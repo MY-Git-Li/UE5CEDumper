@@ -3,6 +3,7 @@
 // ============================================================
 
 #include "OffsetFinder.h"
+#include "HintCache.h"
 #include "Memory.h"
 #define LOG_CAT "SCAN"
 #include "Logger.h"
@@ -533,6 +534,7 @@ struct ScanReport {
     uintptr_t                      scanAddr     = 0;  // AOB match address (instruction that references the pointer)
     const char*                    winningId    = nullptr;
     const AobSignature*            winningSig   = nullptr;  // Winning pattern (for AOB metadata)
+    bool                           hintUsed     = false;    // true if winner came from hint cache
 };
 
 // Try to resolve a symbol export from any loaded module.
@@ -675,7 +677,8 @@ static constexpr int kBatchSize = 8;
 static uintptr_t ScanForTarget(
     const AobSignature* patterns, size_t count,
     ValidatorFn validate, ScanReport& report,
-    bool tryMultiModule)
+    bool tryMultiModule,
+    const char* hintPatternId = nullptr)
 {
     // Sort entries by priority (patterns array is constexpr, so copy pointers)
     std::vector<const AobSignature*> sorted;
@@ -683,6 +686,74 @@ static uintptr_t ScanForTarget(
     for (size_t i = 0; i < count; ++i) sorted.push_back(&patterns[i]);
     std::sort(sorted.begin(), sorted.end(),
               [](const AobSignature* a, const AobSignature* b) { return a->priority < b->priority; });
+
+    // ── Hint phase: try cached winning pattern first ─────────────────
+    // If a previous scan recorded a winning AOB pattern for this PE hash,
+    // try it first as a single-pattern scan before the normal phases.
+    // On hit: immediate return (massive speedup for repeat scans).
+    // On miss: remove from list (avoid re-scanning) and fall through.
+    if (hintPatternId && hintPatternId[0]) {
+        auto it = std::find_if(sorted.begin(), sorted.end(),
+            [&](const AobSignature* s) { return strcmp(s->id, hintPatternId) == 0; });
+
+        if (it != sorted.end()) {
+            const AobSignature* hintSig = *it;
+
+            // Only use hint for AOB-type patterns (not exports/callfollow)
+            if (hintSig->resolve != AobResolve::SymbolExport &&
+                hintSig->resolve != AobResolve::SymbolCallFollow &&
+                hintSig->resolve != AobResolve::CallFollow) {
+
+                LOG_INFO("[%s] Hint: trying cached pattern '%s' first...",
+                         report.targetName, hintPatternId);
+
+                g_validationDbgCount = 0;
+
+                auto hintT0 = std::chrono::high_resolution_clock::now();
+                uintptr_t matchAddr = Mem::AOBScan(hintSig->pattern);
+                auto hintT1 = std::chrono::high_resolution_clock::now();
+                auto hintUs = std::chrono::duration_cast<std::chrono::microseconds>(hintT1 - hintT0).count();
+
+                PatternScanResult pr;
+                pr.id = hintSig->id;
+                pr.hitCount = matchAddr ? 1 : 0;
+
+                if (matchAddr) {
+                    uintptr_t resolved = TryResolveMatch(matchAddr, *hintSig, validate);
+                    pr.selected = resolved;
+                    pr.validated = (resolved != 0);
+                    report.results.push_back(pr);
+
+                    if (resolved) {
+                        LOG_INFO("[%s] Hint HIT: '%s' -> 0x%llX (scan %lld us, skipping remaining patterns)",
+                                 report.targetName, hintPatternId,
+                                 static_cast<unsigned long long>(resolved),
+                                 static_cast<long long>(hintUs));
+                        report.finalAddress = resolved;
+                        report.scanAddr = matchAddr;
+                        report.winningId = hintSig->id;
+                        report.winningSig = hintSig;
+                        report.hintUsed = true;
+                        return resolved;
+                    }
+                } else {
+                    report.results.push_back(pr);
+                }
+
+                LOG_INFO("[%s] Hint MISS: '%s' (scan %lld us) — falling back to full scan",
+                         report.targetName, hintPatternId, static_cast<long long>(hintUs));
+
+                // Remove hint from sorted list to avoid re-scanning in Phase 2
+                sorted.erase(it);
+            } else {
+                LOG_INFO("[%s] Hint: pattern '%s' is non-AOB type (%d), skipping hint",
+                         report.targetName, hintPatternId, static_cast<int>(hintSig->resolve));
+            }
+        } else {
+            LOG_INFO("[%s] Hint: cached pattern '%s' not found in current pattern set",
+                     report.targetName, hintPatternId);
+        }
+    }
 
     // ── Phase 1: Handle non-AOB patterns sequentially (unchanged) ────
     // Symbol exports, CallFollow, etc. are rare (priority 0-5) and don't
@@ -963,10 +1034,11 @@ static void LogScanReport(const ScanReport& report) {
 
     // Summary line
     if (report.finalAddress) {
-        Logger::Info("SCAN", "=== %s: %d patterns tried, %d with hits, winner: %s -> 0x%llX ===",
+        Logger::Info("SCAN", "=== %s: %d patterns tried, %d with hits, winner: %s -> 0x%llX%s ===",
                  report.targetName, totalPatterns, patternsWithHits,
                  report.winningId ? report.winningId : "?",
-                 (unsigned long long)report.finalAddress);
+                 (unsigned long long)report.finalAddress,
+                 report.hintUsed ? " (hint)" : "");
     } else {
         Logger::Warn("SCAN", "=== %s: %d patterns tried, %d with hits, NONE validated ===",
                  report.targetName, totalPatterns, patternsWithHits);
@@ -1004,7 +1076,7 @@ static ScanReport s_gworldReport;
 // FindGObjects — unified scan + data-section fallback
 // ============================================================
 
-uintptr_t FindGObjects() {
+uintptr_t FindGObjects(const char* hintPatternId) {
     s_gobjectsMethod = "not_found";
     Logger::Info("SCAN:GObj", "FindGObjects: Scanning for GObjects...");
 
@@ -1014,7 +1086,7 @@ uintptr_t FindGObjects() {
 
     uintptr_t result = ScanForTarget(
         Sig::GOBJECTS_PATTERNS, std::size(Sig::GOBJECTS_PATTERNS),
-        ValidateGObjects, report, /*tryMultiModule=*/true);
+        ValidateGObjects, report, /*tryMultiModule=*/true, hintPatternId);
 
     LogScanReport(report);
 
@@ -1110,7 +1182,8 @@ static bool ValidateGNames(uintptr_t addr) {
         Logger::Debug("SCAN:GNam", "ValidateGNames: dump@0x%llX:%s",
                   (unsigned long long)addr, hexbuf);
     }
-    Logger::Warn("SCAN:GNam", "ValidateGNames: Validation failed at 0x%llX", static_cast<unsigned long long>(addr));
+    if (g_validationDbgCount <= kMaxValidationDbgLogs)
+        Logger::Warn("SCAN:GNam", "ValidateGNames: Validation failed at 0x%llX", static_cast<unsigned long long>(addr));
     return false;
 }
 
@@ -1540,7 +1613,7 @@ static uintptr_t FindGNamesByStringRef() {
     return 0;
 }
 
-uintptr_t FindGNames() {
+uintptr_t FindGNames(const char* hintPatternId) {
     s_gnamesMethod = "not_found";
     // Reset detection state for each scan attempt
     g_isUE4NameArray = false;
@@ -1555,7 +1628,7 @@ uintptr_t FindGNames() {
 
     uintptr_t result = ScanForTarget(
         Sig::GNAMES_PATTERNS, std::size(Sig::GNAMES_PATTERNS),
-        ValidateGNamesAny, report, /*tryMultiModule=*/true);
+        ValidateGNamesAny, report, /*tryMultiModule=*/true, hintPatternId);
 
     LogScanReport(report);
 
@@ -1597,7 +1670,7 @@ static bool ValidateGWorldBasic(uintptr_t addr) {
     return LooksLikeDataPtr(world);
 }
 
-uintptr_t FindGWorld() {
+uintptr_t FindGWorld(const char* hintPatternId) {
     s_gworldMethod = "not_found";
     Logger::Info("SCAN:GWld", "FindGWorld: Scanning for GWorld...");
 
@@ -1607,7 +1680,7 @@ uintptr_t FindGWorld() {
 
     uintptr_t result = ScanForTarget(
         Sig::GWORLD_PATTERNS, std::size(Sig::GWORLD_PATTERNS),
-        ValidateGWorldBasic, report, /*tryMultiModule=*/true);
+        ValidateGWorldBasic, report, /*tryMultiModule=*/true, hintPatternId);
 
     LogScanReport(report);
 
@@ -2911,6 +2984,13 @@ uintptr_t ExtraScanGWorld() {
 bool FindAll(EnginePointers& out, ScanProgressFn progress) {
     LOG_INFO("FindAll: Starting global pointer scan...");
 
+    // Compute PE hash early — needed for hint cache lookup
+    ComputePEHash(out.peHash, sizeof(out.peHash));
+    LOG_INFO("FindAll: PE hash = %s", out.peHash);
+
+    // Load hint cache: previously-winning pattern IDs for this game version
+    auto hints = HintCache::LoadHints(out.peHash);
+
     if (progress) progress(1, "Detecting UE version...");
     out.UEVersion = DetectVersion();
     out.bVersionDetected = (out.UEVersion != 0);
@@ -2922,13 +3002,15 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
              out.bVersionDetected ? "yes" : "no");
 
     if (progress) progress(2, "Scanning GObjects...");
-    out.GObjects = FindGObjects();
+    out.GObjects = FindGObjects(hints.gobjectsPatternId.empty() ? nullptr
+                                : hints.gobjectsPatternId.c_str());
     if (!out.GObjects) {
         LOG_WARN("FindAll: Failed to find GObjects (will continue — Extra Scan may recover)");
     }
 
     if (progress) progress(3, "Scanning GNames...");
-    out.GNames = FindGNames();
+    out.GNames = FindGNames(hints.gnamesPatternId.empty() ? nullptr
+                            : hints.gnamesPatternId.c_str());
     if (!out.GNames) {
         LOG_WARN("FindAll: Failed to find GNames (will continue — Extra Scan may recover)");
     }
@@ -2957,14 +3039,12 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
     }
 
     if (progress) progress(4, "Scanning GWorld...");
-    out.GWorld = FindGWorld();
+    out.GWorld = FindGWorld(hints.gworldPatternId.empty() ? nullptr
+                            : hints.gworldPatternId.c_str());
     out.gworldMethod = s_gworldMethod;
     // GWorld is non-critical, just log
 
-    // --- AOB Usage Tracking: compute PE hash and propagate scan stats ---
-    ComputePEHash(out.peHash, sizeof(out.peHash));
-    LOG_INFO("FindAll: PE hash = %s", out.peHash);
-
+    // --- AOB Usage Tracking: propagate scan stats ---
     out.gobjectsPatternId = s_gobjectsReport.winningId;
     out.gnamesPatternId   = s_gnamesReport.winningId;
     out.gworldPatternId   = s_gworldReport.winningId;
@@ -2990,6 +3070,21 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
              out.UEVersion,
              out.bUE4NameArray ? "yes" : "no",
              out.fnameEntryHeaderOffset);
+
+    // Save scan results to hint cache for future acceleration
+    {
+        wchar_t exePathW[MAX_PATH] = {};
+        GetModuleFileNameW(nullptr, exePathW, MAX_PATH);
+        // Extract just the filename
+        const wchar_t* slash = wcsrchr(exePathW, L'\\');
+        const wchar_t* nameW = slash ? slash + 1 : exePathW;
+        // Convert to UTF-8
+        int sz = WideCharToMultiByte(CP_UTF8, 0, nameW, -1, nullptr, 0, nullptr, nullptr);
+        std::string processName(sz > 0 ? sz - 1 : 0, '\0');
+        if (sz > 0)
+            WideCharToMultiByte(CP_UTF8, 0, nameW, -1, processName.data(), sz, nullptr, nullptr);
+        HintCache::SaveResults(out.peHash, out, processName.c_str());
+    }
 
     return true;
 }

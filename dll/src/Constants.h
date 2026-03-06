@@ -17,6 +17,9 @@ constexpr int            LOG_ROTATE_MAX   = 4;        // 4-file rotation per cat
 constexpr size_t         LOG_MAX_SIZE_MB  = 8;
 constexpr size_t         LOG_MAX_SIZE     = LOG_MAX_SIZE_MB * 1024 * 1024;
 
+// --- Hint Cache ---
+constexpr const wchar_t* HINT_CACHE_PREFIX = L"UE5CEDumper";  // File: UE5CEDumper.{COMPUTERNAME}.json
+
 // --- Named Pipe ---
 constexpr const wchar_t* PIPE_NAME        = L"\\\\.\\pipe\\UE5DumpBfx";
 constexpr const char*    PIPE_NAME_NARROW  = "\\\\.\\pipe\\UE5DumpBfx";
