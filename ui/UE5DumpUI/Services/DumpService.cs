@@ -322,57 +322,7 @@ public sealed class DumpService : IDumpService
             foreach (var f in fields)
             {
                 if (f is not JsonObject fo) continue;
-                result.Fields.Add(new LiveFieldValue
-                {
-                    Name = fo["name"]?.GetValue<string>() ?? "",
-                    TypeName = fo["type"]?.GetValue<string>() ?? "",
-                    Offset = fo["offset"]?.GetValue<int>() ?? 0,
-                    Size = fo["size"]?.GetValue<int>() ?? 0,
-                    HexValue = fo["hex"]?.GetValue<string>() ?? "",
-                    TypedValue = fo["value"]?.GetValue<string>() ?? "",
-                    PtrAddress = fo["ptr"]?.GetValue<string>() ?? "",
-                    PtrName = fo["ptr_name"]?.GetValue<string>() ?? "",
-                    PtrClassName = fo["ptr_class"]?.GetValue<string>() ?? "",
-                    PtrClassAddr = fo["ptr_class_addr"]?.GetValue<string>() ?? "",
-                    BoolBitIndex = fo["bool_bit"]?.GetValue<int>() ?? -1,
-                    BoolFieldMask = fo["bool_mask"]?.GetValue<int>() ?? 0,
-                    ArrayCount = fo["count"]?.GetValue<int>() ?? -1,
-                    ArrayInnerType = fo["array_inner_type"]?.GetValue<string>() ?? "",
-                    ArrayStructType = fo["array_struct_type"]?.GetValue<string>() ?? "",
-                    ArrayElemSize = fo["array_elem_size"]?.GetValue<int>() ?? 0,
-                    ArrayInnerAddr = fo["array_inner_addr"]?.GetValue<string>() ?? "",
-                    ArrayDataAddr = fo["array_data_addr"]?.GetValue<string>() ?? "",
-                    ArrayStructClassAddr = fo["array_struct_class_addr"]?.GetValue<string>() ?? "",
-                    ArrayElements = ParseArrayElements(fo["elements"]),
-                    ArrayEnumAddr = fo["enum_addr"]?.GetValue<string>() ?? "",
-                    ArrayEnumEntries = ParseEnumEntries(fo["enum_entries"]),
-                    MapCount = fo["map_count"]?.GetValue<int>() ?? -1,
-                    MapKeyType = fo["map_key_type"]?.GetValue<string>() ?? "",
-                    MapValueType = fo["map_value_type"]?.GetValue<string>() ?? "",
-                    MapKeySize = fo["map_key_size"]?.GetValue<int>() ?? 0,
-                    MapValueSize = fo["map_value_size"]?.GetValue<int>() ?? 0,
-                    MapDataAddr = fo["map_data_addr"]?.GetValue<string>() ?? "",
-                    MapKeyStructAddr = fo["map_key_struct_addr"]?.GetValue<string>() ?? "",
-                    MapKeyStructType = fo["map_key_struct_type"]?.GetValue<string>() ?? "",
-                    MapValueStructAddr = fo["map_value_struct_addr"]?.GetValue<string>() ?? "",
-                    MapValueStructType = fo["map_value_struct_type"]?.GetValue<string>() ?? "",
-                    MapElements = ParseContainerElements(fo["map_elements"]),
-                    SetCount = fo["set_count"]?.GetValue<int>() ?? -1,
-                    SetElemType = fo["set_elem_type"]?.GetValue<string>() ?? "",
-                    SetElemSize = fo["set_elem_size"]?.GetValue<int>() ?? 0,
-                    SetDataAddr = fo["set_data_addr"]?.GetValue<string>() ?? "",
-                    SetElemStructAddr = fo["set_elem_struct_addr"]?.GetValue<string>() ?? "",
-                    SetElemStructType = fo["set_elem_struct_type"]?.GetValue<string>() ?? "",
-                    SetElements = ParseContainerElements(fo["set_elements"]),
-                    StructDataAddr = fo["struct_data_addr"]?.GetValue<string>() ?? "",
-                    StructClassAddr = fo["struct_class_addr"]?.GetValue<string>() ?? "",
-                    StructTypeName = fo["struct_type"]?.GetValue<string>() ?? "",
-                    EnumName = fo["enum_name"]?.GetValue<string>() ?? "",
-                    EnumValue = fo["enum_value"]?.GetValue<long>() ?? 0,
-                    EnumAddr = fo["enum_addr"]?.GetValue<string>() ?? "",
-                    EnumEntries = ParseEnumEntries(fo["enum_entries"]),
-                    StrValue = fo["str_value"]?.GetValue<string>() ?? "",
-                });
+                result.Fields.Add(ParseLiveFieldValue(fo));
             }
         }
 
@@ -563,6 +513,114 @@ public sealed class DumpService : IDumpService
             InnerType = res["inner_type"]?.GetValue<string>() ?? innerType,
             ElemSize = res["elem_size"]?.GetValue<int>() ?? elemSize,
             Elements = ParseArrayElements(res["elements"]) ?? new(),
+        };
+    }
+
+    // --- DataTable Row Browsing ---
+
+    public async Task<DataTableWalkResult> WalkDataTableRowsAsync(string addr, int offset = 0, int limit = 64, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "walk_datatable_rows",
+            ["addr"] = addr,
+            ["offset"] = offset,
+            ["limit"] = limit,
+        };
+
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        var result = new DataTableWalkResult
+        {
+            RowCount = res["row_count"]?.GetValue<int>() ?? 0,
+            RowMapOffset = res["row_map_offset"]?.GetValue<int>() ?? 0,
+            RowStructAddr = res["row_struct_addr"]?.GetValue<string>() ?? "",
+            RowStructName = res["row_struct_name"]?.GetValue<string>() ?? "",
+            FNameSize = res["fname_size"]?.GetValue<int>() ?? 0,
+            Stride = res["stride"]?.GetValue<int>() ?? 0,
+        };
+
+        if (res["rows"] is JsonArray rows)
+        {
+            foreach (var r in rows)
+            {
+                if (r is not JsonObject ro) continue;
+                var row = new DataTableRowInfo
+                {
+                    SparseIndex = ro["sparse_index"]?.GetValue<int>() ?? 0,
+                    RowName = ro["row_name"]?.GetValue<string>() ?? "",
+                    DataAddr = ro["data_addr"]?.GetValue<string>() ?? "",
+                };
+                if (ro["fields"] is JsonArray rowFields)
+                {
+                    foreach (var f in rowFields)
+                    {
+                        if (f is not JsonObject fo) continue;
+                        row.Fields.Add(ParseLiveFieldValue(fo));
+                    }
+                }
+                result.Rows.Add(row);
+            }
+        }
+
+        return result;
+    }
+
+    // --- Shared JSON Parsing Helpers ---
+
+    private static LiveFieldValue ParseLiveFieldValue(JsonObject fo)
+    {
+        return new LiveFieldValue
+        {
+            Name = fo["name"]?.GetValue<string>() ?? "",
+            TypeName = fo["type"]?.GetValue<string>() ?? "",
+            Offset = fo["offset"]?.GetValue<int>() ?? 0,
+            Size = fo["size"]?.GetValue<int>() ?? 0,
+            HexValue = fo["hex"]?.GetValue<string>() ?? "",
+            TypedValue = fo["value"]?.GetValue<string>() ?? "",
+            PtrAddress = fo["ptr"]?.GetValue<string>() ?? "",
+            PtrName = fo["ptr_name"]?.GetValue<string>() ?? "",
+            PtrClassName = fo["ptr_class"]?.GetValue<string>() ?? "",
+            PtrClassAddr = fo["ptr_class_addr"]?.GetValue<string>() ?? "",
+            BoolBitIndex = fo["bool_bit"]?.GetValue<int>() ?? -1,
+            BoolFieldMask = fo["bool_mask"]?.GetValue<int>() ?? 0,
+            ArrayCount = fo["count"]?.GetValue<int>() ?? -1,
+            ArrayInnerType = fo["array_inner_type"]?.GetValue<string>() ?? "",
+            ArrayStructType = fo["array_struct_type"]?.GetValue<string>() ?? "",
+            ArrayElemSize = fo["array_elem_size"]?.GetValue<int>() ?? 0,
+            ArrayInnerAddr = fo["array_inner_addr"]?.GetValue<string>() ?? "",
+            ArrayDataAddr = fo["array_data_addr"]?.GetValue<string>() ?? "",
+            ArrayStructClassAddr = fo["array_struct_class_addr"]?.GetValue<string>() ?? "",
+            ArrayElements = ParseArrayElements(fo["elements"]),
+            ArrayEnumAddr = fo["enum_addr"]?.GetValue<string>() ?? "",
+            ArrayEnumEntries = ParseEnumEntries(fo["enum_entries"]),
+            MapCount = fo["map_count"]?.GetValue<int>() ?? -1,
+            MapKeyType = fo["map_key_type"]?.GetValue<string>() ?? "",
+            MapValueType = fo["map_value_type"]?.GetValue<string>() ?? "",
+            MapKeySize = fo["map_key_size"]?.GetValue<int>() ?? 0,
+            MapValueSize = fo["map_value_size"]?.GetValue<int>() ?? 0,
+            MapDataAddr = fo["map_data_addr"]?.GetValue<string>() ?? "",
+            MapKeyStructAddr = fo["map_key_struct_addr"]?.GetValue<string>() ?? "",
+            MapKeyStructType = fo["map_key_struct_type"]?.GetValue<string>() ?? "",
+            MapValueStructAddr = fo["map_value_struct_addr"]?.GetValue<string>() ?? "",
+            MapValueStructType = fo["map_value_struct_type"]?.GetValue<string>() ?? "",
+            MapElements = ParseContainerElements(fo["map_elements"]),
+            SetCount = fo["set_count"]?.GetValue<int>() ?? -1,
+            SetElemType = fo["set_elem_type"]?.GetValue<string>() ?? "",
+            SetElemSize = fo["set_elem_size"]?.GetValue<int>() ?? 0,
+            SetDataAddr = fo["set_data_addr"]?.GetValue<string>() ?? "",
+            SetElemStructAddr = fo["set_elem_struct_addr"]?.GetValue<string>() ?? "",
+            SetElemStructType = fo["set_elem_struct_type"]?.GetValue<string>() ?? "",
+            SetElements = ParseContainerElements(fo["set_elements"]),
+            StructDataAddr = fo["struct_data_addr"]?.GetValue<string>() ?? "",
+            StructClassAddr = fo["struct_class_addr"]?.GetValue<string>() ?? "",
+            StructTypeName = fo["struct_type"]?.GetValue<string>() ?? "",
+            EnumName = fo["enum_name"]?.GetValue<string>() ?? "",
+            EnumValue = fo["enum_value"]?.GetValue<long>() ?? 0,
+            EnumAddr = fo["enum_addr"]?.GetValue<string>() ?? "",
+            EnumEntries = ParseEnumEntries(fo["enum_entries"]),
+            StrValue = fo["str_value"]?.GetValue<string>() ?? "",
         };
     }
 
