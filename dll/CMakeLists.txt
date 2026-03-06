@@ -103,6 +103,7 @@ add_library(UE5Dumper SHARED
     src/PipeServer.cpp
     src/GameThreadDispatch.cpp
     src/Mailbox.cpp
+    src/HintCache.cpp
     src/version.rc
 )
 
@@ -182,6 +183,7 @@ if(BUILD_PROXY_DLL)
         src/PipeServer.cpp
         src/GameThreadDispatch.cpp
         src/Mailbox.cpp
+        src/HintCache.cpp
         src/version.rc
     )
 

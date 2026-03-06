@@ -62,13 +62,16 @@ struct EnginePointers {
 bool FindAll(EnginePointers& out, ScanProgressFn progress = nullptr);
 
 // Find GObjects (FUObjectArray) address
-uintptr_t FindGObjects();
+// hintPatternId: optional cached winning pattern ID to try first (from HintCache)
+uintptr_t FindGObjects(const char* hintPatternId = nullptr);
 
 // Find GNames (FNamePool) address
-uintptr_t FindGNames();
+// hintPatternId: optional cached winning pattern ID to try first (from HintCache)
+uintptr_t FindGNames(const char* hintPatternId = nullptr);
 
 // Find GWorld pointer address
-uintptr_t FindGWorld();
+// hintPatternId: optional cached winning pattern ID to try first (from HintCache)
+uintptr_t FindGWorld(const char* hintPatternId = nullptr);
 
 // Detect UE version from memory or PE resources
 uint32_t DetectVersion();

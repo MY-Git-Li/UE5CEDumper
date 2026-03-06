@@ -321,10 +321,12 @@ uintptr_t ResolveRIP(uintptr_t instrAddr, int opcodeLen, int totalLen) {
     }
 
     uintptr_t target = instrAddr + totalLen + rel32;
-    LOG_DEBUG("ResolveRIP: 0x%llX + %d + %d = 0x%llX",
-              static_cast<unsigned long long>(instrAddr),
-              totalLen, rel32,
-              static_cast<unsigned long long>(target));
+    static int s_resolveRipDbgCount = 0;
+    if (s_resolveRipDbgCount++ < 50)
+        LOG_DEBUG("ResolveRIP: 0x%llX + %d + %d = 0x%llX",
+                  static_cast<unsigned long long>(instrAddr),
+                  totalLen, rel32,
+                  static_cast<unsigned long long>(target));
     return target;
 }
 
