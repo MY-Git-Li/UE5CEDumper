@@ -1587,8 +1587,15 @@ public partial class LiveWalkerViewModel : ViewModelBase
                 await _dump.WriteMemAsync(field.FieldAddress, data);
             }
 
-            // Refresh to show updated value
+            // Refresh to show updated value, then restore selection to the edited row
+            var editedName = field.Name;
+            var editedOffset = field.Offset;
             await RefreshAsync();
+
+            var restored = Fields?.FirstOrDefault(f => f.Name == editedName && f.Offset == editedOffset);
+            if (restored != null)
+                SelectedField = restored;
+
             StatusText = $"Written: {field.Name} = {newValue}";
             _log.Info($"EDIT {field.Name} ({field.TypeName}) @ {field.FieldAddress} = {newValue}");
         }

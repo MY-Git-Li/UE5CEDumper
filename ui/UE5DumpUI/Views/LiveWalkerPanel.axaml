@@ -224,16 +224,27 @@
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:LiveFieldValue">
               <TextBlock Text="{Binding DisplayValue}"
-                         VerticalAlignment="Center" Margin="4,0"
-                         FontFamily="Consolas" FontSize="12"/>
+                         VerticalAlignment="Center" Margin="4,0"/>
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
           <DataGridTemplateColumn.CellEditingTemplate>
             <DataTemplate x:DataType="m:LiveFieldValue">
-              <TextBox Text="{Binding EditableValue, Mode=TwoWay}"
-                       FontFamily="Consolas" FontSize="12"
-                       Padding="4,2" BorderThickness="1"
-                       BorderBrush="#569CD6"/>
+              <Panel>
+                <!-- BoolProperty: dropdown with true/false -->
+                <ComboBox IsVisible="{Binding IsBoolProperty}"
+                          ItemsSource="{x:Static m:LiveFieldValue.BoolOptions}"
+                          SelectedItem="{Binding EditableValue, Mode=TwoWay}"
+                          Loaded="BoolCombo_Loaded"
+                          SelectionChanged="BoolCombo_SelectionChanged"
+                          Padding="2,1" BorderThickness="1"
+                          BorderBrush="#569CD6"
+                          HorizontalAlignment="Stretch"/>
+                <!-- Other editable types: free-text input -->
+                <TextBox IsVisible="{Binding !IsBoolProperty}"
+                         Text="{Binding EditableValue, Mode=TwoWay}"
+                         Padding="4,2" BorderThickness="1"
+                         BorderBrush="#569CD6"/>
+              </Panel>
             </DataTemplate>
           </DataGridTemplateColumn.CellEditingTemplate>
         </DataGridTemplateColumn>

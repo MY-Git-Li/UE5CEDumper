@@ -295,6 +295,12 @@ public sealed class LiveFieldValue
         !string.IsNullOrEmpty(FieldAddress) &&
         FieldValueConverter.IsEditableType(TypeName);
 
+    /// <summary>Whether this field is a BoolProperty (for dropdown editing vs TextBox).</summary>
+    public bool IsBoolProperty => TypeName == "BoolProperty";
+
+    /// <summary>Static options for BoolProperty dropdown.</summary>
+    public static string[] BoolOptions { get; } = ["true", "false"];
+
     /// <summary>Mutable value for DataGrid edit binding. Get returns the editable string form; set stores pending value.</summary>
     public string EditableValue
     {
