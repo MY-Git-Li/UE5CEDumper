@@ -110,6 +110,26 @@ public partial class MainWindowViewModel : ViewModelBase
         InstanceFinder.PreviewLimit = value;
     }
 
+    /// <summary>
+    /// Re-check AOBMaker CE Plugin availability on tab switch.
+    /// The user may open CE after connecting, so periodic re-check ensures
+    /// AOBMaker-dependent buttons become enabled when the plugin appears.
+    /// </summary>
+    partial void OnSelectedTabIndexChanged(int value)
+    {
+        if (!IsConnected) return;
+
+        switch (value)
+        {
+            case 0: // Live Walker
+                _ = LiveWalker.CheckAobMakerAsync();
+                break;
+            case 5: // Pointers
+                _ = Pointers.CheckAobMakerAsync();
+                break;
+        }
+    }
+
     public MainWindowViewModel(
         IPipeClient pipeClient,
         IDumpService dump,
