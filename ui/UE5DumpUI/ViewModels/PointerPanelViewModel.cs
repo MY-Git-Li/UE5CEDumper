@@ -184,7 +184,8 @@ public partial class PointerPanelViewModel : ViewModelBase
         _ = CheckAobMakerAsync();
     }
 
-    private async Task CheckAobMakerAsync()
+    /// <summary>Check AOBMaker availability (called after data load and on tab switch).</summary>
+    public async Task CheckAobMakerAsync()
     {
         if (_aobMaker == null) return;
         try
