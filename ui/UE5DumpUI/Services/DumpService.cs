@@ -585,6 +585,7 @@ public sealed class DumpService : IDumpService
             PtrClassAddr = fo["ptr_class_addr"]?.GetValue<string>() ?? "",
             BoolBitIndex = fo["bool_bit"]?.GetValue<int>() ?? -1,
             BoolFieldMask = fo["bool_mask"]?.GetValue<int>() ?? 0,
+            BoolByteOffset = fo["bool_byte_offset"]?.GetValue<int>() ?? 0,
             ArrayCount = fo["count"]?.GetValue<int>() ?? -1,
             ArrayInnerType = fo["array_inner_type"]?.GetValue<string>() ?? "",
             ArrayStructType = fo["array_struct_type"]?.GetValue<string>() ?? "",

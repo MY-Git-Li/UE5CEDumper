@@ -79,4 +79,34 @@ public partial class LiveWalkerPanel : UserControl
             e.Row.Background = field.IsSearchMatch ? HighlightBrush : Brushes.Transparent;
         }
     }
+
+    private void FieldGrid_BeginningEdit(object? sender, DataGridBeginningEditEventArgs e)
+    {
+        // Cancel edit for non-editable fields (pointers, structs, containers, strings, etc.)
+        if (e.Row.DataContext is LiveFieldValue field && !field.IsEditable)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        // Suppress auto-refresh while editing
+        if (DataContext is LiveWalkerViewModel vm)
+            vm.IsEditing = true;
+    }
+
+    private async void FieldGrid_CellEditEnded(object? sender, DataGridCellEditEndedEventArgs e)
+    {
+        if (DataContext is not LiveWalkerViewModel vm) return;
+        vm.IsEditing = false;
+
+        // Only commit on user confirmation (Enter / focus loss), not on cancel (Escape)
+        if (e.EditAction == DataGridEditAction.Cancel) return;
+
+        if (e.Row.DataContext is LiveFieldValue field && field.IsEditable)
+        {
+            var newValue = field.GetPendingEditValue();
+            if (!string.IsNullOrEmpty(newValue))
+                await vm.CommitFieldEditAsync(field, newValue);
+        }
+    }
 }

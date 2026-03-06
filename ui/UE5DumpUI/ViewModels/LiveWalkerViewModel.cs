@@ -114,6 +114,7 @@ public partial class LiveWalkerViewModel : ViewModelBase
     private int _countdownRemaining;
     private bool _isAutoRefreshBenchmarked;
     private bool _isAutoRefreshing_InProgress; // Guard against overlapping refreshes
+    private bool _isEditing; // True while a cell is being edited (suppresses auto-refresh)
 
     /// <summary>
     /// Raised when the View should scroll the DataGrid to a specific field name.
@@ -1530,6 +1531,74 @@ public partial class LiveWalkerViewModel : ViewModelBase
     private static string StripHexPrefix(string addr)
         => addr.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? addr[2..] : addr;
 
+    // --- Live Edit Mode ---
+
+    /// <summary>Whether a field value is currently being edited. Suppresses auto-refresh.</summary>
+    public bool IsEditing
+    {
+        get => _isEditing;
+        set { _isEditing = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// Commit an inline field edit: validate, convert to bytes, write to game memory.
+    /// </summary>
+    public async Task CommitFieldEditAsync(LiveFieldValue field, string newValue)
+    {
+        if (field == null || string.IsNullOrEmpty(field.FieldAddress)) return;
+
+        try
+        {
+            ClearStatus();
+
+            // BoolProperty: read-modify-write with bitmask
+            if (field.TypeName == "BoolProperty")
+            {
+                if (!FieldValueConverter.TryParseBool(newValue, out var boolVal))
+                {
+                    StatusText = $"Invalid bool value: {newValue} (expected true/false/1/0)";
+                    return;
+                }
+
+                // Write address = field address + boolByteOffset
+                var baseAddr = Convert.ToUInt64(
+                    field.FieldAddress.Replace("0x", "").Replace("0X", ""), 16);
+                var writeAddr = $"0x{baseAddr + (ulong)field.BoolByteOffset:X}";
+
+                // Read current byte, apply mask, write back
+                var currentBytes = await _dump.ReadMemAsync(writeAddr, 1);
+                var modified = FieldValueConverter.ApplyBoolMask(
+                    currentBytes[0], field.BoolFieldMask, boolVal);
+
+                await _dump.WriteMemAsync(writeAddr, new[] { modified });
+            }
+            else
+            {
+                // Standard scalar / enum conversion
+                var (success, data, error) = FieldValueConverter.TryConvert(
+                    field.TypeName, newValue, field.Size, field.EnumEntries);
+
+                if (!success)
+                {
+                    StatusText = $"Invalid value for {field.Name}: {error}";
+                    return;
+                }
+
+                await _dump.WriteMemAsync(field.FieldAddress, data);
+            }
+
+            // Refresh to show updated value
+            await RefreshAsync();
+            StatusText = $"Written: {field.Name} = {newValue}";
+            _log.Info($"EDIT {field.Name} ({field.TypeName}) @ {field.FieldAddress} = {newValue}");
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Write failed for {field.Name}: {ex.Message}";
+            _log.Error($"Failed to write {field.Name} @ {field.FieldAddress}", ex);
+        }
+    }
+
     [RelayCommand]
     private async Task HexFieldAddressAsync(LiveFieldValue? field)
     {
@@ -1730,7 +1799,7 @@ public partial class LiveWalkerViewModel : ViewModelBase
         // Anti-flooding: skip if a refresh is already in progress or no data to refresh.
         // Uses a dedicated flag (_isAutoRefreshing_InProgress) to prevent re-entrant calls
         // from the DispatcherTimer firing while a previous refresh is still awaiting.
-        if (_isAutoRefreshing_InProgress || !HasData || string.IsNullOrEmpty(CurrentAddress)) return;
+        if (_isAutoRefreshing_InProgress || _isEditing || !HasData || string.IsNullOrEmpty(CurrentAddress)) return;
 
         _isAutoRefreshing_InProgress = true;
         try

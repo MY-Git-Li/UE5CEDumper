@@ -1,4 +1,5 @@
 using System.Linq;
+using UE5DumpUI.Core;
 
 namespace UE5DumpUI.Models;
 
@@ -118,6 +119,9 @@ public sealed class LiveFieldValue
 
     /// <summary>For BoolProperty: raw FieldMask byte.</summary>
     public int BoolFieldMask { get; init; }
+
+    /// <summary>For BoolProperty: byte offset within the field for bitfield reads/writes.</summary>
+    public int BoolByteOffset { get; init; }
 
     /// <summary>For ArrayProperty: element count (-1 = not an array).</summary>
     public int ArrayCount { get; init; } = -1;
@@ -285,6 +289,35 @@ public sealed class LiveFieldValue
 
     /// <summary>Whether this field matches the current search query (set by ViewModel).</summary>
     public bool IsSearchMatch { get; set; }
+
+    /// <summary>Whether this field's value can be edited inline (scalar numeric/bool/enum types only).</summary>
+    public bool IsEditable =>
+        !string.IsNullOrEmpty(FieldAddress) &&
+        FieldValueConverter.IsEditableType(TypeName);
+
+    /// <summary>Mutable value for DataGrid edit binding. Get returns the editable string form; set stores pending value.</summary>
+    public string EditableValue
+    {
+        get
+        {
+            if (TypeName == "BoolProperty")
+            {
+                // Extract just "true" or "false" from TypedValue like "true (bit 2, mask 0x04)"
+                if (!string.IsNullOrEmpty(TypedValue))
+                    return TypedValue.StartsWith("true", System.StringComparison.OrdinalIgnoreCase) ? "true" : "false";
+                return "false";
+            }
+            if (TypeName == "EnumProperty" && !string.IsNullOrEmpty(EnumName))
+                return EnumName;
+            // For numeric types, return TypedValue (already a clean number string)
+            return TypedValue;
+        }
+        set => _editableValue = value;
+    }
+    private string _editableValue = "";
+
+    /// <summary>Get the pending edit value (what the user typed). Falls back to EditableValue getter if not set.</summary>
+    internal string GetPendingEditValue() => _editableValue;
 
     private string FormatArrayDisplay()
     {
