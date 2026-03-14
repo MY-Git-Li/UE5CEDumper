@@ -270,9 +270,11 @@ public static class CeXmlExportService
             // Use decorated label for containers (includes element count/type info)
             var desc = bc.IsContainerView ? bc.Label : bc.FieldName;
 
+            var offsets = needsDeref ? new[] { 0 } : null;
+
             EmitGroupOpen(sb, childIndent, desc,
                 $"+{bc.FieldOffset:X}",
-                needsDeref ? new[] { 0 } : null,
+                offsets,
                 showAsHex: needsDeref);
             openTags++;
         }
@@ -434,9 +436,11 @@ public static class CeXmlExportService
             var needsDeref = bc.IsPointerDeref || bc.IsContainerView;
             var desc = bc.IsContainerView ? bc.Label : bc.FieldName;
 
+            var offsets = needsDeref ? new[] { 0 } : null;
+
             EmitGroupOpen(sb, childIndent, desc,
                 $"+{bc.FieldOffset:X}",
-                needsDeref ? new[] { 0 } : null,
+                offsets,
                 showAsHex: needsDeref);
             innerOpenTags++;
         }
