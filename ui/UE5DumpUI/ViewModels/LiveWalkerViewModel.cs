@@ -1352,13 +1352,21 @@ public partial class LiveWalkerViewModel : ViewModelBase
 
             var rootBc = breadcrumbsForXml[0];
 
+            // AOB mode requires a GWorld-rooted breadcrumb chain. When the object was
+            // opened via Instance Finder / Address Lookup there is no GWorld→object path,
+            // so we fall back to direct-address mode to avoid generating a wrong base.
+            var isGWorldRoot = rootBc.FieldName == "GWorld";
+            var useAob = UseAobSymbol && isGWorldRoot && !string.IsNullOrEmpty(_engineState?.GWorldAob);
+            if (UseAobSymbol && !isGWorldRoot)
+                _log.Info("CEXML: AOB requested but root is not GWorld — falling back to direct address");
+
             StatusText = "Generating CE XML...";
             string xml;
-            if (UseAobSymbol && !string.IsNullOrEmpty(_engineState?.GWorldAob))
+            if (useAob)
             {
                 xml = CeXmlExportService.GenerateAobWrappedXml(
                     rootBc.Label, breadcrumbsForXml, fieldsForXml,
-                    _engineState.GWorldAob, _engineState.GWorldAobPos, _engineState.GWorldAobLen,
+                    _engineState!.GWorldAob, _engineState.GWorldAobPos, _engineState.GWorldAobLen,
                     _engineState.ModuleName,
                     resolvedStructs,
                     collapsePointerNodes: CollapsePointerNodes,
@@ -1376,8 +1384,9 @@ public partial class LiveWalkerViewModel : ViewModelBase
 
             await _platform.CopyToClipboardAsync(xml);
             var limitWarn = BuildContainerLimitWarning(fieldsForXml, ArrayLimit);
-            StatusText = limitWarn ?? "";
-            _log.Info($"CE XML copied to clipboard for {CurrentClassName} (AOB={UseAobSymbol}, {resolvedStructs.Count} structs resolved)");
+            var aobFallbackWarn = (UseAobSymbol && !isGWorldRoot) ? "AOB skipped (no GWorld path)" : null;
+            StatusText = aobFallbackWarn ?? limitWarn ?? "";
+            _log.Info($"CE XML copied to clipboard for {CurrentClassName} (AOB={useAob}, {resolvedStructs.Count} structs resolved)");
         }
         catch (Exception ex)
         {
@@ -1496,13 +1505,19 @@ public partial class LiveWalkerViewModel : ViewModelBase
 
             var rootBc = breadcrumbsForXml[0];
 
+            // Same GWorld-root guard as ExportCeXmlAsync
+            var isGWorldRoot = rootBc.FieldName == "GWorld";
+            var useAob = UseAobSymbol && isGWorldRoot && !string.IsNullOrEmpty(_engineState?.GWorldAob);
+            if (UseAobSymbol && !isGWorldRoot)
+                _log.Info("CEFieldXML: AOB requested but root is not GWorld — falling back to direct address");
+
             StatusText = "Generating CE Field XML...";
             string xml;
-            if (UseAobSymbol && !string.IsNullOrEmpty(_engineState?.GWorldAob))
+            if (useAob)
             {
                 xml = CeXmlExportService.GenerateAobWrappedXml(
                     rootBc.Label, breadcrumbsForXml, singleFieldList,
-                    _engineState.GWorldAob, _engineState.GWorldAobPos, _engineState.GWorldAobLen,
+                    _engineState!.GWorldAob, _engineState.GWorldAobPos, _engineState.GWorldAobLen,
                     _engineState.ModuleName,
                     resolvedStructs,
                     collapsePointerNodes: CollapsePointerNodes,
@@ -1520,8 +1535,9 @@ public partial class LiveWalkerViewModel : ViewModelBase
 
             await _platform.CopyToClipboardAsync(xml);
             var limitWarn = BuildContainerLimitWarning(singleFieldList, ArrayLimit);
-            StatusText = limitWarn ?? "";
-            _log.Info($"CE Field XML copied for {SelectedField.Name} ({SelectedField.TypeName}, AOB={UseAobSymbol})");
+            var aobFallbackWarn = (UseAobSymbol && !isGWorldRoot) ? "AOB skipped (no GWorld path)" : null;
+            StatusText = aobFallbackWarn ?? limitWarn ?? "";
+            _log.Info($"CE Field XML copied for {SelectedField.Name} ({SelectedField.TypeName}, AOB={useAob})");
         }
         catch (Exception ex)
         {
