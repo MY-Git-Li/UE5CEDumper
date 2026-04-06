@@ -1,5 +1,6 @@
 // ============================================================
-// ProxyVersion.cpp — version.dll proxy forwarding layer
+// Lugner — 呂格納 (偽裝專家 — Master of Disguise)
+// ProxyVersion: version.dll forwarding proxy
 //
 // This file is only compiled for the Proxy DLL build target
 // (UE5_PROXY_BUILD). It loads the real version.dll from
@@ -25,7 +26,7 @@
 
 #include <Windows.h>
 #define LOG_CAT "PROXY"
-#include "Logger.h"
+#include "Sein.h"
 
 // Real version.dll handle — loaded on first call
 static HMODULE g_realVersion = nullptr;

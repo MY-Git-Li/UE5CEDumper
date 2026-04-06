@@ -1,7 +1,8 @@
 #pragma once
 
 // ============================================================
-// PipeProtocol.h — JSON IPC protocol definitions
+// Renge — 蓮格 (連絡人 — Liaison)
+// PipeProtocol: IPC command/event definitions
 // ============================================================
 
 #include <json.hpp>
@@ -10,7 +11,7 @@
 #include <sstream>
 #include <iomanip>
 
-namespace PipeProtocol {
+namespace Renge {
 
 // Command strings
 constexpr const char* CMD_INIT             = "init";
@@ -109,4 +110,4 @@ inline nlohmann::json MakeEvent(const std::string& eventType, const nlohmann::js
     return evt;
 }
 
-} // namespace PipeProtocol
+} // namespace Renge

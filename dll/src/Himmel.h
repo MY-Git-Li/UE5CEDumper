@@ -3,7 +3,8 @@
 #include <cstdint>
 
 // ============================================================
-// Signatures.h — Centralized AOB (Array of Bytes) patterns
+// Himmel — 欣梅爾 (勇者 — The Hero, Remembered Forever)
+// Signatures: 128+ AOB pattern database
 //
 // All byte-pattern signatures for GObjects, GNames, GWorld,
 // and related UE global pointer scanning live in this file.

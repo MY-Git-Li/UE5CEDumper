@@ -1,12 +1,10 @@
 // ============================================================
-// Logger.cpp — Category-routed file logger
-//
-// Routes log messages to category-specific files under the
-// per-process subfolder based on the category tag prefix.
+// Sein — 賽恩 (僧侶・記錄者 — Priest, Chronicler)
+// Logger: 5-category per-process file logging with rotation
 // ============================================================
 
-#include "Logger.h"
-#include "Constants.h"
+#include "Sein.h"
+#include "Grimoire.h"
 #include "BuildInfo.h"
 
 #include <Windows.h>
@@ -24,7 +22,7 @@
 
 namespace fs = std::filesystem;
 
-namespace Logger {
+namespace Sein {
 
 // ================================================================
 // Log file categories
@@ -115,7 +113,7 @@ static constexpr size_t EARLY_BUFFER_MAX = 100;
 static fs::path GetLogDirectory() {
     wchar_t* appdata = nullptr;
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &appdata))) {
-        fs::path dir = fs::path(appdata) / Constants::LOG_FOLDER_NAME / Constants::LOG_SUBFOLDER;
+        fs::path dir = fs::path(appdata) / Grimoire::LOG_FOLDER_NAME / Grimoire::LOG_SUBFOLDER;
         CoTaskMemFree(appdata);
         return dir;
     }
@@ -151,13 +149,13 @@ static void RotateLogsInDir(const fs::path& dir, const wchar_t* baseName, int ma
 }
 
 static void RotateIfNeeded(LogFileState& fs_state) {
-    if (fs_state.written < Constants::LOG_MAX_SIZE) return;
+    if (fs_state.written < Grimoire::LOG_MAX_SIZE) return;
 
     fflush(fs_state.file);
     fclose(fs_state.file);
 
     RotateLogsInDir(fs_state.currentPath.parent_path(), fs_state.baseName.c_str(),
-                    Constants::LOG_ROTATE_MAX);
+                    Grimoire::LOG_ROTATE_MAX);
 
     fs_state.file = _wfopen(fs_state.currentPath.c_str(), L"w");
     fs_state.written = 0;
@@ -325,7 +323,7 @@ void InitProcessMirror(const std::wstring& processName, int maxSubfolders) {
 
     // Open all 5 category files
     for (int i = 0; i < LF_COUNT; ++i) {
-        OpenFileInDir(s_files[i], s_processDir, s_fileNames[i], Constants::LOG_ROTATE_MAX);
+        OpenFileInDir(s_files[i], s_processDir, s_fileNames[i], Grimoire::LOG_ROTATE_MAX);
     }
     s_filesOpen = true;
 
@@ -394,4 +392,4 @@ void Summary(const char* fmt, ...) {
     va_end(args);
 }
 
-} // namespace Logger
+} // namespace Sein

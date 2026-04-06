@@ -1,5 +1,6 @@
 // ============================================================
-// GameThreadDispatch.h — Execute ProcessEvent calls on game thread
+// Stark — 修塔爾克 (勇者戰士 — Brave Warrior)
+// GameThreadDispatch: MinHook ProcessEvent hook + game-thread queue
 //
 // Architecture:
 //   Pipe thread calls EnqueueInvoke() → pushes request to queue
@@ -14,7 +15,7 @@
 
 #include <cstdint>
 
-namespace GameThreadDispatch {
+namespace Stark {
 
 /// Install the ProcessEvent hook at the given address.
 /// @param processEventAddr  Absolute address of UObject::ProcessEvent
@@ -36,4 +37,4 @@ bool IsHookActive();
 /// @return 0 on success, -4 if SEH exception, -5 if timeout, -7 if hook not active
 int32_t EnqueueInvoke(uintptr_t instance, uintptr_t ufunc, uintptr_t params);
 
-} // namespace GameThreadDispatch
+} // namespace Stark

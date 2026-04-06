@@ -1,16 +1,13 @@
 // ============================================================
-// HintCache.cpp — JSON-based scan hint cache
-//
-// Reads/writes %LOCALAPPDATA%\UE5CEDumper\UE5CEDumper.{COMPUTERNAME}.json
-// to accelerate repeat scans by trying the previously-winning
-// AOB pattern first.
+// Flamme — 弗蘭梅 (古代大魔法使 — Ancient Master)
+// HintCache: per-game AOB result caching
 // ============================================================
 
-#include "HintCache.h"
-#include "OffsetFinder.h"
-#include "Constants.h"
+#include "Flamme.h"
+#include "Genau.h"
+#include "Grimoire.h"
 #define LOG_CAT "SCAN"
-#include "Logger.h"
+#include "Sein.h"
 
 #include <Windows.h>
 #include <ShlObj.h>
@@ -24,7 +21,7 @@
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 
-namespace HintCache {
+namespace Flamme {
 
 // ============================================================
 // Helpers
@@ -36,7 +33,7 @@ static fs::path GetCacheFilePath() {
     if (!SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &appdata)))
         return {};
 
-    fs::path dir = fs::path(appdata) / Constants::LOG_FOLDER_NAME;
+    fs::path dir = fs::path(appdata) / Grimoire::LOG_FOLDER_NAME;
     CoTaskMemFree(appdata);
 
     // Get machine name
@@ -46,7 +43,7 @@ static fs::path GetCacheFilePath() {
         wcscpy_s(compName, L"UNKNOWN");
 
     // UE5CEDumper.{COMPUTERNAME}.json
-    std::wstring filename = std::wstring(Constants::HINT_CACHE_PREFIX) + L"." +
+    std::wstring filename = std::wstring(Grimoire::HINT_CACHE_PREFIX) + L"." +
                             compName + L".json";
     return dir / filename;
 }
@@ -153,7 +150,7 @@ static json MakeScanEntry(const char* method, const char* patternId, int tried, 
     return entry;
 }
 
-void SaveResults(const char* peHash, const OffsetFinder::EnginePointers& ptrs,
+void SaveResults(const char* peHash, const Genau::EnginePointers& ptrs,
                  const char* processName) {
     if (!peHash || !peHash[0]) return;
 
@@ -251,4 +248,4 @@ void SaveResults(const char* peHash, const OffsetFinder::EnginePointers& ptrs,
     }
 }
 
-} // namespace HintCache
+} // namespace Flamme

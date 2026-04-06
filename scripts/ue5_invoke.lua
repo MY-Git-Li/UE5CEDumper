@@ -124,7 +124,7 @@
 
 local M = {}
 
--- Mailbox offsets (must match Mailbox.h MailboxData struct)
+-- Mailbox offsets (must match Mimic.h MailboxData struct)
 local OFF_CMD            = 0x000   -- int32: command (write LAST)
 local OFF_STATUS         = 0x004   -- int32: status (poll this)
 local OFF_RESULT         = 0x008   -- int32: result code

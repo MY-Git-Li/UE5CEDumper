@@ -1,7 +1,8 @@
 #pragma once
 
 // ============================================================
-// HintCache.h — Scan hint cache for AOB pattern acceleration
+// Flamme — 弗蘭梅 (古代大魔法使 — Ancient Master)
+// HintCache: per-game AOB result caching
 //
 // Reads/writes a JSON file with previously-winning pattern IDs
 // per game (keyed by PE hash). On second scan of the same game
@@ -16,9 +17,9 @@
 #include <cstdint>
 
 // Forward declare to avoid pulling OffsetFinder.h
-namespace OffsetFinder { struct EnginePointers; }
+namespace Genau { struct EnginePointers; }
 
-namespace HintCache {
+namespace Flamme {
 
 /// Per-target hint: pattern ID to try first (empty = no hint).
 /// Also carries cached UE version to skip the slow DetectVersion scan.
@@ -42,7 +43,7 @@ ScanHints LoadHints(const char* peHash);
 /// Save scan results to the cache file.  Reads the existing file,
 /// updates/inserts the record for peHash, writes atomically.
 /// Never throws — errors are logged and silently ignored.
-void SaveResults(const char* peHash, const OffsetFinder::EnginePointers& ptrs,
+void SaveResults(const char* peHash, const Genau::EnginePointers& ptrs,
                  const char* processName);
 
-} // namespace HintCache
+} // namespace Flamme

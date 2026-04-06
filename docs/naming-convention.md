@@ -72,25 +72,24 @@ narrative identity resonates with what the module *does*.
 ## Namespace Structure
 
 ```
-UE5::                       // Root namespace (preserves UE5 branding)
-  Frieren::                 // ExportAPI — the gateway
-  Genau::                   // OffsetFinder — the examiner
-  Macht::                   // Memory — raw power
-  Aura::                    // ObjectArray — the scale
-  Serie::                   // FNamePool — name oracle
-  Ubel::                    // UStructWalker — surgical dissection
-  Fern::                    // PipeServer — messenger
-  Sein::                    // Logger — chronicler
-  Himmel::                  // Signatures — hero's legacy
-  Flamme::                  // HintCache — ancient wisdom
-  Stark::                   // GameThreadDispatch — frontline warrior
-  Mimic::                   // Mailbox — disguised channel
-  Methode::                 // CEPlugin — analyst
-  Lugner::                  // ProxyVersion — deceiver
-  Renge::                   // PipeProtocol — liaison rules
-  Grimoire::                // Constants — spell book
-  DynOff::                  // Dynamic offsets (in Grimoire.h, unchanged)
+Frieren::                   // ExportAPI — the gateway (extern "C", no namespace wrapper)
+Genau::                     // OffsetFinder — the examiner
+Macht::                     // Memory — raw power
+Aura::                      // ObjectArray — the scale
+Serie::                     // FNamePool — name oracle
+Ubel::                      // UStructWalker — surgical dissection
+Fern::                      // PipeServer — messenger (also class name)
+Sein::                      // Logger — chronicler
+Himmel::                    // Signatures — hero's legacy (header-only)
+Flamme::                    // HintCache — ancient wisdom
+Stark::                     // GameThreadDispatch — frontline warrior
+Mimic::                     // Mailbox — disguised channel
+Renge::                     // PipeProtocol — liaison rules
+Grimoire::                  // Constants — spell book
+DynOff::                    // Dynamic offsets (in Grimoire.h, unchanged)
 ```
+
+> **Note**: No `UE5::` root prefix — flat namespaces matching the original code style.
 
 ---
 
@@ -108,7 +107,7 @@ Every Frieren-named file MUST include this header:
 ```cpp
 // Genau — 葛納烏 (一級魔法使篩選考官 — First-Class Mage Examiner)
 // OffsetFinder: AOB pattern scanning for GObjects, GNames, GWorld pointers
-namespace UE5::Genau {
+namespace Genau {
     // ...
 }
 ```
@@ -116,7 +115,7 @@ namespace UE5::Genau {
 ```cpp
 // Macht — 黃金鄉的馬哈特 (七大魔王 — Seven Sages, Transmutation)
 // Memory: AOB scanning, SEH-protected reads/writes, RIP-relative resolution
-namespace UE5::Macht {
+namespace Macht {
     // ...
 }
 ```
@@ -124,7 +123,7 @@ namespace UE5::Macht {
 ```cpp
 // Mimic — 寶箱怪 (芙莉蓮的經典梗 — The Classic Gag)
 // Mailbox: CE Lua shared-memory command interface (no CreateRemoteThread needed)
-namespace UE5::Mimic {
+namespace Mimic {
     // ...
 }
 ```

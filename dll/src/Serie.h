@@ -1,13 +1,14 @@
 #pragma once
 
 // ============================================================
-// FNamePool.h — UE5 FNamePool string resolution
+// Serie — 賽莉耶 (千年大魔法使 — Living-History Great Mage)
+// FNamePool: FName string resolution (UE5 pool + UE4 TNameEntry)
 // ============================================================
 
 #include <cstdint>
 #include <string>
 
-namespace FNamePool {
+namespace Serie {
 
 // Initialize with the FNamePool address found by OffsetFinder (UE4.23+/UE5)
 // headerOffset: bytes before the 2-byte header within each FNameEntry.
@@ -39,4 +40,4 @@ bool IsUE4Mode();
 // Call when name resolution ratio is unexpectedly low.
 void LogDiagnostics();
 
-} // namespace FNamePool
+} // namespace Serie
