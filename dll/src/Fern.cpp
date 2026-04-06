@@ -1,17 +1,18 @@
 // ============================================================
-// PipeServer.cpp — Named Pipe IPC server implementation
+// Fern — 費倫 (芙莉蓮的弟子 — Frieren's Apprentice)
+// PipeServer: Named Pipe JSON IPC implementation
 // ============================================================
 
-#include "PipeServer.h"
-#include "PipeProtocol.h"
-#include "Constants.h"
+#include "Fern.h"
+#include "Renge.h"
+#include "Grimoire.h"
 #define LOG_CAT "PIPE:svr"
-#include "Logger.h"
-#include "Memory.h"
-#include "OffsetFinder.h"
-#include "ObjectArray.h"
-#include "FNamePool.h"
-#include "UStructWalker.h"
+#include "Sein.h"
+#include "Macht.h"
+#include "Genau.h"
+#include "Aura.h"
+#include "Serie.h"
+#include "Ubel.h"
 #include "BuildInfo.h"
 
 #include <json.hpp>
@@ -35,20 +36,20 @@ namespace ScanProgress {
     std::string GetStatusText();
 }
 
-bool PipeServer::Start() {
+bool Fern::Start() {
     if (m_running.load()) {
         LOG_WARN("PipeServer: Already running");
         return true;
     }
 
     m_running = true;
-    m_acceptThread = std::thread(&PipeServer::AcceptLoop, this);
+    m_acceptThread = std::thread(&Fern::AcceptLoop, this);
 
-    LOG_INFO("PipeServer: Started on %ls", Constants::PIPE_NAME);
+    LOG_INFO("PipeServer: Started on %ls", Grimoire::PIPE_NAME);
     return true;
 }
 
-void PipeServer::Stop() {
+void Fern::Stop() {
     if (!m_running.exchange(false)) return; // Already stopped
     StopAllWatches();
 
@@ -76,16 +77,16 @@ void PipeServer::Stop() {
     LOG_INFO("PipeServer: Stopped");
 }
 
-void PipeServer::AcceptLoop() {
+void Fern::AcceptLoop() {
     while (m_running.load()) {
         // Create a new pipe instance
         HANDLE pipe = CreateNamedPipeW(
-            Constants::PIPE_NAME,
+            Grimoire::PIPE_NAME,
             PIPE_ACCESS_DUPLEX,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
             1,                          // Max instances
-            Constants::PIPE_BUF_SIZE,
-            Constants::PIPE_BUF_SIZE,
+            Grimoire::PIPE_BUF_SIZE,
+            Grimoire::PIPE_BUF_SIZE,
             0,                          // Default timeout
             nullptr                     // Default security
         );
@@ -140,7 +141,7 @@ void PipeServer::AcceptLoop() {
     }
 }
 
-std::string PipeServer::ReadLine(HANDLE pipe) {
+std::string Fern::ReadLine(HANDLE pipe) {
     std::string line;
     char ch;
     DWORD bytesRead;
@@ -159,29 +160,29 @@ std::string PipeServer::ReadLine(HANDLE pipe) {
         line += ch;
 
         // Safety: don't let a line grow unbounded
-        if (line.size() > Constants::PIPE_BUF_SIZE) {
-            Logger::Warn("PIPE:cmd", "PipeServer: Line too long, dropping");
+        if (line.size() > Grimoire::PIPE_BUF_SIZE) {
+            Sein::Warn("PIPE:cmd", "PipeServer: Line too long, dropping");
             return "";
         }
     }
     return "";
 }
 
-bool PipeServer::WriteLine(HANDLE pipe, const std::string& line) {
+bool Fern::WriteLine(HANDLE pipe, const std::string& line) {
     std::lock_guard<std::mutex> lock(m_writeMutex);
     std::string data = line + "\n";
     DWORD written;
     return WriteFile(pipe, data.c_str(), static_cast<DWORD>(data.size()), &written, nullptr) != 0;
 }
 
-void PipeServer::HandleClient(HANDLE pipe) {
+void Fern::HandleClient(HANDLE pipe) {
     // Batch-suppress repetitive command logging (e.g. 244 x get_object_list)
     std::string lastCmd;
     int repeatCount = 0;
 
     auto flushRepeat = [&]() {
         if (repeatCount > 1) {
-            Logger::Debug("PIPE:cmd", "PipeServer: ... repeated %dx: %s", repeatCount, lastCmd.c_str());
+            Sein::Debug("PIPE:cmd", "PipeServer: ... repeated %dx: %s", repeatCount, lastCmd.c_str());
         }
         repeatCount = 0;
         lastCmd.clear();
@@ -204,7 +205,7 @@ void PipeServer::HandleClient(HANDLE pipe) {
             ++repeatCount;
         } else {
             flushRepeat();
-            Logger::Debug("PIPE:cmd", "PipeServer: Received: %s", line.c_str());
+            Sein::Debug("PIPE:cmd", "PipeServer: Received: %s", line.c_str());
             lastCmd = cmd;
             repeatCount = 1;
         }
@@ -213,14 +214,14 @@ void PipeServer::HandleClient(HANDLE pipe) {
         if (!response.empty()) {
             if (!WriteLine(pipe, response)) {
                 flushRepeat();
-                Logger::Error("PIPE:cmd", "PipeServer: Failed to write response");
+                Sein::Error("PIPE:cmd", "PipeServer: Failed to write response");
                 break;
             }
         }
     }
 }
 
-void PipeServer::PushEvent(const std::string& jsonLine) {
+void Fern::PushEvent(const std::string& jsonLine) {
     if (!m_clientConnected.load()) return;
     HANDLE pipe;
     {
@@ -235,7 +236,7 @@ void PipeServer::PushEvent(const std::string& jsonLine) {
 // SerializeField — Convert a LiveFieldValue to JSON.
 // Shared by walk_instance and walk_datatable_rows handlers.
 // ============================================================
-static json SerializeField(const UStructWalker::LiveFieldValue& fv) {
+static json SerializeField(const Ubel::LiveFieldValue& fv) {
     json fj;
     fj["name"]   = fv.name;
     fj["type"]   = fv.typeName;
@@ -248,11 +249,11 @@ static json SerializeField(const UStructWalker::LiveFieldValue& fv) {
 
     // ObjectProperty: pointer info
     if (fv.ptrValue != 0) {
-        fj["ptr"]       = PipeProtocol::AddrToStr(fv.ptrValue);
+        fj["ptr"]       = Renge::AddrToStr(fv.ptrValue);
         fj["ptr_name"]  = fv.ptrName;
         fj["ptr_class"] = fv.ptrClassName;
         if (fv.ptrClassAddr)
-            fj["ptr_class_addr"] = PipeProtocol::AddrToStr(fv.ptrClassAddr);
+            fj["ptr_class_addr"] = Renge::AddrToStr(fv.ptrClassAddr);
     }
 
     // BoolProperty: bit field info
@@ -266,7 +267,7 @@ static json SerializeField(const UStructWalker::LiveFieldValue& fv) {
     if (fv.arrayCount >= 0) {
         fj["count"] = fv.arrayCount;
         if (fv.arrayDataAddr != 0)
-            fj["array_data_addr"] = PipeProtocol::AddrToStr(fv.arrayDataAddr);
+            fj["array_data_addr"] = Renge::AddrToStr(fv.arrayDataAddr);
         if (!fv.arrayInnerType.empty()) {
             fj["array_inner_type"] = fv.arrayInnerType;
             if (fv.arrayElemSize > 0)
@@ -274,10 +275,10 @@ static json SerializeField(const UStructWalker::LiveFieldValue& fv) {
             if (!fv.arrayInnerStructType.empty())
                 fj["array_struct_type"] = fv.arrayInnerStructType;
             if (fv.arrayInnerStructAddr != 0)
-                fj["array_struct_class_addr"] = PipeProtocol::AddrToStr(fv.arrayInnerStructAddr);
+                fj["array_struct_class_addr"] = Renge::AddrToStr(fv.arrayInnerStructAddr);
         }
         if (fv.arrayInnerFFieldAddr != 0)
-            fj["array_inner_addr"] = PipeProtocol::AddrToStr(fv.arrayInnerFFieldAddr);
+            fj["array_inner_addr"] = Renge::AddrToStr(fv.arrayInnerFFieldAddr);
         // Phase B/D: inline element values (scalar or pointer)
         if (!fv.arrayElements.empty()) {
             json elems = json::array();
@@ -292,7 +293,7 @@ static json SerializeField(const UStructWalker::LiveFieldValue& fv) {
                     ej["rv"] = e.rawIntValue;
                 // Phase D: pointer element fields
                 if (e.ptrAddr != 0) {
-                    ej["pa"] = PipeProtocol::AddrToStr(e.ptrAddr);
+                    ej["pa"] = Renge::AddrToStr(e.ptrAddr);
                     ej["pn"] = e.ptrName;
                     ej["pc"] = e.ptrClassName;
                 }
@@ -304,10 +305,10 @@ static json SerializeField(const UStructWalker::LiveFieldValue& fv) {
                                     {"o", sf.offset}, {"s", sf.size}, {"v", sf.value}};
                         // Pointer resolution for ObjectProperty sub-fields
                         if (sf.ptrAddr != 0) {
-                            sfj["pa"] = PipeProtocol::AddrToStr(sf.ptrAddr);
+                            sfj["pa"] = Renge::AddrToStr(sf.ptrAddr);
                             sfj["pn"] = sf.ptrName;
                             sfj["pc"] = sf.ptrClassName;
-                            sfj["pca"] = PipeProtocol::AddrToStr(sf.ptrClassAddr);
+                            sfj["pca"] = Renge::AddrToStr(sf.ptrClassAddr);
                         }
                         sfs.push_back(sfj);
                     }
@@ -320,7 +321,7 @@ static json SerializeField(const UStructWalker::LiveFieldValue& fv) {
 
         // CE DropDownList: full enum entries for this array field
         if (fv.arrayEnumAddr != 0 && !fv.arrayEnumEntries.empty()) {
-            fj["enum_addr"] = PipeProtocol::AddrToStr(fv.arrayEnumAddr);
+            fj["enum_addr"] = Renge::AddrToStr(fv.arrayEnumAddr);
             json entries = json::array();
             for (const auto& ee : fv.arrayEnumEntries)
                 entries.push_back({{"v", ee.value}, {"n", ee.name}});
@@ -338,13 +339,13 @@ static json SerializeField(const UStructWalker::LiveFieldValue& fv) {
         if (fv.mapValueOffset != 0)
             fj["map_value_offset"] = fv.mapValueOffset;
         if (fv.mapDataAddr != 0)
-            fj["map_data_addr"] = PipeProtocol::AddrToStr(fv.mapDataAddr);
+            fj["map_data_addr"] = Renge::AddrToStr(fv.mapDataAddr);
         if (fv.mapKeyStructAddr != 0) {
-            fj["map_key_struct_addr"] = PipeProtocol::AddrToStr(fv.mapKeyStructAddr);
+            fj["map_key_struct_addr"] = Renge::AddrToStr(fv.mapKeyStructAddr);
             fj["map_key_struct_type"] = fv.mapKeyStructType;
         }
         if (fv.mapValueStructAddr != 0) {
-            fj["map_value_struct_addr"] = PipeProtocol::AddrToStr(fv.mapValueStructAddr);
+            fj["map_value_struct_addr"] = Renge::AddrToStr(fv.mapValueStructAddr);
             fj["map_value_struct_type"] = fv.mapValueStructType;
         }
         if (!fv.containerElements.empty()) {
@@ -357,10 +358,10 @@ static json SerializeField(const UStructWalker::LiveFieldValue& fv) {
                 if (!e.keyHex.empty())   ej["kh"] = e.keyHex;
                 if (!e.valueHex.empty()) ej["vh"] = e.valueHex;
                 if (!e.keyPtrName.empty())   ej["kn"] = e.keyPtrName;
-                if (e.keyPtrAddr != 0)       ej["ka"] = PipeProtocol::AddrToStr(e.keyPtrAddr);
+                if (e.keyPtrAddr != 0)       ej["ka"] = Renge::AddrToStr(e.keyPtrAddr);
                 if (!e.keyPtrClassName.empty()) ej["kc"] = e.keyPtrClassName;
                 if (!e.valuePtrName.empty()) ej["vn"] = e.valuePtrName;
-                if (e.valuePtrAddr != 0)     ej["va"] = PipeProtocol::AddrToStr(e.valuePtrAddr);
+                if (e.valuePtrAddr != 0)     ej["va"] = Renge::AddrToStr(e.valuePtrAddr);
                 if (!e.valuePtrClassName.empty()) ej["vc"] = e.valuePtrClassName;
                 elems.push_back(ej);
             }
@@ -374,9 +375,9 @@ static json SerializeField(const UStructWalker::LiveFieldValue& fv) {
         fj["set_elem_type"] = fv.setElemType;
         fj["set_elem_size"] = fv.setElemSize;
         if (fv.setDataAddr != 0)
-            fj["set_data_addr"] = PipeProtocol::AddrToStr(fv.setDataAddr);
+            fj["set_data_addr"] = Renge::AddrToStr(fv.setDataAddr);
         if (fv.setElemStructAddr != 0) {
-            fj["set_elem_struct_addr"] = PipeProtocol::AddrToStr(fv.setElemStructAddr);
+            fj["set_elem_struct_addr"] = Renge::AddrToStr(fv.setElemStructAddr);
             fj["set_elem_struct_type"] = fv.setElemStructType;
         }
         if (!fv.containerElements.empty()) {
@@ -387,7 +388,7 @@ static json SerializeField(const UStructWalker::LiveFieldValue& fv) {
                 ej["k"] = e.key;
                 if (!e.keyHex.empty()) ej["kh"] = e.keyHex;
                 if (!e.keyPtrName.empty()) ej["kn"] = e.keyPtrName;
-                if (e.keyPtrAddr != 0)    ej["ka"] = PipeProtocol::AddrToStr(e.keyPtrAddr);
+                if (e.keyPtrAddr != 0)    ej["ka"] = Renge::AddrToStr(e.keyPtrAddr);
                 if (!e.keyPtrClassName.empty()) ej["kc"] = e.keyPtrClassName;
                 elems.push_back(ej);
             }
@@ -397,8 +398,8 @@ static json SerializeField(const UStructWalker::LiveFieldValue& fv) {
 
     // StructProperty: inner struct info
     if (fv.structDataAddr != 0) {
-        fj["struct_data_addr"]  = PipeProtocol::AddrToStr(fv.structDataAddr);
-        fj["struct_class_addr"] = PipeProtocol::AddrToStr(fv.structClassAddr);
+        fj["struct_data_addr"]  = Renge::AddrToStr(fv.structDataAddr);
+        fj["struct_class_addr"] = Renge::AddrToStr(fv.structClassAddr);
         fj["struct_type"]       = fv.structTypeName;
     }
 
@@ -408,7 +409,7 @@ static json SerializeField(const UStructWalker::LiveFieldValue& fv) {
         fj["enum_value"] = fv.enumValue;
     }
     if (fv.enumAddr != 0 && !fv.enumEntries.empty()) {
-        fj["enum_addr"] = PipeProtocol::AddrToStr(fv.enumAddr);
+        fj["enum_addr"] = Renge::AddrToStr(fv.enumAddr);
         json enumEntries = json::array();
         for (const auto& ee : fv.enumEntries)
             enumEntries.push_back({{"v", ee.value}, {"n", ee.name}});
@@ -423,20 +424,20 @@ static json SerializeField(const UStructWalker::LiveFieldValue& fv) {
     return fj;
 }
 
-std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
+std::string Fern::DispatchCommand(const std::string& jsonLine) {
     json request;
     try {
         request = json::parse(jsonLine);
     } catch (const json::exception& e) {
-        Logger::Error("PIPE:cmd", "PipeServer: JSON parse error: %s", e.what());
-        return PipeProtocol::MakeError(0, "Invalid JSON").dump();
+        Sein::Error("PIPE:cmd", "PipeServer: JSON parse error: %s", e.what());
+        return Renge::MakeError(0, "Invalid JSON").dump();
     }
 
     int id = request.value("id", 0);
     std::string cmd = request.value("cmd", "");
 
     try {
-        if (cmd == PipeProtocol::CMD_INIT) {
+        if (cmd == Renge::CMD_INIT) {
             extern uint32_t g_cachedUEVersion;
             extern bool     g_cachedVersionDetected;
             json data;
@@ -446,10 +447,10 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             data["build_hash"] = BUILD_GIT_HASH;
             data["build_time"] = BUILD_TIMESTAMP;
             data["build_info"] = BUILD_VERSION_STRING;
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
-        if (cmd == PipeProtocol::CMD_GET_POINTERS) {
+        if (cmd == Renge::CMD_GET_POINTERS) {
             // These are filled by ExportAPI's cached EnginePointers
             extern uintptr_t   g_cachedGObjects;
             extern uintptr_t   g_cachedGNames;
@@ -475,12 +476,12 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             extern int         g_cachedGWorldAobLen;
 
             json data;
-            data["gobjects"]         = PipeProtocol::AddrToStr(g_cachedGObjects);
-            data["gnames"]           = PipeProtocol::AddrToStr(g_cachedGNames);
-            data["gworld"]           = PipeProtocol::AddrToStr(g_cachedGWorld);
+            data["gobjects"]         = Renge::AddrToStr(g_cachedGObjects);
+            data["gnames"]           = Renge::AddrToStr(g_cachedGNames);
+            data["gworld"]           = Renge::AddrToStr(g_cachedGWorld);
             data["ue_version"]       = g_cachedUEVersion;
             data["version_detected"] = g_cachedVersionDetected;
-            data["object_count"]     = ObjectArray::GetCount();
+            data["object_count"]     = Aura::GetCount();
             data["gobjects_method"]  = g_cachedGObjectsMethod;
             data["gnames_method"]    = g_cachedGNamesMethod;
             data["gworld_method"]    = g_cachedGWorldMethod;
@@ -500,9 +501,9 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             data["scan_stats"] = scanStats;
 
             // AOB scan hit addresses (instruction that references the pointer)
-            data["gobjects_scan_addr"] = PipeProtocol::AddrToStr(g_cachedGObjectsScanAddr);
-            data["gnames_scan_addr"]   = PipeProtocol::AddrToStr(g_cachedGNamesScanAddr);
-            data["gworld_scan_addr"]   = PipeProtocol::AddrToStr(g_cachedGWorldScanAddr);
+            data["gobjects_scan_addr"] = Renge::AddrToStr(g_cachedGObjectsScanAddr);
+            data["gnames_scan_addr"]   = Renge::AddrToStr(g_cachedGNamesScanAddr);
+            data["gworld_scan_addr"]   = Renge::AddrToStr(g_cachedGWorldScanAddr);
 
             // GWorld winning pattern AOB metadata (for CE symbol registration)
             data["gworld_aob"]     = g_cachedGWorldAob ? g_cachedGWorldAob : "";
@@ -510,8 +511,8 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             data["gworld_aob_len"] = g_cachedGWorldAobLen;
 
             // Module info for CE address formatting
-            uintptr_t moduleBase = Mem::GetModuleBase(nullptr);
-            data["module_base"] = PipeProtocol::AddrToStr(moduleBase);
+            uintptr_t moduleBase = Macht::GetModuleBase(nullptr);
+            data["module_base"] = Renge::AddrToStr(moduleBase);
             {
                 wchar_t moduleNameW[MAX_PATH] = {};
                 GetModuleFileNameW(reinterpret_cast<HMODULE>(moduleBase), moduleNameW, MAX_PATH);
@@ -526,39 +527,39 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                 data["module_name"] = moduleName;
             }
 
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
-        if (cmd == PipeProtocol::CMD_GET_OBJECT_COUNT) {
+        if (cmd == Renge::CMD_GET_OBJECT_COUNT) {
             json data;
-            data["count"] = ObjectArray::GetCount();
-            return PipeProtocol::MakeResponse(id, data).dump();
+            data["count"] = Aura::GetCount();
+            return Renge::MakeResponse(id, data).dump();
         }
 
-        if (cmd == PipeProtocol::CMD_GET_OBJECT_LIST) {
+        if (cmd == Renge::CMD_GET_OBJECT_LIST) {
             int offset = request.value("offset", 0);
             int limit  = request.value("limit", 200);
-            int total  = ObjectArray::GetCount();
+            int total  = Aura::GetCount();
 
             json objects = json::array();
             int end = (std::min)(offset + limit, total);
 
             for (int i = offset; i < end; ++i) {
-                uintptr_t obj = ObjectArray::GetByIndex(i);
+                uintptr_t obj = Aura::GetByIndex(i);
                 if (!obj) continue;
 
-                std::string name = UStructWalker::GetName(obj);
+                std::string name = Ubel::GetName(obj);
                 if (name.empty()) continue; // Skip unnamed objects
 
                 json item;
-                item["addr"]  = PipeProtocol::AddrToStr(obj);
+                item["addr"]  = Renge::AddrToStr(obj);
                 item["name"]  = name;
 
-                uintptr_t cls = UStructWalker::GetClass(obj);
-                item["class"] = cls ? UStructWalker::GetName(cls) : "";
+                uintptr_t cls = Ubel::GetClass(obj);
+                item["class"] = cls ? Ubel::GetName(cls) : "";
 
-                uintptr_t outer = UStructWalker::GetOuter(obj);
-                item["outer"] = outer ? PipeProtocol::AddrToStr(outer) : "";
+                uintptr_t outer = Ubel::GetOuter(obj);
+                item["outer"] = outer ? Renge::AddrToStr(outer) : "";
 
                 objects.push_back(item);
             }
@@ -567,57 +568,57 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             data["total"]   = total;
             data["scanned"] = end - offset; // Number of indices scanned (for pagination)
             data["objects"] = objects;
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
-        if (cmd == PipeProtocol::CMD_GET_OBJECT) {
+        if (cmd == Renge::CMD_GET_OBJECT) {
             std::string addrStr = request.value("addr", "");
-            if (addrStr.empty()) return PipeProtocol::MakeError(id, "Missing addr").dump();
+            if (addrStr.empty()) return Renge::MakeError(id, "Missing addr").dump();
 
-            uintptr_t addr = PipeProtocol::StrToAddr(addrStr);
+            uintptr_t addr = Renge::StrToAddr(addrStr);
             json data;
             data["addr"]      = addrStr;
-            data["name"]      = UStructWalker::GetName(addr);
-            data["full_name"] = UStructWalker::GetFullName(addr);
+            data["name"]      = Ubel::GetName(addr);
+            data["full_name"] = Ubel::GetFullName(addr);
 
-            uintptr_t cls = UStructWalker::GetClass(addr);
-            data["class"]      = cls ? UStructWalker::GetName(cls) : "";
-            data["class_addr"] = PipeProtocol::AddrToStr(cls);
+            uintptr_t cls = Ubel::GetClass(addr);
+            data["class"]      = cls ? Ubel::GetName(cls) : "";
+            data["class_addr"] = Renge::AddrToStr(cls);
 
-            uintptr_t outer = UStructWalker::GetOuter(addr);
-            data["outer"]      = outer ? UStructWalker::GetName(outer) : "";
-            data["outer_addr"] = PipeProtocol::AddrToStr(outer);
+            uintptr_t outer = Ubel::GetOuter(addr);
+            data["outer"]      = outer ? Ubel::GetName(outer) : "";
+            data["outer_addr"] = Renge::AddrToStr(outer);
 
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
-        if (cmd == PipeProtocol::CMD_FIND_OBJECT) {
+        if (cmd == Renge::CMD_FIND_OBJECT) {
             std::string path = request.value("path", "");
-            if (path.empty()) return PipeProtocol::MakeError(id, "Missing path").dump();
+            if (path.empty()) return Renge::MakeError(id, "Missing path").dump();
 
-            uintptr_t obj = ObjectArray::FindByName(path);
-            if (!obj) return PipeProtocol::MakeError(id, "Object not found").dump();
+            uintptr_t obj = Aura::FindByName(path);
+            if (!obj) return Renge::MakeError(id, "Object not found").dump();
 
             json data;
-            data["addr"] = PipeProtocol::AddrToStr(obj);
-            data["name"] = UStructWalker::GetName(obj);
-            return PipeProtocol::MakeResponse(id, data).dump();
+            data["addr"] = Renge::AddrToStr(obj);
+            data["name"] = Ubel::GetName(obj);
+            return Renge::MakeResponse(id, data).dump();
         }
 
-        if (cmd == PipeProtocol::CMD_SEARCH_OBJECTS) {
+        if (cmd == Renge::CMD_SEARCH_OBJECTS) {
             std::string query = request.value("query", "");
             int limit = request.value("limit", 200);
-            if (query.empty()) return PipeProtocol::MakeError(id, "Missing query").dump();
+            if (query.empty()) return Renge::MakeError(id, "Missing query").dump();
 
-            auto rset = ObjectArray::SearchByName(query, limit);
+            auto rset = Aura::SearchByName(query, limit);
 
             json objects = json::array();
             for (const auto& sr : rset.results) {
                 json item;
-                item["addr"]  = PipeProtocol::AddrToStr(sr.addr);
+                item["addr"]  = Renge::AddrToStr(sr.addr);
                 item["name"]  = sr.name;
                 item["class"] = sr.className;
-                item["outer"] = PipeProtocol::AddrToStr(sr.outer);
+                item["outer"] = Renge::AddrToStr(sr.outer);
                 objects.push_back(item);
             }
 
@@ -625,27 +626,27 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             data["total"]   = static_cast<int>(rset.results.size());
             data["scanned"] = rset.scanned;
             data["objects"] = objects;
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
-        if (cmd == PipeProtocol::CMD_WALK_CLASS) {
+        if (cmd == Renge::CMD_WALK_CLASS) {
             std::string addrStr = request.value("addr", "");
-            if (addrStr.empty()) return PipeProtocol::MakeError(id, "Missing addr").dump();
+            if (addrStr.empty()) return Renge::MakeError(id, "Missing addr").dump();
 
-            uintptr_t addr = PipeProtocol::StrToAddr(addrStr);
-            ClassInfo ci = UStructWalker::WalkClassEx(addr);
+            uintptr_t addr = Renge::StrToAddr(addrStr);
+            ClassInfo ci = Ubel::WalkClassEx(addr);
 
             json classData;
             classData["name"]       = ci.Name;
             classData["full_path"]  = ci.FullPath;
-            classData["super_addr"] = PipeProtocol::AddrToStr(ci.SuperClass);
+            classData["super_addr"] = Renge::AddrToStr(ci.SuperClass);
             classData["super_name"] = ci.SuperName;
             classData["props_size"] = ci.PropertiesSize;
 
             json fields = json::array();
             for (const auto& f : ci.Fields) {
                 json fj = {
-                    {"addr",   PipeProtocol::AddrToStr(f.Address)},
+                    {"addr",   Renge::AddrToStr(f.Address)},
                     {"name",   f.Name},
                     {"type",   f.TypeName},
                     {"offset", f.Offset},
@@ -671,34 +672,34 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
 
             json data;
             data["class"] = classData;
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
         // list_enums: enumerate all UEnum objects with their entries
-        if (cmd == PipeProtocol::CMD_LIST_ENUMS) {
-            int total = ObjectArray::GetCount();
+        if (cmd == Renge::CMD_LIST_ENUMS) {
+            int total = Aura::GetCount();
             json enums = json::array();
 
             for (int i = 0; i < total; ++i) {
-                uintptr_t obj = ObjectArray::GetByIndex(i);
+                uintptr_t obj = Aura::GetByIndex(i);
                 if (!obj) continue;
 
                 // Check if this object's class is "Enum" (UEnum inherits UObject)
-                uintptr_t cls = UStructWalker::GetClass(obj);
+                uintptr_t cls = Ubel::GetClass(obj);
                 if (!cls) continue;
-                std::string clsName = UStructWalker::GetName(cls);
+                std::string clsName = Ubel::GetName(cls);
                 if (clsName != "Enum") continue;
 
-                std::string name = UStructWalker::GetName(obj);
+                std::string name = Ubel::GetName(obj);
                 if (name.empty()) continue;
 
                 // Read enum entries via cached resolver
-                auto entries = UStructWalker::GetEnumEntries(obj);
+                auto entries = Ubel::GetEnumEntries(obj);
 
                 json enumObj;
-                enumObj["addr"]      = PipeProtocol::AddrToStr(obj);
+                enumObj["addr"]      = Renge::AddrToStr(obj);
                 enumObj["name"]      = name;
-                enumObj["full_path"] = UStructWalker::GetFullName(obj);
+                enumObj["full_path"] = Ubel::GetFullName(obj);
 
                 json entryArr = json::array();
                 for (const auto& e : entries) {
@@ -711,22 +712,22 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             json data;
             data["enums"] = enums;
             data["count"] = static_cast<int>(enums.size());
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
-        if (cmd == PipeProtocol::CMD_WALK_FUNCTIONS) {
+        if (cmd == Renge::CMD_WALK_FUNCTIONS) {
             std::string addrStr = request.value("addr", "");
-            if (addrStr.empty()) return PipeProtocol::MakeError(id, "Missing addr").dump();
+            if (addrStr.empty()) return Renge::MakeError(id, "Missing addr").dump();
 
-            uintptr_t addr = PipeProtocol::StrToAddr(addrStr);
-            auto funcs = UStructWalker::WalkFunctions(addr);
+            uintptr_t addr = Renge::StrToAddr(addrStr);
+            auto funcs = Ubel::WalkFunctions(addr);
 
             json funcArr = json::array();
             for (const auto& f : funcs) {
                 json fj;
                 fj["name"]    = f.name;
                 fj["full"]    = f.fullName;
-                fj["addr"]    = PipeProtocol::AddrToStr(f.address);
+                fj["addr"]    = Renge::AddrToStr(f.address);
                 fj["flags"]   = f.functionFlags;
                 fj["num_parms"]  = f.numParms;
                 fj["parms_size"] = f.parmsSize;
@@ -765,65 +766,65 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             json data;
             data["functions"] = funcArr;
             data["count"]     = static_cast<int>(funcArr.size());
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
-        if (cmd == PipeProtocol::CMD_READ_MEM) {
+        if (cmd == Renge::CMD_READ_MEM) {
             std::string addrStr = request.value("addr", "");
             int size = request.value("size", 256);
-            if (addrStr.empty()) return PipeProtocol::MakeError(id, "Missing addr").dump();
-            if (size <= 0 || size > 65536) return PipeProtocol::MakeError(id, "Invalid size").dump();
+            if (addrStr.empty()) return Renge::MakeError(id, "Missing addr").dump();
+            if (size <= 0 || size > 65536) return Renge::MakeError(id, "Invalid size").dump();
 
-            uintptr_t addr = PipeProtocol::StrToAddr(addrStr);
+            uintptr_t addr = Renge::StrToAddr(addrStr);
             std::vector<uint8_t> buf(size);
-            if (!Mem::ReadBytesSafe(addr, buf.data(), size)) {
-                return PipeProtocol::MakeError(id, "Read failed").dump();
+            if (!Macht::ReadBytesSafe(addr, buf.data(), size)) {
+                return Renge::MakeError(id, "Read failed").dump();
             }
 
             json data;
-            data["bytes"] = PipeProtocol::BytesToHex(buf.data(), buf.size());
-            return PipeProtocol::MakeResponse(id, data).dump();
+            data["bytes"] = Renge::BytesToHex(buf.data(), buf.size());
+            return Renge::MakeResponse(id, data).dump();
         }
 
-        if (cmd == PipeProtocol::CMD_WRITE_MEM) {
+        if (cmd == Renge::CMD_WRITE_MEM) {
             std::string addrStr = request.value("addr", "");
             std::string hexBytes = request.value("bytes", "");
             if (addrStr.empty() || hexBytes.empty()) {
-                return PipeProtocol::MakeError(id, "Missing addr or bytes").dump();
+                return Renge::MakeError(id, "Missing addr or bytes").dump();
             }
 
-            uintptr_t addr = PipeProtocol::StrToAddr(addrStr);
-            auto bytes = PipeProtocol::HexToBytes(hexBytes);
+            uintptr_t addr = Renge::StrToAddr(addrStr);
+            auto bytes = Renge::HexToBytes(hexBytes);
             if (bytes.empty() || bytes.size() > 65536) {
-                return PipeProtocol::MakeError(id, "Invalid write size (max 65536)").dump();
+                return Renge::MakeError(id, "Invalid write size (max 65536)").dump();
             }
-            if (!Mem::WriteBytes(addr, bytes.data(), bytes.size())) {
-                return PipeProtocol::MakeError(id, "Write failed").dump();
+            if (!Macht::WriteBytes(addr, bytes.data(), bytes.size())) {
+                return Renge::MakeError(id, "Write failed").dump();
             }
 
-            return PipeProtocol::MakeResponse(id).dump();
+            return Renge::MakeResponse(id).dump();
         }
 
         // === walk_instance: Read live field values from a UObject instance ===
-        if (cmd == PipeProtocol::CMD_WALK_INSTANCE) {
+        if (cmd == Renge::CMD_WALK_INSTANCE) {
             std::string addrStr = request.value("addr", "");
-            if (addrStr.empty()) return PipeProtocol::MakeError(id, "Missing addr").dump();
+            if (addrStr.empty()) return Renge::MakeError(id, "Missing addr").dump();
 
-            uintptr_t addr = PipeProtocol::StrToAddr(addrStr);
+            uintptr_t addr = Renge::StrToAddr(addrStr);
             std::string classAddrStr = request.value("class_addr", "");
-            uintptr_t classAddr = classAddrStr.empty() ? 0 : PipeProtocol::StrToAddr(classAddrStr);
+            uintptr_t classAddr = classAddrStr.empty() ? 0 : Renge::StrToAddr(classAddrStr);
             int32_t arrayLimit = request.value("array_limit", 64);
             int32_t previewLimit = request.value("preview_limit", 2);
             bool fillGaps = request.value("fill_gaps", false);
 
-            auto result = UStructWalker::WalkInstance(addr, classAddr, arrayLimit, previewLimit, fillGaps);
+            auto result = Ubel::WalkInstance(addr, classAddr, arrayLimit, previewLimit, fillGaps);
 
             json data;
-            data["addr"]       = PipeProtocol::AddrToStr(result.addr);
+            data["addr"]       = Renge::AddrToStr(result.addr);
             data["name"]       = result.name;
             data["class"]      = result.className;
-            data["class_addr"] = PipeProtocol::AddrToStr(result.classAddr);
-            data["outer"]      = PipeProtocol::AddrToStr(result.outerAddr);
+            data["class_addr"] = Renge::AddrToStr(result.classAddr);
+            data["outer"]      = Renge::AddrToStr(result.outerAddr);
             data["outer_name"] = result.outerName;
             data["outer_class"]= result.outerClassName;
             if (result.isDefinition)
@@ -836,40 +837,40 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                 fields.push_back(SerializeField(fv));
             }
             data["fields"] = fields;
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
         // === read_array_elements: Read scalar elements from a TArray (Phase B) ===
-        if (cmd == PipeProtocol::CMD_READ_ARRAY_ELEMS) {
+        if (cmd == Renge::CMD_READ_ARRAY_ELEMS) {
             std::string addrStr = request.value("addr", "");
             if (addrStr.empty())
-                return PipeProtocol::MakeError(id, "missing 'addr'").dump();
-            uintptr_t addr = PipeProtocol::StrToAddr(addrStr);
+                return Renge::MakeError(id, "missing 'addr'").dump();
+            uintptr_t addr = Renge::StrToAddr(addrStr);
 
             int32_t fieldOffset = request.value("field_offset", 0);
             std::string innerAddrStr = request.value("inner_addr", "");
-            uintptr_t innerAddr = innerAddrStr.empty() ? 0 : PipeProtocol::StrToAddr(innerAddrStr);
+            uintptr_t innerAddr = innerAddrStr.empty() ? 0 : Renge::StrToAddr(innerAddrStr);
             std::string innerType = request.value("inner_type", "");
             int32_t elemSize = request.value("elem_size", 0);
             int32_t offset = request.value("offset", 0);
             int32_t limit = request.value("limit", 64);
 
             if (innerType.empty() || elemSize <= 0)
-                return PipeProtocol::MakeError(id, "missing inner_type or invalid elem_size").dump();
+                return Renge::MakeError(id, "missing inner_type or invalid elem_size").dump();
 
             // Validate elemSize from UI — may have cached garbage from older sessions.
             // ReadArrayElements already caps at 256, but validate explicitly here too.
             if (elemSize > 256) {
-                Logger::Warn("PIPE:cmd", "read_array_elements: elemSize=%d too large for '%s', rejecting",
+                Sein::Warn("PIPE:cmd", "read_array_elements: elemSize=%d too large for '%s', rejecting",
                     elemSize, innerType.c_str());
-                return PipeProtocol::MakeError(id, "elem_size too large (max 256)").dump();
+                return Renge::MakeError(id, "elem_size too large (max 256)").dump();
             }
 
-            auto result = UStructWalker::ReadArrayElements(
+            auto result = Ubel::ReadArrayElements(
                 addr, fieldOffset, innerAddr, innerType, elemSize, offset, limit);
 
             if (!result.ok)
-                return PipeProtocol::MakeError(id, result.error).dump();
+                return Renge::MakeError(id, result.error).dump();
 
             json data;
             data["total"] = result.totalCount;
@@ -889,7 +890,7 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                     ej["rv"] = e.rawIntValue;
                 // Phase D: pointer element fields
                 if (e.ptrAddr != 0) {
-                    ej["pa"] = PipeProtocol::AddrToStr(e.ptrAddr);
+                    ej["pa"] = Renge::AddrToStr(e.ptrAddr);
                     ej["pn"] = e.ptrName;
                     ej["pc"] = e.ptrClassName;
                 }
@@ -901,10 +902,10 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                                     {"o", sf.offset}, {"s", sf.size}, {"v", sf.value}};
                         // Pointer resolution for ObjectProperty sub-fields
                         if (sf.ptrAddr != 0) {
-                            sfj["pa"] = PipeProtocol::AddrToStr(sf.ptrAddr);
+                            sfj["pa"] = Renge::AddrToStr(sf.ptrAddr);
                             sfj["pn"] = sf.ptrName;
                             sfj["pc"] = sf.ptrClassName;
-                            sfj["pca"] = PipeProtocol::AddrToStr(sf.ptrClassAddr);
+                            sfj["pca"] = Renge::AddrToStr(sf.ptrClassAddr);
                         }
                         sfs.push_back(sfj);
                     }
@@ -913,24 +914,24 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                 elems.push_back(ej);
             }
             data["elements"] = elems;
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
         // === walk_world: Browse GWorld → PersistentLevel → Actors hierarchy ===
-        if (cmd == PipeProtocol::CMD_WALK_WORLD) {
+        if (cmd == Renge::CMD_WALK_WORLD) {
             extern uintptr_t g_cachedGWorld;
 
             // Allow overriding with a custom address
             std::string addrStr = request.value("addr", "");
             uintptr_t worldAddr = 0;
             if (!addrStr.empty()) {
-                worldAddr = PipeProtocol::StrToAddr(addrStr);
+                worldAddr = Renge::StrToAddr(addrStr);
             } else {
                 // g_cachedGWorld is &GWorld (address of the global pointer variable).
                 // Must dereference to get the actual UWorld* value.
                 if (g_cachedGWorld) {
-                    bool ok = Mem::ReadSafe(g_cachedGWorld, worldAddr);
-                    Logger::Info("PIPE:world", "GWorld deref: &GWorld=0x%llX -> UWorld*=0x%llX (ReadSafe=%s)",
+                    bool ok = Macht::ReadSafe(g_cachedGWorld, worldAddr);
+                    Sein::Info("PIPE:world", "GWorld deref: &GWorld=0x%llX -> UWorld*=0x%llX (ReadSafe=%s)",
                         static_cast<unsigned long long>(g_cachedGWorld),
                         static_cast<unsigned long long>(worldAddr),
                         ok ? "ok" : "fail");
@@ -939,21 +940,21 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                 // Fallback: if AOB-resolved GWorld is null/wrong, search GObjects for a UWorld instance.
                 // This handles games where the AOB pattern matched the wrong global variable.
                 if (!worldAddr) {
-                    Logger::Info("PIPE:world", "GWorld pointer is null, searching GObjects for UWorld...");
-                    ObjectArray::ForEach([&](int32_t idx, uintptr_t obj) -> bool {
-                        uintptr_t cls = UStructWalker::GetClass(obj);
+                    Sein::Info("PIPE:world", "GWorld pointer is null, searching GObjects for UWorld...");
+                    Aura::ForEach([&](int32_t idx, uintptr_t obj) -> bool {
+                        uintptr_t cls = Ubel::GetClass(obj);
                         if (!cls) return true; // continue
-                        std::string clsName = UStructWalker::GetName(cls);
+                        std::string clsName = Ubel::GetName(cls);
                         if (clsName == "World") {
                             // Skip CDOs (Default__World) — they have null PersistentLevel
-                            std::string objName = UStructWalker::GetName(obj);
+                            std::string objName = Ubel::GetName(obj);
                             if (objName.rfind("Default__", 0) == 0) {
-                                Logger::Debug("PIPE:world", "Skipping CDO '%s' at 0x%llX",
+                                Sein::Debug("PIPE:world", "Skipping CDO '%s' at 0x%llX",
                                     objName.c_str(), static_cast<unsigned long long>(obj));
                                 return true; // continue
                             }
                             worldAddr = obj;
-                            Logger::Info("PIPE:world", "Found UWorld '%s' via GObjects scan: 0x%llX (index=%d)",
+                            Sein::Info("PIPE:world", "Found UWorld '%s' via GObjects scan: 0x%llX (index=%d)",
                                 objName.c_str(), static_cast<unsigned long long>(obj), idx);
                             return false; // stop
                         }
@@ -962,25 +963,25 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                 }
             }
 
-            if (!worldAddr) return PipeProtocol::MakeError(id, "GWorld not found — no UWorld instance in GObjects").dump();
+            if (!worldAddr) return Renge::MakeError(id, "GWorld not found — no UWorld instance in GObjects").dump();
 
             json data;
-            data["world_addr"] = PipeProtocol::AddrToStr(worldAddr);
-            data["world_name"] = UStructWalker::GetName(worldAddr);
+            data["world_addr"] = Renge::AddrToStr(worldAddr);
+            data["world_name"] = Ubel::GetName(worldAddr);
 
             // Log DynOff state for diagnostics
-            Logger::Info("PIPE:world", "DynOff: FFIELD_NEXT=0x%02X FFIELD_NAME=0x%02X FPROPERTY_OFFSET=0x%02X "
+            Sein::Info("PIPE:world", "DynOff: FFIELD_NEXT=0x%02X FFIELD_NAME=0x%02X FPROPERTY_OFFSET=0x%02X "
                 "FPROPERTY_ELEMSIZE=0x%02X FSTRUCTPROP_STRUCT=0x%02X bTaggedFFV=%d",
                 DynOff::FFIELD_NEXT, DynOff::FFIELD_NAME, DynOff::FPROPERTY_OFFSET,
                 DynOff::FPROPERTY_ELEMSIZE, DynOff::FSTRUCTPROP_STRUCT,
                 DynOff::bTaggedFFieldVariant ? 1 : 0);
 
             // Walk UWorld class to find PersistentLevel field offset dynamically
-            uintptr_t worldClass = UStructWalker::GetClass(worldAddr);
-            if (!worldClass) return PipeProtocol::MakeError(id, "Cannot read UWorld class").dump();
+            uintptr_t worldClass = Ubel::GetClass(worldAddr);
+            if (!worldClass) return Renge::MakeError(id, "Cannot read UWorld class").dump();
 
-            ClassInfo worldCI = UStructWalker::WalkClass(worldClass);
-            Logger::Info("PIPE:world", "UWorld class '%s' at 0x%llX, %zu fields, propsSize=%d",
+            ClassInfo worldCI = Ubel::WalkClass(worldClass);
+            Sein::Info("PIPE:world", "UWorld class '%s' at 0x%llX, %zu fields, propsSize=%d",
                 worldCI.Name.c_str(), static_cast<unsigned long long>(worldClass),
                 worldCI.Fields.size(), worldCI.PropertiesSize);
 
@@ -992,8 +993,8 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                 if (f.Name == "PersistentLevel" && f.Size >= 8) {
                     foundPersistentLevel = true;
                     persistentLevelOffset = f.Offset;
-                    Mem::ReadSafe(worldAddr + f.Offset, levelAddr);
-                    Logger::Info("PIPE:world", "PersistentLevel: offset=%d, levelAddr=0x%llX",
+                    Macht::ReadSafe(worldAddr + f.Offset, levelAddr);
+                    Sein::Info("PIPE:world", "PersistentLevel: offset=%d, levelAddr=0x%llX",
                         persistentLevelOffset, static_cast<unsigned long long>(levelAddr));
                     break;
                 }
@@ -1001,12 +1002,12 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
 
             if (!foundPersistentLevel) {
                 // Diagnostic: dump all field names + raw FName data for debugging
-                Logger::Warn("PIPE:world", "PersistentLevel NOT found in %zu UWorld fields. Dumping first 10:",
+                Sein::Warn("PIPE:world", "PersistentLevel NOT found in %zu UWorld fields. Dumping first 10:",
                     worldCI.Fields.size());
                 int dumpCount = 0;
                 for (const auto& f : worldCI.Fields) {
                     if (dumpCount >= 10) break;
-                    Logger::Warn("PIPE:world", "  field[%d]: name='%s' type='%s' off=%d size=%d addr=0x%llX",
+                    Sein::Warn("PIPE:world", "  field[%d]: name='%s' type='%s' off=%d size=%d addr=0x%llX",
                         dumpCount, f.Name.c_str(), f.TypeName.c_str(), f.Offset, f.Size,
                         static_cast<unsigned long long>(f.Address));
                     ++dumpCount;
@@ -1017,9 +1018,9 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                     uintptr_t firstFF = worldCI.Fields[0].Address;
                     for (int probe = 0x18; probe <= 0x38; probe += 4) {
                         int32_t ci = 0;
-                        if (Mem::ReadSafe(firstFF + probe, ci) && ci > 0 && ci < 0x00FFFFFF) {
-                            std::string probeName = FNamePool::GetString(ci);
-                            Logger::Warn("PIPE:world", "  probe FField+0x%02X: compIdx=%d -> '%s'",
+                        if (Macht::ReadSafe(firstFF + probe, ci) && ci > 0 && ci < 0x00FFFFFF) {
+                            std::string probeName = Serie::GetString(ci);
+                            Sein::Warn("PIPE:world", "  probe FField+0x%02X: compIdx=%d -> '%s'",
                                 probe, ci, probeName.c_str());
                         }
                     }
@@ -1027,22 +1028,22 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
 
                 data["error"] = "PersistentLevel field not found in UWorld class (WalkClass returned "
                     + std::to_string(worldCI.Fields.size()) + " fields)";
-                Logger::Warn("PIPE:world", "%s", data["error"].get<std::string>().c_str());
-                return PipeProtocol::MakeResponse(id, data).dump();
+                Sein::Warn("PIPE:world", "%s", data["error"].get<std::string>().c_str());
+                return Renge::MakeResponse(id, data).dump();
             }
             if (!levelAddr) {
                 data["error"] = "PersistentLevel is null (CDO or uninitialized world instance)";
-                Logger::Warn("PIPE:world", "%s", data["error"].get<std::string>().c_str());
-                return PipeProtocol::MakeResponse(id, data).dump();
+                Sein::Warn("PIPE:world", "%s", data["error"].get<std::string>().c_str());
+                return Renge::MakeResponse(id, data).dump();
             }
 
-            data["level_addr"] = PipeProtocol::AddrToStr(levelAddr);
-            data["level_name"] = UStructWalker::GetName(levelAddr);
+            data["level_addr"] = Renge::AddrToStr(levelAddr);
+            data["level_name"] = Ubel::GetName(levelAddr);
             data["level_offset"] = persistentLevelOffset;
 
             // Walk ULevel class to find Actors TArray field
-            uintptr_t levelClass = UStructWalker::GetClass(levelAddr);
-            ClassInfo levelCI = levelClass ? UStructWalker::WalkClass(levelClass) : ClassInfo{};
+            uintptr_t levelClass = Ubel::GetClass(levelAddr);
+            ClassInfo levelCI = levelClass ? Ubel::WalkClass(levelClass) : ClassInfo{};
 
             // Find Actors field (ArrayProperty) — it's a TArray<AActor*>
             int actorsOffset = -1;
@@ -1057,23 +1058,23 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             int actorLimit = request.value("limit", 200);
 
             if (actorsOffset >= 0) {
-                Mem::TArrayView actorArr;
-                if (Mem::ReadTArray(levelAddr + actorsOffset, actorArr)) {
+                Macht::TArrayView actorArr;
+                if (Macht::ReadTArray(levelAddr + actorsOffset, actorArr)) {
                     int count = (std::min)(actorArr.Count, actorLimit);
                     for (int i = 0; i < count; ++i) {
-                        uintptr_t actorAddr = Mem::ReadTArrayElement(actorArr, i);
+                        uintptr_t actorAddr = Macht::ReadTArrayElement(actorArr, i);
                         if (!actorAddr) continue;
 
                         json actorItem;
-                        actorItem["addr"]  = PipeProtocol::AddrToStr(actorAddr);
-                        actorItem["name"]  = UStructWalker::GetName(actorAddr);
-                        actorItem["index"] = UStructWalker::GetIndex(actorAddr);
+                        actorItem["addr"]  = Renge::AddrToStr(actorAddr);
+                        actorItem["name"]  = Ubel::GetName(actorAddr);
+                        actorItem["index"] = Ubel::GetIndex(actorAddr);
 
-                        uintptr_t actorCls = UStructWalker::GetClass(actorAddr);
-                        actorItem["class"] = actorCls ? UStructWalker::GetName(actorCls) : "";
+                        uintptr_t actorCls = Ubel::GetClass(actorAddr);
+                        actorItem["class"] = actorCls ? Ubel::GetName(actorCls) : "";
 
                         // Try to find OwnedComponents on this actor
-                        ClassInfo actorCI = actorCls ? UStructWalker::WalkClass(actorCls) : ClassInfo{};
+                        ClassInfo actorCI = actorCls ? Ubel::WalkClass(actorCls) : ClassInfo{};
                         int compsOffset = -1;
                         for (const auto& f : actorCI.Fields) {
                             if (f.Name == "OwnedComponents" && f.TypeName == "ArrayProperty") {
@@ -1083,19 +1084,19 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                         }
 
                         if (compsOffset >= 0) {
-                            Mem::TArrayView compArr;
-                            if (Mem::ReadTArray(actorAddr + compsOffset, compArr)) {
+                            Macht::TArrayView compArr;
+                            if (Macht::ReadTArray(actorAddr + compsOffset, compArr)) {
                                 json comps = json::array();
                                 int compCount = (std::min)(compArr.Count, 64); // Limit components
                                 for (int c = 0; c < compCount; ++c) {
-                                    uintptr_t compAddr = Mem::ReadTArrayElement(compArr, c);
+                                    uintptr_t compAddr = Macht::ReadTArrayElement(compArr, c);
                                     if (!compAddr) continue;
 
                                     json compItem;
-                                    compItem["addr"] = PipeProtocol::AddrToStr(compAddr);
-                                    compItem["name"] = UStructWalker::GetName(compAddr);
-                                    uintptr_t compCls = UStructWalker::GetClass(compAddr);
-                                    compItem["class"] = compCls ? UStructWalker::GetName(compCls) : "";
+                                    compItem["addr"] = Renge::AddrToStr(compAddr);
+                                    compItem["name"] = Ubel::GetName(compAddr);
+                                    uintptr_t compCls = Ubel::GetClass(compAddr);
+                                    compItem["class"] = compCls ? Ubel::GetName(compCls) : "";
                                     comps.push_back(compItem);
                                 }
                                 actorItem["components"] = comps;
@@ -1109,36 +1110,36 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
 
             data["actors"]      = actors;
             data["actor_count"] = static_cast<int>(actors.size());
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
         // === find_instances: Search GObjects for instances of a given class ===
-        if (cmd == PipeProtocol::CMD_FIND_INSTANCES) {
+        if (cmd == Renge::CMD_FIND_INSTANCES) {
             std::string className = request.value("class_name", "");
             bool exactMatch = request.value("exact_match", false);
             int limit = request.value("limit", 500);
-            if (className.empty()) return PipeProtocol::MakeError(id, "Missing class_name").dump();
+            if (className.empty()) return Renge::MakeError(id, "Missing class_name").dump();
 
-            auto rset = ObjectArray::FindInstancesByClass(className, exactMatch, limit);
+            auto rset = Aura::FindInstancesByClass(className, exactMatch, limit);
 
             // Diagnostic: if name resolution ratio is low, dump FNamePool state
             if (rset.nonNull > 1000 && rset.named > 0) {
                 double namedRatio = static_cast<double>(rset.named) / rset.nonNull;
                 if (namedRatio < 0.70) {
-                    Logger::Warn("PIPE:find", "Low name resolution ratio: %.1f%% (%d/%d) — running FNamePool diagnostics",
+                    Sein::Warn("PIPE:find", "Low name resolution ratio: %.1f%% (%d/%d) — running FNamePool diagnostics",
                                  namedRatio * 100, rset.named, rset.nonNull);
-                    FNamePool::LogDiagnostics();
+                    Serie::LogDiagnostics();
                 }
             }
 
             json instances = json::array();
             for (const auto& sr : rset.results) {
                 json item;
-                item["addr"]  = PipeProtocol::AddrToStr(sr.addr);
+                item["addr"]  = Renge::AddrToStr(sr.addr);
                 item["index"] = sr.index;
                 item["name"]  = sr.name;
                 item["class"] = sr.className;
-                item["outer"] = PipeProtocol::AddrToStr(sr.outer);
+                item["outer"] = Renge::AddrToStr(sr.outer);
                 instances.push_back(item);
             }
 
@@ -1148,15 +1149,15 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             data["non_null"]  = rset.nonNull;
             data["named"]     = rset.named;
             data["instances"] = instances;
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
         // === search_properties: Keyword search across all UClass properties ===
-        if (cmd == PipeProtocol::CMD_SEARCH_PROPERTIES) {
+        if (cmd == Renge::CMD_SEARCH_PROPERTIES) {
             std::string query = request.value("query", "");
             bool gameOnly = request.value("game_only", true);
             int limit = request.value("limit", 200);
-            if (query.empty()) return PipeProtocol::MakeError(id, "Missing query").dump();
+            if (query.empty()) return Renge::MakeError(id, "Missing query").dump();
 
             // Parse optional type filter
             std::vector<std::string> typeFilter;
@@ -1166,13 +1167,13 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                 }
             }
 
-            auto searchResult = ObjectArray::SearchProperties(query, typeFilter, gameOnly, limit);
+            auto searchResult = Aura::SearchProperties(query, typeFilter, gameOnly, limit);
 
             json matches = json::array();
             for (const auto& m : searchResult.results) {
                 json item;
                 item["class_name"]  = m.className;
-                item["class_addr"]  = PipeProtocol::AddrToStr(m.classAddr);
+                item["class_addr"]  = Renge::AddrToStr(m.classAddr);
                 item["class_path"]  = m.classPath;
                 item["super_name"]  = m.superName;
                 item["prop_name"]   = m.propName;
@@ -1191,21 +1192,21 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             data["scanned_classes"] = searchResult.scannedClasses;
             data["scanned_objects"] = searchResult.scannedObjects;
             data["results"]         = matches;
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
         // === list_classes: List all UClass objects (optionally game-only) ===
-        if (cmd == PipeProtocol::CMD_LIST_CLASSES) {
+        if (cmd == Renge::CMD_LIST_CLASSES) {
             bool gameOnly = request.value("game_only", true);
             int limit = request.value("limit", 5000);
 
-            auto listResult = ObjectArray::ListClasses(gameOnly, limit);
+            auto listResult = Aura::ListClasses(gameOnly, limit);
 
             json classes = json::array();
             for (const auto& e : listResult.results) {
                 json item;
                 item["class_name"]      = e.className;
-                item["class_addr"]      = PipeProtocol::AddrToStr(e.classAddr);
+                item["class_addr"]      = Renge::AddrToStr(e.classAddr);
                 item["class_path"]      = e.classPath;
                 item["super_name"]      = e.superName;
                 item["property_count"]  = e.propertyCount;
@@ -1219,56 +1220,56 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             data["scanned_objects"] = listResult.scannedObjects;
             data["total_classes"]   = listResult.totalClasses;
             data["classes"]         = classes;
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
         // === find_by_address: Reverse lookup — address to UObject instance ===
-        if (cmd == PipeProtocol::CMD_FIND_BY_ADDRESS) {
+        if (cmd == Renge::CMD_FIND_BY_ADDRESS) {
             std::string addrStr = request.value("addr", "");
-            if (addrStr.empty()) return PipeProtocol::MakeError(id, "Missing addr").dump();
+            if (addrStr.empty()) return Renge::MakeError(id, "Missing addr").dump();
 
-            uintptr_t queryAddr = PipeProtocol::StrToAddr(addrStr);
-            auto lookupResult = ObjectArray::FindByAddress(queryAddr);
+            uintptr_t queryAddr = Renge::StrToAddr(addrStr);
+            auto lookupResult = Aura::FindByAddress(queryAddr);
 
             json data;
             data["found"] = lookupResult.found;
 
             if (lookupResult.found) {
                 data["match_type"]       = lookupResult.exactMatch ? "exact" : "contains";
-                data["addr"]             = PipeProtocol::AddrToStr(lookupResult.objectAddr);
+                data["addr"]             = Renge::AddrToStr(lookupResult.objectAddr);
                 data["index"]            = lookupResult.index;
                 data["name"]             = lookupResult.name;
                 data["class"]            = lookupResult.className;
-                data["outer"]            = PipeProtocol::AddrToStr(lookupResult.outer);
+                data["outer"]            = Renge::AddrToStr(lookupResult.outer);
                 data["offset_from_base"] = lookupResult.offsetFromBase;
                 data["query_addr"]       = addrStr;
             }
 
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
         // === get_ce_pointer_info: CE pointer chain info for a GObjects instance ===
-        if (cmd == PipeProtocol::CMD_GET_CE_PTR_INFO) {
+        if (cmd == Renge::CMD_GET_CE_PTR_INFO) {
             std::string addrStr = request.value("addr", "");
-            if (addrStr.empty()) return PipeProtocol::MakeError(id, "Missing addr").dump();
+            if (addrStr.empty()) return Renge::MakeError(id, "Missing addr").dump();
 
-            uintptr_t addr = PipeProtocol::StrToAddr(addrStr);
+            uintptr_t addr = Renge::StrToAddr(addrStr);
             int fieldOffset = request.value("field_offset", 0);
 
             extern uintptr_t g_cachedGObjects;
-            uintptr_t moduleBase = Mem::GetModuleBase(nullptr);
+            uintptr_t moduleBase = Macht::GetModuleBase(nullptr);
 
             // Compute GObjects RVA
             uintptr_t gobjectsRVA = g_cachedGObjects - moduleBase;
 
             // Find the InternalIndex of this object by scanning
-            int32_t internalIndex = UStructWalker::GetIndex(addr);
+            int32_t internalIndex = Ubel::GetIndex(addr);
             if (internalIndex < 0) {
-                return PipeProtocol::MakeError(id, "Cannot read InternalIndex").dump();
+                return Renge::MakeError(id, "Cannot read InternalIndex").dump();
             }
 
-            int32_t chunkIndex  = internalIndex / Constants::OBJECTS_PER_CHUNK;
-            int32_t withinChunk = internalIndex % Constants::OBJECTS_PER_CHUNK;
+            int32_t chunkIndex  = internalIndex / Grimoire::OBJECTS_PER_CHUNK;
+            int32_t withinChunk = internalIndex % Grimoire::OBJECTS_PER_CHUNK;
 
             // Get module name
             wchar_t moduleNameW[MAX_PATH] = {};
@@ -1291,8 +1292,8 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
 
             json data;
             data["module"]         = moduleName;
-            data["module_base"]    = PipeProtocol::AddrToStr(moduleBase);
-            data["gobjects_rva"]   = PipeProtocol::AddrToStr(gobjectsRVA);
+            data["module_base"]    = Renge::AddrToStr(moduleBase);
+            data["gobjects_rva"]   = Renge::AddrToStr(gobjectsRVA);
             data["internal_index"] = internalIndex;
             data["chunk_index"]    = chunkIndex;
             data["within_chunk"]   = withinChunk;
@@ -1305,7 +1306,7 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             // Level 1 (innermost): Object + fieldOffset → value
             json offsets = json::array();
             offsets.push_back(fieldOffset);                              // field offset from UObject*
-            offsets.push_back(withinChunk * ObjectArray::GetItemSize()); // item in chunk
+            offsets.push_back(withinChunk * Aura::GetItemSize()); // item in chunk
             offsets.push_back(chunkIndex * 8);                           // chunk in table
             offsets.push_back(0);                                         // deref FUObjectArray.Objects
 
@@ -1317,11 +1318,11 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                      moduleName.c_str(), static_cast<unsigned long long>(gobjectsRVA));
             data["ce_base"] = ceBase;
 
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
         // === get_offsets: Return all detected FField/FProperty/UStruct offsets ===
-        if (cmd == PipeProtocol::CMD_GET_OFFSETS) {
+        if (cmd == Renge::CMD_GET_OFFSETS) {
             json data;
             data["build_info"]         = BUILD_VERSION_STRING;
             data["validated"]          = DynOff::bOffsetsValidated.load(std::memory_order_acquire);
@@ -1345,36 +1346,36 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                 data["uproperty_flags"]    = DynOff::UPROPERTY_FLAGS;
                 data["uproperty_offset"]   = DynOff::UPROPERTY_OFFSET;
             }
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
-        if (cmd == PipeProtocol::CMD_WATCH) {
+        if (cmd == Renge::CMD_WATCH) {
             std::string addrStr = request.value("addr", "");
             int size = request.value("size", 4);
             int interval = request.value("interval_ms", 500);
-            if (addrStr.empty()) return PipeProtocol::MakeError(id, "Missing addr").dump();
-            if (size <= 0 || size > 65536) return PipeProtocol::MakeError(id, "Invalid size (1-65536)").dump();
+            if (addrStr.empty()) return Renge::MakeError(id, "Missing addr").dump();
+            if (size <= 0 || size > 65536) return Renge::MakeError(id, "Invalid size (1-65536)").dump();
             if (interval < 50) interval = 50; // Minimum 50ms to prevent CPU spin
 
-            uintptr_t addr = PipeProtocol::StrToAddr(addrStr);
+            uintptr_t addr = Renge::StrToAddr(addrStr);
             StartWatch(addr, size, interval);
-            return PipeProtocol::MakeResponse(id).dump();
+            return Renge::MakeResponse(id).dump();
         }
 
-        if (cmd == PipeProtocol::CMD_UNWATCH) {
+        if (cmd == Renge::CMD_UNWATCH) {
             std::string addrStr = request.value("addr", "");
-            if (addrStr.empty()) return PipeProtocol::MakeError(id, "Missing addr").dump();
+            if (addrStr.empty()) return Renge::MakeError(id, "Missing addr").dump();
 
-            uintptr_t addr = PipeProtocol::StrToAddr(addrStr);
+            uintptr_t addr = Renge::StrToAddr(addrStr);
             StopWatch(addr);
-            return PipeProtocol::MakeResponse(id).dump();
+            return Renge::MakeResponse(id).dump();
         }
 
         // === Extra Scan: user-triggered aggressive pointer recovery ===
 
-        if (cmd == PipeProtocol::CMD_RESCAN) {
+        if (cmd == Renge::CMD_RESCAN) {
             if (m_rescan.running.load()) {
-                return PipeProtocol::MakeError(id, "Rescan already in progress").dump();
+                return Renge::MakeError(id, "Rescan already in progress").dump();
             }
 
             extern uintptr_t g_cachedGObjects;
@@ -1389,7 +1390,7 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                 data["scanning_gobjects"] = false;
                 data["scanning_gworld"]   = false;
                 data["message"] = "All scannable pointers already found";
-                return PipeProtocol::MakeResponse(id, data).dump();
+                return Renge::MakeResponse(id, data).dump();
             }
 
             // Reset state
@@ -1405,15 +1406,15 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             m_rescan.running.store(true);
 
             if (m_rescan.scanThread.joinable()) m_rescan.scanThread.join();
-            m_rescan.scanThread = std::thread(&PipeServer::RunRescan, this, needGObj, needGWld);
+            m_rescan.scanThread = std::thread(&Fern::RunRescan, this, needGObj, needGWld);
 
             json data;
             data["scanning_gobjects"] = needGObj;
             data["scanning_gworld"]   = needGWld;
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
-        if (cmd == PipeProtocol::CMD_RESCAN_STATUS) {
+        if (cmd == Renge::CMD_RESCAN_STATUS) {
             json data;
             data["running"] = m_rescan.running.load();
             data["phase"]   = m_rescan.phase.load();
@@ -1425,17 +1426,17 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             if (!m_rescan.running.load() && m_rescan.phase.load() == 3) {
                 data["found_gobjects"]   = (m_rescan.foundGObjects != 0);
                 data["found_gworld"]     = (m_rescan.foundGWorld != 0);
-                data["gobjects_addr"]    = PipeProtocol::AddrToStr(m_rescan.foundGObjects);
-                data["gworld_addr"]      = PipeProtocol::AddrToStr(m_rescan.foundGWorld);
+                data["gobjects_addr"]    = Renge::AddrToStr(m_rescan.foundGObjects);
+                data["gworld_addr"]      = Renge::AddrToStr(m_rescan.foundGWorld);
                 data["gobjects_method"]  = m_rescan.gobjectsMethod;
                 data["gworld_method"]    = m_rescan.gworldMethod;
             }
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
-        if (cmd == PipeProtocol::CMD_APPLY_RESCAN) {
+        if (cmd == Renge::CMD_APPLY_RESCAN) {
             if (m_rescan.running.load()) {
-                return PipeProtocol::MakeError(id, "Rescan still running").dump();
+                return Renge::MakeError(id, "Rescan still running").dump();
             }
 
             extern uintptr_t   g_cachedGObjects;
@@ -1450,8 +1451,8 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             if (m_rescan.foundGObjects && g_cachedGObjects == 0) {
                 g_cachedGObjects = m_rescan.foundGObjects;
                 g_cachedGObjectsMethod = m_rescan.gobjectsMethod;
-                ObjectArray::Init(g_cachedGObjects);
-                Logger::Info("PIPE:cmd", "apply_rescan: Applied GObjects=0x%llX (%s)",
+                Aura::Init(g_cachedGObjects);
+                Sein::Info("PIPE:cmd", "apply_rescan: Applied GObjects=0x%llX (%s)",
                          (unsigned long long)g_cachedGObjects, g_cachedGObjectsMethod);
                 applied = true;
             }
@@ -1459,25 +1460,25 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             if (m_rescan.foundGWorld && g_cachedGWorld == 0) {
                 g_cachedGWorld = m_rescan.foundGWorld;
                 g_cachedGWorldMethod = m_rescan.gworldMethod;
-                Logger::Info("PIPE:cmd", "apply_rescan: Applied GWorld=0x%llX (%s)",
+                Sein::Info("PIPE:cmd", "apply_rescan: Applied GWorld=0x%llX (%s)",
                          (unsigned long long)g_cachedGWorld, g_cachedGWorldMethod);
                 applied = true;
             }
 
             // If we now have both GObjects+GNames, run full offset detection
             if (g_cachedGObjects && g_cachedGNames) {
-                if (!OffsetFinder::ValidateAndFixOffsets(g_cachedUEVersion)) {
-                    Logger::Warn("PIPE:cmd", "apply_rescan: ValidateAndFixOffsets returned false");
+                if (!Genau::ValidateAndFixOffsets(g_cachedUEVersion)) {
+                    Sein::Warn("PIPE:cmd", "apply_rescan: ValidateAndFixOffsets returned false");
                 }
             }
 
             json data;
             data["applied"]      = applied;
-            data["gobjects"]     = PipeProtocol::AddrToStr(g_cachedGObjects);
-            data["gnames"]       = PipeProtocol::AddrToStr(g_cachedGNames);
-            data["gworld"]       = PipeProtocol::AddrToStr(g_cachedGWorld);
-            data["object_count"] = ObjectArray::GetCount();
-            return PipeProtocol::MakeResponse(id, data).dump();
+            data["gobjects"]     = Renge::AddrToStr(g_cachedGObjects);
+            data["gnames"]       = Renge::AddrToStr(g_cachedGNames);
+            data["gworld"]       = Renge::AddrToStr(g_cachedGWorld);
+            data["object_count"] = Aura::GetCount();
+            return Renge::MakeResponse(id, data).dump();
         }
 
         // ── trigger_scan: UI-initiated deferred scan (proxy DLL mode) ────────
@@ -1485,12 +1486,12 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
         // this command when the user is ready (game loaded, world active).
         // Async: starts a background thread, returns immediately.
         // Also safe to call in CE/manual inject mode — UE5_Init is idempotent.
-        if (cmd == PipeProtocol::CMD_TRIGGER_SCAN) {
+        if (cmd == Renge::CMD_TRIGGER_SCAN) {
             if (m_scan.running.load()) {
-                return PipeProtocol::MakeError(id, "Scan already in progress").dump();
+                return Renge::MakeError(id, "Scan already in progress").dump();
             }
 
-            Logger::Info("PIPE:cmd", "trigger_scan: Starting async engine scan...");
+            Sein::Info("PIPE:cmd", "trigger_scan: Starting async engine scan...");
 
             // Reset state and launch background thread
             m_scan.completed = false;
@@ -1502,15 +1503,15 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             m_scan.running.store(true);
 
             if (m_scan.scanThread.joinable()) m_scan.scanThread.join();
-            m_scan.scanThread = std::thread(&PipeServer::RunScan, this);
+            m_scan.scanThread = std::thread(&Fern::RunScan, this);
 
             json data;
             data["started"] = true;
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
         // ── scan_status: Poll scan progress (pairs with trigger_scan) ────────
-        if (cmd == PipeProtocol::CMD_SCAN_STATUS) {
+        if (cmd == Renge::CMD_SCAN_STATUS) {
             extern uintptr_t   g_cachedGObjects;
             extern uintptr_t   g_cachedGNames;
             extern uintptr_t   g_cachedGWorld;
@@ -1545,12 +1546,12 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             // When complete, include full pointer data (same as get_pointers)
             if (!m_scan.running.load() && m_scan.completed) {
                 data["scanned"]          = true;
-                data["gobjects"]         = PipeProtocol::AddrToStr(g_cachedGObjects);
-                data["gnames"]           = PipeProtocol::AddrToStr(g_cachedGNames);
-                data["gworld"]           = PipeProtocol::AddrToStr(g_cachedGWorld);
+                data["gobjects"]         = Renge::AddrToStr(g_cachedGObjects);
+                data["gnames"]           = Renge::AddrToStr(g_cachedGNames);
+                data["gworld"]           = Renge::AddrToStr(g_cachedGWorld);
                 data["ue_version"]       = g_cachedUEVersion;
                 data["version_detected"] = g_cachedVersionDetected;
-                data["object_count"]     = ObjectArray::GetCount();
+                data["object_count"]     = Aura::GetCount();
                 data["gobjects_method"]  = g_cachedGObjectsMethod;
                 data["gnames_method"]    = g_cachedGNamesMethod;
                 data["gworld_method"]    = g_cachedGWorldMethod;
@@ -1566,15 +1567,15 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                 scanStats["gworld_tried"]   = g_cachedGWorldTried;
                 scanStats["gworld_hit"]     = g_cachedGWorldHit;
                 data["scan_stats"]          = scanStats;
-                data["gobjects_scan_addr"]  = PipeProtocol::AddrToStr(g_cachedGObjectsScanAddr);
-                data["gnames_scan_addr"]    = PipeProtocol::AddrToStr(g_cachedGNamesScanAddr);
-                data["gworld_scan_addr"]    = PipeProtocol::AddrToStr(g_cachedGWorldScanAddr);
+                data["gobjects_scan_addr"]  = Renge::AddrToStr(g_cachedGObjectsScanAddr);
+                data["gnames_scan_addr"]    = Renge::AddrToStr(g_cachedGNamesScanAddr);
+                data["gworld_scan_addr"]    = Renge::AddrToStr(g_cachedGWorldScanAddr);
                 data["gworld_aob"]          = g_cachedGWorldAob ? g_cachedGWorldAob : "";
                 data["gworld_aob_pos"]      = g_cachedGWorldAobPos;
                 data["gworld_aob_len"]      = g_cachedGWorldAobLen;
 
-                uintptr_t moduleBase = Mem::GetModuleBase(nullptr);
-                data["module_base"] = PipeProtocol::AddrToStr(moduleBase);
+                uintptr_t moduleBase = Macht::GetModuleBase(nullptr);
+                data["module_base"] = Renge::AddrToStr(moduleBase);
                 {
                     wchar_t moduleNameW[MAX_PATH] = {};
                     GetModuleFileNameW(reinterpret_cast<HMODULE>(moduleBase), moduleNameW, MAX_PATH);
@@ -1590,27 +1591,27 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                 }
             }
 
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
         // === walk_datatable_rows: Browse DataTable RowMap entries ===
-        if (cmd == PipeProtocol::CMD_WALK_DATATABLE_ROWS) {
+        if (cmd == Renge::CMD_WALK_DATATABLE_ROWS) {
             std::string addrStr = request.value("addr", "");
-            if (addrStr.empty()) return PipeProtocol::MakeError(id, "Missing addr").dump();
+            if (addrStr.empty()) return Renge::MakeError(id, "Missing addr").dump();
 
-            uintptr_t addr = PipeProtocol::StrToAddr(addrStr);
+            uintptr_t addr = Renge::StrToAddr(addrStr);
             int32_t offset = request.value("offset", 0);
             int32_t limit  = request.value("limit", 64);
 
-            auto result = UStructWalker::WalkDataTableRows(addr, offset, limit);
+            auto result = Ubel::WalkDataTableRows(addr, offset, limit);
 
             if (!result.ok)
-                return PipeProtocol::MakeError(id, result.error).dump();
+                return Renge::MakeError(id, result.error).dump();
 
             json data;
             data["row_count"]       = result.rowCount;
             data["row_map_offset"]  = result.rowMapOffset;
-            data["row_struct_addr"] = PipeProtocol::AddrToStr(result.rowStructAddr);
+            data["row_struct_addr"] = Renge::AddrToStr(result.rowStructAddr);
             data["row_struct_name"] = result.rowStructName;
             data["fname_size"]      = result.fnameSize;
             data["stride"]          = result.stride;
@@ -1620,7 +1621,7 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                 json rj;
                 rj["sparse_index"] = row.sparseIndex;
                 rj["row_name"]     = row.rowName;
-                rj["data_addr"]    = PipeProtocol::AddrToStr(row.rowDataAddr);
+                rj["data_addr"]    = Renge::AddrToStr(row.rowDataAddr);
 
                 json rowFields = json::array();
                 for (const auto& fv : row.fields) {
@@ -1630,11 +1631,11 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                 rows.push_back(rj);
             }
             data["rows"] = rows;
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
         // ── invoke_function: Call ProcessEvent via pipe (bypasses CE executeCodeEx) ──
-        if (cmd == PipeProtocol::CMD_INVOKE_FUNCTION) {
+        if (cmd == Renge::CMD_INVOKE_FUNCTION) {
             std::string className   = request.value("class_name", "");
             std::string funcName    = request.value("func_name", "");
             std::string instAddrStr = request.value("instance_addr", "");
@@ -1642,38 +1643,38 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             int parmsSize           = request.value("parms_size", 0);
 
             if (funcName.empty()) {
-                return PipeProtocol::MakeError(id, "func_name is required").dump();
+                return Renge::MakeError(id, "func_name is required").dump();
             }
 
             // Resolve instance address
             uintptr_t instanceAddr = 0;
             if (!instAddrStr.empty()) {
-                instanceAddr = PipeProtocol::StrToAddr(instAddrStr);
+                instanceAddr = Renge::StrToAddr(instAddrStr);
                 if (instanceAddr == 0) {
-                    return PipeProtocol::MakeError(id, "Invalid instance_addr").dump();
+                    return Renge::MakeError(id, "Invalid instance_addr").dump();
                 }
             } else if (!className.empty()) {
                 instanceAddr = UE5_FindInstanceOfClass(className.c_str());
                 if (instanceAddr == 0) {
-                    return PipeProtocol::MakeError(id,
+                    return Renge::MakeError(id,
                         "No instance found for class: " + className).dump();
                 }
             } else {
-                return PipeProtocol::MakeError(id,
+                return Renge::MakeError(id,
                     "Either instance_addr or class_name is required").dump();
             }
 
             // Get class address from instance
             uintptr_t classAddr = UE5_GetObjectClass(instanceAddr);
             if (classAddr == 0) {
-                return PipeProtocol::MakeError(id,
-                    "Failed to read class from instance " + PipeProtocol::AddrToStr(instanceAddr)).dump();
+                return Renge::MakeError(id,
+                    "Failed to read class from instance " + Renge::AddrToStr(instanceAddr)).dump();
             }
 
             // Resolve UFunction
             uintptr_t ufuncAddr = UE5_FindFunctionByName(classAddr, funcName.c_str());
             if (ufuncAddr == 0) {
-                return PipeProtocol::MakeError(id,
+                return Renge::MakeError(id,
                     "Function not found: " + funcName).dump();
             }
 
@@ -1682,7 +1683,7 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             std::vector<uint8_t> paramBuf(bufSize, 0);
 
             if (!paramsHex.empty()) {
-                auto hexBytes = PipeProtocol::HexToBytes(paramsHex);
+                auto hexBytes = Renge::HexToBytes(paramsHex);
                 size_t copyLen = (std::min)(hexBytes.size(), paramBuf.size());
                 if (copyLen > 0) {
                     memcpy(paramBuf.data(), hexBytes.data(), copyLen);
@@ -1693,10 +1694,10 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                 ? reinterpret_cast<uintptr_t>(paramBuf.data())
                 : 0;
 
-            Logger::Info("PIPE:cmd", "invoke_function: %s::%s inst=%s func=%s parms=%d",
+            Sein::Info("PIPE:cmd", "invoke_function: %s::%s inst=%s func=%s parms=%d",
                          className.c_str(), funcName.c_str(),
-                         PipeProtocol::AddrToStr(instanceAddr).c_str(),
-                         PipeProtocol::AddrToStr(ufuncAddr).c_str(),
+                         Renge::AddrToStr(instanceAddr).c_str(),
+                         Renge::AddrToStr(ufuncAddr).c_str(),
                          (int)bufSize);
 
             // Call ProcessEvent
@@ -1705,13 +1706,13 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
             // Build response
             json data;
             data["result"]        = callResult;
-            data["instance_addr"] = PipeProtocol::AddrToStr(instanceAddr);
-            data["func_addr"]     = PipeProtocol::AddrToStr(ufuncAddr);
+            data["instance_addr"] = Renge::AddrToStr(instanceAddr);
+            data["func_addr"]     = Renge::AddrToStr(ufuncAddr);
             data["parms_size"]    = (int)bufSize;
 
             // Return post-call buffer (may contain out-param values)
             if (bufSize > 0) {
-                data["result_hex"] = PipeProtocol::BytesToHex(paramBuf.data(), bufSize);
+                data["result_hex"] = Renge::BytesToHex(paramBuf.data(), bufSize);
             }
 
             if (callResult == 0) {
@@ -1727,33 +1728,33 @@ std::string PipeServer::DispatchCommand(const std::string& jsonLine) {
                 data["error"] = errMsg;
             }
 
-            return PipeProtocol::MakeResponse(id, data).dump();
+            return Renge::MakeResponse(id, data).dump();
         }
 
-        return PipeProtocol::MakeError(id, "Unknown command: " + cmd).dump();
+        return Renge::MakeError(id, "Unknown command: " + cmd).dump();
 
     } catch (const std::exception& e) {
-        Logger::Error("PIPE:cmd", "PipeServer: Exception in command '%s': %s", cmd.c_str(), e.what());
-        return PipeProtocol::MakeError(id, std::string("Internal error: ") + e.what()).dump();
+        Sein::Error("PIPE:cmd", "PipeServer: Exception in command '%s': %s", cmd.c_str(), e.what());
+        return Renge::MakeError(id, std::string("Internal error: ") + e.what()).dump();
     }
 }
 
 // ============================================================
 // RunScan — Background thread for initial scan (trigger_scan)
 // ============================================================
-void PipeServer::RunScan() {
-    Logger::Info("PIPE:scan", "RunScan: started");
+void Fern::RunScan() {
+    Sein::Info("PIPE:scan", "RunScan: started");
     UE5_Init();  // Updates ScanProgress phases 1-7
     m_scan.completed = true;
     m_scan.running.store(false);
-    Logger::Info("PIPE:scan", "RunScan: finished");
+    Sein::Info("PIPE:scan", "RunScan: finished");
 }
 
 // ============================================================
 // RunRescan — Background thread for aggressive pointer recovery
 // ============================================================
-void PipeServer::RunRescan(bool scanGObjects, bool scanGWorld) {
-    Logger::Info("PIPE:rescan", "RunRescan: started (GObjects=%d, GWorld=%d)",
+void Fern::RunRescan(bool scanGObjects, bool scanGWorld) {
+    Sein::Info("PIPE:rescan", "RunRescan: started (GObjects=%d, GWorld=%d)",
                  scanGObjects, scanGWorld);
 
     if (scanGObjects) {
@@ -1763,14 +1764,14 @@ void PipeServer::RunRescan(bool scanGObjects, bool scanGWorld) {
             m_rescan.statusText = "Scanning GObjects (.data heuristic)...";
         }
 
-        uintptr_t result = OffsetFinder::ExtraScanGObjects();
+        uintptr_t result = Genau::ExtraScanGObjects();
         if (result) {
             m_rescan.foundGObjects = result;
             m_rescan.gobjectsMethod = "data_heuristic";
-            Logger::Info("PIPE:rescan", "RunRescan: GObjects found at 0x%llX",
+            Sein::Info("PIPE:rescan", "RunRescan: GObjects found at 0x%llX",
                          static_cast<unsigned long long>(result));
         } else {
-            Logger::Info("PIPE:rescan", "RunRescan: GObjects not found");
+            Sein::Info("PIPE:rescan", "RunRescan: GObjects not found");
         }
     }
 
@@ -1781,14 +1782,14 @@ void PipeServer::RunRescan(bool scanGObjects, bool scanGWorld) {
             m_rescan.statusText = "Scanning GWorld (instance scan)...";
         }
 
-        uintptr_t result = OffsetFinder::ExtraScanGWorld();
+        uintptr_t result = Genau::ExtraScanGWorld();
         if (result) {
             m_rescan.foundGWorld = result;
             m_rescan.gworldMethod = "instance_scan";
-            Logger::Info("PIPE:rescan", "RunRescan: GWorld found at 0x%llX",
+            Sein::Info("PIPE:rescan", "RunRescan: GWorld found at 0x%llX",
                          static_cast<unsigned long long>(result));
         } else {
-            Logger::Info("PIPE:rescan", "RunRescan: GWorld not found");
+            Sein::Info("PIPE:rescan", "RunRescan: GWorld not found");
         }
     }
 
@@ -1799,12 +1800,12 @@ void PipeServer::RunRescan(bool scanGObjects, bool scanGWorld) {
     }
     m_rescan.running.store(false);
 
-    Logger::Info("PIPE:rescan", "RunRescan: finished (foundGObj=0x%llX, foundGWld=0x%llX)",
+    Sein::Info("PIPE:rescan", "RunRescan: finished (foundGObj=0x%llX, foundGWld=0x%llX)",
                  static_cast<unsigned long long>(m_rescan.foundGObjects),
                  static_cast<unsigned long long>(m_rescan.foundGWorld));
 }
 
-void PipeServer::StartWatch(uintptr_t addr, uint32_t size, uint32_t interval_ms) {
+void Fern::StartWatch(uintptr_t addr, uint32_t size, uint32_t interval_ms) {
     StopWatch(addr); // Stop existing watch on same address
 
     std::lock_guard<std::mutex> lock(m_watchMutex);
@@ -1819,25 +1820,25 @@ void PipeServer::StartWatch(uintptr_t addr, uint32_t size, uint32_t interval_ms)
     entry->watchThread = std::thread([this, ptr]() {
         std::vector<uint8_t> buf(ptr->size);
         while (ptr->active.load() && m_running.load()) {
-            if (Mem::ReadBytesSafe(ptr->addr, buf.data(), ptr->size)) {
+            if (Macht::ReadBytesSafe(ptr->addr, buf.data(), ptr->size)) {
                 json data;
-                data["addr"]      = PipeProtocol::AddrToStr(ptr->addr);
-                data["bytes"]     = PipeProtocol::BytesToHex(buf.data(), buf.size());
+                data["addr"]      = Renge::AddrToStr(ptr->addr);
+                data["bytes"]     = Renge::BytesToHex(buf.data(), buf.size());
                 data["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::system_clock::now().time_since_epoch()).count();
 
-                PushEvent(PipeProtocol::MakeEvent(PipeProtocol::EVT_WATCH, data).dump());
+                PushEvent(Renge::MakeEvent(Renge::EVT_WATCH, data).dump());
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(ptr->interval_ms));
         }
     });
 
     m_watches[addr] = std::move(entry);
-    Logger::Info("PIPE:watch", "PipeServer: Watch started on 0x%llX (size=%u, interval=%ums)",
+    Sein::Info("PIPE:watch", "PipeServer: Watch started on 0x%llX (size=%u, interval=%ums)",
              static_cast<unsigned long long>(addr), size, interval_ms);
 }
 
-void PipeServer::StopWatch(uintptr_t addr) {
+void Fern::StopWatch(uintptr_t addr) {
     std::lock_guard<std::mutex> lock(m_watchMutex);
     auto it = m_watches.find(addr);
     if (it != m_watches.end()) {
@@ -1846,11 +1847,11 @@ void PipeServer::StopWatch(uintptr_t addr) {
             it->second->watchThread.join();
         }
         m_watches.erase(it);
-        Logger::Info("PIPE:watch", "PipeServer: Watch stopped on 0x%llX", static_cast<unsigned long long>(addr));
+        Sein::Info("PIPE:watch", "PipeServer: Watch stopped on 0x%llX", static_cast<unsigned long long>(addr));
     }
 }
 
-void PipeServer::StopAllWatches() {
+void Fern::StopAllWatches() {
     std::lock_guard<std::mutex> lock(m_watchMutex);
     for (auto& [addr, entry] : m_watches) {
         entry->active = false;

@@ -1,10 +1,11 @@
 // ============================================================
-// Memory.cpp — AOBScan, module base, RIP-relative resolution
+// Macht — 黃金鄉的馬哈特 (七大魔王 — Seven Sages, Transmutation)
+// Memory: AOB scanning, SEH-protected reads, RIP-relative resolution
 // ============================================================
 
-#include "Memory.h"
+#include "Macht.h"
 #define LOG_CAT "MEM"
-#include "Logger.h"
+#include "Sein.h"
 
 #include <Psapi.h>
 #include <vector>
@@ -12,7 +13,7 @@
 #include <cstring>
 #include <immintrin.h>  // AVX2 intrinsics for SIMD pattern scanning
 
-namespace Mem {
+namespace Macht {
 
 // ============================================================
 // Basic read / write helpers
@@ -731,4 +732,4 @@ std::vector<BatchScanResult> AOBScanBatch(
     return results;
 }
 
-} // namespace Mem
+} // namespace Macht

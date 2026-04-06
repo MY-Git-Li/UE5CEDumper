@@ -1,14 +1,15 @@
 #pragma once
 
 // ============================================================
-// Memory.h — Basic memory read/write utilities (DLL is injected)
+// Macht — 黃金鄉的馬哈特 (七大魔王 — Seven Sages, Transmutation)
+// Memory: AOB scanning, SEH-protected reads, RIP-relative resolution
 // ============================================================
 
 #include <Windows.h>
 #include <cstdint>
 #include <vector>
 
-namespace Mem {
+namespace Macht {
 
 // Direct memory read (DLL is in-process)
 template<typename T>
@@ -218,4 +219,4 @@ inline int32_t ComputeMapValueOffset(int32_t keySize, int32_t valueSize) {
     return (keySize + valAlign - 1) & ~(valAlign - 1);
 }
 
-} // namespace Mem
+} // namespace Macht

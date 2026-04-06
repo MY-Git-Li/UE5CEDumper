@@ -1,11 +1,12 @@
 // ============================================================
-// dllmain.cpp — DLL entry point
+// Heiter — 海塔 (僧侶・旅途起點 — Priest Who Started the Journey)
+// dllmain: DLL entry point and auto-start logic
 // ============================================================
 
 #include <Windows.h>
 #include <atomic>
 #define LOG_CAT "INIT"
-#include "Logger.h"
+#include "Sein.h"
 #include "BuildInfo.h"
 
 // Global DLL module handle — used by CEPlugin.cpp to resolve the DLL's
@@ -23,7 +24,7 @@ extern "C" bool UE5_StartPipeServer();
 extern "C" void UE5_Shutdown();
 
 // Mailbox — shared memory interface for CE Lua
-#include "Mailbox.h"
+#include "Mimic.h"
 
 #ifdef UE5_PROXY_BUILD
 // Cleanup for proxy DLL — defined in ProxyVersion.cpp
@@ -115,7 +116,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID /*reserved*/) {
     case DLL_PROCESS_ATTACH: {
         g_hDllModule = hModule;
         DisableThreadLibraryCalls(hModule);
-        Logger::Init();
+        Sein::Init();
         {
             // Log which process loaded this DLL — distinguishes CE plugin
             // host (ce.exe) from game process injection in the log file.
@@ -135,11 +136,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID /*reserved*/) {
                      BUILD_VERSION_STRING, procNameA, GetCurrentProcessId());
 
             // Initialize per-process mirror log subfolder
-            Logger::InitProcessMirror(fileName);
+            Sein::InitProcessMirror(fileName);
         }
         // Start mailbox polling thread (CE Lua shared memory interface).
         // Runs in both proxy and inject modes — handles auto-init on first command.
-        Mailbox::StartThread();
+        Mimic::StartThread();
 
         // Spawn auto-start thread. It will self-terminate if g_isCEPlugin
         // is set true by CEPlugin_InitializePlugin within 1 second.
@@ -166,7 +167,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID /*reserved*/) {
 #ifdef UE5_PROXY_BUILD
         ProxyVersion_Cleanup();
 #endif
-        Logger::Shutdown();
+        Sein::Shutdown();
         break;
 
     default:

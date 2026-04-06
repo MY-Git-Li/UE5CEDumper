@@ -1,5 +1,6 @@
 // ============================================================
-// Mailbox.cpp — Shared memory mailbox for CE Lua
+// Mimic — 寶箱怪 (經典梗 — The Classic Gag)
+// Mailbox: CE Lua shared-memory command interface
 //
 // Polling thread checks the mailbox every ~10ms.
 // Uses existing public APIs (UE5_Init, UE5_CallProcessEvent, etc.)
@@ -12,11 +13,11 @@
 // ============================================================
 
 #define LOG_CAT "PIPE"
-#include "Logger.h"
-#include "Mailbox.h"
-#include "ExportAPI.h"
-#include "ObjectArray.h"
-#include "UStructWalker.h"
+#include "Sein.h"
+#include "Mimic.h"
+#include "Frieren.h"
+#include "Aura.h"
+#include "Ubel.h"
 
 #include <Windows.h>
 
@@ -32,9 +33,9 @@ extern uintptr_t    g_cachedGObjects;
 extern uintptr_t    g_cachedGNames;
 
 // The exported mailbox — zero-initialized by default
-extern "C" __declspec(dllexport) Mailbox::MailboxData g_invokeMailbox = {};
+extern "C" __declspec(dllexport) Mimic::MailboxData g_invokeMailbox = {};
 
-namespace Mailbox {
+namespace Mimic {
 
 // Polling thread state
 static std::atomic<bool> s_running{false};
@@ -168,7 +169,7 @@ static void HandleFindInstance() {
     LOG_INFO("Mailbox: FIND_INSTANCE class='%s'", className);
 
     // Reuse existing logic from UE5_FindInstanceOfClass
-    auto rset = ObjectArray::FindInstancesByClass(className, false, 100);
+    auto rset = Aura::FindInstancesByClass(className, false, 100);
 
     // Prefer non-CDO instance
     uintptr_t found = 0;
@@ -219,14 +220,14 @@ static void HandleFindFunction() {
              (unsigned long long)instanceAddr, funcName);
 
     // Get UClass from instance
-    uintptr_t classAddr = UStructWalker::GetClass(instanceAddr);
+    uintptr_t classAddr = Ubel::GetClass(instanceAddr);
     if (!classAddr) {
         SetError(-2, "Cannot read UClass from instance");
         return;
     }
 
     // Walk functions
-    auto funcs = UStructWalker::WalkFunctions(classAddr);
+    auto funcs = Ubel::WalkFunctions(classAddr);
 
     // Exact match
     uintptr_t ufuncAddr = 0;
@@ -357,7 +358,7 @@ static void HandleListFunctions() {
 
         LOG_INFO("Mailbox: LIST_FUNCTIONS finding instance of '%s'...", className);
 
-        auto rset = ObjectArray::FindInstancesByClass(className, false, 100);
+        auto rset = Aura::FindInstancesByClass(className, false, 100);
         for (const auto& r : rset.results) {
             if (r.addr && r.name.find("Default__") == std::string::npos) {
                 instanceAddr = r.addr;
@@ -381,14 +382,14 @@ static void HandleListFunctions() {
     memcpy(&pageIndex, g_invokeMailbox.paramsData, sizeof(uint32_t));
 
     // Get UClass
-    uintptr_t classAddr = UStructWalker::GetClass(instanceAddr);
+    uintptr_t classAddr = Ubel::GetClass(instanceAddr);
     if (!classAddr) {
         SetError(-2, "Cannot read UClass from instance");
         return;
     }
 
     // Walk all functions
-    auto funcs = UStructWalker::WalkFunctions(classAddr);
+    auto funcs = Ubel::WalkFunctions(classAddr);
 
     LOG_INFO("Mailbox: LIST_FUNCTIONS inst=0x%llX class=0x%llX total=%d page=%u",
              (unsigned long long)instanceAddr, (unsigned long long)classAddr,
@@ -471,4 +472,4 @@ static void SetDone(int32_t resultCode) {
     g_invokeMailbox.cmd = CMD_IDLE;
 }
 
-} // namespace Mailbox
+} // namespace Mimic

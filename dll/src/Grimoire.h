@@ -1,14 +1,13 @@
 #pragma once
 
 // ============================================================
-// Constants.h — Centralized magic strings and numbers for DLL
-//
-// NOTE: AOB patterns and symbol exports have moved to Signatures.h
+// Grimoire — 魔導書 (Book of Spells)
+// Constants, magic strings, DynOff namespace
 // ============================================================
 
 #include <atomic>
 
-namespace Constants {
+namespace Grimoire {
 
 // --- Logging ---
 constexpr const wchar_t* LOG_FOLDER_NAME  = L"UE5CEDumper";
@@ -53,7 +52,7 @@ constexpr int OFF_UOBJECT_NAME         = 0x18;
 //   UE4.27-CPN:  FName=0x10 bytes, shifts FField::Flags+0x8, FFieldClass offsets+0x8,
 //                 and UObject::Outer from 0x20 to 0x28
 
-} // namespace Constants
+} // namespace Grimoire
 
 namespace DynOff {
 
@@ -154,7 +153,7 @@ inline bool IsFFieldVariantUObject(uintptr_t ptr) {
 
 } // namespace DynOff
 
-namespace Constants {
+namespace Grimoire {
 
 // --- Object Array ---
 constexpr int OBJECTS_PER_CHUNK        = 64 * 1024;
@@ -163,4 +162,4 @@ constexpr int OBJECTS_PER_CHUNK        = 64 * 1024;
 constexpr int FNAME_CHUNK_SIZE         = 0x20000;  // 128 KB per chunk
 constexpr int FNAME_STRIDE             = 2;         // Alignment stride
 
-} // namespace Constants
+} // namespace Grimoire

@@ -1,7 +1,8 @@
 #pragma once
 
 // ============================================================
-// UStructWalker.h — UStruct / FField chain traversal
+// Ubel — 尤蓓爾 (外科式暗殺者 — Surgical Assassin)
+// UStructWalker: FField chain traversal and property reading
 // ============================================================
 
 #include <cstdint>
@@ -74,7 +75,7 @@ struct FunctionInfo {
     std::string returnType;  // empty if void
 };
 
-namespace UStructWalker {
+namespace Ubel {
 
 // Walk a UClass/UStruct and enumerate all fields (including inherited)
 ClassInfo WalkClass(uintptr_t uclassAddr);
@@ -339,21 +340,21 @@ ReadArrayResult ReadStructArrayElements(
     uintptr_t innerStructAddr, int32_t elemSize,
     int32_t offset = 0, int32_t limit = 64);
 
-} // namespace UStructWalker
+} // namespace Ubel
 
 // --- Property Search Preview Resolution ---
 // (Outside UStructWalker namespace because PropertyMatch is in ObjectArray namespace)
 
-namespace ObjectArray { struct PropertyMatch; }
+namespace Aura { struct PropertyMatch; }
 
-namespace UStructWalker {
+namespace Ubel {
 
 // Resolve inline value previews for property search results.
 // For each PropertyMatch, reads the property value from a representative
 // instance of its class and stores the preview string in match.preview.
 // instanceMap: classAddr -> instanceAddr (one representative instance per class)
 void ResolvePropertyPreviews(
-    std::vector<ObjectArray::PropertyMatch>& matches,
+    std::vector<Aura::PropertyMatch>& matches,
     const std::unordered_map<uintptr_t, uintptr_t>& instanceMap);
 
-} // namespace UStructWalker
+} // namespace Ubel

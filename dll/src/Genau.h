@@ -1,13 +1,14 @@
 #pragma once
 
 // ============================================================
-// OffsetFinder.h — GObjects / GNames / GWorld pattern scan
+// Genau — 葛納烏 (一級魔法使篩選考官 — First-Class Mage Examiner)
+// OffsetFinder: AOB pattern scanning for GObjects, GNames, GWorld
 // ============================================================
 
 #include <cstdint>
 #include <functional>
 
-namespace OffsetFinder {
+namespace Genau {
 
 // Callback for reporting scan progress (phase 0-7, status text).
 // Phase: 0=idle, 1=version, 2=GObjects, 3=GNames, 4=GWorld, 5=init, 6=dynoff, 7=complete
@@ -77,7 +78,7 @@ uintptr_t FindGWorld(const char* hintPatternId = nullptr);
 uint32_t DetectVersion();
 
 // Dynamically detect and fix FField/FProperty/UStruct offsets.
-// Must be called AFTER GObjects + GNames are initialized (ObjectArray::Init + FNamePool::Init).
+// Must be called AFTER GObjects + GNames are initialized (Aura::Init + Serie::Init).
 // ueVersion: detected UE version (e.g. 505 = UE5.5, 427 = UE4.27). Used to determine
 // UProperty vs FProperty mode. Pass 0 if unknown (will fall back to heuristic detection).
 // Updates DynOff:: namespace variables.
@@ -91,7 +92,7 @@ bool DetectUEnumNames();
 // === Extra Scan: user-triggered aggressive fallback techniques ===
 // These are computationally expensive (seconds, not milliseconds) and are designed
 // to be called from a background thread.  They are READ-ONLY — no global state is
-// modified.  The caller is responsible for applying results (ObjectArray::Init, etc.)
+// modified.  The caller is responsible for applying results (Aura::Init, etc.)
 // on the pipe thread.
 
 // Scan .data section for FUObjectArray by validating structure heuristics.
@@ -102,4 +103,4 @@ uintptr_t ExtraScanGObjects();
 // for a static pointer to that instance.  Requires GObjects + GNames already initialized.
 uintptr_t ExtraScanGWorld();
 
-} // namespace OffsetFinder
+} // namespace Genau

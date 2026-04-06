@@ -1,7 +1,8 @@
 #pragma once
 
 // ============================================================
-// Logger.h — Category-routed file logger
+// Sein — 賽恩 (僧侶・記錄者 — Priest, Chronicler)
+// Logger: 5-category per-process file logging with rotation
 //
 // Each log message is routed to a category-specific file under
 // the per-process folder based on its category tag prefix:
@@ -22,7 +23,7 @@
 // Kept for backward compatibility (SetChannel/GetChannel are no-ops).
 enum class LogChannel { Scan, Pipe };
 
-namespace Logger {
+namespace Sein {
 
 // Initialize the logger: creates log directory, enables early buffering.
 // Actual log files are opened in InitProcessMirror().
@@ -55,7 +56,7 @@ void Debug(const char* cat, const char* fmt, ...);
 // No category tag; format: [timestamp] [SUMMARY] message
 void Summary(const char* fmt, ...);
 
-} // namespace Logger
+} // namespace Sein
 
 // Convenience macros — each source file should #define LOG_CAT before
 // including this header (or before using the macros).
@@ -66,8 +67,8 @@ void Summary(const char* fmt, ...);
 #define LOG_CAT ""
 #endif
 
-#define LOG_INFO(fmt, ...)    Logger::Info(LOG_CAT, fmt, ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...)   Logger::Error(LOG_CAT, fmt, ##__VA_ARGS__)
-#define LOG_WARN(fmt, ...)    Logger::Warn(LOG_CAT, fmt, ##__VA_ARGS__)
-#define LOG_DEBUG(fmt, ...)   Logger::Debug(LOG_CAT, fmt, ##__VA_ARGS__)
-#define LOG_SUMMARY(fmt, ...) Logger::Summary(fmt, ##__VA_ARGS__)
+#define LOG_INFO(fmt, ...)    Sein::Info(LOG_CAT, fmt, ##__VA_ARGS__)
+#define LOG_ERROR(fmt, ...)   Sein::Error(LOG_CAT, fmt, ##__VA_ARGS__)
+#define LOG_WARN(fmt, ...)    Sein::Warn(LOG_CAT, fmt, ##__VA_ARGS__)
+#define LOG_DEBUG(fmt, ...)   Sein::Debug(LOG_CAT, fmt, ##__VA_ARGS__)
+#define LOG_SUMMARY(fmt, ...) Sein::Summary(fmt, ##__VA_ARGS__)

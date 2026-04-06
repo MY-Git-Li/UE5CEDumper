@@ -1,7 +1,8 @@
 #pragma once
 
 // ============================================================
-// ObjectArray.h — FChunkedFixedUObjectArray access
+// Aura — 斷頭台的奧拉 (服從之秤 — Obedience Scale)
+// ObjectArray: FUObjectArray slot enumeration and validation
 // ============================================================
 
 #include <cstdint>
@@ -19,7 +20,7 @@ struct FUObjectItem {
     int32_t   SerialNumber;
 };
 
-namespace ObjectArray {
+namespace Aura {
 
 // === Encrypted GObjects Support (GAP #1) ===
 // Some anti-cheat games encrypt the Objects pointer in FUObjectArray.
@@ -166,4 +167,4 @@ struct ClassListResult {
 // List all UClass objects, optionally filtering out engine packages.
 ClassListResult ListClasses(bool gameOnly, int maxResults = 5000);
 
-} // namespace ObjectArray
+} // namespace Aura

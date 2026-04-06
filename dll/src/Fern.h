@@ -1,7 +1,8 @@
 #pragma once
 
 // ============================================================
-// PipeServer.h — Named Pipe IPC server
+// Fern — 費倫 (芙莉蓮的弟子 — Frieren's Apprentice)
+// PipeServer: Named Pipe JSON IPC server (~30 commands)
 // ============================================================
 
 #include <Windows.h>
@@ -11,9 +12,9 @@
 #include <unordered_map>
 #include <mutex>
 
-class PipeServer {
+class Fern {
 public:
-    ~PipeServer() { Stop(); }
+    ~Fern() { Stop(); }
     bool Start();
     void Stop();
     bool IsClientConnected() const { return m_clientConnected.load(); }
