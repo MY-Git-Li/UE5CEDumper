@@ -1,5 +1,6 @@
 // ============================================================
-// Mailbox.h — Shared memory mailbox for CE Lua UFunction invocation
+// Mimic — 寶箱怪 (經典梗 — The Classic Gag)
+// Mailbox: CE Lua shared-memory command interface
 //
 // CE Lua uses readQword/writeQword (ReadProcessMemory/WriteProcessMemory)
 // to communicate with the DLL without needing CreateRemoteThread.
@@ -16,7 +17,7 @@
 
 #include <cstdint>
 
-namespace Mailbox {
+namespace Mimic {
 
 // Mailbox commands (CE writes to cmd field)
 enum Cmd : int32_t {
@@ -87,8 +88,8 @@ void StopThread();
 /// Returns the address of the mailbox buffer.
 uintptr_t GetAddress();
 
-} // namespace Mailbox
+} // namespace Mimic
 
 // Exported global — CE Lua uses getAddress("g_invokeMailbox") to find it.
 // No function call needed! CE resolves the symbol from the DLL export table.
-extern "C" __declspec(dllexport) extern Mailbox::MailboxData g_invokeMailbox;
+extern "C" __declspec(dllexport) extern Mimic::MailboxData g_invokeMailbox;

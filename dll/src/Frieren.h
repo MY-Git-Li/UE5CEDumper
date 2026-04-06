@@ -1,7 +1,8 @@
 #pragma once
 
 // ============================================================
-// ExportAPI.h — C ABI export functions for CE Lua
+// Frieren — 芙莉蓮 (主角 — Protagonist)
+// ExportAPI: ~30 C ABI exports for CE Lua bridge
 // ============================================================
 
 #include <cstdint>

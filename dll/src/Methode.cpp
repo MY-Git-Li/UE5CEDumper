@@ -1,5 +1,6 @@
 // ============================================================
-// CEPlugin.cpp — CE Plugin interface with Type 5 Main Menu
+// Methode — 梅特黛 (全能分析型 — All-Capable Analyst)
+// CEPlugin: CE Plugin Type 5 interface
 //
 // When loaded by CE from its plugin folder, this adds a
 // "UE5CEDumper: Inject & Connect" item to CE's Plugins menu.
@@ -17,7 +18,7 @@
 #include <cstring>
 #include <atomic>
 #define LOG_CAT "CEP"
-#include "Logger.h"
+#include "Sein.h"
 
 // ── Externals from dllmain.cpp ────────────────────────────────────────────
 extern HMODULE g_hDllModule;           // DLL module handle

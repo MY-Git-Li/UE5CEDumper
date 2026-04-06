@@ -1,15 +1,16 @@
 // ============================================================
-// UStructWalker.cpp — FField chain traversal implementation
+// Ubel — 尤蓓爾 (外科式暗殺者 — Surgical Assassin)
+// UStructWalker: FField chain traversal and property reading
 // ============================================================
 
-#include "UStructWalker.h"
-#include "Memory.h"
+#include "Ubel.h"
+#include "Macht.h"
 #define LOG_CAT "WALK"
-#include "Logger.h"
-#include "Constants.h"
-#include "FNamePool.h"
-#include "ObjectArray.h"
-#include "OffsetFinder.h"
+#include "Sein.h"
+#include "Grimoire.h"
+#include "Serie.h"
+#include "Aura.h"
+#include "Genau.h"
 
 #include <algorithm>
 #include <chrono>
@@ -23,7 +24,7 @@
 // Defined in ExportAPI.cpp — cached UE version for layout branching
 extern uint32_t g_cachedUEVersion;
 
-namespace UStructWalker {
+namespace Ubel {
 
 // File-scope enum cache: keyed by UEnum* → vector of (value, name) pairs.
 // Shared between ResolveEnumValue (lookup) and GetEnumEntries (full list export).
@@ -40,10 +41,10 @@ static std::string ReadFName(uintptr_t fnameAddr) {
     int32_t compIndex = 0;
     int32_t number = 0;
 
-    if (!Mem::ReadSafe(fnameAddr, compIndex)) return "";
-    Mem::ReadSafe(fnameAddr + 4, number);
+    if (!Macht::ReadSafe(fnameAddr, compIndex)) return "";
+    Macht::ReadSafe(fnameAddr + 4, number);
 
-    return FNamePool::GetString(compIndex, number);
+    return Serie::GetString(compIndex, number);
 }
 
 // ============================================================
@@ -57,7 +58,7 @@ static std::string ResolveEnumValue(uintptr_t enumAddr, int64_t value) {
     // Lazy init: trigger DetectUEnumNames on first call.
     // bUEnumNamesFailed prevents retry storm (was causing 25-45 second delays).
     if (!DynOff::bUEnumNamesDetected.load(std::memory_order_acquire))
-        OffsetFinder::DetectUEnumNames();
+        Genau::DetectUEnumNames();
     if (DynOff::bUEnumNamesFailed.load(std::memory_order_acquire))
         return "";  // Detection failed — show raw int values instead
 
@@ -66,8 +67,8 @@ static std::string ResolveEnumValue(uintptr_t enumAddr, int64_t value) {
         // Read UEnum::Names TArray<TPair<FName, int64>>
         uintptr_t data = 0;
         int32_t count = 0;
-        Mem::ReadSafe(enumAddr + DynOff::UENUM_NAMES, data);
-        Mem::ReadSafe(enumAddr + DynOff::UENUM_NAMES + 8, count);
+        Macht::ReadSafe(enumAddr + DynOff::UENUM_NAMES, data);
+        Macht::ReadSafe(enumAddr + DynOff::UENUM_NAMES + 8, count);
 
         std::vector<std::pair<int64_t, std::string>> entries;
         if (data && count > 0 && count < 16384) {
@@ -76,9 +77,9 @@ static std::string ResolveEnumValue(uintptr_t enumAddr, int64_t value) {
                 uintptr_t entryAddr = data + static_cast<uintptr_t>(i) * DynOff::UENUM_ENTRY_SIZE;
                 int32_t nameIdx = 0;
                 int64_t val = 0;
-                Mem::ReadSafe(entryAddr, nameIdx);
-                Mem::ReadSafe(entryAddr + 8, val);
-                std::string name = FNamePool::GetString(nameIdx);
+                Macht::ReadSafe(entryAddr, nameIdx);
+                Macht::ReadSafe(entryAddr + 8, val);
+                std::string name = Serie::GetString(nameIdx);
                 entries.push_back({val, std::move(name)});
             }
             LOG_DEBUG("ResolveEnumValue: Cached UEnum 0x%llX with %d entries",
@@ -124,14 +125,14 @@ static std::string ReadFString(uintptr_t instanceAddr, int32_t offset) {
     // FString = TArray<wchar_t> = { wchar_t* Data (8B), int32 Count (4B), int32 Max (4B) }
     uintptr_t data = 0;
     int32_t count = 0;
-    Mem::ReadSafe(instanceAddr + offset, data);
-    Mem::ReadSafe(instanceAddr + offset + 8, count);
+    Macht::ReadSafe(instanceAddr + offset, data);
+    Macht::ReadSafe(instanceAddr + offset + 8, count);
 
     if (!data || count <= 0 || count > 256) return "";
 
     // Read wchar_t buffer (count includes null terminator in most UE builds)
     std::vector<wchar_t> wbuf(count, 0);
-    if (!Mem::ReadBytesSafe(data, wbuf.data(), count * sizeof(wchar_t)))
+    if (!Macht::ReadBytesSafe(data, wbuf.data(), count * sizeof(wchar_t)))
         return "";
 
     // Ensure null termination
@@ -195,7 +196,7 @@ static std::string ReadFTextString(uintptr_t ftextAddr) {
 
     // Read ITextData* (first 8 bytes of FText)
     uintptr_t textDataPtr = 0;
-    if (!Mem::ReadSafe(ftextAddr, textDataPtr) || !textDataPtr) return "";
+    if (!Macht::ReadSafe(ftextAddr, textDataPtr) || !textDataPtr) return "";
 
     // Probe ITextData at multiple offsets for a valid FString
     // FString = { wchar_t* Data (8B), int32 Count (4B), int32 Max (4B) }
@@ -206,9 +207,9 @@ static std::string ReadFTextString(uintptr_t ftextAddr) {
         int32_t   strCount = 0;
         int32_t   strMax = 0;
 
-        if (!Mem::ReadSafe(textDataPtr + offset, strData) || !strData) continue;
-        if (!Mem::ReadSafe(textDataPtr + offset + 8, strCount)) continue;
-        if (!Mem::ReadSafe(textDataPtr + offset + 12, strMax)) continue;
+        if (!Macht::ReadSafe(textDataPtr + offset, strData) || !strData) continue;
+        if (!Macht::ReadSafe(textDataPtr + offset + 8, strCount)) continue;
+        if (!Macht::ReadSafe(textDataPtr + offset + 12, strMax)) continue;
 
         // Validate: reasonable FString (non-null data, positive count, count <= max)
         if (strCount <= 0 || strCount > 4096 || strMax < strCount) continue;
@@ -225,14 +226,14 @@ static std::string ReadFTextString(uintptr_t ftextAddr) {
 uintptr_t GetClass(uintptr_t uobjectAddr) {
     if (!uobjectAddr) return 0;
     uintptr_t cls = 0;
-    Mem::ReadSafe(uobjectAddr + Constants::OFF_UOBJECT_CLASS, cls);
+    Macht::ReadSafe(uobjectAddr + Grimoire::OFF_UOBJECT_CLASS, cls);
     return cls;
 }
 
 uintptr_t GetOuter(uintptr_t uobjectAddr) {
     if (!uobjectAddr) return 0;
     uintptr_t outer = 0;
-    Mem::ReadSafe(uobjectAddr + DynOff::UOBJECT_OUTER, outer);
+    Macht::ReadSafe(uobjectAddr + DynOff::UOBJECT_OUTER, outer);
     return outer;
 }
 
@@ -243,7 +244,7 @@ std::string GetName(uintptr_t uobjectAddr) {
     auto it = s_nameCache.find(uobjectAddr);
     if (it != s_nameCache.end()) return it->second;
 
-    std::string name = ReadFName(uobjectAddr + Constants::OFF_UOBJECT_NAME);
+    std::string name = ReadFName(uobjectAddr + Grimoire::OFF_UOBJECT_NAME);
 
     // Only cache non-empty names (empty could be transient read failure)
     if (!name.empty())
@@ -255,7 +256,7 @@ std::string GetName(uintptr_t uobjectAddr) {
 int32_t GetIndex(uintptr_t uobjectAddr) {
     if (!uobjectAddr) return -1;
     int32_t index = -1;
-    Mem::ReadSafe(uobjectAddr + Constants::OFF_UOBJECT_INDEX, index);
+    Macht::ReadSafe(uobjectAddr + Grimoire::OFF_UOBJECT_INDEX, index);
     return index;
 }
 
@@ -297,7 +298,7 @@ std::string GetFullName(uintptr_t uobjectAddr) {
 static std::string GetFieldTypeName(uintptr_t ffieldAddr) {
     // FField::ClassPrivate at offset 0x08 -> FFieldClass*
     uintptr_t fieldClass = 0;
-    if (!Mem::ReadSafe(ffieldAddr + DynOff::FFIELD_CLASS, fieldClass) || !fieldClass) {
+    if (!Macht::ReadSafe(ffieldAddr + DynOff::FFIELD_CLASS, fieldClass) || !fieldClass) {
         return "Unknown";
     }
 
@@ -309,12 +310,12 @@ static std::string GetFieldTypeName(uintptr_t ffieldAddr) {
 // UProperty inherits UObject, so its Class at +0x10 is a UClass whose Name is the type.
 static std::string GetUPropertyTypeName(uintptr_t upropAddr) {
     uintptr_t cls = 0;
-    if (!Mem::ReadSafe(upropAddr + Constants::OFF_UOBJECT_CLASS, cls) || !cls) return "";
+    if (!Macht::ReadSafe(upropAddr + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) return "";
     if (cls < 0x10000 || cls > 0x00007FFFFFFFFFFF) return "";
 
     uint32_t nameIdx = 0;
-    if (!Mem::ReadSafe(cls + Constants::OFF_UOBJECT_NAME, nameIdx)) return "";
-    return FNamePool::GetString(nameIdx);
+    if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, nameIdx)) return "";
+    return Serie::GetString(nameIdx);
 }
 
 // Walk the FField chain starting from the first field (UE4.25+ / UE5)
@@ -337,9 +338,9 @@ static void WalkFFieldChain(uintptr_t firstField, std::vector<FieldInfo>& fields
         fi.TypeName = GetFieldTypeName(current);
 
         // Read offset and size (FProperty fields, may not be valid for non-property FFields)
-        Mem::ReadSafe<int32_t>(current + DynOff::FPROPERTY_OFFSET, fi.Offset);
-        Mem::ReadSafe<int32_t>(current + DynOff::FPROPERTY_ELEMSIZE, fi.Size);
-        Mem::ReadSafe<uint64_t>(current + DynOff::FPROPERTY_FLAGS, fi.PropertyFlags);
+        Macht::ReadSafe<int32_t>(current + DynOff::FPROPERTY_OFFSET, fi.Offset);
+        Macht::ReadSafe<int32_t>(current + DynOff::FPROPERTY_ELEMSIZE, fi.Size);
+        Macht::ReadSafe<uint64_t>(current + DynOff::FPROPERTY_FLAGS, fi.PropertyFlags);
 
         // Alignment sanity warning: pointers/containers must be 8-byte, int/float 4-byte aligned
         if (fi.Offset > 0 && !fi.TypeName.empty()) {
@@ -354,7 +355,7 @@ static void WalkFFieldChain(uintptr_t firstField, std::vector<FieldInfo>& fields
             bool need4 = fi.TypeName == "IntProperty" || fi.TypeName == "UInt32Property" ||
                          fi.TypeName == "FloatProperty" || fi.TypeName == "EnumProperty";
             if ((need8 && fi.Offset % 8 != 0) || (need4 && fi.Offset % 4 != 0)) {
-                Logger::Warn("WALK", "Misaligned field '%s' (%s) at offset 0x%X — possible wrong FPROPERTY_OFFSET",
+                Sein::Warn("WALK", "Misaligned field '%s' (%s) at offset 0x%X — possible wrong FPROPERTY_OFFSET",
                     fi.Name.c_str(), fi.TypeName.c_str(), fi.Offset);
             }
         }
@@ -365,7 +366,7 @@ static void WalkFFieldChain(uintptr_t firstField, std::vector<FieldInfo>& fields
 
         // Move to next FField (strip tag bit for UE5.3+ safety)
         uintptr_t next = 0;
-        if (!Mem::ReadSafe(current + DynOff::FFIELD_NEXT, next)) break;
+        if (!Macht::ReadSafe(current + DynOff::FFIELD_NEXT, next)) break;
         current = DynOff::StripFFieldTag(next);
     }
 }
@@ -380,12 +381,12 @@ static void WalkUPropertyChain(uintptr_t firstField, std::vector<FieldInfo>& fie
         fi.Address = current;
 
         // UProperty is UObject-derived, so Name is at UObject::Name
-        fi.Name = ReadFName(current + Constants::OFF_UOBJECT_NAME);
+        fi.Name = ReadFName(current + Grimoire::OFF_UOBJECT_NAME);
 
         // Type name: UProperty's class name (e.g., "IntProperty", "FloatProperty")
         uintptr_t cls = 0;
-        if (Mem::ReadSafe(current + Constants::OFF_UOBJECT_CLASS, cls) && cls) {
-            fi.TypeName = ReadFName(cls + Constants::OFF_UOBJECT_NAME);
+        if (Macht::ReadSafe(current + Grimoire::OFF_UOBJECT_CLASS, cls) && cls) {
+            fi.TypeName = ReadFName(cls + Grimoire::OFF_UOBJECT_NAME);
         } else {
             fi.TypeName = "Unknown";
         }
@@ -394,15 +395,15 @@ static void WalkUPropertyChain(uintptr_t firstField, std::vector<FieldInfo>& fie
         // Skip them — they don't have UProperty layout (Offset/Size/Flags are garbage).
         if (fi.TypeName.find("Property") == std::string::npos) {
             uintptr_t next = 0;
-            if (!Mem::ReadSafe(current + DynOff::UFIELD_NEXT, next)) break;
+            if (!Macht::ReadSafe(current + DynOff::UFIELD_NEXT, next)) break;
             current = next;
             continue;
         }
 
         // Read UProperty-specific fields
-        Mem::ReadSafe<int32_t>(current + DynOff::UPROPERTY_OFFSET, fi.Offset);
-        Mem::ReadSafe<int32_t>(current + DynOff::UPROPERTY_ELEMSIZE, fi.Size);
-        Mem::ReadSafe<uint64_t>(current + DynOff::UPROPERTY_FLAGS, fi.PropertyFlags);
+        Macht::ReadSafe<int32_t>(current + DynOff::UPROPERTY_OFFSET, fi.Offset);
+        Macht::ReadSafe<int32_t>(current + DynOff::UPROPERTY_ELEMSIZE, fi.Size);
+        Macht::ReadSafe<uint64_t>(current + DynOff::UPROPERTY_FLAGS, fi.PropertyFlags);
 
         // UE4 UBoolProperty -> FieldMask byte
         if (fi.TypeName == "BoolProperty") {
@@ -411,7 +412,7 @@ static void WalkUPropertyChain(uintptr_t firstField, std::vector<FieldInfo>& fie
                                 DynOff::UBOOLPROP_FIELDSIZE + 4, DynOff::UBOOLPROP_FIELDSIZE + 8,
                                 DynOff::UBOOLPROP_FIELDSIZE - 8 }) {
                 if (tryOff < 0) continue;
-                if (!Mem::ReadBytesSafe(current + tryOff, boolBytes, 4)) continue;
+                if (!Macht::ReadBytesSafe(current + tryOff, boolBytes, 4)) continue;
                 uint8_t fieldSize = boolBytes[0];
                 uint8_t fieldMask = boolBytes[3];
                 if (fieldSize == 1 && fieldMask != 0 && (fieldMask & (fieldMask - 1)) == 0) {
@@ -427,7 +428,7 @@ static void WalkUPropertyChain(uintptr_t firstField, std::vector<FieldInfo>& fie
 
         // Move to next UField via UField::Next
         uintptr_t next = 0;
-        if (!Mem::ReadSafe(current + DynOff::UFIELD_NEXT, next)) break;
+        if (!Macht::ReadSafe(current + DynOff::UFIELD_NEXT, next)) break;
         current = next;
     }
 }
@@ -453,13 +454,13 @@ ClassInfo WalkClass(uintptr_t uclassAddr) {
     info.FullPath = GetFullName(uclassAddr);
 
     // Read SuperStruct
-    Mem::ReadSafe(uclassAddr + DynOff::USTRUCT_SUPER, info.SuperClass);
+    Macht::ReadSafe(uclassAddr + DynOff::USTRUCT_SUPER, info.SuperClass);
     if (info.SuperClass) {
         info.SuperName = GetName(info.SuperClass);
     }
 
     // Read PropertiesSize
-    Mem::ReadSafe(uclassAddr + DynOff::USTRUCT_PROPSSIZE, info.PropertiesSize);
+    Macht::ReadSafe(uclassAddr + DynOff::USTRUCT_PROPSSIZE, info.PropertiesSize);
 
     LOG_DEBUG("WalkClass: %s (super=%s, size=%d) at 0x%llX",
               info.Name.c_str(), info.SuperName.c_str(), info.PropertiesSize,
@@ -470,13 +471,13 @@ ClassInfo WalkClass(uintptr_t uclassAddr) {
         // UE4.25+ / UE5: FField chain via ChildProperties
         // Tag-bit stripping is handled inside WalkFFieldChain for UE5.3+ safety
         uintptr_t childProps = 0;
-        if (Mem::ReadSafe(uclassAddr + DynOff::USTRUCT_CHILDPROPS, childProps) && childProps) {
+        if (Macht::ReadSafe(uclassAddr + DynOff::USTRUCT_CHILDPROPS, childProps) && childProps) {
             WalkFFieldChain(childProps, info.Fields);
         }
     } else {
         // UE4 <4.25: UProperty chain via Children (UField chain includes properties)
         uintptr_t children = 0;
-        if (Mem::ReadSafe(uclassAddr + DynOff::USTRUCT_CHILDREN, children) && children) {
+        if (Macht::ReadSafe(uclassAddr + DynOff::USTRUCT_CHILDREN, children) && children) {
             WalkUPropertyChain(children, info.Fields);
         }
     }
@@ -498,14 +499,14 @@ ClassInfo WalkClass(uintptr_t uclassAddr) {
 
         if (DynOff::bUseFProperty) {
             uintptr_t superChildProps = 0;
-            if (Mem::ReadSafe(super + DynOff::USTRUCT_CHILDPROPS, superChildProps) && superChildProps) {
+            if (Macht::ReadSafe(super + DynOff::USTRUCT_CHILDPROPS, superChildProps) && superChildProps) {
                 std::vector<FieldInfo> inherited;
                 WalkFFieldChain(superChildProps, inherited);
                 info.Fields.insert(info.Fields.begin(), inherited.begin(), inherited.end());
             }
         } else {
             uintptr_t superChildren = 0;
-            if (Mem::ReadSafe(super + DynOff::USTRUCT_CHILDREN, superChildren) && superChildren) {
+            if (Macht::ReadSafe(super + DynOff::USTRUCT_CHILDREN, superChildren) && superChildren) {
                 std::vector<FieldInfo> inherited;
                 WalkUPropertyChain(superChildren, inherited);
                 info.Fields.insert(info.Fields.begin(), inherited.begin(), inherited.end());
@@ -513,7 +514,7 @@ ClassInfo WalkClass(uintptr_t uclassAddr) {
         }
 
         uintptr_t nextSuper = 0;
-        Mem::ReadSafe(super + DynOff::USTRUCT_SUPER, nextSuper);
+        Macht::ReadSafe(super + DynOff::USTRUCT_SUPER, nextSuper);
         super = nextSuper;
         ++depth;
     }
@@ -541,7 +542,7 @@ static std::pair<uintptr_t, std::string> ProbeInnerProperty(uintptr_t fieldAddr,
         int off = baseOffset + delta;
         if (off < 0) continue;
         uintptr_t inner = 0;
-        if (!Mem::ReadSafe(fieldAddr + off, inner) || !inner) continue;
+        if (!Macht::ReadSafe(fieldAddr + off, inner) || !inner) continue;
         std::string tn = GetFieldTypeName(inner);
         if (!tn.empty() && tn != "Unknown" && tn.find("Property") != std::string::npos)
             return { inner, tn };
@@ -553,7 +554,7 @@ static std::pair<uintptr_t, std::string> ProbeInnerProperty(uintptr_t fieldAddr,
 // read the UScriptStruct*/UClass* at the subclass extension offset and return its name.
 static std::string ReadSubclassTypeName(uintptr_t propAddr) {
     uintptr_t ptr = 0;
-    if (!Mem::ReadSafe(propAddr + DynOff::FSTRUCTPROP_STRUCT, ptr) || !ptr) return "";
+    if (!Macht::ReadSafe(propAddr + DynOff::FSTRUCTPROP_STRUCT, ptr) || !ptr) return "";
     std::string name = GetName(ptr);
     if (name.empty() || name[0] < 0x20 || name[0] >= 0x7F) return "";
     return name;
@@ -603,13 +604,13 @@ ClassInfo WalkClassEx(uintptr_t uclassAddr) {
                 int tryOff = DynOff::FSTRUCTPROP_STRUCT + delta;
                 if (tryOff < 0) continue;
                 uintptr_t keyProp = 0;
-                if (!Mem::ReadSafe(fi.Address + tryOff, keyProp) || !keyProp) continue;
+                if (!Macht::ReadSafe(fi.Address + tryOff, keyProp) || !keyProp) continue;
                 std::string keyTn = GetFieldTypeName(keyProp);
                 if (keyTn.empty() || keyTn == "Unknown" || keyTn.find("Property") == std::string::npos)
                     continue;
                 // Found KeyProp — ValueProp is at +8
                 uintptr_t valueProp = 0;
-                Mem::ReadSafe(fi.Address + tryOff + 8, valueProp);
+                Macht::ReadSafe(fi.Address + tryOff + 8, valueProp);
                 std::string valTn = valueProp ? GetFieldTypeName(valueProp) : "";
                 if (valTn.empty() || valTn.find("Property") == std::string::npos) continue;
 
@@ -634,7 +635,7 @@ ClassInfo WalkClassEx(uintptr_t uclassAddr) {
         // EnumProperty -> UEnum name
         else if (tn == "EnumProperty") {
             uintptr_t enumPtr = 0;
-            if (Mem::ReadSafe(fi.Address + DynOff::FENUMPROP_ENUM, enumPtr) && enumPtr) {
+            if (Macht::ReadSafe(fi.Address + DynOff::FENUMPROP_ENUM, enumPtr) && enumPtr) {
                 std::string ename = GetName(enumPtr);
                 if (!ename.empty() && ename[0] >= 0x20 && ename[0] < 0x7F)
                     fi.enumName = ename;
@@ -644,7 +645,7 @@ ClassInfo WalkClassEx(uintptr_t uclassAddr) {
         // ByteProperty -> check if it has an associated UEnum
         else if (tn == "ByteProperty") {
             uintptr_t enumPtr = 0;
-            if (Mem::ReadSafe(fi.Address + DynOff::FBYTEPROP_ENUM, enumPtr) && enumPtr) {
+            if (Macht::ReadSafe(fi.Address + DynOff::FBYTEPROP_ENUM, enumPtr) && enumPtr) {
                 std::string ename = GetName(enumPtr);
                 if (!ename.empty() && ename[0] >= 0x20 && ename[0] < 0x7F)
                     fi.enumName = ename;
@@ -657,7 +658,7 @@ ClassInfo WalkClassEx(uintptr_t uclassAddr) {
             int baseOff = DynOff::bUseFProperty ? DynOff::FBOOLPROP_FIELDSIZE : DynOff::UBOOLPROP_FIELDSIZE;
             for (int tryOff : { baseOff, baseOff - 4, baseOff + 4, baseOff + 8, baseOff - 8 }) {
                 if (tryOff < 0) continue;
-                if (!Mem::ReadBytesSafe(fi.Address + tryOff, boolBytes, 4)) continue;
+                if (!Macht::ReadBytesSafe(fi.Address + tryOff, boolBytes, 4)) continue;
                 uint8_t fieldSize = boolBytes[0];
                 uint8_t fieldMask = boolBytes[3];
                 if (fieldSize == 1 && fieldMask != 0 && (fieldMask & (fieldMask - 1)) == 0) {
@@ -684,15 +685,15 @@ std::vector<FunctionInfo> WalkFunctions(uintptr_t uclassAddr) {
     // Walk the UField::Children chain (UStruct::Children at 0x48)
     // This chain contains UFunctions (and possibly other UField types)
     uintptr_t child = 0;
-    if (!Mem::ReadSafe(uclassAddr + DynOff::USTRUCT_CHILDREN, child) || !child)
+    if (!Macht::ReadSafe(uclassAddr + DynOff::USTRUCT_CHILDREN, child) || !child)
         return funcs;
 
     int safetyLimit = 4096;
     while (child != 0 && safetyLimit-- > 0) {
         // Check if this child is a UFunction by reading its class name
         uintptr_t childClass = 0;
-        if (Mem::ReadSafe(child + Constants::OFF_UOBJECT_CLASS, childClass) && childClass) {
-            std::string clsName = ReadFName(childClass + Constants::OFF_UOBJECT_NAME);
+        if (Macht::ReadSafe(child + Grimoire::OFF_UOBJECT_CLASS, childClass) && childClass) {
+            std::string clsName = ReadFName(childClass + Grimoire::OFF_UOBJECT_NAME);
 
             if (clsName == "Function") {
                 FunctionInfo fi{};
@@ -718,13 +719,13 @@ std::vector<FunctionInfo> WalkFunctions(uintptr_t uclassAddr) {
                 else                               primary = 0x88;
 
                 // Try primary offset first
-                if (Mem::ReadSafe<uint32_t>(child + primary, funcFlags) && funcFlags != 0) {
+                if (Macht::ReadSafe<uint32_t>(child + primary, funcFlags) && funcFlags != 0) {
                     funcFlagsOff = primary;
                 } else {
                     // Fallback: try all known offsets (skip primary, already tried)
                     for (int tryOff : { 0xB0, 0xC0, 0x88, 0x98, 0xA8, 0xB8 }) {
                         if (tryOff == primary) continue;
-                        if (Mem::ReadSafe<uint32_t>(child + tryOff, funcFlags) && funcFlags != 0) {
+                        if (Macht::ReadSafe<uint32_t>(child + tryOff, funcFlags) && funcFlags != 0) {
                             funcFlagsOff = tryOff;
                             break;
                         }
@@ -738,16 +739,16 @@ std::vector<FunctionInfo> WalkFunctions(uintptr_t uclassAddr) {
                 //   +0x06 = ParmsSize (uint16)
                 //   +0x08 = ReturnValueOffset (uint16)
                 if (funcFlagsOff >= 0) {
-                    Mem::ReadSafe<uint8_t> (child + funcFlagsOff + 0x04, fi.numParms);
-                    Mem::ReadSafe<uint16_t>(child + funcFlagsOff + 0x06, fi.parmsSize);
-                    Mem::ReadSafe<uint16_t>(child + funcFlagsOff + 0x08, fi.returnValueOffset);
+                    Macht::ReadSafe<uint8_t> (child + funcFlagsOff + 0x04, fi.numParms);
+                    Macht::ReadSafe<uint16_t>(child + funcFlagsOff + 0x06, fi.parmsSize);
+                    Macht::ReadSafe<uint16_t>(child + funcFlagsOff + 0x08, fi.returnValueOffset);
                 }
 
                 // Walk the UFunction's own property chain (its parameters)
                 // UFunction inherits UStruct, so ChildProperties is at USTRUCT_CHILDPROPS
                 if (DynOff::bUseFProperty) {
                     uintptr_t paramChain = 0;
-                    if (Mem::ReadSafe(child + DynOff::USTRUCT_CHILDPROPS, paramChain) && paramChain) {
+                    if (Macht::ReadSafe(child + DynOff::USTRUCT_CHILDPROPS, paramChain) && paramChain) {
                         uintptr_t cur = DynOff::StripFFieldTag(paramChain);
                         int paramLimit = 256;
                         while (cur != 0 && paramLimit-- > 0) {
@@ -756,11 +757,11 @@ std::vector<FunctionInfo> WalkFunctions(uintptr_t uclassAddr) {
                             FunctionParam param{};
                             param.name = ReadFName(cur + DynOff::FFIELD_NAME);
                             param.typeName = GetFieldTypeName(cur);
-                            Mem::ReadSafe<int32_t>(cur + DynOff::FPROPERTY_ELEMSIZE, param.size);
-                            Mem::ReadSafe<int32_t>(cur + DynOff::FPROPERTY_OFFSET, param.offset);
+                            Macht::ReadSafe<int32_t>(cur + DynOff::FPROPERTY_ELEMSIZE, param.size);
+                            Macht::ReadSafe<int32_t>(cur + DynOff::FPROPERTY_OFFSET, param.offset);
 
                             uint64_t propFlags = 0;
-                            Mem::ReadSafe<uint64_t>(cur + DynOff::FPROPERTY_FLAGS, propFlags);
+                            Macht::ReadSafe<uint64_t>(cur + DynOff::FPROPERTY_FLAGS, propFlags);
 
                             param.isReturn = (propFlags & CPF_ReturnParm) != 0;
                             param.isOut = (propFlags & CPF_OutParm) != 0;
@@ -770,7 +771,7 @@ std::vector<FunctionInfo> WalkFunctions(uintptr_t uclassAddr) {
                                 param.structType = ReadSubclassTypeName(cur);
                                 // Phase B: walk the UScriptStruct to discover sub-fields
                                 uintptr_t structPtr = 0;
-                                if (Mem::ReadSafe(cur + DynOff::FSTRUCTPROP_STRUCT, structPtr) && structPtr) {
+                                if (Macht::ReadSafe(cur + DynOff::FSTRUCTPROP_STRUCT, structPtr) && structPtr) {
                                     ClassInfo structInfo = WalkClass(structPtr);
                                     for (const auto& sf : structInfo.Fields)
                                         param.structFields.push_back({sf.Name, sf.TypeName, sf.Offset, sf.Size});
@@ -784,29 +785,29 @@ std::vector<FunctionInfo> WalkFunctions(uintptr_t uclassAddr) {
                                 fi.params.push_back(param);
 
                             uintptr_t next = 0;
-                            if (!Mem::ReadSafe(cur + DynOff::FFIELD_NEXT, next)) break;
+                            if (!Macht::ReadSafe(cur + DynOff::FFIELD_NEXT, next)) break;
                             cur = DynOff::StripFFieldTag(next);
                         }
                     }
                 } else {
                     // UE4 <4.25: UProperty chain via Children
                     uintptr_t paramChain = 0;
-                    if (Mem::ReadSafe(child + DynOff::USTRUCT_CHILDREN, paramChain) && paramChain) {
+                    if (Macht::ReadSafe(child + DynOff::USTRUCT_CHILDREN, paramChain) && paramChain) {
                         uintptr_t cur = paramChain;
                         int paramLimit = 256;
                         while (cur != 0 && paramLimit-- > 0) {
                             FunctionParam param{};
-                            param.name = ReadFName(cur + Constants::OFF_UOBJECT_NAME);
+                            param.name = ReadFName(cur + Grimoire::OFF_UOBJECT_NAME);
 
                             uintptr_t paramCls = 0;
-                            if (Mem::ReadSafe(cur + Constants::OFF_UOBJECT_CLASS, paramCls) && paramCls)
-                                param.typeName = ReadFName(paramCls + Constants::OFF_UOBJECT_NAME);
+                            if (Macht::ReadSafe(cur + Grimoire::OFF_UOBJECT_CLASS, paramCls) && paramCls)
+                                param.typeName = ReadFName(paramCls + Grimoire::OFF_UOBJECT_NAME);
 
-                            Mem::ReadSafe<int32_t>(cur + DynOff::UPROPERTY_ELEMSIZE, param.size);
-                            Mem::ReadSafe<int32_t>(cur + DynOff::UPROPERTY_OFFSET, param.offset);
+                            Macht::ReadSafe<int32_t>(cur + DynOff::UPROPERTY_ELEMSIZE, param.size);
+                            Macht::ReadSafe<int32_t>(cur + DynOff::UPROPERTY_OFFSET, param.offset);
 
                             uint64_t propFlags = 0;
-                            Mem::ReadSafe<uint64_t>(cur + DynOff::UPROPERTY_FLAGS, propFlags);
+                            Macht::ReadSafe<uint64_t>(cur + DynOff::UPROPERTY_FLAGS, propFlags);
 
                             param.isReturn = (propFlags & CPF_ReturnParm) != 0;
                             param.isOut = (propFlags & CPF_OutParm) != 0;
@@ -815,7 +816,7 @@ std::vector<FunctionInfo> WalkFunctions(uintptr_t uclassAddr) {
                             if (param.typeName == "StructProperty") {
                                 uintptr_t structPtr = 0;
                                 // UStructProperty::Struct is at UPROPERTY subclass extension offset
-                                if (Mem::ReadSafe(cur + DynOff::UPROPERTY_OFFSET + 0x2C, structPtr) && structPtr) {
+                                if (Macht::ReadSafe(cur + DynOff::UPROPERTY_OFFSET + 0x2C, structPtr) && structPtr) {
                                     std::string sn = GetName(structPtr);
                                     if (!sn.empty() && sn[0] >= 0x20 && sn[0] < 0x7F)
                                         param.structType = sn;
@@ -830,7 +831,7 @@ std::vector<FunctionInfo> WalkFunctions(uintptr_t uclassAddr) {
                             if (!param.name.empty()) fi.params.push_back(param);
 
                             uintptr_t next = 0;
-                            if (!Mem::ReadSafe(cur + DynOff::UFIELD_NEXT, next)) break;
+                            if (!Macht::ReadSafe(cur + DynOff::UFIELD_NEXT, next)) break;
                             cur = next;
                         }
                     }
@@ -842,7 +843,7 @@ std::vector<FunctionInfo> WalkFunctions(uintptr_t uclassAddr) {
 
         // Move to next UField via UField::Next
         uintptr_t next = 0;
-        if (!Mem::ReadSafe(child + DynOff::UFIELD_NEXT, next)) break;
+        if (!Macht::ReadSafe(child + DynOff::UFIELD_NEXT, next)) break;
         child = next;
     }
 
@@ -889,7 +890,7 @@ static int32_t ValidateArrayElemSize(int32_t readSize, const std::string& typeNa
     if (expected > 0) {
         // For known types, we know the exact size — override if it doesn't match
         if (readSize != expected) {
-            Logger::Warn("WALK:ArrayP", "elemSize=%d is invalid for '%s' (expected=%d), overriding",
+            Sein::Warn("WALK:ArrayP", "elemSize=%d is invalid for '%s' (expected=%d), overriding",
                 readSize, typeName.c_str(), expected);
             return expected;
         }
@@ -902,7 +903,7 @@ static int32_t ValidateArrayElemSize(int32_t readSize, const std::string& typeNa
         return 0;  // Caller handles zero-size case
     }
     if (readSize > 65536) {
-        Logger::Warn("WALK:ArrayP", "elemSize=%d is unreasonably large for '%s', zeroing",
+        Sein::Warn("WALK:ArrayP", "elemSize=%d is unreasonably large for '%s', zeroing",
             readSize, typeName.c_str());
         return 0;
     }
@@ -996,7 +997,7 @@ std::string InterpretValue(const std::string& typeName, const void* data, int32_
         // FName — resolve via FNamePool
         int32_t nameIdx;
         memcpy(&nameIdx, bytes, 4);
-        return FNamePool::GetString(nameIdx);
+        return Serie::GetString(nameIdx);
     }
 
     // StructProperty: for small structs, show inline float hints
@@ -1081,8 +1082,8 @@ ReadArrayResult ReadArrayElements(
     }
 
     // Read TArray header
-    Mem::TArrayView arr;
-    if (!Mem::ReadTArray(instanceAddr + fieldOffset, arr)) {
+    Macht::TArrayView arr;
+    if (!Macht::ReadTArray(instanceAddr + fieldOffset, arr)) {
         result.error = "TArray read failed";
         return result;
     }
@@ -1109,10 +1110,10 @@ ReadArrayResult ReadArrayElements(
     uintptr_t enumPtr = 0;
     if (innerFFieldAddr) {
         if (innerTypeName == "EnumProperty") {
-            Mem::ReadSafe(innerFFieldAddr + DynOff::FENUMPROP_ENUM, enumPtr);
+            Macht::ReadSafe(innerFFieldAddr + DynOff::FENUMPROP_ENUM, enumPtr);
         } else if (innerTypeName == "ByteProperty") {
             uintptr_t candidateEnum = 0;
-            if (Mem::ReadSafe(innerFFieldAddr + DynOff::FBYTEPROP_ENUM, candidateEnum) && candidateEnum) {
+            if (Macht::ReadSafe(innerFFieldAddr + DynOff::FBYTEPROP_ENUM, candidateEnum) && candidateEnum) {
                 // Validate it's a UEnum
                 uintptr_t enumClass = GetClass(candidateEnum);
                 std::string enumClassName = enumClass ? GetName(enumClass) : "";
@@ -1132,7 +1133,7 @@ ReadArrayResult ReadArrayElements(
         elem.index = i;
 
         uintptr_t elemAddr = arr.Data + static_cast<int64_t>(i) * elemSize;
-        if (!Mem::ReadBytesSafe(elemAddr, buf.data(), elemSize)) {
+        if (!Macht::ReadBytesSafe(elemAddr, buf.data(), elemSize)) {
             elem.value = "???";
             elem.hex = "??";
             result.elements.push_back(std::move(elem));
@@ -1212,8 +1213,8 @@ ReadArrayResult ReadPointerArrayElements(
     elemSize = 8;
 
     // Read TArray header
-    Mem::TArrayView arr;
-    if (!Mem::ReadTArray(instanceAddr + fieldOffset, arr)) {
+    Macht::TArrayView arr;
+    if (!Macht::ReadTArray(instanceAddr + fieldOffset, arr)) {
         result.error = "TArray read failed";
         return result;
     }
@@ -1244,7 +1245,7 @@ ReadArrayResult ReadPointerArrayElements(
 
         uintptr_t ptr = 0;
         uintptr_t elemAddr = arr.Data + static_cast<int64_t>(i) * elemSize;
-        if (!Mem::ReadSafe(elemAddr, ptr)) {
+        if (!Macht::ReadSafe(elemAddr, ptr)) {
             elem.value = "???";
             elem.hex = "????????????????";
             result.elements.push_back(std::move(elem));
@@ -1294,9 +1295,9 @@ ReadArrayResult ReadPointerArrayElements(
 // ============================================================
 uintptr_t ResolveWeakObjectPtr(int32_t objectIndex, int32_t serialNumber) {
     if (objectIndex <= 0) return 0;
-    uintptr_t obj = ObjectArray::GetByIndex(objectIndex);
+    uintptr_t obj = Aura::GetByIndex(objectIndex);
     if (!obj) return 0;
-    int32_t actualSerial = ObjectArray::GetSerialNumber(objectIndex);
+    int32_t actualSerial = Aura::GetSerialNumber(objectIndex);
     if (actualSerial != serialNumber) return 0;  // stale reference
     return obj;
 }
@@ -1326,8 +1327,8 @@ ReadArrayResult ReadWeakObjectArrayElements(
     elemSize = 8;
 
     // Read TArray header
-    Mem::TArrayView arr;
-    if (!Mem::ReadTArray(instanceAddr + fieldOffset, arr)) {
+    Macht::TArrayView arr;
+    if (!Macht::ReadTArray(instanceAddr + fieldOffset, arr)) {
         result.error = "TArray read failed";
         return result;
     }
@@ -1360,7 +1361,7 @@ ReadArrayResult ReadWeakObjectArrayElements(
 
         // Read FWeakObjectPtr { int32 ObjectIndex, int32 SerialNumber }
         int32_t objIdx = 0, serial = 0;
-        if (!Mem::ReadSafe(elemAddr, objIdx) || !Mem::ReadSafe(elemAddr + 4, serial)) {
+        if (!Macht::ReadSafe(elemAddr, objIdx) || !Macht::ReadSafe(elemAddr + 4, serial)) {
             elem.value = "???";
             elem.hex = "????????????????";
             result.elements.push_back(std::move(elem));
@@ -1449,7 +1450,7 @@ static const std::vector<CachedStructField>& GetCachedStructFields(uintptr_t str
             int baseOff = DynOff::bUseFProperty ? DynOff::FBOOLPROP_FIELDSIZE : DynOff::UBOOLPROP_FIELDSIZE;
             for (int tryOff : { baseOff, baseOff - 4, baseOff + 4, baseOff + 8, baseOff - 8 }) {
                 if (tryOff < 0) continue;
-                if (!Mem::ReadBytesSafe(fi.Address + tryOff, boolBytes, 4)) continue;
+                if (!Macht::ReadBytesSafe(fi.Address + tryOff, boolBytes, 4)) continue;
                 uint8_t fieldSize = boolBytes[0];
                 uint8_t fieldMask = boolBytes[3];
                 if (fieldSize >= 1 && fieldSize <= 8 && fieldMask != 0 && (fieldMask & (fieldMask - 1)) == 0) {
@@ -1461,18 +1462,18 @@ static const std::vector<CachedStructField>& GetCachedStructFields(uintptr_t str
 
         // EnumProperty: read UEnum*
         if (fi.TypeName == "EnumProperty" && fi.Address) {
-            Mem::ReadSafe(fi.Address + DynOff::FENUMPROP_ENUM, cf.enumAddr);
+            Macht::ReadSafe(fi.Address + DynOff::FENUMPROP_ENUM, cf.enumAddr);
         }
 
         // ByteProperty: check for UEnum* (ByteProperty-with-enum)
         if (fi.TypeName == "ByteProperty" && fi.Address) {
-            Mem::ReadSafe(fi.Address + DynOff::FBYTEPROP_ENUM, cf.enumAddr);
+            Macht::ReadSafe(fi.Address + DynOff::FBYTEPROP_ENUM, cf.enumAddr);
         }
 
         // StructProperty: read nested struct type name
         if (fi.TypeName == "StructProperty" && fi.Address) {
             uintptr_t nestedStruct = 0;
-            if (Mem::ReadSafe(fi.Address + DynOff::FSTRUCTPROP_STRUCT, nestedStruct) && nestedStruct) {
+            if (Macht::ReadSafe(fi.Address + DynOff::FSTRUCTPROP_STRUCT, nestedStruct) && nestedStruct) {
                 cf.nestedTypeName = GetName(nestedStruct);
             }
         }
@@ -1480,7 +1481,7 @@ static const std::vector<CachedStructField>& GetCachedStructFields(uintptr_t str
         cached.push_back(std::move(cf));
     }
 
-    Logger::Debug("WALK:ArrayF", "Cached struct fields for 0x%llX: %d fields",
+    Sein::Debug("WALK:ArrayF", "Cached struct fields for 0x%llX: %d fields",
         static_cast<unsigned long long>(structAddr), static_cast<int>(cached.size()));
 
     auto [ins, _] = s_structFieldCache.emplace(structAddr, std::move(cached));
@@ -1497,8 +1498,8 @@ ReadArrayResult ReadStructArrayElements(
 {
     ReadArrayResult result;
 
-    Mem::TArrayView arr;
-    if (!Mem::ReadTArray(instanceAddr + fieldOffset, arr)) {
+    Macht::TArrayView arr;
+    if (!Macht::ReadTArray(instanceAddr + fieldOffset, arr)) {
         result.error = "Failed to read TArray header";
         return result;
     }
@@ -1536,7 +1537,7 @@ ReadArrayResult ReadStructArrayElements(
 
         // Bulk read element bytes
         std::vector<uint8_t> buf(readSize, 0);
-        if (!Mem::ReadBytesSafe(elemAddr, buf.data(), readSize)) {
+        if (!Macht::ReadBytesSafe(elemAddr, buf.data(), readSize)) {
             elem.value = "???";
             result.elements.push_back(std::move(elem));
             continue;
@@ -1614,8 +1615,8 @@ ReadArrayResult ReadStructArrayElements(
             } else if (cf.typeName == "LazyObjectProperty") {
                 uintptr_t gAddr = elemAddr + cf.offset + 0x10;
                 uint32_t ga = 0, gb = 0, gc = 0, gd = 0;
-                Mem::ReadSafe(gAddr, ga); Mem::ReadSafe(gAddr + 4, gb);
-                Mem::ReadSafe(gAddr + 8, gc); Mem::ReadSafe(gAddr + 12, gd);
+                Macht::ReadSafe(gAddr, ga); Macht::ReadSafe(gAddr + 4, gb);
+                Macht::ReadSafe(gAddr + 8, gc); Macht::ReadSafe(gAddr + 12, gd);
                 char gs[48]; snprintf(gs, sizeof(gs), "{%08X-%08X-%08X-%08X}", ga, gb, gc, gd);
                 sf.value = gs;
             } else if (cf.typeName == "TextProperty") {
@@ -1685,14 +1686,14 @@ static void CorrectSubclassOffsets(const std::vector<FieldInfo>& fields) {
             int tryOff = DynOff::FSTRUCTPROP_STRUCT + delta;
             if (tryOff < 0) continue;
             uintptr_t candidate = 0;
-            if (!Mem::ReadSafe(fi.Address + tryOff, candidate) || !candidate) continue;
+            if (!Macht::ReadSafe(fi.Address + tryOff, candidate) || !candidate) continue;
             // Validate: must be a UScriptStruct (UObject) with a readable ASCII name
             std::string sname = GetName(candidate);
             if (sname.empty() || sname[0] < 0x20 || sname[0] >= 0x7F) continue;
 
             if (delta != 0) {
                 int corrected = DynOff::FSTRUCTPROP_STRUCT + delta;
-                Logger::Info("WALK", "CorrectSubclassOffsets: delta=%d, FSTRUCTPROP 0x%X -> 0x%X (validated with '%s' -> '%s')",
+                Sein::Info("WALK", "CorrectSubclassOffsets: delta=%d, FSTRUCTPROP 0x%X -> 0x%X (validated with '%s' -> '%s')",
                     delta, DynOff::FSTRUCTPROP_STRUCT, corrected, fi.Name.c_str(), sname.c_str());
                 DynOff::FSTRUCTPROP_STRUCT  = corrected;
                 // Note: FARRAYPROP_INNER may differ from FSTRUCTPROP_STRUCT (UE5.7 has
@@ -1726,7 +1727,7 @@ static std::string FormatGuessedName(int32_t offset, const char* hint) {
 static bool IsLikelyPointer(uint64_t val) {
     if (val < 0x10000 || val > 0x00007FFFFFFFFFFF) return false;
     uint8_t probe = 0;
-    return Mem::ReadSafe(static_cast<uintptr_t>(val), probe);
+    return Macht::ReadSafe(static_cast<uintptr_t>(val), probe);
 }
 
 // "Clean" float: fractional part is exactly .0 or .5 (common in game data)
@@ -1812,7 +1813,7 @@ static void GuessGapTypes(uintptr_t baseAddr, int32_t gapStart, int32_t gapEnd,
         // Read up to 8 bytes for analysis
         uint8_t buf[8] = {};
         int32_t readLen = std::min(remaining, static_cast<int32_t>(8));
-        if (!Mem::ReadBytesSafe(baseAddr + pos, buf, readLen)) {
+        if (!Macht::ReadBytesSafe(baseAddr + pos, buf, readLen)) {
             pos++;
             continue;
         }
@@ -1828,7 +1829,7 @@ static void GuessGapTypes(uintptr_t baseAddr, int32_t gapStart, int32_t gapEnd,
                 int32_t zeroRun = 0;
                 for (int32_t probe = pos; probe < gapEnd && zeroRun < 256; probe++) {
                     uint8_t b = 0;
-                    if (!Mem::ReadSafe<uint8_t>(baseAddr + probe, b) || b != 0) break;
+                    if (!Macht::ReadSafe<uint8_t>(baseAddr + probe, b) || b != 0) break;
                     zeroRun++;
                 }
                 if (zeroRun >= 4) {
@@ -2009,7 +2010,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
     bool isRawStruct = false;
     if (classAddr) {
         uintptr_t testClass = 0;
-        Mem::ReadSafe(instanceAddr + Constants::OFF_UOBJECT_CLASS, testClass);
+        Macht::ReadSafe(instanceAddr + Grimoire::OFF_UOBJECT_CLASS, testClass);
         if (!testClass || testClass < 0x10000 || testClass > 0x00007FFFFFFFFFFF) {
             isRawStruct = true;
         } else {
@@ -2112,7 +2113,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                     { tArray += ms; nArray++; }
                 else { tScalar += ms; nScalar++; }
                 if (ms > 500) {
-                    Logger::Warn("WALK:perf", "Slow field '%s' (%s) took %lldms",
+                    Sein::Warn("WALK:perf", "Slow field '%s' (%s) took %lldms",
                         fi.Name.c_str(), tn.c_str(), static_cast<long long>(ms));
                 }
             }
@@ -2127,8 +2128,8 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
         // Handle WeakObjectProperty: FWeakObjectPtr { int32 ObjectIndex, int32 SerialNumber }
         if (fi.TypeName == "WeakObjectProperty") {
             int32_t objIdx = 0, serial = 0;
-            Mem::ReadSafe(instanceAddr + fi.Offset, objIdx);
-            Mem::ReadSafe(instanceAddr + fi.Offset + 4, serial);
+            Macht::ReadSafe(instanceAddr + fi.Offset, objIdx);
+            Macht::ReadSafe(instanceAddr + fi.Offset + 4, serial);
             uintptr_t ptr = ResolveWeakObjectPtr(objIdx, serial);
             if (ptr) {
                 fv.ptrValue = ptr;
@@ -2150,7 +2151,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
         // Always 8 bytes (pointer) — don't gate on fi.Size which can be garbage.
         if (fi.TypeName == "ObjectProperty" || fi.TypeName == "ClassProperty") {
             uintptr_t ptr = 0;
-            if (Mem::ReadSafe(instanceAddr + fi.Offset, ptr) && ptr) {
+            if (Macht::ReadSafe(instanceAddr + fi.Offset, ptr) && ptr) {
                 fv.ptrValue = ptr;
                 fv.ptrName = GetName(ptr);
                 fv.ptrClassName = "";
@@ -2181,7 +2182,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
             int showBytes = (fi.Size > 0 && fi.Size <= 64) ? (std::min)(fi.Size, (int32_t)32) : 0;
             if (showBytes > 0) {
                 std::vector<uint8_t> rawBuf(showBytes, 0);
-                if (Mem::ReadBytesSafe(fieldAddr, rawBuf.data(), showBytes)) {
+                if (Macht::ReadBytesSafe(fieldAddr, rawBuf.data(), showBytes)) {
                     std::string hex;
                     hex.reserve(showBytes * 2);
                     for (int i = 0; i < showBytes; ++i) {
@@ -2202,10 +2203,10 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
         if (fi.TypeName == "LazyObjectProperty") {
             uintptr_t guidAddr = instanceAddr + fi.Offset + 0x10;
             uint32_t a = 0, b = 0, c = 0, d = 0;
-            Mem::ReadSafe(guidAddr + 0, a);
-            Mem::ReadSafe(guidAddr + 4, b);
-            Mem::ReadSafe(guidAddr + 8, c);
-            Mem::ReadSafe(guidAddr + 12, d);
+            Macht::ReadSafe(guidAddr + 0, a);
+            Macht::ReadSafe(guidAddr + 4, b);
+            Macht::ReadSafe(guidAddr + 8, c);
+            Macht::ReadSafe(guidAddr + 12, d);
 
             char guidStr[48];
             snprintf(guidStr, sizeof(guidStr), "{%08X-%08X-%08X-%08X}", a, b, c, d);
@@ -2216,7 +2217,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
             int showBytes = (fi.Size > 0 && fi.Size <= 64) ? (std::min)(fi.Size, (int32_t)32) : 0;
             if (showBytes > 0) {
                 std::vector<uint8_t> rawBuf(showBytes, 0);
-                if (Mem::ReadBytesSafe(instanceAddr + fi.Offset, rawBuf.data(), showBytes)) {
+                if (Macht::ReadBytesSafe(instanceAddr + fi.Offset, rawBuf.data(), showBytes)) {
                     std::string hex;
                     hex.reserve(showBytes * 2);
                     for (int i = 0; i < showBytes; ++i) {
@@ -2236,8 +2237,8 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
         if (fi.TypeName == "InterfaceProperty") {
             uintptr_t objPtr = 0;
             uintptr_t ifacePtr = 0;
-            Mem::ReadSafe(instanceAddr + fi.Offset, objPtr);
-            Mem::ReadSafe(instanceAddr + fi.Offset + 8, ifacePtr);
+            Macht::ReadSafe(instanceAddr + fi.Offset, objPtr);
+            Macht::ReadSafe(instanceAddr + fi.Offset + 8, ifacePtr);
 
             if (objPtr) {
                 fv.ptrValue = objPtr;
@@ -2260,8 +2261,8 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
 
         // Handle ArrayProperty: read TArray header + Inner element type
         if (fi.TypeName == "ArrayProperty") {
-            Mem::TArrayView arr;
-            if (Mem::ReadTArray(instanceAddr + fi.Offset, arr)) {
+            Macht::TArrayView arr;
+            if (Macht::ReadTArray(instanceAddr + fi.Offset, arr)) {
                 fv.arrayCount = arr.Count;
                 fv.arrayDataAddr = arr.Data;
                 // Hex of the TArray header (Data ptr + Count + Max)
@@ -2285,7 +2286,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                     int tryOff = DynOff::FARRAYPROP_INNER + delta;
                     if (tryOff < 0) continue;
                     uintptr_t inner = 0;
-                    if (!Mem::ReadSafe(fi.Address + tryOff, inner) || !inner) continue;
+                    if (!Macht::ReadSafe(fi.Address + tryOff, inner) || !inner) continue;
                     // Skip obvious garbage addresses to avoid SEH faults
                     if (inner < 0x10000 || inner > 0x00007FFFFFFFFFFF) continue;
 
@@ -2300,33 +2301,33 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                         // Inner FProperty's ELEMSIZE offset often returns garbage because
                         // the inner property metadata layout differs from top-level FFields.
                         int32_t rawElemSize = 0;
-                        Mem::ReadSafe<int32_t>(inner + DynOff::FPROPERTY_ELEMSIZE, rawElemSize);
+                        Macht::ReadSafe<int32_t>(inner + DynOff::FPROPERTY_ELEMSIZE, rawElemSize);
                         fv.arrayElemSize = ValidateArrayElemSize(rawElemSize, innerTypeName);
 
                         // If inner is StructProperty, also read the UScriptStruct name
                         if (innerTypeName == "StructProperty") {
                             uintptr_t innerStruct = 0;
-                            if (Mem::ReadSafe(inner + DynOff::FSTRUCTPROP_STRUCT, innerStruct) && innerStruct) {
+                            if (Macht::ReadSafe(inner + DynOff::FSTRUCTPROP_STRUCT, innerStruct) && innerStruct) {
                                 fv.arrayInnerStructType = GetName(innerStruct);
                                 fv.arrayInnerStructAddr = innerStruct;  // Phase F: store for struct array expansion
                                 // Fallback: FProperty::ElementSize often reads 0 for StructProperty inners.
                                 // Use UScriptStruct::PropertiesSize as the actual element size.
                                 if (fv.arrayElemSize <= 0) {
                                     int32_t propsSize = 0;
-                                    if (Mem::ReadSafe(innerStruct + DynOff::USTRUCT_PROPSSIZE, propsSize) && propsSize > 0 && propsSize <= 65536) {
+                                    if (Macht::ReadSafe(innerStruct + DynOff::USTRUCT_PROPSSIZE, propsSize) && propsSize > 0 && propsSize <= 65536) {
                                         fv.arrayElemSize = propsSize;
-                                        Logger::Info("WALK:ArrayP", "Fallback: used PropertiesSize=%d for '%s' struct '%s'",
+                                        Sein::Info("WALK:ArrayP", "Fallback: used PropertiesSize=%d for '%s' struct '%s'",
                                             propsSize, fi.Name.c_str(), fv.arrayInnerStructType.c_str());
                                     }
                                 }
                             }
                         }
 
-                        Logger::Info("WALK:ArrayP", "FArrayProperty::Inner found at FField+0x%X (delta=%d) for '%s' -> '%s' elemSize=%d",
+                        Sein::Info("WALK:ArrayP", "FArrayProperty::Inner found at FField+0x%X (delta=%d) for '%s' -> '%s' elemSize=%d",
                             tryOff, delta, fi.Name.c_str(), innerTypeName.c_str(), fv.arrayElemSize);
                         // Persist corrected FARRAYPROP_INNER if delta != 0
                         if (delta != 0) {
-                            Logger::Info("WALK:ArrayP", "Correcting FARRAYPROP_INNER: 0x%X -> 0x%X",
+                            Sein::Info("WALK:ArrayP", "Correcting FARRAYPROP_INNER: 0x%X -> 0x%X",
                                 DynOff::FARRAYPROP_INNER, tryOff);
                             DynOff::FARRAYPROP_INNER = tryOff;
                         }
@@ -2346,7 +2347,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                         fv.arrayElemSize, 0, arrayLimit);
                     if (elemResult.ok && !elemResult.elements.empty()) {
                         fv.arrayElements = std::move(elemResult.elements);
-                        Logger::Debug("WALK:ArrayP", "Inline elements: %d read for '%s'",
+                        Sein::Debug("WALK:ArrayP", "Inline elements: %d read for '%s'",
                             static_cast<int>(fv.arrayElements.size()), fi.Name.c_str());
                     }
                     // Populate full enum entries for CE DropDownList
@@ -2364,7 +2365,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                         instanceAddr, fi.Offset, fv.arrayElemSize, 0, arrayLimit);
                     if (ptrResult.ok && !ptrResult.elements.empty()) {
                         fv.arrayElements = std::move(ptrResult.elements);
-                        Logger::Debug("WALK:ArrayP", "Ptr elements: %d read for '%s'",
+                        Sein::Debug("WALK:ArrayP", "Ptr elements: %d read for '%s'",
                             static_cast<int>(fv.arrayElements.size()), fi.Name.c_str());
                     }
                 }
@@ -2377,7 +2378,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                         instanceAddr, fi.Offset, fv.arrayElemSize, 0, arrayLimit);
                     if (weakResult.ok && !weakResult.elements.empty()) {
                         fv.arrayElements = std::move(weakResult.elements);
-                        Logger::Debug("WALK:ArrayP", "Weak ptr elements: %d read for '%s'",
+                        Sein::Debug("WALK:ArrayP", "Weak ptr elements: %d read for '%s'",
                             static_cast<int>(fv.arrayElements.size()), fi.Name.c_str());
                     }
                 }
@@ -2392,7 +2393,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                         fv.arrayInnerStructAddr, fv.arrayElemSize, 0, arrayLimit);
                     if (structResult.ok && !structResult.elements.empty()) {
                         fv.arrayElements = std::move(structResult.elements);
-                        Logger::Debug("WALK:ArrayP", "Struct elements: %d read for '%s'",
+                        Sein::Debug("WALK:ArrayP", "Struct elements: %d read for '%s'",
                             static_cast<int>(fv.arrayElements.size()), fi.Name.c_str());
                     }
                 }
@@ -2402,14 +2403,14 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                     uint8_t dumpBuf[64] = {};
                     int dumpStart = DynOff::FARRAYPROP_INNER - 16;
                     if (dumpStart < 0) dumpStart = 0;
-                    Mem::ReadBytesSafe(fi.Address + dumpStart, dumpBuf, 64);
+                    Macht::ReadBytesSafe(fi.Address + dumpStart, dumpBuf, 64);
                     char hexDump[200] = {};
                     for (int i = 0; i < 64 && i < (int)sizeof(hexDump)/3; i++)
                         snprintf(hexDump + i*3, 4, "%02X ", dumpBuf[i]);
-                    Logger::Info("WALK:ArrayP", "Inner NOT found for '%s' (FField=0x%llX, FARRAYPROP_INNER=0x%X, FSTRUCTPROP_STRUCT=0x%X)",
+                    Sein::Info("WALK:ArrayP", "Inner NOT found for '%s' (FField=0x%llX, FARRAYPROP_INNER=0x%X, FSTRUCTPROP_STRUCT=0x%X)",
                         fi.Name.c_str(), static_cast<unsigned long long>(fi.Address),
                         DynOff::FARRAYPROP_INNER, DynOff::FSTRUCTPROP_STRUCT);
-                    Logger::Info("WALK:ArrayP", "  hex @+0x%X..+0x%X: %s", dumpStart, dumpStart+64, hexDump);
+                    Sein::Info("WALK:ArrayP", "  hex @+0x%X..+0x%X: %s", dumpStart, dumpStart+64, hexDump);
                 }
             } else {
                 // UProperty mode (UE4 <4.25): UArrayProperty::Inner is a UProperty* (UObject subclass).
@@ -2421,7 +2422,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                     int tryOff = baseOff + delta;
                     if (tryOff < 0) continue;
                     uintptr_t inner = 0;
-                    if (!Mem::ReadSafe(fi.Address + tryOff, inner) || !inner) continue;
+                    if (!Macht::ReadSafe(fi.Address + tryOff, inner) || !inner) continue;
                     if (inner < 0x10000 || inner > 0x00007FFFFFFFFFFF) continue;
 
                     std::string innerTypeName = GetUPropertyTypeName(inner);
@@ -2429,28 +2430,28 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                         fv.arrayInnerType = innerTypeName;
                         // Read element size and validate (same garbage-guard as FProperty mode)
                         int32_t rawElemSize = 0;
-                        Mem::ReadSafe<int32_t>(inner + DynOff::UPROPERTY_ELEMSIZE, rawElemSize);
+                        Macht::ReadSafe<int32_t>(inner + DynOff::UPROPERTY_ELEMSIZE, rawElemSize);
                         fv.arrayElemSize = ValidateArrayElemSize(rawElemSize, innerTypeName);
 
                         if (innerTypeName == "StructProperty") {
                             // UStructProperty::Struct at same base offset
                             uintptr_t innerStruct = 0;
-                            if (Mem::ReadSafe(inner + baseOff, innerStruct) && innerStruct) {
+                            if (Macht::ReadSafe(inner + baseOff, innerStruct) && innerStruct) {
                                 fv.arrayInnerStructType = GetName(innerStruct);
                                 fv.arrayInnerStructAddr = innerStruct;
                                 // Fallback: use UScriptStruct::PropertiesSize when ElementSize is 0
                                 if (fv.arrayElemSize <= 0) {
                                     int32_t propsSize = 0;
-                                    if (Mem::ReadSafe(innerStruct + DynOff::USTRUCT_PROPSSIZE, propsSize) && propsSize > 0 && propsSize <= 65536) {
+                                    if (Macht::ReadSafe(innerStruct + DynOff::USTRUCT_PROPSSIZE, propsSize) && propsSize > 0 && propsSize <= 65536) {
                                         fv.arrayElemSize = propsSize;
-                                        Logger::Info("WALK:ArrayP", "Fallback: used PropertiesSize=%d for '%s' struct '%s'",
+                                        Sein::Info("WALK:ArrayP", "Fallback: used PropertiesSize=%d for '%s' struct '%s'",
                                             propsSize, fi.Name.c_str(), fv.arrayInnerStructType.c_str());
                                     }
                                 }
                             }
                         }
 
-                        Logger::Info("WALK:ArrayP", "UArrayProperty::Inner at UProperty+0x%X (delta=%d) for '%s' -> '%s' elemSize=%d",
+                        Sein::Info("WALK:ArrayP", "UArrayProperty::Inner at UProperty+0x%X (delta=%d) for '%s' -> '%s' elemSize=%d",
                             tryOff, delta, fi.Name.c_str(), innerTypeName.c_str(), fv.arrayElemSize);
                         fv.arrayInnerFFieldAddr = inner;  // reuse field for UProperty* too
                         innerFound = true;
@@ -2497,7 +2498,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                 }
 
                 if (!innerFound) {
-                    Logger::Info("WALK:ArrayP", "UArrayProperty::Inner NOT found for '%s' (UProperty=0x%llX, baseOff=0x%X)",
+                    Sein::Info("WALK:ArrayP", "UArrayProperty::Inner NOT found for '%s' (UProperty=0x%llX, baseOff=0x%X)",
                         fi.Name.c_str(), static_cast<unsigned long long>(fi.Address), baseOff);
                 }
             }
@@ -2508,8 +2509,8 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
 
         // Handle MapProperty: read TMap (wraps TSet<TPair<Key,Value>>)
         if (fi.TypeName == "MapProperty") {
-            Mem::TSparseArrayView sa;
-            if (Mem::ReadTSparseArray(instanceAddr + fi.Offset, sa)) {
+            Macht::TSparseArrayView sa;
+            if (Macht::ReadTSparseArray(instanceAddr + fi.Offset, sa)) {
                 fv.mapCount = sa.MaxIndex - sa.NumFreeIndices;
                 if (fv.mapCount < 0) fv.mapCount = 0;
                 fv.mapDataAddr = sa.Data;
@@ -2529,7 +2530,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                     int tryOff = DynOff::FSTRUCTPROP_STRUCT + delta;
                     if (tryOff < 0) continue;
                     uintptr_t keyProp = 0;
-                    if (!Mem::ReadSafe(fi.Address + tryOff, keyProp) || !keyProp) continue;
+                    if (!Macht::ReadSafe(fi.Address + tryOff, keyProp) || !keyProp) continue;
                     if (keyProp < 0x10000 || keyProp > 0x00007FFFFFFFFFFF) continue;
 
                     std::string keyTypeName = GetFieldTypeName(keyProp);
@@ -2538,29 +2539,29 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
 
                     // Found KeyProp — ValueProp is at +8 from KeyProp
                     uintptr_t valueProp = 0;
-                    Mem::ReadSafe(fi.Address + tryOff + 8, valueProp);
+                    Macht::ReadSafe(fi.Address + tryOff + 8, valueProp);
                     std::string valueTypeName = valueProp ? GetFieldTypeName(valueProp) : "";
 
                     if (!valueTypeName.empty() && valueTypeName.find("Property") != std::string::npos) {
                         fv.mapKeyType = keyTypeName;
                         fv.mapValueType = valueTypeName;
-                        Mem::ReadSafe<int32_t>(keyProp + DynOff::FPROPERTY_ELEMSIZE, fv.mapKeySize);
-                        Mem::ReadSafe<int32_t>(valueProp + DynOff::FPROPERTY_ELEMSIZE, fv.mapValueSize);
-                        Logger::Info("WALK:MapP", "FMapProperty KeyProp='%s'(%d) ValueProp='%s'(%d) at delta=%d for '%s'",
+                        Macht::ReadSafe<int32_t>(keyProp + DynOff::FPROPERTY_ELEMSIZE, fv.mapKeySize);
+                        Macht::ReadSafe<int32_t>(valueProp + DynOff::FPROPERTY_ELEMSIZE, fv.mapValueSize);
+                        Sein::Info("WALK:MapP", "FMapProperty KeyProp='%s'(%d) ValueProp='%s'(%d) at delta=%d for '%s'",
                             keyTypeName.c_str(), fv.mapKeySize, valueTypeName.c_str(), fv.mapValueSize,
                             delta, fi.Name.c_str());
 
                         // If key/value is StructProperty, read UScriptStruct* for navigation
                         if (keyTypeName == "StructProperty") {
                             uintptr_t kStruct = 0;
-                            if (Mem::ReadSafe(keyProp + DynOff::FSTRUCTPROP_STRUCT, kStruct) && kStruct) {
+                            if (Macht::ReadSafe(keyProp + DynOff::FSTRUCTPROP_STRUCT, kStruct) && kStruct) {
                                 fv.mapKeyStructAddr = kStruct;
                                 fv.mapKeyStructType = GetName(kStruct);
                             }
                         }
                         if (valueTypeName == "StructProperty") {
                             uintptr_t vStruct = 0;
-                            if (Mem::ReadSafe(valueProp + DynOff::FSTRUCTPROP_STRUCT, vStruct) && vStruct) {
+                            if (Macht::ReadSafe(valueProp + DynOff::FSTRUCTPROP_STRUCT, vStruct) && vStruct) {
                                 fv.mapValueStructAddr = vStruct;
                                 fv.mapValueStructType = GetName(vStruct);
                             }
@@ -2569,23 +2570,23 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                         // Read inline element values if count is manageable
                         if (fv.mapCount > 0
                             && sa.Data && fv.mapKeySize > 0 && fv.mapValueSize > 0) {
-                            int32_t valOffset = Mem::ComputeMapValueOffset(fv.mapKeySize, fv.mapValueSize);
+                            int32_t valOffset = Macht::ComputeMapValueOffset(fv.mapKeySize, fv.mapValueSize);
                             int32_t pairSize = valOffset + fv.mapValueSize;
-                            int32_t stride = Mem::ComputeSetElementStride(pairSize);
+                            int32_t stride = Macht::ComputeSetElementStride(pairSize);
                             fv.mapValueOffset = valOffset;
-                            Logger::Debug("WALK:MapP", "Reading %d map entries for '%s': Data=0x%llX KeySz=%d ValSz=%d ValOff=%d Stride=%d MaxIdx=%d NumBits=%d",
+                            Sein::Debug("WALK:MapP", "Reading %d map entries for '%s': Data=0x%llX KeySz=%d ValSz=%d ValOff=%d Stride=%d MaxIdx=%d NumBits=%d",
                                 fv.mapCount, fi.Name.c_str(), (unsigned long long)sa.Data,
                                 fv.mapKeySize, fv.mapValueSize, valOffset, stride, sa.MaxIndex, sa.numBits);
                             int read = 0;
                             int skipped = 0;
                             for (int32_t idx = 0; idx < sa.MaxIndex && read < fv.mapCount && read < arrayLimit; ++idx) {
-                                if (!Mem::IsSparseIndexAllocated(sa, idx)) { skipped++; continue; }
+                                if (!Macht::IsSparseIndexAllocated(sa, idx)) { skipped++; continue; }
                                 uintptr_t elemAddr = sa.Data + static_cast<uintptr_t>(idx) * stride;
                                 LiveFieldValue::ContainerElement ce;
                                 ce.index = idx;
                                 // Read key bytes
                                 std::vector<uint8_t> keyBuf(fv.mapKeySize);
-                                if (Mem::ReadBytesSafe(elemAddr, keyBuf.data(), fv.mapKeySize)) {
+                                if (Macht::ReadBytesSafe(elemAddr, keyBuf.data(), fv.mapKeySize)) {
                                     ce.key = InterpretValue(keyTypeName, keyBuf.data(), fv.mapKeySize);
                                     // Hex
                                     std::string kh;
@@ -2613,7 +2614,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                                 }
                                 // Read value bytes (at aligned offset within pair)
                                 std::vector<uint8_t> valBuf(fv.mapValueSize);
-                                if (Mem::ReadBytesSafe(elemAddr + valOffset, valBuf.data(), fv.mapValueSize)) {
+                                if (Macht::ReadBytesSafe(elemAddr + valOffset, valBuf.data(), fv.mapValueSize)) {
                                     ce.value = InterpretValue(valueTypeName, valBuf.data(), fv.mapValueSize);
                                     std::string vh;
                                     int vlen = (std::min)(fv.mapValueSize, 16);
@@ -2636,9 +2637,9 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                                 fv.containerElements.push_back(std::move(ce));
                                 ++read;
                             }
-                            Logger::Debug("WALK:MapP", "Read %d/%d map entries for '%s' (skipped %d unallocated)", read, fv.mapCount, fi.Name.c_str(), skipped);
+                            Sein::Debug("WALK:MapP", "Read %d/%d map entries for '%s' (skipped %d unallocated)", read, fv.mapCount, fi.Name.c_str(), skipped);
                         } else {
-                            Logger::Warn("WALK:MapP", "Cannot read map elements for '%s': count=%d Data=0x%llX KeySz=%d ValSz=%d",
+                            Sein::Warn("WALK:MapP", "Cannot read map elements for '%s': count=%d Data=0x%llX KeySz=%d ValSz=%d",
                                 fi.Name.c_str(), fv.mapCount, (unsigned long long)sa.Data, fv.mapKeySize, fv.mapValueSize);
                         }
                         break;
@@ -2652,36 +2653,36 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                     int tryOff = baseOff + delta;
                     if (tryOff < 0) continue;
                     uintptr_t keyProp = 0;
-                    if (!Mem::ReadSafe(fi.Address + tryOff, keyProp) || !keyProp) continue;
+                    if (!Macht::ReadSafe(fi.Address + tryOff, keyProp) || !keyProp) continue;
                     if (keyProp < 0x10000 || keyProp > 0x00007FFFFFFFFFFF) continue;
 
                     std::string keyTypeName = GetUPropertyTypeName(keyProp);
                     if (keyTypeName.empty() || keyTypeName.find("Property") == std::string::npos) continue;
 
                     uintptr_t valueProp = 0;
-                    Mem::ReadSafe(fi.Address + tryOff + 8, valueProp);
+                    Macht::ReadSafe(fi.Address + tryOff + 8, valueProp);
                     std::string valueTypeName = (valueProp && valueProp > 0x10000
                         && valueProp < 0x00007FFFFFFFFFFF) ? GetUPropertyTypeName(valueProp) : "";
 
                     if (!valueTypeName.empty() && valueTypeName.find("Property") != std::string::npos) {
                         fv.mapKeyType = keyTypeName;
                         fv.mapValueType = valueTypeName;
-                        Mem::ReadSafe<int32_t>(keyProp + DynOff::UPROPERTY_ELEMSIZE, fv.mapKeySize);
-                        Mem::ReadSafe<int32_t>(valueProp + DynOff::UPROPERTY_ELEMSIZE, fv.mapValueSize);
-                        Logger::Info("WALK:MapP", "UMapProperty KeyProp='%s'(%d) ValueProp='%s'(%d) at delta=%d for '%s'",
+                        Macht::ReadSafe<int32_t>(keyProp + DynOff::UPROPERTY_ELEMSIZE, fv.mapKeySize);
+                        Macht::ReadSafe<int32_t>(valueProp + DynOff::UPROPERTY_ELEMSIZE, fv.mapValueSize);
+                        Sein::Info("WALK:MapP", "UMapProperty KeyProp='%s'(%d) ValueProp='%s'(%d) at delta=%d for '%s'",
                             keyTypeName.c_str(), fv.mapKeySize, valueTypeName.c_str(), fv.mapValueSize,
                             delta, fi.Name.c_str());
 
                         if (keyTypeName == "StructProperty") {
                             uintptr_t kStruct = 0;
-                            if (Mem::ReadSafe(keyProp + baseOff, kStruct) && kStruct) {
+                            if (Macht::ReadSafe(keyProp + baseOff, kStruct) && kStruct) {
                                 fv.mapKeyStructAddr = kStruct;
                                 fv.mapKeyStructType = GetName(kStruct);
                             }
                         }
                         if (valueTypeName == "StructProperty") {
                             uintptr_t vStruct = 0;
-                            if (Mem::ReadSafe(valueProp + baseOff, vStruct) && vStruct) {
+                            if (Macht::ReadSafe(valueProp + baseOff, vStruct) && vStruct) {
                                 fv.mapValueStructAddr = vStruct;
                                 fv.mapValueStructType = GetName(vStruct);
                             }
@@ -2689,18 +2690,18 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
 
                         // Read inline element values
                         if (fv.mapCount > 0 && sa.Data && fv.mapKeySize > 0 && fv.mapValueSize > 0) {
-                            int32_t valOffset = Mem::ComputeMapValueOffset(fv.mapKeySize, fv.mapValueSize);
+                            int32_t valOffset = Macht::ComputeMapValueOffset(fv.mapKeySize, fv.mapValueSize);
                             int32_t pairSize = valOffset + fv.mapValueSize;
-                            int32_t stride = Mem::ComputeSetElementStride(pairSize);
+                            int32_t stride = Macht::ComputeSetElementStride(pairSize);
                             fv.mapValueOffset = valOffset;
                             int read = 0;
                             for (int32_t idx = 0; idx < sa.MaxIndex && read < fv.mapCount && read < arrayLimit; ++idx) {
-                                if (!Mem::IsSparseIndexAllocated(sa, idx)) continue;
+                                if (!Macht::IsSparseIndexAllocated(sa, idx)) continue;
                                 uintptr_t elemAddr = sa.Data + static_cast<uintptr_t>(idx) * stride;
                                 LiveFieldValue::ContainerElement ce;
                                 ce.index = idx;
                                 std::vector<uint8_t> keyBuf(fv.mapKeySize);
-                                if (Mem::ReadBytesSafe(elemAddr, keyBuf.data(), fv.mapKeySize)) {
+                                if (Macht::ReadBytesSafe(elemAddr, keyBuf.data(), fv.mapKeySize)) {
                                     ce.key = InterpretValue(keyTypeName, keyBuf.data(), fv.mapKeySize);
                                     std::string kh;
                                     int klen = (std::min)(fv.mapKeySize, 16);
@@ -2724,7 +2725,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                                     }
                                 }
                                 std::vector<uint8_t> valBuf(fv.mapValueSize);
-                                if (Mem::ReadBytesSafe(elemAddr + valOffset, valBuf.data(), fv.mapValueSize)) {
+                                if (Macht::ReadBytesSafe(elemAddr + valOffset, valBuf.data(), fv.mapValueSize)) {
                                     ce.value = InterpretValue(valueTypeName, valBuf.data(), fv.mapValueSize);
                                     std::string vh;
                                     int vlen = (std::min)(fv.mapValueSize, 16);
@@ -2747,7 +2748,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                                 fv.containerElements.push_back(std::move(ce));
                                 ++read;
                             }
-                            Logger::Debug("WALK:MapP", "Read %d/%d map entries for '%s'", read, fv.mapCount, fi.Name.c_str());
+                            Sein::Debug("WALK:MapP", "Read %d/%d map entries for '%s'", read, fv.mapCount, fi.Name.c_str());
                         }
                         break;
                     }
@@ -2760,8 +2761,8 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
 
         // Handle SetProperty: read TSet (TSparseArray of elements)
         if (fi.TypeName == "SetProperty") {
-            Mem::TSparseArrayView sa;
-            if (Mem::ReadTSparseArray(instanceAddr + fi.Offset, sa)) {
+            Macht::TSparseArrayView sa;
+            if (Macht::ReadTSparseArray(instanceAddr + fi.Offset, sa)) {
                 fv.setCount = sa.MaxIndex - sa.NumFreeIndices;
                 if (fv.setCount < 0) fv.setCount = 0;
                 fv.setDataAddr = sa.Data;
@@ -2780,7 +2781,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                     int tryOff = DynOff::FSTRUCTPROP_STRUCT + delta;
                     if (tryOff < 0) continue;
                     uintptr_t elemProp = 0;
-                    if (!Mem::ReadSafe(fi.Address + tryOff, elemProp) || !elemProp) continue;
+                    if (!Macht::ReadSafe(fi.Address + tryOff, elemProp) || !elemProp) continue;
                     if (elemProp < 0x10000 || elemProp > 0x00007FFFFFFFFFFF) continue;
 
                     std::string elemTypeName = GetFieldTypeName(elemProp);
@@ -2788,22 +2789,22 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                         || elemTypeName.find("Property") == std::string::npos) continue;
 
                     fv.setElemType = elemTypeName;
-                    Mem::ReadSafe<int32_t>(elemProp + DynOff::FPROPERTY_ELEMSIZE, fv.setElemSize);
-                    Logger::Info("WALK:SetP", "FSetProperty ElementProp='%s'(%d) at delta=%d for '%s'",
+                    Macht::ReadSafe<int32_t>(elemProp + DynOff::FPROPERTY_ELEMSIZE, fv.setElemSize);
+                    Sein::Info("WALK:SetP", "FSetProperty ElementProp='%s'(%d) at delta=%d for '%s'",
                         elemTypeName.c_str(), fv.setElemSize, delta, fi.Name.c_str());
 
                     // If element is StructProperty, read UScriptStruct* for navigation
                     if (elemTypeName == "StructProperty") {
                         uintptr_t eStruct = 0;
-                        if (Mem::ReadSafe(elemProp + DynOff::FSTRUCTPROP_STRUCT, eStruct) && eStruct) {
+                        if (Macht::ReadSafe(elemProp + DynOff::FSTRUCTPROP_STRUCT, eStruct) && eStruct) {
                             fv.setElemStructAddr = eStruct;
                             fv.setElemStructType = GetName(eStruct);
                             // Fallback: use UScriptStruct::PropertiesSize when ElementSize is 0
                             if (fv.setElemSize <= 0) {
                                 int32_t propsSize = 0;
-                                if (Mem::ReadSafe(eStruct + DynOff::USTRUCT_PROPSSIZE, propsSize) && propsSize > 0 && propsSize <= 65536) {
+                                if (Macht::ReadSafe(eStruct + DynOff::USTRUCT_PROPSSIZE, propsSize) && propsSize > 0 && propsSize <= 65536) {
                                     fv.setElemSize = propsSize;
-                                    Logger::Info("WALK:SetP", "Fallback: used PropertiesSize=%d for '%s' struct '%s'",
+                                    Sein::Info("WALK:SetP", "Fallback: used PropertiesSize=%d for '%s' struct '%s'",
                                         propsSize, fi.Name.c_str(), fv.setElemStructType.c_str());
                                 }
                             }
@@ -2813,15 +2814,15 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                     // Read inline element values if count is manageable
                     if (fv.setCount > 0
                         && sa.Data && fv.setElemSize > 0) {
-                        int32_t stride = Mem::ComputeSetElementStride(fv.setElemSize);
+                        int32_t stride = Macht::ComputeSetElementStride(fv.setElemSize);
                         int read = 0;
                         for (int32_t idx = 0; idx < sa.MaxIndex && read < fv.setCount && read < arrayLimit; ++idx) {
-                            if (!Mem::IsSparseIndexAllocated(sa, idx)) continue;
+                            if (!Macht::IsSparseIndexAllocated(sa, idx)) continue;
                             uintptr_t elemAddr = sa.Data + static_cast<uintptr_t>(idx) * stride;
                             LiveFieldValue::ContainerElement ce;
                             ce.index = idx;
                             std::vector<uint8_t> elemBuf(fv.setElemSize);
-                            if (Mem::ReadBytesSafe(elemAddr, elemBuf.data(), fv.setElemSize)) {
+                            if (Macht::ReadBytesSafe(elemAddr, elemBuf.data(), fv.setElemSize)) {
                                 ce.key = InterpretValue(elemTypeName, elemBuf.data(), fv.setElemSize);
                                 std::string eh;
                                 int elen = (std::min)(fv.setElemSize, 16);
@@ -2844,7 +2845,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                             fv.containerElements.push_back(std::move(ce));
                             ++read;
                         }
-                        Logger::Debug("WALK:SetP", "Read %d/%d set entries for '%s'", read, fv.setCount, fi.Name.c_str());
+                        Sein::Debug("WALK:SetP", "Read %d/%d set entries for '%s'", read, fv.setCount, fi.Name.c_str());
                     }
                     break;
                 }
@@ -2856,28 +2857,28 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                     int tryOff = baseOff + delta;
                     if (tryOff < 0) continue;
                     uintptr_t elemProp = 0;
-                    if (!Mem::ReadSafe(fi.Address + tryOff, elemProp) || !elemProp) continue;
+                    if (!Macht::ReadSafe(fi.Address + tryOff, elemProp) || !elemProp) continue;
                     if (elemProp < 0x10000 || elemProp > 0x00007FFFFFFFFFFF) continue;
 
                     std::string elemTypeName = GetUPropertyTypeName(elemProp);
                     if (elemTypeName.empty() || elemTypeName.find("Property") == std::string::npos) continue;
 
                     fv.setElemType = elemTypeName;
-                    Mem::ReadSafe<int32_t>(elemProp + DynOff::UPROPERTY_ELEMSIZE, fv.setElemSize);
-                    Logger::Info("WALK:SetP", "USetProperty ElementProp='%s'(%d) at delta=%d for '%s'",
+                    Macht::ReadSafe<int32_t>(elemProp + DynOff::UPROPERTY_ELEMSIZE, fv.setElemSize);
+                    Sein::Info("WALK:SetP", "USetProperty ElementProp='%s'(%d) at delta=%d for '%s'",
                         elemTypeName.c_str(), fv.setElemSize, delta, fi.Name.c_str());
 
                     if (elemTypeName == "StructProperty") {
                         uintptr_t eStruct = 0;
-                        if (Mem::ReadSafe(elemProp + baseOff, eStruct) && eStruct) {
+                        if (Macht::ReadSafe(elemProp + baseOff, eStruct) && eStruct) {
                             fv.setElemStructAddr = eStruct;
                             fv.setElemStructType = GetName(eStruct);
                             // Fallback: use UScriptStruct::PropertiesSize when ElementSize is 0
                             if (fv.setElemSize <= 0) {
                                 int32_t propsSize = 0;
-                                if (Mem::ReadSafe(eStruct + DynOff::USTRUCT_PROPSSIZE, propsSize) && propsSize > 0 && propsSize <= 65536) {
+                                if (Macht::ReadSafe(eStruct + DynOff::USTRUCT_PROPSSIZE, propsSize) && propsSize > 0 && propsSize <= 65536) {
                                     fv.setElemSize = propsSize;
-                                    Logger::Info("WALK:SetP", "Fallback: used PropertiesSize=%d for '%s' struct '%s'",
+                                    Sein::Info("WALK:SetP", "Fallback: used PropertiesSize=%d for '%s' struct '%s'",
                                         propsSize, fi.Name.c_str(), fv.setElemStructType.c_str());
                                 }
                             }
@@ -2885,15 +2886,15 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                     }
 
                     if (fv.setCount > 0 && sa.Data && fv.setElemSize > 0) {
-                        int32_t stride = Mem::ComputeSetElementStride(fv.setElemSize);
+                        int32_t stride = Macht::ComputeSetElementStride(fv.setElemSize);
                         int read = 0;
                         for (int32_t idx = 0; idx < sa.MaxIndex && read < fv.setCount && read < arrayLimit; ++idx) {
-                            if (!Mem::IsSparseIndexAllocated(sa, idx)) continue;
+                            if (!Macht::IsSparseIndexAllocated(sa, idx)) continue;
                             uintptr_t elemAddr = sa.Data + static_cast<uintptr_t>(idx) * stride;
                             LiveFieldValue::ContainerElement ce;
                             ce.index = idx;
                             std::vector<uint8_t> elemBuf(fv.setElemSize);
-                            if (Mem::ReadBytesSafe(elemAddr, elemBuf.data(), fv.setElemSize)) {
+                            if (Macht::ReadBytesSafe(elemAddr, elemBuf.data(), fv.setElemSize)) {
                                 ce.key = InterpretValue(elemTypeName, elemBuf.data(), fv.setElemSize);
                                 std::string eh;
                                 int elen = (std::min)(fv.setElemSize, 16);
@@ -2916,7 +2917,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                             fv.containerElements.push_back(std::move(ce));
                             ++read;
                         }
-                        Logger::Debug("WALK:SetP", "Read %d/%d set entries for '%s'", read, fv.setCount, fi.Name.c_str());
+                        Sein::Debug("WALK:SetP", "Read %d/%d set entries for '%s'", read, fv.setCount, fi.Name.c_str());
                     }
                     break;
                 }
@@ -2935,7 +2936,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                 int tryOffset = DynOff::FSTRUCTPROP_STRUCT + delta;
                 if (tryOffset < 0) continue;
                 uintptr_t candidate = 0;
-                if (!Mem::ReadSafe(fi.Address + tryOffset, candidate) || !candidate) continue;
+                if (!Macht::ReadSafe(fi.Address + tryOffset, candidate) || !candidate) continue;
                 // Skip obvious garbage addresses to avoid SEH faults
                 if (candidate < 0x10000 || candidate > 0x00007FFFFFFFFFFF) continue;
                 // Validate: must be a UScriptStruct (inherits UObject), so GetName should return ASCII
@@ -2945,7 +2946,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                     fv.structTypeName  = sname;
                     fv.structDataAddr  = instanceAddr + fi.Offset;
                     if (delta != 0) {
-                        Logger::Info("WALK:StructP", "FStructProperty::Struct at FField+0x%X (base=0x%X, delta=%d) for '%s' -> '%s'",
+                        Sein::Info("WALK:StructP", "FStructProperty::Struct at FField+0x%X (base=0x%X, delta=%d) for '%s' -> '%s'",
                             tryOffset, DynOff::FSTRUCTPROP_STRUCT, delta, fi.Name.c_str(), sname.c_str());
                         // Persist correction to DynOff (CorrectSubclassOffsets handles the global
                         // update, but if it didn't run yet or missed, update here too)
@@ -2956,7 +2957,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                 }
             }
             if (!found) {
-                Logger::Debug("WALK:StructP", "FStructProperty::Struct not found for '%s' (FField=0x%llX, probed 0x%X +/- 16)",
+                Sein::Debug("WALK:StructP", "FStructProperty::Struct not found for '%s' (FField=0x%llX, probed 0x%X +/- 16)",
                     fi.Name.c_str(), static_cast<unsigned long long>(fi.Address), DynOff::FSTRUCTPROP_STRUCT);
             }
 
@@ -2978,7 +2979,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                 bool hasBuf = false;
                 if (readSize > 0) {
                     structBuf.resize(readSize, 0);
-                    hasBuf = Mem::ReadBytesSafe(structBase, structBuf.data(), readSize);
+                    hasBuf = Macht::ReadBytesSafe(structBase, structBuf.data(), readSize);
                 }
 
                 // Preview: interpret sub-fields from local buffer (no per-field ReadSafe)
@@ -3016,7 +3017,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                             val = std::to_string(p[0]);
                         } else if (sf.TypeName == "NameProperty" && sfSize >= 4) {
                             int32_t nameIdx; memcpy(&nameIdx, p, 4);
-                            val = FNamePool::GetString(nameIdx);
+                            val = Serie::GetString(nameIdx);
                             if (val.empty()) val = "None";
                         } else if ((sf.TypeName == "ObjectProperty" || sf.TypeName == "ClassProperty") && sfSize >= 8) {
                             uintptr_t ptr; memcpy(&ptr, p, 8);
@@ -3066,7 +3067,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
             int baseOff = DynOff::bUseFProperty ? DynOff::FBOOLPROP_FIELDSIZE : DynOff::UBOOLPROP_FIELDSIZE;
             for (int tryOff : { baseOff, baseOff - 4, baseOff + 4, baseOff + 8, baseOff - 8 }) {
                 if (tryOff < 0) continue;
-                if (!Mem::ReadBytesSafe(fi.Address + tryOff, boolBytes, 4)) continue;
+                if (!Macht::ReadBytesSafe(fi.Address + tryOff, boolBytes, 4)) continue;
 
                 uint8_t fieldSize  = boolBytes[0];
                 uint8_t byteOff    = boolBytes[1];
@@ -3094,7 +3095,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
             // Read actual value using FieldMask
             uint8_t rawByte = 0;
             int readOffset = fi.Offset + fv.boolByteOffset;
-            if (Mem::ReadSafe(instanceAddr + readOffset, rawByte)) {
+            if (Macht::ReadSafe(instanceAddr + readOffset, rawByte)) {
                 char hexBuf[3];
                 snprintf(hexBuf, sizeof(hexBuf), "%02X", rawByte);
                 fv.hexValue = hexBuf;
@@ -3117,7 +3118,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
         // Handle EnumProperty: read underlying int, resolve via UEnum
         if (fi.TypeName == "EnumProperty") {
             uintptr_t enumPtr = 0;
-            Mem::ReadSafe(fi.Address + DynOff::FENUMPROP_ENUM, enumPtr);
+            Macht::ReadSafe(fi.Address + DynOff::FENUMPROP_ENUM, enumPtr);
 
             // Validate enum size: FPROPERTY_ELEMSIZE can be garbage for fields in
             // UScriptStruct layouts. Default to 1 (uint8, most common for BP enums).
@@ -3127,10 +3128,10 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
 
             // Read raw value based on validated size
             int64_t rawVal = 0;
-            if (enumSize == 1) { uint8_t v = 0; Mem::ReadSafe(instanceAddr + fi.Offset, v); rawVal = v; }
-            else if (enumSize == 2) { int16_t v = 0; Mem::ReadSafe(instanceAddr + fi.Offset, v); rawVal = v; }
-            else if (enumSize == 4) { int32_t v = 0; Mem::ReadSafe(instanceAddr + fi.Offset, v); rawVal = v; }
-            else if (enumSize == 8) { int64_t v = 0; Mem::ReadSafe(instanceAddr + fi.Offset, v); rawVal = v; }
+            if (enumSize == 1) { uint8_t v = 0; Macht::ReadSafe(instanceAddr + fi.Offset, v); rawVal = v; }
+            else if (enumSize == 2) { int16_t v = 0; Macht::ReadSafe(instanceAddr + fi.Offset, v); rawVal = v; }
+            else if (enumSize == 4) { int32_t v = 0; Macht::ReadSafe(instanceAddr + fi.Offset, v); rawVal = v; }
+            else if (enumSize == 8) { int64_t v = 0; Macht::ReadSafe(instanceAddr + fi.Offset, v); rawVal = v; }
 
             fv.enumValue = rawVal;
             fv.size = enumSize;
@@ -3143,7 +3144,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
 
             // Populate hex
             uint8_t buf[8] = {};
-            Mem::ReadBytesSafe(instanceAddr + fi.Offset, buf, enumSize);
+            Macht::ReadBytesSafe(instanceAddr + fi.Offset, buf, enumSize);
             std::string hex;
             hex.reserve(enumSize * 2);
             for (int i = 0; i < enumSize; ++i) { char hx[3]; snprintf(hx, sizeof(hx), "%02X", buf[i]); hex += hx; }
@@ -3155,14 +3156,14 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
         // Handle ByteProperty: check if it has a UEnum* (byte-sized enum)
         if (fi.TypeName == "ByteProperty") {
             uintptr_t enumPtr = 0;
-            Mem::ReadSafe(fi.Address + DynOff::FBYTEPROP_ENUM, enumPtr);
+            Macht::ReadSafe(fi.Address + DynOff::FBYTEPROP_ENUM, enumPtr);
             if (enumPtr) {
                 // Validate it's actually a UEnum by checking its class name
                 uintptr_t enumClass = GetClass(enumPtr);
                 std::string enumClassName = enumClass ? GetName(enumClass) : "";
                 if (enumClassName == "Enum" || enumClassName == "UserDefinedEnum") {
                     uint8_t rawVal = 0;
-                    Mem::ReadSafe(instanceAddr + fi.Offset, rawVal);
+                    Macht::ReadSafe(instanceAddr + fi.Offset, rawVal);
                     fv.enumValue = rawVal;
                     fv.enumName = ResolveEnumValue(enumPtr, rawVal);
                     fv.enumAddr = enumPtr;
@@ -3185,8 +3186,8 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
             // Hex of the TArray<wchar_t> header (Data ptr + Count)
             uintptr_t strData = 0;
             int32_t strCount = 0;
-            Mem::ReadSafe(instanceAddr + fi.Offset, strData);
-            Mem::ReadSafe(instanceAddr + fi.Offset + 8, strCount);
+            Macht::ReadSafe(instanceAddr + fi.Offset, strData);
+            Macht::ReadSafe(instanceAddr + fi.Offset + 8, strCount);
             char buf[48];
             snprintf(buf, sizeof(buf), "%016llX %08X",
                 static_cast<unsigned long long>(strData), strCount);
@@ -3203,7 +3204,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
 
             // Hex: show the ITextData pointer
             uintptr_t textDataPtr = 0;
-            Mem::ReadSafe(instanceAddr + fi.Offset, textDataPtr);
+            Macht::ReadSafe(instanceAddr + fi.Offset, textDataPtr);
             char buf[20];
             snprintf(buf, sizeof(buf), "%016llX", static_cast<unsigned long long>(textDataPtr));
             fv.hexValue = buf;
@@ -3217,8 +3218,8 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
             uintptr_t fieldAddr = instanceAddr + fi.Offset;
 
             int32_t objIdx = 0, serial = 0;
-            Mem::ReadSafe(fieldAddr, objIdx);
-            Mem::ReadSafe(fieldAddr + 4, serial);
+            Macht::ReadSafe(fieldAddr, objIdx);
+            Macht::ReadSafe(fieldAddr + 4, serial);
             uintptr_t target = ResolveWeakObjectPtr(objIdx, serial);
             std::string funcName = ReadFName(fieldAddr + 8);
 
@@ -3241,7 +3242,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
             // Hex: FWeakObjectPtr + FName raw bytes
             int delegateSize = 8 + fnameSize;
             std::vector<uint8_t> buf(delegateSize, 0);
-            if (Mem::ReadBytesSafe(fieldAddr, buf.data(), delegateSize)) {
+            if (Macht::ReadBytesSafe(fieldAddr, buf.data(), delegateSize)) {
                 std::string hex;
                 hex.reserve(delegateSize * 2);
                 for (auto b : buf) { char hx[3]; snprintf(hx, sizeof(hx), "%02X", b); hex += hx; }
@@ -3263,8 +3264,8 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
             // Read TArray<FScriptDelegate> header
             uintptr_t data = 0;
             int32_t count = 0;
-            Mem::ReadSafe(fieldAddr, data);
-            Mem::ReadSafe(fieldAddr + 8, count);
+            Macht::ReadSafe(fieldAddr, data);
+            Macht::ReadSafe(fieldAddr + 8, count);
 
             if (count < 0 || count > 256) count = 0;  // Sanity clamp
 
@@ -3280,7 +3281,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                 for (int i = 0; i < previewCount; ++i) {
                     uintptr_t elemAddr = data + static_cast<int64_t>(i) * delegateElemSize;
                     int32_t objIdx = 0, serial = 0;
-                    if (!Mem::ReadSafe(elemAddr, objIdx) || !Mem::ReadSafe(elemAddr + 4, serial))
+                    if (!Macht::ReadSafe(elemAddr, objIdx) || !Macht::ReadSafe(elemAddr + 4, serial))
                         continue;
 
                     uintptr_t target = ResolveWeakObjectPtr(objIdx, serial);
@@ -3332,7 +3333,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
         }
         if (readSize > 0 && readSize <= 256) {
             std::vector<uint8_t> buf(readSize, 0);
-            if (Mem::ReadBytesSafe(instanceAddr + fi.Offset, buf.data(), readSize)) {
+            if (Macht::ReadBytesSafe(instanceAddr + fi.Offset, buf.data(), readSize)) {
                 // Build hex string
                 std::string hex;
                 hex.reserve(readSize * 2);
@@ -3404,7 +3405,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
     auto loopEnd = std::chrono::steady_clock::now();
     auto totalMs = std::chrono::duration_cast<std::chrono::milliseconds>(loopEnd - loopStart).count();
 
-    Logger::Info("WALK:perf", "WalkInstance '%s' (%s): %zu fields in %lldms (WalkClass=%lldms) "
+    Sein::Info("WALK:perf", "WalkInstance '%s' (%s): %zu fields in %lldms (WalkClass=%lldms) "
         "| Obj:%d/%lldms Struct:%d/%lldms Array:%d/%lldms Scalar:%d/%lldms",
         result.name.c_str(), result.className.c_str(), result.fields.size(), totalMs, walkClassMs,
         nObj, tObj, nStruct, tStruct, nArray, tArray, nScalar, tScalar);
@@ -3417,7 +3418,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
 // live values from representative instances (Phase 2 of search).
 // ============================================================
 void ResolvePropertyPreviews(
-    std::vector<ObjectArray::PropertyMatch>& matches,
+    std::vector<Aura::PropertyMatch>& matches,
     const std::unordered_map<uintptr_t, uintptr_t>& instanceMap)
 {
     for (auto& m : matches) {
@@ -3441,7 +3442,7 @@ void ResolvePropertyPreviews(
         {
             if (sz > 0 && sz <= 64) {
                 uint8_t buf[64] = {};
-                if (Mem::ReadBytesSafe(inst + off, buf, sz)) {
+                if (Macht::ReadBytesSafe(inst + off, buf, sz)) {
                     m.preview = InterpretValue(t, buf, sz);
                 }
             }
@@ -3452,7 +3453,7 @@ void ResolvePropertyPreviews(
         if (t == "BoolProperty") {
             uint8_t rawByte = 0;
             int readOff = off + m.boolByteOffset;
-            if (Mem::ReadSafe(inst + readOff, rawByte)) {
+            if (Macht::ReadSafe(inst + readOff, rawByte)) {
                 if (m.boolFieldMask != 0) {
                     m.preview = (rawByte & m.boolFieldMask) ? "true" : "false";
                 } else {
@@ -3481,10 +3482,10 @@ void ResolvePropertyPreviews(
         // --- EnumProperty: read raw int + resolve enum name ---
         if (t == "EnumProperty") {
             int64_t rawVal = 0;
-            if (sz == 1)      { uint8_t v = 0; Mem::ReadSafe(inst + off, v); rawVal = v; }
-            else if (sz == 2) { int16_t v = 0; Mem::ReadSafe(inst + off, v); rawVal = v; }
-            else if (sz == 4) { int32_t v = 0; Mem::ReadSafe(inst + off, v); rawVal = v; }
-            else if (sz == 8) { int64_t v = 0; Mem::ReadSafe(inst + off, v); rawVal = v; }
+            if (sz == 1)      { uint8_t v = 0; Macht::ReadSafe(inst + off, v); rawVal = v; }
+            else if (sz == 2) { int16_t v = 0; Macht::ReadSafe(inst + off, v); rawVal = v; }
+            else if (sz == 4) { int32_t v = 0; Macht::ReadSafe(inst + off, v); rawVal = v; }
+            else if (sz == 8) { int64_t v = 0; Macht::ReadSafe(inst + off, v); rawVal = v; }
 
             if (m.enumAddr) {
                 std::string enumName = ResolveEnumValue(m.enumAddr, rawVal);
@@ -3503,7 +3504,7 @@ void ResolvePropertyPreviews(
             t == "SoftClassProperty")
         {
             uintptr_t ptr = 0;
-            Mem::ReadSafe(inst + off, ptr);
+            Macht::ReadSafe(inst + off, ptr);
             if (!ptr) {
                 m.preview = "null";
             } else {
@@ -3523,7 +3524,7 @@ void ResolvePropertyPreviews(
         if (t == "StructProperty") {
             if (sz > 0 && sz <= 256) {
                 std::vector<uint8_t> buf(sz, 0);
-                if (Mem::ReadBytesSafe(inst + off, buf.data(), sz)) {
+                if (Macht::ReadBytesSafe(inst + off, buf.data(), sz)) {
                     std::string hint = InterpretValue(t, buf.data(), sz);
                     if (!hint.empty()) {
                         m.preview = hint;
@@ -3540,8 +3541,8 @@ void ResolvePropertyPreviews(
 
         // --- ArrayProperty: read TArray count ---
         if (t == "ArrayProperty") {
-            Mem::TArrayView arr;
-            if (Mem::ReadTArray(inst + off, arr) && arr.Count >= 0) {
+            Macht::TArrayView arr;
+            if (Macht::ReadTArray(inst + off, arr) && arr.Count >= 0) {
                 m.preview = "[" + std::to_string(arr.Count) + " x " +
                             (m.innerType.empty() ? "?" : m.innerType) + "]";
             }
@@ -3553,7 +3554,7 @@ void ResolvePropertyPreviews(
             // FScriptMap layout: FScriptSet { FHashAllocator {SparseArray {Data(8) Count(4) ...}}}
             // The count is at offset +8 within the FScriptMap (FScriptSet.Elements.Count)
             int32_t count = 0;
-            Mem::ReadSafe(inst + off + 8, count);
+            Macht::ReadSafe(inst + off + 8, count);
             if (count >= 0 && count < 1000000) {
                 std::string keyStr = m.keyType.empty() ? "?" : m.keyType;
                 std::string valStr = m.valueType.empty() ? "?" : m.valueType;
@@ -3574,7 +3575,7 @@ void ResolvePropertyPreviews(
         // --- SetProperty: read count ---
         if (t == "SetProperty") {
             int32_t count = 0;
-            Mem::ReadSafe(inst + off + 8, count);
+            Macht::ReadSafe(inst + off + 8, count);
             if (count >= 0 && count < 1000000) {
                 m.preview = "{Set: " + std::to_string(count) + "}";
             }
@@ -3609,13 +3610,13 @@ static int32_t ProbeRowMapOffset(uintptr_t dataTableAddr, const ClassInfo& ci) {
 
     int fnameSize = DynOff::bCasePreservingName ? 0x10 : 0x08;
     int pairSize  = fnameSize + 8;  // FName + uint8*
-    int stride    = Mem::ComputeSetElementStride(pairSize);
+    int stride    = Macht::ComputeSetElementStride(pairSize);
 
     // Scan forward from end of reflected properties, up to +256 bytes
     for (int32_t delta = 0; delta <= 256; delta += 8) {
         int32_t candidate = endReflected + delta;
-        Mem::TSparseArrayView sa;
-        if (!Mem::ReadTSparseArray(dataTableAddr + candidate, sa))
+        Macht::TSparseArrayView sa;
+        if (!Macht::ReadTSparseArray(dataTableAddr + candidate, sa))
             continue;
 
         // Basic sanity
@@ -3634,22 +3635,22 @@ static int32_t ProbeRowMapOffset(uintptr_t dataTableAddr, const ClassInfo& ci) {
         // Extra validation: read first allocated element
         bool validated = false;
         for (int32_t idx = 0; idx < sa.MaxIndex && idx < 32; ++idx) {
-            if (!Mem::IsSparseIndexAllocated(sa, idx))
+            if (!Macht::IsSparseIndexAllocated(sa, idx))
                 continue;
 
             uintptr_t elemAddr = sa.Data + (idx * stride);
 
             // Read FName key
             int32_t compIndex = 0;
-            if (!Mem::ReadSafe(elemAddr, compIndex))
+            if (!Macht::ReadSafe(elemAddr, compIndex))
                 break;
-            std::string keyName = FNamePool::GetString(compIndex);
+            std::string keyName = Serie::GetString(compIndex);
             if (keyName.empty() || keyName == "None")
                 break;  // Legit RowMap entries have non-None row names
 
             // Read uint8* value pointer
             uintptr_t rowPtr = 0;
-            if (!Mem::ReadSafe(elemAddr + fnameSize, rowPtr))
+            if (!Macht::ReadSafe(elemAddr + fnameSize, rowPtr))
                 break;
             if (rowPtr < 0x10000 || rowPtr > 0x7FFFFFFFFFFF)
                 break;
@@ -3659,13 +3660,13 @@ static int32_t ProbeRowMapOffset(uintptr_t dataTableAddr, const ClassInfo& ci) {
         }
 
         if (validated) {
-            Logger::Info("WALK", "ProbeRowMapOffset: found RowMap at DataTable+0x%X "
+            Sein::Info("WALK", "ProbeRowMapOffset: found RowMap at DataTable+0x%X "
                          "(count=%d, stride=%d)", candidate, count, stride);
             return candidate;
         }
     }
 
-    Logger::Warn("WALK", "ProbeRowMapOffset: could not find RowMap (endReflected=0x%X)",
+    Sein::Warn("WALK", "ProbeRowMapOffset: could not find RowMap (endReflected=0x%X)",
                  endReflected);
     return -1;
 }
@@ -3696,7 +3697,7 @@ DataTableWalkResult WalkDataTableRows(uintptr_t dataTableAddr, int32_t offset, i
     uintptr_t rowStructAddr = 0;
     for (const auto& fi : ci.Fields) {
         if (fi.Name == "RowStruct" && (fi.TypeName == "ObjectProperty" || fi.TypeName == "ClassProperty")) {
-            Mem::ReadSafe(dataTableAddr + fi.Offset, rowStructAddr);
+            Macht::ReadSafe(dataTableAddr + fi.Offset, rowStructAddr);
             break;
         }
     }
@@ -3724,15 +3725,15 @@ DataTableWalkResult WalkDataTableRows(uintptr_t dataTableAddr, int32_t offset, i
     result.rowMapOffset = rowMapOffset;
 
     // Read TSparseArray
-    Mem::TSparseArrayView sa;
-    if (!Mem::ReadTSparseArray(dataTableAddr + rowMapOffset, sa)) {
+    Macht::TSparseArrayView sa;
+    if (!Macht::ReadTSparseArray(dataTableAddr + rowMapOffset, sa)) {
         result.error = "Failed to read TSparseArray at RowMap offset";
         return result;
     }
 
     int fnameSize = DynOff::bCasePreservingName ? 0x10 : 0x08;
     int pairSize  = fnameSize + 8;
-    int stride    = Mem::ComputeSetElementStride(pairSize);
+    int stride    = Macht::ComputeSetElementStride(pairSize);
 
     result.fnameSize = fnameSize;
     result.stride    = stride;
@@ -3742,7 +3743,7 @@ DataTableWalkResult WalkDataTableRows(uintptr_t dataTableAddr, int32_t offset, i
     int32_t read = 0;
     int32_t skipped = 0;
     for (int32_t idx = 0; idx < sa.MaxIndex && read < limit; ++idx) {
-        if (!Mem::IsSparseIndexAllocated(sa, idx))
+        if (!Macht::IsSparseIndexAllocated(sa, idx))
             continue;
         // Skip entries before 'offset'
         if (skipped < offset) { ++skipped; continue; }
@@ -3758,7 +3759,7 @@ DataTableWalkResult WalkDataTableRows(uintptr_t dataTableAddr, int32_t offset, i
 
         // Read uint8* value pointer (row data address)
         uintptr_t rowPtr = 0;
-        if (!Mem::ReadSafe(elemAddr + fnameSize, rowPtr) || !rowPtr) {
+        if (!Macht::ReadSafe(elemAddr + fnameSize, rowPtr) || !rowPtr) {
             row.rowName += " (null)";
             result.rows.push_back(std::move(row));
             ++read;
@@ -3770,7 +3771,7 @@ DataTableWalkResult WalkDataTableRows(uintptr_t dataTableAddr, int32_t offset, i
         int32_t rowSize = rowCI.PropertiesSize;
         if (rowSize <= 0 || rowSize > 4096) rowSize = 256;  // fallback
         std::vector<uint8_t> rowBuf(rowSize, 0);
-        bool rowBufOk = Mem::ReadBytesSafe(rowPtr, rowBuf.data(), rowSize);
+        bool rowBufOk = Macht::ReadBytesSafe(rowPtr, rowBuf.data(), rowSize);
 
         // Read fields using RowStruct layout
         for (const auto& fi : rowCI.Fields) {
@@ -3825,7 +3826,7 @@ DataTableWalkResult WalkDataTableRows(uintptr_t dataTableAddr, int32_t offset, i
                     fv.structDataAddr = rowPtr + fi.Offset;
                     // Read UScriptStruct* from the FProperty
                     uintptr_t structClass = 0;
-                    if (Mem::ReadSafe(fi.Address + DynOff::FSTRUCTPROP_STRUCT, structClass) && structClass)
+                    if (Macht::ReadSafe(fi.Address + DynOff::FSTRUCTPROP_STRUCT, structClass) && structClass)
                         fv.structClassAddr = structClass;
                 }
 
@@ -3843,7 +3844,7 @@ DataTableWalkResult WalkDataTableRows(uintptr_t dataTableAddr, int32_t offset, i
                     fv.enumValue = rawVal;
                     // Resolve enum address and name
                     uintptr_t enumAddr = 0;
-                    if (Mem::ReadSafe(fi.Address + DynOff::FENUMPROP_ENUM, enumAddr) && enumAddr) {
+                    if (Macht::ReadSafe(fi.Address + DynOff::FENUMPROP_ENUM, enumAddr) && enumAddr) {
                         fv.enumAddr = enumAddr;
                         fv.enumName = ResolveEnumValue(enumAddr, rawVal);
                     }
@@ -3858,9 +3859,9 @@ DataTableWalkResult WalkDataTableRows(uintptr_t dataTableAddr, int32_t offset, i
     }
 
     result.ok = true;
-    Logger::Info("WALK", "WalkDataTableRows: %s — %d rows read (total=%d, offset=%d, stride=%d, RowMap=+0x%X)",
+    Sein::Info("WALK", "WalkDataTableRows: %s — %d rows read (total=%d, offset=%d, stride=%d, RowMap=+0x%X)",
                  result.rowStructName.c_str(), read, result.rowCount, offset, stride, rowMapOffset);
     return result;
 }
 
-} // namespace UStructWalker
+} // namespace Ubel

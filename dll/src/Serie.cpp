@@ -1,21 +1,20 @@
 // ============================================================
-// FNamePool.cpp — UE FNamePool / TNameEntryArray string resolution
-// Supports UE4.25+ (FNamePool) and UE5 (FNamePool with varying chunk bits)
-// Also supports UE4.26-style hash-prefixed FNameEntry (4B hash + 2B header)
+// Serie — 賽莉耶 (千年大魔法使 — Living-History Great Mage)
+// FNamePool: FName string resolution (UE5 pool + UE4 TNameEntry)
 // ============================================================
 
-#include "FNamePool.h"
-#include "Memory.h"
+#include "Serie.h"
+#include "Macht.h"
 #define LOG_CAT "FNAM"
-#include "Logger.h"
-#include "Constants.h"
+#include "Sein.h"
+#include "Grimoire.h"
 
 #include <atomic>
 #include <cstring>
 #include <vector>
 #include <string>
 
-namespace FNamePool {
+namespace Serie {
 
 static uintptr_t s_poolAddr = 0;
 static std::atomic<bool> s_initialized{false};
@@ -60,13 +59,13 @@ static int s_chunksOffset = 0; // Offset from pool address to chunk pointer arra
 // Returns true if successfully verified.
 static bool TryDecodeNone(uintptr_t entryAddr, int hdrOff) {
     uint16_t header = 0;
-    if (!Mem::ReadSafe(entryAddr + hdrOff, header)) return false;
+    if (!Macht::ReadSafe(entryAddr + hdrOff, header)) return false;
 
     auto tryFormat = [&](int shift, int mask) -> bool {
         int len = (header >> shift) & mask;
         if (len != 4) return false;
         char name[5] = {};
-        if (!Mem::ReadBytesSafe(entryAddr + hdrOff + 2, name, 4)) return false;
+        if (!Macht::ReadBytesSafe(entryAddr + hdrOff + 2, name, 4)) return false;
         return strcmp(name, "None") == 0;
     };
 
@@ -88,9 +87,9 @@ static uintptr_t GetEntryInternal(int32_t nameIndex) {
         int32_t elemIndex  = nameIndex % UE4_CHUNK_SIZE;
         if (chunkIndex < 0 || chunkIndex > 256) return 0;
         uintptr_t chunkPtr = 0;
-        if (!Mem::ReadSafe(s_poolAddr + chunkIndex * sizeof(uintptr_t), chunkPtr) || !chunkPtr) return 0;
+        if (!Macht::ReadSafe(s_poolAddr + chunkIndex * sizeof(uintptr_t), chunkPtr) || !chunkPtr) return 0;
         uintptr_t entryPtr = 0;
-        if (!Mem::ReadSafe(chunkPtr + elemIndex * sizeof(uintptr_t), entryPtr)) return 0;
+        if (!Macht::ReadSafe(chunkPtr + elemIndex * sizeof(uintptr_t), entryPtr)) return 0;
         return entryPtr;
     }
 
@@ -99,7 +98,7 @@ static uintptr_t GetEntryInternal(int32_t nameIndex) {
     if (chunkIndex < 0 || chunkIndex > 8192) return 0;
     uintptr_t chunkPtr = 0;
     uintptr_t chunksBase = s_poolAddr + s_chunksOffset;
-    if (!Mem::ReadSafe(chunksBase + chunkIndex * sizeof(uintptr_t), chunkPtr) || !chunkPtr) return 0;
+    if (!Macht::ReadSafe(chunksBase + chunkIndex * sizeof(uintptr_t), chunkPtr) || !chunkPtr) return 0;
     return chunkPtr + chunkOffset;
 }
 
@@ -111,13 +110,13 @@ static void DetectHeaderFormat() {
 
     // The header is at entry + s_headerOffset
     uint16_t header = 0;
-    if (!Mem::ReadSafe(entry + s_headerOffset, header)) return;
+    if (!Macht::ReadSafe(entry + s_headerOffset, header)) return;
 
     // Try Format A: len = header >> 6
     int lenA = header >> 6;
     if (lenA == 4) {
         char name[5] = {};
-        if (Mem::ReadBytesSafe(entry + s_headerOffset + 2, name, 4) && strcmp(name, "None") == 0) {
+        if (Macht::ReadBytesSafe(entry + s_headerOffset + 2, name, 4) && strcmp(name, "None") == 0) {
             s_lenShift = 6;
             s_lenMask = 0x3FF;
             s_wideFlag = 0;
@@ -130,7 +129,7 @@ static void DetectHeaderFormat() {
     int lenB = (header >> 1) & 0x7FF;
     if (lenB == 4) {
         char name[5] = {};
-        if (Mem::ReadBytesSafe(entry + s_headerOffset + 2, name, 4) && strcmp(name, "None") == 0) {
+        if (Macht::ReadBytesSafe(entry + s_headerOffset + 2, name, 4) && strcmp(name, "None") == 0) {
             s_lenShift = 1;
             s_lenMask = 0x7FF;
             s_wideFlag = 0;
@@ -146,7 +145,7 @@ static void DetectHeaderFormat() {
 // Returns true if the chunk at (poolAddr + chunksOffset)[0] -> FNameEntry looks like "None".
 static bool ValidateChunkForNone(uintptr_t poolAddr, int chunksOffset) {
     uintptr_t chunk0 = 0;
-    if (!Mem::ReadSafe(poolAddr + chunksOffset, chunk0) || !chunk0) return false;
+    if (!Macht::ReadSafe(poolAddr + chunksOffset, chunk0) || !chunk0) return false;
 
     // Pointer sanity
     if (chunk0 < 0x10000 || chunk0 > 0x00007FFFFFFFFFFF) return false;
@@ -183,10 +182,10 @@ static void DetectChunksOffset() {
     LOG_WARN("FNamePool: 'None' validation failed for all offsets, trying readable-pointer fallback");
     for (int off : offsets) {
         uintptr_t chunk0 = 0;
-        if (Mem::ReadSafe(s_poolAddr + off, chunk0) && chunk0 != 0 &&
+        if (Macht::ReadSafe(s_poolAddr + off, chunk0) && chunk0 != 0 &&
             chunk0 > 0x10000 && chunk0 < 0x00007FFFFFFFFFFF) {
             uint16_t testHeader = 0;
-            if (Mem::ReadSafe(chunk0, testHeader)) {
+            if (Macht::ReadSafe(chunk0, testHeader)) {
                 s_chunksOffset = off;
                 LOG_WARN("FNamePool: Chunks at offset 0x%X (unvalidated fallback)", off);
                 return;
@@ -216,13 +215,13 @@ static void DetectBlockOffsetBits() {
 
         uintptr_t chunkPtr = 0;
         uintptr_t chunksBase = s_poolAddr + s_chunksOffset;
-        if (!Mem::ReadSafe(chunksBase + ci * sizeof(uintptr_t), chunkPtr) || !chunkPtr) continue;
+        if (!Macht::ReadSafe(chunksBase + ci * sizeof(uintptr_t), chunkPtr) || !chunkPtr) continue;
 
         uintptr_t entry = chunkPtr + co;
 
         // Read header at the detected header offset
         uint16_t header = 0;
-        if (!Mem::ReadSafe(entry + s_headerOffset, header)) continue;
+        if (!Macht::ReadSafe(entry + s_headerOffset, header)) continue;
 
         // Try both header formats
         auto tryLen = [&](int shift, int lenMask) -> int {
@@ -240,7 +239,7 @@ static void DetectBlockOffsetBits() {
         // String starts at entry + s_headerOffset + 2
         char buf[8] = {};
         int readLen = len > 7 ? 7 : len;
-        if (!Mem::ReadBytesSafe(entry + s_headerOffset + 2, buf, readLen)) continue;
+        if (!Macht::ReadBytesSafe(entry + s_headerOffset + 2, buf, readLen)) continue;
 
         bool valid = true;
         for (int i = 0; i < readLen; ++i) {
@@ -267,13 +266,13 @@ static void DetectBlockOffsetBits() {
 static void DetectStride() {
     uintptr_t chunksBase = s_poolAddr + s_chunksOffset;
     uintptr_t chunk0 = 0;
-    if (!Mem::ReadSafe(chunksBase, chunk0) || !chunk0) return;
+    if (!Macht::ReadSafe(chunksBase, chunk0) || !chunk0) return;
 
     // Scan first 16 bytes of chunk[0] for "None" (0x4E6F6E65)
     // The offset where "None" appears tells us the header size.
     constexpr uint32_t NoneAsU32 = 0x656E6F4E; // "None" in little-endian
     char buf[16] = {};
-    if (!Mem::ReadBytesSafe(chunk0, buf, 16)) return;
+    if (!Macht::ReadBytesSafe(chunk0, buf, 16)) return;
 
     int noneOffset = -1;
     for (int i = 0; i <= 12; ++i) {
@@ -313,7 +312,7 @@ void Init(uintptr_t gnamesAddr, int headerOffset) {
     // Initial stride guess based on header offset.
     // Hash-prefixed entries (headerOffset=4) have uint32_t ComparisonId as first member,
     // raising alignof(FNameEntry) to 4 (vs 2 for standard entries with uint16_t header).
-    s_stride = (headerOffset >= 4) ? 4 : Constants::FNAME_STRIDE;
+    s_stride = (headerOffset >= 4) ? 4 : Grimoire::FNAME_STRIDE;
     LOG_INFO("FNamePool: Entry stride = %d (initial, hdrOff=%d)", s_stride, headerOffset);
 
     DetectChunksOffset();
@@ -363,12 +362,12 @@ uintptr_t GetEntry(int32_t nameIndex) {
 
         // Read chunk pointer from array
         uintptr_t chunkPtr = 0;
-        if (!Mem::ReadSafe(s_poolAddr + chunkIndex * sizeof(uintptr_t), chunkPtr) || !chunkPtr)
+        if (!Macht::ReadSafe(s_poolAddr + chunkIndex * sizeof(uintptr_t), chunkPtr) || !chunkPtr)
             return 0;
 
         // Each element in the chunk is a pointer to FNameEntry
         uintptr_t entryPtr = 0;
-        if (!Mem::ReadSafe(chunkPtr + elemIndex * sizeof(uintptr_t), entryPtr))
+        if (!Macht::ReadSafe(chunkPtr + elemIndex * sizeof(uintptr_t), entryPtr))
             return 0;
 
         return entryPtr;
@@ -384,7 +383,7 @@ uintptr_t GetEntry(int32_t nameIndex) {
     // Read chunk pointer
     uintptr_t chunkPtr = 0;
     uintptr_t chunksBase = s_poolAddr + s_chunksOffset;
-    if (!Mem::ReadSafe(chunksBase + chunkIndex * sizeof(uintptr_t), chunkPtr) || !chunkPtr) {
+    if (!Macht::ReadSafe(chunksBase + chunkIndex * sizeof(uintptr_t), chunkPtr) || !chunkPtr) {
         return 0;
     }
 
@@ -400,7 +399,7 @@ std::string GetString(int32_t nameIndex, int32_t number) {
     if (s_isUE4Mode) {
         // UE4: null-terminated string at fixed offset within FNameEntry
         char buf[256] = {};
-        if (!Mem::ReadBytesSafe(entry + s_ue4StringOffset, buf, 255)) return "";
+        if (!Macht::ReadBytesSafe(entry + s_ue4StringOffset, buf, 255)) return "";
         buf[255] = '\0';
 
         // Sanitize: ensure valid ASCII
@@ -425,7 +424,7 @@ std::string GetString(int32_t nameIndex, int32_t number) {
     // Entry layout: [s_headerOffset bytes prefix][2-byte header][string data]
     // s_headerOffset is 0 for standard UE5, 4 for hash-prefixed UE4.26
     uint16_t header = 0;
-    if (!Mem::ReadSafe(entry + s_headerOffset, header)) return "";
+    if (!Macht::ReadSafe(entry + s_headerOffset, header)) return "";
 
     int len = (header >> s_lenShift) & s_lenMask;
     bool isWide = (header & (1 << s_wideFlag)) != 0;
@@ -441,7 +440,7 @@ std::string GetString(int32_t nameIndex, int32_t number) {
         // Wide character name — convert UTF-16 (wchar_t on Windows) to UTF-8.
         // UE FNames can store localized display names (e.g., Japanese) in wide format.
         std::vector<wchar_t> wbuf(len + 1, 0);
-        if (!Mem::ReadBytesSafe(entry + strStart, wbuf.data(), len * sizeof(wchar_t))) return "";
+        if (!Macht::ReadBytesSafe(entry + strStart, wbuf.data(), len * sizeof(wchar_t))) return "";
         result.reserve(len * 3); // worst case: 3 bytes per BMP char
         for (int i = 0; i < len; ++i) {
             auto ch = static_cast<uint32_t>(wbuf[i]);
@@ -462,7 +461,7 @@ std::string GetString(int32_t nameIndex, int32_t number) {
         // ANSI name — sanitize non-ASCII bytes to produce valid UTF-8.
         // UE FNames should be pure ASCII; non-ASCII means corrupted/encrypted data.
         std::vector<char> buf(len + 1, 0);
-        if (!Mem::ReadBytesSafe(entry + strStart, buf.data(), len)) return "";
+        if (!Macht::ReadBytesSafe(entry + strStart, buf.data(), len)) return "";
         result.reserve(len);
         for (int i = 0; i < len; ++i) {
             auto c = static_cast<unsigned char>(buf[i]);
@@ -517,7 +516,7 @@ void LogDiagnostics() {
     int totalValidChunks = 0;
     for (int i = 0; i <= 512; ++i) {
         uintptr_t chunkPtr = 0;
-        if (Mem::ReadSafe(chunksBase + i * sizeof(uintptr_t), chunkPtr) && chunkPtr != 0) {
+        if (Macht::ReadSafe(chunksBase + i * sizeof(uintptr_t), chunkPtr) && chunkPtr != 0) {
             ++totalValidChunks;
             maxValidChunk = i;
         }
@@ -554,7 +553,7 @@ void LogDiagnostics() {
         if (!entry) { ++stats.entryNull; continue; }
 
         uint16_t header = 0;
-        if (!Mem::ReadSafe(entry + s_headerOffset, header)) { ++stats.headerReadFail; continue; }
+        if (!Macht::ReadSafe(entry + s_headerOffset, header)) { ++stats.headerReadFail; continue; }
 
         int len = (header >> s_lenShift) & s_lenMask;
         if (len <= 0) {
@@ -580,7 +579,7 @@ void LogDiagnostics() {
 
         char buf[8] = {};
         int readLen = (len > 7) ? 7 : len;
-        if (!Mem::ReadBytesSafe(entry + s_headerOffset + 2, buf, readLen)) { ++stats.stringReadFail; continue; }
+        if (!Macht::ReadBytesSafe(entry + s_headerOffset + 2, buf, readLen)) { ++stats.stringReadFail; continue; }
 
         bool hasValid = false;
         for (int i = 0; i < readLen; ++i) {
@@ -606,9 +605,9 @@ void LogDiagnostics() {
     // Dump first 16 bytes of chunks 0 and 1 for visual inspection
     for (int c = 0; c <= 1 && c <= maxValidChunk; ++c) {
         uintptr_t chunkPtr = 0;
-        if (Mem::ReadSafe(chunksBase + c * sizeof(uintptr_t), chunkPtr) && chunkPtr) {
+        if (Macht::ReadSafe(chunksBase + c * sizeof(uintptr_t), chunkPtr) && chunkPtr) {
             uint8_t dump[32] = {};
-            Mem::ReadBytesSafe(chunkPtr, dump, 32);
+            Macht::ReadBytesSafe(chunkPtr, dump, 32);
             LOG_INFO("  Chunk[%d] @0x%llX: %02X %02X %02X %02X %02X %02X %02X %02X "
                      "%02X %02X %02X %02X %02X %02X %02X %02X "
                      "%02X %02X %02X %02X %02X %02X %02X %02X "
@@ -622,4 +621,4 @@ void LogDiagnostics() {
     }
 }
 
-} // namespace FNamePool
+} // namespace Serie

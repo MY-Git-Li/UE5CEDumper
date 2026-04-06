@@ -91,19 +91,19 @@ if(MSVC)
 endif()
 
 add_library(UE5Dumper SHARED
-    src/dllmain.cpp
-    src/CEPlugin.cpp
-    src/Memory.cpp
-    src/Logger.cpp
-    src/OffsetFinder.cpp
-    src/ObjectArray.cpp
-    src/FNamePool.cpp
-    src/UStructWalker.cpp
-    src/ExportAPI.cpp
-    src/PipeServer.cpp
-    src/GameThreadDispatch.cpp
-    src/Mailbox.cpp
-    src/HintCache.cpp
+    src/Heiter.cpp
+    src/Methode.cpp
+    src/Macht.cpp
+    src/Sein.cpp
+    src/Genau.cpp
+    src/Aura.cpp
+    src/Serie.cpp
+    src/Ubel.cpp
+    src/Frieren.cpp
+    src/Fern.cpp
+    src/Stark.cpp
+    src/Mimic.cpp
+    src/Flamme.cpp
     src/version.rc
 )
 
@@ -171,19 +171,19 @@ option(BUILD_PROXY_DLL "Build the proxy DLL (version.dll) target" OFF)
 
 if(BUILD_PROXY_DLL)
     add_library(UE5Dumper_Proxy SHARED
-        src/dllmain.cpp
-        src/ProxyVersion.cpp
-        src/Memory.cpp
-        src/Logger.cpp
-        src/OffsetFinder.cpp
-        src/ObjectArray.cpp
-        src/FNamePool.cpp
-        src/UStructWalker.cpp
-        src/ExportAPI.cpp
-        src/PipeServer.cpp
-        src/GameThreadDispatch.cpp
-        src/Mailbox.cpp
-        src/HintCache.cpp
+        src/Heiter.cpp
+        src/Lugner.cpp
+        src/Macht.cpp
+        src/Sein.cpp
+        src/Genau.cpp
+        src/Aura.cpp
+        src/Serie.cpp
+        src/Ubel.cpp
+        src/Frieren.cpp
+        src/Fern.cpp
+        src/Stark.cpp
+        src/Mimic.cpp
+        src/Flamme.cpp
         src/version.rc
     )
 

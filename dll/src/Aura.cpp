@@ -1,15 +1,16 @@
 // ============================================================
-// ObjectArray.cpp — FChunkedFixedUObjectArray implementation
+// Aura — 斷頭台的奧拉 (服從之秤 — Obedience Scale)
+// ObjectArray: FUObjectArray slot enumeration and validation
 // ============================================================
 
-#include "ObjectArray.h"
-#include "Memory.h"
+#include "Aura.h"
+#include "Macht.h"
 #define LOG_CAT "OARR"
-#include "Logger.h"
-#include "Constants.h"
-#include "FNamePool.h"
+#include "Sein.h"
+#include "Grimoire.h"
+#include "Serie.h"
 
-#include "UStructWalker.h"
+#include "Ubel.h"
 
 #include <algorithm>
 #include <cctype>
@@ -17,7 +18,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace ObjectArray {
+namespace Aura {
 
 // FUObjectArray layout offsets (auto-detected)
 struct ArrayLayout {
@@ -36,15 +37,15 @@ static bool        s_isFlat   = false; // true = non-chunked flat array (some UE
 // GAP #1: Decryption hook for encrypted GObjects pointers.
 // Default nullptr = identity (zero overhead — no indirect call on hot path).
 // Set by SetDecryptFunc() from CE Lua export before Init().
-static ObjectArray::DecryptFunc s_decryptFunc = nullptr;
+static Aura::DecryptFunc s_decryptFunc = nullptr;
 
-void ObjectArray::SetDecryptFunc(DecryptFunc func) {
+void Aura::SetDecryptFunc(DecryptFunc func) {
     s_decryptFunc = func;
     LOG_INFO("ObjectArray: Custom decryption function %s",
              func ? "SET" : "CLEARED (identity)");
 }
 
-uintptr_t ObjectArray::DecryptObjectPtr(uintptr_t rawPtr) {
+uintptr_t Aura::DecryptObjectPtr(uintptr_t rawPtr) {
     if (!rawPtr || !s_decryptFunc) return rawPtr;
     return s_decryptFunc(rawPtr);
 }
@@ -89,8 +90,8 @@ static bool LooksLikeHeapPtr(uintptr_t ptr) {
     // Must be in user-mode address range (below kernel boundary)
     if (ptr > 0x00007FFFFFFFFFFF) return false;
     // Reject pointers in the game module's code range (likely .text section)
-    uintptr_t modBase = Mem::GetModuleBase(nullptr);
-    uintptr_t modSize = Mem::GetModuleSize(nullptr);
+    uintptr_t modBase = Macht::GetModuleBase(nullptr);
+    uintptr_t modSize = Macht::GetModuleSize(nullptr);
     if (modBase && modSize && ptr >= modBase && ptr < modBase + modSize) return false;
     return true;
 }
@@ -99,11 +100,11 @@ static bool LooksLikeHeapPtr(uintptr_t ptr) {
 static void LogLayoutFields(uintptr_t addr, const ArrayLayout& layout, const char* presetName) {
     int32_t numElements = 0, maxElements = 0, numChunks = 0, maxChunks = 0;
     uintptr_t objPtr = 0;
-    Mem::ReadSafe(addr + layout.numElementsOffset, numElements);
-    Mem::ReadSafe(addr + layout.maxElementsOffset, maxElements);
-    Mem::ReadSafe(addr + layout.objectsOffset, objPtr);
-    if (layout.maxChunksOffset >= 0) Mem::ReadSafe(addr + layout.maxChunksOffset, maxChunks);
-    if (layout.numChunksOffset >= 0) Mem::ReadSafe(addr + layout.numChunksOffset, numChunks);
+    Macht::ReadSafe(addr + layout.numElementsOffset, numElements);
+    Macht::ReadSafe(addr + layout.maxElementsOffset, maxElements);
+    Macht::ReadSafe(addr + layout.objectsOffset, objPtr);
+    if (layout.maxChunksOffset >= 0) Macht::ReadSafe(addr + layout.maxChunksOffset, maxChunks);
+    if (layout.numChunksOffset >= 0) Macht::ReadSafe(addr + layout.numChunksOffset, numChunks);
 
     uintptr_t decObjPtr = DecryptObjectPtr(objPtr);
     LOG_INFO("ObjectArray: Layout '%s': Num=%d, Max=%d, NumChunks=%d, MaxChunks=%d, Objects=0x%llX%s",
@@ -118,15 +119,15 @@ static bool ValidateChunkedLayout(uintptr_t addr, const ArrayLayout& layout) {
     int32_t numElements = 0, maxElements = 0, numChunks = 0, maxChunks = 0;
     uintptr_t objPtr = 0;
 
-    if (!Mem::ReadSafe(addr + layout.numElementsOffset, numElements)) return false;
-    if (!Mem::ReadSafe(addr + layout.maxElementsOffset, maxElements)) return false;
-    if (!Mem::ReadSafe(addr + layout.objectsOffset, objPtr)) return false;
+    if (!Macht::ReadSafe(addr + layout.numElementsOffset, numElements)) return false;
+    if (!Macht::ReadSafe(addr + layout.maxElementsOffset, maxElements)) return false;
+    if (!Macht::ReadSafe(addr + layout.objectsOffset, objPtr)) return false;
     objPtr = DecryptObjectPtr(objPtr);
 
     bool hasChunkFields = (layout.maxChunksOffset >= 0 && layout.numChunksOffset >= 0);
     if (hasChunkFields) {
-        if (!Mem::ReadSafe(addr + layout.maxChunksOffset, maxChunks)) return false;
-        if (!Mem::ReadSafe(addr + layout.numChunksOffset, numChunks)) return false;
+        if (!Macht::ReadSafe(addr + layout.maxChunksOffset, maxChunks)) return false;
+        if (!Macht::ReadSafe(addr + layout.numChunksOffset, numChunks)) return false;
     }
 
     // --- Range checks ---
@@ -157,7 +158,7 @@ static bool ValidateChunkedLayout(uintptr_t addr, const ArrayLayout& layout) {
 
     // --- Pointer dereference validation ---
     uintptr_t chunk0 = 0;
-    if (!Mem::ReadSafe(objPtr, chunk0)) return false;
+    if (!Macht::ReadSafe(objPtr, chunk0)) return false;
 
     if (chunk0 == 0) {
         // chunk[0] null — unlikely for valid array, but accept if objPtr is heap
@@ -170,7 +171,7 @@ static bool ValidateChunkedLayout(uintptr_t addr, const ArrayLayout& layout) {
     if (hasChunkFields && numChunks > 1) {
         for (int i = 1; i < numChunks && i < 5; ++i) {
             uintptr_t chunkI = 0;
-            if (!Mem::ReadSafe(objPtr + i * sizeof(uintptr_t), chunkI)) return false;
+            if (!Macht::ReadSafe(objPtr + i * sizeof(uintptr_t), chunkI)) return false;
             if (chunkI && !LooksLikeHeapPtr(chunkI)) return false;
         }
     }
@@ -182,7 +183,7 @@ static bool DetectLayout(uintptr_t addr) {
     // Diagnostic: dump first 48 bytes at the GObjects address
     {
         uint64_t dump[6] = {};
-        Mem::ReadBytesSafe(addr, dump, sizeof(dump));
+        Macht::ReadBytesSafe(addr, dump, sizeof(dump));
         LOG_DEBUG("ObjectArray: GObjects@0x%llX: +00:%016llX +08:%016llX +10:%016llX +18:%016llX +20:%016llX +28:%016llX",
                   (unsigned long long)addr,
                   dump[0], dump[1], dump[2], dump[3], dump[4], dump[5]);
@@ -232,10 +233,10 @@ static bool DetectLayout(uintptr_t addr) {
     // Layout A/C (relaxed): Objects@+0x00, Num@+0x14
     {
         int32_t num = 0;
-        Mem::ReadSafe(addr + 0x14, num);
+        Macht::ReadSafe(addr + 0x14, num);
         if (num > 0 && num <= 0x800000) {
             uintptr_t objPtr = 0;
-            Mem::ReadSafe(addr + 0x00, objPtr);
+            Macht::ReadSafe(addr + 0x00, objPtr);
             objPtr = DecryptObjectPtr(objPtr);
             if (LooksLikeHeapPtr(objPtr)) {
                 s_layout = { 0x00, 0x10, 0x14, 0x18, 0x1C };
@@ -249,10 +250,10 @@ static bool DetectLayout(uintptr_t addr) {
     // Layout B (flat/alt): Objects@+0x10, Num@+0x04
     {
         int32_t num = 0;
-        Mem::ReadSafe(addr + 0x04, num);
+        Macht::ReadSafe(addr + 0x04, num);
         if (num > 0 && num <= 0x800000) {
             uintptr_t objPtr = 0;
-            Mem::ReadSafe(addr + 0x10, objPtr);
+            Macht::ReadSafe(addr + 0x10, objPtr);
             objPtr = DecryptObjectPtr(objPtr);
             if (LooksLikeHeapPtr(objPtr)) {
                 s_layout = { 0x10, 0x08, 0x04, 0x0C, -1 };
@@ -266,11 +267,11 @@ static bool DetectLayout(uintptr_t addr) {
     // Layout D (UE4 extended relaxed): Objects@+0x10, Num@+0x1C, Max@+0x18
     {
         int32_t num = 0, max = 0;
-        Mem::ReadSafe(addr + 0x1C, num);
-        Mem::ReadSafe(addr + 0x18, max);
+        Macht::ReadSafe(addr + 0x1C, num);
+        Macht::ReadSafe(addr + 0x18, max);
         if (num > 0 && num <= max && max <= 0x800000) {
             uintptr_t objPtr = 0;
-            Mem::ReadSafe(addr + 0x10, objPtr);
+            Macht::ReadSafe(addr + 0x10, objPtr);
             objPtr = DecryptObjectPtr(objPtr);
             if (LooksLikeHeapPtr(objPtr)) {
                 s_layout = { 0x10, 0x18, 0x1C, 0x20, 0x24 };
@@ -285,11 +286,11 @@ static bool DetectLayout(uintptr_t addr) {
     // FUObjectArray with GC prefix + PreAllocatedObjects ptr before array fields.
     {
         int32_t num = 0, max = 0;
-        Mem::ReadSafe(addr + 0x24, num);
-        Mem::ReadSafe(addr + 0x20, max);
+        Macht::ReadSafe(addr + 0x24, num);
+        Macht::ReadSafe(addr + 0x20, max);
         if (num > 0 && num <= max && max <= 0x800000) {
             uintptr_t objPtr = 0;
-            Mem::ReadSafe(addr + 0x10, objPtr);
+            Macht::ReadSafe(addr + 0x10, objPtr);
             objPtr = DecryptObjectPtr(objPtr);
             if (LooksLikeHeapPtr(objPtr)) {
                 s_layout = { 0x10, 0x20, 0x24, 0x28, 0x2C };
@@ -309,10 +310,10 @@ static bool DetectLayout(uintptr_t addr) {
 static bool LooksLikeUObject(uintptr_t obj) {
     if (!obj || obj < 0x10000 || obj > 0x00007FFFFFFFFFFF) return false;
     uintptr_t cls = 0;
-    if (!Mem::ReadSafe(obj + 0x10, cls)) return false;
+    if (!Macht::ReadSafe(obj + 0x10, cls)) return false;
     if (cls < 0x10000 || cls > 0x00007FFFFFFFFFFF) return false;
     uintptr_t clsCls = 0;
-    if (!Mem::ReadSafe(cls + 0x10, clsCls)) return false;
+    if (!Macht::ReadSafe(cls + 0x10, clsCls)) return false;
     if (clsCls < 0x10000 || clsCls > 0x00007FFFFFFFFFFF) return false;
     return true;
 }
@@ -328,7 +329,7 @@ static void ProbeStride(uintptr_t chunkBase, int stride, int maxItems,
         int64_t byteOff = static_cast<int64_t>(idx) * stride;
 
         uintptr_t obj = 0;
-        if (!Mem::ReadSafe(chunkBase + byteOff, obj)) {
+        if (!Macht::ReadSafe(chunkBase + byteOff, obj)) {
             ++outBad;
             if (outBad > 30 && outGood == 0) break;  // Too many read failures, give up
             continue;
@@ -348,10 +349,10 @@ static void ProbeStride(uintptr_t chunkBase, int stride, int maxItems,
         ++outGood;
 
         // If FNamePool is available, use strong validation
-        if (FNamePool::IsInitialized()) {
+        if (Serie::IsInitialized()) {
             uint32_t nameIdx = 0;
-            if (Mem::ReadSafe(obj + Constants::OFF_UOBJECT_NAME, nameIdx)) {
-                std::string name = FNamePool::GetString(nameIdx);
+            if (Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_NAME, nameIdx)) {
+                std::string name = Serie::GetString(nameIdx);
                 if (!name.empty() && name != "None") {
                     bool validAscii = true;
                     for (char c : name) {
@@ -465,7 +466,7 @@ static void ProbeAllStrides(uintptr_t base, int maxItems, const char* phase,
 // Uses tiebreaker: when named counts are equal, prefer stride with fewer bad items.
 static void DetectItemSize() {
     uintptr_t chunkTable = 0;
-    if (!Mem::ReadSafe(s_arrayAddr + s_layout.objectsOffset, chunkTable) || !chunkTable) {
+    if (!Macht::ReadSafe(s_arrayAddr + s_layout.objectsOffset, chunkTable) || !chunkTable) {
         LOG_WARN("ObjectArray: Cannot read chunk table for item size detection");
         return;
     }
@@ -474,14 +475,14 @@ static void DetectItemSize() {
     // Diagnostic: dump first 64 bytes at chunkTable address
     {
         uint64_t dump[8] = {};
-        Mem::ReadBytesSafe(chunkTable, dump, sizeof(dump));
+        Macht::ReadBytesSafe(chunkTable, dump, sizeof(dump));
         LOG_DEBUG("ObjectArray: chunkTable@0x%llX: +00:%016llX +08:%016llX +10:%016llX +18:%016llX +20:%016llX +28:%016llX +30:%016llX +38:%016llX",
                   (unsigned long long)chunkTable,
                   dump[0], dump[1], dump[2], dump[3], dump[4], dump[5], dump[6], dump[7]);
     }
 
     uintptr_t chunk0 = 0;
-    if (!Mem::ReadSafe(chunkTable, chunk0) || !chunk0) {
+    if (!Macht::ReadSafe(chunkTable, chunk0) || !chunk0) {
         LOG_WARN("ObjectArray: Cannot read chunk[0] for item size detection");
         return;
     }
@@ -509,12 +510,12 @@ static void DetectItemSize() {
     // (e.g. 0x40000000 = EObjectFlags), which fails LooksLikeHeapPtr.
     {
         uintptr_t chunk1 = 0;
-        Mem::ReadSafe(chunkTable + sizeof(uintptr_t), chunk1);
+        Macht::ReadSafe(chunkTable + sizeof(uintptr_t), chunk1);
         int32_t numElements = GetCount();
         bool mightBeFlat = false;
 
         if (chunk0 && numElements > 0) {
-            int chunksNeeded = (numElements + Constants::OBJECTS_PER_CHUNK - 1) / Constants::OBJECTS_PER_CHUNK;
+            int chunksNeeded = (numElements + Grimoire::OBJECTS_PER_CHUNK - 1) / Grimoire::OBJECTS_PER_CHUNK;
             if (chunksNeeded >= 2) {
                 // Validate chunk[1]: in a real chunk table, chunk[1] must be a valid heap pointer.
                 // LooksLikeHeapPtr alone is insufficient — 32-bit values like EObjectFlags
@@ -525,7 +526,7 @@ static void DetectItemSize() {
                 if (chunk1Valid && chunk1 < 0x100000000ULL) {
                     // Value fits in 32 bits — suspicious. Verify by dereference.
                     uintptr_t testDeref = 0;
-                    if (!Mem::ReadSafe(chunk1, testDeref)) {
+                    if (!Macht::ReadSafe(chunk1, testDeref)) {
                         chunk1Valid = false;
                         LOG_DEBUG("ObjectArray: chunk[1]=0x%llX fits in 32 bits and is unreadable — not a chunk pointer",
                                   (unsigned long long)chunk1);
@@ -636,14 +637,14 @@ void Init(uintptr_t gobjectsAddr) {
 int32_t GetCount() {
     if (!s_arrayAddr) return 0;
     int32_t count = 0;
-    Mem::ReadSafe(s_arrayAddr + s_layout.numElementsOffset, count);
+    Macht::ReadSafe(s_arrayAddr + s_layout.numElementsOffset, count);
     return count;
 }
 
 int32_t GetMax() {
     if (!s_arrayAddr) return 0;
     int32_t max = 0;
-    Mem::ReadSafe(s_arrayAddr + s_layout.maxElementsOffset, max);
+    Macht::ReadSafe(s_arrayAddr + s_layout.maxElementsOffset, max);
     return max;
 }
 
@@ -660,7 +661,7 @@ uintptr_t GetByIndex(int32_t index) {
 
     // Read array base pointer
     uintptr_t arrayBase = 0;
-    if (!Mem::ReadSafe(s_arrayAddr + s_layout.objectsOffset, arrayBase) || !arrayBase) return 0;
+    if (!Macht::ReadSafe(s_arrayAddr + s_layout.objectsOffset, arrayBase) || !arrayBase) return 0;
     arrayBase = DecryptObjectPtr(arrayBase);
 
     uintptr_t itemAddr = 0;
@@ -670,17 +671,17 @@ uintptr_t GetByIndex(int32_t index) {
         itemAddr = arrayBase + static_cast<uintptr_t>(index) * s_itemSize;
     } else {
         // Chunked: arrayBase is a chunk table, each chunk holds OBJECTS_PER_CHUNK items
-        int32_t chunkIndex = index / Constants::OBJECTS_PER_CHUNK;
-        int32_t withinChunk = index % Constants::OBJECTS_PER_CHUNK;
+        int32_t chunkIndex = index / Grimoire::OBJECTS_PER_CHUNK;
+        int32_t withinChunk = index % Grimoire::OBJECTS_PER_CHUNK;
 
         uintptr_t chunk = 0;
-        if (!Mem::ReadSafe(arrayBase + chunkIndex * sizeof(uintptr_t), chunk) || !chunk) return 0;
+        if (!Macht::ReadSafe(arrayBase + chunkIndex * sizeof(uintptr_t), chunk) || !chunk) return 0;
 
         itemAddr = chunk + static_cast<uintptr_t>(withinChunk) * s_itemSize;
     }
 
     uintptr_t object = 0;
-    Mem::ReadSafe(itemAddr, object);
+    Macht::ReadSafe(itemAddr, object);
     return object;
 }
 
@@ -688,7 +689,7 @@ FUObjectItem* GetItem(int32_t index) {
     if (!s_arrayAddr || index < 0 || index >= GetCount()) return nullptr;
 
     uintptr_t arrayBase = 0;
-    if (!Mem::ReadSafe(s_arrayAddr + s_layout.objectsOffset, arrayBase) || !arrayBase) return nullptr;
+    if (!Macht::ReadSafe(s_arrayAddr + s_layout.objectsOffset, arrayBase) || !arrayBase) return nullptr;
     arrayBase = DecryptObjectPtr(arrayBase);
 
     uintptr_t itemAddr = 0;
@@ -696,23 +697,23 @@ FUObjectItem* GetItem(int32_t index) {
     if (s_isFlat) {
         itemAddr = arrayBase + static_cast<uintptr_t>(index) * s_itemSize;
     } else {
-        int32_t chunkIndex = index / Constants::OBJECTS_PER_CHUNK;
-        int32_t withinChunk = index % Constants::OBJECTS_PER_CHUNK;
+        int32_t chunkIndex = index / Grimoire::OBJECTS_PER_CHUNK;
+        int32_t withinChunk = index % Grimoire::OBJECTS_PER_CHUNK;
 
         uintptr_t chunk = 0;
-        if (!Mem::ReadSafe(arrayBase + chunkIndex * sizeof(uintptr_t), chunk) || !chunk) return nullptr;
+        if (!Macht::ReadSafe(arrayBase + chunkIndex * sizeof(uintptr_t), chunk) || !chunk) return nullptr;
 
         itemAddr = chunk + static_cast<uintptr_t>(withinChunk) * s_itemSize;
     }
 
-    return Mem::Ptr<FUObjectItem>(itemAddr);
+    return Macht::Ptr<FUObjectItem>(itemAddr);
 }
 
 int32_t GetSerialNumber(int32_t index) {
     if (!s_arrayAddr || index < 0 || index >= GetCount()) return 0;
 
     uintptr_t arrayBase = 0;
-    if (!Mem::ReadSafe(s_arrayAddr + s_layout.objectsOffset, arrayBase) || !arrayBase)
+    if (!Macht::ReadSafe(s_arrayAddr + s_layout.objectsOffset, arrayBase) || !arrayBase)
         return 0;
     arrayBase = DecryptObjectPtr(arrayBase);
 
@@ -720,10 +721,10 @@ int32_t GetSerialNumber(int32_t index) {
     if (s_isFlat) {
         itemAddr = arrayBase + static_cast<uintptr_t>(index) * s_itemSize;
     } else {
-        int32_t chunkIndex  = index / Constants::OBJECTS_PER_CHUNK;
-        int32_t withinChunk = index % Constants::OBJECTS_PER_CHUNK;
+        int32_t chunkIndex  = index / Grimoire::OBJECTS_PER_CHUNK;
+        int32_t withinChunk = index % Grimoire::OBJECTS_PER_CHUNK;
         uintptr_t chunk = 0;
-        if (!Mem::ReadSafe(arrayBase + chunkIndex * sizeof(uintptr_t), chunk) || !chunk)
+        if (!Macht::ReadSafe(arrayBase + chunkIndex * sizeof(uintptr_t), chunk) || !chunk)
             return 0;
         itemAddr = chunk + static_cast<uintptr_t>(withinChunk) * s_itemSize;
     }
@@ -733,7 +734,7 @@ int32_t GetSerialNumber(int32_t index) {
     //   24B: Object(8) + Flags(4) + ClusterRootIndex(4) + Serial(4)  → +0x10
     int serialOff = (s_itemSize >= 24) ? 0x10 : 0x0C;
     int32_t serial = 0;
-    Mem::ReadSafe(itemAddr + serialOff, serial);
+    Macht::ReadSafe(itemAddr + serialOff, serial);
     return serial;
 }
 
@@ -752,9 +753,9 @@ uintptr_t FindByName(const std::string& name) {
     ForEach([&](int32_t /*idx*/, uintptr_t obj) -> bool {
         // Read FName from UObject
         uint32_t nameIndex = 0;
-        if (!Mem::ReadSafe(obj + Constants::OFF_UOBJECT_NAME, nameIndex)) return true;
+        if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_NAME, nameIndex)) return true;
 
-        std::string objName = FNamePool::GetString(nameIndex);
+        std::string objName = Serie::GetString(nameIndex);
         if (objName == name) {
             result = obj;
             return false; // Stop iteration
@@ -765,7 +766,7 @@ uintptr_t FindByName(const std::string& name) {
 }
 
 uintptr_t FindByFullName(const std::string& fullName) {
-    // Forward declared — uses UStructWalker::GetFullName
+    // Forward declared — uses Ubel::GetFullName
     // This is implemented after UStructWalker is available
     (void)fullName;
     return 0;
@@ -787,9 +788,9 @@ SearchResultSet SearchByName(const std::string& query, int maxResults) {
 
         // Read FName from UObject
         uint32_t nameIndex = 0;
-        if (!Mem::ReadSafe(obj + Constants::OFF_UOBJECT_NAME, nameIndex)) continue;
+        if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_NAME, nameIndex)) continue;
 
-        std::string objName = FNamePool::GetString(nameIndex);
+        std::string objName = Serie::GetString(nameIndex);
         if (objName.empty()) continue;
         rset.named++;
 
@@ -805,15 +806,15 @@ SearchResultSet SearchByName(const std::string& query, int maxResults) {
 
         // Get class name
         uintptr_t cls = 0;
-        if (Mem::ReadSafe(obj + Constants::OFF_UOBJECT_CLASS, cls) && cls) {
+        if (Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) && cls) {
             uint32_t clsNameIdx = 0;
-            if (Mem::ReadSafe(cls + Constants::OFF_UOBJECT_NAME, clsNameIdx)) {
-                sr.className = FNamePool::GetString(clsNameIdx);
+            if (Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx)) {
+                sr.className = Serie::GetString(clsNameIdx);
             }
         }
 
         // Get outer
-        Mem::ReadSafe(obj + DynOff::UOBJECT_OUTER, sr.outer);
+        Macht::ReadSafe(obj + DynOff::UOBJECT_OUTER, sr.outer);
 
         rset.results.push_back(std::move(sr));
     }
@@ -837,13 +838,13 @@ SearchResultSet FindInstancesByClass(const std::string& className, bool exactMat
 
         // Read ClassPrivate
         uintptr_t cls = 0;
-        if (!Mem::ReadSafe(obj + Constants::OFF_UOBJECT_CLASS, cls) || !cls) continue;
+        if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
 
         // Read class FName
         uint32_t clsNameIdx = 0;
-        if (!Mem::ReadSafe(cls + Constants::OFF_UOBJECT_NAME, clsNameIdx)) continue;
+        if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx)) continue;
 
-        std::string clsName = FNamePool::GetString(clsNameIdx);
+        std::string clsName = Serie::GetString(clsNameIdx);
         if (clsName.empty()) continue;
         rset.named++;
 
@@ -863,18 +864,18 @@ SearchResultSet FindInstancesByClass(const std::string& className, bool exactMat
 
         // Read object name
         uint32_t nameIdx = 0;
-        if (Mem::ReadSafe(obj + Constants::OFF_UOBJECT_NAME, nameIdx)) {
-            sr.name = FNamePool::GetString(nameIdx);
+        if (Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_NAME, nameIdx)) {
+            sr.name = Serie::GetString(nameIdx);
         }
         sr.className = clsName;
 
         // Read outer
-        Mem::ReadSafe(obj + DynOff::UOBJECT_OUTER, sr.outer);
+        Macht::ReadSafe(obj + DynOff::UOBJECT_OUTER, sr.outer);
 
         rset.results.push_back(std::move(sr));
     }
 
-    Logger::Info("PIPE:find", "FindInstancesByClass '%s': %d found, scanned=%d, nonNull=%d, named=%d",
+    Sein::Info("PIPE:find", "FindInstancesByClass '%s': %d found, scanned=%d, nonNull=%d, named=%d",
                  className.c_str(), (int)rset.results.size(), rset.scanned, rset.nonNull, rset.named);
     return rset;
 }
@@ -889,17 +890,17 @@ static void FillLookupResult(AddressLookupResult& out, uintptr_t obj, int32_t in
     out.offsetFromBase = offsetFromBase;
 
     uint32_t nameIdx = 0;
-    if (Mem::ReadSafe(obj + Constants::OFF_UOBJECT_NAME, nameIdx)) {
-        out.name = FNamePool::GetString(nameIdx);
+    if (Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_NAME, nameIdx)) {
+        out.name = Serie::GetString(nameIdx);
     }
     uintptr_t cls = 0;
-    if (Mem::ReadSafe(obj + Constants::OFF_UOBJECT_CLASS, cls) && cls) {
+    if (Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) && cls) {
         uint32_t clsNameIdx = 0;
-        if (Mem::ReadSafe(cls + Constants::OFF_UOBJECT_NAME, clsNameIdx)) {
-            out.className = FNamePool::GetString(clsNameIdx);
+        if (Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx)) {
+            out.className = Serie::GetString(clsNameIdx);
         }
     }
-    Mem::ReadSafe(obj + DynOff::UOBJECT_OUTER, out.outer);
+    Macht::ReadSafe(obj + DynOff::UOBJECT_OUTER, out.outer);
 }
 
 AddressLookupResult FindByAddress(uintptr_t addr) {
@@ -984,18 +985,18 @@ AddressLookupResult FindByAddress(uintptr_t addr) {
 
         // Read ClassPrivate to get PropertiesSize
         uintptr_t cls = 0;
-        if (!Mem::ReadSafe(obj + Constants::OFF_UOBJECT_CLASS, cls) || !cls) continue;
+        if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
 
         int32_t propsSize = 0;
-        if (!Mem::ReadSafe(cls + DynOff::USTRUCT_PROPSSIZE, propsSize)) continue;
+        if (!Macht::ReadSafe(cls + DynOff::USTRUCT_PROPSSIZE, propsSize)) continue;
         if (propsSize <= 0 || propsSize > 0x100000) continue;
 
         // Log top candidates for diagnosis
         if (c < 5) {
             uint32_t nameIdx = 0;
             std::string name = "(read fail)";
-            if (Mem::ReadSafe(obj + Constants::OFF_UOBJECT_NAME, nameIdx))
-                name = FNamePool::GetString(nameIdx);
+            if (Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_NAME, nameIdx))
+                name = Serie::GetString(nameIdx);
             LOG_INFO("FindByAddress: Candidate #%d: 0x%llX (%s), dist=0x%llX, propsSize=%d, %s",
                      c, static_cast<unsigned long long>(obj), name.c_str(),
                      static_cast<unsigned long long>(dist), propsSize,
@@ -1038,8 +1039,8 @@ AddressLookupResult FindByAddress(uintptr_t addr) {
 
     constexpr uintptr_t MAX_BACKWARD_SCAN = 0x10000;  // 64KB backward scan
 
-    uintptr_t moduleBase = Mem::GetModuleBase(nullptr);
-    uintptr_t moduleEnd = moduleBase + Mem::GetModuleSize(nullptr);
+    uintptr_t moduleBase = Macht::GetModuleBase(nullptr);
+    uintptr_t moduleEnd = moduleBase + Macht::GetModuleSize(nullptr);
 
     uintptr_t scanStart = (addr > MAX_BACKWARD_SCAN) ? (addr - MAX_BACKWARD_SCAN) : 0;
     // Align to 8 bytes
@@ -1058,30 +1059,30 @@ AddressLookupResult FindByAddress(uintptr_t addr) {
     for (uintptr_t probe = (addr & ~7ULL); probe >= scanStart && probe <= addr; probe -= 8) {
         // Quick reject: read VTable pointer
         uintptr_t vtable = 0;
-        if (!Mem::ReadSafe(probe + Constants::OFF_UOBJECT_VTABLE, vtable) || !vtable) continue;
+        if (!Macht::ReadSafe(probe + Grimoire::OFF_UOBJECT_VTABLE, vtable) || !vtable) continue;
 
         // VTable should point into the module's address range
         if (vtable < moduleBase || vtable >= moduleEnd) continue;
 
         // Read ClassPrivate — must be non-null
         uintptr_t cls = 0;
-        if (!Mem::ReadSafe(probe + Constants::OFF_UOBJECT_CLASS, cls) || !cls) continue;
+        if (!Macht::ReadSafe(probe + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
 
         // ClassPrivate's VTable should also be in module range (it's a UClass)
         uintptr_t clsVtable = 0;
-        if (!Mem::ReadSafe(cls + Constants::OFF_UOBJECT_VTABLE, clsVtable)) continue;
+        if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_VTABLE, clsVtable)) continue;
         if (clsVtable < moduleBase || clsVtable >= moduleEnd) continue;
 
         // Read InternalIndex — should be reasonable
         int32_t idx = 0;
-        if (!Mem::ReadSafe(probe + Constants::OFF_UOBJECT_INDEX, idx)) continue;
+        if (!Macht::ReadSafe(probe + Grimoire::OFF_UOBJECT_INDEX, idx)) continue;
         if (idx < 0 || idx > 0x800000) continue;
 
         // Read FName ComparisonIndex — must resolve to a non-empty string
         uint32_t nameIdx = 0;
-        if (!Mem::ReadSafe(probe + Constants::OFF_UOBJECT_NAME, nameIdx)) continue;
+        if (!Macht::ReadSafe(probe + Grimoire::OFF_UOBJECT_NAME, nameIdx)) continue;
         if (nameIdx == 0) continue;  // Index 0 = "None", skip
-        std::string name = FNamePool::GetString(nameIdx);
+        std::string name = Serie::GetString(nameIdx);
         if (name.empty() || name == "None") continue;
 
         // Additional validation: name should contain only printable ASCII
@@ -1223,25 +1224,25 @@ PropertySearchResult SearchProperties(
 
         // Check if this object IS a UClass (its class name == "Class")
         uintptr_t cls = 0;
-        if (!Mem::ReadSafe(obj + Constants::OFF_UOBJECT_CLASS, cls) || !cls) continue;
+        if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
 
         uint32_t clsNameIdx = 0;
-        if (!Mem::ReadSafe(cls + Constants::OFF_UOBJECT_NAME, clsNameIdx)) continue;
+        if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx)) continue;
 
-        std::string metaClassName = FNamePool::GetString(clsNameIdx);
+        std::string metaClassName = Serie::GetString(clsNameIdx);
         if (metaClassName != "Class") continue;
 
         // This object is a UClass. Skip if already visited.
         if (!visitedClasses.insert(obj).second) continue;
 
         // Get class path for game_only filter
-        std::string classPath = UStructWalker::GetFullName(obj);
+        std::string classPath = Ubel::GetFullName(obj);
         if (gameOnly && IsEnginePackage(classPath)) continue;
 
         result.scannedClasses++;
 
         // Walk class properties (including inherited)
-        ClassInfo ci = UStructWalker::WalkClassEx(obj);
+        ClassInfo ci = Ubel::WalkClassEx(obj);
         if (ci.Fields.empty()) continue;
 
         // Search properties
@@ -1293,7 +1294,7 @@ PropertySearchResult SearchProperties(
             if (!obj) continue;
 
             uintptr_t cls = 0;
-            if (!Mem::ReadSafe(obj + Constants::OFF_UOBJECT_CLASS, cls) || !cls) continue;
+            if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
 
             // Skip if this IS a UClass (we want instances, not the class itself)
             if (needClasses.count(cls) && !instanceMap.count(cls) && obj != cls) {
@@ -1306,14 +1307,14 @@ PropertySearchResult SearchProperties(
             // Resolve EnumProperty: read UEnum* from FField for matches that need it
             for (auto& m : result.results) {
                 if (m.propType == "EnumProperty" && m.enumAddr == 0 && m.fieldAddr) {
-                    Mem::ReadSafe(m.fieldAddr + DynOff::FENUMPROP_ENUM, m.enumAddr);
+                    Macht::ReadSafe(m.fieldAddr + DynOff::FENUMPROP_ENUM, m.enumAddr);
                 }
             }
-            UStructWalker::ResolvePropertyPreviews(result.results, instanceMap);
+            Ubel::ResolvePropertyPreviews(result.results, instanceMap);
         }
     }
 
-    Logger::Info("PIPE:search", "SearchProperties '%s': %d matches from %d classes (scanned %d objects)",
+    Sein::Info("PIPE:search", "SearchProperties '%s': %d matches from %d classes (scanned %d objects)",
                  query.c_str(), static_cast<int>(result.results.size()),
                  result.scannedClasses, result.scannedObjects);
     return result;
@@ -1411,25 +1412,25 @@ ClassListResult ListClasses(bool gameOnly, int maxResults) {
 
         // Check if this object IS a UClass (its class name == "Class")
         uintptr_t cls = 0;
-        if (!Mem::ReadSafe(obj + Constants::OFF_UOBJECT_CLASS, cls) || !cls) continue;
+        if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
 
         uint32_t clsNameIdx = 0;
-        if (!Mem::ReadSafe(cls + Constants::OFF_UOBJECT_NAME, clsNameIdx)) continue;
+        if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx)) continue;
 
-        std::string metaClassName = FNamePool::GetString(clsNameIdx);
+        std::string metaClassName = Serie::GetString(clsNameIdx);
         if (metaClassName != "Class") continue;
 
         // Skip if already visited
         if (!visitedClasses.insert(obj).second) continue;
 
         // Get class path for game_only filter
-        std::string classPath = UStructWalker::GetFullName(obj);
+        std::string classPath = Ubel::GetFullName(obj);
         if (gameOnly && IsEnginePackage(classPath)) continue;
 
         result.totalClasses++;
 
         // Walk class to get property count and size
-        ClassInfo ci = UStructWalker::WalkClassEx(obj);
+        ClassInfo ci = Ubel::WalkClassEx(obj);
 
         ClassListEntry entry;
         entry.className      = ci.Name;
@@ -1450,9 +1451,9 @@ ClassListResult ListClasses(bool gameOnly, int maxResults) {
             return a.className < b.className;
         });
 
-    Logger::Info("PIPE:list", "ListClasses: %d classes (gameOnly=%d, scanned %d objects)",
+    Sein::Info("PIPE:list", "ListClasses: %d classes (gameOnly=%d, scanned %d objects)",
                  static_cast<int>(result.results.size()), gameOnly ? 1 : 0, result.scannedObjects);
     return result;
 }
 
-} // namespace ObjectArray
+} // namespace Aura

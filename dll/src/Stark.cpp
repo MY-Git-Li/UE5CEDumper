@@ -1,5 +1,6 @@
 // ============================================================
-// GameThreadDispatch.cpp — Game-thread ProcessEvent dispatch
+// Stark — 修塔爾克 (勇者戰士 — Brave Warrior)
+// GameThreadDispatch: MinHook ProcessEvent hook + game-thread queue
 //
 // Hooks UObject::ProcessEvent using MinHook. Every game-thread PE
 // call first drains a lock-protected queue of pending invocations
@@ -10,8 +11,8 @@
 // ============================================================
 
 #define LOG_CAT "PIPE"
-#include "Logger.h"
-#include "GameThreadDispatch.h"
+#include "Sein.h"
+#include "Stark.h"
 
 #include <MinHook.h>
 #include <Windows.h>
@@ -24,7 +25,7 @@
 #include <queue>
 #include <vector>
 
-namespace GameThreadDispatch {
+namespace Stark {
 
 // ---- Types ----
 
@@ -227,4 +228,4 @@ int32_t EnqueueInvoke(uintptr_t instance, uintptr_t ufunc, uintptr_t params) {
     return result;
 }
 
-} // namespace GameThreadDispatch
+} // namespace Stark

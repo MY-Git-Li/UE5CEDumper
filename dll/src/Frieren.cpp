@@ -1,20 +1,21 @@
 // ============================================================
-// ExportAPI.cpp — C ABI export implementation
+// Frieren — 芙莉蓮 (主角 — Protagonist)
+// ExportAPI: ~30 C ABI exports for CE Lua bridge
 // ============================================================
 
-#include "ExportAPI.h"
+#include "Frieren.h"
 #define LOG_CAT "INIT"
-#include "Logger.h"
+#include "Sein.h"
 #include "BuildInfo.h"
-#include "Constants.h"
-#include "Memory.h"
-#include "OffsetFinder.h"
-#include "ObjectArray.h"
-#include "FNamePool.h"
-#include "UStructWalker.h"
-#include "PipeServer.h"
-#include "GameThreadDispatch.h"
-#include "Mailbox.h"
+#include "Grimoire.h"
+#include "Macht.h"
+#include "Genau.h"
+#include "Aura.h"
+#include "Serie.h"
+#include "Ubel.h"
+#include "Fern.h"
+#include "Stark.h"
+#include "Mimic.h"
 
 #include <string>
 #include <cstring>
@@ -47,7 +48,7 @@ int         g_cachedGWorldAobPos = 0;
 int         g_cachedGWorldAobLen = 0;
 
 static bool        s_initialized = false;
-static PipeServer  s_pipeServer;
+static Fern  s_pipeServer;
 static std::mutex  s_walkMutex;
 static ClassInfo   s_walkCache;
 
@@ -87,8 +88,8 @@ bool UE5_Init() {
 
     LOG_INFO("UE5_Init: Starting initialization...");
 
-    OffsetFinder::EnginePointers ptrs;
-    OffsetFinder::FindAll(ptrs, [](int phase, const char* text) {
+    Genau::EnginePointers ptrs;
+    Genau::FindAll(ptrs, [](int phase, const char* text) {
         ScanProgress::Set(phase, text);
     });
 
@@ -123,13 +124,13 @@ bool UE5_Init() {
     ScanProgress::Set(5, "Initializing subsystems...");
     if (ptrs.GNames) {
         if (ptrs.bUE4NameArray) {
-            FNamePool::InitUE4(ptrs.GNames, ptrs.ue4StringOffset);
+            Serie::InitUE4(ptrs.GNames, ptrs.ue4StringOffset);
         } else {
-            FNamePool::Init(ptrs.GNames, ptrs.fnameEntryHeaderOffset);
+            Serie::Init(ptrs.GNames, ptrs.fnameEntryHeaderOffset);
         }
     }
     if (ptrs.GObjects) {
-        ObjectArray::Init(ptrs.GObjects);
+        Aura::Init(ptrs.GObjects);
     }
 
     // Sanity check + dynamic offset detection — only when BOTH are available
@@ -138,13 +139,13 @@ bool UE5_Init() {
         // Quick sanity check: verify name resolution works for a few objects
         {
             int verified = 0, tested = 0;
-            for (int32_t i = 0; i < ObjectArray::GetCount() && tested < 10; ++i) {
-                uintptr_t obj = ObjectArray::GetByIndex(i);
+            for (int32_t i = 0; i < Aura::GetCount() && tested < 10; ++i) {
+                uintptr_t obj = Aura::GetByIndex(i);
                 if (!obj) continue;
                 ++tested;
                 uint32_t nameIdx = 0;
-                if (Mem::ReadSafe(obj + Constants::OFF_UOBJECT_NAME, nameIdx)) {
-                    std::string name = FNamePool::GetString(nameIdx);
+                if (Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_NAME, nameIdx)) {
+                    std::string name = Serie::GetString(nameIdx);
                     if (!name.empty() && name != "None") {
                         ++verified;
                         if (verified <= 3) {
@@ -161,16 +162,16 @@ bool UE5_Init() {
 
         // Dynamically detect FField/FProperty/UStruct offsets
         // Must be called AFTER FNamePool + ObjectArray are initialized
-        if (!OffsetFinder::ValidateAndFixOffsets(ptrs.UEVersion)) {
+        if (!Genau::ValidateAndFixOffsets(ptrs.UEVersion)) {
             LOG_WARN("UE5_Init: Offset validation failed — using default offsets (may be wrong for this UE version)");
         }
 
         // Post-DynOff version correction: UProperty mode definitively means UE4 pre-4.25.
         if (!DynOff::bUseFProperty && ptrs.UEVersion >= 500) {
-            uint32_t corrected = ObjectArray::IsFlat() ? 418 : 424;
+            uint32_t corrected = Aura::IsFlat() ? 418 : 424;
             LOG_WARN("UE5_Init: UProperty mode detected (no FProperty) but version=%u (>= 500). "
                      "Overriding to %u (flat=%s)", ptrs.UEVersion, corrected,
-                     ObjectArray::IsFlat() ? "yes" : "no");
+                     Aura::IsFlat() ? "yes" : "no");
             ptrs.UEVersion = corrected;
             g_cachedUEVersion = ptrs.UEVersion;
         }
@@ -184,7 +185,7 @@ bool UE5_Init() {
              ptrs.UEVersion,
              static_cast<unsigned long long>(ptrs.GObjects),
              static_cast<unsigned long long>(ptrs.GNames),
-             ObjectArray::GetCount());
+             Aura::GetCount());
 
     // Condensed summary for quick scan-log triage
     LOG_SUMMARY("build=%s config=%s UE=%u",
@@ -193,7 +194,7 @@ bool UE5_Init() {
                 static_cast<unsigned long long>(ptrs.GObjects),
                 static_cast<unsigned long long>(ptrs.GNames),
                 static_cast<unsigned long long>(ptrs.GWorld),
-                ObjectArray::GetCount());
+                Aura::GetCount());
     LOG_SUMMARY("DynOff: CPN=%s FProp=%s TagFFV=%s Outer=+0x%02X validated=%s",
                 DynOff::bCasePreservingName ? "yes" : "no",
                 DynOff::bUseFProperty ? "yes" : "no",
@@ -215,15 +216,15 @@ bool UE5_Init() {
     ScanProgress::Set(7, "Complete");
 
     // Switch to Pipe channel — all subsequent runtime logging goes to pipe file
-    Logger::SetChannel(LogChannel::Pipe);
+    Sein::SetChannel(LogChannel::Pipe);
 
     return true;
 }
 
 void UE5_Shutdown() {
     LOG_INFO("UE5_Shutdown: Cleaning up...");
-    Mailbox::StopThread();
-    GameThreadDispatch::RemoveHook();
+    Mimic::StopThread();
+    Stark::RemoveHook();
     s_pipeServer.Stop();
     s_initialized = false;
 }
@@ -241,53 +242,53 @@ uintptr_t UE5_GetGNamesAddr() {
 }
 
 void UE5_SetObjectDecryption(uintptr_t (*decryptFunc)(uintptr_t)) {
-    ObjectArray::SetDecryptFunc(decryptFunc);
+    Aura::SetDecryptFunc(decryptFunc);
     LOG_INFO("UE5_SetObjectDecryption: %s",
              decryptFunc ? "Custom decryption set" : "Decryption cleared");
 }
 
 int32_t UE5_GetObjectCount() {
-    return ObjectArray::GetCount();
+    return Aura::GetCount();
 }
 
 uintptr_t UE5_GetObjectByIndex(int32_t index) {
-    return ObjectArray::GetByIndex(index);
+    return Aura::GetByIndex(index);
 }
 
 bool UE5_GetObjectName(uintptr_t obj, char* buf, int32_t bufLen) {
-    std::string name = UStructWalker::GetName(obj);
+    std::string name = Ubel::GetName(obj);
     return CopyToBuffer(name, buf, bufLen);
 }
 
 bool UE5_GetObjectFullName(uintptr_t obj, char* buf, int32_t bufLen) {
-    std::string name = UStructWalker::GetFullName(obj);
+    std::string name = Ubel::GetFullName(obj);
     return CopyToBuffer(name, buf, bufLen);
 }
 
 uintptr_t UE5_GetObjectClass(uintptr_t obj) {
-    return UStructWalker::GetClass(obj);
+    return Ubel::GetClass(obj);
 }
 
 uintptr_t UE5_GetObjectOuter(uintptr_t obj) {
-    return UStructWalker::GetOuter(obj);
+    return Ubel::GetOuter(obj);
 }
 
 uintptr_t UE5_FindObject(const char* fullPath) {
     if (!fullPath) return 0;
-    return ObjectArray::FindByName(fullPath);
+    return Aura::FindByName(fullPath);
 }
 
 uintptr_t UE5_FindClass(const char* className) {
     if (!className) return 0;
 
     uintptr_t result = 0;
-    ObjectArray::ForEach([&](int32_t /*idx*/, uintptr_t obj) -> bool {
-        uintptr_t cls = UStructWalker::GetClass(obj);
+    Aura::ForEach([&](int32_t /*idx*/, uintptr_t obj) -> bool {
+        uintptr_t cls = Ubel::GetClass(obj);
         if (!cls) return true;
 
-        std::string clsName = UStructWalker::GetName(cls);
+        std::string clsName = Ubel::GetName(cls);
         if (clsName == "Class") {
-            std::string objName = UStructWalker::GetName(obj);
+            std::string objName = Ubel::GetName(obj);
             if (objName == className) {
                 result = obj;
                 return false;
@@ -300,7 +301,7 @@ uintptr_t UE5_FindClass(const char* className) {
 
 int32_t UE5_WalkClassBegin(uintptr_t uclassAddr) {
     std::lock_guard<std::mutex> lock(s_walkMutex);
-    s_walkCache = UStructWalker::WalkClass(uclassAddr);
+    s_walkCache = Ubel::WalkClass(uclassAddr);
     return static_cast<int32_t>(s_walkCache.Fields.size());
 }
 
@@ -334,7 +335,7 @@ bool UE5_ResolveFName(uint64_t fname, char* buf, int32_t bufLen) {
     int32_t compIndex = static_cast<int32_t>(fname & 0xFFFFFFFF);
     int32_t number    = static_cast<int32_t>((fname >> 32) & 0xFFFFFFFF);
 
-    std::string name = FNamePool::GetString(compIndex, number);
+    std::string name = Serie::GetString(compIndex, number);
     return CopyToBuffer(name, buf, bufLen);
 }
 
@@ -359,7 +360,7 @@ int32_t UE5_GetFieldBoolMask(uintptr_t fieldAddr) {
     for (int tryOff : { baseOff, baseOff - 4, baseOff + 4, baseOff + 8, baseOff - 8 }) {
         if (tryOff < 0) continue;
         uint8_t boolBytes[4] = {};
-        if (Mem::ReadBytesSafe(fieldAddr + tryOff, boolBytes, 4)) {
+        if (Macht::ReadBytesSafe(fieldAddr + tryOff, boolBytes, 4)) {
             uint8_t fieldSize = boolBytes[0];
             uint8_t fieldMask = boolBytes[3];
             if (fieldSize >= 1 && fieldSize <= 8 && fieldMask != 0 && (fieldMask & (fieldMask - 1)) == 0) {
@@ -378,8 +379,8 @@ uintptr_t UE5_GetFieldStructClass(uintptr_t fieldAddr) {
         int tryOff = DynOff::FSTRUCTPROP_STRUCT + delta;
         if (tryOff < 0) continue;
         uintptr_t structPtr = 0;
-        if (Mem::ReadSafe(fieldAddr + tryOff, structPtr) && structPtr) {
-            std::string sname = UStructWalker::GetName(structPtr);
+        if (Macht::ReadSafe(fieldAddr + tryOff, structPtr) && structPtr) {
+            std::string sname = Ubel::GetName(structPtr);
             if (!sname.empty() && sname != "None") return structPtr;
         }
     }
@@ -396,7 +397,7 @@ uintptr_t UE5_GetFieldPropertyClass(uintptr_t fieldAddr) {
 int32_t UE5_GetClassPropsSize(uintptr_t classAddr) {
     if (!classAddr) return 0;
     int32_t propsSize = 0;
-    Mem::ReadSafe(classAddr + DynOff::USTRUCT_PROPSSIZE, propsSize);
+    Macht::ReadSafe(classAddr + DynOff::USTRUCT_PROPSSIZE, propsSize);
     return propsSize;
 }
 
@@ -405,7 +406,7 @@ int32_t UE5_GetClassPropsSize(uintptr_t classAddr) {
 uintptr_t UE5_FindInstanceOfClass(const char* className) {
     if (!className || !className[0]) return 0;
 
-    auto rset = ObjectArray::FindInstancesByClass(className, false, 100);
+    auto rset = Aura::FindInstancesByClass(className, false, 100);
 
     // Prefer non-CDO instance
     for (const auto& r : rset.results) {
@@ -432,7 +433,7 @@ uintptr_t UE5_FindInstanceOfClass(const char* className) {
 uintptr_t UE5_FindFunctionByName(uintptr_t classAddr, const char* funcName) {
     if (!classAddr || !funcName || !funcName[0]) return 0;
 
-    auto funcs = UStructWalker::WalkFunctions(classAddr);
+    auto funcs = Ubel::WalkFunctions(classAddr);
 
     // Exact match
     for (const auto& f : funcs) {
@@ -480,8 +481,8 @@ static int DetectProcessEventVTableOffset() {
 
     // Find any valid UObject to read vtable from
     uintptr_t testObj = 0;
-    for (int i = 0; i < ObjectArray::GetCount() && i < 200; ++i) {
-        testObj = ObjectArray::GetByIndex(i);
+    for (int i = 0; i < Aura::GetCount() && i < 200; ++i) {
+        testObj = Aura::GetByIndex(i);
         if (testObj) break;
     }
     if (!testObj) {
@@ -490,7 +491,7 @@ static int DetectProcessEventVTableOffset() {
     }
 
     uintptr_t vtable = 0;
-    if (!Mem::ReadSafe(testObj, vtable) || !vtable) {
+    if (!Macht::ReadSafe(testObj, vtable) || !vtable) {
         LOG_ERROR("DetectProcessEvent: cannot read vtable from obj 0x%llX",
                   (unsigned long long)testObj);
         return -1;
@@ -503,7 +504,7 @@ static int DetectProcessEventVTableOffset() {
         int off = primary + delta;
         if (off < 0) continue;
         uintptr_t addr = 0;
-        Mem::ReadSafe(vtable + off, addr);
+        Macht::ReadSafe(vtable + off, addr);
         LOG_INFO("  vtable+0x%03X = 0x%llX%s",
                  off, (unsigned long long)addr,
                  delta == 0 ? "  <-- primary" : "");
@@ -511,9 +512,9 @@ static int DetectProcessEventVTableOffset() {
 
     // Validate primary: must point to readable code
     uintptr_t funcAddr = 0;
-    if (Mem::ReadSafe(vtable + primary, funcAddr) && funcAddr) {
+    if (Macht::ReadSafe(vtable + primary, funcAddr) && funcAddr) {
         uint8_t test = 0;
-        if (Mem::ReadBytesSafe(funcAddr, &test, 1)) {
+        if (Macht::ReadBytesSafe(funcAddr, &test, 1)) {
             LOG_INFO("DetectProcessEvent: using primary 0x%X -> 0x%llX",
                      primary, (unsigned long long)funcAddr);
             return primary;
@@ -525,9 +526,9 @@ static int DetectProcessEventVTableOffset() {
         int off = primary + d;
         if (off < 0) continue;
         funcAddr = 0;
-        if (Mem::ReadSafe(vtable + off, funcAddr) && funcAddr) {
+        if (Macht::ReadSafe(vtable + off, funcAddr) && funcAddr) {
             uint8_t test = 0;
-            if (Mem::ReadBytesSafe(funcAddr, &test, 1)) {
+            if (Macht::ReadBytesSafe(funcAddr, &test, 1)) {
                 LOG_WARN("DetectProcessEvent: primary 0x%X failed, using 0x%X -> 0x%llX",
                          primary, off, (unsigned long long)funcAddr);
                 return off;
@@ -552,16 +553,16 @@ static uintptr_t ResolveProcessEventAddr() {
     // Find any valid UObject to read its vtable
     uintptr_t testObj = 0;
     for (int idx = 1; idx < 100; idx++) {
-        auto* item = ObjectArray::GetItem(idx);
+        auto* item = Aura::GetItem(idx);
         if (item && item->Object) { testObj = item->Object; break; }
     }
     if (!testObj) return 0;
 
     uintptr_t vtable = 0;
-    if (!Mem::ReadSafe(testObj, vtable) || !vtable) return 0;
+    if (!Macht::ReadSafe(testObj, vtable) || !vtable) return 0;
 
     uintptr_t peAddr = 0;
-    if (!Mem::ReadSafe(vtable + s_processEventOffset, peAddr) || !peAddr) return 0;
+    if (!Macht::ReadSafe(vtable + s_processEventOffset, peAddr) || !peAddr) return 0;
 
     return peAddr;
 }
@@ -579,7 +580,7 @@ static void TryInstallGameThreadHook() {
         return;
     }
 
-    if (GameThreadDispatch::InstallHook(peAddr)) {
+    if (Stark::InstallHook(peAddr)) {
         LOG_INFO("GameThreadDispatch: hook installed, invoke will use game-thread dispatch");
     } else {
         LOG_WARN("GameThreadDispatch: hook install failed, invoke will use direct call (unsafe)");
@@ -597,10 +598,10 @@ int32_t UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t para
     if (s_processEventOffset < 0) return -3;
 
     // Prefer game-thread dispatch via hook
-    if (GameThreadDispatch::IsHookActive()) {
+    if (Stark::IsHookActive()) {
         LOG_INFO("UE5_CallProcessEvent: dispatching to game thread inst=0x%llX func=0x%llX",
                  (unsigned long long)instance, (unsigned long long)ufunc);
-        return GameThreadDispatch::EnqueueInvoke(instance, ufunc, params);
+        return Stark::EnqueueInvoke(instance, ufunc, params);
     }
 
     // Fallback: direct call from current thread (unsafe for state-changing functions)
@@ -608,10 +609,10 @@ int32_t UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t para
 
     // Read vtable from the target instance
     uintptr_t vtable = 0;
-    if (!Mem::ReadSafe(instance, vtable) || !vtable) return -2;
+    if (!Macht::ReadSafe(instance, vtable) || !vtable) return -2;
 
     uintptr_t peAddr = 0;
-    if (!Mem::ReadSafe(vtable + s_processEventOffset, peAddr) || !peAddr) return -3;
+    if (!Macht::ReadSafe(vtable + s_processEventOffset, peAddr) || !peAddr) return -3;
 
     typedef void (__fastcall *FnProcessEvent)(void*, void*, void*);
     auto pProcessEvent = reinterpret_cast<FnProcessEvent>(peAddr);
@@ -636,7 +637,7 @@ int32_t UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t para
 // === Mailbox ===
 
 uintptr_t UE5_GetMailboxAddr() {
-    return Mailbox::GetAddress();
+    return Mimic::GetAddress();
 }
 
 // === Pipe Server ===
@@ -645,7 +646,7 @@ bool UE5_StartPipeServer() {
     // Guard: if another UE5Dumper instance (e.g., proxy DLL) already owns the pipe,
     // skip starting a competing pipe server to avoid connection failures.
     HANDLE testPipe = CreateFileW(
-        Constants::PIPE_NAME,
+        Grimoire::PIPE_NAME,
         GENERIC_READ, 0, nullptr,
         OPEN_EXISTING, 0, nullptr);
     if (testPipe != INVALID_HANDLE_VALUE) {
