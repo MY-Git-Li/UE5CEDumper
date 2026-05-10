@@ -11,7 +11,159 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
-## 2026-05-10 (latest, dev branch, build 597-607) — Interesting Functions Finder
+## 2026-05-10 (latest, dev branch, build 608-609) — AOBMaker gating + CamelCase tokeniser + dialog overflow fix
+
+Three independent fixes shipped under the "polish + de-risk" theme
+after Interesting Functions Finder went live in 597-607.
+
+### AOBMaker availability gating + Notes column + pipe-broken guard (build 608, [`25b6594`](../ui/UE5DumpUI/ViewModels/InterestingFunctionsViewModel.cs))
+
+Closes the UX gap where AA Script export silently fell back to
+clipboard when AOBMaker was unavailable -- user had no clear signal
+whether the script reached CE or not.
+
+- `InterestingFunctionsViewModel` got `IAobMakerBridge?` ctor injection
+  + `IsAobMakerAvailable` ObservableProperty + `AobMakerNote` computed
+  string + `CheckAobMakerAsync` / `TryCheckAobMaker` methods. Mirrors
+  the LiveWalker pattern; same 5s cooldown so rapid tab switches don't
+  stack 2s pipe-connect timeouts.
+- `MainWindow.MainTabs_SelectionChanged` now also fire-and-forget
+  re-checks AOBMaker on LiveWalker (tab 0) and Interesting Funcs
+  (tab 3) activation. Detects CE start/stop without blocking the UI
+  thread.
+- `LiveWalker.TryCheckAobMaker` made public so the tab handler can
+  call it from the same code path.
+- LiveWalker + Interesting Funcs DataGrids gained a "Notes" column
+  bound via `RelativeSource` ancestor to the parent VM's `AobMakerNote`.
+  Italic amber styling (#E0A050). Per-row column with VM-level value
+  -- every row shows the same hint, leaves the slot open for future
+  per-row notes (e.g. dry-run failures).
+- Send-time guards: `LiveWalker.GenerateInvokeScriptAsync`,
+  `LiveWalker.CopyBakedScriptAsync` no-args fast path,
+  `InvokeParamDialog.OnCopyBakedScriptClicked`, MainWindowVM
+  `RequestCopyBakedScript` -- all sample `_aobMaker.IsAvailable` BEFORE
+  the send so the failure message can distinguish:
+  * `sentToCe=true` -> "AA Script created in CE"
+  * `sentToCe=false && wasAvailable=true` -> `⚠ AOBMaker pipe broke
+    (CE closed?) -- copied to clipboard`
+  * `sentToCe=false && wasAvailable=false` -> "AOBMaker not connected
+    -- copied to clipboard"
+  After each send, the bridge's post-send `IsAvailable` is synced back
+  to the VM so the Notes column reflects reality on the next repaint.
+
+### Step 3 (UFunction metadata exposure) skipped after research
+
+Original plan: read `UField::MetaDataMap` to surface Blueprint
+`DisplayName` / `ToolTip` / `Category` / `Keywords`.
+
+Research (vendored UE source `Field.cpp:666-693` +
+`CoreMiscDefines.h:22-28`) confirmed:
+- `WITH_METADATA = WITH_EDITORONLY_DATA`
+- On Windows/Mac/Linux Shipping builds the macro is `1` so the
+  `MetaDataMap` POINTER exists in the struct
+- BUT the cooker strips the actual content during cook -- runtime
+  `GetMetaData()` returns empty string in every cooked Shipping game
+
+Implication: implementing this would only pay off on DebugGame /
+Development-config builds. Cheat-engine users almost never encounter
+those. Estimated 250 LoC + per-version offset table for ~zero
+real-world value.
+
+**Pivoted** to the tokeniser work (B below) which closes the same
+substring-noise gap by a different route.
+
+### CamelCase keyword tokeniser (build 609, [`f146a22`](../ui/UE5DumpUI/Services/KeywordTokenizer.cs))
+
+Replaces v1's substring-matching scorer with a tokenisation pass so
+keywords match whole tokens instead of letter substrings. Closes the
+trade-off where short acronyms HP/MP/SP/XP/TP had to be dropped to
+avoid false-positiving every word containing those letter pairs
+(`Component`, `Spawn`, `GetTPSStream`, etc).
+
+New `KeywordTokenizer` (`Services/KeywordTokenizer.cs`) -- splits on
+underscore/hyphen, lower-to-upper transition (`AddMoney` ->
+{add, money}), and run-of-uppers followed by lower (`HUDWidget` ->
+{hud, widget}, `BPCharacter` -> {bp, character}). Returns lowercased
+tokens for case-blind comparison. Digit-to-letter / letter-to-digit
+transitions are NOT split (UE BP names typically already
+underscore-separate digit groups; documented + tested cost is
+"Player100Health" tokenises to one token).
+
+`KeywordScoringTable.Score` now tokenises function + class name into
+a unioned HashSet, then `CountTokenHits` does a subset-match: ALL
+keyword tokens must be present in the function/class token set.
+Multi-token keywords (`NoClip` -> {no, clip}, `SetActorLocation` ->
+{set, actor, location}) work via the subset rule.
+
+Keyword tables restored:
+- StatsKeywords: HP/Hp/MP/SP/XP all back -- only fire on standalone
+  tokens now (`GetHP`, `SetMaxMP`, `RestoreSP`, `AddXP`)
+- InventoryKeywords: 'Drop' restored -- `DropItem` hits Inventory
+  cleanly without false-positiving every disposal helper
+- MovementKeywords: 'TP' restored. Multi-token forms collapsed to
+  single tokens like 'Location' (covers `SetLocation` /
+  `SetActorLocation` / etc with less keyword bookkeeping)
+- UtilityKeywords: 'Time' / 'Clock' restored -- `Lifetime` no longer
+  false-fires (tokenises to one token "lifetime", not "time")
+- Create/Destroy still dropped -- engine plumbing spam even tokenised
+
+ClassBonuses (substring-based, separate table) untouched -- `"Anim"`
+should still hit `AnimNotify` / `AnimationInstance` / etc, which
+benefits from substring rather than whole-token matching.
+
+### Invoke dialog overflow fix (build 609)
+
+The actual issue wasn't a missing ScrollViewer (that was already
+there since the dialog was first written) -- it was the hard
+`MaxHeight=700` window cap that prevented users on big monitors from
+resizing larger to see all params.
+
+`InvokeParamDialog.cs` changes:
+- Window `MaxHeight` 700 -> 1100; `Height=480` default; `MinHeight=240`
+- `SizeToContent = SizeToContent.Height` so the dialog grows to fit
+  the form then caps at MaxHeight
+- ScrollViewer wrapping the param panel gained `MinHeight=200` -- when
+  the FIRE result label expands after a successful invoke, DockPanel
+  would otherwise let the bottom panel squish the scroll area to a
+  sliver. 200px floor keeps ~6 param rows visible regardless.
+
+### Tests (+51, total 651 C# / 744 across project)
+
+- `KeywordTokenizerTests` (new, 17 cases): all 4 split rules,
+  acronym-preserved-as-single-token cases, the substring-noise
+  regression cases (`Component` / `MyComponent` / `Spawn` /
+  `SpawnActor` / `GetTPSStream` MUST tokenise without producing
+  `mp`/`sp`/`tp` tokens), null/empty/single-char/all-lower/all-upper/
+  digit-attachment edge cases.
+- `KeywordScoringTableTests` (+9): 5 substring-noise regressions
+  now correctly Other; 5 acronym-restored cases (`GetHP`, `SetMaxMP`,
+  `RestoreSP`, `AddXP`, `DoTP`) correctly categorise; restored-keyword
+  fact (`DropItem` -> Inventory, `GetTimeRemaining` -> Utility,
+  `GetLifetime` -> Other); multi-token `EnableNoClip` /
+  `ToggleGodMode` via subset-match.
+- `InterestingFunctionsViewModelTests` (+4): AOBMaker availability
+  flip-to-false note presence, recovery-clears-note, cooldown
+  honoured, no-bridge no-throw.
+
+### What's still pending
+
+The plan's full 5 items now reconcile:
+1. ✅ AA-Script export from UI (build 590-596)
+2. ✅ Interesting Functions Finder (build 597-607)
+3. ❌ UFunction metadata exposure -- skipped (cooker strips it; see above)
+4. ❌ Finder rev2 metadata fold-in -- skipped (depends on 3)
+5. ✅ Invoke dialog overflow fix (build 609)
+
+Carryover gaps (in [todo.md](todo.md)) untouched: UE 4.23-4.27 sparse
+delegate, Find Refs v4 weak-side, FieldPathProperty, GWorld for
+Star Wars Jedi / Satisfactory.
+
+**Build #609, 744 tests passing (651 C# + 62 dll_helpers + 31
+utf8_helpers).** 8 commits ahead of `origin/main`.
+
+-----
+
+## 2026-05-10 (build 597-607) — Interesting Functions Finder
 
 `feat(dll,ui): list_all_functions + Interesting Functions Finder
 panel` — second item of the "Call-UE-function strengthening" plan

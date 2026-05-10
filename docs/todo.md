@@ -116,7 +116,34 @@ Files touched:
 
 Tests: 633 -> 693 (540 -> 600 C# + 62 dll_helpers + 31 utf8_helpers).
 
-### 3. UFunction metadata exposure ([4]) — **next**
+### 3. UFunction metadata exposure ([4]) — ❌ skipped (build 608 research)
+
+**Effort**: M (estimated) | **Risk**: med (now confirmed: ~total no-op)
+
+Original plan: read `UField::MetaDataMap` to surface Blueprint
+`DisplayName` / `ToolTip` / `Category` / `Keywords`.
+
+Research finding ([dev-log build 608](dev-log.md)): the metadata map
+is `#if WITH_METADATA` (= `WITH_EDITORONLY_DATA`). On Windows/Mac/Linux
+Shipping builds the macro is `1` so the `MetaDataMap` POINTER exists,
+but the cooker strips the actual content during cook -- `GetMetaData()`
+returns empty string at runtime in every cooked Shipping game.
+Verified against Engine/Source/Runtime/CoreUObject/Private/UObject/Field.cpp
++ Core/Public/Misc/CoreMiscDefines.h.
+
+Implication: implementing this would only pay off on DebugGame /
+Development-config builds, which a cheat-engine user almost never
+encounters. The work was estimated at ~250 LoC + per-version offset
+table -- not worth shipping for ~zero real-world value.
+
+**Pivot**: did B (CamelCase tokeniser) instead -- closes the substring-
+noise gap from the v1 finder so short acronyms (HP/MP/SP/XP/TP) can
+work safely as keywords, materially improving the existing scorer
+without needing metadata at all. Shipped build 608+.
+
+If a user reports the finder missing obvious cheat-relevant functions
+in a real game, revisit this -- but expect to need a per-version
+`MetaDataMap` offset table only useful for testing dev-config builds.
 
 **Effort**: M | **Risk**: med
 
@@ -125,6 +152,14 @@ calls in UE source) with `DisplayName` / `ToolTip` / `Category` /
 `Keywords`. Currently we only expose the cooked function name. Surfacing
 metadata gives:
 
+### 4. Update interesting-functions + existing function lists with metadata ([3c rev2]) — ❌ skipped (depended on 3)
+
+Skipped because step 3 was skipped — see step 3 entry above. Tokeniser
+work delivered the same end value (better keyword matching) without
+needing metadata.
+
+The "stale step 3" original spec preserved here as historical context:
+
 - Better display strings ("Add Player Currency" beats `AddMoney`)
 - A **second corpus** for the keyword scorer in step 2 (matches against
   Category `Player|Stats|Combat` etc. are higher-signal than matches
@@ -132,28 +167,18 @@ metadata gives:
   helpers)
 - Tooltip text in the UI invoke dialog
 
-**Risk**: metadata layout differs across UE versions and isn't always
-present (especially for cooked / shipping builds where editor-only
-metadata may be stripped). Need a feature-detect path that gracefully
-degrades to "no metadata" rather than reading garbage.
-
-**Touch points**:
+Implementation notes if a user requests this anyway:
 - `dll/src/Ubel.cpp` UFunction reader — probe `MetaDataMap` (TMap<FName,
   FString>) at the version-specific offset
 - `Aura::WalkClass` augment per-function row with `metadata: { displayName,
   toolTip, category, keywords }`
 - Pipe schema bump
 - UI: new columns in the function lists, tooltip wired
+- Pre-req: read UnrealEngine source for the `UMetaData` /
+  `UFunction::FindMetaData` chain; build per-version offset table
+  (UE 4.27, 5.0, 5.4, 5.7 minimum)
 
-**Pre-req for step 4**: read the relevant UnrealEngine source to find
-the `UMetaData` / `UFunction::FindMetaData` chain. Build per-version
-offset table (UE 4.27, 5.0, 5.4, 5.7 minimum).
-
-### 4. Update interesting-functions + existing function lists with metadata ([3c rev2])
-
-**Effort**: S | **Risk**: low (assuming step 3 lands cleanly)
-
-Once step 3 ships:
+Original step 4 incremental rev2 spec follows for completeness:
 
 - Keyword scorer in step 2 also matches against `DisplayName`,
   `Category`, `Keywords` metadata fields (each weighted higher than
@@ -162,15 +187,27 @@ Once step 3 ships:
   show `DisplayName` as primary label with cooked name as small
   secondary text
 
-### 5. UI invoke dialog overflow fix ([3b])
+### 5. UI invoke dialog overflow fix ([3b]) — ✅ shipped (build 609)
 
-**Effort**: S | **Risk**: low
+**Effort**: S (actual: ~XS) | **Risk**: low (no regressions)
 
-`InvokeDialog.axaml` parameter list overflows the screen when a
-function has >~10 params. Wrap the param list in a `ScrollViewer` with
-`MaxHeight` (~60% of window height). Add "Reset to defaults" button.
+The actual issue wasn't a missing ScrollViewer (that was already there
+since the dialog was first written). It was the hard `MaxHeight=700`
+window cap that prevented users on big monitors from resizing the
+dialog larger to see all params.
 
-Cleanup item — keep at the end of the chain.
+Fix:
+- Window `MaxHeight` 700 → 1100; added `Height=480` default + `MinHeight=240`
+- `SizeToContent = SizeToContent.Height` so the dialog grows to fit
+  the form, then caps at MaxHeight
+- ScrollViewer wrapping the param panel gained `MinHeight=200` -- when
+  the FIRE result label expands after a successful invoke, DockPanel
+  would otherwise let the bottom panel squish the scroll area down to
+  a sliver. 200px floor keeps ~6 param rows visible regardless.
+- Skipped the "Reset to defaults" button -- v1 use case for this is
+  unclear; can add if requested.
+
+File touched: `ui/UE5DumpUI/Views/InvokeParamDialog.cs` (~10 lines).
 
 -----
 
@@ -266,3 +303,13 @@ Recent items that shipped, kept here briefly until the next refresh:
   generator + dialog + Tools menu, build 590-596)
 - ✅ **Interesting Functions Finder** (list_all_functions pipe +
   KeywordScoringTable + new tab + cross-tab nav, build 597-607)
+- ✅ **AOBMaker availability gating + Notes column + pipe-broken
+  guard** (build 608)
+- ✅ **CamelCase keyword tokeniser** (KeywordTokenizer + tokens
+  replace substring matching, restored short acronyms, build 609)
+- ✅ **Invoke dialog overflow fix** (window MaxHeight + ScrollViewer
+  MinHeight, build 609)
+- ❌ **UFunction metadata exposure (steps 3+4) skipped** — research
+  confirmed metadata is stripped from cooked Shipping binaries; would
+  be ~zero value for real cheat-table targets. Pivoted to tokeniser
+  instead.

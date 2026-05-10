@@ -6,7 +6,7 @@ upcoming work and [dev-log.md](dev-log.md) for the historical commit
 trail. Build number tags reflect when each row reached its current
 state.
 
-> **Last refreshed**: 2026-05-10 (build 607, post-Interesting Functions Finder on `dev`).
+> **Last refreshed**: 2026-05-10 (build 609, post-tokeniser + AOBMaker gating polish on `dev`).
 
 -----
 
@@ -53,13 +53,15 @@ Tools menu **Export CE Helper Lua File...** writes
 `scripts/ue5_invoke_helper.lua` to a user-chosen path so they can drop
 it next to their .CT and add via Cheat Engine `Table -> Add File...`.
 
-## Interesting Functions Finder (build 597-607)
+## Interesting Functions Finder (build 597-609)
 
 New tab "Interesting Funcs" between Property Search and Game Classes.
 Backed by the `list_all_functions` pipe cmd which flattens every
 UFunction across every UClass into a single one-shot payload (~4MB
 for a 50k-function game). Client-side scoring via
-`KeywordScoringTable`:
+`KeywordScoringTable` + `KeywordTokenizer` (build 609 -- whole-token
+match instead of substring, so short acronyms HP/MP/SP/XP/TP only
+fire on standalone tokens):
 
 - **Categories**: Stats / Inventory / Movement / Combat / Utility (with
   ExplicitMovementCheats sub-bucket: NoClip/Fly/God/Ghost/Invincible
@@ -76,6 +78,15 @@ Per-row actions:
   to ClassStruct tab if class is CDO-only
 - **AA(B)**: shortcut into the Copy AA Script (Baked) flow; reuses the
   same dialog as the LiveWalker AA(Baked) button
+
+**AOBMaker availability gating** (build 608) — both LiveWalker
+Functions and Interesting Funcs DataGrids carry a "Notes" column at
+the end. When AOBMaker CE Plugin pipe is unreachable the column shows
+"AOBMaker plugin not found — AA Script export will fall back to
+clipboard". Re-checked on tab activation (5s cooldown so rapid
+switching doesn't stack 2s pipe-connect timeouts). Send-time guard
+distinguishes "pipe broke during send" (warning) vs "plugin never
+configured" (informational).
 
 ## Publisher detection
 

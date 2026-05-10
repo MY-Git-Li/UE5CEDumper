@@ -97,9 +97,20 @@ public sealed class InvokeParamDialog : Window
         Title = $"Invoke: {className}::{funcName}";
         Width = 560;
         MinWidth = 420;
-        MaxHeight = 700;
+        // Default starting Height grows up to a sensible cap; on a small
+        // screen Avalonia clamps to the work area for us. The hard
+        // MaxHeight=700 cap from the previous version was the actual
+        // overflow bug -- on a 4K monitor a 12-param function still
+        // showed a tiny scrollable strip when there was room for the
+        // whole form. Bumping to 1100 lets the user see all params on
+        // typical 1080p+ displays without manual resize, while
+        // CanResize=true still lets them shrink it.
+        Height = 480;
+        MaxHeight = 1100;
+        MinHeight = 240;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         CanResize = true;
+        SizeToContent = SizeToContent.Height;  // grow to fit form, then cap at MaxHeight
         Background = new SolidColorBrush(Color.Parse("#1E1E1E"));
 
         var root = new DockPanel { Margin = new Thickness(16) };
@@ -347,6 +358,13 @@ public sealed class InvokeParamDialog : Window
         {
             Content = paramPanel,
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            // Floor on the scrollable area: when the FIRE result panel
+            // grows after a successful invoke (decoded post-call buffer
+            // listing), DockPanel would otherwise let the bottom panel
+            // squish the scroll area down to a sliver. 200px keeps at
+            // least ~6 param rows visible regardless of result-area
+            // expansion.
+            MinHeight = 200,
         };
 
         root.Children.Add(scroll);
