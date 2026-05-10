@@ -57,7 +57,8 @@ public interface IAobMakerBridge
     /// Embed an arbitrary text/Lua file into the currently open CE table.
     /// Sends <c>InjectTableFile</c> — the CE Plugin handler runs
     /// <c>findTableFile</c> (delete-if-exists) + <c>createTableFile</c> +
-    /// <c>Stream.write</c> + a <c>Stream.Size</c> verification check.
+    /// <c>Stream.copyFrom(createStringStream(content))</c> + a
+    /// <c>Stream.Size</c> verification check.
     /// Lets users skip the manual "save .lua to disk" + "Table -> Add File..."
     /// dance for runtime helpers like <c>ue5_invoke_helper.lua</c>.
     /// </summary>
@@ -65,6 +66,13 @@ public interface IAobMakerBridge
     /// (case-sensitive, used by <c>findTableFile</c> from AA scripts).</param>
     /// <param name="content">Raw UTF-8 file content. Long-bracket level
     /// is chosen automatically by the CE Plugin so any payload is safe.</param>
-    Task<bool> InjectTableFileAsync(string fileName, string content,
+    /// <returns>
+    /// Tuple of (Ok, ErrorMessage). On success Ok=true and ErrorMessage=null.
+    /// On failure Ok=false and ErrorMessage carries the plugin-side reason
+    /// (e.g. "Stream size mismatch: ..."), or null if the failure was a
+    /// connect/timeout on the UI side. Surface the message in status text
+    /// so users can tell "wrong CE state" apart from "real plugin bug".
+    /// </returns>
+    Task<(bool Ok, string? ErrorMessage)> InjectTableFileAsync(string fileName, string content,
         CancellationToken ct = default);
 }

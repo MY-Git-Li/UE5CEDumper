@@ -250,6 +250,62 @@ this one bumped to build 611.
 
 -----
 
+## Pending live-game verification
+
+Features have shipped + unit tests pass, but need real game smoke tests
+before we can declare them solid. Tracked here (not just in memory) so
+they don't get forgotten between sessions.
+
+### PropertySearch dedupe-by-defining-class (build 610)
+
+**Effort**: S | **Risk**: low | **Why**: dedupe logic is the kind of
+thing that looks fine on paper but can collapse on a game with unusual
+inheritance trees (forwarded properties, native-vs-BP mixed chains).
+
+Test plan:
+- Open ES2 / TQ2 / FF7 Rebirth
+- PropertySearch -> search `bCanBeDamaged`
+- Expect: ONE row with "+N inheritors" badge in the Scope column
+  (was thousands of indistinguishable rows pre-build-610)
+- Hover the badge -> tooltip should explain the inheritance relationship
+- Cross-check: at least one row WITHOUT a badge (unique-to-this-class)
+  in the same result set as a sanity check that the dedupe isn't
+  collapsing legitimately distinct rows
+
+### Tools -> Inject Helper into Current CE Table (build 611)
+
+**Effort**: S | **Risk**: low | **Why**: pipe-side `synchronize` round-
+trip touches CE main thread; large payloads (~10 KB) crossing two named
+pipes deserve a real run before declaring done.
+
+Test plan:
+- Launch CE with AOBMaker CE Plugin loaded
+- Open or create a .CT
+- UE5DumpUI: Tools -> Inject Helper into Current CE Table
+- Expect: status bar reports success; CE table file list shows
+  `ue5_invoke_helper.lua` without manual `Table -> Add File...`
+- Re-run on the same table -> should overwrite (delete-if-exists path)
+- Sanity: close AOBMaker plugin -> expect graceful "not configured"
+  status (not an exception)
+- Sanity: stop CE -> expect "CE not running" status
+
+### Interesting Funcs token-based scoring (build 609)
+
+**Effort**: S | **Risk**: low | **Why**: tokeniser fix restored short
+acronyms HP/MP/SP/XP/TP; need to confirm real games show better
+relevance vs. the build-608 (no-acronyms) state.
+
+Test plan:
+- Open a game with abbreviated naming (e.g. JRPG-style: ES2/TQ2)
+- Interesting Funcs tab -> Load
+- Expect: functions like `GetHP` / `SetMaxMP` / `AddXP` rank visibly
+  higher than before, and substring-noise targets (`OnComponentHit`,
+  `BeginComponent`) do NOT hit the HP/MP keyword tier
+- Cross-check Stats / Inventory / Movement / Combat buckets each show
+  plausible top hits
+
+-----
+
 ## Property Origin Resolver — proposals B + C still on table
 
 Proposal A (dedupe-by-defining-class) shipped as build 610. Two

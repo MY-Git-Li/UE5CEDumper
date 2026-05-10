@@ -34,6 +34,7 @@ public partial class LiveWalkerPanel : UserControl
         {
             _subscribedVm.ScrollToFieldRequested -= OnScrollToFieldRequested;
             _subscribedVm.ScrollToFirstSearchMatch -= OnScrollToFirstSearchMatch;
+            _subscribedVm.ScrollToFunctionRequested -= OnScrollToFunctionRequested;
             _subscribedVm = null;
         }
 
@@ -41,6 +42,7 @@ public partial class LiveWalkerPanel : UserControl
         {
             vm.ScrollToFieldRequested += OnScrollToFieldRequested;
             vm.ScrollToFirstSearchMatch += OnScrollToFirstSearchMatch;
+            vm.ScrollToFunctionRequested += OnScrollToFunctionRequested;
             _subscribedVm = vm;
         }
     }
@@ -52,6 +54,7 @@ public partial class LiveWalkerPanel : UserControl
         {
             _subscribedVm.ScrollToFieldRequested -= OnScrollToFieldRequested;
             _subscribedVm.ScrollToFirstSearchMatch -= OnScrollToFirstSearchMatch;
+            _subscribedVm.ScrollToFunctionRequested -= OnScrollToFunctionRequested;
             _subscribedVm = null;
         }
     }
@@ -85,6 +88,28 @@ public partial class LiveWalkerPanel : UserControl
                 .FirstOrDefault(f => f.IsSearchMatch);
             if (target != null)
                 grid.ScrollIntoView(target, null);
+        }, DispatcherPriority.Background);
+    }
+
+    private void OnScrollToFunctionRequested(string functionName)
+    {
+        // Cross-tab nav from Interesting Funcs lands here. The grid lives
+        // inside an Expander that is collapsed by default — when it has
+        // never been expanded, ItemsSource has no realised rows yet, so
+        // post twice (background then loaded) to give layout a chance to
+        // populate the row presenters before scrolling.
+        Dispatcher.UIThread.Post(() =>
+        {
+            var grid = this.FindControl<DataGrid>("FunctionGrid");
+            if (grid?.ItemsSource == null) return;
+
+            var target = grid.ItemsSource.Cast<FunctionInfoModel>()
+                .FirstOrDefault(f => f.Name == functionName);
+            if (target != null)
+            {
+                grid.SelectedItem = target;
+                grid.ScrollIntoView(target, null);
+            }
         }, DispatcherPriority.Background);
     }
 

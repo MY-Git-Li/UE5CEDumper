@@ -44,10 +44,32 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _currentOuterName = "";
     [ObservableProperty] private string _currentOuterClassName = "";
     [ObservableProperty] private bool _hasParent;
-    // UFunction display
+    // UFunction display. _allFunctions holds the unfiltered set received
+    // from the DLL; Functions is the user-visible filtered subset rebuilt
+    // by ApplyFunctionFilter() whenever the filter text changes. Function
+    // counts on UE-derived classes can climb past 200 entries (Character /
+    // PlayerController inheritance chains), so the filter is a usability
+    // floor — not a perf optimization.
+    private readonly List<FunctionInfoModel> _allFunctions = new();
+    private Task? _pendingFunctionsLoad;
     [ObservableProperty] private ObservableCollection<FunctionInfoModel> _functions = new();
     [ObservableProperty] private bool _hasFunctions;
     [ObservableProperty] private FunctionInfoModel? _selectedFunction;
+    [ObservableProperty] private string _functionFilter = "";
+
+    /// <summary>
+    /// Two-way binding for the Functions Expander. Defaults to collapsed
+    /// because most navigation in LiveWalker is field-focused; cross-tab
+    /// jumps from Interesting Funcs flip this to true via
+    /// <see cref="TrySelectFunctionByName"/> so the user lands with the
+    /// target function already visible.
+    /// </summary>
+    [ObservableProperty] private bool _isFunctionsExpanded;
+
+    partial void OnFunctionFilterChanged(string value) => ApplyFunctionFilter();
+
+    [RelayCommand]
+    private void ClearFunctionFilter() => FunctionFilter = "";
     private string _currentClassAddr = "";
     private bool _isDefinitionView;  // True when displaying a class/struct definition (no live data)
     private DataTableWalkResult? _cachedDataTableRows;  // Cached DataTable row data
@@ -180,6 +202,14 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// Raised when the View should scroll the DataGrid to the first search match.
     /// </summary>
     public event Action? ScrollToFirstSearchMatch;
+
+    /// <summary>
+    /// Raised when the View should scroll the FunctionGrid to a specific
+    /// UFunction by name. Used by cross-tab navigation from Interesting
+    /// Funcs so the user lands on the correct row even when the function
+    /// list scrolls past the visible area.
+    /// </summary>
+    public event Action<string>? ScrollToFunctionRequested;
     private string _lastScrolledSearchText = "";
 
     public LiveWalkerViewModel(IDumpService dump, ILoggingService log, IPlatformService platform,
@@ -2818,9 +2848,13 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             }
         }
 
-        // Store class address and load functions asynchronously
+        // Store class address and load functions asynchronously. Track
+        // the in-flight task so cross-tab navigators (e.g. Interesting
+        // Funcs -> Live) can await it before calling
+        // TrySelectFunctionByName -- otherwise the call races with the
+        // function-list population and the row never gets selected.
         _currentClassAddr = result.ClassAddr;
-        _ = LoadFunctionsAsync(result.ClassAddr);
+        _pendingFunctionsLoad = LoadFunctionsAsync(result.ClassAddr);
 
         // DataTable detection: if this is a DataTable, fetch rows and inject synthetic RowMap field
         _cachedDataTableRows = null;
@@ -2868,6 +2902,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     {
         if (string.IsNullOrEmpty(classAddr) || classAddr == "0x0")
         {
+            _allFunctions.Clear();
             Functions.Clear();
             HasFunctions = false;
             return;
@@ -2876,16 +2911,90 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         try
         {
             var funcs = await _dump.WalkFunctionsAsync(classAddr);
-            Functions.Clear();
-            foreach (var f in funcs)
-                Functions.Add(f);
+            _allFunctions.Clear();
+            _allFunctions.AddRange(funcs);
             HasFunctions = funcs.Count > 0;
+            ApplyFunctionFilter();
         }
         catch
         {
+            _allFunctions.Clear();
             Functions.Clear();
             HasFunctions = false;
         }
+    }
+
+    /// <summary>
+    /// Rebuild the visible <see cref="Functions"/> collection from
+    /// <see cref="_allFunctions"/> using <see cref="FunctionFilter"/>.
+    /// Substring match on function name (case-insensitive). Empty filter
+    /// shows everything. Mirrors the InterestingFunctions filter pattern
+    /// so the UX is consistent across the two UFunction views.
+    /// </summary>
+    private void ApplyFunctionFilter()
+    {
+        Functions.Clear();
+        if (_allFunctions.Count == 0) return;
+
+        var filter = (FunctionFilter ?? "").Trim();
+        if (filter.Length == 0)
+        {
+            foreach (var f in _allFunctions) Functions.Add(f);
+            return;
+        }
+
+        foreach (var f in _allFunctions)
+        {
+            if (f.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                Functions.Add(f);
+        }
+    }
+
+    /// <summary>
+    /// Public entry point for cross-tab navigation: scroll to and select
+    /// the named function in the Functions DataGrid. Returns true when the
+    /// function was found and made current; false when the class has no
+    /// such function (caller should still expand the section so the user
+    /// can see the full list).
+    /// </summary>
+    public async Task<bool> TrySelectFunctionByNameAsync(string functionName)
+    {
+        if (string.IsNullOrEmpty(functionName)) return false;
+
+        // Wait for any in-flight LoadFunctionsAsync triggered by the
+        // preceding NavigateToAddress to finish. UpdateDisplay() kicks the
+        // function load fire-and-forget so fields render immediately;
+        // without this await the cross-tab navigator races the loader and
+        // sees an empty _allFunctions on the first click after a class
+        // change. The second click then succeeds because the previous
+        // load already completed -- exactly the "(function not selected)"
+        // pattern observed in the live-test logs.
+        if (_pendingFunctionsLoad is { IsCompleted: false } pending)
+        {
+            try { await pending; }
+            catch { /* loader logs its own error path; treat as miss */ }
+        }
+
+        if (_allFunctions.Count == 0) return false;
+
+        // Clear filter first — a previously typed filter could hide the
+        // target row even though it's in the underlying list.
+        if (!string.IsNullOrEmpty(FunctionFilter)) FunctionFilter = "";
+
+        // Auto-expand the section so the user can actually see the target
+        // row without an extra click after a cross-tab navigation.
+        IsFunctionsExpanded = true;
+
+        foreach (var f in Functions)
+        {
+            if (string.Equals(f.Name, functionName, StringComparison.Ordinal))
+            {
+                SelectedFunction = f;
+                ScrollToFunctionRequested?.Invoke(functionName);
+                return true;
+            }
+        }
+        return false;
     }
 }
 

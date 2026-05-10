@@ -272,7 +272,7 @@ public sealed class AobMakerBridgeService : IAobMakerBridge, IDisposable
         }
     }
 
-    public async Task<bool> InjectTableFileAsync(string fileName, string content,
+    public async Task<(bool Ok, string? ErrorMessage)> InjectTableFileAsync(string fileName, string content,
         CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(fileName))
@@ -283,7 +283,7 @@ public sealed class AobMakerBridgeService : IAobMakerBridge, IDisposable
         if (!await ReconnectAsync(ct))
         {
             IsAvailable = false;
-            return false;
+            return (false, null);
         }
 
         try
@@ -304,28 +304,29 @@ public sealed class AobMakerBridgeService : IAobMakerBridge, IDisposable
             CleanupPipe();
             if (response == null || !response.Success)
             {
+                var msg = response?.Message ?? "no response";
                 _log?.Warn(Constants.LogCatInit,
-                    $"AOBMaker InjectTableFile '{fileName}' failed: {response?.Message ?? "no response"}");
-                return false;
+                    $"AOBMaker InjectTableFile '{fileName}' failed: {msg}");
+                return (false, response?.Message);
             }
 
             IsAvailable = true;
             _log?.Info(Constants.LogCatInit,
                 $"AOBMaker: injected table file '{fileName}' ({content.Length:N0} chars)");
-            return true;
+            return (true, null);
         }
         catch (OperationCanceledException)
         {
             _log?.Warn(Constants.LogCatInit, $"AOBMaker InjectTableFile timed out for '{fileName}'");
             CleanupPipe();
-            return false;
+            return (false, "timed out waiting for CE Plugin response");
         }
         catch (Exception ex)
         {
             _log?.Warn(Constants.LogCatInit, $"AOBMaker InjectTableFile error: {ex.Message}");
             IsAvailable = false;
             CleanupPipe();
-            return false;
+            return (false, ex.Message);
         }
     }
 

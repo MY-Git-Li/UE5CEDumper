@@ -335,12 +335,17 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 {
                     SelectedTabIndex = 0; // Live Walker
                     await LiveWalker.NavigateToAddressCommand.ExecuteAsync(liveAddr);
-                    StatusText = $"Navigated to {className}::{funcName} (live instance {liveAddr})";
-                    _log.Info($"InterestingFunctions -> LiveWalker: {className}::{funcName} @ {liveAddr}");
-                    // Note: auto-scroll to the specific UFunction row inside Live Walker would
-                    // need an additional event into LiveWalkerViewModel. v1 lands on the
-                    // instance; user manually scrolls to the function. Wire a row-scroll event
-                    // here when feedback says it's worth it.
+                    // Function Goto: TrySelectFunctionByNameAsync awaits any
+                    // in-flight LoadFunctionsAsync (NavigateToAddress fires
+                    // it forget-style so fields render fast). Without that
+                    // await the first click after a class change finds an
+                    // empty function list and reports "function not selected".
+                    var picked = await LiveWalker.TrySelectFunctionByNameAsync(funcName);
+                    StatusText = picked
+                        ? $"Navigated to {className}::{funcName} (live instance {liveAddr})"
+                        : $"Navigated to {className} @ {liveAddr}; function '{funcName}' not in this class";
+                    _log.Info($"InterestingFunctions -> LiveWalker: {className}::{funcName} @ {liveAddr}" +
+                              (picked ? "" : " (function not selected)"));
                 }
                 else
                 {
@@ -365,6 +370,20 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _log.Error($"InterestingFunctions NavigateToFunction handler error: {className}::{funcName}", ex);
+            }
+        };
+
+        // Wire InterestingFunctions -> clipboard. The VM avoids holding
+        // IPlatformService directly so its test stubs stay minimal; the
+        // MainWindow knows the platform service and can do the actual
+        // copy here. Status text already set by the VM.
+        InterestingFunctions.RequestCopyText += async (text) =>
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            try { await _platform.CopyToClipboardAsync(text); }
+            catch (Exception ex)
+            {
+                _log.Error($"InterestingFunctions clipboard copy failed: {ex.Message}", ex);
             }
         };
 
@@ -743,34 +762,44 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        // Show an in-flight status so successive clicks can be told apart
+        // even when both end in the same outcome — without this the user
+        // sees the previous run's text frozen on screen until the new
+        // run finishes, which reads as "the click did nothing".
+        StatusText = $"Injecting {HelperLuaResource.DefaultFileName} into CE table...";
+
         try
         {
             await _aobMaker.CheckAvailabilityAsync();
             if (!_aobMaker.IsAvailable)
             {
-                StatusText = "AOBMaker not connected — open Cheat Engine with the AOBMaker plugin loaded";
+                StatusText = "Inject helper: AOBMaker not connected — open Cheat Engine with the AOBMaker plugin loaded";
                 return;
             }
 
             var content = HelperLuaResource.Read();
-            var ok = await _aobMaker.InjectTableFileAsync(
+            var (ok, error) = await _aobMaker.InjectTableFileAsync(
                 HelperLuaResource.DefaultFileName, content);
 
             if (ok)
             {
                 _log.Info($"Injected {HelperLuaResource.DefaultFileName} into CE table " +
                           $"({content.Length:N0} chars)");
-                StatusText = $"Helper embedded in current CE table ({HelperLuaResource.DefaultFileName})";
+                StatusText = $"Inject helper OK: {HelperLuaResource.DefaultFileName} embedded ({content.Length:N0} bytes)";
+            }
+            else if (!string.IsNullOrEmpty(error))
+            {
+                StatusText = $"Inject helper failed: {error} — use Export to disk + Add File... fallback";
             }
             else
             {
-                StatusText = "Inject failed (CE closed?) — use Export to disk + Add File... fallback";
+                StatusText = "Inject helper failed (no plugin response — CE closed?) — use Export to disk + Add File... fallback";
             }
         }
         catch (Exception ex)
         {
             _log.Error("Inject CE Helper Lua failed", ex);
-            StatusText = $"Inject CE helper failed: {ex.Message}";
+            StatusText = $"Inject helper failed: {ex.Message}";
         }
     }
 

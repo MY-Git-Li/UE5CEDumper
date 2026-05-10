@@ -88,6 +88,13 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     public event Action<string, string>? NavigateToFunction;
     public event Action<string, string>? RequestCopyBakedScript;
 
+    /// <summary>
+    /// Raised when a row's "Name" button is clicked. MainWindow handler
+    /// hands the string to the platform clipboard service. Keeps this VM
+    /// free of an IPlatformService dependency so the test stubs stay tiny.
+    /// </summary>
+    public event Action<string>? RequestCopyText;
+
     public InterestingFunctionsViewModel(IDumpService dump, ILoggingService log,
                                           IAobMakerBridge? aobMaker = null)
     {
@@ -280,5 +287,19 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     {
         if (row == null) return;
         RequestCopyBakedScript?.Invoke(row.ClassName, row.FuncName);
+    }
+
+    /// <summary>Per-row action: copy the function name (no class prefix)
+    /// to the clipboard. MainWindow handler routes this through the
+    /// platform service so AOT / clipboard fallback semantics live in
+    /// one place. Bare name (not Class::Func) keeps it pasteable into
+    /// CE script editors and grep workflows directly.</summary>
+    [RelayCommand]
+    private void CopyFunctionName(ScoredFunctionRow? row)
+    {
+        if (row == null) return;
+        if (string.IsNullOrEmpty(row.FuncName)) return;
+        RequestCopyText?.Invoke(row.FuncName);
+        StatusText = $"Copied function name: {row.FuncName}";
     }
 }

@@ -516,8 +516,24 @@
     <!-- Functions section (collapsible) -->
     <Expander Grid.Row="1" IsVisible="{Binding HasFunctions}"
               Header="{StaticResource str.LiveWalker.Functions}"
-              IsExpanded="False" Margin="0,4,0,0"
+              IsExpanded="{Binding IsFunctionsExpanded, Mode=TwoWay}" Margin="0,4,0,0"
               MaxHeight="280">
+      <DockPanel>
+        <!-- Filter row: substring match on function name -->
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6"
+                    Margin="2,2,2,4">
+          <TextBox Text="{Binding FunctionFilter, Mode=TwoWay}"
+                   PlaceholderText="Filter by name..."
+                   Width="220" Padding="4,2" FontSize="12"
+                   ToolTip.Tip="Substring match on function name (case-insensitive)"/>
+          <Button Content="Clear"
+                  Command="{Binding ClearFunctionFilterCommand}"
+                  Padding="6,2"
+                  IsEnabled="{Binding FunctionFilter, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                  ToolTip.Tip="Clear filter"/>
+          <TextBlock VerticalAlignment="Center" Foreground="#888" FontSize="11"
+                     Text="{Binding Functions.Count, StringFormat='{}{0} shown'}"/>
+        </StackPanel>
       <DataGrid x:Name="FunctionGrid"
                 ItemsSource="{Binding Functions}"
                 SelectedItem="{Binding SelectedFunction}"
@@ -594,6 +610,7 @@
           </DataGridTemplateColumn>
         </DataGrid.Columns>
       </DataGrid>
+      </DockPanel>
     </Expander>
     </Grid>
   </DockPanel>

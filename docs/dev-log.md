@@ -11,7 +11,101 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
-## 2026-05-10 (latest, dev branch, build 611) — One-click helper inject into open CE table
+## 2026-05-10 (latest, dev branch, build 632) — Inject Helper bug fix + Function Goto + filter polish
+
+User-driven follow-ups after the build 611 live test on Everspace 2.
+
+### AOBMaker plugin: `InjectTableFile` actually works now
+
+Live test on ES2 surfaced a real plugin-side bug: `f.Stream.write(content)`
+ran but `f.Stream.Size` always read 0 immediately after, so the post-write
+verification in [pipe_server.cpp:1338-1362](https://github.com/bbfox0703/AOBMaker/blob/dev/plugins/CEPlugin/src/pipe_server.cpp)
+always reported "Stream size mismatch: wrote 10008, stream has 0" and the
+table file was effectively empty. Pivoted to the pattern Cheat Engine
+itself uses (`autorun/java.lua` line 537-541): build a `createStringStream`
+from the Lua-side content variable, then `f.Stream.copyFrom(ss, 0)` and
+`ss.destroy()`. `f.Stream.Size` reads correctly afterwards.
+
+Fix shipped as AOBMaker [commit 3fc4d8c](https://github.com/bbfox0703/AOBMaker)
+("Use createStringStream+copyFrom for InjectTableFile content population")
+on AOBMaker `dev` branch.
+
+### UE5DumpUI: surface the actual plugin-side error
+
+`IAobMakerBridge.InjectTableFileAsync` return type changed from `Task<bool>`
+to `Task<(bool Ok, string? ErrorMessage)>` so the
+`MainWindowViewModel.InjectCeHelperLuaCommand` can drop the plugin's
+verbatim message into the status bar instead of always showing the
+generic "Inject failed (CE closed?)" hint. Status bar now also shows an
+in-flight "Injecting ue5_invoke_helper.lua into CE table..." line so
+successive clicks can be told apart even when both fail.
+
+Tests: +1 (`InjectCeHelperLua_BridgeReturnsError_StatusSurfacesPluginMessage`)
+asserting the plugin-side reason makes it into `StatusText`.
+
+### Interesting Funcs: third per-row "Name" button
+
+Each row already had Live + AA(B); added a yellow "Name" button at the
+end that copies the bare function name (no `Class::` prefix) to the
+clipboard. Wires through a new `RequestCopyText` event on
+`InterestingFunctionsViewModel` rather than taking an
+`IPlatformService` dependency directly, so the test stubs stay tiny.
+
+### Function Goto: Live button auto-expands + selects
+
+Live button on Interesting Funcs previously dropped the user on the
+correct LiveWalker instance but left the Functions Expander collapsed
+and didn't scroll to the target row. Two changes:
+
+- New `LiveWalkerViewModel.TrySelectFunctionByNameAsync(name)` —
+  awaits the in-flight `LoadFunctionsAsync` task (UpdateDisplay kicks
+  it fire-and-forget so fields render fast), clears any active filter,
+  flips `IsFunctionsExpanded = true`, sets `SelectedFunction`, fires
+  `ScrollToFunctionRequested` which the View handles with a
+  `DataGrid.ScrollIntoView` call.
+- The await closes the race the live test surfaced: first click after
+  a class change used to log "(function not selected)" because
+  `_allFunctions` was still empty when the selector ran. Subsequent
+  clicks succeeded because the previous load had already completed.
+
+### LiveWalker: filter field on Functions section
+
+Functions section gained a filter TextBox + "Clear" button + count
+badge. Substring match on function name (case-insensitive). Mirrors
+the Interesting Funcs filter UX for consistency. Backed by a private
+`_allFunctions: List<FunctionInfoModel>` field; `Functions` is the
+filtered ObservableCollection rebuilt on every filter change.
+
+### ClassStruct: empty-class hint banner
+
+`BlueprintFunctionLibrary` subclasses (e.g. `GameplayLib` on ES2)
+report 0 instance fields because all their content is static methods.
+The cross-tab fallback path from Interesting Funcs lands the user on
+ClassStruct with an empty DataGrid, which reads as "broken" without
+explanation. Added a new `HasNoFields` computed property +
+hint banner: "This class has no instance fields. Likely a
+BlueprintFunctionLibrary or utility class — its content is static
+methods, not data. Use the Interesting Funcs tab to invoke its
+functions."
+
+### Files touched
+
+- `dll/`: none (this round was UI-only on the UE5DumpUI side)
+- C#: `Core/IAobMakerBridge.cs`, `Services/AobMakerBridgeService.cs`,
+  `ViewModels/MainWindowViewModel.cs`, `ViewModels/LiveWalkerViewModel.cs`,
+  `ViewModels/InterestingFunctionsViewModel.cs`, `ViewModels/ClassStructViewModel.cs`,
+  `Views/LiveWalkerPanel.axaml{,.cs}`, `Views/InterestingFunctionsPanel.axaml`,
+  `Views/ClassStructPanel.axaml`, `Resources/Strings/en.axaml`
+- Tests: `MainWindowInjectHelperTests.cs` (new error-message test +
+  RecordingBridge update), `InterestingFunctionsViewModelTests.cs`
+  (FakeAobMakerBridge updated to new tuple return)
+- AOBMaker plugin: `pipe_server.cpp` (`HandleInjectTableFile` rewrite)
+
+Tests: 670 -> 671 C# (+1) + 62 dll_helpers + 31 utf8_helpers = 764 total.
+
+-----
+
+## 2026-05-10 (build 611) — One-click helper inject into open CE table
 
 Closes the last manual step in the "super beginner" cheat-table flow:
 previously every user had to **Tools -> Export CE Helper Lua File...**,

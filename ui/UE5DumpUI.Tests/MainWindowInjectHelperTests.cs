@@ -59,7 +59,8 @@ public class MainWindowInjectHelperTests
         Assert.NotNull(bridge.LastInjectContent);
         Assert.True(bridge.LastInjectContent!.Length > 200,
             $"helper content was suspiciously short ({bridge.LastInjectContent.Length} chars)");
-        Assert.Contains("Helper embedded in current CE table", vm.StatusText);
+        Assert.Contains("Inject helper OK", vm.StatusText);
+        Assert.Contains(HelperLuaResource.DefaultFileName, vm.StatusText);
     }
 
     [Fact]
@@ -71,6 +72,28 @@ public class MainWindowInjectHelperTests
         await vm.InjectCeHelperLuaCommand.ExecuteAsync(null);
 
         Assert.Equal(1, bridge.InjectCalls);
+        Assert.Contains("Export to disk", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task InjectCeHelperLua_BridgeReturnsError_StatusSurfacesPluginMessage()
+    {
+        // Plugin returned an explicit failure reason (e.g. real bug from
+        // pre-fix builds: "Stream size mismatch: wrote 10008, stream has 0").
+        // The user can't tell "wrong CE state" apart from a real plugin
+        // bug unless we actually surface the plugin's text.
+        var bridge = new RecordingBridge
+        {
+            NextAvailability = true,
+            NextInjectResult = false,
+            NextInjectError = "Stream size mismatch: wrote 10008, stream has 0"
+        };
+        var vm = BuildVm(aobMaker: bridge);
+
+        await vm.InjectCeHelperLuaCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, bridge.InjectCalls);
+        Assert.Contains("Stream size mismatch", vm.StatusText);
         Assert.Contains("Export to disk", vm.StatusText);
     }
 
@@ -92,6 +115,7 @@ public class MainWindowInjectHelperTests
     {
         public bool NextAvailability { get; set; }
         public bool NextInjectResult { get; set; }
+        public string? NextInjectError { get; set; }
         public int CheckCalls { get; private set; }
         public int InjectCalls { get; private set; }
         public string? LastInjectFileName { get; private set; }
@@ -106,13 +130,13 @@ public class MainWindowInjectHelperTests
             return Task.FromResult(NextAvailability);
         }
 
-        public Task<bool> InjectTableFileAsync(string fileName, string content,
+        public Task<(bool Ok, string? ErrorMessage)> InjectTableFileAsync(string fileName, string content,
             CancellationToken ct = default)
         {
             InjectCalls++;
             LastInjectFileName = fileName;
             LastInjectContent = content;
-            return Task.FromResult(NextInjectResult);
+            return Task.FromResult((NextInjectResult, NextInjectError));
         }
 
         public Task<bool> NavigateHexViewAsync(string hexAddress, CancellationToken ct = default)
