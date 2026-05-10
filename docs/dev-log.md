@@ -83,8 +83,8 @@ the project's been maintaining. Doc-only conflicts on dev-log.md /
 roadmap.md / todo.md (both branches updated the "latest" headers);
 resolved by keeping both entries with AOBMaker bumped to build 611.
 
-**Build #611, 762 tests passing (669 C# + 62 dll_helpers + 31
-utf8_helpers).** 10 commits ahead of `origin/main`.
+**Build #611, 763 tests passing (670 C# + 62 dll_helpers + 31
+utf8_helpers).** 13 commits ahead of `origin/main`.
 
 -----
 

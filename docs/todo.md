@@ -209,7 +209,7 @@ Fix:
 
 File touched: `ui/UE5DumpUI/Views/InvokeParamDialog.cs` (~10 lines).
 
-### 6. One-click helper inject into open CE table — ✅ shipped (build 610)
+### 6. One-click helper inject into open CE table — ✅ shipped (build 611)
 
 **Effort**: S (actual: ~S) | **Risk**: low (additive — old export menu kept as fallback)
 
@@ -234,93 +234,47 @@ running, success, failure). Inject path uses a 15 s response timeout
 (vs. 5 s default for navigation calls) to give synchronize round-trip
 headroom for ~10 KB payloads.
 
-Tests: 651 C# xunit (+7 from this change) + 62 dll_helpers + 31 utf8_helpers.
+Tests: integrated via cherry-pick onto current dev. Final total
+670 C# xunit (+8 from this change after subclassed-stub bridge
+addition) + 62 dll_helpers + 31 utf8_helpers = **763 total**.
 Coverage: AobMakerInjectTableFileTests (3 — wire-model serialization,
 relaxed encoder for single quotes, bridge service arg validation),
-MainWindowInjectHelperTests (4 — all four end-states via recording bridge).
+MainWindowInjectHelperTests (4 — all four end-states via recording bridge),
+plus FakeAobMakerBridge stub gained the new method (+1 test indirectly).
+
+Spawned session worked in a separate worktree from `aa2ac0d`; cherry-
+picked `44a3943` onto current dev as `67fd61b` rather than merging,
+keeping the linear history. Doc-only conflicts (dev-log.md / roadmap.md /
+todo.md "latest" headers) resolved by keeping both entries with
+this one bumped to build 611.
 
 -----
 
-## In-flight (spawned to separate sessions / under analysis)
+## Property Origin Resolver — proposals B + C still on table
 
-### AOBMaker plugin: inject helper lua into CE table — 🚧 spawned 2026-05-10
+Proposal A (dedupe-by-defining-class) shipped as build 610. Two
+follow-ups discussed in the design analysis but not yet implemented:
 
-**Effort**: M | **Risk**: low | **Status**: spawned to dedicated session
+### Proposal B: per-row "similar BP-added properties" suggestions
 
-End-to-end goal: replace the two-step `Tools -> Export to disk +
-Cheat Engine -> Add File...` workflow with a one-click "Inject Helper
-into Current CE Table" menu item that pushes
-`ue5_invoke_helper.lua` directly into the user's currently-open .CT
-via AOBMaker plugin.
+When a user lands on `bCanBeDamaged @ AActor`, surface a side-panel
+with fuzzy-matched game-specific bools that semantically overlap
+(e.g. `bIsImmortal @ BP_PlayerCharacter_C`). Reuses the
+`KeywordTokenizer` + `KeywordScoringTable` machinery to score
+similarity. **Effort**: M | **Risk**: low | **Why**: closes the
+"engine field is at the wrong layer; show me the BP-added bool that
+the game's TakeDamage override actually checks" gap from the
+analysis.
 
-Sub-task brief (sent to spawned session):
-- AOBMaker repo (`D:\Github\AOBMaker`): new pipe cmd `InjectTableFile`
-  with `{Type, FileName, Content}` payload; plugin Lua handler uses
-  `findTableFile` + delete-if-exists + `createTableFile` + write
-- UE5DumpUI repo: `IAobMakerBridge.InjectTableFileAsync`,
-  `MainWindowViewModel.InjectCeHelperLuaCommand`, new Tools menu item
-  next to existing `Export CE Helper Lua File...`
-- Both repos: docs updated, tests added
+### Proposal C: Class Family Browser
 
-Once spawned session reports back, integrate the UI menu item if it
-wasn't included; verify the AOBMaker pipe protocol matches.
-
-### Property Origin Resolver (Proposal A) — ✅ shipped (build 610)
-
-**Effort**: M (actual: ~M) | **Risk**: low (no regressions; tests + build clean)
-
-PropertySearch dedupe-by-defining-class shipped. Searching for
-`bCanBeDamaged` now returns one row keyed by `AActor` with a
-"+4822 inheritors" badge, instead of 4823 rows you couldn't tell apart.
-
-Implementation:
-- DLL `Aura::FindDefiningClass(classAddr, fieldOffset)` walks the
-  SuperStruct chain upward and returns the highest-up class still
-  declaring the property (algorithm: super has it iff
-  `fieldOffset < super.PropertiesSize`).
-- DLL `Aura::SearchProperties` rewritten to dedupe by
-  `(definingClass, propName, offset)` triple. Per-call
-  `unordered_map` accumulates the inheritance count and tracks the
-  most-derived subclass observed (largest `PropertiesSize`) as the
-  preview-source -- defining class is often abstract (AActor, APawn)
-  with no direct instances, so Phase 2 needs to sample a concrete
-  subclass. classAddr/className/classPath in the wire output are
-  swapped to the defining class for the canonical "this is the
-  field's true home" view.
-- Wire schema: 4 new fields per match
-  (`defining_class_name`/`defining_class_addr`/`defining_class_path`/
-  `inherited_by_count`).
-- C# `PropertySearchMatch` model gains the new fields plus computed
-  `InheritanceBadge` ("+N inheritors" / "" for unique) and
-  `InheritanceTooltip` (explains the relationship + shows defining
-  class path so user can see engine vs game home).
-- PropertySearchPanel grew a "Scope" column between Class and Super
-  showing the badge + tooltip.
-- Tests (+11): `PropertySearchMatchTests` covers the badge + tooltip
-  pluralisation + game-specific-uniqueness wording + existing
-  TypeDisplay/OffsetHex formatting baseline.
-
-DLL-side dedup correctness needs a live game (4823-class scenario)
-for end-to-end verification -- to be confirmed via smoke test on
-Everspace 2 / Titan Quest II / FF7 Rebirth. Behaviour-preserving for
-unique BP-added fields (count=0, blank scope column).
-
-Files touched:
-- `dll/src/Aura.h` + `Aura.cpp` (`FindDefiningClass`,
-  `PropertyMatch` new fields, `SearchProperties` dedup)
-- `dll/src/Fern.cpp` (search_properties response wire)
-- `ui/UE5DumpUI/Models/PropertySearchResult.cs` (new fields +
-  computed display props)
-- `ui/UE5DumpUI/Services/DumpService.cs` (deserialize new fields)
-- `ui/UE5DumpUI/Views/PropertySearchPanel.axaml` (Scope column)
-- `ui/UE5DumpUI.Tests/PropertySearchMatchTests.cs` (new, 11 tests)
-
-**Follow-ups still on the table** (not blocking):
-- Proposal B: per-row "similar BP-added properties" suggestions
-  (fuzzy-match on tokeniser output to surface game-specific bools
-  alongside the engine field)
-- Proposal C: Class Family Browser (Character / Inventory / Save /
-  Component / DataAsset buckets) — bigger work, separate planning
+New tab "Class Family" — bucketed view of the game's classes by
+inferred role (Character / Pawn / Inventory / Stats / Save /
+Components / DataAssets / DataTables / GameMode). The "where do
+character / item data live?" entry point. **Effort**: L | **Risk**:
+med (needs careful family-classification rules per UE version) |
+**Why**: real answer to "I have no idea where to start exploring a
+new game" -- bigger work, separate planning round before starting.
 
 -----
 
@@ -429,3 +383,6 @@ Recent items that shipped, kept here briefly until the next refresh:
 - ✅ **PropertySearch dedupe-by-defining-class (Property Origin
   Resolver A)** — `bCanBeDamaged` now one row "+4822 inheritors"
   instead of 4823 indistinguishable rows (build 610)
+- ✅ **One-click Inject Helper into Current CE Table** (AOBMaker
+  plugin's new InjectTableFile pipe cmd + UE5DumpUI Tools menu;
+  cherry-picked from spawned session, build 611)
