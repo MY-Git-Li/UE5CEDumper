@@ -425,6 +425,12 @@ dist/
 
 # Claude Code
 .claude/
+
+# Local scratch / handoff staging — never committed.
+# Use this for cross-device handoff payloads (memory snapshots,
+# session notes) that should travel with the working tree but
+# not into the public history.
+work/
 build_output.txt
 build_error.txt
 build_log.txt
