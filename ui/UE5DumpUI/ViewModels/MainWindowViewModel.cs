@@ -70,6 +70,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public InstanceFinderViewModel InstanceFinder { get; }
     public PropertySearchViewModel PropertySearch { get; }
     public GameClassFilterViewModel GameClassFilter { get; }
+    public InterestingFunctionsViewModel InterestingFunctions { get; }
     public ProxyDeployViewModel? ProxyDeploy { get; }
 
     partial void OnSelectedAddressFormatIndexChanged(int value)
@@ -162,6 +163,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         InstanceFinder = new InstanceFinderViewModel(dump, log, platform);
         PropertySearch = new PropertySearchViewModel(dump, log);
         GameClassFilter = new GameClassFilterViewModel(dump, log);
+        InterestingFunctions = new InterestingFunctionsViewModel(dump, log);
 
         if (proxyDeploy != null)
             ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log);
