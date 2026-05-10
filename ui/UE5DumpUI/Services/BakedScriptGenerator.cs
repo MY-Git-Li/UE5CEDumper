@@ -169,16 +169,30 @@ public static class BakedScriptGenerator
         if (verifyReturn)
         {
             Line(sb, "-- ====== Verify mode: dump params buffer + decoded return ======");
-            Line(sb, "-- Locate the mailbox for raw byte access. UE5_INVOKE_PARAMS_OFFSET");
-            Line(sb, "-- is exposed by the helper after fn() loaded above.");
-            Line(sb, "local _mb_dbg   = getAddress('g_invokeMailbox')");
-            Line(sb, $"local _PD_dbg   = _mb_dbg + (UE5_INVOKE_PARAMS_OFFSET or 0x328)");
+            Line(sb, "-- Resolve mailbox via getAddressSafe + module-prefixed fallback,");
+            Line(sb, "-- mirroring the helper's findMailbox(). Bare getAddress() is fine");
+            Line(sb, "-- in some setups but throws / returns garbage in others when CE's");
+            Line(sb, "-- symbol resolver only registers the prefixed form -- without this");
+            Line(sb, "-- guard the dump call would later hit string.format with nil.");
+            Line(sb, "local _mb_dbg = (function()");
+            Line(sb, "  local a = getAddressSafe('g_invokeMailbox')");
+            Line(sb, "  if not a or a == 0 then a = getAddressSafe('UE5Dumper.g_invokeMailbox') end");
+            Line(sb, "  return a or 0");
+            Line(sb, "end)()");
+            Line(sb, $"local _PD_dbg = _mb_dbg + (UE5_INVOKE_PARAMS_OFFSET or 0x328)");
             int dumpLen = Math.Max(8, Math.Min(parmsSize, 32));
             Line(sb, $"local _DUMP_LEN = {dumpLen}  -- min(parmsSize, 32)");
             Line(sb, "local function _dumpHex(label)");
+            Line(sb, "  if _mb_dbg == 0 then");
+            Line(sb, "    print(label .. ': <mailbox unresolved -- is UE5Dumper.dll injected?>')");
+            Line(sb, "    return");
+            Line(sb, "  end");
             Line(sb, "  local s = label .. ': '");
             Line(sb, "  for i = 0, _DUMP_LEN - 1 do");
-            Line(sb, "    s = s .. string.format('%02X ', readByte(_PD_dbg + i))");
+            // `or 0` keeps the dump alive even if readByte returns nil for a
+            // single byte (e.g. half-page boundary on a tiny region) -- shows
+            // 00 instead of crashing the whole script.
+            Line(sb, "    s = s .. string.format('%02X ', readByte(_PD_dbg + i) or 0)");
             Line(sb, "  end");
             Line(sb, "  print(s)");
             Line(sb, "end");

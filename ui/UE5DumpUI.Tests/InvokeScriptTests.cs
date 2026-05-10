@@ -686,6 +686,17 @@ public class InvokeScriptTests
         Assert.Contains("UE5_INVOKE_PARAMS_OFFSET", script);
         Assert.Contains("_dumpHex('[Invoke] Before')", script);
         Assert.Contains("_dumpHex('[Invoke] After ')", script);
+        // Robust mailbox resolution: mirror helper's getAddressSafe + module-
+        // prefixed fallback. Bare getAddress() returned garbage on the user's
+        // CE setup which then crashed the dump with format(nil). Don't
+        // regress this -- both code paths must remain.
+        Assert.Contains("getAddressSafe('g_invokeMailbox')", script);
+        Assert.Contains("getAddressSafe('UE5Dumper.g_invokeMailbox')", script);
+        // Nil-guard on individual byte reads so a single unreadable byte
+        // doesn't crash the whole dump call.
+        Assert.Contains("readByte(_PD_dbg + i) or 0", script);
+        // Friendly fallback when symbol resolution fails entirely.
+        Assert.Contains("mailbox unresolved", script);
 
         // Decoded read uses the supplied offset + helper type
         Assert.Contains("readUFunctionReturn(8, 'double')", script);
