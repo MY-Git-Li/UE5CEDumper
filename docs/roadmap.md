@@ -6,7 +6,7 @@ upcoming work and [dev-log.md](dev-log.md) for the historical commit
 trail. Build number tags reflect when each row reached its current
 state.
 
-> **Last refreshed**: 2026-05-10 (build 609, post-tokeniser + AOBMaker gating polish on `dev`).
+> **Last refreshed**: 2026-05-10 (build 610, post-PropertySearch dedupe-by-defining-class on `dev`).
 
 -----
 

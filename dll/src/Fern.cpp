@@ -1352,6 +1352,13 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 item["prop_size"]   = m.propSize;
                 item["struct_type"] = m.structType;
                 item["inner_type"]  = m.innerType;
+                // Inheritance-aware fields (build 610+) -- after dedup,
+                // class_name == defining_class_name (we keep both for
+                // forward compat in case the dedup story changes).
+                item["defining_class_name"] = m.definingClassName;
+                item["defining_class_addr"] = Renge::AddrToStr(m.definingClassAddr);
+                item["defining_class_path"] = m.definingClassPath;
+                item["inherited_by_count"]  = m.inheritedByCount;
                 if (!m.preview.empty())
                     item["preview"] = m.preview;
                 matches.push_back(item);

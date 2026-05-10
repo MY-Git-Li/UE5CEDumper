@@ -228,7 +228,9 @@ std::vector<ReferenceMatch> FindReferencesToUObject(uintptr_t target,
 // === Property Keyword Search ===
 
 struct PropertyMatch {
-    std::string className;
+    std::string className;        // The class this match was emitted from
+                                  // (= definingClassName after dedup, since
+                                  //  dedup keeps only the defining-class row)
     uintptr_t   classAddr = 0;
     std::string classPath;
     std::string superName;
@@ -238,6 +240,38 @@ struct PropertyMatch {
     int32_t     propSize   = 0;
     std::string structType;   // StructProperty -> inner struct name
     std::string innerType;    // ArrayProperty -> inner element type
+
+    // === Inheritance-aware fields (build 610+) ===
+    //
+    // PropertySearch dedupes by (definingClass, propName, offset) so a
+    // field declared on AActor and inherited by 4823 children only emits
+    // one row. The defining class is the highest-up class in the
+    // inheritance chain that actually declares the property; everything
+    // below it inherits the same FProperty at the same offset, so writing
+    // to that offset on any instance has identical effect.
+    std::string definingClassName;     // Class where the FProperty is first declared
+    uintptr_t   definingClassAddr = 0; // Address of that class
+    std::string definingClassPath;     // Full path of the defining class (for game-vs-engine UI hint)
+    int32_t     inheritedByCount = 0;  // Number of OTHER classes (excludes defining)
+                                       // that inherit this field. 0 means
+                                       // the property is unique to this class.
+
+    // === Internal preview-resolution helper (not serialised) ===
+    //
+    // After dedup, classAddr / definingClassAddr point to the canonical
+    // defining class (often abstract -- AActor / APawn / etc -- with no
+    // direct instances). Phase 2 needs an actual non-abstract subclass
+    // to find a representative instance. Track the most-derived
+    // subclass we observed during the search loop so Phase 2 can find
+    // instances even when the defining class is abstract.
+    //
+    // "Most derived" is approximated by largest PropertiesSize -- a
+    // subclass with more bytes in its struct is presumed to be deeper
+    // in the inheritance chain and more likely to have live instances
+    // (concrete BP classes typically have more fields than the abstract
+    // engine bases).
+    uintptr_t   previewClassAddr      = 0;
+    int32_t     previewPropertiesSize = 0;
 
     // Preview support — populated in Phase 2 of SearchProperties
     std::string preview;           // Inline value preview from a representative instance
@@ -259,11 +293,28 @@ struct PropertySearchResult {
 // query: case-insensitive substring match on property name.
 // typeFilter: optional list of property types (e.g. "FloatProperty"); empty = all types.
 // gameOnly: skip engine packages (/Script/Engine, /Script/CoreUObject, etc.)
+//
+// Results are deduped by (definingClass, propName, offset) -- a field
+// declared on AActor and inherited by 4823 children only emits one row,
+// keyed by the defining class. The PropertyMatch.inheritedByCount
+// records how many other classes share that inherited field.
 PropertySearchResult SearchProperties(
     const std::string& query,
     const std::vector<std::string>& typeFilter,
     bool gameOnly,
     int maxResults = 200);
+
+// Walk the SuperStruct chain upward from `classAddr` and return the
+// highest-up class that still declares a property at `fieldOffset`.
+// Algorithm: a class C declares the property iff
+//   fieldOffset >= C.SuperStruct.PropertiesSize  (super doesn't have it)
+//   fieldOffset <  C.PropertiesSize              (C does have it)
+// If no super exists (UObject is the root), classAddr itself is the
+// defining class.
+//
+// Used by SearchProperties dedup. Cap on chain depth (32) matches
+// Ubel's WalkClass inherited-walk to avoid pathological cycles.
+uintptr_t FindDefiningClass(uintptr_t classAddr, int32_t fieldOffset);
 
 // === Game Class List ===
 

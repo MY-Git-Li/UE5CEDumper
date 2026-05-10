@@ -1023,6 +1023,14 @@ public sealed class DumpService : IDumpService
                     StructType = obj["struct_type"]?.GetValue<string>() ?? "",
                     InnerType  = obj["inner_type"]?.GetValue<string>() ?? "",
                     Preview    = obj["preview"]?.GetValue<string>() ?? "",
+                    // Inheritance-aware fields (build 610+) -- back-compat
+                    // with older DLLs that didn't emit these: defaults to
+                    // "" / 0, falls back to ClassName via the model's
+                    // computed properties.
+                    DefiningClassName = obj["defining_class_name"]?.GetValue<string>() ?? "",
+                    DefiningClassAddr = obj["defining_class_addr"]?.GetValue<string>() ?? "",
+                    DefiningClassPath = obj["defining_class_path"]?.GetValue<string>() ?? "",
+                    InheritedByCount  = obj["inherited_by_count"]?.GetValue<int>() ?? 0,
                 });
             }
         }

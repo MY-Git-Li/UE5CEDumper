@@ -2276,6 +2276,51 @@ static std::string ToLower(const std::string& s) {
     return out;
 }
 
+// FindDefiningClass: walk SuperStruct chain upward and return the
+// highest-up class that still declares the property at `fieldOffset`.
+//
+// Algorithm:
+//   For class C with SuperStruct S:
+//     - If S exists and S.PropertiesSize > fieldOffset, then S has the
+//       property too -- keep walking up (cur = S).
+//     - Otherwise S doesn't have it (or no S), so C is the defining
+//       class.
+//
+// 32-step depth cap matches Ubel's WalkClass inherited-walk so a
+// pathological cycle in the SuperStruct chain can't hang us.
+uintptr_t FindDefiningClass(uintptr_t classAddr, int32_t fieldOffset) {
+    if (!classAddr) return 0;
+    uintptr_t cur = classAddr;
+    for (int depth = 0; depth < 32; ++depth) {
+        uintptr_t super = 0;
+        if (!Macht::ReadSafe(cur + DynOff::USTRUCT_SUPER, super) || !super) {
+            // No super left -- cur is at the root (UObject) and must
+            // be where the property lives.
+            return cur;
+        }
+        int32_t superPropsSize = 0;
+        if (!Macht::ReadSafe(super + DynOff::USTRUCT_PROPSSIZE, superPropsSize)
+            || superPropsSize <= 0) {
+            // Can't read super's PropertiesSize -- conservatively
+            // attribute to current class.
+            return cur;
+        }
+        // Super has the property too iff its size covers this offset.
+        // Note: PropertiesSize is the END of the struct, so a property
+        // at offset O is inside super iff O < superPropsSize.
+        if (fieldOffset < superPropsSize) {
+            cur = super;  // super has it; keep going up
+            continue;
+        }
+        return cur;  // super doesn't have it; cur is the defining class
+    }
+    return cur;
+}
+
+// Cache for FindDefiningClass results -- per (classAddr, fieldOffset).
+// Reset implicitly per SearchProperties call (keyed by a thread-local
+// epoch would be over-engineering; the cost is one map per call).
+
 PropertySearchResult SearchProperties(
     const std::string& query,
     const std::vector<std::string>& typeFilter,
@@ -2292,6 +2337,50 @@ PropertySearchResult SearchProperties(
 
     // Track already-visited UClass addresses to avoid duplicates
     std::unordered_set<uintptr_t> visitedClasses;
+
+    // Per-call cache of FindDefiningClass results -- a single property
+    // walked across many subclasses would otherwise re-walk the
+    // SuperStruct chain redundantly. Keyed by (classAddr, fieldOffset)
+    // because different fields on the same class have different
+    // defining classes. Wrapped in a struct because std::pair isn't
+    // hashable out of the box.
+    struct FieldKey {
+        uintptr_t classAddr;
+        int32_t   offset;
+        bool operator==(const FieldKey& o) const {
+            return classAddr == o.classAddr && offset == o.offset;
+        }
+    };
+    struct FieldKeyHash {
+        size_t operator()(const FieldKey& k) const {
+            return std::hash<uintptr_t>{}(k.classAddr)
+                 ^ (std::hash<int32_t>{}(k.offset) << 1);
+        }
+    };
+    std::unordered_map<FieldKey, uintptr_t, FieldKeyHash> definingCache;
+
+    // Dedup map: groups inheriting classes by (definingClass, propName, offset).
+    // Value is the index into `result.results` for that group's
+    // representative match. inheritedByCount accumulates as we visit
+    // more classes that inherit the same field.
+    struct DedupKey {
+        uintptr_t   definingClassAddr;
+        std::string propName;
+        int32_t     offset;
+        bool operator==(const DedupKey& o) const {
+            return definingClassAddr == o.definingClassAddr
+                && offset == o.offset
+                && propName == o.propName;
+        }
+    };
+    struct DedupKeyHash {
+        size_t operator()(const DedupKey& k) const {
+            return std::hash<uintptr_t>{}(k.definingClassAddr)
+                 ^ (std::hash<std::string>{}(k.propName) << 1)
+                 ^ (std::hash<int32_t>{}(k.offset) << 2);
+        }
+    };
+    std::unordered_map<DedupKey, size_t, DedupKeyHash> dedupIndex;
 
     int32_t count = GetCount();
     result.scannedObjects = count;
@@ -2337,37 +2426,117 @@ PropertySearchResult SearchProperties(
                 if (typeSet.find(lowerType) == typeSet.end()) continue;
             }
 
+            // Resolve defining class (cached per field key).
+            FieldKey fk{ obj, field.Offset };
+            uintptr_t definingAddr = 0;
+            auto cacheIt = definingCache.find(fk);
+            if (cacheIt != definingCache.end()) {
+                definingAddr = cacheIt->second;
+            } else {
+                definingAddr = FindDefiningClass(obj, field.Offset);
+                definingCache[fk] = definingAddr;
+            }
+            if (!definingAddr) definingAddr = obj;  // safety net
+
+            // Dedup: have we seen this defining-class+name+offset combo?
+            DedupKey dk{ definingAddr, field.Name, field.Offset };
+            auto dedupIt = dedupIndex.find(dk);
+            if (dedupIt != dedupIndex.end()) {
+                // This class inherits a field we've already emitted.
+                // Bump the inheritedByCount on the existing match.
+                auto& existing = result.results[dedupIt->second];
+                existing.inheritedByCount++;
+                // Update preview-source if THIS subclass is more derived
+                // (bigger PropertiesSize) than the previous best -- bias
+                // toward leaf classes that actually have live instances.
+                if (ci.PropertiesSize > existing.previewPropertiesSize) {
+                    existing.previewClassAddr      = obj;
+                    existing.previewPropertiesSize = ci.PropertiesSize;
+                }
+                continue;
+            }
+
+            // First time seeing this (definingClass, propName, offset)
+            // triple -- emit a representative row keyed by the defining
+            // class, NOT the iterated class. That way the user sees
+            // "bCanBeDamaged @ AActor (inherited by 4822)" instead of
+            // "bCanBeDamaged @ BP_RandomChild_C" depending on iteration
+            // order.
+            std::string definingName;
+            std::string definingPath;
+            if (definingAddr == obj) {
+                // Defining class is the one we're iterating -- already have its name/path.
+                definingName = ci.Name;
+                definingPath = classPath;
+            } else {
+                // Defining class is somewhere up the chain -- read its name + path.
+                definingName = Ubel::GetName(definingAddr);
+                definingPath = Ubel::GetFullName(definingAddr);
+            }
+
             PropertyMatch match;
-            match.className  = ci.Name;
-            match.classAddr  = ci.Address;
-            match.classPath  = classPath;
-            match.superName  = ci.SuperName;
-            match.propName   = field.Name;
-            match.propType   = field.TypeName;
-            match.propOffset = field.Offset;
-            match.propSize   = field.Size;
-            match.structType = field.structType;
-            match.innerType  = field.innerType;
-            // Preview metadata
+            // The headline className/classAddr/classPath/superName all
+            // reflect the DEFINING class -- the user wants to see the
+            // canonical home of the field, not whichever subclass we
+            // happened to iterate first.
+            match.className   = definingName;
+            match.classAddr   = definingAddr;
+            match.classPath   = definingPath;
+            // SuperName is the defining class's super (if we can read it
+            // cheaply). For non-iterated defining-classes we'd need to
+            // read it via DynOff::USTRUCT_SUPER -> name; skip for now
+            // since it's not load-bearing for the dedup story.
+            match.superName   = (definingAddr == obj) ? ci.SuperName : "";
+            match.propName    = field.Name;
+            match.propType    = field.TypeName;
+            match.propOffset  = field.Offset;
+            match.propSize    = field.Size;
+            match.structType  = field.structType;
+            match.innerType   = field.innerType;
+            // Inheritance fields
+            match.definingClassName = definingName;
+            match.definingClassAddr = definingAddr;
+            match.definingClassPath = definingPath;
+            match.inheritedByCount  = 0;  // bumps as we encounter inheritors below
+            // Preview metadata (read from any class -- the defining
+            // class CDO would be most "canonical" but the iterated
+            // class's preview is still valid since the field is
+            // identical).
             match.fieldAddr      = field.Address;
             match.boolFieldMask  = field.boolFieldMask;
             match.keyType        = field.keyType;
             match.valueType      = field.valueType;
+            // Seed preview source with the iterated class -- guaranteed
+            // to have the field (we're walking its property chain). Will
+            // be replaced by a more-derived subclass on later count bumps.
+            match.previewClassAddr      = obj;
+            match.previewPropertiesSize = ci.PropertiesSize;
+
+            dedupIndex[dk] = result.results.size();
             result.results.push_back(std::move(match));
         }
     }
 
     // --- Phase 2: Resolve value previews from representative instances ---
+    //
+    // After dedup, match.classAddr is the DEFINING class (often abstract
+    // -- AActor / APawn / etc -- with no direct instances). We use the
+    // separate previewClassAddr (the most-derived subclass observed
+    // during the search loop) to find a live instance whose data we can
+    // sample. Since the property is at the same offset on every subclass,
+    // the preview value is identical regardless of which subclass we
+    // sampled.
     if (!result.results.empty()) {
-        // 2a. Collect unique classAddr set
-        std::unordered_set<uintptr_t> needClasses;
+        // 2a. Collect unique preview-source class set (subclasses
+        // chosen for instance lookup, NOT the defining classes).
+        std::unordered_set<uintptr_t> needPreviewClasses;
         for (const auto& m : result.results)
-            needClasses.insert(m.classAddr);
+            needPreviewClasses.insert(m.previewClassAddr);
 
-        // 2b. Scan GObjects to find one instance per class
+        // 2b. Scan GObjects to find one instance per preview-source class.
         std::unordered_map<uintptr_t, uintptr_t> instanceMap;
         int32_t cnt = GetCount();
-        for (int32_t i = 0; i < cnt && instanceMap.size() < needClasses.size(); ++i) {
+        for (int32_t i = 0; i < cnt && instanceMap.size() < needPreviewClasses.size(); ++i) {
             uintptr_t obj = GetByIndex(i);
             if (!obj) continue;
 
@@ -2375,12 +2544,16 @@ PropertySearchResult SearchProperties(
             if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
 
             // Skip if this IS a UClass (we want instances, not the class itself)
-            if (needClasses.count(cls) && !instanceMap.count(cls) && obj != cls) {
+            if (needPreviewClasses.count(cls) && !instanceMap.count(cls) && obj != cls) {
                 instanceMap[cls] = obj;
             }
         }
 
-        // 2c. Read property values and fill previews
+        // 2c. Read property values and fill previews. ResolvePropertyPreviews
+        // expects the match's classAddr to key into instanceMap, but we
+        // want it to use previewClassAddr instead. Temporarily swap, run,
+        // then swap back so the wire output keeps the defining-class
+        // address as the canonical classAddr.
         if (!instanceMap.empty()) {
             // Resolve EnumProperty: read UEnum* from FField for matches that need it
             for (auto& m : result.results) {
@@ -2388,7 +2561,14 @@ PropertySearchResult SearchProperties(
                     Macht::ReadSafe(m.fieldAddr + DynOff::FENUMPROP_ENUM, m.enumAddr);
                 }
             }
+            // Swap classAddr <-> previewClassAddr around the call.
+            for (auto& m : result.results) {
+                std::swap(m.classAddr, m.previewClassAddr);
+            }
             Ubel::ResolvePropertyPreviews(result.results, instanceMap);
+            for (auto& m : result.results) {
+                std::swap(m.classAddr, m.previewClassAddr);
+            }
         }
     }
 

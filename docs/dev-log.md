@@ -11,7 +11,131 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
-## 2026-05-10 (latest, dev branch, build 608-609) — AOBMaker gating + CamelCase tokeniser + dialog overflow fix
+## 2026-05-10 (latest, dev branch, build 610) — PropertySearch dedupe-by-defining-class
+
+`feat(dll,ui): PropertySearch results deduped by defining class
++ inheritance count badge`. First piece of the "Property Origin
+Resolver" set proposed in chat (proposal A) -- closes the
+"PropertySearch returns 4823 indistinguishable rows for
+`bCanBeDamaged`" UX trap that user flagged as the biggest practical
+problem with the existing tooling.
+
+### The problem (one sentence)
+
+UE doesn't shadow inherited properties (no C# `new` keyword
+equivalent), so a field declared on `AActor` lives at the same offset
+on every `APawn`/`ACharacter`/`BP_*_C` subclass. PropertySearch
+walked each class's full inherited chain and emitted one row per
+class -- 4823 rows for one field, with no signal to the user about
+which one was "real" (they're all the same memory).
+
+### Algorithm
+
+`Aura::FindDefiningClass(classAddr, fieldOffset)` walks the
+SuperStruct chain upward. A class C declares the property at
+`fieldOffset` iff:
+
+```
+fieldOffset >= C.SuperStruct.PropertiesSize    (super doesn't have it)
+fieldOffset <  C.PropertiesSize                (C does have it)
+```
+
+Translated to a loop: starting at the iterated class, walk to super
+while `super.PropertiesSize > fieldOffset` (super has it too); when
+super doesn't have it, the current class is the defining class.
+32-step depth cap matches Ubel's existing inherited-walk limit.
+
+### SearchProperties dedup
+
+Per-call `unordered_map<DedupKey, size_t>` where key is
+`(definingClassAddr, propName, propOffset)`. First encounter:
+allocate a representative `PropertyMatch` keyed by the defining
+class. Subsequent encounters: bump `inheritedByCount`, no new row.
+
+The representative match's `className` / `classAddr` / `classPath`
+are the **defining class**, not the iterated class -- so the user
+sees `AActor` as the "true home" of `bCanBeDamaged` regardless of
+which subclass GObjects[i] hit first.
+
+### Phase 2 (preview) gotcha + fix
+
+After dedup, `match.classAddr` is the defining class -- often
+abstract (AActor / APawn) with zero direct instances. The existing
+Phase 2 code looked up instances by exact class match, which after
+dedup would find nothing for almost every match.
+
+Fix: track an internal-only `previewClassAddr` per match -- the
+most-derived subclass observed during the search loop (largest
+`PropertiesSize`, since deeper-in-chain classes are more likely to
+be concrete and have live instances). Phase 2 swaps `classAddr <->
+previewClassAddr` around the `ResolvePropertyPreviews` call so the
+existing instance-lookup helper sees the concrete subclass while
+the wire output keeps the canonical defining-class addressing.
+
+### Wire schema additions (4 new fields)
+
+```json
+{
+  "class_name":           "AActor",                  // defining class (post-dedup)
+  "class_addr":           "0x7FF...",                // ditto
+  "defining_class_name":  "AActor",                  // explicit duplicate for forward compat
+  "defining_class_addr":  "0x7FF...",
+  "defining_class_path":  "/Script/Engine.Actor",
+  "inherited_by_count":   4822,
+  ...
+}
+```
+
+`defining_class_*` exposed as a separate copy of `class_*` so a
+future "Show inheritance expanded" mode could emit one row per
+inheriting class with `class_*` reflecting the inheritor and
+`defining_class_*` still pointing at the canonical home. Back-compat
+preserved: older DLLs that don't emit these default to "" / 0
+client-side, which the model's computed properties handle gracefully.
+
+### UI
+
+PropertySearchPanel grew a new "Scope" column between Class and
+Super:
+- Empty when `InheritedByCount == 0` (a strong "this is a unique,
+  game-specific field" hint -- usually the kind a cheat-table maker
+  actually wants)
+- "+1 inheritor" / "+N inheritors" otherwise
+
+Tooltip on the Scope cell explains the relationship + shows the
+defining class path so the user can tell engine fields
+(`/Script/Engine.*`) from game fields (`/Game/*` / `/Script/MyGame.*`)
+at a glance.
+
+### Tests (+11)
+
+`PropertySearchMatchTests` (new):
+- `InheritanceBadge` empty / singular / plural cases
+- `InheritanceTooltip` highlights uniqueness when count=0; shows
+  defining class path + "identical effect" wording when count>0
+- `OffsetHex` / `TypeDisplay` baseline preserved (no regression
+  in existing display behaviour)
+
+DLL-side dedup correctness needs a live game (4823-class scenario)
+to verify end-to-end -- no unit-test surface for the GObjects walk.
+Smoke test pending on Everspace 2 / Titan Quest II / FF7 Rebirth.
+
+### Follow-ups (not blocking)
+
+- **Proposal B**: per-row "similar BP-added properties" suggestions
+  using the tokeniser to surface game-specific bools alongside the
+  engine field (so user sees `bCanBeDamaged @ AActor` AND nearby
+  `bIsImmortal @ BP_PlayerCharacter_C` in one view)
+- **Proposal C**: Class Family Browser tab -- bucketed view of
+  Character / Pawn / Inventory / Save / Component / DataAsset / etc
+  classes loaded in the game. Bigger work, separate planning.
+
+**Build #610, 755 tests passing (662 C# + 62 dll_helpers + 31
+utf8_helpers).** 9 commits ahead of `origin/main`.
+
+-----
+
+## 2026-05-10 (build 608-609) — AOBMaker gating + CamelCase tokeniser + dialog overflow fix
 
 Three independent fixes shipped under the "polish + de-risk" theme
 after Interesting Functions Finder went live in 597-607.

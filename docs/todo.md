@@ -235,30 +235,62 @@ Sub-task brief (sent to spawned session):
 Once spawned session reports back, integrate the UI menu item if it
 wasn't included; verify the AOBMaker pipe protocol matches.
 
-### Property Origin Resolver (analysis) — 🔍 design discussion 2026-05-10
+### Property Origin Resolver (Proposal A) — ✅ shipped (build 610)
 
-**Effort**: M (estimated, pending design agreement) | **Risk**: low
+**Effort**: M (actual: ~M) | **Risk**: low (no regressions; tests + build clean)
 
-User reports the existing PropertySearch panel is "groping in the
-dark" -- searching for `bCanBeDamaged` returns 4823 matches because
-every Actor-derived UClass surfaces its inherited property, and the
-user can't tell which one is the "real" cheat target. Same for
-`Health` / `Speed` / etc -- shown on Pawn, Character, BP_*, with no
-indication that they're often the SAME memory location at the same
-inherited offset.
+PropertySearch dedupe-by-defining-class shipped. Searching for
+`bCanBeDamaged` now returns one row keyed by `AActor` with a
+"+4822 inheritors" badge, instead of 4823 rows you couldn't tell apart.
 
-Design brief (in chat, awaiting agreement before implementation):
-- Group PropertySearch results by **defining class** (the class where
-  the FProperty was first declared in the inheritance chain, not just
-  inherited from)
-- Show a "(inherited by N classes)" badge instead of N separate rows
-- Per-property breakdown panel: defining class + child classes that
-  inherit + indication of whether it's C++ engine-defined or BP-added
-- Bigger-picture follow-up: **Class Family Browser** (pick a category
-  Character / Inventory / Combat / Save / Component / DataAsset / etc
-  and see all UClasses of that family in the loaded game)
+Implementation:
+- DLL `Aura::FindDefiningClass(classAddr, fieldOffset)` walks the
+  SuperStruct chain upward and returns the highest-up class still
+  declaring the property (algorithm: super has it iff
+  `fieldOffset < super.PropertiesSize`).
+- DLL `Aura::SearchProperties` rewritten to dedupe by
+  `(definingClass, propName, offset)` triple. Per-call
+  `unordered_map` accumulates the inheritance count and tracks the
+  most-derived subclass observed (largest `PropertiesSize`) as the
+  preview-source -- defining class is often abstract (AActor, APawn)
+  with no direct instances, so Phase 2 needs to sample a concrete
+  subclass. classAddr/className/classPath in the wire output are
+  swapped to the defining class for the canonical "this is the
+  field's true home" view.
+- Wire schema: 4 new fields per match
+  (`defining_class_name`/`defining_class_addr`/`defining_class_path`/
+  `inherited_by_count`).
+- C# `PropertySearchMatch` model gains the new fields plus computed
+  `InheritanceBadge` ("+N inheritors" / "" for unique) and
+  `InheritanceTooltip` (explains the relationship + shows defining
+  class path so user can see engine vs game home).
+- PropertySearchPanel grew a "Scope" column between Class and Super
+  showing the badge + tooltip.
+- Tests (+11): `PropertySearchMatchTests` covers the badge + tooltip
+  pluralisation + game-specific-uniqueness wording + existing
+  TypeDisplay/OffsetHex formatting baseline.
 
-See chat session 2026-05-10 for the full analysis.
+DLL-side dedup correctness needs a live game (4823-class scenario)
+for end-to-end verification -- to be confirmed via smoke test on
+Everspace 2 / Titan Quest II / FF7 Rebirth. Behaviour-preserving for
+unique BP-added fields (count=0, blank scope column).
+
+Files touched:
+- `dll/src/Aura.h` + `Aura.cpp` (`FindDefiningClass`,
+  `PropertyMatch` new fields, `SearchProperties` dedup)
+- `dll/src/Fern.cpp` (search_properties response wire)
+- `ui/UE5DumpUI/Models/PropertySearchResult.cs` (new fields +
+  computed display props)
+- `ui/UE5DumpUI/Services/DumpService.cs` (deserialize new fields)
+- `ui/UE5DumpUI/Views/PropertySearchPanel.axaml` (Scope column)
+- `ui/UE5DumpUI.Tests/PropertySearchMatchTests.cs` (new, 11 tests)
+
+**Follow-ups still on the table** (not blocking):
+- Proposal B: per-row "similar BP-added properties" suggestions
+  (fuzzy-match on tokeniser output to surface game-specific bools
+  alongside the engine field)
+- Proposal C: Class Family Browser (Character / Inventory / Save /
+  Component / DataAsset buckets) — bigger work, separate planning
 
 -----
 
@@ -364,3 +396,6 @@ Recent items that shipped, kept here briefly until the next refresh:
   confirmed metadata is stripped from cooked Shipping binaries; would
   be ~zero value for real cheat-table targets. Pivoted to tokeniser
   instead.
+- ✅ **PropertySearch dedupe-by-defining-class (Property Origin
+  Resolver A)** — `bCanBeDamaged` now one row "+4822 inheritors"
+  instead of 4823 indistinguishable rows (build 610)
