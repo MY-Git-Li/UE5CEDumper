@@ -2979,14 +2979,33 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
     }
 
     // Step 9: Derive remaining offsets
-    // PropertyFlags: ElementSize + 8 (ArrayDim int32 fills the gap)
+    //
+    // PropertyFlags follows ElementSize directly (no padding). UE source
+    // layout (CoreUObject/Public/UObject/UnrealType.h on UE 4.25+):
+    //
+    //   class FProperty : public FField {
+    //       int32 ArrayDim;        // +0x30
+    //       int32 ElementSize;     // +0x34   <- propElemSizeOff
+    //       EPropertyFlags Flags;  // +0x38   <- propElemSizeOff + 4
+    //       uint16 RepIndex;       // +0x40
+    //       int32 Offset_Internal; // +0x44
+    //   };
+    //
+    // ArrayDim is BEFORE ElementSize, not between ElementSize and Flags --
+    // the previous "+8" formula assumed the wrong order and read the high
+    // 32 bits of the 64-bit Flags instead of the low. CPF_ReturnParm
+    // (0x400), CPF_OutParm (0x100), and other parm flags all live in the
+    // low 32 bits, so IsReturn / IsOut / IsParm detection silently
+    // returned false for every UFunction param across every UE version.
+    // This in turn made baked AA Scripts emit ReturnValue as an INPUT
+    // param and the verify-mode print as "(void return)".
     if (DynOff::bUseFProperty) {
         if (propElemSizeOff >= 0) {
-            DynOff::FPROPERTY_FLAGS = propElemSizeOff + 8;
+            DynOff::FPROPERTY_FLAGS = propElemSizeOff + 4;
         }
     } else {
         if (propElemSizeOff >= 0) {
-            DynOff::UPROPERTY_FLAGS = propElemSizeOff + 8;
+            DynOff::UPROPERTY_FLAGS = propElemSizeOff + 4;
         }
     }
 
