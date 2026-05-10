@@ -26,12 +26,13 @@
 | Cat Island Petrichor Demo | UE5.6 | Full working. GWorld ✅ |
 | Way of the Hunter 2 Demo | UE5.7 | Full working. GWorld ✅ |
 | COMBAT PILOT: CARRIER QUALIFICATION Demo | UE5.5 | Full working. GWorld ✅ |
+| The Artisan of Glimmith | UE4.27 (PE: 427, exe: Geri-Win64-Shipping) | Full working. Stride 24, 157K objects. GWorld ✅. Used during build 647 ProcessEvent vtable-detection debugging (see [docs/todo.md](todo.md) CRITICAL section) — UFunction invoke pipeline returns `result=0` here for the same root cause as ES2, confirming the bug is not UE-5.5-specific. |
 
 -----
 
 ## GWorld Status Summary
 
-**Working (18/20):** TQ2, EverSpace 2, Hogwarts Legacy, IDOLM@STER, Romancing SaGa 2, Tower of Mask, Ghostwire: Tokyo, Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT Demo, OctoPath Traveler, FF7R, FF7Re, DQ I&II, DQ III, DQ XI S, Lushfoil Photography Sim, Manor Lords
+**Working (19/21):** TQ2, EverSpace 2, Hogwarts Legacy, IDOLM@STER, Romancing SaGa 2, Tower of Mask, Ghostwire: Tokyo, Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT Demo, OctoPath Traveler, FF7R, FF7Re, DQ I&II, DQ III, DQ XI S, Lushfoil Photography Sim, Manor Lords, The Artisan of Glimmith
 
 **Failing (GWorld not found or untested):** Star Wars Jedi, Satisfactory
 
@@ -39,3 +40,4 @@
 
 - **FF7Re** = Final Fantasy VII Rebirth (UE4.26 Square Enix fork)
 - **FF7R** = Final Fantasy VII Remake Intergrade (UE4.18 Square Enix fork)
+- **Geri** = The Artisan of Glimmith (UE4.27, executable `Geri-Win64-Shipping.exe` — log folder uses this name)

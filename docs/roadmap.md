@@ -147,6 +147,12 @@ detection — wait for a real misdetection report before adding.
 - **The Occupation** ✅ (UE 4.19): UE4 path with `GNAM_CT3`, GWorld OK.
 - **TimeSplitters Rewind Early Access V0.3.3** ✅ (UE 4.25): full scan,
   GWorld OK.
+- **The Artisan of Glimmith** ✅ (UE 4.27, exe `Geri-Win64-Shipping.exe`,
+  157K objects): full scan + GWorld OK. Used as cross-version
+  reproducer for the build 647 ProcessEvent vtable-detection bug —
+  shows the same `result=0` invoke pattern as ES2 (UE 5.5), confirming
+  the bug is not UE-5.5-specific. Fix tracked in
+  [docs/todo.md](todo.md#critical-processevent-vtable-detection-is-wrong-discovered-build-647-live-test).
 - **Squad-Win64-Shipping** ✅ (UE 5.7, 240K objects): build 488 user
   reported 13 `get_object_list` 0xA0 UTF-8 exceptions → root cause was
   Serie wide-path surrogate encoding bug, fixed in build 555. Should
