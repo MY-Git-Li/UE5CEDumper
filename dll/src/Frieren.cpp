@@ -662,6 +662,47 @@ int32_t UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t para
     return 0;
 }
 
+// Direct call entry point — never goes through GameThreadDispatch.
+// Mirrors the fallback path of UE5_CallProcessEvent without the hook
+// check; intended for callers (e.g. Mimic::HandleInvoke) that have
+// independently verified the function is safe to call off-thread.
+// Sharing the body via a static helper would tangle SEH+C++ object
+// lifetimes; the duplication is small.
+int32_t UE5_CallProcessEventDirect(uintptr_t instance, uintptr_t ufunc, uintptr_t params) {
+    if (!instance || !ufunc) return -1;
+
+    // Lazy detection (same as the dispatching path)
+    if (s_processEventOffset == -2) {
+        s_processEventOffset = DetectProcessEventVTableOffset();
+        TryInstallGameThreadHook();
+    }
+    if (s_processEventOffset < 0) return -3;
+
+    uintptr_t vtable = 0;
+    if (!Macht::ReadSafe(instance, vtable) || !vtable) return -2;
+
+    uintptr_t peAddr = 0;
+    if (!Macht::ReadSafe(vtable + s_processEventOffset, peAddr) || !peAddr) return -3;
+
+    typedef void (__fastcall *FnProcessEvent)(void*, void*, void*);
+    auto pProcessEvent = reinterpret_cast<FnProcessEvent>(peAddr);
+
+    LOG_INFO("UE5_CallProcessEventDirect: inst=0x%llX func=0x%llX pe=0x%llX (caller-asserted safe)",
+             (unsigned long long)instance, (unsigned long long)ufunc,
+             (unsigned long long)peAddr);
+
+    __try {
+        pProcessEvent(reinterpret_cast<void*>(instance),
+                      reinterpret_cast<void*>(ufunc),
+                      reinterpret_cast<void*>(params));
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        LOG_ERROR("UE5_CallProcessEventDirect: EXCEPTION during direct ProcessEvent call!");
+        return -4;
+    }
+
+    return 0;
+}
+
 // === Mailbox ===
 
 uintptr_t UE5_GetMailboxAddr() {

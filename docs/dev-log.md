@@ -11,7 +11,73 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
-## 2026-05-10 (latest, dev branch, build 632) — Inject Helper bug fix + Function Goto + filter polish
+## 2026-05-10 (latest, dev branch, build 636) — Static-native ProcessEvent fast path
+
+Live test on ES2 invoking `KismetMathLibrary::exp` returned `result=-5`
+(GameThreadDispatch timeout) even after the user bumped the per-game
+invoke timeout from 5000ms to 7000ms. Pipe-side log confirmed the flow:
+
+```
+FIND_INSTANCE 'KismetMathLibrary' -> CDO 0x7FF3E02B4788 (only CDO found)
+FIND_FUNCTION 'exp' -> 0x7FF3E0073288 (parmsSize=16 numParms=2 flags=0x14022403)
+INVOKE enqueued via GameThreadDispatch ... 7000ms timeout ... result=-5
+```
+
+### Root cause
+
+`KismetMathLibrary::exp` is a `Native | Static` UFunction (flags
+`0x14022403` -> `Final | Native | Static | BlueprintCallable |
+BlueprintPure | ...`). The DLL was routing every invoke through
+`Stark::EnqueueInvoke`, which only completes when the game thread
+fires a real ProcessEvent and drains the queue. ES2 in main menu /
+loading state goes seconds without a single PE call, so the queue
+sits idle until the deadline expires -- even though `exp(8)` is a
+pure C++ math helper that needs no game thread at all.
+
+### Fix
+
+Added a fast path in `Mimic::HandleInvoke` (DLL) that checks the
+captured `functionFlags` after FIND_FUNCTION:
+
+```cpp
+const bool isStaticNative =
+    (g_invokeMailbox.functionFlags & (FUNC_Native | FUNC_Static))
+        == (FUNC_Native | FUNC_Static);
+result = isStaticNative
+    ? UE5_CallProcessEventDirect(...)   // bypass GameThreadDispatch
+    : UE5_CallProcessEvent(...);        // game-thread queue (existing)
+```
+
+`UE5_CallProcessEventDirect` is a new export -- mirror of the existing
+direct-call fallback path inside `UE5_CallProcessEvent`, but without
+the hook check. Caller (`Mimic`) asserts safety based on flags. Added
+to both the in-process DLL (`Frieren.cpp` / `Frieren.h`) and the proxy
+forwarding shim (`ProxyVersion.def`).
+
+This covers all the BFL helpers users actually want to invoke from a
+cheat table -- `KismetMathLibrary`, `KismetStringLibrary`,
+`KismetArrayLibrary`, `KismetSystemLibrary` -- without any of them
+ever depending on game-thread availability.
+
+Stateful methods (BlueprintEvent, RPC, anything mutating actor state)
+still route through `Stark::EnqueueInvoke` exactly as before.
+
+### Files touched
+
+- `dll/src/Frieren.h`: declare `UE5_CallProcessEventDirect`
+- `dll/src/Frieren.cpp`: implement it (forked from the existing direct-
+  call fallback)
+- `dll/src/Mimic.cpp`: dispatch by `(FUNC_Native | FUNC_Static)` flag
+  pair
+- `dll/src/ProxyVersion.def`: re-export from version.dll proxy
+- `docs/dev-log.md`: this entry
+
+Tests: 671 C# (no change) + 62 dll_helpers + 31 utf8_helpers = 764.
+Build 636.
+
+-----
+
+## 2026-05-10 (build 632) — Inject Helper bug fix + Function Goto + filter polish
 
 User-driven follow-ups after the build 611 live test on Everspace 2.
 
