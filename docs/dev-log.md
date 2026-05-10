@@ -11,7 +11,84 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
-## 2026-05-10 (latest, dev branch, build 610) — PropertySearch dedupe-by-defining-class
+## 2026-05-10 (latest, dev branch, build 611) — One-click helper inject into open CE table
+
+Closes the last manual step in the "super beginner" cheat-table flow:
+previously every user had to **Tools -> Export CE Helper Lua File...**,
+save the .lua somewhere, then open CE and **Table -> Add File...** to
+embed `ue5_invoke_helper.lua` into their .CT before any baked Invoke
+script could run. New flow: one menu click and the helper is in the
+table.
+
+### AOBMaker plugin: new `InjectTableFile` pipe command
+
+Added handler in `D:\Github\AOBMaker\plugins\CEPlugin\src\pipe_server.cpp`
+that runs in CE's main thread via `synchronize`:
+
+1. `findTableFile(fileName)` — delete if it already exists (replace, not append)
+2. `createTableFile(fileName)` — fresh empty TableFile in the open .CT
+3. `f.Stream.write(content)` — write the raw bytes
+4. Verify `f.Stream.Size == #content`
+
+Content is embedded into the generated Lua program via a long-bracket
+literal (`[==N==[ ... ]==N==]`) where the `=` count is **chosen
+dynamically** from the content so an arbitrary payload — including one
+containing `]==]` — can never collide with the delimiter. Protocol
+constants `TypeInjectTableFile` / `TypeInjectTableFileResult` added
+to `protocol.h`; routing wired in `HandleClient`.
+
+Shipped to AOBMaker `main` via merge commit
+[`7505644`](https://github.com/bbfox0703/AOBMaker/commit/7505644)
+(dev branch commit `ce488bc`).
+
+### UE5DumpUI: `IAobMakerBridge.InjectTableFileAsync` + Tools menu item
+
+- `IAobMakerBridge` grew a sixth method, `InjectTableFileAsync(fileName,
+  content, ct)` — same per-request reconnect pattern as the existing
+  navigation calls but with a **15 s response timeout** (vs. 5 s default)
+  to give `synchronize()` round-trip headroom for ~10 KB payloads.
+- `AobMakerMessage` model gained `fileName` / `content` JSON properties
+  (omitted when null, AOT context unchanged).
+- `MainWindowViewModel.InjectCeHelperLuaCommand` orchestrates the four
+  user-visible end-states:
+  - bridge missing -> "AOBMaker plugin not configured"
+  - CE not running -> "AOBMaker not connected — open Cheat Engine..."
+  - inject succeeds -> "Helper embedded in current CE table (...)"
+  - inject fails -> "Inject failed (CE closed?) — use Export to disk
+    + Add File... fallback"
+- New menu entry **Tools -> Inject Helper into Current CE Table**
+  sits above the existing **Export CE Helper Lua File...** so the
+  one-click path is the obvious default; export remains as the
+  documented manual fallback.
+
+### Tests (+7)
+
+- `AobMakerInjectTableFileTests` (3 tests): wire-model serialization
+  emits new fields, relaxed encoder keeps literal single quotes (CE Lua
+  JSON parser doesn't decode `'`), bridge service rejects empty
+  `fileName` / `content`.
+- `MainWindowInjectHelperTests` (4 tests): all four end-states above
+  via a recording bridge, with no-op stubs for `IPipeClient` /
+  `IPlatformService` / `ILoggingService` since the inject path doesn't
+  touch them.
+- `FakeAobMakerBridge` in `InterestingFunctionsViewModelTests` got the
+  new method stubbed (returns false) to keep it interface-compliant.
+
+### Integration via cherry-pick
+
+Spawned session worked from `aa2ac0d` while main session continued
+through `942c35d` (PropertySearch dedupe). Cherry-picked
+`44a3943` onto dev rather than merging — keeps the linear history
+the project's been maintaining. Doc-only conflicts on dev-log.md /
+roadmap.md / todo.md (both branches updated the "latest" headers);
+resolved by keeping both entries with AOBMaker bumped to build 611.
+
+**Build #611, 762 tests passing (669 C# + 62 dll_helpers + 31
+utf8_helpers).** 10 commits ahead of `origin/main`.
+
+-----
+
+## 2026-05-10 (dev branch, build 610) — PropertySearch dedupe-by-defining-class
 
 `feat(dll,ui): PropertySearch results deduped by defining class
 + inheritance count badge`. First piece of the "Property Origin
@@ -131,11 +208,11 @@ Smoke test pending on Everspace 2 / Titan Quest II / FF7 Rebirth.
   classes loaded in the game. Bigger work, separate planning.
 
 **Build #610, 755 tests passing (662 C# + 62 dll_helpers + 31
-utf8_helpers).** 9 commits ahead of `origin/main`.
+utf8_helpers).**
 
 -----
 
-## 2026-05-10 (build 608-609) — AOBMaker gating + CamelCase tokeniser + dialog overflow fix
+## 2026-05-10 (dev branch, build 608-609) — AOBMaker gating + CamelCase tokeniser + dialog overflow fix
 
 Three independent fixes shipped under the "polish + de-risk" theme
 after Interesting Functions Finder went live in 597-607.

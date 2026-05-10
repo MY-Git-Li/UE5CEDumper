@@ -52,4 +52,19 @@ public interface IAobMakerBridge
     /// <param name="autoActivate">Whether to activate the script immediately after creation</param>
     Task<bool> CreateSymbolScriptAsync(string name, string aob, int pos, int aoblen,
         string symbol, string module, bool autoActivate = true, CancellationToken ct = default);
+
+    /// <summary>
+    /// Embed an arbitrary text/Lua file into the currently open CE table.
+    /// Sends <c>InjectTableFile</c> — the CE Plugin handler runs
+    /// <c>findTableFile</c> (delete-if-exists) + <c>createTableFile</c> +
+    /// <c>Stream.write</c> + a <c>Stream.Size</c> verification check.
+    /// Lets users skip the manual "save .lua to disk" + "Table -> Add File..."
+    /// dance for runtime helpers like <c>ue5_invoke_helper.lua</c>.
+    /// </summary>
+    /// <param name="fileName">Filename to register inside the .CT
+    /// (case-sensitive, used by <c>findTableFile</c> from AA scripts).</param>
+    /// <param name="content">Raw UTF-8 file content. Long-bracket level
+    /// is chosen automatically by the CE Plugin so any payload is safe.</param>
+    Task<bool> InjectTableFileAsync(string fileName, string content,
+        CancellationToken ct = default);
 }

@@ -6,7 +6,7 @@ upcoming work and [dev-log.md](dev-log.md) for the historical commit
 trail. Build number tags reflect when each row reached its current
 state.
 
-> **Last refreshed**: 2026-05-10 (build 610, post-PropertySearch dedupe-by-defining-class on `dev`).
+> **Last refreshed**: 2026-05-10 (build 610-611, PropertySearch dedupe-by-defining-class + one-click helper-into-CE inject on `dev`).
 
 -----
 
@@ -49,9 +49,17 @@ Three buttons per UFunction row in LiveWalker:
 | **Pipe Invoke** (`PIPE`) | In-app via DLL pipe | Live invoke + decoded result inline |
 | **AA(Baked)** (new) | Non-interactive AA Script | Self-contained AA Script with values baked at generation time; depends on `ue5_invoke_helper.lua` embedded in the user's .CT |
 
-Tools menu **Export CE Helper Lua File...** writes
-`scripts/ue5_invoke_helper.lua` to a user-chosen path so they can drop
-it next to their .CT and add via Cheat Engine `Table -> Add File...`.
+Two ways to get `ue5_invoke_helper.lua` into the user's .CT:
+
+- **Tools -> Inject Helper into Current CE Table** (build 610, preferred) —
+  one click; sends the embedded helper straight into the open CE table
+  via the AOBMaker plugin's new `InjectTableFile` pipe command (`findTableFile`
+  delete-if-exists -> `createTableFile` -> `Stream.write` -> verify).
+  Requires the AOBMaker CE Plugin to be loaded; falls back gracefully
+  with a status-bar hint if unavailable.
+- **Tools -> Export CE Helper Lua File...** — manual fallback when
+  AOBMaker isn't installed or CE isn't running. Writes `scripts/ue5_invoke_helper.lua`
+  to a user-chosen path; user adds it via CE `Table -> Add File...`.
 
 ## Interesting Functions Finder (build 597-609)
 

@@ -209,6 +209,36 @@ Fix:
 
 File touched: `ui/UE5DumpUI/Views/InvokeParamDialog.cs` (~10 lines).
 
+### 6. One-click helper inject into open CE table — ✅ shipped (build 610)
+
+**Effort**: S (actual: ~S) | **Risk**: low (additive — old export menu kept as fallback)
+
+Removes the manual save-to-disk + `Table -> Add File...` dance for
+brand-new users by wiring a new `InjectTableFile` pipe command into the
+AOBMaker CE Plugin and a matching `IAobMakerBridge.InjectTableFileAsync`
+on the UE5DumpUI side.
+
+Plugin side (`D:\Github\AOBMaker\plugins\CEPlugin\src\pipe_server.cpp`):
+`HandleInjectTableFile` runs `findTableFile` (delete-if-exists) +
+`createTableFile` + `Stream.write` + `Stream.Size` verify under
+`synchronize` so all CE Lua APIs execute on CE's main thread. Long-bracket
+level is chosen dynamically so any payload is safe (even one containing
+`]==]`). Protocol constants added to `protocol.h`; routed from
+`HandleClient`.
+
+UE5DumpUI side: new `Tools -> Inject Helper into Current CE Table` menu
+item -> `MainWindowViewModel.InjectCeHelperLuaCommand` -> probe
+`CheckAvailabilityAsync` -> `InjectTableFileAsync(fileName, content)` ->
+status text covers all four user-visible end-states (no bridge, CE not
+running, success, failure). Inject path uses a 15 s response timeout
+(vs. 5 s default for navigation calls) to give synchronize round-trip
+headroom for ~10 KB payloads.
+
+Tests: 651 C# xunit (+7 from this change) + 62 dll_helpers + 31 utf8_helpers.
+Coverage: AobMakerInjectTableFileTests (3 — wire-model serialization,
+relaxed encoder for single quotes, bridge service arg validation),
+MainWindowInjectHelperTests (4 — all four end-states via recording bridge).
+
 -----
 
 ## In-flight (spawned to separate sessions / under analysis)

@@ -724,6 +724,56 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Tools menu: ship the embedded <c>ue5_invoke_helper.lua</c> straight
+    /// into the currently open CE table via the AOBMaker plugin pipe
+    /// (<c>InjectTableFile</c>). Replaces the manual save-to-disk +
+    /// <c>Table -&gt; Add File...</c> dance.
+    /// Probes <see cref="IAobMakerBridge.IsAvailable"/> first via
+    /// <see cref="IAobMakerBridge.CheckAvailabilityAsync"/> so a stale
+    /// availability flag (CE closed since the last check) doesn't fire
+    /// off a guaranteed-to-fail pipe round-trip.
+    /// </summary>
+    [RelayCommand]
+    private async Task InjectCeHelperLuaAsync()
+    {
+        if (_aobMaker == null)
+        {
+            StatusText = "AOBMaker plugin not configured";
+            return;
+        }
+
+        try
+        {
+            await _aobMaker.CheckAvailabilityAsync();
+            if (!_aobMaker.IsAvailable)
+            {
+                StatusText = "AOBMaker not connected — open Cheat Engine with the AOBMaker plugin loaded";
+                return;
+            }
+
+            var content = HelperLuaResource.Read();
+            var ok = await _aobMaker.InjectTableFileAsync(
+                HelperLuaResource.DefaultFileName, content);
+
+            if (ok)
+            {
+                _log.Info($"Injected {HelperLuaResource.DefaultFileName} into CE table " +
+                          $"({content.Length:N0} chars)");
+                StatusText = $"Helper embedded in current CE table ({HelperLuaResource.DefaultFileName})";
+            }
+            else
+            {
+                StatusText = "Inject failed (CE closed?) — use Export to disk + Add File... fallback";
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Inject CE Helper Lua failed", ex);
+            StatusText = $"Inject CE helper failed: {ex.Message}";
+        }
+    }
+
     private async Task ExportSymbolsAsync(
         string filterName, string filterExtension,
         Func<IReadOnlyList<SymbolEntry>, string, string> generator)

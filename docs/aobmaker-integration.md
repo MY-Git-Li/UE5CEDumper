@@ -124,7 +124,33 @@ Create an Auto Assembler script entry in CE's address list.
 **Used by:**
 - LiveWalker: `GenerateInvokeScriptAsync` sends UFunction invoke scripts directly to CE (falls back to clipboard if AOBMaker unavailable)
 
-### 4. `CreateSymbolScript`
+### 4. `InjectTableFile`
+
+Embed an arbitrary text/Lua file straight into the currently open Cheat Engine table. Replaces existing TableFile of the same name (delete-if-exists), then `createTableFile` + `Stream.write` + verify `Stream.Size`. Used by the **Tools -> Inject Helper into Current CE Table** menu so the user no longer has to save the helper to disk and `Table -> Add File...` it manually.
+
+```json
+// Request
+{
+  "type": "InjectTableFile",
+  "fileName": "ue5_invoke_helper.lua",
+  "content": "if not invokeUFunction then\n  function invokeUFunction(...)\n    ...\n  end\nend\n"
+}
+
+// Response
+{ "type": "InjectTableFileResult", "success": true }
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `fileName` | string | Filename to register inside the .CT (case-sensitive — AA scripts use the same name in `findTableFile`) |
+| `content` | string | Raw UTF-8 file content. The CE Plugin chooses a long-bracket level dynamically so any payload is safe |
+
+The plugin handler runs `synchronize(function() ... end)` so all CE Lua APIs (`findTableFile`, `createTableFile`, `Stream.write`) execute on CE's main thread. Self-verifies via `f.Stream.Size == #content` before returning success. Bridge timeout is **15 s** (vs. the 5 s navigation default) to give the synchronize round-trip headroom for larger payloads.
+
+**Used by:**
+- Tools menu **Inject Helper into Current CE Table** — UE5DumpUI ships the embedded `ue5_invoke_helper.lua` straight into the user's open .CT. Falls back to "use Export to disk + Add File..." if AOBMaker plugin isn't loaded.
+
+### 5. `CreateSymbolScript`
 
 Create an AOB-scan-based symbol registration AA script. The CE Plugin's `BuildSymbolScanScript()` generates the full AA script from these parameters.
 
@@ -308,7 +334,7 @@ AOBMaker CE Plugin
 
 | File | Role |
 |------|------|
-| `ui/UE5DumpUI/Core/IAobMakerBridge.cs` | Interface — 5 methods |
+| `ui/UE5DumpUI/Core/IAobMakerBridge.cs` | Interface — 6 methods (incl. `InjectTableFileAsync`) |
 | `ui/UE5DumpUI/Services/AobMakerBridgeService.cs` | Implementation — pipe client, per-request reconnect |
 | `ui/UE5DumpUI/Models/AobMakerMessage.cs` | Wire model + AOT-safe `JsonSerializerContext` |
 | `ui/UE5DumpUI/Models/EngineState.cs` | AOB metadata (scan addr, pattern, pos, aoblen) |

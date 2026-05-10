@@ -65,6 +65,18 @@ public class AobMakerMessage
     [JsonPropertyName("module")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Module { get; set; }
+
+    // --- InjectTableFile fields ---
+    // Embeds an arbitrary text/Lua file directly into the currently open
+    // CE table via findTableFile + createTableFile + Stream.write.
+
+    [JsonPropertyName("fileName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FileName { get; set; }
+
+    [JsonPropertyName("content")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Content { get; set; }
 }
 
 /// <summary>
