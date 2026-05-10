@@ -617,7 +617,7 @@ For the JSON protocol (31 commands, including `find_refs_to_uobject`), see
 CE Lua's only responsibility is to **inject the DLL**. The DLL auto-starts via `AutoStartThreadProc` on `DLL_PROCESS_ATTACH` — no `callFunction` or `executeCodeEx` required.
 
 ```lua
--- ue5dump.lua (simplified)
+-- UE5CEDumper.CT init script (simplified)
 -- DLL_PATH resolved from: OpenDialog1.FileName dir → SaveDialog1.FileName dir → CE root dir
 
 local DLL_PATH = resolveDllPath()  -- tries 3 candidates

@@ -107,8 +107,9 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |  Game Process                                        |
 |                                                      |
 |  CE Lua                                              |
-|    ue5dump.lua        <- DLL inject + pipe start     |
+|    UE5CEDumper.CT     <- DLL inject + pipe start     |
 |    ue5_dissect.lua    <- CE Structure Dissect builder |
+|    ue5_invoke_helper.lua <- AA Script invoke shim (embedded in CT via UI) |
 |      |  loadLibrary / callFunction (28 C ABI exports)|
 |      v                                               |
 |  UE5Dumper.dll  [injected]                           |

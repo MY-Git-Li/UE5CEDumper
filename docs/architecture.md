@@ -141,12 +141,13 @@ UE5CEDumper/
 │               └── en.axaml       ← All UI strings (English only)
 │
 ├── scripts/
-│   ├── UE5CEDumper.CT              ← Cheat Engine table (injectDLL + init)
-│   ├── ue5_dissect.lua             ← CE Structure Dissect builder
-│   ├── ue5_invoke.lua              ← CE Lua UFunction invocation helper
-│   ├── ue5dump.lua                 ← Legacy standalone loader (superseded by CT)
-│   ├── utils.lua                   ← Legacy helpers (superseded by CT)
-│   └── test_pipe.ps1               ← PowerShell pipe test client
+│   ├── UE5CEDumper.CT              ← Cheat Engine table (injectDLL + init); copied to dist/
+│   ├── ue5_dissect.lua             ← CE Structure Dissect builder; copied to dist/
+│   ├── ue5_invoke_helper.lua       ← AA Script invoke shim; embedded in UE5DumpUI.exe
+│   │                                  via <EmbeddedResource>; injected into open .CT by
+│   │                                  Tools → Inject Helper (or Export... + Add File...)
+│   ├── DEPLOY_README.md            ← End-user readme; copied to dist/README.md
+│   └── test_pipe.ps1               ← Dev-only pipe test client (not deployed)
 │
 └── vendor/                         ← Git submodules
     ├── Dumper-7/                   ← Reference: AOB patterns, offset detection
