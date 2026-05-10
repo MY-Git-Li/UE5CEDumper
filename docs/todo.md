@@ -252,57 +252,150 @@ this one bumped to build 611.
 
 ## Pending live-game verification
 
-Features have shipped + unit tests pass, but need real game smoke tests
-before we can declare them solid. Tracked here (not just in memory) so
-they don't get forgotten between sessions.
+Features that shipped + unit tests pass but need real game smoke tests
+before we can declare them solid on multiple titles.
 
-### PropertySearch dedupe-by-defining-class (build 610)
+### Static-native ProcessEvent fast path (build 636)
 
-**Effort**: S | **Risk**: low | **Why**: dedupe logic is the kind of
-thing that looks fine on paper but can collapse on a game with unusual
-inheritance trees (forwarded properties, native-vs-BP mixed chains).
-
-Test plan:
-- Open ES2 / TQ2 / FF7 Rebirth
-- PropertySearch -> search `bCanBeDamaged`
-- Expect: ONE row with "+N inheritors" badge in the Scope column
-  (was thousands of indistinguishable rows pre-build-610)
-- Hover the badge -> tooltip should explain the inheritance relationship
-- Cross-check: at least one row WITHOUT a badge (unique-to-this-class)
-  in the same result set as a sanity check that the dedupe isn't
-  collapsing legitimately distinct rows
-
-### Tools -> Inject Helper into Current CE Table (build 611)
-
-**Effort**: S | **Risk**: low | **Why**: pipe-side `synchronize` round-
-trip touches CE main thread; large payloads (~10 KB) crossing two named
-pipes deserve a real run before declaring done.
+**Effort**: S | **Risk**: low | **Why**: Verified on ES2 (logs show
+`static-native fast path (flags=0x14022403, bypassing GameThreadDispatch)
+... INVOKE result=0`). Need to confirm on a game where the user is
+actively playing (game thread pumping) so we can compare static-native
+fast path latency vs. instance-method GameThreadDispatch latency on the
+same session. Also confirm that **stateful** UFunctions (BlueprintEvent
+/ RPC / non-static) still correctly route through GameThreadDispatch
+and don't fall into the fast path by accident.
 
 Test plan:
-- Launch CE with AOBMaker CE Plugin loaded
-- Open or create a .CT
-- UE5DumpUI: Tools -> Inject Helper into Current CE Table
-- Expect: status bar reports success; CE table file list shows
-  `ue5_invoke_helper.lua` without manual `Table -> Add File...`
-- Re-run on the same table -> should overwrite (delete-if-exists path)
-- Sanity: close AOBMaker plugin -> expect graceful "not configured"
-  status (not an exception)
-- Sanity: stop CE -> expect "CE not running" status
+- Active game session (player moving), Interesting Funcs -> any static
+  BFL function (Stats/Math) -> AA(B) + Verify -> should print result
+  in <50ms regardless of game idle/active state
+- Same session, instance method (e.g. PlayerController::* setter) ->
+  AA(B) + Verify -> uses GameThreadDispatch; should also succeed if
+  game thread is active. Idle test (let game sit on title screen) ->
+  expect timeout `-5` for the instance method but **not** for the
+  static native helper.
 
-### Interesting Funcs token-based scoring (build 609)
+### FPROPERTY_FLAGS offset fix (build 642)
 
-**Effort**: S | **Risk**: low | **Why**: tokeniser fix restored short
-acronyms HP/MP/SP/XP/TP; need to confirm real games show better
-relevance vs. the build-608 (no-acronyms) state.
+**Effort**: S | **Risk**: med | **Why**: The +8 -> +4 offset fix
+flipped how the walker reads CPF_ReturnParm / CPF_OutParm / CPF_Parm
+on **every** UFunction parameter across **every** UE version. The
+verify-mode PARAMS table is now correctly emitting ReturnValue as a
+return slot (not as an input), but the same flag-read also feeds
+`docs/dll-spec.md` UFunction listings, the Class Structure tab's
+function display, USMAP export, etc. Sweep the 12+ tested games
+quickly to confirm no regression on any of them.
 
 Test plan:
-- Open a game with abbreviated naming (e.g. JRPG-style: ES2/TQ2)
-- Interesting Funcs tab -> Load
-- Expect: functions like `GetHP` / `SetMaxMP` / `AddXP` rank visibly
-  higher than before, and substring-noise targets (`OnComponentHit`,
-  `BeginComponent`) do NOT hit the HP/MP keyword tier
-- Cross-check Stats / Inventory / Movement / Combat buckets each show
-  plausible top hits
+- For each game in [docs/roadmap.md](roadmap.md#tested-games-last-verified-2026-05-10),
+  open Class Structure on a known UClass with mixed input/output params
+  (e.g. Character::AddMovementInput, PlayerController::GetMousePosition)
+  and check the Functions section's Return column populates.
+- Quick sanity: Interesting Funcs -> any function with a return value
+  -> AA(B) -> generated PARAMS should NOT include ReturnValue (used
+  to before this fix).
+
+### Verify Return Value diagnostic mode (build 637 / refined 644)
+
+**Effort**: S | **Risk**: low | **Why**: Live-tested on ES2 and worked
+end-to-end (mailbox resolution + Before/After dump + decoded scalar
+print). Need to confirm pointer-return functions show 0x prefix
+correctly and FString-return functions show the "see After: dump
+above" hint.
+
+Test plan:
+- Pick a function returning UObject* (e.g. `GetWorld`, `GetGameInstance`,
+  `GetOuter` if BC) -> Verify on -> expect `(pointer@N) = 0xFFFFFFFF...`
+- Pick a function returning FString (e.g. `GetGameName`) -> Verify on ->
+  expect `(fstring@N, size=16B) -- complex return; see After: dump above`
+  and dump shows non-zero ptr+count when the call succeeded.
+
+-----
+
+## Call-UE-function feature gaps (discovered build 643-644 live test)
+
+Two real gaps surfaced when test-driving the verify-mode AA Script
+flow on Everspace 2 (UE 5.5). Both are caller-experience improvements,
+not correctness bugs in our existing code.
+
+### Document KismetMathLibrary stub-pattern in cooked Shipping; suggest better verification targets
+
+**Effort**: S | **Risk**: low | **Why**: A naive user trying to verify
+the invoke pipeline reaches for `KismetMathLibrary::Exp(8) -> 2980.957`
+or `Add_IntInt(3, 4) -> 7` because they're the simplest possible
+sanity tests. On UE 5.5+ cooked Shipping these consistently return 0
+even though the function lookup, fast-path, and ProcessEvent
+dispatch all succeed -- the cooker leaves the reflection metadata
+intact but the `execXxx` thunk has been stripped or replaced with
+a no-op stub (likely a side effect of UE's BlueprintFastCall
+optimisation, where the Blueprint VM bytecode bypasses ProcessEvent
+for these helpers entirely).
+
+Live verification on ES2 (UE 5.5):
+- `KismetMathLibrary::exp` (lowercase) -> 0 (Before/After identical)
+- `KismetMathLibrary::Multiply_DoubleDouble(3, 4)` -> 0 (A and B
+  written, ReturnValue stays 0)
+- `KismetMathLibrary::Add_IntInt(3, 4)` -> 0 (same pattern; rules
+  out "double precision specifically broken" hypothesis)
+
+What to do:
+- Add a "Recommended verification targets" hint in the InvokeParamDialog
+  status footer when the selected class is `KismetMathLibrary` /
+  `KismetSystemLibrary`: "These BlueprintFunctionLibrary helpers are
+  often stub-only in cooked Shipping. Verify with game-specific
+  classes instead."
+- Update [docs/lessons-learned.md](lessons-learned.md) and
+  [docs/test-games.md](test-games.md) so the lesson survives across
+  sessions.
+
+This is **NOT** a feature to enable calling KismetMathLibrary
+helpers -- there's nothing we can do from outside the cooker. It's
+a UX hint to redirect users to verification targets that actually
+work (game-specific instance methods on a UObject when the game is
+actively playing, so ProcessEvent traffic drains the queue).
+
+### FString / FText / TArray input support in baked AA Script
+
+**Effort**: M | **Risk**: med | **Why**: Functions like
+`KismetSystemLibrary::PrintString` are observable side-effect targets
+(player sees text in-game) ideal for verifying ProcessEvent works
+end-to-end -- but currently unreachable because we can't bake an
+FString **input** value. Helper's `writeBakedParams` only handles
+scalar inputs (bool/int/float/double/pointer); FString needs:
+
+1. Allocate a wide-char buffer in CE address space
+2. Write the FString header at the param offset:
+   - ptr (qword) = buffer address
+   - count (int32) = char count
+   - max (int32) = char count (typically same as count)
+3. Keep the buffer alive across the ProcessEvent call (CE's
+   `allocateMemory` returns a stable address)
+4. Free the buffer after the call (in the cleanup timer)
+
+Same pattern applies to FText (slightly more complex header) and
+TArray of scalars (count + capacity + ptr to elements).
+
+Implementation sketch:
+- Helper-side: new `writeFString(buffer, header_addr, str)` /
+  `freeFString(buffer)` shared utilities
+- Generator-side: detect `StrProperty` / `TextProperty` / scalar
+  `ArrayProperty` in `BakedParamValue` and emit the alloc + header
+  + free dance instead of the simple `writeQword` path
+- Dialog-side: TextBox should accept the unquoted user string;
+  generator emits Lua-string literal with escaping
+- Cleanup-side: extend the cleanup timer to free any allocated
+  buffers before disabling the memrec
+
+Out-of-scope for v1: complex-typed return decoding (FString return
+already handled via "see After: dump" hint -- input support doesn't
+imply output support); StructProperty inputs (the dialog flattens
+known structs but generating allocs for nested containers is
+significantly more work).
+
+Read-back path: the helper's `readUFunctionReturn` already has
+distinct read paths per type -- could grow a `'fstring'` token that
+returns the decoded Lua string instead of a number. Optional v2.
 
 -----
 
