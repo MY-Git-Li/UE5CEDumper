@@ -19,6 +19,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly ILoggingService _log;
     private readonly IPlatformService _platform;
     private readonly AobUsageService? _aobUsage;
+    private readonly IAobMakerBridge? _aobMaker;  // captured so InterestingFunctions handlers can ship AA Scripts
     private EngineState? _engineState;
 
     [ObservableProperty] private string _statusText = "Disconnected";
@@ -155,6 +156,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         _log = log;
         _platform = platform;
         _aobUsage = aobUsage;
+        _aobMaker = aobMaker;
 
         ObjectTree = new ObjectTreeViewModel(dump, log, platform);
         ClassStruct = new ClassStructViewModel(dump, log);
@@ -296,12 +298,163 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                SelectedTabIndex = 4; // Switch to ClassStruct tab (index shifted by GameClassFilter)
+                SelectedTabIndex = 5; // Switch to ClassStruct tab (was 4 pre-InterestingFunctions tab insertion)
                 await ClassStruct.LoadClassCommand.ExecuteAsync(classAddr);
             }
             catch (Exception ex)
             {
                 _log.Error("GameClassFilter NavigateToClassStruct handler error", ex);
+            }
+        };
+
+        // Wire InterestingFunctions -> Live Walker (with find_instance fallback to ClassStruct).
+        // The Finder gives us (className, funcName), but Live Walker is instance-based:
+        //   1. Try FindInstancesAsync(className, exactMatch=true) -- pick the first non-CDO live instance.
+        //   2. On hit: switch to Live Walker tab + navigate to that instance + auto-scroll to funcName.
+        //   3. On miss (CDO-only class, or class not yet instantiated): switch to ClassStruct tab so
+        //      the user at least sees the function in the class metadata, with a status hint.
+        InterestingFunctions.NavigateToFunction += async (className, funcName) =>
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(className)) return;
+
+                var instances = await _dump.FindInstancesAsync(className, exactMatch: true, limit: 5);
+                // Skip CDO entries (their name typically starts with "Default__"); pick the first
+                // real instance so Live Walker has something to walk.
+                string? liveAddr = null;
+                foreach (var inst in instances.Instances)
+                {
+                    if (string.IsNullOrEmpty(inst.Address)) continue;
+                    if (inst.Name.StartsWith("Default__", StringComparison.Ordinal)) continue;
+                    liveAddr = inst.Address;
+                    break;
+                }
+
+                if (!string.IsNullOrEmpty(liveAddr))
+                {
+                    SelectedTabIndex = 0; // Live Walker
+                    await LiveWalker.NavigateToAddressCommand.ExecuteAsync(liveAddr);
+                    StatusText = $"Navigated to {className}::{funcName} (live instance {liveAddr})";
+                    _log.Info($"InterestingFunctions -> LiveWalker: {className}::{funcName} @ {liveAddr}");
+                    // Note: auto-scroll to the specific UFunction row inside Live Walker would
+                    // need an additional event into LiveWalkerViewModel. v1 lands on the
+                    // instance; user manually scrolls to the function. Wire a row-scroll event
+                    // here when feedback says it's worth it.
+                }
+                else
+                {
+                    SelectedTabIndex = 5; // ClassStruct fallback
+                    // Look up the class address via ListClasses since Find Instances came back empty.
+                    var classes = await _dump.ListClassesAsync(gameOnly: false);
+                    var match = classes.Classes.FirstOrDefault(
+                        c => c.ClassName.Equals(className, StringComparison.Ordinal));
+                    if (match != null && !string.IsNullOrEmpty(match.ClassAddr))
+                    {
+                        await ClassStruct.LoadClassCommand.ExecuteAsync(match.ClassAddr);
+                        StatusText = $"No live instance of {className}; showing class metadata";
+                        _log.Info($"InterestingFunctions -> ClassStruct fallback: {className}::{funcName}");
+                    }
+                    else
+                    {
+                        StatusText = $"Class {className} not resolvable (Find Instances + ListClasses both empty)";
+                        _log.Warn($"InterestingFunctions navigate: {className} not found");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"InterestingFunctions NavigateToFunction handler error: {className}::{funcName}", ex);
+            }
+        };
+
+        // Wire InterestingFunctions -> Copy AA Script (Baked).
+        // Walks the class to fetch the chosen UFunction's full param metadata, then either
+        // generates a no-arg script directly (fast path) or opens InvokeParamDialog in
+        // CopyBakedScript mode for the user to fill values.
+        InterestingFunctions.RequestCopyBakedScript += async (className, funcName) =>
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(className) || string.IsNullOrEmpty(funcName)) return;
+
+                // Need a class address to walk_functions. Reuse ListClasses (cached game class list).
+                var classes = await _dump.ListClassesAsync(gameOnly: false);
+                var classMatch = classes.Classes.FirstOrDefault(
+                    c => c.ClassName.Equals(className, StringComparison.Ordinal));
+                if (classMatch == null || string.IsNullOrEmpty(classMatch.ClassAddr))
+                {
+                    StatusText = $"Class {className} not found";
+                    return;
+                }
+
+                var functions = await _dump.WalkFunctionsAsync(classMatch.ClassAddr);
+                var funcMatch = functions.FirstOrDefault(
+                    f => f.Name.Equals(funcName, StringComparison.Ordinal));
+                if (funcMatch == null)
+                {
+                    StatusText = $"{className}::{funcName} not in walk_functions output";
+                    return;
+                }
+
+                // Find a live instance so the script's invokeUFunction has a target. The
+                // helper uses CMD_INVOKE_BY_NAME which finds an instance itself, but
+                // running it now lets us surface a clear error if the class is CDO-only.
+                var instances = await _dump.FindInstancesAsync(className, exactMatch: true, limit: 1);
+                string instanceAddr = "";
+                foreach (var inst in instances.Instances)
+                {
+                    if (!inst.Name.StartsWith("Default__", StringComparison.Ordinal))
+                    {
+                        instanceAddr = inst.Address;
+                        break;
+                    }
+                }
+
+                // Fast path: zero-arg function -> generate + ship directly without opening
+                // the dialog (matches the LiveWalker AA(Baked) button's 0-arg fast path).
+                var inputParams = funcMatch.Params.Where(p => !p.IsReturn).ToList();
+                if (inputParams.Count == 0)
+                {
+                    var script = Services.BakedScriptGenerator.Generate(
+                        className, funcName, funcMatch.ParmsSize,
+                        Array.Empty<Models.BakedParamValue>());
+                    var description = $"Invoke (baked, no args): {className}::{funcName}";
+                    var sentToCe = false;
+                    if (_aobMaker != null)
+                        sentToCe = await _aobMaker.CreateAAScriptAsync(description, script, autoActivate: false);
+                    if (!sentToCe)
+                        await _platform.CopyToClipboardAsync(script);
+                    StatusText = sentToCe
+                        ? $"AA Script created in CE: {funcName}"
+                        : $"AA Script copied to clipboard: {funcName}";
+                    _log.Info($"InterestingFunctions baked AA Script (no args) " +
+                              $"{(sentToCe ? "sent to CE" : "to clipboard")}: {className}::{funcName}");
+                    return;
+                }
+
+                // Otherwise open the dialog in CopyBakedScript mode.
+                if (Avalonia.Application.Current?.ApplicationLifetime is not
+                    Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+                    || desktop.MainWindow is not { } owner)
+                    return;
+
+                var dialog = new Views.InvokeParamDialog(
+                    className, funcName, inputParams, funcMatch.Params, funcMatch.ParmsSize,
+                    instanceAddr, _dump, _engineState?.UEVersion ?? 0,
+                    aobMaker: _aobMaker, platform: _platform,
+                    mode: Views.InvokeDialogMode.CopyBakedScript);
+                var result = await dialog.ShowDialog<string?>(owner);
+                StatusText = result == "ok"
+                    ? $"AA Script ready: {className}::{funcName}"
+                    : $"AA Script export cancelled: {funcName}";
+                _log.Info($"InterestingFunctions CopyBakedScript dialog " +
+                          $"{(result == "ok" ? "completed" : "cancelled")}: {className}::{funcName}");
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"InterestingFunctions RequestCopyBakedScript handler error: {className}::{funcName}", ex);
+                StatusText = $"AA Script export failed: {ex.Message}";
             }
         };
 

@@ -1,0 +1,271 @@
+using UE5DumpUI.Core;
+using UE5DumpUI.Models;
+using UE5DumpUI.Services;
+using UE5DumpUI.ViewModels;
+using Xunit;
+
+namespace UE5DumpUI.Tests;
+
+/// <summary>
+/// VM-level tests for the Interesting Functions Finder. Exercises:
+/// - Load -> score -> sort pipeline
+/// - Filter inputs (FilterText / CategoryFilter / ShowAll) and how
+///   they interact with the InterestingThreshold cutoff
+/// - Cross-tab navigation events fire with the right payload
+///
+/// Uses a hand-rolled stub IDumpService scoped to this test file.
+/// </summary>
+public class InterestingFunctionsViewModelTests
+{
+    // ------------------------------------------------------------------
+    // Stub IDumpService -- subclass the existing StubDumpService and
+    // override only ListAllFunctionsAsync so the rest of the surface
+    // throws NotImplementedException (catches accidental calls cleanly).
+    // ------------------------------------------------------------------
+
+    private sealed class FakeDumpService : StubDumpService
+    {
+        public AllFunctionsResult NextResult { get; set; } = new();
+        public bool LastGameOnly { get; private set; }
+        public int CallCount { get; private set; }
+
+        public override Task<AllFunctionsResult> ListAllFunctionsAsync(
+            bool gameOnly = true, int limit = 100000, CancellationToken ct = default)
+        {
+            CallCount++;
+            LastGameOnly = gameOnly;
+            return Task.FromResult(NextResult);
+        }
+    }
+
+    private sealed class NoopLogger : ILoggingService
+    {
+        public void Info(string message) { }
+        public void Warn(string message) { }
+        public void Error(string message) { }
+        public void Error(string message, Exception ex) { }
+        public void Debug(string message) { }
+        public void Info(string category, string message) { }
+        public void Warn(string category, string message) { }
+        public void Error(string category, string message) { }
+        public void Error(string category, string message, Exception ex) { }
+        public void Debug(string category, string message) { }
+        public void StartProcessMirror(string processName) { }
+        public void StopProcessMirror() { }
+    }
+
+    // ------------------------------------------------------------------
+    // Helper: build a synthetic AllFunctionEntry list spanning all 5
+    // categories + a few low-score noise entries so we can verify the
+    // threshold filter independently of the categorisation logic.
+    // ------------------------------------------------------------------
+
+    private static List<AllFunctionEntry> BuildSampleEntries() => new()
+    {
+        // High-score, multi-bucket: Inventory category, score ~10
+        new() { ClassName="PlayerCharacter", FuncName="AddMoney",
+                FunctionFlags=0x0400_0000, NumParms=2, ParmsSize=5 },
+        // Stats
+        new() { ClassName="PlayerState", FuncName="SetMaxHealth",
+                FunctionFlags=0x0400_0000, NumParms=2, ParmsSize=4 },
+        // Movement
+        new() { ClassName="MyPawn", FuncName="TeleportPlayer",
+                FunctionFlags=0x0400_0000, NumParms=4, ParmsSize=12 },
+        // Combat
+        new() { ClassName="WeaponComp", FuncName="FireWeapon",
+                FunctionFlags=0x0400_0000, NumParms=1, ParmsSize=4 },
+        // Utility
+        new() { ClassName="GameMode", FuncName="SaveGame",
+                FunctionFlags=0x0400_0000, NumParms=1, ParmsSize=4 },
+        // Noise -- below threshold
+        new() { ClassName="AnimNotify", FuncName="DoTick",
+                FunctionFlags=0, NumParms=0, ParmsSize=0 },
+        new() { ClassName="ParticleSystem", FuncName="UpdateInternal",
+                FunctionFlags=0, NumParms=0, ParmsSize=0 },
+    };
+
+    private static AllFunctionsResult BuildResult(List<AllFunctionEntry> entries)
+        => new()
+        {
+            Total          = entries.Count,
+            ScannedObjects = 1000,
+            ScannedClasses = 5,
+            TotalFunctions = entries.Count,
+            Functions      = entries,
+        };
+
+    private static (InterestingFunctionsViewModel vm, FakeDumpService dump) MakeVm(
+        List<AllFunctionEntry>? entries = null)
+    {
+        var dump = new FakeDumpService
+        {
+            NextResult = BuildResult(entries ?? BuildSampleEntries()),
+        };
+        var vm = new InterestingFunctionsViewModel(dump, new NoopLogger());
+        return (vm, dump);
+    }
+
+    // ==================================================================
+    // Load + scoring
+    // ==================================================================
+
+    [Fact]
+    public async Task LoadAsync_PopulatesResultsSortedByScoreDescending()
+    {
+        var (vm, _) = MakeVm();
+        await vm.LoadCommand.ExecuteAsync(null);
+
+        Assert.NotEmpty(vm.Results);
+        // First result should have the highest score (FilterText="" + CategoryFilter=null
+        // so threshold cutoff applies but ShowAll=false -> only above-threshold).
+        for (int i = 1; i < vm.Results.Count; i++)
+        {
+            Assert.True(vm.Results[i - 1].FinalScore >= vm.Results[i].FinalScore,
+                $"Results not sorted by score descending: " +
+                $"index {i - 1}={vm.Results[i - 1].FinalScore} vs index {i}={vm.Results[i].FinalScore}");
+        }
+    }
+
+    [Fact]
+    public async Task LoadAsync_DefaultThreshold_HidesNoiseEntries()
+    {
+        var (vm, _) = MakeVm();
+        await vm.LoadCommand.ExecuteAsync(null);
+
+        // The two noise entries (AnimNotify.DoTick + ParticleSystem.UpdateInternal)
+        // should be hidden (negative scores due to class penalty).
+        Assert.DoesNotContain(vm.Results, r => r.FuncName == "DoTick");
+        Assert.DoesNotContain(vm.Results, r => r.FuncName == "UpdateInternal");
+    }
+
+    [Fact]
+    public async Task LoadAsync_PassesGameOnlyToService()
+    {
+        var (vm, dump) = MakeVm();
+        vm.GameOnly = false;
+        await vm.LoadCommand.ExecuteAsync(null);
+        Assert.False(dump.LastGameOnly);
+
+        vm.GameOnly = true;
+        await vm.LoadCommand.ExecuteAsync(null);
+        Assert.True(dump.LastGameOnly);
+    }
+
+    // ==================================================================
+    // Filter inputs
+    // ==================================================================
+
+    [Fact]
+    public async Task FilterText_SubstringMatch_AppliesToFuncAndClassName()
+    {
+        var (vm, _) = MakeVm();
+        await vm.LoadCommand.ExecuteAsync(null);
+
+        // Match against function name
+        vm.FilterText = "Money";
+        Assert.Single(vm.Results);
+        Assert.Equal("AddMoney", vm.Results[0].FuncName);
+
+        // Match against class name
+        vm.FilterText = "Pawn";
+        Assert.Single(vm.Results);
+        Assert.Equal("MyPawn", vm.Results[0].ClassName);
+
+        // Case insensitive
+        vm.FilterText = "MONEY";
+        Assert.Single(vm.Results);
+    }
+
+    [Fact]
+    public async Task CategoryFilter_HidesOtherCategories()
+    {
+        var (vm, _) = MakeVm();
+        await vm.LoadCommand.ExecuteAsync(null);
+
+        vm.CategoryFilter = FunctionCategory.Movement;
+        Assert.All(vm.Results, r => Assert.Equal(FunctionCategory.Movement, r.Category));
+        Assert.Contains(vm.Results, r => r.FuncName == "TeleportPlayer");
+
+        vm.CategoryFilter = null; // back to All
+        Assert.True(vm.Results.Count > 1);
+    }
+
+    [Fact]
+    public async Task ShowAll_RevealsBelowThresholdRows()
+    {
+        var (vm, _) = MakeVm();
+        await vm.LoadCommand.ExecuteAsync(null);
+        int aboveThreshold = vm.Results.Count;
+
+        vm.ShowAll = true;
+        Assert.True(vm.Results.Count > aboveThreshold,
+            "ShowAll should reveal additional rows below the threshold");
+    }
+
+    [Fact]
+    public async Task ClearFilters_ResetsAllInputs()
+    {
+        var (vm, _) = MakeVm();
+        await vm.LoadCommand.ExecuteAsync(null);
+
+        vm.FilterText = "Foo";
+        vm.CategoryFilter = FunctionCategory.Stats;
+        vm.ShowAll = true;
+
+        vm.ClearFiltersCommand.Execute(null);
+
+        Assert.Equal("", vm.FilterText);
+        Assert.Null(vm.CategoryFilter);
+        Assert.False(vm.ShowAll);
+    }
+
+    // ==================================================================
+    // Cross-tab navigation events
+    // ==================================================================
+
+    [Fact]
+    public async Task OpenInLiveWalker_FiresNavigateToFunctionWithClassAndFunc()
+    {
+        var (vm, _) = MakeVm();
+        await vm.LoadCommand.ExecuteAsync(null);
+        var addMoney = vm.Results.First(r => r.FuncName == "AddMoney");
+
+        string? capturedClass = null;
+        string? capturedFunc = null;
+        vm.NavigateToFunction += (cls, fn) => { capturedClass = cls; capturedFunc = fn; };
+
+        vm.OpenInLiveWalkerCommand.Execute(addMoney);
+
+        Assert.Equal("PlayerCharacter", capturedClass);
+        Assert.Equal("AddMoney", capturedFunc);
+    }
+
+    [Fact]
+    public async Task CopyAaScript_FiresRequestCopyBakedScriptWithClassAndFunc()
+    {
+        var (vm, _) = MakeVm();
+        await vm.LoadCommand.ExecuteAsync(null);
+        var save = vm.Results.First(r => r.FuncName == "SaveGame");
+
+        string? capturedClass = null;
+        string? capturedFunc = null;
+        vm.RequestCopyBakedScript += (cls, fn) => { capturedClass = cls; capturedFunc = fn; };
+
+        vm.CopyAaScriptCommand.Execute(save);
+
+        Assert.Equal("GameMode", capturedClass);
+        Assert.Equal("SaveGame", capturedFunc);
+    }
+
+    [Fact]
+    public void OpenInLiveWalker_NullRow_DoesNotFireEvent()
+    {
+        var (vm, _) = MakeVm();
+        bool fired = false;
+        vm.NavigateToFunction += (_, _) => fired = true;
+
+        vm.OpenInLiveWalkerCommand.Execute(null);
+
+        Assert.False(fired);
+    }
+}

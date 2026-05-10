@@ -53,33 +53,58 @@ public static class KeywordScoringTable
     // funcName + className, case-insensitive.
     // ------------------------------------------------------------------
 
+    // Note on keyword length: substring matching means short 2-3 char
+    // acronyms collide with common English words ("Component" contains
+    // "mp", "Spawn" contains "sp", "GetTPSStream" contains "tp"). The
+    // tables below intentionally use full forms only -- accept the
+    // miss on "GetHP()" so we don't false-positive every "*Component*"
+    // function. Game devs almost always emit full-name BC functions
+    // for the surface that's actually exposed to Blueprint anyway.
+
     /// <summary>Per-hit score for each Stats keyword.</summary>
     public const int StatsKeywordScore = 5;
     public static readonly string[] StatsKeywords =
     {
-        // Health / mana / stamina / energy
-        "HP", "Health", "Hp", "MP", "Mana", "SP", "Stamina", "Energy",
-        // XP / level / score
-        "XP", "Exp", "Experience", "Level", "Score",
+        // Health / mana / stamina / energy (full forms only -- HP/MP/SP
+        // dropped because they substring-match common engine words).
+        "Health", "Mana", "Stamina", "Energy",
+        // Experience / level / score
+        "Experience", "Exp", "Level", "Score",
         // Combat-stat verbs (still primarily affect a stat field)
-        "Damage", "Heal", "Hurt", "Kill", "Revive", "Die", "Death",
+        "Damage", "Heal", "Hurt", "Kill", "Revive", "Death",
     };
 
     public const int InventoryKeywordScore = 5;
     public static readonly string[] InventoryKeywords =
     {
         "Gold", "Money", "Coin", "Currency", "Cash", "Credit",
-        "Item", "Inventory", "Pickup", "Loot", "Drop", "Equip",
+        "Item", "Inventory", "Pickup", "Loot", "Equip",
         "Wallet", "Stack",
+        // 'Drop' removed -- collides with "DropItem" semantics that
+        // overlap Inventory + UI; full keyword set still surfaces it
+        // via Inventory bucket alone (Pickup/Loot/Item).
     };
 
     public const int MovementKeywordScore = 5;
     public static readonly string[] MovementKeywords =
     {
-        "Teleport", "Warp", "TP",
+        "Teleport", "Warp",  // 'TP' dropped -- substring noise
         "SetLocation", "SetActorLocation", "Move",
-        "Speed", "Velocity", "Walk", "Run", "Sprint", "Jump",
-        "NoClip", "Fly", "God", "Ghost", "Invincible",
+        "Speed", "Velocity", "Walk", "Sprint", "Jump",
+        // 'Run' dropped -- too common in callback names (RunCallback,
+        // RunOnSubsystem, etc); use Sprint as the cheat-relevant verb.
+    };
+
+    /// <summary>
+    /// Explicit movement-cheat verbs. Higher per-hit weight (8) than
+    /// regular Movement (5) so a NoClip function on DebugCheatManager
+    /// stays in Movement instead of being pulled into Utility by the
+    /// "Cheat" + "Debug" class-name keywords. Categorised as Movement.
+    /// </summary>
+    public const int ExplicitCheatScore = 8;
+    public static readonly string[] ExplicitMovementCheats =
+    {
+        "NoClip", "Fly", "God", "Ghost", "Invincible", "Invisible",
     };
 
     public const int CombatKeywordScore = 4;
@@ -94,8 +119,11 @@ public static class KeywordScoringTable
     public static readonly string[] UtilityKeywords =
     {
         "Save", "Load", "Checkpoint",
-        "Spawn", "Summon", "Create", "Destroy",
-        "Timer", "Time", "Clock", "Countdown",
+        "Spawn", "Summon",
+        // 'Create'/'Destroy' dropped -- engine spam (CreateWidget,
+        // CreateProxy, DestroyComponent everywhere)
+        "Timer", "Countdown",
+        // 'Time'/'Clock' dropped -- substring noise (Lifetime, etc)
         "Cheat", "Debug", "Console", "Toggle",
     };
 
@@ -163,12 +191,15 @@ public static class KeywordScoringTable
         int statsHits     = CountHits(funcLower, classLower, StatsKeywords);
         int inventoryHits = CountHits(funcLower, classLower, InventoryKeywords);
         int movementHits  = CountHits(funcLower, classLower, MovementKeywords);
+        int cheatHits     = CountHits(funcLower, classLower, ExplicitMovementCheats);
         int combatHits    = CountHits(funcLower, classLower, CombatKeywords);
         int utilityHits   = CountHits(funcLower, classLower, UtilityKeywords);
 
         int statsScore     = statsHits     * StatsKeywordScore;
         int inventoryScore = inventoryHits * InventoryKeywordScore;
-        int movementScore  = movementHits  * MovementKeywordScore;
+        // Movement folds in explicit-cheat hits at the higher per-hit weight.
+        int movementScore  = movementHits  * MovementKeywordScore
+                           + cheatHits     * ExplicitCheatScore;
         int combatScore    = combatHits    * CombatKeywordScore;
         int utilityScore   = utilityHits   * UtilityKeywordScore;
 
@@ -177,7 +208,7 @@ public static class KeywordScoringTable
         var category = FunctionCategory.Other;
         int catScore = 0;
         int totalKeywordHits =
-            statsHits + inventoryHits + movementHits + combatHits + utilityHits;
+            statsHits + inventoryHits + movementHits + cheatHits + combatHits + utilityHits;
 
         if (statsScore > catScore)     { catScore = statsScore;     category = FunctionCategory.Stats; }
         if (inventoryScore > catScore) { catScore = inventoryScore; category = FunctionCategory.Inventory; }

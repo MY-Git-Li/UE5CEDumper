@@ -66,60 +66,57 @@ Files touched:
 
 Tests: 597 -> 633 (504 -> 540 C# + 62 dll_helpers + 31 utf8_helpers).
 
-### 2. Interesting-functions finder ([3c]) — **next**
+### 2. Interesting-functions finder ([3c]) — ✅ shipped (build 597-607)
 
-**Effort**: M | **Risk**: low
+**Effort**: M (actual: ~M as estimated) | **Risk**: low (no regressions)
 
-New panel (or filter in PropertySearch) that ranks UFunctions by a
-keyword + class + flag heuristic and groups them into Cheat-Engine-style
-categories.
+New "Interesting Funcs" tab between Property Search and Game Classes.
+Per-row Live + AA(B) actions. Architecture decisions actually shipped:
 
-**Scoring layers**:
+- **Scoring is UI-side** (not DLL) so keyword tables can be tuned
+  without DLL rebuild. DLL just enumerates via new `list_all_functions`
+  pipe cmd.
+- **Scoring file**: `KeywordScoringTable.cs` -- 5 visible categories
+  (Stats / Inventory / Movement / Combat / Utility) + an
+  ExplicitMovementCheats sub-bucket (NoClip/Fly/God/Ghost/Invincible/
+  Invisible at +8 per-hit) so explicit movement cheats outrank a
+  Utility-noisy `DebugCheatManager` class name.
+- **Substring-noise lesson** (caught by unit tests): short acronyms
+  like HP/MP/SP/XP/TP collide with engine-spam words ("Component"
+  contains "mp"). Dropped them from the keyword tables; full forms
+  only (Health/Mana/Stamina/Experience/Teleport).
+- **Tab insertion shifts ClassStruct from index 4 -> 5**; updated
+  `GameClassFilter.NavigateToClassStruct` accordingly.
+- **Cross-tab nav**: Live button uses FindInstancesAsync -> non-CDO
+  pick -> Live Walker; falls back to ClassStruct (with status hint)
+  when class is CDO-only. AA(B) button reuses the InvokeParamDialog
+  CopyBakedScript mode from step 1.
 
-1. **Keyword table** (hardcoded in DLL or UI — TBD):
-   - `HP|Health|Hp` → Stats / +5
-   - `MP|Mana|Magic` → Stats / +5
-   - `SP|Stamina|Energy` → Stats / +5
-   - `Gold|Money|Coin|Currency|Cash` → Inventory / +5
-   - `XP|Exp|Experience|Level|Lv` → Stats / +4
-   - `Damage|Heal|Hurt|Kill|Revive` → Combat / +4
-   - `Item|Inventory|Pickup|Loot|Drop` → Inventory / +4
-   - `Teleport|Warp|TP|Move|Setpos|SetLocation` → Movement / +5
-   - `Speed|Velocity|Walk|Run|Sprint` → Movement / +3
-   - `NoClip|Fly|God|Invincible|Invisibility|Ghost` → Movement / +5
-   - `Timer|Time|Clock|Countdown` → Utility / +3
-   - `Score|Kills|Streak` → Stats / +3
-   - `Spawn|Summon|Create` → Utility / +3
-   - `Save|Load|Checkpoint` → Utility / +2
+Files touched:
+- `dll/src/Aura.h` + `Aura.cpp` (`AllFunctionEntry` /
+  `EnumerateAllFunctions`)
+- `dll/src/Renge.h` + `Fern.cpp` (CMD_LIST_ALL_FUNCTIONS handler)
+- `ui/UE5DumpUI/Models/AllFunctionsResult.cs` + `ScoredFunctionRow.cs`
+  (new)
+- `ui/UE5DumpUI/Services/KeywordScoringTable.cs` +
+  `CategoryDisplayConverter.cs` (new)
+- `ui/UE5DumpUI/Services/DumpService.cs` + `Core/IDumpService.cs`
+  (`ListAllFunctionsAsync`)
+- `ui/UE5DumpUI/ViewModels/InterestingFunctionsViewModel.cs` (new)
+- `ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs` (cross-tab handlers
+  + `_aobMaker` field for AA Script delivery)
+- `ui/UE5DumpUI/Views/InterestingFunctionsPanel.axaml` + .cs (new)
+- `ui/UE5DumpUI/Views/MainWindow.axaml` (new TabItem; ClassStruct
+  shifted)
+- `ui/UE5DumpUI/Resources/Strings/en.axaml` (~14 new strings)
+- `ui/UE5DumpUI.Tests/CsxExportServiceTests.cs` (un-seal
+  `StubDumpService`, mark `ListAllFunctionsAsync` `virtual`)
+- `ui/UE5DumpUI.Tests/KeywordScoringTableTests.cs` + `InterestingFunctionsViewModelTests.cs`
+  (+60 test cases)
 
-2. **Class boosts**:
-   - `Character`/`Pawn`/`PlayerController`/`PlayerState`: +3
-   - `GameMode`/`GameInstance`/`SaveGame`: +2
-   - Anything starting `Anim` or `Niagara`: -2 (mostly visual, low
-     cheat value)
+Tests: 633 -> 693 (540 -> 600 C# + 62 dll_helpers + 31 utf8_helpers).
 
-3. **Flag boosts**:
-   - `BlueprintCallable`: +2 (player-facing exposed surface)
-   - `Pure` function: -1 (read-only, less interesting)
-   - 0 params: +1 (easy 1-click invoke)
-   - >5 params: -2 (annoying to call)
-
-UI: tabbed panel — Stats / Inventory / Movement / Combat / Utility /
-Other. Each row shows class, function name, signature preview, score.
-Click → navigate to the function in LiveWalker / Class Structure.
-Direct "Copy as CE AA Script" action available from the row.
-
-**Touch points**:
-- New `dll/src/Lustig.h` (Frieren character — TBD; "fun-loving" fits
-  the "interesting functions" theme) — keyword table + scorer, header-
-  only so it can be tested
-- New pipe cmd `find_interesting_functions` returning ranked list
-- New `ui/UE5DumpUI/ViewModels/InterestingFunctionsViewModel.cs` +
-  panel
-- Tests: per-keyword scoring, edge cases (keyword in class name vs
-  function name)
-
-### 3. UFunction metadata exposure ([4])
+### 3. UFunction metadata exposure ([4]) — **next**
 
 **Effort**: M | **Risk**: med
 
@@ -265,3 +262,7 @@ Recent items that shipped, kept here briefly until the next refresh:
 - ✅ **Drill Depth slider 0-6 with warning band** (build 588, PR #195)
 - ✅ **dev-log split into roadmap.md + todo.md** (this document, post
   build 589)
+- ✅ **Copy AA Script (Baked) UFunction export** (helper file +
+  generator + dialog + Tools menu, build 590-596)
+- ✅ **Interesting Functions Finder** (list_all_functions pipe +
+  KeywordScoringTable + new tab + cross-tab nav, build 597-607)

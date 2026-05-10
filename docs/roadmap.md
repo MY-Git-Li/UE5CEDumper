@@ -6,7 +6,7 @@ upcoming work and [dev-log.md](dev-log.md) for the historical commit
 trail. Build number tags reflect when each row reached its current
 state.
 
-> **Last refreshed**: 2026-05-10 (build 596, post-AA-Script export feature on `dev`).
+> **Last refreshed**: 2026-05-10 (build 607, post-Interesting Functions Finder on `dev`).
 
 -----
 
@@ -52,6 +52,30 @@ Three buttons per UFunction row in LiveWalker:
 Tools menu **Export CE Helper Lua File...** writes
 `scripts/ue5_invoke_helper.lua` to a user-chosen path so they can drop
 it next to their .CT and add via Cheat Engine `Table -> Add File...`.
+
+## Interesting Functions Finder (build 597-607)
+
+New tab "Interesting Funcs" between Property Search and Game Classes.
+Backed by the `list_all_functions` pipe cmd which flattens every
+UFunction across every UClass into a single one-shot payload (~4MB
+for a 50k-function game). Client-side scoring via
+`KeywordScoringTable`:
+
+- **Categories**: Stats / Inventory / Movement / Combat / Utility (with
+  ExplicitMovementCheats sub-bucket: NoClip/Fly/God/Ghost/Invincible
+  weighted +8 to outscore Utility's noisy `Cheat` + `Debug` matches)
+- **Class bonuses**: Character/Pawn/PlayerController/PlayerState +3,
+  GameMode/GameInstance/SaveGame +2; Anim/Niagara/Sound/Audio/Particle
+  -2; UI/Widget -1
+- **Flag bonuses**: BlueprintCallable +2, BlueprintEvent +1, Pure-or-
+  Const safe getter +1, ParmsSize > 64 -1
+- **Threshold = 5**; Show All toggle bypasses
+
+Per-row actions:
+- **Live**: open in Live Walker via `find_instance` lookup, falls back
+  to ClassStruct tab if class is CDO-only
+- **AA(B)**: shortcut into the Copy AA Script (Baked) flow; reuses the
+  same dialog as the LiveWalker AA(Baked) button
 
 ## Publisher detection
 

@@ -11,7 +11,218 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
-## 2026-05-10 (latest, dev branch, build 590-596) — Copy AA Script (Baked) UFunction export
+## 2026-05-10 (latest, dev branch, build 597-607) — Interesting Functions Finder
+
+`feat(dll,ui): list_all_functions + Interesting Functions Finder
+panel` — second item of the "Call-UE-function strengthening" plan
+([docs/todo.md](todo.md), step 3c). Three commits on `dev`:
+[`d4ef507`](../dll/src/Aura.cpp) DLL + service wire,
+[`e3a24fb`](../ui/UE5DumpUI/ViewModels/InterestingFunctionsViewModel.cs)
+panel + scoring, and the cross-tab nav + tests + docs in this commit.
+
+### The problem
+
+After the Copy AA Script (Baked) feature shipped (build 590-596), the
+remaining friction was *discovery*: a user wanting to find AddMoney /
+Teleport / SetHealth on a game with 50k UFunctions across 1k UClasses
+had to manually walk the class tree or guess at PropertySearch
+keywords. PropertySearch is property-focused (FloatProperty fields
+across classes); functions had no equivalent surface. The
+GameClassFilter panel lists classes by RE score but doesn't surface
+the actual cheat-relevant *verbs* on each class.
+
+### Architecture
+
+Three layers, sliced UI ↔ DLL at the cheapest seam:
+
+**Layer 1 — DLL: `Aura::EnumerateAllFunctions`** (`Aura.cpp` + `Aura.h`)
+
+Mirrors the SearchProperties / ListClasses GObjects-walk pattern: scan
+every UObject, identify UClasses by metaclass-name == "Class", dedupe
+via visited set, flatten Ubel::WalkFunctions per class. Returns a flat
+vector of light-weight `AllFunctionEntry { className, classAddr,
+superName, classPath, funcName, funcAddr, functionFlags, numParms,
+parmsSize }` rows -- ~80 bytes per row, so 50k functions = ~4MB JSON,
+acceptable as a one-shot pipe payload. Per-class WalkClassEx is
+technically wasted work (we only need SuperName from it) but adding
+a SuperName-only walker just to save a few ms isn't worth the parallel-
+reader maintenance burden.
+
+New pipe cmd `Renge::CMD_LIST_ALL_FUNCTIONS = "list_all_functions"`
+with `{game_only, limit}` request and `{total, scanned_objects,
+scanned_classes, total_functions, functions[]}` response. Cost is
+O(GObjects + sum(WalkFunctions)); typical 1M-object game completes in
+2-10s. UI runs the call on a worker task with a progress indicator.
+
+**Layer 2 — UI keyword scorer:
+[`KeywordScoringTable`](../ui/UE5DumpUI/Services/KeywordScoringTable.cs)**
+(C# static class)
+
+Scoring is client-side so the rules can be tuned without a DLL
+rebuild. Six categories (Stats / Inventory / Movement / Combat /
+Utility / Other) with per-bucket keyword arrays and a fixed
+per-category hit-score weight:
+
+| Category | Per-hit | Sample keywords |
+|---|---|---|
+| Stats | 5 | Health, Mana, Stamina, Experience, Damage, Heal, Kill |
+| Inventory | 5 | Gold, Money, Currency, Item, Inventory, Pickup, Loot |
+| Movement | 5 | Teleport, Warp, SetActorLocation, Move, Speed, Walk, Sprint |
+| Combat | 4 | Attack, Fire, Cast, Ability, Skill, Buff |
+| Utility | 3 | Save, Load, Spawn, Timer, Cheat, Debug, Console |
+| **ExplicitMovementCheats** | **8** | NoClip, Fly, God, Ghost, Invincible, Invisible |
+
+The ExplicitMovementCheats sub-bucket carries higher per-hit weight
+and folds into Movement so a `NoClip` function on a
+`DebugCheatManager` class stays in Movement instead of being pulled
+into Utility by the noisy `Cheat` + `Debug` class-name keywords (8 vs
+3+3=6).
+
+Class-name bonuses (substring, summed -- so AnimNotify_Character gets
++3 Character + -2 Anim = +1 net):
+
+| Class substring | Bonus |
+|---|---|
+| Character / Pawn / PlayerController / PlayerState | +3 |
+| GameMode / GameInstance / SaveGame | +2 |
+| Anim / Niagara / Sound / Audio / Particle | -2 |
+| UI / Widget | -1 |
+
+Flag bonuses (from `AllFunctionEntry`'s flag projections):
+
+| Flag condition | Bonus |
+|---|---|
+| `BlueprintCallable` | +2 |
+| `BlueprintEvent` | +1 |
+| `(BlueprintPure \|\| Const)` && `numParms <= 1` | +1 (safe getter) |
+| `ParmsSize > 64` | -1 (annoying to call) |
+
+Score = sum of all keyword-bucket scores + classBonus + flagBonus.
+Category = the highest-scoring bucket; ties broken by enum order
+(Stats > Inventory > Movement > Combat > Utility). InterestingThreshold
+= 5; rows below are hidden by default (UI "Show All" toggle bypasses).
+
+#### Substring-noise lesson
+
+First draft included short acronyms (HP/MP/SP/XP/TP). Tests caught
+the regression immediately:
+[`Component`](https://en.cppreference.com/w/cpp/string/byte/strstr)
+contains "mp", `Spawn` contains "sp", `GetTPSStream` contains "tp".
+A `FrobnicatorComponent.DoNothingPlz` function was scoring as Stats
+because of the "mp" substring in "Component". Resolution: drop short
+acronyms entirely -- accept the miss on `GetHP()` so we don't
+false-positive every `*Component*` function. Game devs almost always
+emit full-name BC functions for the surface that's actually exposed
+to Blueprint anyway. The keyword tables now use full forms only and
+have inline comments explaining what got dropped and why.
+
+**Layer 3 — UI panel:
+[`InterestingFunctionsPanel`](../ui/UE5DumpUI/Views/InterestingFunctionsPanel.axaml)**
+
+New tab "Interesting Funcs" between PropertySearch and GameClassFilter
+(tab index 3 -- ClassStruct shifts 4 → 5; updated the existing
+`GameClassFilter.NavigateToClassStruct` handler accordingly).
+Toolbar: Load button, Game Only toggle, name-substring filter, category
+chip dropdown (with custom
+[`CategoryDisplayConverter`](../ui/UE5DumpUI/Services/CategoryDisplayConverter.cs)
+that maps null → "All"), Show All toggle, Clear button, status text.
+
+DataGrid columns: Score (with breakdown tooltip), Cat (coloured per
+category), Class, Function, Flags (compact `BC,BE,Const` style),
+Params (`NumParms (ParmsSize B)`), action buttons:
+- **Live**: opens the function in Live Walker via cross-tab nav.
+- **AA(B)**: shortcut into the Copy AA Script (Baked) flow.
+
+Both fire events into MainWindowVM which routes them.
+
+### Cross-tab navigation
+
+Two events on
+[`InterestingFunctionsViewModel`](../ui/UE5DumpUI/ViewModels/InterestingFunctionsViewModel.cs):
+
+`NavigateToFunction(className, funcName)` -- Live Walker is
+instance-based, but the Finder gives us (className, funcName).
+Handler:
+1. `FindInstancesAsync(className, exactMatch=true, limit=5)` -- pick
+   the first non-CDO live instance (skip `Default__*`).
+2. On hit: switch to Live Walker tab + `NavigateToAddressCommand` on
+   the instance address. (v1 lands on the instance; user manually
+   scrolls to the function row -- a row-scroll event into Live Walker
+   could be added if feedback says it's worth it.)
+3. On miss (CDO-only class, or class not yet instantiated): switch to
+   ClassStruct tab + `LoadClassCommand` on the class address resolved
+   via `ListClassesAsync` lookup. Surfaces "no live instance, showing
+   class metadata" in the status bar.
+
+`RequestCopyBakedScript(className, funcName)` -- shortcut into the
+Copy AA Script (Baked) flow without going through Live Walker first.
+Handler:
+1. `ListClassesAsync` to resolve className → classAddr.
+2. `WalkFunctionsAsync(classAddr)` to fetch full param metadata.
+3. Find the matching FunctionInfoModel by name.
+4. Try `FindInstancesAsync` for a live instance (best-effort; the
+   helper's `CMD_INVOKE_BY_NAME` finds an instance itself, but
+   surfacing it now lets us show a clear error if the class is
+   CDO-only).
+5. Zero-arg fast path: generate AA Script directly + ship to AOBMaker /
+   clipboard. Otherwise open `InvokeParamDialog` in
+   `CopyBakedScript` mode.
+
+### Tests (+60)
+
+[`KeywordScoringTableTests`](../ui/UE5DumpUI.Tests/KeywordScoringTableTests.cs)
+-- 30+ cases:
+- Per-keyword category assignment (16 [Theory] inlines covering all
+  five real categories + a no-hit Other case)
+- Class bonus stacking (AnimNotify_Character +1 net, NiagaraSystem -2,
+  HUDWidget -1, MyUIPanel -1)
+- Flag bonus combinations (BC, safe getter, large-params penalty,
+  net-1-after-penalty case)
+- Combined "happy path" (`AddMoney/PlayerCharacter` lands above
+  threshold)
+- Negative case (`UpdateInternal/BP_NiagaraEffect_C` lands below
+  threshold)
+- Tie-break (`GoldHealth/Misc` -> Stats wins per enum order)
+- DisplayName + CategoryColor full-coverage [Theory]
+
+[`InterestingFunctionsViewModelTests`](../ui/UE5DumpUI.Tests/InterestingFunctionsViewModelTests.cs)
+-- 10 cases:
+- Load -> score -> sort by FinalScore desc
+- Default threshold hides noise (AnimNotify, ParticleSystem)
+- GameOnly toggle is plumbed to the service
+- FilterText substring match against function OR class name
+  (case-insensitive)
+- CategoryFilter narrows to one bucket; null restores All
+- ShowAll bypasses threshold
+- ClearFilters resets all inputs
+- OpenInLiveWalker fires NavigateToFunction with right payload
+- CopyAaScript fires RequestCopyBakedScript with right payload
+- Null-row guard
+
+`StubDumpService` (in `CsxExportServiceTests.cs`) un-sealed and the new
+`ListAllFunctionsAsync` made `virtual` so the new tests' `FakeDumpService`
+can extend it with one override -- avoids duplicating the full
+~25-method IDumpService stub list.
+
+### What's covered now / what's pending
+
+Done: discover + score + filter + categorise UFunctions across the
+whole loaded class hierarchy; one-click navigate to LiveWalker (with
+graceful ClassStruct fallback) or generate a baked AA Script.
+
+Still pending in the same plan ([docs/todo.md](todo.md)):
+3. **UFunction metadata exposure** -- expose Blueprint
+   `DisplayName` / `ToolTip` / `Category` so the Finder can match
+   richer text + show better column labels
+4. Finder rev2 -- fold metadata into the keyword scorer
+5. InvokeParamDialog ScrollViewer overflow fix
+
+**Build #607, 693 tests passing (600 C# + 62 dll_helpers + 31
+utf8_helpers).** 5 commits ahead of `origin/main`.
+
+-----
+
+## 2026-05-10 (build 590-596) — Copy AA Script (Baked) UFunction export
 
 `feat(ui): Copy AA Script (Baked)` series — first chunk of the
 "Call-UE-function strengthening" plan from

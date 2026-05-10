@@ -8,8 +8,11 @@ namespace UE5DumpUI.Tests;
 /// <summary>
 /// Stub IDumpService that returns empty results — sufficient for
 /// testing CSX generation where StructProperty resolution is not needed.
+/// Other test files may sub-class to override one or two methods (e.g.
+/// <c>InterestingFunctionsViewModelTests.FakeDumpService</c> overrides
+/// <c>ListAllFunctionsAsync</c>).
 /// </summary>
-public sealed class StubDumpService : IDumpService
+public class StubDumpService : IDumpService
 {
     private readonly Dictionary<string, InstanceWalkResult> _structResults = new();
     private readonly Dictionary<string, ClassInfoModel> _classResults = new();
@@ -61,7 +64,7 @@ public sealed class StubDumpService : IDumpService
     public Task<List<FunctionInfoModel>> WalkFunctionsAsync(string addr, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<PropertySearchResult> SearchPropertiesAsync(string query, string[]? types = null, bool gameOnly = true, int limit = 200, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<ClassListResult> ListClassesAsync(bool gameOnly = true, int limit = 5000, CancellationToken ct = default) => throw new NotImplementedException();
-    public Task<AllFunctionsResult> ListAllFunctionsAsync(bool gameOnly = true, int limit = 100000, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<AllFunctionsResult> ListAllFunctionsAsync(bool gameOnly = true, int limit = 100000, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<RescanStartResult> StartRescanAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public Task<RescanStatusResult> GetRescanStatusAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public Task<EngineState> ApplyRescanAsync(CancellationToken ct = default) => throw new NotImplementedException();
