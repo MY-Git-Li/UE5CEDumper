@@ -1071,6 +1071,61 @@ public sealed class DumpService : IDumpService
         return result;
     }
 
+    /// <summary>
+    /// Enumerate every UFunction across every loaded UClass. Backs the
+    /// "Interesting Functions Finder" panel.
+    /// </summary>
+    /// <param name="gameOnly">When true, skip engine-package classes
+    ///     (/Script/Engine, /Script/CoreUObject, etc.). Typically reduces
+    ///     the result set ~5x for shipping games.</param>
+    /// <param name="limit">Hard cap on returned entries to keep the pipe
+    ///     payload bounded -- defaults to 100k, well above the ~50k
+    ///     ceiling typical for shipping UE games.</param>
+    public async Task<AllFunctionsResult> ListAllFunctionsAsync(
+        bool gameOnly = true, int limit = 100000, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "list_all_functions",
+            ["game_only"] = gameOnly,
+            ["limit"] = limit,
+        };
+
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        var functions = new List<AllFunctionEntry>(
+            res["total"]?.GetValue<int>() ?? 0);
+        if (res["functions"] is JsonArray arr)
+        {
+            foreach (var item in arr)
+            {
+                if (item is not JsonObject obj) continue;
+                functions.Add(new AllFunctionEntry
+                {
+                    ClassName     = obj["class_name"]?.GetValue<string>() ?? "",
+                    ClassAddr     = obj["class_addr"]?.GetValue<string>() ?? "",
+                    SuperName     = obj["super_name"]?.GetValue<string>() ?? "",
+                    ClassPath     = obj["class_path"]?.GetValue<string>() ?? "",
+                    FuncName      = obj["func_name"]?.GetValue<string>() ?? "",
+                    FuncAddr      = obj["func_addr"]?.GetValue<string>() ?? "",
+                    FunctionFlags = (uint)(obj["function_flags"]?.GetValue<long>() ?? 0L),
+                    NumParms      = (byte)(obj["num_parms"]?.GetValue<int>() ?? 0),
+                    ParmsSize     = (ushort)(obj["parms_size"]?.GetValue<int>() ?? 0),
+                });
+            }
+        }
+
+        return new AllFunctionsResult
+        {
+            Total          = res["total"]?.GetValue<int>()          ?? 0,
+            ScannedObjects = res["scanned_objects"]?.GetValue<int>() ?? 0,
+            ScannedClasses = res["scanned_classes"]?.GetValue<int>() ?? 0,
+            TotalFunctions = res["total_functions"]?.GetValue<int>() ?? 0,
+            Functions      = functions,
+        };
+    }
+
     // --- Extra Scan (user-triggered aggressive fallback) ---
 
     public async Task<RescanStartResult> StartRescanAsync(CancellationToken ct = default)

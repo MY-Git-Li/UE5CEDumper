@@ -74,6 +74,10 @@ public interface IDumpService
     Task<ClassListResult> ListClassesAsync(
         bool gameOnly = true, int limit = 5000, CancellationToken ct = default);
 
+    // --- All Functions Enumeration (Interesting Functions Finder) ---
+    Task<AllFunctionsResult> ListAllFunctionsAsync(
+        bool gameOnly = true, int limit = 100000, CancellationToken ct = default);
+
     // --- Extra Scan (user-triggered aggressive fallback) ---
     Task<RescanStartResult> StartRescanAsync(CancellationToken ct = default);
     Task<RescanStatusResult> GetRescanStatusAsync(CancellationToken ct = default);

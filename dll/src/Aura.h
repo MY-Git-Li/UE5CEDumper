@@ -286,6 +286,46 @@ struct ClassListResult {
 // List all UClass objects, optionally filtering out engine packages.
 ClassListResult ListClasses(bool gameOnly, int maxResults = 5000);
 
+// === All-Functions Enumeration (Interesting Functions Finder) ===
+
+// Lightweight per-function metadata returned by EnumerateAllFunctions.
+// Deliberately omits parameter details — the UI only needs enough to
+// score + render a row; full param walk happens on-demand when the
+// user picks a function (existing CMD_WALK_FUNCTIONS path).
+struct AllFunctionEntry {
+    std::string className;
+    uintptr_t   classAddr   = 0;
+    std::string superName;
+    std::string classPath;        // full path for game_only / package filter
+    std::string funcName;
+    uintptr_t   funcAddr    = 0;
+    uint32_t    functionFlags = 0;
+    uint8_t     numParms    = 0;
+    uint16_t    parmsSize   = 0;
+};
+
+struct AllFunctionsResult {
+    int scannedObjects   = 0;     // GObjects count walked
+    int scannedClasses   = 0;     // UClasses considered (post game-only filter)
+    int totalFunctions   = 0;     // sum of WalkFunctions over all classes
+    std::vector<AllFunctionEntry> entries;
+};
+
+// Walk every UClass in GObjects, enumerate its UFunctions, and return a
+// flat list of {class, function, addr, flags, paramsSize} tuples.
+//
+// gameOnly: when true, skips classes whose path matches IsEnginePackage
+//   (/Script/Engine, /Script/CoreUObject, etc.) -- typically reduces
+//   the result set ~5x for shipping games.
+// maxEntries: hard cap to keep the pipe payload bounded. Defaults to
+//   100k (well above the ~50k-function ceiling of typical UE games).
+//
+// Cost is O(GObjects + sum(WalkFunctions)) with a single pass over
+// GObjects to identify UClasses, plus one Ubel::WalkFunctions per
+// class. Typical 1M-object game completes in 2-10s. UI should run
+// this on a worker task with a progress indicator.
+AllFunctionsResult EnumerateAllFunctions(bool gameOnly, int maxEntries = 100000);
+
 // === Sparse Delegate Storage Walker ===
 //
 // Resolves bindings for a MulticastSparseDelegateProperty. The field on a

@@ -1393,6 +1393,43 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             return Renge::MakeResponse(id, data).dump();
         }
 
+        // === list_all_functions: Flat enumeration of every UFunction across
+        // every UClass in GObjects -- backs the "Interesting Functions
+        // Finder" UI panel. UI does keyword scoring + categorization
+        // client-side so the rules can be tuned without DLL rebuild.
+        // Per-function payload is intentionally light (no params); UI
+        // calls existing CMD_WALK_FUNCTIONS for the chosen class to fetch
+        // full param data on demand. ===
+        if (cmd == Renge::CMD_LIST_ALL_FUNCTIONS) {
+            bool gameOnly = request.value("game_only", true);
+            int limit = request.value("limit", 100000);
+
+            auto enumResult = Aura::EnumerateAllFunctions(gameOnly, limit);
+
+            json functions = json::array();
+            for (const auto& e : enumResult.entries) {
+                json item;
+                item["class_name"]    = e.className;
+                item["class_addr"]    = Renge::AddrToStr(e.classAddr);
+                item["super_name"]    = e.superName;
+                item["class_path"]    = e.classPath;
+                item["func_name"]     = e.funcName;
+                item["func_addr"]     = Renge::AddrToStr(e.funcAddr);
+                item["function_flags"]= e.functionFlags;
+                item["num_parms"]     = e.numParms;
+                item["parms_size"]    = e.parmsSize;
+                functions.push_back(item);
+            }
+
+            json data;
+            data["total"]            = static_cast<int>(enumResult.entries.size());
+            data["scanned_objects"]  = enumResult.scannedObjects;
+            data["scanned_classes"]  = enumResult.scannedClasses;
+            data["total_functions"]  = enumResult.totalFunctions;
+            data["functions"]        = functions;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
         // === find_by_address: Reverse lookup — address to UObject instance ===
         // Always runs the standard FindByAddress (UObject containment + backward
         // memory scan). Additionally runs container-aware FindInContainers when:

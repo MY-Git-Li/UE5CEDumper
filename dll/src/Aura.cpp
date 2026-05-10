@@ -2534,6 +2534,86 @@ ClassListResult ListClasses(bool gameOnly, int maxResults) {
     return result;
 }
 
+// --- EnumerateAllFunctions ---
+//
+// Mirrors the SearchProperties / ListClasses GObjects-walk pattern: scan
+// every object, identify UClasses by metaclass-name, dedupe via a visited
+// set, and flatten the per-class function list into a single result vector.
+//
+// Per-class cost is dominated by Ubel::WalkFunctions which walks the
+// UField::Children chain (4096-iteration safety cap, 256-iteration param
+// cap per function). On 1M-object games this typically takes 2-10s
+// because the UFunction count per class is small (usually <50) and the
+// per-class walk caches nothing — we pay the full O(F) per class.
+
+AllFunctionsResult EnumerateAllFunctions(bool gameOnly, int maxEntries) {
+    AllFunctionsResult result;
+
+    std::unordered_set<uintptr_t> visitedClasses;
+
+    int32_t count = GetCount();
+    result.scannedObjects = count;
+
+    for (int32_t i = 0; i < count; ++i) {
+        if (static_cast<int>(result.entries.size()) >= maxEntries) break;
+
+        uintptr_t obj = GetByIndex(i);
+        if (!obj) continue;
+
+        // Identify UClass by checking metaclass-name == "Class"
+        // (same trick SearchProperties + ListClasses use).
+        uintptr_t cls = 0;
+        if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
+
+        uint32_t clsNameIdx = 0;
+        if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx)) continue;
+
+        std::string metaClassName = Serie::GetString(clsNameIdx);
+        if (metaClassName != "Class") continue;
+
+        // Skip duplicates (same UClass can be referenced from multiple GObjects slots
+        // when CDOs or hot-reload artefacts keep stale handles around).
+        if (!visitedClasses.insert(obj).second) continue;
+
+        std::string classPath = Ubel::GetFullName(obj);
+        if (gameOnly && IsEnginePackage(classPath)) continue;
+
+        result.scannedClasses++;
+
+        // Walk class metadata + functions. WalkClassEx is needed for SuperName
+        // (used by the UI's class-keyword scoring). It also walks fields, which
+        // is wasted work here, but the alternative (a Functions-only walker)
+        // would mean a parallel reader path -- not worth the maintenance burden
+        // for the typical perf budget.
+        ClassInfo ci = Ubel::WalkClassEx(obj);
+        std::vector<FunctionInfo> funcs = Ubel::WalkFunctions(obj);
+
+        for (const auto& f : funcs) {
+            if (static_cast<int>(result.entries.size()) >= maxEntries) break;
+
+            AllFunctionEntry entry;
+            entry.className     = ci.Name;
+            entry.classAddr     = obj;
+            entry.superName     = ci.SuperName;
+            entry.classPath     = classPath;
+            entry.funcName      = f.name;
+            entry.funcAddr      = f.address;
+            entry.functionFlags = f.functionFlags;
+            entry.numParms      = f.numParms;
+            entry.parmsSize     = f.parmsSize;
+            result.entries.push_back(std::move(entry));
+            result.totalFunctions++;
+        }
+    }
+
+    Sein::Info("PIPE:list",
+        "EnumerateAllFunctions: %d entries from %d classes "
+        "(gameOnly=%d, scanned %d objects, total funcs %d)",
+        static_cast<int>(result.entries.size()), result.scannedClasses,
+        gameOnly ? 1 : 0, result.scannedObjects, result.totalFunctions);
+    return result;
+}
+
 SparseDelegateResult WalkSparseDelegateBindings(uintptr_t ownerObj,
                                                  const std::string& fieldName,
                                                  int32_t maxBindings)

@@ -1,0 +1,75 @@
+namespace UE5DumpUI.Models;
+
+/// <summary>
+/// One UFunction entry returned by the <c>list_all_functions</c> pipe
+/// command. Backs the "Interesting Functions Finder" panel
+/// (<see cref="ViewModels.InterestingFunctionsViewModel"/>).
+///
+/// Lightweight by design -- the DLL omits param details to keep the
+/// pipe payload bounded for games with ~50k+ functions. The UI fetches
+/// full param data on-demand via <c>walk_functions</c> when the user
+/// picks a function (e.g. for "Open in LiveWalker" or
+/// "Copy AA Script (Baked)").
+/// </summary>
+public sealed class AllFunctionEntry
+{
+    public string ClassName       { get; init; } = "";
+    public string ClassAddr       { get; init; } = "";
+    public string SuperName       { get; init; } = "";
+    public string ClassPath       { get; init; } = "";
+    public string FuncName        { get; init; } = "";
+    public string FuncAddr        { get; init; } = "";
+    public uint   FunctionFlags   { get; init; }
+    public byte   NumParms        { get; init; }
+    public ushort ParmsSize       { get; init; }
+
+    // ------------------------------------------------------------------
+    // Computed display helpers (UI-bound; no network/IO)
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Short flag label for the DataGrid -- compact subset of
+    /// <see cref="FunctionInfoModel.DecodeFunctionFlags"/> showing only
+    /// the flags that affect cheat-table relevance + safety.
+    /// </summary>
+    public string ShortFlags
+    {
+        get
+        {
+            var parts = new List<string>(4);
+            if ((FunctionFlags & 0x0400_0000) != 0) parts.Add("BC");   // BlueprintCallable
+            if ((FunctionFlags & 0x0800_0000) != 0) parts.Add("BE");   // BlueprintEvent
+            if ((FunctionFlags & 0x1000_0000) != 0) parts.Add("BP");   // BlueprintPure
+            if ((FunctionFlags & 0x4000_0000) != 0) parts.Add("Const");
+            if ((FunctionFlags & 0x0000_0400) != 0) parts.Add("Native");
+            if ((FunctionFlags & 0x0000_0800) != 0) parts.Add("Event");
+            if ((FunctionFlags & 0x0000_2000) != 0) parts.Add("Static");
+            return string.Join(",", parts);
+        }
+    }
+
+    public bool IsBlueprintCallable => (FunctionFlags & 0x0400_0000) != 0;
+    public bool IsBlueprintPure     => (FunctionFlags & 0x1000_0000) != 0;
+    public bool IsBlueprintEvent    => (FunctionFlags & 0x0800_0000) != 0;
+    public bool IsConst             => (FunctionFlags & 0x4000_0000) != 0;
+    public bool IsNative            => (FunctionFlags & 0x0000_0400) != 0;
+
+    /// <summary>"NumParms (ParmsSize B)" e.g. "2 (5B)".</summary>
+    public string ParamsLabel => $"{NumParms} ({ParmsSize}B)";
+}
+
+/// <summary>
+/// Full result set from <c>list_all_functions</c>. The
+/// <see cref="ScannedObjects"/> / <see cref="ScannedClasses"/> /
+/// <see cref="TotalFunctions"/> counters are surfaced in the UI status
+/// bar so the user can sanity-check the scan against game-known counts
+/// and spot regressions if a future DLL change starts dropping classes.
+/// </summary>
+public sealed class AllFunctionsResult
+{
+    public int Total          { get; init; }
+    public int ScannedObjects { get; init; }
+    public int ScannedClasses { get; init; }
+    public int TotalFunctions { get; init; }
+    public List<AllFunctionEntry> Functions { get; init; } = new();
+}
