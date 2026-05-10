@@ -11,7 +11,67 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
-## 2026-05-10 (latest, dev branch, build 636) — Static-native ProcessEvent fast path
+## 2026-05-10 (latest, dev branch, build 637) — Verify Return Value toggle on baked AA template
+
+Live-test follow-up after the static-native fast path landed: invoking
+`KismetMathLibrary::exp(8)` returned `result=0` (success) but the
+ReturnValue slot read 0 instead of `2980.957987...`. Without a
+diagnostic mode in the generated AA Script, the user had to hand-edit
+the script to insert raw-byte dumps just to tell apart "function
+didn't run" from "wrong return offset" from "data overwritten".
+
+### Toggle
+
+`InvokeParamDialog` (CopyBakedScript mode) gained a new checkbox:
+**"Verify return value (print result, keep engine open)"**. Default
+off so the production "ship a one-shot cheat" flow stays silent on
+success and auto-closes the engine. When enabled, the generated AA
+Script:
+
+- Resolves the mailbox params buffer via `getAddress('g_invokeMailbox')
+  + UE5_INVOKE_PARAMS_OFFSET` (the latter exposed by the helper).
+- Prints a `Before:` raw-byte dump of the params buffer
+  (min(ParmsSize, 32) bytes, floor 8) before the invoke call.
+- Prints an `After:` dump immediately after, so layout / write-back
+  bugs jump out by side-by-side comparison.
+- Decodes the return slot via `readUFunctionReturn(offset, type)` and
+  prints `[Invoke] OK: Class::Func -> Name (type@offset) = value`
+  with a type-aware format spec (`%.10g` for double/float, `0x%X` for
+  pointer-shaped, `%d` for ints/bools).
+- Suppresses the auto-close timer's `synchronize(getLuaEngine().Close())`
+  branch so the user can actually read the diagnostic before the
+  window vanishes.
+
+For void-return functions, verify mode prints `(void return)` instead
+of attempting a read.
+
+### Pointer-return detail
+
+The helper's `readUFunctionReturn` doesn't recognise the `'pointer'`
+type token (defaults to int32 = 4-byte read on an 8-byte slot). The
+generator now translates `'pointer'` -> `'qword'` on the wire while
+keeping `pointer` as the display label, so UObject* / UClass* /
+FName returns decode correctly without a helper rebuild.
+
+### Files touched
+
+- `ui/UE5DumpUI/Services/BakedScriptGenerator.cs`: new optional
+  `returnParam` + `verifyReturn` params on `Generate(...)`; emit
+  diagnostic block + suppress auto-close when on.
+- `ui/UE5DumpUI/Views/InvokeParamDialog.cs`: `_chkVerifyReturn`
+  CheckBox in the bottom panel; new `BuildReturnBakedParam()` helper
+  that pulls the return slot from `_allParams`.
+- `ui/UE5DumpUI.Tests/InvokeScriptTests.cs`: +6 tests covering verify-
+  off contract preservation, verify-on dump+print emission, void
+  return, pointer translation to qword, dump-window cap (32B) and
+  floor (8B).
+
+Tests: 671 -> 677 (+6). Total 677 + 62 dll_helpers + 31 utf8_helpers
+= 770. Build 637.
+
+-----
+
+## 2026-05-10 (build 636) — Static-native ProcessEvent fast path
 
 Live test on ES2 invoking `KismetMathLibrary::exp` returned `result=-5`
 (GameThreadDispatch timeout) even after the user bumped the per-game

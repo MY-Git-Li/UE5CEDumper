@@ -68,6 +68,7 @@ public sealed class InvokeParamDialog : Window
     private Button _btnFire = null!;
     private Button _btnCopyBaked = null!;
     private Button _btnClose = null!;
+    private CheckBox _chkVerifyReturn = null!;
     private int _fireCount;
 
     public InvokeParamDialog(
@@ -192,6 +193,28 @@ public sealed class InvokeParamDialog : Window
         btnPanel.Children.Add(_btnClose);
         btnPanel.Children.Add(btnCancel);
         bottomPanel.Children.Add(btnPanel);
+
+        // Verify return value: opt-in toggle that switches the generated AA
+        // Script into a diagnostic mode -- emits a Before/After raw-byte
+        // dump of the params buffer plus a decoded print of the return slot,
+        // and skips the auto-close-engine timer so the user can read both.
+        // Default OFF so the production "ship a one-shot cheat" flow stays
+        // silent on success. Visible only for the baked-script path; FIRE
+        // already shows decoded values inline in PipeInvoke mode.
+        _chkVerifyReturn = new CheckBox
+        {
+            Content = "Verify return value (print result, keep engine open)",
+            IsChecked = false,
+            Foreground = new SolidColorBrush(Color.Parse("#CCCCCC")),
+            FontSize = 11,
+            Margin = new Thickness(0, 6, 0, 0),
+        };
+        Avalonia.Controls.ToolTip.SetTip(_chkVerifyReturn,
+            "When checked, the generated AA Script prints the params buffer " +
+            "(before/after) and decodes the return value, then leaves the " +
+            "Lua engine open so you can read it. Use to debug 'function ran " +
+            "but return is 0' situations. Off = silent on success, auto-close.");
+        bottomPanel.Children.Add(_chkVerifyReturn);
 
         // Result area
         _resultLabel = new TextBlock
@@ -519,8 +542,15 @@ public sealed class InvokeParamDialog : Window
         try
         {
             var bakedValues = CollectBakedValues();
+            // Pull the return-value param (if any) from _allParams. The
+            // generator's verify mode uses Offset + UeTypeName to emit
+            // a typed readUFunctionReturn call. Skipped for void-return
+            // functions; verify mode then just prints "(void return)".
+            var returnParam = BuildReturnBakedParam();
+            var verify = _chkVerifyReturn.IsChecked == true;
             var script = BakedScriptGenerator.Generate(
-                _className, _funcName, _parmsSize, bakedValues);
+                _className, _funcName, _parmsSize, bakedValues,
+                returnParam: returnParam, verifyReturn: verify);
 
             // Prefer AOBMaker (creates the AA Script entry directly in CE);
             // fall back to clipboard for users running without the plugin.
@@ -590,6 +620,30 @@ public sealed class InvokeParamDialog : Window
         {
             _btnCopyBaked.IsEnabled = true;
         }
+    }
+
+    /// <summary>
+    /// Locate the return-value parameter in <see cref="_allParams"/> and
+    /// wrap it as a <see cref="BakedParamValue"/> for the generator's
+    /// verify-mode emit. Returns <c>null</c> for void-return functions
+    /// (the generator then prints just "(void return)" on success).
+    /// LiteralText is unused for the return slot (helper reads, not writes)
+    /// so we pass an empty string.
+    /// </summary>
+    internal BakedParamValue? BuildReturnBakedParam()
+    {
+        foreach (var p in _allParams)
+        {
+            if (!p.IsReturn) continue;
+            if (p.Offset < 0 || p.Offset >= _parmsSize) continue;
+            return new BakedParamValue(
+                ParamName:   string.IsNullOrEmpty(p.Name) ? "ReturnValue" : p.Name,
+                UeTypeName:  p.TypeName,
+                Size:        p.Size,
+                Offset:      p.Offset,
+                LiteralText: "");
+        }
+        return null;
     }
 
     /// <summary>

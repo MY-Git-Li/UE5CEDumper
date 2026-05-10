@@ -643,4 +643,124 @@ public class InvokeScriptTests
         Assert.Contains("if not invokeUFunction then", content);
         Assert.Contains("registerLuaFunctionHighlight('invokeUFunction')", content);
     }
+
+    // ==================================================================
+    // BakedScriptGenerator -- Verify Return Value toggle
+    //
+    // The toggle on InvokeParamDialog flips two behaviours in the
+    // generator: emit a Before/After raw-byte dump + decoded return print,
+    // and skip the synchronize-close so the user can read the print.
+    // Default (verify=false) MUST keep the silent-on-success / auto-close
+    // contract -- the production "ship a one-shot cheat" flow depends on
+    // that to not leave engine windows open.
+    // ==================================================================
+
+    [Fact]
+    public void BakedGenerate_VerifyReturnOff_SilentOnSuccessAndAutoCloses()
+    {
+        var script = BakedScriptGenerator.Generate(
+            "C", "F", 16,
+            new[] { new BakedParamValue("A", "DoubleProperty", 8, 0, "8") },
+            returnParam: new BakedParamValue("ReturnValue", "DoubleProperty", 8, 8, ""),
+            verifyReturn: false);
+
+        // Default: no diagnostic dump, no decoded print on success
+        Assert.DoesNotContain("Before", script);
+        Assert.DoesNotContain("readUFunctionReturn", script);
+        // Auto-close branch present
+        Assert.Contains("synchronize(function() getLuaEngine().Close() end)",
+                        script);
+    }
+
+    [Fact]
+    public void BakedGenerate_VerifyReturnOn_EmitsDumpAndDecodedPrintAndKeepsEngineOpen()
+    {
+        var script = BakedScriptGenerator.Generate(
+            "KismetMathLibrary", "exp", 16,
+            new[] { new BakedParamValue("A", "DoubleProperty", 8, 0, "8") },
+            returnParam: new BakedParamValue("ReturnValue", "DoubleProperty", 8, 8, ""),
+            verifyReturn: true);
+
+        // Before/After dump scaffolding
+        Assert.Contains("local _mb_dbg", script);
+        Assert.Contains("UE5_INVOKE_PARAMS_OFFSET", script);
+        Assert.Contains("_dumpHex('[Invoke] Before')", script);
+        Assert.Contains("_dumpHex('[Invoke] After ')", script);
+
+        // Decoded read uses the supplied offset + helper type
+        Assert.Contains("readUFunctionReturn(8, 'double')", script);
+        // Print line includes class::func + the param's display label
+        Assert.Contains("[Invoke] OK: KismetMathLibrary::exp", script);
+        Assert.Contains("ReturnValue (double@8)", script);
+        // Float-style format spec for double
+        Assert.Contains("%.10g", script);
+
+        // Auto-close branch suppressed -- engine stays open for the user
+        // to read the print output.
+        Assert.DoesNotContain("getLuaEngine().Close()", script);
+        // Memrec disable still happens (so the row stops re-firing)
+        Assert.Contains("if memrec then memrec.Active = false end", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_VerifyReturnOn_VoidReturn_PrintsCompletionWithoutRead()
+    {
+        var script = BakedScriptGenerator.Generate(
+            "C", "DoStuff", 4,
+            new[] { new BakedParamValue("Flag", "BoolProperty", 1, 0, "true") },
+            returnParam: null,
+            verifyReturn: true);
+
+        // No read call (no return slot to read)
+        Assert.DoesNotContain("readUFunctionReturn", script);
+        // Still prints a completion notice on success
+        Assert.Contains("(void return)", script);
+        Assert.DoesNotContain("getLuaEngine().Close()", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_VerifyReturnOn_PointerReturn_TranslatesToQword()
+    {
+        // Helper's readUFunctionReturn doesn't recognise 'pointer' (would
+        // default to int32 = 4-byte read on the 8-byte slot). Generator
+        // sends 'qword' on the wire while still showing 'pointer' as the
+        // display label, and renders the value as 0x%X.
+        var script = BakedScriptGenerator.Generate(
+            "C", "GetPlayer", 8,
+            Array.Empty<BakedParamValue>(),
+            returnParam: new BakedParamValue("ReturnValue", "ObjectProperty", 8, 0, ""),
+            verifyReturn: true);
+
+        Assert.Contains("readUFunctionReturn(0, 'qword')", script);
+        Assert.Contains("(pointer@0)", script);
+        Assert.Contains("0x%X", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_VerifyReturnOn_DumpWindowCappedAt32Bytes()
+    {
+        // Big parmsSize (struct return etc.) shouldn't flood the engine
+        // output with a 200-byte hex dump per invoke. Cap is min(parmsSize, 32).
+        var script = BakedScriptGenerator.Generate(
+            "C", "F", parmsSize: 200,
+            Array.Empty<BakedParamValue>(),
+            returnParam: null,
+            verifyReturn: true);
+
+        Assert.Contains("local _DUMP_LEN = 32", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_VerifyReturnOn_DumpWindowFloorIs8()
+    {
+        // Tiny single-byte param shouldn't degenerate to a 1-byte dump
+        // -- floor at 8 keeps the line readable.
+        var script = BakedScriptGenerator.Generate(
+            "C", "F", parmsSize: 1,
+            Array.Empty<BakedParamValue>(),
+            returnParam: null,
+            verifyReturn: true);
+
+        Assert.Contains("local _DUMP_LEN = 8", script);
+    }
 }

@@ -54,7 +54,9 @@ public static class BakedScriptGenerator
         string className,
         string funcName,
         int parmsSize,
-        IReadOnlyList<BakedParamValue> bakedValues)
+        IReadOnlyList<BakedParamValue> bakedValues,
+        BakedParamValue? returnParam = null,
+        bool verifyReturn = false)
     {
         var sb = new StringBuilder(4096);
 
@@ -77,11 +79,15 @@ public static class BakedScriptGenerator
         // Baked params table (or empty marker for no-arg functions)
         AppendBakedParamsTable(sb, bakedValues);
 
-        // Invoke + result handling (silent on success, print + showMessage on error)
-        AppendInvokeAndResultHandler(sb, className, funcName, parmsSize);
+        // Invoke + result handling (silent on success, print + showMessage on error;
+        // when verifyReturn is set, emits a diagnostic block instead).
+        AppendInvokeAndResultHandler(sb, className, funcName, parmsSize,
+                                     returnParam, verifyReturn);
 
-        // Auto-disable + close lua engine on success (your hygiene rule)
-        AppendCleanupAndClose(sb);
+        // Auto-disable + close lua engine on success (your hygiene rule).
+        // Verify-return mode keeps the engine open so the diagnostic print
+        // remains readable -- the close branch is conditionally suppressed.
+        AppendCleanupAndClose(sb, keepEngineOpen: verifyReturn);
 
         Line(sb, "{$asm}");
         Line(sb, "[DISABLE]");
@@ -152,22 +158,88 @@ public static class BakedScriptGenerator
     }
 
     private static void AppendInvokeAndResultHandler(
-        StringBuilder sb, string className, string funcName, int parmsSize)
+        StringBuilder sb, string className, string funcName, int parmsSize,
+        BakedParamValue? returnParam, bool verifyReturn)
     {
-        Line(sb, "-- Invoke (silent on success -- only prints/showMessage on error)");
+        // Verify mode: emit a Before/After raw-byte dump around the invoke
+        // so the user can distinguish "function didn't run" (After == Before)
+        // from "wrong return offset" (return value lands somewhere else).
+        // The dump covers the smaller of (parmsSize, 32) bytes -- enough for
+        // typical 1-2 input + 1 return functions without flooding the output.
+        if (verifyReturn)
+        {
+            Line(sb, "-- ====== Verify mode: dump params buffer + decoded return ======");
+            Line(sb, "-- Locate the mailbox for raw byte access. UE5_INVOKE_PARAMS_OFFSET");
+            Line(sb, "-- is exposed by the helper after fn() loaded above.");
+            Line(sb, "local _mb_dbg   = getAddress('g_invokeMailbox')");
+            Line(sb, $"local _PD_dbg   = _mb_dbg + (UE5_INVOKE_PARAMS_OFFSET or 0x328)");
+            int dumpLen = Math.Max(8, Math.Min(parmsSize, 32));
+            Line(sb, $"local _DUMP_LEN = {dumpLen}  -- min(parmsSize, 32)");
+            Line(sb, "local function _dumpHex(label)");
+            Line(sb, "  local s = label .. ': '");
+            Line(sb, "  for i = 0, _DUMP_LEN - 1 do");
+            Line(sb, "    s = s .. string.format('%02X ', readByte(_PD_dbg + i))");
+            Line(sb, "  end");
+            Line(sb, "  print(s)");
+            Line(sb, "end");
+            Line(sb, "_dumpHex('[Invoke] Before')");
+            Line(sb);
+        }
+
+        Line(sb, verifyReturn
+            ? "-- Invoke (verify mode -- prints decoded return value on success)"
+            : "-- Invoke (silent on success -- only prints/showMessage on error)");
         Line(sb,
             $"local ok, err = invokeUFunction('{EscapeLua(className)}', " +
             $"'{EscapeLua(funcName)}', {parmsSize}, PARAMS)");
-        Line(sb, "if not ok then");
-        Line(sb, "  print(string.format('[Invoke] FAILED: %s::%s -- %s',");
-        Line(sb, $"                      '{EscapeLua(className)}', " +
-                  $"'{EscapeLua(funcName)}', tostring(err)))");
-        Line(sb, "  showMessage('Invoke failed:\\n' .. tostring(err))");
-        Line(sb, "end");
+
+        if (verifyReturn)
+        {
+            Line(sb, "_dumpHex('[Invoke] After ')");
+            Line(sb, "if ok then");
+            if (returnParam != null)
+            {
+                var displayType = MapToHelperType(returnParam.UeTypeName);
+                // The helper's readUFunctionReturn doesn't recognise 'pointer'
+                // (defaults to int32 = 4-byte read on the 8-byte pointer slot).
+                // Send 'qword' on the wire while showing 'pointer' in the
+                // human-readable label so the user still sees the UE-side type.
+                var readType = displayType == "pointer" ? "qword" : displayType;
+                var fmt = ReturnPrintFormat(returnParam.UeTypeName);
+                Line(sb,
+                    $"  local _ret = readUFunctionReturn({returnParam.Offset}, '{readType}')");
+                Line(sb,
+                    $"  print(string.format('[Invoke] OK: {EscapeLua(className)}::{EscapeLua(funcName)} " +
+                    $"-> {EscapeLua(returnParam.ParamName)} ({displayType}@{returnParam.Offset}) = " +
+                    $"{fmt}', _ret))");
+            }
+            else
+            {
+                // Void-return: still confirm the call completed.
+                Line(sb,
+                    $"  print('[Invoke] OK: {EscapeLua(className)}::{EscapeLua(funcName)} " +
+                    "(void return)')");
+            }
+            Line(sb, "else");
+            Line(sb, "  print(string.format('[Invoke] FAILED: %s::%s -- %s',");
+            Line(sb, $"                      '{EscapeLua(className)}', " +
+                      $"'{EscapeLua(funcName)}', tostring(err)))");
+            Line(sb, "  showMessage('Invoke failed:\\n' .. tostring(err))");
+            Line(sb, "end");
+        }
+        else
+        {
+            Line(sb, "if not ok then");
+            Line(sb, "  print(string.format('[Invoke] FAILED: %s::%s -- %s',");
+            Line(sb, $"                      '{EscapeLua(className)}', " +
+                      $"'{EscapeLua(funcName)}', tostring(err)))");
+            Line(sb, "  showMessage('Invoke failed:\\n' .. tostring(err))");
+            Line(sb, "end");
+        }
         Line(sb);
     }
 
-    private static void AppendCleanupAndClose(StringBuilder sb)
+    private static void AppendCleanupAndClose(StringBuilder sb, bool keepEngineOpen)
     {
         Line(sb, "-- Auto-disable memrec; on success also close the lua engine window.");
         Line(sb, "-- (Errors leave the window open so you can read the message.)");
@@ -177,13 +249,39 @@ public static class BakedScriptGenerator
         Line(sb, "  s.Enabled = false");
         Line(sb, "  s.destroy()");
         Line(sb, "  if memrec then memrec.Active = false end");
-        Line(sb, "  if ok then");
-        Line(sb, "    synchronize(function() getLuaEngine().Close() end)");
-        Line(sb, "  end");
+        if (keepEngineOpen)
+        {
+            // Verify mode: leave the engine window open so the user can
+            // read the Before/After dump and the decoded return print.
+            Line(sb, "  -- (verify mode: engine window kept open so you can read the diagnostic)");
+        }
+        else
+        {
+            Line(sb, "  if ok then");
+            Line(sb, "    synchronize(function() getLuaEngine().Close() end)");
+            Line(sb, "  end");
+        }
         Line(sb, "end");
         Line(sb, "t.Enabled = true");
         Line(sb);
     }
+
+    /// <summary>
+    /// Pick a <c>string.format</c> specifier for the decoded return value
+    /// based on UE type. Doubles/floats use <c>%.10g</c> (matches the
+    /// diagnostic snippet documented in the dev guide); pointer-shaped
+    /// types render as 0x%X; ints render as %d.
+    /// </summary>
+    private static string ReturnPrintFormat(string ueTypeName) => ueTypeName switch
+    {
+        "DoubleProperty" or "FloatProperty"           => "%.10g",
+        "ObjectProperty" or "ClassProperty" or "NameProperty"
+            or "SoftObjectProperty" or "SoftClassProperty"
+            or "WeakObjectProperty" or "LazyObjectProperty"
+            or "InterfaceProperty" or "UInt64Property" => "0x%X",
+        "BoolProperty"                                 => "%d",
+        _                                              => "%d",
+    };
 
     // ------------------------------------------------------------------
     // Type + literal helpers
