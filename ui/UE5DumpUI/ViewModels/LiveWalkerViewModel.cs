@@ -2674,9 +2674,15 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             ClearStatus();
 
             var inputParams = func.Params.Where(p => !p.IsReturn).ToList();
+            var hasReturn = func.Params.Any(p => p.IsReturn);
 
-            // Fast-path: no input params -> no dialog needed, ship straight away.
-            if (inputParams.Count == 0)
+            // Fast-path: TRULY trivial functions only (no inputs AND no return).
+            // For functions that return a value but take no inputs (e.g.
+            // KismetSystemLibrary::GetGameName, KismetMathLibrary::GetPI),
+            // we MUST show the dialog so the Verify Return Value toggle is
+            // reachable -- otherwise the user has no way to print/inspect
+            // what the function actually returned.
+            if (inputParams.Count == 0 && !hasReturn)
             {
                 var script = Services.BakedScriptGenerator.Generate(
                     CurrentClassName, func.Name, func.ParmsSize,

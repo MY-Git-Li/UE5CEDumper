@@ -430,10 +430,13 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                     }
                 }
 
-                // Fast path: zero-arg function -> generate + ship directly without opening
-                // the dialog (matches the LiveWalker AA(Baked) button's 0-arg fast path).
+                // Fast path: TRULY trivial functions only (no inputs AND no return).
+                // Functions like KismetSystemLibrary::GetGameName have no inputs
+                // but DO return a value -- they need the dialog so the Verify
+                // Return Value toggle is reachable. Mirrors LiveWalker's path.
                 var inputParams = funcMatch.Params.Where(p => !p.IsReturn).ToList();
-                if (inputParams.Count == 0)
+                var hasReturn = funcMatch.Params.Any(p => p.IsReturn);
+                if (inputParams.Count == 0 && !hasReturn)
                 {
                     var script = Services.BakedScriptGenerator.Generate(
                         className, funcName, funcMatch.ParmsSize,

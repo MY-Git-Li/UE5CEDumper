@@ -610,11 +610,50 @@ public class InvokeScriptTests
     [InlineData("SoftObjectProperty",   "pointer")]
     [InlineData("WeakObjectProperty",   "pointer")]
     [InlineData("InterfaceProperty",    "pointer")]
-    [InlineData("StructProperty",       "int32")]  // unsupported -> falls through
+    [InlineData("StructProperty",       "fstruct")]
+    [InlineData("StrProperty",          "fstring")]
+    [InlineData("TextProperty",         "ftext")]
+    [InlineData("ArrayProperty",        "tarray")]
+    [InlineData("MapProperty",          "tmap")]
+    [InlineData("SetProperty",          "tset")]
+    [InlineData("DelegateProperty",     "delegate")]
+    [InlineData("UnknownProperty",      "int32")]  // genuine fallback
     public void BakedGenerate_MapToHelperType_AllKnownTypes(
         string ueType, string expectedHelper)
     {
         Assert.Equal(expectedHelper, BakedScriptGenerator.MapToHelperType(ueType));
+    }
+
+    [Theory]
+    [InlineData("StrProperty",          true)]
+    [InlineData("TextProperty",         true)]
+    [InlineData("ArrayProperty",        true)]
+    [InlineData("StructProperty",       true)]
+    [InlineData("DelegateProperty",     true)]
+    [InlineData("IntProperty",          false)]
+    [InlineData("DoubleProperty",       false)]
+    [InlineData("ObjectProperty",       false)]
+    public void BakedGenerate_IsComplexReturnType_ClassifiesCorrectly(
+        string ueType, bool expectedComplex)
+    {
+        Assert.Equal(expectedComplex, BakedScriptGenerator.IsComplexReturnType(ueType));
+    }
+
+    [Fact]
+    public void BakedGenerate_VerifyReturnOn_FStringReturn_PrintsHexDumpHint()
+    {
+        // FString return: helper has no scalar decoder, so verify mode
+        // emits a hint pointing at the After: dump instead of pretending
+        // to read a 4-byte int from a 16-byte FString header.
+        var script = BakedScriptGenerator.Generate(
+            "KismetSystemLibrary", "GetGameName", 16,
+            Array.Empty<BakedParamValue>(),
+            returnParam: new BakedParamValue("ReturnValue", "StrProperty", 16, 0, ""),
+            verifyReturn: true);
+
+        Assert.DoesNotContain("readUFunctionReturn", script);
+        Assert.Contains("complex return; see After: dump above", script);
+        Assert.Contains("(fstring@0, size=16B)", script);
     }
 
     // ==================================================================

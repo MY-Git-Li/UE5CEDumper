@@ -220,12 +220,28 @@ public static class BakedScriptGenerator
                 // human-readable label so the user still sees the UE-side type.
                 var readType = displayType == "pointer" ? "qword" : displayType;
                 var fmt = ReturnPrintFormat(returnParam.UeTypeName);
-                Line(sb,
-                    $"  local _ret = readUFunctionReturn({returnParam.Offset}, '{readType}')");
-                Line(sb,
-                    $"  print(string.format('[Invoke] OK: {EscapeLua(className)}::{EscapeLua(funcName)} " +
-                    $"-> {EscapeLua(returnParam.ParamName)} ({displayType}@{returnParam.Offset}) = " +
-                    $"{fmt}', _ret))");
+
+                if (IsComplexReturnType(returnParam.UeTypeName))
+                {
+                    // FString / FText / TArray / TMap / TSet / FStruct etc. are
+                    // multi-byte buffer layouts the helper has no decoder for.
+                    // Print just the raw decoded label and tell the user to
+                    // read the After: dump for the actual bytes -- still useful
+                    // ("ReturnValue is non-zero in the dump → function ran").
+                    Line(sb,
+                        $"  print('[Invoke] OK: {EscapeLua(className)}::{EscapeLua(funcName)} " +
+                        $"-> {EscapeLua(returnParam.ParamName)} ({displayType}@{returnParam.Offset}, " +
+                        $"size={returnParam.Size}B) -- complex return; see After: dump above')");
+                }
+                else
+                {
+                    Line(sb,
+                        $"  local _ret = readUFunctionReturn({returnParam.Offset}, '{readType}')");
+                    Line(sb,
+                        $"  print(string.format('[Invoke] OK: {EscapeLua(className)}::{EscapeLua(funcName)} " +
+                        $"-> {EscapeLua(returnParam.ParamName)} ({displayType}@{returnParam.Offset}) = " +
+                        $"{fmt}', _ret))");
+                }
             }
             else
             {
@@ -325,8 +341,35 @@ public static class BakedScriptGenerator
             or "SoftObjectProperty" or "SoftClassProperty"
             or "WeakObjectProperty" or "LazyObjectProperty"
             or "InterfaceProperty"                    => "pointer",
+        // Complex multi-byte buffer types -- the helper has no scalar
+        // decoder for these, so the verify-mode emit treats them as a
+        // raw region (size taken from the param) and tells the user to
+        // read the After: hex dump. Still better than silently falling
+        // through to int32 and reading 4 random bytes.
+        "StrProperty"                                 => "fstring",
+        "TextProperty"                                => "ftext",
+        "ArrayProperty"                               => "tarray",
+        "MapProperty"                                 => "tmap",
+        "SetProperty"                                 => "tset",
+        "StructProperty"                              => "fstruct",
+        "DelegateProperty" or "MulticastDelegateProperty"
+            or "MulticastInlineDelegateProperty"
+            or "MulticastSparseDelegateProperty"      => "delegate",
         _                                             => "int32",
     };
+
+    /// <summary>
+    /// True for types the helper's <c>readUFunctionReturn</c> can't decode
+    /// as a single scalar -- caller emits a "see hex dump" hint instead
+    /// of an actual read+print line. Keeps the diagnostic honest rather
+    /// than printing a misleading 4-byte slice of an FString header.
+    /// </summary>
+    public static bool IsComplexReturnType(string ueTypeName)
+    {
+        var t = MapToHelperType(ueTypeName);
+        return t is "fstring" or "ftext" or "tarray" or "tmap"
+                 or "tset" or "fstruct" or "delegate";
+    }
 
     /// <summary>
     /// Render a user-entered text value as a Lua numeric literal, picking
