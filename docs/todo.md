@@ -211,6 +211,57 @@ File touched: `ui/UE5DumpUI/Views/InvokeParamDialog.cs` (~10 lines).
 
 -----
 
+## In-flight (spawned to separate sessions / under analysis)
+
+### AOBMaker plugin: inject helper lua into CE table — 🚧 spawned 2026-05-10
+
+**Effort**: M | **Risk**: low | **Status**: spawned to dedicated session
+
+End-to-end goal: replace the two-step `Tools -> Export to disk +
+Cheat Engine -> Add File...` workflow with a one-click "Inject Helper
+into Current CE Table" menu item that pushes
+`ue5_invoke_helper.lua` directly into the user's currently-open .CT
+via AOBMaker plugin.
+
+Sub-task brief (sent to spawned session):
+- AOBMaker repo (`D:\Github\AOBMaker`): new pipe cmd `InjectTableFile`
+  with `{Type, FileName, Content}` payload; plugin Lua handler uses
+  `findTableFile` + delete-if-exists + `createTableFile` + write
+- UE5DumpUI repo: `IAobMakerBridge.InjectTableFileAsync`,
+  `MainWindowViewModel.InjectCeHelperLuaCommand`, new Tools menu item
+  next to existing `Export CE Helper Lua File...`
+- Both repos: docs updated, tests added
+
+Once spawned session reports back, integrate the UI menu item if it
+wasn't included; verify the AOBMaker pipe protocol matches.
+
+### Property Origin Resolver (analysis) — 🔍 design discussion 2026-05-10
+
+**Effort**: M (estimated, pending design agreement) | **Risk**: low
+
+User reports the existing PropertySearch panel is "groping in the
+dark" -- searching for `bCanBeDamaged` returns 4823 matches because
+every Actor-derived UClass surfaces its inherited property, and the
+user can't tell which one is the "real" cheat target. Same for
+`Health` / `Speed` / etc -- shown on Pawn, Character, BP_*, with no
+indication that they're often the SAME memory location at the same
+inherited offset.
+
+Design brief (in chat, awaiting agreement before implementation):
+- Group PropertySearch results by **defining class** (the class where
+  the FProperty was first declared in the inheritance chain, not just
+  inherited from)
+- Show a "(inherited by N classes)" badge instead of N separate rows
+- Per-property breakdown panel: defining class + child classes that
+  inherit + indication of whether it's C++ engine-defined or BP-added
+- Bigger-picture follow-up: **Class Family Browser** (pick a category
+  Character / Inventory / Combat / Save / Component / DataAsset / etc
+  and see all UClasses of that family in the loaded game)
+
+See chat session 2026-05-10 for the full analysis.
+
+-----
+
 ## Carryover capability gaps
 
 Existing gaps from before the plan above. Pick up when the active plan
