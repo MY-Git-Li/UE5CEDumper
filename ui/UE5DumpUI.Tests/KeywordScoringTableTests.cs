@@ -255,4 +255,81 @@ public class KeywordScoringTableTests
         Assert.StartsWith("#", hex);
         Assert.Equal(7, hex.Length); // "#RRGGBB"
     }
+
+    // ==================================================================
+    // Tokenisation regression cases (build 608+)
+    //
+    // These are the substring-noise traps that motivated the switch to
+    // KeywordTokenizer. Each pair documents:
+    //   - "Was a false-positive in v1": now correctly Other.
+    //   - "Was a false-negative in v1": now correctly categorised.
+    // ==================================================================
+
+    [Theory]
+    [InlineData("DoNothing",        "FrobnicatorComponent")] // "Component" used to substring-hit Stats via "MP"
+    [InlineData("Update",           "MyComponent")]
+    [InlineData("Initialize",       "RandomActor")]
+    [InlineData("Tick",             "BaseActor")]
+    [InlineData("OnStreamReady",    "TPSStream")] // "TPS" used to substring-hit Movement via "TP"
+    public void TokenisationRegression_FormerSubstringFalsePositives_NowOther(
+        string funcName, string className)
+    {
+        var entry = MakeEntry(funcName, className);
+        var result = KeywordScoringTable.Score(entry);
+        Assert.Equal(FunctionCategory.Other, result.Category);
+    }
+
+    [Theory]
+    // Acronym-ending function names that v1 had to drop (HP/MP/SP/XP/TP).
+    [InlineData("GetHP",        "PlayerCharacter", FunctionCategory.Stats)]
+    [InlineData("SetMaxMP",     "PlayerCharacter", FunctionCategory.Stats)]
+    [InlineData("RestoreSP",    "PlayerCharacter", FunctionCategory.Stats)]
+    [InlineData("AddXP",        "PlayerCharacter", FunctionCategory.Stats)]
+    // 'TP' as a Movement keyword -- only matches as a standalone token
+    // (e.g. "DoTP" / "InstantTP"), not buried in "TPSStream".
+    [InlineData("DoTP",         "PlayerCharacter", FunctionCategory.Movement)]
+    public void TokenisationRegression_AcronymsRestored_AssignsCategory(
+        string funcName, string className, FunctionCategory expected)
+    {
+        var entry = MakeEntry(funcName, className);
+        var result = KeywordScoringTable.Score(entry);
+        Assert.Equal(expected, result.Category);
+    }
+
+    [Fact]
+    public void TokenisationRegression_RestoredKeywords_DropTimeClock()
+    {
+        // 'Drop' restored to Inventory (was dropped due to substring noise).
+        var drop = KeywordScoringTable.Score(MakeEntry("DropItem", "Inventory"));
+        Assert.Equal(FunctionCategory.Inventory, drop.Category);
+
+        // 'Time'/'Clock' restored to Utility (Lifetime no longer false-fires).
+        var lifetime = KeywordScoringTable.Score(MakeEntry("GetLifetime", "Actor"));
+        Assert.Equal(FunctionCategory.Other, lifetime.Category); // 'Lifetime' is single token, not 'Time'
+        var realTime = KeywordScoringTable.Score(MakeEntry("GetTimeRemaining", "Timer"));
+        Assert.Equal(FunctionCategory.Utility, realTime.Category);
+    }
+
+    [Fact]
+    public void TokenisationRegression_MultiTokenKeyword_NoClipMatchesEnableNoClip()
+    {
+        // Multi-token keyword: "NoClip" -> ["no","clip"]. Function
+        // "EnableNoClip" tokens = ["enable","no","clip"] -- subset
+        // match must succeed for Movement category.
+        var entry = MakeEntry("EnableNoClip", "DebugCheatManager");
+        var result = KeywordScoringTable.Score(entry);
+        Assert.Equal(FunctionCategory.Movement, result.Category);
+    }
+
+    [Fact]
+    public void TokenisationRegression_MultiTokenKeyword_GodModeDoesNotMatchDecoration()
+    {
+        // "God" (single token in ExplicitMovementCheats) should match
+        // "ToggleGodMode" -> ["toggle","god","mode"] cleanly.
+        var entry = MakeEntry("ToggleGodMode", "DebugManager");
+        var result = KeywordScoringTable.Score(entry);
+        Assert.Equal(FunctionCategory.Movement, result.Category);
+        // And also "ToggleGodMode" still wins over Utility's "Toggle"
+        // because ExplicitMovementCheats per-hit (8) > Utility per-hit (3).
+    }
 }

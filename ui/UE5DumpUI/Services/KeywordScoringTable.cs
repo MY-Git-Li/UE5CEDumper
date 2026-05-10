@@ -53,24 +53,34 @@ public static class KeywordScoringTable
     // funcName + className, case-insensitive.
     // ------------------------------------------------------------------
 
-    // Note on keyword length: substring matching means short 2-3 char
-    // acronyms collide with common English words ("Component" contains
-    // "mp", "Spawn" contains "sp", "GetTPSStream" contains "tp"). The
-    // tables below intentionally use full forms only -- accept the
-    // miss on "GetHP()" so we don't false-positive every "*Component*"
-    // function. Game devs almost always emit full-name BC functions
-    // for the surface that's actually exposed to Blueprint anyway.
+    // Tokenisation history (build 597-607 -> build 608+):
+    //
+    // Original substring matching false-positived everywhere short
+    // acronyms appeared inside common engine words:
+    //   "Component" contained "mp" -> Stats false hit
+    //   "Spawn" contained "sp"     -> Stats false hit
+    //   "GetTPSStream" contained "tp" -> Movement false hit
+    // Resolution at the time was to drop HP/MP/SP/XP/TP/Drop/Time/Clock/
+    // Create/Destroy entirely.
+    //
+    // After switching to KeywordTokenizer (whole-token match against
+    // tokens like "Component" / "Spawn" / "Stream"), short acronyms are
+    // safe again -- "MP" only matches when it appears as its own
+    // token (GetMP / PlayerMP / SetMaxMP), never as a buried letter
+    // pair. The dropped keywords are restored below; comments record
+    // which ones came back and why.
 
     /// <summary>Per-hit score for each Stats keyword.</summary>
     public const int StatsKeywordScore = 5;
     public static readonly string[] StatsKeywords =
     {
-        // Health / mana / stamina / energy (full forms only -- HP/MP/SP
-        // dropped because they substring-match common engine words).
-        "Health", "Mana", "Stamina", "Energy",
-        // Experience / level / score
-        "Experience", "Exp", "Level", "Score",
-        // Combat-stat verbs (still primarily affect a stat field)
+        // Health / mana / stamina / energy. Short acronyms (HP/MP/SP)
+        // restored post-tokenisation -- safe because tokens are matched
+        // whole, not as substrings of "Component"/"Spawn"/etc.
+        "HP", "Hp", "Health", "MP", "Mana", "SP", "Stamina", "Energy",
+        // Experience / level / score. XP restored.
+        "XP", "Exp", "Experience", "Level", "Score",
+        // Combat-stat verbs (still primarily affect a stat field).
         "Damage", "Heal", "Hurt", "Kill", "Revive", "Death",
     };
 
@@ -78,21 +88,25 @@ public static class KeywordScoringTable
     public static readonly string[] InventoryKeywords =
     {
         "Gold", "Money", "Coin", "Currency", "Cash", "Credit",
-        "Item", "Inventory", "Pickup", "Loot", "Equip",
+        "Item", "Inventory", "Pickup", "Loot", "Drop", "Equip",
         "Wallet", "Stack",
-        // 'Drop' removed -- collides with "DropItem" semantics that
-        // overlap Inventory + UI; full keyword set still surfaces it
-        // via Inventory bucket alone (Pickup/Loot/Item).
+        // 'Drop' restored -- token-based match means DropItem ->
+        // ["Drop","Item"] hits Inventory cleanly without false-positiving
+        // "DropDownList" (which tokenises to ["Drop","Down","List"] --
+        // OK, that one DOES match. UI penalty offsets it though.)
     };
 
     public const int MovementKeywordScore = 5;
     public static readonly string[] MovementKeywords =
     {
-        "Teleport", "Warp",  // 'TP' dropped -- substring noise
-        "SetLocation", "SetActorLocation", "Move",
+        // TP restored -- only matches "TP" as a standalone token (rare
+        // in cheat-relevant func names but legit when present).
+        "Teleport", "Warp", "TP",
+        "Move", "Location",  // multi-token "SetLocation"/"SetActorLocation"
+                              // collapsed to the meaningful single token
         "Speed", "Velocity", "Walk", "Sprint", "Jump",
-        // 'Run' dropped -- too common in callback names (RunCallback,
-        // RunOnSubsystem, etc); use Sprint as the cheat-relevant verb.
+        // 'Run' still dropped -- even tokenised, "Run" appears in
+        // RunCallback/RunGameMode plumbing too often to be cheat-relevant.
     };
 
     /// <summary>
@@ -120,10 +134,13 @@ public static class KeywordScoringTable
     {
         "Save", "Load", "Checkpoint",
         "Spawn", "Summon",
-        // 'Create'/'Destroy' dropped -- engine spam (CreateWidget,
-        // CreateProxy, DestroyComponent everywhere)
-        "Timer", "Countdown",
-        // 'Time'/'Clock' dropped -- substring noise (Lifetime, etc)
+        // Create/Destroy still dropped -- even tokenised they fire on
+        // engine plumbing (CreateWidget / DestroyComponent / etc) far
+        // more often than cheat-relevant code. Use Spawn/Summon for
+        // gameplay-actor creation instead.
+        "Timer", "Time", "Clock", "Countdown",
+        // Time/Clock restored -- "Time" only fires on actual timing
+        // tokens now (TimeRemaining, ClockTick) not on "Lifetime" etc.
         "Cheat", "Debug", "Console", "Toggle",
     };
 
@@ -180,20 +197,29 @@ public static class KeywordScoringTable
     /// </summary>
     public static ScoreResult Score(AllFunctionEntry entry)
     {
-        // Pre-lower the names ONCE -- substring matches are case-
-        // insensitive and we run them through ~5-10 keywords per
-        // category. Also, name comparison usually dominates per-row
-        // scoring cost.
-        var funcLower  = entry.FuncName.ToLowerInvariant();
+        // Tokenise the function + class names once. The tokeniser already
+        // emits lowercased tokens so keyword comparison is case-blind by
+        // construction. Union of both name's tokens is the search domain
+        // for keyword hits -- that way a match in either name counts
+        // (e.g. function "AddCash" on class "Inventory" hits Inventory
+        // twice via "Cash" and "Inventory").
+        var tokens = KeywordTokenizer.TokenizeAsSet(entry.FuncName);
+        foreach (var t in KeywordTokenizer.Tokenize(entry.ClassName))
+            tokens.Add(t);
+
+        // Class-name lowercase preserved separately for the substring-based
+        // ClassBonuses table (those still want substring match -- "Anim"
+        // should hit "AnimNotify" / "AnimationInstance" / etc, not just
+        // standalone "Anim" tokens).
         var classLower = entry.ClassName.ToLowerInvariant();
 
         // Keyword pass: tally hits per category, pick the winner.
-        int statsHits     = CountHits(funcLower, classLower, StatsKeywords);
-        int inventoryHits = CountHits(funcLower, classLower, InventoryKeywords);
-        int movementHits  = CountHits(funcLower, classLower, MovementKeywords);
-        int cheatHits     = CountHits(funcLower, classLower, ExplicitMovementCheats);
-        int combatHits    = CountHits(funcLower, classLower, CombatKeywords);
-        int utilityHits   = CountHits(funcLower, classLower, UtilityKeywords);
+        int statsHits     = CountTokenHits(tokens, StatsKeywords);
+        int inventoryHits = CountTokenHits(tokens, InventoryKeywords);
+        int movementHits  = CountTokenHits(tokens, MovementKeywords);
+        int cheatHits     = CountTokenHits(tokens, ExplicitMovementCheats);
+        int combatHits    = CountTokenHits(tokens, CombatKeywords);
+        int utilityHits   = CountTokenHits(tokens, UtilityKeywords);
 
         int statsScore     = statsHits     * StatsKeywordScore;
         int inventoryScore = inventoryHits * InventoryKeywordScore;
@@ -253,19 +279,37 @@ public static class KeywordScoringTable
     }
 
     /// <summary>
-    /// Count distinct keyword substrings present in the function name
-    /// OR class name. Each keyword counts once even if it appears in
-    /// both names (avoids double-credit for e.g. "Health" in both
-    /// "GetHealth" and "PlayerHealthComponent").
+    /// Count distinct keywords whose tokens all appear in
+    /// <paramref name="tokens"/>. Replaces the v1 substring-matching
+    /// <c>CountHits</c>.
+    ///
+    /// Multi-token keywords are common (e.g. "NoClip" tokenises to
+    /// ["no","clip"], "SetActorLocation" to ["set","actor","location"])
+    /// so the match is a subset check: ALL keyword tokens must be
+    /// present in the function/class token set, in any order. That
+    /// means "EnableNoClip" -> ["enable","no","clip"] still matches
+    /// keyword "NoClip" because {"no","clip"} ⊆ {"enable","no","clip"}.
+    ///
+    /// Each keyword counts once total even if multiple tokens would
+    /// match (e.g. a function "AddHealthHealth" only credits "Health"
+    /// once -- avoids over-rewarding repetitive names).
     /// </summary>
-    private static int CountHits(string funcLower, string classLower, string[] keywords)
+    private static int CountTokenHits(HashSet<string> tokens, string[] keywords)
     {
         int hits = 0;
         foreach (var k in keywords)
         {
-            var kLower = k.ToLowerInvariant();
-            if (funcLower.Contains(kLower) || classLower.Contains(kLower))
-                hits++;
+            // Re-tokenise the keyword (cheap; keyword count is ~40
+            // total across all buckets). Result is already lowercased
+            // by the tokeniser so direct HashSet lookup is fine.
+            var keyTokens = KeywordTokenizer.Tokenize(k);
+            if (keyTokens.Length == 0) continue;
+            bool allPresent = true;
+            foreach (var kt in keyTokens)
+            {
+                if (!tokens.Contains(kt)) { allPresent = false; break; }
+            }
+            if (allPresent) hits++;
         }
         return hits;
     }
