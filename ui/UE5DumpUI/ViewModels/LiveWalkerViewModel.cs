@@ -2570,11 +2570,15 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             // Dialog owns the entire invoke lifecycle:
             // - Shows input fields (or "no params" message)
             // - FIRE button calls InvokeFunctionAsync internally
+            // - Copy AA Script button bakes current values via BakedScriptGenerator
+            //   and pushes to AOBMaker / clipboard
             // - Decoded results shown inline (return values, out params)
             // - Returns "ok" on Close, null on Cancel
             var dialog = new Views.InvokeParamDialog(
                 CurrentClassName, func.Name, inputParams, func.Params, func.ParmsSize,
-                CurrentAddress, _dump, _engineState?.UEVersion ?? 0);
+                CurrentAddress, _dump, _engineState?.UEVersion ?? 0,
+                aobMaker: _aobMaker, platform: _platform,
+                mode: Views.InvokeDialogMode.PipeInvoke);
 
             var dialogResult = await dialog.ShowDialog<string?>(owner);
 
@@ -2589,6 +2593,71 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         {
             SetError(ex);
             _log.Error($"Failed to invoke {func?.Name} via pipe", ex);
+        }
+    }
+
+    /// <summary>
+    /// Third UFunction-row button: opens the InvokeParamDialog in
+    /// CopyBakedScript mode (FIRE hidden) so the user can fill the form
+    /// and ship a non-interactive AA Script for inclusion in their .CT.
+    /// For zero-param functions the dialog is skipped -- the script is
+    /// generated immediately from an empty BakedParamValue list.
+    /// </summary>
+    [RelayCommand]
+    private async Task CopyBakedScriptAsync(FunctionInfoModel? func)
+    {
+        if (func == null || string.IsNullOrEmpty(CurrentClassName)) return;
+
+        try
+        {
+            ClearStatus();
+
+            var inputParams = func.Params.Where(p => !p.IsReturn).ToList();
+
+            // Fast-path: no input params -> no dialog needed, ship straight away.
+            if (inputParams.Count == 0)
+            {
+                var script = Services.BakedScriptGenerator.Generate(
+                    CurrentClassName, func.Name, func.ParmsSize,
+                    Array.Empty<Models.BakedParamValue>());
+                var description = $"Invoke (baked, no args): {CurrentClassName}::{func.Name}";
+                var sentToCe = false;
+                if (_aobMaker != null)
+                    sentToCe = await _aobMaker.CreateAAScriptAsync(description, script, autoActivate: false);
+                if (!sentToCe)
+                    await _platform.CopyToClipboardAsync(script);
+                StatusText = sentToCe
+                    ? $"AA Script created in CE: {func.Name}"
+                    : $"AA Script copied to clipboard: {func.Name}";
+                _log.Info($"Baked AA Script (no args) {(sentToCe ? "sent to CE" : "to clipboard")}: " +
+                          $"{CurrentClassName}::{func.Name}");
+                return;
+            }
+
+            if (Avalonia.Application.Current?.ApplicationLifetime is not
+                Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+                || desktop.MainWindow is not { } owner)
+                return;
+
+            var dialog = new Views.InvokeParamDialog(
+                CurrentClassName, func.Name, inputParams, func.Params, func.ParmsSize,
+                CurrentAddress, _dump, _engineState?.UEVersion ?? 0,
+                aobMaker: _aobMaker, platform: _platform,
+                mode: Views.InvokeDialogMode.CopyBakedScript);
+
+            var dialogResult = await dialog.ShowDialog<string?>(owner);
+
+            StatusText = dialogResult == "ok"
+                ? $"AA Script ready: {CurrentClassName}::{func.Name}"
+                : $"AA Script export cancelled: {func.Name}";
+
+            _log.Info($"CopyBakedScript dialog {(dialogResult == "ok" ? "completed" : "cancelled")}: " +
+                      $"{CurrentClassName}::{func.Name}");
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error($"Failed to generate baked script for {func?.Name}", ex);
         }
     }
 
