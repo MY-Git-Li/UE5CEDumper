@@ -1,8 +1,13 @@
 # Dev Log
 
-Running log of milestone work, current capability matrix, and known gaps.
-Newest section first. Tied to the `dev` branch — entries reference build
-numbers from `build_number.txt` so a commit can be cross-referenced.
+Append-only milestone history, newest first. Each entry references a
+build number from `build_number.txt` so commits can be cross-referenced.
+
+> **Looking for current state?** See [roadmap.md](roadmap.md) for the
+> capability matrix / per-game configuration / tested games, and
+> [todo.md](todo.md) for the prioritized next-work list. This file
+> records *what shipped* — the other two record *what works now* and
+> *what's next*.
 
 -----
 
@@ -1404,95 +1409,7 @@ binding and the filter logic share one implementation.
 
 -----
 
-## Capability matrix (current — build 589)
-
-| Layer | Drill-down | Find Refs |
-|-------|-----------|-----------|
-| Object / Class / Interface | ✅ | ✅ |
-| Weak / Soft{Class} / Lazy (single + array) | ✅ | ✅ |
-| TArray of any pointer-shaped inner | ✅ | ✅ |
-| TMap / TSet (Object/Class) | ✅ | ✅ (allocated slots only) |
-| Delegate (single FScriptDelegate) | ✅ | ✅ (v3) |
-| MulticastInline / MulticastDelegate | ✅ | ✅ (v3) |
-| TArray<FScriptDelegate> | ✅ | ✅ (v3) |
-| MulticastSparseDelegate (UE 5.0+) | ✅ bindings via SPARSE_ES2_1 AOB (build 561-577) | ✅ v4 sparse pass (build 565) |
-| MulticastSparseDelegate (UE 4.23-4.27) | ❌ FObjectKey outer key, separate AOB needed | ❌ |
-| OptionalProperty\<pointer / weak\> | ✅ | ✅ |
-| OptionalProperty\<scalar Int/Float/Bool/Byte/Enum\> | ✅ trailing-bIsSet | — |
-| OptionalProperty\<String / Name / Text\> | ✅ intrusive sentinel + value (build 530) | — |
-| OptionalProperty\<Struct\> | ✅ (build 528) | ✅ depth-3 descent through inner struct (build 528) |
-| FieldPathProperty | ❌ | ❌ |
-| TMap / TSet with weak-like inner sides | — | ❌ (v4 candidate) |
-
-## Per-game configuration (build 589)
-
-Persisted in HintCache JSON per PE hash, surfaces in the Pointer panel:
-
-| Setting | Range | Default | Pipe cmd |
-|---|---|---|---|
-| UE version override | Auto / 4.18-4.27 / 5.0-5.8 | Auto (detect) | `set_ue_version_override` |
-| Invoke timeout | 1000-60000 ms | 5000 ms | `set_invoke_timeout` |
-
-## Remaining gaps (next-session pickup candidates)
-
-1. **MulticastSparseDelegate UE 4.23-4.27** — outer key is
-   `FObjectKey { FWeakObjectPtr Object; int32 ObjectSerialNumber; }`
-   (12B + 4 pad = 16B), outer stride changes ~0x60 → ~0x68, key match
-   logic must reconstruct FObjectKey via `Aura::GetSerialNumber`. Need a
-   separate AOB — UE4 binaries don't share the UE5 lea sequence.
-
-2. **Find Refs v4 extension** — `TMap` / `TSet` with weak-like inner
-   sides (currently Object/Class only).
-
-3. **`FieldPathProperty`** — rare, low priority.
-
-4. **GWorld**: Star Wars Jedi untested, Satisfactory fails (modular DLL
-   — pattern may need to live in `CoreUObject-Win64-Shipping.dll`, not
-   the main exe).
-
-5. **Other publishers shipping unreliable version strings** — only
-   `SQUARE_ENIX` is in `kPublishers[]` (Genau.cpp). Adding casually risks
-   wrong bias overriding correct detection — wait for a real misdetection
-   report before adding.
-
-## Tested games (last verified 2026-05-10)
-
-- **Everspace 2** ✅ (UE 5.4): item template ID via container scan; Find
-  Refs v3 returns 9 correct references in 224ms (cache hot, scan
-  complete: 1180536/1180536); auto-scroll-to-field after Open works;
-  Class Structure for `LocalPlayer` shows correct fields after the
-  class-like routing fix; PropertySearch type filter `OptionalProperty`
-  finds 9 matches across 5 real classes + 4 test-object fields.
-  **`SPARSE_ES2_1` resolves SparseDelegates @ +9AA5F10** (build 575,
-  ground truth from PDB).
-- **Titan Quest II** ✅ (UE 5.7, bCasePreservingName=**true**, 486k
-  objects): cross-version validation — same `SPARSE_ES2_1` AOB hits
-  `+D46D170`, exercises FName=16 walker branch (inner stride 0x28).
-  Was source of 194 `ValidateArrayElemSize` warnings/session pre-build
-  583 → now Debug-only.
-- **DQ I&II HD-2D / FF7 Rebirth / FF7 Remake** (UE4 forks, Square Enix
-  publisher): Square Enix publisher detected → ⚠ Low Confidence badge +
-  Publisher chip; user can set Override = UE 4.27 / 4.18, persists
-  across launches. Char Lv / HP / Party Lv in non-reflected memory
-  (custom allocator) — out of reflection scope; use CE pointer scan.
-  **Build 589 verified**: invoke_timeout=6000 round-trip OK after
-  `FillPointerSnapshot` fix; Square Enix purple chip + Low Confidence
-  amber badge both surface from `scan_status` payload now.
-- **Meltopia** ✅ (UE 5.0.5): full scan OK; was source of ~75
-  misalignment + ~58 empty-map false-positives + 4 UFunction timeouts →
-  all resolved in build 582-583 (Scharf alignment helper + empty-map
-  guard + per-game invoke timeout 6000ms via UI NumericUpDown).
-- **Squirrel With A Gun** ✅ (UE 5.0.2): full scan OK; was source of
-  `walk_instance` `std::invalid_argument` crash on unsubstituted CE
-  placeholder `0x[ply_base]` → resolved by `Renge::TryStrToAddr` in
-  build 582.
-- **Caravan Sandwitch** ✅ (UE 5.0.4): full scan OK; was source of 49
-  empty-TMap false-positives → resolved by count=0+Data=null guard.
-- **Retro Rewind Demo** ✅ (UE 5.0.4): full scan OK.
-- **The Occupation** ✅ (UE 4.19): UE4 path with `GNAM_CT3`, GWorld OK.
-- **TimeSplitters Rewind Early Access V0.3.3** ✅ (UE 4.25): full scan,
-  GWorld OK.
-- **Squad-Win64-Shipping** ✅ (UE 5.7, 240K objects): build 488 user
-  reported 13 `get_object_list` 0xA0 UTF-8 exceptions → root cause was
-  Serie wide-path surrogate encoding bug, fixed in build 555. Should
-  now work clean post-560.
+> **Current capability matrix, per-game config, tested games, and
+> long-running concerns** moved to [roadmap.md](roadmap.md) (post-589).
+> **Next-session pickup candidates** moved to [todo.md](todo.md). This
+> file is now a pure append-only milestone history.
