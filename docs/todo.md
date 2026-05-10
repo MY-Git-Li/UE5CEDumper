@@ -313,6 +313,101 @@ Test plan:
 
 -----
 
+## CRITICAL: ProcessEvent vtable detection is wrong (discovered build 647 live test)
+
+**Effort**: M | **Risk**: med | **Why**: Live testing on Geri (UE 4.27,
+The Artisan of Glimmith) reproduced the same "static-native fast path
+returns 0" pattern we saw on ES2 (UE 5.5). Two different UE versions,
+same symptom -> not a UE 5.5 / KismetMathLibrary quirk. Root cause
+traced to `DetectProcessEventVTableOffset` in
+[dll/src/Frieren.cpp:495](../dll/src/Frieren.cpp).
+
+### What's wrong
+
+The function picks a vtable byte offset purely by hardcoded UE-version
+table:
+
+```
+UE 4.18-4.19: 0x208
+UE 4.20-4.24: 0x210
+UE 4.25-4.27: 0x218
+UE 5.0-5.4:   0x220
+UE 5.5+:      0x228
+```
+
+The "validation" only checks that `vtable[offset]` points to *readable
+code* -- which every vtable entry does (all UObject virtual methods are
+real functions). So the check passes for any offset and the wrong slot
+gets used silently.
+
+### Evidence of the bug
+
+- **ES2 (UE 5.5)** with hook at `vtable+0x220 -> 0x7FF79416A2E0`: every
+  instance-method invoke (`CharacterMovementComponent::GetMaxJumpHeight
+  WithJumpTime`, `Inventory::GetTotalCargoSpaceIncreasingAmount`, ...)
+  times out at -5. Game thread is alive (player can move; game thread
+  fires PE many times per second for tick/anim) but our queue never
+  drains -> hook isn't on PE.
+- **Geri (UE 4.27)** with hook at `vtable+0x218 -> 0x7FF607BEA200`:
+  same pattern. Static-native fast path "succeeds" (no crash, returns
+  0) because we're calling some adjacent UObject virtual whose ABI
+  happens to be compatible enough not to AV but doesn't actually do
+  anything useful with our params.
+
+### Why it took until now to surface
+
+- Pre-build-637 (verify mode), no one read return values from invoked
+  functions -- "no crash" was treated as success.
+- Pre-build-636 (static-native fast path), all KismetMathLibrary tests
+  hit `-5` timeout on the queued path; we attributed it to "idle game,
+  game thread not pumping" -- an explanation that *would* be true if
+  the hook were on the right slot but never got falsified.
+- Static-native fast path made the bypass work for `Native | Static`
+  helpers (so they don't time out) but the underlying "we're not
+  calling ProcessEvent" issue stayed hidden until verify mode actually
+  decoded the return slot.
+
+### Fix plan
+
+1. **Replace vtable-index detection with AOB scan of the PE prologue.**
+   UE's `UObject::ProcessEvent` has a recognisable prologue across
+   versions (RE-UE4SS / Dumper-7 reference both have stable patterns).
+   Scan `.text` of the game module for the sig, hook the absolute
+   address, drop the vtable indirection entirely.
+2. **Validate the hook by side-effect.** After installing, set a one-
+   shot diagnostic that confirms `HookedProcessEvent` fires within
+   N milliseconds (game does PE many times per second; if we don't
+   see hook hits in 1s, the install missed). Log a clear ERROR --
+   the silent-failure mode here is the whole reason this bug stayed
+   hidden for 600+ builds.
+3. **Belt-and-braces option** while #1 is in flight: probe each
+   candidate vtable offset by hooking it temporarily, sleeping a few
+   hundred ms, checking whether the trampoline fired, and unhooking
+   if it didn't. The right slot is the one that actually fires under
+   live gameplay.
+
+### Files in scope
+
+- `dll/src/Frieren.cpp` -- `DetectProcessEventVTableOffset` (replace
+  with AOB-based resolver)
+- `dll/src/Stark.cpp` -- `InstallHook` (add post-install validation)
+- `dll/src/Himmel.h` / `Himmel.cpp` -- new AOB pattern for
+  `UObject::ProcessEvent`
+- `docs/lessons-learned.md` -- new entry "Vtable-index detection is
+  unreliable"
+
+### Out of scope for v1
+
+- Calling KismetMathLibrary helpers via the BP FastCall path (separate
+  feature, not needed once ProcessEvent works).
+- Re-checking "KismetMathLibrary stub" hypothesis from
+  [feedback_kismet_stubs.md](../../../../../../C:/Users/user/.claude/projects/D--Github-UE5CEDumper/memory/feedback_kismet_stubs.md)
+  -- with a correctly-hooked ProcessEvent, those static helpers
+  *might* actually return correct values. We can't know until #1 is
+  done. Keep the lesson but flag it as "needs re-verification post-fix".
+
+-----
+
 ## Call-UE-function feature gaps (discovered build 643-644 live test)
 
 Two real gaps surfaced when test-driving the verify-mode AA Script
