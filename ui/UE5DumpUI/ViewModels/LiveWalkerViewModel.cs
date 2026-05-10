@@ -123,6 +123,21 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     // AOBMaker CE Plugin integration
     [ObservableProperty] private bool _isAobMakerAvailable;
 
+    /// <summary>
+    /// Per-row hint shown in the Functions DataGrid Notes column. Same
+    /// value across every row in the current grid; the column is per-row
+    /// in AXAML but the data is VM-level. When AOBMaker is unavailable
+    /// the AA(B) shortcut still works (clipboard fallback) but the
+    /// in-CE workflow is degraded; this surfaces that to the user without
+    /// requiring them to hover for a tooltip.
+    /// </summary>
+    public string AobMakerNote => IsAobMakerAvailable
+        ? ""
+        : "AOBMaker plugin not found — AA Script export will fall back to clipboard";
+
+    partial void OnIsAobMakerAvailableChanged(bool value)
+        => OnPropertyChanged(nameof(AobMakerNote));
+
     // AOB Symbol toggle for CE XML export
     [ObservableProperty] private bool _useAobSymbol;
     [ObservableProperty] private bool _isAobSymbolAvailable;
@@ -2070,8 +2085,9 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// Detects both CE starting (buttons enable) and CE closing (buttons disable).
     /// Skips if last check was within <see cref="AobMakerCheckCooldown"/> to avoid
     /// spamming pipe connects on rapid navigation (2s timeout when CE not running).
+    /// Public so MainWindow's tab-switch handler can also re-check on tab activation.
     /// </summary>
-    private void TryCheckAobMaker()
+    public void TryCheckAobMaker()
     {
         if (_aobMaker == null) return;
         if (DateTime.UtcNow - _lastAobMakerCheck < AobMakerCheckCooldown) return;
@@ -2528,21 +2544,36 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             var script = InvokeScriptGenerator.Generate(CurrentClassName, func.Name, func);
             var description = $"Invoke: {CurrentClassName}::{func.Name}";
 
-            // Try AOBMaker CE Plugin first, fallback to clipboard
-            if (_aobMaker != null)
+            // Sample availability before send so we can distinguish 'pipe
+            // broke mid-send' (was available, now isn't) from 'never
+            // configured / CE not running' (was already false). Note:
+            // this command is also IsEnabled-bound to IsAobMakerAvailable
+            // in the AXAML, so wasAvailable=false here would only happen
+            // if the user clicked between availability flips -- the
+            // clipboard fallback below still produces a usable script.
+            bool wasAvailable = _aobMaker?.IsAvailable ?? false;
+            if (_aobMaker != null && wasAvailable)
             {
                 var sent = await _aobMaker.CreateAAScriptAsync(description, script, autoActivate: false);
                 if (sent)
                 {
                     _log.Info($"Invoke script sent to CE: {description}");
                     StatusText = $"Invoke script created in CE: {func.Name}";
+                    if (_aobMaker != null) IsAobMakerAvailable = _aobMaker.IsAvailable;
                     return;
                 }
             }
 
+            // Fallback: copy script to clipboard. If we thought CE was
+            // present (button shouldn't have been clickable in that case),
+            // surface a pipe-broken warning so the user knows the AA Script
+            // didn't land in CE.
             await _platform.CopyToClipboardAsync(script);
-            StatusText = $"Invoke script copied to clipboard: {func.Name}";
-            _log.Info($"Invoke script copied to clipboard: {description}");
+            if (_aobMaker != null) IsAobMakerAvailable = _aobMaker.IsAvailable;
+            StatusText = wasAvailable
+                ? $"⚠ AOBMaker pipe broke (CE closed?) — invoke script copied to clipboard"
+                : $"Invoke script copied to clipboard: {func.Name}";
+            _log.Info($"Invoke script copied to clipboard: {description} (wasAvailable={wasAvailable})");
         }
         catch (Exception ex)
         {
@@ -2621,16 +2652,27 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     CurrentClassName, func.Name, func.ParmsSize,
                     Array.Empty<Models.BakedParamValue>());
                 var description = $"Invoke (baked, no args): {CurrentClassName}::{func.Name}";
-                var sentToCe = false;
-                if (_aobMaker != null)
+                // Sample availability BEFORE the send so we can distinguish
+                // 'pipe broke mid-send' (was available, now isn't) from
+                // 'not configured' (was already false).
+                bool wasAvailable = _aobMaker?.IsAvailable ?? false;
+                bool sentToCe = false;
+                if (_aobMaker != null && wasAvailable)
                     sentToCe = await _aobMaker.CreateAAScriptAsync(description, script, autoActivate: false);
                 if (!sentToCe)
                     await _platform.CopyToClipboardAsync(script);
+                // Sync the VM-level flag from whatever the bridge ended up at,
+                // so the Notes column reflects post-send reality on the next
+                // repaint.
+                if (_aobMaker != null) IsAobMakerAvailable = _aobMaker.IsAvailable;
+
                 StatusText = sentToCe
                     ? $"AA Script created in CE: {func.Name}"
-                    : $"AA Script copied to clipboard: {func.Name}";
+                    : wasAvailable
+                        ? $"⚠ AOBMaker pipe broke (CE closed?) — script copied to clipboard"
+                        : $"AOBMaker not connected — script copied to clipboard ({func.Name})";
                 _log.Info($"Baked AA Script (no args) {(sentToCe ? "sent to CE" : "to clipboard")}: " +
-                          $"{CurrentClassName}::{func.Name}");
+                          $"{CurrentClassName}::{func.Name} (wasAvailable={wasAvailable})");
                 return;
             }
 

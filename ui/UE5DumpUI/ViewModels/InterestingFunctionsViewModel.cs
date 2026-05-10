@@ -32,6 +32,14 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
 {
     private readonly IDumpService _dump;
     private readonly ILoggingService _log;
+    private readonly IAobMakerBridge? _aobMaker;
+
+    /// <summary>Cooldown between AOBMaker availability re-checks. The
+    /// pipe connect attempt has a 2s timeout when CE isn't running, so
+    /// without throttling rapid tab switches would stack 2s-blocking
+    /// checks. Mirrors <see cref="LiveWalkerViewModel"/>'s pattern.</summary>
+    private static readonly TimeSpan AobMakerCheckCooldown = TimeSpan.FromSeconds(5);
+    private DateTime _lastAobMakerCheck = DateTime.MinValue;
 
     /// <summary>Full unfiltered list of scored rows. Filter operates
     /// against this and rebuilds <see cref="Results"/>.</summary>
@@ -45,6 +53,12 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     [ObservableProperty] private string _statusText = "Click Load to scan all UFunctions";
     [ObservableProperty] private ObservableCollection<ScoredFunctionRow> _results = new();
     [ObservableProperty] private ScoredFunctionRow? _selectedResult;
+
+    /// <summary>True when the AOBMaker CE Plugin pipe responded to the
+    /// last availability check. Defaults true so the UI doesn't gray
+    /// out before we've had a chance to probe; first
+    /// <see cref="CheckAobMakerAsync"/> on Load updates it.</summary>
+    [ObservableProperty] private bool _isAobMakerAvailable = true;
 
     // Static category list used by the chip dropdown (in chip-display order).
     public IReadOnlyList<FunctionCategory?> CategoryOptions { get; } = new FunctionCategory?[]
@@ -74,17 +88,64 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     public event Action<string, string>? NavigateToFunction;
     public event Action<string, string>? RequestCopyBakedScript;
 
-    public InterestingFunctionsViewModel(IDumpService dump, ILoggingService log)
+    public InterestingFunctionsViewModel(IDumpService dump, ILoggingService log,
+                                          IAobMakerBridge? aobMaker = null)
     {
         _dump = dump;
         _log = log;
+        _aobMaker = aobMaker;
     }
+
+    /// <summary>
+    /// Per-row hint shown in the Notes column. Same value across every
+    /// row in the current grid -- the column is per-row in the AXAML
+    /// layout but the data is VM-level. When AOBMaker is unavailable
+    /// the AA(B) shortcut still works (clipboard fallback) but the
+    /// CE-side workflow is degraded; this surfaces that to the user
+    /// without burying it in a tooltip.
+    /// </summary>
+    public string AobMakerNote => IsAobMakerAvailable
+        ? ""
+        : "AOBMaker plugin not found — AA Script export will fall back to clipboard";
 
     // Filter inputs all funnel into a single ApplyFilter pass. Each
     // partial method fires once per ObservableProperty change.
     partial void OnFilterTextChanged(string value)         => ApplyFilter();
     partial void OnCategoryFilterChanged(FunctionCategory? value) => ApplyFilter();
     partial void OnShowAllChanged(bool value)              => ApplyFilter();
+    partial void OnIsAobMakerAvailableChanged(bool value)
+        => OnPropertyChanged(nameof(AobMakerNote));
+
+    /// <summary>
+    /// Probe AOBMaker pipe and update <see cref="IsAobMakerAvailable"/>.
+    /// Runs the bridge's CheckAvailabilityAsync (2s pipe-connect timeout
+    /// when CE not running) so cheap to call on tab activation.
+    /// </summary>
+    public async Task CheckAobMakerAsync()
+    {
+        if (_aobMaker == null) { IsAobMakerAvailable = false; return; }
+        _lastAobMakerCheck = DateTime.UtcNow;
+        try
+        {
+            IsAobMakerAvailable = await _aobMaker.CheckAvailabilityAsync();
+        }
+        catch
+        {
+            IsAobMakerAvailable = false;
+        }
+    }
+
+    /// <summary>
+    /// Fire-and-forget AOBMaker availability check with cooldown so
+    /// rapid tab switches don't stack 2s-blocking pipe-connect attempts.
+    /// Called from MainWindow's tab-switch handler.
+    /// </summary>
+    public void TryCheckAobMaker()
+    {
+        if (_aobMaker == null) return;
+        if (DateTime.UtcNow - _lastAobMakerCheck < AobMakerCheckCooldown) return;
+        _ = CheckAobMakerAsync();
+    }
 
     [RelayCommand]
     private async Task LoadAsync()
@@ -139,6 +200,11 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
                          $"scanned {result.ScannedObjects:N0} objects)";
             _log.Info($"ListAllFunctions: total={result.Total} classes={result.ScannedClasses} " +
                       $"interesting={interesting} (gameOnly={GameOnly})");
+
+            // Refresh AOBMaker state at end of load so the Notes column
+            // reflects current connectivity. Doesn't block the load --
+            // status text above already updated.
+            await CheckAobMakerAsync();
         }
         catch (Exception ex)
         {

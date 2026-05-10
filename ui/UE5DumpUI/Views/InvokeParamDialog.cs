@@ -506,9 +506,13 @@ public sealed class InvokeParamDialog : Window
 
             // Prefer AOBMaker (creates the AA Script entry directly in CE);
             // fall back to clipboard for users running without the plugin.
+            // Sample IsAvailable BEFORE the send so we can distinguish
+            // 'pipe broke mid-send' (was available, now isn't) from
+            // 'never configured' (was already false) in the result message.
             var description = $"Invoke (baked): {_className}::{_funcName}";
-            var sentToCe = false;
-            if (_aobMaker != null)
+            bool wasAvailable = _aobMaker?.IsAvailable ?? false;
+            bool sentToCe = false;
+            if (_aobMaker != null && wasAvailable)
             {
                 sentToCe = await _aobMaker.CreateAAScriptAsync(
                     description, script, autoActivate: false);
@@ -524,10 +528,23 @@ public sealed class InvokeParamDialog : Window
             else if (_platform != null)
             {
                 await _platform.CopyToClipboardAsync(script);
-                _resultLabel.Foreground = new SolidColorBrush(Color.Parse("#4EC9B0"));
-                _resultLabel.Text = $"AA Script copied to clipboard ({script.Length:N0} chars)\n" +
-                    $"Paste into a new CE AA Script entry. Don't forget to embed\n" +
-                    $"ue5_invoke_helper.lua in your .CT (Table -> Add File...).";
+                if (wasAvailable)
+                {
+                    // Pipe was up at start; send failed. CE likely closed
+                    // between availability check and send.
+                    _resultLabel.Foreground = new SolidColorBrush(Color.Parse("#E0A050"));
+                    _resultLabel.Text =
+                        $"⚠ AOBMaker pipe broke mid-send (CE closed?).\n" +
+                        $"AA Script copied to clipboard ({script.Length:N0} chars) " +
+                        "as a fallback.\nPaste into a new CE AA Script entry once CE is ready.";
+                }
+                else
+                {
+                    _resultLabel.Foreground = new SolidColorBrush(Color.Parse("#4EC9B0"));
+                    _resultLabel.Text = $"AOBMaker not connected.\nAA Script copied to clipboard " +
+                        $"({script.Length:N0} chars).\nDon't forget to embed " +
+                        $"ue5_invoke_helper.lua in your .CT (Table -> Add File...).";
+                }
             }
             else
             {

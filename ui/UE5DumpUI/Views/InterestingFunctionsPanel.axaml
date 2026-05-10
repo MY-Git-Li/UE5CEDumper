@@ -122,6 +122,23 @@
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
+        <!-- Notes column: per-row, but the value is currently VM-level
+             (same string on every row). Reflects AOBMaker availability so
+             the user sees the degraded-mode hint without hovering for
+             tooltips. Empty string when everything is fine. -->
+        <DataGridTemplateColumn Header="Notes" Width="*">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:ScoredFunctionRow">
+              <TextBlock Text="{Binding $parent[UserControl].((vm:InterestingFunctionsViewModel)DataContext).AobMakerNote}"
+                         Foreground="#E0A050"
+                         FontSize="11"
+                         FontStyle="Italic"
+                         VerticalAlignment="Center"
+                         Margin="6,0"
+                         TextTrimming="CharacterEllipsis"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
       </DataGrid.Columns>
     </DataGrid>
   </DockPanel>

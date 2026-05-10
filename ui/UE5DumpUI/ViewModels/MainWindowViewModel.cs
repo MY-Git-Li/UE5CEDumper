@@ -165,7 +165,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         InstanceFinder = new InstanceFinderViewModel(dump, log, platform);
         PropertySearch = new PropertySearchViewModel(dump, log);
         GameClassFilter = new GameClassFilterViewModel(dump, log);
-        InterestingFunctions = new InterestingFunctionsViewModel(dump, log);
+        InterestingFunctions = new InterestingFunctionsViewModel(dump, log, aobMaker);
 
         if (proxyDeploy != null)
             ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log);
@@ -420,16 +420,26 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                         className, funcName, funcMatch.ParmsSize,
                         Array.Empty<Models.BakedParamValue>());
                     var description = $"Invoke (baked, no args): {className}::{funcName}";
-                    var sentToCe = false;
-                    if (_aobMaker != null)
+                    // Sample availability before send so 'pipe broke mid-send'
+                    // surfaces distinctly from 'CE not running'.
+                    bool wasAvailable = _aobMaker?.IsAvailable ?? false;
+                    bool sentToCe = false;
+                    if (_aobMaker != null && wasAvailable)
                         sentToCe = await _aobMaker.CreateAAScriptAsync(description, script, autoActivate: false);
                     if (!sentToCe)
                         await _platform.CopyToClipboardAsync(script);
+                    // Sync VM-level state so InterestingFunctions tab's Notes
+                    // column reflects post-send reality.
+                    if (_aobMaker != null)
+                        InterestingFunctions.IsAobMakerAvailable = _aobMaker.IsAvailable;
                     StatusText = sentToCe
                         ? $"AA Script created in CE: {funcName}"
-                        : $"AA Script copied to clipboard: {funcName}";
+                        : wasAvailable
+                            ? $"⚠ AOBMaker pipe broke (CE closed?) — script copied to clipboard"
+                            : $"AOBMaker not connected — script copied to clipboard ({funcName})";
                     _log.Info($"InterestingFunctions baked AA Script (no args) " +
-                              $"{(sentToCe ? "sent to CE" : "to clipboard")}: {className}::{funcName}");
+                              $"{(sentToCe ? "sent to CE" : "to clipboard")}: " +
+                              $"{className}::{funcName} (wasAvailable={wasAvailable})");
                     return;
                 }
 

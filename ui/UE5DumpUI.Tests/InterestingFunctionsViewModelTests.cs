@@ -268,4 +268,103 @@ public class InterestingFunctionsViewModelTests
 
         Assert.False(fired);
     }
+
+    // ==================================================================
+    // AOBMaker availability + Notes column
+    // ==================================================================
+
+    /// <summary>Stub bridge with a controllable IsAvailable for testing
+    /// the VM's wiring without actually opening a pipe.</summary>
+    private sealed class FakeAobMakerBridge : IAobMakerBridge
+    {
+        public bool IsAvailable { get; set; }
+        public bool NextCheckResult { get; set; }
+        public int CheckCallCount { get; private set; }
+
+        public Task<bool> CheckAvailabilityAsync(CancellationToken ct = default)
+        {
+            CheckCallCount++;
+            IsAvailable = NextCheckResult;
+            return Task.FromResult(NextCheckResult);
+        }
+
+        public Task<bool> NavigateHexViewAsync(string hexAddress, CancellationToken ct = default)
+            => Task.FromResult(false);
+        public Task<bool> NavigateDisassemblerAsync(string hexAddress, CancellationToken ct = default)
+            => Task.FromResult(false);
+        public Task<bool> CreateAAScriptAsync(string description, string script,
+            bool autoActivate = true, CancellationToken ct = default)
+            => Task.FromResult(false);
+        public Task<bool> CreateSymbolScriptAsync(string name, string aob, int pos, int aoblen,
+            string symbol, string module, bool autoActivate = true, CancellationToken ct = default)
+            => Task.FromResult(false);
+    }
+
+    [Fact]
+    public async Task AobMakerNote_AvailabilityFlipsToFalse_NoteHasContent()
+    {
+        var bridge = new FakeAobMakerBridge { NextCheckResult = false };
+        var vm = new InterestingFunctionsViewModel(
+            new FakeDumpService { NextResult = BuildResult(BuildSampleEntries()) },
+            new NoopLogger(), bridge);
+
+        // Initial state: defaults to true so UI doesn't gray out before
+        // first probe; AobMakerNote is empty.
+        Assert.True(vm.IsAobMakerAvailable);
+        Assert.Equal("", vm.AobMakerNote);
+
+        await vm.CheckAobMakerAsync();
+
+        Assert.False(vm.IsAobMakerAvailable);
+        Assert.Contains("AOBMaker plugin not found", vm.AobMakerNote);
+    }
+
+    [Fact]
+    public async Task AobMakerNote_AvailabilityRecovers_NoteClears()
+    {
+        var bridge = new FakeAobMakerBridge { NextCheckResult = false };
+        var vm = new InterestingFunctionsViewModel(
+            new FakeDumpService { NextResult = BuildResult(BuildSampleEntries()) },
+            new NoopLogger(), bridge);
+
+        await vm.CheckAobMakerAsync();
+        Assert.False(vm.IsAobMakerAvailable);
+
+        // CE starts up between checks
+        bridge.NextCheckResult = true;
+        await vm.CheckAobMakerAsync();
+
+        Assert.True(vm.IsAobMakerAvailable);
+        Assert.Equal("", vm.AobMakerNote);
+    }
+
+    [Fact]
+    public void TryCheckAobMaker_RespectsCooldown()
+    {
+        var bridge = new FakeAobMakerBridge { NextCheckResult = true };
+        var vm = new InterestingFunctionsViewModel(
+            new FakeDumpService(), new NoopLogger(), bridge);
+
+        // First call should fire (cooldown is from MinValue, always elapsed)
+        vm.TryCheckAobMaker();
+        // Drain any in-flight task
+        SpinWait.SpinUntil(() => bridge.CheckCallCount >= 1, TimeSpan.FromSeconds(2));
+        Assert.Equal(1, bridge.CheckCallCount);
+
+        // Second call within cooldown window should be skipped silently
+        vm.TryCheckAobMaker();
+        Thread.Sleep(50); // Give any spurious task a chance to run
+        Assert.Equal(1, bridge.CheckCallCount);
+    }
+
+    [Fact]
+    public void TryCheckAobMaker_NoBridge_DoesNothing()
+    {
+        var vm = new InterestingFunctionsViewModel(
+            new FakeDumpService(), new NoopLogger(), aobMaker: null);
+
+        // No throw, no side effect
+        vm.TryCheckAobMaker();
+        Assert.True(vm.IsAobMakerAvailable); // unchanged from default
+    }
 }

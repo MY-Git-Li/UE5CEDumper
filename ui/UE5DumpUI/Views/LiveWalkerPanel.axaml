@@ -576,6 +576,22 @@
               </DataTemplate>
             </DataGridTemplateColumn.CellTemplate>
           </DataGridTemplateColumn>
+          <!-- Notes column: VM-level AOBMaker hint (currently same value
+               on every row; AXAML left per-row to mirror Interesting Funcs
+               panel and to leave room for future per-row notes). -->
+          <DataGridTemplateColumn Header="Notes" Width="*">
+            <DataGridTemplateColumn.CellTemplate>
+              <DataTemplate x:DataType="m:FunctionInfoModel">
+                <TextBlock Text="{Binding $parent[UserControl].((vm:LiveWalkerViewModel)DataContext).AobMakerNote}"
+                           Foreground="#E0A050"
+                           FontSize="11"
+                           FontStyle="Italic"
+                           VerticalAlignment="Center"
+                           Margin="6,0"
+                           TextTrimming="CharacterEllipsis"/>
+              </DataTemplate>
+            </DataGridTemplateColumn.CellTemplate>
+          </DataGridTemplateColumn>
         </DataGrid.Columns>
       </DataGrid>
     </Expander>
