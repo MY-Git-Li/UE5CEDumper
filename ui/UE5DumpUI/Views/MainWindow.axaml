@@ -161,6 +161,21 @@
           </DropDownButton>
         </Border>
 
+        <!-- Tools dropdown (always available; doesn't need a DLL connection) -->
+        <Border Margin="8,2" VerticalAlignment="Center">
+          <DropDownButton Content="{StaticResource str.Toolbar.Tools}"
+                          ToolTip.Tip="{StaticResource str.Tip.Tools}"
+                          Padding="8,3" FontSize="12">
+            <DropDownButton.Flyout>
+              <MenuFlyout>
+                <MenuItem Header="{StaticResource str.Tools.ExportCeHelperLua}"
+                          Command="{Binding ExportCeHelperLuaCommand}"
+                          ToolTip.Tip="{StaticResource str.Tip.Tools.ExportCeHelperLua}"/>
+              </MenuFlyout>
+            </DropDownButton.Flyout>
+          </DropDownButton>
+        </Border>
+
         <!-- Version label -->
         <TextBlock Text="{Binding AppVersion}"
                    Foreground="#808080" FontSize="11"

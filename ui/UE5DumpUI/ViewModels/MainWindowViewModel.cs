@@ -522,6 +522,43 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             (symbols, _) => SymbolExportService.GenerateIdaScript(symbols));
     }
 
+    /// <summary>
+    /// Tools menu: stream the embedded <c>ue5_invoke_helper.lua</c> to a
+    /// user-chosen file. The helper is required at runtime by every
+    /// "Copy AA Script (Baked)" output -- once per .CT the user picks
+    /// Tools -> Export CE Helper Lua File... here, then drags the file
+    /// into their table via Cheat Engine's Table -> Add File...
+    /// menu. Doesn't need an active DLL connection.
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportCeHelperLuaAsync()
+    {
+        try
+        {
+            var savePath = await _platform.ShowSaveFileDialogAsync(
+                defaultFileName:  HelperLuaResource.DefaultFileName,
+                filterName:       "CE Lua Helper (*.lua)",
+                filterExtension:  ".lua");
+            if (string.IsNullOrEmpty(savePath))
+            {
+                _log.Info("Export CE Helper Lua: user cancelled");
+                return;
+            }
+
+            var content = HelperLuaResource.Read();
+            await File.WriteAllTextAsync(savePath, content);
+
+            _log.Info($"Exported CE helper lua: {savePath} " +
+                      $"({content.Length:N0} chars)");
+            StatusText = $"CE helper exported: {Path.GetFileName(savePath)}";
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Export CE Helper Lua failed", ex);
+            StatusText = $"Export CE helper failed: {ex.Message}";
+        }
+    }
+
     private async Task ExportSymbolsAsync(
         string filterName, string filterExtension,
         Func<IReadOnlyList<SymbolEntry>, string, string> generator)

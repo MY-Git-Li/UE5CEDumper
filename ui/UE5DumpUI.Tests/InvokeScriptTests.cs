@@ -354,4 +354,293 @@ public class InvokeScriptTests
         Assert.Equal(2, input.Count);
         Assert.DoesNotContain(input, p => p.Name == "ReturnValue");
     }
+
+    // ==================================================================
+    // BakedScriptGenerator -- non-interactive AA Script export (todo 3a)
+    //
+    // The generator produces a script that depends on
+    // ue5_invoke_helper.lua being embedded in the user's .CT. Tests
+    // assert both the structural shape (loader, PARAMS table, invoke
+    // call, cleanup) and the literal-rendering correctness for each
+    // supported UE type.
+    // ==================================================================
+
+    private static IReadOnlyList<BakedParamValue> NoBakedValues
+        => Array.Empty<BakedParamValue>();
+
+    [Fact]
+    public void BakedGenerate_NoParams_ProducesEmptyParamsTableAndDirectInvoke()
+    {
+        var script = BakedScriptGenerator.Generate(
+            "Player_C", "openShop", parmsSize: 0, NoBakedValues);
+
+        // The fast-path comment + empty table
+        Assert.Contains("(no input params -- direct invoke)", script);
+        Assert.Contains("local PARAMS = {}", script);
+        // Helper invoke with parmsSize=0
+        Assert.Contains(
+            "invokeUFunction('Player_C', 'openShop', 0, PARAMS)",
+            script);
+    }
+
+    [Fact]
+    public void BakedGenerate_StructureBlocks_AllPresent()
+    {
+        var script = BakedScriptGenerator.Generate(
+            "PlayerCharacter", "AddMoney", 5,
+            new[] { new BakedParamValue("Amount", "IntProperty", 4, 0, "1000") });
+
+        // [ENABLE]/[DISABLE] block markers
+        Assert.Contains("[ENABLE]", script);
+        Assert.Contains("[DISABLE]", script);
+        Assert.Contains("{$lua}", script);
+        Assert.Contains("{$asm}", script);
+        Assert.Contains("if syntaxcheck then return end", script);
+
+        // Helper loader uses findTableFile -- no fs fallback per design
+        Assert.Contains("findTableFile('ue5_invoke_helper.lua')", script);
+        Assert.Contains("Table -> Add File...", script);
+        // Loader bails cleanly on missing file
+        Assert.Contains("if memrec then memrec.Active = false end", script);
+
+        // Cleanup: silent on success, close lua engine
+        Assert.Contains("synchronize(function() getLuaEngine().Close() end)",
+                        script);
+
+        // Should NOT contain anything that would prompt user (no createForm)
+        Assert.DoesNotContain("createForm", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_IntParam_RendersDecimalLiteral()
+    {
+        var script = BakedScriptGenerator.Generate(
+            "C", "F", 4,
+            new[] { new BakedParamValue("Amount", "IntProperty", 4, 0, "1000") });
+
+        Assert.Contains("type='int32', offset=0, value=1000", script);
+        Assert.Contains("-- int32 4B", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_FloatParam_RendersDecimalLiteral()
+    {
+        var script = BakedScriptGenerator.Generate(
+            "C", "F", 4,
+            new[] { new BakedParamValue("Speed", "FloatProperty", 4, 0, "3.14") });
+
+        Assert.Contains("type='float', offset=0, value=3.14", script);
+        Assert.Contains("-- float 4B", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_BoolTrueVariants_AllRenderAs1()
+    {
+        foreach (var input in new[] { "true", "1", "yes", "on", "TRUE", "True" })
+        {
+            var script = BakedScriptGenerator.Generate(
+                "C", "F", 1,
+                new[] { new BakedParamValue("b", "BoolProperty", 1, 0, input) });
+            Assert.Contains("type='bool', offset=0, value=1", script);
+        }
+    }
+
+    [Fact]
+    public void BakedGenerate_BoolFalseVariants_AllRenderAs0()
+    {
+        foreach (var input in new[] { "false", "0", "no", "off", "FALSE" })
+        {
+            var script = BakedScriptGenerator.Generate(
+                "C", "F", 1,
+                new[] { new BakedParamValue("b", "BoolProperty", 1, 0, input) });
+            Assert.Contains("type='bool', offset=0, value=0", script);
+        }
+    }
+
+    [Fact]
+    public void BakedGenerate_ObjectPointer_RendersAsHexLiteral()
+    {
+        var script = BakedScriptGenerator.Generate(
+            "C", "F", 8,
+            new[] { new BakedParamValue("Target", "ObjectProperty", 8, 0,
+                "0x7FF6CD120000") });
+
+        // Helper uses 'pointer' type for object/class/name/soft/weak/lazy/iface/uint64
+        Assert.Contains("type='pointer', offset=0, value=0x7FF6CD120000",
+                        script);
+    }
+
+    [Fact]
+    public void BakedGenerate_ZeroPointer_RendersAsPlainZero()
+    {
+        // 0 looks cleaner than 0x0; the helper's writeQword accepts both.
+        var script = BakedScriptGenerator.Generate(
+            "C", "F", 8,
+            new[] { new BakedParamValue("Target", "ObjectProperty", 8, 0, "0") });
+        Assert.Contains("type='pointer', offset=0, value=0", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_NegativeInt_PreservesSign()
+    {
+        var script = BakedScriptGenerator.Generate(
+            "C", "RemoveMoney", 4,
+            new[] { new BakedParamValue("Delta", "IntProperty", 4, 0, "-1000") });
+
+        Assert.Contains("type='int32', offset=0, value=-1000", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_HexInputForInt_PreservesHexForm()
+    {
+        // User typed 0xFF for an enum -- preserve the hex form so it's
+        // self-documenting in the generated script.
+        var script = BakedScriptGenerator.Generate(
+            "C", "F", 4,
+            new[] { new BakedParamValue("Mask", "IntProperty", 4, 0, "0xFF") });
+
+        Assert.Contains("type='int32', offset=0, value=0xFF", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_MultipleParams_AllRenderedAtCorrectOffsets()
+    {
+        var values = new[]
+        {
+            new BakedParamValue("Amount",     "IntProperty",   4, 0, "1000"),
+            new BakedParamValue("bShowToast", "BoolProperty",  1, 4, "true"),
+            new BakedParamValue("Source",     "ObjectProperty",8, 8, "0xDEADBEEF"),
+        };
+        var script = BakedScriptGenerator.Generate("Player_C", "AddMoney", 16, values);
+
+        Assert.Contains("type='int32', offset=0, value=1000", script);
+        Assert.Contains("type='bool', offset=4, value=1", script);
+        Assert.Contains("type='pointer', offset=8, value=0xDEADBEEF", script);
+        Assert.Contains("invokeUFunction('Player_C', 'AddMoney', 16, PARAMS)", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_FlattenedStructSubFields_AllRendered()
+    {
+        // The dialog is responsible for flattening structs into
+        // BakedParamValue entries; the generator just sees scalars at
+        // the absolute offsets. Verify a 3-field FVector style input
+        // emits 3 rows with parent.sub names.
+        var values = new[]
+        {
+            new BakedParamValue("Location.X", "FloatProperty", 4, 16, "100.5"),
+            new BakedParamValue("Location.Y", "FloatProperty", 4, 20, "200.5"),
+            new BakedParamValue("Location.Z", "FloatProperty", 4, 24, "0"),
+        };
+        var script = BakedScriptGenerator.Generate("Pawn_C", "Teleport", 28, values);
+
+        Assert.Contains("name='Location.X'", script);
+        Assert.Contains("name='Location.Y'", script);
+        Assert.Contains("name='Location.Z'", script);
+        Assert.Contains("offset=16, value=100.5", script);
+        Assert.Contains("offset=20, value=200.5", script);
+        Assert.Contains("offset=24, value=0", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_UnparseableInput_EmitsTodoMarkerNotMangledLiteral()
+    {
+        // User typed garbage like "see comment" -- generator should not
+        // silently emit "see comment" as a Lua expression. The
+        // --[[unparsed:...]] 0 fallback flags it explicitly.
+        var script = BakedScriptGenerator.Generate(
+            "C", "F", 4,
+            new[] { new BakedParamValue("Amount", "IntProperty", 4, 0,
+                "see TODO comment") });
+
+        Assert.Contains("--[[unparsed:see TODO comment]] 0", script);
+        // The user's text is preserved verbatim so they can find + fix it
+        Assert.Contains("see TODO comment", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_ClassOrFuncWithApostrophe_EscapedInLuaLiteral()
+    {
+        // A class named "Player'sActor_C" would close the Lua single-quoted
+        // string mid-name without escaping. EscapeLua adds a backslash.
+        var script = BakedScriptGenerator.Generate(
+            "Player'sActor_C", "O'Brien", 0, NoBakedValues);
+
+        Assert.Contains(@"'Player\'sActor_C'", script);
+        Assert.Contains(@"'O\'Brien'", script);
+        // And the invoke call must still be valid
+        Assert.Contains(@"invokeUFunction('Player\'sActor_C', 'O\'Brien'",
+                        script);
+    }
+
+    [Fact]
+    public void BakedGenerate_UnparseableContainsCommentClose_EscapedToAvoidEarlyTermination()
+    {
+        // If the user typed "]]" it would close the --[[...]] comment
+        // early and the trailing "0" would become orphaned syntax.
+        // EscapeLuaComment splits ]] into ] ] to neutralise the close.
+        var script = BakedScriptGenerator.Generate(
+            "C", "F", 4,
+            new[] { new BakedParamValue("X", "IntProperty", 4, 0, "abc]]def") });
+
+        Assert.Contains("--[[unparsed:abc] ]def]] 0", script);
+        Assert.DoesNotContain("--[[unparsed:abc]]def", script);
+    }
+
+    // ==================================================================
+    // BakedScriptGenerator.MapToHelperType -- type mapping table
+    // ==================================================================
+
+    [Theory]
+    [InlineData("BoolProperty",         "bool")]
+    [InlineData("ByteProperty",         "byte")]
+    [InlineData("Int8Property",         "byte")]
+    [InlineData("Int16Property",        "int16")]
+    [InlineData("UInt16Property",       "int16")]
+    [InlineData("IntProperty",          "int32")]
+    [InlineData("UInt32Property",       "int32")]
+    [InlineData("EnumProperty",         "int32")]
+    [InlineData("Int64Property",        "int64")]
+    [InlineData("UInt64Property",       "pointer")]
+    [InlineData("FloatProperty",        "float")]
+    [InlineData("DoubleProperty",       "double")]
+    [InlineData("ObjectProperty",       "pointer")]
+    [InlineData("ClassProperty",        "pointer")]
+    [InlineData("NameProperty",         "pointer")]
+    [InlineData("SoftObjectProperty",   "pointer")]
+    [InlineData("WeakObjectProperty",   "pointer")]
+    [InlineData("InterfaceProperty",    "pointer")]
+    [InlineData("StructProperty",       "int32")]  // unsupported -> falls through
+    public void BakedGenerate_MapToHelperType_AllKnownTypes(
+        string ueType, string expectedHelper)
+    {
+        Assert.Equal(expectedHelper, BakedScriptGenerator.MapToHelperType(ueType));
+    }
+
+    // ==================================================================
+    // HelperLuaResource -- embedded resource discovery
+    // ==================================================================
+
+    [Fact]
+    public void HelperLuaResource_Read_ReturnsNonEmptyContent()
+    {
+        var content = HelperLuaResource.Read();
+        Assert.NotNull(content);
+        Assert.NotEmpty(content);
+        // Sentinel string from the helper -- if this fails the embedded
+        // resource was replaced with the wrong file.
+        Assert.Contains("ue5_invoke_helper.lua v", content);
+    }
+
+    [Fact]
+    public void HelperLuaResource_Read_ContainsRequiredPublicAPI()
+    {
+        var content = HelperLuaResource.Read();
+        // The two functions the generator's output depends on
+        Assert.Contains("function invokeUFunction(", content);
+        Assert.Contains("function readUFunctionReturn(", content);
+        // Re-declaration guard pattern
+        Assert.Contains("if not invokeUFunction then", content);
+        Assert.Contains("registerLuaFunctionHighlight('invokeUFunction')", content);
+    }
 }

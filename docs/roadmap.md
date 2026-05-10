@@ -6,7 +6,7 @@ upcoming work and [dev-log.md](dev-log.md) for the historical commit
 trail. Build number tags reflect when each row reached its current
 state.
 
-> **Last refreshed**: 2026-05-10 (build 589, post-PR #195 merge).
+> **Last refreshed**: 2026-05-10 (build 596, post-AA-Script export feature on `dev`).
 
 -----
 
@@ -38,6 +38,20 @@ Persisted in HintCache JSON per PE hash, surfaces in the Pointer panel:
 |---|---|---|---|---|
 | UE version override | Auto / 4.18-4.27 / 5.0-5.8 | Auto (detect) | `set_ue_version_override` | build 549 |
 | Invoke timeout | 1000-60000 ms | 5000 ms | `set_invoke_timeout` | build 583 |
+
+## UFunction invoke export (build 590-596)
+
+Three buttons per UFunction row in LiveWalker:
+
+| Button | Mode | Output |
+|---|---|---|
+| **Generate Script** (`INV`) | In-CE form (existing) | AA Script with `createForm` interactive popup |
+| **Pipe Invoke** (`PIPE`) | In-app via DLL pipe | Live invoke + decoded result inline |
+| **AA(Baked)** (new) | Non-interactive AA Script | Self-contained AA Script with values baked at generation time; depends on `ue5_invoke_helper.lua` embedded in the user's .CT |
+
+Tools menu **Export CE Helper Lua File...** writes
+`scripts/ue5_invoke_helper.lua` to a user-chosen path so they can drop
+it next to their .CT and add via Cheat Engine `Table -> Add File...`.
 
 ## Publisher detection
 

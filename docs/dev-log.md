@@ -11,7 +11,212 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
-## 2026-05-10 (latest, dev branch, build 578-589) — Walker false-positive sweep + per-game invoke timeout + FillPointerSnapshot + drill-depth 0-6 band
+## 2026-05-10 (latest, dev branch, build 590-596) — Copy AA Script (Baked) UFunction export
+
+`feat(ui): Copy AA Script (Baked)` series — first chunk of the
+"Call-UE-function strengthening" plan from
+[docs/todo.md](todo.md#active-plan-call-ue-function-strengthening),
+specifically item 1 (AA-Script export from UI). Three commits on `dev`:
+[`93f9fd6`](../scripts/ue5_invoke_helper.lua) helper + embed,
+[`c3c27e9`](../ui/UE5DumpUI/Services/BakedScriptGenerator.cs) generator
++ dialog + button, and the Tools menu + tests in this commit.
+
+### The problem
+
+The existing `Generate Script` button on UFunction rows produces a CE
+AA Script that builds a `createForm` dialog **inside Cheat Engine** so
+the user fills params at runtime. That's fine for in-CE testing but
+unsuitable for shipping a static cheat table — every "Add Money" needs
+the user to type 1000 in a popup every time the script enables.
+
+### Architecture (helper-in-table pattern)
+
+Initial proposal was "self-contained AA scripts that inline the entire
+mailbox protocol". User pushed back with a much better model from his
+own CE table experience (Crimson Desert): embed a shared helper file
+in the .CT itself and have AA scripts load it via `findTableFile`. New
+two-artifact design:
+
+**Artifact 1: [`scripts/ue5_invoke_helper.lua`](../scripts/ue5_invoke_helper.lua)**
+(new, ~285 lines)
+
+Public API exposed via re-declaration-safe pattern matching the
+celua_*.lua convention:
+
+```lua
+if not invokeUFunction then
+  function invokeUFunction(className, funcName, parmsSize, params)
+    ...
+  end
+  registerLuaFunctionHighlight('invokeUFunction')
+end
+```
+
+Two functions: `invokeUFunction` (CMD_INVOKE_BY_NAME via mailbox) and
+`readUFunctionReturn` (typed read from params buffer). Internal
+`writeBakedParams` accepts a flat param array `{ {name, type, offset,
+value}, ... }` and dispatches by the helper-token type:
+`bool`/`byte`/`int16`/`int32`/`int64`/`float`/`double`/`pointer`. All
+pointer-shaped UE types (object/class/name/soft/weak/lazy/interface)
+collapse to `'pointer'` and the helper writes them as a qword.
+
+Strict input validation (non-empty strings, parmsSize range check),
+pcall-protected mailbox lookup so missing `g_invokeMailbox` surfaces
+as a clean `(false, err)` return rather than a Lua trace, and a
+sentinel print matching `[*] ue5_invoke_helper.lua v1.0 loaded`.
+
+**Artifact 2: Generated AA Script** (~50 lines per script vs ~200 in
+the form-based generator)
+
+```text
+[ENABLE]
+{$lua}
+if syntaxcheck then return end
+-- Setup instructions: Table -> Add File... -> ue5_invoke_helper.lua
+
+local tf = findTableFile('ue5_invoke_helper.lua')
+if not tf then
+  showMessage('[Invoke] ue5_invoke_helper.lua not found in this table.\n...')
+  if memrec then memrec.Active = false end
+  return
+end
+do
+  local ss = createStringStream()
+  ss.copyFrom(tf.Stream, tf.Stream.Size)
+  local fn, err = load(ss.DataString)
+  ss.destroy()
+  if not fn then ... return end
+  fn()
+end
+
+-- ====== BAKED PARAMS (edit values here) ==============================
+local PARAMS = {
+  { name='Amount',     type='int32', offset=0, value=1000 },  -- int32 4B
+  { name='bShowToast', type='bool',  offset=4, value=1 },     -- bool 1B
+}
+-- =====================================================================
+
+local ok, err = invokeUFunction('PlayerCharacter', 'AddMoney', 5, PARAMS)
+if not ok then
+  print(...) ; showMessage(...)
+end
+
+local t = createTimer(nil, false)
+t.Interval = 100
+t.OnTimer = function(s)
+  s.Enabled = false; s.destroy()
+  if memrec then memrec.Active = false end
+  if ok then
+    synchronize(function() getLuaEngine().Close() end)
+  end
+end
+t.Enabled = true
+{$asm}
+```
+
+Hygiene rules baked in (per the user's deployment guidance):
+- **No filesystem fallback** for the helper — explicit error +
+  showMessage tells the user how to add the file (no surprise loading
+  from random paths)
+- **Silent on success** — auto-disables the memrec then closes the lua
+  engine via `synchronize(getLuaEngine().Close())` so the user doesn't
+  see a stray output window pop on every enable
+- **Errors keep the window open** so the user can read the message
+- **`-- BAKED PARAMS` block** clearly delimits the editable section so
+  cheat-table maintainers can tweak values without understanding the
+  mailbox protocol
+
+### UI integration
+
+[`InvokeParamDialog.cs`](../ui/UE5DumpUI/Views/InvokeParamDialog.cs)
+gains an `InvokeDialogMode` enum with two values:
+
+| Mode | FIRE | Copy AA Script | Close | Cancel | Opened from |
+|---|:-:|:-:|:-:|:-:|---|
+| `PipeInvoke` | ✓ | ✓ | ✓ | ✓ | LiveWalker `Pipe Invoke` button |
+| `CopyBakedScript` | — | ✓ | — | ✓ | LiveWalker `AA(Baked)` button |
+
+The dialog's existing `_structEdits` map is reused to flatten struct
+arguments — `CollectBakedValues()` emits one
+[`BakedParamValue`](../ui/UE5DumpUI/Models/BakedParamValue.cs) per
+sub-field with absolute offset (`parent.Offset + sub.Offset`) and
+display name `Parent.Sub`. The generator never sees nesting.
+
+[`LiveWalkerPanel.axaml`](../ui/UE5DumpUI/Views/LiveWalkerPanel.axaml)
+column widened from 100 → 320 to fit the third button. The new
+`AA(Baked)` button has a 0-arg fast-path: for void-or-no-params
+functions the dialog is skipped and the script is generated +
+delivered immediately.
+
+[`MainWindow.axaml`](../ui/UE5DumpUI/Views/MainWindow.axaml) gains a
+`Tools` dropdown (always available, doesn't require a DLL connection)
+with one entry: **Export CE Helper Lua File...**. Streams the
+embedded `ue5_invoke_helper.lua` to a user-chosen path via
+`IPlatformService.ShowSaveFileDialogAsync` so the user can drop it
+next to their .CT for the Add File step.
+
+### Embed mechanics
+
+[`UE5DumpUI.csproj`](../ui/UE5DumpUI/UE5DumpUI.csproj) gets an
+`<EmbeddedResource>` link to `scripts/ue5_invoke_helper.lua` with a
+stable LogicalName `UE5DumpUI.Resources.CE.ue5_invoke_helper.lua`.
+Single source of truth lives in `scripts/` — the resource link is
+just a packaging hint.
+[`HelperLuaResource.cs`](../ui/UE5DumpUI/Services/HelperLuaResource.cs)
+reads it via `Assembly.GetManifestResourceStream` (AOT-clean, no
+reflection-based resource lookup). A diagnostic `ListEmbeddedNames`
+helper exists for when the manifest name drifts.
+
+### Tests (+36)
+
+Extended
+[`InvokeScriptTests.cs`](../ui/UE5DumpUI.Tests/InvokeScriptTests.cs)
+with a `BakedScriptGenerator` section covering:
+
+- Structural shape (ENABLE/DISABLE blocks, helper loader present, no
+  filesystem fallback wording, `getLuaEngine().Close()` cleanup,
+  `createForm` absent so no accidental interactive UI)
+- Per-type literal rendering (int decimal, float with InvariantCulture,
+  bool true-variants → 1 / false-variants → 0, object pointer hex,
+  zero pointer as plain `0`, negative int sign-preserved, hex input
+  preserves hex form)
+- Multi-param row generation at correct offsets
+- Struct sub-field flattening (3-field FVector style → 3 rows with
+  `Location.X`/`Y`/`Z` names at consecutive offsets)
+- Edge cases: unparseable input falls through to `--[[unparsed:...]]
+  0` literal that *flags* the problem instead of mangling it; Lua
+  single-quote escape via `EscapeLua` (`O'Brien` → `O\'Brien`); Lua
+  comment-close `]]` in the unparsed payload escaped to `] ]` so it
+  can't terminate the comment early
+- `[Theory]` of all 17 supported UE TypeName → helper-token mappings
+- `HelperLuaResource.Read()` returns non-empty content with the
+  expected sentinel + public function names — catches packaging
+  regressions where the EmbeddedResource link is silently broken
+
+Tests went from 597 → **633** (504 → 540 C# + 62 dll_helpers + 31
+utf8_helpers).
+
+### What's covered now / what's pending
+
+Done (top of the call-UE-function strengthening plan): UFunction →
+non-interactive AA Script with baked params, deployable as a static
+piece of a CE table. Tools-menu helper export closes the loop on
+"how does the user get the helper file in the first place".
+
+Still pending in the same plan (in [docs/todo.md](todo.md)):
+2. Interesting-functions finder (keyword scorer surfacing
+   HP/MP/Gold/Teleport/etc.)
+3. UFunction metadata exposure (Blueprint `DisplayName`/`ToolTip`/
+   `Category`)
+4. Finder rev2 — fold metadata into the scorer
+5. InvokeParamDialog ScrollViewer overflow fix
+
+**Build #596, 633 tests passing (540 C# + 62 dll_helpers + 31
+utf8_helpers).**
+
+-----
+
+## 2026-05-10 (build 578-589) — Walker false-positive sweep + per-game invoke timeout + FillPointerSnapshot + drill-depth 0-6 band
 
 Three feature commits on `dev` (`c4f0644`, `95722fd`, `e49a599`) driven by
 analysis of cross-game logs (build 449 user submission with 7 games + the

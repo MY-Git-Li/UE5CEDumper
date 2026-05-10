@@ -17,50 +17,56 @@ Move items to [dev-log.md](dev-log.md) once they ship; update
 The "Call UE function" capability is currently the weakest link in the
 "discover → use" workflow. Five-step plan agreed 2026-05-10:
 
-### 1. AA-Script export from UI ([3a]) — **next**
+### 1. AA-Script export from UI ([3a]) — ✅ shipped (build 590-596)
 
-**Effort**: M | **Risk**: low
+**Effort**: M (actual: ~M as estimated) | **Risk**: low (no regressions)
 
-Add "Copy as CE AA Script" action to UFunction rows in LiveWalker /
-Class Structure / PropertySearch. Output is a non-interactive `{$lua}`
-block that calls the function with hardcoded args + comments showing
-parameter shapes:
+LiveWalker UFunction rows gained a third button **AA(Baked)** that
+opens the existing param dialog in `CopyBakedScript` mode and ships
+a non-interactive AA Script via AOBMaker / clipboard. Sister to the
+existing `Generate Script` (in-CE form) and `Pipe Invoke` (in-app
+test) buttons.
 
-```lua
-{$lua}
--- AddMoney(Amount=1000) — Engine.PlayerCharacter
--- Discovered offset: 0x7FF6XX..., Func ptr: 0x7FF6XX...
--- Param 0: int32 Amount  (e.g. 1000, -1000 to remove)
--- Param 1: bool bShowToast  (default true)
-local target = readQword("[BasePtr+0x18]")  -- TODO: replace with your CE pointer
-callFunctionUE5(target, "AddMoney", 1000, true)
-{$asm}
-```
+Architecture (revised from the original plan after design review):
+- **Helper file in CE table** — instead of inlining the mailbox
+  protocol in every AA Script, the generated script depends on
+  `ue5_invoke_helper.lua` being embedded in the user's .CT via
+  Cheat Engine's `Table -> Add File...` menu. The script uses
+  `findTableFile()` + `load()` to resolve the helper at runtime. No
+  filesystem fallback — explicit error + setup instructions if the
+  file is missing.
+- **Tools menu export** — `Tools -> Export CE Helper Lua File...`
+  streams the embedded helper to a user-chosen path so they can drop
+  it next to their .CT.
+- **Re-declaration safe** — helper functions use the
+  `if not invokeUFunction then function ... end
+  registerLuaFunctionHighlight('invokeUFunction') end` pattern so
+  multiple AA scripts loading the same helper don't redefine it.
+- **Print discipline** — generated scripts are silent on success
+  (auto-close the lua engine via `synchronize(getLuaEngine().Close())`
+  per the user's hygiene rule), print + showMessage on error.
 
-**Pre-req**: write a `callFunctionUE5(target, name, ...)` Lua helper in
-`scripts/ue5_invoke.lua` — wraps the existing pipe `invoke_function`
-command into a one-liner. Make it accept variadic args mapped to UE
-param types (int32, float, bool, FString, FName, UObject*).
+Files touched:
+- `scripts/ue5_invoke_helper.lua` (new, ~285 lines)
+- `ui/UE5DumpUI/Models/BakedParamValue.cs` (new)
+- `ui/UE5DumpUI/Services/BakedScriptGenerator.cs` (new, ~250 lines)
+- `ui/UE5DumpUI/Services/HelperLuaResource.cs` (new)
+- `ui/UE5DumpUI/Views/InvokeParamDialog.cs` (`InvokeDialogMode` enum,
+  `Copy AA Script` button, `CollectBakedValues` helper)
+- `ui/UE5DumpUI/ViewModels/LiveWalkerViewModel.cs` (`CopyBakedScriptCommand`)
+- `ui/UE5DumpUI/Views/LiveWalkerPanel.axaml` (third button column)
+- `ui/UE5DumpUI/Views/MainWindow.axaml` (Tools dropdown)
+- `ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs` (`ExportCeHelperLuaCommand`)
+- `ui/UE5DumpUI/UE5DumpUI.csproj` (EmbeddedResource link to helper)
+- `ui/UE5DumpUI/Resources/Strings/en.axaml` (button + tooltip + Tools menu strings)
+- `ui/UE5DumpUI.Tests/InvokeScriptTests.cs` (+36 test cases:
+  baked-render correctness for each UE type, struct flattening,
+  unparseable-input fallback, Lua-quote escaping, helper resource
+  reachable from assembly manifest)
 
-**Touch points**:
-- New `ui/UE5DumpUI/Services/CeAaScriptExportService.cs` (mirrors
-  `CsxExportService` shape)
-- New context menu item in `LiveWalkerView.axaml` /
-  `ClassStructPanel.axaml` / `PropertySearchPanel.axaml`
-- `scripts/ue5_invoke.lua` Lua helper
-- Tests: `CeAaScriptExportServiceTests` covering scalar / object /
-  string / no-arg cases
+Tests: 597 -> 633 (504 -> 540 C# + 62 dll_helpers + 31 utf8_helpers).
 
-**Deliberate non-goals**:
-- Resolving the runtime target pointer for the user — leave as `TODO:`
-  comment in the script. Their cheat table will have its own pointer
-  chain to plug in.
-- Auto-detecting "good" arg values — just stamp a literal placeholder
-  per param type (`1000` for int, `1.0` for float, `true` for bool, `""`
-  for string, `nil` for object). Step 4 (UFunction metadata) may later
-  let us be smarter.
-
-### 2. Interesting-functions finder ([3c])
+### 2. Interesting-functions finder ([3c]) — **next**
 
 **Effort**: M | **Risk**: low
 

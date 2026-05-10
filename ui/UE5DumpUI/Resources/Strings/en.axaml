@@ -192,6 +192,10 @@
     <sys:String x:Key="str.Export.Usmap">USMAP (.usmap)</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportHeader">Export .h</sys:String>
 
+    <!-- Tools (always-available menu; doesn't depend on a DLL connection) -->
+    <sys:String x:Key="str.Toolbar.Tools">Tools</sys:String>
+    <sys:String x:Key="str.Tools.ExportCeHelperLua">Export CE Helper Lua File...</sys:String>
+
     <!-- Property Search -->
     <sys:String x:Key="str.PropertySearch.QueryHint">Property name (e.g. Health, Mana, Gold)</sys:String>
     <sys:String x:Key="str.PropertySearch.TypeHint">Type filter (start typing — e.g. opt, weak)</sys:String>
@@ -234,6 +238,8 @@
     <sys:String x:Key="str.Tip.PreviewLimit">Struct sub-fields shown in Value column (0 = no preview)</sys:String>
     <sys:String x:Key="str.Tip.CsxDepth">Pointer drill-down depth (0 = flat). Applies to both CSX export and CE XML / CE Field copy. 0-4 normal; 5-6 deep — output size grows exponentially per level (depth 6 on UWorld can produce multi-MB CE XML).</sys:String>
     <sys:String x:Key="str.Tip.Export">Export object data in various formats</sys:String>
+    <sys:String x:Key="str.Tip.Tools">Tools that don't depend on a live DLL connection (helper file export, etc.)</sys:String>
+    <sys:String x:Key="str.Tip.Tools.ExportCeHelperLua">Save ue5_invoke_helper.lua to a file you can drop next to your .CT and add via Cheat Engine's Table -&gt; Add File... menu. Required by every "Copy AA Script (Baked)" output -- one-time setup per cheat table.</sys:String>
 
     <!-- Tooltips: Object Tree -->
     <sys:String x:Key="str.Tip.ObjectTree.Reload">Reload all objects from game process</sys:String>
