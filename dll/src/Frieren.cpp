@@ -21,6 +21,8 @@
 #include <cstring>
 #include <mutex>
 #include <algorithm>
+#include <thread>
+#include <chrono>
 
 // Global cached state (also accessed by PipeServer)
 uintptr_t   g_cachedGObjects        = 0;
@@ -492,14 +494,115 @@ uintptr_t UE5_FindFunctionByName(uintptr_t classAddr, const char* funcName) {
     return 0;
 }
 
-// ProcessEvent vtable detection — version-based with ±2 probing
-static int DetectProcessEventVTableOffset() {
-    // Empirical vtable byte offsets for UObject::ProcessEvent (Shipping builds, MSVC x64)
-    //   UE 4.18-4.19: 0x208 (index 65)
-    //   UE 4.20-4.24: 0x210 (index 66)
-    //   UE 4.25-4.27: 0x218 (index 67)
-    //   UE 5.0-5.4:   0x220 (index 68)
-    //   UE 5.5+:      0x228 (index 69)
+// ============================================================================
+// ProcessEvent vtable detection (build 648+)
+//
+// Background: the pre-build-648 detector picked the vtable byte offset purely
+// from a hardcoded UE-version table and "validated" the slot only by reading
+// 1 byte to confirm it pointed to *some* code. Every UObject virtual passes
+// that check, so on Geri (UE 4.27) and ES2 (UE 5.5) we silently hooked an
+// adjacent virtual — the invoke queue never drained, KismetMathLibrary
+// returns sat at 0, and the bug slept for 600+ builds because verify mode
+// (the first reader of the return slot) only landed in build 637.
+//
+// New approach (cribbed from Dumper-7 vendor/Dumper-7/Dumper/Engine/Private/
+// OffsetFinder/Offsets.cpp:15-74): iterate the UObject vtable slot-by-slot,
+// fetch each candidate function's body, and look for two `TEST [reg+disp32],
+// imm32` instructions that ProcessEvent uniquely checks against:
+//   1) imm32 = 0x00000400  (FUNC_Native)         — within first 0x400 bytes
+//   2) imm32 = 0x00400000  (FUNC_HasOutParms /
+//                           FUNC_NetServer mask) — within first 0xF00 bytes
+// Both `disp32` operands point at UFunction::FunctionFlags (~0x88..0xC0 across
+// UE versions). We don't need to know the exact FunctionFlags offset — just
+// that *some* `TEST DWORD PTR [reg+disp32], imm32` pair exists with the right
+// immediates. Function-fingerprinting beats slot-fingerprinting because slot
+// indexes drift with UObject virtual additions across versions (and across
+// publisher forks), but the FUNC_Native test inside ProcessEvent is stable.
+//
+// Fallback: if no slot matches the pattern (e.g. heavily-optimised LTO build
+// that rewrote the test sequence), fall back to the legacy version-based
+// table so we degrade gracefully instead of bricking the whole invoke path.
+// ============================================================================
+
+// 10-byte signatures for `F7 /0 disp32, imm32` (TEST [reg+disp32], imm32):
+//   [F7] [ModRM] [disp32 low byte = FF_off] [disp32 high 3 bytes = 0] [imm32]
+// ModRM and the FF_off byte are wildcarded — FF_off varies by UE version
+// (0x88..0xC0, always < 0x100 so the high 3 bytes of disp32 are 0).
+// The remaining 7 bytes pin the instruction shape and the literal imm32.
+namespace {
+    constexpr uint8_t kPePat1Bytes[10] = { 0xF7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00 };
+    constexpr char    kPePat1Mask[11] =   "x??xxxxxxx";   // 10 chars + NUL
+    constexpr uint8_t kPePat2Bytes[10] = { 0xF7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00 };
+    constexpr char    kPePat2Mask[11] =   "x??xxxxxxx";
+
+    // Linear pattern search with 'x' = exact / '?' = wildcard mask.
+    // Returns true if found within haystack[0..size).
+    bool ContainsPattern(const uint8_t* haystack, size_t haystackSize,
+                         const uint8_t* pattern, const char* mask, size_t patternSize) {
+        if (haystackSize < patternSize) return false;
+        for (size_t i = 0; i <= haystackSize - patternSize; ++i) {
+            bool ok = true;
+            for (size_t j = 0; j < patternSize; ++j) {
+                if (mask[j] == 'x' && haystack[i + j] != pattern[j]) { ok = false; break; }
+            }
+            if (ok) return true;
+        }
+        return false;
+    }
+
+    // Sample-many-objects vtable extractor. Most slots only need one valid
+    // UObject*, but a few pathological GObjects entries near the head can be
+    // garbage CDOs with NULL or torn vtable pointers — walk a window of 200.
+    uintptr_t FindAnyValidVTable() {
+        for (int i = 0; i < Aura::GetCount() && i < 200; ++i) {
+            uintptr_t obj = Aura::GetByIndex(i);
+            if (!obj) continue;
+            uintptr_t vt = 0;
+            if (Macht::ReadSafe(obj, vt) && vt) return vt;
+        }
+        return 0;
+    }
+}  // namespace
+
+// Pattern-based detection: scan a window of vtable slots, return the byte
+// offset whose function body contains both Dumper-7 TEST patterns. -1 = miss.
+static int DetectProcessEventVTableOffsetByPattern(uintptr_t vtable) {
+    // Vtable window: every UE version we support places PE between 0x100 and
+    // 0x300. Step 8 = pointer stride. ~64 slots × ~0xF00 byte read is fast.
+    constexpr int kMinOffset   = 0x100;
+    constexpr int kMaxOffset   = 0x300;
+    constexpr size_t kBodySize = 0xF00;
+
+    uint8_t body[kBodySize];
+
+    for (int off = kMinOffset; off <= kMaxOffset; off += 8) {
+        uintptr_t funcAddr = 0;
+        if (!Macht::ReadSafe(vtable + off, funcAddr) || !funcAddr) continue;
+
+        // Read function body; failure means this slot points somewhere
+        // unreadable (broken vtable entry) — skip without logging spam.
+        if (!Macht::ReadBytesSafe(funcAddr, body, kBodySize)) continue;
+
+        // Pattern 1 (FUNC_Native test) must be within first 0x400 bytes —
+        // ProcessEvent's prologue does this very early.
+        if (!ContainsPattern(body, 0x400, kPePat1Bytes, kPePat1Mask, sizeof(kPePat1Bytes))) continue;
+
+        // Pattern 2 (high-flag test) can live deeper into the function body.
+        if (!ContainsPattern(body, kBodySize, kPePat2Bytes, kPePat2Mask, sizeof(kPePat2Bytes))) continue;
+
+        LOG_INFO("DetectProcessEvent (pattern): match at vtable+0x%X -> 0x%llX",
+                 off, (unsigned long long)funcAddr);
+        return off;
+    }
+    return -1;
+}
+
+// Legacy version-based detection — kept as a fallback for cases where the
+// pattern scanner whiffs (unusual compiler output, heavily-optimised LTO,
+// custom publisher fork). Not authoritative anymore: a "success" return
+// here will be cross-checked by post-install hook-fire-count validation
+// in TryInstallGameThreadHook below.
+static int DetectProcessEventVTableOffsetByVersion(uintptr_t vtable) {
     int primary;
     if (g_cachedUEVersion >= 550)      primary = 0x228;
     else if (g_cachedUEVersion >= 500) primary = 0x220;
@@ -507,27 +610,9 @@ static int DetectProcessEventVTableOffset() {
     else if (g_cachedUEVersion >= 420) primary = 0x210;
     else                               primary = 0x208;
 
-    // Find any valid UObject to read vtable from
-    uintptr_t testObj = 0;
-    for (int i = 0; i < Aura::GetCount() && i < 200; ++i) {
-        testObj = Aura::GetByIndex(i);
-        if (testObj) break;
-    }
-    if (!testObj) {
-        LOG_ERROR("DetectProcessEvent: no valid UObject in GObjects");
-        return -1;
-    }
-
-    uintptr_t vtable = 0;
-    if (!Macht::ReadSafe(testObj, vtable) || !vtable) {
-        LOG_ERROR("DetectProcessEvent: cannot read vtable from obj 0x%llX",
-                  (unsigned long long)testObj);
-        return -1;
-    }
-
-    // Log nearby vtable entries for debugging
-    LOG_INFO("DetectProcessEvent: UE=%u primary=0x%X vtable=0x%llX",
-             g_cachedUEVersion, primary, (unsigned long long)vtable);
+    LOG_WARN("DetectProcessEvent (fallback): pattern scan missed, "
+             "falling back to UE=%u version-table primary=0x%X",
+             g_cachedUEVersion, primary);
     for (int delta = -16; delta <= 16; delta += 8) {
         int off = primary + delta;
         if (off < 0) continue;
@@ -538,18 +623,13 @@ static int DetectProcessEventVTableOffset() {
                  delta == 0 ? "  <-- primary" : "");
     }
 
-    // Validate primary: must point to readable code
     uintptr_t funcAddr = 0;
     if (Macht::ReadSafe(vtable + primary, funcAddr) && funcAddr) {
         uint8_t test = 0;
         if (Macht::ReadBytesSafe(funcAddr, &test, 1)) {
-            LOG_INFO("DetectProcessEvent: using primary 0x%X -> 0x%llX",
-                     primary, (unsigned long long)funcAddr);
             return primary;
         }
     }
-
-    // Probe ±8, ±16
     for (int d : { 8, -8, 16, -16 }) {
         int off = primary + d;
         if (off < 0) continue;
@@ -557,14 +637,29 @@ static int DetectProcessEventVTableOffset() {
         if (Macht::ReadSafe(vtable + off, funcAddr) && funcAddr) {
             uint8_t test = 0;
             if (Macht::ReadBytesSafe(funcAddr, &test, 1)) {
-                LOG_WARN("DetectProcessEvent: primary 0x%X failed, using 0x%X -> 0x%llX",
-                         primary, off, (unsigned long long)funcAddr);
                 return off;
             }
         }
     }
+    return -1;
+}
 
-    LOG_ERROR("DetectProcessEvent: all probes failed");
+// Top-level resolver. Pattern-based first, version-table second. Caller is
+// expected to additionally validate by post-install hook-fire-count check.
+static int DetectProcessEventVTableOffset() {
+    uintptr_t vtable = FindAnyValidVTable();
+    if (!vtable) {
+        LOG_ERROR("DetectProcessEvent: no valid UObject vtable available");
+        return -1;
+    }
+
+    int off = DetectProcessEventVTableOffsetByPattern(vtable);
+    if (off > 0) return off;
+
+    off = DetectProcessEventVTableOffsetByVersion(vtable);
+    if (off > 0) return off;
+
+    LOG_ERROR("DetectProcessEvent: both pattern scan and version fallback failed");
     return -1;
 }
 
@@ -597,6 +692,15 @@ static uintptr_t ResolveProcessEventAddr() {
 
 /// Try to install the game-thread ProcessEvent hook.
 /// Called lazily on first UE5_CallProcessEvent invocation.
+///
+/// After a successful MinHook install, spawns a detached validator thread
+/// (build 648+) that waits 1500ms and confirms Stark::GetHookFireCount() is
+/// non-zero. UObject::ProcessEvent fires many times per second under normal
+/// gameplay (every tick, every input dispatch, every anim notify), so a zero
+/// reading after 1.5s is strong evidence we hooked an adjacent virtual
+/// rather than PE itself. Logs ERROR loudly when that happens — silent
+/// vtable-misdetection is the whole reason the bug at builds 1..647
+/// stayed buried, so we now refuse to keep that failure mode silent.
 static void TryInstallGameThreadHook() {
     static bool s_hookAttempted = false;
     if (s_hookAttempted) return;
@@ -608,11 +712,36 @@ static void TryInstallGameThreadHook() {
         return;
     }
 
-    if (Stark::InstallHook(peAddr)) {
-        LOG_INFO("GameThreadDispatch: hook installed, invoke will use game-thread dispatch");
-    } else {
+    if (!Stark::InstallHook(peAddr)) {
         LOG_WARN("GameThreadDispatch: hook install failed, invoke will use direct call (unsafe)");
+        return;
     }
+    LOG_INFO("GameThreadDispatch: hook installed at 0x%llX, validator armed (1500ms)",
+             (unsigned long long)peAddr);
+
+    // Detached validator: don't block the caller — UE5_Init must keep
+    // running. The validator just observes and logs; remediation (e.g.
+    // unhook + re-detect with a different strategy) is intentionally out
+    // of scope for v1 since unhook-while-game-thread-may-be-inside-the-
+    // trampoline is itself unsafe (see Stark::RemoveHook comment).
+    std::thread([peAddr]() {
+        uint64_t before = Stark::GetHookFireCount();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+        uint64_t after  = Stark::GetHookFireCount();
+        uint64_t delta  = after - before;
+        if (delta == 0) {
+            LOG_ERROR("GameThreadDispatch: VALIDATION FAILED — hook at 0x%llX fired 0 "
+                      "times in 1500ms. We are almost certainly hooked on the wrong "
+                      "vtable slot. UFunction invokes via this path WILL time out. "
+                      "(If the game is paused/main-menu, ignore; otherwise this is a "
+                      "real misdetection — please collect logs.)",
+                      (unsigned long long)peAddr);
+        } else {
+            LOG_INFO("GameThreadDispatch: validation OK — hook fired %llu times "
+                     "in 1500ms (hook=0x%llX)",
+                     (unsigned long long)delta, (unsigned long long)peAddr);
+        }
+    }).detach();
 }
 
 int32_t UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t params) {

@@ -53,4 +53,11 @@ void SetInvokeTimeoutMs(int32_t timeoutMs);
 /// Read the current invoke timeout in milliseconds (post-clamping).
 int32_t GetInvokeTimeoutMs();
 
+/// Total number of times HookedProcessEvent has fired since this process
+/// started. Used by post-install validation (build 648+) to confirm the
+/// hook was actually placed on UObject::ProcessEvent and not on an
+/// adjacent UObject virtual: a real PE hook fires many times per second
+/// during normal gameplay, a wrong hook fires 0 times. Thread-safe.
+uint64_t GetHookFireCount();
+
 } // namespace Stark

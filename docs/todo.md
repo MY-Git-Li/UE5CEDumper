@@ -255,6 +255,80 @@ this one bumped to build 611.
 Features that shipped + unit tests pass but need real game smoke tests
 before we can declare them solid on multiple titles.
 
+### ~~ProcessEvent vtable fix — partial confirmation on ES2 (UE 5.5)~~ — ✅ FULL VERIFICATION (build 648, 2026-05-11)
+
+**Effort**: 0 (done) | **Risk**: — | **Why**: Verified end-to-end on
+**two UE versions** spanning the original repro range:
+
+| Game | UE | Actual PE slot | Old hardcoded | Validator | Scenarios passed |
+|---|---|:---:|:---:|---|---|
+| EverSpace 2 | 5.5 | `vtable+0x278` | `0x228` (off 10 slots) | 2360 fires / 1500ms | KismetMath Add_IntInt=7, Multiply_DoubleDouble=12, InventoryLib::GetTotalCargoSpaceOfShip=73 |
+| The Artisan of Glimmith (Geri) | 4.27 | `vtable+0x220` | `0x218` (off 1 slot) | 1260 fires / 1500ms | KismetMath Add_IntInt=7, Multiply_FloatFloat=12, **CharacterMovementComponent::GetMaxJumpHeight=89.99 (instance method, game-thread dispatch)**, **PlayerCameraManager::GetCameraLocation=FVector (struct return, game-thread dispatch)** |
+
+**KismetMathLibrary "stub" hypothesis is now falsified on both UE
+versions** (see retracted [feedback_kismet_stubs.md]). Both
+static-native fast path (KismetMath) AND game-thread dispatch (Geri
+scenarios 3 + 4 are instance methods on CharacterMovementComponent /
+PlayerCameraManager) work correctly.
+
+Remaining nice-to-have verification (lower priority — fix is already
+considered solid):
+- A UE 4.18-4.24 game (smaller vtable, lower slot offset) to make
+  sure the pattern scanner's `[0x100, 0x300]` window catches lower
+  slot positions. Pick from Octopath Traveler / IDOLM@STER STARLIT
+  SEASON / DQ XI S.
+- A custom publisher fork (Square Enix DQ/FF7 series) to confirm the
+  pattern scan finds PE even when the binary has been heavily
+  modified post-cook.
+
+### Mimic: zero ReturnValue slot before invoke so verify-mode dumps are unambiguous
+
+**Effort**: S | **Risk**: low | **Why**: ES2 live test 2026-05-11
+showed `GetTotalCargoSpaceOfShip(0)` returning Before/After dumps:
+```
+Before: 00 00 00 00 49 00 00 00
+After : 00 00 00 00 49 00 00 00   <- 0x49 = 73 in ReturnValue slot
+```
+The `0x49` was identical pre- and post-invoke, so we can't tell apart
+"function ran and wrote 73" from "function ran but didn't touch
+ReturnValue (leaving stale 73 from previous call)". Fix:
+`Mimic::HandleInvoke` should overwrite the ReturnValue slot with a
+sentinel (e.g. `0xCDCDCDCDCDCDCDCD`) or zero before calling PE. Then
+the After dump unambiguously shows what PE wrote — if it's still the
+sentinel, PE didn't write the return slot. Affects: all verify-mode
+AA Scripts. Trivial 2-line patch in `dll/src/Mimic.cpp`'s static-
+native fast path + the game-thread dispatch path.
+
+### CE Lua hang during AA Script activation (ES2 2026-05-11 session 2)
+
+**Effort**: M (mitigation) | **Risk**: low | **Why**: After restarting
+the game (new proxy DLL load) + UE5DumpUI, the user tried Scenario 3
+again. DLL stayed healthy: `find_instances InventoryLib: 1 found` at
+22:27:23, then 72-second silence with no `Mailbox: received cmd=4`,
+ending with `Client disconnected` at 22:28:35 + `PipeServer Stopped`
+at 22:28:43. The AA Script never reached the mailbox — CE Lua either
+froze or showed a hidden error dialog. Mitigations to consider:
+
+1. **Re-arm helper-injected check on every UI Connect**: when UI
+   connects to a fresh DLL session, optionally re-prompt the user
+   (or auto-inject) the `ue5_invoke_helper.lua` if AOBMaker is
+   reachable. Currently the helper persists in the .CT across CE
+   restarts but NOT across game restarts in proxy mode (since proxy
+   doesn't touch the CT). Easy to forget.
+2. **Mailbox heartbeat on the AA Script side**: have the generated
+   AA Script `print()` a "starting" line before writing to the
+   mailbox, so the CE Lua log shows progress even if the mailbox
+   write later hangs.
+3. **Timeout/watchdog on the CE Lua side**: less feasible because
+   we don't control CE's Lua engine. But we can add an explicit
+   `if not g_invokeMailbox then showMessage('Helper not loaded —
+   run Tools → Inject Helper first'); return end` early-exit in
+   the helper itself.
+
+We can't distinguish AA-Script-error from CE-Lua-freeze from our DLL
+side because the mailbox just never receives anything. So this is
+primarily a UX hardening task, not a correctness bug.
+
 ### Static-native ProcessEvent fast path (build 636)
 
 **Effort**: S | **Risk**: low | **Why**: Verified on ES2 (logs show
@@ -313,98 +387,78 @@ Test plan:
 
 -----
 
-## CRITICAL: ProcessEvent vtable detection is wrong (discovered build 647 live test)
+## ~~CRITICAL: ProcessEvent vtable detection is wrong~~ — ✅ shipped (build 648)
 
-**Effort**: M | **Risk**: med | **Why**: Live testing on Geri (UE 4.27,
-The Artisan of Glimmith) reproduced the same "static-native fast path
-returns 0" pattern we saw on ES2 (UE 5.5). Two different UE versions,
-same symptom -> not a UE 5.5 / KismetMathLibrary quirk. Root cause
-traced to `DetectProcessEventVTableOffset` in
-[dll/src/Frieren.cpp:495](../dll/src/Frieren.cpp).
+**Effort**: M (actual: ~M) | **Risk**: med (no regressions in 786-test
+suite; live-game smoke test pending — see "Pending live-game
+verification" section above).
 
-### What's wrong
+Replaced the version-table vtable detector with a **function-body
+pattern scan** modeled on Dumper-7's approach (vendor/Dumper-7/Dumper/
+Engine/Private/OffsetFinder/Offsets.cpp:15-74). Iterate vtable slots in
+the `[0x100, 0x300]` window, read each candidate function's first 0xF00
+bytes, look for two `TEST [reg+disp32], imm32` instructions that
+ProcessEvent uniquely contains:
 
-The function picks a vtable byte offset purely by hardcoded UE-version
-table:
+- Pattern 1 (within first 0x400 bytes): `imm32 = 0x00000400` (FUNC_Native test)
+- Pattern 2 (within first 0xF00 bytes): `imm32 = 0x00400000` (high-flag test)
 
-```
-UE 4.18-4.19: 0x208
-UE 4.20-4.24: 0x210
-UE 4.25-4.27: 0x218
-UE 5.0-5.4:   0x220
-UE 5.5+:      0x228
-```
+`disp32` points at `UFunction::FunctionFlags` (`0x88..0xC0` across UE
+versions) — we wildcard those bytes so the scan is FunctionFlags-offset
+agnostic. The old UE-version-table heuristic is kept as a `LOG_WARN`
+fallback path for unusual compiler output (heavily-optimised LTO,
+custom publisher fork).
 
-The "validation" only checks that `vtable[offset]` points to *readable
-code* -- which every vtable entry does (all UObject virtual methods are
-real functions). So the check passes for any offset and the wrong slot
-gets used silently.
+**Belt-and-braces validation** (the real safety net): `Stark` now
+exposes `GetHookFireCount()`, an atomic counter ticked at the top of
+`HookedProcessEvent`. After `InstallHook` succeeds, `Frieren::
+TryInstallGameThreadHook` spawns a detached 1500ms validator thread —
+if the counter is still 0 when it wakes up, log a loud `[ERROR]
+GameThreadDispatch: VALIDATION FAILED` with the hooked address. UE's
+real ProcessEvent fires many times per second under normal gameplay,
+so a zero reading after 1.5s is strong evidence of a wrong-slot hook.
+Silent vtable-misdetection is the whole reason this bug slept for
+600+ builds; we now refuse to keep that failure mode silent.
 
-### Evidence of the bug
+Files touched:
+- `dll/src/Frieren.cpp` — new `DetectProcessEventVTableOffsetByPattern`
+  + legacy `ByVersion` fallback + post-install validator thread
+- `dll/src/Stark.h` + `Stark.cpp` — `s_hookFireCount` atomic +
+  `GetHookFireCount()` API; counter ticked in `HookedProcessEvent`
+- `docs/lessons-learned.md` — new entry "Vtable-index detection is
+  unreliable" + "Validate hooks by side-effect, not metadata"
+- `docs/dev-log.md` — build 648 entry
 
-- **ES2 (UE 5.5)** with hook at `vtable+0x220 -> 0x7FF79416A2E0`: every
-  instance-method invoke (`CharacterMovementComponent::GetMaxJumpHeight
-  WithJumpTime`, `Inventory::GetTotalCargoSpaceIncreasingAmount`, ...)
-  times out at -5. Game thread is alive (player can move; game thread
-  fires PE many times per second for tick/anim) but our queue never
-  drains -> hook isn't on PE.
-- **Geri (UE 4.27)** with hook at `vtable+0x218 -> 0x7FF607BEA200`:
-  same pattern. Static-native fast path "succeeds" (no crash, returns
-  0) because we're calling some adjacent UObject virtual whose ABI
-  happens to be compatible enough not to AV but doesn't actually do
-  anything useful with our params.
+Tests: 786 total (693 C# + 62 dll_helpers + 31 utf8_helpers) — no
+regressions. Build 648 on dev.
 
-### Why it took until now to surface
+### Pending live-game re-verification (CRITICAL)
 
-- Pre-build-637 (verify mode), no one read return values from invoked
-  functions -- "no crash" was treated as success.
-- Pre-build-636 (static-native fast path), all KismetMathLibrary tests
-  hit `-5` timeout on the queued path; we attributed it to "idle game,
-  game thread not pumping" -- an explanation that *would* be true if
-  the hook were on the right slot but never got falsified.
-- Static-native fast path made the bypass work for `Native | Static`
-  helpers (so they don't time out) but the underlying "we're not
-  calling ProcessEvent" issue stayed hidden until verify mode actually
-  decoded the return slot.
+Until the hook is observed firing on real games, treat the build 648
+fix as "compiles + tests pass" — not "live-verified". Need:
 
-### Fix plan
+1. Run on **ES2 (UE 5.5)** with a player-controlled session, look for
+   `GameThreadDispatch: validation OK — hook fired N times` in
+   `init-*.log` after first invoke. The instance-method invokes that
+   previously timed out at `-5` should now succeed.
+2. Run on **Geri / The Artisan of Glimmith (UE 4.27)**, same check.
+3. Re-test KismetMathLibrary helpers ([feedback_kismet_stubs.md](
+   ../../../../../../C:/Users/user/.claude/projects/D--Github-UE5CEDumper/memory/feedback_kismet_stubs.md))
+   — with a correctly-hooked PE they *might* return real values; if
+   they don't, the stub-pattern hypothesis stands. Either way, update
+   the memory note based on actual observation.
 
-1. **Replace vtable-index detection with AOB scan of the PE prologue.**
-   UE's `UObject::ProcessEvent` has a recognisable prologue across
-   versions (RE-UE4SS / Dumper-7 reference both have stable patterns).
-   Scan `.text` of the game module for the sig, hook the absolute
-   address, drop the vtable indirection entirely.
-2. **Validate the hook by side-effect.** After installing, set a one-
-   shot diagnostic that confirms `HookedProcessEvent` fires within
-   N milliseconds (game does PE many times per second; if we don't
-   see hook hits in 1s, the install missed). Log a clear ERROR --
-   the silent-failure mode here is the whole reason this bug stayed
-   hidden for 600+ builds.
-3. **Belt-and-braces option** while #1 is in flight: probe each
-   candidate vtable offset by hooking it temporarily, sleeping a few
-   hundred ms, checking whether the trampoline fired, and unhooking
-   if it didn't. The right slot is the one that actually fires under
-   live gameplay.
+### Out of scope for build 648
 
-### Files in scope
-
-- `dll/src/Frieren.cpp` -- `DetectProcessEventVTableOffset` (replace
-  with AOB-based resolver)
-- `dll/src/Stark.cpp` -- `InstallHook` (add post-install validation)
-- `dll/src/Himmel.h` / `Himmel.cpp` -- new AOB pattern for
-  `UObject::ProcessEvent`
-- `docs/lessons-learned.md` -- new entry "Vtable-index detection is
-  unreliable"
-
-### Out of scope for v1
-
-- Calling KismetMathLibrary helpers via the BP FastCall path (separate
-  feature, not needed once ProcessEvent works).
-- Re-checking "KismetMathLibrary stub" hypothesis from
-  [feedback_kismet_stubs.md](../../../../../../C:/Users/user/.claude/projects/D--Github-UE5CEDumper/memory/feedback_kismet_stubs.md)
-  -- with a correctly-hooked ProcessEvent, those static helpers
-  *might* actually return correct values. We can't know until #1 is
-  done. Keep the lesson but flag it as "needs re-verification post-fix".
+- AOB scan of the PE prologue (the original `Fix plan` step 1). The
+  function-body pattern approach is functionally equivalent — both
+  rely on PE's distinctive byte sequence — but is more robust because
+  we don't have to guess where the prologue lives in `.text`. Can
+  revisit if the function-body scan whiffs on a real game.
+- Hot re-hook if validation fails. Unhook-while-game-thread-may-be-
+  inside-the-trampoline is itself unsafe (see `Stark::RemoveHook`
+  comment); the validator just observes and logs. User reaction is to
+  collect logs + report so we can extend pattern coverage.
 
 -----
 

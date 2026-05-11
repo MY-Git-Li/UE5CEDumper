@@ -148,17 +148,42 @@ detection — wait for a real misdetection report before adding.
 - **TimeSplitters Rewind Early Access V0.3.3** ✅ (UE 4.25): full scan,
   GWorld OK.
 - **The Artisan of Glimmith** ✅ (UE 4.27, exe `Geri-Win64-Shipping.exe`,
-  157K objects): full scan + GWorld OK. Used as cross-version
-  reproducer for the build 647 ProcessEvent vtable-detection bug —
-  shows the same `result=0` invoke pattern as ES2 (UE 5.5), confirming
-  the bug is not UE-5.5-specific. Fix tracked in
-  [docs/todo.md](todo.md#critical-processevent-vtable-detection-is-wrong-discovered-build-647-live-test).
+  24K objects): full scan + GWorld OK. Build 647 cross-version
+  reproducer for the wrong-vtable-slot bug (PE was on `vtable+0x220`,
+  the old detector picked `0x218` — off by 1 slot) — **fixed and
+  fully re-verified on build 648 (2026-05-11)**: pattern scanner
+  picks the correct slot, validator confirms 1260 hook fires in
+  1500ms, and four real invokes succeed: KismetMath helpers (Add_IntInt
+  = 7, Multiply_FloatFloat = 12) via static-native fast path, plus
+  instance methods via game-thread dispatch (CharacterMovementComponent
+  ::GetMaxJumpHeight = 89.99 float, PlayerCameraManager::
+  GetCameraLocation = FVector struct).
 - **Squad-Win64-Shipping** ✅ (UE 5.7, 240K objects): build 488 user
   reported 13 `get_object_list` 0xA0 UTF-8 exceptions → root cause was
   Serie wide-path surrogate encoding bug, fixed in build 555. Should
   now work clean post-560.
+- **Barn Finders** ✅ (UE 4.25, 137K objects, build 560 user logs):
+  full scan OK, UE5-Extended layout (strict). GWorld ✅. No new issues
+  surfaced — pre-existing `find_by_address` `stoull` exception on
+  malformed `0xrank` input from the Lookup field is already fixed in
+  build 561+ (UI side `AddressHelper.TryNormalizeAddress` + DLL side
+  `Renge::TryStrToAddr` noexcept). Walker Misaligned-EnumProperty
+  warnings (163 in session) cleaned up by `Scharf.h` in build 582.
+- **Colossal** ✅ (UE 5.03, 41K objects, build 560 user logs, publisher:
+  Atan, exe `Colossal-Win64-Shipping.exe`): full scan OK, UE5-Extended
+  layout (strict), TaggedFFieldVariant (UE5.3+). GWorld ✅
+  (`GWLD_ES2_6`). Project still ships Epic default copyright/company
+  placeholder strings — no publisher thumbprint match expected.
+- **Extinction** ✅ (UE 4.15, 230K objects, build 560 user logs,
+  publisher: Modus Games, exe `Extinction.exe` under `Blink/Binaries/
+  Win64/`): **lowest UE version verified end-to-end** — expands the
+  previously-documented 4.18+ floor down to 4.15. Flat (non-chunked)
+  `FFixedUObjectArray`, UProperty mode (UE < 4.25), `UField::Next=+0x28`.
+  Patterns: GOBJ_RE2 (1.8s, 2 batches) / GNAM_CT3 (4.6s, 4 batches) /
+  GWLD_G42_1 (3.3s, 3 batches) — ~10s total scan but all three globals
+  resolved on first scan and validated. GWorld ✅.
 
-GWorld success ratio: **25 / 26 (~96%)**. Untested: Star Wars Jedi.
+GWorld success ratio: **28 / 29 (~97%)**. Untested: Star Wars Jedi.
 Failing: Satisfactory (modular DLL — pattern likely needs to live in
 `CoreUObject-Win64-Shipping.dll` instead of the main exe).
 

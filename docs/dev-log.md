@@ -11,7 +11,130 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
-## 2026-05-10 (latest, dev branch, build 637) — Verify Return Value toggle on baked AA template
+## 2026-05-11 (latest, dev branch, build 648) — ProcessEvent vtable detection rewrite + hook-fire validation
+
+Closes the CRITICAL `ProcessEvent vtable detection is wrong` entry
+opened build 647. Two-layer fix: (1) replace the version-table detector
+with a function-body pattern scan modeled on Dumper-7, and (2) add a
+post-install hook-fire-count validator so silent vtable-misdetection
+can never sleep for 600+ builds again.
+
+### Background (re-stated for the log)
+
+Pre-build-648 `DetectProcessEventVTableOffset` picked a vtable byte
+offset from a hardcoded UE-version table and "validated" the slot by
+reading 1 byte to confirm it pointed at code. Every UObject virtual
+passes that check — so on Geri (UE 4.27, slot 0x218) and ES2 (UE 5.5,
+slot 0x220), we hooked an adjacent virtual silently. The invoke queue
+never drained (`-5` timeouts), static-native fast path "succeeded"
+with `result=0` because the wrong virtual's ABI was compatible enough
+not to AV but didn't actually run the requested UFunction. Bug slept
+600+ builds because verify-mode (the first reader of the return slot)
+only landed in build 637.
+
+### Layer 1 — pattern-based detection (new primary path)
+
+`DetectProcessEventVTableOffsetByPattern(vtable)` iterates vtable slots
+in `[0x100, 0x300]` step 8, reads each candidate function's first 0xF00
+bytes via `Macht::ReadBytesSafe`, and looks for two distinctive
+`TEST [reg+disp32], imm32` instructions ProcessEvent uniquely contains:
+
+```
+Pattern 1 (within first 0x400 bytes):  F7 ?? ?? 00 00 00 00 04 00 00
+                                       └─────────────────────────────┘
+                                       TEST [reg + UFunction::FunctionFlags], 0x00000400  (FUNC_Native)
+
+Pattern 2 (within first 0xF00 bytes):  F7 ?? ?? 00 00 00 00 00 40 00
+                                       └─────────────────────────────┘
+                                       TEST [reg + UFunction::FunctionFlags], 0x00400000  (high-flag mask)
+```
+
+`disp32` low byte (FunctionFlags offset) and the ModRM byte are
+wildcarded — so the scan is FunctionFlags-offset agnostic and matches
+any UE version 4.18..5.7+ without per-version branching. First slot
+whose function body matches *both* patterns is ProcessEvent.
+
+The legacy version-table heuristic (`DetectProcessEventVTableOffsetByVersion`)
+is retained as a `LOG_WARN` fallback for unusual compiler output. Even
+when the fallback fires, layer 2 below catches a miss.
+
+### Layer 2 — post-install hook-fire validation (real safety net)
+
+`Stark` exposes a new atomic counter `s_hookFireCount`, ticked at the
+very top of `HookedProcessEvent` (relaxed memory order — single
+non-zero observation is all we need). Public API
+`Stark::GetHookFireCount()` returns the running total.
+
+After `Stark::InstallHook` succeeds, `Frieren::TryInstallGameThreadHook`
+spawns a detached validator thread:
+
+```cpp
+std::thread([peAddr]() {
+    uint64_t before = Stark::GetHookFireCount();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    uint64_t after  = Stark::GetHookFireCount();
+    if (after - before == 0) {
+        LOG_ERROR("GameThreadDispatch: VALIDATION FAILED — hook at 0x%llX "
+                  "fired 0 times in 1500ms. We are almost certainly hooked "
+                  "on the wrong vtable slot. UFunction invokes WILL time out.");
+    } else {
+        LOG_INFO("GameThreadDispatch: validation OK — hook fired %llu times "
+                 "in 1500ms");
+    }
+}).detach();
+```
+
+Detached so DLL init doesn't block on the 1.5s sleep. UE's real
+ProcessEvent fires many times per second during normal gameplay (every
+tick, every input dispatch, every anim notify), so a zero count after
+1.5s is high-confidence evidence of a wrong-slot hook. Out of scope
+for v1: hot re-hook on validation failure — unhook-while-thread-may-be-
+inside-trampoline is unsafe (see `Stark::RemoveHook` comment), so the
+validator just observes and logs. User reaction = collect logs + ping
+us so we can extend pattern coverage.
+
+### Reference
+
+Pattern technique cribbed from [Dumper-7](https://github.com/Encryqed/Dumper-7),
+specifically `vendor/Dumper-7/Dumper/Engine/Private/OffsetFinder/
+Offsets.cpp:15-74` (`Off::InSDK::ProcessEvent::InitPE_Windows`). Dumper-7
+also documents a `L"Accessed None"` string-xref fallback we haven't
+adopted yet — the dual-TEST pattern is enough to catch every UE 4.18+
+version we ship to without a string scan.
+
+### Files touched
+
+- `dll/src/Frieren.cpp`:
+  - `DetectProcessEventVTableOffset` — split into `ByPattern` (new
+    primary) + `ByVersion` (legacy fallback) + top-level resolver
+  - `TryInstallGameThreadHook` — new detached validator thread
+  - Anonymous namespace: `ContainsPattern` byte-pattern matcher (10-line
+    linear scan with `'x' / '?'` mask), `FindAnyValidVTable` helper,
+    pattern byte literals + masks
+- `dll/src/Stark.h` — new `GetHookFireCount()` API entry
+- `dll/src/Stark.cpp`:
+  - `s_hookFireCount` atomic counter (relaxed memory order)
+  - `HookedProcessEvent` — increment counter at top
+  - `GetHookFireCount()` implementation
+- `docs/todo.md` — CRITICAL section marked ✅ shipped, moved live-game
+  re-verification details into "Pending live-game verification" pool
+- `docs/lessons-learned.md` — new entries (see below)
+- `docs/roadmap.md` — capability matrix unchanged; tested-games entry
+  for Geri updated separately (when live verification lands)
+
+### Live-game smoke test still pending
+
+Treat build 648 as "compiles + tests pass + theoretically correct" —
+not "live-verified". Until we observe the new validator-OK log line
+on ES2 (UE 5.5) and Geri (UE 4.27), the prior failure mode is still
+possible.
+
+Tests: 786 total (693 C# + 62 dll_helpers + 31 utf8_helpers) — no
+regressions vs build 647. Build 648.
+
+-----
+
+## 2026-05-10 (dev branch, build 637) — Verify Return Value toggle on baked AA template
 
 Live-test follow-up after the static-native fast path landed: invoking
 `KismetMathLibrary::exp(8)` returned `result=0` (success) but the
