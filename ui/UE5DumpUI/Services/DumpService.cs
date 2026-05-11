@@ -41,8 +41,12 @@ public sealed class DumpService : IDumpService
                               ?? ptrs["is_user_override"]?.GetValue<bool>() ?? false;
         var isLowConfidence = res["is_low_confidence"]?.GetValue<bool>()
                               ?? ptrs["is_low_confidence"]?.GetValue<bool>() ?? false;
+        // build_number (build 653+): present only on the init response, not get_pointers.
+        // Older DLLs omit the field — preserved as 0 so the UI can warn "DLL pre-dates
+        // the build-number probe; assume stale".
+        var dllBuildNumber  = res["build_number"]?.GetValue<int>() ?? 0;
 
-        return BuildEngineState(ptrs, ueVersion, versionDetected, isUserOverride, isLowConfidence);
+        return BuildEngineState(ptrs, ueVersion, versionDetected, isUserOverride, isLowConfidence, dllBuildNumber);
     }
 
     public async Task<EngineState> GetPointersAsync(CancellationToken ct = default)
@@ -94,7 +98,8 @@ public sealed class DumpService : IDumpService
 
     /// <summary>Build EngineState from a get_pointers response, with optional overrides from init.</summary>
     private static EngineState BuildEngineState(JsonObject ptrs, int ueVersion = 0, bool versionDetected = true,
-                                                 bool? isUserOverride = null, bool? isLowConfidence = null)
+                                                 bool? isUserOverride = null, bool? isLowConfidence = null,
+                                                 int dllBuildNumber = 0)
     {
         if (ueVersion == 0)
             ueVersion = ptrs["ue_version"]?.GetValue<int>() ?? 0;
@@ -141,6 +146,11 @@ public sealed class DumpService : IDumpService
             GWorldAobLen = ptrs["gworld_aob_len"]?.GetValue<int>() ?? 0,
             // GameThreadDispatch invoke timeout (effective value)
             InvokeTimeoutMs = ptrs["invoke_timeout_ms"]?.GetValue<int>() ?? 5000,
+            // DLL build number — present in both init AND get_pointers responses
+            // (build 653+). Prefer the explicit caller-supplied value; fall back
+            // to ptrs so refreshes from get_pointers pick it up automatically.
+            DllBuildNumber = dllBuildNumber != 0 ? dllBuildNumber
+                                                 : (ptrs["build_number"]?.GetValue<int>() ?? 0),
         };
     }
 
@@ -1221,6 +1231,7 @@ public sealed class DumpService : IDumpService
         string? className = null,
         int parmsSize = 0,
         string? paramsHex = null,
+        bool directCall = false,
         CancellationToken ct = default)
     {
         var req = new JsonObject
@@ -1240,6 +1251,12 @@ public sealed class DumpService : IDumpService
 
         if (!string.IsNullOrEmpty(paramsHex))
             req["params_hex"] = paramsHex;
+
+        // Static-native fast path (KismetMathLibrary etc.) — only set when
+        // caller has verified the function is safe to call off-thread. Default
+        // false preserves the existing behavior for LiveWalker's Pipe Invoke.
+        if (directCall)
+            req["direct_call"] = true;
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);

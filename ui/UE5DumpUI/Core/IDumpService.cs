@@ -109,11 +109,16 @@ public interface IDumpService
     /// <param name="className">Class name to auto-resolve instance (optional if instanceAddr provided).</param>
     /// <param name="parmsSize">Total parameter buffer size from UFunction.</param>
     /// <param name="paramsHex">Hex-encoded param bytes (optional).</param>
+    /// <param name="directCall">When true, force the DLL-side UE5_CallProcessEventDirect path
+    ///     (bypass GameThreadDispatch). Caller asserts the function is FUNC_Native|FUNC_Static
+    ///     (e.g. KismetMathLibrary helpers) — required by the System tab Self-Test which must
+    ///     succeed on idle main-menu / loading screens where the game thread isn't pumping.</param>
     Task<InvokeFunctionResult> InvokeFunctionAsync(
         string funcName,
         string? instanceAddr = null,
         string? className = null,
         int parmsSize = 0,
         string? paramsHex = null,
+        bool directCall = false,
         CancellationToken ct = default);
 }

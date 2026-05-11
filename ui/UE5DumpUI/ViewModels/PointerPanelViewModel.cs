@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Reflection;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
@@ -78,6 +80,36 @@ public partial class PointerPanelViewModel : ViewModelBase
     // --- Cache management ---
     [ObservableProperty] private string _peHash = "";
     [ObservableProperty] private string _cacheStatusText = "";
+
+    // --- Diagnostics: build version + Self-Test ---
+
+    /// <summary>UI's own build number (compiled in via AssemblyVersion). Constant
+    /// per UE5DumpUI binary, computed once from the entry assembly's FileVersion.
+    /// Uses GetEntryAssembly() rather than GetExecutingAssembly() because the
+    /// latter gets trimmed in Native AOT single-file publishes (returns Build=0).
+    /// MainWindowViewModel.AppVersion uses the same trick for the title bar.</summary>
+    public int UiBuildNumber { get; } =
+        Assembly.GetEntryAssembly()?.GetName().Version?.Build ?? 0;
+
+    [ObservableProperty] private int _dllBuildNumber;
+
+    /// <summary>True when the DLL reports the same build number as the UI.
+    /// False means the DLL is stale (forgot to redeploy after rebuild) — common
+    /// in proxy mode. ⚠ shown next to the version display.</summary>
+    public bool BuildVersionsMatch => HasData && DllBuildNumber > 0 && DllBuildNumber == UiBuildNumber;
+
+    /// <summary>True when DLL reports a build number AND it differs from UI's.</summary>
+    public bool BuildVersionMismatch => HasData && DllBuildNumber > 0 && DllBuildNumber != UiBuildNumber;
+
+    /// <summary>True when DLL is pre-build-653 and doesn't report build_number at all.</summary>
+    public bool BuildVersionUnknown => HasData && DllBuildNumber == 0;
+
+    // --- Self-Test state ---
+    [ObservableProperty] private bool _isSelfTesting;
+    [ObservableProperty] private string _selfTestResultText = "";
+    [ObservableProperty] private bool _selfTestPassed;
+    [ObservableProperty] private bool _selfTestFailed;
+    [ObservableProperty] private bool _selfTestHasResult;
 
     /// <summary>
     /// Legacy warning binding (kept for compatibility with existing axaml). True when
@@ -251,6 +283,7 @@ public partial class PointerPanelViewModel : ViewModelBase
         GworldAobLen = state.GWorldAobLen;
         ModuleName = state.ModuleName;
         PeHash = state.PeHash;
+        DllBuildNumber = state.DllBuildNumber;
         // Re-sync the invoke timeout from the DLL (already-applied per-game override or default).
         // _suppressInvokeTimeoutEvent prevents the partial-changed handler from firing the apply
         // round-trip when this is just a refresh.
@@ -312,7 +345,19 @@ public partial class PointerPanelViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanExtraScan));
         OnPropertyChanged(nameof(CanManageCache));
         OnPropertyChanged(nameof(CanClearGameCache));
+        OnPropertyChanged(nameof(BuildVersionsMatch));
+        OnPropertyChanged(nameof(BuildVersionMismatch));
+        OnPropertyChanged(nameof(BuildVersionUnknown));
+        OnPropertyChanged(nameof(CanSelfTest));
         NotifyAobMakerProperties();
+    }
+
+    // Recompute computed props when DllBuildNumber arrives separately from HasData.
+    partial void OnDllBuildNumberChanged(int value)
+    {
+        OnPropertyChanged(nameof(BuildVersionsMatch));
+        OnPropertyChanged(nameof(BuildVersionMismatch));
+        OnPropertyChanged(nameof(BuildVersionUnknown));
     }
 
     private void NotifyAobMakerProperties()
@@ -748,4 +793,210 @@ public partial class PointerPanelViewModel : ViewModelBase
         if (!string.IsNullOrEmpty(SparseDelegatesScanAddr))
             await _platform.CopyToClipboardAsync(StripHexPrefix(SparseDelegatesScanAddr));
     }
+
+    // ===================================================================
+    // Self-Test: PE-hook smoke test via auto-picked KismetMathLibrary helper
+    //
+    // Rationale: the build-647 wrong-vtable-slot bug slept for 600+ builds
+    // because "result=0 from ProcessEvent" passed for success. Build 648's
+    // pattern scanner + post-install fire-counter caught the misdetection
+    // automatically — this button surfaces the SAME guarantee to end users:
+    // one-click verification that the hook is on the right slot AND that
+    // ProcessEvent actually executes the requested function body.
+    //
+    // Auto-pick: try a small ordered list of universal BlueprintFunctionLibrary
+    // helpers (Add_IntInt → Multiply_IntInt → Add_FloatFloat → ...) until one
+    // resolves on this game. All entries are FUNC_Native|FUNC_Static so the
+    // call uses Mimic's static-native fast path (no game-thread queue) and
+    // works on idle main-menu / loading screens. First-hit wins keeps the
+    // pick deterministic across runs.
+    //
+    // Success criterion: ResultHex bytes at the return offset match the
+    // expected value. We never trust pipe result=0 alone — that's exactly
+    // the trap the build-647 bug fell into.
+    // ===================================================================
+
+    /// <summary>Self-test can run when connected. AOBMaker isn't needed.</summary>
+    public bool CanSelfTest => HasData && _dump != null && !IsSelfTesting;
+
+    /// <summary>Ordered candidate list. Each entry: function name on
+    /// KismetMathLibrary + how to encode the 8-byte input + how to decode the
+    /// return-slot bytes + expected return + display label.
+    /// First entry whose lookup succeeds is the one used.</summary>
+    private static readonly SelfTestCandidate[] _selfTestCandidates =
+    {
+        // Add_IntInt: most universal — pure integer math, present on every
+        // UE 4.x and 5.x build. 3 + 4 = 7 (parmsSize=12: 4+4+4).
+        new("Add_IntInt",            "03000000 04000000 00000000", 8, "int32",  7.0,  "Add_IntInt(3,4)"),
+        new("Multiply_IntInt",       "03000000 04000000 00000000", 8, "int32",  12.0, "Multiply_IntInt(3,4)"),
+        // Float variants — UE 4.x uses Float, UE 5.x converted many to Double.
+        new("Add_FloatFloat",        "00004040 00008040 00000000", 8, "float",  7.0,  "Add_FloatFloat(3.0,4.0)"),
+        new("Multiply_FloatFloat",   "00004040 00008040 00000000", 8, "float",  12.0, "Multiply_FloatFloat(3.0,4.0)"),
+        // Double variants — UE 5.0+ only (parmsSize=24: 8+8+8).
+        new("Add_DoubleDouble",      "0000000000000840 0000000000001040 0000000000000000", 16, "double", 7.0,  "Add_DoubleDouble(3.0,4.0)"),
+        new("Multiply_DoubleDouble", "0000000000000840 0000000000001040 0000000000000000", 16, "double", 12.0, "Multiply_DoubleDouble(3.0,4.0)"),
+    };
+
+    private record SelfTestCandidate(
+        string FuncName,
+        string InputHex,       // hex string with spaces (stripped before sending)
+        int    ReturnOffset,   // byte offset of return slot in params buffer
+        string ReturnType,     // "int32" | "float" | "double"
+        double Expected,       // expected return value
+        string DisplayLabel);  // e.g. "Add_IntInt(3,4)"
+
+    [RelayCommand]
+    private async Task SelfTestAsync()
+    {
+        if (_dump == null) return;
+
+        try
+        {
+            ClearError();
+            IsSelfTesting = true;
+            SelfTestHasResult = false;
+            SelfTestPassed = false;
+            SelfTestFailed = false;
+            SelfTestResultText = Res.Get("str.System.SelfTest.Running");
+            OnPropertyChanged(nameof(CanSelfTest));
+
+            // Probe each candidate until one resolves. "Resolves" = the DLL's
+            // invoke_function returns without "Function not found". We attempt
+            // the actual call to avoid a separate find_function pipe round-trip
+            // — net cost is the same as probing.
+            foreach (var cand in _selfTestCandidates)
+            {
+                var probeResult = await TrySelfTestCandidate(cand);
+                if (probeResult != null)
+                {
+                    // First hit — verify + report.
+                    var (actual, hex, passed) = probeResult.Value;
+                    if (passed)
+                    {
+                        SelfTestPassed = true;
+                        SelfTestResultText = string.Format(
+                            CultureInfo.InvariantCulture,
+                            "✓ {0} = {1}  →  PE hook verified",
+                            cand.DisplayLabel, FormatActual(actual, cand.ReturnType));
+                    }
+                    else
+                    {
+                        SelfTestFailed = true;
+                        SelfTestResultText = string.Format(
+                            CultureInfo.InvariantCulture,
+                            "✗ {0} expected {1}, got {2}  →  Hook may be on the wrong vtable slot. " +
+                            "Check init-*.log for 'VALIDATION FAILED' and re-deploy the DLL.\n" +
+                            "Raw buffer: {3}",
+                            cand.DisplayLabel,
+                            FormatActual(cand.Expected, cand.ReturnType),
+                            FormatActual(actual, cand.ReturnType),
+                            hex);
+                    }
+                    SelfTestHasResult = true;
+                    _log?.Info(Constants.LogCatInit,
+                        $"Self-Test: {cand.DisplayLabel} expected={cand.Expected} actual={actual} pass={passed}");
+                    return;
+                }
+            }
+
+            // All candidates missing — unusual but possible (custom game build
+            // with stripped KismetMathLibrary, or DLL pre-build-653 without the
+            // direct_call flag support).
+            SelfTestFailed = true;
+            SelfTestHasResult = true;
+            SelfTestResultText = Res.Get("str.System.SelfTest.NoCandidate");
+            _log?.Warn(Constants.LogCatInit,
+                "Self-Test: no testable KismetMathLibrary helper found in this game");
+        }
+        catch (Exception ex)
+        {
+            SelfTestFailed = true;
+            SelfTestHasResult = true;
+            SelfTestResultText = Res.Format("str.System.SelfTest.Error", ex.Message);
+            SetError(ex);
+            _log?.Error(Constants.LogCatInit, "Self-Test failed", ex);
+        }
+        finally
+        {
+            IsSelfTesting = false;
+            OnPropertyChanged(nameof(CanSelfTest));
+        }
+    }
+
+    /// <summary>Try one candidate. Returns (actualValue, rawHex, passed) on a
+    /// successful invoke (function resolved + call returned), or null when the
+    /// function isn't present on this game.</summary>
+    private async Task<(double actual, string hex, bool passed)?> TrySelfTestCandidate(SelfTestCandidate cand)
+    {
+        if (_dump == null) return null;
+
+        int parmsSize = cand.ReturnType == "double" ? 24 : 12;
+        string paramsHexClean = cand.InputHex.Replace(" ", "");
+
+        InvokeFunctionResult res;
+        try
+        {
+            res = await _dump.InvokeFunctionAsync(
+                funcName:     cand.FuncName,
+                className:    "KismetMathLibrary",
+                parmsSize:    parmsSize,
+                paramsHex:    paramsHexClean,
+                directCall:   true);  // bypass GameThreadDispatch (Native|Static)
+        }
+        catch (Exception ex) when (ex.Message.Contains("Function not found")
+                                   || ex.Message.Contains("No instance found"))
+        {
+            // Not on this game — try next candidate.
+            return null;
+        }
+
+        // Decode return value from result_hex (DLL returns full params buffer
+        // post-call). result=0 means ProcessEvent dispatch reported success;
+        // we still verify by reading the return slot to catch wrong-hook cases.
+        double actual = DecodeReturnFromHex(res.ResultHex, cand.ReturnOffset, cand.ReturnType);
+        bool passed = ValuesMatch(actual, cand.Expected, cand.ReturnType);
+        return (actual, res.ResultHex, passed);
+    }
+
+    /// <summary>Parse N bytes from result_hex at byte offset, interpret as the
+    /// given UE type, return as double for uniform handling. Returns NaN on
+    /// any malformed input — caller treats that as "fail".</summary>
+    private static double DecodeReturnFromHex(string resultHex, int byteOffset, string type)
+    {
+        if (string.IsNullOrEmpty(resultHex)) return double.NaN;
+        int hexOffset = byteOffset * 2;
+        int needBytes = type == "double" ? 8 : 4;
+        if (resultHex.Length < hexOffset + needBytes * 2) return double.NaN;
+
+        var bytes = new byte[needBytes];
+        for (int i = 0; i < needBytes; ++i)
+        {
+            if (!byte.TryParse(
+                    resultHex.AsSpan(hexOffset + i * 2, 2),
+                    NumberStyles.HexNumber, CultureInfo.InvariantCulture, out bytes[i]))
+                return double.NaN;
+        }
+        return type switch
+        {
+            "int32"  => BitConverter.ToInt32(bytes, 0),
+            "float"  => BitConverter.ToSingle(bytes, 0),
+            "double" => BitConverter.ToDouble(bytes, 0),
+            _        => double.NaN,
+        };
+    }
+
+    private static bool ValuesMatch(double actual, double expected, string type)
+    {
+        if (double.IsNaN(actual)) return false;
+        if (type == "int32") return (int)actual == (int)expected;
+        // float/double: epsilon comparison — Add_FloatFloat(3,4) is exact 7.0
+        // but defending against rounding noise on Multiply_DoubleDouble etc.
+        return Math.Abs(actual - expected) < 1e-5;
+    }
+
+    private static string FormatActual(double v, string type) => type switch
+    {
+        "int32" => ((int)v).ToString(CultureInfo.InvariantCulture),
+        _       => v.ToString("0.######", CultureInfo.InvariantCulture),
+    };
 }

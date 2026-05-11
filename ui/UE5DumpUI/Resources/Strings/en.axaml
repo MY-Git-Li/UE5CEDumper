@@ -15,7 +15,7 @@
 
     <!-- Tabs -->
     <sys:String x:Key="str.Tab.ClassStruct">Class Structure</sys:String>
-    <sys:String x:Key="str.Tab.Pointers">Global Pointers</sys:String>
+    <sys:String x:Key="str.Tab.Pointers">System</sys:String>
     <sys:String x:Key="str.Tab.ProxyDeploy">Proxy Deploy</sys:String>
     <sys:String x:Key="str.Tab.LiveWalker">Live Walker</sys:String>
     <sys:String x:Key="str.Tab.InstanceFinder">Instance Finder</sys:String>
@@ -163,6 +163,22 @@
     <sys:String x:Key="str.Pointers.Cache.AllReset">All cache data reset. Backup saved as .001 file.</sys:String>
     <sys:String x:Key="str.Pointers.Cache.ResetFailed">Failed to reset cache — check logs.</sys:String>
     <sys:String x:Key="str.Pointers.Cache.Error">Error: {0}</sys:String>
+
+    <!-- System tab: Diagnostics (build version + AOBMaker status + Self-Test) -->
+    <sys:String x:Key="str.System.Header">Diagnostics</sys:String>
+    <sys:String x:Key="str.System.UiBuild">UI build</sys:String>
+    <sys:String x:Key="str.System.DllBuild">DLL build</sys:String>
+    <sys:String x:Key="str.System.BuildMatch">&#x2713; matched</sys:String>
+    <sys:String x:Key="str.System.BuildMismatch">&#x26A0; DLL outdated — redeploy from Proxy Deploy tab (game must be closed)</sys:String>
+    <sys:String x:Key="str.System.BuildUnknown">&#x26A0; DLL pre-dates build-number probe — assume stale</sys:String>
+    <sys:String x:Key="str.System.AobMakerStatus">AOBMaker plugin</sys:String>
+    <sys:String x:Key="str.System.AobMakerConnected">&#x25CF; Connected</sys:String>
+    <sys:String x:Key="str.System.AobMakerOffline">&#x25CB; Not reachable — check CE plugin installation</sys:String>
+    <sys:String x:Key="str.System.SelfTest.Button">Run Self-Test</sys:String>
+    <sys:String x:Key="str.System.SelfTest.Hint">Auto-picks a KismetMathLibrary helper, invokes it via static-native fast path, and verifies the return value. Confirms the ProcessEvent hook is on the correct vtable slot.</sys:String>
+    <sys:String x:Key="str.System.SelfTest.Running">Probing KismetMathLibrary helpers...</sys:String>
+    <sys:String x:Key="str.System.SelfTest.NoCandidate">No testable BlueprintFunctionLibrary helper found in this game.</sys:String>
+    <sys:String x:Key="str.System.SelfTest.Error">Self-Test failed: {0}</sys:String>
 
     <!-- Proxy Deploy -->
     <sys:String x:Key="str.ProxyDeploy.ProxyType">Proxy DLL:</sys:String>

@@ -196,6 +196,20 @@ public static class BakedScriptGenerator
             Line(sb, "  end");
             Line(sb, "  print(s)");
             Line(sb, "end");
+            // Wipe the params buffer to parmsSize BEFORE the Before dump.
+            // The mailbox is a single shared buffer reused across every
+            // invoke in this CE session -- the DLL has no clean transition
+            // point to zero it after a call (would race with Lua reading
+            // the return value), and the helper's writeBakedParams zero
+            // happens AFTER this dump. Without this pre-zero, the Before
+            // dump shows leftover bytes from the previous invoke (e.g.
+            // ES2 / Geri 2026-05-11 test: scen 2's Before showed scen 1's
+            // [3, 4, 7] payload). Pre-zeroing here makes Before always
+            // appear clean, so Before vs After unambiguously isolates
+            // what THIS invoke wrote.
+            Line(sb, "if _mb_dbg ~= 0 then");
+            Line(sb, $"  for i = 0, {parmsSize} - 1 do writeByte(_PD_dbg + i, 0) end");
+            Line(sb, "end");
             Line(sb, "_dumpHex('[Invoke] Before')");
             Line(sb);
         }

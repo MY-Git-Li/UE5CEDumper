@@ -70,7 +70,7 @@ public class StubDumpService : IDumpService
     public Task<EngineState> ApplyRescanAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public Task TriggerScanAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public Task<ScanStatusResult> GetScanStatusAsync(CancellationToken ct = default) => throw new NotImplementedException();
-    public Task<InvokeFunctionResult> InvokeFunctionAsync(string funcName, string? instanceAddr = null, string? className = null, int parmsSize = 0, string? paramsHex = null, CancellationToken ct = default) => throw new NotImplementedException();
+    public Task<InvokeFunctionResult> InvokeFunctionAsync(string funcName, string? instanceAddr = null, string? className = null, int parmsSize = 0, string? paramsHex = null, bool directCall = false, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<DataTableWalkResult> WalkDataTableRowsAsync(string addr, int offset = 0, int limit = 64, CancellationToken ct = default) => throw new NotImplementedException();
 }
 
