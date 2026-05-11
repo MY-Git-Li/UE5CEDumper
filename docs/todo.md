@@ -550,19 +550,140 @@ returns the decoded Lua string instead of a number. Optional v2.
 
 ## Property Origin Resolver — proposals B + C still on table
 
+> **🎯 NEXT SESSION STARTING POINT (2026-05-12 close-out discussion)**:
+> Proposal B is the next concrete unit of work, **paired with the new
+> "Unusual Location" detection** described below (B'). Both reuse the
+> same `KeywordTokenizer` + `KeywordScoringTable` infrastructure from
+> Interesting Functions Finder, so they ship together cheaply.
+> Function-side work (Interesting Funcs v2) is intentionally deferred
+> — v1 is solid and the workflow loop closed; Property is the higher-
+> ROI direction. Class Family Browser (Proposal C, Effort L) needs
+> its own planning round and is NOT the right "jump in and code" task.
+
 Proposal A (dedupe-by-defining-class) shipped as build 610. Two
-follow-ups discussed in the design analysis but not yet implemented:
+follow-ups discussed in the design analysis but not yet implemented,
+plus one new insight from the 2026-05-12 close-out chat:
 
 ### Proposal B: per-row "similar BP-added properties" suggestions
+
+**Effort**: M | **Risk**: low
 
 When a user lands on `bCanBeDamaged @ AActor`, surface a side-panel
 with fuzzy-matched game-specific bools that semantically overlap
 (e.g. `bIsImmortal @ BP_PlayerCharacter_C`). Reuses the
 `KeywordTokenizer` + `KeywordScoringTable` machinery to score
-similarity. **Effort**: M | **Risk**: low | **Why**: closes the
-"engine field is at the wrong layer; show me the BP-added bool that
-the game's TakeDamage override actually checks" gap from the
-analysis.
+similarity. **Why**: closes the "engine field is at the wrong layer;
+show me the BP-added bool that the game's TakeDamage override
+actually checks" gap from the analysis.
+
+**UX**: anchor-driven. User already has a property selected (the
+engine field); we surface its likely game-specific counterpart in BP
+subclasses.
+
+### Proposal B': "Unusual Location" Property Detection — **new insight 2026-05-12**
+
+**Effort**: S–M (small if folded into B's PR) | **Risk**: low
+
+Complementary to B but a different entry point: **find game-state-
+suggestive properties (HP/MP/Stamina/XP/Damage/Health/etc.) regardless
+of whether an engine equivalent exists, AND flag the cases where
+they're sitting in a class you wouldn't expect.**
+
+**Motivation**: developers don't always follow Unreal conventions.
+HP/MP fields routinely show up in non-standard containers — observed
+patterns include `LocalPlayer`, `GameViewportClient`, `HUDClass`,
+`GameInstance` subclasses, even random `UObject`-derived service
+classes. From a cheat-development perspective these are the most
+valuable hits because they're **not where you'd think to look first**.
+Function-side already does this kind of class-location-aware ranking
+(`Character / Pawn / PlayerController / PlayerState +3`,
+`Anim / Niagara / Sound -2`, etc. in `KeywordScoringTable`); the
+Property side needs the same treatment.
+
+**UX**: broad sweep, no anchor needed. Could land as either:
+- a new **"Interesting Properties"** tab (analogous to Interesting
+  Funcs), OR
+- a **scoring-aware mode toggle** in the existing PropertySearch tab
+
+**Scoring sketch** — reuse `KeywordTokenizer` for property-name
+matches, layer class-location bonuses/penalties on top:
+
+| Class bucket                                      | Bonus | Interpretation                |
+|---------------------------------------------------|------:|-------------------------------|
+| Character / Pawn / PlayerState / Inventory        |   +3  | Expected location             |
+| GameMode / GameInstance / SaveGame                |   +2  | Expected (game-level state)   |
+| AbilitySystemComponent / Stats / Status           |   +2  | Expected (gameplay subsystem) |
+| **LocalPlayer / GameViewportClient / HUD**        |  **+4** | **Unusual — high-value hit**  |
+| Anim / Niagara / Sound / Audio / Particle / Mesh  |   −2  | Noise (visual/effect classes) |
+| UI / Widget                                       |   −1  | Noise (UI display)            |
+
+The Unusual category gets a **positive bonus** because a HP field in
+`LocalPlayer` is more interesting than a HP field in `BP_Player_C`
+(the latter is the "normal" place; the former is the cheat-finder's
+gold). Display this as a **"⚠ Unusual Location"** badge on the row
+so the user immediately sees why this hit is unconventional.
+
+**Keyword starter list** (extend in C# scoring table):
+- Stats: `HP`, `MP`, `SP`, `Health`, `Mana`, `Stamina`, `Energy`,
+  `XP`, `Exp`, `Experience`, `Level`, `Lv`, `Lvl`
+- Combat: `Damage`, `Defense`, `Armor`, `CritRate`, `CritDamage`,
+  `Attack`, `MoveSpeed`, `JumpHeight`
+- Resources: `Gold`, `Coin`, `Money`, `Currency`, `Gem`, `Diamond`
+
+Apply `KeywordTokenizer` whole-token matching so short acronyms
+(HP/MP/SP/XP/Lv) don't substring-collide with engine spam
+(`Component`, `Levitate`, etc.) — same lesson from build 609.
+
+### Pairing rationale (why B + B' together)
+
+Both proposals lean on the same building blocks:
+1. `KeywordTokenizer.cs` — whole-token matching, already proven
+2. `KeywordScoringTable.cs` — already has Function-side scoring
+   tables; extend with PropertyScoringTable using the same shape
+3. `ScoredFunctionRow`-style row model for `ScoredPropertyRow`
+4. Class-location bonus/penalty machinery — already mature for
+   functions, factor out to a shared `ClassLocationScorer` helper
+
+Doing them together = ~1.3× the work for both, vs ~1× + ~1× sequential.
+Estimate **M total** if done in one PR.
+
+### Open design questions (decide before starting)
+
+1. **B as side-panel vs B' as new tab vs B' as PropertySearch mode** —
+   pick one of: (a) side-panel for B + new "Interesting Properties"
+   tab for B', (b) extend PropertySearch with a "Scored" sort/filter
+   mode covering both. Option (b) is fewer moving parts but more
+   crowded UI; option (a) keeps the discovery/exploration entry
+   points separate.
+2. **Anchor-driven B's fuzzy threshold** — too loose = noise, too
+   tight = no hits. Need a calibration round on 3-4 games. The
+   build-609 KeywordTokenizer threshold-5 lesson applies.
+3. **PropertyScoringTable keyword list** — start with the table
+   above, calibrate on real games (ES2's `bCanBeDamaged` / `Health`,
+   Geri's `MaxJumpHeight` are good anchors).
+
+### Files in scope (pre-implementation guess)
+
+- `ui/UE5DumpUI/Services/PropertyScoringTable.cs` (new, mirror of
+  `KeywordScoringTable.cs`)
+- `ui/UE5DumpUI/Services/ClassLocationScorer.cs` (new, extracted from
+  `KeywordScoringTable`'s class-bonus logic — refactor first so
+  Function side benefits too)
+- `ui/UE5DumpUI/Models/ScoredPropertyRow.cs` (new)
+- `ui/UE5DumpUI/ViewModels/PropertySearchViewModel.cs` (extend with
+  scoring + Unusual Location badge) OR new
+  `InterestingPropertiesViewModel.cs` (depending on #1 above)
+- `ui/UE5DumpUI/Views/PropertySearchPanel.axaml` (Scope column
+  already exists for B's "+N inheritors"; add Unusual Location badge)
+- `dll/src/Aura.cpp` — possibly extend `EnumerateAllFunctions`-style
+  scan for properties if PropertySearch's current pagination can't
+  serve the new flow
+
+### Out of scope for this round
+
+- Full Class Family Browser (Proposal C) — separate planning
+- Anchor-driven function fuzzy-match (Function v2 equivalent of B) —
+  Function v1 closed; defer until concrete user request
 
 ### Proposal C: Class Family Browser
 
