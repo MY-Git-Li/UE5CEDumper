@@ -1,0 +1,153 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UE5DumpUI.ViewModels"
+             xmlns:m="using:UE5DumpUI.Models"
+             xmlns:svc="using:UE5DumpUI.Services"
+             x:Class="UE5DumpUI.Views.InterestingFunctionsPanel"
+             x:DataType="vm:InterestingFunctionsViewModel">
+
+  <DockPanel Margin="8">
+
+    <!-- Top: Load + Game Only + Search bar -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,4">
+      <Button Content="{StaticResource str.IF.Load}"
+              Command="{Binding LoadCommand}"
+              ToolTip.Tip="{StaticResource str.Tip.IF.Load}"
+              IsEnabled="{Binding !IsLoading}"
+              Classes="accent" Padding="12,4"/>
+      <CheckBox Content="{StaticResource str.IF.GameOnly}"
+                IsChecked="{Binding GameOnly}"
+                ToolTip.Tip="{StaticResource str.Tip.IF.GameOnly}"
+                Foreground="#CCCCCC" FontSize="12"
+                VerticalAlignment="Center"/>
+      <TextBox PlaceholderText="{StaticResource str.IF.FilterHint}"
+               Text="{Binding FilterText}"
+               ToolTip.Tip="{StaticResource str.Tip.IF.Filter}"
+               Width="260" Padding="4,2"/>
+      <ComboBox ItemsSource="{Binding CategoryOptions}"
+                SelectedItem="{Binding CategoryFilter}"
+                ToolTip.Tip="{StaticResource str.Tip.IF.Category}"
+                Width="120" FontSize="12">
+        <ComboBox.ItemTemplate>
+          <DataTemplate>
+            <TextBlock Text="{Binding Converter={x:Static svc:CategoryDisplayConverter.Instance}}"/>
+          </DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+      <CheckBox Content="{StaticResource str.IF.ShowAll}"
+                IsChecked="{Binding ShowAll}"
+                ToolTip.Tip="{StaticResource str.Tip.IF.ShowAll}"
+                Foreground="#CCCCCC" FontSize="12"
+                VerticalAlignment="Center"/>
+      <Button Content="{StaticResource str.IF.ClearFilters}"
+              Command="{Binding ClearFiltersCommand}"
+              Padding="6,2" FontSize="11"
+              VerticalAlignment="Center"/>
+      <TextBlock Text="{Binding StatusText}"
+                 Foreground="#888" FontSize="12"
+                 VerticalAlignment="Center" Margin="8,0"/>
+    </StackPanel>
+
+    <!-- Loading indicator -->
+    <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True"
+                 IsVisible="{Binding IsLoading}" Height="2" Margin="0,0,0,4"/>
+
+    <!-- Error display -->
+    <TextBlock DockPanel.Dock="Top"
+               Text="{Binding ErrorMessage}"
+               Foreground="#F44747" Margin="0,0,0,4"
+               IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+
+    <!-- Results DataGrid -->
+    <DataGrid x:Name="ResultsGrid"
+              ItemsSource="{Binding Results}"
+              SelectedItem="{Binding SelectedResult}"
+              IsReadOnly="True"
+              CanUserResizeColumns="True"
+              GridLinesVisibility="Horizontal"
+              BorderThickness="0"
+              Background="#1E1E1E"
+              Foreground="#D4D4D4"
+              FontSize="12"
+              FontFamily="Consolas, Menlo, monospace">
+      <DataGrid.Columns>
+        <DataGridTemplateColumn Header="Score" Width="60">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:ScoredFunctionRow">
+              <TextBlock Text="{Binding FinalScore}"
+                         Foreground="#CCCCCC"
+                         FontWeight="Bold"
+                         VerticalAlignment="Center"
+                         Margin="6,0"
+                         ToolTip.Tip="{Binding ScoreTooltip}"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+        <DataGridTemplateColumn Header="Cat" Width="80">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:ScoredFunctionRow">
+              <TextBlock Text="{Binding CategoryLabel}"
+                         Foreground="{Binding CategoryColor}"
+                         FontWeight="SemiBold"
+                         VerticalAlignment="Center"
+                         Margin="4,0"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+        <DataGridTextColumn Header="Class" Binding="{Binding ClassName}" Width="220"/>
+        <DataGridTextColumn Header="Function" Binding="{Binding FuncName}" Width="200"/>
+        <DataGridTextColumn Header="Flags" Binding="{Binding ShortFlags}" Width="120"/>
+        <DataGridTextColumn Header="Params" Binding="{Binding ParamsLabel}" Width="80"/>
+        <DataGridTemplateColumn Header="" Width="Auto">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:ScoredFunctionRow">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <Button Content="{StaticResource str.IF.OpenLive}"
+                        Command="{Binding $parent[UserControl].((vm:InterestingFunctionsViewModel)DataContext).OpenInLiveWalkerCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.IF.OpenLive}"
+                        Foreground="#4EC9B0" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#4EC9B0"
+                        Padding="6,2" FontSize="11"
+                        Cursor="Hand"/>
+                <Button Content="{StaticResource str.IF.CopyAaScript}"
+                        Command="{Binding $parent[UserControl].((vm:InterestingFunctionsViewModel)DataContext).CopyAaScriptCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.IF.CopyAaScript}"
+                        Foreground="#7FB6E8" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#7FB6E8"
+                        Padding="6,2" FontSize="11"
+                        Cursor="Hand"/>
+                <Button Content="{StaticResource str.IF.CopyName}"
+                        Command="{Binding $parent[UserControl].((vm:InterestingFunctionsViewModel)DataContext).CopyFunctionNameCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.IF.CopyName}"
+                        Foreground="#DCDCAA" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#DCDCAA"
+                        Padding="6,2" FontSize="11"
+                        Cursor="Hand"/>
+              </StackPanel>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+        <!-- Notes column: per-row, but the value is currently VM-level
+             (same string on every row). Reflects AOBMaker availability so
+             the user sees the degraded-mode hint without hovering for
+             tooltips. Empty string when everything is fine. -->
+        <DataGridTemplateColumn Header="Notes" Width="*">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:ScoredFunctionRow">
+              <TextBlock Text="{Binding $parent[UserControl].((vm:InterestingFunctionsViewModel)DataContext).AobMakerNote}"
+                         Foreground="#E0A050"
+                         FontSize="11"
+                         FontStyle="Italic"
+                         VerticalAlignment="Center"
+                         Margin="6,0"
+                         TextTrimming="CharacterEllipsis"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</UserControl>

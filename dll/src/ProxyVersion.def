@@ -58,6 +58,7 @@ EXPORTS
     UE5_FindInstanceOfClass
     UE5_FindFunctionByName
     UE5_CallProcessEvent
+    UE5_CallProcessEventDirect
     UE5_GetMailboxAddr
     g_invokeMailbox DATA
     UE5_StartPipeServer

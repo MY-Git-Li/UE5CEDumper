@@ -400,6 +400,87 @@
         </StackPanel>
       </Border>
 
+      <!-- Diagnostics section: build version comparison + AOBMaker status + Self-Test -->
+      <Border Background="#2D2D30" CornerRadius="4" Padding="16,12"
+              BorderBrush="#555" BorderThickness="1"
+              IsVisible="{Binding HasData}">
+        <StackPanel Spacing="10">
+          <TextBlock Text="{StaticResource str.System.Header}"
+                     Foreground="#9CDCFE" FontSize="13" FontWeight="SemiBold"/>
+
+          <!-- Build version row: UI vs DLL -->
+          <Grid ColumnDefinitions="120,*">
+            <TextBlock Grid.Column="0" Text="{StaticResource str.System.UiBuild}"
+                       Foreground="#999" FontSize="12" VerticalAlignment="Center"/>
+            <TextBlock Grid.Column="1" Text="{Binding UiBuildNumber}"
+                       Foreground="#D4D4D4" FontFamily="Consolas" FontSize="12"
+                       VerticalAlignment="Center"/>
+          </Grid>
+          <Grid ColumnDefinitions="120,Auto,*">
+            <TextBlock Grid.Column="0" Text="{StaticResource str.System.DllBuild}"
+                       Foreground="#999" FontSize="12" VerticalAlignment="Center"/>
+            <TextBlock Grid.Column="1" Text="{Binding DllBuildNumber}"
+                       Foreground="#D4D4D4" FontFamily="Consolas" FontSize="12"
+                       VerticalAlignment="Center" Margin="0,0,12,0"/>
+            <TextBlock Grid.Column="2" Text="{StaticResource str.System.BuildMatch}"
+                       Foreground="#4EC9B0" FontSize="11" VerticalAlignment="Center"
+                       IsVisible="{Binding BuildVersionsMatch}"/>
+            <TextBlock Grid.Column="2" Text="{StaticResource str.System.BuildMismatch}"
+                       Foreground="#E6A817" FontSize="11" VerticalAlignment="Center"
+                       TextWrapping="Wrap"
+                       IsVisible="{Binding BuildVersionMismatch}"/>
+            <TextBlock Grid.Column="2" Text="{StaticResource str.System.BuildUnknown}"
+                       Foreground="#E6A817" FontSize="11" VerticalAlignment="Center"
+                       TextWrapping="Wrap"
+                       IsVisible="{Binding BuildVersionUnknown}"/>
+          </Grid>
+
+          <!-- AOBMaker plugin status -->
+          <Grid ColumnDefinitions="120,*">
+            <TextBlock Grid.Column="0" Text="{StaticResource str.System.AobMakerStatus}"
+                       Foreground="#999" FontSize="12" VerticalAlignment="Center"/>
+            <TextBlock Grid.Column="1" Text="{StaticResource str.System.AobMakerConnected}"
+                       Foreground="#4EC9B0" FontSize="12" VerticalAlignment="Center"
+                       IsVisible="{Binding IsAobMakerAvailable}"/>
+            <TextBlock Grid.Column="1" Text="{StaticResource str.System.AobMakerOffline}"
+                       Foreground="#888" FontSize="12" VerticalAlignment="Center"
+                       TextWrapping="Wrap">
+              <TextBlock.IsVisible>
+                <Binding Path="IsAobMakerAvailable" Converter="{x:Static BoolConverters.Not}"/>
+              </TextBlock.IsVisible>
+            </TextBlock>
+          </Grid>
+
+          <!-- Self-Test: button + hint + result line (color-coded by pass/fail) -->
+          <StackPanel Spacing="6" Margin="0,4,0,0">
+            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+              <Button Content="{StaticResource str.System.SelfTest.Button}"
+                      Command="{Binding SelfTestCommand}"
+                      IsEnabled="{Binding CanSelfTest}"
+                      Padding="10,5" FontSize="12" Foreground="#9CDCFE"
+                      Background="Transparent" BorderThickness="1" BorderBrush="#555"
+                      Cursor="Hand"/>
+              <TextBlock Text="..." Foreground="#888" FontSize="11"
+                         VerticalAlignment="Center"
+                         IsVisible="{Binding IsSelfTesting}"/>
+            </StackPanel>
+            <TextBlock Text="{StaticResource str.System.SelfTest.Hint}"
+                       Foreground="#666" FontSize="11" TextWrapping="Wrap"/>
+            <!-- Pass (green) and fail (red) variants — switching by IsVisible
+                 avoids needing a multi-binding color converter. Both bind the
+                 same SelfTestResultText, only one is visible at a time. -->
+            <TextBlock Text="{Binding SelfTestResultText}"
+                       Foreground="#4EC9B0" FontSize="11"
+                       TextWrapping="Wrap" FontFamily="Consolas"
+                       IsVisible="{Binding SelfTestPassed}"/>
+            <TextBlock Text="{Binding SelfTestResultText}"
+                       Foreground="#E05252" FontSize="11"
+                       TextWrapping="Wrap" FontFamily="Consolas"
+                       IsVisible="{Binding SelfTestFailed}"/>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
     </StackPanel>
   </StackPanel>
   </ScrollViewer>

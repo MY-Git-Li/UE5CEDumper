@@ -24,6 +24,14 @@ public sealed class AobMakerBridgeService : IAobMakerBridge, IDisposable
     private const string TypeNavigateDisassembler = "NavigateDisassembler";
     private const string TypeCreateAAScript = "CreateAAScript";
     private const string TypeCreateSymbolScript = "CreateSymbolScript";
+    private const string TypeInjectTableFile = "InjectTableFile";
+
+    // Inject ships an entire helper Lua file payload, runs CE Lua via
+    // synchronize() (which yields to CE's main thread), and verifies the
+    // stream size on the way out — the navigation-class 5 s deadline is
+    // tight against that. Give it a roomier window so a momentary CE
+    // pause doesn't show up as a spurious failure to the user.
+    private const int InjectResponseTimeoutMs = 15000;
 
     private readonly ILoggingService? _log;
     private NamedPipeClientStream? _pipe;
@@ -261,6 +269,64 @@ public sealed class AobMakerBridgeService : IAobMakerBridge, IDisposable
             IsAvailable = false;
             CleanupPipe();
             return false;
+        }
+    }
+
+    public async Task<(bool Ok, string? ErrorMessage)> InjectTableFileAsync(string fileName, string content,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(fileName))
+            throw new ArgumentException("fileName must not be empty", nameof(fileName));
+        if (string.IsNullOrEmpty(content))
+            throw new ArgumentException("content must not be empty", nameof(content));
+
+        if (!await ReconnectAsync(ct))
+        {
+            IsAvailable = false;
+            return (false, null);
+        }
+
+        try
+        {
+            var request = new AobMakerMessage
+            {
+                Type = TypeInjectTableFile,
+                FileName = fileName,
+                Content = content
+            };
+
+            await WriteMessageAsync(_pipe!, request, ct);
+
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(InjectResponseTimeoutMs);
+
+            var response = await ReadMessageAsync(_pipe!, timeoutCts.Token);
+            CleanupPipe();
+            if (response == null || !response.Success)
+            {
+                var msg = response?.Message ?? "no response";
+                _log?.Warn(Constants.LogCatInit,
+                    $"AOBMaker InjectTableFile '{fileName}' failed: {msg}");
+                return (false, response?.Message);
+            }
+
+            IsAvailable = true;
+            _log?.Info(Constants.LogCatInit,
+                $"AOBMaker: injected table file '{fileName}' ({content.Length:N0} chars)");
+            return (true, null);
+        }
+        catch (OperationCanceledException)
+        {
+            _log?.Warn(Constants.LogCatInit, $"AOBMaker InjectTableFile timed out for '{fileName}'");
+            CleanupPipe();
+            return (false, "timed out waiting for CE Plugin response");
+        }
+        catch (Exception ex)
+        {
+            _log?.Warn(Constants.LogCatInit, $"AOBMaker InjectTableFile error: {ex.Message}");
+            IsAvailable = false;
+            CleanupPipe();
+            return (false, ex.Message);
         }
     }
 

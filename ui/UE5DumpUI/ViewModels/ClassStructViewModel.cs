@@ -23,6 +23,20 @@ public partial class ClassStructViewModel : ViewModelBase
     [ObservableProperty] private bool _hasClass;
 
     /// <summary>
+    /// True when a class is loaded but has zero instance fields. The
+    /// canonical example is <c>BlueprintFunctionLibrary</c> subclasses
+    /// (e.g. <c>GameplayLib</c>) -- pure utility classes whose only
+    /// content is static methods. Without this hint the user sees an
+    /// empty DataGrid after a cross-tab fallback from Interesting Funcs
+    /// and can't tell "broken load" from "this class genuinely has no
+    /// fields". UI binds this to a help banner.
+    /// </summary>
+    public bool HasNoFields => HasClass && !IsLoading && Fields.Count == 0;
+
+    partial void OnHasClassChanged(bool value)   => OnPropertyChanged(nameof(HasNoFields));
+    partial void OnIsLoadingChanged(bool value)  => OnPropertyChanged(nameof(HasNoFields));
+
+    /// <summary>
     /// Address of the UObject whose class is currently displayed. Used to
     /// dedupe the "selection bounces twice" Avalonia ListBox behaviour and
     /// to ignore a stale null-fire that would otherwise blank the panel.
@@ -58,6 +72,8 @@ public partial class ClassStructViewModel : ViewModelBase
             {
                 Fields.Add(f);
             }
+            // Fields.Count change doesn't fire HasNoFields; nudge it.
+            OnPropertyChanged(nameof(HasNoFields));
 
             _log.Info($"Loaded class: {ci.Name} ({ci.Fields.Count} fields)");
         }

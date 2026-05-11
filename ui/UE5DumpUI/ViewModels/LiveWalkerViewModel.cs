@@ -44,10 +44,32 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _currentOuterName = "";
     [ObservableProperty] private string _currentOuterClassName = "";
     [ObservableProperty] private bool _hasParent;
-    // UFunction display
+    // UFunction display. _allFunctions holds the unfiltered set received
+    // from the DLL; Functions is the user-visible filtered subset rebuilt
+    // by ApplyFunctionFilter() whenever the filter text changes. Function
+    // counts on UE-derived classes can climb past 200 entries (Character /
+    // PlayerController inheritance chains), so the filter is a usability
+    // floor — not a perf optimization.
+    private readonly List<FunctionInfoModel> _allFunctions = new();
+    private Task? _pendingFunctionsLoad;
     [ObservableProperty] private ObservableCollection<FunctionInfoModel> _functions = new();
     [ObservableProperty] private bool _hasFunctions;
     [ObservableProperty] private FunctionInfoModel? _selectedFunction;
+    [ObservableProperty] private string _functionFilter = "";
+
+    /// <summary>
+    /// Two-way binding for the Functions Expander. Defaults to collapsed
+    /// because most navigation in LiveWalker is field-focused; cross-tab
+    /// jumps from Interesting Funcs flip this to true via
+    /// <see cref="TrySelectFunctionByName"/> so the user lands with the
+    /// target function already visible.
+    /// </summary>
+    [ObservableProperty] private bool _isFunctionsExpanded;
+
+    partial void OnFunctionFilterChanged(string value) => ApplyFunctionFilter();
+
+    [RelayCommand]
+    private void ClearFunctionFilter() => FunctionFilter = "";
     private string _currentClassAddr = "";
     private bool _isDefinitionView;  // True when displaying a class/struct definition (no live data)
     private DataTableWalkResult? _cachedDataTableRows;  // Cached DataTable row data
@@ -123,6 +145,21 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     // AOBMaker CE Plugin integration
     [ObservableProperty] private bool _isAobMakerAvailable;
 
+    /// <summary>
+    /// Per-row hint shown in the Functions DataGrid Notes column. Same
+    /// value across every row in the current grid; the column is per-row
+    /// in AXAML but the data is VM-level. When AOBMaker is unavailable
+    /// the AA(B) shortcut still works (clipboard fallback) but the
+    /// in-CE workflow is degraded; this surfaces that to the user without
+    /// requiring them to hover for a tooltip.
+    /// </summary>
+    public string AobMakerNote => IsAobMakerAvailable
+        ? ""
+        : "AOBMaker plugin not found — AA Script export will fall back to clipboard";
+
+    partial void OnIsAobMakerAvailableChanged(bool value)
+        => OnPropertyChanged(nameof(AobMakerNote));
+
     // AOB Symbol toggle for CE XML export
     [ObservableProperty] private bool _useAobSymbol;
     [ObservableProperty] private bool _isAobSymbolAvailable;
@@ -165,6 +202,14 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// Raised when the View should scroll the DataGrid to the first search match.
     /// </summary>
     public event Action? ScrollToFirstSearchMatch;
+
+    /// <summary>
+    /// Raised when the View should scroll the FunctionGrid to a specific
+    /// UFunction by name. Used by cross-tab navigation from Interesting
+    /// Funcs so the user lands on the correct row even when the function
+    /// list scrolls past the visible area.
+    /// </summary>
+    public event Action<string>? ScrollToFunctionRequested;
     private string _lastScrolledSearchText = "";
 
     public LiveWalkerViewModel(IDumpService dump, ILoggingService log, IPlatformService platform,
@@ -2070,8 +2115,9 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// Detects both CE starting (buttons enable) and CE closing (buttons disable).
     /// Skips if last check was within <see cref="AobMakerCheckCooldown"/> to avoid
     /// spamming pipe connects on rapid navigation (2s timeout when CE not running).
+    /// Public so MainWindow's tab-switch handler can also re-check on tab activation.
     /// </summary>
-    private void TryCheckAobMaker()
+    public void TryCheckAobMaker()
     {
         if (_aobMaker == null) return;
         if (DateTime.UtcNow - _lastAobMakerCheck < AobMakerCheckCooldown) return;
@@ -2528,21 +2574,36 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             var script = InvokeScriptGenerator.Generate(CurrentClassName, func.Name, func);
             var description = $"Invoke: {CurrentClassName}::{func.Name}";
 
-            // Try AOBMaker CE Plugin first, fallback to clipboard
-            if (_aobMaker != null)
+            // Sample availability before send so we can distinguish 'pipe
+            // broke mid-send' (was available, now isn't) from 'never
+            // configured / CE not running' (was already false). Note:
+            // this command is also IsEnabled-bound to IsAobMakerAvailable
+            // in the AXAML, so wasAvailable=false here would only happen
+            // if the user clicked between availability flips -- the
+            // clipboard fallback below still produces a usable script.
+            bool wasAvailable = _aobMaker?.IsAvailable ?? false;
+            if (_aobMaker != null && wasAvailable)
             {
                 var sent = await _aobMaker.CreateAAScriptAsync(description, script, autoActivate: false);
                 if (sent)
                 {
                     _log.Info($"Invoke script sent to CE: {description}");
                     StatusText = $"Invoke script created in CE: {func.Name}";
+                    if (_aobMaker != null) IsAobMakerAvailable = _aobMaker.IsAvailable;
                     return;
                 }
             }
 
+            // Fallback: copy script to clipboard. If we thought CE was
+            // present (button shouldn't have been clickable in that case),
+            // surface a pipe-broken warning so the user knows the AA Script
+            // didn't land in CE.
             await _platform.CopyToClipboardAsync(script);
-            StatusText = $"Invoke script copied to clipboard: {func.Name}";
-            _log.Info($"Invoke script copied to clipboard: {description}");
+            if (_aobMaker != null) IsAobMakerAvailable = _aobMaker.IsAvailable;
+            StatusText = wasAvailable
+                ? $"⚠ AOBMaker pipe broke (CE closed?) — invoke script copied to clipboard"
+                : $"Invoke script copied to clipboard: {func.Name}";
+            _log.Info($"Invoke script copied to clipboard: {description} (wasAvailable={wasAvailable})");
         }
         catch (Exception ex)
         {
@@ -2570,11 +2631,15 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             // Dialog owns the entire invoke lifecycle:
             // - Shows input fields (or "no params" message)
             // - FIRE button calls InvokeFunctionAsync internally
+            // - Copy AA Script button bakes current values via BakedScriptGenerator
+            //   and pushes to AOBMaker / clipboard
             // - Decoded results shown inline (return values, out params)
             // - Returns "ok" on Close, null on Cancel
             var dialog = new Views.InvokeParamDialog(
                 CurrentClassName, func.Name, inputParams, func.Params, func.ParmsSize,
-                CurrentAddress, _dump, _engineState?.UEVersion ?? 0);
+                CurrentAddress, _dump, _engineState?.UEVersion ?? 0,
+                aobMaker: _aobMaker, platform: _platform,
+                mode: Views.InvokeDialogMode.PipeInvoke);
 
             var dialogResult = await dialog.ShowDialog<string?>(owner);
 
@@ -2589,6 +2654,88 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         {
             SetError(ex);
             _log.Error($"Failed to invoke {func?.Name} via pipe", ex);
+        }
+    }
+
+    /// <summary>
+    /// Third UFunction-row button: opens the InvokeParamDialog in
+    /// CopyBakedScript mode (FIRE hidden) so the user can fill the form
+    /// and ship a non-interactive AA Script for inclusion in their .CT.
+    /// For zero-param functions the dialog is skipped -- the script is
+    /// generated immediately from an empty BakedParamValue list.
+    /// </summary>
+    [RelayCommand]
+    private async Task CopyBakedScriptAsync(FunctionInfoModel? func)
+    {
+        if (func == null || string.IsNullOrEmpty(CurrentClassName)) return;
+
+        try
+        {
+            ClearStatus();
+
+            var inputParams = func.Params.Where(p => !p.IsReturn).ToList();
+            var hasReturn = func.Params.Any(p => p.IsReturn);
+
+            // Fast-path: TRULY trivial functions only (no inputs AND no return).
+            // For functions that return a value but take no inputs (e.g.
+            // KismetSystemLibrary::GetGameName, KismetMathLibrary::GetPI),
+            // we MUST show the dialog so the Verify Return Value toggle is
+            // reachable -- otherwise the user has no way to print/inspect
+            // what the function actually returned.
+            if (inputParams.Count == 0 && !hasReturn)
+            {
+                var script = Services.BakedScriptGenerator.Generate(
+                    CurrentClassName, func.Name, func.ParmsSize,
+                    Array.Empty<Models.BakedParamValue>());
+                var description = $"Invoke (baked, no args): {CurrentClassName}::{func.Name}";
+                // Sample availability BEFORE the send so we can distinguish
+                // 'pipe broke mid-send' (was available, now isn't) from
+                // 'not configured' (was already false).
+                bool wasAvailable = _aobMaker?.IsAvailable ?? false;
+                bool sentToCe = false;
+                if (_aobMaker != null && wasAvailable)
+                    sentToCe = await _aobMaker.CreateAAScriptAsync(description, script, autoActivate: false);
+                if (!sentToCe)
+                    await _platform.CopyToClipboardAsync(script);
+                // Sync the VM-level flag from whatever the bridge ended up at,
+                // so the Notes column reflects post-send reality on the next
+                // repaint.
+                if (_aobMaker != null) IsAobMakerAvailable = _aobMaker.IsAvailable;
+
+                StatusText = sentToCe
+                    ? $"AA Script created in CE: {func.Name}"
+                    : wasAvailable
+                        ? $"⚠ AOBMaker pipe broke (CE closed?) — script copied to clipboard"
+                        : $"AOBMaker not connected — script copied to clipboard ({func.Name})";
+                _log.Info($"Baked AA Script (no args) {(sentToCe ? "sent to CE" : "to clipboard")}: " +
+                          $"{CurrentClassName}::{func.Name} (wasAvailable={wasAvailable})");
+                return;
+            }
+
+            if (Avalonia.Application.Current?.ApplicationLifetime is not
+                Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+                || desktop.MainWindow is not { } owner)
+                return;
+
+            var dialog = new Views.InvokeParamDialog(
+                CurrentClassName, func.Name, inputParams, func.Params, func.ParmsSize,
+                CurrentAddress, _dump, _engineState?.UEVersion ?? 0,
+                aobMaker: _aobMaker, platform: _platform,
+                mode: Views.InvokeDialogMode.CopyBakedScript);
+
+            var dialogResult = await dialog.ShowDialog<string?>(owner);
+
+            StatusText = dialogResult == "ok"
+                ? $"AA Script ready: {CurrentClassName}::{func.Name}"
+                : $"AA Script export cancelled: {func.Name}";
+
+            _log.Info($"CopyBakedScript dialog {(dialogResult == "ok" ? "completed" : "cancelled")}: " +
+                      $"{CurrentClassName}::{func.Name}");
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error($"Failed to generate baked script for {func?.Name}", ex);
         }
     }
 
@@ -2707,9 +2854,13 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             }
         }
 
-        // Store class address and load functions asynchronously
+        // Store class address and load functions asynchronously. Track
+        // the in-flight task so cross-tab navigators (e.g. Interesting
+        // Funcs -> Live) can await it before calling
+        // TrySelectFunctionByName -- otherwise the call races with the
+        // function-list population and the row never gets selected.
         _currentClassAddr = result.ClassAddr;
-        _ = LoadFunctionsAsync(result.ClassAddr);
+        _pendingFunctionsLoad = LoadFunctionsAsync(result.ClassAddr);
 
         // DataTable detection: if this is a DataTable, fetch rows and inject synthetic RowMap field
         _cachedDataTableRows = null;
@@ -2757,6 +2908,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     {
         if (string.IsNullOrEmpty(classAddr) || classAddr == "0x0")
         {
+            _allFunctions.Clear();
             Functions.Clear();
             HasFunctions = false;
             return;
@@ -2765,16 +2917,90 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         try
         {
             var funcs = await _dump.WalkFunctionsAsync(classAddr);
-            Functions.Clear();
-            foreach (var f in funcs)
-                Functions.Add(f);
+            _allFunctions.Clear();
+            _allFunctions.AddRange(funcs);
             HasFunctions = funcs.Count > 0;
+            ApplyFunctionFilter();
         }
         catch
         {
+            _allFunctions.Clear();
             Functions.Clear();
             HasFunctions = false;
         }
+    }
+
+    /// <summary>
+    /// Rebuild the visible <see cref="Functions"/> collection from
+    /// <see cref="_allFunctions"/> using <see cref="FunctionFilter"/>.
+    /// Substring match on function name (case-insensitive). Empty filter
+    /// shows everything. Mirrors the InterestingFunctions filter pattern
+    /// so the UX is consistent across the two UFunction views.
+    /// </summary>
+    private void ApplyFunctionFilter()
+    {
+        Functions.Clear();
+        if (_allFunctions.Count == 0) return;
+
+        var filter = (FunctionFilter ?? "").Trim();
+        if (filter.Length == 0)
+        {
+            foreach (var f in _allFunctions) Functions.Add(f);
+            return;
+        }
+
+        foreach (var f in _allFunctions)
+        {
+            if (f.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                Functions.Add(f);
+        }
+    }
+
+    /// <summary>
+    /// Public entry point for cross-tab navigation: scroll to and select
+    /// the named function in the Functions DataGrid. Returns true when the
+    /// function was found and made current; false when the class has no
+    /// such function (caller should still expand the section so the user
+    /// can see the full list).
+    /// </summary>
+    public async Task<bool> TrySelectFunctionByNameAsync(string functionName)
+    {
+        if (string.IsNullOrEmpty(functionName)) return false;
+
+        // Wait for any in-flight LoadFunctionsAsync triggered by the
+        // preceding NavigateToAddress to finish. UpdateDisplay() kicks the
+        // function load fire-and-forget so fields render immediately;
+        // without this await the cross-tab navigator races the loader and
+        // sees an empty _allFunctions on the first click after a class
+        // change. The second click then succeeds because the previous
+        // load already completed -- exactly the "(function not selected)"
+        // pattern observed in the live-test logs.
+        if (_pendingFunctionsLoad is { IsCompleted: false } pending)
+        {
+            try { await pending; }
+            catch { /* loader logs its own error path; treat as miss */ }
+        }
+
+        if (_allFunctions.Count == 0) return false;
+
+        // Clear filter first — a previously typed filter could hide the
+        // target row even though it's in the underlying list.
+        if (!string.IsNullOrEmpty(FunctionFilter)) FunctionFilter = "";
+
+        // Auto-expand the section so the user can actually see the target
+        // row without an extra click after a cross-tab navigation.
+        IsFunctionsExpanded = true;
+
+        foreach (var f in Functions)
+        {
+            if (string.Equals(f.Name, functionName, StringComparison.Ordinal))
+            {
+                SelectedFunction = f;
+                ScrollToFunctionRequested?.Invoke(functionName);
+                return true;
+            }
+        }
+        return false;
     }
 }
 

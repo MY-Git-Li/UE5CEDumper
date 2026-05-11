@@ -41,8 +41,12 @@ public sealed class DumpService : IDumpService
                               ?? ptrs["is_user_override"]?.GetValue<bool>() ?? false;
         var isLowConfidence = res["is_low_confidence"]?.GetValue<bool>()
                               ?? ptrs["is_low_confidence"]?.GetValue<bool>() ?? false;
+        // build_number (build 653+): present only on the init response, not get_pointers.
+        // Older DLLs omit the field — preserved as 0 so the UI can warn "DLL pre-dates
+        // the build-number probe; assume stale".
+        var dllBuildNumber  = res["build_number"]?.GetValue<int>() ?? 0;
 
-        return BuildEngineState(ptrs, ueVersion, versionDetected, isUserOverride, isLowConfidence);
+        return BuildEngineState(ptrs, ueVersion, versionDetected, isUserOverride, isLowConfidence, dllBuildNumber);
     }
 
     public async Task<EngineState> GetPointersAsync(CancellationToken ct = default)
@@ -94,7 +98,8 @@ public sealed class DumpService : IDumpService
 
     /// <summary>Build EngineState from a get_pointers response, with optional overrides from init.</summary>
     private static EngineState BuildEngineState(JsonObject ptrs, int ueVersion = 0, bool versionDetected = true,
-                                                 bool? isUserOverride = null, bool? isLowConfidence = null)
+                                                 bool? isUserOverride = null, bool? isLowConfidence = null,
+                                                 int dllBuildNumber = 0)
     {
         if (ueVersion == 0)
             ueVersion = ptrs["ue_version"]?.GetValue<int>() ?? 0;
@@ -141,6 +146,11 @@ public sealed class DumpService : IDumpService
             GWorldAobLen = ptrs["gworld_aob_len"]?.GetValue<int>() ?? 0,
             // GameThreadDispatch invoke timeout (effective value)
             InvokeTimeoutMs = ptrs["invoke_timeout_ms"]?.GetValue<int>() ?? 5000,
+            // DLL build number — present in both init AND get_pointers responses
+            // (build 653+). Prefer the explicit caller-supplied value; fall back
+            // to ptrs so refreshes from get_pointers pick it up automatically.
+            DllBuildNumber = dllBuildNumber != 0 ? dllBuildNumber
+                                                 : (ptrs["build_number"]?.GetValue<int>() ?? 0),
         };
     }
 
@@ -1023,6 +1033,14 @@ public sealed class DumpService : IDumpService
                     StructType = obj["struct_type"]?.GetValue<string>() ?? "",
                     InnerType  = obj["inner_type"]?.GetValue<string>() ?? "",
                     Preview    = obj["preview"]?.GetValue<string>() ?? "",
+                    // Inheritance-aware fields (build 610+) -- back-compat
+                    // with older DLLs that didn't emit these: defaults to
+                    // "" / 0, falls back to ClassName via the model's
+                    // computed properties.
+                    DefiningClassName = obj["defining_class_name"]?.GetValue<string>() ?? "",
+                    DefiningClassAddr = obj["defining_class_addr"]?.GetValue<string>() ?? "",
+                    DefiningClassPath = obj["defining_class_path"]?.GetValue<string>() ?? "",
+                    InheritedByCount  = obj["inherited_by_count"]?.GetValue<int>() ?? 0,
                 });
             }
         }
@@ -1069,6 +1087,61 @@ public sealed class DumpService : IDumpService
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Enumerate every UFunction across every loaded UClass. Backs the
+    /// "Interesting Functions Finder" panel.
+    /// </summary>
+    /// <param name="gameOnly">When true, skip engine-package classes
+    ///     (/Script/Engine, /Script/CoreUObject, etc.). Typically reduces
+    ///     the result set ~5x for shipping games.</param>
+    /// <param name="limit">Hard cap on returned entries to keep the pipe
+    ///     payload bounded -- defaults to 100k, well above the ~50k
+    ///     ceiling typical for shipping UE games.</param>
+    public async Task<AllFunctionsResult> ListAllFunctionsAsync(
+        bool gameOnly = true, int limit = 100000, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "list_all_functions",
+            ["game_only"] = gameOnly,
+            ["limit"] = limit,
+        };
+
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        var functions = new List<AllFunctionEntry>(
+            res["total"]?.GetValue<int>() ?? 0);
+        if (res["functions"] is JsonArray arr)
+        {
+            foreach (var item in arr)
+            {
+                if (item is not JsonObject obj) continue;
+                functions.Add(new AllFunctionEntry
+                {
+                    ClassName     = obj["class_name"]?.GetValue<string>() ?? "",
+                    ClassAddr     = obj["class_addr"]?.GetValue<string>() ?? "",
+                    SuperName     = obj["super_name"]?.GetValue<string>() ?? "",
+                    ClassPath     = obj["class_path"]?.GetValue<string>() ?? "",
+                    FuncName      = obj["func_name"]?.GetValue<string>() ?? "",
+                    FuncAddr      = obj["func_addr"]?.GetValue<string>() ?? "",
+                    FunctionFlags = (uint)(obj["function_flags"]?.GetValue<long>() ?? 0L),
+                    NumParms      = (byte)(obj["num_parms"]?.GetValue<int>() ?? 0),
+                    ParmsSize     = (ushort)(obj["parms_size"]?.GetValue<int>() ?? 0),
+                });
+            }
+        }
+
+        return new AllFunctionsResult
+        {
+            Total          = res["total"]?.GetValue<int>()          ?? 0,
+            ScannedObjects = res["scanned_objects"]?.GetValue<int>() ?? 0,
+            ScannedClasses = res["scanned_classes"]?.GetValue<int>() ?? 0,
+            TotalFunctions = res["total_functions"]?.GetValue<int>() ?? 0,
+            Functions      = functions,
+        };
     }
 
     // --- Extra Scan (user-triggered aggressive fallback) ---
@@ -1158,6 +1231,7 @@ public sealed class DumpService : IDumpService
         string? className = null,
         int parmsSize = 0,
         string? paramsHex = null,
+        bool directCall = false,
         CancellationToken ct = default)
     {
         var req = new JsonObject
@@ -1177,6 +1251,12 @@ public sealed class DumpService : IDumpService
 
         if (!string.IsNullOrEmpty(paramsHex))
             req["params_hex"] = paramsHex;
+
+        // Static-native fast path (KismetMathLibrary etc.) — only set when
+        // caller has verified the function is safe to call off-thread. Default
+        // false preserves the existing behavior for LiveWalker's Pipe Invoke.
+        if (directCall)
+            req["direct_call"] = true;
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);

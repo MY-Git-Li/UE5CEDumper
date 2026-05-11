@@ -19,6 +19,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly ILoggingService _log;
     private readonly IPlatformService _platform;
     private readonly AobUsageService? _aobUsage;
+    private readonly IAobMakerBridge? _aobMaker;  // captured so InterestingFunctions handlers can ship AA Scripts
     private EngineState? _engineState;
 
     [ObservableProperty] private string _statusText = "Disconnected";
@@ -70,6 +71,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public InstanceFinderViewModel InstanceFinder { get; }
     public PropertySearchViewModel PropertySearch { get; }
     public GameClassFilterViewModel GameClassFilter { get; }
+    public InterestingFunctionsViewModel InterestingFunctions { get; }
     public ProxyDeployViewModel? ProxyDeploy { get; }
 
     partial void OnSelectedAddressFormatIndexChanged(int value)
@@ -154,6 +156,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         _log = log;
         _platform = platform;
         _aobUsage = aobUsage;
+        _aobMaker = aobMaker;
 
         ObjectTree = new ObjectTreeViewModel(dump, log, platform);
         ClassStruct = new ClassStructViewModel(dump, log);
@@ -162,6 +165,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         InstanceFinder = new InstanceFinderViewModel(dump, log, platform);
         PropertySearch = new PropertySearchViewModel(dump, log);
         GameClassFilter = new GameClassFilterViewModel(dump, log);
+        InterestingFunctions = new InterestingFunctionsViewModel(dump, log, aobMaker);
 
         if (proxyDeploy != null)
             ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log);
@@ -294,12 +298,195 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                SelectedTabIndex = 4; // Switch to ClassStruct tab (index shifted by GameClassFilter)
+                SelectedTabIndex = 5; // Switch to ClassStruct tab (was 4 pre-InterestingFunctions tab insertion)
                 await ClassStruct.LoadClassCommand.ExecuteAsync(classAddr);
             }
             catch (Exception ex)
             {
                 _log.Error("GameClassFilter NavigateToClassStruct handler error", ex);
+            }
+        };
+
+        // Wire InterestingFunctions -> Live Walker (with find_instance fallback to ClassStruct).
+        // The Finder gives us (className, funcName), but Live Walker is instance-based:
+        //   1. Try FindInstancesAsync(className, exactMatch=true) -- pick the first non-CDO live instance.
+        //   2. On hit: switch to Live Walker tab + navigate to that instance + auto-scroll to funcName.
+        //   3. On miss (CDO-only class, or class not yet instantiated): switch to ClassStruct tab so
+        //      the user at least sees the function in the class metadata, with a status hint.
+        InterestingFunctions.NavigateToFunction += async (className, funcName) =>
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(className)) return;
+
+                var instances = await _dump.FindInstancesAsync(className, exactMatch: true, limit: 5);
+                // Skip CDO entries (their name typically starts with "Default__"); pick the first
+                // real instance so Live Walker has something to walk.
+                string? liveAddr = null;
+                foreach (var inst in instances.Instances)
+                {
+                    if (string.IsNullOrEmpty(inst.Address)) continue;
+                    if (inst.Name.StartsWith("Default__", StringComparison.Ordinal)) continue;
+                    liveAddr = inst.Address;
+                    break;
+                }
+
+                if (!string.IsNullOrEmpty(liveAddr))
+                {
+                    SelectedTabIndex = 0; // Live Walker
+                    await LiveWalker.NavigateToAddressCommand.ExecuteAsync(liveAddr);
+                    // Function Goto: TrySelectFunctionByNameAsync awaits any
+                    // in-flight LoadFunctionsAsync (NavigateToAddress fires
+                    // it forget-style so fields render fast). Without that
+                    // await the first click after a class change finds an
+                    // empty function list and reports "function not selected".
+                    var picked = await LiveWalker.TrySelectFunctionByNameAsync(funcName);
+                    StatusText = picked
+                        ? $"Navigated to {className}::{funcName} (live instance {liveAddr})"
+                        : $"Navigated to {className} @ {liveAddr}; function '{funcName}' not in this class";
+                    _log.Info($"InterestingFunctions -> LiveWalker: {className}::{funcName} @ {liveAddr}" +
+                              (picked ? "" : " (function not selected)"));
+                }
+                else
+                {
+                    SelectedTabIndex = 5; // ClassStruct fallback
+                    // Look up the class address via ListClasses since Find Instances came back empty.
+                    var classes = await _dump.ListClassesAsync(gameOnly: false);
+                    var match = classes.Classes.FirstOrDefault(
+                        c => c.ClassName.Equals(className, StringComparison.Ordinal));
+                    if (match != null && !string.IsNullOrEmpty(match.ClassAddr))
+                    {
+                        await ClassStruct.LoadClassCommand.ExecuteAsync(match.ClassAddr);
+                        StatusText = $"No live instance of {className}; showing class metadata";
+                        _log.Info($"InterestingFunctions -> ClassStruct fallback: {className}::{funcName}");
+                    }
+                    else
+                    {
+                        StatusText = $"Class {className} not resolvable (Find Instances + ListClasses both empty)";
+                        _log.Warn($"InterestingFunctions navigate: {className} not found");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"InterestingFunctions NavigateToFunction handler error: {className}::{funcName}", ex);
+            }
+        };
+
+        // Wire InterestingFunctions -> clipboard. The VM avoids holding
+        // IPlatformService directly so its test stubs stay minimal; the
+        // MainWindow knows the platform service and can do the actual
+        // copy here. Status text already set by the VM.
+        InterestingFunctions.RequestCopyText += async (text) =>
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            try { await _platform.CopyToClipboardAsync(text); }
+            catch (Exception ex)
+            {
+                _log.Error($"InterestingFunctions clipboard copy failed: {ex.Message}", ex);
+            }
+        };
+
+        // Wire InterestingFunctions -> Copy AA Script (Baked).
+        // Walks the class to fetch the chosen UFunction's full param metadata, then either
+        // generates a no-arg script directly (fast path) or opens InvokeParamDialog in
+        // CopyBakedScript mode for the user to fill values.
+        InterestingFunctions.RequestCopyBakedScript += async (className, funcName) =>
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(className) || string.IsNullOrEmpty(funcName)) return;
+
+                // Need a class address to walk_functions. Reuse ListClasses (cached game class list).
+                var classes = await _dump.ListClassesAsync(gameOnly: false);
+                var classMatch = classes.Classes.FirstOrDefault(
+                    c => c.ClassName.Equals(className, StringComparison.Ordinal));
+                if (classMatch == null || string.IsNullOrEmpty(classMatch.ClassAddr))
+                {
+                    StatusText = $"Class {className} not found";
+                    return;
+                }
+
+                var functions = await _dump.WalkFunctionsAsync(classMatch.ClassAddr);
+                var funcMatch = functions.FirstOrDefault(
+                    f => f.Name.Equals(funcName, StringComparison.Ordinal));
+                if (funcMatch == null)
+                {
+                    StatusText = $"{className}::{funcName} not in walk_functions output";
+                    return;
+                }
+
+                // Find a live instance so the script's invokeUFunction has a target. The
+                // helper uses CMD_INVOKE_BY_NAME which finds an instance itself, but
+                // running it now lets us surface a clear error if the class is CDO-only.
+                var instances = await _dump.FindInstancesAsync(className, exactMatch: true, limit: 1);
+                string instanceAddr = "";
+                foreach (var inst in instances.Instances)
+                {
+                    if (!inst.Name.StartsWith("Default__", StringComparison.Ordinal))
+                    {
+                        instanceAddr = inst.Address;
+                        break;
+                    }
+                }
+
+                // Fast path: TRULY trivial functions only (no inputs AND no return).
+                // Functions like KismetSystemLibrary::GetGameName have no inputs
+                // but DO return a value -- they need the dialog so the Verify
+                // Return Value toggle is reachable. Mirrors LiveWalker's path.
+                var inputParams = funcMatch.Params.Where(p => !p.IsReturn).ToList();
+                var hasReturn = funcMatch.Params.Any(p => p.IsReturn);
+                if (inputParams.Count == 0 && !hasReturn)
+                {
+                    var script = Services.BakedScriptGenerator.Generate(
+                        className, funcName, funcMatch.ParmsSize,
+                        Array.Empty<Models.BakedParamValue>());
+                    var description = $"Invoke (baked, no args): {className}::{funcName}";
+                    // Sample availability before send so 'pipe broke mid-send'
+                    // surfaces distinctly from 'CE not running'.
+                    bool wasAvailable = _aobMaker?.IsAvailable ?? false;
+                    bool sentToCe = false;
+                    if (_aobMaker != null && wasAvailable)
+                        sentToCe = await _aobMaker.CreateAAScriptAsync(description, script, autoActivate: false);
+                    if (!sentToCe)
+                        await _platform.CopyToClipboardAsync(script);
+                    // Sync VM-level state so InterestingFunctions tab's Notes
+                    // column reflects post-send reality.
+                    if (_aobMaker != null)
+                        InterestingFunctions.IsAobMakerAvailable = _aobMaker.IsAvailable;
+                    StatusText = sentToCe
+                        ? $"AA Script created in CE: {funcName}"
+                        : wasAvailable
+                            ? $"⚠ AOBMaker pipe broke (CE closed?) — script copied to clipboard"
+                            : $"AOBMaker not connected — script copied to clipboard ({funcName})";
+                    _log.Info($"InterestingFunctions baked AA Script (no args) " +
+                              $"{(sentToCe ? "sent to CE" : "to clipboard")}: " +
+                              $"{className}::{funcName} (wasAvailable={wasAvailable})");
+                    return;
+                }
+
+                // Otherwise open the dialog in CopyBakedScript mode.
+                if (Avalonia.Application.Current?.ApplicationLifetime is not
+                    Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+                    || desktop.MainWindow is not { } owner)
+                    return;
+
+                var dialog = new Views.InvokeParamDialog(
+                    className, funcName, inputParams, funcMatch.Params, funcMatch.ParmsSize,
+                    instanceAddr, _dump, _engineState?.UEVersion ?? 0,
+                    aobMaker: _aobMaker, platform: _platform,
+                    mode: Views.InvokeDialogMode.CopyBakedScript);
+                var result = await dialog.ShowDialog<string?>(owner);
+                StatusText = result == "ok"
+                    ? $"AA Script ready: {className}::{funcName}"
+                    : $"AA Script export cancelled: {funcName}";
+                _log.Info($"InterestingFunctions CopyBakedScript dialog " +
+                          $"{(result == "ok" ? "completed" : "cancelled")}: {className}::{funcName}");
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"InterestingFunctions RequestCopyBakedScript handler error: {className}::{funcName}", ex);
+                StatusText = $"AA Script export failed: {ex.Message}";
             }
         };
 
@@ -520,6 +707,103 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         await ExportSymbolsAsync("IDA Script (*.idc)", ".idc",
             (symbols, _) => SymbolExportService.GenerateIdaScript(symbols));
+    }
+
+    /// <summary>
+    /// Tools menu: stream the embedded <c>ue5_invoke_helper.lua</c> to a
+    /// user-chosen file. The helper is required at runtime by every
+    /// "Copy AA Script (Baked)" output -- once per .CT the user picks
+    /// Tools -> Export CE Helper Lua File... here, then drags the file
+    /// into their table via Cheat Engine's Table -> Add File...
+    /// menu. Doesn't need an active DLL connection.
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportCeHelperLuaAsync()
+    {
+        try
+        {
+            var savePath = await _platform.ShowSaveFileDialogAsync(
+                defaultFileName:  HelperLuaResource.DefaultFileName,
+                filterName:       "CE Lua Helper (*.lua)",
+                filterExtension:  ".lua");
+            if (string.IsNullOrEmpty(savePath))
+            {
+                _log.Info("Export CE Helper Lua: user cancelled");
+                return;
+            }
+
+            var content = HelperLuaResource.Read();
+            await File.WriteAllTextAsync(savePath, content);
+
+            _log.Info($"Exported CE helper lua: {savePath} " +
+                      $"({content.Length:N0} chars)");
+            StatusText = $"CE helper exported: {Path.GetFileName(savePath)}";
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Export CE Helper Lua failed", ex);
+            StatusText = $"Export CE helper failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Tools menu: ship the embedded <c>ue5_invoke_helper.lua</c> straight
+    /// into the currently open CE table via the AOBMaker plugin pipe
+    /// (<c>InjectTableFile</c>). Replaces the manual save-to-disk +
+    /// <c>Table -&gt; Add File...</c> dance.
+    /// Probes <see cref="IAobMakerBridge.IsAvailable"/> first via
+    /// <see cref="IAobMakerBridge.CheckAvailabilityAsync"/> so a stale
+    /// availability flag (CE closed since the last check) doesn't fire
+    /// off a guaranteed-to-fail pipe round-trip.
+    /// </summary>
+    [RelayCommand]
+    private async Task InjectCeHelperLuaAsync()
+    {
+        if (_aobMaker == null)
+        {
+            StatusText = "AOBMaker plugin not configured";
+            return;
+        }
+
+        // Show an in-flight status so successive clicks can be told apart
+        // even when both end in the same outcome — without this the user
+        // sees the previous run's text frozen on screen until the new
+        // run finishes, which reads as "the click did nothing".
+        StatusText = $"Injecting {HelperLuaResource.DefaultFileName} into CE table...";
+
+        try
+        {
+            await _aobMaker.CheckAvailabilityAsync();
+            if (!_aobMaker.IsAvailable)
+            {
+                StatusText = "Inject helper: AOBMaker not connected — open Cheat Engine with the AOBMaker plugin loaded";
+                return;
+            }
+
+            var content = HelperLuaResource.Read();
+            var (ok, error) = await _aobMaker.InjectTableFileAsync(
+                HelperLuaResource.DefaultFileName, content);
+
+            if (ok)
+            {
+                _log.Info($"Injected {HelperLuaResource.DefaultFileName} into CE table " +
+                          $"({content.Length:N0} chars)");
+                StatusText = $"Inject helper OK: {HelperLuaResource.DefaultFileName} embedded ({content.Length:N0} bytes)";
+            }
+            else if (!string.IsNullOrEmpty(error))
+            {
+                StatusText = $"Inject helper failed: {error} — use Export to disk + Add File... fallback";
+            }
+            else
+            {
+                StatusText = "Inject helper failed (no plugin response — CE closed?) — use Export to disk + Add File... fallback";
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Inject CE Helper Lua failed", ex);
+            StatusText = $"Inject helper failed: {ex.Message}";
+        }
     }
 
     private async Task ExportSymbolsAsync(

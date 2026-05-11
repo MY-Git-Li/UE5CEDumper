@@ -71,4 +71,13 @@ public sealed class EngineState
     /// to the UE Version Override; user can adjust via SetInvokeTimeoutAsync.
     /// </summary>
     public int InvokeTimeoutMs { get; init; } = 5000;
+
+    /// <summary>
+    /// VER_BUILD of the currently-running DLL (e.g. 648). Returned by the init pipe response.
+    /// 0 means the DLL is older than build 653 and doesn't expose this field. The System tab
+    /// compares against the UI's own bundled build to warn about "DLL not redeployed" — a
+    /// common gotcha in proxy mode where the user updates the UI but forgets to copy the new
+    /// DLL into the game's Binaries\Win64\ folder.
+    /// </summary>
+    public int DllBuildNumber { get; init; }
 }

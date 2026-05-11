@@ -21,8 +21,15 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Stop Live Walker auto-refresh when the user switches away from the Live Walker tab.
-    /// Auto-refresh is for monitoring live data — no point polling while viewing other tabs.
+    /// Per-tab activation work:
+    /// 1. Stop Live Walker auto-refresh when the user switches away
+    ///    from Live Walker (no point polling while viewing other tabs).
+    /// 2. Refresh AOBMaker availability for tabs whose actions depend
+    ///    on the CE plugin (LiveWalker, InterestingFunctions). The
+    ///    re-check is fire-and-forget with a 5s cooldown so rapid tab
+    ///    switches don't stack 2s pipe-connect timeouts -- keeps the
+    ///    grayout state honest when the user starts/stops CE without
+    ///    blocking the UI thread.
     /// </summary>
     private void MainTabs_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
@@ -33,6 +40,14 @@ public partial class MainWindow : Window
         if (tabs.SelectedIndex != 0 && vm.LiveWalker.IsAutoRefreshing)
         {
             vm.LiveWalker.StopAutoRefreshTimer();
+        }
+
+        // Refresh AOBMaker state for tabs whose toolbar / per-row buttons
+        // depend on it. Order matches the AXAML tab order.
+        switch (tabs.SelectedIndex)
+        {
+            case 0: vm.LiveWalker.TryCheckAobMaker(); break;
+            case 3: vm.InterestingFunctions.TryCheckAobMaker(); break;
         }
     }
 }

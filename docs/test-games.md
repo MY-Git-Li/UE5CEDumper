@@ -26,12 +26,16 @@
 | Cat Island Petrichor Demo | UE5.6 | Full working. GWorld ✅ |
 | Way of the Hunter 2 Demo | UE5.7 | Full working. GWorld ✅ |
 | COMBAT PILOT: CARRIER QUALIFICATION Demo | UE5.5 | Full working. GWorld ✅ |
+| The Artisan of Glimmith | UE4.27 (PE: 427, exe: Geri-Win64-Shipping) | Full working. Stride 24, 24K objects. GWorld ✅. **Build 648 cross-version PE-vtable verification target (2026-05-11)**: actual PE slot is `vtable+0x220` (old hardcoded `0x218` for UE 4.25-4.27 was off by 1 slot — enough to silently break invokes). Validator confirms 1260 hook fires / 1500ms. Four scenarios verified: Add_IntInt=7, Multiply_FloatFloat=12, `CharacterMovementComponent::GetMaxJumpHeight`=89.99 (instance method via game-thread dispatch), `PlayerCameraManager::GetCameraLocation` returns FVector struct. |
+| Barn Finders | UE4.25 (PE: 425, exe: BarnFinders-Win64-Shipping) | User-submitted logs (build 560). Stride 24, 136,953 objects. UE5-Extended layout (strict). GWorld ✅. Standard FProperty mode. Publisher fallback (Atomic Jelly / Plug-In Digital — no thumbprint match). |
+| Colossal | UE5.03 (PE: 503, exe: Colossal-Win64-Shipping, publisher: Atan) | User-submitted logs (build 560). Stride 24, 41,528 objects. UE5-Extended layout (strict). GWorld ✅. TaggedFFieldVariant (UE5.3+). FField::Next=+0x18, FField::Name=+0x20. Publisher Copyright is Epic default placeholder — no thumbprint match. |
+| Extinction | UE4.15 (PE: 415, exe: Extinction.exe, dir: Blink/Binaries/Win64) | User-submitted logs (build 560). Stride 24, 230,732 objects. **Flat (non-chunked)** FFixedUObjectArray. GNames via TNameEntryArray (UE4Names=yes). UProperty mode (UE < 4.25). UField::Next=+0x28. **Lowest UE version verified end-to-end** — expands support below the previously documented 4.18+ floor. Patterns: GOBJ_RE2 (1.8s, 2 batches) / GNAM_CT3 (4.6s, 4 batches) / GWLD_G42_1 (3.3s, 3 batches). Publisher: Modus Games (no thumbprint). |
 
 -----
 
 ## GWorld Status Summary
 
-**Working (18/20):** TQ2, EverSpace 2, Hogwarts Legacy, IDOLM@STER, Romancing SaGa 2, Tower of Mask, Ghostwire: Tokyo, Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT Demo, OctoPath Traveler, FF7R, FF7Re, DQ I&II, DQ III, DQ XI S, Lushfoil Photography Sim, Manor Lords
+**Working (22/24):** TQ2, EverSpace 2, Hogwarts Legacy, IDOLM@STER, Romancing SaGa 2, Tower of Mask, Ghostwire: Tokyo, Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT Demo, OctoPath Traveler, FF7R, FF7Re, DQ I&II, DQ III, DQ XI S, Lushfoil Photography Sim, Manor Lords, The Artisan of Glimmith, Barn Finders, Colossal, Extinction
 
 **Failing (GWorld not found or untested):** Star Wars Jedi, Satisfactory
 
@@ -39,3 +43,5 @@
 
 - **FF7Re** = Final Fantasy VII Rebirth (UE4.26 Square Enix fork)
 - **FF7R** = Final Fantasy VII Remake Intergrade (UE4.18 Square Enix fork)
+- **Geri** = The Artisan of Glimmith (UE4.27, executable `Geri-Win64-Shipping.exe` — log folder uses this name)
+- **Blink** = Extinction (UE4.15, executable `Extinction.exe`, parent dir `Blink/Binaries/Win64/`)

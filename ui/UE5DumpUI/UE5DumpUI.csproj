@@ -74,6 +74,16 @@
     <AvaloniaResource Include="Assets\**" />
   </ItemGroup>
 
+  <!-- Embed CE Lua helper so the Tools -> Export CE Helper Lua File...
+       command can stream it out. Single source of truth = scripts/ folder
+       (linked here, not copied). -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\scripts\ue5_invoke_helper.lua">
+      <Link>Resources\CE\ue5_invoke_helper.lua</Link>
+      <LogicalName>UE5DumpUI.Resources.CE.ue5_invoke_helper.lua</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
   <!-- Prevent Avalonia assemblies from being over-trimmed during AOT publish.
        Avalonia.Win32 and Avalonia.Skia are loaded via reflection by UsePlatformDetect()
        and would be partially trimmed without explicit roots, causing NullReferenceException

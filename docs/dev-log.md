@@ -1,12 +1,1129 @@
 # Dev Log
 
-Running log of milestone work, current capability matrix, and known gaps.
-Newest section first. Tied to the `dev` branch — entries reference build
-numbers from `build_number.txt` so a commit can be cross-referenced.
+Append-only milestone history, newest first. Each entry references a
+build number from `build_number.txt` so commits can be cross-referenced.
+
+> **Looking for current state?** See [roadmap.md](roadmap.md) for the
+> capability matrix / per-game configuration / tested games, and
+> [todo.md](todo.md) for the prioritized next-work list. This file
+> records *what shipped* — the other two record *what works now* and
+> *what's next*.
 
 -----
 
-## 2026-05-10 (latest, dev branch, build 578-589) — Walker false-positive sweep + per-game invoke timeout + FillPointerSnapshot + drill-depth 0-6 band
+## 2026-05-11 (latest, dev branch, build 648) — ProcessEvent vtable detection rewrite + hook-fire validation
+
+Closes the CRITICAL `ProcessEvent vtable detection is wrong` entry
+opened build 647. Two-layer fix: (1) replace the version-table detector
+with a function-body pattern scan modeled on Dumper-7, and (2) add a
+post-install hook-fire-count validator so silent vtable-misdetection
+can never sleep for 600+ builds again.
+
+### Background (re-stated for the log)
+
+Pre-build-648 `DetectProcessEventVTableOffset` picked a vtable byte
+offset from a hardcoded UE-version table and "validated" the slot by
+reading 1 byte to confirm it pointed at code. Every UObject virtual
+passes that check — so on Geri (UE 4.27, slot 0x218) and ES2 (UE 5.5,
+slot 0x220), we hooked an adjacent virtual silently. The invoke queue
+never drained (`-5` timeouts), static-native fast path "succeeded"
+with `result=0` because the wrong virtual's ABI was compatible enough
+not to AV but didn't actually run the requested UFunction. Bug slept
+600+ builds because verify-mode (the first reader of the return slot)
+only landed in build 637.
+
+### Layer 1 — pattern-based detection (new primary path)
+
+`DetectProcessEventVTableOffsetByPattern(vtable)` iterates vtable slots
+in `[0x100, 0x300]` step 8, reads each candidate function's first 0xF00
+bytes via `Macht::ReadBytesSafe`, and looks for two distinctive
+`TEST [reg+disp32], imm32` instructions ProcessEvent uniquely contains:
+
+```
+Pattern 1 (within first 0x400 bytes):  F7 ?? ?? 00 00 00 00 04 00 00
+                                       └─────────────────────────────┘
+                                       TEST [reg + UFunction::FunctionFlags], 0x00000400  (FUNC_Native)
+
+Pattern 2 (within first 0xF00 bytes):  F7 ?? ?? 00 00 00 00 00 40 00
+                                       └─────────────────────────────┘
+                                       TEST [reg + UFunction::FunctionFlags], 0x00400000  (high-flag mask)
+```
+
+`disp32` low byte (FunctionFlags offset) and the ModRM byte are
+wildcarded — so the scan is FunctionFlags-offset agnostic and matches
+any UE version 4.18..5.7+ without per-version branching. First slot
+whose function body matches *both* patterns is ProcessEvent.
+
+The legacy version-table heuristic (`DetectProcessEventVTableOffsetByVersion`)
+is retained as a `LOG_WARN` fallback for unusual compiler output. Even
+when the fallback fires, layer 2 below catches a miss.
+
+### Layer 2 — post-install hook-fire validation (real safety net)
+
+`Stark` exposes a new atomic counter `s_hookFireCount`, ticked at the
+very top of `HookedProcessEvent` (relaxed memory order — single
+non-zero observation is all we need). Public API
+`Stark::GetHookFireCount()` returns the running total.
+
+After `Stark::InstallHook` succeeds, `Frieren::TryInstallGameThreadHook`
+spawns a detached validator thread:
+
+```cpp
+std::thread([peAddr]() {
+    uint64_t before = Stark::GetHookFireCount();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    uint64_t after  = Stark::GetHookFireCount();
+    if (after - before == 0) {
+        LOG_ERROR("GameThreadDispatch: VALIDATION FAILED — hook at 0x%llX "
+                  "fired 0 times in 1500ms. We are almost certainly hooked "
+                  "on the wrong vtable slot. UFunction invokes WILL time out.");
+    } else {
+        LOG_INFO("GameThreadDispatch: validation OK — hook fired %llu times "
+                 "in 1500ms");
+    }
+}).detach();
+```
+
+Detached so DLL init doesn't block on the 1.5s sleep. UE's real
+ProcessEvent fires many times per second during normal gameplay (every
+tick, every input dispatch, every anim notify), so a zero count after
+1.5s is high-confidence evidence of a wrong-slot hook. Out of scope
+for v1: hot re-hook on validation failure — unhook-while-thread-may-be-
+inside-trampoline is unsafe (see `Stark::RemoveHook` comment), so the
+validator just observes and logs. User reaction = collect logs + ping
+us so we can extend pattern coverage.
+
+### Reference
+
+Pattern technique cribbed from [Dumper-7](https://github.com/Encryqed/Dumper-7),
+specifically `vendor/Dumper-7/Dumper/Engine/Private/OffsetFinder/
+Offsets.cpp:15-74` (`Off::InSDK::ProcessEvent::InitPE_Windows`). Dumper-7
+also documents a `L"Accessed None"` string-xref fallback we haven't
+adopted yet — the dual-TEST pattern is enough to catch every UE 4.18+
+version we ship to without a string scan.
+
+### Files touched
+
+- `dll/src/Frieren.cpp`:
+  - `DetectProcessEventVTableOffset` — split into `ByPattern` (new
+    primary) + `ByVersion` (legacy fallback) + top-level resolver
+  - `TryInstallGameThreadHook` — new detached validator thread
+  - Anonymous namespace: `ContainsPattern` byte-pattern matcher (10-line
+    linear scan with `'x' / '?'` mask), `FindAnyValidVTable` helper,
+    pattern byte literals + masks
+- `dll/src/Stark.h` — new `GetHookFireCount()` API entry
+- `dll/src/Stark.cpp`:
+  - `s_hookFireCount` atomic counter (relaxed memory order)
+  - `HookedProcessEvent` — increment counter at top
+  - `GetHookFireCount()` implementation
+- `docs/todo.md` — CRITICAL section marked ✅ shipped, moved live-game
+  re-verification details into "Pending live-game verification" pool
+- `docs/lessons-learned.md` — new entries (see below)
+- `docs/roadmap.md` — capability matrix unchanged; tested-games entry
+  for Geri updated separately (when live verification lands)
+
+### Live-game smoke test still pending
+
+Treat build 648 as "compiles + tests pass + theoretically correct" —
+not "live-verified". Until we observe the new validator-OK log line
+on ES2 (UE 5.5) and Geri (UE 4.27), the prior failure mode is still
+possible.
+
+Tests: 786 total (693 C# + 62 dll_helpers + 31 utf8_helpers) — no
+regressions vs build 647. Build 648.
+
+-----
+
+## 2026-05-10 (dev branch, build 637) — Verify Return Value toggle on baked AA template
+
+Live-test follow-up after the static-native fast path landed: invoking
+`KismetMathLibrary::exp(8)` returned `result=0` (success) but the
+ReturnValue slot read 0 instead of `2980.957987...`. Without a
+diagnostic mode in the generated AA Script, the user had to hand-edit
+the script to insert raw-byte dumps just to tell apart "function
+didn't run" from "wrong return offset" from "data overwritten".
+
+### Toggle
+
+`InvokeParamDialog` (CopyBakedScript mode) gained a new checkbox:
+**"Verify return value (print result, keep engine open)"**. Default
+off so the production "ship a one-shot cheat" flow stays silent on
+success and auto-closes the engine. When enabled, the generated AA
+Script:
+
+- Resolves the mailbox params buffer via `getAddress('g_invokeMailbox')
+  + UE5_INVOKE_PARAMS_OFFSET` (the latter exposed by the helper).
+- Prints a `Before:` raw-byte dump of the params buffer
+  (min(ParmsSize, 32) bytes, floor 8) before the invoke call.
+- Prints an `After:` dump immediately after, so layout / write-back
+  bugs jump out by side-by-side comparison.
+- Decodes the return slot via `readUFunctionReturn(offset, type)` and
+  prints `[Invoke] OK: Class::Func -> Name (type@offset) = value`
+  with a type-aware format spec (`%.10g` for double/float, `0x%X` for
+  pointer-shaped, `%d` for ints/bools).
+- Suppresses the auto-close timer's `synchronize(getLuaEngine().Close())`
+  branch so the user can actually read the diagnostic before the
+  window vanishes.
+
+For void-return functions, verify mode prints `(void return)` instead
+of attempting a read.
+
+### Pointer-return detail
+
+The helper's `readUFunctionReturn` doesn't recognise the `'pointer'`
+type token (defaults to int32 = 4-byte read on an 8-byte slot). The
+generator now translates `'pointer'` -> `'qword'` on the wire while
+keeping `pointer` as the display label, so UObject* / UClass* /
+FName returns decode correctly without a helper rebuild.
+
+### Files touched
+
+- `ui/UE5DumpUI/Services/BakedScriptGenerator.cs`: new optional
+  `returnParam` + `verifyReturn` params on `Generate(...)`; emit
+  diagnostic block + suppress auto-close when on.
+- `ui/UE5DumpUI/Views/InvokeParamDialog.cs`: `_chkVerifyReturn`
+  CheckBox in the bottom panel; new `BuildReturnBakedParam()` helper
+  that pulls the return slot from `_allParams`.
+- `ui/UE5DumpUI.Tests/InvokeScriptTests.cs`: +6 tests covering verify-
+  off contract preservation, verify-on dump+print emission, void
+  return, pointer translation to qword, dump-window cap (32B) and
+  floor (8B).
+
+Tests: 671 -> 677 (+6). Total 677 + 62 dll_helpers + 31 utf8_helpers
+= 770. Build 637.
+
+-----
+
+## 2026-05-10 (build 636) — Static-native ProcessEvent fast path
+
+Live test on ES2 invoking `KismetMathLibrary::exp` returned `result=-5`
+(GameThreadDispatch timeout) even after the user bumped the per-game
+invoke timeout from 5000ms to 7000ms. Pipe-side log confirmed the flow:
+
+```
+FIND_INSTANCE 'KismetMathLibrary' -> CDO 0x7FF3E02B4788 (only CDO found)
+FIND_FUNCTION 'exp' -> 0x7FF3E0073288 (parmsSize=16 numParms=2 flags=0x14022403)
+INVOKE enqueued via GameThreadDispatch ... 7000ms timeout ... result=-5
+```
+
+### Root cause
+
+`KismetMathLibrary::exp` is a `Native | Static` UFunction (flags
+`0x14022403` -> `Final | Native | Static | BlueprintCallable |
+BlueprintPure | ...`). The DLL was routing every invoke through
+`Stark::EnqueueInvoke`, which only completes when the game thread
+fires a real ProcessEvent and drains the queue. ES2 in main menu /
+loading state goes seconds without a single PE call, so the queue
+sits idle until the deadline expires -- even though `exp(8)` is a
+pure C++ math helper that needs no game thread at all.
+
+### Fix
+
+Added a fast path in `Mimic::HandleInvoke` (DLL) that checks the
+captured `functionFlags` after FIND_FUNCTION:
+
+```cpp
+const bool isStaticNative =
+    (g_invokeMailbox.functionFlags & (FUNC_Native | FUNC_Static))
+        == (FUNC_Native | FUNC_Static);
+result = isStaticNative
+    ? UE5_CallProcessEventDirect(...)   // bypass GameThreadDispatch
+    : UE5_CallProcessEvent(...);        // game-thread queue (existing)
+```
+
+`UE5_CallProcessEventDirect` is a new export -- mirror of the existing
+direct-call fallback path inside `UE5_CallProcessEvent`, but without
+the hook check. Caller (`Mimic`) asserts safety based on flags. Added
+to both the in-process DLL (`Frieren.cpp` / `Frieren.h`) and the proxy
+forwarding shim (`ProxyVersion.def`).
+
+This covers all the BFL helpers users actually want to invoke from a
+cheat table -- `KismetMathLibrary`, `KismetStringLibrary`,
+`KismetArrayLibrary`, `KismetSystemLibrary` -- without any of them
+ever depending on game-thread availability.
+
+Stateful methods (BlueprintEvent, RPC, anything mutating actor state)
+still route through `Stark::EnqueueInvoke` exactly as before.
+
+### Files touched
+
+- `dll/src/Frieren.h`: declare `UE5_CallProcessEventDirect`
+- `dll/src/Frieren.cpp`: implement it (forked from the existing direct-
+  call fallback)
+- `dll/src/Mimic.cpp`: dispatch by `(FUNC_Native | FUNC_Static)` flag
+  pair
+- `dll/src/ProxyVersion.def`: re-export from version.dll proxy
+- `docs/dev-log.md`: this entry
+
+Tests: 671 C# (no change) + 62 dll_helpers + 31 utf8_helpers = 764.
+Build 636.
+
+-----
+
+## 2026-05-10 (build 632) — Inject Helper bug fix + Function Goto + filter polish
+
+User-driven follow-ups after the build 611 live test on Everspace 2.
+
+### AOBMaker plugin: `InjectTableFile` actually works now
+
+Live test on ES2 surfaced a real plugin-side bug: `f.Stream.write(content)`
+ran but `f.Stream.Size` always read 0 immediately after, so the post-write
+verification in [pipe_server.cpp:1338-1362](https://github.com/bbfox0703/AOBMaker/blob/dev/plugins/CEPlugin/src/pipe_server.cpp)
+always reported "Stream size mismatch: wrote 10008, stream has 0" and the
+table file was effectively empty. Pivoted to the pattern Cheat Engine
+itself uses (`autorun/java.lua` line 537-541): build a `createStringStream`
+from the Lua-side content variable, then `f.Stream.copyFrom(ss, 0)` and
+`ss.destroy()`. `f.Stream.Size` reads correctly afterwards.
+
+Fix shipped as AOBMaker [commit 3fc4d8c](https://github.com/bbfox0703/AOBMaker)
+("Use createStringStream+copyFrom for InjectTableFile content population")
+on AOBMaker `dev` branch.
+
+### UE5DumpUI: surface the actual plugin-side error
+
+`IAobMakerBridge.InjectTableFileAsync` return type changed from `Task<bool>`
+to `Task<(bool Ok, string? ErrorMessage)>` so the
+`MainWindowViewModel.InjectCeHelperLuaCommand` can drop the plugin's
+verbatim message into the status bar instead of always showing the
+generic "Inject failed (CE closed?)" hint. Status bar now also shows an
+in-flight "Injecting ue5_invoke_helper.lua into CE table..." line so
+successive clicks can be told apart even when both fail.
+
+Tests: +1 (`InjectCeHelperLua_BridgeReturnsError_StatusSurfacesPluginMessage`)
+asserting the plugin-side reason makes it into `StatusText`.
+
+### Interesting Funcs: third per-row "Name" button
+
+Each row already had Live + AA(B); added a yellow "Name" button at the
+end that copies the bare function name (no `Class::` prefix) to the
+clipboard. Wires through a new `RequestCopyText` event on
+`InterestingFunctionsViewModel` rather than taking an
+`IPlatformService` dependency directly, so the test stubs stay tiny.
+
+### Function Goto: Live button auto-expands + selects
+
+Live button on Interesting Funcs previously dropped the user on the
+correct LiveWalker instance but left the Functions Expander collapsed
+and didn't scroll to the target row. Two changes:
+
+- New `LiveWalkerViewModel.TrySelectFunctionByNameAsync(name)` —
+  awaits the in-flight `LoadFunctionsAsync` task (UpdateDisplay kicks
+  it fire-and-forget so fields render fast), clears any active filter,
+  flips `IsFunctionsExpanded = true`, sets `SelectedFunction`, fires
+  `ScrollToFunctionRequested` which the View handles with a
+  `DataGrid.ScrollIntoView` call.
+- The await closes the race the live test surfaced: first click after
+  a class change used to log "(function not selected)" because
+  `_allFunctions` was still empty when the selector ran. Subsequent
+  clicks succeeded because the previous load had already completed.
+
+### LiveWalker: filter field on Functions section
+
+Functions section gained a filter TextBox + "Clear" button + count
+badge. Substring match on function name (case-insensitive). Mirrors
+the Interesting Funcs filter UX for consistency. Backed by a private
+`_allFunctions: List<FunctionInfoModel>` field; `Functions` is the
+filtered ObservableCollection rebuilt on every filter change.
+
+### ClassStruct: empty-class hint banner
+
+`BlueprintFunctionLibrary` subclasses (e.g. `GameplayLib` on ES2)
+report 0 instance fields because all their content is static methods.
+The cross-tab fallback path from Interesting Funcs lands the user on
+ClassStruct with an empty DataGrid, which reads as "broken" without
+explanation. Added a new `HasNoFields` computed property +
+hint banner: "This class has no instance fields. Likely a
+BlueprintFunctionLibrary or utility class — its content is static
+methods, not data. Use the Interesting Funcs tab to invoke its
+functions."
+
+### Files touched
+
+- `dll/`: none (this round was UI-only on the UE5DumpUI side)
+- C#: `Core/IAobMakerBridge.cs`, `Services/AobMakerBridgeService.cs`,
+  `ViewModels/MainWindowViewModel.cs`, `ViewModels/LiveWalkerViewModel.cs`,
+  `ViewModels/InterestingFunctionsViewModel.cs`, `ViewModels/ClassStructViewModel.cs`,
+  `Views/LiveWalkerPanel.axaml{,.cs}`, `Views/InterestingFunctionsPanel.axaml`,
+  `Views/ClassStructPanel.axaml`, `Resources/Strings/en.axaml`
+- Tests: `MainWindowInjectHelperTests.cs` (new error-message test +
+  RecordingBridge update), `InterestingFunctionsViewModelTests.cs`
+  (FakeAobMakerBridge updated to new tuple return)
+- AOBMaker plugin: `pipe_server.cpp` (`HandleInjectTableFile` rewrite)
+
+Tests: 670 -> 671 C# (+1) + 62 dll_helpers + 31 utf8_helpers = 764 total.
+
+-----
+
+## 2026-05-10 (build 611) — One-click helper inject into open CE table
+
+Closes the last manual step in the "super beginner" cheat-table flow:
+previously every user had to **Tools -> Export CE Helper Lua File...**,
+save the .lua somewhere, then open CE and **Table -> Add File...** to
+embed `ue5_invoke_helper.lua` into their .CT before any baked Invoke
+script could run. New flow: one menu click and the helper is in the
+table.
+
+### AOBMaker plugin: new `InjectTableFile` pipe command
+
+Added handler in `D:\Github\AOBMaker\plugins\CEPlugin\src\pipe_server.cpp`
+that runs in CE's main thread via `synchronize`:
+
+1. `findTableFile(fileName)` — delete if it already exists (replace, not append)
+2. `createTableFile(fileName)` — fresh empty TableFile in the open .CT
+3. `f.Stream.write(content)` — write the raw bytes
+4. Verify `f.Stream.Size == #content`
+
+Content is embedded into the generated Lua program via a long-bracket
+literal (`[==N==[ ... ]==N==]`) where the `=` count is **chosen
+dynamically** from the content so an arbitrary payload — including one
+containing `]==]` — can never collide with the delimiter. Protocol
+constants `TypeInjectTableFile` / `TypeInjectTableFileResult` added
+to `protocol.h`; routing wired in `HandleClient`.
+
+Shipped to AOBMaker `main` via merge commit
+[`7505644`](https://github.com/bbfox0703/AOBMaker/commit/7505644)
+(dev branch commit `ce488bc`).
+
+### UE5DumpUI: `IAobMakerBridge.InjectTableFileAsync` + Tools menu item
+
+- `IAobMakerBridge` grew a sixth method, `InjectTableFileAsync(fileName,
+  content, ct)` — same per-request reconnect pattern as the existing
+  navigation calls but with a **15 s response timeout** (vs. 5 s default)
+  to give `synchronize()` round-trip headroom for ~10 KB payloads.
+- `AobMakerMessage` model gained `fileName` / `content` JSON properties
+  (omitted when null, AOT context unchanged).
+- `MainWindowViewModel.InjectCeHelperLuaCommand` orchestrates the four
+  user-visible end-states:
+  - bridge missing -> "AOBMaker plugin not configured"
+  - CE not running -> "AOBMaker not connected — open Cheat Engine..."
+  - inject succeeds -> "Helper embedded in current CE table (...)"
+  - inject fails -> "Inject failed (CE closed?) — use Export to disk
+    + Add File... fallback"
+- New menu entry **Tools -> Inject Helper into Current CE Table**
+  sits above the existing **Export CE Helper Lua File...** so the
+  one-click path is the obvious default; export remains as the
+  documented manual fallback.
+
+### Tests (+7)
+
+- `AobMakerInjectTableFileTests` (3 tests): wire-model serialization
+  emits new fields, relaxed encoder keeps literal single quotes (CE Lua
+  JSON parser doesn't decode `'`), bridge service rejects empty
+  `fileName` / `content`.
+- `MainWindowInjectHelperTests` (4 tests): all four end-states above
+  via a recording bridge, with no-op stubs for `IPipeClient` /
+  `IPlatformService` / `ILoggingService` since the inject path doesn't
+  touch them.
+- `FakeAobMakerBridge` in `InterestingFunctionsViewModelTests` got the
+  new method stubbed (returns false) to keep it interface-compliant.
+
+### Integration via cherry-pick
+
+Spawned session worked from `aa2ac0d` while main session continued
+through `942c35d` (PropertySearch dedupe). Cherry-picked
+`44a3943` onto dev rather than merging — keeps the linear history
+the project's been maintaining. Doc-only conflicts on dev-log.md /
+roadmap.md / todo.md (both branches updated the "latest" headers);
+resolved by keeping both entries with AOBMaker bumped to build 611.
+
+**Build #611, 763 tests passing (670 C# + 62 dll_helpers + 31
+utf8_helpers).** 13 commits ahead of `origin/main`.
+
+-----
+
+## 2026-05-10 (dev branch, build 610) — PropertySearch dedupe-by-defining-class
+
+`feat(dll,ui): PropertySearch results deduped by defining class
++ inheritance count badge`. First piece of the "Property Origin
+Resolver" set proposed in chat (proposal A) -- closes the
+"PropertySearch returns 4823 indistinguishable rows for
+`bCanBeDamaged`" UX trap that user flagged as the biggest practical
+problem with the existing tooling.
+
+### The problem (one sentence)
+
+UE doesn't shadow inherited properties (no C# `new` keyword
+equivalent), so a field declared on `AActor` lives at the same offset
+on every `APawn`/`ACharacter`/`BP_*_C` subclass. PropertySearch
+walked each class's full inherited chain and emitted one row per
+class -- 4823 rows for one field, with no signal to the user about
+which one was "real" (they're all the same memory).
+
+### Algorithm
+
+`Aura::FindDefiningClass(classAddr, fieldOffset)` walks the
+SuperStruct chain upward. A class C declares the property at
+`fieldOffset` iff:
+
+```
+fieldOffset >= C.SuperStruct.PropertiesSize    (super doesn't have it)
+fieldOffset <  C.PropertiesSize                (C does have it)
+```
+
+Translated to a loop: starting at the iterated class, walk to super
+while `super.PropertiesSize > fieldOffset` (super has it too); when
+super doesn't have it, the current class is the defining class.
+32-step depth cap matches Ubel's existing inherited-walk limit.
+
+### SearchProperties dedup
+
+Per-call `unordered_map<DedupKey, size_t>` where key is
+`(definingClassAddr, propName, propOffset)`. First encounter:
+allocate a representative `PropertyMatch` keyed by the defining
+class. Subsequent encounters: bump `inheritedByCount`, no new row.
+
+The representative match's `className` / `classAddr` / `classPath`
+are the **defining class**, not the iterated class -- so the user
+sees `AActor` as the "true home" of `bCanBeDamaged` regardless of
+which subclass GObjects[i] hit first.
+
+### Phase 2 (preview) gotcha + fix
+
+After dedup, `match.classAddr` is the defining class -- often
+abstract (AActor / APawn) with zero direct instances. The existing
+Phase 2 code looked up instances by exact class match, which after
+dedup would find nothing for almost every match.
+
+Fix: track an internal-only `previewClassAddr` per match -- the
+most-derived subclass observed during the search loop (largest
+`PropertiesSize`, since deeper-in-chain classes are more likely to
+be concrete and have live instances). Phase 2 swaps `classAddr <->
+previewClassAddr` around the `ResolvePropertyPreviews` call so the
+existing instance-lookup helper sees the concrete subclass while
+the wire output keeps the canonical defining-class addressing.
+
+### Wire schema additions (4 new fields)
+
+```json
+{
+  "class_name":           "AActor",                  // defining class (post-dedup)
+  "class_addr":           "0x7FF...",                // ditto
+  "defining_class_name":  "AActor",                  // explicit duplicate for forward compat
+  "defining_class_addr":  "0x7FF...",
+  "defining_class_path":  "/Script/Engine.Actor",
+  "inherited_by_count":   4822,
+  ...
+}
+```
+
+`defining_class_*` exposed as a separate copy of `class_*` so a
+future "Show inheritance expanded" mode could emit one row per
+inheriting class with `class_*` reflecting the inheritor and
+`defining_class_*` still pointing at the canonical home. Back-compat
+preserved: older DLLs that don't emit these default to "" / 0
+client-side, which the model's computed properties handle gracefully.
+
+### UI
+
+PropertySearchPanel grew a new "Scope" column between Class and
+Super:
+- Empty when `InheritedByCount == 0` (a strong "this is a unique,
+  game-specific field" hint -- usually the kind a cheat-table maker
+  actually wants)
+- "+1 inheritor" / "+N inheritors" otherwise
+
+Tooltip on the Scope cell explains the relationship + shows the
+defining class path so the user can tell engine fields
+(`/Script/Engine.*`) from game fields (`/Game/*` / `/Script/MyGame.*`)
+at a glance.
+
+### Tests (+11)
+
+`PropertySearchMatchTests` (new):
+- `InheritanceBadge` empty / singular / plural cases
+- `InheritanceTooltip` highlights uniqueness when count=0; shows
+  defining class path + "identical effect" wording when count>0
+- `OffsetHex` / `TypeDisplay` baseline preserved (no regression
+  in existing display behaviour)
+
+DLL-side dedup correctness needs a live game (4823-class scenario)
+to verify end-to-end -- no unit-test surface for the GObjects walk.
+Smoke test pending on Everspace 2 / Titan Quest II / FF7 Rebirth.
+
+### Follow-ups (not blocking)
+
+- **Proposal B**: per-row "similar BP-added properties" suggestions
+  using the tokeniser to surface game-specific bools alongside the
+  engine field (so user sees `bCanBeDamaged @ AActor` AND nearby
+  `bIsImmortal @ BP_PlayerCharacter_C` in one view)
+- **Proposal C**: Class Family Browser tab -- bucketed view of
+  Character / Pawn / Inventory / Save / Component / DataAsset / etc
+  classes loaded in the game. Bigger work, separate planning.
+
+**Build #610, 755 tests passing (662 C# + 62 dll_helpers + 31
+utf8_helpers).**
+
+-----
+
+## 2026-05-10 (dev branch, build 608-609) — AOBMaker gating + CamelCase tokeniser + dialog overflow fix
+
+Three independent fixes shipped under the "polish + de-risk" theme
+after Interesting Functions Finder went live in 597-607.
+
+### AOBMaker availability gating + Notes column + pipe-broken guard (build 608, [`25b6594`](../ui/UE5DumpUI/ViewModels/InterestingFunctionsViewModel.cs))
+
+Closes the UX gap where AA Script export silently fell back to
+clipboard when AOBMaker was unavailable -- user had no clear signal
+whether the script reached CE or not.
+
+- `InterestingFunctionsViewModel` got `IAobMakerBridge?` ctor injection
+  + `IsAobMakerAvailable` ObservableProperty + `AobMakerNote` computed
+  string + `CheckAobMakerAsync` / `TryCheckAobMaker` methods. Mirrors
+  the LiveWalker pattern; same 5s cooldown so rapid tab switches don't
+  stack 2s pipe-connect timeouts.
+- `MainWindow.MainTabs_SelectionChanged` now also fire-and-forget
+  re-checks AOBMaker on LiveWalker (tab 0) and Interesting Funcs
+  (tab 3) activation. Detects CE start/stop without blocking the UI
+  thread.
+- `LiveWalker.TryCheckAobMaker` made public so the tab handler can
+  call it from the same code path.
+- LiveWalker + Interesting Funcs DataGrids gained a "Notes" column
+  bound via `RelativeSource` ancestor to the parent VM's `AobMakerNote`.
+  Italic amber styling (#E0A050). Per-row column with VM-level value
+  -- every row shows the same hint, leaves the slot open for future
+  per-row notes (e.g. dry-run failures).
+- Send-time guards: `LiveWalker.GenerateInvokeScriptAsync`,
+  `LiveWalker.CopyBakedScriptAsync` no-args fast path,
+  `InvokeParamDialog.OnCopyBakedScriptClicked`, MainWindowVM
+  `RequestCopyBakedScript` -- all sample `_aobMaker.IsAvailable` BEFORE
+  the send so the failure message can distinguish:
+  * `sentToCe=true` -> "AA Script created in CE"
+  * `sentToCe=false && wasAvailable=true` -> `⚠ AOBMaker pipe broke
+    (CE closed?) -- copied to clipboard`
+  * `sentToCe=false && wasAvailable=false` -> "AOBMaker not connected
+    -- copied to clipboard"
+  After each send, the bridge's post-send `IsAvailable` is synced back
+  to the VM so the Notes column reflects reality on the next repaint.
+
+### Step 3 (UFunction metadata exposure) skipped after research
+
+Original plan: read `UField::MetaDataMap` to surface Blueprint
+`DisplayName` / `ToolTip` / `Category` / `Keywords`.
+
+Research (vendored UE source `Field.cpp:666-693` +
+`CoreMiscDefines.h:22-28`) confirmed:
+- `WITH_METADATA = WITH_EDITORONLY_DATA`
+- On Windows/Mac/Linux Shipping builds the macro is `1` so the
+  `MetaDataMap` POINTER exists in the struct
+- BUT the cooker strips the actual content during cook -- runtime
+  `GetMetaData()` returns empty string in every cooked Shipping game
+
+Implication: implementing this would only pay off on DebugGame /
+Development-config builds. Cheat-engine users almost never encounter
+those. Estimated 250 LoC + per-version offset table for ~zero
+real-world value.
+
+**Pivoted** to the tokeniser work (B below) which closes the same
+substring-noise gap by a different route.
+
+### CamelCase keyword tokeniser (build 609, [`f146a22`](../ui/UE5DumpUI/Services/KeywordTokenizer.cs))
+
+Replaces v1's substring-matching scorer with a tokenisation pass so
+keywords match whole tokens instead of letter substrings. Closes the
+trade-off where short acronyms HP/MP/SP/XP/TP had to be dropped to
+avoid false-positiving every word containing those letter pairs
+(`Component`, `Spawn`, `GetTPSStream`, etc).
+
+New `KeywordTokenizer` (`Services/KeywordTokenizer.cs`) -- splits on
+underscore/hyphen, lower-to-upper transition (`AddMoney` ->
+{add, money}), and run-of-uppers followed by lower (`HUDWidget` ->
+{hud, widget}, `BPCharacter` -> {bp, character}). Returns lowercased
+tokens for case-blind comparison. Digit-to-letter / letter-to-digit
+transitions are NOT split (UE BP names typically already
+underscore-separate digit groups; documented + tested cost is
+"Player100Health" tokenises to one token).
+
+`KeywordScoringTable.Score` now tokenises function + class name into
+a unioned HashSet, then `CountTokenHits` does a subset-match: ALL
+keyword tokens must be present in the function/class token set.
+Multi-token keywords (`NoClip` -> {no, clip}, `SetActorLocation` ->
+{set, actor, location}) work via the subset rule.
+
+Keyword tables restored:
+- StatsKeywords: HP/Hp/MP/SP/XP all back -- only fire on standalone
+  tokens now (`GetHP`, `SetMaxMP`, `RestoreSP`, `AddXP`)
+- InventoryKeywords: 'Drop' restored -- `DropItem` hits Inventory
+  cleanly without false-positiving every disposal helper
+- MovementKeywords: 'TP' restored. Multi-token forms collapsed to
+  single tokens like 'Location' (covers `SetLocation` /
+  `SetActorLocation` / etc with less keyword bookkeeping)
+- UtilityKeywords: 'Time' / 'Clock' restored -- `Lifetime` no longer
+  false-fires (tokenises to one token "lifetime", not "time")
+- Create/Destroy still dropped -- engine plumbing spam even tokenised
+
+ClassBonuses (substring-based, separate table) untouched -- `"Anim"`
+should still hit `AnimNotify` / `AnimationInstance` / etc, which
+benefits from substring rather than whole-token matching.
+
+### Invoke dialog overflow fix (build 609)
+
+The actual issue wasn't a missing ScrollViewer (that was already
+there since the dialog was first written) -- it was the hard
+`MaxHeight=700` window cap that prevented users on big monitors from
+resizing larger to see all params.
+
+`InvokeParamDialog.cs` changes:
+- Window `MaxHeight` 700 -> 1100; `Height=480` default; `MinHeight=240`
+- `SizeToContent = SizeToContent.Height` so the dialog grows to fit
+  the form then caps at MaxHeight
+- ScrollViewer wrapping the param panel gained `MinHeight=200` -- when
+  the FIRE result label expands after a successful invoke, DockPanel
+  would otherwise let the bottom panel squish the scroll area to a
+  sliver. 200px floor keeps ~6 param rows visible regardless.
+
+### Tests (+51, total 651 C# / 744 across project)
+
+- `KeywordTokenizerTests` (new, 17 cases): all 4 split rules,
+  acronym-preserved-as-single-token cases, the substring-noise
+  regression cases (`Component` / `MyComponent` / `Spawn` /
+  `SpawnActor` / `GetTPSStream` MUST tokenise without producing
+  `mp`/`sp`/`tp` tokens), null/empty/single-char/all-lower/all-upper/
+  digit-attachment edge cases.
+- `KeywordScoringTableTests` (+9): 5 substring-noise regressions
+  now correctly Other; 5 acronym-restored cases (`GetHP`, `SetMaxMP`,
+  `RestoreSP`, `AddXP`, `DoTP`) correctly categorise; restored-keyword
+  fact (`DropItem` -> Inventory, `GetTimeRemaining` -> Utility,
+  `GetLifetime` -> Other); multi-token `EnableNoClip` /
+  `ToggleGodMode` via subset-match.
+- `InterestingFunctionsViewModelTests` (+4): AOBMaker availability
+  flip-to-false note presence, recovery-clears-note, cooldown
+  honoured, no-bridge no-throw.
+
+### What's still pending
+
+The plan's full 5 items now reconcile:
+1. ✅ AA-Script export from UI (build 590-596)
+2. ✅ Interesting Functions Finder (build 597-607)
+3. ❌ UFunction metadata exposure -- skipped (cooker strips it; see above)
+4. ❌ Finder rev2 metadata fold-in -- skipped (depends on 3)
+5. ✅ Invoke dialog overflow fix (build 609)
+
+Carryover gaps (in [todo.md](todo.md)) untouched: UE 4.23-4.27 sparse
+delegate, Find Refs v4 weak-side, FieldPathProperty, GWorld for
+Star Wars Jedi / Satisfactory.
+
+**Build #609, 744 tests passing (651 C# + 62 dll_helpers + 31
+utf8_helpers).** 8 commits ahead of `origin/main`.
+
+-----
+
+## 2026-05-10 (build 597-607) — Interesting Functions Finder
+
+`feat(dll,ui): list_all_functions + Interesting Functions Finder
+panel` — second item of the "Call-UE-function strengthening" plan
+([docs/todo.md](todo.md), step 3c). Three commits on `dev`:
+[`d4ef507`](../dll/src/Aura.cpp) DLL + service wire,
+[`e3a24fb`](../ui/UE5DumpUI/ViewModels/InterestingFunctionsViewModel.cs)
+panel + scoring, and the cross-tab nav + tests + docs in this commit.
+
+### The problem
+
+After the Copy AA Script (Baked) feature shipped (build 590-596), the
+remaining friction was *discovery*: a user wanting to find AddMoney /
+Teleport / SetHealth on a game with 50k UFunctions across 1k UClasses
+had to manually walk the class tree or guess at PropertySearch
+keywords. PropertySearch is property-focused (FloatProperty fields
+across classes); functions had no equivalent surface. The
+GameClassFilter panel lists classes by RE score but doesn't surface
+the actual cheat-relevant *verbs* on each class.
+
+### Architecture
+
+Three layers, sliced UI ↔ DLL at the cheapest seam:
+
+**Layer 1 — DLL: `Aura::EnumerateAllFunctions`** (`Aura.cpp` + `Aura.h`)
+
+Mirrors the SearchProperties / ListClasses GObjects-walk pattern: scan
+every UObject, identify UClasses by metaclass-name == "Class", dedupe
+via visited set, flatten Ubel::WalkFunctions per class. Returns a flat
+vector of light-weight `AllFunctionEntry { className, classAddr,
+superName, classPath, funcName, funcAddr, functionFlags, numParms,
+parmsSize }` rows -- ~80 bytes per row, so 50k functions = ~4MB JSON,
+acceptable as a one-shot pipe payload. Per-class WalkClassEx is
+technically wasted work (we only need SuperName from it) but adding
+a SuperName-only walker just to save a few ms isn't worth the parallel-
+reader maintenance burden.
+
+New pipe cmd `Renge::CMD_LIST_ALL_FUNCTIONS = "list_all_functions"`
+with `{game_only, limit}` request and `{total, scanned_objects,
+scanned_classes, total_functions, functions[]}` response. Cost is
+O(GObjects + sum(WalkFunctions)); typical 1M-object game completes in
+2-10s. UI runs the call on a worker task with a progress indicator.
+
+**Layer 2 — UI keyword scorer:
+[`KeywordScoringTable`](../ui/UE5DumpUI/Services/KeywordScoringTable.cs)**
+(C# static class)
+
+Scoring is client-side so the rules can be tuned without a DLL
+rebuild. Six categories (Stats / Inventory / Movement / Combat /
+Utility / Other) with per-bucket keyword arrays and a fixed
+per-category hit-score weight:
+
+| Category | Per-hit | Sample keywords |
+|---|---|---|
+| Stats | 5 | Health, Mana, Stamina, Experience, Damage, Heal, Kill |
+| Inventory | 5 | Gold, Money, Currency, Item, Inventory, Pickup, Loot |
+| Movement | 5 | Teleport, Warp, SetActorLocation, Move, Speed, Walk, Sprint |
+| Combat | 4 | Attack, Fire, Cast, Ability, Skill, Buff |
+| Utility | 3 | Save, Load, Spawn, Timer, Cheat, Debug, Console |
+| **ExplicitMovementCheats** | **8** | NoClip, Fly, God, Ghost, Invincible, Invisible |
+
+The ExplicitMovementCheats sub-bucket carries higher per-hit weight
+and folds into Movement so a `NoClip` function on a
+`DebugCheatManager` class stays in Movement instead of being pulled
+into Utility by the noisy `Cheat` + `Debug` class-name keywords (8 vs
+3+3=6).
+
+Class-name bonuses (substring, summed -- so AnimNotify_Character gets
++3 Character + -2 Anim = +1 net):
+
+| Class substring | Bonus |
+|---|---|
+| Character / Pawn / PlayerController / PlayerState | +3 |
+| GameMode / GameInstance / SaveGame | +2 |
+| Anim / Niagara / Sound / Audio / Particle | -2 |
+| UI / Widget | -1 |
+
+Flag bonuses (from `AllFunctionEntry`'s flag projections):
+
+| Flag condition | Bonus |
+|---|---|
+| `BlueprintCallable` | +2 |
+| `BlueprintEvent` | +1 |
+| `(BlueprintPure \|\| Const)` && `numParms <= 1` | +1 (safe getter) |
+| `ParmsSize > 64` | -1 (annoying to call) |
+
+Score = sum of all keyword-bucket scores + classBonus + flagBonus.
+Category = the highest-scoring bucket; ties broken by enum order
+(Stats > Inventory > Movement > Combat > Utility). InterestingThreshold
+= 5; rows below are hidden by default (UI "Show All" toggle bypasses).
+
+#### Substring-noise lesson
+
+First draft included short acronyms (HP/MP/SP/XP/TP). Tests caught
+the regression immediately:
+[`Component`](https://en.cppreference.com/w/cpp/string/byte/strstr)
+contains "mp", `Spawn` contains "sp", `GetTPSStream` contains "tp".
+A `FrobnicatorComponent.DoNothingPlz` function was scoring as Stats
+because of the "mp" substring in "Component". Resolution: drop short
+acronyms entirely -- accept the miss on `GetHP()` so we don't
+false-positive every `*Component*` function. Game devs almost always
+emit full-name BC functions for the surface that's actually exposed
+to Blueprint anyway. The keyword tables now use full forms only and
+have inline comments explaining what got dropped and why.
+
+**Layer 3 — UI panel:
+[`InterestingFunctionsPanel`](../ui/UE5DumpUI/Views/InterestingFunctionsPanel.axaml)**
+
+New tab "Interesting Funcs" between PropertySearch and GameClassFilter
+(tab index 3 -- ClassStruct shifts 4 → 5; updated the existing
+`GameClassFilter.NavigateToClassStruct` handler accordingly).
+Toolbar: Load button, Game Only toggle, name-substring filter, category
+chip dropdown (with custom
+[`CategoryDisplayConverter`](../ui/UE5DumpUI/Services/CategoryDisplayConverter.cs)
+that maps null → "All"), Show All toggle, Clear button, status text.
+
+DataGrid columns: Score (with breakdown tooltip), Cat (coloured per
+category), Class, Function, Flags (compact `BC,BE,Const` style),
+Params (`NumParms (ParmsSize B)`), action buttons:
+- **Live**: opens the function in Live Walker via cross-tab nav.
+- **AA(B)**: shortcut into the Copy AA Script (Baked) flow.
+
+Both fire events into MainWindowVM which routes them.
+
+### Cross-tab navigation
+
+Two events on
+[`InterestingFunctionsViewModel`](../ui/UE5DumpUI/ViewModels/InterestingFunctionsViewModel.cs):
+
+`NavigateToFunction(className, funcName)` -- Live Walker is
+instance-based, but the Finder gives us (className, funcName).
+Handler:
+1. `FindInstancesAsync(className, exactMatch=true, limit=5)` -- pick
+   the first non-CDO live instance (skip `Default__*`).
+2. On hit: switch to Live Walker tab + `NavigateToAddressCommand` on
+   the instance address. (v1 lands on the instance; user manually
+   scrolls to the function row -- a row-scroll event into Live Walker
+   could be added if feedback says it's worth it.)
+3. On miss (CDO-only class, or class not yet instantiated): switch to
+   ClassStruct tab + `LoadClassCommand` on the class address resolved
+   via `ListClassesAsync` lookup. Surfaces "no live instance, showing
+   class metadata" in the status bar.
+
+`RequestCopyBakedScript(className, funcName)` -- shortcut into the
+Copy AA Script (Baked) flow without going through Live Walker first.
+Handler:
+1. `ListClassesAsync` to resolve className → classAddr.
+2. `WalkFunctionsAsync(classAddr)` to fetch full param metadata.
+3. Find the matching FunctionInfoModel by name.
+4. Try `FindInstancesAsync` for a live instance (best-effort; the
+   helper's `CMD_INVOKE_BY_NAME` finds an instance itself, but
+   surfacing it now lets us show a clear error if the class is
+   CDO-only).
+5. Zero-arg fast path: generate AA Script directly + ship to AOBMaker /
+   clipboard. Otherwise open `InvokeParamDialog` in
+   `CopyBakedScript` mode.
+
+### Tests (+60)
+
+[`KeywordScoringTableTests`](../ui/UE5DumpUI.Tests/KeywordScoringTableTests.cs)
+-- 30+ cases:
+- Per-keyword category assignment (16 [Theory] inlines covering all
+  five real categories + a no-hit Other case)
+- Class bonus stacking (AnimNotify_Character +1 net, NiagaraSystem -2,
+  HUDWidget -1, MyUIPanel -1)
+- Flag bonus combinations (BC, safe getter, large-params penalty,
+  net-1-after-penalty case)
+- Combined "happy path" (`AddMoney/PlayerCharacter` lands above
+  threshold)
+- Negative case (`UpdateInternal/BP_NiagaraEffect_C` lands below
+  threshold)
+- Tie-break (`GoldHealth/Misc` -> Stats wins per enum order)
+- DisplayName + CategoryColor full-coverage [Theory]
+
+[`InterestingFunctionsViewModelTests`](../ui/UE5DumpUI.Tests/InterestingFunctionsViewModelTests.cs)
+-- 10 cases:
+- Load -> score -> sort by FinalScore desc
+- Default threshold hides noise (AnimNotify, ParticleSystem)
+- GameOnly toggle is plumbed to the service
+- FilterText substring match against function OR class name
+  (case-insensitive)
+- CategoryFilter narrows to one bucket; null restores All
+- ShowAll bypasses threshold
+- ClearFilters resets all inputs
+- OpenInLiveWalker fires NavigateToFunction with right payload
+- CopyAaScript fires RequestCopyBakedScript with right payload
+- Null-row guard
+
+`StubDumpService` (in `CsxExportServiceTests.cs`) un-sealed and the new
+`ListAllFunctionsAsync` made `virtual` so the new tests' `FakeDumpService`
+can extend it with one override -- avoids duplicating the full
+~25-method IDumpService stub list.
+
+### What's covered now / what's pending
+
+Done: discover + score + filter + categorise UFunctions across the
+whole loaded class hierarchy; one-click navigate to LiveWalker (with
+graceful ClassStruct fallback) or generate a baked AA Script.
+
+Still pending in the same plan ([docs/todo.md](todo.md)):
+3. **UFunction metadata exposure** -- expose Blueprint
+   `DisplayName` / `ToolTip` / `Category` so the Finder can match
+   richer text + show better column labels
+4. Finder rev2 -- fold metadata into the keyword scorer
+5. InvokeParamDialog ScrollViewer overflow fix
+
+**Build #607, 693 tests passing (600 C# + 62 dll_helpers + 31
+utf8_helpers).** 5 commits ahead of `origin/main`.
+
+-----
+
+## 2026-05-10 (build 590-596) — Copy AA Script (Baked) UFunction export
+
+`feat(ui): Copy AA Script (Baked)` series — first chunk of the
+"Call-UE-function strengthening" plan from
+[docs/todo.md](todo.md#active-plan-call-ue-function-strengthening),
+specifically item 1 (AA-Script export from UI). Three commits on `dev`:
+[`93f9fd6`](../scripts/ue5_invoke_helper.lua) helper + embed,
+[`c3c27e9`](../ui/UE5DumpUI/Services/BakedScriptGenerator.cs) generator
++ dialog + button, and the Tools menu + tests in this commit.
+
+### The problem
+
+The existing `Generate Script` button on UFunction rows produces a CE
+AA Script that builds a `createForm` dialog **inside Cheat Engine** so
+the user fills params at runtime. That's fine for in-CE testing but
+unsuitable for shipping a static cheat table — every "Add Money" needs
+the user to type 1000 in a popup every time the script enables.
+
+### Architecture (helper-in-table pattern)
+
+Initial proposal was "self-contained AA scripts that inline the entire
+mailbox protocol". User pushed back with a much better model from his
+own CE table experience (Crimson Desert): embed a shared helper file
+in the .CT itself and have AA scripts load it via `findTableFile`. New
+two-artifact design:
+
+**Artifact 1: [`scripts/ue5_invoke_helper.lua`](../scripts/ue5_invoke_helper.lua)**
+(new, ~285 lines)
+
+Public API exposed via re-declaration-safe pattern matching the
+celua_*.lua convention:
+
+```lua
+if not invokeUFunction then
+  function invokeUFunction(className, funcName, parmsSize, params)
+    ...
+  end
+  registerLuaFunctionHighlight('invokeUFunction')
+end
+```
+
+Two functions: `invokeUFunction` (CMD_INVOKE_BY_NAME via mailbox) and
+`readUFunctionReturn` (typed read from params buffer). Internal
+`writeBakedParams` accepts a flat param array `{ {name, type, offset,
+value}, ... }` and dispatches by the helper-token type:
+`bool`/`byte`/`int16`/`int32`/`int64`/`float`/`double`/`pointer`. All
+pointer-shaped UE types (object/class/name/soft/weak/lazy/interface)
+collapse to `'pointer'` and the helper writes them as a qword.
+
+Strict input validation (non-empty strings, parmsSize range check),
+pcall-protected mailbox lookup so missing `g_invokeMailbox` surfaces
+as a clean `(false, err)` return rather than a Lua trace, and a
+sentinel print matching `[*] ue5_invoke_helper.lua v1.0 loaded`.
+
+**Artifact 2: Generated AA Script** (~50 lines per script vs ~200 in
+the form-based generator)
+
+```text
+[ENABLE]
+{$lua}
+if syntaxcheck then return end
+-- Setup instructions: Table -> Add File... -> ue5_invoke_helper.lua
+
+local tf = findTableFile('ue5_invoke_helper.lua')
+if not tf then
+  showMessage('[Invoke] ue5_invoke_helper.lua not found in this table.\n...')
+  if memrec then memrec.Active = false end
+  return
+end
+do
+  local ss = createStringStream()
+  ss.copyFrom(tf.Stream, tf.Stream.Size)
+  local fn, err = load(ss.DataString)
+  ss.destroy()
+  if not fn then ... return end
+  fn()
+end
+
+-- ====== BAKED PARAMS (edit values here) ==============================
+local PARAMS = {
+  { name='Amount',     type='int32', offset=0, value=1000 },  -- int32 4B
+  { name='bShowToast', type='bool',  offset=4, value=1 },     -- bool 1B
+}
+-- =====================================================================
+
+local ok, err = invokeUFunction('PlayerCharacter', 'AddMoney', 5, PARAMS)
+if not ok then
+  print(...) ; showMessage(...)
+end
+
+local t = createTimer(nil, false)
+t.Interval = 100
+t.OnTimer = function(s)
+  s.Enabled = false; s.destroy()
+  if memrec then memrec.Active = false end
+  if ok then
+    synchronize(function() getLuaEngine().Close() end)
+  end
+end
+t.Enabled = true
+{$asm}
+```
+
+Hygiene rules baked in (per the user's deployment guidance):
+- **No filesystem fallback** for the helper — explicit error +
+  showMessage tells the user how to add the file (no surprise loading
+  from random paths)
+- **Silent on success** — auto-disables the memrec then closes the lua
+  engine via `synchronize(getLuaEngine().Close())` so the user doesn't
+  see a stray output window pop on every enable
+- **Errors keep the window open** so the user can read the message
+- **`-- BAKED PARAMS` block** clearly delimits the editable section so
+  cheat-table maintainers can tweak values without understanding the
+  mailbox protocol
+
+### UI integration
+
+[`InvokeParamDialog.cs`](../ui/UE5DumpUI/Views/InvokeParamDialog.cs)
+gains an `InvokeDialogMode` enum with two values:
+
+| Mode | FIRE | Copy AA Script | Close | Cancel | Opened from |
+|---|:-:|:-:|:-:|:-:|---|
+| `PipeInvoke` | ✓ | ✓ | ✓ | ✓ | LiveWalker `Pipe Invoke` button |
+| `CopyBakedScript` | — | ✓ | — | ✓ | LiveWalker `AA(Baked)` button |
+
+The dialog's existing `_structEdits` map is reused to flatten struct
+arguments — `CollectBakedValues()` emits one
+[`BakedParamValue`](../ui/UE5DumpUI/Models/BakedParamValue.cs) per
+sub-field with absolute offset (`parent.Offset + sub.Offset`) and
+display name `Parent.Sub`. The generator never sees nesting.
+
+[`LiveWalkerPanel.axaml`](../ui/UE5DumpUI/Views/LiveWalkerPanel.axaml)
+column widened from 100 → 320 to fit the third button. The new
+`AA(Baked)` button has a 0-arg fast-path: for void-or-no-params
+functions the dialog is skipped and the script is generated +
+delivered immediately.
+
+[`MainWindow.axaml`](../ui/UE5DumpUI/Views/MainWindow.axaml) gains a
+`Tools` dropdown (always available, doesn't require a DLL connection)
+with one entry: **Export CE Helper Lua File...**. Streams the
+embedded `ue5_invoke_helper.lua` to a user-chosen path via
+`IPlatformService.ShowSaveFileDialogAsync` so the user can drop it
+next to their .CT for the Add File step.
+
+### Embed mechanics
+
+[`UE5DumpUI.csproj`](../ui/UE5DumpUI/UE5DumpUI.csproj) gets an
+`<EmbeddedResource>` link to `scripts/ue5_invoke_helper.lua` with a
+stable LogicalName `UE5DumpUI.Resources.CE.ue5_invoke_helper.lua`.
+Single source of truth lives in `scripts/` — the resource link is
+just a packaging hint.
+[`HelperLuaResource.cs`](../ui/UE5DumpUI/Services/HelperLuaResource.cs)
+reads it via `Assembly.GetManifestResourceStream` (AOT-clean, no
+reflection-based resource lookup). A diagnostic `ListEmbeddedNames`
+helper exists for when the manifest name drifts.
+
+### Tests (+36)
+
+Extended
+[`InvokeScriptTests.cs`](../ui/UE5DumpUI.Tests/InvokeScriptTests.cs)
+with a `BakedScriptGenerator` section covering:
+
+- Structural shape (ENABLE/DISABLE blocks, helper loader present, no
+  filesystem fallback wording, `getLuaEngine().Close()` cleanup,
+  `createForm` absent so no accidental interactive UI)
+- Per-type literal rendering (int decimal, float with InvariantCulture,
+  bool true-variants → 1 / false-variants → 0, object pointer hex,
+  zero pointer as plain `0`, negative int sign-preserved, hex input
+  preserves hex form)
+- Multi-param row generation at correct offsets
+- Struct sub-field flattening (3-field FVector style → 3 rows with
+  `Location.X`/`Y`/`Z` names at consecutive offsets)
+- Edge cases: unparseable input falls through to `--[[unparsed:...]]
+  0` literal that *flags* the problem instead of mangling it; Lua
+  single-quote escape via `EscapeLua` (`O'Brien` → `O\'Brien`); Lua
+  comment-close `]]` in the unparsed payload escaped to `] ]` so it
+  can't terminate the comment early
+- `[Theory]` of all 17 supported UE TypeName → helper-token mappings
+- `HelperLuaResource.Read()` returns non-empty content with the
+  expected sentinel + public function names — catches packaging
+  regressions where the EmbeddedResource link is silently broken
+
+Tests went from 597 → **633** (504 → 540 C# + 62 dll_helpers + 31
+utf8_helpers).
+
+### What's covered now / what's pending
+
+Done (top of the call-UE-function strengthening plan): UFunction →
+non-interactive AA Script with baked params, deployable as a static
+piece of a CE table. Tools-menu helper export closes the loop on
+"how does the user get the helper file in the first place".
+
+Still pending in the same plan (in [docs/todo.md](todo.md)):
+2. Interesting-functions finder (keyword scorer surfacing
+   HP/MP/Gold/Teleport/etc.)
+3. UFunction metadata exposure (Blueprint `DisplayName`/`ToolTip`/
+   `Category`)
+4. Finder rev2 — fold metadata into the scorer
+5. InvokeParamDialog ScrollViewer overflow fix
+
+**Build #596, 633 tests passing (540 C# + 62 dll_helpers + 31
+utf8_helpers).**
+
+-----
+
+## 2026-05-10 (build 578-589) — Walker false-positive sweep + per-game invoke timeout + FillPointerSnapshot + drill-depth 0-6 band
 
 Three feature commits on `dev` (`c4f0644`, `95722fd`, `e49a599`) driven by
 analysis of cross-game logs (build 449 user submission with 7 games + the
@@ -1404,95 +2521,7 @@ binding and the filter logic share one implementation.
 
 -----
 
-## Capability matrix (current — build 589)
-
-| Layer | Drill-down | Find Refs |
-|-------|-----------|-----------|
-| Object / Class / Interface | ✅ | ✅ |
-| Weak / Soft{Class} / Lazy (single + array) | ✅ | ✅ |
-| TArray of any pointer-shaped inner | ✅ | ✅ |
-| TMap / TSet (Object/Class) | ✅ | ✅ (allocated slots only) |
-| Delegate (single FScriptDelegate) | ✅ | ✅ (v3) |
-| MulticastInline / MulticastDelegate | ✅ | ✅ (v3) |
-| TArray<FScriptDelegate> | ✅ | ✅ (v3) |
-| MulticastSparseDelegate (UE 5.0+) | ✅ bindings via SPARSE_ES2_1 AOB (build 561-577) | ✅ v4 sparse pass (build 565) |
-| MulticastSparseDelegate (UE 4.23-4.27) | ❌ FObjectKey outer key, separate AOB needed | ❌ |
-| OptionalProperty\<pointer / weak\> | ✅ | ✅ |
-| OptionalProperty\<scalar Int/Float/Bool/Byte/Enum\> | ✅ trailing-bIsSet | — |
-| OptionalProperty\<String / Name / Text\> | ✅ intrusive sentinel + value (build 530) | — |
-| OptionalProperty\<Struct\> | ✅ (build 528) | ✅ depth-3 descent through inner struct (build 528) |
-| FieldPathProperty | ❌ | ❌ |
-| TMap / TSet with weak-like inner sides | — | ❌ (v4 candidate) |
-
-## Per-game configuration (build 589)
-
-Persisted in HintCache JSON per PE hash, surfaces in the Pointer panel:
-
-| Setting | Range | Default | Pipe cmd |
-|---|---|---|---|
-| UE version override | Auto / 4.18-4.27 / 5.0-5.8 | Auto (detect) | `set_ue_version_override` |
-| Invoke timeout | 1000-60000 ms | 5000 ms | `set_invoke_timeout` |
-
-## Remaining gaps (next-session pickup candidates)
-
-1. **MulticastSparseDelegate UE 4.23-4.27** — outer key is
-   `FObjectKey { FWeakObjectPtr Object; int32 ObjectSerialNumber; }`
-   (12B + 4 pad = 16B), outer stride changes ~0x60 → ~0x68, key match
-   logic must reconstruct FObjectKey via `Aura::GetSerialNumber`. Need a
-   separate AOB — UE4 binaries don't share the UE5 lea sequence.
-
-2. **Find Refs v4 extension** — `TMap` / `TSet` with weak-like inner
-   sides (currently Object/Class only).
-
-3. **`FieldPathProperty`** — rare, low priority.
-
-4. **GWorld**: Star Wars Jedi untested, Satisfactory fails (modular DLL
-   — pattern may need to live in `CoreUObject-Win64-Shipping.dll`, not
-   the main exe).
-
-5. **Other publishers shipping unreliable version strings** — only
-   `SQUARE_ENIX` is in `kPublishers[]` (Genau.cpp). Adding casually risks
-   wrong bias overriding correct detection — wait for a real misdetection
-   report before adding.
-
-## Tested games (last verified 2026-05-10)
-
-- **Everspace 2** ✅ (UE 5.4): item template ID via container scan; Find
-  Refs v3 returns 9 correct references in 224ms (cache hot, scan
-  complete: 1180536/1180536); auto-scroll-to-field after Open works;
-  Class Structure for `LocalPlayer` shows correct fields after the
-  class-like routing fix; PropertySearch type filter `OptionalProperty`
-  finds 9 matches across 5 real classes + 4 test-object fields.
-  **`SPARSE_ES2_1` resolves SparseDelegates @ +9AA5F10** (build 575,
-  ground truth from PDB).
-- **Titan Quest II** ✅ (UE 5.7, bCasePreservingName=**true**, 486k
-  objects): cross-version validation — same `SPARSE_ES2_1` AOB hits
-  `+D46D170`, exercises FName=16 walker branch (inner stride 0x28).
-  Was source of 194 `ValidateArrayElemSize` warnings/session pre-build
-  583 → now Debug-only.
-- **DQ I&II HD-2D / FF7 Rebirth / FF7 Remake** (UE4 forks, Square Enix
-  publisher): Square Enix publisher detected → ⚠ Low Confidence badge +
-  Publisher chip; user can set Override = UE 4.27 / 4.18, persists
-  across launches. Char Lv / HP / Party Lv in non-reflected memory
-  (custom allocator) — out of reflection scope; use CE pointer scan.
-  **Build 589 verified**: invoke_timeout=6000 round-trip OK after
-  `FillPointerSnapshot` fix; Square Enix purple chip + Low Confidence
-  amber badge both surface from `scan_status` payload now.
-- **Meltopia** ✅ (UE 5.0.5): full scan OK; was source of ~75
-  misalignment + ~58 empty-map false-positives + 4 UFunction timeouts →
-  all resolved in build 582-583 (Scharf alignment helper + empty-map
-  guard + per-game invoke timeout 6000ms via UI NumericUpDown).
-- **Squirrel With A Gun** ✅ (UE 5.0.2): full scan OK; was source of
-  `walk_instance` `std::invalid_argument` crash on unsubstituted CE
-  placeholder `0x[ply_base]` → resolved by `Renge::TryStrToAddr` in
-  build 582.
-- **Caravan Sandwitch** ✅ (UE 5.0.4): full scan OK; was source of 49
-  empty-TMap false-positives → resolved by count=0+Data=null guard.
-- **Retro Rewind Demo** ✅ (UE 5.0.4): full scan OK.
-- **The Occupation** ✅ (UE 4.19): UE4 path with `GNAM_CT3`, GWorld OK.
-- **TimeSplitters Rewind Early Access V0.3.3** ✅ (UE 4.25): full scan,
-  GWorld OK.
-- **Squad-Win64-Shipping** ✅ (UE 5.7, 240K objects): build 488 user
-  reported 13 `get_object_list` 0xA0 UTF-8 exceptions → root cause was
-  Serie wide-path surrogate encoding bug, fixed in build 555. Should
-  now work clean post-560.
+> **Current capability matrix, per-game config, tested games, and
+> long-running concerns** moved to [roadmap.md](roadmap.md) (post-589).
+> **Next-session pickup candidates** moved to [todo.md](todo.md). This
+> file is now a pure append-only milestone history.

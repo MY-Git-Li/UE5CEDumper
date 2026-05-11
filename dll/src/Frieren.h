@@ -84,6 +84,15 @@ __declspec(dllexport) uintptr_t UE5_FindFunctionByName(uintptr_t classAddr, cons
 // Error codes: -1=bad args, -2=vtable read fail, -3=ProcessEvent not found, -4=exception.
 __declspec(dllexport) int32_t   UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t params);
 
+// Direct ProcessEvent call from the calling thread, bypassing
+// GameThreadDispatch. Safe for pure native helpers (FUNC_Native|FUNC_Static
+// — KismetMathLibrary, KismetStringLibrary, BFLs without game-state side
+// effects). NOT safe for instance methods that read/write actor state from
+// off-thread; use UE5_CallProcessEvent for those.
+// Error codes match UE5_CallProcessEvent: -1=bad args, -2=vtable, -3=PE
+// vtable offset unresolved, -4=SEH exception.
+__declspec(dllexport) int32_t   UE5_CallProcessEventDirect(uintptr_t instance, uintptr_t ufunc, uintptr_t params);
+
 // === Mailbox (CE Lua shared memory interface) ===
 // Returns the address of the g_invokeMailbox buffer.
 // CE Lua can also use getAddress("g_invokeMailbox") directly.

@@ -1,6 +1,8 @@
 # Scripts
 
-Cheat Engine Lua scripts and table files for UE5CEDumper.
+Cheat Engine artefacts that ship with UE5CEDumper.
+
+> **What's actually in use**: only the files in the table below. Everything else has been removed (see git history if you need an older variant).
 
 ---
 
@@ -10,9 +12,9 @@ Cheat Engine Lua scripts and table files for UE5CEDumper.
 |------|---------|------------|
 | `UE5CEDumper.CT` | Main CE Cheat Table — DLL injection, init, pipe server | Copied to `dist/` by build |
 | `ue5_dissect.lua` | CE Structure Dissect builder — generates CE struct definitions from UE reflection | Copied to `dist/` by build |
-| `ue5dump.lua` | Legacy standalone loader (superseded by CT) | Not deployed |
-| `utils.lua` | Legacy helper utilities (superseded by CT) | Not deployed |
+| `ue5_invoke_helper.lua` | Runtime helper required by AA Scripts produced via UE5DumpUI's "Copy AA Script (Baked)" / Interesting Funcs AA(B) flow | **Embedded in `UE5DumpUI.exe`** as a manifest resource — see [HelperLuaResource.cs](../ui/UE5DumpUI/Services/HelperLuaResource.cs) — and shipped into the user's open .CT either via Tools → Inject Helper (one click via AOBMaker) or Tools → Export CE Helper Lua File... + manual `Table -> Add File...` |
 | `test_pipe.ps1` | Dev-only pipe protocol test script | Not deployed |
+| `DEPLOY_README.md` | End-user deployment doc — copied into `dist/` as `README.md` | Copied to `dist/README.md` |
 
 ---
 
@@ -118,12 +120,46 @@ UE property types are mapped to CE structure element types:
 
 ---
 
-## Legacy Scripts
+## ue5_invoke_helper.lua
 
-### ue5dump.lua
+The runtime mailbox-protocol shim for **AA Script (Baked)** invocations generated from UE5DumpUI's LiveWalker `AA(Baked)` button and Interesting Funcs `AA(B)` button. It exposes two public functions to AA Script code:
 
-Standalone script that loads `UE5Dumper.dll`, calls `UE5_Init`, and starts the pipe server. This functionality is now fully embedded in `UE5CEDumper.CT` — the standalone script is kept for reference only.
+| Function | Description |
+|----------|-------------|
+| `invokeUFunction(className, funcName, parmsSize, params)` | Marshal a `CMD_INVOKE_BY_NAME` mailbox request to the DLL: find non-CDO instance → find UFunction → write baked params → ProcessEvent → return ok/err |
+| `readUFunctionReturn(offset, valueType)` | Decode a single scalar from the params buffer (`int32` / `float` / `double` / `bool` / `byte` / `qword` / `int16`). Used by Verify Return Value mode |
 
-### utils.lua
+### How it lands in your .CT
 
-Helper library used by `ue5dump.lua` (`callDLL`, `log`, `addrToHex`). Not needed when using the CT or `ue5_dissect.lua` (which has its own built-in helpers).
+The user's .CT must contain this file as an **embedded table file** (CE → File List view) for any baked AA Script to work. Two paths to get there, both starting from inside UE5DumpUI:
+
+1. **Tools → Inject Helper into Current CE Table** — one click. Routes through the AOBMaker CE Plugin's `InjectTableFile` pipe command (`createStringStream` + `Stream.copyFrom`). Requires AOBMaker plugin to be loaded in CE; falls back gracefully if not.
+2. **Tools → Export CE Helper Lua File...** — saves a copy to disk, then you add it via CE's `Table -> Add File...` menu. Manual fallback for users without AOBMaker.
+
+The file is the same in both cases — read from the manifest resource embedded in `UE5DumpUI.exe`. You don't need a copy in `dist/`; the EXE carries it.
+
+### Generated AA Script flow
+
+```lua
+local tf = findTableFile('ue5_invoke_helper.lua')
+-- ... ss.copyFrom + load + fn() ...
+local ok, err = invokeUFunction('Class', 'Func', parmsSize, PARAMS)
+```
+
+If `findTableFile` returns nil the script `showMessage`s a setup hint and bails — there is **no filesystem fallback** by design (avoids ambiguity over which copy is in use).
+
+### Re-injection
+
+You only need to re-run **Inject Helper** when:
+
+- The helper itself changes (we'll note that in [docs/dev-log.md](../docs/dev-log.md))
+- You start from a fresh `.CT` that has no helper embedded yet
+- You manually deleted the helper from your .CT
+
+Day-to-day, once-per-table is enough.
+
+---
+
+## test_pipe.ps1
+
+Dev-only PowerShell script that exercises the named pipe protocol against a running game with `UE5Dumper.dll` injected. Used to smoke-test pipe command wiring without going through the UI. Not part of any release artefact.

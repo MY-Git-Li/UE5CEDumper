@@ -12,10 +12,38 @@ using UE5DumpUI.Services;
 namespace UE5DumpUI.Views;
 
 /// <summary>
-/// Modal dialog for pipe-based UFunction invocation.
+/// Two entry-points for this dialog (each opened by a different LiveWalker
+/// button on a UFunction row):
+/// <list type="bullet">
+/// <item><see cref="PipeInvoke"/> -- shows FIRE + Copy AA Script + Cancel.
+///     User can either test the call live in-app via the pipe, or bake the
+///     current form values into a redistributable AA Script.</item>
+/// <item><see cref="CopyBakedScript"/> -- shows Copy AA Script + Cancel
+///     only. FIRE is hidden so a user opening the dialog from the
+///     "Copy AA Script (Baked)" button can't accidentally invoke the
+///     function on their live game.</item>
+/// </list>
+/// </summary>
+public enum InvokeDialogMode
+{
+    /// <summary>FIRE + Copy AA Script + Cancel. Default.</summary>
+    PipeInvoke,
+    /// <summary>Copy AA Script + Cancel. FIRE button hidden.</summary>
+    CopyBakedScript,
+}
+
+/// <summary>
+/// Modal dialog for UFunction invocation. Either fires the call live via
+/// the pipe (FIRE button) or bakes the current form values into a
+/// redistributable AA Script (Copy AA Script button), depending on the
+/// <see cref="InvokeDialogMode"/> the dialog was opened in.
+///
 /// FIRE executes ProcessEvent via pipe and displays decoded results inline.
 /// The dialog stays open after invocation so the user can read return values.
-/// Returns: "ok" if invoked successfully, null if cancelled.
+/// Copy AA Script generates a script via <see cref="BakedScriptGenerator"/>,
+/// pushes it to AOBMaker (or clipboard fallback), and closes.
+///
+/// Returns: "ok" if any action completed, null if cancelled.
 /// </summary>
 public sealed class InvokeParamDialog : Window
 {
@@ -23,10 +51,14 @@ public sealed class InvokeParamDialog : Window
     private readonly IReadOnlyList<FunctionParamModel> _inputParams;
     private readonly IReadOnlyList<FunctionParamModel> _allParams;
     private readonly int _parmsSize;
+    private readonly string _className;
     private readonly string _funcName;
     private readonly string _instanceAddr;
     private readonly IDumpService _dump;
+    private readonly IAobMakerBridge? _aobMaker;
+    private readonly IPlatformService? _platform;
     private readonly int _ueVersion;
+    private readonly InvokeDialogMode _mode;
 
     // Struct expansion: param index → list of (sub-field, TextBox) pairs
     // Uses DynamicStructField as unified type for both known and DLL-discovered layouts.
@@ -34,7 +66,9 @@ public sealed class InvokeParamDialog : Window
 
     private TextBlock _resultLabel = null!;
     private Button _btnFire = null!;
+    private Button _btnCopyBaked = null!;
     private Button _btnClose = null!;
+    private CheckBox _chkVerifyReturn = null!;
     private int _fireCount;
 
     public InvokeParamDialog(
@@ -44,22 +78,40 @@ public sealed class InvokeParamDialog : Window
         int parmsSize,
         string instanceAddr,
         IDumpService dump,
-        int ueVersion = 0)
+        int ueVersion = 0,
+        IAobMakerBridge? aobMaker = null,
+        IPlatformService? platform = null,
+        InvokeDialogMode mode = InvokeDialogMode.PipeInvoke)
     {
         _inputParams = inputParams;
         _allParams = allParams;
         _parmsSize = parmsSize;
+        _className = className;
         _funcName = funcName;
         _instanceAddr = instanceAddr;
         _dump = dump;
+        _aobMaker = aobMaker;
+        _platform = platform;
         _ueVersion = ueVersion;
+        _mode = mode;
 
         Title = $"Invoke: {className}::{funcName}";
         Width = 560;
         MinWidth = 420;
-        MaxHeight = 700;
+        // Default starting Height grows up to a sensible cap; on a small
+        // screen Avalonia clamps to the work area for us. The hard
+        // MaxHeight=700 cap from the previous version was the actual
+        // overflow bug -- on a 4K monitor a 12-param function still
+        // showed a tiny scrollable strip when there was room for the
+        // whole form. Bumping to 1100 lets the user see all params on
+        // typical 1080p+ displays without manual resize, while
+        // CanResize=true still lets them shrink it.
+        Height = 480;
+        MaxHeight = 1100;
+        MinHeight = 240;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         CanResize = true;
+        SizeToContent = SizeToContent.Height;  // grow to fit form, then cap at MaxHeight
         Background = new SolidColorBrush(Color.Parse("#1E1E1E"));
 
         var root = new DockPanel { Margin = new Thickness(16) };
@@ -93,13 +145,39 @@ public sealed class InvokeParamDialog : Window
             FontWeight = FontWeight.Bold,
             Foreground = new SolidColorBrush(Color.Parse("#FFFFFF")),
             Background = new SolidColorBrush(Color.Parse("#4E7A25")),
+            // CopyBakedScript mode: hide FIRE so the user can't accidentally
+            // invoke the function on their live game when they only meant to
+            // export an AA Script.
+            IsVisible = _mode == InvokeDialogMode.PipeInvoke,
         };
         _btnFire.Click += OnFireClicked;
+
+        // New: Copy AA Script (Baked) -- bakes current form values into a
+        // self-contained AA Script via BakedScriptGenerator and hands it
+        // to AOBMaker (if connected) or the clipboard. Available in BOTH
+        // modes because the user filling the form may decide to either
+        // FIRE-then-export or export-without-firing.
+        _btnCopyBaked = new Button
+        {
+            Content = "Copy AA Script",
+            Width = 130,
+            FontWeight = FontWeight.Bold,
+            Foreground = new SolidColorBrush(Color.Parse("#FFFFFF")),
+            Background = new SolidColorBrush(Color.Parse("#3F6FA8")),
+        };
+        Avalonia.Controls.ToolTip.SetTip(_btnCopyBaked,
+            "Bake current values into a CE AA Script + copy to clipboard / AOBMaker. " +
+            "Requires ue5_invoke_helper.lua to be embedded in your CE table " +
+            "(Table -> Add File...).");
+        _btnCopyBaked.Click += OnCopyBakedScriptClicked;
 
         _btnClose = new Button
         {
             Content = "Close",
             Width = 80,
+            // CopyBakedScript mode: no FIRE means no result to read; the
+            // user finishes via Copy or Cancel, so Close adds noise.
+            IsVisible = _mode == InvokeDialogMode.PipeInvoke,
         };
         _btnClose.Click += (_, _) => Close("ok");
 
@@ -111,9 +189,32 @@ public sealed class InvokeParamDialog : Window
         btnCancel.Click += (_, _) => Close(null);
 
         btnPanel.Children.Add(_btnFire);
+        btnPanel.Children.Add(_btnCopyBaked);
         btnPanel.Children.Add(_btnClose);
         btnPanel.Children.Add(btnCancel);
         bottomPanel.Children.Add(btnPanel);
+
+        // Verify return value: opt-in toggle that switches the generated AA
+        // Script into a diagnostic mode -- emits a Before/After raw-byte
+        // dump of the params buffer plus a decoded print of the return slot,
+        // and skips the auto-close-engine timer so the user can read both.
+        // Default OFF so the production "ship a one-shot cheat" flow stays
+        // silent on success. Visible only for the baked-script path; FIRE
+        // already shows decoded values inline in PipeInvoke mode.
+        _chkVerifyReturn = new CheckBox
+        {
+            Content = "Verify return value (print result, keep engine open)",
+            IsChecked = false,
+            Foreground = new SolidColorBrush(Color.Parse("#CCCCCC")),
+            FontSize = 11,
+            Margin = new Thickness(0, 6, 0, 0),
+        };
+        Avalonia.Controls.ToolTip.SetTip(_chkVerifyReturn,
+            "When checked, the generated AA Script prints the params buffer " +
+            "(before/after) and decodes the return value, then leaves the " +
+            "Lua engine open so you can read it. Use to debug 'function ran " +
+            "but return is 0' situations. Off = silent on success, auto-close.");
+        bottomPanel.Children.Add(_chkVerifyReturn);
 
         // Result area
         _resultLabel = new TextBlock
@@ -280,6 +381,13 @@ public sealed class InvokeParamDialog : Window
         {
             Content = paramPanel,
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            // Floor on the scrollable area: when the FIRE result panel
+            // grows after a successful invoke (decoded post-call buffer
+            // listing), DockPanel would otherwise let the bottom panel
+            // squish the scroll area down to a sliver. 200px keeps at
+            // least ~6 param rows visible regardless of result-area
+            // expansion.
+            MinHeight = 200,
         };
 
         root.Children.Add(scroll);
@@ -416,6 +524,167 @@ public sealed class InvokeParamDialog : Window
 
         _resultLabel.Foreground = new SolidColorBrush(Color.Parse("#4EC9B0"));
         _resultLabel.Text = string.Join("\n", lines);
+    }
+
+    /// <summary>
+    /// "Copy AA Script (Baked)" handler: snapshot the current form values,
+    /// flatten any expanded structs into individual scalar entries (each
+    /// at parent_offset + sub_offset), generate the AA Script, and ship
+    /// it via AOBMaker / clipboard.
+    /// </summary>
+    private async void OnCopyBakedScriptClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        _btnCopyBaked.IsEnabled = false;
+        _resultLabel.IsVisible = true;
+        _resultLabel.Foreground = new SolidColorBrush(Color.Parse("#808080"));
+        _resultLabel.Text = "Generating AA Script...";
+
+        try
+        {
+            var bakedValues = CollectBakedValues();
+            // Pull the return-value param (if any) from _allParams. The
+            // generator's verify mode uses Offset + UeTypeName to emit
+            // a typed readUFunctionReturn call. Skipped for void-return
+            // functions; verify mode then just prints "(void return)".
+            var returnParam = BuildReturnBakedParam();
+            var verify = _chkVerifyReturn.IsChecked == true;
+            var script = BakedScriptGenerator.Generate(
+                _className, _funcName, _parmsSize, bakedValues,
+                returnParam: returnParam, verifyReturn: verify);
+
+            // Prefer AOBMaker (creates the AA Script entry directly in CE);
+            // fall back to clipboard for users running without the plugin.
+            // Sample IsAvailable BEFORE the send so we can distinguish
+            // 'pipe broke mid-send' (was available, now isn't) from
+            // 'never configured' (was already false) in the result message.
+            var description = $"Invoke (baked): {_className}::{_funcName}";
+            bool wasAvailable = _aobMaker?.IsAvailable ?? false;
+            bool sentToCe = false;
+            if (_aobMaker != null && wasAvailable)
+            {
+                sentToCe = await _aobMaker.CreateAAScriptAsync(
+                    description, script, autoActivate: false);
+            }
+
+            if (sentToCe)
+            {
+                _resultLabel.Foreground = new SolidColorBrush(Color.Parse("#4EC9B0"));
+                _resultLabel.Text = $"AA Script created in CE: {description}\n" +
+                    $"({bakedValues.Count} baked param(s); helper file required " +
+                    "in your .CT)";
+            }
+            else if (_platform != null)
+            {
+                await _platform.CopyToClipboardAsync(script);
+                if (wasAvailable)
+                {
+                    // Pipe was up at start; send failed. CE likely closed
+                    // between availability check and send.
+                    _resultLabel.Foreground = new SolidColorBrush(Color.Parse("#E0A050"));
+                    _resultLabel.Text =
+                        $"⚠ AOBMaker pipe broke mid-send (CE closed?).\n" +
+                        $"AA Script copied to clipboard ({script.Length:N0} chars) " +
+                        "as a fallback.\nPaste into a new CE AA Script entry once CE is ready.";
+                }
+                else
+                {
+                    _resultLabel.Foreground = new SolidColorBrush(Color.Parse("#4EC9B0"));
+                    _resultLabel.Text = $"AOBMaker not connected.\nAA Script copied to clipboard " +
+                        $"({script.Length:N0} chars).\nDon't forget to embed " +
+                        $"ue5_invoke_helper.lua in your .CT (Table -> Add File...).";
+                }
+            }
+            else
+            {
+                _resultLabel.Foreground = new SolidColorBrush(Color.Parse("#F44747"));
+                _resultLabel.Text = "ERROR: No clipboard service and AOBMaker " +
+                    "unavailable -- cannot deliver script.";
+                return;
+            }
+
+            // CopyBakedScript mode only: auto-close after a short delay so
+            // the user reads the success message but doesn't have to click.
+            // PipeInvoke mode keeps the dialog open so the user can also FIRE.
+            if (_mode == InvokeDialogMode.CopyBakedScript)
+            {
+                await Task.Delay(800);
+                Close("ok");
+            }
+        }
+        catch (Exception ex)
+        {
+            _resultLabel.Foreground = new SolidColorBrush(Color.Parse("#F44747"));
+            _resultLabel.Text = $"ERROR: {ex.Message}";
+        }
+        finally
+        {
+            _btnCopyBaked.IsEnabled = true;
+        }
+    }
+
+    /// <summary>
+    /// Locate the return-value parameter in <see cref="_allParams"/> and
+    /// wrap it as a <see cref="BakedParamValue"/> for the generator's
+    /// verify-mode emit. Returns <c>null</c> for void-return functions
+    /// (the generator then prints just "(void return)" on success).
+    /// LiteralText is unused for the return slot (helper reads, not writes)
+    /// so we pass an empty string.
+    /// </summary>
+    internal BakedParamValue? BuildReturnBakedParam()
+    {
+        foreach (var p in _allParams)
+        {
+            if (!p.IsReturn) continue;
+            if (p.Offset < 0 || p.Offset >= _parmsSize) continue;
+            return new BakedParamValue(
+                ParamName:   string.IsNullOrEmpty(p.Name) ? "ReturnValue" : p.Name,
+                UeTypeName:  p.TypeName,
+                Size:        p.Size,
+                Offset:      p.Offset,
+                LiteralText: "");
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Snapshot the form into a flat list of <see cref="BakedParamValue"/>.
+    /// Struct params are flattened to one entry per sub-field (offset =
+    /// parent.Offset + subfield.Offset, name = "Parent.Sub"), so the
+    /// generator + helper handle them as ordinary scalars.
+    /// </summary>
+    internal IReadOnlyList<BakedParamValue> CollectBakedValues()
+    {
+        var list = new List<BakedParamValue>(_inputParams.Count);
+        for (int i = 0; i < _inputParams.Count; i++)
+        {
+            var p = _inputParams[i];
+            if (p.Offset < 0 || p.Offset >= _parmsSize) continue;
+
+            if (_structEdits.TryGetValue(i, out var subEdits))
+            {
+                // Struct param: emit one BakedParamValue per sub-field
+                foreach (var (sf, edit) in subEdits)
+                {
+                    list.Add(new BakedParamValue(
+                        ParamName:   $"{p.Name}.{sf.Name}",
+                        UeTypeName:  sf.TypeName,
+                        Size:        sf.Size,
+                        Offset:      p.Offset + sf.Offset,
+                        LiteralText: (edit.Text ?? "0").Trim()));
+                }
+            }
+            else
+            {
+                var text = (_edits[i]?.Text ?? "0").Trim();
+                list.Add(new BakedParamValue(
+                    ParamName:   p.Name,
+                    UeTypeName:  p.TypeName,
+                    Size:        p.Size,
+                    Offset:      p.Offset,
+                    LiteralText: text));
+            }
+        }
+        return list;
     }
 
     /// <summary>Decode a single param value from the post-call buffer bytes.</summary>

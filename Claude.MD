@@ -107,8 +107,9 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |  Game Process                                        |
 |                                                      |
 |  CE Lua                                              |
-|    ue5dump.lua        <- DLL inject + pipe start     |
+|    UE5CEDumper.CT     <- DLL inject + pipe start     |
 |    ue5_dissect.lua    <- CE Structure Dissect builder |
+|    ue5_invoke_helper.lua <- AA Script invoke shim (embedded in CT via UI) |
 |      |  loadLibrary / callFunction (28 C ABI exports)|
 |      v                                               |
 |  UE5Dumper.dll  [injected]                           |
@@ -145,7 +146,9 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 
 | Document | Contents |
 |----------|----------|
-| [docs/dev-log.md](docs/dev-log.md) | Recent milestone work, capability matrix, remaining drill-down / Find Refs gaps — **read first** |
+| [docs/roadmap.md](docs/roadmap.md) | **Current state** — capability matrix, per-game configuration, tested games, long-running concerns. **Read first** for "what works now". |
+| [docs/todo.md](docs/todo.md) | **What's next** — prioritized open work with effort/risk tags. Active plan + carryover gaps + speculative ideas. |
+| [docs/dev-log.md](docs/dev-log.md) | **What shipped** — append-only milestone history per build number. Read when investigating "when/why was X added". |
 | [docs/architecture.md](docs/architecture.md) | Directory structure (15 .cpp + 14 .h DLL files, 92 UI .cs/.axaml files), git submodules, build environment |
 | [docs/dll-spec.md](docs/dll-spec.md) | C++ DLL interface: 30 C ABI exports, offset tables, CE Lua bridge (Frieren-themed file/namespace names) |
 | [docs/pipe-protocol.md](docs/pipe-protocol.md) | Named Pipe JSON IPC protocol (31 commands, Request/Response/Event) |

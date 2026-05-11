@@ -29,8 +29,16 @@
 // Forward declarations for ExportAPI symbols (must be outside namespace)
 extern "C" bool     UE5_Init();
 extern "C" int32_t  UE5_CallProcessEvent(uintptr_t, uintptr_t, uintptr_t);
+extern "C" int32_t  UE5_CallProcessEventDirect(uintptr_t, uintptr_t, uintptr_t);
 extern uintptr_t    g_cachedGObjects;
 extern uintptr_t    g_cachedGNames;
+
+// UE FunctionFlags subset we care about for the static-native fast path.
+// Pulled from Engine/Source/Runtime/CoreUObject/Public/UObject/Script.h.
+// Only the two flags below are read; defining locally avoids dragging the
+// full enum into Mimic just for two bit checks.
+static constexpr uint32_t kFuncFlag_Native = 0x00000400u;
+static constexpr uint32_t kFuncFlag_Static = 0x00002000u;
 
 // The exported mailbox — zero-initialized by default
 extern "C" __declspec(dllexport) Mimic::MailboxData g_invokeMailbox = {};
@@ -324,16 +332,46 @@ static void HandleInvoke() {
     LOG_INFO("Mailbox: INVOKE inst=0x%llX func=0x%llX",
              (unsigned long long)instanceAddr, (unsigned long long)ufuncAddr);
 
-    // Call ProcessEvent using the existing public API.
-    // UE5_CallProcessEvent handles:
-    //   - Lazy ProcessEvent vtable detection
-    //   - Lazy MinHook installation (GameThreadDispatch)
-    //   - EnqueueInvoke (blocks until game thread executes)
-    //   - Fallback direct call if hook not active
-    // Note: extern declaration is at file scope (above namespace)
-    int32_t result = UE5_CallProcessEvent(
-        instanceAddr, ufuncAddr,
-        reinterpret_cast<uintptr_t>(g_invokeMailbox.paramsData));
+    // Pure-helper fast path: a UFunction tagged Native+Static is a C++
+    // implementation that takes no implicit `this` and has no hidden
+    // dependency on game state. KismetMathLibrary, KismetStringLibrary,
+    // KismetArrayLibrary etc. all live here. These are safe to call
+    // directly from the pipe thread and -- importantly -- DO NOT need
+    // the game thread to ever fire ProcessEvent again.
+    //
+    // Without this short-circuit, an idle game (main menu / loading
+    // screen) leaves the GameThreadDispatch queue undrained and every
+    // pure-helper invoke times out at the configured deadline (default
+    // 5s, observed in ES2 logs even at 7s). The user has no clue why a
+    // simple `exp(8)` math helper would time out -- the call doesn't
+    // need a game thread at all.
+    //
+    // Stateful instance methods (FUNC_Net, FUNC_Event, BlueprintEvent,
+    // anything touching actor mutable state from off-thread) still
+    // route through GameThreadDispatch via UE5_CallProcessEvent.
+    const bool isStaticNative =
+        (g_invokeMailbox.functionFlags & (kFuncFlag_Native | kFuncFlag_Static))
+            == (kFuncFlag_Native | kFuncFlag_Static);
+
+    int32_t result;
+    if (isStaticNative) {
+        LOG_INFO("Mailbox: INVOKE -> static-native fast path "
+                 "(flags=0x%08X, bypassing GameThreadDispatch)",
+                 g_invokeMailbox.functionFlags);
+        result = UE5_CallProcessEventDirect(
+            instanceAddr, ufuncAddr,
+            reinterpret_cast<uintptr_t>(g_invokeMailbox.paramsData));
+    } else {
+        // Call ProcessEvent using the existing public API.
+        // UE5_CallProcessEvent handles:
+        //   - Lazy ProcessEvent vtable detection
+        //   - Lazy MinHook installation (GameThreadDispatch)
+        //   - EnqueueInvoke (blocks until game thread executes)
+        //   - Fallback direct call if hook not active
+        result = UE5_CallProcessEvent(
+            instanceAddr, ufuncAddr,
+            reinterpret_cast<uintptr_t>(g_invokeMailbox.paramsData));
+    }
 
     if (result != 0) {
         char msg[256];

@@ -28,6 +28,7 @@ extern "C" bool      UE5_Init();
 extern "C" uintptr_t UE5_FindInstanceOfClass(const char* className);
 extern "C" uintptr_t UE5_GetObjectClass(uintptr_t obj);
 extern "C" uintptr_t UE5_FindFunctionByName(uintptr_t classAddr, const char* funcName);
+extern "C" int32_t   UE5_CallProcessEventDirect(uintptr_t instance, uintptr_t ufunc, uintptr_t params);
 extern "C" int32_t   UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t params);
 
 // ScanProgress — global progress state updated by UE5_Init(), read by scan_status
@@ -294,6 +295,10 @@ static void FillPointerSnapshot(json& data) {
     data["version_detected"]     = g_cachedVersionDetected;
     data["is_user_override"]     = g_cachedIsUserOverride;
     data["is_low_confidence"]    = g_cachedIsLowConfidence;
+    // build_number: compile-time DLL build (e.g. 648). Also emitted on the
+    // init response; surfacing it on every snapshot lets the UI's
+    // get_pointers refreshes preserve the value across panel state rebuilds.
+    data["build_number"]         = (int)VER_BUILD;
     data["publisher_thumbprint"] = g_cachedPublisherThumbprint ? g_cachedPublisherThumbprint : "";
     data["object_count"]         = Aura::GetCount();
     data["gobjects_method"]         = g_cachedGObjectsMethod;
@@ -565,10 +570,15 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             data["is_low_confidence"] = g_cachedIsLowConfidence;
             data["publisher_thumbprint"] = g_cachedPublisherThumbprint
                 ? g_cachedPublisherThumbprint : "";
-            data["build_git"]  = BUILD_GIT_SHORT;
-            data["build_hash"] = BUILD_GIT_HASH;
-            data["build_time"] = BUILD_TIMESTAMP;
-            data["build_info"] = BUILD_VERSION_STRING;
+            data["build_git"]    = BUILD_GIT_SHORT;
+            data["build_hash"]   = BUILD_GIT_HASH;
+            data["build_time"]   = BUILD_TIMESTAMP;
+            data["build_info"]   = BUILD_VERSION_STRING;
+            // build_number: VER_BUILD as integer (e.g. 648). UI compares against
+            // its own bundled build to detect "DLL not redeployed after rebuild"
+            // — common gotcha in proxy mode, where the user updates the UI but
+            // forgets to copy the new DLL into the game's Binaries\Win64\ folder.
+            data["build_number"] = (int)VER_BUILD;
             return Renge::MakeResponse(id, data).dump();
         }
 
@@ -1352,6 +1362,13 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 item["prop_size"]   = m.propSize;
                 item["struct_type"] = m.structType;
                 item["inner_type"]  = m.innerType;
+                // Inheritance-aware fields (build 610+) -- after dedup,
+                // class_name == defining_class_name (we keep both for
+                // forward compat in case the dedup story changes).
+                item["defining_class_name"] = m.definingClassName;
+                item["defining_class_addr"] = Renge::AddrToStr(m.definingClassAddr);
+                item["defining_class_path"] = m.definingClassPath;
+                item["inherited_by_count"]  = m.inheritedByCount;
                 if (!m.preview.empty())
                     item["preview"] = m.preview;
                 matches.push_back(item);
@@ -1390,6 +1407,43 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             data["scanned_objects"] = listResult.scannedObjects;
             data["total_classes"]   = listResult.totalClasses;
             data["classes"]         = classes;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // === list_all_functions: Flat enumeration of every UFunction across
+        // every UClass in GObjects -- backs the "Interesting Functions
+        // Finder" UI panel. UI does keyword scoring + categorization
+        // client-side so the rules can be tuned without DLL rebuild.
+        // Per-function payload is intentionally light (no params); UI
+        // calls existing CMD_WALK_FUNCTIONS for the chosen class to fetch
+        // full param data on demand. ===
+        if (cmd == Renge::CMD_LIST_ALL_FUNCTIONS) {
+            bool gameOnly = request.value("game_only", true);
+            int limit = request.value("limit", 100000);
+
+            auto enumResult = Aura::EnumerateAllFunctions(gameOnly, limit);
+
+            json functions = json::array();
+            for (const auto& e : enumResult.entries) {
+                json item;
+                item["class_name"]    = e.className;
+                item["class_addr"]    = Renge::AddrToStr(e.classAddr);
+                item["super_name"]    = e.superName;
+                item["class_path"]    = e.classPath;
+                item["func_name"]     = e.funcName;
+                item["func_addr"]     = Renge::AddrToStr(e.funcAddr);
+                item["function_flags"]= e.functionFlags;
+                item["num_parms"]     = e.numParms;
+                item["parms_size"]    = e.parmsSize;
+                functions.push_back(item);
+            }
+
+            json data;
+            data["total"]            = static_cast<int>(enumResult.entries.size());
+            data["scanned_objects"]  = enumResult.scannedObjects;
+            data["scanned_classes"]  = enumResult.scannedClasses;
+            data["total_functions"]  = enumResult.totalFunctions;
+            data["functions"]        = functions;
             return Renge::MakeResponse(id, data).dump();
         }
 
@@ -1847,6 +1901,13 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             std::string instAddrStr = request.value("instance_addr", "");
             std::string paramsHex   = request.value("params_hex", "");
             int parmsSize           = request.value("parms_size", 0);
+            // direct_call: caller has asserted the function is safe to invoke
+            // off-thread (FUNC_Native|FUNC_Static — e.g. KismetMathLibrary
+            // helpers). Bypasses GameThreadDispatch so the call works on idle
+            // main-menu / loading screens where the game thread isn't pumping
+            // ProcessEvent. Required by System tab Self-Test which must run
+            // even before the user enters live gameplay.
+            bool directCall         = request.value("direct_call", false);
 
             if (funcName.empty()) {
                 return Renge::MakeError(id, "func_name is required").dump();
@@ -1900,14 +1961,18 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 ? reinterpret_cast<uintptr_t>(paramBuf.data())
                 : 0;
 
-            Sein::Info("PIPE:cmd", "invoke_function: %s::%s inst=%s func=%s parms=%d",
+            Sein::Info("PIPE:cmd", "invoke_function: %s::%s inst=%s func=%s parms=%d direct=%d",
                          className.c_str(), funcName.c_str(),
                          Renge::AddrToStr(instanceAddr).c_str(),
                          Renge::AddrToStr(ufuncAddr).c_str(),
-                         (int)bufSize);
+                         (int)bufSize, directCall ? 1 : 0);
 
-            // Call ProcessEvent
-            int32_t callResult = UE5_CallProcessEvent(instanceAddr, ufuncAddr, paramPtr);
+            // Call ProcessEvent. directCall=true uses the direct entry point
+            // (no GameThreadDispatch queue), matching Mimic's static-native
+            // fast path. Caller is responsible for asserting safety.
+            int32_t callResult = directCall
+                ? UE5_CallProcessEventDirect(instanceAddr, ufuncAddr, paramPtr)
+                : UE5_CallProcessEvent(instanceAddr, ufuncAddr, paramPtr);
 
             // Build response
             json data;

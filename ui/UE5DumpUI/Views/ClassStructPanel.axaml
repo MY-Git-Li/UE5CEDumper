@@ -38,6 +38,28 @@
                IsVisible="{Binding IsLoading}"
                HorizontalAlignment="Center"/>
 
+    <!-- Empty-class hint: BlueprintFunctionLibrary subclasses
+         (e.g. GameplayLib) report 0 instance fields because all their
+         content is static methods. Without this banner the empty
+         DataGrid below looks broken to a user landing here from an
+         Interesting Funcs fallback. -->
+    <Border DockPanel.Dock="Top"
+            IsVisible="{Binding HasNoFields}"
+            Background="#2D2D30"
+            BorderBrush="#3F3F46"
+            BorderThickness="1"
+            CornerRadius="3"
+            Padding="12,8"
+            Margin="0,4,0,8">
+      <StackPanel Spacing="4">
+        <TextBlock Foreground="#E0A050" FontSize="12" FontWeight="Bold"
+                   Text="This class has no instance fields"/>
+        <TextBlock Foreground="#CCCCCC" FontSize="11"
+                   TextWrapping="Wrap"
+                   Text="Likely a BlueprintFunctionLibrary or utility class — its content is static methods, not data. Use the Interesting Funcs tab to invoke its functions; LiveWalker has nothing to walk because there is no instance."/>
+      </StackPanel>
+    </Border>
+
     <!-- Fields DataGrid -->
     <DataGrid ItemsSource="{Binding Fields}"
               IsReadOnly="True"

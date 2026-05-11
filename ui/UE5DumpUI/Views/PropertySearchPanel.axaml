@@ -72,6 +72,24 @@
         <DataGridTextColumn Header="Class"
                             Binding="{Binding ClassName}"
                             Width="200"/>
+        <!-- Inheritance badge: '+N inheritors' when the field is shared
+             across N subclasses. Empty when the property is unique to
+             this class (a strong hint that it's a game-specific addition
+             rather than an engine-inherited field). Tooltip explains
+             the relationship + shows the defining class path. -->
+        <DataGridTemplateColumn Header="Scope" Width="120">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:PropertySearchMatch">
+              <TextBlock Text="{Binding InheritanceBadge}"
+                         Foreground="#888"
+                         FontSize="11"
+                         FontStyle="Italic"
+                         VerticalAlignment="Center"
+                         Margin="4,0"
+                         ToolTip.Tip="{Binding InheritanceTooltip}"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
         <DataGridTextColumn Header="Super"
                             Binding="{Binding SuperName}"
                             Width="120"/>

@@ -62,6 +62,13 @@ static uintptr_t s_hookedAddr = 0;
 // future.wait_for is captured at call time).
 static std::atomic<int32_t> s_invokeTimeoutMs{kDefaultInvokeTimeoutMs};
 
+// Hook fire counter — incremented every time HookedProcessEvent runs.
+// Used by post-install validation (Frieren::TryInstallGameThreadHook): a
+// correctly-placed PE hook fires many times per second under normal
+// gameplay, so a 0 count ~1.5s after install means we hooked the wrong
+// vtable slot. relaxed memory order — readers just want a non-zero check.
+static std::atomic<uint64_t> s_hookFireCount{0};
+
 // ---- SEH-isolated helper ----
 
 /// Call ProcessEvent with SEH protection. Isolated into a separate function
@@ -86,6 +93,13 @@ static int32_t CallProcessEventSEH(uintptr_t instance, uintptr_t ufunc, uintptr_
 /// Hooked ProcessEvent — called on the game thread for every UObject event.
 /// Drains the invoke queue first, then calls the original PE for the game's own call.
 static void __fastcall HookedProcessEvent(void* thisObj, void* ufunc, void* params) {
+    // Tick the fire counter first thing. Even if the queue is empty and we
+    // pass straight through to s_originalPE, this gives the post-install
+    // validator (Frieren) ground truth that "we are sitting on the right
+    // vtable slot." relaxed: a single non-zero observation by the validator
+    // is enough; we never read this back inside the hot path.
+    s_hookFireCount.fetch_add(1, std::memory_order_relaxed);
+
     // Drain pending invocations from pipe thread
     {
         std::vector<std::shared_ptr<InvokeRequest>> pending;
@@ -297,6 +311,10 @@ void SetInvokeTimeoutMs(int32_t timeoutMs) {
 
 int32_t GetInvokeTimeoutMs() {
     return s_invokeTimeoutMs.load();
+}
+
+uint64_t GetHookFireCount() {
+    return s_hookFireCount.load(std::memory_order_relaxed);
 }
 
 } // namespace Stark
