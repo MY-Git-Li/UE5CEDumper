@@ -59,6 +59,17 @@
                  FontFamily="Consolas, Menlo, monospace"
                  VerticalAlignment="Center"
                  ToolTip.Tip="{Binding StatusText}"/>
+      <!-- AOBMaker availability indicator — single place (build 688).
+           Was previously repeated per-row in the Notes column; that
+           was pure noise since the value is VM-level. Visible only
+           when the plugin isn't reachable. -->
+      <TextBlock Text="{Binding AobMakerNote}"
+                 IsVisible="{Binding AobMakerNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                 Foreground="#E0A050"
+                 FontSize="11"
+                 FontStyle="Italic"
+                 VerticalAlignment="Center"
+                 ToolTip.Tip="{Binding AobMakerNote}"/>
     </StackPanel>
 
     <!-- Error display -->
@@ -139,23 +150,9 @@
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
-        <!-- Notes column: per-row, but the value is currently VM-level
-             (same string on every row). Reflects AOBMaker availability so
-             the user sees the degraded-mode hint without hovering for
-             tooltips. Empty string when everything is fine. -->
-        <DataGridTemplateColumn Header="Notes" Width="*">
-          <DataGridTemplateColumn.CellTemplate>
-            <DataTemplate x:DataType="m:ScoredFunctionRow">
-              <TextBlock Text="{Binding $parent[UserControl].((vm:InterestingFunctionsViewModel)DataContext).AobMakerNote}"
-                         Foreground="#E0A050"
-                         FontSize="11"
-                         FontStyle="Italic"
-                         VerticalAlignment="Center"
-                         Margin="6,0"
-                         TextTrimming="CharacterEllipsis"/>
-            </DataTemplate>
-          </DataGridTemplateColumn.CellTemplate>
-        </DataGridTemplateColumn>
+        <!-- (Build 688) Notes column removed — the value was identical on
+             every row (VM-level AOBMaker status); see status row above
+             for the single-place indicator. -->
       </DataGrid.Columns>
     </DataGrid>
   </DockPanel>

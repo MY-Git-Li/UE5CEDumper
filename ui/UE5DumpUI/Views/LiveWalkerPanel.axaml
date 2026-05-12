@@ -534,6 +534,18 @@
                   ToolTip.Tip="Clear filter"/>
           <TextBlock VerticalAlignment="Center" Foreground="#888" FontSize="11"
                      Text="{Binding Functions.Count, StringFormat='{}{0} shown'}"/>
+          <!-- AOBMaker availability indicator — single place (build 688).
+               Previously this lived in a Notes column repeated per-row,
+               which was pure noise. Visible only when the plugin isn't
+               reachable. -->
+          <TextBlock Text="{Binding AobMakerNote}"
+                     IsVisible="{Binding AobMakerNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                     Foreground="#E0A050"
+                     FontSize="11"
+                     FontStyle="Italic"
+                     VerticalAlignment="Center"
+                     Margin="6,0,0,0"
+                     ToolTip.Tip="{Binding AobMakerNote}"/>
         </StackPanel>
       <DataGrid x:Name="FunctionGrid"
                 ItemsSource="{Binding Functions}"
@@ -593,22 +605,10 @@
               </DataTemplate>
             </DataGridTemplateColumn.CellTemplate>
           </DataGridTemplateColumn>
-          <!-- Notes column: VM-level AOBMaker hint (currently same value
-               on every row; AXAML left per-row to mirror Interesting Funcs
-               panel and to leave room for future per-row notes). -->
-          <DataGridTemplateColumn Header="Notes" Width="*">
-            <DataGridTemplateColumn.CellTemplate>
-              <DataTemplate x:DataType="m:FunctionInfoModel">
-                <TextBlock Text="{Binding $parent[UserControl].((vm:LiveWalkerViewModel)DataContext).AobMakerNote}"
-                           Foreground="#E0A050"
-                           FontSize="11"
-                           FontStyle="Italic"
-                           VerticalAlignment="Center"
-                           Margin="6,0"
-                           TextTrimming="CharacterEllipsis"/>
-              </DataTemplate>
-            </DataGridTemplateColumn.CellTemplate>
-          </DataGridTemplateColumn>
+          <!-- (Build 688) Notes column removed — the value was identical
+               on every row (VM-level AOBMaker status). The function-list
+               toolbar above the grid carries the same indicator when the
+               plugin isn't reachable, so per-row repetition was pure noise. -->
         </DataGrid.Columns>
       </DataGrid>
       </DockPanel>
