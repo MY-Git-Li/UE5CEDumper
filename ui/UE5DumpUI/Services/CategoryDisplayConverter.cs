@@ -16,7 +16,8 @@ public sealed class CategoryDisplayConverter : IValueConverter
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
         if (value is null) return "All";
-        if (value is FunctionCategory cat) return KeywordScoringTable.DisplayName(cat);
+        if (value is FunctionCategory fc) return KeywordScoringTable.DisplayName(fc);
+        if (value is PropertyCategory pc) return PropertyScoringTable.DisplayName(pc);
         return value.ToString() ?? "";
     }
 

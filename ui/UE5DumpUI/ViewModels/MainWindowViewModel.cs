@@ -72,6 +72,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public PropertySearchViewModel PropertySearch { get; }
     public GameClassFilterViewModel GameClassFilter { get; }
     public InterestingFunctionsViewModel InterestingFunctions { get; }
+    public InterestingPropertiesViewModel InterestingProperties { get; }
     public ProxyDeployViewModel? ProxyDeploy { get; }
 
     partial void OnSelectedAddressFormatIndexChanged(int value)
@@ -166,6 +167,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         PropertySearch = new PropertySearchViewModel(dump, log);
         GameClassFilter = new GameClassFilterViewModel(dump, log);
         InterestingFunctions = new InterestingFunctionsViewModel(dump, log, aobMaker);
+        InterestingProperties = new InterestingPropertiesViewModel(dump, log);
 
         if (proxyDeploy != null)
             ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log);
@@ -298,7 +300,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                SelectedTabIndex = 5; // Switch to ClassStruct tab (was 4 pre-InterestingFunctions tab insertion)
+                SelectedTabIndex = 6; // Switch to ClassStruct tab (now index 6 after InterestingFunctions + InterestingProperties insertions)
                 await ClassStruct.LoadClassCommand.ExecuteAsync(classAddr);
             }
             catch (Exception ex)
@@ -349,7 +351,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 }
                 else
                 {
-                    SelectedTabIndex = 5; // ClassStruct fallback
+                    SelectedTabIndex = 6; // ClassStruct fallback (index shifted by InterestingProperties insertion)
                     // Look up the class address via ListClasses since Find Instances came back empty.
                     var classes = await _dump.ListClassesAsync(gameOnly: false);
                     var match = classes.Classes.FirstOrDefault(
@@ -370,6 +372,73 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _log.Error($"InterestingFunctions NavigateToFunction handler error: {className}::{funcName}", ex);
+            }
+        };
+
+        // Wire InterestingProperties -> Live Walker. Same pattern as
+        // InterestingFunctions: try find_instance for a non-CDO live address,
+        // fall back to ClassStruct when none. We don't scroll to the
+        // specific property row in round 1 (LiveWalker has no public
+        // ScrollToField yet) — the property name is left in the status
+        // text so the user knows what to look for.
+        InterestingProperties.NavigateToProperty += async (className, propName) =>
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(className)) return;
+
+                var instances = await _dump.FindInstancesAsync(className, exactMatch: true, limit: 5);
+                string? liveAddr = null;
+                foreach (var inst in instances.Instances)
+                {
+                    if (string.IsNullOrEmpty(inst.Address)) continue;
+                    if (inst.Name.StartsWith("Default__", StringComparison.Ordinal)) continue;
+                    liveAddr = inst.Address;
+                    break;
+                }
+
+                if (!string.IsNullOrEmpty(liveAddr))
+                {
+                    SelectedTabIndex = 0; // Live Walker
+                    await LiveWalker.NavigateToAddressCommand.ExecuteAsync(liveAddr);
+                    // Pre-fill the search box so the user lands with the
+                    // property highlighted instead of having to scroll.
+                    LiveWalker.SearchText = propName;
+                    StatusText = $"Navigated to {className} (live instance {liveAddr}); searching {propName}";
+                    _log.Info($"InterestingProperties -> LiveWalker: {className}.{propName} @ {liveAddr}");
+                }
+                else
+                {
+                    SelectedTabIndex = 6; // ClassStruct fallback
+                    var classes = await _dump.ListClassesAsync(gameOnly: false);
+                    var match = classes.Classes.FirstOrDefault(
+                        c => c.ClassName.Equals(className, StringComparison.Ordinal));
+                    if (match != null && !string.IsNullOrEmpty(match.ClassAddr))
+                    {
+                        await ClassStruct.LoadClassCommand.ExecuteAsync(match.ClassAddr);
+                        StatusText = $"No live instance of {className}; showing class metadata (look for {propName})";
+                        _log.Info($"InterestingProperties -> ClassStruct fallback: {className}.{propName}");
+                    }
+                    else
+                    {
+                        StatusText = $"Class {className} not resolvable";
+                        _log.Warn($"InterestingProperties navigate: {className} not found");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"InterestingProperties NavigateToProperty handler error: {className}.{propName}", ex);
+            }
+        };
+
+        InterestingProperties.RequestCopyText += async (text) =>
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            try { await _platform.CopyToClipboardAsync(text); }
+            catch (Exception ex)
+            {
+                _log.Error($"InterestingProperties clipboard copy failed: {ex.Message}", ex);
             }
         };
 
