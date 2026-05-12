@@ -2829,6 +2829,38 @@ std::vector<PropertySearchResult> SearchPropertiesBatch(
     return out;
 }
 
+// === Batched class schema walk ===
+//
+// Pure pipe-amortisation helper: invokes Ubel::WalkClassEx once per
+// input address and returns the results in the same order. Built as a
+// trivial loop on top of the single-class function so each batch
+// element is byte-identical to a single-call walk_class response —
+// the safety guarantee that lets SdkExportService / DumpAllService
+// switch from N round-trips to N/200 without risking dropped fields.
+//
+// Caller chunks the request (~200 addrs per call) to keep response
+// payloads bounded and progress feedback live.
+std::vector<Ubel::ClassInfo> WalkClassesBatch(const std::vector<uintptr_t>& addrs)
+{
+    auto t0 = std::chrono::high_resolution_clock::now();
+    std::vector<Ubel::ClassInfo> out;
+    out.reserve(addrs.size());
+
+    int emptyCount = 0;
+    for (uintptr_t addr : addrs) {
+        Ubel::ClassInfo ci = Ubel::WalkClassEx(addr);
+        if (ci.Fields.empty()) ++emptyCount;
+        out.push_back(std::move(ci));
+    }
+
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::high_resolution_clock::now() - t0).count();
+    Sein::Info("PIPE:walk", "WalkClassesBatch: %d addrs -> %d results (%d empty) in %lld ms",
+               static_cast<int>(addrs.size()), static_cast<int>(out.size()),
+               emptyCount, static_cast<long long>(elapsed));
+    return out;
+}
+
 // --- Heuristic Scorer: auto-rank classes by RE interest ---
 
 static int GetFieldTypeWeight(const std::string& typeName) {

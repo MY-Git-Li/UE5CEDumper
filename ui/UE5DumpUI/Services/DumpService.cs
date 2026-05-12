@@ -273,6 +273,19 @@ public sealed class DumpService : IDumpService
         var classObj = res["class"] as JsonObject;
         if (classObj == null) throw new InvalidOperationException("Missing class data in response");
 
+        return DeserializeClassInfo(classObj);
+    }
+
+    /// <summary>
+    /// Shared deserializer for the wire shape both <c>walk_class</c>
+    /// (`res["class"]`) and <c>walk_class_batch</c> (each element of
+    /// `res["classes"]`) emit. Centralising the field mapping is the
+    /// C# half of the byte-equivalence contract: the batch path
+    /// cannot drift from the single path because they parse with the
+    /// same code.
+    /// </summary>
+    private static ClassInfoModel DeserializeClassInfo(JsonObject classObj)
+    {
         var model = new ClassInfoModel
         {
             Name = classObj["name"]?.GetValue<string>() ?? "",
@@ -313,6 +326,43 @@ public sealed class DumpService : IDumpService
         }
 
         return model;
+    }
+
+    public async Task<List<ClassInfoModel>> WalkClassesBatchAsync(string[] addrs, CancellationToken ct = default)
+    {
+        var result = new List<ClassInfoModel>(addrs.Length);
+        if (addrs.Length == 0) return result;
+
+        var addrsArr = new JsonArray();
+        foreach (var a in addrs)
+        {
+            // Empty/null addresses dropped here — the DLL also drops
+            // them, so the result count may be < addrs.Length when the
+            // caller passes empties. Callers are expected to filter
+            // before invocation.
+            if (!string.IsNullOrEmpty(a))
+                addrsArr.Add((JsonNode?)JsonValue.Create(a));
+        }
+
+        var req = new JsonObject
+        {
+            ["cmd"]   = "walk_class_batch",
+            ["addrs"] = addrsArr,
+        };
+
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        if (res["classes"] is not JsonArray arr)
+            throw new InvalidOperationException("Missing classes array in walk_class_batch response");
+
+        foreach (var item in arr)
+        {
+            if (item is not JsonObject classObj) continue;
+            result.Add(DeserializeClassInfo(classObj));
+        }
+
+        return result;
     }
 
     public async Task<byte[]> ReadMemAsync(string addr, int size, CancellationToken ct = default)

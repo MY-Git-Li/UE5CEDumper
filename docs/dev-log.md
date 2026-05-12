@@ -11,6 +11,135 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-05-12 (dev branch, build 693-696) — `walk_class_batch` — Full SDK / Dump-All pipe round-trip amortisation
+
+Architectural extension of the build-685 `search_properties_batch`
+pattern: a second batched pipe command, this time for class schema
+walks. Drops `SdkExportService.GenerateFullSdkAsync` and
+`DumpAllService.GenerateAsync` from N pipe round-trips down to
+N / 200 (chunk size). Estimated wall-time speedup for big-game Full
+SDK exports: 2-5× from the latency amortisation alone (each round-
+trip is ~0.3ms × ~4000 calls = ~1.3s saved on a 4400-class game,
+plus per-call JSON envelope serialisation).
+
+### Why this needed a different test bar than build 685
+
+`search_properties_batch` returns dedicated result rows the user
+sees inline in a UI table — any drift would have been visually
+obvious. `walk_class_batch` feeds the **Full SDK Export** and
+**Dump All Metadata** paths, both of which produce large file-shaped
+outputs where a silently-dropped class or field is invisible until
+the user happens to look for it months later. User flagged this
+explicitly when greenlighting: "if export sdk if missing something,
+I also see no out".
+
+The whole implementation is therefore biased toward byte-equivalence
+provability:
+
+- **DLL batch = loop over `Ubel::WalkClassEx`** ([Aura.cpp:2830](../dll/src/Aura.cpp))
+  — no new walking logic, just a pipe-amortised wrapper. Each batch
+  element comes from the same function the single-call `walk_class`
+  pipe command uses, so byte-identical results are a structural
+  property, not a tested behaviour.
+- **Shared JSON serialiser in Fern.cpp** — single + batch both call
+  the same lambda `EncodeClassInfoToJson`. The wire shape cannot
+  drift because the encoder is shared.
+- **Shared C# deserialiser** — `WalkClassAsync` and
+  `WalkClassesBatchAsync` both call `DumpService.DeserializeClassInfo`.
+  Same parse code → same `ClassInfoModel` for the same JSON.
+- **Per-chunk fallback in both consumers** — if the batch throws or
+  returns the wrong element count, the chunk replays as N single
+  `WalkClassAsync` calls. Preserves per-class error attribution (the
+  `// ERROR:` line in SDK output and the `kind=error` JSONL row in
+  Dump All).
+- **Equivalence test file**
+  ([WalkClassBatchEquivalenceTests.cs](../ui/UE5DumpUI.Tests/WalkClassBatchEquivalenceTests.cs))
+  — builds a 250-class fixture with mixed metas (Class / BPGC /
+  AnimBPGC / WidgetBPGC / DynamicClass / ScriptStruct), every
+  FieldInfoModel optional metadata bucket populated, engine-vs-game
+  paths half-split, ~30% of classes carrying functions. Runs both
+  consumers through TWO stubs against the same fixture:
+  - **HappyPathDump** — exposes both batched + single-call paths via
+    one shared dictionary, mirroring the DLL's loop-over-singles
+    contract.
+  - **ForcedFallbackDump** — throws on every `WalkClassesBatchAsync`,
+    forcing the consumer's per-class fallback path.
+
+  Test asserts byte-for-byte equality between the two outputs at 7
+  class counts (0 / 1 / 199 / 200 / 201 / 250 / 400) covering chunk-
+  boundary edges, plus a `TruncatedBatchDump` test where the batch
+  returns N-1 results — must trigger fallback and still produce
+  identical output. Total: 15 new test rows on top of the existing
+  `SdkExportService` / `DumpAllService` tests (which now also run
+  through the batched path because `StubDumpService`'s default
+  `WalkClassesBatchAsync` delegates to N `WalkClassAsync` calls).
+
+### Files
+
+DLL:
+- [Aura.h:307-320](../dll/src/Aura.h) — `WalkClassesBatch` declaration
+- [Aura.cpp:2832-2862](../dll/src/Aura.cpp) — trivial loop implementation
+  with timing log
+- [Renge.h:25](../dll/src/Renge.h) — `CMD_WALK_CLASS_BATCH` constant
+- [Fern.cpp:801-878](../dll/src/Fern.cpp) — `EncodeClassInfoToJson`
+  lambda + both single + batch dispatch share it
+
+C#:
+- [IDumpService.cs](../ui/UE5DumpUI/Core/IDumpService.cs) —
+  `WalkClassesBatchAsync` method declaration
+- [DumpService.cs:267-373](../ui/UE5DumpUI/Services/DumpService.cs) —
+  pipe call implementation; extracted `DeserializeClassInfo` shared
+  helper
+- [SdkExportService.cs:39-50, 100-180](../ui/UE5DumpUI/Services/SdkExportService.cs)
+  — `FullSdkBatchChunkSize` const + chunked loop with per-chunk
+  fallback
+- [DumpAllService.cs:WalkClassBatchChunkSize, FlushClassChunkAsync](../ui/UE5DumpUI/Services/DumpAllService.cs)
+  — chunk buffer in the page loop + extracted helper
+
+Tests:
+- [CsxExportServiceTests.cs:StubDumpService](../ui/UE5DumpUI.Tests/CsxExportServiceTests.cs)
+  — virtual default `WalkClassesBatchAsync` that delegates to
+  `WalkClassAsync × N`, so every existing test that uses this stub
+  automatically validates the batch path produces the same data as
+  the single-call path
+- [WalkClassBatchEquivalenceTests.cs](../ui/UE5DumpUI.Tests/WalkClassBatchEquivalenceTests.cs)
+  — new 450-line test file: 250-class fixture builder + 3 stub
+  variants (happy / forced-fallback / truncated-batch) + 15 test
+  rows asserting byte-equivalence
+
+### Build number ladder
+
+| Build | Phase                                          | Net code change |
+|------:|------------------------------------------------|-----------------|
+| 693   | DLL: WalkClassesBatch + CMD_WALK_CLASS_BATCH   | +~50 lines C++  |
+| 694   | C#: IDumpService + DumpService + StubDumpService | +~80 lines    |
+| 695   | C# refactor: SdkExportService + DumpAllService | +~130 lines / -~50 |
+| 696   | Tests: equivalence file + init-only field fix  | +~450 lines     |
+
+### Tests / perf
+
+C# tests: 802 → **817** (+15 new). DLL tests: 62 + 31 = 93 unchanged.
+Total: **910**.
+
+No live-perf regression test yet — needs a real game with a fixed
+class count to baseline. User-side benchmark suggestion: time Full
+SDK Export on TQ2 (~4400 classes) before/after this build; expect
+~2-5× speedup. The build-685 search_properties_batch precedent
+(42s → 1.5s) was a stronger win because it amortised the
+GObjects-walk; this one only amortises pipe overhead. Both are
+welcome.
+
+### Out of scope for this build (follow-ups)
+
+- **`walk_functions_batch`** — DumpAllService still does
+  `WalkFunctionsAsync` per emitted class. Same pattern as
+  walk_class_batch would shave another ~N round-trips when
+  `IncludeFunctions=true`. Skipped for build 693-696 to keep the
+  blast radius small and the equivalence tests focused.
+- **Live-perf baseline** — needs a real game session to be useful.
+
+-----
+
 ## 2026-05-12 (dev branch, build 690-691) — SdkExportService BPGC filter fix + Satisfactory proxy-deploy fix
 
 Two small, related cleanups from the build 689 "next-session" candidates.

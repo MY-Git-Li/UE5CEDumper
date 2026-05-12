@@ -22,6 +22,7 @@ constexpr const char* CMD_GET_OBJECT       = "get_object";
 constexpr const char* CMD_FIND_OBJECT      = "find_object";
 constexpr const char* CMD_SEARCH_OBJECTS   = "search_objects";
 constexpr const char* CMD_WALK_CLASS       = "walk_class";
+constexpr const char* CMD_WALK_CLASS_BATCH = "walk_class_batch";
 constexpr const char* CMD_READ_MEM         = "read_mem";
 constexpr const char* CMD_WRITE_MEM        = "write_mem";
 constexpr const char* CMD_WALK_INSTANCE    = "walk_instance";

@@ -40,6 +40,25 @@ public class StubDumpService : IDumpService
         return Task.FromResult(new ClassInfoModel { Fields = new List<FieldInfoModel>() });
     }
 
+    /// <summary>
+    /// Default test-stub implementation that delegates to N single
+    /// <see cref="WalkClassAsync"/> calls. This mirrors the DLL-side
+    /// contract (batch = loop over singles) so callers under test see
+    /// byte-identical results whether they go through the single or
+    /// batched code path. Override in a sub-stub to inject batch-
+    /// specific behaviour (e.g. forced failure for fallback testing).
+    /// </summary>
+    public virtual async Task<List<ClassInfoModel>> WalkClassesBatchAsync(string[] addrs, CancellationToken ct = default)
+    {
+        var result = new List<ClassInfoModel>(addrs.Length);
+        foreach (var addr in addrs)
+        {
+            ct.ThrowIfCancellationRequested();
+            result.Add(await WalkClassAsync(addr, ct));
+        }
+        return result;
+    }
+
     // Unused stubs — throw NotImplementedException to catch unexpected calls
     public Task<EngineState> InitAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public Task<EngineState> GetPointersAsync(CancellationToken ct = default) => throw new NotImplementedException();

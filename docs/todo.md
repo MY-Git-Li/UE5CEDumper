@@ -609,6 +609,40 @@ build 673 DLL fix, different code path. Now calls
 Regression test `GenerateFullSdkAsync_AcceptsAllClassLikeMetasAndScriptStruct`
 covers every meta variant explicitly so it can't silently regress.
 
+### ~~`walk_class_batch` — Full SDK / Dump All pipe round-trip amortisation~~ — **shipped build 693-696**
+
+C# Full SDK export + Dump All Metadata both ran one pipe round-trip per
+class (~4400 on a TQ2-size game). Build 693-696 batches in chunks of
+200 via a new DLL `walk_class_batch` command. Implementation pattern
+mirrors build-685 `search_properties_batch` — `Aura::WalkClassesBatch`
+is a trivial loop over `Ubel::WalkClassEx`, so each batch element is
+byte-identical to a single `walk_class` response. Shared JSON
+serialiser (`EncodeClassInfoToJson` in Fern.cpp) + shared C#
+deserialiser (`DumpService.DeserializeClassInfo`) make byte-equivalence
+structural rather than tested.
+
+Three-layer safety net per the user's "I can't tell if SDK export drops
+a class" concern:
+
+1. DLL batch = loop over single → byte-identical at the source
+2. Single + batch share the JSON encoder/decoder → no wire drift
+3. `WalkClassBatchEquivalenceTests.cs` runs both consumers against a
+   250-class fixture through a happy-path stub AND a forced-fallback
+   stub; asserts byte equality at 7 class-count edges (0/1/199/200/201/
+   250/400) + a truncated-batch defensive test.
+
+Consumers chunk batches at 200 with per-chunk single-call fallback so
+per-class error attribution (the `// ERROR:` line in SDK / `kind=error`
+JSONL in Dump All) survives any batch failure.
+
+Tests: 802 → 817 C# (+15). Estimated wall-time speedup on big games:
+2-5× for Full SDK Export (latency amortisation only; WalkClass doesn't
+re-walk GObjects).
+
+**Follow-up candidate**: `walk_functions_batch` for DumpAll (still does
+WalkFunctions single-call per class). Same shape, smaller win — skip
+unless profiling shows it as the new bottleneck.
+
 ### ~~Multi-module GWorld scan (Satisfactory class)~~ — **shipped build 691**
 
 **Status**: Both halves resolved, neither was the originally-suspected bug.

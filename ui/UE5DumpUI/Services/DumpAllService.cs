@@ -42,6 +42,13 @@ public static class DumpAllService
     };
 
     /// <summary>
+    /// Default chunk size for the batched walk_class fan-out. Internal
+    /// so tests can hit chunk-boundary edge cases at (n-1)/n/(n+1)
+    /// counts. Matches <see cref="SdkExportService.FullSdkBatchChunkSize"/>.
+    /// </summary>
+    internal const int WalkClassBatchChunkSize = 200;
+
+    /// <summary>
     /// Engine-package path prefixes (mirrors the DLL's IsEnginePackage
     /// list). Used only when <see cref="DumpOptions.GameOnly"/> is true
     /// to skip /Script/Engine.*, /Script/CoreUObject.*, etc.
@@ -133,6 +140,16 @@ public static class DumpAllService
         }
 
         // ----- Pass 2: walk every class-like object -----
+        //
+        // Classes are walked in chunks of WalkClassBatchChunkSize via
+        // walk_class_batch (build 693). The DLL batch is a trivial loop
+        // over Ubel::WalkClassEx — same function the single walk_class
+        // path uses — so each batch element is byte-identical to a
+        // single-call result. WalkFunctions stays single-call per
+        // emitted class for now (separate optimisation candidate).
+        // Any batch failure (pipe exception, unexpected element count)
+        // is caught and the chunk is replayed via single WalkClassAsync
+        // calls so per-class error attribution is preserved.
         int classesEmitted = 0;
         int classesSkipped = 0;
         int errors = 0;
@@ -140,6 +157,8 @@ public static class DumpAllService
         {
             int offset = 0;
             const int pageSize = 5000;
+            var chunkBuffer = new List<UObjectNode>(WalkClassBatchChunkSize);
+
             do
             {
                 ct.ThrowIfCancellationRequested();
@@ -159,47 +178,32 @@ public static class DumpAllService
                         continue;
                     }
 
-                    try
+                    chunkBuffer.Add(obj);
+                    if (chunkBuffer.Count >= WalkClassBatchChunkSize)
                     {
-                        var classInfo = await dump.WalkClassAsync(obj.Address, ct);
-
-                        List<FunctionInfoModel>? functions = null;
-                        if (options.IncludeFunctions)
-                        {
-                            functions = await dump.WalkFunctionsAsync(obj.Address, ct);
-                        }
-
-                        int instCount = 0;
-                        if (instanceCounts != null)
-                        {
-                            instanceCounts.TryGetValue(classInfo.Name, out instCount);
-                        }
-
-                        await WriteClassLineAsync(writer, obj, classInfo, functions, instCount, ct);
-                        classesEmitted++;
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        errors++;
-                        await WriteErrorLineAsync(writer, obj.Address, obj.Name, ex.Message, ct);
-                    }
-
-                    if ((classesEmitted % 50) == 0)
-                    {
-                        progress?.Report(new DumpProgress(
-                            Phase: "Walking classes",
-                            Done: classesEmitted,
-                            Total: -1));
+                        var (emitted, errs) = await FlushClassChunkAsync(
+                            dump, writer, chunkBuffer, instanceCounts, options,
+                            classesEmitted, progress, ct);
+                        classesEmitted += emitted;
+                        errors         += errs;
+                        chunkBuffer.Clear();
                     }
                 }
 
                 offset += page.Scanned > 0 ? page.Scanned : page.Objects.Count;
                 if (offset >= total) break;
             } while (true);
+
+            // Final partial chunk.
+            if (chunkBuffer.Count > 0)
+            {
+                var (emitted, errs) = await FlushClassChunkAsync(
+                    dump, writer, chunkBuffer, instanceCounts, options,
+                    classesEmitted, progress, ct);
+                classesEmitted += emitted;
+                errors         += errs;
+                chunkBuffer.Clear();
+            }
         }
 
         // ----- Summary line -----
@@ -210,6 +214,108 @@ public static class DumpAllService
             Phase: $"Done — {classesEmitted} classes",
             Done: classesEmitted,
             Total: classesEmitted));
+    }
+
+    /// <summary>
+    /// Walk a chunk of class objects and emit one class line per entry.
+    /// Tries the batched walk_class_batch path first; on any failure
+    /// (pipe exception, unexpected result count) falls back to single
+    /// WalkClassAsync calls so per-class error attribution survives.
+    /// WalkFunctions is invoked single-call per emitted class — that
+    /// half of the per-class round-trip cost is a separate batching
+    /// candidate (build 693 only batches walk_class).
+    ///
+    /// Returns (emittedDelta, errorsDelta) so the caller can maintain
+    /// the cumulative <c>classesEmitted</c> / <c>errors</c> counters
+    /// the summary line reports.
+    /// </summary>
+    private static async Task<(int emitted, int errors)> FlushClassChunkAsync(
+        IDumpService dump,
+        TextWriter writer,
+        List<UObjectNode> chunk,
+        Dictionary<string, int>? instanceCounts,
+        DumpOptions options,
+        int cumulativeEmittedBefore,
+        IProgress<DumpProgress>? progress,
+        CancellationToken ct)
+    {
+        if (chunk.Count == 0) return (0, 0);
+
+        // Try the batched path first.
+        var addrs = new string[chunk.Count];
+        for (int i = 0; i < chunk.Count; i++) addrs[i] = chunk[i].Address;
+
+        List<ClassInfoModel>? batchResult = null;
+        try
+        {
+            var fetched = await dump.WalkClassesBatchAsync(addrs, ct);
+            if (fetched.Count == chunk.Count)
+                batchResult = fetched;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            // batchResult stays null → fallback below preserves
+            // per-class error rows (kind=error) the way the pre-batch
+            // path did.
+        }
+
+        int emittedThisChunk = 0;
+        int errorsThisChunk = 0;
+
+        for (int i = 0; i < chunk.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var obj = chunk[i];
+            try
+            {
+                var classInfo = batchResult != null
+                    ? batchResult[i]
+                    : await dump.WalkClassAsync(obj.Address, ct);
+
+                List<FunctionInfoModel>? functions = null;
+                if (options.IncludeFunctions)
+                {
+                    functions = await dump.WalkFunctionsAsync(obj.Address, ct);
+                }
+
+                int instCount = 0;
+                if (instanceCounts != null)
+                {
+                    instanceCounts.TryGetValue(classInfo.Name, out instCount);
+                }
+
+                await WriteClassLineAsync(writer, obj, classInfo, functions, instCount, ct);
+                emittedThisChunk++;
+
+                // Preserves the pre-batch path's per-50-class progress
+                // granularity, measured against the cumulative emit
+                // count (not the chunk-local count). Matches old
+                // behaviour exactly so progress messages line up.
+                int cumulative = cumulativeEmittedBefore + emittedThisChunk;
+                if ((cumulative % 50) == 0)
+                {
+                    progress?.Report(new DumpProgress(
+                        Phase: "Walking classes",
+                        Done: cumulative,
+                        Total: -1));
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                errorsThisChunk++;
+                await WriteErrorLineAsync(writer, obj.Address, obj.Name, ex.Message, ct);
+            }
+        }
+
+        return (emittedThisChunk, errorsThisChunk);
     }
 
     // ------------------------------------------------------------------

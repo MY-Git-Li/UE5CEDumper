@@ -798,13 +798,12 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             return Renge::MakeResponse(id, data).dump();
         }
 
-        if (cmd == Renge::CMD_WALK_CLASS) {
-            std::string addrStr = request.value("addr", "");
-            if (addrStr.empty()) return Renge::MakeError(id, "Missing addr").dump();
-
-            uintptr_t addr = Renge::StrToAddr(addrStr);
-            ClassInfo ci = Ubel::WalkClassEx(addr);
-
+        // EncodeClassInfoToJson — shared serialiser used by both
+        // walk_class (single) and walk_class_batch. Centralising the
+        // emit logic guarantees the two pipe paths produce byte-
+        // identical class objects, which is the explicit safety
+        // contract for SdkExport / DumpAll switching to the batch.
+        auto EncodeClassInfoToJson = [](const ClassInfo& ci) -> json {
             json classData;
             classData["name"]       = ci.Name;
             classData["full_path"]  = ci.FullPath;
@@ -838,9 +837,51 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 fields.push_back(fj);
             }
             classData["fields"] = fields;
+            return classData;
+        };
+
+        if (cmd == Renge::CMD_WALK_CLASS) {
+            std::string addrStr = request.value("addr", "");
+            if (addrStr.empty()) return Renge::MakeError(id, "Missing addr").dump();
+
+            uintptr_t addr = Renge::StrToAddr(addrStr);
+            ClassInfo ci = Ubel::WalkClassEx(addr);
 
             json data;
-            data["class"] = classData;
+            data["class"] = EncodeClassInfoToJson(ci);
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // === walk_class_batch: Pipe-amortised variant of walk_class.
+        // Loops Ubel::WalkClassEx over addrs[] and returns one class
+        // object per addr in order. Each element matches the single
+        // walk_class response's "class" field byte-for-byte — both
+        // paths share EncodeClassInfoToJson above. Used by
+        // SdkExportService Full SDK export and DumpAllService stream
+        // to collapse N round-trips into N/chunkSize. ===
+        if (cmd == Renge::CMD_WALK_CLASS_BATCH) {
+            if (!request.contains("addrs") || !request["addrs"].is_array()) {
+                return Renge::MakeError(id, "Missing or non-array 'addrs'").dump();
+            }
+            std::vector<uintptr_t> addrs;
+            addrs.reserve(request["addrs"].size());
+            for (const auto& a : request["addrs"]) {
+                if (a.is_string()) {
+                    auto s = a.get<std::string>();
+                    if (!s.empty()) addrs.push_back(Renge::StrToAddr(s));
+                }
+            }
+
+            auto results = Aura::WalkClassesBatch(addrs);
+
+            json classesArr = json::array();
+            for (const auto& ci : results) {
+                classesArr.push_back(EncodeClassInfoToJson(ci));
+            }
+
+            json data;
+            data["classes"] = classesArr;
+            data["count"]   = static_cast<int>(results.size());
             return Renge::MakeResponse(id, data).dump();
         }
 

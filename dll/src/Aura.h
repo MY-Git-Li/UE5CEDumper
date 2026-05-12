@@ -8,6 +8,9 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
+
+#include "Ubel.h"   // For Ubel::ClassInfo used by WalkClassesBatch
 
 // FUObjectItem structure (in FChunkedFixedUObjectArray)
 // Size varies by UE version — auto-detected at Init() time:
@@ -324,6 +327,20 @@ std::vector<PropertySearchResult> SearchPropertiesBatch(
     bool gameOnly,
     int maxResultsPerQuery = 200,
     bool withPreviews = false);
+
+// Batched class schema walk: invokes Ubel::WalkClassEx once per input
+// address and returns results in the same order. The DLL implementation
+// is deliberately a trivial loop — every element comes from the exact
+// same WalkClassEx call the single-walk `walk_class` pipe command uses,
+// so each ClassInfo is byte-identical to a single-call response. The
+// optimisation is purely pipe round-trip + JSON serialisation
+// amortisation: a 4000-class Full SDK export saves ~4000 × ~0.3ms of
+// per-message overhead plus the per-call JSON envelope cost.
+//
+// Caller is responsible for chunking — a single batch carrying
+// thousands of fully-walked classes would produce a multi-megabyte
+// JSON payload, so the UI side fans out in ~200-class chunks.
+std::vector<Ubel::ClassInfo> WalkClassesBatch(const std::vector<uintptr_t>& addrs);
 
 // Walk the SuperStruct chain upward from `classAddr` and return the
 // highest-up class that still declares a property at `fieldOffset`.
