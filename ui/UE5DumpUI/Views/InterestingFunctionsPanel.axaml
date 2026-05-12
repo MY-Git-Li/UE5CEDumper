@@ -43,14 +43,23 @@
               Command="{Binding ClearFiltersCommand}"
               Padding="6,2" FontSize="11"
               VerticalAlignment="Center"/>
-      <TextBlock Text="{Binding StatusText}"
-                 Foreground="#888" FontSize="12"
-                 VerticalAlignment="Center" Margin="8,0"/>
     </StackPanel>
 
-    <!-- Loading indicator -->
-    <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True"
-                 IsVisible="{Binding IsLoading}" Height="2" Margin="0,0,0,4"/>
+    <!-- Status + progress in their own dock row (mirrors Interesting
+         Properties panel build 681 layout) so a long status message
+         doesn't get clipped behind the filter buttons at narrow widths. -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8"
+                Margin="0,0,0,4" VerticalAlignment="Center">
+      <ProgressBar IsIndeterminate="True"
+                   IsVisible="{Binding IsLoading}"
+                   Width="80" Height="4"
+                   VerticalAlignment="Center"/>
+      <TextBlock Text="{Binding StatusText}"
+                 Foreground="#AAB8D0" FontSize="12"
+                 FontFamily="Consolas, Menlo, monospace"
+                 VerticalAlignment="Center"
+                 ToolTip.Tip="{Binding StatusText}"/>
+    </StackPanel>
 
     <!-- Error display -->
     <TextBlock DockPanel.Dock="Top"

@@ -87,16 +87,15 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
     partial void OnShowAllChanged(bool value)                       => ApplyFilter();
 
     /// <summary>
-    /// Walk each SeedQuery sequentially (the DLL pipe is single-channel
-    /// so concurrent calls would queue up anyway — sequential issuance
-    /// gives accurate progress reporting at zero throughput cost),
-    /// merge + dedupe by (DefiningClassName, PropName, PropOffset),
-    /// score, sort.
+    /// Send ONE batched search_properties_batch call carrying all
+    /// SeedQueries. DLL walks GObjects + class fields once and checks
+    /// every property against every keyword, returning per-query result
+    /// envelopes. Wall-time drops from ~42s (legacy sequential pipe
+    /// loop, build 681-682) to ~1.5s for a 4400-class game.
     ///
-    /// Timing on TQ2 (4392 classes, build 678 SeedQueries with 36
-    /// entries): ~1.15s per query × 36 = ~42s total. Bigger games
-    /// scale roughly linearly with class count, so the progress bar
-    /// is the main UX deliverable for this command.
+    /// Why progress is now one-shot: the speedup is so large that the
+    /// per-keyword loop disappears entirely on the wire. Status text
+    /// just shows the single round-trip + scoring phase.
     /// </summary>
     [RelayCommand]
     private async Task LoadAsync()
@@ -106,24 +105,32 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
             ClearError();
             IsLoading = true;
 
-            // Issue queries sequentially so we can update StatusText
-            // per-query — pipe is single-channel anyway so parallel
-            // execution would just be N enqueued tasks completing in
-            // serial order (see build 681 log analysis on TQ2).
             var queries = PropertyScoringTable.SeedQueries;
-            var results = new PropertySearchResult[queries.Length];
-            int totalRawHits = 0;
-            for (int i = 0; i < queries.Length; i++)
-            {
-                var q = queries[i];
-                StatusText = $"Scanning {i + 1}/{queries.Length}: '{q}' " +
-                             $"({totalRawHits:N0} raw hits so far)";
-                results[i] = await _dump.SearchPropertiesAsync(
-                    query: q, types: null, gameOnly: GameOnly, limit: PerQueryLimit);
-                totalRawHits += results[i]?.Results?.Count ?? 0;
-            }
+            StatusText = $"Walking GObjects with {queries.Length} keyword queries (single batched call)...";
 
-            StatusText = $"Scoring + dedup ({totalRawHits:N0} raw hits)...";
+            var batch = await _dump.SearchPropertiesBatchAsync(
+                queries, types: null, gameOnly: GameOnly, limitPerQuery: PerQueryLimit);
+
+            StatusText = $"Scoring + dedup ({batch.Total:N0} raw hits across " +
+                         $"{batch.ScannedClasses:N0} classes)...";
+
+            // Flatten the per-query envelopes into a single list for the
+            // existing dedup/score loop; that loop dedupes by
+            // (DefiningClassName, PropName, PropOffset) so per-query
+            // duplicates (same field matched by multiple keywords)
+            // collapse into one ScoredPropertyRow.
+            var results = new PropertySearchResult[batch.PerQuery.Count];
+            for (int i = 0; i < batch.PerQuery.Count; i++)
+            {
+                var env = batch.PerQuery[i];
+                results[i] = new PropertySearchResult
+                {
+                    Total          = env.MatchCount,
+                    ScannedClasses = batch.ScannedClasses,
+                    ScannedObjects = batch.ScannedObjects,
+                    Results        = env.Results,
+                };
+            }
 
             // Score + dedup happens off the UI thread; on huge games the
             // pre-dedup set can hit ~6000 entries.

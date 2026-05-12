@@ -70,6 +70,23 @@ public interface IDumpService
         string query, string[]? types = null, bool gameOnly = true,
         int limit = 200, CancellationToken ct = default);
 
+    /// <summary>
+    /// Batched property search — DLL walks GObjects once and checks
+    /// every property against every query. Drops the multi-keyword
+    /// sweep time from ~42s (sequential pipe calls each re-walking
+    /// GObjects) to ~1.5s for a 36-query / 4400-class game. Used by
+    /// the Interesting Properties tab Load command.
+    ///
+    /// Each query gets its own dedup index + maxResults limit, returned
+    /// in order inside <see cref="PropertySearchBatchResult.PerQuery"/>.
+    /// Preview values are NOT resolved on the batch path (the tab
+    /// doesn't display them; user opens a row in Live Walker to read
+    /// the live value).
+    /// </summary>
+    Task<PropertySearchBatchResult> SearchPropertiesBatchAsync(
+        string[] queries, string[]? types = null, bool gameOnly = true,
+        int limitPerQuery = 200, CancellationToken ct = default);
+
     // --- Game Class List ---
     Task<ClassListResult> ListClassesAsync(
         bool gameOnly = true, int limit = 5000, CancellationToken ct = default);

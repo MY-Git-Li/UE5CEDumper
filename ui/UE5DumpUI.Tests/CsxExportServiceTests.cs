@@ -63,6 +63,7 @@ public class StubDumpService : IDumpService
     public Task<List<EnumDefinition>> ListEnumsAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<List<FunctionInfoModel>> WalkFunctionsAsync(string addr, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<PropertySearchResult> SearchPropertiesAsync(string query, string[]? types = null, bool gameOnly = true, int limit = 200, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<PropertySearchBatchResult> SearchPropertiesBatchAsync(string[] queries, string[]? types = null, bool gameOnly = true, int limitPerQuery = 200, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<ClassListResult> ListClassesAsync(bool gameOnly = true, int limit = 5000, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<AllFunctionsResult> ListAllFunctionsAsync(bool gameOnly = true, int limit = 100000, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<RescanStartResult> StartRescanAsync(CancellationToken ct = default) => throw new NotImplementedException();

@@ -1048,6 +1048,87 @@ public sealed class DumpService : IDumpService
         return result;
     }
 
+    public async Task<PropertySearchBatchResult> SearchPropertiesBatchAsync(
+        string[] queries, string[]? types = null, bool gameOnly = true,
+        int limitPerQuery = 200, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "search_properties_batch",
+            ["game_only"] = gameOnly,
+            ["limit"] = limitPerQuery
+        };
+
+        var qarr = new JsonArray();
+        foreach (var q in queries)
+        {
+            if (!string.IsNullOrEmpty(q))
+                qarr.Add((JsonNode?)JsonValue.Create(q));
+        }
+        req["queries"] = qarr;
+
+        if (types is { Length: > 0 })
+        {
+            var tarr = new JsonArray();
+            foreach (var t in types) tarr.Add((JsonNode?)JsonValue.Create(t));
+            req["types"] = tarr;
+        }
+
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        var result = new PropertySearchBatchResult
+        {
+            QueryCount     = res["query_count"]?.GetValue<int>() ?? 0,
+            Total          = res["total"]?.GetValue<int>() ?? 0,
+            ScannedClasses = res["scanned_classes"]?.GetValue<int>() ?? 0,
+            ScannedObjects = res["scanned_objects"]?.GetValue<int>() ?? 0,
+        };
+
+        if (res["per_query"] is JsonArray perQuery)
+        {
+            foreach (var envNode in perQuery)
+            {
+                if (envNode is not JsonObject envObj) continue;
+                var envelope = new PropertySearchQueryEnvelope
+                {
+                    Query      = envObj["query"]?.GetValue<string>() ?? "",
+                    MatchCount = envObj["match_count"]?.GetValue<int>() ?? 0,
+                };
+                if (envObj["results"] is JsonArray matches)
+                {
+                    foreach (var item in matches)
+                    {
+                        if (item is not JsonObject obj) continue;
+                        envelope.Results.Add(new PropertySearchMatch
+                        {
+                            ClassName  = obj["class_name"]?.GetValue<string>() ?? "",
+                            ClassAddr  = obj["class_addr"]?.GetValue<string>() ?? "",
+                            ClassPath  = obj["class_path"]?.GetValue<string>() ?? "",
+                            SuperName  = obj["super_name"]?.GetValue<string>() ?? "",
+                            PropName   = obj["prop_name"]?.GetValue<string>() ?? "",
+                            PropType   = obj["prop_type"]?.GetValue<string>() ?? "",
+                            PropOffset = obj["prop_offset"]?.GetValue<int>() ?? 0,
+                            PropSize   = obj["prop_size"]?.GetValue<int>() ?? 0,
+                            StructType = obj["struct_type"]?.GetValue<string>() ?? "",
+                            InnerType  = obj["inner_type"]?.GetValue<string>() ?? "",
+                            // Preview intentionally omitted — batch path
+                            // skips DLL-side Phase-2 instance scan; field
+                            // stays empty by default.
+                            DefiningClassName = obj["defining_class_name"]?.GetValue<string>() ?? "",
+                            DefiningClassAddr = obj["defining_class_addr"]?.GetValue<string>() ?? "",
+                            DefiningClassPath = obj["defining_class_path"]?.GetValue<string>() ?? "",
+                            InheritedByCount  = obj["inherited_by_count"]?.GetValue<int>() ?? 0,
+                        });
+                    }
+                }
+                result.PerQuery.Add(envelope);
+            }
+        }
+
+        return result;
+    }
+
     public async Task<ClassListResult> ListClassesAsync(
         bool gameOnly = true, int limit = 5000, CancellationToken ct = default)
     {

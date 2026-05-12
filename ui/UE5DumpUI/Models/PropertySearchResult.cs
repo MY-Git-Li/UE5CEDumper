@@ -91,3 +91,31 @@ public class PropertySearchResult
     public int ScannedObjects { get; set; }
     public List<PropertySearchMatch> Results { get; set; } = new();
 }
+
+/// <summary>
+/// Per-query envelope inside a <see cref="PropertySearchBatchResult"/>.
+/// Mirrors the DLL-side `per_query[i]` shape.
+/// </summary>
+public class PropertySearchQueryEnvelope
+{
+    public string Query { get; set; } = "";
+    public int MatchCount { get; set; }
+    public List<PropertySearchMatch> Results { get; set; } = new();
+}
+
+/// <summary>
+/// Result set from the search_properties_batch command. Walks GObjects
+/// + class fields ONCE for N queries — see DLL-side SearchPropertiesBatch
+/// for the speedup rationale (~30x on a 36-query / 4400-class game).
+/// Order of <see cref="PerQuery"/> matches the input queries[] order;
+/// callers can therefore index by position or by matching the
+/// envelope's <see cref="PropertySearchQueryEnvelope.Query"/> field.
+/// </summary>
+public class PropertySearchBatchResult
+{
+    public int QueryCount { get; set; }
+    public int Total { get; set; }
+    public int ScannedClasses { get; set; }
+    public int ScannedObjects { get; set; }
+    public List<PropertySearchQueryEnvelope> PerQuery { get; set; } = new();
+}

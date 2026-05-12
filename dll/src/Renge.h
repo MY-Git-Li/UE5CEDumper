@@ -37,6 +37,7 @@ constexpr const char* CMD_WALK_FUNCTIONS   = "walk_functions";
 constexpr const char* CMD_WATCH             = "watch";
 constexpr const char* CMD_UNWATCH           = "unwatch";
 constexpr const char* CMD_SEARCH_PROPERTIES = "search_properties";
+constexpr const char* CMD_SEARCH_PROPERTIES_BATCH = "search_properties_batch";
 constexpr const char* CMD_LIST_CLASSES      = "list_classes";
 constexpr const char* CMD_LIST_ALL_FUNCTIONS = "list_all_functions";
 constexpr const char* CMD_RESCAN            = "rescan";

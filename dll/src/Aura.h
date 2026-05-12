@@ -304,6 +304,27 @@ PropertySearchResult SearchProperties(
     bool gameOnly,
     int maxResults = 200);
 
+// Batched property search: walk GObjects + class fields ONCE and check
+// every property against ALL queries. Returns one PropertySearchResult
+// per query (in the same order as the input). Each query gets its own
+// dedup index, per-query maxResults limit, and (optionally) per-query
+// preview values.
+//
+// The big win: a 36-query sweep on a 4400-class game drops from
+// ~42 sequential seconds (each call re-walks GObjects) to ~1.5 seconds
+// (one shared walk; per-property keyword check is cheap).
+//
+// withPreviews=false skips the Phase-2 instance scan that resolves
+// preview values for the wire output. The Interesting Properties tab
+// (the primary consumer) doesn't show previews, so the default is off
+// and we save another GObjects pass.
+std::vector<PropertySearchResult> SearchPropertiesBatch(
+    const std::vector<std::string>& queries,
+    const std::vector<std::string>& typeFilter,
+    bool gameOnly,
+    int maxResultsPerQuery = 200,
+    bool withPreviews = false);
+
 // Walk the SuperStruct chain upward from `classAddr` and return the
 // highest-up class that still declares a property at `fieldOffset`.
 // Algorithm: a class C declares the property iff
