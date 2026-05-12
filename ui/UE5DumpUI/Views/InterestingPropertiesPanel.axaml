@@ -48,16 +48,25 @@
               Command="{Binding ClearFiltersCommand}"
               Padding="6,2" FontSize="11"
               VerticalAlignment="Center"/>
-      <TextBlock Text="{Binding StatusText}"
-                 Foreground="#888" FontSize="12"
-                 VerticalAlignment="Center" Margin="8,0"
-                 TextTrimming="CharacterEllipsis"
-                 ToolTip.Tip="{Binding StatusText}"/>
     </StackPanel>
 
-    <!-- Loading indicator -->
-    <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True"
-                 IsVisible="{Binding IsLoading}" Height="2" Margin="0,0,0,4"/>
+    <!-- Status + progress bar in their own row so the long "Scanning N/M:
+         'keyword' (X raw hits)" status text doesn't get squeezed off-
+         screen by the toolbar elements at narrow widths. -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8"
+                Margin="0,0,0,4" VerticalAlignment="Center">
+      <!-- Indeterminate spinner — narrow + only visible during scan. The
+           real progress info is the text next to it (Scanning N/M). -->
+      <ProgressBar IsIndeterminate="True"
+                   IsVisible="{Binding IsLoading}"
+                   Width="80" Height="4"
+                   VerticalAlignment="Center"/>
+      <TextBlock Text="{Binding StatusText}"
+                 Foreground="#AAB8D0" FontSize="12"
+                 FontFamily="Consolas, Menlo, monospace"
+                 VerticalAlignment="Center"
+                 ToolTip.Tip="{Binding StatusText}"/>
+    </StackPanel>
 
     <!-- Error display -->
     <TextBlock DockPanel.Dock="Top"

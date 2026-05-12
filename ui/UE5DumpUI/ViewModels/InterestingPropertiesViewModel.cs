@@ -87,11 +87,16 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
     partial void OnShowAllChanged(bool value)                       => ApplyFilter();
 
     /// <summary>
-    /// Fan-out across all SeedQueries in parallel, merge + dedupe by
-    /// (DefiningClassName, PropName, PropOffset), score, sort. Total
-    /// time is bounded by the slowest single query — typically 1-3s
-    /// per query on a large game, so ~3s total for the whole sweep
-    /// when run in parallel.
+    /// Walk each SeedQuery sequentially (the DLL pipe is single-channel
+    /// so concurrent calls would queue up anyway — sequential issuance
+    /// gives accurate progress reporting at zero throughput cost),
+    /// merge + dedupe by (DefiningClassName, PropName, PropOffset),
+    /// score, sort.
+    ///
+    /// Timing on TQ2 (4392 classes, build 678 SeedQueries with 36
+    /// entries): ~1.15s per query × 36 = ~42s total. Bigger games
+    /// scale roughly linearly with class count, so the progress bar
+    /// is the main UX deliverable for this command.
     /// </summary>
     [RelayCommand]
     private async Task LoadAsync()
@@ -100,21 +105,25 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
         {
             ClearError();
             IsLoading = true;
-            StatusText = $"Scanning {PropertyScoringTable.SeedQueries.Length} seed keywords...";
 
-            // Issue all queries in parallel. Each task gets its own
-            // CancellationToken so we could later wire a "Cancel" button
-            // to abort in-flight queries (out of scope for round 1).
+            // Issue queries sequentially so we can update StatusText
+            // per-query — pipe is single-channel anyway so parallel
+            // execution would just be N enqueued tasks completing in
+            // serial order (see build 681 log analysis on TQ2).
             var queries = PropertyScoringTable.SeedQueries;
-            var tasks = new Task<PropertySearchResult>[queries.Length];
+            var results = new PropertySearchResult[queries.Length];
+            int totalRawHits = 0;
             for (int i = 0; i < queries.Length; i++)
             {
                 var q = queries[i];
-                tasks[i] = _dump.SearchPropertiesAsync(
+                StatusText = $"Scanning {i + 1}/{queries.Length}: '{q}' " +
+                             $"({totalRawHits:N0} raw hits so far)";
+                results[i] = await _dump.SearchPropertiesAsync(
                     query: q, types: null, gameOnly: GameOnly, limit: PerQueryLimit);
+                totalRawHits += results[i]?.Results?.Count ?? 0;
             }
 
-            var results = await Task.WhenAll(tasks);
+            StatusText = $"Scoring + dedup ({totalRawHits:N0} raw hits)...";
 
             // Score + dedup happens off the UI thread; on huge games the
             // pre-dedup set can hit ~6000 entries.
