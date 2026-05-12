@@ -30,7 +30,28 @@
 -- ============================================================
 
 if not UE5_INVOKE_HELPER_VERSION then
-  UE5_INVOKE_HELPER_VERSION = '1.0'
+  UE5_INVOKE_HELPER_VERSION = '1.1'
+end
+
+-- ============================================================
+-- Reentrancy guard
+-- ============================================================
+-- The DLL exposes a single-slot mailbox (g_invokeMailbox in
+-- Mimic.cpp). If two CE-Lua callers write the className /
+-- funcName / paramsData fields concurrently the in-flight call
+-- gets corrupted -- both callers may observe status=DONE while
+-- the DLL only executed one (Frankenstein) request. CE's Lua
+-- `sleep(1)` pumps Windows messages, so timer / synchronize
+-- callbacks CAN fire reentrantly inside waitDone's poll loop.
+--
+-- This flag serializes invokes within a single Lua engine. The
+-- DLL side has no busy-rejection of its own; this is the only
+-- guard. The `if nil` init pattern preserves the flag across
+-- helper re-loads (multiple AA Scripts loading the helper file
+-- in the same session) so a concurrent in-flight call isn't
+-- silently cleared.
+if _ue5_invoke_busy == nil then
+  _ue5_invoke_busy = false
 end
 
 -- ============================================================
@@ -178,6 +199,9 @@ if not invokeUFunction then
   --- @return boolean ok       True on success
   --- @return string|nil err   Error message on failure (nil on success)
   function invokeUFunction(className, funcName, parmsSize, params)
+    -- Input validation BEFORE the busy check so bad args from a
+    -- concurrent caller surface as the real validation error
+    -- instead of getting hidden by a busy state from someone else.
     if type(className) ~= 'string' or #className == 0 then
       return false, 'className must be a non-empty string'
     end
@@ -190,37 +214,61 @@ if not invokeUFunction then
         'parmsSize %d out of range (0..1024)', parmsSize)
     end
 
-    local ok_mb, mb = pcall(findMailbox)
-    if not ok_mb then
-      return false, tostring(mb)
+    -- Reentrancy guard: refuse to touch the mailbox if another
+    -- invoke is mid-flight in this Lua engine. Returning a clean
+    -- 'busy' error beats silently corrupting the in-flight call.
+    if _ue5_invoke_busy then
+      return false,
+        '[ue5_invoke] busy -- another script is mid-call. ' ..
+        'Serialize your AA Scripts or guard with synchronize().'
     end
 
-    -- Marshal the request into the mailbox.
-    writeMbStr(mb, OFF_CLASS, className)
-    writeMbStr(mb, OFF_FUNC, funcName)
-    local ok_p, err_p = pcall(writeBakedParams, mb, parmsSize, params)
-    if not ok_p then
-      return false, tostring(err_p)
+    -- Set busy = true around the mailbox-touching body. The pcall
+    -- wrapper ensures the flag is ALWAYS cleared, even if any
+    -- write/read throws (e.g. mailbox address turned invalid).
+    _ue5_invoke_busy = true
+    local pok, ok_or_err, err_or_nil = pcall(function()
+      local ok_mb, mb = pcall(findMailbox)
+      if not ok_mb then
+        return false, tostring(mb)
+      end
+
+      -- Marshal the request into the mailbox.
+      writeMbStr(mb, OFF_CLASS, className)
+      writeMbStr(mb, OFF_FUNC, funcName)
+      local ok_p, err_p = pcall(writeBakedParams, mb, parmsSize, params)
+      if not ok_p then
+        return false, tostring(err_p)
+      end
+
+      -- Clear status, then write CMD last to trigger the DLL.
+      writeInteger(mb + OFF_STATUS, 0)
+      writeInteger(mb + OFF_CMD, CMD_INVOKE_BY_NAME)
+
+      -- Poll until the DLL's mailbox handler reports done.
+      local ok_w, err_w = waitDone(mb, DEFAULT_TIMEOUT_MS)
+      if not ok_w then
+        return false, err_w
+      end
+
+      local result = readInteger(mb + OFF_RESULT)
+      if result ~= 0 then
+        return false, string.format(
+          '%s::%s -> result=%d (%s)',
+          className, funcName, result, readErrMsg(mb))
+      end
+
+      return true
+    end)
+    _ue5_invoke_busy = false
+
+    if not pok then
+      -- Hard error inside the body (raised, not returned). pcall
+      -- captured the message as ok_or_err.
+      return false, tostring(ok_or_err)
     end
-
-    -- Clear status, then write CMD last to trigger the DLL.
-    writeInteger(mb + OFF_STATUS, 0)
-    writeInteger(mb + OFF_CMD, CMD_INVOKE_BY_NAME)
-
-    -- Poll until the DLL's mailbox handler reports done.
-    local ok_w, err_w = waitDone(mb, DEFAULT_TIMEOUT_MS)
-    if not ok_w then
-      return false, err_w
-    end
-
-    local result = readInteger(mb + OFF_RESULT)
-    if result ~= 0 then
-      return false, string.format(
-        '%s::%s -> result=%d (%s)',
-        className, funcName, result, readErrMsg(mb))
-    end
-
-    return true
+    -- Soft return path: inner function returned (ok, err)
+    return ok_or_err, err_or_nil
   end
 
   registerLuaFunctionHighlight('invokeUFunction')
