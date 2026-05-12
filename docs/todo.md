@@ -550,14 +550,17 @@ returns the decoded Lua string instead of a number. Optional v2.
 
 ## Property Origin Resolver — proposals B + C still on table
 
-> **🎯 NEXT SESSION STARTING POINT (2026-05-12 close-out, build 689)**:
-> Big productive session — see dev-log for full list. Headline shipments:
+> **🎯 NEXT SESSION STARTING POINT (2026-05-12 close-out, build 696 / dist 704)**:
+> Session shipped 7 commits on top of build 689 — see dev-log for full
+> entries. Headline shipments since 689:
 >
-> - **B' (Interesting Properties tab with Unusual Location detection)** — shipped build 670, plus calibrated by 15-game cross-game analysis (build 678 + 687)
-> - **DLL BPGC filter bug fix** (build 673) — three callsites that filtered out every BlueprintGeneratedClass; turned out to be the biggest cheat-relevance gap in the project
-> - **`search_properties_batch`** (build 685) — 36 keywords in one GObjects walk, ~30× speedup on big games (42s → ~1.5s on TQ2)
-> - **Dump All Metadata + Python analyzer pipeline** — `scripts/analysis/analyze_dumps.py` now feeds keyword/class-rule decisions with real-game data. 15-game corpus methodology documented.
-> - **9 keyword adds + 5 class rules** (Combat: Effect/Target/Radius/Ability/Modifier/Duration; Resources: Item/Items; class rules: Weapon/Projectile/Battle/Enemy) — all empirically validated, every addition has ≥3-game evidence.
+> - **SdkExportService BPGC filter fix** (build 690, [2dd2ac8](https://github.com/bbfox0703/UE5CEDumper/commit/2dd2ac8)) — mirror of the build-673 DLL fix on the C# side; Full SDK export was silently dropping every BPGC. Test `GenerateFullSdkAsync_AcceptsAllClassLikeMetasAndScriptStruct` locks it.
+> - **Satisfactory + Hybrid + Modular proxy-deploy scanner** (build 691-692, [e5e9782](https://github.com/bbfox0703/UE5CEDumper/commit/e5e9782)) — `ScanGameFolder` two-tier search (primary roots first, Engine\ as fallback only); handles all three observed UE shipping layouts (Monolithic / Hybrid / Pure modular) without phantom rows.
+> - **`walk_class_batch` pipe round-trip amortisation** (build 693-696, [deb837d](https://github.com/bbfox0703/UE5CEDumper/commit/deb837d) + namespace fix [568c757](https://github.com/bbfox0703/UE5CEDumper/commit/568c757)) — Full SDK Export + Dump All Metadata now batch in chunks of 200; estimated 2-5× wall-time speedup. Three-layer byte-equivalence guarantee: DLL loop-over-singles + shared JSON encoder/decoder + `WalkClassBatchEquivalenceTests.cs` 250-class fixture run through happy-path AND forced-fallback stubs.
+> - **GWorld 29/29 (100%)** ([2ccfd05](https://github.com/bbfox0703/UE5CEDumper/commit/2ccfd05)) — Star Wars Jedi: Fallen Order verified (UE 4.21, GWorld=0x7FF7317EBAB8, EA-launcher with proxy-DLL block — CE injection required). Satisfactory roadmap note corrected (scan was already working since the build-509 SIMD scanner rewrite).
+> - **17-game corpus bias recheck + analyzer hint sync** ([4f50ea0](https://github.com/bbfox0703/UE5CEDumper/commit/4f50ea0)) — Python analyzer's `CHEAT_KEYWORD_HINTS` had silently drifted from `PropertyScoringTable.cs`, hallucinating "uncategorised candidates" for already-shipped build-678 keywords. Synced. Bias verdict: tables stable, no additions warranted from Star Wars Jedi + Ghostwire: Tokyo (both reinforced existing patterns rather than surfacing new ones).
+>
+> Tests: 790 → **817 C#** (+27 across the session), DLL self-tests 62 + 31 = 93 unchanged. Total **910**.
 >
 > Proposal B (per-row "similar BP-added properties" side panel) **explicitly deferred** —
 > B' is shipped and proves the broad-sweep approach works; B's anchor-driven panel adds
@@ -565,22 +568,34 @@ returns the decoded Lua string instead of a number. Optional v2.
 >
 > Suggested next-session starters (pick one):
 >
-> 1. **More dumps for genre coverage** — 15-game corpus is heavy on JRPG/sim/ARPG.
->    Adding MMO / fighting / horror / RTS would calibrate further. Use the existing
->    pipeline; no code changes needed unless a new class-rule emerges. **S effort**.
-> 2. ~~**Fix the same BPGC-filter bug in `SdkExportService`**~~ — **shipped build 690**.
->    Now calls `DumpAllService.IsClassLikeMetaName` directly; regression test
->    `GenerateFullSdkAsync_AcceptsAllClassLikeMetasAndScriptStruct` locks the contract.
-> 3. ~~**Multi-module GWorld scan for Satisfactory**~~ — **shipped build 691**.
->    Real bug was the UI proxy-deploy scanner skipping `Engine\Binaries\Win64\`
->    (where modular UE builds put their launcher); scan-side was already working.
-> 4. **Class Family Browser (Proposal C)** — bucketed view of game classes by inferred
->    role (Character / Pawn / Inventory / Stats / Save / etc.). Genuine
->    "where do I start exploring a new game?" entry point. **L effort, needs own
->    planning round.**
+> 1. **More dumps for genre coverage** — 17-game corpus is heavy on JRPG/sim/ARPG/
+>    action-adventure/sandbox; the Star Wars Jedi + GWT adds (build 4f50ea0)
+>    reinforced existing patterns without surfacing new ones. **Adding MMO /
+>    fighting / RTS / sports-sim / horror-pure** would be the only thing that
+>    moves the calibration needle further. Use existing pipeline; no code change
+>    unless a new class-rule emerges. **S effort, user-driven**.
+> 2. **`walk_functions_batch` follow-up** — sister to the build-696
+>    `walk_class_batch`. `DumpAllService` still does `WalkFunctionsAsync` once
+>    per emitted class (`IncludeFunctions=true` is default). Same trivial-loop
+>    pattern, same byte-equivalence safety net machinery already in place.
+>    Smaller win than walk_class_batch on its own (Dump All only) — skip unless
+>    profiling shows it as the new bottleneck. **S effort**.
+> 3. **FString / FText / TArray input for baked AA Script** (open since build
+>    643-644 ES2 verification) — `KismetSystemLibrary::PrintString` is the
+>    obvious observable-side-effect verification target but currently unreachable
+>    because the helper's `writeBakedParams` only handles scalar inputs. Needs
+>    CE-side alloc + FString header write + free dance. See
+>    [Call-UE-function feature gaps](#fstring--ftext--tarray-input-support-in-baked-aa-script).
+>    **M effort, med risk**.
+> 4. **Class Family Browser (Proposal C)** — bucketed view of game classes by
+>    inferred role (Character / Pawn / Inventory / Stats / Save / etc.). Genuine
+>    "where do I start exploring a new game?" entry point. The 17-game dump
+>    corpus would feed the heuristic-classification clustering work. **L effort,
+>    needs own planning round**.
 > 5. **Runtime `keywords.json` override** — let users customise scoring tables
->    without recompiling. Discussed during the anti-bias conversation; not yet built.
->    Source-generated JSON serializer for AOT compat. **M effort**.
+>    without recompiling. Discussed during the anti-bias conversation; not yet
+>    built. Source-generated JSON serializer for AOT compat. **M effort, only
+>    if a user asks**.
 
 ### Proposal B — DEFERRED (build 689)
 
