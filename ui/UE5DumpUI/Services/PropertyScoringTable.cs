@@ -65,6 +65,12 @@ public static class PropertyScoringTable
         "HP", "Hp", "Health", "MP", "Mana", "SP", "Stamina", "Energy",
         // Experience / level
         "XP", "Exp", "Experience", "Level", "Lv", "Lvl",
+        // Alive / dead state — IsDead / bIsAlive are very common BP-added
+        // boolean cheat targets on character classes. Tokeniser produces
+        // ["is","dead"] from "IsDead" so include both forms; "Dead" /
+        // "Alive" alone catch property names like "bIsDead" -> ["b","is",
+        // "dead"].
+        "Dead", "IsDead", "Alive", "IsAlive",
         // General resource bars / regeneration
         "Regen", "Regenerate", "Max",  // "Max" is per-token; only fires on
                                         // "MaxHealth"/"MaxStamina"/etc, not
@@ -81,6 +87,8 @@ public static class PropertyScoringTable
         "Crit", "Critical", "CritRate", "CritDamage",
         // Attack / multiplier knobs
         "Attack", "Atk", "Multiplier",
+        // Weapon-related fields (loadout pointers, weapon stats)
+        "Weapon", "Hit", "HitDamage",
     };
 
     public const int ResourcesKeywordScore = 4;
@@ -244,9 +252,10 @@ public static class PropertyScoringTable
     {
         // Stats
         "HP", "Health", "Mana", "Stamina", "Energy", "Level", "Experience",
-        "Max",
+        "Max", "Dead", "Alive",
         // Combat
         "Damage", "Defense", "Armor", "Crit", "Attack", "Multiplier",
+        "Weapon", "Hit",
         // Resources
         "Gold", "Coin", "Money", "Gem", "Ammo", "Stack", "Count",
         // Movement

@@ -2222,6 +2222,26 @@ std::vector<ReferenceMatch> FindReferencesToUObject(uintptr_t target,
 
 // === Property Keyword Search ===
 
+// Identify "class-like" metas. UClass instances have meta-class name "Class",
+// but UE has several UClass subclasses whose own meta is a different string:
+//   * Class                           — regular C++ UClass
+//   * BlueprintGeneratedClass         — every BP-derived class (most games)
+//   * AnimBlueprintGeneratedClass     — Anim BP-derived classes
+//   * WidgetBlueprintGeneratedClass   — UMG widget BP-derived classes
+//   * DynamicClass                    — Shipping cooked dynamic classes
+// Before this whitelist, SearchProperties / ListClasses / EnumerateAllFunctions
+// matched only "Class" and silently dropped every game-specific BPGC — which
+// is where 90%+ of game-specific Health / Damage / Gold properties live. The
+// user's TowerOfMask repro: `SearchProperties 'Health': 0 matches` despite
+// `Health @ AnimMan_Player_C` clearly existing in the Class Struct view.
+static bool IsClassLikeMeta(const std::string& metaClassName) {
+    return metaClassName == "Class"
+        || metaClassName == "BlueprintGeneratedClass"
+        || metaClassName == "AnimBlueprintGeneratedClass"
+        || metaClassName == "WidgetBlueprintGeneratedClass"
+        || metaClassName == "DynamicClass";
+}
+
 // Engine packages to skip when gameOnly is true
 static bool IsEnginePackage(const std::string& path) {
     static const char* kEnginePrefixes[] = {
@@ -2389,7 +2409,10 @@ PropertySearchResult SearchProperties(
         uintptr_t obj = GetByIndex(i);
         if (!obj) continue;
 
-        // Check if this object IS a UClass (its class name == "Class")
+        // Identify class-like objects (UClass + BlueprintGeneratedClass +
+        // variants). See IsClassLikeMeta for why "== Class" alone is too
+        // strict — it drops every BPGC and breaks property search on
+        // game-specific BP fields.
         uintptr_t cls = 0;
         if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
 
@@ -2397,9 +2420,9 @@ PropertySearchResult SearchProperties(
         if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx)) continue;
 
         std::string metaClassName = Serie::GetString(clsNameIdx);
-        if (metaClassName != "Class") continue;
+        if (!IsClassLikeMeta(metaClassName)) continue;
 
-        // This object is a UClass. Skip if already visited.
+        // This object is a class. Skip if already visited.
         if (!visitedClasses.insert(obj).second) continue;
 
         // Get class path for game_only filter
@@ -2668,7 +2691,9 @@ ClassListResult ListClasses(bool gameOnly, int maxResults) {
         uintptr_t obj = GetByIndex(i);
         if (!obj) continue;
 
-        // Check if this object IS a UClass (its class name == "Class")
+        // Identify class-like objects (UClass + BPGC variants); see
+        // IsClassLikeMeta for the rationale on accepting more than just
+        // "Class".
         uintptr_t cls = 0;
         if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
 
@@ -2676,7 +2701,7 @@ ClassListResult ListClasses(bool gameOnly, int maxResults) {
         if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx)) continue;
 
         std::string metaClassName = Serie::GetString(clsNameIdx);
-        if (metaClassName != "Class") continue;
+        if (!IsClassLikeMeta(metaClassName)) continue;
 
         // Skip if already visited
         if (!visitedClasses.insert(obj).second) continue;
@@ -2740,8 +2765,8 @@ AllFunctionsResult EnumerateAllFunctions(bool gameOnly, int maxEntries) {
         uintptr_t obj = GetByIndex(i);
         if (!obj) continue;
 
-        // Identify UClass by checking metaclass-name == "Class"
-        // (same trick SearchProperties + ListClasses use).
+        // Identify class-like object (UClass + BPGC variants) via
+        // IsClassLikeMeta — same helper SearchProperties + ListClasses use.
         uintptr_t cls = 0;
         if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
 
@@ -2749,7 +2774,7 @@ AllFunctionsResult EnumerateAllFunctions(bool gameOnly, int maxEntries) {
         if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx)) continue;
 
         std::string metaClassName = Serie::GetString(clsNameIdx);
-        if (metaClassName != "Class") continue;
+        if (!IsClassLikeMeta(metaClassName)) continue;
 
         // Skip duplicates (same UClass can be referenced from multiple GObjects slots
         // when CDOs or hot-reload artefacts keep stale handles around).

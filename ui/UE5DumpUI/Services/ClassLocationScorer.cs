@@ -36,18 +36,40 @@ public static class ClassLocationScorer
         ("Pawn",              3),
         ("PlayerController",  3),
         ("PlayerState",       3),
+        // Generic "Player" — catches game-named classes like BP_Player_C,
+        // AnimMan_Player_C, MyPlayerStats, etc. that contain "Player" but
+        // not the more specific tokens above. Mild bonus (+2) since some
+        // false-positives (PlayerCameraManager) are still tolerable.
+        ("Player",            2),
         // Game-level systems
         ("GameMode",          2),
         ("GameInstance",      2),
         ("SaveGame",          2),
-        // Visual / audio / animation -- penalty
-        ("Anim",             -2),
-        ("Niagara",          -2),
-        ("Sound",            -2),
-        ("Audio",            -2),
-        ("UI",               -1),
-        ("Widget",           -1),
-        ("Particle",         -2),
+        // Visual / audio / animation -- penalty. SURGICAL compound names
+        // only: a bare "Anim" substring penalty false-positives on
+        // legitimate game-class prefixes like "AnimMan_Player_C" (a
+        // game's player character in TowerOfMask). The anim framework
+        // itself uses very specific compound class names; we list those
+        // explicitly so game classes that happen to begin with "Anim"
+        // are not punished.
+        ("AnimInstance",     -2),
+        ("AnimMontage",      -2),
+        ("AnimSequence",     -2),
+        ("AnimNotify",       -2),
+        ("AnimGraph",        -2),
+        ("AnimBlueprint",    -2),
+        ("AnimDataController", -2),
+        ("NiagaraSystem",    -2),
+        ("NiagaraEmitter",   -2),
+        ("NiagaraComponent", -2),
+        ("SoundCue",         -2),
+        ("SoundWave",        -2),
+        ("SoundBase",        -2),
+        ("AudioComponent",   -2),
+        ("ParticleSystem",   -2),
+        ("ParticleEmitter",  -2),
+        ("UserWidget",       -1),
+        ("WidgetComponent",  -1),
     };
 
     /// <summary>
@@ -93,6 +115,10 @@ public static class ClassLocationScorer
         new("AttributeSet",     3, false),
         new("Inventory",        3, false),
         new("Equipment",        3, false),
+        // Generic "Player" catches game-named classes like BP_Player_C,
+        // AnimMan_Player_C, MyPlayerStats, etc. that contain "Player" but
+        // not the more specific tokens above. Mild bonus (+2).
+        new("Player",           2, false),
         // Game-level
         new("GameMode",         2, false),
         new("GameInstance",     2, false),
@@ -113,17 +139,17 @@ public static class ClassLocationScorer
         // CheatManager subclasses (e.g. MyGameCheatMgr).
         new("CheatManager",         4, true),
 
-        // === Noise (visual / audio / FX containers) ===
-        new("Anim",             -2, false),
-        new("Niagara",          -2, false),
-        new("Sound",            -2, false),
-        new("Audio",            -2, false),
-        new("Particle",         -2, false),
-        new("Mesh",             -1, false),  // SkeletalMesh / StaticMesh — usually visuals,
-                                              // but mild penalty since some games stash
-                                              // damage modifiers on mesh component classes
-        new("UI",               -1, false),
-        new("Widget",           -1, false),
+        // No anim/audio/FX penalties on the Property side. Rationale:
+        // property NAMES alone already filter most noise (a property
+        // called "PlaybackSpeed" on UAudioComponent doesn't match any
+        // Stats / Combat / Resources keyword, so it naturally scores 0).
+        // The substring "Anim" / "Sound" / "Particle" penalty bit us hard
+        // in TowerOfMask: the game's player character class is named
+        // "AnimMan_Player_C" — a perfectly cheat-relevant target whose
+        // Health field was being filtered out because of the Anim penalty.
+        // The Function side keeps refined COMPOUND-name penalties for the
+        // function-flavoured noise (which would otherwise dominate);
+        // Property side doesn't have that problem and ships penalty-free.
     };
 
     /// <summary>

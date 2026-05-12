@@ -113,13 +113,15 @@ public class KeywordScoringTableTests
     // ==================================================================
 
     [Theory]
-    [InlineData("PlayerCharacter",       3)]
-    [InlineData("MyPawn_C",              3)]
-    [InlineData("MyPlayerController",    3)]
-    [InlineData("DerivedPlayerState",    3)]
+    [InlineData("PlayerCharacter",       5)]  // Player(+2) + Character(+3)
+    [InlineData("MyPawn_C",              3)]  // Pawn — no Player substring
+    [InlineData("MyPlayerController",    5)]  // PlayerController(+3) + Player(+2)
+    [InlineData("DerivedPlayerState",    5)]  // PlayerState(+3) + Player(+2)
     [InlineData("MyGameMode",            2)]
     [InlineData("CustomGameInstance",    2)]
     [InlineData("MySaveGame",            2)]
+    [InlineData("AnimMan_Player_C",      2)]  // Player(+2) only — no longer penalised
+                                              // for "Anim" prefix (build 671 TowerOfMask regression)
     [InlineData("RandomActor",           0)]
     public void Score_ClassBonus_AppliesPerSubstring(string className, int expectedBonus)
     {
@@ -129,10 +131,11 @@ public class KeywordScoringTableTests
     }
 
     [Theory]
-    [InlineData("AnimNotify_Character",  3 - 2)] // Character (+3) + Anim (-2) = +1 net
-    [InlineData("NiagaraSystemActor",    -2)]   // Niagara (-2)
-    [InlineData("HUDWidget",             -1)]   // Widget (-1)
-    [InlineData("MyUIPanel",             -1)]   // UI (-1)
+    [InlineData("AnimNotify_Character",  3 - 2)]      // Character(+3) + AnimNotify(-2)
+    [InlineData("UAnimInstance",         -2)]         // surgical AnimInstance penalty
+    [InlineData("NiagaraSystemActor",    -2)]         // NiagaraSystem(-2)
+    [InlineData("MyUserWidget",          -1)]         // UserWidget(-1)
+    [InlineData("MyHUDWidgetComponent",  -1)]         // WidgetComponent(-1)
     public void Score_ClassBonus_PenaltyAndBonusStack(string className, int expectedBonus)
     {
         var entry = MakeEntry("InertFunc", className);
@@ -221,8 +224,8 @@ public class KeywordScoringTableTests
         // No keyword hits -> Other regardless of class bonus.
         Assert.Equal(FunctionCategory.Other, result.Category);
         Assert.Equal(0, result.KeywordHits);
-        // But the score still reflects the bonuses (class +3, BC +2 = 5).
-        Assert.Equal(5, result.FinalScore);
+        // Bonuses: Player(+2) + Character(+3) + BlueprintCallable(+2) = 7.
+        Assert.Equal(7, result.FinalScore);
     }
 
     // ==================================================================

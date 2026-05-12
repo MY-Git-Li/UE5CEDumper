@@ -67,30 +67,32 @@ public class PropertyScoringTableTests
     // ==================================================================
 
     [Theory]
-    [InlineData("PlayerCharacter",       false, 3)]  // Expected — Character bonus
+    [InlineData("PlayerCharacter",       false, 5)]  // PlayerController?(no) + Player(+2) + Character(+3) — both stack
     [InlineData("AbilitySystemComponent",false, 3)]
     [InlineData("BP_Inventory_C",        false, 3)]
     [InlineData("MyGameMode",            false, 2)]  // game-level
-    [InlineData("LocalPlayer",           true,  4)]  // ⚠ Unusual
+    [InlineData("AnimMan_Player_C",      false, 2)]  // Player bonus only (no penalty for game-prefix "Anim")
+    [InlineData("BP_Player_C",           false, 2)]  // Generic "Player" rule
+    [InlineData("LocalPlayer",           true,  6)]  // LocalPlayer(+4 Unusual) + Player(+2)
     [InlineData("UGameViewportClient",   true,  4)]
     [InlineData("BP_HUD_C",              true,  4)]
-    [InlineData("UCheatManager",         true,  4)]  // matches both "UCheatManager" and "CheatManager"
-                                                       // -> 4 + 4 = 8 (validated separately in stacking test)
-    [InlineData("AnimMontage",           false, -2)] // animation noise
-    [InlineData("ParticleEmitter",       false, -2)]
     [InlineData("FoobarComponent",       false, 0)]  // no match
     public void PropertyBonus_ClassLocation(
         string className, bool expectedUnusual, int expectedBonus)
     {
         var (bonus, isUnusual) = ClassLocationScorer.PropertyBonus(className);
         Assert.Equal(expectedUnusual, isUnusual);
-        // For UCheatManager the substring matches BOTH rules so bonus stacks
-        // (4 + 4 = 8). Test that here as a tolerance match, since the
-        // contract is "sum stacked bonuses across all matches".
-        if (className == "UCheatManager")
-            Assert.Equal(8, bonus);
-        else
-            Assert.Equal(expectedBonus, bonus);
+        Assert.Equal(expectedBonus, bonus);
+    }
+
+    [Fact]
+    public void PropertyBonus_CheatManager_StacksRules()
+    {
+        // "UCheatManager" matches both "UCheatManager" (+4 Unusual) AND
+        // "CheatManager" (+4 Unusual) — bonuses stack to 8.
+        var (bonus, isUnusual) = ClassLocationScorer.PropertyBonus("UCheatManager");
+        Assert.True(isUnusual);
+        Assert.Equal(8, bonus);
     }
 
     [Fact]
@@ -113,9 +115,9 @@ public class PropertyScoringTableTests
         Assert.Equal(PropertyCategory.Stats, result.Category);
         Assert.True(result.IsUnusualLocation,
             "LocalPlayer should trigger Unusual Location flag");
-        // Stats keyword(5) + LocalPlayer class bonus(4) = 9, well above threshold(4)
-        Assert.True(result.FinalScore >= 8,
-            $"Expected score >= 8 (Health=5 + LocalPlayer=4), got {result.FinalScore}");
+        // Stats keyword(5) + LocalPlayer(+4) + Player(+2) = 11, well above threshold(4)
+        Assert.True(result.FinalScore >= 10,
+            $"Expected score >= 10 (Health=5 + LocalPlayer=4 + Player=2), got {result.FinalScore}");
     }
 
     [Fact]
@@ -130,19 +132,23 @@ public class PropertyScoringTableTests
     }
 
     [Fact]
-    public void Score_AnimPenaltyAppliesToProperties()
+    public void Score_HealthOnAnimManPlayerC_NotPenalised_UserRegressionCase()
     {
-        // Same stacking behaviour as Function side: a property called
-        // "Health" on "AnimCharacter" gets Character bonus(+3) + Anim
-        // penalty(-2) = +1, accurately reflecting that it's likely an
-        // animation-side mirror of a real Health field elsewhere.
-        var match = Make("Health", "AnimCharacter");
+        // TowerOfMask regression: the game's player character is named
+        // "AnimMan_Player_C" — substring "Anim" used to apply a -2 penalty
+        // which made `Health @ AnimMan_Player_C` score Stats(5) - Anim(2)
+        // = 3, below the threshold of 4 — so it never surfaced in the
+        // Interesting Properties list. With surgical compound-name
+        // penalties on the Function side and zero penalty on the Property
+        // side, AnimMan_Player_C gets only the Player(+2) bonus.
+        var match = Make("Health", "AnimMan_Player_C");
         var result = PropertyScoringTable.Score(match);
 
-        // Stats keyword(5) + classBonus(3 - 2 = 1) = 6
-        Assert.Equal(6, result.FinalScore);
-        Assert.Equal(1, result.ClassBonus);
+        Assert.Equal(PropertyCategory.Stats, result.Category);
         Assert.False(result.IsUnusualLocation);
+        // Stats(5) + Player(+2) = 7
+        Assert.Equal(7, result.FinalScore);
+        Assert.Equal(2, result.ClassBonus);
     }
 
     // ==================================================================
@@ -193,10 +199,11 @@ public class PropertyScoringTableTests
     // ==================================================================
 
     [Theory]
-    [InlineData("PlayerCharacter",  3)]
-    [InlineData("AnimMontage",     -2)]
+    [InlineData("PlayerCharacter",  5)]  // Player(+2) + Character(+3)
+    [InlineData("AnimMontage",     -2)]  // surgical AnimMontage penalty
+    [InlineData("AnimMan_Player_C", 2)]  // Player(+2) — no Anim penalty since
+                                         // it's not a compound anim-framework name
     [InlineData("GameMode",         2)]
-    [InlineData("AnimCharacter",    1)]   // Character(+3) + Anim(-2)
     [InlineData("FoobarComponent",  0)]
     public void FunctionBonus_PreservesExistingContract(string className, int expected)
     {
