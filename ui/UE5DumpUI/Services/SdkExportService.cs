@@ -56,7 +56,13 @@ public static class SdkExportService
 
             foreach (var obj in page.Objects)
             {
-                if (obj.ClassName is "Class" or "ScriptStruct")
+                // Mirrors the DLL-side `Aura::IsClassLikeMeta` whitelist
+                // (Class + BPGC variants + DynamicClass). A bare
+                // `ClassName == "Class"` check silently drops every
+                // BlueprintGeneratedClass — which is where 90%+ of
+                // game-specific cheat targets live. Same bug fixed in
+                // the DLL build 673; this is the C# mirror.
+                if (DumpAllService.IsClassLikeMetaName(obj.ClassName) || obj.ClassName == "ScriptStruct")
                     targets.Add((obj.Address, obj.Name, obj.ClassName));
             }
 
