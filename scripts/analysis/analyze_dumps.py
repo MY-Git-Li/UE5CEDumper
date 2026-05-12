@@ -281,14 +281,16 @@ TRIVIAL_TOKENS: frozenset[str] = frozenset({
 })
 
 
-def report_top_property_names(aggs: list[GameAggregates], top: int = 100) -> str:
+def report_top_property_names(aggs: list[GameAggregates], top: int = 100,
+                              min_games: int = 1) -> str:
     """Top OWN property names (definition-site frequency), with per-game
     breakdown.
 
-    "Total" counts the number of CLASSES that declare their own copy of
-    this name (not the inheritance-blown-up count). A name with
-    Total >= len(games) is likely a cross-game convention worth
-    adding to the scoring table.
+    "Classes" counts the number of distinct classes that declare their
+    own copy of this name; "Games" counts how many dumps had at least
+    one such declaration. Filter to min_games ≥ 3 to surface cross-game
+    conventions and drop single-game noise (e.g. TQ2's m_* C++ field
+    family dominates raw counts but says nothing about general patterns).
     """
     merged = Counter()
     per_game: dict[str, dict[str, int]] = defaultdict(dict)
@@ -299,27 +301,50 @@ def report_top_property_names(aggs: list[GameAggregates], top: int = 100) -> str
             per_game[name][agg.label] = cnt
 
     lines: list[str] = []
-    lines.append(f"# Top {top} OWN property names (definition site) across {len(aggs)} game(s)")
+    if min_games > 1:
+        title = (f"# Top {top} OWN property names (definition site) "
+                 f"— ≥ {min_games} games")
+    else:
+        title = f"# Top {top} OWN property names (definition site) across {len(aggs)} game(s)"
+    lines.append(title)
     lines.append("")
-    lines.append("Counts the number of distinct CLASSES that DECLARE their own copy "
-                 "of this name (inherited copies excluded). High Total + multiple "
-                 "games hit = strong cross-game convention.")
+    if min_games > 1:
+        lines.append(f"Filtered to names appearing in ≥ {min_games} games — drops "
+                     f"single-game spikes (e.g. one game with 500 of the same "
+                     f"name) so cross-game conventions stand out.")
+    else:
+        lines.append("Counts the number of distinct CLASSES that DECLARE their own copy "
+                     "of this name (inherited copies excluded). High Total + multiple "
+                     "games hit = strong cross-game convention.")
     lines.append("")
     lines.append("| Rank | Name | Classes | Games | Per game (label:N) |")
     lines.append("|---:|---|---:|---:|---|")
-    for rank, (name, total) in enumerate(merged.most_common(top), 1):
+    rank = 0
+    for name, total in merged.most_common():
         per = per_game[name]
         games_hit = len(per)
+        if games_hit < min_games:
+            continue
+        rank += 1
+        if rank > top:
+            break
         per_str = "; ".join(f"{lbl}:{n}" for lbl, n in sorted(per.items()))
         lines.append(f"| {rank} | `{name}` | {total} | {games_hit} | {per_str} |")
     return "\n".join(lines)
 
 
-def report_top_prop_tokens(aggs: list[GameAggregates], top: int = 60) -> str:
+def report_top_prop_tokens(aggs: list[GameAggregates], top: int = 60,
+                           min_games: int = 1) -> str:
     """Property TOKEN frequency on OWN properties only. Trivial tokens
     (b/c/on/is/...) are filtered out so candidate keywords stay
     visible. Cross-references existing categorisation so analyst sees
-    which tokens land outside the table."""
+    which tokens land outside the table.
+
+    When min_games > 1, drops tokens that appear in only a few dumps —
+    those are likely game-specific terminology (e.g. one game's
+    "uberGraph" or "m_pIconTexture") rather than cross-game patterns
+    worth seeding into the scoring table.
+    """
     merged = Counter()
     per_game: dict[str, set[str]] = defaultdict(set)
     for agg in aggs:
@@ -332,7 +357,10 @@ def report_top_prop_tokens(aggs: list[GameAggregates], top: int = 60) -> str:
             per_game[tok].add(agg.label)
 
     lines: list[str] = []
-    lines.append(f"# Top {top} OWN property TOKENS (candidate keywords)")
+    if min_games > 1:
+        lines.append(f"# Top {top} OWN property TOKENS (≥ {min_games} games)")
+    else:
+        lines.append(f"# Top {top} OWN property TOKENS (candidate keywords)")
     lines.append("")
     lines.append("Tokens of game-defined property names. Trivial tokens "
                  "(b/c/on/is/etc.) filtered. Cross-referenced against "
@@ -340,13 +368,21 @@ def report_top_prop_tokens(aggs: list[GameAggregates], top: int = 60) -> str:
     lines.append("")
     lines.append("| Rank | Token | Hits | Games | Existing category |")
     lines.append("|---:|---|---:|---:|---|")
-    for rank, (tok, hits) in enumerate(merged.most_common(top), 1):
+    rank = 0
+    for tok, hits in merged.most_common():
+        games = len(per_game[tok])
+        if games < min_games:
+            continue
+        rank += 1
+        if rank > top:
+            break
         cat = categorize_token(tok) or ""
-        lines.append(f"| {rank} | `{tok}` | {hits} | {len(per_game[tok])} | {cat} |")
+        lines.append(f"| {rank} | `{tok}` | {hits} | {games} | {cat} |")
     return "\n".join(lines)
 
 
-def report_unusual_locations(aggs: list[GameAggregates], min_count: int = 3) -> str:
+def report_unusual_locations(aggs: list[GameAggregates], min_count: int = 3,
+                             min_games: int = 1) -> str:
     """Class tokens hosting Stats/Combat/Resources tokens — flag the
     ones we DON'T have in the ClassLocationScorer table as candidates
     for the Unusual list (cheat-relevant property in a non-canonical
@@ -362,6 +398,7 @@ def report_unusual_locations(aggs: list[GameAggregates], min_count: int = 3) -> 
     cheat_tokens = set().union(*CHEAT_KEYWORD_HINTS.values())
 
     merged: Counter = Counter()
+    games_for_pair: dict[tuple[str, str], set[str]] = defaultdict(set)
     for agg in aggs:
         for (ct, pt), n in agg.class_x_prop.items():
             if pt not in cheat_tokens:
@@ -375,18 +412,24 @@ def report_unusual_locations(aggs: list[GameAggregates], min_count: int = 3) -> 
                 # to seed a class-bonus rule.
                 continue
             merged[(ct, pt)] += n
+            games_for_pair[(ct, pt)].add(agg.label)
 
     lines: list[str] = []
     lines.append(f"# Candidate 'Unusual Location' class tokens (host cheat-relevant properties, not yet in ClassLocationScorer)")
     lines.append("")
-    lines.append(f"Filter: ≥ {min_count} occurrences across all dumps.")
+    lines.append(f"Filter: ≥ {min_count} occurrences across all dumps; "
+                 f"appears in ≥ {min_games} game(s). Games column promotes "
+                 f"cross-game patterns over single-game spikes.")
     lines.append("")
-    lines.append("| Class token | Property token | Hits |")
-    lines.append("|---|---|---:|")
-    for (ct, pt), n in merged.most_common(200):
+    lines.append("| Class token | Property token | Hits | Games |")
+    lines.append("|---|---|---:|---:|")
+    for (ct, pt), n in merged.most_common(400):
         if n < min_count:
-            break
-        lines.append(f"| `{ct}` | `{pt}` | {n} |")
+            continue
+        games = len(games_for_pair[(ct, pt)])
+        if games < min_games:
+            continue
+        lines.append(f"| `{ct}` | `{pt}` | {n} | {games} |")
     return "\n".join(lines)
 
 
@@ -417,6 +460,11 @@ def main(argv: list[str] | None = None) -> int:
                    help="JSONL dump files (one per game)")
     p.add_argument("--top", type=int, default=100,
                    help="Top N rows in frequency tables (default 100)")
+    p.add_argument("--min-games", type=int, default=3,
+                   help="Minimum number of games a name/token/pair must appear in to "
+                        "be included in the cross-game sections (default 3). Single-"
+                        "game spikes (e.g. one game with 500x m_pIconTexture) are "
+                        "filtered out. Set to 1 to see everything.")
     p.add_argument("--include-engine", action="store_true",
                    help="Include engine /Script/* classes in aggregates")
     p.add_argument("--output", type=Path, default=Path("analysis-report.md"),
@@ -433,12 +481,21 @@ def main(argv: list[str] | None = None) -> int:
 
     aggs = [aggregate(d, game_only=not args.include_engine) for d in dumps]
 
-    report = "\n\n".join([
-        report_meta(aggs, dumps),
-        report_top_property_names(aggs, top=args.top),
-        report_top_prop_tokens(aggs, top=min(args.top, 60)),
-        report_unusual_locations(aggs),
-    ])
+    sections = [report_meta(aggs, dumps)]
+    if len(aggs) >= 2:
+        # Lead with cross-game sections — single-game spikes get filtered
+        # so the actionable signal surfaces immediately.
+        sections.append(report_top_property_names(aggs, top=args.top, min_games=args.min_games))
+        sections.append(report_top_prop_tokens(aggs, top=min(args.top, 60), min_games=args.min_games))
+        sections.append(report_unusual_locations(aggs, min_games=args.min_games))
+        # Follow with raw "all data" sections for completeness.
+        sections.append(report_top_property_names(aggs, top=args.top, min_games=1))
+        sections.append(report_top_prop_tokens(aggs, top=min(args.top, 60), min_games=1))
+    else:
+        sections.append(report_top_property_names(aggs, top=args.top))
+        sections.append(report_top_prop_tokens(aggs, top=min(args.top, 60)))
+        sections.append(report_unusual_locations(aggs))
+    report = "\n\n".join(sections)
     args.output.write_text(report, encoding="utf-8")
     print(f"[done] wrote {args.output} ({len(report):,} chars)")
     return 0

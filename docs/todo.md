@@ -741,10 +741,23 @@ unverified / failing titles.
 
 - **Star Wars Jedi: Survivor** (UE 4.27?): untested — needs an AOB
   sweep run + result triage
-- **Satisfactory** (UE 5.3, modular DLL build): GWorld scan fails on
-  the main exe. Pattern likely needs to live in
-  `CoreUObject-Win64-Shipping.dll`. Adapt `Genau::FindAll` to scan
-  multiple modules when the primary scan fails.
+- **Satisfactory** (UE 5.3, modular DLL build): two related issues,
+  both stemming from the same root — game splits CoreUObject into a
+  separate DLL rather than baking it into the main exe.
+  1. **Proxy DLL injection fails** (verified 2026-05-12, user feedback):
+     dropping version.dll / dinput8.dll into the install folder doesn't
+     attach. The game's loader or launcher bypasses normal proxy
+     hooking. **Workaround**: CE DLL injection (manual). This was good
+     enough for the 10-game dump-for-analysis run, but breaks the
+     proxy-deploy UX path entirely on Satisfactory.
+  2. **GWorld scan fails on the main exe**. Pattern likely lives in
+     `CoreUObject-Win64-Shipping.dll`. Adapt `Genau::FindAll` to scan
+     multiple modules when the primary scan fails.
+
+  **Effort**: M (multi-module scan in Genau) + investigate why proxy
+  DLL doesn't attach. Once attached via CE injection the rest works —
+  dump produced 4868 BPGCs cleanly, the biggest game-class count of
+  the analysis-corpus dataset.
 
 ### `kPublishers[]` table additions
 
