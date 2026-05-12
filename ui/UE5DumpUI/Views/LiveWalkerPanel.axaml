@@ -127,9 +127,9 @@
               IsVisible="{Binding HasData}"
               ToolTip.Tip="{StaticResource str.Tip.LiveWalker.ExportCE}"
               Padding="8,4"/>
-      <Button Content="{StaticResource str.LiveWalker.ExportCEField}"
+      <Button Content="{Binding ExportCeFieldButtonLabel}"
               Command="{Binding ExportCeFieldXmlCommand}"
-              IsVisible="{Binding SelectedField, Converter={x:Static ObjectConverters.IsNotNull}}"
+              IsVisible="{Binding HasSelectedFields}"
               ToolTip.Tip="{StaticResource str.Tip.LiveWalker.ExportCEField}"
               Padding="8,4"/>
       <CheckBox Content="{StaticResource str.LiveWalker.AobToggle}"
@@ -335,7 +335,7 @@
     <DataGrid x:Name="FieldGrid"
               ItemsSource="{Binding Fields}"
               SelectedItem="{Binding SelectedField}"
-              SelectionMode="Single"
+              SelectionMode="Extended"
               IsReadOnly="False"
               CanUserResizeColumns="True"
               CanUserSortColumns="True"
@@ -346,7 +346,8 @@
               HorizontalScrollBarVisibility="Auto"
               LoadingRow="FieldGrid_LoadingRow"
               BeginningEdit="FieldGrid_BeginningEdit"
-              CellEditEnded="FieldGrid_CellEditEnded">
+              CellEditEnded="FieldGrid_CellEditEnded"
+              SelectionChanged="FieldGrid_SelectionChanged">
       <DataGrid.Columns>
         <DataGridTextColumn Header="{StaticResource str.ClassStruct.Offset}"
                             Binding="{Binding Offset, StringFormat='0x{0:X}'}"

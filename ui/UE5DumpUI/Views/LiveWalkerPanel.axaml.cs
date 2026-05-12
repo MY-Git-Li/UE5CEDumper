@@ -129,6 +129,18 @@ public partial class LiveWalkerPanel : UserControl
     private static readonly IBrush GuessedForeground = new SolidColorBrush(Color.Parse("#666666"));
     private static readonly IBrush NormalForeground = new SolidColorBrush(Color.Parse("#D4D4D4"));
 
+    // Sync the DataGrid's multi-selection into the ViewModel snapshot.
+    // Avalonia's DataGrid.SelectedItems is read-only, so we push it into
+    // the VM here whenever the selection changes. The Copy CE Field(s)
+    // export command reads this snapshot when invoked.
+    private void FieldGrid_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is DataGrid grid && DataContext is LiveWalkerViewModel vm)
+        {
+            vm.UpdateSelectedFields(grid.SelectedItems);
+        }
+    }
+
     private void FieldGrid_LoadingRow(object? sender, DataGridRowEventArgs e)
     {
         if (e.Row.DataContext is LiveFieldValue field)
