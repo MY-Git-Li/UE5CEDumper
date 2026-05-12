@@ -14,14 +14,14 @@
     <sys:String x:Key="str.Toolbar.CsxDepth">Drill Depth:</sys:String>
 
     <!-- Tabs -->
-    <sys:String x:Key="str.Tab.ClassStruct">Class Structure</sys:String>
+    <sys:String x:Key="str.Tab.ClassStruct">Class Struct</sys:String>
     <sys:String x:Key="str.Tab.Pointers">System</sys:String>
     <sys:String x:Key="str.Tab.ProxyDeploy">Proxy Deploy</sys:String>
     <sys:String x:Key="str.Tab.LiveWalker">Live Walker</sys:String>
-    <sys:String x:Key="str.Tab.InstanceFinder">Instance Finder</sys:String>
-    <sys:String x:Key="str.Tab.PropertySearch">Property Search</sys:String>
+    <sys:String x:Key="str.Tab.InstanceFinder">Instances</sys:String>
+    <sys:String x:Key="str.Tab.PropertySearch">Properties</sys:String>
     <sys:String x:Key="str.Tab.InterestingFunctions">Interesting Funcs</sys:String>
-    <sys:String x:Key="str.Tab.GameClassFilter">Game Classes</sys:String>
+    <sys:String x:Key="str.Tab.GameClassFilter">Classes</sys:String>
 
     <!-- Object Tree -->
     <sys:String x:Key="str.ObjectTree.Title">Object Tree</sys:String>
@@ -202,6 +202,7 @@
     <sys:String x:Key="str.ProxyDeploy.ColError">Error</sys:String>
 
     <!-- Export -->
+    <sys:String x:Key="str.Toolbar.Options">⚙ Options</sys:String>
     <sys:String x:Key="str.Toolbar.Export">Export</sys:String>
     <sys:String x:Key="str.Export.SymbolsX64dbg">Symbols (x64dbg .dd64)</sys:String>
     <sys:String x:Key="str.Export.SymbolsGhidra">Symbols (Ghidra .txt)</sys:String>
@@ -251,7 +252,7 @@
     <sys:String x:Key="str.Tip.IF.Filter">Substring match against function name OR class name (case-insensitive). e.g. "Money" or "PlayerCharacter".</sys:String>
     <sys:String x:Key="str.Tip.IF.Category">Filter by category. Categories are picked from the strongest-scoring keyword bucket per function (Stats &gt; Inventory &gt; Movement &gt; Combat &gt; Utility tied with same score).</sys:String>
     <sys:String x:Key="str.Tip.IF.ShowAll">When off, hide rows with score below the InterestingThreshold (currently 5). When on, show every UFunction regardless of score.</sys:String>
-    <sys:String x:Key="str.Tip.IF.OpenLive">Try to open this function in Live Walker. If the class has no live (non-CDO) instance, falls back to the Class Structure tab. Auto-expands the Functions section and selects the target row.</sys:String>
+    <sys:String x:Key="str.Tip.IF.OpenLive">Try to open this function in Live Walker. If the class has no live (non-CDO) instance, falls back to the Class Struct tab. Auto-expands the Functions section and selects the target row.</sys:String>
     <sys:String x:Key="str.Tip.IF.CopyAaScript">Open the Copy AA Script (Baked) dialog for this function. Output requires ue5_invoke_helper.lua embedded in your CE table (Tools -&gt; Export CE Helper Lua File...).</sys:String>
     <sys:String x:Key="str.Tip.IF.CopyName">Copy this function's name to the clipboard. Useful when pasting into a CE script or another tool.</sys:String>
 
@@ -274,6 +275,7 @@
     <sys:String x:Key="str.Tip.DropDownLimit">Max CE DropDownList entries (2^N)</sys:String>
     <sys:String x:Key="str.Tip.PreviewLimit">Struct sub-fields shown in Value column (0 = no preview)</sys:String>
     <sys:String x:Key="str.Tip.CsxDepth">Pointer drill-down depth (0 = flat). Applies to both CSX export and CE XML / CE Field copy. 0-4 normal; 5-6 deep — output size grows exponentially per level (depth 6 on UWorld can produce multi-MB CE XML).</sys:String>
+    <sys:String x:Key="str.Tip.Toolbar.Options">Export-shape settings: pointer-node collapse, array/dropdown/preview limits, drill depth. Set once per session.</sys:String>
     <sys:String x:Key="str.Tip.Export">Export object data in various formats</sys:String>
     <sys:String x:Key="str.Tip.Tools">Tools that don't depend on a live DLL connection (helper file export/inject, etc.)</sys:String>
     <sys:String x:Key="str.Tip.Tools.InjectCeHelperLua">One-click: send ue5_invoke_helper.lua straight into the currently open CE table via the AOBMaker plugin. Replaces existing copy if present. Skips the manual save-to-disk + Table -&gt; Add File... dance. Requires the AOBMaker CE Plugin to be loaded (open Cheat Engine first); falls back gracefully if unavailable.</sys:String>

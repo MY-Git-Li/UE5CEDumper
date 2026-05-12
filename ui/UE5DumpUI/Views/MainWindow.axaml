@@ -34,13 +34,22 @@
                   ToolTip.Tip="{StaticResource str.Tip.StartScan}"
                   Classes="accent" Padding="12,4"
                   FontWeight="Bold"/>
+          <!-- Status: capped width + ellipsis + tooltip so long messages
+               (e.g. "Navigated to FooComponent::GetBar (live instance 0x…)")
+               don't push the rest of the toolbar off-screen and wrap. -->
           <TextBlock Text="{Binding StatusText}"
                      Foreground="#4EC9B0"
                      VerticalAlignment="Center"
-                     Margin="4,0"/>
+                     Margin="4,0"
+                     MaxWidth="360"
+                     TextTrimming="CharacterEllipsis"
+                     ToolTip.Tip="{Binding StatusText}"/>
           <TextBlock Text="{Binding ErrorMessage}"
                      Foreground="#F44747"
                      VerticalAlignment="Center"
+                     MaxWidth="360"
+                     TextTrimming="CharacterEllipsis"
+                     ToolTip.Tip="{Binding ErrorMessage}"
                      IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
         </StackPanel>
 
@@ -57,85 +66,100 @@
                     VerticalAlignment="Center"/>
         </StackPanel>
 
-        <!-- CE XML collapse toggle -->
-        <CheckBox Content="{StaticResource str.Toolbar.CollapsePointers}"
-                  IsChecked="{Binding CollapsePointerNodes}"
-                  ToolTip.Tip="{StaticResource str.Tip.CollapsePointers}"
-                  Foreground="#CCCCCC" FontSize="12"
-                  VerticalAlignment="Center" Margin="8,2"/>
+        <!-- Options popover (⚙):
+             Collapses 5 export-shape controls (Collapse Pointers + 4 slider
+             limits) into a single dropdown to keep the top toolbar on one
+             row even at 4K / 225% scaling. These are tuned once per export
+             session, not flipped frequently, so hiding them behind a click
+             trades zero ergonomic cost for ~600px of horizontal space. -->
+        <Border Margin="8,2" VerticalAlignment="Center">
+          <DropDownButton Content="{StaticResource str.Toolbar.Options}"
+                          ToolTip.Tip="{StaticResource str.Tip.Toolbar.Options}"
+                          Padding="8,3" FontSize="12">
+            <DropDownButton.Flyout>
+              <Flyout Placement="Bottom">
+                <StackPanel Spacing="10" Width="380" Margin="6">
+                  <!-- CE XML collapse toggle -->
+                  <CheckBox Content="{StaticResource str.Toolbar.CollapsePointers}"
+                            IsChecked="{Binding CollapsePointerNodes}"
+                            ToolTip.Tip="{StaticResource str.Tip.CollapsePointers}"
+                            Foreground="#CCCCCC" FontSize="12"/>
 
-        <!-- Array Limit slider group -->
-        <StackPanel Orientation="Horizontal" Spacing="4"
-                    VerticalAlignment="Center" Margin="8,2">
-          <TextBlock Text="{StaticResource str.Toolbar.ArrayLimit}"
-                     Foreground="#CCCCCC" FontSize="12"
-                     VerticalAlignment="Center"/>
-          <Slider Value="{Binding ArrayLimitExponent}"
-                  Minimum="1" Maximum="14"
-                  TickFrequency="1" IsSnapToTickEnabled="True"
-                  Width="140"
-                  ToolTip.Tip="{StaticResource str.Tip.ArrayLimit}"
-                  VerticalAlignment="Center"/>
-          <TextBlock Text="{Binding ArrayLimit}"
-                     Foreground="#D4D4D4" FontSize="12" FontWeight="Bold"
-                     VerticalAlignment="Center" MinWidth="35"/>
-          <TextBlock Text="{StaticResource str.Toolbar.ArrayLimitWarn}"
-                     Foreground="#F4A747" FontSize="11"
-                     VerticalAlignment="Center"
-                     IsVisible="{Binding ShowArrayLimitWarning}"/>
-        </StackPanel>
+                  <Separator Background="#3C3C3C" Height="1"/>
 
-        <!-- DropDown Limit slider group -->
-        <StackPanel Orientation="Horizontal" Spacing="4"
-                    VerticalAlignment="Center" Margin="8,2">
-          <TextBlock Text="{StaticResource str.Toolbar.DropDownLimit}"
-                     Foreground="#CCCCCC" FontSize="12"
-                     VerticalAlignment="Center"/>
-          <Slider Value="{Binding DropDownLimitExponent}"
-                  Minimum="6" Maximum="13"
-                  TickFrequency="1" IsSnapToTickEnabled="True"
-                  Width="100"
-                  ToolTip.Tip="{StaticResource str.Tip.DropDownLimit}"
-                  VerticalAlignment="Center"/>
-          <TextBlock Text="{Binding DropDownLimit}"
-                     Foreground="#D4D4D4" FontSize="12" FontWeight="Bold"
-                     VerticalAlignment="Center" MinWidth="35"/>
-        </StackPanel>
+                  <!-- Array Limit -->
+                  <StackPanel Spacing="2">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="{StaticResource str.Toolbar.ArrayLimit}"
+                                 Foreground="#CCCCCC" FontSize="12"
+                                 VerticalAlignment="Center"/>
+                      <TextBlock Text="{Binding ArrayLimit}"
+                                 Foreground="#D4D4D4" FontSize="12" FontWeight="Bold"
+                                 VerticalAlignment="Center" MinWidth="40"/>
+                      <TextBlock Text="{StaticResource str.Toolbar.ArrayLimitWarn}"
+                                 Foreground="#F4A747" FontSize="11"
+                                 VerticalAlignment="Center"
+                                 IsVisible="{Binding ShowArrayLimitWarning}"/>
+                    </StackPanel>
+                    <Slider Value="{Binding ArrayLimitExponent}"
+                            Minimum="1" Maximum="14"
+                            TickFrequency="1" IsSnapToTickEnabled="True"
+                            ToolTip.Tip="{StaticResource str.Tip.ArrayLimit}"/>
+                  </StackPanel>
 
-        <!-- Preview limit slider group -->
-        <StackPanel Orientation="Horizontal" Spacing="4"
-                    VerticalAlignment="Center" Margin="8,2">
-          <TextBlock Text="{StaticResource str.Toolbar.PreviewLimit}"
-                     Foreground="#CCCCCC" FontSize="12"
-                     VerticalAlignment="Center"/>
-          <Slider Value="{Binding PreviewLimit}"
-                  Minimum="0" Maximum="6"
-                  TickFrequency="1" IsSnapToTickEnabled="True"
-                  Width="100"
-                  ToolTip.Tip="{StaticResource str.Tip.PreviewLimit}"
-                  VerticalAlignment="Center"/>
-          <TextBlock Text="{Binding PreviewLimit}"
-                     Foreground="#D4D4D4" FontSize="12" FontWeight="Bold"
-                     VerticalAlignment="Center" MinWidth="15"/>
-        </StackPanel>
+                  <!-- DropDown Limit -->
+                  <StackPanel Spacing="2">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="{StaticResource str.Toolbar.DropDownLimit}"
+                                 Foreground="#CCCCCC" FontSize="12"
+                                 VerticalAlignment="Center"/>
+                      <TextBlock Text="{Binding DropDownLimit}"
+                                 Foreground="#D4D4D4" FontSize="12" FontWeight="Bold"
+                                 VerticalAlignment="Center" MinWidth="40"/>
+                    </StackPanel>
+                    <Slider Value="{Binding DropDownLimitExponent}"
+                            Minimum="6" Maximum="13"
+                            TickFrequency="1" IsSnapToTickEnabled="True"
+                            ToolTip.Tip="{StaticResource str.Tip.DropDownLimit}"/>
+                  </StackPanel>
 
-        <!-- CSX Depth slider group -->
-        <StackPanel Orientation="Horizontal" Spacing="4"
-                    VerticalAlignment="Center" Margin="8,2">
-          <TextBlock Text="{StaticResource str.Toolbar.CsxDepth}"
-                     Foreground="#CCCCCC" FontSize="12"
-                     VerticalAlignment="Center"/>
-          <Slider Value="{Binding CsxDrilldownDepth}"
-                  Minimum="0" Maximum="6"
-                  TickFrequency="1" IsSnapToTickEnabled="True"
-                  Width="100"
-                  ToolTip.Tip="{StaticResource str.Tip.CsxDepth}"
-                  VerticalAlignment="Center"/>
-          <TextBlock Text="{Binding CsxDrilldownDepth}"
-                     Foreground="{Binding CsxDrilldownDepthBrush}"
-                     FontSize="12" FontWeight="Bold"
-                     VerticalAlignment="Center" MinWidth="15"/>
-        </StackPanel>
+                  <!-- Preview limit -->
+                  <StackPanel Spacing="2">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="{StaticResource str.Toolbar.PreviewLimit}"
+                                 Foreground="#CCCCCC" FontSize="12"
+                                 VerticalAlignment="Center"/>
+                      <TextBlock Text="{Binding PreviewLimit}"
+                                 Foreground="#D4D4D4" FontSize="12" FontWeight="Bold"
+                                 VerticalAlignment="Center" MinWidth="20"/>
+                    </StackPanel>
+                    <Slider Value="{Binding PreviewLimit}"
+                            Minimum="0" Maximum="6"
+                            TickFrequency="1" IsSnapToTickEnabled="True"
+                            ToolTip.Tip="{StaticResource str.Tip.PreviewLimit}"/>
+                  </StackPanel>
+
+                  <!-- CSX Drill Depth -->
+                  <StackPanel Spacing="2">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="{StaticResource str.Toolbar.CsxDepth}"
+                                 Foreground="#CCCCCC" FontSize="12"
+                                 VerticalAlignment="Center"/>
+                      <TextBlock Text="{Binding CsxDrilldownDepth}"
+                                 Foreground="{Binding CsxDrilldownDepthBrush}"
+                                 FontSize="12" FontWeight="Bold"
+                                 VerticalAlignment="Center" MinWidth="20"/>
+                    </StackPanel>
+                    <Slider Value="{Binding CsxDrilldownDepth}"
+                            Minimum="0" Maximum="6"
+                            TickFrequency="1" IsSnapToTickEnabled="True"
+                            ToolTip.Tip="{StaticResource str.Tip.CsxDepth}"/>
+                  </StackPanel>
+                </StackPanel>
+              </Flyout>
+            </DropDownButton.Flyout>
+          </DropDownButton>
+        </Border>
 
         <!-- Export dropdown -->
         <Border Margin="8,2" VerticalAlignment="Center"
