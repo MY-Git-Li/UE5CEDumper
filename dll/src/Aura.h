@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "Ubel.h"   // For Ubel::ClassInfo used by WalkClassesBatch
+#include "Ubel.h"   // For ::ClassInfo (defined at global scope in Ubel.h, despite the filename) used by WalkClassesBatch
 
 // FUObjectItem structure (in FChunkedFixedUObjectArray)
 // Size varies by UE version — auto-detected at Init() time:
@@ -340,7 +340,9 @@ std::vector<PropertySearchResult> SearchPropertiesBatch(
 // Caller is responsible for chunking — a single batch carrying
 // thousands of fully-walked classes would produce a multi-megabyte
 // JSON payload, so the UI side fans out in ~200-class chunks.
-std::vector<Ubel::ClassInfo> WalkClassesBatch(const std::vector<uintptr_t>& addrs);
+// Note: ClassInfo is defined at global scope in Ubel.h (not inside the
+// Ubel namespace), so the unqualified name is correct here.
+std::vector<ClassInfo> WalkClassesBatch(const std::vector<uintptr_t>& addrs);
 
 // Walk the SuperStruct chain upward from `classAddr` and return the
 // highest-up class that still declares a property at `fieldOffset`.

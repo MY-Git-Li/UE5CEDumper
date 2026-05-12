@@ -2840,15 +2840,17 @@ std::vector<PropertySearchResult> SearchPropertiesBatch(
 //
 // Caller chunks the request (~200 addrs per call) to keep response
 // payloads bounded and progress feedback live.
-std::vector<Ubel::ClassInfo> WalkClassesBatch(const std::vector<uintptr_t>& addrs)
+std::vector<ClassInfo> WalkClassesBatch(const std::vector<uintptr_t>& addrs)
 {
     auto t0 = std::chrono::high_resolution_clock::now();
-    std::vector<Ubel::ClassInfo> out;
+    std::vector<ClassInfo> out;
     out.reserve(addrs.size());
 
     int emptyCount = 0;
     for (uintptr_t addr : addrs) {
-        Ubel::ClassInfo ci = Ubel::WalkClassEx(addr);
+        // ClassInfo lives at global scope (see Ubel.h), but the
+        // WalkClassEx function lives inside namespace Ubel.
+        ClassInfo ci = Ubel::WalkClassEx(addr);
         if (ci.Fields.empty()) ++emptyCount;
         out.push_back(std::move(ci));
     }
