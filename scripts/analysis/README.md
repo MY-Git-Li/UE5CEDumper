@@ -76,12 +76,45 @@ signatures — UE reflection metadata. It does **not** contain:
 
 Safe to share publicly for analysis purposes.
 
+## Anti-bias: when the default keyword tables don't fit your games
+
+The keyword tables shipped in `PropertyScoringTable.cs` and
+`ClassLocationScorer.cs` are calibrated from a specific 15-game corpus
+(JRPG / sim / action mix — see [docs/dev-log.md](../../docs/dev-log.md)
+build 678 entry for the actual list and findings). If you play
+games whose dominant genres aren't well represented (FPS, MMO,
+racing, fighting, horror), you'll likely see false-negatives — real
+cheat targets that don't surface in the Interesting Properties tab.
+
+**The recommended fix is data-driven, not opinion-driven:**
+
+1. Dump 3-5 games from your preferred genres
+   (Export → Dump All Metadata).
+2. Run `python analyze_dumps.py your-dumps/*.jsonl`.
+3. Look at the **Top OWN property TOKENS (≥ 3 games)** section —
+   tokens appearing across multiple of YOUR games but not in the
+   existing category column are candidates the default table missed.
+4. PR your additions to `PropertyScoringTable.cs`. Include the analysis
+   output as evidence (`x games / y hits`).
+
+This is how the build 678 additions
+(effect / target / radius / ability / modifier / duration / item /
+Weapon / Projectile / Battle) landed in the first place. The keyword
+table grows by empirical contribution, not curator guesswork.
+
+**If you really don't want to compile**: fork the repo, edit the
+arrays in the two files, run `build.ps1 -Target UI` — that's the
+entire change loop. ~10 minutes once the build env is set up. A
+"runtime keywords.json" override is on the wishlist (see todo.md)
+but not yet implemented.
+
 ## Future expansions
 
+- Runtime `keywords.json` override so users can customise without
+  rebuilding. AOT-compatible JSON source-generator pattern.
 - Compare two dumps from the same game across patches — surface field
   layout changes.
-- Diff scoring table outputs across games to validate calibration.
 - Cluster classes by property-name set similarity — surface
   "Inventory-like" classes that don't follow the naming convention.
 
-These aren't built yet; PRs welcome.
+PRs welcome.

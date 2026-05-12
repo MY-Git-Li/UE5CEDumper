@@ -125,6 +125,16 @@ public static class ClassLocationScorer
         new("SaveGame",         2, false),
         new("PlayerProfile",    2, false),
 
+        // === Added build 678 — derived from 15-game cross-game dump
+        // analysis. Each token confirmed as host for cheat-relevant
+        // properties in ≥ 4 of 15 games (see scripts/analysis/
+        // analyze_dumps.py "Candidate Unusual Location" section). ===
+        new("Weapon",           2, false),  // 8 games host weapon/max stats
+        new("Projectile",       2, false),  // 4-5 games host speed/hit/damage
+        new("Battle",           2, false),  // 5 games — Battle* containers
+                                            // for damage/count/max (common
+                                            // in JRPG/strategy battles)
+
         // === UNUSUAL locations (highest-value hits — devs broke convention) ===
         // LocalPlayer / GameViewportClient / HUD often store gameplay state
         // they "shouldn't" because Unreal's recommended pattern would put it

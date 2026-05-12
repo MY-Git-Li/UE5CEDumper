@@ -46,6 +46,17 @@ public class PropertyScoringTableTests
     [InlineData("Friction",      "MovementSettings", PropertyCategory.Movement)]
     [InlineData("IsImmortal",    "BP_Player_C",      PropertyCategory.Utility)]
     [InlineData("bCanBeDamaged", "AActor",           PropertyCategory.Utility)]
+    // Build 678 — keywords added from 15-game cross-game analysis.
+    // Lock in category assignments so future bucket reshuffles don't
+    // silently regress.
+    [InlineData("DamageEffect",  "BP_Ability_C",     PropertyCategory.Combat)]
+    [InlineData("AttackTarget",  "BP_Enemy_C",       PropertyCategory.Combat)]
+    [InlineData("EffectRadius",  "BP_Spell_C",       PropertyCategory.Combat)]
+    [InlineData("AbilityType",   "BP_GameplayAbility_C", PropertyCategory.Combat)]
+    [InlineData("DamageModifier","WeaponData",       PropertyCategory.Combat)]
+    [InlineData("BuffDuration",  "BP_Effect_C",      PropertyCategory.Combat)]
+    [InlineData("ItemCount",     "InventoryComponent", PropertyCategory.Resources)]
+    [InlineData("ItemList",      "BP_Container_C",   PropertyCategory.Resources)]
     public void Score_KeywordHits_AssignsExpectedCategory(
         string propName, string className, PropertyCategory expected)
     {
@@ -77,6 +88,11 @@ public class PropertyScoringTableTests
     [InlineData("UGameViewportClient",   true,  4)]
     [InlineData("BP_HUD_C",              true,  4)]
     [InlineData("FoobarComponent",       false, 0)]  // no match
+    // === Build 678 — class rules from 15-game cross-game analysis. ===
+    [InlineData("BP_Weapon_C",           false, 2)]  // Weapon class
+    [InlineData("WeaponData",            false, 2)]  // Weapon-prefix struct
+    [InlineData("BP_Projectile_C",       false, 2)]  // Projectile class
+    [InlineData("BP_Battle_Manager_C",   false, 2)]  // Battle class
     public void PropertyBonus_ClassLocation(
         string className, bool expectedUnusual, int expectedBonus)
     {

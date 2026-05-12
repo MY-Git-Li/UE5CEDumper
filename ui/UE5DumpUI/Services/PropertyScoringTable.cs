@@ -89,6 +89,15 @@ public static class PropertyScoringTable
         "Attack", "Atk", "Multiplier",
         // Weapon-related fields (loadout pointers, weapon stats)
         "Weapon", "Hit", "HitDamage",
+        // === Added build 678 — confirmed cross-game via 15-game dump
+        // analysis (scripts/analysis/analyze_dumps.py). Each appears
+        // in ≥ 7/15 games with substantial per-game hit counts. ===
+        "Effect",       // GameplayEffect framework — 14/15 games, 5740 hits
+        "Target",       // combat target / aim target — 14/15 games
+        "Radius",       // AoE / detection radius — 12/15 games
+        "Ability",      // GameplayAbility framework — 7/15 games
+        "Modifier",     // DamageModifier / SpeedModifier — 7/15 games
+        "Duration",     // buff/effect duration — 9/15 games
     };
 
     public const int ResourcesKeywordScore = 4;
@@ -106,6 +115,9 @@ public static class PropertyScoringTable
         "Ammo", "Material", "Materials", "Resource", "Resources", "Supply", "Supplies",
         // Inventory metadata
         "Stack", "Count", "Quantity", "Amount",
+        // === Added build 678 — confirmed cross-game (13/15 games via
+        // scripts/analysis/analyze_dumps.py, 1351 cross-game hits). ===
+        "Item", "Items",
     };
 
     public const int MovementKeywordScore = 4;
