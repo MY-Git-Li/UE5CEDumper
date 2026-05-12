@@ -121,7 +121,8 @@ Download AOBMaker here (register is required): https://opencheattables.com/viewt
 ## Important Notes
 
 * **Custom Data Structures**: In games like *FF7 Rebirth*, some critical data (e.g., HP) is stored in custom structures outside standard `UObjects`. The Live Walker can help investigate these regions, but direct discovery is not possible.
-* **GWorld Connectivity**: `GWorld` traversal works in ~97% of tested games (28 of 29). For the remainder, use the **Object Tree** or **Instance Finder** as the primary entry point.
+* **GWorld Connectivity**: `GWorld` traversal works in **100% of tested games (29 / 29)** as of 2026-05-12, including Satisfactory (modular UE build with a separate `CoreUObject-Win64-Shipping.dll`) and *Star Wars Jedi: Fallen Order* (UE 4.21, EA Origin / Steam launcher). For unverified games, fall back to **Object Tree** or **Instance Finder** as the primary entry point.
+* **Proxy DLL caveat for EA-launcher games**: *Star Wars Jedi: Fallen Order* launches via the EA app; neither `version.dll` nor `dinput8.dll` proxy is loaded by the wrapped process (EA's launcher restricts the DLL search path). The DLL must be CE-injected after the game is running. The scan side itself works fine — GObjects / GNames / GWorld all resolve cleanly once the DLL is inside the process. Same pattern likely applies to other EA-launched titles; report any new ones as an issue.
 * **Container Limits**: Array/Map/Set element reading respects a configurable limit to avoid excessive memory reads. Adjust the **Array Limit** slider in the Live Walker when working with large containers.
 
 ---

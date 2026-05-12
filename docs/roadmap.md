@@ -253,15 +253,34 @@ detection — wait for a real misdetection report before adding.
   Patterns: GOBJ_RE2 (1.8s, 2 batches) / GNAM_CT3 (4.6s, 4 batches) /
   GWLD_G42_1 (3.3s, 3 batches) — ~10s total scan but all three globals
   resolved on first scan and validated. GWorld ✅.
+- **Star Wars Jedi: Fallen Order** ✅ (UE 4.21, 313 887 objects, build
+  704 user logs 2026-05-12, EA Origin / Steam launcher): full scan OK —
+  GObjects=0x7FF7316F5CD0, GNames=0x12B65A10080,
+  **GWorld=0x7FF7317EBAB8** (non-zero, valid). DynOff full UE4 layout
+  (`UField::Next=+0x28`, `UStruct::ChildProperties=+0x50`,
+  `UProperty::ElemSize=+0x34`). Install path
+  `H:\SteamLibrary\steamapps\common\Jedi Fallen Order`, exe layout has
+  TWO identical 58.4 MB copies side-by-side in `SwGame\Binaries\Win64\`:
+  `SwGame-Win64-Shipping.exe` (canonical UE name) +
+  `starwarsjedifallenorder.exe` (EA-launcher target name). CE shows the
+  running process as the latter. **Proxy DLL caveat**: neither
+  `version.dll` nor `dinput8.dll` proxy gets loaded by the EA launcher —
+  must inject via Cheat Engine after the game is running. Scan +
+  dump pipeline works identically once the DLL is in-process.
 
-GWorld success ratio: **28 / 29 (~97%)**. Untested: Star Wars Jedi.
-Satisfactory (modular DLL): scan side OK — `Macht::AOBScanAllModules`
+GWorld success ratio: **29 / 29 (100% of tested games)** as of 2026-05-12.
+Satisfactory (modular DLL build): scan side OK — `Macht::AOBScanAllModules`
 falls through to `FactoryGameSteam-CoreUObject-Win64-Shipping.dll`
 under `Engine\Binaries\Win64\` and the 15-game dump corpus includes
 its 4,868 BPGCs cleanly. Proxy deploy was previously broken because
 the UI skipped the `Engine` subfolder; fixed build 691 (the real
 game .exe lives in `Engine\Binaries\Win64\` for this title, not
 under `FactoryGame\`).
+Star Wars Jedi: Fallen Order: scan side OK as above; proxy deploy
+inherently broken because of EA launcher (see lesson in
+[lessons-learned.md → Proxy DLL Deploy](lessons-learned.md#proxy-dll-deploy)).
+For both EA-launcher and other launcher-wrapped titles, recommend CE
+manual injection as the documented workaround.
 
 ## Long-running concerns
 

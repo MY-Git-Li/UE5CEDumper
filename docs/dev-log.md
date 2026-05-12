@@ -11,6 +11,62 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-05-12 (dev branch, docs only) — GWorld 29 / 29 (100%), Star Wars Jedi verified, EA-launcher proxy limitation documented
+
+User verification on two previously "unverified or thought-failing" titles
+landed us at **29 / 29 = 100%** GWorld coverage across the tested corpus.
+No code change in this commit — just docs catching up with the empirical
+state.
+
+### Star Wars Jedi: Fallen Order (UE 4.21) — newly verified
+
+- Install: `H:\SteamLibrary\steamapps\common\Jedi Fallen Order`
+- Logs: `%LOCALAPPDATA%\UE5CEDumper\Logs\starwarsjedifallenorder\` (build 1.0.0.704)
+- Scan result: GObjects = `0x7FF7316F5CD0`, GNames = `0x12B65A10080`,
+  **GWorld = `0x7FF7317EBAB8`** (non-zero, valid). 313 887 objects.
+  Full UE4 DynOff layout (`UField::Next=+0x28`,
+  `UStruct::ChildProperties=+0x50`, `UProperty::ElemSize=+0x34`).
+- Launcher quirk: `SwGame\Binaries\Win64\` holds TWO identical 58.4 MB
+  exes — the canonical `SwGame-Win64-Shipping.exe` plus a renamed copy
+  `starwarsjedifallenorder.exe` that the EA app actually targets. CE
+  sees the running process as the latter.
+- **Proxy DLL caveat**: neither `version.dll` nor `dinput8.dll` proxy
+  gets loaded by the EA-wrapped process. EA's launcher restricts the
+  DLL search path before spawning the game, stripping the exe's own
+  directory so proxies dropped there never resolve. Workaround: CE
+  manual injection after the game is running. Scan side works
+  identically once the DLL is inside the process.
+- New lesson added: [Proxy DLL Deploy → EA-launcher proxy block](lessons-learned.md#proxy-dll-deploy).
+
+### Satisfactory (UE 5.3) — note correction
+
+The "GWorld fails" note in roadmap + test-games was stale: it
+predated the `Macht::AOBScanAllModules` work (commit `589fc35`, build
+509-ish) that walks every loaded module including
+`FactoryGameSteam-CoreUObject-Win64-Shipping.dll` under
+`Engine\Binaries\Win64\`. The 15-game dump corpus (build 678 + 687)
+already contained Satisfactory's 4 868 BPGCs cleanly, proving the
+multi-module fallback works. User reconfirmed GWorld resolves on this
+build (2026-05-12) — the docs are now corrected to match reality.
+
+### Docs touched
+
+- [Readme.MD](../Readme.MD) — GWorld bullet bumped to 29 / 29 (100%)
+  + new EA-launcher proxy caveat bullet
+- [Readme_zh-TW.MD](../Readme_zh-TW.MD) — same updates with Traditional
+  Chinese phrasing for the two new bullets
+- [docs/roadmap.md](roadmap.md) — Star Wars Jedi entry added under
+  Tested games + GWorld ratio bumped + EA-launcher note appended
+- [docs/test-games.md](test-games.md) — Star Wars Jedi row rewritten
+  with GWorld ✅ + EA-launcher caveat; Satisfactory row rewritten to
+  drop the stale "GWorld fails" claim
+- [docs/lessons-learned.md](lessons-learned.md) — new bullet in the
+  Proxy DLL Deploy section documenting the EA-launcher proxy block
+
+No code change. No tests touched. Build number unchanged on dev.
+
+-----
+
 ## 2026-05-12 (dev branch, build 693-696) — `walk_class_batch` — Full SDK / Dump-All pipe round-trip amortisation
 
 Architectural extension of the build-685 `search_properties_batch`
