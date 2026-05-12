@@ -6,7 +6,7 @@ upcoming work and [dev-log.md](dev-log.md) for the historical commit
 trail. Build number tags reflect when each row reached its current
 state.
 
-> **Last refreshed**: 2026-05-10 (build 610-611, PropertySearch dedupe-by-defining-class + one-click helper-into-CE inject on `dev`).
+> **Last refreshed**: 2026-05-12 (build 689 on `dev` and `origin/dev`; pushed). Latest session shipped Interesting Properties tab (B'), DLL BPGC filter fix, multi-select Copy CE Field(s), Dump All Metadata export + Python analyzer, 15-game data-driven keyword/class-rule additions, and 30× speedup via `search_properties_batch`. See [dev-log.md](dev-log.md) build 657-689 entry.
 
 -----
 
@@ -75,8 +75,13 @@ fire on standalone tokens):
   ExplicitMovementCheats sub-bucket: NoClip/Fly/God/Ghost/Invincible
   weighted +8 to outscore Utility's noisy `Cheat` + `Debug` matches)
 - **Class bonuses**: Character/Pawn/PlayerController/PlayerState +3,
-  GameMode/GameInstance/SaveGame +2; Anim/Niagara/Sound/Audio/Particle
-  -2; UI/Widget -1
+  Player +2 (build 673), Enemy / Weapon +2 (build 687 — Phase 2),
+  GameMode/GameInstance/SaveGame +2; AnimInstance/AnimMontage/AnimSequence/
+  AnimNotify/AnimGraph/AnimBlueprint -2 (build 673 — surgical compound
+  names, was bare "Anim" before which broke game classes like AnimMan_*),
+  NiagaraSystem/NiagaraEmitter/NiagaraComponent/SoundCue/SoundWave/
+  SoundBase/AudioComponent/ParticleSystem/ParticleEmitter -2,
+  UserWidget/WidgetComponent -1
 - **Flag bonuses**: BlueprintCallable +2, BlueprintEvent +1, Pure-or-
   Const safe getter +1, ParmsSize > 64 -1
 - **Threshold = 5**; Show All toggle bypasses
@@ -87,14 +92,80 @@ Per-row actions:
 - **AA(B)**: shortcut into the Copy AA Script (Baked) flow; reuses the
   same dialog as the LiveWalker AA(Baked) button
 
-**AOBMaker availability gating** (build 608) — both LiveWalker
-Functions and Interesting Funcs DataGrids carry a "Notes" column at
-the end. When AOBMaker CE Plugin pipe is unreachable the column shows
-"AOBMaker plugin not found — AA Script export will fall back to
-clipboard". Re-checked on tab activation (5s cooldown so rapid
-switching doesn't stack 2s pipe-connect timeouts). Send-time guard
-distinguishes "pipe broke during send" (warning) vs "plugin never
-configured" (informational).
+**AOBMaker availability gating** (build 608, refined build 689) — when
+AOBMaker CE Plugin pipe is unreachable, both LiveWalker Functions and
+Interesting Funcs panels show a single inline italic status indicator
+("AOBMaker plugin not found — AA Script export will fall back to
+clipboard"). Was previously a per-row Notes column on every row (pure
+noise since the value is VM-level); build 689 collapsed it to one
+place. Re-checked on tab activation (5s cooldown so rapid switching
+doesn't stack 2s pipe-connect timeouts). Send-time guard distinguishes
+"pipe broke during send" (warning) vs "plugin never configured"
+(informational).
+
+## Interesting Properties Finder (B' — build 670-687)
+
+Symmetric tab to Interesting Funcs but for properties. Backed by
+`search_properties_batch` (build 685) — DLL walks GObjects ONCE and
+checks every property against every keyword in one pass, ~30× faster
+than the build-670 sequential approach. Uses `PropertyScoringTable.cs`
+(separate from KeywordScoringTable since property naming differs from
+function naming) + shared `ClassLocationScorer.cs`:
+
+- **Categories**: Stats / Combat / Resources / Movement / Utility
+  (no Inventory — uses Resources instead; no ExplicitMovementCheats —
+  property names rarely encode cheat-mode verbs)
+- **Class bonuses (PropertyRules)**:
+  Character/Pawn/PlayerController/PlayerState/AbilitySystem/AttributeSet/
+  Inventory/Equipment +3; Player +2; GameMode/GameInstance/SaveGame/
+  PlayerProfile +2; **LocalPlayer / GameViewportClient / HUD /
+  UCheatManager / CheatManager +4 with ⚠ Unusual Location flag**
+  (build 670); Weapon / Projectile / Battle / Enemy +2 (build 678 + 687
+  — empirically derived from 15-game cross-game analysis)
+- **No visual/audio penalties on Property side** — property names alone
+  filter the noise (an "PlaybackSpeed" on UAudioComponent doesn't match
+  any keyword, so it scores 0)
+- **Threshold = 4** (slightly lower than Function side because per-hit
+  weights are lower)
+
+Key concept: **Unusual Location flag** highlights cheat-relevant fields
+hosted in non-canonical containers (LocalPlayer / GameViewportClient /
+HUD / CheatManager) — the kind of properties developers placed outside
+where you'd think to look first.
+
+Per-row actions:
+- **Live**: open the property's owning class in Live Walker via
+  `find_instance`, fall back to ClassStruct on CDO-only classes.
+  Pre-fills the LiveWalker SearchText with the property name so the
+  user lands with it highlighted.
+- **Name**: copy the bare property name to clipboard.
+
+## Dump-for-analysis pipeline (build 676-687)
+
+`Export → Dump All Metadata (.jsonl)` streams every class + props +
+funcs as JSON Lines via the existing pipe endpoints (`get_object_list`
++ `walk_class` + `walk_functions` — no new DLL command). Mirrors the
+`IsClassLikeMeta` whitelist so BPGCs are included.
+
+Companion Python script `scripts/analysis/analyze_dumps.py` aggregates
+N dumps cross-game and emits a Markdown report with:
+
+- Top OWN property names (with `_resolve_own_props` filter to dedup
+  inherited fields counted N times across the inheritance chain)
+- Top OWN property TOKENS — candidate keywords, cross-referenced
+  against existing category buckets
+- Candidate Unusual Location class tokens — class × prop-token
+  co-occurrence ranked by cross-game frequency
+- Same three sections for the Function side (build 687)
+- `--min-games` filter (default 3) drops single-game spikes
+
+15-game corpus (DQ7R / DQI&IIHD2D / ES2 / FSD-DRG / FactoryGameSteam /
+Geri / HogwartsLegacy / ManorLords / NMKART / Octopath / Stray / TQ2 /
+TowerOfMask / ff7rebirth / ff7remake) drove the build 678 + 687 scoring
+table additions. Anti-bias workflow documented in
+[scripts/analysis/README.md](../scripts/analysis/README.md) — users
+whose preferred genres aren't well-represented dump their own games +
+PR with analysis output as evidence.
 
 ## Publisher detection
 

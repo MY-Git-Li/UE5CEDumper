@@ -550,19 +550,151 @@ returns the decoded Lua string instead of a number. Optional v2.
 
 ## Property Origin Resolver — proposals B + C still on table
 
-> **🎯 NEXT SESSION STARTING POINT (2026-05-12 close-out discussion)**:
-> Proposal B is the next concrete unit of work, **paired with the new
-> "Unusual Location" detection** described below (B'). Both reuse the
-> same `KeywordTokenizer` + `KeywordScoringTable` infrastructure from
-> Interesting Functions Finder, so they ship together cheaply.
-> Function-side work (Interesting Funcs v2) is intentionally deferred
-> — v1 is solid and the workflow loop closed; Property is the higher-
-> ROI direction. Class Family Browser (Proposal C, Effort L) needs
-> its own planning round and is NOT the right "jump in and code" task.
+> **🎯 NEXT SESSION STARTING POINT (2026-05-12 close-out, build 689)**:
+> Big productive session — see dev-log for full list. Headline shipments:
+>
+> - **B' (Interesting Properties tab with Unusual Location detection)** — shipped build 670, plus calibrated by 15-game cross-game analysis (build 678 + 687)
+> - **DLL BPGC filter bug fix** (build 673) — three callsites that filtered out every BlueprintGeneratedClass; turned out to be the biggest cheat-relevance gap in the project
+> - **`search_properties_batch`** (build 685) — 36 keywords in one GObjects walk, ~30× speedup on big games (42s → ~1.5s on TQ2)
+> - **Dump All Metadata + Python analyzer pipeline** — `scripts/analysis/analyze_dumps.py` now feeds keyword/class-rule decisions with real-game data. 15-game corpus methodology documented.
+> - **9 keyword adds + 5 class rules** (Combat: Effect/Target/Radius/Ability/Modifier/Duration; Resources: Item/Items; class rules: Weapon/Projectile/Battle/Enemy) — all empirically validated, every addition has ≥3-game evidence.
+>
+> Proposal B (per-row "similar BP-added properties" side panel) **explicitly deferred** —
+> B' is shipped and proves the broad-sweep approach works; B's anchor-driven panel adds
+> work without solving a concrete user gap. **Skip unless a real user request surfaces.**
+>
+> Suggested next-session starters (pick one):
+>
+> 1. **More dumps for genre coverage** — 15-game corpus is heavy on JRPG/sim/ARPG.
+>    Adding MMO / fighting / horror / RTS would calibrate further. Use the existing
+>    pipeline; no code changes needed unless a new class-rule emerges. **S effort**.
+> 2. **Fix the same BPGC-filter bug in `SdkExportService`** — build 673 fixed three
+>    DLL callsites, but the C# SDK header export at
+>    [SdkExportService.cs:59](../ui/UE5DumpUI/Services/SdkExportService.cs#L59) still
+>    filters with bare `ClassName is "Class" or "ScriptStruct"`. Mirror the
+>    `IsClassLikeMetaName` whitelist used by DumpAllService. **S effort, low risk.**
+> 3. **Multi-module GWorld scan for Satisfactory** — game splits CoreUObject into a
+>    separate DLL, plus proxy DLL injection ALSO fails on it (build 686 user feedback).
+>    User worked around with CE injection but the proxy-deploy UX path is broken.
+>    Adapt `Genau::FindAll` to scan multiple modules when primary scan misses. **M effort**.
+> 4. **Class Family Browser (Proposal C)** — bucketed view of game classes by inferred
+>    role (Character / Pawn / Inventory / Stats / Save / etc.). Genuine
+>    "where do I start exploring a new game?" entry point. **L effort, needs own
+>    planning round.**
+> 5. **Runtime `keywords.json` override** — let users customise scoring tables
+>    without recompiling. Discussed during the anti-bias conversation; not yet built.
+>    Source-generated JSON serializer for AOT compat. **M effort**.
 
-Proposal A (dedupe-by-defining-class) shipped as build 610. Two
-follow-ups discussed in the design analysis but not yet implemented,
-plus one new insight from the 2026-05-12 close-out chat:
+### Proposal B — DEFERRED (build 689)
+
+Original B (per-row "similar BP-added properties" suggestions on a row
+click) is now deferred indefinitely. B' (the broad-sweep "find HP/MP/etc
+in unusual containers" approach) shipped and is calibrated, which gives
+us the cheat-discovery workflow without B's added complexity. If a real
+user reports the gap B was meant to fill ("the engine field at the wrong
+layer — show me the BP-added bool that the game's TakeDamage override
+actually checks"), revisit B then; until then, skip.
+
+Proposal A (dedupe-by-defining-class) shipped as build 610.
+**Proposal B' shipped as build 670 + calibrated through build 687.**
+
+-----
+
+## New pending items (discovered build 657-689)
+
+### Fix SdkExportService BPGC filter (mirror of build 673 DLL fix)
+
+**Effort**: S | **Risk**: low | **Why**: Build 673 fixed three DLL
+callsites (`SearchProperties` / `ListClasses` / `EnumerateAllFunctions`)
+that wrongly filtered out BlueprintGeneratedClass instances via the
+naive `metaClassName != "Class"` check. But the C# `SdkExportService`
+at [SdkExportService.cs:59](../ui/UE5DumpUI/Services/SdkExportService.cs#L59)
+still does the equivalent client-side filter:
+
+```csharp
+if (obj.ClassName is "Class" or "ScriptStruct")
+    targets.Add((obj.Address, obj.Name, obj.ClassName));
+```
+
+So Full SDK export currently misses every BPGC-derived class — same bug
+class as the build 673 DLL fix, different code path. `DumpAllService`
+(build 676) already has the right pattern; mirror its `ClassLikeMetas`
+set or extract it to a shared helper. Add a regression test that
+covers `BlueprintGeneratedClass` / `AnimBPGC` / `WidgetBPGC` /
+`DynamicClass` so this can't silently regress again.
+
+### Multi-module GWorld scan (Satisfactory class)
+
+**Effort**: M | **Risk**: med | **Why**: Build 689 user feedback —
+Satisfactory's proxy DLL injection ALSO fails (not just GWorld scan).
+Game splits CoreUObject into its own DLL; the AOB patterns live in
+`CoreUObject-Win64-Shipping.dll` rather than the main exe. User worked
+around with CE injection but the proxy-deploy UX path is broken on this
+title.
+
+Two parts:
+1. **Multi-module scan in Genau** — when the primary `Genau::FindAll`
+   pass on the main exe misses GWorld / GNames / GObjects, fall through
+   to scanning every loaded module that matches `*CoreUObject*.dll`.
+   Mirror the existing logging (which pattern hit which module).
+2. **Investigate proxy DLL injection failure** — separate issue from
+   scan: even when we drop version.dll into the install folder, the
+   game's loader bypasses normal proxy hooking. Need to investigate
+   what loading mechanism Satisfactory uses (EOS-launcher init? custom
+   PE patch?) and either add a new shim type or document the limitation.
+
+Once attached via CE injection, the rest works — Satisfactory dump
+produced 4,868 BPGCs cleanly in the 15-game analysis run.
+
+### More-genre dump coverage (calibration follow-up)
+
+**Effort**: S (mostly user-side dumping; analyzer already does the
+heavy lifting) | **Risk**: low | **Why**: The 15-game corpus is
+heavy on JRPG / sim / ARPG / FPS / racing / sandbox. Missing genres:
+MMO, fighting, horror, RTS, sports-sim. Each genre has its own
+vocabulary (e.g. fighters: combo / cancel / parry / juggle; MMOs:
+threat / aggro / dispel / cooldown_ms).
+
+Workflow: dump 3-5 games per missing genre, re-run
+`scripts/analysis/analyze_dumps.py work/dump/*.jsonl`, look at the new
+cross-game tokens, PR additions to PropertyScoringTable /
+KeywordScoringTable with the analysis output attached as evidence.
+
+Process documented in [scripts/analysis/README.md](../scripts/analysis/README.md).
+
+### Runtime `keywords.json` override (anti-bias UX)
+
+**Effort**: M | **Risk**: med | **Why**: Discussed during build-679
+anti-bias conversation. Users who disagree with the default scoring
+tables currently have to fork + recompile. A runtime override file
+(`keywords.json` alongside the exe) would let users add their own
+genre-specific keywords without touching C# / build env.
+
+Constraints:
+- Must be AOT-compat — use source-generated JsonSerializerContext per
+  CLAUDE.md rule
+- Default tables stay hardcoded as fallback (so behaviour is sane
+  even when the JSON is missing / malformed)
+- Schema mirrors the C# tables 1:1 (StatsKeywords / CombatKeywords /
+  …) plus an extension mode (additive vs replace)
+- One-click "Export current tables to JSON" UI button to seed the
+  customisation file
+
+Not blocking — only do if a user actually asks for it.
+
+### Class Family Browser (Proposal C) — still on the wishlist
+
+**Effort**: L | **Risk**: med | **Why**: New tab "Class Family" with
+a bucketed view of game classes by inferred role (Character / Pawn /
+Inventory / Stats / Save / Components / DataAssets / DataTables /
+GameMode). Real answer to "I have no idea where to start exploring a
+new game". Needs its own planning round before starting — the
+classification heuristic + UI design is the hard part, not the
+implementation. **NOT a "jump in and code" task.**
+
+Pre-work would benefit from the dump corpus: cluster 15 games' BPGCs
+by property-name similarity to derive concrete "Inventory-like" /
+"Character-like" / etc. archetype patterns.
 
 ### Proposal B: per-row "similar BP-added properties" suggestions
 
@@ -818,3 +950,32 @@ Recent items that shipped, kept here briefly until the next refresh:
 - ✅ **One-click Inject Helper into Current CE Table** (AOBMaker
   plugin's new InjectTableFile pipe cmd + UE5DumpUI Tools menu;
   cherry-picked from spawned session, build 611)
+- ✅ **Multi-select Copy CE Field(s)** — LiveWalker DataGrid Extended
+  mode; container-view multi-select emits one filtered container
+  with N elements (build 660)
+- ✅ **System tab "UI build: 0" bug** — `Version.Revision` not `.Build`
+  (build 662)
+- ✅ **Tab labels shortened** + **status text overflow fix** +
+  **⚙ Options popover** (build 666)
+- ✅ **Interesting Properties tab (B' round 1)** — Stats / Combat /
+  Resources / Movement / Utility categories, Unusual Location flag
+  for LocalPlayer / GameViewportClient / HUD / CheatManager
+  (build 670)
+- ✅ **DLL BPGC filter fix** (`IsClassLikeMeta` whitelist in
+  SearchProperties / ListClasses / EnumerateAllFunctions) + **surgical
+  Anim penalty** (AnimMan_Player_C no longer punished) + **Player +2 rule**
+  (build 673)
+- ✅ **Export → Dump All Metadata (.jsonl)** + Python analyzer pipeline
+  (`scripts/analysis/analyze_dumps.py` + README anti-bias section)
+  (build 676)
+- ✅ **15-game data-driven keyword adds**:
+  CombatKeywords +6 (Effect/Target/Radius/Ability/Modifier/Duration);
+  ResourcesKeywords +2 (Item/Items); PropertyRules +3 (Weapon/Projectile/Battle)
+  — all backed by cross-game evidence (build 678)
+- ✅ **`search_properties_batch`** — DLL walks GObjects ONCE for N
+  queries; ~30× speedup on big games (build 685)
+- ✅ **Phase 2 function-side analysis** confirms KeywordScoringTable
+  is comprehensive; class-bonus side gets Enemy +2 (both Function +
+  Property) and Weapon +2 (Function side mirror) (build 687)
+- ✅ **AOBMaker "Notes" column removed** — replaced with single
+  inline status-row indicator (build 689)

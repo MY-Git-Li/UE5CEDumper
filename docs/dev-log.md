@@ -11,7 +11,76 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
-## 2026-05-11 (latest, dev branch, build 648) — ProcessEvent vtable detection rewrite + hook-fire validation
+## 2026-05-12 (latest, dev branch, build 657-689) — Multi-select Copy CE Fields, Interesting Properties tab (B'), DLL BPGC fix, dump-for-analysis pipeline, 15-game data-driven scoring
+
+A long single-day session covering 13 commits, two distinct themes:
+**UX/feature additions** (multi-select Copy CE Field, Interesting
+Properties tab with Unusual Location detection, ⚙ Options popover,
+shorter tab labels, Dump All Metadata export) and **data-driven scoring
+calibration** (15-game dump corpus → empirical PropertyScoringTable +
+KeywordScoringTable additions, with a Python aggregator committed to
+the repo to make the pipeline reproducible).
+
+### Commit-by-commit
+
+| Build | Commit  | Summary |
+|------:|---------|---------|
+| 660   | `7863afb` | **Multi-select Copy CE Field** — `LiveWalkerPanel` field DataGrid switched to `Extended` selection mode. Button label flips between "Copy CE Field" and "Copy CE Fields (N)". Container-view multi-select emits ONE filtered container with N elements (not N detached top-level entries). 10 new tests in `LiveWalkerMultiSelectTests.cs`. |
+| 662   | `9cb33ff` | **System tab "UI build" fix** — `PointerPanelViewModel.UiBuildNumber` was reading `Version.Build` which is the THIRD position in .NET's `Major.Minor.Build.Revision` schema. Our AssemblyVersion is `Major.Minor.Patch.Build` so what we call "build" sits in `.Revision`. Showed "UI build: 0" through builds 657–660. Lesson now documented in both the source comment and dev-log. |
+| 666   | `bf515e0` | **UI polish trio** — (1) shorter tab labels (Instance Finder → Instances, Property Search → Properties, Game Classes → Classes, Class Structure → Class Struct). (2) MainWindow status text gets MaxWidth=360 + ellipsis + tooltip so long "Navigated to Foo::Bar (live instance 0x...)" messages don't push toolbar to 2 rows on 4K@225%. (3) New "⚙ Options" DropDownButton houses the 5 export-shape sliders (Collapse / Array Limit / DropDown Limit / Preview / Drill Depth), reclaiming ~600px on the top toolbar. |
+| 670   | `f3b719e` | **Interesting Properties tab (B' round 1)** — new tab between Interesting Funcs and Classes. Extracts `ClassLocationScorer.cs` shared between Function and Property sides. New `PropertyScoringTable.cs` (Stats / Combat / Resources / Movement / Utility categories), `ScoredPropertyRow.cs`, `InterestingPropertiesViewModel.cs`. Key concept: **⚠ Unusual Location flag** for properties hosted in `LocalPlayer` / `GameViewportClient` / `HUD` / `CheatManager` (+4 bonus) — fields developers placed outside the conventional Character/Pawn/PlayerState containers. VM fans out via batched seed-keyword `search_properties` calls + client-side dedupe. 41 new tests. |
+| 673   | `d760e50` | **DLL BPGC filter + Anim-penalty refinement** — TowerOfMask repro caught two stacked bugs. (1) `Aura::SearchProperties` / `ListClasses` / `EnumerateAllFunctions` all had `if (metaClassName != "Class") continue;` which dropped every `BlueprintGeneratedClass`-derived class — that's where 90%+ of game-specific properties live. New `IsClassLikeMeta` helper whitelists `Class` + `BlueprintGeneratedClass` + `AnimBlueprintGeneratedClass` + `WidgetBlueprintGeneratedClass` + `DynamicClass`. (2) Substring `"Anim" -2` penalty falsely punished game-prefix classes like `AnimMan_Player_C`. Replaced with surgical compound names (`AnimInstance` / `AnimMontage` / `AnimSequence` / `AnimNotify` / `AnimGraph` / `AnimBlueprint`). Plus added `Player +2` rule + Stats keywords `Dead`/`IsDead`/`Alive`/`IsAlive` + Combat `Weapon`/`Hit`/`HitDamage`. |
+| 676   | `4d18b63` | **Export → Dump All Metadata (.jsonl)** + analysis pipeline — new `DumpAllService.cs` that streams every class + props + funcs to JSON Lines via existing `get_object_list` / `walk_class` / `walk_functions` endpoints (no new DLL command). Mirrors the IsClassLikeMeta filter so BPGCs are included. Python `scripts/analysis/analyze_dumps.py` skeleton aggregates dumps cross-game and emits a Markdown report covering top property names / tokens / unusual class locations. `scripts/analysis/README.md` explains the workflow. 23 new tests for the dump shape. Designed for offline data-driven scoring calibration. |
+| ~     | `3fe02b4` | **Analyzer first-real-dump fixes** — (1) DLL emits paths like `//Script/CoreUObject/Object` (double-slash, `/` separator), not the `/Script/CoreUObject.` format the analyzer expected; replaced prefix-list with substring `/Script/` check. (2) `WalkClass` merges inherited fields into each class's Fields list, so naive aggregation counted `bReplicates` 486× in TowerOfMask (once per Actor-derived class). Added `_resolve_own_props` that filters by `offset >= super.props_size`. (3) Trivial-token guard for `b` / `c` / `is` / `on` / `bp` / single letters. |
+| ~     | `e66776d` | **Analyzer `--min-games` filter + Games column** — 10-game run revealed single-game spikes dominating (TQ2's `m_*` C++ family racks up 477–859 hits each). Default `--min-games=3` filters them out of the cross-game sections; raw all-data sections kept for completeness. Unusual Locations gained a Games column. Plus `docs/todo.md` update: Satisfactory proxy DLL injection ALSO fails (verified — user used CE injection workaround). |
+| ~     | `a837076` | **15-game data-driven keyword adds** — analysis of 15 dumps (JRPG / sim / ARPG / FPS / racing / sandbox mix: DQ7R / DQI&IIHD2D / ES2 / FSD-DRG / FactoryGameSteam / Geri / HogwartsLegacy / ManorLords / NMKART / Octopath / Stray / TQ2 / TowerOfMask / ff7rebirth / ff7remake). `CombatKeywords` +6 (`Effect` 14g, `Target` 14g, `Radius` 12g, `Ability` 7g, `Modifier` 7g, `Duration` 9g). `ResourcesKeywords` +2 (`Item` / `Items` 13g). `ClassLocationScorer.PropertyRules` +3 (`Weapon` 8g, `Projectile` 4-5g, `Battle` 5g). README anti-bias section. 12 new tests. |
+| 682   | `9ebe25d` | **Interesting Props per-query progress** — TQ2 user benchmark: 36 seed queries × ~1.15s = 42s wall time with indeterminate spinner. Sequential loop with per-query status text ("Scanning 5/36: 'Health' (123 raw hits so far)"). Status row moved out of cramped filter toolbar into its own dock row with monospace font. |
+| 685   | `00177ef` | **`search_properties_batch` — 30× speedup** — User asked about pipe serialization. Log analysis confirmed pipe is single-channel FIFO; 36 sequential calls each re-walking GObjects is the bottleneck, NOT pipe latency. New DLL command + `SearchPropertiesBatch` walks GObjects ONCE and checks every property against every keyword in one pass. C# `IDumpService.SearchPropertiesBatchAsync` + `PropertySearchBatchResult` model. Interesting Properties Load now single round-trip. Funcs panel cosmetic mirror of build 682 status-row layout. |
+| 687   | `95aa066` | **Phase 2: function-side analyzer** — extended `analyze_dumps.py` to aggregate function data (name / token / class × func co-occurrence) and re-ran on 15-game corpus. Finding: **`KeywordScoringTable.cs` is already comprehensive** — top 60 function tokens are 100% BP plumbing or already covered. So NO new keywords. But class-bonus side surfaced two adds: `Enemy +2` (both Function + Property sides — `enemy → damage/attack` in 3-4 games) and `Weapon +2` (Function side mirror — Property side had it from build 678). Plus TRIVIAL_TOKENS extended with BP-compilation artifacts (`ubergraph` / `k2node` / `evt` / `bnd` / `bpi` / `evaluate` / `exposed` / ...) so future analyses surface signal instead of UE plumbing. |
+| 689   | `4dd0717` | **Notes column cleanup** — `InterestingFunctionsPanel` + LiveWalker Functions DataGrid had a `Notes` column that repeated the same VM-level "AOBMaker plugin not found" string on every row (pure noise). Replaced with an inline italic TextBlock in the panel's status row, visible only when the plugin is unavailable. |
+
+### Cross-cutting lessons recorded
+
+- **`Version.Build` vs `.Revision` trap**: .NET names the four `Major.Minor.Build.Revision` parts in a different order than our `Major.Minor.Patch.Build` AssemblyVersion convention. Anything that reads "my build number" must use `Version.Revision`, not `Version.Build`. Title bar dodged this trap because it uses `Version.ToString()` (prints all four).
+- **BPGC filter check is the BIG hidden bug class**: anywhere in the DLL that walks GObjects looking for "is this a class?" must accept ALL class-flavoured metas (Class + BlueprintGeneratedClass + variants). The build-670 `IsClassLikeMeta` helper exists for this — use it instead of bare `== "Class"`. Existing `SdkExportService` has the same bug and should be fixed in a future PR (filed in todo).
+- **Substring class-name penalties are dangerous**: `"Anim" -2` killed every game class with "Anim" in its name (e.g. TowerOfMask's `AnimMan_Player_C`). Surgical compound names (`AnimInstance`, `AnimMontage`, …) are the right granularity.
+- **Pipe serialization is a design choice, not a hard limit**: `SearchProperties` is read-only memory walking; no game-thread hook required. The build-685 batch API proves the underlying operation can be parallelized at the field level rather than at the pipe level.
+- **Hand-curated keyword tables converge fast**: 15-game cross-game analysis added only 9 high-confidence keywords to PropertyScoringTable and 0 to KeywordScoringTable. Future scoring improvements should target class-bonus rules, not keyword arrays.
+- **Anti-bias defense is the analyzer itself**: if a user's preferred genres aren't well-represented in the default tables, they dump their own games, run `analyze_dumps.py`, and PR the additions with evidence. `scripts/analysis/README.md` documents this workflow as the recommended response to disagreement with the defaults.
+
+### 15-game dump corpus (kept under `work/dump/`)
+
+For reproducibility / future calibration:
+
+| Game | UE | Object count | Game classes (BPGCs) |
+|---|---:|---:|---:|
+| DQ7R | 4.27 | 194,684 | 824 |
+| DQI&IIHD2D Remake | 4.27 | 128,678 | 323 |
+| ES2 (Everspace 2) | 5.0.5 | 1,150,336 | 1,653 |
+| FSD (Deep Rock Galactic) | 4.27 | 87,370 | 809 |
+| Satisfactory (FactoryGameSteam) | 5.0.3 | 206,743 | 4,868 |
+| Geri (The Artisan of Glimmith) | 4.27 | 157,620 | 87 |
+| HogwartsLegacy | 4.27 | 384,649 | 1,836 |
+| ManorLords | 5.0.5 | 34,124 | 7 |
+| NMKART (Nickelodeon Kart Racers) | 4.25 | 184,931 | 264 |
+| Octopath_Traveler | 4.27 | 406,060 | 444 |
+| Stray | 4.27 | 224,025 | 342 |
+| TQ2 (Titan Quest 2) | 5.0.7 | 495,878 | 1,188 |
+| TowerOfMask | 4.27 | 62,426 | 222 |
+| ff7rebirth | 4.27 | 432,506 | 2,068 |
+| ff7remake | 4.27 | 315,304 | 514 |
+
+Notes: dumps NOT committed to repo (under `work/` which is gitignored).
+Re-run the pipeline by re-dumping locally + invoking
+`python scripts/analysis/analyze_dumps.py work/dump/*.jsonl`.
+
+### Final test count
+
+**790 C# pass** (was 693 at session start) + 62 dll_helpers + 31 utf8_helpers = 883 total. Build 689 on dev (just pushed).
+
+-----
+
+## 2026-05-11 (build 648) — ProcessEvent vtable detection rewrite + hook-fire validation
 
 Closes the CRITICAL `ProcessEvent vtable detection is wrong` entry
 opened build 647. Two-layer fix: (1) replace the version-table detector
