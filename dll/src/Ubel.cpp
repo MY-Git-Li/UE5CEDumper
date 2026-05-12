@@ -4223,7 +4223,6 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
             const bool isStrInner   = (innerTn == "StrProperty");
             const bool isNameInner  = (innerTn == "NameProperty");
             const bool isTextInner  = (innerTn == "TextProperty");
-            const bool isIntrusiveScalar = isStrInner || isNameInner || isTextInner;
 
             bool isSet = false;
 

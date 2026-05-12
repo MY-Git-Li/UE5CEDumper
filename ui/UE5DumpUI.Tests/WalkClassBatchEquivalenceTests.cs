@@ -323,8 +323,9 @@ public class WalkClassBatchEquivalenceTests
         var happy    = MakeHappy(classCount);
         var fallback = MakeFallback(classCount);
 
-        string batchedSdk  = await SdkExportService.GenerateFullSdkAsync(happy);
-        string fallbackSdk = await SdkExportService.GenerateFullSdkAsync(fallback);
+        var ct = TestContext.Current.CancellationToken;
+        string batchedSdk  = await SdkExportService.GenerateFullSdkAsync(happy,    ct: ct);
+        string fallbackSdk = await SdkExportService.GenerateFullSdkAsync(fallback, ct: ct);
 
         // Byte-for-byte equality. Any drift between the batched and
         // fallback paths fails here.
@@ -448,8 +449,9 @@ public class WalkClassBatchEquivalenceTests
         foreach (var kv in classWalks) truncated.ClassWalks[kv.Key] = kv.Value;
         foreach (var kv in functionWalks) truncated.FunctionWalks[kv.Key] = kv.Value;
 
-        string happySdk      = await SdkExportService.GenerateFullSdkAsync(happy);
-        string truncatedSdk  = await SdkExportService.GenerateFullSdkAsync(truncated);
+        var ct = TestContext.Current.CancellationToken;
+        string happySdk      = await SdkExportService.GenerateFullSdkAsync(happy,     ct: ct);
+        string truncatedSdk  = await SdkExportService.GenerateFullSdkAsync(truncated, ct: ct);
 
         Assert.Equal(happySdk, truncatedSdk);
     }

@@ -387,7 +387,7 @@ public class SdkExportServiceTests
         dump.ClassWalks["0x5"] = new ClassInfoModel { Name = "MyDynamic_C", SuperName = "UObject", PropertiesSize = 0x40 };
         dump.ClassWalks["0x6"] = new ClassInfoModel { Name = "FVector",     SuperName = "",        PropertiesSize = 0x0C };
 
-        var sdk = await SdkExportService.GenerateFullSdkAsync(dump);
+        var sdk = await SdkExportService.GenerateFullSdkAsync(dump, ct: TestContext.Current.CancellationToken);
 
         // All 5 class-like metas + the ScriptStruct should be in the output;
         // the live instance and the Function should NOT.

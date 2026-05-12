@@ -384,7 +384,7 @@ public class ProxyDeployTests
             MakeEmptyFile(Path.Combine(factoryBin, "FactoryGameSteam-FactoryGame-Win64-Shipping.dll"));
 
             var svc = new ProxyDeployService(new NoopLog());
-            var found = await svc.FindUeGamesAsync(new[] { lib });
+            var found = await svc.FindUeGamesAsync(new[] { lib }, TestContext.Current.CancellationToken);
 
             var sat = Assert.Single(found, g => g.Name == "Satisfactory");
             Assert.Equal(engineBin, sat.BinariesDir);
@@ -414,7 +414,7 @@ public class ProxyDeployTests
             MakeEmptyFile(Path.Combine(gameBin, "MonoGame-Win64-Shipping.exe"));
 
             var svc = new ProxyDeployService(new NoopLog());
-            var found = await svc.FindUeGamesAsync(new[] { lib });
+            var found = await svc.FindUeGamesAsync(new[] { lib }, TestContext.Current.CancellationToken);
 
             var mono = Assert.Single(found, g => g.Name == "MonoGame");
             Assert.Equal(gameBin, mono.BinariesDir);
@@ -440,7 +440,7 @@ public class ProxyDeployTests
             MakeEmptyFile(Path.Combine(engineBin, "CrashReportClient.exe"));
 
             var svc = new ProxyDeployService(new NoopLog());
-            var found = await svc.FindUeGamesAsync(new[] { lib });
+            var found = await svc.FindUeGamesAsync(new[] { lib }, TestContext.Current.CancellationToken);
 
             Assert.DoesNotContain(found, g => g.Name == "OrphanEngine");
         }
@@ -471,7 +471,7 @@ public class ProxyDeployTests
             MakeEmptyFile(Path.Combine(sbBin,     "SB-Win64-Shipping.exe"));     // real exe
 
             var svc = new ProxyDeployService(new NoopLog());
-            var found = await svc.FindUeGamesAsync(new[] { lib });
+            var found = await svc.FindUeGamesAsync(new[] { lib }, TestContext.Current.CancellationToken);
 
             var sb = Assert.Single(found, g => g.Name == "StellarBlade");
             Assert.Equal(sbBin, sb.BinariesDir);
@@ -504,7 +504,7 @@ public class ProxyDeployTests
             MakeEmptyFile(Path.Combine(factoryBin, "FactoryGameSteam-FactoryGame-Win64-Shipping.dll"));
 
             var svc = new ProxyDeployService(new NoopLog());
-            var found = await svc.FindUeGamesAsync(new[] { lib });
+            var found = await svc.FindUeGamesAsync(new[] { lib }, TestContext.Current.CancellationToken);
 
             var sat = Assert.Single(found, g => g.Name == "Satisfactory");
             Assert.Equal(engineBin, sat.BinariesDir);
