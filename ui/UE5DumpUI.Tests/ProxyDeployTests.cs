@@ -1,3 +1,4 @@
+using UE5DumpUI.Core;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 using Xunit;
@@ -307,5 +308,210 @@ public class ProxyDeployTests
     public void ProxyType_VersionAndDinput8_HaveDistinctDllNames()
     {
         Assert.NotEqual(ProxyType.Version.GetDllName(), ProxyType.Dinput8.GetDllName());
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // IsKnownStubExe
+    // ────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("CrashReportClient.exe", true)]
+    [InlineData("crashreportclient.exe", true)]
+    [InlineData("CRASHREPORTCLIENT.EXE", true)]
+    [InlineData("FactoryGameSteam-Win64-Shipping.exe", false)]
+    [InlineData("Game-Win64-Shipping.exe", false)]
+    [InlineData("", false)]
+    public void IsKnownStubExe_FiltersCrashReportClient(string exeName, bool expected)
+    {
+        Assert.Equal(expected, ProxyDeployService.IsKnownStubExe(exeName));
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // FindUeGames — modular vs monolithic layouts (build 691 Satisfactory fix)
+    // ────────────────────────────────────────────────────────────────
+
+    private sealed class NoopLog : ILoggingService
+    {
+        public void Info(string message) { }
+        public void Warn(string message) { }
+        public void Error(string message) { }
+        public void Error(string message, Exception ex) { }
+        public void Debug(string message) { }
+        public void Info(string category, string message) { }
+        public void Warn(string category, string message) { }
+        public void Error(string category, string message) { }
+        public void Error(string category, string message, Exception ex) { }
+        public void Debug(string category, string message) { }
+        public void StartProcessMirror(string processName) { }
+        public void StopProcessMirror() { }
+    }
+
+    /// <summary>
+    /// Build a throwaway Steam-library tree under a temp folder. Returns
+    /// the library root that should be fed to <c>FindUeGamesAsync</c>.
+    /// The caller is responsible for deleting the returned path.
+    /// </summary>
+    private static string MakeTempLibrary()
+    {
+        string lib = Path.Combine(Path.GetTempPath(),
+            "UE5DumpTests_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(lib, "steamapps", "common"));
+        return lib;
+    }
+
+    private static void MakeEmptyFile(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, Array.Empty<byte>());
+    }
+
+    [Fact]
+    public async Task FindUeGames_ModularLayout_PicksEngineExeNotCrashReport()
+    {
+        string lib = MakeTempLibrary();
+        try
+        {
+            // Satisfactory-shape: real .exe lives in <Game>/Engine/Binaries/Win64
+            // alongside CrashReportClient.exe. <Game>/FactoryGame/Binaries/Win64
+            // has only a .modules manifest + DLLs, no .exe at all.
+            string game = Path.Combine(lib, "steamapps", "common", "Satisfactory");
+            string engineBin = Path.Combine(game, "Engine", "Binaries", "Win64");
+            string factoryBin = Path.Combine(game, "FactoryGame", "Binaries", "Win64");
+
+            MakeEmptyFile(Path.Combine(engineBin, "FactoryGameSteam-Win64-Shipping.exe"));
+            MakeEmptyFile(Path.Combine(engineBin, "CrashReportClient.exe"));
+            MakeEmptyFile(Path.Combine(factoryBin, "FactoryGameSteam-Win64-Shipping.modules"));
+            MakeEmptyFile(Path.Combine(factoryBin, "FactoryGameSteam-FactoryGame-Win64-Shipping.dll"));
+
+            var svc = new ProxyDeployService(new NoopLog());
+            var found = await svc.FindUeGamesAsync(new[] { lib });
+
+            var sat = Assert.Single(found, g => g.Name == "Satisfactory");
+            Assert.Equal(engineBin, sat.BinariesDir);
+            Assert.EndsWith("FactoryGameSteam-Win64-Shipping.exe", sat.ExePath);
+            Assert.DoesNotContain("CrashReport", sat.ExePath);
+        }
+        finally
+        {
+            Directory.Delete(lib, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task FindUeGames_MonolithicLayout_StillPicksGameExeNotEngineSide()
+    {
+        string lib = MakeTempLibrary();
+        try
+        {
+            // Standard monolithic UE: real .exe under <Game>/<Sub>/Binaries/Win64.
+            // <Game>/Engine/Binaries/Win64 contains only CrashReportClient.exe — must
+            // NOT be surfaced as a phantom row.
+            string game = Path.Combine(lib, "steamapps", "common", "MonoGame");
+            string engineBin = Path.Combine(game, "Engine", "Binaries", "Win64");
+            string gameBin = Path.Combine(game, "MonoGame", "Binaries", "Win64");
+
+            MakeEmptyFile(Path.Combine(engineBin, "CrashReportClient.exe"));
+            MakeEmptyFile(Path.Combine(gameBin, "MonoGame-Win64-Shipping.exe"));
+
+            var svc = new ProxyDeployService(new NoopLog());
+            var found = await svc.FindUeGamesAsync(new[] { lib });
+
+            var mono = Assert.Single(found, g => g.Name == "MonoGame");
+            Assert.Equal(gameBin, mono.BinariesDir);
+            Assert.EndsWith("MonoGame-Win64-Shipping.exe", mono.ExePath);
+        }
+        finally
+        {
+            Directory.Delete(lib, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task FindUeGames_OnlyCrashReportInEngineDir_ProducesNoRow()
+    {
+        string lib = MakeTempLibrary();
+        try
+        {
+            // Edge case: a folder that contains an Engine/Binaries/Win64 with
+            // only CrashReportClient.exe and no real game .exe anywhere.
+            // Result: no DetectedGame row — we must not surface CrashReport.
+            string game = Path.Combine(lib, "steamapps", "common", "OrphanEngine");
+            string engineBin = Path.Combine(game, "Engine", "Binaries", "Win64");
+            MakeEmptyFile(Path.Combine(engineBin, "CrashReportClient.exe"));
+
+            var svc = new ProxyDeployService(new NoopLog());
+            var found = await svc.FindUeGamesAsync(new[] { lib });
+
+            Assert.DoesNotContain(found, g => g.Name == "OrphanEngine");
+        }
+        finally
+        {
+            Directory.Delete(lib, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task FindUeGames_HybridLayout_PrefersGameSubdirOverEngineSide()
+    {
+        string lib = MakeTempLibrary();
+        try
+        {
+            // StellarBlade / NMKART / Palworld / Titan Quest II shape: the real
+            // game exe lives in <Game>\<Sub>\Binaries\Win64\ AND a stub
+            // launcher exe lives in <Game>\Engine\Binaries\Win64\. Both look
+            // like valid UE shipping exes. We must surface ONE row pointing at
+            // the <Sub> path — the Engine-side row would lead the user to
+            // deploy version.dll into the wrong folder for monolithic builds.
+            string game = Path.Combine(lib, "steamapps", "common", "StellarBlade");
+            string engineBin = Path.Combine(game, "Engine", "Binaries", "Win64");
+            string sbBin     = Path.Combine(game, "SB", "Binaries", "Win64");
+
+            MakeEmptyFile(Path.Combine(engineBin, "SB-Win64-Shipping.exe"));     // stub launcher
+            MakeEmptyFile(Path.Combine(engineBin, "CrashReportClient.exe"));
+            MakeEmptyFile(Path.Combine(sbBin,     "SB-Win64-Shipping.exe"));     // real exe
+
+            var svc = new ProxyDeployService(new NoopLog());
+            var found = await svc.FindUeGamesAsync(new[] { lib });
+
+            var sb = Assert.Single(found, g => g.Name == "StellarBlade");
+            Assert.Equal(sbBin, sb.BinariesDir);
+        }
+        finally
+        {
+            Directory.Delete(lib, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task FindUeGames_PureModularLayout_FallsThroughToEngine()
+    {
+        string lib = MakeTempLibrary();
+        try
+        {
+            // Repro of the Satisfactory exact shape: <Game>\<Sub>\Binaries\Win64\
+            // has NO .exe at all (only the .modules manifest + game-side DLLs),
+            // so Engine fallback MUST run and pick up the real launcher exe.
+            // Regression-guard against the two-tier search accidentally
+            // skipping Engine when <Sub>\Binaries\Win64\ existed but produced
+            // no game row.
+            string game = Path.Combine(lib, "steamapps", "common", "Satisfactory");
+            string engineBin  = Path.Combine(game, "Engine",      "Binaries", "Win64");
+            string factoryBin = Path.Combine(game, "FactoryGame", "Binaries", "Win64");
+
+            MakeEmptyFile(Path.Combine(engineBin,  "FactoryGameSteam-Win64-Shipping.exe")); // real
+            MakeEmptyFile(Path.Combine(engineBin,  "CrashReportClient.exe"));
+            MakeEmptyFile(Path.Combine(factoryBin, "FactoryGameSteam-Win64-Shipping.modules"));
+            MakeEmptyFile(Path.Combine(factoryBin, "FactoryGameSteam-FactoryGame-Win64-Shipping.dll"));
+
+            var svc = new ProxyDeployService(new NoopLog());
+            var found = await svc.FindUeGamesAsync(new[] { lib });
+
+            var sat = Assert.Single(found, g => g.Name == "Satisfactory");
+            Assert.Equal(engineBin, sat.BinariesDir);
+        }
+        finally
+        {
+            Directory.Delete(lib, recursive: true);
+        }
     }
 }

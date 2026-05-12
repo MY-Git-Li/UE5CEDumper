@@ -11,7 +11,138 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
-## 2026-05-12 (latest, dev branch, build 657-689) — Multi-select Copy CE Fields, Interesting Properties tab (B'), DLL BPGC fix, dump-for-analysis pipeline, 15-game data-driven scoring
+## 2026-05-12 (dev branch, build 690-691) — SdkExportService BPGC filter fix + Satisfactory proxy-deploy fix
+
+Two small, related cleanups from the build 689 "next-session" candidates.
+Both fix bugs that silently dropped real targets — same pattern as the
+build 673 DLL BPGC filter trap (an over-narrow whitelist that everyone
+agreed looked sensible at the time).
+
+### Build 690 — `SdkExportService` BPGC filter (C# mirror of build 673 DLL fix)
+
+[ui/UE5DumpUI/Services/SdkExportService.cs:59](../ui/UE5DumpUI/Services/SdkExportService.cs#L59)
+was filtering Full SDK header export with bare
+`obj.ClassName is "Class" or "ScriptStruct"`. This dropped every
+`BlueprintGeneratedClass` / `AnimBPGC` / `WidgetBPGC` / `DynamicClass`
+target — the exact same bug class the build 673 DLL fix patched, just
+on the C# side. Now calls
+`DumpAllService.IsClassLikeMetaName(obj.ClassName) || obj.ClassName == "ScriptStruct"`
+so the whitelist stays in lockstep with the DumpAll path. New regression
+test `GenerateFullSdkAsync_AcceptsAllClassLikeMetasAndScriptStruct`
+covers every variant explicitly so this bug class cannot regress
+silently a third time.
+
+### Build 692 — Hybrid-layout follow-up (two-tier search)
+
+Build 691 fixed the pure-modular case (Satisfactory) but accidentally
+broke the hybrid case. User screenshot after build 691 showed four
+games with duplicate rows:
+
+| Game           | Phantom Engine row                                  | Real row                                              |
+|----------------|-----------------------------------------------------|-------------------------------------------------------|
+| NMKART         | `NMKART\Engine\Binaries\Win64\`        (NotDeployed) | `NMKART\NMKART\Binaries\Win64\`        (DeployedOutdated) |
+| Palworld       | `Palworld\Engine\Binaries\Win64\`      (NotDeployed) | `Palworld\Pal\Binaries\Win64\`         (DeployedOutdated) |
+| StellarBlade   | `StellarBlade\Engine\Binaries\Win64\`  (NotDeployed) | `StellarBlade\SB\Binaries\Win64\`      (DeployedOutdated) |
+| Titan Quest II | `Titan Quest II\Engine\Binaries\Win64\` (NotDeployed)| `Titan Quest II\TQ2\Binaries\Win64\`   (DeployedOutdated) |
+
+These ship a **stub launcher exe** in `Engine\Binaries\Win64\`
+alongside the real game exe in `<Game>\<Sub>\Binaries\Win64\` — both
+look like valid `*-Win64-Shipping.exe` candidates. Build 691's "skip
+known stubs" approach only filtered `CrashReportClient.exe`; the stub
+*launcher* exes have the same name as the real game exe, so the
+filter can't help.
+
+Fix: split `ScanGameFolder` into a two-tier search:
+
+1. **Primary** — gameDir itself + every non-Engine subdir. Walked first.
+2. **Engine fallback** — `<Game>\Engine\Binaries\Win64\` walked ONLY when
+   primary contributed zero rows for this gameDir.
+
+This handles all three observed layouts cleanly:
+- Monolithic (DQ7R / Hogwarts / Stray): primary wins; Engine fallback
+  never runs → no phantom CrashReport row.
+- Hybrid (StellarBlade / NMKART / Palworld / TQ2): primary wins on the
+  `<Sub>\` real exe; Engine stub never surfaces → one clean row.
+- Pure modular (Satisfactory): primary's `<Sub>\Binaries\Win64\` has
+  no .exe; Engine fallback runs and picks up the real launcher → the
+  only row points to `Engine\Binaries\Win64\`.
+
+Refactor extracted the per-binDir loop body into a private
+`ScanBinariesDir` helper so the new two-tier logic stays readable.
+
+Tests: 800 → 802 (+2 — `FindUeGames_HybridLayout_PrefersGameSubdirOverEngineSide`
+covers StellarBlade-shape, `FindUeGames_PureModularLayout_FallsThroughToEngine`
+locks the Engine-fallback contract). All existing tests still pass.
+
+### Build 691 — Satisfactory proxy deploy (UI ScanGameFolder fix)
+
+User reported putting `version.dll` in
+`<Satisfactory>\FactoryGame\Binaries\Win64\` had no effect. Investigation
+found two related issues:
+
+1. **Wrong folder** — Satisfactory is a *modular* UE build. The real
+   launcher .exe (`FactoryGameSteam-Win64-Shipping.exe`, only 0.3MB —
+   all code lives in DLLs) is under `Engine\Binaries\Win64\` next to
+   `FactoryGameSteam-CoreUObject-Win64-Shipping.dll` and 163 other
+   engine module DLLs. `<Satisfactory>\FactoryGame\Binaries\Win64\`
+   contains only a `.modules` manifest + game-side DLLs, NO .exe at
+   all. Windows DLL search order resolves `version.dll` from the
+   process executable's directory FIRST, so the proxy must go next to
+   the launcher in `Engine\Binaries\Win64\`. User-verified working
+   2026-05-12.
+2. **UI couldn't find Satisfactory at all** —
+   [ProxyDeployService.cs:153-156](../ui/UE5DumpUI/Services/ProxyDeployService.cs#L153)
+   had an explicit "skip the Engine subdir, it only has
+   CrashReportClient.exe" assumption baked into `ScanGameFolder`. That
+   assumption holds for monolithic UE titles (most games) but is fatal
+   for modular builds where the real exe IS in `Engine\Binaries\Win64\`.
+
+Build 691 changes:
+
+- **Removed the Engine-skip** — the `searchRoots` enumeration now includes
+  every subdirectory of the game folder, Engine included.
+- **Added `IsKnownStubExe(exeName)`** — currently filters only
+  `CrashReportClient.exe` (case-insensitive). Applied in both the
+  primary `*-Win64-Shipping.exe` selector and the fallback "any .exe"
+  loop so the stub never becomes a phantom game row.
+- **Monolithic regression-safety**: for ES2 / Geri / DQ7R-style games,
+  `Engine\Binaries\Win64\` still only contains `CrashReportClient.exe`
+  — after the stub filter, no exe survives, so no phantom row appears.
+  Three new regression tests lock this contract:
+  - `FindUeGames_ModularLayout_PicksEngineExeNotCrashReport` —
+    Satisfactory shape: BinariesDir must resolve to `Engine\Binaries\Win64\`,
+    ExePath must NOT contain "CrashReport".
+  - `FindUeGames_MonolithicLayout_StillPicksGameExeNotEngineSide` —
+    standard layout: must pick `<Game>\<Sub>\Binaries\Win64\`, not the
+    Engine-side CrashReportClient.
+  - `FindUeGames_OnlyCrashReportInEngineDir_ProducesNoRow` —
+    pathological edge case: an orphan game folder with only
+    CrashReportClient. Must produce zero rows, not a phantom one.
+- **Scan side was a red herring**: `docs/roadmap.md` previously claimed
+  Satisfactory's GWorld scan was failing because of the modular DLL
+  layout. Stale note — `Macht::AOBScanAllModules` was added in commit
+  `589fc35` (build 509-ish) and `Genau::ScanForTarget` already invokes
+  it with `tryMultiModule=true` for all four targets. The 15-game dump
+  corpus (build 678 + 687) already contained `FactoryGameSteam`'s 4,868
+  BPGCs cleanly, which proves the scan side has been working all along.
+  Roadmap entry corrected.
+- **New `Proxy DLL Deploy` section in lessons-learned.md** captures
+  the modular-vs-monolithic distinction so future-Claude doesn't
+  re-propose "implement multi-module scan" — the scan side is fine,
+  proxy deploy is the half that periodically catches us out.
+
+| Build | Commit | Summary |
+|------:|--------|---------|
+| 690 | (this session) | `SdkExportService` BPGC filter — now reuses `DumpAllService.IsClassLikeMetaName`. Tests: 790 → 791 C#. |
+| 691 | (this session) | Satisfactory proxy deploy — `ScanGameFolder` accepts the Engine subdir + filters `CrashReportClient.exe`. Tests: 791 → 800 C# (+6 IsKnownStubExe InlineData rows, +3 layout regression Facts). Roadmap + lessons-learned updated. |
+| 692 | (this session) | Hybrid-layout fix — `ScanGameFolder` switched to two-tier search (primary roots first, Engine\ as fallback only when primary is empty). Eliminates the phantom Engine-side row that build 691 added for StellarBlade / NMKART / Palworld / TQ2. Tests: 800 → 802 C# (+2 layout regressions). |
+
+Total tests this session: 790 → 802 (+12 C#), DLL tests unchanged
+(62 + 31 = 93). Total 802 + 93 = **895**.
+
+-----
+
+## 2026-05-12 (dev branch, build 657-689) — Multi-select Copy CE Fields, Interesting Properties tab (B'), DLL BPGC fix, dump-for-analysis pipeline, 15-game data-driven scoring
 
 A long single-day session covering 13 commits, two distinct themes:
 **UX/feature additions** (multi-select Copy CE Field, Interesting

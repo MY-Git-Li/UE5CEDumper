@@ -141,20 +141,35 @@ public sealed class ProxyDeployService : IProxyDeployService
     {
         string gameName = Path.GetFileName(gameDir);
 
-        // Search pattern: look for Binaries/Win64/*.exe at up to 2 levels deep
-        // Level 0: <gameDir>/Binaries/Win64/
-        // Level 1: <gameDir>/<subDir>/Binaries/Win64/
-        var searchRoots = new List<string> { gameDir };
+        // Two-tier search to handle three different UE shipping layouts:
+        //   1. Monolithic (DQ7R, Hogwarts, Stray, etc.)
+        //         <Game>\<Sub>\Binaries\Win64\<Game>-Win64-Shipping.exe   ← real
+        //         <Game>\Engine\Binaries\Win64\CrashReportClient.exe       ← stub only
+        //
+        //   2. Hybrid (StellarBlade, NMKART, Palworld, Titan Quest II)
+        //         <Game>\<Sub>\Binaries\Win64\<Game>-Win64-Shipping.exe   ← real
+        //         <Game>\Engine\Binaries\Win64\<Game>-Win64-Shipping.exe  ← stub launcher
+        //
+        //   3. Pure modular (Satisfactory)
+        //         <Game>\<Sub>\Binaries\Win64\  ← no .exe at all (only .modules + DLLs)
+        //         <Game>\Engine\Binaries\Win64\<Game>-Win64-Shipping.exe  ← real launcher
+        //
+        // Walking Engine\ unconditionally produces phantom rows for layouts 1+2
+        // (the user sees both rows for the same game). Skipping Engine\ kills
+        // layout 3 (Satisfactory). Solution: try primary roots first; only fall
+        // back to Engine\Binaries\Win64\ when primary contributed no rows for
+        // this gameDir.
+        var primary = new List<string> { gameDir };
+        string? engineRoot = null;
 
         try
         {
             foreach (string sub in Directory.EnumerateDirectories(gameDir))
             {
-                // Skip the UE Engine folder — it only contains CrashReportClient.exe,
-                // not game binaries.  Avoids false-positive entries.
                 if (string.Equals(Path.GetFileName(sub), "Engine", StringComparison.OrdinalIgnoreCase))
-                    continue;
-                searchRoots.Add(sub);
+                    engineRoot = sub;
+                else
+                    primary.Add(sub);
             }
         }
         catch
@@ -162,67 +177,100 @@ public sealed class ProxyDeployService : IProxyDeployService
             // Permission error etc. — just use the root
         }
 
-        foreach (string root in searchRoots)
+        int gamesBefore = games.Count;
+        foreach (string root in primary)
+            ScanBinariesDir(gameName, gameDir, root, games, seenBinDirs);
+
+        // Engine fallback: only walked when primary yielded zero rows for this
+        // gameDir. Catches pure-modular layouts like Satisfactory where the
+        // real launcher .exe lives in <Game>\Engine\Binaries\Win64\.
+        if (games.Count == gamesBefore && engineRoot != null)
+            ScanBinariesDir(gameName, gameDir, engineRoot, games, seenBinDirs);
+    }
+
+    private void ScanBinariesDir(
+        string gameName, string gameDir, string root,
+        List<DetectedGame> games, HashSet<string> seenBinDirs)
+    {
+        string binDir = Path.Combine(root, "Binaries", "Win64");
+        if (!Directory.Exists(binDir))
+            return;
+
+        // Dedup by BinariesDir
+        if (!seenBinDirs.Add(binDir))
+            return;
+
+        try
         {
-            string binDir = Path.Combine(root, "Binaries", "Win64");
-            if (!Directory.Exists(binDir))
-                continue;
-
-            // Dedup by BinariesDir
-            if (!seenBinDirs.Add(binDir))
-                continue;
-
-            try
+            // Find executables in Binaries/Win64. Stub .exes (CrashReportClient,
+            // launcher helpers) are filtered up front so they never win against
+            // a real game exe even when sorted earlier alphabetically.
+            bool foundUe = false;
+            foreach (string exePath in Directory.EnumerateFiles(binDir, "*.exe"))
             {
-                // Find executables in Binaries/Win64
-                bool foundUe = false;
+                string exeName = Path.GetFileName(exePath);
+                if (IsKnownStubExe(exeName))
+                    continue;
+
+                // Standard UE: xxx-Win64-Shipping.exe
+                bool isStandardUe = exeName.Contains("-Win64-Shipping", StringComparison.OrdinalIgnoreCase);
+
+                // Check for Engine folder nearby (UE indicator)
+                bool hasEngineFolder = Directory.Exists(Path.Combine(root, "Engine"))
+                                    || Directory.Exists(Path.Combine(gameDir, "Engine"));
+
+                if (isStandardUe || hasEngineFolder)
+                {
+                    games.Add(new DetectedGame
+                    {
+                        Name = gameName,
+                        ExePath = exePath,
+                        BinariesDir = binDir,
+                        UeVersion = TryDetectUeVersion(exePath),
+                    });
+                    foundUe = true;
+                    break; // One exe per BinariesDir is enough
+                }
+            }
+
+            // Fallback: any non-stub exe in Binaries/Win64 is likely a UE
+            // game even without standard naming. Same stub filter applies
+            // so we never surface CrashReportClient as a "game".
+            if (!foundUe)
+            {
                 foreach (string exePath in Directory.EnumerateFiles(binDir, "*.exe"))
                 {
                     string exeName = Path.GetFileName(exePath);
+                    if (IsKnownStubExe(exeName))
+                        continue;
 
-                    // Standard UE: xxx-Win64-Shipping.exe
-                    bool isStandardUe = exeName.Contains("-Win64-Shipping", StringComparison.OrdinalIgnoreCase);
-
-                    // Check for Engine folder nearby (UE indicator)
-                    bool hasEngineFolder = Directory.Exists(Path.Combine(root, "Engine"))
-                                        || Directory.Exists(Path.Combine(gameDir, "Engine"));
-
-                    if (isStandardUe || hasEngineFolder)
+                    games.Add(new DetectedGame
                     {
-                        games.Add(new DetectedGame
-                        {
-                            Name = gameName,
-                            ExePath = exePath,
-                            BinariesDir = binDir,
-                            UeVersion = TryDetectUeVersion(exePath),
-                        });
-                        foundUe = true;
-                        break; // One exe per BinariesDir is enough
-                    }
+                        Name = gameName,
+                        ExePath = exePath,
+                        BinariesDir = binDir,
+                        UeVersion = TryDetectUeVersion(exePath),
+                    });
+                    break;
                 }
-
-                // Fallback: any exe in Binaries/Win64 with no .dll extension
-                // is likely a UE game even without standard naming
-                if (!foundUe)
-                {
-                    foreach (string exePath in Directory.EnumerateFiles(binDir, "*.exe"))
-                    {
-                        games.Add(new DetectedGame
-                        {
-                            Name = gameName,
-                            ExePath = exePath,
-                            BinariesDir = binDir,
-                            UeVersion = TryDetectUeVersion(exePath),
-                        });
-                        break;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _log.Warn("ProxyDeploy", $"Error scanning {binDir}: {ex.Message}");
             }
         }
+        catch (Exception ex)
+        {
+            _log.Warn("ProxyDeploy", $"Error scanning {binDir}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Known non-game UE helper executables that ship inside Binaries/Win64
+    /// folders. These would otherwise be picked up as the "game .exe" on
+    /// modular UE builds where Engine/Binaries/Win64 holds both the real
+    /// game launcher and CrashReportClient side-by-side (e.g. Satisfactory).
+    /// Case-insensitive match.
+    /// </summary>
+    internal static bool IsKnownStubExe(string exeName)
+    {
+        return string.Equals(exeName, "CrashReportClient.exe", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

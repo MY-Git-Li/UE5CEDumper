@@ -255,8 +255,13 @@ detection — wait for a real misdetection report before adding.
   resolved on first scan and validated. GWorld ✅.
 
 GWorld success ratio: **28 / 29 (~97%)**. Untested: Star Wars Jedi.
-Failing: Satisfactory (modular DLL — pattern likely needs to live in
-`CoreUObject-Win64-Shipping.dll` instead of the main exe).
+Satisfactory (modular DLL): scan side OK — `Macht::AOBScanAllModules`
+falls through to `FactoryGameSteam-CoreUObject-Win64-Shipping.dll`
+under `Engine\Binaries\Win64\` and the 15-game dump corpus includes
+its 4,868 BPGCs cleanly. Proxy deploy was previously broken because
+the UI skipped the `Engine` subfolder; fixed build 691 (the real
+game .exe lives in `Engine\Binaries\Win64\` for this title, not
+under `FactoryGame\`).
 
 ## Long-running concerns
 

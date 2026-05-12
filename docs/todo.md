@@ -568,15 +568,12 @@ returns the decoded Lua string instead of a number. Optional v2.
 > 1. **More dumps for genre coverage** — 15-game corpus is heavy on JRPG/sim/ARPG.
 >    Adding MMO / fighting / horror / RTS would calibrate further. Use the existing
 >    pipeline; no code changes needed unless a new class-rule emerges. **S effort**.
-> 2. **Fix the same BPGC-filter bug in `SdkExportService`** — build 673 fixed three
->    DLL callsites, but the C# SDK header export at
->    [SdkExportService.cs:59](../ui/UE5DumpUI/Services/SdkExportService.cs#L59) still
->    filters with bare `ClassName is "Class" or "ScriptStruct"`. Mirror the
->    `IsClassLikeMetaName` whitelist used by DumpAllService. **S effort, low risk.**
-> 3. **Multi-module GWorld scan for Satisfactory** — game splits CoreUObject into a
->    separate DLL, plus proxy DLL injection ALSO fails on it (build 686 user feedback).
->    User worked around with CE injection but the proxy-deploy UX path is broken.
->    Adapt `Genau::FindAll` to scan multiple modules when primary scan misses. **M effort**.
+> 2. ~~**Fix the same BPGC-filter bug in `SdkExportService`**~~ — **shipped build 690**.
+>    Now calls `DumpAllService.IsClassLikeMetaName` directly; regression test
+>    `GenerateFullSdkAsync_AcceptsAllClassLikeMetasAndScriptStruct` locks the contract.
+> 3. ~~**Multi-module GWorld scan for Satisfactory**~~ — **shipped build 691**.
+>    Real bug was the UI proxy-deploy scanner skipping `Engine\Binaries\Win64\`
+>    (where modular UE builds put their launcher); scan-side was already working.
 > 4. **Class Family Browser (Proposal C)** — bucketed view of game classes by inferred
 >    role (Character / Pawn / Inventory / Stats / Save / etc.). Genuine
 >    "where do I start exploring a new game?" entry point. **L effort, needs own
@@ -602,49 +599,42 @@ Proposal A (dedupe-by-defining-class) shipped as build 610.
 
 ## New pending items (discovered build 657-689)
 
-### Fix SdkExportService BPGC filter (mirror of build 673 DLL fix)
+### ~~Fix SdkExportService BPGC filter~~ — **shipped build 690**
 
-**Effort**: S | **Risk**: low | **Why**: Build 673 fixed three DLL
-callsites (`SearchProperties` / `ListClasses` / `EnumerateAllFunctions`)
-that wrongly filtered out BlueprintGeneratedClass instances via the
-naive `metaClassName != "Class"` check. But the C# `SdkExportService`
-at [SdkExportService.cs:59](../ui/UE5DumpUI/Services/SdkExportService.cs#L59)
-still does the equivalent client-side filter:
+C# Full SDK export was filtering with bare `ClassName is "Class" or "ScriptStruct"`
+which silently dropped every BlueprintGeneratedClass — same bug class as the
+build 673 DLL fix, different code path. Now calls
+`DumpAllService.IsClassLikeMetaName` directly so the whitelist
+(Class + BPGC + AnimBPGC + WidgetBPGC + DynamicClass) stays in lockstep.
+Regression test `GenerateFullSdkAsync_AcceptsAllClassLikeMetasAndScriptStruct`
+covers every meta variant explicitly so it can't silently regress.
 
-```csharp
-if (obj.ClassName is "Class" or "ScriptStruct")
-    targets.Add((obj.Address, obj.Name, obj.ClassName));
-```
+### ~~Multi-module GWorld scan (Satisfactory class)~~ — **shipped build 691**
 
-So Full SDK export currently misses every BPGC-derived class — same bug
-class as the build 673 DLL fix, different code path. `DumpAllService`
-(build 676) already has the right pattern; mirror its `ClassLikeMetas`
-set or extract it to a shared helper. Add a regression test that
-covers `BlueprintGeneratedClass` / `AnimBPGC` / `WidgetBPGC` /
-`DynamicClass` so this can't silently regress again.
+**Status**: Both halves resolved, neither was the originally-suspected bug.
 
-### Multi-module GWorld scan (Satisfactory class)
+- **Scan side** (originally framed as "multi-module GWorld scan needs implementing"):
+  turns out `Macht::AOBScanAllModules` was ALREADY in place from the build-509 SIMD
+  scanner rewrite (commit `589fc35`), and `Genau::ScanForTarget` already invokes it
+  with `tryMultiModule=true` for GObjects / GNames / GWorld / SparseDelegates. The
+  15-game dump corpus already contained `FactoryGameSteam`'s clean output — the
+  scan side was working all along; only the roadmap note was stale (now corrected).
+- **Proxy deploy side** (the real bug): user couldn't drop `version.dll` because
+  Satisfactory's actual launcher exe lives in `Engine\Binaries\Win64\` (modular UE
+  build), NOT `<Game>\Binaries\Win64\`. UI proxy-deploy scanner was explicitly
+  skipping `Engine\` subdir + breaking on the first `*.exe` it saw, which for
+  modular layouts meant the launcher dir was invisible. Build 691 removes the
+  Engine-skip and filters `CrashReportClient.exe` via `IsKnownStubExe`, so the
+  scanner walks `Engine\Binaries\Win64\` but never surfaces phantom rows for
+  monolithic games (where that folder only contains CrashReportClient).
 
-**Effort**: M | **Risk**: med | **Why**: Build 689 user feedback —
-Satisfactory's proxy DLL injection ALSO fails (not just GWorld scan).
-Game splits CoreUObject into its own DLL; the AOB patterns live in
-`CoreUObject-Win64-Shipping.dll` rather than the main exe. User worked
-around with CE injection but the proxy-deploy UX path is broken on this
-title.
+Files touched: [ProxyDeployService.cs:140](../ui/UE5DumpUI/Services/ProxyDeployService.cs#L140),
+[ProxyDeployTests.cs](../ui/UE5DumpUI.Tests/ProxyDeployTests.cs) (3 new tests —
+modular layout, monolithic regression, orphan-Engine-dir edge case),
+[lessons-learned.md "Proxy DLL Deploy"](lessons-learned.md#proxy-dll-deploy).
 
-Two parts:
-1. **Multi-module scan in Genau** — when the primary `Genau::FindAll`
-   pass on the main exe misses GWorld / GNames / GObjects, fall through
-   to scanning every loaded module that matches `*CoreUObject*.dll`.
-   Mirror the existing logging (which pattern hit which module).
-2. **Investigate proxy DLL injection failure** — separate issue from
-   scan: even when we drop version.dll into the install folder, the
-   game's loader bypasses normal proxy hooking. Need to investigate
-   what loading mechanism Satisfactory uses (EOS-launcher init? custom
-   PE patch?) and either add a new shim type or document the limitation.
-
-Once attached via CE injection, the rest works — Satisfactory dump
-produced 4,868 BPGCs cleanly in the 15-game analysis run.
+User-side verification 2026-05-12: manual `version.dll` drop into
+`<Satisfactory>\Engine\Binaries\Win64\` → pipe connects, dump completes.
 
 ### More-genre dump coverage (calibration follow-up)
 
