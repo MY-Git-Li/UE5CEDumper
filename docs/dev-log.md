@@ -11,6 +11,74 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-05-12 (dev branch, scripts only) — 17-game bias recheck + analyzer hint sync
+
+User added two new dumps (Star Wars Jedi: Fallen Order — UE 4.21 EA
+action-adventure, 734 game classes; Ghostwire: Tokyo — UE 5.04 Tango
+Gameworks action-horror, 1558 game classes) bringing the corpus to
+**17 games**. Goal: are the build-678 / build-687 keyword + class-rule
+calibrations still well-supported, or do the new dumps surface a
+pattern the existing tables miss?
+
+### Meta finding: the analyzer's own hint table was stale
+
+`scripts/analysis/analyze_dumps.py:CHEAT_KEYWORD_HINTS` had drifted from
+`PropertyScoringTable.cs` — the build-678 additions
+(`Effect/Target/Radius/Ability/Modifier/Duration/Item/Items`) had been
+added to the C# tables but never mirrored into the Python hint list, so
+the "Existing category" column in every fresh report kept flagging
+them as **un-categorised** even though they had been calibrated and
+shipped months ago. This drift would have made any future bias check
+hallucinate "new candidates" that were actually already covered. Synced
+the hint table to mirror the C# tables fully; future runs now show
+accurate category labels.
+
+### Bias verdict — tables remain stable
+
+After the sync, the 17-game cross-game token distribution shows:
+
+- Every property token rank-1 through rank-60 with ≥7 game support
+  either falls in an existing keyword bucket
+  (`combat`/`stats`/`resources`) or is engine plumbing
+  (`graph`/`anim`/`node`/`uber`/`frame`/`transition`/`pose` etc).
+- Unusual-Location class-bonus rules from build 670 + 687 (Health /
+  Damage / Weapon / Save / Menu containers) all re-validated.
+- The two genre-adjacent additions reinforce existing patterns rather
+  than surface new ones — neither EA action-adventure nor Tango action-
+  horror brought a token cluster above the build-678 evidence threshold
+  (8+ cross-game with substantial per-game count).
+- Closest borderline: `Effects` (plural) at 7/17 games (41%). Below the
+  build-678 ratio for `Ability` (53%) and same root word as the already-
+  present `Effect` (16/17 games) — not worth adding for cosmetic plural
+  coverage.
+
+**No keyword additions, no class-rule additions, no scoring weight
+changes.** The first analysis since calibration to confirm the tables
+generalise to genre-adjacent unseen titles.
+
+### What WOULD move the needle
+
+If we add 3-5 dumps each from genuinely under-represented genres
+(MMO / fighting / RTS / sports-sim / horror-pure), the analyzer would
+have a chance to surface vocabulary not present in the 17-game JRPG /
+sim / action-adventure / sandbox / racing mix. Until then, further
+ARPG / adventure dumps will keep reinforcing the current calibration
+without expanding it. Tracked in
+[docs/todo.md → More-genre dump coverage](todo.md).
+
+### Files touched
+
+- [scripts/analysis/analyze_dumps.py](../scripts/analysis/analyze_dumps.py)
+  — `CHEAT_KEYWORD_HINTS` synced to mirror `PropertyScoringTable.cs`
+  exactly. Comment added linking the two and noting "keep in lockstep
+  when you touch StatsKeywords / CombatKeywords / etc."
+
+No DLL / UI code touched. No tests touched. The 17 dumps + the
+regenerated `work/dump/analysis-report.md` live under `work/` which is
+gitignored — only the analyzer + scoring tables are version-tracked.
+
+-----
+
 ## 2026-05-12 (dev branch, docs only) — GWorld 29 / 29 (100%), Star Wars Jedi verified, EA-launcher proxy limitation documented
 
 User verification on two previously "unverified or thought-failing" titles

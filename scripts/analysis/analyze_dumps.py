@@ -276,16 +276,43 @@ CHEAT_KEYWORD_HINTS = {
     # Hints for picking interesting tokens out of the noise. Each entry
     # is a *category label* the analyst can sort by; the table here is
     # NOT the keyword table — it's a UI sort for the analyst.
-    "stats":     ("health", "hp", "mp", "mana", "stamina", "energy", "level",
-                  "lv", "xp", "exp", "experience", "dead", "alive", "max"),
-    "combat":    ("damage", "dmg", "defense", "armor", "armour", "crit",
-                  "attack", "atk", "weapon", "hit", "resist"),
-    "resources": ("gold", "coin", "coins", "money", "gem", "diamond", "ammo",
-                  "stack", "count", "quantity", "amount"),
-    "movement":  ("speed", "velocity", "jump", "walk", "sprint", "run",
-                  "friction", "gravity", "dash", "climb"),
-    "utility":   ("quest", "save", "load", "checkpoint", "cheat", "debug",
-                  "immortal", "invincible", "godmode", "noclip"),
+    #
+    # Synced to mirror PropertyScoringTable.cs as of build 698 — when
+    # this drifts the report's "Existing category" column lies about
+    # which tokens are already covered, which historically made already-
+    # added build-678 keywords (Effect / Target / Radius / etc.) keep
+    # surfacing as "uncategorised" in fresh runs. Keep this list in
+    # lockstep when you touch StatsKeywords / CombatKeywords / etc.
+    # All entries are lowercase because tokenize() lowercases.
+    "stats":     ("hp", "health", "mp", "mana", "sp", "stamina", "energy",
+                  "xp", "exp", "experience", "level", "lv", "lvl",
+                  "dead", "isdead", "alive", "isalive",
+                  "regen", "regenerate", "max"),
+    "combat":    ("damage", "dmg", "defense", "defence", "def", "armor", "armour",
+                  "resistance", "resist",
+                  "crit", "critical", "critrate", "critdamage",
+                  "attack", "atk", "multiplier",
+                  "weapon", "hit", "hitdamage",
+                  # Build 678 cross-game additions
+                  "effect", "target", "radius", "ability", "modifier", "duration"),
+    "resources": ("gold", "coin", "coins", "money", "currency", "cash",
+                  "credit", "credits",
+                  "gem", "gems", "diamond", "diamonds", "crystal", "crystals",
+                  "token", "tokens",
+                  "ammo", "material", "materials", "resource", "resources",
+                  "supply", "supplies",
+                  "stack", "count", "quantity", "amount",
+                  # Build 678 cross-game additions
+                  "item", "items"),
+    "movement":  ("speed", "velocity", "walk", "sprint", "run",
+                  "jump", "jumpheight", "jumpz",
+                  "friction", "acceleration", "gravity",
+                  "dash", "climb", "swim"),
+    "utility":   ("save", "load", "checkpoint",
+                  "quest", "mission", "objective",
+                  "cheat", "debug", "godmode", "noclip", "score",
+                  "isimmortal", "canbedamaged", "immortal",
+                  "invincible", "invulnerable"),
 }
 
 def categorize_token(tok: str) -> str | None:
