@@ -949,6 +949,73 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Stream a full classes-and-properties dump to a JSON-Lines file
+    /// for offline analysis. Used to feed the
+    /// <c>scripts/analysis/analyze_dumps.py</c> aggregator that derives
+    /// keyword tables / class bonuses from real-game data instead of
+    /// hand-curated guesses.
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportDumpAllAsync()
+    {
+        if (_engineState == null) return;
+
+        try
+        {
+            ClearError();
+            var moduleName = _engineState.ModuleName;
+            if (string.IsNullOrEmpty(moduleName)) moduleName = "game";
+            var safeModule = Path.GetFileNameWithoutExtension(moduleName);
+            var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+
+            var filePath = await _platform.ShowSaveFileDialogAsync(
+                $"{safeModule}-dump-{stamp}", "Dump JSON Lines (*.jsonl)", ".jsonl");
+            if (string.IsNullOrEmpty(filePath)) return;
+
+            StatusText = "Dumping classes...";
+            var progress = new Progress<DumpProgress>(p =>
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    StatusText = p.Total > 0
+                        ? $"{p.Phase} ({p.Done}/{p.Total})"
+                        : $"{p.Phase} ({p.Done})";
+                }));
+
+            var options = new DumpOptions(
+                GameOnly: false,                           // Capture engine too; analysis can filter
+                IncludeFunctions: true,
+                IncludeInstanceCounts: true,
+                DumperBuildNumber: GetBuildNumber(),
+                DumperCommit: null);                        // Not yet plumbed through
+
+            await using var fs = new FileStream(
+                filePath, FileMode.Create, FileAccess.Write, FileShare.Read, 64 * 1024, useAsync: true);
+            await DumpAllService.GenerateAsync(_dump, _engineState, fs, options, progress);
+
+            var fileInfo = new FileInfo(filePath);
+            StatusText = $"Dumped {fileInfo.Length / 1024 / 1024:F1} MB to {Path.GetFileName(filePath)}";
+            _log.Info($"DumpAll exported to {filePath} ({fileInfo.Length} bytes)");
+        }
+        catch (Exception ex)
+        {
+            StatusText = "Dump failed";
+            SetError(ex);
+            _log.Error("DumpAll export failed", ex);
+        }
+    }
+
+    /// <summary>
+    /// Same EntryAssembly + Version.Revision trick the System tab uses
+    /// (see PointerPanelViewModel.ReadUiBuildNumber for the two-trap
+    /// rationale).
+    /// </summary>
+    private static int GetBuildNumber()
+    {
+        var rev = Assembly.GetEntryAssembly()?.GetName().Version?.Revision ?? 0;
+        return rev > 0 ? rev : 0;
+    }
+
     [RelayCommand]
     private async Task ExportUsmapAsync()
     {
