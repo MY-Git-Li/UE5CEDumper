@@ -131,32 +131,19 @@ def tokenize(identifier: str) -> list[str]:
 # Filtering — engine vs game classes
 # =====================================================================
 
-ENGINE_PATH_PREFIXES = (
-    "/Script/Engine.",
-    "/Script/CoreUObject.",
-    "/Script/CoreOnline.",
-    "/Script/UMG.",
-    "/Script/Slate.",
-    "/Script/SlateCore.",
-    "/Script/InputCore.",
-    "/Script/PhysicsCore.",
-    "/Script/NavigationSystem.",
-    "/Script/AIModule.",
-    "/Script/Niagara.",
-    "/Script/MovieScene.",
-    "/Script/LevelSequence.",
-    "/Script/Landscape.",
-    "/Script/Foliage.",
-    "/Script/AnimGraphRuntime.",
-    "/Script/AudioMixer.",
-    "/Script/GameplayTags.",
-    "/Script/GameplayTasks.",
-    "/Script/GameplayAbilities.",
-)
-
+# Engine classes live under `/Script/<Module>/...`. The DLL emits paths
+# with either `.` or `/` as the package/class separator depending on
+# code path (Ubel::GetFullName uses `/`; PropertyMatch::classPath uses
+# `.`). Substring match against `/Script/` is format-agnostic and
+# precise enough — game classes live under `/Game/...` so there's no
+# collision risk.
 def is_engine_class(cls: dict) -> bool:
     path = cls.get("path", "")
-    return any(path.startswith(p) for p in ENGINE_PATH_PREFIXES)
+    return "/Script/" in path
+
+def is_game_class(cls: dict) -> bool:
+    path = cls.get("path", "")
+    return "/Game/" in path or "/Engine/" not in path and "/Script/" not in path
 
 
 # =====================================================================
@@ -167,18 +154,57 @@ def is_engine_class(cls: dict) -> bool:
 class GameAggregates:
     """Per-game roll-up of property-name + class-token statistics."""
     label: str
-    prop_name_freq: Counter = field(default_factory=Counter)         # exact prop name -> n
-    prop_token_freq: Counter = field(default_factory=Counter)        # tokenized prop part -> n
-    class_token_freq: Counter = field(default_factory=Counter)       # tokenized class part -> n
+    # OWN props only — fields actually defined on the class (not
+    # inherited from supers). This is the cheat-relevant signal: every
+    # game class re-lists AActor's bReplicates / bHidden / OnClicked
+    # because WalkClass merges supers into one Fields list. We split
+    # them back out via super_addr resolution.
+    own_prop_name_freq: Counter = field(default_factory=Counter)
+    own_prop_token_freq: Counter = field(default_factory=Counter)
+    # Number of CLASSES that own each property name (cross-class
+    # frequency). e.g. Health=5 means 5 different classes declare
+    # their own Health field — a strong cross-game signal.
+    own_prop_classes: dict[str, set[str]] = field(default_factory=lambda: defaultdict(set))
+    class_token_freq: Counter = field(default_factory=Counter)
     is_bpgc_count: int = 0
     game_class_count: int = 0
     engine_class_count: int = 0
-    # Co-occurrence: (class_token, prop_token) -> count
+    # Co-occurrence on OWN props only.
+    # (class_token, prop_token) -> count
     class_x_prop: Counter = field(default_factory=Counter)
 
 
+def _resolve_own_props(cls: dict, by_addr: dict[str, dict]) -> list[dict]:
+    """Return the subset of `cls['props']` whose offset is at or above
+    the super's <c>props_size</c> — those are the fields declared ON
+    this class. Walks the super chain to handle the super-of-super case
+    when the immediate super has zero own fields (rare but happens for
+    pass-through base classes).
+    """
+    super_addr = cls.get("super_addr", "0x0")
+    if not super_addr or super_addr == "0x0":
+        return cls.get("props", [])
+    super_cls = by_addr.get(super_addr)
+    if super_cls is None:
+        # Super not in our dump (engine module dropped, etc.). Treat
+        # whole prop list as own to avoid losing data; analyst can
+        # filter further client-side.
+        return cls.get("props", [])
+    super_size = super_cls.get("props_size", 0)
+    return [p for p in cls.get("props", []) if p.get("offset", 0) >= super_size]
+
+
 def aggregate(dump: Dump, game_only: bool = True) -> GameAggregates:
+    """Per-game aggregation, OWN-props-only by default.
+    Side effect: skips engine classes when game_only=True so cross-game
+    stats focus on game-specific naming patterns."""
     agg = GameAggregates(label=dump.label)
+
+    # Build addr -> class map for super lookup. Needs to include engine
+    # classes too — game classes derive FROM engine classes, so the
+    # super chain crosses the boundary.
+    by_addr = {cls["addr"]: cls for cls in dump.classes if cls.get("addr")}
+
     for cls in dump.classes:
         if is_engine_class(cls):
             agg.engine_class_count += 1
@@ -189,24 +215,24 @@ def aggregate(dump: Dump, game_only: bool = True) -> GameAggregates:
         if cls.get("is_bpgc"):
             agg.is_bpgc_count += 1
 
-        class_tokens = set(tokenize(cls.get("name", "")))
+        class_name = cls.get("name", "")
+        class_tokens = set(tokenize(class_name))
         for ct in class_tokens:
             agg.class_token_freq[ct] += 1
 
-        for prop in cls.get("props", []):
+        # OWN props only — the meaningful signal.
+        for prop in _resolve_own_props(cls, by_addr):
             name = prop.get("name", "")
             if not name:
                 continue
-            agg.prop_name_freq[name] += 1
+            agg.own_prop_name_freq[name] += 1
+            agg.own_prop_classes[name].add(class_name)
             tokens = set(tokenize(name))
             for t in tokens:
-                agg.prop_token_freq[t] += 1
-            # Co-occurrence (only on game classes — engine cooccurrences
-            # are dominated by base-class fields).
-            if not is_engine_class(cls):
-                for ct in class_tokens:
-                    for pt in tokens:
-                        agg.class_x_prop[(ct, pt)] += 1
+                agg.own_prop_token_freq[t] += 1
+            for ct in class_tokens:
+                for pt in tokens:
+                    agg.class_x_prop[(ct, pt)] += 1
     return agg
 
 
@@ -237,20 +263,49 @@ def categorize_token(tok: str) -> str | None:
     return None
 
 
+# Tokens that match the tokenizer but carry no useful signal — common
+# English connectives, language particles, single letters that fall out
+# of class names like `BP_Player_C` → ["bp","player","c"]. Filtering
+# these out keeps the candidate-keyword report focused on signal.
+TRIVIAL_TOKENS: frozenset[str] = frozenset({
+    "b",            # boolean prefix bX
+    "c",            # _C BPGC suffix
+    "f", "u", "a",  # UE type prefixes (FStruct/UClass/AActor)
+    "is", "has",    # boolean verbs without category signal
+    "on",           # delegate prefix Onx
+    "in", "to", "of", "for", "with", "by", "the", "a", "an",
+    "and", "or", "not", "be", "do", "get", "set",
+    "my",           # generic prefix BP_MyFoo_C
+    "bp",           # BP_ class prefix
+    "tmp", "temp",  # placeholder names
+})
+
+
 def report_top_property_names(aggs: list[GameAggregates], top: int = 100) -> str:
-    """Table: property-name frequency × game (so we see which names are
-    cross-game, which are single-game noise)."""
+    """Top OWN property names (definition-site frequency), with per-game
+    breakdown.
+
+    "Total" counts the number of CLASSES that declare their own copy of
+    this name (not the inheritance-blown-up count). A name with
+    Total >= len(games) is likely a cross-game convention worth
+    adding to the scoring table.
+    """
     merged = Counter()
     per_game: dict[str, dict[str, int]] = defaultdict(dict)
     for agg in aggs:
-        for name, n in agg.prop_name_freq.items():
-            merged[name] += n
-            per_game[name][agg.label] = n
+        for name, classes in agg.own_prop_classes.items():
+            cnt = len(classes)
+            merged[name] += cnt
+            per_game[name][agg.label] = cnt
 
     lines: list[str] = []
-    lines.append(f"# Top {top} property names across {len(aggs)} game(s)")
+    lines.append(f"# Top {top} OWN property names (definition site) across {len(aggs)} game(s)")
     lines.append("")
-    lines.append("| Rank | Name | Total | Games hit | Per game (label:count) |")
+    lines.append("Counts the number of distinct CLASSES that DECLARE their own copy "
+                 "of this name (inherited copies excluded). High Total + multiple "
+                 "games hit = strong cross-game convention.")
+    lines.append("")
+    lines.append("| Rank | Name | Classes | Games | Per game (label:N) |")
     lines.append("|---:|---|---:|---:|---|")
     for rank, (name, total) in enumerate(merged.most_common(top), 1):
         per = per_game[name]
@@ -261,20 +316,27 @@ def report_top_property_names(aggs: list[GameAggregates], top: int = 100) -> str
 
 
 def report_top_prop_tokens(aggs: list[GameAggregates], top: int = 60) -> str:
-    """Property TOKEN frequency — these are the candidate keywords for
-    the scoring table. Cross-references against our current categorisation
-    so the analyst sees which categories the tokens land in."""
+    """Property TOKEN frequency on OWN properties only. Trivial tokens
+    (b/c/on/is/...) are filtered out so candidate keywords stay
+    visible. Cross-references existing categorisation so analyst sees
+    which tokens land outside the table."""
     merged = Counter()
     per_game: dict[str, set[str]] = defaultdict(set)
     for agg in aggs:
-        for tok, n in agg.prop_token_freq.items():
+        for tok, n in agg.own_prop_token_freq.items():
+            if tok in TRIVIAL_TOKENS:
+                continue
+            if len(tok) < 2:
+                continue
             merged[tok] += n
             per_game[tok].add(agg.label)
 
     lines: list[str] = []
-    lines.append(f"# Top {top} property TOKENS (candidate keywords)")
+    lines.append(f"# Top {top} OWN property TOKENS (candidate keywords)")
     lines.append("")
-    lines.append("Use this to spot tokens that look cheat-relevant but aren't yet in PropertyScoringTable's tables.")
+    lines.append("Tokens of game-defined property names. Trivial tokens "
+                 "(b/c/on/is/etc.) filtered. Cross-referenced against "
+                 "existing PropertyScoringTable buckets.")
     lines.append("")
     lines.append("| Rank | Token | Hits | Games | Existing category |")
     lines.append("|---:|---|---:|---:|---|")
@@ -305,6 +367,12 @@ def report_unusual_locations(aggs: list[GameAggregates], min_count: int = 3) -> 
             if pt not in cheat_tokens:
                 continue
             if ct in KNOWN_BONUSES:
+                continue
+            if ct in TRIVIAL_TOKENS:
+                continue
+            if len(ct) < 3:
+                # Drop very short tokens (c/bp/ar/etc.) — too ambiguous
+                # to seed a class-bonus rule.
                 continue
             merged[(ct, pt)] += n
 
