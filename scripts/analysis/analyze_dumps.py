@@ -152,7 +152,9 @@ def is_game_class(cls: dict) -> bool:
 
 @dataclass
 class GameAggregates:
-    """Per-game roll-up of property-name + class-token statistics."""
+    """Per-game roll-up of property-name + class-token + function
+    statistics. The function side mirrors the property side: token
+    frequency, class-name co-occurrence, optional dedup by addr."""
     label: str
     # OWN props only — fields actually defined on the class (not
     # inherited from supers). This is the cheat-relevant signal: every
@@ -172,6 +174,18 @@ class GameAggregates:
     # Co-occurrence on OWN props only.
     # (class_token, prop_token) -> count
     class_x_prop: Counter = field(default_factory=Counter)
+    # === Function-side aggregates (Phase 2) ===
+    # Each function entry from the dump represents a function declared
+    # on the class (WalkFunctions walks UStruct::Children at the class
+    # level — doesn't recurse up the super chain). So unlike props,
+    # there's no per-game inheritance dedup needed; the funcs[] list
+    # is already "own functions" by virtue of how the DLL gathers them.
+    own_func_name_freq: Counter = field(default_factory=Counter)
+    own_func_token_freq: Counter = field(default_factory=Counter)
+    own_func_classes: dict[str, set[str]] = field(default_factory=lambda: defaultdict(set))
+    # (class_token, func_token) co-occurrence — used to surface
+    # candidate ClassLocationScorer class rules from real function names.
+    class_x_func: Counter = field(default_factory=Counter)
 
 
 def _resolve_own_props(cls: dict, by_addr: dict[str, dict]) -> list[dict]:
@@ -233,6 +247,24 @@ def aggregate(dump: Dump, game_only: bool = True) -> GameAggregates:
             for ct in class_tokens:
                 for pt in tokens:
                     agg.class_x_prop[(ct, pt)] += 1
+
+        # === Function aggregation (Phase 2 — feeds KeywordScoringTable) ===
+        # cls['funcs'] holds the class's OWN functions (DLL-side
+        # WalkFunctions doesn't recurse supers), so no offset / addr
+        # dedup is needed. Same trivial-token / min-games filters
+        # at report time keep the signal-to-noise ratio sensible.
+        for fn in cls.get("funcs", []):
+            fname = fn.get("name", "")
+            if not fname:
+                continue
+            agg.own_func_name_freq[fname] += 1
+            agg.own_func_classes[fname].add(class_name)
+            ftokens = set(tokenize(fname))
+            for t in ftokens:
+                agg.own_func_token_freq[t] += 1
+            for ct in class_tokens:
+                for ft in ftokens:
+                    agg.class_x_func[(ct, ft)] += 1
     return agg
 
 
@@ -267,6 +299,12 @@ def categorize_token(tok: str) -> str | None:
 # English connectives, language particles, single letters that fall out
 # of class names like `BP_Player_C` → ["bp","player","c"]. Filtering
 # these out keeps the candidate-keyword report focused on signal.
+#
+# Phase 2 additions (function-side analysis): BP compilation artifacts
+# dominate UFunction names. Every BPGC has dozens of
+# `ExecuteUbergraph_Foo_K2Node_*`, `Foo__DelegateSignature`,
+# `BndEvt__Foo_K2Node_*`, etc. Without this filter the top 60 function
+# tokens are 100% UE/BP plumbing and zero cheat signal.
 TRIVIAL_TOKENS: frozenset[str] = frozenset({
     "b",            # boolean prefix bX
     "c",            # _C BPGC suffix
@@ -278,6 +316,21 @@ TRIVIAL_TOKENS: frozenset[str] = frozenset({
     "my",           # generic prefix BP_MyFoo_C
     "bp",           # BP_ class prefix
     "tmp", "temp",  # placeholder names
+    # --- BP / UE compilation artifacts (function-side) ---
+    "ubergraph", "k2node", "evt", "bnd", "bpi",
+    "evaluate", "exposed", "inputs", "outputs",
+    "signature", "delegate", "bound",
+    "execute", "executed", "executes",
+    "notify", "notified",
+    "finished", "completed",
+    "clicked", "changed", "hovered", "unhovered", "released",
+    "construct", "construction", "constructed",
+    "inp", "func", "out",
+    "receive", "received",
+    "pre", "post",
+    "begin", "end",  # BeginPlay/EndPlay etc — engine boilerplate
+    "tick", "ticked",
+    "play",  # PlaySound / PlayAnimation / etc — mostly UE
 })
 
 
@@ -378,6 +431,140 @@ def report_top_prop_tokens(aggs: list[GameAggregates], top: int = 60,
             break
         cat = categorize_token(tok) or ""
         lines.append(f"| {rank} | `{tok}` | {hits} | {games} | {cat} |")
+    return "\n".join(lines)
+
+
+def report_top_func_names(aggs: list[GameAggregates], top: int = 100,
+                          min_games: int = 1) -> str:
+    """Top function names (definition-site frequency, OWN funcs per
+    DLL-side WalkFunctions semantics — see GameAggregates docstring).
+    Mirrors report_top_property_names for the function side. Feeds
+    KeywordScoringTable.cs candidate adds."""
+    merged = Counter()
+    per_game: dict[str, dict[str, int]] = defaultdict(dict)
+    for agg in aggs:
+        for name, classes in agg.own_func_classes.items():
+            cnt = len(classes)
+            merged[name] += cnt
+            per_game[name][agg.label] = cnt
+
+    lines: list[str] = []
+    if min_games > 1:
+        lines.append(f"# Top {top} OWN function names — ≥ {min_games} games")
+    else:
+        lines.append(f"# Top {top} OWN function names across {len(aggs)} game(s)")
+    lines.append("")
+    lines.append("Counts the number of distinct CLASSES that DECLARE this "
+                 "function name. Cross-game frequency surfaces function "
+                 "naming conventions that should feed KeywordScoringTable.")
+    lines.append("")
+    lines.append("| Rank | Name | Classes | Games | Per game (label:N) |")
+    lines.append("|---:|---|---:|---:|---|")
+    rank = 0
+    for name, total in merged.most_common():
+        per = per_game[name]
+        games_hit = len(per)
+        if games_hit < min_games:
+            continue
+        rank += 1
+        if rank > top:
+            break
+        per_str = "; ".join(f"{lbl}:{n}" for lbl, n in sorted(per.items()))
+        lines.append(f"| {rank} | `{name}` | {total} | {games_hit} | {per_str} |")
+    return "\n".join(lines)
+
+
+def report_top_func_tokens(aggs: list[GameAggregates], top: int = 60,
+                           min_games: int = 1) -> str:
+    """Top function TOKENS — candidate keywords for KeywordScoringTable.
+    Same trivial-token / length-2 filtering as property side."""
+    merged = Counter()
+    per_game: dict[str, set[str]] = defaultdict(set)
+    for agg in aggs:
+        for tok, n in agg.own_func_token_freq.items():
+            if tok in TRIVIAL_TOKENS:
+                continue
+            if len(tok) < 2:
+                continue
+            merged[tok] += n
+            per_game[tok].add(agg.label)
+
+    lines: list[str] = []
+    if min_games > 1:
+        lines.append(f"# Top {top} OWN function TOKENS — ≥ {min_games} games")
+    else:
+        lines.append(f"# Top {top} OWN function TOKENS (candidate keywords)")
+    lines.append("")
+    lines.append("Tokens of game-defined function names. Trivial tokens "
+                 "(b/c/on/is/etc.) filtered. Candidates for "
+                 "KeywordScoringTable.cs Stats / Inventory / Movement / "
+                 "Combat / Utility / ExplicitMovementCheats buckets.")
+    lines.append("")
+    lines.append("| Rank | Token | Hits | Games | Existing category |")
+    lines.append("|---:|---|---:|---:|---|")
+    rank = 0
+    for tok, hits in merged.most_common():
+        games = len(per_game[tok])
+        if games < min_games:
+            continue
+        rank += 1
+        if rank > top:
+            break
+        cat = categorize_token(tok) or ""
+        lines.append(f"| {rank} | `{tok}` | {hits} | {games} | {cat} |")
+    return "\n".join(lines)
+
+
+def report_unusual_func_locations(aggs: list[GameAggregates],
+                                  min_count: int = 3,
+                                  min_games: int = 3) -> str:
+    """Class tokens hosting cheat-relevant function tokens. Surfaces
+    candidate ClassLocationScorer additions from the function side
+    (mirror of Property-side Unusual Locations report). Function names
+    are verb+noun, so the property-side cheat_tokens set works as a
+    first filter."""
+    KNOWN_BONUSES = {
+        # ClassLocationScorer.FunctionBonus expected (+) entries.
+        "character", "pawn", "playercontroller", "playerstate",
+        "player", "gamemode", "gameinstance", "savegame",
+        # Property-side rules too — same classes show up on both sides.
+        "abilitysystem", "attributeset", "inventory", "equipment",
+        "playerprofile", "localplayer", "gameviewportclient", "hud",
+        "ucheatmanager", "cheatmanager",
+        "weapon", "projectile", "battle",  # build 678 adds
+    }
+    cheat_tokens = set().union(*CHEAT_KEYWORD_HINTS.values())
+
+    merged: Counter = Counter()
+    games_for_pair: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for agg in aggs:
+        for (ct, ft), n in agg.class_x_func.items():
+            if ft not in cheat_tokens:
+                continue
+            if ct in KNOWN_BONUSES:
+                continue
+            if ct in TRIVIAL_TOKENS:
+                continue
+            if len(ct) < 3:
+                continue
+            merged[(ct, ft)] += n
+            games_for_pair[(ct, ft)].add(agg.label)
+
+    lines: list[str] = []
+    lines.append(f"# Candidate function-side class bonuses (hosts cheat-relevant function tokens, not yet in ClassLocationScorer)")
+    lines.append("")
+    lines.append(f"Filter: ≥ {min_count} occurrences across all dumps; "
+                 f"appears in ≥ {min_games} game(s).")
+    lines.append("")
+    lines.append("| Class token | Func token | Hits | Games |")
+    lines.append("|---|---|---:|---:|")
+    for (ct, ft), n in merged.most_common(400):
+        if n < min_count:
+            continue
+        games = len(games_for_pair[(ct, ft)])
+        if games < min_games:
+            continue
+        lines.append(f"| `{ct}` | `{ft}` | {n} | {games} |")
     return "\n".join(lines)
 
 
@@ -485,16 +672,27 @@ def main(argv: list[str] | None = None) -> int:
     if len(aggs) >= 2:
         # Lead with cross-game sections — single-game spikes get filtered
         # so the actionable signal surfaces immediately.
+        sections.append("# --- PROPERTY SIDE ---")
         sections.append(report_top_property_names(aggs, top=args.top, min_games=args.min_games))
         sections.append(report_top_prop_tokens(aggs, top=min(args.top, 60), min_games=args.min_games))
         sections.append(report_unusual_locations(aggs, min_games=args.min_games))
-        # Follow with raw "all data" sections for completeness.
+        # Function side — mirrors property side. Feeds KeywordScoringTable.
+        sections.append("# --- FUNCTION SIDE ---")
+        sections.append(report_top_func_names(aggs, top=args.top, min_games=args.min_games))
+        sections.append(report_top_func_tokens(aggs, top=min(args.top, 60), min_games=args.min_games))
+        sections.append(report_unusual_func_locations(aggs, min_games=args.min_games))
+        # Raw "all data" sections for completeness (no min-games filter).
+        sections.append("# --- RAW (no min-games filter, single-game spikes included) ---")
         sections.append(report_top_property_names(aggs, top=args.top, min_games=1))
         sections.append(report_top_prop_tokens(aggs, top=min(args.top, 60), min_games=1))
+        sections.append(report_top_func_names(aggs, top=args.top, min_games=1))
+        sections.append(report_top_func_tokens(aggs, top=min(args.top, 60), min_games=1))
     else:
         sections.append(report_top_property_names(aggs, top=args.top))
         sections.append(report_top_prop_tokens(aggs, top=min(args.top, 60)))
         sections.append(report_unusual_locations(aggs))
+        sections.append(report_top_func_names(aggs, top=args.top))
+        sections.append(report_top_func_tokens(aggs, top=min(args.top, 60)))
     report = "\n\n".join(sections)
     args.output.write_text(report, encoding="utf-8")
     print(f"[done] wrote {args.output} ({len(report):,} chars)")

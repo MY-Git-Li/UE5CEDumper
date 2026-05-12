@@ -93,6 +93,9 @@ public class PropertyScoringTableTests
     [InlineData("WeaponData",            false, 2)]  // Weapon-prefix struct
     [InlineData("BP_Projectile_C",       false, 2)]  // Projectile class
     [InlineData("BP_Battle_Manager_C",   false, 2)]  // Battle class
+    // === Build 686 — Phase 2 function-side analyzer surfaced Enemy. ===
+    [InlineData("BP_Enemy_C",            false, 2)]  // Enemy class
+    [InlineData("EnemyBase",             false, 2)]  // Enemy-prefix
     public void PropertyBonus_ClassLocation(
         string className, bool expectedUnusual, int expectedBonus)
     {
@@ -221,6 +224,10 @@ public class PropertyScoringTableTests
                                          // it's not a compound anim-framework name
     [InlineData("GameMode",         2)]
     [InlineData("FoobarComponent",  0)]
+    // === Build 686 — Phase 2 function-side data-driven adds. ===
+    [InlineData("BP_Enemy_C",       2)]  // Enemy +2
+    [InlineData("WeaponBase",       2)]  // Weapon +2 (mirror of property side)
+    [InlineData("EnemyWeapon_C",    4)]  // both stack: Enemy(+2) + Weapon(+2)
     public void FunctionBonus_PreservesExistingContract(string className, int expected)
     {
         Assert.Equal(expected, ClassLocationScorer.FunctionBonus(className));

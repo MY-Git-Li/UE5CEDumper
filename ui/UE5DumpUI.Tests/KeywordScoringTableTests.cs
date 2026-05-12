@@ -122,6 +122,11 @@ public class KeywordScoringTableTests
     [InlineData("MySaveGame",            2)]
     [InlineData("AnimMan_Player_C",      2)]  // Player(+2) only — no longer penalised
                                               // for "Anim" prefix (build 671 TowerOfMask regression)
+    // === Build 686 — Phase 2 function-side analyzer adds. ===
+    [InlineData("BP_Enemy_C",            2)]  // Enemy(+2)
+    [InlineData("EnemyBase",             2)]
+    [InlineData("WeaponHandler",         2)]  // Weapon(+2) — mirror of property side
+    [InlineData("EnemyWeapon_C",         4)]  // Enemy(+2) + Weapon(+2) stack
     [InlineData("RandomActor",           0)]
     public void Score_ClassBonus_AppliesPerSubstring(string className, int expectedBonus)
     {

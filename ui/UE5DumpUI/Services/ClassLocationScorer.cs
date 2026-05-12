@@ -41,6 +41,15 @@ public static class ClassLocationScorer
         // not the more specific tokens above. Mild bonus (+2) since some
         // false-positives (PlayerCameraManager) are still tolerable.
         ("Player",            2),
+        // === Build 686 — Phase 2 function-side analyzer additions.
+        // 15-game cross-game function-token co-occurrence:
+        //   enemy → damage / attack  : 3-4 games, 39+15 hits — Enemy* classes
+        //                              clearly host attack/damage functions
+        //   weapon → weapon / save   : 3-5 games — Weapon* classes host
+        //                              weapon-related functions (mirror of the
+        //                              build 678 Property-side Weapon rule)
+        ("Enemy",             2),
+        ("Weapon",            2),
         // Game-level systems
         ("GameMode",          2),
         ("GameInstance",      2),
@@ -134,6 +143,12 @@ public static class ClassLocationScorer
         new("Battle",           2, false),  // 5 games — Battle* containers
                                             // for damage/count/max (common
                                             // in JRPG/strategy battles)
+        // === Added build 686 — Phase 2 function-side analyzer also
+        // reveals "enemy" class token hosting damage/attack functions
+        // in 3-4 games. Mirror to Property side for symmetric scoring
+        // (an "Enemy*" class is just as likely to hold damage / health
+        // properties as it is to expose damage functions). ===
+        new("Enemy",            2, false),
 
         // === UNUSUAL locations (highest-value hits — devs broke convention) ===
         // LocalPlayer / GameViewportClient / HUD often store gameplay state
