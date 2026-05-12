@@ -84,12 +84,31 @@ public partial class PointerPanelViewModel : ViewModelBase
     // --- Diagnostics: build version + Self-Test ---
 
     /// <summary>UI's own build number (compiled in via AssemblyVersion). Constant
-    /// per UE5DumpUI binary, computed once from the entry assembly's FileVersion.
-    /// Uses GetEntryAssembly() rather than GetExecutingAssembly() because the
-    /// latter gets trimmed in Native AOT single-file publishes (returns Build=0).
-    /// MainWindowViewModel.AppVersion uses the same trick for the title bar.</summary>
-    public int UiBuildNumber { get; } =
-        Assembly.GetEntryAssembly()?.GetName().Version?.Build ?? 0;
+    /// per UE5DumpUI binary, computed once from the entry assembly's version.
+    ///
+    /// Two traps stacked here:
+    /// 1. Native AOT single-file publish trims <c>GetExecutingAssembly()</c> →
+    ///    returns no version. Use <c>GetEntryAssembly()</c> instead (the same
+    ///    fix <c>MainWindowViewModel.GetAppVersion</c> uses for the title bar).
+    ///    See build 657 lesson.
+    /// 2. Our AssemblyVersion is laid out as <c>Major.Minor.Patch.Build</c>
+    ///    (e.g. 1.0.0.661) but .NET's <see cref="System.Version"/> names the
+    ///    four parts <c>Major.Minor.Build.Revision</c> — so what we call "build"
+    ///    sits in <see cref="System.Version.Revision"/>, not
+    ///    <see cref="System.Version.Build"/>. Reading <c>.Build</c> returned the
+    ///    patch digit (0), which is why the System tab Diagnostics showed
+    ///    "UI build: 0" through builds 657–660 even after the AOT-trim fix.
+    /// </summary>
+    public int UiBuildNumber { get; } = ReadUiBuildNumber();
+
+    private static int ReadUiBuildNumber()
+    {
+        // System.Version.Revision returns -1 if the version was constructed
+        // with fewer than 4 components. Our csproj always sets 4, but guard
+        // anyway so we never show "-1" in the UI badge.
+        var rev = Assembly.GetEntryAssembly()?.GetName().Version?.Revision ?? 0;
+        return rev > 0 ? rev : 0;
+    }
 
     [ObservableProperty] private int _dllBuildNumber;
 
