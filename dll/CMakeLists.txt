@@ -146,6 +146,7 @@ target_link_libraries(UE5Dumper PRIVATE
     Shlwapi
     Psapi
     Version   # GetFileVersionInfoW / VerQueryValueW for PE VERSIONINFO
+    Winmm     # timeBeginPeriod / timeEndPeriod — Mimic poll-thread 1ms tick
     minhook
 )
 
@@ -207,7 +208,7 @@ set(PROXY_INCLUDE_DIRS
 )
 
 set(PROXY_LINK_LIBS
-    ws2_32 Shlwapi Psapi Version delayimp minhook
+    ws2_32 Shlwapi Psapi Version Winmm delayimp minhook
 )
 
 if(BUILD_PROXY_DLL)
@@ -344,4 +345,9 @@ if(NOT BUILD_PROXY_DLL AND NOT BUILD_PROXY_DINPUT8)
             /utf-8 /W4 /permissive- /EHa
         )
     endif()
+
+    # Mimic poll-latency micro-benchmark calls timeBeginPeriod / timeEndPeriod
+    # to verify Sleep(1) actually delivers ~1ms on this host. Without winmm
+    # the test exe wouldn't link.
+    target_link_libraries(dll_helpers_test PRIVATE Winmm)
 endif()
