@@ -32,6 +32,23 @@ public interface IDumpService
     Task<ObjectDetail> FindObjectAsync(string path, CancellationToken ct = default);
     Task<ObjectListResult> SearchObjectsAsync(string query, int limit = 200, CancellationToken ct = default);
     Task<ClassInfoModel> WalkClassAsync(string addr, CancellationToken ct = default);
+
+    /// <summary>
+    /// Batched class schema walk — drops N pipe round-trips down to one
+    /// for callers that need to walk many classes (Full SDK export,
+    /// Dump All Metadata stream). Each returned element is byte-
+    /// identical to a single <see cref="WalkClassAsync"/> call: the DLL
+    /// implementation is a trivial loop over <c>Ubel::WalkClassEx</c>
+    /// and the wire encoding is the same JSON shape as walk_class's
+    /// "class" field, wrapped in a "classes" array.
+    ///
+    /// Result count equals the input count, in order. Empty / invalid
+    /// addresses still emit a row (mirrors the single-call behaviour
+    /// where WalkClassEx on a bad address returns an empty ClassInfo).
+    /// Caller should chunk to keep pipe payloads bounded (~200 addrs
+    /// per call is a safe default).
+    /// </summary>
+    Task<List<ClassInfoModel>> WalkClassesBatchAsync(string[] addrs, CancellationToken ct = default);
     Task<byte[]> ReadMemAsync(string addr, int size, CancellationToken ct = default);
     Task WriteMemAsync(string addr, byte[] data, CancellationToken ct = default);
     Task WatchAsync(string addr, int size, int intervalMs, CancellationToken ct = default);
@@ -69,6 +86,23 @@ public interface IDumpService
     Task<PropertySearchResult> SearchPropertiesAsync(
         string query, string[]? types = null, bool gameOnly = true,
         int limit = 200, CancellationToken ct = default);
+
+    /// <summary>
+    /// Batched property search — DLL walks GObjects once and checks
+    /// every property against every query. Drops the multi-keyword
+    /// sweep time from ~42s (sequential pipe calls each re-walking
+    /// GObjects) to ~1.5s for a 36-query / 4400-class game. Used by
+    /// the Interesting Properties tab Load command.
+    ///
+    /// Each query gets its own dedup index + maxResults limit, returned
+    /// in order inside <see cref="PropertySearchBatchResult.PerQuery"/>.
+    /// Preview values are NOT resolved on the batch path (the tab
+    /// doesn't display them; user opens a row in Live Walker to read
+    /// the live value).
+    /// </summary>
+    Task<PropertySearchBatchResult> SearchPropertiesBatchAsync(
+        string[] queries, string[]? types = null, bool gameOnly = true,
+        int limitPerQuery = 200, CancellationToken ct = default);
 
     // --- Game Class List ---
     Task<ClassListResult> ListClassesAsync(

@@ -273,6 +273,19 @@ public sealed class DumpService : IDumpService
         var classObj = res["class"] as JsonObject;
         if (classObj == null) throw new InvalidOperationException("Missing class data in response");
 
+        return DeserializeClassInfo(classObj);
+    }
+
+    /// <summary>
+    /// Shared deserializer for the wire shape both <c>walk_class</c>
+    /// (`res["class"]`) and <c>walk_class_batch</c> (each element of
+    /// `res["classes"]`) emit. Centralising the field mapping is the
+    /// C# half of the byte-equivalence contract: the batch path
+    /// cannot drift from the single path because they parse with the
+    /// same code.
+    /// </summary>
+    private static ClassInfoModel DeserializeClassInfo(JsonObject classObj)
+    {
         var model = new ClassInfoModel
         {
             Name = classObj["name"]?.GetValue<string>() ?? "",
@@ -313,6 +326,43 @@ public sealed class DumpService : IDumpService
         }
 
         return model;
+    }
+
+    public async Task<List<ClassInfoModel>> WalkClassesBatchAsync(string[] addrs, CancellationToken ct = default)
+    {
+        var result = new List<ClassInfoModel>(addrs.Length);
+        if (addrs.Length == 0) return result;
+
+        var addrsArr = new JsonArray();
+        foreach (var a in addrs)
+        {
+            // Empty/null addresses dropped here — the DLL also drops
+            // them, so the result count may be < addrs.Length when the
+            // caller passes empties. Callers are expected to filter
+            // before invocation.
+            if (!string.IsNullOrEmpty(a))
+                addrsArr.Add((JsonNode?)JsonValue.Create(a));
+        }
+
+        var req = new JsonObject
+        {
+            ["cmd"]   = "walk_class_batch",
+            ["addrs"] = addrsArr,
+        };
+
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        if (res["classes"] is not JsonArray arr)
+            throw new InvalidOperationException("Missing classes array in walk_class_batch response");
+
+        foreach (var item in arr)
+        {
+            if (item is not JsonObject classObj) continue;
+            result.Add(DeserializeClassInfo(classObj));
+        }
+
+        return result;
     }
 
     public async Task<byte[]> ReadMemAsync(string addr, int size, CancellationToken ct = default)
@@ -965,6 +1015,10 @@ public sealed class DumpService : IDumpService
                             IsReturn = po["ret"]?.GetValue<bool>() ?? false,
                             StructName = po["struct_type"]?.GetValue<string>() ?? "",
                             StructFields = structFields,
+                            // Stage 1 (Invoke param picker): expected UClass name
+                            // for pointer-flavoured params. Empty when the DLL
+                            // pre-dates the field or for non-pointer params.
+                            ObjectClassName = po["obj_class"]?.GetValue<string>() ?? "",
                         });
                     }
                 }
@@ -1042,6 +1096,87 @@ public sealed class DumpService : IDumpService
                     DefiningClassPath = obj["defining_class_path"]?.GetValue<string>() ?? "",
                     InheritedByCount  = obj["inherited_by_count"]?.GetValue<int>() ?? 0,
                 });
+            }
+        }
+
+        return result;
+    }
+
+    public async Task<PropertySearchBatchResult> SearchPropertiesBatchAsync(
+        string[] queries, string[]? types = null, bool gameOnly = true,
+        int limitPerQuery = 200, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "search_properties_batch",
+            ["game_only"] = gameOnly,
+            ["limit"] = limitPerQuery
+        };
+
+        var qarr = new JsonArray();
+        foreach (var q in queries)
+        {
+            if (!string.IsNullOrEmpty(q))
+                qarr.Add((JsonNode?)JsonValue.Create(q));
+        }
+        req["queries"] = qarr;
+
+        if (types is { Length: > 0 })
+        {
+            var tarr = new JsonArray();
+            foreach (var t in types) tarr.Add((JsonNode?)JsonValue.Create(t));
+            req["types"] = tarr;
+        }
+
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        var result = new PropertySearchBatchResult
+        {
+            QueryCount     = res["query_count"]?.GetValue<int>() ?? 0,
+            Total          = res["total"]?.GetValue<int>() ?? 0,
+            ScannedClasses = res["scanned_classes"]?.GetValue<int>() ?? 0,
+            ScannedObjects = res["scanned_objects"]?.GetValue<int>() ?? 0,
+        };
+
+        if (res["per_query"] is JsonArray perQuery)
+        {
+            foreach (var envNode in perQuery)
+            {
+                if (envNode is not JsonObject envObj) continue;
+                var envelope = new PropertySearchQueryEnvelope
+                {
+                    Query      = envObj["query"]?.GetValue<string>() ?? "",
+                    MatchCount = envObj["match_count"]?.GetValue<int>() ?? 0,
+                };
+                if (envObj["results"] is JsonArray matches)
+                {
+                    foreach (var item in matches)
+                    {
+                        if (item is not JsonObject obj) continue;
+                        envelope.Results.Add(new PropertySearchMatch
+                        {
+                            ClassName  = obj["class_name"]?.GetValue<string>() ?? "",
+                            ClassAddr  = obj["class_addr"]?.GetValue<string>() ?? "",
+                            ClassPath  = obj["class_path"]?.GetValue<string>() ?? "",
+                            SuperName  = obj["super_name"]?.GetValue<string>() ?? "",
+                            PropName   = obj["prop_name"]?.GetValue<string>() ?? "",
+                            PropType   = obj["prop_type"]?.GetValue<string>() ?? "",
+                            PropOffset = obj["prop_offset"]?.GetValue<int>() ?? 0,
+                            PropSize   = obj["prop_size"]?.GetValue<int>() ?? 0,
+                            StructType = obj["struct_type"]?.GetValue<string>() ?? "",
+                            InnerType  = obj["inner_type"]?.GetValue<string>() ?? "",
+                            // Preview intentionally omitted — batch path
+                            // skips DLL-side Phase-2 instance scan; field
+                            // stays empty by default.
+                            DefiningClassName = obj["defining_class_name"]?.GetValue<string>() ?? "",
+                            DefiningClassAddr = obj["defining_class_addr"]?.GetValue<string>() ?? "",
+                            DefiningClassPath = obj["defining_class_path"]?.GetValue<string>() ?? "",
+                            InheritedByCount  = obj["inherited_by_count"]?.GetValue<int>() ?? 0,
+                        });
+                    }
+                }
+                result.PerQuery.Add(envelope);
             }
         }
 

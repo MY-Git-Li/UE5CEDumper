@@ -237,7 +237,13 @@ public static class InvokeScriptGenerator
         for (int i = 0; i < inputParams.Count; i++)
         {
             var p = inputParams[i];
-            var label = $"{p.Name}  [{ShortTypeName(p.TypeName)}, {p.Size} B{(p.IsOut ? ", out" : "")}]";
+            // Stage 1: surface expected UClass for pointer params (mirrors the
+            // in-app InvokeParamDialog label) so the CE-side form is just as
+            // self-documenting.
+            var objClassSuffix = !string.IsNullOrEmpty(p.ObjectClassName)
+                ? $": {p.ObjectClassName}"
+                : "";
+            var label = $"{p.Name}  [{ShortTypeName(p.TypeName)}{objClassSuffix}, {p.Size} B{(p.IsOut ? ", out" : "")}]";
             var defaultVal = GetDefaultValue(p.TypeName);
             int idx = i + 1;
 

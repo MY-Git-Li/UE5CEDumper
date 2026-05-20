@@ -36,7 +36,26 @@ public static class SdkExportService
     }
 
     /// <summary>
+    /// Default chunk size for the batched walk_class fan-out. Exposed
+    /// internally so tests can hit the chunk-boundary edge cases at
+    /// (chunkSize - 1) / chunkSize / (chunkSize + 1) class counts.
+    /// </summary>
+    internal const int FullSdkBatchChunkSize = 200;
+
+    /// <summary>
     /// Bulk: generate headers for multiple classes (one big file).
+    ///
+    /// Walks classes in batches of <see cref="FullSdkBatchChunkSize"/>
+    /// via <c>walk_class_batch</c> to collapse N pipe round-trips into
+    /// N / chunkSize. The batch DLL command is a trivial loop over the
+    /// same <c>Ubel::WalkClassEx</c> function the single-call path
+    /// uses, so each batch element is byte-identical to a single
+    /// <see cref="IDumpService.WalkClassAsync"/> response — output of
+    /// this method is unchanged from the pre-batch implementation for
+    /// any given input. If a batch call throws or returns the wrong
+    /// number of results, the chunk is retried as N single calls so
+    /// per-class error attribution (the <c>// ERROR: ...</c> line) is
+    /// preserved.
     /// </summary>
     public static async Task<string> GenerateFullSdkAsync(
         IDumpService dump, IProgress<string>? progress = null,
@@ -56,7 +75,13 @@ public static class SdkExportService
 
             foreach (var obj in page.Objects)
             {
-                if (obj.ClassName is "Class" or "ScriptStruct")
+                // Mirrors the DLL-side `Aura::IsClassLikeMeta` whitelist
+                // (Class + BPGC variants + DynamicClass). A bare
+                // `ClassName == "Class"` check silently drops every
+                // BlueprintGeneratedClass — which is where 90%+ of
+                // game-specific cheat targets live. Same bug fixed in
+                // the DLL build 673; this is the C# mirror.
+                if (DumpAllService.IsClassLikeMetaName(obj.ClassName) || obj.ClassName == "ScriptStruct")
                     targets.Add((obj.Address, obj.Name, obj.ClassName));
             }
 
@@ -66,7 +91,7 @@ public static class SdkExportService
 
         progress?.Report($"Walking {targets.Count} classes...");
 
-        // 2. Walk each class to get field definitions
+        // 2. Walk each class to get field definitions, batched
         var sb = new StringBuilder(targets.Count * 512);
         EmitFileHeader(sb);
         sb.AppendLine("#pragma once");
@@ -74,23 +99,72 @@ public static class SdkExportService
         sb.AppendLine();
 
         int walked = 0;
-        foreach (var (addr, name, clsName) in targets)
+        for (int chunkStart = 0; chunkStart < targets.Count; chunkStart += FullSdkBatchChunkSize)
         {
             ct.ThrowIfCancellationRequested();
-            walked++;
-            if (walked % 50 == 0)
-                progress?.Report($"Walking classes... ({walked}/{targets.Count})");
+            int chunkEnd = Math.Min(chunkStart + FullSdkBatchChunkSize, targets.Count);
+            int chunkLen = chunkEnd - chunkStart;
+            var chunkAddrs = new string[chunkLen];
+            for (int i = 0; i < chunkLen; i++)
+                chunkAddrs[i] = targets[chunkStart + i].addr;
 
+            // Try the batched path first. We treat any failure (pipe
+            // exception, unexpected element count) as a hint that the
+            // chunk must be retried single-call to preserve per-class
+            // error attribution. Cancellations always propagate.
+            List<ClassInfoModel>? batchResult = null;
             try
             {
-                var classInfo = await dump.WalkClassAsync(addr, ct);
-                EmitClassHeaderFromSchema(sb, classInfo);
-                sb.AppendLine();
+                var fetched = await dump.WalkClassesBatchAsync(chunkAddrs, ct);
+                if (fetched.Count == chunkLen)
+                    batchResult = fetched;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch
             {
-                sb.AppendLine($"// ERROR: Failed to walk {name} at {addr}");
-                sb.AppendLine();
+                // batchResult stays null → fallback below.
+            }
+
+            if (batchResult != null)
+            {
+                for (int i = 0; i < chunkLen; i++)
+                {
+                    EmitClassHeaderFromSchema(sb, batchResult[i]);
+                    sb.AppendLine();
+                    walked++;
+                    if (walked % 50 == 0)
+                        progress?.Report($"Walking classes... ({walked}/{targets.Count})");
+                }
+            }
+            else
+            {
+                // Per-class fallback — same shape as the pre-batch path.
+                for (int i = 0; i < chunkLen; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var (addr, name, _) = targets[chunkStart + i];
+                    try
+                    {
+                        var classInfo = await dump.WalkClassAsync(addr, ct);
+                        EmitClassHeaderFromSchema(sb, classInfo);
+                        sb.AppendLine();
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch
+                    {
+                        sb.AppendLine($"// ERROR: Failed to walk {name} at {addr}");
+                        sb.AppendLine();
+                    }
+                    walked++;
+                    if (walked % 50 == 0)
+                        progress?.Report($"Walking classes... ({walked}/{targets.Count})");
+                }
             }
         }
 

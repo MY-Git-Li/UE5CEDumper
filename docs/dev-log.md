@@ -11,7 +11,548 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
-## 2026-05-11 (latest, dev branch, build 648) — ProcessEvent vtable detection rewrite + hook-fire validation
+## 2026-05-20 (dev branch, docs only) — 18-game bias recheck (Frontiers added — first MMO/ARPG-flavoured dump)
+
+User added one new dump (`Frontiers-Win64-Shipping.exe`, UE 4.26,
+107,872 objects, 1,310 game classes / BPGCs) bringing the corpus to
+**18 games**. Tool / workflow unchanged from the 17-game refresh
+([4f50ea0](https://github.com/bbfox0703/UE5CEDumper/commit/4f50ea0)):
+same `python scripts/analysis/analyze_dumps.py work/dump/*.jsonl
+--min-games 3` run, same ad-hoc drill-down snippets reusing the
+analyzer's `load_dump` / `tokenize` / `_resolve_own_props` helpers.
+
+### Genre signature: predicted "out-of-genre" target
+
+Characteristic class names (`TL_*` asset prefix, `BossMonster*`,
+`BossFightObserver*`, `Pet*`, `Affix*`, `Dungeon*`, `Sharpshooter`,
+`Captain`, `Cursed` archetypes) point to a Korean-MMO / ARPG-style
+title — exactly the genre family
+[docs/todo.md → More dumps for genre coverage](todo.md) flagged as
+the only kind that could move the calibration needle further. The
+17-game corpus was heavy on JRPG / sim / action-adventure / sandbox /
+racing; this is the first MMO/ARPG-flavoured entry.
+
+### Bias verdict — tables still stable
+
+Token-by-token drill-down on every candidate with ≥3-game support:
+
+- **`skill`** (8 / 18 games, 90 classes) looked promising at first but
+  per-name inspection showed ~85% UI-widget noise: `SkillList`,
+  `SkillIcon`, `Txt_SkillName`, `Img_SkillIcon`, `Pnl_SkillName_Mask`,
+  `Hrz_SkillName`. Genuine cheat-tunable hits
+  (`CurrentSkillPoints`, `SkillPointsRequired`, `IsSkillPurchased`)
+  are buried under ~15% of the surface. Adding `Skill` to
+  PropertyScoringTable would over-fire on UI properties. Function-side
+  `Skill` keyword in CombatKeywords remains correct since function
+  names like `UseSkill` / `LearnSkill` are unambiguously action verbs.
+- **`effects`** (7 / 18), **`aura`** (4 / 18), **`gameplay`** (4 / 18),
+  **`requirements`** (3 / 18), **`expiration`** (3 / 18), **`tags`**
+  (5 / 18) — all >95% TQ2-skewed (TQ2 contributes 477-905 of each
+  token's hit count; other games combined are single-to-low-
+  double-digit). Single-game spikes, not cross-game signal.
+- **Frontiers-unique tokens** (`affix`, `pet`, `dungeon`, `captain`,
+  `sharpshooter`, `cursed`) all concentrated in Frontiers alone. Same
+  single-game-spike rejection rule as the 17-game pass.
+- **Class-side candidates** (Frontiers top class-x-prop pairs) are all
+  UI-flavoured (`credits→credit`, `widget→item`, `bar→resource`,
+  `dungeon→level`); none generalise across the corpus.
+
+**No keyword additions, no class-rule additions, no scoring weight
+changes.** Second consecutive bias recheck confirming the build-678 /
+687 calibration generalises to genre-adjacent AND genuinely out-of-
+genre unseen titles.
+
+### Why this is stronger evidence than the 17-game pass
+
+The 17-game recheck added two same-family titles (Star Wars Jedi:
+Fallen Order — EA action-adventure; Ghostwire: Tokyo — Tango action-
+horror). Both reinforced existing patterns, but the prediction was
+that they wouldn't move the needle because they sit in already-well-
+represented genres.
+
+This 18-game pass added a predicted-to-be-different-genre title
+(MMO-flavoured ARPG, never previously represented). The prediction was
+that out-of-genre dumps would surface new vocabulary. The data says
+the build-678 / 687 calibration **also covers MMO/ARPG vocabulary**
+without any new keyword. That's stronger evidence for table robustness
+than two more same-genre dumps would have been.
+
+### Genres still completely absent from the corpus
+
+MMO/ARPG is now (partially) represented. Still missing:
+
+- Pure horror (no Resident Evil / Silent Hill style — only action-horror
+  hybrids like GWT / Hogwarts dark sequences)
+- Fighting (Tekken / Street Fighter / Mortal Kombat)
+- RTS (Age of Empires / StarCraft / Company of Heroes)
+- Sports-sim (FIFA / NBA 2K / car-tuning sims)
+
+A dump from any of these would test calibration against vocabulary
+genuinely outside the current action-adventure / RPG / sim / shooter /
+ARPG neighbourhood.
+
+### Files touched
+
+Docs only. No code, no tests, no scoring tables. The Frontiers dump +
+regenerated `work/dump/analysis-report-18games.md` live under `work/`
+which is gitignored.
+
+-----
+
+## 2026-05-12 (dev branch, scripts only) — 17-game bias recheck + analyzer hint sync
+
+User added two new dumps (Star Wars Jedi: Fallen Order — UE 4.21 EA
+action-adventure, 734 game classes; Ghostwire: Tokyo — UE 5.04 Tango
+Gameworks action-horror, 1558 game classes) bringing the corpus to
+**17 games**. Goal: are the build-678 / build-687 keyword + class-rule
+calibrations still well-supported, or do the new dumps surface a
+pattern the existing tables miss?
+
+### Meta finding: the analyzer's own hint table was stale
+
+`scripts/analysis/analyze_dumps.py:CHEAT_KEYWORD_HINTS` had drifted from
+`PropertyScoringTable.cs` — the build-678 additions
+(`Effect/Target/Radius/Ability/Modifier/Duration/Item/Items`) had been
+added to the C# tables but never mirrored into the Python hint list, so
+the "Existing category" column in every fresh report kept flagging
+them as **un-categorised** even though they had been calibrated and
+shipped months ago. This drift would have made any future bias check
+hallucinate "new candidates" that were actually already covered. Synced
+the hint table to mirror the C# tables fully; future runs now show
+accurate category labels.
+
+### Bias verdict — tables remain stable
+
+After the sync, the 17-game cross-game token distribution shows:
+
+- Every property token rank-1 through rank-60 with ≥7 game support
+  either falls in an existing keyword bucket
+  (`combat`/`stats`/`resources`) or is engine plumbing
+  (`graph`/`anim`/`node`/`uber`/`frame`/`transition`/`pose` etc).
+- Unusual-Location class-bonus rules from build 670 + 687 (Health /
+  Damage / Weapon / Save / Menu containers) all re-validated.
+- The two genre-adjacent additions reinforce existing patterns rather
+  than surface new ones — neither EA action-adventure nor Tango action-
+  horror brought a token cluster above the build-678 evidence threshold
+  (8+ cross-game with substantial per-game count).
+- Closest borderline: `Effects` (plural) at 7/17 games (41%). Below the
+  build-678 ratio for `Ability` (53%) and same root word as the already-
+  present `Effect` (16/17 games) — not worth adding for cosmetic plural
+  coverage.
+
+**No keyword additions, no class-rule additions, no scoring weight
+changes.** The first analysis since calibration to confirm the tables
+generalise to genre-adjacent unseen titles.
+
+### What WOULD move the needle
+
+If we add 3-5 dumps each from genuinely under-represented genres
+(MMO / fighting / RTS / sports-sim / horror-pure), the analyzer would
+have a chance to surface vocabulary not present in the 17-game JRPG /
+sim / action-adventure / sandbox / racing mix. Until then, further
+ARPG / adventure dumps will keep reinforcing the current calibration
+without expanding it. Tracked in
+[docs/todo.md → More-genre dump coverage](todo.md).
+
+### Files touched
+
+- [scripts/analysis/analyze_dumps.py](../scripts/analysis/analyze_dumps.py)
+  — `CHEAT_KEYWORD_HINTS` synced to mirror `PropertyScoringTable.cs`
+  exactly. Comment added linking the two and noting "keep in lockstep
+  when you touch StatsKeywords / CombatKeywords / etc."
+
+No DLL / UI code touched. No tests touched. The 17 dumps + the
+regenerated `work/dump/analysis-report.md` live under `work/` which is
+gitignored — only the analyzer + scoring tables are version-tracked.
+
+-----
+
+## 2026-05-12 (dev branch, docs only) — GWorld 29 / 29 (100%), Star Wars Jedi verified, EA-launcher proxy limitation documented
+
+User verification on two previously "unverified or thought-failing" titles
+landed us at **29 / 29 = 100%** GWorld coverage across the tested corpus.
+No code change in this commit — just docs catching up with the empirical
+state.
+
+### Star Wars Jedi: Fallen Order (UE 4.21) — newly verified
+
+- Install: `H:\SteamLibrary\steamapps\common\Jedi Fallen Order`
+- Logs: `%LOCALAPPDATA%\UE5CEDumper\Logs\starwarsjedifallenorder\` (build 1.0.0.704)
+- Scan result: GObjects = `0x7FF7316F5CD0`, GNames = `0x12B65A10080`,
+  **GWorld = `0x7FF7317EBAB8`** (non-zero, valid). 313 887 objects.
+  Full UE4 DynOff layout (`UField::Next=+0x28`,
+  `UStruct::ChildProperties=+0x50`, `UProperty::ElemSize=+0x34`).
+- Launcher quirk: `SwGame\Binaries\Win64\` holds TWO identical 58.4 MB
+  exes — the canonical `SwGame-Win64-Shipping.exe` plus a renamed copy
+  `starwarsjedifallenorder.exe` that the EA app actually targets. CE
+  sees the running process as the latter.
+- **Proxy DLL caveat**: neither `version.dll` nor `dinput8.dll` proxy
+  gets loaded by the EA-wrapped process. EA's launcher restricts the
+  DLL search path before spawning the game, stripping the exe's own
+  directory so proxies dropped there never resolve. Workaround: CE
+  manual injection after the game is running. Scan side works
+  identically once the DLL is inside the process.
+- New lesson added: [Proxy DLL Deploy → EA-launcher proxy block](lessons-learned.md#proxy-dll-deploy).
+
+### Satisfactory (UE 5.3) — note correction
+
+The "GWorld fails" note in roadmap + test-games was stale: it
+predated the `Macht::AOBScanAllModules` work (commit `589fc35`, build
+509-ish) that walks every loaded module including
+`FactoryGameSteam-CoreUObject-Win64-Shipping.dll` under
+`Engine\Binaries\Win64\`. The 15-game dump corpus (build 678 + 687)
+already contained Satisfactory's 4 868 BPGCs cleanly, proving the
+multi-module fallback works. User reconfirmed GWorld resolves on this
+build (2026-05-12) — the docs are now corrected to match reality.
+
+### Docs touched
+
+- [Readme.MD](../Readme.MD) — GWorld bullet bumped to 29 / 29 (100%)
+  + new EA-launcher proxy caveat bullet
+- [Readme_zh-TW.MD](../Readme_zh-TW.MD) — same updates with Traditional
+  Chinese phrasing for the two new bullets
+- [docs/roadmap.md](roadmap.md) — Star Wars Jedi entry added under
+  Tested games + GWorld ratio bumped + EA-launcher note appended
+- [docs/test-games.md](test-games.md) — Star Wars Jedi row rewritten
+  with GWorld ✅ + EA-launcher caveat; Satisfactory row rewritten to
+  drop the stale "GWorld fails" claim
+- [docs/lessons-learned.md](lessons-learned.md) — new bullet in the
+  Proxy DLL Deploy section documenting the EA-launcher proxy block
+
+No code change. No tests touched. Build number unchanged on dev.
+
+-----
+
+## 2026-05-12 (dev branch, build 693-696) — `walk_class_batch` — Full SDK / Dump-All pipe round-trip amortisation
+
+Architectural extension of the build-685 `search_properties_batch`
+pattern: a second batched pipe command, this time for class schema
+walks. Drops `SdkExportService.GenerateFullSdkAsync` and
+`DumpAllService.GenerateAsync` from N pipe round-trips down to
+N / 200 (chunk size). Estimated wall-time speedup for big-game Full
+SDK exports: 2-5× from the latency amortisation alone (each round-
+trip is ~0.3ms × ~4000 calls = ~1.3s saved on a 4400-class game,
+plus per-call JSON envelope serialisation).
+
+### Why this needed a different test bar than build 685
+
+`search_properties_batch` returns dedicated result rows the user
+sees inline in a UI table — any drift would have been visually
+obvious. `walk_class_batch` feeds the **Full SDK Export** and
+**Dump All Metadata** paths, both of which produce large file-shaped
+outputs where a silently-dropped class or field is invisible until
+the user happens to look for it months later. User flagged this
+explicitly when greenlighting: "if export sdk if missing something,
+I also see no out".
+
+The whole implementation is therefore biased toward byte-equivalence
+provability:
+
+- **DLL batch = loop over `Ubel::WalkClassEx`** ([Aura.cpp:2830](../dll/src/Aura.cpp))
+  — no new walking logic, just a pipe-amortised wrapper. Each batch
+  element comes from the same function the single-call `walk_class`
+  pipe command uses, so byte-identical results are a structural
+  property, not a tested behaviour.
+- **Shared JSON serialiser in Fern.cpp** — single + batch both call
+  the same lambda `EncodeClassInfoToJson`. The wire shape cannot
+  drift because the encoder is shared.
+- **Shared C# deserialiser** — `WalkClassAsync` and
+  `WalkClassesBatchAsync` both call `DumpService.DeserializeClassInfo`.
+  Same parse code → same `ClassInfoModel` for the same JSON.
+- **Per-chunk fallback in both consumers** — if the batch throws or
+  returns the wrong element count, the chunk replays as N single
+  `WalkClassAsync` calls. Preserves per-class error attribution (the
+  `// ERROR:` line in SDK output and the `kind=error` JSONL row in
+  Dump All).
+- **Equivalence test file**
+  ([WalkClassBatchEquivalenceTests.cs](../ui/UE5DumpUI.Tests/WalkClassBatchEquivalenceTests.cs))
+  — builds a 250-class fixture with mixed metas (Class / BPGC /
+  AnimBPGC / WidgetBPGC / DynamicClass / ScriptStruct), every
+  FieldInfoModel optional metadata bucket populated, engine-vs-game
+  paths half-split, ~30% of classes carrying functions. Runs both
+  consumers through TWO stubs against the same fixture:
+  - **HappyPathDump** — exposes both batched + single-call paths via
+    one shared dictionary, mirroring the DLL's loop-over-singles
+    contract.
+  - **ForcedFallbackDump** — throws on every `WalkClassesBatchAsync`,
+    forcing the consumer's per-class fallback path.
+
+  Test asserts byte-for-byte equality between the two outputs at 7
+  class counts (0 / 1 / 199 / 200 / 201 / 250 / 400) covering chunk-
+  boundary edges, plus a `TruncatedBatchDump` test where the batch
+  returns N-1 results — must trigger fallback and still produce
+  identical output. Total: 15 new test rows on top of the existing
+  `SdkExportService` / `DumpAllService` tests (which now also run
+  through the batched path because `StubDumpService`'s default
+  `WalkClassesBatchAsync` delegates to N `WalkClassAsync` calls).
+
+### Files
+
+DLL:
+- [Aura.h:307-320](../dll/src/Aura.h) — `WalkClassesBatch` declaration
+- [Aura.cpp:2832-2862](../dll/src/Aura.cpp) — trivial loop implementation
+  with timing log
+- [Renge.h:25](../dll/src/Renge.h) — `CMD_WALK_CLASS_BATCH` constant
+- [Fern.cpp:801-878](../dll/src/Fern.cpp) — `EncodeClassInfoToJson`
+  lambda + both single + batch dispatch share it
+
+C#:
+- [IDumpService.cs](../ui/UE5DumpUI/Core/IDumpService.cs) —
+  `WalkClassesBatchAsync` method declaration
+- [DumpService.cs:267-373](../ui/UE5DumpUI/Services/DumpService.cs) —
+  pipe call implementation; extracted `DeserializeClassInfo` shared
+  helper
+- [SdkExportService.cs:39-50, 100-180](../ui/UE5DumpUI/Services/SdkExportService.cs)
+  — `FullSdkBatchChunkSize` const + chunked loop with per-chunk
+  fallback
+- [DumpAllService.cs:WalkClassBatchChunkSize, FlushClassChunkAsync](../ui/UE5DumpUI/Services/DumpAllService.cs)
+  — chunk buffer in the page loop + extracted helper
+
+Tests:
+- [CsxExportServiceTests.cs:StubDumpService](../ui/UE5DumpUI.Tests/CsxExportServiceTests.cs)
+  — virtual default `WalkClassesBatchAsync` that delegates to
+  `WalkClassAsync × N`, so every existing test that uses this stub
+  automatically validates the batch path produces the same data as
+  the single-call path
+- [WalkClassBatchEquivalenceTests.cs](../ui/UE5DumpUI.Tests/WalkClassBatchEquivalenceTests.cs)
+  — new 450-line test file: 250-class fixture builder + 3 stub
+  variants (happy / forced-fallback / truncated-batch) + 15 test
+  rows asserting byte-equivalence
+
+### Build number ladder
+
+| Build | Phase                                          | Net code change |
+|------:|------------------------------------------------|-----------------|
+| 693   | DLL: WalkClassesBatch + CMD_WALK_CLASS_BATCH   | +~50 lines C++  |
+| 694   | C#: IDumpService + DumpService + StubDumpService | +~80 lines    |
+| 695   | C# refactor: SdkExportService + DumpAllService | +~130 lines / -~50 |
+| 696   | Tests: equivalence file + init-only field fix  | +~450 lines     |
+
+### Tests / perf
+
+C# tests: 802 → **817** (+15 new). DLL tests: 62 + 31 = 93 unchanged.
+Total: **910**.
+
+No live-perf regression test yet — needs a real game with a fixed
+class count to baseline. User-side benchmark suggestion: time Full
+SDK Export on TQ2 (~4400 classes) before/after this build; expect
+~2-5× speedup. The build-685 search_properties_batch precedent
+(42s → 1.5s) was a stronger win because it amortised the
+GObjects-walk; this one only amortises pipe overhead. Both are
+welcome.
+
+### Out of scope for this build (follow-ups)
+
+- **`walk_functions_batch`** — DumpAllService still does
+  `WalkFunctionsAsync` per emitted class. Same pattern as
+  walk_class_batch would shave another ~N round-trips when
+  `IncludeFunctions=true`. Skipped for build 693-696 to keep the
+  blast radius small and the equivalence tests focused.
+- **Live-perf baseline** — needs a real game session to be useful.
+
+-----
+
+## 2026-05-12 (dev branch, build 690-691) — SdkExportService BPGC filter fix + Satisfactory proxy-deploy fix
+
+Two small, related cleanups from the build 689 "next-session" candidates.
+Both fix bugs that silently dropped real targets — same pattern as the
+build 673 DLL BPGC filter trap (an over-narrow whitelist that everyone
+agreed looked sensible at the time).
+
+### Build 690 — `SdkExportService` BPGC filter (C# mirror of build 673 DLL fix)
+
+[ui/UE5DumpUI/Services/SdkExportService.cs:59](../ui/UE5DumpUI/Services/SdkExportService.cs#L59)
+was filtering Full SDK header export with bare
+`obj.ClassName is "Class" or "ScriptStruct"`. This dropped every
+`BlueprintGeneratedClass` / `AnimBPGC` / `WidgetBPGC` / `DynamicClass`
+target — the exact same bug class the build 673 DLL fix patched, just
+on the C# side. Now calls
+`DumpAllService.IsClassLikeMetaName(obj.ClassName) || obj.ClassName == "ScriptStruct"`
+so the whitelist stays in lockstep with the DumpAll path. New regression
+test `GenerateFullSdkAsync_AcceptsAllClassLikeMetasAndScriptStruct`
+covers every variant explicitly so this bug class cannot regress
+silently a third time.
+
+### Build 692 — Hybrid-layout follow-up (two-tier search)
+
+Build 691 fixed the pure-modular case (Satisfactory) but accidentally
+broke the hybrid case. User screenshot after build 691 showed four
+games with duplicate rows:
+
+| Game           | Phantom Engine row                                  | Real row                                              |
+|----------------|-----------------------------------------------------|-------------------------------------------------------|
+| NMKART         | `NMKART\Engine\Binaries\Win64\`        (NotDeployed) | `NMKART\NMKART\Binaries\Win64\`        (DeployedOutdated) |
+| Palworld       | `Palworld\Engine\Binaries\Win64\`      (NotDeployed) | `Palworld\Pal\Binaries\Win64\`         (DeployedOutdated) |
+| StellarBlade   | `StellarBlade\Engine\Binaries\Win64\`  (NotDeployed) | `StellarBlade\SB\Binaries\Win64\`      (DeployedOutdated) |
+| Titan Quest II | `Titan Quest II\Engine\Binaries\Win64\` (NotDeployed)| `Titan Quest II\TQ2\Binaries\Win64\`   (DeployedOutdated) |
+
+These ship a **stub launcher exe** in `Engine\Binaries\Win64\`
+alongside the real game exe in `<Game>\<Sub>\Binaries\Win64\` — both
+look like valid `*-Win64-Shipping.exe` candidates. Build 691's "skip
+known stubs" approach only filtered `CrashReportClient.exe`; the stub
+*launcher* exes have the same name as the real game exe, so the
+filter can't help.
+
+Fix: split `ScanGameFolder` into a two-tier search:
+
+1. **Primary** — gameDir itself + every non-Engine subdir. Walked first.
+2. **Engine fallback** — `<Game>\Engine\Binaries\Win64\` walked ONLY when
+   primary contributed zero rows for this gameDir.
+
+This handles all three observed layouts cleanly:
+- Monolithic (DQ7R / Hogwarts / Stray): primary wins; Engine fallback
+  never runs → no phantom CrashReport row.
+- Hybrid (StellarBlade / NMKART / Palworld / TQ2): primary wins on the
+  `<Sub>\` real exe; Engine stub never surfaces → one clean row.
+- Pure modular (Satisfactory): primary's `<Sub>\Binaries\Win64\` has
+  no .exe; Engine fallback runs and picks up the real launcher → the
+  only row points to `Engine\Binaries\Win64\`.
+
+Refactor extracted the per-binDir loop body into a private
+`ScanBinariesDir` helper so the new two-tier logic stays readable.
+
+Tests: 800 → 802 (+2 — `FindUeGames_HybridLayout_PrefersGameSubdirOverEngineSide`
+covers StellarBlade-shape, `FindUeGames_PureModularLayout_FallsThroughToEngine`
+locks the Engine-fallback contract). All existing tests still pass.
+
+### Build 691 — Satisfactory proxy deploy (UI ScanGameFolder fix)
+
+User reported putting `version.dll` in
+`<Satisfactory>\FactoryGame\Binaries\Win64\` had no effect. Investigation
+found two related issues:
+
+1. **Wrong folder** — Satisfactory is a *modular* UE build. The real
+   launcher .exe (`FactoryGameSteam-Win64-Shipping.exe`, only 0.3MB —
+   all code lives in DLLs) is under `Engine\Binaries\Win64\` next to
+   `FactoryGameSteam-CoreUObject-Win64-Shipping.dll` and 163 other
+   engine module DLLs. `<Satisfactory>\FactoryGame\Binaries\Win64\`
+   contains only a `.modules` manifest + game-side DLLs, NO .exe at
+   all. Windows DLL search order resolves `version.dll` from the
+   process executable's directory FIRST, so the proxy must go next to
+   the launcher in `Engine\Binaries\Win64\`. User-verified working
+   2026-05-12.
+2. **UI couldn't find Satisfactory at all** —
+   [ProxyDeployService.cs:153-156](../ui/UE5DumpUI/Services/ProxyDeployService.cs#L153)
+   had an explicit "skip the Engine subdir, it only has
+   CrashReportClient.exe" assumption baked into `ScanGameFolder`. That
+   assumption holds for monolithic UE titles (most games) but is fatal
+   for modular builds where the real exe IS in `Engine\Binaries\Win64\`.
+
+Build 691 changes:
+
+- **Removed the Engine-skip** — the `searchRoots` enumeration now includes
+  every subdirectory of the game folder, Engine included.
+- **Added `IsKnownStubExe(exeName)`** — currently filters only
+  `CrashReportClient.exe` (case-insensitive). Applied in both the
+  primary `*-Win64-Shipping.exe` selector and the fallback "any .exe"
+  loop so the stub never becomes a phantom game row.
+- **Monolithic regression-safety**: for ES2 / Geri / DQ7R-style games,
+  `Engine\Binaries\Win64\` still only contains `CrashReportClient.exe`
+  — after the stub filter, no exe survives, so no phantom row appears.
+  Three new regression tests lock this contract:
+  - `FindUeGames_ModularLayout_PicksEngineExeNotCrashReport` —
+    Satisfactory shape: BinariesDir must resolve to `Engine\Binaries\Win64\`,
+    ExePath must NOT contain "CrashReport".
+  - `FindUeGames_MonolithicLayout_StillPicksGameExeNotEngineSide` —
+    standard layout: must pick `<Game>\<Sub>\Binaries\Win64\`, not the
+    Engine-side CrashReportClient.
+  - `FindUeGames_OnlyCrashReportInEngineDir_ProducesNoRow` —
+    pathological edge case: an orphan game folder with only
+    CrashReportClient. Must produce zero rows, not a phantom one.
+- **Scan side was a red herring**: `docs/roadmap.md` previously claimed
+  Satisfactory's GWorld scan was failing because of the modular DLL
+  layout. Stale note — `Macht::AOBScanAllModules` was added in commit
+  `589fc35` (build 509-ish) and `Genau::ScanForTarget` already invokes
+  it with `tryMultiModule=true` for all four targets. The 15-game dump
+  corpus (build 678 + 687) already contained `FactoryGameSteam`'s 4,868
+  BPGCs cleanly, which proves the scan side has been working all along.
+  Roadmap entry corrected.
+- **New `Proxy DLL Deploy` section in lessons-learned.md** captures
+  the modular-vs-monolithic distinction so future-Claude doesn't
+  re-propose "implement multi-module scan" — the scan side is fine,
+  proxy deploy is the half that periodically catches us out.
+
+| Build | Commit | Summary |
+|------:|--------|---------|
+| 690 | (this session) | `SdkExportService` BPGC filter — now reuses `DumpAllService.IsClassLikeMetaName`. Tests: 790 → 791 C#. |
+| 691 | (this session) | Satisfactory proxy deploy — `ScanGameFolder` accepts the Engine subdir + filters `CrashReportClient.exe`. Tests: 791 → 800 C# (+6 IsKnownStubExe InlineData rows, +3 layout regression Facts). Roadmap + lessons-learned updated. |
+| 692 | (this session) | Hybrid-layout fix — `ScanGameFolder` switched to two-tier search (primary roots first, Engine\ as fallback only when primary is empty). Eliminates the phantom Engine-side row that build 691 added for StellarBlade / NMKART / Palworld / TQ2. Tests: 800 → 802 C# (+2 layout regressions). |
+
+Total tests this session: 790 → 802 (+12 C#), DLL tests unchanged
+(62 + 31 = 93). Total 802 + 93 = **895**.
+
+-----
+
+## 2026-05-12 (dev branch, build 657-689) — Multi-select Copy CE Fields, Interesting Properties tab (B'), DLL BPGC fix, dump-for-analysis pipeline, 15-game data-driven scoring
+
+A long single-day session covering 13 commits, two distinct themes:
+**UX/feature additions** (multi-select Copy CE Field, Interesting
+Properties tab with Unusual Location detection, ⚙ Options popover,
+shorter tab labels, Dump All Metadata export) and **data-driven scoring
+calibration** (15-game dump corpus → empirical PropertyScoringTable +
+KeywordScoringTable additions, with a Python aggregator committed to
+the repo to make the pipeline reproducible).
+
+### Commit-by-commit
+
+| Build | Commit  | Summary |
+|------:|---------|---------|
+| 660   | `7863afb` | **Multi-select Copy CE Field** — `LiveWalkerPanel` field DataGrid switched to `Extended` selection mode. Button label flips between "Copy CE Field" and "Copy CE Fields (N)". Container-view multi-select emits ONE filtered container with N elements (not N detached top-level entries). 10 new tests in `LiveWalkerMultiSelectTests.cs`. |
+| 662   | `9cb33ff` | **System tab "UI build" fix** — `PointerPanelViewModel.UiBuildNumber` was reading `Version.Build` which is the THIRD position in .NET's `Major.Minor.Build.Revision` schema. Our AssemblyVersion is `Major.Minor.Patch.Build` so what we call "build" sits in `.Revision`. Showed "UI build: 0" through builds 657–660. Lesson now documented in both the source comment and dev-log. |
+| 666   | `bf515e0` | **UI polish trio** — (1) shorter tab labels (Instance Finder → Instances, Property Search → Properties, Game Classes → Classes, Class Structure → Class Struct). (2) MainWindow status text gets MaxWidth=360 + ellipsis + tooltip so long "Navigated to Foo::Bar (live instance 0x...)" messages don't push toolbar to 2 rows on 4K@225%. (3) New "⚙ Options" DropDownButton houses the 5 export-shape sliders (Collapse / Array Limit / DropDown Limit / Preview / Drill Depth), reclaiming ~600px on the top toolbar. |
+| 670   | `f3b719e` | **Interesting Properties tab (B' round 1)** — new tab between Interesting Funcs and Classes. Extracts `ClassLocationScorer.cs` shared between Function and Property sides. New `PropertyScoringTable.cs` (Stats / Combat / Resources / Movement / Utility categories), `ScoredPropertyRow.cs`, `InterestingPropertiesViewModel.cs`. Key concept: **⚠ Unusual Location flag** for properties hosted in `LocalPlayer` / `GameViewportClient` / `HUD` / `CheatManager` (+4 bonus) — fields developers placed outside the conventional Character/Pawn/PlayerState containers. VM fans out via batched seed-keyword `search_properties` calls + client-side dedupe. 41 new tests. |
+| 673   | `d760e50` | **DLL BPGC filter + Anim-penalty refinement** — TowerOfMask repro caught two stacked bugs. (1) `Aura::SearchProperties` / `ListClasses` / `EnumerateAllFunctions` all had `if (metaClassName != "Class") continue;` which dropped every `BlueprintGeneratedClass`-derived class — that's where 90%+ of game-specific properties live. New `IsClassLikeMeta` helper whitelists `Class` + `BlueprintGeneratedClass` + `AnimBlueprintGeneratedClass` + `WidgetBlueprintGeneratedClass` + `DynamicClass`. (2) Substring `"Anim" -2` penalty falsely punished game-prefix classes like `AnimMan_Player_C`. Replaced with surgical compound names (`AnimInstance` / `AnimMontage` / `AnimSequence` / `AnimNotify` / `AnimGraph` / `AnimBlueprint`). Plus added `Player +2` rule + Stats keywords `Dead`/`IsDead`/`Alive`/`IsAlive` + Combat `Weapon`/`Hit`/`HitDamage`. |
+| 676   | `4d18b63` | **Export → Dump All Metadata (.jsonl)** + analysis pipeline — new `DumpAllService.cs` that streams every class + props + funcs to JSON Lines via existing `get_object_list` / `walk_class` / `walk_functions` endpoints (no new DLL command). Mirrors the IsClassLikeMeta filter so BPGCs are included. Python `scripts/analysis/analyze_dumps.py` skeleton aggregates dumps cross-game and emits a Markdown report covering top property names / tokens / unusual class locations. `scripts/analysis/README.md` explains the workflow. 23 new tests for the dump shape. Designed for offline data-driven scoring calibration. |
+| ~     | `3fe02b4` | **Analyzer first-real-dump fixes** — (1) DLL emits paths like `//Script/CoreUObject/Object` (double-slash, `/` separator), not the `/Script/CoreUObject.` format the analyzer expected; replaced prefix-list with substring `/Script/` check. (2) `WalkClass` merges inherited fields into each class's Fields list, so naive aggregation counted `bReplicates` 486× in TowerOfMask (once per Actor-derived class). Added `_resolve_own_props` that filters by `offset >= super.props_size`. (3) Trivial-token guard for `b` / `c` / `is` / `on` / `bp` / single letters. |
+| ~     | `e66776d` | **Analyzer `--min-games` filter + Games column** — 10-game run revealed single-game spikes dominating (TQ2's `m_*` C++ family racks up 477–859 hits each). Default `--min-games=3` filters them out of the cross-game sections; raw all-data sections kept for completeness. Unusual Locations gained a Games column. Plus `docs/todo.md` update: Satisfactory proxy DLL injection ALSO fails (verified — user used CE injection workaround). |
+| ~     | `a837076` | **15-game data-driven keyword adds** — analysis of 15 dumps (JRPG / sim / ARPG / FPS / racing / sandbox mix: DQ7R / DQI&IIHD2D / ES2 / FSD-DRG / FactoryGameSteam / Geri / HogwartsLegacy / ManorLords / NMKART / Octopath / Stray / TQ2 / TowerOfMask / ff7rebirth / ff7remake). `CombatKeywords` +6 (`Effect` 14g, `Target` 14g, `Radius` 12g, `Ability` 7g, `Modifier` 7g, `Duration` 9g). `ResourcesKeywords` +2 (`Item` / `Items` 13g). `ClassLocationScorer.PropertyRules` +3 (`Weapon` 8g, `Projectile` 4-5g, `Battle` 5g). README anti-bias section. 12 new tests. |
+| 682   | `9ebe25d` | **Interesting Props per-query progress** — TQ2 user benchmark: 36 seed queries × ~1.15s = 42s wall time with indeterminate spinner. Sequential loop with per-query status text ("Scanning 5/36: 'Health' (123 raw hits so far)"). Status row moved out of cramped filter toolbar into its own dock row with monospace font. |
+| 685   | `00177ef` | **`search_properties_batch` — 30× speedup** — User asked about pipe serialization. Log analysis confirmed pipe is single-channel FIFO; 36 sequential calls each re-walking GObjects is the bottleneck, NOT pipe latency. New DLL command + `SearchPropertiesBatch` walks GObjects ONCE and checks every property against every keyword in one pass. C# `IDumpService.SearchPropertiesBatchAsync` + `PropertySearchBatchResult` model. Interesting Properties Load now single round-trip. Funcs panel cosmetic mirror of build 682 status-row layout. |
+| 687   | `95aa066` | **Phase 2: function-side analyzer** — extended `analyze_dumps.py` to aggregate function data (name / token / class × func co-occurrence) and re-ran on 15-game corpus. Finding: **`KeywordScoringTable.cs` is already comprehensive** — top 60 function tokens are 100% BP plumbing or already covered. So NO new keywords. But class-bonus side surfaced two adds: `Enemy +2` (both Function + Property sides — `enemy → damage/attack` in 3-4 games) and `Weapon +2` (Function side mirror — Property side had it from build 678). Plus TRIVIAL_TOKENS extended with BP-compilation artifacts (`ubergraph` / `k2node` / `evt` / `bnd` / `bpi` / `evaluate` / `exposed` / ...) so future analyses surface signal instead of UE plumbing. |
+| 689   | `4dd0717` | **Notes column cleanup** — `InterestingFunctionsPanel` + LiveWalker Functions DataGrid had a `Notes` column that repeated the same VM-level "AOBMaker plugin not found" string on every row (pure noise). Replaced with an inline italic TextBlock in the panel's status row, visible only when the plugin is unavailable. |
+
+### Cross-cutting lessons recorded
+
+- **`Version.Build` vs `.Revision` trap**: .NET names the four `Major.Minor.Build.Revision` parts in a different order than our `Major.Minor.Patch.Build` AssemblyVersion convention. Anything that reads "my build number" must use `Version.Revision`, not `Version.Build`. Title bar dodged this trap because it uses `Version.ToString()` (prints all four).
+- **BPGC filter check is the BIG hidden bug class**: anywhere in the DLL that walks GObjects looking for "is this a class?" must accept ALL class-flavoured metas (Class + BlueprintGeneratedClass + variants). The build-670 `IsClassLikeMeta` helper exists for this — use it instead of bare `== "Class"`. Existing `SdkExportService` has the same bug and should be fixed in a future PR (filed in todo).
+- **Substring class-name penalties are dangerous**: `"Anim" -2` killed every game class with "Anim" in its name (e.g. TowerOfMask's `AnimMan_Player_C`). Surgical compound names (`AnimInstance`, `AnimMontage`, …) are the right granularity.
+- **Pipe serialization is a design choice, not a hard limit**: `SearchProperties` is read-only memory walking; no game-thread hook required. The build-685 batch API proves the underlying operation can be parallelized at the field level rather than at the pipe level.
+- **Hand-curated keyword tables converge fast**: 15-game cross-game analysis added only 9 high-confidence keywords to PropertyScoringTable and 0 to KeywordScoringTable. Future scoring improvements should target class-bonus rules, not keyword arrays.
+- **Anti-bias defense is the analyzer itself**: if a user's preferred genres aren't well-represented in the default tables, they dump their own games, run `analyze_dumps.py`, and PR the additions with evidence. `scripts/analysis/README.md` documents this workflow as the recommended response to disagreement with the defaults.
+
+### 15-game dump corpus (kept under `work/dump/`)
+
+For reproducibility / future calibration:
+
+| Game | UE | Object count | Game classes (BPGCs) |
+|---|---:|---:|---:|
+| DQ7R | 4.27 | 194,684 | 824 |
+| DQI&IIHD2D Remake | 4.27 | 128,678 | 323 |
+| ES2 (Everspace 2) | 5.0.5 | 1,150,336 | 1,653 |
+| FSD (Deep Rock Galactic) | 4.27 | 87,370 | 809 |
+| Satisfactory (FactoryGameSteam) | 5.0.3 | 206,743 | 4,868 |
+| Geri (The Artisan of Glimmith) | 4.27 | 157,620 | 87 |
+| HogwartsLegacy | 4.27 | 384,649 | 1,836 |
+| ManorLords | 5.0.5 | 34,124 | 7 |
+| NMKART (Nickelodeon Kart Racers) | 4.25 | 184,931 | 264 |
+| Octopath_Traveler | 4.27 | 406,060 | 444 |
+| Stray | 4.27 | 224,025 | 342 |
+| TQ2 (Titan Quest 2) | 5.0.7 | 495,878 | 1,188 |
+| TowerOfMask | 4.27 | 62,426 | 222 |
+| ff7rebirth | 4.27 | 432,506 | 2,068 |
+| ff7remake | 4.27 | 315,304 | 514 |
+
+Notes: dumps NOT committed to repo (under `work/` which is gitignored).
+Re-run the pipeline by re-dumping locally + invoking
+`python scripts/analysis/analyze_dumps.py work/dump/*.jsonl`.
+
+### Final test count
+
+**790 C# pass** (was 693 at session start) + 62 dll_helpers + 31 utf8_helpers = 883 total. Build 689 on dev (just pushed).
+
+-----
+
+## 2026-05-11 (build 648) — ProcessEvent vtable detection rewrite + hook-fire validation
 
 Closes the CRITICAL `ProcessEvent vtable detection is wrong` entry
 opened build 647. Two-layer fix: (1) replace the version-table detector

@@ -52,6 +52,11 @@ struct FunctionParam {
     bool        isOut = false;
     bool        isReturn = false;
     std::string structType;     // UScriptStruct name for StructProperty params (empty otherwise)
+    // Stage 1 (Invoke param picker): target UClass name for pointer-flavoured
+    // params (ObjectProperty / ClassProperty / Soft* / Weak* / Lazy* /
+    // InterfaceProperty). Mirrors FieldInfo::objClassName. Empty for scalar,
+    // struct, container, and bool params.
+    std::string objClassName;
 
     // Phase B: sub-field layout for StructProperty params (dynamic discovery)
     struct StructSubField {

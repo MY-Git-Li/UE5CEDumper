@@ -822,6 +822,17 @@ std::vector<FunctionInfo> WalkFunctions(uintptr_t uclassAddr) {
                                         param.structFields.push_back({sf.Name, sf.TypeName, sf.Offset, sf.Size});
                                 }
                             }
+                            // Stage 1: Object/Class/Soft/Weak/Lazy/Interface params
+                            // expose their target UClass name (FObjectPropertyBase::
+                            // PropertyClass lives at the same FProperty subclass
+                            // extension slot as FStructProperty::Struct — mirrors
+                            // the WalkClassEx field-side enrichment at line 599).
+                            else if (param.typeName == "ObjectProperty"     || param.typeName == "ClassProperty"
+                                  || param.typeName == "WeakObjectProperty" || param.typeName == "SoftObjectProperty"
+                                  || param.typeName == "SoftClassProperty"  || param.typeName == "InterfaceProperty"
+                                  || param.typeName == "LazyObjectProperty") {
+                                param.objClassName = ReadSubclassTypeName(cur);
+                            }
 
                             if (param.isReturn)
                                 fi.returnType = param.typeName;
@@ -874,6 +885,21 @@ std::vector<FunctionInfo> WalkFunctions(uintptr_t uclassAddr) {
                                     ClassInfo structInfo = WalkClass(structPtr);
                                     for (const auto& sf : structInfo.Fields)
                                         param.structFields.push_back({sf.Name, sf.TypeName, sf.Offset, sf.Size});
+                                }
+                            }
+                            // Stage 1 (UE4 <4.25 path): same UProperty subclass
+                            // extension slot as UStructProperty::Struct holds
+                            // UObjectPropertyBase::PropertyClass — both are the
+                            // first derived field after the UProperty base.
+                            else if (param.typeName == "ObjectProperty"     || param.typeName == "ClassProperty"
+                                  || param.typeName == "WeakObjectProperty" || param.typeName == "SoftObjectProperty"
+                                  || param.typeName == "SoftClassProperty"  || param.typeName == "InterfaceProperty"
+                                  || param.typeName == "LazyObjectProperty") {
+                                uintptr_t classPtr = 0;
+                                if (Macht::ReadSafe(cur + DynOff::UPROPERTY_OFFSET + 0x2C, classPtr) && classPtr) {
+                                    std::string cn = GetName(classPtr);
+                                    if (!cn.empty() && cn[0] >= 0x20 && cn[0] < 0x7F)
+                                        param.objClassName = cn;
                                 }
                             }
 
@@ -4223,7 +4249,6 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
             const bool isStrInner   = (innerTn == "StrProperty");
             const bool isNameInner  = (innerTn == "NameProperty");
             const bool isTextInner  = (innerTn == "TextProperty");
-            const bool isIntrusiveScalar = isStrInner || isNameInner || isTextInner;
 
             bool isSet = false;
 

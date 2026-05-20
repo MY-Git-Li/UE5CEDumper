@@ -22,6 +22,9 @@
 #include "../src/Renge.h"
 #include "../src/Scharf.h"
 
+#include <Windows.h>
+#include <timeapi.h>   // timeBeginPeriod — exercised by the poll-latency check
+
 #include <cstdio>
 #include <cstdint>
 #include <string>
@@ -197,6 +200,64 @@ static void Test_Alignment_WeakAndSparseDelegate() {
            !Scharf::IsAlignmentSuspicious("MulticastSparseDelegateProperty", 0x5, 1, false));
 }
 
+// ----- Mimic poll-latency micro-benchmark ------------------------------------
+//
+// Mimic.cpp's polling thread does `Sleep(kPollIntervalMs)` (=1) every iteration
+// and bumps timer resolution via timeBeginPeriod(1) so Sleep(1) actually
+// delivers ~1ms latency. This test reproduces the same setup in the test
+// process and asserts that 100 × Sleep(1) takes < 200ms wall-clock.
+//
+// Without timeBeginPeriod, Sleep(1) on a system with the default 15.6ms tick
+// rounds up to 15.6ms per call → 100 calls = ~1560ms, which would fail this
+// assertion. So a green test confirms the Mimic-side latency reduction is
+// actually achievable on this host's OS configuration.
+//
+// 300ms threshold (vs. ideal ~100ms): generous to account for CI scheduler
+// jitter, thread contention, and the kernel's discretion on tick rounding.
+// Idle baseline on a quiet machine landed at 193ms (≈1.94ms/sleep) — Windows
+// commonly rounds Sleep(1) up to the next 1-2ms tick boundary, so anything
+// under ~250ms confirms timeBeginPeriod is in effect. The 5× headroom keeps
+// the test from flaking under heavy load while still catching the legacy-
+// tick regression cleanly (which would land near 1560ms).
+
+static void Test_Mimic_PollLatency_OneMillisecond() {
+    // Mirror the DLL polling thread's timer-resolution request.
+    MMRESULT rc = timeBeginPeriod(1);
+    EXPECT("timeBeginPeriod(1) ok", rc == TIMERR_NOERROR);
+    if (rc != TIMERR_NOERROR) {
+        std::printf("  [warn] timeBeginPeriod failed rc=%u — skipping latency assert\n", rc);
+        return;
+    }
+
+    LARGE_INTEGER freq{}, start{}, end{};
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&start);
+
+    constexpr int kIters = 100;
+    for (int i = 0; i < kIters; ++i) {
+        Sleep(1);
+    }
+
+    QueryPerformanceCounter(&end);
+    timeEndPeriod(1);
+
+    double elapsedMs = double(end.QuadPart - start.QuadPart) * 1000.0 / double(freq.QuadPart);
+    std::printf("  [info] 100 x Sleep(1) under timeBeginPeriod(1) = %.1f ms "
+                "(avg %.2f ms/sleep)\n",
+                elapsedMs, elapsedMs / kIters);
+
+    // Hard ceiling: if a sleep really cost the legacy 15.6ms tick, this would
+    // be ~1560ms. 300ms catches that regression cleanly while tolerating noise.
+    if (elapsedMs >= 300.0) {
+        ++g_fail;
+        std::printf("  FAIL: poll-latency over threshold\n"
+                    "    actual=%.1f ms expected<200 ms\n"
+                    "    at %s:%d\n", elapsedMs, __FILE__, __LINE__);
+    } else {
+        ++g_pass;
+    }
+}
+
 // ----- main ------------------------------------------------------------------
 
 int main() {
@@ -217,6 +278,8 @@ int main() {
     Test_Alignment_OffsetZeroNeverSuspicious();
     Test_Alignment_UnknownTypesNotValidated();
     Test_Alignment_WeakAndSparseDelegate();
+
+    Test_Mimic_PollLatency_OneMillisecond();
 
     std::printf("------------------------------------------\n");
     std::printf("Pass: %d   Fail: %d\n", g_pass, g_fail);

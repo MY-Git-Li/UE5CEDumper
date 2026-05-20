@@ -123,7 +123,8 @@ AOBMaker 下載連結（需先註冊）：https://opencheattables.com/viewtopic.
 ## 重要注意事項 (Important Notes)
 
 * **自定義數據結構**: 在如《FF7 Rebirth》等遊戲中，部分關鍵數據（如 HP）存儲在標準 `UObject` 之外的自定義結構中。Live Walker 可協助探查這些區域，但無法直接自動發現。
-* **GWorld 連通性**: `GWorld` 遍歷在約 97% 的實測遊戲中可正常運作（29 款中有 28 款）。若無法運作，請改用 **Object Tree** 或 **Instance Finder** 作為主要進入點。
+* **GWorld 連通性**: 截至 2026-05-12，`GWorld` 遍歷在 **100% 實測遊戲中正常運作（29 / 29）**，已涵蓋 Satisfactory（modular UE，獨立 `CoreUObject-Win64-Shipping.dll`）以及《STAR WARS 絕地：組織殞落》(UE 4.21，EA 啟動器 / Steam)。如遇尚未驗證的遊戲，請改用 **Object Tree** 或 **Instance Finder** 作為主要進入點。
+* **EA 啟動器遊戲的 Proxy DLL 限制**: 《STAR WARS 絕地：組織殞落》透過 EA 啟動器啟動，`version.dll` 或 `dinput8.dll` proxy 皆無法被遊戲行程載入（EA 啟動器會限制 DLL 搜尋路徑）。需待遊戲啟動後改以 CE Dll Injection 注入。掃描端本身無問題 — DLL 進入行程後 GObjects / GNames / GWorld 均能正常解析。其他 EA 啟動器標題可能也有相同情況；若遇到請開 issue 回報。
 * **容器元素限制**: Array/Map/Set 的元素讀取受可調限制值控制，避免過度記憶體存取。如需處理大型容器，請在 Live Walker 中調整 **Array Limit** 滑桿。
 
 ---

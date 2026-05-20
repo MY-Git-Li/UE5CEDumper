@@ -550,19 +550,314 @@ returns the decoded Lua string instead of a number. Optional v2.
 
 ## Property Origin Resolver — proposals B + C still on table
 
-Proposal A (dedupe-by-defining-class) shipped as build 610. Two
-follow-ups discussed in the design analysis but not yet implemented:
+> **🎯 NEXT SESSION STARTING POINT (2026-05-12 close-out, build 696 / dist 704)**:
+> Session shipped 7 commits on top of build 689 — see dev-log for full
+> entries. Headline shipments since 689:
+>
+> - **SdkExportService BPGC filter fix** (build 690, [2dd2ac8](https://github.com/bbfox0703/UE5CEDumper/commit/2dd2ac8)) — mirror of the build-673 DLL fix on the C# side; Full SDK export was silently dropping every BPGC. Test `GenerateFullSdkAsync_AcceptsAllClassLikeMetasAndScriptStruct` locks it.
+> - **Satisfactory + Hybrid + Modular proxy-deploy scanner** (build 691-692, [e5e9782](https://github.com/bbfox0703/UE5CEDumper/commit/e5e9782)) — `ScanGameFolder` two-tier search (primary roots first, Engine\ as fallback only); handles all three observed UE shipping layouts (Monolithic / Hybrid / Pure modular) without phantom rows.
+> - **`walk_class_batch` pipe round-trip amortisation** (build 693-696, [deb837d](https://github.com/bbfox0703/UE5CEDumper/commit/deb837d) + namespace fix [568c757](https://github.com/bbfox0703/UE5CEDumper/commit/568c757)) — Full SDK Export + Dump All Metadata now batch in chunks of 200; estimated 2-5× wall-time speedup. Three-layer byte-equivalence guarantee: DLL loop-over-singles + shared JSON encoder/decoder + `WalkClassBatchEquivalenceTests.cs` 250-class fixture run through happy-path AND forced-fallback stubs.
+> - **GWorld 29/29 (100%)** ([2ccfd05](https://github.com/bbfox0703/UE5CEDumper/commit/2ccfd05)) — Star Wars Jedi: Fallen Order verified (UE 4.21, GWorld=0x7FF7317EBAB8, EA-launcher with proxy-DLL block — CE injection required). Satisfactory roadmap note corrected (scan was already working since the build-509 SIMD scanner rewrite).
+> - **17-game corpus bias recheck + analyzer hint sync** ([4f50ea0](https://github.com/bbfox0703/UE5CEDumper/commit/4f50ea0)) — Python analyzer's `CHEAT_KEYWORD_HINTS` had silently drifted from `PropertyScoringTable.cs`, hallucinating "uncategorised candidates" for already-shipped build-678 keywords. Synced. Bias verdict: tables stable, no additions warranted from Star Wars Jedi + Ghostwire: Tokyo (both reinforced existing patterns rather than surfacing new ones).
+> - **18-game bias recheck (Frontiers, MMO/ARPG genre)** — 2026-05-20 docs-only entry in [dev-log.md](dev-log.md). First MMO/ARPG-flavoured dump added (TL_* asset prefix, BossMonster / Pet / Affix / Dungeon / Sharpshooter archetypes). Bias verdict: **no additions warranted** despite landing in the predicted "out-of-genre" slot — the most promising candidate (`skill`, 8/18 games) was ~85% UI-widget noise on per-name inspection. Stronger robustness evidence than the 17-game pass since the genre prediction said this kind of dump *would* surface new vocabulary and it didn't.
+>
+> Tests: 790 → **817 C#** (+27 across the session), DLL self-tests 62 + 31 = 93 unchanged. Total **910**.
+>
+> Proposal B (per-row "similar BP-added properties" side panel) **explicitly deferred** —
+> B' is shipped and proves the broad-sweep approach works; B's anchor-driven panel adds
+> work without solving a concrete user gap. **Skip unless a real user request surfaces.**
+>
+> Suggested next-session starters (pick one):
+>
+> 1. **More dumps for genre coverage** — 18-game corpus now spans JRPG/sim/ARPG/
+>    action-adventure/sandbox/racing **and** (as of Frontiers 2026-05-20) MMO/ARPG.
+>    Even with the predicted "out-of-genre" MMO/ARPG add, no keyword adds were
+>    warranted — strengthening the build-678/687 stability case. **Still missing
+>    from the corpus: pure-horror / fighting / RTS / sports-sim.** A dump from
+>    any of those would be the only thing that could still move the calibration
+>    needle. Use existing pipeline; no code change unless a new class-rule
+>    emerges. **S effort, user-driven**.
+> 2. **`walk_functions_batch` follow-up** — sister to the build-696
+>    `walk_class_batch`. `DumpAllService` still does `WalkFunctionsAsync` once
+>    per emitted class (`IncludeFunctions=true` is default). Same trivial-loop
+>    pattern, same byte-equivalence safety net machinery already in place.
+>    Smaller win than walk_class_batch on its own (Dump All only) — skip unless
+>    profiling shows it as the new bottleneck. **S effort**.
+> 3. **FString / FText / TArray input for baked AA Script** (open since build
+>    643-644 ES2 verification) — `KismetSystemLibrary::PrintString` is the
+>    obvious observable-side-effect verification target but currently unreachable
+>    because the helper's `writeBakedParams` only handles scalar inputs. Needs
+>    CE-side alloc + FString header write + free dance. See
+>    [Call-UE-function feature gaps](#fstring--ftext--tarray-input-support-in-baked-aa-script).
+>    **M effort, med risk**.
+> 4. **Class Family Browser (Proposal C)** — bucketed view of game classes by
+>    inferred role (Character / Pawn / Inventory / Stats / Save / etc.). Genuine
+>    "where do I start exploring a new game?" entry point. The 18-game dump
+>    corpus would feed the heuristic-classification clustering work. **L effort,
+>    needs own planning round**.
+> 5. **Runtime `keywords.json` override** — let users customise scoring tables
+>    without recompiling. Discussed during the anti-bias conversation; not yet
+>    built. Source-generated JSON serializer for AOT compat. **M effort, only
+>    if a user asks**.
+
+### Proposal B — DEFERRED (build 689)
+
+Original B (per-row "similar BP-added properties" suggestions on a row
+click) is now deferred indefinitely. B' (the broad-sweep "find HP/MP/etc
+in unusual containers" approach) shipped and is calibrated, which gives
+us the cheat-discovery workflow without B's added complexity. If a real
+user reports the gap B was meant to fill ("the engine field at the wrong
+layer — show me the BP-added bool that the game's TakeDamage override
+actually checks"), revisit B then; until then, skip.
+
+Proposal A (dedupe-by-defining-class) shipped as build 610.
+**Proposal B' shipped as build 670 + calibrated through build 687.**
+
+-----
+
+## New pending items (discovered build 657-689)
+
+### ~~Fix SdkExportService BPGC filter~~ — **shipped build 690**
+
+C# Full SDK export was filtering with bare `ClassName is "Class" or "ScriptStruct"`
+which silently dropped every BlueprintGeneratedClass — same bug class as the
+build 673 DLL fix, different code path. Now calls
+`DumpAllService.IsClassLikeMetaName` directly so the whitelist
+(Class + BPGC + AnimBPGC + WidgetBPGC + DynamicClass) stays in lockstep.
+Regression test `GenerateFullSdkAsync_AcceptsAllClassLikeMetasAndScriptStruct`
+covers every meta variant explicitly so it can't silently regress.
+
+### ~~`walk_class_batch` — Full SDK / Dump All pipe round-trip amortisation~~ — **shipped build 693-696**
+
+C# Full SDK export + Dump All Metadata both ran one pipe round-trip per
+class (~4400 on a TQ2-size game). Build 693-696 batches in chunks of
+200 via a new DLL `walk_class_batch` command. Implementation pattern
+mirrors build-685 `search_properties_batch` — `Aura::WalkClassesBatch`
+is a trivial loop over `Ubel::WalkClassEx`, so each batch element is
+byte-identical to a single `walk_class` response. Shared JSON
+serialiser (`EncodeClassInfoToJson` in Fern.cpp) + shared C#
+deserialiser (`DumpService.DeserializeClassInfo`) make byte-equivalence
+structural rather than tested.
+
+Three-layer safety net per the user's "I can't tell if SDK export drops
+a class" concern:
+
+1. DLL batch = loop over single → byte-identical at the source
+2. Single + batch share the JSON encoder/decoder → no wire drift
+3. `WalkClassBatchEquivalenceTests.cs` runs both consumers against a
+   250-class fixture through a happy-path stub AND a forced-fallback
+   stub; asserts byte equality at 7 class-count edges (0/1/199/200/201/
+   250/400) + a truncated-batch defensive test.
+
+Consumers chunk batches at 200 with per-chunk single-call fallback so
+per-class error attribution (the `// ERROR:` line in SDK / `kind=error`
+JSONL in Dump All) survives any batch failure.
+
+Tests: 802 → 817 C# (+15). Estimated wall-time speedup on big games:
+2-5× for Full SDK Export (latency amortisation only; WalkClass doesn't
+re-walk GObjects).
+
+**Follow-up candidate**: `walk_functions_batch` for DumpAll (still does
+WalkFunctions single-call per class). Same shape, smaller win — skip
+unless profiling shows it as the new bottleneck.
+
+### ~~Multi-module GWorld scan (Satisfactory class)~~ — **shipped build 691**
+
+**Status**: Both halves resolved, neither was the originally-suspected bug.
+
+- **Scan side** (originally framed as "multi-module GWorld scan needs implementing"):
+  turns out `Macht::AOBScanAllModules` was ALREADY in place from the build-509 SIMD
+  scanner rewrite (commit `589fc35`), and `Genau::ScanForTarget` already invokes it
+  with `tryMultiModule=true` for GObjects / GNames / GWorld / SparseDelegates. The
+  15-game dump corpus already contained `FactoryGameSteam`'s clean output — the
+  scan side was working all along; only the roadmap note was stale (now corrected).
+- **Proxy deploy side** (the real bug): user couldn't drop `version.dll` because
+  Satisfactory's actual launcher exe lives in `Engine\Binaries\Win64\` (modular UE
+  build), NOT `<Game>\Binaries\Win64\`. UI proxy-deploy scanner was explicitly
+  skipping `Engine\` subdir + breaking on the first `*.exe` it saw, which for
+  modular layouts meant the launcher dir was invisible. Build 691 removes the
+  Engine-skip and filters `CrashReportClient.exe` via `IsKnownStubExe`, so the
+  scanner walks `Engine\Binaries\Win64\` but never surfaces phantom rows for
+  monolithic games (where that folder only contains CrashReportClient).
+
+Files touched: [ProxyDeployService.cs:140](../ui/UE5DumpUI/Services/ProxyDeployService.cs#L140),
+[ProxyDeployTests.cs](../ui/UE5DumpUI.Tests/ProxyDeployTests.cs) (3 new tests —
+modular layout, monolithic regression, orphan-Engine-dir edge case),
+[lessons-learned.md "Proxy DLL Deploy"](lessons-learned.md#proxy-dll-deploy).
+
+User-side verification 2026-05-12: manual `version.dll` drop into
+`<Satisfactory>\Engine\Binaries\Win64\` → pipe connects, dump completes.
+
+### More-genre dump coverage (calibration follow-up)
+
+**Effort**: S (mostly user-side dumping; analyzer already does the
+heavy lifting) | **Risk**: low | **Why**: The 15-game corpus is
+heavy on JRPG / sim / ARPG / FPS / racing / sandbox. Missing genres:
+MMO, fighting, horror, RTS, sports-sim. Each genre has its own
+vocabulary (e.g. fighters: combo / cancel / parry / juggle; MMOs:
+threat / aggro / dispel / cooldown_ms).
+
+Workflow: dump 3-5 games per missing genre, re-run
+`scripts/analysis/analyze_dumps.py work/dump/*.jsonl`, look at the new
+cross-game tokens, PR additions to PropertyScoringTable /
+KeywordScoringTable with the analysis output attached as evidence.
+
+Process documented in [scripts/analysis/README.md](../scripts/analysis/README.md).
+
+### Runtime `keywords.json` override (anti-bias UX)
+
+**Effort**: M | **Risk**: med | **Why**: Discussed during build-679
+anti-bias conversation. Users who disagree with the default scoring
+tables currently have to fork + recompile. A runtime override file
+(`keywords.json` alongside the exe) would let users add their own
+genre-specific keywords without touching C# / build env.
+
+Constraints:
+- Must be AOT-compat — use source-generated JsonSerializerContext per
+  CLAUDE.md rule
+- Default tables stay hardcoded as fallback (so behaviour is sane
+  even when the JSON is missing / malformed)
+- Schema mirrors the C# tables 1:1 (StatsKeywords / CombatKeywords /
+  …) plus an extension mode (additive vs replace)
+- One-click "Export current tables to JSON" UI button to seed the
+  customisation file
+
+Not blocking — only do if a user actually asks for it.
+
+### Class Family Browser (Proposal C) — still on the wishlist
+
+**Effort**: L | **Risk**: med | **Why**: New tab "Class Family" with
+a bucketed view of game classes by inferred role (Character / Pawn /
+Inventory / Stats / Save / Components / DataAssets / DataTables /
+GameMode). Real answer to "I have no idea where to start exploring a
+new game". Needs its own planning round before starting — the
+classification heuristic + UI design is the hard part, not the
+implementation. **NOT a "jump in and code" task.**
+
+Pre-work would benefit from the dump corpus: cluster 15 games' BPGCs
+by property-name similarity to derive concrete "Inventory-like" /
+"Character-like" / etc. archetype patterns.
 
 ### Proposal B: per-row "similar BP-added properties" suggestions
+
+**Effort**: M | **Risk**: low
 
 When a user lands on `bCanBeDamaged @ AActor`, surface a side-panel
 with fuzzy-matched game-specific bools that semantically overlap
 (e.g. `bIsImmortal @ BP_PlayerCharacter_C`). Reuses the
 `KeywordTokenizer` + `KeywordScoringTable` machinery to score
-similarity. **Effort**: M | **Risk**: low | **Why**: closes the
-"engine field is at the wrong layer; show me the BP-added bool that
-the game's TakeDamage override actually checks" gap from the
-analysis.
+similarity. **Why**: closes the "engine field is at the wrong layer;
+show me the BP-added bool that the game's TakeDamage override
+actually checks" gap from the analysis.
+
+**UX**: anchor-driven. User already has a property selected (the
+engine field); we surface its likely game-specific counterpart in BP
+subclasses.
+
+### Proposal B': "Unusual Location" Property Detection — **new insight 2026-05-12**
+
+**Effort**: S–M (small if folded into B's PR) | **Risk**: low
+
+Complementary to B but a different entry point: **find game-state-
+suggestive properties (HP/MP/Stamina/XP/Damage/Health/etc.) regardless
+of whether an engine equivalent exists, AND flag the cases where
+they're sitting in a class you wouldn't expect.**
+
+**Motivation**: developers don't always follow Unreal conventions.
+HP/MP fields routinely show up in non-standard containers — observed
+patterns include `LocalPlayer`, `GameViewportClient`, `HUDClass`,
+`GameInstance` subclasses, even random `UObject`-derived service
+classes. From a cheat-development perspective these are the most
+valuable hits because they're **not where you'd think to look first**.
+Function-side already does this kind of class-location-aware ranking
+(`Character / Pawn / PlayerController / PlayerState +3`,
+`Anim / Niagara / Sound -2`, etc. in `KeywordScoringTable`); the
+Property side needs the same treatment.
+
+**UX**: broad sweep, no anchor needed. Could land as either:
+- a new **"Interesting Properties"** tab (analogous to Interesting
+  Funcs), OR
+- a **scoring-aware mode toggle** in the existing PropertySearch tab
+
+**Scoring sketch** — reuse `KeywordTokenizer` for property-name
+matches, layer class-location bonuses/penalties on top:
+
+| Class bucket                                      | Bonus | Interpretation                |
+|---------------------------------------------------|------:|-------------------------------|
+| Character / Pawn / PlayerState / Inventory        |   +3  | Expected location             |
+| GameMode / GameInstance / SaveGame                |   +2  | Expected (game-level state)   |
+| AbilitySystemComponent / Stats / Status           |   +2  | Expected (gameplay subsystem) |
+| **LocalPlayer / GameViewportClient / HUD**        |  **+4** | **Unusual — high-value hit**  |
+| Anim / Niagara / Sound / Audio / Particle / Mesh  |   −2  | Noise (visual/effect classes) |
+| UI / Widget                                       |   −1  | Noise (UI display)            |
+
+The Unusual category gets a **positive bonus** because a HP field in
+`LocalPlayer` is more interesting than a HP field in `BP_Player_C`
+(the latter is the "normal" place; the former is the cheat-finder's
+gold). Display this as a **"⚠ Unusual Location"** badge on the row
+so the user immediately sees why this hit is unconventional.
+
+**Keyword starter list** (extend in C# scoring table):
+- Stats: `HP`, `MP`, `SP`, `Health`, `Mana`, `Stamina`, `Energy`,
+  `XP`, `Exp`, `Experience`, `Level`, `Lv`, `Lvl`
+- Combat: `Damage`, `Defense`, `Armor`, `CritRate`, `CritDamage`,
+  `Attack`, `MoveSpeed`, `JumpHeight`
+- Resources: `Gold`, `Coin`, `Money`, `Currency`, `Gem`, `Diamond`
+
+Apply `KeywordTokenizer` whole-token matching so short acronyms
+(HP/MP/SP/XP/Lv) don't substring-collide with engine spam
+(`Component`, `Levitate`, etc.) — same lesson from build 609.
+
+### Pairing rationale (why B + B' together)
+
+Both proposals lean on the same building blocks:
+1. `KeywordTokenizer.cs` — whole-token matching, already proven
+2. `KeywordScoringTable.cs` — already has Function-side scoring
+   tables; extend with PropertyScoringTable using the same shape
+3. `ScoredFunctionRow`-style row model for `ScoredPropertyRow`
+4. Class-location bonus/penalty machinery — already mature for
+   functions, factor out to a shared `ClassLocationScorer` helper
+
+Doing them together = ~1.3× the work for both, vs ~1× + ~1× sequential.
+Estimate **M total** if done in one PR.
+
+### Open design questions (decide before starting)
+
+1. **B as side-panel vs B' as new tab vs B' as PropertySearch mode** —
+   pick one of: (a) side-panel for B + new "Interesting Properties"
+   tab for B', (b) extend PropertySearch with a "Scored" sort/filter
+   mode covering both. Option (b) is fewer moving parts but more
+   crowded UI; option (a) keeps the discovery/exploration entry
+   points separate.
+2. **Anchor-driven B's fuzzy threshold** — too loose = noise, too
+   tight = no hits. Need a calibration round on 3-4 games. The
+   build-609 KeywordTokenizer threshold-5 lesson applies.
+3. **PropertyScoringTable keyword list** — start with the table
+   above, calibrate on real games (ES2's `bCanBeDamaged` / `Health`,
+   Geri's `MaxJumpHeight` are good anchors).
+
+### Files in scope (pre-implementation guess)
+
+- `ui/UE5DumpUI/Services/PropertyScoringTable.cs` (new, mirror of
+  `KeywordScoringTable.cs`)
+- `ui/UE5DumpUI/Services/ClassLocationScorer.cs` (new, extracted from
+  `KeywordScoringTable`'s class-bonus logic — refactor first so
+  Function side benefits too)
+- `ui/UE5DumpUI/Models/ScoredPropertyRow.cs` (new)
+- `ui/UE5DumpUI/ViewModels/PropertySearchViewModel.cs` (extend with
+  scoring + Unusual Location badge) OR new
+  `InterestingPropertiesViewModel.cs` (depending on #1 above)
+- `ui/UE5DumpUI/Views/PropertySearchPanel.axaml` (Scope column
+  already exists for B's "+N inheritors"; add Unusual Location badge)
+- `dll/src/Aura.cpp` — possibly extend `EnumerateAllFunctions`-style
+  scan for properties if PropertySearch's current pagination can't
+  serve the new flow
+
+### Out of scope for this round
+
+- Full Class Family Browser (Proposal C) — separate planning
+- Anchor-driven function fuzzy-match (Function v2 equivalent of B) —
+  Function v1 closed; defer until concrete user request
 
 ### Proposal C: Class Family Browser
 
@@ -620,10 +915,23 @@ unverified / failing titles.
 
 - **Star Wars Jedi: Survivor** (UE 4.27?): untested — needs an AOB
   sweep run + result triage
-- **Satisfactory** (UE 5.3, modular DLL build): GWorld scan fails on
-  the main exe. Pattern likely needs to live in
-  `CoreUObject-Win64-Shipping.dll`. Adapt `Genau::FindAll` to scan
-  multiple modules when the primary scan fails.
+- **Satisfactory** (UE 5.3, modular DLL build): two related issues,
+  both stemming from the same root — game splits CoreUObject into a
+  separate DLL rather than baking it into the main exe.
+  1. **Proxy DLL injection fails** (verified 2026-05-12, user feedback):
+     dropping version.dll / dinput8.dll into the install folder doesn't
+     attach. The game's loader or launcher bypasses normal proxy
+     hooking. **Workaround**: CE DLL injection (manual). This was good
+     enough for the 10-game dump-for-analysis run, but breaks the
+     proxy-deploy UX path entirely on Satisfactory.
+  2. **GWorld scan fails on the main exe**. Pattern likely lives in
+     `CoreUObject-Win64-Shipping.dll`. Adapt `Genau::FindAll` to scan
+     multiple modules when the primary scan fails.
+
+  **Effort**: M (multi-module scan in Genau) + investigate why proxy
+  DLL doesn't attach. Once attached via CE injection the rest works —
+  dump produced 4868 BPGCs cleanly, the biggest game-class count of
+  the analysis-corpus dataset.
 
 ### `kPublishers[]` table additions
 
@@ -684,3 +992,32 @@ Recent items that shipped, kept here briefly until the next refresh:
 - ✅ **One-click Inject Helper into Current CE Table** (AOBMaker
   plugin's new InjectTableFile pipe cmd + UE5DumpUI Tools menu;
   cherry-picked from spawned session, build 611)
+- ✅ **Multi-select Copy CE Field(s)** — LiveWalker DataGrid Extended
+  mode; container-view multi-select emits one filtered container
+  with N elements (build 660)
+- ✅ **System tab "UI build: 0" bug** — `Version.Revision` not `.Build`
+  (build 662)
+- ✅ **Tab labels shortened** + **status text overflow fix** +
+  **⚙ Options popover** (build 666)
+- ✅ **Interesting Properties tab (B' round 1)** — Stats / Combat /
+  Resources / Movement / Utility categories, Unusual Location flag
+  for LocalPlayer / GameViewportClient / HUD / CheatManager
+  (build 670)
+- ✅ **DLL BPGC filter fix** (`IsClassLikeMeta` whitelist in
+  SearchProperties / ListClasses / EnumerateAllFunctions) + **surgical
+  Anim penalty** (AnimMan_Player_C no longer punished) + **Player +2 rule**
+  (build 673)
+- ✅ **Export → Dump All Metadata (.jsonl)** + Python analyzer pipeline
+  (`scripts/analysis/analyze_dumps.py` + README anti-bias section)
+  (build 676)
+- ✅ **15-game data-driven keyword adds**:
+  CombatKeywords +6 (Effect/Target/Radius/Ability/Modifier/Duration);
+  ResourcesKeywords +2 (Item/Items); PropertyRules +3 (Weapon/Projectile/Battle)
+  — all backed by cross-game evidence (build 678)
+- ✅ **`search_properties_batch`** — DLL walks GObjects ONCE for N
+  queries; ~30× speedup on big games (build 685)
+- ✅ **Phase 2 function-side analysis** confirms KeywordScoringTable
+  is comprehensive; class-bonus side gets Enemy +2 (both Function +
+  Property) and Weapon +2 (Function side mirror) (build 687)
+- ✅ **AOBMaker "Notes" column removed** — replaced with single
+  inline status-row indicator (build 689)

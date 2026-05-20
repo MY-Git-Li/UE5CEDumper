@@ -135,6 +135,58 @@ public class InvokeScriptTests
     }
 
     [Fact]
+    public void Generate_ObjectParamWithKnownClass_LabelShowsExpectedType()
+    {
+        // Stage 1 (Invoke param picker): when the DLL surfaces the param's
+        // expected UClass via FObjectPropertyBase::PropertyClass, the
+        // generated CE-side script label should self-document it so the
+        // user knows what kind of pointer to provide.
+        var func = new FunctionInfoModel
+        {
+            Name = "setTarget",
+            ParmsSize = 8,
+            Params = new List<FunctionParamModel>
+            {
+                new() {
+                    Name = "Target", TypeName = "ObjectProperty", Size = 8, Offset = 0,
+                    ObjectClassName = "AActor",
+                },
+            },
+        };
+
+        var script = InvokeScriptGenerator.Generate("AI_C", "setTarget", func);
+
+        // Label should include "UObject*: AActor" so users see the expected
+        // class right inside the CE-form dialog without having to look it up.
+        Assert.Contains("UObject*: AActor", script);
+    }
+
+    [Fact]
+    public void Generate_ObjectParamWithoutKnownClass_LabelOmitsColonSuffix()
+    {
+        // Stage 1 backward-compat: when the DLL pre-dates the obj_class field
+        // (or the param genuinely lacks a constraint), the label should fall
+        // back to the original "[UObject*, ...]" form — no spurious colon.
+        var func = new FunctionInfoModel
+        {
+            Name = "setTarget",
+            ParmsSize = 8,
+            Params = new List<FunctionParamModel>
+            {
+                new() {
+                    Name = "Target", TypeName = "ObjectProperty", Size = 8, Offset = 0,
+                    // ObjectClassName left default ""
+                },
+            },
+        };
+
+        var script = InvokeScriptGenerator.Generate("AI_C", "setTarget", func);
+
+        // No ": " suffix between the type tag and the size tag.
+        Assert.DoesNotContain("UObject*:", script);
+    }
+
+    [Fact]
     public void Generate_FloatParam_UsesTonumber()
     {
         var func = new FunctionInfoModel

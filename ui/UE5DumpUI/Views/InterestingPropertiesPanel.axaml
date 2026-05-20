@@ -1,0 +1,156 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UE5DumpUI.ViewModels"
+             xmlns:m="using:UE5DumpUI.Models"
+             xmlns:svc="using:UE5DumpUI.Services"
+             x:Class="UE5DumpUI.Views.InterestingPropertiesPanel"
+             x:DataType="vm:InterestingPropertiesViewModel">
+
+  <DockPanel Margin="8">
+
+    <!-- Top: Load + Game Only + Search bar + filters -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,4">
+      <Button Content="{StaticResource str.IP.Load}"
+              Command="{Binding LoadCommand}"
+              ToolTip.Tip="{StaticResource str.Tip.IP.Load}"
+              IsEnabled="{Binding !IsLoading}"
+              Classes="accent" Padding="12,4"/>
+      <CheckBox Content="{StaticResource str.IP.GameOnly}"
+                IsChecked="{Binding GameOnly}"
+                ToolTip.Tip="{StaticResource str.Tip.IP.GameOnly}"
+                Foreground="#CCCCCC" FontSize="12"
+                VerticalAlignment="Center"/>
+      <TextBox PlaceholderText="{StaticResource str.IP.FilterHint}"
+               Text="{Binding FilterText}"
+               ToolTip.Tip="{StaticResource str.Tip.IP.Filter}"
+               Width="240" Padding="4,2"/>
+      <ComboBox ItemsSource="{Binding CategoryOptions}"
+                SelectedItem="{Binding CategoryFilter}"
+                ToolTip.Tip="{StaticResource str.Tip.IP.Category}"
+                Width="120" FontSize="12">
+        <ComboBox.ItemTemplate>
+          <DataTemplate>
+            <TextBlock Text="{Binding Converter={x:Static svc:CategoryDisplayConverter.Instance}}"/>
+          </DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+      <CheckBox Content="{StaticResource str.IP.UnusualOnly}"
+                IsChecked="{Binding UnusualOnly}"
+                ToolTip.Tip="{StaticResource str.Tip.IP.UnusualOnly}"
+                Foreground="#E0A050" FontSize="12"
+                VerticalAlignment="Center"/>
+      <CheckBox Content="{StaticResource str.IP.ShowAll}"
+                IsChecked="{Binding ShowAll}"
+                ToolTip.Tip="{StaticResource str.Tip.IP.ShowAll}"
+                Foreground="#CCCCCC" FontSize="12"
+                VerticalAlignment="Center"/>
+      <Button Content="{StaticResource str.IP.ClearFilters}"
+              Command="{Binding ClearFiltersCommand}"
+              Padding="6,2" FontSize="11"
+              VerticalAlignment="Center"/>
+    </StackPanel>
+
+    <!-- Status + progress bar in their own row so the long "Scanning N/M:
+         'keyword' (X raw hits)" status text doesn't get squeezed off-
+         screen by the toolbar elements at narrow widths. -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8"
+                Margin="0,0,0,4" VerticalAlignment="Center">
+      <!-- Indeterminate spinner — narrow + only visible during scan. The
+           real progress info is the text next to it (Scanning N/M). -->
+      <ProgressBar IsIndeterminate="True"
+                   IsVisible="{Binding IsLoading}"
+                   Width="80" Height="4"
+                   VerticalAlignment="Center"/>
+      <TextBlock Text="{Binding StatusText}"
+                 Foreground="#AAB8D0" FontSize="12"
+                 FontFamily="Consolas, Menlo, monospace"
+                 VerticalAlignment="Center"
+                 ToolTip.Tip="{Binding StatusText}"/>
+    </StackPanel>
+
+    <!-- Error display -->
+    <TextBlock DockPanel.Dock="Top"
+               Text="{Binding ErrorMessage}"
+               Foreground="#F44747" Margin="0,0,0,4"
+               IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+
+    <!-- Results DataGrid -->
+    <DataGrid x:Name="ResultsGrid"
+              ItemsSource="{Binding Results}"
+              SelectedItem="{Binding SelectedResult}"
+              IsReadOnly="True"
+              CanUserResizeColumns="True"
+              GridLinesVisibility="Horizontal"
+              BorderThickness="0"
+              Background="#1E1E1E"
+              Foreground="#D4D4D4"
+              FontSize="12"
+              FontFamily="Consolas, Menlo, monospace">
+      <DataGrid.Columns>
+        <DataGridTemplateColumn Header="Score" Width="60">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:ScoredPropertyRow">
+              <TextBlock Text="{Binding FinalScore}"
+                         Foreground="#CCCCCC"
+                         FontWeight="Bold"
+                         VerticalAlignment="Center"
+                         Margin="6,0"
+                         ToolTip.Tip="{Binding ScoreTooltip}"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+        <DataGridTemplateColumn Header="Cat" Width="80">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:ScoredPropertyRow">
+              <TextBlock Text="{Binding CategoryLabel}"
+                         Foreground="{Binding CategoryColor}"
+                         FontWeight="SemiBold"
+                         VerticalAlignment="Center"
+                         Margin="4,0"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+        <DataGridTemplateColumn Header="⚠ Location" Width="100">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:ScoredPropertyRow">
+              <TextBlock Text="{Binding UnusualBadge}"
+                         Foreground="#E0A050"
+                         FontWeight="SemiBold"
+                         VerticalAlignment="Center"
+                         Margin="4,0"
+                         ToolTip.Tip="{Binding ScoreTooltip}"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+        <DataGridTextColumn Header="Class" Binding="{Binding ClassName}" Width="220"/>
+        <DataGridTextColumn Header="Property" Binding="{Binding PropName}" Width="220"/>
+        <DataGridTextColumn Header="Type" Binding="{Binding TypeDisplay}" Width="160"/>
+        <DataGridTextColumn Header="Offset" Binding="{Binding OffsetHex}" Width="80"/>
+        <DataGridTemplateColumn Header="" Width="Auto">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:ScoredPropertyRow">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <Button Content="{StaticResource str.IP.OpenLive}"
+                        Command="{Binding $parent[UserControl].((vm:InterestingPropertiesViewModel)DataContext).OpenInLiveWalkerCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.IP.OpenLive}"
+                        Foreground="#4EC9B0" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#4EC9B0"
+                        Padding="6,2" FontSize="11"
+                        Cursor="Hand"/>
+                <Button Content="{StaticResource str.IP.CopyName}"
+                        Command="{Binding $parent[UserControl].((vm:InterestingPropertiesViewModel)DataContext).CopyPropertyNameCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.IP.CopyName}"
+                        Foreground="#DCDCAA" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#DCDCAA"
+                        Padding="6,2" FontSize="11"
+                        Cursor="Hand"/>
+              </StackPanel>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</UserControl>

@@ -8,6 +8,9 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
+
+#include "Ubel.h"   // For ::ClassInfo (defined at global scope in Ubel.h, despite the filename) used by WalkClassesBatch
 
 // FUObjectItem structure (in FChunkedFixedUObjectArray)
 // Size varies by UE version — auto-detected at Init() time:
@@ -303,6 +306,43 @@ PropertySearchResult SearchProperties(
     const std::vector<std::string>& typeFilter,
     bool gameOnly,
     int maxResults = 200);
+
+// Batched property search: walk GObjects + class fields ONCE and check
+// every property against ALL queries. Returns one PropertySearchResult
+// per query (in the same order as the input). Each query gets its own
+// dedup index, per-query maxResults limit, and (optionally) per-query
+// preview values.
+//
+// The big win: a 36-query sweep on a 4400-class game drops from
+// ~42 sequential seconds (each call re-walks GObjects) to ~1.5 seconds
+// (one shared walk; per-property keyword check is cheap).
+//
+// withPreviews=false skips the Phase-2 instance scan that resolves
+// preview values for the wire output. The Interesting Properties tab
+// (the primary consumer) doesn't show previews, so the default is off
+// and we save another GObjects pass.
+std::vector<PropertySearchResult> SearchPropertiesBatch(
+    const std::vector<std::string>& queries,
+    const std::vector<std::string>& typeFilter,
+    bool gameOnly,
+    int maxResultsPerQuery = 200,
+    bool withPreviews = false);
+
+// Batched class schema walk: invokes Ubel::WalkClassEx once per input
+// address and returns results in the same order. The DLL implementation
+// is deliberately a trivial loop — every element comes from the exact
+// same WalkClassEx call the single-walk `walk_class` pipe command uses,
+// so each ClassInfo is byte-identical to a single-call response. The
+// optimisation is purely pipe round-trip + JSON serialisation
+// amortisation: a 4000-class Full SDK export saves ~4000 × ~0.3ms of
+// per-message overhead plus the per-call JSON envelope cost.
+//
+// Caller is responsible for chunking — a single batch carrying
+// thousands of fully-walked classes would produce a multi-megabyte
+// JSON payload, so the UI side fans out in ~200-class chunks.
+// Note: ClassInfo is defined at global scope in Ubel.h (not inside the
+// Ubel namespace), so the unqualified name is correct here.
+std::vector<ClassInfo> WalkClassesBatch(const std::vector<uintptr_t>& addrs);
 
 // Walk the SuperStruct chain upward from `classAddr` and return the
 // highest-up class that still declares a property at `fieldOffset`.

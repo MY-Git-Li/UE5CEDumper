@@ -53,6 +53,14 @@ public sealed class FunctionParamModel
     public string StructName { get; init; } = "";
     /// <summary>DLL-discovered sub-fields for StructProperty params (Phase B fallback). Empty for non-struct or when struct layout is unknown.</summary>
     public IReadOnlyList<DynamicStructField> StructFields { get; init; } = [];
+    /// <summary>
+    /// Stage 1 (Invoke param picker): expected UClass name for pointer-flavoured
+    /// params (ObjectProperty / ClassProperty / SoftObject / WeakObject / Lazy /
+    /// Interface). The DLL extracts this from FObjectPropertyBase::PropertyClass.
+    /// Empty for scalar / struct / container params, and on older DLLs that
+    /// pre-date the field (backwards-compatible default).
+    /// </summary>
+    public string ObjectClassName { get; init; } = "";
 }
 
 /// <summary>

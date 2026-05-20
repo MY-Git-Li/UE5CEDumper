@@ -71,7 +71,7 @@ public class AobMakerInjectTableFileTests
     {
         var bridge = new AobMakerBridgeService();
         await Assert.ThrowsAsync<ArgumentException>(
-            () => bridge.InjectTableFileAsync("", "content"));
+            () => bridge.InjectTableFileAsync("", "content", TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public class AobMakerInjectTableFileTests
     {
         var bridge = new AobMakerBridgeService();
         await Assert.ThrowsAsync<ArgumentException>(
-            () => bridge.InjectTableFileAsync("foo.lua", ""));
+            () => bridge.InjectTableFileAsync("foo.lua", "", TestContext.Current.CancellationToken));
     }
 
     // Note: a "no-CE-plugin -> graceful false" test is intentionally

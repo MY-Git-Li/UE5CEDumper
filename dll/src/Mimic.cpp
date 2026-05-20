@@ -2,7 +2,7 @@
 // Mimic — 寶箱怪 (經典梗 — The Classic Gag)
 // Mailbox: CE Lua shared-memory command interface
 //
-// Polling thread checks the mailbox every ~10ms.
+// Polling thread checks the mailbox every ~1ms (see kPollIntervalMs).
 // Uses existing public APIs (UE5_Init, UE5_CallProcessEvent, etc.)
 // so no internal changes to GameThreadDispatch are needed.
 //
@@ -20,6 +20,7 @@
 #include "Ubel.h"
 
 #include <Windows.h>
+#include <timeapi.h>   // timeBeginPeriod / timeEndPeriod (winmm)
 
 #include <atomic>
 #include <cstring>
@@ -48,6 +49,19 @@ namespace Mimic {
 // Polling thread state
 static std::atomic<bool> s_running{false};
 static HANDLE s_hThread = nullptr;
+
+// Mailbox poll interval. CE Lua's invokeUFunction blocks waiting for the
+// status flag to flip — every ms shaved off this interval is shaved off the
+// per-invoke wall-clock latency. Was 10ms historically; lowered to 1ms so a
+// tight Lua loop of N invokes doesn't accumulate (N × ~5ms) of pure idle
+// time inside the polling loop. CPU cost at idle: one thread ticks 1000x/sec
+// doing a handful of volatile reads — negligible. The polling thread bumps
+// the Windows timer resolution to 1ms via timeBeginPeriod so Sleep(1) really
+// delivers ~1ms on the few systems that still default to the legacy 15.6ms
+// system tick (Win10 2004+ scopes this to our process; earlier systems pay
+// a small global cost but the DLL is only loaded into game processes that
+// almost always already request 1ms resolution for their own frame timing).
+static constexpr UINT kPollIntervalMs = 1;
 
 // Audit fix #10: depth counter for compound multi-step operations
 // (HandleInvokeByName chains three sub-handlers). When > 0, sub-handlers'
@@ -85,7 +99,21 @@ struct CompoundOpGuard {
 // ---- Polling thread ----
 
 static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
-    LOG_INFO("Mailbox: polling thread started");
+    LOG_INFO("Mailbox: polling thread started (poll=%ums)", kPollIntervalMs);
+
+    // Bump Windows timer resolution to 1ms for the lifetime of this thread.
+    // Without this, Sleep(1) on a host with the default 15.6ms tick (rare on
+    // modern Win10/11 game processes, common on idle/server SKUs) would actually
+    // sleep ~15.6ms — completely defeating the latency win. Paired with
+    // timeEndPeriod below; balanced so we don't leak the request if the thread
+    // exits cleanly. MMSYSERR_NOERROR == 0; non-zero just logs (caller decision
+    // is to proceed: even on failure the worst case is Sleep granularity falls
+    // back to the system default, not a correctness break).
+    MMRESULT tbpRc = timeBeginPeriod(kPollIntervalMs);
+    if (tbpRc != TIMERR_NOERROR) {
+        LOG_WARN("Mailbox: timeBeginPeriod(%u) failed rc=%u — Sleep granularity "
+                 "may fall back to system default", kPollIntervalMs, tbpRc);
+    }
 
     // Audit doc #8: g_invokeMailbox is a plain struct (no atomics). Reads
     // are correct here under the assumption that the writer (CE Lua) uses
@@ -137,7 +165,11 @@ static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
             }
         }
 
-        Sleep(10);
+        Sleep(kPollIntervalMs);
+    }
+
+    if (tbpRc == TIMERR_NOERROR) {
+        timeEndPeriod(kPollIntervalMs);
     }
 
     LOG_INFO("Mailbox: polling thread stopped");

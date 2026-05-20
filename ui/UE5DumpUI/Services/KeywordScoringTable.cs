@@ -145,31 +145,13 @@ public static class KeywordScoringTable
     };
 
     // ------------------------------------------------------------------
-    // Class-name boosts (substring matched against owning class name).
+    // Class-name boosts moved to ClassLocationScorer.FunctionBonus so
+    // both Function side and Property side (B' / Interesting Properties)
+    // share the same bag-of-substrings pattern. Property side has its
+    // OWN table because the relevant noise / signal classes differ —
+    // e.g. LocalPlayer / GameViewportClient / HUD are "unusual but
+    // valuable" for properties but irrelevant for functions.
     // ------------------------------------------------------------------
-
-    private static readonly (string Substring, int Bonus)[] ClassBonuses =
-    {
-        // Player-controlled / persistent state -- big boost (these are
-        // where game-state-mutating functions usually live)
-        ("Character",         3),
-        ("Pawn",              3),
-        ("PlayerController",  3),
-        ("PlayerState",       3),
-        // Game-level systems -- medium boost
-        ("GameMode",          2),
-        ("GameInstance",      2),
-        ("SaveGame",          2),
-        // Visual / audio / animation -- penalty (these have lots of
-        // BC functions but rarely move cheat-relevant state)
-        ("Anim",             -2),
-        ("Niagara",          -2),
-        ("Sound",            -2),
-        ("Audio",            -2),
-        ("UI",               -1),  // milder -- some HUD/inventory UI is relevant
-        ("Widget",           -1),
-        ("Particle",         -2),
-    };
 
     // ------------------------------------------------------------------
     // FunctionFlag boosts. Read from AllFunctionEntry projections so
@@ -207,12 +189,6 @@ public static class KeywordScoringTable
         foreach (var t in KeywordTokenizer.Tokenize(entry.ClassName))
             tokens.Add(t);
 
-        // Class-name lowercase preserved separately for the substring-based
-        // ClassBonuses table (those still want substring match -- "Anim"
-        // should hit "AnimNotify" / "AnimationInstance" / etc, not just
-        // standalone "Anim" tokens).
-        var classLower = entry.ClassName.ToLowerInvariant();
-
         // Keyword pass: tally hits per category, pick the winner.
         int statsHits     = CountTokenHits(tokens, StatsKeywords);
         int inventoryHits = CountTokenHits(tokens, InventoryKeywords);
@@ -242,16 +218,10 @@ public static class KeywordScoringTable
         if (combatScore > catScore)    { catScore = combatScore;    category = FunctionCategory.Combat; }
         if (utilityScore > catScore)   { catScore = utilityScore;   category = FunctionCategory.Utility; }
 
-        // Class bonus: sum all matching substring bonuses (so something
-        // like "AnimCharacter" gets Anim penalty + Character bonus
-        // = +1 net, accurately reflecting that it's likely an
-        // animation event on a character).
-        int classBonus = 0;
-        foreach (var (sub, bonus) in ClassBonuses)
-        {
-            if (classLower.Contains(sub.ToLowerInvariant()))
-                classBonus += bonus;
-        }
+        // Class bonus delegated to shared ClassLocationScorer so the
+        // identical stacking semantics ("AnimCharacter" = Anim + Character)
+        // are also available to the Property-side scorer.
+        int classBonus = ClassLocationScorer.FunctionBonus(entry.ClassName);
 
         // Flag bonus
         int flagBonus = 0;

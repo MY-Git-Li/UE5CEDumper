@@ -40,6 +40,47 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _currentAddress = "";
     [ObservableProperty] private bool _hasData;
     [ObservableProperty] private LiveFieldValue? _selectedField;
+
+    // Multi-selection snapshot. Updated by LiveWalkerPanel's SelectionChanged
+    // handler whenever the DataGrid's SelectedItems changes. Drives Copy CE
+    // Field(s) export — everything else (drill-down, copy buttons, edit) acts
+    // on the row whose own button was clicked, so multi-select doesn't affect
+    // those flows. SelectedField is still the focus anchor for search /
+    // bookmark / scroll-to logic.
+    private readonly List<LiveFieldValue> _selectedFieldsSnapshot = new();
+    [ObservableProperty] private int _selectedFieldsCount;
+
+    public bool HasSelectedFields => SelectedFieldsCount > 0;
+
+    public string ExportCeFieldButtonLabel => SelectedFieldsCount > 1
+        ? $"Copy CE Fields ({SelectedFieldsCount})"
+        : "Copy CE Field";
+
+    partial void OnSelectedFieldsCountChanged(int value)
+    {
+        OnPropertyChanged(nameof(HasSelectedFields));
+        OnPropertyChanged(nameof(ExportCeFieldButtonLabel));
+    }
+
+    /// <summary>
+    /// Sync the multi-selection snapshot from the DataGrid's SelectedItems
+    /// collection. Called by LiveWalkerPanel.FieldGrid_SelectionChanged.
+    /// Filters out non-LiveFieldValue entries defensively (Avalonia's
+    /// SelectedItems is typed as IList).
+    /// </summary>
+    public void UpdateSelectedFields(System.Collections.IEnumerable? selectedItems)
+    {
+        _selectedFieldsSnapshot.Clear();
+        if (selectedItems != null)
+        {
+            foreach (var item in selectedItems)
+            {
+                if (item is LiveFieldValue f) _selectedFieldsSnapshot.Add(f);
+            }
+        }
+        SelectedFieldsCount = _selectedFieldsSnapshot.Count;
+    }
+
     [ObservableProperty] private string _currentOuterAddr = "";
     [ObservableProperty] private string _currentOuterName = "";
     [ObservableProperty] private string _currentOuterClassName = "";
@@ -877,14 +918,26 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Create a container field copy with only the element matching the selected synthetic field.
-    /// Extracts sparse index from the "[N]" or "[N] description" name pattern.
-    /// Used by CE XML export to emit only the selected element within the container.
+    /// Create a container field copy retaining only the elements matching the
+    /// selected synthetic fields (one or more). Extracts sparse indices from
+    /// each selected field's "[N]" or "[N] description" name pattern.
+    /// Used by Copy CE Field(s) export to emit one container with N filtered
+    /// elements instead of N separate top-level entries — preserves CE's
+    /// hierarchical structure (container header + nested elements under same
+    /// pointer chain).
+    /// If no selected field has a parseable sparse index, returns the whole
+    /// container (preserving the original single-select fallback).
     /// </summary>
-    private static LiveFieldValue FilterContainerToElement(LiveFieldValue containerField, LiveFieldValue selectedField)
+    internal static LiveFieldValue FilterContainerToElement(
+        LiveFieldValue containerField, IReadOnlyList<LiveFieldValue> selectedFields)
     {
-        var sparseIndex = ParseSparseIndex(selectedField.Name);
-        if (!sparseIndex.HasValue) return containerField;
+        var indices = new HashSet<int>();
+        foreach (var f in selectedFields)
+        {
+            var idx = ParseSparseIndex(f.Name);
+            if (idx.HasValue) indices.Add(idx.Value);
+        }
+        if (indices.Count == 0) return containerField;
 
         if (containerField.DataTableRowCount > 0 && containerField.DataTableRowData != null)
         {
@@ -900,7 +953,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 DataTableStride = containerField.DataTableStride,
                 DataTableRowStructAddr = containerField.DataTableRowStructAddr,
                 DataTableRowData = containerField.DataTableRowData
-                    .Where(r => r.SparseIndex == sparseIndex.Value).ToList(),
+                    .Where(r => indices.Contains(r.SparseIndex)).ToList(),
             };
         }
 
@@ -922,7 +975,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 MapKeyStructType = containerField.MapKeyStructType,
                 MapValueStructAddr = containerField.MapValueStructAddr,
                 MapValueStructType = containerField.MapValueStructType,
-                MapElements = containerField.MapElements.Where(e => e.Index == sparseIndex.Value).ToList(),
+                MapElements = containerField.MapElements.Where(e => indices.Contains(e.Index)).ToList(),
             };
         }
 
@@ -940,7 +993,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 SetDataAddr = containerField.SetDataAddr,
                 SetElemStructAddr = containerField.SetElemStructAddr,
                 SetElemStructType = containerField.SetElemStructType,
-                SetElements = containerField.SetElements.Where(e => e.Index == sparseIndex.Value).ToList(),
+                SetElements = containerField.SetElements.Where(e => indices.Contains(e.Index)).ToList(),
             };
         }
 
@@ -961,7 +1014,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 ArrayStructClassAddr = containerField.ArrayStructClassAddr,
                 SoftArrayFNameSize = containerField.SoftArrayFNameSize,
                 SoftArrayIsTopLevelAssetPath = containerField.SoftArrayIsTopLevelAssetPath,
-                ArrayElements = containerField.ArrayElements.Where(e => e.Index == sparseIndex.Value).ToList(),
+                ArrayElements = containerField.ArrayElements.Where(e => indices.Contains(e.Index)).ToList(),
                 ArrayEnumAddr = containerField.ArrayEnumAddr,
                 ArrayEnumEntries = containerField.ArrayEnumEntries,
             };
@@ -1714,34 +1767,46 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private async Task ExportCeFieldXmlAsync()
     {
-        if (SelectedField == null || string.IsNullOrEmpty(CurrentAddress) || Breadcrumbs.Count == 0) return;
+        // Use the multi-selection snapshot; fall back to SelectedField for
+        // robustness if SelectionChanged hasn't synced yet (e.g. when the
+        // command fires programmatically right after a single-row selection).
+        var selectedSnapshot = _selectedFieldsSnapshot.Count > 0
+            ? new List<LiveFieldValue>(_selectedFieldsSnapshot)
+            : (SelectedField != null ? new List<LiveFieldValue> { SelectedField } : new List<LiveFieldValue>());
+
+        if (selectedSnapshot.Count == 0 || string.IsNullOrEmpty(CurrentAddress) || Breadcrumbs.Count == 0) return;
 
         try
         {
             ClearStatus();
             IsLoading = true;
 
-            // Container view: strip container breadcrumb, use filtered ContainerField
-            // containing only the selected element. Same rationale as ExportCeXmlAsync.
+            // Container view: strip container breadcrumb, build ONE filtered
+            // ContainerField containing all selected elements (preserves CE's
+            // hierarchical structure — header + nested elements under same
+            // pointer chain — instead of N detached top-level entries).
             var lastBc = Breadcrumbs[^1];
             var isContainerView = lastBc.IsContainerView && lastBc.ContainerField != null;
 
             IReadOnlyList<BreadcrumbItem> breadcrumbsForXml;
-            List<LiveFieldValue> singleFieldList;
+            List<LiveFieldValue> fieldsForXml;
 
             if (isContainerView)
             {
                 breadcrumbsForXml = Breadcrumbs.Take(Breadcrumbs.Count - 1).ToList();
-                singleFieldList = new List<LiveFieldValue>
-                    { FilterContainerToElement(lastBc.ContainerField!, SelectedField) };
+                fieldsForXml = new List<LiveFieldValue>
+                    { FilterContainerToElement(lastBc.ContainerField!, selectedSnapshot) };
             }
             else
             {
                 breadcrumbsForXml = Breadcrumbs;
-                singleFieldList = new List<LiveFieldValue> { SelectedField };
+                fieldsForXml = selectedSnapshot;
             }
 
-            _log.Info($"CEFieldXML export: field={SelectedField.Name} containerView={isContainerView} bcCount={breadcrumbsForXml.Count} | BC={FormatBreadcrumbTrace()}");
+            var fieldSummary = selectedSnapshot.Count == 1
+                ? $"field={selectedSnapshot[0].Name}"
+                : $"fields={selectedSnapshot.Count}({string.Join(",", selectedSnapshot.Take(5).Select(f => f.Name))}{(selectedSnapshot.Count > 5 ? "…" : "")})";
+            _log.Info($"CEFieldXML export: {fieldSummary} containerView={isContainerView} bcCount={breadcrumbsForXml.Count} | BC={FormatBreadcrumbTrace()}");
 
             // Pre-check CleanBreadcrumbs to log any cycle removals
             var cleaned = CeXmlExportService.CleanBreadcrumbs(breadcrumbsForXml);
@@ -1756,19 +1821,19 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 }
             }
 
-            // Pre-resolve StructProperty inner fields for the selected field
+            // Pre-resolve StructProperty inner fields for the selected fields
             StatusText = CsxDrilldownDepth > 0
                 ? "Resolving struct + pointer fields..."
                 : "Resolving struct fields...";
             var resolvedStructs = await CeXmlExportService.ResolveStructFieldsAsync(
-                _dump, singleFieldList, arrayLimit: ArrayLimit);
+                _dump, fieldsForXml, arrayLimit: ArrayLimit);
 
-            // Pointer drill-down for the selected field (and its target's nested
-            // pointers) up to CsxDrilldownDepth — same toolbar slider used by CSX.
-            // Cascades struct resolution into each drilled target's fields so
-            // nested StructProperty children expand too.
+            // Pointer drill-down for the selected fields (and their targets'
+            // nested pointers) up to CsxDrilldownDepth — same toolbar slider
+            // used by CSX. Cascades struct resolution into each drilled
+            // target's fields so nested StructProperty children expand too.
             var resolvedInstances = await CeXmlExportService.ResolvePointerInstancesAsync(
-                _dump, singleFieldList, depth: CsxDrilldownDepth, arrayLimit: ArrayLimit,
+                _dump, fieldsForXml, depth: CsxDrilldownDepth, arrayLimit: ArrayLimit,
                 resolvedStructs: resolvedStructs);
 
             var rootBc = breadcrumbsForXml[0];
@@ -1784,7 +1849,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             if (useAob)
             {
                 xml = CeXmlExportService.GenerateAobWrappedXml(
-                    rootBc.Label, breadcrumbsForXml, singleFieldList,
+                    rootBc.Label, breadcrumbsForXml, fieldsForXml,
                     _engineState!.GWorldAob, _engineState.GWorldAobPos, _engineState.GWorldAobLen,
                     _engineState.ModuleName,
                     resolvedStructs,
@@ -1797,17 +1862,17 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 var rootAddress = AddressHelper.FormatAddress(
                     rootBc.Address, _engineState?.ModuleName, _engineState?.ModuleBase, AddrFormat);
                 xml = CeXmlExportService.GenerateHierarchicalXml(
-                    rootAddress, rootBc.Label, breadcrumbsForXml, singleFieldList, resolvedStructs,
+                    rootAddress, rootBc.Label, breadcrumbsForXml, fieldsForXml, resolvedStructs,
                     collapsePointerNodes: CollapsePointerNodes,
                     maxDropDownEntries: DropDownLimit,
                     resolvedInstances: resolvedInstances);
             }
 
             await _platform.CopyToClipboardAsync(xml);
-            var limitWarn = BuildContainerLimitWarning(singleFieldList, ArrayLimit);
+            var limitWarn = BuildContainerLimitWarning(fieldsForXml, ArrayLimit);
             var aobFallbackWarn = (UseAobSymbol && !isGWorldRoot) ? "AOB skipped (no GWorld path)" : null;
             StatusText = aobFallbackWarn ?? limitWarn ?? "";
-            _log.Info($"CE Field XML copied for {SelectedField.Name} ({SelectedField.TypeName}, AOB={useAob}, " +
+            _log.Info($"CE Field XML copied: {selectedSnapshot.Count} field(s) (AOB={useAob}, " +
                 $"{resolvedInstances.Count} pointer targets resolved at depth={CsxDrilldownDepth})");
         }
         catch (Exception ex)

@@ -14,14 +14,15 @@
     <sys:String x:Key="str.Toolbar.CsxDepth">Drill Depth:</sys:String>
 
     <!-- Tabs -->
-    <sys:String x:Key="str.Tab.ClassStruct">Class Structure</sys:String>
+    <sys:String x:Key="str.Tab.ClassStruct">Class Struct</sys:String>
     <sys:String x:Key="str.Tab.Pointers">System</sys:String>
     <sys:String x:Key="str.Tab.ProxyDeploy">Proxy Deploy</sys:String>
     <sys:String x:Key="str.Tab.LiveWalker">Live Walker</sys:String>
-    <sys:String x:Key="str.Tab.InstanceFinder">Instance Finder</sys:String>
-    <sys:String x:Key="str.Tab.PropertySearch">Property Search</sys:String>
+    <sys:String x:Key="str.Tab.InstanceFinder">Instances</sys:String>
+    <sys:String x:Key="str.Tab.PropertySearch">Properties</sys:String>
     <sys:String x:Key="str.Tab.InterestingFunctions">Interesting Funcs</sys:String>
-    <sys:String x:Key="str.Tab.GameClassFilter">Game Classes</sys:String>
+    <sys:String x:Key="str.Tab.InterestingProperties">Interesting Props</sys:String>
+    <sys:String x:Key="str.Tab.GameClassFilter">Classes</sys:String>
 
     <!-- Object Tree -->
     <sys:String x:Key="str.ObjectTree.Title">Object Tree</sys:String>
@@ -64,6 +65,7 @@
     <sys:String x:Key="str.LiveWalker.Go">Go</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportCE">Copy CE XML</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportCEField">Copy CE Field</sys:String>
+    <sys:String x:Key="str.LiveWalker.ExportCEFields">Copy CE Fields</sys:String>
     <sys:String x:Key="str.LiveWalker.AobToggle">AOB</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportCsx">Export CSX</sys:String>
     <sys:String x:Key="str.LiveWalker.Value">Value</sys:String>
@@ -201,12 +203,15 @@
     <sys:String x:Key="str.ProxyDeploy.ColError">Error</sys:String>
 
     <!-- Export -->
+    <sys:String x:Key="str.Toolbar.Options">⚙ Options</sys:String>
     <sys:String x:Key="str.Toolbar.Export">Export</sys:String>
     <sys:String x:Key="str.Export.SymbolsX64dbg">Symbols (x64dbg .dd64)</sys:String>
     <sys:String x:Key="str.Export.SymbolsGhidra">Symbols (Ghidra .txt)</sys:String>
     <sys:String x:Key="str.Export.SymbolsIda">Symbols (IDA .idc)</sys:String>
     <sys:String x:Key="str.Export.SdkHeader">SDK Header (.h)</sys:String>
     <sys:String x:Key="str.Export.Usmap">USMAP (.usmap)</sys:String>
+    <sys:String x:Key="str.Export.DumpAll">Dump All Metadata (.jsonl)</sys:String>
+    <sys:String x:Key="str.Tip.Export.DumpAll">Stream every class + property + function (including BPGCs) to a JSON Lines file. Used by scripts/analysis/analyze_dumps.py to derive keyword tables / class bonuses / threshold calibration from real-game data. ~30-60s per game; output is 50-500 MB depending on game size.</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportHeader">Export .h</sys:String>
 
     <!-- Tools (always-available menu; doesn't depend on a DLL connection) -->
@@ -250,9 +255,27 @@
     <sys:String x:Key="str.Tip.IF.Filter">Substring match against function name OR class name (case-insensitive). e.g. "Money" or "PlayerCharacter".</sys:String>
     <sys:String x:Key="str.Tip.IF.Category">Filter by category. Categories are picked from the strongest-scoring keyword bucket per function (Stats &gt; Inventory &gt; Movement &gt; Combat &gt; Utility tied with same score).</sys:String>
     <sys:String x:Key="str.Tip.IF.ShowAll">When off, hide rows with score below the InterestingThreshold (currently 5). When on, show every UFunction regardless of score.</sys:String>
-    <sys:String x:Key="str.Tip.IF.OpenLive">Try to open this function in Live Walker. If the class has no live (non-CDO) instance, falls back to the Class Structure tab. Auto-expands the Functions section and selects the target row.</sys:String>
+    <sys:String x:Key="str.Tip.IF.OpenLive">Try to open this function in Live Walker. If the class has no live (non-CDO) instance, falls back to the Class Struct tab. Auto-expands the Functions section and selects the target row.</sys:String>
     <sys:String x:Key="str.Tip.IF.CopyAaScript">Open the Copy AA Script (Baked) dialog for this function. Output requires ue5_invoke_helper.lua embedded in your CE table (Tools -&gt; Export CE Helper Lua File...).</sys:String>
     <sys:String x:Key="str.Tip.IF.CopyName">Copy this function's name to the clipboard. Useful when pasting into a CE script or another tool.</sys:String>
+
+    <!-- Interesting Properties Finder (B' / Unusual Location) -->
+    <sys:String x:Key="str.IP.Load">Load</sys:String>
+    <sys:String x:Key="str.IP.GameOnly">Game Only</sys:String>
+    <sys:String x:Key="str.IP.FilterHint">Filter by name (property or class)...</sys:String>
+    <sys:String x:Key="str.IP.UnusualOnly">⚠ Unusual Only</sys:String>
+    <sys:String x:Key="str.IP.ShowAll">Show All (incl. low-score)</sys:String>
+    <sys:String x:Key="str.IP.ClearFilters">Clear</sys:String>
+    <sys:String x:Key="str.IP.OpenLive">Live</sys:String>
+    <sys:String x:Key="str.IP.CopyName">Name</sys:String>
+    <sys:String x:Key="str.Tip.IP.Load">Fan-out search across the seed keyword list (HP/Damage/Gold/Speed/etc.) and score the results client-side. Highlights properties in non-canonical locations (LocalPlayer / HUD / GameViewportClient) — the kind of cheat-relevant fields a CE user would miss looking only in Character/Pawn.</sys:String>
+    <sys:String x:Key="str.Tip.IP.GameOnly">Skip /Script/Engine, /Script/CoreUObject, etc. Recommended on — game-specific properties are the cheat-table targets.</sys:String>
+    <sys:String x:Key="str.Tip.IP.Filter">Substring match against property name OR class name (case-insensitive). e.g. "Health" or "PlayerState".</sys:String>
+    <sys:String x:Key="str.Tip.IP.Category">Filter by category. Stats / Combat / Resources / Movement / Utility / Other.</sys:String>
+    <sys:String x:Key="str.Tip.IP.UnusualOnly">Show only properties whose owning class is in the Unusual Location list (LocalPlayer / GameViewportClient / HUD / CheatManager) — properties developers placed outside the conventional Character/Pawn/PlayerState containers.</sys:String>
+    <sys:String x:Key="str.Tip.IP.ShowAll">When off, hide rows below the InterestingThreshold (currently 4). When on, show every property regardless of score.</sys:String>
+    <sys:String x:Key="str.Tip.IP.OpenLive">Open this property's owning class in Live Walker (live instance lookup), or fall back to Class Struct if no live instance exists.</sys:String>
+    <sys:String x:Key="str.Tip.IP.CopyName">Copy this property's name to the clipboard.</sys:String>
 
     <!-- Proxy DLL / Deferred Scan -->
     <sys:String x:Key="str.Toolbar.StartScan">Start Scan</sys:String>
@@ -273,6 +296,7 @@
     <sys:String x:Key="str.Tip.DropDownLimit">Max CE DropDownList entries (2^N)</sys:String>
     <sys:String x:Key="str.Tip.PreviewLimit">Struct sub-fields shown in Value column (0 = no preview)</sys:String>
     <sys:String x:Key="str.Tip.CsxDepth">Pointer drill-down depth (0 = flat). Applies to both CSX export and CE XML / CE Field copy. 0-4 normal; 5-6 deep — output size grows exponentially per level (depth 6 on UWorld can produce multi-MB CE XML).</sys:String>
+    <sys:String x:Key="str.Tip.Toolbar.Options">Export-shape settings: pointer-node collapse, array/dropdown/preview limits, drill depth. Set once per session.</sys:String>
     <sys:String x:Key="str.Tip.Export">Export object data in various formats</sys:String>
     <sys:String x:Key="str.Tip.Tools">Tools that don't depend on a live DLL connection (helper file export/inject, etc.)</sys:String>
     <sys:String x:Key="str.Tip.Tools.InjectCeHelperLua">One-click: send ue5_invoke_helper.lua straight into the currently open CE table via the AOBMaker plugin. Replaces existing copy if present. Skips the manual save-to-disk + Table -&gt; Add File... dance. Requires the AOBMaker CE Plugin to be loaded (open Cheat Engine first); falls back gracefully if unavailable.</sys:String>
@@ -331,7 +355,7 @@
     <sys:String x:Key="str.Tip.LiveWalker.FindRefs">Find UObjects that hold a pointer to this one (true logical owner — Outer/Parent often only gives the naming-hierarchy package)</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.Go">Navigate to the specified address</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.ExportCE">Copy full CE XML pointer chain to clipboard</sys:String>
-    <sys:String x:Key="str.Tip.LiveWalker.ExportCEField">Copy CE XML for selected field only</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.ExportCEField">Copy CE XML for the selected field(s) only (Ctrl/Shift-click to multi-select)</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.AobToggle">Use AOB-scanned GWorld symbol instead of hardcoded address (survives game restarts)</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.ExportCsx">Export CE Structure Dissect script (.csx)</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.ExportHeader">Export C++ SDK header (.h)</sys:String>

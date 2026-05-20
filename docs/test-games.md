@@ -18,11 +18,11 @@
 | Hogwarts Legacy | UE4.27 (PE: 427) | GNames via pointer-scan fallback. Stride 24, 379K objects. GWorld ✅ (build 1.0.0.27) |
 | IDOLM@STER STARLIT SEASON | UE4.24 | Working. GWorld ✅ (build 1.0.0.27). CDO skip fix effective |
 | Romancing SaGa 2 | UE4.27 | Working (build 1.0.0.27). GWorld ✅ |
-| Star Wars Jedi: Fallen Order | UE4.21 | Working (build 1.0.0.25). 318022 objects. GWorld untested |
+| Star Wars Jedi: Fallen Order | UE4.21 | Working — 313 887 objects, **GWorld ✅** (`0x7FF7317EBAB8`) re-verified build 704 (2026-05-12) via CE injection. EA-launcher title: `version.dll` / `dinput8.dll` proxies do NOT load (EA app restricts the DLL search path); must inject via CE after the game is running. Install at `SwGame\Binaries\Win64\` holds TWO 58.4 MB exes side-by-side (`SwGame-Win64-Shipping.exe` + `starwarsjedifallenorder.exe`); CE sees the launcher exe as the running process. |
 | Ghostwire: Tokyo | UE505 detected (possibly UE4) | Working (build 1.0.0.27). 254493 objects. GWorld ✅. UE version likely incorrect. RE-UE4SS has only AOB signatures, no version override |
 | Lushfoil Photography Sim | UE5.6 (PE: 506) | NEW (build 1.0.0.40). All working. 58630 objects |
 | Manor Lords | UE5.5 | NEW (build 1.0.0.40). All working |
-| Satisfactory | UE5.3 (PE: 503) | NEW (build 1.0.0.40). Working. GWorld fails. 35776 objects |
+| Satisfactory | UE5.3 (PE: 503) | Working — modular UE build with separate `FactoryGameSteam-CoreUObject-Win64-Shipping.dll` under `Engine\Binaries\Win64\`. `Macht::AOBScanAllModules` falls through to the CoreUObject DLL; the 15-game dump corpus (build 678 + 687) contains its 4 868 BPGCs cleanly. **GWorld ✅** re-verified build 704 (2026-05-12); the original "GWorld fails" note was stale (pre-`AOBScanAllModules`). Proxy deploy fixed build 691 — UI now finds the launcher at `Engine\Binaries\Win64\FactoryGameSteam-Win64-Shipping.exe` (real .exe is in `Engine\`, not `FactoryGame\`). |
 | Cat Island Petrichor Demo | UE5.6 | Full working. GWorld ✅ |
 | Way of the Hunter 2 Demo | UE5.7 | Full working. GWorld ✅ |
 | COMBAT PILOT: CARRIER QUALIFICATION Demo | UE5.5 | Full working. GWorld ✅ |
