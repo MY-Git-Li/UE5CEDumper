@@ -955,6 +955,11 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                     pj["ret"]    = p.isReturn;
                     if (!p.structType.empty())
                         pj["struct_type"] = p.structType;
+                    // Stage 1 (Invoke param picker): target UClass for
+                    // Object/Class/Soft/Weak/Lazy/Interface params. Mirrors
+                    // the field-side `obj_class` key used by walk_class.
+                    if (!p.objClassName.empty())
+                        pj["obj_class"] = p.objClassName;
                     if (!p.structFields.empty()) {
                         json sfArr = json::array();
                         for (const auto& sf : p.structFields) {

@@ -342,7 +342,14 @@ public sealed class InvokeParamDialog : Window
                     var structSuffix = (p.TypeName == "StructProperty" && !string.IsNullOrEmpty(p.StructName))
                         ? $" ({p.StructName})"
                         : "";
-                    var label = $"{p.Name}  [{shortType}{structSuffix}, {p.Size}B, off={p.Offset}{(p.IsOut ? ", out" : "")}]";
+                    // Stage 1: surface the expected UClass for pointer-flavoured
+                    // params so the user knows what kind of object the param wants
+                    // (e.g. "UObject*: AActor" instead of bare "UObject*"). Empty
+                    // ObjectClassName falls through to the original label.
+                    var objClassSuffix = !string.IsNullOrEmpty(p.ObjectClassName)
+                        ? $": {p.ObjectClassName}"
+                        : "";
+                    var label = $"{p.Name}  [{shortType}{objClassSuffix}{structSuffix}, {p.Size}B, off={p.Offset}{(p.IsOut ? ", out" : "")}]";
 
                     var row = new Grid
                     {

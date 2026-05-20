@@ -1015,6 +1015,10 @@ public sealed class DumpService : IDumpService
                             IsReturn = po["ret"]?.GetValue<bool>() ?? false,
                             StructName = po["struct_type"]?.GetValue<string>() ?? "",
                             StructFields = structFields,
+                            // Stage 1 (Invoke param picker): expected UClass name
+                            // for pointer-flavoured params. Empty when the DLL
+                            // pre-dates the field or for non-pointer params.
+                            ObjectClassName = po["obj_class"]?.GetValue<string>() ?? "",
                         });
                     }
                 }
