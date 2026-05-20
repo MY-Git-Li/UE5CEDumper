@@ -194,6 +194,47 @@ public class ParamBufferBuilderTests
         Assert.Equal(expected, ParamBufferBuilder.ShortTypeName(typeName));
     }
 
+    // --- IsPickablePointerType (Stage 2) ---
+
+    [Theory]
+    [InlineData("ObjectProperty")]
+    [InlineData("ClassProperty")]
+    [InlineData("WeakObjectProperty")]
+    [InlineData("SoftObjectProperty")]
+    [InlineData("SoftClassProperty")]
+    [InlineData("InterfaceProperty")]
+    [InlineData("LazyObjectProperty")]
+    public void IsPickablePointerType_PointerTypes_True(string typeName)
+    {
+        // Mirrors the DLL-side WalkFunctions enrichment list. If a new pointer
+        // type gets added to one side, the other side must follow — this
+        // theory locks the contract.
+        Assert.True(ParamBufferBuilder.IsPickablePointerType(typeName));
+    }
+
+    [Theory]
+    [InlineData("IntProperty")]
+    [InlineData("FloatProperty")]
+    [InlineData("BoolProperty")]
+    [InlineData("StructProperty")]
+    [InlineData("StrProperty")]
+    [InlineData("TextProperty")]
+    [InlineData("NameProperty")]
+    [InlineData("ArrayProperty")]
+    [InlineData("MapProperty")]
+    [InlineData("SetProperty")]
+    [InlineData("EnumProperty")]
+    [InlineData("ByteProperty")]
+    [InlineData("")]
+    [InlineData("UnknownProperty")]
+    public void IsPickablePointerType_NonPointerTypes_False(string typeName)
+    {
+        // Scalars / containers / bool / string-likes don't get the picker UI.
+        // Empty + unknown type names also fall through to false so the dialog
+        // doesn't render orphan buttons for surprise inputs.
+        Assert.False(ParamBufferBuilder.IsPickablePointerType(typeName));
+    }
+
     // --- WriteStructParam ---
 
     [Fact]

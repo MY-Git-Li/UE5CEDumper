@@ -1,0 +1,258 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Interactivity;
+using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.Threading;
+using UE5DumpUI.Core;
+using UE5DumpUI.Models;
+
+namespace UE5DumpUI.Views;
+
+/// <summary>
+/// Stage 2 (Invoke param picker): modal dialog that lists live UObject
+/// instances matching an expected UClass, returns the chosen instance's
+/// address back to the caller. Opens from <see cref="InvokeParamDialog"/>
+/// when the user clicks "Pick..." next to a pointer-flavoured parameter.
+///
+/// Mechanics:
+/// <list type="bullet">
+/// <item>Auto-runs <c>FindInstancesAsync(expectedClassName, exactMatch:false)</c>
+///     on open — substring match catches subclasses of the expected base
+///     (which is what an ObjectProperty parameter genuinely accepts).</item>
+/// <item>User can edit the class filter + toggle exact-match + refresh.</item>
+/// <item>Double-click a row OR click "Use selected" → <c>Close(addressHex)</c>.</item>
+/// <item>Cancel → <c>Close(null)</c>.</item>
+/// </list>
+///
+/// Code-behind only (no XAML / CompiledBinding) to stay AOT-safe like the
+/// rest of the project. Visuals mirror InvokeParamDialog's palette.
+/// </summary>
+public sealed class ObjectInstancePickerDialog : Window
+{
+    private readonly IDumpService _dump;
+    private readonly string _expectedClassName;
+    private TextBox _classBox = null!;
+    private CheckBox _exactBox = null!;
+    private TextBlock _statusLabel = null!;
+    private DataGrid _grid = null!;
+    private Button _btnUse = null!;
+    private Button _btnRefresh = null!;
+    private Button _btnCancel = null!;
+
+    public ObjectInstancePickerDialog(string expectedClassName, IDumpService dump)
+    {
+        _expectedClassName = expectedClassName ?? "";
+        _dump = dump;
+
+        Title = string.IsNullOrEmpty(_expectedClassName)
+            ? "Pick UObject instance"
+            : $"Pick UObject instance — expected: {_expectedClassName}";
+        Width = 720;
+        MinWidth = 480;
+        Height = 520;
+        MinHeight = 320;
+        WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        CanResize = true;
+        Background = new SolidColorBrush(Color.Parse("#1E1E1E"));
+
+        var root = new DockPanel { Margin = new Thickness(12) };
+
+        // === Top: search row ===
+        var topRow = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("Auto,8,*,8,Auto,8,Auto"),
+            Margin = new Thickness(0, 0, 0, 8),
+        };
+
+        var classLbl = new TextBlock
+        {
+            Text = "Class filter:",
+            Foreground = new SolidColorBrush(Color.Parse("#DCDCAA")),
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(classLbl, 0);
+        topRow.Children.Add(classLbl);
+
+        _classBox = new TextBox
+        {
+            Text = _expectedClassName,
+            FontSize = 12,
+            Padding = new Thickness(4, 2),
+        };
+        Grid.SetColumn(_classBox, 2);
+        topRow.Children.Add(_classBox);
+
+        _exactBox = new CheckBox
+        {
+            Content = "Exact",
+            IsChecked = false,
+            Foreground = new SolidColorBrush(Color.Parse("#D4D4D4")),
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(_exactBox, 4);
+        topRow.Children.Add(_exactBox);
+
+        _btnRefresh = new Button
+        {
+            Content = "Refresh",
+            Padding = new Thickness(10, 4),
+        };
+        _btnRefresh.Click += OnRefreshClicked;
+        Grid.SetColumn(_btnRefresh, 6);
+        topRow.Children.Add(_btnRefresh);
+
+        DockPanel.SetDock(topRow, Dock.Top);
+        root.Children.Add(topRow);
+
+        // === Status label (under search row) ===
+        _statusLabel = new TextBlock
+        {
+            Text = "Searching...",
+            Foreground = new SolidColorBrush(Color.Parse("#808080")),
+            FontSize = 11,
+            Margin = new Thickness(0, 0, 0, 6),
+        };
+        DockPanel.SetDock(_statusLabel, Dock.Top);
+        root.Children.Add(_statusLabel);
+
+        // === Bottom: action buttons ===
+        var btnRow = new StackPanel
+        {
+            Orientation = Avalonia.Layout.Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 8, 0, 0),
+        };
+
+        _btnUse = new Button
+        {
+            Content = "Use selected",
+            Padding = new Thickness(14, 6),
+            Margin = new Thickness(0, 0, 8, 0),
+            IsEnabled = false,
+        };
+        _btnUse.Click += OnUseClicked;
+        btnRow.Children.Add(_btnUse);
+
+        _btnCancel = new Button
+        {
+            Content = "Cancel",
+            Padding = new Thickness(14, 6),
+        };
+        _btnCancel.Click += (_, _) => Close(null);
+        btnRow.Children.Add(_btnCancel);
+
+        DockPanel.SetDock(btnRow, Dock.Bottom);
+        root.Children.Add(btnRow);
+
+        // === Center: instance grid ===
+        _grid = new DataGrid
+        {
+            AutoGenerateColumns = false,
+            IsReadOnly = true,
+            CanUserResizeColumns = true,
+            CanUserReorderColumns = false,
+            CanUserSortColumns = true,
+            GridLinesVisibility = DataGridGridLinesVisibility.Horizontal,
+            HeadersVisibility = DataGridHeadersVisibility.Column,
+            SelectionMode = DataGridSelectionMode.Single,
+            FontSize = 12,
+        };
+        _grid.Columns.Add(new DataGridTextColumn
+        {
+            Header = "Index",
+            Binding = new Avalonia.Data.Binding(nameof(InstanceResult.Index)),
+            Width = new DataGridLength(70),
+        });
+        _grid.Columns.Add(new DataGridTextColumn
+        {
+            Header = "Address",
+            Binding = new Avalonia.Data.Binding(nameof(InstanceResult.Address)),
+            Width = new DataGridLength(180),
+        });
+        _grid.Columns.Add(new DataGridTextColumn
+        {
+            Header = "Class",
+            Binding = new Avalonia.Data.Binding(nameof(InstanceResult.ClassName)),
+            Width = new DataGridLength(200),
+        });
+        _grid.Columns.Add(new DataGridTextColumn
+        {
+            Header = "Name",
+            Binding = new Avalonia.Data.Binding(nameof(InstanceResult.Name)),
+            Width = new DataGridLength(1, DataGridLengthUnitType.Star),
+        });
+        _grid.SelectionChanged += (_, _) => _btnUse.IsEnabled = _grid.SelectedItem is InstanceResult;
+        _grid.DoubleTapped += OnGridDoubleTapped;
+
+        root.Children.Add(_grid);
+
+        Content = root;
+
+        Opened += async (_, _) => await RunSearchAsync();
+    }
+
+    private async void OnRefreshClicked(object? sender, RoutedEventArgs e)
+        => await RunSearchAsync();
+
+    private async Task RunSearchAsync()
+    {
+        var cls = _classBox.Text?.Trim() ?? "";
+        if (string.IsNullOrEmpty(cls))
+        {
+            _statusLabel.Text = "Enter a class name to search.";
+            _statusLabel.Foreground = new SolidColorBrush(Color.Parse("#F44747"));
+            _grid.ItemsSource = null;
+            return;
+        }
+
+        _btnRefresh.IsEnabled = false;
+        _statusLabel.Text = "Searching...";
+        _statusLabel.Foreground = new SolidColorBrush(Color.Parse("#808080"));
+
+        try
+        {
+            var exact = _exactBox.IsChecked == true;
+            var res = await _dump.FindInstancesAsync(cls, exactMatch: exact);
+            _grid.ItemsSource = res.Instances;
+
+            // Status line: tells the user how many we got, and the diagnostic
+            // counts from the DLL (scanned / non-null / named) — same info
+            // the InstanceFinderPanel surfaces, so users get a consistent
+            // feel for "is the game even alive right now".
+            _statusLabel.Text = $"{res.Instances.Count} instance(s) — "
+                              + $"scanned {res.Scanned:N0}, non-null {res.NonNull:N0}, named {res.Named:N0}"
+                              + (exact ? " (exact match)" : " (substring match — catches subclasses)");
+            _statusLabel.Foreground = new SolidColorBrush(Color.Parse(
+                res.Instances.Count > 0 ? "#4EC9B0" : "#D4D4D4"));
+        }
+        catch (Exception ex)
+        {
+            _statusLabel.Text = $"Search failed: {ex.Message}";
+            _statusLabel.Foreground = new SolidColorBrush(Color.Parse("#F44747"));
+            _grid.ItemsSource = null;
+        }
+        finally
+        {
+            _btnRefresh.IsEnabled = true;
+            _btnUse.IsEnabled = _grid.SelectedItem is InstanceResult;
+        }
+    }
+
+    private void OnUseClicked(object? sender, RoutedEventArgs e)
+    {
+        if (_grid.SelectedItem is InstanceResult ir && !string.IsNullOrEmpty(ir.Address))
+            Close(ir.Address);
+    }
+
+    private void OnGridDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        // Mirrors the LiveWalker / InstanceFinder UX: double-click is the
+        // primary "this one" gesture, distinct from single-click selection.
+        if (_grid.SelectedItem is InstanceResult ir && !string.IsNullOrEmpty(ir.Address))
+            Close(ir.Address);
+    }
+}

@@ -52,6 +52,25 @@ public static class ParamBufferBuilder
     }
 
     /// <summary>
+    /// True when a parameter type is a pointer to a UObject-flavoured value
+    /// that benefits from the Stage 2 instance-picker UI (a button that opens
+    /// the live-instance picker pre-filtered to the param's expected UClass).
+    ///
+    /// Includes every property type the DLL's WalkFunctions extracts an
+    /// <c>objClassName</c> for. Excludes scalars / struct / containers / bool —
+    /// those have their own editing paths (typed textbox, struct sub-field
+    /// expansion, etc.) and shouldn't get a picker button.
+    /// </summary>
+    public static bool IsPickablePointerType(string typeName) =>
+        typeName is "ObjectProperty"
+                 or "ClassProperty"
+                 or "WeakObjectProperty"
+                 or "SoftObjectProperty"
+                 or "SoftClassProperty"
+                 or "InterfaceProperty"
+                 or "LazyObjectProperty";
+
+    /// <summary>
     /// Get a short display name for a parameter type.
     /// </summary>
     public static string ShortTypeName(string typeName)

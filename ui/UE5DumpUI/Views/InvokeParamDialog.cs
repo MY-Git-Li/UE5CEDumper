@@ -351,9 +351,16 @@ public sealed class InvokeParamDialog : Window
                         : "";
                     var label = $"{p.Name}  [{shortType}{objClassSuffix}{structSuffix}, {p.Size}B, off={p.Offset}{(p.IsOut ? ", out" : "")}]";
 
+                    // Stage 2: pointer-flavoured params (UObject*/UClass*/Soft*/
+                    // Weak*/Lazy*/Interface) get three extra buttons after the
+                    // textbox — [Pick…] [null] [self]. Non-pointer params keep
+                    // the original two-column layout.
+                    bool isPointer = ParamBufferBuilder.IsPickablePointerType(p.TypeName);
                     var row = new Grid
                     {
-                        ColumnDefinitions = new ColumnDefinitions("Auto,8,*"),
+                        ColumnDefinitions = isPointer
+                            ? new ColumnDefinitions("Auto,8,*,4,Auto,4,Auto,4,Auto")
+                            : new ColumnDefinitions("Auto,8,*"),
                         Margin = new Thickness(0, 2),
                     };
 
@@ -379,6 +386,57 @@ public sealed class InvokeParamDialog : Window
                     row.Children.Add(edt);
                     _edits.Add(edt);
 
+                    if (isPointer)
+                    {
+                        // [Pick…] — opens the live-instance picker pre-filtered
+                        // to the param's expected UClass (from Stage 1). Greyed
+                        // out when ObjectClassName is empty because the picker
+                        // has nothing to pre-seed; users can still use the
+                        // textbox directly or go via the full InstanceFinder
+                        // panel.
+                        var btnPick = new Button
+                        {
+                            Content = "Pick…",
+                            Padding = new Thickness(8, 2),
+                            FontSize = 11,
+                            IsEnabled = !string.IsNullOrEmpty(p.ObjectClassName),
+                            Tag = (p.ObjectClassName, edt),
+                        };
+                        btnPick.Click += OnPickPointerClicked;
+                        Grid.SetColumn(btnPick, 4);
+                        row.Children.Add(btnPick);
+
+                        // [null] — quick 0x0 fill for optional pointer params
+                        // (WorldContextObject, default-null Inputs, etc.).
+                        var btnNull = new Button
+                        {
+                            Content = "null",
+                            Padding = new Thickness(8, 2),
+                            FontSize = 11,
+                            Tag = edt,
+                        };
+                        btnNull.Click += OnNullPointerClicked;
+                        Grid.SetColumn(btnNull, 6);
+                        row.Children.Add(btnNull);
+
+                        // [self] — fill with the invoke target's own address.
+                        // Useful for functions that take their owning UObject
+                        // as a param (rare but happens for utility functions
+                        // that re-target themselves). Disabled when there's
+                        // no target instance (definition-only views).
+                        var btnSelf = new Button
+                        {
+                            Content = "self",
+                            Padding = new Thickness(8, 2),
+                            FontSize = 11,
+                            IsEnabled = !string.IsNullOrEmpty(_instanceAddr),
+                            Tag = edt,
+                        };
+                        btnSelf.Click += OnSelfPointerClicked;
+                        Grid.SetColumn(btnSelf, 8);
+                        row.Children.Add(btnSelf);
+                    }
+
                     paramPanel.Children.Add(row);
                 }
             }
@@ -399,6 +457,33 @@ public sealed class InvokeParamDialog : Window
 
         root.Children.Add(scroll);
         Content = root;
+    }
+
+    // Stage 2: pointer-param helper buttons. Each handler is light enough to
+    // inline; centralising them here keeps the row-construction code at
+    // declaration site readable.
+
+    private async void OnPickPointerClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is not Button btn) return;
+        if (btn.Tag is not (string expectedClass, TextBox edt)) return;
+
+        var picker = new ObjectInstancePickerDialog(expectedClass, _dump);
+        var picked = await picker.ShowDialog<string?>(this);
+        if (!string.IsNullOrEmpty(picked))
+            edt.Text = picked;
+    }
+
+    private void OnNullPointerClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is TextBox edt)
+            edt.Text = "0x0";
+    }
+
+    private void OnSelfPointerClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is TextBox edt && !string.IsNullOrEmpty(_instanceAddr))
+            edt.Text = _instanceAddr;
     }
 
     private async void OnFireClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
