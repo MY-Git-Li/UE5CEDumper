@@ -559,6 +559,7 @@ returns the decoded Lua string instead of a number. Optional v2.
 > - **`walk_class_batch` pipe round-trip amortisation** (build 693-696, [deb837d](https://github.com/bbfox0703/UE5CEDumper/commit/deb837d) + namespace fix [568c757](https://github.com/bbfox0703/UE5CEDumper/commit/568c757)) — Full SDK Export + Dump All Metadata now batch in chunks of 200; estimated 2-5× wall-time speedup. Three-layer byte-equivalence guarantee: DLL loop-over-singles + shared JSON encoder/decoder + `WalkClassBatchEquivalenceTests.cs` 250-class fixture run through happy-path AND forced-fallback stubs.
 > - **GWorld 29/29 (100%)** ([2ccfd05](https://github.com/bbfox0703/UE5CEDumper/commit/2ccfd05)) — Star Wars Jedi: Fallen Order verified (UE 4.21, GWorld=0x7FF7317EBAB8, EA-launcher with proxy-DLL block — CE injection required). Satisfactory roadmap note corrected (scan was already working since the build-509 SIMD scanner rewrite).
 > - **17-game corpus bias recheck + analyzer hint sync** ([4f50ea0](https://github.com/bbfox0703/UE5CEDumper/commit/4f50ea0)) — Python analyzer's `CHEAT_KEYWORD_HINTS` had silently drifted from `PropertyScoringTable.cs`, hallucinating "uncategorised candidates" for already-shipped build-678 keywords. Synced. Bias verdict: tables stable, no additions warranted from Star Wars Jedi + Ghostwire: Tokyo (both reinforced existing patterns rather than surfacing new ones).
+> - **18-game bias recheck (Frontiers, MMO/ARPG genre)** — 2026-05-20 docs-only entry in [dev-log.md](dev-log.md). First MMO/ARPG-flavoured dump added (TL_* asset prefix, BossMonster / Pet / Affix / Dungeon / Sharpshooter archetypes). Bias verdict: **no additions warranted** despite landing in the predicted "out-of-genre" slot — the most promising candidate (`skill`, 8/18 games) was ~85% UI-widget noise on per-name inspection. Stronger robustness evidence than the 17-game pass since the genre prediction said this kind of dump *would* surface new vocabulary and it didn't.
 >
 > Tests: 790 → **817 C#** (+27 across the session), DLL self-tests 62 + 31 = 93 unchanged. Total **910**.
 >
@@ -568,12 +569,14 @@ returns the decoded Lua string instead of a number. Optional v2.
 >
 > Suggested next-session starters (pick one):
 >
-> 1. **More dumps for genre coverage** — 17-game corpus is heavy on JRPG/sim/ARPG/
->    action-adventure/sandbox; the Star Wars Jedi + GWT adds (build 4f50ea0)
->    reinforced existing patterns without surfacing new ones. **Adding MMO /
->    fighting / RTS / sports-sim / horror-pure** would be the only thing that
->    moves the calibration needle further. Use existing pipeline; no code change
->    unless a new class-rule emerges. **S effort, user-driven**.
+> 1. **More dumps for genre coverage** — 18-game corpus now spans JRPG/sim/ARPG/
+>    action-adventure/sandbox/racing **and** (as of Frontiers 2026-05-20) MMO/ARPG.
+>    Even with the predicted "out-of-genre" MMO/ARPG add, no keyword adds were
+>    warranted — strengthening the build-678/687 stability case. **Still missing
+>    from the corpus: pure-horror / fighting / RTS / sports-sim.** A dump from
+>    any of those would be the only thing that could still move the calibration
+>    needle. Use existing pipeline; no code change unless a new class-rule
+>    emerges. **S effort, user-driven**.
 > 2. **`walk_functions_batch` follow-up** — sister to the build-696
 >    `walk_class_batch`. `DumpAllService` still does `WalkFunctionsAsync` once
 >    per emitted class (`IncludeFunctions=true` is default). Same trivial-loop
@@ -589,7 +592,7 @@ returns the decoded Lua string instead of a number. Optional v2.
 >    **M effort, med risk**.
 > 4. **Class Family Browser (Proposal C)** — bucketed view of game classes by
 >    inferred role (Character / Pawn / Inventory / Stats / Save / etc.). Genuine
->    "where do I start exploring a new game?" entry point. The 17-game dump
+>    "where do I start exploring a new game?" entry point. The 18-game dump
 >    corpus would feed the heuristic-classification clustering work. **L effort,
 >    needs own planning round**.
 > 5. **Runtime `keywords.json` override** — let users customise scoring tables

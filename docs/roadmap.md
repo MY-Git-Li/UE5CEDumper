@@ -162,7 +162,11 @@ N dumps cross-game and emits a Markdown report with:
 15-game corpus (DQ7R / DQI&IIHD2D / ES2 / FSD-DRG / FactoryGameSteam /
 Geri / HogwartsLegacy / ManorLords / NMKART / Octopath / Stray / TQ2 /
 TowerOfMask / ff7rebirth / ff7remake) drove the build 678 + 687 scoring
-table additions. Anti-bias workflow documented in
+table additions. Two subsequent bias rechecks at **17 games** (Star Wars
+Jedi: Fallen Order + Ghostwire: Tokyo, 2026-05-12) and **18 games**
+(Frontiers — first MMO/ARPG-flavoured entry, 2026-05-20) confirmed
+stability with **no further keyword additions** in either pass. Anti-
+bias workflow documented in
 [scripts/analysis/README.md](../scripts/analysis/README.md) — users
 whose preferred genres aren't well-represented dump their own games +
 PR with analysis output as evidence.

@@ -11,6 +11,94 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-05-20 (dev branch, docs only) — 18-game bias recheck (Frontiers added — first MMO/ARPG-flavoured dump)
+
+User added one new dump (`Frontiers-Win64-Shipping.exe`, UE 4.26,
+107,872 objects, 1,310 game classes / BPGCs) bringing the corpus to
+**18 games**. Tool / workflow unchanged from the 17-game refresh
+([4f50ea0](https://github.com/bbfox0703/UE5CEDumper/commit/4f50ea0)):
+same `python scripts/analysis/analyze_dumps.py work/dump/*.jsonl
+--min-games 3` run, same ad-hoc drill-down snippets reusing the
+analyzer's `load_dump` / `tokenize` / `_resolve_own_props` helpers.
+
+### Genre signature: predicted "out-of-genre" target
+
+Characteristic class names (`TL_*` asset prefix, `BossMonster*`,
+`BossFightObserver*`, `Pet*`, `Affix*`, `Dungeon*`, `Sharpshooter`,
+`Captain`, `Cursed` archetypes) point to a Korean-MMO / ARPG-style
+title — exactly the genre family
+[docs/todo.md → More dumps for genre coverage](todo.md) flagged as
+the only kind that could move the calibration needle further. The
+17-game corpus was heavy on JRPG / sim / action-adventure / sandbox /
+racing; this is the first MMO/ARPG-flavoured entry.
+
+### Bias verdict — tables still stable
+
+Token-by-token drill-down on every candidate with ≥3-game support:
+
+- **`skill`** (8 / 18 games, 90 classes) looked promising at first but
+  per-name inspection showed ~85% UI-widget noise: `SkillList`,
+  `SkillIcon`, `Txt_SkillName`, `Img_SkillIcon`, `Pnl_SkillName_Mask`,
+  `Hrz_SkillName`. Genuine cheat-tunable hits
+  (`CurrentSkillPoints`, `SkillPointsRequired`, `IsSkillPurchased`)
+  are buried under ~15% of the surface. Adding `Skill` to
+  PropertyScoringTable would over-fire on UI properties. Function-side
+  `Skill` keyword in CombatKeywords remains correct since function
+  names like `UseSkill` / `LearnSkill` are unambiguously action verbs.
+- **`effects`** (7 / 18), **`aura`** (4 / 18), **`gameplay`** (4 / 18),
+  **`requirements`** (3 / 18), **`expiration`** (3 / 18), **`tags`**
+  (5 / 18) — all >95% TQ2-skewed (TQ2 contributes 477-905 of each
+  token's hit count; other games combined are single-to-low-
+  double-digit). Single-game spikes, not cross-game signal.
+- **Frontiers-unique tokens** (`affix`, `pet`, `dungeon`, `captain`,
+  `sharpshooter`, `cursed`) all concentrated in Frontiers alone. Same
+  single-game-spike rejection rule as the 17-game pass.
+- **Class-side candidates** (Frontiers top class-x-prop pairs) are all
+  UI-flavoured (`credits→credit`, `widget→item`, `bar→resource`,
+  `dungeon→level`); none generalise across the corpus.
+
+**No keyword additions, no class-rule additions, no scoring weight
+changes.** Second consecutive bias recheck confirming the build-678 /
+687 calibration generalises to genre-adjacent AND genuinely out-of-
+genre unseen titles.
+
+### Why this is stronger evidence than the 17-game pass
+
+The 17-game recheck added two same-family titles (Star Wars Jedi:
+Fallen Order — EA action-adventure; Ghostwire: Tokyo — Tango action-
+horror). Both reinforced existing patterns, but the prediction was
+that they wouldn't move the needle because they sit in already-well-
+represented genres.
+
+This 18-game pass added a predicted-to-be-different-genre title
+(MMO-flavoured ARPG, never previously represented). The prediction was
+that out-of-genre dumps would surface new vocabulary. The data says
+the build-678 / 687 calibration **also covers MMO/ARPG vocabulary**
+without any new keyword. That's stronger evidence for table robustness
+than two more same-genre dumps would have been.
+
+### Genres still completely absent from the corpus
+
+MMO/ARPG is now (partially) represented. Still missing:
+
+- Pure horror (no Resident Evil / Silent Hill style — only action-horror
+  hybrids like GWT / Hogwarts dark sequences)
+- Fighting (Tekken / Street Fighter / Mortal Kombat)
+- RTS (Age of Empires / StarCraft / Company of Heroes)
+- Sports-sim (FIFA / NBA 2K / car-tuning sims)
+
+A dump from any of these would test calibration against vocabulary
+genuinely outside the current action-adventure / RPG / sim / shooter /
+ARPG neighbourhood.
+
+### Files touched
+
+Docs only. No code, no tests, no scoring tables. The Frontiers dump +
+regenerated `work/dump/analysis-report-18games.md` live under `work/`
+which is gitignored.
+
+-----
+
 ## 2026-05-12 (dev branch, scripts only) — 17-game bias recheck + analyzer hint sync
 
 User added two new dumps (Star Wars Jedi: Fallen Order — UE 4.21 EA
