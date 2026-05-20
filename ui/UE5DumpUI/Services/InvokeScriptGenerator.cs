@@ -347,8 +347,9 @@ public static class InvokeScriptGenerator
                 => "writeDouble",
             "Int64Property" or "UInt64Property"
                 or "NameProperty" or "ObjectProperty" or "ClassProperty"
-                or "SoftObjectProperty" or "WeakObjectProperty"
-                or "LazyObjectProperty" or "InterfaceProperty"
+                or "SoftObjectProperty" or "SoftClassProperty"
+                or "WeakObjectProperty" or "LazyObjectProperty"
+                or "InterfaceProperty"
                 => "writeQword",
             "IntProperty" or "UInt32Property" or "EnumProperty"
                 => "writeInteger",
@@ -403,7 +404,8 @@ public static class InvokeScriptGenerator
             "FloatProperty" or "DoubleProperty" => "0.0",
             "BoolProperty" => "0",
             "NameProperty" or "ObjectProperty" or "ClassProperty"
-                or "SoftObjectProperty" or "WeakObjectProperty"
+                or "SoftObjectProperty" or "SoftClassProperty"
+                or "WeakObjectProperty" or "LazyObjectProperty"
                 or "InterfaceProperty" => "0x0",
             _ => "0",
         };
@@ -414,7 +416,9 @@ public static class InvokeScriptGenerator
     {
         // Pointer/FName types: hex-aware parsing
         if (typeName is "NameProperty" or "ObjectProperty" or "ClassProperty"
-            or "SoftObjectProperty" or "WeakObjectProperty" or "InterfaceProperty")
+            or "SoftObjectProperty" or "SoftClassProperty"
+            or "WeakObjectProperty" or "LazyObjectProperty"
+            or "InterfaceProperty")
         {
             return $"(function() local s = edits[{editIndex}].Text; " +
                    "if s:sub(1,2) == '0x' or s:sub(1,2) == '0X' then " +

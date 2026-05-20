@@ -45,7 +45,8 @@ public static class ParamBufferBuilder
             "FloatProperty" or "DoubleProperty" => "0.0",
             "BoolProperty" => "0",
             "NameProperty" or "ObjectProperty" or "ClassProperty"
-                or "SoftObjectProperty" or "WeakObjectProperty"
+                or "SoftObjectProperty" or "SoftClassProperty"
+                or "WeakObjectProperty" or "LazyObjectProperty"
                 or "InterfaceProperty" => "0x0",
             _ => "0",
         };
@@ -189,6 +190,7 @@ public static class ParamBufferBuilder
             case "ObjectProperty":
             case "ClassProperty":
             case "SoftObjectProperty":
+            case "SoftClassProperty":
             case "WeakObjectProperty":
             case "LazyObjectProperty":
             case "InterfaceProperty":

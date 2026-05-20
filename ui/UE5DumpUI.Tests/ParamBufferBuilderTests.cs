@@ -367,4 +367,57 @@ public class ParamBufferBuilderTests
     {
         Assert.Equal(expected, ParamBufferBuilder.GetDefaultValue(typeName));
     }
+
+    // --- Contract: every IsPickablePointerType=true type must be handled
+    //     end-to-end (default text + buffer writer). Catches the
+    //     SoftClassProperty truncation regression where the picker UI
+    //     was wired up but downstream consumers fell through to the
+    //     size-based default (writing 4 bytes of a 64-bit address).
+
+    public static readonly TheoryData<string> PickablePointerTypes = new()
+    {
+        "ObjectProperty",
+        "ClassProperty",
+        "WeakObjectProperty",
+        "SoftObjectProperty",
+        "SoftClassProperty",
+        "InterfaceProperty",
+        "LazyObjectProperty",
+    };
+
+    [Theory]
+    [MemberData(nameof(PickablePointerTypes))]
+    public void PickablePointerType_GetDefaultValue_IsHexZero(string typeName)
+    {
+        // Pointer-flavoured params take addresses; the textbox seed must be
+        // "0x0" so ParseULong's hex path kicks in. A plain "0" still parses
+        // fine, but the visual mismatch trips users up.
+        Assert.Equal("0x0", ParamBufferBuilder.GetDefaultValue(typeName));
+    }
+
+    [Theory]
+    [MemberData(nameof(PickablePointerTypes))]
+    public void PickablePointerType_WriteParam_WritesFullEightBytes(string typeName)
+    {
+        // Picks emit a real 64-bit address (e.g. 0x00007FF61234ABCD). If
+        // WriteParam falls through to the size-based default, the upper
+        // bits get truncated to int32 and the call site dereferences
+        // garbage. Verify all 8 bytes land at the param offset.
+        var param = new FunctionParamModel
+        {
+            Name = "Target",
+            TypeName = typeName,
+            Size = 8,
+            Offset = 0,
+        };
+        const string addr = "0x7FF61234ABCD";
+        var hex = ParamBufferBuilder.BuildParamsHex(
+            new[] { param }, new[] { addr }, parmsSize: 8);
+
+        // ulong 0x7FF61234ABCD = u64 0x00007FF61234ABCD.
+        // Bytes (MSB-first): 00 00 7F F6 12 34 AB CD.
+        // Little-endian → CD AB 34 12 F6 7F 00 00.
+        // Convert.ToHexString uppercases → CDAB3412F67F0000.
+        Assert.Equal("CDAB3412F67F0000", hex);
+    }
 }
