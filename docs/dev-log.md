@@ -11,6 +11,59 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-05-20 (PR #199 merged dev → main) — Mailbox poll 10ms→1ms + Invoke param picker Stage 1+2
+
+Three-shipment session on top of the build-696 close-out. Total: 4 commits (build 707 → 715), all pushed to dev, then dev merged into main via PR #199 as a fast-forward (30 commits caught up — first dev→main merge since build 590).
+
+### A. Mailbox poll latency cut (build 707-710, [74db6b5](https://github.com/bbfox0703/UE5CEDumper/commit/74db6b5))
+
+CE Lua's `invokeUFunction` blocks on a status-flag flip driven by Mimic's polling thread. The historic `Sleep(10)` between iterations added ~5ms avg of pure idle wait per invoke — so a tight Lua loop of N invokes used to burn ~N×5ms in the polling loop alone. Lowered to `Sleep(kPollIntervalMs=1)` with a `timeBeginPeriod(1)` / `timeEndPeriod(1)` bracket so Sleep(1) reliably delivers ~1-2ms regardless of host timer state (legacy 15.6ms tick would otherwise defeat the win on idle/server SKUs). Win10 2004+ scopes timeBeginPeriod per-process; no global cost.
+
+Added `Test_Mimic_PollLatency_OneMillisecond` to `dll_helpers_test`: brackets the same timeBeginPeriod pair, asserts 100×Sleep(1) lands under 300ms. Observed 188-194ms on the dev machine (~1.9ms/sleep) — 5× under the ~1560ms a legacy-tick regression would produce. `Winmm` linked into main DLL + both proxy DLLs + the test exe.
+
+The Stark queue (game-thread FIFO with per-request promises) and the UE ProcessEvent throughput itself are unaffected — those are fundamental constraints. This change only kills the mailbox-side idle wait, which was the dominant latency layer for sequential CE-Lua-driven invokes.
+
+### B. Invoke param Stage 1 — surface UObject* expected UClass (build 711, [024b6fd](https://github.com/bbfox0703/UE5CEDumper/commit/024b6fd))
+
+Pain point: invoking a UFunction with a UObject*/UClass*/Soft*/Weak*/Lazy*/Interface parameter, the user had no idea what type was actually expected — the DLL had the info (`FObjectPropertyBase::PropertyClass`) but threw it away when walking function params. The InvokeParamDialog label just said `[UObject*, 8B]` with no class hint, leaving the user to guess or grep the SDK header.
+
+This is Stage 1 of a 3-stage plan to make invoking pointer params tractable. Stage 2 (instance picker) and Stage 3 (class validation) build on the metadata exposed here.
+
+- **DLL**: `Ubel.h::FunctionParam` gains `objClassName` field (mirrors `FieldInfo`). `Ubel.cpp::WalkFunctions` extracts `PropertyClass` for the 7 pointer-flavoured types on both UE5/4.25+ (via `ReadSubclassTypeName`) and UE4 <4.25 (via `UPROPERTY_OFFSET+0x2C` — same delta the StructProperty path uses, since both derived types put their first member at the same subclass slot). `Fern.cpp` walk_functions JSON adds optional `"obj_class"` key alongside `"struct_type"`.
+- **C#**: `FunctionParamModel.ObjectClassName` (default "" for backward compat). `DumpService` parses `obj_class`. `InvokeParamDialog` + `InvokeScriptGenerator` labels become `[UObject*: AActor, 8B, off=0x10]` when the class is known, fall back cleanly to the original form when empty.
+- **Tests**: 2 new (with-class / without-class label format).
+
+### C. Invoke param Stage 2 — instance picker dialog (build 715, [515a344](https://github.com/bbfox0703/UE5CEDumper/commit/515a344))
+
+When InvokeParamDialog renders a pointer-flavoured param, the row now grows three buttons after the textbox:
+
+```
+[param-name]  [type, classHint, NB]  [textbox]  [Pick…] [null] [self]
+```
+
+- **[Pick…]**: opens new `ObjectInstancePickerDialog` pre-filtered to the param's expected UClass (from Stage 1). Substring-match default catches subclasses (which is what an ObjectProperty actually accepts). Double-click row OR "Use selected" → textbox fills with chosen address. Cancel leaves textbox alone. Greyed when `ObjectClassName` is empty (older DLL or genuinely unconstrained param — user can still type address by hand).
+- **[null]**: fills `0x0` for optional pointer params (WorldContextObject, etc.).
+- **[self]**: fills invoke target's own address — for utility functions that re-target themselves. Disabled when no target instance (definition-only views).
+
+Zero DLL change: picker reuses the build-547 `find_instances` pipe command (InstanceFinder has used it for nearly 200 builds). Picker dialog mirrors InvokeParamDialog's code-behind style — no XAML, no CompiledBinding, AOT-safe.
+
+`ParamBufferBuilder.IsPickablePointerType` is the canonical list of the 7 pointer types — 7 positive + 14 negative test theories lock the DLL↔UI contract so a future type drift breaks at compile time.
+
+### Files / counts
+
+- New: `ui/UE5DumpUI/Views/ObjectInstancePickerDialog.cs` (260 lines)
+- Modified: `dll/src/Ubel.h`, `dll/src/Ubel.cpp`, `dll/src/Fern.cpp`, `dll/src/Mimic.cpp`, `dll/CMakeLists.txt`, `dll/tests/dll_helpers_test.cpp`, `ui/UE5DumpUI/Models/FunctionInfoModel.cs`, `ui/UE5DumpUI/Services/DumpService.cs`, `ui/UE5DumpUI/Services/ParamBufferBuilder.cs`, `ui/UE5DumpUI/Services/InvokeScriptGenerator.cs`, `ui/UE5DumpUI/Views/InvokeParamDialog.cs`, `ui/UE5DumpUI.Tests/InvokeScriptTests.cs`, `ui/UE5DumpUI.Tests/ParamBufferBuilderTests.cs`
+
+Tests: 910 → **935** (DLL self-tests 93 → 95 +mailbox latency; C# 817 → 840 +2 Stage-1 label tests +21 IsPickablePointerType theories). Build 715 / dist still 704 (no Publish rebuild this session).
+
+### What's still open
+
+- **Stage 3 (class validation)** — explicitly deferred to "real crash drives it" per Stage 2 close-out conversation. DLL would gain `validate_object_class(addr, expectedClassName)`; UI would warn (not block) on mismatch before invoking. Picker output is almost always class-correct in practice.
+- **`walk_functions_batch`** — sister to `walk_class_batch`, still on the next-session bench.
+- **FString / FText / TArray input for baked AA Script** — still open since build 643-644 ES2 verification.
+
+-----
+
 ## 2026-05-20 (dev branch, docs only) — 18-game bias recheck (Frontiers added — first MMO/ARPG-flavoured dump)
 
 User added one new dump (`Frontiers-Win64-Shipping.exe`, UE 4.26,
