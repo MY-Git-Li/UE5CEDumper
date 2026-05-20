@@ -550,52 +550,47 @@ returns the decoded Lua string instead of a number. Optional v2.
 
 ## Property Origin Resolver — proposals B + C still on table
 
-> **🎯 NEXT SESSION STARTING POINT (2026-05-12 close-out, build 696 / dist 704)**:
-> Session shipped 7 commits on top of build 689 — see dev-log for full
-> entries. Headline shipments since 689:
+> **🎯 NEXT SESSION STARTING POINT (2026-05-20 close-out, build 715 / dist 704, main caught up via PR #199)**:
+> Session shipped 4 commits + dev→main fast-forward merge (30 commits, first
+> merge since build 590). Headline shipments:
 >
-> - **SdkExportService BPGC filter fix** (build 690, [2dd2ac8](https://github.com/bbfox0703/UE5CEDumper/commit/2dd2ac8)) — mirror of the build-673 DLL fix on the C# side; Full SDK export was silently dropping every BPGC. Test `GenerateFullSdkAsync_AcceptsAllClassLikeMetasAndScriptStruct` locks it.
-> - **Satisfactory + Hybrid + Modular proxy-deploy scanner** (build 691-692, [e5e9782](https://github.com/bbfox0703/UE5CEDumper/commit/e5e9782)) — `ScanGameFolder` two-tier search (primary roots first, Engine\ as fallback only); handles all three observed UE shipping layouts (Monolithic / Hybrid / Pure modular) without phantom rows.
-> - **`walk_class_batch` pipe round-trip amortisation** (build 693-696, [deb837d](https://github.com/bbfox0703/UE5CEDumper/commit/deb837d) + namespace fix [568c757](https://github.com/bbfox0703/UE5CEDumper/commit/568c757)) — Full SDK Export + Dump All Metadata now batch in chunks of 200; estimated 2-5× wall-time speedup. Three-layer byte-equivalence guarantee: DLL loop-over-singles + shared JSON encoder/decoder + `WalkClassBatchEquivalenceTests.cs` 250-class fixture run through happy-path AND forced-fallback stubs.
-> - **GWorld 29/29 (100%)** ([2ccfd05](https://github.com/bbfox0703/UE5CEDumper/commit/2ccfd05)) — Star Wars Jedi: Fallen Order verified (UE 4.21, GWorld=0x7FF7317EBAB8, EA-launcher with proxy-DLL block — CE injection required). Satisfactory roadmap note corrected (scan was already working since the build-509 SIMD scanner rewrite).
-> - **17-game corpus bias recheck + analyzer hint sync** ([4f50ea0](https://github.com/bbfox0703/UE5CEDumper/commit/4f50ea0)) — Python analyzer's `CHEAT_KEYWORD_HINTS` had silently drifted from `PropertyScoringTable.cs`, hallucinating "uncategorised candidates" for already-shipped build-678 keywords. Synced. Bias verdict: tables stable, no additions warranted from Star Wars Jedi + Ghostwire: Tokyo (both reinforced existing patterns rather than surfacing new ones).
-> - **18-game bias recheck (Frontiers, MMO/ARPG genre)** — 2026-05-20 docs-only entry in [dev-log.md](dev-log.md). First MMO/ARPG-flavoured dump added (TL_* asset prefix, BossMonster / Pet / Affix / Dungeon / Sharpshooter archetypes). Bias verdict: **no additions warranted** despite landing in the predicted "out-of-genre" slot — the most promising candidate (`skill`, 8/18 games) was ~85% UI-widget noise on per-name inspection. Stronger robustness evidence than the 17-game pass since the genre prediction said this kind of dump *would* surface new vocabulary and it didn't.
+> - **18-game bias recheck (Frontiers, MMO/ARPG)** ([7ef5f57](https://github.com/bbfox0703/UE5CEDumper/commit/7ef5f57)) — docs-only. First MMO/ARPG-flavoured dump added (TL_* prefix, BossMonster / Pet / Affix / Dungeon / Sharpshooter). No keyword adds warranted despite landing in the predicted "out-of-genre" slot — the only promising candidate (`skill`, 8/18 games) was ~85% UI-widget noise. **Strongest robustness evidence yet** for the build-678/687 calibration.
+> - **Mailbox poll 10ms → 1ms** (build 707-710, [74db6b5](https://github.com/bbfox0703/UE5CEDumper/commit/74db6b5)) — `Mimic.cpp` poll thread uses `Sleep(kPollIntervalMs=1)` + `timeBeginPeriod(1)` bracket. CE-Lua tight-loop invokes save ~5ms/call of pure idle wait. Benchmark `Test_Mimic_PollLatency_OneMillisecond` in `dll_helpers_test` locks the win.
+> - **Invoke Stage 1 — surface UObject* expected UClass** (build 711, [024b6fd](https://github.com/bbfox0703/UE5CEDumper/commit/024b6fd)) — DLL `FunctionParam.objClassName` extracted via `ReadSubclassTypeName` for 7 pointer-flavoured types. Pipe walk_functions JSON adds `obj_class`. C# `FunctionParamModel.ObjectClassName` + InvokeParamDialog label becomes `[UObject*: AActor, 8B, off=0x10]`.
+> - **Invoke Stage 2 — instance picker dialog** (build 715, [515a344](https://github.com/bbfox0703/UE5CEDumper/commit/515a344)) — new `ObjectInstancePickerDialog` (no XAML, AOT-safe). Pointer-param rows in InvokeParamDialog grow `[Pick…] [null] [self]` buttons. Pick opens picker pre-filtered to expected UClass via existing `find_instances` pipe cmd. `ParamBufferBuilder.IsPickablePointerType` is the canonical 7-type contract (locked by 21 test theories).
 >
-> Tests: 790 → **817 C#** (+27 across the session), DLL self-tests 62 + 31 = 93 unchanged. Total **910**.
+> Tests: 910 → **935** (DLL self-tests 93 → 95 +mailbox latency; C# 817 → 840 +2 label tests +21 IsPickablePointerType theories).
 >
-> Proposal B (per-row "similar BP-added properties" side panel) **explicitly deferred** —
-> B' is shipped and proves the broad-sweep approach works; B's anchor-driven panel adds
-> work without solving a concrete user gap. **Skip unless a real user request surfaces.**
+> **Stage 3 (class validation)** explicitly deferred — picker output is almost always class-correct in practice; revisit when a real crash motivates it.
+> Proposal B (per-row "similar BP-added properties" side panel) still **deferred indefinitely** — B' covers the workflow.
 >
 > Suggested next-session starters (pick one):
 >
-> 1. **More dumps for genre coverage** — 18-game corpus now spans JRPG/sim/ARPG/
->    action-adventure/sandbox/racing **and** (as of Frontiers 2026-05-20) MMO/ARPG.
->    Even with the predicted "out-of-genre" MMO/ARPG add, no keyword adds were
->    warranted — strengthening the build-678/687 stability case. **Still missing
->    from the corpus: pure-horror / fighting / RTS / sports-sim.** A dump from
->    any of those would be the only thing that could still move the calibration
->    needle. Use existing pipeline; no code change unless a new class-rule
->    emerges. **S effort, user-driven**.
-> 2. **`walk_functions_batch` follow-up** — sister to the build-696
+> 1. **Live-game verification of Invoke Stage 1+2** — open InvokeParamDialog on a UFunction with a UObject* / UClass* / Soft* param: label should read `[UObject*: AActor, 8B]`; `[Pick…]` opens picker pre-filled with `AActor`, lists subclasses via substring match. Tests cover the contract; only live-game test pending. **S effort, user-driven**.
+> 2. **More dumps for genre coverage** — 18-game corpus now spans JRPG/sim/ARPG/
+>    action-adventure/sandbox/racing/MMO-ARPG. **Still missing: pure-horror / fighting /
+>    RTS / sports-sim.** Only kind of dump that could still move the calibration needle.
+>    Use existing pipeline; no code change unless a new class-rule emerges. **S effort, user-driven**.
+> 3. **`walk_functions_batch` follow-up** — sister to the build-696
 >    `walk_class_batch`. `DumpAllService` still does `WalkFunctionsAsync` once
 >    per emitted class (`IncludeFunctions=true` is default). Same trivial-loop
 >    pattern, same byte-equivalence safety net machinery already in place.
 >    Smaller win than walk_class_batch on its own (Dump All only) — skip unless
 >    profiling shows it as the new bottleneck. **S effort**.
-> 3. **FString / FText / TArray input for baked AA Script** (open since build
+> 4. **FString / FText / TArray input for baked AA Script** (open since build
 >    643-644 ES2 verification) — `KismetSystemLibrary::PrintString` is the
 >    obvious observable-side-effect verification target but currently unreachable
 >    because the helper's `writeBakedParams` only handles scalar inputs. Needs
 >    CE-side alloc + FString header write + free dance. See
 >    [Call-UE-function feature gaps](#fstring--ftext--tarray-input-support-in-baked-aa-script).
 >    **M effort, med risk**.
-> 4. **Class Family Browser (Proposal C)** — bucketed view of game classes by
+> 5. **Invoke Stage 3 (class validation)** — DLL gains `validate_object_class(addr, expectedClassName)` (read addr→ClassPrivate→FName, walk super chain). InvokeParamDialog warns (not blocks) on mismatch before invoking. **S effort, low risk** — only worth doing if a real crash from class mismatch surfaces.
+> 6. **Class Family Browser (Proposal C)** — bucketed view of game classes by
 >    inferred role (Character / Pawn / Inventory / Stats / Save / etc.). Genuine
 >    "where do I start exploring a new game?" entry point. The 18-game dump
 >    corpus would feed the heuristic-classification clustering work. **L effort,
 >    needs own planning round**.
-> 5. **Runtime `keywords.json` override** — let users customise scoring tables
+> 7. **Runtime `keywords.json` override** — let users customise scoring tables
 >    without recompiling. Discussed during the anti-bias conversation; not yet
 >    built. Source-generated JSON serializer for AOT compat. **M effort, only
 >    if a user asks**.

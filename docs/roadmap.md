@@ -61,6 +61,37 @@ Two ways to get `ue5_invoke_helper.lua` into the user's .CT:
   AOBMaker isn't installed or CE isn't running. Writes `scripts/ue5_invoke_helper.lua`
   to a user-chosen path; user adds it via CE `Table -> Add File...`.
 
+### Invoke param picker (build 711-715, Stage 1+2)
+
+InvokeParamDialog rows for pointer-flavoured params (UObject* / UClass* /
+SoftObject / WeakObject / LazyObject / Interface) now surface the expected
+target UClass and provide one-click filling:
+
+- **Label** — `[UObject*: AActor, 8B, off=0x10]` instead of bare
+  `[UObject*, 8B]`. The DLL extracts `FObjectPropertyBase::PropertyClass` in
+  `WalkFunctions` and ships it via the `obj_class` pipe field; C#
+  `FunctionParamModel.ObjectClassName` carries it to the UI. Empty when the
+  param genuinely has no class constraint or when an older DLL is in use
+  (backward-compatible).
+- **[Pick…]** — opens `ObjectInstancePickerDialog` pre-filtered to the
+  expected UClass via the existing `find_instances` pipe command. Substring
+  match catches subclasses (which is what the param actually accepts). Double-
+  click row or "Use selected" fills the textbox with the chosen instance's
+  address.
+- **[null]** — fills `0x0` (WorldContextObject and other optional pointer
+  params).
+- **[self]** — fills the invoke target's own address (for utility functions
+  that re-target themselves).
+
+`ParamBufferBuilder.IsPickablePointerType` is the canonical 7-type list
+locked by test theories — adding a new pointer property type requires
+mirroring it in both the DLL `WalkFunctions` extraction and the C# helper
+or the build catches the drift.
+
+Stage 3 (class validation — DLL `validate_object_class` round-trip before
+invoke) deferred until a real class-mismatch crash motivates it; picker
+output is almost always class-correct in practice.
+
 ## Interesting Functions Finder (build 597-609)
 
 New tab "Interesting Funcs" between Property Search and Game Classes.
