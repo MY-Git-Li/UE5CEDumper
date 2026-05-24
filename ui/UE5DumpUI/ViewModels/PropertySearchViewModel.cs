@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
 using UE5DumpUI.Models;
+using UE5DumpUI.Services;
 
 namespace UE5DumpUI.ViewModels;
 
@@ -17,6 +18,29 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
 {
     private readonly IDumpService _dump;
     private readonly ILoggingService _log;
+    private readonly IAobMakerBridge? _aobMaker;
+
+    /// <summary>
+    /// Cooldown for live AOBMaker availability re-checks so rapid grid
+    /// interactions don't flood the pipe. Mirrors LiveWalkerViewModel.
+    /// </summary>
+    private DateTime _lastAobMakerCheck = DateTime.MinValue;
+    private static readonly TimeSpan AobMakerCheckCooldown = TimeSpan.FromSeconds(5);
+
+    [ObservableProperty] private bool _isAobMakerAvailable;
+
+    /// <summary>
+    /// Tooltip shown on the Freeze button when it's disabled, explaining
+    /// why. Refreshed alongside <see cref="IsAobMakerAvailable"/>.
+    /// Matches the existing LiveWalker / InterestingFuncs Notes-column UX.
+    /// </summary>
+    public string FreezeUnavailableTooltip => IsAobMakerAvailable
+        ? "Generate an AA Script that locks this property across all live instances"
+        : "AOBMaker CE Plugin not found — Freeze requires the plugin so the AA Script can be injected into the open CE table. " +
+          "Setup: copy AOBMaker DLL into Cheat Engine's autorun/ folder and restart CE.";
+
+    partial void OnIsAobMakerAvailableChanged(bool value)
+        => OnPropertyChanged(nameof(FreezeUnavailableTooltip));
 
     [ObservableProperty] private string _searchQuery = "";
     [ObservableProperty] private string _typeFilter = "";
@@ -98,10 +122,132 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
     /// </summary>
     public event Action<string>? NavigateToLiveWalker;
 
-    public PropertySearchViewModel(IDumpService dump, ILoggingService log)
+    public PropertySearchViewModel(IDumpService dump, ILoggingService log,
+                                   IAobMakerBridge? aobMaker = null)
     {
         _dump = dump;
         _log = log;
+        _aobMaker = aobMaker;
+        // Seed the availability flag from the bridge's cached value so the
+        // first paint of the panel isn't always "unavailable" — the actual
+        // pipe probe happens lazily in RefreshAobMakerAvailabilityAsync.
+        _isAobMakerAvailable = aobMaker?.IsAvailable ?? false;
+    }
+
+    /// <summary>
+    /// Re-probe AOBMaker pipe so the Freeze button enablement reflects the
+    /// current state. Called on tab activation + before each Freeze click;
+    /// cooldown prevents pipe spam on rapid interactions.
+    /// </summary>
+    public async Task RefreshAobMakerAvailabilityAsync()
+    {
+        if (_aobMaker == null)
+        {
+            IsAobMakerAvailable = false;
+            return;
+        }
+        var now = DateTime.UtcNow;
+        if (now - _lastAobMakerCheck < AobMakerCheckCooldown)
+            return;
+        _lastAobMakerCheck = now;
+        try
+        {
+            IsAobMakerAvailable = await _aobMaker.CheckAvailabilityAsync();
+        }
+        catch
+        {
+            IsAobMakerAvailable = false;
+        }
+    }
+
+    /// <summary>
+    /// Raised when the ViewModel wants the View to show a modal dialog to
+    /// collect a freeze value. The View handles the actual dialog creation
+    /// (so the VM stays View-free / testable) and resolves the task with the
+    /// validated Lua literal, or null on cancel.
+    /// </summary>
+    public Func<PropertySearchMatch, Task<string?>>? FreezeValuePrompt { get; set; }
+
+    /// <summary>
+    /// Last status message from a freeze-script attempt. Bound to the
+    /// existing <see cref="StatusText"/> for now — separated only so the
+    /// freeze flow can overwrite the same chrome the search uses.
+    /// </summary>
+    [RelayCommand]
+    private async Task CopyFreezeScriptAsync(PropertySearchMatch? match)
+    {
+        if (match == null) return;
+        if (_aobMaker == null)
+        {
+            StatusText = "Freeze unavailable — no AOBMaker bridge wired";
+            return;
+        }
+        if (!FreezeScriptGenerator.IsTypeSupported(match.PropType))
+        {
+            StatusText = $"Freeze v1 does not support {match.PropType} (numeric + bool only)";
+            return;
+        }
+        if (FreezeValuePrompt == null)
+        {
+            StatusText = "Freeze unavailable — value prompt not wired";
+            return;
+        }
+
+        // Refresh availability synchronously so the user sees fresh state
+        // (the cooldown skips actual network if recent).
+        await RefreshAobMakerAvailabilityAsync();
+        if (!IsAobMakerAvailable)
+        {
+            StatusText = "AOBMaker plugin not reachable — script not sent";
+            return;
+        }
+
+        string? literal;
+        try
+        {
+            literal = await FreezeValuePrompt(match);
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Freeze dialog error: {ex.Message}";
+            return;
+        }
+        if (literal == null) return;  // user cancelled
+
+        var p = new FreezeScriptParams
+        {
+            // Prefer the defining class — that's where the property is
+            // actually declared; freezing on it covers all subclasses.
+            ClassName      = !string.IsNullOrEmpty(match.DefiningClassName)
+                             ? match.DefiningClassName
+                             : match.ClassName,
+            PropertyName   = match.PropName,
+            PropertyOffset = match.PropOffset,
+            UeTypeName     = match.PropType,
+            ValueLiteral   = literal,
+        };
+        var script = FreezeScriptGenerator.Generate(p);
+        var description = $"Freeze: {p.ClassName}::{p.PropertyName} = {literal}";
+
+        bool sent;
+        try
+        {
+            sent = await _aobMaker.CreateAAScriptAsync(description, script, autoActivate: false);
+        }
+        catch (Exception ex)
+        {
+            sent = false;
+            StatusText = $"Freeze send error: {ex.Message}";
+            return;
+        }
+        finally
+        {
+            IsAobMakerAvailable = _aobMaker?.IsAvailable ?? false;
+        }
+
+        StatusText = sent
+            ? $"Freeze script created in CE: {description}"
+            : "Freeze script not sent — AOBMaker rejected the request";
     }
 
     [RelayCommand]

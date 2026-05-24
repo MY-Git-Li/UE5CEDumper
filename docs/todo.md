@@ -255,6 +255,37 @@ this one bumped to build 611.
 Features that shipped + unit tests pass but need real game smoke tests
 before we can declare them solid on multiple titles.
 
+### Property freeze (Route B) — needs live test on a respawning-NPC game (build 719, 2026-05-24)
+
+**Effort**: 0 (verification only) | **Risk**: low | **Why**: 1015 unit
+tests green, but the helper's interaction with CE's main-thread timer
+pump under a real game's frame load is unproven. What to watch for:
+
+1. **Tick FPS impact**: Default 50ms tick = 20 writes/sec per cached
+   instance. On a game with 8-16 teammates, that's 160-320
+   `writeFloat` per second on the CE main thread. Verify no visible
+   stutter in the game window while a freeze script is active.
+2. **Rescan cadence at respawn**: kill a teammate, confirm the next
+   5-second rescan picks up the new instance and the freeze resumes
+   on the respawned actor (cache turnover working).
+3. **Vtable liveness guard**: the helper skips writes when the
+   instance's first qword is 0 (freed). Sanity check: enable a
+   freeze, force a level transition, confirm no crash even if the
+   rescan hasn't fired yet (stale pointers in cache pointing to
+   recycled pages).
+4. **AOBMaker gating UX**: with CE closed, button should be disabled
+   and tooltip should explain the requirement. Re-open CE, switch
+   to PropertySearch tab — button should re-enable within the 5s
+   cooldown.
+5. **Multi-script coexistence**: enable Freeze HP + Freeze MP
+   simultaneously on the same class. Both should run; disabling
+   one should NOT stop the other (per-script keyed handle table is
+   the contract).
+
+First good candidate: Geri (UE 4.27, ProcessEvent verified) since it
+has respawning NPCs and a known healthy invoke pipeline. Use
+PropertySearch to find a float property on a Pawn-derived class.
+
 ### ~~ProcessEvent vtable fix — partial confirmation on ES2 (UE 5.5)~~ — ✅ FULL VERIFICATION (build 648, 2026-05-11)
 
 **Effort**: 0 (done) | **Risk**: — | **Why**: Verified end-to-end on
@@ -952,6 +983,16 @@ Items from the brainstorm that aren't yet committed to:
   into a single `.ct` file, auto-grouped by category
 - **Hotkey binding** — global hotkey assignment for shortlisted
   functions ("give 1000 gold" on Ctrl+G)
+- **Property freeze — Route A (manual CE workflow, deferred)**:
+  re-use the existing **CE XML / CSX export** to land a pointer chain
+  in CE, then the user manually ticks Freeze in CE's address list.
+  Works today, no code needed — just docs. Tradeoff: pointer chain
+  is bound to the single resolved instance at export time, so it
+  breaks on respawn / level transition. Active alternative: **Route B**
+  (AA Script + class+name dynamic resolution + timer) — see the new
+  Property-freeze active plan when it lands. Keep Route A on the list
+  so users who only need a one-shot freeze (e.g. a static singleton
+  manager) don't have to wait for the dynamic version.
 
 -----
 

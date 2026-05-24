@@ -27,6 +27,7 @@ enum Cmd : int32_t {
     CMD_FIND_FUNCTION   = 3,  // Find UFunction by name on instance's class
     CMD_INVOKE_BY_NAME  = 4,  // Combined: find instance + find function + invoke
     CMD_LIST_FUNCTIONS  = 5,  // List all UFunctions on an instance's class (paginated)
+    CMD_LIST_INSTANCES  = 6,  // List all live (non-CDO) instances of a class (paginated)
 };
 
 // Mailbox status (DLL writes to status field)
@@ -72,6 +73,15 @@ struct MailboxData {
                                         //     [10..11] numParms (uint16)
                                         //     [12..15] flags (uint32)
                                         //     [16..63] name (48 chars, null-terminated)
+                                        //
+                                        // CMD_LIST_INSTANCES uses this buffer for paginated results:
+                                        //   Input:  paramsData[0..3] = page index (uint32, 0-based)
+                                        //           className field = exact class name (case-insensitive)
+                                        //   Output: parmsSize = total live instance count (capped at 0xFFFF)
+                                        //           numParms  = returned count this page
+                                        //           functionFlags = total pages
+                                        //   Each entry is 8 bytes (max 128 per page):
+                                        //     [0..7]   UObject* (uint64)
 };
 #pragma pack(pop)
 

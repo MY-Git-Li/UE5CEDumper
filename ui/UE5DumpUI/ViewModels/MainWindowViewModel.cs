@@ -164,7 +164,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         Pointers = new PointerPanelViewModel(platform, dump, log, aobMaker, aobUsage);
         LiveWalker = new LiveWalkerViewModel(dump, log, platform, aobMaker);
         InstanceFinder = new InstanceFinderViewModel(dump, log, platform);
-        PropertySearch = new PropertySearchViewModel(dump, log);
+        PropertySearch = new PropertySearchViewModel(dump, log, aobMaker);
         GameClassFilter = new GameClassFilterViewModel(dump, log);
         InterestingFunctions = new InterestingFunctionsViewModel(dump, log, aobMaker);
         InterestingProperties = new InterestingPropertiesViewModel(dump, log);
@@ -872,6 +872,93 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             _log.Error("Inject CE Helper Lua failed", ex);
             StatusText = $"Inject helper failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Tools menu: stream the embedded <c>ue5_freeze_helper.lua</c> to a
+    /// user-chosen file. Manual-fallback companion to
+    /// <see cref="InjectFreezeHelperLuaAsync"/> for cases where AOBMaker
+    /// isn't installed.
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportFreezeHelperLuaAsync()
+    {
+        try
+        {
+            var savePath = await _platform.ShowSaveFileDialogAsync(
+                defaultFileName:  FreezeHelperLuaResource.DefaultFileName,
+                filterName:       "CE Lua Freeze Helper (*.lua)",
+                filterExtension:  ".lua");
+            if (string.IsNullOrEmpty(savePath))
+            {
+                _log.Info("Export Freeze Helper Lua: user cancelled");
+                return;
+            }
+
+            var content = FreezeHelperLuaResource.Read();
+            await File.WriteAllTextAsync(savePath, content);
+
+            _log.Info($"Exported freeze helper lua: {savePath} " +
+                      $"({content.Length:N0} chars)");
+            StatusText = $"Freeze helper exported: {Path.GetFileName(savePath)}";
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Export Freeze Helper Lua failed", ex);
+            StatusText = $"Export freeze helper failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Tools menu: ship the embedded <c>ue5_freeze_helper.lua</c> straight
+    /// into the currently open CE table via the AOBMaker plugin
+    /// (<c>InjectTableFile</c>). Sister to <see cref="InjectCeHelperLuaAsync"/>;
+    /// the two helpers coexist in one .CT.
+    /// </summary>
+    [RelayCommand]
+    private async Task InjectFreezeHelperLuaAsync()
+    {
+        if (_aobMaker == null)
+        {
+            StatusText = "AOBMaker plugin not configured";
+            return;
+        }
+
+        StatusText = $"Injecting {FreezeHelperLuaResource.DefaultFileName} into CE table...";
+
+        try
+        {
+            await _aobMaker.CheckAvailabilityAsync();
+            if (!_aobMaker.IsAvailable)
+            {
+                StatusText = "Inject freeze helper: AOBMaker not connected — open Cheat Engine with the AOBMaker plugin loaded";
+                return;
+            }
+
+            var content = FreezeHelperLuaResource.Read();
+            var (ok, error) = await _aobMaker.InjectTableFileAsync(
+                FreezeHelperLuaResource.DefaultFileName, content);
+
+            if (ok)
+            {
+                _log.Info($"Injected {FreezeHelperLuaResource.DefaultFileName} into CE table " +
+                          $"({content.Length:N0} chars)");
+                StatusText = $"Inject freeze helper OK: {FreezeHelperLuaResource.DefaultFileName} embedded ({content.Length:N0} bytes)";
+            }
+            else if (!string.IsNullOrEmpty(error))
+            {
+                StatusText = $"Inject freeze helper failed: {error} — use Export to disk + Add File... fallback";
+            }
+            else
+            {
+                StatusText = "Inject freeze helper failed (no plugin response — CE closed?) — use Export to disk + Add File... fallback";
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Inject Freeze Helper Lua failed", ex);
+            StatusText = $"Inject freeze helper failed: {ex.Message}";
         }
     }
 

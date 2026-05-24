@@ -1,0 +1,39 @@
+namespace UE5DumpUI.Models;
+
+/// <summary>
+/// Input bundle for <see cref="Services.FreezeScriptGenerator"/>.
+///
+/// Captures the (class, property, type, value) tuple needed to produce a
+/// CE AA Script that uses <c>ue5_freeze_helper.lua</c> to lock a property
+/// horizontally across ALL live instances of <see cref="ClassName"/>.
+///
+/// Sourced from a <see cref="PropertySearchMatch"/> row + a single value
+/// the user types in <c>FreezeValueDialog</c>. The "defining class" is
+/// what flows in here -- that's the class where the property is actually
+/// declared (build 610+ PropertySearch dedupe), and writing at the offset
+/// hits every instance of that class or its subclasses.
+/// </summary>
+public sealed class FreezeScriptParams
+{
+    /// <summary>Exact UE class name (case-insensitive at DLL match time,
+    /// but preserved verbatim for the generated CFG block).</summary>
+    public required string ClassName { get; init; }
+
+    /// <summary>Property name -- purely informational, embedded in the
+    /// generated script's comment header so a future reader knows which
+    /// field was targeted.</summary>
+    public required string PropertyName { get; init; }
+
+    /// <summary>Byte offset of the property within the UObject instance.</summary>
+    public required int PropertyOffset { get; init; }
+
+    /// <summary>UE property type string (e.g. "FloatProperty", "BoolProperty").
+    /// Mapped to the freeze helper's <c>valueType</c> via
+    /// <see cref="Services.FreezeScriptGenerator.MapToHelperType"/>.</summary>
+    public required string UeTypeName { get; init; }
+
+    /// <summary>User-supplied value as a literal Lua expression (already
+    /// validated by <c>FreezeValueDialog</c>). For numerics this is a
+    /// number literal; for bool it is the string "true" or "false".</summary>
+    public required string ValueLiteral { get; init; }
+}
