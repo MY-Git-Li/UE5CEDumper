@@ -11,6 +11,89 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-05-24 — Property freeze (Route B): horizontal lock across all class instances (build 719)
+
+New end-to-end capability: given a property surfaced by **PropertySearch**, generate an AA Script that holds the value at a constant across **every live instance** of the owning class, with automatic instance re-enumeration on a timer so respawns / new spawns / destroys are handled transparently. Sister capability to the existing CE-XML pointer-chain export (Route A, kept in [todo.md → Speculative](todo.md)) — fundamental difference: CE XML pins ONE pointer chain to ONE instance; the freeze script tracks a property by **class + offset + type** and writes to every live instance every tick.
+
+### Architecture
+
+```
+PropertySearch row
+  → [Freeze] button (grayed when AOBMaker plugin not detected)
+  → FreezeValueDialog (single input, type-validated)
+  → FreezeScriptGenerator.Generate(...)
+  → AOBMaker CreateAAScriptAsync — script lands in CE's address list
+
+Generated AA Script [ENABLE]
+  → findTableFile('ue5_freeze_helper.lua') → load() the helper
+  → freezeProperty(cfg) → handle
+  → handle.start() → createTimer(50ms tick) + createTimer(5s rescan)
+
+Tick (every 50ms): for each cached instance addr → writer(addr + offset, value)
+Rescan (every 5s): CMD_LIST_INSTANCES → refresh cache
+
+[DISABLE]: handle.stop() → destroys both timers, clears cache
+```
+
+### DLL — CMD_LIST_INSTANCES = 6 ([Mimic.h](../dll/src/Mimic.h), [Mimic.cpp](../dll/src/Mimic.cpp))
+
+New mailbox cmd that paginates **live (non-CDO) UObject* pointers** of a class. Match policy: `exactMatch=true` — partial matching would have `"Pawn"` pull every pawn subclass in the world and the property offset only makes sense for the exact class chain PropertySearch identified. Hard cap 2000 instances, 128 ptrs per page (8 bytes each = exactly 1024 bytes paramsData). Output mirrors the LIST_FUNCTIONS shape: `parmsSize=total`, `numParms=this page`, `functionFlags=total pages`.
+
+Reuses Aura's existing `FindInstancesByClass`; CDO filter (`name contains "Default__"`) drops template objects.
+
+### Lua — `scripts/ue5_freeze_helper.lua` (new, ~340 lines incl. 5 commented samples)
+
+- Public API: `freezeProperty(cfg) → handle` with `handle.start()` / `handle.stop()`
+- `cfg` fields: `className`, `propOffset`, `valueType`, `value`, `tickIntervalMs` (default 50), `refreshIntervalSec` (default 5), `filter` (optional `fn(addr) → bool`)
+- Type writers cover bool + int8/uint8 + int16/uint16 + int32/uint32 + int64/uint64 + float + double (aliases: byte/sbyte/word/dword/qword/int/long/boolean)
+- Shares `_ue5_invoke_busy` reentrancy flag with `ue5_invoke_helper.lua` — neither helper touches the mailbox while the other is mid-call
+- Tick has a vtable-null liveness guard so a freed instance between rescans doesn't write to recycled memory
+- 5 commented samples in the file header: basic teammate HP, god mode bool, filter-out-local-player, multi-property freeze in one script, how to edit CFG after generation
+
+Bundled as an `<EmbeddedResource>` in `UE5DumpUI.csproj` so the UI can ship it to disk or inject it into the CE table via AOBMaker.
+
+### C# — Models / Services / Views
+
+| File | Purpose |
+|---|---|
+| `Models/FreezeScriptParams.cs` | DTO: ClassName, PropertyName, PropertyOffset, UeTypeName, ValueLiteral |
+| `Services/FreezeScriptGenerator.cs` | Renders the AA Script; per-script keyed handle table (`_ue5_freeze_handles[KEY]`) so multiple Freeze scripts coexist without clobbering each other's globals |
+| `Services/FreezeHelperLuaResource.cs` | Embedded-resource accessor (mirrors `HelperLuaResource`) |
+| `Views/FreezeValueDialog.cs` | Single-input modal with read-only target details + type-aware validation (`ValidateAndConvert`); accepts bool as `true/false/1/0` (case insensitive) |
+| `ViewModels/PropertySearchViewModel.cs` | New `CopyFreezeScriptCommand`, `IsAobMakerAvailable` flag + `FreezeUnavailableTooltip`, `RefreshAobMakerAvailabilityAsync` with 5s cooldown |
+| `Views/PropertySearchPanel.axaml` + `.axaml.cs` | New **Freeze** button per row; `DataContextChanged` wires `FreezeValuePrompt` callback so the VM stays View-free |
+| `ViewModels/MainWindowViewModel.cs` | New `InjectFreezeHelperLuaCommand` + `ExportFreezeHelperLuaCommand` mirroring the existing invoke-helper Tools entries |
+| `Views/MainWindow.axaml` + `Resources/Strings/en.axaml` | Tools menu gains two entries with a `<Separator/>` from the invoke helper pair; 3 new strings + 3 new tooltips |
+
+### Gating — no clipboard fallback, AOBMaker required
+
+Decided per user request to keep the surface tight: the Freeze button is **disabled** when the AOBMaker bridge can't reach CE, with a tooltip explaining the setup. No copy-paste fallback path (would duplicate the helper-loader chrome and split the docs). The AOBMaker plugin's existing `CreateAAScriptAsync` (used by the Pipe Invoke / AA(Baked) flow since build 590) delivers the script directly into CE's address list.
+
+### Per-script handle key (subtle correctness fix during dev)
+
+Initial generator used a single global `_freezeHandle` — would have been clobbered by a second active Freeze script. Switched to `_ue5_freeze_handles[KEY]` table keyed by `ClassName::PropName@0xOffset`. Deterministic key so re-enabling the same script reuses the same slot; defensive stop in [ENABLE] catches the rare "AA Script reload while active" case.
+
+### Tests — +47 tests (target file path includes both the helper resource sanity check and the wiring)
+
+- `FreezeScriptGeneratorTests.cs` — type mapping (12 known + 6 unsupported), Lua escaping (6 cases), generated script section structure (5 facts incl. defining-class preference, hex offset render, helper resource read)
+- `FreezeValueDialogValidationTests.cs` — bool / float / double / signed-int / unsigned-int / unsupported (20 cases via theory + 4 facts)
+- `PropertySearchFreezeTests.cs` — 7 gating + happy-path scenarios + 1 tooltip test (no-bridge / unavailable / unsupported-type / cancel / happy / defining-class preferred / rejected / tooltip flag)
+
+Final total: 920 C# xunit + 64 dll_helpers + 31 utf8_helpers = **1015 tests**, all green.
+
+### What changed in MEMORY.md
+
+Test count bumped 786 → 1015; tested-games / capability-matrix entries remain valid (freeze is additive, no regressions to existing flows).
+
+### Not done in this round (Route A still on the table)
+
+- **Live-game verification**: needs a UE 4.x or 5.x cooked game with a teammate-style property to confirm the rescan cadence + tick writer doesn't disturb gameplay. Smoke-tested unit-level; first live test should be a single-player game with respawning NPCs (e.g. Geri) where a respawn-induced cache refresh is observable.
+- **Bitfield bool detection**: the helper writes a full byte for `bool`, which is wrong for packed bitfield bools (`uint8 bFoo : 1`). PropertySearch doesn't currently surface bitfield mask metadata so we can't gate the button accordingly — deferred until a user hits this.
+- **FString / FName / struct field freeze**: out of v1 scope per user (numerics + bool first).
+- **Route A polish**: existing CE-XML export already handles single-pointer-chain freeze; the [todo Speculative entry](todo.md) documents it as the "static singleton manager" option.
+
+-----
+
 ## 2026-05-20 (PR #199 merged dev → main) — Mailbox poll 10ms→1ms + Invoke param picker Stage 1+2
 
 Three-shipment session on top of the build-696 close-out. Total: 4 commits (build 707 → 715), all pushed to dev, then dev merged into main via PR #199 as a fast-forward (30 commits caught up — first dev→main merge since build 590).

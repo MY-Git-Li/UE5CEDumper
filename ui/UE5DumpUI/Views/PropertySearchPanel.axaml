@@ -130,6 +130,16 @@
                         CommandParameter="{Binding}"
                         ToolTip.Tip="{StaticResource str.Tip.PropertySearch.CopyOffset}"
                         Padding="6,2" FontSize="11"/>
+                <!-- Freeze button: enabled only when AOBMaker plugin is reachable.
+                     Tooltip swaps between the action description and the
+                     setup hint via FreezeUnavailableTooltip (matches the
+                     LiveWalker AobMakerNote pattern from build 608). -->
+                <Button Content="{StaticResource str.PropertySearch.Freeze}"
+                        Command="{Binding $parent[UserControl].((vm:PropertySearchViewModel)DataContext).CopyFreezeScriptCommand}"
+                        CommandParameter="{Binding}"
+                        IsEnabled="{Binding $parent[UserControl].((vm:PropertySearchViewModel)DataContext).IsAobMakerAvailable}"
+                        ToolTip.Tip="{Binding $parent[UserControl].((vm:PropertySearchViewModel)DataContext).FreezeUnavailableTooltip}"
+                        Padding="6,2" FontSize="11"/>
               </StackPanel>
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>

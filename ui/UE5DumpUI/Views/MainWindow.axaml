@@ -202,6 +202,13 @@
                 <MenuItem Header="{StaticResource str.Tools.ExportCeHelperLua}"
                           Command="{Binding ExportCeHelperLuaCommand}"
                           ToolTip.Tip="{StaticResource str.Tip.Tools.ExportCeHelperLua}"/>
+                <Separator/>
+                <MenuItem Header="{StaticResource str.Tools.InjectFreezeHelperLua}"
+                          Command="{Binding InjectFreezeHelperLuaCommand}"
+                          ToolTip.Tip="{StaticResource str.Tip.Tools.InjectFreezeHelperLua}"/>
+                <MenuItem Header="{StaticResource str.Tools.ExportFreezeHelperLua}"
+                          Command="{Binding ExportFreezeHelperLuaCommand}"
+                          ToolTip.Tip="{StaticResource str.Tip.Tools.ExportFreezeHelperLua}"/>
               </MenuFlyout>
             </DropDownButton.Flyout>
           </DropDownButton>

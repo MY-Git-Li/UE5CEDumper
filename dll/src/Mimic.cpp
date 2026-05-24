@@ -77,6 +77,7 @@ static void HandleFindFunction();
 static void HandleInvoke();
 static void HandleInvokeByName();
 static void HandleListFunctions();
+static void HandleListInstances();
 static void SetError(int32_t code, const char* msg);
 static void SetDone(int32_t resultCode);
 static bool EnsureInitialized();
@@ -158,6 +159,9 @@ static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
                 break;
             case CMD_LIST_FUNCTIONS:
                 HandleListFunctions();
+                break;
+            case CMD_LIST_INSTANCES:
+                HandleListInstances();
                 break;
             default:
                 SetError(-1, "Unknown command");
@@ -540,6 +544,75 @@ static void HandleListFunctions() {
     }
 
     LOG_INFO("Mailbox: LIST_FUNCTIONS returned %u/%u functions (page %u/%u)",
+             returnedCount, totalCount, pageIndex + 1, totalPages);
+    SetDone(0);
+}
+
+// Enumerate all live (non-CDO) instances of a class for the property-freeze
+// helper. Paginated identically to LIST_FUNCTIONS so the CE Lua side can pull
+// multi-page result sets through the single-slot mailbox.
+//
+// Match policy: exactMatch=true. Freeze callers want precise class identity
+// — partial matching would have "Pawn" pull every pawn subclass in the world,
+// and the property offset only makes sense for the exact class chain the
+// PropertySearch row identified. Users who deliberately want a broader scope
+// can edit the className in the generated AA Script's CFG block.
+static void HandleListInstances() {
+    char className[256];
+    memcpy(className, g_invokeMailbox.className, sizeof(className));
+    className[255] = '\0';
+
+    if (className[0] == '\0') {
+        SetError(-1, "Empty class name");
+        return;
+    }
+
+    // Read page index from paramsData[0..3] BEFORE we overwrite the buffer.
+    uint32_t pageIndex = 0;
+    memcpy(&pageIndex, g_invokeMailbox.paramsData, sizeof(uint32_t));
+
+    LOG_INFO("Mailbox: LIST_INSTANCES class='%s' page=%u", className, pageIndex);
+
+    // Hard cap at 2000 instances — freeze use cases ("all teammates", "all
+    // ammo pickups") rarely exceed double digits; 2000 is generous and the
+    // total walk stays bounded.
+    auto rset = Aura::FindInstancesByClass(className, /*exactMatch=*/true, /*maxResults=*/2000);
+
+    // CDO filter: the class default object (Default__BP_Foo_C) is the
+    // template, not a live instance. Freezing its property would touch the
+    // template state — never what the user wants.
+    std::vector<uintptr_t> live;
+    live.reserve(rset.results.size());
+    for (const auto& r : rset.results) {
+        if (r.addr && r.name.find("Default__") == std::string::npos) {
+            live.push_back(r.addr);
+        }
+    }
+
+    constexpr uint32_t ENTRY_SIZE = 8;            // uint64 pointer
+    constexpr uint32_t ENTRIES_PER_PAGE = 128;    // 128 * 8 = 1024 bytes (fills paramsData)
+
+    uint32_t totalCount = static_cast<uint32_t>(live.size());
+    uint32_t totalPages = (totalCount + ENTRIES_PER_PAGE - 1) / ENTRIES_PER_PAGE;
+    if (totalPages == 0) totalPages = 1;
+
+    uint32_t startIdx = pageIndex * ENTRIES_PER_PAGE;
+    uint32_t endIdx = (std::min)(startIdx + ENTRIES_PER_PAGE, totalCount);
+    uint32_t returnedCount = (startIdx < totalCount) ? (endIdx - startIdx) : 0;
+
+    // parmsSize is uint16 — saturate if a class somehow has >65535 instances.
+    g_invokeMailbox.parmsSize = static_cast<uint16_t>(totalCount > 0xFFFFu ? 0xFFFFu : totalCount);
+    g_invokeMailbox.numParms = static_cast<uint16_t>(returnedCount);
+    g_invokeMailbox.functionFlags = totalPages;
+
+    memset(g_invokeMailbox.paramsData, 0, sizeof(g_invokeMailbox.paramsData));
+
+    for (uint32_t i = 0; i < returnedCount; ++i) {
+        uint64_t addr = live[startIdx + i];
+        memcpy(g_invokeMailbox.paramsData + (i * ENTRY_SIZE), &addr, ENTRY_SIZE);
+    }
+
+    LOG_INFO("Mailbox: LIST_INSTANCES returned %u/%u (page %u/%u)",
              returnedCount, totalCount, pageIndex + 1, totalPages);
     SetDone(0);
 }

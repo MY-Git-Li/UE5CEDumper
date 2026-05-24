@@ -6,7 +6,7 @@ upcoming work and [dev-log.md](dev-log.md) for the historical commit
 trail. Build number tags reflect when each row reached its current
 state.
 
-> **Last refreshed**: 2026-05-12 (build 689 on `dev` and `origin/dev`; pushed). Latest session shipped Interesting Properties tab (B'), DLL BPGC filter fix, multi-select Copy CE Field(s), Dump All Metadata export + Python analyzer, 15-game data-driven keyword/class-rule additions, and 30× speedup via `search_properties_batch`. See [dev-log.md](dev-log.md) build 657-689 entry.
+> **Last refreshed**: 2026-05-24 (build 719 on `dev`). New: **property freeze (Route B)** — PropertySearch row "Freeze" button generates an AA Script that locks a property horizontally across all live instances of the owning class. Auto-rescan every 5s catches respawns. Requires AOBMaker plugin (no clipboard fallback). New DLL mailbox cmd `CMD_LIST_INSTANCES = 6`; new helper `scripts/ue5_freeze_helper.lua`. See [dev-log.md](dev-log.md) 2026-05-24 entry.
 
 -----
 
@@ -91,6 +91,27 @@ or the build catches the drift.
 Stage 3 (class validation — DLL `validate_object_class` round-trip before
 invoke) deferred until a real class-mismatch crash motivates it; picker
 output is almost always class-correct in practice.
+
+## Property freeze — horizontal class-wide (build 719)
+
+PropertySearch rows gain a **Freeze** button that ships an AA Script
+into CE locking the property at a constant across **every live instance**
+of the owning class. Different from the CE-XML export (Route A — kept
+in [todo Speculative](todo.md)) which pins a single pointer chain to a
+single instance: the freeze script enumerates instances by class+offset
+every 5 s, so respawns / new spawns / destroys are handled transparently.
+
+| Component | What it does |
+|---|---|
+| `Mimic::CMD_LIST_INSTANCES` (mailbox cmd 6) | Paginates live (non-CDO) `UObject*` pointers of a class via `Aura::FindInstancesByClass(exactMatch=true)`. 128 ptrs / page, hard cap 2000 instances. |
+| `scripts/ue5_freeze_helper.lua` (embedded) | `freezeProperty(cfg) → handle` API; tick timer (50 ms default) + rescan timer (5 s default); type writers for bool / int8-64 / uint8-64 / float / double; shares `_ue5_invoke_busy` reentrancy flag with invoke helper. |
+| `FreezeScriptGenerator` | Renders AA Script with editable `CFG = {...}` block, per-script keyed handle table so multiple Freeze scripts coexist. |
+| `FreezeValueDialog` | Single-input modal with type-aware validation (bool accepts true/false/1/0). |
+| `Tools -> Inject/Export Freeze Helper Lua` | Sister entries to the invoke-helper Tools menu — one-click AOBMaker inject or manual file export. |
+
+Supported property types (v1): BoolProperty, ByteProperty, Int8/16/32/64Property, UInt16/32/64Property, EnumProperty, FloatProperty, DoubleProperty. **Not supported**: StructProperty / FString / FName / containers (deferred).
+
+Gating: the Freeze button is disabled when AOBMaker plugin isn't reachable; tooltip explains the setup requirement. **No clipboard fallback** — script delivery is AOBMaker-only by design (keeps the surface tight).
 
 ## Interesting Functions Finder (build 597-609)
 

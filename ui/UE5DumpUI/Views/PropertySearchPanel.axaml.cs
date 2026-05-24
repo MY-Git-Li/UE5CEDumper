@@ -1,6 +1,8 @@
 using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input;
 using Avalonia.Threading;
+using UE5DumpUI.Models;
 using UE5DumpUI.ViewModels;
 
 namespace UE5DumpUI.Views;
@@ -10,14 +12,36 @@ public partial class PropertySearchPanel : UserControl
     public PropertySearchPanel()
     {
         InitializeComponent();
-        // Restore the user's last selected row + scroll position whenever the
-        // panel re-attaches to the visual tree. Avalonia's TabControl swaps
-        // out inactive tab content; the VM keeps SelectedResult populated, but
-        // the freshly-shown DataGrid doesn't auto-scroll to its SelectedItem
-        // (and visually appears to have lost the selection because the
-        // highlighted row is offscreen). Calling ScrollIntoView after the
-        // grid is laid out brings the row back into view.
         Loaded += OnPanelLoaded;
+        DataContextChanged += OnDataContextChanged;
+    }
+
+    private void OnDataContextChanged(object? sender, System.EventArgs e)
+    {
+        if (DataContext is not PropertySearchViewModel vm) return;
+        // Inject the value-prompt callback: the VM stays View-free so it
+        // remains unit-testable, while the dialog mechanics live here.
+        vm.FreezeValuePrompt = PromptFreezeValueAsync;
+        // Probe AOBMaker once on attach so the Freeze button reflects
+        // current state (cooldown inside the VM prevents pipe spam).
+        _ = vm.RefreshAobMakerAvailabilityAsync();
+    }
+
+    private async System.Threading.Tasks.Task<string?> PromptFreezeValueAsync(PropertySearchMatch match)
+    {
+        var dialog = new FreezeValueDialog(match);
+        // Find the owning Window so the dialog modals correctly.
+        Window? owner = null;
+        if (Avalonia.Application.Current?.ApplicationLifetime
+                is IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            owner = desktop.MainWindow;
+        }
+        if (owner != null)
+            await dialog.ShowDialog(owner);
+        else
+            dialog.Show();  // fallback — shouldn't happen in real runs
+        return dialog.ValueLiteral;
     }
 
     private void SearchQueryInput_KeyDown(object? sender, KeyEventArgs e)
