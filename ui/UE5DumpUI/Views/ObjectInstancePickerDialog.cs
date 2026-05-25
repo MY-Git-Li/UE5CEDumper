@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
@@ -161,29 +162,66 @@ public sealed class ObjectInstancePickerDialog : Window
             SelectionMode = DataGridSelectionMode.Single,
             FontSize = 12,
         };
-        _grid.Columns.Add(new DataGridTextColumn
+        // AOT-safe columns: typed lambda templates instead of
+        // `new Binding(propertyName)` -- the string-based Binding ctor is
+        // ReflectionBinding (IL2026 / IL3050) and would silently render
+        // blank cells under PublishAot=true. FuncDataTemplate<T> resolves
+        // each cell value via direct property access, no reflection.
+        // SortMemberPath is kept so sortable headers still work in the
+        // non-AOT default build; sort is a runtime nice-to-have and
+        // doesn't load-bear the picker's primary "double-click to use"
+        // gesture.
+        _grid.Columns.Add(new DataGridTemplateColumn
         {
             Header = "Index",
-            Binding = new Avalonia.Data.Binding(nameof(InstanceResult.Index)),
             Width = new DataGridLength(70),
+            SortMemberPath = nameof(InstanceResult.Index),
+            CellTemplate = new FuncDataTemplate<InstanceResult>(
+                (ir, _) => new TextBlock
+                {
+                    Text = ir?.Index.ToString() ?? "",
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(4, 0),
+                }, supportsRecycling: true),
         });
-        _grid.Columns.Add(new DataGridTextColumn
+        _grid.Columns.Add(new DataGridTemplateColumn
         {
             Header = "Address",
-            Binding = new Avalonia.Data.Binding(nameof(InstanceResult.Address)),
             Width = new DataGridLength(180),
+            SortMemberPath = nameof(InstanceResult.Address),
+            CellTemplate = new FuncDataTemplate<InstanceResult>(
+                (ir, _) => new TextBlock
+                {
+                    Text = ir?.Address ?? "",
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(4, 0),
+                }, supportsRecycling: true),
         });
-        _grid.Columns.Add(new DataGridTextColumn
+        _grid.Columns.Add(new DataGridTemplateColumn
         {
             Header = "Class",
-            Binding = new Avalonia.Data.Binding(nameof(InstanceResult.ClassName)),
             Width = new DataGridLength(200),
+            SortMemberPath = nameof(InstanceResult.ClassName),
+            CellTemplate = new FuncDataTemplate<InstanceResult>(
+                (ir, _) => new TextBlock
+                {
+                    Text = ir?.ClassName ?? "",
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(4, 0),
+                }, supportsRecycling: true),
         });
-        _grid.Columns.Add(new DataGridTextColumn
+        _grid.Columns.Add(new DataGridTemplateColumn
         {
             Header = "Name",
-            Binding = new Avalonia.Data.Binding(nameof(InstanceResult.Name)),
             Width = new DataGridLength(1, DataGridLengthUnitType.Star),
+            SortMemberPath = nameof(InstanceResult.Name),
+            CellTemplate = new FuncDataTemplate<InstanceResult>(
+                (ir, _) => new TextBlock
+                {
+                    Text = ir?.Name ?? "",
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(4, 0),
+                }, supportsRecycling: true),
         });
         _grid.SelectionChanged += (_, _) => _btnUse.IsEnabled = _grid.SelectedItem is InstanceResult;
         _grid.DoubleTapped += OnGridDoubleTapped;

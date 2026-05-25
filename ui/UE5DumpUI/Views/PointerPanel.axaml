@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:UE5DumpUI.ViewModels"
+             xmlns:views="using:UE5DumpUI.Views"
              x:Class="UE5DumpUI.Views.PointerPanel"
              x:DataType="vm:PointerPanelViewModel">
 
@@ -482,6 +483,11 @@
       </Border>
 
     </StackPanel>
+
+    <!-- Credit footer: author + repo links, clickable. Always visible on
+         the System tab so the attribution doesn't depend on a live DLL
+         connection. -->
+    <views:CreditFooter Margin="0,8,0,4"/>
   </StackPanel>
   </ScrollViewer>
 </UserControl>
