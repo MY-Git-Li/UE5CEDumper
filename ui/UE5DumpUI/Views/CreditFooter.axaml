@@ -1,0 +1,38 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="UE5DumpUI.Views.CreditFooter">
+
+  <!-- Two-line credit footer: author tagline + repo URL. Both URLs open in
+       the default browser via Process.Start(UseShellExecute=true) wired in
+       code-behind. Plain TextBlock click handlers (not HyperlinkButton) so
+       the AOT trim path stays predictable. -->
+  <StackPanel Spacing="2" HorizontalAlignment="Center">
+
+    <!-- Row 1: author @ opencheattables -->
+    <StackPanel Orientation="Horizontal" Spacing="0" HorizontalAlignment="Center">
+      <TextBlock Text="{StaticResource str.Credit.AuthorPrefix}"
+                 Foreground="#888" FontSize="11" VerticalAlignment="Center"/>
+      <TextBlock x:Name="AuthorUrlText"
+                 Text="{StaticResource str.Credit.AuthorUrl}"
+                 Foreground="#569CD6" FontSize="11" VerticalAlignment="Center"
+                 TextDecorations="Underline"
+                 Cursor="Hand"
+                 PointerPressed="OnAuthorUrlPressed"
+                 ToolTip.Tip="{StaticResource str.Credit.OpenInBrowserTip}"/>
+    </StackPanel>
+
+    <!-- Row 2: repo URL -->
+    <StackPanel Orientation="Horizontal" Spacing="0" HorizontalAlignment="Center">
+      <TextBlock Text="{StaticResource str.Credit.RepoPrefix}"
+                 Foreground="#888" FontSize="11" VerticalAlignment="Center"/>
+      <TextBlock x:Name="RepoUrlText"
+                 Text="{StaticResource str.Credit.RepoUrl}"
+                 Foreground="#569CD6" FontSize="11" VerticalAlignment="Center"
+                 TextDecorations="Underline"
+                 Cursor="Hand"
+                 PointerPressed="OnRepoUrlPressed"
+                 ToolTip.Tip="{StaticResource str.Credit.OpenInBrowserTip}"/>
+    </StackPanel>
+
+  </StackPanel>
+</UserControl>

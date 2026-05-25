@@ -3,6 +3,7 @@
              xmlns:vm="using:UE5DumpUI.ViewModels"
              xmlns:m="using:UE5DumpUI.Models"
              xmlns:conv="using:UE5DumpUI.Converters"
+             xmlns:views="using:UE5DumpUI.Views"
              x:Class="UE5DumpUI.Views.LiveWalkerPanel"
              x:DataType="vm:LiveWalkerViewModel">
 
@@ -512,6 +513,14 @@
            VerticalAlignment="Center"
            MaxWidth="{Binding $parent[Panel].Bounds.Width, Converter={x:Static conv:MultiplyConverter.Instance}, ConverterParameter=0.75}"
            MaxHeight="{Binding $parent[Panel].Bounds.Height, Converter={x:Static conv:MultiplyConverter.Instance}, ConverterParameter=0.75}"/>
+
+    <!-- Credit footer: pinned to the bottom of the empty-state panel so
+         the attribution sits visibly below the logo. Hidden once the
+         DataGrid has data and takes over the area. -->
+    <views:CreditFooter IsVisible="{Binding !HasData}"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Bottom"
+                        Margin="0,0,0,8"/>
     </Panel>
 
     <!-- Functions section (collapsible) -->
