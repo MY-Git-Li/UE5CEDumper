@@ -12,6 +12,198 @@ Move items to [dev-log.md](dev-log.md) once they ship; update
 
 -----
 
+## Next-priority enhancements (decided 2026-05-26, post build 730)
+
+Picked after a value-vs-effort review at end of the build-719 freeze
+session. **Ordered by value/effort ratio** — top items are highest
+return. The previously-floated "Game Profile persistence" item was
+**dropped** because [Flamme HintCache](../dll/src/Flamme.cpp) already
+persists per-PE-hash AOB winning pattern IDs + UE version + version-
+detected flag + user override + invoke timeout, shared with the C#
+[AobUsageService](../ui/UE5DumpUI/Services/AobUsageService.cs) via the
+same `%LOCALAPPDATA%\UE5CEDumper\UE5CEDumper.{COMPUTERNAME}.json` file.
+The remaining gaps (DynOff cache, favorites, invoke param presets) are
+low-pain compared to the AOB scan which is already cached.
+
+### 1. UE Console / Exec Command Bridge — pick #1 (highest value)
+
+**Effort**: M (~3-5 days) | **Risk**: low | **Why**: Skips the entire
+"find UFunction → build ParamBuffer → invoke" workflow for games that
+ship with debug exec commands intact (which is common even in cooked
+Shipping — Epic's `UCheatManager` subclasses + many game-specific
+exec functions survive cooking). Many cheat-relevant capabilities
+(`fly`, `ghost`, `setspeed N`, `god`, `giveitem`, `teleport`,
+`summon`) are *already implemented by the game developer* as
+`UFUNCTION(exec)` — using them means we deliver effects the game has
+literally pre-built for cheating, no offset hunting, no ParamBuffer,
+no vtable hook beyond what we have for ProcessEvent already.
+
+**Implementation sketch**:
+- DLL: `Aura::EnumerateExecFunctions` — reuse `EnumerateAllFunctions`
+  loop, filter by `FunctionFlags & FUNC_Exec (0x00000004)`. Optionally
+  walk `IConsoleManager::ConsoleObjects` via runtime symbol resolution
+  for the console-variable side.
+- New pipe cmds: `list_exec_commands` (returns class + name + param
+  list) + `exec_console_command` (string in → result out).
+- Game-thread dispatch: route through existing
+  [Stark](../dll/src/Stark.cpp) — `APlayerController::ConsoleCommand`
+  is a UFunction itself, so we can either find-and-invoke it via the
+  existing PE pipeline OR resolve the C++ method directly. PE-route is
+  safer (already debugged + game-thread-correct).
+- UI: new "Console" tab with text input (free-form `setspeed 2`-style),
+  dropdown of discovered exec commands (filtered by current player
+  controller class), history list with one-click re-run.
+
+**Why-it-wins-keyword-scoring**: the developer's own `exec` annotation
+is ground truth for "this is a cheat / debug entry point" — beats any
+heuristic. Devs themselves have already curated the list for us.
+
+**Verification target**: Geri (UE 4.27, ProcessEvent verified) ships
+`UCheatManager` exec commands; ES2 (UE 5.5) also has them.
+
+### 2. Live ProcessEvent Call Profiler — pick #2
+
+**Effort**: M-L (~1 week) | **Risk**: med (PE is hot path) | **Why**:
+Solves the keyword-scoring blind spot — functions whose names give
+nothing away but are called every time the user triggers an action.
+Current Interesting Funcs ranks by name heuristics; this ranks by
+**observed behaviour**.
+
+**Implementation sketch**:
+- [Stark](../dll/src/Stark.cpp) already hooks ProcessEvent and ticks
+  `s_hookFireCount`. Extend with per-UFunction atomic counter (lock-
+  free hash map keyed by `UFunction*`) — increment at the top of
+  `HookedProcessEvent`.
+- "Recording" mode toggle so the counters are only ticked when armed
+  (PE fires thousands of times/sec idle; counting always-on would burn
+  CPU for no gain when no one's watching).
+- New pipe cmds: `start_pe_profile`, `stop_pe_profile`,
+  `get_pe_profile` (returns top-N most-called UFunctions in last
+  window). Streaming optional v2.
+- UI: new "Live Funcs" tab (or sub-panel under Interesting Funcs?
+  decide during implementation) — sliding-window top-N display, pause
+  button for "snapshot before vs after" diff workflow.
+
+**Workflow win**: user presses "Start", performs gameplay action
+("open inventory"), presses "Stop", sees the 10 functions called
+since Start. Functions that fired ONLY during that action are
+hypotheses about what implements the action.
+
+**Risk mitigation**: lockless atomic ring-buffer / `std::atomic<uint64>`
+per slot. PE hot-path overhead must stay < 100ns/call. Benchmark in
+`dll_helpers_test` before shipping.
+
+### 3. Multi-row → One .CT Batch Generator — pick #3 (quickest win)
+
+**Effort**: S-M (~2-3 days) | **Risk**: low | **Why**: Polishes the
+existing AA(Baked) single-row export into a multi-row batch — the
+80% of pieces are already in place from build 590-596 (BakedScript
+generation) + build 660 (LiveWalker DataGrid Extended-mode
+multi-select). Promotes the tool one notch from "research toy" to
+"shareable cheat-table author".
+
+**Implementation sketch**:
+- Interesting Funcs + Interesting Properties + LiveWalker gain a
+  "Generate Cheat Table from Selection" toolbar button (visible when
+  ≥2 rows selected).
+- New `Services/CheatTableBuilder.cs` — assemble selected rows into a
+  single `.CT` payload: header XML + grouped memrec entries (one
+  group per category) + per-row AA Script body (reuses
+  `BakedScriptGenerator.Generate` or `FreezeScriptGenerator.Generate`).
+- Output: save-as dialog, default filename
+  `{processName}-{timestamp}.CT`. AOBMaker direct-inject as v2 if
+  user requests.
+- Tests: golden-file CT samples for 3-row / 10-row / mixed-category
+  selections.
+
+**Why-now**: every other "discover" workflow (Properties / Funcs /
+Live Walker) already feeds this — it's the unification step that
+the rest of the pipeline has been waiting for.
+
+### 4. Game Version Diff (SDK / Dump Compare) — pick #4
+
+**Effort**: S (~2 days, pure Python) | **Risk**: zero (offline) |
+**Why**: Cheat-table maintainer pain — game patches silently move
+field offsets and add/remove fields, breaking tables that worked
+yesterday. No tool in the cheat-engine ecosystem does this at
+UFunction/UProperty granularity.
+
+**Implementation sketch**:
+- New `scripts/analysis/diff_dumps.py` consuming two Dump All
+  Metadata JSONL files (`work/dump/X.jsonl` + `work/dump/Y.jsonl`).
+- Reports: `AddedClasses`, `RemovedClasses`, `MovedFields` (per-class
+  with old → new offset), `AddedFunctions`, `RemovedFunctions`,
+  `FunctionSignatureChanges` (param list diff).
+- Markdown output mirroring `analyze_dumps.py` style; optional
+  `--minimal` flag for "just the things that broke my cheat table"
+  view (offset moves only).
+- README addition documenting the workflow: dump game pre-patch,
+  dump post-patch, diff, fix table.
+
+**Why now**: zero risk, leverage existing dump corpus (15+ games),
+delivers a feature the wider cheat-table community would directly
+benefit from.
+
+### 5. UFunction Return Value Structured Walker — pick #5
+
+**Effort**: S | **Risk**: low | **Why**: Invoke (Pipe Invoke + Verify
+mode) returns raw bytes or single-scalar decoded values. Struct
+returns (FVector / FRotator / FTransform / FHitResult / user
+USTRUCTs) currently show as hex dumps — usable but not introspectable.
+
+**Implementation sketch**:
+- [Ubel](../dll/src/Ubel.cpp) already has the property walker that
+  produces ClassStruct field listings. Apply it to the returned
+  ParamBuffer's ReturnValue slot using the function's return
+  StructProperty / ObjectProperty metadata.
+- Invoke response gains optional `returnValueStructured: { fields: [
+  { name, type, value }, ... ] }`.
+- UI: InvokeParamDialog FIRE-result panel shows a small property
+  grid below the raw hex when the return is structured.
+
+**Why-relatively-easy**: 95% of the code exists, this is plumbing
+to wire ReturnValue into the walker that already understands
+StructProperty offsets / FString / FVector / etc.
+
+**Verification target**: Geri's
+`PlayerCameraManager::GetCameraLocation` returns `FVector` — already
+known-working from build 648 verification, just needs structured
+rendering instead of raw `00 00 00 ... 89.99` bytes.
+
+### Add-on: Universal Hotkey Loop option for AA(Baked) — bonus S item
+
+**Effort**: S | **Risk**: low | **Why**: AA(Baked) currently runs the
+generated script once per [ENABLE]. Many cheat scenarios need
+"every X ms": refill health every tick, write speed multiplier each
+frame, etc. CE's [ENABLE]/[DISABLE] block already supports `timer`
+hooks; FreezeScriptGenerator (build 719) shows the pattern.
+
+Add an "Auto-tick every N ms" checkbox to InvokeParamDialog's
+CopyBakedScript mode. When checked, generated script wraps the
+`invokeUFunction` call in a `createTimer(N, callback)` block —
+[DISABLE] tears it down. Same handle-table pattern as FreezeScript
+keyed by `class::func@instance` so multiple ticking scripts coexist.
+
+Lands as a 1-day add-on after pick #3 (CT batch generator) — both
+touch the script generator + dialog wiring.
+
+### Dropped from consideration — reasoning preserved
+
+- ~~**Game Profile persistence**~~ — already covered by
+  [Flamme::SaveResults / LoadHints](../dll/src/Flamme.cpp) +
+  [AobUsageService](../ui/UE5DumpUI/Services/AobUsageService.cs).
+  Remaining gaps (DynOff offset table cache, user favorites, invoke
+  param presets) are low-pain UX polish, not value-visible wins. Only
+  revisit if a user reports DynOff re-derivation as a noticeable wait
+  (currently < 100ms after AOB scan completes).
+- ~~**32-bit UE4 support**~~ — discussed 2026-05-26, deferred. Would
+  need a parallel Win32 DLL build + new 32-bit AOB pattern bank + per-
+  ABI ParamBuffer rewrite (thiscall vs Microsoft x64). Estimated 2-3
+  weeks + corpus validation. No identified user demand; most UE4
+  titles people target are 64-bit.
+
+-----
+
 ## Active plan: Call-UE-function strengthening
 
 The "Call UE function" capability is currently the weakest link in the
@@ -581,7 +773,12 @@ returns the decoded Lua string instead of a number. Optional v2.
 
 ## Property Origin Resolver — proposals B + C still on table
 
-> **🎯 NEXT SESSION STARTING POINT (2026-05-20 close-out, build 715 / dist 704, main caught up via PR #199)**:
+> **🎯 NEXT SESSION STARTING POINT (2026-05-26 refresh, build 730 on `dev`)**:
+> See the new **[Next-priority enhancements (decided 2026-05-26)](#next-priority-enhancements-decided-2026-05-26-post-build-730)** section at the top of this file — picks #1-5 + the AA(Baked) auto-tick add-on supersede the build-715 starter list below. **Active pick = #1 UE Console / Exec Command Bridge**.
+>
+> The build-715 NEXT-SESSION block below is kept as historical context (mostly shipped through build 719's freeze work + the post-715 stabilisation commits — MSVC CRT static link, AOT DataGrid fix, credit footer).
+>
+> **Original block, build 715 close-out (2026-05-20)**:
 > Session shipped 4 commits + dev→main fast-forward merge (30 commits, first
 > merge since build 590). Headline shipments:
 >
