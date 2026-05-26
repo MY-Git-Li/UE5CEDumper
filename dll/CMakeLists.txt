@@ -99,6 +99,7 @@ add_library(UE5Dumper SHARED
     src/Aura.cpp
     src/Serie.cpp
     src/Ubel.cpp
+    src/ValueScan.cpp
     src/Frieren.cpp
     src/Fern.cpp
     src/Stark.cpp
@@ -184,6 +185,7 @@ set(PROXY_SOURCES
     src/Aura.cpp
     src/Serie.cpp
     src/Ubel.cpp
+    src/ValueScan.cpp
     src/Frieren.cpp
     src/Fern.cpp
     src/Stark.cpp
@@ -325,11 +327,14 @@ if(NOT BUILD_PROXY_DLL AND NOT BUILD_PROXY_DINPUT8)
         )
     endif()
 
-    # Pure-helper tests (Renge::TryStrToAddr, Scharf::IsAlignmentSuspicious).
+    # Pure-helper tests (Renge::TryStrToAddr, Scharf::IsAlignmentSuspicious,
+    # ValueScan typed-read + predicates + session lifecycle).
     # Same harness style as utf8_helpers_test — exit code = failure count.
     # Pulls in nlohmann/json since Renge.h needs it (header-only, no link).
+    # ValueScan.cpp is std-only so it compiles cleanly into the leaf test.
     add_executable(dll_helpers_test
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/dll_helpers_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/ValueScan.cpp
     )
 
     target_include_directories(dll_helpers_test PRIVATE

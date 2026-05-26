@@ -21,13 +21,16 @@
 
 #include "../src/Renge.h"
 #include "../src/Scharf.h"
+#include "../src/ValueScan.h"
 
 #include <Windows.h>
 #include <timeapi.h>   // timeBeginPeriod — exercised by the poll-latency check
 
 #include <cstdio>
 #include <cstdint>
+#include <cstring>
 #include <string>
+#include <vector>
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -258,10 +261,206 @@ static void Test_Mimic_PollLatency_OneMillisecond() {
     }
 }
 
+// ----- ValueScan: SizeOf + NameOf + parsers ---------------------------------
+
+static void Test_ValueScan_DataTypeSizes() {
+    EXPECT("SizeOf Int8 = 1",   ValueScan::SizeOf(ValueScan::DataType::Int8)   == 1);
+    EXPECT("SizeOf Int16 = 2",  ValueScan::SizeOf(ValueScan::DataType::Int16)  == 2);
+    EXPECT("SizeOf Int32 = 4",  ValueScan::SizeOf(ValueScan::DataType::Int32)  == 4);
+    EXPECT("SizeOf Int64 = 8",  ValueScan::SizeOf(ValueScan::DataType::Int64)  == 8);
+    EXPECT("SizeOf UInt8 = 1",  ValueScan::SizeOf(ValueScan::DataType::UInt8)  == 1);
+    EXPECT("SizeOf UInt16 = 2", ValueScan::SizeOf(ValueScan::DataType::UInt16) == 2);
+    EXPECT("SizeOf UInt32 = 4", ValueScan::SizeOf(ValueScan::DataType::UInt32) == 4);
+    EXPECT("SizeOf UInt64 = 8", ValueScan::SizeOf(ValueScan::DataType::UInt64) == 8);
+    EXPECT("SizeOf Float = 4",  ValueScan::SizeOf(ValueScan::DataType::Float)  == 4);
+    EXPECT("SizeOf Double = 8", ValueScan::SizeOf(ValueScan::DataType::Double) == 8);
+    EXPECT("SizeOf Bool = 1",   ValueScan::SizeOf(ValueScan::DataType::Bool)   == 1);
+}
+
+static void Test_ValueScan_ParseDataTypeRoundTrip() {
+    using DT = ValueScan::DataType;
+    DT got;
+    EXPECT("parse Int32",   ValueScan::TryParseDataType("Int32",  got) && got == DT::Int32);
+    EXPECT("parse Float",   ValueScan::TryParseDataType("Float",  got) && got == DT::Float);
+    EXPECT("parse Bool",    ValueScan::TryParseDataType("Bool",   got) && got == DT::Bool);
+    EXPECT("parse UInt64",  ValueScan::TryParseDataType("UInt64", got) && got == DT::UInt64);
+    EXPECT("parse rejects unknown", !ValueScan::TryParseDataType("FString", got));
+    EXPECT("parse rejects empty",   !ValueScan::TryParseDataType("",        got));
+}
+
+static void Test_ValueScan_ScanTypePartitioning() {
+    using ST = ValueScan::ScanType;
+    EXPECT("Exact is first-scan",      ValueScan::IsFirstScanType(ST::Exact));
+    EXPECT("Bigger is first-scan",     ValueScan::IsFirstScanType(ST::Bigger));
+    EXPECT("Smaller is first-scan",    ValueScan::IsFirstScanType(ST::Smaller));
+    EXPECT("Between is first-scan",    ValueScan::IsFirstScanType(ST::Between));
+    EXPECT("Changed is prev-value",    ValueScan::IsPrevValueScanType(ST::Changed));
+    EXPECT("Unchanged is prev-value",  ValueScan::IsPrevValueScanType(ST::Unchanged));
+    EXPECT("Increased is prev-value",  ValueScan::IsPrevValueScanType(ST::Increased));
+    EXPECT("Decreased is prev-value",  ValueScan::IsPrevValueScanType(ST::Decreased));
+    // No overlap between first-scan and prev-value partitions:
+    EXPECT("Exact is NOT prev-value",  !ValueScan::IsPrevValueScanType(ST::Exact));
+    EXPECT("Changed is NOT first-scan", !ValueScan::IsFirstScanType(ST::Changed));
+}
+
+// ----- ValueScan: ComparePredicate per DataType -----------------------------
+//
+// Each test seeds two byte buffers as if they were the raw memory of a
+// real UProperty, then exercises every ScanType predicate. Prev-value
+// scan types reuse `target` as the candidate's stored prevValue, so the
+// same buffer layout works for both flavours.
+
+template <typename T>
+static void WriteLE(uint8_t buf[8], T val) {
+    std::memset(buf, 0, 8);
+    std::memcpy(buf, &val, sizeof(T));
+}
+
+static void Test_ValueScan_Predicate_Int32() {
+    using DT = ValueScan::DataType;
+    using ST = ValueScan::ScanType;
+    uint8_t cur[8], tgt[8], tgt2[8];
+    WriteLE<int32_t>(cur, 100);
+    WriteLE<int32_t>(tgt, 100);
+    EXPECT("Int32 Exact (100==100)",      ValueScan::ComparePredicate(DT::Int32, ST::Exact,   cur, tgt));
+    WriteLE<int32_t>(tgt, 50);
+    EXPECT("Int32 Bigger (100>50)",       ValueScan::ComparePredicate(DT::Int32, ST::Bigger,  cur, tgt));
+    EXPECT("Int32 Smaller false",        !ValueScan::ComparePredicate(DT::Int32, ST::Smaller, cur, tgt));
+    WriteLE<int32_t>(tgt, 200);
+    EXPECT("Int32 Smaller (100<200)",     ValueScan::ComparePredicate(DT::Int32, ST::Smaller, cur, tgt));
+    WriteLE<int32_t>(tgt, 50);
+    WriteLE<int32_t>(tgt2, 150);
+    EXPECT("Int32 Between (100 in [50,150])", ValueScan::ComparePredicate(DT::Int32, ST::Between, cur, tgt, tgt2));
+    WriteLE<int32_t>(tgt, 150);
+    WriteLE<int32_t>(tgt2, 200);
+    EXPECT("Int32 Between rejects (100 not in [150,200])",
+           !ValueScan::ComparePredicate(DT::Int32, ST::Between, cur, tgt, tgt2));
+
+    // Changed / Unchanged compare against prev (passed as `target`)
+    WriteLE<int32_t>(tgt, 100);
+    EXPECT("Int32 Unchanged (100==prev100)",  ValueScan::ComparePredicate(DT::Int32, ST::Unchanged, cur, tgt));
+    EXPECT("Int32 Changed rejects same",     !ValueScan::ComparePredicate(DT::Int32, ST::Changed,   cur, tgt));
+    WriteLE<int32_t>(tgt, 99);
+    EXPECT("Int32 Changed (100!=prev99)",     ValueScan::ComparePredicate(DT::Int32, ST::Changed,   cur, tgt));
+    EXPECT("Int32 Increased (100>prev99)",    ValueScan::ComparePredicate(DT::Int32, ST::Increased, cur, tgt));
+    WriteLE<int32_t>(tgt, 101);
+    EXPECT("Int32 Decreased (100<prev101)",   ValueScan::ComparePredicate(DT::Int32, ST::Decreased, cur, tgt));
+}
+
+static void Test_ValueScan_Predicate_Int8Negative() {
+    // Regression for sign extension: Int8 must compare as signed even
+    // when the raw byte is 0xFF (which would be 255 as unsigned).
+    using DT = ValueScan::DataType;
+    using ST = ValueScan::ScanType;
+    uint8_t cur[8] = {}, tgt[8] = {};
+    int8_t minusOne = -1;
+    int8_t zero = 0;
+    std::memcpy(cur, &minusOne, 1);
+    std::memcpy(tgt, &zero, 1);
+    EXPECT("Int8 (-1 < 0) Smaller",   ValueScan::ComparePredicate(DT::Int8, ST::Smaller, cur, tgt));
+    EXPECT("Int8 (-1 < 0) Bigger NO", !ValueScan::ComparePredicate(DT::Int8, ST::Bigger,  cur, tgt));
+}
+
+static void Test_ValueScan_Predicate_Float() {
+    using DT = ValueScan::DataType;
+    using ST = ValueScan::ScanType;
+    uint8_t cur[8], tgt[8];
+    WriteLE<float>(cur, 3.14f);
+    WriteLE<float>(tgt, 3.14f);
+    EXPECT("Float Exact (3.14==3.14)",  ValueScan::ComparePredicate(DT::Float, ST::Exact,  cur, tgt));
+    WriteLE<float>(tgt, 1.0f);
+    EXPECT("Float Bigger (3.14>1)",     ValueScan::ComparePredicate(DT::Float, ST::Bigger, cur, tgt));
+    WriteLE<float>(cur, -2.5f);
+    WriteLE<float>(tgt, -1.0f);
+    EXPECT("Float Smaller (-2.5<-1)",   ValueScan::ComparePredicate(DT::Float, ST::Smaller, cur, tgt));
+}
+
+static void Test_ValueScan_Predicate_Double() {
+    using DT = ValueScan::DataType;
+    using ST = ValueScan::ScanType;
+    uint8_t cur[8], tgt[8];
+    WriteLE<double>(cur, 1.0 / 3.0);
+    WriteLE<double>(tgt, 1.0 / 3.0);
+    EXPECT("Double Exact (1/3==1/3)",   ValueScan::ComparePredicate(DT::Double, ST::Exact,   cur, tgt));
+    WriteLE<double>(tgt, 0.0);
+    EXPECT("Double Increased prev=0",   ValueScan::ComparePredicate(DT::Double, ST::Increased, cur, tgt));
+}
+
+static void Test_ValueScan_Predicate_Bool() {
+    using DT = ValueScan::DataType;
+    using ST = ValueScan::ScanType;
+    uint8_t cur[8] = { 1 }, tgt[8] = { 1 };
+    EXPECT("Bool true==true Exact",       ValueScan::ComparePredicate(DT::Bool, ST::Exact, cur, tgt));
+    tgt[0] = 0;
+    EXPECT("Bool true!=false Changed",    ValueScan::ComparePredicate(DT::Bool, ST::Changed, cur, tgt));
+    EXPECT("Bool true!=false Unchanged NO", !ValueScan::ComparePredicate(DT::Bool, ST::Unchanged, cur, tgt));
+}
+
+static void Test_ValueScan_Predicate_UInt64_RangeBoundary() {
+    using DT = ValueScan::DataType;
+    using ST = ValueScan::ScanType;
+    uint8_t cur[8], tgt[8];
+    // Values that would be NEGATIVE if mis-read as signed: ensures
+    // unsigned path is taken for UInt64.
+    WriteLE<uint64_t>(cur, 0xFFFFFFFFFFFFFFFFULL);
+    WriteLE<uint64_t>(tgt, 0x8000000000000000ULL);
+    EXPECT("UInt64 (~0 > 0x8000...) Bigger", ValueScan::ComparePredicate(DT::UInt64, ST::Bigger, cur, tgt));
+    EXPECT("UInt64 (~0 < 0x8000...) Smaller NO",
+           !ValueScan::ComparePredicate(DT::UInt64, ST::Smaller, cur, tgt));
+}
+
+// ----- ValueScan: SessionManager lifecycle ----------------------------------
+
+static void Test_ValueScan_SessionLifecycle() {
+    using namespace ValueScan;
+    auto& mgr = SessionManager::Instance();
+
+    // Seed two candidates.
+    std::vector<Candidate> seed;
+    seed.resize(2);
+    seed[0].addr = 0x1000;
+    WriteLE<int32_t>(seed[0].prevValue, 100);
+    seed[1].addr = 0x2000;
+    WriteLE<int32_t>(seed[1].prevValue, 200);
+
+    uint64_t sid = mgr.Begin(DataType::Int32, std::move(seed));
+    EXPECT("Begin returns non-zero session id", sid != 0);
+
+    bool viewed = mgr.ViewWith(sid, [&](DataType dt, const std::vector<Candidate>& cs) {
+        EXPECT("ViewWith sees correct dataType", dt == DataType::Int32);
+        EXPECT("ViewWith sees 2 candidates",     cs.size() == 2);
+    });
+    EXPECT("ViewWith returns true for live session", viewed);
+
+    // RefineWith may mutate the candidates vector.
+    bool refined = mgr.RefineWith(sid, [](DataType, std::vector<Candidate>& cs) {
+        cs.pop_back();  // drop one
+    });
+    EXPECT("RefineWith returns true for live session", refined);
+
+    size_t remaining = 0;
+    mgr.ViewWith(sid, [&](DataType, const std::vector<Candidate>& cs) {
+        remaining = cs.size();
+    });
+    EXPECT("Refine pruned candidate count", remaining == 1);
+
+    EXPECT("End returns true on first call",  mgr.End(sid));
+    EXPECT("End returns false on second call",!mgr.End(sid));
+
+    // Lookups on a missing session id return false WITHOUT invoking
+    // the callback -- caller maps to wire error "session_not_found".
+    bool callbackRan = false;
+    bool missingOk = mgr.RefineWith(sid, [&](DataType, std::vector<Candidate>&) {
+        callbackRan = true;
+    });
+    EXPECT("RefineWith on missing returns false", !missingOk);
+    EXPECT("RefineWith on missing does NOT invoke callback", !callbackRan);
+}
+
 // ----- main ------------------------------------------------------------------
 
 int main() {
-    std::printf("dll_helpers_test (Renge + Scharf)\n");
+    std::printf("dll_helpers_test (Renge + Scharf + ValueScan)\n");
     std::printf("------------------------------------------\n");
 
     Test_TryStrToAddr_AcceptsValidHex();
@@ -280,6 +479,17 @@ int main() {
     Test_Alignment_WeakAndSparseDelegate();
 
     Test_Mimic_PollLatency_OneMillisecond();
+
+    Test_ValueScan_DataTypeSizes();
+    Test_ValueScan_ParseDataTypeRoundTrip();
+    Test_ValueScan_ScanTypePartitioning();
+    Test_ValueScan_Predicate_Int32();
+    Test_ValueScan_Predicate_Int8Negative();
+    Test_ValueScan_Predicate_Float();
+    Test_ValueScan_Predicate_Double();
+    Test_ValueScan_Predicate_Bool();
+    Test_ValueScan_Predicate_UInt64_RangeBoundary();
+    Test_ValueScan_SessionLifecycle();
 
     std::printf("------------------------------------------\n");
     std::printf("Pass: %d   Fail: %d\n", g_pass, g_fail);

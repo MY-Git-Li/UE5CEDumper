@@ -22,8 +22,27 @@
     <sys:String x:Key="str.Tab.PropertySearch">Properties</sys:String>
     <sys:String x:Key="str.Tab.InterestingFunctions">Interesting Funcs</sys:String>
     <sys:String x:Key="str.Tab.InterestingProperties">Interesting Props</sys:String>
+    <sys:String x:Key="str.Tab.ValueSearch">Value Search</sys:String>
     <sys:String x:Key="str.Tab.Console">Console</sys:String>
     <sys:String x:Key="str.Tab.GameClassFilter">Classes</sys:String>
+
+    <!-- Value Search -->
+    <sys:String x:Key="str.VS.Banner">Native C++ fields (non-UPROPERTY) cannot be found here — even if they live inside a UObject's memory. Use Cheat Engine's raw memory scan for those.</sys:String>
+    <sys:String x:Key="str.VS.DataType">Type:</sys:String>
+    <sys:String x:Key="str.VS.ScanType">Scan:</sys:String>
+    <sys:String x:Key="str.VS.Value">Value:</sys:String>
+    <sys:String x:Key="str.VS.Value2">… to</sys:String>
+    <sys:String x:Key="str.VS.GameOnly">Game classes only</sys:String>
+    <sys:String x:Key="str.VS.MaxResults">Max:</sys:String>
+    <sys:String x:Key="str.VS.FirstScan">First Scan</sys:String>
+    <sys:String x:Key="str.VS.NextScan">Next Scan</sys:String>
+    <sys:String x:Key="str.VS.NewScan">New Scan</sys:String>
+    <sys:String x:Key="str.VS.OpenLive">Open in Live Walker</sys:String>
+    <sys:String x:Key="str.VS.CopyAddr">Copy Address</sys:String>
+    <sys:String x:Key="str.Tip.VS.DataType">Pick the UE primitive type to scan. Strings, names, arrays, vectors, and FText are not yet supported.</sys:String>
+    <sys:String x:Key="str.Tip.VS.FirstScan">Walk every UPROPERTY field of the chosen type across all UObject instances, apply the predicate, and start a session for Next Scan refines.</sys:String>
+    <sys:String x:Key="str.Tip.VS.NextScan">Re-read each candidate's bytes and prune by the new predicate. Changed / Unchanged / Increased / Decreased compare against the previous round.</sys:String>
+    <sys:String x:Key="str.Tip.VS.NewScan">End the current session and reset for a fresh scan.</sys:String>
 
     <!-- Object Tree -->
     <sys:String x:Key="str.ObjectTree.Title">Object Tree</sys:String>

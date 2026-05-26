@@ -1,0 +1,171 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UE5DumpUI.ViewModels"
+             xmlns:m="using:UE5DumpUI.Models"
+             x:Class="UE5DumpUI.Views.ValueSearchPanel"
+             x:DataType="vm:ValueSearchViewModel">
+
+  <DockPanel Margin="8">
+
+    <!-- UX banner (REQUIRED by project memory project_value_search_caveats).
+         Surfaces the hard limitation that this scan only sees fields
+         declared with UPROPERTY. Raw C++ members embedded inside a UObject
+         remain visible to CE's raw scan but invisible to us. The banner
+         is locked in by ValueSearchPanel_BannerTest. -->
+    <Border DockPanel.Dock="Top"
+            Background="#3A2A14"
+            BorderBrush="#E0A050" BorderThickness="0,0,0,2"
+            Padding="10,6" Margin="0,0,0,8">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <TextBlock Text="⚠" Foreground="#E0A050"
+                   FontSize="14" FontWeight="Bold"
+                   VerticalAlignment="Center"/>
+        <TextBlock Text="{StaticResource str.VS.Banner}"
+                   Foreground="#F0CC80" FontSize="12"
+                   TextWrapping="Wrap"
+                   VerticalAlignment="Center"/>
+      </StackPanel>
+    </Border>
+
+    <!-- Inputs row -->
+    <Grid DockPanel.Dock="Top" Margin="0,0,0,4" ColumnDefinitions="Auto,*"
+          RowDefinitions="Auto,Auto,Auto">
+
+      <!-- Row 0: DataType + ScanType + Values -->
+      <TextBlock Grid.Row="0" Grid.Column="0"
+                 Text="{StaticResource str.VS.DataType}"
+                 Foreground="#CCCCCC" VerticalAlignment="Center"
+                 Margin="0,4,8,4"/>
+      <StackPanel Grid.Row="0" Grid.Column="1"
+                  Orientation="Horizontal" Spacing="6" Margin="0,4,0,4">
+        <ComboBox ItemsSource="{Binding DataTypeOptions}"
+                  SelectedItem="{Binding SelectedDataType}"
+                  ToolTip.Tip="{StaticResource str.Tip.VS.DataType}"
+                  MinWidth="100" Padding="4,2" FontSize="12"/>
+
+        <TextBlock Text="{StaticResource str.VS.ScanType}"
+                   Foreground="#CCCCCC" VerticalAlignment="Center"
+                   Margin="8,0,0,0"/>
+        <ComboBox ItemsSource="{Binding ScanTypeOptions}"
+                  SelectedItem="{Binding SelectedScanType}"
+                  MinWidth="110" Padding="4,2" FontSize="12"/>
+
+        <!-- Value input box: hidden for prev-value scan types so the
+             user understands no value is required for Changed/etc. -->
+        <TextBlock Text="{StaticResource str.VS.Value}"
+                   Foreground="#CCCCCC" VerticalAlignment="Center"
+                   IsVisible="{Binding RequiresValueInput}"
+                   Margin="8,0,0,0"/>
+        <TextBox Text="{Binding Value}"
+                 IsVisible="{Binding RequiresValueInput}"
+                 Width="120" Padding="4,2" FontSize="12"/>
+
+        <TextBlock Text="{StaticResource str.VS.Value2}"
+                   Foreground="#CCCCCC" VerticalAlignment="Center"
+                   IsVisible="{Binding RequiresValue2Input}"
+                   Margin="4,0,0,0"/>
+        <TextBox Text="{Binding Value2}"
+                 IsVisible="{Binding RequiresValue2Input}"
+                 Width="120" Padding="4,2" FontSize="12"/>
+      </StackPanel>
+
+      <!-- Row 1: Game Only + Max Results -->
+      <StackPanel Grid.Row="1" Grid.Column="1"
+                  Orientation="Horizontal" Spacing="12" Margin="0,2,0,4">
+        <CheckBox Content="{StaticResource str.VS.GameOnly}"
+                  IsChecked="{Binding GameOnly}"
+                  Foreground="#CCCCCC" FontSize="12"
+                  VerticalAlignment="Center"/>
+        <TextBlock Text="{StaticResource str.VS.MaxResults}"
+                   Foreground="#CCCCCC" FontSize="12"
+                   VerticalAlignment="Center"/>
+        <NumericUpDown Value="{Binding MaxResults}"
+                       Minimum="100" Maximum="500000" Increment="1000"
+                       Width="120" FontSize="12"/>
+      </StackPanel>
+
+      <!-- Row 2: action buttons -->
+      <StackPanel Grid.Row="2" Grid.Column="1"
+                  Orientation="Horizontal" Spacing="8" Margin="0,2,0,4">
+        <Button Content="{StaticResource str.VS.FirstScan}"
+                Command="{Binding FirstScanCommand}"
+                IsEnabled="{Binding !IsScanning}"
+                ToolTip.Tip="{StaticResource str.Tip.VS.FirstScan}"
+                Classes="accent" Padding="12,4"/>
+        <Button Content="{StaticResource str.VS.NextScan}"
+                Command="{Binding NextScanCommand}"
+                IsEnabled="{Binding HasSession}"
+                ToolTip.Tip="{StaticResource str.Tip.VS.NextScan}"
+                Padding="12,4"/>
+        <Button Content="{StaticResource str.VS.NewScan}"
+                Command="{Binding NewScanCommand}"
+                IsEnabled="{Binding HasSession}"
+                ToolTip.Tip="{StaticResource str.Tip.VS.NewScan}"
+                Padding="12,4"/>
+        <ProgressBar IsIndeterminate="True"
+                     IsVisible="{Binding IsScanning}"
+                     Width="80" Height="4"
+                     VerticalAlignment="Center" Margin="8,0,0,0"/>
+      </StackPanel>
+    </Grid>
+
+    <!-- Status row -->
+    <TextBlock DockPanel.Dock="Top"
+               Text="{Binding StatusText}"
+               Foreground="#AAB8D0" FontSize="12"
+               FontFamily="Consolas, Menlo, monospace"
+               Margin="0,4,0,4"
+               TextWrapping="Wrap"
+               ToolTip.Tip="{Binding StatusText}"/>
+
+    <!-- Error row -->
+    <TextBlock DockPanel.Dock="Top"
+               Text="{Binding ErrorMessage}"
+               Foreground="#F44747" Margin="0,0,0,4"
+               IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+
+    <!-- Results DataGrid -->
+    <DataGrid x:Name="ResultsGrid"
+              ItemsSource="{Binding Candidates}"
+              SelectedItem="{Binding SelectedCandidate}"
+              IsReadOnly="True"
+              CanUserResizeColumns="True"
+              GridLinesVisibility="Horizontal"
+              BorderThickness="0"
+              Background="#1E1E1E"
+              Foreground="#D4D4D4"
+              FontSize="12"
+              FontFamily="Consolas, Menlo, monospace">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="Class.Field" Binding="{Binding LocationLabel}" Width="320"/>
+        <DataGridTextColumn Header="Type" Binding="{Binding FieldType}" Width="120"/>
+        <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="120"/>
+        <DataGridTextColumn Header="Offset" Binding="{Binding OffsetHex}" Width="80"/>
+        <DataGridTextColumn Header="Address" Binding="{Binding Addr}" Width="160"/>
+        <DataGridTextColumn Header="Instance" Binding="{Binding InstanceName}" Width="200"/>
+        <DataGridTemplateColumn Header="" Width="Auto">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:ValueCandidate">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <Button Content="{StaticResource str.VS.OpenLive}"
+                        Command="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).OpenInLiveWalkerCommand}"
+                        CommandParameter="{Binding}"
+                        Foreground="#4EC9B0" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#4EC9B0"
+                        Padding="6,2" FontSize="11"
+                        Cursor="Hand"/>
+                <Button Content="{StaticResource str.VS.CopyAddr}"
+                        Command="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).CopyAddressCommand}"
+                        CommandParameter="{Binding}"
+                        Foreground="#DCDCAA" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#DCDCAA"
+                        Padding="6,2" FontSize="11"
+                        Cursor="Hand"/>
+              </StackPanel>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</UserControl>

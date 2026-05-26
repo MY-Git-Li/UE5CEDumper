@@ -12,18 +12,65 @@ Move items to [dev-log.md](dev-log.md) once they ship; update
 
 -----
 
-## Next-priority enhancements (decided 2026-05-26, post build 730)
+## Next-priority enhancements (decided 2026-05-26, post build 738)
 
-Picked after a value-vs-effort review at end of the build-719 freeze
-session. **Ordered by value/effort ratio** — top items are highest
-return. The previously-floated "Game Profile persistence" item was
-**dropped** because [Flamme HintCache](../dll/src/Flamme.cpp) already
-persists per-PE-hash AOB winning pattern IDs + UE version + version-
-detected flag + user override + invoke timeout, shared with the C#
-[AobUsageService](../ui/UE5DumpUI/Services/AobUsageService.cs) via the
-same `%LOCALAPPDATA%\UE5CEDumper\UE5CEDumper.{COMPUTERNAME}.json` file.
-The remaining gaps (DynOff cache, favorites, invoke param presets) are
-low-pain compared to the AOB scan which is already cached.
+### 0. ~~Value Search tab (by-value scan)~~ — ✅ shipped this session (2026-05-26, build 738)
+
+**Effort actual**: ~half a day (Sonnet-driven port of discrete Phase 27b
+shape, mostly mechanical) | **Risk**: low — purely additive (3 new DLL
+files, 3 new pipe cmds, 1 new tab; no existing-behaviour regressions
+in 957 C# + 124 DLL tests). **Why**: filled the search-by-value gap
+(PropertySearch = by-name; InstanceFinder = by-address; this is the
+third axis). Port motivated by cross-repo discussion at session start —
+the Unity-side `whatIsAt` + `beginValueScan` workflow has direct
+analog here, and UE's reflection metadata makes the candidate
+enrichment cleaner than discrete's whatIsAt path.
+
+**What shipped**:
+- DLL: `ValueScan.h/.cpp` (DataType / ScanType enums, Candidate,
+  SessionManager with 5-min idle expiry, ComparePredicate), Aura
+  `ScanForValue` + `RefineCandidates`, 3 pipe cmds
+  (`begin_value_scan` / `refine_value_scan` / `end_value_scan`).
+- C#: `Models/ValueScanModels.cs`, `IDumpService` + `DumpService`
+  begin/refine/end, `ValueSearchViewModel`, `ValueSearchPanel.axaml`
+  with **hard-locked** "Native C++ fields not findable here" banner
+  (literal text locked in by `Banner_LiteralText_IsPresentInEnAxaml`
+  test — see memory `project_value_search_caveats`).
+- Tests: +31 DLL helpers, +22 C# (incl. scan-type partition theory,
+  prev-value scan type omits `value` field on the wire, First Scan
+  auto-ends orphan session before new Begin).
+
+**Live verification target (next session, user-side)**:
+- Geri (UE 4.27) + ES2 (UE 5.5): scan for HP (Int32 or Float, depending
+  on game), take damage, switch ScanType=Decreased, click Next Scan,
+  confirm candidates prune correctly. Smoke-test the cross-tab
+  "Open in Live Walker" navigation flow.
+
+**v2 deferred** (revisit on user signal):
+- **FString / FName / FText support** — string scan is the most-asked
+  CE feature beyond primitives; straightforward port once we lock the
+  FName index round-trip (Serie::GetString equivalent on the C# side
+  for predicate building).
+- **TArray\<T\> scan** — see memory `project_value_search_caveats`
+  for the open crash-risk plan. Before shipping: confirm
+  `Aura::FindInContainers`'s 15s deadline is enough back-pressure for
+  pathological containers; add soft circuit-breaker on Num
+  (>10M elements skip with telemetry log) rather than inheriting Copy
+  CE XML's hard array-size cap (which would silently drop legit deep
+  hits). Stress-test on Satisfactory inventory arrays before enabling.
+- **FVector / FRotator / FTransform** — natural next step after
+  primitives; needs scan-by-(X, Y, Z) tolerance UI.
+
+> _Ordering note (kept from earlier 2026-05-26 review)_: items below
+> were ordered by value/effort ratio at the end of the build-719 freeze
+> session. "Game Profile persistence" was dropped because [Flamme
+> HintCache](../dll/src/Flamme.cpp) already persists per-PE-hash AOB
+> winning pattern IDs + UE version + version-detected flag + user
+> override + invoke timeout, shared with the C#
+> [AobUsageService](../ui/UE5DumpUI/Services/AobUsageService.cs) via
+> `%LOCALAPPDATA%\UE5CEDumper\UE5CEDumper.{COMPUTERNAME}.json`. The
+> remaining gaps (DynOff cache, favorites, invoke param presets) are
+> low-pain compared to the AOB scan which is already cached.
 
 ### 1. ~~UE Console / Exec Command Bridge~~ — ✅ shipped this session (2026-05-26)
 

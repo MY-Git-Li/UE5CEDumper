@@ -15,10 +15,13 @@
 #include "Ubel.h"
 #include "Flamme.h"
 #include "Stark.h"
+#include "ValueScan.h"
 #include "BuildInfo.h"
 
 #include <json.hpp>
 #include <chrono>
+#include <cstring>
+#include <sstream>
 #include <vector>
 
 using json = nlohmann::json;
@@ -30,6 +33,191 @@ extern "C" uintptr_t UE5_GetObjectClass(uintptr_t obj);
 extern "C" uintptr_t UE5_FindFunctionByName(uintptr_t classAddr, const char* funcName);
 extern "C" int32_t   UE5_CallProcessEventDirect(uintptr_t instance, uintptr_t ufunc, uintptr_t params);
 extern "C" int32_t   UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t params);
+
+// ============================================================
+// ValueScan wire helpers — parse "100" / "-42" / "3.14" / "true" /
+// "0x..." into the right little-endian byte layout for DataType, and
+// format the inverse for response payloads. Wire schema uses strings
+// to avoid JSON-number precision loss at 64-bit ints; the helpers
+// also tolerate leading 0x for unsigned-int types so the user can
+// paste pointer-shaped values directly into Exact-mode scans.
+// ============================================================
+namespace {
+
+bool ParseValueBytes(ValueScan::DataType dt, const std::string& raw, uint8_t out[8]) {
+    std::memset(out, 0, 8);
+    if (raw.empty()) return false;
+
+    // Trim surrounding whitespace -- the UI's NumericTextBox sometimes
+    // ships a trailing newline.
+    size_t lo = 0, hi = raw.size();
+    while (lo < hi && std::isspace(static_cast<unsigned char>(raw[lo]))) ++lo;
+    while (hi > lo && std::isspace(static_cast<unsigned char>(raw[hi - 1]))) --hi;
+    if (lo >= hi) return false;
+    std::string s = raw.substr(lo, hi - lo);
+
+    auto isHexPrefix = [](const std::string& str) {
+        return str.size() > 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X');
+    };
+
+    try {
+        switch (dt) {
+            case ValueScan::DataType::Int8: {
+                long long v = std::stoll(s, nullptr, 0);
+                if (v < INT8_MIN || v > INT8_MAX) return false;
+                int8_t t = static_cast<int8_t>(v);
+                std::memcpy(out, &t, 1);
+                return true;
+            }
+            case ValueScan::DataType::Int16: {
+                long long v = std::stoll(s, nullptr, 0);
+                if (v < INT16_MIN || v > INT16_MAX) return false;
+                int16_t t = static_cast<int16_t>(v);
+                std::memcpy(out, &t, 2);
+                return true;
+            }
+            case ValueScan::DataType::Int32: {
+                long long v = std::stoll(s, nullptr, 0);
+                if (v < INT32_MIN || v > INT32_MAX) return false;
+                int32_t t = static_cast<int32_t>(v);
+                std::memcpy(out, &t, 4);
+                return true;
+            }
+            case ValueScan::DataType::Int64: {
+                long long v = std::stoll(s, nullptr, 0);
+                int64_t t = static_cast<int64_t>(v);
+                std::memcpy(out, &t, 8);
+                return true;
+            }
+            case ValueScan::DataType::UInt8: {
+                unsigned long long v = std::stoull(s, nullptr, isHexPrefix(s) ? 16 : 0);
+                if (v > UINT8_MAX) return false;
+                uint8_t t = static_cast<uint8_t>(v);
+                std::memcpy(out, &t, 1);
+                return true;
+            }
+            case ValueScan::DataType::UInt16: {
+                unsigned long long v = std::stoull(s, nullptr, isHexPrefix(s) ? 16 : 0);
+                if (v > UINT16_MAX) return false;
+                uint16_t t = static_cast<uint16_t>(v);
+                std::memcpy(out, &t, 2);
+                return true;
+            }
+            case ValueScan::DataType::UInt32: {
+                unsigned long long v = std::stoull(s, nullptr, isHexPrefix(s) ? 16 : 0);
+                if (v > UINT32_MAX) return false;
+                uint32_t t = static_cast<uint32_t>(v);
+                std::memcpy(out, &t, 4);
+                return true;
+            }
+            case ValueScan::DataType::UInt64: {
+                unsigned long long v = std::stoull(s, nullptr, isHexPrefix(s) ? 16 : 0);
+                uint64_t t = static_cast<uint64_t>(v);
+                std::memcpy(out, &t, 8);
+                return true;
+            }
+            case ValueScan::DataType::Float: {
+                float t = std::stof(s);
+                std::memcpy(out, &t, 4);
+                return true;
+            }
+            case ValueScan::DataType::Double: {
+                double t = std::stod(s);
+                std::memcpy(out, &t, 8);
+                return true;
+            }
+            case ValueScan::DataType::Bool: {
+                // Accept: true / false / 1 / 0 (case insensitive)
+                std::string lower = s;
+                for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (lower == "true"  || lower == "1") { out[0] = 1; return true; }
+                if (lower == "false" || lower == "0") { out[0] = 0; return true; }
+                return false;
+            }
+        }
+    } catch (...) {
+        return false;
+    }
+    return false;
+}
+
+std::string FormatValueBytes(ValueScan::DataType dt, const uint8_t bytes[8]) {
+    std::ostringstream oss;
+    switch (dt) {
+        case ValueScan::DataType::Int8: {
+            int8_t v;  std::memcpy(&v, bytes, 1);
+            oss << static_cast<int>(v);
+            break;
+        }
+        case ValueScan::DataType::Int16: {
+            int16_t v; std::memcpy(&v, bytes, 2);
+            oss << v;
+            break;
+        }
+        case ValueScan::DataType::Int32: {
+            int32_t v; std::memcpy(&v, bytes, 4);
+            oss << v;
+            break;
+        }
+        case ValueScan::DataType::Int64: {
+            int64_t v; std::memcpy(&v, bytes, 8);
+            oss << v;
+            break;
+        }
+        case ValueScan::DataType::UInt8: {
+            oss << static_cast<unsigned int>(bytes[0]);
+            break;
+        }
+        case ValueScan::DataType::UInt16: {
+            uint16_t v; std::memcpy(&v, bytes, 2);
+            oss << v;
+            break;
+        }
+        case ValueScan::DataType::UInt32: {
+            uint32_t v; std::memcpy(&v, bytes, 4);
+            oss << v;
+            break;
+        }
+        case ValueScan::DataType::UInt64: {
+            uint64_t v; std::memcpy(&v, bytes, 8);
+            oss << v;
+            break;
+        }
+        case ValueScan::DataType::Float: {
+            float v;   std::memcpy(&v, bytes, 4);
+            oss << v;
+            break;
+        }
+        case ValueScan::DataType::Double: {
+            double v;  std::memcpy(&v, bytes, 8);
+            oss << v;
+            break;
+        }
+        case ValueScan::DataType::Bool: {
+            oss << (bytes[0] ? "true" : "false");
+            break;
+        }
+    }
+    return oss.str();
+}
+
+json CandidateToJson(const ValueScan::Candidate& c, ValueScan::DataType dt) {
+    json item;
+    item["addr"]                = Renge::AddrToStr(c.addr);
+    item["instance_addr"]       = Renge::AddrToStr(c.instanceAddr);
+    item["instance_index"]      = c.instanceIndex;
+    item["field_offset"]        = c.fieldOffset;
+    item["instance_name"]       = c.instanceName;
+    item["class_name"]          = c.className;
+    item["defining_class_name"] = c.definingClassName;
+    item["field_name"]          = c.fieldName;
+    item["field_type"]          = c.fieldType;
+    item["bool_field_mask"]     = c.boolFieldMask;
+    item["value"]               = FormatValueBytes(dt, c.prevValue);
+    return item;
+}
+
+}  // namespace
 
 // ScanProgress — global progress state updated by UE5_Init(), read by scan_status
 namespace ScanProgress {
@@ -1508,6 +1696,162 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             data["scanned_classes"] = totalScannedClasses;
             data["scanned_objects"] = totalScannedObjects;
             data["per_query"]       = perQuery;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // === begin_value_scan: CE-style First Scan. Walks GObjects +
+        // UProperty metadata for every UPROPERTY-declared field of the
+        // requested DataType across all UObject instances, applies the
+        // (scan_type, value[, value2]) predicate, and returns enriched
+        // candidates + a session_id for follow-up refine_value_scan
+        // calls. See ValueScan.h for the lifecycle contract.
+        //
+        // Native C++ fields (non-UPROPERTY) are intentionally NOT
+        // scanned -- the UI's Value Search tab MUST surface this caveat
+        // in a banner. See memory project_value_search_caveats.
+        if (cmd == Renge::CMD_BEGIN_VALUE_SCAN) {
+            std::string dtStr = request.value("data_type", "");
+            std::string stStr = request.value("scan_type", "Exact");
+            std::string valStr = request.value("value", "");
+            std::string val2Str = request.value("value2", "");
+            bool gameOnly = request.value("game_only", true);
+            int  maxResults = request.value("max_results", 50000);
+
+            ValueScan::DataType dt;
+            if (!ValueScan::TryParseDataType(dtStr, dt)) {
+                return Renge::MakeError(id, "Unknown data_type: " + dtStr).dump();
+            }
+            ValueScan::ScanType st;
+            if (!ValueScan::TryParseScanType(stStr, st)) {
+                return Renge::MakeError(id, "Unknown scan_type: " + stStr).dump();
+            }
+            if (!ValueScan::IsFirstScanType(st)) {
+                return Renge::MakeError(id, "scan_type '" + stStr +
+                    "' is only valid for refine (no prevValue on first scan)").dump();
+            }
+
+            uint8_t targetBytes[8] = {};
+            uint8_t target2Bytes[8] = {};
+            if (!ParseValueBytes(dt, valStr, targetBytes)) {
+                return Renge::MakeError(id, "Invalid 'value' for data_type " + dtStr).dump();
+            }
+            const uint8_t* target2Ptr = nullptr;
+            if (st == ValueScan::ScanType::Between) {
+                if (!ParseValueBytes(dt, val2Str, target2Bytes)) {
+                    return Renge::MakeError(id, "Between requires 'value2' for data_type " + dtStr).dump();
+                }
+                target2Ptr = target2Bytes;
+            }
+
+            auto scanResult = Aura::ScanForValue(
+                dt, st, targetBytes, target2Ptr, gameOnly, maxResults);
+
+            uint64_t sessionId = ValueScan::SessionManager::Instance().Begin(
+                dt, scanResult.candidates);
+
+            json candidates = json::array();
+            // Echo back candidates from the session-held vector AFTER
+            // Begin moved them in -- we need ViewWith because the local
+            // vector was moved-from.
+            ValueScan::SessionManager::Instance().ViewWith(sessionId,
+                [&](ValueScan::DataType sdt, const std::vector<ValueScan::Candidate>& cs) {
+                    for (const auto& c : cs) candidates.push_back(CandidateToJson(c, sdt));
+                });
+
+            json data;
+            data["session_id"]      = sessionId;
+            data["data_type"]       = ValueScan::NameOf(dt);
+            data["total"]           = static_cast<int>(candidates.size());
+            data["scanned_classes"] = scanResult.stats.scannedClasses;
+            data["scanned_objects"] = scanResult.stats.scannedObjects;
+            data["duration_ms"]     = static_cast<int64_t>(scanResult.stats.durationMs);
+            data["deadline_hit"]    = scanResult.stats.deadlineHit;
+            data["candidates"]      = candidates;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // === refine_value_scan: CE-style Next Scan. Re-reads each
+        // candidate's bytes, prunes with the (scan_type, value[, value2])
+        // predicate. prev-value scan types (Changed / Unchanged /
+        // Increased / Decreased) compare against the candidate's last
+        // observed bytes; targeted scan types (Exact / Bigger / Smaller
+        // / Between) compare against the supplied value(s). Updates
+        // prevValue on survivors so the NEXT refine compares against
+        // bytes captured during THIS refine. ===
+        if (cmd == Renge::CMD_REFINE_VALUE_SCAN) {
+            uint64_t sessionId = request.value("session_id", 0ULL);
+            if (sessionId == 0) {
+                return Renge::MakeError(id, "Missing or zero session_id").dump();
+            }
+            std::string stStr = request.value("scan_type", "");
+            std::string valStr = request.value("value", "");
+            std::string val2Str = request.value("value2", "");
+
+            ValueScan::ScanType st;
+            if (!ValueScan::TryParseScanType(stStr, st)) {
+                return Renge::MakeError(id, "Unknown scan_type: " + stStr).dump();
+            }
+
+            ValueScan::DataType dtCaptured = ValueScan::DataType::Int32;
+            json candidates = json::array();
+            Aura::ValueScanStats stats;
+            bool parseFailed = false;
+            bool found = ValueScan::SessionManager::Instance().RefineWith(sessionId,
+                [&](ValueScan::DataType dt, std::vector<ValueScan::Candidate>& cs) {
+                    dtCaptured = dt;
+                    uint8_t targetBytes[8] = {};
+                    uint8_t target2Bytes[8] = {};
+                    const uint8_t* tgtPtr  = nullptr;
+                    const uint8_t* tgt2Ptr = nullptr;
+
+                    if (!ValueScan::IsPrevValueScanType(st)) {
+                        if (!ParseValueBytes(dt, valStr, targetBytes)) {
+                            parseFailed = true;
+                            return;
+                        }
+                        tgtPtr = targetBytes;
+                        if (st == ValueScan::ScanType::Between) {
+                            if (!ParseValueBytes(dt, val2Str, target2Bytes)) {
+                                parseFailed = true;
+                                return;
+                            }
+                            tgt2Ptr = target2Bytes;
+                        }
+                    }
+
+                    stats = Aura::RefineCandidates(dt, st, tgtPtr, tgt2Ptr, cs);
+                    for (const auto& c : cs) candidates.push_back(CandidateToJson(c, dt));
+                });
+
+            if (!found) {
+                return Renge::MakeError(id, "session_not_found").dump();
+            }
+            if (parseFailed) {
+                return Renge::MakeError(id, "Invalid 'value' or 'value2' for session's data_type").dump();
+            }
+
+            json data;
+            data["session_id"]   = sessionId;
+            data["data_type"]    = ValueScan::NameOf(dtCaptured);
+            data["scan_type"]    = stStr;
+            data["total"]        = static_cast<int>(candidates.size());
+            data["duration_ms"]  = static_cast<int64_t>(stats.durationMs);
+            data["candidates"]   = candidates;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // === end_value_scan: drop a value-scan session. Idempotent;
+        // returns ok=true even when the session was already gone (e.g.
+        // 5-minute idle expiry already swept it). ===
+        if (cmd == Renge::CMD_END_VALUE_SCAN) {
+            uint64_t sessionId = request.value("session_id", 0ULL);
+            if (sessionId == 0) {
+                return Renge::MakeError(id, "Missing or zero session_id").dump();
+            }
+            bool ended = ValueScan::SessionManager::Instance().End(sessionId);
+            json data;
+            data["session_id"] = sessionId;
+            data["ended"]      = ended;
             return Renge::MakeResponse(id, data).dump();
         }
 

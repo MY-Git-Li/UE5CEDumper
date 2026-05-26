@@ -254,6 +254,9 @@
         <TabItem Header="{StaticResource str.Tab.InterestingProperties}">
           <views:InterestingPropertiesPanel DataContext="{Binding InterestingProperties}"/>
         </TabItem>
+        <TabItem Header="{StaticResource str.Tab.ValueSearch}">
+          <views:ValueSearchPanel DataContext="{Binding ValueSearch}"/>
+        </TabItem>
         <TabItem Header="{StaticResource str.Tab.Console}">
           <views:ConsolePanel DataContext="{Binding Console}"/>
         </TabItem>

@@ -73,6 +73,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public GameClassFilterViewModel GameClassFilter { get; }
     public InterestingFunctionsViewModel InterestingFunctions { get; }
     public InterestingPropertiesViewModel InterestingProperties { get; }
+    public ValueSearchViewModel ValueSearch { get; }
     public ConsoleViewModel Console { get; }
     public ProxyDeployViewModel? ProxyDeploy { get; }
 
@@ -169,6 +170,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         GameClassFilter = new GameClassFilterViewModel(dump, log);
         InterestingFunctions = new InterestingFunctionsViewModel(dump, log, aobMaker);
         InterestingProperties = new InterestingPropertiesViewModel(dump, log);
+        ValueSearch = new ValueSearchViewModel(dump, log);
         Console = new ConsoleViewModel(dump, log);
 
         if (proxyDeploy != null)
@@ -441,6 +443,31 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _log.Error($"InterestingProperties clipboard copy failed: {ex.Message}", ex);
+            }
+        };
+
+        // Wire ValueSearch -> LiveWalker (open candidate's owning instance)
+        // + clipboard. Same shape as InstanceFinder.NavigateToLiveWalker
+        // since ValueSearch already has the instance address resolved.
+        ValueSearch.NavigateToInstance += async (addr) =>
+        {
+            try
+            {
+                SelectedTabIndex = 0;  // Live Walker
+                await LiveWalker.NavigateToAddressCommand.ExecuteAsync(addr);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"ValueSearch NavigateToInstance handler error: {addr}", ex);
+            }
+        };
+        ValueSearch.RequestCopyText += async (text) =>
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            try { await _platform.CopyToClipboardAsync(text); }
+            catch (Exception ex)
+            {
+                _log.Error($"ValueSearch clipboard copy failed: {ex.Message}", ex);
             }
         };
 
