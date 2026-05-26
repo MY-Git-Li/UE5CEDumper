@@ -11,6 +11,62 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-05-26 — Value Search: recurse StructProperty so GAS / FGameplayAttributeData values are reachable (build 740 hotfix)
+
+Live-game repro on TQ2 (UE 5.07) the same session as the shipping build
+738 entry below: user opened CE Structure Dissect, walked `GWorld →
+OwningGameInstance → LocalPlayers[0] → PlayerController → Character →
+m_pStatsComponent → m_pAttributeSetHealth → MaximumHealth
+(GameplayAttributeData) → BaseValue = 337.5`. Opened Value Search,
+Type=Float, Scan=Exact, Value=337.5 → **0 candidates in 743 ms
+(scanned 380748 objects, 1717 classes with matching fields)**.
+
+Root cause: `Aura::ScanForValue::buildClassIndex` walked only
+top-level `ClassInfo.Fields` entries. `BaseValue` / `CurrentValue` live
+inside `FGameplayAttributeData` — a USTRUCT used as a StructProperty
+member of `UAttributeSetHealth`. The scan saw `MaximumHealth` as a
+StructProperty (not a leaf float type) and dropped it. Same dead-end
+would apply to FVector / FRotator / FTransform members of any UObject,
+not just GAS-style attribute sets.
+
+Fix: replaced the linear field loop with a recursive `expandFields`
+lambda. For each StructProperty encountered, reads `FSTRUCTPROP_STRUCT`
+to resolve the inner `UScriptStruct*` and recurses with cumulative
+offset + dotted name prefix. Emits ScanField entries for every
+matching-type leaf at the correct cumulative offset. Cycle guard via
+visited-set; hard depth cap at 4 to bound worst-case CPU on
+pathological types (self-referencing USTRUCTs declared as linked
+nodes).
+
+```
+Before fix (TQ2 repro):
+  UAttributeSetHealth.MaximumHealth → StructProperty → skipped
+  → 0 candidates
+
+After fix:
+  UAttributeSetHealth.MaximumHealth → recurse FGameplayAttributeData
+    → MaximumHealth.BaseValue    @ +0x48 → leaf, emitted
+    → MaximumHealth.CurrentValue @ +0x4C → leaf, emitted
+  → 2+ candidates per AttributeSetHealth instance
+```
+
+Uses `Ubel::WalkClassEx` at every depth so BoolProperty FieldMask is
+populated for nested bitfield bools on the UE5 FProperty path
+(WalkClass alone covers UE4 UProperty path only).
+
+Container properties (Array / Map / Set / Optional) are intentionally
+NOT recursed — TArray\<T\> remains v2 gated by the crash-risk plan in
+`project_value_search_caveats` memory. StructProperty recursion is
+strictly safe: no allocation walk, no Num-bounded iteration.
+
+No new test surface — recursion is implementation-detail inside the
+scan lambda; visible only through end-to-end scan results on a live
+UE process. Existing predicate / session / parser tests unchanged
+(957 C# + 124 DLL still pass on build 740). TQ2 live re-verification
+is the contract test.
+
+-----
+
 ## 2026-05-26 — Value Search tab: CE-style First Scan / Next Scan over UPROPERTY fields (build 738)
 
 New end-to-end capability: given a value (int / float / bool / etc),

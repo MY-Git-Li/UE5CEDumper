@@ -3230,29 +3230,97 @@ ValueScanResult ScanForValue(
     };
     std::unordered_map<uintptr_t, ScanClassInfo> classCache;
 
-    auto buildClassIndex = [&](uintptr_t classAddr) -> ScanClassInfo* {
-        auto it = classCache.find(classAddr);
-        if (it != classCache.end()) return &it->second;
+    // Recursive struct expansion: walks a UStruct's FProperty chain and
+    // emits ScanField entries for every leaf property matching the target
+    // DataType, including fields nested inside StructProperty members.
+    //
+    // Critical for GAS / Gameplay Ability System games: the most common
+    // pattern is `UAttributeSet -> FGameplayAttributeData MaximumHealth ->
+    // float BaseValue / float CurrentValue`. Without recursion the scan
+    // sees only the outer StructProperty (which isn't a leaf type) and
+    // returns 0 candidates -- the original 2026-05-26 TQ2 repro that
+    // motivated this fix. Same applies to FVector / FRotator / FTransform
+    // members of any UObject.
+    //
+    // Cycle / pathological-depth guards:
+    //   - kMaxDepth = 4. Real UE structs rarely nest beyond 2-3 levels;
+    //     beyond 4 we're either in a recursive type loop or pathological
+    //     data. The cap bounds worst-case CPU per class.
+    //   - visited set per call protects against accidental cycles
+    //     (FStructProperty's Struct pointer pointing to a struct that
+    //     transitively re-references itself, e.g. linked-list nodes
+    //     declared as USTRUCT with a self-typed StructProperty).
+    auto expandFields = [&](auto& self,
+                            uintptr_t structAddr,
+                            int32_t   baseOffset,
+                            const std::string& namePrefix,
+                            std::vector<ScanField>& out,
+                            std::unordered_set<uintptr_t>& visited,
+                            int depth) -> void {
+        constexpr int kMaxDepth = 4;
+        if (depth > kMaxDepth) return;
+        if (!visited.insert(structAddr).second) return;  // cycle
 
-        ClassInfo ci = Ubel::WalkClassEx(classAddr);
-        ScanClassInfo sci;
-        sci.className = ci.Name;
-        sci.classPath = ci.FullPath;
-        sci.gameClass = !IsEnginePackage(ci.FullPath);
+        // Use WalkClassEx at every depth so BoolProperty FieldMask is
+        // populated for nested bitfield bools (WalkClass alone covers it
+        // on the UE4 UProperty path only; the UE5 FProperty path needs
+        // the WalkClassEx pass). The extra metadata reads we don't use
+        // are cheap relative to the GObjects walk itself.
+        ClassInfo ci = Ubel::WalkClassEx(structAddr);
         for (const auto& f : ci.Fields) {
+            // Leaf-type match: emit a ScanField at the cumulative offset.
             bool accepted = false;
             for (const auto& t : acceptedTypes) {
                 if (f.TypeName == t) { accepted = true; break; }
             }
-            if (!accepted) continue;
-            ScanField sf;
-            sf.offset        = f.Offset;
-            sf.size          = f.Size;
-            sf.name          = f.Name;
-            sf.typeName      = f.TypeName;
-            sf.boolFieldMask = f.boolFieldMask;
-            sci.fields.push_back(std::move(sf));
+            if (accepted) {
+                ScanField sf;
+                sf.offset        = baseOffset + f.Offset;
+                sf.size          = f.Size;
+                sf.name          = namePrefix.empty() ? f.Name : (namePrefix + "." + f.Name);
+                sf.typeName      = f.TypeName;
+                sf.boolFieldMask = f.boolFieldMask;
+                out.push_back(std::move(sf));
+                continue;
+            }
+
+            // StructProperty: resolve the inner UScriptStruct via
+            // FStructProperty::Struct (FField + FSTRUCTPROP_STRUCT) and
+            // recurse with the cumulative offset + dotted name prefix.
+            // Container properties (Array / Map / Set / Optional) are
+            // intentionally NOT recursed here -- TArray<T> scan is the
+            // v2 milestone gated by the crash-risk plan in memory
+            // project_value_search_caveats.
+            if (f.TypeName == "StructProperty" && f.Address) {
+                uintptr_t nested = 0;
+                if (Macht::ReadSafe(f.Address + DynOff::FSTRUCTPROP_STRUCT, nested) && nested) {
+                    std::string childPrefix = namePrefix.empty()
+                        ? f.Name : (namePrefix + "." + f.Name);
+                    self(self, nested, baseOffset + f.Offset, childPrefix, out, visited, depth + 1);
+                }
+            }
         }
+    };
+
+    auto buildClassIndex = [&](uintptr_t classAddr) -> ScanClassInfo* {
+        auto it = classCache.find(classAddr);
+        if (it != classCache.end()) return &it->second;
+
+        ScanClassInfo sci;
+        // Two passes: first WalkClassEx for the class metadata (Name +
+        // FullPath are populated by Ubel::WalkClass already, but
+        // WalkClassEx also populates structType / inner / enum metadata
+        // we want available). Then expandFields walks the property chain
+        // recursively for ScanField emission.
+        ClassInfo ci = Ubel::WalkClassEx(classAddr);
+        sci.className = ci.Name;
+        sci.classPath = ci.FullPath;
+        sci.gameClass = !IsEnginePackage(ci.FullPath);
+
+        std::unordered_set<uintptr_t> visited;
+        expandFields(expandFields, classAddr, /*baseOffset=*/0,
+                     /*namePrefix=*/"", sci.fields, visited, /*depth=*/0);
+
         auto inserted = classCache.emplace(classAddr, std::move(sci));
         return &inserted.first->second;
     };
