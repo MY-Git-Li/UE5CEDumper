@@ -11,6 +11,30 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-05-26 — Value Search hotfix #2: WalkClassEx must calibrate FSTRUCTPROP_STRUCT before reading (build 744)
+
+Build-740 recursion fix shipped but TQ2 live test STILL returned 0 candidates. Targeted DIAG logging on `class name contains "AttributeSet"` revealed the actual failure mode:
+
+```
+ValueScan DIAG: class 'GrimAttributeSetHealth' WalkClassEx fields=8:
+  [1] name='MaximumHealth' type='StructProperty' offset=0xC8 size=37
+      addr=0x1FB83F53800 structType=''   ← empty!
+  ...
+ValueScan DIAG: class 'GrimAttributeSetHealth' emitted 0 ScanFields
+```
+
+`structType=''` on EVERY StructProperty was the smoking gun. `ReadSubclassTypeName(f.Address + FSTRUCTPROP_STRUCT)` returned empty because the runtime `FSTRUCTPROP_STRUCT` was still at default `0x78` — TQ2 (UE 5.07) actually needs `0x74`. My nested-struct recursion uses the same offset, so it also bailed on every read.
+
+Root cause: `CorrectSubclassOffsets` (Ubel.cpp:2441) is the calibration routine that probes the right offset, but it was **only called from `WalkInstance`** (line 2864). Any caller that hit `WalkClassEx` without a prior `WalkInstance` saw the uncalibrated default — including `Aura::ScanForValue`'s GObjects walk. The reason the bug was hidden in earlier features: `WalkInstance` typically fires from Live Walker before any other operation, so PropertySearch / etc. always inherited a calibrated value. Value Search is the first feature whose hot path doesn't depend on Live Walker firing first.
+
+Fix: added `CorrectSubclassOffsets(info.Fields)` call at the top of `WalkClassEx`, just after `WalkClass`. The function is idempotent (atomic-guarded), so calling it on every WalkClassEx is a no-op after the first successful probe. Forward declaration added near the top of Ubel.cpp because the definition lives at line ~2441.
+
+Same fix strengthens other `WalkClassEx` consumers (SearchProperties / EnumerateAllFunctions / SdkExport) — they'd also have shown empty `structType` / `innerType` if invoked before any WalkInstance, just hadn't triggered the bug because of LiveWalker-first usage patterns.
+
+957 C# + 124 DLL tests still pass. TQ2 live re-verification pending.
+
+-----
+
 ## 2026-05-26 — Value Search: recurse StructProperty so GAS / FGameplayAttributeData values are reachable (build 740 hotfix)
 
 Live-game repro on TQ2 (UE 5.07) the same session as the shipping build

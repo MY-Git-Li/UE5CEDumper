@@ -579,8 +579,28 @@ static std::string ReadSubclassTypeName(uintptr_t propAddr) {
     return name;
 }
 
+// Forward declaration -- definition lives further down this file (line ~2441).
+// WalkClassEx calls it at the top to ensure FSTRUCTPROP_STRUCT is calibrated
+// before any caller reads FProperty subclass extension fields.
+static void CorrectSubclassOffsets(const std::vector<FieldInfo>& fields);
+
 ClassInfo WalkClassEx(uintptr_t uclassAddr) {
     ClassInfo info = WalkClass(uclassAddr);
+
+    // Calibrate FSTRUCTPROP_STRUCT (and the FProperty subclass extension
+    // offsets that share its slot) BEFORE reading them. Historically this
+    // calibration only ran inside WalkInstance -- which meant any caller
+    // that hit WalkClassEx without a prior WalkInstance (e.g. the Value
+    // Search tab's GObjects walk, build 738+) saw uncalibrated reads:
+    // ReadSubclassTypeName returns "" for every StructProperty, the
+    // nested-struct recursion in Aura::ScanForValue bails, and the user
+    // gets 0 candidates on GAS / FGameplayAttributeData scans.
+    //
+    // CorrectSubclassOffsets is idempotent (guarded by an atomic), so
+    // calling it on every WalkClassEx is a no-op after the first
+    // successful probe. The cost on cold call is bounded: at most 7
+    // probe-delta reads per StructProperty until one validates.
+    CorrectSubclassOffsets(info.Fields);
 
     // Enrich each field with extended type metadata
     for (auto& fi : info.Fields) {
