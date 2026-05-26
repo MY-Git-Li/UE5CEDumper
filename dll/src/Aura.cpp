@@ -3197,7 +3197,8 @@ ValueScanResult ScanForValue(
     const uint8_t*      targetBytes,
     const uint8_t*      target2Bytes,
     bool                gameOnly,
-    int32_t             maxResults)
+    int32_t             maxResults,
+    double              tolerance)
 {
     ValueScanResult result;
     auto t0 = std::chrono::steady_clock::now();
@@ -3404,7 +3405,7 @@ ValueScanResult ScanForValue(
                 readBuf[0] = ((readBuf[0] & sf.boolFieldMask) != 0) ? 1 : 0;
             }
 
-            if (!ValueScan::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes)) continue;
+            if (!ValueScan::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
 
             // Hit. Lazy-resolve instance metadata.
             if (!gotInstanceName) {
@@ -3464,7 +3465,8 @@ ValueScanStats RefineCandidates(
     ValueScan::ScanType                st,
     const uint8_t*                     targetBytes,
     const uint8_t*                     target2Bytes,
-    std::vector<ValueScan::Candidate>& candidates)
+    std::vector<ValueScan::Candidate>& candidates,
+    double                             tolerance)
 {
     ValueScanStats stats;
     auto t0 = std::chrono::steady_clock::now();
@@ -3491,7 +3493,7 @@ ValueScanStats RefineCandidates(
         }
 
         const uint8_t* cmpTarget = usePrev ? c.prevValue : targetBytes;
-        if (!ValueScan::ComparePredicate(dt, st, readBuf, cmpTarget, target2Bytes)) continue;
+        if (!ValueScan::ComparePredicate(dt, st, readBuf, cmpTarget, target2Bytes, tolerance)) continue;
 
         std::memcpy(c.prevValue, readBuf, dtSize);
         kept.push_back(std::move(c));

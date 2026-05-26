@@ -32,6 +32,8 @@
     <sys:String x:Key="str.VS.ScanType">Scan:</sys:String>
     <sys:String x:Key="str.VS.Value">Value:</sys:String>
     <sys:String x:Key="str.VS.Value2">… to</sys:String>
+    <sys:String x:Key="str.VS.Tolerance">± Tol:</sys:String>
+    <sys:String x:Key="str.Tip.VS.Tolerance">Rounded-scan slack for Float/Double. Game UI shows "338" for a real float of 337.5 — set tolerance 0.5 to scan for "338" and match anything in [337.5, 338.5]. Ignored for integer types.</sys:String>
     <sys:String x:Key="str.VS.GameOnly">Game classes only</sys:String>
     <sys:String x:Key="str.VS.MaxResults">Max:</sys:String>
     <sys:String x:Key="str.VS.FirstScan">First Scan</sys:String>

@@ -67,6 +67,21 @@
         <TextBox Text="{Binding Value2}"
                  IsVisible="{Binding RequiresValue2Input}"
                  Width="120" Padding="4,2" FontSize="12"/>
+
+        <!-- Tolerance input: visible only for Float/Double DataTypes.
+             CE-style rounded scan default 0.5 matches the common case
+             where the game UI displays a value rounded to nearest int. -->
+        <TextBlock Text="{StaticResource str.VS.Tolerance}"
+                   Foreground="#CCCCCC" VerticalAlignment="Center"
+                   IsVisible="{Binding SupportsTolerance}"
+                   ToolTip.Tip="{StaticResource str.Tip.VS.Tolerance}"
+                   Margin="8,0,0,0"/>
+        <NumericUpDown Value="{Binding Tolerance}"
+                       IsVisible="{Binding SupportsTolerance}"
+                       ToolTip.Tip="{StaticResource str.Tip.VS.Tolerance}"
+                       Minimum="0" Maximum="1000" Increment="0.1"
+                       FormatString="0.###"
+                       Width="100" FontSize="12"/>
       </StackPanel>
 
       <!-- Row 1: Game Only + Max Results -->

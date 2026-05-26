@@ -199,6 +199,199 @@ public class ValueSearchTests
     }
 
     [Fact]
+    public async Task BeginValueScanAsync_AttachesToleranceForFloat()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"]              = req["id"]?.GetValue<int>() ?? 0,
+                ["ok"]              = true,
+                ["session_id"]      = 1UL,
+                ["data_type"]       = "Float",
+                ["total"]           = 0,
+                ["scanned_classes"] = 0,
+                ["scanned_objects"] = 0,
+                ["duration_ms"]     = 1L,
+                ["deadline_hit"]    = false,
+                ["candidates"]      = new JsonArray(),
+            };
+        });
+
+        await svc.BeginValueScanAsync(
+            ValueScanDataType.Float, ValueScanType.Exact, "338",
+            tolerance: 0.5,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(captured);
+        Assert.True(captured!.ContainsKey("tolerance"));
+        Assert.Equal(0.5, captured["tolerance"]?.GetValue<double>());
+    }
+
+    [Theory]
+    [InlineData(ValueScanDataType.Int8)]
+    [InlineData(ValueScanDataType.Int32)]
+    [InlineData(ValueScanDataType.Int64)]
+    [InlineData(ValueScanDataType.UInt32)]
+    [InlineData(ValueScanDataType.Bool)]
+    public async Task BeginValueScanAsync_OmitsToleranceForIntegerTypes(ValueScanDataType dt)
+    {
+        // Integer-typed scans must not carry tolerance on the wire even
+        // when the caller supplies a non-zero value -- DLL ignores it
+        // and the wire shape stays byte-identical to the pre-tolerance
+        // protocol for the common (integer) case. Locks the
+        // SupportsTolerance gating logic in DumpService.
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"]              = req["id"]?.GetValue<int>() ?? 0,
+                ["ok"]              = true,
+                ["session_id"]      = 1UL,
+                ["data_type"]       = dt.ToString(),
+                ["total"]           = 0,
+                ["scanned_classes"] = 0,
+                ["scanned_objects"] = 0,
+                ["duration_ms"]     = 1L,
+                ["deadline_hit"]    = false,
+                ["candidates"]      = new JsonArray(),
+            };
+        });
+
+        await svc.BeginValueScanAsync(
+            dt, ValueScanType.Exact, "10",
+            tolerance: 5.0,   // explicitly non-zero; should still be dropped
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(captured);
+        Assert.False(captured!.ContainsKey("tolerance"),
+            $"tolerance must not be on the wire for {dt}");
+    }
+
+    [Fact]
+    public async Task BeginValueScanAsync_OmitsToleranceWhenZero()
+    {
+        // Even for Float, tolerance=0 means "exact" -- skip the field so
+        // the existing exact-scan call sites stay byte-identical.
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"]              = req["id"]?.GetValue<int>() ?? 0,
+                ["ok"]              = true,
+                ["session_id"]      = 1UL,
+                ["data_type"]       = "Float",
+                ["total"]           = 0,
+                ["scanned_classes"] = 0,
+                ["scanned_objects"] = 0,
+                ["duration_ms"]     = 1L,
+                ["deadline_hit"]    = false,
+                ["candidates"]      = new JsonArray(),
+            };
+        });
+
+        await svc.BeginValueScanAsync(
+            ValueScanDataType.Float, ValueScanType.Exact, "100",
+            tolerance: 0.0,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(captured);
+        Assert.False(captured!.ContainsKey("tolerance"));
+    }
+
+    [Fact]
+    public async Task RefineValueScanAsync_AttachesToleranceWhenNonZero()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"]          = req["id"]?.GetValue<int>() ?? 0,
+                ["ok"]          = true,
+                ["session_id"]  = 1UL,
+                ["data_type"]   = "Float",
+                ["scan_type"]   = "Decreased",
+                ["total"]       = 0,
+                ["duration_ms"] = 1L,
+                ["candidates"]  = new JsonArray(),
+            };
+        });
+
+        await svc.RefineValueScanAsync(
+            1UL, ValueScanType.Decreased,
+            value: null, value2: null,
+            tolerance: 0.5,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(captured);
+        Assert.Equal(0.5, captured!["tolerance"]?.GetValue<double>());
+    }
+
+    [Fact]
+    public void ViewModel_SupportsTolerance_GatesByDataType()
+    {
+        var (vm, _) = MakeVm();
+        vm.SelectedDataType = ValueScanDataType.Int32;
+        Assert.False(vm.SupportsTolerance);
+        vm.SelectedDataType = ValueScanDataType.Float;
+        Assert.True(vm.SupportsTolerance);
+        vm.SelectedDataType = ValueScanDataType.Double;
+        Assert.True(vm.SupportsTolerance);
+        vm.SelectedDataType = ValueScanDataType.UInt64;
+        Assert.False(vm.SupportsTolerance);
+    }
+
+    [Fact]
+    public async Task ViewModel_TolerancePassesThroughForFloat()
+    {
+        var (vm, fake) = MakeVm();
+        fake.NextBeginResult = new ValueScanBeginResult { SessionId = 1UL };
+        vm.SelectedDataType = ValueScanDataType.Float;
+        vm.SelectedScanType = ValueScanType.Exact;
+        vm.Value = "338";
+        vm.Tolerance = 0.5;
+
+        await vm.FirstScanCommand.ExecuteAsync(null);
+
+        Assert.Single(fake.Begins);
+        var (_, _, _, _, _, _, tol) = fake.Begins[0];
+        Assert.Equal(0.5, tol);
+    }
+
+    [Fact]
+    public async Task ViewModel_ToleranceIgnoredForIntegerType()
+    {
+        // Even though the user has Tolerance=2 set, an Int32 scan must
+        // send tolerance=0 to the service (which then strips it from the
+        // wire). Mirror of the wire-level OmitsToleranceForIntegerTypes
+        // test, one layer up at the VM.
+        var (vm, fake) = MakeVm();
+        fake.NextBeginResult = new ValueScanBeginResult { SessionId = 1UL };
+        vm.SelectedDataType = ValueScanDataType.Int32;
+        vm.SelectedScanType = ValueScanType.Exact;
+        vm.Value = "100";
+        vm.Tolerance = 2.0;
+
+        await vm.FirstScanCommand.ExecuteAsync(null);
+
+        Assert.Single(fake.Begins);
+        var (_, _, _, _, _, _, tol) = fake.Begins[0];
+        Assert.Equal(0.0, tol);
+    }
+
+    [Fact]
     public async Task EndValueScanAsync_SendsSessionId()
     {
         var svc = MakeService(out var pipe);
@@ -253,25 +446,27 @@ public class ValueSearchTests
     {
         public ValueScanBeginResult NextBeginResult { get; set; } = new();
         public ValueScanRefineResult NextRefineResult { get; set; } = new();
-        public List<(ValueScanDataType, ValueScanType, string, string?, bool, int)> Begins { get; } = new();
-        public List<(ulong, ValueScanType, string?, string?)> Refines { get; } = new();
+        public List<(ValueScanDataType, ValueScanType, string, string?, bool, int, double)> Begins { get; } = new();
+        public List<(ulong, ValueScanType, string?, string?, double)> Refines { get; } = new();
         public List<ulong> Ends { get; } = new();
 
         public override Task<ValueScanBeginResult> BeginValueScanAsync(
             ValueScanDataType dataType, ValueScanType scanType,
             string value, string? value2 = null, bool gameOnly = true,
-            int maxResults = 50000, CancellationToken ct = default)
+            int maxResults = 50000, double tolerance = 0.0,
+            CancellationToken ct = default)
         {
-            Begins.Add((dataType, scanType, value, value2, gameOnly, maxResults));
+            Begins.Add((dataType, scanType, value, value2, gameOnly, maxResults, tolerance));
             return Task.FromResult(NextBeginResult);
         }
 
         public override Task<ValueScanRefineResult> RefineValueScanAsync(
             ulong sessionId, ValueScanType scanType,
             string? value = null, string? value2 = null,
+            double tolerance = 0.0,
             CancellationToken ct = default)
         {
-            Refines.Add((sessionId, scanType, value, value2));
+            Refines.Add((sessionId, scanType, value, value2, tolerance));
             return Task.FromResult(NextRefineResult);
         }
 
@@ -318,7 +513,7 @@ public class ValueSearchTests
         Assert.True(vm.HasSession);
         Assert.Single(vm.Candidates);
         Assert.Single(fake.Begins);
-        var (dt, st, val, val2, _, _) = fake.Begins[0];
+        var (dt, st, val, val2, _, _, _) = fake.Begins[0];
         Assert.Equal(ValueScanDataType.Int32, dt);
         Assert.Equal(ValueScanType.Exact,     st);
         Assert.Equal("100",                   val);
@@ -383,7 +578,7 @@ public class ValueSearchTests
         await vm.NextScanCommand.ExecuteAsync(null);
 
         Assert.Single(fake.Refines);
-        var (sid, st, val, val2) = fake.Refines[0];
+        var (sid, st, val, val2, _) = fake.Refines[0];
         Assert.Equal(7UL, sid);
         Assert.Equal(ValueScanType.Changed, st);
         Assert.Null(val);

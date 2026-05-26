@@ -40,6 +40,12 @@ public partial class ValueSearchViewModel : ViewModelBase
     [ObservableProperty] private bool   _gameOnly = true;
     [ObservableProperty] private int    _maxResults = 50000;
 
+    /// <summary>CE-style rounded-scan slack for Float/Double comparisons.
+    /// Default 0.5 covers the common case: game UI displays "338" for a
+    /// real float of 337.5, so scanning for "338" with tolerance 0.5
+    /// matches any value in [337.5, 338.5]. Integer types ignore it.</summary>
+    [ObservableProperty] private double _tolerance = 0.5;
+
     public IReadOnlyList<ValueScanDataType> DataTypeOptions { get; } = new[]
     {
         ValueScanDataType.Int32,
@@ -102,6 +108,18 @@ public partial class ValueSearchViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(RequiresValueInput));
         OnPropertyChanged(nameof(RequiresValue2Input));
+    }
+
+    /// <summary>True when the selected DataType is Float or Double --
+    /// drives Tolerance input visibility. Integer types hide it because
+    /// the DLL ignores tolerance for non-floating-point comparisons.</summary>
+    public bool SupportsTolerance =>
+        SelectedDataType == ValueScanDataType.Float
+        || SelectedDataType == ValueScanDataType.Double;
+
+    partial void OnSelectedDataTypeChanged(ValueScanDataType value)
+    {
+        OnPropertyChanged(nameof(SupportsTolerance));
     }
 
     public static bool IsPrevValueScanType(ValueScanType st) => st switch
@@ -169,10 +187,13 @@ public partial class ValueSearchViewModel : ViewModelBase
             // accumulate orphan sessions.
             await EndSessionIfAnyAsync();
 
+            // Tolerance only passes through for Float/Double; integer
+            // scans get exact-match semantics regardless of the UI value.
+            double effTol = SupportsTolerance ? Tolerance : 0.0;
             var result = await _dump.BeginValueScanAsync(
                 SelectedDataType, SelectedScanType, Value,
                 SelectedScanType == ValueScanType.Between ? Value2 : null,
-                GameOnly, MaxResults);
+                GameOnly, MaxResults, effTol);
 
             SessionId = result.SessionId;
             Candidates = new ObservableCollection<ValueCandidate>(result.Candidates);
@@ -218,10 +239,12 @@ public partial class ValueSearchViewModel : ViewModelBase
             ErrorMessage = "";
             StatusText  = $"Refining ({SelectedScanType})...";
 
+            double effTol = SupportsTolerance ? Tolerance : 0.0;
             var result = await _dump.RefineValueScanAsync(
                 SessionId, SelectedScanType,
                 needsValue ? Value : null,
-                SelectedScanType == ValueScanType.Between ? Value2 : null);
+                SelectedScanType == ValueScanType.Between ? Value2 : null,
+                effTol);
 
             Candidates = new ObservableCollection<ValueCandidate>(result.Candidates);
 

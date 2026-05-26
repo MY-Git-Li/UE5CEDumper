@@ -11,6 +11,35 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-05-26 — Value Search: Float/Double tolerance (CE-style rounded scan) (build 746)
+
+User-requested follow-up after the build-744 fix landed TQ2 GAS scans. Game UIs commonly display attributes rounded to the nearest integer ("HP: 338") while the underlying float is something like 337.5. Without tolerance, a scan for "338" misses 337.5 and the user has to guess at decimal precision.
+
+New `tolerance` parameter on `ValueScan::ComparePredicate` + `Aura::ScanForValue` + `Aura::RefineCandidates`, only meaningful for `Float`/`Double` (integer types ignore it -- exact comparison stays the default for non-floating types where tolerance semantics don't transfer cleanly). Per-ScanType behavior:
+
+| ScanType | Tolerance semantic |
+|---|---|
+| Exact     | `\|cur - target\| <= tol`              (matches displayed-rounded values) |
+| Bigger    | `cur > target + tol`                  (clearly above tolerance band) |
+| Smaller   | `cur < target - tol` |
+| Between   | `target1 - tol <= cur <= target2 + tol` (widen the inclusive range) |
+| Changed   | `\|cur - prev\| > tol`                  (changed beyond noise) |
+| Unchanged | `\|cur - prev\| <= tol` |
+| Increased | `cur > prev + tol`                    (strictly above prev beyond noise) |
+| Decreased | `cur < prev - tol` |
+
+The `Float Exact tol=0.5` scan on the user's TQ2 repro example: target 338, candidates whose underlying float falls in `[337.5, 338.5]` match. The CurrentValue / BaseValue floats sitting at 337.5 get found whether the user types 337.5, 338, or 338.5 (with tol >= 0.5).
+
+UI: new `± Tol` `NumericUpDown` (default 0.5) appears next to Value/Value2 when DataType is Float or Double. Hidden for integer types. `SupportsTolerance` VM property drives the visibility binding.
+
+Wire shape: `tolerance` JSON field on `begin_value_scan` / `refine_value_scan` requests. **Omitted when the value is 0 or the type is integer** -- preserves byte-identical wire shape for existing exact-scan call sites and integer scans (back-compat with any external pipe consumer that might be sniffing the protocol). DLL defaults to 0 if absent.
+
+Tests:
+- DLL: +18 assertions (124 -> 142 dll_helpers) covering Float Exact within / outside band, tol=0 strict equality back-compat, Bigger / Smaller band shift, Unchanged within drift / Changed beyond drift, Increased / Decreased prev-value semantics, Between widening both bounds, Int32 / UInt64 integer types IGNORE non-zero tolerance.
+- C#: +11 (957 -> 968) covering tolerance attached on the wire for Float, omitted for 5 integer types (theory), omitted when zero, refine_value_scan attaches tolerance, VM SupportsTolerance gates by DataType (Int -> false, Float/Double -> true, UInt64 -> false), tolerance pass-through Float / dropped Int through the VM.
+
+-----
+
 ## 2026-05-26 — Value Search hotfix #2: WalkClassEx must calibrate FSTRUCTPROP_STRUCT before reading (build 744)
 
 Build-740 recursion fix shipped but TQ2 live test STILL returned 0 candidates. Targeted DIAG logging on `class name contains "AttributeSet"` revealed the actual failure mode:

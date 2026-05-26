@@ -411,6 +411,129 @@ static void Test_ValueScan_Predicate_UInt64_RangeBoundary() {
 
 // ----- ValueScan: SessionManager lifecycle ----------------------------------
 
+// ----- ValueScan: Float/Double tolerance (CE-style rounded scan) ------------
+//
+// The TQ2 / GAS use case that motivated tolerance: game UI shows "338"
+// for an underlying float of 337.5 (default rounding). User scans for
+// 338 with tolerance 0.5 -> should match values in [337.5, 338.5].
+// All eight ScanTypes have a defined tolerance semantic; integer types
+// must IGNORE tolerance regardless of the value supplied (the DLL
+// signal that this is a "wrong type for tolerance" case).
+
+static void Test_ValueScan_FloatTolerance_Exact() {
+    using DT = ValueScan::DataType;
+    using ST = ValueScan::ScanType;
+    uint8_t cur[8], tgt[8];
+
+    // target=338, cur=337.5 (rounds-to-338 in UI), tol=0.5 -> match
+    WriteLE<float>(cur, 337.5f);
+    WriteLE<float>(tgt, 338.0f);
+    EXPECT("Float Exact tol 0.5 (337.5 ~= 338)",
+           ValueScan::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.5));
+
+    // target=338, cur=338.5 -> still inside tolerance band [337.5, 338.5]
+    WriteLE<float>(cur, 338.5f);
+    EXPECT("Float Exact tol 0.5 (338.5 ~= 338, inclusive)",
+           ValueScan::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.5));
+
+    // target=338, cur=338.51 -> outside band, no match
+    WriteLE<float>(cur, 338.51f);
+    EXPECT("Float Exact tol 0.5 rejects 338.51",
+           !ValueScan::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.5));
+
+    // tol=0 keeps strict equality semantics (back-compat with old callers)
+    WriteLE<float>(cur, 337.5f);
+    EXPECT("Float Exact tol 0 rejects 337.5 vs 338",
+           !ValueScan::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.0));
+}
+
+static void Test_ValueScan_FloatTolerance_Ordered() {
+    using DT = ValueScan::DataType;
+    using ST = ValueScan::ScanType;
+    uint8_t cur[8], tgt[8];
+
+    // Bigger: cur > target + tol  -> 339 > 338+0.5=338.5 is true, but 338.4 isn't
+    WriteLE<float>(tgt, 338.0f);
+    WriteLE<float>(cur, 339.0f);
+    EXPECT("Float Bigger tol 0.5 (339 > 338.5)",
+           ValueScan::ComparePredicate(DT::Float, ST::Bigger, cur, tgt, nullptr, 0.5));
+    WriteLE<float>(cur, 338.4f);
+    EXPECT("Float Bigger tol 0.5 rejects 338.4 (within band)",
+           !ValueScan::ComparePredicate(DT::Float, ST::Bigger, cur, tgt, nullptr, 0.5));
+
+    // Smaller: cur < target - tol
+    WriteLE<float>(cur, 337.4f);
+    EXPECT("Float Smaller tol 0.5 (337.4 < 337.5)",
+           ValueScan::ComparePredicate(DT::Float, ST::Smaller, cur, tgt, nullptr, 0.5));
+}
+
+static void Test_ValueScan_FloatTolerance_PrevValue() {
+    using DT = ValueScan::DataType;
+    using ST = ValueScan::ScanType;
+    uint8_t cur[8], prev[8];
+
+    // Unchanged within tolerance band — float drift below tol is "no change"
+    WriteLE<float>(prev, 100.0f);
+    WriteLE<float>(cur,  100.3f);
+    EXPECT("Float Unchanged tol 0.5 (drift 0.3 within noise)",
+           ValueScan::ComparePredicate(DT::Float, ST::Unchanged, cur, prev, nullptr, 0.5));
+    // Same drift, Changed -> false (drift smaller than tol)
+    EXPECT("Float Changed tol 0.5 rejects 0.3 drift",
+           !ValueScan::ComparePredicate(DT::Float, ST::Changed, cur, prev, nullptr, 0.5));
+
+    // Drift larger than tol -> Changed true, Unchanged false
+    WriteLE<float>(cur, 100.6f);
+    EXPECT("Float Changed tol 0.5 (drift 0.6 > noise)",
+           ValueScan::ComparePredicate(DT::Float, ST::Changed, cur, prev, nullptr, 0.5));
+
+    // Increased: cur > prev + tol
+    WriteLE<float>(prev, 50.0f);
+    WriteLE<float>(cur,  50.6f);
+    EXPECT("Float Increased tol 0.5 (50.6 > 50.5)",
+           ValueScan::ComparePredicate(DT::Float, ST::Increased, cur, prev, nullptr, 0.5));
+    WriteLE<float>(cur, 50.4f);
+    EXPECT("Float Increased tol 0.5 rejects 50.4 (inside band)",
+           !ValueScan::ComparePredicate(DT::Float, ST::Increased, cur, prev, nullptr, 0.5));
+}
+
+static void Test_ValueScan_FloatTolerance_Between() {
+    using DT = ValueScan::DataType;
+    using ST = ValueScan::ScanType;
+    uint8_t cur[8], lo[8], hi[8];
+    // Between widens both bounds: [10-0.5, 20+0.5] = [9.5, 20.5]
+    WriteLE<float>(lo, 10.0f);
+    WriteLE<float>(hi, 20.0f);
+    WriteLE<float>(cur, 9.8f);
+    EXPECT("Float Between tol 0.5 includes 9.8 (lo bound widened)",
+           ValueScan::ComparePredicate(DT::Float, ST::Between, cur, lo, hi, 0.5));
+    WriteLE<float>(cur, 20.3f);
+    EXPECT("Float Between tol 0.5 includes 20.3 (hi bound widened)",
+           ValueScan::ComparePredicate(DT::Float, ST::Between, cur, lo, hi, 0.5));
+    WriteLE<float>(cur, 20.6f);
+    EXPECT("Float Between tol 0.5 rejects 20.6",
+           !ValueScan::ComparePredicate(DT::Float, ST::Between, cur, lo, hi, 0.5));
+}
+
+static void Test_ValueScan_IntegerTypes_IgnoreTolerance() {
+    using DT = ValueScan::DataType;
+    using ST = ValueScan::ScanType;
+    uint8_t cur[8], tgt[8];
+    // Even with absurd tolerance, Int32 Exact must be literal equality.
+    WriteLE<int32_t>(cur, 99);
+    WriteLE<int32_t>(tgt, 100);
+    EXPECT("Int32 Exact tol 5 rejects 99 vs 100 (tolerance ignored)",
+           !ValueScan::ComparePredicate(DT::Int32, ST::Exact, cur, tgt, nullptr, 5.0));
+    WriteLE<int32_t>(cur, 100);
+    EXPECT("Int32 Exact tol 5 accepts 100 vs 100",
+           ValueScan::ComparePredicate(DT::Int32, ST::Exact, cur, tgt, nullptr, 5.0));
+
+    // Same for UInt64
+    WriteLE<uint64_t>(cur, 999);
+    WriteLE<uint64_t>(tgt, 1000);
+    EXPECT("UInt64 Exact tol 100 still rejects 999 vs 1000",
+           !ValueScan::ComparePredicate(DT::UInt64, ST::Exact, cur, tgt, nullptr, 100.0));
+}
+
 static void Test_ValueScan_SessionLifecycle() {
     using namespace ValueScan;
     auto& mgr = SessionManager::Instance();
@@ -489,6 +612,11 @@ int main() {
     Test_ValueScan_Predicate_Double();
     Test_ValueScan_Predicate_Bool();
     Test_ValueScan_Predicate_UInt64_RangeBoundary();
+    Test_ValueScan_FloatTolerance_Exact();
+    Test_ValueScan_FloatTolerance_Ordered();
+    Test_ValueScan_FloatTolerance_PrevValue();
+    Test_ValueScan_FloatTolerance_Between();
+    Test_ValueScan_IntegerTypes_IgnoreTolerance();
     Test_ValueScan_SessionLifecycle();
 
     std::printf("------------------------------------------\n");

@@ -1716,6 +1716,9 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             std::string val2Str = request.value("value2", "");
             bool gameOnly = request.value("game_only", true);
             int  maxResults = request.value("max_results", 50000);
+            // CE-style rounded scan slack (Float/Double only -- integer
+            // types ignore it). 0.0 = exact comparison.
+            double tolerance = request.value("tolerance", 0.0);
 
             ValueScan::DataType dt;
             if (!ValueScan::TryParseDataType(dtStr, dt)) {
@@ -1744,7 +1747,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             }
 
             auto scanResult = Aura::ScanForValue(
-                dt, st, targetBytes, target2Ptr, gameOnly, maxResults);
+                dt, st, targetBytes, target2Ptr, gameOnly, maxResults, tolerance);
 
             uint64_t sessionId = ValueScan::SessionManager::Instance().Begin(
                 dt, scanResult.candidates);
@@ -1786,6 +1789,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             std::string stStr = request.value("scan_type", "");
             std::string valStr = request.value("value", "");
             std::string val2Str = request.value("value2", "");
+            double tolerance = request.value("tolerance", 0.0);
 
             ValueScan::ScanType st;
             if (!ValueScan::TryParseScanType(stStr, st)) {
@@ -1819,7 +1823,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                         }
                     }
 
-                    stats = Aura::RefineCandidates(dt, st, tgtPtr, tgt2Ptr, cs);
+                    stats = Aura::RefineCandidates(dt, st, tgtPtr, tgt2Ptr, cs, tolerance);
                     for (const auto& c : cs) candidates.push_back(CandidateToJson(c, dt));
                 });
 

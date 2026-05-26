@@ -198,11 +198,26 @@ private:
 // For prev-value scan types (Changed / Unchanged / Increased / Decreased)
 // targetBytes is the candidate's prevValue snapshot.
 //
+// `tolerance` is the CE-style rounded-scan slack applied to Float/Double
+// only. Per-scan-type semantics (let `a` = target, `b` = target2, `c` = cur):
+//   Exact      |c - a| <= tol           (matches displayed-rounded values)
+//   Bigger     c > a + tol              (clearly above the tolerance band)
+//   Smaller    c < a - tol
+//   Between    a - tol <= c <= b + tol  (widen the inclusive range)
+//   Changed    |c - prev| > tol         (changed by more than noise)
+//   Unchanged  |c - prev| <= tol
+//   Increased  c > prev + tol           (strictly above prev beyond noise)
+//   Decreased  c < prev - tol
+// For Int8/16/32/64 + UInt8/16/32/64 + Bool the tolerance is ignored
+// (typed comparison stays exact -- tolerance semantics don't transfer
+// cleanly to integral types where the user typically means literal values).
+//
 // Exposed for the dll_helpers_test unit suite; the scan + refine
 // engines call this internally.
 bool ComparePredicate(DataType dt, ScanType st,
                       const uint8_t* rawBytes,
                       const uint8_t* targetBytes,
-                      const uint8_t* target2Bytes = nullptr);
+                      const uint8_t* target2Bytes = nullptr,
+                      double         tolerance    = 0.0);
 
 }  // namespace ValueScan

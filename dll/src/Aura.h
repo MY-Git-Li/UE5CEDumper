@@ -483,13 +483,17 @@ struct ValueScanResult {
 };
 
 // First Scan: walk every UPROPERTY field matching `dt` across all
-// UObject instances, applying the (st, targetBytes, target2Bytes)
-// predicate. Skips UClass meta-objects -- only live instances + CDOs
-// are scanned.
+// UObject instances, applying the (st, targetBytes, target2Bytes,
+// tolerance) predicate. Skips UClass meta-objects -- only live
+// instances + CDOs are scanned.
 //
 // Valid scan types for first scan: Exact / Bigger / Smaller / Between.
 // Prev-value scan types are silently treated as Exact against
 // targetBytes -- the pipe handler rejects invalid combinations upstream.
+//
+// `tolerance` only affects Float/Double comparisons (CE-style rounded
+// scan -- displays show "338" for a real float of 337.5, so users want
+// to scan with +-0.5 slack). Integer types ignore it.
 //
 // Returns at most maxResults candidates; the scan also bails on a 15s
 // deadline (stats.deadlineHit fires when this happens). Used by the
@@ -500,12 +504,13 @@ ValueScanResult ScanForValue(
     const uint8_t*      targetBytes,
     const uint8_t*      target2Bytes,
     bool                gameOnly,
-    int32_t             maxResults = 100000);
+    int32_t             maxResults = 100000,
+    double              tolerance  = 0.0);
 
 // Refine an existing candidate vector in place: re-read each
-// candidate's bytes, apply (st, targetBytes, target2Bytes) predicate,
-// prune entries that no longer match. For prev-value scan types
-// (Changed / Unchanged / Increased / Decreased) the candidate's
+// candidate's bytes, apply (st, targetBytes, target2Bytes, tolerance)
+// predicate, prune entries that no longer match. For prev-value scan
+// types (Changed / Unchanged / Increased / Decreased) the candidate's
 // prevValue snapshot is used in place of targetBytes. prevValue is
 // updated to the latest-observed bytes on survivors so the NEXT
 // prev-value refine compares against the bytes seen during THIS
@@ -515,6 +520,7 @@ ValueScanStats RefineCandidates(
     ValueScan::ScanType                st,
     const uint8_t*                     targetBytes,
     const uint8_t*                     target2Bytes,
-    std::vector<ValueScan::Candidate>& candidates);
+    std::vector<ValueScan::Candidate>& candidates,
+    double                             tolerance = 0.0);
 
 } // namespace Aura

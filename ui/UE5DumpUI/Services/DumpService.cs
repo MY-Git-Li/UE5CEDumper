@@ -1207,6 +1207,7 @@ public sealed class DumpService : IDumpService
         string? value2 = null,
         bool gameOnly = true,
         int maxResults = 50000,
+        double tolerance = 0.0,
         CancellationToken ct = default)
     {
         var req = new JsonObject
@@ -1220,6 +1221,12 @@ public sealed class DumpService : IDumpService
         };
         if (!string.IsNullOrEmpty(value2))
             req["value2"] = value2;
+        // Only attach tolerance for Float/Double -- integer scans ignore
+        // it DLL-side and omitting keeps the wire shape tighter for the
+        // common case. Also only attach when non-zero so existing
+        // exact-scan call sites stay byte-identical on the wire.
+        if (tolerance > 0.0 && (dataType == ValueScanDataType.Float || dataType == ValueScanDataType.Double))
+            req["tolerance"] = tolerance;
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
@@ -1251,6 +1258,7 @@ public sealed class DumpService : IDumpService
         ValueScanType scanType,
         string? value = null,
         string? value2 = null,
+        double tolerance = 0.0,
         CancellationToken ct = default)
     {
         var req = new JsonObject
@@ -1261,6 +1269,11 @@ public sealed class DumpService : IDumpService
         };
         if (value != null)  req["value"]  = value;
         if (value2 != null) req["value2"] = value2;
+        // Refine doesn't know the session's DataType client-side -- the
+        // DLL ignores tolerance on integer-typed sessions automatically.
+        // Attach when non-zero so the common exact-refine path stays
+        // byte-identical on the wire.
+        if (tolerance > 0.0) req["tolerance"] = tolerance;
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);

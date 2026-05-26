@@ -195,12 +195,34 @@ bool ApplyOrdered(ScanType st, T cur, T a, T b) {
     return false;
 }
 
+// Tolerance-aware double predicate. tol applies as a +- band around
+// the reference value(s); per-scan-type semantics are documented on
+// ComparePredicate in ValueScan.h. Negative tolerance is clamped to 0
+// (a malformed UI input shouldn't widen the band on the wrong side).
+inline double Absd(double x) { return x < 0.0 ? -x : x; }
+
+bool ApplyOrderedTol(ScanType st, double cur, double a, double b, double tol) {
+    if (tol < 0.0) tol = 0.0;
+    switch (st) {
+        case ScanType::Exact:     return Absd(cur - a) <= tol;
+        case ScanType::Bigger:    return cur > a + tol;
+        case ScanType::Smaller:   return cur < a - tol;
+        case ScanType::Between:   return cur >= a - tol && cur <= b + tol;
+        case ScanType::Changed:   return Absd(cur - a) > tol;
+        case ScanType::Unchanged: return Absd(cur - a) <= tol;
+        case ScanType::Increased: return cur > a + tol;
+        case ScanType::Decreased: return cur < a - tol;
+    }
+    return false;
+}
+
 }  // namespace
 
 bool ComparePredicate(DataType dt, ScanType st,
                       const uint8_t* rawBytes,
                       const uint8_t* targetBytes,
-                      const uint8_t* target2Bytes) {
+                      const uint8_t* target2Bytes,
+                      double         tolerance) {
     if (!rawBytes || !targetBytes) return false;
     if (st == ScanType::Between && !target2Bytes) return false;
 
@@ -208,7 +230,9 @@ bool ComparePredicate(DataType dt, ScanType st,
         double cur = LoadTyped<double>(dt, rawBytes);
         double a   = LoadTyped<double>(dt, targetBytes);
         double b   = target2Bytes ? LoadTyped<double>(dt, target2Bytes) : 0.0;
-        return ApplyOrdered<double>(st, cur, a, b);
+        // Tolerance is only meaningful for Float/Double: integral types
+        // get exact comparison regardless of the supplied tol value.
+        return ApplyOrderedTol(st, cur, a, b, tolerance);
     }
     if (IsSignedIntType(dt)) {
         int64_t cur = LoadTyped<int64_t>(dt, rawBytes);
