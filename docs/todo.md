@@ -187,6 +187,110 @@ StructProperty offsets / FString / FVector / etc.
 known-working from build 648 verification, just needs structured
 rendering instead of raw `00 00 00 ... 89.99` bytes.
 
+### 6. UCheatManager stripped-body diagnosis + feedback memory — pick #6 (Console-ship follow-up)
+
+**Effort**: S (~half a day, mostly write-up) | **Risk**: zero | **Why**:
+First live test of the build-731 Console tab surfaced the canonical
+gotcha — `UCheatManager::Fly` / `Ghost` / `God` / `Walk` / `Slomo` /
+`ChangeSize` invokes return `Result=0` (`OK`) but produce no in-game
+effect on cooked Shipping builds. Root cause is well-known but
+undocumented in this repo: UE engine wraps these in
+`#if !UE_BUILD_SHIPPING`, so the cooker preserves the reflection
+metadata (you can list + invoke the UFunction) while stripping the
+function body to a `ret`. PE call really happens, the function really
+returns 0, the function just does nothing.
+
+Different failure mode from the build 647-648 wrong-vtable-slot bug
+(that one was PE never firing). The discriminator is
+`Stark::GetHookFireCount()` — if it's > 0 after the call, the hook
+fired and the function body itself is the dead end.
+
+**What to ship**:
+- New `feedback_ucheatmanager_stripped.md` memory entry capturing the
+  diagnostic: hook-fire-count > 0 + result=0 + no effect → cooker
+  stripped body, almost certainly UCheatManager-derived.
+- Diagnostic guidance: try a `BlueprintCallable` game-specific exec
+  on the same session; if that works, confirms it's UCheatManager-
+  specific stripping rather than wholesale PE breakage.
+- Console panel UX hint: when the user selects an exec whose class
+  inherits from `UCheatManager` (cheap walk-super-chain check via
+  existing `walk_class` data), add a footer line "⚠ Often
+  stub-only in cooked Shipping — try a game-specific exec for
+  verification" — same pattern as the build 643-644
+  KismetMathLibrary hint plan in
+  [Call-UE-function feature gaps](#document-kismetmathlibrary-stub-pattern-in-cooked-shipping-suggest-better-verification-targets).
+- Update [docs/lessons-learned.md](lessons-learned.md) with the
+  diagnostic flow so the lesson survives across sessions.
+
+**Verification target**: confirm on Geri (UE 4.27) and/or ES2 (UE 5.5)
+that (a) `UCheatManager::Fly` returns OK + does nothing, AND (b) a
+game-specific BC function on the same session works — proving the
+PE pipeline itself is healthy. Same evidence shape that closed the
+build 648 wrong-slot bug.
+
+**Out of scope**: bypassing the strip (would require code-injection
+into a different code path entirely; outside this tool's scope). The
+goal is to redirect users to verification targets that actually do
+something, not to revive the dead UCheatManager bodies.
+
+### 7. View Snap Hotkey (Property → Snap Hotkey) — pick #7
+
+**Effort**: S-M (~2-3 days) | **Risk**: low | **Why**: Common cheat
+need that no existing exec covers — UE has no built-in `setyaw 90` /
+`rotate90` / `snapview` exec, and `AddYawInput` is a tiny 1.5°/tick
+accumulator unsuitable for snap. The natural shape is "find
+`ControlRotation.Yaw` on the live PlayerController + bind a CE
+hotkey that snaps it to the next 90° (or arbitrary step)". 95% of
+the building blocks already exist from build 719's property freeze
+Route B.
+
+**Architecture sketch (mirrors freeze Route B)**:
+- New PropertySearch / LiveWalker row action **"Snap Hotkey…"** for
+  Float / Double properties (FRotator.Yaw is a Float inside the
+  struct; user navigates to the inner property via existing struct
+  drill-down).
+- New `SnapHotkeyDialog`: step size (default 90°, free-text override),
+  direction (next / previous / nearest), hotkey capture (VK_NUMPAD9
+  default), wrap-around enable for angle-like fields (auto-mod 360
+  when min-max span ≈ 360).
+- New `scripts/ue5_snap_helper.lua` embedded resource — shares the
+  `_ue5_invoke_busy` reentrancy flag with the invoke + freeze
+  helpers. Public API: `snapProperty(cfg, deltaSign) → handle`,
+  reuses the CMD_LIST_INSTANCES paginated walk (build 719) to
+  resolve live targets per-keystroke (cheap; instances list typically
+  < 5 for PlayerController).
+- New `SnapHotkeyScriptGenerator.cs` — renders an AA Script with the
+  CFG block + `createHotkey(VK_*, snapNext)` + `createHotkey(VK_*,
+  snapPrev)` + [DISABLE] cleanup. Per-script keyed handle table
+  `_ue5_snap_handles[KEY]` so multiple snap bindings coexist.
+- New `Tools → Inject Snap Helper Lua` + `Export Snap Helper Lua…`
+  Tools-menu entries (sister to the invoke + freeze pair).
+- Reuses AOBMaker `CreateAAScriptAsync` for delivery; no clipboard
+  fallback (matches freeze decision — keeps the surface tight).
+
+**Type scope (v1)**: Float, Double. Could extend to Int32 / Int64
+(snap to nearest enum value), but Float covers the rotation use
+case cleanly.
+
+**Why this generalises beyond rotation**: the same "snap to nearest
+N" pattern covers MoveSpeed multipliers (0.5x / 1.0x / 2.0x / 4.0x
+cycling), zoom levels, time-dilation cycling — anywhere the user
+wants a small discrete set of values bound to a single hotkey
+toggle. Not pitched as "snap by 90°" specifically but as
+"snap-to-step on a property".
+
+**Test plan (live)**:
+- Geri (UE 4.27): find `APlayerController::ControlRotation.Yaw`
+  via LiveWalker, bind NumPad9 = +90°, NumPad7 = -90°. Press in-
+  game, view should snap to the four cardinal directions with no
+  visible interpolation.
+- ES2 (UE 5.5): same test path; confirms the helper handles UE5
+  PlayerController layout without per-version branches.
+
+**Out of scope for v1**: animated/interpolated snap (would need a
+tick loop, not just a hotkey write); collision-aware snap (skipping
+to next free direction); chord-key hotkeys.
+
 ### Add-on: Universal Hotkey Loop option for AA(Baked) — bonus S item
 
 **Effort**: S | **Risk**: low | **Why**: AA(Baked) currently runs the
