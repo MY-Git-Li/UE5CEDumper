@@ -22,6 +22,7 @@
     <sys:String x:Key="str.Tab.PropertySearch">Properties</sys:String>
     <sys:String x:Key="str.Tab.InterestingFunctions">Interesting Funcs</sys:String>
     <sys:String x:Key="str.Tab.InterestingProperties">Interesting Props</sys:String>
+    <sys:String x:Key="str.Tab.Console">Console</sys:String>
     <sys:String x:Key="str.Tab.GameClassFilter">Classes</sys:String>
 
     <!-- Object Tree -->
@@ -268,6 +269,29 @@
     <sys:String x:Key="str.Tip.IF.OpenLive">Try to open this function in Live Walker. If the class has no live (non-CDO) instance, falls back to the Class Struct tab. Auto-expands the Functions section and selects the target row.</sys:String>
     <sys:String x:Key="str.Tip.IF.CopyAaScript">Open the Copy AA Script (Baked) dialog for this function. Output requires ue5_invoke_helper.lua embedded in your CE table (Tools -&gt; Export CE Helper Lua File...).</sys:String>
     <sys:String x:Key="str.Tip.IF.CopyName">Copy this function's name to the clipboard. Useful when pasting into a CE script or another tool.</sys:String>
+
+    <!-- Console (UFUNCTION(exec) discovery + invoke) -->
+    <sys:String x:Key="str.Con.Load">Load</sys:String>
+    <sys:String x:Key="str.Con.GameOnly">Game Only</sys:String>
+    <sys:String x:Key="str.Con.FilterHint">Filter exec commands by name...</sys:String>
+    <sys:String x:Key="str.Con.ClearFilter">Clear</sys:String>
+    <sys:String x:Key="str.Con.CommandHint">type command (e.g. fly, ghost, god)</sys:String>
+    <sys:String x:Key="str.Con.Run">Run</sys:String>
+    <sys:String x:Key="str.Con.RunSelected">Run Selected</sys:String>
+    <sys:String x:Key="str.Con.RunRow">Run</sys:String>
+    <sys:String x:Key="str.Con.OpenLive">Live</sys:String>
+    <sys:String x:Key="str.Con.CopyAaScript">AA(B)</sys:String>
+    <sys:String x:Key="str.Con.HistoryHeader">Recent invocations</sys:String>
+    <sys:String x:Key="str.Tip.Con.Load">Scan every UFunction and surface those marked with UFUNCTION(exec) (FUNC_Exec=0x200). Many games leave these intact in cooked Shipping — they're the cheat surface the developer already curated.</sys:String>
+    <sys:String x:Key="str.Tip.Con.GameOnly">When OFF (default), engine-side UCheatManager exec commands are included — usually what you want. Flip ON to see only game-specific exec commands.</sys:String>
+    <sys:String x:Key="str.Tip.Con.Filter">Substring match against command name OR class name (case-insensitive). Empty = show all.</sys:String>
+    <sys:String x:Key="str.Tip.Con.CommandInput">Type an exec command name and press Run. No-arg commands invoke directly; commands with parameters open the InvokeParamDialog. Leading slash is stripped (/fly == fly).</sys:String>
+    <sys:String x:Key="str.Tip.Con.RunCommand">Resolve the typed command against the loaded list and invoke. Match is case-insensitive exact funcName; first match wins if multiple classes implement the same name.</sys:String>
+    <sys:String x:Key="str.Tip.Con.RunSelected">Invoke the currently selected row. Same code path as Run on a row.</sys:String>
+    <sys:String x:Key="str.Tip.Con.RunRow">Invoke this exec command. No-arg commands run directly via pipe; commands with parameters open the InvokeParamDialog.</sys:String>
+    <sys:String x:Key="str.Tip.Con.OpenLive">Try to open the implementing class in Live Walker. Falls back to Class Struct on CDO-only classes (UCheatManager subclasses often have no live instance until a PlayerController spawns).</sys:String>
+    <sys:String x:Key="str.Tip.Con.CopyAaScript">Open the Copy AA Script (Baked) dialog for this exec command — useful when you want to bake the invoke into a CE Auto Assembler script for table sharing.</sys:String>
+    <sys:String x:Key="str.Tip.Con.Replay">Re-run this command. Requires the discovery list to still be loaded (re-launch wipes the cache).</sys:String>
 
     <!-- Interesting Properties Finder (B' / Unusual Location) -->
     <sys:String x:Key="str.IP.Load">Load</sys:String>

@@ -254,6 +254,9 @@
         <TabItem Header="{StaticResource str.Tab.InterestingProperties}">
           <views:InterestingPropertiesPanel DataContext="{Binding InterestingProperties}"/>
         </TabItem>
+        <TabItem Header="{StaticResource str.Tab.Console}">
+          <views:ConsolePanel DataContext="{Binding Console}"/>
+        </TabItem>
         <TabItem Header="{StaticResource str.Tab.GameClassFilter}">
           <views:GameClassFilterPanel DataContext="{Binding GameClassFilter}"/>
         </TabItem>

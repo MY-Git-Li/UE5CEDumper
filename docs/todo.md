@@ -25,41 +25,58 @@ same `%LOCALAPPDATA%\UE5CEDumper\UE5CEDumper.{COMPUTERNAME}.json` file.
 The remaining gaps (DynOff cache, favorites, invoke param presets) are
 low-pain compared to the AOB scan which is already cached.
 
-### 1. UE Console / Exec Command Bridge — pick #1 (highest value)
+### 1. ~~UE Console / Exec Command Bridge~~ — ✅ shipped this session (2026-05-26)
 
-**Effort**: M (~3-5 days) | **Risk**: low | **Why**: Skips the entire
-"find UFunction → build ParamBuffer → invoke" workflow for games that
-ship with debug exec commands intact (which is common even in cooked
-Shipping — Epic's `UCheatManager` subclasses + many game-specific
-exec functions survive cooking). Many cheat-relevant capabilities
-(`fly`, `ghost`, `setspeed N`, `god`, `giveitem`, `teleport`,
+**Effort actual**: ~3 hours (zero DLL change) | **Risk**: low (no
+existing-behaviour regressions; ConsoleViewModelTests +15 / 920 → 935
+C# tests). **Why**: skips the "find UFunction → build ParamBuffer →
+invoke" workflow for games that ship with debug exec commands intact
+(common even in cooked Shipping — Epic's `UCheatManager` subclasses
++ many game-specific exec functions survive cooking). Many cheat-
+relevant capabilities (`fly`, `ghost`, `god`, `giveitem`, `teleport`,
 `summon`) are *already implemented by the game developer* as
 `UFUNCTION(exec)` — using them means we deliver effects the game has
-literally pre-built for cheating, no offset hunting, no ParamBuffer,
-no vtable hook beyond what we have for ProcessEvent already.
+literally pre-built for cheating.
 
-**Implementation sketch**:
-- DLL: `Aura::EnumerateExecFunctions` — reuse `EnumerateAllFunctions`
-  loop, filter by `FunctionFlags & FUNC_Exec (0x00000004)`. Optionally
-  walk `IConsoleManager::ConsoleObjects` via runtime symbol resolution
-  for the console-variable side.
-- New pipe cmds: `list_exec_commands` (returns class + name + param
-  list) + `exec_console_command` (string in → result out).
-- Game-thread dispatch: route through existing
-  [Stark](../dll/src/Stark.cpp) — `APlayerController::ConsoleCommand`
-  is a UFunction itself, so we can either find-and-invoke it via the
-  existing PE pipeline OR resolve the C++ method directly. PE-route is
-  safer (already debugged + game-thread-correct).
-- UI: new "Console" tab with text input (free-form `setspeed 2`-style),
-  dropdown of discovered exec commands (filtered by current player
-  controller class), history list with one-click re-run.
+**What shipped**:
+- `AllFunctionEntry.IsExec` + `Exec` short-flag decoder (corrects
+  the previously-undecoded `FUNC_Exec = 0x00000200` bit — note:
+  earlier draft of this doc wrote 0x4, which is actually
+  `FUNC_BlueprintAuthorityOnly`).
+- `ConsoleViewModel` + `ConsoleHistoryEntry` model with Load (filters
+  `IsExec` client-side from the existing `list_all_functions` payload
+  — no new DLL/pipe surface), filter-text, RunSelected (direct invoke
+  via existing `InvokeFunctionAsync` for no-arg commands; raises
+  `RequestParameterInvoke` for commands with parameters), command-
+  line-style `>` input with `/fly`-style typed dispatch, 20-entry
+  history with one-click replay.
+- `ConsolePanel.axaml` — new tab between Interesting Props and Game
+  Classes. Top toolbar: Load / GameOnly / Filter / typed-command
+  input. Centre: DataGrid of discovered exec commands. Bottom:
+  history pane (160 px max-height, scrollable).
+- MainWindow integration: new `Console` child VM property, wired
+  three events (`NavigateToFunction`, `RequestCopyBakedScript`,
+  `RequestParameterInvoke`) to the existing flows. ClassStruct tab
+  index shifted 6 → 7 due to Console insertion (3 updated call
+  sites).
+- 15 new `ConsoleViewModelTests` covering Load filter, sort order,
+  filter text, no-arg direct invoke, multi-arg dialog route,
+  history cap + replay, the FUNC_Exec bit-decoder belt-and-braces
+  guard against the historical 0x4-vs-0x200 confusion.
 
-**Why-it-wins-keyword-scoring**: the developer's own `exec` annotation
-is ground truth for "this is a cheat / debug entry point" — beats any
-heuristic. Devs themselves have already curated the list for us.
+**v1 deferred** (revisit on user feedback):
+- Inline scalar arg parsing for typed commands (`setspeed 5`).
+  Currently parses the command name, ignores args, routes to dialog.
+  Full inline parsing needs the FString-input gap from build
+  643-644 to land first.
+- Bridge through `APlayerController::ConsoleCommand` for full UE
+  string-parsing semantics — same FString-input blocker.
+- Live ProcessEvent profiler overlap (next pick).
 
-**Verification target**: Geri (UE 4.27, ProcessEvent verified) ships
-`UCheatManager` exec commands; ES2 (UE 5.5) also has them.
+**Verification target on real game**: Geri (UE 4.27) ships
+`UCheatManager` exec commands; ES2 (UE 5.5) also has them. Open
+the Console tab → Load → check `UCheatManager` Fly/Ghost rows
+appear; double-click Run → should toggle in-game.
 
 ### 2. Live ProcessEvent Call Profiler — pick #2
 
