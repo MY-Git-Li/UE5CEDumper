@@ -1,0 +1,186 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UE5DumpUI.ViewModels"
+             xmlns:m="using:UE5DumpUI.Models"
+             x:Class="UE5DumpUI.Views.ConsolePanel"
+             x:DataType="vm:ConsoleViewModel">
+
+  <DockPanel Margin="8">
+
+    <!-- Top: Load + GameOnly + Filter -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,4">
+      <Button Content="{StaticResource str.Con.Load}"
+              Command="{Binding LoadCommand}"
+              ToolTip.Tip="{StaticResource str.Tip.Con.Load}"
+              IsEnabled="{Binding !IsLoading}"
+              Classes="accent" Padding="12,4"/>
+      <CheckBox Content="{StaticResource str.Con.GameOnly}"
+                IsChecked="{Binding GameOnly}"
+                ToolTip.Tip="{StaticResource str.Tip.Con.GameOnly}"
+                Foreground="#CCCCCC" FontSize="12"
+                VerticalAlignment="Center"/>
+      <TextBox PlaceholderText="{StaticResource str.Con.FilterHint}"
+               Text="{Binding FilterText}"
+               ToolTip.Tip="{StaticResource str.Tip.Con.Filter}"
+               Width="240" Padding="4,2"/>
+      <Button Content="{StaticResource str.Con.ClearFilter}"
+              Command="{Binding ClearFilterCommand}"
+              Padding="6,2" FontSize="11"
+              VerticalAlignment="Center"/>
+    </StackPanel>
+
+    <!-- Command-line style input row: type a command + Run -->
+    <Border DockPanel.Dock="Top"
+            Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
+            CornerRadius="3" Padding="6" Margin="0,0,0,4">
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <TextBlock Text="&gt;" Foreground="#7FB6E8" FontWeight="Bold"
+                   FontFamily="Consolas, Menlo, monospace"
+                   VerticalAlignment="Center"/>
+        <TextBox Text="{Binding CommandInput}"
+                 PlaceholderText="{StaticResource str.Con.CommandHint}"
+                 ToolTip.Tip="{StaticResource str.Tip.Con.CommandInput}"
+                 Width="320" Padding="4,2"
+                 FontFamily="Consolas, Menlo, monospace"/>
+        <Button Content="{StaticResource str.Con.Run}"
+                Command="{Binding RunCommandTextCommand}"
+                ToolTip.Tip="{StaticResource str.Tip.Con.RunCommand}"
+                IsEnabled="{Binding !IsRunning}"
+                Foreground="#4EC9B0" Background="Transparent"
+                BorderThickness="1" BorderBrush="#4EC9B0"
+                Padding="10,3" FontWeight="SemiBold"
+                Cursor="Hand"/>
+        <Button Content="{StaticResource str.Con.RunSelected}"
+                Command="{Binding RunSelectedCommand}"
+                ToolTip.Tip="{StaticResource str.Tip.Con.RunSelected}"
+                IsEnabled="{Binding !IsRunning}"
+                Foreground="#7FB6E8" Background="Transparent"
+                BorderThickness="1" BorderBrush="#7FB6E8"
+                Padding="10,3"
+                Cursor="Hand"/>
+      </StackPanel>
+    </Border>
+
+    <!-- Status row -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8"
+                Margin="0,0,0,4" VerticalAlignment="Center">
+      <ProgressBar IsIndeterminate="True"
+                   IsVisible="{Binding IsLoading}"
+                   Width="80" Height="4"
+                   VerticalAlignment="Center"/>
+      <ProgressBar IsIndeterminate="True"
+                   IsVisible="{Binding IsRunning}"
+                   Width="80" Height="4"
+                   Foreground="#4EC9B0"
+                   VerticalAlignment="Center"/>
+      <TextBlock Text="{Binding StatusText}"
+                 Foreground="#AAB8D0" FontSize="12"
+                 FontFamily="Consolas, Menlo, monospace"
+                 VerticalAlignment="Center"
+                 ToolTip.Tip="{Binding StatusText}"/>
+    </StackPanel>
+
+    <!-- Error display -->
+    <TextBlock DockPanel.Dock="Top"
+               Text="{Binding ErrorMessage}"
+               Foreground="#F44747" Margin="0,0,0,4"
+               IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+
+    <!-- History panel at bottom (collapsible-ish: limited height,
+         scrollable) — keeps recent invocations visible without
+         eating into the discovery grid. -->
+    <Border DockPanel.Dock="Bottom"
+            Background="#1A1A1A" BorderBrush="#2D2D30" BorderThickness="1"
+            CornerRadius="3" Margin="0,4,0,0" MaxHeight="160">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Top"
+                   Text="{StaticResource str.Con.HistoryHeader}"
+                   Foreground="#999999" FontSize="11" FontWeight="SemiBold"
+                   Margin="6,4,6,2"/>
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+          <ItemsControl ItemsSource="{Binding History}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="m:ConsoleHistoryEntry">
+                <StackPanel Orientation="Horizontal" Spacing="6"
+                            Margin="6,1" ToolTip.Tip="{Binding Tooltip}">
+                  <TextBlock Text="{Binding Badge}"
+                             Foreground="{Binding BadgeColor}"
+                             FontFamily="Consolas, Menlo, monospace"
+                             FontSize="11" FontWeight="Bold"
+                             Width="28"/>
+                  <TextBlock Text="{Binding Label}"
+                             Foreground="#D4D4D4"
+                             FontFamily="Consolas, Menlo, monospace"
+                             FontSize="11"/>
+                  <TextBlock Text="{Binding ResultText}"
+                             Foreground="#9CDCFE"
+                             FontFamily="Consolas, Menlo, monospace"
+                             FontSize="11"/>
+                  <Button Content="↻"
+                          Command="{Binding $parent[UserControl].((vm:ConsoleViewModel)DataContext).ReplayHistoryCommand}"
+                          CommandParameter="{Binding}"
+                          ToolTip.Tip="{StaticResource str.Tip.Con.Replay}"
+                          Foreground="#7FB6E8" Background="Transparent"
+                          BorderThickness="0" Padding="4,0" FontSize="11"
+                          Cursor="Hand"/>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
+
+    <!-- Main results DataGrid: discovered exec commands -->
+    <DataGrid x:Name="ResultsGrid"
+              ItemsSource="{Binding Results}"
+              SelectedItem="{Binding SelectedResult}"
+              IsReadOnly="True"
+              CanUserResizeColumns="True"
+              GridLinesVisibility="Horizontal"
+              BorderThickness="0"
+              Background="#1E1E1E"
+              Foreground="#D4D4D4"
+              FontSize="12"
+              FontFamily="Consolas, Menlo, monospace">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="Class" Binding="{Binding ClassName}" Width="240"/>
+        <DataGridTextColumn Header="Command" Binding="{Binding FuncName}" Width="200"/>
+        <DataGridTextColumn Header="Flags" Binding="{Binding ShortFlags}" Width="140"/>
+        <DataGridTextColumn Header="Params" Binding="{Binding ParamsLabel}" Width="80"/>
+        <DataGridTemplateColumn Header="" Width="Auto">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:AllFunctionEntry">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <Button Content="{StaticResource str.Con.RunRow}"
+                        Command="{Binding $parent[UserControl].((vm:ConsoleViewModel)DataContext).RunSelectedCommand}"
+                        ToolTip.Tip="{StaticResource str.Tip.Con.RunRow}"
+                        Foreground="#4EC9B0" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#4EC9B0"
+                        Padding="6,2" FontSize="11"
+                        Cursor="Hand"/>
+                <Button Content="{StaticResource str.Con.OpenLive}"
+                        Command="{Binding $parent[UserControl].((vm:ConsoleViewModel)DataContext).OpenInLiveWalkerCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.Con.OpenLive}"
+                        Foreground="#7FB6E8" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#7FB6E8"
+                        Padding="6,2" FontSize="11"
+                        Cursor="Hand"/>
+                <Button Content="{StaticResource str.Con.CopyAaScript}"
+                        Command="{Binding $parent[UserControl].((vm:ConsoleViewModel)DataContext).CopyAaScriptCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.Con.CopyAaScript}"
+                        Foreground="#DCDCAA" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#DCDCAA"
+                        Padding="6,2" FontSize="11"
+                        Cursor="Hand"/>
+              </StackPanel>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</UserControl>

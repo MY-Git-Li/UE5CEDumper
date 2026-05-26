@@ -11,6 +11,292 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-05-26 — Value Search: Float/Double tolerance (CE-style rounded scan) (build 746)
+
+User-requested follow-up after the build-744 fix landed TQ2 GAS scans. Game UIs commonly display attributes rounded to the nearest integer ("HP: 338") while the underlying float is something like 337.5. Without tolerance, a scan for "338" misses 337.5 and the user has to guess at decimal precision.
+
+New `tolerance` parameter on `ValueScan::ComparePredicate` + `Aura::ScanForValue` + `Aura::RefineCandidates`, only meaningful for `Float`/`Double` (integer types ignore it -- exact comparison stays the default for non-floating types where tolerance semantics don't transfer cleanly). Per-ScanType behavior:
+
+| ScanType | Tolerance semantic |
+|---|---|
+| Exact     | `\|cur - target\| <= tol`              (matches displayed-rounded values) |
+| Bigger    | `cur > target + tol`                  (clearly above tolerance band) |
+| Smaller   | `cur < target - tol` |
+| Between   | `target1 - tol <= cur <= target2 + tol` (widen the inclusive range) |
+| Changed   | `\|cur - prev\| > tol`                  (changed beyond noise) |
+| Unchanged | `\|cur - prev\| <= tol` |
+| Increased | `cur > prev + tol`                    (strictly above prev beyond noise) |
+| Decreased | `cur < prev - tol` |
+
+The `Float Exact tol=0.5` scan on the user's TQ2 repro example: target 338, candidates whose underlying float falls in `[337.5, 338.5]` match. The CurrentValue / BaseValue floats sitting at 337.5 get found whether the user types 337.5, 338, or 338.5 (with tol >= 0.5).
+
+UI: new `± Tol` `NumericUpDown` (default 0.5) appears next to Value/Value2 when DataType is Float or Double. Hidden for integer types. `SupportsTolerance` VM property drives the visibility binding.
+
+Wire shape: `tolerance` JSON field on `begin_value_scan` / `refine_value_scan` requests. **Omitted when the value is 0 or the type is integer** -- preserves byte-identical wire shape for existing exact-scan call sites and integer scans (back-compat with any external pipe consumer that might be sniffing the protocol). DLL defaults to 0 if absent.
+
+Tests:
+- DLL: +18 assertions (124 -> 142 dll_helpers) covering Float Exact within / outside band, tol=0 strict equality back-compat, Bigger / Smaller band shift, Unchanged within drift / Changed beyond drift, Increased / Decreased prev-value semantics, Between widening both bounds, Int32 / UInt64 integer types IGNORE non-zero tolerance.
+- C#: +11 (957 -> 968) covering tolerance attached on the wire for Float, omitted for 5 integer types (theory), omitted when zero, refine_value_scan attaches tolerance, VM SupportsTolerance gates by DataType (Int -> false, Float/Double -> true, UInt64 -> false), tolerance pass-through Float / dropped Int through the VM.
+
+-----
+
+## 2026-05-26 — Value Search hotfix #2: WalkClassEx must calibrate FSTRUCTPROP_STRUCT before reading (build 744)
+
+Build-740 recursion fix shipped but TQ2 live test STILL returned 0 candidates. Targeted DIAG logging on `class name contains "AttributeSet"` revealed the actual failure mode:
+
+```
+ValueScan DIAG: class 'GrimAttributeSetHealth' WalkClassEx fields=8:
+  [1] name='MaximumHealth' type='StructProperty' offset=0xC8 size=37
+      addr=0x1FB83F53800 structType=''   ← empty!
+  ...
+ValueScan DIAG: class 'GrimAttributeSetHealth' emitted 0 ScanFields
+```
+
+`structType=''` on EVERY StructProperty was the smoking gun. `ReadSubclassTypeName(f.Address + FSTRUCTPROP_STRUCT)` returned empty because the runtime `FSTRUCTPROP_STRUCT` was still at default `0x78` — TQ2 (UE 5.07) actually needs `0x74`. My nested-struct recursion uses the same offset, so it also bailed on every read.
+
+Root cause: `CorrectSubclassOffsets` (Ubel.cpp:2441) is the calibration routine that probes the right offset, but it was **only called from `WalkInstance`** (line 2864). Any caller that hit `WalkClassEx` without a prior `WalkInstance` saw the uncalibrated default — including `Aura::ScanForValue`'s GObjects walk. The reason the bug was hidden in earlier features: `WalkInstance` typically fires from Live Walker before any other operation, so PropertySearch / etc. always inherited a calibrated value. Value Search is the first feature whose hot path doesn't depend on Live Walker firing first.
+
+Fix: added `CorrectSubclassOffsets(info.Fields)` call at the top of `WalkClassEx`, just after `WalkClass`. The function is idempotent (atomic-guarded), so calling it on every WalkClassEx is a no-op after the first successful probe. Forward declaration added near the top of Ubel.cpp because the definition lives at line ~2441.
+
+Same fix strengthens other `WalkClassEx` consumers (SearchProperties / EnumerateAllFunctions / SdkExport) — they'd also have shown empty `structType` / `innerType` if invoked before any WalkInstance, just hadn't triggered the bug because of LiveWalker-first usage patterns.
+
+957 C# + 124 DLL tests still pass. TQ2 live re-verification pending.
+
+-----
+
+## 2026-05-26 — Value Search: recurse StructProperty so GAS / FGameplayAttributeData values are reachable (build 740 hotfix)
+
+Live-game repro on TQ2 (UE 5.07) the same session as the shipping build
+738 entry below: user opened CE Structure Dissect, walked `GWorld →
+OwningGameInstance → LocalPlayers[0] → PlayerController → Character →
+m_pStatsComponent → m_pAttributeSetHealth → MaximumHealth
+(GameplayAttributeData) → BaseValue = 337.5`. Opened Value Search,
+Type=Float, Scan=Exact, Value=337.5 → **0 candidates in 743 ms
+(scanned 380748 objects, 1717 classes with matching fields)**.
+
+Root cause: `Aura::ScanForValue::buildClassIndex` walked only
+top-level `ClassInfo.Fields` entries. `BaseValue` / `CurrentValue` live
+inside `FGameplayAttributeData` — a USTRUCT used as a StructProperty
+member of `UAttributeSetHealth`. The scan saw `MaximumHealth` as a
+StructProperty (not a leaf float type) and dropped it. Same dead-end
+would apply to FVector / FRotator / FTransform members of any UObject,
+not just GAS-style attribute sets.
+
+Fix: replaced the linear field loop with a recursive `expandFields`
+lambda. For each StructProperty encountered, reads `FSTRUCTPROP_STRUCT`
+to resolve the inner `UScriptStruct*` and recurses with cumulative
+offset + dotted name prefix. Emits ScanField entries for every
+matching-type leaf at the correct cumulative offset. Cycle guard via
+visited-set; hard depth cap at 4 to bound worst-case CPU on
+pathological types (self-referencing USTRUCTs declared as linked
+nodes).
+
+```
+Before fix (TQ2 repro):
+  UAttributeSetHealth.MaximumHealth → StructProperty → skipped
+  → 0 candidates
+
+After fix:
+  UAttributeSetHealth.MaximumHealth → recurse FGameplayAttributeData
+    → MaximumHealth.BaseValue    @ +0x48 → leaf, emitted
+    → MaximumHealth.CurrentValue @ +0x4C → leaf, emitted
+  → 2+ candidates per AttributeSetHealth instance
+```
+
+Uses `Ubel::WalkClassEx` at every depth so BoolProperty FieldMask is
+populated for nested bitfield bools on the UE5 FProperty path
+(WalkClass alone covers UE4 UProperty path only).
+
+Container properties (Array / Map / Set / Optional) are intentionally
+NOT recursed — TArray\<T\> remains v2 gated by the crash-risk plan in
+`project_value_search_caveats` memory. StructProperty recursion is
+strictly safe: no allocation walk, no Num-bounded iteration.
+
+No new test surface — recursion is implementation-detail inside the
+scan lambda; visible only through end-to-end scan results on a live
+UE process. Existing predicate / session / parser tests unchanged
+(957 C# + 124 DLL still pass on build 740). TQ2 live re-verification
+is the contract test.
+
+-----
+
+## 2026-05-26 — Value Search tab: CE-style First Scan / Next Scan over UPROPERTY fields (build 738)
+
+New end-to-end capability: given a value (int / float / bool / etc),
+walk every UPROPERTY-declared field of every UObject instance and
+return the addresses + class + field metadata for each match. Refines
+with the standard CE Next-Scan predicates (Exact / Bigger / Smaller /
+Between + Changed / Unchanged / Increased / Decreased) inside a
+DLL-side session. Fills the long-standing search-by-value gap —
+PropertySearch was search-by-name; InstanceFinder was search-by-address;
+this is the third axis. Port of discrete's Phase 27b
+[ValueScanSession](../../discrete/dll/src/shared/ValueScanSession.h)
+shape with UE-specific scan engine.
+
+Cross-repo motivation: discussed at session start whether the Unity-
+side feature (D:\Github\discrete `whatIsAt` + `beginValueScan`) was
+worth porting to UE5CEDumper. Verdict: better suited here than there
+because UE's reflection metadata is more uniform than IL2CPP's mix of
+typed instances + raw native arrays, and the FindByAddress / GObjects-
+walk infrastructure for enriching candidates was already mature.
+
+### Architecture
+
+```
+UI Value Search tab
+  ↓ begin_value_scan { data_type, scan_type, value, value2?, game_only, max_results }
+DLL Aura::ScanForValue
+  ↓ walks GObjects
+  ↓ skips UClass meta-objects (IsClassLikeMeta filter)
+  ↓ per-class field index cached lazily via Ubel::WalkClassEx, filtered to
+     fields whose TypeName matches the requested DataType
+  ↓ typed-read instance+offset bytes, apply ComparePredicate
+  ↓ on hit: lookup FindDefiningClass (cached), build ValueScan::Candidate
+ValueScan::SessionManager::Begin → sessionId
+  ↑ candidates echoed back to UI
+
+UI Next Scan
+  ↓ refine_value_scan { session_id, scan_type, value?, value2? }
+DLL Aura::RefineCandidates
+  ↓ re-reads each candidate's bytes
+  ↓ predicate compares to user value (Exact/etc) or candidate.prevValue
+     (Changed / Unchanged / Increased / Decreased)
+  ↓ prunes failing, updates prevValue on survivors
+  ↑ surviving candidates returned
+
+UI New Scan
+  ↓ end_value_scan { session_id }
+ValueScan::SessionManager::End drops the session.
+Sessions auto-expire at 5 min idle so abandoned sessions clear lazily.
+```
+
+### MVP scope (build 737)
+
+- **Types**: Int8/16/32/64, UInt8/16/32/64, Float, Double, Bool.
+  BoolProperty bitfields normalized to 0/1 via FieldMask so refine
+  predicates see stable boolean semantics across sibling-bit flips.
+- **Scan candidate source**: GObjects → UProperty fields only.
+  Deliberately NOT raw memory scan — the UE precedent is better than
+  discrete's because UProperty metadata gives lossless typing and the
+  raw-memory false-positive problem is sidestepped entirely.
+- **Scan deadline**: 15s; `deadline_hit` surfaces in the response so
+  the UI can show "scan truncated — narrow predicate" instead of
+  silently returning a partial set.
+- **Hard-locked UX contract**: Value Search tab MUST surface a banner
+  reading "Native C++ fields (non-UPROPERTY) cannot be found here — use
+  Cheat Engine's raw memory scan for those." Locked in by a literal-text
+  test (`ValueSearchTests.Banner_LiteralText_IsPresentInEnAxaml`,
+  `Banner_IsReferencedByValueSearchPanel`). Rationale: scan walks
+  UProperty reflection metadata, so non-reflected C++ fields (private
+  members not declared UPROPERTY, or fields inside non-UObject native
+  structs embedded in a UObject) are invisible. Without the banner the
+  user would assume "value not found" means "value isn't there" rather
+  than "this tab can't see it" — a silent failure mode of the worst
+  kind.
+
+### Deferred (v2)
+
+- **FString / FName / FText / TArray\<T\> / FVector / FQuat / FTransform**
+  — UE-specific types where typed read is non-trivial.
+- **TArray scan**: see memory `project_value_search_caveats` for the
+  open risk. Existing Copy CE XML / CSX / SDK Header exports apply an
+  array size cap to keep payloads bounded; the value scan must NOT
+  inherit that cap (a hit at index 50000 of a TArray\<int32\> is still a
+  legit hit). Concern: removing the cap may risk crash / hang on
+  pathological containers (malformed Num, freed slack, OptionalProperty
+  mis-decoded as TArray). Mitigation plan: soft circuit-breaker on Num
+  (>10M elements skip with telemetry log) rather than a hard cap; verify
+  `Aura::FindInContainers`'s 15s deadline is enough back-pressure;
+  stress-test on Satisfactory inventory arrays before shipping.
+- **Native C++ field scan**: explicitly excluded; banner directs user
+  to CE for those (intended behaviour, not a future task).
+
+### DLL — 3 new files + 3 new pipe cmds
+
+- `dll/src/ValueScan.h` / `.cpp` — DataType / ScanType enums, Candidate
+  struct, SessionManager (singleton, 5-min idle expiry), ComparePredicate
+  (typed-load + ordered predicate for int64/uint64/double). Heap-leaked
+  singleton matches discrete's precedent so DLL teardown doesn't
+  destructor-storm tens of thousands of candidates.
+- `dll/src/Aura.h` / `.cpp` — adds `ScanForValue` (GObjects walk +
+  per-class field index + FindDefiningClass cache) and
+  `RefineCandidates` (re-read + prune + prevValue update).
+- `dll/src/Renge.h` — `CMD_BEGIN_VALUE_SCAN` / `CMD_REFINE_VALUE_SCAN` /
+  `CMD_END_VALUE_SCAN` constants; **pipe cmds now 39** (+3).
+- `dll/src/Fern.cpp` — 3 new handlers + `ParseValueBytes` (string →
+  LE bytes per DataType, with 0x-hex prefix support for unsigned ints)
+  + `FormatValueBytes` (inverse) + `CandidateToJson` helpers.
+
+### Tests
+
+- **DLL** (`dll/tests/dll_helpers_test.cpp`): +31 new assertions across
+  `Test_ValueScan_DataTypeSizes`, `Test_ValueScan_ParseDataTypeRoundTrip`,
+  `Test_ValueScan_ScanTypePartitioning`, `Test_ValueScan_Predicate_Int32`,
+  `Test_ValueScan_Predicate_Int8Negative` (signed-extension regression
+  guard), `Test_ValueScan_Predicate_Float`, `_Double`, `_Bool`,
+  `_UInt64_RangeBoundary` (ensures unsigned path on 0xFFFF...
+  values that would be negative as signed), `Test_ValueScan_SessionLifecycle`
+  (Begin → ViewWith → RefineWith mutation → End → missing-session
+  contract). DLL test suite **93 → 124** (utf8 31 + dll-helpers 93).
+- **C#** (`ui/UE5DumpUI.Tests/ValueSearchTests.cs`): +22 tests including
+  service-level JSON round-trips, scan-type partition theory (8
+  predicates × 2 buckets = 16 assertions), VM workflow contract
+  (First Scan rejects prev-value scan types; Between requires Value2;
+  Next Scan with prev-value type omits `value` field; New Scan ends
+  session + clears candidates; First Scan auto-ends orphan session),
+  and the two banner-literal-text tests that lock the UX rule.
+  C# total **935 → 957**.
+
+### C# UI — new files
+
+- `Models/ValueScanModels.cs` — `ValueScanDataType`, `ValueScanType`,
+  `ValueCandidate`, `ValueScanBeginResult`, `ValueScanRefineResult`.
+- `Services/DumpService.cs` + `Core/IDumpService.cs` — adds
+  `BeginValueScanAsync`, `RefineValueScanAsync`, `EndValueScanAsync`
+  + shared `ParseValueCandidate` JSON helper.
+- `ViewModels/ValueSearchViewModel.cs` — DataType / ScanType selectors,
+  Value/Value2 inputs (visibility-bound to scan type), First Scan /
+  Next Scan / New Scan commands, NavigateToInstance event for
+  cross-tab "Open in Live Walker".
+- `Views/ValueSearchPanel.axaml` + `.axaml.cs` — top banner (warm-amber
+  styled, locked by test), inputs row, status row, DataGrid of
+  candidates with Class.Field / Type / Value / Offset / Addr / Instance
+  columns + per-row Open / Copy buttons.
+- `Views/MainWindow.axaml` — new tab between Interesting Props and
+  Console (header `str.Tab.ValueSearch` = "Value Search").
+- `ViewModels/MainWindowViewModel.cs` — wires `ValueSearch` child VM +
+  navigation + clipboard events.
+- `Resources/Strings/en.axaml` — 16 new string keys (banner + labels +
+  tooltips).
+
+### Workflow (golden path)
+
+1. Open Value Search tab → see banner explicitly stating native-field
+   limitation.
+2. Pick DataType (e.g. Int32), ScanType=Exact, type the value you're
+   looking for (e.g. current HP = 100), click **First Scan**.
+3. DLL walks GObjects + matching-type UProperties, returns N candidates
+   in seconds.
+4. Take damage in-game (HP drops to 75), switch ScanType=Decreased,
+   click **Next Scan** → candidates pruned to fields that dropped.
+5. Repeat with Changed / Unchanged / Decreased until candidate count
+   drops to a single-digit list.
+6. Click **Open in Live Walker** on a candidate → cross-tab navigation
+   opens the owning instance with the field highlighted. Or click
+   **Copy Address** to send the address straight to CE.
+
+### Open items (next session — see todo.md)
+
+- Live-game verification on Geri (UE 4.27) + ES2 (UE 5.5): scan for
+  HP, take damage, refine. End-to-end smoke test before declaring
+  the feature stable on the broader 18-game corpus.
+- v2 type expansion (FString first as the easiest; TArray gated by
+  the crash-risk plan above).
+- Optional UX polish: keyboard shortcut for First/Next Scan; "Add to
+  Watch List" right-click action.
+
+-----
+
 ## 2026-05-24 — Property freeze (Route B): horizontal lock across all class instances (build 719)
 
 New end-to-end capability: given a property surfaced by **PropertySearch**, generate an AA Script that holds the value at a constant across **every live instance** of the owning class, with automatic instance re-enumeration on a timer so respawns / new spawns / destroys are handled transparently. Sister capability to the existing CE-XML pointer-chain export (Route A, kept in [todo.md → Speculative](todo.md)) — fundamental difference: CE XML pins ONE pointer chain to ONE instance; the freeze script tracks a property by **class + offset + type** and writes to every live instance every tick.

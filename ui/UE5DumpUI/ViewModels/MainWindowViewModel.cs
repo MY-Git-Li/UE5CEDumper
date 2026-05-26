@@ -73,6 +73,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public GameClassFilterViewModel GameClassFilter { get; }
     public InterestingFunctionsViewModel InterestingFunctions { get; }
     public InterestingPropertiesViewModel InterestingProperties { get; }
+    public ValueSearchViewModel ValueSearch { get; }
+    public ConsoleViewModel Console { get; }
     public ProxyDeployViewModel? ProxyDeploy { get; }
 
     partial void OnSelectedAddressFormatIndexChanged(int value)
@@ -168,6 +170,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         GameClassFilter = new GameClassFilterViewModel(dump, log);
         InterestingFunctions = new InterestingFunctionsViewModel(dump, log, aobMaker);
         InterestingProperties = new InterestingPropertiesViewModel(dump, log);
+        ValueSearch = new ValueSearchViewModel(dump, log);
+        Console = new ConsoleViewModel(dump, log);
 
         if (proxyDeploy != null)
             ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log);
@@ -300,7 +304,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                SelectedTabIndex = 6; // Switch to ClassStruct tab (now index 6 after InterestingFunctions + InterestingProperties insertions)
+                SelectedTabIndex = 7; // Switch to ClassStruct tab (now index 7 after the Console tab insertion)
                 await ClassStruct.LoadClassCommand.ExecuteAsync(classAddr);
             }
             catch (Exception ex)
@@ -351,7 +355,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 }
                 else
                 {
-                    SelectedTabIndex = 6; // ClassStruct fallback (index shifted by InterestingProperties insertion)
+                    SelectedTabIndex = 7; // ClassStruct fallback (index shifted by Console tab insertion)
                     // Look up the class address via ListClasses since Find Instances came back empty.
                     var classes = await _dump.ListClassesAsync(gameOnly: false);
                     var match = classes.Classes.FirstOrDefault(
@@ -409,7 +413,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 }
                 else
                 {
-                    SelectedTabIndex = 6; // ClassStruct fallback
+                    SelectedTabIndex = 7; // ClassStruct fallback (shifted by Console tab insertion)
                     var classes = await _dump.ListClassesAsync(gameOnly: false);
                     var match = classes.Classes.FirstOrDefault(
                         c => c.ClassName.Equals(className, StringComparison.Ordinal));
@@ -439,6 +443,31 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _log.Error($"InterestingProperties clipboard copy failed: {ex.Message}", ex);
+            }
+        };
+
+        // Wire ValueSearch -> LiveWalker (open candidate's owning instance)
+        // + clipboard. Same shape as InstanceFinder.NavigateToLiveWalker
+        // since ValueSearch already has the instance address resolved.
+        ValueSearch.NavigateToInstance += async (addr) =>
+        {
+            try
+            {
+                SelectedTabIndex = 0;  // Live Walker
+                await LiveWalker.NavigateToAddressCommand.ExecuteAsync(addr);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"ValueSearch NavigateToInstance handler error: {addr}", ex);
+            }
+        };
+        ValueSearch.RequestCopyText += async (text) =>
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            try { await _platform.CopyToClipboardAsync(text); }
+            catch (Exception ex)
+            {
+                _log.Error($"ValueSearch clipboard copy failed: {ex.Message}", ex);
             }
         };
 
@@ -555,6 +584,217 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _log.Error($"InterestingFunctions RequestCopyBakedScript handler error: {className}::{funcName}", ex);
+                StatusText = $"AA Script export failed: {ex.Message}";
+            }
+        };
+
+        // ─────────────────────────────────────────────────────────────
+        // Console panel wiring (Console = UFUNCTION(exec) discovery+invoke)
+        //
+        // Mirrors the InterestingFunctions handler bodies above. Duplicated
+        // intentionally for v1 — a future shared-helper extraction would
+        // touch GameClassFilter / InterestingFunctions / InterestingProperties
+        // / Console (4 callers), worth its own refactor pass.
+        // ─────────────────────────────────────────────────────────────
+
+        Console.NavigateToFunction += async (className, funcName) =>
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(className)) return;
+
+                var instances = await _dump.FindInstancesAsync(className, exactMatch: true, limit: 5);
+                string? liveAddr = null;
+                foreach (var inst in instances.Instances)
+                {
+                    if (string.IsNullOrEmpty(inst.Address)) continue;
+                    if (inst.Name.StartsWith("Default__", StringComparison.Ordinal)) continue;
+                    liveAddr = inst.Address;
+                    break;
+                }
+
+                if (!string.IsNullOrEmpty(liveAddr))
+                {
+                    SelectedTabIndex = 0; // Live Walker
+                    await LiveWalker.NavigateToAddressCommand.ExecuteAsync(liveAddr);
+                    var picked = await LiveWalker.TrySelectFunctionByNameAsync(funcName);
+                    StatusText = picked
+                        ? $"Navigated to {className}::{funcName} (live instance {liveAddr})"
+                        : $"Navigated to {className} @ {liveAddr}; exec '{funcName}' not in this class";
+                    _log.Info($"Console -> LiveWalker: {className}::{funcName} @ {liveAddr}" +
+                              (picked ? "" : " (function not selected)"));
+                }
+                else
+                {
+                    SelectedTabIndex = 7; // ClassStruct fallback (consistent with Console tab shift)
+                    var classes = await _dump.ListClassesAsync(gameOnly: false);
+                    var match = classes.Classes.FirstOrDefault(
+                        c => c.ClassName.Equals(className, StringComparison.Ordinal));
+                    if (match != null && !string.IsNullOrEmpty(match.ClassAddr))
+                    {
+                        await ClassStruct.LoadClassCommand.ExecuteAsync(match.ClassAddr);
+                        StatusText = $"No live instance of {className}; showing class metadata " +
+                                     $"(exec '{funcName}' — UCheatManager subclasses often need an active PlayerController)";
+                        _log.Info($"Console -> ClassStruct fallback: {className}::{funcName}");
+                    }
+                    else
+                    {
+                        StatusText = $"Class {className} not resolvable (Find Instances + ListClasses both empty)";
+                        _log.Warn($"Console navigate: {className} not found");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"Console NavigateToFunction handler error: {className}::{funcName}", ex);
+            }
+        };
+
+        // Console -> RequestParameterInvoke fires when a multi-param exec
+        // command is selected. Opens the standard InvokeParamDialog in
+        // PipeInvoke mode so the user fills values + presses FIRE to run.
+        Console.RequestParameterInvoke += async (className, funcName) =>
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(className) || string.IsNullOrEmpty(funcName)) return;
+
+                var classes = await _dump.ListClassesAsync(gameOnly: false);
+                var classMatch = classes.Classes.FirstOrDefault(
+                    c => c.ClassName.Equals(className, StringComparison.Ordinal));
+                if (classMatch == null || string.IsNullOrEmpty(classMatch.ClassAddr))
+                {
+                    StatusText = $"Class {className} not found";
+                    return;
+                }
+
+                var functions = await _dump.WalkFunctionsAsync(classMatch.ClassAddr);
+                var funcMatch = functions.FirstOrDefault(
+                    f => f.Name.Equals(funcName, StringComparison.Ordinal));
+                if (funcMatch == null)
+                {
+                    StatusText = $"{className}::{funcName} not in walk_functions output";
+                    return;
+                }
+
+                var instances = await _dump.FindInstancesAsync(className, exactMatch: true, limit: 1);
+                string instanceAddr = "";
+                foreach (var inst in instances.Instances)
+                {
+                    if (!inst.Name.StartsWith("Default__", StringComparison.Ordinal))
+                    {
+                        instanceAddr = inst.Address;
+                        break;
+                    }
+                }
+
+                if (Avalonia.Application.Current?.ApplicationLifetime is not
+                    Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+                    || desktop.MainWindow is not { } owner)
+                    return;
+
+                var inputParams = funcMatch.Params.Where(p => !p.IsReturn).ToList();
+                var dialog = new Views.InvokeParamDialog(
+                    className, funcName, inputParams, funcMatch.Params, funcMatch.ParmsSize,
+                    instanceAddr, _dump, _engineState?.UEVersion ?? 0,
+                    aobMaker: _aobMaker, platform: _platform,
+                    mode: Views.InvokeDialogMode.PipeInvoke);
+                var result = await dialog.ShowDialog<string?>(owner);
+                StatusText = result == "ok"
+                    ? $"exec {className}::{funcName} dialog closed"
+                    : $"exec {funcName} cancelled";
+                _log.Info($"Console PipeInvoke dialog " +
+                          $"{(result == "ok" ? "completed" : "cancelled")}: {className}::{funcName}");
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"Console RequestParameterInvoke handler error: {className}::{funcName}", ex);
+                StatusText = $"exec dialog failed: {ex.Message}";
+            }
+        };
+
+        // Console -> RequestCopyBakedScript reuses the InterestingFunctions
+        // logic body. Same shape as above (no-arg fast path + dialog path).
+        Console.RequestCopyBakedScript += async (className, funcName) =>
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(className) || string.IsNullOrEmpty(funcName)) return;
+
+                var classes = await _dump.ListClassesAsync(gameOnly: false);
+                var classMatch = classes.Classes.FirstOrDefault(
+                    c => c.ClassName.Equals(className, StringComparison.Ordinal));
+                if (classMatch == null || string.IsNullOrEmpty(classMatch.ClassAddr))
+                {
+                    StatusText = $"Class {className} not found";
+                    return;
+                }
+
+                var functions = await _dump.WalkFunctionsAsync(classMatch.ClassAddr);
+                var funcMatch = functions.FirstOrDefault(
+                    f => f.Name.Equals(funcName, StringComparison.Ordinal));
+                if (funcMatch == null)
+                {
+                    StatusText = $"{className}::{funcName} not in walk_functions output";
+                    return;
+                }
+
+                var instances = await _dump.FindInstancesAsync(className, exactMatch: true, limit: 1);
+                string instanceAddr = "";
+                foreach (var inst in instances.Instances)
+                {
+                    if (!inst.Name.StartsWith("Default__", StringComparison.Ordinal))
+                    {
+                        instanceAddr = inst.Address;
+                        break;
+                    }
+                }
+
+                var inputParams = funcMatch.Params.Where(p => !p.IsReturn).ToList();
+                var hasReturn = funcMatch.Params.Any(p => p.IsReturn);
+                if (inputParams.Count == 0 && !hasReturn)
+                {
+                    var script = Services.BakedScriptGenerator.Generate(
+                        className, funcName, funcMatch.ParmsSize,
+                        Array.Empty<Models.BakedParamValue>());
+                    var description = $"exec (baked, no args): {className}::{funcName}";
+                    bool wasAvailable = _aobMaker?.IsAvailable ?? false;
+                    bool sentToCe = false;
+                    if (_aobMaker != null && wasAvailable)
+                        sentToCe = await _aobMaker.CreateAAScriptAsync(description, script, autoActivate: false);
+                    if (!sentToCe)
+                        await _platform.CopyToClipboardAsync(script);
+                    StatusText = sentToCe
+                        ? $"AA Script created in CE: {funcName}"
+                        : wasAvailable
+                            ? $"⚠ AOBMaker pipe broke (CE closed?) — script copied to clipboard"
+                            : $"AOBMaker not connected — script copied to clipboard ({funcName})";
+                    _log.Info($"Console baked AA Script (no args) " +
+                              $"{(sentToCe ? "sent to CE" : "to clipboard")}: " +
+                              $"{className}::{funcName} (wasAvailable={wasAvailable})");
+                    return;
+                }
+
+                if (Avalonia.Application.Current?.ApplicationLifetime is not
+                    Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+                    || desktop.MainWindow is not { } owner)
+                    return;
+
+                var dialog = new Views.InvokeParamDialog(
+                    className, funcName, inputParams, funcMatch.Params, funcMatch.ParmsSize,
+                    instanceAddr, _dump, _engineState?.UEVersion ?? 0,
+                    aobMaker: _aobMaker, platform: _platform,
+                    mode: Views.InvokeDialogMode.CopyBakedScript);
+                var result = await dialog.ShowDialog<string?>(owner);
+                StatusText = result == "ok"
+                    ? $"AA Script ready: {className}::{funcName}"
+                    : $"AA Script export cancelled: {funcName}";
+                _log.Info($"Console CopyBakedScript dialog " +
+                          $"{(result == "ok" ? "completed" : "cancelled")}: {className}::{funcName}");
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"Console RequestCopyBakedScript handler error: {className}::{funcName}", ex);
                 StatusText = $"AA Script export failed: {ex.Message}";
             }
         };

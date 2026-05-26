@@ -41,6 +41,7 @@ public sealed class AllFunctionEntry
             if ((FunctionFlags & 0x0800_0000) != 0) parts.Add("BE");   // BlueprintEvent
             if ((FunctionFlags & 0x1000_0000) != 0) parts.Add("BP");   // BlueprintPure
             if ((FunctionFlags & 0x4000_0000) != 0) parts.Add("Const");
+            if ((FunctionFlags & 0x0000_0200) != 0) parts.Add("Exec");
             if ((FunctionFlags & 0x0000_0400) != 0) parts.Add("Native");
             if ((FunctionFlags & 0x0000_0800) != 0) parts.Add("Event");
             if ((FunctionFlags & 0x0000_2000) != 0) parts.Add("Static");
@@ -53,6 +54,14 @@ public sealed class AllFunctionEntry
     public bool IsBlueprintEvent    => (FunctionFlags & 0x0800_0000) != 0;
     public bool IsConst             => (FunctionFlags & 0x4000_0000) != 0;
     public bool IsNative            => (FunctionFlags & 0x0000_0400) != 0;
+
+    /// <summary>
+    /// UFUNCTION(exec) — a console-invokable command. The cooker preserves
+    /// these in Shipping builds (often inside UCheatManager subclasses),
+    /// so the developer's own debug/cheat entry points remain accessible
+    /// at runtime. Backs the Console panel discovery filter.
+    /// </summary>
+    public bool IsExec              => (FunctionFlags & 0x0000_0200) != 0;
 
     /// <summary>"NumParms (ParmsSize B)" e.g. "2 (5B)".</summary>
     public string ParamsLabel => $"{NumParms} ({ParmsSize}B)";

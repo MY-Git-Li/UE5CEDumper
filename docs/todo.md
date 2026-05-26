@@ -12,6 +12,366 @@ Move items to [dev-log.md](dev-log.md) once they ship; update
 
 -----
 
+## Next-priority enhancements (decided 2026-05-26, post build 738)
+
+### 0. ~~Value Search tab (by-value scan)~~ — ✅ shipped this session (2026-05-26, build 738)
+
+**Effort actual**: ~half a day (Sonnet-driven port of discrete Phase 27b
+shape, mostly mechanical) | **Risk**: low — purely additive (3 new DLL
+files, 3 new pipe cmds, 1 new tab; no existing-behaviour regressions
+in 957 C# + 124 DLL tests). **Why**: filled the search-by-value gap
+(PropertySearch = by-name; InstanceFinder = by-address; this is the
+third axis). Port motivated by cross-repo discussion at session start —
+the Unity-side `whatIsAt` + `beginValueScan` workflow has direct
+analog here, and UE's reflection metadata makes the candidate
+enrichment cleaner than discrete's whatIsAt path.
+
+**What shipped**:
+- DLL: `ValueScan.h/.cpp` (DataType / ScanType enums, Candidate,
+  SessionManager with 5-min idle expiry, ComparePredicate), Aura
+  `ScanForValue` + `RefineCandidates`, 3 pipe cmds
+  (`begin_value_scan` / `refine_value_scan` / `end_value_scan`).
+- C#: `Models/ValueScanModels.cs`, `IDumpService` + `DumpService`
+  begin/refine/end, `ValueSearchViewModel`, `ValueSearchPanel.axaml`
+  with **hard-locked** "Native C++ fields not findable here" banner
+  (literal text locked in by `Banner_LiteralText_IsPresentInEnAxaml`
+  test — see memory `project_value_search_caveats`).
+- Tests: +31 DLL helpers, +22 C# (incl. scan-type partition theory,
+  prev-value scan type omits `value` field on the wire, First Scan
+  auto-ends orphan session before new Begin).
+
+**Live verification target (next session, user-side)**:
+- Geri (UE 4.27) + ES2 (UE 5.5): scan for HP (Int32 or Float, depending
+  on game), take damage, switch ScanType=Decreased, click Next Scan,
+  confirm candidates prune correctly. Smoke-test the cross-tab
+  "Open in Live Walker" navigation flow.
+
+**v2 deferred** (revisit on user signal):
+- **FString / FName / FText support** — string scan is the most-asked
+  CE feature beyond primitives; straightforward port once we lock the
+  FName index round-trip (Serie::GetString equivalent on the C# side
+  for predicate building).
+- **TArray\<T\> scan** — see memory `project_value_search_caveats`
+  for the open crash-risk plan. Before shipping: confirm
+  `Aura::FindInContainers`'s 15s deadline is enough back-pressure for
+  pathological containers; add soft circuit-breaker on Num
+  (>10M elements skip with telemetry log) rather than inheriting Copy
+  CE XML's hard array-size cap (which would silently drop legit deep
+  hits). Stress-test on Satisfactory inventory arrays before enabling.
+- **FVector / FRotator / FTransform** — natural next step after
+  primitives; needs scan-by-(X, Y, Z) tolerance UI.
+
+> _Ordering note (kept from earlier 2026-05-26 review)_: items below
+> were ordered by value/effort ratio at the end of the build-719 freeze
+> session. "Game Profile persistence" was dropped because [Flamme
+> HintCache](../dll/src/Flamme.cpp) already persists per-PE-hash AOB
+> winning pattern IDs + UE version + version-detected flag + user
+> override + invoke timeout, shared with the C#
+> [AobUsageService](../ui/UE5DumpUI/Services/AobUsageService.cs) via
+> `%LOCALAPPDATA%\UE5CEDumper\UE5CEDumper.{COMPUTERNAME}.json`. The
+> remaining gaps (DynOff cache, favorites, invoke param presets) are
+> low-pain compared to the AOB scan which is already cached.
+
+### 1. ~~UE Console / Exec Command Bridge~~ — ✅ shipped this session (2026-05-26)
+
+**Effort actual**: ~3 hours (zero DLL change) | **Risk**: low (no
+existing-behaviour regressions; ConsoleViewModelTests +15 / 920 → 935
+C# tests). **Why**: skips the "find UFunction → build ParamBuffer →
+invoke" workflow for games that ship with debug exec commands intact
+(common even in cooked Shipping — Epic's `UCheatManager` subclasses
++ many game-specific exec functions survive cooking). Many cheat-
+relevant capabilities (`fly`, `ghost`, `god`, `giveitem`, `teleport`,
+`summon`) are *already implemented by the game developer* as
+`UFUNCTION(exec)` — using them means we deliver effects the game has
+literally pre-built for cheating.
+
+**What shipped**:
+- `AllFunctionEntry.IsExec` + `Exec` short-flag decoder (corrects
+  the previously-undecoded `FUNC_Exec = 0x00000200` bit — note:
+  earlier draft of this doc wrote 0x4, which is actually
+  `FUNC_BlueprintAuthorityOnly`).
+- `ConsoleViewModel` + `ConsoleHistoryEntry` model with Load (filters
+  `IsExec` client-side from the existing `list_all_functions` payload
+  — no new DLL/pipe surface), filter-text, RunSelected (direct invoke
+  via existing `InvokeFunctionAsync` for no-arg commands; raises
+  `RequestParameterInvoke` for commands with parameters), command-
+  line-style `>` input with `/fly`-style typed dispatch, 20-entry
+  history with one-click replay.
+- `ConsolePanel.axaml` — new tab between Interesting Props and Game
+  Classes. Top toolbar: Load / GameOnly / Filter / typed-command
+  input. Centre: DataGrid of discovered exec commands. Bottom:
+  history pane (160 px max-height, scrollable).
+- MainWindow integration: new `Console` child VM property, wired
+  three events (`NavigateToFunction`, `RequestCopyBakedScript`,
+  `RequestParameterInvoke`) to the existing flows. ClassStruct tab
+  index shifted 6 → 7 due to Console insertion (3 updated call
+  sites).
+- 15 new `ConsoleViewModelTests` covering Load filter, sort order,
+  filter text, no-arg direct invoke, multi-arg dialog route,
+  history cap + replay, the FUNC_Exec bit-decoder belt-and-braces
+  guard against the historical 0x4-vs-0x200 confusion.
+
+**v1 deferred** (revisit on user feedback):
+- Inline scalar arg parsing for typed commands (`setspeed 5`).
+  Currently parses the command name, ignores args, routes to dialog.
+  Full inline parsing needs the FString-input gap from build
+  643-644 to land first.
+- Bridge through `APlayerController::ConsoleCommand` for full UE
+  string-parsing semantics — same FString-input blocker.
+- Live ProcessEvent profiler overlap (next pick).
+
+**Verification target on real game**: Geri (UE 4.27) ships
+`UCheatManager` exec commands; ES2 (UE 5.5) also has them. Open
+the Console tab → Load → check `UCheatManager` Fly/Ghost rows
+appear; double-click Run → should toggle in-game.
+
+### 2. Live ProcessEvent Call Profiler — pick #2
+
+**Effort**: M-L (~1 week) | **Risk**: med (PE is hot path) | **Why**:
+Solves the keyword-scoring blind spot — functions whose names give
+nothing away but are called every time the user triggers an action.
+Current Interesting Funcs ranks by name heuristics; this ranks by
+**observed behaviour**.
+
+**Implementation sketch**:
+- [Stark](../dll/src/Stark.cpp) already hooks ProcessEvent and ticks
+  `s_hookFireCount`. Extend with per-UFunction atomic counter (lock-
+  free hash map keyed by `UFunction*`) — increment at the top of
+  `HookedProcessEvent`.
+- "Recording" mode toggle so the counters are only ticked when armed
+  (PE fires thousands of times/sec idle; counting always-on would burn
+  CPU for no gain when no one's watching).
+- New pipe cmds: `start_pe_profile`, `stop_pe_profile`,
+  `get_pe_profile` (returns top-N most-called UFunctions in last
+  window). Streaming optional v2.
+- UI: new "Live Funcs" tab (or sub-panel under Interesting Funcs?
+  decide during implementation) — sliding-window top-N display, pause
+  button for "snapshot before vs after" diff workflow.
+
+**Workflow win**: user presses "Start", performs gameplay action
+("open inventory"), presses "Stop", sees the 10 functions called
+since Start. Functions that fired ONLY during that action are
+hypotheses about what implements the action.
+
+**Risk mitigation**: lockless atomic ring-buffer / `std::atomic<uint64>`
+per slot. PE hot-path overhead must stay < 100ns/call. Benchmark in
+`dll_helpers_test` before shipping.
+
+### 3. Multi-row → One .CT Batch Generator — pick #3 (quickest win)
+
+**Effort**: S-M (~2-3 days) | **Risk**: low | **Why**: Polishes the
+existing AA(Baked) single-row export into a multi-row batch — the
+80% of pieces are already in place from build 590-596 (BakedScript
+generation) + build 660 (LiveWalker DataGrid Extended-mode
+multi-select). Promotes the tool one notch from "research toy" to
+"shareable cheat-table author".
+
+**Implementation sketch**:
+- Interesting Funcs + Interesting Properties + LiveWalker gain a
+  "Generate Cheat Table from Selection" toolbar button (visible when
+  ≥2 rows selected).
+- New `Services/CheatTableBuilder.cs` — assemble selected rows into a
+  single `.CT` payload: header XML + grouped memrec entries (one
+  group per category) + per-row AA Script body (reuses
+  `BakedScriptGenerator.Generate` or `FreezeScriptGenerator.Generate`).
+- Output: save-as dialog, default filename
+  `{processName}-{timestamp}.CT`. AOBMaker direct-inject as v2 if
+  user requests.
+- Tests: golden-file CT samples for 3-row / 10-row / mixed-category
+  selections.
+
+**Why-now**: every other "discover" workflow (Properties / Funcs /
+Live Walker) already feeds this — it's the unification step that
+the rest of the pipeline has been waiting for.
+
+### 4. Game Version Diff (SDK / Dump Compare) — pick #4
+
+**Effort**: S (~2 days, pure Python) | **Risk**: zero (offline) |
+**Why**: Cheat-table maintainer pain — game patches silently move
+field offsets and add/remove fields, breaking tables that worked
+yesterday. No tool in the cheat-engine ecosystem does this at
+UFunction/UProperty granularity.
+
+**Implementation sketch**:
+- New `scripts/analysis/diff_dumps.py` consuming two Dump All
+  Metadata JSONL files (`work/dump/X.jsonl` + `work/dump/Y.jsonl`).
+- Reports: `AddedClasses`, `RemovedClasses`, `MovedFields` (per-class
+  with old → new offset), `AddedFunctions`, `RemovedFunctions`,
+  `FunctionSignatureChanges` (param list diff).
+- Markdown output mirroring `analyze_dumps.py` style; optional
+  `--minimal` flag for "just the things that broke my cheat table"
+  view (offset moves only).
+- README addition documenting the workflow: dump game pre-patch,
+  dump post-patch, diff, fix table.
+
+**Why now**: zero risk, leverage existing dump corpus (15+ games),
+delivers a feature the wider cheat-table community would directly
+benefit from.
+
+### 5. UFunction Return Value Structured Walker — pick #5
+
+**Effort**: S | **Risk**: low | **Why**: Invoke (Pipe Invoke + Verify
+mode) returns raw bytes or single-scalar decoded values. Struct
+returns (FVector / FRotator / FTransform / FHitResult / user
+USTRUCTs) currently show as hex dumps — usable but not introspectable.
+
+**Implementation sketch**:
+- [Ubel](../dll/src/Ubel.cpp) already has the property walker that
+  produces ClassStruct field listings. Apply it to the returned
+  ParamBuffer's ReturnValue slot using the function's return
+  StructProperty / ObjectProperty metadata.
+- Invoke response gains optional `returnValueStructured: { fields: [
+  { name, type, value }, ... ] }`.
+- UI: InvokeParamDialog FIRE-result panel shows a small property
+  grid below the raw hex when the return is structured.
+
+**Why-relatively-easy**: 95% of the code exists, this is plumbing
+to wire ReturnValue into the walker that already understands
+StructProperty offsets / FString / FVector / etc.
+
+**Verification target**: Geri's
+`PlayerCameraManager::GetCameraLocation` returns `FVector` — already
+known-working from build 648 verification, just needs structured
+rendering instead of raw `00 00 00 ... 89.99` bytes.
+
+### 6. UCheatManager stripped-body diagnosis + feedback memory — pick #6 (Console-ship follow-up)
+
+**Effort**: S (~half a day, mostly write-up) | **Risk**: zero | **Why**:
+First live test of the build-731 Console tab surfaced the canonical
+gotcha — `UCheatManager::Fly` / `Ghost` / `God` / `Walk` / `Slomo` /
+`ChangeSize` invokes return `Result=0` (`OK`) but produce no in-game
+effect on cooked Shipping builds. Root cause is well-known but
+undocumented in this repo: UE engine wraps these in
+`#if !UE_BUILD_SHIPPING`, so the cooker preserves the reflection
+metadata (you can list + invoke the UFunction) while stripping the
+function body to a `ret`. PE call really happens, the function really
+returns 0, the function just does nothing.
+
+Different failure mode from the build 647-648 wrong-vtable-slot bug
+(that one was PE never firing). The discriminator is
+`Stark::GetHookFireCount()` — if it's > 0 after the call, the hook
+fired and the function body itself is the dead end.
+
+**What to ship**:
+- New `feedback_ucheatmanager_stripped.md` memory entry capturing the
+  diagnostic: hook-fire-count > 0 + result=0 + no effect → cooker
+  stripped body, almost certainly UCheatManager-derived.
+- Diagnostic guidance: try a `BlueprintCallable` game-specific exec
+  on the same session; if that works, confirms it's UCheatManager-
+  specific stripping rather than wholesale PE breakage.
+- Console panel UX hint: when the user selects an exec whose class
+  inherits from `UCheatManager` (cheap walk-super-chain check via
+  existing `walk_class` data), add a footer line "⚠ Often
+  stub-only in cooked Shipping — try a game-specific exec for
+  verification" — same pattern as the build 643-644
+  KismetMathLibrary hint plan in
+  [Call-UE-function feature gaps](#document-kismetmathlibrary-stub-pattern-in-cooked-shipping-suggest-better-verification-targets).
+- Update [docs/lessons-learned.md](lessons-learned.md) with the
+  diagnostic flow so the lesson survives across sessions.
+
+**Verification target**: confirm on Geri (UE 4.27) and/or ES2 (UE 5.5)
+that (a) `UCheatManager::Fly` returns OK + does nothing, AND (b) a
+game-specific BC function on the same session works — proving the
+PE pipeline itself is healthy. Same evidence shape that closed the
+build 648 wrong-slot bug.
+
+**Out of scope**: bypassing the strip (would require code-injection
+into a different code path entirely; outside this tool's scope). The
+goal is to redirect users to verification targets that actually do
+something, not to revive the dead UCheatManager bodies.
+
+### 7. View Snap Hotkey (Property → Snap Hotkey) — pick #7
+
+**Effort**: S-M (~2-3 days) | **Risk**: low | **Why**: Common cheat
+need that no existing exec covers — UE has no built-in `setyaw 90` /
+`rotate90` / `snapview` exec, and `AddYawInput` is a tiny 1.5°/tick
+accumulator unsuitable for snap. The natural shape is "find
+`ControlRotation.Yaw` on the live PlayerController + bind a CE
+hotkey that snaps it to the next 90° (or arbitrary step)". 95% of
+the building blocks already exist from build 719's property freeze
+Route B.
+
+**Architecture sketch (mirrors freeze Route B)**:
+- New PropertySearch / LiveWalker row action **"Snap Hotkey…"** for
+  Float / Double properties (FRotator.Yaw is a Float inside the
+  struct; user navigates to the inner property via existing struct
+  drill-down).
+- New `SnapHotkeyDialog`: step size (default 90°, free-text override),
+  direction (next / previous / nearest), hotkey capture (VK_NUMPAD9
+  default), wrap-around enable for angle-like fields (auto-mod 360
+  when min-max span ≈ 360).
+- New `scripts/ue5_snap_helper.lua` embedded resource — shares the
+  `_ue5_invoke_busy` reentrancy flag with the invoke + freeze
+  helpers. Public API: `snapProperty(cfg, deltaSign) → handle`,
+  reuses the CMD_LIST_INSTANCES paginated walk (build 719) to
+  resolve live targets per-keystroke (cheap; instances list typically
+  < 5 for PlayerController).
+- New `SnapHotkeyScriptGenerator.cs` — renders an AA Script with the
+  CFG block + `createHotkey(VK_*, snapNext)` + `createHotkey(VK_*,
+  snapPrev)` + [DISABLE] cleanup. Per-script keyed handle table
+  `_ue5_snap_handles[KEY]` so multiple snap bindings coexist.
+- New `Tools → Inject Snap Helper Lua` + `Export Snap Helper Lua…`
+  Tools-menu entries (sister to the invoke + freeze pair).
+- Reuses AOBMaker `CreateAAScriptAsync` for delivery; no clipboard
+  fallback (matches freeze decision — keeps the surface tight).
+
+**Type scope (v1)**: Float, Double. Could extend to Int32 / Int64
+(snap to nearest enum value), but Float covers the rotation use
+case cleanly.
+
+**Why this generalises beyond rotation**: the same "snap to nearest
+N" pattern covers MoveSpeed multipliers (0.5x / 1.0x / 2.0x / 4.0x
+cycling), zoom levels, time-dilation cycling — anywhere the user
+wants a small discrete set of values bound to a single hotkey
+toggle. Not pitched as "snap by 90°" specifically but as
+"snap-to-step on a property".
+
+**Test plan (live)**:
+- Geri (UE 4.27): find `APlayerController::ControlRotation.Yaw`
+  via LiveWalker, bind NumPad9 = +90°, NumPad7 = -90°. Press in-
+  game, view should snap to the four cardinal directions with no
+  visible interpolation.
+- ES2 (UE 5.5): same test path; confirms the helper handles UE5
+  PlayerController layout without per-version branches.
+
+**Out of scope for v1**: animated/interpolated snap (would need a
+tick loop, not just a hotkey write); collision-aware snap (skipping
+to next free direction); chord-key hotkeys.
+
+### Add-on: Universal Hotkey Loop option for AA(Baked) — bonus S item
+
+**Effort**: S | **Risk**: low | **Why**: AA(Baked) currently runs the
+generated script once per [ENABLE]. Many cheat scenarios need
+"every X ms": refill health every tick, write speed multiplier each
+frame, etc. CE's [ENABLE]/[DISABLE] block already supports `timer`
+hooks; FreezeScriptGenerator (build 719) shows the pattern.
+
+Add an "Auto-tick every N ms" checkbox to InvokeParamDialog's
+CopyBakedScript mode. When checked, generated script wraps the
+`invokeUFunction` call in a `createTimer(N, callback)` block —
+[DISABLE] tears it down. Same handle-table pattern as FreezeScript
+keyed by `class::func@instance` so multiple ticking scripts coexist.
+
+Lands as a 1-day add-on after pick #3 (CT batch generator) — both
+touch the script generator + dialog wiring.
+
+### Dropped from consideration — reasoning preserved
+
+- ~~**Game Profile persistence**~~ — already covered by
+  [Flamme::SaveResults / LoadHints](../dll/src/Flamme.cpp) +
+  [AobUsageService](../ui/UE5DumpUI/Services/AobUsageService.cs).
+  Remaining gaps (DynOff offset table cache, user favorites, invoke
+  param presets) are low-pain UX polish, not value-visible wins. Only
+  revisit if a user reports DynOff re-derivation as a noticeable wait
+  (currently < 100ms after AOB scan completes).
+- ~~**32-bit UE4 support**~~ — discussed 2026-05-26, deferred. Would
+  need a parallel Win32 DLL build + new 32-bit AOB pattern bank + per-
+  ABI ParamBuffer rewrite (thiscall vs Microsoft x64). Estimated 2-3
+  weeks + corpus validation. No identified user demand; most UE4
+  titles people target are 64-bit.
+
+-----
+
 ## Active plan: Call-UE-function strengthening
 
 The "Call UE function" capability is currently the weakest link in the
@@ -581,7 +941,12 @@ returns the decoded Lua string instead of a number. Optional v2.
 
 ## Property Origin Resolver — proposals B + C still on table
 
-> **🎯 NEXT SESSION STARTING POINT (2026-05-20 close-out, build 715 / dist 704, main caught up via PR #199)**:
+> **🎯 NEXT SESSION STARTING POINT (2026-05-26 refresh, build 730 on `dev`)**:
+> See the new **[Next-priority enhancements (decided 2026-05-26)](#next-priority-enhancements-decided-2026-05-26-post-build-730)** section at the top of this file — picks #1-5 + the AA(Baked) auto-tick add-on supersede the build-715 starter list below. **Active pick = #1 UE Console / Exec Command Bridge**.
+>
+> The build-715 NEXT-SESSION block below is kept as historical context (mostly shipped through build 719's freeze work + the post-715 stabilisation commits — MSVC CRT static link, AOT DataGrid fix, credit footer).
+>
+> **Original block, build 715 close-out (2026-05-20)**:
 > Session shipped 4 commits + dev→main fast-forward merge (30 commits, first
 > merge since build 590). Headline shipments:
 >

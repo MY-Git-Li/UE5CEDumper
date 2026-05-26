@@ -20,6 +20,7 @@ extern uint32_t g_cachedUEVersion;
 #include <cctype>
 #include <chrono>
 #include <climits>
+#include <cstring>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -3186,6 +3187,330 @@ SparseDelegateResult WalkSparseDelegateBindings(uintptr_t ownerObj,
     }
 
     return result;
+}
+
+// === Value Search (CE-style First Scan / Next Scan workflow) ===
+
+ValueScanResult ScanForValue(
+    ValueScan::DataType dt,
+    ValueScan::ScanType st,
+    const uint8_t*      targetBytes,
+    const uint8_t*      target2Bytes,
+    bool                gameOnly,
+    int32_t             maxResults,
+    double              tolerance)
+{
+    ValueScanResult result;
+    auto t0 = std::chrono::steady_clock::now();
+    constexpr auto kDeadline = std::chrono::seconds(15);
+
+    const size_t dtSize = ValueScan::SizeOf(dt);
+    if (dtSize == 0 || !targetBytes) return result;
+    if (st == ValueScan::ScanType::Between && !target2Bytes) return result;
+    // Prev-value scan types have no meaning on a first scan -- caller (pipe
+    // handler) is responsible for rejecting these, but be defensive.
+    if (ValueScan::IsPrevValueScanType(st)) return result;
+
+    const auto& acceptedTypes = ValueScan::PropertyTypeNames(dt);
+
+    // Per-class field index. classAddr -> filtered subset of FieldInfo
+    // that match the requested DataType. Built lazily on first
+    // encounter; reused across all instances of that class.
+    struct ScanField {
+        int32_t     offset;
+        int32_t     size;
+        std::string name;
+        std::string typeName;
+        uint8_t     boolFieldMask;
+    };
+    struct ScanClassInfo {
+        std::string             className;
+        std::string             classPath;
+        bool                    gameClass = false;   // !IsEnginePackage(classPath)
+        std::vector<ScanField>  fields;
+    };
+    std::unordered_map<uintptr_t, ScanClassInfo> classCache;
+
+    // Recursive struct expansion: walks a UStruct's FProperty chain and
+    // emits ScanField entries for every leaf property matching the target
+    // DataType, including fields nested inside StructProperty members.
+    //
+    // Critical for GAS / Gameplay Ability System games: the most common
+    // pattern is `UAttributeSet -> FGameplayAttributeData MaximumHealth ->
+    // float BaseValue / float CurrentValue`. Without recursion the scan
+    // sees only the outer StructProperty (which isn't a leaf type) and
+    // returns 0 candidates -- the original 2026-05-26 TQ2 repro that
+    // motivated this fix. Same applies to FVector / FRotator / FTransform
+    // members of any UObject.
+    //
+    // Cycle / pathological-depth guards:
+    //   - kMaxDepth = 4. Real UE structs rarely nest beyond 2-3 levels;
+    //     beyond 4 we're either in a recursive type loop or pathological
+    //     data. The cap bounds worst-case CPU per class.
+    //   - visited set per call protects against accidental cycles
+    //     (FStructProperty's Struct pointer pointing to a struct that
+    //     transitively re-references itself, e.g. linked-list nodes
+    //     declared as USTRUCT with a self-typed StructProperty).
+    auto expandFields = [&](auto& self,
+                            uintptr_t structAddr,
+                            int32_t   baseOffset,
+                            const std::string& namePrefix,
+                            std::vector<ScanField>& out,
+                            std::unordered_set<uintptr_t>& visited,
+                            int depth) -> void {
+        constexpr int kMaxDepth = 4;
+        if (depth > kMaxDepth) return;
+        if (!visited.insert(structAddr).second) return;  // cycle
+
+        // Use WalkClassEx at every depth so BoolProperty FieldMask is
+        // populated for nested bitfield bools (WalkClass alone covers it
+        // on the UE4 UProperty path only; the UE5 FProperty path needs
+        // the WalkClassEx pass). The extra metadata reads we don't use
+        // are cheap relative to the GObjects walk itself.
+        ClassInfo ci = Ubel::WalkClassEx(structAddr);
+        for (const auto& f : ci.Fields) {
+            // Leaf-type match: emit a ScanField at the cumulative offset.
+            bool accepted = false;
+            for (const auto& t : acceptedTypes) {
+                if (f.TypeName == t) { accepted = true; break; }
+            }
+            if (accepted) {
+                ScanField sf;
+                sf.offset        = baseOffset + f.Offset;
+                sf.size          = f.Size;
+                sf.name          = namePrefix.empty() ? f.Name : (namePrefix + "." + f.Name);
+                sf.typeName      = f.TypeName;
+                sf.boolFieldMask = f.boolFieldMask;
+                out.push_back(std::move(sf));
+                continue;
+            }
+
+            // StructProperty: resolve the inner UScriptStruct via
+            // FStructProperty::Struct (FField + FSTRUCTPROP_STRUCT) and
+            // recurse with the cumulative offset + dotted name prefix.
+            // Container properties (Array / Map / Set / Optional) are
+            // intentionally NOT recursed here -- TArray<T> scan is the
+            // v2 milestone gated by the crash-risk plan in memory
+            // project_value_search_caveats.
+            if (f.TypeName == "StructProperty" && f.Address) {
+                uintptr_t nested = 0;
+                if (Macht::ReadSafe(f.Address + DynOff::FSTRUCTPROP_STRUCT, nested) && nested) {
+                    std::string childPrefix = namePrefix.empty()
+                        ? f.Name : (namePrefix + "." + f.Name);
+                    self(self, nested, baseOffset + f.Offset, childPrefix, out, visited, depth + 1);
+                }
+            }
+        }
+    };
+
+    auto buildClassIndex = [&](uintptr_t classAddr) -> ScanClassInfo* {
+        auto it = classCache.find(classAddr);
+        if (it != classCache.end()) return &it->second;
+
+        ScanClassInfo sci;
+        // Two passes: first WalkClassEx for the class metadata (Name +
+        // FullPath are populated by Ubel::WalkClass already, but
+        // WalkClassEx also populates structType / inner / enum metadata
+        // we want available). Then expandFields walks the property chain
+        // recursively for ScanField emission.
+        ClassInfo ci = Ubel::WalkClassEx(classAddr);
+        sci.className = ci.Name;
+        sci.classPath = ci.FullPath;
+        sci.gameClass = !IsEnginePackage(ci.FullPath);
+
+        std::unordered_set<uintptr_t> visited;
+        expandFields(expandFields, classAddr, /*baseOffset=*/0,
+                     /*namePrefix=*/"", sci.fields, visited, /*depth=*/0);
+
+        auto inserted = classCache.emplace(classAddr, std::move(sci));
+        return &inserted.first->second;
+    };
+
+    // Cache FindDefiningClass results per (classAddr, fieldOffset) so a
+    // hot scan over many instances of the same class doesn't re-walk the
+    // SuperStruct chain on every candidate emission.
+    struct DefKey {
+        uintptr_t classAddr;
+        int32_t   offset;
+        bool operator==(const DefKey& o) const {
+            return classAddr == o.classAddr && offset == o.offset;
+        }
+    };
+    struct DefKeyHash {
+        size_t operator()(const DefKey& k) const {
+            return std::hash<uintptr_t>{}(k.classAddr)
+                 ^ (std::hash<int32_t>{}(k.offset) << 1);
+        }
+    };
+    std::unordered_map<DefKey, std::string, DefKeyHash> definingNameCache;
+
+    const int32_t count = GetCount();
+
+    LOG_INFO("ValueScan: First Scan dt=%s st=%d (target %zuB, gameOnly=%d, max=%d) over %d objects",
+             ValueScan::NameOf(dt), static_cast<int>(st), dtSize,
+             gameOnly ? 1 : 0, maxResults, count);
+
+    for (int32_t i = 0; i < count; ++i) {
+        // Periodic deadline + max-results check (every 4K objects keeps
+        // the chrono cost negligible while still bounding worst-case
+        // wall time to ~16ms past the deadline).
+        if ((i & 0xFFF) == 0) {
+            if (std::chrono::steady_clock::now() - t0 > kDeadline) {
+                result.stats.deadlineHit = true;
+                LOG_INFO("ValueScan: deadline reached after %d objects, %d candidates",
+                         i, static_cast<int>(result.candidates.size()));
+                break;
+            }
+            if (static_cast<int32_t>(result.candidates.size()) >= maxResults) break;
+        }
+
+        uintptr_t obj = GetByIndex(i);
+        if (!obj) continue;
+        result.stats.scannedObjects++;
+
+        uintptr_t cls = 0;
+        if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
+
+        // Skip class-meta objects -- we want instances + CDOs, not the
+        // UClass entries themselves. (A UClass's own class is "Class" /
+        // "BlueprintGeneratedClass" / etc.; an instance's class is the
+        // game class.)
+        uint32_t metaIdx = 0;
+        if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, metaIdx)) continue;
+        std::string metaName = Serie::GetString(metaIdx);
+        if (IsClassLikeMeta(metaName)) continue;
+
+        ScanClassInfo* sci = buildClassIndex(cls);
+        if (!sci || sci->fields.empty()) continue;
+        if (gameOnly && !sci->gameClass) continue;
+
+        // Defer instance-name resolution until we know we have a match;
+        // FName lookup is cheap but billions of unused calls add up.
+        bool   gotInstanceName = false;
+        std::string instanceName;
+
+        for (const auto& sf : sci->fields) {
+            if (static_cast<int32_t>(result.candidates.size()) >= maxResults) break;
+
+            uintptr_t valueAddr = obj + sf.offset;
+            uint8_t readBuf[8] = {};
+            if (!Macht::ReadBytesSafe(valueAddr, readBuf, dtSize)) continue;
+
+            // BoolProperty bitfield normalisation. The bytes we stored
+            // as prevValue must reflect the LOGICAL bool (0/1), not the
+            // raw shared byte, so Changed/Unchanged refines compare on
+            // a stable value even when sibling bits flip.
+            if (dt == ValueScan::DataType::Bool
+                && sf.boolFieldMask != 0 && sf.boolFieldMask != 0xFF) {
+                readBuf[0] = ((readBuf[0] & sf.boolFieldMask) != 0) ? 1 : 0;
+            }
+
+            if (!ValueScan::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
+
+            // Hit. Lazy-resolve instance metadata.
+            if (!gotInstanceName) {
+                instanceName    = Ubel::GetName(obj);
+                gotInstanceName = true;
+            }
+
+            ValueScan::Candidate cand;
+            cand.addr          = valueAddr;
+            cand.instanceAddr  = obj;
+            cand.instanceIndex = i;
+            cand.fieldOffset   = sf.offset;
+            std::memcpy(cand.prevValue, readBuf, dtSize);
+            cand.instanceName  = instanceName;
+            cand.className     = sci->className;
+            cand.fieldName     = sf.name;
+            cand.fieldType     = sf.typeName;
+            cand.boolFieldMask = sf.boolFieldMask;
+
+            // Defining class lookup with per-(class,offset) cache.
+            DefKey dk{ cls, sf.offset };
+            auto dit = definingNameCache.find(dk);
+            if (dit != definingNameCache.end()) {
+                cand.definingClassName = dit->second;
+            } else {
+                uintptr_t defAddr = FindDefiningClass(cls, sf.offset);
+                std::string defName = (defAddr && defAddr != cls)
+                    ? Ubel::GetName(defAddr) : sci->className;
+                definingNameCache.emplace(dk, defName);
+                cand.definingClassName = std::move(defName);
+            }
+
+            result.candidates.push_back(std::move(cand));
+        }
+    }
+
+    int32_t classesWithFields = 0;
+    for (const auto& kv : classCache) {
+        if (!kv.second.fields.empty()) ++classesWithFields;
+    }
+    result.stats.scannedClasses = classesWithFields;
+
+    auto dtms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - t0).count();
+    result.stats.durationMs = static_cast<int64_t>(dtms);
+
+    LOG_INFO("ValueScan: First Scan complete -- %d candidates in %lld ms (%d objects, %d classes with matching fields%s)",
+             static_cast<int>(result.candidates.size()),
+             static_cast<long long>(dtms),
+             result.stats.scannedObjects, classesWithFields,
+             result.stats.deadlineHit ? ", DEADLINE HIT" : "");
+    return result;
+}
+
+ValueScanStats RefineCandidates(
+    ValueScan::DataType                dt,
+    ValueScan::ScanType                st,
+    const uint8_t*                     targetBytes,
+    const uint8_t*                     target2Bytes,
+    std::vector<ValueScan::Candidate>& candidates,
+    double                             tolerance)
+{
+    ValueScanStats stats;
+    auto t0 = std::chrono::steady_clock::now();
+
+    const size_t dtSize = ValueScan::SizeOf(dt);
+    if (dtSize == 0) return stats;
+
+    const bool usePrev = ValueScan::IsPrevValueScanType(st);
+    if (!usePrev && !targetBytes) return stats;
+    if (st == ValueScan::ScanType::Between && !target2Bytes) return stats;
+
+    const int32_t initialSize = static_cast<int32_t>(candidates.size());
+
+    std::vector<ValueScan::Candidate> kept;
+    kept.reserve(candidates.size());
+
+    for (auto& c : candidates) {
+        uint8_t readBuf[8] = {};
+        if (!Macht::ReadBytesSafe(c.addr, readBuf, dtSize)) continue;
+
+        if (dt == ValueScan::DataType::Bool
+            && c.boolFieldMask != 0 && c.boolFieldMask != 0xFF) {
+            readBuf[0] = ((readBuf[0] & c.boolFieldMask) != 0) ? 1 : 0;
+        }
+
+        const uint8_t* cmpTarget = usePrev ? c.prevValue : targetBytes;
+        if (!ValueScan::ComparePredicate(dt, st, readBuf, cmpTarget, target2Bytes, tolerance)) continue;
+
+        std::memcpy(c.prevValue, readBuf, dtSize);
+        kept.push_back(std::move(c));
+    }
+
+    stats.scannedObjects = initialSize;
+    candidates           = std::move(kept);
+
+    auto dtms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - t0).count();
+    stats.durationMs = static_cast<int64_t>(dtms);
+
+    LOG_INFO("ValueScan: Refine st=%d (usePrev=%d): %d -> %d candidates in %lld ms",
+             static_cast<int>(st), usePrev ? 1 : 0,
+             initialSize, static_cast<int>(candidates.size()),
+             static_cast<long long>(dtms));
+    return stats;
 }
 
 } // namespace Aura

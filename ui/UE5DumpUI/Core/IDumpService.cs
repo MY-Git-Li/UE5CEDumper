@@ -108,6 +108,41 @@ public interface IDumpService
     Task<ClassListResult> ListClassesAsync(
         bool gameOnly = true, int limit = 5000, CancellationToken ct = default);
 
+    // --- Value Search (CE-style First Scan + Next Scan) ---
+    //
+    // Walks GObjects + UProperty metadata for every UPROPERTY field
+    // matching `dataType` across all UObject instances, applying the
+    // scan predicate. Returns enriched candidates + a session id for
+    // follow-up RefineValueScanAsync calls.
+    //
+    // For ValueScanType.Between, both `value` and `value2` must be
+    // populated. For ValueScanType.Exact/Bigger/Smaller `value2` is
+    // ignored. Prev-value predicates (Changed/Unchanged/Increased/
+    // Decreased) are NOT valid for the first scan — caller must use
+    // RefineValueScanAsync for those.
+    //
+    // Native C++ fields (non-UPROPERTY) are NOT visible to this scan.
+    // The UI's Value Search tab surfaces this limitation in a banner.
+    Task<ValueScanBeginResult> BeginValueScanAsync(
+        ValueScanDataType dataType,
+        ValueScanType scanType,
+        string value,
+        string? value2 = null,
+        bool gameOnly = true,
+        int maxResults = 50000,
+        double tolerance = 0.0,
+        CancellationToken ct = default);
+
+    Task<ValueScanRefineResult> RefineValueScanAsync(
+        ulong sessionId,
+        ValueScanType scanType,
+        string? value = null,
+        string? value2 = null,
+        double tolerance = 0.0,
+        CancellationToken ct = default);
+
+    Task EndValueScanAsync(ulong sessionId, CancellationToken ct = default);
+
     // --- All Functions Enumeration (Interesting Functions Finder) ---
     Task<AllFunctionsResult> ListAllFunctionsAsync(
         bool gameOnly = true, int limit = 100000, CancellationToken ct = default);

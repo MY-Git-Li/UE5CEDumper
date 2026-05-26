@@ -50,6 +50,9 @@ constexpr const char* CMD_WALK_DATATABLE_ROWS   = "walk_datatable_rows";
 constexpr const char* CMD_SCAN_STATUS           = "scan_status";
 constexpr const char* CMD_SET_UE_VERSION_OVERRIDE = "set_ue_version_override";
 constexpr const char* CMD_SET_INVOKE_TIMEOUT       = "set_invoke_timeout";
+constexpr const char* CMD_BEGIN_VALUE_SCAN         = "begin_value_scan";
+constexpr const char* CMD_REFINE_VALUE_SCAN        = "refine_value_scan";
+constexpr const char* CMD_END_VALUE_SCAN           = "end_value_scan";
 
 // Event types
 constexpr const char* EVT_WATCH            = "watch";

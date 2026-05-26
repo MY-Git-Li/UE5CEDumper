@@ -6,7 +6,7 @@ upcoming work and [dev-log.md](dev-log.md) for the historical commit
 trail. Build number tags reflect when each row reached its current
 state.
 
-> **Last refreshed**: 2026-05-24 (build 719 on `dev`). New: **property freeze (Route B)** — PropertySearch row "Freeze" button generates an AA Script that locks a property horizontally across all live instances of the owning class. Auto-rescan every 5s catches respawns. Requires AOBMaker plugin (no clipboard fallback). New DLL mailbox cmd `CMD_LIST_INSTANCES = 6`; new helper `scripts/ue5_freeze_helper.lua`. See [dev-log.md](dev-log.md) 2026-05-24 entry.
+> **Last refreshed**: 2026-05-26 (build 738 on `dev`). New: **Value Search tab** — CE-style First Scan / Next Scan over UPROPERTY fields. Walks GObjects + per-class field index, returns enriched candidates (class + field + defining class + value), refines with the 8 standard CE scan types. Session-based; 5-min idle expiry. Three new pipe cmds (`begin_value_scan` / `refine_value_scan` / `end_value_scan`). Native C++ fields explicitly excluded — banner in UI surfaces the limitation. MVP types: Int8/16/32/64, UInt8/16/32/64, Float, Double, Bool. FString / TArray / FVector deferred. See [dev-log.md](dev-log.md) 2026-05-26 entry.
 
 -----
 
@@ -91,6 +91,25 @@ or the build catches the drift.
 Stage 3 (class validation — DLL `validate_object_class` round-trip before
 invoke) deferred until a real class-mismatch crash motivates it; picker
 output is almost always class-correct in practice.
+
+## Value Search — by-value scan (build 738)
+
+New tab "Value Search" between Interesting Properties and Console. Fills
+the search-by-value gap (PropertySearch was by-name; InstanceFinder was
+by-address; this is the third axis). Port of discrete's Phase 27b
+`ValueScanSession` shape with UE-specific scan engine.
+
+| Component | What it does |
+|---|---|
+| `ValueScan::SessionManager` (DLL) | 5-min idle-expiry session container; holds candidate vector + DataType between RPCs. |
+| `Aura::ScanForValue` | Walks GObjects (skips UClass meta), per-class field index cached lazily via `Ubel::WalkClassEx` filtered to matching DataType, typed-read + `ComparePredicate`. 15 s deadline. |
+| `Aura::RefineCandidates` | Re-reads each candidate's bytes, applies predicate (prev-value scan types compare against stored `Candidate.prevValue`), prunes failing, updates `prevValue` on survivors. |
+| `Fern.cpp` handlers | `begin_value_scan` / `refine_value_scan` / `end_value_scan` (3 new cmds; total **39**). |
+| `ValueSearchPanel.axaml` | Top banner (locked by test): "Native C++ fields (non-UPROPERTY) cannot be found here — use Cheat Engine's raw memory scan for those." DataType + ScanType selectors, Value/Value2 inputs (visibility bound to ScanType), Candidates DataGrid with Class.Field / Type / Value / Offset / Addr / Instance columns. |
+
+Supported MVP DataTypes: Int8/16/32/64, UInt8/16/32/64, Float, Double, Bool (BoolProperty bitfields normalized to 0/1 via `FieldMask`). **Not supported**: FString, FName, FText, TArray\<T\>, FVector / FRotator / FTransform — deferred to v2. Native C++ fields (non-UPROPERTY) are explicitly excluded — banner directs the user to CE for those.
+
+Scan flow: `Exact / Bigger / Smaller / Between` for First Scan; `Changed / Unchanged / Increased / Decreased` additionally available for Next Scan. Cross-tab navigation: per-row "Open in Live Walker" opens the owning instance with the field address pre-populated.
 
 ## Property freeze — horizontal class-wide (build 719)
 

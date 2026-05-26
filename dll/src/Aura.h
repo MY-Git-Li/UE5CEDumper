@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "Ubel.h"   // For ::ClassInfo (defined at global scope in Ubel.h, despite the filename) used by WalkClassesBatch
+#include "ValueScan.h"  // For ValueScan::Candidate / DataType / ScanType used by ScanForValue / RefineCandidates
 
 // FUObjectItem structure (in FChunkedFixedUObjectArray)
 // Size varies by UE version — auto-detected at Init() time:
@@ -455,5 +456,71 @@ struct SparseDelegateResult {
 SparseDelegateResult WalkSparseDelegateBindings(uintptr_t ownerObj,
                                                  const std::string& fieldName,
                                                  int32_t maxBindings = 64);
+
+// === Value Search (CE-style First Scan / Next Scan workflow) ===
+//
+// Walks GObjects + UProperty metadata to find every UPROPERTY-declared
+// field matching `dt` whose typed value satisfies the predicate. Each
+// candidate is enriched with owning UObject + class + defining-class +
+// field metadata via the same machinery FindByAddress / SearchProperties
+// already use.
+//
+// Native C++ fields (non-UPROPERTY) are NOT visible to this scan — the
+// UI is contractually required to surface this limitation. See
+// `project_value_search_caveats` memory for the rationale and the
+// TArray<T> crash-risk plan that gates the v2 expansion past primitives.
+
+struct ValueScanStats {
+    int32_t scannedClasses = 0;   // Unique classes with matching-type fields
+    int32_t scannedObjects = 0;   // UObject instances iterated
+    int64_t durationMs     = 0;
+    bool    deadlineHit    = false;
+};
+
+struct ValueScanResult {
+    std::vector<ValueScan::Candidate> candidates;
+    ValueScanStats                    stats;
+};
+
+// First Scan: walk every UPROPERTY field matching `dt` across all
+// UObject instances, applying the (st, targetBytes, target2Bytes,
+// tolerance) predicate. Skips UClass meta-objects -- only live
+// instances + CDOs are scanned.
+//
+// Valid scan types for first scan: Exact / Bigger / Smaller / Between.
+// Prev-value scan types are silently treated as Exact against
+// targetBytes -- the pipe handler rejects invalid combinations upstream.
+//
+// `tolerance` only affects Float/Double comparisons (CE-style rounded
+// scan -- displays show "338" for a real float of 337.5, so users want
+// to scan with +-0.5 slack). Integer types ignore it.
+//
+// Returns at most maxResults candidates; the scan also bails on a 15s
+// deadline (stats.deadlineHit fires when this happens). Used by the
+// Value Search tab.
+ValueScanResult ScanForValue(
+    ValueScan::DataType dt,
+    ValueScan::ScanType st,
+    const uint8_t*      targetBytes,
+    const uint8_t*      target2Bytes,
+    bool                gameOnly,
+    int32_t             maxResults = 100000,
+    double              tolerance  = 0.0);
+
+// Refine an existing candidate vector in place: re-read each
+// candidate's bytes, apply (st, targetBytes, target2Bytes, tolerance)
+// predicate, prune entries that no longer match. For prev-value scan
+// types (Changed / Unchanged / Increased / Decreased) the candidate's
+// prevValue snapshot is used in place of targetBytes. prevValue is
+// updated to the latest-observed bytes on survivors so the NEXT
+// prev-value refine compares against the bytes seen during THIS
+// refine -- standard CE Next Scan semantics.
+ValueScanStats RefineCandidates(
+    ValueScan::DataType                dt,
+    ValueScan::ScanType                st,
+    const uint8_t*                     targetBytes,
+    const uint8_t*                     target2Bytes,
+    std::vector<ValueScan::Candidate>& candidates,
+    double                             tolerance = 0.0);
 
 } // namespace Aura
