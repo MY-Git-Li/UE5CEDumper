@@ -11,6 +11,198 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-05-27 (PR #211 merged dev → main) — AOT-warning cleanup on Invoke structured-return DataGrid (build 780)
+
+The pick #5 structured-return DataGrid (build 775) wired each `DataGridTextColumn` with `new Avalonia.Data.Binding("PropertyName")`. That ctor has `RequiresUnreferencedCodeAttribute` + `RequiresDynamicCodeAttribute` because Avalonia's string-path Binding uses reflection to resolve the property — directly violates CLAUDE.md's "Native AOT compatible, no reflection-based APIs" rule. `dotnet publish` emitted 18 warnings (IL2026 + IL3050) across the four column declarations + their forwarded constructor analysis.
+
+Fix: switch the four columns to `DataGridTemplateColumn` + `FuncDataTemplate<StructFieldValue>(lambda)`. Each cell's text comes from a strongly-typed `Func<StructFieldValue, string>` so no reflection or dynamic dispatch fires. Centralised via a new private helper `AddStructuredReturnColumn(header, width, textSelector)` so the four column declarations stay one-line each.
+
+Trade-off documented in the commit: FuncDataTemplate materialises each cell once at row creation and doesn't observe per-property INPC after that. Acceptable for this panel because `UpdateStructuredReturnGrid` replaces `ItemsSource` wholesale on each FIRE — no in-place mutation case.
+
+Tests: 1080 (unchanged — pure UI plumbing fix). Publish build emits zero IL2026/IL3050; UE5DumpUI.exe still trims to 42.4 MB.
+
+-----
+
+## 2026-05-27 — Console panel: UCheatManager stripped-body hint footer (#6, build 778)
+
+First live test of the build-731 Console tab surfaced the canonical gotcha: `UCheatManager::Fly` / `Ghost` / `God` / `Walk` / `Slomo` / `ChangeSize` invokes return `Result=0` (OK) but produce no in-game effect on cooked Shipping builds. Root cause: UE wraps these in `#if !UE_BUILD_SHIPPING`; Epic ships with that defined, so the function bodies compile out but the `UFUNCTION(exec)` reflection metadata (generated pre-cook by UHT) survives. PE call really happens, function returns 0, no-op.
+
+**Distinct failure mode** from the build 647-648 wrong-vtable-slot bug. The discriminator is `Stark::GetHookFireCount()`: `>0 + Result=0 + no effect = cooker strip`; `==0 = hook on wrong slot`.
+
+Surface area:
+- `ConsoleViewModel.IsLikelyUCheatManagerExec(entry)` — public + static, case-insensitive substring match on `ClassName` or `SuperName` against "CheatManager". Catches engine class + game-defined subclasses (`MyGameCheatManager` / `BP_CheatManager_C`) + super-chain-via-immediate-super (`AFooCheats : UCheatManager`). Public so tests lock the heuristic without standing up a VM.
+- `ConsoleViewModel.SelectedExecHint` — computed property re-evaluated on `SelectedResult` change via `OnSelectedResultChanged` partial; warning text when the row is UCheatManager-derived, empty otherwise.
+- `ConsolePanel.axaml` — orange-bordered footer Border below the status row, IsVisible bound to non-empty SelectedExecHint. Same visual treatment as the Value Search "native C++ fields" banner so users recognise the warning pattern.
+- `docs/lessons-learned.md` — new bullet under "UFunction Invoke / ProcessEvent" with the diagnostic flow.
+- Memory file `feedback_ucheatmanager_stripped.md` — full diagnostic table + per-version UE source pointer + "what we don't try to do" scope (bypassing the strip is out of scope; this tool is discovery + dispatch).
+
+Tests: 1065 → 1080 (+15). 10-row theory for the predicate (5 positive incl. case-insensitive + super-name-only variants, 4 negative), null guard, SelectedExecHint empty/populated/refresh-on-change.
+
+Deferred: full super-chain walk to catch second-degree subclasses (`BP_MyCheatManager_C : MyGameCheatManager : UCheatManager`) — current substring heuristic catches the first two layers.
+
+-----
+
+## 2026-05-27 — Invoke result: structured-return DataGrid for struct returns (#5, build 775)
+
+Existing decoder already produced `"X=1.0, Y=2.0, Z=3.0"`-style comma joins inside `_resultLabel` for FVector / FRotator returns. Pick #5 wires the same decode into a small 4-column DataGrid (Field / Type / Value / Offset) below the text decode so each sub-field becomes its own row with absolute buffer offset.
+
+What landed:
+- `Models/StructFieldValue.cs` — pure record (Name, Type, Value, Offset). Offset is **absolute** buffer offset (return param offset + sub-field offset) so users can copy it into Find In Containers / CE memrec setup directly.
+- `Services/StructReturnDecoder.cs` — static `Decode` + `CanDecode`. Resolution order: KnownStructLayouts (per-version locked) → DLL-discovered dynamic StructFields → empty list. Delegates each byte→typed-value cell to `InvokeParamDialog.DecodeParamValue` so the grid and result-label never disagree on a byte mapping. SafeDecode wraps with try/catch so a single bad field doesn't blow the whole grid.
+- InvokeParamDialog — pre-resolves `_returnParam` at construction; clears + hides grid at top of `OnFireClicked` so stale rows don't flash across invocations; `UpdateStructuredReturnGrid` populates after a successful FIRE; header label includes struct name (e.g. `"Return value (decoded — Vector):"`).
+
+What's NOT done (deferred):
+- **ObjectProperty / ClassProperty return resolution** to "Name (Class)". Pointer returns still show as 8-byte hex in the existing decode; resolving to UObject name needs a DLL pipe round-trip (`Ubel::GetName` on the returned address) — separate scope.
+- **Recursive struct expansion**. `FHitResult.Location` (FVector) renders as one "Location (StructProperty)" row with the inner FVector showing as raw bytes; WalkFunctions only goes one level deep on `param.structFields` by design. Nested expansion needs recursive DLL-side discovery.
+
+Tests: 1052 → 1065 (+13). New `StructReturnDecoderTests` covers CanDecode contract, FVector + FRotator decode shape, KnownStructLayouts-wins-over-StructFields precedence (locked by giving the same param both inputs with conflicting field lists), dynamic-fields fallback per-type decode, absolute offset surfacing, short-buffer tolerance (out-of-bounds reads degrade to "?" instead of throwing).
+
+Verification target: Geri's `PlayerCameraManager::GetCameraLocation` returns FVector — grid should show 3 rows (X / Y / Z floats) at offsets 0x4 / 0x8 / 0xC of the post-call param buffer.
+
+-----
+
+## 2026-05-27 — NuGet packages bump + dotnet test migration to MTP mode (build 771)
+
+User-driven NuGet bumps surfaced a .NET 10 + `Microsoft.Testing.Platform.MSBuild` 2.x compat break: the legacy VSTest bridge target was dropped on .NET 10 SDK, so the existing `dotnet test <proj>` invocation errored with "Testing with VSTest target is no longer supported by Microsoft.Testing.Platform on .NET 10 SDK and later" (see https://aka.ms/dotnet-test-mtp-error).
+
+Migration per the official upgrade path:
+
+1. **New `global.json`** at repo root with:
+   ```json
+   { "test": { "runner": "Microsoft.Testing.Platform" } }
+   ```
+   switches `dotnet test` to MTP mode natively, replacing the VSTest bridge entirely.
+
+2. **`build.ps1` invocation updated**: `--project <proj>` instead of legacy positional form (the latter silently downgrades to VSTest mode). Dropped `--nologo` / `-v minimal` since they aren't in MTP mode's allowed dotnet-test flag list — unknown flags get forwarded to xunit.v3, which prints help + exits 5.
+
+3. **Dropped explicit pins** on `Microsoft.Testing.Platform.MSBuild` / `Microsoft.Testing.Extensions.Telemetry` / `Microsoft.Testing.Extensions.TrxReport.Abstractions`. xunit.v3 bundles its own MTP bridge (`Xunit.MicrosoftTestingPlatform.*`) compiled against a specific MTP API surface; pinning explicit 2.2.3 versions overrode xunit.v3's tested transitives and triggered `MissingMethodException` on `IOutputDevice.DisplayAsync` at test-run time. Let xunit.v3 resolve transitively.
+
+NuGet bumps kept (all transitives surfaced as explicit pins by the user's IDE bump):
+- Avalonia.Angle.Windows.Natives 2.1.27548.20260419
+- HarfBuzzSharp.NativeAssets.* 8.3.1.5
+- SkiaSharp + NativeAssets.* 3.119.4
+- Tmds.DBus.Protocol 0.93.0 → 0.94.0
+- Microsoft.NET.Test.Sdk 18.5.1 → 18.6.0
+- Microsoft.Extensions.* / System.Memory.Data / System.Security.Cryptography.ProtectedData → 10.0.8
+- Azure SDK chain transitives (Azure.Core 1.57.0 / OpenTelemetry / Microsoft.Identity.Client 4.84.1 etc.)
+
+Tests: 1052 passing under MTP mode (no behaviour change — pure dependency bump + test runner mode migration).
+
+**Lesson logged**: never explicitly pin packages that come in transitively via a test framework's own bridge. Let the framework own the version dance for its internal compatibility surface.
+
+-----
+
+## 2026-05-27 — Multi-row → One .CT batch generator (#3, build 760)
+
+Polishes the existing single-row AA(Baked) / Freeze export into a multi-row batch on the **Interesting Functions** + **Interesting Properties** tabs. Promotes the discover→use workflow from "research toy" to "shareable cheat-table author":
+
+1. Discover (existing flow: Load → score → filter → scan)
+2. Select N relevant rows (Ctrl/Shift+click; DataGrid is now `SelectionMode="Extended"`)
+3. Click 📦 Generate CT → save-dialog → one .CT with per-row AA Script entries, grouped by category
+
+### Architecture
+
+- `Models/CheatTableRow.cs` — discriminated row type (`CtPropertyRow` wraps `FreezeScriptParams`, `CtFunctionRow` wraps Baked params). Source-panel-agnostic so future call sites (LiveWalker mixed rows, Live PE Profiler hits) can feed the same builder without churn.
+- `Services/CheatTableBuilder.cs` — assembles N rows into a `<CheatTable CheatEngineTableVersion="46">` XML matching CE's File→Save As shape. Root group → per-category sub-groups (alphabetical, Uncategorised trails) → one `<CheatEntry>` per row with `<VariableType>Auto Assembler Script</VariableType>` body. IDs sequential from `BaseId=1000`. XML escapes all five canonical entities so `TArray<int>` / `&` / quotes in descriptions can't break a CT load.
+- Property rows reuse `FreezeScriptGenerator`; function rows reuse `BakedScriptGenerator`. No new generator code.
+- VM stays IO-free — emits `RequestSaveCheatTable(defaultName, ctXml)` event; MainWindow owns the platform save-file dialog + UTF-8 write via the existing `SaveCheatTableAsync` helper.
+
+### UX details
+
+- **Property rows**: defaults to a per-UE-type "obvious cheat" freeze literal (Float = `9999.0`, Int = `99999`, Bool = `true`, Byte = `255`); user edits CFG.value in CE before activating. Struct / array / non-scalar rows are skipped (status: "Generated N entries (skipped K unsupported)"). Description includes the defining-class hint when it differs from the user-picked class.
+- **Function rows**: BakedValues intentionally empty (helper zero-fills PARAMS); description for parameterised funcs reads `"Class::Func (N (XB)) — edit baked PARAMS in CE"` so users know to populate before activating. No-arg funcs read `"Class::Func()"`.
+- Default filename: `{Source}-batch-yyyyMMdd-HHmmss.CT` where Source is `InterestingProperties` / `InterestingFunctions`.
+
+Tests: 1028 → 1052 (+24). `CheatTableBuilderTests` covers structural shape (CheatTable root + nesting + per-row VariableType + UserdefinedSymbols), category alphabetical ordering + Uncategorised-trails-last, input order preservation within a category, 3-row / 10-row / mixed property+function selections, ID uniqueness + sequential allocation, empty/null rows throw, XML escaping for `TArray<int>` / `&` / quotes, DefaultFileName format + fallback, SanitizeFileName, VM mapping (BuildRowsFromSelection skip-unsupported counts, defining-class targetClass choice, per-type freeze literal theory).
+
+Out of scope for v1: LiveWalker integration (heterogeneous row types — needs its own UX pass); AOBMaker direct-inject of the generated CT (currently save-to-disk + user opens in CE).
+
+-----
+
+## 2026-05-27 — `scripts/analysis/diff_dumps.py` — same-game patch diff at UProperty granularity (#4)
+
+Pure-Python sister script to `analyze_dumps.py` — consumes the same `Dump All Metadata` JSONL corpus but does N=2 patch-vs-patch diff instead of N=many cross-game aggregation. Closes the cheat-table-maintainer pain: when a game ships a silent UPROPERTY offset shuffle, hand-coded tables break and the binary search for the new offset is hours of grinding.
+
+Surface area:
+- Class-level: Added / Removed / props_size delta
+- Property-level: Added / Removed / **Moved** (same name, different offset/size) / **Type changed** (FloatProperty → DoubleProperty incl. inner_type / struct_type / obj_class / enum sub-changes)
+- Function-level: Added / Removed / **Signature changed** (return_type / num_parms / parms_size / flags differ — bodies aren't in the dump so logic-only changes are invisible; documented limitation)
+
+Match keys: classes by `path` (canonical UE id; `addr` is session-local and ignored). Path normalisation (`//Script/X` ≡ `/Script/X`). Properties + functions by `name` within class.
+
+CLI:
+```bash
+python diff_dumps.py <old.jsonl> <new.jsonl>           # full report → stdout
+python diff_dumps.py <old.jsonl> <new.jsonl> -o diff.md
+python diff_dumps.py <old.jsonl> <new.jsonl> --minimal       # Moved + sig-changed only
+python diff_dumps.py <old.jsonl> <new.jsonl> --include-engine
+python diff_dumps.py --self-test                              # synthetic fixtures
+```
+
+`--self-test` runs 6 built-in synthetic-fixture scenarios (Added / Removed / Moved / TypeChanged / SignatureChanged paths, engine-class filter, path normalisation, self-diff identity, Markdown render edge cases) so the diff logic is checkable without external dumps.
+
+Verified:
+- Self-test all assertions pass
+- Self-diff Geri vs Geri → 87 unchanged, 0 changes (identity property holds)
+- Cross-game Geri vs ES2 → module-mismatch warning fires; 1652 added / 86 removed / 0 changed (doesn't crash on massive divergence)
+
+README extended with the same-game-patch workflow + match-key + known limitations sections. No auto-rename detection (renamed field shows as Removed + Added); no function body comparison (only metadata is dumped — logic-only refactors invisible; covered by Live ProcessEvent Profiler in the future).
+
+-----
+
+## 2026-05-27 — Value Search Phase 2: FString / FName / FText + FVector / FRotator + TArray<T> (build 757)
+
+Closes the v2-deferred list from `docs/todo.md` Section 0 — extends the build-738 numeric-primitives Value Search to the three deferred type families:
+
+### Phase 2A — FString / FName / FText
+
+- New ScanTypes `Contains` / `StartsWith` / `EndsWith` with CE-style case-insensitive default (ASCII fold; non-ASCII bytes compare bitwise). Opt-in case sensitivity exposed as a UI checkbox visible only for string DataTypes.
+- `Ubel::ReadFStringAt` / `ReadFNameAt` / `ReadFTextStringAt` exposed publicly so Aura's scan path doesn't duplicate the FString-header decode + UTF-16 sanitize logic.
+- FText is best-effort (cooked games strip most display strings — ES2 smoke test resolved 1/1551 classes, expected).
+
+### Phase 2B — FVector / FRotator (component-wise tolerance)
+
+- `CompareVectorPredicate` compares X / Y / Z per axis with shared tolerance. Exact / Bigger / Smaller / Between apply to all axes; Changed / Increased / Decreased trigger when ANY axis moves (matches in-game movement patterns).
+- StructProperty inner-name match against `VectorStructNames` (`Vector` / `Vector3f` / `Rotator` / `Rotator3f` / NetQuantize variants) so we don't read 12 bytes from every UE struct.
+- FTransform DataType reserved on the wire but mapped to no struct names — returns zero hits pending per-version Translation offset detection (UE4/UE5-non-LWC: +16, UE5 LWC: +32). Documented in `VectorStructNames()`.
+
+### Phase 2C — TArray<T> with safety circuit-breaker
+
+- `ScanField` gains `isArray` + `elemStride` + `elemTypeName`. `expandFields` emits `ArrayProperty` entries when Inner matches the wanted DataType (primitive / string / vector inner all supported).
+- Per-instance loop branches on `isArray` and walks `TArray.Data`, emitting one candidate per match labelled `FieldName[N]`.
+- **Soft circuit-breaker** per memory `project_value_search_caveats`: `Num > 10M` skips with `LOG_WARN`; `Num >= 0`, `Max >= Num`, `Data != null` guards. Macht's SEH-wrapped reads turn stale post-reallocation addresses into safe failures (candidate drops without crash).
+- Refine re-reads strings via `c.addr` instead of `(instanceAddr, fieldOffset)` so array-element strings work uniformly with direct string fields.
+
+### Wire-schema additions (all backward-compatible)
+
+Fields are omitted in the common case so pre-Phase-2 traffic is byte-identical:
+- `begin_value_scan` / `refine_value_scan` gain optional `case_sensitive` (attached only for string DataTypes when true).
+- Existing `tolerance` now applies to FVector/FRotator too (component-wise per axis).
+- DataType strings: `FString`, `FName`, `FText`, `FVector`, `FRotator`, `FTransform`.
+- ScanType strings: `Contains`, `StartsWith`, `EndsWith`.
+
+Pipe handlers in Fern.cpp gain `IsScanTypeValidFor` gating that rejects nonsensical combinations (`FString + Bigger`, `Int32 + Contains`, etc.) with an explicit error rather than letting the scan run and silently return 0 hits.
+
+### Live verification (EVERSPACE 2, UE 5.5)
+
+| DataType | ScanType | Value | Result |
+|---|---|---|---|
+| FString | Contains | "Engine" | 54 / 323ms ✓ |
+| FName | Contains | "Engine" | 7119 / 415ms ✓ |
+| FText | Contains | "Engine" | 1 / 396ms (cooked-build limitation) |
+| FVector | Exact (CSV) tol=0.01 | 49966 / 303ms (hit max_results cap) |
+| FRotator | Exact tol=0.01 | 16819 / 290ms ✓ |
+
+No `LOG_WARN: skipping TArray with Num=` fired across ~1.15M scanned objects — ES2 has no pathological arrays.
+
+### Tests
+
+1081 → 1306 total (+225).
+- DLL helpers: 124 → 247 (+123). ScanType partition for Contains/StartsWith/EndsWith; type-family predicates (`IsStringDataType` / `IsVectorDataType` / `IsSubstringScanType`); `IsScanTypeValidFor` matrix; `CompareStringPredicate` Exact/Substring/Changed/Unchanged; `CompareVectorPredicate` Exact/Ordering/Between/PrevValue/RejectsSubstring; `VectorStructNames` per-family content.
+- C# tests: 957 → 1028 (+71 spread across this + tolerance work). `IsScanTypeValidFor` 27-row theory mirroring DLL contract; `VisibleScanTypeOptions` filtering per DataType; `SelectedScanType` auto-reset on incompatible-type switch; `SupportsCaseSensitive` / `SupportsTolerance` gating; wire-shape locks for `case_sensitive` (string-only) and `tolerance` (now also vector types).
+
+-----
+
 ## 2026-05-26 — Value Search: Float/Double tolerance (CE-style rounded scan) (build 746)
 
 User-requested follow-up after the build-744 fix landed TQ2 GAS scans. Game UIs commonly display attributes rounded to the nearest integer ("HP: 338") while the underlying float is something like 337.5. Without tolerance, a scan for "338" misses 337.5 and the user has to guess at decimal precision.

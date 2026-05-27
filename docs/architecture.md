@@ -12,11 +12,12 @@ UE5CEDumper/
 ├── CMakeLists.txt                  ← Root CMake (delegates to dll/)
 ├── build_number.txt                ← Auto-incremented build counter
 ├── build.cmd / build.ps1           ← Full clean-build scripts (DLL + UI)
+├── global.json                     ← .NET 10 + Microsoft.Testing.Platform opt-in (build 771)
 ├── .gitmodules
 │
 ├── dll/                            ← C++ DLL (injected into game process)
 │   ├── CMakeLists.txt              ← DLL build config (versioning, git hash, deps)
-│   └── src/                        ← 15 .cpp + 14 .h (Frieren-themed; see naming-convention.md)
+│   └── src/                        ← 16 .cpp + 17 .h (Frieren-themed; see naming-convention.md)
 │       ├── Heiter.cpp              ← dllmain — DLL_PROCESS_ATTACH, AutoStartThreadProc
 │       ├── Methode.cpp             ← CEPlugin — CE plugin Type 5 main menu
 │       ├── Grimoire.h              ← Constants — magic strings, pipe name, UObject offsets, DynOff namespace
@@ -41,14 +42,17 @@ UE5CEDumper/
 │       ├── ProxyDinput8.def        ← dinput8.dll export forwarding
 │       │
 │       ├── Frieren.cpp / .h        ← ExportAPI — 30 C ABI exports for CE Lua bridge
-│       ├── Fern.cpp / .h           ← PipeServer — Named pipe IPC server, JSON dispatch (31 commands)
+│       ├── Fern.cpp / .h           ← PipeServer — Named pipe IPC server, JSON dispatch (~42 commands)
+│       ├── ValueScan.cpp / .h      ← Value Search session manager + DataType / ScanType /
+│       │                              ComparePredicate / CompareStringPredicate /
+│       │                              CompareVectorPredicate (builds 738 + 757 Phase 2)
 │       └── Renge.h                 ← PipeProtocol — shared JSON command/field name constants
 │
 ├── docs/                           ← Documentation
 │   ├── architecture.md             ← This file
 │   ├── dev-log.md                  ← Running milestone log + capability matrix + gaps (read first)
 │   ├── dll-spec.md                 ← C++ header definitions, offset tables, CE Lua bridge
-│   ├── pipe-protocol.md            ← Named Pipe JSON IPC protocol (31 commands)
+│   ├── pipe-protocol.md            ← Named Pipe JSON IPC protocol (42 commands)
 │   ├── ui-spec.md                  ← Avalonia UI tech stack, component skeletons
 │   ├── export-formats.md           ← CE XML, CSX, SDK Header, USMAP export rules
 │   ├── technical-notes.md          ← UE version diffs, FField vs UProperty, FNamePool internals,
@@ -64,7 +68,7 @@ UE5CEDumper/
 │
 ├── ui/                             ← C# Avalonia UI App
 │   ├── UE5DumpUI.sln
-│   ├── UE5DumpUI.Tests/            ← xUnit test project (16 .cs test files, 496 tests)
+│   ├── UE5DumpUI.Tests/            ← xUnit test project (~33 .cs test files, 1080 tests as of build 780; runs under Microsoft.Testing.Platform via global.json opt-in)
 │   └── UE5DumpUI/
 │       ├── UE5DumpUI.csproj        ← .NET 10 windows, Avalonia 12.0.2, Native AOT
 │       ├── Program.cs              ← Avalonia entry point
