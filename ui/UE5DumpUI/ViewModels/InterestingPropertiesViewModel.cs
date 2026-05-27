@@ -75,6 +75,12 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
     public event Action<string, string>? NavigateToProperty;
     public event Action<string>? RequestCopyText;
 
+    /// <summary>Raised when the user clicks "Generate Cheat Table" on
+    /// the multi-select toolbar. Subscribers (MainWindow) open the save
+    /// dialog and write the payload — keeping IO out of the VM keeps it
+    /// testable.</summary>
+    public event Action<string /*defaultFileName*/, string /*ctXml*/>? RequestSaveCheatTable;
+
     public InterestingPropertiesViewModel(IDumpService dump, ILoggingService log)
     {
         _dump = dump;
@@ -275,5 +281,129 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
         if (string.IsNullOrEmpty(row.PropName)) return;
         RequestCopyText?.Invoke(row.PropName);
         StatusText = $"Copied property name: {row.PropName}";
+    }
+
+    // ------------------------------------------------------------------
+    // Multi-row batch: turn the user's current DataGrid selection into a
+    // single CT file (one freeze entry per row, grouped by Category).
+    // Rows whose UE type isn't freeze-supported (StructProperty,
+    // ArrayProperty, etc.) are dropped from the batch with a status-
+    // line warning rather than silently skipped.
+    // ------------------------------------------------------------------
+
+    /// <summary>Default Lua literal for a freeze CFG.value, chosen
+    /// per UE type. Users edit this in CE before activating; the
+    /// values here are "obvious cheat" placeholders (max-ish for
+    /// numerics, true for bool).</summary>
+    internal static string DefaultFreezeLiteral(string ueTypeName) => ueTypeName switch
+    {
+        "BoolProperty"    => "true",
+        "ByteProperty"    => "255",
+        "Int8Property"    => "99",
+        "Int16Property"   => "9999",
+        "UInt16Property"  => "9999",
+        "IntProperty"     => "99999",
+        "UInt32Property"  => "99999",
+        "EnumProperty"    => "0",
+        "Int64Property"   => "99999",
+        "UInt64Property"  => "99999",
+        "FloatProperty"   => "9999.0",
+        "DoubleProperty"  => "9999.0",
+        _                 => "0",
+    };
+
+    /// <summary>Build the CT batch from <paramref name="selected"/>. Public
+    /// + static for direct test coverage (no need to stand up the full VM
+    /// to verify the row mapping + skip-reason accounting).</summary>
+    public static (
+        List<CheatTableRow> rows,
+        int skippedUnsupported,
+        int skippedMissingOffset) BuildRowsFromSelection(
+            IEnumerable<ScoredPropertyRow> selected)
+    {
+        var rows = new List<CheatTableRow>();
+        int skippedUnsupported = 0;
+        int skippedMissingOffset = 0;
+        foreach (var sr in selected)
+        {
+            if (sr is null) continue;
+            if (!FreezeScriptGenerator.IsTypeSupported(sr.PropType))
+            {
+                skippedUnsupported++;
+                continue;
+            }
+            // PropOffset==0 is valid (root of a struct), but DefiningClassName
+            // empty signals a malformed row from a partial pipe reply —
+            // drop it rather than emit a broken script.
+            string targetClass = string.IsNullOrEmpty(sr.DefiningClassName)
+                ? sr.ClassName : sr.DefiningClassName;
+            if (string.IsNullOrEmpty(targetClass))
+            {
+                skippedMissingOffset++;
+                continue;
+            }
+
+            var fp = new FreezeScriptParams
+            {
+                ClassName       = targetClass,
+                PropertyName    = sr.PropName,
+                PropertyOffset  = sr.PropOffset,
+                UeTypeName      = sr.PropType,
+                ValueLiteral    = DefaultFreezeLiteral(sr.PropType),
+            };
+            string desc = targetClass == sr.ClassName
+                ? $"{sr.ClassName}::{sr.PropName}"
+                : $"{sr.ClassName}::{sr.PropName} (defined on {sr.DefiningClassName})";
+            rows.Add(new CtPropertyRow
+            {
+                Category     = PropertyScoringTable.DisplayName(sr.Category),
+                Description  = desc,
+                FreezeParams = fp,
+            });
+        }
+        return (rows, skippedUnsupported, skippedMissingOffset);
+    }
+
+    /// <summary>"Generate Cheat Table from Selection" command. The
+    /// DataGrid binds its SelectedItems via the panel code-behind; we
+    /// take the snapshot as a parameter so the VM doesn't have to
+    /// reach into Avalonia's SelectedItems collection (which has AOT-
+    /// hostile dynamic typing). The panel converts SelectedItems
+    /// to an IList&lt;ScoredPropertyRow&gt; before invoking.</summary>
+    [RelayCommand]
+    private void GenerateCheatTable(IList<ScoredPropertyRow>? selected)
+    {
+        if (selected is null || selected.Count == 0)
+        {
+            StatusText = "Select 2+ rows first (Ctrl/Shift+click).";
+            return;
+        }
+
+        var (rows, skippedUnsupported, skippedMissingOffset) =
+            BuildRowsFromSelection(selected);
+
+        if (rows.Count == 0)
+        {
+            StatusText = skippedUnsupported > 0
+                ? $"Selected rows aren't freeze-supported " +
+                  $"(struct / array / non-scalar types). 0 entries in batch."
+                : "Selection produced 0 valid rows — nothing to write.";
+            return;
+        }
+
+        var now = DateTime.Now;
+        string title = $"UE5CEDumper Interesting Properties — " +
+                       $"{rows.Count} row{(rows.Count == 1 ? "" : "s")} " +
+                       $"@ {now:yyyy-MM-dd HH:mm}";
+        string ct = CheatTableBuilder.Build(title, rows);
+        string defaultName = CheatTableBuilder.DefaultFileName(
+            processName: "InterestingProperties", now);
+
+        var skipped = skippedUnsupported + skippedMissingOffset;
+        StatusText = skipped > 0
+            ? $"Generated {rows.Count} entries (skipped {skipped} unsupported / malformed)."
+            : $"Generated {rows.Count} entries.";
+
+        RequestSaveCheatTable?.Invoke(defaultName, ct);
     }
 }

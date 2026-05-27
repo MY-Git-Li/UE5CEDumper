@@ -292,6 +292,8 @@
     <sys:String x:Key="str.Tip.IF.OpenLive">Try to open this function in Live Walker. If the class has no live (non-CDO) instance, falls back to the Class Struct tab. Auto-expands the Functions section and selects the target row.</sys:String>
     <sys:String x:Key="str.Tip.IF.CopyAaScript">Open the Copy AA Script (Baked) dialog for this function. Output requires ue5_invoke_helper.lua embedded in your CE table (Tools -&gt; Export CE Helper Lua File...).</sys:String>
     <sys:String x:Key="str.Tip.IF.CopyName">Copy this function's name to the clipboard. Useful when pasting into a CE script or another tool.</sys:String>
+    <sys:String x:Key="str.IF.GenerateCT">📦 Generate CT</sys:String>
+    <sys:String x:Key="str.Tip.IF.GenerateCT">Generate one .CT file containing baked-invoke entries for every selected row. Use Ctrl/Shift+click in the grid to multi-select first. Functions with parameters: the helper zero-fills PARAMS; edit the baked PARAMS table in the generated entry before activating.</sys:String>
 
     <!-- Console (UFUNCTION(exec) discovery + invoke) -->
     <sys:String x:Key="str.Con.Load">Load</sys:String>
@@ -333,6 +335,8 @@
     <sys:String x:Key="str.Tip.IP.ShowAll">When off, hide rows below the InterestingThreshold (currently 4). When on, show every property regardless of score.</sys:String>
     <sys:String x:Key="str.Tip.IP.OpenLive">Open this property's owning class in Live Walker (live instance lookup), or fall back to Class Struct if no live instance exists.</sys:String>
     <sys:String x:Key="str.Tip.IP.CopyName">Copy this property's name to the clipboard.</sys:String>
+    <sys:String x:Key="str.IP.GenerateCT">📦 Generate CT</sys:String>
+    <sys:String x:Key="str.Tip.IP.GenerateCT">Generate one .CT file containing freeze entries for every selected row. Use Ctrl/Shift+click in the grid to multi-select first. Each entry uses ue5_freeze_helper.lua — embed it in the resulting CT via Tools → Inject Freeze Helper, or open the CT in CE and edit CFG.value before enabling. Struct / array / non-scalar rows are skipped.</sys:String>
 
     <!-- Proxy DLL / Deferred Scan -->
     <sys:String x:Key="str.Toolbar.StartScan">Start Scan</sys:String>
