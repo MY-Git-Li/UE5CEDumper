@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Templates;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -282,33 +283,23 @@ public sealed class InvokeParamDialog : Window
             MaxHeight = 220,
             IsVisible = false,
         };
-        _structuredReturnGrid.Columns.Add(new DataGridTextColumn
-        {
-            Header = "Field",
-            Binding = new Avalonia.Data.Binding(nameof(StructFieldValue.Name)),
-            Width = new DataGridLength(140),
-        });
-        _structuredReturnGrid.Columns.Add(new DataGridTextColumn
-        {
-            Header = "Type",
-            Binding = new Avalonia.Data.Binding(nameof(StructFieldValue.Type)),
-            Width = new DataGridLength(140),
-        });
-        _structuredReturnGrid.Columns.Add(new DataGridTextColumn
-        {
-            Header = "Value",
-            Binding = new Avalonia.Data.Binding(nameof(StructFieldValue.Value)),
-            Width = new DataGridLength(220),
-        });
-        _structuredReturnGrid.Columns.Add(new DataGridTextColumn
-        {
-            Header = "Offset",
-            Binding = new Avalonia.Data.Binding(nameof(StructFieldValue.Offset))
-            {
-                StringFormat = "0x{0:X}",
-            },
-            Width = new DataGridLength(80),
-        });
+        // Columns are DataGridTemplateColumn with FuncDataTemplate so
+        // the per-cell value is read via a typed lambda — no reflection,
+        // no string-path Binding. The latter would trigger IL2026 +
+        // IL3050 trim/AOT warnings (Avalonia's Binding(String) ctor
+        // uses dynamic dispatch), and the project's CLAUDE.md mandates
+        // Native AOT compatibility. Each FuncDataTemplate is invoked
+        // once per row at materialization, which is fine for our
+        // workflow (the grid's ItemsSource is replaced wholesale on
+        // each successful FIRE — see UpdateStructuredReturnGrid).
+        AddStructuredReturnColumn("Field",  140,
+            row => row.Name);
+        AddStructuredReturnColumn("Type",   140,
+            row => row.Type);
+        AddStructuredReturnColumn("Value",  220,
+            row => row.Value);
+        AddStructuredReturnColumn("Offset",  80,
+            row => $"0x{row.Offset:X}");
         bottomPanel.Children.Add(_structuredReturnGrid);
 
         DockPanel.SetDock(bottomPanel, Dock.Bottom);
@@ -712,6 +703,36 @@ public sealed class InvokeParamDialog : Window
         // return is non-struct or no layout is resolvable; the existing
         // text decode in _resultLabel remains the primary signal.
         UpdateStructuredReturnGrid(result);
+    }
+
+    /// <summary>
+    /// Adds one DataGridTemplateColumn to the structured-return grid,
+    /// reading each cell's text via the supplied
+    /// <paramref name="textSelector"/> lambda. Keeps the call sites
+    /// declarative and centralises the per-cell TextBlock styling
+    /// (padding / vertical alignment / monospace font inherited from
+    /// the DataGrid). AOT-safe — the FuncDataTemplate is materialised
+    /// once per row from a strongly-typed delegate, so no reflection
+    /// fires at trim/AOT analysis time.
+    /// </summary>
+    private void AddStructuredReturnColumn(
+        string header, double width, Func<StructFieldValue, string> textSelector)
+    {
+        _structuredReturnGrid.Columns.Add(new DataGridTemplateColumn
+        {
+            Header = header,
+            Width  = new DataGridLength(width),
+            CellTemplate = new FuncDataTemplate<StructFieldValue>(
+                (row, _) => new TextBlock
+                {
+                    Text                = row is null ? "" : textSelector(row),
+                    Margin              = new Thickness(6, 2),
+                    VerticalAlignment   = VerticalAlignment.Center,
+                    FontFamily          = new FontFamily("Consolas, Courier New, monospace"),
+                    FontSize            = 11,
+                },
+                supportsRecycling: true),
+        });
     }
 
     /// <summary>
