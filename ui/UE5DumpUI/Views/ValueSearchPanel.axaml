@@ -46,7 +46,7 @@
         <TextBlock Text="{StaticResource str.VS.ScanType}"
                    Foreground="#CCCCCC" VerticalAlignment="Center"
                    Margin="8,0,0,0"/>
-        <ComboBox ItemsSource="{Binding ScanTypeOptions}"
+        <ComboBox ItemsSource="{Binding VisibleScanTypeOptions}"
                   SelectedItem="{Binding SelectedScanType}"
                   MinWidth="110" Padding="4,2" FontSize="12"/>
 
@@ -82,6 +82,17 @@
                        Minimum="0" Maximum="1000" Increment="0.1"
                        FormatString="0.###"
                        Width="150" FontSize="12"/>
+
+        <!-- Case-sensitive checkbox: visible only for string DataTypes
+             (FString / FName / FText). Default unchecked = CE-style
+             case-insensitive matching. -->
+        <CheckBox Content="{StaticResource str.VS.CaseSensitive}"
+                  IsChecked="{Binding CaseSensitive}"
+                  IsVisible="{Binding SupportsCaseSensitive}"
+                  ToolTip.Tip="{StaticResource str.Tip.VS.CaseSensitive}"
+                  Foreground="#CCCCCC" FontSize="12"
+                  VerticalAlignment="Center"
+                  Margin="8,0,0,0"/>
       </StackPanel>
 
       <!-- Row 1: Game Only + Max Results -->

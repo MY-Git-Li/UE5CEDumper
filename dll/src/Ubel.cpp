@@ -267,6 +267,26 @@ int32_t GetIndex(uintptr_t uobjectAddr) {
     return index;
 }
 
+// Public thin wrappers around the file-static ReadFString / ReadFName /
+// ReadFTextString helpers so cross-TU consumers (Aura ValueScan path)
+// don't need to duplicate the FString header decode + UTF-16 sanitize
+// logic. Keeping the static helpers in place avoids touching the
+// thousand-plus existing call sites in this TU.
+std::string ReadFStringAt(uintptr_t instanceAddr, int32_t offset) {
+    if (!instanceAddr) return "";
+    return ReadFString(instanceAddr, offset);
+}
+
+std::string ReadFNameAt(uintptr_t instanceAddr, int32_t offset) {
+    if (!instanceAddr) return "";
+    return ReadFName(instanceAddr + offset);
+}
+
+std::string ReadFTextStringAt(uintptr_t instanceAddr, int32_t offset) {
+    if (!instanceAddr) return "";
+    return ReadFTextString(instanceAddr + offset);
+}
+
 std::string GetFullName(uintptr_t uobjectAddr) {
     if (!uobjectAddr) return "";
 

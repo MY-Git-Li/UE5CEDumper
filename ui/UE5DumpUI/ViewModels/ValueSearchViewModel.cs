@@ -40,11 +40,17 @@ public partial class ValueSearchViewModel : ViewModelBase
     [ObservableProperty] private bool   _gameOnly = true;
     [ObservableProperty] private int    _maxResults = 50000;
 
-    /// <summary>CE-style rounded-scan slack for Float/Double comparisons.
-    /// Default 0.5 covers the common case: game UI displays "338" for a
-    /// real float of 337.5, so scanning for "338" with tolerance 0.5
-    /// matches any value in [337.5, 338.5]. Integer types ignore it.</summary>
+    /// <summary>CE-style rounded-scan slack for Float/Double and vector
+    /// comparisons. Default 0.5 covers the common case: game UI
+    /// displays "338" for a real float of 337.5, so scanning for "338"
+    /// with tolerance 0.5 matches any value in [337.5, 338.5]. Integer
+    /// + string types ignore it.</summary>
     [ObservableProperty] private double _tolerance = 0.5;
+
+    /// <summary>Opt-in case sensitivity for string scans. Default
+    /// false matches CE's case-insensitive convention. Has no effect
+    /// for non-string DataTypes (the wire serializer strips it).</summary>
+    [ObservableProperty] private bool _caseSensitive = false;
 
     public IReadOnlyList<ValueScanDataType> DataTypeOptions { get; } = new[]
     {
@@ -59,13 +65,26 @@ public partial class ValueSearchViewModel : ViewModelBase
         ValueScanDataType.Float,
         ValueScanDataType.Double,
         ValueScanDataType.Bool,
+        // Phase 2A — string types. FText is best-effort (cooked games
+        // strip a lot of metadata so display strings may be unresolvable;
+        // we keep it as a third option since the UE NameProperty /
+        // StrProperty / TextProperty fields are common enough that
+        // exposing all three is friendlier than guessing).
+        ValueScanDataType.FString,
+        ValueScanDataType.FName,
+        ValueScanDataType.FText,
+        // Phase 2B — vector types. FTransform is wire-stable but
+        // currently returns zero hits pending per-version Translation
+        // offset detection; deliberately not exposed in the dropdown
+        // until that lands.
+        ValueScanDataType.FVector,
+        ValueScanDataType.FRotator,
     };
 
-    /// <summary>Scan types valid in any context (used by both First and
-    /// Next scan). Prev-value scans only become reachable AFTER a
-    /// session exists; that constraint is enforced by the
-    /// <see cref="HasSession"/> binding on the Next-Scan button.</summary>
-    public IReadOnlyList<ValueScanType> ScanTypeOptions { get; } = new[]
+    /// <summary>Full set of scan-type values; the panel uses
+    /// <see cref="VisibleScanTypeOptions"/> instead so the dropdown
+    /// shows only entries valid for the current DataType.</summary>
+    private static readonly ValueScanType[] s_allScanTypes = new[]
     {
         ValueScanType.Exact,
         ValueScanType.Bigger,
@@ -75,7 +94,60 @@ public partial class ValueSearchViewModel : ViewModelBase
         ValueScanType.Unchanged,
         ValueScanType.Increased,
         ValueScanType.Decreased,
+        ValueScanType.Contains,
+        ValueScanType.StartsWith,
+        ValueScanType.EndsWith,
     };
+
+    /// <summary>Scan types valid for the current DataType. Numeric +
+    /// Vector use ordering predicates; string types use substring
+    /// predicates. Mirror of the DLL's <c>IsScanTypeValidFor</c>.</summary>
+    public IReadOnlyList<ValueScanType> VisibleScanTypeOptions =>
+        FilterScanTypes(SelectedDataType);
+
+    /// <summary>Static helper: filter the global scan-type list by a
+    /// given DataType. Public so unit tests can lock the contract
+    /// without standing up a ViewModel instance.</summary>
+    public static IReadOnlyList<ValueScanType> FilterScanTypes(ValueScanDataType dt)
+    {
+        return s_allScanTypes.Where(st => IsScanTypeValidFor(dt, st)).ToList();
+    }
+
+    /// <summary>True when the (dataType, scanType) pair is a legal
+    /// combination. Mirror of DLL <c>ValueScan::IsScanTypeValidFor</c>:
+    ///   String : Exact / Contains / StartsWith / EndsWith / Changed / Unchanged
+    ///   Vector / Numeric: Exact / Bigger / Smaller / Between / Changed /
+    ///                     Unchanged / Increased / Decreased
+    /// </summary>
+    public static bool IsScanTypeValidFor(ValueScanDataType dt, ValueScanType st)
+    {
+        bool isString = IsStringDataType(dt);
+        bool isSubstring = st == ValueScanType.Contains
+                        || st == ValueScanType.StartsWith
+                        || st == ValueScanType.EndsWith;
+        if (isString)
+        {
+            return st == ValueScanType.Exact
+                || st == ValueScanType.Contains
+                || st == ValueScanType.StartsWith
+                || st == ValueScanType.EndsWith
+                || st == ValueScanType.Changed
+                || st == ValueScanType.Unchanged;
+        }
+        // Numeric + Vector: substring predicates reject; everything
+        // else is valid.
+        return !isSubstring;
+    }
+
+    public static bool IsStringDataType(ValueScanDataType dt) =>
+        dt == ValueScanDataType.FString
+        || dt == ValueScanDataType.FName
+        || dt == ValueScanDataType.FText;
+
+    public static bool IsVectorDataType(ValueScanDataType dt) =>
+        dt == ValueScanDataType.FVector
+        || dt == ValueScanDataType.FRotator
+        || dt == ValueScanDataType.FTransform;
 
     // ------------------------------------------------------------------
     // Output state
@@ -110,16 +182,34 @@ public partial class ValueSearchViewModel : ViewModelBase
         OnPropertyChanged(nameof(RequiresValue2Input));
     }
 
-    /// <summary>True when the selected DataType is Float or Double --
-    /// drives Tolerance input visibility. Integer types hide it because
-    /// the DLL ignores tolerance for non-floating-point comparisons.</summary>
+    /// <summary>True when the selected DataType uses tolerance --
+    /// Float/Double for scalar tolerance, Vector/Rotator for axis-
+    /// wise tolerance. Integer + string types hide the UI knob because
+    /// the DLL ignores it for those comparisons.</summary>
     public bool SupportsTolerance =>
         SelectedDataType == ValueScanDataType.Float
-        || SelectedDataType == ValueScanDataType.Double;
+        || SelectedDataType == ValueScanDataType.Double
+        || IsVectorDataType(SelectedDataType);
+
+    /// <summary>True when the selected DataType is a string type
+    /// (FString / FName / FText) — drives the Case-sensitive checkbox
+    /// visibility. Non-string types hide it because the wire layer
+    /// strips the flag for them anyway.</summary>
+    public bool SupportsCaseSensitive => IsStringDataType(SelectedDataType);
 
     partial void OnSelectedDataTypeChanged(ValueScanDataType value)
     {
         OnPropertyChanged(nameof(SupportsTolerance));
+        OnPropertyChanged(nameof(SupportsCaseSensitive));
+        OnPropertyChanged(nameof(VisibleScanTypeOptions));
+        // If the currently-selected ScanType is no longer valid for
+        // the new DataType (e.g. user switched from Int32+Bigger to
+        // FString+Bigger), snap it to a sensible default that exists
+        // in every (DataType, ScanType) matrix cell -- Exact.
+        if (!IsScanTypeValidFor(value, SelectedScanType))
+        {
+            SelectedScanType = ValueScanType.Exact;
+        }
     }
 
     public static bool IsPrevValueScanType(ValueScanType st) => st switch
@@ -136,7 +226,10 @@ public partial class ValueSearchViewModel : ViewModelBase
         ValueScanType.Exact
             or ValueScanType.Bigger
             or ValueScanType.Smaller
-            or ValueScanType.Between => true,
+            or ValueScanType.Between
+            or ValueScanType.Contains
+            or ValueScanType.StartsWith
+            or ValueScanType.EndsWith => true,
         _ => false,
     };
 
@@ -160,8 +253,14 @@ public partial class ValueSearchViewModel : ViewModelBase
 
         if (!IsFirstScanType(SelectedScanType))
         {
-            ErrorMessage = "First Scan only supports Exact / Bigger / Smaller / Between. " +
+            ErrorMessage = "First Scan supports targeted predicates only (Exact / " +
+                           "Bigger / Smaller / Between / Contains / StartsWith / EndsWith). " +
                            "Use Next Scan for Changed / Unchanged / Increased / Decreased.";
+            return;
+        }
+        if (!IsScanTypeValidFor(SelectedDataType, SelectedScanType))
+        {
+            ErrorMessage = $"Scan type '{SelectedScanType}' is not valid for {SelectedDataType}.";
             return;
         }
 
@@ -187,13 +286,17 @@ public partial class ValueSearchViewModel : ViewModelBase
             // accumulate orphan sessions.
             await EndSessionIfAnyAsync();
 
-            // Tolerance only passes through for Float/Double; integer
-            // scans get exact-match semantics regardless of the UI value.
+            // Tolerance only passes through for Float/Double + vector
+            // types; integer + string scans get exact-match semantics
+            // regardless of the UI value.
             double effTol = SupportsTolerance ? Tolerance : 0.0;
+            // Case sensitivity only passes through for string types;
+            // wire serializer enforces the same restriction.
+            bool effCase = SupportsCaseSensitive && CaseSensitive;
             var result = await _dump.BeginValueScanAsync(
                 SelectedDataType, SelectedScanType, Value,
                 SelectedScanType == ValueScanType.Between ? Value2 : null,
-                GameOnly, MaxResults, effTol);
+                GameOnly, MaxResults, effTol, effCase);
 
             SessionId = result.SessionId;
             Candidates = new ObservableCollection<ValueCandidate>(result.Candidates);
@@ -240,11 +343,12 @@ public partial class ValueSearchViewModel : ViewModelBase
             StatusText  = $"Refining ({SelectedScanType})...";
 
             double effTol = SupportsTolerance ? Tolerance : 0.0;
+            bool effCase = SupportsCaseSensitive && CaseSensitive;
             var result = await _dump.RefineValueScanAsync(
                 SessionId, SelectedScanType,
                 needsValue ? Value : null,
                 SelectedScanType == ValueScanType.Between ? Value2 : null,
-                effTol);
+                effTol, effCase);
 
             Candidates = new ObservableCollection<ValueCandidate>(result.Candidates);
 

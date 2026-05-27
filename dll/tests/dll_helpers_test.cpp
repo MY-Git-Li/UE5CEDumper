@@ -26,6 +26,7 @@
 #include <Windows.h>
 #include <timeapi.h>   // timeBeginPeriod — exercised by the poll-latency check
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
@@ -275,6 +276,14 @@ static void Test_ValueScan_DataTypeSizes() {
     EXPECT("SizeOf Float = 4",  ValueScan::SizeOf(ValueScan::DataType::Float)  == 4);
     EXPECT("SizeOf Double = 8", ValueScan::SizeOf(ValueScan::DataType::Double) == 8);
     EXPECT("SizeOf Bool = 1",   ValueScan::SizeOf(ValueScan::DataType::Bool)   == 1);
+    // Phase 2A: string types — variable length, signalled by SizeOf = 0.
+    EXPECT("SizeOf FString = 0", ValueScan::SizeOf(ValueScan::DataType::FString) == 0);
+    EXPECT("SizeOf FName = 0",   ValueScan::SizeOf(ValueScan::DataType::FName)   == 0);
+    EXPECT("SizeOf FText = 0",   ValueScan::SizeOf(ValueScan::DataType::FText)   == 0);
+    // Phase 2B: vector types — three floats = 12 bytes.
+    EXPECT("SizeOf FVector = 12",    ValueScan::SizeOf(ValueScan::DataType::FVector)    == 12);
+    EXPECT("SizeOf FRotator = 12",   ValueScan::SizeOf(ValueScan::DataType::FRotator)   == 12);
+    EXPECT("SizeOf FTransform = 12", ValueScan::SizeOf(ValueScan::DataType::FTransform) == 12);
 }
 
 static void Test_ValueScan_ParseDataTypeRoundTrip() {
@@ -284,8 +293,15 @@ static void Test_ValueScan_ParseDataTypeRoundTrip() {
     EXPECT("parse Float",   ValueScan::TryParseDataType("Float",  got) && got == DT::Float);
     EXPECT("parse Bool",    ValueScan::TryParseDataType("Bool",   got) && got == DT::Bool);
     EXPECT("parse UInt64",  ValueScan::TryParseDataType("UInt64", got) && got == DT::UInt64);
-    EXPECT("parse rejects unknown", !ValueScan::TryParseDataType("FString", got));
-    EXPECT("parse rejects empty",   !ValueScan::TryParseDataType("",        got));
+    // Phase 2 DataTypes — locks the wire-protocol shape.
+    EXPECT("parse FString", ValueScan::TryParseDataType("FString", got) && got == DT::FString);
+    EXPECT("parse FName",   ValueScan::TryParseDataType("FName",   got) && got == DT::FName);
+    EXPECT("parse FText",   ValueScan::TryParseDataType("FText",   got) && got == DT::FText);
+    EXPECT("parse FVector",  ValueScan::TryParseDataType("FVector",  got) && got == DT::FVector);
+    EXPECT("parse FRotator", ValueScan::TryParseDataType("FRotator", got) && got == DT::FRotator);
+    EXPECT("parse FTransform", ValueScan::TryParseDataType("FTransform", got) && got == DT::FTransform);
+    EXPECT("parse rejects unknown", !ValueScan::TryParseDataType("TArray<Int32>", got));
+    EXPECT("parse rejects empty",   !ValueScan::TryParseDataType("",              got));
 }
 
 static void Test_ValueScan_ScanTypePartitioning() {
@@ -301,6 +317,66 @@ static void Test_ValueScan_ScanTypePartitioning() {
     // No overlap between first-scan and prev-value partitions:
     EXPECT("Exact is NOT prev-value",  !ValueScan::IsPrevValueScanType(ST::Exact));
     EXPECT("Changed is NOT first-scan", !ValueScan::IsFirstScanType(ST::Changed));
+    // Phase 2A: substring predicates are first-scan eligible.
+    EXPECT("Contains is first-scan",   ValueScan::IsFirstScanType(ST::Contains));
+    EXPECT("StartsWith is first-scan", ValueScan::IsFirstScanType(ST::StartsWith));
+    EXPECT("EndsWith is first-scan",   ValueScan::IsFirstScanType(ST::EndsWith));
+    EXPECT("Contains is NOT prev-value",   !ValueScan::IsPrevValueScanType(ST::Contains));
+}
+
+static void Test_ValueScan_TypeFamilyPredicates() {
+    using DT = ValueScan::DataType;
+    using ST = ValueScan::ScanType;
+    // IsStringDataType: only the three string types.
+    EXPECT("FString isString",  ValueScan::IsStringDataType(DT::FString));
+    EXPECT("FName isString",    ValueScan::IsStringDataType(DT::FName));
+    EXPECT("FText isString",    ValueScan::IsStringDataType(DT::FText));
+    EXPECT("Int32 NOT isString", !ValueScan::IsStringDataType(DT::Int32));
+    EXPECT("Float NOT isString", !ValueScan::IsStringDataType(DT::Float));
+    EXPECT("FVector NOT isString", !ValueScan::IsStringDataType(DT::FVector));
+    // IsVectorDataType: only the three vector types.
+    EXPECT("FVector isVector",    ValueScan::IsVectorDataType(DT::FVector));
+    EXPECT("FRotator isVector",   ValueScan::IsVectorDataType(DT::FRotator));
+    EXPECT("FTransform isVector", ValueScan::IsVectorDataType(DT::FTransform));
+    EXPECT("Int32 NOT isVector",  !ValueScan::IsVectorDataType(DT::Int32));
+    EXPECT("FString NOT isVector", !ValueScan::IsVectorDataType(DT::FString));
+    // IsSubstringScanType: only Contains/StartsWith/EndsWith.
+    EXPECT("Contains is substring",   ValueScan::IsSubstringScanType(ST::Contains));
+    EXPECT("StartsWith is substring", ValueScan::IsSubstringScanType(ST::StartsWith));
+    EXPECT("EndsWith is substring",   ValueScan::IsSubstringScanType(ST::EndsWith));
+    EXPECT("Exact NOT substring",   !ValueScan::IsSubstringScanType(ST::Exact));
+    EXPECT("Bigger NOT substring",  !ValueScan::IsSubstringScanType(ST::Bigger));
+    EXPECT("Changed NOT substring", !ValueScan::IsSubstringScanType(ST::Changed));
+}
+
+static void Test_ValueScan_IsScanTypeValidFor() {
+    using DT = ValueScan::DataType;
+    using ST = ValueScan::ScanType;
+    // Numerics: substring predicates reject, ordering predicates accept.
+    EXPECT("Int32 Exact valid",    ValueScan::IsScanTypeValidFor(DT::Int32, ST::Exact));
+    EXPECT("Int32 Bigger valid",   ValueScan::IsScanTypeValidFor(DT::Int32, ST::Bigger));
+    EXPECT("Int32 Changed valid",  ValueScan::IsScanTypeValidFor(DT::Int32, ST::Changed));
+    EXPECT("Int32 Contains REJ",   !ValueScan::IsScanTypeValidFor(DT::Int32, ST::Contains));
+    EXPECT("Int32 StartsWith REJ", !ValueScan::IsScanTypeValidFor(DT::Int32, ST::StartsWith));
+    EXPECT("Float EndsWith REJ",   !ValueScan::IsScanTypeValidFor(DT::Float, ST::EndsWith));
+    // Strings: ordering predicates reject, substring + Exact + Changed/Unchanged accept.
+    EXPECT("FString Exact valid",     ValueScan::IsScanTypeValidFor(DT::FString, ST::Exact));
+    EXPECT("FString Contains valid",  ValueScan::IsScanTypeValidFor(DT::FString, ST::Contains));
+    EXPECT("FString StartsWith valid", ValueScan::IsScanTypeValidFor(DT::FString, ST::StartsWith));
+    EXPECT("FName EndsWith valid",    ValueScan::IsScanTypeValidFor(DT::FName,   ST::EndsWith));
+    EXPECT("FText Changed valid",     ValueScan::IsScanTypeValidFor(DT::FText,   ST::Changed));
+    EXPECT("FText Unchanged valid",   ValueScan::IsScanTypeValidFor(DT::FText,   ST::Unchanged));
+    EXPECT("FString Bigger REJ",   !ValueScan::IsScanTypeValidFor(DT::FString, ST::Bigger));
+    EXPECT("FString Smaller REJ",  !ValueScan::IsScanTypeValidFor(DT::FString, ST::Smaller));
+    EXPECT("FString Between REJ",  !ValueScan::IsScanTypeValidFor(DT::FString, ST::Between));
+    EXPECT("FString Increased REJ", !ValueScan::IsScanTypeValidFor(DT::FString, ST::Increased));
+    EXPECT("FString Decreased REJ", !ValueScan::IsScanTypeValidFor(DT::FString, ST::Decreased));
+    // Vectors: substring predicates reject; ordering predicates accept.
+    EXPECT("FVector Exact valid",    ValueScan::IsScanTypeValidFor(DT::FVector, ST::Exact));
+    EXPECT("FVector Bigger valid",   ValueScan::IsScanTypeValidFor(DT::FVector, ST::Bigger));
+    EXPECT("FVector Between valid",  ValueScan::IsScanTypeValidFor(DT::FVector, ST::Between));
+    EXPECT("FVector Changed valid",  ValueScan::IsScanTypeValidFor(DT::FVector, ST::Changed));
+    EXPECT("FRotator Contains REJ", !ValueScan::IsScanTypeValidFor(DT::FRotator, ST::Contains));
 }
 
 // ----- ValueScan: ComparePredicate per DataType -----------------------------
@@ -534,6 +610,195 @@ static void Test_ValueScan_IntegerTypes_IgnoreTolerance() {
            !ValueScan::ComparePredicate(DT::UInt64, ST::Exact, cur, tgt, nullptr, 100.0));
 }
 
+// ----- ValueScan: CompareStringPredicate (Phase 2A) -------------------------
+
+static void Test_ValueScan_StringPredicate_Exact() {
+    using ST = ValueScan::ScanType;
+    EXPECT("Exact case-insensitive match",
+           ValueScan::CompareStringPredicate(ST::Exact, "PlayerName", "playername", false));
+    EXPECT("Exact case-sensitive rejects",
+           !ValueScan::CompareStringPredicate(ST::Exact, "PlayerName", "playername", true));
+    EXPECT("Exact case-sensitive accepts",
+           ValueScan::CompareStringPredicate(ST::Exact, "PlayerName", "PlayerName", true));
+    EXPECT("Exact rejects different length",
+           !ValueScan::CompareStringPredicate(ST::Exact, "PlayerName", "Player", false));
+    EXPECT("Exact accepts empty == empty",
+           ValueScan::CompareStringPredicate(ST::Exact, "", "", false));
+}
+
+static void Test_ValueScan_StringPredicate_Substring() {
+    using ST = ValueScan::ScanType;
+    EXPECT("Contains case-insensitive: 'Health' in 'PlayerHealth'",
+           ValueScan::CompareStringPredicate(ST::Contains, "PlayerHealth", "Health", false));
+    EXPECT("Contains case-insensitive lowercase: 'health' in 'PlayerHealth'",
+           ValueScan::CompareStringPredicate(ST::Contains, "PlayerHealth", "health", false));
+    EXPECT("Contains case-sensitive rejects case mismatch",
+           !ValueScan::CompareStringPredicate(ST::Contains, "PlayerHealth", "health", true));
+    EXPECT("Contains rejects missing substring",
+           !ValueScan::CompareStringPredicate(ST::Contains, "PlayerHealth", "Mana", false));
+    EXPECT("Contains empty needle always true",
+           ValueScan::CompareStringPredicate(ST::Contains, "PlayerHealth", "", false));
+    EXPECT("Contains rejects longer-than-haystack",
+           !ValueScan::CompareStringPredicate(ST::Contains, "Hi", "Player", false));
+
+    EXPECT("StartsWith: 'Player' starts 'PlayerHealth'",
+           ValueScan::CompareStringPredicate(ST::StartsWith, "PlayerHealth", "Player", false));
+    EXPECT("StartsWith rejects suffix",
+           !ValueScan::CompareStringPredicate(ST::StartsWith, "PlayerHealth", "Health", false));
+    EXPECT("StartsWith case-insensitive 'player'",
+           ValueScan::CompareStringPredicate(ST::StartsWith, "PlayerHealth", "player", false));
+
+    EXPECT("EndsWith: 'Health' ends 'PlayerHealth'",
+           ValueScan::CompareStringPredicate(ST::EndsWith, "PlayerHealth", "Health", false));
+    EXPECT("EndsWith rejects prefix",
+           !ValueScan::CompareStringPredicate(ST::EndsWith, "PlayerHealth", "Player", false));
+    EXPECT("EndsWith case-sensitive rejects",
+           !ValueScan::CompareStringPredicate(ST::EndsWith, "PlayerHealth", "HEALTH", true));
+}
+
+static void Test_ValueScan_StringPredicate_PrevValue() {
+    using ST = ValueScan::ScanType;
+    EXPECT("Changed: different strings",
+           ValueScan::CompareStringPredicate(ST::Changed, "NewName", "OldName", false));
+    EXPECT("Changed rejects identical",
+           !ValueScan::CompareStringPredicate(ST::Changed, "Same", "Same", false));
+    EXPECT("Unchanged: identical strings",
+           ValueScan::CompareStringPredicate(ST::Unchanged, "Same", "Same", false));
+    EXPECT("Unchanged: case-insensitive identical",
+           ValueScan::CompareStringPredicate(ST::Unchanged, "SAME", "same", false));
+    EXPECT("Unchanged case-sensitive rejects case-diff",
+           !ValueScan::CompareStringPredicate(ST::Unchanged, "SAME", "same", true));
+}
+
+static void Test_ValueScan_StringPredicate_RejectsNumericOrdering() {
+    using ST = ValueScan::ScanType;
+    // Numeric predicates have no meaning for strings — return false
+    // unconditionally so the pipe handler's IsScanTypeValidFor guard
+    // is belt-and-braces.
+    EXPECT("Bigger rejects",
+           !ValueScan::CompareStringPredicate(ST::Bigger, "B", "A", false));
+    EXPECT("Smaller rejects",
+           !ValueScan::CompareStringPredicate(ST::Smaller, "A", "B", false));
+    EXPECT("Between rejects",
+           !ValueScan::CompareStringPredicate(ST::Between, "M", "A", false));
+    EXPECT("Increased rejects",
+           !ValueScan::CompareStringPredicate(ST::Increased, "B", "A", false));
+    EXPECT("Decreased rejects",
+           !ValueScan::CompareStringPredicate(ST::Decreased, "A", "B", false));
+}
+
+// ----- ValueScan: CompareVectorPredicate (Phase 2B) -------------------------
+
+static void WriteVector(uint8_t buf[12], float x, float y, float z) {
+    std::memcpy(buf + 0, &x, 4);
+    std::memcpy(buf + 4, &y, 4);
+    std::memcpy(buf + 8, &z, 4);
+}
+
+static void Test_ValueScan_VectorPredicate_Exact() {
+    using ST = ValueScan::ScanType;
+    uint8_t cur[12], tgt[12];
+    WriteVector(cur, 100.0f, 200.0f, 300.0f);
+    WriteVector(tgt, 100.0f, 200.0f, 300.0f);
+    EXPECT("Vec Exact all match", ValueScan::CompareVectorPredicate(ST::Exact, cur, tgt));
+    WriteVector(cur, 100.5f, 200.0f, 300.0f);
+    EXPECT("Vec Exact rejects component mismatch", !ValueScan::CompareVectorPredicate(ST::Exact, cur, tgt));
+    EXPECT("Vec Exact tol 0.5 accepts within band",
+           ValueScan::CompareVectorPredicate(ST::Exact, cur, tgt, nullptr, 0.5));
+}
+
+static void Test_ValueScan_VectorPredicate_Ordering() {
+    using ST = ValueScan::ScanType;
+    uint8_t cur[12], tgt[12];
+    WriteVector(cur, 10.0f, 20.0f, 30.0f);
+    WriteVector(tgt, 5.0f,  10.0f, 15.0f);
+    EXPECT("Vec Bigger: all axes above", ValueScan::CompareVectorPredicate(ST::Bigger, cur, tgt));
+    EXPECT("Vec Smaller (10,20,30) NOT < (5,10,15)",
+           !ValueScan::CompareVectorPredicate(ST::Smaller, cur, tgt));
+
+    // One axis equal kills Bigger
+    WriteVector(cur, 10.0f, 10.0f, 30.0f);
+    EXPECT("Vec Bigger fails when one axis equals",
+           !ValueScan::CompareVectorPredicate(ST::Bigger, cur, tgt));
+}
+
+static void Test_ValueScan_VectorPredicate_Between() {
+    using ST = ValueScan::ScanType;
+    uint8_t cur[12], lo[12], hi[12];
+    WriteVector(lo, 0.0f,   0.0f,   0.0f);
+    WriteVector(hi, 100.0f, 100.0f, 100.0f);
+    WriteVector(cur, 50.0f, 50.0f, 50.0f);
+    EXPECT("Vec Between: (50,50,50) in [(0,0,0),(100,100,100)]",
+           ValueScan::CompareVectorPredicate(ST::Between, cur, lo, hi));
+    WriteVector(cur, 50.0f, 150.0f, 50.0f);
+    EXPECT("Vec Between rejects Y outside",
+           !ValueScan::CompareVectorPredicate(ST::Between, cur, lo, hi));
+}
+
+static void Test_ValueScan_VectorPredicate_PrevValue() {
+    using ST = ValueScan::ScanType;
+    uint8_t cur[12], prev[12];
+    WriteVector(prev, 100.0f, 100.0f, 100.0f);
+
+    // Movement on any single axis = Changed
+    WriteVector(cur, 100.0f, 100.0f, 105.0f);
+    EXPECT("Vec Changed: one axis moved",
+           ValueScan::CompareVectorPredicate(ST::Changed, cur, prev));
+    EXPECT("Vec Unchanged rejects when axis differs",
+           !ValueScan::CompareVectorPredicate(ST::Unchanged, cur, prev));
+
+    // No movement
+    WriteVector(cur, 100.0f, 100.0f, 100.0f);
+    EXPECT("Vec Unchanged accepts identical",
+           ValueScan::CompareVectorPredicate(ST::Unchanged, cur, prev));
+    EXPECT("Vec Changed rejects identical",
+           !ValueScan::CompareVectorPredicate(ST::Changed, cur, prev));
+
+    // Increased: ANY axis moved up beyond tolerance
+    WriteVector(cur, 100.0f, 100.0f, 110.0f);
+    EXPECT("Vec Increased: Z went up",
+           ValueScan::CompareVectorPredicate(ST::Increased, cur, prev));
+    // All went down — Increased rejects
+    WriteVector(cur, 90.0f, 90.0f, 90.0f);
+    EXPECT("Vec Increased rejects when all axes down",
+           !ValueScan::CompareVectorPredicate(ST::Increased, cur, prev));
+    EXPECT("Vec Decreased: all axes down",
+           ValueScan::CompareVectorPredicate(ST::Decreased, cur, prev));
+}
+
+static void Test_ValueScan_VectorPredicate_RejectsSubstring() {
+    using ST = ValueScan::ScanType;
+    uint8_t cur[12], tgt[12];
+    WriteVector(cur, 0,0,0); WriteVector(tgt, 0,0,0);
+    EXPECT("Vec Contains rejects",
+           !ValueScan::CompareVectorPredicate(ST::Contains, cur, tgt));
+    EXPECT("Vec StartsWith rejects",
+           !ValueScan::CompareVectorPredicate(ST::StartsWith, cur, tgt));
+    EXPECT("Vec EndsWith rejects",
+           !ValueScan::CompareVectorPredicate(ST::EndsWith, cur, tgt));
+}
+
+// ----- VectorStructNames (Phase 2B) ----------------------------------------
+
+static void Test_ValueScan_VectorStructNames() {
+    using DT = ValueScan::DataType;
+    const auto& vec = ValueScan::VectorStructNames(DT::FVector);
+    EXPECT("FVector accepts 'Vector'",
+           std::find(vec.begin(), vec.end(), std::string("Vector")) != vec.end());
+    EXPECT("FVector accepts 'Vector3f'",
+           std::find(vec.begin(), vec.end(), std::string("Vector3f")) != vec.end());
+    const auto& rot = ValueScan::VectorStructNames(DT::FRotator);
+    EXPECT("FRotator accepts 'Rotator'",
+           std::find(rot.begin(), rot.end(), std::string("Rotator")) != rot.end());
+    // FTransform is intentionally empty until per-version Translation
+    // offset detection ships.
+    const auto& xfm = ValueScan::VectorStructNames(DT::FTransform);
+    EXPECT("FTransform empty (deferred)", xfm.empty());
+    // Non-vector dt returns empty.
+    const auto& none = ValueScan::VectorStructNames(DT::Int32);
+    EXPECT("Int32 has no vector struct names", none.empty());
+}
+
 static void Test_ValueScan_SessionLifecycle() {
     using namespace ValueScan;
     auto& mgr = SessionManager::Instance();
@@ -617,6 +882,22 @@ int main() {
     Test_ValueScan_FloatTolerance_PrevValue();
     Test_ValueScan_FloatTolerance_Between();
     Test_ValueScan_IntegerTypes_IgnoreTolerance();
+
+    // Phase 2A — string predicates + family predicates
+    Test_ValueScan_TypeFamilyPredicates();
+    Test_ValueScan_IsScanTypeValidFor();
+    Test_ValueScan_StringPredicate_Exact();
+    Test_ValueScan_StringPredicate_Substring();
+    Test_ValueScan_StringPredicate_PrevValue();
+    Test_ValueScan_StringPredicate_RejectsNumericOrdering();
+    // Phase 2B — vector predicates
+    Test_ValueScan_VectorPredicate_Exact();
+    Test_ValueScan_VectorPredicate_Ordering();
+    Test_ValueScan_VectorPredicate_Between();
+    Test_ValueScan_VectorPredicate_PrevValue();
+    Test_ValueScan_VectorPredicate_RejectsSubstring();
+    Test_ValueScan_VectorStructNames();
+
     Test_ValueScan_SessionLifecycle();
 
     std::printf("------------------------------------------\n");

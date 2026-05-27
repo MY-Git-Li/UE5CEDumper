@@ -131,6 +131,7 @@ public interface IDumpService
         bool gameOnly = true,
         int maxResults = 50000,
         double tolerance = 0.0,
+        bool caseSensitive = false,
         CancellationToken ct = default);
 
     Task<ValueScanRefineResult> RefineValueScanAsync(
@@ -139,6 +140,7 @@ public interface IDumpService
         string? value = null,
         string? value2 = null,
         double tolerance = 0.0,
+        bool caseSensitive = false,
         CancellationToken ct = default);
 
     Task EndValueScanAsync(ulong sessionId, CancellationToken ct = default);

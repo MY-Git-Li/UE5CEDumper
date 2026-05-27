@@ -1200,6 +1200,18 @@ public sealed class DumpService : IDumpService
         Value             = obj["value"]?.GetValue<string>() ?? "",
     };
 
+    private static bool ToleranceAppliesTo(ValueScanDataType dt) =>
+        dt == ValueScanDataType.Float
+        || dt == ValueScanDataType.Double
+        || dt == ValueScanDataType.FVector
+        || dt == ValueScanDataType.FRotator
+        || dt == ValueScanDataType.FTransform;
+
+    private static bool IsStringDataType(ValueScanDataType dt) =>
+        dt == ValueScanDataType.FString
+        || dt == ValueScanDataType.FName
+        || dt == ValueScanDataType.FText;
+
     public async Task<ValueScanBeginResult> BeginValueScanAsync(
         ValueScanDataType dataType,
         ValueScanType scanType,
@@ -1208,6 +1220,7 @@ public sealed class DumpService : IDumpService
         bool gameOnly = true,
         int maxResults = 50000,
         double tolerance = 0.0,
+        bool caseSensitive = false,
         CancellationToken ct = default)
     {
         var req = new JsonObject
@@ -1221,12 +1234,18 @@ public sealed class DumpService : IDumpService
         };
         if (!string.IsNullOrEmpty(value2))
             req["value2"] = value2;
-        // Only attach tolerance for Float/Double -- integer scans ignore
-        // it DLL-side and omitting keeps the wire shape tighter for the
+        // Only attach tolerance for float-aware types (Float/Double +
+        // FVector/FRotator/FTransform). Integer + string scans ignore
+        // it DLL-side; omitting keeps the wire shape tighter for the
         // common case. Also only attach when non-zero so existing
         // exact-scan call sites stay byte-identical on the wire.
-        if (tolerance > 0.0 && (dataType == ValueScanDataType.Float || dataType == ValueScanDataType.Double))
+        if (tolerance > 0.0 && ToleranceAppliesTo(dataType))
             req["tolerance"] = tolerance;
+        // Case sensitivity is a string-only knob. Default = case-
+        // insensitive (matches CE convention) → only attach when the
+        // user explicitly opts to case-sensitive AND the type can use it.
+        if (caseSensitive && IsStringDataType(dataType))
+            req["case_sensitive"] = true;
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
@@ -1259,6 +1278,7 @@ public sealed class DumpService : IDumpService
         string? value = null,
         string? value2 = null,
         double tolerance = 0.0,
+        bool caseSensitive = false,
         CancellationToken ct = default)
     {
         var req = new JsonObject
@@ -1270,10 +1290,12 @@ public sealed class DumpService : IDumpService
         if (value != null)  req["value"]  = value;
         if (value2 != null) req["value2"] = value2;
         // Refine doesn't know the session's DataType client-side -- the
-        // DLL ignores tolerance on integer-typed sessions automatically.
-        // Attach when non-zero so the common exact-refine path stays
+        // DLL ignores tolerance on integer-typed sessions automatically
+        // and ignores case_sensitive on non-string sessions. Attach
+        // each only when non-default so common refine paths stay
         // byte-identical on the wire.
         if (tolerance > 0.0) req["tolerance"] = tolerance;
+        if (caseSensitive)   req["case_sensitive"] = true;
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
