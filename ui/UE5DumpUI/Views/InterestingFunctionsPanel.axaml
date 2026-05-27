@@ -43,6 +43,14 @@
               Command="{Binding ClearFiltersCommand}"
               Padding="6,2" FontSize="11"
               VerticalAlignment="Center"/>
+      <Button Content="{StaticResource str.IF.GenerateCT}"
+              Click="OnGenerateCtClick"
+              ToolTip.Tip="{StaticResource str.Tip.IF.GenerateCT}"
+              Foreground="#00BB5E" Background="Transparent"
+              BorderThickness="1" BorderBrush="#00BB5E"
+              Padding="6,2" FontSize="11"
+              VerticalAlignment="Center"
+              Cursor="Hand"/>
     </StackPanel>
 
     <!-- Status + progress in their own dock row (mirrors Interesting
@@ -82,6 +90,7 @@
     <DataGrid x:Name="ResultsGrid"
               ItemsSource="{Binding Results}"
               SelectedItem="{Binding SelectedResult}"
+              SelectionMode="Extended"
               IsReadOnly="True"
               CanUserResizeColumns="True"
               GridLinesVisibility="Horizontal"

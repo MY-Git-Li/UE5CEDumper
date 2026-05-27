@@ -48,6 +48,14 @@
               Command="{Binding ClearFiltersCommand}"
               Padding="6,2" FontSize="11"
               VerticalAlignment="Center"/>
+      <Button Content="{StaticResource str.IP.GenerateCT}"
+              Click="OnGenerateCtClick"
+              ToolTip.Tip="{StaticResource str.Tip.IP.GenerateCT}"
+              Foreground="#00BB5E" Background="Transparent"
+              BorderThickness="1" BorderBrush="#00BB5E"
+              Padding="6,2" FontSize="11"
+              VerticalAlignment="Center"
+              Cursor="Hand"/>
     </StackPanel>
 
     <!-- Status + progress bar in their own row so the long "Scanning N/M:
@@ -78,6 +86,7 @@
     <DataGrid x:Name="ResultsGrid"
               ItemsSource="{Binding Results}"
               SelectedItem="{Binding SelectedResult}"
+              SelectionMode="Extended"
               IsReadOnly="True"
               CanUserResizeColumns="True"
               GridLinesVisibility="Horizontal"

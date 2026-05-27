@@ -88,6 +88,12 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     public event Action<string, string>? NavigateToFunction;
     public event Action<string, string>? RequestCopyBakedScript;
 
+    /// <summary>Raised when the user clicks "Generate Cheat Table" on
+    /// the multi-select toolbar. Subscribers (MainWindow) open the
+    /// save dialog and write the payload — IO out of the VM keeps the
+    /// command testable.</summary>
+    public event Action<string /*defaultFileName*/, string /*ctXml*/>? RequestSaveCheatTable;
+
     /// <summary>
     /// Raised when a row's "Name" button is clicked. MainWindow handler
     /// hands the string to the platform clipboard service. Keeps this VM
@@ -301,5 +307,81 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
         if (string.IsNullOrEmpty(row.FuncName)) return;
         RequestCopyText?.Invoke(row.FuncName);
         StatusText = $"Copied function name: {row.FuncName}";
+    }
+
+    // ------------------------------------------------------------------
+    // Multi-row batch: turn the user's current DataGrid selection into a
+    // single CT file (one baked-invoke entry per row, grouped by
+    // Category). For functions with parameters the BakedValues list is
+    // intentionally empty — the generated script's helper zero-fills the
+    // PARAMS buffer, and the user edits the baked PARAMS table in CE
+    // before activating. The script header comment guides them.
+    // ------------------------------------------------------------------
+
+    /// <summary>Build the CT batch from <paramref name="selected"/>.
+    /// Public + static for direct test coverage (no need to stand up
+    /// the full VM to verify the row mapping).</summary>
+    public static List<CheatTableRow> BuildRowsFromSelection(
+        IEnumerable<ScoredFunctionRow> selected)
+    {
+        var rows = new List<CheatTableRow>();
+        foreach (var sr in selected)
+        {
+            if (sr is null) continue;
+            if (string.IsNullOrEmpty(sr.ClassName) || string.IsNullOrEmpty(sr.FuncName))
+                continue;
+
+            string desc = sr.NumParms == 0
+                ? $"{sr.ClassName}::{sr.FuncName}()"
+                : $"{sr.ClassName}::{sr.FuncName}  ({sr.ParamsLabel})  -- edit baked PARAMS in CE";
+
+            rows.Add(new CtFunctionRow
+            {
+                Category    = KeywordScoringTable.DisplayName(sr.Category),
+                Description = desc,
+                ClassName   = sr.ClassName,
+                FuncName    = sr.FuncName,
+                ParmsSize   = sr.ParmsSize,
+                // No baked values for batch entries -- user fills the
+                // PARAMS table in CE per-row before activating. The
+                // helper zero-fills the buffer so the script is safe
+                // to enable accidentally (worst case = func runs with
+                // all-zero args).
+                BakedValues = Array.Empty<BakedParamValue>(),
+            });
+        }
+        return rows;
+    }
+
+    /// <summary>"Generate Cheat Table from Selection" command. Same
+    /// shape as the Interesting Properties sibling: VM stays IO-free,
+    /// MainWindow handles the save dialog.</summary>
+    [RelayCommand]
+    private void GenerateCheatTable(IList<ScoredFunctionRow>? selected)
+    {
+        if (selected is null || selected.Count == 0)
+        {
+            StatusText = "Select 2+ rows first (Ctrl/Shift+click).";
+            return;
+        }
+
+        var rows = BuildRowsFromSelection(selected);
+        if (rows.Count == 0)
+        {
+            StatusText = "Selection produced 0 valid rows — nothing to write.";
+            return;
+        }
+
+        var now = DateTime.Now;
+        string title = $"UE5CEDumper Interesting Functions — " +
+                       $"{rows.Count} row{(rows.Count == 1 ? "" : "s")} " +
+                       $"@ {now:yyyy-MM-dd HH:mm}";
+        string ct = CheatTableBuilder.Build(title, rows);
+        string defaultName = CheatTableBuilder.DefaultFileName(
+            processName: "InterestingFunctions", now);
+
+        StatusText = $"Generated {rows.Count} invoke entries " +
+                     "(edit baked PARAMS in CE for funcs with arguments).";
+        RequestSaveCheatTable?.Invoke(defaultName, ct);
     }
 }

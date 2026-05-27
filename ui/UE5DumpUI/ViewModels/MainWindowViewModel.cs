@@ -446,6 +446,16 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             }
         };
 
+        // Wire InterestingProperties -> CT save dialog. The VM builds
+        // the .CT payload and emits (defaultFileName, ctXml); we own
+        // the platform-specific save dialog + write here so the VM
+        // stays IO-free and unit-testable. The CT filter matches what
+        // CE associates with the .CT extension on Windows.
+        InterestingProperties.RequestSaveCheatTable += async (defaultName, ctXml) =>
+        {
+            await SaveCheatTableAsync(defaultName, ctXml, "InterestingProperties");
+        };
+
         // Wire ValueSearch -> LiveWalker (open candidate's owning instance)
         // + clipboard. Same shape as InstanceFinder.NavigateToLiveWalker
         // since ValueSearch already has the instance address resolved.
@@ -483,6 +493,13 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 _log.Error($"InterestingFunctions clipboard copy failed: {ex.Message}", ex);
             }
+        };
+
+        // Wire InterestingFunctions -> CT save dialog (sister to the
+        // Properties hookup above).
+        InterestingFunctions.RequestSaveCheatTable += async (defaultName, ctXml) =>
+        {
+            await SaveCheatTableAsync(defaultName, ctXml, "InterestingFunctions");
         };
 
         // Wire InterestingFunctions -> Copy AA Script (Baked).
@@ -1052,6 +1069,48 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             _log.Error("Export CE Helper Lua failed", ex);
             StatusText = $"Export CE helper failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Shared CT save handler — opens the platform save-file dialog with
+    /// the VM-supplied default filename + .CT filter, writes the XML
+    /// payload (UTF-8, no BOM — CE's loader handles either but the
+    /// existing UE5CEDumper.CT ships without BOM so we stay consistent),
+    /// and surfaces success/error in the top status bar.
+    ///
+    /// <paramref name="source"/> is a short label for the log entry
+    /// (e.g. "InterestingProperties" / "InterestingFunctions") so a
+    /// later grep through the user's logs can identify which tab
+    /// generated which file.
+    /// </summary>
+    private async Task SaveCheatTableAsync(
+        string defaultFileName, string ctXml, string source)
+    {
+        try
+        {
+            var savePath = await _platform.ShowSaveFileDialogAsync(
+                defaultFileName: defaultFileName,
+                filterName:      "Cheat Engine Table (*.CT)",
+                filterExtension: ".CT");
+            if (string.IsNullOrEmpty(savePath))
+            {
+                _log.Info($"Save Cheat Table ({source}): user cancelled");
+                return;
+            }
+            // Avalonia's open-file dialog returns the chosen filter's
+            // extension as a hint; some platforms append it twice if
+            // the user typed an extension. Strip any duplicate.
+            await File.WriteAllTextAsync(savePath, ctXml,
+                new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            _log.Info($"Saved Cheat Table ({source}): {savePath} " +
+                      $"({ctXml.Length:N0} chars)");
+            StatusText = $"Saved: {Path.GetFileName(savePath)}";
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"Save Cheat Table ({source}) failed", ex);
+            StatusText = $"Save Cheat Table failed: {ex.Message}";
         }
     }
 
