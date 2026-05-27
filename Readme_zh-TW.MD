@@ -18,6 +18,10 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-CC785C?logo=claude)](https://claude.ai/code)
 
+## 螢幕截圖 (Screenshots)
+<img src="./img/MainUI.webp" alt="Main UI"/>  
+<img src="./img/Value_Search.webp" alt="Value Search"/>  
+
 ## 實測版本矩陣 (Tested Version Matrix)
 
 | UE 版本 | GObjects | GNames | DynOff | 已驗證遊戲 |
