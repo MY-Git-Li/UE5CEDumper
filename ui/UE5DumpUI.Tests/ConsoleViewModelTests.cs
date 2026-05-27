@@ -423,4 +423,120 @@ public class ConsoleViewModelTests
         Assert.Contains("Exec", exec.ShortFlags);
         Assert.DoesNotContain("Exec", nonExec.ShortFlags);
     }
+
+    // ------------------------------------------------------------------
+    // Pick #6: UCheatManager stripped-body hint detection.
+    //
+    // Locks the predicate that decides whether the footer warning shows
+    // up. False-negative is the cost mode (silent strip surprise);
+    // false-positive is the mild mode (nudge user toward a different
+    // verification target). The heuristic prefers covering more
+    // subclasses over precision.
+    // ------------------------------------------------------------------
+
+    [Theory]
+    // Engine class — canonical hit.
+    [InlineData("UCheatManager", "",          true)]
+    [InlineData("CheatManager",  "",          true)]
+    // Game-defined subclass — class name carries the hint.
+    [InlineData("MyGameCheatManager", "UCheatManager", true)]
+    [InlineData("BP_CheatManager_C",  "CheatManager",  true)]
+    // Subclass whose own name doesn't carry "CheatManager" but the
+    // SuperName does — covers `class AFooCheats : public UCheatManager`.
+    [InlineData("AFooCheats", "UCheatManager", true)]
+    // Case-insensitive match — covers `cheatmanager` typos in BPGCs.
+    [InlineData("bp_cheatmanager_c", "object", true)]
+    // Negative cases — must NOT trigger the hint.
+    [InlineData("PlayerController", "Pawn",   false)]
+    [InlineData("ACharacter",       "APawn",  false)]
+    [InlineData("BP_Player_C",      "ACharacter", false)]
+    [InlineData("",                 "",       false)]
+    public void IsLikelyUCheatManagerExec_matchesByClassOrSuperName(
+        string className, string superName, bool expected)
+    {
+        var entry = new AllFunctionEntry
+        {
+            ClassName = className,
+            SuperName = superName,
+            FuncName  = "DoesNotMatter",
+            FunctionFlags = 0x0000_0200,  // exec
+        };
+        Assert.Equal(expected, ConsoleViewModel.IsLikelyUCheatManagerExec(entry));
+    }
+
+    [Fact]
+    public void IsLikelyUCheatManagerExec_NullEntry_ReturnsFalse()
+    {
+        Assert.False(ConsoleViewModel.IsLikelyUCheatManagerExec(null!));
+    }
+
+    [Fact]
+    public void SelectedExecHint_IsEmpty_WhenNoSelection()
+    {
+        var vm = CreateVm(new FakeDumpService());
+        Assert.Equal("", vm.SelectedExecHint);
+    }
+
+    [Fact]
+    public void SelectedExecHint_PopulatesForUCheatManager()
+    {
+        var vm = CreateVm(new FakeDumpService());
+        vm.SelectedResult = new AllFunctionEntry
+        {
+            ClassName = "UCheatManager",
+            FuncName  = "Fly",
+            FunctionFlags = 0x0000_0200,
+        };
+        Assert.NotEqual("", vm.SelectedExecHint);
+        Assert.Contains("body-stripped",            vm.SelectedExecHint);
+        Assert.Contains("cooked Shipping",          vm.SelectedExecHint);
+        Assert.Contains("feedback_ucheatmanager_stripped", vm.SelectedExecHint);
+    }
+
+    [Fact]
+    public void SelectedExecHint_EmptyForUnrelatedClass()
+    {
+        var vm = CreateVm(new FakeDumpService());
+        vm.SelectedResult = new AllFunctionEntry
+        {
+            ClassName = "PlayerController",
+            FuncName  = "ClientMessage",
+            FunctionFlags = 0x0000_0200,
+        };
+        Assert.Equal("", vm.SelectedExecHint);
+    }
+
+    [Fact]
+    public void SelectedExecHint_RefreshesOnSelectionChange()
+    {
+        // Locks the OnSelectedResultChanged partial — the property must
+        // re-evaluate when SelectedResult flips. Without the
+        // notification the panel would show a stale hint after the
+        // user changes rows.
+        var vm = CreateVm(new FakeDumpService());
+        var cheatRow = new AllFunctionEntry
+        {
+            ClassName = "MyGameCheatManager", FuncName = "Fly",
+            FunctionFlags = 0x0000_0200,
+        };
+        var normalRow = new AllFunctionEntry
+        {
+            ClassName = "PlayerController", FuncName = "Say",
+            FunctionFlags = 0x0000_0200,
+        };
+
+        int changes = 0;
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(vm.SelectedExecHint)) changes++;
+        };
+
+        vm.SelectedResult = cheatRow;
+        Assert.True(changes >= 1, "SelectedExecHint must fire PropertyChanged on selection");
+        Assert.NotEqual("", vm.SelectedExecHint);
+
+        vm.SelectedResult = normalRow;
+        Assert.True(changes >= 2, "PropertyChanged must fire again on subsequent selection");
+        Assert.Equal("", vm.SelectedExecHint);
+    }
 }

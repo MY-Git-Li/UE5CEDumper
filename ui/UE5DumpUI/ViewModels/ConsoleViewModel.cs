@@ -87,6 +87,61 @@ public partial class ConsoleViewModel : ViewModelBase
 
     partial void OnFilterTextChanged(string value) => ApplyFilter();
 
+    /// <summary>
+    /// When the user selects a row, refresh the
+    /// <see cref="SelectedExecHint"/> binding so the cooker-strip
+    /// warning footer toggles per-selection. Single notification —
+    /// the hint is computed on demand from <see cref="SelectedResult"/>
+    /// to keep this side-effect-free.
+    /// </summary>
+    partial void OnSelectedResultChanged(AllFunctionEntry? value)
+        => OnPropertyChanged(nameof(SelectedExecHint));
+
+    /// <summary>
+    /// Footer-line hint shown below the status row when the currently-
+    /// selected exec is likely to be one of the
+    /// <c>#if !UE_BUILD_SHIPPING</c> stripped engine commands
+    /// (UCheatManager::Fly/Ghost/God/Walk/Slomo/ChangeSize/Teleport
+    /// etc., or a game-defined subclass). Empty otherwise — the panel
+    /// binds visibility to non-empty.
+    ///
+    /// Detection is a cheap class-name / super-name substring match
+    /// against "CheatManager"; catches the canonical engine class +
+    /// the typical game-defined subclasses
+    /// (<c>MyGameCheatManager</c>, <c>BP_CheatManager_C</c>) without
+    /// needing a full super-chain walk. See memory
+    /// <c>feedback_ucheatmanager_stripped</c> for the diagnostic
+    /// rationale.
+    /// </summary>
+    public string SelectedExecHint
+    {
+        get
+        {
+            if (SelectedResult is null) return "";
+            return IsLikelyUCheatManagerExec(SelectedResult)
+                ? "⚠ UCheatManager subclasses are often body-stripped in cooked Shipping " +
+                  "(Result=0 + no in-game effect). Try a game-specific exec or BC " +
+                  "function for verification. See memory feedback_ucheatmanager_stripped."
+                : "";
+        }
+    }
+
+    /// <summary>
+    /// True when <paramref name="entry"/>'s class or immediate super
+    /// name contains the substring "CheatManager" (case-insensitive).
+    /// Catches the engine class, game-defined subclasses, and BPGCs.
+    /// Public + static for direct test coverage so the heuristic stays
+    /// regression-proof without needing a VM lifecycle.
+    /// </summary>
+    public static bool IsLikelyUCheatManagerExec(AllFunctionEntry entry)
+    {
+        if (entry is null) return false;
+        const string needle = "CheatManager";
+        bool ClassMatches(string s) => !string.IsNullOrEmpty(s)
+            && s.Contains(needle, StringComparison.OrdinalIgnoreCase);
+        return ClassMatches(entry.ClassName) || ClassMatches(entry.SuperName);
+    }
+
     [RelayCommand]
     private async Task LoadAsync()
     {
