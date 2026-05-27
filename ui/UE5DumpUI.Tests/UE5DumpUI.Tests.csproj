@@ -9,13 +9,47 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Avalonia.Angle.Windows.Natives" Version="2.1.27548.20260419" />
+    <PackageReference Include="Azure.Core" Version="1.57.0" />
+    <PackageReference Include="Azure.Monitor.OpenTelemetry.Exporter" Version="1.8.1" />
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.Linux" Version="8.3.1.5" />
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.WebAssembly" Version="8.3.1.5" />
     <PackageReference Include="MicroCom.Runtime" Version="0.11.6" />
+    <PackageReference Include="Microsoft.ApplicationInsights" Version="3.1.1" />
     <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.Abstractions" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.FileProviders.Abstractions" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Configuration" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Identity.Client" Version="4.84.1" />
+    <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.84.1" />
+    <PackageReference Include="Microsoft.IdentityModel.Abstractions" Version="8.18.0" />
+    <!-- Note: Microsoft.Testing.Platform.* are intentionally NOT pinned
+         here. xunit.v3 bundles its own MTP bridge (Xunit.MicrosoftTestingPlatform.*)
+         compiled against a specific MTP API surface; pinning explicit
+         versions of Microsoft.Testing.Platform.MSBuild /
+         Microsoft.Testing.Extensions.Telemetry /
+         Microsoft.Testing.Extensions.TrxReport.Abstractions causes a
+         MissingMethodException at test-run time when the explicit pins
+         override xunit.v3's tested transitives. Let xunit.v3's
+         transitive graph resolve them. -->
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-    <PackageReference Include="Tmds.DBus.Protocol" Version="0.93.0" />
+    <PackageReference Include="OpenTelemetry.PersistentStorage.Abstractions" Version="1.1.0" />
+    <PackageReference Include="OpenTelemetry.PersistentStorage.FileSystem" Version="1.1.0" />
+    <PackageReference Include="SkiaSharp" Version="3.119.4" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="3.119.4" />
+    <PackageReference Include="SkiaSharp.NativeAssets.WebAssembly" Version="3.119.4" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="3.119.4" />
+    <PackageReference Include="System.Memory.Data" Version="10.0.8" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.8" />
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.0" />
     <PackageReference Include="xunit.v3" Version="3.*" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.*" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.5.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
   </ItemGroup>
 
   <ItemGroup>

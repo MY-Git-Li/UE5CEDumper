@@ -1,0 +1,13 @@
+{
+  "//": [
+    "Switches `dotnet test` to Microsoft.Testing.Platform mode introduced in",
+    ".NET 10 SDK. Required because `Microsoft.Testing.Platform.MSBuild` 2.x ",
+    "dropped the legacy VSTest-bridge target on .NET 10; without this opt-in,",
+    "`dotnet test` errors with 'Testing with VSTest target is no longer supported'.",
+    "See https://aka.ms/dotnet-test-mtp-error and",
+    "https://learn.microsoft.com/dotnet/core/testing/unit-testing-with-dotnet-test."
+  ],
+  "test": {
+    "runner": "Microsoft.Testing.Platform"
+  }
+}
