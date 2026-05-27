@@ -65,11 +65,22 @@ public sealed class InvokeParamDialog : Window
     private readonly Dictionary<int, List<(DynamicStructField sf, TextBox edit)>> _structEdits = new();
 
     private TextBlock _resultLabel = null!;
+    private DataGrid _structuredReturnGrid = null!;
+    private TextBlock _structuredReturnHeader = null!;
     private Button _btnFire = null!;
     private Button _btnCopyBaked = null!;
     private Button _btnClose = null!;
     private CheckBox _chkVerifyReturn = null!;
     private int _fireCount;
+
+    /// <summary>
+    /// The return param of the current invocation (or null when the
+    /// function is void / there's no CPF_ReturnParm flag set). Pre-
+    /// resolved at construction time so the FIRE handler can quickly
+    /// gate the structured-return panel without re-scanning
+    /// <see cref="_allParams"/> on every fire.
+    /// </summary>
+    private readonly FunctionParamModel? _returnParam;
 
     public InvokeParamDialog(
         string className, string funcName,
@@ -94,6 +105,17 @@ public sealed class InvokeParamDialog : Window
         _platform = platform;
         _ueVersion = ueVersion;
         _mode = mode;
+
+        // Pre-resolve the return param so the structured-return panel
+        // doesn't have to re-scan _allParams on each FIRE. UE marks
+        // exactly one param with CPF_ReturnParm; if more than one
+        // claim it (rare; cooker bug), the first wins.
+        FunctionParamModel? rp = null;
+        foreach (var p in _allParams)
+        {
+            if (p.IsReturn) { rp = p; break; }
+        }
+        _returnParam = rp;
 
         Title = $"Invoke: {className}::{funcName}";
         Width = 560;
@@ -227,6 +249,67 @@ public sealed class InvokeParamDialog : Window
             IsVisible = false,
         };
         bottomPanel.Children.Add(_resultLabel);
+
+        // Structured-return property grid (pick #5, build 772+). Visible
+        // only when the function's return param is a StructProperty
+        // whose layout we can resolve (KnownStructLayouts hit OR DLL-
+        // supplied dynamic StructFields). Three columns mirror the
+        // dialog's `Name (Type, off) = value` text decode so the grid
+        // and the result-label decode never disagree.
+        _structuredReturnHeader = new TextBlock
+        {
+            Text = "Return value (decoded):",
+            Foreground = new SolidColorBrush(Color.Parse("#AAB8D0")),
+            FontSize = 11,
+            Margin = new Thickness(0, 6, 0, 2),
+            IsVisible = false,
+        };
+        bottomPanel.Children.Add(_structuredReturnHeader);
+
+        _structuredReturnGrid = new DataGrid
+        {
+            IsReadOnly = true,
+            CanUserResizeColumns = true,
+            GridLinesVisibility = DataGridGridLinesVisibility.Horizontal,
+            BorderThickness = new Thickness(0),
+            Background = new SolidColorBrush(Color.Parse("#1E1E1E")),
+            Foreground = new SolidColorBrush(Color.Parse("#D4D4D4")),
+            FontSize = 11,
+            FontFamily = new FontFamily("Consolas, Courier New, monospace"),
+            // Bounded height so the grid never dominates the dialog
+            // — the dialog already shows the single-line decode in
+            // _resultLabel, this panel is supplementary.
+            MaxHeight = 220,
+            IsVisible = false,
+        };
+        _structuredReturnGrid.Columns.Add(new DataGridTextColumn
+        {
+            Header = "Field",
+            Binding = new Avalonia.Data.Binding(nameof(StructFieldValue.Name)),
+            Width = new DataGridLength(140),
+        });
+        _structuredReturnGrid.Columns.Add(new DataGridTextColumn
+        {
+            Header = "Type",
+            Binding = new Avalonia.Data.Binding(nameof(StructFieldValue.Type)),
+            Width = new DataGridLength(140),
+        });
+        _structuredReturnGrid.Columns.Add(new DataGridTextColumn
+        {
+            Header = "Value",
+            Binding = new Avalonia.Data.Binding(nameof(StructFieldValue.Value)),
+            Width = new DataGridLength(220),
+        });
+        _structuredReturnGrid.Columns.Add(new DataGridTextColumn
+        {
+            Header = "Offset",
+            Binding = new Avalonia.Data.Binding(nameof(StructFieldValue.Offset))
+            {
+                StringFormat = "0x{0:X}",
+            },
+            Width = new DataGridLength(80),
+        });
+        bottomPanel.Children.Add(_structuredReturnGrid);
 
         DockPanel.SetDock(bottomPanel, Dock.Bottom);
         root.Children.Add(bottomPanel);
@@ -493,6 +576,12 @@ public sealed class InvokeParamDialog : Window
         _resultLabel.IsVisible = true;
         _resultLabel.Foreground = new SolidColorBrush(Color.Parse("#808080"));
         _resultLabel.Text = "Invoking ProcessEvent...";
+        // Clear any prior structured-return grid so the user isn't
+        // looking at stale rows from the previous fire while the new
+        // call is in-flight. Re-populated on the success path below.
+        _structuredReturnGrid.ItemsSource  = null;
+        _structuredReturnGrid.IsVisible    = false;
+        _structuredReturnHeader.IsVisible  = false;
         _fireCount++;
 
         try
@@ -616,6 +705,52 @@ public sealed class InvokeParamDialog : Window
 
         _resultLabel.Foreground = new SolidColorBrush(Color.Parse("#4EC9B0"));
         _resultLabel.Text = string.Join("\n", lines);
+
+        // Pick #5: structured return-value DataGrid. Decode the return
+        // param's struct sub-fields (when present) and surface them as
+        // a small property grid below the text decode. Hidden when the
+        // return is non-struct or no layout is resolvable; the existing
+        // text decode in _resultLabel remains the primary signal.
+        UpdateStructuredReturnGrid(result);
+    }
+
+    /// <summary>
+    /// Populate (or hide) the structured-return DataGrid based on the
+    /// post-FIRE result. Pure helper — extracted so the FIRE handler
+    /// stays linear + the decode logic gets independently testable via
+    /// <see cref="StructReturnDecoder.Decode"/>.
+    /// </summary>
+    private void UpdateStructuredReturnGrid(InvokeFunctionResult result)
+    {
+        // Default: hide everything. Each early return below leaves the
+        // grid in this state so a string of subsequent invokes against
+        // void / non-struct returns doesn't flash stale rows.
+        _structuredReturnGrid.ItemsSource = null;
+        _structuredReturnGrid.IsVisible   = false;
+        _structuredReturnHeader.IsVisible = false;
+
+        if (_returnParam is null) return;
+        if (!result.Success) return;
+        if (string.IsNullOrEmpty(result.ResultHex)) return;
+        if (!StructReturnDecoder.CanDecode(_returnParam, _ueVersion)) return;
+
+        byte[] bytes;
+        try { bytes = HexToBytes(result.ResultHex); }
+        catch { return; }
+
+        var rows = StructReturnDecoder.Decode(bytes, _returnParam, _ueVersion);
+        if (rows.Count == 0) return;
+
+        _structuredReturnGrid.ItemsSource = rows;
+        _structuredReturnGrid.IsVisible   = true;
+        _structuredReturnHeader.IsVisible = true;
+        // Header label includes the struct type so the user sees the
+        // "what" at a glance — useful when chaining many invokes that
+        // return different structs.
+        string structLabel = string.IsNullOrEmpty(_returnParam.StructName)
+            ? "Return value (decoded):"
+            : $"Return value (decoded — {_returnParam.StructName}):";
+        _structuredReturnHeader.Text = structLabel;
     }
 
     /// <summary>
