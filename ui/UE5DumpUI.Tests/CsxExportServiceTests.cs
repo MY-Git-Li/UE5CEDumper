@@ -85,8 +85,8 @@ public class StubDumpService : IDumpService
     public virtual Task<PropertySearchBatchResult> SearchPropertiesBatchAsync(string[] queries, string[]? types = null, bool gameOnly = true, int limitPerQuery = 200, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<ClassListResult> ListClassesAsync(bool gameOnly = true, int limit = 5000, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<AllFunctionsResult> ListAllFunctionsAsync(bool gameOnly = true, int limit = 100000, CancellationToken ct = default) => throw new NotImplementedException();
-    public virtual Task<ValueScanBeginResult> BeginValueScanAsync(ValueScanDataType dataType, ValueScanType scanType, string value, string? value2 = null, bool gameOnly = true, int maxResults = 50000, double tolerance = 0.0, CancellationToken ct = default) => throw new NotImplementedException();
-    public virtual Task<ValueScanRefineResult> RefineValueScanAsync(ulong sessionId, ValueScanType scanType, string? value = null, string? value2 = null, double tolerance = 0.0, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<ValueScanBeginResult> BeginValueScanAsync(ValueScanDataType dataType, ValueScanType scanType, string value, string? value2 = null, bool gameOnly = true, int maxResults = 50000, double tolerance = 0.0, bool caseSensitive = false, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<ValueScanRefineResult> RefineValueScanAsync(ulong sessionId, ValueScanType scanType, string? value = null, string? value2 = null, double tolerance = 0.0, bool caseSensitive = false, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task EndValueScanAsync(ulong sessionId, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<RescanStartResult> StartRescanAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public Task<RescanStatusResult> GetRescanStatusAsync(CancellationToken ct = default) => throw new NotImplementedException();

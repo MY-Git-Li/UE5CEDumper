@@ -33,7 +33,7 @@
     <sys:String x:Key="str.VS.Value">Value:</sys:String>
     <sys:String x:Key="str.VS.Value2">… to</sys:String>
     <sys:String x:Key="str.VS.Tolerance">± Tol:</sys:String>
-    <sys:String x:Key="str.Tip.VS.Tolerance">Rounded-scan slack for Float/Double. Game UI shows "338" for a real float of 337.5 — set tolerance 0.5 to scan for "338" and match anything in [337.5, 338.5]. Ignored for integer types.</sys:String>
+    <sys:String x:Key="str.Tip.VS.Tolerance">Rounded-scan slack for Float/Double + vector types. Game UI shows "338" for a real float of 337.5 — set tolerance 0.5 to scan for "338" and match anything in [337.5, 338.5]. For vectors the tolerance applies per axis. Ignored for integer + string types.</sys:String>
     <sys:String x:Key="str.VS.GameOnly">Game classes only</sys:String>
     <sys:String x:Key="str.VS.MaxResults">Max:</sys:String>
     <sys:String x:Key="str.VS.FirstScan">First Scan</sys:String>
@@ -41,9 +41,11 @@
     <sys:String x:Key="str.VS.NewScan">New Scan</sys:String>
     <sys:String x:Key="str.VS.OpenLive">Open in Live Walker</sys:String>
     <sys:String x:Key="str.VS.CopyAddr">Copy Address</sys:String>
-    <sys:String x:Key="str.Tip.VS.DataType">Pick the UE primitive type to scan. Strings, names, arrays, vectors, and FText are not yet supported.</sys:String>
-    <sys:String x:Key="str.Tip.VS.FirstScan">Walk every UPROPERTY field of the chosen type across all UObject instances, apply the predicate, and start a session for Next Scan refines.</sys:String>
-    <sys:String x:Key="str.Tip.VS.NextScan">Re-read each candidate's bytes and prune by the new predicate. Changed / Unchanged / Increased / Decreased compare against the previous round.</sys:String>
+    <sys:String x:Key="str.VS.CaseSensitive">Case sensitive</sys:String>
+    <sys:String x:Key="str.Tip.VS.CaseSensitive">When checked, string scans (FString / FName / FText) match case exactly. Default unchecked = CE-style case-insensitive matching. Only affects string DataTypes.</sys:String>
+    <sys:String x:Key="str.Tip.VS.DataType">Pick the UE property type to scan. Numeric primitives, FString / FName / FText, and FVector / FRotator are supported. FTransform is reserved but currently returns no hits. The scan also walks TArray&lt;T&gt; containers of the chosen inner type — matching elements appear as "FieldName[index]" rows.</sys:String>
+    <sys:String x:Key="str.Tip.VS.FirstScan">Walk every UPROPERTY field of the chosen type across all UObject instances (including TArray elements of that type), apply the predicate, and start a session for Next Scan refines. For strings use Contains / StartsWith / EndsWith. For vectors enter "X,Y,Z".</sys:String>
+    <sys:String x:Key="str.Tip.VS.NextScan">Re-read each candidate and prune by the new predicate. Changed / Unchanged / Increased / Decreased compare against the previous round.</sys:String>
     <sys:String x:Key="str.Tip.VS.NewScan">End the current session and reset for a fresh scan.</sys:String>
 
     <!-- Object Tree -->

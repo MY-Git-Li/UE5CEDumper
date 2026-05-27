@@ -487,13 +487,22 @@ struct ValueScanResult {
 // tolerance) predicate. Skips UClass meta-objects -- only live
 // instances + CDOs are scanned.
 //
-// Valid scan types for first scan: Exact / Bigger / Smaller / Between.
-// Prev-value scan types are silently treated as Exact against
-// targetBytes -- the pipe handler rejects invalid combinations upstream.
+// Numeric path: targetBytes / target2Bytes carry the predicate target.
+// Vector path (FVector/FRotator/FTransform): same buffers, 12 bytes each.
+// String path (FString/FName/FText): targetBytes/target2Bytes ignored;
+// targetString carries the user's search string and caseSensitive
+// controls the comparison.
 //
-// `tolerance` only affects Float/Double comparisons (CE-style rounded
-// scan -- displays show "338" for a real float of 337.5, so users want
-// to scan with +-0.5 slack). Integer types ignore it.
+// Valid scan types for first scan:
+//   Numeric / Vector: Exact / Bigger / Smaller / Between.
+//   String:           Exact / Contains / StartsWith / EndsWith.
+// Pipe handler rejects invalid (dt, st) combinations upstream so the
+// scan engine doesn't have to second-guess.
+//
+// `tolerance` only affects Float/Double and vector comparisons
+// (CE-style rounded scan -- displays show "338" for a real float of
+// 337.5, so users want to scan with +-0.5 slack). Integer + string
+// types ignore it.
 //
 // Returns at most maxResults candidates; the scan also bails on a 15s
 // deadline (stats.deadlineHit fires when this happens). Used by the
@@ -504,23 +513,27 @@ ValueScanResult ScanForValue(
     const uint8_t*      targetBytes,
     const uint8_t*      target2Bytes,
     bool                gameOnly,
-    int32_t             maxResults = 100000,
-    double              tolerance  = 0.0);
+    int32_t             maxResults    = 100000,
+    double              tolerance     = 0.0,
+    const std::string&  targetString  = "",
+    bool                caseSensitive = false);
 
 // Refine an existing candidate vector in place: re-read each
-// candidate's bytes, apply (st, targetBytes, target2Bytes, tolerance)
-// predicate, prune entries that no longer match. For prev-value scan
-// types (Changed / Unchanged / Increased / Decreased) the candidate's
-// prevValue snapshot is used in place of targetBytes. prevValue is
-// updated to the latest-observed bytes on survivors so the NEXT
-// prev-value refine compares against the bytes seen during THIS
-// refine -- standard CE Next Scan semantics.
+// candidate's bytes (or string, for FString/FName/FText DataTypes),
+// apply the predicate, prune entries that no longer match. For
+// prev-value scan types (Changed / Unchanged / Increased / Decreased)
+// the candidate's prevValue/prevStr snapshot is used in place of the
+// targeted inputs. Snapshots are updated to the latest-observed
+// state on survivors so the NEXT prev-value refine compares against
+// what was seen during THIS refine -- standard CE Next Scan semantics.
 ValueScanStats RefineCandidates(
     ValueScan::DataType                dt,
     ValueScan::ScanType                st,
     const uint8_t*                     targetBytes,
     const uint8_t*                     target2Bytes,
     std::vector<ValueScan::Candidate>& candidates,
-    double                             tolerance = 0.0);
+    double                             tolerance     = 0.0,
+    const std::string&                 targetString  = "",
+    bool                               caseSensitive = false);
 
 } // namespace Aura

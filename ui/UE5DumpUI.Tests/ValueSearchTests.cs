@@ -366,7 +366,7 @@ public class ValueSearchTests
         await vm.FirstScanCommand.ExecuteAsync(null);
 
         Assert.Single(fake.Begins);
-        var (_, _, _, _, _, _, tol) = fake.Begins[0];
+        var (_, _, _, _, _, _, tol, _) = fake.Begins[0];
         Assert.Equal(0.5, tol);
     }
 
@@ -387,7 +387,7 @@ public class ValueSearchTests
         await vm.FirstScanCommand.ExecuteAsync(null);
 
         Assert.Single(fake.Begins);
-        var (_, _, _, _, _, _, tol) = fake.Begins[0];
+        var (_, _, _, _, _, _, tol, _) = fake.Begins[0];
         Assert.Equal(0.0, tol);
     }
 
@@ -420,14 +420,19 @@ public class ValueSearchTests
     // ------------------------------------------------------------------
 
     [Theory]
-    [InlineData(ValueScanType.Exact,     true,  false)]
-    [InlineData(ValueScanType.Bigger,    true,  false)]
-    [InlineData(ValueScanType.Smaller,   true,  false)]
-    [InlineData(ValueScanType.Between,   true,  false)]
-    [InlineData(ValueScanType.Changed,   false, true)]
-    [InlineData(ValueScanType.Unchanged, false, true)]
-    [InlineData(ValueScanType.Increased, false, true)]
-    [InlineData(ValueScanType.Decreased, false, true)]
+    [InlineData(ValueScanType.Exact,      true,  false)]
+    [InlineData(ValueScanType.Bigger,     true,  false)]
+    [InlineData(ValueScanType.Smaller,    true,  false)]
+    [InlineData(ValueScanType.Between,    true,  false)]
+    [InlineData(ValueScanType.Changed,    false, true)]
+    [InlineData(ValueScanType.Unchanged,  false, true)]
+    [InlineData(ValueScanType.Increased,  false, true)]
+    [InlineData(ValueScanType.Decreased,  false, true)]
+    // Phase 2A: substring predicates are first-scan eligible (used as
+    // narrowing predicates on the user's needle, like Exact).
+    [InlineData(ValueScanType.Contains,   true,  false)]
+    [InlineData(ValueScanType.StartsWith, true,  false)]
+    [InlineData(ValueScanType.EndsWith,   true,  false)]
     public void ScanType_Partition_IsExhaustiveAndDisjoint(
         ValueScanType st, bool expectFirst, bool expectPrev)
     {
@@ -435,6 +440,384 @@ public class ValueSearchTests
         Assert.Equal(expectPrev,  ValueSearchViewModel.IsPrevValueScanType(st));
         Assert.NotEqual(ValueSearchViewModel.IsFirstScanType(st),
                         ValueSearchViewModel.IsPrevValueScanType(st));
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 2: IsScanTypeValidFor partition (mirror of DLL contract).
+    // String types: substring + Exact + Changed/Unchanged accept;
+    //               numeric ordering predicates reject.
+    // Vector / numeric types: substring predicates reject; ordering
+    //                         predicates accept.
+    // ------------------------------------------------------------------
+    [Theory]
+    // Numeric type accepts everything except substring predicates.
+    [InlineData(ValueScanDataType.Int32, ValueScanType.Exact,      true)]
+    [InlineData(ValueScanDataType.Int32, ValueScanType.Bigger,     true)]
+    [InlineData(ValueScanDataType.Int32, ValueScanType.Smaller,    true)]
+    [InlineData(ValueScanDataType.Int32, ValueScanType.Between,    true)]
+    [InlineData(ValueScanDataType.Int32, ValueScanType.Changed,    true)]
+    [InlineData(ValueScanDataType.Int32, ValueScanType.Increased,  true)]
+    [InlineData(ValueScanDataType.Int32, ValueScanType.Contains,   false)]
+    [InlineData(ValueScanDataType.Int32, ValueScanType.StartsWith, false)]
+    [InlineData(ValueScanDataType.Int32, ValueScanType.EndsWith,   false)]
+    [InlineData(ValueScanDataType.Float, ValueScanType.Contains,   false)]
+    // String types: substring + Exact + Changed/Unchanged accept;
+    // ordering rejects.
+    [InlineData(ValueScanDataType.FString, ValueScanType.Exact,      true)]
+    [InlineData(ValueScanDataType.FString, ValueScanType.Contains,   true)]
+    [InlineData(ValueScanDataType.FString, ValueScanType.StartsWith, true)]
+    [InlineData(ValueScanDataType.FString, ValueScanType.EndsWith,   true)]
+    [InlineData(ValueScanDataType.FString, ValueScanType.Changed,    true)]
+    [InlineData(ValueScanDataType.FString, ValueScanType.Unchanged,  true)]
+    [InlineData(ValueScanDataType.FString, ValueScanType.Bigger,     false)]
+    [InlineData(ValueScanDataType.FString, ValueScanType.Smaller,    false)]
+    [InlineData(ValueScanDataType.FString, ValueScanType.Between,    false)]
+    [InlineData(ValueScanDataType.FString, ValueScanType.Increased,  false)]
+    [InlineData(ValueScanDataType.FString, ValueScanType.Decreased,  false)]
+    [InlineData(ValueScanDataType.FName,   ValueScanType.Contains,   true)]
+    [InlineData(ValueScanDataType.FName,   ValueScanType.Bigger,     false)]
+    [InlineData(ValueScanDataType.FText,   ValueScanType.StartsWith, true)]
+    // Vector types: ordering predicates accept; substring rejects.
+    [InlineData(ValueScanDataType.FVector,  ValueScanType.Exact,      true)]
+    [InlineData(ValueScanDataType.FVector,  ValueScanType.Bigger,     true)]
+    [InlineData(ValueScanDataType.FVector,  ValueScanType.Between,    true)]
+    [InlineData(ValueScanDataType.FVector,  ValueScanType.Changed,    true)]
+    [InlineData(ValueScanDataType.FVector,  ValueScanType.Contains,   false)]
+    [InlineData(ValueScanDataType.FRotator, ValueScanType.Smaller,    true)]
+    [InlineData(ValueScanDataType.FRotator, ValueScanType.EndsWith,   false)]
+    public void IsScanTypeValidFor_PartitionsCorrectlyPerDataType(
+        ValueScanDataType dt, ValueScanType st, bool expected)
+    {
+        Assert.Equal(expected, ValueSearchViewModel.IsScanTypeValidFor(dt, st));
+    }
+
+    [Fact]
+    public void IsStringDataType_OnlyMatchesStringFamily()
+    {
+        Assert.True(ValueSearchViewModel.IsStringDataType(ValueScanDataType.FString));
+        Assert.True(ValueSearchViewModel.IsStringDataType(ValueScanDataType.FName));
+        Assert.True(ValueSearchViewModel.IsStringDataType(ValueScanDataType.FText));
+        Assert.False(ValueSearchViewModel.IsStringDataType(ValueScanDataType.Int32));
+        Assert.False(ValueSearchViewModel.IsStringDataType(ValueScanDataType.FVector));
+    }
+
+    [Fact]
+    public void IsVectorDataType_OnlyMatchesVectorFamily()
+    {
+        Assert.True(ValueSearchViewModel.IsVectorDataType(ValueScanDataType.FVector));
+        Assert.True(ValueSearchViewModel.IsVectorDataType(ValueScanDataType.FRotator));
+        Assert.True(ValueSearchViewModel.IsVectorDataType(ValueScanDataType.FTransform));
+        Assert.False(ValueSearchViewModel.IsVectorDataType(ValueScanDataType.Int32));
+        Assert.False(ValueSearchViewModel.IsVectorDataType(ValueScanDataType.FString));
+    }
+
+    [Theory]
+    // Numeric DataTypes: dropdown excludes substring predicates.
+    [InlineData(ValueScanDataType.Int32,   8 /* Exact..Decreased */)]
+    [InlineData(ValueScanDataType.Float,   8)]
+    // String DataTypes: 6 predicates (Exact, Contains, StartsWith,
+    // EndsWith, Changed, Unchanged).
+    [InlineData(ValueScanDataType.FString, 6)]
+    [InlineData(ValueScanDataType.FName,   6)]
+    [InlineData(ValueScanDataType.FText,   6)]
+    // Vector DataTypes: same 8 as numerics.
+    [InlineData(ValueScanDataType.FVector, 8)]
+    [InlineData(ValueScanDataType.FRotator,8)]
+    public void VisibleScanTypeOptions_ReflectsDataType(ValueScanDataType dt, int expectedCount)
+    {
+        var (vm, _) = MakeVm();
+        vm.SelectedDataType = dt;
+        Assert.Equal(expectedCount, vm.VisibleScanTypeOptions.Count);
+    }
+
+    [Fact]
+    public void SelectedScanType_ResetsToExact_WhenSwitchingToIncompatibleDataType()
+    {
+        // User starts with Int32 + Bigger, then switches to FString.
+        // Bigger is invalid for FString -> the VM must snap to Exact
+        // so the dropdown stays in a consistent state.
+        var (vm, _) = MakeVm();
+        vm.SelectedDataType = ValueScanDataType.Int32;
+        vm.SelectedScanType = ValueScanType.Bigger;
+        vm.SelectedDataType = ValueScanDataType.FString;
+        Assert.Equal(ValueScanType.Exact, vm.SelectedScanType);
+    }
+
+    [Fact]
+    public void SupportsCaseSensitive_OnlyForStringTypes()
+    {
+        var (vm, _) = MakeVm();
+        vm.SelectedDataType = ValueScanDataType.Int32;
+        Assert.False(vm.SupportsCaseSensitive);
+        vm.SelectedDataType = ValueScanDataType.FString;
+        Assert.True(vm.SupportsCaseSensitive);
+        vm.SelectedDataType = ValueScanDataType.FName;
+        Assert.True(vm.SupportsCaseSensitive);
+        vm.SelectedDataType = ValueScanDataType.FText;
+        Assert.True(vm.SupportsCaseSensitive);
+        vm.SelectedDataType = ValueScanDataType.FVector;
+        Assert.False(vm.SupportsCaseSensitive);
+    }
+
+    [Fact]
+    public void SupportsTolerance_AlsoForVectorTypes()
+    {
+        // Tolerance is enabled for Float/Double + Vector/Rotator/Transform.
+        var (vm, _) = MakeVm();
+        vm.SelectedDataType = ValueScanDataType.FVector;
+        Assert.True(vm.SupportsTolerance);
+        vm.SelectedDataType = ValueScanDataType.FRotator;
+        Assert.True(vm.SupportsTolerance);
+        vm.SelectedDataType = ValueScanDataType.FTransform;
+        Assert.True(vm.SupportsTolerance);
+        vm.SelectedDataType = ValueScanDataType.FString;
+        Assert.False(vm.SupportsTolerance);
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 2 wire-shape locks for DumpService
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task BeginValueScanAsync_AttachesCaseSensitiveForFString()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"]              = req["id"]?.GetValue<int>() ?? 0,
+                ["ok"]              = true,
+                ["session_id"]      = 1UL,
+                ["data_type"]       = "FString",
+                ["total"]           = 0,
+                ["scanned_classes"] = 0,
+                ["scanned_objects"] = 0,
+                ["duration_ms"]     = 1L,
+                ["deadline_hit"]    = false,
+                ["candidates"]      = new JsonArray(),
+            };
+        });
+
+        await svc.BeginValueScanAsync(
+            ValueScanDataType.FString, ValueScanType.Contains, "Player",
+            caseSensitive: true,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(captured);
+        Assert.Equal("FString",   captured!["data_type"]?.GetValue<string>());
+        Assert.Equal("Contains",  captured["scan_type"]?.GetValue<string>());
+        Assert.Equal("Player",    captured["value"]?.GetValue<string>());
+        Assert.True(captured.ContainsKey("case_sensitive"));
+        Assert.True(captured["case_sensitive"]?.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task BeginValueScanAsync_OmitsCaseSensitiveWhenFalse()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"]              = req["id"]?.GetValue<int>() ?? 0,
+                ["ok"]              = true,
+                ["session_id"]      = 1UL,
+                ["data_type"]       = "FString",
+                ["total"]           = 0,
+                ["scanned_classes"] = 0,
+                ["scanned_objects"] = 0,
+                ["duration_ms"]     = 1L,
+                ["deadline_hit"]    = false,
+                ["candidates"]      = new JsonArray(),
+            };
+        });
+
+        // CE-style default is case-insensitive -- the wire should omit
+        // the flag entirely so non-string sessions stay byte-identical
+        // to the pre-Phase-2 wire shape.
+        await svc.BeginValueScanAsync(
+            ValueScanDataType.FString, ValueScanType.Exact, "Player",
+            caseSensitive: false,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(captured);
+        Assert.False(captured!.ContainsKey("case_sensitive"));
+    }
+
+    [Theory]
+    [InlineData(ValueScanDataType.Int32)]
+    [InlineData(ValueScanDataType.Float)]
+    [InlineData(ValueScanDataType.FVector)]
+    public async Task BeginValueScanAsync_OmitsCaseSensitiveForNonStringTypes(ValueScanDataType dt)
+    {
+        // Even when the caller explicitly passes caseSensitive=true,
+        // non-string DataTypes must NOT carry the flag on the wire --
+        // the DLL ignores it for those sessions and omitting keeps the
+        // wire shape minimal.
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"]              = req["id"]?.GetValue<int>() ?? 0,
+                ["ok"]              = true,
+                ["session_id"]      = 1UL,
+                ["data_type"]       = dt.ToString(),
+                ["total"]           = 0,
+                ["scanned_classes"] = 0,
+                ["scanned_objects"] = 0,
+                ["duration_ms"]     = 1L,
+                ["deadline_hit"]    = false,
+                ["candidates"]      = new JsonArray(),
+            };
+        });
+
+        await svc.BeginValueScanAsync(
+            dt, ValueScanType.Exact,
+            dt == ValueScanDataType.FVector ? "0,0,0" : "0",
+            caseSensitive: true,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(captured);
+        Assert.False(captured!.ContainsKey("case_sensitive"),
+            $"case_sensitive must not appear on the wire for {dt}");
+    }
+
+    [Theory]
+    [InlineData(ValueScanDataType.FVector)]
+    [InlineData(ValueScanDataType.FRotator)]
+    [InlineData(ValueScanDataType.FTransform)]
+    public async Task BeginValueScanAsync_AttachesToleranceForVectorTypes(ValueScanDataType dt)
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"]              = req["id"]?.GetValue<int>() ?? 0,
+                ["ok"]              = true,
+                ["session_id"]      = 1UL,
+                ["data_type"]       = dt.ToString(),
+                ["total"]           = 0,
+                ["scanned_classes"] = 0,
+                ["scanned_objects"] = 0,
+                ["duration_ms"]     = 1L,
+                ["deadline_hit"]    = false,
+                ["candidates"]      = new JsonArray(),
+            };
+        });
+
+        await svc.BeginValueScanAsync(
+            dt, ValueScanType.Exact, "100,200,300",
+            tolerance: 0.5,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(captured);
+        Assert.Equal(0.5, captured!["tolerance"]?.GetValue<double>());
+    }
+
+    [Theory]
+    [InlineData(ValueScanDataType.FString)]
+    [InlineData(ValueScanDataType.FName)]
+    [InlineData(ValueScanDataType.FText)]
+    public async Task BeginValueScanAsync_OmitsToleranceForStringTypes(ValueScanDataType dt)
+    {
+        // Strings ignore tolerance DLL-side; omitting keeps the wire
+        // shape tight for the common case.
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"]              = req["id"]?.GetValue<int>() ?? 0,
+                ["ok"]              = true,
+                ["session_id"]      = 1UL,
+                ["data_type"]       = dt.ToString(),
+                ["total"]           = 0,
+                ["scanned_classes"] = 0,
+                ["scanned_objects"] = 0,
+                ["duration_ms"]     = 1L,
+                ["deadline_hit"]    = false,
+                ["candidates"]      = new JsonArray(),
+            };
+        });
+
+        await svc.BeginValueScanAsync(
+            dt, ValueScanType.Contains, "Player",
+            tolerance: 5.0,   // explicitly non-zero, should still be dropped
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(captured);
+        Assert.False(captured!.ContainsKey("tolerance"),
+            $"tolerance must not appear on the wire for {dt}");
+    }
+
+    [Fact]
+    public async Task ViewModel_CaseSensitive_PassesThroughForFString()
+    {
+        var (vm, fake) = MakeVm();
+        fake.NextBeginResult = new ValueScanBeginResult { SessionId = 1UL };
+        vm.SelectedDataType = ValueScanDataType.FString;
+        vm.SelectedScanType = ValueScanType.Contains;
+        vm.Value = "Health";
+        vm.CaseSensitive = true;
+
+        await vm.FirstScanCommand.ExecuteAsync(null);
+
+        Assert.Single(fake.Begins);
+        var (_, _, _, _, _, _, _, cs) = fake.Begins[0];
+        Assert.True(cs);
+    }
+
+    [Fact]
+    public async Task ViewModel_CaseSensitive_IgnoredForNonStringTypes()
+    {
+        // The VM applies SupportsCaseSensitive gating before pushing
+        // to the service -- even with CaseSensitive=true the
+        // non-string scan must see false.
+        var (vm, fake) = MakeVm();
+        fake.NextBeginResult = new ValueScanBeginResult { SessionId = 1UL };
+        vm.SelectedDataType = ValueScanDataType.Int32;
+        vm.SelectedScanType = ValueScanType.Exact;
+        vm.Value = "100";
+        vm.CaseSensitive = true;   // user set it, but type is Int32
+
+        await vm.FirstScanCommand.ExecuteAsync(null);
+
+        Assert.Single(fake.Begins);
+        var (_, _, _, _, _, _, _, cs) = fake.Begins[0];
+        Assert.False(cs);
+    }
+
+    [Fact]
+    public async Task FirstScan_RejectsIncompatibleScanTypeForDataType()
+    {
+        // FString + Bigger is a legal-individually pair but illegal in
+        // combination. The VM must catch it before hitting the DLL so
+        // the user gets a clean error.
+        var (vm, fake) = MakeVm();
+        vm.SelectedDataType = ValueScanDataType.FString;
+        // Bigger isn't in VisibleScanTypeOptions, but a misbehaving
+        // caller could set it directly. Verify the FirstScan guard.
+        vm.SelectedScanType = ValueScanType.Bigger;
+        vm.Value = "anything";
+
+        await vm.FirstScanCommand.ExecuteAsync(null);
+
+        Assert.False(vm.HasSession);
+        Assert.Empty(fake.Begins);
+        Assert.Contains("not valid for", vm.ErrorMessage);
     }
 
     // ------------------------------------------------------------------
@@ -446,17 +829,20 @@ public class ValueSearchTests
     {
         public ValueScanBeginResult NextBeginResult { get; set; } = new();
         public ValueScanRefineResult NextRefineResult { get; set; } = new();
-        public List<(ValueScanDataType, ValueScanType, string, string?, bool, int, double)> Begins { get; } = new();
-        public List<(ulong, ValueScanType, string?, string?, double)> Refines { get; } = new();
+        // (dataType, scanType, value, value2, gameOnly, maxResults, tolerance, caseSensitive)
+        public List<(ValueScanDataType, ValueScanType, string, string?, bool, int, double, bool)> Begins { get; } = new();
+        // (sessionId, scanType, value, value2, tolerance, caseSensitive)
+        public List<(ulong, ValueScanType, string?, string?, double, bool)> Refines { get; } = new();
         public List<ulong> Ends { get; } = new();
 
         public override Task<ValueScanBeginResult> BeginValueScanAsync(
             ValueScanDataType dataType, ValueScanType scanType,
             string value, string? value2 = null, bool gameOnly = true,
             int maxResults = 50000, double tolerance = 0.0,
+            bool caseSensitive = false,
             CancellationToken ct = default)
         {
-            Begins.Add((dataType, scanType, value, value2, gameOnly, maxResults, tolerance));
+            Begins.Add((dataType, scanType, value, value2, gameOnly, maxResults, tolerance, caseSensitive));
             return Task.FromResult(NextBeginResult);
         }
 
@@ -464,9 +850,10 @@ public class ValueSearchTests
             ulong sessionId, ValueScanType scanType,
             string? value = null, string? value2 = null,
             double tolerance = 0.0,
+            bool caseSensitive = false,
             CancellationToken ct = default)
         {
-            Refines.Add((sessionId, scanType, value, value2, tolerance));
+            Refines.Add((sessionId, scanType, value, value2, tolerance, caseSensitive));
             return Task.FromResult(NextRefineResult);
         }
 
@@ -513,7 +900,7 @@ public class ValueSearchTests
         Assert.True(vm.HasSession);
         Assert.Single(vm.Candidates);
         Assert.Single(fake.Begins);
-        var (dt, st, val, val2, _, _, _) = fake.Begins[0];
+        var (dt, st, val, val2, _, _, _, _) = fake.Begins[0];
         Assert.Equal(ValueScanDataType.Int32, dt);
         Assert.Equal(ValueScanType.Exact,     st);
         Assert.Equal("100",                   val);
@@ -531,7 +918,7 @@ public class ValueSearchTests
 
         Assert.False(vm.HasSession);
         Assert.Empty(fake.Begins);
-        Assert.Contains("First Scan only supports", vm.ErrorMessage);
+        Assert.Contains("First Scan supports targeted predicates only", vm.ErrorMessage);
     }
 
     [Fact]
@@ -578,7 +965,7 @@ public class ValueSearchTests
         await vm.NextScanCommand.ExecuteAsync(null);
 
         Assert.Single(fake.Refines);
-        var (sid, st, val, val2, _) = fake.Refines[0];
+        var (sid, st, val, val2, _, _) = fake.Refines[0];
         Assert.Equal(7UL, sid);
         Assert.Equal(ValueScanType.Changed, st);
         Assert.Null(val);

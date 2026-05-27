@@ -17,6 +17,12 @@ size_t SizeOf(DataType dt) {
         case DataType::Int16:  case DataType::UInt16:                        return 2;
         case DataType::Int32:  case DataType::UInt32: case DataType::Float:  return 4;
         case DataType::Int64:  case DataType::UInt64: case DataType::Double: return 8;
+        // Vector primitives: 3 floats packed = 12 bytes. FTransform's
+        // candidate-stored bytes are the Translation FVector only.
+        case DataType::FVector: case DataType::FRotator: case DataType::FTransform: return 12;
+        // String types use the candidate's prevStr field instead of
+        // the byte buffer — return 0 so callers can branch on it.
+        case DataType::FString: case DataType::FName: case DataType::FText: return 0;
     }
     return 0;
 }
@@ -34,6 +40,12 @@ const char* NameOf(DataType dt) {
         case DataType::Float:  return "Float";
         case DataType::Double: return "Double";
         case DataType::Bool:   return "Bool";
+        case DataType::FString:    return "FString";
+        case DataType::FName:      return "FName";
+        case DataType::FText:      return "FText";
+        case DataType::FVector:    return "FVector";
+        case DataType::FRotator:   return "FRotator";
+        case DataType::FTransform: return "FTransform";
     }
     return "?";
 }
@@ -50,18 +62,27 @@ bool TryParseDataType(const std::string& s, DataType& out) {
     if (s == "Float")  { out = DataType::Float;  return true; }
     if (s == "Double") { out = DataType::Double; return true; }
     if (s == "Bool")   { out = DataType::Bool;   return true; }
+    if (s == "FString")    { out = DataType::FString;    return true; }
+    if (s == "FName")      { out = DataType::FName;      return true; }
+    if (s == "FText")      { out = DataType::FText;      return true; }
+    if (s == "FVector")    { out = DataType::FVector;    return true; }
+    if (s == "FRotator")   { out = DataType::FRotator;   return true; }
+    if (s == "FTransform") { out = DataType::FTransform; return true; }
     return false;
 }
 
 bool TryParseScanType(const std::string& s, ScanType& out) {
-    if (s == "Exact")     { out = ScanType::Exact;     return true; }
-    if (s == "Bigger")    { out = ScanType::Bigger;    return true; }
-    if (s == "Smaller")   { out = ScanType::Smaller;   return true; }
-    if (s == "Between")   { out = ScanType::Between;   return true; }
-    if (s == "Changed")   { out = ScanType::Changed;   return true; }
-    if (s == "Unchanged") { out = ScanType::Unchanged; return true; }
-    if (s == "Increased") { out = ScanType::Increased; return true; }
-    if (s == "Decreased") { out = ScanType::Decreased; return true; }
+    if (s == "Exact")      { out = ScanType::Exact;      return true; }
+    if (s == "Bigger")     { out = ScanType::Bigger;     return true; }
+    if (s == "Smaller")    { out = ScanType::Smaller;    return true; }
+    if (s == "Between")    { out = ScanType::Between;    return true; }
+    if (s == "Changed")    { out = ScanType::Changed;    return true; }
+    if (s == "Unchanged")  { out = ScanType::Unchanged;  return true; }
+    if (s == "Increased")  { out = ScanType::Increased;  return true; }
+    if (s == "Decreased")  { out = ScanType::Decreased;  return true; }
+    if (s == "Contains")   { out = ScanType::Contains;   return true; }
+    if (s == "StartsWith") { out = ScanType::StartsWith; return true; }
+    if (s == "EndsWith")   { out = ScanType::EndsWith;   return true; }
     return false;
 }
 
@@ -83,10 +104,61 @@ bool IsFirstScanType(ScanType st) {
         case ScanType::Bigger:
         case ScanType::Smaller:
         case ScanType::Between:
+        case ScanType::Contains:
+        case ScanType::StartsWith:
+        case ScanType::EndsWith:
             return true;
         default:
             return false;
     }
+}
+
+bool IsStringDataType(DataType dt) {
+    return dt == DataType::FString || dt == DataType::FName || dt == DataType::FText;
+}
+
+bool IsVectorDataType(DataType dt) {
+    return dt == DataType::FVector || dt == DataType::FRotator || dt == DataType::FTransform;
+}
+
+bool IsSubstringScanType(ScanType st) {
+    return st == ScanType::Contains || st == ScanType::StartsWith || st == ScanType::EndsWith;
+}
+
+bool IsScanTypeValidFor(DataType dt, ScanType st) {
+    if (IsStringDataType(dt)) {
+        // Strings: Exact, Contains, StartsWith, EndsWith, Changed, Unchanged.
+        // No ordering -> reject Bigger/Smaller/Between/Increased/Decreased.
+        switch (st) {
+            case ScanType::Exact:
+            case ScanType::Contains:
+            case ScanType::StartsWith:
+            case ScanType::EndsWith:
+            case ScanType::Changed:
+            case ScanType::Unchanged:
+                return true;
+            default:
+                return false;
+        }
+    }
+    if (IsVectorDataType(dt)) {
+        // Vectors: component-wise ordering applies; substring predicates reject.
+        switch (st) {
+            case ScanType::Exact:
+            case ScanType::Bigger:
+            case ScanType::Smaller:
+            case ScanType::Between:
+            case ScanType::Changed:
+            case ScanType::Unchanged:
+            case ScanType::Increased:
+            case ScanType::Decreased:
+                return true;
+            default:
+                return false;
+        }
+    }
+    // Numeric primitives: substring predicates reject, everything else valid.
+    return !IsSubstringScanType(st);
 }
 
 const std::vector<std::string>& PropertyTypeNames(DataType dt) {
@@ -103,6 +175,13 @@ const std::vector<std::string>& PropertyTypeNames(DataType dt) {
     static const std::vector<std::string> kFloat  = { "FloatProperty" };
     static const std::vector<std::string> kDouble = { "DoubleProperty" };
     static const std::vector<std::string> kBool   = { "BoolProperty" };
+    static const std::vector<std::string> kFString = { "StrProperty" };
+    static const std::vector<std::string> kFName   = { "NameProperty" };
+    static const std::vector<std::string> kFText   = { "TextProperty" };
+    // Vector / Rotator / Transform are represented as StructProperty in
+    // ClassInfo.Fields. The scan-side caller must also match the inner
+    // UScriptStruct name (see VectorStructNames) before emitting.
+    static const std::vector<std::string> kStruct = { "StructProperty" };
     static const std::vector<std::string> kEmpty;
 
     switch (dt) {
@@ -117,8 +196,43 @@ const std::vector<std::string>& PropertyTypeNames(DataType dt) {
         case DataType::Float:  return kFloat;
         case DataType::Double: return kDouble;
         case DataType::Bool:   return kBool;
+        case DataType::FString: return kFString;
+        case DataType::FName:   return kFName;
+        case DataType::FText:   return kFText;
+        case DataType::FVector:
+        case DataType::FRotator:
+        case DataType::FTransform: return kStruct;
     }
     return kEmpty;
+}
+
+const std::vector<std::string>& VectorStructNames(DataType dt) {
+    // UE5 introduced Large World Coordinate variants — FVector became
+    // double-precision (kept as "Vector"), with explicit float variants
+    // FVector3f / FVector4f. Cooked-game StructProperty inner names
+    // vary by version + variant. Accept the common shapes for each
+    // logical type; the scan engine reads only 12 bytes regardless so
+    // it'll grab the first 3 floats (UE5 double-vector reads as the
+    // first 3 doubles' first 4 bytes each = junk; we accept Vector3f
+    // as the safe primary match and add "Vector" for UE4 + cases where
+    // the struct still names itself Vector despite being float-backed).
+    static const std::vector<std::string> kVec  = { "Vector", "Vector3f", "Vector_NetQuantize", "Vector_NetQuantizeNormal" };
+    static const std::vector<std::string> kRot  = { "Rotator", "Rotator3f" };
+    // FTransform deferred: layout starts with FQuat Rotation (16B UE4 /
+    // 32B UE5 LWC), so reading 12 bytes from struct start would grab
+    // the Rotation quat's first three floats, not Translation. Proper
+    // support needs per-version offset detection (Translation lives at
+    // +16 non-LWC, +32 LWC). Leaving FTransform DataType in the enum
+    // so the C# wire enum can stay stable, but no struct names map to
+    // it -- scan returns 0 candidates until the per-version offset
+    // table lands.
+    static const std::vector<std::string> kEmpty;
+    switch (dt) {
+        case DataType::FVector:    return kVec;
+        case DataType::FRotator:   return kRot;
+        case DataType::FTransform: return kEmpty;
+        default:                   return kEmpty;
+    }
 }
 
 // --- Compare predicate ---
@@ -225,6 +339,8 @@ bool ComparePredicate(DataType dt, ScanType st,
                       double         tolerance) {
     if (!rawBytes || !targetBytes) return false;
     if (st == ScanType::Between && !target2Bytes) return false;
+    // Substring predicates have no meaning for numeric types.
+    if (IsSubstringScanType(st)) return false;
 
     if (IsFloatType(dt)) {
         double cur = LoadTyped<double>(dt, rawBytes);
@@ -245,6 +361,150 @@ bool ComparePredicate(DataType dt, ScanType st,
         uint64_t a   = LoadTyped<uint64_t>(dt, targetBytes);
         uint64_t b   = target2Bytes ? LoadTyped<uint64_t>(dt, target2Bytes) : 0;
         return ApplyOrdered<uint64_t>(st, cur, a, b);
+    }
+    return false;
+}
+
+// --- String predicate ---
+
+namespace {
+
+// ASCII-aware case folder. We don't pull in <locale> / ICU; for the
+// cheat use cases that hit string scans (English item names, save
+// keys, dialogue tags) a byte-level tolower over [A-Z] is sufficient.
+// Non-ASCII bytes (UTF-8 multibyte sequences) compare bitwise — two
+// strings that differ only in non-ASCII case (e.g. "Ä" vs "ä") will
+// not match in case-insensitive mode. Documented in ValueScan.h.
+inline char FoldAscii(char c) {
+    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + ('a' - 'A')) : c;
+}
+
+bool EqualsFolded(const std::string& a, const std::string& b, bool caseSensitive) {
+    if (a.size() != b.size()) return false;
+    if (caseSensitive) return a == b;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (FoldAscii(a[i]) != FoldAscii(b[i])) return false;
+    }
+    return true;
+}
+
+bool StartsWithFolded(const std::string& s, const std::string& prefix, bool caseSensitive) {
+    if (prefix.size() > s.size()) return false;
+    if (caseSensitive) return std::memcmp(s.data(), prefix.data(), prefix.size()) == 0;
+    for (size_t i = 0; i < prefix.size(); ++i) {
+        if (FoldAscii(s[i]) != FoldAscii(prefix[i])) return false;
+    }
+    return true;
+}
+
+bool EndsWithFolded(const std::string& s, const std::string& suffix, bool caseSensitive) {
+    if (suffix.size() > s.size()) return false;
+    size_t off = s.size() - suffix.size();
+    if (caseSensitive) return std::memcmp(s.data() + off, suffix.data(), suffix.size()) == 0;
+    for (size_t i = 0; i < suffix.size(); ++i) {
+        if (FoldAscii(s[off + i]) != FoldAscii(suffix[i])) return false;
+    }
+    return true;
+}
+
+bool ContainsFolded(const std::string& s, const std::string& needle, bool caseSensitive) {
+    if (needle.empty()) return true;
+    if (needle.size() > s.size()) return false;
+    if (caseSensitive) return s.find(needle) != std::string::npos;
+    // Inline ASCII-fold substring search — O(N*M) but bounded by short
+    // user-entered needles + ~50K candidates. No allocations.
+    const size_t lastStart = s.size() - needle.size();
+    for (size_t i = 0; i <= lastStart; ++i) {
+        bool match = true;
+        for (size_t j = 0; j < needle.size(); ++j) {
+            if (FoldAscii(s[i + j]) != FoldAscii(needle[j])) { match = false; break; }
+        }
+        if (match) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
+bool CompareStringPredicate(ScanType           st,
+                            const std::string& cur,
+                            const std::string& target,
+                            bool               caseSensitive) {
+    switch (st) {
+        case ScanType::Exact:      return EqualsFolded(cur, target, caseSensitive);
+        case ScanType::Contains:   return ContainsFolded(cur, target, caseSensitive);
+        case ScanType::StartsWith: return StartsWithFolded(cur, target, caseSensitive);
+        case ScanType::EndsWith:   return EndsWithFolded(cur, target, caseSensitive);
+        case ScanType::Changed:    return !EqualsFolded(cur, target, caseSensitive);
+        case ScanType::Unchanged:  return  EqualsFolded(cur, target, caseSensitive);
+        // Numeric-ordering predicates are nonsensical for strings.
+        case ScanType::Bigger:
+        case ScanType::Smaller:
+        case ScanType::Between:
+        case ScanType::Increased:
+        case ScanType::Decreased:
+            return false;
+    }
+    return false;
+}
+
+// --- Vector predicate ---
+
+bool CompareVectorPredicate(ScanType       st,
+                            const uint8_t* rawBytes,
+                            const uint8_t* targetBytes,
+                            const uint8_t* target2Bytes,
+                            double         tolerance) {
+    if (!rawBytes || !targetBytes) return false;
+    if (st == ScanType::Between && !target2Bytes) return false;
+    if (IsSubstringScanType(st)) return false;
+    if (tolerance < 0.0) tolerance = 0.0;
+
+    float c[3], a[3], b[3] = {0.0f, 0.0f, 0.0f};
+    std::memcpy(c, rawBytes,     sizeof(c));
+    std::memcpy(a, targetBytes,  sizeof(a));
+    if (target2Bytes) std::memcpy(b, target2Bytes, sizeof(b));
+
+    auto absf = [](float x) -> float { return x < 0.0f ? -x : x; };
+    const float tol = static_cast<float>(tolerance);
+
+    switch (st) {
+        case ScanType::Exact:
+            for (int i = 0; i < 3; ++i)
+                if (absf(c[i] - a[i]) > tol) return false;
+            return true;
+        case ScanType::Bigger:
+            for (int i = 0; i < 3; ++i)
+                if (!(c[i] > a[i] + tol)) return false;
+            return true;
+        case ScanType::Smaller:
+            for (int i = 0; i < 3; ++i)
+                if (!(c[i] < a[i] - tol)) return false;
+            return true;
+        case ScanType::Between:
+            for (int i = 0; i < 3; ++i)
+                if (!(c[i] >= a[i] - tol && c[i] <= b[i] + tol)) return false;
+            return true;
+        case ScanType::Changed:
+            for (int i = 0; i < 3; ++i)
+                if (absf(c[i] - a[i]) > tol) return true;
+            return false;
+        case ScanType::Unchanged:
+            for (int i = 0; i < 3; ++i)
+                if (absf(c[i] - a[i]) > tol) return false;
+            return true;
+        case ScanType::Increased:
+            for (int i = 0; i < 3; ++i)
+                if (c[i] > a[i] + tol) return true;
+            return false;
+        case ScanType::Decreased:
+            for (int i = 0; i < 3; ++i)
+                if (c[i] < a[i] - tol) return true;
+            return false;
+        case ScanType::Contains:
+        case ScanType::StartsWith:
+        case ScanType::EndsWith:
+            return false;
     }
     return false;
 }

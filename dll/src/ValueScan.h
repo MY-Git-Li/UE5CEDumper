@@ -22,14 +22,34 @@
 // vector — typical refine reads ~50K addresses via ReadSafe which is
 // fast enough that a coarse lock is acceptable for v1).
 //
-// MVP scope (locked-in 2026-05-26 — see memory project_value_search):
-//   - Types:     Int8/16/32/64, UInt8/16/32/64, Float, Double, Bool
-//                (BoolProperty supports both whole-byte and bitfield)
-//   - First scan: Exact / Bigger / Smaller / Between
-//   - Next scan:  Exact / Bigger / Smaller / Between (vs target value)
-//                 Changed / Unchanged / Increased / Decreased (vs prev value)
-//   - Excluded:  Native C++ fields (non-UPROPERTY) — UI must show banner
-//   - Deferred:  FString / FName / FText / TArray<T> / FVector
+// Scope (build 738 MVP + Phase 2 expansion 2026-05-26):
+//   Numeric (MVP, build 738):
+//     - Types:      Int8/16/32/64, UInt8/16/32/64, Float, Double, Bool
+//                   (BoolProperty supports both whole-byte and bitfield)
+//     - First scan: Exact / Bigger / Smaller / Between
+//     - Next scan:  + Changed / Unchanged / Increased / Decreased
+//   String (Phase 2A, build 750):
+//     - Types:      FString (StrProperty), FName (NameProperty), FText
+//                   (TextProperty — best-effort: cooked FText often
+//                   has the display string at a probed offset; the
+//                   scan falls back to the raw header bytes if no
+//                   string is resolvable)
+//     - First scan: Exact / Contains / StartsWith / EndsWith
+//     - Next scan:  + Changed / Unchanged
+//                   (Bigger/Smaller/Between/Increased/Decreased rejected
+//                    DLL-side for string types — no natural ordering)
+//   Vector (Phase 2B, build 750):
+//     - Types:      FVector / FRotator / FTransform (translation only).
+//                   FVector / FRotator are 3 floats (X,Y,Z) or
+//                   (Pitch,Yaw,Roll). FTransform scans the Translation
+//                   FVector — the most useful cheat axis; Rotation +
+//                   Scale are out of scope to keep the UI surface tight.
+//     - First scan: Exact / Bigger / Smaller (component-wise; Between
+//                   takes a single second vector for upper bound)
+//     - Next scan:  + Changed / Unchanged / Increased / Decreased
+//   Excluded:       Native C++ fields (non-UPROPERTY) — UI must show banner
+//   Deferred:       TArray<T> scan — see memory project_value_search_caveats
+//                   for the crash-risk plan that gates the v2 expansion
 //
 // The candidate enrichment matches Aura::FindByAddress conventions so
 // "Open in Live Walker" works without further address-→-instance lookup.
@@ -45,10 +65,12 @@
 
 namespace ValueScan {
 
-// Primitive data types supported by the MVP. String/array/vector forms
-// are deferred — see memory project_value_search_caveats for the
-// TArray<T> crash-risk plan that gates the v2 expansion.
+// Data types supported by the scan engine. Numeric primitives are the
+// MVP; string types (FString/FName/FText) and vector types (FVector/
+// FRotator/FTransform) are Phase 2 extensions (build 750). TArray<T>
+// scan remains deferred — see memory project_value_search_caveats.
 enum class DataType : uint8_t {
+    // Numeric primitives (MVP, build 738)
     Int8 = 0,
     Int16,
     Int32,
@@ -60,20 +82,46 @@ enum class DataType : uint8_t {
     Float,
     Double,
     Bool,
+
+    // String types (Phase 2A, build 750). prevValue array unused;
+    // candidate's prevStr holds the resolved UTF-8 string.
+    FString,
+    FName,
+    FText,
+
+    // Vector types (Phase 2B, build 750). prevValue array holds the
+    // first 8 bytes (X), prevValue2 holds Y, prevValue3 holds Z so the
+    // candidate row stays POD-sized. FTransform scans the Translation
+    // FVector only (Rotation + Scale out of scope to keep UI tight).
+    FVector,
+    FRotator,
+    FTransform,
 };
 
 enum class ScanType : uint8_t {
+    // Targeted (compare against user-supplied value)
     Exact = 0,
     Bigger,
     Smaller,
     Between,
+
+    // Prev-value (compare against last-observed candidate bytes)
     Changed,
     Unchanged,
     Increased,
     Decreased,
+
+    // String-only targeted predicates (Phase 2A). Reject DLL-side for
+    // numeric / vector types since there's no natural substring concept.
+    Contains,
+    StartsWith,
+    EndsWith,
 };
 
-// Byte count for a given DataType. 1..8 for primitives.
+// Byte count for a given DataType. 1..8 for numeric primitives;
+// 12 for FVector/FRotator (3 floats); 0 for string types (variable
+// length — the scan engine reads on demand via Ubel::ReadFStringAt /
+// ReadFNameAt / ReadFTextStringAt).
 size_t SizeOf(DataType dt);
 
 // Human-readable name (matches the JSON wire shape: "Int32" / "Float" / ...)
@@ -88,25 +136,62 @@ bool TryParseScanType(const std::string& s, ScanType& out);
 bool IsPrevValueScanType(ScanType st);
 
 // True when the scan type is valid for the FIRST scan (no prevValue yet).
-// (Exact / Bigger / Smaller / Between)
+// Numeric: Exact / Bigger / Smaller / Between.
+// String:  Exact / Contains / StartsWith / EndsWith.
+// Vector:  Exact / Bigger / Smaller / Between (component-wise).
 bool IsFirstScanType(ScanType st);
+
+// True when the data type is one of the Phase 2 string family
+// (FString / FName / FText) — those use the candidate's prevStr and
+// the CompareStringPredicate path instead of byte comparisons.
+bool IsStringDataType(DataType dt);
+
+// True when the data type is one of the Phase 2 vector family
+// (FVector / FRotator / FTransform). Reads SizeOf(dt) bytes per
+// candidate and compares X / Y / Z component-wise with shared tolerance.
+bool IsVectorDataType(DataType dt);
+
+// True when the scan type is one of the string-only substring
+// predicates (Contains / StartsWith / EndsWith). Caller must reject
+// these for non-string DataTypes.
+bool IsSubstringScanType(ScanType st);
+
+// True when the (DataType, ScanType) pair is a legal combination.
+// Used by the pipe handler to reject Bigger/Smaller on strings and
+// Contains/StartsWith on numerics before the scan engine sees them.
+bool IsScanTypeValidFor(DataType dt, ScanType st);
 
 // Map a DataType to the set of UE property type-name strings that
 // represent it in ClassInfo.Fields. UInt8 maps to ByteProperty
-// (UE's name for one-byte unsigned int).
+// (UE's name for one-byte unsigned int). Vector types map to
+// StructProperty — caller must additionally check the inner struct's
+// name matches "Vector" / "Vector3f" / "Rotator" / "Transform" /
+// "Transform3f" before emitting a candidate.
 const std::vector<std::string>& PropertyTypeNames(DataType dt);
+
+// Vector DataType → set of UScriptStruct names that represent it
+// (handles UE5 "Vector3f" + UE4 "Vector" + UE5 LWC variants). Empty
+// for non-vector data types.
+const std::vector<std::string>& VectorStructNames(DataType dt);
 
 // One candidate as remembered between RPCs. Cache the FindByAddress
 // metadata on the FIRST scan so refine rounds don't re-resolve owner
 // info. `prevValue` is updated to the latest-observed bytes on every
 // successful refine, so Changed/Unchanged/etc. always compare against
 // "what we saw last time we looked at this slot".
+//
+// For Phase 2 string data types (FString / FName / FText) `prevStr`
+// holds the resolved UTF-8 value instead of the byte buffer. For
+// vector data types (FVector / FRotator) `prevValue` is 12 bytes
+// (X / Y / Z packed); for FTransform the same 12 bytes hold the
+// Translation FVector (Rotation + Scale not stored).
 struct Candidate {
     uintptr_t   addr           = 0;     // instance + fieldOffset (the value's address)
     uintptr_t   instanceAddr   = 0;     // owning UObject
     int32_t     instanceIndex  = -1;    // GObjects index (-1 if not enumerated)
     int32_t     fieldOffset    = 0;     // bytes from instanceAddr
-    uint8_t     prevValue[8]   = {};    // last-observed bytes; size = SizeOf(dt)
+    uint8_t     prevValue[16]  = {};    // last-observed bytes; size = SizeOf(dt)
+    std::string prevStr;                // last-observed string (string DataTypes only)
     std::string instanceName;
     std::string className;              // The instance's UClass name
     std::string definingClassName;      // Class where the field is declared
@@ -219,5 +304,47 @@ bool ComparePredicate(DataType dt, ScanType st,
                       const uint8_t* targetBytes,
                       const uint8_t* target2Bytes = nullptr,
                       double         tolerance    = 0.0);
+
+// String predicate. `cur` is the latest-observed string at the
+// candidate field; `target` is either the user-supplied search string
+// (targeted predicates) or the candidate's prevStr (Changed /
+// Unchanged). Supports Exact / Contains / StartsWith / EndsWith /
+// Changed / Unchanged; all other scan types return false.
+//
+// CE-style default is case-insensitive — `caseSensitive=true` keeps the
+// raw comparison (used when the user explicitly opts in). Matching
+// uses byte-level comparison after lowercasing ASCII letters — non-
+// ASCII bytes (UTF-8 multibyte sequences) compare bitwise. This is
+// sufficient for the cheat use cases that hit string scans (English
+// item names, savegame keys, dialogue tags); a full Unicode case fold
+// would need an ICU dependency we don't ship and isn't justified yet.
+bool CompareStringPredicate(ScanType           st,
+                            const std::string& cur,
+                            const std::string& target,
+                            bool               caseSensitive);
+
+// Vector predicate. `rawBytes` is 12 bytes (3 floats X,Y,Z) read from
+// the candidate field. `targetBytes` / `target2Bytes` are 12 bytes
+// each (Between takes a second corner). Component-wise compare with
+// shared tolerance applied per-axis.
+//
+// ScanType semantics (let a = target, b = target2, c = current,
+// applied per axis):
+//   Exact      |c - a| <= tol             (all three axes match)
+//   Bigger     c > a + tol                (all three axes strictly above)
+//   Smaller    c < a - tol                (all three axes strictly below)
+//   Between    a - tol <= c <= b + tol    (all three axes inside box)
+//   Changed    any axis |c - prev| > tol
+//   Unchanged  all axes  |c - prev| <= tol
+//   Increased  any axis  c > prev + tol (game movement is rarely
+//              uniformly higher on all axes — match if ANY component
+//              moved in the requested direction)
+//   Decreased  any axis  c < prev - tol
+// Substring scan types reject for vectors (return false).
+bool CompareVectorPredicate(ScanType       st,
+                            const uint8_t* rawBytes,
+                            const uint8_t* targetBytes,
+                            const uint8_t* target2Bytes = nullptr,
+                            double         tolerance    = 0.0);
 
 }  // namespace ValueScan

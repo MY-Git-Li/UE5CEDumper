@@ -134,6 +134,27 @@ std::string GetFullName(uintptr_t uobjectAddr);
 // Get the internal index of a UObject
 int32_t GetIndex(uintptr_t uobjectAddr);
 
+// --- String-reading helpers (Phase 2 Value Search) ---
+//
+// Read an FString (TArray<TCHAR>) at instanceAddr + offset into UTF-8.
+// Returns "" on failure or out-of-range length. Caps at 256 wide chars
+// per the existing ReadFString implementation — the cap protects
+// against garbage Count values from freed memory; cheat-relevant
+// strings (item names, save keys) fit well under it.
+std::string ReadFStringAt(uintptr_t instanceAddr, int32_t offset);
+
+// Read an FName at instanceAddr + offset and resolve it to a string
+// via Serie::GetString. Returns "" on failure or "None" for the
+// canonical empty FName. Handles both 8-byte (Index+Number) and
+// 16-byte (CasePreservingName) FName layouts.
+std::string ReadFNameAt(uintptr_t instanceAddr, int32_t offset);
+
+// Read an FText at instanceAddr + offset and return the embedded
+// display string. Cooked builds vary; the implementation probes a
+// handful of well-known offsets inside the ITextData payload looking
+// for a valid FString header. Returns "" if nothing resolvable.
+std::string ReadFTextStringAt(uintptr_t instanceAddr, int32_t offset);
+
 // --- Live Instance Walking ---
 
 // A single field value read from a live instance

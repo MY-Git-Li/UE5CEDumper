@@ -44,6 +44,37 @@ extern "C" int32_t   UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, u
 // ============================================================
 namespace {
 
+// Vector value parser. Accepts "X,Y,Z" or "X Y Z" with optional spaces;
+// rejects malformed input (wrong component count, non-numeric tokens).
+// Writes 12 little-endian bytes (3 floats) into `out`. Phase 2B.
+bool ParseVectorBytes(const std::string& raw, uint8_t out[12]) {
+    std::memset(out, 0, 12);
+    if (raw.empty()) return false;
+
+    // Tokenise on commas + whitespace. Resilient to "1, 2, 3" /
+    // "1,2,3" / "1 2 3" / "1.5, -2.5, 3" alike.
+    std::vector<std::string> toks;
+    std::string cur;
+    auto flush = [&]() {
+        if (!cur.empty()) { toks.push_back(cur); cur.clear(); }
+    };
+    for (char c : raw) {
+        if (c == ',' || std::isspace(static_cast<unsigned char>(c))) flush();
+        else cur.push_back(c);
+    }
+    flush();
+    if (toks.size() != 3) return false;
+
+    float floats[3] = {0.0f, 0.0f, 0.0f};
+    try {
+        for (int i = 0; i < 3; ++i) floats[i] = std::stof(toks[static_cast<size_t>(i)]);
+    } catch (...) {
+        return false;
+    }
+    std::memcpy(out, floats, 12);
+    return true;
+}
+
 bool ParseValueBytes(ValueScan::DataType dt, const std::string& raw, uint8_t out[8]) {
     std::memset(out, 0, 8);
     if (raw.empty()) return false;
@@ -134,6 +165,17 @@ bool ParseValueBytes(ValueScan::DataType dt, const std::string& raw, uint8_t out
                 if (lower == "false" || lower == "0") { out[0] = 0; return true; }
                 return false;
             }
+            // String types pass through targetString separately; the
+            // byte path is unused. Vector types use ParseVectorBytes
+            // into a 12-byte buffer. Fall through to false so a caller
+            // that forgets to dispatch fails loudly.
+            case ValueScan::DataType::FString:
+            case ValueScan::DataType::FName:
+            case ValueScan::DataType::FText:
+            case ValueScan::DataType::FVector:
+            case ValueScan::DataType::FRotator:
+            case ValueScan::DataType::FTransform:
+                return false;
         }
     } catch (...) {
         return false;
@@ -197,7 +239,32 @@ std::string FormatValueBytes(ValueScan::DataType dt, const uint8_t bytes[8]) {
             oss << (bytes[0] ? "true" : "false");
             break;
         }
+        // String types use prevStr on the candidate, not the byte
+        // buffer; the wire writer dispatches before calling this.
+        // Returning "" here is just a defensive fallthrough.
+        case ValueScan::DataType::FString:
+        case ValueScan::DataType::FName:
+        case ValueScan::DataType::FText:
+            break;
+        // Vector formatting is handled by FormatVectorBytes below; this
+        // overload is byte-array bound to the 8B prevValue lump so it
+        // doesn't see the full 12-byte vector buffer.
+        case ValueScan::DataType::FVector:
+        case ValueScan::DataType::FRotator:
+        case ValueScan::DataType::FTransform:
+            break;
     }
+    return oss.str();
+}
+
+// Format a 12-byte vector as "X, Y, Z" with up to 4 decimals. Used by
+// CandidateToJson for vector data types.
+std::string FormatVectorBytes(const uint8_t bytes[12]) {
+    float v[3] = {0.0f, 0.0f, 0.0f};
+    std::memcpy(v, bytes, 12);
+    std::ostringstream oss;
+    oss.precision(4);
+    oss << v[0] << ", " << v[1] << ", " << v[2];
     return oss.str();
 }
 
@@ -213,7 +280,16 @@ json CandidateToJson(const ValueScan::Candidate& c, ValueScan::DataType dt) {
     item["field_name"]          = c.fieldName;
     item["field_type"]          = c.fieldType;
     item["bool_field_mask"]     = c.boolFieldMask;
-    item["value"]               = FormatValueBytes(dt, c.prevValue);
+    // Value rendering varies by family. Strings emit the resolved
+    // UTF-8 directly; vectors emit "X, Y, Z"; numerics emit the
+    // formatted prevValue scalar.
+    if (ValueScan::IsStringDataType(dt)) {
+        item["value"] = c.prevStr;
+    } else if (ValueScan::IsVectorDataType(dt)) {
+        item["value"] = FormatVectorBytes(c.prevValue);
+    } else {
+        item["value"] = FormatValueBytes(dt, c.prevValue);
+    }
     return item;
 }
 
@@ -1716,9 +1792,12 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             std::string val2Str = request.value("value2", "");
             bool gameOnly = request.value("game_only", true);
             int  maxResults = request.value("max_results", 50000);
-            // CE-style rounded scan slack (Float/Double only -- integer
-            // types ignore it). 0.0 = exact comparison.
+            // CE-style rounded scan slack (Float/Double + Vector only --
+            // integer + string types ignore it). 0.0 = exact comparison.
             double tolerance = request.value("tolerance", 0.0);
+            // String scans only: opt-in case sensitivity. Default is
+            // CE-style case-insensitive matching.
+            bool caseSensitive = request.value("case_sensitive", false);
 
             ValueScan::DataType dt;
             if (!ValueScan::TryParseDataType(dtStr, dt)) {
@@ -1732,22 +1811,51 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 return Renge::MakeError(id, "scan_type '" + stStr +
                     "' is only valid for refine (no prevValue on first scan)").dump();
             }
-
-            uint8_t targetBytes[8] = {};
-            uint8_t target2Bytes[8] = {};
-            if (!ParseValueBytes(dt, valStr, targetBytes)) {
-                return Renge::MakeError(id, "Invalid 'value' for data_type " + dtStr).dump();
+            if (!ValueScan::IsScanTypeValidFor(dt, st)) {
+                return Renge::MakeError(id, "scan_type '" + stStr +
+                    "' is not valid for data_type '" + dtStr + "'").dump();
             }
+
+            const bool isString = ValueScan::IsStringDataType(dt);
+            const bool isVector = ValueScan::IsVectorDataType(dt);
+
+            uint8_t targetBytes[12] = {};
+            uint8_t target2Bytes[12] = {};
+            std::string targetString;
             const uint8_t* target2Ptr = nullptr;
-            if (st == ValueScan::ScanType::Between) {
-                if (!ParseValueBytes(dt, val2Str, target2Bytes)) {
-                    return Renge::MakeError(id, "Between requires 'value2' for data_type " + dtStr).dump();
+
+            if (isString) {
+                // String scans take the user's needle verbatim. Empty
+                // needle is rejected at the C# layer; defensively
+                // accept here so Refine-with-empty (rare) still works.
+                targetString = valStr;
+            } else if (isVector) {
+                if (!ParseVectorBytes(valStr, targetBytes)) {
+                    return Renge::MakeError(id, "Invalid 'value' for data_type " + dtStr +
+                        " (expected 'X,Y,Z' float triple)").dump();
                 }
-                target2Ptr = target2Bytes;
+                if (st == ValueScan::ScanType::Between) {
+                    if (!ParseVectorBytes(val2Str, target2Bytes)) {
+                        return Renge::MakeError(id, "Between requires 'value2' for data_type " + dtStr +
+                            " (expected 'X,Y,Z' float triple)").dump();
+                    }
+                    target2Ptr = target2Bytes;
+                }
+            } else {
+                if (!ParseValueBytes(dt, valStr, targetBytes)) {
+                    return Renge::MakeError(id, "Invalid 'value' for data_type " + dtStr).dump();
+                }
+                if (st == ValueScan::ScanType::Between) {
+                    if (!ParseValueBytes(dt, val2Str, target2Bytes)) {
+                        return Renge::MakeError(id, "Between requires 'value2' for data_type " + dtStr).dump();
+                    }
+                    target2Ptr = target2Bytes;
+                }
             }
 
             auto scanResult = Aura::ScanForValue(
-                dt, st, targetBytes, target2Ptr, gameOnly, maxResults, tolerance);
+                dt, st, targetBytes, target2Ptr, gameOnly, maxResults,
+                tolerance, targetString, caseSensitive);
 
             uint64_t sessionId = ValueScan::SessionManager::Instance().Begin(
                 dt, scanResult.candidates);
@@ -1790,6 +1898,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             std::string valStr = request.value("value", "");
             std::string val2Str = request.value("value2", "");
             double tolerance = request.value("tolerance", 0.0);
+            bool caseSensitive = request.value("case_sensitive", false);
 
             ValueScan::ScanType st;
             if (!ValueScan::TryParseScanType(stStr, st)) {
@@ -1800,35 +1909,67 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             json candidates = json::array();
             Aura::ValueScanStats stats;
             bool parseFailed = false;
+            bool scanTypeInvalid = false;
             bool found = ValueScan::SessionManager::Instance().RefineWith(sessionId,
                 [&](ValueScan::DataType dt, std::vector<ValueScan::Candidate>& cs) {
                     dtCaptured = dt;
-                    uint8_t targetBytes[8] = {};
-                    uint8_t target2Bytes[8] = {};
+                    if (!ValueScan::IsScanTypeValidFor(dt, st)) {
+                        scanTypeInvalid = true;
+                        return;
+                    }
+
+                    const bool isString = ValueScan::IsStringDataType(dt);
+                    const bool isVector = ValueScan::IsVectorDataType(dt);
+
+                    uint8_t targetBytes[12] = {};
+                    uint8_t target2Bytes[12] = {};
                     const uint8_t* tgtPtr  = nullptr;
                     const uint8_t* tgt2Ptr = nullptr;
+                    std::string targetString;
 
                     if (!ValueScan::IsPrevValueScanType(st)) {
-                        if (!ParseValueBytes(dt, valStr, targetBytes)) {
-                            parseFailed = true;
-                            return;
-                        }
-                        tgtPtr = targetBytes;
-                        if (st == ValueScan::ScanType::Between) {
-                            if (!ParseValueBytes(dt, val2Str, target2Bytes)) {
+                        if (isString) {
+                            targetString = valStr;
+                        } else if (isVector) {
+                            if (!ParseVectorBytes(valStr, targetBytes)) {
                                 parseFailed = true;
                                 return;
                             }
-                            tgt2Ptr = target2Bytes;
+                            tgtPtr = targetBytes;
+                            if (st == ValueScan::ScanType::Between) {
+                                if (!ParseVectorBytes(val2Str, target2Bytes)) {
+                                    parseFailed = true;
+                                    return;
+                                }
+                                tgt2Ptr = target2Bytes;
+                            }
+                        } else {
+                            if (!ParseValueBytes(dt, valStr, targetBytes)) {
+                                parseFailed = true;
+                                return;
+                            }
+                            tgtPtr = targetBytes;
+                            if (st == ValueScan::ScanType::Between) {
+                                if (!ParseValueBytes(dt, val2Str, target2Bytes)) {
+                                    parseFailed = true;
+                                    return;
+                                }
+                                tgt2Ptr = target2Bytes;
+                            }
                         }
                     }
 
-                    stats = Aura::RefineCandidates(dt, st, tgtPtr, tgt2Ptr, cs, tolerance);
+                    stats = Aura::RefineCandidates(dt, st, tgtPtr, tgt2Ptr, cs,
+                                                   tolerance, targetString, caseSensitive);
                     for (const auto& c : cs) candidates.push_back(CandidateToJson(c, dt));
                 });
 
             if (!found) {
                 return Renge::MakeError(id, "session_not_found").dump();
+            }
+            if (scanTypeInvalid) {
+                return Renge::MakeError(id, "scan_type '" + stStr +
+                    "' is not valid for session's data_type").dump();
             }
             if (parseFailed) {
                 return Renge::MakeError(id, "Invalid 'value' or 'value2' for session's data_type").dump();

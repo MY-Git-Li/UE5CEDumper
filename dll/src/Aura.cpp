@@ -3198,30 +3198,58 @@ ValueScanResult ScanForValue(
     const uint8_t*      target2Bytes,
     bool                gameOnly,
     int32_t             maxResults,
-    double              tolerance)
+    double              tolerance,
+    const std::string&  targetString,
+    bool                caseSensitive)
 {
     ValueScanResult result;
     auto t0 = std::chrono::steady_clock::now();
     constexpr auto kDeadline = std::chrono::seconds(15);
 
+    const bool isString = ValueScan::IsStringDataType(dt);
+    const bool isVector = ValueScan::IsVectorDataType(dt);
     const size_t dtSize = ValueScan::SizeOf(dt);
-    if (dtSize == 0 || !targetBytes) return result;
-    if (st == ValueScan::ScanType::Between && !target2Bytes) return result;
+
+    // Validate inputs per type family.
+    if (isString) {
+        // String scans take the user's needle on targetString; the byte
+        // buffers are unused. Caller must pass a non-empty target for
+        // targeted predicates (substring matchers + Exact); Changed /
+        // Unchanged use the candidate's prevStr.
+        if (!ValueScan::IsPrevValueScanType(st) && targetString.empty()) return result;
+    } else {
+        if (dtSize == 0 || !targetBytes) return result;
+        if (st == ValueScan::ScanType::Between && !target2Bytes) return result;
+    }
     // Prev-value scan types have no meaning on a first scan -- caller (pipe
     // handler) is responsible for rejecting these, but be defensive.
     if (ValueScan::IsPrevValueScanType(st)) return result;
 
     const auto& acceptedTypes = ValueScan::PropertyTypeNames(dt);
+    // Vector types match by StructProperty + inner struct name (e.g.
+    // "Vector", "Vector3f"). Empty for non-vector dt so the inner-name
+    // check is skipped.
+    const auto& acceptedStructNames = ValueScan::VectorStructNames(dt);
 
     // Per-class field index. classAddr -> filtered subset of FieldInfo
     // that match the requested DataType. Built lazily on first
     // encounter; reused across all instances of that class.
+    //
+    // Phase 2C extends this with an "isArray" flag — when set, the
+    // ScanField represents an ArrayProperty whose Inner matches the
+    // requested DataType. The per-instance loop reads the TArray
+    // header (Data ptr, Num, Max) and emits ONE candidate per matching
+    // element. elemStride captures the per-element size in bytes;
+    // size still refers to the field-level size (16B TArray header).
     struct ScanField {
         int32_t     offset;
         int32_t     size;
         std::string name;
         std::string typeName;
         uint8_t     boolFieldMask;
+        bool        isArray      = false;
+        int32_t     elemStride   = 0;
+        std::string elemTypeName;   // Inner type name when isArray (e.g. "IntProperty")
     };
     struct ScanClassInfo {
         std::string             className;
@@ -3274,6 +3302,20 @@ ValueScanResult ScanForValue(
             for (const auto& t : acceptedTypes) {
                 if (f.TypeName == t) { accepted = true; break; }
             }
+
+            // Vector data types additionally require the inner struct
+            // name to match (e.g. "Vector" / "Vector3f"). This both
+            // filters out unrelated StructProperty fields (which are
+            // numerous) and avoids the cost of reading 12 bytes from
+            // every non-vector struct on every scan.
+            if (accepted && !acceptedStructNames.empty() && f.TypeName == "StructProperty") {
+                bool nameMatch = false;
+                for (const auto& name : acceptedStructNames) {
+                    if (f.structType == name) { nameMatch = true; break; }
+                }
+                accepted = nameMatch;
+            }
+
             if (accepted) {
                 ScanField sf;
                 sf.offset        = baseOffset + f.Offset;
@@ -3285,14 +3327,69 @@ ValueScanResult ScanForValue(
                 continue;
             }
 
+            // Phase 2C: TArray<T> container scan. When the inner
+            // FProperty's type matches the requested DataType, emit a
+            // ScanField marked isArray=true with the per-element
+            // stride. Per-instance loop branches on isArray to walk
+            // the TArray buffer.
+            //
+            // Vector inner types additionally require innerStructType
+            // to match the accepted struct names (mirrors the leaf
+            // StructProperty filter).
+            if (f.TypeName == "ArrayProperty" && !f.innerType.empty()) {
+                bool innerAccepted = false;
+                for (const auto& t : acceptedTypes) {
+                    // Inner matches a leaf-property type the scan
+                    // wants, but vectors also need StructProperty inner
+                    // (and the struct name check below).
+                    if (f.innerType == t) {
+                        innerAccepted = true;
+                        break;
+                    }
+                }
+                if (innerAccepted && !acceptedStructNames.empty()
+                    && f.innerType == "StructProperty") {
+                    bool nameMatch = false;
+                    for (const auto& name : acceptedStructNames) {
+                        if (f.innerStructType == name) { nameMatch = true; break; }
+                    }
+                    innerAccepted = nameMatch;
+                }
+                if (innerAccepted) {
+                    int32_t stride = Ubel::GetArrayInnerElemSize(f.Address);
+                    // Skip arrays whose inner-element size couldn't be
+                    // resolved (rare; defensive). Without stride we
+                    // can't iterate safely.
+                    if (stride > 0) {
+                        ScanField sf;
+                        sf.offset        = baseOffset + f.Offset;
+                        sf.size          = f.Size;
+                        sf.name          = namePrefix.empty()
+                            ? f.Name : (namePrefix + "." + f.Name);
+                        sf.typeName      = "ArrayProperty";
+                        sf.boolFieldMask = 0xFF;
+                        sf.isArray       = true;
+                        sf.elemStride    = stride;
+                        sf.elemTypeName  = f.innerType;
+                        out.push_back(std::move(sf));
+                        continue;
+                    }
+                }
+            }
+
             // StructProperty: resolve the inner UScriptStruct via
             // FStructProperty::Struct (FField + FSTRUCTPROP_STRUCT) and
             // recurse with the cumulative offset + dotted name prefix.
-            // Container properties (Array / Map / Set / Optional) are
-            // intentionally NOT recursed here -- TArray<T> scan is the
-            // v2 milestone gated by the crash-risk plan in memory
-            // project_value_search_caveats.
-            if (f.TypeName == "StructProperty" && f.Address) {
+            // Map / Set / Optional containers are intentionally NOT
+            // recursed -- they're separate milestones.
+            //
+            // For vector data types, skip recursion -- we only want
+            // leaves whose own type IS the vector struct, not nested
+            // structs that happen to contain a vector. This matches the
+            // CE-style cheat workflow (find an FVector at a known
+            // location, not all FVectors-anywhere-inside).
+            if (acceptedStructNames.empty()
+                && f.TypeName == "StructProperty" && f.Address) {
                 uintptr_t nested = 0;
                 if (Macht::ReadSafe(f.Address + DynOff::FSTRUCTPROP_STRUCT, nested) && nested) {
                     std::string childPrefix = namePrefix.empty()
@@ -3389,56 +3486,186 @@ ValueScanResult ScanForValue(
         bool   gotInstanceName = false;
         std::string instanceName;
 
+        // Helper: emit one candidate from per-hit data. Used by both
+        // direct-field and per-array-element paths. Captures the
+        // shared metadata + defining-class cache lookup. Inlined as a
+        // lambda to avoid an extra parameter cascade.
+        auto emitCandidate = [&](uintptr_t valueAddr,
+                                 int32_t   fieldOffsetForCand,
+                                 const std::string& displayName,
+                                 const std::string& fieldType,
+                                 uint8_t   boolMask,
+                                 const uint8_t* rawBytes,
+                                 size_t   rawByteCount,
+                                 const std::string* strValue) {
+            if (!gotInstanceName) {
+                instanceName    = Ubel::GetName(obj);
+                gotInstanceName = true;
+            }
+            ValueScan::Candidate cand;
+            cand.addr          = valueAddr;
+            cand.instanceAddr  = obj;
+            cand.instanceIndex = i;
+            cand.fieldOffset   = fieldOffsetForCand;
+            if (strValue) {
+                cand.prevStr = *strValue;
+            } else if (rawBytes && rawByteCount > 0) {
+                std::memcpy(cand.prevValue, rawBytes, rawByteCount);
+            }
+            cand.instanceName  = instanceName;
+            cand.className     = sci->className;
+            cand.fieldName     = displayName;
+            cand.fieldType     = fieldType;
+            cand.boolFieldMask = boolMask;
+
+            DefKey dk{ cls, fieldOffsetForCand };
+            auto dit = definingNameCache.find(dk);
+            if (dit != definingNameCache.end()) {
+                cand.definingClassName = dit->second;
+            } else {
+                uintptr_t defAddr = FindDefiningClass(cls, fieldOffsetForCand);
+                std::string defName = (defAddr && defAddr != cls)
+                    ? Ubel::GetName(defAddr) : sci->className;
+                definingNameCache.emplace(dk, defName);
+                cand.definingClassName = std::move(defName);
+            }
+            result.candidates.push_back(std::move(cand));
+        };
+
         for (const auto& sf : sci->fields) {
             if (static_cast<int32_t>(result.candidates.size()) >= maxResults) break;
 
+            // Phase 2C: TArray<T> path. Read the TArray header (Data,
+            // Num, Max), defensively validate, then iterate elements
+            // and emit one candidate per match.
+            if (sf.isArray) {
+                uintptr_t arrayDataPtr = 0;
+                int32_t   arrayNum     = 0;
+                int32_t   arrayMax     = 0;
+                if (!Macht::ReadSafe(obj + sf.offset, arrayDataPtr)) continue;
+                if (!Macht::ReadSafe(obj + sf.offset + 8, arrayNum)) continue;
+                if (!Macht::ReadSafe(obj + sf.offset + 12, arrayMax)) continue;
+
+                // Safety circuit-breakers (memory project_value_search_caveats):
+                //   - Negative or absurdly-large Num is a corrupted /
+                //     freed-memory marker; skip with a single LOG_WARN
+                //     so we surface pathological data without spamming.
+                //   - Max must be >= Num for a valid TArray; mismatch
+                //     signals corruption (or OptionalProperty being
+                //     misread as TArray).
+                //   - Empty array (Num == 0) is fine, just skip the
+                //     iteration; Data ptr may be null in that case.
+                constexpr int32_t kMaxElementsPerArray = 10'000'000;
+                if (arrayNum < 0 || arrayNum > kMaxElementsPerArray) {
+                    LOG_WARN("ValueScan: skipping TArray with Num=%d on field '%s' at 0x%llX (instance 0x%llX)",
+                             arrayNum, sf.name.c_str(),
+                             (unsigned long long)(obj + sf.offset),
+                             (unsigned long long)obj);
+                    continue;
+                }
+                if (arrayNum == 0) continue;
+                if (arrayMax < arrayNum) continue;
+                if (!arrayDataPtr) continue;
+
+                for (int32_t idx = 0; idx < arrayNum; ++idx) {
+                    if (static_cast<int32_t>(result.candidates.size()) >= maxResults) break;
+
+                    uintptr_t   elemAddr = arrayDataPtr + static_cast<uintptr_t>(idx) * sf.elemStride;
+                    uint8_t     readBuf[16] = {};
+                    std::string readStr;
+
+                    if (isString) {
+                        if (dt == ValueScan::DataType::FString) {
+                            readStr = Ubel::ReadFStringAt(elemAddr, 0);
+                        } else if (dt == ValueScan::DataType::FName) {
+                            readStr = Ubel::ReadFNameAt(elemAddr, 0);
+                        } else {
+                            readStr = Ubel::ReadFTextStringAt(elemAddr, 0);
+                        }
+                        if (!ValueScan::CompareStringPredicate(st, readStr, targetString, caseSensitive)) continue;
+                    } else if (isVector) {
+                        if (!Macht::ReadBytesSafe(elemAddr, readBuf, 12)) continue;
+                        if (!ValueScan::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
+                    } else {
+                        if (!Macht::ReadBytesSafe(elemAddr, readBuf, dtSize)) continue;
+                        // Array elements never share a bitfield byte
+                        // (TArray<bool> is stored unpacked), so the
+                        // boolFieldMask = 0xFF path applies.
+                        if (!ValueScan::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
+                    }
+
+                    // Display name "Field[N]" so the user sees which
+                    // element matched. fieldOffset stays the
+                    // class-level offset (helps with defining-class
+                    // lookup); the candidate's addr is the element
+                    // address.
+                    char idxStr[24];
+                    std::snprintf(idxStr, sizeof(idxStr), "[%d]", idx);
+                    std::string elemName = sf.name + idxStr;
+
+                    if (isString) {
+                        emitCandidate(elemAddr, sf.offset, elemName,
+                                      sf.elemTypeName, 0xFF,
+                                      nullptr, 0, &readStr);
+                    } else if (isVector) {
+                        emitCandidate(elemAddr, sf.offset, elemName,
+                                      sf.elemTypeName, 0xFF,
+                                      readBuf, 12, nullptr);
+                    } else {
+                        emitCandidate(elemAddr, sf.offset, elemName,
+                                      sf.elemTypeName, 0xFF,
+                                      readBuf, dtSize, nullptr);
+                    }
+                }
+                continue;
+            }
+
             uintptr_t valueAddr = obj + sf.offset;
-            uint8_t readBuf[8] = {};
+            uint8_t  readBuf[16] = {};
+            std::string readStr;
+
+            if (isString) {
+                // FString / FName / FText -- resolve to UTF-8 via Ubel
+                // helpers. Empty resolution returns "" and we still test
+                // it (target may be "" for Exact-empty searches).
+                if (dt == ValueScan::DataType::FString) {
+                    readStr = Ubel::ReadFStringAt(obj, sf.offset);
+                } else if (dt == ValueScan::DataType::FName) {
+                    readStr = Ubel::ReadFNameAt(obj, sf.offset);
+                } else {
+                    readStr = Ubel::ReadFTextStringAt(obj, sf.offset);
+                }
+                if (!ValueScan::CompareStringPredicate(st, readStr, targetString, caseSensitive)) continue;
+                emitCandidate(valueAddr, sf.offset, sf.name, sf.typeName,
+                              sf.boolFieldMask, nullptr, 0, &readStr);
+                continue;
+            }
+            if (isVector) {
+                // Vector / Rotator: read 12 bytes (3 floats) from the
+                // struct start. Caller's targetBytes already encodes
+                // the 12-byte (X,Y,Z) layout.
+                if (!Macht::ReadBytesSafe(valueAddr, readBuf, 12)) continue;
+                if (!ValueScan::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
+                emitCandidate(valueAddr, sf.offset, sf.name, sf.typeName,
+                              sf.boolFieldMask, readBuf, 12, nullptr);
+                continue;
+            }
+
             if (!Macht::ReadBytesSafe(valueAddr, readBuf, dtSize)) continue;
 
-            // BoolProperty bitfield normalisation. The bytes we stored
-            // as prevValue must reflect the LOGICAL bool (0/1), not the
-            // raw shared byte, so Changed/Unchanged refines compare on
-            // a stable value even when sibling bits flip.
+            // BoolProperty bitfield normalisation. The bytes we
+            // store as prevValue must reflect the LOGICAL bool
+            // (0/1), not the raw shared byte, so Changed /
+            // Unchanged refines compare on a stable value even
+            // when sibling bits flip.
             if (dt == ValueScan::DataType::Bool
                 && sf.boolFieldMask != 0 && sf.boolFieldMask != 0xFF) {
                 readBuf[0] = ((readBuf[0] & sf.boolFieldMask) != 0) ? 1 : 0;
             }
 
             if (!ValueScan::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
-
-            // Hit. Lazy-resolve instance metadata.
-            if (!gotInstanceName) {
-                instanceName    = Ubel::GetName(obj);
-                gotInstanceName = true;
-            }
-
-            ValueScan::Candidate cand;
-            cand.addr          = valueAddr;
-            cand.instanceAddr  = obj;
-            cand.instanceIndex = i;
-            cand.fieldOffset   = sf.offset;
-            std::memcpy(cand.prevValue, readBuf, dtSize);
-            cand.instanceName  = instanceName;
-            cand.className     = sci->className;
-            cand.fieldName     = sf.name;
-            cand.fieldType     = sf.typeName;
-            cand.boolFieldMask = sf.boolFieldMask;
-
-            // Defining class lookup with per-(class,offset) cache.
-            DefKey dk{ cls, sf.offset };
-            auto dit = definingNameCache.find(dk);
-            if (dit != definingNameCache.end()) {
-                cand.definingClassName = dit->second;
-            } else {
-                uintptr_t defAddr = FindDefiningClass(cls, sf.offset);
-                std::string defName = (defAddr && defAddr != cls)
-                    ? Ubel::GetName(defAddr) : sci->className;
-                definingNameCache.emplace(dk, defName);
-                cand.definingClassName = std::move(defName);
-            }
-
-            result.candidates.push_back(std::move(cand));
+            emitCandidate(valueAddr, sf.offset, sf.name, sf.typeName,
+                          sf.boolFieldMask, readBuf, dtSize, nullptr);
         }
     }
 
@@ -3466,17 +3693,23 @@ ValueScanStats RefineCandidates(
     const uint8_t*                     targetBytes,
     const uint8_t*                     target2Bytes,
     std::vector<ValueScan::Candidate>& candidates,
-    double                             tolerance)
+    double                             tolerance,
+    const std::string&                 targetString,
+    bool                               caseSensitive)
 {
     ValueScanStats stats;
     auto t0 = std::chrono::steady_clock::now();
 
+    const bool isString = ValueScan::IsStringDataType(dt);
+    const bool isVector = ValueScan::IsVectorDataType(dt);
     const size_t dtSize = ValueScan::SizeOf(dt);
-    if (dtSize == 0) return stats;
+    if (!isString && dtSize == 0) return stats;
 
     const bool usePrev = ValueScan::IsPrevValueScanType(st);
-    if (!usePrev && !targetBytes) return stats;
-    if (st == ValueScan::ScanType::Between && !target2Bytes) return stats;
+    if (!isString) {
+        if (!usePrev && !targetBytes) return stats;
+        if (st == ValueScan::ScanType::Between && !target2Bytes) return stats;
+    }
 
     const int32_t initialSize = static_cast<int32_t>(candidates.size());
 
@@ -3484,7 +3717,53 @@ ValueScanStats RefineCandidates(
     kept.reserve(candidates.size());
 
     for (auto& c : candidates) {
-        uint8_t readBuf[8] = {};
+        if (isString) {
+            // Re-resolve the string from the candidate's recorded
+            // address. c.addr already points at the value (FString
+            // header / FName slot / FText payload) — for direct fields
+            // this is instanceAddr + fieldOffset; for array elements
+            // it's arrayDataPtr + index * stride. Reading from c.addr
+            // with offset=0 works uniformly for both.
+            //
+            // Array reallocation caveat: if the underlying TArray
+            // resized between scans, c.addr is stale and the read may
+            // fail or return garbage. Macht's SEH-wrapped reads turn
+            // bad accesses into safe failures (continue), so we drop
+            // the candidate quietly; the user can First-Scan again
+            // to refresh.
+            std::string cur;
+            if (c.fieldType == "StrProperty") {
+                cur = Ubel::ReadFStringAt(c.addr, 0);
+            } else if (c.fieldType == "NameProperty") {
+                cur = Ubel::ReadFNameAt(c.addr, 0);
+            } else if (c.fieldType == "TextProperty") {
+                cur = Ubel::ReadFTextStringAt(c.addr, 0);
+            } else {
+                // Shouldn't happen for a string-typed session, but be
+                // defensive: a candidate with the wrong fieldType
+                // can't be re-read, so drop it.
+                continue;
+            }
+
+            const std::string& cmpTarget = usePrev ? c.prevStr : targetString;
+            if (!ValueScan::CompareStringPredicate(st, cur, cmpTarget, caseSensitive)) continue;
+
+            c.prevStr = std::move(cur);
+            kept.push_back(std::move(c));
+            continue;
+        }
+
+        if (isVector) {
+            uint8_t readBuf[16] = {};
+            if (!Macht::ReadBytesSafe(c.addr, readBuf, 12)) continue;
+            const uint8_t* cmpTarget = usePrev ? c.prevValue : targetBytes;
+            if (!ValueScan::CompareVectorPredicate(st, readBuf, cmpTarget, target2Bytes, tolerance)) continue;
+            std::memcpy(c.prevValue, readBuf, 12);
+            kept.push_back(std::move(c));
+            continue;
+        }
+
+        uint8_t readBuf[16] = {};
         if (!Macht::ReadBytesSafe(c.addr, readBuf, dtSize)) continue;
 
         if (dt == ValueScan::DataType::Bool

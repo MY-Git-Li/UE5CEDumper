@@ -1,17 +1,23 @@
 namespace UE5DumpUI.Models;
 
 /// <summary>
-/// Primitive data types supported by the Value Search workflow. Wire
-/// string matches DLL-side <c>ValueScan::DataType</c> exactly so the
-/// pipe round-trip is just <c>nameof(ValueScanDataType.X)</c>.
+/// Data types supported by the Value Search workflow. Wire string
+/// matches DLL-side <c>ValueScan::DataType</c> exactly so the pipe
+/// round-trip is just <c>nameof(ValueScanDataType.X)</c>.
 ///
-/// MVP locked-in 2026-05-26 (see memory project_value_search_caveats):
-/// strings, names, arrays, vectors, and FText are deliberately omitted.
-/// Native C++ fields (non-UPROPERTY) are also unreachable from this
-/// scan — the UI Value Search tab MUST surface that limitation.
+/// Numeric primitives shipped in build 738 (MVP). Phase 2 (build 750)
+/// added FString / FName / FText (Phase 2A) and FVector / FRotator
+/// (Phase 2B); FTransform is wire-stable but the DLL returns zero
+/// candidates pending per-version Translation offset detection. See
+/// memory project_value_search_caveats for the TArray&lt;T&gt; gap.
+///
+/// Native C++ fields (non-UPROPERTY) are unreachable from this scan
+/// regardless of data type — the UI Value Search tab MUST surface that
+/// limitation in its banner.
 /// </summary>
 public enum ValueScanDataType
 {
+    // Numeric primitives (MVP, build 738)
     Int8,
     Int16,
     Int32,
@@ -23,13 +29,30 @@ public enum ValueScanDataType
     Float,
     Double,
     Bool,
+    // String types (Phase 2A, build 750)
+    FString,
+    FName,
+    FText,
+    // Vector types (Phase 2B, build 750). FTransform reserved but
+    // currently returns zero hits — see VectorStructNames in DLL.
+    FVector,
+    FRotator,
+    FTransform,
 }
 
 /// <summary>
-/// Scan comparison predicates. First-Scan predicates (Exact / Bigger
-/// / Smaller / Between) compare against user-supplied values; Next-Scan
-/// predicates (Changed / Unchanged / Increased / Decreased) compare
-/// against each candidate's stored prevValue from the previous round.
+/// Scan comparison predicates. Targeted predicates (Exact / Bigger /
+/// Smaller / Between / Contains / StartsWith / EndsWith) compare
+/// against user-supplied values; prev-value predicates (Changed /
+/// Unchanged / Increased / Decreased) compare against each candidate's
+/// stored snapshot from the previous round.
+///
+/// Per-type validity:
+///   Numeric: Exact / Bigger / Smaller / Between / Changed / Unchanged
+///            / Increased / Decreased
+///   String:  Exact / Contains / StartsWith / EndsWith / Changed / Unchanged
+///   Vector:  Exact / Bigger / Smaller / Between / Changed / Unchanged
+///            / Increased / Decreased  (component-wise per axis)
 /// </summary>
 public enum ValueScanType
 {
@@ -41,6 +64,10 @@ public enum ValueScanType
     Unchanged,
     Increased,
     Decreased,
+    // String-only substring predicates (Phase 2A, build 750)
+    Contains,
+    StartsWith,
+    EndsWith,
 }
 
 /// <summary>
