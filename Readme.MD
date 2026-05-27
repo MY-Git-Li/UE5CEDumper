@@ -18,6 +18,10 @@ UE5CEDumper is a interactive inspector toolchain. It provides a **live window** 
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-CC785C?logo=claude)](https://claude.ai/code)
 
+## Sample screenshots
+<img src="./img/MainUI.webp" alt="Main UI"/>  
+<img src="./img/Value_Search.webp" alt="Value Search"/>  
+
 ## Tested Version Matrix
 
 | UE Version | GObjects | GNames | DynOff | Verified Games |
