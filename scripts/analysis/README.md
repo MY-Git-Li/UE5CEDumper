@@ -3,12 +3,20 @@
 Offline-analysis tooling that consumes the JSONL dumps produced by
 **Export → Dump All Metadata (.jsonl)** in UE5DumpUI.
 
-Goal: replace hand-curated keyword guesses in
-`ui/UE5DumpUI/Services/PropertyScoringTable.cs` and
-`ui/UE5DumpUI/Services/ClassLocationScorer.cs` with empirically-grounded
-tables derived from real-game data.
+Two scripts share the same dump corpus:
 
-## Workflow
+- **`analyze_dumps.py`** — cross-game keyword + class-bonus calibration.
+  Aggregates property / function names across N dumps from different
+  games to derive empirically-grounded scoring tables. Feeds
+  `PropertyScoringTable.cs` and `ClassLocationScorer.cs` (the engines
+  behind the Interesting Properties / Interesting Funcs tabs).
+- **`diff_dumps.py`** — same-game patch comparison. Diffs two dumps
+  taken before/after a game update; surfaces moved field offsets,
+  added/removed classes and functions, and function signature
+  changes. Saves cheat-table maintainers from binary-searching offsets
+  by hand when a patch silently breaks their working table.
+
+## Workflow: cross-game calibration (`analyze_dumps.py`)
 
 1. Launch a UE4/5 game, attach UE5DumpUI as usual.
 2. **Export → Dump All Metadata (.jsonl)** — saves
@@ -108,13 +116,66 @@ entire change loop. ~10 minutes once the build env is set up. A
 "runtime keywords.json" override is on the wishlist (see todo.md)
 but not yet implemented.
 
+## Workflow: same-game patch diff (`diff_dumps.py`)
+
+When a game ships a patch, the cooker can shuffle UPROPERTY offsets and
+add/remove fields silently — every cheat table that hard-codes an
+offset breaks. The diff tool surfaces exactly what changed at
+UClass / UProperty / UFunction granularity so you can fix tables in
+seconds instead of binary-searching offsets by hand.
+
+1. Dump the game **before** the patch (Export → Dump All Metadata).
+   Save the JSONL somewhere stable (e.g. `work/dump/<game>-pre.jsonl`).
+2. Apply the patch / verify the new version.
+3. Dump again: `work/dump/<game>-post.jsonl`.
+4. Run the diff:
+   ```bash
+   python scripts/analysis/diff_dumps.py <game>-pre.jsonl <game>-post.jsonl -o diff.md
+   ```
+5. Read `diff.md`. For cheat-table fixing, the **Moved fields** and
+   **Function signatures changed** sections are usually all you need.
+   Pass `--minimal` to suppress the added/removed lists and emit only
+   those breaking-change sections:
+   ```bash
+   python scripts/analysis/diff_dumps.py pre.jsonl post.jsonl --minimal -o break.md
+   ```
+
+### Other flags
+
+- `--include-engine` — by default `/Script/<Module>/` engine classes
+  are skipped (they rarely shift across game patches; suppressing them
+  cuts ~60% of the noise on big games). Add this flag for an exhaustive
+  comparison.
+- `--self-test` — runs the built-in synthetic-fixture test suite. Use
+  this after editing the script to confirm the diff logic still
+  matches its specification:
+  ```bash
+  python scripts/analysis/diff_dumps.py --self-test
+  ```
+
+### Match key + known limitations
+
+- Classes match by `path` (UE's canonical identifier). `addr` is
+  session-local and ignored. Paths with one or more leading slashes
+  are normalized — `//Script/X/Y` and `/Script/X/Y` match.
+- Properties match by `name` within a class. **Renamed fields appear
+  as Removed + Added** — the tool doesn't auto-detect renames. If a
+  field went from `Health` to `CurrentHealth` at the same offset, scan
+  the report for a same-offset removed/added pair.
+- Same applies to renamed classes.
+- Function bodies aren't in the dump — only metadata
+  (`return_type` / `num_parms` / `parms_size` / `flags`). A patch that
+  changes function logic without changing the signature is **invisible**
+  to this diff (covered by Live ProcessEvent Call Profiler instead — see
+  `docs/todo.md`).
+
 ## Future expansions
 
 - Runtime `keywords.json` override so users can customise without
   rebuilding. AOT-compatible JSON source-generator pattern.
-- Compare two dumps from the same game across patches — surface field
-  layout changes.
 - Cluster classes by property-name set similarity — surface
   "Inventory-like" classes that don't follow the naming convention.
+- Auto-detect field renames in `diff_dumps.py` (same offset + size,
+  different name) — currently requires manual report scan.
 
 PRs welcome.
