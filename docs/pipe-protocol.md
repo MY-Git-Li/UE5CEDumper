@@ -170,6 +170,49 @@ Total commands: 31 (command name constants live in `dll/src/Renge.h`)
 { "id": 42, "cmd": "invoke_function", "func_name": "Attack", "instance_addr": "0x7FF...", "parms_size": 16, "params_hex": "3F800000" }
 ```
 
+### Value Search (build 738 + Phase 2 build 757)
+
+CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands form a session: `begin_value_scan` opens, `refine_value_scan` narrows, `end_value_scan` closes. Sessions auto-expire after 5 min idle.
+
+```jsonc
+// First Scan — open a new session, return enriched candidates.
+// data_type: Int8/Int16/Int32/Int64/UInt8/UInt16/UInt32/UInt64/Float/Double/Bool
+//          | FString/FName/FText           (Phase 2A — case-insensitive default)
+//          | FVector/FRotator/FTransform   (Phase 2B — FTransform reserved, 0 hits pending Translation offset)
+// scan_type for numeric/vector: Exact/Bigger/Smaller/Between
+// scan_type for string:         Exact/Contains/StartsWith/EndsWith
+// value:    string-encoded target (e.g. "100", "3.14", "true", "Engine", "100,200,300" CSV for vectors)
+// value2:   second target for Between (numeric/vector only)
+// tolerance: float-only — applies to Float/Double + vector types (per-axis); omitted for integer/string
+// case_sensitive: string types only — omitted unless true (CE-style default is insensitive)
+{
+  "id": 50, "cmd": "begin_value_scan",
+  "data_type": "FString",
+  "scan_type": "Contains",
+  "value":     "Engine",
+  "game_only": true,
+  "max_results": 50000,
+  "case_sensitive": false       // optional, string types only
+}
+
+// Next Scan — refine candidates in an open session.
+// scan_type may switch between targeted (Exact/Contains/...) and prev-value
+// (Changed/Unchanged/Increased/Decreased). value/value2 omitted for prev-value types.
+{
+  "id": 51, "cmd": "refine_value_scan",
+  "session_id": 1234,
+  "scan_type":  "Decreased"
+}
+
+// End — drop the session. Idempotent (returns ok=true even when already expired).
+{ "id": 52, "cmd": "end_value_scan", "session_id": 1234 }
+```
+
+**Wire-shape contract** (locked by tests):
+- `tolerance` is attached only when non-zero AND the data type is Float/Double/FVector/FRotator/FTransform. Integer + string sessions never carry it; the DLL ignores it for those anyway.
+- `case_sensitive` is attached only when true AND the data type is FString/FName/FText.
+- `(data_type, scan_type)` combinations are validated server-side by `IsScanTypeValidFor` — `FString + Bigger` or `Int32 + Contains` return an explicit error rather than running with garbage semantics.
+
 -----
 
 ## Responses (DLL → UI)

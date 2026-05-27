@@ -12,6 +12,46 @@ Move items to [dev-log.md](dev-log.md) once they ship; update
 
 -----
 
+## 🎯 NEXT SESSION STARTING POINT (2026-05-27 refresh, build 780, dev = main)
+
+Last session (2026-05-27) merged **PR #208, #209, #210, #211** to main —
+seven shipments across the picks list:
+
+| Build | Pick | Status |
+|---|---|---|
+| 757 | Value Search Phase 2 (FString/FName/FText + FVector/FRotator + TArray) | ✅ PR #208 |
+| 760 | #3 Multi-row → One .CT batch generator (Interesting Funcs + Properties tabs) | ✅ PR #210 |
+| — | #4 `scripts/analysis/diff_dumps.py` (same-game patch diff) | ✅ PR #209 |
+| 771 | NuGet bump + dotnet test → MTP mode (`global.json` + `--project` flag) | ✅ PR #211 |
+| 775 | #5 Structured-return DataGrid (FVector/FRotator/FHitResult/user USTRUCT rendering) | ✅ PR #211 |
+| 778 | #6 UCheatManager stripped-body Console-panel hint + memory + lessons-learned bullet | ✅ PR #211 |
+| 780 | AOT-warning fix on #5 DataGrid (`FuncDataTemplate<T>` instead of string-path Binding) | ✅ PR #211 |
+
+Test count this session: 1052 → **1080** C# (+28 from #3/#5/#6) on top
+of the Phase 2 work (+71 C#, +123 DLL helpers from earlier in the
+day). Total now **247 DLL helpers + 31 utf8 + 1080 C# = 1358 tests**.
+
+### Active candidates (pick one to start the next session)
+
+Picks #2 / #7 / 0c / #5-v2 / LiveWalker-batch all live as detailed
+sections further down this file. Sorted here by recommended start order:
+
+1. **#7 View Snap Hotkey (Property → Snap Hotkey)** — S-M (~2-3 days), low risk. New PropertySearch / LiveWalker row action + `SnapHotkeyDialog` + `scripts/ue5_snap_helper.lua` + `SnapHotkeyScriptGenerator.cs`. 95% mirrors build-719 freeze Route B. Generalises beyond rotation (MoveSpeed multipliers, zoom cycling, time-dilation).
+2. **Bonus add-on: AA(Baked) Auto-tick every N ms checkbox** — S, low. 1-day item; both #7 and #3 already touched the script generator + dialog wiring.
+3. **#5 v2 — ObjectProperty return resolution + recursive struct expansion** — S+S follow-ups to PR #211. Needs a new DLL pipe call (`resolve_object_name(addr)` or extend invoke_function response) for UObject* → "Name (Class)" rendering.
+4. **0c FTransform Translation offset** — S, low risk. Phase 2 footnote. Needs per-version Translation offset detection (UE4 / UE5-non-LWC at +16, UE5 LWC at +32). Currently `VectorStructNames(FTransform)` returns empty → zero hits.
+5. **#2 Live ProcessEvent Call Profiler** — M-L (~1 week), med risk. Hot-path DLL change. The big-impact one but biggest blast radius. Stark already has `s_hookFireCount` — extend with per-UFunction atomic counter + Recording toggle + 3 pipe cmds + new "Live Funcs" tab.
+6. **LiveWalker batch generator (v2 of #3)** — S-M. Heterogeneous rows (functions + fields + struct sub-fields + array elements). Needs UX pass on drilldown state.
+
+### Live-game verification waiting on user (no code needed)
+
+- **Phase 2 paths on Geri (UE 4.27)** — ES2 (UE 5.5) already verified across all 5 new DataTypes + Contains/StartsWith/EndsWith.
+- **TArray stress test on Satisfactory inventory arrays** — confirms the 10M soft circuit-breaker doesn't false-positive on legit deep arrays.
+- **#5 grid on Geri's `PlayerCameraManager::GetCameraLocation`** — expect 3 rows (X / Y / Z floats) at offsets 0x4 / 0x8 / 0xC.
+- **#6 diagnostic on `UCheatManager::Fly`** — confirm orange footer hint appears + Result=0 + no effect + GetHookFireCount > 0 + game-specific BC function on same session works.
+
+-----
+
 ## Next-priority enhancements (decided 2026-05-26, post build 738)
 
 ### 0. ~~Value Search tab (by-value scan)~~ — ✅ shipped this session (2026-05-26, build 738)
@@ -47,19 +87,21 @@ enrichment cleaner than discrete's whatIsAt path.
   "Open in Live Walker" navigation flow.
 
 **v2 deferred** (revisit on user signal):
-- **FString / FName / FText support** — string scan is the most-asked
-  CE feature beyond primitives; straightforward port once we lock the
-  FName index round-trip (Serie::GetString equivalent on the C# side
-  for predicate building).
-- **TArray\<T\> scan** — see memory `project_value_search_caveats`
-  for the open crash-risk plan. Before shipping: confirm
-  `Aura::FindInContainers`'s 15s deadline is enough back-pressure for
-  pathological containers; add soft circuit-breaker on Num
-  (>10M elements skip with telemetry log) rather than inheriting Copy
-  CE XML's hard array-size cap (which would silently drop legit deep
-  hits). Stress-test on Satisfactory inventory arrays before enabling.
-- **FVector / FRotator / FTransform** — natural next step after
-  primitives; needs scan-by-(X, Y, Z) tolerance UI.
+- ~~**FString / FName / FText support**~~ — ✅ shipped **build 757** (Phase 2A,
+  2026-05-27, PR #208). Contains / StartsWith / EndsWith scan types with
+  CE-style case-insensitive default; opt-in case sensitivity. FText is
+  best-effort in cooked builds (ES2 resolved 1/1551 classes — expected).
+- ~~**TArray\<T\> scan**~~ — ✅ shipped **build 757** (Phase 2C, 2026-05-27,
+  PR #208). Walks reflected ArrayProperty buffers for primitive / string /
+  vector inner types. Soft circuit-breaker on `Num > 10M` (skip with
+  `LOG_WARN`), Num/Max/Data validation guards, SEH-safe stale-addr reads.
+  No `LOG_WARN: skipping TArray` fired across ~1.15M scanned objects on ES2.
+- ~~**FVector / FRotator / FTransform**~~ — ✅ shipped **build 757** (Phase 2B,
+  2026-05-27, PR #208). Component-wise compare with shared per-axis
+  tolerance; `"X,Y,Z"` CSV input. **FTransform footnote**: reserved on the
+  wire but currently returns zero hits — pending per-version Translation
+  offset detection (UE4 / UE5-non-LWC at +16, UE5 LWC at +32). Tracked as
+  follow-up **#0c FTransform Translation offset** below.
 
 > _Ordering note (kept from earlier 2026-05-26 review)_: items below
 > were ordered by value/effort ratio at the end of the build-719 freeze
@@ -157,128 +199,66 @@ hypotheses about what implements the action.
 per slot. PE hot-path overhead must stay < 100ns/call. Benchmark in
 `dll_helpers_test` before shipping.
 
-### 3. Multi-row → One .CT Batch Generator — pick #3 (quickest win)
+### 3. ~~Multi-row → One .CT Batch Generator~~ — ✅ shipped (build 760, PR #210)
 
-**Effort**: S-M (~2-3 days) | **Risk**: low | **Why**: Polishes the
-existing AA(Baked) single-row export into a multi-row batch — the
-80% of pieces are already in place from build 590-596 (BakedScript
-generation) + build 660 (LiveWalker DataGrid Extended-mode
-multi-select). Promotes the tool one notch from "research toy" to
-"shareable cheat-table author".
+**Effort actual**: S-M (~half day) | **Risk**: low (purely additive). Polished the existing AA(Baked) / Freeze single-row export into a multi-row batch on the Interesting Functions + Interesting Properties tabs.
 
-**Implementation sketch**:
-- Interesting Funcs + Interesting Properties + LiveWalker gain a
-  "Generate Cheat Table from Selection" toolbar button (visible when
-  ≥2 rows selected).
-- New `Services/CheatTableBuilder.cs` — assemble selected rows into a
-  single `.CT` payload: header XML + grouped memrec entries (one
-  group per category) + per-row AA Script body (reuses
-  `BakedScriptGenerator.Generate` or `FreezeScriptGenerator.Generate`).
-- Output: save-as dialog, default filename
-  `{processName}-{timestamp}.CT`. AOBMaker direct-inject as v2 if
-  user requests.
-- Tests: golden-file CT samples for 3-row / 10-row / mixed-category
-  selections.
+**What shipped**:
+- `Models/CheatTableRow.cs` — discriminated row type (`CtPropertyRow` wraps `FreezeScriptParams`, `CtFunctionRow` wraps Baked params). Source-panel-agnostic.
+- `Services/CheatTableBuilder.cs` — `<CheatTable CheatEngineTableVersion="46">` XML matching CE's File→Save As shape. Root group → per-category sub-groups (alphabetical, Uncategorised trails) → one `<CheatEntry>` per row with `<VariableType>Auto Assembler Script</VariableType>` body. IDs sequential from `BaseId=1000`. XML-escapes all five canonical entities.
+- DataGrid `SelectionMode="Extended"` + 📦 toolbar button + code-behind Click handler on both panels.
+- Property rows: per-UE-type "obvious cheat" freeze literal (Float=9999.0, Int=99999, Bool=true, Byte=255). Struct/array/non-scalar rows skipped with status counter. Function rows: BakedValues empty (helper zero-fills); description for parameterised funcs reads "edit baked PARAMS in CE".
+- Default filename `{Source}-batch-yyyyMMdd-HHmmss.CT`. MainWindow `SaveCheatTableAsync` helper owns the platform dialog + UTF-8 write.
 
-**Why-now**: every other "discover" workflow (Properties / Funcs /
-Live Walker) already feeds this — it's the unification step that
-the rest of the pipeline has been waiting for.
+**Deferred**:
+- **LiveWalker integration** — heterogeneous row types (functions + fields + struct sub-fields + array elements) + drilldown state. Needs its own UX pass. Tracked as `LiveWalker batch generator v2` below.
+- **AOBMaker direct-inject** of generated CT (currently save-to-disk).
 
-### 4. Game Version Diff (SDK / Dump Compare) — pick #4
+Tests: 1028 → 1052 (+24).
 
-**Effort**: S (~2 days, pure Python) | **Risk**: zero (offline) |
-**Why**: Cheat-table maintainer pain — game patches silently move
-field offsets and add/remove fields, breaking tables that worked
-yesterday. No tool in the cheat-engine ecosystem does this at
-UFunction/UProperty granularity.
+### 4. ~~Game Version Diff (SDK / Dump Compare)~~ — ✅ shipped (`9c225ff`, PR #209)
 
-**Implementation sketch**:
-- New `scripts/analysis/diff_dumps.py` consuming two Dump All
-  Metadata JSONL files (`work/dump/X.jsonl` + `work/dump/Y.jsonl`).
-- Reports: `AddedClasses`, `RemovedClasses`, `MovedFields` (per-class
-  with old → new offset), `AddedFunctions`, `RemovedFunctions`,
-  `FunctionSignatureChanges` (param list diff).
-- Markdown output mirroring `analyze_dumps.py` style; optional
-  `--minimal` flag for "just the things that broke my cheat table"
-  view (offset moves only).
-- README addition documenting the workflow: dump game pre-patch,
-  dump post-patch, diff, fix table.
+**Effort actual**: S (~2 hours) | **Risk**: zero (pure Python, offline). Cheat-table maintainer pain target: when a game ships a silent UPROPERTY offset shuffle, hand-coded tables break.
 
-**Why now**: zero risk, leverage existing dump corpus (15+ games),
-delivers a feature the wider cheat-table community would directly
-benefit from.
+**What shipped**:
+- `scripts/analysis/diff_dumps.py` — sister to `analyze_dumps.py`, same JSONL corpus, N=2 patch-vs-patch diff. Match keys: class `path` (canonical UE id; `addr` is session-local), properties + functions by `name` within class. Path normalisation (`//Script/X` ≡ `/Script/X`).
+- Reports: AddedClasses / RemovedClasses / Moved fields (same name, different offset/size) / Type changed (FloatProperty → DoubleProperty incl. inner_type / struct_type / obj_class / enum) / Function signature changed (return_type / num_parms / parms_size / flags) / Added/Removed functions.
+- CLI: `--minimal` (breaking changes only), `--include-engine` (default skips `/Script/`), `--self-test` (6 built-in synthetic-fixture scenarios so the diff logic is checkable without external dumps).
+- README extended with the same-game-patch workflow + match-key + known limitations sections.
 
-### 5. UFunction Return Value Structured Walker — pick #5
+**Smoke tests passed**: self-diff Geri vs Geri (87 unchanged, 0 changes — identity holds); cross-game Geri vs ES2 (1652/86/0 — module-mismatch warning fires, doesn't crash on massive divergence); `--self-test` all assertions pass.
 
-**Effort**: S | **Risk**: low | **Why**: Invoke (Pipe Invoke + Verify
-mode) returns raw bytes or single-scalar decoded values. Struct
-returns (FVector / FRotator / FTransform / FHitResult / user
-USTRUCTs) currently show as hex dumps — usable but not introspectable.
+**Known limitations** (documented in README): no auto-rename detection (renamed field shows as Removed + Added); no function body comparison — only metadata is dumped (logic-only refactors invisible; covered by #2 Live PE Profiler in the future).
 
-**Implementation sketch**:
-- [Ubel](../dll/src/Ubel.cpp) already has the property walker that
-  produces ClassStruct field listings. Apply it to the returned
-  ParamBuffer's ReturnValue slot using the function's return
-  StructProperty / ObjectProperty metadata.
-- Invoke response gains optional `returnValueStructured: { fields: [
-  { name, type, value }, ... ] }`.
-- UI: InvokeParamDialog FIRE-result panel shows a small property
-  grid below the raw hex when the return is structured.
+### 5. ~~UFunction Return Value Structured Walker~~ — ✅ shipped (build 775, PR #211)
 
-**Why-relatively-easy**: 95% of the code exists, this is plumbing
-to wire ReturnValue into the walker that already understands
-StructProperty offsets / FString / FVector / etc.
+**Effort actual**: S (~half day) | **Risk**: low (purely additive UI panel). Renders struct returns as a 4-column DataGrid (Field / Type / Value / Offset) below the existing single-line decode in InvokeParamDialog.
 
-**Verification target**: Geri's
-`PlayerCameraManager::GetCameraLocation` returns `FVector` — already
-known-working from build 648 verification, just needs structured
-rendering instead of raw `00 00 00 ... 89.99` bytes.
+**What shipped**:
+- `Models/StructFieldValue.cs` — pure record. Offset is **absolute** buffer offset (return param offset + sub-field offset) so users can copy it into Find In Containers / CE memrec setup directly.
+- `Services/StructReturnDecoder.cs` — static `Decode` + `CanDecode`. Resolution order: KnownStructLayouts (per-version locked) → DLL-discovered dynamic StructFields → empty list. Delegates each byte→typed-value cell to `InvokeParamDialog.DecodeParamValue` so the grid + result-label never disagree on a byte mapping. SafeDecode wraps with try/catch so a single bad field doesn't blow the whole grid.
+- InvokeParamDialog: pre-resolves `_returnParam` at construction; clears + hides grid at top of `OnFireClicked` so stale rows don't flash; header label includes struct name.
+- **Build 780 follow-up (PR #211)**: switched the DataGrid columns from string-path `Binding` to `DataGridTemplateColumn` + `FuncDataTemplate<StructFieldValue>(lambda)` to clear 18 IL2026/IL3050 AOT warnings.
 
-### 6. UCheatManager stripped-body diagnosis + feedback memory — pick #6 (Console-ship follow-up)
+**v2 follow-ups** (deferred — listed under "Remaining picks" below):
+- **ObjectProperty / ClassProperty return resolution** to "Name (Class)" — needs DLL pipe round-trip via `Ubel::GetName` on the returned address.
+- **Recursive struct expansion** — `FHitResult.Location` (FVector) renders as one StructProperty row; nested expansion needs recursive DLL-side discovery in WalkFunctions.
 
-**Effort**: S (~half a day, mostly write-up) | **Risk**: zero | **Why**:
-First live test of the build-731 Console tab surfaced the canonical
-gotcha — `UCheatManager::Fly` / `Ghost` / `God` / `Walk` / `Slomo` /
-`ChangeSize` invokes return `Result=0` (`OK`) but produce no in-game
-effect on cooked Shipping builds. Root cause is well-known but
-undocumented in this repo: UE engine wraps these in
-`#if !UE_BUILD_SHIPPING`, so the cooker preserves the reflection
-metadata (you can list + invoke the UFunction) while stripping the
-function body to a `ret`. PE call really happens, the function really
-returns 0, the function just does nothing.
+Tests: 1052 → 1065 (+13). **Live verification target (user-side)**: Geri's `PlayerCameraManager::GetCameraLocation` returns FVector — grid should show 3 rows (X / Y / Z) at offsets 0x4 / 0x8 / 0xC.
 
-Different failure mode from the build 647-648 wrong-vtable-slot bug
-(that one was PE never firing). The discriminator is
-`Stark::GetHookFireCount()` — if it's > 0 after the call, the hook
-fired and the function body itself is the dead end.
+### 6. ~~UCheatManager stripped-body diagnosis + feedback memory~~ — ✅ shipped (build 778, PR #211)
 
-**What to ship**:
-- New `feedback_ucheatmanager_stripped.md` memory entry capturing the
-  diagnostic: hook-fire-count > 0 + result=0 + no effect → cooker
-  stripped body, almost certainly UCheatManager-derived.
-- Diagnostic guidance: try a `BlueprintCallable` game-specific exec
-  on the same session; if that works, confirms it's UCheatManager-
-  specific stripping rather than wholesale PE breakage.
-- Console panel UX hint: when the user selects an exec whose class
-  inherits from `UCheatManager` (cheap walk-super-chain check via
-  existing `walk_class` data), add a footer line "⚠ Often
-  stub-only in cooked Shipping — try a game-specific exec for
-  verification" — same pattern as the build 643-644
-  KismetMathLibrary hint plan in
-  [Call-UE-function feature gaps](#document-kismetmathlibrary-stub-pattern-in-cooked-shipping-suggest-better-verification-targets).
-- Update [docs/lessons-learned.md](lessons-learned.md) with the
-  diagnostic flow so the lesson survives across sessions.
+**Effort actual**: S (~half day, mostly write-up) | **Risk**: zero. Documented the cooker-stripped-body gotcha (`#if !UE_BUILD_SHIPPING` wraps the body, reflection metadata survives) and added a Console-panel UX hint.
 
-**Verification target**: confirm on Geri (UE 4.27) and/or ES2 (UE 5.5)
-that (a) `UCheatManager::Fly` returns OK + does nothing, AND (b) a
-game-specific BC function on the same session works — proving the
-PE pipeline itself is healthy. Same evidence shape that closed the
-build 648 wrong-slot bug.
+**What shipped**:
+- `ConsoleViewModel.IsLikelyUCheatManagerExec(entry)` — public + static, case-insensitive substring match on `ClassName` OR `SuperName` against "CheatManager". Catches engine class + game-defined subclasses + immediate-super patterns.
+- `ConsoleViewModel.SelectedExecHint` — computed property; orange-bordered footer Border on ConsolePanel visible when non-empty. Text: "⚠ UCheatManager subclasses are often body-stripped in cooked Shipping (Result=0 + no in-game effect). Try a game-specific exec or BC function for verification. See memory feedback_ucheatmanager_stripped."
+- Memory file `feedback_ucheatmanager_stripped.md` — full diagnostic table comparing wrong-vtable-slot vs cooker-strip failure modes; the discriminator is `Stark::GetHookFireCount()` (>0 + Result=0 + no effect = cooker strip; ==0 = hook on wrong slot).
+- `docs/lessons-learned.md` — new bullet under "UFunction Invoke / ProcessEvent".
 
-**Out of scope**: bypassing the strip (would require code-injection
-into a different code path entirely; outside this tool's scope). The
-goal is to redirect users to verification targets that actually do
-something, not to revive the dead UCheatManager bodies.
+**Deferred**: full super-chain walk via a new `walk_super_chain` pipe call to catch second-degree subclasses (`BP_MyCheatManager_C : MyGameCheatManager : UCheatManager`) — substring heuristic covers the first two layers; revisit if false-negatives surface.
+
+Tests: 1065 → 1080 (+15). **Live verification target (user-side)**: on Geri or ES2 — (a) `UCheatManager::Fly` returns OK + does nothing; (b) game-specific BC function on the same session works → confirms diagnostic.
 
 ### 7. View Snap Hotkey (Property → Snap Hotkey) — pick #7
 
@@ -941,55 +921,18 @@ returns the decoded Lua string instead of a number. Optional v2.
 
 ## Property Origin Resolver — proposals B + C still on table
 
-> **🎯 NEXT SESSION STARTING POINT (2026-05-26 refresh, build 730 on `dev`)**:
-> See the new **[Next-priority enhancements (decided 2026-05-26)](#next-priority-enhancements-decided-2026-05-26-post-build-730)** section at the top of this file — picks #1-5 + the AA(Baked) auto-tick add-on supersede the build-715 starter list below. **Active pick = #1 UE Console / Exec Command Bridge**.
+> The starter block at the **top of this file** (build 780 refresh) is the current source of truth for next-session picks. The historical 2026-05-20 (build 715) block + its 7-item suggestion list has been **archived to [docs/archive/todo-history-build-715.md](archive/todo-history-build-715.md)**.
 >
-> The build-715 NEXT-SESSION block below is kept as historical context (mostly shipped through build 719's freeze work + the post-715 stabilisation commits — MSVC CRT static link, AOT DataGrid fix, credit footer).
+> Of the 7 starter suggestions in that historical block:
+> - #1 Live-game verification of Invoke Stage 1+2 → user-side, still open
+> - #2 More dumps for genre coverage (pure-horror / fighting / RTS / sports-sim) → user-side, still open
+> - #3 `walk_functions_batch` follow-up → still open, S effort
+> - #4 FString / FText / TArray **input** for baked AA Script (distinct from the Value Search Phase 2 work) → still open, M effort, med risk
+> - #5 Invoke Stage 3 (class validation) → still deferred until a real crash motivates
+> - #6 Class Family Browser (Proposal C) → still open, L effort, needs own planning
+> - #7 Runtime `keywords.json` override → still open, M effort, only if a user asks
 >
-> **Original block, build 715 close-out (2026-05-20)**:
-> Session shipped 4 commits + dev→main fast-forward merge (30 commits, first
-> merge since build 590). Headline shipments:
->
-> - **18-game bias recheck (Frontiers, MMO/ARPG)** ([7ef5f57](https://github.com/bbfox0703/UE5CEDumper/commit/7ef5f57)) — docs-only. First MMO/ARPG-flavoured dump added (TL_* prefix, BossMonster / Pet / Affix / Dungeon / Sharpshooter). No keyword adds warranted despite landing in the predicted "out-of-genre" slot — the only promising candidate (`skill`, 8/18 games) was ~85% UI-widget noise. **Strongest robustness evidence yet** for the build-678/687 calibration.
-> - **Mailbox poll 10ms → 1ms** (build 707-710, [74db6b5](https://github.com/bbfox0703/UE5CEDumper/commit/74db6b5)) — `Mimic.cpp` poll thread uses `Sleep(kPollIntervalMs=1)` + `timeBeginPeriod(1)` bracket. CE-Lua tight-loop invokes save ~5ms/call of pure idle wait. Benchmark `Test_Mimic_PollLatency_OneMillisecond` in `dll_helpers_test` locks the win.
-> - **Invoke Stage 1 — surface UObject* expected UClass** (build 711, [024b6fd](https://github.com/bbfox0703/UE5CEDumper/commit/024b6fd)) — DLL `FunctionParam.objClassName` extracted via `ReadSubclassTypeName` for 7 pointer-flavoured types. Pipe walk_functions JSON adds `obj_class`. C# `FunctionParamModel.ObjectClassName` + InvokeParamDialog label becomes `[UObject*: AActor, 8B, off=0x10]`.
-> - **Invoke Stage 2 — instance picker dialog** (build 715, [515a344](https://github.com/bbfox0703/UE5CEDumper/commit/515a344)) — new `ObjectInstancePickerDialog` (no XAML, AOT-safe). Pointer-param rows in InvokeParamDialog grow `[Pick…] [null] [self]` buttons. Pick opens picker pre-filtered to expected UClass via existing `find_instances` pipe cmd. `ParamBufferBuilder.IsPickablePointerType` is the canonical 7-type contract (locked by 21 test theories).
->
-> Tests: 910 → **935** (DLL self-tests 93 → 95 +mailbox latency; C# 817 → 840 +2 label tests +21 IsPickablePointerType theories).
->
-> **Stage 3 (class validation)** explicitly deferred — picker output is almost always class-correct in practice; revisit when a real crash motivates it.
-> Proposal B (per-row "similar BP-added properties" side panel) still **deferred indefinitely** — B' covers the workflow.
->
-> Suggested next-session starters (pick one):
->
-> 1. **Live-game verification of Invoke Stage 1+2** — open InvokeParamDialog on a UFunction with a UObject* / UClass* / Soft* param: label should read `[UObject*: AActor, 8B]`; `[Pick…]` opens picker pre-filled with `AActor`, lists subclasses via substring match. Tests cover the contract; only live-game test pending. **S effort, user-driven**.
-> 2. **More dumps for genre coverage** — 18-game corpus now spans JRPG/sim/ARPG/
->    action-adventure/sandbox/racing/MMO-ARPG. **Still missing: pure-horror / fighting /
->    RTS / sports-sim.** Only kind of dump that could still move the calibration needle.
->    Use existing pipeline; no code change unless a new class-rule emerges. **S effort, user-driven**.
-> 3. **`walk_functions_batch` follow-up** — sister to the build-696
->    `walk_class_batch`. `DumpAllService` still does `WalkFunctionsAsync` once
->    per emitted class (`IncludeFunctions=true` is default). Same trivial-loop
->    pattern, same byte-equivalence safety net machinery already in place.
->    Smaller win than walk_class_batch on its own (Dump All only) — skip unless
->    profiling shows it as the new bottleneck. **S effort**.
-> 4. **FString / FText / TArray input for baked AA Script** (open since build
->    643-644 ES2 verification) — `KismetSystemLibrary::PrintString` is the
->    obvious observable-side-effect verification target but currently unreachable
->    because the helper's `writeBakedParams` only handles scalar inputs. Needs
->    CE-side alloc + FString header write + free dance. See
->    [Call-UE-function feature gaps](#fstring--ftext--tarray-input-support-in-baked-aa-script).
->    **M effort, med risk**.
-> 5. **Invoke Stage 3 (class validation)** — DLL gains `validate_object_class(addr, expectedClassName)` (read addr→ClassPrivate→FName, walk super chain). InvokeParamDialog warns (not blocks) on mismatch before invoking. **S effort, low risk** — only worth doing if a real crash from class mismatch surfaces.
-> 6. **Class Family Browser (Proposal C)** — bucketed view of game classes by
->    inferred role (Character / Pawn / Inventory / Stats / Save / etc.). Genuine
->    "where do I start exploring a new game?" entry point. The 18-game dump
->    corpus would feed the heuristic-classification clustering work. **L effort,
->    needs own planning round**.
-> 7. **Runtime `keywords.json` override** — let users customise scoring tables
->    without recompiling. Discussed during the anti-bias conversation; not yet
->    built. Source-generated JSON serializer for AOT compat. **M effort, only
->    if a user asks**.
+> All seven are detailed in the [Call-UE-function feature gaps](#call-ue-function-feature-gaps-discovered-build-643-644-live-test) section + the build-689 "Class Family Browser" subsection below.
 
 ### Proposal B — DEFERRED (build 689)
 

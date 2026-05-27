@@ -114,29 +114,37 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      v                                               |
 |  UE5Dumper.dll  [injected]                           |
 |      +-- Frieren  (ExportAPI)     <- 30 C ABI for CE Lua      |
-|      +-- Fern     (PipeServer)    <- Named Pipe IPC (31 cmds) |
+|      +-- Fern     (PipeServer)    <- Named Pipe IPC (~42 cmds incl. value scan) |
 |      +-- Himmel   (Signatures)    <- 128 AOB + symbol exports |
 |      +-- Genau    (OffsetFinder)  <- GObjects/GNames/GWorld   |
-|      +-- Aura     (ObjectArray)   <- Chunked + Flat arrays + Find Refs/Containers |
+|      +-- Aura     (ObjectArray)   <- Chunked + Flat arrays + Find Refs/Containers + ScanForValue |
 |      +-- Serie    (FNamePool)     <- UE5 Pool / UE4 TNameEntry|
-|      +-- Ubel     (UStructWalker) <- FField + UProperty + Phases B-K + Optional |
+|      +-- Ubel     (UStructWalker) <- FField + UProperty + Phases B-K + Optional + ReadFStringAt/ReadFNameAt/ReadFTextStringAt (public, build 757) |
 |      +-- Macht    (Memory)        <- AOBScan + SEH read/write |
 |      +-- Sein     (Logger)        <- 5-category per-process   |
 |      +-- Stark    (GameThreadDispatch) <- MinHook ProcessEvent hook |
+|      +-- ValueScan (build 738 + Phase 2 757) <- SessionManager + DataType / ScanType / CompareStringPredicate / CompareVectorPredicate |
 +----------------------+-------------------------------+
                        | Named Pipe: \\.\pipe\UE5DumpBfx
                        | JSON over pipe (newline-delimited)
 +----------------------v-------------------------------+
 |  UE5DumpUI  (Avalonia + ReactiveUI, standalone exe)  |
-|      +-- PipeClient          <- async pipe mgmt     |
-|      +-- ObjectTreePanel     <- UObject hierarchy    |
-|      +-- ClassStructPanel    <- Property Grid        |
-|      +-- PointerPanel        <- GObjects/GNames addr |
-|      +-- LiveWalkerPanel     <- Instance drill-down  |
-|      +-- InstanceFinderPanel <- Class instance search|
-|      +-- ProxyDeployPanel   <- Proxy DLL management |
-|      +-- CeXmlExport        <- CE XML pointer chains |
-|      +-- CsxExport          <- CE Structure Dissect  |
+|      +-- PipeClient                <- async pipe mgmt     |
+|      +-- ObjectTreePanel           <- UObject hierarchy    |
+|      +-- ClassStructPanel          <- Property Grid        |
+|      +-- PointerPanel              <- GObjects/GNames addr |
+|      +-- LiveWalkerPanel           <- Instance drill-down  |
+|      +-- InstanceFinderPanel       <- Class instance search|
+|      +-- PropertySearchPanel       <- Search by name (build 610+ dedupe + Freeze button) |
+|      +-- InterestingFunctionsPanel <- Scored UFunctions; 📦 batch CT (build 760) |
+|      +-- InterestingPropertiesPanel<- Scored properties (B'); 📦 batch CT (build 760) |
+|      +-- ConsolePanel              <- UFUNCTION(exec) discovery + UCheatManager hint (build 778) |
+|      +-- ValueSearchPanel          <- CE-style by-value scan (build 738 + Phase 2 757) |
+|      +-- ProxyDeployPanel          <- Proxy DLL management |
+|      +-- CeXmlExport               <- CE XML pointer chains |
+|      +-- CsxExport                 <- CE Structure Dissect  |
+|      +-- CheatTableBuilder         <- Multi-row .CT batch generator (build 760) |
+|      +-- StructReturnDecoder       <- Invoke result property grid (build 775) |
 +------------------------------------------------------+
 ```
 
@@ -149,9 +157,9 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 | [docs/roadmap.md](docs/roadmap.md) | **Current state** — capability matrix, per-game configuration, tested games, long-running concerns. **Read first** for "what works now". |
 | [docs/todo.md](docs/todo.md) | **What's next** — prioritized open work with effort/risk tags. Active plan + carryover gaps + speculative ideas. |
 | [docs/dev-log.md](docs/dev-log.md) | **What shipped** — append-only milestone history per build number. Read when investigating "when/why was X added". |
-| [docs/architecture.md](docs/architecture.md) | Directory structure (15 .cpp + 14 .h DLL files, 92 UI .cs/.axaml files), git submodules, build environment |
+| [docs/architecture.md](docs/architecture.md) | Directory structure (16 .cpp + 17 .h DLL files; ~130 UI .cs/.axaml files; 33 test files), git submodules, build environment |
 | [docs/dll-spec.md](docs/dll-spec.md) | C++ DLL interface: 30 C ABI exports, offset tables, CE Lua bridge (Frieren-themed file/namespace names) |
-| [docs/pipe-protocol.md](docs/pipe-protocol.md) | Named Pipe JSON IPC protocol (31 commands, Request/Response/Event) |
+| [docs/pipe-protocol.md](docs/pipe-protocol.md) | Named Pipe JSON IPC protocol (~42 commands incl. Value Search begin/refine/end, Request/Response/Event) |
 | [docs/ui-spec.md](docs/ui-spec.md) | Avalonia UI tech stack (Avalonia 12.0.2 / .NET 10), AOT compatibility, component specs |
 | [docs/export-formats.md](docs/export-formats.md) | CE XML, CSX, SDK Header, USMAP export rules, pointer chain model, type mappings |
 | [docs/technical-notes.md](docs/technical-notes.md) | UE version differences, FField vs UProperty, FNamePool, DynOff, Property Type Layouts (Phases B-K), Address Finder layered lookup |
@@ -159,6 +167,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 | [docs/test-games.md](docs/test-games.md) | 20 test games with UE versions, GWorld status, stride info |
 | [docs/naming-convention.md](docs/naming-convention.md) | Frieren-themed C++ file / namespace mapping (Macht/Genau/Aura/Serie/Ubel/Frieren/Fern/...) |
 | [docs/aobmaker-integration.md](docs/aobmaker-integration.md) | AOBMaker CE Plugin pipe bridge (HEX / ASM / SYM / CreateAAScript) |
+| [scripts/analysis/README.md](scripts/analysis/README.md) | Offline analysis tooling — `analyze_dumps.py` (cross-game keyword calibration) + `diff_dumps.py` (same-game patch diff, build 780). |
 | [docs/simd-scanning-notes.md](docs/simd-scanning-notes.md) | AOBMaker SIMD scanning research: AVX2 anchor technique (reference) |
 | [docs/CE-Bugs-Minesweeper.md](docs/CE-Bugs-Minesweeper.md) | CE-specific quirks and undocumented API behaviors |
 | [docs/archive/](docs/archive/) | Outdated design docs preserved for history (UX spec, UFunction roadmap) |
