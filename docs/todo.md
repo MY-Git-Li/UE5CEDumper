@@ -12,6 +12,30 @@ Move items to [dev-log.md](dev-log.md) once they ship; update
 
 -----
 
+## 🎯 NEXT SESSION STARTING POINT (2026-05-29 latest, build 797-798, dev = main)
+
+Shipped this session (merged dev→main): the two **multi-numeric Value Search
+meta types** — find a value across many numeric widths in one pass, each field
+compared by its OWN declared type (a *structured property walk*, so unlike CE's
+raw "All" there are **no byte-reinterpret false hits**).
+
+| Build | Feature | Status |
+|---|---|---|
+| 794-795 | **NumericNoByte** — word/dword/qword/float/double in one pass; excludes 1-byte + bool | ✅ PR #220 |
+| 796-797 | **NumericAll** — NumericNoByte + Int8/UInt8, plus a result-volume **warning** (small values flood 1-byte fields) | ✅ PR #221 |
+
+Both in-game verified OK. Tests now **349 DLL helpers + 31 utf8 + 1105 C# = 1485**.
+Implementation notes in [dev-log.md](dev-log.md) build 794-795 / 796-797; capability
+matrix in [roadmap.md](roadmap.md) Value Search section. The meta machinery is keyed
+on `ValueScan::IsMultiNumericDataType`, so a future third variant (e.g. include Bool,
+or a vector-family meta) is a small add.
+
+**Remaining picks** unchanged — the 2026-05-27 block below is still the source of
+truth (#7 View Snap Hotkey, #2 Live PE Call Profiler, #0c FTransform Translation
+offset, #5-v2 ObjectProperty return resolution, LiveWalker batch generator).
+
+-----
+
 ## 🎯 NEXT SESSION STARTING POINT (2026-05-29 update, build 792)
 
 Shipped this session (committed to dev): **P1b parallelization** of the three
