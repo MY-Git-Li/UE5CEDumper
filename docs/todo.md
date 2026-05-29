@@ -12,6 +12,36 @@ Move items to [dev-log.md](dev-log.md) once they ship; update
 
 -----
 
+## 🎯 NEXT SESSION STARTING POINT (2026-05-29 update, build 792)
+
+Shipped this session (committed to dev): **P1b parallelization** of the three
+GObjects-walk scans — `ScanForValue` / `FindInContainers` /
+`FindReferencesToUObject` — plus thread-safe `Ubel` caches that the parallel
+walk now requires. Source: `D:\Github\CE-Handwire-Private\docs\Memory-Scanning-Internals.md`
+§16. Full write-up in [dev-log.md](dev-log.md) 2026-05-29 entry. Build + all
+1358 tests green; **in-game perf/correctness verification still pending** (below).
+
+**New follow-ups from this work:**
+
+- **Extract `ParallelGObjectsScan<ResultT>` template helper** — *S, low risk.*
+  The `ThreadResult` struct + `perThread` vector + atomic `deadlineHit` +
+  worker-open + merge loop is ~100 lines duplicated across the three scan
+  functions. A template taking a per-object visitor + per-thread result type +
+  merge policy collapses it to one source of truth. Deferred deliberately —
+  don't refactor freshly-verified concurrency code in the same session. Pick it
+  up next time any of the three scans is touched.
+- **In-game parallel-scan verification** — inject into ES2 (UE 5.5) + a
+  large-heap title (Satisfactory / SaGa-class). (a) Parallel result set must
+  equal the old serial set: same addresses, ascending order, same count
+  (lowest-index subset when truncated to maxResults). (b) First-Scan wall-clock
+  over 1M+ objects should drop roughly ×cores. (c) Confirm no hang / crash and
+  that `deadlineHit` still fires correctly under load.
+
+The 2026-05-27 block below remains the source of truth for the remaining
+picks (#7 / #2 / 0c / #5-v2 / LiveWalker-batch).
+
+-----
+
 ## 🎯 NEXT SESSION STARTING POINT (2026-05-27 refresh, build 780, dev = main)
 
 Last session (2026-05-27) merged **PR #208, #209, #210, #211** to main —

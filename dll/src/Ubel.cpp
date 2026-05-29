@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -37,6 +38,25 @@ static std::unordered_map<uintptr_t, std::vector<std::pair<int64_t, std::string>
 // Dramatically reduces FNamePool lookups for ObjectProperty fields that
 // reference the same UClass repeatedly (e.g., many fields pointing to the same class).
 static std::unordered_map<uintptr_t, std::string> s_nameCache;
+
+// ── Cache mutexes (thread-safety for parallel GObjects walks) ──────────────
+// Aura's value/reference/container scans walk the whole GObjects array across
+// N worker threads, all of which call WalkClass(Ex) / GetName / ResolveEnumValue
+// / GetCachedStructFields. Those memoize into the file-scope maps above + below,
+// so concurrent first-touches would race. Each cache gets its own mutex; the
+// expensive walk/read happens WITHOUT the lock (only the find/insert is guarded),
+// and every cache-returning function hands back either a value copy or a
+// reference into a node-based unordered_map (whose element references stay valid
+// across other threads' inserts), so callers can read lock-free after lookup.
+// These touches are per-class / per-match (NOT per-object), so contention is low.
+// All locks are leaf-level (no function holds one while acquiring another), so
+// there is no lock-ordering / deadlock concern. s_calibrationMutex guards the
+// one-time CorrectSubclassOffsets DynOff writes via double-checked locking.
+static std::mutex s_enumCacheMutex;
+static std::mutex s_nameCacheMutex;
+static std::mutex s_walkClassCacheMutex;
+static std::mutex s_structFieldCacheMutex;
+static std::mutex s_calibrationMutex;
 
 // Read FName from an address and resolve to string
 static std::string ReadFName(uintptr_t fnameAddr) {
@@ -65,37 +85,52 @@ static std::string ResolveEnumValue(uintptr_t enumAddr, int64_t value) {
     if (DynOff::bUEnumNamesFailed.load(std::memory_order_acquire))
         return "";  // Detection failed — show raw int values instead
 
-    auto it = s_enumCache.find(enumAddr);
-    if (it == s_enumCache.end()) {
-        // Read UEnum::Names TArray<TPair<FName, int64>>
-        uintptr_t data = 0;
-        int32_t count = 0;
-        Macht::ReadSafe(enumAddr + DynOff::UENUM_NAMES, data);
-        Macht::ReadSafe(enumAddr + DynOff::UENUM_NAMES + 8, count);
-
-        std::vector<std::pair<int64_t, std::string>> entries;
-        if (data && count > 0 && count < 16384) {
-            entries.reserve(count);
-            for (int i = 0; i < count; ++i) {
-                uintptr_t entryAddr = data + static_cast<uintptr_t>(i) * DynOff::UENUM_ENTRY_SIZE;
-                int32_t nameIdx = 0;
-                int64_t val = 0;
-                Macht::ReadSafe(entryAddr, nameIdx);
-                Macht::ReadSafe(entryAddr + 8, val);
-                std::string name = Serie::GetString(nameIdx);
-                entries.push_back({val, std::move(name)});
-            }
-            LOG_DEBUG("ResolveEnumValue: Cached UEnum 0x%llX with %d entries",
-                static_cast<unsigned long long>(enumAddr), count);
+    // Fast path: already cached. Hold the lock only for the lookup; the
+    // returned name is copied out so we read lock-free thereafter.
+    {
+        std::lock_guard<std::mutex> lk(s_enumCacheMutex);
+        auto it = s_enumCache.find(enumAddr);
+        if (it != s_enumCache.end()) {
+            for (const auto& [v, n] : it->second)
+                if (v == value) return n;
+            return "";  // Value not in this (cached) enum
         }
-        it = s_enumCache.emplace(enumAddr, std::move(entries)).first;
     }
 
-    // Lookup value
-    for (const auto& [v, n] : it->second) {
-        if (v == value) return n;
+    // Slow path: read UEnum::Names TArray<TPair<FName, int64>> WITHOUT the
+    // lock (game-memory reads are the expensive part), then insert.
+    uintptr_t data = 0;
+    int32_t count = 0;
+    Macht::ReadSafe(enumAddr + DynOff::UENUM_NAMES, data);
+    Macht::ReadSafe(enumAddr + DynOff::UENUM_NAMES + 8, count);
+
+    std::vector<std::pair<int64_t, std::string>> entries;
+    if (data && count > 0 && count < 16384) {
+        entries.reserve(count);
+        for (int i = 0; i < count; ++i) {
+            uintptr_t entryAddr = data + static_cast<uintptr_t>(i) * DynOff::UENUM_ENTRY_SIZE;
+            int32_t nameIdx = 0;
+            int64_t val = 0;
+            Macht::ReadSafe(entryAddr, nameIdx);
+            Macht::ReadSafe(entryAddr + 8, val);
+            std::string name = Serie::GetString(nameIdx);
+            entries.push_back({val, std::move(name)});
+        }
+        LOG_DEBUG("ResolveEnumValue: Cached UEnum 0x%llX with %d entries",
+            static_cast<unsigned long long>(enumAddr), count);
     }
-    return "";  // Value not in enum
+
+    // Insert (another thread may have built the same enum meanwhile — emplace
+    // is a no-op then, and we read the existing entry while holding the lock).
+    {
+        std::lock_guard<std::mutex> lk(s_enumCacheMutex);
+        auto it = s_enumCache.find(enumAddr);
+        if (it == s_enumCache.end())
+            it = s_enumCache.emplace(enumAddr, std::move(entries)).first;
+        for (const auto& [v, n] : it->second)
+            if (v == value) return n;
+        return "";  // Value not in enum
+    }
 }
 
 // ============================================================
@@ -109,6 +144,7 @@ std::vector<LiveFieldValue::EnumEntry> GetEnumEntries(uintptr_t enumAddr) {
     // Trigger cache population (value -999999 won't match any real enum entry)
     ResolveEnumValue(enumAddr, -999999);
 
+    std::lock_guard<std::mutex> lk(s_enumCacheMutex);
     auto it = s_enumCache.find(enumAddr);
     if (it == s_enumCache.end()) return {};
 
@@ -248,14 +284,19 @@ std::string GetName(uintptr_t uobjectAddr) {
     if (!uobjectAddr) return "";
 
     // Check name cache first — avoids repeated FNamePool lookups
-    auto it = s_nameCache.find(uobjectAddr);
-    if (it != s_nameCache.end()) return it->second;
+    {
+        std::lock_guard<std::mutex> lk(s_nameCacheMutex);
+        auto it = s_nameCache.find(uobjectAddr);
+        if (it != s_nameCache.end()) return it->second;
+    }
 
     std::string name = ReadFName(uobjectAddr + Grimoire::OFF_UOBJECT_NAME);
 
     // Only cache non-empty names (empty could be transient read failure)
-    if (!name.empty())
+    if (!name.empty()) {
+        std::lock_guard<std::mutex> lk(s_nameCacheMutex);
         s_nameCache[uobjectAddr] = name;
+    }
 
     return name;
 }
@@ -482,10 +523,14 @@ ClassInfo WalkClass(uintptr_t uclassAddr) {
     ClassInfo info{};
     if (!uclassAddr) return info;
 
-    // Check cache first
-    auto cacheIt = s_walkClassCache.find(uclassAddr);
-    if (cacheIt != s_walkClassCache.end()) {
-        return cacheIt->second;
+    // Check cache first. Return a copy so callers read lock-free; node-based
+    // unordered_map keeps the entry alive regardless of later inserts.
+    {
+        std::lock_guard<std::mutex> lk(s_walkClassCacheMutex);
+        auto cacheIt = s_walkClassCache.find(uclassAddr);
+        if (cacheIt != s_walkClassCache.end()) {
+            return cacheIt->second;
+        }
     }
 
     info.Address = uclassAddr;
@@ -528,12 +573,16 @@ ClassInfo WalkClass(uintptr_t uclassAddr) {
     int depth = 0;
     while (super != 0 && depth < 32) {
         // Check if super is already in cache — if so, use its full field list
-        // (which includes its own supers) and stop walking further.
-        auto superCacheIt = s_walkClassCache.find(super);
-        if (superCacheIt != s_walkClassCache.end()) {
-            const auto& superFields = superCacheIt->second.Fields;
-            info.Fields.insert(info.Fields.begin(), superFields.begin(), superFields.end());
-            break;  // cached super already includes its entire inheritance chain
+        // (which includes its own supers) and stop walking further. Copy the
+        // cached super's fields out while holding the lock.
+        {
+            std::lock_guard<std::mutex> lk(s_walkClassCacheMutex);
+            auto superCacheIt = s_walkClassCache.find(super);
+            if (superCacheIt != s_walkClassCache.end()) {
+                const auto& superFields = superCacheIt->second.Fields;
+                info.Fields.insert(info.Fields.begin(), superFields.begin(), superFields.end());
+                break;  // cached super already includes its entire inheritance chain
+            }
         }
 
         if (DynOff::bUseFProperty) {
@@ -564,8 +613,13 @@ ClassInfo WalkClass(uintptr_t uclassAddr) {
 
     LOG_INFO("WalkClass: %s — %zu fields", info.Name.c_str(), info.Fields.size());
 
-    // Cache the result for subsequent WalkInstance calls
-    s_walkClassCache[uclassAddr] = info;
+    // Cache the result for subsequent WalkInstance calls. Concurrent builders
+    // of the same class produce equal ClassInfo (idempotent), so last-writer
+    // wins harmlessly.
+    {
+        std::lock_guard<std::mutex> lk(s_walkClassCacheMutex);
+        s_walkClassCache[uclassAddr] = info;
+    }
 
     return info;
 }
@@ -1669,11 +1723,15 @@ struct CachedStructField {
 static std::unordered_map<uintptr_t, std::vector<CachedStructField>> s_structFieldCache;
 
 static const std::vector<CachedStructField>& GetCachedStructFields(uintptr_t structAddr) {
-    auto it = s_structFieldCache.find(structAddr);
-    if (it != s_structFieldCache.end())
-        return it->second;
+    {
+        std::lock_guard<std::mutex> lk(s_structFieldCacheMutex);
+        auto it = s_structFieldCache.find(structAddr);
+        if (it != s_structFieldCache.end())
+            return it->second;   // ref stays valid after unlock (node stability)
+    }
 
-    // Walk the struct to get field layout
+    // Walk the struct to get field layout (no lock held — WalkClass/GetName
+    // take their own leaf locks).
     ClassInfo ci = WalkClass(structAddr);
     std::vector<CachedStructField> cached;
     cached.reserve(ci.Fields.size());
@@ -1725,6 +1783,7 @@ static const std::vector<CachedStructField>& GetCachedStructFields(uintptr_t str
     Sein::Debug("WALK:ArrayF", "Cached struct fields for 0x%llX: %d fields",
         static_cast<unsigned long long>(structAddr), static_cast<int>(cached.size()));
 
+    std::lock_guard<std::mutex> lk(s_structFieldCacheMutex);
     auto [ins, _] = s_structFieldCache.emplace(structAddr, std::move(cached));
     return ins->second;
 }
@@ -2480,6 +2539,11 @@ ReadArrayResult ReadMulticastDelegateArrayElements(
 // ============================================================
 static void CorrectSubclassOffsets(const std::vector<FieldInfo>& fields) {
     static std::atomic<bool> s_checked{false};
+    if (s_checked.load(std::memory_order_acquire)) return;  // fast path: already calibrated
+
+    // Slow path: serialize calibration so the parallel GObjects walkers can't
+    // race on the DynOff:: writes below. Double-checked under the lock.
+    std::lock_guard<std::mutex> lk(s_calibrationMutex);
     if (s_checked.load(std::memory_order_acquire)) return;
     if (!DynOff::bUseFProperty) { s_checked.store(true, std::memory_order_release); return; }
 
