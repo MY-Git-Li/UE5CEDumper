@@ -24,13 +24,14 @@ results, no hang/crash, multi-core First-Scan speedup).
 
 **New follow-ups from this work:**
 
-- **Extract `ParallelGObjectsScan<ResultT>` template helper** — *S, low risk.*
-  The `ThreadResult` struct + `perThread` vector + atomic `deadlineHit` +
-  worker-open + merge loop is ~100 lines duplicated across the three scan
-  functions. A template taking a per-object visitor + per-thread result type +
-  merge policy collapses it to one source of truth. Deferred deliberately —
-  don't refactor freshly-verified concurrency code in the same session. Pick it
-  up next time any of the three scans is touched.
+- ~~**Extract `ParallelGObjectsScan<ResultT>` template helper**~~ — ✅ **done
+  2026-05-29 (build 793)**. Added `ParallelGObjectsScan<PerThreadT>(count, body)`
+  (owns nthreads / perThread vector / atomic deadline / `ParallelIndexRanges`
+  plumbing) + `ConcatTruncate(perThread, &T::member, maxResults)` (the
+  ascending-tid merge + truncate ordering invariant, now one source of truth).
+  All three scans call them identically; per-thread stat folds stay in each
+  caller (counter types differ). Behavior byte-identical (build + 1358 tests
+  green).
 - ~~**In-game parallel-scan verification**~~ — ✅ **done 2026-05-29**.
   User-verified: parallel result set matches the serial walk, no hang / crash,
   and the multi-core First-Scan speedup held on a live target.

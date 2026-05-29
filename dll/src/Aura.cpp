@@ -125,6 +125,58 @@ void ParallelIndexRanges(int32_t count, int nthreads, BodyFn&& body) {
     for (auto& th : pool) th.join();
 }
 
+// Result of a ParallelGObjectsScan run. `perThread` is exposed so callers can
+// fold their own per-thread stat fields (counters, sets) after the run;
+// `deadlineHit` is the post-join load of the shared flag; `nthreads` is what
+// ScanThreadCount picked (for logging).
+template <typename PerThreadT>
+struct ParallelScanResult {
+    std::vector<PerThreadT> perThread;
+    int                     nthreads    = 1;
+    bool                    deadlineHit = false;
+};
+
+// Run a parallel GObjects walk: spawn ScanThreadCount(count) workers over
+// contiguous ascending index ranges, each writing into its own PerThreadT.
+// `body(tr, beginIdx, endIdx, deadlineHit)` is the per-thread loop — it owns the
+// per-object work, the per-thread local maxResults cap, and the deadline check
+// (call deadlineHit.store(true) to signal siblings to stop). This factors out
+// the nthreads / perThread-vector / atomic-deadline / ParallelIndexRanges
+// boilerplate the three scans shared. The per-thread result-vector merge is left
+// to the caller (via ConcatTruncate) because the element type differs per scan.
+// After join, returns {perThread (moved), nthreads, deadlineHit.load()}.
+template <typename PerThreadT, typename BodyFn>
+ParallelScanResult<PerThreadT> ParallelGObjectsScan(int32_t count, BodyFn&& body) {
+    const int nthreads = ScanThreadCount(count);
+    std::vector<PerThreadT> perThread(static_cast<size_t>(std::max(1, nthreads)));
+    std::atomic<bool> deadlineHit{false};
+
+    ParallelIndexRanges(count, nthreads, [&](int tid, int32_t beginIdx, int32_t endIdx) {
+        body(perThread[tid], beginIdx, endIdx, deadlineHit);
+    });
+
+    return { std::move(perThread), nthreads, deadlineHit.load() };
+}
+
+// Concatenate each thread's result vector (selected by pointer-to-member) in
+// ascending tid order, stopping at maxResults. Each worker scanned a contiguous
+// ascending index range and locally capped at maxResults, so this reproduces the
+// serial "first N in ascending index order" set exactly (keeps the lowest-index
+// subset when truncating). Elements are moved out of `perThread`.
+template <typename PerThreadT, typename ElemT>
+std::vector<ElemT> ConcatTruncate(std::vector<PerThreadT>& perThread,
+                                  std::vector<ElemT> PerThreadT::* member,
+                                  int32_t maxResults) {
+    std::vector<ElemT> out;
+    for (auto& tr : perThread) {
+        for (auto& item : tr.*member) {
+            if (static_cast<int32_t>(out.size()) >= maxResults) return out;
+            out.push_back(std::move(item));
+        }
+    }
+    return out;
+}
+
 } // namespace
 
 uintptr_t Aura::DecryptObjectPtr(uintptr_t rawPtr) {
@@ -1413,19 +1465,17 @@ std::vector<ContainerMatch> FindInContainers(uintptr_t addr, int32_t maxResults,
     auto t0 = std::chrono::steady_clock::now();
 
     // Parallel GObjects walk. GetClassContainers + Ubel caches are mutex-guarded,
-    // so per-thread state is just the match buffer + diagnostic counters; results
-    // merge in ascending tid order (== serial ascending-index ordering).
+    // so per-thread state is just the match buffer + diagnostic counters; the
+    // ascending-tid merge below reproduces the serial ascending-index ordering.
     struct ThreadResult {
         std::vector<ContainerMatch> matches;
         int32_t                     scanned       = 0;
         int32_t                     classesWalked = 0;
     };
-    const int nthreads = ScanThreadCount(count);
-    std::vector<ThreadResult> perThread(static_cast<size_t>(std::max(1, nthreads)));
-    std::atomic<bool> deadlineHit{false};
 
-    auto worker = [&](int tid, int32_t beginIdx, int32_t endIdx) {
-        ThreadResult& tr = perThread[tid];
+    auto scan = ParallelGObjectsScan<ThreadResult>(count,
+        [&](ThreadResult& tr, int32_t beginIdx, int32_t endIdx,
+            std::atomic<bool>& deadlineHit) {
 
         // maxResults is a per-thread local cap; the ascending-tid merge truncates
         // to maxResults, reproducing the serial "first N in ascending index order".
@@ -1521,20 +1571,15 @@ std::vector<ContainerMatch> FindInContainers(uintptr_t addr, int32_t maxResults,
             if (static_cast<int>(tr.matches.size()) >= maxResults) break;
         }
     }
-    };  // worker
+    });  // ParallelGObjectsScan
 
-    ParallelIndexRanges(count, nthreads, worker);
-
-    // Merge per-thread matches in ascending tid order, truncating to maxResults.
+    // Fold per-thread stats; match vectors concat in ascending tid order.
     int32_t scanned = 0, classesWalked = 0;
-    for (auto& tr : perThread) {
+    for (auto& tr : scan.perThread) {
         scanned       += tr.scanned;
         classesWalked += tr.classesWalked;
-        for (auto& m : tr.matches) {
-            if (static_cast<int>(matches.size()) >= maxResults) break;
-            matches.push_back(std::move(m));
-        }
     }
+    matches = ConcatTruncate(scan.perThread, &ThreadResult::matches, maxResults);
 
     auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - t0).count();
@@ -1542,11 +1587,11 @@ std::vector<ContainerMatch> FindInContainers(uintptr_t addr, int32_t maxResults,
         stats->objectsScanned = scanned;
         stats->classesPrimed  = classesWalked;
         stats->durationMs     = static_cast<int64_t>(dt);
-        stats->deadlineHit    = deadlineHit.load();
+        stats->deadlineHit    = scan.deadlineHit;
     }
     LOG_INFO("FindInContainers: found %d matches in %lld ms (scanned %d/%d, %d non-empty classes, %d thread(s)%s)",
              static_cast<int>(matches.size()), static_cast<long long>(dt),
-             scanned, count, classesWalked, nthreads, deadlineHit.load() ? ", DEADLINE HIT" : "");
+             scanned, count, classesWalked, scan.nthreads, scan.deadlineHit ? ", DEADLINE HIT" : "");
     return matches;
 }
 
@@ -1967,12 +2012,10 @@ std::vector<ReferenceMatch> FindReferencesToUObject(uintptr_t target,
         int32_t                     scanned       = 0;
         int32_t                     classesPrimed = 0;
     };
-    const int nthreads = ScanThreadCount(count);
-    std::vector<ThreadResult> perThread(static_cast<size_t>(std::max(1, nthreads)));
-    std::atomic<bool> deadlineHit{false};
 
-    auto worker = [&](int tid, int32_t beginIdx, int32_t endIdx) {
-        ThreadResult& tr = perThread[tid];
+    auto scan = ParallelGObjectsScan<ThreadResult>(count,
+        [&](ThreadResult& tr, int32_t beginIdx, int32_t endIdx,
+            std::atomic<bool>& deadlineHit) {
 
         // maxResults is a per-thread local cap; the ascending-tid merge truncates
         // to maxResults (== serial "first N in ascending index order").
@@ -2229,20 +2272,20 @@ std::vector<ReferenceMatch> FindReferencesToUObject(uintptr_t target,
         }
         if (hitMaxThisObj) break;
     }
-    };  // worker
+    });  // ParallelGObjectsScan
 
-    ParallelIndexRanges(count, nthreads, worker);
-
-    // Merge per-thread matches in ascending tid order, truncating to maxResults.
+    // Fold per-thread stats; match vectors concat in ascending tid order.
     int32_t scanned = 0, classesPrimed = 0;
-    for (auto& tr : perThread) {
+    for (auto& tr : scan.perThread) {
         scanned       += tr.scanned;
         classesPrimed += tr.classesPrimed;
-        for (auto& m : tr.matches) {
-            if (static_cast<int>(matches.size()) >= maxResults) break;
-            matches.push_back(std::move(m));
-        }
     }
+    matches = ConcatTruncate(scan.perThread, &ThreadResult::matches, maxResults);
+
+    // Carry the parallel phase's deadline state into the serial sparse pass as a
+    // plain bool (the atomic lived inside ParallelGObjectsScan). The sparse pass
+    // may set it if IT runs long; the epilogue reports the final value.
+    bool deadlineHit = scan.deadlineHit;
 
     // Serial pushMatch for the single-pass sparse-delegate walk below (appends
     // to the already-merged `matches`).
@@ -2257,7 +2300,7 @@ std::vector<ReferenceMatch> FindReferencesToUObject(uintptr_t target,
     // UObject's memory. Walk that TMap once and check every binding's
     // FWeakObjectPtr against `target`. Skipped silently when AOB scan
     // failed or UE version is unsupported.
-    if (static_cast<int>(matches.size()) < maxResults && !deadlineHit.load() &&
+    if (static_cast<int>(matches.size()) < maxResults && !deadlineHit &&
         ::g_cachedUEVersion >= 500)
     {
         uintptr_t storage = Genau::FindSparseDelegateStorage();
@@ -2279,7 +2322,7 @@ std::vector<ReferenceMatch> FindReferencesToUObject(uintptr_t target,
                     if ((++outerVisited & 0xFF) == 0) {
                         auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
                                       std::chrono::steady_clock::now() - t0).count();
-                        if (dt > kDeadlineMs) { deadlineHit.store(true); break; }
+                        if (dt > kDeadlineMs) { deadlineHit = true; break; }
                     }
 
                     uintptr_t outerSlot = outerHdr.arrayData +
@@ -2354,11 +2397,11 @@ std::vector<ReferenceMatch> FindReferencesToUObject(uintptr_t target,
         stats->objectsScanned = scanned;
         stats->classesPrimed  = classesPrimed;
         stats->durationMs     = static_cast<int64_t>(dt);
-        stats->deadlineHit    = deadlineHit.load();
+        stats->deadlineHit    = deadlineHit;
     }
     LOG_INFO("FindReferencesToUObject: found %d matches in %lld ms (scanned %d/%d, %d classes with refs, %d thread(s)%s)",
              static_cast<int>(matches.size()), static_cast<long long>(dt),
-             scanned, count, classesPrimed, nthreads, deadlineHit.load() ? ", DEADLINE HIT" : "");
+             scanned, count, classesPrimed, scan.nthreads, deadlineHit ? ", DEADLINE HIT" : "");
     return matches;
 }
 
@@ -3432,12 +3475,9 @@ ValueScanResult ScanForValue(
         std::unordered_set<uintptr_t>     classesWithFields;
     };
 
-    const int nthreads = ScanThreadCount(count);
-    std::vector<ThreadResult> perThread(static_cast<size_t>(std::max(1, nthreads)));
-    std::atomic<bool> deadlineHit{false};
-
-    auto worker = [&](int tid, int32_t beginIdx, int32_t endIdx) {
-        ThreadResult& tr = perThread[tid];
+    auto scan = ParallelGObjectsScan<ThreadResult>(count,
+        [&](ThreadResult& tr, int32_t beginIdx, int32_t endIdx,
+            std::atomic<bool>& deadlineHit) {
 
         // Thread-local per-class field index. classAddr -> filtered subset of
         // FieldInfo matching the requested DataType. Built lazily on first
@@ -3847,26 +3887,19 @@ ValueScanResult ScanForValue(
         for (const auto& kv : classCache) {
             if (!kv.second.fields.empty()) tr.classesWithFields.insert(kv.first);
         }
-    };  // worker
+    });  // ParallelGObjectsScan
 
-    ParallelIndexRanges(count, nthreads, worker);
-
-    // Merge per-thread results in ascending tid order. Each thread scanned a
-    // contiguous ascending index range and locally capped at maxResults, so
-    // concatenating in tid order and truncating to maxResults reproduces the
-    // serial "scan ascending, stop at maxResults" candidate set exactly.
+    // Fold per-thread stats; candidate vectors concat in ascending tid order
+    // (ConcatTruncate) → serial "scan ascending, stop at maxResults" set.
     std::unordered_set<uintptr_t> classesWithFields;
-    for (auto& tr : perThread) {
+    for (auto& tr : scan.perThread) {
         result.stats.scannedObjects += tr.scannedObjects;
         classesWithFields.insert(tr.classesWithFields.begin(),
                                  tr.classesWithFields.end());
-        for (auto& c : tr.candidates) {
-            if (static_cast<int32_t>(result.candidates.size()) >= maxResults) break;
-            result.candidates.push_back(std::move(c));
-        }
     }
+    result.candidates = ConcatTruncate(scan.perThread, &ThreadResult::candidates, maxResults);
     result.stats.scannedClasses = static_cast<int32_t>(classesWithFields.size());
-    result.stats.deadlineHit    = deadlineHit.load();
+    result.stats.deadlineHit    = scan.deadlineHit;
 
     auto dtms = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - t0).count();
@@ -3876,7 +3909,7 @@ ValueScanResult ScanForValue(
              static_cast<int>(result.candidates.size()),
              static_cast<long long>(dtms),
              result.stats.scannedObjects,
-             static_cast<int>(classesWithFields.size()), nthreads,
+             static_cast<int>(classesWithFields.size()), scan.nthreads,
              result.stats.deadlineHit ? ", DEADLINE HIT" : "");
     return result;
 }

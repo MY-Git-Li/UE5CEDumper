@@ -11,6 +11,38 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-05-29 — Refactor: extract `ParallelGObjectsScan<ResultT>` template (build 793)
+
+Follow-up to build 792 (logged in todo.md): the three parallelized scans each
+carried ~identical scaffolding — a `ThreadResult` struct, the `nthreads` /
+`perThread`-vector / `std::atomic<bool> deadlineHit` triplet, a `worker` lambda
+open, the `ParallelIndexRanges` call, and a result-concat-with-truncate merge
+loop. Centralised into two anon-namespace helpers in `Aura.cpp`:
+
+- `ParallelGObjectsScan<PerThreadT>(count, body)` — owns `ScanThreadCount` +
+  the `perThread` vector + the shared `std::atomic<bool> deadlineHit` + the
+  `ParallelIndexRanges` call. `body(tr, beginIdx, endIdx, deadlineHit)` is the
+  per-thread loop (per-object work + local maxResults cap + deadline check).
+  Returns `{ perThread (moved), nthreads, deadlineHit.load() }`.
+- `ConcatTruncate(perThread, &PerThreadT::member, maxResults)` — concatenates
+  each thread's result vector (selected by pointer-to-member) in ascending-tid
+  order, truncating to maxResults. **This is the ascending-merge + lowest-index
+  truncation invariant, now a single source of truth** instead of triplicated.
+
+Each scan keeps its own `ThreadResult` (the variable part — different element
+type + counter set) and folds its per-thread stat counters inline (sum of
+scanned/classesPrimed/classesWalked; `ScanForValue` unions its
+`classesWithFields` set). `FindReferencesToUObject` carries the parallel phase's
+deadline into its serial sparse-delegate pass via a plain `bool` seeded from
+`scan.deadlineHit`.
+
+Pure structural change — the per-object loop bodies are untouched, so behaviour
+is byte-identical (the build-792 merge semantics are preserved exactly). Build
+793 clean (zero warnings); **1358 tests unchanged** (31 utf8 + 247 dll_helpers +
+1080 C#).
+
+-----
+
 ## 2026-05-29 — Parallelize GObjects-walk scans + thread-safe Ubel caches (build 792)
 
 Applied the **P1b parallelization** from `D:\Github\CE-Handwire-Private\docs\Memory-Scanning-Internals.md` §16 to the three GObjects-array scans. They were single-threaded `for (i = 0 .. count)` walks — the wall-clock floor on 1M+ object / multi-GB-heap games. Each walk is read-only against game memory + init-time constants (FNamePool offsets, `g_cachedUEVersion`, the FUObjectArray layout), so partitioning the index range across worker threads parallelizes cleanly. (Unlike the `discrete` Unity dumper that doc also covers, our scan is a *structured property walk*, not a raw VirtualQuery sweep, so the doc's SIMD / interval-tree advice doesn't apply — only parallelization does. AOBScan already had AVX2 + executable-section filtering, and our reads are already SEH `memcpy` with no per-chunk VirtualQuery.)
