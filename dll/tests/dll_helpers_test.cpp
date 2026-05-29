@@ -284,6 +284,8 @@ static void Test_ValueScan_DataTypeSizes() {
     EXPECT("SizeOf FVector = 12",    ValueScan::SizeOf(ValueScan::DataType::FVector)    == 12);
     EXPECT("SizeOf FRotator = 12",   ValueScan::SizeOf(ValueScan::DataType::FRotator)   == 12);
     EXPECT("SizeOf FTransform = 12", ValueScan::SizeOf(ValueScan::DataType::FTransform) == 12);
+    // Multi-numeric meta type — variable width, signalled by SizeOf = 0.
+    EXPECT("SizeOf NumericNoByte = 0", ValueScan::SizeOf(ValueScan::DataType::NumericNoByte) == 0);
 }
 
 static void Test_ValueScan_ParseDataTypeRoundTrip() {
@@ -300,6 +302,8 @@ static void Test_ValueScan_ParseDataTypeRoundTrip() {
     EXPECT("parse FVector",  ValueScan::TryParseDataType("FVector",  got) && got == DT::FVector);
     EXPECT("parse FRotator", ValueScan::TryParseDataType("FRotator", got) && got == DT::FRotator);
     EXPECT("parse FTransform", ValueScan::TryParseDataType("FTransform", got) && got == DT::FTransform);
+    // Multi-numeric meta DataType — locks the wire-protocol shape.
+    EXPECT("parse NumericNoByte", ValueScan::TryParseDataType("NumericNoByte", got) && got == DT::NumericNoByte);
     EXPECT("parse rejects unknown", !ValueScan::TryParseDataType("TArray<Int32>", got));
     EXPECT("parse rejects empty",   !ValueScan::TryParseDataType("",              got));
 }
@@ -377,6 +381,147 @@ static void Test_ValueScan_IsScanTypeValidFor() {
     EXPECT("FVector Between valid",  ValueScan::IsScanTypeValidFor(DT::FVector, ST::Between));
     EXPECT("FVector Changed valid",  ValueScan::IsScanTypeValidFor(DT::FVector, ST::Changed));
     EXPECT("FRotator Contains REJ", !ValueScan::IsScanTypeValidFor(DT::FRotator, ST::Contains));
+    // Multi-numeric meta type behaves like a numeric: ordering accept,
+    // substring reject.
+    EXPECT("NumericNoByte Exact valid",   ValueScan::IsScanTypeValidFor(DT::NumericNoByte, ST::Exact));
+    EXPECT("NumericNoByte Bigger valid",  ValueScan::IsScanTypeValidFor(DT::NumericNoByte, ST::Bigger));
+    EXPECT("NumericNoByte Between valid", ValueScan::IsScanTypeValidFor(DT::NumericNoByte, ST::Between));
+    EXPECT("NumericNoByte Changed valid", ValueScan::IsScanTypeValidFor(DT::NumericNoByte, ST::Changed));
+    EXPECT("NumericNoByte Contains REJ", !ValueScan::IsScanTypeValidFor(DT::NumericNoByte, ST::Contains));
+}
+
+// ----- ValueScan: multi-numeric meta type -----------------------------------
+
+static void Test_ValueScan_MultiNumericMembers() {
+    using DT = ValueScan::DataType;
+    EXPECT("NumericNoByte is multi-numeric",  ValueScan::IsMultiNumericDataType(DT::NumericNoByte));
+    EXPECT("Int32 is NOT multi-numeric",     !ValueScan::IsMultiNumericDataType(DT::Int32));
+    EXPECT("FString is NOT multi-numeric",   !ValueScan::IsMultiNumericDataType(DT::FString));
+
+    const auto& m = ValueScan::MultiNumericMembers(DT::NumericNoByte);
+    EXPECT("NumericNoByte has 8 members", m.size() == 8);
+    auto has = [&](DT d) {
+        for (auto x : m) if (x == d) return true;
+        return false;
+    };
+    EXPECT("members include Int16",  has(DT::Int16));
+    EXPECT("members include UInt16", has(DT::UInt16));
+    EXPECT("members include Int32",  has(DT::Int32));
+    EXPECT("members include UInt32", has(DT::UInt32));
+    EXPECT("members include Int64",  has(DT::Int64));
+    EXPECT("members include UInt64", has(DT::UInt64));
+    EXPECT("members include Float",  has(DT::Float));
+    EXPECT("members include Double", has(DT::Double));
+    // The "no byte" contract: no 1-byte or bool members.
+    EXPECT("members exclude Int8",  !has(DT::Int8));
+    EXPECT("members exclude UInt8", !has(DT::UInt8));
+    EXPECT("members exclude Bool",  !has(DT::Bool));
+    // Non-meta types yield an empty member set.
+    EXPECT("Int32 members empty", ValueScan::MultiNumericMembers(DT::Int32).empty());
+}
+
+static void Test_ValueScan_DataTypeFromPropertyTypeName() {
+    using DT = ValueScan::DataType;
+    DT got;
+    EXPECT("IntProperty -> Int32",     ValueScan::TryDataTypeFromPropertyTypeName("IntProperty", got)    && got == DT::Int32);
+    EXPECT("Int16Property -> Int16",   ValueScan::TryDataTypeFromPropertyTypeName("Int16Property", got)  && got == DT::Int16);
+    EXPECT("Int64Property -> Int64",   ValueScan::TryDataTypeFromPropertyTypeName("Int64Property", got)  && got == DT::Int64);
+    EXPECT("UInt16Property -> UInt16", ValueScan::TryDataTypeFromPropertyTypeName("UInt16Property", got) && got == DT::UInt16);
+    EXPECT("UInt32Property -> UInt32", ValueScan::TryDataTypeFromPropertyTypeName("UInt32Property", got) && got == DT::UInt32);
+    EXPECT("UInt64Property -> UInt64", ValueScan::TryDataTypeFromPropertyTypeName("UInt64Property", got) && got == DT::UInt64);
+    EXPECT("FloatProperty -> Float",   ValueScan::TryDataTypeFromPropertyTypeName("FloatProperty", got)  && got == DT::Float);
+    EXPECT("DoubleProperty -> Double", ValueScan::TryDataTypeFromPropertyTypeName("DoubleProperty", got) && got == DT::Double);
+    // "No byte" + non-numeric reject so the multi walk skips them.
+    EXPECT("ByteProperty rejected",  !ValueScan::TryDataTypeFromPropertyTypeName("ByteProperty", got));
+    EXPECT("Int8Property rejected",  !ValueScan::TryDataTypeFromPropertyTypeName("Int8Property", got));
+    EXPECT("BoolProperty rejected",  !ValueScan::TryDataTypeFromPropertyTypeName("BoolProperty", got));
+    EXPECT("StrProperty rejected",   !ValueScan::TryDataTypeFromPropertyTypeName("StrProperty", got));
+    EXPECT("StructProperty rejected",!ValueScan::TryDataTypeFromPropertyTypeName("StructProperty", got));
+
+    // PropertyTypeNames(NumericNoByte) MUST be exactly the set that
+    // TryDataTypeFromPropertyTypeName resolves — otherwise a field could
+    // be accepted into the scan index yet fail per-field resolution.
+    const auto& names = ValueScan::PropertyTypeNames(DT::NumericNoByte);
+    EXPECT("NumericNoByte has 8 property names", names.size() == 8);
+    bool allResolve = true;
+    for (const auto& n : names) {
+        DT d;
+        if (!ValueScan::TryDataTypeFromPropertyTypeName(n, d)) allResolve = false;
+    }
+    EXPECT("every NumericNoByte property name resolves", allResolve);
+}
+
+// Helper: does the set contain an entry for `dt`, and (optionally) does
+// it decode to the expected scalar value?
+static void Test_ValueScan_BuildNumericTargets() {
+    using DT = ValueScan::DataType;
+
+    // "100" fits every member width.
+    {
+        ValueScan::NumericTargetSet ts;
+        EXPECT("BuildNumericTargets(100) ok", ValueScan::BuildNumericTargets(DT::NumericNoByte, "100", ts));
+        EXPECT("100 fits all 8 widths", ts.entries.size() == 8);
+        const uint8_t* i32 = ts.Find(DT::Int32);
+        EXPECT("100 Int32 entry present", i32 != nullptr);
+        if (i32) { int32_t v; std::memcpy(&v, i32, 4); EXPECT("100 Int32 decodes", v == 100); }
+        const uint8_t* f = ts.Find(DT::Float);
+        EXPECT("100 Float entry present", f != nullptr);
+        if (f) { float v; std::memcpy(&v, f, 4); EXPECT("100 Float decodes", v == 100.0f); }
+    }
+    // "70000" overflows 16-bit widths — no Int16/UInt16 entries.
+    {
+        ValueScan::NumericTargetSet ts;
+        EXPECT("BuildNumericTargets(70000) ok", ValueScan::BuildNumericTargets(DT::NumericNoByte, "70000", ts));
+        EXPECT("70000 has no Int16",  ts.Find(DT::Int16)  == nullptr);
+        EXPECT("70000 has no UInt16", ts.Find(DT::UInt16) == nullptr);
+        EXPECT("70000 has Int32",     ts.Find(DT::Int32)  != nullptr);
+        EXPECT("70000 has UInt32",    ts.Find(DT::UInt32) != nullptr);
+        EXPECT("70000 has Float",     ts.Find(DT::Float)  != nullptr);
+    }
+    // "-5" can't be unsigned — signed + float members only.
+    {
+        ValueScan::NumericTargetSet ts;
+        EXPECT("BuildNumericTargets(-5) ok", ValueScan::BuildNumericTargets(DT::NumericNoByte, "-5", ts));
+        EXPECT("-5 has Int16",   ts.Find(DT::Int16)  != nullptr);
+        EXPECT("-5 has Int32",   ts.Find(DT::Int32)  != nullptr);
+        EXPECT("-5 has Float",   ts.Find(DT::Float)  != nullptr);
+        EXPECT("-5 has NO UInt16", ts.Find(DT::UInt16) == nullptr);
+        EXPECT("-5 has NO UInt32", ts.Find(DT::UInt32) == nullptr);
+        EXPECT("-5 has NO UInt64", ts.Find(DT::UInt64) == nullptr);
+    }
+    // "100.5" is non-integral — float/double members only.
+    {
+        ValueScan::NumericTargetSet ts;
+        EXPECT("BuildNumericTargets(100.5) ok", ValueScan::BuildNumericTargets(DT::NumericNoByte, "100.5", ts));
+        EXPECT("100.5 has 2 entries", ts.entries.size() == 2);
+        EXPECT("100.5 has Float",  ts.Find(DT::Float)  != nullptr);
+        EXPECT("100.5 has Double", ts.Find(DT::Double) != nullptr);
+        EXPECT("100.5 has NO Int32", ts.Find(DT::Int32) == nullptr);
+        const uint8_t* d = ts.Find(DT::Double);
+        if (d) { double v; std::memcpy(&v, d, 8); EXPECT("100.5 Double decodes", v == 100.5); }
+    }
+    // Hex "0x10" → integer widths only (no float reinterpret).
+    {
+        ValueScan::NumericTargetSet ts;
+        EXPECT("BuildNumericTargets(0x10) ok", ValueScan::BuildNumericTargets(DT::NumericNoByte, "0x10", ts));
+        EXPECT("0x10 has Int32",    ts.Find(DT::Int32) != nullptr);
+        EXPECT("0x10 has NO Float", ts.Find(DT::Float) == nullptr);
+        const uint8_t* i = ts.Find(DT::Int32);
+        if (i) { int32_t v; std::memcpy(&v, i, 4); EXPECT("0x10 Int32 == 16", v == 16); }
+    }
+    // Empty / whitespace / garbage → false, no entries.
+    {
+        ValueScan::NumericTargetSet ts;
+        EXPECT("BuildNumericTargets('') false", !ValueScan::BuildNumericTargets(DT::NumericNoByte, "", ts));
+        EXPECT("empty leaves no entries", ts.entries.empty());
+        EXPECT("BuildNumericTargets('  ') false", !ValueScan::BuildNumericTargets(DT::NumericNoByte, "   ", ts));
+        EXPECT("BuildNumericTargets('abc') false", !ValueScan::BuildNumericTargets(DT::NumericNoByte, "abc", ts));
+    }
+    // Non-meta data type yields no targets.
+    {
+        ValueScan::NumericTargetSet ts;
+        EXPECT("BuildNumericTargets(Int32 meta) false", !ValueScan::BuildNumericTargets(DT::Int32, "100", ts));
+    }
 }
 
 // ----- ValueScan: ComparePredicate per DataType -----------------------------
@@ -897,6 +1042,10 @@ int main() {
     Test_ValueScan_VectorPredicate_PrevValue();
     Test_ValueScan_VectorPredicate_RejectsSubstring();
     Test_ValueScan_VectorStructNames();
+    // build 794 — multi-numeric (NumericNoByte) meta type
+    Test_ValueScan_MultiNumericMembers();
+    Test_ValueScan_DataTypeFromPropertyTypeName();
+    Test_ValueScan_BuildNumericTargets();
 
     Test_ValueScan_SessionLifecycle();
 

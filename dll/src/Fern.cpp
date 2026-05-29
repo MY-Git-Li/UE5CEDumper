@@ -175,6 +175,9 @@ bool ParseValueBytes(ValueScan::DataType dt, const std::string& raw, uint8_t out
             case ValueScan::DataType::FVector:
             case ValueScan::DataType::FRotator:
             case ValueScan::DataType::FTransform:
+            // Multi-numeric meta type is parsed via BuildNumericTargets,
+            // not this single-width helper. Fail loudly if misrouted.
+            case ValueScan::DataType::NumericNoByte:
                 return false;
         }
     } catch (...) {
@@ -253,6 +256,11 @@ std::string FormatValueBytes(ValueScan::DataType dt, const uint8_t bytes[8]) {
         case ValueScan::DataType::FRotator:
         case ValueScan::DataType::FTransform:
             break;
+        // Multi-numeric: CandidateToJson resolves the candidate's own
+        // concrete DataType and calls this with that, never the meta
+        // type. Defensive fallthrough.
+        case ValueScan::DataType::NumericNoByte:
+            break;
     }
     return oss.str();
 }
@@ -287,6 +295,15 @@ json CandidateToJson(const ValueScan::Candidate& c, ValueScan::DataType dt) {
         item["value"] = c.prevStr;
     } else if (ValueScan::IsVectorDataType(dt)) {
         item["value"] = FormatVectorBytes(c.prevValue);
+    } else if (ValueScan::IsMultiNumericDataType(dt)) {
+        // Render each candidate with its OWN concrete width resolved
+        // from the stored fieldType ("FloatProperty" -> Float, etc.).
+        ValueScan::DataType memberDt;
+        if (ValueScan::TryDataTypeFromPropertyTypeName(c.fieldType, memberDt)) {
+            item["value"] = FormatValueBytes(memberDt, c.prevValue);
+        } else {
+            item["value"] = "";
+        }
     } else {
         item["value"] = FormatValueBytes(dt, c.prevValue);
     }
@@ -1818,11 +1835,18 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
 
             const bool isString = ValueScan::IsStringDataType(dt);
             const bool isVector = ValueScan::IsVectorDataType(dt);
+            const bool isMulti  = ValueScan::IsMultiNumericDataType(dt);
 
             uint8_t targetBytes[12] = {};
             uint8_t target2Bytes[12] = {};
             std::string targetString;
             const uint8_t* target2Ptr = nullptr;
+            // Multi-numeric meta scan: per-width target sets replace the
+            // single byte buffer. Built once here, pointed at by the
+            // pointers passed to ScanForValue.
+            ValueScan::NumericTargetSet multiTargets, multiTargets2;
+            const ValueScan::NumericTargetSet* multiPtr  = nullptr;
+            const ValueScan::NumericTargetSet* multiPtr2 = nullptr;
 
             if (isString) {
                 // String scans take the user's needle verbatim. Empty
@@ -1841,6 +1865,18 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                     }
                     target2Ptr = target2Bytes;
                 }
+            } else if (isMulti) {
+                if (!ValueScan::BuildNumericTargets(dt, valStr, multiTargets)) {
+                    return Renge::MakeError(id, "Invalid 'value' for data_type " + dtStr +
+                        " (does not fit any numeric width)").dump();
+                }
+                multiPtr = &multiTargets;
+                if (st == ValueScan::ScanType::Between) {
+                    if (!ValueScan::BuildNumericTargets(dt, val2Str, multiTargets2)) {
+                        return Renge::MakeError(id, "Between requires a valid 'value2' for data_type " + dtStr).dump();
+                    }
+                    multiPtr2 = &multiTargets2;
+                }
             } else {
                 if (!ParseValueBytes(dt, valStr, targetBytes)) {
                     return Renge::MakeError(id, "Invalid 'value' for data_type " + dtStr).dump();
@@ -1855,7 +1891,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
 
             auto scanResult = Aura::ScanForValue(
                 dt, st, targetBytes, target2Ptr, gameOnly, maxResults,
-                tolerance, targetString, caseSensitive);
+                tolerance, targetString, caseSensitive, multiPtr, multiPtr2);
 
             uint64_t sessionId = ValueScan::SessionManager::Instance().Begin(
                 dt, scanResult.candidates);
@@ -1920,12 +1956,16 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
 
                     const bool isString = ValueScan::IsStringDataType(dt);
                     const bool isVector = ValueScan::IsVectorDataType(dt);
+                    const bool isMulti  = ValueScan::IsMultiNumericDataType(dt);
 
                     uint8_t targetBytes[12] = {};
                     uint8_t target2Bytes[12] = {};
                     const uint8_t* tgtPtr  = nullptr;
                     const uint8_t* tgt2Ptr = nullptr;
                     std::string targetString;
+                    ValueScan::NumericTargetSet multiTargets, multiTargets2;
+                    const ValueScan::NumericTargetSet* multiPtr  = nullptr;
+                    const ValueScan::NumericTargetSet* multiPtr2 = nullptr;
 
                     if (!ValueScan::IsPrevValueScanType(st)) {
                         if (isString) {
@@ -1942,6 +1982,19 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                                     return;
                                 }
                                 tgt2Ptr = target2Bytes;
+                            }
+                        } else if (isMulti) {
+                            if (!ValueScan::BuildNumericTargets(dt, valStr, multiTargets)) {
+                                parseFailed = true;
+                                return;
+                            }
+                            multiPtr = &multiTargets;
+                            if (st == ValueScan::ScanType::Between) {
+                                if (!ValueScan::BuildNumericTargets(dt, val2Str, multiTargets2)) {
+                                    parseFailed = true;
+                                    return;
+                                }
+                                multiPtr2 = &multiTargets2;
                             }
                         } else {
                             if (!ParseValueBytes(dt, valStr, targetBytes)) {
@@ -1960,7 +2013,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                     }
 
                     stats = Aura::RefineCandidates(dt, st, tgtPtr, tgt2Ptr, cs,
-                                                   tolerance, targetString, caseSensitive);
+                                                   tolerance, targetString, caseSensitive,
+                                                   multiPtr, multiPtr2);
                     for (const auto& c : cs) candidates.push_back(CandidateToJson(c, dt));
                 });
 

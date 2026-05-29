@@ -23,6 +23,9 @@ size_t SizeOf(DataType dt) {
         // String types use the candidate's prevStr field instead of
         // the byte buffer — return 0 so callers can branch on it.
         case DataType::FString: case DataType::FName: case DataType::FText: return 0;
+        // Multi-numeric meta type has no single width — the scan engine
+        // resolves SizeOf per member; 0 signals "variable" like strings.
+        case DataType::NumericNoByte: return 0;
     }
     return 0;
 }
@@ -46,6 +49,7 @@ const char* NameOf(DataType dt) {
         case DataType::FVector:    return "FVector";
         case DataType::FRotator:   return "FRotator";
         case DataType::FTransform: return "FTransform";
+        case DataType::NumericNoByte: return "NumericNoByte";
     }
     return "?";
 }
@@ -68,6 +72,7 @@ bool TryParseDataType(const std::string& s, DataType& out) {
     if (s == "FVector")    { out = DataType::FVector;    return true; }
     if (s == "FRotator")   { out = DataType::FRotator;   return true; }
     if (s == "FTransform") { out = DataType::FTransform; return true; }
+    if (s == "NumericNoByte") { out = DataType::NumericNoByte; return true; }
     return false;
 }
 
@@ -182,6 +187,17 @@ const std::vector<std::string>& PropertyTypeNames(DataType dt) {
     // ClassInfo.Fields. The scan-side caller must also match the inner
     // UScriptStruct name (see VectorStructNames) before emitting.
     static const std::vector<std::string> kStruct = { "StructProperty" };
+    // NumericNoByte union — every word/dword/qword/float/double property
+    // type, minus the 1-byte families (ByteProperty / Int8Property) and
+    // BoolProperty. MUST stay in sync with the names recognised by
+    // TryDataTypeFromPropertyTypeName below, or a field could be
+    // accepted into the scan index yet fail per-field DataType resolution.
+    static const std::vector<std::string> kNumericNoByte = {
+        "Int16Property", "UInt16Property",
+        "IntProperty",   "UInt32Property",
+        "Int64Property", "UInt64Property",
+        "FloatProperty", "DoubleProperty",
+    };
     static const std::vector<std::string> kEmpty;
 
     switch (dt) {
@@ -202,6 +218,7 @@ const std::vector<std::string>& PropertyTypeNames(DataType dt) {
         case DataType::FVector:
         case DataType::FRotator:
         case DataType::FTransform: return kStruct;
+        case DataType::NumericNoByte: return kNumericNoByte;
     }
     return kEmpty;
 }
@@ -233,6 +250,139 @@ const std::vector<std::string>& VectorStructNames(DataType dt) {
         case DataType::FTransform: return kEmpty;
         default:                   return kEmpty;
     }
+}
+
+// --- Multi-numeric meta type helpers ---
+
+bool IsMultiNumericDataType(DataType dt) {
+    return dt == DataType::NumericNoByte;
+}
+
+const std::vector<DataType>& MultiNumericMembers(DataType dt) {
+    static const std::vector<DataType> kNoByte = {
+        DataType::Int16, DataType::UInt16,
+        DataType::Int32, DataType::UInt32,
+        DataType::Int64, DataType::UInt64,
+        DataType::Float, DataType::Double,
+    };
+    static const std::vector<DataType> kEmpty;
+    switch (dt) {
+        case DataType::NumericNoByte: return kNoByte;
+        default:                      return kEmpty;
+    }
+}
+
+bool TryDataTypeFromPropertyTypeName(const std::string& propTypeName, DataType& out) {
+    // Only the multi-numeric member set is mapped. ByteProperty /
+    // Int8Property / BoolProperty deliberately return false so the
+    // NumericNoByte walk skips 1-byte + bool fields.
+    if (propTypeName == "Int16Property")  { out = DataType::Int16;  return true; }
+    if (propTypeName == "UInt16Property") { out = DataType::UInt16; return true; }
+    if (propTypeName == "IntProperty")    { out = DataType::Int32;  return true; }
+    if (propTypeName == "UInt32Property") { out = DataType::UInt32; return true; }
+    if (propTypeName == "Int64Property")  { out = DataType::Int64;  return true; }
+    if (propTypeName == "UInt64Property") { out = DataType::UInt64; return true; }
+    if (propTypeName == "FloatProperty")  { out = DataType::Float;  return true; }
+    if (propTypeName == "DoubleProperty") { out = DataType::Double; return true; }
+    return false;
+}
+
+bool BuildNumericTargets(DataType metaDt, const std::string& raw, NumericTargetSet& out) {
+    out.entries.clear();
+    const auto& members = MultiNumericMembers(metaDt);
+    if (members.empty()) return false;
+
+    // Trim surrounding whitespace (mirrors ParseValueBytes — the UI's
+    // NumericTextBox can ship a trailing newline).
+    size_t lo = 0, hi = raw.size();
+    auto isWs = [](char c) {
+        return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == '\v';
+    };
+    while (lo < hi && isWs(raw[lo])) ++lo;
+    while (hi > lo && isWs(raw[hi - 1])) --hi;
+    if (lo >= hi) return false;
+    const std::string s = raw.substr(lo, hi - lo);
+
+    const bool isHex = s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X');
+    const bool isNeg = s[0] == '-';
+
+    // Parse each interpretation independently; require the WHOLE string
+    // to be consumed so "100.5" doesn't pass as integer 100. Base 0
+    // mirrors ParseValueBytes (auto-detects hex; leading-0 = octal).
+    bool     hasSigned = false; int64_t  sv = 0;
+    bool     hasUnsigned = false; uint64_t uv = 0;
+    bool     hasFloat = false; double   dv = 0.0;
+
+    try {
+        size_t pos = 0;
+        long long v = std::stoll(s, &pos, 0);
+        if (pos == s.size()) { hasSigned = true; sv = static_cast<int64_t>(v); }
+    } catch (...) {}
+
+    if (!isNeg) {
+        try {
+            size_t pos = 0;
+            unsigned long long v = std::stoull(s, &pos, isHex ? 16 : 0);
+            if (pos == s.size()) { hasUnsigned = true; uv = static_cast<uint64_t>(v); }
+        } catch (...) {}
+    }
+
+    if (!isHex) {
+        try {
+            size_t pos = 0;
+            double v = std::stod(s, &pos);
+            if (pos == s.size()) { hasFloat = true; dv = v; }
+        } catch (...) {}
+    }
+
+    auto push = [&](DataType dt, const void* src, size_t n) {
+        NumericTargetSet::Entry e;
+        e.dt = dt;
+        std::memset(e.bytes, 0, sizeof(e.bytes));
+        std::memcpy(e.bytes, src, n);
+        out.entries.push_back(e);
+    };
+
+    for (DataType m : members) {
+        switch (m) {
+            case DataType::Int16:
+                if (hasSigned && sv >= INT16_MIN && sv <= INT16_MAX) {
+                    int16_t t = static_cast<int16_t>(sv); push(m, &t, 2);
+                }
+                break;
+            case DataType::Int32:
+                if (hasSigned && sv >= INT32_MIN && sv <= INT32_MAX) {
+                    int32_t t = static_cast<int32_t>(sv); push(m, &t, 4);
+                }
+                break;
+            case DataType::Int64:
+                if (hasSigned) { int64_t t = sv; push(m, &t, 8); }
+                break;
+            case DataType::UInt16:
+                if (hasUnsigned && uv <= UINT16_MAX) {
+                    uint16_t t = static_cast<uint16_t>(uv); push(m, &t, 2);
+                }
+                break;
+            case DataType::UInt32:
+                if (hasUnsigned && uv <= UINT32_MAX) {
+                    uint32_t t = static_cast<uint32_t>(uv); push(m, &t, 4);
+                }
+                break;
+            case DataType::UInt64:
+                if (hasUnsigned) { uint64_t t = uv; push(m, &t, 8); }
+                break;
+            case DataType::Float:
+                if (hasFloat) { float t = static_cast<float>(dv); push(m, &t, 4); }
+                break;
+            case DataType::Double:
+                if (hasFloat) { double t = dv; push(m, &t, 8); }
+                break;
+            default:
+                break;
+        }
+    }
+
+    return !out.entries.empty();
 }
 
 // --- Compare predicate ---

@@ -78,6 +78,7 @@ sections further down this file. Sorted here by recommended start order:
 - **TArray stress test on Satisfactory inventory arrays** — confirms the 10M soft circuit-breaker doesn't false-positive on legit deep arrays.
 - **#5 grid on Geri's `PlayerCameraManager::GetCameraLocation`** — expect 3 rows (X / Y / Z floats) at offsets 0x4 / 0x8 / 0xC.
 - **#6 diagnostic on `UCheatManager::Fly`** — confirm orange footer hint appears + Result=0 + no effect + GetHookFireCount > 0 + game-specific BC function on same session works.
+- **NumericNoByte (build 794-795) on a 1M-object game** — scan a known HP value (e.g. `100`) with DataType=NumericNoByte; confirm candidates appear across mixed property types (the Type column should show IntProperty / FloatProperty / etc.), Next Scan (Decreased after taking damage) prunes correctly, and the result count + scan time stay sane (no runaway explosion now that 1-byte/bool are excluded). Then sanity-check a float-only value (e.g. `337.5` with tolerance 0.5) only hits float/double fields.
 
 -----
 
@@ -131,6 +132,16 @@ enrichment cleaner than discrete's whatIsAt path.
   wire but currently returns zero hits — pending per-version Translation
   offset detection (UE4 / UE5-non-LWC at +16, UE5 LWC at +32). Tracked as
   follow-up **#0c FTransform Translation offset** below.
+- ~~**Multi-numeric "All" scan (no-byte variant)**~~ — ✅ shipped **build 794-795**
+  (2026-05-29). `ValueScanDataType.NumericNoByte`: one pass over every
+  word/dword/qword/float/double field, comparing the value against each field
+  by its own declared width (no byte-reinterpret, unlike CE's "All"). Excludes
+  Int8/UInt8/Bool to avoid small-value result explosion. See dev-log build
+  794-795. **Follow-up #0d: with-byte variant** — add `NumericAll` (include
+  Int8/UInt8) once the no-byte path is in-game verified; trivial once the
+  member-set + UI plumbing exists (add an enum value + member list + dropdown
+  entry; everything else is shared). Surface a result-volume warning for the
+  with-byte case since small values flood 1-byte fields.
 
 > _Ordering note (kept from earlier 2026-05-26 review)_: items below
 > were ordered by value/effort ratio at the end of the build-719 freeze

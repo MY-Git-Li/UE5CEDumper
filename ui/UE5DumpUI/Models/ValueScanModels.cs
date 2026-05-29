@@ -38,6 +38,14 @@ public enum ValueScanDataType
     FVector,
     FRotator,
     FTransform,
+    // Multi-numeric meta type (build 794). Scans every word/dword/qword/
+    // float/double UPROPERTY in one pass, comparing the value against
+    // each field using that field's own declared width — no need to
+    // know whether the value is stored as int or float up front. The
+    // "no byte" variant excludes 1-byte (Int8/UInt8/Bool) fields to keep
+    // the candidate set from exploding on small values. Wire string
+    // "NumericNoByte" matches DLL ValueScan::DataType::NumericNoByte.
+    NumericNoByte,
 }
 
 /// <summary>
