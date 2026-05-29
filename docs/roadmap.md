@@ -6,7 +6,9 @@ upcoming work and [dev-log.md](dev-log.md) for the historical commit
 trail. Build number tags reflect when each row reached its current
 state.
 
-> **Last refreshed**: 2026-05-27 (build 780, dev = main after PR #208/#209/#210/#211 merges). Session shipments:
+> **Last refreshed**: 2026-05-29 (build 792, dev ahead of main — parallelization change). Latest shipment:
+>
+> - **Parallel GObjects-walk scans** (build 792) — `ScanForValue` / `FindInContainers` / `FindReferencesToUObject` now fan their object-array walk across `clamp(cores-2, 1, 16)` worker threads (`ParallelIndexRanges`), with per-thread caches + ascending-tid merge that reproduces the serial result set byte-for-byte. `Ubel`'s class/name/enum/struct-field caches + `CorrectSubclassOffsets` calibration are now mutex-guarded for concurrent access. Expected ~cores× First-Scan speedup on 1M+ object games; in-game verification pending. See [dev-log.md](dev-log.md) 2026-05-29 + [todo.md](todo.md). The prior 2026-05-27 shipments below are unchanged:
 >
 > - **Value Search Phase 2** (build 757) — FString / FName / FText with `Contains` / `StartsWith` / `EndsWith` + case-sensitive toggle; FVector / FRotator component-wise compare; TArray\<T\> primitive/string/vector element scan with `Num > 10M` soft circuit-breaker. **FTransform footnote**: wire-stable but zero hits pending per-version Translation offset detection. See [dev-log.md](dev-log.md) 2026-05-27 entry.
 > - **Multi-row → One .CT batch generator** (build 760, #3) — Interesting Funcs + Interesting Properties tabs gain Extended-mode multi-select + 📦 Generate CT toolbar button. Output: one CT with root group → per-category sub-groups (alphabetical) → one CheatEntry per row.
