@@ -104,9 +104,11 @@
                   VerticalAlignment="Center"/>
         <TextBlock Text="{StaticResource str.VS.MaxResults}"
                    Foreground="#CCCCCC" FontSize="12"
-                   VerticalAlignment="Center"/>
+                   VerticalAlignment="Center"
+                   ToolTip.Tip="{StaticResource str.Tip.VS.MaxResults}"/>
         <NumericUpDown Value="{Binding MaxResults}"
                        Minimum="100" Maximum="500000" Increment="1000"
+                       ToolTip.Tip="{StaticResource str.Tip.VS.MaxResults}"
                        Width="170" FontSize="12"/>
       </StackPanel>
 
