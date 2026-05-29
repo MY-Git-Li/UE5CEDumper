@@ -96,6 +96,20 @@ enum class DataType : uint8_t {
     FVector,
     FRotator,
     FTransform,
+
+    // Multi-numeric "meta" type (build 794). Unlike CE's raw "All" scan
+    // (which reinterprets the same untyped bytes as multiple widths),
+    // our structured property walk knows each field's DECLARED type, so
+    // NumericNoByte means: accept every word/dword/qword/float/double
+    // UPROPERTY and compare the user's value against each field using
+    // that field's own declared width — no byte-reinterpret false hits.
+    // "NoByte" deliberately excludes Int8/UInt8/Bool: 1-byte fields are
+    // extremely numerous and a small value (0/1/5/100) would explode the
+    // candidate set. Members: Int16/UInt16, Int32/UInt32, Int64/UInt64,
+    // Float, Double. SizeOf() returns 0 (variable, like strings); the
+    // scan/refine engines resolve the concrete per-field DataType via
+    // TryDataTypeFromPropertyTypeName + a pre-built NumericTargetSet.
+    NumericNoByte,
 };
 
 enum class ScanType : uint8_t {
@@ -155,6 +169,60 @@ bool IsVectorDataType(DataType dt);
 // predicates (Contains / StartsWith / EndsWith). Caller must reject
 // these for non-string DataTypes.
 bool IsSubstringScanType(ScanType st);
+
+// True when the data type is a multi-numeric "meta" type
+// (NumericNoByte) that fans out over a fixed set of concrete numeric
+// member types instead of a single fixed-width comparison.
+bool IsMultiNumericDataType(DataType dt);
+
+// Concrete member DataTypes a multi-numeric meta type expands to.
+// NumericNoByte -> { Int16, UInt16, Int32, UInt32, Int64, UInt64,
+// Float, Double }. Empty for non-meta data types.
+const std::vector<DataType>& MultiNumericMembers(DataType dt);
+
+// Map a UE property type-name string (as it appears in
+// ClassInfo.Fields[].TypeName) to its concrete scalar DataType. Only
+// the multi-numeric member set is recognised — "IntProperty"->Int32,
+// "FloatProperty"->Float, "Int16Property"->Int16, etc. Returns false
+// for ByteProperty / Int8Property / BoolProperty / non-numeric names
+// so the multi-numeric walk skips byte-width + bool fields. Used by
+// the scan + refine engines to resolve each candidate's own width.
+bool TryDataTypeFromPropertyTypeName(const std::string& propTypeName, DataType& out);
+
+// Pre-parsed multi-numeric target. Holds one little-endian byte buffer
+// per member DataType whose width can represent the user's value (e.g.
+// "70000" yields Int32/UInt32/Int64/UInt64/Float/Double entries but no
+// Int16/UInt16; "100.5" yields only Float/Double; "-5" yields the
+// signed + float members but no unsigned ones). BuildNumericTargets
+// populates it; the scan/refine engines Find() the entry matching each
+// field's resolved DataType — a missing entry means "value can't fit
+// this width" and the field is skipped (no candidate / pruned).
+struct NumericTargetSet {
+    struct Entry {
+        DataType dt;
+        uint8_t  bytes[8];
+    };
+    std::vector<Entry> entries;
+
+    // Return the buffer for `dt`, or nullptr if the value didn't fit
+    // that width.
+    const uint8_t* Find(DataType dt) const {
+        for (const auto& e : entries) {
+            if (e.dt == dt) return e.bytes;
+        }
+        return nullptr;
+    }
+};
+
+// Parse the user's numeric value string into one NumericTargetSet entry
+// per member width of `metaDt` (currently NumericNoByte) that can
+// represent it. Returns false (and leaves out.entries empty) when the
+// string is empty / unparseable / fits no member width. Signed,
+// unsigned, and floating interpretations are each attempted and gated:
+//   - negative values produce no unsigned entries
+//   - non-integral values (e.g. "100.5") produce no integer entries
+//   - hex (0x..) values produce integer entries only
+bool BuildNumericTargets(DataType metaDt, const std::string& raw, NumericTargetSet& out);
 
 // True when the (DataType, ScanType) pair is a legal combination.
 // Used by the pipe handler to reject Bigger/Smaller on strings and

@@ -575,6 +575,131 @@ public class ValueSearchTests
     }
 
     // ------------------------------------------------------------------
+    // build 794 — multi-numeric (NumericNoByte) meta type
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void NumericNoByte_IsOfferedInDropdown()
+    {
+        var (vm, _) = MakeVm();
+        Assert.Contains(ValueScanDataType.NumericNoByte, vm.DataTypeOptions);
+    }
+
+    [Fact]
+    public void NumericNoByte_IsNeitherStringNorVector()
+    {
+        // The meta type must classify as a plain numeric so the existing
+        // numeric scan-type + (no) case-sensitive gating applies.
+        Assert.False(ValueSearchViewModel.IsStringDataType(ValueScanDataType.NumericNoByte));
+        Assert.False(ValueSearchViewModel.IsVectorDataType(ValueScanDataType.NumericNoByte));
+    }
+
+    [Fact]
+    public void NumericNoByte_SupportsTolerance_ButNotCaseSensitive()
+    {
+        // Tolerance is meaningful (float/double members); case-sensitive
+        // is string-only so it must stay off.
+        var (vm, _) = MakeVm();
+        vm.SelectedDataType = ValueScanDataType.NumericNoByte;
+        Assert.True(vm.SupportsTolerance);
+        Assert.False(vm.SupportsCaseSensitive);
+    }
+
+    [Theory]
+    // Behaves like a numeric: ordering predicates accept, substring reject.
+    [InlineData(ValueScanType.Exact,      true)]
+    [InlineData(ValueScanType.Bigger,     true)]
+    [InlineData(ValueScanType.Smaller,    true)]
+    [InlineData(ValueScanType.Between,    true)]
+    [InlineData(ValueScanType.Changed,    true)]
+    [InlineData(ValueScanType.Increased,  true)]
+    [InlineData(ValueScanType.Contains,   false)]
+    [InlineData(ValueScanType.StartsWith, false)]
+    [InlineData(ValueScanType.EndsWith,   false)]
+    public void NumericNoByte_ScanTypeValidity_MirrorsNumeric(ValueScanType st, bool expected)
+    {
+        Assert.Equal(expected,
+            ValueSearchViewModel.IsScanTypeValidFor(ValueScanDataType.NumericNoByte, st));
+    }
+
+    [Fact]
+    public void NumericNoByte_VisibleScanTypes_ExcludeSubstring()
+    {
+        // Same 8 ordering predicates as a single numeric type.
+        var (vm, _) = MakeVm();
+        vm.SelectedDataType = ValueScanDataType.NumericNoByte;
+        Assert.Equal(8, vm.VisibleScanTypeOptions.Count);
+        Assert.DoesNotContain(ValueScanType.Contains, vm.VisibleScanTypeOptions);
+    }
+
+    [Fact]
+    public async Task BeginValueScanAsync_SendsNumericNoByteWireName_AndAttachesTolerance()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"]              = req["id"]?.GetValue<int>() ?? 0,
+                ["ok"]              = true,
+                ["session_id"]      = 5UL,
+                ["data_type"]       = "NumericNoByte",
+                ["total"]           = 0,
+                ["scanned_classes"] = 0,
+                ["scanned_objects"] = 0,
+                ["duration_ms"]     = 1L,
+                ["deadline_hit"]    = false,
+                ["candidates"]      = new JsonArray(),
+            };
+        });
+
+        await svc.BeginValueScanAsync(
+            ValueScanDataType.NumericNoByte, ValueScanType.Exact, "100",
+            tolerance: 0.5,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(captured);
+        Assert.Equal("NumericNoByte", captured!["data_type"]?.GetValue<string>());
+        // Tolerance rides along (it applies to the float/double members).
+        Assert.True(captured.ContainsKey("tolerance"));
+        Assert.Equal(0.5, captured["tolerance"]?.GetValue<double>());
+    }
+
+    [Fact]
+    public async Task BeginValueScanAsync_OmitsCaseSensitiveForNumericNoByte()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"]              = req["id"]?.GetValue<int>() ?? 0,
+                ["ok"]              = true,
+                ["session_id"]      = 1UL,
+                ["data_type"]       = "NumericNoByte",
+                ["total"]           = 0,
+                ["scanned_classes"] = 0,
+                ["scanned_objects"] = 0,
+                ["duration_ms"]     = 1L,
+                ["deadline_hit"]    = false,
+                ["candidates"]      = new JsonArray(),
+            };
+        });
+
+        await svc.BeginValueScanAsync(
+            ValueScanDataType.NumericNoByte, ValueScanType.Exact, "100",
+            caseSensitive: true,   // user set it, but type isn't a string
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(captured);
+        Assert.False(captured!.ContainsKey("case_sensitive"));
+    }
+
+    // ------------------------------------------------------------------
     // Phase 2 wire-shape locks for DumpService
     // ------------------------------------------------------------------
 

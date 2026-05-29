@@ -126,6 +126,7 @@ families.
 - **String** (Phase 2A, build 757): FString, FName, FText (best-effort — cooked games strip most display strings; ES2 resolved 1/1551 classes).
 - **Vector** (Phase 2B, build 757): FVector, FRotator. **FTransform** wire-stable but currently returns zero hits pending per-version Translation offset detection (tracked as todo `#0c FTransform Translation offset`).
 - **TArray\<T\>** (Phase 2C, build 757): walks reflected ArrayProperty buffers for primitive / string / vector inner types. Soft circuit-breaker on `Num > 10M` (skip with `LOG_WARN`), Num/Max/Data validation guards. Matching elements appear as `FieldName[N]` rows.
+- **NumericNoByte** (multi-numeric meta, build 794-795): one pass over **every** word/dword/qword/float/double field, each compared by its OWN declared width — the "I know the value but not whether it's int or float" starting point. Distinct from CE's raw "All" (no byte-reinterpret false hits — our walk knows each field's declared type). Excludes Int8/UInt8/Bool to prevent small-value result explosion. `BuildNumericTargets` pre-parses the value into one buffer per fitting width (`70000` → no 16-bit; `100.5` → float/double only; hex → integer only); each field resolves its own DataType via `TryDataTypeFromPropertyTypeName` and compares against the matching buffer. Results-grid Type column shows which width matched. Tolerance applies per-member to float/double fields only. With-byte variant is the planned follow-up (`#0d`). _In-game verification pending._
 
 **ScanType matrix**:
 | DataType family | Valid scan types |

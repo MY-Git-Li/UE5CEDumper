@@ -3384,7 +3384,9 @@ ValueScanResult ScanForValue(
     int32_t             maxResults,
     double              tolerance,
     const std::string&  targetString,
-    bool                caseSensitive)
+    bool                caseSensitive,
+    const ValueScan::NumericTargetSet* multiTargets,
+    const ValueScan::NumericTargetSet* multiTargets2)
 {
     ValueScanResult result;
     auto t0 = std::chrono::steady_clock::now();
@@ -3392,6 +3394,7 @@ ValueScanResult ScanForValue(
 
     const bool isString = ValueScan::IsStringDataType(dt);
     const bool isVector = ValueScan::IsVectorDataType(dt);
+    const bool isMulti  = ValueScan::IsMultiNumericDataType(dt);
     const size_t dtSize = ValueScan::SizeOf(dt);
 
     // Validate inputs per type family.
@@ -3401,6 +3404,13 @@ ValueScanResult ScanForValue(
         // targeted predicates (substring matchers + Exact); Changed /
         // Unchanged use the candidate's prevStr.
         if (!ValueScan::IsPrevValueScanType(st) && targetString.empty()) return result;
+    } else if (isMulti) {
+        // Multi-numeric meta scan: the pre-parsed per-width target set
+        // replaces targetBytes. First scan requires it (prev-value scan
+        // types never reach here — rejected below).
+        if (!multiTargets || multiTargets->entries.empty()) return result;
+        if (st == ValueScan::ScanType::Between
+            && (!multiTargets2 || multiTargets2->entries.empty())) return result;
     } else {
         if (dtSize == 0 || !targetBytes) return result;
         if (st == ValueScan::ScanType::Between && !target2Bytes) return result;
@@ -3653,6 +3663,29 @@ ValueScanResult ScanForValue(
         // Thread-local FindDefiningClass result cache (see DefKey above).
         std::unordered_map<DefKey, std::string, DefKeyHash> definingNameCache;
 
+        // Multi-numeric meta resolver. For NumericNoByte scans, resolve a
+        // field/element's own concrete DataType from its property type
+        // name and point `tgt`/`tgt2` at the matching pre-parsed target.
+        // Returns false (skip the field) when the type isn't a numeric
+        // member or the value can't fit that width. Only reached on the
+        // targeted first-scan path (prev-value scan types never get here).
+        auto multiResolve = [&](const std::string& propTypeName,
+                                ValueScan::DataType& memberDt,
+                                const uint8_t*&      tgt,
+                                const uint8_t*&      tgt2) -> bool {
+            if (!ValueScan::TryDataTypeFromPropertyTypeName(propTypeName, memberDt)) return false;
+            const uint8_t* e = multiTargets ? multiTargets->Find(memberDt) : nullptr;
+            if (!e) return false;
+            tgt  = e;
+            tgt2 = nullptr;
+            if (st == ValueScan::ScanType::Between) {
+                const uint8_t* e2 = multiTargets2 ? multiTargets2->Find(memberDt) : nullptr;
+                if (!e2) return false;
+                tgt2 = e2;
+            }
+            return true;
+        };
+
         for (int32_t i = beginIdx; i < endIdx; ++i) {
         // Periodic deadline + max-results check (every 4K objects keeps
         // the chrono cost negligible while still bounding worst-case
@@ -3787,6 +3820,8 @@ ValueScanResult ScanForValue(
                     uint8_t     readBuf[16] = {};
                     std::string readStr;
 
+                    ValueScan::DataType elemDt = dt;
+                    size_t              elemReadSize = dtSize;
                     if (isString) {
                         if (dt == ValueScan::DataType::FString) {
                             readStr = Ubel::ReadFStringAt(elemAddr, 0);
@@ -3799,6 +3834,14 @@ ValueScanResult ScanForValue(
                     } else if (isVector) {
                         if (!Macht::ReadBytesSafe(elemAddr, readBuf, 12)) continue;
                         if (!ValueScan::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
+                    } else if (isMulti) {
+                        // Resolve the array's inner element width + target.
+                        const uint8_t* mtgt = nullptr;
+                        const uint8_t* mtgt2 = nullptr;
+                        if (!multiResolve(sf.elemTypeName, elemDt, mtgt, mtgt2)) continue;
+                        elemReadSize = ValueScan::SizeOf(elemDt);
+                        if (!Macht::ReadBytesSafe(elemAddr, readBuf, elemReadSize)) continue;
+                        if (!ValueScan::ComparePredicate(elemDt, st, readBuf, mtgt, mtgt2, tolerance)) continue;
                     } else {
                         if (!Macht::ReadBytesSafe(elemAddr, readBuf, dtSize)) continue;
                         // Array elements never share a bitfield byte
@@ -3825,9 +3868,12 @@ ValueScanResult ScanForValue(
                                       sf.elemTypeName, 0xFF,
                                       readBuf, 12, nullptr);
                     } else {
+                        // elemReadSize == dtSize for fixed-width numeric
+                        // scans; for multi-numeric it's the resolved
+                        // per-element width (dtSize is 0 in that mode).
                         emitCandidate(elemAddr, sf.offset, elemName,
                                       sf.elemTypeName, 0xFF,
-                                      readBuf, dtSize, nullptr);
+                                      readBuf, elemReadSize, nullptr);
                     }
                 }
                 continue;
@@ -3861,6 +3907,23 @@ ValueScanResult ScanForValue(
                 if (!ValueScan::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
                 emitCandidate(valueAddr, sf.offset, sf.name, sf.typeName,
                               sf.boolFieldMask, readBuf, 12, nullptr);
+                continue;
+            }
+
+            if (isMulti) {
+                // Resolve this field's own width + matching target; skip
+                // if the value can't fit it. Compare with the per-field
+                // DataType so an int field compares as int, a float field
+                // as float — no byte-reinterpret.
+                ValueScan::DataType memberDt;
+                const uint8_t* mtgt = nullptr;
+                const uint8_t* mtgt2 = nullptr;
+                if (!multiResolve(sf.typeName, memberDt, mtgt, mtgt2)) continue;
+                size_t msz = ValueScan::SizeOf(memberDt);
+                if (!Macht::ReadBytesSafe(valueAddr, readBuf, msz)) continue;
+                if (!ValueScan::ComparePredicate(memberDt, st, readBuf, mtgt, mtgt2, tolerance)) continue;
+                emitCandidate(valueAddr, sf.offset, sf.name, sf.typeName,
+                              sf.boolFieldMask, readBuf, msz, nullptr);
                 continue;
             }
 
@@ -3922,18 +3985,27 @@ ValueScanStats RefineCandidates(
     std::vector<ValueScan::Candidate>& candidates,
     double                             tolerance,
     const std::string&                 targetString,
-    bool                               caseSensitive)
+    bool                               caseSensitive,
+    const ValueScan::NumericTargetSet* multiTargets,
+    const ValueScan::NumericTargetSet* multiTargets2)
 {
     ValueScanStats stats;
     auto t0 = std::chrono::steady_clock::now();
 
     const bool isString = ValueScan::IsStringDataType(dt);
     const bool isVector = ValueScan::IsVectorDataType(dt);
+    const bool isMulti  = ValueScan::IsMultiNumericDataType(dt);
     const size_t dtSize = ValueScan::SizeOf(dt);
-    if (!isString && dtSize == 0) return stats;
+    if (!isString && !isMulti && dtSize == 0) return stats;
 
     const bool usePrev = ValueScan::IsPrevValueScanType(st);
-    if (!isString) {
+    if (isMulti) {
+        // Targeted multi-numeric refine needs the pre-parsed target set;
+        // prev-value predicates compare against each candidate's snapshot.
+        if (!usePrev && (!multiTargets || multiTargets->entries.empty())) return stats;
+        if (!usePrev && st == ValueScan::ScanType::Between
+            && (!multiTargets2 || multiTargets2->entries.empty())) return stats;
+    } else if (!isString) {
         if (!usePrev && !targetBytes) return stats;
         if (st == ValueScan::ScanType::Between && !target2Bytes) return stats;
     }
@@ -3944,6 +4016,35 @@ ValueScanStats RefineCandidates(
     kept.reserve(candidates.size());
 
     for (auto& c : candidates) {
+        if (isMulti) {
+            // Re-resolve this candidate's own width from its stored
+            // fieldType (concrete property type, e.g. "FloatProperty").
+            // Targeted predicates compare against the matching target
+            // entry; prev-value predicates against the snapshot.
+            ValueScan::DataType memberDt;
+            if (!ValueScan::TryDataTypeFromPropertyTypeName(c.fieldType, memberDt)) continue;
+            size_t msz = ValueScan::SizeOf(memberDt);
+            uint8_t readBuf[16] = {};
+            if (!Macht::ReadBytesSafe(c.addr, readBuf, msz)) continue;
+
+            const uint8_t* cmpTarget = nullptr;
+            const uint8_t* cmp2      = nullptr;
+            if (usePrev) {
+                cmpTarget = c.prevValue;
+            } else {
+                cmpTarget = multiTargets ? multiTargets->Find(memberDt) : nullptr;
+                if (!cmpTarget) continue;  // value can't fit this width
+                if (st == ValueScan::ScanType::Between) {
+                    cmp2 = multiTargets2 ? multiTargets2->Find(memberDt) : nullptr;
+                    if (!cmp2) continue;
+                }
+            }
+            if (!ValueScan::ComparePredicate(memberDt, st, readBuf, cmpTarget, cmp2, tolerance)) continue;
+            std::memcpy(c.prevValue, readBuf, msz);
+            kept.push_back(std::move(c));
+            continue;
+        }
+
         if (isString) {
             // Re-resolve the string from the candidate's recorded
             // address. c.addr already points at the value (FString

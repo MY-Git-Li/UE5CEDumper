@@ -11,6 +11,60 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-05-29 — Value Search: multi-numeric "NumericNoByte" meta scan (build 794-795)
+
+New `ValueScanDataType.NumericNoByte` — a "find this value across **every**
+word/dword/qword/float/double field in one pass" mode, the natural starting
+point when you know the value (e.g. `100`) but not whether it's stored as
+`int32`, `float`, `uint16`, … Unlike CE's raw "All" type (which reinterprets
+the *same untyped bytes* as multiple widths and produces overlapping false
+hits), our scan is a **structured property walk** — each candidate's DECLARED
+type is known — so each field is compared using *its own* declared width. A
+`float Health` compares as float, an `int32 Ammo` as int32: **zero
+byte-reinterpret false positives**. "No byte" deliberately excludes
+`Int8`/`UInt8`/`Bool` (1-byte fields are too numerous; a small value would
+flood the candidate set — the same reason CE breaks "Byte" out separately).
+The with-byte variant is the planned follow-up.
+
+Members: `Int16/UInt16`, `Int32/UInt32`, `Int64/UInt64`, `Float`, `Double`.
+
+**DLL** (`ValueScan.{h,cpp}`, `Aura.{h,cpp}`, `Fern.cpp`):
+- `IsMultiNumericDataType` / `MultiNumericMembers` / `TryDataTypeFromPropertyTypeName`
+  (property-type-name → concrete DataType, rejecting Byte/Int8/Bool/non-numeric)
+  / `NumericTargetSet` + `BuildNumericTargets`. The target set holds one
+  little-endian buffer **per member width the value can represent** —
+  `70000` yields no Int16/UInt16; `-5` no unsigned; `100.5` only Float/Double;
+  hex `0x10` integer widths only. `PropertyTypeNames(NumericNoByte)` returns the
+  8-name union (locked in a test to exactly match what
+  `TryDataTypeFromPropertyTypeName` resolves, so a field can't be accepted yet
+  fail per-field resolution).
+- `ScanForValue` / `RefineCandidates` gained optional `multiTargets` /
+  `multiTargets2` params. In multi mode the scalar-field **and** TArray-element
+  comparison sites resolve each field's own DataType + matching target and call
+  the existing `ComparePredicate`. Refine re-resolves each candidate's width
+  from its stored `fieldType`. `CandidateToJson` renders each row's value with
+  its own resolved width. Single-type paths are byte-identical (new branches
+  are gated on `isMulti`).
+- Tolerance flows through (applies per-member to float/double fields only;
+  integer members ignore it, exactly as the single-type path already does).
+
+**UI** (`ValueScanModels.cs`, `ValueSearchViewModel.cs`, `DumpService.cs`,
+`en.axaml`): enum member + dropdown entry (listed first), `SupportsTolerance`
++ `ToleranceAppliesTo` include it, case-sensitive stays string-only. The
+results grid's existing **Type** column shows each candidate's concrete
+property type so the user sees which width matched. DataType tooltip updated.
+
+**Tests**: +3 DLL test fns (`MultiNumericMembers` / `DataTypeFromPropertyTypeName`
+incl. the union-consistency lock / `BuildNumericTargets` fit-rules) + 7 C# tests
+(dropdown presence, family classification, tolerance/case gating, scan-type
+validity mirror, wire-name + tolerance attach). All green: dll_helpers 319,
+utf8 31, C# 1095 (total 1445). Zero compile warnings.
+
+**Pending**: in-game verification (correctness + result-volume sanity on a
+1M-object game), then the with-byte variant.
+
+-----
+
 ## 2026-05-29 — Refactor: extract `ParallelGObjectsScan<ResultT>` template (build 793)
 
 Follow-up to build 792 (logged in todo.md): the three parallelized scans each

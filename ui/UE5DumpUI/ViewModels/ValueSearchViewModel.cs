@@ -54,6 +54,12 @@ public partial class ValueSearchViewModel : ViewModelBase
 
     public IReadOnlyList<ValueScanDataType> DataTypeOptions { get; } = new[]
     {
+        // Multi-numeric meta scan: one pass over every word/dword/qword/
+        // float/double field, comparing per declared width. Listed first
+        // because it's the natural "I don't know the stored type yet"
+        // starting point. "No byte" excludes 1-byte + bool fields so a
+        // small value doesn't explode the candidate set.
+        ValueScanDataType.NumericNoByte,
         ValueScanDataType.Int32,
         ValueScanDataType.Int64,
         ValueScanDataType.Int16,
@@ -189,6 +195,7 @@ public partial class ValueSearchViewModel : ViewModelBase
     public bool SupportsTolerance =>
         SelectedDataType == ValueScanDataType.Float
         || SelectedDataType == ValueScanDataType.Double
+        || SelectedDataType == ValueScanDataType.NumericNoByte
         || IsVectorDataType(SelectedDataType);
 
     /// <summary>True when the selected DataType is a string type

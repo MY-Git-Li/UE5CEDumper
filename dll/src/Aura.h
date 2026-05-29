@@ -507,6 +507,13 @@ struct ValueScanResult {
 // Returns at most maxResults candidates; the scan also bails on a 15s
 // deadline (stats.deadlineHit fires when this happens). Used by the
 // Value Search tab.
+//
+// Multi-numeric meta path (dt == NumericNoByte): targetBytes /
+// target2Bytes are ignored. Every word/dword/qword/float/double field
+// is accepted; each is compared using its OWN resolved DataType against
+// the matching entry in `multiTargets` (and `multiTargets2` for
+// Between). A field whose width can't represent the value (no matching
+// entry) is skipped. `multiTargets` must be non-null for this path.
 ValueScanResult ScanForValue(
     ValueScan::DataType dt,
     ValueScan::ScanType st,
@@ -516,7 +523,9 @@ ValueScanResult ScanForValue(
     int32_t             maxResults    = 100000,
     double              tolerance     = 0.0,
     const std::string&  targetString  = "",
-    bool                caseSensitive = false);
+    bool                caseSensitive = false,
+    const ValueScan::NumericTargetSet* multiTargets  = nullptr,
+    const ValueScan::NumericTargetSet* multiTargets2 = nullptr);
 
 // Refine an existing candidate vector in place: re-read each
 // candidate's bytes (or string, for FString/FName/FText DataTypes),
@@ -526,6 +535,11 @@ ValueScanResult ScanForValue(
 // targeted inputs. Snapshots are updated to the latest-observed
 // state on survivors so the NEXT prev-value refine compares against
 // what was seen during THIS refine -- standard CE Next Scan semantics.
+//
+// Multi-numeric meta path (dt == NumericNoByte): each candidate's
+// concrete DataType is re-resolved from its stored fieldType; targeted
+// predicates compare against `multiTargets`/`multiTargets2` (matched by
+// that width), prev-value predicates against the candidate's prevValue.
 ValueScanStats RefineCandidates(
     ValueScan::DataType                dt,
     ValueScan::ScanType                st,
@@ -534,6 +548,8 @@ ValueScanStats RefineCandidates(
     std::vector<ValueScan::Candidate>& candidates,
     double                             tolerance     = 0.0,
     const std::string&                 targetString  = "",
-    bool                               caseSensitive = false);
+    bool                               caseSensitive = false,
+    const ValueScan::NumericTargetSet* multiTargets  = nullptr,
+    const ValueScan::NumericTargetSet* multiTargets2 = nullptr);
 
 } // namespace Aura
