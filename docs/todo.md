@@ -19,7 +19,8 @@ GObjects-walk scans — `ScanForValue` / `FindInContainers` /
 `FindReferencesToUObject` — plus thread-safe `Ubel` caches that the parallel
 walk now requires. Source: `D:\Github\CE-Handwire-Private\docs\Memory-Scanning-Internals.md`
 §16. Full write-up in [dev-log.md](dev-log.md) 2026-05-29 entry. Build + all
-1358 tests green; **in-game perf/correctness verification still pending** (below).
+1358 tests green; **in-game verified OK 2026-05-29** (user-confirmed: correct
+results, no hang/crash, multi-core First-Scan speedup).
 
 **New follow-ups from this work:**
 
@@ -30,12 +31,9 @@ walk now requires. Source: `D:\Github\CE-Handwire-Private\docs\Memory-Scanning-I
   merge policy collapses it to one source of truth. Deferred deliberately —
   don't refactor freshly-verified concurrency code in the same session. Pick it
   up next time any of the three scans is touched.
-- **In-game parallel-scan verification** — inject into ES2 (UE 5.5) + a
-  large-heap title (Satisfactory / SaGa-class). (a) Parallel result set must
-  equal the old serial set: same addresses, ascending order, same count
-  (lowest-index subset when truncated to maxResults). (b) First-Scan wall-clock
-  over 1M+ objects should drop roughly ×cores. (c) Confirm no hang / crash and
-  that `deadlineHit` still fires correctly under load.
+- ~~**In-game parallel-scan verification**~~ — ✅ **done 2026-05-29**.
+  User-verified: parallel result set matches the serial walk, no hang / crash,
+  and the multi-core First-Scan speedup held on a live target.
 
 The 2026-05-27 block below remains the source of truth for the remaining
 picks (#7 / #2 / 0c / #5-v2 / LiveWalker-batch).
