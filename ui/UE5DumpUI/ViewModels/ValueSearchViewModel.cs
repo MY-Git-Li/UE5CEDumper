@@ -60,6 +60,10 @@ public partial class ValueSearchViewModel : ViewModelBase
         // starting point. "No byte" excludes 1-byte + bool fields so a
         // small value doesn't explode the candidate set.
         ValueScanDataType.NumericNoByte,
+        // Same one-pass scan but INCLUDING 1-byte fields. Listed right
+        // after the no-byte variant; the VM shows a result-volume warning
+        // when it's selected (small values flood 1-byte fields).
+        ValueScanDataType.NumericAll,
         ValueScanDataType.Int32,
         ValueScanDataType.Int64,
         ValueScanDataType.Int16,
@@ -195,8 +199,28 @@ public partial class ValueSearchViewModel : ViewModelBase
     public bool SupportsTolerance =>
         SelectedDataType == ValueScanDataType.Float
         || SelectedDataType == ValueScanDataType.Double
-        || SelectedDataType == ValueScanDataType.NumericNoByte
+        || IsMultiNumericDataType(SelectedDataType)
         || IsVectorDataType(SelectedDataType);
+
+    /// <summary>True for the multi-numeric meta types (NumericNoByte /
+    /// NumericAll) that fan out over a fixed member set instead of a
+    /// single fixed-width compare. Mirror of DLL
+    /// <c>ValueScan::IsMultiNumericDataType</c>.</summary>
+    public static bool IsMultiNumericDataType(ValueScanDataType dt) =>
+        dt == ValueScanDataType.NumericNoByte
+        || dt == ValueScanDataType.NumericAll;
+
+    /// <summary>Non-empty when the selected DataType warrants a caution
+    /// to the user. Currently only NumericAll: including 1-byte fields
+    /// means small values (0/1/255) match a very large number of fields,
+    /// so the candidate set can explode. Empty for every other type
+    /// (drives an orange hint TextBlock via IsNotNullOrEmpty).</summary>
+    public string DataTypeWarning =>
+        SelectedDataType == ValueScanDataType.NumericAll
+            ? "NumericAll includes 1-byte fields — small values (e.g. 0 / 1 / 255) " +
+              "will match a very large number of fields and can flood the results. " +
+              "Use a larger / more specific value, or pick NumericNoByte to skip 1-byte fields."
+            : "";
 
     /// <summary>True when the selected DataType is a string type
     /// (FString / FName / FText) — drives the Case-sensitive checkbox
@@ -208,6 +232,7 @@ public partial class ValueSearchViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(SupportsTolerance));
         OnPropertyChanged(nameof(SupportsCaseSensitive));
+        OnPropertyChanged(nameof(DataTypeWarning));
         OnPropertyChanged(nameof(VisibleScanTypeOptions));
         // If the currently-selected ScanType is no longer valid for
         // the new DataType (e.g. user switched from Int32+Bigger to

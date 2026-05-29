@@ -137,11 +137,12 @@ enrichment cleaner than discrete's whatIsAt path.
   word/dword/qword/float/double field, comparing the value against each field
   by its own declared width (no byte-reinterpret, unlike CE's "All"). Excludes
   Int8/UInt8/Bool to avoid small-value result explosion. See dev-log build
-  794-795. **Follow-up #0d: with-byte variant** — add `NumericAll` (include
-  Int8/UInt8) once the no-byte path is in-game verified; trivial once the
-  member-set + UI plumbing exists (add an enum value + member list + dropdown
-  entry; everything else is shared). Surface a result-volume warning for the
-  with-byte case since small values flood 1-byte fields.
+  794-795.
+- ~~**#0d with-byte variant `NumericAll`**~~ — ✅ shipped **build 796-797**
+  (2026-05-29). Adds Int8/UInt8 to the multi-numeric member set (still no
+  Bool). Includes a result-volume warning (`DataTypeWarning` VM property →
+  orange hint in the panel) since small values flood 1-byte fields. Rode on
+  the NumericNoByte meta machinery. See dev-log build 796-797.
 
 > _Ordering note (kept from earlier 2026-05-26 review)_: items below
 > were ordered by value/effort ratio at the end of the build-719 freeze

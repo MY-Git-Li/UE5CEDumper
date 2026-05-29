@@ -175,9 +175,10 @@ bool ParseValueBytes(ValueScan::DataType dt, const std::string& raw, uint8_t out
             case ValueScan::DataType::FVector:
             case ValueScan::DataType::FRotator:
             case ValueScan::DataType::FTransform:
-            // Multi-numeric meta type is parsed via BuildNumericTargets,
+            // Multi-numeric meta types are parsed via BuildNumericTargets,
             // not this single-width helper. Fail loudly if misrouted.
             case ValueScan::DataType::NumericNoByte:
+            case ValueScan::DataType::NumericAll:
                 return false;
         }
     } catch (...) {
@@ -260,6 +261,7 @@ std::string FormatValueBytes(ValueScan::DataType dt, const uint8_t bytes[8]) {
         // concrete DataType and calls this with that, never the meta
         // type. Defensive fallthrough.
         case ValueScan::DataType::NumericNoByte:
+        case ValueScan::DataType::NumericAll:
             break;
     }
     return oss.str();

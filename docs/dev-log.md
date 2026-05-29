@@ -11,6 +11,46 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-05-29 — Value Search: with-byte variant `NumericAll` + result-volume warning (build 796-797)
+
+Follow-up to NumericNoByte (build 794-795, todo #0d). Adds
+`ValueScanDataType.NumericAll` — the same one-pass structured multi-numeric
+scan but **including** the 1-byte families (`Int8Property` → Int8,
+`ByteProperty` → UInt8). Bool stays excluded (it has its own single-type
+scan). Members: Int8/UInt8 + Int16/UInt16 + Int32/UInt32 + Int64/UInt64 +
+Float + Double (10).
+
+Implementation rode almost entirely on the NumericNoByte plumbing — the meta
+machinery (`IsMultiNumericDataType` / `ScanForValue` / `RefineCandidates` /
+`CandidateToJson`) is keyed on `IsMultiNumericDataType`, so it picked up the
+new type for free. The only DLL deltas: `MultiNumericMembers(NumericAll)`
+(adds Int8/UInt8), `PropertyTypeNames(NumericAll)` (10-name union),
+`TryDataTypeFromPropertyTypeName` now resolves `Int8Property`/`ByteProperty`
+(safe for NumericNoByte — its union never feeds those names in),
+`BuildNumericTargets` Int8/UInt8 fit-checks, and the SizeOf/NameOf/parse/
+Format switch cases. `BuildNumericTargets` range-gates byte widths as
+expected (`300` → no Int8/UInt8; `-5` → Int8 yes / UInt8 no; `200` → UInt8
+yes / Int8 no).
+
+**Result-volume warning** (user-requested): small values (0/1/255) match a
+very large number of 1-byte fields, so the candidate set can explode. New VM
+property `ValueSearchViewModel.DataTypeWarning` (non-empty only for
+NumericAll, raised on DataType switch) drives an orange italic hint TextBlock
+in `ValueSearchPanel.axaml` (binds via `IsNotNullOrEmpty`, same pattern as
+`ErrorMessage`). DataType tooltip in `en.axaml` updated. `SupportsTolerance`
+generalised to `IsMultiNumericDataType`; `DumpService.ToleranceAppliesTo`
+includes NumericAll.
+
+**Tests**: +30 DLL EXPECTs (members=10 incl. byte, byte property-name
+resolution flipped from reject→resolve, NumericAll union-consistency lock,
+BuildNumericTargets byte range-gates) + 10 C# (dropdown/classification,
+tolerance, the warning is NumericAll-only + raises PropertyChanged, scan-type
+mirror, wire name). All green: dll_helpers 349, utf8 31, C# 1105 (total 1485),
+zero warnings. **In-game verification pending** (the volume-explosion behavior
+the warning guards against is exactly what to sanity-check live).
+
+-----
+
 ## 2026-05-29 — Value Search: multi-numeric "NumericNoByte" meta scan (build 794-795)
 
 New `ValueScanDataType.NumericNoByte` — a "find this value across **every**
