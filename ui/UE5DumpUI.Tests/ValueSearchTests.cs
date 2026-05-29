@@ -700,6 +700,106 @@ public class ValueSearchTests
     }
 
     // ------------------------------------------------------------------
+    // build 796 — multi-numeric with-byte variant (NumericAll) + warning
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void NumericAll_IsOfferedInDropdown_AndClassifiedMultiNumeric()
+    {
+        var (vm, _) = MakeVm();
+        Assert.Contains(ValueScanDataType.NumericAll, vm.DataTypeOptions);
+        Assert.True(ValueSearchViewModel.IsMultiNumericDataType(ValueScanDataType.NumericAll));
+        Assert.True(ValueSearchViewModel.IsMultiNumericDataType(ValueScanDataType.NumericNoByte));
+        Assert.False(ValueSearchViewModel.IsMultiNumericDataType(ValueScanDataType.Int32));
+        // Still a plain numeric for scan-type / case gating purposes.
+        Assert.False(ValueSearchViewModel.IsStringDataType(ValueScanDataType.NumericAll));
+        Assert.False(ValueSearchViewModel.IsVectorDataType(ValueScanDataType.NumericAll));
+    }
+
+    [Fact]
+    public void NumericAll_SupportsTolerance_ButNotCaseSensitive()
+    {
+        var (vm, _) = MakeVm();
+        vm.SelectedDataType = ValueScanDataType.NumericAll;
+        Assert.True(vm.SupportsTolerance);
+        Assert.False(vm.SupportsCaseSensitive);
+    }
+
+    [Fact]
+    public void DataTypeWarning_OnlyShownForNumericAll()
+    {
+        // The result-volume caution fires for NumericAll (1-byte fields
+        // flood on small values) and is empty for everything else.
+        var (vm, _) = MakeVm();
+        vm.SelectedDataType = ValueScanDataType.NumericAll;
+        Assert.NotEmpty(vm.DataTypeWarning);
+        Assert.Contains("1-byte", vm.DataTypeWarning);
+
+        vm.SelectedDataType = ValueScanDataType.NumericNoByte;
+        Assert.Empty(vm.DataTypeWarning);
+        vm.SelectedDataType = ValueScanDataType.Int32;
+        Assert.Empty(vm.DataTypeWarning);
+        vm.SelectedDataType = ValueScanDataType.Float;
+        Assert.Empty(vm.DataTypeWarning);
+    }
+
+    [Fact]
+    public void DataTypeWarning_RaisesPropertyChanged_OnDataTypeSwitch()
+    {
+        var (vm, _) = MakeVm();
+        var raised = new List<string?>();
+        vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        vm.SelectedDataType = ValueScanDataType.NumericAll;
+        Assert.Contains(nameof(vm.DataTypeWarning), raised);
+    }
+
+    [Theory]
+    [InlineData(ValueScanType.Exact,    true)]
+    [InlineData(ValueScanType.Bigger,   true)]
+    [InlineData(ValueScanType.Between,  true)]
+    [InlineData(ValueScanType.Decreased,true)]
+    [InlineData(ValueScanType.Contains, false)]
+    public void NumericAll_ScanTypeValidity_MirrorsNumeric(ValueScanType st, bool expected)
+    {
+        Assert.Equal(expected,
+            ValueSearchViewModel.IsScanTypeValidFor(ValueScanDataType.NumericAll, st));
+    }
+
+    [Fact]
+    public async Task BeginValueScanAsync_SendsNumericAllWireName_AndAttachesTolerance()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"]              = req["id"]?.GetValue<int>() ?? 0,
+                ["ok"]              = true,
+                ["session_id"]      = 8UL,
+                ["data_type"]       = "NumericAll",
+                ["total"]           = 0,
+                ["scanned_classes"] = 0,
+                ["scanned_objects"] = 0,
+                ["duration_ms"]     = 1L,
+                ["deadline_hit"]    = false,
+                ["candidates"]      = new JsonArray(),
+            };
+        });
+
+        await svc.BeginValueScanAsync(
+            ValueScanDataType.NumericAll, ValueScanType.Exact, "100",
+            tolerance: 0.5,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(captured);
+        Assert.Equal("NumericAll", captured!["data_type"]?.GetValue<string>());
+        Assert.True(captured.ContainsKey("tolerance"));
+        Assert.Equal(0.5, captured["tolerance"]?.GetValue<double>());
+    }
+
+    // ------------------------------------------------------------------
     // Phase 2 wire-shape locks for DumpService
     // ------------------------------------------------------------------
 

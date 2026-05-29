@@ -1203,10 +1203,11 @@ public sealed class DumpService : IDumpService
     private static bool ToleranceAppliesTo(ValueScanDataType dt) =>
         dt == ValueScanDataType.Float
         || dt == ValueScanDataType.Double
-        // Multi-numeric meta scan includes Float/Double members, so
+        // Multi-numeric meta scans include Float/Double members, so
         // tolerance is meaningful (DLL applies it per-member to the
         // float/double fields only; integer members ignore it).
         || dt == ValueScanDataType.NumericNoByte
+        || dt == ValueScanDataType.NumericAll
         || dt == ValueScanDataType.FVector
         || dt == ValueScanDataType.FRotator
         || dt == ValueScanDataType.FTransform;

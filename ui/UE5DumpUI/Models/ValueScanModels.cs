@@ -46,6 +46,12 @@ public enum ValueScanDataType
     // the candidate set from exploding on small values. Wire string
     // "NumericNoByte" matches DLL ValueScan::DataType::NumericNoByte.
     NumericNoByte,
+    // Multi-numeric meta type WITH 1-byte fields (build 796). Same as
+    // NumericNoByte but additionally includes Int8/UInt8 (still excludes
+    // Bool). WARNING: small values (0/1/255) match a very large number of
+    // 1-byte fields — the VM surfaces a result-volume warning when this is
+    // selected. Wire string "NumericAll" matches DLL DataType::NumericAll.
+    NumericAll,
 }
 
 /// <summary>

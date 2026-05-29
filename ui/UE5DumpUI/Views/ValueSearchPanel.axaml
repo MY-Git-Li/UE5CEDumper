@@ -150,6 +150,15 @@
                Foreground="#F44747" Margin="0,0,0,4"
                IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
 
+    <!-- DataType caution row: result-volume warning for NumericAll
+         (1-byte fields flood on small values). Empty for every other
+         DataType so the row collapses. -->
+    <TextBlock DockPanel.Dock="Top"
+               Text="{Binding DataTypeWarning}"
+               Foreground="#E0A050" FontSize="11" FontStyle="Italic"
+               Margin="0,0,0,4" TextWrapping="Wrap"
+               IsVisible="{Binding DataTypeWarning, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+
     <!-- Results DataGrid -->
     <DataGrid x:Name="ResultsGrid"
               ItemsSource="{Binding Candidates}"

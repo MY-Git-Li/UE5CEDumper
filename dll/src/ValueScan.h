@@ -110,6 +110,15 @@ enum class DataType : uint8_t {
     // scan/refine engines resolve the concrete per-field DataType via
     // TryDataTypeFromPropertyTypeName + a pre-built NumericTargetSet.
     NumericNoByte,
+
+    // Multi-numeric "meta" type WITH 1-byte fields (build 796). Same
+    // structured per-width compare as NumericNoByte, but additionally
+    // includes Int8 (Int8Property) + UInt8 (ByteProperty). Bool is still
+    // excluded (it has its own single-type scan). Members: Int8/UInt8,
+    // Int16/UInt16, Int32/UInt32, Int64/UInt64, Float, Double. WARNING:
+    // small values (0/1/255) match a very large number of 1-byte fields —
+    // the UI surfaces a result-volume warning for this type.
+    NumericAll,
 };
 
 enum class ScanType : uint8_t {
@@ -171,22 +180,25 @@ bool IsVectorDataType(DataType dt);
 bool IsSubstringScanType(ScanType st);
 
 // True when the data type is a multi-numeric "meta" type
-// (NumericNoByte) that fans out over a fixed set of concrete numeric
-// member types instead of a single fixed-width comparison.
+// (NumericNoByte / NumericAll) that fans out over a fixed set of
+// concrete numeric member types instead of a single fixed-width compare.
 bool IsMultiNumericDataType(DataType dt);
 
 // Concrete member DataTypes a multi-numeric meta type expands to.
 // NumericNoByte -> { Int16, UInt16, Int32, UInt32, Int64, UInt64,
-// Float, Double }. Empty for non-meta data types.
+//                    Float, Double }.
+// NumericAll    -> the above plus { Int8, UInt8 }.
+// Empty for non-meta data types.
 const std::vector<DataType>& MultiNumericMembers(DataType dt);
 
 // Map a UE property type-name string (as it appears in
-// ClassInfo.Fields[].TypeName) to its concrete scalar DataType. Only
-// the multi-numeric member set is recognised — "IntProperty"->Int32,
-// "FloatProperty"->Float, "Int16Property"->Int16, etc. Returns false
-// for ByteProperty / Int8Property / BoolProperty / non-numeric names
-// so the multi-numeric walk skips byte-width + bool fields. Used by
-// the scan + refine engines to resolve each candidate's own width.
+// ClassInfo.Fields[].TypeName) to its concrete scalar DataType. The
+// full numeric member set is recognised — "IntProperty"->Int32,
+// "FloatProperty"->Float, "Int16Property"->Int16, "Int8Property"->Int8,
+// "ByteProperty"->UInt8, etc. Returns false for BoolProperty +
+// non-numeric names. (NumericNoByte simply never feeds byte-width names
+// here because its PropertyTypeNames union excludes them.) Used by the
+// scan + refine engines to resolve each candidate's own width.
 bool TryDataTypeFromPropertyTypeName(const std::string& propTypeName, DataType& out);
 
 // Pre-parsed multi-numeric target. Holds one little-endian byte buffer

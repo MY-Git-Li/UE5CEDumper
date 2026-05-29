@@ -23,9 +23,10 @@ size_t SizeOf(DataType dt) {
         // String types use the candidate's prevStr field instead of
         // the byte buffer — return 0 so callers can branch on it.
         case DataType::FString: case DataType::FName: case DataType::FText: return 0;
-        // Multi-numeric meta type has no single width — the scan engine
+        // Multi-numeric meta types have no single width — the scan engine
         // resolves SizeOf per member; 0 signals "variable" like strings.
-        case DataType::NumericNoByte: return 0;
+        case DataType::NumericNoByte:
+        case DataType::NumericAll: return 0;
     }
     return 0;
 }
@@ -50,6 +51,7 @@ const char* NameOf(DataType dt) {
         case DataType::FRotator:   return "FRotator";
         case DataType::FTransform: return "FTransform";
         case DataType::NumericNoByte: return "NumericNoByte";
+        case DataType::NumericAll:    return "NumericAll";
     }
     return "?";
 }
@@ -73,6 +75,7 @@ bool TryParseDataType(const std::string& s, DataType& out) {
     if (s == "FRotator")   { out = DataType::FRotator;   return true; }
     if (s == "FTransform") { out = DataType::FTransform; return true; }
     if (s == "NumericNoByte") { out = DataType::NumericNoByte; return true; }
+    if (s == "NumericAll")    { out = DataType::NumericAll;    return true; }
     return false;
 }
 
@@ -198,6 +201,16 @@ const std::vector<std::string>& PropertyTypeNames(DataType dt) {
         "Int64Property", "UInt64Property",
         "FloatProperty", "DoubleProperty",
     };
+    // NumericAll union — NumericNoByte plus the 1-byte families
+    // (Int8Property + ByteProperty). MUST stay in sync with the names
+    // TryDataTypeFromPropertyTypeName resolves.
+    static const std::vector<std::string> kNumericAll = {
+        "Int8Property",  "ByteProperty",
+        "Int16Property", "UInt16Property",
+        "IntProperty",   "UInt32Property",
+        "Int64Property", "UInt64Property",
+        "FloatProperty", "DoubleProperty",
+    };
     static const std::vector<std::string> kEmpty;
 
     switch (dt) {
@@ -219,6 +232,7 @@ const std::vector<std::string>& PropertyTypeNames(DataType dt) {
         case DataType::FRotator:
         case DataType::FTransform: return kStruct;
         case DataType::NumericNoByte: return kNumericNoByte;
+        case DataType::NumericAll:    return kNumericAll;
     }
     return kEmpty;
 }
@@ -255,7 +269,7 @@ const std::vector<std::string>& VectorStructNames(DataType dt) {
 // --- Multi-numeric meta type helpers ---
 
 bool IsMultiNumericDataType(DataType dt) {
-    return dt == DataType::NumericNoByte;
+    return dt == DataType::NumericNoByte || dt == DataType::NumericAll;
 }
 
 const std::vector<DataType>& MultiNumericMembers(DataType dt) {
@@ -265,17 +279,28 @@ const std::vector<DataType>& MultiNumericMembers(DataType dt) {
         DataType::Int64, DataType::UInt64,
         DataType::Float, DataType::Double,
     };
+    static const std::vector<DataType> kAll = {
+        DataType::Int8,  DataType::UInt8,
+        DataType::Int16, DataType::UInt16,
+        DataType::Int32, DataType::UInt32,
+        DataType::Int64, DataType::UInt64,
+        DataType::Float, DataType::Double,
+    };
     static const std::vector<DataType> kEmpty;
     switch (dt) {
         case DataType::NumericNoByte: return kNoByte;
+        case DataType::NumericAll:    return kAll;
         default:                      return kEmpty;
     }
 }
 
 bool TryDataTypeFromPropertyTypeName(const std::string& propTypeName, DataType& out) {
-    // Only the multi-numeric member set is mapped. ByteProperty /
-    // Int8Property / BoolProperty deliberately return false so the
-    // NumericNoByte walk skips 1-byte + bool fields.
+    // The full numeric member set is mapped (NumericAll includes the
+    // 1-byte families). BoolProperty deliberately returns false — neither
+    // meta type includes bool. NumericNoByte never feeds byte-width names
+    // here because its PropertyTypeNames union excludes them.
+    if (propTypeName == "Int8Property")   { out = DataType::Int8;   return true; }
+    if (propTypeName == "ByteProperty")   { out = DataType::UInt8;  return true; }
     if (propTypeName == "Int16Property")  { out = DataType::Int16;  return true; }
     if (propTypeName == "UInt16Property") { out = DataType::UInt16; return true; }
     if (propTypeName == "IntProperty")    { out = DataType::Int32;  return true; }
@@ -345,6 +370,16 @@ bool BuildNumericTargets(DataType metaDt, const std::string& raw, NumericTargetS
 
     for (DataType m : members) {
         switch (m) {
+            case DataType::Int8:
+                if (hasSigned && sv >= INT8_MIN && sv <= INT8_MAX) {
+                    int8_t t = static_cast<int8_t>(sv); push(m, &t, 1);
+                }
+                break;
+            case DataType::UInt8:
+                if (hasUnsigned && uv <= UINT8_MAX) {
+                    uint8_t t = static_cast<uint8_t>(uv); push(m, &t, 1);
+                }
+                break;
             case DataType::Int16:
                 if (hasSigned && sv >= INT16_MIN && sv <= INT16_MAX) {
                     int16_t t = static_cast<int16_t>(sv); push(m, &t, 2);
