@@ -95,6 +95,7 @@ sections further down this file. Sorted here by recommended start order:
 4. **0c FTransform Translation offset** — S, low risk. Phase 2 footnote. Needs per-version Translation offset detection (UE4 / UE5-non-LWC at +16, UE5 LWC at +32). Currently `VectorStructNames(FTransform)` returns empty → zero hits.
 5. **#2 Live ProcessEvent Call Profiler** — M-L (~1 week), med risk. Hot-path DLL change. The big-impact one but biggest blast radius. Stark already has `s_hookFireCount` — extend with per-UFunction atomic counter + Recording toggle + 3 pipe cmds + new "Live Funcs" tab.
 6. **LiveWalker batch generator (v2 of #3)** — S-M. Heterogeneous rows (functions + fields + struct sub-fields + array elements). Needs UX pass on drilldown state.
+7. **Dual-connection pipe (eliminate head-of-line blocking)** — M, **high risk** (in-process DLL concurrency). **POSTPONED 2026-06-01** — full design written up in [multi-connection-pipe-proposal.md](multi-connection-pipe-proposal.md). Mirror discrete's interactive/bulk split (one pipe, two UI connections, `nMaxInstances=4`, per-client server thread) so value-scan / find-refs / list-all don't freeze browsing. Engine-side concurrency is already safe (build 792/793 + SessionManager); residual risk is Fern's accept/shutdown rewrite. Phase the DLL change behind the unchanged single-conn UI first. Benefit is moderate (parallelised scans already shrank the blocking window) — revisit only if "UI freezes during a big scan" becomes a real pain.
 
 ### Live-game verification waiting on user (no code needed)
 
