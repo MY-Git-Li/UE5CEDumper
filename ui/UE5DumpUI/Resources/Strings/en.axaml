@@ -222,6 +222,25 @@
     <sys:String x:Key="str.Experimental.EnableHint">Enable advanced experimental features</sys:String>
     <sys:String x:Key="str.Experimental.Placeholder">This experimental feature is under construction. See docs/experimental-snapshot-spc-pivot.md.</sys:String>
 
+    <!-- Snapshot tab (experimental — Phase A) -->
+    <sys:String x:Key="str.Snapshot.Intro">Capture every numeric UPROPERTY of every (scoped) object into a persisted snapshot. Snapshots feed SPC Query and Class Pivot. Native (non-UPROPERTY) fields are not captured.</sys:String>
+    <sys:String x:Key="str.Snapshot.NotConnected">Connect to a game to capture snapshots.</sys:String>
+    <sys:String x:Key="str.Snapshot.Scope">Scope:</sys:String>
+    <sys:String x:Key="str.Snapshot.GameOnly">Game objects only</sys:String>
+    <sys:String x:Key="str.Snapshot.Label">Label:</sys:String>
+    <sys:String x:Key="str.Snapshot.LabelWatermark">(optional — defaults to a timestamp)</sys:String>
+    <sys:String x:Key="str.Snapshot.Capture">Capture Snapshot</sys:String>
+    <sys:String x:Key="str.Snapshot.Cancel">Cancel</sys:String>
+    <sys:String x:Key="str.Snapshot.Refresh">Refresh</sys:String>
+    <sys:String x:Key="str.Snapshot.Delete">Delete Selected</sys:String>
+    <sys:String x:Key="str.Snapshot.Saved">Saved snapshots</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Label">Label</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Captured">Captured (UTC)</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Objects">Objects</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Fields">Fields</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Scope">Scope</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Ue">UE</sys:String>
+
     <!-- Proxy Deploy -->
     <sys:String x:Key="str.ProxyDeploy.ProxyType">Proxy DLL:</sys:String>
     <sys:String x:Key="str.ProxyDeploy.Type.Version">version.dll</sys:String>

@@ -1,0 +1,67 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UE5DumpUI.ViewModels"
+             x:Class="UE5DumpUI.Views.SnapshotPanel"
+             x:DataType="vm:SnapshotViewModel">
+
+  <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,*">
+
+    <!-- Intro -->
+    <TextBlock Grid.Row="0" Text="{StaticResource str.Snapshot.Intro}"
+               Foreground="#999" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+    <!-- Capture controls -->
+    <Border Grid.Row="1" Background="#252526" CornerRadius="4" Padding="12" Margin="0,0,0,10"
+            BorderBrush="#3C3C3C" BorderThickness="1">
+      <StackPanel Spacing="8">
+        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+          <TextBlock Text="{StaticResource str.Snapshot.Scope}" Foreground="#CCCCCC" VerticalAlignment="Center"/>
+          <ComboBox ItemsSource="{Binding ScopeOptions}" SelectedItem="{Binding SelectedScope}" MinWidth="150"/>
+          <CheckBox Content="{StaticResource str.Snapshot.GameOnly}" IsChecked="{Binding GameOnly}" Foreground="#CCCCCC"/>
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+          <TextBlock Text="{StaticResource str.Snapshot.Label}" Foreground="#CCCCCC" VerticalAlignment="Center"/>
+          <TextBox Text="{Binding Label}" PlaceholderText="{StaticResource str.Snapshot.LabelWatermark}" Width="340"/>
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+          <Button Content="{StaticResource str.Snapshot.Capture}" Command="{Binding CaptureCommand}"
+                  IsEnabled="{Binding CanCapture}" IsVisible="{Binding !IsCapturing}"
+                  Classes="accent" Padding="12,5" FontWeight="Bold"/>
+          <Button Content="{StaticResource str.Snapshot.Cancel}" Command="{Binding CancelCommand}"
+                  IsVisible="{Binding IsCapturing}" Padding="12,5"/>
+          <ProgressBar Value="{Binding Progress}" Minimum="0" Maximum="1" Width="220" Height="6"
+                       IsVisible="{Binding IsCapturing}" VerticalAlignment="Center"/>
+        </StackPanel>
+        <TextBlock Text="{StaticResource str.Snapshot.NotConnected}" Foreground="#888" FontSize="11"
+                   IsVisible="{Binding !CanCapture}"/>
+        <TextBlock Text="{Binding StatusText}" Foreground="#4EC9B0" FontSize="12" TextWrapping="Wrap"
+                   IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+        <TextBlock Text="{Binding ErrorMessage}" Foreground="#F44747" FontSize="12" TextWrapping="Wrap"
+                   IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+      </StackPanel>
+    </Border>
+
+    <!-- List header + actions -->
+    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="10" Margin="0,0,0,6" VerticalAlignment="Center">
+      <TextBlock Text="{StaticResource str.Snapshot.Saved}" Foreground="#9CDCFE"
+                 FontWeight="SemiBold" VerticalAlignment="Center"/>
+      <Button Content="{StaticResource str.Snapshot.Refresh}" Command="{Binding RefreshCommand}" Padding="8,3"/>
+      <Button Content="{StaticResource str.Snapshot.Delete}" Command="{Binding DeleteCommand}"
+              CommandParameter="{Binding SelectedSnapshot}" Padding="8,3"/>
+    </StackPanel>
+
+    <!-- Snapshot list -->
+    <DataGrid Grid.Row="3" ItemsSource="{Binding Snapshots}" SelectedItem="{Binding SelectedSnapshot}"
+              IsReadOnly="True" GridLinesVisibility="Horizontal" Background="#1E1E1E"
+              CanUserResizeColumns="True" CanUserSortColumns="True">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Label}"    Binding="{Binding Label}"       Width="*"/>
+        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Captured}" Binding="{Binding CapturedAt}"  Width="190"/>
+        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Objects}"  Binding="{Binding ObjectCount}" Width="90"/>
+        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Fields}"   Binding="{Binding FieldCount}"  Width="90"/>
+        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Scope}"    Binding="{Binding Scope}"       Width="130"/>
+        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Ue}"       Binding="{Binding UeVersion}"   Width="60"/>
+      </DataGrid.Columns>
+    </DataGrid>
+  </Grid>
+</UserControl>

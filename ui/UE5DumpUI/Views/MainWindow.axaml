@@ -284,10 +284,7 @@
              docs/experimental-snapshot-spc-pivot.md. -->
         <TabItem Header="{StaticResource str.Tab.Snapshot}"
                  IsVisible="{Binding ExperimentalEnabled}">
-          <TextBlock Text="{StaticResource str.Experimental.Placeholder}"
-                     Foreground="#888" FontSize="13" TextWrapping="Wrap"
-                     HorizontalAlignment="Center" VerticalAlignment="Center"
-                     MaxWidth="520" TextAlignment="Center"/>
+          <views:SnapshotPanel DataContext="{Binding Snapshot}"/>
         </TabItem>
         <TabItem Header="{StaticResource str.Tab.SpcQuery}"
                  IsVisible="{Binding ExperimentalEnabled}">

@@ -126,6 +126,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public ValueSearchViewModel ValueSearch { get; }
     public ConsoleViewModel Console { get; }
     public ProxyDeployViewModel? ProxyDeploy { get; }
+    /// <summary>Experimental Snapshot tab — null when no snapshot store was
+    /// injected (e.g. in unit tests). Gated behind <see cref="ExperimentalEnabled"/>.</summary>
+    public SnapshotViewModel? Snapshot { get; }
 
     partial void OnSelectedAddressFormatIndexChanged(int value)
     {
@@ -189,7 +192,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         AobUsageService? aobUsage = null,
         IAobMakerBridge? aobMaker = null,
         IProxyDeployService? proxyDeploy = null,
-        IExperimentalGate? experimentalGate = null)
+        IExperimentalGate? experimentalGate = null,
+        ISnapshotStore? snapshotStore = null)
     {
         _pipeClient = pipeClient;
         _dump = dump;
@@ -215,6 +219,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         InterestingProperties = new InterestingPropertiesViewModel(dump, log);
         ValueSearch = new ValueSearchViewModel(dump, log);
         Console = new ConsoleViewModel(dump, log);
+        if (snapshotStore != null)
+            Snapshot = new SnapshotViewModel(dump, snapshotStore, log);
 
         if (proxyDeploy != null)
             ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log);
@@ -232,6 +238,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 ObjectTree.SetEngineState(state);
                 LiveWalker.SetEngineState(state);
                 InstanceFinder.SetEngineState(state);
+                Snapshot?.SetEngineState(state);
 
                 _ = LiveWalker.CheckAobMakerAsync();
 
@@ -989,6 +996,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ObjectTree.SetEngineState(state);
         LiveWalker.SetEngineState(state);
         InstanceFinder.SetEngineState(state);
+        Snapshot?.SetEngineState(state);
 
         // Fire-and-forget: check AOBMaker availability for Live Walker
         _ = LiveWalker.CheckAobMakerAsync();
