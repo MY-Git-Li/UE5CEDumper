@@ -1,5 +1,6 @@
 using System.IO;
 using System.Linq;
+using UE5DumpUI.Core;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 using UE5DumpUI.ViewModels;
@@ -123,5 +124,68 @@ public class ClassPivotViewModelTests : IDisposable
         nav = null;
         vm.OpenInLiveWalkerCommand.Execute(new PivotResultRow { ObjAddr = "" });
         Assert.Null(nav);
+    }
+
+    // ---- Concurrency guard: a stale field-load must not clobber the latest ----
+
+    // ISnapshotStore stub whose ListPivotFieldsAsync is gated per class so a test
+    // can complete an earlier (superseded) load AFTER a later one.
+    private sealed class GatedStore : ISnapshotStore
+    {
+        public readonly Dictionary<string, TaskCompletionSource<IReadOnlyList<PivotFieldInfo>>> Gates = new();
+
+        public string DatabasePath => "";
+        public void SetActiveGame(string? peHash) { }
+        public Task<IReadOnlyList<SnapshotMeta>> ListSnapshotsAsync(CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<SnapshotMeta>>(new[] { new SnapshotMeta { Id = 1, Label = "s" } });
+        public Task<IReadOnlyList<PivotClassInfo>> ListPivotClassesAsync(long snapshotId, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<PivotClassInfo>>(new[]
+            {
+                new PivotClassInfo { ClassName = "A", InstanceCount = 2 },
+                new PivotClassInfo { ClassName = "B", InstanceCount = 2 },
+            });
+        public Task<IReadOnlyList<PivotFieldInfo>> ListPivotFieldsAsync(long snapshotId, string className, CancellationToken ct = default)
+        {
+            var tcs = new TaskCompletionSource<IReadOnlyList<PivotFieldInfo>>();
+            Gates[className] = tcs;
+            return tcs.Task;
+        }
+
+        public Task<long> CreateSnapshotAsync(SnapshotMeta meta, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<int> WriteChunkAsync(long id, IReadOnlyList<SnapshotCapturedObject> o, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task FinalizeSnapshotAsync(long id, int oc, int fc, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task DeleteSnapshotAsync(long id, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<SnapshotUsage> GetUsageAsync(CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<SnapshotDiffResult> DiffSnapshotsAsync(long a, long b, SnapshotDiffFilter f, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<SpcResult> SpcQueryAsync(SpcQuery q, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<PivotResult> PivotAsync(PivotQuery q, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<int> EnforceQuotaAsync(long bytes, CancellationToken ct = default) => throw new NotImplementedException();
+    }
+
+    private static PivotFieldInfo Field(string name)
+        => new() { Name = name, DeclaredType = "IntProperty", DistinctCount = 1, InstanceCount = 2 };
+
+    [Fact]
+    public async Task RapidClassSwitch_StaleLoadDoesNotClobberLatest()
+    {
+        var store = new GatedStore();
+        var vm = new ClassPivotViewModel(store, new MockLoggingService());
+        await vm.RefreshAsync();        // loads snapshot + classes (classes are immediate)
+        await vm.PendingLoad!;
+
+        // Select A (load A starts, gated), then B (load B starts, gated).
+        vm.SelectedClass = vm.Classes.First(c => c.ClassName == "A");
+        var loadA = vm.PendingLoad!;
+        vm.SelectedClass = vm.Classes.First(c => c.ClassName == "B");
+        var loadB = vm.PendingLoad!;
+
+        // Complete the NEWER load first, then the stale one.
+        store.Gates["B"].SetResult(new[] { Field("BetaField") });
+        await loadB;
+        store.Gates["A"].SetResult(new[] { Field("AlphaField") });
+        await loadA;
+
+        // The stale A load must have bailed — Fields shows only B's field.
+        Assert.Equal("BetaField", Assert.Single(vm.Fields).Name);
     }
 }

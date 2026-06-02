@@ -48,6 +48,12 @@ public partial class ClassPivotViewModel : ViewModelBase
     private readonly IPlatformService? _platform;
     private EngineState? _engineState;
     private readonly List<PivotClassInfo> _allClasses = new();
+    // Monotonic guards so a stale (superseded) async load can't clobber the
+    // collections after a newer snapshot/class selection. Rapidly switching the
+    // class ComboBox would otherwise interleave two loads at the await boundary
+    // and leave Fields holding a mix of two classes.
+    private int _classLoadId;
+    private int _fieldLoadId;
 
     [ObservableProperty] private SnapshotMeta? _selectedSnapshot;
     [ObservableProperty] private string _classFilter = "";
@@ -135,9 +141,12 @@ public partial class ClassPivotViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(CanRunPivot));
         if (SelectedSnapshot == null) { _allClasses.Clear(); Classes.Clear(); return; }
+        int id = ++_classLoadId;
+        long snapId = SelectedSnapshot.Id;
         try
         {
-            var list = await _store.ListPivotClassesAsync(SelectedSnapshot.Id);
+            var list = await _store.ListPivotClassesAsync(snapId);
+            if (id != _classLoadId) return;   // a newer snapshot superseded us
             _allClasses.Clear();
             _allClasses.AddRange(list);
             ApplyClassFilter();
@@ -160,14 +169,23 @@ public partial class ClassPivotViewModel : ViewModelBase
 
     private async Task LoadFieldsAsync()
     {
-        Fields.Clear();
-        KeyFieldOptions.Clear();
-        Results.Clear();
-        if (SelectedSnapshot == null || SelectedClass == null) return;
+        if (SelectedSnapshot == null || SelectedClass == null)
+        {
+            Fields.Clear(); KeyFieldOptions.Clear(); Results.Clear();
+            return;
+        }
+        int id = ++_fieldLoadId;
+        long snapId = SelectedSnapshot.Id;
+        string cls = SelectedClass.ClassName;
         try
         {
-            var fields = await _store.ListPivotFieldsAsync(SelectedSnapshot.Id, SelectedClass.ClassName);
-            string cls = SelectedClass.ClassName;
+            var fields = await _store.ListPivotFieldsAsync(snapId, cls);
+            // A newer class selection superseded us — leave its results intact.
+            // (Clear is deferred to here so a stale load can't wipe the latest.)
+            if (id != _fieldLoadId) return;
+            Fields.Clear();
+            KeyFieldOptions.Clear();
+            Results.Clear();
             foreach (var f in fields)
             {
                 Fields.Add(new PivotFieldPick(f,

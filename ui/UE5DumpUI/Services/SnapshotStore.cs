@@ -626,9 +626,17 @@ SELECT COUNT(*) FROM fields a WHERE a.snapshot_id=$in AND a.array_field IS NULL 
         sql.Append(" ORDER BY gobjects_index;");
         cmd.CommandText = sql.ToString();
 
+        // Defensive input cap: a pathologically large class shouldn't pull an
+        // unbounded row set into memory. Far above any realistic class fan-out;
+        // if it ever fires we log it and flag the result truncated (no silent
+        // caps — see the repo's lessons-learned).
+        const int fetchRowCap = 2_000_000;
+        bool capped = false;
         await using (var r = await cmd.ExecuteReaderAsync(ct))
         {
             while (await r.ReadAsync(ct))
+            {
+                if (rows.Count >= fetchRowCap) { capped = true; break; }
                 rows.Add(new PivotInputRow
                 {
                     ObjectIndex  = r.IsDBNull(0) ? -1 : r.GetInt64(0),
@@ -639,8 +647,15 @@ SELECT COUNT(*) FROM fields a WHERE a.snapshot_id=$in AND a.array_field IS NULL 
                     DeclaredType = r.IsDBNull(5) ? "" : r.GetString(5),
                     Hex          = r.IsDBNull(6) ? "" : r.GetString(6),
                 });
+            }
         }
-        return PivotEngine.Build(rows, query);
+        if (capped)
+            _log?.Warn(Constants.LogCatView,
+                $"Pivot: row fetch hit the {fetchRowCap:N0} cap for class {query.ClassName} — results truncated");
+
+        var result = PivotEngine.Build(rows, query);
+        if (capped) result.Truncated = true;
+        return result;
     }
 
     public async Task DeleteSnapshotAsync(long snapshotId, CancellationToken ct = default)
