@@ -15,7 +15,7 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
 [![C++](https://img.shields.io/badge/C++-23-00599C)](https://isocpp.org/)
 [![Avalonia](https://img.shields.io/badge/Avalonia-UI-8B5CF6)](https://avaloniaui.net/)
-[![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-CC785C?logo=claude)](https://claude.ai/code)
 
 ## 螢幕截圖 (Screenshots)
@@ -178,4 +178,4 @@ https://opencheattables.com/viewtopic.php?f=17&t=1797
 
 ---
 
-**授權條款**: [GPL-3.0](LICENSE) © 2026 bbfox0703
+**授權條款**: [MIT](LICENSE) © 2026 bbfox0703
