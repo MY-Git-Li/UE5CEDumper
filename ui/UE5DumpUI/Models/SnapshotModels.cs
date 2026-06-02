@@ -23,6 +23,26 @@ public sealed class SnapshotMeta
     public int    FieldCount    { get; set; }
     /// <summary>Capture scope tag, e.g. "NumericNoByte".</summary>
     public string Scope         { get; set; } = "NumericNoByte";
+
+    /// <summary>Estimated on-disk size of this snapshot in bytes (field_count
+    /// pro-rated against the DB file size). Computed by the store on list, not
+    /// persisted — snapshots share one per-game DB file, so exact per-snapshot
+    /// bytes aren't recoverable.</summary>
+    public long EstBytes { get; set; }
+
+    /// <summary>Human-readable estimated size, e.g. "42.3 MB".</summary>
+    public string EstSizeDisplay => SnapshotFormat.Bytes(EstBytes);
+}
+
+/// <summary>Per-game snapshot DB disk usage, for the quota/usage UI.</summary>
+public sealed class SnapshotUsage
+{
+    /// <summary>Active game's DB file size in bytes.</summary>
+    public long   GameDbBytes   { get; set; }
+    /// <summary>Sum of all snapshots.*.db files in bytes (all games).</summary>
+    public long   AllGamesBytes { get; set; }
+    /// <summary>Snapshots in the active game's DB.</summary>
+    public int    SnapshotCount { get; set; }
 }
 
 /// <summary>One UObject captured in a snapshot chunk (transient — flattened

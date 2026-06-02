@@ -4,7 +4,7 @@
              x:Class="UE5DumpUI.Views.SnapshotPanel"
              x:DataType="vm:SnapshotViewModel">
 
-  <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,*">
+  <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,Auto,*">
 
     <!-- Intro -->
     <TextBlock Grid.Row="0" Text="{StaticResource str.Snapshot.Intro}"
@@ -18,6 +18,10 @@
           <TextBlock Text="{StaticResource str.Snapshot.Scope}" Foreground="#CCCCCC" VerticalAlignment="Center"/>
           <ComboBox ItemsSource="{Binding ScopeOptions}" SelectedItem="{Binding SelectedScope}" MinWidth="150"/>
           <CheckBox Content="{StaticResource str.Snapshot.GameOnly}" IsChecked="{Binding GameOnly}" Foreground="#CCCCCC"/>
+          <TextBlock Text="{StaticResource str.Snapshot.Quota}" Foreground="#CCCCCC"
+                     VerticalAlignment="Center" Margin="12,0,0,0"/>
+          <ComboBox ItemsSource="{Binding QuotaOptions}" SelectedItem="{Binding SelectedQuotaLabel}"
+                    MinWidth="110" ToolTip.Tip="{StaticResource str.Snapshot.QuotaHint}"/>
         </StackPanel>
         <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
           <TextBlock Text="{StaticResource str.Snapshot.Label}" Foreground="#CCCCCC" VerticalAlignment="Center"/>
@@ -50,8 +54,19 @@
               CommandParameter="{Binding SelectedSnapshot}" Padding="8,3"/>
     </StackPanel>
 
+    <!-- Usage / quota -->
+    <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="10" Margin="0,0,0,6" VerticalAlignment="Center">
+      <TextBlock Text="{StaticResource str.Snapshot.Usage}" Foreground="#999" VerticalAlignment="Center"/>
+      <TextBlock Text="{Binding UsageText}" Foreground="#D4D4D4" FontFamily="Consolas"
+                 VerticalAlignment="Center" MinWidth="150"/>
+      <ProgressBar Value="{Binding UsageRatio}" Minimum="0" Maximum="1" Width="180" Height="6"
+                   IsVisible="{Binding ShowUsageBar}" VerticalAlignment="Center"/>
+      <TextBlock Text="{Binding AllGamesText}" Foreground="#777" FontSize="11"
+                 VerticalAlignment="Center" Margin="12,0,0,0"/>
+    </StackPanel>
+
     <!-- Snapshot list -->
-    <DataGrid Grid.Row="3" ItemsSource="{Binding Snapshots}" SelectedItem="{Binding SelectedSnapshot}"
+    <DataGrid Grid.Row="4" ItemsSource="{Binding Snapshots}" SelectedItem="{Binding SelectedSnapshot}"
               IsReadOnly="True" GridLinesVisibility="Horizontal" Background="#1E1E1E"
               CanUserResizeColumns="True" CanUserSortColumns="True">
       <DataGrid.Columns>
@@ -59,6 +74,7 @@
         <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Captured}" Binding="{Binding CapturedAt}"  Width="190"/>
         <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Objects}"  Binding="{Binding ObjectCount}" Width="90"/>
         <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Fields}"   Binding="{Binding FieldCount}"  Width="90"/>
+        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Size}"     Binding="{Binding EstSizeDisplay}" Width="90"/>
         <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Scope}"    Binding="{Binding Scope}"       Width="130"/>
         <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Ue}"       Binding="{Binding UeVersion}"   Width="60"/>
       </DataGrid.Columns>

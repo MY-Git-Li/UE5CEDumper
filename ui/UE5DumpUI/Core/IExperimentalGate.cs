@@ -15,6 +15,11 @@ public interface IExperimentalGate
     /// <summary>True when the experimental tabs should be shown.</summary>
     bool IsEnabled { get; set; }
 
+    /// <summary>Per-game snapshot DB size cap in MB (0 = unlimited). Persisted
+    /// alongside <see cref="IsEnabled"/>; setting it does not raise
+    /// <see cref="Changed"/> (the Snapshot tab owns its own quota UI).</summary>
+    int SnapshotQuotaMb { get; set; }
+
     /// <summary>Raised whenever <see cref="IsEnabled"/> changes.</summary>
     event EventHandler? Changed;
 }

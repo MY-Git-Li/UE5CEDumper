@@ -220,7 +220,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ValueSearch = new ValueSearchViewModel(dump, log);
         Console = new ConsoleViewModel(dump, log);
         if (snapshotStore != null)
-            Snapshot = new SnapshotViewModel(dump, snapshotStore, log);
+            Snapshot = new SnapshotViewModel(dump, snapshotStore, log, experimentalGate);
 
         if (proxyDeploy != null)
             ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log);

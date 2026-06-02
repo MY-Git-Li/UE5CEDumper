@@ -239,7 +239,113 @@ public sealed class SnapshotStore : ISnapshotStore
                 Scope         = reader.IsDBNull(8) ? "" : reader.GetString(8),
             });
         }
+
+        // Estimate each snapshot's on-disk size by pro-rating the DB file size
+        // across all field rows (snapshots share one per-game DB file).
+        long fileBytes = FileSizeOf(DatabasePath);
+        long totalFields = 0;
+        foreach (var m in list) totalFields += m.FieldCount;
+        if (totalFields > 0 && fileBytes > 0)
+        {
+            double bytesPerField = (double)fileBytes / totalFields;
+            foreach (var m in list) m.EstBytes = (long)(m.FieldCount * bytesPerField);
+        }
         return list;
+    }
+
+    public async Task<SnapshotUsage> GetUsageAsync(CancellationToken ct = default)
+    {
+        var usage = new SnapshotUsage();
+        await using (var conn = await OpenAsync(ct))
+        {
+            // Fold the WAL back into the .db so the file size reflects all data.
+            await ExecAsync(conn, "PRAGMA wal_checkpoint(TRUNCATE);", ct);
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM snapshots;";
+            usage.SnapshotCount = (int)(long)(await cmd.ExecuteScalarAsync(ct) ?? 0L);
+        }
+        usage.GameDbBytes   = FileSizeOf(DatabasePath);
+        usage.AllGamesBytes = AllGamesBytes();
+        return usage;
+    }
+
+    public async Task<int> EnforceQuotaAsync(long quotaBytes, CancellationToken ct = default)
+    {
+        if (quotaBytes <= 0) return 0;  // unlimited
+
+        await using var conn = await OpenAsync(ct);
+        await ExecAsync(conn, "PRAGMA wal_checkpoint(TRUNCATE);", ct);
+
+        long fileBytes = FileSizeOf(DatabasePath);
+        if (fileBytes <= quotaBytes) return 0;
+
+        // Read snapshots newest-first with their field counts.
+        var rows = new List<(long id, int fields)>();
+        long totalFields = 0;
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT id, field_count FROM snapshots ORDER BY id DESC;";
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                int fc = r.IsDBNull(1) ? 0 : r.GetInt32(1);
+                rows.Add((r.GetInt64(0), fc));
+                totalFields += fc;
+            }
+        }
+        if (rows.Count <= 1) return 0;  // always keep at least the newest
+
+        double bytesPerField = totalFields > 0 ? (double)fileBytes / totalFields : 0;
+        long kept = 0;
+        var dropIds = new List<long>();
+        bool keeping = true;
+        for (int i = 0; i < rows.Count; i++)
+        {
+            long est = (long)(rows[i].fields * bytesPerField);
+            if (keeping && (i == 0 || kept + est <= quotaBytes))
+                kept += est;
+            else
+            {
+                keeping = false;       // once over, every OLDER snapshot drops too
+                dropIds.Add(rows[i].id);
+            }
+        }
+        if (dropIds.Count == 0) return 0;
+
+        {
+            await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
+            await using var del = conn.CreateCommand();
+            del.Transaction = tx;
+            del.CommandText = "DELETE FROM fields WHERE snapshot_id=$id; DELETE FROM snapshots WHERE id=$id;";
+            var p = del.Parameters.Add("$id", SqliteType.Integer);
+            foreach (var id in dropIds) { p.Value = id; await del.ExecuteNonQueryAsync(ct); }
+            await tx.CommitAsync(ct);
+        }
+        // Reclaim disk now that rows are gone (DELETE alone doesn't shrink).
+        await ExecAsync(conn, "VACUUM;", ct);
+        await ExecAsync(conn, "PRAGMA wal_checkpoint(TRUNCATE);", ct);
+
+        _log?.Info(Constants.LogCatView,
+            $"SnapshotStore: quota eviction dropped {dropIds.Count} oldest snapshot(s)");
+        return dropIds.Count;
+    }
+
+    private static long FileSizeOf(string path)
+    {
+        try { var fi = new FileInfo(path); return fi.Exists ? fi.Length : 0; }
+        catch { return 0; }
+    }
+
+    private long AllGamesBytes()
+    {
+        try
+        {
+            long sum = 0;
+            foreach (var f in Directory.EnumerateFiles(_dir, $"{Constants.SnapshotDbPrefix}.*.db"))
+                sum += FileSizeOf(f);
+            return sum;
+        }
+        catch { return 0; }
     }
 
     public async Task DeleteSnapshotAsync(long snapshotId, CancellationToken ct = default)

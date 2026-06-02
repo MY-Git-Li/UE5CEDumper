@@ -233,7 +233,11 @@
     <sys:String x:Key="str.Snapshot.Cancel">Cancel</sys:String>
     <sys:String x:Key="str.Snapshot.Refresh">Refresh</sys:String>
     <sys:String x:Key="str.Snapshot.Delete">Delete Selected</sys:String>
+    <sys:String x:Key="str.Snapshot.Quota">Per-game quota:</sys:String>
+    <sys:String x:Key="str.Snapshot.QuotaHint">When a capture exceeds the quota, the oldest snapshots of this game are dropped automatically.</sys:String>
+    <sys:String x:Key="str.Snapshot.Usage">Used:</sys:String>
     <sys:String x:Key="str.Snapshot.Saved">Saved snapshots</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Size">Est. Size</sys:String>
     <sys:String x:Key="str.Snapshot.Col.Label">Label</sys:String>
     <sys:String x:Key="str.Snapshot.Col.Captured">Captured (UTC)</sys:String>
     <sys:String x:Key="str.Snapshot.Col.Objects">Objects</sys:String>

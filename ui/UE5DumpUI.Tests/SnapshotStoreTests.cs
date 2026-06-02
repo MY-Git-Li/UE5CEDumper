@@ -73,6 +73,51 @@ public class SnapshotStoreTests : IDisposable
         Assert.Empty(await _store.ListSnapshotsAsync(ct));
     }
 
+    private async Task<long> SeedSnapshotAsync(string label, int idx, CancellationToken ct)
+    {
+        long id = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = label }, ct);
+        await _store.WriteChunkAsync(id, new[] { MakeObject(idx, ("X", "IntProperty", "01000000")) }, ct);
+        await _store.FinalizeSnapshotAsync(id, 1, 1, ct);
+        return id;
+    }
+
+    [Fact]
+    public async Task EnforceQuota_DropsOldestKeepsNewest()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await SeedSnapshotAsync("a", 1, ct);
+        await SeedSnapshotAsync("b", 2, ct);
+        await SeedSnapshotAsync("c", 3, ct);
+
+        // A 1-byte quota evicts everything but the newest (always kept).
+        int dropped = await _store.EnforceQuotaAsync(1, ct);
+        Assert.Equal(2, dropped);
+        Assert.Equal("c", Assert.Single(await _store.ListSnapshotsAsync(ct)).Label);
+    }
+
+    [Fact]
+    public async Task EnforceQuota_UnlimitedIsNoOp()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await SeedSnapshotAsync("a", 1, ct);
+        Assert.Equal(0, await _store.EnforceQuotaAsync(0, ct));   // 0 = unlimited
+        Assert.Single(await _store.ListSnapshotsAsync(ct));
+    }
+
+    [Fact]
+    public async Task GetUsage_ReportsSizeAndCount()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await SeedSnapshotAsync("a", 1, ct);
+        var u = await _store.GetUsageAsync(ct);
+        Assert.Equal(1, u.SnapshotCount);
+        Assert.True(u.GameDbBytes > 0);
+        Assert.True(u.AllGamesBytes >= u.GameDbBytes);
+
+        // List populates a positive size estimate for snapshots with fields.
+        Assert.True(Assert.Single(await _store.ListSnapshotsAsync(ct)).EstBytes > 0);
+    }
+
     [Fact]
     public async Task WriteChunk_EmptyIsNoOp()
     {

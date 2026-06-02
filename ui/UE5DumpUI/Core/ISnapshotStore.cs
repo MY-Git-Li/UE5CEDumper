@@ -35,9 +35,20 @@ public interface ISnapshotStore
     Task FinalizeSnapshotAsync(long snapshotId, int objectCount, int fieldCount,
                                CancellationToken ct = default);
 
-    /// <summary>All snapshots, newest first.</summary>
+    /// <summary>All snapshots for the active game, newest first. Each row's
+    /// <see cref="SnapshotMeta.EstBytes"/> is set (pro-rated from the DB size).</summary>
     Task<IReadOnlyList<SnapshotMeta>> ListSnapshotsAsync(CancellationToken ct = default);
 
     /// <summary>Delete a snapshot and all its field rows.</summary>
     Task DeleteSnapshotAsync(long snapshotId, CancellationToken ct = default);
+
+    /// <summary>Active game's DB file size + all-games total + snapshot count.</summary>
+    Task<SnapshotUsage> GetUsageAsync(CancellationToken ct = default);
+
+    /// <summary>Drop oldest snapshots (FIFO) from the active game's DB until it
+    /// fits <paramref name="quotaBytes"/>, then VACUUM to reclaim the space. The
+    /// newest snapshot is always kept (even if it alone exceeds the quota).
+    /// <paramref name="quotaBytes"/> &lt;= 0 means unlimited (no-op). Returns the
+    /// number of snapshots dropped.</summary>
+    Task<int> EnforceQuotaAsync(long quotaBytes, CancellationToken ct = default);
 }

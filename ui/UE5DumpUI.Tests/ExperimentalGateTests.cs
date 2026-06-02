@@ -62,6 +62,22 @@ public class ExperimentalGateTests : IDisposable
     }
 
     [Fact]
+    public void SnapshotQuotaMb_DefaultsTo1GB_AndPersists()
+    {
+        var gate = new ExperimentalGate(_platform);
+        Assert.Equal(1024, gate.SnapshotQuotaMb);   // default 1 GB
+
+        gate.SnapshotQuotaMb = 2048;
+        Assert.Equal(2048, new ExperimentalGate(_platform).SnapshotQuotaMb);  // persisted
+
+        // Quota and the enable flag round-trip independently.
+        gate.IsEnabled = true;
+        var reopened = new ExperimentalGate(_platform);
+        Assert.True(reopened.IsEnabled);
+        Assert.Equal(2048, reopened.SnapshotQuotaMb);
+    }
+
+    [Fact]
     public void Changed_FiresOnFlip_NotOnSameValue()
     {
         var gate = new ExperimentalGate(_platform);

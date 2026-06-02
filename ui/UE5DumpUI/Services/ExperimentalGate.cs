@@ -17,6 +17,7 @@ public sealed class ExperimentalGate : IExperimentalGate
     private readonly string _filePath;
     private readonly ILoggingService? _log;
     private bool _enabled;
+    private int _quotaMb = 1024;
 
     // Source-generated JSON context (reflection-based JSON is disabled in trimmed/AOT builds)
     private static readonly ExperimentalSettingsJsonContext s_jsonCtx = ExperimentalSettingsJsonContext.Default;
@@ -29,7 +30,7 @@ public sealed class ExperimentalGate : IExperimentalGate
         var dir = Path.Combine(platform.GetAppDataPath(), Constants.LogFolderName);
         Directory.CreateDirectory(dir);
         _filePath = Path.Combine(dir, Constants.ExperimentalSettingsFile);
-        _enabled = Load();
+        Load();
     }
 
     public bool IsEnabled
@@ -44,19 +45,33 @@ public sealed class ExperimentalGate : IExperimentalGate
         }
     }
 
-    private bool Load()
+    public int SnapshotQuotaMb
+    {
+        get => _quotaMb;
+        set
+        {
+            if (_quotaMb == value) return;
+            _quotaMb = value < 0 ? 0 : value;
+            Save();  // no Changed — tab-visibility doesn't depend on the quota
+        }
+    }
+
+    private void Load()
     {
         try
         {
-            if (!File.Exists(_filePath)) return false;
+            if (!File.Exists(_filePath)) return;
             var json = File.ReadAllText(_filePath);
             var settings = JsonSerializer.Deserialize(json, s_jsonCtx.ExperimentalSettings);
-            return settings?.Enabled ?? false;
+            if (settings != null)
+            {
+                _enabled = settings.Enabled;
+                _quotaMb = settings.SnapshotQuotaMb < 0 ? 0 : settings.SnapshotQuotaMb;
+            }
         }
         catch (Exception ex)
         {
-            _log?.Warn(Constants.LogCatInit, $"ExperimentalGate: failed to load, defaulting off: {ex.Message}");
-            return false;
+            _log?.Warn(Constants.LogCatInit, $"ExperimentalGate: failed to load, using defaults: {ex.Message}");
         }
     }
 
@@ -65,11 +80,11 @@ public sealed class ExperimentalGate : IExperimentalGate
         try
         {
             var json = JsonSerializer.Serialize(
-                new ExperimentalSettings { Enabled = _enabled }, s_jsonCtx.ExperimentalSettings);
+                new ExperimentalSettings { Enabled = _enabled, SnapshotQuotaMb = _quotaMb },
+                s_jsonCtx.ExperimentalSettings);
             var tempPath = _filePath + ".tmp";
             File.WriteAllText(tempPath, json);
             File.Move(tempPath, _filePath, overwrite: true);
-            _log?.Info(Constants.LogCatInit, $"ExperimentalGate: experimental features {(_enabled ? "enabled" : "disabled")}");
         }
         catch (Exception ex)
         {
