@@ -29,10 +29,15 @@ deferred).
 
 Build in order; each phase gates the next:
 
-- **Phase 0 — Gating checkbox** (persisted). *Effort S · Risk low · no DLL.*
-  `bbfox` credit in System tab → checkbox; tooltip "Enable advanced experimental
-  features"; new `ExperimentalGate` service (model on `AobUsageService`); 3 tabs
-  bind `IsVisible` to `MainWindowViewModel.ExperimentalEnabled`.
+- ~~**Phase 0 — Gating checkbox** (persisted).~~ ✅ **SHIPPED 2026-06-02
+  (`5b8a47d`, build 805).** `ExperimentalGate` service +
+  `IExperimentalGate` (persists to `%LOCALAPPDATA%\UE5CEDumper\experimental.json`,
+  source-gen JSON, shared between PointerPanelVM checkbox + MainWindowVM tab
+  gating via `Changed`). System-tab bbfox credit → checkbox (tooltip "Enable
+  advanced experimental features"); 3 placeholder tabs appended last,
+  `IsVisible` bound to `ExperimentalEnabled`. +4 gate tests → 1489 green; AOT
+  publish clean. (Also fixed an unrelated `build.ps1 -Target Test` crash from a
+  stray empty `--no-restore` arg, `4292004`.)
 - **Phase A — Snapshot** (multi-session persistent foundation).
   - A1 DLL streaming capture (`begin/snapshot_chunk/end_snapshot`), all-numeric +
     identity columns + array elements, reusing `Aura` container walk + `Ubel`.
