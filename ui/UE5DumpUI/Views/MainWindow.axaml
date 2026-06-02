@@ -272,6 +272,33 @@
         <TabItem Header="{StaticResource str.Tab.ProxyDeploy}">
           <views:ProxyDeployPanel DataContext="{Binding ProxyDeploy}"/>
         </TabItem>
+
+        <!-- Experimental tabs (Phase 0): hidden unless the user opts in via the
+             System-tab credit checkbox. Appended last so existing tab indices
+             (used by OnSelectedTabIndexChanged) don't shift. Content is a
+             placeholder until Phases A/B/C land. See
+             docs/experimental-snapshot-spc-pivot.md. -->
+        <TabItem Header="{StaticResource str.Tab.Snapshot}"
+                 IsVisible="{Binding ExperimentalEnabled}">
+          <TextBlock Text="{StaticResource str.Experimental.Placeholder}"
+                     Foreground="#888" FontSize="13" TextWrapping="Wrap"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"
+                     MaxWidth="520" TextAlignment="Center"/>
+        </TabItem>
+        <TabItem Header="{StaticResource str.Tab.SpcQuery}"
+                 IsVisible="{Binding ExperimentalEnabled}">
+          <TextBlock Text="{StaticResource str.Experimental.Placeholder}"
+                     Foreground="#888" FontSize="13" TextWrapping="Wrap"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"
+                     MaxWidth="520" TextAlignment="Center"/>
+        </TabItem>
+        <TabItem Header="{StaticResource str.Tab.ClassPivot}"
+                 IsVisible="{Binding ExperimentalEnabled}">
+          <TextBlock Text="{StaticResource str.Experimental.Placeholder}"
+                     Foreground="#888" FontSize="13" TextWrapping="Wrap"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"
+                     MaxWidth="520" TextAlignment="Center"/>
+        </TabItem>
       </TabControl>
     </Grid>
   </DockPanel>

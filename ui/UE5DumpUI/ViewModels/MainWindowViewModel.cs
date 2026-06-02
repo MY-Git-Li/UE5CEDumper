@@ -20,6 +20,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly IPlatformService _platform;
     private readonly AobUsageService? _aobUsage;
     private readonly IAobMakerBridge? _aobMaker;  // captured so InterestingFunctions handlers can ship AA Scripts
+    private readonly IExperimentalGate? _experimentalGate;
     private EngineState? _engineState;
 
     [ObservableProperty] private string _statusText = "Disconnected";
@@ -43,6 +44,24 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>Show warning when array limit &gt;= 256 (high memory usage).</summary>
     public bool ShowArrayLimitWarning => ArrayLimitExponent >= 8;
+
+    /// <summary>
+    /// Experimental analysis tabs (Snapshot / SPC Query / Class Pivot) stay
+    /// hidden unless the user opts in via the System-tab credit checkbox.
+    /// Backed by the shared <see cref="IExperimentalGate"/> so the toggle
+    /// (owned by <see cref="PointerPanelViewModel"/>) and this tab-visibility
+    /// flag stay in sync. See docs/experimental-snapshot-spc-pivot.md Phase 0.
+    /// </summary>
+    public bool ExperimentalEnabled
+    {
+        get => _experimentalGate?.IsEnabled ?? false;
+        set
+        {
+            if (_experimentalGate == null || _experimentalGate.IsEnabled == value) return;
+            _experimentalGate.IsEnabled = value;
+            OnPropertyChanged();
+        }
+    }
 
     /// <summary>Address format options for toolbar ComboBox.</summary>
     public string[] AddressFormatOptions { get; } =
@@ -152,7 +171,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         IPlatformService platform,
         AobUsageService? aobUsage = null,
         IAobMakerBridge? aobMaker = null,
-        IProxyDeployService? proxyDeploy = null)
+        IProxyDeployService? proxyDeploy = null,
+        IExperimentalGate? experimentalGate = null)
     {
         _pipeClient = pipeClient;
         _dump = dump;
@@ -160,10 +180,16 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         _platform = platform;
         _aobUsage = aobUsage;
         _aobMaker = aobMaker;
+        _experimentalGate = experimentalGate;
+
+        // Keep tab visibility in sync when the toggle is flipped elsewhere
+        // (the checkbox lives on the System tab / PointerPanelViewModel).
+        if (experimentalGate != null)
+            experimentalGate.Changed += (_, _) => OnPropertyChanged(nameof(ExperimentalEnabled));
 
         ObjectTree = new ObjectTreeViewModel(dump, log, platform);
         ClassStruct = new ClassStructViewModel(dump, log);
-        Pointers = new PointerPanelViewModel(platform, dump, log, aobMaker, aobUsage);
+        Pointers = new PointerPanelViewModel(platform, dump, log, aobMaker, aobUsage, experimentalGate);
         LiveWalker = new LiveWalkerViewModel(dump, log, platform, aobMaker);
         InstanceFinder = new InstanceFinderViewModel(dump, log, platform);
         PropertySearch = new PropertySearchViewModel(dump, log, aobMaker);

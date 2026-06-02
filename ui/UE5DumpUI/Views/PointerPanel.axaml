@@ -484,10 +484,34 @@
 
     </StackPanel>
 
-    <!-- Credit footer: author + repo links, clickable. Always visible on
-         the System tab so the attribution doesn't depend on a live DLL
-         connection. -->
-    <views:CreditFooter Margin="0,8,0,4"/>
+    <!-- Credit footer + experimental gate. The author credit doubles as the
+         opt-in checkbox for the experimental analysis tabs (Snapshot / SPC
+         Query / Class Pivot); its tooltip states the effect. The repo link
+         stays a plain clickable link below. Always visible on the System tab
+         so the attribution doesn't depend on a live DLL connection. -->
+    <StackPanel Spacing="3" HorizontalAlignment="Center" Margin="0,8,0,4">
+      <CheckBox IsChecked="{Binding ExperimentalEnabled}"
+                ToolTip.Tip="{StaticResource str.Experimental.EnableHint}"
+                HorizontalAlignment="Center"
+                VerticalContentAlignment="Center">
+        <StackPanel Orientation="Horizontal" Spacing="0">
+          <TextBlock Text="{StaticResource str.Credit.AuthorPrefix}"
+                     Foreground="#888" FontSize="11" VerticalAlignment="Center"/>
+          <TextBlock Text="{StaticResource str.Credit.AuthorUrl}"
+                     Foreground="#569CD6" FontSize="11" VerticalAlignment="Center"/>
+        </StackPanel>
+      </CheckBox>
+      <StackPanel Orientation="Horizontal" Spacing="0" HorizontalAlignment="Center">
+        <TextBlock Text="{StaticResource str.Credit.RepoPrefix}"
+                   Foreground="#888" FontSize="11" VerticalAlignment="Center"/>
+        <TextBlock x:Name="RepoUrlText"
+                   Text="{StaticResource str.Credit.RepoUrl}"
+                   Foreground="#569CD6" FontSize="11" VerticalAlignment="Center"
+                   TextDecorations="Underline" Cursor="Hand"
+                   PointerPressed="OnRepoUrlPressed"
+                   ToolTip.Tip="{StaticResource str.Credit.OpenInBrowserTip}"/>
+      </StackPanel>
+    </StackPanel>
   </StackPanel>
   </ScrollViewer>
 </UserControl>

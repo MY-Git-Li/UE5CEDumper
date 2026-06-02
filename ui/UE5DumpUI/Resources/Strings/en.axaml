@@ -25,6 +25,10 @@
     <sys:String x:Key="str.Tab.ValueSearch">Value Search</sys:String>
     <sys:String x:Key="str.Tab.Console">Console</sys:String>
     <sys:String x:Key="str.Tab.GameClassFilter">Classes</sys:String>
+    <!-- Experimental tabs (hidden unless opted in via System-tab credit checkbox) -->
+    <sys:String x:Key="str.Tab.Snapshot">Snapshot</sys:String>
+    <sys:String x:Key="str.Tab.SpcQuery">SPC Query</sys:String>
+    <sys:String x:Key="str.Tab.ClassPivot">Class Pivot</sys:String>
 
     <!-- Value Search -->
     <sys:String x:Key="str.VS.Banner">Native C++ fields (non-UPROPERTY) cannot be found here — even if they live inside a UObject's memory. Use Cheat Engine's raw memory scan for those.</sys:String>
@@ -213,6 +217,10 @@
     <sys:String x:Key="str.Credit.RepoPrefix">Repository: </sys:String>
     <sys:String x:Key="str.Credit.RepoUrl">https://github.com/bbfox0703/UE5CEDumper</sys:String>
     <sys:String x:Key="str.Credit.OpenInBrowserTip">Open in default browser</sys:String>
+
+    <!-- Experimental features gate (System-tab credit checkbox) -->
+    <sys:String x:Key="str.Experimental.EnableHint">Enable advanced experimental features</sys:String>
+    <sys:String x:Key="str.Experimental.Placeholder">This experimental feature is under construction. See docs/experimental-snapshot-spc-pivot.md.</sys:String>
 
     <!-- Proxy Deploy -->
     <sys:String x:Key="str.ProxyDeploy.ProxyType">Proxy DLL:</sys:String>
