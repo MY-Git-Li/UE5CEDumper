@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UE5CEDumper — Quick Start</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6; max-width: 920px; margin: 0 auto; padding: 32px 24px;
+    color: #1f2328; background: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { color: #d4d4d4; background: #1e1e1e; }
+    code, pre { background: #2d2d2d !important; }
+    th { background: #2d2d2d !important; }
+    tr:nth-child(even) td { background: #252526; }
+    a { color: #569cd6; }
+    blockquote { color: #9aa0a6; border-left-color: #3c3c3c; }
+  }
+  h1 { font-size: 1.9em; border-bottom: 2px solid #d0d7de; padding-bottom: .3em; }
+  h2 { font-size: 1.4em; margin-top: 1.8em; border-bottom: 1px solid #d0d7de; padding-bottom: .2em; }
+  h3 { font-size: 1.15em; margin-top: 1.4em; }
+  hr { border: none; border-top: 1px solid #d0d7de; margin: 2em 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: .95em; }
+  th, td { border: 1px solid #d0d7de; padding: 7px 11px; text-align: left; vertical-align: top; }
+  th { background: #f6f8fa; }
+  code { background: #f6f8fa; padding: .15em .4em; border-radius: 4px; font-size: .9em;
+         font-family: Consolas, "SF Mono", Menlo, monospace; }
+  pre { background: #f6f8fa; padding: 14px 16px; border-radius: 6px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  blockquote { margin: 1em 0; padding: .2em 1em; color: #57606a; border-left: 4px solid #d0d7de; }
+  ol, ul { padding-left: 1.6em; }
+  a { color: #0969da; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<h1>UE5CEDumper — Quick Start</h1>
+
+<p>UE5CEDumper is a live inspector for Unreal Engine games (UE4.18 – UE5.8).
+It injects a DLL into the game process, then communicates with a standalone UI via Named Pipe.</p>
+
+<hr>
+
+<h2>Package Contents</h2>
+
+<table>
+  <thead><tr><th>File</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>UE5DumpUI.exe</code></td><td>Standalone UI application (connect, browse, export)</td></tr>
+    <tr><td><code>UE5Dumper.dll</code></td><td>Injected DLL — used with Cheat Engine (Option A)</td></tr>
+    <tr><td><code>version.dll</code></td><td>Proxy DLL — auto-loads without CE (Option B)</td></tr>
+    <tr><td><code>UE5CEDumper.CT</code></td><td>CE Cheat Table — loads and injects the DLL</td></tr>
+    <tr><td><code>ue5_dissect.lua</code></td><td>CE Structure Dissect builder (optional, for advanced CE users)</td></tr>
+  </tbody>
+</table>
+
+<hr>
+
+<h2>Injection Methods</h2>
+
+<p>There are <strong>two ways</strong> to get UE5Dumper running inside the game process.
+Choose one — do <strong>not</strong> use both at the same time.</p>
+
+<h3>Option A: Cheat Engine Injection</h3>
+
+<p>Best for: CE power users who want full CE integration (Structure Dissect, memory editing, Lua scripting).</p>
+
+<p><strong>Required files</strong>: <code>UE5Dumper.dll</code>, <code>UE5CEDumper.CT</code>, <code>UE5DumpUI.exe</code></p>
+
+<ol>
+  <li>Open <strong>Cheat Engine</strong> and attach to the game process.</li>
+  <li>Load a save / reach gameplay so UE objects are populated.</li>
+  <li>Open <code>UE5CEDumper.CT</code> (File &gt; Open).</li>
+  <li>Enable <code>init &lt;== enable after process attached</code>, then <code>Inject DLL + Start Pipe Server</code>.</li>
+  <li>Wait a few seconds for the AOB scan to finish.</li>
+  <li>Launch <code>UE5DumpUI.exe</code> and click <strong>Connect</strong>.</li>
+</ol>
+
+<blockquote><strong>CE-specific extras</strong>: With CE injection, you can also use <code>ue5_dissect.lua</code> to generate
+CE Structure Dissect entries from UE class reflection. See the <em>CE Scripts</em> section below.</blockquote>
+
+<h3>Option B: Proxy DLL (No Cheat Engine)</h3>
+
+<p>Best for: users who don't need CE, or when CE causes compatibility issues with the game.</p>
+
+<p><strong>Required files</strong>: <code>version.dll</code>, <code>UE5DumpUI.exe</code></p>
+
+<ol>
+  <li>Copy <code>version.dll</code> into the <strong>game's root folder</strong> (next to the game <code>.exe</code>).</li>
+  <li>Launch the game normally. The proxy DLL loads automatically via Windows DLL search order.</li>
+  <li>Load a save / reach gameplay so UE objects are populated.</li>
+  <li>Launch <code>UE5DumpUI.exe</code> and click <strong>Connect</strong>.</li>
+  <li>Click the <strong>Start Scan</strong> button in the toolbar. The DLL performs the AOB scan and returns engine data.</li>
+  <li>Browse objects, find instances, export — same workflow as Option A.</li>
+</ol>
+
+<blockquote><strong>Why deferred scan?</strong> The proxy DLL loads very early (before the game's main loop).
+At that point, GObjects/GNames may not be initialized yet. Waiting until you reach
+gameplay ensures the scan finds valid data.</blockquote>
+
+<blockquote><strong>Removing</strong>: To stop using the proxy DLL, simply delete <code>version.dll</code> from the game folder.</blockquote>
+
+<h3>Comparison</h3>
+
+<table>
+  <thead><tr><th></th><th>Option A (CE Inject)</th><th>Option B (Proxy DLL)</th></tr></thead>
+  <tbody>
+    <tr><td>Requires Cheat Engine</td><td>Yes</td><td>No</td></tr>
+    <tr><td>Auto-loads on game start</td><td>No (manual inject)</td><td>Yes</td></tr>
+    <tr><td>CE Structure Dissect</td><td>Yes (<code>ue5_dissect.lua</code>)</td><td>No</td></tr>
+    <tr><td>CE memory editing</td><td>Yes</td><td>No (UI read-only browse)</td></tr>
+    <tr><td>Scan timing</td><td>Immediate on inject</td><td>Deferred (click Start Scan)</td></tr>
+    <tr><td>Anti-cheat risk</td><td>CE may be detected</td><td>Lower profile (common DLL name)</td></tr>
+  </tbody>
+</table>
+
+<h3>Dual-Injection Safety</h3>
+
+<p>If you accidentally have <code>version.dll</code> in the game folder <strong>and</strong> try to inject <code>UE5Dumper.dll</code> via CE:</p>
+
+<ul>
+  <li>The second instance detects that the pipe <code>\\.\pipe\UE5DumpBfx</code> already exists.</li>
+  <li>It <strong>skips</strong> auto-start to prevent conflicts.</li>
+  <li>No crash, no duplicate data — the first instance wins.</li>
+</ul>
+
+<p>Best practice: use one method at a time. Remove <code>version.dll</code> from the game folder when using CE injection.</p>
+
+<hr>
+
+<h2>CE Scripts (Option A Only)</h2>
+
+<h3>ue5_dissect.lua</h3>
+
+<p>A CE Lua module that creates <strong>Structure Dissect</strong> entries from UE class reflection.
+Only works when <code>UE5Dumper.dll</code> is injected via CE.</p>
+
+<pre><code>-- In CE Lua Engine (after DLL is injected):
+local dissect = dofile("ue5_dissect.lua")
+
+-- Interactive: shows dialog to enter class address or UE path
+dissect.createInteractive()
+
+-- By UE path
+dissect.createFromPath("/Script/Engine.Actor")
+
+-- Auto mode: CE auto-fills Structure Dissect for any UObject address
+dissect.enableAutoCallback()</code></pre>
+
+<p>Features: 25+ UE property type mappings, struct flattening (6 levels), BoolProperty bitmask, Array/Map/Set helpers, gap filling, UObject header, auto-callback, caching.</p>
+
+<hr>
+
+<h2>Troubleshooting</h2>
+
+<table>
+  <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+  <tbody>
+    <tr><td>UI says "Connection failed"</td><td>Pipe server not running</td><td>Make sure DLL is injected (Option A) or version.dll is in game folder (Option B)</td></tr>
+    <tr><td>UI connects but shows 0 objects</td><td>Scan not run or game data not loaded</td><td>Load a save first, then inject (A) or click Start Scan (B)</td></tr>
+    <tr><td>Start Scan button not visible</td><td>Already scanned, or CE inject mode</td><td>Normal — button only appears in proxy DLL mode before first scan</td></tr>
+    <tr><td>Game crashes on launch with version.dll</td><td>Rare DLL conflict</td><td>File a bug report — alternative proxy DLL targets may be needed</td></tr>
+    <tr><td>"UE version: Unknown"</td><td>AOB patterns didn't match</td><td>File a bug report with game name + UE version</td></tr>
+  </tbody>
+</table>
+
+<hr>
+
+<h2>More Information</h2>
+
+<ul>
+  <li>Project page: <a href="https://github.com/bbfox0703/UE5CEDumper">https://github.com/bbfox0703/UE5CEDumper</a></li>
+  <li>Bug reports: Include the game name, UE version, and logs from <code>%LOCALAPPDATA%\UE5CEDumper\Logs\</code></li>
+</ul>
+
+<p><small>Licensed under the MIT License.</small></p>
+
+</body>
+</html>

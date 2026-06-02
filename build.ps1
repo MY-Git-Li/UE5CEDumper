@@ -329,11 +329,14 @@ if ($Target -in "All", "DLL") {
             if ($dllFile) {
                 Copy-Item $dllFile.FullName -Destination $DIST_DIR -Force
 
-                # Always copy PDB (useful for crash diagnostics even in Release)
-                $pdbFile = Get-ChildItem -Path $BUILD_DIR -Filter "UE5Dumper.pdb" -Recurse |
-                           Select-Object -First 1
-                if ($pdbFile) {
-                    Copy-Item $pdbFile.FullName -Destination $DIST_DIR -Force
+                # Copy PDB for Debug only — Release/Publish dists ship without
+                # symbols (a final sweep also strips any stale *.pdb).
+                if ($Mode -eq "Debug") {
+                    $pdbFile = Get-ChildItem -Path $BUILD_DIR -Filter "UE5Dumper.pdb" -Recurse |
+                               Select-Object -First 1
+                    if ($pdbFile) {
+                        Copy-Item $pdbFile.FullName -Destination $DIST_DIR -Force
+                    }
                 }
 
                 $dllSize = Get-FileSize (Join-Path $DIST_DIR "UE5Dumper.dll")
@@ -396,10 +399,12 @@ if ($Target -in "All", "ProxyDLL") {
 
                 Copy-Item $proxyDll.FullName -Destination $proxyOutDir -Force
 
-                $pdbFile = Get-ChildItem -Path $proxyBuildDir -Filter "version.pdb" -Recurse |
-                           Select-Object -First 1
-                if ($pdbFile) {
-                    Copy-Item $pdbFile.FullName -Destination $proxyOutDir -Force
+                if ($Mode -eq "Debug") {
+                    $pdbFile = Get-ChildItem -Path $proxyBuildDir -Filter "version.pdb" -Recurse |
+                               Select-Object -First 1
+                    if ($pdbFile) {
+                        Copy-Item $pdbFile.FullName -Destination $proxyOutDir -Force
+                    }
                 }
 
                 $dllSize = Get-FileSize (Join-Path $proxyOutDir "version.dll")
@@ -458,10 +463,12 @@ if ($Target -in "All", "ProxyDinput8") {
 
                 Copy-Item $proxyDll.FullName -Destination $proxyOutDir -Force
 
-                $pdbFile = Get-ChildItem -Path $proxyDi8BuildDir -Filter "dinput8.pdb" -Recurse |
-                           Select-Object -First 1
-                if ($pdbFile) {
-                    Copy-Item $pdbFile.FullName -Destination $proxyOutDir -Force
+                if ($Mode -eq "Debug") {
+                    $pdbFile = Get-ChildItem -Path $proxyDi8BuildDir -Filter "dinput8.pdb" -Recurse |
+                               Select-Object -First 1
+                    if ($pdbFile) {
+                        Copy-Item $pdbFile.FullName -Destination $proxyOutDir -Force
+                    }
                 }
 
                 $dllSize = Get-FileSize (Join-Path $proxyOutDir "dinput8.dll")
@@ -530,9 +537,10 @@ if ($Target -in "All", "UI", "Test") {
                            Select-Object -First 1
 
                 if ($exeFile) {
-                    # Copy EXE, native DLLs, and PDB (PDB needed for crash address resolution)
+                    # Copy EXE + native DLLs only — Publish dists ship without
+                    # *.pdb symbols (keeps the distribution lean).
                     Get-ChildItem -Path $publishDir -File |
-                        Where-Object { $_.Extension -in ".exe", ".dll", ".pdb" } |
+                        Where-Object { $_.Extension -in ".exe", ".dll" } |
                         ForEach-Object { Copy-Item $_.FullName -Destination $DIST_DIR -Force }
 
                     Remove-Item $publishDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -709,17 +717,34 @@ if ($Target -in "All", "DLL") {
         Copy-Item $dissectSrc -Destination $DIST_DIR -Force
         Write-Ok "ue5_dissect.lua copied to dist\"
     }
-    # README.md — deployment guide for end users (covers CE inject + Proxy DLL)
-    $readmeSrc = Join-Path $ROOT_DIR "scripts\DEPLOY_README.md"
+    # README.html — deployment guide for end users (covers CE inject + Proxy DLL)
+    $readmeSrc = Join-Path $ROOT_DIR "scripts\DEPLOY_README.html"
     if (Test-Path $readmeSrc) {
-        Copy-Item $readmeSrc -Destination (Join-Path $DIST_DIR "README.md") -Force
-        Write-Ok "deployment README.md copied to dist\"
+        Copy-Item $readmeSrc -Destination (Join-Path $DIST_DIR "README.html") -Force
+        # Remove any stale markdown README from an earlier non-clean build.
+        $staleMd = Join-Path $DIST_DIR "README.md"
+        if (Test-Path $staleMd) { Remove-Item $staleMd -Force -ErrorAction SilentlyContinue }
+        Write-Ok "deployment README.html copied to dist\"
     }
     # build_number.txt — build version tracking
     $buildNumSrc = Join-Path $ROOT_DIR "build_number.txt"
     if (Test-Path $buildNumSrc) {
         Copy-Item $buildNumSrc -Destination $DIST_DIR -Force
         Write-Ok "build_number.txt copied to dist\"
+    }
+}
+
+# ============================================================
+# Strip debug symbols from distribution builds
+# ============================================================
+# Release/Publish dists ship WITHOUT *.pdb. Sweep the whole dist tree (incl.
+# dist\proxy) so any stale symbols from a prior non-clean build are removed too.
+# Debug keeps them for local crash diagnostics.
+if ($Mode -ne "Debug" -and (Test-Path $DIST_DIR)) {
+    $pdbs = @(Get-ChildItem -Path $DIST_DIR -Recurse -Filter "*.pdb" -File -ErrorAction SilentlyContinue)
+    if ($pdbs.Count -gt 0) {
+        $pdbs | Remove-Item -Force -ErrorAction SilentlyContinue
+        Write-Ok "stripped $($pdbs.Count) *.pdb from dist\ (Release/Publish ship without symbols)"
     }
 }
 
