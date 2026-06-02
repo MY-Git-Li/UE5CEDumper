@@ -200,6 +200,13 @@ public partial class MainWindow : Window
             vm.LiveWalker.StopAutoRefreshTimer();
         }
 
+        // Opening any experimental tab while enabled permanently commits the
+        // opt-in: the System-tab checkbox can no longer be unticked from here
+        // on. The gate persists the lock; LockExperimental is idempotent and a
+        // no-op when the feature isn't enabled.
+        if (tag is "Snapshot" or "SpcQuery" or "ClassPivot")
+            vm.LockExperimental();
+
         // Refresh AOBMaker state for tabs whose toolbar / per-row buttons
         // depend on it. LiveWalker / InterestingFunctions throttle via
         // TryCheckAobMaker; PointerPanel has no cooldown wrapper, so call
@@ -209,6 +216,9 @@ public partial class MainWindow : Window
             case "LiveWalker": vm.LiveWalker.TryCheckAobMaker(); break;
             case "InterestingFunctions": vm.InterestingFunctions.TryCheckAobMaker(); break;
             case "Pointers": _ = vm.Pointers.CheckAobMakerAsync(); break;
+            // SPC reads the snapshot list saved by the Snapshot tab — refresh on
+            // activation so a just-captured snapshot shows up in the picker.
+            case "SpcQuery": _ = vm.Spc?.RefreshCommand.ExecuteAsync(null); break;
         }
     }
 }

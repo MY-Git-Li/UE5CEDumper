@@ -20,13 +20,15 @@ behind an opt-in experimental flag. **Design of record:
 it first (concept mapping, UE-vs-Unity advantages, SQLite schema, identity-key
 join, array inner-key handling, the Q#4 key-field improvement).
 
-> **NEXT SESSION → Phase B (SPC Query).** Phase 0 + all of Phase A shipped
-> (builds 805-823; capture / per-game DB / quota / diff / struct-array, A3 diff
-> live-verified). The data layer is ready for SPC: identity columns (norm_path /
-> outer_chain / gobjects_index), `numeric_value` for Increased/Decreased, and the
-> strict/loose/in-session indexes are all in `SnapshotStore`. Phase B is the
-> energy-bar multi-session directional case — pure C# over the existing SQLite,
-> no DLL work. See the Phase B block below + design §"Phase B".
+> **NEXT SESSION → Phase C (Class Pivot).** Phase 0 + all of Phase A + **Phase B
+> (SPC Query)** shipped (builds 805-824; capture / per-game DB / quota / diff /
+> struct-array / SPC directional query). The SPC engine (`SpcQueryBuilder` +
+> `SnapshotStore.SpcQueryAsync`) and UI (`SpcQueryViewModel` + `SpcPanel`) are
+> live; SPC is multi-session, type-agnostic directional, Strict/Loose/In-session
+> join. Phase C is the value-keyed Class Pivot (identity-first mode + key
+> discovery via `PropertyScoringTable`) — pure C# over the same SQLite, no DLL.
+> See the Phase C block below + design §"Phase C". Also still open: **A3c** (CE
+> .CT freeze-export from a diff/SPC hit — Copy Address covers the manual path).
 
 Locked decisions: SQLite (raw ADO.NET, no EF Core) · all three features ·
 persisted gating · **multi-session first-class** for SPC/Pivot · type-agnostic
@@ -65,9 +67,18 @@ Build in order; each phase gates the next:
     +per-game quota/usage (`ab874a4`). Full CE .CT freeze-export deferred to A3c
     (Copy Address covers the manual path). **Phase A capture→compare loop works
     end-to-end.** Remaining: A1b (array capture).
-- **Phase B — SPC Query** (multi-session, type-agnostic directional). Pure C#.
-  - B1 engine: Strict/Loose join + relative predicate chain. *Effort S-M · low.*
-  - B2 UI: cross-session picker + direction predicates + CE export. *Effort S · low.*
+- ~~**Phase B — SPC Query** (multi-session, type-agnostic directional). Pure C#.~~
+  ✅ **SHIPPED 2026-06-02 (build 824).**
+  - ~~B1 engine: Strict/Loose join + relative predicate chain.~~ `SpcQueryBuilder`
+    (pure N-way self-join SQL compiler) + `SnapshotStore.SpcQueryAsync`;
+    directional predicates (Any/Unchanged/Changed/Increased/Decreased) pushed
+    into indexed SQL; Strict/Loose/In-session join modes. +19 engine/builder tests.
+  - ~~B2 UI: cross-session picker + direction predicates + CE export.~~
+    `SpcQueryViewModel` + `SpcPanel` (snapshot picker with session-tail column +
+    per-row predicate combo, join-mode toggle, filters, value-sequence results;
+    Copy Address + Open in Live Walker). +6 VM tests. **Follow-ups (v2):** absolute
+    Exact/Range/Delta predicates; per-snapshot value columns (deferred to keep the
+    grid AOT-safe). Live multi-session verify = user.
 - **Phase C — Class Pivot** (value-keyed, cross-session safe). Pure C# (+opt DLL).
   - C1 PivotEngine (identity mode + collision render). *Effort M · med.*
   - C2 Find-by-value locator + handoff (closes the loop). *Effort M · med.*

@@ -500,6 +500,48 @@ SELECT COUNT(*) FROM fields a WHERE a.snapshot_id=$in AND a.array_field IS NULL 
         return (int)(long)(await cmd.ExecuteScalarAsync(ct) ?? 0L);
     }
 
+    public async Task<SpcResult> SpcQueryAsync(SpcQuery query, CancellationToken ct = default)
+    {
+        var result = new SpcResult { SnapshotCount = query.SnapshotIds.Count };
+        // Compile throws ArgumentException for < 2 snapshots or a mismatched
+        // predicate count — let it propagate so the VM surfaces the error.
+        var compiled = SpcQueryBuilder.Compile(query);
+        int n = query.SnapshotIds.Count;
+        int max = query.MaxRows > 0 ? query.MaxRows : 50000;
+
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = compiled.Sql;
+        if (compiled.ClassLike != null) cmd.Parameters.AddWithValue("$cls", compiled.ClassLike);
+        if (compiled.PropLike  != null) cmd.Parameters.AddWithValue("$prop", compiled.PropLike);
+
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        // Column layout (see SpcQueryBuilder): 0 class, 1 norm_path, 2 prop_name,
+        // 3 prop_offset, 4 declared_type, 5 obj_addr, then n hex columns.
+        const int hexBase = 6;
+        while (await r.ReadAsync(ct))
+        {
+            if (result.Rows.Count >= max) { result.Truncated = true; break; }
+            string type = r.IsDBNull(4) ? "" : r.GetString(4);
+            var row = new SpcResultRow
+            {
+                ClassName    = r.IsDBNull(0) ? "" : r.GetString(0),
+                NormPath     = r.IsDBNull(1) ? "" : r.GetString(1),
+                PropName     = r.IsDBNull(2) ? "" : r.GetString(2),
+                PropOffset   = r.IsDBNull(3) ? 0  : r.GetInt32(3),
+                DeclaredType = type,
+                ObjAddr      = r.IsDBNull(5) ? "" : r.GetString(5),
+            };
+            for (int i = 0; i < n; i++)
+            {
+                string hex = r.IsDBNull(hexBase + i) ? "" : r.GetString(hexBase + i);
+                row.Values.Add(SnapshotNumeric.Render(type, hex));
+            }
+            result.Rows.Add(row);
+        }
+        return result;
+    }
+
     public async Task DeleteSnapshotAsync(long snapshotId, CancellationToken ct = default)
     {
         await using var conn = await OpenAsync(ct);

@@ -11,6 +11,72 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-06-02 — Experimental: SPC Query (Phase B) + opt-in checkbox lock (build 824)
+
+Second tranche of the experimental Snapshot / SPC / Pivot feature. **Phase B (SPC
+Query)** ships the multi-session, type-agnostic directional query engine + UI —
+the energy-bar driver case. Pure C# over the existing SQLite corpus, **zero DLL
+change**. Plus a UX change on the experimental opt-in checkbox. Design of record:
+[experimental-snapshot-spc-pivot.md](experimental-snapshot-spc-pivot.md)
+§"Phase B".
+
+- **B1 — engine (pure C#, no pipe).** `SpcQueryBuilder.Compile` turns an
+  `SpcQuery` (ordered snapshot ids + per-snapshot predicate chain + join mode +
+  filters) into one indexed SQLite statement: an **N-way self-join** over the
+  `fields` table where the oldest snapshot `f0` is the anchor and every later
+  snapshot `f{i}` inner-joins on the chosen identity key (so only fields present
+  in ALL selected snapshots survive — the candidate intersection). Directional
+  predicates become `WHERE` clauses comparing `f{i}` vs `f{i-1}`:
+  Unchanged/Changed compare raw `hex` (type-exact); Increased/Decreased compare
+  `numeric_value` by the field's declared width (no byte-reinterpret false hits).
+  Pushing predicates into SQL lets a selective chain collapse a million-row
+  intersection to a handful via the `ix_strict`/`ix_loose`/`ix_insession`
+  indexes. Snapshot ids + limit are inlined (validated long/int — injection-safe);
+  only the two LIKE filters are parameterised. `SnapshotStore.SpcQueryAsync`
+  executes it and renders each snapshot's value via `SnapshotNumeric.Render`.
+  **Join modes:** Strict `(class, norm_path, prop, offset)` / Loose
+  `(class, outer_chain, prop)` / In-session `(class, gobjects_index, prop)`.
+  `SpcModels` carries `SpcPredicateKind` (Any/Unchanged/Changed/Increased/
+  Decreased — directional v1), `SpcJoinMode`, `SpcQuery`, `SpcResultRow`
+  (rendered value sequence as one AOT-safe column), `SpcResult`.
+
+- **B2 — UI.** `SpcQueryViewModel` + `SpcPanel.axaml` replace the SPC placeholder
+  tab. A snapshot picker (DataGrid: tick + label + captured + **session tail** so
+  cross-session spans are visible + a per-row predicate ComboBox), a Strict/Loose/
+  In-session toggle, class/field filters, and a results grid (Class / Object /
+  Field / Type / **value sequence**). The oldest ticked snapshot is the baseline
+  (its predicate ignored); each later one compares to the previous ticked. Hit →
+  **Copy Address** (newest snapshot's `obj_addr` + offset) / **Open in Live
+  Walker** (the existing `NavigateToInstance` handoff). Wired into
+  `MainWindowViewModel.Spc` (shares the snapshot store), refreshed on tab
+  activation so a just-captured snapshot appears. Results column is a single
+  rendered "value sequence" string — no per-snapshot `Binding("Values[i]")`, which
+  would trip the IL2026/IL3050 AOT warnings (build-780 lesson).
+
+- **Opt-in checkbox UX (user request).** The System-tab experimental-enable
+  checkbox now renders at **Opacity 0.25**, and once it is checked **and** the
+  user has opened any experimental tab (Snapshot / SPC Query / Class Pivot) it can
+  **no longer be unticked**. `IExperimentalGate` grows `IsLocked` + `Lock()`
+  (persisted in `experimental.json`; `IsEnabled` setter also refuses to go false
+  while locked — defence in depth). The three experimental `TabItem`s gained
+  `Tag`s; `MainTabs_SelectionChanged` calls `MainWindowViewModel.LockExperimental`
+  (idempotent, no-op unless enabled) on first open. `PointerPanelViewModel`
+  exposes `CanToggleExperimental` (`!IsLocked`) bound to the checkbox `IsEnabled`.
+  The lock is a permanent commitment — it survives restarts.
+
+- **Tests +29 → 1197 C# (1598 total: 1197 C# + 370 dll + 31 utf8).**
+  `SpcQueryBuilderTests` lock the SQL shape (join keys per mode, predicate
+  clauses, filters, limit, validation) without a DB; `SpcStoreTests` run the
+  engine end-to-end against a temp SQLite (money "decreased twice" + the
+  cross-session energy-bar "same/same/down/up" + norm_path spawn-counter merge +
+  filters + intersection drop); `SpcQueryViewModelTests` cover refresh/auto-select/
+  run/copy-address/navigate; `ExperimentalGateTests` +4 lock the lock contract.
+  Full clean Native AOT publish (`build.ps1 -Mode Publish`) is clean (the only ILC
+  notes are the pre-existing benign X11/DBus Linux-backend trim messages).
+  **Remaining experimental: Phase C (Class Pivot) + A3c (CE .CT export).**
+
+-----
+
 ## 2026-06-02 — Experimental: Snapshot capture / diff (Phase 0 + A, builds 805-823)
 
 First tranche of the experimental Snapshot / SPC / Pivot feature ported in

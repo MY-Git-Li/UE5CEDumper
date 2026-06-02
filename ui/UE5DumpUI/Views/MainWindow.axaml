@@ -282,18 +282,15 @@
              (used by OnSelectedTabIndexChanged) don't shift. Content is a
              placeholder until Phases A/B/C land. See
              docs/experimental-snapshot-spc-pivot.md. -->
-        <TabItem Header="{StaticResource str.Tab.Snapshot}"
+        <TabItem Header="{StaticResource str.Tab.Snapshot}" Tag="Snapshot"
                  IsVisible="{Binding ExperimentalEnabled}">
           <views:SnapshotPanel DataContext="{Binding Snapshot}"/>
         </TabItem>
-        <TabItem Header="{StaticResource str.Tab.SpcQuery}"
+        <TabItem Header="{StaticResource str.Tab.SpcQuery}" Tag="SpcQuery"
                  IsVisible="{Binding ExperimentalEnabled}">
-          <TextBlock Text="{StaticResource str.Experimental.Placeholder}"
-                     Foreground="#888" FontSize="13" TextWrapping="Wrap"
-                     HorizontalAlignment="Center" VerticalAlignment="Center"
-                     MaxWidth="520" TextAlignment="Center"/>
+          <views:SpcPanel DataContext="{Binding Spc}"/>
         </TabItem>
-        <TabItem Header="{StaticResource str.Tab.ClassPivot}"
+        <TabItem Header="{StaticResource str.Tab.ClassPivot}" Tag="ClassPivot"
                  IsVisible="{Binding ExperimentalEnabled}">
           <TextBlock Text="{StaticResource str.Experimental.Placeholder}"
                      Foreground="#888" FontSize="13" TextWrapping="Wrap"

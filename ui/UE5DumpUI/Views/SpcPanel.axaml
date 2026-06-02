@@ -1,0 +1,93 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UE5DumpUI.ViewModels"
+             xmlns:m="using:UE5DumpUI.Models"
+             x:Class="UE5DumpUI.Views.SpcPanel"
+             x:DataType="vm:SpcQueryViewModel">
+
+  <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,170,Auto,*">
+
+    <!-- Intro -->
+    <TextBlock Grid.Row="0" Text="{StaticResource str.Spc.Intro}"
+               Foreground="#999" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+    <!-- Query controls -->
+    <Border Grid.Row="1" Background="#252526" CornerRadius="4" Padding="12,8" Margin="0,0,0,10"
+            BorderBrush="#3C3C3C" BorderThickness="1">
+      <WrapPanel Orientation="Horizontal">
+        <TextBlock Text="{StaticResource str.Spc.Join}" Foreground="#CCCCCC"
+                   VerticalAlignment="Center" Margin="0,0,4,0"/>
+        <ComboBox ItemsSource="{Binding JoinModeOptions}" SelectedItem="{Binding SelectedJoinMode}"
+                  MinWidth="120" Margin="0,0,12,0" ToolTip.Tip="{StaticResource str.Spc.JoinHint}"/>
+        <TextBlock Text="{StaticResource str.Spc.ClassFilter}" Foreground="#CCCCCC"
+                   VerticalAlignment="Center" Margin="0,0,4,0"/>
+        <TextBox Text="{Binding ClassFilter}" Width="140" Margin="0,0,12,0"/>
+        <TextBlock Text="{StaticResource str.Spc.PropFilter}" Foreground="#CCCCCC"
+                   VerticalAlignment="Center" Margin="0,0,4,0"/>
+        <TextBox Text="{Binding PropFilter}" Width="140" Margin="0,0,12,0"/>
+        <Button Content="{StaticResource str.Spc.Run}" Command="{Binding RunQueryCommand}"
+                IsEnabled="{Binding CanRunQuery}" Classes="accent" Padding="12,4" Margin="0,0,8,0"/>
+        <Button Content="{StaticResource str.Spc.Refresh}" Command="{Binding RefreshCommand}"
+                Padding="8,4" Margin="0,0,8,0"/>
+        <Button Content="{StaticResource str.Spc.OpenWalker}" Command="{Binding OpenInLiveWalkerCommand}"
+                CommandParameter="{Binding SelectedResult}" Padding="8,4" Margin="0,0,8,0"/>
+        <Button Content="{StaticResource str.Spc.CopyAddr}" Command="{Binding CopyAddressCommand}"
+                CommandParameter="{Binding SelectedResult}" Padding="8,4"/>
+      </WrapPanel>
+    </Border>
+
+    <!-- Picker header -->
+    <TextBlock Grid.Row="2" Text="{StaticResource str.Spc.PickerHeader}" Foreground="#9CDCFE"
+               FontWeight="SemiBold" Margin="0,0,0,6"/>
+
+    <!-- Snapshot picker: tick the snapshots (oldest selected = baseline) and set
+         each one's directional predicate vs the previous selected snapshot. -->
+    <DataGrid Grid.Row="3" ItemsSource="{Binding SnapshotPicks}" IsReadOnly="False"
+              GridLinesVisibility="Horizontal" Background="#1E1E1E"
+              CanUserResizeColumns="True" CanUserSortColumns="False">
+      <DataGrid.Columns>
+        <DataGridCheckBoxColumn Header="{StaticResource str.Spc.Col.Use}"
+                                Binding="{Binding IsSelected}" Width="50"/>
+        <DataGridTextColumn Header="{StaticResource str.Spc.Col.Label}"
+                            Binding="{Binding Label}" IsReadOnly="True" Width="*"/>
+        <DataGridTextColumn Header="{StaticResource str.Spc.Col.Captured}"
+                            Binding="{Binding CapturedAt}" IsReadOnly="True" Width="190"/>
+        <DataGridTextColumn Header="{StaticResource str.Spc.Col.Session}"
+                            Binding="{Binding SessionShort}" IsReadOnly="True" Width="120"/>
+        <DataGridTemplateColumn Header="{StaticResource str.Spc.Col.Predicate}" Width="150">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="vm:SpcSnapshotPick">
+              <ComboBox ItemsSource="{Binding PredicateOptions}"
+                        SelectedItem="{Binding SelectedPredicate}"
+                        IsEnabled="{Binding IsSelected}"
+                        HorizontalAlignment="Stretch" Margin="2"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+      </DataGrid.Columns>
+    </DataGrid>
+
+    <!-- Hint + status -->
+    <StackPanel Grid.Row="4" Spacing="2" Margin="0,8,0,8">
+      <TextBlock Text="{StaticResource str.Spc.BaselineHint}" Foreground="#888" FontSize="11"
+                 TextWrapping="Wrap"/>
+      <TextBlock Text="{Binding StatusText}" Foreground="#4EC9B0" FontSize="12" TextWrapping="Wrap"
+                 IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+      <TextBlock Text="{Binding ErrorMessage}" Foreground="#F44747" FontSize="12" TextWrapping="Wrap"
+                 IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+    </StackPanel>
+
+    <!-- Results -->
+    <DataGrid Grid.Row="5" ItemsSource="{Binding Results}" SelectedItem="{Binding SelectedResult}"
+              IsReadOnly="True" GridLinesVisibility="Horizontal" Background="#1E1E1E"
+              CanUserResizeColumns="True" CanUserSortColumns="True">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="{StaticResource str.Spc.Res.Class}"    Binding="{Binding ClassName}"       Width="200"/>
+        <DataGridTextColumn Header="{StaticResource str.Spc.Res.Object}"   Binding="{Binding NormPath}"        Width="*"/>
+        <DataGridTextColumn Header="{StaticResource str.Spc.Res.Field}"    Binding="{Binding PropName}"        Width="150"/>
+        <DataGridTextColumn Header="{StaticResource str.Spc.Res.Type}"     Binding="{Binding DeclaredType}"    Width="120"/>
+        <DataGridTextColumn Header="{StaticResource str.Spc.Res.Sequence}" Binding="{Binding SequenceDisplay}" Width="240"/>
+      </DataGrid.Columns>
+    </DataGrid>
+  </Grid>
+</UserControl>

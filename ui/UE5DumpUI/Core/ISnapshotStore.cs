@@ -53,6 +53,14 @@ public interface ISnapshotStore
     Task<SnapshotDiffResult> DiffSnapshotsAsync(
         long idA, long idB, SnapshotDiffFilter filter, CancellationToken ct = default);
 
+    /// <summary>Run an SPC query over the active game's DB: intersect the fields
+    /// present in all of <see cref="SpcQuery.SnapshotIds"/> under the chosen join
+    /// mode, then keep those whose value sequence satisfies the directional
+    /// predicate chain. Multi-session by design (snapshots may span game
+    /// launches). Pure SQL — no DLL/pipe. See
+    /// docs/experimental-snapshot-spc-pivot.md §"Phase B".</summary>
+    Task<SpcResult> SpcQueryAsync(SpcQuery query, CancellationToken ct = default);
+
     /// <summary>Drop oldest snapshots (FIFO) from the active game's DB until it
     /// fits <paramref name="quotaBytes"/>, then VACUUM to reclaim the space. The
     /// newest snapshot is always kept (even if it alone exceeds the quota).

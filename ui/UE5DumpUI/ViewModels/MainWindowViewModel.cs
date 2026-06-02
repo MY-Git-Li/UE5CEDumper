@@ -94,6 +94,19 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Permanently commit to the experimental features. Called the first time the
+    /// user actually opens one of the experimental tabs (Snapshot / SPC Query /
+    /// Class Pivot) while enabled — from that point the System-tab opt-in
+    /// checkbox can no longer be unticked (the gate persists the lock). Idempotent
+    /// and a no-op when the gate isn't enabled.
+    /// </summary>
+    public void LockExperimental()
+    {
+        if (_experimentalGate is { IsEnabled: true, IsLocked: false })
+            _experimentalGate.Lock();
+    }
+
     /// <summary>Address format options for toolbar ComboBox.</summary>
     public string[] AddressFormatOptions { get; } =
     [
@@ -129,6 +142,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     /// <summary>Experimental Snapshot tab — null when no snapshot store was
     /// injected (e.g. in unit tests). Gated behind <see cref="ExperimentalEnabled"/>.</summary>
     public SnapshotViewModel? Snapshot { get; }
+    /// <summary>Experimental SPC Query tab — shares the snapshot store with
+    /// <see cref="Snapshot"/>. Null when no store was injected.</summary>
+    public SpcQueryViewModel? Spc { get; }
 
     partial void OnSelectedAddressFormatIndexChanged(int value)
     {
@@ -235,6 +251,21 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                     _log.Error($"Snapshot NavigateToInstance handler error: {addr}", ex);
                 }
             };
+
+            Spc = new SpcQueryViewModel(snapshotStore, log, platform);
+            // SPC hit -> open its object in Live Walker (newest snapshot's addr).
+            Spc.NavigateToInstance += async (addr) =>
+            {
+                try
+                {
+                    SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                    await LiveWalker.NavigateToAddressCommand.ExecuteAsync(addr);
+                }
+                catch (Exception ex)
+                {
+                    _log.Error($"SPC NavigateToInstance handler error: {addr}", ex);
+                }
+            };
         }
 
         if (proxyDeploy != null)
@@ -254,6 +285,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 LiveWalker.SetEngineState(state);
                 InstanceFinder.SetEngineState(state);
                 Snapshot?.SetEngineState(state);
+                Spc?.SetEngineState(state);
 
                 _ = LiveWalker.CheckAobMakerAsync();
 
@@ -1012,6 +1044,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         LiveWalker.SetEngineState(state);
         InstanceFinder.SetEngineState(state);
         Snapshot?.SetEngineState(state);
+        Spc?.SetEngineState(state);
 
         // Fire-and-forget: check AOBMaker availability for Live Walker
         _ = LiveWalker.CheckAobMakerAsync();

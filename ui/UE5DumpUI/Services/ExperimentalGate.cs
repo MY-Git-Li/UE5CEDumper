@@ -17,6 +17,7 @@ public sealed class ExperimentalGate : IExperimentalGate
     private readonly string _filePath;
     private readonly ILoggingService? _log;
     private bool _enabled;
+    private bool _locked;
     private int _quotaMb = 1024;
 
     // Source-generated JSON context (reflection-based JSON is disabled in trimmed/AOT builds)
@@ -38,11 +39,24 @@ public sealed class ExperimentalGate : IExperimentalGate
         get => _enabled;
         set
         {
+            // Once locked the opt-in is irreversible — refuse to turn it off
+            // (the UI also disables the checkbox, this is defence in depth).
+            if (_locked && !value) return;
             if (_enabled == value) return;
             _enabled = value;
             Save();
             Changed?.Invoke(this, EventArgs.Empty);
         }
+    }
+
+    public bool IsLocked => _locked;
+
+    public void Lock()
+    {
+        if (_locked) return;
+        _locked = true;
+        Save();
+        Changed?.Invoke(this, EventArgs.Empty);
     }
 
     public int SnapshotQuotaMb
@@ -66,6 +80,7 @@ public sealed class ExperimentalGate : IExperimentalGate
             if (settings != null)
             {
                 _enabled = settings.Enabled;
+                _locked  = settings.Locked;
                 _quotaMb = settings.SnapshotQuotaMb < 0 ? 0 : settings.SnapshotQuotaMb;
             }
         }
@@ -80,7 +95,7 @@ public sealed class ExperimentalGate : IExperimentalGate
         try
         {
             var json = JsonSerializer.Serialize(
-                new ExperimentalSettings { Enabled = _enabled, SnapshotQuotaMb = _quotaMb },
+                new ExperimentalSettings { Enabled = _enabled, Locked = _locked, SnapshotQuotaMb = _quotaMb },
                 s_jsonCtx.ExperimentalSettings);
             var tempPath = _filePath + ".tmp";
             File.WriteAllText(tempPath, json);

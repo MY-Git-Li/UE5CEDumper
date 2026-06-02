@@ -96,4 +96,50 @@ public class ExperimentalGateTests : IDisposable
         gate.IsEnabled = false; // real flip
         Assert.Equal(2, fired);
     }
+
+    [Fact]
+    public void DefaultsToUnlocked()
+    {
+        Assert.False(new ExperimentalGate(_platform).IsLocked);
+    }
+
+    [Fact]
+    public void Lock_PersistsAcrossInstances()
+    {
+        var gate = new ExperimentalGate(_platform);
+        gate.IsEnabled = true;
+        gate.Lock();
+        Assert.True(gate.IsLocked);
+
+        var reopened = new ExperimentalGate(_platform);
+        Assert.True(reopened.IsLocked);
+        Assert.True(reopened.IsEnabled);
+    }
+
+    [Fact]
+    public void Lock_FiresChangedOnce_ThenIdempotent()
+    {
+        var gate = new ExperimentalGate(_platform);
+        int fired = 0;
+        gate.Changed += (_, _) => fired++;
+
+        gate.Lock();              // real lock
+        Assert.Equal(1, fired);
+        gate.Lock();              // no-op (already locked)
+        Assert.Equal(1, fired);
+    }
+
+    [Fact]
+    public void Locked_RefusesToDisable()
+    {
+        var gate = new ExperimentalGate(_platform);
+        gate.IsEnabled = true;
+        gate.Lock();
+
+        gate.IsEnabled = false;   // must be ignored while locked
+        Assert.True(gate.IsEnabled);
+
+        // And the refusal survives a reload.
+        Assert.True(new ExperimentalGate(_platform).IsEnabled);
+    }
 }

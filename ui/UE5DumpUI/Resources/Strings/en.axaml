@@ -263,6 +263,29 @@
     <sys:String x:Key="str.Snapshot.Diff.Col.Old">Old</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.Col.New">New</sys:String>
 
+    <!-- SPC Query (experimental) -->
+    <sys:String x:Key="str.Spc.Intro">Find fields whose value SEQUENCE across snapshots matches a direction chain — no type, no value. Pick two or more snapshots (they may span game sessions), set how each should compare to the previous one (Increased / Decreased / Unchanged / Changed), and run. This is CE's "Unknown Initial Value + Increased/Decreased" generalised across persisted snapshots and restarts.</sys:String>
+    <sys:String x:Key="str.Spc.Join">Join:</sys:String>
+    <sys:String x:Key="str.Spc.JoinHint">Strict = same class + normalised path + offset (fewest false positives). Loose = class + outer chain + name (recovers some spawned objects across sessions). In-session = same game launch only (exact).</sys:String>
+    <sys:String x:Key="str.Spc.ClassFilter">Class:</sys:String>
+    <sys:String x:Key="str.Spc.PropFilter">Field:</sys:String>
+    <sys:String x:Key="str.Spc.Run">Run SPC</sys:String>
+    <sys:String x:Key="str.Spc.Refresh">Refresh</sys:String>
+    <sys:String x:Key="str.Spc.OpenWalker">Open in Live Walker</sys:String>
+    <sys:String x:Key="str.Spc.CopyAddr">Copy Address</sys:String>
+    <sys:String x:Key="str.Spc.PickerHeader">Snapshot sequence</sys:String>
+    <sys:String x:Key="str.Spc.BaselineHint">The oldest ticked snapshot is the baseline (its predicate is ignored). Each later snapshot's predicate compares it to the previous ticked one. Hit → Copy Address / Open in Live Walker hands the newest snapshot's live address to CE.</sys:String>
+    <sys:String x:Key="str.Spc.Col.Use">Use</sys:String>
+    <sys:String x:Key="str.Spc.Col.Label">Label</sys:String>
+    <sys:String x:Key="str.Spc.Col.Captured">Captured (UTC)</sys:String>
+    <sys:String x:Key="str.Spc.Col.Session">Session</sys:String>
+    <sys:String x:Key="str.Spc.Col.Predicate">Compare</sys:String>
+    <sys:String x:Key="str.Spc.Res.Class">Class</sys:String>
+    <sys:String x:Key="str.Spc.Res.Object">Object</sys:String>
+    <sys:String x:Key="str.Spc.Res.Field">Field</sys:String>
+    <sys:String x:Key="str.Spc.Res.Type">Type</sys:String>
+    <sys:String x:Key="str.Spc.Res.Sequence">Value sequence</sys:String>
+
     <!-- Proxy Deploy -->
     <sys:String x:Key="str.ProxyDeploy.ProxyType">Proxy DLL:</sys:String>
     <sys:String x:Key="str.ProxyDeploy.Type.Version">version.dll</sys:String>

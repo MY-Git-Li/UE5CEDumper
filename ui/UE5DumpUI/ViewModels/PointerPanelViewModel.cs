@@ -266,10 +266,23 @@ public partial class PointerPanelViewModel : ViewModelBase
         _aobUsage = aobUsage;
         _experimentalGate = experimentalGate;
 
-        // Reflect external flips (e.g. another System-tab instance) back to the checkbox.
+        // Reflect external flips (e.g. another System-tab instance) back to the
+        // checkbox, plus the lock state (which disables the checkbox once an
+        // experimental tab has been opened).
         if (experimentalGate != null)
-            experimentalGate.Changed += (_, _) => OnPropertyChanged(nameof(ExperimentalEnabled));
+            experimentalGate.Changed += (_, _) =>
+            {
+                OnPropertyChanged(nameof(ExperimentalEnabled));
+                OnPropertyChanged(nameof(CanToggleExperimental));
+            };
     }
+
+    /// <summary>
+    /// False once the experimental opt-in has been locked (the user opened an
+    /// experimental tab while enabled). The System-tab checkbox binds its
+    /// <c>IsEnabled</c> to this so a locked opt-in can no longer be unticked.
+    /// </summary>
+    public bool CanToggleExperimental => !(_experimentalGate?.IsLocked ?? false);
 
     /// <summary>
     /// Opt-in toggle for the experimental analysis tabs (Snapshot / SPC Query /

@@ -133,6 +133,13 @@ is **persisted**.
 
 **Effort:** S · **Risk:** low · No DLL change.
 
+> **Update (build 824):** the opt-in checkbox renders at **Opacity 0.25**, and
+> once it is checked **and** the user opens any experimental tab the opt-in is
+> **locked** (can no longer be unticked, persisted across restarts). The gate
+> gained `IsLocked` + `Lock()`; `MainTabs_SelectionChanged` locks on first
+> experimental-tab open; the checkbox `IsEnabled` binds to
+> `PointerPanelViewModel.CanToggleExperimental`.
+
 -----
 
 ## Phase A — Snapshot (multi-session persistent foundation)
