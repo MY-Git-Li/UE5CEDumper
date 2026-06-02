@@ -145,6 +145,17 @@ public interface IDumpService
 
     Task EndValueScanAsync(ulong sessionId, CancellationToken ct = default);
 
+    // --- Snapshot Capture (experimental — Phase A) ---
+    // Stateless cursor pagination (like get_object_list): begin returns the
+    // total object count for progress; each chunk streams [offset, offset+limit)
+    // objects with their numeric UPROPERTY values. Advance offset by the
+    // returned Scanned, NOT Objects.Count. dataType is a multi-numeric meta
+    // type ("NumericNoByte" / "NumericAll").
+    Task<int> BeginSnapshotAsync(string dataType, CancellationToken ct = default);
+
+    Task<SnapshotChunkResult> SnapshotChunkAsync(
+        string dataType, bool gameOnly, int offset, int limit, CancellationToken ct = default);
+
     // --- All Functions Enumeration (Interesting Functions Finder) ---
     Task<AllFunctionsResult> ListAllFunctionsAsync(
         bool gameOnly = true, int limit = 100000, CancellationToken ct = default);

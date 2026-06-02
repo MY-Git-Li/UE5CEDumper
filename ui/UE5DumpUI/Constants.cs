@@ -58,6 +58,11 @@ public static class Constants
     // System-tab credit checkbox). Persisted under %LOCALAPPDATA%\UE5CEDumper.
     public const string ExperimentalSettingsFile = "experimental.json";
 
+    // Experimental Snapshot store — SQLite DB under %LOCALAPPDATA%\UE5CEDumper.
+    public const string SnapshotDbFile = "snapshots.db";
+    // Objects streamed per snapshot_chunk pipe round-trip.
+    public const int SnapshotChunkSize = 200;
+
     // UI
     public const int DefaultWindowWidth = 1400;
     public const int DefaultWindowHeight = 900;
