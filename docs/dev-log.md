@@ -57,12 +57,13 @@ change**. Plus a UX change on the experimental opt-in checkbox. Design of record
   checkbox now renders at **Opacity 0.25**, and once it is checked **and** the
   user has opened any experimental tab (Snapshot / SPC Query / Class Pivot) it can
   **no longer be unticked**. `IExperimentalGate` grows `IsLocked` + `Lock()`
-  (persisted in `experimental.json`; `IsEnabled` setter also refuses to go false
-  while locked — defence in depth). The three experimental `TabItem`s gained
-  `Tag`s; `MainTabs_SelectionChanged` calls `MainWindowViewModel.LockExperimental`
-  (idempotent, no-op unless enabled) on first open. `PointerPanelViewModel`
-  exposes `CanToggleExperimental` (`!IsLocked`) bound to the checkbox `IsEnabled`.
-  The lock is a permanent commitment — it survives restarts.
+  (`IsEnabled` setter also refuses to go false while locked — defence in depth).
+  The three experimental `TabItem`s gained `Tag`s; `MainTabs_SelectionChanged`
+  calls `MainWindowViewModel.LockExperimental` (idempotent, no-op unless enabled)
+  on first open. `PointerPanelViewModel` exposes `CanToggleExperimental`
+  (`!IsLocked`) bound to the checkbox `IsEnabled`. The lock is **session-only**
+  (NOT persisted) — a restart clears it, so the user can untick again until they
+  re-open an experimental tab.
 
 - **Tests +29 → 1197 C# (1598 total: 1197 C# + 370 dll + 31 utf8).**
   `SpcQueryBuilderTests` lock the SQL shape (join keys per mode, predicate

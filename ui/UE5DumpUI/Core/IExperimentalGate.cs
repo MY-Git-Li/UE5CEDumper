@@ -20,14 +20,15 @@ public interface IExperimentalGate
     /// <see cref="Changed"/> (the Snapshot tab owns its own quota UI).</summary>
     int SnapshotQuotaMb { get; set; }
 
-    /// <summary>True once the user has actually opened an experimental tab while
-    /// enabled. While locked the opt-in checkbox can no longer be unticked, and
-    /// <see cref="IsEnabled"/> can no longer be set back to false. Persisted, so
-    /// the commitment survives restarts.</summary>
+    /// <summary>True once the user has opened an experimental tab while enabled.
+    /// While locked the opt-in checkbox can no longer be unticked, and
+    /// <see cref="IsEnabled"/> can no longer be set back to false.
+    /// <b>Session-only</b> — NOT persisted; a restart clears it, so the user can
+    /// untick again until they re-open an experimental tab.</summary>
     bool IsLocked { get; }
 
-    /// <summary>Commit to the experimental features irreversibly (idempotent).
-    /// Persists the lock and raises <see cref="Changed"/> on the first call.</summary>
+    /// <summary>Lock the opt-in for this session (idempotent). Raises
+    /// <see cref="Changed"/> on the first call. Not persisted.</summary>
     void Lock();
 
     /// <summary>Raised whenever <see cref="IsEnabled"/> or <see cref="IsLocked"/>

@@ -104,16 +104,18 @@ public class ExperimentalGateTests : IDisposable
     }
 
     [Fact]
-    public void Lock_PersistsAcrossInstances()
+    public void Lock_IsSessionOnly_NotPersisted()
     {
         var gate = new ExperimentalGate(_platform);
         gate.IsEnabled = true;
         gate.Lock();
         Assert.True(gate.IsLocked);
 
+        // A fresh instance (restart) starts unlocked — the enable flag persists
+        // but the lock does not.
         var reopened = new ExperimentalGate(_platform);
-        Assert.True(reopened.IsLocked);
         Assert.True(reopened.IsEnabled);
+        Assert.False(reopened.IsLocked);
     }
 
     [Fact]
@@ -130,7 +132,7 @@ public class ExperimentalGateTests : IDisposable
     }
 
     [Fact]
-    public void Locked_RefusesToDisable()
+    public void Locked_RefusesToDisable_WithinSession()
     {
         var gate = new ExperimentalGate(_platform);
         gate.IsEnabled = true;
@@ -139,7 +141,10 @@ public class ExperimentalGateTests : IDisposable
         gate.IsEnabled = false;   // must be ignored while locked
         Assert.True(gate.IsEnabled);
 
-        // And the refusal survives a reload.
-        Assert.True(new ExperimentalGate(_platform).IsEnabled);
+        // But a restart clears the lock, so unticking works again.
+        var reopened = new ExperimentalGate(_platform);
+        Assert.False(reopened.IsLocked);
+        reopened.IsEnabled = false;
+        Assert.False(reopened.IsEnabled);
     }
 }

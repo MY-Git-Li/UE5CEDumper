@@ -95,11 +95,11 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Permanently commit to the experimental features. Called the first time the
-    /// user actually opens one of the experimental tabs (Snapshot / SPC Query /
-    /// Class Pivot) while enabled — from that point the System-tab opt-in
-    /// checkbox can no longer be unticked (the gate persists the lock). Idempotent
-    /// and a no-op when the gate isn't enabled.
+    /// Lock the experimental opt-in for the rest of this session. Called the
+    /// first time the user opens one of the experimental tabs (Snapshot /
+    /// SPC Query / Class Pivot) while enabled — from that point the System-tab
+    /// opt-in checkbox can no longer be unticked. Session-only (a restart clears
+    /// the lock). Idempotent and a no-op when the gate isn't enabled.
     /// </summary>
     public void LockExperimental()
     {

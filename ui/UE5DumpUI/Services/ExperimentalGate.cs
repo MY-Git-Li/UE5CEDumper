@@ -53,9 +53,10 @@ public sealed class ExperimentalGate : IExperimentalGate
 
     public void Lock()
     {
+        // Session-only: the lock is NOT persisted. After a restart the user can
+        // untick the opt-in again until they re-open an experimental tab.
         if (_locked) return;
         _locked = true;
-        Save();
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -80,7 +81,6 @@ public sealed class ExperimentalGate : IExperimentalGate
             if (settings != null)
             {
                 _enabled = settings.Enabled;
-                _locked  = settings.Locked;
                 _quotaMb = settings.SnapshotQuotaMb < 0 ? 0 : settings.SnapshotQuotaMb;
             }
         }
@@ -95,7 +95,7 @@ public sealed class ExperimentalGate : IExperimentalGate
         try
         {
             var json = JsonSerializer.Serialize(
-                new ExperimentalSettings { Enabled = _enabled, Locked = _locked, SnapshotQuotaMb = _quotaMb },
+                new ExperimentalSettings { Enabled = _enabled, SnapshotQuotaMb = _quotaMb },
                 s_jsonCtx.ExperimentalSettings);
             var tempPath = _filePath + ".tmp";
             File.WriteAllText(tempPath, json);
