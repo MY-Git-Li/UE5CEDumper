@@ -42,10 +42,20 @@ public partial class SnapshotViewModel : ViewModelBase
     [ObservableProperty] private SnapshotMeta? _diffB;      // new
     [ObservableProperty] private string _diffClassFilter = "";
     [ObservableProperty] private string _diffPropFilter = "";
+    [ObservableProperty] private string _diffObjectFilter = "";
     [ObservableProperty] private string _selectedDiffDirection = "Any";
     [ObservableProperty] private bool   _isDiffing;
     [ObservableProperty] private string _diffStatusText = "";
     [ObservableProperty] private SnapshotDiffRow? _selectedDiffRow;
+
+    // Full unfiltered changed set from the last Run Diff; the grid (DiffRows)
+    // is a live client-side filter of this so typing in the filter boxes is
+    // instant (no SQL re-query).
+    private readonly List<SnapshotDiffRow> _allDiff = new();
+    private string _diffSummary = "";
+
+    /// <summary>Raised to open a diff row's object in the Live Walker tab.</summary>
+    public event Action<string>? NavigateToInstance;
 
     public IReadOnlyList<string> DiffDirectionOptions { get; } =
         new[] { "Any", "Increased", "Decreased" };
@@ -58,6 +68,38 @@ public partial class SnapshotViewModel : ViewModelBase
     partial void OnDiffAChanged(SnapshotMeta? value)   => OnPropertyChanged(nameof(CanRunDiff));
     partial void OnDiffBChanged(SnapshotMeta? value)   => OnPropertyChanged(nameof(CanRunDiff));
     partial void OnIsDiffingChanged(bool value)        => OnPropertyChanged(nameof(CanRunDiff));
+
+    // Filter boxes narrow the loaded result live (client-side).
+    partial void OnDiffClassFilterChanged(string value)      => ApplyDiffFilter();
+    partial void OnDiffPropFilterChanged(string value)       => ApplyDiffFilter();
+    partial void OnDiffObjectFilterChanged(string value)     => ApplyDiffFilter();
+    partial void OnSelectedDiffDirectionChanged(string value) => ApplyDiffFilter();
+
+    private void ApplyDiffFilter()
+    {
+        if (_allDiff.Count == 0 && DiffRows.Count == 0) return;
+        string cls = DiffClassFilter.Trim();
+        string prop = DiffPropFilter.Trim();
+        string obj = DiffObjectFilter.Trim();
+        SnapshotDiffDirection? dir = SelectedDiffDirection switch
+        {
+            "Increased" => SnapshotDiffDirection.Up,
+            "Decreased" => SnapshotDiffDirection.Down,
+            _           => null,
+        };
+
+        DiffRows.Clear();
+        foreach (var r in _allDiff)
+        {
+            if (cls.Length  > 0 && r.ClassName.IndexOf(cls, StringComparison.OrdinalIgnoreCase) < 0) continue;
+            if (prop.Length > 0 && r.PropName.IndexOf(prop, StringComparison.OrdinalIgnoreCase) < 0) continue;
+            if (obj.Length  > 0 && r.NormPath.IndexOf(obj, StringComparison.OrdinalIgnoreCase) < 0) continue;
+            if (dir.HasValue && r.Direction != dir.Value) continue;
+            DiffRows.Add(r);
+        }
+        DiffStatusText = _diffSummary +
+            (DiffRows.Count != _allDiff.Count ? $"  ·  showing {DiffRows.Count:N0}" : "");
+    }
 
     /// <summary>Capture scope: NumericNoByte (default, excludes 1-byte) or
     /// NumericAll (includes Int8/UInt8 — floods on small values).</summary>
@@ -267,23 +309,16 @@ public partial class SnapshotViewModel : ViewModelBase
         IsDiffing = true;
         try
         {
-            var filter = new SnapshotDiffFilter
-            {
-                ClassContains = DiffClassFilter.Trim(),
-                PropContains  = DiffPropFilter.Trim(),
-                Direction = SelectedDiffDirection switch
-                {
-                    "Increased" => SnapshotDiffDirection.Up,
-                    "Decreased" => SnapshotDiffDirection.Down,
-                    _           => SnapshotDiffDirection.None,
-                },
-            };
+            // Load the full changed set (capped); the filter boxes narrow it
+            // client-side afterward so typing is instant.
+            var filter = new SnapshotDiffFilter();
             var diff = await _store.DiffSnapshotsAsync(DiffA!.Id, DiffB!.Id, filter);
-            DiffRows.Clear();
-            foreach (var row in diff.Changed) DiffRows.Add(row);
+            _allDiff.Clear();
+            _allDiff.AddRange(diff.Changed);
             var trunc = diff.Truncated ? $" (capped at {filter.MaxRows:N0})" : "";
-            DiffStatusText =
+            _diffSummary =
                 $"{diff.Changed.Count:N0} changed{trunc}  ·  +{diff.AddedCount:N0} added  ·  −{diff.RemovedCount:N0} removed";
+            ApplyDiffFilter();
         }
         catch (Exception ex)
         {
@@ -294,6 +329,14 @@ public partial class SnapshotViewModel : ViewModelBase
         {
             IsDiffing = false;
         }
+    }
+
+    /// <summary>Open the selected diff row's object in the Live Walker tab.</summary>
+    [RelayCommand]
+    private void OpenInLiveWalker(SnapshotDiffRow? row)
+    {
+        if (row == null || string.IsNullOrEmpty(row.ObjAddr)) return;
+        NavigateToInstance?.Invoke(row.ObjAddr);
     }
 
     /// <summary>Copy the changed field's live address (obj_addr + offset) to the

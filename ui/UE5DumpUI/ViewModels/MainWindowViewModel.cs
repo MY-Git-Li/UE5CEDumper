@@ -220,7 +220,22 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ValueSearch = new ValueSearchViewModel(dump, log);
         Console = new ConsoleViewModel(dump, log);
         if (snapshotStore != null)
+        {
             Snapshot = new SnapshotViewModel(dump, snapshotStore, log, experimentalGate, platform);
+            // Diff row -> open its object in Live Walker (same shape as ValueSearch).
+            Snapshot.NavigateToInstance += async (addr) =>
+            {
+                try
+                {
+                    SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                    await LiveWalker.NavigateToAddressCommand.ExecuteAsync(addr);
+                }
+                catch (Exception ex)
+                {
+                    _log.Error($"Snapshot NavigateToInstance handler error: {addr}", ex);
+                }
+            };
+        }
 
         if (proxyDeploy != null)
             ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log);

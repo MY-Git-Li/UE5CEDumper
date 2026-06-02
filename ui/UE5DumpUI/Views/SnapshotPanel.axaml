@@ -107,19 +107,22 @@
           <Button Content="{StaticResource str.Snapshot.Diff.Run}" Command="{Binding RunDiffCommand}"
                   IsEnabled="{Binding CanRunDiff}" Classes="accent" Padding="12,4" Margin="0,0,8,0"
                   ToolTip.Tip="{StaticResource str.Snapshot.Diff.Hint}"/>
+          <Button Content="{StaticResource str.Snapshot.Diff.OpenWalker}" Command="{Binding OpenInLiveWalkerCommand}"
+                  CommandParameter="{Binding SelectedDiffRow}" Padding="8,4" Margin="0,0,8,0"/>
           <Button Content="{StaticResource str.Snapshot.Diff.CopyAddr}" Command="{Binding CopyDiffAddressCommand}"
                   CommandParameter="{Binding SelectedDiffRow}" Padding="8,4"/>
         </WrapPanel>
-        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-          <TextBlock Text="{StaticResource str.Snapshot.Diff.ClassFilter}" Foreground="#CCCCCC" VerticalAlignment="Center"/>
-          <TextBox Text="{Binding DiffClassFilter}" Width="140"/>
-          <TextBlock Text="{StaticResource str.Snapshot.Diff.PropFilter}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="8,0,0,0"/>
-          <TextBox Text="{Binding DiffPropFilter}" Width="140"/>
-          <TextBlock Text="{StaticResource str.Snapshot.Diff.Dir}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="8,0,0,0"/>
-          <ComboBox ItemsSource="{Binding DiffDirectionOptions}" SelectedItem="{Binding SelectedDiffDirection}" MinWidth="120"/>
-          <TextBlock Text="{Binding DiffStatusText}" Foreground="#4EC9B0" FontSize="12"
-                     VerticalAlignment="Center" Margin="12,0,0,0"/>
-        </StackPanel>
+        <WrapPanel Orientation="Horizontal">
+          <TextBlock Text="{StaticResource str.Snapshot.Diff.ClassFilter}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+          <TextBox Text="{Binding DiffClassFilter}" Width="130" Margin="0,0,8,0"/>
+          <TextBlock Text="{StaticResource str.Snapshot.Diff.PropFilter}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+          <TextBox Text="{Binding DiffPropFilter}" Width="130" Margin="0,0,8,0"/>
+          <TextBlock Text="{StaticResource str.Snapshot.Diff.ObjectFilter}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+          <TextBox Text="{Binding DiffObjectFilter}" Width="160" Margin="0,0,8,0"/>
+          <TextBlock Text="{StaticResource str.Snapshot.Diff.Dir}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+          <ComboBox ItemsSource="{Binding DiffDirectionOptions}" SelectedItem="{Binding SelectedDiffDirection}" MinWidth="120" Margin="0,0,8,0"/>
+          <TextBlock Text="{Binding DiffStatusText}" Foreground="#4EC9B0" FontSize="12" VerticalAlignment="Center"/>
+        </WrapPanel>
       </StackPanel>
     </Border>
 

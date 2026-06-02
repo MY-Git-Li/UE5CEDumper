@@ -253,6 +253,8 @@
     <sys:String x:Key="str.Snapshot.Diff.PropFilter">Field:</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.Dir">Change:</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.CopyAddr">Copy Address</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.OpenWalker">Open in Live Walker</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.ObjectFilter">Object:</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.Hint">Diff joins fields by object identity within a session (same game launch). Old &amp; New should be from the same play session.</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.Col.Change">Δ</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.Col.Class">Class</sys:String>
