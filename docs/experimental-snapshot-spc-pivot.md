@@ -169,10 +169,17 @@ identity columns needed for cross-session join, plus array elements (§4).
   `SQLitePCLRaw.bundle_e_sqlite3`). **No EF Core** (reflection-based query breaks
   trim/AOT — violates the repo's AOT rule). Schema in §6. **Stream chunk writes**
   so neither the game nor the UI holds the full capture.
-  - ⚠️ **Publish check:** verify `e_sqlite3` native lib is bundled by
-    `build.ps1 -Mode Publish` into the self-contained trimmed output.
-- Session identity: store `pe_hash` (already from `get_pointers`) + a launch
-  token → `game_session_id` distinguishes restarts.
+  - ✅ **Publish check DONE (build 811):** Native AOT publish
+    (`build.ps1 -Mode Publish`) is clean and bundles `e_sqlite3.dll`.
+- **Per-game DB file** (build 813): `snapshots.<pe_hash>.db`, NOT one shared
+  file. `pe_hash` is stable across launches of the same build, so all sessions
+  of a game share one file; a patch (new pe_hash) gets a fresh file. This keeps
+  games isolated — no cross-game mixing in the list or in SPC/Pivot joins,
+  isolated growth, isolated corruption blast radius. The store's active game is
+  set on connect (`SetActiveGame`); pe_hash is sanitised to ASCII alphanumerics
+  (no path traversal).
+- Session identity: store `pe_hash` + `ModuleBase` (ASLR, per-launch) →
+  `game_session_id` distinguishes restarts WITHIN a game's file.
 - New gated "Snapshot" tab: capture controls (scope / caps), snapshot list,
   status row (reuse the existing status-row architecture).
 
@@ -326,6 +333,11 @@ HP / money) lives on the stable anchors, so it joins well.
 -----
 
 ## 6. SQLite schema (raw ADO.NET)
+
+> One DB file **per game**: `%LOCALAPPDATA%\UE5CEDumper\snapshots.<pe_hash>.db`.
+> `game_session_id` (pe_hash + ModuleBase) distinguishes restarts within that
+> file. Cross-game isolation is by file; cross-session join is by the columns
+> below.
 
 ```sql
 -- One row per capture round (may span game sessions).
