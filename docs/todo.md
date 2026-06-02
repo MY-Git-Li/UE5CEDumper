@@ -39,11 +39,16 @@ Build in order; each phase gates the next:
   publish clean. (Also fixed an unrelated `build.ps1 -Target Test` crash from a
   stray empty `--no-restore` arg, `4292004`.)
 - **Phase A — Snapshot** (multi-session persistent foundation).
-  - A1 DLL streaming capture (`begin/snapshot_chunk/end_snapshot`), all-numeric +
-    identity columns + array elements, reusing `Aura` container walk + `Ubel`.
-    *Effort M · Risk capture mem/perf · DLL.*
-  - A2 C# model + SQLite (raw ADO.NET, stream chunk writes) + capture UI.
-    *Effort M · Risk publish native dep · no DLL.* ⚠ verify `e_sqlite3` bundling.
+  - ~~A1a DLL scalar numeric capture + `begin_snapshot`/`snapshot_chunk`.~~ ✅
+    **SHIPPED `fe8b5c2` (build 808)** — `Aura::CaptureSnapshotChunk` +
+    `ValueScan::SelectSnapshotNumericFields` (dll_helpers 349→365).
+  - **A1b DLL array element capture (inner-key)** — struct-array inner numeric
+    fields + inner-key (FName/int/enum) + object-array element identity, reusing
+    `Aura` container walk (`ContainerCacheEntry`/`intraOffset`). *Effort M · med ·
+    DLL.* ⏳ NEXT. Has a live test harness now (the A2 capture UI).
+  - ~~A2 C# SQLite store + models + capture UI.~~ ✅ **SHIPPED `0747065` (A2a
+    data layer) + `e832b4c` (A2b capture UI), builds 809-811.** Native AOT
+    publish verified clean + bundles `e_sqlite3.dll`. +50 tests → 1535 green.
   - A3 Diff engine (in-session index join) + grid + CE export handoff.
     *Effort S · Risk low · no DLL.*
 - **Phase B — SPC Query** (multi-session, type-agnostic directional). Pure C#.
