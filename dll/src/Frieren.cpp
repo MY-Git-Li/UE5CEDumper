@@ -744,7 +744,13 @@ static void TryInstallGameThreadHook() {
     }).detach();
 }
 
-int32_t UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t params) {
+// Internal size-aware entry. paramsSize > 0 makes the queued GameThreadDispatch
+// request OWN a copy of the param bytes, so a timed-out-but-still-queued invoke
+// can't dereference a freed caller buffer (use-after-free). Out-params are copied
+// back on success. The direct fallback is synchronous (buffer stays alive), so
+// size is irrelevant there. Declared extern "C" so Fern links to it directly.
+extern "C" int32_t UE5_CallProcessEventEx(uintptr_t instance, uintptr_t ufunc,
+                                          uintptr_t params, uint32_t paramsSize) {
     if (!instance || !ufunc) return -1;
 
     // Lazy detection
@@ -758,7 +764,7 @@ int32_t UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t para
     if (Stark::IsHookActive()) {
         LOG_INFO("UE5_CallProcessEvent: dispatching to game thread inst=0x%llX func=0x%llX",
                  (unsigned long long)instance, (unsigned long long)ufunc);
-        return Stark::EnqueueInvoke(instance, ufunc, params);
+        return Stark::EnqueueInvoke(instance, ufunc, params, paramsSize);
     }
 
     // Fallback: direct call from current thread (unsafe for state-changing functions)
@@ -789,6 +795,12 @@ int32_t UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t para
 
     LOG_INFO("UE5_CallProcessEvent: direct call success (warn: not game-thread)");
     return 0;
+}
+
+int32_t UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t params) {
+    // Legacy 3-arg export (CE Lua + Mimic's mailbox). Size 0 = no owned copy:
+    // callers here pass persistent buffers that outlive the queued request.
+    return UE5_CallProcessEventEx(instance, ufunc, params, 0);
 }
 
 // Direct call entry point — never goes through GameThreadDispatch.

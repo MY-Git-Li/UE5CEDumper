@@ -947,10 +947,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Audit fixes #16/#17: dispose owned child VMs that hold timers /
     /// CancellationTokenSources. Called from MainWindow.Closed so timer
-    /// callbacks don't fire after the window is gone.
-    /// Other child VMs (PointerPanel, ClassStruct, InstanceFinder, etc.)
-    /// don't currently own disposable resources; they're skipped here.
-    /// If they grow IDisposable in the future, add them to this list.
+    /// callbacks don't fire after the window is gone. Any child VM that is
+    /// IDisposable (owns a timer / CTS / SQLite handle) MUST be disposed here —
+    /// the VM's own Dispose() has no other caller.
     /// </summary>
     public void Dispose()
     {
@@ -959,6 +958,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         ObjectTree.Dispose();
         LiveWalker.Dispose();
+        // PropertySearch is IDisposable (owns a debounce System.Threading.Timer);
+        // its Dispose had no caller before, leaking the timer until process exit.
+        PropertySearch.Dispose();
 
         GC.SuppressFinalize(this);
     }

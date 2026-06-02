@@ -33,6 +33,9 @@ extern "C" uintptr_t UE5_GetObjectClass(uintptr_t obj);
 extern "C" uintptr_t UE5_FindFunctionByName(uintptr_t classAddr, const char* funcName);
 extern "C" int32_t   UE5_CallProcessEventDirect(uintptr_t instance, uintptr_t ufunc, uintptr_t params);
 extern "C" int32_t   UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t params);
+// Size-aware variant: the queued request owns a copy of the param buffer, so a
+// timed-out invoke can't use-after-free this handler's stack-local paramBuf.
+extern "C" int32_t   UE5_CallProcessEventEx(uintptr_t instance, uintptr_t ufunc, uintptr_t params, uint32_t paramsSize);
 
 // ============================================================
 // ValueScan wire helpers — parse "100" / "-42" / "3.14" / "true" /
@@ -2727,9 +2730,12 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             // Call ProcessEvent. directCall=true uses the direct entry point
             // (no GameThreadDispatch queue), matching Mimic's static-native
             // fast path. Caller is responsible for asserting safety.
+            // The queued path uses the size-aware Ex entry so the request owns a
+            // copy of paramBuf — otherwise a timeout would leave the game thread
+            // dereferencing this freed stack-local buffer (use-after-free).
             int32_t callResult = directCall
                 ? UE5_CallProcessEventDirect(instanceAddr, ufuncAddr, paramPtr)
-                : UE5_CallProcessEvent(instanceAddr, ufuncAddr, paramPtr);
+                : UE5_CallProcessEventEx(instanceAddr, ufuncAddr, paramPtr, (uint32_t)bufSize);
 
             // Build response
             json data;

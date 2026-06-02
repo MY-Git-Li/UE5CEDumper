@@ -542,10 +542,20 @@ public sealed class InvokeParamDialog : Window
         if (sender is not Button btn) return;
         if (btn.Tag is not (string expectedClass, TextBox edt)) return;
 
-        var picker = new ObjectInstancePickerDialog(expectedClass, _dump);
-        var picked = await picker.ShowDialog<string?>(this);
-        if (!string.IsNullOrEmpty(picked))
-            edt.Text = picked;
+        // async void: an unguarded throw here (e.g. ShowDialog with a closing
+        // owner) would escape to the dispatcher and crash the app, matching the
+        // try/catch the sibling handlers (OnFireClicked/OnCopyBakedScriptClicked) use.
+        try
+        {
+            var picker = new ObjectInstancePickerDialog(expectedClass, _dump);
+            var picked = await picker.ShowDialog<string?>(this);
+            if (!string.IsNullOrEmpty(picked))
+                edt.Text = picked;
+        }
+        catch (Exception ex)
+        {
+            _resultLabel.Text = $"Pick failed: {ex.Message}";
+        }
     }
 
     private void OnNullPointerClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

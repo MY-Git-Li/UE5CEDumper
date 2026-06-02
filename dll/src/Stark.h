@@ -37,11 +37,17 @@ bool IsHookActive();
 /// Enqueue a ProcessEvent invocation for game-thread execution.
 /// Blocks until the game thread executes it (or timeout).
 ///
-/// @param instance  UObject instance pointer
-/// @param ufunc     UFunction pointer
-/// @param params    Parameter buffer pointer (already allocated/written by caller)
+/// @param instance    UObject instance pointer
+/// @param ufunc       UFunction pointer
+/// @param params      Parameter buffer pointer (already allocated/written by caller)
+/// @param paramsSize  Bytes to COPY into the request so it owns its buffer. Pass
+///                    the UFunction ParmsSize when the caller's buffer is
+///                    transient (the common case — prevents a use-after-free if
+///                    the invoke times out but is later drained by the game
+///                    thread). Pass 0 only when `params` is a persistent buffer
+///                    that outlives the request (e.g. Mimic's mailbox global).
 /// @return 0 on success, -4 if SEH exception, -5 if timeout, -7 if hook not active
-int32_t EnqueueInvoke(uintptr_t instance, uintptr_t ufunc, uintptr_t params);
+int32_t EnqueueInvoke(uintptr_t instance, uintptr_t ufunc, uintptr_t params, size_t paramsSize);
 
 /// Default invoke timeout (compile-time baseline, used when no override is set).
 constexpr int32_t kDefaultInvokeTimeoutMs = 5000;
