@@ -228,7 +228,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             experimentalGate.Changed += (_, _) => OnPropertyChanged(nameof(ExperimentalEnabled));
 
         ObjectTree = new ObjectTreeViewModel(dump, log, platform);
-        ClassStruct = new ClassStructViewModel(dump, log);
+        ClassStruct = new ClassStructViewModel(dump, log, platform);
         Pointers = new PointerPanelViewModel(platform, dump, log, aobMaker, aobUsage, experimentalGate);
         LiveWalker = new LiveWalkerViewModel(dump, log, platform, aobMaker);
         InstanceFinder = new InstanceFinderViewModel(dump, log, platform);

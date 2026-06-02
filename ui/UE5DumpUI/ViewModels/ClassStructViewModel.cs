@@ -13,6 +13,7 @@ public partial class ClassStructViewModel : ViewModelBase
 {
     private readonly IDumpService _dump;
     private readonly ILoggingService _log;
+    private readonly IPlatformService _platform;
 
     [ObservableProperty] private string _className = "";
     [ObservableProperty] private string _classPath = "";
@@ -21,6 +22,9 @@ public partial class ClassStructViewModel : ViewModelBase
     [ObservableProperty] private ObservableCollection<FieldInfoModel> _fields = new();
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private bool _hasClass;
+
+    /// <summary>Field row the user right-clicked (drives the xref context menu).</summary>
+    [ObservableProperty] private FieldInfoModel? _selectedField;
 
     /// <summary>
     /// True when a class is loaded but has zero instance fields. The
@@ -43,10 +47,44 @@ public partial class ClassStructViewModel : ViewModelBase
     /// </summary>
     private string? _lastLoadedNodeAddress;
 
-    public ClassStructViewModel(IDumpService dump, ILoggingService log)
+    public ClassStructViewModel(IDumpService dump, ILoggingService log, IPlatformService platform)
     {
         _dump = dump;
         _log = log;
+        _platform = platform;
+    }
+
+    /// <summary>
+    /// "Find functions using this field" — static Kismet-bytecode cross-reference
+    /// for the field's FProperty*. Opens a self-contained dialog (no tab impact).
+    /// </summary>
+    [RelayCommand]
+    private async Task FindFieldXrefsAsync(FieldInfoModel? field)
+    {
+        field ??= SelectedField;
+        if (field == null || string.IsNullOrEmpty(field.Address) || field.Address == "0x0")
+            return;
+
+        if (Avalonia.Application.Current?.ApplicationLifetime is not
+            Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+            || desktop.MainWindow is not { } owner)
+        {
+            _log.Warn("FindFieldXrefs: no owner window available");
+            return;
+        }
+
+        try
+        {
+            var dialog = new Views.PropertyXrefDialog(
+                field.Name, field.TypeName, field.Address, _dump, _platform);
+            await dialog.ShowDialog(owner);
+            _log.Info($"FindFieldXrefs dialog closed for {ClassName}.{field.Name} ({field.Address})");
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error($"FindFieldXrefs failed for {field.Name}", ex);
+        }
     }
 
     [RelayCommand]

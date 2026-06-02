@@ -62,6 +62,7 @@
 
     <!-- Fields DataGrid -->
     <DataGrid ItemsSource="{Binding Fields}"
+              SelectedItem="{Binding SelectedField}"
               IsReadOnly="True"
               CanUserSortColumns="True"
               CanUserResizeColumns="True"
@@ -70,6 +71,13 @@
               IsVisible="{Binding HasClass}"
               FontFamily="Consolas"
               FontSize="13">
+      <DataGrid.ContextMenu>
+        <ContextMenu x:DataType="vm:ClassStructViewModel">
+          <MenuItem Header="{StaticResource str.ClassStruct.FindXrefs}"
+                    Command="{Binding FindFieldXrefsCommand}"
+                    CommandParameter="{Binding SelectedField}"/>
+        </ContextMenu>
+      </DataGrid.ContextMenu>
       <DataGrid.Columns>
         <DataGridTextColumn Header="{StaticResource str.ClassStruct.Offset}"
                             Binding="{Binding Offset, StringFormat=0x{0:X}}"
