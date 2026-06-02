@@ -201,6 +201,22 @@ const std::vector<DataType>& MultiNumericMembers(DataType dt);
 // scan + refine engines to resolve each candidate's own width.
 bool TryDataTypeFromPropertyTypeName(const std::string& propTypeName, DataType& out);
 
+// Snapshot capture (Phase A1a): given the property type-name of each field
+// of a class (in ClassInfo.Fields order), select those whose declared type
+// is a member of the given numeric meta scope (NumericNoByte / NumericAll),
+// pairing each selected field's index with its resolved concrete DataType.
+// Pure / std-only so it reuses the exact same MultiNumericMembers +
+// TryDataTypeFromPropertyTypeName invariant the value scan relies on — a
+// field captured here is guaranteed to resolve to a fixed width via
+// SizeOf(dt). Non-numeric, Bool, and out-of-scope (e.g. 1-byte under
+// NumericNoByte) fields are omitted.
+struct SnapshotFieldPick {
+    int32_t  fieldIndex;
+    DataType dt;
+};
+std::vector<SnapshotFieldPick> SelectSnapshotNumericFields(
+    const std::vector<std::string>& propTypeNames, DataType numericScope);
+
 // Pre-parsed multi-numeric target. Holds one little-endian byte buffer
 // per member DataType whose width can represent the user's value (e.g.
 // "70000" yields Int32/UInt32/Int64/UInt64/Float/Double entries but no

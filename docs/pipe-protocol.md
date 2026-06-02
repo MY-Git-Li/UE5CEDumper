@@ -213,6 +213,26 @@ CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands f
 - `case_sensitive` is attached only when true AND the data type is FString/FName/FText.
 - `(data_type, scan_type)` combinations are validated server-side by `IsScanTypeValidFor` — `FString + Bigger` or `Int32 + Contains` return an explicit error rather than running with garbage semantics.
 
+### Snapshot Capture (experimental — Phase A)
+
+Type-agnostic streamed capture of every numeric UPROPERTY of every (scoped) UObject, for the experimental Snapshot / SPC / Pivot tabs. **Stateless cursor pagination** (mirrors `get_object_list`): no server-side session. `begin_snapshot` returns the total object count for a progress bar; `snapshot_chunk` streams `[offset, offset+limit)` objects. Advance `offset` by the returned `scanned` (indices iterated), NOT by `objects.length` (objects with zero numeric fields are skipped). Phase A1a captures scalar numeric fields only; array elements arrive in A1b.
+
+```jsonc
+// Begin — validate scope, return total object count.
+// data_type: NumericNoByte (default) | NumericAll. Must be a multi-numeric
+//            meta type; the structured walk compares each field by its own
+//            declared width (no byte-reinterpret). NumericNoByte excludes
+//            1-byte families to avoid flooding.
+{ "id": 60, "cmd": "begin_snapshot", "data_type": "NumericNoByte" }
+
+// Chunk — stream the next window of objects.
+{ "id": 61, "cmd": "snapshot_chunk",
+  "data_type": "NumericNoByte",
+  "game_only": true,
+  "offset":    0,
+  "limit":     100 }
+```
+
 -----
 
 ## Responses (DLL → UI)
@@ -268,6 +288,37 @@ CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands f
       "name":  "BP_Player_C_0",
       "class": "BlueprintGeneratedClass",
       "outer": "7FF123400000"
+    }
+  ]
+}
+```
+
+### begin_snapshot / snapshot_chunk
+
+```jsonc
+// begin_snapshot
+{ "id": 60, "ok": true, "total": 58432 }
+
+// snapshot_chunk — one entry per object with >=1 numeric field.
+// "index" is the GObjects index (stable in-session join key). "path" is the
+// full object path (cross-session identity; UI normalises the FName suffix).
+// "off" is the field byte offset; "hex" is the little-endian raw bytes.
+{
+  "id": 61, "ok": true,
+  "total":   58432,
+  "scanned": 100,          // ← advance offset by this, NOT objects.length
+  "objects": [
+    {
+      "index":       12345,
+      "addr":        "0x7FF123456000",
+      "name":        "BP_Player_C_0",
+      "class":       "BP_Player_C",
+      "outer_class": "World",
+      "path":        "/Game/Maps/Map.Map:PersistentLevel.BP_Player_C_0",
+      "fields": [
+        { "name": "Health", "off": 720, "type": "FloatProperty", "hex": "0000C842" },
+        { "name": "Ammo",   "off": 728, "type": "IntProperty",   "hex": "1E000000" }
+      ]
     }
   ]
 }

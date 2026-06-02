@@ -312,6 +312,25 @@ bool TryDataTypeFromPropertyTypeName(const std::string& propTypeName, DataType& 
     return false;
 }
 
+std::vector<SnapshotFieldPick> SelectSnapshotNumericFields(
+    const std::vector<std::string>& propTypeNames, DataType numericScope) {
+    std::vector<SnapshotFieldPick> picks;
+    const std::vector<DataType>& members = MultiNumericMembers(numericScope);
+    if (members.empty()) return picks;  // not a meta scope -> capture nothing
+
+    for (int32_t i = 0; i < static_cast<int32_t>(propTypeNames.size()); ++i) {
+        DataType dt;
+        if (!TryDataTypeFromPropertyTypeName(propTypeNames[i], dt)) continue;  // non-numeric / bool
+        bool inScope = false;
+        for (DataType m : members) {
+            if (m == dt) { inScope = true; break; }
+        }
+        if (!inScope) continue;  // e.g. Int8/UInt8 under NumericNoByte
+        picks.push_back({ i, dt });
+    }
+    return picks;
+}
+
 bool BuildNumericTargets(DataType metaDt, const std::string& raw, NumericTargetSet& out) {
     out.entries.clear();
     const auto& members = MultiNumericMembers(metaDt);

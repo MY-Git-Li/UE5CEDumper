@@ -1023,6 +1023,62 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             return Renge::MakeResponse(id, data).dump();
         }
 
+        // Snapshot capture (experimental — Phase A1a). begin returns the total
+        // object count for progress; chunk streams numeric UPROPERTY values per
+        // object. Stateless cursor pagination — advance "offset" by "scanned".
+        if (cmd == Renge::CMD_BEGIN_SNAPSHOT) {
+            std::string dtStr = request.value("data_type", "NumericNoByte");
+            ValueScan::DataType dt;
+            if (!ValueScan::TryParseDataType(dtStr, dt) || !ValueScan::IsMultiNumericDataType(dt)) {
+                return Renge::MakeError(id, "snapshot data_type must be NumericNoByte or NumericAll").dump();
+            }
+            json data;
+            data["total"] = Aura::GetCount();
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        if (cmd == Renge::CMD_SNAPSHOT_CHUNK) {
+            int  offset   = request.value("offset", 0);
+            int  limit    = request.value("limit", 100);
+            bool gameOnly = request.value("game_only", true);
+            std::string dtStr = request.value("data_type", "NumericNoByte");
+            ValueScan::DataType dt;
+            if (!ValueScan::TryParseDataType(dtStr, dt) || !ValueScan::IsMultiNumericDataType(dt)) {
+                return Renge::MakeError(id, "snapshot data_type must be NumericNoByte or NumericAll").dump();
+            }
+
+            auto chunk = Aura::CaptureSnapshotChunk(offset, limit, gameOnly, dt);
+
+            json objects = json::array();
+            for (const auto& o : chunk.objects) {
+                json fields = json::array();
+                for (const auto& f : o.fields) {
+                    json fe;
+                    fe["name"] = f.name;
+                    fe["off"]  = f.offset;
+                    fe["type"] = f.type;
+                    fe["hex"]  = f.hex;
+                    fields.push_back(std::move(fe));
+                }
+
+                json item;
+                item["index"]       = o.index;
+                item["addr"]        = Renge::AddrToStr(o.addr);
+                item["name"]        = o.name;
+                item["class"]       = o.className;
+                item["outer_class"] = o.outerClassName;
+                item["path"]        = o.path;
+                item["fields"]      = std::move(fields);
+                objects.push_back(std::move(item));
+            }
+
+            json data;
+            data["total"]   = chunk.total;
+            data["scanned"] = chunk.scanned;
+            data["objects"] = std::move(objects);
+            return Renge::MakeResponse(id, data).dump();
+        }
+
         if (cmd == Renge::CMD_GET_OBJECT) {
             std::string addrStr = request.value("addr", "");
             if (addrStr.empty()) return Renge::MakeError(id, "Missing addr").dump();

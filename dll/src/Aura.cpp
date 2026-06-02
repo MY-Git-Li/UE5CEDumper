@@ -4120,4 +4120,93 @@ ValueScanStats RefineCandidates(
     return stats;
 }
 
+// ------------------------------------------------------------------
+// Snapshot capture (Phase A1a)
+// ------------------------------------------------------------------
+
+namespace {
+// Uppercase, no-prefix hex — matches Renge::BytesToHex without pulling the
+// json-heavy Renge.h into this TU.
+std::string SnapshotBytesToHex(const uint8_t* d, size_t n) {
+    static const char* kHex = "0123456789ABCDEF";
+    std::string s;
+    s.reserve(n * 2);
+    for (size_t i = 0; i < n; ++i) {
+        s.push_back(kHex[(d[i] >> 4) & 0xF]);
+        s.push_back(kHex[d[i] & 0xF]);
+    }
+    return s;
+}
+} // namespace
+
+SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
+                                         bool gameOnly,
+                                         ValueScan::DataType numericScope) {
+    SnapshotChunkResult result;
+    const int32_t total = GetCount();
+    result.total = total;
+
+    if (offset < 0) offset = 0;
+    if (limit < 0)  limit = 0;
+    const int32_t end = (std::min)(offset + limit, total);
+    result.scanned = (end > offset) ? (end - offset) : 0;
+
+    // Reused scratch so per-object capture doesn't churn the heap.
+    std::vector<std::string> typeNames;
+
+    for (int32_t i = offset; i < end; ++i) {
+        uintptr_t obj = GetByIndex(i);
+        if (!obj) continue;
+
+        std::string name = Ubel::GetName(obj);
+        if (name.empty()) continue;  // skip unnamed slots (matches get_object_list)
+
+        uintptr_t cls = Ubel::GetClass(obj);
+        if (!cls) continue;
+
+        // game_only filter keys on the class path (engine packages skipped).
+        std::string classPath = Ubel::GetFullName(cls);
+        if (gameOnly && IsEnginePackage(classPath)) continue;
+
+        ClassInfo ci = Ubel::WalkClassEx(cls);  // cached per class
+        if (ci.Fields.empty()) continue;
+
+        typeNames.clear();
+        typeNames.reserve(ci.Fields.size());
+        for (const auto& f : ci.Fields) typeNames.push_back(f.TypeName);
+
+        auto picks = ValueScan::SelectSnapshotNumericFields(typeNames, numericScope);
+        if (picks.empty()) continue;
+
+        SnapshotObject so;
+        so.index     = i;  // GObjects index == logical slot index
+        so.addr      = obj;
+        so.name      = std::move(name);
+        so.className = ci.Name;
+        so.path      = Ubel::GetFullName(obj);
+        uintptr_t outer = Ubel::GetOuter(obj);
+        so.outerClassName = outer ? Ubel::GetName(Ubel::GetClass(outer)) : "";
+
+        for (const auto& p : picks) {
+            const auto& fi = ci.Fields[p.fieldIndex];
+            size_t sz = ValueScan::SizeOf(p.dt);
+            if (sz == 0 || sz > 8) continue;  // defensive; meta members are 1..8B
+            uint8_t buf[8] = {};
+            if (!Macht::ReadBytesSafe(obj + fi.Offset, buf, sz)) continue;
+
+            SnapshotField sf;
+            sf.name   = fi.Name;
+            sf.offset = fi.Offset;
+            sf.type   = fi.TypeName;
+            sf.hex    = SnapshotBytesToHex(buf, sz);
+            so.fields.push_back(std::move(sf));
+        }
+
+        if (so.fields.empty()) continue;  // every read failed -> nothing to store
+        result.objects.push_back(std::move(so));
+    }
+
+    return result;
+}
+
 } // namespace Aura

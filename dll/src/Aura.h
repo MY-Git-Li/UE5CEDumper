@@ -552,4 +552,44 @@ ValueScanStats RefineCandidates(
     const ValueScan::NumericTargetSet* multiTargets  = nullptr,
     const ValueScan::NumericTargetSet* multiTargets2 = nullptr);
 
+// ------------------------------------------------------------------
+// Snapshot capture (experimental — Phase A1a). A type-agnostic, streamed
+// capture of every numeric UPROPERTY of every (scoped) UObject, used by the
+// UI to persist snapshots for diff / SPC / pivot. Stateless cursor
+// pagination (mirrors GetCount/GetByIndex + get_object_list): each chunk
+// walks [offset, offset+limit) GObjects indices. Reuses Ubel::WalkClassEx
+// (cached) + ValueScan::SelectSnapshotNumericFields. Array elements are
+// captured in Phase A1b.
+// ------------------------------------------------------------------
+struct SnapshotField {
+    std::string name;
+    int32_t     offset = 0;
+    std::string type;       // "FloatProperty" / "IntProperty" / ... (declared type)
+    std::string hex;        // little-endian raw bytes, hex (no 0x prefix)
+};
+
+struct SnapshotObject {
+    int32_t     index = -1;        // GObjects index (stable in-session join key)
+    uintptr_t   addr  = 0;         // session-local; for CE export handoff
+    std::string name;              // FName (numeric suffix normalised UI-side)
+    std::string className;         // owning UClass short name
+    std::string outerClassName;    // immediate outer's UClass name (loose join)
+    std::string path;              // Ubel::GetFullName (cross-session identity)
+    std::vector<SnapshotField> fields;
+};
+
+struct SnapshotChunkResult {
+    int32_t total   = 0;   // GObjects count
+    int32_t scanned = 0;   // indices iterated this chunk (advance offset by this)
+    std::vector<SnapshotObject> objects;  // only objects with >=1 numeric field
+};
+
+// Capture a chunk of objects [offset, offset+limit) with their numeric
+// scalar UPROPERTY values. gameOnly skips engine-package classes.
+// numericScope must be a multi-numeric meta type (NumericNoByte default /
+// NumericAll); a non-meta type captures nothing.
+SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
+                                         bool gameOnly,
+                                         ValueScan::DataType numericScope);
+
 } // namespace Aura

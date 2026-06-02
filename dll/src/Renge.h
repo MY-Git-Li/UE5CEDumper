@@ -54,6 +54,13 @@ constexpr const char* CMD_BEGIN_VALUE_SCAN         = "begin_value_scan";
 constexpr const char* CMD_REFINE_VALUE_SCAN        = "refine_value_scan";
 constexpr const char* CMD_END_VALUE_SCAN           = "end_value_scan";
 
+// Snapshot capture (experimental — Phase A). Stateless cursor pagination
+// like get_object_list: begin_snapshot returns the total object count for
+// progress; snapshot_chunk streams [offset, offset+limit) objects with their
+// numeric UPROPERTY values. No end command — there is no server-side session.
+constexpr const char* CMD_BEGIN_SNAPSHOT           = "begin_snapshot";
+constexpr const char* CMD_SNAPSHOT_CHUNK           = "snapshot_chunk";
+
 // Event types
 constexpr const char* EVT_WATCH            = "watch";
 
