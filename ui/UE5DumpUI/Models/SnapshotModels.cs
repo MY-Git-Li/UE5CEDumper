@@ -56,6 +56,25 @@ public sealed class SnapshotCapturedObject
     public string OuterClassName { get; set; } = "";  // loose-join component
     public string Path           { get; set; } = "";  // full object path (cross-session id)
     public List<SnapshotCapturedField> Fields { get; set; } = new();
+    /// <summary>Struct-array inner-key captures (Phase A1b).</summary>
+    public List<SnapshotCapturedArray> Arrays { get; set; } = new();
+}
+
+/// <summary>One element of a captured struct-array, with a reorder-immune inner
+/// key (e.g. FCargoSlot.ItemID = "Fuel") and its numeric inner fields.</summary>
+public sealed class SnapshotCapturedArrayElement
+{
+    public int    Index    { get; set; }
+    public string KeyName  { get; set; } = "";   // inner-key field (e.g. "ItemID"); "" if none
+    public string KeyValue { get; set; } = "";   // rendered inner-key value (e.g. "Fuel")
+    public List<SnapshotCapturedField> Fields { get; set; } = new();
+}
+
+/// <summary>A captured struct-array (e.g. "Cargo") and its elements.</summary>
+public sealed class SnapshotCapturedArray
+{
+    public string Field { get; set; } = "";
+    public List<SnapshotCapturedArrayElement> Elements { get; set; } = new();
 }
 
 /// <summary>One numeric scalar field captured for an object.</summary>

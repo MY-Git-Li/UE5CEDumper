@@ -118,6 +118,50 @@ public class SnapshotStoreTests : IDisposable
         Assert.True(Assert.Single(await _store.ListSnapshotsAsync(ct)).EstBytes > 0);
     }
 
+    private static SnapshotCapturedArrayElement MakeElem(
+        int idx, string keyName, string keyVal, params (string n, string t, string h)[] fields)
+    {
+        var el = new SnapshotCapturedArrayElement { Index = idx, KeyName = keyName, KeyValue = keyVal };
+        foreach (var (n, t, h) in fields)
+            el.Fields.Add(new SnapshotCapturedField { Name = n, Type = t, Hex = h });
+        return el;
+    }
+
+    private static SnapshotCapturedObject ShipWithCargo(string hpHex, string fuelQtyHex)
+    {
+        var o = new SnapshotCapturedObject
+        {
+            Index = 1, Addr = "0x1", Name = "Ship_0", ClassName = "BP_Ship_C",
+            OuterClassName = "World", Path = "/Game/M.M:L.Ship_0",
+        };
+        o.Fields.Add(new SnapshotCapturedField { Name = "HP", Type = "IntProperty", Hex = hpHex });
+        var cargo = new SnapshotCapturedArray { Field = "Cargo" };
+        cargo.Elements.Add(MakeElem(0, "ItemID", "Fuel", ("Quantity", "IntProperty", fuelQtyHex)));
+        cargo.Elements.Add(MakeElem(1, "ItemID", "Ore",  ("Quantity", "IntProperty", "0A000000")));
+        o.Arrays.Add(cargo);
+        return o;
+    }
+
+    [Fact]
+    public async Task WriteChunk_WritesArrayRows_ExcludedFromScalarDiff()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        long a = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "a" }, ct);
+        int rowsA = await _store.WriteChunkAsync(a, new[] { ShipWithCargo("64000000", "64000000") }, ct); // HP100, Fuel100
+        Assert.Equal(3, rowsA);  // 1 scalar HP + 2 array-element Quantity rows
+        await _store.FinalizeSnapshotAsync(a, 1, rowsA, ct);
+
+        long b = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "b" }, ct);
+        await _store.WriteChunkAsync(b, new[] { ShipWithCargo("5A000000", "50000000") }, ct);  // HP90, Fuel80
+        await _store.FinalizeSnapshotAsync(b, 1, 3, ct);
+
+        // The scalar diff sees only HP — array-element Quantity changes are
+        // excluded (they'd join ambiguously on prop_name). Array diffing is Pivot.
+        var diff = await _store.DiffSnapshotsAsync(a, b, new SnapshotDiffFilter(), ct);
+        Assert.Equal("HP", Assert.Single(diff.Changed).PropName);
+    }
+
     [Fact]
     public async Task WriteChunk_EmptyIsNoOp()
     {

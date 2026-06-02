@@ -568,6 +568,21 @@ struct SnapshotField {
     std::string hex;        // little-endian raw bytes, hex (no 0x prefix)
 };
 
+// One element of a struct-array (Phase A1b). Carries an inner-key (e.g.
+// FCargoSlot.ItemID = "Fuel") so the same logical slot joins across snapshots
+// regardless of array reordering, plus the element's numeric inner fields.
+struct SnapshotArrayElement {
+    int32_t     index = 0;         // element position (fallback key when keyName empty)
+    std::string keyName;           // inner-key field name (e.g. "ItemID"); "" if none
+    std::string keyValue;          // rendered inner-key value (e.g. "Fuel" / "42")
+    std::vector<SnapshotField> fields;  // numeric inner fields (e.g. Quantity)
+};
+
+struct SnapshotArray {
+    std::string field;             // owning ArrayProperty name (e.g. "Cargo")
+    std::vector<SnapshotArrayElement> elements;
+};
+
 struct SnapshotObject {
     int32_t     index = -1;        // GObjects index (stable in-session join key)
     uintptr_t   addr  = 0;         // session-local; for CE export handoff
@@ -576,6 +591,7 @@ struct SnapshotObject {
     std::string outerClassName;    // immediate outer's UClass name (loose join)
     std::string path;              // Ubel::GetFullName (cross-session identity)
     std::vector<SnapshotField> fields;
+    std::vector<SnapshotArray>  arrays;   // struct-array inner-key capture (A1b)
 };
 
 struct SnapshotChunkResult {
@@ -585,11 +601,13 @@ struct SnapshotChunkResult {
 };
 
 // Capture a chunk of objects [offset, offset+limit) with their numeric
-// scalar UPROPERTY values. gameOnly skips engine-package classes.
-// numericScope must be a multi-numeric meta type (NumericNoByte default /
-// NumericAll); a non-meta type captures nothing.
+// scalar UPROPERTY values + struct-array element inner fields (inner-key
+// capture). gameOnly skips engine-package classes. numericScope must be a
+// multi-numeric meta type (NumericNoByte default / NumericAll); a non-meta
+// type captures nothing. arrayCap bounds elements captured per struct array.
 SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
                                          bool gameOnly,
-                                         ValueScan::DataType numericScope);
+                                         ValueScan::DataType numericScope,
+                                         int32_t arrayCap = 256);
 
 } // namespace Aura

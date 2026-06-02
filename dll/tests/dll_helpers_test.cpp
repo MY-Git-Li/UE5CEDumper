@@ -1095,6 +1095,25 @@ static void Test_ValueScan_SelectSnapshotNumericFields() {
     }
 }
 
+// Phase A1b — struct-array inner-key selection.
+static void Test_ValueScan_SelectArrayInnerKey() {
+    // FCargoSlot { FName ItemID; int32 Quantity; } -> key = ItemID (index 0).
+    EXPECT("FName ItemID is the key",
+        ValueScan::SelectArrayInnerKey({"NameProperty", "IntProperty"}, {"ItemID", "Quantity"}) == 0);
+    // A plain (keyword-less) FName still beats an integer.
+    EXPECT("plain FName beats int",
+        ValueScan::SelectArrayInnerKey({"IntProperty", "NameProperty"}, {"Count", "Slot"}) == 1);
+    // No FName -> first integer field.
+    EXPECT("first int when no FName",
+        ValueScan::SelectArrayInnerKey({"FloatProperty", "IntProperty", "Int64Property"}, {"X", "Qty", "Big"}) == 1);
+    // A keyworded FName is preferred over an earlier plain FName.
+    EXPECT("keyworded FName preferred",
+        ValueScan::SelectArrayInnerKey({"NameProperty", "NameProperty"}, {"Display", "RowName"}) == 1);
+    // Neither FName nor integer -> -1 (caller uses the element index).
+    EXPECT("no key field -> -1",
+        ValueScan::SelectArrayInnerKey({"FloatProperty", "BoolProperty"}, {"X", "Flag"}) == -1);
+}
+
 int main() {
     std::printf("dll_helpers_test (Renge + Scharf + ValueScan)\n");
     std::printf("------------------------------------------\n");
@@ -1151,6 +1170,8 @@ int main() {
     Test_ValueScan_BuildNumericTargets();
     // Phase A1a — snapshot field selection
     Test_ValueScan_SelectSnapshotNumericFields();
+    // Phase A1b — struct-array inner-key selection
+    Test_ValueScan_SelectArrayInnerKey();
 
     Test_ValueScan_SessionLifecycle();
 

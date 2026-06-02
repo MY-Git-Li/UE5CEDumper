@@ -217,6 +217,16 @@ struct SnapshotFieldPick {
 std::vector<SnapshotFieldPick> SelectSnapshotNumericFields(
     const std::vector<std::string>& propTypeNames, DataType numericScope);
 
+// Snapshot array capture (Phase A1b): pick the index of the best "inner key"
+// field for a struct-array element, given the element struct's field type names
+// + field names (parallel vectors). Prefers a NameProperty (FName) whose name
+// looks like an id/name/tag/key/row; then any NameProperty; then the first
+// integer field. Returns -1 if none (caller falls back to the element index).
+// Pure / std-only. Used to give cargo/inventory rows a reorder-immune key
+// (e.g. FCargoSlot.ItemID) so the same logical slot joins across snapshots.
+int SelectArrayInnerKey(const std::vector<std::string>& typeNames,
+                        const std::vector<std::string>& fieldNames);
+
 // Pre-parsed multi-numeric target. Holds one little-endian byte buffer
 // per member DataType whose width can represent the user's value (e.g.
 // "70000" yields Int32/UInt32/Int64/UInt64/Float/Double entries but no

@@ -173,6 +173,34 @@ public sealed class SnapshotStore : ISnapshotStore
         var pNum  = cmd.Parameters.Add("$num",  SqliteType.Real);
         var pHex  = cmd.Parameters.Add("$hex",  SqliteType.Text);
 
+        // Second command for struct-array element rows (carries the array
+        // columns; SPC/Pivot inner-join on array_field + inner_key + inner_prop).
+        await using var arrCmd = conn.CreateCommand();
+        arrCmd.Transaction = tx;
+        arrCmd.CommandText = """
+            INSERT INTO fields(snapshot_id, class_fqn, norm_path, outer_chain, prop_name, prop_offset,
+                               declared_type, gobjects_index, obj_addr, numeric_value, hex,
+                               array_field, elem_index, inner_key_name, inner_key_value, inner_prop_name)
+            VALUES ($snap, $cls, $np, $oc, $pn, $off, $dt, $idx, $addr, $num, $hex,
+                    $af, $ei, $ikn, $ikv, $ipn);
+            """;
+        var aSnap = arrCmd.Parameters.Add("$snap", SqliteType.Integer);
+        var aCls  = arrCmd.Parameters.Add("$cls",  SqliteType.Text);
+        var aNp   = arrCmd.Parameters.Add("$np",   SqliteType.Text);
+        var aOc   = arrCmd.Parameters.Add("$oc",   SqliteType.Text);
+        var aPn   = arrCmd.Parameters.Add("$pn",   SqliteType.Text);
+        var aOff  = arrCmd.Parameters.Add("$off",  SqliteType.Integer);
+        var aDt   = arrCmd.Parameters.Add("$dt",   SqliteType.Text);
+        var aIdx  = arrCmd.Parameters.Add("$idx",  SqliteType.Integer);
+        var aAddr = arrCmd.Parameters.Add("$addr", SqliteType.Text);
+        var aNum  = arrCmd.Parameters.Add("$num",  SqliteType.Real);
+        var aHex  = arrCmd.Parameters.Add("$hex",  SqliteType.Text);
+        var aAf   = arrCmd.Parameters.Add("$af",   SqliteType.Text);
+        var aEi   = arrCmd.Parameters.Add("$ei",   SqliteType.Integer);
+        var aIkn  = arrCmd.Parameters.Add("$ikn",  SqliteType.Text);
+        var aIkv  = arrCmd.Parameters.Add("$ikv",  SqliteType.Text);
+        var aIpn  = arrCmd.Parameters.Add("$ipn",  SqliteType.Text);
+
         int rows = 0;
         foreach (var obj in objects)
         {
@@ -193,6 +221,38 @@ public sealed class SnapshotStore : ISnapshotStore
                 pHex.Value  = f.Hex;
                 await cmd.ExecuteNonQueryAsync(ct);
                 rows++;
+            }
+
+            // Struct-array element rows (one per inner numeric field).
+            foreach (var arr in obj.Arrays)
+            {
+                foreach (var el in arr.Elements)
+                {
+                    object keyName  = string.IsNullOrEmpty(el.KeyName) ? DBNull.Value : el.KeyName;
+                    object keyValue = string.IsNullOrEmpty(el.KeyName) ? DBNull.Value : el.KeyValue;
+                    foreach (var f in el.Fields)
+                    {
+                        aSnap.Value = snapshotId;
+                        aCls.Value  = obj.ClassName;
+                        aNp.Value   = normPath;
+                        aOc.Value   = obj.OuterClassName;
+                        aPn.Value   = f.Name;
+                        aOff.Value  = f.Offset;
+                        aDt.Value   = f.Type;
+                        aIdx.Value  = obj.Index;
+                        aAddr.Value = obj.Addr;
+                        aNum.Value  = SnapshotNumeric.TryFromHex(f.Type, f.Hex, out var anum)
+                                        ? anum : (object)DBNull.Value;
+                        aHex.Value  = f.Hex;
+                        aAf.Value   = arr.Field;
+                        aEi.Value   = el.Index;
+                        aIkn.Value  = keyName;
+                        aIkv.Value  = keyValue;
+                        aIpn.Value  = f.Name;
+                        await arrCmd.ExecuteNonQueryAsync(ct);
+                        rows++;
+                    }
+                }
             }
         }
 
@@ -365,7 +425,7 @@ SELECT a.class_fqn, b.norm_path, a.gobjects_index, a.prop_name, a.prop_offset, a
 FROM fields a JOIN fields b
   ON a.snapshot_id=$A AND b.snapshot_id=$B
   AND a.class_fqn=b.class_fqn AND a.gobjects_index=b.gobjects_index AND a.prop_name=b.prop_name
-WHERE a.hex <> b.hex");
+WHERE a.hex <> b.hex AND a.array_field IS NULL AND b.array_field IS NULL");
             cmd.Parameters.AddWithValue("$A", idA);
             cmd.Parameters.AddWithValue("$B", idB);
             if (!string.IsNullOrEmpty(filter.ClassContains))
@@ -432,8 +492,8 @@ WHERE a.hex <> b.hex");
     {
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
-SELECT COUNT(*) FROM fields a WHERE a.snapshot_id=$in AND NOT EXISTS (
-  SELECT 1 FROM fields b WHERE b.snapshot_id=$notin
+SELECT COUNT(*) FROM fields a WHERE a.snapshot_id=$in AND a.array_field IS NULL AND NOT EXISTS (
+  SELECT 1 FROM fields b WHERE b.snapshot_id=$notin AND b.array_field IS NULL
     AND b.class_fqn=a.class_fqn AND b.gobjects_index=a.gobjects_index AND b.prop_name=a.prop_name);";
         cmd.Parameters.AddWithValue("$in", inSnap);
         cmd.Parameters.AddWithValue("$notin", notInSnap);

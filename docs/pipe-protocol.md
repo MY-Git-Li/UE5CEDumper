@@ -226,11 +226,28 @@ Type-agnostic streamed capture of every numeric UPROPERTY of every (scoped) UObj
 { "id": 60, "cmd": "begin_snapshot", "data_type": "NumericNoByte" }
 
 // Chunk — stream the next window of objects.
+// array_cap bounds struct-array elements captured per array (default 256).
 { "id": 61, "cmd": "snapshot_chunk",
   "data_type": "NumericNoByte",
   "game_only": true,
   "offset":    0,
-  "limit":     100 }
+  "limit":     100,
+  "array_cap": 256 }
+```
+
+Each chunk object may also carry an `arrays` field (Phase A1b) — struct-array
+inner-key capture for cargo/inventory cases. Each element has an inner key
+(`key_name`/`key_value`, e.g. `ItemID`=`Fuel`) so the same logical slot joins
+across snapshots regardless of reordering, plus its numeric inner fields:
+
+```jsonc
+"arrays": [
+  { "field": "Cargo",
+    "elements": [
+      { "i": 0, "key_name": "ItemID", "key_value": "Fuel",
+        "fields": [ { "name": "Quantity", "off": 8, "type": "IntProperty", "hex": "64000000" } ] }
+    ] }
+]
 ```
 
 -----
