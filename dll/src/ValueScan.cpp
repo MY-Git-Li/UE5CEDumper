@@ -5,6 +5,7 @@
 #include "ValueScan.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 
 namespace ValueScan {
@@ -310,6 +311,55 @@ bool TryDataTypeFromPropertyTypeName(const std::string& propTypeName, DataType& 
     if (propTypeName == "FloatProperty")  { out = DataType::Float;  return true; }
     if (propTypeName == "DoubleProperty") { out = DataType::Double; return true; }
     return false;
+}
+
+std::vector<SnapshotFieldPick> SelectSnapshotNumericFields(
+    const std::vector<std::string>& propTypeNames, DataType numericScope) {
+    std::vector<SnapshotFieldPick> picks;
+    const std::vector<DataType>& members = MultiNumericMembers(numericScope);
+    if (members.empty()) return picks;  // not a meta scope -> capture nothing
+
+    for (int32_t i = 0; i < static_cast<int32_t>(propTypeNames.size()); ++i) {
+        DataType dt;
+        if (!TryDataTypeFromPropertyTypeName(propTypeNames[i], dt)) continue;  // non-numeric / bool
+        bool inScope = false;
+        for (DataType m : members) {
+            if (m == dt) { inScope = true; break; }
+        }
+        if (!inScope) continue;  // e.g. Int8/UInt8 under NumericNoByte
+        picks.push_back({ i, dt });
+    }
+    return picks;
+}
+
+int SelectArrayInnerKey(const std::vector<std::string>& typeNames,
+                        const std::vector<std::string>& fieldNames) {
+    int firstName = -1, firstInt = -1;
+    size_t n = std::min(typeNames.size(), fieldNames.size());
+    for (size_t i = 0; i < n; ++i) {
+        const std::string& t = typeNames[i];
+        if (t == "NameProperty") {
+            if (firstName < 0) firstName = static_cast<int>(i);
+            std::string lo;
+            lo.reserve(fieldNames[i].size());
+            for (char c : fieldNames[i])
+                lo.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+            if (lo.find("id")   != std::string::npos ||
+                lo.find("name") != std::string::npos ||
+                lo.find("tag")  != std::string::npos ||
+                lo.find("key")  != std::string::npos ||
+                lo.find("row")  != std::string::npos)
+                return static_cast<int>(i);  // keyworded FName — strongest signal
+        }
+        else if (firstInt < 0 &&
+                 (t == "IntProperty"  || t == "Int64Property"  || t == "UInt32Property" ||
+                  t == "UInt64Property" || t == "Int16Property" || t == "UInt16Property" ||
+                  t == "ByteProperty" || t == "Int8Property")) {
+            firstInt = static_cast<int>(i);
+        }
+    }
+    if (firstName >= 0) return firstName;  // any FName beats an integer key
+    return firstInt;                        // -1 if neither -> caller uses elem index
 }
 
 bool BuildNumericTargets(DataType metaDt, const std::string& raw, NumericTargetSet& out) {

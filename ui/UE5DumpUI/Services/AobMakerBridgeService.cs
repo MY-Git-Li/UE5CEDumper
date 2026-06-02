@@ -35,6 +35,17 @@ public sealed class AobMakerBridgeService : IAobMakerBridge, IDisposable
 
     private readonly ILoggingService? _log;
     private NamedPipeClientStream? _pipe;
+
+    // All public methods share the single _pipe field with per-request
+    // reconnect + CleanupPipe and can be invoked concurrently (e.g. a tab
+    // switch fires CheckAvailabilityAsync fire-and-forget while the user
+    // clicks a button that calls CreateAAScriptAsync / InjectTableFileAsync).
+    // Without this gate, one method's CleanupPipe() would dispose the _pipe
+    // another is mid-read/write on → ObjectDisposedException → spurious
+    // "not connected". The public methods never call each other (only the
+    // private Reconnect/Write/Read/Cleanup helpers), so a non-reentrant
+    // semaphore serializes them deadlock-free.
+    private readonly SemaphoreSlim _opLock = new(1, 1);
     private bool _disposed;
 
     public bool IsAvailable { get; private set; }
@@ -46,229 +57,269 @@ public sealed class AobMakerBridgeService : IAobMakerBridge, IDisposable
 
     public async Task<bool> CheckAvailabilityAsync(CancellationToken ct = default)
     {
+        await _opLock.WaitAsync(ct);
         try
         {
-            if (await ReconnectAsync(ct))
+            try
             {
-                IsAvailable = true;
-                CleanupPipe();
-                _log?.Info(Constants.LogCatInit, "AOBMaker CE Plugin bridge: available");
-                return true;
+                if (await ReconnectAsync(ct))
+                {
+                    IsAvailable = true;
+                    CleanupPipe();
+                    _log?.Info(Constants.LogCatInit, "AOBMaker CE Plugin bridge: available");
+                    return true;
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            _log?.Debug(Constants.LogCatInit, $"AOBMaker CE Plugin bridge check failed: {ex.Message}");
-        }
+            catch (Exception ex)
+            {
+                _log?.Debug(Constants.LogCatInit, $"AOBMaker CE Plugin bridge check failed: {ex.Message}");
+            }
 
-        IsAvailable = false;
-        return false;
+            IsAvailable = false;
+            return false;
+        }
+        finally
+        {
+            _opLock.Release();
+        }
     }
 
     public async Task<bool> NavigateHexViewAsync(string hexAddress, CancellationToken ct = default)
     {
-        if (!await ReconnectAsync(ct))
-        {
-            IsAvailable = false;
-            return false;
-        }
-
+        await _opLock.WaitAsync(ct);
         try
         {
-            var request = new AobMakerMessage
+            if (!await ReconnectAsync(ct))
             {
-                Type = TypeNavigateHexView,
-                Address = hexAddress
-            };
-
-            await WriteMessageAsync(_pipe!, request, ct);
-
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(ResponseTimeoutMs);
-
-            var response = await ReadMessageAsync(_pipe!, timeoutCts.Token);
-            CleanupPipe();  // CE Plugin disconnects after each request — release handle immediately
-            if (response == null || !response.Success)
-            {
-                _log?.Warn(Constants.LogCatInit,
-                    $"AOBMaker NavigateHexView failed: {response?.Message ?? "no response"}");
+                IsAvailable = false;
                 return false;
             }
 
-            IsAvailable = true;
-            _log?.Info(Constants.LogCatInit, $"AOBMaker: navigated hex view to {hexAddress}");
-            return true;
+            try
+            {
+                var request = new AobMakerMessage
+                {
+                    Type = TypeNavigateHexView,
+                    Address = hexAddress
+                };
+
+                await WriteMessageAsync(_pipe!, request, ct);
+
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeoutCts.CancelAfter(ResponseTimeoutMs);
+
+                var response = await ReadMessageAsync(_pipe!, timeoutCts.Token);
+                CleanupPipe();  // CE Plugin disconnects after each request — release handle immediately
+                if (response == null || !response.Success)
+                {
+                    _log?.Warn(Constants.LogCatInit,
+                        $"AOBMaker NavigateHexView failed: {response?.Message ?? "no response"}");
+                    return false;
+                }
+
+                IsAvailable = true;
+                _log?.Info(Constants.LogCatInit, $"AOBMaker: navigated hex view to {hexAddress}");
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                _log?.Warn(Constants.LogCatInit, $"AOBMaker NavigateHexView timed out for {hexAddress}");
+                CleanupPipe();
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _log?.Warn(Constants.LogCatInit, $"AOBMaker NavigateHexView error: {ex.Message}");
+                IsAvailable = false;
+                CleanupPipe();
+                return false;
+            }
         }
-        catch (OperationCanceledException)
+        finally
         {
-            _log?.Warn(Constants.LogCatInit, $"AOBMaker NavigateHexView timed out for {hexAddress}");
-            CleanupPipe();
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _log?.Warn(Constants.LogCatInit, $"AOBMaker NavigateHexView error: {ex.Message}");
-            IsAvailable = false;
-            CleanupPipe();
-            return false;
+            _opLock.Release();
         }
     }
 
     public async Task<bool> NavigateDisassemblerAsync(string hexAddress, CancellationToken ct = default)
     {
-        if (!await ReconnectAsync(ct))
-        {
-            IsAvailable = false;
-            return false;
-        }
-
+        await _opLock.WaitAsync(ct);
         try
         {
-            var request = new AobMakerMessage
+            if (!await ReconnectAsync(ct))
             {
-                Type = TypeNavigateDisassembler,
-                Address = hexAddress
-            };
-
-            await WriteMessageAsync(_pipe!, request, ct);
-
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(ResponseTimeoutMs);
-
-            var response = await ReadMessageAsync(_pipe!, timeoutCts.Token);
-            CleanupPipe();  // CE Plugin disconnects after each request — release handle immediately
-            if (response == null || !response.Success)
-            {
-                _log?.Warn(Constants.LogCatInit,
-                    $"AOBMaker NavigateDisassembler failed: {response?.Message ?? "no response"}");
+                IsAvailable = false;
                 return false;
             }
 
-            IsAvailable = true;
-            _log?.Info(Constants.LogCatInit, $"AOBMaker: navigated disassembler to {hexAddress}");
-            return true;
+            try
+            {
+                var request = new AobMakerMessage
+                {
+                    Type = TypeNavigateDisassembler,
+                    Address = hexAddress
+                };
+
+                await WriteMessageAsync(_pipe!, request, ct);
+
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeoutCts.CancelAfter(ResponseTimeoutMs);
+
+                var response = await ReadMessageAsync(_pipe!, timeoutCts.Token);
+                CleanupPipe();  // CE Plugin disconnects after each request — release handle immediately
+                if (response == null || !response.Success)
+                {
+                    _log?.Warn(Constants.LogCatInit,
+                        $"AOBMaker NavigateDisassembler failed: {response?.Message ?? "no response"}");
+                    return false;
+                }
+
+                IsAvailable = true;
+                _log?.Info(Constants.LogCatInit, $"AOBMaker: navigated disassembler to {hexAddress}");
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                _log?.Warn(Constants.LogCatInit, $"AOBMaker NavigateDisassembler timed out for {hexAddress}");
+                CleanupPipe();
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _log?.Warn(Constants.LogCatInit, $"AOBMaker NavigateDisassembler error: {ex.Message}");
+                IsAvailable = false;
+                CleanupPipe();
+                return false;
+            }
         }
-        catch (OperationCanceledException)
+        finally
         {
-            _log?.Warn(Constants.LogCatInit, $"AOBMaker NavigateDisassembler timed out for {hexAddress}");
-            CleanupPipe();
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _log?.Warn(Constants.LogCatInit, $"AOBMaker NavigateDisassembler error: {ex.Message}");
-            IsAvailable = false;
-            CleanupPipe();
-            return false;
+            _opLock.Release();
         }
     }
 
     public async Task<bool> CreateAAScriptAsync(string description, string script,
         bool autoActivate = true, CancellationToken ct = default)
     {
-        if (!await ReconnectAsync(ct))
-        {
-            IsAvailable = false;
-            return false;
-        }
-
+        await _opLock.WaitAsync(ct);
         try
         {
-            var request = new AobMakerMessage
+            if (!await ReconnectAsync(ct))
             {
-                Type = TypeCreateAAScript,
-                Description = description,
-                Script = script,
-                AutoActivate = autoActivate
-            };
-
-            await WriteMessageAsync(_pipe!, request, ct);
-
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(ResponseTimeoutMs);
-
-            var response = await ReadMessageAsync(_pipe!, timeoutCts.Token);
-            CleanupPipe();
-            if (response == null || !response.Success)
-            {
-                _log?.Warn(Constants.LogCatInit,
-                    $"AOBMaker CreateAAScript failed: {response?.Message ?? "no response"}");
+                IsAvailable = false;
                 return false;
             }
 
-            IsAvailable = true;
-            _log?.Info(Constants.LogCatInit, $"AOBMaker: created AA script '{description}'");
-            return true;
+            try
+            {
+                var request = new AobMakerMessage
+                {
+                    Type = TypeCreateAAScript,
+                    Description = description,
+                    Script = script,
+                    AutoActivate = autoActivate
+                };
+
+                await WriteMessageAsync(_pipe!, request, ct);
+
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeoutCts.CancelAfter(ResponseTimeoutMs);
+
+                var response = await ReadMessageAsync(_pipe!, timeoutCts.Token);
+                CleanupPipe();
+                if (response == null || !response.Success)
+                {
+                    _log?.Warn(Constants.LogCatInit,
+                        $"AOBMaker CreateAAScript failed: {response?.Message ?? "no response"}");
+                    return false;
+                }
+
+                IsAvailable = true;
+                _log?.Info(Constants.LogCatInit, $"AOBMaker: created AA script '{description}'");
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                _log?.Warn(Constants.LogCatInit, $"AOBMaker CreateAAScript timed out for '{description}'");
+                CleanupPipe();
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _log?.Warn(Constants.LogCatInit, $"AOBMaker CreateAAScript error: {ex.Message}");
+                IsAvailable = false;
+                CleanupPipe();
+                return false;
+            }
         }
-        catch (OperationCanceledException)
+        finally
         {
-            _log?.Warn(Constants.LogCatInit, $"AOBMaker CreateAAScript timed out for '{description}'");
-            CleanupPipe();
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _log?.Warn(Constants.LogCatInit, $"AOBMaker CreateAAScript error: {ex.Message}");
-            IsAvailable = false;
-            CleanupPipe();
-            return false;
+            _opLock.Release();
         }
     }
 
     public async Task<bool> CreateSymbolScriptAsync(string name, string aob, int pos, int aoblen,
         string symbol, string module, bool autoActivate = true, CancellationToken ct = default)
     {
-        if (!await ReconnectAsync(ct))
-        {
-            IsAvailable = false;
-            return false;
-        }
-
+        await _opLock.WaitAsync(ct);
         try
         {
-            var request = new AobMakerMessage
+            if (!await ReconnectAsync(ct))
             {
-                Type = TypeCreateSymbolScript,
-                Name = name,
-                Aob = aob,
-                Pos = pos,
-                AobLen = aoblen,
-                Symbol = symbol,
-                Module = module,
-                AutoActivate = autoActivate
-            };
-
-            await WriteMessageAsync(_pipe!, request, ct);
-
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(ResponseTimeoutMs);
-
-            var response = await ReadMessageAsync(_pipe!, timeoutCts.Token);
-            CleanupPipe();
-            if (response == null || !response.Success)
-            {
-                _log?.Warn(Constants.LogCatInit,
-                    $"AOBMaker CreateSymbolScript failed: {response?.Message ?? "no response"}");
+                IsAvailable = false;
                 return false;
             }
 
-            IsAvailable = true;
-            _log?.Info(Constants.LogCatInit,
-                $"AOBMaker: created symbol script '{name}' → {symbol} (AOB: {aob})");
-            return true;
+            try
+            {
+                var request = new AobMakerMessage
+                {
+                    Type = TypeCreateSymbolScript,
+                    Name = name,
+                    Aob = aob,
+                    Pos = pos,
+                    AobLen = aoblen,
+                    Symbol = symbol,
+                    Module = module,
+                    AutoActivate = autoActivate
+                };
+
+                await WriteMessageAsync(_pipe!, request, ct);
+
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeoutCts.CancelAfter(ResponseTimeoutMs);
+
+                var response = await ReadMessageAsync(_pipe!, timeoutCts.Token);
+                CleanupPipe();
+                if (response == null || !response.Success)
+                {
+                    _log?.Warn(Constants.LogCatInit,
+                        $"AOBMaker CreateSymbolScript failed: {response?.Message ?? "no response"}");
+                    return false;
+                }
+
+                IsAvailable = true;
+                _log?.Info(Constants.LogCatInit,
+                    $"AOBMaker: created symbol script '{name}' → {symbol} (AOB: {aob})");
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                _log?.Warn(Constants.LogCatInit, $"AOBMaker CreateSymbolScript timed out for '{name}'");
+                CleanupPipe();
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _log?.Warn(Constants.LogCatInit, $"AOBMaker CreateSymbolScript error: {ex.Message}");
+                IsAvailable = false;
+                CleanupPipe();
+                return false;
+            }
         }
-        catch (OperationCanceledException)
+        finally
         {
-            _log?.Warn(Constants.LogCatInit, $"AOBMaker CreateSymbolScript timed out for '{name}'");
-            CleanupPipe();
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _log?.Warn(Constants.LogCatInit, $"AOBMaker CreateSymbolScript error: {ex.Message}");
-            IsAvailable = false;
-            CleanupPipe();
-            return false;
+            _opLock.Release();
         }
     }
 
@@ -280,53 +331,61 @@ public sealed class AobMakerBridgeService : IAobMakerBridge, IDisposable
         if (string.IsNullOrEmpty(content))
             throw new ArgumentException("content must not be empty", nameof(content));
 
-        if (!await ReconnectAsync(ct))
-        {
-            IsAvailable = false;
-            return (false, null);
-        }
-
+        await _opLock.WaitAsync(ct);
         try
         {
-            var request = new AobMakerMessage
+            if (!await ReconnectAsync(ct))
             {
-                Type = TypeInjectTableFile,
-                FileName = fileName,
-                Content = content
-            };
-
-            await WriteMessageAsync(_pipe!, request, ct);
-
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(InjectResponseTimeoutMs);
-
-            var response = await ReadMessageAsync(_pipe!, timeoutCts.Token);
-            CleanupPipe();
-            if (response == null || !response.Success)
-            {
-                var msg = response?.Message ?? "no response";
-                _log?.Warn(Constants.LogCatInit,
-                    $"AOBMaker InjectTableFile '{fileName}' failed: {msg}");
-                return (false, response?.Message);
+                IsAvailable = false;
+                return (false, null);
             }
 
-            IsAvailable = true;
-            _log?.Info(Constants.LogCatInit,
-                $"AOBMaker: injected table file '{fileName}' ({content.Length:N0} chars)");
-            return (true, null);
+            try
+            {
+                var request = new AobMakerMessage
+                {
+                    Type = TypeInjectTableFile,
+                    FileName = fileName,
+                    Content = content
+                };
+
+                await WriteMessageAsync(_pipe!, request, ct);
+
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeoutCts.CancelAfter(InjectResponseTimeoutMs);
+
+                var response = await ReadMessageAsync(_pipe!, timeoutCts.Token);
+                CleanupPipe();
+                if (response == null || !response.Success)
+                {
+                    var msg = response?.Message ?? "no response";
+                    _log?.Warn(Constants.LogCatInit,
+                        $"AOBMaker InjectTableFile '{fileName}' failed: {msg}");
+                    return (false, response?.Message);
+                }
+
+                IsAvailable = true;
+                _log?.Info(Constants.LogCatInit,
+                    $"AOBMaker: injected table file '{fileName}' ({content.Length:N0} chars)");
+                return (true, null);
+            }
+            catch (OperationCanceledException)
+            {
+                _log?.Warn(Constants.LogCatInit, $"AOBMaker InjectTableFile timed out for '{fileName}'");
+                CleanupPipe();
+                return (false, "timed out waiting for CE Plugin response");
+            }
+            catch (Exception ex)
+            {
+                _log?.Warn(Constants.LogCatInit, $"AOBMaker InjectTableFile error: {ex.Message}");
+                IsAvailable = false;
+                CleanupPipe();
+                return (false, ex.Message);
+            }
         }
-        catch (OperationCanceledException)
+        finally
         {
-            _log?.Warn(Constants.LogCatInit, $"AOBMaker InjectTableFile timed out for '{fileName}'");
-            CleanupPipe();
-            return (false, "timed out waiting for CE Plugin response");
-        }
-        catch (Exception ex)
-        {
-            _log?.Warn(Constants.LogCatInit, $"AOBMaker InjectTableFile error: {ex.Message}");
-            IsAvailable = false;
-            CleanupPipe();
-            return (false, ex.Message);
+            _opLock.Release();
         }
     }
 
@@ -407,5 +466,6 @@ public sealed class AobMakerBridgeService : IAobMakerBridge, IDisposable
         if (_disposed) return;
         _disposed = true;
         CleanupPipe();
+        _opLock.Dispose();
     }
 }

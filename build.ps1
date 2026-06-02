@@ -666,7 +666,6 @@ if ($Target -in "All", "Test") {
     else {
         Write-Step "Building + running tests..."
 
-        $restoreFlag = if ($SkipRestore) { "--no-restore" } else { "" }
         # .NET 10 SDK + Microsoft.Testing.Platform 2.x: global.json's
         # `test.runner = Microsoft.Testing.Platform` switches dotnet test
         # into MTP mode. Differences from the legacy VSTest mode:
@@ -675,7 +674,12 @@ if ($Target -in "All", "Test") {
         #     unknown flags get forwarded to the test runner (xunit.v3),
         #     which doesn't recognize them and prints help + exits 5.
         #   - VSTest bridge target was dropped in MTP 2.x on .NET 10.
-        & dotnet test --project $TEST_PROJ -c $CSharpConfig $restoreFlag
+        # Build args via splatting so an absent --no-restore is OMITTED, not
+        # passed as an empty string — MTP's CommandLineParser throws
+        # IndexOutOfRangeException on a stray empty arg ("Zero tests ran").
+        $testArgs = @('test', '--project', $TEST_PROJ, '-c', $CSharpConfig)
+        if ($SkipRestore) { $testArgs += '--no-restore' }
+        & dotnet @testArgs
 
         if ($LASTEXITCODE -ne 0) {
             Write-Fail "Tests failed"

@@ -19,6 +19,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -31,12 +32,21 @@ namespace Stark {
 
 /// A single queued ProcessEvent invocation request.
 /// Shared ownership: pipe thread holds shared_ptr while waiting on future,
-/// game thread holds shared_ptr while executing. This prevents use-after-free
-/// if the pipe thread times out and releases its reference.
+/// game thread holds shared_ptr while executing.
+///
+/// CRITICAL: the shared_ptr keeps the REQUEST struct alive, but NOT the caller's
+/// parameter buffer. If the caller passes a transient buffer (e.g. the pipe
+/// handler's stack-local vector) and the invoke TIMES OUT, the request stays
+/// queued while the caller's buffer is freed — the game thread then dereferences
+/// freed memory (use-after-free). To make a timed-out-but-still-queued request
+/// self-contained, EnqueueInvoke COPIES the param bytes into `ownedParams` (when
+/// a size is given) and points `params` at that owned copy. Callers that pass a
+/// persistent buffer (Mimic's mailbox global) may pass size 0 to skip the copy.
 struct InvokeRequest {
     uintptr_t instance;
     uintptr_t ufunc;
     uintptr_t params;
+    std::vector<uint8_t> ownedParams;   // owns the param bytes when copied (size>0)
     std::promise<int32_t> promise;
 };
 
@@ -261,7 +271,7 @@ bool IsHookActive() {
     return s_hookActive.load();
 }
 
-int32_t EnqueueInvoke(uintptr_t instance, uintptr_t ufunc, uintptr_t params) {
+int32_t EnqueueInvoke(uintptr_t instance, uintptr_t ufunc, uintptr_t params, size_t paramsSize) {
     if (!s_hookActive.load()) {
         return -7; // Hook not active
     }
@@ -269,13 +279,26 @@ int32_t EnqueueInvoke(uintptr_t instance, uintptr_t ufunc, uintptr_t params) {
     auto req = std::make_shared<InvokeRequest>();
     req->instance = instance;
     req->ufunc = ufunc;
-    req->params = params;
+    // Own a copy of the param bytes so a timed-out-but-still-queued request can
+    // never dereference a freed caller buffer (use-after-free). When the caller
+    // passes size 0 (a persistent buffer like Mimic's global), use the pointer
+    // as-is — that buffer outlives the request.
+    if (paramsSize > 0 && params != 0) {
+        const auto* src = reinterpret_cast<const uint8_t*>(params);
+        req->ownedParams.assign(src, src + paramsSize);
+        req->params = reinterpret_cast<uintptr_t>(req->ownedParams.data());
+    } else {
+        req->params = params;
+    }
 
     auto future = req->promise.get_future();
 
     {
         std::lock_guard<std::mutex> lock(s_queueMutex);
-        s_invokeQueue.push(std::move(req));
+        // Push a COPY of the shared_ptr (refcount stays >=1 locally) so `req`
+        // remains valid below for the out-param copy-back even after the game
+        // thread drains and pops the queue entry.
+        s_invokeQueue.push(req);
     }
 
     LOG_INFO("GameThreadDispatch: enqueued invoke inst=0x%llX func=0x%llX, waiting...",
@@ -288,10 +311,17 @@ int32_t EnqueueInvoke(uintptr_t instance, uintptr_t ufunc, uintptr_t params) {
         LOG_ERROR("GameThreadDispatch: invoke timeout (%dms) inst=0x%llX func=0x%llX",
                   timeoutMs,
                   (unsigned long long)instance, (unsigned long long)ufunc);
+        // The request stays queued, but it owns its param buffer, so the eventual
+        // game-thread execution is safe. We just abandon the (now stale) result.
         return -5;
     }
 
     int32_t result = future.get();
+    // Propagate out-params written by the game thread back to the caller's buffer
+    // (only when we owned a copy; the size-0 path wrote the caller's buffer directly).
+    if (!req->ownedParams.empty() && params != 0) {
+        memcpy(reinterpret_cast<void*>(params), req->ownedParams.data(), req->ownedParams.size());
+    }
     LOG_INFO("GameThreadDispatch: invoke completed result=%d", result);
     return result;
 }

@@ -67,6 +67,12 @@
     <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.3" />
     <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.0.0" />
 
+    <!-- SQLite (experimental Snapshot store). Raw ADO.NET only — no EF Core
+         (its reflection query pipeline breaks trim/AOT). Microsoft.Data.Sqlite
+         pulls SQLitePCLRaw.bundle_e_sqlite3, whose native e_sqlite3 must be
+         bundled into the self-contained / AOT publish. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.*" />
+
     <!-- MVVM -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
     <PackageReference Include="HarfBuzzSharp" Version="8.3.1.5" />

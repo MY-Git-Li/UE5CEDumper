@@ -4120,4 +4120,190 @@ ValueScanStats RefineCandidates(
     return stats;
 }
 
+// ------------------------------------------------------------------
+// Snapshot capture (Phase A1a)
+// ------------------------------------------------------------------
+
+namespace {
+// Uppercase, no-prefix hex — matches Renge::BytesToHex without pulling the
+// json-heavy Renge.h into this TU.
+std::string SnapshotBytesToHex(const uint8_t* d, size_t n) {
+    static const char* kHex = "0123456789ABCDEF";
+    std::string s;
+    s.reserve(n * 2);
+    for (size_t i = 0; i < n; ++i) {
+        s.push_back(kHex[(d[i] >> 4) & 0xF]);
+        s.push_back(kHex[d[i] & 0xF]);
+    }
+    return s;
+}
+
+// Render a struct-array element's inner-key value to a string: FName -> its
+// string; integer -> decimal; otherwise "" (caller falls back to elem index).
+std::string RenderInnerKey(const FieldInfo& kf, uintptr_t elemAddr) {
+    if (kf.TypeName == "NameProperty")
+        return Ubel::ReadFNameAt(elemAddr, kf.Offset);
+
+    ValueScan::DataType dt;
+    if (ValueScan::TryDataTypeFromPropertyTypeName(kf.TypeName, dt)) {
+        size_t sz = ValueScan::SizeOf(dt);
+        uint8_t buf[8] = {};
+        if (sz >= 1 && sz <= 8 && Macht::ReadBytesSafe(elemAddr + kf.Offset, buf, sz)) {
+            switch (dt) {
+                case ValueScan::DataType::Int8:   return std::to_string(static_cast<int>(static_cast<int8_t>(buf[0])));
+                case ValueScan::DataType::UInt8:  return std::to_string(static_cast<unsigned>(buf[0]));
+                case ValueScan::DataType::Int16:  { int16_t v;  std::memcpy(&v, buf, 2); return std::to_string(v); }
+                case ValueScan::DataType::UInt16: { uint16_t v; std::memcpy(&v, buf, 2); return std::to_string(v); }
+                case ValueScan::DataType::Int32:  { int32_t v;  std::memcpy(&v, buf, 4); return std::to_string(v); }
+                case ValueScan::DataType::UInt32: { uint32_t v; std::memcpy(&v, buf, 4); return std::to_string(v); }
+                case ValueScan::DataType::Int64:  { int64_t v;  std::memcpy(&v, buf, 8); return std::to_string(v); }
+                case ValueScan::DataType::UInt64: { uint64_t v; std::memcpy(&v, buf, 8); return std::to_string(v); }
+                default: break;
+            }
+        }
+    }
+    return "";
+}
+
+// Capture struct-array elements of `obj` (Phase A1b). For each
+// TArray<StructProperty> field, resolve the inner UScriptStruct, pick an
+// inner-key field (reorder-immune join key) + its numeric inner fields, and
+// emit up to arrayCap elements.
+void CaptureStructArrays(uintptr_t obj, const ClassInfo& ci,
+                         ValueScan::DataType numericScope, int32_t arrayCap,
+                         std::vector<Aura::SnapshotArray>& out) {
+    if (arrayCap <= 0) arrayCap = 256;
+    for (const auto& fi : ci.Fields) {
+        if (fi.TypeName != "ArrayProperty" || fi.innerType != "StructProperty") continue;
+        if (!fi.Address) continue;
+
+        // Inner UScriptStruct: ArrayProperty::Inner (FProperty*) -> StructProperty::Struct.
+        uintptr_t innerProp = 0, innerStruct = 0;
+        if (!Macht::ReadSafe(fi.Address + DynOff::FARRAYPROP_INNER, innerProp) || !innerProp) continue;
+        if (!Macht::ReadSafe(innerProp + DynOff::FSTRUCTPROP_STRUCT, innerStruct) || !innerStruct) continue;
+
+        ClassInfo si = Ubel::WalkClassEx(innerStruct);  // cached per struct
+        if (si.Fields.empty()) continue;
+
+        int32_t stride = Ubel::GetArrayInnerElemSize(fi.Address);
+        if (stride <= 0) continue;
+
+        std::vector<std::string> innerTypes, innerNames;
+        innerTypes.reserve(si.Fields.size());
+        innerNames.reserve(si.Fields.size());
+        for (const auto& f : si.Fields) { innerTypes.push_back(f.TypeName); innerNames.push_back(f.Name); }
+
+        auto numPicks = ValueScan::SelectSnapshotNumericFields(innerTypes, numericScope);
+        if (numPicks.empty()) continue;  // nothing numeric to track inside the struct
+        int keyIdx = ValueScan::SelectArrayInnerKey(innerTypes, innerNames);
+
+        Macht::TArrayView arr;
+        if (!Macht::ReadTArray(obj + fi.Offset, arr)) continue;
+        if (arr.Count <= 0 || !arr.Data) continue;
+        int32_t n = (std::min)(arr.Count, arrayCap);
+
+        Aura::SnapshotArray sa;
+        sa.field = fi.Name;
+        for (int32_t e = 0; e < n; ++e) {
+            uintptr_t elemAddr = arr.Data + static_cast<uintptr_t>(e) * static_cast<uintptr_t>(stride);
+            Aura::SnapshotArrayElement el;
+            el.index = e;
+            if (keyIdx >= 0 && keyIdx < static_cast<int>(si.Fields.size())) {
+                const auto& kf = si.Fields[keyIdx];
+                el.keyName  = kf.Name;
+                el.keyValue = RenderInnerKey(kf, elemAddr);
+            }
+            for (const auto& p : numPicks) {
+                const auto& nf = si.Fields[p.fieldIndex];
+                size_t sz = ValueScan::SizeOf(p.dt);
+                if (sz == 0 || sz > 8) continue;
+                uint8_t buf[8] = {};
+                if (!Macht::ReadBytesSafe(elemAddr + nf.Offset, buf, sz)) continue;
+                Aura::SnapshotField f2;
+                f2.name = nf.Name; f2.offset = nf.Offset; f2.type = nf.TypeName;
+                f2.hex = SnapshotBytesToHex(buf, sz);
+                el.fields.push_back(std::move(f2));
+            }
+            if (!el.fields.empty()) sa.elements.push_back(std::move(el));
+        }
+        if (!sa.elements.empty()) out.push_back(std::move(sa));
+    }
+}
+} // namespace
+
+SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
+                                         bool gameOnly,
+                                         ValueScan::DataType numericScope,
+                                         int32_t arrayCap) {
+    SnapshotChunkResult result;
+    const int32_t total = GetCount();
+    result.total = total;
+
+    if (offset < 0) offset = 0;
+    if (limit < 0)  limit = 0;
+    const int32_t end = (std::min)(offset + limit, total);
+    result.scanned = (end > offset) ? (end - offset) : 0;
+
+    // Reused scratch so per-object capture doesn't churn the heap.
+    std::vector<std::string> typeNames;
+
+    for (int32_t i = offset; i < end; ++i) {
+        uintptr_t obj = GetByIndex(i);
+        if (!obj) continue;
+
+        std::string name = Ubel::GetName(obj);
+        if (name.empty()) continue;  // skip unnamed slots (matches get_object_list)
+
+        uintptr_t cls = Ubel::GetClass(obj);
+        if (!cls) continue;
+
+        // game_only filter keys on the class path (engine packages skipped).
+        std::string classPath = Ubel::GetFullName(cls);
+        if (gameOnly && IsEnginePackage(classPath)) continue;
+
+        ClassInfo ci = Ubel::WalkClassEx(cls);  // cached per class
+        if (ci.Fields.empty()) continue;
+
+        typeNames.clear();
+        typeNames.reserve(ci.Fields.size());
+        for (const auto& f : ci.Fields) typeNames.push_back(f.TypeName);
+
+        auto picks = ValueScan::SelectSnapshotNumericFields(typeNames, numericScope);
+
+        SnapshotObject so;
+        so.index     = i;  // GObjects index == logical slot index
+        so.addr      = obj;
+        so.name      = std::move(name);
+        so.className = ci.Name;
+        so.path      = Ubel::GetFullName(obj);
+        uintptr_t outer = Ubel::GetOuter(obj);
+        so.outerClassName = outer ? Ubel::GetName(Ubel::GetClass(outer)) : "";
+
+        // Top-level numeric scalar fields.
+        for (const auto& p : picks) {
+            const auto& fi = ci.Fields[p.fieldIndex];
+            size_t sz = ValueScan::SizeOf(p.dt);
+            if (sz == 0 || sz > 8) continue;  // defensive; meta members are 1..8B
+            uint8_t buf[8] = {};
+            if (!Macht::ReadBytesSafe(obj + fi.Offset, buf, sz)) continue;
+
+            SnapshotField sf;
+            sf.name   = fi.Name;
+            sf.offset = fi.Offset;
+            sf.type   = fi.TypeName;
+            sf.hex    = SnapshotBytesToHex(buf, sz);
+            so.fields.push_back(std::move(sf));
+        }
+
+        // Struct-array element inner fields (inner-key capture).
+        CaptureStructArrays(obj, ci, numericScope, arrayCap, so.arrays);
+
+        // Keep objects with any captured scalar field OR array element.
+        if (so.fields.empty() && so.arrays.empty()) continue;
+        result.objects.push_back(std::move(so));
+    }
+
+    return result;
+}
+
 } // namespace Aura

@@ -33,6 +33,9 @@ extern "C" uintptr_t UE5_GetObjectClass(uintptr_t obj);
 extern "C" uintptr_t UE5_FindFunctionByName(uintptr_t classAddr, const char* funcName);
 extern "C" int32_t   UE5_CallProcessEventDirect(uintptr_t instance, uintptr_t ufunc, uintptr_t params);
 extern "C" int32_t   UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t params);
+// Size-aware variant: the queued request owns a copy of the param buffer, so a
+// timed-out invoke can't use-after-free this handler's stack-local paramBuf.
+extern "C" int32_t   UE5_CallProcessEventEx(uintptr_t instance, uintptr_t ufunc, uintptr_t params, uint32_t paramsSize);
 
 // ============================================================
 // ValueScan wire helpers — parse "100" / "-42" / "3.14" / "true" /
@@ -1020,6 +1023,89 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             data["total"]   = total;
             data["scanned"] = end - offset; // Number of indices scanned (for pagination)
             data["objects"] = objects;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // Snapshot capture (experimental — Phase A1a). begin returns the total
+        // object count for progress; chunk streams numeric UPROPERTY values per
+        // object. Stateless cursor pagination — advance "offset" by "scanned".
+        if (cmd == Renge::CMD_BEGIN_SNAPSHOT) {
+            std::string dtStr = request.value("data_type", "NumericNoByte");
+            ValueScan::DataType dt;
+            if (!ValueScan::TryParseDataType(dtStr, dt) || !ValueScan::IsMultiNumericDataType(dt)) {
+                return Renge::MakeError(id, "snapshot data_type must be NumericNoByte or NumericAll").dump();
+            }
+            json data;
+            data["total"] = Aura::GetCount();
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        if (cmd == Renge::CMD_SNAPSHOT_CHUNK) {
+            int  offset   = request.value("offset", 0);
+            int  limit    = request.value("limit", 100);
+            int  arrayCap = request.value("array_cap", 256);
+            bool gameOnly = request.value("game_only", true);
+            std::string dtStr = request.value("data_type", "NumericNoByte");
+            ValueScan::DataType dt;
+            if (!ValueScan::TryParseDataType(dtStr, dt) || !ValueScan::IsMultiNumericDataType(dt)) {
+                return Renge::MakeError(id, "snapshot data_type must be NumericNoByte or NumericAll").dump();
+            }
+
+            auto chunk = Aura::CaptureSnapshotChunk(offset, limit, gameOnly, dt, arrayCap);
+
+            auto encodeFields = [](const std::vector<Aura::SnapshotField>& src) {
+                json arr = json::array();
+                for (const auto& f : src) {
+                    json fe;
+                    fe["name"] = f.name;
+                    fe["off"]  = f.offset;
+                    fe["type"] = f.type;
+                    fe["hex"]  = f.hex;
+                    arr.push_back(std::move(fe));
+                }
+                return arr;
+            };
+
+            json objects = json::array();
+            for (const auto& o : chunk.objects) {
+                json item;
+                item["index"]       = o.index;
+                item["addr"]        = Renge::AddrToStr(o.addr);
+                item["name"]        = o.name;
+                item["class"]       = o.className;
+                item["outer_class"] = o.outerClassName;
+                item["path"]        = o.path;
+                item["fields"]      = encodeFields(o.fields);
+
+                // Struct-array elements (inner-key capture). Omitted when empty.
+                if (!o.arrays.empty()) {
+                    json arrays = json::array();
+                    for (const auto& a : o.arrays) {
+                        json elems = json::array();
+                        for (const auto& el : a.elements) {
+                            json eo;
+                            eo["i"] = el.index;
+                            if (!el.keyName.empty()) {
+                                eo["key_name"]  = el.keyName;
+                                eo["key_value"] = el.keyValue;
+                            }
+                            eo["fields"] = encodeFields(el.fields);
+                            elems.push_back(std::move(eo));
+                        }
+                        json ao;
+                        ao["field"]    = a.field;
+                        ao["elements"] = std::move(elems);
+                        arrays.push_back(std::move(ao));
+                    }
+                    item["arrays"] = std::move(arrays);
+                }
+                objects.push_back(std::move(item));
+            }
+
+            json data;
+            data["total"]   = chunk.total;
+            data["scanned"] = chunk.scanned;
+            data["objects"] = std::move(objects);
             return Renge::MakeResponse(id, data).dump();
         }
 
@@ -2644,9 +2730,12 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             // Call ProcessEvent. directCall=true uses the direct entry point
             // (no GameThreadDispatch queue), matching Mimic's static-native
             // fast path. Caller is responsible for asserting safety.
+            // The queued path uses the size-aware Ex entry so the request owns a
+            // copy of paramBuf — otherwise a timeout would leave the game thread
+            // dereferencing this freed stack-local buffer (use-after-free).
             int32_t callResult = directCall
                 ? UE5_CallProcessEventDirect(instanceAddr, ufuncAddr, paramPtr)
-                : UE5_CallProcessEvent(instanceAddr, ufuncAddr, paramPtr);
+                : UE5_CallProcessEventEx(instanceAddr, ufuncAddr, paramPtr, (uint32_t)bufSize);
 
             // Build response
             json data;

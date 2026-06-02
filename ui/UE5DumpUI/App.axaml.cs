@@ -18,6 +18,8 @@ public class App : Application
     private AobUsageService? _aobUsage;
     private AobMakerBridgeService? _aobMakerBridge;
     private ProxyDeployService? _proxyDeploy;
+    private ExperimentalGate? _experimentalGate;
+    private SnapshotStore? _snapshotStore;
 
     public override void Initialize()
     {
@@ -46,6 +48,8 @@ public class App : Application
             _aobUsage = new AobUsageService(_platform, _logging);
             _aobMakerBridge = new AobMakerBridgeService(_logging);
             _proxyDeploy = new ProxyDeployService(_logging);
+            _experimentalGate = new ExperimentalGate(_platform, _logging);
+            _snapshotStore = new SnapshotStore(_platform, _logging);
 
             _logging.Info(Constants.LogCatInit, "UE5DumpUI starting...");
             _logging.Info(Constants.LogCatInit, $"Version:   {typeof(App).Assembly.GetName().Version}");
@@ -57,7 +61,7 @@ public class App : Application
             // Create main window
             var mainVm = new MainWindowViewModel(
                 _pipeClient, _dumpService, _logging, _platform, _aobUsage, _aobMakerBridge,
-                _proxyDeploy);
+                _proxyDeploy, _experimentalGate, _snapshotStore);
 
             desktop.MainWindow = new MainWindow
             {

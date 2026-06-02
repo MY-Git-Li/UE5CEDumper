@@ -239,7 +239,11 @@
       <TabControl x:Name="MainTabs" Grid.Column="2" Background="#1E1E1E" Padding="4"
                   SelectedIndex="{Binding SelectedTabIndex}"
                   SelectionChanged="MainTabs_SelectionChanged">
-        <TabItem Header="{StaticResource str.Tab.LiveWalker}">
+        <!-- Tag tokens mark tabs whose toolbar/per-row buttons depend on the
+             AOBMaker CE plugin. MainWindow.axaml.cs routes the tab-switch
+             AOBMaker re-check by Tag (not index) so reordering/inserting tabs
+             can't silently break it (see MainTabs_SelectionChanged). -->
+        <TabItem Header="{StaticResource str.Tab.LiveWalker}" Tag="LiveWalker">
           <views:LiveWalkerPanel DataContext="{Binding LiveWalker}"/>
         </TabItem>
         <TabItem Header="{StaticResource str.Tab.InstanceFinder}">
@@ -248,7 +252,7 @@
         <TabItem Header="{StaticResource str.Tab.PropertySearch}">
           <views:PropertySearchPanel DataContext="{Binding PropertySearch}"/>
         </TabItem>
-        <TabItem Header="{StaticResource str.Tab.InterestingFunctions}">
+        <TabItem Header="{StaticResource str.Tab.InterestingFunctions}" Tag="InterestingFunctions">
           <views:InterestingFunctionsPanel DataContext="{Binding InterestingFunctions}"/>
         </TabItem>
         <TabItem Header="{StaticResource str.Tab.InterestingProperties}">
@@ -266,11 +270,29 @@
         <TabItem Header="{StaticResource str.Tab.ClassStruct}">
           <views:ClassStructPanel DataContext="{Binding ClassStruct}"/>
         </TabItem>
-        <TabItem Header="{StaticResource str.Tab.Pointers}">
+        <TabItem Header="{StaticResource str.Tab.Pointers}" Tag="Pointers">
           <views:PointerPanel DataContext="{Binding Pointers}"/>
         </TabItem>
         <TabItem Header="{StaticResource str.Tab.ProxyDeploy}">
           <views:ProxyDeployPanel DataContext="{Binding ProxyDeploy}"/>
+        </TabItem>
+
+        <!-- Experimental tabs (Phase 0): hidden unless the user opts in via the
+             System-tab credit checkbox. Appended last so existing tab indices
+             (used by OnSelectedTabIndexChanged) don't shift. Content is a
+             placeholder until Phases A/B/C land. See
+             docs/experimental-snapshot-spc-pivot.md. -->
+        <TabItem Header="{StaticResource str.Tab.Snapshot}" Tag="Snapshot"
+                 IsVisible="{Binding ExperimentalEnabled}">
+          <views:SnapshotPanel DataContext="{Binding Snapshot}"/>
+        </TabItem>
+        <TabItem Header="{StaticResource str.Tab.SpcQuery}" Tag="SpcQuery"
+                 IsVisible="{Binding ExperimentalEnabled}">
+          <views:SpcPanel DataContext="{Binding Spc}"/>
+        </TabItem>
+        <TabItem Header="{StaticResource str.Tab.ClassPivot}" Tag="ClassPivot"
+                 IsVisible="{Binding ExperimentalEnabled}">
+          <views:ClassPivotPanel DataContext="{Binding Pivot}"/>
         </TabItem>
       </TabControl>
     </Grid>

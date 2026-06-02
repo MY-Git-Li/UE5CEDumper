@@ -18,6 +18,7 @@ public partial class PointerPanelViewModel : ViewModelBase
     private readonly ILoggingService? _log;
     private readonly IAobMakerBridge? _aobMaker;
     private readonly AobUsageService? _aobUsage;
+    private readonly IExperimentalGate? _experimentalGate;
 
     [ObservableProperty] private string _gObjectsAddress = "";
     [ObservableProperty] private string _gNamesAddress = "";
@@ -255,13 +256,48 @@ public partial class PointerPanelViewModel : ViewModelBase
 
     public PointerPanelViewModel(IPlatformService platform, IDumpService? dump = null,
                                 ILoggingService? log = null, IAobMakerBridge? aobMaker = null,
-                                AobUsageService? aobUsage = null)
+                                AobUsageService? aobUsage = null,
+                                IExperimentalGate? experimentalGate = null)
     {
         _platform = platform;
         _dump = dump;
         _log = log;
         _aobMaker = aobMaker;
         _aobUsage = aobUsage;
+        _experimentalGate = experimentalGate;
+
+        // Reflect external flips (e.g. another System-tab instance) back to the
+        // checkbox, plus the lock state (which disables the checkbox once an
+        // experimental tab has been opened).
+        if (experimentalGate != null)
+            experimentalGate.Changed += (_, _) =>
+            {
+                OnPropertyChanged(nameof(ExperimentalEnabled));
+                OnPropertyChanged(nameof(CanToggleExperimental));
+            };
+    }
+
+    /// <summary>
+    /// False once the experimental opt-in has been locked (the user opened an
+    /// experimental tab while enabled). The System-tab checkbox binds its
+    /// <c>IsEnabled</c> to this so a locked opt-in can no longer be unticked.
+    /// </summary>
+    public bool CanToggleExperimental => !(_experimentalGate?.IsLocked ?? false);
+
+    /// <summary>
+    /// Opt-in toggle for the experimental analysis tabs (Snapshot / SPC Query /
+    /// Class Pivot), surfaced as the System-tab credit checkbox. Backed by the
+    /// shared <see cref="IExperimentalGate"/> (persisted across restarts).
+    /// </summary>
+    public bool ExperimentalEnabled
+    {
+        get => _experimentalGate?.IsEnabled ?? false;
+        set
+        {
+            if (_experimentalGate == null || _experimentalGate.IsEnabled == value) return;
+            _experimentalGate.IsEnabled = value;
+            OnPropertyChanged();
+        }
     }
 
     public void Update(EngineState state)

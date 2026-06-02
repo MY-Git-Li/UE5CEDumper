@@ -25,6 +25,10 @@
     <sys:String x:Key="str.Tab.ValueSearch">Value Search</sys:String>
     <sys:String x:Key="str.Tab.Console">Console</sys:String>
     <sys:String x:Key="str.Tab.GameClassFilter">Classes</sys:String>
+    <!-- Experimental tabs (hidden unless opted in via System-tab credit checkbox) -->
+    <sys:String x:Key="str.Tab.Snapshot">Snapshot</sys:String>
+    <sys:String x:Key="str.Tab.SpcQuery">SPC Query</sys:String>
+    <sys:String x:Key="str.Tab.ClassPivot">Class Pivot</sys:String>
 
     <!-- Value Search -->
     <sys:String x:Key="str.VS.Banner">Native C++ fields (non-UPROPERTY) cannot be found here — even if they live inside a UObject's memory. Use Cheat Engine's raw memory scan for those.</sys:String>
@@ -213,6 +217,94 @@
     <sys:String x:Key="str.Credit.RepoPrefix">Repository: </sys:String>
     <sys:String x:Key="str.Credit.RepoUrl">https://github.com/bbfox0703/UE5CEDumper</sys:String>
     <sys:String x:Key="str.Credit.OpenInBrowserTip">Open in default browser</sys:String>
+
+    <!-- Experimental features gate (System-tab credit checkbox) -->
+    <sys:String x:Key="str.Experimental.EnableHint">Enable advanced experimental features</sys:String>
+    <sys:String x:Key="str.Experimental.Placeholder">This experimental feature is under construction. See docs/experimental-snapshot-spc-pivot.md.</sys:String>
+
+    <!-- Snapshot tab (experimental — Phase A) -->
+    <sys:String x:Key="str.Snapshot.Intro">Capture every numeric UPROPERTY of every (scoped) object into a persisted snapshot. Snapshots feed SPC Query and Class Pivot. Native (non-UPROPERTY) fields are not captured.</sys:String>
+    <sys:String x:Key="str.Snapshot.NotConnected">Connect to a game to capture snapshots.</sys:String>
+    <sys:String x:Key="str.Snapshot.Scope">Scope:</sys:String>
+    <sys:String x:Key="str.Snapshot.GameOnly">Game objects only</sys:String>
+    <sys:String x:Key="str.Snapshot.Label">Label:</sys:String>
+    <sys:String x:Key="str.Snapshot.LabelWatermark">(optional — defaults to a timestamp)</sys:String>
+    <sys:String x:Key="str.Snapshot.Capture">Capture Snapshot</sys:String>
+    <sys:String x:Key="str.Snapshot.Cancel">Cancel</sys:String>
+    <sys:String x:Key="str.Snapshot.Refresh">Refresh</sys:String>
+    <sys:String x:Key="str.Snapshot.Delete">Delete Selected</sys:String>
+    <sys:String x:Key="str.Snapshot.Quota">Per-game quota:</sys:String>
+    <sys:String x:Key="str.Snapshot.QuotaHint">When a capture exceeds the quota, the oldest snapshots of this game are dropped automatically.</sys:String>
+    <sys:String x:Key="str.Snapshot.Usage">Used:</sys:String>
+    <sys:String x:Key="str.Snapshot.Saved">Saved snapshots</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Size">Est. Size</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Label">Label</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Captured">Captured (UTC)</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Objects">Objects</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Fields">Fields</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Scope">Scope</sys:String>
+    <sys:String x:Key="str.Snapshot.Col.Ue">UE</sys:String>
+    <!-- Snapshot diff -->
+    <sys:String x:Key="str.Snapshot.Diff.Header">Compare</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Old">Old:</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.New">New:</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Run">Run Diff</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.ClassFilter">Class:</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.PropFilter">Field:</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Dir">Change:</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.CopyAddr">Copy Address</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.OpenWalker">Open in Live Walker</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.ObjectFilter">Object:</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Hint">Diff joins fields by object identity within a session (same game launch). Old &amp; New should be from the same play session.</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Col.Change">Δ</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Col.Class">Class</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Col.Object">Object</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Col.Field">Field</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Col.Old">Old</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Col.New">New</sys:String>
+
+    <!-- SPC Query (experimental) -->
+    <sys:String x:Key="str.Spc.Intro">Find fields whose value SEQUENCE across snapshots matches a direction chain — no type, no value. Pick two or more snapshots (they may span game sessions), set how each should compare to the previous one (Increased / Decreased / Unchanged / Changed), and run. This is CE's "Unknown Initial Value + Increased/Decreased" generalised across persisted snapshots and restarts.</sys:String>
+    <sys:String x:Key="str.Spc.Join">Join:</sys:String>
+    <sys:String x:Key="str.Spc.JoinHint">Strict = same class + normalised path + offset (fewest false positives). Loose = class + outer chain + name (recovers some spawned objects across sessions). In-session = same game launch only (exact).</sys:String>
+    <sys:String x:Key="str.Spc.ClassFilter">Class:</sys:String>
+    <sys:String x:Key="str.Spc.PropFilter">Field:</sys:String>
+    <sys:String x:Key="str.Spc.Run">Run SPC</sys:String>
+    <sys:String x:Key="str.Spc.Refresh">Refresh</sys:String>
+    <sys:String x:Key="str.Spc.OpenWalker">Open in Live Walker</sys:String>
+    <sys:String x:Key="str.Spc.CopyAddr">Copy Address</sys:String>
+    <sys:String x:Key="str.Spc.PickerHeader">Snapshot sequence</sys:String>
+    <sys:String x:Key="str.Spc.BaselineHint">The oldest ticked snapshot is the baseline (its predicate is ignored). Each later snapshot's predicate compares it to the previous ticked one. Hit → Copy Address / Open in Live Walker hands the newest snapshot's live address to CE.</sys:String>
+    <sys:String x:Key="str.Spc.Col.Use">Use</sys:String>
+    <sys:String x:Key="str.Spc.Col.Label">Label</sys:String>
+    <sys:String x:Key="str.Spc.Col.Captured">Captured (UTC)</sys:String>
+    <sys:String x:Key="str.Spc.Col.Session">Session</sys:String>
+    <sys:String x:Key="str.Spc.Col.Predicate">Compare</sys:String>
+    <sys:String x:Key="str.Spc.Res.Class">Class</sys:String>
+    <sys:String x:Key="str.Spc.Res.Object">Object</sys:String>
+    <sys:String x:Key="str.Spc.Res.Field">Field</sys:String>
+    <sys:String x:Key="str.Spc.Res.Type">Type</sys:String>
+    <sys:String x:Key="str.Spc.Res.Sequence">Value sequence</sys:String>
+
+    <!-- Class Pivot (experimental) -->
+    <sys:String x:Key="str.Pivot.Intro">Group one class's instances by a key field's value (e.g. inventory by ItemID) or by object identity, and project the value fields per group. The best key field is auto-suggested (type + name + cardinality). Differing values inside a group render as a collision ⟨N: v1,v2,+M⟩. Snapshot capture is all-numeric, so keys are int/enum IDs.</sys:String>
+    <sys:String x:Key="str.Pivot.Snapshot">Snapshot:</sys:String>
+    <sys:String x:Key="str.Pivot.ClassFilter">Class:</sys:String>
+    <sys:String x:Key="str.Pivot.Run">Run Pivot</sys:String>
+    <sys:String x:Key="str.Pivot.OpenWalker">Open in Live Walker</sys:String>
+    <sys:String x:Key="str.Pivot.CopyAddr">Copy Address</sys:String>
+    <sys:String x:Key="str.Pivot.GroupBy">Group by:</sys:String>
+    <sys:String x:Key="str.Pivot.KeyField">Key field:</sys:String>
+    <sys:String x:Key="str.Pivot.Col.Project">Value</sys:String>
+    <sys:String x:Key="str.Pivot.Col.Field">Field</sys:String>
+    <sys:String x:Key="str.Pivot.Col.Type">Type</sys:String>
+    <sys:String x:Key="str.Pivot.Col.Distinct">Distinct</sys:String>
+    <sys:String x:Key="str.Pivot.Col.Insts">Instances</sys:String>
+    <sys:String x:Key="str.Pivot.Col.KeyScore">Key score</sys:String>
+    <sys:String x:Key="str.Pivot.ResultsHint">Tick the value fields above to project them. Identity mode groups spawn-normalised siblings (BP_Enemy_C_0/_1/…) together. Select a group → Open in Live Walker / Copy Address hands its representative instance to CE.</sys:String>
+    <sys:String x:Key="str.Pivot.Res.Count">Count</sys:String>
+    <sys:String x:Key="str.Pivot.Res.Key">Key</sys:String>
+    <sys:String x:Key="str.Pivot.Res.Values">Projected values</sys:String>
 
     <!-- Proxy Deploy -->
     <sys:String x:Key="str.ProxyDeploy.ProxyType">Proxy DLL:</sys:String>

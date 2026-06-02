@@ -1047,6 +1047,73 @@ static void Test_ValueScan_SessionLifecycle() {
 
 // ----- main ------------------------------------------------------------------
 
+// Phase A1a — snapshot field selection: pick numeric scalar fields by scope,
+// preserving original field indices and resolving each to its concrete width.
+static void Test_ValueScan_SelectSnapshotNumericFields() {
+    using DT = ValueScan::DataType;
+    // Mixed class layout (field order matters — indices must be preserved).
+    const std::vector<std::string> fields = {
+        "FloatProperty",   // 0  -> captured (Float) in both scopes
+        "BoolProperty",    // 1  -> never (bool excluded)
+        "IntProperty",     // 2  -> captured (Int32) in both
+        "StrProperty",     // 3  -> never (non-numeric)
+        "Int8Property",    // 4  -> NumericAll only (Int8)
+        "ByteProperty",    // 5  -> NumericAll only (UInt8)
+        "StructProperty",  // 6  -> never
+        "Int16Property",   // 7  -> captured (Int16) in both
+        "DoubleProperty",  // 8  -> captured (Double) in both
+    };
+
+    auto noByte = ValueScan::SelectSnapshotNumericFields(fields, DT::NumericNoByte);
+    EXPECT("NoByte picks 4 fields", noByte.size() == 4);
+    if (noByte.size() == 4) {
+        EXPECT("NoByte[0] = field 0 Float",  noByte[0].fieldIndex == 0 && noByte[0].dt == DT::Float);
+        EXPECT("NoByte[1] = field 2 Int32",  noByte[1].fieldIndex == 2 && noByte[1].dt == DT::Int32);
+        EXPECT("NoByte[2] = field 7 Int16",  noByte[2].fieldIndex == 7 && noByte[2].dt == DT::Int16);
+        EXPECT("NoByte[3] = field 8 Double", noByte[3].fieldIndex == 8 && noByte[3].dt == DT::Double);
+    }
+
+    auto all = ValueScan::SelectSnapshotNumericFields(fields, DT::NumericAll);
+    EXPECT("All picks 6 fields", all.size() == 6);
+    if (all.size() == 6) {
+        EXPECT("All includes field 4 Int8",  all[2].fieldIndex == 4 && all[2].dt == DT::Int8);
+        EXPECT("All includes field 5 UInt8", all[3].fieldIndex == 5 && all[3].dt == DT::UInt8);
+    }
+
+    // Non-meta scope captures nothing (snapshot only runs with meta types).
+    auto none = ValueScan::SelectSnapshotNumericFields(fields, DT::Int32);
+    EXPECT("Int32 scope captures nothing", none.empty());
+
+    // Empty input is fine.
+    auto empty = ValueScan::SelectSnapshotNumericFields({}, DT::NumericNoByte);
+    EXPECT("empty field list -> empty picks", empty.empty());
+
+    // Every captured field must have a non-zero fixed width (SizeOf invariant).
+    for (const auto& p : all) {
+        EXPECT("captured dt has 1..8 byte width",
+               ValueScan::SizeOf(p.dt) >= 1 && ValueScan::SizeOf(p.dt) <= 8);
+    }
+}
+
+// Phase A1b — struct-array inner-key selection.
+static void Test_ValueScan_SelectArrayInnerKey() {
+    // FCargoSlot { FName ItemID; int32 Quantity; } -> key = ItemID (index 0).
+    EXPECT("FName ItemID is the key",
+        ValueScan::SelectArrayInnerKey({"NameProperty", "IntProperty"}, {"ItemID", "Quantity"}) == 0);
+    // A plain (keyword-less) FName still beats an integer.
+    EXPECT("plain FName beats int",
+        ValueScan::SelectArrayInnerKey({"IntProperty", "NameProperty"}, {"Count", "Slot"}) == 1);
+    // No FName -> first integer field.
+    EXPECT("first int when no FName",
+        ValueScan::SelectArrayInnerKey({"FloatProperty", "IntProperty", "Int64Property"}, {"X", "Qty", "Big"}) == 1);
+    // A keyworded FName is preferred over an earlier plain FName.
+    EXPECT("keyworded FName preferred",
+        ValueScan::SelectArrayInnerKey({"NameProperty", "NameProperty"}, {"Display", "RowName"}) == 1);
+    // Neither FName nor integer -> -1 (caller uses the element index).
+    EXPECT("no key field -> -1",
+        ValueScan::SelectArrayInnerKey({"FloatProperty", "BoolProperty"}, {"X", "Flag"}) == -1);
+}
+
 int main() {
     std::printf("dll_helpers_test (Renge + Scharf + ValueScan)\n");
     std::printf("------------------------------------------\n");
@@ -1101,6 +1168,10 @@ int main() {
     Test_ValueScan_MultiNumericMembers();
     Test_ValueScan_DataTypeFromPropertyTypeName();
     Test_ValueScan_BuildNumericTargets();
+    // Phase A1a — snapshot field selection
+    Test_ValueScan_SelectSnapshotNumericFields();
+    // Phase A1b — struct-array inner-key selection
+    Test_ValueScan_SelectArrayInnerKey();
 
     Test_ValueScan_SessionLifecycle();
 

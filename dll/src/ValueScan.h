@@ -201,6 +201,32 @@ const std::vector<DataType>& MultiNumericMembers(DataType dt);
 // scan + refine engines to resolve each candidate's own width.
 bool TryDataTypeFromPropertyTypeName(const std::string& propTypeName, DataType& out);
 
+// Snapshot capture (Phase A1a): given the property type-name of each field
+// of a class (in ClassInfo.Fields order), select those whose declared type
+// is a member of the given numeric meta scope (NumericNoByte / NumericAll),
+// pairing each selected field's index with its resolved concrete DataType.
+// Pure / std-only so it reuses the exact same MultiNumericMembers +
+// TryDataTypeFromPropertyTypeName invariant the value scan relies on — a
+// field captured here is guaranteed to resolve to a fixed width via
+// SizeOf(dt). Non-numeric, Bool, and out-of-scope (e.g. 1-byte under
+// NumericNoByte) fields are omitted.
+struct SnapshotFieldPick {
+    int32_t  fieldIndex;
+    DataType dt;
+};
+std::vector<SnapshotFieldPick> SelectSnapshotNumericFields(
+    const std::vector<std::string>& propTypeNames, DataType numericScope);
+
+// Snapshot array capture (Phase A1b): pick the index of the best "inner key"
+// field for a struct-array element, given the element struct's field type names
+// + field names (parallel vectors). Prefers a NameProperty (FName) whose name
+// looks like an id/name/tag/key/row; then any NameProperty; then the first
+// integer field. Returns -1 if none (caller falls back to the element index).
+// Pure / std-only. Used to give cargo/inventory rows a reorder-immune key
+// (e.g. FCargoSlot.ItemID) so the same logical slot joins across snapshots.
+int SelectArrayInnerKey(const std::vector<std::string>& typeNames,
+                        const std::vector<std::string>& fieldNames);
+
 // Pre-parsed multi-numeric target. Holds one little-endian byte buffer
 // per member DataType whose width can represent the user's value (e.g.
 // "70000" yields Int32/UInt32/Int64/UInt64/Float/Double entries but no

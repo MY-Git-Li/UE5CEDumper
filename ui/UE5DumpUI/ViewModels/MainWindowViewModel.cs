@@ -9,6 +9,37 @@ using UE5DumpUI.Services;
 namespace UE5DumpUI.ViewModels;
 
 /// <summary>
+/// Tab positions in the <c>MainWindow.axaml</c> TabControl, used by the
+/// panel-to-panel navigation handlers that set
+/// <see cref="MainWindowViewModel.SelectedTabIndex"/>. This is the single
+/// source of truth for those indices — MUST stay in the same order as the
+/// &lt;TabItem&gt; elements in MainWindow.axaml. (These indices silently
+/// drifted before: the "ClassStruct" navigations hard-coded 7 but GameClassFilter
+/// took index 7, pushing ClassStruct to 8.) The tab-switch *read* path
+/// (AOBMaker re-check) instead matches on <c>TabItem.Tag</c> in
+/// MainWindow.axaml.cs, which is reorder-proof and needs no entry here.
+/// </summary>
+internal enum MainTabIndex
+{
+    LiveWalker = 0,
+    InstanceFinder = 1,
+    PropertySearch = 2,
+    InterestingFunctions = 3,
+    InterestingProperties = 4,
+    ValueSearch = 5,
+    Console = 6,
+    GameClassFilter = 7,
+    ClassStruct = 8,
+    Pointers = 9,
+    ProxyDeploy = 10,
+    // Experimental tabs (hidden unless opted in) are appended last so the
+    // indices above never shift. Not navigation targets today.
+    Snapshot = 11,
+    SpcQuery = 12,
+    ClassPivot = 13,
+}
+
+/// <summary>
 /// Main window ViewModel — orchestrates connection and child ViewModels.
 /// </summary>
 public partial class MainWindowViewModel : ViewModelBase, IDisposable
@@ -20,6 +51,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly IPlatformService _platform;
     private readonly AobUsageService? _aobUsage;
     private readonly IAobMakerBridge? _aobMaker;  // captured so InterestingFunctions handlers can ship AA Scripts
+    private readonly IExperimentalGate? _experimentalGate;
     private EngineState? _engineState;
 
     [ObservableProperty] private string _statusText = "Disconnected";
@@ -43,6 +75,37 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>Show warning when array limit &gt;= 256 (high memory usage).</summary>
     public bool ShowArrayLimitWarning => ArrayLimitExponent >= 8;
+
+    /// <summary>
+    /// Experimental analysis tabs (Snapshot / SPC Query / Class Pivot) stay
+    /// hidden unless the user opts in via the System-tab credit checkbox.
+    /// Backed by the shared <see cref="IExperimentalGate"/> so the toggle
+    /// (owned by <see cref="PointerPanelViewModel"/>) and this tab-visibility
+    /// flag stay in sync. See docs/experimental-snapshot-spc-pivot.md Phase 0.
+    /// </summary>
+    public bool ExperimentalEnabled
+    {
+        get => _experimentalGate?.IsEnabled ?? false;
+        set
+        {
+            if (_experimentalGate == null || _experimentalGate.IsEnabled == value) return;
+            _experimentalGate.IsEnabled = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>
+    /// Lock the experimental opt-in for the rest of this session. Called the
+    /// first time the user opens one of the experimental tabs (Snapshot /
+    /// SPC Query / Class Pivot) while enabled — from that point the System-tab
+    /// opt-in checkbox can no longer be unticked. Session-only (a restart clears
+    /// the lock). Idempotent and a no-op when the gate isn't enabled.
+    /// </summary>
+    public void LockExperimental()
+    {
+        if (_experimentalGate is { IsEnabled: true, IsLocked: false })
+            _experimentalGate.Lock();
+    }
 
     /// <summary>Address format options for toolbar ComboBox.</summary>
     public string[] AddressFormatOptions { get; } =
@@ -76,6 +139,15 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public ValueSearchViewModel ValueSearch { get; }
     public ConsoleViewModel Console { get; }
     public ProxyDeployViewModel? ProxyDeploy { get; }
+    /// <summary>Experimental Snapshot tab — null when no snapshot store was
+    /// injected (e.g. in unit tests). Gated behind <see cref="ExperimentalEnabled"/>.</summary>
+    public SnapshotViewModel? Snapshot { get; }
+    /// <summary>Experimental SPC Query tab — shares the snapshot store with
+    /// <see cref="Snapshot"/>. Null when no store was injected.</summary>
+    public SpcQueryViewModel? Spc { get; }
+    /// <summary>Experimental Class Pivot tab — shares the snapshot store.
+    /// Null when no store was injected.</summary>
+    public ClassPivotViewModel? Pivot { get; }
 
     partial void OnSelectedAddressFormatIndexChanged(int value)
     {
@@ -125,25 +197,11 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         InstanceFinder.PreviewLimit = value;
     }
 
-    /// <summary>
-    /// Re-check AOBMaker CE Plugin availability on tab switch.
-    /// The user may open CE after connecting, so periodic re-check ensures
-    /// AOBMaker-dependent buttons become enabled when the plugin appears.
-    /// </summary>
-    partial void OnSelectedTabIndexChanged(int value)
-    {
-        if (!IsConnected) return;
-
-        switch (value)
-        {
-            case 0: // Live Walker
-                _ = LiveWalker.CheckAobMakerAsync();
-                break;
-            case 5: // Pointers
-                _ = Pointers.CheckAobMakerAsync();
-                break;
-        }
-    }
+    // NOTE: the on-tab-switch AOBMaker re-check used to live here as an
+    // OnSelectedTabIndexChanged switch keyed on magic tab indices, which
+    // silently drifted when tabs were inserted (Pointers ended up checking
+    // the wrong tab). It now lives in MainWindow.axaml.cs's
+    // MainTabs_SelectionChanged, routed by TabItem.Tag so it can't drift.
 
     public MainWindowViewModel(
         IPipeClient pipeClient,
@@ -152,7 +210,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         IPlatformService platform,
         AobUsageService? aobUsage = null,
         IAobMakerBridge? aobMaker = null,
-        IProxyDeployService? proxyDeploy = null)
+        IProxyDeployService? proxyDeploy = null,
+        IExperimentalGate? experimentalGate = null,
+        ISnapshotStore? snapshotStore = null)
     {
         _pipeClient = pipeClient;
         _dump = dump;
@@ -160,10 +220,16 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         _platform = platform;
         _aobUsage = aobUsage;
         _aobMaker = aobMaker;
+        _experimentalGate = experimentalGate;
+
+        // Keep tab visibility in sync when the toggle is flipped elsewhere
+        // (the checkbox lives on the System tab / PointerPanelViewModel).
+        if (experimentalGate != null)
+            experimentalGate.Changed += (_, _) => OnPropertyChanged(nameof(ExperimentalEnabled));
 
         ObjectTree = new ObjectTreeViewModel(dump, log, platform);
         ClassStruct = new ClassStructViewModel(dump, log);
-        Pointers = new PointerPanelViewModel(platform, dump, log, aobMaker, aobUsage);
+        Pointers = new PointerPanelViewModel(platform, dump, log, aobMaker, aobUsage, experimentalGate);
         LiveWalker = new LiveWalkerViewModel(dump, log, platform, aobMaker);
         InstanceFinder = new InstanceFinderViewModel(dump, log, platform);
         PropertySearch = new PropertySearchViewModel(dump, log, aobMaker);
@@ -172,6 +238,53 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         InterestingProperties = new InterestingPropertiesViewModel(dump, log);
         ValueSearch = new ValueSearchViewModel(dump, log);
         Console = new ConsoleViewModel(dump, log);
+        if (snapshotStore != null)
+        {
+            Snapshot = new SnapshotViewModel(dump, snapshotStore, log, experimentalGate, platform);
+            // Diff row -> open its object in Live Walker (same shape as ValueSearch).
+            Snapshot.NavigateToInstance += async (addr) =>
+            {
+                try
+                {
+                    SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                    await LiveWalker.NavigateToAddressCommand.ExecuteAsync(addr);
+                }
+                catch (Exception ex)
+                {
+                    _log.Error($"Snapshot NavigateToInstance handler error: {addr}", ex);
+                }
+            };
+
+            Spc = new SpcQueryViewModel(snapshotStore, log, platform);
+            // SPC hit -> open its object in Live Walker (newest snapshot's addr).
+            Spc.NavigateToInstance += async (addr) =>
+            {
+                try
+                {
+                    SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                    await LiveWalker.NavigateToAddressCommand.ExecuteAsync(addr);
+                }
+                catch (Exception ex)
+                {
+                    _log.Error($"SPC NavigateToInstance handler error: {addr}", ex);
+                }
+            };
+
+            Pivot = new ClassPivotViewModel(snapshotStore, log, platform);
+            // Pivot group -> open its representative object in Live Walker.
+            Pivot.NavigateToInstance += async (addr) =>
+            {
+                try
+                {
+                    SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                    await LiveWalker.NavigateToAddressCommand.ExecuteAsync(addr);
+                }
+                catch (Exception ex)
+                {
+                    _log.Error($"Pivot NavigateToInstance handler error: {addr}", ex);
+                }
+            };
+        }
 
         if (proxyDeploy != null)
             ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log);
@@ -189,6 +302,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 ObjectTree.SetEngineState(state);
                 LiveWalker.SetEngineState(state);
                 InstanceFinder.SetEngineState(state);
+                Snapshot?.SetEngineState(state);
+                Spc?.SetEngineState(state);
+                Pivot?.SetEngineState(state);
 
                 _ = LiveWalker.CheckAobMakerAsync();
 
@@ -223,7 +339,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                SelectedTabIndex = 0; // Switch to Live Walker tab
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker; // Switch to Live Walker tab
                 await LiveWalker.NavigateToAddressCommand.ExecuteAsync(addr);
             }
             catch (Exception ex)
@@ -241,7 +357,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                SelectedTabIndex = 1; // Switch to Instance Finder tab
+                SelectedTabIndex = (int)MainTabIndex.InstanceFinder; // Switch to Instance Finder tab
                 InstanceFinder.SearchClassName = className;
                 if (InstanceFinder.SearchCommand.CanExecute(null))
                     await InstanceFinder.SearchCommand.ExecuteAsync(null);
@@ -257,7 +373,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                SelectedTabIndex = 0; // Switch to Live Walker tab
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker; // Switch to Live Walker tab
                 await LiveWalker.NavigateToAddressCommand.ExecuteAsync(addr);
             }
             catch (Exception ex)
@@ -274,7 +390,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                SelectedTabIndex = 1; // Switch to Instance Finder tab
+                SelectedTabIndex = (int)MainTabIndex.InstanceFinder; // Switch to Instance Finder tab
                 InstanceFinder.SearchClassName = className;
                 if (InstanceFinder.SearchCommand.CanExecute(null))
                     await InstanceFinder.SearchCommand.ExecuteAsync(null);
@@ -290,7 +406,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                SelectedTabIndex = 0; // Switch to Live Walker tab
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker; // Switch to Live Walker tab
                 await LiveWalker.NavigateToAddressCommand.ExecuteAsync(addr);
             }
             catch (Exception ex)
@@ -304,7 +420,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                SelectedTabIndex = 7; // Switch to ClassStruct tab (now index 7 after the Console tab insertion)
+                SelectedTabIndex = (int)MainTabIndex.ClassStruct; // Switch to ClassStruct tab
                 await ClassStruct.LoadClassCommand.ExecuteAsync(classAddr);
             }
             catch (Exception ex)
@@ -339,7 +455,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
                 if (!string.IsNullOrEmpty(liveAddr))
                 {
-                    SelectedTabIndex = 0; // Live Walker
+                    SelectedTabIndex = (int)MainTabIndex.LiveWalker; // Live Walker
                     await LiveWalker.NavigateToAddressCommand.ExecuteAsync(liveAddr);
                     // Function Goto: TrySelectFunctionByNameAsync awaits any
                     // in-flight LoadFunctionsAsync (NavigateToAddress fires
@@ -355,7 +471,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 }
                 else
                 {
-                    SelectedTabIndex = 7; // ClassStruct fallback (index shifted by Console tab insertion)
+                    SelectedTabIndex = (int)MainTabIndex.ClassStruct; // ClassStruct fallback
                     // Look up the class address via ListClasses since Find Instances came back empty.
                     var classes = await _dump.ListClassesAsync(gameOnly: false);
                     var match = classes.Classes.FirstOrDefault(
@@ -403,7 +519,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
                 if (!string.IsNullOrEmpty(liveAddr))
                 {
-                    SelectedTabIndex = 0; // Live Walker
+                    SelectedTabIndex = (int)MainTabIndex.LiveWalker; // Live Walker
                     await LiveWalker.NavigateToAddressCommand.ExecuteAsync(liveAddr);
                     // Pre-fill the search box so the user lands with the
                     // property highlighted instead of having to scroll.
@@ -413,7 +529,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 }
                 else
                 {
-                    SelectedTabIndex = 7; // ClassStruct fallback (shifted by Console tab insertion)
+                    SelectedTabIndex = (int)MainTabIndex.ClassStruct; // ClassStruct fallback
                     var classes = await _dump.ListClassesAsync(gameOnly: false);
                     var match = classes.Classes.FirstOrDefault(
                         c => c.ClassName.Equals(className, StringComparison.Ordinal));
@@ -463,7 +579,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                SelectedTabIndex = 0;  // Live Walker
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;  // Live Walker
                 await LiveWalker.NavigateToAddressCommand.ExecuteAsync(addr);
             }
             catch (Exception ex)
@@ -632,7 +748,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
                 if (!string.IsNullOrEmpty(liveAddr))
                 {
-                    SelectedTabIndex = 0; // Live Walker
+                    SelectedTabIndex = (int)MainTabIndex.LiveWalker; // Live Walker
                     await LiveWalker.NavigateToAddressCommand.ExecuteAsync(liveAddr);
                     var picked = await LiveWalker.TrySelectFunctionByNameAsync(funcName);
                     StatusText = picked
@@ -643,7 +759,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 }
                 else
                 {
-                    SelectedTabIndex = 7; // ClassStruct fallback (consistent with Console tab shift)
+                    SelectedTabIndex = (int)MainTabIndex.ClassStruct; // ClassStruct fallback
                     var classes = await _dump.ListClassesAsync(gameOnly: false);
                     var match = classes.Classes.FirstOrDefault(
                         c => c.ClassName.Equals(className, StringComparison.Ordinal));
@@ -831,10 +947,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Audit fixes #16/#17: dispose owned child VMs that hold timers /
     /// CancellationTokenSources. Called from MainWindow.Closed so timer
-    /// callbacks don't fire after the window is gone.
-    /// Other child VMs (PointerPanel, ClassStruct, InstanceFinder, etc.)
-    /// don't currently own disposable resources; they're skipped here.
-    /// If they grow IDisposable in the future, add them to this list.
+    /// callbacks don't fire after the window is gone. Any child VM that is
+    /// IDisposable (owns a timer / CTS / SQLite handle) MUST be disposed here —
+    /// the VM's own Dispose() has no other caller.
     /// </summary>
     public void Dispose()
     {
@@ -843,6 +958,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         ObjectTree.Dispose();
         LiveWalker.Dispose();
+        // PropertySearch is IDisposable (owns a debounce System.Threading.Timer);
+        // its Dispose had no caller before, leaking the timer until process exit.
+        PropertySearch.Dispose();
 
         GC.SuppressFinalize(this);
     }
@@ -946,6 +1064,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ObjectTree.SetEngineState(state);
         LiveWalker.SetEngineState(state);
         InstanceFinder.SetEngineState(state);
+        Snapshot?.SetEngineState(state);
+        Spc?.SetEngineState(state);
+        Pivot?.SetEngineState(state);
 
         // Fire-and-forget: check AOBMaker availability for Live Walker
         _ = LiveWalker.CheckAobMakerAsync();

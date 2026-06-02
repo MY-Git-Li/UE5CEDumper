@@ -1336,6 +1336,106 @@ public sealed class DumpService : IDumpService
         CheckResponse(res);
     }
 
+    public async Task<int> BeginSnapshotAsync(string dataType, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "begin_snapshot",
+            ["data_type"] = dataType,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return res["total"]?.GetValue<int>() ?? 0;
+    }
+
+    public async Task<SnapshotChunkResult> SnapshotChunkAsync(
+        string dataType, bool gameOnly, int offset, int limit, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "snapshot_chunk",
+            ["data_type"] = dataType,
+            ["game_only"] = gameOnly,
+            ["offset"] = offset,
+            ["limit"] = limit,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        var result = new SnapshotChunkResult
+        {
+            Total   = res["total"]?.GetValue<int>() ?? 0,
+            Scanned = res["scanned"]?.GetValue<int>() ?? 0,
+        };
+
+        if (res["objects"] is JsonArray arr)
+        {
+            foreach (var node in arr)
+            {
+                if (node is not JsonObject o) continue;
+                var obj = new SnapshotCapturedObject
+                {
+                    Index          = o["index"]?.GetValue<int>() ?? -1,
+                    Addr           = o["addr"]?.GetValue<string>() ?? "",
+                    Name           = o["name"]?.GetValue<string>() ?? "",
+                    ClassName      = o["class"]?.GetValue<string>() ?? "",
+                    OuterClassName = o["outer_class"]?.GetValue<string>() ?? "",
+                    Path           = o["path"]?.GetValue<string>() ?? "",
+                };
+                if (o["fields"] is JsonArray fields)
+                {
+                    foreach (var fn in fields)
+                    {
+                        if (fn is not JsonObject f) continue;
+                        obj.Fields.Add(ParseSnapshotField(f));
+                    }
+                }
+                if (o["arrays"] is JsonArray arrays)
+                {
+                    foreach (var an in arrays)
+                    {
+                        if (an is not JsonObject ao) continue;
+                        var ca = new SnapshotCapturedArray { Field = ao["field"]?.GetValue<string>() ?? "" };
+                        if (ao["elements"] is JsonArray elems)
+                        {
+                            foreach (var en in elems)
+                            {
+                                if (en is not JsonObject eo) continue;
+                                var el = new SnapshotCapturedArrayElement
+                                {
+                                    Index    = eo["i"]?.GetValue<int>() ?? 0,
+                                    KeyName  = eo["key_name"]?.GetValue<string>() ?? "",
+                                    KeyValue = eo["key_value"]?.GetValue<string>() ?? "",
+                                };
+                                if (eo["fields"] is JsonArray ef)
+                                {
+                                    foreach (var fn in ef)
+                                    {
+                                        if (fn is not JsonObject f) continue;
+                                        el.Fields.Add(ParseSnapshotField(f));
+                                    }
+                                }
+                                ca.Elements.Add(el);
+                            }
+                        }
+                        obj.Arrays.Add(ca);
+                    }
+                }
+                result.Objects.Add(obj);
+            }
+        }
+
+        return result;
+    }
+
+    private static SnapshotCapturedField ParseSnapshotField(JsonObject f) => new()
+    {
+        Name   = f["name"]?.GetValue<string>() ?? "",
+        Offset = f["off"]?.GetValue<int>() ?? 0,
+        Type   = f["type"]?.GetValue<string>() ?? "",
+        Hex    = f["hex"]?.GetValue<string>() ?? "",
+    };
+
     public async Task<ClassListResult> ListClassesAsync(
         bool gameOnly = true, int limit = 5000, CancellationToken ct = default)
     {

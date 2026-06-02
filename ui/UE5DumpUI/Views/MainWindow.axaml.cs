@@ -172,29 +172,54 @@ public partial class MainWindow : Window
     /// 1. Stop Live Walker auto-refresh when the user switches away
     ///    from Live Walker (no point polling while viewing other tabs).
     /// 2. Refresh AOBMaker availability for tabs whose actions depend
-    ///    on the CE plugin (LiveWalker, InterestingFunctions). The
-    ///    re-check is fire-and-forget with a 5s cooldown so rapid tab
-    ///    switches don't stack 2s pipe-connect timeouts -- keeps the
-    ///    grayout state honest when the user starts/stops CE without
-    ///    blocking the UI thread.
+    ///    on the CE plugin (LiveWalker, InterestingFunctions, Pointers).
+    ///    The re-check is fire-and-forget (cooldown-throttled where the
+    ///    panel VM supports it) so rapid tab switches don't stack 2s
+    ///    pipe-connect timeouts -- keeps the grayout state honest when
+    ///    the user starts/stops CE without blocking the UI thread.
     /// </summary>
+    /// <remarks>
+    /// Routing is keyed on the selected <see cref="TabItem.Tag"/>, NOT its
+    /// position. Index-based routing here has silently drifted twice as tabs
+    /// were inserted into MainWindow.axaml (the Pointers re-check pointed at
+    /// the wrong index, and the autorefresh-stop assumed LiveWalker == 0).
+    /// The Tag travels with its TabItem, so reordering can't break this.
+    /// SelectedItem is the outer TabControl's selection, so inner
+    /// SelectionChanged events bubbling from child grids are harmless.
+    /// </remarks>
     private void MainTabs_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (sender is not TabControl tabs) return;
         if (DataContext is not MainWindowViewModel vm) return;
 
-        // Tab index 0 = Live Walker (first tab in the TabControl)
-        if (tabs.SelectedIndex != 0 && vm.LiveWalker.IsAutoRefreshing)
+        var tag = (tabs.SelectedItem as TabItem)?.Tag as string;
+
+        // Stop Live Walker auto-refresh when switching away from it.
+        if (tag != "LiveWalker" && vm.LiveWalker.IsAutoRefreshing)
         {
             vm.LiveWalker.StopAutoRefreshTimer();
         }
 
+        // Opening any experimental tab while enabled permanently commits the
+        // opt-in: the System-tab checkbox can no longer be unticked from here
+        // on. The gate persists the lock; LockExperimental is idempotent and a
+        // no-op when the feature isn't enabled.
+        if (tag is "Snapshot" or "SpcQuery" or "ClassPivot")
+            vm.LockExperimental();
+
         // Refresh AOBMaker state for tabs whose toolbar / per-row buttons
-        // depend on it. Order matches the AXAML tab order.
-        switch (tabs.SelectedIndex)
+        // depend on it. LiveWalker / InterestingFunctions throttle via
+        // TryCheckAobMaker; PointerPanel has no cooldown wrapper, so call
+        // its async check directly (fire-and-forget, as before).
+        switch (tag)
         {
-            case 0: vm.LiveWalker.TryCheckAobMaker(); break;
-            case 3: vm.InterestingFunctions.TryCheckAobMaker(); break;
+            case "LiveWalker": vm.LiveWalker.TryCheckAobMaker(); break;
+            case "InterestingFunctions": vm.InterestingFunctions.TryCheckAobMaker(); break;
+            case "Pointers": _ = vm.Pointers.CheckAobMakerAsync(); break;
+            // SPC / Pivot read the snapshot list saved by the Snapshot tab —
+            // refresh on activation so a just-captured snapshot shows up.
+            case "SpcQuery": _ = vm.Spc?.RefreshCommand.ExecuteAsync(null); break;
+            case "ClassPivot": _ = vm.Pivot?.RefreshCommand.ExecuteAsync(null); break;
         }
     }
 }

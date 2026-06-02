@@ -12,6 +12,99 @@ Move items to [dev-log.md](dev-log.md) once they ship; update
 
 -----
 
+## 🧪 EXPERIMENTAL: Snapshot / SPC Query / Class Pivot (Phase A done 2026-06-02)
+
+Port of three analysis features from the Unity sister project `discrete`, gated
+behind an opt-in experimental flag. **Design of record:
+[experimental-snapshot-spc-pivot.md](experimental-snapshot-spc-pivot.md)** — read
+it first (concept mapping, UE-vs-Unity advantages, SQLite schema, identity-key
+join, array inner-key handling, the Q#4 key-field improvement).
+
+> **NEXT SESSION → Phase C polish (C2/C4/C5) + array pivot.** Phase 0 + Phase A +
+> Phase B (SPC) + **Phase C C1 core (Class Pivot)** shipped (builds 805-830). The
+> pivot engine (`PivotEngine` + `PivotKeyScorer` + `SnapshotStore.Pivot*Async`)
+> and UI (`ClassPivotViewModel` + `ClassPivotPanel`) are live: group a class by
+> identity or a key field, project value fields, collision render `⟨N: …⟩`, key
+> auto-suggested. Remaining Phase C: **C2** (find-by-value locator → pivot
+> handoff), **C4** (DataTable-native zero-config pivot), **C5** (right-click
+> "Pivot this" from LiveWalker / PropertySearch / InterestingProps), and
+> **array-element pivot** (inner-key join on captured struct arrays — the cargo
+> case). Also still open: **A3c** (CE .CT freeze-export from a diff/SPC/pivot
+> hit — Copy Address covers the manual path). See the Phase C block + design
+> §"Phase C".
+
+Locked decisions: SQLite (raw ADO.NET, no EF Core) · all three features ·
+persisted gating · **multi-session first-class** for SPC/Pivot · type-agnostic
+directional SPC (energy-bar / CE Unknown-Initial-Value generalization) ·
+Strict+Loose cross-session join · all-numeric capture scope · **v1 array
+inner-key join** (struct/object/primitive — the cargo-hold case `discrete`
+deferred).
+
+Build in order; each phase gates the next:
+
+- ~~**Phase 0 — Gating checkbox** (persisted).~~ ✅ **SHIPPED 2026-06-02
+  (`5b8a47d`, build 805).** `ExperimentalGate` service +
+  `IExperimentalGate` (persists to `%LOCALAPPDATA%\UE5CEDumper\experimental.json`,
+  source-gen JSON, shared between PointerPanelVM checkbox + MainWindowVM tab
+  gating via `Changed`). System-tab bbfox credit → checkbox (tooltip "Enable
+  advanced experimental features"); 3 placeholder tabs appended last,
+  `IsVisible` bound to `ExperimentalEnabled`. +4 gate tests → 1489 green; AOT
+  publish clean. (Also fixed an unrelated `build.ps1 -Target Test` crash from a
+  stray empty `--no-restore` arg, `4292004`.)
+- **Phase A — Snapshot** (multi-session persistent foundation).
+  - ~~A1a DLL scalar numeric capture + `begin_snapshot`/`snapshot_chunk`.~~ ✅
+    **SHIPPED `fe8b5c2` (build 808)** — `Aura::CaptureSnapshotChunk` +
+    `ValueScan::SelectSnapshotNumericFields` (dll_helpers 349→365).
+  - ~~A1b DLL array element capture (inner-key).~~ ✅ **SHIPPED `ba7c370`
+    (build 823).** Struct-array inner numeric fields keyed by a reorder-immune
+    inner key (`ValueScan::SelectArrayInnerKey` + `Aura` container reuse);
+    `arrays` wire field; C# parse + array-element rows; scalar diff excludes
+    them. +6 tests → 1569 green. **Follow-ups:** object/primitive arrays + the
+    Pivot inner-key join (Phase C). Live struct-array verify = user.
+  - ~~A2 C# SQLite store + models + capture UI.~~ ✅ **SHIPPED `0747065` (A2a
+    data layer) + `e832b4c` (A2b capture UI), builds 809-811.** Native AOT
+    publish verified clean + bundles `e_sqlite3.dll`. +50 tests → 1535 green.
+  - ~~A3 Diff engine (in-session index join) + grid + CE export handoff.~~ ✅
+    **SHIPPED `aeba44d` (build 817).** `DiffSnapshotsAsync` (single indexed SQL
+    join, changed rows + churn counts + filters) + diff grid + Copy Address.
+    +per-game quota/usage (`ab874a4`). Full CE .CT freeze-export deferred to A3c
+    (Copy Address covers the manual path). **Phase A capture→compare loop works
+    end-to-end.** Remaining: A1b (array capture).
+- ~~**Phase B — SPC Query** (multi-session, type-agnostic directional). Pure C#.~~
+  ✅ **SHIPPED 2026-06-02 (build 824).**
+  - ~~B1 engine: Strict/Loose join + relative predicate chain.~~ `SpcQueryBuilder`
+    (pure N-way self-join SQL compiler) + `SnapshotStore.SpcQueryAsync`;
+    directional predicates (Any/Unchanged/Changed/Increased/Decreased) pushed
+    into indexed SQL; Strict/Loose/In-session join modes. +19 engine/builder tests.
+  - ~~B2 UI: cross-session picker + direction predicates + CE export.~~
+    `SpcQueryViewModel` + `SpcPanel` (snapshot picker with session-tail column +
+    per-row predicate combo, join-mode toggle, filters, value-sequence results;
+    Copy Address + Open in Live Walker). +6 VM tests. **Follow-ups (v2):** absolute
+    Exact/Range/Delta predicates; per-snapshot value columns (deferred to keep the
+    grid AOT-safe). Live multi-session verify = user.
+- **Phase C — Class Pivot** (value-keyed, cross-session safe). Pure C# (+opt DLL).
+  - ~~C1 PivotEngine (identity mode + collision render).~~ ✅ **SHIPPED 2026-06-02
+    (build 830).** `PivotEngine` (pure: identity/field grouping, per-group value
+    projection, `⟨N: …⟩` collision) + `SnapshotStore.PivotAsync` /
+    `ListPivotClasses` / `ListPivotFields`; `ClassPivotViewModel` + `ClassPivotPanel`
+    replace the placeholder. +13 engine/store tests + 4 VM tests.
+  - ~~C3 Key discovery — reuse `PropertyScoringTable` + UE type/name priors.~~ ✅
+    **SHIPPED (build 830, C3-lite).** `PivotKeyScorer` (type + name + cardinality
+    key prior; `SuggestKey`; value interest via `PropertyScoringTable`). +5 tests.
+    **v2 follow-ups:** Jaccard stability + greedy compound key + class shortlist /
+    volatility ranking (the heavier 29i-3 scorer) still open.
+  - C2 Find-by-value locator + handoff (closes the loop). *Effort M · med.*
+  - C4 DataTable-native pivot (RowName is the key, zero-config). *Effort S · low.*
+  - C5 Right-click handoff from LiveWalker / PropertySearch / InterestingProps.
+    *Effort S · low.*
+  - C6 Array-element pivot (inner-key join on captured struct arrays — cargo
+    case). *Effort M · med.*
+
+New work concentrates in A1 (DLL capture, mostly reuse) + C3 (UE-ify scorer);
+B/C are largely portable `discrete` C# + indexed SQL.
+
+-----
+
 ## 🎯 NEXT SESSION STARTING POINT (2026-05-29 latest, build 797-798, dev = main)
 
 Shipped this session (merged dev→main): the two **multi-numeric Value Search

@@ -54,6 +54,17 @@ public static class Constants
     // AOB Usage Tracking
     public const string AobUsageFilePrefix = "UE5CEDumper";
 
+    // Experimental features (Snapshot / SPC Query / Class Pivot — gated via the
+    // System-tab credit checkbox). Persisted under %LOCALAPPDATA%\UE5CEDumper.
+    public const string ExperimentalSettingsFile = "experimental.json";
+
+    // Experimental Snapshot store — per-game SQLite DB under
+    // %LOCALAPPDATA%\UE5CEDumper, named snapshots.<pe_hash>.db so each game's
+    // snapshots stay isolated (no cross-game mixing / growth / corruption).
+    public const string SnapshotDbPrefix = "snapshots";
+    // Objects streamed per snapshot_chunk pipe round-trip.
+    public const int SnapshotChunkSize = 200;
+
     // UI
     public const int DefaultWindowWidth = 1400;
     public const int DefaultWindowHeight = 900;

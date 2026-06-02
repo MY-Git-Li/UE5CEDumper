@@ -11,6 +11,190 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-06-02 — Experimental: Class Pivot (Phase C, build 830)
+
+Third tranche of the experimental Snapshot / SPC / Pivot feature. **Phase C
+(Class Pivot)** ships the value-keyed grouping core + UI. Pure C# over the
+existing SQLite corpus, **zero DLL change**. Design of record:
+[experimental-snapshot-spc-pivot.md](experimental-snapshot-spc-pivot.md)
+§"Phase C".
+
+- **C1 — PivotEngine (pure, AOT-safe).** `PivotEngine.Build` folds the captured
+  (instance, field) rows into per-instance records, groups them by **intrinsic
+  identity** (normalised path — spawn-counter siblings `BP_Enemy_C_0/_1/…`
+  collapse into one group so the value cells show the spread) **or by a chosen
+  key field's value** (e.g. inventory by `ItemID`), and projects the requested
+  value fields per group. Differing values within a group render as a collision
+  `⟨N: v1,v2,+M⟩` (ported from the Unity sister project's 29e-2 polish). Sorts
+  most-populous-first; caps at `MaxGroups`. `SnapshotStore.PivotAsync` fetches
+  only the key + value rows for the class then calls the engine; `Pivot*Async`
+  helpers list classes (with instance counts) and fields (with cardinality).
+
+- **C3 lite — key discovery.** `PivotKeyScorer` ranks numeric fields as group
+  keys by **type prior** (Byte/enum + int good, float/double poor), **name prior**
+  (id/index/type/slot/tag/… tokens), and **cardinality** (a key must actually
+  partition: `1 < distinct < instances`). `SuggestKey` auto-selects the best;
+  value-field interest reuses the calibrated `PropertyScoringTable.Score`. This
+  is the UE answer to `discrete`'s "user must guess the business key" pain.
+  (Top-level capture is all-numeric, so v1 keys are int/enum IDs; FName keys live
+  on array-element rows — a later array-pivot path.)
+
+- **C1 UI.** `ClassPivotViewModel` + `ClassPivotPanel` replace the Class Pivot
+  placeholder tab: snapshot picker, class picker (filter + most-populous-first),
+  a key-mode toggle (Identity / Field) with an auto-suggested key field, a field
+  grid (tick value fields; shows type / distinct / instances / **key score**),
+  and a results grid (Count / Key / Projected values). Selecting a class loads
+  fields, suggests the key, and pre-ticks the most interesting value fields.
+  Group → **Open in Live Walker** / **Copy Address** hands its representative
+  instance to CE. Wired into `MainWindowViewModel.Pivot`; refreshed on tab
+  activation. Like SPC, the projected-values column is a single rendered string
+  (collision-aware) to stay AOT-safe — no per-field dynamic bindings.
+
+- **Tests +22 → 1219 C# (1620 total: 1219 C# + 370 dll + 31 utf8).**
+  `PivotEngineTests` (field/identity grouping, missing-key bucket, truncation,
+  the `⟨N: …⟩` collision render), `PivotKeyScorerTests` (int>float, partitioning
+  key > unique id, value interest via the scoring table), `PivotStoreTests`
+  (class/field listing + field/identity pivots end-to-end), and
+  `ClassPivotViewModelTests` (load → key suggestion → run, via a `PendingLoad`
+  test seam on the selection-triggered async loads). Full clean Native AOT
+  publish is clean. **Remaining experimental: C2 (find-by-value locator),
+  C4 (DataTable-native pivot), C5 (right-click handoff from other panels),
+  array-element pivot, A3c (CE .CT export).**
+
+-----
+
+## 2026-06-02 — Experimental: SPC Query (Phase B) + opt-in checkbox lock (build 824)
+
+Second tranche of the experimental Snapshot / SPC / Pivot feature. **Phase B (SPC
+Query)** ships the multi-session, type-agnostic directional query engine + UI —
+the energy-bar driver case. Pure C# over the existing SQLite corpus, **zero DLL
+change**. Plus a UX change on the experimental opt-in checkbox. Design of record:
+[experimental-snapshot-spc-pivot.md](experimental-snapshot-spc-pivot.md)
+§"Phase B".
+
+- **B1 — engine (pure C#, no pipe).** `SpcQueryBuilder.Compile` turns an
+  `SpcQuery` (ordered snapshot ids + per-snapshot predicate chain + join mode +
+  filters) into one indexed SQLite statement: an **N-way self-join** over the
+  `fields` table where the oldest snapshot `f0` is the anchor and every later
+  snapshot `f{i}` inner-joins on the chosen identity key (so only fields present
+  in ALL selected snapshots survive — the candidate intersection). Directional
+  predicates become `WHERE` clauses comparing `f{i}` vs `f{i-1}`:
+  Unchanged/Changed compare raw `hex` (type-exact); Increased/Decreased compare
+  `numeric_value` by the field's declared width (no byte-reinterpret false hits).
+  Pushing predicates into SQL lets a selective chain collapse a million-row
+  intersection to a handful via the `ix_strict`/`ix_loose`/`ix_insession`
+  indexes. Snapshot ids + limit are inlined (validated long/int — injection-safe);
+  only the two LIKE filters are parameterised. `SnapshotStore.SpcQueryAsync`
+  executes it and renders each snapshot's value via `SnapshotNumeric.Render`.
+  **Join modes:** Strict `(class, norm_path, prop, offset)` / Loose
+  `(class, outer_chain, prop)` / In-session `(class, gobjects_index, prop)`.
+  `SpcModels` carries `SpcPredicateKind` (Any/Unchanged/Changed/Increased/
+  Decreased — directional v1), `SpcJoinMode`, `SpcQuery`, `SpcResultRow`
+  (rendered value sequence as one AOT-safe column), `SpcResult`.
+
+- **B2 — UI.** `SpcQueryViewModel` + `SpcPanel.axaml` replace the SPC placeholder
+  tab. A snapshot picker (DataGrid: tick + label + captured + **session tail** so
+  cross-session spans are visible + a per-row predicate ComboBox), a Strict/Loose/
+  In-session toggle, class/field filters, and a results grid (Class / Object /
+  Field / Type / **value sequence**). The oldest ticked snapshot is the baseline
+  (its predicate ignored); each later one compares to the previous ticked. Hit →
+  **Copy Address** (newest snapshot's `obj_addr` + offset) / **Open in Live
+  Walker** (the existing `NavigateToInstance` handoff). Wired into
+  `MainWindowViewModel.Spc` (shares the snapshot store), refreshed on tab
+  activation so a just-captured snapshot appears. Results column is a single
+  rendered "value sequence" string — no per-snapshot `Binding("Values[i]")`, which
+  would trip the IL2026/IL3050 AOT warnings (build-780 lesson).
+
+- **Opt-in checkbox UX (user request).** The System-tab experimental-enable
+  checkbox now renders at **Opacity 0.25**, and once it is checked **and** the
+  user has opened any experimental tab (Snapshot / SPC Query / Class Pivot) it can
+  **no longer be unticked**. `IExperimentalGate` grows `IsLocked` + `Lock()`
+  (`IsEnabled` setter also refuses to go false while locked — defence in depth).
+  The three experimental `TabItem`s gained `Tag`s; `MainTabs_SelectionChanged`
+  calls `MainWindowViewModel.LockExperimental` (idempotent, no-op unless enabled)
+  on first open. `PointerPanelViewModel` exposes `CanToggleExperimental`
+  (`!IsLocked`) bound to the checkbox `IsEnabled`. The lock is **session-only**
+  (NOT persisted) — a restart clears it, so the user can untick again until they
+  re-open an experimental tab.
+
+- **Tests +29 → 1197 C# (1598 total: 1197 C# + 370 dll + 31 utf8).**
+  `SpcQueryBuilderTests` lock the SQL shape (join keys per mode, predicate
+  clauses, filters, limit, validation) without a DB; `SpcStoreTests` run the
+  engine end-to-end against a temp SQLite (money "decreased twice" + the
+  cross-session energy-bar "same/same/down/up" + norm_path spawn-counter merge +
+  filters + intersection drop); `SpcQueryViewModelTests` cover refresh/auto-select/
+  run/copy-address/navigate; `ExperimentalGateTests` +4 lock the lock contract.
+  Full clean Native AOT publish (`build.ps1 -Mode Publish`) is clean (the only ILC
+  notes are the pre-existing benign X11/DBus Linux-backend trim messages).
+  **Remaining experimental: Phase C (Class Pivot) + A3c (CE .CT export).**
+
+-----
+
+## 2026-06-02 — Experimental: Snapshot capture / diff (Phase 0 + A, builds 805-823)
+
+First tranche of the experimental Snapshot / SPC / Pivot feature ported in
+concept from the Unity sister project `discrete`. Gated behind an opt-in flag so
+the default UI is unchanged. Design of record:
+[experimental-snapshot-spc-pivot.md](experimental-snapshot-spc-pivot.md).
+**The full capture → quota → compare loop now works end-to-end; A3 diff was
+live-verified by the user (caught `DOLLFriendGameCharacter.HP 99→120`).**
+
+- **Phase 0 — gating (build 805, `5b8a47d`).** The System-tab `bbfox` credit
+  becomes a checkbox; checked → three experimental tabs appear (tooltip "Enable
+  advanced experimental features"). `ExperimentalGate`/`IExperimentalGate`
+  persists the opt-in to `%LOCALAPPDATA%\UE5CEDumper\experimental.json` (source-
+  gen JSON; shared between the checkbox VM and tab-visibility VM via `Changed`).
+  Also fixed an unrelated `build.ps1 -Target Test` crash from a stray empty
+  `--no-restore` arg passed to the MTP runner (`4292004`).
+
+- **A1a — DLL scalar capture (build 808, `fe8b5c2`).** Stateless cursor-paginated
+  `begin_snapshot` / `snapshot_chunk` pipe commands. `Aura::CaptureSnapshotChunk`
+  walks GObjects (game-only via `IsEnginePackage`), reuses cached
+  `Ubel::WalkClassEx`, emits per-object identity (index/addr/name/class/
+  outer_class/path) + every numeric scalar UPROPERTY (via the pure
+  `ValueScan::SelectSnapshotNumericFields`, keyed on the existing NumericNoByte/
+  NumericAll member sets).
+
+- **A2 — SQLite store + capture UI (builds 809-813, `0747065` + `e832b4c` +
+  `0da1248`).** `Microsoft.Data.Sqlite` raw ADO.NET (no EF Core). **Native AOT
+  publish is clean and bundles `e_sqlite3.dll`** — the design's headline risk,
+  resolved. `SnapshotStore` (denormalised `fields` table, strict/loose/in-session
+  join indexes, streaming chunk writes); `SnapshotViewModel` orchestrates capture
+  (begin → loop chunks → store → finalise, progress/cancel); `SnapshotPanel`.
+  Pure helpers `SnapshotIdentity.NormalizePath` (leaf-only FName-suffix strip) +
+  `SnapshotNumeric.TryFromHex`. **Per-game DB** `snapshots.<pe_hash>.db` — no
+  cross-game mixing / unbounded growth / shared corruption blast radius.
+
+- **A2c — quota + usage (build 815, `ab874a4`).** Per-game size quota with FIFO
+  auto-eviction on capture (`EnforceQuotaAsync` drops oldest until ≤ quota then
+  VACUUMs; newest always kept) + `GetUsageAsync` + per-snapshot `EstBytes`. Quota
+  persisted in experimental.json; UI = quota dropdown + used/quota bar + Est.Size.
+
+- **A3 — diff (build 817, `aeba44d`) + polish (build 820, `0731d4e`).** Both
+  snapshots live in one per-game DB, so the diff is a single indexed SQL join on
+  (class, GObjects index, property) WHERE bytes differ → changed rows (rendered
+  via `SnapshotNumeric.Render`, direction ▲/▼) + Added/Removed churn counts. UI:
+  Old/New pickers (default to the two newest), client-side **live**
+  Class/Field/Object/Direction filters, Copy Address (CE handoff), Open in Live
+  Walker.
+
+- **A1b — struct-array inner-key capture (build 823, `ba7c370`).** The cargo/
+  inventory case: `TArray<FStruct>` element inner numeric fields keyed by a
+  reorder-immune inner key (`ValueScan::SelectArrayInnerKey`: keyworded-FName >
+  FName > int > none). `Aura::CaptureSnapshotChunk` resolves the inner
+  UScriptStruct (`ArrayProperty::Inner → StructProperty::Struct`), walks it, reads
+  the `TArray`, emits ≤ `array_cap` elements with rendered inner key + numeric
+  inner hex. Pipe `arrays` field; C# array-element rows; scalar diff excludes them
+  (array diffing is Pivot). **Gotcha:** `FieldInfo`/`ClassInfo` are GLOBAL scope
+  in Ubel.h, not `Ubel::` (C2039).
+
+**Tests across the tranche**: 1485 → **1569** (1168 C# + 370 dll_helpers + 31
+utf8). Every phase AOT-publish-clean. **Remaining (next sessions):** Phase B
+(SPC multi-session directional — the energy-bar case), Phase C (Class Pivot,
+incl. the array inner-key join + object/primitive arrays), A3c (CE .CT export).
+
+-----
+
 ## 2026-05-29 — Value Search: with-byte variant `NumericAll` + result-volume warning (build 796-797)
 
 Follow-up to NumericNoByte (build 794-795, todo #0d). Adds
