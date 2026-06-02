@@ -418,6 +418,51 @@ struct AllFunctionsResult {
 // this on a worker task with a progress indicator.
 AllFunctionsResult EnumerateAllFunctions(bool gameOnly, int maxEntries = 100000);
 
+// === Property Bytecode Cross-Reference (Path 1: Kismet bytecode static xref) ===
+//
+// Finds which UFunctions reference a target FProperty by scanning each
+// function's UStruct::Script (Kismet bytecode) for the FProperty* pointer.
+// Variable-access opcodes (EX_InstanceVariable 0x01 / EX_LocalVariable 0x00 /
+// EX_Context inner) embed the live, fixed-up FProperty* directly, so a raw
+// byte-scan for the 8-byte pointer value is complete AND version-agnostic
+// (no opcode table; the 0x00/0x01 preceding byte is only a confidence/kind
+// hint). The target address is the field's FProperty* (UProperty* on UE4
+// <4.25) — exactly what WalkClassEx / SearchProperties report as fieldAddr.
+//
+// COVERAGE: Blueprint / script functions only. Native (FUNC_Native) functions
+// have empty Script — their property access is in compiled machine code and is
+// invisible here. The UI MUST surface this (mirror the value-search caveat
+// contract); complementary to the CE access-breakpoint approach which covers
+// native but drowns on shared/inlined code.
+struct PropertyXref {
+    uintptr_t   funcAddr       = 0;
+    std::string funcName;
+    std::string funcFullName;
+    uintptr_t   ownerClassAddr = 0;
+    std::string ownerClassName;
+    int32_t     occurrences    = 0;    // hit count within this function's bytecode
+    std::string kind;                  // "instance" (0x01) / "local" (0x00) / "ref"
+};
+
+struct PropertyXrefStats {
+    int32_t functionsScanned    = 0;   // objects whose class name == "Function"
+    int32_t functionsWithScript = 0;   // of those, Script.Num > 0
+    int32_t objectsTotal        = 0;   // GObjects count
+    int64_t durationMs          = 0;
+    bool    deadlineHit         = false;
+};
+
+struct PropertyXrefResult {
+    std::vector<PropertyXref> xrefs;
+    PropertyXrefStats         stats;
+};
+
+// Scan every UFunction's bytecode for references to `propAddr` (an FProperty*).
+// gameOnly skips functions whose owning class is an engine package. Parallel
+// GObjects walk (relies on Ubel's mutex-guarded caches, build 792).
+PropertyXrefResult FindPropertyXrefs(uintptr_t propAddr, bool gameOnly,
+                                     int32_t maxResults = 200);
+
 // === Sparse Delegate Storage Walker ===
 //
 // Resolves bindings for a MulticastSparseDelegateProperty. The field on a

@@ -3266,6 +3266,125 @@ AllFunctionsResult EnumerateAllFunctions(bool gameOnly, int maxEntries) {
     return result;
 }
 
+// --- FindPropertyXrefs: Kismet bytecode static cross-reference (Path 1) ---
+//
+// Walk GObjects; for every UFunction, read UStruct::Script and byte-scan the
+// bytecode for the 8-byte little-endian `propAddr`. The variable-access opcodes
+// embed the live FProperty* directly, so any function that references the field
+// contains its pointer in the script buffer. Parallelised over GObjects index
+// ranges via ParallelGObjectsScan (Ubel name/outer caches are mutex-guarded).
+PropertyXrefResult FindPropertyXrefs(uintptr_t propAddr, bool gameOnly,
+                                     int32_t maxResults) {
+    PropertyXrefResult out;
+    if (!propAddr || !s_arrayAddr) return out;
+    if (maxResults <= 0) maxResults = 200;
+
+    int32_t count = GetCount();
+    if (count <= 0) return out;
+    out.stats.objectsTotal = count;
+
+    LOG_INFO("FindPropertyXrefs: scanning %d objects for xrefs to FProperty 0x%llX (gameOnly=%d)",
+             count, static_cast<unsigned long long>(propAddr), gameOnly ? 1 : 0);
+
+    // Target pointer as 8 little-endian bytes for the memcmp window.
+    uint8_t needle[8];
+    memcpy(needle, &propAddr, sizeof(needle));
+
+    constexpr int kDeadlineMs = 30000;
+    auto t0 = std::chrono::steady_clock::now();
+
+    struct ThreadResult {
+        std::vector<PropertyXref> xrefs;
+        int32_t funcsScanned    = 0;
+        int32_t funcsWithScript = 0;
+    };
+
+    auto scan = ParallelGObjectsScan<ThreadResult>(count,
+        [&](ThreadResult& tr, int32_t beginIdx, int32_t endIdx,
+            std::atomic<bool>& deadlineHit) {
+
+        std::vector<uint8_t> buf;   // reused across functions (keeps capacity)
+
+        for (int32_t i = beginIdx;
+             i < endIdx && static_cast<int>(tr.xrefs.size()) < maxResults; ++i) {
+            // Chunk-relative stride so the deadline / sibling check fires from
+            // this chunk's first iteration (mirrors FindReferencesToUObject).
+            if (((i - beginIdx) & 0x3FF) == 0) {
+                if (deadlineHit.load(std::memory_order_relaxed)) return;
+                auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::steady_clock::now() - t0).count();
+                if (dt > kDeadlineMs) {
+                    deadlineHit.store(true, std::memory_order_relaxed);
+                    return;
+                }
+            }
+
+            uintptr_t obj = GetByIndex(i);
+            if (!obj) continue;
+
+            // UFunction? Its UClass name is "Function".
+            uintptr_t cls = 0;
+            if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
+            uint32_t clsNameIdx = 0;
+            if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx)) continue;
+            if (Serie::GetString(clsNameIdx) != "Function") continue;
+            tr.funcsScanned++;
+
+            // Read UStruct::Script { Data*, Num, Max }.
+            uintptr_t scriptData = 0; int32_t scriptNum = 0;
+            Macht::ReadSafe(obj + DynOff::USTRUCT_SCRIPT,        scriptData);
+            Macht::ReadSafe(obj + DynOff::USTRUCT_SCRIPT + 0x08, scriptNum);
+            if (!scriptData || scriptNum <= 0 || scriptNum > (1 << 22)) continue;  // sanity guard
+            tr.funcsWithScript++;
+
+            // Bulk-read bytecode, byte-scan for the (UNALIGNED) pointer value.
+            buf.resize(static_cast<size_t>(scriptNum));
+            if (!Macht::ReadBytesSafe(scriptData, buf.data(), static_cast<size_t>(scriptNum)))
+                continue;
+
+            int32_t occ = 0;
+            uint8_t precByte = 0xFF;
+            for (int32_t p = 0; p + 8 <= scriptNum; ++p) {
+                if (memcmp(buf.data() + p, needle, 8) == 0) {
+                    if (occ == 0 && p > 0) precByte = buf[p - 1];  // classify first hit
+                    occ++;
+                }
+            }
+            if (occ == 0) continue;
+
+            // Owning class = UFunction's Outer. Apply gameOnly on its path.
+            uintptr_t owner = Ubel::GetOuter(obj);
+            if (gameOnly && owner && IsEnginePackage(Ubel::GetFullName(owner))) continue;
+
+            PropertyXref x;
+            x.funcAddr       = obj;
+            x.funcName       = Ubel::GetName(obj);
+            x.funcFullName   = Ubel::GetFullName(obj);
+            x.ownerClassAddr = owner;
+            x.ownerClassName = owner ? Ubel::GetName(owner) : "";
+            x.occurrences    = occ;
+            x.kind = (precByte == 0x01) ? "instance"
+                   : (precByte == 0x00) ? "local" : "ref";
+            tr.xrefs.push_back(std::move(x));
+        }
+    });
+
+    out.xrefs = ConcatTruncate(scan.perThread, &ThreadResult::xrefs, maxResults);
+    for (auto& tr : scan.perThread) {
+        out.stats.functionsScanned    += tr.funcsScanned;
+        out.stats.functionsWithScript += tr.funcsWithScript;
+    }
+    out.stats.deadlineHit = scan.deadlineHit;
+    out.stats.durationMs  = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - t0).count();
+
+    LOG_INFO("FindPropertyXrefs: %zu xrefs (scanned %d functions, %d with script, %lldms%s)",
+             out.xrefs.size(), out.stats.functionsScanned, out.stats.functionsWithScript,
+             static_cast<long long>(out.stats.durationMs),
+             out.stats.deadlineHit ? ", DEADLINE" : "");
+    return out;
+}
+
 SparseDelegateResult WalkSparseDelegateBindings(uintptr_t ownerObj,
                                                  const std::string& fieldName,
                                                  int32_t maxBindings)
