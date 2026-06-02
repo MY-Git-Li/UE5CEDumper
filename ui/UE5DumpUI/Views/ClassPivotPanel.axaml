@@ -1,0 +1,94 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UE5DumpUI.ViewModels"
+             xmlns:m="using:UE5DumpUI.Models"
+             x:Class="UE5DumpUI.Views.ClassPivotPanel"
+             x:DataType="vm:ClassPivotViewModel">
+
+  <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,170,Auto,*">
+
+    <!-- Intro -->
+    <TextBlock Grid.Row="0" Text="{StaticResource str.Pivot.Intro}"
+               Foreground="#999" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+    <!-- Snapshot / class selection -->
+    <Border Grid.Row="1" Background="#252526" CornerRadius="4" Padding="12,8" Margin="0,0,0,8"
+            BorderBrush="#3C3C3C" BorderThickness="1">
+      <WrapPanel Orientation="Horizontal">
+        <TextBlock Text="{StaticResource str.Pivot.Snapshot}" Foreground="#CCCCCC"
+                   VerticalAlignment="Center" Margin="0,0,4,0"/>
+        <ComboBox ItemsSource="{Binding Snapshots}" SelectedItem="{Binding SelectedSnapshot}"
+                  MinWidth="180" Margin="0,0,12,0">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="m:SnapshotMeta">
+              <TextBlock Text="{Binding Label}"/>
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+        <TextBlock Text="{StaticResource str.Pivot.ClassFilter}" Foreground="#CCCCCC"
+                   VerticalAlignment="Center" Margin="0,0,4,0"/>
+        <TextBox Text="{Binding ClassFilter}" Width="130" Margin="0,0,8,0"/>
+        <ComboBox ItemsSource="{Binding Classes}" SelectedItem="{Binding SelectedClass}"
+                  MinWidth="260" Margin="0,0,12,0">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="m:PivotClassInfo">
+              <TextBlock Text="{Binding Display}"/>
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+        <Button Content="{StaticResource str.Pivot.Run}" Command="{Binding RunPivotCommand}"
+                IsEnabled="{Binding CanRunPivot}" Classes="accent" Padding="12,4" Margin="0,0,8,0"/>
+        <Button Content="{StaticResource str.Pivot.OpenWalker}" Command="{Binding OpenInLiveWalkerCommand}"
+                CommandParameter="{Binding SelectedResult}" Padding="8,4" Margin="0,0,8,0"/>
+        <Button Content="{StaticResource str.Pivot.CopyAddr}" Command="{Binding CopyAddressCommand}"
+                CommandParameter="{Binding SelectedResult}" Padding="8,4"/>
+      </WrapPanel>
+    </Border>
+
+    <!-- Key mode -->
+    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8" VerticalAlignment="Center">
+      <TextBlock Text="{StaticResource str.Pivot.GroupBy}" Foreground="#CCCCCC" VerticalAlignment="Center"/>
+      <ComboBox ItemsSource="{Binding KeyModeOptions}" SelectedItem="{Binding SelectedKeyMode}" MinWidth="170"/>
+      <TextBlock Text="{StaticResource str.Pivot.KeyField}" Foreground="#CCCCCC"
+                 VerticalAlignment="Center" Margin="12,0,0,0" IsVisible="{Binding IsFieldKeyMode}"/>
+      <ComboBox ItemsSource="{Binding KeyFieldOptions}" SelectedItem="{Binding SelectedKeyField}"
+                MinWidth="200" IsVisible="{Binding IsFieldKeyMode}"/>
+      <TextBlock Text="{Binding StatusText}" Foreground="#4EC9B0" FontSize="12"
+                 VerticalAlignment="Center" Margin="12,0,0,0"
+                 IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+      <TextBlock Text="{Binding ErrorMessage}" Foreground="#F44747" FontSize="12"
+                 VerticalAlignment="Center" Margin="12,0,0,0"
+                 IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+    </StackPanel>
+
+    <!-- Field picker: tick the value fields to project per group. KeyScore hints
+         which fields make good group keys; the best is pre-selected above. -->
+    <DataGrid Grid.Row="3" ItemsSource="{Binding Fields}" IsReadOnly="False"
+              GridLinesVisibility="Horizontal" Background="#1E1E1E"
+              CanUserResizeColumns="True" CanUserSortColumns="True">
+      <DataGrid.Columns>
+        <DataGridCheckBoxColumn Header="{StaticResource str.Pivot.Col.Project}"
+                                Binding="{Binding IsValue}" Width="60"/>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Field}"    Binding="{Binding Name}"            IsReadOnly="True" Width="*"/>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Type}"     Binding="{Binding DeclaredType}"    IsReadOnly="True" Width="130"/>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Distinct}" Binding="{Binding DistinctCount}"   IsReadOnly="True" Width="80"/>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Insts}"    Binding="{Binding InstanceCount}"   IsReadOnly="True" Width="90"/>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Col.KeyScore}" Binding="{Binding KeyScoreDisplay}" IsReadOnly="True" Width="80"/>
+      </DataGrid.Columns>
+    </DataGrid>
+
+    <TextBlock Grid.Row="4" Text="{StaticResource str.Pivot.ResultsHint}" Foreground="#888"
+               FontSize="11" TextWrapping="Wrap" Margin="0,8,0,8"/>
+
+    <!-- Results: one row per group -->
+    <DataGrid Grid.Row="5" ItemsSource="{Binding Results}" SelectedItem="{Binding SelectedResult}"
+              IsReadOnly="True" GridLinesVisibility="Horizontal" Background="#1E1E1E"
+              CanUserResizeColumns="True" CanUserSortColumns="True">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Res.Count}"  Binding="{Binding Count}"         Width="70"/>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Res.Key}"    Binding="{Binding KeyValue}"      Width="*"/>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Res.Values}" Binding="{Binding ValuesDisplay}" Width="2*"/>
+      </DataGrid.Columns>
+    </DataGrid>
+  </Grid>
+</UserControl>

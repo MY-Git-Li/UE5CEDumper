@@ -292,10 +292,7 @@
         </TabItem>
         <TabItem Header="{StaticResource str.Tab.ClassPivot}" Tag="ClassPivot"
                  IsVisible="{Binding ExperimentalEnabled}">
-          <TextBlock Text="{StaticResource str.Experimental.Placeholder}"
-                     Foreground="#888" FontSize="13" TextWrapping="Wrap"
-                     HorizontalAlignment="Center" VerticalAlignment="Center"
-                     MaxWidth="520" TextAlignment="Center"/>
+          <views:ClassPivotPanel DataContext="{Binding Pivot}"/>
         </TabItem>
       </TabControl>
     </Grid>

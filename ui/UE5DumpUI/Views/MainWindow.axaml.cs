@@ -216,9 +216,10 @@ public partial class MainWindow : Window
             case "LiveWalker": vm.LiveWalker.TryCheckAobMaker(); break;
             case "InterestingFunctions": vm.InterestingFunctions.TryCheckAobMaker(); break;
             case "Pointers": _ = vm.Pointers.CheckAobMakerAsync(); break;
-            // SPC reads the snapshot list saved by the Snapshot tab — refresh on
-            // activation so a just-captured snapshot shows up in the picker.
+            // SPC / Pivot read the snapshot list saved by the Snapshot tab —
+            // refresh on activation so a just-captured snapshot shows up.
             case "SpcQuery": _ = vm.Spc?.RefreshCommand.ExecuteAsync(null); break;
+            case "ClassPivot": _ = vm.Pivot?.RefreshCommand.ExecuteAsync(null); break;
         }
     }
 }

@@ -11,6 +11,58 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-06-02 — Experimental: Class Pivot (Phase C, build 830)
+
+Third tranche of the experimental Snapshot / SPC / Pivot feature. **Phase C
+(Class Pivot)** ships the value-keyed grouping core + UI. Pure C# over the
+existing SQLite corpus, **zero DLL change**. Design of record:
+[experimental-snapshot-spc-pivot.md](experimental-snapshot-spc-pivot.md)
+§"Phase C".
+
+- **C1 — PivotEngine (pure, AOT-safe).** `PivotEngine.Build` folds the captured
+  (instance, field) rows into per-instance records, groups them by **intrinsic
+  identity** (normalised path — spawn-counter siblings `BP_Enemy_C_0/_1/…`
+  collapse into one group so the value cells show the spread) **or by a chosen
+  key field's value** (e.g. inventory by `ItemID`), and projects the requested
+  value fields per group. Differing values within a group render as a collision
+  `⟨N: v1,v2,+M⟩` (ported from the Unity sister project's 29e-2 polish). Sorts
+  most-populous-first; caps at `MaxGroups`. `SnapshotStore.PivotAsync` fetches
+  only the key + value rows for the class then calls the engine; `Pivot*Async`
+  helpers list classes (with instance counts) and fields (with cardinality).
+
+- **C3 lite — key discovery.** `PivotKeyScorer` ranks numeric fields as group
+  keys by **type prior** (Byte/enum + int good, float/double poor), **name prior**
+  (id/index/type/slot/tag/… tokens), and **cardinality** (a key must actually
+  partition: `1 < distinct < instances`). `SuggestKey` auto-selects the best;
+  value-field interest reuses the calibrated `PropertyScoringTable.Score`. This
+  is the UE answer to `discrete`'s "user must guess the business key" pain.
+  (Top-level capture is all-numeric, so v1 keys are int/enum IDs; FName keys live
+  on array-element rows — a later array-pivot path.)
+
+- **C1 UI.** `ClassPivotViewModel` + `ClassPivotPanel` replace the Class Pivot
+  placeholder tab: snapshot picker, class picker (filter + most-populous-first),
+  a key-mode toggle (Identity / Field) with an auto-suggested key field, a field
+  grid (tick value fields; shows type / distinct / instances / **key score**),
+  and a results grid (Count / Key / Projected values). Selecting a class loads
+  fields, suggests the key, and pre-ticks the most interesting value fields.
+  Group → **Open in Live Walker** / **Copy Address** hands its representative
+  instance to CE. Wired into `MainWindowViewModel.Pivot`; refreshed on tab
+  activation. Like SPC, the projected-values column is a single rendered string
+  (collision-aware) to stay AOT-safe — no per-field dynamic bindings.
+
+- **Tests +22 → 1219 C# (1620 total: 1219 C# + 370 dll + 31 utf8).**
+  `PivotEngineTests` (field/identity grouping, missing-key bucket, truncation,
+  the `⟨N: …⟩` collision render), `PivotKeyScorerTests` (int>float, partitioning
+  key > unique id, value interest via the scoring table), `PivotStoreTests`
+  (class/field listing + field/identity pivots end-to-end), and
+  `ClassPivotViewModelTests` (load → key suggestion → run, via a `PendingLoad`
+  test seam on the selection-triggered async loads). Full clean Native AOT
+  publish is clean. **Remaining experimental: C2 (find-by-value locator),
+  C4 (DataTable-native pivot), C5 (right-click handoff from other panels),
+  array-element pivot, A3c (CE .CT export).**
+
+-----
+
 ## 2026-06-02 — Experimental: SPC Query (Phase B) + opt-in checkbox lock (build 824)
 
 Second tranche of the experimental Snapshot / SPC / Pivot feature. **Phase B (SPC

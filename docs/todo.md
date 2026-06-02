@@ -20,15 +20,18 @@ behind an opt-in experimental flag. **Design of record:
 it first (concept mapping, UE-vs-Unity advantages, SQLite schema, identity-key
 join, array inner-key handling, the Q#4 key-field improvement).
 
-> **NEXT SESSION → Phase C (Class Pivot).** Phase 0 + all of Phase A + **Phase B
-> (SPC Query)** shipped (builds 805-824; capture / per-game DB / quota / diff /
-> struct-array / SPC directional query). The SPC engine (`SpcQueryBuilder` +
-> `SnapshotStore.SpcQueryAsync`) and UI (`SpcQueryViewModel` + `SpcPanel`) are
-> live; SPC is multi-session, type-agnostic directional, Strict/Loose/In-session
-> join. Phase C is the value-keyed Class Pivot (identity-first mode + key
-> discovery via `PropertyScoringTable`) — pure C# over the same SQLite, no DLL.
-> See the Phase C block below + design §"Phase C". Also still open: **A3c** (CE
-> .CT freeze-export from a diff/SPC hit — Copy Address covers the manual path).
+> **NEXT SESSION → Phase C polish (C2/C4/C5) + array pivot.** Phase 0 + Phase A +
+> Phase B (SPC) + **Phase C C1 core (Class Pivot)** shipped (builds 805-830). The
+> pivot engine (`PivotEngine` + `PivotKeyScorer` + `SnapshotStore.Pivot*Async`)
+> and UI (`ClassPivotViewModel` + `ClassPivotPanel`) are live: group a class by
+> identity or a key field, project value fields, collision render `⟨N: …⟩`, key
+> auto-suggested. Remaining Phase C: **C2** (find-by-value locator → pivot
+> handoff), **C4** (DataTable-native zero-config pivot), **C5** (right-click
+> "Pivot this" from LiveWalker / PropertySearch / InterestingProps), and
+> **array-element pivot** (inner-key join on captured struct arrays — the cargo
+> case). Also still open: **A3c** (CE .CT freeze-export from a diff/SPC/pivot
+> hit — Copy Address covers the manual path). See the Phase C block + design
+> §"Phase C".
 
 Locked decisions: SQLite (raw ADO.NET, no EF Core) · all three features ·
 persisted gating · **multi-session first-class** for SPC/Pivot · type-agnostic
@@ -80,13 +83,22 @@ Build in order; each phase gates the next:
     Exact/Range/Delta predicates; per-snapshot value columns (deferred to keep the
     grid AOT-safe). Live multi-session verify = user.
 - **Phase C — Class Pivot** (value-keyed, cross-session safe). Pure C# (+opt DLL).
-  - C1 PivotEngine (identity mode + collision render). *Effort M · med.*
+  - ~~C1 PivotEngine (identity mode + collision render).~~ ✅ **SHIPPED 2026-06-02
+    (build 830).** `PivotEngine` (pure: identity/field grouping, per-group value
+    projection, `⟨N: …⟩` collision) + `SnapshotStore.PivotAsync` /
+    `ListPivotClasses` / `ListPivotFields`; `ClassPivotViewModel` + `ClassPivotPanel`
+    replace the placeholder. +13 engine/store tests + 4 VM tests.
+  - ~~C3 Key discovery — reuse `PropertyScoringTable` + UE type/name priors.~~ ✅
+    **SHIPPED (build 830, C3-lite).** `PivotKeyScorer` (type + name + cardinality
+    key prior; `SuggestKey`; value interest via `PropertyScoringTable`). +5 tests.
+    **v2 follow-ups:** Jaccard stability + greedy compound key + class shortlist /
+    volatility ranking (the heavier 29i-3 scorer) still open.
   - C2 Find-by-value locator + handoff (closes the loop). *Effort M · med.*
-  - C3 Key discovery — reuse `PropertyScoringTable` + UE type/name priors.
-    *Effort M-L · med.*
   - C4 DataTable-native pivot (RowName is the key, zero-config). *Effort S · low.*
   - C5 Right-click handoff from LiveWalker / PropertySearch / InterestingProps.
     *Effort S · low.*
+  - C6 Array-element pivot (inner-key join on captured struct arrays — cargo
+    case). *Effort M · med.*
 
 New work concentrates in A1 (DLL capture, mostly reuse) + C3 (UE-ify scorer);
 B/C are largely portable `discrete` C# + indexed SQL.

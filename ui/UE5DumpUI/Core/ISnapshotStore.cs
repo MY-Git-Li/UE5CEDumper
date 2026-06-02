@@ -61,6 +61,22 @@ public interface ISnapshotStore
     /// docs/experimental-snapshot-spc-pivot.md §"Phase B".</summary>
     Task<SpcResult> SpcQueryAsync(SpcQuery query, CancellationToken ct = default);
 
+    /// <summary>Classes present in a snapshot with their live-instance counts,
+    /// most-populous first — populates the Class Pivot class picker.</summary>
+    Task<IReadOnlyList<PivotClassInfo>> ListPivotClassesAsync(
+        long snapshotId, CancellationToken ct = default);
+
+    /// <summary>Numeric fields of one class in a snapshot with cardinality stats
+    /// (distinct values / instance count) — drives key ranking + value picks.</summary>
+    Task<IReadOnlyList<PivotFieldInfo>> ListPivotFieldsAsync(
+        long snapshotId, string className, CancellationToken ct = default);
+
+    /// <summary>Group a class's instances by identity or a key field and project
+    /// the requested value fields per group (collisions rendered ⟨N: …⟩). Pure
+    /// SQL fetch + <see cref="Services.PivotEngine"/>. See
+    /// docs/experimental-snapshot-spc-pivot.md §"Phase C".</summary>
+    Task<PivotResult> PivotAsync(PivotQuery query, CancellationToken ct = default);
+
     /// <summary>Drop oldest snapshots (FIFO) from the active game's DB until it
     /// fits <paramref name="quotaBytes"/>, then VACUUM to reclaim the space. The
     /// newest snapshot is always kept (even if it alone exceeds the quota).

@@ -542,6 +542,107 @@ SELECT COUNT(*) FROM fields a WHERE a.snapshot_id=$in AND a.array_field IS NULL 
         return result;
     }
 
+    public async Task<IReadOnlyList<PivotClassInfo>> ListPivotClassesAsync(
+        long snapshotId, CancellationToken ct = default)
+    {
+        var list = new List<PivotClassInfo>();
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT class_fqn, COUNT(DISTINCT gobjects_index) AS instances
+            FROM fields WHERE snapshot_id=$s AND array_field IS NULL
+            GROUP BY class_fqn ORDER BY instances DESC, class_fqn;
+            """;
+        cmd.Parameters.AddWithValue("$s", snapshotId);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            list.Add(new PivotClassInfo
+            {
+                ClassName     = r.IsDBNull(0) ? "" : r.GetString(0),
+                InstanceCount = r.IsDBNull(1) ? 0  : r.GetInt32(1),
+            });
+        return list;
+    }
+
+    public async Task<IReadOnlyList<PivotFieldInfo>> ListPivotFieldsAsync(
+        long snapshotId, string className, CancellationToken ct = default)
+    {
+        var list = new List<PivotFieldInfo>();
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT prop_name, declared_type,
+                   COUNT(DISTINCT hex) AS distinctVals, COUNT(*) AS instances
+            FROM fields WHERE snapshot_id=$s AND class_fqn=$c AND array_field IS NULL
+            GROUP BY prop_name, declared_type ORDER BY prop_name;
+            """;
+        cmd.Parameters.AddWithValue("$s", snapshotId);
+        cmd.Parameters.AddWithValue("$c", className);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            list.Add(new PivotFieldInfo
+            {
+                Name          = r.IsDBNull(0) ? "" : r.GetString(0),
+                DeclaredType  = r.IsDBNull(1) ? "" : r.GetString(1),
+                DistinctCount = r.IsDBNull(2) ? 0  : r.GetInt32(2),
+                InstanceCount = r.IsDBNull(3) ? 0  : r.GetInt32(3),
+            });
+        return list;
+    }
+
+    public async Task<PivotResult> PivotAsync(PivotQuery query, CancellationToken ct = default)
+    {
+        // Fetch only the rows the engine needs: the key field (Field mode) + the
+        // value fields, for this class. Prop names come from our own field list
+        // (DB-sourced identifiers) but are still parameterised defensively.
+        var props = new List<string>();
+        if (query.KeyMode == PivotKeyMode.Field && !string.IsNullOrEmpty(query.KeyField))
+            props.Add(query.KeyField);
+        foreach (var v in query.ValueFields)
+            if (!props.Contains(v)) props.Add(v);
+
+        var rows = new List<PivotInputRow>();
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        var sql = new StringBuilder("""
+            SELECT gobjects_index, norm_path, obj_addr, prop_name, prop_offset, declared_type, hex
+            FROM fields WHERE snapshot_id=$s AND class_fqn=$c AND array_field IS NULL
+            """);
+        cmd.Parameters.AddWithValue("$s", query.SnapshotId);
+        cmd.Parameters.AddWithValue("$c", query.ClassName);
+        if (props.Count > 0)
+        {
+            sql.Append(" AND prop_name IN (");
+            for (int i = 0; i < props.Count; i++)
+            {
+                if (i > 0) sql.Append(',');
+                var name = "$p" + i;
+                sql.Append(name);
+                cmd.Parameters.AddWithValue(name, props[i]);
+            }
+            sql.Append(')');
+        }
+        sql.Append(" ORDER BY gobjects_index;");
+        cmd.CommandText = sql.ToString();
+
+        await using (var r = await cmd.ExecuteReaderAsync(ct))
+        {
+            while (await r.ReadAsync(ct))
+                rows.Add(new PivotInputRow
+                {
+                    ObjectIndex  = r.IsDBNull(0) ? -1 : r.GetInt64(0),
+                    NormPath     = r.IsDBNull(1) ? "" : r.GetString(1),
+                    ObjAddr      = r.IsDBNull(2) ? "" : r.GetString(2),
+                    PropName     = r.IsDBNull(3) ? "" : r.GetString(3),
+                    PropOffset   = r.IsDBNull(4) ? 0  : r.GetInt32(4),
+                    DeclaredType = r.IsDBNull(5) ? "" : r.GetString(5),
+                    Hex          = r.IsDBNull(6) ? "" : r.GetString(6),
+                });
+        }
+        return PivotEngine.Build(rows, query);
+    }
+
     public async Task DeleteSnapshotAsync(long snapshotId, CancellationToken ct = default)
     {
         await using var conn = await OpenAsync(ct);

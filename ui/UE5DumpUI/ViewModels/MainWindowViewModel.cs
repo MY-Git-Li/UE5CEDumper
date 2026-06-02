@@ -145,6 +145,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     /// <summary>Experimental SPC Query tab — shares the snapshot store with
     /// <see cref="Snapshot"/>. Null when no store was injected.</summary>
     public SpcQueryViewModel? Spc { get; }
+    /// <summary>Experimental Class Pivot tab — shares the snapshot store.
+    /// Null when no store was injected.</summary>
+    public ClassPivotViewModel? Pivot { get; }
 
     partial void OnSelectedAddressFormatIndexChanged(int value)
     {
@@ -266,6 +269,21 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                     _log.Error($"SPC NavigateToInstance handler error: {addr}", ex);
                 }
             };
+
+            Pivot = new ClassPivotViewModel(snapshotStore, log, platform);
+            // Pivot group -> open its representative object in Live Walker.
+            Pivot.NavigateToInstance += async (addr) =>
+            {
+                try
+                {
+                    SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                    await LiveWalker.NavigateToAddressCommand.ExecuteAsync(addr);
+                }
+                catch (Exception ex)
+                {
+                    _log.Error($"Pivot NavigateToInstance handler error: {addr}", ex);
+                }
+            };
         }
 
         if (proxyDeploy != null)
@@ -286,6 +304,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 InstanceFinder.SetEngineState(state);
                 Snapshot?.SetEngineState(state);
                 Spc?.SetEngineState(state);
+                Pivot?.SetEngineState(state);
 
                 _ = LiveWalker.CheckAobMakerAsync();
 
@@ -1045,6 +1064,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         InstanceFinder.SetEngineState(state);
         Snapshot?.SetEngineState(state);
         Spc?.SetEngineState(state);
+        Pivot?.SetEngineState(state);
 
         // Fire-and-forget: check AOBMaker availability for Live Walker
         _ = LiveWalker.CheckAobMakerAsync();

@@ -286,6 +286,26 @@
     <sys:String x:Key="str.Spc.Res.Type">Type</sys:String>
     <sys:String x:Key="str.Spc.Res.Sequence">Value sequence</sys:String>
 
+    <!-- Class Pivot (experimental) -->
+    <sys:String x:Key="str.Pivot.Intro">Group one class's instances by a key field's value (e.g. inventory by ItemID) or by object identity, and project the value fields per group. The best key field is auto-suggested (type + name + cardinality). Differing values inside a group render as a collision ⟨N: v1,v2,+M⟩. Snapshot capture is all-numeric, so keys are int/enum IDs.</sys:String>
+    <sys:String x:Key="str.Pivot.Snapshot">Snapshot:</sys:String>
+    <sys:String x:Key="str.Pivot.ClassFilter">Class:</sys:String>
+    <sys:String x:Key="str.Pivot.Run">Run Pivot</sys:String>
+    <sys:String x:Key="str.Pivot.OpenWalker">Open in Live Walker</sys:String>
+    <sys:String x:Key="str.Pivot.CopyAddr">Copy Address</sys:String>
+    <sys:String x:Key="str.Pivot.GroupBy">Group by:</sys:String>
+    <sys:String x:Key="str.Pivot.KeyField">Key field:</sys:String>
+    <sys:String x:Key="str.Pivot.Col.Project">Value</sys:String>
+    <sys:String x:Key="str.Pivot.Col.Field">Field</sys:String>
+    <sys:String x:Key="str.Pivot.Col.Type">Type</sys:String>
+    <sys:String x:Key="str.Pivot.Col.Distinct">Distinct</sys:String>
+    <sys:String x:Key="str.Pivot.Col.Insts">Instances</sys:String>
+    <sys:String x:Key="str.Pivot.Col.KeyScore">Key score</sys:String>
+    <sys:String x:Key="str.Pivot.ResultsHint">Tick the value fields above to project them. Identity mode groups spawn-normalised siblings (BP_Enemy_C_0/_1/…) together. Select a group → Open in Live Walker / Copy Address hands its representative instance to CE.</sys:String>
+    <sys:String x:Key="str.Pivot.Res.Count">Count</sys:String>
+    <sys:String x:Key="str.Pivot.Res.Key">Key</sys:String>
+    <sys:String x:Key="str.Pivot.Res.Values">Projected values</sys:String>
+
     <!-- Proxy Deploy -->
     <sys:String x:Key="str.ProxyDeploy.ProxyType">Proxy DLL:</sys:String>
     <sys:String x:Key="str.ProxyDeploy.Type.Version">version.dll</sys:String>

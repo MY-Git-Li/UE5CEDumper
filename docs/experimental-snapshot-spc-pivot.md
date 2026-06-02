@@ -253,6 +253,14 @@ the repo's test culture).
 Group a class's instances by a key field's value, project value fields across
 snapshots. Pure C# over SQLite — **zero DLL change** (except optional C4).
 
+> **Status (build 830): C1 + C3-lite SHIPPED.** `PivotEngine` (identity/field
+> grouping + `⟨N: …⟩` collision render) + `PivotKeyScorer` (type/name/cardinality
+> key prior, `SuggestKey`, value interest via `PropertyScoringTable`) +
+> `SnapshotStore.PivotAsync`/`ListPivotClasses`/`ListPivotFields` +
+> `ClassPivotViewModel`/`ClassPivotPanel`. Remaining: C2 (find-by-value), C4
+> (DataTable-native), C5 (right-click handoff), C6 (array-element pivot), and the
+> heavier C3 scorer (Jaccard stability / compound key / volatility ranking).
+
 ### C — How UE dissolves the key-field problem (the `discrete` pain, your Q#4)
 `discrete`'s root cause: anonymous Unity instances *force* a guessed business
 key. UE's six-layer improvement:
