@@ -11,6 +11,71 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-06-02 — Experimental: Snapshot capture / diff (Phase 0 + A, builds 805-823)
+
+First tranche of the experimental Snapshot / SPC / Pivot feature ported in
+concept from the Unity sister project `discrete`. Gated behind an opt-in flag so
+the default UI is unchanged. Design of record:
+[experimental-snapshot-spc-pivot.md](experimental-snapshot-spc-pivot.md).
+**The full capture → quota → compare loop now works end-to-end; A3 diff was
+live-verified by the user (caught `DOLLFriendGameCharacter.HP 99→120`).**
+
+- **Phase 0 — gating (build 805, `5b8a47d`).** The System-tab `bbfox` credit
+  becomes a checkbox; checked → three experimental tabs appear (tooltip "Enable
+  advanced experimental features"). `ExperimentalGate`/`IExperimentalGate`
+  persists the opt-in to `%LOCALAPPDATA%\UE5CEDumper\experimental.json` (source-
+  gen JSON; shared between the checkbox VM and tab-visibility VM via `Changed`).
+  Also fixed an unrelated `build.ps1 -Target Test` crash from a stray empty
+  `--no-restore` arg passed to the MTP runner (`4292004`).
+
+- **A1a — DLL scalar capture (build 808, `fe8b5c2`).** Stateless cursor-paginated
+  `begin_snapshot` / `snapshot_chunk` pipe commands. `Aura::CaptureSnapshotChunk`
+  walks GObjects (game-only via `IsEnginePackage`), reuses cached
+  `Ubel::WalkClassEx`, emits per-object identity (index/addr/name/class/
+  outer_class/path) + every numeric scalar UPROPERTY (via the pure
+  `ValueScan::SelectSnapshotNumericFields`, keyed on the existing NumericNoByte/
+  NumericAll member sets).
+
+- **A2 — SQLite store + capture UI (builds 809-813, `0747065` + `e832b4c` +
+  `0da1248`).** `Microsoft.Data.Sqlite` raw ADO.NET (no EF Core). **Native AOT
+  publish is clean and bundles `e_sqlite3.dll`** — the design's headline risk,
+  resolved. `SnapshotStore` (denormalised `fields` table, strict/loose/in-session
+  join indexes, streaming chunk writes); `SnapshotViewModel` orchestrates capture
+  (begin → loop chunks → store → finalise, progress/cancel); `SnapshotPanel`.
+  Pure helpers `SnapshotIdentity.NormalizePath` (leaf-only FName-suffix strip) +
+  `SnapshotNumeric.TryFromHex`. **Per-game DB** `snapshots.<pe_hash>.db` — no
+  cross-game mixing / unbounded growth / shared corruption blast radius.
+
+- **A2c — quota + usage (build 815, `ab874a4`).** Per-game size quota with FIFO
+  auto-eviction on capture (`EnforceQuotaAsync` drops oldest until ≤ quota then
+  VACUUMs; newest always kept) + `GetUsageAsync` + per-snapshot `EstBytes`. Quota
+  persisted in experimental.json; UI = quota dropdown + used/quota bar + Est.Size.
+
+- **A3 — diff (build 817, `aeba44d`) + polish (build 820, `0731d4e`).** Both
+  snapshots live in one per-game DB, so the diff is a single indexed SQL join on
+  (class, GObjects index, property) WHERE bytes differ → changed rows (rendered
+  via `SnapshotNumeric.Render`, direction ▲/▼) + Added/Removed churn counts. UI:
+  Old/New pickers (default to the two newest), client-side **live**
+  Class/Field/Object/Direction filters, Copy Address (CE handoff), Open in Live
+  Walker.
+
+- **A1b — struct-array inner-key capture (build 823, `ba7c370`).** The cargo/
+  inventory case: `TArray<FStruct>` element inner numeric fields keyed by a
+  reorder-immune inner key (`ValueScan::SelectArrayInnerKey`: keyworded-FName >
+  FName > int > none). `Aura::CaptureSnapshotChunk` resolves the inner
+  UScriptStruct (`ArrayProperty::Inner → StructProperty::Struct`), walks it, reads
+  the `TArray`, emits ≤ `array_cap` elements with rendered inner key + numeric
+  inner hex. Pipe `arrays` field; C# array-element rows; scalar diff excludes them
+  (array diffing is Pivot). **Gotcha:** `FieldInfo`/`ClassInfo` are GLOBAL scope
+  in Ubel.h, not `Ubel::` (C2039).
+
+**Tests across the tranche**: 1485 → **1569** (1168 C# + 370 dll_helpers + 31
+utf8). Every phase AOT-publish-clean. **Remaining (next sessions):** Phase B
+(SPC multi-session directional — the energy-bar case), Phase C (Class Pivot,
+incl. the array inner-key join + object/primitive arrays), A3c (CE .CT export).
+
+-----
+
 ## 2026-05-29 — Value Search: with-byte variant `NumericAll` + result-volume warning (build 796-797)
 
 Follow-up to NumericNoByte (build 794-795, todo #0d). Adds

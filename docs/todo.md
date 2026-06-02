@@ -12,13 +12,21 @@ Move items to [dev-log.md](dev-log.md) once they ship; update
 
 -----
 
-## 🧪 EXPERIMENTAL: Snapshot / SPC Query / Class Pivot (planned 2026-06-02)
+## 🧪 EXPERIMENTAL: Snapshot / SPC Query / Class Pivot (Phase A done 2026-06-02)
 
 Port of three analysis features from the Unity sister project `discrete`, gated
 behind an opt-in experimental flag. **Design of record:
 [experimental-snapshot-spc-pivot.md](experimental-snapshot-spc-pivot.md)** — read
 it first (concept mapping, UE-vs-Unity advantages, SQLite schema, identity-key
 join, array inner-key handling, the Q#4 key-field improvement).
+
+> **NEXT SESSION → Phase B (SPC Query).** Phase 0 + all of Phase A shipped
+> (builds 805-823; capture / per-game DB / quota / diff / struct-array, A3 diff
+> live-verified). The data layer is ready for SPC: identity columns (norm_path /
+> outer_chain / gobjects_index), `numeric_value` for Increased/Decreased, and the
+> strict/loose/in-session indexes are all in `SnapshotStore`. Phase B is the
+> energy-bar multi-session directional case — pure C# over the existing SQLite,
+> no DLL work. See the Phase B block below + design §"Phase B".
 
 Locked decisions: SQLite (raw ADO.NET, no EF Core) · all three features ·
 persisted gating · **multi-session first-class** for SPC/Pivot · type-agnostic
