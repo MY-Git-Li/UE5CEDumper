@@ -42,10 +42,12 @@ Build in order; each phase gates the next:
   - ~~A1a DLL scalar numeric capture + `begin_snapshot`/`snapshot_chunk`.~~ ✅
     **SHIPPED `fe8b5c2` (build 808)** — `Aura::CaptureSnapshotChunk` +
     `ValueScan::SelectSnapshotNumericFields` (dll_helpers 349→365).
-  - **A1b DLL array element capture (inner-key)** — struct-array inner numeric
-    fields + inner-key (FName/int/enum) + object-array element identity, reusing
-    `Aura` container walk (`ContainerCacheEntry`/`intraOffset`). *Effort M · med ·
-    DLL.* ⏳ NEXT. Has a live test harness now (the A2 capture UI).
+  - ~~A1b DLL array element capture (inner-key).~~ ✅ **SHIPPED `ba7c370`
+    (build 823).** Struct-array inner numeric fields keyed by a reorder-immune
+    inner key (`ValueScan::SelectArrayInnerKey` + `Aura` container reuse);
+    `arrays` wire field; C# parse + array-element rows; scalar diff excludes
+    them. +6 tests → 1569 green. **Follow-ups:** object/primitive arrays + the
+    Pivot inner-key join (Phase C). Live struct-array verify = user.
   - ~~A2 C# SQLite store + models + capture UI.~~ ✅ **SHIPPED `0747065` (A2a
     data layer) + `e832b4c` (A2b capture UI), builds 809-811.** Native AOT
     publish verified clean + bundles `e_sqlite3.dll`. +50 tests → 1535 green.
