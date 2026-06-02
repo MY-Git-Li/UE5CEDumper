@@ -348,6 +348,98 @@ public sealed class SnapshotStore : ISnapshotStore
         catch { return 0; }
     }
 
+    public async Task<SnapshotDiffResult> DiffSnapshotsAsync(
+        long idA, long idB, SnapshotDiffFilter filter, CancellationToken ct = default)
+    {
+        var result = new SnapshotDiffResult();
+        int max = filter.MaxRows > 0 ? filter.MaxRows : 50000;
+
+        await using var conn = await OpenAsync(ct);
+
+        // --- Changed: same (class, index, prop), different bytes ---
+        await using (var cmd = conn.CreateCommand())
+        {
+            var sql = new StringBuilder(@"
+SELECT a.class_fqn, b.norm_path, a.gobjects_index, a.prop_name, a.prop_offset, a.declared_type,
+       b.obj_addr, a.hex, b.hex, a.numeric_value, b.numeric_value
+FROM fields a JOIN fields b
+  ON a.snapshot_id=$A AND b.snapshot_id=$B
+  AND a.class_fqn=b.class_fqn AND a.gobjects_index=b.gobjects_index AND a.prop_name=b.prop_name
+WHERE a.hex <> b.hex");
+            cmd.Parameters.AddWithValue("$A", idA);
+            cmd.Parameters.AddWithValue("$B", idB);
+            if (!string.IsNullOrEmpty(filter.ClassContains))
+            {
+                sql.Append(" AND a.class_fqn LIKE $cls");
+                cmd.Parameters.AddWithValue("$cls", $"%{filter.ClassContains}%");
+            }
+            if (!string.IsNullOrEmpty(filter.PropContains))
+            {
+                sql.Append(" AND a.prop_name LIKE $prop");
+                cmd.Parameters.AddWithValue("$prop", $"%{filter.PropContains}%");
+            }
+            if (filter.Direction == SnapshotDiffDirection.Up)
+                sql.Append(" AND b.numeric_value > a.numeric_value");
+            else if (filter.Direction == SnapshotDiffDirection.Down)
+                sql.Append(" AND b.numeric_value < a.numeric_value");
+            sql.Append(" LIMIT $lim;");
+            cmd.Parameters.AddWithValue("$lim", max + 1);  // +1 to detect truncation
+            cmd.CommandText = sql.ToString();
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                if (result.Changed.Count >= max) { result.Truncated = true; break; }
+                string type   = r.IsDBNull(5) ? "" : r.GetString(5);
+                string oldHex = r.IsDBNull(7) ? "" : r.GetString(7);
+                string newHex = r.IsDBNull(8) ? "" : r.GetString(8);
+                double? oldNum = r.IsDBNull(9)  ? null : r.GetDouble(9);
+                double? newNum = r.IsDBNull(10) ? null : r.GetDouble(10);
+                var dir = (oldNum.HasValue && newNum.HasValue)
+                    ? (newNum > oldNum ? SnapshotDiffDirection.Up
+                       : newNum < oldNum ? SnapshotDiffDirection.Down
+                       : SnapshotDiffDirection.None)
+                    : SnapshotDiffDirection.None;
+                result.Changed.Add(new SnapshotDiffRow
+                {
+                    ClassName    = r.IsDBNull(0) ? "" : r.GetString(0),
+                    NormPath     = r.IsDBNull(1) ? "" : r.GetString(1),
+                    ObjectIndex  = r.IsDBNull(2) ? -1 : r.GetInt32(2),
+                    PropName     = r.IsDBNull(3) ? "" : r.GetString(3),
+                    PropOffset   = r.IsDBNull(4) ? 0  : r.GetInt32(4),
+                    DeclaredType = type,
+                    ObjAddr      = r.IsDBNull(6) ? "" : r.GetString(6),
+                    OldValue     = SnapshotNumeric.Render(type, oldHex),
+                    NewValue     = SnapshotNumeric.Render(type, newHex),
+                    Direction    = dir,
+                });
+            }
+        }
+
+        // --- Added / Removed field churn (counts only) ---
+        if (filter.IncludeAddedRemoved)
+        {
+            result.RemovedCount = await CountChurnAsync(conn, idA, idB, ct);  // in A, not B
+            result.AddedCount   = await CountChurnAsync(conn, idB, idA, ct);  // in B, not A
+        }
+        return result;
+    }
+
+    // Count fields present in `inSnap` whose (class, index, prop) key has no
+    // match in `notInSnap` (uses the ix_insession index for the anti-join).
+    private static async Task<int> CountChurnAsync(
+        SqliteConnection conn, long inSnap, long notInSnap, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+SELECT COUNT(*) FROM fields a WHERE a.snapshot_id=$in AND NOT EXISTS (
+  SELECT 1 FROM fields b WHERE b.snapshot_id=$notin
+    AND b.class_fqn=a.class_fqn AND b.gobjects_index=a.gobjects_index AND b.prop_name=a.prop_name);";
+        cmd.Parameters.AddWithValue("$in", inSnap);
+        cmd.Parameters.AddWithValue("$notin", notInSnap);
+        return (int)(long)(await cmd.ExecuteScalarAsync(ct) ?? 0L);
+    }
+
     public async Task DeleteSnapshotAsync(long snapshotId, CancellationToken ct = default)
     {
         await using var conn = await OpenAsync(ct);

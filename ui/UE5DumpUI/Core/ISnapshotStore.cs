@@ -45,6 +45,14 @@ public interface ISnapshotStore
     /// <summary>Active game's DB file size + all-games total + snapshot count.</summary>
     Task<SnapshotUsage> GetUsageAsync(CancellationToken ct = default);
 
+    /// <summary>Diff snapshot <paramref name="idA"/> (old) against
+    /// <paramref name="idB"/> (new): fields whose value changed, joined by
+    /// (class, GObjects index, property). Both must be in the active game's DB
+    /// (in-session identity). Returns changed rows (filtered/capped) plus
+    /// Added/Removed churn counts.</summary>
+    Task<SnapshotDiffResult> DiffSnapshotsAsync(
+        long idA, long idB, SnapshotDiffFilter filter, CancellationToken ct = default);
+
     /// <summary>Drop oldest snapshots (FIFO) from the active game's DB until it
     /// fits <paramref name="quotaBytes"/>, then VACUUM to reclaim the space. The
     /// newest snapshot is always kept (even if it alone exceeds the quota).

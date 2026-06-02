@@ -244,6 +244,22 @@
     <sys:String x:Key="str.Snapshot.Col.Fields">Fields</sys:String>
     <sys:String x:Key="str.Snapshot.Col.Scope">Scope</sys:String>
     <sys:String x:Key="str.Snapshot.Col.Ue">UE</sys:String>
+    <!-- Snapshot diff -->
+    <sys:String x:Key="str.Snapshot.Diff.Header">Compare</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Old">Old:</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.New">New:</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Run">Run Diff</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.ClassFilter">Class:</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.PropFilter">Field:</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Dir">Change:</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.CopyAddr">Copy Address</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Hint">Diff joins fields by object identity within a session (same game launch). Old &amp; New should be from the same play session.</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Col.Change">Δ</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Col.Class">Class</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Col.Object">Object</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Col.Field">Field</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Col.Old">Old</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Col.New">New</sys:String>
 
     <!-- Proxy Deploy -->
     <sys:String x:Key="str.ProxyDeploy.ProxyType">Proxy DLL:</sys:String>

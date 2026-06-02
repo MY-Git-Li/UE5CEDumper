@@ -24,6 +24,21 @@ public class SnapshotNumericTests
     }
 
     [Theory]
+    [InlineData("FloatProperty",  "0000C842", "100")]            // 100.0 -> "100"
+    [InlineData("FloatProperty",  "0000803F", "1")]              // 1.0 -> "1"
+    [InlineData("DoubleProperty", "0000000000000440", "2.5")]
+    [InlineData("IntProperty",    "1E000000", "30")]
+    [InlineData("IntProperty",    "FFFFFFFF", "-1")]
+    [InlineData("UInt32Property", "FFFFFFFF", "4294967295")]
+    [InlineData("Int64Property",  "FFFFFFFFFFFFFFFF", "-1")]      // exact, no double loss
+    [InlineData("ByteProperty",   "FF", "255")]
+    [InlineData("StructProperty", "DEADBEEF", "DEADBEEF")]       // unknown -> raw hex
+    public void Render_ProducesDisplayString(string type, string hex, string expected)
+    {
+        Assert.Equal(expected, SnapshotNumeric.Render(type, hex));
+    }
+
+    [Theory]
     [InlineData("BoolProperty", "01")]      // not a captured numeric type
     [InlineData("StructProperty", "00000000")]
     [InlineData("IntProperty", "")]          // empty hex

@@ -115,4 +115,45 @@ public class SnapshotViewModelTests : IDisposable
         vm.SetEngineState(new EngineState { PeHash = "X" });
         Assert.True(vm.CanCapture);
     }
+
+    private static SnapshotCapturedObject Obj(int idx, string field, string type, string hex)
+    {
+        var o = new SnapshotCapturedObject
+        {
+            Index = idx, Addr = $"0x{idx:X}", Name = $"O_{idx}",
+            ClassName = "C", OuterClassName = "W", Path = $"/Game/M.M:L.O_{idx}",
+        };
+        o.Fields.Add(new SnapshotCapturedField { Name = field, Type = type, Hex = hex });
+        return o;
+    }
+
+    [Fact]
+    public async Task RunDiff_PopulatesChangedRows_AndDefaultsPickers()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _store.SetActiveGame("G");
+        long a = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "a" }, ct);
+        await _store.WriteChunkAsync(a, new[] { Obj(1, "HP", "IntProperty", "64000000") }, ct);  // 100
+        await _store.FinalizeSnapshotAsync(a, 1, 1, ct);
+        long b = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "b" }, ct);
+        await _store.WriteChunkAsync(b, new[] { Obj(1, "HP", "IntProperty", "5A000000") }, ct);  // 90
+        await _store.FinalizeSnapshotAsync(b, 1, 1, ct);
+
+        // Store already scoped to "G" above; a single awaited refresh avoids the
+        // SetEngineState fire-and-forget refresh racing this one.
+        var vm = new SnapshotViewModel(new CaptureStub(), _store, new MockLoggingService());
+        await vm.RefreshCommand.ExecuteAsync(null);
+
+        // Default pickers: A = older, B = newer.
+        Assert.Equal(a, vm.DiffA!.Id);
+        Assert.Equal(b, vm.DiffB!.Id);
+        Assert.True(vm.CanRunDiff);
+
+        await vm.RunDiffCommand.ExecuteAsync(null);
+        var row = Assert.Single(vm.DiffRows);
+        Assert.Equal("HP", row.PropName);
+        Assert.Equal("100", row.OldValue);
+        Assert.Equal("90", row.NewValue);
+        Assert.Equal(SnapshotDiffDirection.Down, row.Direction);
+    }
 }

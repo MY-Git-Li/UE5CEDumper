@@ -163,6 +163,83 @@ public class SnapshotStoreTests : IDisposable
         Assert.EndsWith("snapshots.evilx00.db", _store.DatabasePath);
     }
 
+    // Two snapshots sharing objects 1 & 2; obj 3 only in A, obj 4 only in B.
+    // Health 100->90 (down), Mana 5->8 (up), Ammo 30->30 (unchanged).
+    private async Task<(long a, long b)> SeedDiffPairAsync(CancellationToken ct)
+    {
+        long a = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "a" }, ct);
+        await _store.WriteChunkAsync(a, new[]
+        {
+            MakeObject(1, ("Health", "FloatProperty", "0000C842")),                                  // 100.0
+            MakeObject(2, ("Ammo", "IntProperty", "1E000000"), ("Mana", "IntProperty", "05000000")), // 30, 5
+            MakeObject(3, ("Gold", "IntProperty", "E7030000")),                                       // 999 (A only)
+        }, ct);
+        await _store.FinalizeSnapshotAsync(a, 3, 4, ct);
+
+        long b = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "b" }, ct);
+        await _store.WriteChunkAsync(b, new[]
+        {
+            MakeObject(1, ("Health", "FloatProperty", "0000B442")),                                  // 90.0 (down)
+            MakeObject(2, ("Ammo", "IntProperty", "1E000000"), ("Mana", "IntProperty", "08000000")), // 30 same, 8 up
+            MakeObject(4, ("Score", "IntProperty", "01000000")),                                     // B only
+        }, ct);
+        await _store.FinalizeSnapshotAsync(b, 3, 4, ct);
+        return (a, b);
+    }
+
+    [Fact]
+    public async Task DiffSnapshots_FindsChangedValues_CountsChurn()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (a, b) = await SeedDiffPairAsync(ct);
+
+        var diff = await _store.DiffSnapshotsAsync(a, b, new SnapshotDiffFilter(), ct);
+
+        Assert.Equal(2, diff.Changed.Count);  // Health + Mana (Ammo unchanged)
+
+        var health = Assert.Single(diff.Changed, r => r.PropName == "Health");
+        Assert.Equal("100", health.OldValue);
+        Assert.Equal("90", health.NewValue);
+        Assert.Equal(SnapshotDiffDirection.Down, health.Direction);
+        Assert.Equal("BP_Player_C", health.ClassName);
+
+        var mana = Assert.Single(diff.Changed, r => r.PropName == "Mana");
+        Assert.Equal("5", mana.OldValue);
+        Assert.Equal("8", mana.NewValue);
+        Assert.Equal(SnapshotDiffDirection.Up, mana.Direction);
+
+        Assert.Equal(1, diff.RemovedCount);   // Gold (A only)
+        Assert.Equal(1, diff.AddedCount);     // Score (B only)
+        Assert.False(diff.Truncated);
+    }
+
+    [Fact]
+    public async Task DiffSnapshots_FiltersByDirection()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (a, b) = await SeedDiffPairAsync(ct);
+
+        var up = await _store.DiffSnapshotsAsync(a, b,
+            new SnapshotDiffFilter { Direction = SnapshotDiffDirection.Up }, ct);
+        Assert.Equal("Mana", Assert.Single(up.Changed).PropName);
+
+        var down = await _store.DiffSnapshotsAsync(a, b,
+            new SnapshotDiffFilter { Direction = SnapshotDiffDirection.Down }, ct);
+        Assert.Equal("Health", Assert.Single(down.Changed).PropName);
+    }
+
+    [Fact]
+    public async Task DiffSnapshots_FiltersByPropName()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (a, b) = await SeedDiffPairAsync(ct);
+
+        var diff = await _store.DiffSnapshotsAsync(a, b,
+            new SnapshotDiffFilter { PropContains = "heal", IncludeAddedRemoved = false }, ct);
+        Assert.Equal("Health", Assert.Single(diff.Changed).PropName);
+        Assert.Equal(0, diff.AddedCount);   // skipped
+    }
+
     [Fact]
     public async Task MultipleSnapshots_ListedNewestFirst()
     {

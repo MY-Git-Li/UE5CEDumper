@@ -45,4 +45,41 @@ public static class SnapshotNumeric
             default:               return false;
         }
     }
+
+    /// <summary>
+    /// Render a captured field's hex to a human-readable value for the diff
+    /// grid. Integers are rendered exactly (no double precision loss); floats
+    /// show up to 6 significant decimals. Falls back to the raw hex if the type
+    /// isn't a known numeric. Pure / AOT-safe.
+    /// </summary>
+    public static string Render(string declaredType, string hex)
+    {
+        if (string.IsNullOrEmpty(hex) || (hex.Length & 1) != 0) return hex ?? "";
+        int byteLen = hex.Length / 2;
+        if (byteLen == 0 || byteLen > 8) return hex;
+
+        Span<byte> b = stackalloc byte[8];
+        b.Clear();
+        for (int i = 0; i < byteLen; i++)
+        {
+            if (!byte.TryParse(hex.AsSpan(i * 2, 2), NumberStyles.HexNumber,
+                               CultureInfo.InvariantCulture, out b[i]))
+                return hex;
+        }
+
+        return declaredType switch
+        {
+            "FloatProperty"  when byteLen >= 4 => BitConverter.ToSingle(b).ToString("0.######", CultureInfo.InvariantCulture),
+            "DoubleProperty" when byteLen >= 8 => BitConverter.ToDouble(b).ToString("0.######", CultureInfo.InvariantCulture),
+            "IntProperty"    when byteLen >= 4 => BitConverter.ToInt32(b).ToString(CultureInfo.InvariantCulture),
+            "UInt32Property" when byteLen >= 4 => BitConverter.ToUInt32(b).ToString(CultureInfo.InvariantCulture),
+            "Int16Property"  when byteLen >= 2 => BitConverter.ToInt16(b).ToString(CultureInfo.InvariantCulture),
+            "UInt16Property" when byteLen >= 2 => BitConverter.ToUInt16(b).ToString(CultureInfo.InvariantCulture),
+            "Int64Property"  when byteLen >= 8 => BitConverter.ToInt64(b).ToString(CultureInfo.InvariantCulture),
+            "UInt64Property" when byteLen >= 8 => BitConverter.ToUInt64(b).ToString(CultureInfo.InvariantCulture),
+            "Int8Property"  => ((sbyte)b[0]).ToString(CultureInfo.InvariantCulture),
+            "ByteProperty"  => b[0].ToString(CultureInfo.InvariantCulture),
+            _               => hex,
+        };
+    }
 }

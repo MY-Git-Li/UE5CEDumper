@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
@@ -19,6 +20,7 @@ public partial class SnapshotViewModel : ViewModelBase
     private readonly ISnapshotStore _store;
     private readonly ILoggingService _log;
     private readonly IExperimentalGate? _gate;
+    private readonly IPlatformService? _platform;
     private EngineState? _engineState;
     private CancellationTokenSource? _cts;
 
@@ -34,6 +36,28 @@ public partial class SnapshotViewModel : ViewModelBase
     [ObservableProperty] private string _allGamesText = "";
     [ObservableProperty] private double _usageRatio;        // 0..1 for the bar
     [ObservableProperty] private bool   _showUsageBar = true;
+
+    // --- Diff (compare two snapshots) ---
+    [ObservableProperty] private SnapshotMeta? _diffA;      // old
+    [ObservableProperty] private SnapshotMeta? _diffB;      // new
+    [ObservableProperty] private string _diffClassFilter = "";
+    [ObservableProperty] private string _diffPropFilter = "";
+    [ObservableProperty] private string _selectedDiffDirection = "Any";
+    [ObservableProperty] private bool   _isDiffing;
+    [ObservableProperty] private string _diffStatusText = "";
+    [ObservableProperty] private SnapshotDiffRow? _selectedDiffRow;
+
+    public IReadOnlyList<string> DiffDirectionOptions { get; } =
+        new[] { "Any", "Increased", "Decreased" };
+
+    public ObservableCollection<SnapshotDiffRow> DiffRows { get; } = new();
+
+    /// <summary>Two distinct snapshots picked and not mid-diff.</summary>
+    public bool CanRunDiff => DiffA != null && DiffB != null && DiffA != DiffB && !IsDiffing;
+
+    partial void OnDiffAChanged(SnapshotMeta? value)   => OnPropertyChanged(nameof(CanRunDiff));
+    partial void OnDiffBChanged(SnapshotMeta? value)   => OnPropertyChanged(nameof(CanRunDiff));
+    partial void OnIsDiffingChanged(bool value)        => OnPropertyChanged(nameof(CanRunDiff));
 
     /// <summary>Capture scope: NumericNoByte (default, excludes 1-byte) or
     /// NumericAll (includes Int8/UInt8 — floods on small values).</summary>
@@ -52,12 +76,13 @@ public partial class SnapshotViewModel : ViewModelBase
     private long QuotaBytes => QuotaMb <= 0 ? 0 : (long)QuotaMb * 1024 * 1024;
 
     public SnapshotViewModel(IDumpService dump, ISnapshotStore store, ILoggingService log,
-                             IExperimentalGate? gate = null)
+                             IExperimentalGate? gate = null, IPlatformService? platform = null)
     {
         _dump = dump;
         _store = store;
         _log = log;
         _gate = gate;
+        _platform = platform;
         if (_gate != null) _selectedQuotaLabel = MbToLabel(_gate.SnapshotQuotaMb);
         // Don't list yet — the per-game DB isn't known until a game connects.
     }
@@ -109,6 +134,13 @@ public partial class SnapshotViewModel : ViewModelBase
             Snapshots.Clear();
             foreach (var s in list) Snapshots.Add(s);
             await UpdateUsageAsync();
+            // Convenience: default the diff pickers to the two newest snapshots
+            // (A = older, B = newer) so "Run Diff" is one click after capturing.
+            if (Snapshots.Count >= 2 && DiffA == null && DiffB == null)
+            {
+                DiffB = Snapshots[0];   // newest
+                DiffA = Snapshots[1];   // second-newest
+            }
         }
         catch (Exception ex)
         {
@@ -226,6 +258,66 @@ public partial class SnapshotViewModel : ViewModelBase
 
     [RelayCommand]
     private void Cancel() => _cts?.Cancel();
+
+    [RelayCommand]
+    private async Task RunDiffAsync()
+    {
+        if (!CanRunDiff) return;
+        ClearError();
+        IsDiffing = true;
+        try
+        {
+            var filter = new SnapshotDiffFilter
+            {
+                ClassContains = DiffClassFilter.Trim(),
+                PropContains  = DiffPropFilter.Trim(),
+                Direction = SelectedDiffDirection switch
+                {
+                    "Increased" => SnapshotDiffDirection.Up,
+                    "Decreased" => SnapshotDiffDirection.Down,
+                    _           => SnapshotDiffDirection.None,
+                },
+            };
+            var diff = await _store.DiffSnapshotsAsync(DiffA!.Id, DiffB!.Id, filter);
+            DiffRows.Clear();
+            foreach (var row in diff.Changed) DiffRows.Add(row);
+            var trunc = diff.Truncated ? $" (capped at {filter.MaxRows:N0})" : "";
+            DiffStatusText =
+                $"{diff.Changed.Count:N0} changed{trunc}  ·  +{diff.AddedCount:N0} added  ·  −{diff.RemovedCount:N0} removed";
+        }
+        catch (Exception ex)
+        {
+            _log.Error(Constants.LogCatView, "Snapshot: diff failed", ex);
+            SetError(ex);
+        }
+        finally
+        {
+            IsDiffing = false;
+        }
+    }
+
+    /// <summary>Copy the changed field's live address (obj_addr + offset) to the
+    /// clipboard — a quick handoff into CE. Valid for an in-session diff.</summary>
+    [RelayCommand]
+    private async Task CopyDiffAddressAsync(SnapshotDiffRow? row)
+    {
+        if (row == null || _platform == null) return;
+        try
+        {
+            var hex = row.ObjAddr.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                ? row.ObjAddr.Substring(2) : row.ObjAddr;
+            if (ulong.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var baseAddr))
+            {
+                ulong addr = baseAddr + (ulong)row.PropOffset;
+                await _platform.CopyToClipboardAsync($"{addr:X}");
+                DiffStatusText = $"Copied {addr:X}  ({row.ClassName}::{row.PropName})";
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Error(Constants.LogCatView, "Snapshot: copy address failed", ex);
+        }
+    }
 
     [RelayCommand]
     private async Task DeleteAsync(SnapshotMeta? meta)
