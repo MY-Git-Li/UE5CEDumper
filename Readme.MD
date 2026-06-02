@@ -15,7 +15,7 @@ UE5CEDumper is a interactive inspector toolchain. It provides a **live window** 
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
 [![C++](https://img.shields.io/badge/C++-23-00599C)](https://isocpp.org/)
 [![Avalonia](https://img.shields.io/badge/Avalonia-UI-8B5CF6)](https://avaloniaui.net/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 [![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-CC785C?logo=claude)](https://claude.ai/code)
 
 ## Sample screenshots
@@ -176,4 +176,4 @@ https://opencheattables.com/viewtopic.php?f=17&t=1797
 
 ---
 
-**License**: [MIT](LICENSE) © 2026 bbfox0703
+**License**: [GPL-3.0](LICENSE) © 2026 bbfox0703
