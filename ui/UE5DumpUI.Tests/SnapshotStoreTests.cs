@@ -82,6 +82,43 @@ public class SnapshotStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task PerGameDb_IsolatesSnapshotsByPeHash()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        _store.SetActiveGame("GAMEA");
+        var pathA = _store.DatabasePath;
+        await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "a", PeHash = "GAMEA" }, ct);
+
+        _store.SetActiveGame("GAMEB");
+        var pathB = _store.DatabasePath;
+        await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "b", PeHash = "GAMEB" }, ct);
+
+        Assert.NotEqual(pathA, pathB);
+        Assert.Contains("GAMEA", pathA);
+        Assert.Contains("GAMEB", pathB);
+
+        // Each game sees only its own snapshot.
+        _store.SetActiveGame("GAMEA");
+        var listA = await _store.ListSnapshotsAsync(ct);
+        Assert.Equal("a", Assert.Single(listA).Label);
+
+        _store.SetActiveGame("GAMEB");
+        var listB = await _store.ListSnapshotsAsync(ct);
+        Assert.Equal("b", Assert.Single(listB).Label);
+    }
+
+    [Fact]
+    public void SetActiveGame_SanitizesPeHashIntoFilename()
+    {
+        _store.SetActiveGame("../../evil\\x00");
+        // Only ASCII alphanumerics survive (drops . / \) -> no path traversal.
+        // Raw chars kept: e v i l x 0 0  ->  "evilx00".
+        Assert.DoesNotContain("..", _store.DatabasePath);
+        Assert.EndsWith("snapshots.evilx00.db", _store.DatabasePath);
+    }
+
+    [Fact]
     public async Task MultipleSnapshots_ListedNewestFirst()
     {
         var ct = TestContext.Current.CancellationToken;

@@ -58,8 +58,10 @@ public static class Constants
     // System-tab credit checkbox). Persisted under %LOCALAPPDATA%\UE5CEDumper.
     public const string ExperimentalSettingsFile = "experimental.json";
 
-    // Experimental Snapshot store — SQLite DB under %LOCALAPPDATA%\UE5CEDumper.
-    public const string SnapshotDbFile = "snapshots.db";
+    // Experimental Snapshot store — per-game SQLite DB under
+    // %LOCALAPPDATA%\UE5CEDumper, named snapshots.<pe_hash>.db so each game's
+    // snapshots stay isolated (no cross-game mixing / growth / corruption).
+    public const string SnapshotDbPrefix = "snapshots";
     // Objects streamed per snapshot_chunk pipe round-trip.
     public const int SnapshotChunkSize = 200;
 

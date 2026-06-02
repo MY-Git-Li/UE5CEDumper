@@ -10,8 +10,18 @@ namespace UE5DumpUI.Core;
 /// </summary>
 public interface ISnapshotStore
 {
-    /// <summary>Absolute path of the SQLite database file.</summary>
+    /// <summary>Absolute path of the SQLite database file for the active game.</summary>
     string DatabasePath { get; }
+
+    /// <summary>
+    /// Scope all subsequent operations to a per-game database file
+    /// (snapshots.&lt;pe_hash&gt;.db). Called when the engine state arrives so
+    /// each game's snapshots stay isolated — no cross-game mixing in the list
+    /// or in SPC / Pivot joins, isolated growth, and isolated corruption blast
+    /// radius. pe_hash is stable across launches of the same build, so all
+    /// sessions of a game share one file.
+    /// </summary>
+    void SetActiveGame(string? peHash);
 
     /// <summary>Insert a new snapshot row; returns its generated id.</summary>
     Task<long> CreateSnapshotAsync(SnapshotMeta meta, CancellationToken ct = default);

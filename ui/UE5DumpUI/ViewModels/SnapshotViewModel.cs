@@ -43,13 +43,16 @@ public partial class SnapshotViewModel : ViewModelBase
         _dump = dump;
         _store = store;
         _log = log;
-        _ = RefreshAsync();
+        // Don't list yet — the per-game DB isn't known until a game connects.
     }
 
     public void SetEngineState(EngineState state)
     {
         _engineState = state;
+        // Scope the store to this game's DB, then load its saved snapshots.
+        _store.SetActiveGame(state.PeHash);
         OnPropertyChanged(nameof(CanCapture));
+        _ = RefreshAsync();
     }
 
     partial void OnIsCapturingChanged(bool value) => OnPropertyChanged(nameof(CanCapture));

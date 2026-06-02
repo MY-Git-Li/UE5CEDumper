@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text;
 using Microsoft.Data.Sqlite;
 using UE5DumpUI.Core;
 using UE5DumpUI.Models;
@@ -14,26 +15,49 @@ namespace UE5DumpUI.Services;
 /// </summary>
 public sealed class SnapshotStore : ISnapshotStore
 {
-    private readonly string _dbPath;
-    private readonly string _connStr;
+    private readonly string _dir;
     private readonly ILoggingService? _log;
+    // Active game's pe_hash (sanitised for use in the filename). Empty until
+    // SetActiveGame is called — falls back to a shared "default" db.
+    private string _peHash = "";
 
     // SQLitePCLRaw provider init is idempotent; do it once before first use so
     // the bundled native e_sqlite3 is registered under Native AOT.
     private static readonly object s_initLock = new();
     private static bool s_initialised;
 
-    public string DatabasePath => _dbPath;
+    /// <summary>Per-game DB path: snapshots.&lt;pe_hash&gt;.db (or
+    /// snapshots.default.db before a game is set).</summary>
+    public string DatabasePath =>
+        Path.Combine(_dir, $"{Constants.SnapshotDbPrefix}.{(_peHash.Length > 0 ? _peHash : "default")}.db");
 
     public SnapshotStore(IPlatformService platform, ILoggingService? log = null)
     {
         _log = log;
-        var dir = Path.Combine(platform.GetAppDataPath(), Constants.LogFolderName);
-        Directory.CreateDirectory(dir);
-        _dbPath = Path.Combine(dir, Constants.SnapshotDbFile);
-        _connStr = new SqliteConnectionStringBuilder { DataSource = _dbPath }.ToString();
+        _dir = Path.Combine(platform.GetAppDataPath(), Constants.LogFolderName);
+        Directory.CreateDirectory(_dir);
         EnsureProviderInitialised();
     }
+
+    public void SetActiveGame(string? peHash)
+    {
+        _peHash = SanitizePeHash(peHash);
+        _log?.Info(Constants.LogCatView, $"SnapshotStore: active DB -> {DatabasePath}");
+    }
+
+    // pe_hash is hex, but sanitise defensively so it can never escape the
+    // filename (path traversal / invalid chars).
+    private static string SanitizePeHash(string? peHash)
+    {
+        if (string.IsNullOrEmpty(peHash)) return "";
+        var sb = new StringBuilder(peHash.Length);
+        foreach (var c in peHash)
+            if (char.IsAsciiLetterOrDigit(c)) sb.Append(c);
+        return sb.ToString();
+    }
+
+    private string ConnectionString =>
+        new SqliteConnectionStringBuilder { DataSource = DatabasePath }.ToString();
 
     private static void EnsureProviderInitialised()
     {
@@ -48,7 +72,7 @@ public sealed class SnapshotStore : ISnapshotStore
 
     private async Task<SqliteConnection> OpenAsync(CancellationToken ct)
     {
-        var conn = new SqliteConnection(_connStr);
+        var conn = new SqliteConnection(ConnectionString);
         await conn.OpenAsync(ct);
         await ExecAsync(conn, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;", ct);
         await EnsureSchemaAsync(conn, ct);
