@@ -239,7 +239,11 @@
       <TabControl x:Name="MainTabs" Grid.Column="2" Background="#1E1E1E" Padding="4"
                   SelectedIndex="{Binding SelectedTabIndex}"
                   SelectionChanged="MainTabs_SelectionChanged">
-        <TabItem Header="{StaticResource str.Tab.LiveWalker}">
+        <!-- Tag tokens mark tabs whose toolbar/per-row buttons depend on the
+             AOBMaker CE plugin. MainWindow.axaml.cs routes the tab-switch
+             AOBMaker re-check by Tag (not index) so reordering/inserting tabs
+             can't silently break it (see MainTabs_SelectionChanged). -->
+        <TabItem Header="{StaticResource str.Tab.LiveWalker}" Tag="LiveWalker">
           <views:LiveWalkerPanel DataContext="{Binding LiveWalker}"/>
         </TabItem>
         <TabItem Header="{StaticResource str.Tab.InstanceFinder}">
@@ -248,7 +252,7 @@
         <TabItem Header="{StaticResource str.Tab.PropertySearch}">
           <views:PropertySearchPanel DataContext="{Binding PropertySearch}"/>
         </TabItem>
-        <TabItem Header="{StaticResource str.Tab.InterestingFunctions}">
+        <TabItem Header="{StaticResource str.Tab.InterestingFunctions}" Tag="InterestingFunctions">
           <views:InterestingFunctionsPanel DataContext="{Binding InterestingFunctions}"/>
         </TabItem>
         <TabItem Header="{StaticResource str.Tab.InterestingProperties}">
@@ -266,7 +270,7 @@
         <TabItem Header="{StaticResource str.Tab.ClassStruct}">
           <views:ClassStructPanel DataContext="{Binding ClassStruct}"/>
         </TabItem>
-        <TabItem Header="{StaticResource str.Tab.Pointers}">
+        <TabItem Header="{StaticResource str.Tab.Pointers}" Tag="Pointers">
           <views:PointerPanel DataContext="{Binding Pointers}"/>
         </TabItem>
         <TabItem Header="{StaticResource str.Tab.ProxyDeploy}">
