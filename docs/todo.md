@@ -12,6 +12,52 @@ Move items to [dev-log.md](dev-log.md) once they ship; update
 
 -----
 
+## 🧪 EXPERIMENTAL: Snapshot / SPC Query / Class Pivot (planned 2026-06-02)
+
+Port of three analysis features from the Unity sister project `discrete`, gated
+behind an opt-in experimental flag. **Design of record:
+[experimental-snapshot-spc-pivot.md](experimental-snapshot-spc-pivot.md)** — read
+it first (concept mapping, UE-vs-Unity advantages, SQLite schema, identity-key
+join, array inner-key handling, the Q#4 key-field improvement).
+
+Locked decisions: SQLite (raw ADO.NET, no EF Core) · all three features ·
+persisted gating · **multi-session first-class** for SPC/Pivot · type-agnostic
+directional SPC (energy-bar / CE Unknown-Initial-Value generalization) ·
+Strict+Loose cross-session join · all-numeric capture scope · **v1 array
+inner-key join** (struct/object/primitive — the cargo-hold case `discrete`
+deferred).
+
+Build in order; each phase gates the next:
+
+- **Phase 0 — Gating checkbox** (persisted). *Effort S · Risk low · no DLL.*
+  `bbfox` credit in System tab → checkbox; tooltip "Enable advanced experimental
+  features"; new `ExperimentalGate` service (model on `AobUsageService`); 3 tabs
+  bind `IsVisible` to `MainWindowViewModel.ExperimentalEnabled`.
+- **Phase A — Snapshot** (multi-session persistent foundation).
+  - A1 DLL streaming capture (`begin/snapshot_chunk/end_snapshot`), all-numeric +
+    identity columns + array elements, reusing `Aura` container walk + `Ubel`.
+    *Effort M · Risk capture mem/perf · DLL.*
+  - A2 C# model + SQLite (raw ADO.NET, stream chunk writes) + capture UI.
+    *Effort M · Risk publish native dep · no DLL.* ⚠ verify `e_sqlite3` bundling.
+  - A3 Diff engine (in-session index join) + grid + CE export handoff.
+    *Effort S · Risk low · no DLL.*
+- **Phase B — SPC Query** (multi-session, type-agnostic directional). Pure C#.
+  - B1 engine: Strict/Loose join + relative predicate chain. *Effort S-M · low.*
+  - B2 UI: cross-session picker + direction predicates + CE export. *Effort S · low.*
+- **Phase C — Class Pivot** (value-keyed, cross-session safe). Pure C# (+opt DLL).
+  - C1 PivotEngine (identity mode + collision render). *Effort M · med.*
+  - C2 Find-by-value locator + handoff (closes the loop). *Effort M · med.*
+  - C3 Key discovery — reuse `PropertyScoringTable` + UE type/name priors.
+    *Effort M-L · med.*
+  - C4 DataTable-native pivot (RowName is the key, zero-config). *Effort S · low.*
+  - C5 Right-click handoff from LiveWalker / PropertySearch / InterestingProps.
+    *Effort S · low.*
+
+New work concentrates in A1 (DLL capture, mostly reuse) + C3 (UE-ify scorer);
+B/C are largely portable `discrete` C# + indexed SQL.
+
+-----
+
 ## 🎯 NEXT SESSION STARTING POINT (2026-05-29 latest, build 797-798, dev = main)
 
 Shipped this session (merged dev→main): the two **multi-numeric Value Search
