@@ -49,8 +49,12 @@ Build in order; each phase gates the next:
   - ~~A2 C# SQLite store + models + capture UI.~~ ✅ **SHIPPED `0747065` (A2a
     data layer) + `e832b4c` (A2b capture UI), builds 809-811.** Native AOT
     publish verified clean + bundles `e_sqlite3.dll`. +50 tests → 1535 green.
-  - A3 Diff engine (in-session index join) + grid + CE export handoff.
-    *Effort S · Risk low · no DLL.*
+  - ~~A3 Diff engine (in-session index join) + grid + CE export handoff.~~ ✅
+    **SHIPPED `aeba44d` (build 817).** `DiffSnapshotsAsync` (single indexed SQL
+    join, changed rows + churn counts + filters) + diff grid + Copy Address.
+    +per-game quota/usage (`ab874a4`). Full CE .CT freeze-export deferred to A3c
+    (Copy Address covers the manual path). **Phase A capture→compare loop works
+    end-to-end.** Remaining: A1b (array capture).
 - **Phase B — SPC Query** (multi-session, type-agnostic directional). Pure C#.
   - B1 engine: Strict/Loose join + relative predicate chain. *Effort S-M · low.*
   - B2 UI: cross-session picker + direction predicates + CE export. *Effort S · low.*
