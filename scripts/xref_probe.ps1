@@ -73,6 +73,7 @@ function Run-Xref($conn, [string]$addr) {
                 kind  = $_.kind
                 occ   = $_.occurrences
                 owner = $_.owner_class
+                event = $_.event      # v2a: BP event (ubergraph hits only)
                 func  = $_.func_full
             }
         } | Format-Table -AutoSize

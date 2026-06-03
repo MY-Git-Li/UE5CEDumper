@@ -749,6 +749,7 @@ public sealed class DumpService : IDumpService
                     OwnerClassAddress = x["owner_class_addr"]?.GetValue<string>() ?? "",
                     Occurrences       = x["occurrences"]?.GetValue<int>() ?? 0,
                     Kind              = x["kind"]?.GetValue<string>() ?? "",
+                    EventName         = x["event"]?.GetValue<string>() ?? "",
                 });
             }
         }

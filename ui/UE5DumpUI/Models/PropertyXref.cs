@@ -33,6 +33,13 @@ public sealed class PropertyXrefMatch
     /// (matched but preceding byte not a known variable opcode).
     /// </summary>
     public string Kind { get; init; } = "";
+
+    /// <summary>
+    /// v2a: for hits inside a Blueprint ubergraph (ExecuteUbergraph_*), the BP
+    /// event(s) whose entry offset precedes the reference (comma-joined). Empty
+    /// for non-ubergraph functions. Best-effort (nearest-preceding heuristic).
+    /// </summary>
+    public string EventName { get; init; } = "";
 }
 
 /// <summary>Diagnostic counters for a property cross-reference scan.</summary>

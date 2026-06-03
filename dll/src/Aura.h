@@ -442,6 +442,15 @@ struct PropertyXref {
     std::string ownerClassName;
     int32_t     occurrences    = 0;    // hit count within this function's bytecode
     std::string kind;                  // "instance" (0x01) / "local" (0x00) / "ref"
+
+    // v2a: for hits inside a Blueprint ubergraph (ExecuteUbergraph_*), the BP
+    // event(s) whose entry offset precedes the reference (comma-joined, distinct).
+    // Empty for non-ubergraph functions. Best-effort: shared sub-graphs reached
+    // from multiple events can mis-attribute (nearest-preceding heuristic).
+    std::string eventName;
+    // Transient (not serialised): byte offsets of the FProperty* within the
+    // ubergraph Script, used by the post-scan attribution pass then cleared.
+    std::vector<int32_t> ubergraphOffsets;
 };
 
 struct PropertyXrefStats {

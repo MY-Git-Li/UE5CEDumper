@@ -2372,6 +2372,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 xj["owner_class_addr"] = Renge::AddrToStr(x.ownerClassAddr);
                 xj["occurrences"]      = x.occurrences;
                 xj["kind"]             = x.kind;
+                if (!x.eventName.empty())
+                    xj["event"]        = x.eventName;
                 arr.push_back(xj);
             }
             data["xrefs"] = arr;

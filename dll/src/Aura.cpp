@@ -23,6 +23,7 @@ extern uint32_t g_cachedUEVersion;
 #include <climits>
 #include <cstring>
 #include <mutex>
+#include <set>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -3266,6 +3267,57 @@ AllFunctionsResult EnumerateAllFunctions(bool gameOnly, int maxEntries) {
     return result;
 }
 
+// --- v2a: Blueprint ubergraph entry-offset table ---
+//
+// Every BP event compiles into the single ExecuteUbergraph_<BP> function; each
+// event's stub UFunction calls it with an int "entry offset" into the bytecode:
+//   EX_(Local)FinalFunction <ExecuteUbergraph* 8B> EX_IntConst <entryOffset 4B> ...
+// We anchor on the ubergraph function's ADDRESS (zero false positives), verify
+// the preceding opcode is EX_LocalFinalFunction(0x46)/EX_FinalFunction(0x1C) and
+// the following byte is EX_IntConst(0x1D), then read the entry offset. Returns
+// (entryOffset, eventName) sorted ascending so the caller can attribute a
+// reference at byte P to the event whose entry offset is the largest <= P.
+static std::vector<std::pair<int32_t, std::string>>
+BuildUbergraphEntryTable(uintptr_t classAddr, uintptr_t ubergraphAddr) {
+    std::vector<std::pair<int32_t, std::string>> table;
+    if (!classAddr || !ubergraphAddr) return table;
+
+    uint8_t anchor[8];
+    memcpy(anchor, &ubergraphAddr, sizeof(anchor));
+
+    std::vector<FunctionInfo> funcs = Ubel::WalkFunctions(classAddr);
+    std::vector<uint8_t> buf;
+    for (const auto& fi : funcs) {
+        if (fi.address == ubergraphAddr) continue;  // skip the ubergraph itself
+
+        uintptr_t scriptData = 0; int32_t scriptNum = 0;
+        Macht::ReadSafe(fi.address + DynOff::USTRUCT_SCRIPT,        scriptData);
+        Macht::ReadSafe(fi.address + DynOff::USTRUCT_SCRIPT + 0x08, scriptNum);
+        if (!scriptData || scriptNum < 13 || scriptNum > (1 << 22)) continue;  // need op+ptr+int
+
+        buf.resize(static_cast<size_t>(scriptNum));
+        if (!Macht::ReadBytesSafe(scriptData, buf.data(), static_cast<size_t>(scriptNum)))
+            continue;
+
+        // p starts at 1 so buf[p-1] (the call opcode) is valid; need ptr(8) +
+        // EX_IntConst(1) + int32(4) to follow.
+        for (int32_t p = 1; p + 8 + 1 + 4 <= scriptNum; ++p) {
+            if (memcmp(buf.data() + p, anchor, 8) != 0) continue;
+            uint8_t op = buf[p - 1];
+            if (op != 0x46 && op != 0x1C) continue;   // EX_LocalFinalFunction / EX_FinalFunction
+            if (buf[p + 8] != 0x1D) continue;         // EX_IntConst
+            int32_t entryOffset = 0;
+            memcpy(&entryOffset, buf.data() + p + 9, 4);
+            table.emplace_back(entryOffset, fi.name);
+            break;  // one ubergraph entry per stub
+        }
+    }
+    std::sort(table.begin(), table.end(),
+              [](const std::pair<int32_t, std::string>& a,
+                 const std::pair<int32_t, std::string>& b) { return a.first < b.first; });
+    return table;
+}
+
 // --- FindPropertyXrefs: Kismet bytecode static cross-reference (Path 1) ---
 //
 // Walk GObjects; for every UFunction, read UStruct::Script and byte-scan the
@@ -3303,7 +3355,8 @@ PropertyXrefResult FindPropertyXrefs(uintptr_t propAddr, bool gameOnly,
         [&](ThreadResult& tr, int32_t beginIdx, int32_t endIdx,
             std::atomic<bool>& deadlineHit) {
 
-        std::vector<uint8_t> buf;   // reused across functions (keeps capacity)
+        std::vector<uint8_t> buf;    // reused across functions (keeps capacity)
+        std::vector<int32_t> offs;   // match byte offsets within this Script
 
         for (int32_t i = beginIdx;
              i < endIdx && static_cast<int>(tr.xrefs.size()) < maxResults; ++i) {
@@ -3342,29 +3395,32 @@ PropertyXrefResult FindPropertyXrefs(uintptr_t propAddr, bool gameOnly,
             if (!Macht::ReadBytesSafe(scriptData, buf.data(), static_cast<size_t>(scriptNum)))
                 continue;
 
-            int32_t occ = 0;
-            uint8_t precByte = 0xFF;
+            offs.clear();
             for (int32_t p = 0; p + 8 <= scriptNum; ++p) {
-                if (memcmp(buf.data() + p, needle, 8) == 0) {
-                    if (occ == 0 && p > 0) precByte = buf[p - 1];  // classify first hit
-                    occ++;
-                }
+                if (memcmp(buf.data() + p, needle, 8) == 0) offs.push_back(p);
             }
-            if (occ == 0) continue;
+            if (offs.empty()) continue;
+            uint8_t precByte = (offs[0] > 0) ? buf[offs[0] - 1] : 0xFF;  // classify first hit
 
             // Owning class = UFunction's Outer. Apply gameOnly on its path.
             uintptr_t owner = Ubel::GetOuter(obj);
             if (gameOnly && owner && IsEnginePackage(Ubel::GetFullName(owner))) continue;
 
+            std::string funcName = Ubel::GetName(obj);
+
             PropertyXref x;
             x.funcAddr       = obj;
-            x.funcName       = Ubel::GetName(obj);
+            x.funcName       = funcName;
             x.funcFullName   = Ubel::GetFullName(obj);
             x.ownerClassAddr = owner;
             x.ownerClassName = owner ? Ubel::GetName(owner) : "";
-            x.occurrences    = occ;
+            x.occurrences    = static_cast<int32_t>(offs.size());
             x.kind = (precByte == 0x01) ? "instance"
                    : (precByte == 0x00) ? "local" : "ref";
+            // v2a: retain match offsets only for ubergraph hits (attributed to
+            // events in a serial post-pass). funcName.rfind(prefix,0)==0 = starts_with.
+            if (funcName.rfind("ExecuteUbergraph", 0) == 0)
+                x.ubergraphOffsets = offs;  // copied (offs is reused next iter)
             tr.xrefs.push_back(std::move(x));
         }
     });
@@ -3373,6 +3429,39 @@ PropertyXrefResult FindPropertyXrefs(uintptr_t propAddr, bool gameOnly,
     for (auto& tr : scan.perThread) {
         out.stats.functionsScanned    += tr.funcsScanned;
         out.stats.functionsWithScript += tr.funcsWithScript;
+    }
+
+    // v2a: attribute ubergraph hits to BP events (serial — the entry-table build
+    // walks sibling UFunctions). Cache per ubergraph address; several refs can
+    // share one. Attribution = the event whose entry offset is the largest <= P.
+    {
+        std::unordered_map<uintptr_t, std::vector<std::pair<int32_t, std::string>>> entryCache;
+        for (auto& x : out.xrefs) {
+            if (x.ubergraphOffsets.empty()) continue;
+            auto it = entryCache.find(x.funcAddr);
+            if (it == entryCache.end())
+                it = entryCache.emplace(
+                         x.funcAddr,
+                         BuildUbergraphEntryTable(x.ownerClassAddr, x.funcAddr)).first;
+            const auto& table = it->second;
+            if (!table.empty()) {
+                std::set<std::string> events;
+                for (int32_t off : x.ubergraphOffsets) {
+                    const std::string* best = nullptr;
+                    for (const auto& e : table) {
+                        if (e.first <= off) best = &e.second; else break;  // sorted ascending
+                    }
+                    if (best) events.insert(*best);
+                }
+                std::string joined;
+                for (const auto& e : events) {
+                    if (!joined.empty()) joined += ", ";
+                    joined += e;
+                }
+                x.eventName = joined;
+            }
+            x.ubergraphOffsets.clear();  // transient
+        }
     }
     out.stats.deadlineHit = scan.deadlineHit;
     out.stats.durationMs  = std::chrono::duration_cast<std::chrono::milliseconds>(

@@ -214,6 +214,21 @@ public sealed class PropertyXrefDialog : Window
         });
         _grid.Columns.Add(new DataGridTemplateColumn
         {
+            Header = "Event",
+            Width = new DataGridLength(160),
+            SortMemberPath = nameof(PropertyXrefMatch.EventName),
+            CellTemplate = new FuncDataTemplate<PropertyXrefMatch>(
+                (x, _) => new TextBlock
+                {
+                    Text = x?.EventName ?? "",
+                    Foreground = new SolidColorBrush(Color.Parse("#C586C0")),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(4, 0),
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                }, supportsRecycling: true),
+        });
+        _grid.Columns.Add(new DataGridTemplateColumn
+        {
             Header = "Function",
             Width = new DataGridLength(1, DataGridLengthUnitType.Star),
             SortMemberPath = nameof(PropertyXrefMatch.FunctionFullName),
