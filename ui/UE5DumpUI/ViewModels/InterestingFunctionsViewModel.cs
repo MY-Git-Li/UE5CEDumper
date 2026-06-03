@@ -33,6 +33,7 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     private readonly IDumpService _dump;
     private readonly ILoggingService _log;
     private readonly IAobMakerBridge? _aobMaker;
+    private readonly IPlatformService? _platform;
 
     /// <summary>Cooldown between AOBMaker availability re-checks. The
     /// pipe connect attempt has a 2s timeout when CE isn't running, so
@@ -102,11 +103,34 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     public event Action<string>? RequestCopyText;
 
     public InterestingFunctionsViewModel(IDumpService dump, ILoggingService log,
-                                          IAobMakerBridge? aobMaker = null)
+                                          IAobMakerBridge? aobMaker = null,
+                                          IPlatformService? platform = null)
     {
         _dump = dump;
         _log = log;
         _aobMaker = aobMaker;
+        _platform = platform;
+    }
+
+    /// <summary>
+    /// Reverse edge: "Props" row action — list the properties this function
+    /// reads/writes (static bytecode scan). Opens a self-contained dialog
+    /// (no tab impact).
+    /// </summary>
+    [RelayCommand]
+    private async Task FindFuncPropsAsync(ScoredFunctionRow? row)
+    {
+        row ??= SelectedResult;
+        if (row == null || string.IsNullOrEmpty(row.FuncAddr)) return;
+        try
+        {
+            await Views.FunctionPropsDialog.ShowForFunctionAsync(
+                row.FuncName, row.FuncAddr, _dump, _platform);
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"FindFuncProps failed for {row.FuncName}", ex);
+        }
     }
 
     /// <summary>

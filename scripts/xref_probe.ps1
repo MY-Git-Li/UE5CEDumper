@@ -24,6 +24,8 @@ param(
     [string]$PropAddr  = "",          # FProperty* to xref (from walk_class field 'addr')
     [string]$ClassName = "",          # resolve this class via list_classes, then walk it
     [string]$Field     = "",          # with -ClassName: pick this field's addr and xref it
+    [string]$Func      = "",          # with -ClassName: reverse edge — list props this function reads/writes
+    [string]$FuncAddr  = "",          # UFunction* to run the reverse edge directly
     [bool]  $GameOnly  = $true,
     [int]   $Max       = 200,
     [string]$PipeName  = "UE5DumpBfx",
@@ -81,6 +83,21 @@ function Run-Xref($conn, [string]$addr) {
     }
 }
 
+function Run-FuncProps($conn, [string]$addr) {
+    Write-Host ""
+    Write-Host "walk_function_props func_addr=$addr" -ForegroundColor Cyan
+    $r = Send-Cmd $conn "walk_function_props" @{ func_addr = $addr }
+    if (-not $r.ok) { Write-Host "ERROR: $($r.error)" -ForegroundColor Red; return }
+    $props = @($r.props)
+    Write-Host ("script_bytes={0}  props={1}" -f $r.script_bytes, $props.Count) -ForegroundColor DarkGray
+    if ($props.Count -gt 0) {
+        $props | ForEach-Object {
+            $acc = if ($_.write_count -gt 0) { "{0}W/{1}R" -f $_.write_count, ($_.occurrences - $_.write_count) } else { "read" }
+            [pscustomobject]@{ scope = $_.scope; access = $acc; occ = $_.occurrences; type = $_.type; name = $_.name }
+        } | Format-Table -AutoSize
+    }
+}
+
 $conn = Connect-Pipe
 try {
     # --- Step 1: validate the Script offset derivation LIVE (step-1 deliverable) ---
@@ -98,6 +115,9 @@ try {
         Write-Host "get_offsets failed: $($off.error)" -ForegroundColor Red
     }
 
+    # --- Reverse edge: direct func_addr path ---
+    if ($FuncAddr) { Run-FuncProps $conn $FuncAddr; return }
+
     # --- Step 2: direct prop_addr path ---
     if ($PropAddr) { Run-Xref $conn $PropAddr; return }
 
@@ -114,6 +134,20 @@ try {
         if ($match.Count -eq 0) { throw "No class matching '$ClassName' (scanned $($lc.total_classes))." }
         $cls = $match[0]
         Write-Host ("class: {0}  addr={1}  path={2}" -f $cls.class_name, $cls.class_addr, $cls.class_path) -ForegroundColor Green
+
+        # Reverse edge: resolve a function by name via walk_functions, then list its props.
+        if ($Func) {
+            $wf = Send-Cmd $conn "walk_functions" @{ addr = $cls.class_addr }
+            if (-not $wf.ok) { throw "walk_functions failed: $($wf.error)" }
+            $fns = @($wf.functions)
+            $fm = @($fns | Where-Object { $_.name -eq $Func })
+            if ($fm.Count -eq 0) { $fm = @($fns | Where-Object { $_.name -like "*$Func*" }) }
+            if ($fm.Count -eq 0) { throw "No function matching '$Func' on $($cls.class_name) ($($fns.Count) funcs)." }
+            $fn = $fm[0]
+            Write-Host ("func: {0} addr={1}" -f $fn.name, $fn.addr) -ForegroundColor Green
+            Run-FuncProps $conn $fn.addr
+            return
+        }
 
         $wc = Send-Cmd $conn "walk_class" @{ addr = $cls.class_addr }
         if (-not $wc.ok) { throw "walk_class failed: $($wc.error)" }

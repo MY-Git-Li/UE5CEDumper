@@ -3510,6 +3510,93 @@ PropertyXrefResult FindPropertyXrefs(uintptr_t propAddr, bool gameOnly,
     return out;
 }
 
+// Map a value-access opcode to a property-scope label (see FunctionPropRef::scope).
+static const char* ScopeForOpcode(uint8_t op) {
+    switch (op) {
+        case 0x01: return "instance";  // EX_InstanceVariable (class member — the RE target)
+        case 0x00: return "local";     // EX_LocalVariable (BP temporaries / locals)
+        case 0x48: return "local";     // EX_LocalOutVariable (out param)
+        case 0x02: return "default";   // EX_DefaultVariable
+        case 0x6C: return "sparse";    // EX_ClassSparseDataVariable
+        case 0x42: return "struct";    // EX_StructMemberContext (inner struct member)
+        case 0x64: return "frame";     // EX_LetValueOnPersistentFrame
+        default:   return "";
+    }
+}
+
+// --- WalkFunctionPropertyRefs: reverse edge (function -> properties) ---
+FunctionPropRefResult WalkFunctionPropertyRefs(uintptr_t funcAddr) {
+    FunctionPropRefResult out;
+    if (!funcAddr) return out;
+
+    uintptr_t scriptData = 0; int32_t scriptNum = 0;
+    Macht::ReadSafe(funcAddr + DynOff::USTRUCT_SCRIPT,        scriptData);
+    Macht::ReadSafe(funcAddr + DynOff::USTRUCT_SCRIPT + 0x08, scriptNum);
+    if (!scriptData || scriptNum <= 0 || scriptNum > (1 << 22)) return out;  // native/empty/garbage
+    out.scriptBytes = scriptNum;
+
+    std::vector<uint8_t> buf(static_cast<size_t>(scriptNum));
+    if (!Macht::ReadBytesSafe(scriptData, buf.data(), static_cast<size_t>(scriptNum))) return out;
+
+    // Opcode-anchored property-reference scan. Anchors are the value-access
+    // opcodes whose immediate operand is an FProperty* (8B):
+    //   EX_LocalVariable 0x00 / InstanceVariable 0x01 / DefaultVariable 0x02 /
+    //   LocalOutVariable 0x48 / ClassSparseDataVariable 0x6C /
+    //   StructMemberContext 0x42 / LetValueOnPersistentFrame 0x64
+    // Each candidate is confirmed via Ubel::ResolvePropertyNameType (rejects
+    // non-property pointers). Deduped by propAddr; read/write via IsWriteContext.
+    std::unordered_map<uintptr_t, size_t> idx;
+    for (int32_t p = 0; p + 1 + 8 <= scriptNum; ++p) {
+        uint8_t op = buf[p];
+        if (op != 0x00 && op != 0x01 && op != 0x02 && op != 0x48
+            && op != 0x6C && op != 0x42 && op != 0x64) continue;
+
+        uintptr_t cand = 0;
+        memcpy(&cand, &buf[p + 1], sizeof(cand));
+        if (!LooksLikeHeapPtr(cand)) continue;
+
+        std::string name, type;
+        if (!Ubel::ResolvePropertyNameType(cand, name, type)) continue;
+
+        // IsWriteContext is keyed on the pointer offset (p+1); 0x64 is itself a write.
+        bool isWrite = (op == 0x64) || IsWriteContext(buf.data(), p + 1);
+
+        auto it = idx.find(cand);
+        if (it == idx.end()) {
+            FunctionPropRef r;
+            r.propAddr    = cand;
+            r.name        = std::move(name);
+            r.type        = std::move(type);
+            r.occurrences = 1;
+            r.writeCount  = isWrite ? 1 : 0;
+            r.scope       = ScopeForOpcode(op);
+            idx.emplace(cand, out.refs.size());
+            out.refs.push_back(std::move(r));
+        } else {
+            auto& r = out.refs[it->second];
+            r.occurrences++;
+            if (isWrite) r.writeCount++;
+            // Prefer the "instance" label if any access proves it's a class member.
+            if (r.scope != "instance" && op == 0x01) r.scope = "instance";
+        }
+    }
+
+    // Class members (instance) first — local BP temporaries are noise — then
+    // writers, then by frequency, then name. Most actionable on top.
+    std::sort(out.refs.begin(), out.refs.end(),
+              [](const FunctionPropRef& a, const FunctionPropRef& b) {
+        bool ai = a.scope == "instance", bi = b.scope == "instance";
+        if (ai != bi) return ai;
+        if ((a.writeCount > 0) != (b.writeCount > 0)) return a.writeCount > 0;
+        if (a.occurrences != b.occurrences) return a.occurrences > b.occurrences;
+        return a.name < b.name;
+    });
+
+    LOG_INFO("WalkFunctionPropertyRefs: 0x%llX -> %zu props (%d script bytes)",
+             static_cast<unsigned long long>(funcAddr), out.refs.size(), scriptNum);
+    return out;
+}
+
 SparseDelegateResult WalkSparseDelegateBindings(uintptr_t ownerObj,
                                                  const std::string& fieldName,
                                                  int32_t maxBindings)

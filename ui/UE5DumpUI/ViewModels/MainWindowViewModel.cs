@@ -234,7 +234,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         InstanceFinder = new InstanceFinderViewModel(dump, log, platform);
         PropertySearch = new PropertySearchViewModel(dump, log, aobMaker, platform);
         GameClassFilter = new GameClassFilterViewModel(dump, log);
-        InterestingFunctions = new InterestingFunctionsViewModel(dump, log, aobMaker);
+        InterestingFunctions = new InterestingFunctionsViewModel(dump, log, aobMaker, platform);
         InterestingProperties = new InterestingPropertiesViewModel(dump, log, platform);
         ValueSearch = new ValueSearchViewModel(dump, log);
         Console = new ConsoleViewModel(dump, log);

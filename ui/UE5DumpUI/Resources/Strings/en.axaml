@@ -378,6 +378,7 @@
     <sys:String x:Key="str.IF.FilterHint">Filter by name (function or class)...</sys:String>
     <sys:String x:Key="str.IF.ShowAll">Show All (incl. low-score)</sys:String>
     <sys:String x:Key="str.IF.ClearFilters">Clear</sys:String>
+    <sys:String x:Key="str.IF.Props">Props</sys:String>
     <sys:String x:Key="str.IF.OpenLive">Live</sys:String>
     <sys:String x:Key="str.IF.CopyAaScript">AA(B)</sys:String>
     <sys:String x:Key="str.IF.CopyName">Name</sys:String>
@@ -386,6 +387,7 @@
     <sys:String x:Key="str.Tip.IF.Filter">Substring match against function name OR class name (case-insensitive). e.g. "Money" or "PlayerCharacter".</sys:String>
     <sys:String x:Key="str.Tip.IF.Category">Filter by category. Categories are picked from the strongest-scoring keyword bucket per function (Stats &gt; Inventory &gt; Movement &gt; Combat &gt; Utility tied with same score).</sys:String>
     <sys:String x:Key="str.Tip.IF.ShowAll">When off, hide rows with score below the InterestingThreshold (currently 5). When on, show every UFunction regardless of score.</sys:String>
+    <sys:String x:Key="str.Tip.IF.Props">List the properties this function reads/writes (static Blueprint-bytecode scan). Native functions have no bytecode and show nothing.</sys:String>
     <sys:String x:Key="str.Tip.IF.OpenLive">Try to open this function in Live Walker. If the class has no live (non-CDO) instance, falls back to the Class Struct tab. Auto-expands the Functions section and selects the target row.</sys:String>
     <sys:String x:Key="str.Tip.IF.CopyAaScript">Open the Copy AA Script (Baked) dialog for this function. Output requires ue5_invoke_helper.lua embedded in your CE table (Tools -&gt; Export CE Helper Lua File...).</sys:String>
     <sys:String x:Key="str.Tip.IF.CopyName">Copy this function's name to the clipboard. Useful when pasting into a CE script or another tool.</sys:String>

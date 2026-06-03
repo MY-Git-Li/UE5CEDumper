@@ -2381,6 +2381,32 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             return Renge::MakeResponse(id, data).dump();
         }
 
+        // === walk_function_props: reverse edge — properties a UFunction reads/writes ===
+        if (cmd == Renge::CMD_WALK_FUNCTION_PROPS) {
+            std::string addrStr = request.value("func_addr", "");
+            if (addrStr.empty()) return Renge::MakeError(id, "Missing func_addr").dump();
+            uintptr_t funcAddr = Renge::StrToAddr(addrStr);
+
+            auto res = Aura::WalkFunctionPropertyRefs(funcAddr);
+
+            json data;
+            data["query_addr"]   = addrStr;
+            data["script_bytes"] = res.scriptBytes;
+            json arr = json::array();
+            for (const auto& r : res.refs) {
+                json rj;
+                rj["prop_addr"]   = Renge::AddrToStr(r.propAddr);
+                rj["name"]        = r.name;
+                rj["type"]        = r.type;
+                rj["occurrences"] = r.occurrences;
+                rj["write_count"] = r.writeCount;
+                rj["scope"]       = r.scope;
+                arr.push_back(rj);
+            }
+            data["props"] = arr;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
         // === get_ce_pointer_info: CE pointer chain info for a GObjects instance ===
         if (cmd == Renge::CMD_GET_CE_PTR_INFO) {
             std::string addrStr = request.value("addr", "");

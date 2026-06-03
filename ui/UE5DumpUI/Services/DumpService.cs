@@ -763,6 +763,43 @@ public sealed class DumpService : IDumpService
         };
     }
 
+    public async Task<FunctionPropRefsResult> WalkFunctionPropsAsync(
+        string funcAddr, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "walk_function_props",
+            ["func_addr"] = funcAddr,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        var props = new List<FunctionPropRef>();
+        if (res["props"] is JsonArray arr)
+        {
+            foreach (var node in arr)
+            {
+                if (node is not JsonObject p) continue;
+                props.Add(new FunctionPropRef
+                {
+                    PropAddress = p["prop_addr"]?.GetValue<string>() ?? "",
+                    Name        = p["name"]?.GetValue<string>() ?? "",
+                    Type        = p["type"]?.GetValue<string>() ?? "",
+                    Occurrences = p["occurrences"]?.GetValue<int>() ?? 0,
+                    WriteCount  = p["write_count"]?.GetValue<int>() ?? 0,
+                    Scope       = p["scope"]?.GetValue<string>() ?? "",
+                });
+            }
+        }
+
+        return new FunctionPropRefsResult
+        {
+            QueryAddress = res["query_addr"]?.GetValue<string>() ?? funcAddr,
+            ScriptBytes  = res["script_bytes"]?.GetValue<int>() ?? 0,
+            Props        = props,
+        };
+    }
+
     public async Task<ArrayElementsResult> ReadArrayElementsAsync(
         string instanceAddr, int fieldOffset,
         string innerAddr, string innerType, int elemSize,

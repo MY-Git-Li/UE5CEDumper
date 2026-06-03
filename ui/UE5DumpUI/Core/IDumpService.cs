@@ -83,6 +83,10 @@ public interface IDumpService
         string propAddr, bool gameOnly = true, int maxResults = 200,
         CancellationToken ct = default);
 
+    // Reverse edge: the properties a single UFunction reads/writes.
+    Task<FunctionPropRefsResult> WalkFunctionPropsAsync(
+        string funcAddr, CancellationToken ct = default);
+
     // --- Enum Enumeration ---
     Task<List<EnumDefinition>> ListEnumsAsync(CancellationToken ct = default);
 

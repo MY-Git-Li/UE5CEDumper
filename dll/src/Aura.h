@@ -476,6 +476,37 @@ struct PropertyXrefResult {
 PropertyXrefResult FindPropertyXrefs(uintptr_t propAddr, bool gameOnly,
                                      int32_t maxResults = 200);
 
+// === Reverse edge: function -> properties it reads/writes ===
+//
+// Given ONE UFunction, parse its Kismet bytecode and list every FProperty it
+// references, with read/write classification. Opcode-anchored scan: for each
+// variable/struct-member/persistent-frame opcode, the following 8-byte pointer
+// is validated via Ubel::ResolvePropertyNameType (type must contain "Property")
+// — so non-property pointers (UFunction*, literals) are rejected. Writes are
+// detected with the same EX_Let* heuristic as FindPropertyXrefs.
+//
+// Blueprint/script functions only (native functions have empty bytecode).
+// Best-effort: a write whose LHS is wrapped (Other.Field / Struct.Member /
+// Arr[i] = x) may be reported as a read.
+struct FunctionPropRef {
+    uintptr_t   propAddr    = 0;
+    std::string name;
+    std::string type;          // "FloatProperty" / "StructProperty" / ...
+    int32_t     occurrences = 0;
+    int32_t     writeCount  = 0;   // reads = occurrences - writeCount
+    std::string scope;             // "instance" (class member) / "local" (function
+                                   // local/param) / "default" / "sparse" / "struct" /
+                                   // "frame". UI defaults to instance-only so BP
+                                   // compiler temporaries (CallFunc_*) don't drown it.
+};
+
+struct FunctionPropRefResult {
+    int32_t scriptBytes = 0;       // UStruct::Script.Num (0 = native / empty)
+    std::vector<FunctionPropRef> refs;
+};
+
+FunctionPropRefResult WalkFunctionPropertyRefs(uintptr_t funcAddr);
+
 // === Sparse Delegate Storage Walker ===
 //
 // Resolves bindings for a MulticastSparseDelegateProperty. The field on a
