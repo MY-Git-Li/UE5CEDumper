@@ -124,6 +124,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- Sein     (Logger)        <- 5-category per-process   |
 |      +-- Stark    (GameThreadDispatch) <- MinHook ProcessEvent hook |
 |      +-- ValueScan (build 738 + Phase 2 757) <- SessionManager + DataType / ScanType / CompareStringPredicate / CompareVectorPredicate |
+|      +-- Denken   (NativeDisasm)  <- Zydis x64 decoder: native UFunction -> [this+off] property xref (Path 2, build 862) |
 +----------------------+-------------------------------+
                        | Named Pipe: \\.\pipe\UE5DumpBfx
                        | JSON over pipe (newline-delimited)

@@ -498,11 +498,20 @@ struct FunctionPropRef {
                                    // local/param) / "default" / "sparse" / "struct" /
                                    // "frame". UI defaults to instance-only so BP
                                    // compiler temporaries (CallFunc_*) don't drown it.
+    // === Path 2 (native disasm) fields ===
+    int32_t     offset     = -1;   // class-member offset the access mapped to (-1 = n/a)
+    std::string confidence;        // "high" (base proven `this`) / "low" — disasm only;
+                                   // empty for the exact bytecode path.
 };
 
 struct FunctionPropRefResult {
     int32_t scriptBytes = 0;       // UStruct::Script.Num (0 = native / empty)
     std::vector<FunctionPropRef> refs;
+    // "bytecode" = Path 1 Kismet scan (exact). "disasm" = Path 2 native x64
+    // disassembly (heuristic — see FunctionPropRef::confidence). "none" =
+    // native but analysis unavailable (Func offset unresolved / unreadable).
+    std::string method;
+    int32_t unmappedAccesses = 0;  // disasm: [reg+off] hits with no matching property
 };
 
 FunctionPropRefResult WalkFunctionPropertyRefs(uintptr_t funcAddr);

@@ -54,6 +54,12 @@ uintptr_t GetModuleBase(const wchar_t* moduleName = nullptr);
 // Get module size
 size_t GetModuleSize(const wchar_t* moduleName = nullptr);
 
+// True when `addr` points into a committed, executable page of a mapped module
+// image (MEM_IMAGE + PAGE_EXECUTE*). Used to validate UFunction::Func candidates
+// during Path-2 offset detection — a native exec thunk lives in a module's
+// .text, so the correct Func offset holds such a pointer for every native func.
+bool LooksLikeCodePointer(uintptr_t addr);
+
 // --- AOB pattern scanning ---
 
 // Parsed pattern: pre-processed bytes/mask for efficient SIMD scanning.

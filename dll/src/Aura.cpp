@@ -12,6 +12,7 @@
 
 #include "Ubel.h"
 #include "Genau.h"
+#include "Denken.h"
 
 // Defined in Frieren.cpp — cached UE version for layout branching
 extern uint32_t g_cachedUEVersion;
@@ -3524,6 +3525,128 @@ static const char* ScopeForOpcode(uint8_t op) {
     }
 }
 
+// --- Path 2: detect UFunction::Func offset (lazy, cached) ---------------
+//
+// Every UFunction stores a FNativeFuncPtr (UFunction::Func) near its tail:
+// native functions point it at their execXxx thunk in .text, script functions
+// at UObject::ProcessInternal — either way it's an in-module code pointer. No
+// other pointer member in the 0x80..0x158 window holds a MEM_IMAGE code pointer
+// (FirstPropertyToInit / Outer / Class are heap objects), so the first offset
+// in range where every sampled UFunction holds a LooksLikeCodePointer IS Func.
+// Detected once on first Path-2 use; 0 = not found → native analysis disabled.
+static void EnsureUFunctionFuncOffset() {
+    if (DynOff::bUFunctionFuncDetected.load(std::memory_order_acquire)) return;
+    static std::mutex s_detectMutex;
+    std::lock_guard<std::mutex> lk(s_detectMutex);
+    if (DynOff::bUFunctionFuncDetected.load(std::memory_order_relaxed)) return;
+
+    constexpr int kWant = 32;
+    std::vector<uintptr_t> samples;
+    int32_t count = GetCount();
+    for (int32_t i = 0; i < count && static_cast<int>(samples.size()) < kWant; ++i) {
+        uintptr_t obj = GetByIndex(i);
+        if (!obj) continue;
+        uintptr_t cls = 0;
+        if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
+        uint32_t clsNameIdx = 0;
+        if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx)) continue;
+        if (Serie::GetString(clsNameIdx) != "Function") continue;
+        samples.push_back(obj);
+    }
+
+    int best = 0;
+    if (samples.size() >= 8) {
+        const int need = static_cast<int>(samples.size()) - 1;  // tolerate 1 oddball
+        for (int off = 0x80; off <= 0x158 && best == 0; off += 8) {
+            int hits = 0;
+            for (uintptr_t f : samples) {
+                uintptr_t p = 0;
+                if (Macht::ReadSafe(f + off, p) && Macht::LooksLikeCodePointer(p)) hits++;
+            }
+            if (hits >= need) best = off;
+        }
+    }
+    DynOff::UFUNCTION_FUNC = best;
+    DynOff::bUFunctionFuncDetected.store(true, std::memory_order_release);
+    LOG_INFO("DetectUFunctionFuncOffset: %zu UFunction samples -> UFUNCTION_FUNC=+0x%X%s",
+             samples.size(), best,
+             best ? "" : " (NOT FOUND — Path 2 native analysis disabled)");
+}
+
+// --- Path 2: disassemble a native UFunction and map [this+off] to props ---
+//
+// Returns the method tag ("disasm" when the decoder ran, "none" when the exec
+// pointer couldn't be resolved/read). Fills out.refs with the field accesses
+// that map to a property on the function's owning class. Heuristic: see Denken.
+static std::string AnalyzeNativeFunctionProps(uintptr_t funcAddr,
+                                              FunctionPropRefResult& out) {
+    EnsureUFunctionFuncOffset();
+    if (DynOff::UFUNCTION_FUNC == 0) return "none";
+
+    uintptr_t exec = 0;
+    if (!Macht::ReadSafe(funcAddr + DynOff::UFUNCTION_FUNC, exec) ||
+        !Macht::LooksLikeCodePointer(exec))
+        return "none";
+
+    // In-process SEH-safe reader: take the full window when readable, else read
+    // byte-by-byte up to the first unreadable address (function tail / guard page).
+    Denken::MemReader reader = [](uintptr_t addr, uint8_t* buf, size_t maxLen) -> size_t {
+        if (Macht::ReadBytesSafe(addr, buf, maxLen)) return maxLen;
+        size_t n = 0;
+        for (; n < maxLen; ++n)
+            if (!Macht::ReadBytesSafe(addr + n, buf + n, 1)) break;
+        return n;
+    };
+
+    Denken::NativeAnalysisResult r = Denken::Analyze(exec, reader);
+    if (!r.ok) return "none";
+
+    // Map each [this+off] access to a property on the owning class (UFunction's
+    // Outer). WalkClass already includes the full inherited super chain with
+    // absolute Offset_Internal, so an offset matches at most one property.
+    uintptr_t owner = Ubel::GetOuter(funcAddr);
+    if (owner) {
+        ClassInfo ci = Ubel::WalkClass(owner);
+        std::unordered_map<int32_t, const FieldInfo*> byOff;
+        byOff.reserve(ci.Fields.size());
+        for (const auto& f : ci.Fields) byOff.emplace(f.Offset, &f);
+
+        for (const auto& acc : r.accesses) {
+            auto it = byOff.find(static_cast<int32_t>(acc.offset));
+            if (it == byOff.end()) { out.unmappedAccesses++; continue; }
+            const FieldInfo& f = *it->second;
+            FunctionPropRef ref;
+            ref.propAddr    = f.Address;
+            ref.name        = f.Name;
+            ref.type        = f.TypeName;
+            ref.offset      = static_cast<int32_t>(acc.offset);
+            ref.occurrences = acc.occurrences;
+            ref.writeCount  = acc.writeCount;
+            ref.scope       = "instance";   // mapped to a class member
+            ref.confidence  = acc.highConfidence ? "high" : "low";
+            out.refs.push_back(std::move(ref));
+        }
+
+        // High-confidence first, then writers, then frequency, then name.
+        std::sort(out.refs.begin(), out.refs.end(),
+                  [](const FunctionPropRef& a, const FunctionPropRef& b) {
+            bool ah = a.confidence == "high", bh = b.confidence == "high";
+            if (ah != bh) return ah;
+            if ((a.writeCount > 0) != (b.writeCount > 0)) return a.writeCount > 0;
+            if (a.occurrences != b.occurrences) return a.occurrences > b.occurrences;
+            return a.name < b.name;
+        });
+    }
+
+    LOG_INFO("AnalyzeNativeFunctionProps: 0x%llX exec=0x%llX -> %zu mapped props "
+             "(%d unmapped, %d instrs, %d calls%s)",
+             static_cast<unsigned long long>(funcAddr),
+             static_cast<unsigned long long>(exec), out.refs.size(),
+             out.unmappedAccesses, r.instrsDecoded, r.callsFollowed,
+             r.budgetHit ? ", BUDGET" : "");
+    return "disasm";
+}
+
 // --- WalkFunctionPropertyRefs: reverse edge (function -> properties) ---
 FunctionPropRefResult WalkFunctionPropertyRefs(uintptr_t funcAddr) {
     FunctionPropRefResult out;
@@ -3532,8 +3655,13 @@ FunctionPropRefResult WalkFunctionPropertyRefs(uintptr_t funcAddr) {
     uintptr_t scriptData = 0; int32_t scriptNum = 0;
     Macht::ReadSafe(funcAddr + DynOff::USTRUCT_SCRIPT,        scriptData);
     Macht::ReadSafe(funcAddr + DynOff::USTRUCT_SCRIPT + 0x08, scriptNum);
-    if (!scriptData || scriptNum <= 0 || scriptNum > (1 << 22)) return out;  // native/empty/garbage
+    if (!scriptData || scriptNum <= 0 || scriptNum > (1 << 22)) {
+        // Empty/native bytecode → Path 2 x64 disassembly fallback (heuristic).
+        out.method = AnalyzeNativeFunctionProps(funcAddr, out);
+        return out;
+    }
     out.scriptBytes = scriptNum;
+    out.method = "bytecode";
 
     std::vector<uint8_t> buf(static_cast<size_t>(scriptNum));
     if (!Macht::ReadBytesSafe(scriptData, buf.data(), static_cast<size_t>(scriptNum))) return out;

@@ -22,6 +22,7 @@
 #include "../src/Renge.h"
 #include "../src/Scharf.h"
 #include "../src/ValueScan.h"
+#include "../src/Denken.h"
 
 #include <Windows.h>
 #include <timeapi.h>   // timeBeginPeriod — exercised by the poll-latency check
@@ -1114,6 +1115,167 @@ static void Test_ValueScan_SelectArrayInnerKey() {
         ValueScan::SelectArrayInnerKey({"FloatProperty", "BoolProperty"}, {"X", "Flag"}) == -1);
 }
 
+// ----- Denken: native x64 disassembly (Path 2) -------------------------------
+//
+// Hand-assembled x64 byte buffers exercise the decoder core through a buffer-
+// backed MemReader (no live process). The encodings below are standard MS x64;
+// `this` is assumed in RCX at entry (Denken's seed), matching the UE exec-thunk
+// signature Func(UObject* Context, FFrame&, void*).
+
+namespace {
+
+struct DenkenRegion { uintptr_t base; std::vector<uint8_t> bytes; };
+
+static Denken::MemReader MakeReader(const std::vector<DenkenRegion>* regions) {
+    return [regions](uintptr_t addr, uint8_t* out, size_t maxLen) -> size_t {
+        for (const auto& r : *regions) {
+            if (addr >= r.base && addr < r.base + r.bytes.size()) {
+                size_t avail = r.base + r.bytes.size() - addr;
+                size_t n = avail < maxLen ? avail : maxLen;
+                std::memcpy(out, r.bytes.data() + (addr - r.base), n);
+                return n;
+            }
+        }
+        return 0;
+    };
+}
+
+static const Denken::NativeFieldAccess* FindAccess(
+    const Denken::NativeAnalysisResult& r, uint32_t off) {
+    for (const auto& a : r.accesses) if (a.offset == off) return &a;
+    return nullptr;
+}
+
+} // namespace
+
+static void Test_Denken_BasicAccesses() {
+    // mov [rcx+0x10], eax   89 41 10   write @0x10, base=this -> high-conf
+    // mov eax, [rdx+0x20]   8B 42 20   read  @0x20, base=rdx  -> low-conf
+    // mov rbx, rcx          48 89 CB   rbx becomes a this-alias
+    // mov eax, [rbx+0x08]   8B 43 08   read  @0x08 via alias  -> high-conf
+    // ret                   C3
+    std::vector<DenkenRegion> regions = {{ 0x140000000ULL, {
+        0x89, 0x41, 0x10,
+        0x8B, 0x42, 0x20,
+        0x48, 0x89, 0xCB,
+        0x8B, 0x43, 0x08,
+        0xC3,
+    }}};
+    auto r = Denken::Analyze(0x140000000ULL, MakeReader(&regions));
+    EXPECT("basic: ran", r.ok);
+
+    const auto* w10 = FindAccess(r, 0x10);
+    EXPECT("basic: @0x10 present",   w10 != nullptr);
+    if (w10) {
+        EXPECT("basic: @0x10 write",     w10->writeCount == 1);
+        EXPECT("basic: @0x10 high-conf", w10->highConfidence);
+        EXPECT("basic: @0x10 size 4",    w10->accessSize == 4);
+    }
+    const auto* r20 = FindAccess(r, 0x20);
+    EXPECT("basic: @0x20 present",   r20 != nullptr);
+    if (r20) {
+        EXPECT("basic: @0x20 read",      r20->writeCount == 0);
+        EXPECT("basic: @0x20 low-conf",  !r20->highConfidence);
+    }
+    const auto* r08 = FindAccess(r, 0x08);
+    EXPECT("basic: @0x08 present (alias)", r08 != nullptr);
+    if (r08) EXPECT("basic: @0x08 high-conf via rbx alias", r08->highConfidence);
+}
+
+static void Test_Denken_ExcludesStackAndZeroDisp() {
+    // mov eax, [rbp+0x10]   8B 45 10        rbp-relative (local) -> excluded
+    // mov eax, [rsp+0x10]   8B 44 24 10     rsp-relative (local) -> excluded
+    // mov [rcx+0x04], eax   89 41 04        valid this write     -> recorded
+    // ret                   C3
+    std::vector<DenkenRegion> regions = {{ 0x140000000ULL, {
+        0x8B, 0x45, 0x10,
+        0x8B, 0x44, 0x24, 0x10,
+        0x89, 0x41, 0x04,
+        0xC3,
+    }}};
+    auto r = Denken::Analyze(0x140000000ULL, MakeReader(&regions));
+    EXPECT("stack: ran", r.ok);
+    EXPECT("stack: rbp excluded", FindAccess(r, 0x10) == nullptr);
+    const auto* a = FindAccess(r, 0x04);
+    EXPECT("stack: this write recorded", a != nullptr && a->writeCount == 1 && a->highConfidence);
+}
+
+static void Test_Denken_FollowsCallHandoff() {
+    // Thunk @ B0: save this, restore to rcx, call impl, ret.
+    //   mov rbx, rcx     48 89 CB
+    //   mov rcx, rbx     48 89 D9
+    //   call rel32       E8 <rel>      (instr at B0+6, next = B0+11)
+    //   ret              C3
+    // Impl  @ B1: mov [rcx+0x40], eax ; ret  (write @0x40, this in rcx)
+    const uintptr_t B0 = 0x140000000ULL;
+    const uintptr_t B1 = 0x140001000ULL;
+    const int32_t rel = static_cast<int32_t>(B1 - (B0 + 11));
+    std::vector<uint8_t> thunk = {
+        0x48, 0x89, 0xCB,
+        0x48, 0x89, 0xD9,
+        0xE8,
+        static_cast<uint8_t>(rel & 0xFF),
+        static_cast<uint8_t>((rel >> 8) & 0xFF),
+        static_cast<uint8_t>((rel >> 16) & 0xFF),
+        static_cast<uint8_t>((rel >> 24) & 0xFF),
+        0xC3,
+    };
+    std::vector<DenkenRegion> regions = {
+        { B0, thunk },
+        { B1, { 0x89, 0x41, 0x40, 0xC3 } },
+    };
+    auto r = Denken::Analyze(B0, MakeReader(&regions));
+    EXPECT("follow: ran", r.ok);
+    EXPECT("follow: followed 1 call", r.callsFollowed == 1);
+    const auto* a = FindAccess(r, 0x40);
+    EXPECT("follow: impl write @0x40 found", a != nullptr);
+    if (a) EXPECT("follow: @0x40 high-conf in impl", a->highConfidence && a->writeCount == 1);
+}
+
+static void Test_Denken_DoesNotFollowNonThisCall() {
+    // call rel32 with a NON-this rcx (rcx was clobbered by a load) must NOT
+    // follow. Sequence: mov rcx, [rdx] (clobbers rcx) ; call impl ; ret.
+    //   mov rcx, [rdx]   48 8B 0A
+    //   call rel32       E8 <rel>     (instr at B0+3, next = B0+8)
+    //   ret              C3
+    const uintptr_t B0 = 0x140000000ULL;
+    const uintptr_t B1 = 0x140001000ULL;
+    const int32_t rel = static_cast<int32_t>(B1 - (B0 + 8));
+    std::vector<uint8_t> thunk = {
+        0x48, 0x8B, 0x0A,
+        0xE8,
+        static_cast<uint8_t>(rel & 0xFF),
+        static_cast<uint8_t>((rel >> 8) & 0xFF),
+        static_cast<uint8_t>((rel >> 16) & 0xFF),
+        static_cast<uint8_t>((rel >> 24) & 0xFF),
+        0xC3,
+    };
+    std::vector<DenkenRegion> regions = {
+        { B0, thunk },
+        { B1, { 0x89, 0x41, 0x40, 0xC3 } },   // would write @0x40 if (wrongly) followed
+    };
+    auto r = Denken::Analyze(B0, MakeReader(&regions));
+    EXPECT("no-follow: ran", r.ok);
+    EXPECT("no-follow: did not follow", r.callsFollowed == 0);
+    EXPECT("no-follow: impl access not recorded", FindAccess(r, 0x40) == nullptr);
+}
+
+static void Test_Denken_TerminatesAndGuards() {
+    // Bare ret -> ok, zero accesses, no crash.
+    std::vector<DenkenRegion> ret = {{ 0x140000000ULL, { 0xC3 } }};
+    auto r0 = Denken::Analyze(0x140000000ULL, MakeReader(&ret));
+    EXPECT("guard: bare ret ok", r0.ok && r0.accesses.empty());
+
+    // Unreadable start address -> not ok (reader returns 0).
+    std::vector<DenkenRegion> empty;
+    auto r1 = Denken::Analyze(0x140000000ULL, MakeReader(&empty));
+    EXPECT("guard: unreadable start -> !ok", !r1.ok);
+
+    // Null start / null reader -> not ok.
+    auto r2 = Denken::Analyze(0, MakeReader(&ret));
+    EXPECT("guard: null addr -> !ok", !r2.ok);
+}
+
 int main() {
     std::printf("dll_helpers_test (Renge + Scharf + ValueScan)\n");
     std::printf("------------------------------------------\n");
@@ -1174,6 +1336,13 @@ int main() {
     Test_ValueScan_SelectArrayInnerKey();
 
     Test_ValueScan_SessionLifecycle();
+
+    // Path 2 — native x64 disassembly (Denken decoder core)
+    Test_Denken_BasicAccesses();
+    Test_Denken_ExcludesStackAndZeroDisp();
+    Test_Denken_FollowsCallHandoff();
+    Test_Denken_DoesNotFollowNonThisCall();
+    Test_Denken_TerminatesAndGuards();
 
     std::printf("------------------------------------------\n");
     std::printf("Pass: %d   Fail: %d\n", g_pass, g_fail);

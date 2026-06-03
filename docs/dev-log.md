@@ -11,6 +11,73 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-06-03 — Native UFunction property xref via x64 disassembly (Path 2, builds 862-872)
+
+The complement to Path 1: **answer "which fields does this *native* (C++) function
+read/write?"** for functions that Path 1 can't see — `FUNC_Native` functions have
+empty Kismet bytecode. Path 2 disassembles the native function's machine code with
+**Zydis** and maps each `[this+offset]` access back to a UPROPERTY on the owning
+class. Forward direction only (function → properties); the reverse (property →
+native funcs) would mean disassembling every native function per query and is
+deferred. Heuristic by nature (vs Path 1's exact byte match), so confidence is
+surfaced honestly in the UI.
+
+**Design — reuses the Path 1 seam end-to-end.** No new pipe command, no new UI
+panel: `walk_function_props` already returned empty for native functions and
+`FunctionPropsDialog` already showed *"native, no bytecode"*. Path 2 plugs into
+exactly that gap — when `UStruct::Script` is empty the DLL falls back to
+disassembly and returns the same `FunctionPropRef` rows, tagged `method="disasm"`
+with a per-row `confidence`.
+
+- **Zydis vendored as `vendor/zydis` submodule** (v4.1.1 + nested `zycore`),
+  matching the `vendor/minhook` convention. Built **static, decoder-only**
+  (`ZYDIS_FEATURE_ENCODER/FORMATTER OFF`) → ~250KB. Linked into `UE5Dumper`, both
+  proxy DLLs, and `dll_helpers_test`. RE-UE4SS's copy was only a FetchContent stub
+  (downloads at build time — rejected as against the offline-vendoring rule).
+- **`Denken` module** (`dll/src/Denken.{h,cpp}`, naming map #25). Pure Zydis-only
+  decoder core: `Analyze(startAddr, MemReader)` where all process-memory access
+  goes through a caller-supplied reader callback — so the TU links into the leaf
+  test with no Macht/Win32 dependency. `this` is seeded in **RCX** (MS x64 ABI; the
+  exec-thunk signature is `Func(UObject* Context, FFrame&, void*)`), tracked across
+  register copies; `[reg+disp]` accesses are recorded high-confidence when the base
+  is a proven this-alias, low otherwise (stack/RIP bases excluded). Follows up to
+  a few direct `CALL`/tail-`JMP` handoffs (the thunk → real C++ impl) when RCX
+  still holds this; instruction budget caps runaway. **Zydis v4 gotcha:** the
+  displacement-present flag is `op.mem.disp.has_displacement`, not `.disp.size`.
+- **`UFunction::Func` offset detection** (`Aura::EnsureUFunctionFuncOffset`,
+  `DynOff::UFUNCTION_FUNC`). Detected **lazily** on first Path-2 use (GObjects
+  guaranteed ready, zero startup cost): every UFunction's `Func` is an in-module
+  code pointer (native → execXxx thunk; script → ProcessInternal), and no other
+  pointer member in the `0x80..0x158` window is `MEM_IMAGE` executable, so the
+  first offset where all sampled UFunctions hold a `Macht::LooksLikeCodePointer`
+  IS Func. `0` = not found → Path 2 silently disabled (method `"none"`), Path 1
+  unaffected. New `Macht::LooksLikeCodePointer` validates via `VirtualQuery`
+  (`MEM_IMAGE` + `PAGE_EXECUTE*`).
+- **Aura wiring** (`WalkFunctionPropertyRefs`). On empty Script → read the exec
+  ptr, `Denken::Analyze`, then map accesses to properties via `Ubel::WalkClass`
+  (already includes the full inherited super chain with absolute `Offset_Internal`,
+  so an offset matches at most one property). Unmapped accesses counted, not shown.
+  Rows sorted high-confidence → writers → frequency → name.
+- **Pipe + UI.** `walk_function_props` response gains `method` + `unmapped` and
+  each row gains `offset` + `confidence`. C# `FunctionPropRef(sResult)` mirrors them
+  (defaulting `method` to `"bytecode"` for old DLLs); `FunctionPropsDialog` is now
+  method-aware — a **Confidence** column appears for disasm results (low-conf rows
+  amber), the status line flags `[native disasm — heuristic, N unmapped]`, and the
+  `"none"` case keeps the old "no analysis available" message. Caveat reworded to
+  cover both methods.
+
+**Tests.** +5 `Denken_*` cases in `dll_helpers_test` (hand-assembled x64: this
+write / non-this read / alias propagation / call-handoff followed / non-this call
+NOT followed / terminators+guards) → 393 dll-helper assertions. +4 C#
+`WalkFunctionPropsAsync` cases (bytecode / disasm with offset+confidence+unmapped /
+none / backward-compat default) → 1224 C#. Suite: **1224 C# + 393 dll + 31 utf8 =
+1648**, all green. Native AOT publish clean (no IL2026/IL3050 from the new
+DataGrid column — uses the existing `FuncDataTemplate<T>` pattern). **Live verify
+pending (user):** Geri (UE4.27) / ES2 (UE5.5) — Interesting Functions → a native
+getter/setter → Props → expect disasm rows naming the touched field(s).
+
+-----
+
 ## 2026-06-03 — Property ↔ Function bytecode cross-reference (Path 1, builds 838-861)
 
 A new RE capability line: **answer "which methods use this field, read or write?"

@@ -89,6 +89,19 @@ size_t GetModuleSize(const wchar_t* moduleName) {
     return 0;
 }
 
+bool LooksLikeCodePointer(uintptr_t addr) {
+    if (addr < 0x10000) return false;  // null / low reserved region
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi)) == 0)
+        return false;
+    if (mbi.State != MEM_COMMIT) return false;
+    if (mbi.Type != MEM_IMAGE) return false;  // must be a mapped module image
+    if (mbi.Protect & PAGE_GUARD) return false;
+    const DWORD execMask = PAGE_EXECUTE | PAGE_EXECUTE_READ |
+                           PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+    return (mbi.Protect & execMask) != 0;
+}
+
 // ============================================================
 // AOBScan internals
 // ============================================================

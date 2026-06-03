@@ -2392,6 +2392,9 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             json data;
             data["query_addr"]   = addrStr;
             data["script_bytes"] = res.scriptBytes;
+            // Path 2: "bytecode" (exact) / "disasm" (native x64, heuristic) / "none".
+            data["method"]       = res.method;
+            data["unmapped"]     = res.unmappedAccesses;
             json arr = json::array();
             for (const auto& r : res.refs) {
                 json rj;
@@ -2401,6 +2404,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 rj["occurrences"] = r.occurrences;
                 rj["write_count"] = r.writeCount;
                 rj["scope"]       = r.scope;
+                rj["offset"]      = r.offset;       // class-member offset (disasm; -1 = n/a)
+                rj["confidence"]  = r.confidence;   // "high"/"low" (disasm); "" (bytecode)
                 arr.push_back(rj);
             }
             data["props"] = arr;

@@ -72,6 +72,19 @@ inline int USTRUCT_PROPSSIZE  = 0x58;
 // PROPSSIZE; default mirrors the UE4.25+/UE5 standard (0x58 + 8 = 0x60).
 inline int USTRUCT_SCRIPT     = 0x60;
 
+// === UFunction::Func — native exec-thunk pointer (Path 2 disassembly) ===
+// FNativeFuncPtr at the tail of UFunction. For native functions it points at
+// the execXxx thunk in .text (what Denken disassembles); for script functions
+// it points at UObject::ProcessInternal. Position trails FunctionFlags + the
+// RPC ids + FirstPropertyToInit and is version-dependent, so it is detected
+// lazily on first Path-2 use (Aura::DetectUFunctionFuncOffset) by finding the
+// offset that holds an in-module code pointer across several sampled native
+// UFunctions. 0 = not found → Path 2 native analysis disabled (the Path 1
+// bytecode path is unaffected).
+inline int UFUNCTION_FUNC     = 0;
+// Latched once detection has run (success or failure), to avoid re-sampling.
+inline std::atomic<bool> bUFunctionFuncDetected{false};
+
 // === FField — defaults for UE5.0-5.1.0 (FFieldVariant=0x10) ===
 // UE5.1.1+ shifts these: Next=0x18, Name=0x20
 inline int FFIELD_CLASS       = 0x08;  // FFieldClass* — stable

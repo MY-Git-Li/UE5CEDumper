@@ -36,11 +36,18 @@ Deferred follow-ups:
   KismetDebuggerMod/src/KismetDebugger.cpp` (`render_expr`) + `EExprToken` in
   `vendor/UnrealEngine/.../UObject/Script.h`. Only do it when a real
   mis-attribution motivates the cost.
-- **Path 2 — native UFunction analysis.** Effort: L. Risk: med. Why: Path 1 can't
-  see native (C++) functions (empty bytecode). Disassemble the native func's x64
-  machine code (Zydis — already vendored transitively at
-  `vendor/RE-UE4SS/deps/third/zydis/`) to find `[reg+0xOFFSET]` property accesses.
-  Complements Path 1; the only way to xref native-only fields.
+- ~~**Path 2 — native UFunction analysis.**~~ ✅ **SHIPPED 2026-06-03 (builds
+  862-872, dev).** Forward direction (native UFunction → properties): Zydis
+  decoder (`Denken` module, `vendor/zydis` submodule) disassembles the exec thunk,
+  tracks the `this` register (RCX), records `[this+off]` accesses, follows the
+  thunk→impl call, and maps offsets to UPROPERTYs via `Ubel::WalkClass`. Plugs into
+  the existing `walk_function_props` / `FunctionPropsDialog` seam (tagged
+  `method="disasm"` + per-row confidence). See dev-log 2026-06-03 (Path 2).
+  **Deferred follow-ups:** (a) **reverse direction** (property → native funcs —
+  needs disassembling every native function per query; expensive); (b) **SIB-indexed
+  / `[reg+idx*scale+disp]` accesses** (currently skipped); (c) **CFG-aware branch
+  following** (only fall-through + direct call/tail-jmp are followed today);
+  (d) live tuning of the `this`-tracking + Func-offset detector across more games.
 
 -----
 
