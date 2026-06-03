@@ -232,10 +232,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         Pointers = new PointerPanelViewModel(platform, dump, log, aobMaker, aobUsage, experimentalGate);
         LiveWalker = new LiveWalkerViewModel(dump, log, platform, aobMaker);
         InstanceFinder = new InstanceFinderViewModel(dump, log, platform);
-        PropertySearch = new PropertySearchViewModel(dump, log, aobMaker);
+        PropertySearch = new PropertySearchViewModel(dump, log, aobMaker, platform);
         GameClassFilter = new GameClassFilterViewModel(dump, log);
         InterestingFunctions = new InterestingFunctionsViewModel(dump, log, aobMaker);
-        InterestingProperties = new InterestingPropertiesViewModel(dump, log);
+        InterestingProperties = new InterestingPropertiesViewModel(dump, log, platform);
         ValueSearch = new ValueSearchViewModel(dump, log);
         Console = new ConsoleViewModel(dump, log);
         if (snapshotStore != null)

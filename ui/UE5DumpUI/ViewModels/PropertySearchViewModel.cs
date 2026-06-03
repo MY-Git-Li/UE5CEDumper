@@ -19,6 +19,7 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
     private readonly IDumpService _dump;
     private readonly ILoggingService _log;
     private readonly IAobMakerBridge? _aobMaker;
+    private readonly IPlatformService? _platform;
 
     /// <summary>
     /// Cooldown for live AOBMaker availability re-checks so rapid grid
@@ -123,11 +124,13 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
     public event Action<string>? NavigateToLiveWalker;
 
     public PropertySearchViewModel(IDumpService dump, ILoggingService log,
-                                   IAobMakerBridge? aobMaker = null)
+                                   IAobMakerBridge? aobMaker = null,
+                                   IPlatformService? platform = null)
     {
         _dump = dump;
         _log = log;
         _aobMaker = aobMaker;
+        _platform = platform;
         // Seed the availability flag from the bridge's cached value so the
         // first paint of the panel isn't always "unavailable" — the actual
         // pipe probe happens lazily in RefreshAobMakerAvailabilityAsync.
@@ -373,6 +376,27 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
             clipboard = desktop.MainWindow?.Clipboard;
         }
         clipboard?.SetTextAsync(match.OffsetHex);
+    }
+
+    /// <summary>
+    /// "Find functions using this field" — static Kismet-bytecode xref for
+    /// the matched property's FProperty*. Opens the shared self-contained
+    /// dialog (no tab impact).
+    /// </summary>
+    [RelayCommand]
+    private async Task FindFieldXrefsAsync(PropertySearchMatch? match)
+    {
+        match ??= SelectedResult;
+        if (match == null || string.IsNullOrEmpty(match.FieldAddr)) return;
+        try
+        {
+            await Views.PropertyXrefDialog.ShowForFieldAsync(
+                match.PropName, match.PropType, match.FieldAddr, _dump, _platform);
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"FindFieldXrefs failed for {match.PropName}", ex);
+        }
     }
 
     public void Dispose()

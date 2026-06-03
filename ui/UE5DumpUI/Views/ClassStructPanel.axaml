@@ -23,6 +23,16 @@
       </StackPanel>
     </StackPanel>
 
+    <!-- Field filter (client-side; no DLL roundtrip) -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8"
+                Margin="0,0,0,8" IsVisible="{Binding HasClass}">
+      <TextBlock Text="{StaticResource str.ClassStruct.FilterLabel}"
+                 Foreground="#888" FontSize="12" VerticalAlignment="Center"/>
+      <TextBox PlaceholderText="{StaticResource str.ClassStruct.FilterHint}"
+               Text="{Binding FieldFilter}"
+               Width="320" Padding="4,2" FontSize="12"/>
+    </StackPanel>
+
     <!-- No class selected message -->
     <TextBlock DockPanel.Dock="Top"
                Text="{StaticResource str.ClassStruct.NoClass}"
@@ -73,7 +83,7 @@
               FontSize="13">
       <DataGrid.ContextMenu>
         <ContextMenu x:DataType="vm:ClassStructViewModel">
-          <MenuItem Header="{StaticResource str.ClassStruct.FindXrefs}"
+          <MenuItem Header="{StaticResource str.Xref.FindFunctions}"
                     Command="{Binding FindFieldXrefsCommand}"
                     CommandParameter="{Binding SelectedField}"/>
         </ContextMenu>
@@ -94,6 +104,19 @@
         <DataGridTextColumn Header="Address"
                             Binding="{Binding Address}"
                             Width="160"/>
+        <DataGridTemplateColumn Header="" Width="Auto">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="models:FieldInfoModel">
+              <Button Content="{StaticResource str.Xref.FindFuncsButton}"
+                      Command="{Binding $parent[UserControl].((vm:ClassStructViewModel)DataContext).FindFieldXrefsCommand}"
+                      CommandParameter="{Binding}"
+                      ToolTip.Tip="{StaticResource str.Xref.FindFunctions}"
+                      Foreground="#C586C0" Background="Transparent"
+                      BorderThickness="1" BorderBrush="#C586C0"
+                      Padding="6,2" FontSize="11" Cursor="Hand"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
       </DataGrid.Columns>
     </DataGrid>
   </DockPanel>

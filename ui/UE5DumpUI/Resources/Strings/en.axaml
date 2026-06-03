@@ -83,7 +83,10 @@
     <sys:String x:Key="str.ClassStruct.Super">Super Class</sys:String>
     <sys:String x:Key="str.ClassStruct.PropsSize">Properties Size</sys:String>
     <sys:String x:Key="str.ClassStruct.NoClass">Select an object to view its class structure</sys:String>
-    <sys:String x:Key="str.ClassStruct.FindXrefs">Find functions using this field</sys:String>
+    <sys:String x:Key="str.Xref.FindFunctions">Find functions using this field</sys:String>
+    <sys:String x:Key="str.Xref.FindFuncsButton">Find Funcs</sys:String>
+    <sys:String x:Key="str.ClassStruct.FilterLabel">Filter:</sys:String>
+    <sys:String x:Key="str.ClassStruct.FilterHint">Filter fields by name or type</sys:String>
 
     <!-- Live Walker -->
     <sys:String x:Key="str.LiveWalker.StartWorld">Start from GWorld</sys:String>

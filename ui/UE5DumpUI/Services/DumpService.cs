@@ -1149,6 +1149,7 @@ public sealed class DumpService : IDumpService
                     DefiningClassAddr = obj["defining_class_addr"]?.GetValue<string>() ?? "",
                     DefiningClassPath = obj["defining_class_path"]?.GetValue<string>() ?? "",
                     InheritedByCount  = obj["inherited_by_count"]?.GetValue<int>() ?? 0,
+                    FieldAddr         = obj["field_addr"]?.GetValue<string>() ?? "",
                 });
             }
         }
@@ -1227,6 +1228,7 @@ public sealed class DumpService : IDumpService
                             DefiningClassAddr = obj["defining_class_addr"]?.GetValue<string>() ?? "",
                             DefiningClassPath = obj["defining_class_path"]?.GetValue<string>() ?? "",
                             InheritedByCount  = obj["inherited_by_count"]?.GetValue<int>() ?? 0,
+                            FieldAddr         = obj["field_addr"]?.GetValue<string>() ?? "",
                         });
                     }
                 }

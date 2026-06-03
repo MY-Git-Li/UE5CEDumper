@@ -36,6 +36,26 @@ public sealed class PropertyXrefDialog : Window
     private Button _btnCopy = null!;
     private Button _btnClose = null!;
 
+    /// <summary>
+    /// Resolve the desktop owner window and show the xref dialog for a field.
+    /// No-op if there is no FProperty address, no platform service, or no
+    /// owner window. Shared by the Class Struct, Property Search, and
+    /// Interesting Properties panels so the owner-resolution lives in one place.
+    /// </summary>
+    public static async Task ShowForFieldAsync(
+        string fieldName, string fieldType, string propAddr,
+        IDumpService dump, IPlatformService? platform)
+    {
+        if (string.IsNullOrEmpty(propAddr) || propAddr == "0x0" || platform == null)
+            return;
+        if (Avalonia.Application.Current?.ApplicationLifetime is not
+            Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+            || desktop.MainWindow is not { } owner)
+            return;
+        var dialog = new PropertyXrefDialog(fieldName, fieldType, propAddr, dump, platform);
+        await dialog.ShowDialog(owner);
+    }
+
     public PropertyXrefDialog(string fieldName, string fieldType, string propAddr,
                               IDumpService dump, IPlatformService platform)
     {

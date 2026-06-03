@@ -33,6 +33,7 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
 {
     private readonly IDumpService _dump;
     private readonly ILoggingService _log;
+    private readonly IPlatformService? _platform;
 
     /// <summary>How many matches each seed-query call asks for. Default
     /// 200 mirrors the existing PropertySearch tab's limit. Total
@@ -81,10 +82,33 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
     /// testable.</summary>
     public event Action<string /*defaultFileName*/, string /*ctXml*/>? RequestSaveCheatTable;
 
-    public InterestingPropertiesViewModel(IDumpService dump, ILoggingService log)
+    public InterestingPropertiesViewModel(IDumpService dump, ILoggingService log,
+                                          IPlatformService? platform = null)
     {
         _dump = dump;
         _log  = log;
+        _platform = platform;
+    }
+
+    /// <summary>
+    /// "Find functions using this field" — bridges the property scoring to the
+    /// functions that actually reference the scored field (static bytecode
+    /// xref). Opens the shared self-contained dialog (no tab impact).
+    /// </summary>
+    [RelayCommand]
+    private async Task FindFieldXrefsAsync(ScoredPropertyRow? row)
+    {
+        row ??= SelectedResult;
+        if (row == null || string.IsNullOrEmpty(row.Match.FieldAddr)) return;
+        try
+        {
+            await Views.PropertyXrefDialog.ShowForFieldAsync(
+                row.PropName, row.PropType, row.Match.FieldAddr, _dump, _platform);
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"FindFieldXrefs failed for {row.PropName}", ex);
+        }
     }
 
     partial void OnFilterTextChanged(string value)                  => ApplyFilter();

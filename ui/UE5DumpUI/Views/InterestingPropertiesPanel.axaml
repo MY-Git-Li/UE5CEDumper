@@ -95,6 +95,13 @@
               Foreground="#D4D4D4"
               FontSize="12"
               FontFamily="Consolas, Menlo, monospace">
+      <DataGrid.ContextMenu>
+        <ContextMenu x:DataType="vm:InterestingPropertiesViewModel">
+          <MenuItem Header="{StaticResource str.Xref.FindFunctions}"
+                    Command="{Binding FindFieldXrefsCommand}"
+                    CommandParameter="{Binding SelectedResult}"/>
+        </ContextMenu>
+      </DataGrid.ContextMenu>
       <DataGrid.Columns>
         <DataGridTemplateColumn Header="Score" Width="60">
           <DataGridTemplateColumn.CellTemplate>
@@ -139,6 +146,14 @@
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:ScoredPropertyRow">
               <StackPanel Orientation="Horizontal" Spacing="4">
+                <Button Content="{StaticResource str.Xref.FindFuncsButton}"
+                        Command="{Binding $parent[UserControl].((vm:InterestingPropertiesViewModel)DataContext).FindFieldXrefsCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Xref.FindFunctions}"
+                        Foreground="#C586C0" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#C586C0"
+                        Padding="6,2" FontSize="11"
+                        Cursor="Hand"/>
                 <Button Content="{StaticResource str.IP.OpenLive}"
                         Command="{Binding $parent[UserControl].((vm:InterestingPropertiesViewModel)DataContext).OpenInLiveWalkerCommand}"
                         CommandParameter="{Binding}"

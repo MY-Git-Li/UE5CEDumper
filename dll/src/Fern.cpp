@@ -1784,6 +1784,10 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 item["defining_class_addr"] = Renge::AddrToStr(m.definingClassAddr);
                 item["defining_class_path"] = m.definingClassPath;
                 item["inherited_by_count"]  = m.inheritedByCount;
+                // FProperty* address — the key for find_property_xrefs
+                // ("which methods use this field?"). Populated during the
+                // field walk regardless of preview.
+                item["field_addr"] = Renge::AddrToStr(m.fieldAddr);
                 if (!m.preview.empty())
                     item["preview"] = m.preview;
                 matches.push_back(item);
@@ -1859,6 +1863,9 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                     item["defining_class_addr"] = Renge::AddrToStr(m.definingClassAddr);
                     item["defining_class_path"] = m.definingClassPath;
                     item["inherited_by_count"]  = m.inheritedByCount;
+                    // FProperty* address for find_property_xrefs (set during
+                    // the field walk, so available even on this no-preview path).
+                    item["field_addr"] = Renge::AddrToStr(m.fieldAddr);
                     // Note: preview omitted intentionally — batch path skips
                     // Phase-2 instance scan. Interesting Properties tab
                     // (the only caller) doesn't display previews.
