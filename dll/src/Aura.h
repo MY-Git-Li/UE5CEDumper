@@ -441,6 +441,10 @@ struct PropertyXref {
     uintptr_t   ownerClassAddr = 0;
     std::string ownerClassName;
     int32_t     occurrences    = 0;    // hit count within this function's bytecode
+    int32_t     writeCount     = 0;    // of those, how many are assignment destinations
+                                       // (EX_Let* LHS). reads = occurrences - writeCount.
+                                       // Best-effort: wrapped LHS (Other.Field/Struct.Member/
+                                       // Arr[i] = x) is not detected and counts as a read.
     std::string kind;                  // "instance" (0x01) / "local" (0x00) / "ref"
 
     // v2a: for hits inside a Blueprint ubergraph (ExecuteUbergraph_*), the BP

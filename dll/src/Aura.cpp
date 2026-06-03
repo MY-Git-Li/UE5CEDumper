@@ -3318,6 +3318,37 @@ BuildUbergraphEntryTable(uintptr_t classAddr, uintptr_t ubergraphAddr) {
     return table;
 }
 
+// v2 read/write: is the FProperty reference at byte offset p (its pointer
+// position; the variable opcode sits at p-1) the DESTINATION of an assignment?
+// Detects the common direct forms (opcode values from UE EExprToken):
+//   EX_LetBool(0x14)/MulticastDelegate(0x43)/Delegate(0x44)/Obj(0x5F)/WeakObjPtr(0x60)
+//                                  [LetOp][varOp][ptr]
+//   EX_Let(0x0F)                   [0x0F][propptr 8B][varOp][ptr]
+//   EX_LetValueOnPersistentFrame(0x64)  [0x64][ptr]  (property read directly = dest)
+// Best-effort: a write whose LHS is wrapped (EX_Context / EX_StructMemberContext /
+// EX_ArrayGetByRef — i.e. Other.Field = x, self.Struct.Member = x, Arr[i] = x) is
+// NOT detected and falls through as a read. The address-shape check on EX_Let's
+// property slot keeps false positives near zero.
+static bool IsWriteContext(const uint8_t* buf, int32_t p) {
+    if (p < 1) return false;
+    uint8_t op = buf[p - 1];
+    if (op == 0x64) return true;  // EX_LetValueOnPersistentFrame (property = destination)
+    // Destination must be a variable-access opcode:
+    //   EX_LocalVariable/InstanceVariable/DefaultVariable/LocalOutVariable/ClassSparseDataVariable
+    if (op != 0x00 && op != 0x01 && op != 0x02 && op != 0x48 && op != 0x6C)
+        return false;
+    if (p >= 2) {
+        uint8_t b = buf[p - 2];  // LetX forms with no property slot
+        if (b == 0x14 || b == 0x43 || b == 0x44 || b == 0x5F || b == 0x60) return true;
+    }
+    if (p >= 10 && buf[p - 10] == 0x0F) {  // EX_Let: opcode + 8B property + varOp + ptr
+        uintptr_t prop = 0;
+        memcpy(&prop, buf + p - 9, sizeof(prop));
+        if (LooksLikeHeapPtr(prop)) return true;
+    }
+    return false;
+}
+
 // --- FindPropertyXrefs: Kismet bytecode static cross-reference (Path 1) ---
 //
 // Walk GObjects; for every UFunction, read UStruct::Script and byte-scan the
@@ -3396,8 +3427,12 @@ PropertyXrefResult FindPropertyXrefs(uintptr_t propAddr, bool gameOnly,
                 continue;
 
             offs.clear();
+            int32_t writeCount = 0;
             for (int32_t p = 0; p + 8 <= scriptNum; ++p) {
-                if (memcmp(buf.data() + p, needle, 8) == 0) offs.push_back(p);
+                if (memcmp(buf.data() + p, needle, 8) == 0) {
+                    offs.push_back(p);
+                    if (IsWriteContext(buf.data(), p)) writeCount++;
+                }
             }
             if (offs.empty()) continue;
             uint8_t precByte = (offs[0] > 0) ? buf[offs[0] - 1] : 0xFF;  // classify first hit
@@ -3415,6 +3450,7 @@ PropertyXrefResult FindPropertyXrefs(uintptr_t propAddr, bool gameOnly,
             x.ownerClassAddr = owner;
             x.ownerClassName = owner ? Ubel::GetName(owner) : "";
             x.occurrences    = static_cast<int32_t>(offs.size());
+            x.writeCount     = writeCount;
             x.kind = (precByte == 0x01) ? "instance"
                    : (precByte == 0x00) ? "local" : "ref";
             // v2a: retain match offsets only for ubergraph hits (attributed to

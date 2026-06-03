@@ -72,8 +72,9 @@ function Run-Xref($conn, [string]$addr) {
             [pscustomobject]@{
                 kind  = $_.kind
                 occ   = $_.occurrences
+                wr    = $_.write_count  # how many of occ are writes (EX_Let* LHS)
                 owner = $_.owner_class
-                event = $_.event      # v2a: BP event (ubergraph hits only)
+                event = $_.event        # v2a: BP event (ubergraph hits only)
                 func  = $_.func_full
             }
         } | Format-Table -AutoSize

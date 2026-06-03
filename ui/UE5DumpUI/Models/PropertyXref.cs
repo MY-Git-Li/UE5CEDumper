@@ -27,6 +27,20 @@ public sealed class PropertyXrefMatch
     public int Occurrences { get; init; }
 
     /// <summary>
+    /// Of <see cref="Occurrences"/>, how many are assignment destinations
+    /// (EX_Let* LHS) — i.e. the function WRITES the field. Reads =
+    /// Occurrences - WriteCount. Best-effort: wrapped LHS (Other.Field /
+    /// Struct.Member / Arr[i] = x) isn't detected and counts as a read.
+    /// </summary>
+    public int WriteCount { get; init; }
+
+    /// <summary>Compact access summary: "3W / 4R", "write", or "read".</summary>
+    public string AccessSummary =>
+        WriteCount <= 0 ? "read"
+        : WriteCount >= Occurrences ? "write"
+        : $"{WriteCount}W / {Occurrences - WriteCount}R";
+
+    /// <summary>
     /// Reference kind, derived from the opcode byte preceding the matched
     /// pointer: "instance" (EX_InstanceVariable 0x01 — class member access,
     /// the common case), "local" (EX_LocalVariable 0x00), or "ref"

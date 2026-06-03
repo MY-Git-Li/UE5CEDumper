@@ -201,6 +201,22 @@ public sealed class PropertyXrefDialog : Window
         });
         _grid.Columns.Add(new DataGridTemplateColumn
         {
+            Header = "Access",
+            Width = new DataGridLength(90),
+            SortMemberPath = nameof(PropertyXrefMatch.WriteCount),
+            CellTemplate = new FuncDataTemplate<PropertyXrefMatch>(
+                (x, _) => new TextBlock
+                {
+                    Text = x?.AccessSummary ?? "",
+                    // Writes stand out (orange); pure reads stay muted.
+                    Foreground = new SolidColorBrush(Color.Parse(
+                        (x?.WriteCount ?? 0) > 0 ? "#E0A050" : "#808080")),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(4, 0),
+                }, supportsRecycling: true),
+        });
+        _grid.Columns.Add(new DataGridTemplateColumn
+        {
             Header = "Owner Class",
             Width = new DataGridLength(220),
             SortMemberPath = nameof(PropertyXrefMatch.OwnerClassName),
