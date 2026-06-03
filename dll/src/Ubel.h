@@ -131,6 +131,13 @@ std::string GetName(uintptr_t uobjectAddr);
 // Get the full path name (e.g., /Game/BP_Player.BP_Player_C)
 std::string GetFullName(uintptr_t uobjectAddr);
 
+// Resolve an FProperty (UE4.25+/UE5) or UProperty (UE4 <4.25) address to its
+// (name, type). Validates by requiring the type name to contain "Property"
+// (e.g. "FloatProperty", "StructProperty"); returns false for anything that
+// doesn't deref to a real property — used by the function->property xref scan
+// to confirm a bytecode-embedded pointer really is a property descriptor.
+bool ResolvePropertyNameType(uintptr_t fieldAddr, std::string& outName, std::string& outType);
+
 // Get the internal index of a UObject
 int32_t GetIndex(uintptr_t uobjectAddr);
 

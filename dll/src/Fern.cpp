@@ -1784,6 +1784,10 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 item["defining_class_addr"] = Renge::AddrToStr(m.definingClassAddr);
                 item["defining_class_path"] = m.definingClassPath;
                 item["inherited_by_count"]  = m.inheritedByCount;
+                // FProperty* address — the key for find_property_xrefs
+                // ("which methods use this field?"). Populated during the
+                // field walk regardless of preview.
+                item["field_addr"] = Renge::AddrToStr(m.fieldAddr);
                 if (!m.preview.empty())
                     item["preview"] = m.preview;
                 matches.push_back(item);
@@ -1859,6 +1863,9 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                     item["defining_class_addr"] = Renge::AddrToStr(m.definingClassAddr);
                     item["defining_class_path"] = m.definingClassPath;
                     item["inherited_by_count"]  = m.inheritedByCount;
+                    // FProperty* address for find_property_xrefs (set during
+                    // the field walk, so available even on this no-preview path).
+                    item["field_addr"] = Renge::AddrToStr(m.fieldAddr);
                     // Note: preview omitted intentionally — batch path skips
                     // Phase-2 instance scan. Interesting Properties tab
                     // (the only caller) doesn't display previews.
@@ -2332,6 +2339,74 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             return Renge::MakeResponse(id, data).dump();
         }
 
+        // === find_property_xrefs: which UFunctions reference a given FProperty ===
+        // Static Kismet-bytecode scan (Blueprint/script functions only; native
+        // functions have empty Script and are invisible — UI must surface this).
+        if (cmd == Renge::CMD_FIND_PROPERTY_XREFS) {
+            std::string addrStr = request.value("prop_addr", "");
+            if (addrStr.empty()) return Renge::MakeError(id, "Missing prop_addr").dump();
+            uintptr_t propAddr = Renge::StrToAddr(addrStr);
+            bool    gameOnly   = request.value("game_only", true);
+            int32_t maxResults = request.value("max_results", 200);
+
+            auto res = Aura::FindPropertyXrefs(propAddr, gameOnly, maxResults);
+
+            json data;
+            data["query_addr"] = addrStr;
+
+            json scanInfo;
+            scanInfo["functions_scanned"]     = res.stats.functionsScanned;
+            scanInfo["functions_with_script"] = res.stats.functionsWithScript;
+            scanInfo["objects_total"]         = res.stats.objectsTotal;
+            scanInfo["duration_ms"]           = res.stats.durationMs;
+            scanInfo["deadline_hit"]          = res.stats.deadlineHit;
+            data["scan"] = scanInfo;
+
+            json arr = json::array();
+            for (const auto& x : res.xrefs) {
+                json xj;
+                xj["func_addr"]        = Renge::AddrToStr(x.funcAddr);
+                xj["func_name"]        = x.funcName;
+                xj["func_full"]        = x.funcFullName;
+                xj["owner_class"]      = x.ownerClassName;
+                xj["owner_class_addr"] = Renge::AddrToStr(x.ownerClassAddr);
+                xj["occurrences"]      = x.occurrences;
+                xj["write_count"]      = x.writeCount;
+                xj["kind"]             = x.kind;
+                if (!x.eventName.empty())
+                    xj["event"]        = x.eventName;
+                arr.push_back(xj);
+            }
+            data["xrefs"] = arr;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // === walk_function_props: reverse edge — properties a UFunction reads/writes ===
+        if (cmd == Renge::CMD_WALK_FUNCTION_PROPS) {
+            std::string addrStr = request.value("func_addr", "");
+            if (addrStr.empty()) return Renge::MakeError(id, "Missing func_addr").dump();
+            uintptr_t funcAddr = Renge::StrToAddr(addrStr);
+
+            auto res = Aura::WalkFunctionPropertyRefs(funcAddr);
+
+            json data;
+            data["query_addr"]   = addrStr;
+            data["script_bytes"] = res.scriptBytes;
+            json arr = json::array();
+            for (const auto& r : res.refs) {
+                json rj;
+                rj["prop_addr"]   = Renge::AddrToStr(r.propAddr);
+                rj["name"]        = r.name;
+                rj["type"]        = r.type;
+                rj["occurrences"] = r.occurrences;
+                rj["write_count"] = r.writeCount;
+                rj["scope"]       = r.scope;
+                arr.push_back(rj);
+            }
+            data["props"] = arr;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
         // === get_ce_pointer_info: CE pointer chain info for a GObjects instance ===
         if (cmd == Renge::CMD_GET_CE_PTR_INFO) {
             std::string addrStr = request.value("addr", "");
@@ -2417,6 +2492,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             data["ustruct_children"]   = DynOff::USTRUCT_CHILDREN;
             data["ustruct_childprops"] = DynOff::USTRUCT_CHILDPROPS;
             data["ustruct_propssize"]  = DynOff::USTRUCT_PROPSSIZE;
+            data["ustruct_script"]     = DynOff::USTRUCT_SCRIPT;
             if (DynOff::bUseFProperty) {
                 data["ffield_class"]       = DynOff::FFIELD_CLASS;
                 data["ffield_next"]        = DynOff::FFIELD_NEXT;

@@ -12,6 +12,38 @@ Move items to [dev-log.md](dev-log.md) once they ship; update
 
 -----
 
+## Bytecode cross-reference: property ↔ function (Path 1) — core SHIPPED 2026-06-03
+
+Static Kismet-bytecode xref answering "which methods use this field (read/write)?"
+and the inverse "which fields does this function touch?". Shipped on `dev`
+(builds 838-861, commits `574031e`→`248f631`); see dev-log 2026-06-03 for the full
+breakdown. BP/script only — native functions have empty bytecode (that's Path 2).
+
+- ~~Path 1 `find_property_xrefs` (property → functions); `USTRUCT_SCRIPT = PROPSSIZE+8`.~~ ✅
+- ~~UI entry from Class Struct / Property Search / Interesting Properties (Find Funcs button + context menu).~~ ✅
+- ~~v2a: ubergraph hits attributed to the BP event (nearest entry offset).~~ ✅
+- ~~read/write distinction (`EX_Let*` LHS detection).~~ ✅
+- ~~Reverse edge `walk_function_props` (function → properties + scope) on Interesting Functions.~~ ✅
+
+Deferred follow-ups:
+
+- **v2b — CFG-precise attribution.** Effort: L. Risk: med-high. Why: v2a's
+  "nearest entry offset" mis-attributes a sub-graph reached from multiple events
+  via jumps; the `EX_Let*` write detector misses wrapped LHS (`Other.Field` /
+  `Struct.Member` / `Arr[i] = x`). A real variable-length decoder (follow
+  `EX_Jump 0x06` / `EX_JumpIfNot 0x07` / `EX_ComputedJump 0x4E`, parse the LHS
+  expression tree) fixes both. Reference: `vendor/RE-UE4SS/cppmods/
+  KismetDebuggerMod/src/KismetDebugger.cpp` (`render_expr`) + `EExprToken` in
+  `vendor/UnrealEngine/.../UObject/Script.h`. Only do it when a real
+  mis-attribution motivates the cost.
+- **Path 2 — native UFunction analysis.** Effort: L. Risk: med. Why: Path 1 can't
+  see native (C++) functions (empty bytecode). Disassemble the native func's x64
+  machine code (Zydis — already vendored transitively at
+  `vendor/RE-UE4SS/deps/third/zydis/`) to find `[reg+0xOFFSET]` property accesses.
+  Complements Path 1; the only way to xref native-only fields.
+
+-----
+
 ## 🧪 EXPERIMENTAL: Snapshot / SPC Query / Class Pivot (Phase A done 2026-06-02)
 
 Port of three analysis features from the Unity sister project `discrete`, gated

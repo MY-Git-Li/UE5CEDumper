@@ -13,6 +13,7 @@ public partial class ClassStructViewModel : ViewModelBase
 {
     private readonly IDumpService _dump;
     private readonly ILoggingService _log;
+    private readonly IPlatformService _platform;
 
     [ObservableProperty] private string _className = "";
     [ObservableProperty] private string _classPath = "";
@@ -21,6 +22,16 @@ public partial class ClassStructViewModel : ViewModelBase
     [ObservableProperty] private ObservableCollection<FieldInfoModel> _fields = new();
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private bool _hasClass;
+
+    /// <summary>Field row the user right-clicked (drives the xref context menu).</summary>
+    [ObservableProperty] private FieldInfoModel? _selectedField;
+
+    /// <summary>Client-side filter text (substring over field name + type).</summary>
+    [ObservableProperty] private string _fieldFilter = "";
+
+    /// <summary>Full unfiltered field set; <see cref="Fields"/> is the
+    /// filtered view rebuilt by <see cref="ApplyFieldFilter"/>.</summary>
+    private readonly List<FieldInfoModel> _allFields = new();
 
     /// <summary>
     /// True when a class is loaded but has zero instance fields. The
@@ -31,10 +42,29 @@ public partial class ClassStructViewModel : ViewModelBase
     /// and can't tell "broken load" from "this class genuinely has no
     /// fields". UI binds this to a help banner.
     /// </summary>
-    public bool HasNoFields => HasClass && !IsLoading && Fields.Count == 0;
+    public bool HasNoFields => HasClass && !IsLoading && _allFields.Count == 0;
 
     partial void OnHasClassChanged(bool value)   => OnPropertyChanged(nameof(HasNoFields));
     partial void OnIsLoadingChanged(bool value)  => OnPropertyChanged(nameof(HasNoFields));
+    partial void OnFieldFilterChanged(string value) => ApplyFieldFilter();
+
+    /// <summary>Rebuild <see cref="Fields"/> from <see cref="_allFields"/>,
+    /// applying <see cref="FieldFilter"/> as a case-insensitive substring over
+    /// field name + type. Field lists are small (hundreds), so no debounce.</summary>
+    private void ApplyFieldFilter()
+    {
+        var filter = (FieldFilter ?? "").Trim();
+        Fields.Clear();
+        foreach (var f in _allFields)
+        {
+            if (filter.Length == 0
+                || f.Name.Contains(filter, System.StringComparison.OrdinalIgnoreCase)
+                || f.TypeName.Contains(filter, System.StringComparison.OrdinalIgnoreCase))
+            {
+                Fields.Add(f);
+            }
+        }
+    }
 
     /// <summary>
     /// Address of the UObject whose class is currently displayed. Used to
@@ -43,10 +73,35 @@ public partial class ClassStructViewModel : ViewModelBase
     /// </summary>
     private string? _lastLoadedNodeAddress;
 
-    public ClassStructViewModel(IDumpService dump, ILoggingService log)
+    public ClassStructViewModel(IDumpService dump, ILoggingService log, IPlatformService platform)
     {
         _dump = dump;
         _log = log;
+        _platform = platform;
+    }
+
+    /// <summary>
+    /// "Find functions using this field" — static Kismet-bytecode cross-reference
+    /// for the field's FProperty*. Opens a self-contained dialog (no tab impact).
+    /// </summary>
+    [RelayCommand]
+    private async Task FindFieldXrefsAsync(FieldInfoModel? field)
+    {
+        field ??= SelectedField;
+        if (field == null || string.IsNullOrEmpty(field.Address) || field.Address == "0x0")
+            return;
+
+        try
+        {
+            await Views.PropertyXrefDialog.ShowForFieldAsync(
+                field.Name, field.TypeName, field.Address, _dump, _platform);
+            _log.Info($"FindFieldXrefs dialog closed for {ClassName}.{field.Name} ({field.Address})");
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error($"FindFieldXrefs failed for {field.Name}", ex);
+        }
     }
 
     [RelayCommand]
@@ -67,11 +122,9 @@ public partial class ClassStructViewModel : ViewModelBase
             PropertiesSize = ci.PropertiesSize;
             HasClass = true;
 
-            Fields.Clear();
-            foreach (var f in ci.Fields)
-            {
-                Fields.Add(f);
-            }
+            _allFields.Clear();
+            _allFields.AddRange(ci.Fields);
+            ApplyFieldFilter();
             // Fields.Count change doesn't fire HasNoFields; nudge it.
             OnPropertyChanged(nameof(HasNoFields));
 

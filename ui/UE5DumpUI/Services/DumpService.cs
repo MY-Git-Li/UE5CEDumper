@@ -707,6 +707,99 @@ public sealed class DumpService : IDumpService
         };
     }
 
+    public async Task<FindPropertyXrefsResult> FindPropertyXrefsAsync(
+        string propAddr, bool gameOnly = true, int maxResults = 200,
+        CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "find_property_xrefs",
+            ["prop_addr"] = propAddr,
+            ["game_only"] = gameOnly,
+            ["max_results"] = maxResults,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        PropertyXrefScanStats? scanStats = null;
+        if (res["scan"] is JsonObject scanNode)
+        {
+            scanStats = new PropertyXrefScanStats
+            {
+                FunctionsScanned    = scanNode["functions_scanned"]?.GetValue<int>() ?? 0,
+                FunctionsWithScript = scanNode["functions_with_script"]?.GetValue<int>() ?? 0,
+                ObjectsTotal        = scanNode["objects_total"]?.GetValue<int>() ?? 0,
+                DurationMs          = scanNode["duration_ms"]?.GetValue<long>() ?? 0,
+                DeadlineHit         = scanNode["deadline_hit"]?.GetValue<bool>() ?? false,
+            };
+        }
+
+        var xrefs = new List<PropertyXrefMatch>();
+        if (res["xrefs"] is JsonArray xrefsArr)
+        {
+            foreach (var node in xrefsArr)
+            {
+                if (node is not JsonObject x) continue;
+                xrefs.Add(new PropertyXrefMatch
+                {
+                    FunctionAddress   = x["func_addr"]?.GetValue<string>() ?? "",
+                    FunctionName      = x["func_name"]?.GetValue<string>() ?? "",
+                    FunctionFullName  = x["func_full"]?.GetValue<string>() ?? "",
+                    OwnerClassName    = x["owner_class"]?.GetValue<string>() ?? "",
+                    OwnerClassAddress = x["owner_class_addr"]?.GetValue<string>() ?? "",
+                    Occurrences       = x["occurrences"]?.GetValue<int>() ?? 0,
+                    WriteCount        = x["write_count"]?.GetValue<int>() ?? 0,
+                    Kind              = x["kind"]?.GetValue<string>() ?? "",
+                    EventName         = x["event"]?.GetValue<string>() ?? "",
+                });
+            }
+        }
+
+        return new FindPropertyXrefsResult
+        {
+            QueryAddress = res["query_addr"]?.GetValue<string>() ?? propAddr,
+            Xrefs        = xrefs,
+            Scan         = scanStats,
+        };
+    }
+
+    public async Task<FunctionPropRefsResult> WalkFunctionPropsAsync(
+        string funcAddr, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "walk_function_props",
+            ["func_addr"] = funcAddr,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        var props = new List<FunctionPropRef>();
+        if (res["props"] is JsonArray arr)
+        {
+            foreach (var node in arr)
+            {
+                if (node is not JsonObject p) continue;
+                props.Add(new FunctionPropRef
+                {
+                    PropAddress = p["prop_addr"]?.GetValue<string>() ?? "",
+                    Name        = p["name"]?.GetValue<string>() ?? "",
+                    Type        = p["type"]?.GetValue<string>() ?? "",
+                    Occurrences = p["occurrences"]?.GetValue<int>() ?? 0,
+                    WriteCount  = p["write_count"]?.GetValue<int>() ?? 0,
+                    Scope       = p["scope"]?.GetValue<string>() ?? "",
+                });
+            }
+        }
+
+        return new FunctionPropRefsResult
+        {
+            QueryAddress = res["query_addr"]?.GetValue<string>() ?? funcAddr,
+            ScriptBytes  = res["script_bytes"]?.GetValue<int>() ?? 0,
+            Props        = props,
+        };
+    }
+
     public async Task<ArrayElementsResult> ReadArrayElementsAsync(
         string instanceAddr, int fieldOffset,
         string innerAddr, string innerType, int elemSize,
@@ -1095,6 +1188,7 @@ public sealed class DumpService : IDumpService
                     DefiningClassAddr = obj["defining_class_addr"]?.GetValue<string>() ?? "",
                     DefiningClassPath = obj["defining_class_path"]?.GetValue<string>() ?? "",
                     InheritedByCount  = obj["inherited_by_count"]?.GetValue<int>() ?? 0,
+                    FieldAddr         = obj["field_addr"]?.GetValue<string>() ?? "",
                 });
             }
         }
@@ -1173,6 +1267,7 @@ public sealed class DumpService : IDumpService
                             DefiningClassAddr = obj["defining_class_addr"]?.GetValue<string>() ?? "",
                             DefiningClassPath = obj["defining_class_path"]?.GetValue<string>() ?? "",
                             InheritedByCount  = obj["inherited_by_count"]?.GetValue<int>() ?? 0,
+                            FieldAddr         = obj["field_addr"]?.GetValue<string>() ?? "",
                         });
                     }
                 }

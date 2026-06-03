@@ -23,6 +23,7 @@ extern uint32_t g_cachedUEVersion;
 #include <climits>
 #include <cstring>
 #include <mutex>
+#include <set>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -3264,6 +3265,336 @@ AllFunctionsResult EnumerateAllFunctions(bool gameOnly, int maxEntries) {
         static_cast<int>(result.entries.size()), result.scannedClasses,
         gameOnly ? 1 : 0, result.scannedObjects, result.totalFunctions);
     return result;
+}
+
+// --- v2a: Blueprint ubergraph entry-offset table ---
+//
+// Every BP event compiles into the single ExecuteUbergraph_<BP> function; each
+// event's stub UFunction calls it with an int "entry offset" into the bytecode:
+//   EX_(Local)FinalFunction <ExecuteUbergraph* 8B> EX_IntConst <entryOffset 4B> ...
+// We anchor on the ubergraph function's ADDRESS (zero false positives), verify
+// the preceding opcode is EX_LocalFinalFunction(0x46)/EX_FinalFunction(0x1C) and
+// the following byte is EX_IntConst(0x1D), then read the entry offset. Returns
+// (entryOffset, eventName) sorted ascending so the caller can attribute a
+// reference at byte P to the event whose entry offset is the largest <= P.
+static std::vector<std::pair<int32_t, std::string>>
+BuildUbergraphEntryTable(uintptr_t classAddr, uintptr_t ubergraphAddr) {
+    std::vector<std::pair<int32_t, std::string>> table;
+    if (!classAddr || !ubergraphAddr) return table;
+
+    uint8_t anchor[8];
+    memcpy(anchor, &ubergraphAddr, sizeof(anchor));
+
+    std::vector<FunctionInfo> funcs = Ubel::WalkFunctions(classAddr);
+    std::vector<uint8_t> buf;
+    for (const auto& fi : funcs) {
+        if (fi.address == ubergraphAddr) continue;  // skip the ubergraph itself
+
+        uintptr_t scriptData = 0; int32_t scriptNum = 0;
+        Macht::ReadSafe(fi.address + DynOff::USTRUCT_SCRIPT,        scriptData);
+        Macht::ReadSafe(fi.address + DynOff::USTRUCT_SCRIPT + 0x08, scriptNum);
+        if (!scriptData || scriptNum < 13 || scriptNum > (1 << 22)) continue;  // need op+ptr+int
+
+        buf.resize(static_cast<size_t>(scriptNum));
+        if (!Macht::ReadBytesSafe(scriptData, buf.data(), static_cast<size_t>(scriptNum)))
+            continue;
+
+        // p starts at 1 so buf[p-1] (the call opcode) is valid; need ptr(8) +
+        // EX_IntConst(1) + int32(4) to follow.
+        for (int32_t p = 1; p + 8 + 1 + 4 <= scriptNum; ++p) {
+            if (memcmp(buf.data() + p, anchor, 8) != 0) continue;
+            uint8_t op = buf[p - 1];
+            if (op != 0x46 && op != 0x1C) continue;   // EX_LocalFinalFunction / EX_FinalFunction
+            if (buf[p + 8] != 0x1D) continue;         // EX_IntConst
+            int32_t entryOffset = 0;
+            memcpy(&entryOffset, buf.data() + p + 9, 4);
+            table.emplace_back(entryOffset, fi.name);
+            break;  // one ubergraph entry per stub
+        }
+    }
+    std::sort(table.begin(), table.end(),
+              [](const std::pair<int32_t, std::string>& a,
+                 const std::pair<int32_t, std::string>& b) { return a.first < b.first; });
+    return table;
+}
+
+// v2 read/write: is the FProperty reference at byte offset p (its pointer
+// position; the variable opcode sits at p-1) the DESTINATION of an assignment?
+// Detects the common direct forms (opcode values from UE EExprToken):
+//   EX_LetBool(0x14)/MulticastDelegate(0x43)/Delegate(0x44)/Obj(0x5F)/WeakObjPtr(0x60)
+//                                  [LetOp][varOp][ptr]
+//   EX_Let(0x0F)                   [0x0F][propptr 8B][varOp][ptr]
+//   EX_LetValueOnPersistentFrame(0x64)  [0x64][ptr]  (property read directly = dest)
+// Best-effort: a write whose LHS is wrapped (EX_Context / EX_StructMemberContext /
+// EX_ArrayGetByRef — i.e. Other.Field = x, self.Struct.Member = x, Arr[i] = x) is
+// NOT detected and falls through as a read. The address-shape check on EX_Let's
+// property slot keeps false positives near zero.
+static bool IsWriteContext(const uint8_t* buf, int32_t p) {
+    if (p < 1) return false;
+    uint8_t op = buf[p - 1];
+    if (op == 0x64) return true;  // EX_LetValueOnPersistentFrame (property = destination)
+    // Destination must be a variable-access opcode:
+    //   EX_LocalVariable/InstanceVariable/DefaultVariable/LocalOutVariable/ClassSparseDataVariable
+    if (op != 0x00 && op != 0x01 && op != 0x02 && op != 0x48 && op != 0x6C)
+        return false;
+    if (p >= 2) {
+        uint8_t b = buf[p - 2];  // LetX forms with no property slot
+        if (b == 0x14 || b == 0x43 || b == 0x44 || b == 0x5F || b == 0x60) return true;
+    }
+    if (p >= 10 && buf[p - 10] == 0x0F) {  // EX_Let: opcode + 8B property + varOp + ptr
+        uintptr_t prop = 0;
+        memcpy(&prop, buf + p - 9, sizeof(prop));
+        if (LooksLikeHeapPtr(prop)) return true;
+    }
+    return false;
+}
+
+// --- FindPropertyXrefs: Kismet bytecode static cross-reference (Path 1) ---
+//
+// Walk GObjects; for every UFunction, read UStruct::Script and byte-scan the
+// bytecode for the 8-byte little-endian `propAddr`. The variable-access opcodes
+// embed the live FProperty* directly, so any function that references the field
+// contains its pointer in the script buffer. Parallelised over GObjects index
+// ranges via ParallelGObjectsScan (Ubel name/outer caches are mutex-guarded).
+PropertyXrefResult FindPropertyXrefs(uintptr_t propAddr, bool gameOnly,
+                                     int32_t maxResults) {
+    PropertyXrefResult out;
+    if (!propAddr || !s_arrayAddr) return out;
+    if (maxResults <= 0) maxResults = 200;
+
+    int32_t count = GetCount();
+    if (count <= 0) return out;
+    out.stats.objectsTotal = count;
+
+    LOG_INFO("FindPropertyXrefs: scanning %d objects for xrefs to FProperty 0x%llX (gameOnly=%d)",
+             count, static_cast<unsigned long long>(propAddr), gameOnly ? 1 : 0);
+
+    // Target pointer as 8 little-endian bytes for the memcmp window.
+    uint8_t needle[8];
+    memcpy(needle, &propAddr, sizeof(needle));
+
+    constexpr int kDeadlineMs = 30000;
+    auto t0 = std::chrono::steady_clock::now();
+
+    struct ThreadResult {
+        std::vector<PropertyXref> xrefs;
+        int32_t funcsScanned    = 0;
+        int32_t funcsWithScript = 0;
+    };
+
+    auto scan = ParallelGObjectsScan<ThreadResult>(count,
+        [&](ThreadResult& tr, int32_t beginIdx, int32_t endIdx,
+            std::atomic<bool>& deadlineHit) {
+
+        std::vector<uint8_t> buf;    // reused across functions (keeps capacity)
+        std::vector<int32_t> offs;   // match byte offsets within this Script
+
+        for (int32_t i = beginIdx;
+             i < endIdx && static_cast<int>(tr.xrefs.size()) < maxResults; ++i) {
+            // Chunk-relative stride so the deadline / sibling check fires from
+            // this chunk's first iteration (mirrors FindReferencesToUObject).
+            if (((i - beginIdx) & 0x3FF) == 0) {
+                if (deadlineHit.load(std::memory_order_relaxed)) return;
+                auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::steady_clock::now() - t0).count();
+                if (dt > kDeadlineMs) {
+                    deadlineHit.store(true, std::memory_order_relaxed);
+                    return;
+                }
+            }
+
+            uintptr_t obj = GetByIndex(i);
+            if (!obj) continue;
+
+            // UFunction? Its UClass name is "Function".
+            uintptr_t cls = 0;
+            if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
+            uint32_t clsNameIdx = 0;
+            if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx)) continue;
+            if (Serie::GetString(clsNameIdx) != "Function") continue;
+            tr.funcsScanned++;
+
+            // Read UStruct::Script { Data*, Num, Max }.
+            uintptr_t scriptData = 0; int32_t scriptNum = 0;
+            Macht::ReadSafe(obj + DynOff::USTRUCT_SCRIPT,        scriptData);
+            Macht::ReadSafe(obj + DynOff::USTRUCT_SCRIPT + 0x08, scriptNum);
+            if (!scriptData || scriptNum <= 0 || scriptNum > (1 << 22)) continue;  // sanity guard
+            tr.funcsWithScript++;
+
+            // Bulk-read bytecode, byte-scan for the (UNALIGNED) pointer value.
+            buf.resize(static_cast<size_t>(scriptNum));
+            if (!Macht::ReadBytesSafe(scriptData, buf.data(), static_cast<size_t>(scriptNum)))
+                continue;
+
+            offs.clear();
+            int32_t writeCount = 0;
+            for (int32_t p = 0; p + 8 <= scriptNum; ++p) {
+                if (memcmp(buf.data() + p, needle, 8) == 0) {
+                    offs.push_back(p);
+                    if (IsWriteContext(buf.data(), p)) writeCount++;
+                }
+            }
+            if (offs.empty()) continue;
+            uint8_t precByte = (offs[0] > 0) ? buf[offs[0] - 1] : 0xFF;  // classify first hit
+
+            // Owning class = UFunction's Outer. Apply gameOnly on its path.
+            uintptr_t owner = Ubel::GetOuter(obj);
+            if (gameOnly && owner && IsEnginePackage(Ubel::GetFullName(owner))) continue;
+
+            std::string funcName = Ubel::GetName(obj);
+
+            PropertyXref x;
+            x.funcAddr       = obj;
+            x.funcName       = funcName;
+            x.funcFullName   = Ubel::GetFullName(obj);
+            x.ownerClassAddr = owner;
+            x.ownerClassName = owner ? Ubel::GetName(owner) : "";
+            x.occurrences    = static_cast<int32_t>(offs.size());
+            x.writeCount     = writeCount;
+            x.kind = (precByte == 0x01) ? "instance"
+                   : (precByte == 0x00) ? "local" : "ref";
+            // v2a: retain match offsets only for ubergraph hits (attributed to
+            // events in a serial post-pass). funcName.rfind(prefix,0)==0 = starts_with.
+            if (funcName.rfind("ExecuteUbergraph", 0) == 0)
+                x.ubergraphOffsets = offs;  // copied (offs is reused next iter)
+            tr.xrefs.push_back(std::move(x));
+        }
+    });
+
+    out.xrefs = ConcatTruncate(scan.perThread, &ThreadResult::xrefs, maxResults);
+    for (auto& tr : scan.perThread) {
+        out.stats.functionsScanned    += tr.funcsScanned;
+        out.stats.functionsWithScript += tr.funcsWithScript;
+    }
+
+    // v2a: attribute ubergraph hits to BP events (serial — the entry-table build
+    // walks sibling UFunctions). Cache per ubergraph address; several refs can
+    // share one. Attribution = the event whose entry offset is the largest <= P.
+    {
+        std::unordered_map<uintptr_t, std::vector<std::pair<int32_t, std::string>>> entryCache;
+        for (auto& x : out.xrefs) {
+            if (x.ubergraphOffsets.empty()) continue;
+            auto it = entryCache.find(x.funcAddr);
+            if (it == entryCache.end())
+                it = entryCache.emplace(
+                         x.funcAddr,
+                         BuildUbergraphEntryTable(x.ownerClassAddr, x.funcAddr)).first;
+            const auto& table = it->second;
+            if (!table.empty()) {
+                std::set<std::string> events;
+                for (int32_t off : x.ubergraphOffsets) {
+                    const std::string* best = nullptr;
+                    for (const auto& e : table) {
+                        if (e.first <= off) best = &e.second; else break;  // sorted ascending
+                    }
+                    if (best) events.insert(*best);
+                }
+                std::string joined;
+                for (const auto& e : events) {
+                    if (!joined.empty()) joined += ", ";
+                    joined += e;
+                }
+                x.eventName = joined;
+            }
+            x.ubergraphOffsets.clear();  // transient
+        }
+    }
+    out.stats.deadlineHit = scan.deadlineHit;
+    out.stats.durationMs  = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - t0).count();
+
+    LOG_INFO("FindPropertyXrefs: %zu xrefs (scanned %d functions, %d with script, %lldms%s)",
+             out.xrefs.size(), out.stats.functionsScanned, out.stats.functionsWithScript,
+             static_cast<long long>(out.stats.durationMs),
+             out.stats.deadlineHit ? ", DEADLINE" : "");
+    return out;
+}
+
+// Map a value-access opcode to a property-scope label (see FunctionPropRef::scope).
+static const char* ScopeForOpcode(uint8_t op) {
+    switch (op) {
+        case 0x01: return "instance";  // EX_InstanceVariable (class member — the RE target)
+        case 0x00: return "local";     // EX_LocalVariable (BP temporaries / locals)
+        case 0x48: return "local";     // EX_LocalOutVariable (out param)
+        case 0x02: return "default";   // EX_DefaultVariable
+        case 0x6C: return "sparse";    // EX_ClassSparseDataVariable
+        case 0x42: return "struct";    // EX_StructMemberContext (inner struct member)
+        case 0x64: return "frame";     // EX_LetValueOnPersistentFrame
+        default:   return "";
+    }
+}
+
+// --- WalkFunctionPropertyRefs: reverse edge (function -> properties) ---
+FunctionPropRefResult WalkFunctionPropertyRefs(uintptr_t funcAddr) {
+    FunctionPropRefResult out;
+    if (!funcAddr) return out;
+
+    uintptr_t scriptData = 0; int32_t scriptNum = 0;
+    Macht::ReadSafe(funcAddr + DynOff::USTRUCT_SCRIPT,        scriptData);
+    Macht::ReadSafe(funcAddr + DynOff::USTRUCT_SCRIPT + 0x08, scriptNum);
+    if (!scriptData || scriptNum <= 0 || scriptNum > (1 << 22)) return out;  // native/empty/garbage
+    out.scriptBytes = scriptNum;
+
+    std::vector<uint8_t> buf(static_cast<size_t>(scriptNum));
+    if (!Macht::ReadBytesSafe(scriptData, buf.data(), static_cast<size_t>(scriptNum))) return out;
+
+    // Opcode-anchored property-reference scan. Anchors are the value-access
+    // opcodes whose immediate operand is an FProperty* (8B):
+    //   EX_LocalVariable 0x00 / InstanceVariable 0x01 / DefaultVariable 0x02 /
+    //   LocalOutVariable 0x48 / ClassSparseDataVariable 0x6C /
+    //   StructMemberContext 0x42 / LetValueOnPersistentFrame 0x64
+    // Each candidate is confirmed via Ubel::ResolvePropertyNameType (rejects
+    // non-property pointers). Deduped by propAddr; read/write via IsWriteContext.
+    std::unordered_map<uintptr_t, size_t> idx;
+    for (int32_t p = 0; p + 1 + 8 <= scriptNum; ++p) {
+        uint8_t op = buf[p];
+        if (op != 0x00 && op != 0x01 && op != 0x02 && op != 0x48
+            && op != 0x6C && op != 0x42 && op != 0x64) continue;
+
+        uintptr_t cand = 0;
+        memcpy(&cand, &buf[p + 1], sizeof(cand));
+        if (!LooksLikeHeapPtr(cand)) continue;
+
+        std::string name, type;
+        if (!Ubel::ResolvePropertyNameType(cand, name, type)) continue;
+
+        // IsWriteContext is keyed on the pointer offset (p+1); 0x64 is itself a write.
+        bool isWrite = (op == 0x64) || IsWriteContext(buf.data(), p + 1);
+
+        auto it = idx.find(cand);
+        if (it == idx.end()) {
+            FunctionPropRef r;
+            r.propAddr    = cand;
+            r.name        = std::move(name);
+            r.type        = std::move(type);
+            r.occurrences = 1;
+            r.writeCount  = isWrite ? 1 : 0;
+            r.scope       = ScopeForOpcode(op);
+            idx.emplace(cand, out.refs.size());
+            out.refs.push_back(std::move(r));
+        } else {
+            auto& r = out.refs[it->second];
+            r.occurrences++;
+            if (isWrite) r.writeCount++;
+            // Prefer the "instance" label if any access proves it's a class member.
+            if (r.scope != "instance" && op == 0x01) r.scope = "instance";
+        }
+    }
+
+    // Class members (instance) first — local BP temporaries are noise — then
+    // writers, then by frequency, then name. Most actionable on top.
+    std::sort(out.refs.begin(), out.refs.end(),
+              [](const FunctionPropRef& a, const FunctionPropRef& b) {
+        bool ai = a.scope == "instance", bi = b.scope == "instance";
+        if (ai != bi) return ai;
+        if ((a.writeCount > 0) != (b.writeCount > 0)) return a.writeCount > 0;
+        if (a.occurrences != b.occurrences) return a.occurrences > b.occurrences;
+        return a.name < b.name;
+    });
+
+    LOG_INFO("WalkFunctionPropertyRefs: 0x%llX -> %zu props (%d script bytes)",
+             static_cast<unsigned long long>(funcAddr), out.refs.size(), scriptNum);
+    return out;
 }
 
 SparseDelegateResult WalkSparseDelegateBindings(uintptr_t ownerObj,

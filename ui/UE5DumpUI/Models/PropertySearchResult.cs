@@ -16,6 +16,13 @@ public class PropertySearchMatch
     public string ClassName { get; set; } = "";
     public string ClassAddr { get; set; } = "";
     public string ClassPath { get; set; } = "";
+
+    /// <summary>
+    /// FProperty* address (UProperty* on UE4 &lt;4.25) — the key for
+    /// find_property_xrefs ("which methods use this field?"). Emitted by
+    /// search_properties / search_properties_batch since build 842.
+    /// </summary>
+    public string FieldAddr { get; set; } = "";
     public string SuperName { get; set; } = "";
     public string PropName { get; set; } = "";
     public string PropType { get; set; } = "";

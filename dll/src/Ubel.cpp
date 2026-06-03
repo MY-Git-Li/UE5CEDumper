@@ -643,6 +643,38 @@ static std::pair<uintptr_t, std::string> ProbeInnerProperty(uintptr_t fieldAddr,
     return { 0, "" };
 }
 
+// Public: resolve an FProperty/UProperty address to (name, type), validating
+// that it is a real property (type name contains "Property"). Reuses
+// GetFieldTypeName (FProperty) / the UProperty UClass-name path (UE4).
+bool ResolvePropertyNameType(uintptr_t fieldAddr, std::string& outName, std::string& outType) {
+    outName.clear();
+    outType.clear();
+    if (!fieldAddr) return false;
+
+    if (DynOff::bUseFProperty) {
+        outType = GetFieldTypeName(fieldAddr);                 // FFieldClass name
+        if (outType.empty() || outType == "Unknown"
+            || outType.find("Property") == std::string::npos)
+            return false;
+        outName = ReadFName(fieldAddr + DynOff::FFIELD_NAME);
+    } else {
+        // UE4 UProperty is a UObject: its UClass name (e.g. "FloatProperty") is the type.
+        uintptr_t cls = 0;
+        if (!Macht::ReadSafe(fieldAddr + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls)
+            return false;
+        outType = GetName(cls);
+        if (outType.empty() || outType.find("Property") == std::string::npos)
+            return false;
+        outName = GetName(fieldAddr);                          // UProperty name (OFF_UOBJECT_NAME)
+    }
+
+    // Reject non-ASCII / empty names (failed deref landing on garbage).
+    if (outName.empty() || static_cast<unsigned char>(outName[0]) < 0x20
+        || static_cast<unsigned char>(outName[0]) >= 0x7F)
+        return false;
+    return true;
+}
+
 // Helper: given an FProperty* for StructProperty/ObjectProperty/ClassProperty,
 // read the UScriptStruct*/UClass* at the subclass extension offset and return its name.
 static std::string ReadSubclassTypeName(uintptr_t propAddr) {

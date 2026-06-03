@@ -418,6 +418,95 @@ struct AllFunctionsResult {
 // this on a worker task with a progress indicator.
 AllFunctionsResult EnumerateAllFunctions(bool gameOnly, int maxEntries = 100000);
 
+// === Property Bytecode Cross-Reference (Path 1: Kismet bytecode static xref) ===
+//
+// Finds which UFunctions reference a target FProperty by scanning each
+// function's UStruct::Script (Kismet bytecode) for the FProperty* pointer.
+// Variable-access opcodes (EX_InstanceVariable 0x01 / EX_LocalVariable 0x00 /
+// EX_Context inner) embed the live, fixed-up FProperty* directly, so a raw
+// byte-scan for the 8-byte pointer value is complete AND version-agnostic
+// (no opcode table; the 0x00/0x01 preceding byte is only a confidence/kind
+// hint). The target address is the field's FProperty* (UProperty* on UE4
+// <4.25) — exactly what WalkClassEx / SearchProperties report as fieldAddr.
+//
+// COVERAGE: Blueprint / script functions only. Native (FUNC_Native) functions
+// have empty Script — their property access is in compiled machine code and is
+// invisible here. The UI MUST surface this (mirror the value-search caveat
+// contract); complementary to the CE access-breakpoint approach which covers
+// native but drowns on shared/inlined code.
+struct PropertyXref {
+    uintptr_t   funcAddr       = 0;
+    std::string funcName;
+    std::string funcFullName;
+    uintptr_t   ownerClassAddr = 0;
+    std::string ownerClassName;
+    int32_t     occurrences    = 0;    // hit count within this function's bytecode
+    int32_t     writeCount     = 0;    // of those, how many are assignment destinations
+                                       // (EX_Let* LHS). reads = occurrences - writeCount.
+                                       // Best-effort: wrapped LHS (Other.Field/Struct.Member/
+                                       // Arr[i] = x) is not detected and counts as a read.
+    std::string kind;                  // "instance" (0x01) / "local" (0x00) / "ref"
+
+    // v2a: for hits inside a Blueprint ubergraph (ExecuteUbergraph_*), the BP
+    // event(s) whose entry offset precedes the reference (comma-joined, distinct).
+    // Empty for non-ubergraph functions. Best-effort: shared sub-graphs reached
+    // from multiple events can mis-attribute (nearest-preceding heuristic).
+    std::string eventName;
+    // Transient (not serialised): byte offsets of the FProperty* within the
+    // ubergraph Script, used by the post-scan attribution pass then cleared.
+    std::vector<int32_t> ubergraphOffsets;
+};
+
+struct PropertyXrefStats {
+    int32_t functionsScanned    = 0;   // objects whose class name == "Function"
+    int32_t functionsWithScript = 0;   // of those, Script.Num > 0
+    int32_t objectsTotal        = 0;   // GObjects count
+    int64_t durationMs          = 0;
+    bool    deadlineHit         = false;
+};
+
+struct PropertyXrefResult {
+    std::vector<PropertyXref> xrefs;
+    PropertyXrefStats         stats;
+};
+
+// Scan every UFunction's bytecode for references to `propAddr` (an FProperty*).
+// gameOnly skips functions whose owning class is an engine package. Parallel
+// GObjects walk (relies on Ubel's mutex-guarded caches, build 792).
+PropertyXrefResult FindPropertyXrefs(uintptr_t propAddr, bool gameOnly,
+                                     int32_t maxResults = 200);
+
+// === Reverse edge: function -> properties it reads/writes ===
+//
+// Given ONE UFunction, parse its Kismet bytecode and list every FProperty it
+// references, with read/write classification. Opcode-anchored scan: for each
+// variable/struct-member/persistent-frame opcode, the following 8-byte pointer
+// is validated via Ubel::ResolvePropertyNameType (type must contain "Property")
+// — so non-property pointers (UFunction*, literals) are rejected. Writes are
+// detected with the same EX_Let* heuristic as FindPropertyXrefs.
+//
+// Blueprint/script functions only (native functions have empty bytecode).
+// Best-effort: a write whose LHS is wrapped (Other.Field / Struct.Member /
+// Arr[i] = x) may be reported as a read.
+struct FunctionPropRef {
+    uintptr_t   propAddr    = 0;
+    std::string name;
+    std::string type;          // "FloatProperty" / "StructProperty" / ...
+    int32_t     occurrences = 0;
+    int32_t     writeCount  = 0;   // reads = occurrences - writeCount
+    std::string scope;             // "instance" (class member) / "local" (function
+                                   // local/param) / "default" / "sparse" / "struct" /
+                                   // "frame". UI defaults to instance-only so BP
+                                   // compiler temporaries (CallFunc_*) don't drown it.
+};
+
+struct FunctionPropRefResult {
+    int32_t scriptBytes = 0;       // UStruct::Script.Num (0 = native / empty)
+    std::vector<FunctionPropRef> refs;
+};
+
+FunctionPropRefResult WalkFunctionPropertyRefs(uintptr_t funcAddr);
+
 // === Sparse Delegate Storage Walker ===
 //
 // Resolves bindings for a MulticastSparseDelegateProperty. The field on a

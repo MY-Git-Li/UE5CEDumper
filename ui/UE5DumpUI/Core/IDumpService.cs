@@ -76,6 +76,17 @@ public interface IDumpService
     Task<FindReferencesResult> FindReferencesToUObjectAsync(
         string addr, int maxResults = 32, CancellationToken ct = default);
 
+    // --- Property Bytecode Cross-Reference ("which methods use this field?") ---
+    // Static Kismet-bytecode scan; Blueprint/script functions only (native
+    // functions have empty bytecode and are invisible).
+    Task<FindPropertyXrefsResult> FindPropertyXrefsAsync(
+        string propAddr, bool gameOnly = true, int maxResults = 200,
+        CancellationToken ct = default);
+
+    // Reverse edge: the properties a single UFunction reads/writes.
+    Task<FunctionPropRefsResult> WalkFunctionPropsAsync(
+        string funcAddr, CancellationToken ct = default);
+
     // --- Enum Enumeration ---
     Task<List<EnumDefinition>> ListEnumsAsync(CancellationToken ct = default);
 

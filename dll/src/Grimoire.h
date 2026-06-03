@@ -65,6 +65,12 @@ inline int USTRUCT_SUPER      = 0x40;
 inline int USTRUCT_CHILDREN   = 0x48;  // UField* chain (functions; in UE4 <4.25: all properties here)
 inline int USTRUCT_CHILDPROPS = 0x50;  // FField* chain (properties; absent in UE4 <4.25)
 inline int USTRUCT_PROPSSIZE  = 0x58;
+// UStruct::Script — TArray<uint8> Kismet bytecode. Always sits immediately
+// after PropertiesSize(int32) + MinAlignment(int32), so == PROPSSIZE + 0x08 for
+// every UE 4.18-5.7 layout and every shifted custom-game layout (verified vs
+// RE-UE4SS MemberVariableLayout templates). Set in Genau from the calibrated
+// PROPSSIZE; default mirrors the UE4.25+/UE5 standard (0x58 + 8 = 0x60).
+inline int USTRUCT_SCRIPT     = 0x60;
 
 // === FField — defaults for UE5.0-5.1.0 (FFieldVariant=0x10) ===
 // UE5.1.1+ shifts these: Next=0x18, Name=0x20

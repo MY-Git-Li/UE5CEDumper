@@ -3045,6 +3045,12 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
 
     // Summary log
     Sein::Info("DYNO", "=== Dynamic Offset Summary ===");
+    // Derived: UStruct::Script (Kismet bytecode TArray) is always PROPSSIZE + 8
+    // (MinAlignment int32 sits between them). Inherits PROPSSIZE's calibration,
+    // so shifted-layout games (Atomic Heart / Silent Hill F / Outer Worlds) are
+    // handled with no extra probe. Used by Aura::FindPropertyXrefs.
+    DynOff::USTRUCT_SCRIPT = DynOff::USTRUCT_PROPSSIZE + 0x08;
+
     Sein::Info("DYNO", "  CasePreservingName: %s", DynOff::bCasePreservingName ? "YES" : "no");
     Sein::Info("DYNO", "  TaggedFFieldVariant:%s", DynOff::bTaggedFFieldVariant ? " YES (UE5.3+)" : " no");
     Sein::Info("DYNO", "  UseFProperty:       %s", DynOff::bUseFProperty ? "yes (UE4.25+/UE5)" : "NO (UE4 UProperty)");
@@ -3053,6 +3059,7 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
     Sein::Info("DYNO", "  UStruct::Children   = +0x%02X", DynOff::USTRUCT_CHILDREN);
     Sein::Info("DYNO", "  UStruct::ChildProps = +0x%02X", DynOff::USTRUCT_CHILDPROPS);
     Sein::Info("DYNO", "  UStruct::PropsSize  = +0x%02X", DynOff::USTRUCT_PROPSSIZE);
+    Sein::Info("DYNO", "  UStruct::Script     = +0x%02X", DynOff::USTRUCT_SCRIPT);
     if (DynOff::bUseFProperty) {
         Sein::Info("DYNO", "  FField::Class       = +0x%02X", DynOff::FFIELD_CLASS);
         Sein::Info("DYNO", "  FField::Next        = +0x%02X", DynOff::FFIELD_NEXT);

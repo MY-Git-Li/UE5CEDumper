@@ -131,6 +131,14 @@
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:ScoredFunctionRow">
               <StackPanel Orientation="Horizontal" Spacing="4">
+                <Button Content="{StaticResource str.IF.Props}"
+                        Command="{Binding $parent[UserControl].((vm:InterestingFunctionsViewModel)DataContext).FindFuncPropsCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.IF.Props}"
+                        Foreground="#C586C0" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#C586C0"
+                        Padding="6,2" FontSize="11"
+                        Cursor="Hand"/>
                 <Button Content="{StaticResource str.IF.OpenLive}"
                         Command="{Binding $parent[UserControl].((vm:InterestingFunctionsViewModel)DataContext).OpenInLiveWalkerCommand}"
                         CommandParameter="{Binding}"
