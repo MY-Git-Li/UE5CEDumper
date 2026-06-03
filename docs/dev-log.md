@@ -11,6 +11,70 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-06-03 — Property ↔ Function bytecode cross-reference (Path 1, builds 838-861)
+
+A new RE capability line: **answer "which methods use this field, read or write?"
+and the inverse "which fields does this function touch?"** by statically scanning
+Kismet (Blueprint) bytecode. Six commits on `dev`. No full disassembler — every
+step anchors on a known **address** (zero false positives) plus a few stable
+`EExprToken` opcode values, so version risk stays low. Coverage is BP/script
+functions only; native (`FUNC_Native`) functions have empty bytecode and are
+invisible (complementary to CE access-breakpoints, which cover native but drown on
+shared/inlined code). Headless verifier: `scripts/xref_probe.ps1` (a pipe CLIENT —
+the opposite of `test_pipe.ps1`'s mock server).
+
+- **`574031e` — DLL Path 1 (`find_property_xrefs`).** Given a target `FProperty*`,
+  byte-scan every UFunction's `UStruct::Script` for the (unaligned) pointer; the
+  variable-access opcodes embed the live fixed-up `FProperty*` directly.
+  `DynOff::USTRUCT_SCRIPT` is **derived as `USTRUCT_PROPSSIZE + 0x08`** (MinAlignment
+  always sits between them) — verified against every RE-UE4SS `MemberVariableLayout`
+  template (UE 4.18-5.7) AND every shifted custom-game layout (Atomic Heart / Silent
+  Hill F / Outer Worlds), so the +8 invariant is universal and inherits PROPSSIZE's
+  calibration. Reuses `ParallelGObjectsScan` + `ConcatTruncate`; 30s deadline; relies
+  on Ubel's mutex-guarded caches (build 792).
+- **`0548ed3` — UI wiring.** `PropertyXrefDialog` (code-behind, AOT-safe
+  `FuncDataTemplate` columns); Class Struct field grid → right-click "Find functions
+  using this field". Self-contained dialog, no new tab (experimental-tab layout
+  untouched).
+- **`a84eca9` — extend + UX consistency.** DLL `search_properties{,_batch}` now emit
+  `field_addr`; Property Search + Interesting Properties get the same xref (row
+  "Find Funcs" button + context menu); Class Struct gains a client-side field
+  Filter box + row button. Shared `PropertyXrefDialog.ShowForFieldAsync` owner
+  resolver. VMs take `IPlatformService` (optional where tests construct them).
+- **`4d349d6` — v2a ubergraph → event attribution.** A BP event's stub calls
+  `ExecuteUbergraph(<int entryOffset>)` via `EX_(Local)FinalFunction(0x46/0x1C)` +
+  `EX_IntConst(0x1D)`. `BuildUbergraphEntryTable` anchors on the ubergraph
+  function's address, reads each stub's entry offset → `(entryOffset, eventName)`;
+  a serial post-pass attributes each reference offset to the event whose entry
+  offset is the largest ≤ it. So `ExecuteUbergraph_*` hits resolve to the actual
+  event (e.g. `ItemEffects_BeginPlay`). Best-effort: shared sub-graphs reached from
+  multiple events can mis-attribute (needs v2b CFG walk).
+- **`9286350` — read/write distinction.** `IsWriteContext` detects assignment
+  destinations via the `EX_Let*` LHS shapes (`EX_LetBool 0x14`/`MulticastDelegate
+  0x43`/`Delegate 0x44`/`Obj 0x5F`/`WeakObjPtr 0x60` = `[LetOp][varOp][ptr]`;
+  `EX_Let 0x0F` = `[0x0F][propptr 8B][varOp][ptr]` with a `LooksLikeHeapPtr` check;
+  `EX_LetValueOnPersistentFrame 0x64`). Conservative (high precision); wrapped LHS
+  (`Other.Field` / `Struct.Member` / `Arr[i] = x`) reads as a read.
+- **`248f631` — reverse edge (`walk_function_props`).** Given ONE UFunction, parse
+  its bytecode and list every `FProperty` it references with read/write tally +
+  **scope** (instance / local / default / sparse / struct / frame).
+  `Ubel::ResolvePropertyNameType` validates each candidate (type name must contain
+  "Property"). Sorted instance-first so BP compiler temporaries
+  (`CallFunc_*_ReturnValue`, scope=local) don't drown the class fields.
+  `FunctionPropsDialog` has a **"Class fields only"** filter (default on);
+  Interesting Functions panel gains a "Props" row button.
+
+Live-verified throughout on Everspace 2 (UE5): `BP_Ship_Player_C.
+OkkarCatalystCargoUnit2HPBuff` → 7 refs, 1 write, event `ItemEffects_BeginPlay`;
+`ExecuteUbergraph_BP_Ship_Player` → 6231 props, instance fields surfaced first.
+Every commit: DLL + UI Release build OK, **tests 1220 C# + 370 dll + 31 utf8 green**,
+Native AOT publish clean. New pipe commands: `find_property_xrefs`,
+`walk_function_props` (+ `field_addr` on `search_properties{,_batch}`,
+`ustruct_script` in `get_offsets`).
+
+**Deferred (see todo):** v2b (CFG-precise event attribution + wrapped-LHS r/w),
+Path 2 (Zydis disasm of native UFunctions).
+
 ## 2026-06-02 — Experimental: Class Pivot (Phase C, build 830)
 
 Third tranche of the experimental Snapshot / SPC / Pivot feature. **Phase C
