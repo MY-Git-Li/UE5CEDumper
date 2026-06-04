@@ -155,11 +155,14 @@ public partial class ClassPivotViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowKeyField));
         OnPropertyChanged(nameof(CanRunPivot));
         // Switching source clears the cross-source picker/result state so a stale
-        // field list or row can't be Run against the wrong source.
+        // field list or row can't be Run against the wrong source. Detach bound
+        // selections before clearing (Avalonia selection-model safety).
+        SelectedKeyField = null;
+        SelectedArrayField = null;
+        SelectedResult = null;
         Fields.Clear();
         KeyFieldOptions.Clear();
         ArrayFields.Clear();
-        SelectedArrayField = null;
         Results.Clear();
         StatusText = "";
         if (IsDataTableSource)
@@ -248,9 +251,11 @@ public partial class ClassPivotViewModel : ViewModelBase
     {
         try
         {
-            var list = await _store.ListSnapshotsAsync();
-            Snapshots.Clear();
-            foreach (var s in list) Snapshots.Add(s);
+            // Off the UI thread: Microsoft.Data.Sqlite "*Async" runs synchronously
+            // on the caller, so awaiting it on the UI thread would block + run the
+            // collection rebuild inline inside a binding event (the crash).
+            var list = await Task.Run(() => _store.ListSnapshotsAsync());
+            UiCollection.Reset(Snapshots, list, () => SelectedSnapshot = null);
             // Default to the newest snapshot (triggers class load).
             SelectedSnapshot = Snapshots.Count > 0 ? Snapshots[0] : null;
         }
@@ -271,9 +276,9 @@ public partial class ClassPivotViewModel : ViewModelBase
         try
         {
             // Array mode lists only classes that captured struct-array elements.
-            var list = arrayMode
-                ? await _store.ListPivotArrayClassesAsync(snapId)
-                : await _store.ListPivotClassesAsync(snapId);
+            var list = await Task.Run(() => arrayMode
+                ? _store.ListPivotArrayClassesAsync(snapId)
+                : _store.ListPivotClassesAsync(snapId));
             if (id != _classLoadId) return;   // a newer snapshot/source superseded us
             _allClasses.Clear();
             _allClasses.AddRange(list);
@@ -289,10 +294,10 @@ public partial class ClassPivotViewModel : ViewModelBase
     private void ApplyClassFilter()
     {
         string f = ClassFilter.Trim();
-        Classes.Clear();
-        foreach (var c in _allClasses)
-            if (f.Length == 0 || c.ClassName.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0)
-                Classes.Add(c);
+        var filtered = _allClasses.Where(c =>
+            f.Length == 0 || c.ClassName.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0);
+        // Detach the selection before rebuilding (Avalonia selection-model safety).
+        UiCollection.Reset(Classes, filtered, () => SelectedClass = null);
     }
 
     private async Task LoadFieldsAsync()
@@ -307,10 +312,12 @@ public partial class ClassPivotViewModel : ViewModelBase
         string cls = SelectedClass.ClassName;
         try
         {
-            var fields = await _store.ListPivotFieldsAsync(snapId, cls);
+            var fields = await Task.Run(() => _store.ListPivotFieldsAsync(snapId, cls));
             // A newer class selection superseded us — leave its results intact.
             // (Clear is deferred to here so a stale load can't wipe the latest.)
             if (id != _fieldLoadId) return;
+            SelectedKeyField = null;   // detach selections before clearing bound lists
+            SelectedResult = null;
             Fields.Clear();
             KeyFieldOptions.Clear();
             Results.Clear();
@@ -365,11 +372,11 @@ public partial class ClassPivotViewModel : ViewModelBase
         try
         {
             var res = await _dump.FindInstancesAsync("DataTable", exactMatch: false, limit: 1000);
-            DataTables.Clear();
-            foreach (var inst in res.Instances
-                         .Where(i => i.ClassName.IndexOf("DataTable", StringComparison.OrdinalIgnoreCase) >= 0)
-                         .OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase))
-                DataTables.Add(new DataTablePick(inst.Name, inst.Address, inst.ClassName));
+            var picks = res.Instances
+                .Where(i => i.ClassName.IndexOf("DataTable", StringComparison.OrdinalIgnoreCase) >= 0)
+                .OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(i => new DataTablePick(i.Name, i.Address, i.ClassName));
+            UiCollection.Reset(DataTables, picks, () => SelectedDataTable = null);
             StatusText = $"{DataTables.Count} DataTable(s) found";
         }
         catch (Exception ex)
@@ -384,6 +391,8 @@ public partial class ClassPivotViewModel : ViewModelBase
     private async Task LoadDataTableFieldsAsync()
     {
         _dataTable = null;
+        SelectedKeyField = null;
+        SelectedResult = null;
         Fields.Clear();
         KeyFieldOptions.Clear();
         Results.Clear();
@@ -432,8 +441,10 @@ public partial class ClassPivotViewModel : ViewModelBase
     /// <summary>List the captured struct-array fields of the selected class (C6).</summary>
     private async Task LoadArrayFieldsAsync()
     {
+        SelectedArrayField = null;   // detach selections before clearing bound lists
+        SelectedKeyField = null;
+        SelectedResult = null;
         ArrayFields.Clear();
-        SelectedArrayField = null;
         Fields.Clear();
         KeyFieldOptions.Clear();
         Results.Clear();
@@ -444,7 +455,7 @@ public partial class ClassPivotViewModel : ViewModelBase
         string cls = SelectedClass.ClassName;
         try
         {
-            var list = await _store.ListPivotArrayFieldsAsync(snapId, cls);
+            var list = await Task.Run(() => _store.ListPivotArrayFieldsAsync(snapId, cls));
             if (id != _classLoadId) return;   // a newer class/snapshot superseded us
             foreach (var af in list) ArrayFields.Add(af);
             // Auto-select the first array field (triggers prop load).
@@ -462,6 +473,8 @@ public partial class ClassPivotViewModel : ViewModelBase
     /// value-field picker. The inner-key value is the implicit group key (C6).</summary>
     private async Task LoadArrayPropsAsync()
     {
+        SelectedKeyField = null;
+        SelectedResult = null;
         Fields.Clear();
         KeyFieldOptions.Clear();
         Results.Clear();
@@ -473,7 +486,7 @@ public partial class ClassPivotViewModel : ViewModelBase
         string af = SelectedArrayField.ArrayField;
         try
         {
-            var props = await _store.ListPivotArrayPropsAsync(snapId, cls, af);
+            var props = await Task.Run(() => _store.ListPivotArrayPropsAsync(snapId, cls, af));
             if (id != _fieldLoadId) return;
             foreach (var f in props)
             {
@@ -509,6 +522,7 @@ public partial class ClassPivotViewModel : ViewModelBase
         if (!CanRunPivot) return;
         ClearError();
         IsBusy = true;
+        SelectedResult = null;   // detach before clearing the bound results grid
         Results.Clear();
         try
         {
@@ -532,7 +546,7 @@ public partial class ClassPivotViewModel : ViewModelBase
                     ArrayField = SelectedArrayField!.ArrayField,
                     ValueProps = Fields.Where(f => f.IsValue).Select(f => f.Name).ToList(),
                 };
-                var arrRes = await _store.PivotArrayAsync(aq);
+                var arrRes = await Task.Run(() => _store.PivotArrayAsync(aq));
                 foreach (var row in arrRes.Rows) Results.Add(row);
                 var arrTrunc = arrRes.Truncated ? $" (capped at {aq.MaxGroups:N0})" : "";
                 string keyName = string.IsNullOrEmpty(SelectedArrayField.InnerKeyName)
@@ -549,7 +563,7 @@ public partial class ClassPivotViewModel : ViewModelBase
                 KeyField    = SelectedKeyField ?? "",
                 ValueFields = Fields.Where(f => f.IsValue).Select(f => f.Name).ToList(),
             };
-            var snapRes = await _store.PivotAsync(query);
+            var snapRes = await Task.Run(() => _store.PivotAsync(query));
             foreach (var row in snapRes.Rows) Results.Add(row);
 
             var snapTrunc = snapRes.Truncated ? $" (capped at {query.MaxGroups:N0})" : "";

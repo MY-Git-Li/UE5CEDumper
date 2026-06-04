@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input.Platform;
@@ -87,6 +88,35 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
     public string GetMachineName()
     {
         return Environment.MachineName;
+    }
+
+    public Task RevealInExplorerAsync(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                // Open Explorer with the file selected.
+                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"")
+                {
+                    UseShellExecute = true,
+                });
+            }
+            else
+            {
+                var dir = Directory.Exists(path) ? path : Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(dir))
+                    Process.Start(new ProcessStartInfo("explorer.exe", $"\"{dir}\"")
+                    {
+                        UseShellExecute = true,
+                    });
+            }
+        }
+        catch
+        {
+            // Revealing a folder must never crash the UI.
+        }
+        return Task.CompletedTask;
     }
 
     public void Dispose()

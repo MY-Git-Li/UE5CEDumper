@@ -12,10 +12,10 @@ public partial class PointerPanel : UserControl
         InitializeComponent();
     }
 
-    // Repo URL in the credit footer opens in the default browser. The author
-    // line is now the experimental-features checkbox, so only the repo link
-    // remains clickable here. Mirrors CreditFooter's UseShellExecute pattern.
-    private void OnRepoUrlPressed(object? sender, PointerPressedEventArgs e)
+    // Credit-footer URLs (author + repo) open in the default browser. The
+    // experimental opt-in is now a separate bare checkbox, so both credit links
+    // are plain clickable text again. Mirrors CreditFooter's UseShellExecute pattern.
+    private void OnUrlPressed(object? sender, PointerPressedEventArgs e)
     {
         if (sender is not TextBlock tb || string.IsNullOrWhiteSpace(tb.Text)) return;
         try

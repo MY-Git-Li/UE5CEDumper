@@ -1,9 +1,11 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
 using UE5DumpUI.Models;
+using UE5DumpUI.Services;
 
 namespace UE5DumpUI.ViewModels;
 
@@ -88,6 +90,7 @@ public partial class SnapshotViewModel : ViewModelBase
             _           => null,
         };
 
+        SelectedDiffRow = null;   // detach before clearing the bound results grid
         DiffRows.Clear();
         foreach (var r in _allDiff)
         {
@@ -172,9 +175,14 @@ public partial class SnapshotViewModel : ViewModelBase
     {
         try
         {
-            var list = await _store.ListSnapshotsAsync();
-            Snapshots.Clear();
-            foreach (var s in list) Snapshots.Add(s);
+            var list = await Task.Run(() => _store.ListSnapshotsAsync());
+            // Preserve the diff picks across a refresh (a capture finishes -> this
+            // runs) by id, since Reset detaches every selection bound to Snapshots.
+            long? keepA = DiffA?.Id, keepB = DiffB?.Id;
+            UiCollection.Reset(Snapshots, list,
+                () => { SelectedSnapshot = null; DiffA = null; DiffB = null; });
+            if (keepA.HasValue) DiffA = Snapshots.FirstOrDefault(s => s.Id == keepA.Value);
+            if (keepB.HasValue) DiffB = Snapshots.FirstOrDefault(s => s.Id == keepB.Value);
             await UpdateUsageAsync();
             // Convenience: default the diff pickers to the two newest snapshots
             // (A = older, B = newer) so "Run Diff" is one click after capturing.
@@ -195,7 +203,7 @@ public partial class SnapshotViewModel : ViewModelBase
     {
         try
         {
-            var u = await _store.GetUsageAsync();
+            var u = await Task.Run(() => _store.GetUsageAsync());
             ShowUsageBar = QuotaMb > 0;
             if (QuotaMb > 0)
             {
@@ -301,6 +309,15 @@ public partial class SnapshotViewModel : ViewModelBase
     [RelayCommand]
     private void Cancel() => _cts?.Cancel();
 
+    /// <summary>Reveal the active game's snapshot DB in the OS file browser.</summary>
+    [RelayCommand]
+    private async Task OpenDbFolderAsync()
+    {
+        if (_platform == null) return;
+        try { await _platform.RevealInExplorerAsync(_store.DatabasePath); }
+        catch (Exception ex) { _log.Error(Constants.LogCatView, "Snapshot: open DB folder failed", ex); }
+    }
+
     [RelayCommand]
     private async Task RunDiffAsync()
     {
@@ -312,7 +329,8 @@ public partial class SnapshotViewModel : ViewModelBase
             // Load the full changed set (capped); the filter boxes narrow it
             // client-side afterward so typing is instant.
             var filter = new SnapshotDiffFilter();
-            var diff = await _store.DiffSnapshotsAsync(DiffA!.Id, DiffB!.Id, filter);
+            long idA = DiffA!.Id, idB = DiffB!.Id;
+            var diff = await Task.Run(() => _store.DiffSnapshotsAsync(idA, idB, filter));
             _allDiff.Clear();
             _allDiff.AddRange(diff.Changed);
             var trunc = diff.Truncated ? $" (capped at {filter.MaxRows:N0})" : "";
@@ -369,6 +387,10 @@ public partial class SnapshotViewModel : ViewModelBase
         try
         {
             await _store.DeleteSnapshotAsync(meta.Id);
+            // Detach any selection pointing at the row before removing it.
+            if (ReferenceEquals(SelectedSnapshot, meta)) SelectedSnapshot = null;
+            if (ReferenceEquals(DiffA, meta)) DiffA = null;
+            if (ReferenceEquals(DiffB, meta)) DiffB = null;
             Snapshots.Remove(meta);
         }
         catch (Exception ex)

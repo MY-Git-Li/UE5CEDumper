@@ -237,6 +237,8 @@
     <sys:String x:Key="str.Snapshot.Cancel">Cancel</sys:String>
     <sys:String x:Key="str.Snapshot.Refresh">Refresh</sys:String>
     <sys:String x:Key="str.Snapshot.Delete">Delete Selected</sys:String>
+    <sys:String x:Key="str.Snapshot.OpenDbFolder">Open DB folder</sys:String>
+    <sys:String x:Key="str.Snapshot.OpenDbFolderTip">Reveal this game's snapshot database (snapshots.&lt;pe_hash&gt;.db) in the file browser.</sys:String>
     <sys:String x:Key="str.Snapshot.Quota">Per-game quota:</sys:String>
     <sys:String x:Key="str.Snapshot.QuotaHint">When a capture exceeds the quota, the oldest snapshots of this game are dropped automatically.</sys:String>
     <sys:String x:Key="str.Snapshot.Usage">Used:</sys:String>

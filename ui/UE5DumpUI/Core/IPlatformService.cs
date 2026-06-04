@@ -21,6 +21,10 @@ public interface IPlatformService
     /// <summary>Copy text to clipboard.</summary>
     Task CopyToClipboardAsync(string text);
 
+    /// <summary>Open the OS file browser at <paramref name="path"/>: reveal/select the
+    /// file if it exists, otherwise open the containing directory. Never throws.</summary>
+    Task RevealInExplorerAsync(string path);
+
     /// <summary>Get the machine name for per-machine file naming.</summary>
     string GetMachineName();
 

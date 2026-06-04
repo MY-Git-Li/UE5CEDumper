@@ -36,6 +36,7 @@ public class SpcQueryViewModelTests : IDisposable
         public string GetAppDataPath() => Path.GetTempPath();
         public string GetLogDirectoryPath() => Path.GetTempPath();
         public Task CopyToClipboardAsync(string text) { LastClipboard = text; return Task.CompletedTask; }
+        public Task RevealInExplorerAsync(string path) => Task.CompletedTask;
         public string GetMachineName() => "TEST";
         public Task<string?> ShowSaveFileDialogAsync(string a, string b, string c) => Task.FromResult<string?>(null);
     }
@@ -79,12 +80,18 @@ public class SpcQueryViewModelTests : IDisposable
         await vm.RefreshAsync();
 
         Assert.Equal(3, vm.SnapshotPicks.Count);
-        // Newest first; the two newest auto-selected for convenience.
-        Assert.True(vm.SnapshotPicks[0].IsSelected);
+        // Oldest-first; the two newest (the tail) auto-selected for convenience.
+        Assert.False(vm.SnapshotPicks[0].IsSelected);
         Assert.True(vm.SnapshotPicks[1].IsSelected);
-        Assert.False(vm.SnapshotPicks[2].IsSelected);
+        Assert.True(vm.SnapshotPicks[2].IsSelected);
         Assert.Equal(2, vm.SelectedCount);
         Assert.True(vm.CanRunQuery);
+        // The oldest CHECKED snapshot is the baseline: predicate fixed to Any + disabled.
+        Assert.True(vm.SnapshotPicks[1].IsBaseline);
+        Assert.Equal("Any", vm.SnapshotPicks[1].SelectedPredicate);
+        Assert.False(vm.SnapshotPicks[1].PredicateEnabled);
+        Assert.False(vm.SnapshotPicks[2].IsBaseline);
+        Assert.True(vm.SnapshotPicks[2].PredicateEnabled);
     }
 
     [Fact]

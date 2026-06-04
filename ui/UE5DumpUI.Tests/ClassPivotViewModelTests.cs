@@ -132,7 +132,9 @@ public class ClassPivotViewModelTests : IDisposable
     // can complete an earlier (superseded) load AFTER a later one.
     private sealed class GatedStore : ISnapshotStore
     {
-        public readonly Dictionary<string, TaskCompletionSource<IReadOnlyList<PivotFieldInfo>>> Gates = new();
+        // Concurrent because the VM now invokes the store off the UI thread
+        // (Task.Run), so gates are created on a thread-pool thread.
+        public readonly System.Collections.Concurrent.ConcurrentDictionary<string, TaskCompletionSource<IReadOnlyList<PivotFieldInfo>>> Gates = new();
 
         public string DatabasePath => "";
         public void SetActiveGame(string? peHash) { }
@@ -332,11 +334,15 @@ public class ClassPivotViewModelTests : IDisposable
         await vm.RefreshAsync();        // loads snapshot + classes (classes are immediate)
         await vm.PendingLoad!;
 
-        // Select A (load A starts, gated), then B (load B starts, gated).
+        // Select A (load A starts, gated), then B (load B starts, gated). The store
+        // call now runs on a thread-pool thread (Task.Run), so wait for both gates
+        // to be created before completing them.
         vm.SelectedClass = vm.Classes.First(c => c.ClassName == "A");
         var loadA = vm.PendingLoad!;
         vm.SelectedClass = vm.Classes.First(c => c.ClassName == "B");
         var loadB = vm.PendingLoad!;
+        await WaitForGate(store, "A");
+        await WaitForGate(store, "B");
 
         // Complete the NEWER load first, then the stale one.
         store.Gates["B"].SetResult(new[] { Field("BetaField") });
@@ -346,5 +352,13 @@ public class ClassPivotViewModelTests : IDisposable
 
         // The stale A load must have bailed — Fields shows only B's field.
         Assert.Equal("BetaField", Assert.Single(vm.Fields).Name);
+    }
+
+    // The store call is deferred to a thread pool (Task.Run), so spin briefly until
+    // the gated load has registered its TaskCompletionSource.
+    private static async Task WaitForGate(GatedStore store, string cls)
+    {
+        for (int i = 0; i < 400 && !store.Gates.ContainsKey(cls); i++)
+            await Task.Delay(5);
     }
 }
