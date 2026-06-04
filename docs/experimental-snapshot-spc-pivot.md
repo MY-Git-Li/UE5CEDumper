@@ -370,20 +370,26 @@ HP / money) lives on the stable anchors, so it joins well.
 
 ## 6. SQLite schema (raw ADO.NET)
 
-> **Schema v3 (build 882) — denormalised (current).** The `fields` table keeps the
-> identity columns per row so the Diff / SPC / Pivot self-joins hit a single-table
-> composite **covering index** (`ix_strict`/`ix_loose`/`ix_insession`) — the fast
-> path. `PRAGMA user_version`-gated: an older DB is just dropped + recreated on open
-> (no in-place migration; experimental captures recapture in ~2 min).
+> **Schema v4 (build 884) — denormalised, in-memory queries (current).** The `fields`
+> table keeps identity columns per row, but **Diff and SPC no longer query in SQL** —
+> they load snapshots into in-memory dictionaries and hash-join in C# (the technique
+> the `discrete` sister project uses; O(n), index-independent). Pivot was already
+> in-memory (`PivotEngine`). So the three heavy composite covering indexes
+> (`ix_strict`/`ix_loose`/`ix_insession`, ~450 MB of a ~1.2 GB capture) were **dropped**
+> — a single lean `ix_fields(snapshot_id, class_fqn)` serves the `WHERE snapshot_id`
+> scans (diff/SPC load) and the `(snapshot_id, class_fqn)` filters (pivot/list).
+> Roughly **halves the DB** at zero capture cost. `PRAGMA user_version`-gated:
+> an older DB is dropped + recreated on open (no in-place migration; recapture ~2 min).
 >
-> **A v2 attempt (build 881, reverted) normalised identity into an `objects` table +
-> `vfields` view.** It halved the on-disk size (≈1.2 GB → 560 MB/snapshot on ES2) but
-> made `Run Diff` take **>1 min** on ~1.8M rows: splitting the composite key across
-> `fields`+`objects` made the covering indexes unusable, collapsing the self-join to
-> a nested loop. Reverted — a working diff outweighs disk size. The proper
-> **small-and-fast** path is *string-interning* (dictionary-encode `norm_path` /
-> `class_fqn` to int ids kept ON `fields`, so the covering indexes stay fast while
-> the big strings dedup) — a future measured iteration.
+> **Why in-memory:** a v2 attempt (build 881, reverted) normalised identity into an
+> `objects` table to shrink the DB, but splitting the join key across two tables made
+> the SQL self-join's covering indexes unusable → `Run Diff` >1 min on ~1.8M rows.
+> Moving the joins in-memory removes the covering-index dependency entirely, which is
+> what then made dropping the indexes (for size) safe. SPC additionally supports
+> per-snapshot **absolute value predicates** (Exact / Between / ≥ / ≤,
+> `SpcAbsolutePredicate`) applied before the result cap, so directional-but-irrelevant
+> noise (UI widget sizes, etc.) doesn't crowd real values out of the 50k. Further size
+> (not yet done): `discrete`-style gzip per-class blob storage.
 
 
 

@@ -11,6 +11,57 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-06-04 — Experimental Snapshot/SPC/Pivot: live-test hardening + in-memory engines (builds 879-884)
+
+A long live-test + iteration pass on the gated Snapshot / SPC Query / Class Pivot tabs.
+
+**879 — crash + hang fixes.** Live test surfaced a crash + a hang (root-caused from the
+UI view log). (a) `ObservableCollection.Clear()`+repopulate while bound to a
+ComboBox/DataGrid selection trips Avalonia's selection model
+(`ArgumentOutOfRangeException` / "Cannot change ObservableCollection during a
+CollectionChanged event") → new `UiCollection.Reset()` detaches the selection before
+mutating, applied to every selection-bound rebuild. (b) `Microsoft.Data.Sqlite`'s
+`*Async` runs synchronously on the caller, so the Pivot/SPC/Diff queries froze the UI
+→ all heavy store calls wrapped in `Task.Run`. Also: SPC oldest-first ordering, baseline
+predicate forced to "Any" + disabled, 2-snapshot warning; experimental checkbox split
+from the author credit (Opacity 0.1); Snapshot "Open DB folder" button
+(`IPlatformService.RevealInExplorerAsync`). Merged to main (PR #230).
+
+**880 — diff + SPC result filters.** AutoCompleteBox pickers (Class/Field/Object, distinct
+from the result set), a global filter (any column), and value ranges (diff Old/New;
+SPC value-sequence first/last) with Apply/Reset.
+
+**881 → 882 — DB normalize, then REVERTED.** Tried normalising identity into an `objects`
+table + `vfields` view (halved size) — but it made Run Diff take >1 min on ~1.8M rows
+(the self-joins fell off their single-table composite covering indexes). Reverted to the
+denormalised schema; kept the version-gated drop-on-old mechanism. Added indeterminate
+progress bars + "Running…" status on all three tabs, and locked capture controls during
+a capture/diff.
+
+**883 — in-memory hash-join diff (the real fix, ported from `discrete`).** The Unity sister
+project never diffs in SQL — it loads both snapshots into dictionaries and diffs in two
+O(n) passes. Adopted: `DiffSnapshotsAsync` streams A into a
+`Dictionary<(class,gobjects_index,prop),(hex,num)>`, streams B and hash-looks-up A
+(changed rows + Added/Removed churn in one pass). O(n), independent of index/schema shape.
+
+**884 — in-memory SPC + drop heavy indexes (~½ DB) + SPC absolute predicates.** Replaced the
+N-way SQL self-join (`SpcQueryBuilder`, deleted) with an in-memory intersection + new pure
+`SpcEngine` predicate evaluator. With diff & SPC in-memory and Pivot filtering by
+`(snapshot_id, class_fqn)`, dropped the three heavy composite indexes
+(`ix_strict/loose/insession`, ~450 MB) for a single lean `ix_fields(snapshot_id, class_fqn)`
+— roughly halving the DB at zero capture cost (schema v4). Added per-snapshot **absolute
+value predicates** (Exact / Between / ≥ / ≤) applied before the 50k cap, fixing the case
+where directional-but-irrelevant UI noise (e.g. `SizeBox.WidthOverride` 1920→0) crowded
+real gameplay values out of the cap.
+
+Tests 1358 → 1241 net for the experimental suite churn (the totals shifted as
+`SpcQueryBuilderTests` were replaced by `SpcEngineTests`); full suite green throughout
+(1241 C# / 393 dll / 31 utf8 at build 884). LIVE-VERIFIED by user: diff fast + correct;
+SPC results + value-filter pending final confirm. The `discrete` techniques still
+unmined: gzip per-class blob storage (further size), lazy field-index + eviction.
+
+-----
+
 ## 2026-06-04 — Class Pivot C5 (right-click handoff) + C6 (array-element pivot) (build 877)
 
 Two more Phase C closures in one session.
