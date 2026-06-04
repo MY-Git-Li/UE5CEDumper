@@ -87,15 +87,15 @@ public sealed class SnapshotStore : ISnapshotStore
     }
 
     /// <summary>Current on-disk schema version. The <c>fields</c> table is
-    /// denormalised (identity columns per row) so the SPC / Pivot / Diff self-joins
-    /// hit a single-table covering index (<c>ix_strict/loose/insession</c>) — the
-    /// fast path. (A v2 attempt to normalise identity into an <c>objects</c> table
-    /// halved the DB size but split those composite keys across two tables, which
-    /// killed the covering indexes and made Diff take &gt;1 min on ~1.8M rows — so it
-    /// was reverted to v3.) Bump this on any incompatible change: an older DB is
-    /// simply dropped + recreated on open (experimental captures recapture in ~2 min;
-    /// no in-place migration).</summary>
-    private const long SchemaVersion = 3;
+    /// denormalised (identity columns per row). v4 DROPPED the three heavy composite
+    /// covering indexes (ix_strict/loose/insession — ~450 MB on a ~1.8M-row capture):
+    /// Diff and SPC now run as in-memory hash-joins (see <see cref="DiffSnapshotsAsync"/>
+    /// / <see cref="SpcQueryAsync"/>), which need only a fast <c>WHERE snapshot_id</c>
+    /// scan, and Pivot filters by (snapshot_id, class_fqn). So a single lean
+    /// <c>ix_fields(snapshot_id, class_fqn)</c> serves every query — roughly halving
+    /// the DB. Bump this on any incompatible change: an older DB is dropped +
+    /// recreated on open (experimental captures recapture in ~2 min; no migration).</summary>
+    private const long SchemaVersion = 4;
 
     private static async Task EnsureSchemaAsync(SqliteConnection conn, CancellationToken ct)
     {
@@ -149,10 +149,7 @@ public sealed class SnapshotStore : ISnapshotStore
                 inner_key_value TEXT,
                 inner_prop_name TEXT
             );
-            CREATE INDEX IF NOT EXISTS ix_fields_snap ON fields(snapshot_id);
-            CREATE INDEX IF NOT EXISTS ix_strict      ON fields(snapshot_id, class_fqn, norm_path,      prop_name);
-            CREATE INDEX IF NOT EXISTS ix_loose       ON fields(snapshot_id, class_fqn, outer_chain,    prop_name);
-            CREATE INDEX IF NOT EXISTS ix_insession   ON fields(snapshot_id, class_fqn, gobjects_index, prop_name);
+            CREATE INDEX IF NOT EXISTS ix_fields ON fields(snapshot_id, class_fqn);
             """, ct);
 
         if (ver < SchemaVersion)
@@ -550,43 +547,125 @@ public sealed class SnapshotStore : ISnapshotStore
     public async Task<SpcResult> SpcQueryAsync(SpcQuery query, CancellationToken ct = default)
     {
         var result = new SpcResult { SnapshotCount = query.SnapshotIds.Count };
-        // Compile throws ArgumentException for < 2 snapshots or a mismatched
-        // predicate count — let it propagate so the VM surfaces the error.
-        var compiled = SpcQueryBuilder.Compile(query);
         int n = query.SnapshotIds.Count;
+        if (n < 2)
+            throw new ArgumentException("SPC needs at least two snapshots.", nameof(query));
+        if (query.Predicates.Count != n)
+            throw new ArgumentException("Predicate count must equal snapshot count.", nameof(query));
         int max = query.MaxRows > 0 ? query.MaxRows : 50000;
 
-        await using var conn = await OpenAsync(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = compiled.Sql;
-        if (compiled.ClassLike != null) cmd.Parameters.AddWithValue("$cls", compiled.ClassLike);
-        if (compiled.PropLike  != null) cmd.Parameters.AddWithValue("$prop", compiled.PropLike);
+        string classContains = query.ClassContains?.Trim() ?? "";
+        string propContains  = query.PropContains?.Trim() ?? "";
+        var mode = query.JoinMode;
+        var abs  = query.AbsolutePredicates is { Count: > 0 } ? query.AbsolutePredicates : null;
 
-        await using var r = await cmd.ExecuteReaderAsync(ct);
-        // Column layout (see SpcQueryBuilder): 0 class, 1 norm_path, 2 prop_name,
-        // 3 prop_offset, 4 declared_type, 5 obj_addr, then n hex columns.
-        const int hexBase = 6;
-        while (await r.ReadAsync(ct))
+        await using var conn = await OpenAsync(ct);
+
+        // In-memory intersection (port of `discrete`): load the anchor (oldest)
+        // snapshot's fields into a candidate dict keyed by the join identity, then
+        // stream each later snapshot and keep only candidates that recur, appending
+        // their value. One shrinking dict — no SQL self-join, no covering-index
+        // dependency. Class/prop filters narrow at anchor load. Duplicate keys within
+        // a snapshot (e.g. spawn siblings sharing a normalised path under Strict) keep
+        // the first — collapses cross-product noise.
+        var intern = new Dictionary<string, string>(StringComparer.Ordinal);
+        string Intern(string s) { if (intern.TryGetValue(s, out var v)) return v; intern[s] = s; return s; }
+
+        var cands = new Dictionary<string, Cand>();
+
+        await using (var cmd = conn.CreateCommand())
         {
+            cmd.CommandText = SpcRowSql;
+            cmd.Parameters.AddWithValue("$id", query.SnapshotIds[0]);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                string cls  = r.IsDBNull(0) ? "" : r.GetString(0);
+                string prop = r.IsDBNull(4) ? "" : r.GetString(4);
+                if (classContains.Length > 0 && cls.IndexOf(classContains, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                if (propContains.Length  > 0 && prop.IndexOf(propContains,  StringComparison.OrdinalIgnoreCase) < 0) continue;
+                string key = SpcKey(mode, r, cls, prop);
+                if (cands.ContainsKey(key)) continue;
+                var c = new Cand { ClassName = Intern(cls), PropName = Intern(prop) };
+                c.Hex.Add(r.IsDBNull(7) ? "" : r.GetString(7));
+                c.Num.Add(r.IsDBNull(8) ? (double?)null : r.GetDouble(8));
+                cands[key] = c;
+            }
+        }
+
+        for (int i = 1; i < n && cands.Count > 0; i++)
+        {
+            foreach (var c in cands.Values) c.Seen = false;
+            bool newest = i == n - 1;
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = SpcRowSql;
+                cmd.Parameters.AddWithValue("$id", query.SnapshotIds[i]);
+                await using var r = await cmd.ExecuteReaderAsync(ct);
+                while (await r.ReadAsync(ct))
+                {
+                    string cls  = r.IsDBNull(0) ? "" : r.GetString(0);
+                    string prop = r.IsDBNull(4) ? "" : r.GetString(4);
+                    string key = SpcKey(mode, r, cls, prop);
+                    if (!cands.TryGetValue(key, out var c) || c.Seen) continue;
+                    c.Seen = true;
+                    c.Hex.Add(r.IsDBNull(7) ? "" : r.GetString(7));
+                    c.Num.Add(r.IsDBNull(8) ? (double?)null : r.GetDouble(8));
+                    if (newest)
+                    {
+                        c.NormPath     = r.IsDBNull(1) ? "" : r.GetString(1);
+                        c.ObjAddr      = r.IsDBNull(6) ? "" : r.GetString(6);
+                        c.PropOffset   = r.IsDBNull(5) ? 0  : r.GetInt32(5);
+                        c.DeclaredType = r.IsDBNull(3) ? "" : r.GetString(3);
+                    }
+                }
+            }
+            // Intersection: drop candidates absent from this snapshot.
+            List<string>? drop = null;
+            foreach (var kv in cands)
+                if (!kv.Value.Seen) (drop ??= new()).Add(kv.Key);
+            if (drop != null) foreach (var k in drop) cands.Remove(k);
+        }
+
+        // Evaluate the directional chain + absolute predicates; build result rows.
+        foreach (var c in cands.Values)
+        {
+            if (c.Hex.Count != n) continue;
+            if (!SpcEngine.Matches(c.Hex, c.Num, query.Predicates, abs)) continue;
             if (result.Rows.Count >= max) { result.Truncated = true; break; }
-            string type = r.IsDBNull(4) ? "" : r.GetString(4);
             var row = new SpcResultRow
             {
-                ClassName    = r.IsDBNull(0) ? "" : r.GetString(0),
-                NormPath     = r.IsDBNull(1) ? "" : r.GetString(1),
-                PropName     = r.IsDBNull(2) ? "" : r.GetString(2),
-                PropOffset   = r.IsDBNull(3) ? 0  : r.GetInt32(3),
-                DeclaredType = type,
-                ObjAddr      = r.IsDBNull(5) ? "" : r.GetString(5),
+                ClassName = c.ClassName, NormPath = c.NormPath, PropName = c.PropName,
+                PropOffset = c.PropOffset, DeclaredType = c.DeclaredType, ObjAddr = c.ObjAddr,
             };
-            for (int i = 0; i < n; i++)
-            {
-                string hex = r.IsDBNull(hexBase + i) ? "" : r.GetString(hexBase + i);
-                row.Values.Add(SnapshotNumeric.Render(type, hex));
-            }
+            for (int i = 0; i < n; i++) row.Values.Add(SnapshotNumeric.Render(c.DeclaredType, c.Hex[i]));
             result.Rows.Add(row);
         }
         return result;
+    }
+
+    // 0 class,1 norm,2 outer,3 type,4 prop,5 offset,6 addr,7 hex,8 num,9 gobjects_index
+    private const string SpcRowSql =
+        "SELECT class_fqn, norm_path, outer_chain, declared_type, prop_name, prop_offset, " +
+        "obj_addr, hex, numeric_value, gobjects_index " +
+        "FROM fields WHERE snapshot_id=$id AND array_field IS NULL;";
+
+    private static string SpcKey(SpcJoinMode mode, SqliteDataReader r, string cls, string prop) => mode switch
+    {
+        SpcJoinMode.Loose     => cls + "\u0001" + (r.IsDBNull(2) ? "" : r.GetString(2)) + "\u0001" + prop,
+        SpcJoinMode.InSession => cls + "\u0001" + (r.IsDBNull(9) ? -1L : r.GetInt64(9)) + "\u0001" + prop,
+        _ /* Strict */        => cls + "\u0001" + (r.IsDBNull(1) ? "" : r.GetString(1)) + "\u0001" + prop +
+                                 "\u0001" + (r.IsDBNull(5) ? 0 : r.GetInt32(5)),
+    };
+
+    // One SPC candidate field: identity + its value sequence (+ display from newest).
+    private sealed class Cand
+    {
+        public string ClassName = "", PropName = "", NormPath = "", ObjAddr = "", DeclaredType = "";
+        public int  PropOffset;
+        public bool Seen;
+        public readonly List<string>  Hex = new();
+        public readonly List<double?> Num = new();
     }
 
     public async Task<IReadOnlyList<PivotClassInfo>> ListPivotClassesAsync(

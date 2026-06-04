@@ -64,6 +64,20 @@
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
+        <DataGridTemplateColumn Header="{StaticResource str.Spc.Col.ValueFilter}" Width="240">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="vm:SpcSnapshotPick">
+              <StackPanel Orientation="Horizontal" Spacing="2" Margin="2" VerticalAlignment="Center">
+                <ComboBox ItemsSource="{Binding AbsKindOptions}" SelectedItem="{Binding AbsKind}"
+                          IsEnabled="{Binding AbsEnabled}" MinWidth="96"/>
+                <TextBox Text="{Binding AbsLow}" Width="52" IsEnabled="{Binding AbsEnabled}"
+                         IsVisible="{Binding ShowAbsLow}" PlaceholderText="lo"/>
+                <TextBox Text="{Binding AbsHigh}" Width="52" IsEnabled="{Binding AbsEnabled}"
+                         IsVisible="{Binding ShowAbsHigh}" PlaceholderText="hi"/>
+              </StackPanel>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
       </DataGrid.Columns>
     </DataGrid>
 

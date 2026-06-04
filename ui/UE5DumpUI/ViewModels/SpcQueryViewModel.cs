@@ -37,7 +37,11 @@ public partial class SpcSnapshotPick : ObservableObject
     /// snapshot.</summary>
     public bool PredicateEnabled => IsSelected && !IsBaseline;
 
-    partial void OnIsSelectedChanged(bool value) => OnPropertyChanged(nameof(PredicateEnabled));
+    partial void OnIsSelectedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(PredicateEnabled));
+        OnPropertyChanged(nameof(AbsEnabled));
+    }
     partial void OnIsBaselineChanged(bool value)
     {
         OnPropertyChanged(nameof(PredicateEnabled));
@@ -45,6 +49,42 @@ public partial class SpcSnapshotPick : ObservableObject
     }
 
     public IReadOnlyList<string> PredicateOptions { get; }
+
+    // --- Optional absolute (value-window) predicate, applied IN ADDITION to the
+    //     directional one, before the cap. Cuts directional-but-irrelevant noise. ---
+    public IReadOnlyList<string> AbsKindOptions { get; } =
+        new[] { "(any value)", "Exact", "Between", "≥", "≤" };
+    [ObservableProperty] private string _absKind = "(any value)";
+    [ObservableProperty] private string _absLow  = "";
+    [ObservableProperty] private string _absHigh = "";
+
+    /// <summary>Value boxes are editable only for a selected snapshot.</summary>
+    public bool AbsEnabled => IsSelected;
+    public bool ShowAbsLow  => AbsKind is "Exact" or "Between" or "≥";
+    public bool ShowAbsHigh => AbsKind is "Between" or "≤";
+
+    partial void OnAbsKindChanged(string value)
+    {
+        OnPropertyChanged(nameof(ShowAbsLow));
+        OnPropertyChanged(nameof(ShowAbsHigh));
+    }
+
+    /// <summary>Compile this row's UI choice into an absolute predicate.</summary>
+    public SpcAbsolutePredicate ToAbsolutePredicate()
+    {
+        double Lo() => double.TryParse(AbsLow.Trim(),  System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0;
+        double Hi() => double.TryParse(AbsHigh.Trim(), System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0;
+        return AbsKind switch
+        {
+            "Exact"        => new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.Exact,   Low = Lo() },
+            "Between"      => new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.Between, Low = Lo(), High = Hi() },
+            "≥"       => new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.AtLeast, Low = Lo() },
+            "≤"       => new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.AtMost,  High = Hi() },
+            _              => new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.None },
+        };
+    }
 
     public long   Id         => Meta.Id;
     public string Label      => Meta.Label;
@@ -262,6 +302,8 @@ public partial class SpcQueryViewModel : ViewModelBase
                 // Index 0 is the baseline; its predicate is forced to Any.
                 query.Predicates.Add(i == 0 ? SpcPredicateKind.Any
                                             : ParsePredicate(selected[i].SelectedPredicate));
+                // Optional per-snapshot absolute value window (applied before the cap).
+                query.AbsolutePredicates.Add(selected[i].ToAbsolutePredicate());
             }
 
             // Off the UI thread — the N-way self-join over ~1.8M rows would

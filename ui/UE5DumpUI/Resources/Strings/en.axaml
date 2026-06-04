@@ -301,6 +301,7 @@
     <sys:String x:Key="str.Spc.Col.Captured">Captured (UTC)</sys:String>
     <sys:String x:Key="str.Spc.Col.Session">Session</sys:String>
     <sys:String x:Key="str.Spc.Col.Predicate">Compare</sys:String>
+    <sys:String x:Key="str.Spc.Col.ValueFilter">Value filter</sys:String>
     <sys:String x:Key="str.Spc.Res.Class">Class</sys:String>
     <sys:String x:Key="str.Spc.Res.Object">Object</sys:String>
     <sys:String x:Key="str.Spc.Res.Field">Field</sys:String>

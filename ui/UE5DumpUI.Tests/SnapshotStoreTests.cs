@@ -102,7 +102,10 @@ public class SnapshotStoreTests : IDisposable
         Assert.Equal(3, await ScalarAsync(conn,
             "SELECT COUNT(*) FROM fields WHERE class_fqn='BP_Player_C' " +
             "AND norm_path='/Game/Map.Map:PersistentLevel.BP_Player_C'", ct));
-        Assert.Equal(3, await ScalarAsync(conn, "PRAGMA user_version", ct));
+        Assert.Equal(4, await ScalarAsync(conn, "PRAGMA user_version", ct));
+        // v4 dropped the heavy composite indexes — only the lean ix_fields remains.
+        Assert.Equal(0, await ScalarAsync(conn,
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name IN ('ix_strict','ix_loose','ix_insession')", ct));
     }
 
     private static async Task<long> ScalarAsync(SqliteConnection conn, string sql, CancellationToken ct)
