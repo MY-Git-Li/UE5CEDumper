@@ -253,6 +253,26 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     public event Action<string>? ScrollToFunctionRequested;
     private string _lastScrolledSearchText = "";
 
+    /// <summary>Raised to pivot the selected field's owning class in the
+    /// experimental Class Pivot tab (className, fieldName). C5 right-click handoff.</summary>
+    public event Action<string, string>? NavigateToPivot;
+
+    /// <summary>Gates the "Pivot this property" context-menu item — true only when
+    /// the experimental Class Pivot tab is available (mirrors the gate).</summary>
+    [ObservableProperty] private bool _pivotEnabled;
+
+    /// <summary>Per-field action: pivot the current class on the selected field in
+    /// the Class Pivot tab. Inert for synthetic container views (Array/Map/Set/
+    /// DataTable labels) — the handoff just reports the class isn't in a snapshot.</summary>
+    [RelayCommand]
+    private void PivotThis(LiveFieldValue? field)
+    {
+        field ??= SelectedField;
+        if (field == null || string.IsNullOrEmpty(CurrentClassName) || string.IsNullOrEmpty(field.Name))
+            return;
+        NavigateToPivot?.Invoke(CurrentClassName, field.Name);
+    }
+
     public LiveWalkerViewModel(IDumpService dump, ILoggingService log, IPlatformService platform,
                                IAobMakerBridge? aobMaker = null)
     {

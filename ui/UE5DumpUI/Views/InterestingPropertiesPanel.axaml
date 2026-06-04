@@ -100,6 +100,10 @@
           <MenuItem Header="{StaticResource str.Xref.FindFunctions}"
                     Command="{Binding FindFieldXrefsCommand}"
                     CommandParameter="{Binding SelectedResult}"/>
+          <MenuItem Header="{StaticResource str.Pivot.ThisProperty}"
+                    Command="{Binding PivotThisCommand}"
+                    CommandParameter="{Binding SelectedResult}"
+                    IsVisible="{Binding PivotEnabled}"/>
         </ContextMenu>
       </DataGrid.ContextMenu>
       <DataGrid.Columns>

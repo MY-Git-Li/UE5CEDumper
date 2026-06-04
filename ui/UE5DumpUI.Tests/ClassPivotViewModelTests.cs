@@ -160,10 +160,169 @@ public class ClassPivotViewModelTests : IDisposable
         public Task<SpcResult> SpcQueryAsync(SpcQuery q, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<PivotResult> PivotAsync(PivotQuery q, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<int> EnforceQuotaAsync(long bytes, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<PivotClassInfo>> ListPivotArrayClassesAsync(long s, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<PivotArrayFieldInfo>> ListPivotArrayFieldsAsync(long s, string c, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<PivotFieldInfo>> ListPivotArrayPropsAsync(long s, string c, string af, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<PivotResult> PivotArrayAsync(ArrayPivotQuery q, CancellationToken ct = default) => throw new NotImplementedException();
     }
 
     private static PivotFieldInfo Field(string name)
         => new() { Name = name, DeclaredType = "IntProperty", DistinctCount = 1, InstanceCount = 2 };
+
+    // ---- Phase C4: DataTable-native (zero-config) pivot source ----
+
+    /// <summary>Fake dump service serving one DataTable list + a 2-row walk.</summary>
+    private sealed class DtDumpService : StubDumpService
+    {
+        public override Task<FindInstancesResult> FindInstancesAsync(
+            string className, bool exactMatch = false, int limit = 500, CancellationToken ct = default)
+            => Task.FromResult(new FindInstancesResult
+            {
+                Instances = new()
+                {
+                    new InstanceResult { Name = "DT_Items", Address = "0xDA7A", ClassName = "DataTable" },
+                    // A non-DataTable instance must be filtered out by the VM.
+                    new InstanceResult { Name = "SomeActor", Address = "0xBEEF", ClassName = "Actor" },
+                },
+            });
+
+        public override Task<DataTableWalkResult> WalkDataTableRowsAsync(
+            string addr, int offset = 0, int limit = 64, CancellationToken ct = default)
+            => Task.FromResult(new DataTableWalkResult
+            {
+                RowCount = 2, RowStructName = "FItemRow",
+                Rows = new()
+                {
+                    new DataTableRowInfo { RowName = "Sword", DataAddr = "0x1000",
+                        Fields = new() { new LiveFieldValue { Name = "Damage", TypeName = "IntProperty", TypedValue = "50" } } },
+                    new DataTableRowInfo { RowName = "Shield", DataAddr = "0x2000",
+                        Fields = new() { new LiveFieldValue { Name = "Damage", TypeName = "IntProperty", TypedValue = "0" } } },
+                },
+            });
+    }
+
+    [Fact]
+    public async Task DataTableSource_ListsTables_FiltersNonDataTables()
+    {
+        var vm = new ClassPivotViewModel(_store, new MockLoggingService(), null, new DtDumpService());
+
+        vm.SelectedSource = "DataTable";   // empty list → triggers a DataTable refresh
+        await vm.PendingLoad!;
+
+        // The Actor instance is filtered; only the DataTable remains.
+        Assert.Equal("DT_Items", Assert.Single(vm.DataTables).Name);
+        Assert.True(vm.IsDataTableSource);
+        Assert.False(vm.IsSnapshotSource);
+    }
+
+    [Fact]
+    public async Task DataTableSource_SelectTable_LoadsFields_AndRunProjectsRows()
+    {
+        var vm = new ClassPivotViewModel(_store, new MockLoggingService(), null, new DtDumpService());
+        vm.SelectedSource = "DataTable";
+        await vm.PendingLoad!;
+
+        vm.SelectedDataTable = vm.DataTables[0];
+        await vm.PendingLoad!;            // walk DataTable → field picker + cached rows
+
+        Assert.Contains(vm.Fields, f => f.Name == "Damage");
+        Assert.True(vm.CanRunPivot);
+
+        await vm.RunPivotCommand.ExecuteAsync(null);
+
+        // One row per DataTable row, keyed by RowName, no collisions.
+        Assert.Equal(2, vm.Results.Count);
+        Assert.Equal(new[] { "Sword", "Shield" }, vm.Results.Select(r => r.KeyValue));
+        Assert.All(vm.Results, r => Assert.Equal(1, r.Count));
+        Assert.Contains("Damage=50", vm.Results[0].ValuesDisplay);
+        Assert.Equal("0x1000", vm.Results[0].ObjAddr);   // CE handoff = row struct addr
+    }
+
+    // ---- C5: right-click "Pivot this property" handoff ----
+
+    [Fact]
+    public async Task PivotForAsync_SelectsClass_AndTicksProperty()
+    {
+        await SeedInventoryAsync();
+        var vm = NewVm();
+
+        await vm.PivotForAsync("BP_Item_C", "Quantity");
+
+        Assert.Equal("Snapshot", vm.SelectedSource);
+        Assert.Equal("BP_Item_C", vm.SelectedClass?.ClassName);
+        // ItemID is the auto-suggested key; the handed-off Quantity becomes a value.
+        Assert.True(vm.Fields.First(f => f.Name == "Quantity").IsValue);
+    }
+
+    [Fact]
+    public async Task PivotForAsync_UnknownClass_ReportsAndDoesNotThrow()
+    {
+        await SeedInventoryAsync();
+        var vm = NewVm();
+
+        await vm.PivotForAsync("DoesNotExist", "Whatever");
+
+        Assert.Null(vm.SelectedClass);
+        Assert.Contains("not in the selected snapshot", vm.StatusText);
+    }
+
+    // ---- C6: Snapshot Array source (inner-key pivot) ----
+
+    private async Task SeedCargoAsync()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        long id = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "cargo" }, ct);
+        var ps = new SnapshotCapturedObject
+        {
+            Index = 9, Addr = "0x9000", Name = "PS_9", ClassName = "PlayerState",
+            OuterClassName = "World", Path = "/G.M:L.PlayerState_0",
+        };
+        var arr = new SnapshotCapturedArray { Field = "Cargo" };
+        arr.Elements.Add(MakeSlot(0, "Fuel", 100));
+        arr.Elements.Add(MakeSlot(1, "Ore", 50));
+        ps.Arrays.Add(arr);
+        await _store.WriteChunkAsync(id, new[] { ps }, ct);
+        await _store.FinalizeSnapshotAsync(id, 1, 2, ct);
+    }
+
+    private static SnapshotCapturedArrayElement MakeSlot(int i, string item, int qty)
+    {
+        var el = new SnapshotCapturedArrayElement { Index = i, KeyName = "ItemID", KeyValue = item };
+        el.Fields.Add(new SnapshotCapturedField { Name = "Quantity", Type = "IntProperty", Hex = IntHex(qty), Offset = 0x8 });
+        return el;
+    }
+
+    [Fact]
+    public async Task ArraySource_LoadsArrayClassFieldsProps_AndPivots()
+    {
+        await SeedCargoAsync();
+        var vm = NewVm();
+        await vm.RefreshAsync();
+        await vm.PendingLoad!;
+
+        vm.SelectedSource = "Snapshot Array";   // reloads class list to array classes
+        await vm.PendingLoad!;
+        Assert.True(vm.IsArraySource);
+        Assert.Contains(vm.Classes, c => c.ClassName == "PlayerState");
+
+        vm.SelectedClass = vm.Classes.First(c => c.ClassName == "PlayerState");
+        await vm.PendingLoad!;   // LoadArrayFieldsAsync (auto-selects the array field)
+        await vm.PendingLoad!;   // LoadArrayPropsAsync
+
+        var cargo = Assert.Single(vm.ArrayFields);
+        Assert.Equal("Cargo", cargo.ArrayField);
+        Assert.Equal("ItemID", cargo.InnerKeyName);
+        Assert.NotNull(vm.SelectedArrayField);
+        Assert.Contains(vm.Fields, f => f.Name == "Quantity");
+        Assert.True(vm.CanRunPivot);
+
+        await vm.RunPivotCommand.ExecuteAsync(null);
+
+        // Grouped by inner-key value (ItemID): Fuel + Ore.
+        Assert.Equal(2, vm.Results.Count);
+        Assert.Contains(vm.Results, r => r.KeyValue == "Fuel");
+        Assert.Contains(vm.Results, r => r.KeyValue == "Ore");
+    }
 
     [Fact]
     public async Task RapidClassSwitch_StaleLoadDoesNotClobberLatest()

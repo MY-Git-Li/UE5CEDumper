@@ -76,6 +76,14 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
     public event Action<string, string>? NavigateToProperty;
     public event Action<string>? RequestCopyText;
 
+    /// <summary>Raised to pivot the selected property in the experimental Class
+    /// Pivot tab (className, propName). C5 right-click handoff.</summary>
+    public event Action<string, string>? NavigateToPivot;
+
+    /// <summary>Gates the "Pivot this property" context-menu item — true only when
+    /// the experimental Class Pivot tab is available (mirrors the gate).</summary>
+    [ObservableProperty] private bool _pivotEnabled;
+
     /// <summary>Raised when the user clicks "Generate Cheat Table" on
     /// the multi-select toolbar. Subscribers (MainWindow) open the save
     /// dialog and write the payload — keeping IO out of the VM keeps it
@@ -295,6 +303,15 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
     {
         if (row == null) return;
         NavigateToProperty?.Invoke(row.ClassName, row.PropName);
+    }
+
+    /// <summary>Per-row action: pivot the property's class in the Class Pivot tab.</summary>
+    [RelayCommand]
+    private void PivotThis(ScoredPropertyRow? row)
+    {
+        row ??= SelectedResult;
+        if (row == null || string.IsNullOrEmpty(row.ClassName)) return;
+        NavigateToPivot?.Invoke(row.ClassName, row.PropName);
     }
 
     /// <summary>Per-row action: copy bare property name to clipboard.</summary>

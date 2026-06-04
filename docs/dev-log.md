@@ -11,6 +11,81 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-06-04 — Class Pivot C5 (right-click handoff) + C6 (array-element pivot) (build 877)
+
+Two more Phase C closures in one session.
+
+**C6 — array-element pivot ("Snapshot Array" source).** Phase A1b already captures
+struct-array elements with their inner-key (e.g. `Cargo[].ItemID`) + inner numeric
+props (`Quantity`) into the `fields` table's array columns. C6 surfaces them: a third
+`Source` mode lets the user pick a snapshot → array-class → struct-array field, then
+groups the elements **by inner-key value** (reorder- and owner-immune) projecting the
+inner props. The neat part: **no new engine.** `SnapshotStore.PivotArrayAsync` fetches
+the element rows and maps each `(owner GObjects index, element index)` pair to a
+*synthetic* `PivotInputRow.ObjectIndex`, with `NormPath = inner_key_value`. Run through
+`PivotEngine.Build` in **Identity mode**, that groups by inner-key value with the exact
+same collision rendering as the scalar pivot. New store methods:
+`ListPivotArrayClasses/Fields/Props` (array_field IS NOT NULL filters) + `PivotArrayAsync`.
+
+**C5 — right-click "Pivot this property…" handoff.** A context-menu item on
+PropertySearch, InterestingProperties, and LiveWalker raises a new
+`NavigateToPivot(className, propName)` event. MainWindowViewModel switches to the Class
+Pivot tab and calls `ClassPivotViewModel.PivotForAsync`, which forces scalar Snapshot
+mode, selects the class in the newest snapshot (clearing any class filter), and ticks
+the handed-off property as a value field (unless it became the auto-suggested key).
+Graceful no-op with a status hint when no snapshot/class match exists.
+
+**Gating (the "invisible when experimental off" requirement).** C6 lives entirely
+inside the already-gated Class Pivot tab. C5's menu items bind `IsVisible` to a new
+per-VM `PivotEnabled` flag that MainWindowViewModel sets to
+`ExperimentalEnabled && Pivot != null` (refreshed on `gate.Changed`) — so the handoff
+disappears the moment experimental features are toggled off, and never appears when no
+snapshot store is wired.
+
+Tests +12 (6 `ArrayPivotStoreTests` + 3 `ClassPivotViewModelTests` [array-source +
+2× `PivotForAsync`] + 4 `PivotHandoffCommandTests`). All green: 1244 C# / 393 dll /
+31 utf8. AOT publish clean. **LIVE-VERIFY PENDING (user):** (1) C6 — capture a snapshot
+of a game with a struct-array inventory, pivot it by inner key; (2) C5 — right-click a
+property in PropertySearch/InterestingProps/LiveWalker → confirm it lands in Class Pivot
+pre-selected. Remaining Phase C: C2 (find-by-value).
+
+-----
+
+## 2026-06-04 — Class Pivot C4: DataTable-native zero-config pivot (build 873)
+
+Closed Phase C4 of the experimental Snapshot/SPC/Pivot work. A DataTable is already
+a `RowName → struct` map, so it pivots with **no key discovery**: each row is its own
+group keyed by RowName, and the row struct's fields are the projected columns.
+
+**Design — reuses the existing seam end-to-end.** No new pipe command and no new tab:
+the DLL's `walk_datatable_rows` (+ `DumpService.WalkDataTableRowsAsync`) already
+existed but had no UI consumer. C4 adds a **`Source` toggle (Snapshot / DataTable)**
+to the existing Class Pivot tab. DataTable mode swaps the snapshot/class pickers for a
+live DataTable picker (`FindInstancesAsync("DataTable")`, subclass-tolerant, filtered
+to class names containing "DataTable"), walks the selected table, and feeds the rows
+through the new pure `DataTablePivotEngine` into the *same* results grid + CE handoff
+(Copy Address / Open in Live Walker) the snapshot pivot already uses.
+
+- **`DataTablePivotEngine`** (pure, AOT-safe, unit-tested): `Build(dt, valueFields)`
+  → one `PivotResultRow` per row (Count 1, never a collision, `ObjAddr` = row struct
+  address for CE); `Fields(dt)` aggregates struct fields across rows (type / distinct /
+  instance counts) to drive the value-field picker.
+- **`ClassPivotViewModel`** gains an optional `IDumpService`, the `Source`/DataTable
+  state, `RefreshDataTablesAsync` + `LoadDataTableFieldsAsync`, a DataTable branch in
+  `RunPivotAsync`, and `ShowKeyField`/`IsSnapshotSource`/`IsDataTableSource` so the
+  Group-By/key controls hide in DataTable mode (replaced by a "Key = RowName" hint).
+- **Gating:** C4 lives entirely inside the Class Pivot tab, which is already
+  `IsVisible="{Binding ExperimentalEnabled}"` — so the whole feature is invisible when
+  the experimental flag is off. No new ungated surface was added.
+
+Tests +8 (6 `DataTablePivotEngineTests` + 2 `ClassPivotViewModelTests` DataTable-source
+cases); made `StubDumpService.FindInstancesAsync`/`WalkDataTableRowsAsync` `virtual` so
+the VM test can subclass. All green: 1232 C# / 393 dll / 31 utf8. AOT publish clean.
+**LIVE-VERIFY PENDING (user):** pick a real game's DataTable and confirm rows + CE
+handoff. Remaining Phase C: C2 (find-by-value), C5 (right-click handoff), array pivot.
+
+-----
+
 ## 2026-06-03 — Native UFunction property xref via x64 disassembly (Path 2, builds 862-872)
 
 The complement to Path 1: **answer "which fields does this *native* (C++) function

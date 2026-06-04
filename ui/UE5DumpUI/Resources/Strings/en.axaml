@@ -291,8 +291,15 @@
     <sys:String x:Key="str.Spc.Res.Sequence">Value sequence</sys:String>
 
     <!-- Class Pivot (experimental) -->
-    <sys:String x:Key="str.Pivot.Intro">Group one class's instances by a key field's value (e.g. inventory by ItemID) or by object identity, and project the value fields per group. The best key field is auto-suggested (type + name + cardinality). Differing values inside a group render as a collision ⟨N: v1,v2,+M⟩. Snapshot capture is all-numeric, so keys are int/enum IDs.</sys:String>
+    <sys:String x:Key="str.Pivot.Intro">Group one class's instances by a key field's value (e.g. inventory by ItemID) or by object identity, and project the value fields per group. The best key field is auto-suggested (type + name + cardinality). Differing values inside a group render as a collision ⟨N: v1,v2,+M⟩. Snapshot capture is all-numeric, so keys are int/enum IDs. Switch Source to Snapshot Array to pivot a captured struct array (e.g. Cargo) by its inner-key value (e.g. ItemID) — reorder- and session-immune. Or DataTable for a zero-config pivot of a live DataTable (RowName is the key — no discovery needed).</sys:String>
+    <sys:String x:Key="str.Pivot.Source">Source:</sys:String>
     <sys:String x:Key="str.Pivot.Snapshot">Snapshot:</sys:String>
+    <sys:String x:Key="str.Pivot.DataTable">DataTable:</sys:String>
+    <sys:String x:Key="str.Pivot.ArrayField">Array field:</sys:String>
+    <sys:String x:Key="str.Pivot.RefreshDataTables">🔄 Find DataTables</sys:String>
+    <sys:String x:Key="str.Pivot.KeyRowName">Key = RowName (zero-config)</sys:String>
+    <sys:String x:Key="str.Pivot.KeyInnerKey">Key = inner-key value (reorder-immune)</sys:String>
+    <sys:String x:Key="str.Pivot.ThisProperty">Pivot this property…</sys:String>
     <sys:String x:Key="str.Pivot.ClassFilter">Class:</sys:String>
     <sys:String x:Key="str.Pivot.Run">Run Pivot</sys:String>
     <sys:String x:Key="str.Pivot.OpenWalker">Open in Live Walker</sys:String>

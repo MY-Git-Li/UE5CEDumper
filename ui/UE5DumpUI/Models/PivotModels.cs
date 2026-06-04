@@ -17,6 +17,26 @@ public enum PivotKeyMode
     Field,
 }
 
+/// <summary>One live DataTable instance pickable as a zero-config pivot source
+/// (Phase C4). A DataTable is already a RowName→struct map, so it pivots without
+/// key discovery. See docs/experimental-snapshot-spc-pivot.md §"Phase C — C4".</summary>
+public sealed class DataTablePick
+{
+    public string Name      { get; }
+    public string Address   { get; }
+    public string ClassName { get; }
+
+    public DataTablePick(string name, string address, string className)
+    {
+        Name = name;
+        Address = address;
+        ClassName = className;
+    }
+
+    /// <summary>"DT_Items  [DataTable]" for the picker.</summary>
+    public string Display => string.IsNullOrEmpty(ClassName) ? Name : $"{Name}  [{ClassName}]";
+}
+
 /// <summary>One class present in a snapshot, with its live-instance count.</summary>
 public sealed class PivotClassInfo
 {
@@ -36,6 +56,35 @@ public sealed class PivotFieldInfo
     public int    DistinctCount { get; set; }
     /// <summary>Instances that carry this field (≈ class instance count).</summary>
     public int    InstanceCount { get; set; }
+}
+
+/// <summary>One captured struct-array field of a pivot class (Phase C6), with its
+/// inner-key field name and total element count. Drives the array-field picker for
+/// array-element pivot. See docs/experimental-snapshot-spc-pivot.md §"Phase C — C6".</summary>
+public sealed class PivotArrayFieldInfo
+{
+    public string ArrayField   { get; set; } = "";
+    /// <summary>Inner key field captured for elements (e.g. "ItemID"); "" if none.</summary>
+    public string InnerKeyName { get; set; } = "";
+    /// <summary>Total captured elements across all instances of the class.</summary>
+    public int    ElementCount { get; set; }
+    public string Display => string.IsNullOrEmpty(InnerKeyName)
+        ? $"{ArrayField}  ({ElementCount:N0})"
+        : $"{ArrayField}  [key={InnerKeyName}]  ({ElementCount:N0})";
+}
+
+/// <summary>An array-element pivot request (Phase C6): group one class's captured
+/// struct-array elements by their inner-key value (reorder- and session-immune),
+/// projecting the inner numeric props. Reuses <see cref="PivotEngine"/> in Identity
+/// mode with the inner-key value as the group key.</summary>
+public sealed class ArrayPivotQuery
+{
+    public long   SnapshotId { get; set; }
+    public string ClassName  { get; set; } = "";
+    public string ArrayField { get; set; } = "";
+    /// <summary>Inner prop names whose values are projected per inner-key group.</summary>
+    public List<string> ValueProps { get; set; } = new();
+    public int MaxGroups { get; set; } = 5000;
 }
 
 /// <summary>One captured (instance, field) row the store hands to the pure

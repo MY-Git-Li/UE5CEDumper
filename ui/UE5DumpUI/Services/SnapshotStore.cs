@@ -658,6 +658,155 @@ SELECT COUNT(*) FROM fields a WHERE a.snapshot_id=$in AND a.array_field IS NULL 
         return result;
     }
 
+    // --- Phase C6: array-element pivot ---------------------------------------
+
+    public async Task<IReadOnlyList<PivotClassInfo>> ListPivotArrayClassesAsync(
+        long snapshotId, CancellationToken ct = default)
+    {
+        var list = new List<PivotClassInfo>();
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT class_fqn, COUNT(DISTINCT gobjects_index) AS instances
+            FROM fields WHERE snapshot_id=$s AND array_field IS NOT NULL
+            GROUP BY class_fqn ORDER BY instances DESC, class_fqn;
+            """;
+        cmd.Parameters.AddWithValue("$s", snapshotId);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            list.Add(new PivotClassInfo
+            {
+                ClassName     = r.IsDBNull(0) ? "" : r.GetString(0),
+                InstanceCount = r.IsDBNull(1) ? 0  : r.GetInt32(1),
+            });
+        return list;
+    }
+
+    public async Task<IReadOnlyList<PivotArrayFieldInfo>> ListPivotArrayFieldsAsync(
+        long snapshotId, string className, CancellationToken ct = default)
+    {
+        var list = new List<PivotArrayFieldInfo>();
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT array_field, COALESCE(inner_key_name, ''), COUNT(*) AS elems
+            FROM fields WHERE snapshot_id=$s AND class_fqn=$c AND array_field IS NOT NULL
+            GROUP BY array_field, inner_key_name ORDER BY array_field;
+            """;
+        cmd.Parameters.AddWithValue("$s", snapshotId);
+        cmd.Parameters.AddWithValue("$c", className);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            list.Add(new PivotArrayFieldInfo
+            {
+                ArrayField   = r.IsDBNull(0) ? "" : r.GetString(0),
+                InnerKeyName = r.IsDBNull(1) ? "" : r.GetString(1),
+                ElementCount = r.IsDBNull(2) ? 0  : r.GetInt32(2),
+            });
+        return list;
+    }
+
+    public async Task<IReadOnlyList<PivotFieldInfo>> ListPivotArrayPropsAsync(
+        long snapshotId, string className, string arrayField, CancellationToken ct = default)
+    {
+        var list = new List<PivotFieldInfo>();
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT inner_prop_name, declared_type,
+                   COUNT(DISTINCT hex) AS distinctVals, COUNT(*) AS elems
+            FROM fields WHERE snapshot_id=$s AND class_fqn=$c AND array_field=$af AND array_field IS NOT NULL
+            GROUP BY inner_prop_name, declared_type ORDER BY inner_prop_name;
+            """;
+        cmd.Parameters.AddWithValue("$s", snapshotId);
+        cmd.Parameters.AddWithValue("$c", className);
+        cmd.Parameters.AddWithValue("$af", arrayField);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            list.Add(new PivotFieldInfo
+            {
+                Name          = r.IsDBNull(0) ? "" : r.GetString(0),
+                DeclaredType  = r.IsDBNull(1) ? "" : r.GetString(1),
+                DistinctCount = r.IsDBNull(2) ? 0  : r.GetInt32(2),
+                InstanceCount = r.IsDBNull(3) ? 0  : r.GetInt32(3),
+            });
+        return list;
+    }
+
+    public async Task<PivotResult> PivotArrayAsync(ArrayPivotQuery query, CancellationToken ct = default)
+    {
+        var props = new List<string>();
+        foreach (var v in query.ValueProps)
+            if (!props.Contains(v)) props.Add(v);
+
+        var rows = new List<PivotInputRow>();
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        var sql = new StringBuilder("""
+            SELECT gobjects_index, elem_index, obj_addr, inner_key_value, inner_prop_name, declared_type, hex
+            FROM fields WHERE snapshot_id=$s AND class_fqn=$c AND array_field=$af AND array_field IS NOT NULL
+            """);
+        cmd.Parameters.AddWithValue("$s",  query.SnapshotId);
+        cmd.Parameters.AddWithValue("$c",  query.ClassName);
+        cmd.Parameters.AddWithValue("$af", query.ArrayField);
+        if (props.Count > 0)
+        {
+            sql.Append(" AND inner_prop_name IN (");
+            for (int i = 0; i < props.Count; i++)
+            {
+                if (i > 0) sql.Append(',');
+                var name = "$p" + i;
+                sql.Append(name);
+                cmd.Parameters.AddWithValue(name, props[i]);
+            }
+            sql.Append(')');
+        }
+        sql.Append(" ORDER BY gobjects_index, elem_index;");
+        cmd.CommandText = sql.ToString();
+
+        // Each (owner instance, element index) pair becomes one synthetic
+        // "instance" so PivotEngine folds an element's inner props together; the
+        // inner-key value becomes the Identity group key (reorder-/session-immune).
+        var idMap = new Dictionary<(long, int), long>();
+        long nextId = 0;
+        const int fetchRowCap = 2_000_000;
+        bool capped = false;
+        await using (var r = await cmd.ExecuteReaderAsync(ct))
+        {
+            while (await r.ReadAsync(ct))
+            {
+                if (rows.Count >= fetchRowCap) { capped = true; break; }
+                long objIdx = r.IsDBNull(0) ? -1 : r.GetInt64(0);
+                int  elem   = r.IsDBNull(1) ? -1 : r.GetInt32(1);
+                var key = (objIdx, elem);
+                if (!idMap.TryGetValue(key, out var sid)) { sid = nextId++; idMap[key] = sid; }
+                rows.Add(new PivotInputRow
+                {
+                    ObjectIndex  = sid,
+                    NormPath     = r.IsDBNull(3) ? "(no key)" : r.GetString(3),  // inner-key value = group key
+                    ObjAddr      = r.IsDBNull(2) ? "" : r.GetString(2),
+                    PropName     = r.IsDBNull(4) ? "" : r.GetString(4),
+                    DeclaredType = r.IsDBNull(5) ? "" : r.GetString(5),
+                    Hex          = r.IsDBNull(6) ? "" : r.GetString(6),
+                });
+            }
+        }
+        if (capped)
+            _log?.Warn(Constants.LogCatView,
+                $"Array pivot: row fetch hit the {fetchRowCap:N0} cap for {query.ClassName}.{query.ArrayField} — results truncated");
+
+        var pq = new PivotQuery
+        {
+            KeyMode     = PivotKeyMode.Identity,   // group key = inner-key value (NormPath)
+            ValueFields = props,
+            MaxGroups   = query.MaxGroups,
+        };
+        var result = PivotEngine.Build(rows, pq);
+        if (capped) result.Truncated = true;
+        return result;
+    }
+
     public async Task DeleteSnapshotAsync(long snapshotId, CancellationToken ct = default)
     {
         await using var conn = await OpenAsync(ct);

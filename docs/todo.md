@@ -59,18 +59,19 @@ behind an opt-in experimental flag. **Design of record:
 it first (concept mapping, UE-vs-Unity advantages, SQLite schema, identity-key
 join, array inner-key handling, the Q#4 key-field improvement).
 
-> **NEXT SESSION → Phase C polish (C2/C4/C5) + array pivot.** Phase 0 + Phase A +
-> Phase B (SPC) + **Phase C C1 core (Class Pivot)** shipped (builds 805-830). The
-> pivot engine (`PivotEngine` + `PivotKeyScorer` + `SnapshotStore.Pivot*Async`)
+> **NEXT SESSION → Phase C only C2 left + A3c.** Phase 0 + Phase A + Phase B (SPC)
+> + **Phase C C1 + C3-lite + C4 + C5 + C6 (Class Pivot)** shipped (builds 805-877).
+> The pivot engine (`PivotEngine` + `PivotKeyScorer` + `SnapshotStore.Pivot*Async`)
 > and UI (`ClassPivotViewModel` + `ClassPivotPanel`) are live: group a class by
 > identity or a key field, project value fields, collision render `⟨N: …⟩`, key
-> auto-suggested. Remaining Phase C: **C2** (find-by-value locator → pivot
-> handoff), **C4** (DataTable-native zero-config pivot), **C5** (right-click
-> "Pivot this" from LiveWalker / PropertySearch / InterestingProps), and
-> **array-element pivot** (inner-key join on captured struct arrays — the cargo
-> case). Also still open: **A3c** (CE .CT freeze-export from a diff/SPC/pivot
-> hit — Copy Address covers the manual path). See the Phase C block + design
-> §"Phase C".
+> auto-suggested. A `Source` toggle offers three modes: **Snapshot** (scalar),
+> **Snapshot Array** (C6 — inner-key pivot of a captured struct array, e.g. Cargo
+> by ItemID), and **DataTable** (C4 — zero-config, RowName is the key). **C5** adds
+> a right-click "Pivot this property…" handoff from PropertySearch / Interesting
+> Properties / LiveWalker into the tab. **Remaining Phase C: C2** (find-by-value
+> locator → pivot handoff). Also still open: **A3c** (CE .CT freeze-export from a
+> diff/SPC/pivot hit — Copy Address covers the manual path). See the Phase C block
+> + design §"Phase C".
 
 Locked decisions: SQLite (raw ADO.NET, no EF Core) · all three features ·
 persisted gating · **multi-session first-class** for SPC/Pivot · type-agnostic
@@ -133,11 +134,27 @@ Build in order; each phase gates the next:
     **v2 follow-ups:** Jaccard stability + greedy compound key + class shortlist /
     volatility ranking (the heavier 29i-3 scorer) still open.
   - C2 Find-by-value locator + handoff (closes the loop). *Effort M · med.*
-  - C4 DataTable-native pivot (RowName is the key, zero-config). *Effort S · low.*
-  - C5 Right-click handoff from LiveWalker / PropertySearch / InterestingProps.
-    *Effort S · low.*
-  - C6 Array-element pivot (inner-key join on captured struct arrays — cargo
-    case). *Effort M · med.*
+  - ~~C4 DataTable-native pivot (RowName is the key, zero-config).~~ ✅ **SHIPPED
+    (build 873).** `DataTablePivotEngine` (pure: one group per row keyed by
+    RowName, struct fields projected, no discovery) + a `Source` toggle
+    (Snapshot/DataTable) on `ClassPivotViewModel`/`ClassPivotPanel` driving the
+    live `walk_datatable_rows` path. Reuses the existing results grid + CE handoff
+    (Copy Address / Open in Live Walker). +8 tests (6 engine + 2 VM). Lives inside
+    the already-gated experimental tab, so it's invisible when the flag is off.
+  - ~~C5 Right-click handoff from LiveWalker / PropertySearch / InterestingProps.~~
+    ✅ **SHIPPED (build 877).** "Pivot this property…" context-menu item on all
+    three panels → `NavigateToPivot(class, prop)` → MainWindowVM switches to the
+    Class Pivot tab + `ClassPivotViewModel.PivotForAsync` selects the class in the
+    newest snapshot and ticks the property. Menu item `IsVisible` binds a
+    per-VM `PivotEnabled` flag (set = ExperimentalEnabled && Pivot exists), so it's
+    hidden when experimental is off. +4 command tests + 2 PivotForAsync tests.
+  - ~~C6 Array-element pivot (inner-key join on captured struct arrays — cargo
+    case).~~ ✅ **SHIPPED (build 877).** "Snapshot Array" source mode: pick a
+    snapshot + array-class + struct-array field; groups elements by inner-key value
+    (e.g. Cargo by ItemID — reorder-/owner-immune), projecting inner numeric props.
+    Store: `ListPivotArrayClasses/Fields/Props` + `PivotArrayAsync` (maps each
+    (owner, element) to a synthetic instance keyed by inner_key_value → reuses
+    `PivotEngine.Build` in Identity mode, zero new engine). +6 store + 1 VM test.
 
 New work concentrates in A1 (DLL capture, mostly reuse) + C3 (UE-ify scorer);
 B/C are largely portable `discrete` C# + indexed SQL.

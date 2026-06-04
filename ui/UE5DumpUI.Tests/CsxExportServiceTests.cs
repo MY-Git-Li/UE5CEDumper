@@ -74,7 +74,7 @@ public class StubDumpService : IDumpService
     public Task WatchAsync(string addr, int size, int intervalMs, CancellationToken ct = default) => throw new NotImplementedException();
     public Task UnwatchAsync(string addr, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<WorldWalkResult> WalkWorldAsync(int actorLimit = 200, int arrayLimit = 64, CancellationToken ct = default) => throw new NotImplementedException();
-    public Task<FindInstancesResult> FindInstancesAsync(string className, bool exactMatch = false, int limit = 500, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<FindInstancesResult> FindInstancesAsync(string className, bool exactMatch = false, int limit = 500, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<CePointerInfo> GetCePointerInfoAsync(string addr, int fieldOffset = 0, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<ArrayElementsResult> ReadArrayElementsAsync(string addr, int fieldOffset, string innerAddr, string innerType, int elemSize, int offset = 0, int limit = 64, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<AddressLookupResult> FindByAddressAsync(string addr, CancellationToken ct = default) => throw new NotImplementedException();
@@ -98,7 +98,7 @@ public class StubDumpService : IDumpService
     public Task TriggerScanAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public Task<ScanStatusResult> GetScanStatusAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<InvokeFunctionResult> InvokeFunctionAsync(string funcName, string? instanceAddr = null, string? className = null, int parmsSize = 0, string? paramsHex = null, bool directCall = false, CancellationToken ct = default) => throw new NotImplementedException();
-    public Task<DataTableWalkResult> WalkDataTableRowsAsync(string addr, int offset = 0, int limit = 64, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<DataTableWalkResult> WalkDataTableRowsAsync(string addr, int offset = 0, int limit = 64, CancellationToken ct = default) => throw new NotImplementedException();
 }
 
 public class CsxExportServiceTests

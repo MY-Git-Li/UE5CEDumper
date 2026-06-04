@@ -107,6 +107,33 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             _experimentalGate.Lock();
     }
 
+    /// <summary>C5: switch to the Class Pivot tab and hand off the chosen
+    /// class/property. Guarded so it's inert when the pivot tab isn't available.</summary>
+    private async void HandlePivotHandoff(string className, string? propName)
+    {
+        if (Pivot == null) return;
+        try
+        {
+            SelectedTabIndex = (int)MainTabIndex.ClassPivot;
+            await Pivot.PivotForAsync(className, propName);
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"Pivot handoff error: {className}.{propName}", ex);
+        }
+    }
+
+    /// <summary>Enable the "Pivot this property" context-menu items only when the
+    /// experimental Class Pivot tab is both present and opted in — so the handoff
+    /// stays invisible while experimental features are off.</summary>
+    private void UpdatePivotHandoffEnabled()
+    {
+        bool on = ExperimentalEnabled && Pivot != null;
+        if (PropertySearch != null)        PropertySearch.PivotEnabled = on;
+        if (InterestingProperties != null) InterestingProperties.PivotEnabled = on;
+        if (LiveWalker != null)            LiveWalker.PivotEnabled = on;
+    }
+
     /// <summary>Address format options for toolbar ComboBox.</summary>
     public string[] AddressFormatOptions { get; } =
     [
@@ -223,9 +250,14 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         _experimentalGate = experimentalGate;
 
         // Keep tab visibility in sync when the toggle is flipped elsewhere
-        // (the checkbox lives on the System tab / PointerPanelViewModel).
+        // (the checkbox lives on the System tab / PointerPanelViewModel). Also
+        // re-gate the "Pivot this property" context-menu handoff (C5).
         if (experimentalGate != null)
-            experimentalGate.Changed += (_, _) => OnPropertyChanged(nameof(ExperimentalEnabled));
+            experimentalGate.Changed += (_, _) =>
+            {
+                OnPropertyChanged(nameof(ExperimentalEnabled));
+                UpdatePivotHandoffEnabled();
+            };
 
         ObjectTree = new ObjectTreeViewModel(dump, log, platform);
         ClassStruct = new ClassStructViewModel(dump, log, platform);
@@ -270,7 +302,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 }
             };
 
-            Pivot = new ClassPivotViewModel(snapshotStore, log, platform);
+            Pivot = new ClassPivotViewModel(snapshotStore, log, platform, dump);
             // Pivot group -> open its representative object in Live Walker.
             Pivot.NavigateToInstance += async (addr) =>
             {
@@ -284,7 +316,15 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                     _log.Error($"Pivot NavigateToInstance handler error: {addr}", ex);
                 }
             };
+
+            // C5: right-click "Pivot this property" from the three source panels ->
+            // switch to the Class Pivot tab and pre-select the class/property.
+            PropertySearch.NavigateToPivot        += (cls, prop) => HandlePivotHandoff(cls, prop);
+            InterestingProperties.NavigateToPivot += (cls, prop) => HandlePivotHandoff(cls, prop);
+            LiveWalker.NavigateToPivot            += (cls, prop) => HandlePivotHandoff(cls, prop);
         }
+        // Gate the handoff menu items to the experimental flag (and pivot existence).
+        UpdatePivotHandoffEnabled();
 
         if (proxyDeploy != null)
             ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log);
