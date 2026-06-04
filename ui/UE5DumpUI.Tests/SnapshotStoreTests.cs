@@ -112,6 +112,41 @@ public class SnapshotStoreTests : IDisposable
         return (long)(await cmd.ExecuteScalarAsync(ct) ?? 0L);
     }
 
+    [Fact]
+    public async Task Diff_InMemoryHashJoin_ChangedAddedRemoved()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _store.SetActiveGame("DIFF");
+
+        long a = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "a" }, ct);
+        await _store.WriteChunkAsync(a, new[]
+        {
+            MakeObject(1, ("HP",   "IntProperty", "64000000")),   // 100
+            MakeObject(2, ("Mana", "IntProperty", "0A000000")),   // 10
+            MakeObject(3, ("XP",   "IntProperty", "05000000")),   // 5  (removed in B)
+        }, ct);
+        await _store.FinalizeSnapshotAsync(a, 3, 3, ct);
+
+        long b = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "b" }, ct);
+        await _store.WriteChunkAsync(b, new[]
+        {
+            MakeObject(1, ("HP",   "IntProperty", "5A000000")),   // 90   (changed, down)
+            MakeObject(2, ("Mana", "IntProperty", "0A000000")),   // 10   (unchanged)
+            MakeObject(4, ("Gold", "IntProperty", "32000000")),   // 50   (added)
+        }, ct);
+        await _store.FinalizeSnapshotAsync(b, 3, 3, ct);
+
+        var diff = await _store.DiffSnapshotsAsync(a, b, new SnapshotDiffFilter(), ct);
+
+        var changed = Assert.Single(diff.Changed);
+        Assert.Equal("HP", changed.PropName);
+        Assert.Equal("100", changed.OldValue);
+        Assert.Equal("90", changed.NewValue);
+        Assert.Equal(SnapshotDiffDirection.Down, changed.Direction);
+        Assert.Equal(1, diff.AddedCount);     // Gold (obj 4) is B-only
+        Assert.Equal(1, diff.RemovedCount);   // XP (obj 3) is A-only
+    }
+
     private async Task<long> SeedSnapshotAsync(string label, int idx, CancellationToken ct)
     {
         long id = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = label }, ct);
