@@ -370,17 +370,20 @@ HP / money) lives on the stable anchors, so it joins well.
 
 ## 6. SQLite schema (raw ADO.NET)
 
-> **Schema v2 (build 881) — normalised.** Per-object identity (`class_fqn`,
-> `norm_path`, `outer_chain`, `obj_addr`, `gobjects_index`) was moved out of the
-> per-row `fields` table into an `objects` table referenced by `fields.object_id`.
-> The long `norm_path` no longer repeats on every field row, and the identity
-> indexes (`ix_obj_strict/loose/insess`) are now over the much smaller `objects`
-> table — both cut the on-disk size substantially (the ~1.2 GB/snapshot bloat was
-> repeated identity strings + their indexes). A `vfields` VIEW reconstructs the old
-> denormalised shape, so all read queries (Diff / SPC / Pivot / ArrayPivot) and
-> `SpcQueryBuilder` read `FROM vfields` unchanged. `PRAGMA user_version=2`; a v1 DB
-> is dropped + recreated on open (experimental data is recapturable). The original
-> denormalised schema below documents the *view* columns.
+> **Schema v3 (build 882) — denormalised (current).** The `fields` table keeps the
+> identity columns per row so the Diff / SPC / Pivot self-joins hit a single-table
+> composite **covering index** (`ix_strict`/`ix_loose`/`ix_insession`) — the fast
+> path. `PRAGMA user_version`-gated: an older DB is just dropped + recreated on open
+> (no in-place migration; experimental captures recapture in ~2 min).
+>
+> **A v2 attempt (build 881, reverted) normalised identity into an `objects` table +
+> `vfields` view.** It halved the on-disk size (≈1.2 GB → 560 MB/snapshot on ES2) but
+> made `Run Diff` take **>1 min** on ~1.8M rows: splitting the composite key across
+> `fields`+`objects` made the covering indexes unusable, collapsing the self-join to
+> a nested loop. Reverted — a working diff outweighs disk size. The proper
+> **small-and-fast** path is *string-interning* (dictionary-encode `norm_path` /
+> `class_fqn` to int ids kept ON `fields`, so the covering indexes stay fast while
+> the big strings dedup) — a future measured iteration.
 
 
 
