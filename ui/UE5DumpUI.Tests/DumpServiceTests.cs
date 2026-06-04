@@ -991,4 +991,152 @@ public class DumpServiceTests
         Assert.Equal(42, int.Parse(result.Elements[0].Value));
         Assert.Equal("2A000000", result.Elements[0].Hex);
     }
+
+    // --- WalkFunctionPropsAsync: Path 1 (bytecode) vs Path 2 (native disasm) ---
+
+    [Fact]
+    public async Task WalkFunctionPropsAsync_ParsesBytecodeMethod()
+    {
+        _pipe.SetHandler(_ => new JsonObject
+        {
+            ["ok"] = true,
+            ["query_addr"] = "0x100",
+            ["script_bytes"] = 12544,
+            ["method"] = "bytecode",
+            ["unmapped"] = 0,
+            ["props"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["prop_addr"] = "0x200",
+                    ["name"] = "CurrentHealth",
+                    ["type"] = "FloatProperty",
+                    ["occurrences"] = 5,
+                    ["write_count"] = 2,
+                    ["scope"] = "instance",
+                    // bytecode rows carry no offset/confidence
+                },
+            }
+        });
+
+        var svc = CreateService();
+        var res = await svc.WalkFunctionPropsAsync("0x100", TestContext.Current.CancellationToken);
+
+        Assert.Equal("bytecode", res.Method);
+        Assert.False(res.IsDisasm);
+        Assert.Equal(12544, res.ScriptBytes);
+        Assert.Single(res.Props);
+        Assert.Equal("CurrentHealth", res.Props[0].Name);
+        Assert.Equal(-1, res.Props[0].Offset);            // absent → -1
+        Assert.Equal("", res.Props[0].Confidence);        // absent → ""
+        Assert.True(res.Props[0].IsClassField);
+    }
+
+    [Fact]
+    public async Task WalkFunctionPropsAsync_ParsesNativeDisasmMethod()
+    {
+        _pipe.SetHandler(_ => new JsonObject
+        {
+            ["ok"] = true,
+            ["query_addr"] = "0x100",
+            ["script_bytes"] = 0,                  // native — no bytecode
+            ["method"] = "disasm",
+            ["unmapped"] = 3,
+            ["props"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["prop_addr"] = "0x200",
+                    ["name"] = "MaxHealth",
+                    ["type"] = "FloatProperty",
+                    ["occurrences"] = 2,
+                    ["write_count"] = 1,
+                    ["scope"] = "instance",
+                    ["offset"] = 0x1C0,
+                    ["confidence"] = "high",
+                },
+                new JsonObject
+                {
+                    ["prop_addr"] = "0x208",
+                    ["name"] = "Stamina",
+                    ["type"] = "FloatProperty",
+                    ["occurrences"] = 1,
+                    ["write_count"] = 0,
+                    ["scope"] = "instance",
+                    ["offset"] = 0x1C8,
+                    ["confidence"] = "low",
+                },
+            }
+        });
+
+        var svc = CreateService();
+        var res = await svc.WalkFunctionPropsAsync("0x100", TestContext.Current.CancellationToken);
+
+        Assert.Equal("disasm", res.Method);
+        Assert.True(res.IsDisasm);
+        Assert.Equal(0, res.ScriptBytes);
+        Assert.Equal(3, res.Unmapped);
+        Assert.Equal(2, res.Props.Count);
+
+        Assert.Equal(0x1C0, res.Props[0].Offset);
+        Assert.Equal("high", res.Props[0].Confidence);
+        Assert.False(res.Props[0].IsLowConfidence);
+
+        Assert.Equal("low", res.Props[1].Confidence);
+        Assert.True(res.Props[1].IsLowConfidence);
+    }
+
+    [Fact]
+    public async Task WalkFunctionPropsAsync_ParsesNoneMethod()
+    {
+        // Native function but UFunction::Func offset unresolved on this build.
+        _pipe.SetHandler(_ => new JsonObject
+        {
+            ["ok"] = true,
+            ["query_addr"] = "0x100",
+            ["script_bytes"] = 0,
+            ["method"] = "none",
+            ["unmapped"] = 0,
+            ["props"] = new JsonArray()
+        });
+
+        var svc = CreateService();
+        var res = await svc.WalkFunctionPropsAsync("0x100", TestContext.Current.CancellationToken);
+
+        Assert.Equal("none", res.Method);
+        Assert.False(res.IsDisasm);
+        Assert.Empty(res.Props);
+    }
+
+    [Fact]
+    public async Task WalkFunctionPropsAsync_DefaultsToBytecodeWhenMethodAbsent()
+    {
+        // Older DLLs don't emit "method" — must default to "bytecode", not "none",
+        // so existing bytecode results keep rendering.
+        _pipe.SetHandler(_ => new JsonObject
+        {
+            ["ok"] = true,
+            ["query_addr"] = "0x100",
+            ["script_bytes"] = 256,
+            ["props"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["prop_addr"] = "0x200",
+                    ["name"] = "Gold",
+                    ["type"] = "IntProperty",
+                    ["occurrences"] = 1,
+                    ["write_count"] = 1,
+                    ["scope"] = "instance",
+                },
+            }
+        });
+
+        var svc = CreateService();
+        var res = await svc.WalkFunctionPropsAsync("0x100", TestContext.Current.CancellationToken);
+
+        Assert.Equal("bytecode", res.Method);
+        Assert.Equal(0, res.Unmapped);
+        Assert.Single(res.Props);
+    }
 }

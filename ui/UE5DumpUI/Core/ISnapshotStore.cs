@@ -77,6 +77,31 @@ public interface ISnapshotStore
     /// docs/experimental-snapshot-spc-pivot.md §"Phase C".</summary>
     Task<PivotResult> PivotAsync(PivotQuery query, CancellationToken ct = default);
 
+    // --- Phase C6: array-element pivot (struct-array inner-key join) ---
+
+    /// <summary>Classes in a snapshot that captured struct-array elements
+    /// (array_field rows), with owner-instance counts — the array-pivot class
+    /// picker.</summary>
+    Task<IReadOnlyList<PivotClassInfo>> ListPivotArrayClassesAsync(
+        long snapshotId, CancellationToken ct = default);
+
+    /// <summary>The struct-array fields captured for one class (e.g. "Cargo"),
+    /// each with its inner-key name + element count.</summary>
+    Task<IReadOnlyList<PivotArrayFieldInfo>> ListPivotArrayFieldsAsync(
+        long snapshotId, string className, CancellationToken ct = default);
+
+    /// <summary>The inner numeric props of one captured struct-array (e.g.
+    /// "Quantity") with cardinality stats — the value-field picker.</summary>
+    Task<IReadOnlyList<PivotFieldInfo>> ListPivotArrayPropsAsync(
+        long snapshotId, string className, string arrayField, CancellationToken ct = default);
+
+    /// <summary>Group a class's captured struct-array elements by inner-key value
+    /// (e.g. Cargo by ItemID), projecting the inner numeric props per group.
+    /// Reorder- and session-immune (keyed by value, not array index). Pure SQL
+    /// fetch + <see cref="Services.PivotEngine"/> in Identity mode. See
+    /// docs/experimental-snapshot-spc-pivot.md §"Phase C — C6".</summary>
+    Task<PivotResult> PivotArrayAsync(ArrayPivotQuery query, CancellationToken ct = default);
+
     /// <summary>Drop oldest snapshots (FIFO) from the active game's DB until it
     /// fits <paramref name="quotaBytes"/>, then VACUUM to reclaim the space. The
     /// newest snapshot is always kept (even if it alone exceeds the quota).

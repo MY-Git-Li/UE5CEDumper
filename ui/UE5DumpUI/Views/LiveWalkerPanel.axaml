@@ -341,6 +341,14 @@
               BeginningEdit="FieldGrid_BeginningEdit"
               CellEditEnded="FieldGrid_CellEditEnded"
               SelectionChanged="FieldGrid_SelectionChanged">
+      <DataGrid.ContextMenu>
+        <ContextMenu x:DataType="vm:LiveWalkerViewModel">
+          <MenuItem Header="{StaticResource str.Pivot.ThisProperty}"
+                    Command="{Binding PivotThisCommand}"
+                    CommandParameter="{Binding SelectedField}"
+                    IsVisible="{Binding PivotEnabled}"/>
+        </ContextMenu>
+      </DataGrid.ContextMenu>
       <DataGrid.Columns>
         <DataGridTextColumn Header="{StaticResource str.ClassStruct.Offset}"
                             Binding="{Binding Offset, StringFormat='0x{0:X}'}"

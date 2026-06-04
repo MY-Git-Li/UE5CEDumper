@@ -17,7 +17,7 @@ UE5CEDumper/
 │
 ├── dll/                            ← C++ DLL (injected into game process)
 │   ├── CMakeLists.txt              ← DLL build config (versioning, git hash, deps)
-│   └── src/                        ← 16 .cpp + 17 .h (Frieren-themed; see naming-convention.md)
+│   └── src/                        ← 17 .cpp + 18 .h (Frieren-themed; see naming-convention.md; +Denken = native x64 disasm, Path 2)
 │       ├── Heiter.cpp              ← dllmain — DLL_PROCESS_ATTACH, AutoStartThreadProc
 │       ├── Methode.cpp             ← CEPlugin — CE plugin Type 5 main menu
 │       ├── Grimoire.h              ← Constants — magic strings, pipe name, UObject offsets, DynOff namespace
@@ -157,6 +157,7 @@ UE5CEDumper/
     ├── Dumper-7/                   ← Reference: AOB patterns, offset detection
     ├── RE-UE4SS/                   ← Reference: CustomGameConfigs, UE4 patterns
     ├── minhook/                    ← MinHook inline hooking library (built)
+    ├── zydis/                      ← Zydis v4.1.1 x64 decoder + nested zycore (built static, decoder-only; Denken/Path 2)
     ├── nlohmann/                   ← nlohmann/json (header-only)
     └── UnrealEngine/               ← UE source reference headers
 ```

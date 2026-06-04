@@ -253,13 +253,21 @@ the repo's test culture).
 Group a class's instances by a key field's value, project value fields across
 snapshots. Pure C# over SQLite — **zero DLL change** (except optional C4).
 
-> **Status (build 830): C1 + C3-lite SHIPPED.** `PivotEngine` (identity/field
-> grouping + `⟨N: …⟩` collision render) + `PivotKeyScorer` (type/name/cardinality
-> key prior, `SuggestKey`, value interest via `PropertyScoringTable`) +
-> `SnapshotStore.PivotAsync`/`ListPivotClasses`/`ListPivotFields` +
-> `ClassPivotViewModel`/`ClassPivotPanel`. Remaining: C2 (find-by-value), C4
-> (DataTable-native), C5 (right-click handoff), C6 (array-element pivot), and the
-> heavier C3 scorer (Jaccard stability / compound key / volatility ranking).
+> **Status (build 877): C1 + C3-lite + C4 + C5 + C6 SHIPPED.** `PivotEngine`
+> (identity/field grouping + `⟨N: …⟩` collision render) + `PivotKeyScorer`
+> (type/name/cardinality key prior, `SuggestKey`, value interest via
+> `PropertyScoringTable`) + `SnapshotStore.PivotAsync`/`ListPivotClasses`/
+> `ListPivotFields` + `ClassPivotViewModel`/`ClassPivotPanel`. A `Source` toggle
+> offers three modes: **Snapshot** (scalar), **Snapshot Array** (C6, build 877 —
+> inner-key pivot of a captured struct array; `PivotArrayAsync` maps each (owner,
+> element) to a synthetic instance keyed by inner_key_value → reuses
+> `PivotEngine.Build` in Identity mode), and **DataTable** (C4, build 873 —
+> zero-config, RowName is the key, `DataTablePivotEngine` over `walk_datatable_rows`).
+> **C5 (build 877):** right-click "Pivot this property…" handoff from PropertySearch
+> / InterestingProperties / LiveWalker (`NavigateToPivot` → `PivotForAsync`), gated
+> by a per-VM `PivotEnabled` flag so it's hidden when experimental is off.
+> Remaining: C2 (find-by-value), and the heavier C3 scorer (Jaccard stability /
+> compound key / volatility ranking).
 
 ### C — How UE dissolves the key-field problem (the `discrete` pain, your Q#4)
 `discrete`'s root cause: anonymous Unity instances *force* a guessed business
@@ -295,9 +303,21 @@ key. UE's six-layer improvement:
   prior; port `discrete`'s stability (Jaccard) + cardinality scores + greedy
   compound key; class shortlist (CV / presence / field ratios); "likely
   game-state" volatility ranking (29i-3).
-- **C4 — DataTable-native pivot:** zero-config (RowName is the key). Possibly a
-  small DLL touch to enrich `walk_datatable_rows` with row struct fields.
-- **C5 — Right-click handoff** from existing panels.
+- **C4 — DataTable-native pivot:** ✅ **SHIPPED (build 873).** Zero-config (RowName
+  is the key). No DLL touch needed — `walk_datatable_rows` already returns the row
+  struct fields; `DataTablePivotEngine` + a `Source` toggle on the Class Pivot tab
+  consume them into the existing results grid.
+- **C5 — Right-click handoff** from existing panels. ✅ **SHIPPED (build 877).**
+  "Pivot this property…" context-menu item on PropertySearch / InterestingProperties
+  / LiveWalker → `NavigateToPivot(class, prop)` → `PivotForAsync` selects the class
+  in the newest snapshot and ticks the property. Gated by a per-VM `PivotEnabled`.
+
+> **C6 — Array-element pivot** ✅ **SHIPPED (build 877).** A "Snapshot Array" source
+> mode pivots a captured struct array (§4) by inner-key value — reorder- and
+> owner-immune. `SnapshotStore.PivotArrayAsync` fetches the array-element rows and
+> maps each (owner GObjects index, element index) to a synthetic instance whose
+> Identity key is the inner_key_value, so `PivotEngine.Build` (Identity mode) does
+> the grouping with zero new engine code.
 
 **Effort:** C1 = M · C2 = M · C3 = M-L · C4 = S · C5 = S · **Risk:** med (port
 volume; algorithms pure C# + testable).

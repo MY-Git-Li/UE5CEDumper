@@ -14,9 +14,11 @@ namespace UE5DumpUI.Views;
 /// Reverse edge: lists the properties a UFunction reads/writes (walk_function_props).
 /// Opened from the Interesting Functions panel "Props" row button.
 ///
-/// Static Kismet-bytecode scan of one function — Blueprint/script functions only
-/// (native functions have empty bytecode; surfaced in the footer). Writes are
-/// best-effort (EX_Let* LHS); wrapped LHS may read as a read.
+/// Two recovery methods, transparently chosen by the DLL: Blueprint/script
+/// functions use an exact Kismet-bytecode scan (Path 1); native (C++) functions
+/// — which have no bytecode — are disassembled (Path 2, Zydis) and their
+/// [this+off] field accesses mapped back to class properties (heuristic, shown
+/// with a Confidence column). Writes are best-effort; see the footer caveat.
 ///
 /// Code-behind only (no XAML / CompiledBinding) to stay AOT-safe; columns use
 /// FuncDataTemplate&lt;T&gt; typed lambdas, not the reflection Binding ctor.
@@ -32,7 +34,10 @@ public sealed class FunctionPropsDialog : Window
     private Button _btnRefresh = null!;
     private Button _btnCopy = null!;
     private CheckBox _classFieldsOnly = null!;
+    private DataGridColumn _confCol = null!;
     private List<FunctionPropRef> _allProps = new();
+    private string _lastMethod = "bytecode";
+    private int _lastUnmapped;
 
     /// <summary>Resolve owner window + show. No-op without an address/platform/window.</summary>
     public static async Task ShowForFunctionAsync(
@@ -112,8 +117,11 @@ public sealed class FunctionPropsDialog : Window
 
         var caveat = new TextBlock
         {
-            Text = "Note: Blueprint/script bytecode only. Native (C++) functions have no bytecode. "
-                 + "Writes are best-effort (direct assignments); wrapped LHS (Other.Field / Struct.Member / Arr[i]) may read as a read.",
+            Text = "Bytecode (Blueprint/script): exact — writes best-effort, wrapped LHS "
+                 + "(Other.Field / Struct.Member / Arr[i]) may read as a read. "
+                 + "Native disasm (C++): heuristic — recovered from x64 machine code; "
+                 + "low-confidence rows are [reg+off] matches whose base isn't provably "
+                 + "'this'. Verify in CE before relying on a hit.",
             Foreground = new SolidColorBrush(Color.Parse("#7A7A7A")),
             FontSize = 10,
             TextWrapping = TextWrapping.Wrap,
@@ -198,6 +206,25 @@ public sealed class FunctionPropsDialog : Window
                     Margin = new Thickness(4, 0),
                 }, supportsRecycling: true),
         });
+        // Confidence column — only meaningful for native disasm (Path 2); hidden
+        // for the exact bytecode path. Low-confidence rows are tinted amber.
+        _confCol = new DataGridTemplateColumn
+        {
+            Header = "Conf",
+            Width = new DataGridLength(70),
+            IsVisible = false,
+            SortMemberPath = nameof(FunctionPropRef.Confidence),
+            CellTemplate = new FuncDataTemplate<FunctionPropRef>(
+                (x, _) => new TextBlock
+                {
+                    Text = x?.Confidence ?? "",
+                    Foreground = new SolidColorBrush(Color.Parse(
+                        (x?.IsLowConfidence ?? false) ? "#E0A050" : "#4EC9B0")),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(4, 0),
+                }, supportsRecycling: true),
+        };
+        _grid.Columns.Add(_confCol);
         _grid.Columns.Add(new DataGridTemplateColumn
         {
             Header = "Property",
@@ -243,18 +270,25 @@ public sealed class FunctionPropsDialog : Window
         }
 
         _btnRefresh.IsEnabled = false;
-        _statusLabel.Text = "Scanning bytecode…";
+        _statusLabel.Text = "Scanning…";
         _statusLabel.Foreground = new SolidColorBrush(Color.Parse("#808080"));
 
         try
         {
             var res = await _dump.WalkFunctionPropsAsync(_funcAddr);
             _allProps = res.Props;
+            _lastMethod = res.Method;
+            _lastUnmapped = res.Unmapped;
 
-            if (res.ScriptBytes <= 0)
+            // Confidence column is only meaningful for the native disasm path.
+            _confCol.IsVisible = res.Method == "disasm";
+
+            if (res.Method == "none")
             {
                 _grid.ItemsSource = null;
-                _statusLabel.Text = "No bytecode — native (C++) function or empty body.";
+                _statusLabel.Text =
+                    "Native (C++) function — no analysis available (UFunction::Func "
+                    + "offset unresolved on this build).";
                 _statusLabel.Foreground = new SolidColorBrush(Color.Parse("#D4D4D4"));
             }
             else
@@ -287,8 +321,13 @@ public sealed class FunctionPropsDialog : Window
         foreach (var p in shown) if (p.WriteCount > 0) writers++;
         var hiddenNote = fieldsOnly && _allProps.Count > shown.Count
             ? $"  ({_allProps.Count - shown.Count} locals/temporaries hidden)" : "";
+        // Path 2 (native disasm): flag the heuristic source + any unmapped accesses.
+        var methodNote = _lastMethod == "disasm"
+            ? "  [native disasm — heuristic"
+              + (_lastUnmapped > 0 ? $", {_lastUnmapped} unmapped]" : "]")
+            : "";
         _statusLabel.Text = $"{shown.Count} propert{(shown.Count == 1 ? "y" : "ies")} "
-                          + $"({writers} written){hiddenNote}";
+                          + $"({writers} written){hiddenNote}{methodNote}";
         _statusLabel.Foreground = new SolidColorBrush(Color.Parse(
             shown.Count > 0 ? "#4EC9B0" : "#D4D4D4"));
     }

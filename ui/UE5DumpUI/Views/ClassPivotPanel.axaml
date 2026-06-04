@@ -15,10 +15,16 @@
     <Border Grid.Row="1" Background="#252526" CornerRadius="4" Padding="12,8" Margin="0,0,0,8"
             BorderBrush="#3C3C3C" BorderThickness="1">
       <WrapPanel Orientation="Horizontal">
-        <TextBlock Text="{StaticResource str.Pivot.Snapshot}" Foreground="#CCCCCC"
+        <TextBlock Text="{StaticResource str.Pivot.Source}" Foreground="#CCCCCC"
                    VerticalAlignment="Center" Margin="0,0,4,0"/>
+        <ComboBox ItemsSource="{Binding SourceOptions}" SelectedItem="{Binding SelectedSource}"
+                  MinWidth="120" Margin="0,0,12,0"/>
+
+        <!-- Snapshot + Snapshot Array sources share the snapshot/class pickers -->
+        <TextBlock Text="{StaticResource str.Pivot.Snapshot}" Foreground="#CCCCCC"
+                   VerticalAlignment="Center" Margin="0,0,4,0" IsVisible="{Binding UsesSnapshot}"/>
         <ComboBox ItemsSource="{Binding Snapshots}" SelectedItem="{Binding SelectedSnapshot}"
-                  MinWidth="180" Margin="0,0,12,0">
+                  MinWidth="180" Margin="0,0,12,0" IsVisible="{Binding UsesSnapshot}">
           <ComboBox.ItemTemplate>
             <DataTemplate x:DataType="m:SnapshotMeta">
               <TextBlock Text="{Binding Label}"/>
@@ -26,16 +32,43 @@
           </ComboBox.ItemTemplate>
         </ComboBox>
         <TextBlock Text="{StaticResource str.Pivot.ClassFilter}" Foreground="#CCCCCC"
-                   VerticalAlignment="Center" Margin="0,0,4,0"/>
-        <TextBox Text="{Binding ClassFilter}" Width="130" Margin="0,0,8,0"/>
+                   VerticalAlignment="Center" Margin="0,0,4,0" IsVisible="{Binding UsesSnapshot}"/>
+        <TextBox Text="{Binding ClassFilter}" Width="130" Margin="0,0,8,0" IsVisible="{Binding UsesSnapshot}"/>
         <ComboBox ItemsSource="{Binding Classes}" SelectedItem="{Binding SelectedClass}"
-                  MinWidth="260" Margin="0,0,12,0">
+                  MinWidth="260" Margin="0,0,12,0" IsVisible="{Binding UsesSnapshot}">
           <ComboBox.ItemTemplate>
             <DataTemplate x:DataType="m:PivotClassInfo">
               <TextBlock Text="{Binding Display}"/>
             </DataTemplate>
           </ComboBox.ItemTemplate>
         </ComboBox>
+
+        <!-- Snapshot Array source (Phase C6: inner-key pivot of a struct array) -->
+        <TextBlock Text="{StaticResource str.Pivot.ArrayField}" Foreground="#CCCCCC"
+                   VerticalAlignment="Center" Margin="0,0,4,0" IsVisible="{Binding IsArraySource}"/>
+        <ComboBox ItemsSource="{Binding ArrayFields}" SelectedItem="{Binding SelectedArrayField}"
+                  MinWidth="240" Margin="0,0,12,0" IsVisible="{Binding IsArraySource}">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="m:PivotArrayFieldInfo">
+              <TextBlock Text="{Binding Display}"/>
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+
+        <!-- DataTable source (Phase C4: zero-config, RowName is the key) -->
+        <TextBlock Text="{StaticResource str.Pivot.DataTable}" Foreground="#CCCCCC"
+                   VerticalAlignment="Center" Margin="0,0,4,0" IsVisible="{Binding IsDataTableSource}"/>
+        <ComboBox ItemsSource="{Binding DataTables}" SelectedItem="{Binding SelectedDataTable}"
+                  MinWidth="300" Margin="0,0,8,0" IsVisible="{Binding IsDataTableSource}">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="m:DataTablePick">
+              <TextBlock Text="{Binding Display}"/>
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+        <Button Content="{StaticResource str.Pivot.RefreshDataTables}" Command="{Binding RefreshDataTablesCommand}"
+                IsVisible="{Binding IsDataTableSource}" Padding="8,4" Margin="0,0,12,0"/>
+
         <Button Content="{StaticResource str.Pivot.Run}" Command="{Binding RunPivotCommand}"
                 IsEnabled="{Binding CanRunPivot}" Classes="accent" Padding="12,4" Margin="0,0,8,0"/>
         <Button Content="{StaticResource str.Pivot.OpenWalker}" Command="{Binding OpenInLiveWalkerCommand}"
@@ -47,12 +80,18 @@
 
     <!-- Key mode -->
     <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8" VerticalAlignment="Center">
-      <TextBlock Text="{StaticResource str.Pivot.GroupBy}" Foreground="#CCCCCC" VerticalAlignment="Center"/>
-      <ComboBox ItemsSource="{Binding KeyModeOptions}" SelectedItem="{Binding SelectedKeyMode}" MinWidth="170"/>
+      <TextBlock Text="{StaticResource str.Pivot.GroupBy}" Foreground="#CCCCCC" VerticalAlignment="Center"
+                 IsVisible="{Binding IsSnapshotSource}"/>
+      <ComboBox ItemsSource="{Binding KeyModeOptions}" SelectedItem="{Binding SelectedKeyMode}" MinWidth="170"
+                IsVisible="{Binding IsSnapshotSource}"/>
       <TextBlock Text="{StaticResource str.Pivot.KeyField}" Foreground="#CCCCCC"
-                 VerticalAlignment="Center" Margin="12,0,0,0" IsVisible="{Binding IsFieldKeyMode}"/>
+                 VerticalAlignment="Center" Margin="12,0,0,0" IsVisible="{Binding ShowKeyField}"/>
       <ComboBox ItemsSource="{Binding KeyFieldOptions}" SelectedItem="{Binding SelectedKeyField}"
-                MinWidth="200" IsVisible="{Binding IsFieldKeyMode}"/>
+                MinWidth="200" IsVisible="{Binding ShowKeyField}"/>
+      <TextBlock Text="{StaticResource str.Pivot.KeyRowName}" Foreground="#CCCCCC"
+                 VerticalAlignment="Center" IsVisible="{Binding IsDataTableSource}"/>
+      <TextBlock Text="{StaticResource str.Pivot.KeyInnerKey}" Foreground="#CCCCCC"
+                 VerticalAlignment="Center" IsVisible="{Binding IsArraySource}"/>
       <TextBlock Text="{Binding StatusText}" Foreground="#4EC9B0" FontSize="12"
                  VerticalAlignment="Center" Margin="12,0,0,0"
                  IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>

@@ -123,6 +123,15 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
     /// </summary>
     public event Action<string>? NavigateToLiveWalker;
 
+    /// <summary>Raised to pivot the selected property in the experimental Class
+    /// Pivot tab (className, propName). C5 right-click handoff.</summary>
+    public event Action<string, string>? NavigateToPivot;
+
+    /// <summary>Gates the "Pivot this property" context-menu item — set true only
+    /// when the experimental Class Pivot tab is available. Mirrors the gate so the
+    /// handoff stays invisible when experimental features are off.</summary>
+    [ObservableProperty] private bool _pivotEnabled;
+
     public PropertySearchViewModel(IDumpService dump, ILoggingService log,
                                    IAobMakerBridge? aobMaker = null,
                                    IPlatformService? platform = null)
@@ -363,6 +372,14 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
     {
         if (match == null || string.IsNullOrEmpty(match.ClassAddr)) return;
         NavigateToLiveWalker?.Invoke(match.ClassAddr);
+    }
+
+    [RelayCommand]
+    private void PivotThis(PropertySearchMatch? match)
+    {
+        match ??= SelectedResult;
+        if (match == null || string.IsNullOrEmpty(match.ClassName)) return;
+        NavigateToPivot?.Invoke(match.ClassName, match.PropName);
     }
 
     [RelayCommand]

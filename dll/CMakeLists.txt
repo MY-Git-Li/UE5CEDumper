@@ -90,6 +90,41 @@ if(MSVC)
     target_compile_options(minhook PRIVATE /W3 /utf-8)
 endif()
 
+# ============================================================
+# Zydis — x64 instruction decoder (MIT, vendor submodule + nested zycore)
+# Used by the Denken module to disassemble native UFunction machine code
+# (Path 2 property xref). Built STATIC, decoder-only (no encoder/formatter)
+# to keep the footprint small (~250KB). All variants (UE5Dumper + the two
+# proxy DLLs + dll_helpers_test) link the same static lib.
+#
+# Cache vars must be FORCEd before add_subdirectory so Zydis's option()
+# calls pick them up. Static CRT is forced on the Zydis/Zycore targets to
+# match our /MT linkage (mismatched CRT = link error).
+# ============================================================
+set(ZYDIS_BUILD_SHARED_LIB  OFF CACHE BOOL "" FORCE)
+set(ZYDIS_BUILD_TOOLS       OFF CACHE BOOL "" FORCE)
+set(ZYDIS_BUILD_EXAMPLES    OFF CACHE BOOL "" FORCE)
+set(ZYDIS_BUILD_TESTS       OFF CACHE BOOL "" FORCE)
+set(ZYDIS_BUILD_DOXYGEN     OFF CACHE BOOL "" FORCE)
+set(ZYDIS_FEATURE_DECODER   ON  CACHE BOOL "" FORCE)
+set(ZYDIS_FEATURE_ENCODER   OFF CACHE BOOL "" FORCE)
+set(ZYDIS_FEATURE_FORMATTER OFF CACHE BOOL "" FORCE)
+set(ZYDIS_MINIMAL_MODE      OFF CACHE BOOL "" FORCE)
+set(ZYAN_NO_LIBC            OFF CACHE BOOL "" FORCE)
+add_subdirectory(${CMAKE_SOURCE_DIR}/vendor/zydis ${CMAKE_CURRENT_BINARY_DIR}/zydis_build EXCLUDE_FROM_ALL)
+
+# Force static CRT + suppress third-party warnings on the Zydis/Zycore targets.
+foreach(_zt Zydis Zycore)
+    if(TARGET ${_zt})
+        if(MSVC)
+            set_property(TARGET ${_zt} PROPERTY
+                MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+            )
+            target_compile_options(${_zt} PRIVATE /wd4100 /wd4101 /wd4244 /wd4245 /wd4267)
+        endif()
+    endif()
+endforeach()
+
 add_library(UE5Dumper SHARED
     src/Heiter.cpp
     src/Methode.cpp
@@ -105,6 +140,7 @@ add_library(UE5Dumper SHARED
     src/Stark.cpp
     src/Mimic.cpp
     src/Flamme.cpp
+    src/Denken.cpp
     src/version.rc
 )
 
@@ -149,6 +185,7 @@ target_link_libraries(UE5Dumper PRIVATE
     Version   # GetFileVersionInfoW / VerQueryValueW for PE VERSIONINFO
     Winmm     # timeBeginPeriod / timeEndPeriod — Mimic poll-thread 1ms tick
     minhook
+    Zydis     # native UFunction disassembly (Denken / Path 2)
 )
 
 # Output name without lib prefix
@@ -191,6 +228,7 @@ set(PROXY_SOURCES
     src/Stark.cpp
     src/Mimic.cpp
     src/Flamme.cpp
+    src/Denken.cpp
     src/version.rc
 )
 
@@ -210,7 +248,7 @@ set(PROXY_INCLUDE_DIRS
 )
 
 set(PROXY_LINK_LIBS
-    ws2_32 Shlwapi Psapi Version Winmm delayimp minhook
+    ws2_32 Shlwapi Psapi Version Winmm delayimp minhook Zydis
 )
 
 if(BUILD_PROXY_DLL)
@@ -332,9 +370,13 @@ if(NOT BUILD_PROXY_DLL AND NOT BUILD_PROXY_DINPUT8)
     # Same harness style as utf8_helpers_test — exit code = failure count.
     # Pulls in nlohmann/json since Renge.h needs it (header-only, no link).
     # ValueScan.cpp is std-only so it compiles cleanly into the leaf test.
+    # Denken.cpp is a pure Zydis-only decoder core (memory access goes through
+    # a reader callback supplied by the caller), so it links into the leaf test
+    # without pulling in Macht / Win32 / the rest of the DLL.
     add_executable(dll_helpers_test
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/dll_helpers_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ValueScan.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/Denken.cpp
     )
 
     target_include_directories(dll_helpers_test PRIVATE
@@ -354,5 +396,5 @@ if(NOT BUILD_PROXY_DLL AND NOT BUILD_PROXY_DINPUT8)
     # Mimic poll-latency micro-benchmark calls timeBeginPeriod / timeEndPeriod
     # to verify Sleep(1) actually delivers ~1ms on this host. Without winmm
     # the test exe wouldn't link.
-    target_link_libraries(dll_helpers_test PRIVATE Winmm)
+    target_link_libraries(dll_helpers_test PRIVATE Winmm Zydis)
 endif()

@@ -182,7 +182,7 @@ Total votes: **12,700,122** | Voting period: 2026-03-08 ~ 2026-03-29
 | 22 | Renge (蓮格) | — | **PipeProtocol** |
 | 23 | Hero of the South | — | — |
 | 24 | Sein (賽恩) | — | **Logger** |
-| 25 | Denken (頓肯) | — | — |
+| 25 | Denken (頓肯) | — | **NativeDisasm** |
 | 26 | Kanne (卡妮) | — | — |
 | 27 | Land (蘭特) | — | — |
 | 28 | Richter (里希特) | — | — |
@@ -203,7 +203,7 @@ Frieren, Himmel, Stark, Fern, Methode, Mimic, Genau
 | ~~Scharf (#17)~~ | 17 | **In use → FProperty alignment validator (`Scharf.h`)** |
 | Glück (#18) | 18 | Lucky heuristics / fallback logic |
 | Wirbel (#20) | 20 | Strategy/optimization |
-| Denken (#25) | 25 | Deep analysis / type inference |
+| ~~Denken (#25)~~ | 25 | **In use → native UFunction x64 disassembly (`Denken.cpp`, Path 2)** |
 | Kanne (#26) | 26 | Growth/tree operations |
 | Richter (#28) | 28 | Memory region scanning |
 

@@ -788,6 +788,8 @@ public sealed class DumpService : IDumpService
                     Occurrences = p["occurrences"]?.GetValue<int>() ?? 0,
                     WriteCount  = p["write_count"]?.GetValue<int>() ?? 0,
                     Scope       = p["scope"]?.GetValue<string>() ?? "",
+                    Offset      = p["offset"]?.GetValue<int>() ?? -1,
+                    Confidence  = p["confidence"]?.GetValue<string>() ?? "",
                 });
             }
         }
@@ -796,6 +798,10 @@ public sealed class DumpService : IDumpService
         {
             QueryAddress = res["query_addr"]?.GetValue<string>() ?? funcAddr,
             ScriptBytes  = res["script_bytes"]?.GetValue<int>() ?? 0,
+            // Path 2: "bytecode" (exact) / "disasm" (native heuristic) / "none".
+            // Default to "bytecode" for older DLLs that don't emit the field.
+            Method       = res["method"]?.GetValue<string>() ?? "bytecode",
+            Unmapped     = res["unmapped"]?.GetValue<int>() ?? 0,
             Props        = props,
         };
     }

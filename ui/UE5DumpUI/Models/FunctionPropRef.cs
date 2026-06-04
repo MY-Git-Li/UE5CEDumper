@@ -1,9 +1,10 @@
 namespace UE5DumpUI.Models;
 
 /// <summary>
-/// One FProperty referenced by a UFunction's bytecode, with read/write tally.
-/// Result of the reverse edge (function -> properties it reads/writes).
-/// Blueprint/script functions only — native functions have no bytecode.
+/// One FProperty referenced by a UFunction, with read/write tally. Result of the
+/// reverse edge (function -> properties it reads/writes). Two recovery methods:
+/// Path 1 walks Blueprint/script bytecode (exact); Path 2 disassembles native
+/// (C++) functions (heuristic — see <see cref="Confidence"/>).
 /// </summary>
 public sealed class FunctionPropRef
 {
@@ -20,6 +21,22 @@ public sealed class FunctionPropRef
     /// </summary>
     public string Scope { get; init; } = "";
 
+    /// <summary>
+    /// Path 2 only: the class-member offset the <c>[this+off]</c> access mapped to
+    /// (-1 = not applicable / bytecode path).
+    /// </summary>
+    public int Offset { get; init; } = -1;
+
+    /// <summary>
+    /// Path 2 only: "high" (base register proven to be <c>this</c>) or "low"
+    /// (<c>[reg+off]</c> matched a property offset but the base isn't provably
+    /// <c>this</c>). Empty for the exact bytecode path.
+    /// </summary>
+    public string Confidence { get; init; } = "";
+
+    /// <summary>True for a low-confidence heuristic (native disasm) row.</summary>
+    public bool IsLowConfidence => Confidence == "low";
+
     /// <summary>True when this is a class member field (vs a local/temporary).</summary>
     public bool IsClassField => Scope == "instance";
 
@@ -35,5 +52,19 @@ public sealed class FunctionPropRefsResult
 {
     public string QueryAddress { get; init; } = "";
     public int ScriptBytes { get; init; }          // 0 = native / empty bytecode
+
+    /// <summary>
+    /// How the props were recovered: "bytecode" (Path 1 Kismet scan, exact),
+    /// "disasm" (Path 2 native x64 disassembly, heuristic), or "none" (native
+    /// but analysis unavailable — Func offset unresolved on this build).
+    /// </summary>
+    public string Method { get; init; } = "bytecode";
+
+    /// <summary>Path 2: [reg+off] accesses with no matching class property.</summary>
+    public int Unmapped { get; init; }
+
+    /// <summary>True when results came from native x64 disassembly (heuristic).</summary>
+    public bool IsDisasm => Method == "disasm";
+
     public List<FunctionPropRef> Props { get; init; } = new();
 }
