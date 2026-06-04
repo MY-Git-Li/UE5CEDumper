@@ -24,6 +24,7 @@ public sealed class MockPlatformService : IPlatformService
     public string GetAppDataPath() => _appDataPath;
     public string GetLogDirectoryPath() => Path.Combine(_appDataPath, "Logs");
     public Task CopyToClipboardAsync(string text) => Task.CompletedTask;
+    public Task RevealInExplorerAsync(string path) => Task.CompletedTask;
     public string GetMachineName() => "TEST-MACHINE";
     public Task<string?> ShowSaveFileDialogAsync(string defaultFileName, string filterName, string filterExtension) => Task.FromResult<string?>(null);
 }

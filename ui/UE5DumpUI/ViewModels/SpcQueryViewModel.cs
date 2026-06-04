@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
 using UE5DumpUI.Models;
+using UE5DumpUI.Services;
 
 namespace UE5DumpUI.ViewModels;
 
@@ -23,10 +24,25 @@ public partial class SpcSnapshotPick : ObservableObject
     }
 
     [ObservableProperty] private bool   _isSelected;
+    /// <summary>True for the oldest CHECKED snapshot — the baseline. Its predicate
+    /// is forced to "Any" and its picker is disabled (there's nothing before it to
+    /// compare against). Recomputed by the VM whenever the selection changes.</summary>
+    [ObservableProperty] private bool   _isBaseline;
     /// <summary>How this snapshot's value compares to the previous selected one
     /// (display string from <see cref="PredicateOptions"/>). Ignored for the
     /// oldest selected snapshot — that one is always the baseline.</summary>
     [ObservableProperty] private string _selectedPredicate = "Any";
+
+    /// <summary>The predicate picker is editable only for a selected, non-baseline
+    /// snapshot.</summary>
+    public bool PredicateEnabled => IsSelected && !IsBaseline;
+
+    partial void OnIsSelectedChanged(bool value) => OnPropertyChanged(nameof(PredicateEnabled));
+    partial void OnIsBaselineChanged(bool value)
+    {
+        OnPropertyChanged(nameof(PredicateEnabled));
+        if (value) SelectedPredicate = "Any";   // the baseline is always "Any"
+    }
 
     public IReadOnlyList<string> PredicateOptions { get; }
 
@@ -67,6 +83,7 @@ public partial class SpcQueryViewModel : ViewModelBase
     [ObservableProperty] private string _propFilter = "";
     [ObservableProperty] private bool   _isQuerying;
     [ObservableProperty] private string _statusText = "";
+    [ObservableProperty] private string _warningText = "";
     [ObservableProperty] private SpcResultRow? _selectedResult;
 
     /// <summary>Directional predicate options (display strings). v1 is
@@ -113,13 +130,21 @@ public partial class SpcQueryViewModel : ViewModelBase
     {
         try
         {
-            var list = await _store.ListSnapshotsAsync();
-            // Preserve current selections/predicates across a refresh so a
-            // capture on the Snapshot tab doesn't wipe a half-built query.
+            // Off the UI thread (SQLite "*Async" is synchronous) — this also posts
+            // the rebuild as a fresh dispatcher work item, avoiding the "cannot
+            // change ObservableCollection during a CollectionChanged event" crash.
+            var list = await Task.Run(() => _store.ListSnapshotsAsync());
+            // Display oldest-first: the baseline (oldest selected) then sits at the
+            // top and the predicate chain reads top-to-bottom in time order.
+            var ordered = list.OrderBy(m => m.Id).ToList();
+            // Preserve current selections/predicates across a refresh so a capture
+            // on the Snapshot tab doesn't wipe a half-built query.
             var prev = SnapshotPicks.ToDictionary(p => p.Id, p => (p.IsSelected, p.SelectedPredicate));
             foreach (var p in SnapshotPicks) p.PropertyChanged -= OnPickChanged;
-            SnapshotPicks.Clear();
-            foreach (var m in list)
+
+            // Build the fresh picks detached, then swap in one shot.
+            var fresh = new List<SpcSnapshotPick>(ordered.Count);
+            foreach (var m in ordered)
             {
                 var pick = new SpcSnapshotPick(m, PredicateOptions);
                 if (prev.TryGetValue(m.Id, out var s))
@@ -128,17 +153,20 @@ public partial class SpcQueryViewModel : ViewModelBase
                     pick.SelectedPredicate = s.SelectedPredicate;
                 }
                 pick.PropertyChanged += OnPickChanged;
-                SnapshotPicks.Add(pick);
+                fresh.Add(pick);
             }
-            // Convenience: pre-select the two newest so a directional query is
-            // one predicate edit away (mirrors the Snapshot diff pickers).
-            if (prev.Count == 0 && SnapshotPicks.Count >= 2)
+            // Convenience: first visit pre-selects the two newest (now at the tail)
+            // so a directional query is one predicate edit away.
+            if (prev.Count == 0 && fresh.Count >= 2)
             {
-                SnapshotPicks[0].IsSelected = true;
-                SnapshotPicks[1].IsSelected = true;
+                fresh[^1].IsSelected = true;
+                fresh[^2].IsSelected = true;
             }
+            UiCollection.Reset(SnapshotPicks, fresh, () => { /* no SelectedItem binding */ });
+            RecomputeBaselines();
             OnPropertyChanged(nameof(SelectedCount));
             OnPropertyChanged(nameof(CanRunQuery));
+            UpdateWarning();
         }
         catch (Exception ex)
         {
@@ -151,9 +179,30 @@ public partial class SpcQueryViewModel : ViewModelBase
     {
         if (e.PropertyName == nameof(SpcSnapshotPick.IsSelected))
         {
+            RecomputeBaselines();
             OnPropertyChanged(nameof(SelectedCount));
             OnPropertyChanged(nameof(CanRunQuery));
+            UpdateWarning();
         }
+    }
+
+    /// <summary>Mark the oldest CHECKED snapshot as the baseline (predicate forced
+    /// to "Any", picker disabled); everything else is non-baseline.</summary>
+    private void RecomputeBaselines()
+    {
+        var baseline = SnapshotPicks.Where(p => p.IsSelected).OrderBy(p => p.Id).FirstOrDefault();
+        foreach (var p in SnapshotPicks) p.IsBaseline = ReferenceEquals(p, baseline);
+    }
+
+    /// <summary>A 2-snapshot directional query matches very broadly (a single
+    /// up/down step is true for a huge fraction of fields → often the row cap). Warn
+    /// the user to add a third snapshot to make the sequence discriminating.</summary>
+    private void UpdateWarning()
+    {
+        int sel = SelectedCount;
+        WarningText = sel == 2
+            ? "Only 2 snapshots selected: a single direction matches very broadly and often hits the result cap. Add a 3rd snapshot to make the sequence discriminating."
+            : "";
     }
 
     [RelayCommand]
@@ -170,6 +219,7 @@ public partial class SpcQueryViewModel : ViewModelBase
 
         ClearError();
         IsQuerying = true;
+        SelectedResult = null;   // detach before clearing the bound results grid
         Results.Clear();
         try
         {
@@ -187,7 +237,9 @@ public partial class SpcQueryViewModel : ViewModelBase
                                             : ParsePredicate(selected[i].SelectedPredicate));
             }
 
-            var res = await _store.SpcQueryAsync(query);
+            // Off the UI thread — the N-way self-join over ~1.8M rows would
+            // otherwise freeze the window for seconds.
+            var res = await Task.Run(() => _store.SpcQueryAsync(query));
             foreach (var row in res.Rows) Results.Add(row);
 
             var trunc = res.Truncated ? $" (capped at {query.MaxRows:N0})" : "";

@@ -484,25 +484,33 @@
 
     </StackPanel>
 
-    <!-- Credit footer + experimental gate. The author credit doubles as the
-         opt-in checkbox for the experimental analysis tabs (Snapshot / SPC
-         Query / Class Pivot); its tooltip states the effect. The repo link
-         stays a plain clickable link below. Always visible on the System tab
-         so the attribution doesn't depend on a live DLL connection. -->
+    <!-- Credit footer + experimental gate. The author/repo credit is a plain
+         label + clickable URL link (full opacity). The experimental opt-in is a
+         SEPARATE, title-less checkbox beside the author line, kept deliberately
+         faint (Opacity 0.2) so it stays low-key; its tooltip states the effect
+         (enables the Snapshot / SPC Query / Class Pivot tabs). Always visible on
+         the System tab so the attribution doesn't depend on a live DLL connection. -->
     <StackPanel Spacing="3" HorizontalAlignment="Center" Margin="0,8,0,4">
-      <CheckBox IsChecked="{Binding ExperimentalEnabled}"
-                IsEnabled="{Binding CanToggleExperimental}"
-                Opacity="0.25"
-                ToolTip.Tip="{StaticResource str.Experimental.EnableHint}"
-                HorizontalAlignment="Center"
-                VerticalContentAlignment="Center">
-        <StackPanel Orientation="Horizontal" Spacing="0">
+      <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
+        <!-- Bare, faint experimental opt-in checkbox (no label of its own). -->
+        <CheckBox IsChecked="{Binding ExperimentalEnabled}"
+                  IsEnabled="{Binding CanToggleExperimental}"
+                  Opacity="0.1"
+                  Padding="0" MinWidth="0"
+                  VerticalAlignment="Center"
+                  ToolTip.Tip="{StaticResource str.Experimental.EnableHint}"/>
+        <!-- Author credit: plain label + clickable link, full opacity. -->
+        <StackPanel Orientation="Horizontal" Spacing="0" VerticalAlignment="Center">
           <TextBlock Text="{StaticResource str.Credit.AuthorPrefix}"
                      Foreground="#888" FontSize="11" VerticalAlignment="Center"/>
-          <TextBlock Text="{StaticResource str.Credit.AuthorUrl}"
-                     Foreground="#569CD6" FontSize="11" VerticalAlignment="Center"/>
+          <TextBlock x:Name="AuthorUrlText"
+                     Text="{StaticResource str.Credit.AuthorUrl}"
+                     Foreground="#569CD6" FontSize="11" VerticalAlignment="Center"
+                     TextDecorations="Underline" Cursor="Hand"
+                     PointerPressed="OnUrlPressed"
+                     ToolTip.Tip="{StaticResource str.Credit.OpenInBrowserTip}"/>
         </StackPanel>
-      </CheckBox>
+      </StackPanel>
       <StackPanel Orientation="Horizontal" Spacing="0" HorizontalAlignment="Center">
         <TextBlock Text="{StaticResource str.Credit.RepoPrefix}"
                    Foreground="#888" FontSize="11" VerticalAlignment="Center"/>
@@ -510,7 +518,7 @@
                    Text="{StaticResource str.Credit.RepoUrl}"
                    Foreground="#569CD6" FontSize="11" VerticalAlignment="Center"
                    TextDecorations="Underline" Cursor="Hand"
-                   PointerPressed="OnRepoUrlPressed"
+                   PointerPressed="OnUrlPressed"
                    ToolTip.Tip="{StaticResource str.Credit.OpenInBrowserTip}"/>
       </StackPanel>
     </StackPanel>

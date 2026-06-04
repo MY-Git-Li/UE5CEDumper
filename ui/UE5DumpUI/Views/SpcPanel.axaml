@@ -59,7 +59,7 @@
             <DataTemplate x:DataType="vm:SpcSnapshotPick">
               <ComboBox ItemsSource="{Binding PredicateOptions}"
                         SelectedItem="{Binding SelectedPredicate}"
-                        IsEnabled="{Binding IsSelected}"
+                        IsEnabled="{Binding PredicateEnabled}"
                         HorizontalAlignment="Stretch" Margin="2"/>
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
@@ -71,6 +71,9 @@
     <StackPanel Grid.Row="4" Spacing="2" Margin="0,8,0,8">
       <TextBlock Text="{StaticResource str.Spc.BaselineHint}" Foreground="#888" FontSize="11"
                  TextWrapping="Wrap"/>
+      <TextBlock Text="{Binding WarningText}" Foreground="#D7BA7D" FontSize="12" TextWrapping="Wrap"
+                 FontStyle="Italic"
+                 IsVisible="{Binding WarningText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
       <TextBlock Text="{Binding StatusText}" Foreground="#4EC9B0" FontSize="12" TextWrapping="Wrap"
                  IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
       <TextBlock Text="{Binding ErrorMessage}" Foreground="#F44747" FontSize="12" TextWrapping="Wrap"
