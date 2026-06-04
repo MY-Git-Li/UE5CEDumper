@@ -94,6 +94,8 @@
         <Button Content="{StaticResource str.Spc.ApplyRange}" Command="{Binding ApplyResultRangeCommand}" Padding="8,3" Margin="0,0,4,0"/>
         <Button Content="{StaticResource str.Spc.ResetRange}" Command="{Binding ResetResultRangeCommand}" Padding="8,3"/>
       </WrapPanel>
+      <ProgressBar IsIndeterminate="True" Height="4" Width="220" HorizontalAlignment="Left"
+                   IsVisible="{Binding IsQuerying}"/>
       <TextBlock Text="{StaticResource str.Spc.BaselineHint}" Foreground="#888" FontSize="11"
                  TextWrapping="Wrap"/>
       <TextBlock Text="{Binding WarningText}" Foreground="#D7BA7D" FontSize="12" TextWrapping="Wrap"

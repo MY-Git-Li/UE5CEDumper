@@ -86,7 +86,16 @@ public partial class SnapshotViewModel : ViewModelBase
 
     partial void OnDiffAChanged(SnapshotMeta? value)   => OnPropertyChanged(nameof(CanRunDiff));
     partial void OnDiffBChanged(SnapshotMeta? value)   => OnPropertyChanged(nameof(CanRunDiff));
-    partial void OnIsDiffingChanged(bool value)        => OnPropertyChanged(nameof(CanRunDiff));
+    partial void OnIsDiffingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanRunDiff));
+        OnPropertyChanged(nameof(CanCapture));
+        OnPropertyChanged(nameof(CanEditSettings));
+    }
+
+    /// <summary>Capture scope / quota / pickers are locked while a capture or diff
+    /// is running, so the user can't change settings mid-operation.</summary>
+    public bool CanEditSettings => !IsCapturing && !IsDiffing;
 
     // Filter boxes narrow the loaded result live (client-side).
     partial void OnDiffClassFilterChanged(string value)      => ApplyDiffFilter();
@@ -188,8 +197,9 @@ public partial class SnapshotViewModel : ViewModelBase
 
     public ObservableCollection<SnapshotMeta> Snapshots { get; } = new();
 
-    /// <summary>True once connected (engine state available) and not mid-capture.</summary>
-    public bool CanCapture => _engineState != null && !IsCapturing;
+    /// <summary>True once connected (engine state available) and not mid-capture
+    /// or mid-diff.</summary>
+    public bool CanCapture => _engineState != null && !IsCapturing && !IsDiffing;
 
     private int QuotaMb => _gate?.SnapshotQuotaMb ?? LabelToMb(SelectedQuotaLabel);
     private long QuotaBytes => QuotaMb <= 0 ? 0 : (long)QuotaMb * 1024 * 1024;
@@ -398,6 +408,7 @@ public partial class SnapshotViewModel : ViewModelBase
         if (!CanRunDiff) return;
         ClearError();
         IsDiffing = true;
+        DiffStatusText = "Running diff… (large snapshots can take a while)";
         try
         {
             // Load the full changed set (capped); the filter boxes narrow it

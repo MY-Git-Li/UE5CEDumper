@@ -245,6 +245,7 @@ public partial class SpcQueryViewModel : ViewModelBase
 
         ClearError();
         IsQuerying = true;
+        StatusText = "Running SPC query… (intersecting fields across snapshots)";
         SelectedResult = null;   // detach before clearing the bound results grid
         Results.Clear();
         try

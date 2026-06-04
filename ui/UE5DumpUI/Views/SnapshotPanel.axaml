@@ -17,16 +17,20 @@
       <StackPanel Spacing="8">
         <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
           <TextBlock Text="{StaticResource str.Snapshot.Scope}" Foreground="#CCCCCC" VerticalAlignment="Center"/>
-          <ComboBox ItemsSource="{Binding ScopeOptions}" SelectedItem="{Binding SelectedScope}" MinWidth="150"/>
-          <CheckBox Content="{StaticResource str.Snapshot.GameOnly}" IsChecked="{Binding GameOnly}" Foreground="#CCCCCC"/>
+          <ComboBox ItemsSource="{Binding ScopeOptions}" SelectedItem="{Binding SelectedScope}" MinWidth="150"
+                    IsEnabled="{Binding CanEditSettings}"/>
+          <CheckBox Content="{StaticResource str.Snapshot.GameOnly}" IsChecked="{Binding GameOnly}" Foreground="#CCCCCC"
+                    IsEnabled="{Binding CanEditSettings}"/>
           <TextBlock Text="{StaticResource str.Snapshot.Quota}" Foreground="#CCCCCC"
                      VerticalAlignment="Center" Margin="12,0,0,0"/>
           <ComboBox ItemsSource="{Binding QuotaOptions}" SelectedItem="{Binding SelectedQuotaLabel}"
-                    MinWidth="110" ToolTip.Tip="{StaticResource str.Snapshot.QuotaHint}"/>
+                    MinWidth="110" ToolTip.Tip="{StaticResource str.Snapshot.QuotaHint}"
+                    IsEnabled="{Binding CanEditSettings}"/>
         </StackPanel>
         <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
           <TextBlock Text="{StaticResource str.Snapshot.Label}" Foreground="#CCCCCC" VerticalAlignment="Center"/>
-          <TextBox Text="{Binding Label}" PlaceholderText="{StaticResource str.Snapshot.LabelWatermark}" Width="340"/>
+          <TextBox Text="{Binding Label}" PlaceholderText="{StaticResource str.Snapshot.LabelWatermark}" Width="340"
+                   IsEnabled="{Binding CanEditSettings}"/>
           <Button Content="{StaticResource str.Snapshot.Capture}" Command="{Binding CaptureCommand}"
                   IsEnabled="{Binding CanCapture}" IsVisible="{Binding !IsCapturing}"
                   Classes="accent" Padding="12,5" FontWeight="Bold"/>
@@ -141,6 +145,8 @@
           <TextBox Text="{Binding DiffNewMax}" Width="70" Margin="0,0,8,0" PlaceholderText="max"/>
           <Button Content="{StaticResource str.Snapshot.Diff.ApplyRange}" Command="{Binding ApplyDiffRangeCommand}" Padding="8,3" Margin="0,0,4,0"/>
           <Button Content="{StaticResource str.Snapshot.Diff.ResetRange}" Command="{Binding ResetDiffRangeCommand}" Padding="8,3" Margin="0,0,8,0"/>
+          <ProgressBar IsIndeterminate="True" Width="120" Height="4" VerticalAlignment="Center" Margin="0,0,8,0"
+                       IsVisible="{Binding IsDiffing}"/>
           <TextBlock Text="{Binding DiffStatusText}" Foreground="#4EC9B0" FontSize="12" VerticalAlignment="Center"/>
         </WrapPanel>
       </StackPanel>

@@ -75,10 +75,10 @@ public class SnapshotStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task Schema_v2_NormalizesIdentityIntoObjectsTable()
+    public async Task Schema_DenormalizedFields_StoresIdentityPerRow()
     {
         var ct = TestContext.Current.CancellationToken;
-        _store.SetActiveGame("NORM");
+        _store.SetActiveGame("DENORM");
         long id = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "n" }, ct);
         await _store.WriteChunkAsync(id, new[]
         {
@@ -92,18 +92,17 @@ public class SnapshotStoreTests : IDisposable
             new SqliteConnectionStringBuilder { DataSource = _store.DatabasePath }.ToString());
         await conn.OpenAsync(ct);
 
-        // Identity stored once: one objects row, three fields rows referencing it.
-        Assert.Equal(1, await ScalarAsync(conn, "SELECT COUNT(*) FROM objects", ct));
+        // Denormalised: identity columns live on `fields` (the fast single-table
+        // covering-index layout). No `objects` table, no `vfields` view.
         Assert.Equal(3, await ScalarAsync(conn, "SELECT COUNT(*) FROM fields", ct));
-        // fields no longer carries the identity columns.
-        Assert.Equal(0, await ScalarAsync(conn,
+        Assert.Equal(1, await ScalarAsync(conn,
             "SELECT COUNT(*) FROM pragma_table_info('fields') WHERE name='norm_path'", ct));
-        // The vfields VIEW reconstructs the denormalised identity for all 3 fields.
+        Assert.Equal(0, await ScalarAsync(conn,
+            "SELECT COUNT(*) FROM sqlite_master WHERE name='objects'", ct));
         Assert.Equal(3, await ScalarAsync(conn,
-            "SELECT COUNT(*) FROM vfields WHERE class_fqn='BP_Player_C' " +
+            "SELECT COUNT(*) FROM fields WHERE class_fqn='BP_Player_C' " +
             "AND norm_path='/Game/Map.Map:PersistentLevel.BP_Player_C'", ct));
-        // Schema version is bumped.
-        Assert.Equal(2, await ScalarAsync(conn, "PRAGMA user_version", ct));
+        Assert.Equal(3, await ScalarAsync(conn, "PRAGMA user_version", ct));
     }
 
     private static async Task<long> ScalarAsync(SqliteConnection conn, string sql, CancellationToken ct)
