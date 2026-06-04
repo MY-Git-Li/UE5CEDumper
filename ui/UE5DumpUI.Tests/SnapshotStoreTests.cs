@@ -1,4 +1,5 @@
 using System.IO;
+using Microsoft.Data.Sqlite;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 using Xunit;
@@ -71,6 +72,45 @@ public class SnapshotStoreTests : IDisposable
 
         await _store.DeleteSnapshotAsync(id, ct);
         Assert.Empty(await _store.ListSnapshotsAsync(ct));
+    }
+
+    [Fact]
+    public async Task Schema_v2_NormalizesIdentityIntoObjectsTable()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _store.SetActiveGame("NORM");
+        long id = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "n" }, ct);
+        await _store.WriteChunkAsync(id, new[]
+        {
+            MakeObject(1, ("A", "IntProperty", "01000000"),
+                          ("B", "IntProperty", "02000000"),
+                          ("C", "IntProperty", "03000000")),
+        }, ct);
+        await _store.FinalizeSnapshotAsync(id, 1, 3, ct);
+
+        await using var conn = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = _store.DatabasePath }.ToString());
+        await conn.OpenAsync(ct);
+
+        // Identity stored once: one objects row, three fields rows referencing it.
+        Assert.Equal(1, await ScalarAsync(conn, "SELECT COUNT(*) FROM objects", ct));
+        Assert.Equal(3, await ScalarAsync(conn, "SELECT COUNT(*) FROM fields", ct));
+        // fields no longer carries the identity columns.
+        Assert.Equal(0, await ScalarAsync(conn,
+            "SELECT COUNT(*) FROM pragma_table_info('fields') WHERE name='norm_path'", ct));
+        // The vfields VIEW reconstructs the denormalised identity for all 3 fields.
+        Assert.Equal(3, await ScalarAsync(conn,
+            "SELECT COUNT(*) FROM vfields WHERE class_fqn='BP_Player_C' " +
+            "AND norm_path='/Game/Map.Map:PersistentLevel.BP_Player_C'", ct));
+        // Schema version is bumped.
+        Assert.Equal(2, await ScalarAsync(conn, "PRAGMA user_version", ct));
+    }
+
+    private static async Task<long> ScalarAsync(SqliteConnection conn, string sql, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        return (long)(await cmd.ExecuteScalarAsync(ct) ?? 0L);
     }
 
     private async Task<long> SeedSnapshotAsync(string label, int idx, CancellationToken ct)

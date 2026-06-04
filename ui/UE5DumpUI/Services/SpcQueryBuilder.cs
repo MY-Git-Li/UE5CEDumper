@@ -65,11 +65,13 @@ public static class SpcQueryBuilder
         for (int i = 0; i < n; i++)
             sb.Append(", f").Append(i).Append(".hex");
 
-        // --- FROM / JOIN: anchor + one inner join per later snapshot. ---
-        sb.Append(" FROM fields f0");
+        // --- FROM / JOIN: anchor + one inner join per later snapshot. The
+        //     vfields VIEW reconstructs the denormalised (identity + value) shape
+        //     from the normalised objects+fields tables (schema v2). ---
+        sb.Append(" FROM vfields f0");
         for (int i = 1; i < n; i++)
         {
-            sb.Append(" JOIN fields f").Append(i)
+            sb.Append(" JOIN vfields f").Append(i)
               .Append(" ON f").Append(i).Append(".snapshot_id=").Append(ids[i])
               .Append(" AND f").Append(i).Append(".class_fqn=f0.class_fqn")
               .Append(" AND f").Append(i).Append(".prop_name=f0.prop_name");

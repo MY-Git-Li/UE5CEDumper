@@ -7,11 +7,17 @@ using UE5DumpUI.Models;
 namespace UE5DumpUI.Services;
 
 /// <summary>
-/// SQLite snapshot store (raw ADO.NET — no EF Core, for trim/AOT safety). DB
-/// lives at %LOCALAPPDATA%\UE5CEDumper\snapshots.db. The <c>fields</c> table is
-/// denormalised (identity columns per row) so the SPC / Pivot engines can join
-/// across snapshots with a single indexed query. Array columns are present but
-/// NULL until Phase A1b. Schema: docs/experimental-snapshot-spc-pivot.md §6.
+/// SQLite snapshot store (raw ADO.NET — no EF Core, for trim/AOT safety). One DB
+/// per game at %LOCALAPPDATA%\UE5CEDumper\snapshots.&lt;pe_hash&gt;.db.
+///
+/// <para>Schema v2 (normalised): per-object identity (class_fqn / norm_path /
+/// outer_chain / obj_addr / gobjects_index) lives once in <c>objects</c>; <c>fields</c>
+/// references it by <c>object_id</c> and carries only the per-property value. This
+/// slashes the on-disk size (the long norm_path no longer repeats on every field
+/// row) and shrinks the identity indexes (now over the much smaller objects table).
+/// A <c>vfields</c> VIEW reconstructs the old denormalised shape so the Diff / SPC /
+/// Pivot queries (and <see cref="SpcQueryBuilder"/>) read from it unchanged. Schema:
+/// docs/experimental-snapshot-spc-pivot.md §6.</para>
 /// </summary>
 public sealed class SnapshotStore : ISnapshotStore
 {
@@ -86,8 +92,38 @@ public sealed class SnapshotStore : ISnapshotStore
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    /// <summary>Current on-disk schema version. v2 normalises per-object identity
+    /// (class_fqn / norm_path / outer_chain / obj_addr / gobjects_index) into an
+    /// `objects` table referenced by `fields.object_id`, which slashes the DB size
+    /// (the long norm_path no longer repeats on every field row) and shrinks the
+    /// identity indexes (now over objects, not the much larger fields). A `vfields`
+    /// VIEW reconstructs the old denormalised shape, so the Diff/SPC/Pivot queries
+    /// read from it unchanged.</summary>
+    private const long SchemaVersion = 2;
+
     private static async Task EnsureSchemaAsync(SqliteConnection conn, CancellationToken ct)
     {
+        long ver;
+        await using (var vcmd = conn.CreateCommand())
+        {
+            vcmd.CommandText = "PRAGMA user_version;";
+            ver = (long)(await vcmd.ExecuteScalarAsync(ct) ?? 0L);
+        }
+
+        // v1 -> v2 is an incompatible layout change (fields gained object_id and lost
+        // the identity columns). Old experimental captures can't be migrated in place,
+        // so drop and recreate — they're cheap to recapture. A brand-new DB (ver 0,
+        // empty) hits the same path with the DROPs as no-ops.
+        if (ver < SchemaVersion)
+        {
+            await ExecAsync(conn, """
+                DROP VIEW  IF EXISTS vfields;
+                DROP TABLE IF EXISTS fields;
+                DROP TABLE IF EXISTS objects;
+                DROP TABLE IF EXISTS snapshots;
+                """, ct);
+        }
+
         await ExecAsync(conn, """
             CREATE TABLE IF NOT EXISTS snapshots(
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,16 +136,21 @@ public sealed class SnapshotStore : ISnapshotStore
                 field_count     INTEGER,
                 scope           TEXT
             );
-            CREATE TABLE IF NOT EXISTS fields(
+            CREATE TABLE IF NOT EXISTS objects(
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 snapshot_id     INTEGER NOT NULL,
+                gobjects_index  INTEGER,
                 class_fqn       TEXT,
                 norm_path       TEXT,
                 outer_chain     TEXT,
+                obj_addr        TEXT
+            );
+            CREATE TABLE IF NOT EXISTS fields(
+                snapshot_id     INTEGER NOT NULL,
+                object_id       INTEGER NOT NULL,
                 prop_name       TEXT,
                 prop_offset     INTEGER,
                 declared_type   TEXT,
-                gobjects_index  INTEGER,
-                obj_addr        TEXT,
                 numeric_value   REAL,
                 hex             TEXT,
                 array_field     TEXT,
@@ -118,11 +159,23 @@ public sealed class SnapshotStore : ISnapshotStore
                 inner_key_value TEXT,
                 inner_prop_name TEXT
             );
-            CREATE INDEX IF NOT EXISTS ix_fields_snap ON fields(snapshot_id);
-            CREATE INDEX IF NOT EXISTS ix_strict      ON fields(snapshot_id, class_fqn, norm_path,      prop_name);
-            CREATE INDEX IF NOT EXISTS ix_loose       ON fields(snapshot_id, class_fqn, outer_chain,    prop_name);
-            CREATE INDEX IF NOT EXISTS ix_insession   ON fields(snapshot_id, class_fqn, gobjects_index, prop_name);
+            CREATE INDEX IF NOT EXISTS ix_obj_snap   ON objects(snapshot_id);
+            CREATE INDEX IF NOT EXISTS ix_obj_strict ON objects(snapshot_id, class_fqn, norm_path);
+            CREATE INDEX IF NOT EXISTS ix_obj_loose  ON objects(snapshot_id, class_fqn, outer_chain);
+            CREATE INDEX IF NOT EXISTS ix_obj_insess ON objects(snapshot_id, class_fqn, gobjects_index);
+            CREATE INDEX IF NOT EXISTS ix_fields_obj  ON fields(object_id);
+            CREATE INDEX IF NOT EXISTS ix_fields_snap ON fields(snapshot_id, prop_name);
+            CREATE VIEW IF NOT EXISTS vfields AS
+                SELECT f.snapshot_id, o.class_fqn, o.norm_path, o.outer_chain,
+                       f.prop_name, f.prop_offset, f.declared_type,
+                       o.gobjects_index, o.obj_addr, f.numeric_value, f.hex,
+                       f.array_field, f.elem_index, f.inner_key_name,
+                       f.inner_key_value, f.inner_prop_name
+                FROM fields f JOIN objects o ON o.id = f.object_id;
             """, ct);
+
+        if (ver < SchemaVersion)
+            await ExecAsync(conn, $"PRAGMA user_version={SchemaVersion};", ct);
     }
 
     public async Task<long> CreateSnapshotAsync(SnapshotMeta meta, CancellationToken ct = default)
@@ -154,45 +207,50 @@ public sealed class SnapshotStore : ISnapshotStore
         await using var conn = await OpenAsync(ct);
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
 
+        // One object row per captured object (identity stored once), returning its id.
+        await using var objCmd = conn.CreateCommand();
+        objCmd.Transaction = tx;
+        objCmd.CommandText = """
+            INSERT INTO objects(snapshot_id, gobjects_index, class_fqn, norm_path, outer_chain, obj_addr)
+            VALUES ($snap, $idx, $cls, $np, $oc, $addr);
+            SELECT last_insert_rowid();
+            """;
+        var oSnap = objCmd.Parameters.Add("$snap", SqliteType.Integer);
+        var oIdx  = objCmd.Parameters.Add("$idx",  SqliteType.Integer);
+        var oCls  = objCmd.Parameters.Add("$cls",  SqliteType.Text);
+        var oNp   = objCmd.Parameters.Add("$np",   SqliteType.Text);
+        var oOc   = objCmd.Parameters.Add("$oc",   SqliteType.Text);
+        var oAddr = objCmd.Parameters.Add("$addr", SqliteType.Text);
+
+        // Scalar field rows reference the object by id (no repeated identity).
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
-            INSERT INTO fields(snapshot_id, class_fqn, norm_path, outer_chain, prop_name, prop_offset,
-                               declared_type, gobjects_index, obj_addr, numeric_value, hex)
-            VALUES ($snap, $cls, $np, $oc, $pn, $off, $dt, $idx, $addr, $num, $hex);
+            INSERT INTO fields(snapshot_id, object_id, prop_name, prop_offset, declared_type, numeric_value, hex)
+            VALUES ($snap, $oid, $pn, $off, $dt, $num, $hex);
             """;
         var pSnap = cmd.Parameters.Add("$snap", SqliteType.Integer);
-        var pCls  = cmd.Parameters.Add("$cls",  SqliteType.Text);
-        var pNp   = cmd.Parameters.Add("$np",   SqliteType.Text);
-        var pOc   = cmd.Parameters.Add("$oc",   SqliteType.Text);
+        var pOid  = cmd.Parameters.Add("$oid",  SqliteType.Integer);
         var pPn   = cmd.Parameters.Add("$pn",   SqliteType.Text);
         var pOff  = cmd.Parameters.Add("$off",  SqliteType.Integer);
         var pDt   = cmd.Parameters.Add("$dt",   SqliteType.Text);
-        var pIdx  = cmd.Parameters.Add("$idx",  SqliteType.Integer);
-        var pAddr = cmd.Parameters.Add("$addr", SqliteType.Text);
         var pNum  = cmd.Parameters.Add("$num",  SqliteType.Real);
         var pHex  = cmd.Parameters.Add("$hex",  SqliteType.Text);
 
-        // Second command for struct-array element rows (carries the array
-        // columns; SPC/Pivot inner-join on array_field + inner_key + inner_prop).
+        // Struct-array element rows (carry the array columns; SPC/Pivot inner-join
+        // on array_field + inner_key + inner_prop).
         await using var arrCmd = conn.CreateCommand();
         arrCmd.Transaction = tx;
         arrCmd.CommandText = """
-            INSERT INTO fields(snapshot_id, class_fqn, norm_path, outer_chain, prop_name, prop_offset,
-                               declared_type, gobjects_index, obj_addr, numeric_value, hex,
+            INSERT INTO fields(snapshot_id, object_id, prop_name, prop_offset, declared_type, numeric_value, hex,
                                array_field, elem_index, inner_key_name, inner_key_value, inner_prop_name)
-            VALUES ($snap, $cls, $np, $oc, $pn, $off, $dt, $idx, $addr, $num, $hex,
-                    $af, $ei, $ikn, $ikv, $ipn);
+            VALUES ($snap, $oid, $pn, $off, $dt, $num, $hex, $af, $ei, $ikn, $ikv, $ipn);
             """;
         var aSnap = arrCmd.Parameters.Add("$snap", SqliteType.Integer);
-        var aCls  = arrCmd.Parameters.Add("$cls",  SqliteType.Text);
-        var aNp   = arrCmd.Parameters.Add("$np",   SqliteType.Text);
-        var aOc   = arrCmd.Parameters.Add("$oc",   SqliteType.Text);
+        var aOid  = arrCmd.Parameters.Add("$oid",  SqliteType.Integer);
         var aPn   = arrCmd.Parameters.Add("$pn",   SqliteType.Text);
         var aOff  = arrCmd.Parameters.Add("$off",  SqliteType.Integer);
         var aDt   = arrCmd.Parameters.Add("$dt",   SqliteType.Text);
-        var aIdx  = arrCmd.Parameters.Add("$idx",  SqliteType.Integer);
-        var aAddr = arrCmd.Parameters.Add("$addr", SqliteType.Text);
         var aNum  = arrCmd.Parameters.Add("$num",  SqliteType.Real);
         var aHex  = arrCmd.Parameters.Add("$hex",  SqliteType.Text);
         var aAf   = arrCmd.Parameters.Add("$af",   SqliteType.Text);
@@ -205,17 +263,21 @@ public sealed class SnapshotStore : ISnapshotStore
         foreach (var obj in objects)
         {
             string normPath = SnapshotIdentity.NormalizePath(obj.Path);
+            oSnap.Value = snapshotId;
+            oIdx.Value  = obj.Index;
+            oCls.Value  = obj.ClassName;
+            oNp.Value   = normPath;
+            oOc.Value   = obj.OuterClassName;
+            oAddr.Value = obj.Addr;
+            long objectId = (long)(await objCmd.ExecuteScalarAsync(ct) ?? 0L);
+
             foreach (var f in obj.Fields)
             {
                 pSnap.Value = snapshotId;
-                pCls.Value  = obj.ClassName;
-                pNp.Value   = normPath;
-                pOc.Value   = obj.OuterClassName;
+                pOid.Value  = objectId;
                 pPn.Value   = f.Name;
                 pOff.Value  = f.Offset;
                 pDt.Value   = f.Type;
-                pIdx.Value  = obj.Index;
-                pAddr.Value = obj.Addr;
                 pNum.Value  = SnapshotNumeric.TryFromHex(f.Type, f.Hex, out var num)
                                 ? num : (object)DBNull.Value;
                 pHex.Value  = f.Hex;
@@ -233,14 +295,10 @@ public sealed class SnapshotStore : ISnapshotStore
                     foreach (var f in el.Fields)
                     {
                         aSnap.Value = snapshotId;
-                        aCls.Value  = obj.ClassName;
-                        aNp.Value   = normPath;
-                        aOc.Value   = obj.OuterClassName;
+                        aOid.Value  = objectId;
                         aPn.Value   = f.Name;
                         aOff.Value  = f.Offset;
                         aDt.Value   = f.Type;
-                        aIdx.Value  = obj.Index;
-                        aAddr.Value = obj.Addr;
                         aNum.Value  = SnapshotNumeric.TryFromHex(f.Type, f.Hex, out var anum)
                                         ? anum : (object)DBNull.Value;
                         aHex.Value  = f.Hex;
@@ -376,7 +434,7 @@ public sealed class SnapshotStore : ISnapshotStore
             await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
             await using var del = conn.CreateCommand();
             del.Transaction = tx;
-            del.CommandText = "DELETE FROM fields WHERE snapshot_id=$id; DELETE FROM snapshots WHERE id=$id;";
+            del.CommandText = "DELETE FROM fields WHERE snapshot_id=$id; DELETE FROM objects WHERE snapshot_id=$id; DELETE FROM snapshots WHERE id=$id;";
             var p = del.Parameters.Add("$id", SqliteType.Integer);
             foreach (var id in dropIds) { p.Value = id; await del.ExecuteNonQueryAsync(ct); }
             await tx.CommitAsync(ct);
@@ -422,7 +480,7 @@ public sealed class SnapshotStore : ISnapshotStore
             var sql = new StringBuilder(@"
 SELECT a.class_fqn, b.norm_path, a.gobjects_index, a.prop_name, a.prop_offset, a.declared_type,
        b.obj_addr, a.hex, b.hex, a.numeric_value, b.numeric_value
-FROM fields a JOIN fields b
+FROM vfields a JOIN vfields b
   ON a.snapshot_id=$A AND b.snapshot_id=$B
   AND a.class_fqn=b.class_fqn AND a.gobjects_index=b.gobjects_index AND a.prop_name=b.prop_name
 WHERE a.hex <> b.hex AND a.array_field IS NULL AND b.array_field IS NULL");
@@ -492,8 +550,8 @@ WHERE a.hex <> b.hex AND a.array_field IS NULL AND b.array_field IS NULL");
     {
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
-SELECT COUNT(*) FROM fields a WHERE a.snapshot_id=$in AND a.array_field IS NULL AND NOT EXISTS (
-  SELECT 1 FROM fields b WHERE b.snapshot_id=$notin AND b.array_field IS NULL
+SELECT COUNT(*) FROM vfields a WHERE a.snapshot_id=$in AND a.array_field IS NULL AND NOT EXISTS (
+  SELECT 1 FROM vfields b WHERE b.snapshot_id=$notin AND b.array_field IS NULL
     AND b.class_fqn=a.class_fqn AND b.gobjects_index=a.gobjects_index AND b.prop_name=a.prop_name);";
         cmd.Parameters.AddWithValue("$in", inSnap);
         cmd.Parameters.AddWithValue("$notin", notInSnap);
@@ -550,7 +608,7 @@ SELECT COUNT(*) FROM fields a WHERE a.snapshot_id=$in AND a.array_field IS NULL 
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT class_fqn, COUNT(DISTINCT gobjects_index) AS instances
-            FROM fields WHERE snapshot_id=$s AND array_field IS NULL
+            FROM vfields WHERE snapshot_id=$s AND array_field IS NULL
             GROUP BY class_fqn ORDER BY instances DESC, class_fqn;
             """;
         cmd.Parameters.AddWithValue("$s", snapshotId);
@@ -573,7 +631,7 @@ SELECT COUNT(*) FROM fields a WHERE a.snapshot_id=$in AND a.array_field IS NULL 
         cmd.CommandText = """
             SELECT prop_name, declared_type,
                    COUNT(DISTINCT hex) AS distinctVals, COUNT(*) AS instances
-            FROM fields WHERE snapshot_id=$s AND class_fqn=$c AND array_field IS NULL
+            FROM vfields WHERE snapshot_id=$s AND class_fqn=$c AND array_field IS NULL
             GROUP BY prop_name, declared_type ORDER BY prop_name;
             """;
         cmd.Parameters.AddWithValue("$s", snapshotId);
@@ -607,7 +665,7 @@ SELECT COUNT(*) FROM fields a WHERE a.snapshot_id=$in AND a.array_field IS NULL 
 
         var sql = new StringBuilder("""
             SELECT gobjects_index, norm_path, obj_addr, prop_name, prop_offset, declared_type, hex
-            FROM fields WHERE snapshot_id=$s AND class_fqn=$c AND array_field IS NULL
+            FROM vfields WHERE snapshot_id=$s AND class_fqn=$c AND array_field IS NULL
             """);
         cmd.Parameters.AddWithValue("$s", query.SnapshotId);
         cmd.Parameters.AddWithValue("$c", query.ClassName);
@@ -668,7 +726,7 @@ SELECT COUNT(*) FROM fields a WHERE a.snapshot_id=$in AND a.array_field IS NULL 
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT class_fqn, COUNT(DISTINCT gobjects_index) AS instances
-            FROM fields WHERE snapshot_id=$s AND array_field IS NOT NULL
+            FROM vfields WHERE snapshot_id=$s AND array_field IS NOT NULL
             GROUP BY class_fqn ORDER BY instances DESC, class_fqn;
             """;
         cmd.Parameters.AddWithValue("$s", snapshotId);
@@ -690,7 +748,7 @@ SELECT COUNT(*) FROM fields a WHERE a.snapshot_id=$in AND a.array_field IS NULL 
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT array_field, COALESCE(inner_key_name, ''), COUNT(*) AS elems
-            FROM fields WHERE snapshot_id=$s AND class_fqn=$c AND array_field IS NOT NULL
+            FROM vfields WHERE snapshot_id=$s AND class_fqn=$c AND array_field IS NOT NULL
             GROUP BY array_field, inner_key_name ORDER BY array_field;
             """;
         cmd.Parameters.AddWithValue("$s", snapshotId);
@@ -715,7 +773,7 @@ SELECT COUNT(*) FROM fields a WHERE a.snapshot_id=$in AND a.array_field IS NULL 
         cmd.CommandText = """
             SELECT inner_prop_name, declared_type,
                    COUNT(DISTINCT hex) AS distinctVals, COUNT(*) AS elems
-            FROM fields WHERE snapshot_id=$s AND class_fqn=$c AND array_field=$af AND array_field IS NOT NULL
+            FROM vfields WHERE snapshot_id=$s AND class_fqn=$c AND array_field=$af AND array_field IS NOT NULL
             GROUP BY inner_prop_name, declared_type ORDER BY inner_prop_name;
             """;
         cmd.Parameters.AddWithValue("$s", snapshotId);
@@ -745,7 +803,7 @@ SELECT COUNT(*) FROM fields a WHERE a.snapshot_id=$in AND a.array_field IS NULL 
 
         var sql = new StringBuilder("""
             SELECT gobjects_index, elem_index, obj_addr, inner_key_value, inner_prop_name, declared_type, hex
-            FROM fields WHERE snapshot_id=$s AND class_fqn=$c AND array_field=$af AND array_field IS NOT NULL
+            FROM vfields WHERE snapshot_id=$s AND class_fqn=$c AND array_field=$af AND array_field IS NOT NULL
             """);
         cmd.Parameters.AddWithValue("$s",  query.SnapshotId);
         cmd.Parameters.AddWithValue("$c",  query.ClassName);
@@ -811,7 +869,7 @@ SELECT COUNT(*) FROM fields a WHERE a.snapshot_id=$in AND a.array_field IS NULL 
     {
         await using var conn = await OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM fields WHERE snapshot_id=$id; DELETE FROM snapshots WHERE id=$id;";
+        cmd.CommandText = "DELETE FROM fields WHERE snapshot_id=$id; DELETE FROM objects WHERE snapshot_id=$id; DELETE FROM snapshots WHERE id=$id;";
         cmd.Parameters.AddWithValue("$id", snapshotId);
         await cmd.ExecuteNonQueryAsync(ct);
         _log?.Info(Constants.LogCatView, $"SnapshotStore: deleted snapshot #{snapshotId}");
