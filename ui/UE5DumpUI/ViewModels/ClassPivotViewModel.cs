@@ -522,6 +522,7 @@ public partial class ClassPivotViewModel : ViewModelBase
         if (!CanRunPivot) return;
         ClearError();
         IsBusy = true;
+        StatusText = "Running pivot…";
         SelectedResult = null;   // detach before clearing the bound results grid
         Results.Clear();
         try

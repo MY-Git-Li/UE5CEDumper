@@ -195,6 +195,53 @@ public class SnapshotViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task Diff_GlobalFilter_ValueRange_AndPickerOptions()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _store.SetActiveGame("G4");
+        long a = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "a" }, ct);
+        await _store.WriteChunkAsync(a, new[]
+        {
+            Obj(1, "HP", "IntProperty", "64000000"),    // 100
+            Obj(2, "Mana", "IntProperty", "0A000000"),  // 10
+        }, ct);
+        await _store.FinalizeSnapshotAsync(a, 2, 2, ct);
+        long b = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "b" }, ct);
+        await _store.WriteChunkAsync(b, new[]
+        {
+            Obj(1, "HP", "IntProperty", "5A000000"),    // 90  (down)
+            Obj(2, "Mana", "IntProperty", "14000000"),  // 20  (up)
+        }, ct);
+        await _store.FinalizeSnapshotAsync(b, 2, 2, ct);
+
+        var vm = new SnapshotViewModel(new CaptureStub(), _store, new MockLoggingService());
+        await vm.RefreshCommand.ExecuteAsync(null);
+        await vm.RunDiffCommand.ExecuteAsync(null);
+        Assert.Equal(2, vm.DiffRows.Count);
+
+        // Picker candidates are the distinct field/class values from the result set.
+        Assert.Contains("HP", vm.DiffFieldOptions);
+        Assert.Contains("Mana", vm.DiffFieldOptions);
+        Assert.Contains("C", vm.DiffClassOptions);
+
+        // Global filter matches across columns: "90" appears only on the HP row's New.
+        vm.DiffGlobalFilter = "90";
+        Assert.Equal("HP", Assert.Single(vm.DiffRows).PropName);
+        vm.DiffGlobalFilter = "";
+        Assert.Equal(2, vm.DiffRows.Count);
+
+        // New-value range is button-applied; New<=50 keeps only Mana (20), drops HP (90).
+        vm.DiffNewMax = "50";
+        Assert.Equal(2, vm.DiffRows.Count);   // not applied until the button
+        vm.ApplyDiffRangeCommand.Execute(null);
+        Assert.Equal("Mana", Assert.Single(vm.DiffRows).PropName);
+
+        vm.ResetDiffRangeCommand.Execute(null);
+        Assert.Equal(2, vm.DiffRows.Count);
+        Assert.Equal("", vm.DiffNewMax);
+    }
+
+    [Fact]
     public async Task OpenInLiveWalker_RaisesNavigateWithObjectAddress()
     {
         var ct = TestContext.Current.CancellationToken;

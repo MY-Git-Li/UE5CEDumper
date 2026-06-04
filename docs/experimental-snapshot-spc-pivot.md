@@ -370,6 +370,29 @@ HP / money) lives on the stable anchors, so it joins well.
 
 ## 6. SQLite schema (raw ADO.NET)
 
+> **Schema v4 (build 884) — denormalised, in-memory queries (current).** The `fields`
+> table keeps identity columns per row, but **Diff and SPC no longer query in SQL** —
+> they load snapshots into in-memory dictionaries and hash-join in C# (the technique
+> the `discrete` sister project uses; O(n), index-independent). Pivot was already
+> in-memory (`PivotEngine`). So the three heavy composite covering indexes
+> (`ix_strict`/`ix_loose`/`ix_insession`, ~450 MB of a ~1.2 GB capture) were **dropped**
+> — a single lean `ix_fields(snapshot_id, class_fqn)` serves the `WHERE snapshot_id`
+> scans (diff/SPC load) and the `(snapshot_id, class_fqn)` filters (pivot/list).
+> Roughly **halves the DB** at zero capture cost. `PRAGMA user_version`-gated:
+> an older DB is dropped + recreated on open (no in-place migration; recapture ~2 min).
+>
+> **Why in-memory:** a v2 attempt (build 881, reverted) normalised identity into an
+> `objects` table to shrink the DB, but splitting the join key across two tables made
+> the SQL self-join's covering indexes unusable → `Run Diff` >1 min on ~1.8M rows.
+> Moving the joins in-memory removes the covering-index dependency entirely, which is
+> what then made dropping the indexes (for size) safe. SPC additionally supports
+> per-snapshot **absolute value predicates** (Exact / Between / ≥ / ≤,
+> `SpcAbsolutePredicate`) applied before the result cap, so directional-but-irrelevant
+> noise (UI widget sizes, etc.) doesn't crowd real values out of the 50k. Further size
+> (not yet done): `discrete`-style gzip per-class blob storage.
+
+
+
 > One DB file **per game**: `%LOCALAPPDATA%\UE5CEDumper\snapshots.<pe_hash>.db`.
 > `game_session_id` (pe_hash + ModuleBase) distinguishes restarts within that
 > file. Cross-game isolation is by file; cross-session join is by the columns

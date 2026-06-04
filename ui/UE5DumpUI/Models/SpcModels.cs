@@ -24,6 +24,51 @@ public enum SpcPredicateKind
 }
 
 /// <summary>
+/// Absolute (value-level) predicate kinds for SPC — applied per snapshot IN ADDITION
+/// to the directional chain, BEFORE the result cap. Lets the user pin a real value
+/// window (e.g. "now Between 0–500") to cut directional-but-irrelevant noise like UI
+/// widget sizes. Mirrors `discrete` + CE's Exact / Between / range scans. Compared on
+/// the field's numeric value (per its declared width).
+/// </summary>
+public enum SpcAbsoluteKind
+{
+    /// <summary>No value constraint for this snapshot.</summary>
+    None,
+    /// <summary>numeric == Low.</summary>
+    Exact,
+    /// <summary>Low ≤ numeric ≤ High.</summary>
+    Between,
+    /// <summary>numeric ≥ Low.</summary>
+    AtLeast,
+    /// <summary>numeric ≤ High.</summary>
+    AtMost,
+}
+
+/// <summary>One snapshot's optional absolute value predicate.</summary>
+public sealed class SpcAbsolutePredicate
+{
+    public SpcAbsoluteKind Kind { get; set; } = SpcAbsoluteKind.None;
+    public double Low  { get; set; }
+    public double High { get; set; }
+
+    /// <summary>True when this field's numeric value satisfies the predicate.
+    /// A non-None predicate on a field with no numeric value (null) fails.</summary>
+    public bool Matches(double? value)
+    {
+        if (Kind == SpcAbsoluteKind.None) return true;
+        if (value is not double v) return false;
+        return Kind switch
+        {
+            SpcAbsoluteKind.Exact   => v == Low,
+            SpcAbsoluteKind.Between => v >= Low && v <= High,
+            SpcAbsoluteKind.AtLeast => v >= Low,
+            SpcAbsoluteKind.AtMost  => v <= High,
+            _                       => true,
+        };
+    }
+}
+
+/// <summary>
 /// Cross-snapshot join mode for SPC. Strict has the lowest false-positive rate
 /// but misses runtime-spawned objects across sessions; Loose recovers some of
 /// them at the cost of multiple candidates per logical field (the predicate
@@ -56,6 +101,11 @@ public sealed class SpcQuery
     /// <see cref="SpcPredicateKind.Any"/> regardless of its value. Predicate
     /// <c>i</c> (i ≥ 1) compares snapshot <c>i</c> against snapshot <c>i-1</c>.</summary>
     public List<SpcPredicateKind> Predicates { get; set; } = new();
+
+    /// <summary>Optional absolute value predicate per snapshot (same order/length as
+    /// <see cref="SnapshotIds"/>, or empty for none). Applied in addition to the
+    /// directional chain. Index 0 (baseline) may carry one too.</summary>
+    public List<SpcAbsolutePredicate> AbsolutePredicates { get; set; } = new();
 
     public SpcJoinMode JoinMode { get; set; } = SpcJoinMode.Strict;
 

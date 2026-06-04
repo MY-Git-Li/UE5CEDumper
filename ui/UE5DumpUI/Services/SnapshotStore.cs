@@ -7,11 +7,11 @@ using UE5DumpUI.Models;
 namespace UE5DumpUI.Services;
 
 /// <summary>
-/// SQLite snapshot store (raw ADO.NET — no EF Core, for trim/AOT safety). DB
-/// lives at %LOCALAPPDATA%\UE5CEDumper\snapshots.db. The <c>fields</c> table is
-/// denormalised (identity columns per row) so the SPC / Pivot engines can join
-/// across snapshots with a single indexed query. Array columns are present but
-/// NULL until Phase A1b. Schema: docs/experimental-snapshot-spc-pivot.md §6.
+/// SQLite snapshot store (raw ADO.NET — no EF Core, for trim/AOT safety). One DB
+/// per game at %LOCALAPPDATA%\UE5CEDumper\snapshots.&lt;pe_hash&gt;.db. The
+/// <c>fields</c> table is denormalised (identity columns per row) so the SPC / Pivot
+/// / Diff self-joins hit a single-table covering index (ix_strict/loose/insession) —
+/// the fast path. Schema: docs/experimental-snapshot-spc-pivot.md §6.
 /// </summary>
 public sealed class SnapshotStore : ISnapshotStore
 {
@@ -86,8 +86,39 @@ public sealed class SnapshotStore : ISnapshotStore
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    /// <summary>Current on-disk schema version. The <c>fields</c> table is
+    /// denormalised (identity columns per row). v4 DROPPED the three heavy composite
+    /// covering indexes (ix_strict/loose/insession — ~450 MB on a ~1.8M-row capture):
+    /// Diff and SPC now run as in-memory hash-joins (see <see cref="DiffSnapshotsAsync"/>
+    /// / <see cref="SpcQueryAsync"/>), which need only a fast <c>WHERE snapshot_id</c>
+    /// scan, and Pivot filters by (snapshot_id, class_fqn). So a single lean
+    /// <c>ix_fields(snapshot_id, class_fqn)</c> serves every query — roughly halving
+    /// the DB. Bump this on any incompatible change: an older DB is dropped +
+    /// recreated on open (experimental captures recapture in ~2 min; no migration).</summary>
+    private const long SchemaVersion = 4;
+
     private static async Task EnsureSchemaAsync(SqliteConnection conn, CancellationToken ct)
     {
+        long ver;
+        await using (var vcmd = conn.CreateCommand())
+        {
+            vcmd.CommandText = "PRAGMA user_version;";
+            ver = (long)(await vcmd.ExecuteScalarAsync(ct) ?? 0L);
+        }
+
+        // Old (or experimental v2) schema detected -> just drop and recreate. The
+        // DROPs are no-ops on a brand-new (empty) DB. Covers v1 (user_version 0) and
+        // the reverted v2 normalised layout alike.
+        if (ver < SchemaVersion)
+        {
+            await ExecAsync(conn, """
+                DROP VIEW  IF EXISTS vfields;
+                DROP TABLE IF EXISTS fields;
+                DROP TABLE IF EXISTS objects;
+                DROP TABLE IF EXISTS snapshots;
+                """, ct);
+        }
+
         await ExecAsync(conn, """
             CREATE TABLE IF NOT EXISTS snapshots(
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -118,11 +149,11 @@ public sealed class SnapshotStore : ISnapshotStore
                 inner_key_value TEXT,
                 inner_prop_name TEXT
             );
-            CREATE INDEX IF NOT EXISTS ix_fields_snap ON fields(snapshot_id);
-            CREATE INDEX IF NOT EXISTS ix_strict      ON fields(snapshot_id, class_fqn, norm_path,      prop_name);
-            CREATE INDEX IF NOT EXISTS ix_loose       ON fields(snapshot_id, class_fqn, outer_chain,    prop_name);
-            CREATE INDEX IF NOT EXISTS ix_insession   ON fields(snapshot_id, class_fqn, gobjects_index, prop_name);
+            CREATE INDEX IF NOT EXISTS ix_fields ON fields(snapshot_id, class_fqn);
             """, ct);
+
+        if (ver < SchemaVersion)
+            await ExecAsync(conn, $"PRAGMA user_version={SchemaVersion};", ct);
     }
 
     public async Task<long> CreateSnapshotAsync(SnapshotMeta meta, CancellationToken ct = default)
@@ -414,132 +445,227 @@ public sealed class SnapshotStore : ISnapshotStore
         var result = new SnapshotDiffResult();
         int max = filter.MaxRows > 0 ? filter.MaxRows : 50000;
 
+        string classContains = filter.ClassContains ?? "";
+        string propContains  = filter.PropContains ?? "";
+
         await using var conn = await OpenAsync(ct);
 
-        // --- Changed: same (class, index, prop), different bytes ---
+        // In-memory hash join (the technique the `discrete` sister project uses):
+        // stream both snapshots' scalar fields into a dictionary keyed by the
+        // in-session identity, then diff in two O(n) passes with O(1) hash lookups.
+        // This is independent of index/schema shape — far faster than a SQL
+        // self-join over ~1.8M rows, which only stays quick with a perfect
+        // single-table composite covering index. Key = (class_fqn, gobjects_index,
+        // prop_name); unique within one snapshot.
+
+        // Intern the high-repetition class/prop strings to cut allocations.
+        var intern = new Dictionary<string, string>(StringComparer.Ordinal);
+        string Intern(string s) { if (intern.TryGetValue(s, out var v)) return v; intern[s] = s; return s; }
+
+        // Snapshot A → { key : (hex, numeric) }. Only the old value + direction
+        // input is kept (display columns come from B, the newer snapshot).
+        var aMap = new Dictionary<(string cls, long idx, string prop), (string hex, double? num)>();
         await using (var cmd = conn.CreateCommand())
         {
-            var sql = new StringBuilder(@"
-SELECT a.class_fqn, b.norm_path, a.gobjects_index, a.prop_name, a.prop_offset, a.declared_type,
-       b.obj_addr, a.hex, b.hex, a.numeric_value, b.numeric_value
-FROM fields a JOIN fields b
-  ON a.snapshot_id=$A AND b.snapshot_id=$B
-  AND a.class_fqn=b.class_fqn AND a.gobjects_index=b.gobjects_index AND a.prop_name=b.prop_name
-WHERE a.hex <> b.hex AND a.array_field IS NULL AND b.array_field IS NULL");
-            cmd.Parameters.AddWithValue("$A", idA);
-            cmd.Parameters.AddWithValue("$B", idB);
-            if (!string.IsNullOrEmpty(filter.ClassContains))
-            {
-                sql.Append(" AND a.class_fqn LIKE $cls");
-                cmd.Parameters.AddWithValue("$cls", $"%{filter.ClassContains}%");
-            }
-            if (!string.IsNullOrEmpty(filter.PropContains))
-            {
-                sql.Append(" AND a.prop_name LIKE $prop");
-                cmd.Parameters.AddWithValue("$prop", $"%{filter.PropContains}%");
-            }
-            if (filter.Direction == SnapshotDiffDirection.Up)
-                sql.Append(" AND b.numeric_value > a.numeric_value");
-            else if (filter.Direction == SnapshotDiffDirection.Down)
-                sql.Append(" AND b.numeric_value < a.numeric_value");
-            sql.Append(" LIMIT $lim;");
-            cmd.Parameters.AddWithValue("$lim", max + 1);  // +1 to detect truncation
-            cmd.CommandText = sql.ToString();
-
+            cmd.CommandText = "SELECT class_fqn, gobjects_index, prop_name, hex, numeric_value " +
+                              "FROM fields WHERE snapshot_id=$id AND array_field IS NULL;";
+            cmd.Parameters.AddWithValue("$id", idA);
             await using var r = await cmd.ExecuteReaderAsync(ct);
             while (await r.ReadAsync(ct))
             {
-                if (result.Changed.Count >= max) { result.Truncated = true; break; }
-                string type   = r.IsDBNull(5) ? "" : r.GetString(5);
-                string oldHex = r.IsDBNull(7) ? "" : r.GetString(7);
-                string newHex = r.IsDBNull(8) ? "" : r.GetString(8);
-                double? oldNum = r.IsDBNull(9)  ? null : r.GetDouble(9);
-                double? newNum = r.IsDBNull(10) ? null : r.GetDouble(10);
-                var dir = (oldNum.HasValue && newNum.HasValue)
-                    ? (newNum > oldNum ? SnapshotDiffDirection.Up
-                       : newNum < oldNum ? SnapshotDiffDirection.Down
+                var key = (Intern(r.IsDBNull(0) ? "" : r.GetString(0)),
+                           r.IsDBNull(1) ? -1L : r.GetInt64(1),
+                           Intern(r.IsDBNull(2) ? "" : r.GetString(2)));
+                aMap[key] = (r.IsDBNull(3) ? "" : r.GetString(3),
+                             r.IsDBNull(4) ? (double?)null : r.GetDouble(4));
+            }
+        }
+
+        // Snapshot B: stream rows, hash-look-up A. matched = common keys (changed +
+        // unchanged); bTotal = all B rows — together they give the Added/Removed churn.
+        int matched = 0, bTotal = 0;
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT class_fqn, gobjects_index, prop_name, hex, numeric_value, " +
+                              "norm_path, obj_addr, prop_offset, declared_type " +
+                              "FROM fields WHERE snapshot_id=$id AND array_field IS NULL;";
+            cmd.Parameters.AddWithValue("$id", idB);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                bTotal++;
+                string cls  = r.IsDBNull(0) ? "" : r.GetString(0);
+                long   idx  = r.IsDBNull(1) ? -1L : r.GetInt64(1);
+                string prop = r.IsDBNull(2) ? "" : r.GetString(2);
+                if (!aMap.TryGetValue((Intern(cls), idx, Intern(prop)), out var a)) continue;  // B-only (added)
+                matched++;
+
+                string bHex = r.IsDBNull(3) ? "" : r.GetString(3);
+                if (string.Equals(a.hex, bHex, StringComparison.Ordinal)) continue;  // unchanged
+
+                // Optional store-side filters (the VM passes an empty filter and
+                // filters client-side, but honour these for API completeness).
+                if (classContains.Length > 0 && cls.IndexOf(classContains, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                if (propContains.Length  > 0 && prop.IndexOf(propContains,  StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+                double? bNum = r.IsDBNull(4) ? (double?)null : r.GetDouble(4);
+                var dir = (a.num.HasValue && bNum.HasValue)
+                    ? (bNum > a.num ? SnapshotDiffDirection.Up
+                       : bNum < a.num ? SnapshotDiffDirection.Down
                        : SnapshotDiffDirection.None)
                     : SnapshotDiffDirection.None;
+                if (filter.Direction == SnapshotDiffDirection.Up   && dir != SnapshotDiffDirection.Up)   continue;
+                if (filter.Direction == SnapshotDiffDirection.Down && dir != SnapshotDiffDirection.Down) continue;
+
+                if (result.Changed.Count >= max) { result.Truncated = true; continue; }  // keep counting churn
+                string type = r.IsDBNull(8) ? "" : r.GetString(8);
                 result.Changed.Add(new SnapshotDiffRow
                 {
-                    ClassName    = r.IsDBNull(0) ? "" : r.GetString(0),
-                    NormPath     = r.IsDBNull(1) ? "" : r.GetString(1),
-                    ObjectIndex  = r.IsDBNull(2) ? -1 : r.GetInt32(2),
-                    PropName     = r.IsDBNull(3) ? "" : r.GetString(3),
-                    PropOffset   = r.IsDBNull(4) ? 0  : r.GetInt32(4),
+                    ClassName    = cls,
+                    NormPath     = r.IsDBNull(5) ? "" : r.GetString(5),
+                    ObjectIndex  = (int)idx,
+                    PropName     = prop,
+                    PropOffset   = r.IsDBNull(7) ? 0 : r.GetInt32(7),
                     DeclaredType = type,
                     ObjAddr      = r.IsDBNull(6) ? "" : r.GetString(6),
-                    OldValue     = SnapshotNumeric.Render(type, oldHex),
-                    NewValue     = SnapshotNumeric.Render(type, newHex),
+                    OldValue     = SnapshotNumeric.Render(type, a.hex),
+                    NewValue     = SnapshotNumeric.Render(type, bHex),
                     Direction    = dir,
                 });
             }
         }
 
-        // --- Added / Removed field churn (counts only) ---
+        // Added = B keys with no A match; Removed = A keys with no B match.
         if (filter.IncludeAddedRemoved)
         {
-            result.RemovedCount = await CountChurnAsync(conn, idA, idB, ct);  // in A, not B
-            result.AddedCount   = await CountChurnAsync(conn, idB, idA, ct);  // in B, not A
+            result.AddedCount   = bTotal - matched;
+            result.RemovedCount = aMap.Count - matched;
         }
         return result;
-    }
-
-    // Count fields present in `inSnap` whose (class, index, prop) key has no
-    // match in `notInSnap` (uses the ix_insession index for the anti-join).
-    private static async Task<int> CountChurnAsync(
-        SqliteConnection conn, long inSnap, long notInSnap, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"
-SELECT COUNT(*) FROM fields a WHERE a.snapshot_id=$in AND a.array_field IS NULL AND NOT EXISTS (
-  SELECT 1 FROM fields b WHERE b.snapshot_id=$notin AND b.array_field IS NULL
-    AND b.class_fqn=a.class_fqn AND b.gobjects_index=a.gobjects_index AND b.prop_name=a.prop_name);";
-        cmd.Parameters.AddWithValue("$in", inSnap);
-        cmd.Parameters.AddWithValue("$notin", notInSnap);
-        return (int)(long)(await cmd.ExecuteScalarAsync(ct) ?? 0L);
     }
 
     public async Task<SpcResult> SpcQueryAsync(SpcQuery query, CancellationToken ct = default)
     {
         var result = new SpcResult { SnapshotCount = query.SnapshotIds.Count };
-        // Compile throws ArgumentException for < 2 snapshots or a mismatched
-        // predicate count — let it propagate so the VM surfaces the error.
-        var compiled = SpcQueryBuilder.Compile(query);
         int n = query.SnapshotIds.Count;
+        if (n < 2)
+            throw new ArgumentException("SPC needs at least two snapshots.", nameof(query));
+        if (query.Predicates.Count != n)
+            throw new ArgumentException("Predicate count must equal snapshot count.", nameof(query));
         int max = query.MaxRows > 0 ? query.MaxRows : 50000;
 
-        await using var conn = await OpenAsync(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = compiled.Sql;
-        if (compiled.ClassLike != null) cmd.Parameters.AddWithValue("$cls", compiled.ClassLike);
-        if (compiled.PropLike  != null) cmd.Parameters.AddWithValue("$prop", compiled.PropLike);
+        string classContains = query.ClassContains?.Trim() ?? "";
+        string propContains  = query.PropContains?.Trim() ?? "";
+        var mode = query.JoinMode;
+        var abs  = query.AbsolutePredicates is { Count: > 0 } ? query.AbsolutePredicates : null;
 
-        await using var r = await cmd.ExecuteReaderAsync(ct);
-        // Column layout (see SpcQueryBuilder): 0 class, 1 norm_path, 2 prop_name,
-        // 3 prop_offset, 4 declared_type, 5 obj_addr, then n hex columns.
-        const int hexBase = 6;
-        while (await r.ReadAsync(ct))
+        await using var conn = await OpenAsync(ct);
+
+        // In-memory intersection (port of `discrete`): load the anchor (oldest)
+        // snapshot's fields into a candidate dict keyed by the join identity, then
+        // stream each later snapshot and keep only candidates that recur, appending
+        // their value. One shrinking dict — no SQL self-join, no covering-index
+        // dependency. Class/prop filters narrow at anchor load. Duplicate keys within
+        // a snapshot (e.g. spawn siblings sharing a normalised path under Strict) keep
+        // the first — collapses cross-product noise.
+        var intern = new Dictionary<string, string>(StringComparer.Ordinal);
+        string Intern(string s) { if (intern.TryGetValue(s, out var v)) return v; intern[s] = s; return s; }
+
+        var cands = new Dictionary<string, Cand>();
+
+        await using (var cmd = conn.CreateCommand())
         {
+            cmd.CommandText = SpcRowSql;
+            cmd.Parameters.AddWithValue("$id", query.SnapshotIds[0]);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                string cls  = r.IsDBNull(0) ? "" : r.GetString(0);
+                string prop = r.IsDBNull(4) ? "" : r.GetString(4);
+                if (classContains.Length > 0 && cls.IndexOf(classContains, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                if (propContains.Length  > 0 && prop.IndexOf(propContains,  StringComparison.OrdinalIgnoreCase) < 0) continue;
+                string key = SpcKey(mode, r, cls, prop);
+                if (cands.ContainsKey(key)) continue;
+                var c = new Cand { ClassName = Intern(cls), PropName = Intern(prop) };
+                c.Hex.Add(r.IsDBNull(7) ? "" : r.GetString(7));
+                c.Num.Add(r.IsDBNull(8) ? (double?)null : r.GetDouble(8));
+                cands[key] = c;
+            }
+        }
+
+        for (int i = 1; i < n && cands.Count > 0; i++)
+        {
+            foreach (var c in cands.Values) c.Seen = false;
+            bool newest = i == n - 1;
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = SpcRowSql;
+                cmd.Parameters.AddWithValue("$id", query.SnapshotIds[i]);
+                await using var r = await cmd.ExecuteReaderAsync(ct);
+                while (await r.ReadAsync(ct))
+                {
+                    string cls  = r.IsDBNull(0) ? "" : r.GetString(0);
+                    string prop = r.IsDBNull(4) ? "" : r.GetString(4);
+                    string key = SpcKey(mode, r, cls, prop);
+                    if (!cands.TryGetValue(key, out var c) || c.Seen) continue;
+                    c.Seen = true;
+                    c.Hex.Add(r.IsDBNull(7) ? "" : r.GetString(7));
+                    c.Num.Add(r.IsDBNull(8) ? (double?)null : r.GetDouble(8));
+                    if (newest)
+                    {
+                        c.NormPath     = r.IsDBNull(1) ? "" : r.GetString(1);
+                        c.ObjAddr      = r.IsDBNull(6) ? "" : r.GetString(6);
+                        c.PropOffset   = r.IsDBNull(5) ? 0  : r.GetInt32(5);
+                        c.DeclaredType = r.IsDBNull(3) ? "" : r.GetString(3);
+                    }
+                }
+            }
+            // Intersection: drop candidates absent from this snapshot.
+            List<string>? drop = null;
+            foreach (var kv in cands)
+                if (!kv.Value.Seen) (drop ??= new()).Add(kv.Key);
+            if (drop != null) foreach (var k in drop) cands.Remove(k);
+        }
+
+        // Evaluate the directional chain + absolute predicates; build result rows.
+        foreach (var c in cands.Values)
+        {
+            if (c.Hex.Count != n) continue;
+            if (!SpcEngine.Matches(c.Hex, c.Num, query.Predicates, abs)) continue;
             if (result.Rows.Count >= max) { result.Truncated = true; break; }
-            string type = r.IsDBNull(4) ? "" : r.GetString(4);
             var row = new SpcResultRow
             {
-                ClassName    = r.IsDBNull(0) ? "" : r.GetString(0),
-                NormPath     = r.IsDBNull(1) ? "" : r.GetString(1),
-                PropName     = r.IsDBNull(2) ? "" : r.GetString(2),
-                PropOffset   = r.IsDBNull(3) ? 0  : r.GetInt32(3),
-                DeclaredType = type,
-                ObjAddr      = r.IsDBNull(5) ? "" : r.GetString(5),
+                ClassName = c.ClassName, NormPath = c.NormPath, PropName = c.PropName,
+                PropOffset = c.PropOffset, DeclaredType = c.DeclaredType, ObjAddr = c.ObjAddr,
             };
-            for (int i = 0; i < n; i++)
-            {
-                string hex = r.IsDBNull(hexBase + i) ? "" : r.GetString(hexBase + i);
-                row.Values.Add(SnapshotNumeric.Render(type, hex));
-            }
+            for (int i = 0; i < n; i++) row.Values.Add(SnapshotNumeric.Render(c.DeclaredType, c.Hex[i]));
             result.Rows.Add(row);
         }
         return result;
+    }
+
+    // 0 class,1 norm,2 outer,3 type,4 prop,5 offset,6 addr,7 hex,8 num,9 gobjects_index
+    private const string SpcRowSql =
+        "SELECT class_fqn, norm_path, outer_chain, declared_type, prop_name, prop_offset, " +
+        "obj_addr, hex, numeric_value, gobjects_index " +
+        "FROM fields WHERE snapshot_id=$id AND array_field IS NULL;";
+
+    private static string SpcKey(SpcJoinMode mode, SqliteDataReader r, string cls, string prop) => mode switch
+    {
+        SpcJoinMode.Loose     => cls + "\u0001" + (r.IsDBNull(2) ? "" : r.GetString(2)) + "\u0001" + prop,
+        SpcJoinMode.InSession => cls + "\u0001" + (r.IsDBNull(9) ? -1L : r.GetInt64(9)) + "\u0001" + prop,
+        _ /* Strict */        => cls + "\u0001" + (r.IsDBNull(1) ? "" : r.GetString(1)) + "\u0001" + prop +
+                                 "\u0001" + (r.IsDBNull(5) ? 0 : r.GetInt32(5)),
+    };
+
+    // One SPC candidate field: identity + its value sequence (+ display from newest).
+    private sealed class Cand
+    {
+        public string ClassName = "", PropName = "", NormPath = "", ObjAddr = "", DeclaredType = "";
+        public int  PropOffset;
+        public bool Seen;
+        public readonly List<string>  Hex = new();
+        public readonly List<double?> Num = new();
     }
 
     public async Task<IReadOnlyList<PivotClassInfo>> ListPivotClassesAsync(

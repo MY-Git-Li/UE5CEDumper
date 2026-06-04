@@ -261,6 +261,12 @@
     <sys:String x:Key="str.Snapshot.Diff.CopyAddr">Copy Address</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.OpenWalker">Open in Live Walker</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.ObjectFilter">Object:</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.Global">Filter all:</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.GlobalHint">match any column…</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.OldRange">Old:</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.NewRange">New:</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.ApplyRange">Apply range</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.ResetRange">Reset</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.Hint">Diff joins fields by object identity within a session (same game launch). Old &amp; New should be from the same play session.</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.Col.Change">Δ</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.Col.Class">Class</sys:String>
@@ -275,6 +281,15 @@
     <sys:String x:Key="str.Spc.JoinHint">Strict = same class + normalised path + offset (fewest false positives). Loose = class + outer chain + name (recovers some spawned objects across sessions). In-session = same game launch only (exact).</sys:String>
     <sys:String x:Key="str.Spc.ClassFilter">Class:</sys:String>
     <sys:String x:Key="str.Spc.PropFilter">Field:</sys:String>
+    <sys:String x:Key="str.Spc.ResClass">Class:</sys:String>
+    <sys:String x:Key="str.Spc.ResField">Field:</sys:String>
+    <sys:String x:Key="str.Spc.ResObject">Object:</sys:String>
+    <sys:String x:Key="str.Spc.ResGlobal">Filter all:</sys:String>
+    <sys:String x:Key="str.Spc.ResGlobalHint">match any column…</sys:String>
+    <sys:String x:Key="str.Spc.SeqFirst">First:</sys:String>
+    <sys:String x:Key="str.Spc.SeqLast">Last:</sys:String>
+    <sys:String x:Key="str.Spc.ApplyRange">Apply range</sys:String>
+    <sys:String x:Key="str.Spc.ResetRange">Reset</sys:String>
     <sys:String x:Key="str.Spc.Run">Run SPC</sys:String>
     <sys:String x:Key="str.Spc.Refresh">Refresh</sys:String>
     <sys:String x:Key="str.Spc.OpenWalker">Open in Live Walker</sys:String>
@@ -286,6 +301,7 @@
     <sys:String x:Key="str.Spc.Col.Captured">Captured (UTC)</sys:String>
     <sys:String x:Key="str.Spc.Col.Session">Session</sys:String>
     <sys:String x:Key="str.Spc.Col.Predicate">Compare</sys:String>
+    <sys:String x:Key="str.Spc.Col.ValueFilter">Value filter</sys:String>
     <sys:String x:Key="str.Spc.Res.Class">Class</sys:String>
     <sys:String x:Key="str.Spc.Res.Object">Object</sys:String>
     <sys:String x:Key="str.Spc.Res.Field">Field</sys:String>

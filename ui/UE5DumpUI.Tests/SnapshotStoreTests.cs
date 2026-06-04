@@ -1,4 +1,5 @@
 using System.IO;
+using Microsoft.Data.Sqlite;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 using Xunit;
@@ -71,6 +72,82 @@ public class SnapshotStoreTests : IDisposable
 
         await _store.DeleteSnapshotAsync(id, ct);
         Assert.Empty(await _store.ListSnapshotsAsync(ct));
+    }
+
+    [Fact]
+    public async Task Schema_DenormalizedFields_StoresIdentityPerRow()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _store.SetActiveGame("DENORM");
+        long id = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "n" }, ct);
+        await _store.WriteChunkAsync(id, new[]
+        {
+            MakeObject(1, ("A", "IntProperty", "01000000"),
+                          ("B", "IntProperty", "02000000"),
+                          ("C", "IntProperty", "03000000")),
+        }, ct);
+        await _store.FinalizeSnapshotAsync(id, 1, 3, ct);
+
+        await using var conn = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = _store.DatabasePath }.ToString());
+        await conn.OpenAsync(ct);
+
+        // Denormalised: identity columns live on `fields` (the fast single-table
+        // covering-index layout). No `objects` table, no `vfields` view.
+        Assert.Equal(3, await ScalarAsync(conn, "SELECT COUNT(*) FROM fields", ct));
+        Assert.Equal(1, await ScalarAsync(conn,
+            "SELECT COUNT(*) FROM pragma_table_info('fields') WHERE name='norm_path'", ct));
+        Assert.Equal(0, await ScalarAsync(conn,
+            "SELECT COUNT(*) FROM sqlite_master WHERE name='objects'", ct));
+        Assert.Equal(3, await ScalarAsync(conn,
+            "SELECT COUNT(*) FROM fields WHERE class_fqn='BP_Player_C' " +
+            "AND norm_path='/Game/Map.Map:PersistentLevel.BP_Player_C'", ct));
+        Assert.Equal(4, await ScalarAsync(conn, "PRAGMA user_version", ct));
+        // v4 dropped the heavy composite indexes — only the lean ix_fields remains.
+        Assert.Equal(0, await ScalarAsync(conn,
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name IN ('ix_strict','ix_loose','ix_insession')", ct));
+    }
+
+    private static async Task<long> ScalarAsync(SqliteConnection conn, string sql, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        return (long)(await cmd.ExecuteScalarAsync(ct) ?? 0L);
+    }
+
+    [Fact]
+    public async Task Diff_InMemoryHashJoin_ChangedAddedRemoved()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _store.SetActiveGame("DIFF");
+
+        long a = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "a" }, ct);
+        await _store.WriteChunkAsync(a, new[]
+        {
+            MakeObject(1, ("HP",   "IntProperty", "64000000")),   // 100
+            MakeObject(2, ("Mana", "IntProperty", "0A000000")),   // 10
+            MakeObject(3, ("XP",   "IntProperty", "05000000")),   // 5  (removed in B)
+        }, ct);
+        await _store.FinalizeSnapshotAsync(a, 3, 3, ct);
+
+        long b = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "b" }, ct);
+        await _store.WriteChunkAsync(b, new[]
+        {
+            MakeObject(1, ("HP",   "IntProperty", "5A000000")),   // 90   (changed, down)
+            MakeObject(2, ("Mana", "IntProperty", "0A000000")),   // 10   (unchanged)
+            MakeObject(4, ("Gold", "IntProperty", "32000000")),   // 50   (added)
+        }, ct);
+        await _store.FinalizeSnapshotAsync(b, 3, 3, ct);
+
+        var diff = await _store.DiffSnapshotsAsync(a, b, new SnapshotDiffFilter(), ct);
+
+        var changed = Assert.Single(diff.Changed);
+        Assert.Equal("HP", changed.PropName);
+        Assert.Equal("100", changed.OldValue);
+        Assert.Equal("90", changed.NewValue);
+        Assert.Equal(SnapshotDiffDirection.Down, changed.Direction);
+        Assert.Equal(1, diff.AddedCount);     // Gold (obj 4) is B-only
+        Assert.Equal(1, diff.RemovedCount);   // XP (obj 3) is A-only
     }
 
     private async Task<long> SeedSnapshotAsync(string label, int idx, CancellationToken ct)

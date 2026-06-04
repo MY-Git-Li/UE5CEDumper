@@ -59,19 +59,26 @@ behind an opt-in experimental flag. **Design of record:
 it first (concept mapping, UE-vs-Unity advantages, SQLite schema, identity-key
 join, array inner-key handling, the Q#4 key-field improvement).
 
-> **NEXT SESSION → Phase C only C2 left + A3c.** Phase 0 + Phase A + Phase B (SPC)
-> + **Phase C C1 + C3-lite + C4 + C5 + C6 (Class Pivot)** shipped (builds 805-877).
-> The pivot engine (`PivotEngine` + `PivotKeyScorer` + `SnapshotStore.Pivot*Async`)
-> and UI (`ClassPivotViewModel` + `ClassPivotPanel`) are live: group a class by
-> identity or a key field, project value fields, collision render `⟨N: …⟩`, key
-> auto-suggested. A `Source` toggle offers three modes: **Snapshot** (scalar),
-> **Snapshot Array** (C6 — inner-key pivot of a captured struct array, e.g. Cargo
-> by ItemID), and **DataTable** (C4 — zero-config, RowName is the key). **C5** adds
-> a right-click "Pivot this property…" handoff from PropertySearch / Interesting
-> Properties / LiveWalker into the tab. **Remaining Phase C: C2** (find-by-value
-> locator → pivot handoff). Also still open: **A3c** (CE .CT freeze-export from a
-> diff/SPC/pivot hit — Copy Address covers the manual path). See the Phase C block
-> + design §"Phase C".
+> **STATUS (builds 805-884).** Phase 0 + A + B (SPC) + **Phase C C1+C3-lite+C4+C5+C6**
+> all shipped. Pivot groups a class by identity/key field with three `Source` modes:
+> Snapshot (scalar), Snapshot Array (C6 inner-key), DataTable (C4 zero-config). C5 =
+> right-click "Pivot this property…" handoff. Diff + SPC have AutoCompleteBox
+> pickers + global filter + value range.
+>
+> **ENGINE REWORK (builds 879-884, live-test driven):** the gated tabs are now
+> hardened + fast. Crash (selection-model on `Clear()`) and hang (sync SQLite on the
+> UI thread) fixed; **Diff and SPC now run as in-memory hash-joins** (ported from
+> `discrete`) instead of SQL self-joins — O(n), index-independent. With Pivot already
+> in-memory, the three heavy composite indexes were dropped for a single lean
+> `ix_fields(snapshot_id, class_fqn)` (**~½ DB, schema v4**). SPC gained per-snapshot
+> **absolute value predicates** (Exact/Between/≥/≤) before the cap, to cut
+> directional-but-irrelevant UI noise. (A v2 normalise attempt was reverted — it broke
+> diff perf; see dev-log.)
+>
+> **Remaining experimental:** C2 (find-by-value locator → pivot handoff); A3c (CE .CT
+> freeze-export from a diff/SPC/pivot hit — Copy Address covers the manual path);
+> heavier C3 scorer; *optional* `discrete`-style gzip blob storage for even smaller
+> DB. See the Phase C block + design §"Phase C"/§6.
 
 Locked decisions: SQLite (raw ADO.NET, no EF Core) · all three features ·
 persisted gating · **multi-session first-class** for SPC/Pivot · type-agnostic

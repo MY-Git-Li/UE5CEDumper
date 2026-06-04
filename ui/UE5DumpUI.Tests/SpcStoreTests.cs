@@ -91,6 +91,38 @@ public class SpcStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task AbsolutePredicate_Between_CutsDirectionalNoise()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        // Both fields Decrease, but WidthOverride is UI noise (1920 -> 0) and HP is the
+        // real gameplay value (300 -> 120).
+        long a = await SeedAsync("a", "S", new[]
+        {
+            Obj(1, "SizeBox",     "/Game/UI.UI:Tree.SizeBox",      ("WidthOverride", "IntProperty", 1920)),
+            Obj(2, "PlayerState", "/Game/M.M:L.PlayerState_0",     ("HP",            "IntProperty", 300)),
+        }, ct);
+        long b = await SeedAsync("b", "S", new[]
+        {
+            Obj(1, "SizeBox",     "/Game/UI.UI:Tree.SizeBox",      ("WidthOverride", "IntProperty", 0)),
+            Obj(2, "PlayerState", "/Game/M.M:L.PlayerState_0",     ("HP",            "IntProperty", 120)),
+        }, ct);
+
+        // Directional-only: both decreases match.
+        var bare = Chain(SpcJoinMode.Strict, new[] { a, b }, SpcPredicateKind.Any, SpcPredicateKind.Decreased);
+        Assert.Equal(2, (await _store.SpcQueryAsync(bare, ct)).Rows.Count);
+
+        // Add a value window (both snapshots Between 0–500): the 1920 baseline fails,
+        // so only the real gameplay HP survives.
+        var windowed = Chain(SpcJoinMode.Strict, new[] { a, b }, SpcPredicateKind.Any, SpcPredicateKind.Decreased);
+        windowed.AbsolutePredicates.Add(new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.Between, Low = 0, High = 500 });
+        windowed.AbsolutePredicates.Add(new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.Between, Low = 0, High = 500 });
+
+        var row = Assert.Single((await _store.SpcQueryAsync(windowed, ct)).Rows);
+        Assert.Equal("HP", row.PropName);
+        Assert.Equal(new[] { "300", "120" }, row.Values.ToArray());
+    }
+
+    [Fact]
     public async Task EnergyBar_SameSameDownUp_AcrossSessions_IsolatesStamina()
     {
         var ct = TestContext.Current.CancellationToken;

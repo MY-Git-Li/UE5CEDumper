@@ -37,7 +37,11 @@ public partial class SpcSnapshotPick : ObservableObject
     /// snapshot.</summary>
     public bool PredicateEnabled => IsSelected && !IsBaseline;
 
-    partial void OnIsSelectedChanged(bool value) => OnPropertyChanged(nameof(PredicateEnabled));
+    partial void OnIsSelectedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(PredicateEnabled));
+        OnPropertyChanged(nameof(AbsEnabled));
+    }
     partial void OnIsBaselineChanged(bool value)
     {
         OnPropertyChanged(nameof(PredicateEnabled));
@@ -45,6 +49,42 @@ public partial class SpcSnapshotPick : ObservableObject
     }
 
     public IReadOnlyList<string> PredicateOptions { get; }
+
+    // --- Optional absolute (value-window) predicate, applied IN ADDITION to the
+    //     directional one, before the cap. Cuts directional-but-irrelevant noise. ---
+    public IReadOnlyList<string> AbsKindOptions { get; } =
+        new[] { "(any value)", "Exact", "Between", "≥", "≤" };
+    [ObservableProperty] private string _absKind = "(any value)";
+    [ObservableProperty] private string _absLow  = "";
+    [ObservableProperty] private string _absHigh = "";
+
+    /// <summary>Value boxes are editable only for a selected snapshot.</summary>
+    public bool AbsEnabled => IsSelected;
+    public bool ShowAbsLow  => AbsKind is "Exact" or "Between" or "≥";
+    public bool ShowAbsHigh => AbsKind is "Between" or "≤";
+
+    partial void OnAbsKindChanged(string value)
+    {
+        OnPropertyChanged(nameof(ShowAbsLow));
+        OnPropertyChanged(nameof(ShowAbsHigh));
+    }
+
+    /// <summary>Compile this row's UI choice into an absolute predicate.</summary>
+    public SpcAbsolutePredicate ToAbsolutePredicate()
+    {
+        double Lo() => double.TryParse(AbsLow.Trim(),  System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0;
+        double Hi() => double.TryParse(AbsHigh.Trim(), System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0;
+        return AbsKind switch
+        {
+            "Exact"        => new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.Exact,   Low = Lo() },
+            "Between"      => new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.Between, Low = Lo(), High = Hi() },
+            "≥"       => new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.AtLeast, Low = Lo() },
+            "≤"       => new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.AtMost,  High = Hi() },
+            _              => new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.None },
+        };
+    }
 
     public long   Id         => Meta.Id;
     public string Label      => Meta.Label;
@@ -98,6 +138,32 @@ public partial class SpcQueryViewModel : ViewModelBase
     public ObservableCollection<SpcSnapshotPick> SnapshotPicks { get; } = new();
 
     public ObservableCollection<SpcResultRow> Results { get; } = new();
+
+    // --- Client-side result filtering (over the last query's full result set) ---
+    [ObservableProperty] private string _resultClassFilter  = "";
+    [ObservableProperty] private string _resultFieldFilter  = "";
+    [ObservableProperty] private string _resultObjectFilter = "";
+    [ObservableProperty] private string _resultGlobalFilter = "";
+    // Value-sequence range: bounds on the first and last value of the sequence,
+    // applied on demand (Apply button) and cleared by Reset.
+    [ObservableProperty] private string _seqFirstMin = "";
+    [ObservableProperty] private string _seqFirstMax = "";
+    [ObservableProperty] private string _seqLastMin = "";
+    [ObservableProperty] private string _seqLastMax = "";
+
+    partial void OnResultClassFilterChanged(string value)  => ApplyResultFilter();
+    partial void OnResultFieldFilterChanged(string value)  => ApplyResultFilter();
+    partial void OnResultObjectFilterChanged(string value) => ApplyResultFilter();
+    partial void OnResultGlobalFilterChanged(string value) => ApplyResultFilter();
+
+    /// <summary>Distinct Class/Field/Object candidates from the last result set,
+    /// feeding the AutoCompleteBox pickers (partial match).</summary>
+    public ObservableCollection<string> ResultClassOptions  { get; } = new();
+    public ObservableCollection<string> ResultFieldOptions  { get; } = new();
+    public ObservableCollection<string> ResultObjectOptions { get; } = new();
+
+    private readonly List<SpcResultRow> _allResults = new();
+    private string _resultSummary = "";
 
     /// <summary>Raised to open a result row's object in the Live Walker tab.</summary>
     public event Action<string>? NavigateToInstance;
@@ -219,6 +285,7 @@ public partial class SpcQueryViewModel : ViewModelBase
 
         ClearError();
         IsQuerying = true;
+        StatusText = "Running SPC query… (intersecting fields across snapshots)";
         SelectedResult = null;   // detach before clearing the bound results grid
         Results.Clear();
         try
@@ -235,19 +302,24 @@ public partial class SpcQueryViewModel : ViewModelBase
                 // Index 0 is the baseline; its predicate is forced to Any.
                 query.Predicates.Add(i == 0 ? SpcPredicateKind.Any
                                             : ParsePredicate(selected[i].SelectedPredicate));
+                // Optional per-snapshot absolute value window (applied before the cap).
+                query.AbsolutePredicates.Add(selected[i].ToAbsolutePredicate());
             }
 
             // Off the UI thread — the N-way self-join over ~1.8M rows would
             // otherwise freeze the window for seconds.
             var res = await Task.Run(() => _store.SpcQueryAsync(query));
-            foreach (var row in res.Rows) Results.Add(row);
+            _allResults.Clear();
+            _allResults.AddRange(res.Rows);
+            RebuildResultOptions();
 
             var trunc = res.Truncated ? $" (capped at {query.MaxRows:N0})" : "";
             var spanSessions = selected.Select(p => p.Meta.GameSessionId).Distinct().Count();
             var sess = spanSessions > 1 ? $", {spanSessions} sessions" : "";
-            StatusText = Results.Count == 0
+            _resultSummary = res.Rows.Count == 0
                 ? $"No fields match the chain across {selected.Count} snapshots{sess}."
-                : $"{Results.Count:N0} match{trunc} across {selected.Count} snapshots{sess} ({SelectedJoinMode}).";
+                : $"{res.Rows.Count:N0} match{trunc} across {selected.Count} snapshots{sess} ({SelectedJoinMode}).";
+            ApplyResultFilter();
         }
         catch (Exception ex)
         {
@@ -259,6 +331,82 @@ public partial class SpcQueryViewModel : ViewModelBase
         {
             IsQuerying = false;
         }
+    }
+
+    private void ApplyResultFilter()
+    {
+        if (_allResults.Count == 0 && Results.Count == 0) { StatusText = _resultSummary; return; }
+        string cls = ResultClassFilter.Trim();
+        string fld = ResultFieldFilter.Trim();
+        string obj = ResultObjectFilter.Trim();
+        string glob = ResultGlobalFilter.Trim();
+        double? fMin = ParseBound(SeqFirstMin), fMax = ParseBound(SeqFirstMax);
+        double? lMin = ParseBound(SeqLastMin),  lMax = ParseBound(SeqLastMax);
+
+        SelectedResult = null;   // detach before clearing the bound results grid
+        Results.Clear();
+        foreach (var r in _allResults)
+        {
+            if (cls.Length  > 0 && r.ClassName.IndexOf(cls, StringComparison.OrdinalIgnoreCase) < 0) continue;
+            if (fld.Length  > 0 && r.PropName.IndexOf(fld, StringComparison.OrdinalIgnoreCase) < 0) continue;
+            if (obj.Length  > 0 && r.NormPath.IndexOf(obj, StringComparison.OrdinalIgnoreCase) < 0) continue;
+            if (glob.Length > 0 && !MatchesGlobal(r, glob)) continue;
+            if (!WithinRange(SeqFirst(r), fMin, fMax)) continue;
+            if (!WithinRange(SeqLast(r),  lMin, lMax)) continue;
+            Results.Add(r);
+        }
+        StatusText = _resultSummary +
+            (Results.Count != _allResults.Count ? $"  ·  showing {Results.Count:N0}" : "");
+    }
+
+    private static string SeqFirst(SpcResultRow r) => r.Values.Count > 0 ? r.Values[0] : "";
+    private static string SeqLast(SpcResultRow r)  => r.Values.Count > 0 ? r.Values[^1] : "";
+
+    private static bool MatchesGlobal(SpcResultRow r, string q) =>
+        r.ClassName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+        r.PropName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+        r.NormPath.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+        r.DeclaredType.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+        r.SequenceDisplay.Contains(q, StringComparison.OrdinalIgnoreCase);
+
+    private static double? ParseBound(string s) =>
+        double.TryParse(s.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : null;
+
+    private static bool WithinRange(string rendered, double? min, double? max)
+    {
+        if (min is null && max is null) return true;
+        if (!double.TryParse(rendered, NumberStyles.Any, CultureInfo.InvariantCulture, out var v))
+            return false;
+        if (min is not null && v < min.Value) return false;
+        if (max is not null && v > max.Value) return false;
+        return true;
+    }
+
+    /// <summary>Apply the value-sequence range (first/last) to the loaded results.</summary>
+    [RelayCommand]
+    private void ApplyResultRange() => ApplyResultFilter();
+
+    /// <summary>Clear the value-sequence range back to unbounded, then re-filter.</summary>
+    [RelayCommand]
+    private void ResetResultRange()
+    {
+        SeqFirstMin = SeqFirstMax = SeqLastMin = SeqLastMax = "";
+        ApplyResultFilter();
+    }
+
+    private void RebuildResultOptions()
+    {
+        FillDistinct(ResultClassOptions,  _allResults.Select(r => r.ClassName));
+        FillDistinct(ResultFieldOptions,  _allResults.Select(r => r.PropName));
+        FillDistinct(ResultObjectOptions, _allResults.Select(r => r.NormPath));
+    }
+
+    private static void FillDistinct(ObservableCollection<string> target, IEnumerable<string> values)
+    {
+        target.Clear();
+        foreach (var v in values.Where(s => !string.IsNullOrEmpty(s))
+                                 .Distinct().OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
+            target.Add(v);
     }
 
     /// <summary>Open the selected result's object in the Live Walker tab.</summary>

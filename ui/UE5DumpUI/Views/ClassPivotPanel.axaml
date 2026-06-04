@@ -92,6 +92,8 @@
                  VerticalAlignment="Center" IsVisible="{Binding IsDataTableSource}"/>
       <TextBlock Text="{StaticResource str.Pivot.KeyInnerKey}" Foreground="#CCCCCC"
                  VerticalAlignment="Center" IsVisible="{Binding IsArraySource}"/>
+      <ProgressBar IsIndeterminate="True" Width="120" Height="4" VerticalAlignment="Center" Margin="12,0,0,0"
+                   IsVisible="{Binding IsBusy}"/>
       <TextBlock Text="{Binding StatusText}" Foreground="#4EC9B0" FontSize="12"
                  VerticalAlignment="Center" Margin="12,0,0,0"
                  IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
