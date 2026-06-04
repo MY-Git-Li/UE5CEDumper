@@ -116,13 +116,31 @@
         </WrapPanel>
         <WrapPanel Orientation="Horizontal">
           <TextBlock Text="{StaticResource str.Snapshot.Diff.ClassFilter}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
-          <TextBox Text="{Binding DiffClassFilter}" Width="130" Margin="0,0,8,0"/>
+          <AutoCompleteBox Text="{Binding DiffClassFilter, Mode=TwoWay}" ItemsSource="{Binding DiffClassOptions}"
+                           FilterMode="Contains" Width="140" Margin="0,0,8,0"/>
           <TextBlock Text="{StaticResource str.Snapshot.Diff.PropFilter}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
-          <TextBox Text="{Binding DiffPropFilter}" Width="130" Margin="0,0,8,0"/>
+          <AutoCompleteBox Text="{Binding DiffPropFilter, Mode=TwoWay}" ItemsSource="{Binding DiffFieldOptions}"
+                           FilterMode="Contains" Width="140" Margin="0,0,8,0"/>
           <TextBlock Text="{StaticResource str.Snapshot.Diff.ObjectFilter}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
-          <TextBox Text="{Binding DiffObjectFilter}" Width="160" Margin="0,0,8,0"/>
+          <AutoCompleteBox Text="{Binding DiffObjectFilter, Mode=TwoWay}" ItemsSource="{Binding DiffObjectOptions}"
+                           FilterMode="Contains" Width="180" Margin="0,0,8,0"/>
           <TextBlock Text="{StaticResource str.Snapshot.Diff.Dir}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
           <ComboBox ItemsSource="{Binding DiffDirectionOptions}" SelectedItem="{Binding SelectedDiffDirection}" MinWidth="120" Margin="0,0,8,0"/>
+        </WrapPanel>
+        <WrapPanel Orientation="Horizontal">
+          <TextBlock Text="{StaticResource str.Snapshot.Diff.Global}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+          <TextBox Text="{Binding DiffGlobalFilter}" Width="180" Margin="0,0,12,0"
+                   PlaceholderText="{StaticResource str.Snapshot.Diff.GlobalHint}"/>
+          <TextBlock Text="{StaticResource str.Snapshot.Diff.OldRange}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+          <TextBox Text="{Binding DiffOldMin}" Width="70" Margin="0,0,2,0" PlaceholderText="min"/>
+          <TextBlock Text="–" Foreground="#888" VerticalAlignment="Center" Margin="0,0,2,0"/>
+          <TextBox Text="{Binding DiffOldMax}" Width="70" Margin="0,0,12,0" PlaceholderText="max"/>
+          <TextBlock Text="{StaticResource str.Snapshot.Diff.NewRange}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+          <TextBox Text="{Binding DiffNewMin}" Width="70" Margin="0,0,2,0" PlaceholderText="min"/>
+          <TextBlock Text="–" Foreground="#888" VerticalAlignment="Center" Margin="0,0,2,0"/>
+          <TextBox Text="{Binding DiffNewMax}" Width="70" Margin="0,0,8,0" PlaceholderText="max"/>
+          <Button Content="{StaticResource str.Snapshot.Diff.ApplyRange}" Command="{Binding ApplyDiffRangeCommand}" Padding="8,3" Margin="0,0,4,0"/>
+          <Button Content="{StaticResource str.Snapshot.Diff.ResetRange}" Command="{Binding ResetDiffRangeCommand}" Padding="8,3" Margin="0,0,8,0"/>
           <TextBlock Text="{Binding DiffStatusText}" Foreground="#4EC9B0" FontSize="12" VerticalAlignment="Center"/>
         </WrapPanel>
       </StackPanel>

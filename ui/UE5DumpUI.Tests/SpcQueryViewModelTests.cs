@@ -127,6 +127,41 @@ public class SpcQueryViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task ResultFilter_Pickers_Global_And_SequenceRange()
+    {
+        await SeedAsync("t1", ("HP", 100), ("Mana", 10));
+        await SeedAsync("t2", ("HP", 90),  ("Mana", 20));
+        await SeedAsync("t3", ("HP", 80),  ("Mana", 30));
+
+        var vm = NewVm();
+        await vm.RefreshAsync();
+        foreach (var p in vm.SnapshotPicks) p.IsSelected = true;   // chain [Any, Any, Any]
+
+        await vm.RunQueryCommand.ExecuteAsync(null);
+        Assert.Equal(2, vm.Results.Count);   // HP + Mana both present in all 3
+
+        // Picker candidates from the result set.
+        Assert.Contains("HP", vm.ResultFieldOptions);
+        Assert.Contains("Mana", vm.ResultFieldOptions);
+
+        // Field filter narrows live.
+        vm.ResultFieldFilter = "HP";
+        Assert.Equal("HP", Assert.Single(vm.Results).PropName);
+        vm.ResultFieldFilter = "";
+        Assert.Equal(2, vm.Results.Count);
+
+        // Sequence range (button-applied): First>=50 keeps HP(100), drops Mana(10).
+        vm.SeqFirstMin = "50";
+        Assert.Equal(2, vm.Results.Count);   // not applied until the button
+        vm.ApplyResultRangeCommand.Execute(null);
+        Assert.Equal("HP", Assert.Single(vm.Results).PropName);
+
+        vm.ResetResultRangeCommand.Execute(null);
+        Assert.Equal(2, vm.Results.Count);
+        Assert.Equal("", vm.SeqFirstMin);
+    }
+
+    [Fact]
     public async Task RunQuery_FewerThanTwoSelected_NoQuery()
     {
         await SeedAsync("a", ("HP", 100));

@@ -50,6 +50,23 @@ public partial class SnapshotViewModel : ViewModelBase
     [ObservableProperty] private string _diffStatusText = "";
     [ObservableProperty] private SnapshotDiffRow? _selectedDiffRow;
 
+    // Global filter (matches across every displayed column) + Old/New numeric
+    // range. The range is applied on demand (Apply button) and cleared by Reset;
+    // the text/global filters are live.
+    [ObservableProperty] private string _diffGlobalFilter = "";
+    [ObservableProperty] private string _diffOldMin = "";
+    [ObservableProperty] private string _diffOldMax = "";
+    [ObservableProperty] private string _diffNewMin = "";
+    [ObservableProperty] private string _diffNewMax = "";
+
+    partial void OnDiffGlobalFilterChanged(string value) => ApplyDiffFilter();
+
+    // Distinct candidate values from the last diff, feeding the Class/Field/Object
+    // AutoCompleteBox pickers (partial match).
+    public ObservableCollection<string> DiffClassOptions  { get; } = new();
+    public ObservableCollection<string> DiffFieldOptions  { get; } = new();
+    public ObservableCollection<string> DiffObjectOptions { get; } = new();
+
     // Full unfiltered changed set from the last Run Diff; the grid (DiffRows)
     // is a live client-side filter of this so typing in the filter boxes is
     // instant (no SQL re-query).
@@ -83,12 +100,15 @@ public partial class SnapshotViewModel : ViewModelBase
         string cls = DiffClassFilter.Trim();
         string prop = DiffPropFilter.Trim();
         string obj = DiffObjectFilter.Trim();
+        string glob = DiffGlobalFilter.Trim();
         SnapshotDiffDirection? dir = SelectedDiffDirection switch
         {
             "Increased" => SnapshotDiffDirection.Up,
             "Decreased" => SnapshotDiffDirection.Down,
             _           => null,
         };
+        double? oldMin = ParseBound(DiffOldMin), oldMax = ParseBound(DiffOldMax);
+        double? newMin = ParseBound(DiffNewMin), newMax = ParseBound(DiffNewMax);
 
         SelectedDiffRow = null;   // detach before clearing the bound results grid
         DiffRows.Clear();
@@ -98,10 +118,64 @@ public partial class SnapshotViewModel : ViewModelBase
             if (prop.Length > 0 && r.PropName.IndexOf(prop, StringComparison.OrdinalIgnoreCase) < 0) continue;
             if (obj.Length  > 0 && r.NormPath.IndexOf(obj, StringComparison.OrdinalIgnoreCase) < 0) continue;
             if (dir.HasValue && r.Direction != dir.Value) continue;
+            if (glob.Length > 0 && !MatchesGlobal(r, glob)) continue;
+            if (!WithinRange(r.OldValue, oldMin, oldMax)) continue;
+            if (!WithinRange(r.NewValue, newMin, newMax)) continue;
             DiffRows.Add(r);
         }
         DiffStatusText = _diffSummary +
             (DiffRows.Count != _allDiff.Count ? $"  ·  showing {DiffRows.Count:N0}" : "");
+    }
+
+    // Global filter: case-insensitive substring across every displayed column.
+    private static bool MatchesGlobal(SnapshotDiffRow r, string q) =>
+        r.ClassName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+        r.PropName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+        r.NormPath.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+        r.OldValue.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+        r.NewValue.Contains(q, StringComparison.OrdinalIgnoreCase);
+
+    private static double? ParseBound(string s) =>
+        double.TryParse(s.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : null;
+
+    // A value passes when no bound is set, or it parses numerically and falls
+    // within the inclusive bounds. A set bound on a non-numeric value rejects.
+    private static bool WithinRange(string rendered, double? min, double? max)
+    {
+        if (min is null && max is null) return true;
+        if (!double.TryParse(rendered, NumberStyles.Any, CultureInfo.InvariantCulture, out var v))
+            return false;
+        if (min is not null && v < min.Value) return false;
+        if (max is not null && v > max.Value) return false;
+        return true;
+    }
+
+    /// <summary>Apply the Old/New numeric range to the loaded diff (button-driven).</summary>
+    [RelayCommand]
+    private void ApplyDiffRange() => ApplyDiffFilter();
+
+    /// <summary>Clear the Old/New range back to unbounded, then re-filter.</summary>
+    [RelayCommand]
+    private void ResetDiffRange()
+    {
+        DiffOldMin = DiffOldMax = DiffNewMin = DiffNewMax = "";
+        ApplyDiffFilter();
+    }
+
+    // Rebuild the distinct Class/Field/Object picker candidates from the loaded set.
+    private void RebuildDiffOptions()
+    {
+        FillDistinct(DiffClassOptions,  _allDiff.Select(r => r.ClassName));
+        FillDistinct(DiffFieldOptions,  _allDiff.Select(r => r.PropName));
+        FillDistinct(DiffObjectOptions, _allDiff.Select(r => r.NormPath));
+    }
+
+    private static void FillDistinct(ObservableCollection<string> target, IEnumerable<string> values)
+    {
+        target.Clear();
+        foreach (var v in values.Where(s => !string.IsNullOrEmpty(s))
+                                 .Distinct().OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
+            target.Add(v);
     }
 
     /// <summary>Capture scope: NumericNoByte (default, excludes 1-byte) or
@@ -333,6 +407,7 @@ public partial class SnapshotViewModel : ViewModelBase
             var diff = await Task.Run(() => _store.DiffSnapshotsAsync(idA, idB, filter));
             _allDiff.Clear();
             _allDiff.AddRange(diff.Changed);
+            RebuildDiffOptions();
             var trunc = diff.Truncated ? $" (capped at {filter.MaxRows:N0})" : "";
             _diffSummary =
                 $"{diff.Changed.Count:N0} changed{trunc}  ·  +{diff.AddedCount:N0} added  ·  −{diff.RemovedCount:N0} removed";

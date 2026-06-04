@@ -67,8 +67,33 @@
       </DataGrid.Columns>
     </DataGrid>
 
-    <!-- Hint + status -->
-    <StackPanel Grid.Row="4" Spacing="2" Margin="0,8,0,8">
+    <!-- Result filters + hint + status -->
+    <StackPanel Grid.Row="4" Spacing="6" Margin="0,8,0,8">
+      <WrapPanel Orientation="Horizontal">
+        <TextBlock Text="{StaticResource str.Spc.ResClass}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+        <AutoCompleteBox Text="{Binding ResultClassFilter, Mode=TwoWay}" ItemsSource="{Binding ResultClassOptions}"
+                         FilterMode="Contains" Width="140" Margin="0,0,8,0"/>
+        <TextBlock Text="{StaticResource str.Spc.ResField}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+        <AutoCompleteBox Text="{Binding ResultFieldFilter, Mode=TwoWay}" ItemsSource="{Binding ResultFieldOptions}"
+                         FilterMode="Contains" Width="140" Margin="0,0,8,0"/>
+        <TextBlock Text="{StaticResource str.Spc.ResObject}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+        <AutoCompleteBox Text="{Binding ResultObjectFilter, Mode=TwoWay}" ItemsSource="{Binding ResultObjectOptions}"
+                         FilterMode="Contains" Width="170" Margin="0,0,8,0"/>
+        <TextBlock Text="{StaticResource str.Spc.ResGlobal}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+        <TextBox Text="{Binding ResultGlobalFilter}" Width="160" PlaceholderText="{StaticResource str.Spc.ResGlobalHint}"/>
+      </WrapPanel>
+      <WrapPanel Orientation="Horizontal">
+        <TextBlock Text="{StaticResource str.Spc.SeqFirst}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+        <TextBox Text="{Binding SeqFirstMin}" Width="70" Margin="0,0,2,0" PlaceholderText="min"/>
+        <TextBlock Text="–" Foreground="#888" VerticalAlignment="Center" Margin="0,0,2,0"/>
+        <TextBox Text="{Binding SeqFirstMax}" Width="70" Margin="0,0,12,0" PlaceholderText="max"/>
+        <TextBlock Text="{StaticResource str.Spc.SeqLast}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+        <TextBox Text="{Binding SeqLastMin}" Width="70" Margin="0,0,2,0" PlaceholderText="min"/>
+        <TextBlock Text="–" Foreground="#888" VerticalAlignment="Center" Margin="0,0,2,0"/>
+        <TextBox Text="{Binding SeqLastMax}" Width="70" Margin="0,0,8,0" PlaceholderText="max"/>
+        <Button Content="{StaticResource str.Spc.ApplyRange}" Command="{Binding ApplyResultRangeCommand}" Padding="8,3" Margin="0,0,4,0"/>
+        <Button Content="{StaticResource str.Spc.ResetRange}" Command="{Binding ResetResultRangeCommand}" Padding="8,3"/>
+      </WrapPanel>
       <TextBlock Text="{StaticResource str.Spc.BaselineHint}" Foreground="#888" FontSize="11"
                  TextWrapping="Wrap"/>
       <TextBlock Text="{Binding WarningText}" Foreground="#D7BA7D" FontSize="12" TextWrapping="Wrap"
