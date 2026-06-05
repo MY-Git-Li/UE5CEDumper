@@ -59,6 +59,59 @@ public class ClassPivotViewModelTests : IDisposable
     private ClassPivotViewModel NewVm()
         => new ClassPivotViewModel(_store, new MockLoggingService());
 
+    /// <summary>Thin decorator that counts the heavy list calls, delegating the
+    /// rest to a real store — proves the per-snapshot cache avoids re-scanning.</summary>
+    private sealed class CountingStore : ISnapshotStore
+    {
+        private readonly ISnapshotStore _inner;
+        public int ClassCalls;
+        public int FieldCalls;
+        public CountingStore(ISnapshotStore inner) => _inner = inner;
+
+        public Task<IReadOnlyList<PivotClassInfo>> ListPivotClassesAsync(long s, CancellationToken ct = default)
+        { ClassCalls++; return _inner.ListPivotClassesAsync(s, ct); }
+        public Task<IReadOnlyList<PivotFieldInfo>> ListPivotFieldsAsync(long s, string c, CancellationToken ct = default)
+        { FieldCalls++; return _inner.ListPivotFieldsAsync(s, c, ct); }
+
+        public string DatabasePath => _inner.DatabasePath;
+        public void SetActiveGame(string? p) => _inner.SetActiveGame(p);
+        public Task<long> CreateSnapshotAsync(SnapshotMeta m, CancellationToken ct = default) => _inner.CreateSnapshotAsync(m, ct);
+        public Task<int> WriteChunkAsync(long s, IReadOnlyList<SnapshotCapturedObject> o, CancellationToken ct = default) => _inner.WriteChunkAsync(s, o, ct);
+        public Task FinalizeSnapshotAsync(long s, int oc, int fc, CancellationToken ct = default) => _inner.FinalizeSnapshotAsync(s, oc, fc, ct);
+        public Task<IReadOnlyList<SnapshotMeta>> ListSnapshotsAsync(CancellationToken ct = default) => _inner.ListSnapshotsAsync(ct);
+        public Task DeleteSnapshotAsync(long s, CancellationToken ct = default) => _inner.DeleteSnapshotAsync(s, ct);
+        public Task<SnapshotUsage> GetUsageAsync(CancellationToken ct = default) => _inner.GetUsageAsync(ct);
+        public Task<SnapshotDiffResult> DiffSnapshotsAsync(long a, long b, SnapshotDiffFilter f, CancellationToken ct = default) => _inner.DiffSnapshotsAsync(a, b, f, ct);
+        public Task<SpcResult> SpcQueryAsync(SpcQuery q, CancellationToken ct = default) => _inner.SpcQueryAsync(q, ct);
+        public Task<PivotResult> PivotAsync(PivotQuery q, CancellationToken ct = default) => _inner.PivotAsync(q, ct);
+        public Task<IReadOnlyList<PivotClassInfo>> ListPivotArrayClassesAsync(long s, CancellationToken ct = default) => _inner.ListPivotArrayClassesAsync(s, ct);
+        public Task<IReadOnlyList<PivotArrayFieldInfo>> ListPivotArrayFieldsAsync(long s, string c, CancellationToken ct = default) => _inner.ListPivotArrayFieldsAsync(s, c, ct);
+        public Task<IReadOnlyList<PivotFieldInfo>> ListPivotArrayPropsAsync(long s, string c, string af, CancellationToken ct = default) => _inner.ListPivotArrayPropsAsync(s, c, af, ct);
+        public Task<PivotResult> PivotArrayAsync(ArrayPivotQuery q, CancellationToken ct = default) => _inner.PivotArrayAsync(q, ct);
+        public Task<int> EnforceQuotaAsync(long b, CancellationToken ct = default) => _inner.EnforceQuotaAsync(b, ct);
+        public HashSet<string> GetClassDenylist(DenylistScope scope) => _inner.GetClassDenylist(scope);
+        public void SetClassDenylist(DenylistScope scope, HashSet<string> classes) => _inner.SetClassDenylist(scope, classes);
+    }
+
+    [Fact]
+    public async Task ClassList_IsCachedPerSnapshot_NotRescannedOnReselect()
+    {
+        await SeedInventoryAsync();
+        var counting = new CountingStore(_store);
+        var vm = new ClassPivotViewModel(counting, new MockLoggingService());
+        await vm.RefreshAsync();
+        await vm.PendingLoad!;            // first class load for the newest snapshot
+        Assert.Equal(1, counting.ClassCalls);
+
+        var snap = vm.SelectedSnapshot!;
+        // Re-select the SAME snapshot (force the change handler) → cache hit, no scan.
+        vm.SelectedSnapshot = null;
+        vm.SelectedSnapshot = snap;
+        if (vm.PendingLoad != null) await vm.PendingLoad;
+        Assert.Equal(1, counting.ClassCalls);   // still 1 — served from cache
+        Assert.Contains(vm.Classes, c => c.ClassName == "BP_Item_C");
+    }
+
     [Fact]
     public async Task Refresh_LoadsSnapshotsAndClasses()
     {
@@ -166,6 +219,20 @@ public class ClassPivotViewModelTests : IDisposable
         public Task<IReadOnlyList<PivotArrayFieldInfo>> ListPivotArrayFieldsAsync(long s, string c, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<PivotFieldInfo>> ListPivotArrayPropsAsync(long s, string c, string af, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<PivotResult> PivotArrayAsync(ArrayPivotQuery q, CancellationToken ct = default) => throw new NotImplementedException();
+
+        // N1: per-game, per-tab class denylist. The gated-class pivot test fleet
+        // exercises the picker filter via Pivot scope, so back it with a real set.
+        public readonly HashSet<string> PivotDenylist = new(StringComparer.Ordinal);
+        public HashSet<string> GetClassDenylist(DenylistScope scope) =>
+            scope == DenylistScope.Pivot
+                ? new HashSet<string>(PivotDenylist, StringComparer.Ordinal)
+                : new HashSet<string>(StringComparer.Ordinal);
+        public void SetClassDenylist(DenylistScope scope, HashSet<string> classes)
+        {
+            if (scope != DenylistScope.Pivot) return;
+            PivotDenylist.Clear();
+            foreach (var c in classes) PivotDenylist.Add(c);
+        }
     }
 
     private static PivotFieldInfo Field(string name)

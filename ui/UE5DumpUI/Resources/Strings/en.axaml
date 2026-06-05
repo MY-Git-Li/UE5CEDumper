@@ -228,6 +228,8 @@
 
     <!-- Snapshot tab (experimental — Phase A) -->
     <sys:String x:Key="str.Snapshot.Intro">Capture every numeric UPROPERTY of every (scoped) object into a persisted snapshot. Snapshots feed SPC Query and Class Pivot. Native (non-UPROPERTY) fields are not captured.</sys:String>
+    <sys:String x:Key="str.Snapshot.CaptureHeader">Capture snapshot</sys:String>
+    <sys:String x:Key="str.Snapshot.CompareHeader">Compare snapshots (diff)</sys:String>
     <sys:String x:Key="str.Snapshot.NotConnected">Connect to a game to capture snapshots.</sys:String>
     <sys:String x:Key="str.Snapshot.Scope">Scope:</sys:String>
     <sys:String x:Key="str.Snapshot.GameOnly">Game objects only</sys:String>
@@ -308,8 +310,24 @@
     <sys:String x:Key="str.Spc.Res.Type">Type</sys:String>
     <sys:String x:Key="str.Spc.Res.Sequence">Value sequence</sys:String>
 
+    <!-- N1: per-game class denylist (noise picker) — shared by SPC + Diff -->
+    <sys:String x:Key="str.Noise.PanelHeader">Noise picker — top classes in this result</sys:String>
+    <sys:String x:Key="str.Noise.PanelHint">Tick classes whose hits you consider noise (UI widgets, animation, tick state). Apply adds them to this game's denylist and re-runs the query. The denylist also filters Snapshot Diff and the Class Pivot picker.</sys:String>
+    <sys:String x:Key="str.Noise.Col.Pick">Hide</sys:String>
+    <sys:String x:Key="str.Noise.Col.Class">Class</sys:String>
+    <sys:String x:Key="str.Noise.Col.Hits">Hits</sys:String>
+    <sys:String x:Key="str.Noise.Col.SampleProps">Sample fields</sys:String>
+    <sys:String x:Key="str.Noise.Apply">Apply &amp; re-run</sys:String>
+    <sys:String x:Key="str.Noise.ActiveHeader">Active denylist for this game:</sys:String>
+    <sys:String x:Key="str.Noise.Clear">Clear all</sys:String>
+    <sys:String x:Key="str.Noise.Reset">Reset ticks</sys:String>
+    <sys:String x:Key="str.Noise.RemoveTip">Remove from denylist</sys:String>
+    <!-- Class Pivot: right-click hide + hidden-class chips -->
+    <sys:String x:Key="str.Pivot.HideClass">Hide selected class from picker</sys:String>
+    <sys:String x:Key="str.Pivot.HiddenHeader">Hidden classes (Pivot only):</sys:String>
+
     <!-- Class Pivot (experimental) -->
-    <sys:String x:Key="str.Pivot.Intro">Group one class's instances by a key field's value (e.g. inventory by ItemID) or by object identity, and project the value fields per group. The best key field is auto-suggested (type + name + cardinality). Differing values inside a group render as a collision ⟨N: v1,v2,+M⟩. Snapshot capture is all-numeric, so keys are int/enum IDs. Switch Source to Snapshot Array to pivot a captured struct array (e.g. Cargo) by its inner-key value (e.g. ItemID) — reorder- and session-immune. Or DataTable for a zero-config pivot of a live DataTable (RowName is the key — no discovery needed).</sys:String>
+    <sys:String x:Key="str.Pivot.Intro">Group one class's instances by a key field's value (e.g. inventory by ItemID) or by object identity, and project the value fields per group. The best key field is auto-suggested (type + name + cardinality). Differing values inside a group render as a collision ⟨N: v1,v2,+M⟩. Snapshot capture is all-numeric, so keys are int/enum IDs. Tip: for transient inventory objects (whose object path is identical, e.g. //Engine/Transient/Item) use a Field key like ItemID — Identity mode would merge them into one group. Switch Source to Snapshot Array to pivot a captured struct array (e.g. Cargo) by its inner-key value (e.g. ItemID) — reorder- and session-immune. Or DataTable for a zero-config pivot of a live DataTable (RowName is the key — no discovery needed).</sys:String>
     <sys:String x:Key="str.Pivot.Source">Source:</sys:String>
     <sys:String x:Key="str.Pivot.Snapshot">Snapshot:</sys:String>
     <sys:String x:Key="str.Pivot.DataTable">DataTable:</sys:String>

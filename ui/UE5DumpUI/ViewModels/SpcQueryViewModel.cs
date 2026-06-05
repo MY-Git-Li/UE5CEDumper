@@ -117,6 +117,7 @@ public partial class SpcQueryViewModel : ViewModelBase
     private readonly ILoggingService _log;
     private readonly IPlatformService? _platform;
     private EngineState? _engineState;
+    private CancellationTokenSource? _queryCts;   // heavy in-memory SPC op
 
     [ObservableProperty] private string _selectedJoinMode = "Strict";
     [ObservableProperty] private string _classFilter = "";
@@ -138,6 +139,21 @@ public partial class SpcQueryViewModel : ViewModelBase
     public ObservableCollection<SpcSnapshotPick> SnapshotPicks { get; } = new();
 
     public ObservableCollection<SpcResultRow> Results { get; } = new();
+
+    // --- N1: per-game class denylist (noise picker) ---
+
+    /// <summary>Top-N classes ranked by hit count over the last result set, each
+    /// row toggleable. Apply pushes the selection into the per-game denylist and
+    /// re-runs the query (so the user sees the cleaned result immediately).</summary>
+    public ObservableCollection<NoiseRowVm> NoiseRows { get; } = new();
+
+    /// <summary>The currently-active per-game denylist (loaded from the store).
+    /// Empty when no game is wired. Display-only — mutations happen via
+    /// ApplyNoisePicksAsync.</summary>
+    public ObservableCollection<string> ActiveDenylist { get; } = new();
+    [ObservableProperty] private bool _noisePanelOpen;
+
+    private HashSet<string> _excludedClasses = new(StringComparer.Ordinal);
 
     // --- Client-side result filtering (over the last query's full result set) ---
     [ObservableProperty] private string _resultClassFilter  = "";
@@ -188,7 +204,18 @@ public partial class SpcQueryViewModel : ViewModelBase
     {
         _engineState = state;
         _store.SetActiveGame(state.PeHash);
+        LoadDenylistFromStore();
         _ = RefreshAsync();
+    }
+
+    /// <summary>Reload the per-game denylist after SetActiveGame switched the
+    /// active DB. Resets the local cache + the bound display collection.</summary>
+    private void LoadDenylistFromStore()
+    {
+        _excludedClasses = _store.GetClassDenylist(DenylistScope.Spc);
+        ActiveDenylist.Clear();
+        foreach (var c in _excludedClasses.OrderBy(s => s, StringComparer.Ordinal))
+            ActiveDenylist.Add(c);
     }
 
     [RelayCommand]
@@ -230,6 +257,7 @@ public partial class SpcQueryViewModel : ViewModelBase
             }
             UiCollection.Reset(SnapshotPicks, fresh, () => { /* no SelectedItem binding */ });
             RecomputeBaselines();
+            AutoSelectJoinMode();
             OnPropertyChanged(nameof(SelectedCount));
             OnPropertyChanged(nameof(CanRunQuery));
             UpdateWarning();
@@ -246,9 +274,41 @@ public partial class SpcQueryViewModel : ViewModelBase
         if (e.PropertyName == nameof(SpcSnapshotPick.IsSelected))
         {
             RecomputeBaselines();
+            AutoSelectJoinMode();
             OnPropertyChanged(nameof(SelectedCount));
             OnPropertyChanged(nameof(CanRunQuery));
             UpdateWarning();
+        }
+    }
+
+    // --- Auto join-mode selection ---
+    // Same-session snapshots are best joined by gobjects_index (In-session): it
+    // tracks each physical object exactly, including transient objects whose
+    // normalised path collides (e.g. every //Engine/Transient/Item folds to the
+    // same Strict key, so Strict collapses 4 distinct items into 1 mismatched
+    // candidate and the predicate fails — the "materials don't show up" bug).
+    // Cross-session snapshots have no stable index, so they fall back to Strict.
+    // The user can still override the combo manually.
+    private bool _joinModeUserOverride;
+    private bool _settingJoinModeProgrammatically;
+
+    partial void OnSelectedJoinModeChanged(string value)
+    {
+        if (!_settingJoinModeProgrammatically) _joinModeUserOverride = true;
+    }
+
+    private void AutoSelectJoinMode()
+    {
+        if (_joinModeUserOverride) return;
+        var ticked = SnapshotPicks.Where(p => p.IsSelected).ToList();
+        if (ticked.Count < 2) return;
+        bool sameSession = ticked.Select(p => p.Meta.GameSessionId).Distinct().Count() == 1;
+        var target = sameSession ? "In-session" : "Strict";
+        if (SelectedJoinMode != target)
+        {
+            _settingJoinModeProgrammatically = true;
+            SelectedJoinMode = target;
+            _settingJoinModeProgrammatically = false;
         }
     }
 
@@ -271,6 +331,12 @@ public partial class SpcQueryViewModel : ViewModelBase
             : "";
     }
 
+    /// <summary>Cancel an in-flight SPC query — called when the user navigates
+    /// away from the SPC tab. The in-memory intersection over ~1.8M rows is the
+    /// heaviest experimental op; left running while another tab loads, it pegs a
+    /// core + allocates GBs (the tab-switch hang the user reported).</summary>
+    public void CancelPendingWork() => _queryCts?.Cancel();
+
     [RelayCommand]
     private async Task RunQueryAsync()
     {
@@ -282,6 +348,12 @@ public partial class SpcQueryViewModel : ViewModelBase
             StatusText = "Select at least two snapshots.";
             return;
         }
+
+        // Cancel a prior in-flight query before starting a new one.
+        _queryCts?.Cancel();
+        _queryCts?.Dispose();
+        var cts = _queryCts = new CancellationTokenSource();
+        var ct = cts.Token;
 
         ClearError();
         IsQuerying = true;
@@ -295,6 +367,9 @@ public partial class SpcQueryViewModel : ViewModelBase
                 JoinMode      = ParseJoinMode(SelectedJoinMode),
                 ClassContains = ClassFilter.Trim(),
                 PropContains  = PropFilter.Trim(),
+                // N1: hand the current denylist to the store so denylisted classes
+                // never enter the candidate dict (cuts memory + match cost both).
+                ExcludedClasses = _excludedClasses.Count > 0 ? _excludedClasses : null,
             };
             for (int i = 0; i < selected.Count; i++)
             {
@@ -308,10 +383,11 @@ public partial class SpcQueryViewModel : ViewModelBase
 
             // Off the UI thread — the N-way self-join over ~1.8M rows would
             // otherwise freeze the window for seconds.
-            var res = await Task.Run(() => _store.SpcQueryAsync(query));
+            var res = await Task.Run(() => _store.SpcQueryAsync(query, ct), ct);
             _allResults.Clear();
             _allResults.AddRange(res.Rows);
             RebuildResultOptions();
+            RebuildNoiseRows(res.TopContributors);
 
             var trunc = res.Truncated ? $" (capped at {query.MaxRows:N0})" : "";
             var spanSessions = selected.Select(p => p.Meta.GameSessionId).Distinct().Count();
@@ -321,6 +397,10 @@ public partial class SpcQueryViewModel : ViewModelBase
                 : $"{res.Rows.Count:N0} match{trunc} across {selected.Count} snapshots{sess} ({SelectedJoinMode}).";
             ApplyResultFilter();
         }
+        catch (OperationCanceledException)
+        {
+            StatusText = "Query cancelled.";
+        }
         catch (Exception ex)
         {
             _log.Error(Constants.LogCatView, "SPC: query failed", ex);
@@ -329,7 +409,14 @@ public partial class SpcQueryViewModel : ViewModelBase
         }
         finally
         {
-            IsQuerying = false;
+            // Clear busy only if THIS run is still current (a newer run may have
+            // superseded us after cancellation).
+            if (ReferenceEquals(_queryCts, cts))
+            {
+                IsQuerying = false;
+                _queryCts.Dispose();
+                _queryCts = null;
+            }
         }
     }
 
@@ -455,4 +542,91 @@ public partial class SpcQueryViewModel : ViewModelBase
         "In-session" => SpcJoinMode.InSession,
         _            => SpcJoinMode.Strict,
     };
+
+    // --- N1: noise picker helpers ---
+
+    /// <summary>Rebuild the noise rows from a fresh result's Top-N contributors.
+    /// All rows start unchecked — the user opts in by ticking + Apply.</summary>
+    private void RebuildNoiseRows(IReadOnlyList<ClassNoiseRow> top)
+    {
+        NoiseRows.Clear();
+        foreach (var c in top)
+        {
+            NoiseRows.Add(new NoiseRowVm
+            {
+                ClassName        = c.ClassName,
+                HitCount         = c.HitCount,
+                SamplePropsDisplay = c.SamplePropsDisplay,
+            });
+        }
+    }
+
+    /// <summary>Commit the ticked noise rows into the per-game denylist, persist,
+    /// and re-run the SPC query so the user sees the cleaned result immediately.
+    /// Untick all + Apply is the "clear" path.</summary>
+    [RelayCommand]
+    private async Task ApplyNoisePicksAsync()
+    {
+        // Build a FRESH set rather than mutating _excludedClasses in place: an
+        // in-flight RunQueryAsync (background thread) may still be iterating the
+        // captured reference via deny.Contains(), and HashSet is not safe for
+        // concurrent read+write. Persist + reload then swaps _excludedClasses to a
+        // new instance, leaving the running query's copy untouched. (Additive —
+        // Apply never removes a previously-denied class; that's RemoveFromDenylist.)
+        var updated = new HashSet<string>(_excludedClasses, StringComparer.Ordinal);
+        bool changed = false;
+        foreach (var row in NoiseRows)
+            if (row.Picked && updated.Add(row.ClassName)) changed = true;
+        if (!changed)
+        {
+            StatusText = "No noise classes picked — tick one or more rows first.";
+            return;
+        }
+        _store.SetClassDenylist(DenylistScope.Spc, updated);
+        LoadDenylistFromStore();   // reassigns _excludedClasses to a fresh instance
+        await RunQueryAsync();
+    }
+
+    /// <summary>Untick all noise-picker rows (without touching the persisted
+    /// denylist). Distinct from Clear all, which empties the denylist.</summary>
+    [RelayCommand]
+    private void ResetNoisePicks()
+    {
+        foreach (var row in NoiseRows) row.Picked = false;
+    }
+
+    /// <summary>Remove one class from the per-game denylist (used by the active-
+    /// denylist chips). Re-runs the query so the user sees the un-cleaned result
+    /// immediately.</summary>
+    [RelayCommand]
+    private async Task RemoveFromDenylistAsync(string? className)
+    {
+        if (string.IsNullOrEmpty(className) || !_excludedClasses.Contains(className)) return;
+        var updated = new HashSet<string>(_excludedClasses, StringComparer.Ordinal);
+        updated.Remove(className);
+        _store.SetClassDenylist(DenylistScope.Spc, updated);
+        LoadDenylistFromStore();
+        await RunQueryAsync();
+    }
+
+    /// <summary>Drop every class from the denylist + re-run.</summary>
+    [RelayCommand]
+    private async Task ClearDenylistAsync()
+    {
+        if (_excludedClasses.Count == 0) return;
+        _store.SetClassDenylist(DenylistScope.Spc, new HashSet<string>(StringComparer.Ordinal));
+        LoadDenylistFromStore();
+        await RunQueryAsync();
+    }
+}
+
+/// <summary>One Top-N noise picker row in the SPC / Diff side panel. The
+/// <see cref="Picked"/> flag is the user's tick; Apply collects them into the
+/// per-game denylist.</summary>
+public partial class NoiseRowVm : ObservableObject
+{
+    [ObservableProperty] private bool _picked;
+    public string ClassName          { get; set; } = "";
+    public int    HitCount           { get; set; }
+    public string SamplePropsDisplay { get; set; } = "";
 }

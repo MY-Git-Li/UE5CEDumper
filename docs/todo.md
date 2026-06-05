@@ -78,7 +78,8 @@ join, array inner-key handling, the Q#4 key-field improvement).
 > **Remaining experimental:** C2 (find-by-value locator → pivot handoff); A3c (CE .CT
 > freeze-export from a diff/SPC/pivot hit — Copy Address covers the manual path);
 > heavier C3 scorer; *optional* `discrete`-style gzip blob storage for even smaller
-> DB. See the Phase C block + design §"Phase C"/§6.
+> DB. ~~**N1 per-game class denylist**~~ ✅ **SHIPPED (build 908).** See the Phase C
+> block + design §"Phase C"/§6.
 
 Locked decisions: SQLite (raw ADO.NET, no EF Core) · all three features ·
 persisted gating · **multi-session first-class** for SPC/Pivot · type-agnostic
@@ -162,6 +163,38 @@ Build in order; each phase gates the next:
     Store: `ListPivotArrayClasses/Fields/Props` + `PivotArrayAsync` (maps each
     (owner, element) to a synthetic instance keyed by inner_key_value → reuses
     `PivotEngine.Build` in Identity mode, zero new engine). +6 store + 1 VM test.
+- ~~**N1 — Per-game class denylist (Top-N noise picker).** *Effort M · low risk.*~~ ✅
+  **SHIPPED 2026-06-05 (build 908).** Per-game denylist persisted next to the DB
+  (`snapshots.<pe_hash>.denylist.json`), applied at the anchor-load step of SPC +
+  Diff (so denied classes never enter the candidate dict — saves memory AND
+  result-cap budget), and removes denied classes from the Class Pivot picker.
+  Top-N (max 50) contributor picker on SPC + Diff result tabs; each row =
+  checkbox + class FQN + hit count + 3 sample prop names. "Apply &amp; re-run"
+  command pushes ticks into the denylist and re-runs the query; chips below
+  show active denylist with one-click remove + "Clear all". +6 tests
+  (Diff/SPC filter, Top-N ranking, per-game persistence round-trip, no-active-
+  game safety, pe_hash filename sanitisation). All 1247 C# + 393 dll + 31 utf8
+  tests green; AOT publish clean.
+  - **Decision deviations from the original spec**: persistence landed
+    *next to the per-game DB* (`snapshots.<pe_hash>.denylist.json`) instead of
+    inside `experimental.json` — auto-follows the game, survives FIFO eviction,
+    no key-by-pe_hash dict needed. Pivot got NO Top-N picker (it's per-class —
+    no "Top contributor" makes sense from a single class).
+  - **Per-tab isolation (build 910, supersedes the original "shared denylist").**
+    Live-test feedback: each tab keeps its OWN list (`DenylistScope` Diff/Spc/Pivot
+    in one JSON file). SPC + Diff populate theirs via the Top-N picker; Pivot via a
+    right-click "Hide this class" on the class picker (+ hidden-class chips). Same
+    build also added: op-time input grayout (all 3 tabs), heavy-query **cancellation**
+    (cancel-on-tab-switch + on-close + explicit ct checks inside the SQLite read
+    loops, since `ReadAsync(ct)` ignores the token) fixing the tab-switch UI hang,
+    "Reset ticks" on the pickers, and a collapsible (Expander) capture+compare layout
+    with a GridSplitter so the diff grid can grow.
+  - **v2 nuance to leave room for**: per-`(class, prop)` granularity. Some
+    classes (`ACharacter`, `APawn`) carry both gameplay-relevant fields
+    (`Health`) and noise (`Velocity`, `LastRenderTime`). v1 by-class catches
+    the widget/anim/component bulk; v2 would chevron-expand each Top-N row to
+    its Top-K noisiest props for finer deny. Defer until v1 proves the bulk
+    case is solved.
 
 New work concentrates in A1 (DLL capture, mostly reuse) + C3 (UE-ify scorer);
 B/C are largely portable `discrete` C# + indexed SQL.

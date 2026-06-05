@@ -5,40 +5,45 @@
              x:Class="UE5DumpUI.Views.SnapshotPanel"
              x:DataType="vm:SnapshotViewModel">
 
-  <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,Auto,150,Auto,Auto,*">
+  <!-- Rows: intro / capture(collapsible) / usage / saved-header / saved-grid(2*) /
+       splitter / compare+diff block(5*) / noise. The two star rows + splitter let
+       the user trade space between the snapshot list and the diff result. -->
+  <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,Auto,2*,Auto,5*,Auto">
 
     <!-- Intro -->
     <TextBlock Grid.Row="0" Text="{StaticResource str.Snapshot.Intro}"
                Foreground="#999" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"/>
 
-    <!-- Capture controls -->
-    <Border Grid.Row="1" Background="#252526" CornerRadius="4" Padding="12" Margin="0,0,0,10"
-            BorderBrush="#3C3C3C" BorderThickness="1">
-      <StackPanel Spacing="8">
-        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-          <TextBlock Text="{StaticResource str.Snapshot.Scope}" Foreground="#CCCCCC" VerticalAlignment="Center"/>
+    <!-- Capture controls (collapsible; force-expanded while capturing) -->
+    <Expander Grid.Row="1" Header="{StaticResource str.Snapshot.CaptureHeader}"
+              IsExpanded="{Binding CaptureSectionOpen}" Margin="0,0,0,10"
+              Background="#252526" BorderBrush="#3C3C3C" BorderThickness="1">
+      <StackPanel Spacing="8" Margin="6">
+        <!-- Single wrap row: Scope / GameOnly / Quota / Label / Capture / Cancel.
+             Flows onto a second line on narrow windows but keeps everything on one
+             line when there's room (denser than the old two-row layout). -->
+        <WrapPanel Orientation="Horizontal">
+          <TextBlock Text="{StaticResource str.Snapshot.Scope}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,6,0"/>
           <ComboBox ItemsSource="{Binding ScopeOptions}" SelectedItem="{Binding SelectedScope}" MinWidth="150"
-                    IsEnabled="{Binding CanEditSettings}"/>
+                    IsEnabled="{Binding CanEditSettings}" Margin="0,0,12,0"/>
           <CheckBox Content="{StaticResource str.Snapshot.GameOnly}" IsChecked="{Binding GameOnly}" Foreground="#CCCCCC"
-                    IsEnabled="{Binding CanEditSettings}"/>
+                    IsEnabled="{Binding CanEditSettings}" VerticalAlignment="Center" Margin="0,0,12,0"/>
           <TextBlock Text="{StaticResource str.Snapshot.Quota}" Foreground="#CCCCCC"
-                     VerticalAlignment="Center" Margin="12,0,0,0"/>
+                     VerticalAlignment="Center" Margin="0,0,6,0"/>
           <ComboBox ItemsSource="{Binding QuotaOptions}" SelectedItem="{Binding SelectedQuotaLabel}"
-                    MinWidth="110" ToolTip.Tip="{StaticResource str.Snapshot.QuotaHint}"
-                    IsEnabled="{Binding CanEditSettings}"/>
-        </StackPanel>
-        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-          <TextBlock Text="{StaticResource str.Snapshot.Label}" Foreground="#CCCCCC" VerticalAlignment="Center"/>
-          <TextBox Text="{Binding Label}" PlaceholderText="{StaticResource str.Snapshot.LabelWatermark}" Width="340"
-                   IsEnabled="{Binding CanEditSettings}"/>
+                    MinWidth="100" ToolTip.Tip="{StaticResource str.Snapshot.QuotaHint}"
+                    IsEnabled="{Binding CanEditSettings}" Margin="0,0,12,0"/>
+          <TextBlock Text="{StaticResource str.Snapshot.Label}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,6,0"/>
+          <TextBox Text="{Binding Label}" PlaceholderText="{StaticResource str.Snapshot.LabelWatermark}" Width="220"
+                   IsEnabled="{Binding CanEditSettings}" Margin="0,0,12,0"/>
           <Button Content="{StaticResource str.Snapshot.Capture}" Command="{Binding CaptureCommand}"
                   IsEnabled="{Binding CanCapture}" IsVisible="{Binding !IsCapturing}"
-                  Classes="accent" Padding="12,5" FontWeight="Bold"/>
+                  Classes="accent" Padding="12,5" FontWeight="Bold" Margin="0,0,8,0"/>
           <Button Content="{StaticResource str.Snapshot.Cancel}" Command="{Binding CancelCommand}"
-                  IsVisible="{Binding IsCapturing}" Padding="12,5"/>
-          <ProgressBar Value="{Binding Progress}" Minimum="0" Maximum="1" Width="220" Height="6"
+                  IsVisible="{Binding IsCapturing}" Padding="12,5" Margin="0,0,8,0"/>
+          <ProgressBar Value="{Binding Progress}" Minimum="0" Maximum="1" Width="200" Height="6"
                        IsVisible="{Binding IsCapturing}" VerticalAlignment="Center"/>
-        </StackPanel>
+        </WrapPanel>
         <TextBlock Text="{StaticResource str.Snapshot.NotConnected}" Foreground="#888" FontSize="11"
                    IsVisible="{Binding !CanCapture}"/>
         <TextBlock Text="{Binding StatusText}" Foreground="#4EC9B0" FontSize="12" TextWrapping="Wrap"
@@ -46,7 +51,7 @@
         <TextBlock Text="{Binding ErrorMessage}" Foreground="#F44747" FontSize="12" TextWrapping="Wrap"
                    IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
       </StackPanel>
-    </Border>
+    </Expander>
 
     <!-- Usage / quota -->
     <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="10" Margin="0,0,0,8" VerticalAlignment="Center">
@@ -65,7 +70,8 @@
                  FontWeight="SemiBold" VerticalAlignment="Center"/>
       <Button Content="{StaticResource str.Snapshot.Refresh}" Command="{Binding RefreshCommand}" Padding="8,3"/>
       <Button Content="{StaticResource str.Snapshot.Delete}" Command="{Binding DeleteCommand}"
-              CommandParameter="{Binding SelectedSnapshot}" Padding="8,3"/>
+              CommandParameter="{Binding SelectedSnapshot}" Padding="8,3"
+              IsEnabled="{Binding !IsDeleting}"/>
       <Button Content="{StaticResource str.Snapshot.OpenDbFolder}" Command="{Binding OpenDbFolderCommand}"
               Padding="8,3" ToolTip.Tip="{StaticResource str.Snapshot.OpenDbFolderTip}"/>
     </StackPanel>
@@ -85,28 +91,35 @@
       </DataGrid.Columns>
     </DataGrid>
 
-    <!-- Diff controls -->
-    <Border Grid.Row="5" Background="#252526" CornerRadius="4" Padding="12,8" Margin="0,10,0,8"
-            BorderBrush="#3C3C3C" BorderThickness="1">
-      <StackPanel Spacing="8">
+    <!-- Drag to trade vertical space between the snapshot list and the diff. -->
+    <GridSplitter Grid.Row="5" Height="5" HorizontalAlignment="Stretch"
+                  ResizeDirection="Rows" Background="#3C3C3C" Margin="0,4,0,4"/>
+
+    <!-- Compare (collapsible) + diff results share the lower star row: collapsing
+         the compare Expander hands its space to the diff grid below it. -->
+    <DockPanel Grid.Row="6">
+      <Expander DockPanel.Dock="Top" Header="{StaticResource str.Snapshot.CompareHeader}"
+                IsExpanded="{Binding CompareSectionOpen}" Margin="0,0,0,8"
+                Background="#252526" BorderBrush="#3C3C3C" BorderThickness="1">
+      <StackPanel Spacing="8" Margin="6">
         <WrapPanel Orientation="Horizontal">
-          <TextBlock Text="{StaticResource str.Snapshot.Diff.Header}" Foreground="#9CDCFE"
-                     FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,0"/>
           <TextBlock Text="{StaticResource str.Snapshot.Diff.Old}" Foreground="#CCCCCC"
                      VerticalAlignment="Center" Margin="0,0,4,0"/>
-          <ComboBox ItemsSource="{Binding Snapshots}" SelectedItem="{Binding DiffA}" MinWidth="170" Margin="0,0,8,0">
+          <ComboBox ItemsSource="{Binding Snapshots}" SelectedItem="{Binding DiffA}" MinWidth="170" Margin="0,0,8,0"
+                    IsEnabled="{Binding !IsDiffing}">
             <ComboBox.ItemTemplate>
               <DataTemplate x:DataType="m:SnapshotMeta">
-                <TextBlock Text="{Binding Label}"/>
+                <TextBlock Text="{Binding PickerDisplay}"/>
               </DataTemplate>
             </ComboBox.ItemTemplate>
           </ComboBox>
           <TextBlock Text="{StaticResource str.Snapshot.Diff.New}" Foreground="#CCCCCC"
                      VerticalAlignment="Center" Margin="0,0,4,0"/>
-          <ComboBox ItemsSource="{Binding Snapshots}" SelectedItem="{Binding DiffB}" MinWidth="170" Margin="0,0,8,0">
+          <ComboBox ItemsSource="{Binding Snapshots}" SelectedItem="{Binding DiffB}" MinWidth="170" Margin="0,0,8,0"
+                    IsEnabled="{Binding !IsDiffing}">
             <ComboBox.ItemTemplate>
               <DataTemplate x:DataType="m:SnapshotMeta">
-                <TextBlock Text="{Binding Label}"/>
+                <TextBlock Text="{Binding PickerDisplay}"/>
               </DataTemplate>
             </ComboBox.ItemTemplate>
           </ComboBox>
@@ -118,7 +131,7 @@
           <Button Content="{StaticResource str.Snapshot.Diff.CopyAddr}" Command="{Binding CopyDiffAddressCommand}"
                   CommandParameter="{Binding SelectedDiffRow}" Padding="8,4"/>
         </WrapPanel>
-        <WrapPanel Orientation="Horizontal">
+        <WrapPanel Orientation="Horizontal" IsEnabled="{Binding !IsDiffing}">
           <TextBlock Text="{StaticResource str.Snapshot.Diff.ClassFilter}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
           <AutoCompleteBox Text="{Binding DiffClassFilter, Mode=TwoWay}" ItemsSource="{Binding DiffClassOptions}"
                            FilterMode="Contains" Width="140" Margin="0,0,8,0"/>
@@ -132,38 +145,100 @@
           <ComboBox ItemsSource="{Binding DiffDirectionOptions}" SelectedItem="{Binding SelectedDiffDirection}" MinWidth="120" Margin="0,0,8,0"/>
         </WrapPanel>
         <WrapPanel Orientation="Horizontal">
-          <TextBlock Text="{StaticResource str.Snapshot.Diff.Global}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
-          <TextBox Text="{Binding DiffGlobalFilter}" Width="180" Margin="0,0,12,0"
-                   PlaceholderText="{StaticResource str.Snapshot.Diff.GlobalHint}"/>
-          <TextBlock Text="{StaticResource str.Snapshot.Diff.OldRange}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
-          <TextBox Text="{Binding DiffOldMin}" Width="70" Margin="0,0,2,0" PlaceholderText="min"/>
-          <TextBlock Text="–" Foreground="#888" VerticalAlignment="Center" Margin="0,0,2,0"/>
-          <TextBox Text="{Binding DiffOldMax}" Width="70" Margin="0,0,12,0" PlaceholderText="max"/>
-          <TextBlock Text="{StaticResource str.Snapshot.Diff.NewRange}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
-          <TextBox Text="{Binding DiffNewMin}" Width="70" Margin="0,0,2,0" PlaceholderText="min"/>
-          <TextBlock Text="–" Foreground="#888" VerticalAlignment="Center" Margin="0,0,2,0"/>
-          <TextBox Text="{Binding DiffNewMax}" Width="70" Margin="0,0,8,0" PlaceholderText="max"/>
-          <Button Content="{StaticResource str.Snapshot.Diff.ApplyRange}" Command="{Binding ApplyDiffRangeCommand}" Padding="8,3" Margin="0,0,4,0"/>
-          <Button Content="{StaticResource str.Snapshot.Diff.ResetRange}" Command="{Binding ResetDiffRangeCommand}" Padding="8,3" Margin="0,0,8,0"/>
+          <!-- Inputs grayed during a diff; progress + status stay live. -->
+          <WrapPanel Orientation="Horizontal" IsEnabled="{Binding !IsDiffing}">
+            <TextBlock Text="{StaticResource str.Snapshot.Diff.Global}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+            <TextBox Text="{Binding DiffGlobalFilter}" Width="180" Margin="0,0,12,0"
+                     PlaceholderText="{StaticResource str.Snapshot.Diff.GlobalHint}"/>
+            <TextBlock Text="{StaticResource str.Snapshot.Diff.OldRange}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+            <TextBox Text="{Binding DiffOldMin}" Width="70" Margin="0,0,2,0" PlaceholderText="min"/>
+            <TextBlock Text="–" Foreground="#888" VerticalAlignment="Center" Margin="0,0,2,0"/>
+            <TextBox Text="{Binding DiffOldMax}" Width="70" Margin="0,0,12,0" PlaceholderText="max"/>
+            <TextBlock Text="{StaticResource str.Snapshot.Diff.NewRange}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+            <TextBox Text="{Binding DiffNewMin}" Width="70" Margin="0,0,2,0" PlaceholderText="min"/>
+            <TextBlock Text="–" Foreground="#888" VerticalAlignment="Center" Margin="0,0,2,0"/>
+            <TextBox Text="{Binding DiffNewMax}" Width="70" Margin="0,0,8,0" PlaceholderText="max"/>
+            <Button Content="{StaticResource str.Snapshot.Diff.ApplyRange}" Command="{Binding ApplyDiffRangeCommand}" Padding="8,3" Margin="0,0,4,0"/>
+            <Button Content="{StaticResource str.Snapshot.Diff.ResetRange}" Command="{Binding ResetDiffRangeCommand}" Padding="8,3" Margin="0,0,8,0"/>
+          </WrapPanel>
           <ProgressBar IsIndeterminate="True" Width="120" Height="4" VerticalAlignment="Center" Margin="0,0,8,0"
                        IsVisible="{Binding IsDiffing}"/>
           <TextBlock Text="{Binding DiffStatusText}" Foreground="#4EC9B0" FontSize="12" VerticalAlignment="Center"/>
         </WrapPanel>
       </StackPanel>
-    </Border>
+      </Expander>
 
-    <!-- Diff results -->
-    <DataGrid Grid.Row="7" ItemsSource="{Binding DiffRows}" SelectedItem="{Binding SelectedDiffRow}"
-              IsReadOnly="True" GridLinesVisibility="Horizontal" Background="#1E1E1E"
-              CanUserResizeColumns="True" CanUserSortColumns="True">
-      <DataGrid.Columns>
-        <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Change}" Binding="{Binding DirectionGlyph}" Width="40"/>
-        <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Class}"  Binding="{Binding ClassName}"      Width="200"/>
-        <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Object}" Binding="{Binding NormPath}"       Width="*"/>
-        <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Field}"  Binding="{Binding PropName}"       Width="160"/>
-        <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Old}"    Binding="{Binding OldValue}"       Width="120"/>
-        <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.New}"    Binding="{Binding NewValue}"       Width="120"/>
-      </DataGrid.Columns>
-    </DataGrid>
+      <!-- Diff results — fills the rest of the lower star row below the compare Expander -->
+      <DataGrid ItemsSource="{Binding DiffRows}" SelectedItem="{Binding SelectedDiffRow}"
+                IsReadOnly="True" GridLinesVisibility="Horizontal" Background="#1E1E1E"
+                CanUserResizeColumns="True" CanUserSortColumns="True">
+        <DataGrid.Columns>
+          <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Change}" Binding="{Binding DirectionGlyph}" Width="40"/>
+          <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Class}"  Binding="{Binding ClassName}"      Width="200"/>
+          <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Object}" Binding="{Binding NormPath}"       Width="*"/>
+          <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Field}"  Binding="{Binding PropName}"       Width="160"/>
+          <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Old}"    Binding="{Binding OldValue}"       Width="120"/>
+          <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.New}"    Binding="{Binding NewValue}"       Width="120"/>
+        </DataGrid.Columns>
+      </DataGrid>
+    </DockPanel>
+
+    <!-- N1: noise picker for the diff. Same shape as the SPC tab — Apply pushes
+         ticked classes into the Diff-scope denylist and re-runs the diff. -->
+    <Expander Grid.Row="7" Header="{StaticResource str.Noise.PanelHeader}"
+              IsExpanded="{Binding NoisePanelOpen}" Margin="0,8,0,0"
+              Background="#252526" BorderBrush="#3C3C3C" BorderThickness="1">
+      <StackPanel Orientation="Vertical" Margin="6">
+        <TextBlock Text="{StaticResource str.Noise.PanelHint}"
+                   Foreground="#888" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"/>
+        <DataGrid ItemsSource="{Binding NoiseRows}" IsReadOnly="False"
+                  Height="200" GridLinesVisibility="Horizontal" Background="#1E1E1E"
+                  CanUserResizeColumns="True" CanUserSortColumns="True">
+          <DataGrid.Columns>
+            <DataGridTemplateColumn Header="{StaticResource str.Noise.Col.Pick}" Width="50">
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate x:DataType="vm:NoiseRowVm">
+                  <CheckBox IsChecked="{Binding Picked}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </DataTemplate>
+              </DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
+            <DataGridTextColumn Header="{StaticResource str.Noise.Col.Class}"
+                                Binding="{Binding ClassName}" IsReadOnly="True" Width="*"/>
+            <DataGridTextColumn Header="{StaticResource str.Noise.Col.Hits}"
+                                Binding="{Binding HitCount}" IsReadOnly="True" Width="80"/>
+            <DataGridTextColumn Header="{StaticResource str.Noise.Col.SampleProps}"
+                                Binding="{Binding SamplePropsDisplay}" IsReadOnly="True" Width="240"/>
+          </DataGrid.Columns>
+        </DataGrid>
+        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+          <Button Content="{StaticResource str.Noise.Apply}"
+                  Command="{Binding ApplyNoisePicksCommand}"
+                  Classes="accent" Padding="12,4" Margin="0,0,6,0"/>
+          <Button Content="{StaticResource str.Noise.Reset}"
+                  Command="{Binding ResetNoisePicksCommand}" Padding="8,4" Margin="0,0,12,0"/>
+          <TextBlock Text="{StaticResource str.Noise.ActiveHeader}"
+                     Foreground="#9CDCFE" VerticalAlignment="Center" Margin="0,0,6,0"/>
+          <Button Content="{StaticResource str.Noise.Clear}"
+                  Command="{Binding ClearDenylistCommand}" Padding="8,3" Margin="0,0,6,0"/>
+        </StackPanel>
+        <ItemsControl ItemsSource="{Binding ActiveDenylist}" Margin="0,4,0,0">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <WrapPanel Orientation="Horizontal"/>
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="x:String">
+              <Button Content="{Binding}"
+                      Command="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).RemoveFromDenylistCommand}"
+                      CommandParameter="{Binding}"
+                      ToolTip.Tip="{StaticResource str.Noise.RemoveTip}"
+                      Margin="0,0,4,4" Padding="6,2"
+                      Background="#3C3C3C" Foreground="#CCCCCC"/>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </Expander>
   </Grid>
 </UserControl>

@@ -5,16 +5,17 @@
              x:Class="UE5DumpUI.Views.ClassPivotPanel"
              x:DataType="vm:ClassPivotViewModel">
 
-  <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,170,Auto,*">
+  <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,170,Auto,*,Auto">
 
     <!-- Intro -->
     <TextBlock Grid.Row="0" Text="{StaticResource str.Pivot.Intro}"
                Foreground="#999" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"/>
 
-    <!-- Snapshot / class selection -->
+    <!-- Snapshot / class selection. Grayed during a pivot run so the source /
+         snapshot / class can't change mid-operation. -->
     <Border Grid.Row="1" Background="#252526" CornerRadius="4" Padding="12,8" Margin="0,0,0,8"
             BorderBrush="#3C3C3C" BorderThickness="1">
-      <WrapPanel Orientation="Horizontal">
+      <WrapPanel Orientation="Horizontal" IsEnabled="{Binding !IsBusy}">
         <TextBlock Text="{StaticResource str.Pivot.Source}" Foreground="#CCCCCC"
                    VerticalAlignment="Center" Margin="0,0,4,0"/>
         <ComboBox ItemsSource="{Binding SourceOptions}" SelectedItem="{Binding SelectedSource}"
@@ -27,7 +28,7 @@
                   MinWidth="180" Margin="0,0,12,0" IsVisible="{Binding UsesSnapshot}">
           <ComboBox.ItemTemplate>
             <DataTemplate x:DataType="m:SnapshotMeta">
-              <TextBlock Text="{Binding Label}"/>
+              <TextBlock Text="{Binding PickerDisplay}"/>
             </DataTemplate>
           </ComboBox.ItemTemplate>
         </ComboBox>
@@ -36,6 +37,16 @@
         <TextBox Text="{Binding ClassFilter}" Width="130" Margin="0,0,8,0" IsVisible="{Binding UsesSnapshot}"/>
         <ComboBox ItemsSource="{Binding Classes}" SelectedItem="{Binding SelectedClass}"
                   MinWidth="260" Margin="0,0,12,0" IsVisible="{Binding UsesSnapshot}">
+          <!-- N1: right-click the class picker → hide the selected class from the
+               Pivot picker (independent Pivot-scope denylist). The ContextMenu
+               inherits the ComboBox's VM DataContext, so the command binds cleanly. -->
+          <ComboBox.ContextMenu>
+            <ContextMenu>
+              <MenuItem Header="{StaticResource str.Pivot.HideClass}"
+                        Command="{Binding HideClassCommand}"
+                        CommandParameter="{Binding SelectedClass}"/>
+            </ContextMenu>
+          </ComboBox.ContextMenu>
           <ComboBox.ItemTemplate>
             <DataTemplate x:DataType="m:PivotClassInfo">
               <TextBlock Text="{Binding Display}"/>
@@ -83,11 +94,11 @@
       <TextBlock Text="{StaticResource str.Pivot.GroupBy}" Foreground="#CCCCCC" VerticalAlignment="Center"
                  IsVisible="{Binding IsSnapshotSource}"/>
       <ComboBox ItemsSource="{Binding KeyModeOptions}" SelectedItem="{Binding SelectedKeyMode}" MinWidth="170"
-                IsVisible="{Binding IsSnapshotSource}"/>
+                IsVisible="{Binding IsSnapshotSource}" IsEnabled="{Binding !IsBusy}"/>
       <TextBlock Text="{StaticResource str.Pivot.KeyField}" Foreground="#CCCCCC"
                  VerticalAlignment="Center" Margin="12,0,0,0" IsVisible="{Binding ShowKeyField}"/>
       <ComboBox ItemsSource="{Binding KeyFieldOptions}" SelectedItem="{Binding SelectedKeyField}"
-                MinWidth="200" IsVisible="{Binding ShowKeyField}"/>
+                MinWidth="200" IsVisible="{Binding ShowKeyField}" IsEnabled="{Binding !IsBusy}"/>
       <TextBlock Text="{StaticResource str.Pivot.KeyRowName}" Foreground="#CCCCCC"
                  VerticalAlignment="Center" IsVisible="{Binding IsDataTableSource}"/>
       <TextBlock Text="{StaticResource str.Pivot.KeyInnerKey}" Foreground="#CCCCCC"
@@ -106,10 +117,16 @@
          which fields make good group keys; the best is pre-selected above. -->
     <DataGrid Grid.Row="3" ItemsSource="{Binding Fields}" IsReadOnly="False"
               GridLinesVisibility="Horizontal" Background="#1E1E1E"
+              IsEnabled="{Binding !IsBusy}"
               CanUserResizeColumns="True" CanUserSortColumns="True">
       <DataGrid.Columns>
-        <DataGridCheckBoxColumn Header="{StaticResource str.Pivot.Col.Project}"
-                                Binding="{Binding IsValue}" Width="60"/>
+        <DataGridTemplateColumn Header="{StaticResource str.Pivot.Col.Project}" Width="60">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="vm:PivotFieldPick">
+              <CheckBox IsChecked="{Binding IsValue}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
         <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Field}"    Binding="{Binding Name}"            IsReadOnly="True" Width="*"/>
         <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Type}"     Binding="{Binding DeclaredType}"    IsReadOnly="True" Width="130"/>
         <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Distinct}" Binding="{Binding DistinctCount}"   IsReadOnly="True" Width="80"/>
@@ -131,5 +148,37 @@
         <DataGridTextColumn Header="{StaticResource str.Pivot.Res.Values}" Binding="{Binding ValuesDisplay}" Width="2*"/>
       </DataGrid.Columns>
     </DataGrid>
+
+    <!-- N1: hidden-class chips (Pivot-scope denylist). Only shown when non-empty.
+         Click a chip to un-hide; "Clear all" empties the Pivot denylist. -->
+    <Border Grid.Row="6" Background="#252526" CornerRadius="4" Padding="8,6" Margin="0,8,0,0"
+            BorderBrush="#3C3C3C" BorderThickness="1"
+            IsVisible="{Binding HasHiddenClasses}">
+      <StackPanel Orientation="Vertical">
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+          <TextBlock Text="{StaticResource str.Pivot.HiddenHeader}"
+                     Foreground="#9CDCFE" VerticalAlignment="Center" Margin="0,0,8,0"/>
+          <Button Content="{StaticResource str.Noise.Clear}"
+                  Command="{Binding ClearDenylistCommand}" Padding="8,2"/>
+        </StackPanel>
+        <ItemsControl ItemsSource="{Binding ActiveDenylist}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <WrapPanel Orientation="Horizontal"/>
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="x:String">
+              <Button Content="{Binding}"
+                      Command="{Binding $parent[UserControl].((vm:ClassPivotViewModel)DataContext).RemoveFromDenylistCommand}"
+                      CommandParameter="{Binding}"
+                      ToolTip.Tip="{StaticResource str.Noise.RemoveTip}"
+                      Margin="0,0,4,4" Padding="6,2"
+                      Background="#3C3C3C" Foreground="#CCCCCC"/>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </Border>
   </Grid>
 </UserControl>

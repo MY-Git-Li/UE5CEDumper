@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using System.Text;
 using Microsoft.Data.Sqlite;
 using UE5DumpUI.Core;
@@ -442,11 +443,15 @@ public sealed class SnapshotStore : ISnapshotStore
     public async Task<SnapshotDiffResult> DiffSnapshotsAsync(
         long idA, long idB, SnapshotDiffFilter filter, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();   // bail before opening a connection
         var result = new SnapshotDiffResult();
         int max = filter.MaxRows > 0 ? filter.MaxRows : 50000;
 
         string classContains = filter.ClassContains ?? "";
         string propContains  = filter.PropContains ?? "";
+        // N1: per-game class denylist. Filter both A-load and B-stream so the
+        // Added/Removed churn counts also reflect only non-denylisted classes.
+        var deny = filter.ExcludedClasses is { Count: > 0 } ? filter.ExcludedClasses : null;
 
         await using var conn = await OpenAsync(ct);
 
@@ -471,9 +476,14 @@ public sealed class SnapshotStore : ISnapshotStore
                               "FROM fields WHERE snapshot_id=$id AND array_field IS NULL;";
             cmd.Parameters.AddWithValue("$id", idA);
             await using var r = await cmd.ExecuteReaderAsync(ct);
+            int rowCount = 0;
             while (await r.ReadAsync(ct))
             {
-                var key = (Intern(r.IsDBNull(0) ? "" : r.GetString(0)),
+                // ReadAsync ignores ct under Microsoft.Data.Sqlite — explicit check.
+                if ((++rowCount & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
+                string aCls = r.IsDBNull(0) ? "" : r.GetString(0);
+                if (deny != null && deny.Contains(aCls)) continue;
+                var key = (Intern(aCls),
                            r.IsDBNull(1) ? -1L : r.GetInt64(1),
                            Intern(r.IsDBNull(2) ? "" : r.GetString(2)));
                 aMap[key] = (r.IsDBNull(3) ? "" : r.GetString(3),
@@ -484,6 +494,9 @@ public sealed class SnapshotStore : ISnapshotStore
         // Snapshot B: stream rows, hash-look-up A. matched = common keys (changed +
         // unchanged); bTotal = all B rows — together they give the Added/Removed churn.
         int matched = 0, bTotal = 0;
+        // N1: Top-N noise picker — accumulate per-class hit count + sample props
+        // over the changed-row set (counts only what the user actually sees).
+        var noise = new NoiseAccumulator();
         await using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText = "SELECT class_fqn, gobjects_index, prop_name, hex, numeric_value, " +
@@ -491,10 +504,13 @@ public sealed class SnapshotStore : ISnapshotStore
                               "FROM fields WHERE snapshot_id=$id AND array_field IS NULL;";
             cmd.Parameters.AddWithValue("$id", idB);
             await using var r = await cmd.ExecuteReaderAsync(ct);
+            int rowCount = 0;
             while (await r.ReadAsync(ct))
             {
-                bTotal++;
+                if ((++rowCount & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
                 string cls  = r.IsDBNull(0) ? "" : r.GetString(0);
+                if (deny != null && deny.Contains(cls)) continue;  // also skip from bTotal so churn is correct
+                bTotal++;
                 long   idx  = r.IsDBNull(1) ? -1L : r.GetInt64(1);
                 string prop = r.IsDBNull(2) ? "" : r.GetString(2);
                 if (!aMap.TryGetValue((Intern(cls), idx, Intern(prop)), out var a)) continue;  // B-only (added)
@@ -517,6 +533,9 @@ public sealed class SnapshotStore : ISnapshotStore
                 if (filter.Direction == SnapshotDiffDirection.Up   && dir != SnapshotDiffDirection.Up)   continue;
                 if (filter.Direction == SnapshotDiffDirection.Down && dir != SnapshotDiffDirection.Down) continue;
 
+                // Count noise even past the row cap so the picker isn't biased
+                // toward whichever class happened to land in the first 50k rows.
+                noise.Bump(cls, prop);
                 if (result.Changed.Count >= max) { result.Truncated = true; continue; }  // keep counting churn
                 string type = r.IsDBNull(8) ? "" : r.GetString(8);
                 result.Changed.Add(new SnapshotDiffRow
@@ -541,6 +560,7 @@ public sealed class SnapshotStore : ISnapshotStore
             result.AddedCount   = bTotal - matched;
             result.RemovedCount = aMap.Count - matched;
         }
+        noise.WriteTo(result.TopContributors);
         return result;
     }
 
@@ -552,12 +572,17 @@ public sealed class SnapshotStore : ISnapshotStore
             throw new ArgumentException("SPC needs at least two snapshots.", nameof(query));
         if (query.Predicates.Count != n)
             throw new ArgumentException("Predicate count must equal snapshot count.", nameof(query));
+        ct.ThrowIfCancellationRequested();   // bail before opening a connection
         int max = query.MaxRows > 0 ? query.MaxRows : 50000;
 
         string classContains = query.ClassContains?.Trim() ?? "";
         string propContains  = query.PropContains?.Trim() ?? "";
         var mode = query.JoinMode;
         var abs  = query.AbsolutePredicates is { Count: > 0 } ? query.AbsolutePredicates : null;
+        // N1: per-game class denylist. Null/empty = no filtering. The set is
+        // captured once here so a concurrent UI-side mutation can't change the
+        // predicate mid-query.
+        var deny = query.ExcludedClasses is { Count: > 0 } ? query.ExcludedClasses : null;
 
         await using var conn = await OpenAsync(ct);
 
@@ -578,9 +603,15 @@ public sealed class SnapshotStore : ISnapshotStore
             cmd.CommandText = SpcRowSql;
             cmd.Parameters.AddWithValue("$id", query.SnapshotIds[0]);
             await using var r = await cmd.ExecuteReaderAsync(ct);
+            int rowCount = 0;
             while (await r.ReadAsync(ct))
             {
+                // Microsoft.Data.Sqlite's ReadAsync runs synchronously and ignores
+                // the token, so the ONLY way to abort a multi-million-row scan is an
+                // explicit periodic check. ~64k-row cadence keeps the overhead nil.
+                if ((++rowCount & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
                 string cls  = r.IsDBNull(0) ? "" : r.GetString(0);
+                if (deny != null && deny.Contains(cls)) continue;
                 string prop = r.IsDBNull(4) ? "" : r.GetString(4);
                 if (classContains.Length > 0 && cls.IndexOf(classContains, StringComparison.OrdinalIgnoreCase) < 0) continue;
                 if (propContains.Length  > 0 && prop.IndexOf(propContains,  StringComparison.OrdinalIgnoreCase) < 0) continue;
@@ -602,9 +633,12 @@ public sealed class SnapshotStore : ISnapshotStore
                 cmd.CommandText = SpcRowSql;
                 cmd.Parameters.AddWithValue("$id", query.SnapshotIds[i]);
                 await using var r = await cmd.ExecuteReaderAsync(ct);
+                int rowCount = 0;
                 while (await r.ReadAsync(ct))
                 {
+                    if ((++rowCount & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
                     string cls  = r.IsDBNull(0) ? "" : r.GetString(0);
+                    if (deny != null && deny.Contains(cls)) continue;
                     string prop = r.IsDBNull(4) ? "" : r.GetString(4);
                     string key = SpcKey(mode, r, cls, prop);
                     if (!cands.TryGetValue(key, out var c) || c.Seen) continue;
@@ -621,6 +655,7 @@ public sealed class SnapshotStore : ISnapshotStore
                 }
             }
             // Intersection: drop candidates absent from this snapshot.
+            ct.ThrowIfCancellationRequested();
             List<string>? drop = null;
             foreach (var kv in cands)
                 if (!kv.Value.Seen) (drop ??= new()).Add(kv.Key);
@@ -628,11 +663,17 @@ public sealed class SnapshotStore : ISnapshotStore
         }
 
         // Evaluate the directional chain + absolute predicates; build result rows.
+        // Accumulate per-class hit count + per-(class, prop) sub-count to drive the
+        // post-query Top-N noise picker (N1).
+        var noise = new NoiseAccumulator();
+        int evalCount = 0;
         foreach (var c in cands.Values)
         {
+            if ((++evalCount & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
             if (c.Hex.Count != n) continue;
             if (!SpcEngine.Matches(c.Hex, c.Num, query.Predicates, abs)) continue;
-            if (result.Rows.Count >= max) { result.Truncated = true; break; }
+            noise.Bump(c.ClassName, c.PropName);  // counted even when row cap is hit
+            if (result.Rows.Count >= max) { result.Truncated = true; continue; }
             var row = new SpcResultRow
             {
                 ClassName = c.ClassName, NormPath = c.NormPath, PropName = c.PropName,
@@ -641,6 +682,7 @@ public sealed class SnapshotStore : ISnapshotStore
             for (int i = 0; i < n; i++) row.Values.Add(SnapshotNumeric.Render(c.DeclaredType, c.Hex[i]));
             result.Rows.Add(row);
         }
+        noise.WriteTo(result.TopContributors);
         return result;
     }
 
@@ -671,6 +713,7 @@ public sealed class SnapshotStore : ISnapshotStore
     public async Task<IReadOnlyList<PivotClassInfo>> ListPivotClassesAsync(
         long snapshotId, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();   // bail before a queued heavy GROUP BY runs
         var list = new List<PivotClassInfo>();
         await using var conn = await OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
@@ -693,6 +736,7 @@ public sealed class SnapshotStore : ISnapshotStore
     public async Task<IReadOnlyList<PivotFieldInfo>> ListPivotFieldsAsync(
         long snapshotId, string className, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         var list = new List<PivotFieldInfo>();
         await using var conn = await OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
@@ -718,6 +762,7 @@ public sealed class SnapshotStore : ISnapshotStore
 
     public async Task<PivotResult> PivotAsync(PivotQuery query, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();   // bail before opening a connection
         // Fetch only the rows the engine needs: the key field (Field mode) + the
         // value fields, for this class. Prop names come from our own field list
         // (DB-sourced identifiers) but are still parameterised defensively.
@@ -760,8 +805,10 @@ public sealed class SnapshotStore : ISnapshotStore
         bool capped = false;
         await using (var r = await cmd.ExecuteReaderAsync(ct))
         {
+            int rowCount = 0;
             while (await r.ReadAsync(ct))
             {
+                if ((++rowCount & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
                 if (rows.Count >= fetchRowCap) { capped = true; break; }
                 rows.Add(new PivotInputRow
                 {
@@ -789,6 +836,7 @@ public sealed class SnapshotStore : ISnapshotStore
     public async Task<IReadOnlyList<PivotClassInfo>> ListPivotArrayClassesAsync(
         long snapshotId, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         var list = new List<PivotClassInfo>();
         await using var conn = await OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
@@ -900,8 +948,10 @@ public sealed class SnapshotStore : ISnapshotStore
         bool capped = false;
         await using (var r = await cmd.ExecuteReaderAsync(ct))
         {
+            int rowCount = 0;
             while (await r.ReadAsync(ct))
             {
+                if ((++rowCount & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
                 if (rows.Count >= fetchRowCap) { capped = true; break; }
                 long objIdx = r.IsDBNull(0) ? -1 : r.GetInt64(0);
                 int  elem   = r.IsDBNull(1) ? -1 : r.GetInt32(1);
@@ -941,5 +991,151 @@ public sealed class SnapshotStore : ISnapshotStore
         cmd.Parameters.AddWithValue("$id", snapshotId);
         await cmd.ExecuteNonQueryAsync(ct);
         _log?.Info(Constants.LogCatView, $"SnapshotStore: deleted snapshot #{snapshotId}");
+    }
+
+    // --- N1: Top-N noise contributor accumulator (used by SPC + Diff) ---
+    //
+    // Walks each emitted result row, keeps per-class hit counts + per-(class, prop)
+    // sub-counts, then writes a Top-50 ranking with up to 3 sample props per class.
+    // Pure in-memory; the rows that drive it are the same rows the user is about to
+    // see, so the picker reflects the predicate they just ran rather than the raw
+    // capture distribution.
+    private sealed class NoiseAccumulator
+    {
+        private const int kTopN          = 50;
+        private const int kSamplePropMax = 3;
+        private readonly Dictionary<string, ClassBucket> _buckets =
+            new(StringComparer.Ordinal);
+
+        private sealed class ClassBucket
+        {
+            public int HitCount;
+            public readonly Dictionary<string, int> PropCounts =
+                new(StringComparer.Ordinal);
+        }
+
+        public void Bump(string className, string propName)
+        {
+            // A malformed (NULL→"") class_fqn shouldn't surface as a blank,
+            // un-tickable picker row.
+            if (string.IsNullOrEmpty(className)) return;
+            if (!_buckets.TryGetValue(className, out var b))
+            {
+                b = new ClassBucket();
+                _buckets[className] = b;
+            }
+            b.HitCount++;
+            b.PropCounts.TryGetValue(propName, out var c);
+            b.PropCounts[propName] = c + 1;
+        }
+
+        public void WriteTo(List<ClassNoiseRow> dest)
+        {
+            // Sort classes by hit count desc, tie-break by name for stability.
+            var ordered = _buckets
+                .Select(kv => (Cls: kv.Key, Count: kv.Value.HitCount, Props: kv.Value.PropCounts))
+                .OrderByDescending(x => x.Count)
+                .ThenBy(x => x.Cls, StringComparer.Ordinal)
+                .Take(kTopN);
+
+            foreach (var x in ordered)
+            {
+                var sampleProps = x.Props
+                    .OrderByDescending(p => p.Value)
+                    .ThenBy(p => p.Key, StringComparer.Ordinal)
+                    .Take(kSamplePropMax)
+                    .Select(p => p.Key)
+                    .ToList();
+                dest.Add(new ClassNoiseRow
+                {
+                    ClassName   = x.Cls,
+                    HitCount    = x.Count,
+                    SampleProps = sampleProps,
+                });
+            }
+        }
+    }
+
+    // --- N1: per-game, PER-TAB class denylists (noise picker) ---
+    //
+    // Stored next to the per-game DB as snapshots.<pe_hash>.denylist.json so the
+    // lists auto-follow the game and survive quota-driven snapshot eviction. The
+    // file holds three INDEPENDENT lists (Diff / Spc / Pivot) — a class hidden in
+    // one tab never affects the others. Source-gen JSON (AOT-safe), atomic write,
+    // swallow-and-log on failure — mirrors ExperimentalGate's persistence pattern.
+
+    private static readonly ClassDenylistJsonContext s_denylistJsonCtx =
+        ClassDenylistJsonContext.Default;
+
+    private string DenylistPath =>
+        Path.Combine(_dir, $"{Constants.SnapshotDbPrefix}.{(_peHash.Length > 0 ? _peHash : "default")}.denylist.json");
+
+    // Load the whole settings object (all three lists); defensive on missing /
+    // corrupt file. Returns a fresh empty object on any failure.
+    private ClassDenylistSettings LoadDenylistSettings()
+    {
+        try
+        {
+            var path = DenylistPath;
+            if (!File.Exists(path)) return new ClassDenylistSettings();
+            var json = File.ReadAllText(path);
+            return System.Text.Json.JsonSerializer.Deserialize(json, s_denylistJsonCtx.ClassDenylistSettings)
+                   ?? new ClassDenylistSettings();
+        }
+        catch (Exception ex)
+        {
+            _log?.Warn(Constants.LogCatView,
+                $"SnapshotStore: failed to load denylist, using empty: {ex.Message}");
+            return new ClassDenylistSettings();
+        }
+    }
+
+    private static List<string> ScopeList(ClassDenylistSettings s, DenylistScope scope) => scope switch
+    {
+        DenylistScope.Diff  => s.Diff,
+        DenylistScope.Spc   => s.Spc,
+        DenylistScope.Pivot => s.Pivot,
+        _                   => s.Diff,
+    };
+
+    public HashSet<string> GetClassDenylist(DenylistScope scope)
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var c in ScopeList(LoadDenylistSettings(), scope))
+            if (!string.IsNullOrEmpty(c)) set.Add(c);
+        return set;
+    }
+
+    public void SetClassDenylist(DenylistScope scope, HashSet<string> classes)
+    {
+        // No-op without an active game — the default DB shouldn't accumulate
+        // game-specific noise picks. UI gates the save behind SetActiveGame
+        // already, so this is defence in depth.
+        if (_peHash.Length == 0) return;
+        try
+        {
+            // Read-modify-write: preserve the other two tabs' lists.
+            var settings = LoadDenylistSettings();
+            var sorted = new List<string>(classes);
+            sorted.Sort(StringComparer.Ordinal);  // stable on-disk order for diffability
+            switch (scope)
+            {
+                case DenylistScope.Diff:  settings.Diff  = sorted; break;
+                case DenylistScope.Spc:   settings.Spc   = sorted; break;
+                case DenylistScope.Pivot: settings.Pivot = sorted; break;
+            }
+            var json = System.Text.Json.JsonSerializer.Serialize(
+                settings, s_denylistJsonCtx.ClassDenylistSettings);
+            var path = DenylistPath;
+            var temp = path + ".tmp";
+            File.WriteAllText(temp, json);
+            File.Move(temp, path, overwrite: true);
+            _log?.Info(Constants.LogCatView,
+                $"SnapshotStore: saved {scope} denylist ({sorted.Count} classes) -> {path}");
+        }
+        catch (Exception ex)
+        {
+            _log?.Error(Constants.LogCatView, "SnapshotStore: failed to save denylist", ex);
+        }
     }
 }

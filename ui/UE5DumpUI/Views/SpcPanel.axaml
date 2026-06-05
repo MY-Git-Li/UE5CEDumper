@@ -5,7 +5,7 @@
              x:Class="UE5DumpUI.Views.SpcPanel"
              x:DataType="vm:SpcQueryViewModel">
 
-  <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,170,Auto,*">
+  <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,170,Auto,*,Auto">
 
     <!-- Intro -->
     <TextBlock Grid.Row="0" Text="{StaticResource str.Spc.Intro}"
@@ -18,17 +18,18 @@
         <TextBlock Text="{StaticResource str.Spc.Join}" Foreground="#CCCCCC"
                    VerticalAlignment="Center" Margin="0,0,4,0"/>
         <ComboBox ItemsSource="{Binding JoinModeOptions}" SelectedItem="{Binding SelectedJoinMode}"
-                  MinWidth="120" Margin="0,0,12,0" ToolTip.Tip="{StaticResource str.Spc.JoinHint}"/>
+                  MinWidth="120" Margin="0,0,12,0" ToolTip.Tip="{StaticResource str.Spc.JoinHint}"
+                  IsEnabled="{Binding !IsQuerying}"/>
         <TextBlock Text="{StaticResource str.Spc.ClassFilter}" Foreground="#CCCCCC"
                    VerticalAlignment="Center" Margin="0,0,4,0"/>
-        <TextBox Text="{Binding ClassFilter}" Width="140" Margin="0,0,12,0"/>
+        <TextBox Text="{Binding ClassFilter}" Width="140" Margin="0,0,12,0" IsEnabled="{Binding !IsQuerying}"/>
         <TextBlock Text="{StaticResource str.Spc.PropFilter}" Foreground="#CCCCCC"
                    VerticalAlignment="Center" Margin="0,0,4,0"/>
-        <TextBox Text="{Binding PropFilter}" Width="140" Margin="0,0,12,0"/>
+        <TextBox Text="{Binding PropFilter}" Width="140" Margin="0,0,12,0" IsEnabled="{Binding !IsQuerying}"/>
         <Button Content="{StaticResource str.Spc.Run}" Command="{Binding RunQueryCommand}"
                 IsEnabled="{Binding CanRunQuery}" Classes="accent" Padding="12,4" Margin="0,0,8,0"/>
         <Button Content="{StaticResource str.Spc.Refresh}" Command="{Binding RefreshCommand}"
-                Padding="8,4" Margin="0,0,8,0"/>
+                Padding="8,4" Margin="0,0,8,0" IsEnabled="{Binding !IsQuerying}"/>
         <Button Content="{StaticResource str.Spc.OpenWalker}" Command="{Binding OpenInLiveWalkerCommand}"
                 CommandParameter="{Binding SelectedResult}" Padding="8,4" Margin="0,0,8,0"/>
         <Button Content="{StaticResource str.Spc.CopyAddr}" Command="{Binding CopyAddressCommand}"
@@ -44,10 +45,16 @@
          each one's directional predicate vs the previous selected snapshot. -->
     <DataGrid Grid.Row="3" ItemsSource="{Binding SnapshotPicks}" IsReadOnly="False"
               GridLinesVisibility="Horizontal" Background="#1E1E1E"
+              IsEnabled="{Binding !IsQuerying}"
               CanUserResizeColumns="True" CanUserSortColumns="False">
       <DataGrid.Columns>
-        <DataGridCheckBoxColumn Header="{StaticResource str.Spc.Col.Use}"
-                                Binding="{Binding IsSelected}" Width="50"/>
+        <DataGridTemplateColumn Header="{StaticResource str.Spc.Col.Use}" Width="50">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="vm:SpcSnapshotPick">
+              <CheckBox IsChecked="{Binding IsSelected}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
         <DataGridTextColumn Header="{StaticResource str.Spc.Col.Label}"
                             Binding="{Binding Label}" IsReadOnly="True" Width="*"/>
         <DataGridTextColumn Header="{StaticResource str.Spc.Col.Captured}"
@@ -133,5 +140,70 @@
         <DataGridTextColumn Header="{StaticResource str.Spc.Res.Sequence}" Binding="{Binding SequenceDisplay}" Width="240"/>
       </DataGrid.Columns>
     </DataGrid>
+
+    <!-- N1: noise picker (Top-N class contributors) + active denylist chips.
+         Collapsed by default; opens to a fixed height so it doesn't eat the
+         result grid. Apply pushes ticked rows into the per-game denylist file
+         (snapshots.<pe_hash>.denylist.json) and re-runs the SPC query. -->
+    <Expander Grid.Row="6" Header="{StaticResource str.Noise.PanelHeader}"
+              IsExpanded="{Binding NoisePanelOpen}" Margin="0,8,0,0"
+              Background="#252526" BorderBrush="#3C3C3C" BorderThickness="1">
+      <StackPanel Orientation="Vertical" Margin="6">
+        <TextBlock Text="{StaticResource str.Noise.PanelHint}"
+                   Foreground="#888" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"/>
+
+        <!-- Top-N picker grid (height-capped) -->
+        <DataGrid ItemsSource="{Binding NoiseRows}" IsReadOnly="False"
+                  Height="200" GridLinesVisibility="Horizontal" Background="#1E1E1E"
+                  CanUserResizeColumns="True" CanUserSortColumns="True">
+          <DataGrid.Columns>
+            <DataGridTemplateColumn Header="{StaticResource str.Noise.Col.Pick}" Width="50">
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate x:DataType="vm:NoiseRowVm">
+                  <CheckBox IsChecked="{Binding Picked}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </DataTemplate>
+              </DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
+            <DataGridTextColumn Header="{StaticResource str.Noise.Col.Class}"
+                                Binding="{Binding ClassName}" IsReadOnly="True" Width="*"/>
+            <DataGridTextColumn Header="{StaticResource str.Noise.Col.Hits}"
+                                Binding="{Binding HitCount}" IsReadOnly="True" Width="80"/>
+            <DataGridTextColumn Header="{StaticResource str.Noise.Col.SampleProps}"
+                                Binding="{Binding SamplePropsDisplay}" IsReadOnly="True" Width="240"/>
+          </DataGrid.Columns>
+        </DataGrid>
+
+        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+          <Button Content="{StaticResource str.Noise.Apply}"
+                  Command="{Binding ApplyNoisePicksCommand}"
+                  Classes="accent" Padding="12,4" Margin="0,0,6,0"/>
+          <Button Content="{StaticResource str.Noise.Reset}"
+                  Command="{Binding ResetNoisePicksCommand}" Padding="8,4" Margin="0,0,12,0"/>
+          <TextBlock Text="{StaticResource str.Noise.ActiveHeader}"
+                     Foreground="#9CDCFE" VerticalAlignment="Center" Margin="0,0,6,0"/>
+          <Button Content="{StaticResource str.Noise.Clear}"
+                  Command="{Binding ClearDenylistCommand}" Padding="8,3" Margin="0,0,6,0"/>
+        </StackPanel>
+
+        <!-- Active denylist chips: one button per class, click removes it. -->
+        <ItemsControl ItemsSource="{Binding ActiveDenylist}" Margin="0,4,0,0">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <WrapPanel Orientation="Horizontal"/>
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="x:String">
+              <Button Content="{Binding}"
+                      Command="{Binding $parent[UserControl].((vm:SpcQueryViewModel)DataContext).RemoveFromDenylistCommand}"
+                      CommandParameter="{Binding}"
+                      ToolTip.Tip="{StaticResource str.Noise.RemoveTip}"
+                      Margin="0,0,4,4" Padding="6,2"
+                      Background="#3C3C3C" Foreground="#CCCCCC"/>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </Expander>
   </Grid>
 </UserControl>

@@ -32,6 +32,21 @@ public sealed class SnapshotMeta
 
     /// <summary>Human-readable estimated size, e.g. "42.3 MB".</summary>
     public string EstSizeDisplay => SnapshotFormat.Bytes(EstBytes);
+
+    /// <summary>Label + captured local time — used in the diff / pivot snapshot
+    /// ComboBoxes so a custom label never hides WHEN the snapshot was taken
+    /// (those pickers show only one line, unlike the saved-snapshots grid which
+    /// has a separate Captured column).</summary>
+    public string PickerDisplay
+    {
+        get
+        {
+            if (System.DateTimeOffset.TryParse(CapturedAt, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.RoundtripKind, out var dto))
+                return $"{Label}  ·  {dto.LocalDateTime:yyyy-MM-dd HH:mm:ss}";
+            return Label;
+        }
+    }
 }
 
 /// <summary>Per-game snapshot DB disk usage, for the quota/usage UI.</summary>
