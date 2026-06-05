@@ -325,8 +325,8 @@ memory-reading code.
 
 ### V3. Lean Candidate record — string interning + deferred enrichment
 
-- **V3-A — shared FieldDescriptor.** ✅ **CODE COMPLETE on dev (build 926, commit
-  `1161411`) — live First/Next scan verification still pending.** Effort: **M**.
+- ~~**V3-A — shared FieldDescriptor.**~~ ✅ **SHIPPED on dev (build 926, commit
+  `1161411`) — live First/Next scan verified OK by user 2026-06-05.** Effort: **M**.
   Risk: **low** (pure DLL-internal, no wire-schema change). Why: `ValueScan::Candidate`
   ([ValueScan.h:294](../dll/src/ValueScan.h#L294)) is **~240 B, 6 `std::string`s**,
   and `className` / `definingClassName` / `fieldName` / `fieldType` / `boolFieldMask`
@@ -343,10 +343,13 @@ memory-reading code.
   value) render identically to pre-926, then a Next Scan prunes correctly.
   The interning + parallel-merge index remap is only exercised end-to-end
   in-process, so a clean unit run ≠ correct scan.
-- **V3-B — instance table dedupe.** Effort: **S**. Risk: **low**. Why: `instanceName`
-  is per-instance, but one object with several matching fields repeats it N times.
-  Pull `instanceAddr → instanceName` into a session-level `vector<{addr,name}>`;
-  Candidate stores `uint32 instanceIdx`. Stacks on V3-A.
+- ~~**V3-B — instance table dedupe.**~~ ✅ **SHIPPED as part of V3-A (build 926,
+  commit `1161411`).** A lean Candidate can't keep raw `instanceAddr`/`instanceName`,
+  so the `InstanceRecord` pool + `Candidate::instanceIdx` were necessarily built in
+  the same change: `ScanForValue` resolves `Ubel::GetName(obj)` once per object
+  (`curInstanceIdx`, [Aura.cpp:4246](../dll/src/Aura.cpp#L4246)) and every matching
+  field of that object shares the index — one record per object, not per candidate.
+  No separate work remains.
 - **V3-C — deferred enrichment.** Effort: **M**. Risk: **med** (new pipe cmd +
   UI paging). Why: refine never needs the display strings (it only re-reads `c.addr`,
   [Aura.cpp:4507-4536](../dll/src/Aura.cpp#L4507)), and the UI only shows a window at
