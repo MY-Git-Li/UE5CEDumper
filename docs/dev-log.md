@@ -11,6 +11,33 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-06-05 — AOT: Windows-only Avalonia backend (drop X11/macOS/FreeDesktop) (build 918)
+
+The Native-AOT publish emitted a wall of `ILC: ... will always throw because:
+Failed to load type 'Tmds.DBus.Protocol.Connection'` warnings from
+`Avalonia.X11` / `Avalonia.FreeDesktop` — code paths that can never run in a
+Windows-only tool (UE5CEDumper injects into Windows games). Removed them at the
+source instead of suppressing:
+
+- **`Avalonia.Desktop` → `Avalonia.Win32` + `Avalonia.Skia`** (the Desktop
+  meta-package bundled the X11 / macOS-Native / FreeDesktop backends). Dropped
+  the now-orphaned `Tmds.DBus.Protocol` and the Linux/WebAssembly native assets
+  (`{HarfBuzzSharp,SkiaSharp}.NativeAssets.{Linux,WebAssembly}`).
+- **`Program.cs`: `UsePlatformDetect()` → `.UseWin32().UseSkia()`.**
+  `UsePlatformDetect` itself lives in `Avalonia.Desktop`, so it had to go; the
+  explicit Win32+Skia wiring is exactly what PlatformDetect resolved to on
+  Windows anyway.
+- TrimmerRootAssembly: dropped `Avalonia.Desktop`.
+
+Result: AOT publish is now **warning-free** (was a dozen X11 ILC lines). Single-
+file exe ~46.8 MB. **LIVE-VERIFY PENDING (user):** launch the published
+`dist/UE5DumpUI.exe` and confirm the window opens + renders — backend init is a
+runtime concern the build can't prove. (Reference: CrimsonAtomic keeps
+Avalonia.Desktop + NoWarn; we went the leaner remove-the-backend route the user
+asked for.)
+
+-----
+
 ## 2026-06-05 — Experimental UX hardening batch 2 (build 916)
 
 Second live-test feedback pass on the Snapshot / SPC / Pivot tabs.
