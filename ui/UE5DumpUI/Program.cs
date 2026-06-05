@@ -47,6 +47,10 @@ internal static class Program
             // so it's gone too.
             .UseWin32()
             .UseSkia()
+            // Text shaping — UsePlatformDetect() wired this for us; the explicit
+            // backend must call it or AppBuilder.Setup() throws "No text shaping
+            // system configured".
+            .UseHarfBuzz()
             // AOT: WinUI Composition via MicroCom COM interop crashes on Native AOT.
             // Force software redirection surface to bypass the compositor COM path.
             .With(new Win32PlatformOptions

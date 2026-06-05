@@ -67,6 +67,10 @@
     <PackageReference Include="Avalonia.Angle.Windows.Natives" Version="2.1.27548.20260419" />
     <PackageReference Include="Avalonia.Win32" Version="12.0.3" />
     <PackageReference Include="Avalonia.Skia" Version="12.0.3" />
+    <!-- Text shaping. UsePlatformDetect() wired this automatically; with the
+         explicit Win32+Skia backend it must be added by hand, else AppBuilder
+         throws "No text shaping system configured" at startup. -->
+    <PackageReference Include="Avalonia.HarfBuzz" Version="12.0.3" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.3" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.3" />
     <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.0.0" />
@@ -149,6 +153,8 @@
     <TrimmerRootAssembly Include="Avalonia.Win32.Automation" />
     <!-- Rendering backend (loaded via reflection — critical) -->
     <TrimmerRootAssembly Include="Avalonia.Skia" />
+    <!-- Text shaping (constructed via reflection — critical) -->
+    <TrimmerRootAssembly Include="Avalonia.HarfBuzz" />
     <!-- Fonts -->
     <TrimmerRootAssembly Include="Avalonia.Fonts.Inter" />
     <!-- COM interop -->
