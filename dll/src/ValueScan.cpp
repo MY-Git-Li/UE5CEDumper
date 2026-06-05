@@ -744,6 +744,13 @@ bool CompareVectorPredicate(ScanType       st,
     return false;
 }
 
+// --- Display helpers ---
+
+std::string FieldDisplayName(const FieldDescriptor& desc, int32_t elementIndex) {
+    if (elementIndex < 0) return desc.fieldName;
+    return desc.fieldName + "[" + std::to_string(elementIndex) + "]";
+}
+
 // --- SessionManager ---
 
 SessionManager& SessionManager::Instance() {
@@ -758,16 +765,21 @@ SessionManager& SessionManager::Instance() {
     return *inst;
 }
 
-uint64_t SessionManager::Begin(DataType dt, std::vector<Candidate> candidates) {
+uint64_t SessionManager::Begin(DataType dt,
+                               std::vector<Candidate>       candidates,
+                               std::vector<FieldDescriptor> descriptors,
+                               std::vector<InstanceRecord>  instances) {
     ExpireOldSessions();
 
     std::lock_guard<std::mutex> lk(mu_);
     uint64_t id = nextId_++;
     auto sess = std::make_unique<Session>();
-    sess->id         = id;
-    sess->dt         = dt;
-    sess->candidates = std::move(candidates);
-    sess->lastUse    = std::chrono::steady_clock::now();
+    sess->id          = id;
+    sess->dt          = dt;
+    sess->candidates  = std::move(candidates);
+    sess->descriptors = std::move(descriptors);
+    sess->instances   = std::move(instances);
+    sess->lastUse     = std::chrono::steady_clock::now();
     sessions_.emplace(id, std::move(sess));
     return id;
 }

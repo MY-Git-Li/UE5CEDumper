@@ -1012,24 +1012,40 @@ static void Test_ValueScan_SessionLifecycle() {
     seed[1].addr = 0x2000;
     WriteLE<int32_t>(seed[1].prevValue, 200);
 
-    uint64_t sid = mgr.Begin(DataType::Int32, std::move(seed));
+    // Shared metadata pools the candidates index into (V3-A). Both
+    // candidates reference one descriptor + one instance to exercise the
+    // dedup path.
+    std::vector<FieldDescriptor> descriptors(1);
+    descriptors[0].className     = "AActor";
+    descriptors[0].fieldName     = "Health";
+    descriptors[0].fieldType     = "IntProperty";
+    std::vector<InstanceRecord> instances(1);
+    instances[0].instanceAddr = 0x4000;
+    instances[0].instanceName = "Actor_0";
+
+    uint64_t sid = mgr.Begin(DataType::Int32, std::move(seed),
+                             std::move(descriptors), std::move(instances));
     EXPECT("Begin returns non-zero session id", sid != 0);
 
-    bool viewed = mgr.ViewWith(sid, [&](DataType dt, const std::vector<Candidate>& cs) {
-        EXPECT("ViewWith sees correct dataType", dt == DataType::Int32);
-        EXPECT("ViewWith sees 2 candidates",     cs.size() == 2);
+    bool viewed = mgr.ViewWith(sid, [&](const Session& sess) {
+        EXPECT("ViewWith sees correct dataType", sess.dt == DataType::Int32);
+        EXPECT("ViewWith sees 2 candidates",     sess.candidates.size() == 2);
+        EXPECT("ViewWith preserves descriptor pool", sess.descriptors.size() == 1);
+        EXPECT("ViewWith preserves instance pool",   sess.instances.size() == 1);
+        EXPECT("Descriptor field name interned",
+               sess.descriptors[0].fieldName == "Health");
     });
     EXPECT("ViewWith returns true for live session", viewed);
 
     // RefineWith may mutate the candidates vector.
-    bool refined = mgr.RefineWith(sid, [](DataType, std::vector<Candidate>& cs) {
-        cs.pop_back();  // drop one
+    bool refined = mgr.RefineWith(sid, [](Session& sess) {
+        sess.candidates.pop_back();  // drop one
     });
     EXPECT("RefineWith returns true for live session", refined);
 
     size_t remaining = 0;
-    mgr.ViewWith(sid, [&](DataType, const std::vector<Candidate>& cs) {
-        remaining = cs.size();
+    mgr.ViewWith(sid, [&](const Session& sess) {
+        remaining = sess.candidates.size();
     });
     EXPECT("Refine pruned candidate count", remaining == 1);
 
@@ -1039,11 +1055,32 @@ static void Test_ValueScan_SessionLifecycle() {
     // Lookups on a missing session id return false WITHOUT invoking
     // the callback -- caller maps to wire error "session_not_found".
     bool callbackRan = false;
-    bool missingOk = mgr.RefineWith(sid, [&](DataType, std::vector<Candidate>&) {
+    bool missingOk = mgr.RefineWith(sid, [&](Session&) {
         callbackRan = true;
     });
     EXPECT("RefineWith on missing returns false", !missingOk);
     EXPECT("RefineWith on missing does NOT invoke callback", !callbackRan);
+}
+
+// V3-A — FieldDisplayName reconstructs the candidate display name from the
+// interned descriptor + the candidate's element index: the base name for a
+// direct field (-1), and "base[idx]" for a TArray/container element.
+static void Test_ValueScan_FieldDisplayName() {
+    using namespace ValueScan;
+    FieldDescriptor desc;
+    desc.fieldName = "Items";
+
+    EXPECT("Direct field uses base name (-1)",
+           FieldDisplayName(desc, -1) == "Items");
+    EXPECT("Element 0 renders [0]",
+           FieldDisplayName(desc, 0) == "Items[0]");
+    EXPECT("Element 42 renders [42]",
+           FieldDisplayName(desc, 42) == "Items[42]");
+
+    FieldDescriptor nested;
+    nested.fieldName = "MaximumHealth.CurrentValue";
+    EXPECT("Dotted nested base name preserved (-1)",
+           FieldDisplayName(nested, -1) == "MaximumHealth.CurrentValue");
 }
 
 // ----- main ------------------------------------------------------------------
@@ -1336,6 +1373,7 @@ int main() {
     Test_ValueScan_SelectArrayInnerKey();
 
     Test_ValueScan_SessionLifecycle();
+    Test_ValueScan_FieldDisplayName();
 
     // Path 2 — native x64 disassembly (Denken decoder core)
     Test_Denken_BasicAccesses();

@@ -3903,6 +3903,11 @@ ValueScanResult ScanForValue(
         bool        isArray      = false;
         int32_t     elemStride   = 0;
         std::string elemTypeName;   // Inner type name when isArray (e.g. "IntProperty")
+        // V3-A: lazily-resolved index into the worker thread's
+        // FieldDescriptor pool (the field's interned class/defining-class/
+        // name/type/offset/mask). -1 until the first candidate of this
+        // field is emitted, then reused by every element + every instance.
+        int32_t     descriptorIdx = -1;
     };
     struct ScanClassInfo {
         std::string             className;
@@ -3939,9 +3944,11 @@ ValueScanResult ScanForValue(
     // ascending tid order so the global candidate list stays ascending by
     // object index — identical ordering to the old serial walk.
     struct ThreadResult {
-        std::vector<ValueScan::Candidate> candidates;
-        int32_t                           scannedObjects = 0;
-        std::unordered_set<uintptr_t>     classesWithFields;
+        std::vector<ValueScan::Candidate>        candidates;   // indices are THREAD-LOCAL
+        std::vector<ValueScan::FieldDescriptor>  descriptors;  // thread-local pool
+        std::vector<ValueScan::InstanceRecord>   instances;    // thread-local pool
+        int32_t                                  scannedObjects = 0;
+        std::unordered_set<uintptr_t>            classesWithFields;
     };
 
     auto scan = ParallelGObjectsScan<ThreadResult>(count,
@@ -4186,58 +4193,75 @@ ValueScanResult ScanForValue(
         if (!sci || sci->fields.empty()) continue;
         if (gameOnly && !sci->gameClass) continue;
 
-        // Defer instance-name resolution until we know we have a match;
-        // FName lookup is cheap but billions of unused calls add up.
-        bool   gotInstanceName = false;
-        std::string instanceName;
+        // Defer instance interning until we know this object has a match;
+        // FName lookup is cheap but billions of unused calls add up. On
+        // the first emit for this object we resolve its name once and push
+        // a single InstanceRecord; every candidate of this object then
+        // shares that index. -1 = not yet interned for this object.
+        int32_t curInstanceIdx = -1;
 
-        // Helper: emit one candidate from per-hit data. Used by both
-        // direct-field and per-array-element paths. Captures the
-        // shared metadata + defining-class cache lookup. Inlined as a
-        // lambda to avoid an extra parameter cascade.
+        // ensureDescriptor: resolve (and cache on the ScanField) the
+        // thread-local FieldDescriptor index for `sf`. The descriptor
+        // interns everything that's a function of (class, field) —
+        // class / defining-class / base name / type / offset / mask — so
+        // it's built once per field (on first emit) and reused by every
+        // array element and every instance. Defining-class resolution
+        // reuses the per-(class,offset) definingNameCache.
+        auto ensureDescriptor = [&](ScanField& sf) -> uint32_t {
+            if (sf.descriptorIdx >= 0) return static_cast<uint32_t>(sf.descriptorIdx);
+            ValueScan::FieldDescriptor d;
+            d.className     = sci->className;
+            d.fieldName     = sf.name;  // BASE name; element "[i]" added at display time
+            d.fieldType     = sf.isArray ? sf.elemTypeName : sf.typeName;
+            d.fieldOffset   = sf.offset;
+            d.boolFieldMask = sf.boolFieldMask;
+
+            DefKey dk{ cls, sf.offset };
+            auto dit = definingNameCache.find(dk);
+            if (dit != definingNameCache.end()) {
+                d.definingClassName = dit->second;
+            } else {
+                uintptr_t defAddr = FindDefiningClass(cls, sf.offset);
+                std::string defName = (defAddr && defAddr != cls)
+                    ? Ubel::GetName(defAddr) : sci->className;
+                definingNameCache.emplace(dk, defName);
+                d.definingClassName = std::move(defName);
+            }
+            sf.descriptorIdx = static_cast<int32_t>(tr.descriptors.size());
+            tr.descriptors.push_back(std::move(d));
+            return static_cast<uint32_t>(sf.descriptorIdx);
+        };
+
+        // Helper: emit one lean candidate. Per-(class,field) metadata is
+        // referenced via descriptorIdx; per-object metadata via the
+        // interned instance index; only the value's address + snapshot +
+        // element index live on the candidate itself. Used by both the
+        // direct-field and per-array-element paths.
         auto emitCandidate = [&](uintptr_t valueAddr,
-                                 int32_t   fieldOffsetForCand,
-                                 const std::string& displayName,
-                                 const std::string& fieldType,
-                                 uint8_t   boolMask,
+                                 uint32_t  descriptorIdx,
+                                 int32_t   elementIndex,   // -1 = direct field
                                  const uint8_t* rawBytes,
                                  size_t   rawByteCount,
                                  const std::string* strValue) {
-            if (!gotInstanceName) {
-                instanceName    = Ubel::GetName(obj);
-                gotInstanceName = true;
+            if (curInstanceIdx < 0) {
+                curInstanceIdx = static_cast<int32_t>(tr.instances.size());
+                tr.instances.push_back(ValueScan::InstanceRecord{
+                    obj, i, Ubel::GetName(obj) });
             }
             ValueScan::Candidate cand;
             cand.addr          = valueAddr;
-            cand.instanceAddr  = obj;
-            cand.instanceIndex = i;
-            cand.fieldOffset   = fieldOffsetForCand;
+            cand.descriptorIdx = descriptorIdx;
+            cand.instanceIdx   = static_cast<uint32_t>(curInstanceIdx);
+            cand.elementIndex  = elementIndex;
             if (strValue) {
                 cand.prevStr = *strValue;
             } else if (rawBytes && rawByteCount > 0) {
                 std::memcpy(cand.prevValue, rawBytes, rawByteCount);
             }
-            cand.instanceName  = instanceName;
-            cand.className     = sci->className;
-            cand.fieldName     = displayName;
-            cand.fieldType     = fieldType;
-            cand.boolFieldMask = boolMask;
-
-            DefKey dk{ cls, fieldOffsetForCand };
-            auto dit = definingNameCache.find(dk);
-            if (dit != definingNameCache.end()) {
-                cand.definingClassName = dit->second;
-            } else {
-                uintptr_t defAddr = FindDefiningClass(cls, fieldOffsetForCand);
-                std::string defName = (defAddr && defAddr != cls)
-                    ? Ubel::GetName(defAddr) : sci->className;
-                definingNameCache.emplace(dk, defName);
-                cand.definingClassName = std::move(defName);
-            }
             tr.candidates.push_back(std::move(cand));
         };
 
-        for (const auto& sf : sci->fields) {
+        for (auto& sf : sci->fields) {
             if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
 
             // Phase 2C: TArray<T> path. Read the TArray header (Data,
@@ -4309,30 +4333,23 @@ ValueScanResult ScanForValue(
                         if (!ValueScan::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
                     }
 
-                    // Display name "Field[N]" so the user sees which
-                    // element matched. fieldOffset stays the
-                    // class-level offset (helps with defining-class
-                    // lookup); the candidate's addr is the element
-                    // address.
-                    char idxStr[24];
-                    std::snprintf(idxStr, sizeof(idxStr), "[%d]", idx);
-                    std::string elemName = sf.name + idxStr;
+                    // The element's display name "Field[idx]" is
+                    // reconstructed at serialization time from the shared
+                    // descriptor + this candidate's elementIndex; the
+                    // candidate's addr is the element address. Array
+                    // elements never share a bitfield byte (TArray<bool>
+                    // is stored unpacked), so the descriptor's mask = 0xFF.
+                    const uint32_t descIdx = ensureDescriptor(sf);
 
                     if (isString) {
-                        emitCandidate(elemAddr, sf.offset, elemName,
-                                      sf.elemTypeName, 0xFF,
-                                      nullptr, 0, &readStr);
+                        emitCandidate(elemAddr, descIdx, idx, nullptr, 0, &readStr);
                     } else if (isVector) {
-                        emitCandidate(elemAddr, sf.offset, elemName,
-                                      sf.elemTypeName, 0xFF,
-                                      readBuf, 12, nullptr);
+                        emitCandidate(elemAddr, descIdx, idx, readBuf, 12, nullptr);
                     } else {
                         // elemReadSize == dtSize for fixed-width numeric
                         // scans; for multi-numeric it's the resolved
                         // per-element width (dtSize is 0 in that mode).
-                        emitCandidate(elemAddr, sf.offset, elemName,
-                                      sf.elemTypeName, 0xFF,
-                                      readBuf, elemReadSize, nullptr);
+                        emitCandidate(elemAddr, descIdx, idx, readBuf, elemReadSize, nullptr);
                     }
                 }
                 continue;
@@ -4354,8 +4371,7 @@ ValueScanResult ScanForValue(
                     readStr = Ubel::ReadFTextStringAt(obj, sf.offset);
                 }
                 if (!ValueScan::CompareStringPredicate(st, readStr, targetString, caseSensitive)) continue;
-                emitCandidate(valueAddr, sf.offset, sf.name, sf.typeName,
-                              sf.boolFieldMask, nullptr, 0, &readStr);
+                emitCandidate(valueAddr, ensureDescriptor(sf), -1, nullptr, 0, &readStr);
                 continue;
             }
             if (isVector) {
@@ -4364,8 +4380,7 @@ ValueScanResult ScanForValue(
                 // the 12-byte (X,Y,Z) layout.
                 if (!Macht::ReadBytesSafe(valueAddr, readBuf, 12)) continue;
                 if (!ValueScan::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
-                emitCandidate(valueAddr, sf.offset, sf.name, sf.typeName,
-                              sf.boolFieldMask, readBuf, 12, nullptr);
+                emitCandidate(valueAddr, ensureDescriptor(sf), -1, readBuf, 12, nullptr);
                 continue;
             }
 
@@ -4381,8 +4396,7 @@ ValueScanResult ScanForValue(
                 size_t msz = ValueScan::SizeOf(memberDt);
                 if (!Macht::ReadBytesSafe(valueAddr, readBuf, msz)) continue;
                 if (!ValueScan::ComparePredicate(memberDt, st, readBuf, mtgt, mtgt2, tolerance)) continue;
-                emitCandidate(valueAddr, sf.offset, sf.name, sf.typeName,
-                              sf.boolFieldMask, readBuf, msz, nullptr);
+                emitCandidate(valueAddr, ensureDescriptor(sf), -1, readBuf, msz, nullptr);
                 continue;
             }
 
@@ -4399,8 +4413,7 @@ ValueScanResult ScanForValue(
             }
 
             if (!ValueScan::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
-            emitCandidate(valueAddr, sf.offset, sf.name, sf.typeName,
-                          sf.boolFieldMask, readBuf, dtSize, nullptr);
+            emitCandidate(valueAddr, ensureDescriptor(sf), -1, readBuf, dtSize, nullptr);
         }
     }
 
@@ -4411,15 +4424,37 @@ ValueScanResult ScanForValue(
         }
     });  // ParallelGObjectsScan
 
-    // Fold per-thread stats; candidate vectors concat in ascending tid order
-    // (ConcatTruncate) → serial "scan ascending, stop at maxResults" set.
+    // Fold per-thread stats.
     std::unordered_set<uintptr_t> classesWithFields;
     for (auto& tr : scan.perThread) {
         result.stats.scannedObjects += tr.scannedObjects;
         classesWithFields.insert(tr.classesWithFields.begin(),
                                  tr.classesWithFields.end());
     }
-    result.candidates = ConcatTruncate(scan.perThread, &ThreadResult::candidates, maxResults);
+
+    // Merge per-thread candidate + descriptor + instance pools in ascending
+    // tid order — preserves the serial "scan ascending, stop at maxResults"
+    // invariant (same as ConcatTruncate, which we can't use here because the
+    // candidate indices need remapping). Each thread's descriptorIdx /
+    // instanceIdx are LOCAL to that thread's pools; offset them by the
+    // running pool base as the pools concatenate. Cross-thread dedup is
+    // intentionally skipped: descriptors are a few hundred per thread (minor
+    // duplication) and a given object is scanned by exactly one thread (so
+    // instances never duplicate across threads). A handful of descriptors
+    // referenced only by truncated candidates may carry over unused — cheap.
+    for (auto& tr : scan.perThread) {
+        if (static_cast<int32_t>(result.candidates.size()) >= maxResults) break;
+        const uint32_t descBase = static_cast<uint32_t>(result.descriptors.size());
+        const uint32_t instBase = static_cast<uint32_t>(result.instances.size());
+        for (auto& d : tr.descriptors) result.descriptors.push_back(std::move(d));
+        for (auto& ins : tr.instances) result.instances.push_back(std::move(ins));
+        for (auto& c : tr.candidates) {
+            if (static_cast<int32_t>(result.candidates.size()) >= maxResults) break;
+            c.descriptorIdx += descBase;
+            c.instanceIdx   += instBase;
+            result.candidates.push_back(std::move(c));
+        }
+    }
     result.stats.scannedClasses = static_cast<int32_t>(classesWithFields.size());
     result.stats.deadlineHit    = scan.deadlineHit;
 
@@ -4437,16 +4472,17 @@ ValueScanResult ScanForValue(
 }
 
 ValueScanStats RefineCandidates(
-    ValueScan::DataType                dt,
-    ValueScan::ScanType                st,
-    const uint8_t*                     targetBytes,
-    const uint8_t*                     target2Bytes,
-    std::vector<ValueScan::Candidate>& candidates,
-    double                             tolerance,
-    const std::string&                 targetString,
-    bool                               caseSensitive,
-    const ValueScan::NumericTargetSet* multiTargets,
-    const ValueScan::NumericTargetSet* multiTargets2)
+    ValueScan::DataType                            dt,
+    ValueScan::ScanType                            st,
+    const uint8_t*                                 targetBytes,
+    const uint8_t*                                 target2Bytes,
+    std::vector<ValueScan::Candidate>&             candidates,
+    const std::vector<ValueScan::FieldDescriptor>& descriptors,
+    double                                         tolerance,
+    const std::string&                             targetString,
+    bool                                           caseSensitive,
+    const ValueScan::NumericTargetSet*             multiTargets,
+    const ValueScan::NumericTargetSet*             multiTargets2)
 {
     ValueScanStats stats;
     auto t0 = std::chrono::steady_clock::now();
@@ -4475,13 +4511,16 @@ ValueScanStats RefineCandidates(
     kept.reserve(candidates.size());
 
     for (auto& c : candidates) {
+        // Per-(class,field) metadata (fieldType / boolFieldMask) lives in
+        // the shared descriptor pool the candidate indexes into (V3-A).
+        const ValueScan::FieldDescriptor& desc = descriptors[c.descriptorIdx];
         if (isMulti) {
             // Re-resolve this candidate's own width from its stored
             // fieldType (concrete property type, e.g. "FloatProperty").
             // Targeted predicates compare against the matching target
             // entry; prev-value predicates against the snapshot.
             ValueScan::DataType memberDt;
-            if (!ValueScan::TryDataTypeFromPropertyTypeName(c.fieldType, memberDt)) continue;
+            if (!ValueScan::TryDataTypeFromPropertyTypeName(desc.fieldType, memberDt)) continue;
             size_t msz = ValueScan::SizeOf(memberDt);
             uint8_t readBuf[16] = {};
             if (!Macht::ReadBytesSafe(c.addr, readBuf, msz)) continue;
@@ -4519,11 +4558,11 @@ ValueScanStats RefineCandidates(
             // the candidate quietly; the user can First-Scan again
             // to refresh.
             std::string cur;
-            if (c.fieldType == "StrProperty") {
+            if (desc.fieldType == "StrProperty") {
                 cur = Ubel::ReadFStringAt(c.addr, 0);
-            } else if (c.fieldType == "NameProperty") {
+            } else if (desc.fieldType == "NameProperty") {
                 cur = Ubel::ReadFNameAt(c.addr, 0);
-            } else if (c.fieldType == "TextProperty") {
+            } else if (desc.fieldType == "TextProperty") {
                 cur = Ubel::ReadFTextStringAt(c.addr, 0);
             } else {
                 // Shouldn't happen for a string-typed session, but be
@@ -4554,8 +4593,8 @@ ValueScanStats RefineCandidates(
         if (!Macht::ReadBytesSafe(c.addr, readBuf, dtSize)) continue;
 
         if (dt == ValueScan::DataType::Bool
-            && c.boolFieldMask != 0 && c.boolFieldMask != 0xFF) {
-            readBuf[0] = ((readBuf[0] & c.boolFieldMask) != 0) ? 1 : 0;
+            && desc.boolFieldMask != 0 && desc.boolFieldMask != 0xFF) {
+            readBuf[0] = ((readBuf[0] & desc.boolFieldMask) != 0) ? 1 : 0;
         }
 
         const uint8_t* cmpTarget = usePrev ? c.prevValue : targetBytes;
