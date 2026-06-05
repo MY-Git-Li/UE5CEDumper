@@ -311,6 +311,91 @@ sections further down this file. Sorted here by recommended start order:
 
 -----
 
+## Value Search coverage + memory — container scan, cap, lean Candidate (planned 2026-06-05, build 923)
+
+Three related Value Search items surfaced from a "what can't it scan?" review.
+They have a **dependency order**: the lean-Candidate refactor (V3) is the enabler
+for both wider coverage (V1) and any cap increase (V2), because every candidate
+lives in the **injected DLL inside the game process** — so per-candidate bytes are
+the real ceiling. Recommended order: **V3-A → V3-B → V1 (Map/Set) → V2/V3-C**.
+
+The底層 sparse-container walk **already exists** (Address Finder uses it) — V1 is
+mostly wiring ValueScan's `expandFields` + per-instance loop into it, not new
+memory-reading code.
+
+### V3. Lean Candidate record — string interning + deferred enrichment
+
+- **V3-A — shared FieldDescriptor.** Effort: **M**. Risk: **low** (pure DLL-internal,
+  no wire-schema change). Why: `ValueScan::Candidate`
+  ([ValueScan.h:294](../dll/src/ValueScan.h#L294)) is **~240 B, 6 `std::string`s**,
+  and `className` / `definingClassName` / `fieldName` / `fieldType` / `boolFieldMask`
+  / `fieldOffset` are all functions of `(class, field)` — identical across thousands
+  of candidates of the same class, yet copied by value into each. They're **already
+  computed once** in `sci->fields` / `sci->className`
+  ([Aura.cpp:4109](../dll/src/Aura.cpp#L4109)). Intern them into a session-level
+  `vector<FieldDescriptor>` + a string pool; Candidate stores a `uint32 descriptorIdx`.
+  Target: **240 B → ~32 B (~7.5×)**, and 5 fewer heap allocations per candidate.
+  50k session drops ~35 MB → ~2 MB in the target process. **This is item (b) — being
+  done this session.**
+- **V3-B — instance table dedupe.** Effort: **S**. Risk: **low**. Why: `instanceName`
+  is per-instance, but one object with several matching fields repeats it N times.
+  Pull `instanceAddr → instanceName` into a session-level `vector<{addr,name}>`;
+  Candidate stores `uint32 instanceIdx`. Stacks on V3-A.
+- **V3-C — deferred enrichment.** Effort: **M**. Risk: **med** (new pipe cmd +
+  UI paging). Why: refine never needs the display strings (it only re-reads `c.addr`,
+  [Aura.cpp:4507-4536](../dll/src/Aura.cpp#L4507)), and the UI only shows a window at
+  a time. Resolve `className` / `instanceName` lazily at view-time via a new
+  `resolve_candidate_window` pipe cmd. Unblocks the pipe/UI walls in V2.
+
+### V1. TMap / TSet / TOptional value scan
+
+- **V1a — TMap / TSet (First-Scan).** Effort: **M** (~1.3× the build-757 TArray path).
+  Risk: **med**. Why: closes the "containers other than TArray are invisible" gap
+  (intentional skip at [Aura.cpp:4079-4080](../dll/src/Aura.cpp#L4079)). Reuse
+  `Macht::ReadTSparseArray` / `IsSparseIndexAllocated`
+  ([Macht.h:165-200](../dll/src/Macht.h#L165)), `Ubel::GetMapPairLayout` /
+  `GetSetElementStride` ([Ubel.cpp:1176-1238](../dll/src/Ubel.cpp#L1176)),
+  `Macht::ComputeMapValueOffset` ([Macht.h:225](../dll/src/Macht.h#L225)), and the
+  proven Map(key+value)/Set iteration template at
+  [Aura.cpp:2194-2270](../dll/src/Aura.cpp#L2194). Changes: (1) widen `ScanField`'s
+  `bool isArray` → `enum ContainerKind { None, Array, Set, MapKey, MapValue }` +
+  `pairStride` / `valueOffset` ([Aura.cpp:3897](../dll/src/Aura.cpp#L3897)); (2) emit
+  Set/Map ScanFields in `expandFields` next to the ArrayProperty branch
+  ([Aura.cpp:4035](../dll/src/Aura.cpp#L4035)); (3) a sparse branch in the per-instance
+  loop next to `if (sf.isArray)` ([Aura.cpp:4246](../dll/src/Aura.cpp#L4246)). Display
+  names `Field[e]` / `Field[e].Key` / `Field[e].Value` (matches Address Finder).
+  Sparse containers are usually small, so the marginal candidate count is low.
+- **V1b — prev-value refine for containers (stable key).** Effort: **M**. Risk: **high**.
+  Why: `Candidate.addr` stores a **raw element address**
+  ([Aura.cpp:4278](../dll/src/Aura.cpp#L4278)); TArray realloc already makes it stale
+  (handled by SEH + "First-Scan again", [Aura.cpp:4515-4520](../dll/src/Aura.cpp#L4515)),
+  and **TSparseArray is worse — freed slots get reused**, so `c.addr` on refine may
+  point at a different logical entry → Changed/Unchanged semantics silently lie.
+  V1a ships **First-Scan-only for containers** (refine drops slots that no longer
+  validate). V1b stores `container addr + slot index` as a stable key and re-walks
+  the sparse array on refine — same idea as snapshot's `SelectArrayInnerKey`
+  ([ValueScan.h:227](../dll/src/ValueScan.h#L227)). Do only if refine-on-container is
+  actually requested.
+- **V1c — TOptional.** Effort: **S-M**. Risk: **med**. Why: different shape from
+  Map/Set — inline `[T value][bool bIsSet]`, not sparse. Needs `OptionalProperty`
+  inner resolution in `WalkClassEx` first, then a flag-gated leaf read. **Do
+  separately, after V1a** — don't bundle the three "deferred containers" together.
+
+### V2. Raising the global `maxResults` cap
+
+- **V2 — paged streaming, not a bigger flat cap.** Effort: **M-L**. Risk: **med**.
+  Why: the 50k cap ([roadmap.md:140](roadmap.md#L140)) is bounded by four walls,
+  nearest first: (1) **DLL memory in the target process** — the hard one, addressed
+  by V3; (2) **pipe JSON serialization** of N candidates; (3) **Avalonia DataGrid**
+  holding N rows under AOT; (4) the 15 s deadline
+  ([Aura.cpp:4424](../dll/src/Aura.cpp#L4424)) + the fact that 500k results aren't
+  user-actionable (refine is meant to converge). Correct shape: keep the **full
+  lean-candidate set in the DLL session** (cheap after V3) but **stream only a
+  window/summary to the UI** (depends on V3-C's paging cmd). Don't just bump the
+  number.
+
+-----
+
 ## Next-priority enhancements (decided 2026-05-26, post build 738)
 
 ### 0. ~~Value Search tab (by-value scan)~~ — ✅ shipped this session (2026-05-26, build 738)
