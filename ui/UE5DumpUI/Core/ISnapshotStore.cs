@@ -42,6 +42,10 @@ public interface ISnapshotStore
     /// <summary>Delete a snapshot and all its field rows.</summary>
     Task DeleteSnapshotAsync(long snapshotId, CancellationToken ct = default);
 
+    /// <summary>Delete EVERY snapshot for the active game (truncate all tables)
+    /// and VACUUM the DB file. Irreversible.</summary>
+    Task DeleteAllSnapshotsAsync(CancellationToken ct = default);
+
     /// <summary>Active game's DB file size + all-games total + snapshot count.</summary>
     Task<SnapshotUsage> GetUsageAsync(CancellationToken ct = default);
 

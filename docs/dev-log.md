@@ -11,6 +11,37 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-06-05 — Experimental UX batch 3: pivot index, capture ETA, Delete All, icon (build 923)
+
+Third live-test feedback pass.
+
+- **Persisted pivot class-index (fixes the ~10s+ Class Pivot first-open scan).**
+  The picker ran `COUNT(DISTINCT gobjects_index) GROUP BY class_fqn` over ~1.7M
+  rows on every snapshot selection. Now precomputed ONCE per snapshot into a small
+  `class_counts` table (additive schema, no version bump — existing snapshots kept;
+  `pivot_index_built` marker distinguishes "0 array classes" from "not built").
+  Built eagerly at `FinalizeSnapshotAsync` (new captures open instantly) with a lazy
+  fallback for old snapshots; the picker reads the tiny table. Persists across
+  restarts. Cleaned up on delete + quota-eviction. +3 tests.
+- **Capture progress: elapsed + ETA + %.** Status now shows
+  `Capturing… X/Y (NN%) — objects/fields · 1m23s elapsed, ~45s left` (ETA from the
+  elapsed/fraction projection, suppressed under 2%). Finalize shows "building pivot
+  index…".
+- **Delete All (truncate) button** on the Snapshot tab — `DeleteAllSnapshotsAsync`
+  truncates every table for the active game + VACUUM, off the UI thread.
+- **Taskbar/window icon was transparent on the AOT exe.** Avalonia's `.ico` decode
+  under AOT/Skia is flaky; switched `Window.Icon` to a PNG (extracted from the
+  existing `Mainicon.ico`). The exe file icon (`ApplicationIcon`, .ico) is unchanged
+  and was already fine. *(The app.manifest already existed + is DPI-aware, so that
+  wasn't the cause.)*
+
+Tests **1254 C# + 393 dll + 31 utf8**, all green. AOT publish clean +
+launch-verified (window opens, no crash). **LIVE-VERIFY PENDING (user):** Pivot
+first-open is now fast; selecting any snapshot responsive; capture shows ETA; Delete
+All works; **taskbar icon renders** (PNG fix).
+
+-----
+
 ## 2026-06-05 — AOT: Windows-only Avalonia backend (drop X11/macOS/FreeDesktop) (build 918)
 
 The Native-AOT publish emitted a wall of `ILC: ... will always throw because:

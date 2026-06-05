@@ -72,6 +72,9 @@
       <Button Content="{StaticResource str.Snapshot.Delete}" Command="{Binding DeleteCommand}"
               CommandParameter="{Binding SelectedSnapshot}" Padding="8,3"
               IsEnabled="{Binding !IsDeleting}"/>
+      <Button Content="{StaticResource str.Snapshot.DeleteAll}" Command="{Binding DeleteAllCommand}"
+              Padding="8,3" IsEnabled="{Binding !IsDeleting}"
+              ToolTip.Tip="{StaticResource str.Snapshot.DeleteAllTip}"/>
       <Button Content="{StaticResource str.Snapshot.OpenDbFolder}" Command="{Binding OpenDbFolderCommand}"
               Padding="8,3" ToolTip.Tip="{StaticResource str.Snapshot.OpenDbFolderTip}"/>
     </StackPanel>
