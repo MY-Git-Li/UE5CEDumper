@@ -325,8 +325,9 @@ memory-reading code.
 
 ### V3. Lean Candidate record — string interning + deferred enrichment
 
-- **V3-A — shared FieldDescriptor.** Effort: **M**. Risk: **low** (pure DLL-internal,
-  no wire-schema change). Why: `ValueScan::Candidate`
+- **V3-A — shared FieldDescriptor.** ✅ **CODE COMPLETE on dev (build 926, commit
+  `1161411`) — live First/Next scan verification still pending.** Effort: **M**.
+  Risk: **low** (pure DLL-internal, no wire-schema change). Why: `ValueScan::Candidate`
   ([ValueScan.h:294](../dll/src/ValueScan.h#L294)) is **~240 B, 6 `std::string`s**,
   and `className` / `definingClassName` / `fieldName` / `fieldType` / `boolFieldMask`
   / `fieldOffset` are all functions of `(class, field)` — identical across thousands
@@ -334,9 +335,14 @@ memory-reading code.
   computed once** in `sci->fields` / `sci->className`
   ([Aura.cpp:4109](../dll/src/Aura.cpp#L4109)). Intern them into a session-level
   `vector<FieldDescriptor>` + a string pool; Candidate stores a `uint32 descriptorIdx`.
-  Target: **240 B → ~32 B (~7.5×)**, and 5 fewer heap allocations per candidate.
-  50k session drops ~35 MB → ~2 MB in the target process. **This is item (b) — being
-  done this session.**
+  Target: **~240 B → ~72 B**, and (the dominant win) 5 fewer heap-string
+  allocations per candidate — numeric scans now allocate zero per candidate.
+  **Live-verify**: on a 1M-object game run a known value First Scan across
+  numeric / string / FVector / TArray-element / NumericNoByte, confirm the
+  candidate rows (class / defining-class / field name incl. `Field[idx]` /
+  value) render identically to pre-926, then a Next Scan prunes correctly.
+  The interning + parallel-merge index remap is only exercised end-to-end
+  in-process, so a clean unit run ≠ correct scan.
 - **V3-B — instance table dedupe.** Effort: **S**. Risk: **low**. Why: `instanceName`
   is per-instance, but one object with several matching fields repeats it N times.
   Pull `instanceAddr → instanceName` into a session-level `vector<{addr,name}>`;
