@@ -108,4 +108,19 @@ public interface ISnapshotStore
     /// <paramref name="quotaBytes"/> &lt;= 0 means unlimited (no-op). Returns the
     /// number of snapshots dropped.</summary>
     Task<int> EnforceQuotaAsync(long quotaBytes, CancellationToken ct = default);
+
+    // --- N1: per-game, per-tab class denylists (noise picker) ---
+
+    /// <summary>Read the active game's class denylist for one tab
+    /// (<paramref name="scope"/>). Returns an empty set when no game is active or
+    /// the denylist file is absent / malformed (defensive — never throws on a
+    /// missing/corrupt file). The three scopes are independent. Ordinal comparison.</summary>
+    HashSet<string> GetClassDenylist(DenylistScope scope);
+
+    /// <summary>Persist the active game's class denylist for one tab
+    /// (<paramref name="scope"/>), preserving the other two tabs' lists (atomic
+    /// temp-then-rename write). No-op when no game is active. Pass an empty set to
+    /// clear that tab's picks. Ordinal comparison. Set is copied — caller's set is
+    /// not retained.</summary>
+    void SetClassDenylist(DenylistScope scope, HashSet<string> classes);
 }

@@ -38,7 +38,15 @@ internal static class Program
 
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>()
-            .UsePlatformDetect()
+            // Windows-only tool (injects into Windows games), so wire the Win32 +
+            // Skia backends EXPLICITLY instead of UsePlatformDetect(). This drops
+            // the Avalonia.Desktop meta-package (which dragged in the X11 / macOS
+            // Native / FreeDesktop backends + Tmds.DBus), eliminating their
+            // "will always throw" ILC AOT warnings — those code paths can never
+            // run on Windows. UsePlatformDetect() itself lives in Avalonia.Desktop,
+            // so it's gone too.
+            .UseWin32()
+            .UseSkia()
             // AOT: WinUI Composition via MicroCom COM interop crashes on Native AOT.
             // Force software redirection surface to bypass the compositor COM path.
             .With(new Win32PlatformOptions

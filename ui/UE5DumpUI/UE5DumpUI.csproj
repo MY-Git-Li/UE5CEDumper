@@ -59,10 +59,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Avalonia -->
+    <!-- Avalonia. Windows-only: reference the Win32 + Skia backends DIRECTLY
+         instead of the Avalonia.Desktop meta-package, which also pulls in the
+         X11 / macOS-Native / FreeDesktop backends we never run. Dropping them
+         removes their "will always throw" Native-AOT ILC warnings. -->
     <PackageReference Include="Avalonia" Version="12.0.3" />
     <PackageReference Include="Avalonia.Angle.Windows.Natives" Version="2.1.27548.20260419" />
-    <PackageReference Include="Avalonia.Desktop" Version="12.0.3" />
+    <PackageReference Include="Avalonia.Win32" Version="12.0.3" />
+    <PackageReference Include="Avalonia.Skia" Version="12.0.3" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.3" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.3" />
     <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.0.0" />
@@ -76,8 +80,6 @@
     <!-- MVVM -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
     <PackageReference Include="HarfBuzzSharp" Version="8.3.1.5" />
-    <PackageReference Include="HarfBuzzSharp.NativeAssets.Linux" Version="8.3.1.5" />
-    <PackageReference Include="HarfBuzzSharp.NativeAssets.WebAssembly" Version="8.3.1.5" />
     <PackageReference Include="MicroCom.Runtime" Version="0.11.6" />
 
     <!-- Logging -->
@@ -85,10 +87,7 @@
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.*" />
     <PackageReference Include="SkiaSharp" Version="3.119.4" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="3.119.4" />
-    <PackageReference Include="SkiaSharp.NativeAssets.WebAssembly" Version="3.119.4" />
     <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="3.119.4" />
-    <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -130,9 +129,10 @@
   </ItemGroup>
 
   <!-- Prevent Avalonia assemblies from being over-trimmed during AOT publish.
-       Avalonia.Win32 and Avalonia.Skia are loaded via reflection by UsePlatformDetect()
-       and would be partially trimmed without explicit roots, causing NullReferenceException
-       in the rendering compositor thread at runtime. -->
+       The Win32 + Skia backends are wired explicitly in Program.cs but still
+       construct types via reflection internally; without explicit roots they'd
+       be partially trimmed, causing NullReferenceException in the rendering
+       compositor thread at runtime. -->
   <ItemGroup>
     <!-- Core -->
     <TrimmerRootAssembly Include="Avalonia" />
@@ -144,8 +144,7 @@
     <TrimmerRootAssembly Include="Avalonia.Controls" />
     <TrimmerRootAssembly Include="Avalonia.Controls.DataGrid" />
     <TrimmerRootAssembly Include="Avalonia.Themes.Fluent" />
-    <!-- Platform backend (loaded via reflection — critical) -->
-    <TrimmerRootAssembly Include="Avalonia.Desktop" />
+    <!-- Platform backend (Win32-only; constructed via reflection — critical) -->
     <TrimmerRootAssembly Include="Avalonia.Win32" />
     <TrimmerRootAssembly Include="Avalonia.Win32.Automation" />
     <!-- Rendering backend (loaded via reflection — critical) -->

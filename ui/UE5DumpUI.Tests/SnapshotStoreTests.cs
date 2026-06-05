@@ -372,4 +372,209 @@ public class SnapshotStoreTests : IDisposable
         Assert.Equal(b, list[0].Id);  // newest (higher id) first
         Assert.Equal(a, list[1].Id);
     }
+
+    // ---------- N1: per-game class denylist (noise picker) ----------
+
+    private static SnapshotCapturedObject MakeObjectAs(string className, int index,
+        params (string name, string type, string hex)[] fields)
+    {
+        var o = new SnapshotCapturedObject
+        {
+            Index = index, Addr = $"0x{index:X}", Name = $"{className}_{index}",
+            ClassName = className, OuterClassName = "World",
+            Path = $"/Game/Map.Map:PersistentLevel.{className}_{index}",
+        };
+        foreach (var (name, type, hex) in fields)
+            o.Fields.Add(new SnapshotCapturedField { Name = name, Type = type, Hex = hex, Offset = 0 });
+        return o;
+    }
+
+    // Two snapshots covering two classes: BP_Player_C (gameplay-relevant) and
+    // W_HUD_C (noise). Both classes have changing values between A and B so the
+    // denylist + Top-N picker have something to act on.
+    private async Task<(long a, long b)> SeedTwoClassPairAsync(CancellationToken ct)
+    {
+        long a = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "a" }, ct);
+        await _store.WriteChunkAsync(a, new[]
+        {
+            MakeObjectAs("BP_Player_C", 1, ("Health", "IntProperty", "64000000")), // 100
+            MakeObjectAs("W_HUD_C",     2, ("Alpha",  "FloatProperty", "00000000")),// 0.0
+            MakeObjectAs("W_HUD_C",     3, ("Width",  "FloatProperty", "00007044")),// 960
+        }, ct);
+        await _store.FinalizeSnapshotAsync(a, 3, 3, ct);
+
+        long b = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "b" }, ct);
+        await _store.WriteChunkAsync(b, new[]
+        {
+            MakeObjectAs("BP_Player_C", 1, ("Health", "IntProperty", "5A000000")), // 90 (down)
+            MakeObjectAs("W_HUD_C",     2, ("Alpha",  "FloatProperty", "0000803F")),// 1.0 (up)
+            MakeObjectAs("W_HUD_C",     3, ("Width",  "FloatProperty", "0000F043")),// 480 (down)
+        }, ct);
+        await _store.FinalizeSnapshotAsync(b, 3, 3, ct);
+        return (a, b);
+    }
+
+    [Fact]
+    public async Task DiffSnapshots_ExcludedClasses_FiltersOutNoiseClass()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (a, b) = await SeedTwoClassPairAsync(ct);
+
+        var deny = new HashSet<string>(StringComparer.Ordinal) { "W_HUD_C" };
+        var diff = await _store.DiffSnapshotsAsync(a, b,
+            new SnapshotDiffFilter { ExcludedClasses = deny }, ct);
+
+        // Only the gameplay class row survives. The two W_HUD_C rows are gone.
+        var row = Assert.Single(diff.Changed);
+        Assert.Equal("BP_Player_C", row.ClassName);
+        Assert.Equal("Health", row.PropName);
+    }
+
+    [Fact]
+    public async Task DiffSnapshots_TopContributors_RanksByHitCount_ExcludesDenied()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (a, b) = await SeedTwoClassPairAsync(ct);
+
+        // No denylist yet: both classes should appear, W_HUD_C first (2 hits vs 1).
+        var diff = await _store.DiffSnapshotsAsync(a, b, new SnapshotDiffFilter(), ct);
+        Assert.Equal(2, diff.TopContributors.Count);
+        Assert.Equal("W_HUD_C",     diff.TopContributors[0].ClassName);
+        Assert.Equal(2,             diff.TopContributors[0].HitCount);
+        Assert.Equal("BP_Player_C", diff.TopContributors[1].ClassName);
+        Assert.Equal(1,             diff.TopContributors[1].HitCount);
+
+        // Denylist suppresses W_HUD_C from BOTH the rows AND the picker (the user
+        // can't re-suggest a class they already hid).
+        var deny = new HashSet<string>(StringComparer.Ordinal) { "W_HUD_C" };
+        var diff2 = await _store.DiffSnapshotsAsync(a, b,
+            new SnapshotDiffFilter { ExcludedClasses = deny }, ct);
+        var only = Assert.Single(diff2.TopContributors);
+        Assert.Equal("BP_Player_C", only.ClassName);
+    }
+
+    [Fact]
+    public async Task Diff_AlreadyCancelledToken_Throws()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (a, b) = await SeedTwoClassPairAsync(ct);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => _store.DiffSnapshotsAsync(a, b, new SnapshotDiffFilter(), cts.Token));
+    }
+
+    [Fact]
+    public async Task SpcQuery_AlreadyCancelledToken_Throws()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (a, b) = await SeedTwoClassPairAsync(ct);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var query = new SpcQuery
+        {
+            SnapshotIds = { a, b },
+            Predicates  = { SpcPredicateKind.Any, SpcPredicateKind.Changed },
+            AbsolutePredicates = { new SpcAbsolutePredicate(), new SpcAbsolutePredicate() },
+            JoinMode = SpcJoinMode.InSession,
+        };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => _store.SpcQueryAsync(query, cts.Token));
+    }
+
+    [Fact]
+    public async Task SpcQuery_ExcludedClasses_FiltersOutNoiseClass()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (a, b) = await SeedTwoClassPairAsync(ct);
+
+        var deny = new HashSet<string>(StringComparer.Ordinal) { "W_HUD_C" };
+        var query = new SpcQuery
+        {
+            SnapshotIds = { a, b },
+            Predicates  = { SpcPredicateKind.Any, SpcPredicateKind.Changed },
+            AbsolutePredicates = { new SpcAbsolutePredicate(), new SpcAbsolutePredicate() },
+            JoinMode = SpcJoinMode.InSession,
+            ExcludedClasses = deny,
+        };
+        var res = await _store.SpcQueryAsync(query, ct);
+
+        // Only the gameplay class survives the chain — W_HUD_C never enters the
+        // candidate dict on the anchor pass.
+        var row = Assert.Single(res.Rows);
+        Assert.Equal("BP_Player_C", row.ClassName);
+        Assert.Equal("Health",      row.PropName);
+
+        // Top-N likewise excludes the denied class.
+        var only = Assert.Single(res.TopContributors);
+        Assert.Equal("BP_Player_C", only.ClassName);
+    }
+
+    [Fact]
+    public void ClassDenylist_PersistsAcrossStoreReload_PerGame()
+    {
+        // Game A: deny two classes (Spc scope).
+        _store.SetActiveGame("GAMEAA");
+        var picksA = new HashSet<string>(StringComparer.Ordinal) { "W_HUD_C", "BP_Tick_C" };
+        _store.SetClassDenylist(DenylistScope.Spc, picksA);
+
+        // Game B: independently deny a different class.
+        _store.SetActiveGame("GAMEBB");
+        var picksB = new HashSet<string>(StringComparer.Ordinal) { "WBP_Inventory_C" };
+        _store.SetClassDenylist(DenylistScope.Spc, picksB);
+
+        // Fresh store instance over the same temp dir — proves the JSON survived.
+        var store2 = new SnapshotStore(new MockPlatformService(_tempDir));
+        store2.SetActiveGame("GAMEAA");
+        Assert.Equal(picksA, store2.GetClassDenylist(DenylistScope.Spc));
+        store2.SetActiveGame("GAMEBB");
+        Assert.Equal(picksB, store2.GetClassDenylist(DenylistScope.Spc));
+        // Unknown game: empty (not the wrong game's list).
+        store2.SetActiveGame("UNKNOWN");
+        Assert.Empty(store2.GetClassDenylist(DenylistScope.Spc));
+    }
+
+    [Fact]
+    public void ClassDenylist_ScopesAreIndependent_AndCoexistInOneFile()
+    {
+        _store.SetActiveGame("SCOPED");
+        var diff  = new HashSet<string>(StringComparer.Ordinal) { "DiffOnly_C" };
+        var spc   = new HashSet<string>(StringComparer.Ordinal) { "SpcOnly_C", "Shared_C" };
+        var pivot = new HashSet<string>(StringComparer.Ordinal) { "PivotOnly_C" };
+        // Writing one scope must not clobber the others (read-modify-write).
+        _store.SetClassDenylist(DenylistScope.Diff, diff);
+        _store.SetClassDenylist(DenylistScope.Spc, spc);
+        _store.SetClassDenylist(DenylistScope.Pivot, pivot);
+
+        var store2 = new SnapshotStore(new MockPlatformService(_tempDir));
+        store2.SetActiveGame("SCOPED");
+        Assert.Equal(diff,  store2.GetClassDenylist(DenylistScope.Diff));
+        Assert.Equal(spc,   store2.GetClassDenylist(DenylistScope.Spc));
+        Assert.Equal(pivot, store2.GetClassDenylist(DenylistScope.Pivot));
+        // A class in Spc is NOT reported under Diff/Pivot (independence).
+        Assert.DoesNotContain("Shared_C", store2.GetClassDenylist(DenylistScope.Diff));
+        Assert.DoesNotContain("Shared_C", store2.GetClassDenylist(DenylistScope.Pivot));
+    }
+
+    [Fact]
+    public void ClassDenylist_WithoutActiveGame_DoesNotPersist()
+    {
+        // No SetActiveGame call — default DB; the store should refuse to save so a
+        // noise pick from one game doesn't leak into the default bucket.
+        _store.SetClassDenylist(DenylistScope.Spc, new HashSet<string>(StringComparer.Ordinal) { "X" });
+
+        var store2 = new SnapshotStore(new MockPlatformService(_tempDir));
+        Assert.Empty(store2.GetClassDenylist(DenylistScope.Spc));
+    }
+
+    [Fact]
+    public void ClassDenylist_FilenameSanitisedForPeHash()
+    {
+        _store.SetActiveGame("../../escape");
+        _store.SetClassDenylist(DenylistScope.Spc, new HashSet<string>(StringComparer.Ordinal) { "A" });
+
+        // Only ASCII alphanumerics survive in the filename.
+        var expected = Path.Combine(_tempDir, "UE5CEDumper", "snapshots.escape.denylist.json");
+        Assert.True(File.Exists(expected));
+    }
 }

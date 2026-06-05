@@ -18,6 +18,12 @@ public sealed class SnapshotDiffFilter
     /// <summary>Also count Added / Removed fields (object set churn). Off skips
     /// the two NOT EXISTS passes.</summary>
     public bool IncludeAddedRemoved { get; set; } = true;
+
+    /// <summary>Per-game class denylist (N1). Class FQNs in this set are skipped
+    /// during both the A and B load passes. Null / empty = no filtering. Ordinal
+    /// comparison. Note: Added/Removed counts also respect the denylist so the
+    /// churn numbers reflect the visible result set.</summary>
+    public HashSet<string>? ExcludedClasses { get; set; }
 }
 
 /// <summary>One field whose value changed between snapshot A (old) and B (new).
@@ -53,4 +59,8 @@ public sealed class SnapshotDiffResult
     public int  RemovedCount  { get; set; }
     /// <summary>True when the changed-row cap was hit.</summary>
     public bool Truncated     { get; set; }
+    /// <summary>Top-N classes by hit count across <see cref="Changed"/> (N1 noise
+    /// picker). Sorted desc by count. Classes already in
+    /// <see cref="SnapshotDiffFilter.ExcludedClasses"/> are NOT included here.</summary>
+    public List<ClassNoiseRow> TopContributors { get; } = new();
 }

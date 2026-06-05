@@ -11,6 +11,238 @@ build number from `build_number.txt` so commits can be cross-referenced.
 
 -----
 
+## 2026-06-05 — AOT: Windows-only Avalonia backend (drop X11/macOS/FreeDesktop) (build 918)
+
+The Native-AOT publish emitted a wall of `ILC: ... will always throw because:
+Failed to load type 'Tmds.DBus.Protocol.Connection'` warnings from
+`Avalonia.X11` / `Avalonia.FreeDesktop` — code paths that can never run in a
+Windows-only tool (UE5CEDumper injects into Windows games). Removed them at the
+source instead of suppressing:
+
+- **`Avalonia.Desktop` → `Avalonia.Win32` + `Avalonia.Skia`** (the Desktop
+  meta-package bundled the X11 / macOS-Native / FreeDesktop backends). Dropped
+  the now-orphaned `Tmds.DBus.Protocol` and the Linux/WebAssembly native assets
+  (`{HarfBuzzSharp,SkiaSharp}.NativeAssets.{Linux,WebAssembly}`).
+- **`Program.cs`: `UsePlatformDetect()` → `.UseWin32().UseSkia()`.**
+  `UsePlatformDetect` itself lives in `Avalonia.Desktop`, so it had to go; the
+  explicit Win32+Skia wiring is exactly what PlatformDetect resolved to on
+  Windows anyway.
+- TrimmerRootAssembly: dropped `Avalonia.Desktop`.
+
+Result: AOT publish is now **warning-free** (was a dozen X11 ILC lines). Single-
+file exe ~46.8 MB. **LIVE-VERIFY PENDING (user):** launch the published
+`dist/UE5DumpUI.exe` and confirm the window opens + renders — backend init is a
+runtime concern the build can't prove. (Reference: CrimsonAtomic keeps
+Avalonia.Desktop + NoWarn; we went the leaner remove-the-backend route the user
+asked for.)
+
+-----
+
+## 2026-06-05 — Experimental UX hardening batch 2 (build 916)
+
+Second live-test feedback pass on the Snapshot / SPC / Pivot tabs.
+
+- **Capture lock-down (real bug).** `OnIsCapturingChanged` only raised `CanCapture`,
+  so `CanEditSettings` never re-evaluated → Scope/GameOnly/Quota/Label stayed editable
+  during a capture. The capture loop reads `GameOnly` **per chunk**, so toggling it
+  mid-capture would corrupt the snapshot. Now raises `CanEditSettings` + `CanRunDiff`,
+  and `CanRunDiff` includes `!IsCapturing` (Run Diff disabled during capture).
+- **Delete Selected hang.** `DeleteSnapshotAsync` (DELETE over ~1.7M rows,
+  `ExecuteNonQueryAsync` runs synchronously) ran on the UI thread → freeze. Wrapped in
+  `Task.Run`, added an `IsDeleting` busy flag (disables the Delete button + status),
+  refreshes usage after.
+- **Class Pivot slow + unresponsive (the 80% CPU / "can't select snapshot" report).**
+  `LoadClassesAsync` (GROUP BY `COUNT(DISTINCT gobjects_index)` over ~1.7M rows) +
+  `LoadFieldsAsync` were uncancellable, so rapidly changing the snapshot stacked
+  several heavy scans on the thread pool. Added a shared `_loadCts` (cancel-prior-on-new)
+  threaded into the store list methods (+ early `ThrowIfCancellationRequested`), a
+  "Loading classes…" status, and `CancelPendingWork` now also cancels loads. Stacking
+  eliminated. **Plus per-snapshot caching (the real fix for "re-scans on every
+  dropdown"):** a snapshot is write-once / immutable, so its class + field lists are
+  cached in-VM keyed by `(snapshotId, arrayMode)` / `(snapshotId, class)` — computed
+  ONCE, instant on every re-select for the session, no dirty-flag needed. Cache entries
+  for deleted snapshots are pruned in `RefreshAsync`; the denylist filter is applied on
+  top of the cache so hiding a class never triggers a re-scan. +1 test (CountingStore
+  proves the class list is scanned once across re-selects).
+- **Pivot intro hint** for transient inventory: their object path is identical
+  (`//Engine/Transient/Item`), so Identity mode merges them into one group (visible
+  collision ⟨N: …⟩) — use a Field key (ItemID) instead. Same transient-path cause as
+  the SPC issue, but Pivot degrades gracefully (single-snapshot, no value-pairing).
+- **SPC "materials don't show up" (root-caused).** Transient inventory objects all
+  normalise to `//Engine/Transient/Item`, so the **Strict** join (norm_path + offset)
+  collapsed 4 distinct items into one candidate; with no `ORDER BY` on the row stream
+  the cross-snapshot value pairing was arbitrary, so the directional predicate failed.
+  **In-session** join (gobjects_index) tracks each object exactly. Fix: auto-select
+  In-session when all ticked snapshots share a `GameSessionId`, Strict otherwise
+  (cross-session) — overridable; a manual combo change sticks. Cross-session SPC still
+  works via Strict/Loose (the user's other ask).
+- **Single-click checkboxes everywhere.** `DataGridCheckBoxColumn` needs select-then-click
+  (2 clicks). Converted all four (SPC Use + noise Pick, Snapshot noise Pick, Pivot
+  Project) to `DataGridTemplateColumn` + centered `CheckBox` (TwoWay) → one click toggles.
+- **Snapshot pickers show the timestamp.** A custom label hid *when* a snapshot was taken
+  in the one-line diff/pivot ComboBoxes. New `SnapshotMeta.PickerDisplay` = "Label ·
+  yyyy-MM-dd HH:mm:ss (local)" used there (the saved-snapshots grid keeps its separate
+  Captured column).
+- **Diff Old/New auto-swap.** If Old is picked newer than New, the diff swaps them by
+  snapshot Id (= capture order) so Increased/Decreased stay correct, noting it in the
+  status.
+- **Capture layout compaction.** Scope / GameOnly / Quota / Label / Capture / Cancel now
+  share one WrapPanel row (was two), denser now that capture is an Expander.
+
+Tests: **1250 C# + 393 dll + 31 utf8 = 1674**, all green; AOT publish clean. **LIVE-VERIFY
+PENDING (user):** (1) settings locked during capture; (2) Delete no longer hangs; (3) Pivot
+snapshot/class selection responsive (no CPU peg); (4) SPC same-session auto-picks In-session
+and the materials now appear; (5) one-click checkboxes; (6) diff/pivot combos show timestamps;
+(7) reversed Old/New auto-swaps.
+
+-----
+
+## 2026-06-05 — N1 follow-ups: per-tab denylists, cancellation, grayout, collapsible layout (build 910)
+
+Live-test feedback pass on the N1 noise picker. Six changes:
+
+**Per-tab denylist isolation (was one shared list).** The user wanted each
+experimental tab to keep its OWN exclude list — hiding a class in SPC must not
+affect Snapshot Diff or Class Pivot. `ClassDenylistSettings` now holds three
+independent lists (`Diff` / `Spc` / `Pivot`) in one per-game JSON file; the store
+API is `GetClassDenylist(DenylistScope)` / `SetClassDenylist(DenylistScope, set)`
+with read-modify-write so writing one scope preserves the other two. SPC VM uses
+`Spc`, Snapshot/Diff uses `Diff`, Pivot uses `Pivot`.
+
+**Class Pivot right-click "Hide this class".** Pivot has no result-derived Top-N
+picker (it analyses one class), so its denylist is populated by a ComboBox
+ContextMenu "Hide selected class from picker" → adds to the Pivot-scope list and
+drops the class from the picker. A hidden-class chips bar (with per-chip remove +
+Clear all) appears below the results when non-empty (`HasHiddenClasses`).
+
+**Cancellation + the tab-switch hang fix.** The reported symptom — switching to
+Class Pivot mid-SPC-query froze the UI (50-80% CPU) and the process lingered after
+close, blocking re-launch — was an uncancellable multi-million-row in-memory query
+competing with the new tab's load. Each experimental VM now owns a
+`CancellationTokenSource`, cancels its prior op on a new one, and exposes
+`CancelPendingWork()`. `MainTabs_SelectionChanged` cancels every experimental tab's
+heavy op when navigating away from it; `MainWindow.OnClosed` cancels all three so
+the process exits promptly (releasing the single-instance mutex). Crucially —
+`Microsoft.Data.Sqlite`'s `ReadAsync(ct)` runs synchronously and **ignores the
+token**, so explicit `ct.ThrowIfCancellationRequested()` was added inside every
+heavy DB-read / in-memory loop (SPC anchor + per-pass + eval, diff A-load + B-stream,
+pivot row fetch ×2) at a ~64k-row cadence, plus an early bail before opening the
+connection. Capture (streaming, yields between chunks) is deliberately NOT cancelled
+on tab-switch.
+
+**Gray out inputs during operations.** Snapshot capture region was already gated
+(`CanEditSettings`, build 882); added gating for the diff inputs during `IsDiffing`,
+SPC query inputs + picker grid during `IsQuerying`, and the Pivot selection +
+key-mode + field grid during `IsBusy`. Progress bars / status / result-action
+buttons (Open / Copy) stay live.
+
+**Reset on the noise pickers.** SPC + Diff Top-N pickers gain a "Reset ticks" button
+(`ResetNoisePicksCommand`) that unticks all rows without touching the persisted
+denylist (distinct from "Clear all", which empties it). Pivot's equivalent is its
+"Clear all" hidden-classes button.
+
+**Collapsible Snapshot layout + splitter.** The capture region and the compare
+region are now `Expander`s (capture force-expanded while capturing via
+`CaptureSectionOpen`). A `GridSplitter` between the saved-snapshot list (2★) and the
+compare+diff block (5★) lets the user trade vertical space — the diff grid (which
+showed very few rows) can now be enlarged by collapsing the two regions and dragging
+the splitter.
+
+Tests +9 (scoped denylist independence + per-scope persistence + already-cancelled-
+token throws for Diff & SPC) → **1250 C# + 393 dll + 31 utf8 = 1674**, all green.
+Native AOT publish clean. **LIVE-VERIFY PENDING (user):** (1) per-tab isolation —
+hide a class in SPC, confirm it still shows in Diff/Pivot; (2) Pivot right-click
+"Hide this class" → confirm it leaves the picker + a chip appears + restart persists;
+(3) the tab-switch hang is gone (switch SPC→Pivot mid-query → "Query cancelled.",
+responsive); (4) collapse capture + compare, drag the splitter → diff grid grows.
+Note: the Pivot ContextMenu command binding inherits the ComboBox's VM DataContext
+(no `$parent` traversal), but ContextMenu-in-popup bindings are an Avalonia AOT risk
+worth confirming at runtime.
+
+-----
+
+## 2026-06-05 — Experimental N1: per-game class denylist + Top-N noise picker (build 908)
+
+SPC over BPGC-heavy games was flooding the 50k cap with directional-but-
+irrelevant hits — game-side widgets / anim BPs / tick components (`W_HUD_C`,
+`WBP_Inventory_C`, `BP_CooldownComponent_C`, …). Static denylists don't travel
+between games (each title's noise classes are named differently), and the
+existing `Aura::IsEnginePackage` skip only covers `/Script/*` not game-side
+BPGCs. N1 turns "what's noisy?" into a one-look UI question over the result
+the user just paid to compute.
+
+**Surface — Top-N picker on SPC + Diff result tabs.** Each run produces a
+`TopContributors: List<ClassNoiseRow>` (max 50) ranked by hit count over the
+*matched-rows* set (not raw capture), each row carrying up to 3 sample prop
+names. A fold-out Expander under the result grid lets the user tick rows and
+hit "Apply &amp; re-run" — the picks join the per-game denylist and the SPC/Diff
+query re-runs immediately so the cleaned result is visible without leaving the
+tab. Below the picker: chips showing the active denylist with one-click remove
+(`RemoveFromDenylistCommand`) + a "Clear all" button.
+
+**Persistence — sibling JSON next to the per-game DB**: `snapshots.&lt;pe_hash&gt;.
+denylist.json`. Deviation from the original spec (which proposed extending
+`experimental.json` with a per-pe_hash dict). Reasons: (a) the denylist
+auto-follows the game already keyed by pe_hash; (b) it survives FIFO snapshot
+eviction (eviction drops snapshots, not the user's noise picks); (c) no need
+to plumb pe_hash through the gate service. Source-gen JSON (`ClassDenylistJsonContext`),
+atomic temp-then-rename writes, swallow-and-log on failure — same pattern as
+`ExperimentalGate`. Filenames sanitise pe_hash to ASCII alphanumerics
+(same defence as the DB filename). Save is gated on an active game so the
+default DB never accumulates game-specific picks.
+
+**Filter application — at the anchor-load step (saves memory AND match cost).**
+`SpcQuery` and `SnapshotDiffFilter` gain `ExcludedClasses: HashSet&lt;string&gt;?`.
+In `SpcQueryAsync` denied classes are skipped on the anchor-load row stream
+*and* on every subsequent snapshot pass, so they never enter the candidate
+dict — cuts the in-memory hash-join's peak working set on noisy games. In
+`DiffSnapshotsAsync` denied classes are filtered out of BOTH the A-load and
+the B-stream (and `bTotal` excludes them too, so the Added/Removed churn
+numbers reflect only the visible classes). The Top-N accumulator counts
+post-filter, so the picker never re-suggests an already-denied class.
+
+**Pivot — picker filtering only, no Top-N UI.** Class Pivot is per-class
+(user picks ONE class to pivot), so a "Top contributor" computation from a
+single class is meaningless. Instead `ClassPivotViewModel.LoadClassesAsync`
+reads `_store.GetClassDenylist()` and skips denied entries before populating
+the bound `_allClasses` list. Symmetric UX: the same denylist that hides
+classes from SPC/Diff results also hides them from the Pivot picker.
+
+Files:
+- New `ui/UE5DumpUI/Models/ClassDenylistSettings.cs` (model + source-gen JSON ctx).
+- `ui/UE5DumpUI/Models/SpcModels.cs`: `SpcQuery.ExcludedClasses`,
+  `SpcResult.TopContributors`, `ClassNoiseRow`.
+- `ui/UE5DumpUI/Models/SnapshotDiffModels.cs`: `SnapshotDiffFilter.ExcludedClasses`,
+  `SnapshotDiffResult.TopContributors`.
+- `ui/UE5DumpUI/Core/ISnapshotStore.cs`: `GetClassDenylist` / `SetClassDenylist`.
+- `ui/UE5DumpUI/Services/SnapshotStore.cs`: denylist persistence (sibling JSON),
+  filter at anchor/per-pass row reads (SPC + Diff), `NoiseAccumulator` helper that
+  Top-N-ranks contributors with up to 3 sample props each.
+- `ui/UE5DumpUI/ViewModels/SpcQueryViewModel.cs` +
+  `ui/UE5DumpUI/ViewModels/SnapshotViewModel.cs`: denylist state,
+  `RebuildNoiseRows`, `ApplyNoisePicksAsync` / `RemoveFromDenylistAsync` /
+  `ClearDenylistAsync` commands, `NoiseRowVm` (shared).
+- `ui/UE5DumpUI/ViewModels/ClassPivotViewModel.cs`: denylist filter on
+  `LoadClassesAsync`.
+- `ui/UE5DumpUI/Views/SpcPanel.axaml` + `SnapshotPanel.axaml`: Expander +
+  picker DataGrid + chip ItemsControl (AOT-safe — no string-path Bindings).
+- `ui/UE5DumpUI/Resources/Strings/en.axaml`: `str.Noise.*` keys.
+- Tests +6 in `SnapshotStoreTests.cs`: `DiffSnapshots_ExcludedClasses_*`,
+  `DiffSnapshots_TopContributors_*`, `SpcQuery_ExcludedClasses_*`,
+  `ClassDenylist_PersistsAcrossStoreReload_PerGame`,
+  `ClassDenylist_WithoutActiveGame_DoesNotPersist`,
+  `ClassDenylist_FilenameSanitisedForPeHash`.
+
+Tests: **1247 C# + 393 dll + 31 utf8 = 1671**, all green. Native AOT publish
+clean (zero IL2026 / IL3050 — source-gen JSON for the new settings type
+registered via `ClassDenylistJsonContext`). LIVE-VERIFY PENDING (user):
+(1) capture two SPC-friendly snapshots on a noisy game; (2) tick the top 1-2
+W_*/WBP_*/anim_BP rows; (3) Apply &amp; re-run → confirm gameplay rows now
+dominate the result; (4) flip to the Pivot tab → confirm denied classes are
+absent from the picker; (5) restart the app → denylist still loaded.
+
+-----
+
 ## 2026-06-04 — Experimental Snapshot/SPC/Pivot: live-test hardening + in-memory engines (builds 879-884)
 
 A long live-test + iteration pass on the gated Snapshot / SPC Query / Class Pivot tabs.

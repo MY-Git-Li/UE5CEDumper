@@ -24,12 +24,14 @@ public partial class SnapshotViewModel : ViewModelBase
     private readonly IExperimentalGate? _gate;
     private readonly IPlatformService? _platform;
     private EngineState? _engineState;
-    private CancellationTokenSource? _cts;
+    private CancellationTokenSource? _cts;        // capture (streaming) op
+    private CancellationTokenSource? _diffCts;    // diff (heavy in-memory) op
 
     [ObservableProperty] private string _label = "";
     [ObservableProperty] private bool   _gameOnly = true;
     [ObservableProperty] private string _selectedScope = "NumericNoByte";
     [ObservableProperty] private bool   _isCapturing;
+    [ObservableProperty] private bool   _isDeleting;
     [ObservableProperty] private double _progress;          // 0..1
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private SnapshotMeta? _selectedSnapshot;
@@ -38,6 +40,11 @@ public partial class SnapshotViewModel : ViewModelBase
     [ObservableProperty] private string _allGamesText = "";
     [ObservableProperty] private double _usageRatio;        // 0..1 for the bar
     [ObservableProperty] private bool   _showUsageBar = true;
+
+    // Collapsible sections (E): the capture + compare regions fold away to give
+    // the diff grid more room. Capture is force-opened while capturing.
+    [ObservableProperty] private bool _captureSectionOpen = true;
+    [ObservableProperty] private bool _compareSectionOpen = true;
 
     // --- Diff (compare two snapshots) ---
     [ObservableProperty] private SnapshotMeta? _diffA;      // old
@@ -81,8 +88,14 @@ public partial class SnapshotViewModel : ViewModelBase
 
     public ObservableCollection<SnapshotDiffRow> DiffRows { get; } = new();
 
+    // --- N1: per-game class denylist (noise picker) ---
+    public ObservableCollection<NoiseRowVm> NoiseRows { get; } = new();
+    public ObservableCollection<string> ActiveDenylist { get; } = new();
+    [ObservableProperty] private bool _noisePanelOpen;
+    private HashSet<string> _excludedClasses = new(StringComparer.Ordinal);
+
     /// <summary>Two distinct snapshots picked and not mid-diff.</summary>
-    public bool CanRunDiff => DiffA != null && DiffB != null && DiffA != DiffB && !IsDiffing;
+    public bool CanRunDiff => DiffA != null && DiffB != null && DiffA != DiffB && !IsDiffing && !IsCapturing;
 
     partial void OnDiffAChanged(SnapshotMeta? value)   => OnPropertyChanged(nameof(CanRunDiff));
     partial void OnDiffBChanged(SnapshotMeta? value)   => OnPropertyChanged(nameof(CanRunDiff));
@@ -248,11 +261,25 @@ public partial class SnapshotViewModel : ViewModelBase
         _engineState = state;
         // Scope the store to this game's DB, then load its saved snapshots.
         _store.SetActiveGame(state.PeHash);
+        LoadDenylistFromStore();
         OnPropertyChanged(nameof(CanCapture));
         _ = RefreshAsync();
     }
 
-    partial void OnIsCapturingChanged(bool value) => OnPropertyChanged(nameof(CanCapture));
+    private void LoadDenylistFromStore()
+    {
+        _excludedClasses = _store.GetClassDenylist(DenylistScope.Diff);
+        ActiveDenylist.Clear();
+        foreach (var c in _excludedClasses.OrderBy(s => s, StringComparer.Ordinal))
+            ActiveDenylist.Add(c);
+    }
+
+    partial void OnIsCapturingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanCapture));
+        OnPropertyChanged(nameof(CanEditSettings));  // lock Scope/GameOnly/Quota/Label during capture
+        OnPropertyChanged(nameof(CanRunDiff));        // and the Run Diff button
+    }
 
     [RelayCommand]
     private async Task RefreshAsync()
@@ -318,6 +345,7 @@ public partial class SnapshotViewModel : ViewModelBase
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
         IsCapturing = true;
+        CaptureSectionOpen = true;   // force the capture region visible while capturing
         Progress = 0;
 
         long snapshotId = 0;
@@ -402,27 +430,56 @@ public partial class SnapshotViewModel : ViewModelBase
         catch (Exception ex) { _log.Error(Constants.LogCatView, "Snapshot: open DB folder failed", ex); }
     }
 
+    /// <summary>Cancel any in-flight heavy diff query — called when the user
+    /// switches away from the Snapshot tab so a big in-memory diff doesn't keep
+    /// burning CPU while another tab competes (the root cause of the tab-switch
+    /// UI hang). The streaming capture op is deliberately NOT cancelled here —
+    /// it yields between chunks and the user shouldn't silently lose a capture.</summary>
+    public void CancelPendingWork() => _diffCts?.Cancel();
+
     [RelayCommand]
     private async Task RunDiffAsync()
     {
         if (!CanRunDiff) return;
+        // Cancel a prior in-flight diff before starting a new one.
+        _diffCts?.Cancel();
+        _diffCts?.Dispose();
+        var cts = _diffCts = new CancellationTokenSource();
+        var ct = cts.Token;
+
         ClearError();
         IsDiffing = true;
         DiffStatusText = "Running diff… (large snapshots can take a while)";
         try
         {
             // Load the full changed set (capped); the filter boxes narrow it
-            // client-side afterward so typing is instant.
-            var filter = new SnapshotDiffFilter();
+            // client-side afterward so typing is instant. N1: hand the per-game
+            // denylist to the store so denied classes are filtered before the cap.
+            var filter = new SnapshotDiffFilter
+            {
+                ExcludedClasses = _excludedClasses.Count > 0 ? _excludedClasses : null,
+            };
+            // Auto-swap if the user picked Old newer than New: snapshot Id is
+            // monotonic (= capture order), so the lower Id is always the older one.
+            // Diffing with A older than B keeps the Increased/Decreased directions
+            // meaningful instead of silently inverted.
             long idA = DiffA!.Id, idB = DiffB!.Id;
-            var diff = await Task.Run(() => _store.DiffSnapshotsAsync(idA, idB, filter));
+            bool swapped = false;
+            if (idA > idB) { (idA, idB) = (idB, idA); swapped = true; }
+            var diff = await Task.Run(() => _store.DiffSnapshotsAsync(idA, idB, filter, ct), ct);
             _allDiff.Clear();
             _allDiff.AddRange(diff.Changed);
             RebuildDiffOptions();
+            RebuildNoiseRows(diff.TopContributors);
             var trunc = diff.Truncated ? $" (capped at {filter.MaxRows:N0})" : "";
+            var swapNote = swapped ? "  ·  (auto-swapped Old/New to capture order)" : "";
             _diffSummary =
-                $"{diff.Changed.Count:N0} changed{trunc}  ·  +{diff.AddedCount:N0} added  ·  −{diff.RemovedCount:N0} removed";
+                $"{diff.Changed.Count:N0} changed{trunc}  ·  +{diff.AddedCount:N0} added  ·  −{diff.RemovedCount:N0} removed{swapNote}";
             ApplyDiffFilter();
+        }
+        catch (OperationCanceledException)
+        {
+            DiffStatusText = "Diff cancelled.";
         }
         catch (Exception ex)
         {
@@ -431,7 +488,14 @@ public partial class SnapshotViewModel : ViewModelBase
         }
         finally
         {
-            IsDiffing = false;
+            // Only clear the busy flag if THIS run is still the current one (a
+            // newer run may have superseded us after cancellation).
+            if (ReferenceEquals(_diffCts, cts))
+            {
+                IsDiffing = false;
+                _diffCts.Dispose();
+                _diffCts = null;
+            }
         }
     }
 
@@ -469,23 +533,99 @@ public partial class SnapshotViewModel : ViewModelBase
     [RelayCommand]
     private async Task DeleteAsync(SnapshotMeta? meta)
     {
-        if (meta == null || IsCapturing) return;
+        if (meta == null || IsCapturing || IsDeleting) return;
+        IsDeleting = true;
+        StatusText = "Deleting snapshot…";
         try
         {
-            await _store.DeleteSnapshotAsync(meta.Id);
+            // DELETE over ~1.7M field rows + ExecuteNonQueryAsync runs synchronously
+            // under Microsoft.Data.Sqlite, so run it off the UI thread to keep the
+            // window responsive.
+            await Task.Run(() => _store.DeleteSnapshotAsync(meta.Id));
             // Detach any selection pointing at the row before removing it.
             if (ReferenceEquals(SelectedSnapshot, meta)) SelectedSnapshot = null;
             if (ReferenceEquals(DiffA, meta)) DiffA = null;
             if (ReferenceEquals(DiffB, meta)) DiffB = null;
             Snapshots.Remove(meta);
+            await UpdateUsageAsync();
+            StatusText = "Snapshot deleted.";
         }
         catch (Exception ex)
         {
             _log.Error(Constants.LogCatView, "Snapshot: delete failed", ex);
             SetError(ex);
         }
+        finally
+        {
+            IsDeleting = false;
+        }
     }
 
     private static string DefaultLabel()
         => $"Snapshot {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
+
+    // --- N1: noise picker helpers (shared shape with SpcQueryViewModel) ---
+
+    private void RebuildNoiseRows(IReadOnlyList<ClassNoiseRow> top)
+    {
+        NoiseRows.Clear();
+        foreach (var c in top)
+        {
+            NoiseRows.Add(new NoiseRowVm
+            {
+                ClassName          = c.ClassName,
+                HitCount           = c.HitCount,
+                SamplePropsDisplay = c.SamplePropsDisplay,
+            });
+        }
+    }
+
+    [RelayCommand]
+    private async Task ApplyNoisePicksAsync()
+    {
+        // Fresh set, not in-place mutation — an in-flight RunDiffAsync (background
+        // thread) may still be reading the captured reference via deny.Contains();
+        // HashSet isn't safe for concurrent read+write. See SpcQueryViewModel for
+        // the full rationale.
+        var updated = new HashSet<string>(_excludedClasses, StringComparer.Ordinal);
+        bool changed = false;
+        foreach (var row in NoiseRows)
+            if (row.Picked && updated.Add(row.ClassName)) changed = true;
+        if (!changed)
+        {
+            DiffStatusText = "No noise classes picked — tick one or more rows first.";
+            return;
+        }
+        _store.SetClassDenylist(DenylistScope.Diff, updated);
+        LoadDenylistFromStore();
+        await RunDiffAsync();
+    }
+
+    /// <summary>Untick all noise-picker rows (without touching the persisted
+    /// denylist). Distinct from Clear all, which empties the denylist.</summary>
+    [RelayCommand]
+    private void ResetNoisePicks()
+    {
+        foreach (var row in NoiseRows) row.Picked = false;
+    }
+
+    [RelayCommand]
+    private async Task RemoveFromDenylistAsync(string? className)
+    {
+        if (string.IsNullOrEmpty(className) || !_excludedClasses.Contains(className)) return;
+        var updated = new HashSet<string>(_excludedClasses, StringComparer.Ordinal);
+        updated.Remove(className);
+        _store.SetClassDenylist(DenylistScope.Diff, updated);
+        LoadDenylistFromStore();
+        await RunDiffAsync();
+    }
+
+    [RelayCommand]
+    private async Task ClearDenylistAsync()
+    {
+        if (_excludedClasses.Count == 0) return;
+        _store.SetClassDenylist(DenylistScope.Diff, new HashSet<string>(StringComparer.Ordinal));
+        LoadDenylistFromStore();
+        await RunDiffAsync();
+    }
 }

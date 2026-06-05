@@ -61,6 +61,8 @@ public partial class ClassPivotViewModel : ViewModelBase
     // and leave Fields holding a mix of two classes.
     private int _classLoadId;
     private int _fieldLoadId;
+    private CancellationTokenSource? _pivotCts;   // heavy pivot run
+    private CancellationTokenSource? _loadCts;    // class / field list loads (GROUP BY over ~1.7M rows)
 
     [ObservableProperty] private string _selectedSource = "Snapshot";
     [ObservableProperty] private SnapshotMeta? _selectedSnapshot;
@@ -128,12 +130,72 @@ public partial class ClassPivotViewModel : ViewModelBase
     {
         _engineState = state;
         _store.SetActiveGame(state.PeHash);
+        LoadDenylistFromStore();
         // A new connection invalidates any DataTable list/rows from a prior game.
         DataTables.Clear();
         _dataTable = null;
         SelectedDataTable = null;
         _ = RefreshAsync();
         if (IsDataTableSource) PendingLoad = RefreshDataTablesAsync();
+    }
+
+    // --- N1: Pivot-scope class denylist (right-click "Hide this class") ---
+    // Independent from the SPC / Diff lists — hiding a class here only affects
+    // the Pivot class picker.
+    private HashSet<string> _excludedClasses = new(StringComparer.Ordinal);
+
+    /// <summary>Classes the user hid from the Pivot picker (display + remove).</summary>
+    public ObservableCollection<string> ActiveDenylist { get; } = new();
+
+    /// <summary>True when at least one class is hidden — drives the chips bar's
+    /// visibility (Avalonia won't bind an int Count to a bool IsVisible).</summary>
+    public bool HasHiddenClasses => ActiveDenylist.Count > 0;
+
+    private void LoadDenylistFromStore()
+    {
+        _excludedClasses = _store.GetClassDenylist(DenylistScope.Pivot);
+        ActiveDenylist.Clear();
+        foreach (var c in _excludedClasses.OrderBy(s => s, StringComparer.Ordinal))
+            ActiveDenylist.Add(c);
+        OnPropertyChanged(nameof(HasHiddenClasses));
+    }
+
+    /// <summary>Right-click "Hide this class" → add to the Pivot denylist and
+    /// drop it from the picker. Operates on the right-clicked row (or the
+    /// selected class as a fallback).</summary>
+    [RelayCommand]
+    private async Task HideClassAsync(PivotClassInfo? cls)
+    {
+        var name = cls?.ClassName ?? SelectedClass?.ClassName;
+        if (string.IsNullOrEmpty(name) || _excludedClasses.Contains(name)) return;
+        var updated = new HashSet<string>(_excludedClasses, StringComparer.Ordinal) { name };
+        _store.SetClassDenylist(DenylistScope.Pivot, updated);
+        LoadDenylistFromStore();
+        if (ReferenceEquals(SelectedClass, cls)) SelectedClass = null;
+        await LoadClassesAsync();   // refresh the dropdown without the hidden class
+    }
+
+    /// <summary>Remove one class from the Pivot denylist (chip click) → it
+    /// reappears in the picker.</summary>
+    [RelayCommand]
+    private async Task RemoveFromDenylistAsync(string? className)
+    {
+        if (string.IsNullOrEmpty(className) || !_excludedClasses.Contains(className)) return;
+        var updated = new HashSet<string>(_excludedClasses, StringComparer.Ordinal);
+        updated.Remove(className);
+        _store.SetClassDenylist(DenylistScope.Pivot, updated);
+        LoadDenylistFromStore();
+        await LoadClassesAsync();
+    }
+
+    /// <summary>Drop every class from the Pivot denylist.</summary>
+    [RelayCommand]
+    private async Task ClearDenylistAsync()
+    {
+        if (_excludedClasses.Count == 0) return;
+        _store.SetClassDenylist(DenylistScope.Pivot, new HashSet<string>(StringComparer.Ordinal));
+        LoadDenylistFromStore();
+        await LoadClassesAsync();
     }
 
     partial void OnIsBusyChanged(bool value)            => OnPropertyChanged(nameof(CanRunPivot));
@@ -256,6 +318,15 @@ public partial class ClassPivotViewModel : ViewModelBase
             // collection rebuild inline inside a binding event (the crash).
             var list = await Task.Run(() => _store.ListSnapshotsAsync());
             UiCollection.Reset(Snapshots, list, () => SelectedSnapshot = null);
+            // Drop cache entries for snapshots that no longer exist (deleted) so a
+            // recaptured Id can't ever read a stale class/field list. (Ids are
+            // monotonic so reuse is unlikely, but this keeps the cache honest +
+            // bounded.)
+            var liveIds = new HashSet<long>(list.Select(s => s.Id));
+            foreach (var k in _classCache.Keys.Where(k => !liveIds.Contains(k.Item1)).ToList())
+                _classCache.Remove(k);
+            foreach (var k in _fieldCache.Keys.Where(k => !liveIds.Contains(k.Item1)).ToList())
+                _fieldCache.Remove(k);
             // Default to the newest snapshot (triggers class load).
             SelectedSnapshot = Snapshots.Count > 0 ? Snapshots[0] : null;
         }
@@ -266,29 +337,69 @@ public partial class ClassPivotViewModel : ViewModelBase
         }
     }
 
+    // Per-snapshot class-list cache. A snapshot is write-once / immutable, so its
+    // class list never changes — compute it ONCE and reuse for the rest of the
+    // session instead of re-running the ~1.7M-row GROUP BY on every dropdown
+    // change. Keyed by (snapshotId, arrayMode); pruned in RefreshAsync when a
+    // snapshot is deleted. The denylist filter is applied on top of the cached
+    // list (so hiding a class never needs a re-scan).
+    private readonly Dictionary<(long, bool), IReadOnlyList<PivotClassInfo>> _classCache = new();
+
     private async Task LoadClassesAsync()
     {
         OnPropertyChanged(nameof(CanRunPivot));
         if (SelectedSnapshot == null) { _allClasses.Clear(); Classes.Clear(); return; }
-        int id = ++_classLoadId;
         long snapId = SelectedSnapshot.Id;
         bool arrayMode = IsArraySource;
+        var key = (snapId, arrayMode);
+
+        // Cache hit → apply instantly, no scan, no thread.
+        if (_classCache.TryGetValue(key, out var cachedList))
+        {
+            ApplyClassList(cachedList);
+            StatusText = $"{_allClasses.Count:N0} classes — pick one to pivot.";
+            return;
+        }
+
+        // Cache miss → scan once. Cancel a prior in-flight load so rapidly
+        // changing the snapshot doesn't stack several heavy scans on the pool.
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        var cts = _loadCts = new CancellationTokenSource();
+        var ct = cts.Token;
+        int id = ++_classLoadId;
+        StatusText = "Loading classes… (first time for this snapshot)";
         try
         {
             // Array mode lists only classes that captured struct-array elements.
             var list = await Task.Run(() => arrayMode
-                ? _store.ListPivotArrayClassesAsync(snapId)
-                : _store.ListPivotClassesAsync(snapId));
+                ? _store.ListPivotArrayClassesAsync(snapId, ct)
+                : _store.ListPivotClassesAsync(snapId, ct), ct);
             if (id != _classLoadId) return;   // a newer snapshot/source superseded us
-            _allClasses.Clear();
-            _allClasses.AddRange(list);
-            ApplyClassFilter();
+            _classCache[key] = list;          // cache for the rest of the session
+            ApplyClassList(list);
+            StatusText = $"{_allClasses.Count:N0} classes — pick one to pivot.";
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a newer selection — leave the status to the new load.
         }
         catch (Exception ex)
         {
             _log.Error(Constants.LogCatView, "Pivot: list classes failed", ex);
             SetError(ex);
         }
+    }
+
+    // Apply a (cached or fresh) class list to the picker, filtered by the
+    // Pivot-scope denylist. N1: hidden classes never appear (independent of the
+    // SPC / Diff denylists — per-tab isolation).
+    private void ApplyClassList(IReadOnlyList<PivotClassInfo> list)
+    {
+        _allClasses.Clear();
+        foreach (var c in list)
+            if (!_excludedClasses.Contains(c.ClassName)) _allClasses.Add(c);
+        ApplyClassFilter();
     }
 
     private void ApplyClassFilter()
@@ -300,6 +411,10 @@ public partial class ClassPivotViewModel : ViewModelBase
         UiCollection.Reset(Classes, filtered, () => SelectedClass = null);
     }
 
+    // Per-(snapshot, class) field-list cache — same immutability rationale as the
+    // class cache: a snapshot's fields for a class never change, so scan once.
+    private readonly Dictionary<(long, string), IReadOnlyList<PivotFieldInfo>> _fieldCache = new();
+
     private async Task LoadFieldsAsync()
     {
         if (SelectedSnapshot == null || SelectedClass == null)
@@ -307,61 +422,87 @@ public partial class ClassPivotViewModel : ViewModelBase
             Fields.Clear(); KeyFieldOptions.Clear(); Results.Clear();
             return;
         }
-        int id = ++_fieldLoadId;
         long snapId = SelectedSnapshot.Id;
         string cls = SelectedClass.ClassName;
+        var key = (snapId, cls);
+
+        // Cache hit → rebuild the picker instantly (no scan).
+        if (_fieldCache.TryGetValue(key, out var cachedFields))
+        {
+            ApplyFieldList(cachedFields, cls);
+            return;
+        }
+
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        var cts = _loadCts = new CancellationTokenSource();
+        var ct = cts.Token;
+        int id = ++_fieldLoadId;
+        StatusText = "Loading fields…";
         try
         {
-            var fields = await Task.Run(() => _store.ListPivotFieldsAsync(snapId, cls));
+            var fields = await Task.Run(() => _store.ListPivotFieldsAsync(snapId, cls, ct), ct);
             // A newer class selection superseded us — leave its results intact.
             // (Clear is deferred to here so a stale load can't wipe the latest.)
             if (id != _fieldLoadId) return;
-            SelectedKeyField = null;   // detach selections before clearing bound lists
-            SelectedResult = null;
-            Fields.Clear();
-            KeyFieldOptions.Clear();
-            Results.Clear();
-            foreach (var f in fields)
-            {
-                Fields.Add(new PivotFieldPick(f,
-                    PivotKeyScorer.KeyScore(f), PivotKeyScorer.ValueScore(cls, f.Name)));
-                KeyFieldOptions.Add(f.Name);
-            }
-
-            // Suggest a key: pick the best-scoring field. If it scores well,
-            // default to Field mode on it; otherwise fall back to Identity.
-            var suggested = PivotKeyScorer.SuggestKey(fields);
-            if (suggested != null && PivotKeyScorer.KeyScore(suggested) >= 0.5)
-            {
-                SelectedKeyField = suggested.Name;
-                SelectedKeyMode  = "Field";
-            }
-            else
-            {
-                SelectedKeyField = KeyFieldOptions.FirstOrDefault();
-                SelectedKeyMode  = "Identity (object path)";
-            }
-
-            // Pre-tick the most interesting value fields (excludes the key),
-            // capped so a wide class doesn't project dozens of columns.
-            int ticked = 0;
-            foreach (var p in Fields.OrderByDescending(p => p.ValueScore))
-            {
-                if (ticked >= 3) break;
-                if (p.Name == SelectedKeyField) continue;
-                if (p.ValueScore >= PropertyScoringTable.InterestingThreshold)
-                {
-                    p.IsValue = true;
-                    ticked++;
-                }
-            }
-            StatusText = $"{Fields.Count} fields · suggested key: {SelectedKeyField ?? "(none)"}";
+            _fieldCache[key] = fields;
+            ApplyFieldList(fields, cls);
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a newer class/snapshot selection.
         }
         catch (Exception ex)
         {
             _log.Error(Constants.LogCatView, "Pivot: list fields failed", ex);
             SetError(ex);
         }
+    }
+
+    // Rebuild the field picker (+ key suggestion + value pre-ticks) from a cached
+    // or freshly-loaded field list. Pure UI work — no DB.
+    private void ApplyFieldList(IReadOnlyList<PivotFieldInfo> fields, string cls)
+    {
+        SelectedKeyField = null;   // detach selections before clearing bound lists
+        SelectedResult = null;
+        Fields.Clear();
+        KeyFieldOptions.Clear();
+        Results.Clear();
+        foreach (var f in fields)
+        {
+            Fields.Add(new PivotFieldPick(f,
+                PivotKeyScorer.KeyScore(f), PivotKeyScorer.ValueScore(cls, f.Name)));
+            KeyFieldOptions.Add(f.Name);
+        }
+
+        // Suggest a key: pick the best-scoring field. If it scores well, default
+        // to Field mode on it; otherwise fall back to Identity.
+        var suggested = PivotKeyScorer.SuggestKey(fields);
+        if (suggested != null && PivotKeyScorer.KeyScore(suggested) >= 0.5)
+        {
+            SelectedKeyField = suggested.Name;
+            SelectedKeyMode  = "Field";
+        }
+        else
+        {
+            SelectedKeyField = KeyFieldOptions.FirstOrDefault();
+            SelectedKeyMode  = "Identity (object path)";
+        }
+
+        // Pre-tick the most interesting value fields (excludes the key), capped so
+        // a wide class doesn't project dozens of columns.
+        int ticked = 0;
+        foreach (var p in Fields.OrderByDescending(p => p.ValueScore))
+        {
+            if (ticked >= 3) break;
+            if (p.Name == SelectedKeyField) continue;
+            if (p.ValueScore >= PropertyScoringTable.InterestingThreshold)
+            {
+                p.IsValue = true;
+                ticked++;
+            }
+        }
+        StatusText = $"{Fields.Count} fields · suggested key: {SelectedKeyField ?? "(none)"}";
     }
 
     /// <summary>List live DataTable instances (and subclasses) for the C4 picker.</summary>
@@ -520,6 +661,12 @@ public partial class ClassPivotViewModel : ViewModelBase
     private async Task RunPivotAsync()
     {
         if (!CanRunPivot) return;
+        // Cancel a prior in-flight pivot before starting a new one.
+        _pivotCts?.Cancel();
+        _pivotCts?.Dispose();
+        var cts = _pivotCts = new CancellationTokenSource();
+        var ct = cts.Token;
+
         ClearError();
         IsBusy = true;
         StatusText = "Running pivot…";
@@ -547,7 +694,7 @@ public partial class ClassPivotViewModel : ViewModelBase
                     ArrayField = SelectedArrayField!.ArrayField,
                     ValueProps = Fields.Where(f => f.IsValue).Select(f => f.Name).ToList(),
                 };
-                var arrRes = await Task.Run(() => _store.PivotArrayAsync(aq));
+                var arrRes = await Task.Run(() => _store.PivotArrayAsync(aq, ct), ct);
                 foreach (var row in arrRes.Rows) Results.Add(row);
                 var arrTrunc = arrRes.Truncated ? $" (capped at {aq.MaxGroups:N0})" : "";
                 string keyName = string.IsNullOrEmpty(SelectedArrayField.InnerKeyName)
@@ -564,12 +711,16 @@ public partial class ClassPivotViewModel : ViewModelBase
                 KeyField    = SelectedKeyField ?? "",
                 ValueFields = Fields.Where(f => f.IsValue).Select(f => f.Name).ToList(),
             };
-            var snapRes = await Task.Run(() => _store.PivotAsync(query));
+            var snapRes = await Task.Run(() => _store.PivotAsync(query, ct), ct);
             foreach (var row in snapRes.Rows) Results.Add(row);
 
             var snapTrunc = snapRes.Truncated ? $" (capped at {query.MaxGroups:N0})" : "";
             var keyDesc = IsFieldKeyMode ? $"key={query.KeyField}" : "identity";
             StatusText = $"{snapRes.GroupCount:N0} groups{snapTrunc} from {snapRes.InstanceCount:N0} instances · {keyDesc}";
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = "Pivot cancelled.";
         }
         catch (Exception ex)
         {
@@ -579,8 +730,22 @@ public partial class ClassPivotViewModel : ViewModelBase
         }
         finally
         {
-            IsBusy = false;
+            if (ReferenceEquals(_pivotCts, cts))
+            {
+                IsBusy = false;
+                _pivotCts.Dispose();
+                _pivotCts = null;
+            }
         }
+    }
+
+    /// <summary>Cancel an in-flight pivot run AND any class/field list load —
+    /// called when the user navigates away from the Class Pivot tab so a heavy
+    /// GROUP BY doesn't keep burning CPU.</summary>
+    public void CancelPendingWork()
+    {
+        _pivotCts?.Cancel();
+        _loadCts?.Cancel();
     }
 
     /// <summary>Open the selected group's representative object in Live Walker.</summary>

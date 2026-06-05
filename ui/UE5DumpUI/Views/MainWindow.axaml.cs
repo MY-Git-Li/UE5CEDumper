@@ -61,6 +61,15 @@ public partial class MainWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        // Stop any in-flight heavy experimental query so the process can exit
+        // promptly and release the single-instance mutex — otherwise a runaway
+        // uncancellable scan kept the old host alive and blocked re-launch.
+        if (DataContext is MainWindowViewModel vm)
+        {
+            vm.Spc?.CancelPendingWork();
+            vm.Snapshot?.CancelPendingWork();
+            vm.Pivot?.CancelPendingWork();
+        }
         if (DataContext is IDisposable d) d.Dispose();
     }
 
@@ -199,6 +208,16 @@ public partial class MainWindow : Window
         {
             vm.LiveWalker.StopAutoRefreshTimer();
         }
+
+        // Cancel any experimental tab's in-flight HEAVY query when navigating
+        // away from it. Leaving a multi-million-row SPC / diff / pivot running on
+        // a thread-pool thread while another tab loads pegs a core + allocates
+        // GBs — the tab-switch UI hang the user reported. Each VM's
+        // CancelPendingWork only cancels its heavy in-memory op (capture, which
+        // yields between chunks, is deliberately left alone).
+        if (tag != "SpcQuery")   vm.Spc?.CancelPendingWork();
+        if (tag != "Snapshot")   vm.Snapshot?.CancelPendingWork();
+        if (tag != "ClassPivot") vm.Pivot?.CancelPendingWork();
 
         // Opening any experimental tab while enabled permanently commits the
         // opt-in: the System-tab checkbox can no longer be unticked from here

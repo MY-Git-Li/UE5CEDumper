@@ -117,6 +117,11 @@ public sealed class SpcQuery
     /// <summary>Max matching candidates returned (default 50,000). One extra is
     /// probed to set <see cref="SpcResult.Truncated"/>.</summary>
     public int MaxRows { get; set; } = 50000;
+
+    /// <summary>Per-game class denylist (N1). Class FQNs in this set are skipped
+    /// at the anchor-load step and every subsequent snapshot pass, before the cap
+    /// is evaluated. Null / empty = no filtering. Ordinal comparison.</summary>
+    public HashSet<string>? ExcludedClasses { get; set; }
 }
 
 /// <summary>One field whose value sequence across the selected snapshots matched
@@ -147,4 +152,26 @@ public sealed class SpcResult
     public bool Truncated   { get; set; }
     /// <summary>Number of snapshots in the evaluated sequence.</summary>
     public int  SnapshotCount { get; set; }
+    /// <summary>Top-N classes by hit count across <see cref="Rows"/> (N1 noise
+    /// picker). Sorted desc by count. Classes already in the query's
+    /// <see cref="SpcQuery.ExcludedClasses"/> are NOT included here (they didn't
+    /// produce rows anyway). Empty when no rows matched.</summary>
+    public List<ClassNoiseRow> TopContributors { get; } = new();
+}
+
+/// <summary>One Top-N noise picker row: a class that produced many result rows in
+/// the most recent query, with sample prop names for context. Built post-query
+/// from the result row set so it reflects what the user is staring at, not the
+/// raw capture distribution.</summary>
+public sealed class ClassNoiseRow
+{
+    public string ClassName { get; set; } = "";
+    public int    HitCount  { get; set; }
+    /// <summary>Up to 3 most-frequent property names this class contributed —
+    /// helps the user judge whether the class is widget/anim noise or genuinely
+    /// gameplay-relevant before ticking it.</summary>
+    public List<string> SampleProps { get; set; } = new();
+
+    /// <summary>Comma-joined sample props for compact column display.</summary>
+    public string SamplePropsDisplay => string.Join(", ", SampleProps);
 }
