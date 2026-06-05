@@ -577,4 +577,61 @@ public class SnapshotStoreTests : IDisposable
         var expected = Path.Combine(_tempDir, "UE5CEDumper", "snapshots.escape.denylist.json");
         Assert.True(File.Exists(expected));
     }
+
+    // ---------- Pivot class-index + Delete All ----------
+
+    [Fact]
+    public async Task PivotClassIndex_ComputesInstanceCounts_AndIsIdempotent()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        long id = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "p" }, ct);
+        await _store.WriteChunkAsync(id, new[]
+        {
+            MakeObjectAs("BP_Player_C", 1, ("Health", "IntProperty", "64000000")),
+            MakeObjectAs("BP_Player_C", 2, ("Health", "IntProperty", "32000000")),
+            MakeObjectAs("W_HUD_C",     3, ("Alpha",  "FloatProperty", "0000803F")),
+        }, ct);
+        await _store.FinalizeSnapshotAsync(id, 3, 3, ct);   // precomputes the index
+
+        var classes = await _store.ListPivotClassesAsync(id, ct);
+        Assert.Equal(2, Assert.Single(classes, c => c.ClassName == "BP_Player_C").InstanceCount);
+        Assert.Equal(1, Assert.Single(classes, c => c.ClassName == "W_HUD_C").InstanceCount);
+
+        // Idempotent: a second call serves the same built index (no rebuild).
+        var again = await _store.ListPivotClassesAsync(id, ct);
+        Assert.Equal(classes.Count, again.Count);
+    }
+
+    [Fact]
+    public async Task PivotClassIndex_LazyBuild_WhenNotFinalizedWithIndex()
+    {
+        // Simulate an old snapshot: write rows but the index is built lazily on
+        // first ListPivotClasses (FinalizeSnapshot also builds it, but the lazy
+        // path must work for pre-feature snapshots / cancelled finalizes).
+        var ct = TestContext.Current.CancellationToken;
+        long id = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "lazy" }, ct);
+        await _store.WriteChunkAsync(id, new[]
+        {
+            MakeObjectAs("BP_Item_C", 1, ("Qty", "IntProperty", "05000000")),
+            MakeObjectAs("BP_Item_C", 2, ("Qty", "IntProperty", "07000000")),
+        }, ct);
+        // NOTE: no FinalizeSnapshotAsync — the index doesn't exist yet.
+        var classes = await _store.ListPivotClassesAsync(id, ct);   // builds lazily
+        Assert.Equal(2, Assert.Single(classes, c => c.ClassName == "BP_Item_C").InstanceCount);
+    }
+
+    [Fact]
+    public async Task DeleteAll_TruncatesEverything()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (a, b) = await SeedTwoClassPairAsync(ct);
+        Assert.Equal(2, (await _store.ListSnapshotsAsync(ct)).Count);
+
+        await _store.DeleteAllSnapshotsAsync(ct);
+
+        Assert.Empty(await _store.ListSnapshotsAsync(ct));
+        // The pivot index for the deleted snapshots is gone too (no rows linger).
+        Assert.Empty(await _store.ListPivotClassesAsync(a, ct));
+        Assert.Empty(await _store.ListPivotClassesAsync(b, ct));
+    }
 }

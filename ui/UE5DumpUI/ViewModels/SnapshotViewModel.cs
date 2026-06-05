@@ -347,6 +347,7 @@ public partial class SnapshotViewModel : ViewModelBase
         IsCapturing = true;
         CaptureSectionOpen = true;   // force the capture region visible while capturing
         Progress = 0;
+        var captureStart = DateTime.UtcNow;
 
         long snapshotId = 0;
         try
@@ -380,11 +381,23 @@ public partial class SnapshotViewModel : ViewModelBase
 
                 offset += chunk.Scanned;
                 Progress = total > 0 ? Math.Min(1.0, offset / (double)total) : 0;
-                StatusText = $"Capturing… {offset:N0}/{total:N0} — {objectCount:N0} objects, {fieldCount:N0} fields";
+                // Elapsed + ETA so a multi-minute capture shows progress, not just
+                // a moving bar. ETA = elapsed / fraction-done − elapsed; suppressed
+                // until ≥2% so the early estimate isn't wildly noisy.
+                var elapsed = DateTime.UtcNow - captureStart;
+                string timing = $" · {FmtSpan(elapsed)} elapsed";
+                if (Progress >= 0.02)
+                {
+                    var remain = TimeSpan.FromSeconds(elapsed.TotalSeconds / Progress) - elapsed;
+                    if (remain > TimeSpan.Zero) timing += $", ~{FmtSpan(remain)} left";
+                }
+                StatusText = $"Capturing… {offset:N0}/{total:N0} ({Progress:P0}) — " +
+                             $"{objectCount:N0} objects, {fieldCount:N0} fields{timing}";
 
                 if (chunk.Scanned == 0 || offset >= chunk.Total) break;
             }
 
+            StatusText = "Finalising (building pivot index)…";
             await _store.FinalizeSnapshotAsync(snapshotId, objectCount, fieldCount, ct);
             // FIFO eviction: drop oldest snapshots of this game until the DB
             // fits the quota (the just-captured one is always kept).
@@ -561,8 +574,41 @@ public partial class SnapshotViewModel : ViewModelBase
         }
     }
 
+    /// <summary>Delete EVERY snapshot for the active game (truncate + VACUUM).
+    /// Off the UI thread; guarded against running during capture/delete.</summary>
+    [RelayCommand]
+    private async Task DeleteAllAsync()
+    {
+        if (IsCapturing || IsDeleting || Snapshots.Count == 0) return;
+        IsDeleting = true;
+        StatusText = "Deleting all snapshots…";
+        try
+        {
+            await Task.Run(() => _store.DeleteAllSnapshotsAsync());
+            SelectedSnapshot = null; DiffA = null; DiffB = null;
+            Snapshots.Clear();
+            await UpdateUsageAsync();
+            StatusText = "All snapshots deleted.";
+        }
+        catch (Exception ex)
+        {
+            _log.Error(Constants.LogCatView, "Snapshot: delete-all failed", ex);
+            SetError(ex);
+        }
+        finally
+        {
+            IsDeleting = false;
+        }
+    }
+
     private static string DefaultLabel()
         => $"Snapshot {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
+
+    /// <summary>Compact human duration: "8s" / "1m23s" / "1h02m05s".</summary>
+    private static string FmtSpan(TimeSpan t) =>
+        t.TotalHours >= 1   ? $"{(int)t.TotalHours}h{t.Minutes:D2}m{t.Seconds:D2}s"
+        : t.TotalMinutes >= 1 ? $"{t.Minutes}m{t.Seconds:D2}s"
+        : $"{t.Seconds}s";
 
     // --- N1: noise picker helpers (shared shape with SpcQueryViewModel) ---
 

@@ -80,6 +80,7 @@ public class ClassPivotViewModelTests : IDisposable
         public Task FinalizeSnapshotAsync(long s, int oc, int fc, CancellationToken ct = default) => _inner.FinalizeSnapshotAsync(s, oc, fc, ct);
         public Task<IReadOnlyList<SnapshotMeta>> ListSnapshotsAsync(CancellationToken ct = default) => _inner.ListSnapshotsAsync(ct);
         public Task DeleteSnapshotAsync(long s, CancellationToken ct = default) => _inner.DeleteSnapshotAsync(s, ct);
+        public Task DeleteAllSnapshotsAsync(CancellationToken ct = default) => _inner.DeleteAllSnapshotsAsync(ct);
         public Task<SnapshotUsage> GetUsageAsync(CancellationToken ct = default) => _inner.GetUsageAsync(ct);
         public Task<SnapshotDiffResult> DiffSnapshotsAsync(long a, long b, SnapshotDiffFilter f, CancellationToken ct = default) => _inner.DiffSnapshotsAsync(a, b, f, ct);
         public Task<SpcResult> SpcQueryAsync(SpcQuery q, CancellationToken ct = default) => _inner.SpcQueryAsync(q, ct);
@@ -210,6 +211,7 @@ public class ClassPivotViewModelTests : IDisposable
         public Task<int> WriteChunkAsync(long id, IReadOnlyList<SnapshotCapturedObject> o, CancellationToken ct = default) => throw new NotImplementedException();
         public Task FinalizeSnapshotAsync(long id, int oc, int fc, CancellationToken ct = default) => throw new NotImplementedException();
         public Task DeleteSnapshotAsync(long id, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task DeleteAllSnapshotsAsync(CancellationToken ct = default) => throw new NotImplementedException();
         public Task<SnapshotUsage> GetUsageAsync(CancellationToken ct = default) => throw new NotImplementedException();
         public Task<SnapshotDiffResult> DiffSnapshotsAsync(long a, long b, SnapshotDiffFilter f, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<SpcResult> SpcQueryAsync(SpcQuery q, CancellationToken ct = default) => throw new NotImplementedException();

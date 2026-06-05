@@ -153,6 +153,27 @@ public sealed class SnapshotStore : ISnapshotStore
             CREATE INDEX IF NOT EXISTS ix_fields ON fields(snapshot_id, class_fqn);
             """, ct);
 
+        // Pivot class-index (additive — no SchemaVersion bump, so it doesn't drop
+        // existing snapshots). Precomputes the per-class instance count once per
+        // snapshot so the Class Pivot picker reads a tiny table instead of running
+        // a COUNT(DISTINCT) GROUP BY over ~1.7M rows on every open (the 10s+ scan).
+        // pivot_index_built marks (snapshot, scalar/array) as computed so an empty
+        // result (a snapshot with no array classes) isn't mistaken for "not built".
+        await ExecAsync(conn, """
+            CREATE TABLE IF NOT EXISTS class_counts(
+                snapshot_id    INTEGER NOT NULL,
+                class_fqn      TEXT,
+                is_array       INTEGER NOT NULL,
+                instance_count INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS ix_class_counts ON class_counts(snapshot_id, is_array);
+            CREATE TABLE IF NOT EXISTS pivot_index_built(
+                snapshot_id INTEGER NOT NULL,
+                is_array    INTEGER NOT NULL,
+                PRIMARY KEY(snapshot_id, is_array)
+            );
+            """, ct);
+
         if (ver < SchemaVersion)
             await ExecAsync(conn, $"PRAGMA user_version={SchemaVersion};", ct);
     }
@@ -302,6 +323,23 @@ public sealed class SnapshotStore : ISnapshotStore
         cmd.Parameters.AddWithValue("$fc", fieldCount);
         cmd.Parameters.AddWithValue("$id", snapshotId);
         await cmd.ExecuteNonQueryAsync(ct);
+
+        // Precompute the pivot class-index now, while we're still in the capture
+        // flow (the user already expects a wait) — so the Class Pivot picker opens
+        // instantly later instead of running a 10s+ GROUP BY on first selection.
+        // Best-effort: if it throws/cancels, the list methods lazily build it.
+        try
+        {
+            await EnsurePivotIndexAsync(conn, snapshotId, 0, ct);
+            await EnsurePivotIndexAsync(conn, snapshotId, 1, ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _log?.Warn(Constants.LogCatView,
+                $"SnapshotStore: pivot index precompute failed for #{snapshotId} (will build lazily): {ex.Message}");
+        }
+
         _log?.Info(Constants.LogCatView,
             $"SnapshotStore: finalised snapshot #{snapshotId} ({objectCount} objects, {fieldCount} fields)");
     }
@@ -408,7 +446,11 @@ public sealed class SnapshotStore : ISnapshotStore
             await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
             await using var del = conn.CreateCommand();
             del.Transaction = tx;
-            del.CommandText = "DELETE FROM fields WHERE snapshot_id=$id; DELETE FROM snapshots WHERE id=$id;";
+            del.CommandText =
+                "DELETE FROM fields WHERE snapshot_id=$id; " +
+                "DELETE FROM class_counts WHERE snapshot_id=$id; " +
+                "DELETE FROM pivot_index_built WHERE snapshot_id=$id; " +
+                "DELETE FROM snapshots WHERE id=$id;";
             var p = del.Parameters.Add("$id", SqliteType.Integer);
             foreach (var id in dropIds) { p.Value = id; await del.ExecuteNonQueryAsync(ct); }
             await tx.CommitAsync(ct);
@@ -710,17 +752,66 @@ public sealed class SnapshotStore : ISnapshotStore
         public readonly List<double?> Num = new();
     }
 
+    // Compute the per-class instance counts for one snapshot ONCE and persist them
+    // into class_counts (the expensive COUNT(DISTINCT gobjects_index) GROUP BY runs
+    // server-side via INSERT...SELECT — no row marshalling). Idempotent: guarded by
+    // the pivot_index_built marker so it never recomputes. isArray selects scalar
+    // (0) vs struct-array (1) classes. Called eagerly at FinalizeSnapshot and lazily
+    // from the list methods (covers snapshots captured before this feature).
+    internal static async Task EnsurePivotIndexAsync(
+        SqliteConnection conn, long snapshotId, int isArray, CancellationToken ct)
+    {
+        await using (var chk = conn.CreateCommand())
+        {
+            chk.CommandText = "SELECT 1 FROM pivot_index_built WHERE snapshot_id=$s AND is_array=$a LIMIT 1;";
+            chk.Parameters.AddWithValue("$s", snapshotId);
+            chk.Parameters.AddWithValue("$a", isArray);
+            if (await chk.ExecuteScalarAsync(ct) != null) return;   // already built
+        }
+
+        await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
+        await using (var ins = conn.CreateCommand())
+        {
+            ins.Transaction = tx;
+            ins.CommandText = isArray == 0
+                ? """
+                  INSERT INTO class_counts(snapshot_id, class_fqn, is_array, instance_count)
+                  SELECT snapshot_id, class_fqn, 0, COUNT(DISTINCT gobjects_index)
+                  FROM fields WHERE snapshot_id=$s AND array_field IS NULL
+                  GROUP BY class_fqn;
+                  """
+                : """
+                  INSERT INTO class_counts(snapshot_id, class_fqn, is_array, instance_count)
+                  SELECT snapshot_id, class_fqn, 1, COUNT(DISTINCT gobjects_index)
+                  FROM fields WHERE snapshot_id=$s AND array_field IS NOT NULL
+                  GROUP BY class_fqn;
+                  """;
+            ins.Parameters.AddWithValue("$s", snapshotId);
+            await ins.ExecuteNonQueryAsync(ct);
+        }
+        await using (var mark = conn.CreateCommand())
+        {
+            mark.Transaction = tx;
+            mark.CommandText = "INSERT OR IGNORE INTO pivot_index_built(snapshot_id, is_array) VALUES($s,$a);";
+            mark.Parameters.AddWithValue("$s", snapshotId);
+            mark.Parameters.AddWithValue("$a", isArray);
+            await mark.ExecuteNonQueryAsync(ct);
+        }
+        await tx.CommitAsync(ct);
+    }
+
     public async Task<IReadOnlyList<PivotClassInfo>> ListPivotClassesAsync(
         long snapshotId, CancellationToken ct = default)
     {
-        ct.ThrowIfCancellationRequested();   // bail before a queued heavy GROUP BY runs
+        ct.ThrowIfCancellationRequested();
         var list = new List<PivotClassInfo>();
         await using var conn = await OpenAsync(ct);
+        await EnsurePivotIndexAsync(conn, snapshotId, 0, ct);   // builds once, then no-op
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT class_fqn, COUNT(DISTINCT gobjects_index) AS instances
-            FROM fields WHERE snapshot_id=$s AND array_field IS NULL
-            GROUP BY class_fqn ORDER BY instances DESC, class_fqn;
+            SELECT class_fqn, instance_count FROM class_counts
+            WHERE snapshot_id=$s AND is_array=0
+            ORDER BY instance_count DESC, class_fqn;
             """;
         cmd.Parameters.AddWithValue("$s", snapshotId);
         await using var r = await cmd.ExecuteReaderAsync(ct);
@@ -839,11 +930,12 @@ public sealed class SnapshotStore : ISnapshotStore
         ct.ThrowIfCancellationRequested();
         var list = new List<PivotClassInfo>();
         await using var conn = await OpenAsync(ct);
+        await EnsurePivotIndexAsync(conn, snapshotId, 1, ct);   // array classes, built once
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT class_fqn, COUNT(DISTINCT gobjects_index) AS instances
-            FROM fields WHERE snapshot_id=$s AND array_field IS NOT NULL
-            GROUP BY class_fqn ORDER BY instances DESC, class_fqn;
+            SELECT class_fqn, instance_count FROM class_counts
+            WHERE snapshot_id=$s AND is_array=1
+            ORDER BY instance_count DESC, class_fqn;
             """;
         cmd.Parameters.AddWithValue("$s", snapshotId);
         await using var r = await cmd.ExecuteReaderAsync(ct);
@@ -987,10 +1079,28 @@ public sealed class SnapshotStore : ISnapshotStore
     {
         await using var conn = await OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM fields WHERE snapshot_id=$id; DELETE FROM snapshots WHERE id=$id;";
+        cmd.CommandText =
+            "DELETE FROM fields WHERE snapshot_id=$id; " +
+            "DELETE FROM class_counts WHERE snapshot_id=$id; " +
+            "DELETE FROM pivot_index_built WHERE snapshot_id=$id; " +
+            "DELETE FROM snapshots WHERE id=$id;";
         cmd.Parameters.AddWithValue("$id", snapshotId);
         await cmd.ExecuteNonQueryAsync(ct);
         _log?.Info(Constants.LogCatView, $"SnapshotStore: deleted snapshot #{snapshotId}");
+    }
+
+    public async Task DeleteAllSnapshotsAsync(CancellationToken ct = default)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        // Truncate every table for the active game's DB, then VACUUM to reclaim
+        // the (potentially multi-GB) file on disk.
+        cmd.CommandText =
+            "DELETE FROM fields; DELETE FROM class_counts; " +
+            "DELETE FROM pivot_index_built; DELETE FROM snapshots;";
+        await cmd.ExecuteNonQueryAsync(ct);
+        await ExecAsync(conn, "VACUUM;", ct);
+        _log?.Info(Constants.LogCatView, "SnapshotStore: deleted ALL snapshots for the active game");
     }
 
     // --- N1: Top-N noise contributor accumulator (used by SPC + Diff) ---

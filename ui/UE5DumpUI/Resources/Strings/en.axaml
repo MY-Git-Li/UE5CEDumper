@@ -239,6 +239,8 @@
     <sys:String x:Key="str.Snapshot.Cancel">Cancel</sys:String>
     <sys:String x:Key="str.Snapshot.Refresh">Refresh</sys:String>
     <sys:String x:Key="str.Snapshot.Delete">Delete Selected</sys:String>
+    <sys:String x:Key="str.Snapshot.DeleteAll">Delete All</sys:String>
+    <sys:String x:Key="str.Snapshot.DeleteAllTip">Delete EVERY snapshot for this game and reclaim the disk (truncate + VACUUM). Irreversible.</sys:String>
     <sys:String x:Key="str.Snapshot.OpenDbFolder">Open DB folder</sys:String>
     <sys:String x:Key="str.Snapshot.OpenDbFolderTip">Reveal this game's snapshot database (snapshots.&lt;pe_hash&gt;.db) in the file browser.</sys:String>
     <sys:String x:Key="str.Snapshot.Quota">Per-game quota:</sys:String>
