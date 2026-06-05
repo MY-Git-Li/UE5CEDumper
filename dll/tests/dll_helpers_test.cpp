@@ -22,6 +22,7 @@
 #include "../src/Renge.h"
 #include "../src/Scharf.h"
 #include "../src/ValueScan.h"
+#include "../src/Macht.h"   // ComputeSetElementStride / ComputeMapValueOffset (V1a geometry)
 #include "../src/Denken.h"
 
 #include <Windows.h>
@@ -1081,6 +1082,40 @@ static void Test_ValueScan_FieldDisplayName() {
     nested.fieldName = "MaximumHealth.CurrentValue";
     EXPECT("Dotted nested base name preserved (-1)",
            FieldDisplayName(nested, -1) == "MaximumHealth.CurrentValue");
+
+    // V1a — TMap key/value scan fields carry a "Map.Key" / "Map.Value" base
+    // name (the per-pair half), so element rendering reads "Map.Key[idx]".
+    FieldDescriptor mapKey;
+    mapKey.fieldName = "Inventory.Key";
+    EXPECT("Map key element renders Map.Key[idx]",
+           FieldDisplayName(mapKey, 2) == "Inventory.Key[2]");
+    FieldDescriptor mapVal;
+    mapVal.fieldName = "Inventory.Value";
+    EXPECT("Map value element renders Map.Value[idx]",
+           FieldDisplayName(mapVal, 5) == "Inventory.Value[5]");
+}
+
+// V1a — TSet / TMap sparse-container element geometry. ComputeSetElementStride
+// accounts for the TSetElement hash overhead (HashNextId + HashIndex, value
+// aligned to 4); ComputeMapValueOffset aligns the TPair value to its natural
+// alignment. These drive the slot addresses the container scan reads, so lock
+// the math the Address Finder + Value Search both depend on.
+static void Test_ValueScan_SparseContainerGeometry() {
+    // TSetElement<T> = { T value; int32 HashNextId; int32 HashIndex; }, with
+    // value padded up to 4-byte alignment before the two hash ints (+8).
+    EXPECT("Set<int32> stride = 4 + 8",        Macht::ComputeSetElementStride(4)  == 12);
+    EXPECT("Set<int64> stride = 8 + 8",        Macht::ComputeSetElementStride(8)  == 16);
+    EXPECT("Set<uint8> stride pads to 4 + 8",  Macht::ComputeSetElementStride(1)  == 12);
+    EXPECT("Set<3-byte> stride pads to 4 + 8", Macht::ComputeSetElementStride(3)  == 12);
+    EXPECT("Set<FVector 12> stride = 12 + 8",  Macht::ComputeSetElementStride(12) == 20);
+
+    // TPair<K,V> value offset = K size aligned up to V's natural alignment
+    // (guessed from V size: >=8 -> 8, >=4 -> 4, >=2 -> 2, else 1).
+    EXPECT("Map<int32,int32> value at +4",    Macht::ComputeMapValueOffset(4, 4)  == 4);
+    EXPECT("Map<uint8,int32> value aligns +4", Macht::ComputeMapValueOffset(1, 4) == 4);
+    EXPECT("Map<uint8,struct80> value at +8",  Macht::ComputeMapValueOffset(1, 80) == 8);
+    EXPECT("Map<int32,uint8> value at +4",     Macht::ComputeMapValueOffset(4, 1) == 4);
+    EXPECT("Map<int64,int64> value at +8",     Macht::ComputeMapValueOffset(8, 8) == 8);
 }
 
 // ----- main ------------------------------------------------------------------
@@ -1374,6 +1409,7 @@ int main() {
 
     Test_ValueScan_SessionLifecycle();
     Test_ValueScan_FieldDisplayName();
+    Test_ValueScan_SparseContainerGeometry();
 
     // Path 2 — native x64 disassembly (Denken decoder core)
     Test_Denken_BasicAccesses();

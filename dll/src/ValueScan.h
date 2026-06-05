@@ -47,10 +47,15 @@
 //     - First scan: Exact / Bigger / Smaller (component-wise; Between
 //                   takes a single second vector for upper bound)
 //     - Next scan:  + Changed / Unchanged / Increased / Decreased
+//   Containers:     TArray<T> (Phase 2C, build 757) + TSet<T> / TMap<K,V>
+//                   key|value (V1a, build 927) are all walked element-wise
+//                   for any supported leaf DataType. Sparse containers
+//                   iterate allocated slots only. Element addresses are raw,
+//                   so refine degrades on a container reallocation (SEH-safe
+//                   read drops the candidate). TOptional is still deferred (V1c).
 //   Excluded:       Native C++ fields (non-UPROPERTY) — UI must show banner
-//   Deferred:       TArray<T> scan — see memory project_value_search_caveats
-//                   for the crash-risk plan that gates the v2 expansion
 //
+
 // The candidate enrichment matches Aura::FindByAddress conventions so
 // "Open in Live Walker" works without further address-→-instance lookup.
 // ============================================================

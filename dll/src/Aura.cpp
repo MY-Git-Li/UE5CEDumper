@@ -3834,6 +3834,29 @@ SparseDelegateResult WalkSparseDelegateBindings(uintptr_t ownerObj,
 
 // === Value Search (CE-style First Scan / Next Scan workflow) ===
 
+// True when a container's inner/element/key/value property type matches the
+// scan's accepted leaf types. For vector scans (acceptedStructNames non-empty)
+// a StructProperty inner must additionally match an accepted struct name —
+// mirrors the leaf + TArray-inner StructProperty filters. (V1a, build 927.)
+static bool ContainerInnerAccepted(
+    const std::string& innerType,
+    const std::string& innerStructType,
+    const std::vector<std::string>& acceptedTypes,
+    const std::vector<std::string>& acceptedStructNames) {
+    bool accepted = false;
+    for (const auto& t : acceptedTypes) {
+        if (innerType == t) { accepted = true; break; }
+    }
+    if (accepted && !acceptedStructNames.empty() && innerType == "StructProperty") {
+        bool nameMatch = false;
+        for (const auto& name : acceptedStructNames) {
+            if (innerStructType == name) { nameMatch = true; break; }
+        }
+        accepted = nameMatch;
+    }
+    return accepted;
+}
+
 ValueScanResult ScanForValue(
     ValueScan::DataType dt,
     ValueScan::ScanType st,
@@ -3894,20 +3917,25 @@ ValueScanResult ScanForValue(
     // header (Data ptr, Num, Max) and emits ONE candidate per matching
     // element. elemStride captures the per-element size in bytes;
     // size still refers to the field-level size (16B TArray header).
+    // Which container a ScanField walks (None = direct scalar field).
+    // Array/Set emit one value per element; MapKey/MapValue emit the key
+    // or value half of each TPair (build 927, V1a).
+    enum class ScanContainer : uint8_t { None, Array, Set, MapKey, MapValue };
     struct ScanField {
-        int32_t     offset;
-        int32_t     size;
-        std::string name;
-        std::string typeName;
-        uint8_t     boolFieldMask;
-        bool        isArray      = false;
-        int32_t     elemStride   = 0;
-        std::string elemTypeName;   // Inner type name when isArray (e.g. "IntProperty")
+        int32_t       offset;
+        int32_t       size;
+        std::string   name;
+        std::string   typeName;
+        uint8_t       boolFieldMask;
+        ScanContainer container    = ScanContainer::None;
+        int32_t       elemStride   = 0;   // Array elem / Set elem / Map pair stride
+        int32_t       valueOffset  = 0;   // MapValue: byte offset of value within the TPair
+        std::string   elemTypeName;       // Inner/elem/key/value type name (e.g. "IntProperty")
         // V3-A: lazily-resolved index into the worker thread's
         // FieldDescriptor pool (the field's interned class/defining-class/
         // name/type/offset/mask). -1 until the first candidate of this
         // field is emitted, then reused by every element + every instance.
-        int32_t     descriptorIdx = -1;
+        int32_t       descriptorIdx = -1;
     };
     struct ScanClassInfo {
         std::string             className;
@@ -4032,9 +4060,9 @@ ValueScanResult ScanForValue(
 
             // Phase 2C: TArray<T> container scan. When the inner
             // FProperty's type matches the requested DataType, emit a
-            // ScanField marked isArray=true with the per-element
-            // stride. Per-instance loop branches on isArray to walk
-            // the TArray buffer.
+            // ScanField with container=Array + the per-element stride.
+            // The per-instance loop branches on sf.container to walk the
+            // TArray buffer.
             //
             // Vector inner types additionally require innerStructType
             // to match the accepted struct names (mirrors the leaf
@@ -4071,7 +4099,7 @@ ValueScanResult ScanForValue(
                             ? f.Name : (namePrefix + "." + f.Name);
                         sf.typeName      = "ArrayProperty";
                         sf.boolFieldMask = 0xFF;
-                        sf.isArray       = true;
+                        sf.container     = ScanContainer::Array;
                         sf.elemStride    = stride;
                         sf.elemTypeName  = f.innerType;
                         out.push_back(std::move(sf));
@@ -4080,11 +4108,86 @@ ValueScanResult ScanForValue(
                 }
             }
 
+            // V1a: TSet<T> container scan. The element type must match the
+            // requested DataType (+ struct name for vectors). Per-instance
+            // loop walks the FSetProperty's TSparseArray (allocated slots
+            // only); each element is read at slot+0.
+            if (f.TypeName == "SetProperty" && !f.elemType.empty()
+                && ContainerInnerAccepted(f.elemType, f.elemStructType,
+                                          acceptedTypes, acceptedStructNames)) {
+                int32_t stride = Ubel::GetSetElementStride(f.Address);
+                if (stride > 0) {
+                    ScanField sf;
+                    sf.offset        = baseOffset + f.Offset;
+                    sf.size          = f.Size;
+                    sf.name          = namePrefix.empty()
+                        ? f.Name : (namePrefix + "." + f.Name);
+                    sf.typeName      = "SetProperty";
+                    sf.boolFieldMask = 0xFF;
+                    sf.container     = ScanContainer::Set;
+                    sf.elemStride    = stride;
+                    sf.elemTypeName  = f.elemType;
+                    out.push_back(std::move(sf));
+                    // fall through is unnecessary; a SetProperty is never
+                    // also a leaf/array/struct, so continue.
+                    continue;
+                }
+            }
+
+            // V1a: TMap<K,V> container scan. Key and value are scanned
+            // independently: a TMap<int,int> with dt=Int32 emits BOTH a
+            // MapKey and a MapValue ScanField. Per-instance loop walks the
+            // FMapProperty's TSparseArray of TPair; key at pair+0, value at
+            // pair+valueOffset.
+            if (f.TypeName == "MapProperty"
+                && (!f.keyType.empty() || !f.valueType.empty())) {
+                const bool keyOk = !f.keyType.empty()
+                    && ContainerInnerAccepted(f.keyType, f.keyStructType,
+                                              acceptedTypes, acceptedStructNames);
+                const bool valOk = !f.valueType.empty()
+                    && ContainerInnerAccepted(f.valueType, f.valueStructType,
+                                              acceptedTypes, acceptedStructNames);
+                if (keyOk || valOk) {
+                    Ubel::MapPairLayout layout;
+                    if (Ubel::GetMapPairLayout(f.Address, layout) && layout.pairStride > 0) {
+                        const std::string base = namePrefix.empty()
+                            ? f.Name : (namePrefix + "." + f.Name);
+                        if (keyOk) {
+                            ScanField sf;
+                            sf.offset        = baseOffset + f.Offset;
+                            sf.size          = f.Size;
+                            sf.name          = base + ".Key";
+                            sf.typeName      = "MapProperty";
+                            sf.boolFieldMask = 0xFF;
+                            sf.container     = ScanContainer::MapKey;
+                            sf.elemStride    = layout.pairStride;
+                            sf.valueOffset   = 0;
+                            sf.elemTypeName  = f.keyType;
+                            out.push_back(std::move(sf));
+                        }
+                        if (valOk) {
+                            ScanField sf;
+                            sf.offset        = baseOffset + f.Offset;
+                            sf.size          = f.Size;
+                            sf.name          = base + ".Value";
+                            sf.typeName      = "MapProperty";
+                            sf.boolFieldMask = 0xFF;
+                            sf.container     = ScanContainer::MapValue;
+                            sf.elemStride    = layout.pairStride;
+                            sf.valueOffset   = layout.valueOffset;
+                            sf.elemTypeName  = f.valueType;
+                            out.push_back(std::move(sf));
+                        }
+                        continue;
+                    }
+                }
+            }
+
             // StructProperty: resolve the inner UScriptStruct via
             // FStructProperty::Struct (FField + FSTRUCTPROP_STRUCT) and
             // recurse with the cumulative offset + dotted name prefix.
-            // Map / Set / Optional containers are intentionally NOT
-            // recursed -- they're separate milestones.
+            // TOptional containers are intentionally NOT recursed -- still
+            // a separate milestone (V1c).
             //
             // For vector data types, skip recursion -- we only want
             // leaves whose own type IS the vector struct, not nested
@@ -4212,7 +4315,8 @@ ValueScanResult ScanForValue(
             ValueScan::FieldDescriptor d;
             d.className     = sci->className;
             d.fieldName     = sf.name;  // BASE name; element "[i]" added at display time
-            d.fieldType     = sf.isArray ? sf.elemTypeName : sf.typeName;
+            d.fieldType     = (sf.container != ScanContainer::None)
+                                ? sf.elemTypeName : sf.typeName;
             d.fieldOffset   = sf.offset;
             d.boolFieldMask = sf.boolFieldMask;
 
@@ -4261,13 +4365,55 @@ ValueScanResult ScanForValue(
             tr.candidates.push_back(std::move(cand));
         };
 
+        // Shared per-element scan for the container paths (Array / Set /
+        // Map key|value): read the value at elemAddr, test the predicate,
+        // and emit a candidate (elementIndex = the container slot index) on
+        // a match. Mirrors the direct-field read/compare branches; the
+        // descriptor is interned lazily on the first match of this field.
+        auto scanElement = [&](ScanField& sf, uintptr_t elemAddr, int32_t elemIndex) {
+            uint8_t     readBuf[16] = {};
+            std::string readStr;
+            if (isString) {
+                if (dt == ValueScan::DataType::FString) {
+                    readStr = Ubel::ReadFStringAt(elemAddr, 0);
+                } else if (dt == ValueScan::DataType::FName) {
+                    readStr = Ubel::ReadFNameAt(elemAddr, 0);
+                } else {
+                    readStr = Ubel::ReadFTextStringAt(elemAddr, 0);
+                }
+                if (!ValueScan::CompareStringPredicate(st, readStr, targetString, caseSensitive)) return;
+                emitCandidate(elemAddr, ensureDescriptor(sf), elemIndex, nullptr, 0, &readStr);
+            } else if (isVector) {
+                if (!Macht::ReadBytesSafe(elemAddr, readBuf, 12)) return;
+                if (!ValueScan::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, tolerance)) return;
+                emitCandidate(elemAddr, ensureDescriptor(sf), elemIndex, readBuf, 12, nullptr);
+            } else if (isMulti) {
+                // Resolve the element's own width (key/value/elem type) + target.
+                ValueScan::DataType elemDt = dt;
+                const uint8_t* mtgt = nullptr;
+                const uint8_t* mtgt2 = nullptr;
+                if (!multiResolve(sf.elemTypeName, elemDt, mtgt, mtgt2)) return;
+                size_t sz = ValueScan::SizeOf(elemDt);
+                if (!Macht::ReadBytesSafe(elemAddr, readBuf, sz)) return;
+                if (!ValueScan::ComparePredicate(elemDt, st, readBuf, mtgt, mtgt2, tolerance)) return;
+                emitCandidate(elemAddr, ensureDescriptor(sf), elemIndex, readBuf, sz, nullptr);
+            } else {
+                // Container elements never share a bitfield byte (TArray /
+                // TSet<bool> + TMap<bool,...> store bool unpacked), so the
+                // boolFieldMask = 0xFF path applies.
+                if (!Macht::ReadBytesSafe(elemAddr, readBuf, dtSize)) return;
+                if (!ValueScan::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) return;
+                emitCandidate(elemAddr, ensureDescriptor(sf), elemIndex, readBuf, dtSize, nullptr);
+            }
+        };
+
         for (auto& sf : sci->fields) {
             if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
 
             // Phase 2C: TArray<T> path. Read the TArray header (Data,
             // Num, Max), defensively validate, then iterate elements
             // and emit one candidate per match.
-            if (sf.isArray) {
+            if (sf.container == ScanContainer::Array) {
                 uintptr_t arrayDataPtr = 0;
                 int32_t   arrayNum     = 0;
                 int32_t   arrayMax     = 0;
@@ -4296,61 +4442,36 @@ ValueScanResult ScanForValue(
                 if (arrayMax < arrayNum) continue;
                 if (!arrayDataPtr) continue;
 
+                // The element display name "Field[idx]" is reconstructed at
+                // serialization time from the shared descriptor + elementIndex.
                 for (int32_t idx = 0; idx < arrayNum; ++idx) {
                     if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
+                    scanElement(sf, arrayDataPtr + static_cast<uintptr_t>(idx) * sf.elemStride, idx);
+                }
+                continue;
+            }
 
-                    uintptr_t   elemAddr = arrayDataPtr + static_cast<uintptr_t>(idx) * sf.elemStride;
-                    uint8_t     readBuf[16] = {};
-                    std::string readStr;
-
-                    ValueScan::DataType elemDt = dt;
-                    size_t              elemReadSize = dtSize;
-                    if (isString) {
-                        if (dt == ValueScan::DataType::FString) {
-                            readStr = Ubel::ReadFStringAt(elemAddr, 0);
-                        } else if (dt == ValueScan::DataType::FName) {
-                            readStr = Ubel::ReadFNameAt(elemAddr, 0);
-                        } else {
-                            readStr = Ubel::ReadFTextStringAt(elemAddr, 0);
-                        }
-                        if (!ValueScan::CompareStringPredicate(st, readStr, targetString, caseSensitive)) continue;
-                    } else if (isVector) {
-                        if (!Macht::ReadBytesSafe(elemAddr, readBuf, 12)) continue;
-                        if (!ValueScan::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
-                    } else if (isMulti) {
-                        // Resolve the array's inner element width + target.
-                        const uint8_t* mtgt = nullptr;
-                        const uint8_t* mtgt2 = nullptr;
-                        if (!multiResolve(sf.elemTypeName, elemDt, mtgt, mtgt2)) continue;
-                        elemReadSize = ValueScan::SizeOf(elemDt);
-                        if (!Macht::ReadBytesSafe(elemAddr, readBuf, elemReadSize)) continue;
-                        if (!ValueScan::ComparePredicate(elemDt, st, readBuf, mtgt, mtgt2, tolerance)) continue;
-                    } else {
-                        if (!Macht::ReadBytesSafe(elemAddr, readBuf, dtSize)) continue;
-                        // Array elements never share a bitfield byte
-                        // (TArray<bool> is stored unpacked), so the
-                        // boolFieldMask = 0xFF path applies.
-                        if (!ValueScan::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
-                    }
-
-                    // The element's display name "Field[idx]" is
-                    // reconstructed at serialization time from the shared
-                    // descriptor + this candidate's elementIndex; the
-                    // candidate's addr is the element address. Array
-                    // elements never share a bitfield byte (TArray<bool>
-                    // is stored unpacked), so the descriptor's mask = 0xFF.
-                    const uint32_t descIdx = ensureDescriptor(sf);
-
-                    if (isString) {
-                        emitCandidate(elemAddr, descIdx, idx, nullptr, 0, &readStr);
-                    } else if (isVector) {
-                        emitCandidate(elemAddr, descIdx, idx, readBuf, 12, nullptr);
-                    } else {
-                        // elemReadSize == dtSize for fixed-width numeric
-                        // scans; for multi-numeric it's the resolved
-                        // per-element width (dtSize is 0 in that mode).
-                        emitCandidate(elemAddr, descIdx, idx, readBuf, elemReadSize, nullptr);
-                    }
+            // V1a: TSet<T> / TMap<K,V>(key|value) path. Walk the FSet/
+            // FMapProperty's TSparseArray (allocated slots only); the value
+            // lives at slot_base + slotOff (0 for Set / Map key, valueOffset
+            // for Map value). The sparse Data buffer holds freed slots too,
+            // so IsSparseIndexAllocated skips them. Element addresses are raw
+            // (like TArray), so refine degrades the same way on a container
+            // reallocation between scans (SEH-safe read drops the candidate).
+            if (sf.container == ScanContainer::Set
+                || sf.container == ScanContainer::MapKey
+                || sf.container == ScanContainer::MapValue) {
+                if (sf.elemStride <= 0) continue;
+                Macht::TSparseArrayView sa;
+                if (!Macht::ReadTSparseArray(obj + sf.offset, sa)) continue;
+                if (sa.MaxIndex <= 0 || !sa.Data) continue;
+                const int32_t slotOff = (sf.container == ScanContainer::MapValue)
+                                          ? sf.valueOffset : 0;
+                for (int32_t e = 0; e < sa.MaxIndex; ++e) {
+                    if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
+                    if (!Macht::IsSparseIndexAllocated(sa, e)) continue;
+                    scanElement(sf,
+                        sa.Data + static_cast<int64_t>(e) * sf.elemStride + slotOff, e);
                 }
                 continue;
             }

@@ -358,8 +358,21 @@ memory-reading code.
 
 ### V1. TMap / TSet / TOptional value scan
 
-- **V1a — TMap / TSet (First-Scan).** Effort: **M** (~1.3× the build-757 TArray path).
-  Risk: **med**. Why: closes the "containers other than TArray are invisible" gap
+- ~~**V1a — TMap / TSet (First-Scan).**~~ ✅ **CODE COMPLETE on dev (build 927) —
+  live First/Next scan verification still pending.** Shipped: `ScanField` gained a
+  `ScanContainer { None, Array, Set, MapKey, MapValue }` enum + `valueOffset`;
+  `expandFields` emits Set/Map(key|value) ScanFields (vector inner gated by
+  `ContainerInnerAccepted`); a shared `scanElement` lambda (factored out of the
+  TArray loop) drives Array + the new sparse branch (`ReadTSparseArray` +
+  `IsSparseIndexAllocated`, value at `slot + valueOffset`). **Refine + Fern needed
+  ZERO changes** — they already operate on `c.addr` + the descriptor pool, and the
+  element addr (incl. valueOffset) is baked in at First-Scan. Rows render
+  `Set[idx]` / `Map.Key[idx]` / `Map.Value[idx]`. Tests: dll_helpers 400 → 412
+  (Map display names + sparse stride/offset geometry). **Live-verify**: scan a
+  known value held in a `TMap`/`TSet` UPROPERTY (inventory/stat maps are common),
+  confirm rows appear with `Map.Key/Value[idx]` names + a Next Scan prunes; watch
+  for false hits from freed-slot reads. Effort: **M** (~1.3× the build-757 TArray
+  path). Risk: **med**. Why: closes the "containers other than TArray are invisible" gap
   (intentional skip at [Aura.cpp:4079-4080](../dll/src/Aura.cpp#L4079)). Reuse
   `Macht::ReadTSparseArray` / `IsSparseIndexAllocated`
   ([Macht.h:165-200](../dll/src/Macht.h#L165)), `Ubel::GetMapPairLayout` /
