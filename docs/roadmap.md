@@ -6,7 +6,14 @@ upcoming work and [dev-log.md](dev-log.md) for the historical commit
 trail. Build number tags reflect when each row reached its current
 state.
 
-> **Last refreshed**: 2026-05-29 (build 797, dev = main). Latest shipments:
+> **Last refreshed**: 2026-05-29 (build 797) for the rows below. **Newer work
+> (builds 805-923) lives elsewhere:** the experimental Snapshot / SPC Query /
+> Class Pivot tabs (incl. the N1 noise picker, cancellation, persisted pivot
+> index) are in [experimental-snapshot-spc-pivot.md](experimental-snapshot-spc-pivot.md)
+> + [dev-log.md](dev-log.md) builds 908-923; the Windows-only Native-AOT Avalonia
+> backend is dev-log builds 918-919. dev = main @ build 923.
+>
+> The build-797 shipments:
 >
 > - **Multi-numeric Value Search meta types** (build 794-797) — `NumericNoByte` (PR #220) scans every word/dword/qword/float/double field in one pass, each compared by its OWN declared width; `NumericAll` (PR #221) adds Int8/UInt8 plus a result-volume warning. Unlike CE's raw "All", our structured property walk knows each field's declared type → no byte-reinterpret false hits. Both in-game verified OK. See the Value Search section below + [dev-log.md](dev-log.md) build 794-795 / 796-797.
 > - **Parallel GObjects-walk scans** (build 792) — `ScanForValue` / `FindInContainers` / `FindReferencesToUObject` now fan their object-array walk across `clamp(cores-2, 1, 16)` worker threads (`ParallelIndexRanges`), with per-thread caches + ascending-tid merge that reproduces the serial result set byte-for-byte. `Ubel`'s class/name/enum/struct-field caches + `CorrectSubclassOffsets` calibration are now mutex-guarded for concurrent access. ~cores× First-Scan speedup on 1M+ object games; **in-game verified OK 2026-05-29** (correct results, no hang/crash, speedup confirmed). See [dev-log.md](dev-log.md) 2026-05-29 + [todo.md](todo.md). The prior 2026-05-27 shipments below are unchanged:

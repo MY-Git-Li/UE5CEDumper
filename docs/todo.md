@@ -75,11 +75,26 @@ join, array inner-key handling, the Q#4 key-field improvement).
 > directional-but-irrelevant UI noise. (A v2 normalise attempt was reverted — it broke
 > diff perf; see dev-log.)
 >
+> **LIVE-TEST HARDENING (builds 908-923, three rounds).** ~~**N1 per-tab class
+> denylist**~~ ✅ (Top-N picker on SPC+Diff, right-click hide on Pivot, 3 independent
+> per-game lists). Plus: heavy-query **cancellation** (cancel-on-tab-switch/close +
+> explicit ct checks in the SQLite loops — fixed the SPC tab-switch hang); **persisted
+> pivot class-index** (`class_counts` table, precomputed at finalize — killed the ~10s+
+> Class Pivot first-open scan); **SPC same-session auto In-session join** (fixed
+> transient inventory "materials don't show up"); capture ETA; Delete All; single-click
+> checkboxes; combo timestamps; Old/New auto-swap; op-time grayout; collapsible layout.
+> See dev-log builds 908/910/912/916/923.
+>
+> **AOT: Windows-only Avalonia backend** ✅ (builds 918-919): `Avalonia.Desktop` →
+> `Win32`+`Skia`+`HarfBuzz`; dropped X11/macOS/FreeDesktop → AOT publish warning-free.
+> Window icon → PNG (.ico flaky under AOT). **Discipline:** launch-test `dist\*.exe`
+> after any backend change (build success ≠ launch success).
+>
 > **Remaining experimental:** C2 (find-by-value locator → pivot handoff); A3c (CE .CT
 > freeze-export from a diff/SPC/pivot hit — Copy Address covers the manual path);
-> heavier C3 scorer; *optional* `discrete`-style gzip blob storage for even smaller
-> DB. ~~**N1 per-game class denylist**~~ ✅ **SHIPPED (build 908).** See the Phase C
-> block + design §"Phase C"/§6.
+> heavier C3 scorer; *optional* `discrete`-style gzip blob storage; **N1 v2** —
+> per-`(class,prop)` deny granularity (v1 is by-class). See the Phase C block + design
+> §"Phase C"/§6.
 
 Locked decisions: SQLite (raw ADO.NET, no EF Core) · all three features ·
 persisted gating · **multi-session first-class** for SPC/Pivot · type-agnostic
