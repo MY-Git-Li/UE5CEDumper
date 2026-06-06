@@ -170,12 +170,4 @@ AOBMaker 下載連結（需先註冊）：https://opencheattables.com/viewtopic.
 
 ---
 
-## 下載
-
-編譯、以目前的版本、建立你自己的程式碼；或是使用以下連結來下載我預先編譯好的版本：
-
-https://opencheattables.com/viewtopic.php?f=17&t=1797
-
----
-
 **授權條款**: [MIT](LICENSE) © 2026 bbfox0703
