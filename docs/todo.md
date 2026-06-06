@@ -252,11 +252,6 @@ Pick up when the active plan finishes or when blocked.
 
 Shipped + unit-tests-pass but unproven on real games:
 
-- **Value Search server-side window (V3-C)** (build 949). On a large First Scan, confirm
-  the grid shows `total` + the first page + a working **Load More**; the **keyword
-  filter** (server-side, debounced) narrows the WHOLE set (not just the loaded window)
-  and "no match" is trustworthy; the **sort picker** (combo + Desc) reorders the whole
-  set; a Next Scan re-pages against the pruned set. Watch sort latency on a big set.
 - **Value Search `TOptional<T>` scan (V1c)** (build 942). Scan a known value held in a
   `TOptional<int/float/FString>` UPROPERTY → confirm the row appears under the optional's
   field name and a Next Scan prunes; confirm an **unset** optional doesn't surface on a

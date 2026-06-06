@@ -55,9 +55,10 @@ round-trip.
 **Folds in most of V2's UI/pipe work** — raising the cap is now just a bigger number.
 Tests **412 → 447 dll** (+23 ordered-view: filter/sort/format/parse), **1268 → 1276
 C#** (+8: query wire shape + omit-defaults, inline-page, sort/desc/LoadMore/filter
-routing, NewScan reset). AOT publish launch-verified. **Live-verify pending:** a large
-First Scan shows total + first page + Load More; the keyword filter (server-side) and
-sort picker narrow/reorder the WHOLE set; a refine re-pages correctly.
+routing, NewScan reset). AOT publish launch-verified. **Live-verified by user
+2026-06-06** — a large First Scan shows total + first page + Load More; the
+server-side keyword filter and sort picker narrow/reorder the WHOLE set; a refine
+re-pages correctly.
 
 ## 2026-06-06 — Value Search: TOptional<T> scan (V1c, build 942)
 
