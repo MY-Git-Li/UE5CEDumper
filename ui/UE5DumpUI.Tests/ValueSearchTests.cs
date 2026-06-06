@@ -1133,6 +1133,31 @@ public class ValueSearchTests
     }
 
     [Fact]
+    public void OpenInLiveWalker_RaisesNavigateWithOffsetAndFieldName()
+    {
+        var (vm, _) = MakeVm();
+        (string addr, int off, string name)? nav = null;
+        vm.NavigateToInstance += (a, o, n) => nav = (a, o, n);
+
+        // Container hit: offset is the owning property, name carries "[N]".
+        vm.OpenInLiveWalkerCommand.Execute(new ValueCandidate
+        {
+            InstanceAddr = "0x2000",
+            FieldOffset  = 0x1C,
+            FieldName    = "AttributeAugmentLevels.Value[2]",
+        });
+        Assert.NotNull(nav);
+        Assert.Equal("0x2000", nav!.Value.addr);
+        Assert.Equal(0x1C,     nav.Value.off);
+        Assert.Equal("AttributeAugmentLevels.Value[2]", nav.Value.name);
+
+        // No instance address → no navigation.
+        nav = null;
+        vm.OpenInLiveWalkerCommand.Execute(new ValueCandidate { InstanceAddr = "" });
+        Assert.Null(nav);
+    }
+
+    [Fact]
     public async Task FirstScan_RejectsPrevValueScanType()
     {
         var (vm, fake) = MakeVm();

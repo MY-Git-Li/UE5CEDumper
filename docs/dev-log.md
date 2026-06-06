@@ -14,6 +14,36 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-06 — Live Walker focus-on-field on Value Search cross-nav (build 939)
+
+Fixes the "found a value in a `TMap`, opened it in Live Walker, but had no idea
+where the data was" complaint. Previously "Open in Live Walker" from a Value Search
+row navigated to the owning instance and dumped its whole field list with nothing
+selected. Now it focuses the exact field that produced the candidate.
+
+Threaded the candidate's `FieldOffset` + display name through the existing cross-nav
+seam: `ValueSearchViewModel.NavigateToInstance` grew from `Action<string>` to
+`Action<string,int,string>` (addr, offset, name); `MainWindowViewModel` calls a new
+`LiveWalkerViewModel.NavigateToInstanceFieldAsync(addr, offset, name)`. The owning
+property row is matched by **byte offset, not name** — field names aren't unique
+(inherited members, map `.Key`/`.Value`), and the DLL already sends `field_offset =
+desc.fieldOffset` (the owning property's offset from the UObject base, matching
+`LiveFieldValue.Offset`). For container hits the display name's trailing `[N]`
+(`Augments.Value[2]`) is parsed by `ParseElementIndexSuffix` and the existing
+Find-Refs auto-drill machinery (`_pendingDrillElementIndex` +
+`TryDrillIntoMatchedContainer`, factored out of the by-name path) drills into the
+container and selects element `[N]`. Hits inside a nested struct (absolute offset,
+not a top-level row) fall back to a plain navigation — same as Find Refs.
+
+Reuses the proven post-walk `_pendingScroll*` → `ScrollToFieldRequested` →
+`ScrollIntoView` path; only a parallel **by-offset** pending hint
+(`_pendingScrollFieldOffset`) was added. **No DLL / wire change.** Tests
+**1254 → 1268 C#** (+13 `ParseElementIndexSuffix` theory cases + 1 event-shape
+assert). **Live-verified by user 2026-06-06** — a `TMap` value hit lands on the
+container row and drills to the element; a direct numeric hit selects + scrolls to
+the exact field. (This was the original "found a TMap value, no idea where it is"
+report.)
+
 ## 2026-06-06 — Value Search engine + app-wide DataGrid sorting + DLL cancellation (builds 926-937, PRs #237/#238)
 
 Five shipments, all live-verified by the user. Tests **1254 C# + 412 dll + 31 utf8**.

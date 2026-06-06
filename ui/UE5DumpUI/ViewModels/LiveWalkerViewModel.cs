@@ -938,6 +938,33 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// Post-match container drill shared by the by-name (Find Refs) and
+    /// by-offset (Value Search) scroll paths in UpdateDisplay. When an
+    /// element index is pending and the matched field is a navigable
+    /// container, drill in and leave a "[N]" hint so the freshly-built
+    /// element view scrolls to the matched entry. No-op for direct fields
+    /// (pending index &lt; 0) or non-container matches.
+    /// </summary>
+    private void TryDrillIntoMatchedContainer(LiveFieldValue hit)
+    {
+        if (_pendingDrillElementIndex < 0) return;
+        var elemIndex = _pendingDrillElementIndex;
+        _pendingDrillElementIndex = -1;
+        if (hit.IsContainerNavigable)
+        {
+            // Stage the element scroll hint so PopulateContainerFields
+            // (called by NavigateToContainerAsync) picks it up.
+            _pendingScrollFieldName = $"[{elemIndex}]";
+            _log.Info($"UpdateDisplay: auto-drill into container '{hit.Name}' element [{elemIndex}]");
+            _ = NavigateToContainerAsync(hit);
+        }
+        else
+        {
+            _log.Info($"UpdateDisplay: skipped auto-drill — '{hit.Name}' is not container-navigable");
+        }
+    }
+
+    /// <summary>
     /// Create a container field copy retaining only the elements matching the
     /// selected synthetic fields (one or more). Extracts sparse indices from
     /// each selected field's "[N]" or "[N] description" name pattern.
@@ -1335,6 +1362,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     // user lands directly on the field that holds the pointer.
     private string? _pendingScrollFieldName;
 
+    // Value Search cross-nav focus: the owning property's byte offset to
+    // scroll to once the next walk result populates Fields. Field NAMES
+    // aren't unique (inherited members, map .Key/.Value), so Value Search
+    // matches the row by OFFSET; the by-name hint above stays for Find Refs.
+    private int? _pendingScrollFieldOffset;
+
     // Optional auto-drill index applied alongside _pendingScrollFieldName.
     // When >= 0 and the resolved field is container-navigable, the post-
     // load handler navigates into the container view AND sets a follow-up
@@ -1444,7 +1477,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         // calling NavigateToAddressAsync, so we mustn't clobber it on the
         // call this command receives from that method. Detection: the
         // pending hint set by OpenReferenceOwnerAsync is non-empty.
-        if (string.IsNullOrEmpty(_pendingScrollFieldName))
+        // NavigateToInstanceFieldAsync (Value Search) pre-arms the same
+        // drill index alongside _pendingScrollFieldOffset, so preserve it
+        // for that path too.
+        if (string.IsNullOrEmpty(_pendingScrollFieldName) && !_pendingScrollFieldOffset.HasValue)
             _pendingDrillElementIndex = -1;
 
         try
@@ -1482,6 +1518,43 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         {
             IsLoading = false;
         }
+    }
+
+    /// <summary>
+    /// Navigate to a UObject instance and focus the field that produced a
+    /// Value Search candidate. The owning property row is matched by byte
+    /// OFFSET (field names aren't unique — inherited members + map
+    /// .Key/.Value collide); if the candidate is a container element (display
+    /// name ends in "[N]") the matched container is drilled and the element
+    /// row [N] is selected. Falls back to a plain navigation when the field
+    /// can't be located as a top-level row (e.g. a hit inside a nested
+    /// struct, which the user must drill manually — same as Find Refs).
+    /// </summary>
+    public async Task NavigateToInstanceFieldAsync(string? addr, int fieldOffset, string? fieldName)
+    {
+        if (string.IsNullOrEmpty(addr)) return;
+        // Pre-arm focus state BEFORE navigating; the post-walk UpdateDisplay
+        // handler consumes it once Fields is populated. (Mirrors how
+        // OpenReferenceOwnerAsync pre-arms the by-name hint for Find Refs.)
+        _pendingScrollFieldOffset = fieldOffset;
+        _pendingDrillElementIndex = ParseElementIndexSuffix(fieldName ?? "");
+        await NavigateToAddressAsync(addr);
+    }
+
+    /// <summary>
+    /// Extract a trailing "[N]" container-element index from a Value Search
+    /// field display name (e.g. "Cargo[3]" or "Augments.Value[2]"). Returns
+    /// -1 for a direct field with no element suffix, an empty/negative
+    /// bracket, or a non-leaf path like "Cargo[3].ItemId" (not a drillable
+    /// element row).
+    /// </summary>
+    internal static int ParseElementIndexSuffix(string fieldName)
+    {
+        if (string.IsNullOrEmpty(fieldName) || fieldName[^1] != ']') return -1;
+        int open = fieldName.LastIndexOf('[');
+        if (open < 0 || open >= fieldName.Length - 2) return -1;  // no '[' or "[]"
+        var inner = fieldName.Substring(open + 1, fieldName.Length - open - 2);
+        return int.TryParse(inner, out var idx) && idx >= 0 ? idx : -1;
     }
 
     [RelayCommand]
@@ -2905,36 +2978,34 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 SelectedField = hit;
                 ScrollToFieldRequested?.Invoke(hint);
                 _log.Info($"UpdateDisplay: auto-scrolled to '{hint}' (pending scroll hint)");
-
-                // Find Refs auto-drill: if the matched field is container-
-                // navigable AND we have a pending element index, chain into
-                // the container view + leave a follow-up scroll hint for
-                // the element entry "[N]". Lets Open-from-Find-Refs land
-                // directly on the array/map/set element that held the
-                // pointer instead of stopping at the container row.
-                if (_pendingDrillElementIndex >= 0)
-                {
-                    var elemIndex = _pendingDrillElementIndex;
-                    _pendingDrillElementIndex = -1;
-                    if (hit.IsContainerNavigable)
-                    {
-                        // Stage the element scroll hint so PopulateContainerFields
-                        // (called by NavigateToContainerAsync) picks it up.
-                        _pendingScrollFieldName = $"[{elemIndex}]";
-                        _log.Info($"UpdateDisplay: auto-drill into container '{hint}' element [{elemIndex}]");
-                        _ = NavigateToContainerAsync(hit);
-                    }
-                    else
-                    {
-                        _log.Info($"UpdateDisplay: skipped auto-drill — '{hint}' is not container-navigable");
-                    }
-                }
+                TryDrillIntoMatchedContainer(hit);
             }
             else
             {
                 _log.Info($"UpdateDisplay: pending scroll hint '{hint}' not found in field list");
                 // Drop the drill hint too — without the container field we
                 // have nothing to drill into.
+                _pendingDrillElementIndex = -1;
+            }
+        }
+        else if (_pendingScrollFieldOffset is int wantOffset)
+        {
+            // Value Search cross-nav: match the owning property row by byte
+            // offset (names aren't unique). Lands on the container row for a
+            // map/array/set hit; TryDrillIntoMatchedContainer then drills to
+            // the matched element when the display name carried a "[N]".
+            _pendingScrollFieldOffset = null;
+            var hit = Fields.FirstOrDefault(f => f.Offset == wantOffset);
+            if (hit != null)
+            {
+                SelectedField = hit;
+                ScrollToFieldRequested?.Invoke(hit.Name);
+                _log.Info($"UpdateDisplay: auto-scrolled to offset 0x{wantOffset:X} field '{hit.Name}'");
+                TryDrillIntoMatchedContainer(hit);
+            }
+            else
+            {
+                _log.Info($"UpdateDisplay: pending scroll offset 0x{wantOffset:X} not found among top-level fields");
                 _pendingDrillElementIndex = -1;
             }
         }
