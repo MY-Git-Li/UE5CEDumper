@@ -14,6 +14,28 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-06 — Global stale-DLL badge + Live Walker tooltip-flicker fix (builds 956-958)
+
+Two small UX fixes from a "manual proxy-DLL deploy" discussion.
+
+**Global stale-DLL badge (build 958).** The DLL already reports `build_number` over
+the pipe and the UI compares it to its own (`BuildVersionMismatch`), but the
+match/mismatch badge lived only in the **Diagnostics** section of the Pointers tab —
+easy to miss after hand-deploying an old proxy DLL into a game folder and forgetting,
+then scanning with mismatched offsets. Surfaced it in the **always-visible top bar**:
+`PointerPanelViewModel` gained `ShowGlobalBuildWarning` + `GlobalBuildWarningText`
+("⚠ DLL build 920 ≠ UI 958 — stale, redeploy"); `MainWindowViewModel` mirrors it as
+`ShowBuildMismatchBadge` (gated on `IsConnected`, re-raised from `Pointers`'
+PropertyChanged + on connect/disconnect) into an amber badge next to the connection
+status. Visible from every tab. +3 VM tests.
+
+**Live Walker function-row tooltip flicker (build 956).** The Functions grid sits at
+the window bottom, so the default `Pointer` tooltip placement on the INV/PIPE/AA(Baked)
+buttons flipped up onto the cursor → hover ends → tooltip dismisses → re-enters →
+repeat (a blinking hint on the bottom row). Same root cause + fix the project already
+documented in `ProxyDeployPanel`: `ToolTip.Placement="Top"` + `VerticalOffset="-4"` so
+the tip sits above the button, away from the cursor.
+
 ## 2026-06-06 — Value Search: raise maxResults cap to 1M (V2, build 954)
 
 With V3-C's server-side window in place the cap is no longer bounded by the pipe / UI

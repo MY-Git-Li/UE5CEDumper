@@ -124,6 +124,22 @@ public partial class PointerPanelViewModel : ViewModelBase
     /// <summary>True when DLL is pre-build-653 and doesn't report build_number at all.</summary>
     public bool BuildVersionUnknown => HasData && DllBuildNumber == 0;
 
+    /// <summary>Drives the GLOBAL stale-DLL badge in the main window top bar:
+    /// true when the DLL is stale (mismatch) OR pre-dates the build probe
+    /// (unknown). Surfaced from EVERY tab — not just Diagnostics — so a
+    /// hand-deployed old proxy DLL is noticed before scanning with mismatched
+    /// offsets (the "forgot where I deployed" trap).</summary>
+    public bool ShowGlobalBuildWarning => BuildVersionMismatch || BuildVersionUnknown;
+
+    /// <summary>Text for the global stale-DLL badge, with the actual build
+    /// numbers when known.</summary>
+    public string GlobalBuildWarningText =>
+        BuildVersionMismatch
+            ? $"⚠ DLL build {DllBuildNumber} ≠ UI {UiBuildNumber} — stale, redeploy (close game first)"
+        : BuildVersionUnknown
+            ? "⚠ DLL pre-dates the build probe — assume stale, redeploy"
+        : "";
+
     // --- Self-Test state ---
     [ObservableProperty] private bool _isSelfTesting;
     [ObservableProperty] private string _selfTestResultText = "";
@@ -413,6 +429,8 @@ public partial class PointerPanelViewModel : ViewModelBase
         OnPropertyChanged(nameof(BuildVersionsMatch));
         OnPropertyChanged(nameof(BuildVersionMismatch));
         OnPropertyChanged(nameof(BuildVersionUnknown));
+        OnPropertyChanged(nameof(ShowGlobalBuildWarning));
+        OnPropertyChanged(nameof(GlobalBuildWarningText));
     }
 
     private void NotifyAobMakerProperties()
