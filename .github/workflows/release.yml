@@ -48,9 +48,27 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Pin build number to the tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        # For a numeric `vNNN` tag, write NNN into build_number.txt so the
+        # embedded build number == the release tag (build.ps1 runs with
+        # -NoBumpBuildNumber below, so it won't drift +1 on the runner). Non-
+        # numeric tags (e.g. v1.2.3) leave the committed build_number.txt as-is.
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          if ($tag -match '^v(\d+)$') {
+            [System.IO.File]::WriteAllText("$PWD/build_number.txt", "$($Matches[1])`n")
+            Write-Host "Pinned build_number.txt = $($Matches[1]) (from tag $tag)"
+          } else {
+            Write-Host "Tag $tag is not vNNN — using committed build_number.txt as-is."
+          }
+
       - name: Build + test + publish dist (AOT)
         shell: pwsh
-        run: ./build.ps1 -Mode Publish -Clean
+        # -NoBumpBuildNumber: keep the embedded build number pinned (to the tag,
+        # see above) instead of incrementing it on the runner.
+        run: ./build.ps1 -Mode Publish -Clean -NoBumpBuildNumber
 
       - name: Package dist into a zip + sha256
         shell: pwsh

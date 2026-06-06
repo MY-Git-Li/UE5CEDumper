@@ -42,6 +42,11 @@ param(
     [switch]$Clean,
     [switch]$SkipRestore,
 
+    # Skip the per-invocation build-number increment. Used by CI release builds
+    # so the embedded build number stays pinned (e.g. to the release tag) instead
+    # of drifting +1 on the runner. Local dev builds bump as usual.
+    [switch]$NoBumpBuildNumber,
+
     [string]$LogFile = ""
 )
 
@@ -283,10 +288,15 @@ if (Test-Path $buildNumFile) {
 else {
     $buildNum = 0
 }
-$buildNum++
-# Write with LF line ending to match CMake's original format (avoids git CRLF warning)
-[System.IO.File]::WriteAllText($buildNumFile, "$buildNum`n")
-Write-Info "Build#: $buildNum"
+if (-not $NoBumpBuildNumber) {
+    $buildNum++
+    # Write with LF line ending to match CMake's original format (avoids git CRLF warning)
+    [System.IO.File]::WriteAllText($buildNumFile, "$buildNum`n")
+    Write-Info "Build#: $buildNum"
+}
+else {
+    Write-Info "Build#: $buildNum (no bump)"
+}
 
 $exitCode = 0
 
