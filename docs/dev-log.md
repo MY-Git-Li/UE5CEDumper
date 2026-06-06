@@ -14,6 +14,81 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-06 — Value Search engine + app-wide DataGrid sorting + DLL cancellation (builds 926-937, PRs #237/#238)
+
+Five shipments, all live-verified by the user. Tests **1254 C# + 412 dll + 31 utf8**.
+
+### Value Search — lean Candidate (V3-A + V3-B), build 926, PR #237
+Interning refactor of the value-scan result record. `ValueScan::Candidate` carried
+six `std::string`s copied by value, almost all redundant: class / defining-class /
+field name / type / mask / offset are functions of `(class, field)`, and the
+instance name is shared per object. Interned the per-(class,field) metadata into a
+session `FieldDescriptor` pool and the per-object metadata into an `InstanceRecord`
+pool; the lean Candidate keeps only `addr` + value snapshot + `descriptorIdx` +
+`instanceIdx` + `elementIndex` (~240 B → ~72 B, and **0 heap strings per numeric
+candidate**). Sessions live in the injected DLL, so this is the precondition for any
+later maxResults-cap increase. Worker threads intern into thread-local pools
+(descriptorIdx cached on the `ScanField`); a custom ascending-tid merge offset-remaps
+candidate indices (replaced `ConcatTruncate` for this caller). **Wire JSON shape
+unchanged → C#/UI untouched.** Array element names rebuilt via
+`ValueScan::FieldDisplayName(desc, elementIndex)`. **V3-B (instance-table dedupe) was
+necessarily folded into V3-A** — a lean Candidate can't keep raw instance fields.
+
+### Value Search — TSet / TMap key|value scan (V1a), build 927, PR #237
+Closes the biggest "what can't Value Scan reach?" gap after non-UPROPERTY fields.
+`ScanField`'s `bool isArray` → `enum ScanContainer { None, Array, Set, MapKey,
+MapValue }` + `valueOffset`. `expandFields` emits Set/Map(key|value) ScanFields next
+to the ArrayProperty branch (vector inner gated by `ContainerInnerAccepted`); a shared
+`scanElement` lambda (factored out of the TArray loop) drives Array + a new sparse
+branch that walks the FSet/FMap `TSparseArray` (allocated slots only via
+`IsSparseIndexAllocated`, value at `slot + valueOffset`), reusing the Address Finder's
+sparse geometry (`GetSetElementStride` / `GetMapPairLayout`). **Refine + Fern needed
+ZERO changes** (operate on `c.addr` + descriptor pool; element addr incl. valueOffset
+baked in at First-Scan). Rows render `Set[idx]` / `Map.Key[idx]` / `Map.Value[idx]`.
+Element addresses are raw, so refine degrades on container reallocation exactly like
+TArray. TOptional (V1c) still deferred. Live-verified: a `TMap<NameProperty,IntProperty>`
+value (`PlayerData.AttributeAugmentLevels.Value[2]`=481) found via Int32 Exact scan.
+
+### App-wide DataGrid sorting fix + Value Search keyword filter, builds 932-934, PR #237
+Column sorting was dead in **every** DataGrid (text and template columns). **Root
+cause: compiled bindings** (`AvaloniaUseCompiledBindingsByDefault=true`) — Avalonia
+DataGrid does NOT auto-derive a column's sort path from a compiled binding, so without
+an explicit `SortMemberPath` nothing sorts. **NOT an AOT/backend-removal regression**
+(reproduced on the non-AOT build). Added `SortMemberPath` to every sortable column
+across all panels (numeric backing for hex offset/size/score columns so order is
+numeric), `CanUserSort="False"` on action columns. Exception kept: SPC `SnapshotPicks`
+stays chronological. Plus a **Value Search keyword filter**: case-insensitive
+substring across all columns, client-side over the cached set (`FilterText` →
+`ApplyFilter` rebuilds the bound **typed** `ObservableCollection` — a non-generic
+`DataGridCollectionView` breaks compiled column-binding type inference, AVLN2000).
+
+### DLL-side cooperative cancellation for long operations, builds 936-937, PR #238
+Long DLL ops now stop when the UI disconnects or the DLL shuts down, so the DLL no
+longer spins after the UI closes and disabling the script / closing the game no longer
+hangs while a scan finishes. The pipe is single-connection + synchronous (a scan blocks
+the pipe thread and can't be told to stop on the same pipe mid-scan), so this is a
+**cooperative-cancel layer**:
+- New `Cancel.h`: `Cancel::Requested()` (relaxed atomic) = per-command disconnect flag
+  | sticky shutdown flag.
+- `Fern::Stop()`/`UE5_Shutdown` call `RequestShutdown()` **before** joining threads →
+  in-flight scan bails, accept-thread join completes fast (**fixes "game won't close"**).
+- Fern **monitor thread** `PeekNamedPipe`s the in-flight pipe every 200ms (only while
+  `m_commandInFlight` — the handler is CPU-bound then, not touching the handle); a broken
+  pipe → per-command cancel → orphaned scan bails, pipe frees for the reconnecting UI
+  (**fixes the reconnect-within-window stall**).
+- Coverage: a watcher in `ParallelGObjectsScan` flips the existing `deadlineHit` (covers
+  value scan / find-refs / containers / xrefs / find-by-path with no per-body edits);
+  serial loops poll `Cancel::Requested()` every 4096 iters (`ListClasses`,
+  `EnumerateAllFunctions`, `SearchByName`, `FindInstancesByClass`, `SearchProperties[Batch]`,
+  `WalkClassesBatch`, `CaptureSnapshotChunk`, `Aura::ForEach`, `list_enums`). **No hard
+  timeouts** — Full SDK dump etc. must run to completion.
+- UI: Value Search gains a per-scan `CancellationTokenSource` + Cancel button (shown
+  while scanning). Cancel abandons the UI wait; the DLL self-terminates at its deadline.
+
+Live-verified: value-scan cancel, close-UI-mid-scan stops the DLL, game closes promptly.
+
+-----
+
 ## 2026-06-05 — Experimental UX batch 3: pivot index, capture ETA, Delete All, icon (build 923)
 
 Third live-test feedback pass.

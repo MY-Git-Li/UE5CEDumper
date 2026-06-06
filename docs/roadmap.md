@@ -6,12 +6,18 @@ upcoming work and [dev-log.md](dev-log.md) for the historical commit
 trail. Build number tags reflect when each row reached its current
 state.
 
-> **Last refreshed**: 2026-05-29 (build 797) for the rows below. **Newer work
-> (builds 805-923) lives elsewhere:** the experimental Snapshot / SPC Query /
-> Class Pivot tabs (incl. the N1 noise picker, cancellation, persisted pivot
-> index) are in [experimental-snapshot-spc-pivot.md](experimental-snapshot-spc-pivot.md)
-> + [dev-log.md](dev-log.md) builds 908-923; the Windows-only Native-AOT Avalonia
-> backend is dev-log builds 918-919. dev = main @ build 923.
+> **Last refreshed**: 2026-05-29 (build 797) for the rows below. **dev = main @
+> build ~937 (PR #238).** Newer work lives in [dev-log.md](dev-log.md):
+> - builds **926-937 (2026-06-06)** — Value Search **lean Candidate** (V3-A/B) +
+>   **TSet/TMap scan** (V1a); **app-wide DataGrid sorting fix** (compiled bindings
+>   need explicit `SortMemberPath`); **Value Search keyword filter**; **DLL-side
+>   cooperative cancellation** (`Cancel.h` + Fern disconnect-monitor + shutdown-abort
+>   — long ops stop when the UI closes / DLL shuts down). See the Value Search section
+>   below + [todo.md](todo.md) for the V1/V2/V3 plan.
+> - builds **805-923** — experimental Snapshot / SPC Query / Class Pivot tabs (N1 noise
+>   picker, cancellation, persisted pivot index) in
+>   [experimental-snapshot-spc-pivot.md](experimental-snapshot-spc-pivot.md) +
+>   dev-log builds 908-923; Windows-only Native-AOT Avalonia backend in dev-log 918-919.
 >
 > The build-797 shipments:
 >
