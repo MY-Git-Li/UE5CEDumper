@@ -107,7 +107,7 @@
         </ContextMenu>
       </DataGrid.ContextMenu>
       <DataGrid.Columns>
-        <DataGridTemplateColumn Header="Score" Width="60">
+        <DataGridTemplateColumn Header="Score" Width="60" SortMemberPath="FinalScore">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:ScoredPropertyRow">
               <TextBlock Text="{Binding FinalScore}"
@@ -119,7 +119,7 @@
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
-        <DataGridTemplateColumn Header="Cat" Width="80">
+        <DataGridTemplateColumn Header="Cat" Width="80" SortMemberPath="CategoryLabel">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:ScoredPropertyRow">
               <TextBlock Text="{Binding CategoryLabel}"
@@ -130,7 +130,7 @@
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
-        <DataGridTemplateColumn Header="⚠ Location" Width="100">
+        <DataGridTemplateColumn Header="⚠ Location" Width="100" SortMemberPath="UnusualBadge">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:ScoredPropertyRow">
               <TextBlock Text="{Binding UnusualBadge}"
@@ -142,11 +142,11 @@
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
-        <DataGridTextColumn Header="Class" Binding="{Binding ClassName}" Width="220"/>
-        <DataGridTextColumn Header="Property" Binding="{Binding PropName}" Width="220"/>
-        <DataGridTextColumn Header="Type" Binding="{Binding TypeDisplay}" Width="160"/>
-        <DataGridTextColumn Header="Offset" Binding="{Binding OffsetHex}" Width="80"/>
-        <DataGridTemplateColumn Header="" Width="Auto">
+        <DataGridTextColumn Header="Class" Binding="{Binding ClassName}" SortMemberPath="ClassName" Width="220"/>
+        <DataGridTextColumn Header="Property" Binding="{Binding PropName}" SortMemberPath="PropName" Width="220"/>
+        <DataGridTextColumn Header="Type" Binding="{Binding TypeDisplay}" SortMemberPath="TypeDisplay" Width="160"/>
+        <DataGridTextColumn Header="Offset" Binding="{Binding OffsetHex}" SortMemberPath="PropOffset" Width="80"/>
+        <DataGridTemplateColumn Header="" Width="Auto" CanUserSort="False">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:ScoredPropertyRow">
               <StackPanel Orientation="Horizontal" Spacing="4">

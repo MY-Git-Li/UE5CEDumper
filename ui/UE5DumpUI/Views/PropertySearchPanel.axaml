@@ -82,13 +82,14 @@
       <DataGrid.Columns>
         <DataGridTextColumn Header="Class"
                             Binding="{Binding ClassName}"
+                            SortMemberPath="ClassName"
                             Width="200"/>
         <!-- Inheritance badge: '+N inheritors' when the field is shared
              across N subclasses. Empty when the property is unique to
              this class (a strong hint that it's a game-specific addition
              rather than an engine-inherited field). Tooltip explains
              the relationship + shows the defining class path. -->
-        <DataGridTemplateColumn Header="Scope" Width="120">
+        <DataGridTemplateColumn Header="Scope" Width="120" SortMemberPath="InheritedByCount">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:PropertySearchMatch">
               <TextBlock Text="{Binding InheritanceBadge}"
@@ -103,20 +104,25 @@
         </DataGridTemplateColumn>
         <DataGridTextColumn Header="Super"
                             Binding="{Binding SuperName}"
+                            SortMemberPath="SuperName"
                             Width="120"/>
         <DataGridTextColumn Header="Property"
                             Binding="{Binding PropName}"
+                            SortMemberPath="PropName"
                             Width="180"/>
         <DataGridTextColumn Header="Type"
                             Binding="{Binding TypeDisplay}"
+                            SortMemberPath="TypeDisplay"
                             Width="200"/>
         <DataGridTextColumn Header="Offset"
                             Binding="{Binding OffsetHex}"
+                            SortMemberPath="PropOffset"
                             Width="80"/>
         <DataGridTextColumn Header="Size"
                             Binding="{Binding PropSize}"
+                            SortMemberPath="PropSize"
                             Width="50"/>
-        <DataGridTemplateColumn Header="Preview" Width="200">
+        <DataGridTemplateColumn Header="Preview" Width="200" SortMemberPath="Preview">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:PropertySearchMatch">
               <TextBlock Text="{Binding Preview}"
@@ -127,7 +133,7 @@
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
-        <DataGridTemplateColumn Header="" Width="Auto">
+        <DataGridTemplateColumn Header="" Width="Auto" CanUserSort="False">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:PropertySearchMatch">
               <StackPanel Orientation="Horizontal" Spacing="4">

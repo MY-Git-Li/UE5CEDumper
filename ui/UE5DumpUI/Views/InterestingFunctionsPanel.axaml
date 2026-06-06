@@ -100,7 +100,7 @@
               FontSize="12"
               FontFamily="Consolas, Menlo, monospace">
       <DataGrid.Columns>
-        <DataGridTemplateColumn Header="Score" Width="60">
+        <DataGridTemplateColumn Header="Score" Width="60" SortMemberPath="FinalScore">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:ScoredFunctionRow">
               <TextBlock Text="{Binding FinalScore}"
@@ -112,7 +112,7 @@
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
-        <DataGridTemplateColumn Header="Cat" Width="80">
+        <DataGridTemplateColumn Header="Cat" Width="80" SortMemberPath="CategoryLabel">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:ScoredFunctionRow">
               <TextBlock Text="{Binding CategoryLabel}"
@@ -123,11 +123,11 @@
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
-        <DataGridTextColumn Header="Class" Binding="{Binding ClassName}" Width="220"/>
-        <DataGridTextColumn Header="Function" Binding="{Binding FuncName}" Width="200"/>
-        <DataGridTextColumn Header="Flags" Binding="{Binding ShortFlags}" Width="120"/>
-        <DataGridTextColumn Header="Params" Binding="{Binding ParamsLabel}" Width="80"/>
-        <DataGridTemplateColumn Header="" Width="Auto">
+        <DataGridTextColumn Header="Class" Binding="{Binding ClassName}" SortMemberPath="ClassName" Width="220"/>
+        <DataGridTextColumn Header="Function" Binding="{Binding FuncName}" SortMemberPath="FuncName" Width="200"/>
+        <DataGridTextColumn Header="Flags" Binding="{Binding ShortFlags}" SortMemberPath="ShortFlags" Width="120"/>
+        <DataGridTextColumn Header="Params" Binding="{Binding ParamsLabel}" SortMemberPath="ParamsLabel" Width="80"/>
+        <DataGridTemplateColumn Header="" Width="Auto" CanUserSort="False">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:ScoredFunctionRow">
               <StackPanel Orientation="Horizontal" Spacing="4">

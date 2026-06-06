@@ -277,18 +277,18 @@
                   MaxHeight="160">
           <DataGrid.Columns>
             <DataGridTextColumn Header="Reference Path"
-                                Binding="{Binding DisplayPath}"
+                                Binding="{Binding DisplayPath}" SortMemberPath="DisplayPath"
                                 Width="2*"/>
             <DataGridTextColumn Header="Owner Class"
-                                Binding="{Binding OwnerClassName}"
+                                Binding="{Binding OwnerClassName}" SortMemberPath="OwnerClassName"
                                 Width="*"/>
             <DataGridTextColumn Header="Field Type"
-                                Binding="{Binding FieldType}"
+                                Binding="{Binding FieldType}" SortMemberPath="FieldType"
                                 Width="120"/>
             <DataGridTextColumn Header="Owner Addr"
-                                Binding="{Binding OwnerAddress}"
+                                Binding="{Binding OwnerAddress}" SortMemberPath="OwnerAddress"
                                 Width="140"/>
-            <DataGridTemplateColumn Header="" Width="80" CanUserResize="False">
+            <DataGridTemplateColumn Header="" Width="80" CanUserResize="False" CanUserSort="False">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate x:DataType="m:ReferenceMatch">
                   <Button Content="Open"
@@ -351,15 +351,16 @@
       </DataGrid.ContextMenu>
       <DataGrid.Columns>
         <DataGridTextColumn Header="{StaticResource str.ClassStruct.Offset}"
-                            Binding="{Binding Offset, StringFormat='0x{0:X}'}"
+                            Binding="{Binding Offset, StringFormat='0x{0:X}'}" SortMemberPath="Offset"
                             Width="75" IsReadOnly="True"/>
         <DataGridTextColumn Header="{StaticResource str.ClassStruct.Name}"
-                            Binding="{Binding Name}"
+                            Binding="{Binding Name}" SortMemberPath="Name"
                             Width="220" MinWidth="140" IsReadOnly="True"/>
         <DataGridTextColumn Header="{StaticResource str.ClassStruct.Type}"
-                            Binding="{Binding TypeName}"
+                            Binding="{Binding TypeName}" SortMemberPath="TypeName"
                             Width="115" IsReadOnly="True"/>
         <DataGridTemplateColumn Header="{StaticResource str.LiveWalker.Value}"
+                                SortMemberPath="DisplayValue"
                                 Width="200" MinWidth="100">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:LiveFieldValue">
@@ -389,15 +390,15 @@
           </DataGridTemplateColumn.CellEditingTemplate>
         </DataGridTemplateColumn>
         <DataGridTextColumn Header="Hex"
-                            Binding="{Binding HexValue}"
+                            Binding="{Binding HexValue}" SortMemberPath="HexValue"
                             Width="130" IsReadOnly="True"/>
         <DataGridTextColumn Header="{StaticResource str.InstanceFinder.Address}"
-                            Binding="{Binding FieldAddress}"
+                            Binding="{Binding FieldAddress}" SortMemberPath="FieldAddress"
                             Width="135" IsReadOnly="True"/>
         <DataGridTextColumn Header="{StaticResource str.LiveWalker.PtrValue}"
-                            Binding="{Binding PtrAddress}"
+                            Binding="{Binding PtrAddress}" SortMemberPath="PtrAddress"
                             Width="135" IsReadOnly="True"/>
-        <DataGridTemplateColumn Header="" Width="45">
+        <DataGridTemplateColumn Header="" Width="45" CanUserSort="False">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:LiveFieldValue">
               <StackPanel Orientation="Horizontal">
@@ -435,7 +436,7 @@
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
-        <DataGridTemplateColumn Header="{StaticResource str.LiveWalker.CopyAddress}" Width="80">
+        <DataGridTemplateColumn Header="{StaticResource str.LiveWalker.CopyAddress}" Width="80" CanUserSort="False">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:LiveFieldValue">
               <StackPanel Orientation="Horizontal">
@@ -460,7 +461,7 @@
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
-        <DataGridTemplateColumn Header="{StaticResource str.LiveWalker.CopyName}" Width="50">
+        <DataGridTemplateColumn Header="{StaticResource str.LiveWalker.CopyName}" Width="50" CanUserSort="False">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:LiveFieldValue">
               <Button Content="Name"
@@ -474,7 +475,7 @@
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
-        <DataGridTemplateColumn Header="{StaticResource str.LiveWalker.CopyPtr}" Width="80">
+        <DataGridTemplateColumn Header="{StaticResource str.LiveWalker.CopyPtr}" Width="80" CanUserSort="False">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:LiveFieldValue">
               <StackPanel Orientation="Horizontal"
@@ -567,9 +568,9 @@
                 FontFamily="Consolas" FontSize="12"
                 Focusable="False">
         <DataGrid.Columns>
-          <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="200" MinWidth="120"/>
-          <DataGridTextColumn Header="Return" Binding="{Binding ReturnType}" Width="100"/>
-          <DataGridTextColumn Header="Params" Width="90">
+          <DataGridTextColumn Header="Name" Binding="{Binding Name}" SortMemberPath="Name" Width="200" MinWidth="120"/>
+          <DataGridTextColumn Header="Return" Binding="{Binding ReturnType}" SortMemberPath="ReturnType" Width="100"/>
+          <DataGridTextColumn Header="Params" Width="90" SortMemberPath="NumParms">
             <DataGridTextColumn.Binding>
               <MultiBinding StringFormat="{}{0} ({1}B)">
                 <Binding Path="NumParms"/>
@@ -577,8 +578,8 @@
               </MultiBinding>
             </DataGridTextColumn.Binding>
           </DataGridTextColumn>
-          <DataGridTextColumn Header="Address" Binding="{Binding Address}" Width="140"/>
-          <DataGridTemplateColumn Header="" Width="320">
+          <DataGridTextColumn Header="Address" Binding="{Binding Address}" SortMemberPath="Address" Width="140"/>
+          <DataGridTemplateColumn Header="" Width="320" CanUserSort="False">
             <DataGridTemplateColumn.CellTemplate>
               <DataTemplate x:DataType="m:FunctionInfoModel">
                 <StackPanel Orientation="Horizontal" Spacing="2">

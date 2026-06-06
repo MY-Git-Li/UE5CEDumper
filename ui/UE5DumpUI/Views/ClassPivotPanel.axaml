@@ -120,18 +120,18 @@
               IsEnabled="{Binding !IsBusy}"
               CanUserResizeColumns="True" CanUserSortColumns="True">
       <DataGrid.Columns>
-        <DataGridTemplateColumn Header="{StaticResource str.Pivot.Col.Project}" Width="60">
+        <DataGridTemplateColumn Header="{StaticResource str.Pivot.Col.Project}" Width="60" CanUserSort="False">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="vm:PivotFieldPick">
               <CheckBox IsChecked="{Binding IsValue}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
-        <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Field}"    Binding="{Binding Name}"            IsReadOnly="True" Width="*"/>
-        <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Type}"     Binding="{Binding DeclaredType}"    IsReadOnly="True" Width="130"/>
-        <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Distinct}" Binding="{Binding DistinctCount}"   IsReadOnly="True" Width="80"/>
-        <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Insts}"    Binding="{Binding InstanceCount}"   IsReadOnly="True" Width="90"/>
-        <DataGridTextColumn Header="{StaticResource str.Pivot.Col.KeyScore}" Binding="{Binding KeyScoreDisplay}" IsReadOnly="True" Width="80"/>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Field}"    Binding="{Binding Name}"            SortMemberPath="Name"          IsReadOnly="True" Width="*"/>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Type}"     Binding="{Binding DeclaredType}"    SortMemberPath="DeclaredType"  IsReadOnly="True" Width="130"/>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Distinct}" Binding="{Binding DistinctCount}"   SortMemberPath="DistinctCount" IsReadOnly="True" Width="80"/>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Insts}"    Binding="{Binding InstanceCount}"   SortMemberPath="InstanceCount" IsReadOnly="True" Width="90"/>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Col.KeyScore}" Binding="{Binding KeyScoreDisplay}" SortMemberPath="KeyScore"      IsReadOnly="True" Width="80"/>
       </DataGrid.Columns>
     </DataGrid>
 
@@ -143,9 +143,9 @@
               IsReadOnly="True" GridLinesVisibility="Horizontal" Background="#1E1E1E"
               CanUserResizeColumns="True" CanUserSortColumns="True">
       <DataGrid.Columns>
-        <DataGridTextColumn Header="{StaticResource str.Pivot.Res.Count}"  Binding="{Binding Count}"         Width="70"/>
-        <DataGridTextColumn Header="{StaticResource str.Pivot.Res.Key}"    Binding="{Binding KeyValue}"      Width="*"/>
-        <DataGridTextColumn Header="{StaticResource str.Pivot.Res.Values}" Binding="{Binding ValuesDisplay}" Width="2*"/>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Res.Count}"  Binding="{Binding Count}"         SortMemberPath="Count"         Width="70"/>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Res.Key}"    Binding="{Binding KeyValue}"      SortMemberPath="KeyValue"      Width="*"/>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Res.Values}" Binding="{Binding ValuesDisplay}" SortMemberPath="ValuesDisplay" Width="2*"/>
       </DataGrid.Columns>
     </DataGrid>
 

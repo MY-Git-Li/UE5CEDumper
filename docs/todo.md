@@ -358,8 +358,10 @@ memory-reading code.
 
 ### V1. TMap / TSet / TOptional value scan
 
-- ~~**V1a — TMap / TSet (First-Scan).**~~ ✅ **CODE COMPLETE on dev (build 927) —
-  live First/Next scan verification still pending.** Shipped: `ScanField` gained a
+- ~~**V1a — TMap / TSet (First-Scan).**~~ ✅ **SHIPPED on dev (build 927) — live-verified
+  OK by user 2026-06-06** (Avowed/Star-game `TMap<NameProperty,IntProperty>`
+  `PlayerData.AttributeAugmentLevels.Value[2]`=481 found via Int32 Exact scan).
+  Shipped: `ScanField` gained a
   `ScanContainer { None, Array, Set, MapKey, MapValue }` enum + `valueOffset`;
   `expandFields` emits Set/Map(key|value) ScanFields (vector inner gated by
   `ContainerInnerAccepted`); a shared `scanElement` lambda (factored out of the
@@ -415,6 +417,43 @@ memory-reading code.
   lean-candidate set in the DLL session** (cheap after V3) but **stream only a
   window/summary to the UI** (depends on V3-C's paging cmd). Don't just bump the
   number.
+
+-----
+
+## UI/UX: DataGrid sorting + Value Search filter (build 934, 2026-06-06)
+
+User-reported during V1a live test. Three items; two shipped, one deferred.
+
+- ~~**DataGrid column sorting broken app-wide.**~~ ✅ **SHIPPED (build 933-934).**
+  Root cause: the project uses **compiled bindings**
+  (`AvaloniaUseCompiledBindingsByDefault=true`), and Avalonia DataGrid does **not**
+  auto-derive a column's sort path from a compiled binding — so NO column sorted
+  (text or template), in every grid. **Not** an AOT/Linux-removal regression (the
+  user tested the non-AOT `-Target Test` build). Fix: added explicit
+  `SortMemberPath="<Prop>"` to every sortable column across all panels (numeric
+  backing for hex offset/size/address/score columns so order is numeric, not
+  lexical); `CanUserSort="False"` on action/button/checkbox columns. **Exception
+  kept:** SpcPanel `SnapshotPicks` stays `CanUserSortColumns="False"` (chronological
+  old→new). Panels swept: ValueSearch, ProxyDeploy, LiveWalker (Fields/Refs/Funcs),
+  InstanceFinder (×3), PropertySearch, Interesting Funcs/Props, ClassStruct,
+  GameClassFilter, Snapshot (×3), Spc (×2), ClassPivot (×2). **Lesson:** any new
+  DataGrid in this project MUST set `SortMemberPath` per sortable column or it won't
+  sort (compiled bindings).
+- ~~**Value Search keyword filter.**~~ ✅ **SHIPPED (build 932).** Case-insensitive
+  substring filter over all displayed columns, client-side over the cached candidate
+  set (`FilterText` → `ApplyFilter()` rebuilds the bound `Candidates` from
+  `_allCandidates`; reflection-free, AOT-safe). Kept the bound collection a **typed**
+  `ObservableCollection` (not a `DataGridCollectionView`) — a non-generic view breaks
+  compiled column-binding type inference (AVLN2000).
+- **Live Walker focus-on-field when navigating from a result.** Effort: **S-M**.
+  Risk: low. **DEFERRED — next.** "Open in Live Walker" from a Value Search row opens
+  the owning instance but doesn't scroll to / select the target field, so the user
+  can't see the correct position. Infra already exists: `LiveWalkerViewModel`'s
+  `_pendingScrollFieldName` + `ScrollToFieldRequested` event + `LiveWalkerPanel`'s
+  `ScrollIntoView`/`SelectedItem` handler (used by Find References). Need to thread
+  the candidate's `FieldOffset` through `OpenInLiveWalker` → `NavigateToInstance` →
+  `NavigateToAddressAsync`, then match by offset in `UpdateDisplay` (field names
+  aren't unique). See the cross-nav investigation in the 2026-06-06 session.
 
 -----
 

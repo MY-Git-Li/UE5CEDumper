@@ -133,11 +133,11 @@
               IsReadOnly="True" GridLinesVisibility="Horizontal" Background="#1E1E1E"
               CanUserResizeColumns="True" CanUserSortColumns="True">
       <DataGrid.Columns>
-        <DataGridTextColumn Header="{StaticResource str.Spc.Res.Class}"    Binding="{Binding ClassName}"       Width="200"/>
-        <DataGridTextColumn Header="{StaticResource str.Spc.Res.Object}"   Binding="{Binding NormPath}"        Width="*"/>
-        <DataGridTextColumn Header="{StaticResource str.Spc.Res.Field}"    Binding="{Binding PropName}"        Width="150"/>
-        <DataGridTextColumn Header="{StaticResource str.Spc.Res.Type}"     Binding="{Binding DeclaredType}"    Width="120"/>
-        <DataGridTextColumn Header="{StaticResource str.Spc.Res.Sequence}" Binding="{Binding SequenceDisplay}" Width="240"/>
+        <DataGridTextColumn Header="{StaticResource str.Spc.Res.Class}"    Binding="{Binding ClassName}"       SortMemberPath="ClassName"       Width="200"/>
+        <DataGridTextColumn Header="{StaticResource str.Spc.Res.Object}"   Binding="{Binding NormPath}"        SortMemberPath="NormPath"        Width="*"/>
+        <DataGridTextColumn Header="{StaticResource str.Spc.Res.Field}"    Binding="{Binding PropName}"        SortMemberPath="PropName"        Width="150"/>
+        <DataGridTextColumn Header="{StaticResource str.Spc.Res.Type}"     Binding="{Binding DeclaredType}"    SortMemberPath="DeclaredType"    Width="120"/>
+        <DataGridTextColumn Header="{StaticResource str.Spc.Res.Sequence}" Binding="{Binding SequenceDisplay}" SortMemberPath="SequenceDisplay" Width="240"/>
       </DataGrid.Columns>
     </DataGrid>
 
@@ -157,7 +157,7 @@
                   Height="200" GridLinesVisibility="Horizontal" Background="#1E1E1E"
                   CanUserResizeColumns="True" CanUserSortColumns="True">
           <DataGrid.Columns>
-            <DataGridTemplateColumn Header="{StaticResource str.Noise.Col.Pick}" Width="50">
+            <DataGridTemplateColumn Header="{StaticResource str.Noise.Col.Pick}" Width="50" CanUserSort="False">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate x:DataType="vm:NoiseRowVm">
                   <CheckBox IsChecked="{Binding Picked}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -165,11 +165,11 @@
               </DataGridTemplateColumn.CellTemplate>
             </DataGridTemplateColumn>
             <DataGridTextColumn Header="{StaticResource str.Noise.Col.Class}"
-                                Binding="{Binding ClassName}" IsReadOnly="True" Width="*"/>
+                                Binding="{Binding ClassName}" SortMemberPath="ClassName" IsReadOnly="True" Width="*"/>
             <DataGridTextColumn Header="{StaticResource str.Noise.Col.Hits}"
-                                Binding="{Binding HitCount}" IsReadOnly="True" Width="80"/>
+                                Binding="{Binding HitCount}" SortMemberPath="HitCount" IsReadOnly="True" Width="80"/>
             <DataGridTextColumn Header="{StaticResource str.Noise.Col.SampleProps}"
-                                Binding="{Binding SamplePropsDisplay}" IsReadOnly="True" Width="240"/>
+                                Binding="{Binding SamplePropsDisplay}" SortMemberPath="SamplePropsDisplay" IsReadOnly="True" Width="240"/>
           </DataGrid.Columns>
         </DataGrid>
 
