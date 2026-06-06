@@ -106,8 +106,13 @@
                    Foreground="#CCCCCC" FontSize="12"
                    VerticalAlignment="Center"
                    ToolTip.Tip="{StaticResource str.Tip.VS.MaxResults}"/>
+        <!-- V2 (build 950): ceiling raised 500k -> 1M now that the UI windows
+             server-side (V3-C) — the DLL holds the lean set cheaply and only a
+             page is ever serialized/rendered. Default stays 50k (a broad scan
+             shouldn't collect a million by default; the truncation note tells
+             the user to raise it). -->
         <NumericUpDown Value="{Binding MaxResults}"
-                       Minimum="100" Maximum="500000" Increment="1000"
+                       Minimum="100" Maximum="1000000" Increment="10000"
                        ToolTip.Tip="{StaticResource str.Tip.VS.MaxResults}"
                        Width="170" FontSize="12"/>
       </StackPanel>
