@@ -315,7 +315,13 @@ public partial class ValueSearchViewModel : ViewModelBase
     // Cross-tab navigation (Open in Live Walker via address)
     // ------------------------------------------------------------------
 
-    public event Action<string>? NavigateToInstance;
+    // (instanceAddr, fieldOffset, fieldDisplayName). Carries the candidate's
+    // owning-property byte offset + display name so Live Walker can focus the
+    // exact field that produced the hit instead of just opening the instance.
+    // Field names aren't unique (inherited members, map .Key/.Value), so the
+    // Walker matches the row by offset; the display name supplies the "[N]"
+    // element suffix for container hits.
+    public event Action<string, int, string>? NavigateToInstance;
     public event Action<string>? RequestCopyText;
 
     public ValueSearchViewModel(IDumpService dump, ILoggingService log)
@@ -478,7 +484,7 @@ public partial class ValueSearchViewModel : ViewModelBase
     {
         if (candidate == null) return;
         if (string.IsNullOrEmpty(candidate.InstanceAddr)) return;
-        NavigateToInstance?.Invoke(candidate.InstanceAddr);
+        NavigateToInstance?.Invoke(candidate.InstanceAddr, candidate.FieldOffset, candidate.FieldName);
     }
 
     [RelayCommand]

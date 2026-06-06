@@ -615,12 +615,15 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         // Wire ValueSearch -> LiveWalker (open candidate's owning instance)
         // + clipboard. Same shape as InstanceFinder.NavigateToLiveWalker
         // since ValueSearch already has the instance address resolved.
-        ValueSearch.NavigateToInstance += async (addr) =>
+        ValueSearch.NavigateToInstance += async (addr, fieldOffset, fieldName) =>
         {
             try
             {
                 SelectedTabIndex = (int)MainTabIndex.LiveWalker;  // Live Walker
-                await LiveWalker.NavigateToAddressCommand.ExecuteAsync(addr);
+                // Focus the candidate's owning field (matched by offset) so the
+                // user lands ON the matched value — not just the instance's
+                // field list — and drills to the element for container hits.
+                await LiveWalker.NavigateToInstanceFieldAsync(addr, fieldOffset, fieldName);
             }
             catch (Exception ex)
             {

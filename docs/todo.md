@@ -21,16 +21,6 @@ Open work only. **Read this when deciding what to do next.**
 
 ## ▶ Next up (genuinely actionable now)
 
-- **Live Walker focus-on-field on cross-nav** — Effort: **S-M** · Risk: **low**.
-  *Marked "next" at build 934.* "Open in Live Walker" from a Value Search row opens
-  the owning instance but doesn't scroll to / select the target field. Infra already
-  exists: `LiveWalkerViewModel._pendingScrollFieldName` + `ScrollToFieldRequested`
-  event + `LiveWalkerPanel` `ScrollIntoView`/`SelectedItem` handler (used by Find
-  References). Thread the candidate's `FieldOffset` through `OpenInLiveWalker` →
-  `NavigateToInstance` → `NavigateToAddressAsync`, then match by offset in
-  `UpdateDisplay` (field names aren't unique).
-  *Parent: Value Search keyword filter + cross-nav, build 932-934 (dev-log 2026-06-06).*
-
 - **Value Search V3-C — deferred enrichment** — Effort: **M** · Risk: **med** (new
   pipe cmd + UI paging). Refine never needs display strings (it only re-reads
   `c.addr`); the UI only shows a window at a time. Resolve `className` /
