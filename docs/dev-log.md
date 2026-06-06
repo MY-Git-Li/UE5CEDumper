@@ -14,6 +14,51 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-06 — Value Search: deferred enrichment + server-side window (V3-C, build 949)
+
+Re-architected Value Search result handling so the DLL session is the **single
+owner** of the candidate set and the UI is a **windowed view** — the precondition
+for a large `maxResults` cap (V2) without a giant pipe payload or a DataGrid holding
+N rows. Design discussion settled a real tension: client-side filter/sort require the
+UI to hold the full set, which defeats windowing. The resolution (user-aligned):
+**filter + sort move server-side**. They run in the DLL over the DLL's *own* pools
+(addresses + interned descriptor/instance strings) — **no game-memory reads, so the
+game thread is never touched** — and only a window is serialized out. A
+loaded-window-only filter would be untrustworthy ("no match" couldn't tell "not in
+the data" from "not loaded"), so this is also the *correct* shape, not just the
+scalable one.
+
+**DLL.** New pure, unit-tested helpers in `ValueScan` (the test target links it):
+`FormatCandidateValue` (now the single source of truth for the value display string,
+shared by the wire encoder — `Fern::CandidateToJson` lost its private formatters),
+`DecodeNumericToDouble`, `SortKey` + `TryParseSortKey`, and `BuildOrderedView`
+(case-insensitive substring filter across the displayed columns + stable sort by key
+→ candidate-index vector). `SessionManager::QueryWith` caches the ordered view on the
+session keyed by `(filter, sortKey, sortDesc)` (invalidated on refine) so plain paging
+doesn't re-sort. New `query_candidates` pipe command (`session_id`, `offset`, `limit`,
+`filter`, `sort_key`, `sort_desc`) → `{total, filtered_total, offset, count,
+candidates}` slices the window out of the cached order. `begin_value_scan` /
+`refine_value_scan` now return `total` (full count) + only the FIRST PAGE (`page_size`,
+scan order) instead of ALL candidates.
+
+**C#.** `IDumpService` / `DumpService` gain `QueryCandidatesAsync` + a `pageSize`
+arg on begin/refine; new `ValueScanWindowResult`. `ValueSearchViewModel` now holds the
+CURRENT window, `Total` / `FilteredTotal` / `WindowStatus` / `HasMore`, a server-side
+keyword filter (debounced 250ms → reload window 0), a **sort picker** (combo +
+`Desc` toggle → `query_candidates`; replaces the client-side column-header sort, which
+could only reorder the loaded window — Avalonia's `DataGridColumnEventArgs` can't
+cancel the built-in sort, so the headers are now non-sortable and a picker drives the
+server), and a **Load More** button (appends the next page). When the view is default
+(no filter, scan order) the inline first page from begin/refine is shown with no extra
+round-trip.
+
+**Folds in most of V2's UI/pipe work** — raising the cap is now just a bigger number.
+Tests **412 → 447 dll** (+23 ordered-view: filter/sort/format/parse), **1268 → 1276
+C#** (+8: query wire shape + omit-defaults, inline-page, sort/desc/LoadMore/filter
+routing, NewScan reset). AOT publish launch-verified. **Live-verify pending:** a large
+First Scan shows total + first page + Load More; the keyword filter (server-side) and
+sort picker narrow/reorder the WHOLE set; a refine re-pages correctly.
+
 ## 2026-06-06 — Value Search: TOptional<T> scan (V1c, build 942)
 
 Closes the last "deferred container" gap in Value Search after V1a (TSet/TMap):

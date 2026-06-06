@@ -21,14 +21,6 @@ Open work only. **Read this when deciding what to do next.**
 
 ## ▶ Next up (genuinely actionable now)
 
-- **Value Search V3-C — deferred enrichment** — Effort: **M** · Risk: **med** (new
-  pipe cmd + UI paging). Refine never needs display strings (it only re-reads
-  `c.addr`); the UI only shows a window at a time. Resolve `className` /
-  `instanceName` lazily at view-time via a new `resolve_candidate_window` pipe cmd.
-  **Unblocks V2** (the cap-raise).
-  *Parent: V3-A/V3-B lean Candidate (shared FieldDescriptor + InstanceRecord pools)
-  shipped build 926, PR #237 (dev-log 2026-06-06).*
-
 - **DLL cancellation — live-game verification** — Effort: **0** (verify only) · Risk:
   low. Confirm in-game that (a) disabling the script / closing the game while a long
   scan runs no longer hangs, (b) closing the UI mid-scan stops the DLL and a reopened
@@ -40,10 +32,11 @@ Open work only. **Read this when deciding what to do next.**
 
 ## Value Search — coverage + memory (build 923 plan)
 
-Dependency order was **V3-A → V3-B → V1a → V2/V3-C**; V3-A/V3-B/V1a have shipped.
+Dependency order was **V3-A → V3-B → V1a → V3-C → V2**; V3-A/V3-B/V1a/**V3-C** have
+shipped (V3-C build 949: DLL owns the set, UI is a server-side-filtered/sorted window).
 Every candidate lives in the **injected DLL inside the game process**, so per-candidate
 bytes are the real ceiling — V3 is the enabler for both wider coverage (V1) and the
-cap raise (V2).
+cap raise (V2, now just "raise the number").
 
 - **V1b — container prev-value refine (stable key)** — Effort: **M** · Risk: **high**.
   `Candidate.addr` stores a raw element address; TArray realloc already makes it stale,
@@ -55,14 +48,16 @@ cap raise (V2).
   *Parent: V1a TSet/TMap key|value scan shipped First-Scan-only, build 927 (dev-log
   2026-06-06).*
 
-- **V2 — raise the global `maxResults` cap via paged streaming** — Effort: **M-L** ·
-  Risk: **med**. The 50k cap is bounded by four walls, nearest first: (1) DLL memory in
-  the target process (addressed by V3); (2) pipe JSON serialization of N candidates; (3)
-  Avalonia DataGrid holding N rows under AOT; (4) the 15 s deadline + the fact that 500k
-  results aren't user-actionable. Correct shape: keep the full lean-candidate set in the
-  DLL session (cheap after V3) but **stream only a window/summary to the UI** — don't
-  just bump the number. **Depends on V3-C's paging cmd.**
-  *Parent: V3-C above + lean Candidate build 926.*
+- **V2 — raise the global `maxResults` cap** — Effort: **S** · Risk: low. The four
+  walls are now down: DLL memory is cheap (V3-A lean Candidate), and the pipe + DataGrid
+  walls are gone (V3-C build 949 — the UI windows server-side via `query_candidates`).
+  What's left is **just the number**: raise the `max_results` default / UI ceiling and
+  smoke-test that a multi-hundred-thousand-candidate session pages, filters, and sorts
+  responsively (the ordered-view sort is O(n log n) over the full set on each
+  filter/sort change — check it stays sub-second at the new ceiling; if not, the only
+  follow-up is incremental/top-k sort). The 15 s **scan** deadline still bounds First
+  Scan regardless.
+  *Parent: V3-C server-side window shipped build 949; lean Candidate build 926.*
 
 -----
 
@@ -257,6 +252,11 @@ Pick up when the active plan finishes or when blocked.
 
 Shipped + unit-tests-pass but unproven on real games:
 
+- **Value Search server-side window (V3-C)** (build 949). On a large First Scan, confirm
+  the grid shows `total` + the first page + a working **Load More**; the **keyword
+  filter** (server-side, debounced) narrows the WHOLE set (not just the loaded window)
+  and "no match" is trustworthy; the **sort picker** (combo + Desc) reorders the whole
+  set; a Next Scan re-pages against the pruned set. Watch sort latency on a big set.
 - **Value Search `TOptional<T>` scan (V1c)** (build 942). Scan a known value held in a
   `TOptional<int/float/FString>` UPROPERTY → confirm the row appears under the optional's
   field name and a Next Scan prunes; confirm an **unset** optional doesn't surface on a

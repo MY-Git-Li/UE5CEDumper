@@ -6,6 +6,12 @@ using UE5DumpUI.Models;
 
 namespace UE5DumpUI.ViewModels;
 
+/// <summary>One entry in the Value Search server-side sort picker (V3-C).
+/// <see cref="Label"/> is shown in the combo; <see cref="Key"/> is the
+/// query_candidates wire string ("" / "scan" / "value" / "class" / "field"
+/// / "type" / "offset" / "addr" / "instance").</summary>
+public sealed record ValueSortOption(string Label, string Key);
+
 /// <summary>
 /// ViewModel for the Value Search panel (build 733+, port from
 /// discrete Phase 27b shape).
@@ -174,46 +180,171 @@ public partial class ValueSearchViewModel : ViewModelBase
     [ObservableProperty] private string _statusText = "Click First Scan to scan for a value across all UPROPERTY fields.";
     [ObservableProperty] private bool   _isScanning;
     [ObservableProperty] private string _errorMessage = "";
-    /// <summary>The bound, FILTERED result set shown by the grid. Kept as
-    /// a typed ObservableCollection (not a DataGridCollectionView) so the
-    /// grid's compiled column bindings can infer the row type AND column
-    /// sorting works via SortMemberPath. Rebuilt from
-    /// <see cref="_allCandidates"/> whenever a scan completes or the filter
-    /// text changes.</summary>
+    /// <summary>The bound result rows shown by the grid — the CURRENT
+    /// server-returned window (V3-C), NOT the full set. A typed
+    /// ObservableCollection (not a DataGridCollectionView) so the grid's
+    /// compiled column bindings infer the row type. Filter / sort / paging run
+    /// server-side over the full session set held in the DLL.</summary>
     [ObservableProperty] private ObservableCollection<ValueCandidate> _candidates = new();
     [ObservableProperty] private ValueCandidate? _selectedCandidate;
 
-    /// <summary>The unfiltered candidate set from the last scan/refine. The
-    /// keyword filter narrows this into <see cref="Candidates"/> without a
-    /// DLL round-trip.</summary>
-    private IReadOnlyList<ValueCandidate> _allCandidates = System.Array.Empty<ValueCandidate>();
+    /// <summary>Full candidate count held in the DLL session.</summary>
+    [ObservableProperty] private int _total;
+    /// <summary>Count after the keyword filter (== <see cref="Total"/> when no
+    /// filter is active).</summary>
+    [ObservableProperty] private int _filteredTotal;
+    /// <summary>One-line "showing N of M" window status for the panel.</summary>
+    [ObservableProperty] private string _windowStatus = "";
 
-    /// <summary>Case-insensitive keyword filter applied across every
-    /// displayed column (Class.Field / Type / Value / Offset / Address /
-    /// Instance). Empty = show all. Purely client-side, so it costs no DLL
-    /// round-trip and survives across refines.</summary>
+    /// <summary>True while the loaded window is smaller than the (filtered)
+    /// total — drives the Load More button.</summary>
+    public bool HasMore => Candidates.Count < FilteredTotal;
+
+    partial void OnCandidatesChanged(ObservableCollection<ValueCandidate> value)
+        => OnPropertyChanged(nameof(HasMore));
+    partial void OnFilteredTotalChanged(int value)
+        => OnPropertyChanged(nameof(HasMore));
+
+    // Server sort key (wire string: "" / "scan" / "value" / "class" / "field"
+    // / "instance" / "type" / "offset" / "addr" / "index"); driven by the
+    // DataGrid column-sort handler in the panel code-behind.
+    private string _sortKey = "";
+    private bool   _sortDesc;
+
+    // Rows fetched per window (begin/refine first page + Load More + reloads).
+    private const int PageSize = 1000;
+
+    private System.Threading.CancellationTokenSource? _viewCts;
+    private System.Threading.CancellationTokenSource? _filterCts;
+
+    /// <summary>Case-insensitive keyword filter — now SERVER-SIDE over the full
+    /// session set (V3-C). A loaded-window-only filter would be untrustworthy
+    /// ("no match" couldn't distinguish "not in the data" from "not loaded"),
+    /// so a change reloads window 0 from the DLL (debounced).</summary>
     [ObservableProperty] private string _filterText = "";
 
-    partial void OnFilterTextChanged(string value) => ApplyFilter();
+    partial void OnFilterTextChanged(string value) => _ = DebouncedReloadAsync();
 
-    /// <summary>Rebuild <see cref="Candidates"/> from
-    /// <see cref="_allCandidates"/> applying the current keyword filter.
-    /// Reflection-free substring match (Native-AOT safe).</summary>
-    private void ApplyFilter()
+    private bool IsDefaultView =>
+        string.IsNullOrEmpty(FilterText)
+        && (string.IsNullOrEmpty(_sortKey) || _sortKey == "scan")
+        && !_sortDesc;
+
+    /// <summary>After a First/Next scan: adopt <paramref name="total"/> and
+    /// show window 0. When the view is default (no filter, scan order) the
+    /// inline first page returned by begin/refine is shown directly (no extra
+    /// round-trip); otherwise the active filter/sort are re-applied
+    /// server-side over the new set.</summary>
+    private async Task ApplyScanResultAsync(int total, IList<ValueCandidate> inlineFirstPage)
     {
-        var q = FilterText?.Trim() ?? "";
-        IEnumerable<ValueCandidate> src = _allCandidates;
-        if (q.Length > 0)
+        Total = total;
+        if (IsDefaultView)
         {
-            src = _allCandidates.Where(c =>
-                   c.LocationLabel.Contains(q, StringComparison.OrdinalIgnoreCase)
-                || c.FieldType.Contains(q, StringComparison.OrdinalIgnoreCase)
-                || c.Value.Contains(q, StringComparison.OrdinalIgnoreCase)
-                || c.OffsetHex.Contains(q, StringComparison.OrdinalIgnoreCase)
-                || c.Addr.Contains(q, StringComparison.OrdinalIgnoreCase)
-                || c.InstanceName.Contains(q, StringComparison.OrdinalIgnoreCase));
+            FilteredTotal = total;
+            Candidates = new ObservableCollection<ValueCandidate>(inlineFirstPage);
+            UpdateWindowStatus();
         }
-        Candidates = new ObservableCollection<ValueCandidate>(src);
+        else
+        {
+            await LoadWindowAsync(reset: true);
+        }
+    }
+
+    /// <summary>Fetch a window from the DLL with the current filter/sort.
+    /// reset=true replaces the window (page 0); reset=false appends the next
+    /// page (Load More). A newer query cancels an in-flight one.</summary>
+    private async Task LoadWindowAsync(bool reset)
+    {
+        if (!HasSession) return;
+        _viewCts?.Cancel();
+        var cts = _viewCts = new System.Threading.CancellationTokenSource();
+        try
+        {
+            int offset = reset ? 0 : Candidates.Count;
+            var w = await _dump.QueryCandidatesAsync(
+                SessionId, offset, PageSize,
+                string.IsNullOrEmpty(FilterText) ? null : FilterText,
+                string.IsNullOrEmpty(_sortKey) ? null : _sortKey,
+                _sortDesc, cts.Token);
+            Total = w.Total;
+            FilteredTotal = w.FilteredTotal;
+            if (reset)
+                Candidates = new ObservableCollection<ValueCandidate>(w.Candidates);
+            else
+                foreach (var c in w.Candidates) Candidates.Add(c);
+            OnPropertyChanged(nameof(HasMore));
+            UpdateWindowStatus();
+        }
+        catch (OperationCanceledException) { /* superseded by a newer query */ }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Query failed: {ex.Message}";
+            _log.Error("ValueSearch query_candidates failed", ex);
+        }
+        finally
+        {
+            if (ReferenceEquals(_viewCts, cts)) { _viewCts?.Dispose(); _viewCts = null; }
+        }
+    }
+
+    private async Task DebouncedReloadAsync()
+    {
+        if (!HasSession) return;
+        _filterCts?.Cancel();
+        var cts = _filterCts = new System.Threading.CancellationTokenSource();
+        try
+        {
+            await Task.Delay(250, cts.Token);
+            await LoadWindowAsync(reset: true);
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            if (ReferenceEquals(_filterCts, cts)) { _filterCts?.Dispose(); _filterCts = null; }
+        }
+    }
+
+    // --- V3-C server-side sort picker. Replaces client-side column-header
+    // sort, which could only reorder the loaded window (misleading once the
+    // set is windowed). Sorting runs in the DLL over the FULL session set. ---
+
+    /// <summary>Sort options for the picker. Label is shown in the combo; Key
+    /// is the query_candidates wire string.</summary>
+    public IReadOnlyList<ValueSortOption> SortOptions { get; } = new[]
+    {
+        new ValueSortOption("Scan order", "scan"),
+        new ValueSortOption("Value",      "value"),
+        new ValueSortOption("Class",      "class"),
+        new ValueSortOption("Field",      "field"),
+        new ValueSortOption("Type",       "type"),
+        new ValueSortOption("Offset",     "offset"),
+        new ValueSortOption("Address",    "addr"),
+        new ValueSortOption("Instance",   "instance"),
+    };
+
+    [ObservableProperty] private ValueSortOption? _selectedSortOption;
+    [ObservableProperty] private bool _sortDescending;
+
+    partial void OnSelectedSortOptionChanged(ValueSortOption? value) => ApplyUiSort();
+    partial void OnSortDescendingChanged(bool value) => ApplyUiSort();
+
+    private void ApplyUiSort()
+    {
+        _sortKey  = SelectedSortOption?.Key ?? "";
+        _sortDesc = SortDescending;
+        if (HasSession) _ = LoadWindowAsync(reset: true);
+    }
+
+    [RelayCommand]
+    private Task LoadMoreAsync() => LoadWindowAsync(reset: false);
+
+    private void UpdateWindowStatus()
+    {
+        if (Total == 0) { WindowStatus = ""; return; }
+        string filt = (FilteredTotal != Total) ? $" (filtered from {Total})" : "";
+        WindowStatus = HasMore
+            ? $"Showing {Candidates.Count} of {FilteredTotal}{filt} — Load More for the rest"
+            : $"Showing all {FilteredTotal}{filt}";
     }
 
     /// <summary>True when a scan session is active (between First Scan
@@ -328,6 +459,7 @@ public partial class ValueSearchViewModel : ViewModelBase
     {
         _dump = dump;
         _log  = log;
+        _selectedSortOption = SortOptions[0];  // scan order
     }
 
     [RelayCommand]
@@ -381,11 +513,10 @@ public partial class ValueSearchViewModel : ViewModelBase
             var result = await _dump.BeginValueScanAsync(
                 SelectedDataType, SelectedScanType, Value,
                 SelectedScanType == ValueScanType.Between ? Value2 : null,
-                GameOnly, MaxResults, effTol, effCase, cts.Token);
+                GameOnly, MaxResults, effTol, effCase, PageSize, cts.Token);
 
             SessionId = result.SessionId;
-            _allCandidates = result.Candidates;
-            ApplyFilter();
+            await ApplyScanResultAsync(result.Total, result.Candidates);
 
             var summary = $"First Scan: {result.Total} candidates in {result.DurationMs} ms " +
                           $"(scanned {result.ScannedObjects} objects, " +
@@ -440,10 +571,9 @@ public partial class ValueSearchViewModel : ViewModelBase
                 SessionId, SelectedScanType,
                 needsValue ? Value : null,
                 SelectedScanType == ValueScanType.Between ? Value2 : null,
-                effTol, effCase, cts.Token);
+                effTol, effCase, PageSize, cts.Token);
 
-            _allCandidates = result.Candidates;
-            ApplyFilter();
+            await ApplyScanResultAsync(result.Total, result.Candidates);
 
             StatusText = $"Next Scan ({SelectedScanType}): {result.Total} surviving candidates " +
                          $"in {result.DurationMs} ms";
@@ -468,8 +598,12 @@ public partial class ValueSearchViewModel : ViewModelBase
     private async Task NewScanAsync()
     {
         await EndSessionIfAnyAsync();
-        _allCandidates = System.Array.Empty<ValueCandidate>();
-        ApplyFilter();
+        Candidates = new ObservableCollection<ValueCandidate>();
+        Total = 0;
+        FilteredTotal = 0;
+        _sortKey = "";
+        _sortDesc = false;
+        UpdateWindowStatus();
         StatusText = "Session ended. Configure a new scan and click First Scan.";
         ErrorMessage = "";
     }

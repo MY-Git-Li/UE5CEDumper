@@ -55,6 +55,7 @@ constexpr const char* CMD_SET_INVOKE_TIMEOUT       = "set_invoke_timeout";
 constexpr const char* CMD_BEGIN_VALUE_SCAN         = "begin_value_scan";
 constexpr const char* CMD_REFINE_VALUE_SCAN        = "refine_value_scan";
 constexpr const char* CMD_END_VALUE_SCAN           = "end_value_scan";
+constexpr const char* CMD_QUERY_CANDIDATES         = "query_candidates";
 
 // Snapshot capture (experimental — Phase A). Stateless cursor pagination
 // like get_object_list: begin_snapshot returns the total object count for

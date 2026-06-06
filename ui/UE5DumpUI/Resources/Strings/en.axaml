@@ -48,7 +48,11 @@
     <sys:String x:Key="str.VS.CopyAddr">Copy Address</sys:String>
     <sys:String x:Key="str.VS.CaseSensitive">Case sensitive</sys:String>
     <sys:String x:Key="str.VS.Filter">Filter:</sys:String>
-    <sys:String x:Key="str.VS.FilterWatermark">Filter results — any column, case-insensitive…</sys:String>
+    <sys:String x:Key="str.VS.FilterWatermark">Filter the full result set (server-side) — any column, case-insensitive…</sys:String>
+    <sys:String x:Key="str.VS.Sort">Sort:</sys:String>
+    <sys:String x:Key="str.VS.SortDesc">Desc</sys:String>
+    <sys:String x:Key="str.VS.LoadMore">Load More</sys:String>
+    <sys:String x:Key="str.Tip.VS.Sort">Filter and sort run in the DLL over the WHOLE result set; the grid shows one page at a time. Load More fetches the next page.</sys:String>
     <sys:String x:Key="str.VS.Cancel">Cancel</sys:String>
     <sys:String x:Key="str.Tip.VS.Cancel">Cancel the in-flight scan. The UI stops waiting immediately; the DLL self-terminates the scan at its deadline (usually sub-second).</sys:String>
     <sys:String x:Key="str.Tip.VS.CaseSensitive">When checked, string scans (FString / FName / FText) match case exactly. Default unchecked = CE-style case-insensitive matching. Only affects string DataTypes.</sys:String>

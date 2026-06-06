@@ -1327,6 +1327,7 @@ public sealed class DumpService : IDumpService
         int maxResults = 50000,
         double tolerance = 0.0,
         bool caseSensitive = false,
+        int pageSize = 1000,
         CancellationToken ct = default)
     {
         var req = new JsonObject
@@ -1337,6 +1338,9 @@ public sealed class DumpService : IDumpService
             ["value"] = value,
             ["game_only"] = gameOnly,
             ["max_results"] = maxResults,
+            // V3-C: only the first page comes back inline; the rest is paged
+            // server-side via query_candidates.
+            ["page_size"] = pageSize,
         };
         if (!string.IsNullOrEmpty(value2))
             req["value2"] = value2;
@@ -1385,6 +1389,7 @@ public sealed class DumpService : IDumpService
         string? value2 = null,
         double tolerance = 0.0,
         bool caseSensitive = false,
+        int pageSize = 1000,
         CancellationToken ct = default)
     {
         var req = new JsonObject
@@ -1392,6 +1397,7 @@ public sealed class DumpService : IDumpService
             ["cmd"] = "refine_value_scan",
             ["session_id"] = sessionId,
             ["scan_type"] = scanType.ToString(),
+            ["page_size"] = pageSize,
         };
         if (value != null)  req["value"]  = value;
         if (value2 != null) req["value2"] = value2;
@@ -1413,6 +1419,51 @@ public sealed class DumpService : IDumpService
             ScanType   = res["scan_type"]?.GetValue<string>() ?? "",
             Total      = res["total"]?.GetValue<int>() ?? 0,
             DurationMs = res["duration_ms"]?.GetValue<long>() ?? 0,
+        };
+
+        if (res["candidates"] is JsonArray arr)
+        {
+            foreach (var item in arr)
+            {
+                if (item is JsonObject obj) result.Candidates.Add(ParseValueCandidate(obj));
+            }
+        }
+
+        return result;
+    }
+
+    public async Task<ValueScanWindowResult> QueryCandidatesAsync(
+        ulong sessionId,
+        int offset,
+        int limit,
+        string? filter = null,
+        string? sortKey = null,
+        bool sortDesc = false,
+        CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "query_candidates",
+            ["session_id"] = sessionId,
+            ["offset"] = offset,
+            ["limit"] = limit,
+        };
+        // Omit defaults so the common (no-filter, scan-order) page stays a
+        // tight wire shape and is byte-identical across calls for caching.
+        if (!string.IsNullOrEmpty(filter))  req["filter"]    = filter;
+        if (!string.IsNullOrEmpty(sortKey)) req["sort_key"]  = sortKey;
+        if (sortDesc)                       req["sort_desc"] = true;
+
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        var result = new ValueScanWindowResult
+        {
+            SessionId     = res["session_id"]?.GetValue<ulong>() ?? sessionId,
+            DataType      = res["data_type"]?.GetValue<string>() ?? "",
+            Total         = res["total"]?.GetValue<int>() ?? 0,
+            FilteredTotal = res["filtered_total"]?.GetValue<int>() ?? 0,
+            Offset        = res["offset"]?.GetValue<int>() ?? offset,
         };
 
         if (res["candidates"] is JsonArray arr)

@@ -1054,17 +1054,20 @@ public class ValueSearchTests
     {
         public ValueScanBeginResult NextBeginResult { get; set; } = new();
         public ValueScanRefineResult NextRefineResult { get; set; } = new();
+        public ValueScanWindowResult NextWindowResult { get; set; } = new();
         // (dataType, scanType, value, value2, gameOnly, maxResults, tolerance, caseSensitive)
         public List<(ValueScanDataType, ValueScanType, string, string?, bool, int, double, bool)> Begins { get; } = new();
         // (sessionId, scanType, value, value2, tolerance, caseSensitive)
         public List<(ulong, ValueScanType, string?, string?, double, bool)> Refines { get; } = new();
+        // (sessionId, offset, limit, filter, sortKey, sortDesc)
+        public List<(ulong, int, int, string?, string?, bool)> Queries { get; } = new();
         public List<ulong> Ends { get; } = new();
 
         public override Task<ValueScanBeginResult> BeginValueScanAsync(
             ValueScanDataType dataType, ValueScanType scanType,
             string value, string? value2 = null, bool gameOnly = true,
             int maxResults = 50000, double tolerance = 0.0,
-            bool caseSensitive = false,
+            bool caseSensitive = false, int pageSize = 1000,
             CancellationToken ct = default)
         {
             Begins.Add((dataType, scanType, value, value2, gameOnly, maxResults, tolerance, caseSensitive));
@@ -1075,11 +1078,20 @@ public class ValueSearchTests
             ulong sessionId, ValueScanType scanType,
             string? value = null, string? value2 = null,
             double tolerance = 0.0,
-            bool caseSensitive = false,
+            bool caseSensitive = false, int pageSize = 1000,
             CancellationToken ct = default)
         {
             Refines.Add((sessionId, scanType, value, value2, tolerance, caseSensitive));
             return Task.FromResult(NextRefineResult);
+        }
+
+        public override Task<ValueScanWindowResult> QueryCandidatesAsync(
+            ulong sessionId, int offset, int limit,
+            string? filter = null, string? sortKey = null, bool sortDesc = false,
+            CancellationToken ct = default)
+        {
+            Queries.Add((sessionId, offset, limit, filter, sortKey, sortDesc));
+            return Task.FromResult(NextWindowResult);
         }
 
         public override Task EndValueScanAsync(ulong sessionId, CancellationToken ct = default)
@@ -1130,6 +1142,187 @@ public class ValueSearchTests
         Assert.Equal(ValueScanType.Exact,     st);
         Assert.Equal("100",                   val);
         Assert.Null(val2);
+    }
+
+    // --- V3-C: server-side window / filter / sort / paging ---
+
+    [Fact]
+    public async Task QueryCandidatesAsync_BuildsRequest_AndParsesWindow()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"]             = req["id"]?.GetValue<int>() ?? 0,
+                ["ok"]             = true,
+                ["session_id"]     = 7UL,
+                ["data_type"]      = "Int32",
+                ["total"]          = 5000,
+                ["filtered_total"] = 1200,
+                ["offset"]         = 1000,
+                ["count"]          = 2,
+                ["candidates"]     = new JsonArray
+                {
+                    new JsonObject { ["addr"] = "0x10", ["field_name"] = "HP", ["value"] = "50" },
+                    new JsonObject { ["addr"] = "0x20", ["field_name"] = "MP", ["value"] = "30" },
+                },
+            };
+        });
+
+        var res = await svc.QueryCandidatesAsync(7UL, 1000, 1000, "hp", "value", sortDesc: true);
+
+        Assert.NotNull(captured);
+        Assert.Equal("query_candidates", captured!["cmd"]?.GetValue<string>());
+        Assert.Equal(7UL,     captured["session_id"]?.GetValue<ulong>());
+        Assert.Equal(1000,    captured["offset"]?.GetValue<int>());
+        Assert.Equal(1000,    captured["limit"]?.GetValue<int>());
+        Assert.Equal("hp",    captured["filter"]?.GetValue<string>());
+        Assert.Equal("value", captured["sort_key"]?.GetValue<string>());
+        Assert.True(captured["sort_desc"]?.GetValue<bool>());
+
+        Assert.Equal(5000, res.Total);
+        Assert.Equal(1200, res.FilteredTotal);
+        Assert.Equal(1000, res.Offset);
+        Assert.Equal(2,    res.Candidates.Count);
+        Assert.Equal("HP", res.Candidates[0].FieldName);
+    }
+
+    [Fact]
+    public async Task QueryCandidatesAsync_OmitsDefaultFilterAndSort()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"] = req["id"]?.GetValue<int>() ?? 0,
+                ["ok"] = true,
+                ["candidates"] = new JsonArray(),
+            };
+        });
+
+        await svc.QueryCandidatesAsync(1UL, 0, 1000);
+
+        Assert.False(captured!.ContainsKey("filter"));
+        Assert.False(captured.ContainsKey("sort_key"));
+        Assert.False(captured.ContainsKey("sort_desc"));
+    }
+
+    private static async Task<(ValueSearchViewModel vm, FakeDumpService fake)> StartSessionAsync(int total, int inlineCount = 1)
+    {
+        var (vm, fake) = MakeVm();
+        var begin = new ValueScanBeginResult { SessionId = 1UL, DataType = "Int32", Total = total };
+        for (int i = 0; i < inlineCount; i++)
+            begin.Candidates.Add(new ValueCandidate { Addr = $"0x{i:X}", Value = i.ToString() });
+        fake.NextBeginResult = begin;
+        vm.SelectedDataType = ValueScanDataType.Int32;
+        vm.SelectedScanType = ValueScanType.Exact;
+        vm.Value = "1";
+        await vm.FirstScanCommand.ExecuteAsync(null);
+        return (vm, fake);
+    }
+
+    [Fact]
+    public async Task FirstScan_DefaultView_UsesInlinePage_NoQuery()
+    {
+        var (vm, fake) = await StartSessionAsync(total: 3, inlineCount: 1);
+        // Default view (no filter, scan order) shows the inline first page with
+        // no extra round-trip.
+        Assert.Empty(fake.Queries);
+        Assert.Single(vm.Candidates);
+        Assert.Equal(3, vm.Total);
+        Assert.Equal(3, vm.FilteredTotal);
+        Assert.True(vm.HasMore);   // 1 of 3 loaded
+    }
+
+    [Fact]
+    public async Task SortChange_QueriesServer_WithSortKey()
+    {
+        var (vm, fake) = await StartSessionAsync(total: 2, inlineCount: 1);
+        fake.NextWindowResult = new ValueScanWindowResult
+        {
+            SessionId = 1UL, Total = 2, FilteredTotal = 2,
+            Candidates = { new ValueCandidate { Value = "1" }, new ValueCandidate { Value = "2" } },
+        };
+
+        vm.SelectedSortOption = vm.SortOptions[1];  // "value"
+        await Task.Yield();
+
+        Assert.NotEmpty(fake.Queries);
+        Assert.Equal("value", fake.Queries[^1].Item5);  // sortKey
+        Assert.False(vm.HasMore);                        // 2 of 2
+        Assert.Equal(2, vm.Candidates.Count);
+    }
+
+    [Fact]
+    public async Task SortDescending_QueriesServer_WithDescFlag()
+    {
+        var (vm, fake) = await StartSessionAsync(total: 2, inlineCount: 2);
+        fake.NextWindowResult = new ValueScanWindowResult
+        {
+            SessionId = 1UL, Total = 2, FilteredTotal = 2,
+            Candidates = { new ValueCandidate { Value = "2" }, new ValueCandidate { Value = "1" } },
+        };
+
+        vm.SortDescending = true;
+        await Task.Yield();
+
+        Assert.NotEmpty(fake.Queries);
+        Assert.True(fake.Queries[^1].Item6);  // sortDesc
+    }
+
+    [Fact]
+    public async Task LoadMore_AppendsNextWindow_AtLoadedOffset()
+    {
+        var (vm, fake) = await StartSessionAsync(total: 3000, inlineCount: 1);
+        Assert.True(vm.HasMore);
+        fake.NextWindowResult = new ValueScanWindowResult
+        {
+            SessionId = 1UL, Total = 3000, FilteredTotal = 3000, Offset = 1,
+            Candidates = { new ValueCandidate { Value = "b" }, new ValueCandidate { Value = "c" } },
+        };
+
+        await vm.LoadMoreCommand.ExecuteAsync(null);
+
+        Assert.Equal(3, vm.Candidates.Count);          // 1 inline + 2 appended
+        Assert.Equal(1, fake.Queries[^1].Item2);       // offset = previously-loaded count
+    }
+
+    [Fact]
+    public async Task FilterChange_DebouncedServerQuery()
+    {
+        var (vm, fake) = await StartSessionAsync(total: 2, inlineCount: 1);
+        fake.Queries.Clear();
+        fake.NextWindowResult = new ValueScanWindowResult
+        {
+            SessionId = 1UL, Total = 2, FilteredTotal = 1,
+            Candidates = { new ValueCandidate { Value = "1" } },
+        };
+
+        vm.FilterText = "hp";
+        await Task.Delay(400);  // past the 250ms debounce
+
+        Assert.NotEmpty(fake.Queries);
+        Assert.Equal("hp", fake.Queries[^1].Item4);  // filter
+        Assert.Equal(1, vm.FilteredTotal);
+    }
+
+    [Fact]
+    public async Task NewScan_ClearsWindowState()
+    {
+        var (vm, fake) = await StartSessionAsync(total: 3, inlineCount: 1);
+        await vm.NewScanCommand.ExecuteAsync(null);
+
+        Assert.Empty(vm.Candidates);
+        Assert.Equal(0, vm.Total);
+        Assert.Equal(0, vm.FilteredTotal);
+        Assert.False(vm.HasMore);
+        Assert.False(vm.HasSession);
     }
 
     [Fact]

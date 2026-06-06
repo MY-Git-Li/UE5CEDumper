@@ -167,15 +167,47 @@
                Margin="0,0,0,4" TextWrapping="Wrap"
                IsVisible="{Binding DataTypeWarning, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
 
-    <!-- Keyword filter row: case-insensitive substring match over every
-         column, applied client-side via the CandidatesView. Sits above the
-         grid so it reads as a filter on the results below. -->
-    <Grid DockPanel.Dock="Top" Margin="0,0,0,4" ColumnDefinitions="Auto,*">
+    <!-- Filter + sort row. Both run SERVER-SIDE over the full session set
+         (V3-C): the DLL owns the candidates and the grid shows one window at a
+         time, so a loaded-window-only filter/sort would be untrustworthy. -->
+    <Grid DockPanel.Dock="Top" Margin="0,0,0,4"
+          ColumnDefinitions="Auto,*,Auto,Auto,Auto"
+          ToolTip.Tip="{StaticResource str.Tip.VS.Sort}">
       <TextBlock Grid.Column="0" Text="{StaticResource str.VS.Filter}"
                  Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,8,0"/>
       <TextBox Grid.Column="1" Text="{Binding FilterText}"
                PlaceholderText="{StaticResource str.VS.FilterWatermark}"
                Padding="4,2" FontSize="12"/>
+      <TextBlock Grid.Column="2" Text="{StaticResource str.VS.Sort}"
+                 Foreground="#CCCCCC" VerticalAlignment="Center" Margin="12,0,6,0"/>
+      <ComboBox Grid.Column="3" MinWidth="110"
+                ItemsSource="{Binding SortOptions}"
+                SelectedItem="{Binding SelectedSortOption}"
+                FontSize="12" VerticalAlignment="Center">
+        <ComboBox.ItemTemplate>
+          <DataTemplate x:DataType="vm:ValueSortOption">
+            <TextBlock Text="{Binding Label}"/>
+          </DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+      <ToggleButton Grid.Column="4" Content="{StaticResource str.VS.SortDesc}"
+                    IsChecked="{Binding SortDescending}"
+                    Margin="6,0,0,0" Padding="8,2" FontSize="11"
+                    VerticalAlignment="Center" Cursor="Hand"/>
+    </Grid>
+
+    <!-- Window paging bar: "showing N of M" + Load More (V3-C). -->
+    <Grid DockPanel.Dock="Bottom" Margin="0,4,0,0" ColumnDefinitions="*,Auto">
+      <TextBlock Grid.Column="0" Text="{Binding WindowStatus}"
+                 Foreground="#AAB8D0" FontSize="11" VerticalAlignment="Center"
+                 FontFamily="Consolas, Menlo, monospace"
+                 TextTrimming="CharacterEllipsis"/>
+      <Button Grid.Column="1" Content="{StaticResource str.VS.LoadMore}"
+              Command="{Binding LoadMoreCommand}"
+              IsVisible="{Binding HasMore}"
+              Foreground="#4EC9B0" Background="Transparent"
+              BorderThickness="1" BorderBrush="#4EC9B0"
+              Padding="10,3" FontSize="11" Cursor="Hand"/>
     </Grid>
 
     <!-- Results DataGrid -->
@@ -184,7 +216,7 @@
               SelectedItem="{Binding SelectedCandidate}"
               IsReadOnly="True"
               CanUserResizeColumns="True"
-              CanUserSortColumns="True"
+              CanUserSortColumns="False"
               GridLinesVisibility="Horizontal"
               BorderThickness="0"
               Background="#1E1E1E"
