@@ -117,7 +117,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- Fern     (PipeServer)    <- Named Pipe IPC (~42 cmds incl. value scan) |
 |      +-- Himmel   (Signatures)    <- 128 AOB + symbol exports |
 |      +-- Genau    (OffsetFinder)  <- GObjects/GNames/GWorld   |
-|      +-- Aura     (ObjectArray)   <- Chunked + Flat arrays + Find Refs/Containers + ScanForValue |
+|      +-- Aura     (ObjectArray)   <- Chunked + Flat arrays + Find Refs/Containers + ScanForValue (lean Candidate V3-A 926; TSet/TMap scan V1a 927) |
 |      +-- Serie    (FNamePool)     <- UE5 Pool / UE4 TNameEntry|
 |      +-- Ubel     (UStructWalker) <- FField + UProperty + Phases B-K + Optional + ReadFStringAt/ReadFNameAt/ReadFTextStringAt (public, build 757) |
 |      +-- Macht    (Memory)        <- AOBScan + SEH read/write |
@@ -125,6 +125,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- Stark    (GameThreadDispatch) <- MinHook ProcessEvent hook |
 |      +-- ValueScan (build 738 + Phase 2 757) <- SessionManager + DataType / ScanType / CompareStringPredicate / CompareVectorPredicate |
 |      +-- Denken   (NativeDisasm)  <- Zydis x64 decoder: native UFunction -> [this+off] property xref (Path 2, build 862) |
+|      +-- Cancel   (Cancellation)  <- Cancel::Requested() flag; Fern disconnect-monitor + shutdown-abort stop long ops (build 936) |
 +----------------------+-------------------------------+
                        | Named Pipe: \\.\pipe\UE5DumpBfx
                        | JSON over pipe (newline-delimited)
@@ -158,7 +159,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 | [docs/roadmap.md](docs/roadmap.md) | **Current state** — capability matrix, per-game configuration, tested games, long-running concerns. **Read first** for "what works now". |
 | [docs/todo.md](docs/todo.md) | **What's next** — prioritized open work with effort/risk tags. Active plan + carryover gaps + speculative ideas. |
 | [docs/dev-log.md](docs/dev-log.md) | **What shipped** — append-only milestone history per build number. Read when investigating "when/why was X added". |
-| [docs/architecture.md](docs/architecture.md) | Directory structure (16 .cpp + 17 .h DLL files; ~130 UI .cs/.axaml files; 33 test files), git submodules, build environment |
+| [docs/architecture.md](docs/architecture.md) | Directory structure (17 .cpp + 19 .h DLL files; ~135 UI .cs/.axaml files; 33 test files), git submodules, build environment |
 | [docs/dll-spec.md](docs/dll-spec.md) | C++ DLL interface: 30 C ABI exports, offset tables, CE Lua bridge (Frieren-themed file/namespace names) |
 | [docs/pipe-protocol.md](docs/pipe-protocol.md) | Named Pipe JSON IPC protocol (~42 commands incl. Value Search begin/refine/end, Request/Response/Event) |
 | [docs/ui-spec.md](docs/ui-spec.md) | Avalonia UI tech stack (Avalonia 12.0.2 / .NET 10), AOT compatibility, component specs |

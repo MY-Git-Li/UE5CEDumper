@@ -17,7 +17,7 @@ UE5CEDumper/
 │
 ├── dll/                            ← C++ DLL (injected into game process)
 │   ├── CMakeLists.txt              ← DLL build config (versioning, git hash, deps)
-│   └── src/                        ← 17 .cpp + 18 .h (Frieren-themed; see naming-convention.md; +Denken = native x64 disasm, Path 2)
+│   └── src/                        ← 17 .cpp + 19 .h (Frieren-themed; see naming-convention.md; +Denken = native x64 disasm, Path 2; +Cancel.h = cooperative cancellation)
 │       ├── Heiter.cpp              ← dllmain — DLL_PROCESS_ATTACH, AutoStartThreadProc
 │       ├── Methode.cpp             ← CEPlugin — CE plugin Type 5 main menu
 │       ├── Grimoire.h              ← Constants — magic strings, pipe name, UObject offsets, DynOff namespace
@@ -45,7 +45,11 @@ UE5CEDumper/
 │       ├── Fern.cpp / .h           ← PipeServer — Named pipe IPC server, JSON dispatch (~42 commands)
 │       ├── ValueScan.cpp / .h      ← Value Search session manager + DataType / ScanType /
 │       │                              ComparePredicate / CompareStringPredicate /
-│       │                              CompareVectorPredicate (builds 738 + 757 Phase 2)
+│       │                              CompareVectorPredicate (738 + 757 Phase 2); lean
+│       │                              Candidate + FieldDescriptor/InstanceRecord pools (V3-A, 926);
+│       │                              TSet/TMap scan (V1a, 927)
+│       ├── Cancel.h                 ← Cooperative cancellation — Cancel::Requested() (per-command
+│       │                              disconnect flag | sticky shutdown flag) polled by long loops (936)
 │       └── Renge.h                 ← PipeProtocol — shared JSON command/field name constants
 │
 ├── docs/                           ← Documentation
