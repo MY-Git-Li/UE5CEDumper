@@ -1217,6 +1217,70 @@ static void Test_ValueScan_OrderedView() {
     EXPECT("parse unknown -> false", !TryParseSortKey("bogus", k));
 }
 
+// V2 (build 950) — scaling smoke for the server-side ordered view. The cap
+// ceiling was raised to 1,000,000 now that the UI windows server-side (V3-C);
+// confirm a full filter + sort over a set that size stays well under a second
+// (it runs on every filter/sort change, debounced 250ms in the UI). Uses
+// QueryPerformanceCounter to match the poll-latency bench above.
+static void Test_ValueScan_OrderedViewScale() {
+    using namespace ValueScan;
+    const int N = 1'000'000;
+
+    std::vector<FieldDescriptor> descs(10);
+    for (int i = 0; i < 10; ++i) {
+        descs[i].className   = "Class_" + std::to_string(i);
+        descs[i].fieldName   = "Field_" + std::to_string(i);
+        descs[i].fieldType   = "IntProperty";
+        descs[i].fieldOffset = i * 4;
+    }
+    std::vector<InstanceRecord> insts(1000);
+    for (int i = 0; i < 1000; ++i) {
+        insts[i].instanceAddr  = 0x10000 + (uintptr_t)i * 0x100;
+        insts[i].instanceIndex = i;
+        insts[i].instanceName  = "Obj_" + std::to_string(i);
+    }
+    std::vector<Candidate> cands(N);
+    for (int i = 0; i < N; ++i) {
+        int32_t v = (int32_t)(((uint32_t)i * 2654435761u) & 0x7FFFFFFF);  // scattered
+        std::memcpy(cands[i].prevValue, &v, 4);
+        cands[i].addr          = 0x100000 + (uintptr_t)i * 8;
+        cands[i].descriptorIdx = (uint32_t)(i % 10);
+        cands[i].instanceIdx   = (uint32_t)(i % 1000);
+        cands[i].elementIndex  = -1;
+    }
+
+    LARGE_INTEGER freq, t0, t1;
+    QueryPerformanceFrequency(&freq);
+
+    QueryPerformanceCounter(&t0);
+    auto sorted = BuildOrderedView(cands, descs, insts, DataType::Int32, "", SortKey::Value, false);
+    QueryPerformanceCounter(&t1);
+    double sortMs = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / freq.QuadPart;
+    std::printf("  [bench] BuildOrderedView sort-by-value %d candidates: %.1f ms\n", N, sortMs);
+    EXPECT("scale: sort retains all", sorted.size() == (size_t)N);
+    bool asc = true;
+    for (size_t i = 1; i < sorted.size(); i += 40000) {
+        if (DecodeNumericToDouble(DataType::Int32, cands[sorted[i - 1]].prevValue) >
+            DecodeNumericToDouble(DataType::Int32, cands[sorted[i]].prevValue)) { asc = false; break; }
+    }
+    EXPECT("scale: sorted ascending", asc);
+
+    QueryPerformanceCounter(&t0);
+    auto filtered = BuildOrderedView(cands, descs, insts, DataType::Int32, "class_3", SortKey::ScanOrder, false);
+    QueryPerformanceCounter(&t1);
+    double filtMs = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / freq.QuadPart;
+    std::printf("  [bench] BuildOrderedView filter 'class_3' over %d: %.1f ms -> %zu rows\n",
+                N, filtMs, filtered.size());
+    EXPECT("scale: filter 'class_3' = N/10", filtered.size() == (size_t)(N / 10));
+
+    // Generous bounds catch an O(n^2) regression; the printed numbers are far
+    // lower. The filter is allocation-heavier than the sort (lowercases each
+    // displayed column) — if it ever creeps past this, the follow-up is the
+    // incremental/top-k path noted in todo V2.
+    EXPECT("scale: sort under 5s",   sortMs < 5000.0);
+    EXPECT("scale: filter under 5s", filtMs < 5000.0);
+}
+
 // V1a — TSet / TMap sparse-container element geometry. ComputeSetElementStride
 // accounts for the TSetElement hash overhead (HashNextId + HashIndex, value
 // aligned to 4); ComputeMapValueOffset aligns the TPair value to its natural
@@ -1533,6 +1597,7 @@ int main() {
     Test_ValueScan_FieldDisplayName();
     Test_ValueScan_OptionalFlagOffset();
     Test_ValueScan_OrderedView();
+    Test_ValueScan_OrderedViewScale();
     Test_ValueScan_SparseContainerGeometry();
 
     // Path 2 — native x64 disassembly (Denken decoder core)

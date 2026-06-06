@@ -32,11 +32,10 @@ Open work only. **Read this when deciding what to do next.**
 
 ## Value Search — coverage + memory (build 923 plan)
 
-Dependency order was **V3-A → V3-B → V1a → V3-C → V2**; V3-A/V3-B/V1a/**V3-C** have
-shipped (V3-C build 949: DLL owns the set, UI is a server-side-filtered/sorted window).
-Every candidate lives in the **injected DLL inside the game process**, so per-candidate
-bytes are the real ceiling — V3 is the enabler for both wider coverage (V1) and the
-cap raise (V2, now just "raise the number").
+Dependency order was **V3-A → V3-B → V1a → V3-C → V2**; **all shipped** (V3-C build 949:
+DLL owns the set, UI is a server-side-filtered/sorted window; V2 build 954: ceiling
+raised to 1M, sort/filter verified sub-second). Remaining open: **V1b** (container
+prev-value refine) and **V1c live-verify**.
 
 - **V1b — container prev-value refine (stable key)** — Effort: **M** · Risk: **high**.
   `Candidate.addr` stores a raw element address; TArray realloc already makes it stale,
@@ -47,17 +46,6 @@ cap raise (V2, now just "raise the number").
   actually requested.**
   *Parent: V1a TSet/TMap key|value scan shipped First-Scan-only, build 927 (dev-log
   2026-06-06).*
-
-- **V2 — raise the global `maxResults` cap** — Effort: **S** · Risk: low. The four
-  walls are now down: DLL memory is cheap (V3-A lean Candidate), and the pipe + DataGrid
-  walls are gone (V3-C build 949 — the UI windows server-side via `query_candidates`).
-  What's left is **just the number**: raise the `max_results` default / UI ceiling and
-  smoke-test that a multi-hundred-thousand-candidate session pages, filters, and sorts
-  responsively (the ordered-view sort is O(n log n) over the full set on each
-  filter/sort change — check it stays sub-second at the new ceiling; if not, the only
-  follow-up is incremental/top-k sort). The 15 s **scan** deadline still bounds First
-  Scan regardless.
-  *Parent: V3-C server-side window shipped build 949; lean Candidate build 926.*
 
 -----
 
@@ -252,6 +240,11 @@ Pick up when the active plan finishes or when blocked.
 
 Shipped + unit-tests-pass but unproven on real games:
 
+- **Value Search 1M cap (V2)** (build 954). Set Max near 1,000,000 on a broadly-matching
+  value; confirm First Scan completes (or hits the 15 s deadline cleanly), the grid pages
+  via Load More, and the server-side keyword filter + sort picker stay responsive at that
+  size (scale bench says ~0.6–0.7 s per filter/sort change over 1M; verify it feels OK
+  in-app, where it's debounced).
 - **Value Search `TOptional<T>` scan (V1c)** (build 942). Scan a known value held in a
   `TOptional<int/float/FString>` UPROPERTY → confirm the row appears under the optional's
   field name and a Next Scan prunes; confirm an **unset** optional doesn't surface on a

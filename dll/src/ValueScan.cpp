@@ -847,6 +847,30 @@ bool TryParseSortKey(const std::string& s, SortKey& out) {
 
 namespace {
 
+// Case-insensitive substring test WITHOUT allocating a lowercased copy of the
+// haystack (`needleLower` must already be lowercased). The filter runs this
+// over every displayed column of every candidate on each filter change, so at
+// the raised cap ceiling (1M, V2) avoiding ~6 string allocations per candidate
+// matters — it roughly halved the filter pass in the scale bench. Naive O(n·m)
+// is fine: needles are short and columns are short.
+bool ContainsCI(const char* hay, size_t hayLen, const std::string& needleLower) {
+    const size_t n = needleLower.size();
+    if (n == 0) return true;
+    if (n > hayLen) return false;
+    for (size_t i = 0; i + n <= hayLen; ++i) {
+        size_t j = 0;
+        for (; j < n; ++j) {
+            char ch = static_cast<char>(std::tolower(static_cast<unsigned char>(hay[i + j])));
+            if (ch != needleLower[j]) break;
+        }
+        if (j == n) return true;
+    }
+    return false;
+}
+inline bool ContainsCI(const std::string& hay, const std::string& needleLower) {
+    return ContainsCI(hay.data(), hay.size(), needleLower);
+}
+
 // Does any displayed column of this candidate contain `needleLower`?
 // Mirrors the columns the client-side keyword filter used to match
 // (Class.Field / DefiningClass / Type / Value / Offset / Address / Instance).
@@ -854,22 +878,26 @@ bool CandidateMatchesFilter(const Candidate& c, DataType dt,
                             const FieldDescriptor& d, const InstanceRecord& inst,
                             const std::string& needleLower) {
     if (needleLower.empty()) return true;
-    auto hit = [&](const std::string& s) {
-        return ToLower(s).find(needleLower) != std::string::npos;
-    };
-    if (hit(d.className)) return true;
-    if (hit(d.definingClassName)) return true;
-    if (hit(FieldDisplayName(d, c.elementIndex))) return true;
-    if (hit(d.fieldType)) return true;
-    if (hit(inst.instanceName)) return true;
-    if (hit(FormatCandidateValue(c, dt, d))) return true;
+    if (ContainsCI(d.className, needleLower)) return true;
+    if (ContainsCI(d.definingClassName, needleLower)) return true;
+    // FieldDisplayName allocates ("name" / "name[i]"); for a direct field
+    // (the common case) it's just desc.fieldName — test that in place. Only
+    // container-element candidates pay the "name[i]" construction.
+    if (c.elementIndex < 0) {
+        if (ContainsCI(d.fieldName, needleLower)) return true;
+    } else if (ContainsCI(FieldDisplayName(d, c.elementIndex), needleLower)) {
+        return true;
+    }
+    if (ContainsCI(d.fieldType, needleLower)) return true;
+    if (ContainsCI(inst.instanceName, needleLower)) return true;
+    if (ContainsCI(FormatCandidateValue(c, dt, d), needleLower)) return true;
     // Lowercase hex of offset + address (needle is already lowercased, so a
     // user typing either case of an offset/address pasted from the grid hits).
     char buf[32];
-    std::snprintf(buf, sizeof buf, "0x%x", static_cast<unsigned>(d.fieldOffset));
-    if (std::string(buf).find(needleLower) != std::string::npos) return true;
-    std::snprintf(buf, sizeof buf, "0x%llx", static_cast<unsigned long long>(c.addr));
-    if (std::string(buf).find(needleLower) != std::string::npos) return true;
+    int n = std::snprintf(buf, sizeof buf, "0x%x", static_cast<unsigned>(d.fieldOffset));
+    if (n > 0 && ContainsCI(buf, static_cast<size_t>(n), needleLower)) return true;
+    n = std::snprintf(buf, sizeof buf, "0x%llx", static_cast<unsigned long long>(c.addr));
+    if (n > 0 && ContainsCI(buf, static_cast<size_t>(n), needleLower)) return true;
     return false;
 }
 

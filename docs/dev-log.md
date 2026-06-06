@@ -14,6 +14,29 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-06 — Value Search: raise maxResults cap to 1M (V2, build 954)
+
+With V3-C's server-side window in place the cap is no longer bounded by the pipe / UI
+walls — only DLL memory (cheap after V3-A's lean Candidate) and sort latency. Raised
+the UI ceiling **500k → 1,000,000** (Increment 10k). The **default stays 50k** — a broad
+scan shouldn't collect a million by default; the truncation note prompts the user to
+raise it. The DLL has no hard clamp (it already honored whatever `max_results` the UI
+sends), so this is purely the UI ceiling + a perf check.
+
+Added a scaling benchmark to `dll_helpers` (1M synthetic candidates): a full
+`BuildOrderedView` sort-by-value runs **~640 ms** and a keyword filter **~715 ms** —
+both sub-second at the absolute ceiling, and proportionally tiny for typical (10k–100k)
+scans. The benchmark runs on every filter/sort change (debounced 250 ms in the UI), so
+while here the filter was made **allocation-free**: a case-insensitive substring test
+(`ContainsCI`) that doesn't lowercase-copy each column, plus skipping the
+`FieldDisplayName` copy for direct fields (877 → 715 ms at 1M). Generous `<5 s` asserts
+catch an O(n²) regression. The value-column format (ostringstream) is the remaining
+filter cost but is left as-is — it's the single source shared with the wire encoder, so
+changing it would risk display drift. Tests **447 → 452 dll**. **Live-verify pending:**
+set Max near 1M on a broadly-matching value, confirm the session pages / filters / sorts
+responsively. (V2 is now closed; the only deeper follow-up — incremental/top-k sort —
+isn't needed at this ceiling.)
+
 ## 2026-06-06 — Value Search: deferred enrichment + server-side window (V3-C, build 949)
 
 Re-architected Value Search result handling so the DLL session is the **single
