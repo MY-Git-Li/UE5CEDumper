@@ -403,14 +403,18 @@ public class ClassPivotViewModelTests : IDisposable
         await vm.RefreshAsync();        // loads snapshot + classes (classes are immediate)
         await vm.PendingLoad!;
 
-        // Select A (load A starts, gated), then B (load B starts, gated). The store
-        // call now runs on a thread-pool thread (Task.Run), so wait for both gates
-        // to be created before completing them.
+        // Select A (gated load starts), then B (gated load starts), so A is the
+        // STALE load and B the newest. The store call runs on a thread-pool
+        // thread (Task.Run), so we must wait for A's gate to register BEFORE
+        // superseding it with B — otherwise on a slow runner A can be superseded
+        // and bail out before it ever reaches the gated store call, leaving no
+        // Gates["A"] (the flaky CI failure). Waiting for A's gate first removes
+        // the race while keeping the same intent (a genuinely in-flight stale A).
         vm.SelectedClass = vm.Classes.First(c => c.ClassName == "A");
         var loadA = vm.PendingLoad!;
+        await WaitForGate(store, "A");
         vm.SelectedClass = vm.Classes.First(c => c.ClassName == "B");
         var loadB = vm.PendingLoad!;
-        await WaitForGate(store, "A");
         await WaitForGate(store, "B");
 
         // Complete the NEWER load first, then the stale one.
