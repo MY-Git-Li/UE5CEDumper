@@ -1,0 +1,120 @@
+# Windows release workflow.
+#
+# Builds the full self-contained x64 distribution (C++ DLL + proxy DLLs + the
+# Native-AOT Avalonia UI) via build.ps1, runs the test suite, packages dist/
+# into a .zip, and attaches it to a **DRAFT** GitHub Release.
+#
+# Trigger: a pushed `v*` tag ONLY. Normal pushes / PR merges do NOT release.
+# (workflow_dispatch = build + artifact only, for testing the pipeline.)
+#
+# Verify-then-publish flow: the release is created as a DRAFT (not public). Pull
+# the .zip from the draft (or the run artifact), verify it, then either click
+# "Publish release" in the GitHub UI, or delete the draft + tag and re-tag.
+name: Release (Windows)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:        # manual run = build + artifact only (no release)
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build + package dist (AOT)
+    # Pinned to the explicit VS2026 image label (same as the git-crypt fork):
+    # GitHub redirects windows-latest AND windows-2025 to windows-2025-vs2026,
+    # so the -vs2026 label is the stable redirect target. Ships VS2026 + cmake
+    # + ninja (no extra installs); build.ps1 finds VS via vswhere, so the build
+    # is toolchain-version-agnostic.
+    runs-on: windows-2025-vs2026
+    steps:
+      - name: Checkout (no submodules — docs/private is a private repo)
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+
+      - name: Init public build submodules
+        shell: pwsh
+        # Only the two PUBLIC vendor submodules are needed to build. The private
+        # docs/private submodule (CE-Handwire-Private) is docs-only and is
+        # intentionally NOT cloned (the default token can't read it).
+        run: git submodule update --init vendor/minhook vendor/zydis
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build + test + publish dist (AOT)
+        shell: pwsh
+        run: ./build.ps1 -Mode Publish -Clean
+
+      - name: Package dist into a zip + sha256
+        shell: pwsh
+        run: |
+          $tag = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { 'manual' }
+          $zip = "UE5CEDumper-$tag-win-x64.zip"
+          if (-not (Test-Path 'dist')) { throw 'dist/ not found — build failed?' }
+          Compress-Archive -Path dist/* -DestinationPath $zip -Force
+          $h = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$h  $zip" | Set-Content "$zip.sha256" -Encoding ascii
+          "ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Packaged $zip (sha256 $h)"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: UE5CEDumper-windows-x64
+          path: |
+            ${{ env.ZIP }}
+            ${{ env.ZIP }}.sha256
+          if-no-files-found: error
+
+      - name: Create DRAFT GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          # Curated default notes. The Snapshot / SPC Query / Class Pivot
+          # experimental tabs are intentionally omitted (in git history, but not
+          # release-facing). Edit these in the DRAFT before publishing.
+          $notes = @(
+            'UE5CEDumper — Unreal Engine 4/5 dumper (C++ DLL + Cheat Engine bridge + Avalonia UI).',
+            '',
+            'Self-contained Windows x64 build (Native AOT). No .NET runtime install required.',
+            '',
+            '## Highlights',
+            '- Dynamic offset detection (GObjects / GNames / GWorld) across UE4 4.18+ and UE5 5.0-5.8+',
+            '- Object Tree / Live Walker / Instance Finder / Property Search',
+            '- Value Search (CE-style by-value scan): numeric / string / vector / TArray / TSet / TMap / TOptional, with server-side filter / sort / paging',
+            '- UFunction discovery + invoke (pipe + CE AA-script export); Console (UFUNCTION exec)',
+            '- Property <-> function bytecode cross-reference (Blueprint + native)',
+            '- CE XML / CSX / SDK header / USMAP export',
+            '',
+            '## Setup',
+            '- Inject via the bundled Cheat Engine table (UE5CEDumper.CT), or drop the proxy version.dll into the game''s Binaries\Win64.',
+            '- See Readme.MD for details.',
+            '',
+            '> The exe is unsigned — Windows SmartScreen / antivirus may warn on first run. Verify the download with the included .sha256.'
+          )
+          Set-Content -Path release-notes.md -Value $notes -Encoding utf8
+
+          # Upsert so this is safe whether the tag was pushed via `git push`
+          # (no release yet -> create a DRAFT) OR created via the web UI
+          # (release already exists -> just attach the assets).
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag "$env:ZIP" "$env:ZIP.sha256" --clobber
+            Write-Host "Release $tag already existed — uploaded assets to it."
+          } else {
+            gh release create $tag "$env:ZIP" "$env:ZIP.sha256" `
+              --draft `
+              --title "UE5CEDumper $tag" `
+              --notes-file release-notes.md
+            Write-Host "Created DRAFT release $tag — review the assets, then Publish (or delete + re-tag)."
+          }
