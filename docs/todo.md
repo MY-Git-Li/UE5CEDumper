@@ -311,6 +311,152 @@ sections further down this file. Sorted here by recommended start order:
 
 -----
 
+## Value Search coverage + memory — container scan, cap, lean Candidate (planned 2026-06-05, build 923)
+
+Three related Value Search items surfaced from a "what can't it scan?" review.
+They have a **dependency order**: the lean-Candidate refactor (V3) is the enabler
+for both wider coverage (V1) and any cap increase (V2), because every candidate
+lives in the **injected DLL inside the game process** — so per-candidate bytes are
+the real ceiling. Recommended order: **V3-A → V3-B → V1 (Map/Set) → V2/V3-C**.
+
+The底層 sparse-container walk **already exists** (Address Finder uses it) — V1 is
+mostly wiring ValueScan's `expandFields` + per-instance loop into it, not new
+memory-reading code.
+
+### V3. Lean Candidate record — string interning + deferred enrichment
+
+- ~~**V3-A — shared FieldDescriptor.**~~ ✅ **SHIPPED on dev (build 926, commit
+  `1161411`) — live First/Next scan verified OK by user 2026-06-05.** Effort: **M**.
+  Risk: **low** (pure DLL-internal, no wire-schema change). Why: `ValueScan::Candidate`
+  ([ValueScan.h:294](../dll/src/ValueScan.h#L294)) is **~240 B, 6 `std::string`s**,
+  and `className` / `definingClassName` / `fieldName` / `fieldType` / `boolFieldMask`
+  / `fieldOffset` are all functions of `(class, field)` — identical across thousands
+  of candidates of the same class, yet copied by value into each. They're **already
+  computed once** in `sci->fields` / `sci->className`
+  ([Aura.cpp:4109](../dll/src/Aura.cpp#L4109)). Intern them into a session-level
+  `vector<FieldDescriptor>` + a string pool; Candidate stores a `uint32 descriptorIdx`.
+  Target: **~240 B → ~72 B**, and (the dominant win) 5 fewer heap-string
+  allocations per candidate — numeric scans now allocate zero per candidate.
+  **Live-verify**: on a 1M-object game run a known value First Scan across
+  numeric / string / FVector / TArray-element / NumericNoByte, confirm the
+  candidate rows (class / defining-class / field name incl. `Field[idx]` /
+  value) render identically to pre-926, then a Next Scan prunes correctly.
+  The interning + parallel-merge index remap is only exercised end-to-end
+  in-process, so a clean unit run ≠ correct scan.
+- ~~**V3-B — instance table dedupe.**~~ ✅ **SHIPPED as part of V3-A (build 926,
+  commit `1161411`).** A lean Candidate can't keep raw `instanceAddr`/`instanceName`,
+  so the `InstanceRecord` pool + `Candidate::instanceIdx` were necessarily built in
+  the same change: `ScanForValue` resolves `Ubel::GetName(obj)` once per object
+  (`curInstanceIdx`, [Aura.cpp:4246](../dll/src/Aura.cpp#L4246)) and every matching
+  field of that object shares the index — one record per object, not per candidate.
+  No separate work remains.
+- **V3-C — deferred enrichment.** Effort: **M**. Risk: **med** (new pipe cmd +
+  UI paging). Why: refine never needs the display strings (it only re-reads `c.addr`,
+  [Aura.cpp:4507-4536](../dll/src/Aura.cpp#L4507)), and the UI only shows a window at
+  a time. Resolve `className` / `instanceName` lazily at view-time via a new
+  `resolve_candidate_window` pipe cmd. Unblocks the pipe/UI walls in V2.
+
+### V1. TMap / TSet / TOptional value scan
+
+- ~~**V1a — TMap / TSet (First-Scan).**~~ ✅ **SHIPPED on dev (build 927) — live-verified
+  OK by user 2026-06-06** (Avowed/Star-game `TMap<NameProperty,IntProperty>`
+  `PlayerData.AttributeAugmentLevels.Value[2]`=481 found via Int32 Exact scan).
+  Shipped: `ScanField` gained a
+  `ScanContainer { None, Array, Set, MapKey, MapValue }` enum + `valueOffset`;
+  `expandFields` emits Set/Map(key|value) ScanFields (vector inner gated by
+  `ContainerInnerAccepted`); a shared `scanElement` lambda (factored out of the
+  TArray loop) drives Array + the new sparse branch (`ReadTSparseArray` +
+  `IsSparseIndexAllocated`, value at `slot + valueOffset`). **Refine + Fern needed
+  ZERO changes** — they already operate on `c.addr` + the descriptor pool, and the
+  element addr (incl. valueOffset) is baked in at First-Scan. Rows render
+  `Set[idx]` / `Map.Key[idx]` / `Map.Value[idx]`. Tests: dll_helpers 400 → 412
+  (Map display names + sparse stride/offset geometry). **Live-verify**: scan a
+  known value held in a `TMap`/`TSet` UPROPERTY (inventory/stat maps are common),
+  confirm rows appear with `Map.Key/Value[idx]` names + a Next Scan prunes; watch
+  for false hits from freed-slot reads. Effort: **M** (~1.3× the build-757 TArray
+  path). Risk: **med**. Why: closes the "containers other than TArray are invisible" gap
+  (intentional skip at [Aura.cpp:4079-4080](../dll/src/Aura.cpp#L4079)). Reuse
+  `Macht::ReadTSparseArray` / `IsSparseIndexAllocated`
+  ([Macht.h:165-200](../dll/src/Macht.h#L165)), `Ubel::GetMapPairLayout` /
+  `GetSetElementStride` ([Ubel.cpp:1176-1238](../dll/src/Ubel.cpp#L1176)),
+  `Macht::ComputeMapValueOffset` ([Macht.h:225](../dll/src/Macht.h#L225)), and the
+  proven Map(key+value)/Set iteration template at
+  [Aura.cpp:2194-2270](../dll/src/Aura.cpp#L2194). Changes: (1) widen `ScanField`'s
+  `bool isArray` → `enum ContainerKind { None, Array, Set, MapKey, MapValue }` +
+  `pairStride` / `valueOffset` ([Aura.cpp:3897](../dll/src/Aura.cpp#L3897)); (2) emit
+  Set/Map ScanFields in `expandFields` next to the ArrayProperty branch
+  ([Aura.cpp:4035](../dll/src/Aura.cpp#L4035)); (3) a sparse branch in the per-instance
+  loop next to `if (sf.isArray)` ([Aura.cpp:4246](../dll/src/Aura.cpp#L4246)). Display
+  names `Field[e]` / `Field[e].Key` / `Field[e].Value` (matches Address Finder).
+  Sparse containers are usually small, so the marginal candidate count is low.
+- **V1b — prev-value refine for containers (stable key).** Effort: **M**. Risk: **high**.
+  Why: `Candidate.addr` stores a **raw element address**
+  ([Aura.cpp:4278](../dll/src/Aura.cpp#L4278)); TArray realloc already makes it stale
+  (handled by SEH + "First-Scan again", [Aura.cpp:4515-4520](../dll/src/Aura.cpp#L4515)),
+  and **TSparseArray is worse — freed slots get reused**, so `c.addr` on refine may
+  point at a different logical entry → Changed/Unchanged semantics silently lie.
+  V1a ships **First-Scan-only for containers** (refine drops slots that no longer
+  validate). V1b stores `container addr + slot index` as a stable key and re-walks
+  the sparse array on refine — same idea as snapshot's `SelectArrayInnerKey`
+  ([ValueScan.h:227](../dll/src/ValueScan.h#L227)). Do only if refine-on-container is
+  actually requested.
+- **V1c — TOptional.** Effort: **S-M**. Risk: **med**. Why: different shape from
+  Map/Set — inline `[T value][bool bIsSet]`, not sparse. Needs `OptionalProperty`
+  inner resolution in `WalkClassEx` first, then a flag-gated leaf read. **Do
+  separately, after V1a** — don't bundle the three "deferred containers" together.
+
+### V2. Raising the global `maxResults` cap
+
+- **V2 — paged streaming, not a bigger flat cap.** Effort: **M-L**. Risk: **med**.
+  Why: the 50k cap ([roadmap.md:140](roadmap.md#L140)) is bounded by four walls,
+  nearest first: (1) **DLL memory in the target process** — the hard one, addressed
+  by V3; (2) **pipe JSON serialization** of N candidates; (3) **Avalonia DataGrid**
+  holding N rows under AOT; (4) the 15 s deadline
+  ([Aura.cpp:4424](../dll/src/Aura.cpp#L4424)) + the fact that 500k results aren't
+  user-actionable (refine is meant to converge). Correct shape: keep the **full
+  lean-candidate set in the DLL session** (cheap after V3) but **stream only a
+  window/summary to the UI** (depends on V3-C's paging cmd). Don't just bump the
+  number.
+
+-----
+
+## UI/UX: DataGrid sorting + Value Search filter (build 934, 2026-06-06)
+
+User-reported during V1a live test. Three items; two shipped, one deferred.
+
+- ~~**DataGrid column sorting broken app-wide.**~~ ✅ **SHIPPED (build 933-934).**
+  Root cause: the project uses **compiled bindings**
+  (`AvaloniaUseCompiledBindingsByDefault=true`), and Avalonia DataGrid does **not**
+  auto-derive a column's sort path from a compiled binding — so NO column sorted
+  (text or template), in every grid. **Not** an AOT/Linux-removal regression (the
+  user tested the non-AOT `-Target Test` build). Fix: added explicit
+  `SortMemberPath="<Prop>"` to every sortable column across all panels (numeric
+  backing for hex offset/size/address/score columns so order is numeric, not
+  lexical); `CanUserSort="False"` on action/button/checkbox columns. **Exception
+  kept:** SpcPanel `SnapshotPicks` stays `CanUserSortColumns="False"` (chronological
+  old→new). Panels swept: ValueSearch, ProxyDeploy, LiveWalker (Fields/Refs/Funcs),
+  InstanceFinder (×3), PropertySearch, Interesting Funcs/Props, ClassStruct,
+  GameClassFilter, Snapshot (×3), Spc (×2), ClassPivot (×2). **Lesson:** any new
+  DataGrid in this project MUST set `SortMemberPath` per sortable column or it won't
+  sort (compiled bindings).
+- ~~**Value Search keyword filter.**~~ ✅ **SHIPPED (build 932).** Case-insensitive
+  substring filter over all displayed columns, client-side over the cached candidate
+  set (`FilterText` → `ApplyFilter()` rebuilds the bound `Candidates` from
+  `_allCandidates`; reflection-free, AOT-safe). Kept the bound collection a **typed**
+  `ObservableCollection` (not a `DataGridCollectionView`) — a non-generic view breaks
+  compiled column-binding type inference (AVLN2000).
+- **Live Walker focus-on-field when navigating from a result.** Effort: **S-M**.
+  Risk: low. **DEFERRED — next.** "Open in Live Walker" from a Value Search row opens
+  the owning instance but doesn't scroll to / select the target field, so the user
+  can't see the correct position. Infra already exists: `LiveWalkerViewModel`'s
+  `_pendingScrollFieldName` + `ScrollToFieldRequested` event + `LiveWalkerPanel`'s
+  `ScrollIntoView`/`SelectedItem` handler (used by Find References). Need to thread
+  the candidate's `FieldOffset` through `OpenInLiveWalker` → `NavigateToInstance` →
+  `NavigateToAddressAsync`, then match by offset in `UpdateDisplay` (field names
+  aren't unique). See the cross-nav investigation in the 2026-06-06 session.
+
+-----
+
 ## Next-priority enhancements (decided 2026-05-26, post build 738)
 
 ### 0. ~~Value Search tab (by-value scan)~~ — ✅ shipped this session (2026-05-26, build 738)

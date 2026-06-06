@@ -47,10 +47,15 @@
 //     - First scan: Exact / Bigger / Smaller (component-wise; Between
 //                   takes a single second vector for upper bound)
 //     - Next scan:  + Changed / Unchanged / Increased / Decreased
+//   Containers:     TArray<T> (Phase 2C, build 757) + TSet<T> / TMap<K,V>
+//                   key|value (V1a, build 927) are all walked element-wise
+//                   for any supported leaf DataType. Sparse containers
+//                   iterate allocated slots only. Element addresses are raw,
+//                   so refine degrades on a container reallocation (SEH-safe
+//                   read drops the candidate). TOptional is still deferred (V1c).
 //   Excluded:       Native C++ fields (non-UPROPERTY) — UI must show banner
-//   Deferred:       TArray<T> scan — see memory project_value_search_caveats
-//                   for the crash-risk plan that gates the v2 expansion
 //
+
 // The candidate enrichment matches Aura::FindByAddress conventions so
 // "Open in Live Walker" works without further address-→-instance lookup.
 // ============================================================
@@ -280,72 +285,115 @@ const std::vector<std::string>& PropertyTypeNames(DataType dt);
 // for non-vector data types.
 const std::vector<std::string>& VectorStructNames(DataType dt);
 
-// One candidate as remembered between RPCs. Cache the FindByAddress
-// metadata on the FIRST scan so refine rounds don't re-resolve owner
-// info. `prevValue` is updated to the latest-observed bytes on every
-// successful refine, so Changed/Unchanged/etc. always compare against
-// "what we saw last time we looked at this slot".
+// ---- Interned candidate metadata (build 924, V3-A) -------------------
 //
-// For Phase 2 string data types (FString / FName / FText) `prevStr`
-// holds the resolved UTF-8 value instead of the byte buffer. For
-// vector data types (FVector / FRotator) `prevValue` is 12 bytes
-// (X / Y / Z packed); for FTransform the same 12 bytes hold the
-// Translation FVector (Rotation + Scale not stored).
-struct Candidate {
-    uintptr_t   addr           = 0;     // instance + fieldOffset (the value's address)
-    uintptr_t   instanceAddr   = 0;     // owning UObject
-    int32_t     instanceIndex  = -1;    // GObjects index (-1 if not enumerated)
-    int32_t     fieldOffset    = 0;     // bytes from instanceAddr
-    uint8_t     prevValue[16]  = {};    // last-observed bytes; size = SizeOf(dt)
-    std::string prevStr;                // last-observed string (string DataTypes only)
+// A First Scan can return tens of thousands of candidates. Each used to
+// carry six std::strings (class / defining-class / field name / field
+// type / instance name) copied BY VALUE, which is almost entirely
+// redundant: className / definingClassName / fieldName / fieldType /
+// boolFieldMask / fieldOffset are functions of the (class, field) pair —
+// identical across every candidate of that class+field — and instanceName
+// is shared by every field that matches on the same object. Interning
+// them into two session-level pools shrinks the per-candidate record from
+// ~240 B (+ up to 5 heap strings) to ~72 B (+ 0 heap strings for numeric
+// scans). That is what lets a session hold a large candidate set inside
+// the injected DLL without bloating the target process (the precondition
+// for any later maxResults-cap increase — see todo.md V2/V3).
+
+// Per-(class, field) display metadata. One entry per distinct field the
+// scan emits a candidate for; shared via Candidate::descriptorIdx.
+struct FieldDescriptor {
+    std::string className;          // The instance's UClass name
+    std::string definingClassName;  // Class where the field is declared
+    std::string fieldName;          // BASE name (no array "[i]" suffix)
+    std::string fieldType;          // "FloatProperty" / "IntProperty" / ...
+    int32_t     fieldOffset   = 0;  // bytes from instanceAddr
+    // BoolProperty bitfield support: when boolFieldMask != 0xFF the field
+    // shares a byte with siblings. Read as `(byte & mask) != 0`.
+    uint8_t     boolFieldMask = 0xFF;
+};
+
+// Per-owning-object metadata. One entry per distinct UObject that owns at
+// least one candidate; shared via Candidate::instanceIdx. (Each object is
+// scanned by exactly one worker thread, so instances never duplicate
+// across the per-thread merge.)
+struct InstanceRecord {
+    uintptr_t   instanceAddr  = 0;  // owning UObject
+    int32_t     instanceIndex = -1; // GObjects index (-1 if not enumerated)
     std::string instanceName;
-    std::string className;              // The instance's UClass name
-    std::string definingClassName;      // Class where the field is declared
-    std::string fieldName;
-    std::string fieldType;              // "FloatProperty" / "IntProperty" / ...
-    // BoolProperty bitfield support: when boolFieldMask != 0xFF the
-    // field shares a byte with siblings. Read as `(byte & mask) != 0`.
-    uint8_t     boolFieldMask  = 0xFF;
+};
+
+// One candidate as remembered between RPCs. Holds only per-candidate
+// state: the value's address, the last-observed value, and indices into
+// the session's FieldDescriptor / InstanceRecord pools. `prevValue` is
+// updated to the latest-observed bytes on every successful refine so
+// Changed/Unchanged/etc. always compare against "what we saw last time".
+//
+// For Phase 2 string data types (FString / FName / FText) `prevStr` holds
+// the resolved UTF-8 value and `prevValue` is unused. For vector data
+// types (FVector / FRotator) `prevValue` is 12 bytes (X / Y / Z packed);
+// for FTransform the same 12 bytes hold the Translation FVector.
+// `elementIndex` is >= 0 for a TArray/container element (display name is
+// descriptor.fieldName + "[elementIndex]") and -1 for a direct field.
+struct Candidate {
+    uintptr_t   addr          = 0;   // instance + fieldOffset (the value's address)
+    uint8_t     prevValue[16] = {};  // last-observed bytes; size = SizeOf(dt)
+    std::string prevStr;             // last-observed string (string DataTypes only)
+    uint32_t    descriptorIdx = 0;   // -> Session::descriptors
+    uint32_t    instanceIdx   = 0;   // -> Session::instances
+    int32_t     elementIndex  = -1;  // array/container element index, -1 = direct field
 };
 
 struct Session {
     uint64_t                              id        = 0;
     DataType                              dt        = DataType::Int32;
     std::vector<Candidate>                candidates;
+    std::vector<FieldDescriptor>          descriptors;  // shared via Candidate::descriptorIdx
+    std::vector<InstanceRecord>           instances;    // shared via Candidate::instanceIdx
     std::chrono::steady_clock::time_point lastUse;
 };
+
+// Reconstruct a candidate's display field name from its descriptor +
+// element index: `fieldName` for a direct field, `fieldName[elementIndex]`
+// for a TArray/container element. Pure / std-only (unit-tested).
+std::string FieldDisplayName(const FieldDescriptor& desc, int32_t elementIndex);
 
 class SessionManager {
 public:
     static SessionManager& Instance();
 
-    // Allocate a new session, take ownership of the candidate vector,
-    // return its sessionId. Triggers a lazy expiry pass on existing
-    // sessions so abandoned sessions don't accumulate.
-    uint64_t Begin(DataType dt, std::vector<Candidate> candidates);
+    // Allocate a new session, take ownership of the candidate vector plus
+    // its shared descriptor / instance pools, return its sessionId.
+    // Triggers a lazy expiry pass on existing sessions so abandoned
+    // sessions don't accumulate.
+    uint64_t Begin(DataType dt,
+                   std::vector<Candidate>       candidates,
+                   std::vector<FieldDescriptor> descriptors,
+                   std::vector<InstanceRecord>  instances);
 
-    // Run `fn(dataType, candidates&)` under the manager's lock. Returns
-    // false if the session doesn't exist (caller should map to wire
-    // error "session_not_found"). `fn` may mutate the candidates
-    // vector (typical Refine behavior is to prune entries that no
-    // longer match).
+    // Run `fn(Session&)` under the manager's lock. Returns false if the
+    // session doesn't exist (caller should map to wire error
+    // "session_not_found"). `fn` may mutate the session's candidates
+    // vector (typical Refine behavior is to prune entries that no longer
+    // match); the descriptor / instance pools are append-only and should
+    // be treated as read-only by the callback.
     template <typename Fn>
     bool RefineWith(uint64_t sessionId, Fn&& fn) {
         std::lock_guard<std::mutex> lk(mu_);
         auto it = sessions_.find(sessionId);
         if (it == sessions_.end()) return false;
         it->second->lastUse = std::chrono::steady_clock::now();
-        fn(it->second->dt, it->second->candidates);
+        fn(*it->second);
         return true;
     }
 
-    // Read-only access — same lock as RefineWith.
+    // Read-only access — same lock as RefineWith. `fn(const Session&)`.
     template <typename Fn>
     bool ViewWith(uint64_t sessionId, Fn&& fn) {
         std::lock_guard<std::mutex> lk(mu_);
         auto it = sessions_.find(sessionId);
         if (it == sessions_.end()) return false;
-        fn(it->second->dt, it->second->candidates);
+        fn(static_cast<const Session&>(*it->second));
         return true;
     }
 

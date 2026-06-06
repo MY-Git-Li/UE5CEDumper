@@ -72,7 +72,7 @@
               FontSize="12"
               FontFamily="Consolas, Menlo, monospace">
       <DataGrid.Columns>
-        <DataGridTemplateColumn Header="Score" Width="55">
+        <DataGridTemplateColumn Header="Score" Width="55" SortMemberPath="Score">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:GameClassEntry">
               <TextBlock Text="{Binding Score}" Foreground="#E5C07B"
@@ -82,23 +82,29 @@
         </DataGridTemplateColumn>
         <DataGridTextColumn Header="Class"
                             Binding="{Binding ClassName}"
+                            SortMemberPath="ClassName"
                             Width="200"/>
         <DataGridTextColumn Header="Super"
                             Binding="{Binding SuperName}"
+                            SortMemberPath="SuperName"
                             Width="140"/>
         <DataGridTextColumn Header="Package"
                             Binding="{Binding Package}"
+                            SortMemberPath="Package"
                             Width="140"/>
         <DataGridTextColumn Header="Path"
                             Binding="{Binding ClassPath}"
+                            SortMemberPath="ClassPath"
                             Width="220"/>
         <DataGridTextColumn Header="Props"
                             Binding="{Binding PropertyCount}"
+                            SortMemberPath="PropertyCount"
                             Width="60"/>
         <DataGridTextColumn Header="Size"
                             Binding="{Binding SizeHex}"
+                            SortMemberPath="PropertiesSize"
                             Width="70"/>
-        <DataGridTemplateColumn Header="" Width="Auto">
+        <DataGridTemplateColumn Header="" Width="Auto" CanUserSort="False">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:GameClassEntry">
               <StackPanel Orientation="Horizontal" Spacing="4">

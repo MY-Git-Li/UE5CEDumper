@@ -167,8 +167,47 @@ public partial class ValueSearchViewModel : ViewModelBase
     [ObservableProperty] private string _statusText = "Click First Scan to scan for a value across all UPROPERTY fields.";
     [ObservableProperty] private bool   _isScanning;
     [ObservableProperty] private string _errorMessage = "";
+    /// <summary>The bound, FILTERED result set shown by the grid. Kept as
+    /// a typed ObservableCollection (not a DataGridCollectionView) so the
+    /// grid's compiled column bindings can infer the row type AND column
+    /// sorting works via SortMemberPath. Rebuilt from
+    /// <see cref="_allCandidates"/> whenever a scan completes or the filter
+    /// text changes.</summary>
     [ObservableProperty] private ObservableCollection<ValueCandidate> _candidates = new();
     [ObservableProperty] private ValueCandidate? _selectedCandidate;
+
+    /// <summary>The unfiltered candidate set from the last scan/refine. The
+    /// keyword filter narrows this into <see cref="Candidates"/> without a
+    /// DLL round-trip.</summary>
+    private IReadOnlyList<ValueCandidate> _allCandidates = System.Array.Empty<ValueCandidate>();
+
+    /// <summary>Case-insensitive keyword filter applied across every
+    /// displayed column (Class.Field / Type / Value / Offset / Address /
+    /// Instance). Empty = show all. Purely client-side, so it costs no DLL
+    /// round-trip and survives across refines.</summary>
+    [ObservableProperty] private string _filterText = "";
+
+    partial void OnFilterTextChanged(string value) => ApplyFilter();
+
+    /// <summary>Rebuild <see cref="Candidates"/> from
+    /// <see cref="_allCandidates"/> applying the current keyword filter.
+    /// Reflection-free substring match (Native-AOT safe).</summary>
+    private void ApplyFilter()
+    {
+        var q = FilterText?.Trim() ?? "";
+        IEnumerable<ValueCandidate> src = _allCandidates;
+        if (q.Length > 0)
+        {
+            src = _allCandidates.Where(c =>
+                   c.LocationLabel.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || c.FieldType.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || c.Value.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || c.OffsetHex.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || c.Addr.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || c.InstanceName.Contains(q, StringComparison.OrdinalIgnoreCase));
+        }
+        Candidates = new ObservableCollection<ValueCandidate>(src);
+    }
 
     /// <summary>True when a scan session is active (between First Scan
     /// and New Scan / End). Drives the enablement of the Next Scan
@@ -331,7 +370,8 @@ public partial class ValueSearchViewModel : ViewModelBase
                 GameOnly, MaxResults, effTol, effCase);
 
             SessionId = result.SessionId;
-            Candidates = new ObservableCollection<ValueCandidate>(result.Candidates);
+            _allCandidates = result.Candidates;
+            ApplyFilter();
 
             var summary = $"First Scan: {result.Total} candidates in {result.DurationMs} ms " +
                           $"(scanned {result.ScannedObjects} objects, " +
@@ -382,7 +422,8 @@ public partial class ValueSearchViewModel : ViewModelBase
                 SelectedScanType == ValueScanType.Between ? Value2 : null,
                 effTol, effCase);
 
-            Candidates = new ObservableCollection<ValueCandidate>(result.Candidates);
+            _allCandidates = result.Candidates;
+            ApplyFilter();
 
             StatusText = $"Next Scan ({SelectedScanType}): {result.Total} surviving candidates " +
                          $"in {result.DurationMs} ms";
@@ -402,7 +443,8 @@ public partial class ValueSearchViewModel : ViewModelBase
     private async Task NewScanAsync()
     {
         await EndSessionIfAnyAsync();
-        Candidates = new ObservableCollection<ValueCandidate>();
+        _allCandidates = System.Array.Empty<ValueCandidate>();
+        ApplyFilter();
         StatusText = "Session ended. Configure a new scan and click First Scan.";
         ErrorMessage = "";
     }

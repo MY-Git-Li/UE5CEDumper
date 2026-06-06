@@ -84,13 +84,13 @@
               IsReadOnly="True" GridLinesVisibility="Horizontal" Background="#1E1E1E"
               CanUserResizeColumns="True" CanUserSortColumns="True">
       <DataGrid.Columns>
-        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Label}"    Binding="{Binding Label}"          Width="*"/>
-        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Captured}" Binding="{Binding CapturedAt}"     Width="190"/>
-        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Objects}"  Binding="{Binding ObjectCount}"    Width="90"/>
-        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Fields}"   Binding="{Binding FieldCount}"     Width="90"/>
-        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Size}"     Binding="{Binding EstSizeDisplay}" Width="90"/>
-        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Scope}"    Binding="{Binding Scope}"          Width="130"/>
-        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Ue}"       Binding="{Binding UeVersion}"      Width="60"/>
+        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Label}"    Binding="{Binding Label}"          SortMemberPath="Label"        Width="*"/>
+        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Captured}" Binding="{Binding CapturedAt}"     SortMemberPath="CapturedAt"   Width="190"/>
+        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Objects}"  Binding="{Binding ObjectCount}"    SortMemberPath="ObjectCount"  Width="90"/>
+        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Fields}"   Binding="{Binding FieldCount}"     SortMemberPath="FieldCount"   Width="90"/>
+        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Size}"     Binding="{Binding EstSizeDisplay}" SortMemberPath="EstBytes"     Width="90"/>
+        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Scope}"    Binding="{Binding Scope}"          SortMemberPath="Scope"        Width="130"/>
+        <DataGridTextColumn Header="{StaticResource str.Snapshot.Col.Ue}"       Binding="{Binding UeVersion}"      SortMemberPath="UeVersion"    Width="60"/>
       </DataGrid.Columns>
     </DataGrid>
 
@@ -176,12 +176,12 @@
                 IsReadOnly="True" GridLinesVisibility="Horizontal" Background="#1E1E1E"
                 CanUserResizeColumns="True" CanUserSortColumns="True">
         <DataGrid.Columns>
-          <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Change}" Binding="{Binding DirectionGlyph}" Width="40"/>
-          <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Class}"  Binding="{Binding ClassName}"      Width="200"/>
-          <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Object}" Binding="{Binding NormPath}"       Width="*"/>
-          <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Field}"  Binding="{Binding PropName}"       Width="160"/>
-          <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Old}"    Binding="{Binding OldValue}"       Width="120"/>
-          <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.New}"    Binding="{Binding NewValue}"       Width="120"/>
+          <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Change}" Binding="{Binding DirectionGlyph}" SortMemberPath="Direction" Width="40"/>
+          <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Class}"  Binding="{Binding ClassName}"      SortMemberPath="ClassName" Width="200"/>
+          <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Object}" Binding="{Binding NormPath}"       SortMemberPath="NormPath"  Width="*"/>
+          <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Field}"  Binding="{Binding PropName}"       SortMemberPath="PropName"  Width="160"/>
+          <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Old}"    Binding="{Binding OldValue}"       SortMemberPath="OldValue"  Width="120"/>
+          <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.New}"    Binding="{Binding NewValue}"       SortMemberPath="NewValue"  Width="120"/>
         </DataGrid.Columns>
       </DataGrid>
     </DockPanel>
@@ -198,7 +198,7 @@
                   Height="200" GridLinesVisibility="Horizontal" Background="#1E1E1E"
                   CanUserResizeColumns="True" CanUserSortColumns="True">
           <DataGrid.Columns>
-            <DataGridTemplateColumn Header="{StaticResource str.Noise.Col.Pick}" Width="50">
+            <DataGridTemplateColumn Header="{StaticResource str.Noise.Col.Pick}" Width="50" CanUserSort="False">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate x:DataType="vm:NoiseRowVm">
                   <CheckBox IsChecked="{Binding Picked}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -206,11 +206,11 @@
               </DataGridTemplateColumn.CellTemplate>
             </DataGridTemplateColumn>
             <DataGridTextColumn Header="{StaticResource str.Noise.Col.Class}"
-                                Binding="{Binding ClassName}" IsReadOnly="True" Width="*"/>
+                                Binding="{Binding ClassName}" SortMemberPath="ClassName" IsReadOnly="True" Width="*"/>
             <DataGridTextColumn Header="{StaticResource str.Noise.Col.Hits}"
-                                Binding="{Binding HitCount}" IsReadOnly="True" Width="80"/>
+                                Binding="{Binding HitCount}" SortMemberPath="HitCount" IsReadOnly="True" Width="80"/>
             <DataGridTextColumn Header="{StaticResource str.Noise.Col.SampleProps}"
-                                Binding="{Binding SamplePropsDisplay}" IsReadOnly="True" Width="240"/>
+                                Binding="{Binding SamplePropsDisplay}" SortMemberPath="SamplePropsDisplay" IsReadOnly="True" Width="240"/>
           </DataGrid.Columns>
         </DataGrid>
         <StackPanel Orientation="Horizontal" Margin="0,6,0,0">

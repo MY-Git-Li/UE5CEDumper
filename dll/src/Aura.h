@@ -576,8 +576,12 @@ struct ValueScanStats {
 };
 
 struct ValueScanResult {
-    std::vector<ValueScan::Candidate> candidates;
-    ValueScanStats                    stats;
+    std::vector<ValueScan::Candidate>       candidates;
+    // Shared metadata pools the candidates index into (V3-A). Moved into
+    // the ValueScan::Session alongside the candidates by SessionManager::Begin.
+    std::vector<ValueScan::FieldDescriptor> descriptors;
+    std::vector<ValueScan::InstanceRecord>  instances;
+    ValueScanStats                          stats;
 };
 
 // First Scan: walk every UPROPERTY field matching `dt` across all
@@ -639,16 +643,17 @@ ValueScanResult ScanForValue(
 // predicates compare against `multiTargets`/`multiTargets2` (matched by
 // that width), prev-value predicates against the candidate's prevValue.
 ValueScanStats RefineCandidates(
-    ValueScan::DataType                dt,
-    ValueScan::ScanType                st,
-    const uint8_t*                     targetBytes,
-    const uint8_t*                     target2Bytes,
-    std::vector<ValueScan::Candidate>& candidates,
-    double                             tolerance     = 0.0,
-    const std::string&                 targetString  = "",
-    bool                               caseSensitive = false,
-    const ValueScan::NumericTargetSet* multiTargets  = nullptr,
-    const ValueScan::NumericTargetSet* multiTargets2 = nullptr);
+    ValueScan::DataType                          dt,
+    ValueScan::ScanType                          st,
+    const uint8_t*                               targetBytes,
+    const uint8_t*                               target2Bytes,
+    std::vector<ValueScan::Candidate>&           candidates,
+    const std::vector<ValueScan::FieldDescriptor>& descriptors,
+    double                                       tolerance     = 0.0,
+    const std::string&                           targetString  = "",
+    bool                                         caseSensitive = false,
+    const ValueScan::NumericTargetSet*           multiTargets  = nullptr,
+    const ValueScan::NumericTargetSet*           multiTargets2 = nullptr);
 
 // ------------------------------------------------------------------
 // Snapshot capture (experimental — Phase A1a). A type-agnostic, streamed

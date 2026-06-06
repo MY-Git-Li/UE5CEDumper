@@ -149,23 +149,23 @@
 
         <!-- Game Name -->
         <DataGridTextColumn Header="{StaticResource str.ProxyDeploy.ColName}"
-                            Binding="{Binding Name}" Width="*" IsReadOnly="True"/>
+                            Binding="{Binding Name}" SortMemberPath="Name" Width="*" IsReadOnly="True"/>
 
         <!-- BinariesDir (path) -->
         <DataGridTextColumn Header="{StaticResource str.ProxyDeploy.ColPath}"
-                            Binding="{Binding BinariesDir}" Width="2*" IsReadOnly="True"/>
+                            Binding="{Binding BinariesDir}" SortMemberPath="BinariesDir" Width="2*" IsReadOnly="True"/>
 
         <!-- Status -->
         <DataGridTextColumn Header="{StaticResource str.ProxyDeploy.ColStatus}"
-                            Binding="{Binding Status}" Width="160" IsReadOnly="True"/>
+                            Binding="{Binding Status}" SortMemberPath="Status" Width="160" IsReadOnly="True"/>
 
         <!-- Installed Version -->
         <DataGridTextColumn Header="{StaticResource str.ProxyDeploy.ColVersion}"
-                            Binding="{Binding InstalledVersion}" Width="120" IsReadOnly="True"/>
+                            Binding="{Binding InstalledVersion}" SortMemberPath="InstalledVersion" Width="120" IsReadOnly="True"/>
 
         <!-- Error Message -->
         <DataGridTextColumn Header="{StaticResource str.ProxyDeploy.ColError}"
-                            Binding="{Binding ErrorMessage}" Width="200" IsReadOnly="True"/>
+                            Binding="{Binding ErrorMessage}" SortMemberPath="ErrorMessage" Width="200" IsReadOnly="True"/>
       </DataGrid.Columns>
     </DataGrid>
   </DockPanel>

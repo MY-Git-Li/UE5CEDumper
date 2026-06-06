@@ -161,12 +161,24 @@
                Margin="0,0,0,4" TextWrapping="Wrap"
                IsVisible="{Binding DataTypeWarning, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
 
+    <!-- Keyword filter row: case-insensitive substring match over every
+         column, applied client-side via the CandidatesView. Sits above the
+         grid so it reads as a filter on the results below. -->
+    <Grid DockPanel.Dock="Top" Margin="0,0,0,4" ColumnDefinitions="Auto,*">
+      <TextBlock Grid.Column="0" Text="{StaticResource str.VS.Filter}"
+                 Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,8,0"/>
+      <TextBox Grid.Column="1" Text="{Binding FilterText}"
+               PlaceholderText="{StaticResource str.VS.FilterWatermark}"
+               Padding="4,2" FontSize="12"/>
+    </Grid>
+
     <!-- Results DataGrid -->
     <DataGrid x:Name="ResultsGrid"
               ItemsSource="{Binding Candidates}"
               SelectedItem="{Binding SelectedCandidate}"
               IsReadOnly="True"
               CanUserResizeColumns="True"
+              CanUserSortColumns="True"
               GridLinesVisibility="Horizontal"
               BorderThickness="0"
               Background="#1E1E1E"
@@ -174,13 +186,13 @@
               FontSize="12"
               FontFamily="Consolas, Menlo, monospace">
       <DataGrid.Columns>
-        <DataGridTextColumn Header="Class.Field" Binding="{Binding LocationLabel}" Width="320"/>
-        <DataGridTextColumn Header="Type" Binding="{Binding FieldType}" Width="120"/>
-        <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="120"/>
-        <DataGridTextColumn Header="Offset" Binding="{Binding OffsetHex}" Width="80"/>
-        <DataGridTextColumn Header="Address" Binding="{Binding Addr}" Width="160"/>
-        <DataGridTextColumn Header="Instance" Binding="{Binding InstanceName}" Width="200"/>
-        <DataGridTemplateColumn Header="" Width="Auto">
+        <DataGridTextColumn Header="Class.Field" Binding="{Binding LocationLabel}" SortMemberPath="LocationLabel" Width="320"/>
+        <DataGridTextColumn Header="Type" Binding="{Binding FieldType}" SortMemberPath="FieldType" Width="120"/>
+        <DataGridTextColumn Header="Value" Binding="{Binding Value}" SortMemberPath="Value" Width="120"/>
+        <DataGridTextColumn Header="Offset" Binding="{Binding OffsetHex}" SortMemberPath="FieldOffset" Width="80"/>
+        <DataGridTextColumn Header="Address" Binding="{Binding Addr}" SortMemberPath="Addr" Width="160"/>
+        <DataGridTextColumn Header="Instance" Binding="{Binding InstanceName}" SortMemberPath="InstanceName" Width="200"/>
+        <DataGridTemplateColumn Header="" Width="Auto" CanUserSort="False">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:ValueCandidate">
               <StackPanel Orientation="Horizontal" Spacing="4">

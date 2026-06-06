@@ -281,18 +281,28 @@ std::string FormatVectorBytes(const uint8_t bytes[12]) {
     return oss.str();
 }
 
-json CandidateToJson(const ValueScan::Candidate& c, ValueScan::DataType dt) {
+// Build the wire JSON for one candidate. Per-(class,field) metadata and
+// per-object metadata are pulled from the session's shared descriptor /
+// instance pools the candidate indexes into (V3-A) — the wire shape is
+// unchanged, the fields are just reassembled from the interned pools.
+json CandidateToJson(const ValueScan::Candidate& c,
+                     ValueScan::DataType dt,
+                     const std::vector<ValueScan::FieldDescriptor>& descriptors,
+                     const std::vector<ValueScan::InstanceRecord>&  instances) {
+    const ValueScan::FieldDescriptor& desc = descriptors[c.descriptorIdx];
+    const ValueScan::InstanceRecord&  inst = instances[c.instanceIdx];
+
     json item;
     item["addr"]                = Renge::AddrToStr(c.addr);
-    item["instance_addr"]       = Renge::AddrToStr(c.instanceAddr);
-    item["instance_index"]      = c.instanceIndex;
-    item["field_offset"]        = c.fieldOffset;
-    item["instance_name"]       = c.instanceName;
-    item["class_name"]          = c.className;
-    item["defining_class_name"] = c.definingClassName;
-    item["field_name"]          = c.fieldName;
-    item["field_type"]          = c.fieldType;
-    item["bool_field_mask"]     = c.boolFieldMask;
+    item["instance_addr"]       = Renge::AddrToStr(inst.instanceAddr);
+    item["instance_index"]      = inst.instanceIndex;
+    item["field_offset"]        = desc.fieldOffset;
+    item["instance_name"]       = inst.instanceName;
+    item["class_name"]          = desc.className;
+    item["defining_class_name"] = desc.definingClassName;
+    item["field_name"]          = ValueScan::FieldDisplayName(desc, c.elementIndex);
+    item["field_type"]          = desc.fieldType;
+    item["bool_field_mask"]     = desc.boolFieldMask;
     // Value rendering varies by family. Strings emit the resolved
     // UTF-8 directly; vectors emit "X, Y, Z"; numerics emit the
     // formatted prevValue scalar.
@@ -304,7 +314,7 @@ json CandidateToJson(const ValueScan::Candidate& c, ValueScan::DataType dt) {
         // Render each candidate with its OWN concrete width resolved
         // from the stored fieldType ("FloatProperty" -> Float, etc.).
         ValueScan::DataType memberDt;
-        if (ValueScan::TryDataTypeFromPropertyTypeName(c.fieldType, memberDt)) {
+        if (ValueScan::TryDataTypeFromPropertyTypeName(desc.fieldType, memberDt)) {
             item["value"] = FormatValueBytes(memberDt, c.prevValue);
         } else {
             item["value"] = "";
@@ -1989,15 +1999,18 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 tolerance, targetString, caseSensitive, multiPtr, multiPtr2);
 
             uint64_t sessionId = ValueScan::SessionManager::Instance().Begin(
-                dt, scanResult.candidates);
+                dt, std::move(scanResult.candidates),
+                std::move(scanResult.descriptors), std::move(scanResult.instances));
 
             json candidates = json::array();
             // Echo back candidates from the session-held vector AFTER
             // Begin moved them in -- we need ViewWith because the local
-            // vector was moved-from.
+            // vectors were moved-from.
             ValueScan::SessionManager::Instance().ViewWith(sessionId,
-                [&](ValueScan::DataType sdt, const std::vector<ValueScan::Candidate>& cs) {
-                    for (const auto& c : cs) candidates.push_back(CandidateToJson(c, sdt));
+                [&](const ValueScan::Session& sess) {
+                    for (const auto& c : sess.candidates)
+                        candidates.push_back(CandidateToJson(
+                            c, sess.dt, sess.descriptors, sess.instances));
                 });
 
             json data;
@@ -2042,7 +2055,9 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             bool parseFailed = false;
             bool scanTypeInvalid = false;
             bool found = ValueScan::SessionManager::Instance().RefineWith(sessionId,
-                [&](ValueScan::DataType dt, std::vector<ValueScan::Candidate>& cs) {
+                [&](ValueScan::Session& sess) {
+                    const ValueScan::DataType dt = sess.dt;
+                    auto& cs = sess.candidates;
                     dtCaptured = dt;
                     if (!ValueScan::IsScanTypeValidFor(dt, st)) {
                         scanTypeInvalid = true;
@@ -2108,9 +2123,12 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                     }
 
                     stats = Aura::RefineCandidates(dt, st, tgtPtr, tgt2Ptr, cs,
+                                                   sess.descriptors,
                                                    tolerance, targetString, caseSensitive,
                                                    multiPtr, multiPtr2);
-                    for (const auto& c : cs) candidates.push_back(CandidateToJson(c, dt));
+                    for (const auto& c : cs)
+                        candidates.push_back(CandidateToJson(
+                            c, dt, sess.descriptors, sess.instances));
                 });
 
             if (!found) {

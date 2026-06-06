@@ -91,20 +91,25 @@
       <DataGrid.Columns>
         <DataGridTextColumn Header="{StaticResource str.ClassStruct.Offset}"
                             Binding="{Binding Offset, StringFormat=0x{0:X}}"
+                            SortMemberPath="Offset"
                             Width="80"/>
         <DataGridTextColumn Header="{StaticResource str.ClassStruct.Name}"
                             Binding="{Binding Name}"
+                            SortMemberPath="Name"
                             Width="200"/>
         <DataGridTextColumn Header="{StaticResource str.ClassStruct.Type}"
                             Binding="{Binding TypeName}"
+                            SortMemberPath="TypeName"
                             Width="180"/>
         <DataGridTextColumn Header="{StaticResource str.ClassStruct.Size}"
                             Binding="{Binding Size}"
+                            SortMemberPath="Size"
                             Width="60"/>
         <DataGridTextColumn Header="Address"
                             Binding="{Binding Address}"
+                            SortMemberPath="Address"
                             Width="160"/>
-        <DataGridTemplateColumn Header="" Width="Auto">
+        <DataGridTemplateColumn Header="" Width="Auto" CanUserSort="False">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="models:FieldInfoModel">
               <Button Content="{StaticResource str.Xref.FindFuncsButton}"
