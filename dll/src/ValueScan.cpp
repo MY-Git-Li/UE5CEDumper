@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstring>
+#include <sstream>
 
 namespace ValueScan {
 
@@ -749,6 +751,190 @@ bool CompareVectorPredicate(ScanType       st,
 std::string FieldDisplayName(const FieldDescriptor& desc, int32_t elementIndex) {
     if (elementIndex < 0) return desc.fieldName;
     return desc.fieldName + "[" + std::to_string(elementIndex) + "]";
+}
+
+int32_t OptionalFlagOffset(int32_t optionalSize, int32_t innerSize) {
+    // Need a known inner size and room past it for the trailing bool. When
+    // optionalSize == innerSize the optional is intrusive (the value's own bit
+    // pattern marks unset — pointer-shaped Ts), so there's no flag to gate on.
+    if (innerSize <= 0 || optionalSize <= innerSize) return -1;
+    return innerSize;
+}
+
+// --- V3-C: value rendering / filter / sort over a candidate pool ---
+
+namespace {
+
+// Numeric scalar -> string. Byte-for-byte the historical wire format (default
+// ostringstream precision for float/double), so the UI display is unchanged.
+std::string FormatScalarBytes(DataType dt, const uint8_t* b) {
+    std::ostringstream oss;
+    switch (dt) {
+        case DataType::Int8:   { int8_t  v; std::memcpy(&v, b, 1); oss << static_cast<int>(v); break; }
+        case DataType::Int16:  { int16_t v; std::memcpy(&v, b, 2); oss << v; break; }
+        case DataType::Int32:  { int32_t v; std::memcpy(&v, b, 4); oss << v; break; }
+        case DataType::Int64:  { int64_t v; std::memcpy(&v, b, 8); oss << v; break; }
+        case DataType::UInt8:  { oss << static_cast<unsigned int>(b[0]); break; }
+        case DataType::UInt16: { uint16_t v; std::memcpy(&v, b, 2); oss << v; break; }
+        case DataType::UInt32: { uint32_t v; std::memcpy(&v, b, 4); oss << v; break; }
+        case DataType::UInt64: { uint64_t v; std::memcpy(&v, b, 8); oss << v; break; }
+        case DataType::Float:  { float  v; std::memcpy(&v, b, 4); oss << v; break; }
+        case DataType::Double: { double v; std::memcpy(&v, b, 8); oss << v; break; }
+        case DataType::Bool:   { oss << (b[0] ? "true" : "false"); break; }
+        default: break;  // strings/vectors/multi handled by FormatCandidateValue
+    }
+    return oss.str();
+}
+
+std::string FormatVectorBytes12(const uint8_t* b) {
+    float v[3] = { 0.0f, 0.0f, 0.0f };
+    std::memcpy(v, b, 12);
+    std::ostringstream oss;
+    oss.precision(4);
+    oss << v[0] << ", " << v[1] << ", " << v[2];
+    return oss.str();
+}
+
+std::string ToLower(std::string s) {
+    for (char& ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    return s;
+}
+
+}  // namespace
+
+std::string FormatCandidateValue(const Candidate& c, DataType dt,
+                                 const FieldDescriptor& desc) {
+    if (IsStringDataType(dt)) return c.prevStr;
+    if (IsVectorDataType(dt)) return FormatVectorBytes12(c.prevValue);
+    if (IsMultiNumericDataType(dt)) {
+        DataType m;
+        if (TryDataTypeFromPropertyTypeName(desc.fieldType, m))
+            return FormatScalarBytes(m, c.prevValue);
+        return "";
+    }
+    return FormatScalarBytes(dt, c.prevValue);
+}
+
+double DecodeNumericToDouble(DataType dt, const uint8_t* b) {
+    switch (dt) {
+        case DataType::Int8:   { int8_t  v; std::memcpy(&v, b, 1); return static_cast<double>(v); }
+        case DataType::Int16:  { int16_t v; std::memcpy(&v, b, 2); return static_cast<double>(v); }
+        case DataType::Int32:  { int32_t v; std::memcpy(&v, b, 4); return static_cast<double>(v); }
+        case DataType::Int64:  { int64_t v; std::memcpy(&v, b, 8); return static_cast<double>(v); }
+        case DataType::UInt8:  return static_cast<double>(b[0]);
+        case DataType::UInt16: { uint16_t v; std::memcpy(&v, b, 2); return static_cast<double>(v); }
+        case DataType::UInt32: { uint32_t v; std::memcpy(&v, b, 4); return static_cast<double>(v); }
+        case DataType::UInt64: { uint64_t v; std::memcpy(&v, b, 8); return static_cast<double>(v); }
+        case DataType::Float:  { float  v; std::memcpy(&v, b, 4); return static_cast<double>(v); }
+        case DataType::Double: { double v; std::memcpy(&v, b, 8); return v; }
+        case DataType::Bool:   return b[0] ? 1.0 : 0.0;
+        default: return 0.0;
+    }
+}
+
+bool TryParseSortKey(const std::string& s, SortKey& out) {
+    if (s.empty() || s == "scan")     { out = SortKey::ScanOrder;     return true; }
+    if (s == "addr" || s == "address"){ out = SortKey::Address;       return true; }
+    if (s == "value")                 { out = SortKey::Value;         return true; }
+    if (s == "class")                 { out = SortKey::ClassName;     return true; }
+    if (s == "field")                 { out = SortKey::FieldName;     return true; }
+    if (s == "instance")              { out = SortKey::InstanceName;  return true; }
+    if (s == "type")                  { out = SortKey::FieldType;     return true; }
+    if (s == "offset")                { out = SortKey::Offset;        return true; }
+    if (s == "index")                 { out = SortKey::InstanceIndex; return true; }
+    return false;
+}
+
+namespace {
+
+// Does any displayed column of this candidate contain `needleLower`?
+// Mirrors the columns the client-side keyword filter used to match
+// (Class.Field / DefiningClass / Type / Value / Offset / Address / Instance).
+bool CandidateMatchesFilter(const Candidate& c, DataType dt,
+                            const FieldDescriptor& d, const InstanceRecord& inst,
+                            const std::string& needleLower) {
+    if (needleLower.empty()) return true;
+    auto hit = [&](const std::string& s) {
+        return ToLower(s).find(needleLower) != std::string::npos;
+    };
+    if (hit(d.className)) return true;
+    if (hit(d.definingClassName)) return true;
+    if (hit(FieldDisplayName(d, c.elementIndex))) return true;
+    if (hit(d.fieldType)) return true;
+    if (hit(inst.instanceName)) return true;
+    if (hit(FormatCandidateValue(c, dt, d))) return true;
+    // Lowercase hex of offset + address (needle is already lowercased, so a
+    // user typing either case of an offset/address pasted from the grid hits).
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "0x%x", static_cast<unsigned>(d.fieldOffset));
+    if (std::string(buf).find(needleLower) != std::string::npos) return true;
+    std::snprintf(buf, sizeof buf, "0x%llx", static_cast<unsigned long long>(c.addr));
+    if (std::string(buf).find(needleLower) != std::string::npos) return true;
+    return false;
+}
+
+}  // namespace
+
+std::vector<uint32_t> BuildOrderedView(
+    const std::vector<Candidate>&       candidates,
+    const std::vector<FieldDescriptor>& descriptors,
+    const std::vector<InstanceRecord>&  instances,
+    DataType dt, const std::string& filter,
+    SortKey sortKey, bool sortDesc) {
+
+    const std::string needle = ToLower(filter);
+
+    std::vector<uint32_t> idx;
+    idx.reserve(candidates.size());
+    for (uint32_t i = 0; i < candidates.size(); ++i) {
+        const Candidate&       c = candidates[i];
+        const FieldDescriptor& d = descriptors[c.descriptorIdx];
+        const InstanceRecord&  n = instances[c.instanceIdx];
+        if (CandidateMatchesFilter(c, dt, d, n, needle)) idx.push_back(i);
+    }
+
+    if (sortKey == SortKey::ScanOrder) {
+        if (sortDesc) std::reverse(idx.begin(), idx.end());
+        return idx;
+    }
+
+    auto less = [&](uint32_t a, uint32_t b) -> bool {
+        const Candidate&       ca = candidates[a]; const Candidate&       cb = candidates[b];
+        const FieldDescriptor& da = descriptors[ca.descriptorIdx];
+        const FieldDescriptor& db = descriptors[cb.descriptorIdx];
+        const InstanceRecord&  ia = instances[ca.instanceIdx];
+        const InstanceRecord&  ib = instances[cb.instanceIdx];
+        switch (sortKey) {
+            case SortKey::Address:       return ca.addr < cb.addr;
+            case SortKey::Offset:        return da.fieldOffset < db.fieldOffset;
+            case SortKey::InstanceIndex: return ia.instanceIndex < ib.instanceIndex;
+            case SortKey::ClassName:     return da.className < db.className;
+            case SortKey::InstanceName:  return ia.instanceName < ib.instanceName;
+            case SortKey::FieldType:     return da.fieldType < db.fieldType;
+            case SortKey::FieldName:
+                return FieldDisplayName(da, ca.elementIndex)
+                     < FieldDisplayName(db, cb.elementIndex);
+            case SortKey::Value: {
+                if (IsStringDataType(dt)) return ca.prevStr < cb.prevStr;
+                if (IsVectorDataType(dt))
+                    return FormatCandidateValue(ca, dt, da)
+                         < FormatCandidateValue(cb, dt, db);
+                DataType ma = dt, mb = dt;
+                if (IsMultiNumericDataType(dt)) {
+                    TryDataTypeFromPropertyTypeName(da.fieldType, ma);
+                    TryDataTypeFromPropertyTypeName(db.fieldType, mb);
+                }
+                return DecodeNumericToDouble(ma, ca.prevValue)
+                     < DecodeNumericToDouble(mb, cb.prevValue);
+            }
+            default: return false;
+        }
+    };
+    // stable_sort keeps scan order among equal keys.
+    std::stable_sort(idx.begin(), idx.end(), [&](uint32_t a, uint32_t b) {
+        return sortDesc ? less(b, a) : less(a, b);
+    });
+    return idx;
 }
 
 // --- SessionManager ---

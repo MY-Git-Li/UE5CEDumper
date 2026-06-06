@@ -141,10 +141,10 @@ public class ValueScanBeginResult
     public List<ValueCandidate> Candidates { get; set; } = new();
 }
 
-/// <summary>Response from <c>refine_value_scan</c>. <see cref="Candidates"/>
-/// is the surviving set after pruning; the DLL also stored these as the
-/// new session candidate vector so the NEXT refine compares prev-value
-/// against the bytes seen during THIS refine.</summary>
+/// <summary>Response from <c>refine_value_scan</c>. <see cref="Total"/> is the
+/// surviving count (the full pruned set lives in the DLL session);
+/// <see cref="Candidates"/> is only the FIRST PAGE in scan order (V3-C). The
+/// UI re-pages / filters / sorts via <c>query_candidates</c>.</summary>
 public class ValueScanRefineResult
 {
     public ulong  SessionId  { get; set; }
@@ -152,5 +152,21 @@ public class ValueScanRefineResult
     public string ScanType   { get; set; } = "";
     public int    Total      { get; set; }
     public long   DurationMs { get; set; }
+    public List<ValueCandidate> Candidates { get; set; } = new();
+}
+
+/// <summary>Response from <c>query_candidates</c> (V3-C server-side window).
+/// The DLL filters + sorts the WHOLE session set and returns only the
+/// requested window. <see cref="Total"/> is the full session size,
+/// <see cref="FilteredTotal"/> the count after the keyword filter, and
+/// <see cref="Candidates"/> the [<see cref="Offset"/>, Offset+limit) slice in
+/// the requested sort order.</summary>
+public class ValueScanWindowResult
+{
+    public ulong  SessionId     { get; set; }
+    public string DataType      { get; set; } = "";
+    public int    Total         { get; set; }
+    public int    FilteredTotal { get; set; }
+    public int    Offset        { get; set; }
     public List<ValueCandidate> Candidates { get; set; } = new();
 }

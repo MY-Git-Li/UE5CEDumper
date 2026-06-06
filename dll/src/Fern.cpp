@@ -20,6 +20,7 @@
 #include "BuildInfo.h"
 
 #include <json.hpp>
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <sstream>
@@ -191,97 +192,6 @@ bool ParseValueBytes(ValueScan::DataType dt, const std::string& raw, uint8_t out
     return false;
 }
 
-std::string FormatValueBytes(ValueScan::DataType dt, const uint8_t bytes[8]) {
-    std::ostringstream oss;
-    switch (dt) {
-        case ValueScan::DataType::Int8: {
-            int8_t v;  std::memcpy(&v, bytes, 1);
-            oss << static_cast<int>(v);
-            break;
-        }
-        case ValueScan::DataType::Int16: {
-            int16_t v; std::memcpy(&v, bytes, 2);
-            oss << v;
-            break;
-        }
-        case ValueScan::DataType::Int32: {
-            int32_t v; std::memcpy(&v, bytes, 4);
-            oss << v;
-            break;
-        }
-        case ValueScan::DataType::Int64: {
-            int64_t v; std::memcpy(&v, bytes, 8);
-            oss << v;
-            break;
-        }
-        case ValueScan::DataType::UInt8: {
-            oss << static_cast<unsigned int>(bytes[0]);
-            break;
-        }
-        case ValueScan::DataType::UInt16: {
-            uint16_t v; std::memcpy(&v, bytes, 2);
-            oss << v;
-            break;
-        }
-        case ValueScan::DataType::UInt32: {
-            uint32_t v; std::memcpy(&v, bytes, 4);
-            oss << v;
-            break;
-        }
-        case ValueScan::DataType::UInt64: {
-            uint64_t v; std::memcpy(&v, bytes, 8);
-            oss << v;
-            break;
-        }
-        case ValueScan::DataType::Float: {
-            float v;   std::memcpy(&v, bytes, 4);
-            oss << v;
-            break;
-        }
-        case ValueScan::DataType::Double: {
-            double v;  std::memcpy(&v, bytes, 8);
-            oss << v;
-            break;
-        }
-        case ValueScan::DataType::Bool: {
-            oss << (bytes[0] ? "true" : "false");
-            break;
-        }
-        // String types use prevStr on the candidate, not the byte
-        // buffer; the wire writer dispatches before calling this.
-        // Returning "" here is just a defensive fallthrough.
-        case ValueScan::DataType::FString:
-        case ValueScan::DataType::FName:
-        case ValueScan::DataType::FText:
-            break;
-        // Vector formatting is handled by FormatVectorBytes below; this
-        // overload is byte-array bound to the 8B prevValue lump so it
-        // doesn't see the full 12-byte vector buffer.
-        case ValueScan::DataType::FVector:
-        case ValueScan::DataType::FRotator:
-        case ValueScan::DataType::FTransform:
-            break;
-        // Multi-numeric: CandidateToJson resolves the candidate's own
-        // concrete DataType and calls this with that, never the meta
-        // type. Defensive fallthrough.
-        case ValueScan::DataType::NumericNoByte:
-        case ValueScan::DataType::NumericAll:
-            break;
-    }
-    return oss.str();
-}
-
-// Format a 12-byte vector as "X, Y, Z" with up to 4 decimals. Used by
-// CandidateToJson for vector data types.
-std::string FormatVectorBytes(const uint8_t bytes[12]) {
-    float v[3] = {0.0f, 0.0f, 0.0f};
-    std::memcpy(v, bytes, 12);
-    std::ostringstream oss;
-    oss.precision(4);
-    oss << v[0] << ", " << v[1] << ", " << v[2];
-    return oss.str();
-}
-
 // Build the wire JSON for one candidate. Per-(class,field) metadata and
 // per-object metadata are pulled from the session's shared descriptor /
 // instance pools the candidate indexes into (V3-A) — the wire shape is
@@ -304,25 +214,11 @@ json CandidateToJson(const ValueScan::Candidate& c,
     item["field_name"]          = ValueScan::FieldDisplayName(desc, c.elementIndex);
     item["field_type"]          = desc.fieldType;
     item["bool_field_mask"]     = desc.boolFieldMask;
-    // Value rendering varies by family. Strings emit the resolved
-    // UTF-8 directly; vectors emit "X, Y, Z"; numerics emit the
-    // formatted prevValue scalar.
-    if (ValueScan::IsStringDataType(dt)) {
-        item["value"] = c.prevStr;
-    } else if (ValueScan::IsVectorDataType(dt)) {
-        item["value"] = FormatVectorBytes(c.prevValue);
-    } else if (ValueScan::IsMultiNumericDataType(dt)) {
-        // Render each candidate with its OWN concrete width resolved
-        // from the stored fieldType ("FloatProperty" -> Float, etc.).
-        ValueScan::DataType memberDt;
-        if (ValueScan::TryDataTypeFromPropertyTypeName(desc.fieldType, memberDt)) {
-            item["value"] = FormatValueBytes(memberDt, c.prevValue);
-        } else {
-            item["value"] = "";
-        }
-    } else {
-        item["value"] = FormatValueBytes(dt, c.prevValue);
-    }
+    // Value rendering (numeric per dt / multi per fieldType / vector
+    // "X, Y, Z" / string prevStr) is the single source of truth in ValueScan,
+    // shared with the server-side filter/sort so the wire + the ordered view
+    // always agree on a candidate's displayed value.
+    item["value"] = ValueScan::FormatCandidateValue(c, dt, desc);
     return item;
 }
 
@@ -2058,21 +1954,29 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 dt, std::move(scanResult.candidates),
                 std::move(scanResult.descriptors), std::move(scanResult.instances));
 
+            // V3-C: the DLL session OWNS the full candidate set; the UI is a
+            // windowed view. Return `total` (full count) + only the FIRST PAGE
+            // in scan order. The UI pages / filters / sorts via the separate
+            // query_candidates command (server-side over the full set). Before
+            // V3-C this echoed back ALL candidates, which didn't scale.
+            int pageSize = request.value("page_size", 1000);
+            if (pageSize < 0) pageSize = 0;
             json candidates = json::array();
-            // Echo back candidates from the session-held vector AFTER
-            // Begin moved them in -- we need ViewWith because the local
-            // vectors were moved-from.
+            int totalCount = 0;
             ValueScan::SessionManager::Instance().ViewWith(sessionId,
                 [&](const ValueScan::Session& sess) {
-                    for (const auto& c : sess.candidates)
+                    totalCount = static_cast<int>(sess.candidates.size());
+                    const int n = (std::min)(pageSize, totalCount);
+                    for (int i = 0; i < n; ++i)
                         candidates.push_back(CandidateToJson(
-                            c, sess.dt, sess.descriptors, sess.instances));
+                            sess.candidates[i], sess.dt, sess.descriptors, sess.instances));
                 });
 
             json data;
             data["session_id"]      = sessionId;
             data["data_type"]       = ValueScan::NameOf(dt);
-            data["total"]           = static_cast<int>(candidates.size());
+            data["total"]           = totalCount;
+            data["page_size"]       = pageSize;
             data["scanned_classes"] = scanResult.stats.scannedClasses;
             data["scanned_objects"] = scanResult.stats.scannedObjects;
             data["duration_ms"]     = static_cast<int64_t>(scanResult.stats.durationMs);
@@ -2105,6 +2009,12 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 return Renge::MakeError(id, "Unknown scan_type: " + stStr).dump();
             }
 
+            // V3-C: like begin, refine returns `total` (surviving count) + only
+            // the FIRST PAGE in scan order; the UI re-pages/filters/sorts via
+            // query_candidates over the pruned set.
+            int pageSize = request.value("page_size", 1000);
+            if (pageSize < 0) pageSize = 0;
+            int totalCount = 0;
             ValueScan::DataType dtCaptured = ValueScan::DataType::Int32;
             json candidates = json::array();
             Aura::ValueScanStats stats;
@@ -2182,9 +2092,11 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                                                    sess.descriptors,
                                                    tolerance, targetString, caseSensitive,
                                                    multiPtr, multiPtr2);
-                    for (const auto& c : cs)
+                    totalCount = static_cast<int>(cs.size());
+                    const int n = (std::min)(pageSize, totalCount);
+                    for (int i = 0; i < n; ++i)
                         candidates.push_back(CandidateToJson(
-                            c, dt, sess.descriptors, sess.instances));
+                            cs[i], dt, sess.descriptors, sess.instances));
                 });
 
             if (!found) {
@@ -2202,7 +2114,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             data["session_id"]   = sessionId;
             data["data_type"]    = ValueScan::NameOf(dtCaptured);
             data["scan_type"]    = stStr;
-            data["total"]        = static_cast<int>(candidates.size());
+            data["total"]        = totalCount;
+            data["page_size"]    = pageSize;
             data["duration_ms"]  = static_cast<int64_t>(stats.durationMs);
             data["candidates"]   = candidates;
             return Renge::MakeResponse(id, data).dump();
@@ -2220,6 +2133,66 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             json data;
             data["session_id"] = sessionId;
             data["ended"]      = ended;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // === query_candidates: server-side window over a value-scan session
+        // (V3-C). The DLL owns the full candidate set; this filters
+        // (case-insensitive substring over the displayed columns) + sorts
+        // (by sort_key/sort_desc) over the WHOLE set and returns only the
+        // requested [offset, offset+limit) window. Pure data work over the
+        // DLL's own pools — no game-memory reads, so the game thread is never
+        // touched. The ordered view is cached on the session so plain paging
+        // doesn't re-sort. ===
+        if (cmd == Renge::CMD_QUERY_CANDIDATES) {
+            uint64_t sessionId = request.value("session_id", 0ULL);
+            if (sessionId == 0) {
+                return Renge::MakeError(id, "Missing or zero session_id").dump();
+            }
+            int offset = request.value("offset", 0);
+            int limit  = request.value("limit", 1000);
+            std::string filter     = request.value("filter", "");
+            std::string sortKeyStr = request.value("sort_key", "");
+            bool sortDesc = request.value("sort_desc", false);
+            if (offset < 0) offset = 0;
+            if (limit  < 0) limit  = 0;
+
+            ValueScan::SortKey sortKey;
+            if (!ValueScan::TryParseSortKey(sortKeyStr, sortKey)) {
+                return Renge::MakeError(id, "Unknown sort_key: " + sortKeyStr).dump();
+            }
+
+            json candidates = json::array();
+            int totalCount    = 0;
+            int filteredCount = 0;
+            std::string dtName;
+            bool found = ValueScan::SessionManager::Instance().QueryWith(
+                sessionId, filter, sortKey, sortDesc,
+                [&](const ValueScan::Session& sess, const std::vector<uint32_t>& order) {
+                    totalCount    = static_cast<int>(sess.candidates.size());
+                    filteredCount = static_cast<int>(order.size());
+                    dtName        = ValueScan::NameOf(sess.dt);
+                    const int begin = (std::min)(offset, filteredCount);
+                    const int end   = (std::min)(offset + limit, filteredCount);
+                    for (int i = begin; i < end; ++i) {
+                        const uint32_t ci = order[i];
+                        candidates.push_back(CandidateToJson(
+                            sess.candidates[ci], sess.dt,
+                            sess.descriptors, sess.instances));
+                    }
+                });
+            if (!found) {
+                return Renge::MakeError(id, "session_not_found").dump();
+            }
+
+            json data;
+            data["session_id"]     = sessionId;
+            data["data_type"]      = dtName;
+            data["total"]          = totalCount;     // full session size
+            data["filtered_total"] = filteredCount;  // matches after filter
+            data["offset"]         = offset;
+            data["count"]          = static_cast<int>(candidates.size());
+            data["candidates"]     = candidates;
             return Renge::MakeResponse(id, data).dump();
         }
 

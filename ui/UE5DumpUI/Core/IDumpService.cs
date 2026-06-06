@@ -134,6 +134,10 @@ public interface IDumpService
     //
     // Native C++ fields (non-UPROPERTY) are NOT visible to this scan.
     // The UI's Value Search tab surfaces this limitation in a banner.
+    // V3-C: the DLL session OWNS the full candidate set; begin/refine return
+    // `Total` (full count) plus only the FIRST PAGE (`pageSize`, scan order).
+    // The UI is a windowed view that pages / filters / sorts server-side via
+    // QueryCandidatesAsync.
     Task<ValueScanBeginResult> BeginValueScanAsync(
         ValueScanDataType dataType,
         ValueScanType scanType,
@@ -143,6 +147,7 @@ public interface IDumpService
         int maxResults = 50000,
         double tolerance = 0.0,
         bool caseSensitive = false,
+        int pageSize = 1000,
         CancellationToken ct = default);
 
     Task<ValueScanRefineResult> RefineValueScanAsync(
@@ -152,6 +157,21 @@ public interface IDumpService
         string? value2 = null,
         double tolerance = 0.0,
         bool caseSensitive = false,
+        int pageSize = 1000,
+        CancellationToken ct = default);
+
+    // V3-C: server-side window over the session's full candidate set. Filters
+    // (case-insensitive substring across the displayed columns) + sorts
+    // (sortKey / sortDesc) over the WHOLE set in the DLL and returns only
+    // [offset, offset+limit). sortKey wire strings: "" / "scan" / "addr" /
+    // "value" / "class" / "field" / "instance" / "type" / "offset" / "index".
+    Task<ValueScanWindowResult> QueryCandidatesAsync(
+        ulong sessionId,
+        int offset,
+        int limit,
+        string? filter = null,
+        string? sortKey = null,
+        bool sortDesc = false,
         CancellationToken ct = default);
 
     Task EndValueScanAsync(ulong sessionId, CancellationToken ct = default);

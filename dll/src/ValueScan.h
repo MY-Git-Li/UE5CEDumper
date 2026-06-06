@@ -351,12 +351,71 @@ struct Session {
     std::vector<FieldDescriptor>          descriptors;  // shared via Candidate::descriptorIdx
     std::vector<InstanceRecord>           instances;    // shared via Candidate::instanceIdx
     std::chrono::steady_clock::time_point lastUse;
+
+    // V3-C: cached ordered view (filtered + sorted candidate indices) so pure
+    // paging doesn't re-sort. Recomputed by SessionManager::QueryWith only when
+    // (viewFilter, viewSortKey, viewSortDesc) change, and invalidated
+    // (viewValid=false) after a refine mutates `candidates`. viewSortKey is the
+    // raw SortKey value (stored as uint8_t because the enum is declared after
+    // this struct).
+    bool                                  viewValid    = false;
+    std::string                           viewFilter;
+    uint8_t                               viewSortKey  = 0;
+    bool                                  viewSortDesc = false;
+    std::vector<uint32_t>                 viewOrder;
 };
 
 // Reconstruct a candidate's display field name from its descriptor +
 // element index: `fieldName` for a direct field, `fieldName[elementIndex]`
 // for a TArray/container element. Pure / std-only (unit-tested).
 std::string FieldDisplayName(const FieldDescriptor& desc, int32_t elementIndex);
+
+// V1c: byte offset of the bIsSet flag inside a non-intrusive TOptional<T>.
+// A non-intrusive optional is laid out `{ T value; bool bIsSet; }` (padded to
+// alignof(T)), so the flag sits at offset == sizeof(T) and the wrapped value
+// is at offset 0. Returns innerSize when the optional is larger than its value
+// (i.e. there's room for the trailing bool), else -1 — meaning "no separate
+// flag to gate on" (intrusive/pointer optionals encode unset in the value
+// itself, and an unknown/zero innerSize can't be gated). Pure (unit-tested).
+int32_t OptionalFlagOffset(int32_t optionalSize, int32_t innerSize);
+
+// --- V3-C: server-side value rendering / filter / sort over a candidate pool ---
+//
+// The session owns the full candidate set inside the injected DLL; the UI is a
+// windowed view. Filter / sort therefore run here (over the DLL's own pools —
+// no game-memory reads, so the game thread is never touched) and only a window
+// is serialized to the UI. These helpers are pure / std-only (unit-tested).
+
+// Render a candidate's value exactly as the wire `value` field does: numeric
+// formatted per `dt`; multi-numeric resolved per the descriptor's fieldType;
+// vector "X, Y, Z"; string the resolved prevStr. The single source of truth
+// for value rendering (the wire encoder calls this too).
+std::string FormatCandidateValue(const Candidate& c, DataType dt,
+                                 const FieldDescriptor& desc);
+
+// Decode a numeric candidate's prevValue to a double sort key (lossy for very
+// large 64-bit integers but monotonic enough for ordering). Non-numeric dt
+// returns 0.
+double DecodeNumericToDouble(DataType dt, const uint8_t* bytes);
+
+// Columns the result grid can sort by. ScanOrder = the original scan/refine
+// order (the candidate vector order). Wire strings parsed by TryParseSortKey.
+enum class SortKey : uint8_t {
+    ScanOrder, Address, Value, ClassName, FieldName,
+    InstanceName, FieldType, Offset, InstanceIndex
+};
+bool TryParseSortKey(const std::string& s, SortKey& out);
+
+// Build the display order over a candidate pool: keep only candidates whose
+// displayed columns contain `filter` (case-insensitive substring; "" keeps
+// all), then stable-sort by (sortKey, sortDesc). Returns candidate indices in
+// display order — the caller slices the requested window out of it.
+std::vector<uint32_t> BuildOrderedView(
+    const std::vector<Candidate>&       candidates,
+    const std::vector<FieldDescriptor>& descriptors,
+    const std::vector<InstanceRecord>&  instances,
+    DataType dt, const std::string& filter,
+    SortKey sortKey, bool sortDesc);
 
 class SessionManager {
 public:
@@ -384,6 +443,9 @@ public:
         if (it == sessions_.end()) return false;
         it->second->lastUse = std::chrono::steady_clock::now();
         fn(*it->second);
+        // The candidate vector may have been pruned — drop the cached view
+        // so the next QueryWith rebuilds the order against the surviving set.
+        it->second->viewValid = false;
         return true;
     }
 
@@ -394,6 +456,36 @@ public:
         auto it = sessions_.find(sessionId);
         if (it == sessions_.end()) return false;
         fn(static_cast<const Session&>(*it->second));
+        return true;
+    }
+
+    // V3-C server-side window query. Ensures the session's cached ordered view
+    // matches (filter, sortKey, sortDesc) — recomputing via BuildOrderedView
+    // only when those params changed or the view was invalidated by a refine —
+    // then calls `fn(const Session&, const std::vector<uint32_t>& order)` under
+    // the lock; the caller slices the requested window out of `order`. Returns
+    // false if the session doesn't exist. Reads only the DLL's own pools (no
+    // game memory), so it never touches the game thread.
+    template <typename Fn>
+    bool QueryWith(uint64_t sessionId, const std::string& filter,
+                   SortKey sortKey, bool sortDesc, Fn&& fn) {
+        std::lock_guard<std::mutex> lk(mu_);
+        auto it = sessions_.find(sessionId);
+        if (it == sessions_.end()) return false;
+        Session& s = *it->second;
+        s.lastUse = std::chrono::steady_clock::now();
+        const uint8_t keyRaw = static_cast<uint8_t>(sortKey);
+        if (!s.viewValid || s.viewFilter != filter
+            || s.viewSortKey != keyRaw || s.viewSortDesc != sortDesc) {
+            s.viewOrder = BuildOrderedView(s.candidates, s.descriptors,
+                                           s.instances, s.dt, filter,
+                                           sortKey, sortDesc);
+            s.viewFilter   = filter;
+            s.viewSortKey  = keyRaw;
+            s.viewSortDesc = sortDesc;
+            s.viewValid    = true;
+        }
+        fn(static_cast<const Session&>(s), s.viewOrder);
         return true;
     }
 

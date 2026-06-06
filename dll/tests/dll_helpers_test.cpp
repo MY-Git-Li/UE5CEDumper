@@ -1095,6 +1095,128 @@ static void Test_ValueScan_FieldDisplayName() {
            FieldDisplayName(mapVal, 5) == "Inventory.Value[5]");
 }
 
+// V1c — TOptional<T> bIsSet flag offset. A non-intrusive optional is laid out
+// { T value; bool bIsSet; } padded to alignof(T), so the flag sits at
+// offset == sizeof(T). OptionalFlagOffset returns that offset when the optional
+// is larger than its value (room for the bool), else -1 (intrusive / unknown).
+static void Test_ValueScan_OptionalFlagOffset() {
+    using namespace ValueScan;
+    // Non-intrusive numerics: flag at sizeof(T).
+    EXPECT("TOptional<int8>  -> flag at 1", OptionalFlagOffset(2, 1)  == 1);
+    EXPECT("TOptional<int16> -> flag at 2", OptionalFlagOffset(4, 2)  == 2);
+    EXPECT("TOptional<int32> -> flag at 4", OptionalFlagOffset(8, 4)  == 4);
+    EXPECT("TOptional<int64> -> flag at 8", OptionalFlagOffset(16, 8) == 8);
+    EXPECT("TOptional<float> -> flag at 4", OptionalFlagOffset(8, 4)  == 4);
+    EXPECT("TOptional<double>-> flag at 8", OptionalFlagOffset(16, 8) == 8);
+    // FVector (double, 24B) -> 24 value + bool padded to 32.
+    EXPECT("TOptional<FVector>-> flag at 24", OptionalFlagOffset(32, 24) == 24);
+    // FString (16B) -> 16 value + bool padded to 24.
+    EXPECT("TOptional<FString>-> flag at 16", OptionalFlagOffset(24, 16) == 16);
+    // Intrusive / pointer-shaped: optional size == value size, no flag.
+    EXPECT("Intrusive (size==inner) -> -1", OptionalFlagOffset(8, 8) == -1);
+    // Unknown / unresolved inner size -> no gate.
+    EXPECT("Zero inner size -> -1",     OptionalFlagOffset(8, 0)  == -1);
+    EXPECT("Negative inner size -> -1", OptionalFlagOffset(8, -1) == -1);
+    // Defensive: a value somehow larger than the optional -> no gate.
+    EXPECT("inner > optional -> -1", OptionalFlagOffset(4, 8) == -1);
+}
+
+// V3-C — server-side ordered view (filter + sort + window) over a candidate
+// pool. The DLL owns the full set; the UI is a window. These pure helpers run
+// over the DLL's own pools (no game memory), so filter/sort never touch the
+// game thread. Builds a tiny synthetic pool and checks filter / sort / format.
+static void Test_ValueScan_OrderedView() {
+    using namespace ValueScan;
+
+    std::vector<FieldDescriptor> descs(2);
+    descs[0].className = "BP_Player_C"; descs[0].definingClassName = "ACharacter";
+    descs[0].fieldName = "Health"; descs[0].fieldType = "IntProperty"; descs[0].fieldOffset = 0x1C;
+    descs[1].className = "BP_Enemy_C"; descs[1].definingClassName = "BP_Enemy_C";
+    descs[1].fieldName = "Mana"; descs[1].fieldType = "IntProperty"; descs[1].fieldOffset = 0x40;
+
+    std::vector<InstanceRecord> insts(2);
+    insts[0].instanceAddr = 0x1000; insts[0].instanceIndex = 5; insts[0].instanceName = "Player_0";
+    insts[1].instanceAddr = 0x2000; insts[1].instanceIndex = 9; insts[1].instanceName = "Enemy_3";
+
+    auto mk = [](int32_t v, uintptr_t addr, uint32_t d, uint32_t inst) {
+        Candidate c;
+        std::memcpy(c.prevValue, &v, 4);
+        c.addr = addr; c.descriptorIdx = d; c.instanceIdx = inst; c.elementIndex = -1;
+        return c;
+    };
+    // Addresses chosen with no decimal-digit overlap with the test values /
+    // offsets so a value/offset filter doesn't also match an address.
+    std::vector<Candidate> cands = {
+        mk(100, 0xAAAA, 0, 0),   // c0: Player.Health = 100
+        mk(50,  0xBBBB, 1, 1),   // c1: Enemy.Mana    = 50
+        mk(30,  0xCCCC, 0, 1),   // c2: Enemy.Health  = 30
+        mk(200, 0xDDDD, 1, 0),   // c3: Player.Mana   = 200
+    };
+    const DataType dt = DataType::Int32;
+
+    auto view = [&](const std::string& f, SortKey k, bool desc) {
+        return BuildOrderedView(cands, descs, insts, dt, f, k, desc);
+    };
+
+    // --- no filter, ordering ---
+    auto o = view("", SortKey::ScanOrder, false);
+    EXPECT("ScanOrder keeps all in order", o.size() == 4 && o[0] == 0 && o[3] == 3);
+    o = view("", SortKey::ScanOrder, true);
+    EXPECT("ScanOrder desc reverses", o.size() == 4 && o[0] == 3 && o[3] == 0);
+
+    o = view("", SortKey::Value, false);
+    EXPECT("Value asc 30,50,100,200", o.size() == 4 && o[0] == 2 && o[1] == 1 && o[2] == 0 && o[3] == 3);
+    o = view("", SortKey::Value, true);
+    EXPECT("Value desc 200..30", o[0] == 3 && o[1] == 0 && o[2] == 1 && o[3] == 2);
+
+    o = view("", SortKey::Offset, false);
+    EXPECT("Offset asc stable (Health 0x1C then Mana 0x40)",
+           o.size() == 4 && o[0] == 0 && o[1] == 2 && o[2] == 1 && o[3] == 3);
+
+    o = view("", SortKey::ClassName, false);
+    EXPECT("ClassName asc stable (Enemy then Player)",
+           o[0] == 1 && o[1] == 3 && o[2] == 0 && o[3] == 2);
+
+    o = view("", SortKey::Address, false);
+    EXPECT("Address asc by pointer", o[0] == 0 && o[1] == 1 && o[2] == 2 && o[3] == 3);
+
+    o = view("", SortKey::InstanceIndex, false);
+    EXPECT("InstanceIndex asc (5 then 9)", o[0] == 0 && o[1] == 3 && o[2] == 1 && o[3] == 2);
+
+    // --- filtering (case-insensitive substring across displayed columns) ---
+    o = view("mana", SortKey::ScanOrder, false);
+    EXPECT("filter field name 'mana'", o.size() == 2 && o[0] == 1 && o[1] == 3);
+    o = view("enemy", SortKey::ScanOrder, false);
+    EXPECT("filter class/instance 'enemy'", o.size() == 3 && o[0] == 1 && o[1] == 2 && o[2] == 3);
+    o = view("100", SortKey::ScanOrder, false);
+    EXPECT("filter by value '100'", o.size() == 1 && o[0] == 0);
+    o = view("0x40", SortKey::ScanOrder, false);
+    EXPECT("filter by offset hex '0x40'", o.size() == 2 && o[0] == 1 && o[1] == 3);
+    // 'player' matches Player_0 instance (c0, c3) AND BP_Player_C class (c0, c2).
+    o = view("PLAYER", SortKey::ScanOrder, false);
+    EXPECT("filter case-insensitive 'PLAYER'", o.size() == 3 && o[0] == 0 && o[1] == 2 && o[2] == 3);
+    o = view("zzz", SortKey::ScanOrder, false);
+    EXPECT("filter no match -> empty", o.empty());
+
+    // filter + sort compose (Health rows, by value asc): c2(30) then c0(100)
+    o = view("health", SortKey::Value, false);
+    EXPECT("filter 'health' + Value asc", o.size() == 2 && o[0] == 2 && o[1] == 0);
+
+    // --- value formatting / decode ---
+    EXPECT("FormatCandidateValue Int32 100", FormatCandidateValue(cands[0], dt, descs[0]) == "100");
+    EXPECT("DecodeNumericToDouble Int32 100", DecodeNumericToDouble(DataType::Int32, cands[0].prevValue) == 100.0);
+    Candidate bc; bc.prevValue[0] = 1;
+    EXPECT("FormatCandidateValue Bool true", FormatCandidateValue(bc, DataType::Bool, descs[0]) == "true");
+    EXPECT("DecodeNumericToDouble Bool true", DecodeNumericToDouble(DataType::Bool, bc.prevValue) == 1.0);
+
+    // --- sort key parsing ---
+    SortKey k;
+    EXPECT("parse 'value'", TryParseSortKey("value", k) && k == SortKey::Value);
+    EXPECT("parse '' -> ScanOrder", TryParseSortKey("", k) && k == SortKey::ScanOrder);
+    EXPECT("parse 'offset'", TryParseSortKey("offset", k) && k == SortKey::Offset);
+    EXPECT("parse unknown -> false", !TryParseSortKey("bogus", k));
+}
+
 // V1a — TSet / TMap sparse-container element geometry. ComputeSetElementStride
 // accounts for the TSetElement hash overhead (HashNextId + HashIndex, value
 // aligned to 4); ComputeMapValueOffset aligns the TPair value to its natural
@@ -1409,6 +1531,8 @@ int main() {
 
     Test_ValueScan_SessionLifecycle();
     Test_ValueScan_FieldDisplayName();
+    Test_ValueScan_OptionalFlagOffset();
+    Test_ValueScan_OrderedView();
     Test_ValueScan_SparseContainerGeometry();
 
     // Path 2 — native x64 disassembly (Denken decoder core)
