@@ -1095,6 +1095,32 @@ static void Test_ValueScan_FieldDisplayName() {
            FieldDisplayName(mapVal, 5) == "Inventory.Value[5]");
 }
 
+// V1c — TOptional<T> bIsSet flag offset. A non-intrusive optional is laid out
+// { T value; bool bIsSet; } padded to alignof(T), so the flag sits at
+// offset == sizeof(T). OptionalFlagOffset returns that offset when the optional
+// is larger than its value (room for the bool), else -1 (intrusive / unknown).
+static void Test_ValueScan_OptionalFlagOffset() {
+    using namespace ValueScan;
+    // Non-intrusive numerics: flag at sizeof(T).
+    EXPECT("TOptional<int8>  -> flag at 1", OptionalFlagOffset(2, 1)  == 1);
+    EXPECT("TOptional<int16> -> flag at 2", OptionalFlagOffset(4, 2)  == 2);
+    EXPECT("TOptional<int32> -> flag at 4", OptionalFlagOffset(8, 4)  == 4);
+    EXPECT("TOptional<int64> -> flag at 8", OptionalFlagOffset(16, 8) == 8);
+    EXPECT("TOptional<float> -> flag at 4", OptionalFlagOffset(8, 4)  == 4);
+    EXPECT("TOptional<double>-> flag at 8", OptionalFlagOffset(16, 8) == 8);
+    // FVector (double, 24B) -> 24 value + bool padded to 32.
+    EXPECT("TOptional<FVector>-> flag at 24", OptionalFlagOffset(32, 24) == 24);
+    // FString (16B) -> 16 value + bool padded to 24.
+    EXPECT("TOptional<FString>-> flag at 16", OptionalFlagOffset(24, 16) == 16);
+    // Intrusive / pointer-shaped: optional size == value size, no flag.
+    EXPECT("Intrusive (size==inner) -> -1", OptionalFlagOffset(8, 8) == -1);
+    // Unknown / unresolved inner size -> no gate.
+    EXPECT("Zero inner size -> -1",     OptionalFlagOffset(8, 0)  == -1);
+    EXPECT("Negative inner size -> -1", OptionalFlagOffset(8, -1) == -1);
+    // Defensive: a value somehow larger than the optional -> no gate.
+    EXPECT("inner > optional -> -1", OptionalFlagOffset(4, 8) == -1);
+}
+
 // V1a — TSet / TMap sparse-container element geometry. ComputeSetElementStride
 // accounts for the TSetElement hash overhead (HashNextId + HashIndex, value
 // aligned to 4); ComputeMapValueOffset aligns the TPair value to its natural
@@ -1409,6 +1435,7 @@ int main() {
 
     Test_ValueScan_SessionLifecycle();
     Test_ValueScan_FieldDisplayName();
+    Test_ValueScan_OptionalFlagOffset();
     Test_ValueScan_SparseContainerGeometry();
 
     // Path 2 — native x64 disassembly (Denken decoder core)

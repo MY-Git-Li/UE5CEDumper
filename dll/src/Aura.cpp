@@ -3986,6 +3986,11 @@ ValueScanResult ScanForValue(
         ScanContainer container    = ScanContainer::None;
         int32_t       elemStride   = 0;   // Array elem / Set elem / Map pair stride
         int32_t       valueOffset  = 0;   // MapValue: byte offset of value within the TPair
+        // V1c: TOptional<T> unset gate. >= 0 → this leaf is a TOptional whose
+        // wrapped value is at offset+0 with a trailing bIsSet byte at
+        // offset+optionalFlagOffset; the per-instance read skips slots whose
+        // flag is 0 (unset). -1 = ordinary leaf / container (no gate).
+        int32_t       optionalFlagOffset = -1;
         std::string   elemTypeName;       // Inner/elem/key/value type name (e.g. "IntProperty")
         // V3-A: lazily-resolved index into the worker thread's
         // FieldDescriptor pool (the field's interned class/defining-class/
@@ -4164,6 +4169,46 @@ ValueScanResult ScanForValue(
                 }
             }
 
+            // V1c: TOptional<T> scan. FOptionalProperty stores the wrapped
+            // value inline at field+0 (same Inner probe as TArray), with a
+            // trailing bIsSet byte for non-intrusive optionals. When the inner
+            // type matches the requested DataType, emit a LEAF ScanField at
+            // field+0 (read identically to a direct field by the per-instance
+            // loop) plus the bIsSet gate offset so unset slots are skipped.
+            // innerType / innerStructType come from WalkClassEx.
+            if (f.TypeName == "OptionalProperty" && !f.innerType.empty()) {
+                bool innerAccepted = false;
+                for (const auto& t : acceptedTypes) {
+                    if (f.innerType == t) { innerAccepted = true; break; }
+                }
+                // Vector inner additionally requires the struct name to match
+                // (mirrors the leaf + TArray-inner StructProperty filter).
+                if (innerAccepted && !acceptedStructNames.empty()
+                    && f.innerType == "StructProperty") {
+                    bool nameMatch = false;
+                    for (const auto& name : acceptedStructNames) {
+                        if (f.innerStructType == name) { nameMatch = true; break; }
+                    }
+                    innerAccepted = nameMatch;
+                }
+                if (innerAccepted) {
+                    ScanField sf;
+                    sf.offset        = baseOffset + f.Offset;   // value at field+0
+                    sf.size          = f.Size;
+                    sf.name          = namePrefix.empty()
+                        ? f.Name : (namePrefix + "." + f.Name);
+                    sf.typeName      = f.innerType;             // read as the inner leaf type
+                    sf.boolFieldMask = 0xFF;                    // optionals never bitfield-pack
+                    // FOptionalProperty shares TArray's Inner-at-FARRAYPROP_INNER
+                    // shape, so GetArrayInnerElemSize yields sizeof(T) here.
+                    int32_t innerSize = Ubel::GetArrayInnerElemSize(f.Address);
+                    sf.optionalFlagOffset =
+                        ValueScan::OptionalFlagOffset(f.Size, innerSize);
+                    out.push_back(std::move(sf));
+                    continue;
+                }
+            }
+
             // V1a: TSet<T> container scan. The element type must match the
             // requested DataType (+ struct name for vectors). Per-instance
             // loop walks the FSetProperty's TSparseArray (allocated slots
@@ -4242,8 +4287,11 @@ ValueScanResult ScanForValue(
             // StructProperty: resolve the inner UScriptStruct via
             // FStructProperty::Struct (FField + FSTRUCTPROP_STRUCT) and
             // recurse with the cumulative offset + dotted name prefix.
-            // TOptional containers are intentionally NOT recursed -- still
-            // a separate milestone (V1c).
+            // TOptional<T> whose value directly matches the DataType
+            // (TOptional<int>/<float>/<FVector>/<FString>) is scanned via the
+            // dedicated OptionalProperty branch above (V1c); drilling INTO an
+            // optional's wrapped struct for nested leaves is a further step
+            // and is intentionally not recursed here.
             //
             // For vector data types, skip recursion -- we only want
             // leaves whose own type IS the vector struct, not nested
@@ -4530,6 +4578,18 @@ ValueScanResult ScanForValue(
                         sa.Data + static_cast<int64_t>(e) * sf.elemStride + slotOff, e);
                 }
                 continue;
+            }
+
+            // V1c: TOptional<T> unset gate. The wrapped value lives at
+            // field+0 (read like a direct leaf below), but for a non-intrusive
+            // optional it's only meaningful when the trailing bIsSet byte is
+            // set — skip unset slots so a scan for 0 / stale bytes doesn't
+            // false-hit. optionalFlagOffset is -1 for ordinary leaf fields.
+            if (sf.optionalFlagOffset >= 0) {
+                uint8_t isSet = 0;
+                if (!Macht::ReadSafe(obj + sf.offset + sf.optionalFlagOffset, isSet)
+                    || isSet == 0)
+                    continue;
             }
 
             uintptr_t valueAddr = obj + sf.offset;

@@ -55,12 +55,6 @@ cap raise (V2).
   *Parent: V1a TSet/TMap key|value scan shipped First-Scan-only, build 927 (dev-log
   2026-06-06).*
 
-- **V1c — TOptional scan** — Effort: **S-M** · Risk: **med**. Different shape from
-  Map/Set — inline `[T value][bool bIsSet]`, not sparse. Needs `OptionalProperty` inner
-  resolution in `WalkClassEx` first, then a flag-gated leaf read. **Do separately, after
-  V1a — don't bundle the three deferred containers together.**
-  *Parent: V1a (the container-scan family), build 927.*
-
 - **V2 — raise the global `maxResults` cap via paged streaming** — Effort: **M-L** ·
   Risk: **med**. The 50k cap is bounded by four walls, nearest first: (1) DLL memory in
   the target process (addressed by V3); (2) pipe JSON serialization of N candidates; (3)
@@ -263,6 +257,11 @@ Pick up when the active plan finishes or when blocked.
 
 Shipped + unit-tests-pass but unproven on real games:
 
+- **Value Search `TOptional<T>` scan (V1c)** (build 942). Scan a known value held in a
+  `TOptional<int/float/FString>` UPROPERTY → confirm the row appears under the optional's
+  field name and a Next Scan prunes; confirm an **unset** optional doesn't surface on a
+  scan for `0` (the `bIsSet` gate). Layout helper is unit-tested; the field walk needs a
+  live game with optional UPROPERTYs.
 - **Property freeze (Route B)** on a respawning-NPC game (build 719). Watch: tick FPS
   impact (50ms × N instances), rescan cadence at respawn, vtable-liveness guard on level
   transition, AOBMaker gating UX, multi-script coexistence. First candidate: Geri (UE

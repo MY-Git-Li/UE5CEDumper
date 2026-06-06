@@ -14,6 +14,37 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-06 — Value Search: TOptional<T> scan (V1c, build 942)
+
+Closes the last "deferred container" gap in Value Search after V1a (TSet/TMap):
+a value held in a `TOptional<T>` UPROPERTY is now findable. `FOptionalProperty`
+stores the wrapped value **inline at field+0** (the same Inner-at-`FARRAYPROP_INNER`
+shape as `FArrayProperty`, already resolved by `WalkClassEx` into `innerType` /
+`innerStructType`), with a trailing `bIsSet` byte for non-intrusive optionals.
+
+So unlike the sparse TSet/TMap walk, a TOptional value is just a **leaf read at
+field+0 with an unset gate**. `expandFields` gained an `OptionalProperty` branch
+(next to the TArray-inner branch) that emits a leaf `ScanField` whose `typeName` is
+the inner type — so the per-instance loop reads/compares it identically to a direct
+field. The only addition is `ScanField::optionalFlagOffset`: when the optional is
+larger than its value (room for the bool), it's set to `sizeof(T)` and the
+per-instance leaf path skips slots whose `bIsSet` byte is 0, so a scan for `0` /
+stale bytes doesn't false-hit unset optionals. The flag offset is computed by a new
+pure helper `ValueScan::OptionalFlagOffset(optionalSize, innerSize)` (returns
+`innerSize` when `optionalSize > innerSize`, else −1 for intrusive/pointer optionals
+or unknown sizes); inner size comes from reusing `Ubel::GetArrayInnerElemSize` (valid
+because FOptionalProperty shares the Inner offset).
+
+Covers numeric / string / vector inner types (the same DataTypes as direct leaves);
+drilling into a `TOptional<FStruct>` for nested leaves is left as a further step.
+**Refine needs no change** — `c.addr` is field+0, a stable address (better than the
+sparse-slot containers), so prev-value refine works directly. **No wire / C# change.**
+Tests **412 → 424 dll** (+12 `OptionalFlagOffset` layout cases: int8/16/32/64,
+float/double, FVector, FString, intrusive, unknown-size, defensive). **Live-verify
+pending:** scan a known value held in a `TOptional<int/float/FString>` UPROPERTY,
+confirm the row appears under the optional's field name + a Next Scan prunes; check an
+unset optional doesn't surface on a scan for 0.
+
 ## 2026-06-06 — Live Walker focus-on-field on Value Search cross-nav (build 939)
 
 Fixes the "found a value in a `TMap`, opened it in Live Walker, but had no idea
