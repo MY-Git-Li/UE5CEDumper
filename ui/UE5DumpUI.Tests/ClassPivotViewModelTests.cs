@@ -432,6 +432,6 @@ public class ClassPivotViewModelTests : IDisposable
     private static async Task WaitForGate(GatedStore store, string cls)
     {
         for (int i = 0; i < 400 && !store.Gates.ContainsKey(cls); i++)
-            await Task.Delay(5);
+            await Task.Delay(5, TestContext.Current.CancellationToken);
     }
 }
