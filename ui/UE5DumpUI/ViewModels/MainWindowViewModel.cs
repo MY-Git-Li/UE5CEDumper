@@ -57,6 +57,18 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _statusText = "Disconnected";
     [ObservableProperty] private string _windowTitle = "UE5 Dump UI";
     [ObservableProperty] private bool _isConnected;
+
+    /// <summary>Global stale-DLL badge shown in the always-visible top bar:
+    /// only while connected AND the DLL build differs from / pre-dates the UI's.
+    /// Mirrors the per-tab Diagnostics badge (PointerPanelViewModel) but is
+    /// visible from every tab, so a hand-deployed old proxy DLL is noticed
+    /// before scanning with mismatched offsets. (Re-raised when Pointers'
+    /// warning state changes — see ctor — and when IsConnected flips.)</summary>
+    public bool ShowBuildMismatchBadge => IsConnected && Pointers.ShowGlobalBuildWarning;
+    public string BuildMismatchBadgeText => Pointers.GlobalBuildWarningText;
+
+    partial void OnIsConnectedChanged(bool value)
+        => OnPropertyChanged(nameof(ShowBuildMismatchBadge));
     [ObservableProperty] private bool _needsScan;       // True when connected but scan not yet done (proxy DLL mode)
     [ObservableProperty] private bool _isScanning;      // True while trigger_scan is in progress
     [ObservableProperty] private int _selectedTabIndex;
@@ -328,6 +340,18 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (proxyDeploy != null)
             ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log);
+
+        // Mirror the per-tab stale-DLL warning into the always-visible top-bar
+        // badge so a version mismatch is noticed from any tab.
+        Pointers.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(PointerPanelViewModel.ShowGlobalBuildWarning)
+                               or nameof(PointerPanelViewModel.GlobalBuildWarningText))
+            {
+                OnPropertyChanged(nameof(ShowBuildMismatchBadge));
+                OnPropertyChanged(nameof(BuildMismatchBadgeText));
+            }
+        };
 
         // Wire Pointers Extra Scan -> refresh all panels after rescan results applied
         Pointers.RescanApplied += async () =>

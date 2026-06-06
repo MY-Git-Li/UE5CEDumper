@@ -51,6 +51,19 @@
                      TextTrimming="CharacterEllipsis"
                      ToolTip.Tip="{Binding ErrorMessage}"
                      IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+          <!-- Global stale-DLL badge: visible from every tab (the per-tab
+               Diagnostics badge is easy to miss after hand-deploying an old
+               proxy DLL). Amber, only while connected + build mismatch. -->
+          <Border IsVisible="{Binding ShowBuildMismatchBadge}"
+                  Background="#3A2E0A" BorderBrush="#E6A817" BorderThickness="1"
+                  CornerRadius="3" Padding="6,2" Margin="4,0"
+                  VerticalAlignment="Center"
+                  ToolTip.Tip="{Binding BuildMismatchBadgeText}">
+            <TextBlock Text="{Binding BuildMismatchBadgeText}"
+                       Foreground="#E6A817" FontSize="11" FontWeight="SemiBold"
+                       VerticalAlignment="Center"
+                       MaxWidth="440" TextTrimming="CharacterEllipsis"/>
+          </Border>
         </StackPanel>
 
         <!-- Address format selector -->
