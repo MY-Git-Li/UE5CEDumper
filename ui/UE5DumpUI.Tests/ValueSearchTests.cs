@@ -1172,7 +1172,8 @@ public class ValueSearchTests
             };
         });
 
-        var res = await svc.QueryCandidatesAsync(7UL, 1000, 1000, "hp", "value", sortDesc: true);
+        var res = await svc.QueryCandidatesAsync(7UL, 1000, 1000, "hp", "value", sortDesc: true,
+            ct: TestContext.Current.CancellationToken);
 
         Assert.NotNull(captured);
         Assert.Equal("query_candidates", captured!["cmd"]?.GetValue<string>());
@@ -1206,7 +1207,7 @@ public class ValueSearchTests
             };
         });
 
-        await svc.QueryCandidatesAsync(1UL, 0, 1000);
+        await svc.QueryCandidatesAsync(1UL, 0, 1000, ct: TestContext.Current.CancellationToken);
 
         Assert.False(captured!.ContainsKey("filter"));
         Assert.False(captured.ContainsKey("sort_key"));
@@ -1305,7 +1306,7 @@ public class ValueSearchTests
         };
 
         vm.FilterText = "hp";
-        await Task.Delay(400);  // past the 250ms debounce
+        await Task.Delay(400, TestContext.Current.CancellationToken);  // past the 250ms debounce
 
         Assert.NotEmpty(fake.Queries);
         Assert.Equal("hp", fake.Queries[^1].Item4);  // filter
