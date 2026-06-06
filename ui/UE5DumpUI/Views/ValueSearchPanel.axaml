@@ -130,6 +130,12 @@
                 IsEnabled="{Binding HasSession}"
                 ToolTip.Tip="{StaticResource str.Tip.VS.NewScan}"
                 Padding="12,4"/>
+        <Button Content="{StaticResource str.VS.Cancel}"
+                Command="{Binding CancelScanCommand}"
+                IsVisible="{Binding IsScanning}"
+                ToolTip.Tip="{StaticResource str.Tip.VS.Cancel}"
+                Foreground="#F44747" BorderBrush="#F44747" BorderThickness="1"
+                Background="Transparent" Padding="12,4"/>
         <ProgressBar IsIndeterminate="True"
                      IsVisible="{Binding IsScanning}"
                      Width="80" Height="4"

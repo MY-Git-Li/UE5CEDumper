@@ -13,6 +13,7 @@
 #include "Ubel.h"
 #include "Genau.h"
 #include "Denken.h"
+#include "Cancel.h"
 
 // Defined in Frieren.cpp — cached UE version for layout branching
 extern uint32_t g_cachedUEVersion;
@@ -153,9 +154,28 @@ ParallelScanResult<PerThreadT> ParallelGObjectsScan(int32_t count, BodyFn&& body
     std::vector<PerThreadT> perThread(static_cast<size_t>(std::max(1, nthreads)));
     std::atomic<bool> deadlineHit{false};
 
+    // Cooperative cancellation: a short-lived watcher flips the shared
+    // deadline flag if a cancel is requested (client disconnect via Fern's
+    // monitor, or shutdown), so every worker bails at its next stride check
+    // — no per-body edits needed. Reuses the deadline-bail path the bodies
+    // already poll. (Cheap: one thread that sleeps in 50ms slices and exits
+    // as soon as the parallel run finishes.)
+    std::atomic<bool> scanDone{false};
+    std::thread cancelWatcher([&] {
+        while (!scanDone.load(std::memory_order_relaxed)) {
+            if (Cancel::Requested()) {
+                deadlineHit.store(true, std::memory_order_relaxed);
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    });
+
     ParallelIndexRanges(count, nthreads, [&](int tid, int32_t beginIdx, int32_t endIdx) {
         body(perThread[tid], beginIdx, endIdx, deadlineHit);
     });
+    scanDone.store(true, std::memory_order_relaxed);
+    cancelWatcher.join();
 
     return { std::move(perThread), nthreads, deadlineHit.load() };
 }
@@ -878,6 +898,10 @@ int32_t GetSerialNumber(int32_t index) {
 void ForEach(std::function<bool(int32_t idx, uintptr_t obj)> cb) {
     int32_t count = GetCount();
     for (int32_t i = 0; i < count; ++i) {
+        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+            Sein::Warn("PIPE:scan", "Aura::ForEach: aborted (client gone / shutdown)");
+            break;  // stop walking; callers see partial/empty result
+        }
         uintptr_t obj = GetByIndex(i);
         if (obj != 0) {
             if (!cb(i, obj)) break;
@@ -919,6 +943,10 @@ SearchResultSet SearchByName(const std::string& query, int maxResults) {
     int32_t count = GetCount();
     rset.scanned = count;
     for (int32_t i = 0; i < count && static_cast<int>(rset.results.size()) < maxResults; ++i) {
+        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+            Sein::Warn("PIPE:search", "SearchByName: aborted (client gone / shutdown)");
+            break;  // return partial result
+        }
         uintptr_t obj = GetByIndex(i);
         if (!obj) continue;
         rset.nonNull++;
@@ -969,6 +997,10 @@ SearchResultSet FindInstancesByClass(const std::string& className, bool exactMat
     int32_t count = GetCount();
     rset.scanned = count;
     for (int32_t i = 0; i < count && static_cast<int>(rset.results.size()) < maxResults; ++i) {
+        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+            Sein::Warn("PIPE:find", "FindInstancesByClass: aborted (client gone / shutdown)");
+            break;  // return partial result
+        }
         uintptr_t obj = GetByIndex(i);
         if (!obj) continue;
         rset.nonNull++;
@@ -2593,6 +2625,10 @@ PropertySearchResult SearchProperties(
     result.scannedObjects = count;
 
     for (int32_t i = 0; i < count && static_cast<int>(result.results.size()) < maxResults; ++i) {
+        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+            Sein::Warn("PIPE:search", "SearchProperties: aborted (client gone / shutdown)");
+            break;  // return partial result
+        }
         uintptr_t obj = GetByIndex(i);
         if (!obj) continue;
 
@@ -2866,6 +2902,10 @@ std::vector<PropertySearchResult> SearchPropertiesBatch(
     int32_t scannedClasses = 0;
 
     for (int32_t i = 0; i < count; ++i) {
+        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+            Sein::Warn("PIPE:search", "SearchPropertiesBatch: aborted (client gone / shutdown)");
+            break;  // return partial result
+        }
         // Early-exit: if every query is already at limit, stop walking.
         bool allFull = true;
         for (const auto& s : qs) {
@@ -3034,7 +3074,15 @@ std::vector<ClassInfo> WalkClassesBatch(const std::vector<uintptr_t>& addrs)
     out.reserve(addrs.size());
 
     int emptyCount = 0;
+    size_t batchIdx = 0;
     for (uintptr_t addr : addrs) {
+        // Cooperative cancel: a Full SDK dump can pass a large addr[] chunk and
+        // each WalkClassEx is heavy. Bail if the client disconnected / shutting
+        // down (NOT a time deadline — a long legitimate dump must run to end).
+        if ((batchIdx++ & 0xFFF) == 0 && Cancel::Requested()) {
+            Sein::Warn("PIPE:walk", "WalkClassesBatch: aborted (client gone / shutdown)");
+            break;  // return partial result
+        }
         // ClassInfo lives at global scope (see Ubel.h), but the
         // WalkClassEx function lives inside namespace Ubel.
         ClassInfo ci = Ubel::WalkClassEx(addr);
@@ -3137,6 +3185,10 @@ ClassListResult ListClasses(bool gameOnly, int maxResults) {
     result.scannedObjects = count;
 
     for (int32_t i = 0; i < count && static_cast<int>(result.results.size()) < maxResults; ++i) {
+        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+            Sein::Warn("PIPE:list", "ListClasses: aborted (client gone / shutdown)");
+            break;  // return partial result
+        }
         uintptr_t obj = GetByIndex(i);
         if (!obj) continue;
 
@@ -3209,6 +3261,10 @@ AllFunctionsResult EnumerateAllFunctions(bool gameOnly, int maxEntries) {
     result.scannedObjects = count;
 
     for (int32_t i = 0; i < count; ++i) {
+        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+            Sein::Warn("PIPE:list", "EnumerateAllFunctions: aborted (client gone / shutdown)");
+            break;  // return partial result
+        }
         if (static_cast<int>(result.entries.size()) >= maxEntries) break;
 
         uintptr_t obj = GetByIndex(i);
@@ -4867,6 +4923,10 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
     std::vector<std::string> typeNames;
 
     for (int32_t i = offset; i < end; ++i) {
+        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+            Sein::Warn("PIPE:snapshot", "CaptureSnapshotChunk: aborted (client gone / shutdown)");
+            break;  // return partial chunk
+        }
         uintptr_t obj = GetByIndex(i);
         if (!obj) continue;
 

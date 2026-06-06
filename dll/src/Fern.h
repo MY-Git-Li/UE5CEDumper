@@ -30,6 +30,19 @@ private:
     std::mutex         m_pipeMutex;     // Protects m_pipe access across threads
     std::mutex         m_writeMutex;
 
+    // Disconnect monitor (cooperative cancellation, build 936). While a
+    // command is in-flight the handler blocks the pipe thread, so it can't
+    // notice the client vanishing. The monitor thread peeks the in-flight
+    // pipe every ~200ms and requests per-command cancellation on a broken
+    // pipe, so an orphaned scan bails and the pipe frees for a reconnect.
+    // It only peeks WHILE m_commandInFlight (the handler is then CPU-bound
+    // in DispatchCommand, not in ReadFile/WriteFile), so there is no
+    // concurrent read/write on the handle.
+    std::thread          m_monitorThread;
+    std::atomic<bool>    m_commandInFlight{false};
+    std::atomic<HANDLE>  m_inflightPipe{INVALID_HANDLE_VALUE};
+    void MonitorLoop();
+
     // Watch entries
     struct WatchEntry {
         uintptr_t           addr;
