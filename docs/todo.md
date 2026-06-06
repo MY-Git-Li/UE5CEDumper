@@ -457,6 +457,42 @@ User-reported during V1a live test. Three items; two shipped, one deferred.
 
 -----
 
+## DLL-side cooperative cancellation for long operations (build 936-937, 2026-06-06)
+
+User-reported: long DLL ops (value scan, snapshot, etc.) must be cancellable +
+clean up; and if the UI closes, the DLL must STOP — not spin idle and block the
+game from closing. Root constraint: Fern's pipe is **single-connection,
+synchronous** (`nMaxInstances=1`), so a long scan blocks the pipe thread and the
+client can't be told to stop on the same pipe mid-scan.
+
+- ~~**Global cooperative-cancel + shutdown-abort + disconnect monitor.**~~ ✅
+  **SHIPPED.** New `Cancel.h` (`Cancel::Requested()` = relaxed atomic; per-command
+  flag + sticky shutdown flag). (1) `Fern::Stop()`/`UE5_Shutdown` call
+  `RequestShutdown()` **before** joining threads → an in-flight scan bails so the
+  accept-thread join completes fast (**fixes "game won't close"**). (2) Fern
+  **monitor thread** `PeekNamedPipe`s the in-flight pipe every 200ms (only while
+  `m_commandInFlight`, when the handler is CPU-bound and not touching the handle);
+  a broken pipe → `RequestPerCommand()` → orphaned scan bails → pipe frees for the
+  reconnecting UI (**fixes the reconnect-within-window stall the user flagged**).
+  (3) Per-command flag reset at each command start. **Coverage:** parallel scans via
+  a watcher inside `ParallelGObjectsScan` (flips the existing `deadlineHit`, covers
+  value scan / find-refs / containers / xrefs / find-by-path — zero per-body edits);
+  serial loops via `Cancel::Requested()` every 4096 iters (`ListClasses`,
+  `EnumerateAllFunctions`, `SearchByName`, `FindInstancesByClass`, `SearchProperties`,
+  `SearchPropertiesBatch`, `WalkClassesBatch` (Full SDK dump), `CaptureSnapshotChunk`,
+  `Aura::ForEach` → covers walk_world fallback, `list_enums`).
+- ~~**Value Search cancel button.**~~ ✅ **SHIPPED.** Per-scan `CancellationTokenSource`;
+  Cancel button visible while `IsScanning`. Cancel abandons the UI wait immediately;
+  the DLL self-terminates at its deadline (≤15s, usually sub-second) and the orphaned
+  response is discarded (single pipe can't interrupt mid-scan while connected).
+- **Decision:** deliberately **no hard timeouts** on serial ops — Full SDK dump etc.
+  are meant to run to completion; the cooperative cancel (disconnect/shutdown) already
+  covers the user's two concerns. **Live-verify pending:** confirm in-game that (a)
+  disabling the script / closing while a long scan runs no longer hangs, (b) closing
+  the UI mid-scan stops the DLL and a reopened UI reconnects promptly.
+
+-----
+
 ## Next-priority enhancements (decided 2026-05-26, post build 738)
 
 ### 0. ~~Value Search tab (by-value scan)~~ — ✅ shipped this session (2026-05-26, build 738)

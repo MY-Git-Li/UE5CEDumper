@@ -16,6 +16,7 @@
 #include "Flamme.h"
 #include "Stark.h"
 #include "ValueScan.h"
+#include "Cancel.h"
 #include "BuildInfo.h"
 
 #include <json.hpp>
@@ -343,6 +344,7 @@ bool Fern::Start() {
 
     m_running = true;
     m_acceptThread = std::thread(&Fern::AcceptLoop, this);
+    m_monitorThread = std::thread(&Fern::MonitorLoop, this);
 
     LOG_INFO("PipeServer: Started on %ls", Grimoire::PIPE_NAME);
     return true;
@@ -350,6 +352,11 @@ bool Fern::Start() {
 
 void Fern::Stop() {
     if (!m_running.exchange(false)) return; // Already stopped
+    // Abort any in-flight long-running operation BEFORE joining threads, so a
+    // scan blocking the accept thread bails promptly and the join below
+    // completes fast (otherwise disabling the script / closing can hang while
+    // a long scan finishes). Sticky — never auto-cleared.
+    Cancel::RequestShutdown();
     StopAllWatches();
 
     // Join background rescan thread if running
@@ -382,8 +389,41 @@ void Fern::Stop() {
         m_acceptThread.join();
     }
 
+    if (m_monitorThread.joinable()) {
+        m_monitorThread.join();
+    }
+
     m_clientConnected = false;
     LOG_INFO("PipeServer: Stopped");
+}
+
+// Disconnect monitor: while a command is in-flight, peek the pipe to detect
+// the client vanishing and request per-command cancellation so the orphaned
+// scan bails. Peeks only while m_commandInFlight (handler is CPU-bound in
+// DispatchCommand, not touching the pipe) — no concurrent read/write.
+void Fern::MonitorLoop() {
+    while (m_running.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        if (!m_running.load()) break;
+        if (!m_commandInFlight.load(std::memory_order_relaxed)) continue;
+
+        HANDLE p = m_inflightPipe.load(std::memory_order_relaxed);
+        if (p == INVALID_HANDLE_VALUE) continue;
+
+        // Non-destructive: PeekNamedPipe reads only buffer state. A closed
+        // client end surfaces as FALSE + ERROR_BROKEN_PIPE.
+        DWORD avail = 0;
+        if (!PeekNamedPipe(p, nullptr, 0, nullptr, &avail, nullptr)) {
+            DWORD e = GetLastError();
+            if (e == ERROR_BROKEN_PIPE || e == ERROR_PIPE_NOT_CONNECTED
+                || e == ERROR_INVALID_HANDLE) {
+                if (!Cancel::g_perCommand.load(std::memory_order_relaxed)) {
+                    LOG_WARN("PipeServer: client gone mid-command (err=%lu) — aborting in-flight op", e);
+                    Cancel::RequestPerCommand();
+                }
+            }
+        }
+    }
 }
 
 void Fern::AcceptLoop() {
@@ -501,6 +541,10 @@ void Fern::HandleClient(HANDLE pipe) {
         std::string line = ReadLine(pipe);
         if (line.empty()) { flushRepeat(); break; } // Disconnected
 
+        // Fresh command: clear any per-command cancel left from a prior
+        // (disconnected) client. Shutdown cancellation stays sticky.
+        Cancel::ResetPerCommand();
+
         // Extract command name for dedup (fast: find "cmd":" in JSON)
         std::string cmd;
         auto pos = line.find("\"cmd\":\"");
@@ -519,7 +563,13 @@ void Fern::HandleClient(HANDLE pipe) {
             repeatCount = 1;
         }
 
+        // Publish the in-flight pipe so the monitor thread can detect a
+        // mid-command disconnect (the handler below blocks this thread).
+        m_inflightPipe.store(pipe, std::memory_order_relaxed);
+        m_commandInFlight.store(true, std::memory_order_relaxed);
         std::string response = DispatchCommand(line);
+        m_commandInFlight.store(false, std::memory_order_relaxed);
+
         if (!response.empty()) {
             if (!WriteLine(pipe, response)) {
                 flushRepeat();
@@ -528,6 +578,8 @@ void Fern::HandleClient(HANDLE pipe) {
             }
         }
     }
+    m_commandInFlight.store(false, std::memory_order_relaxed);
+    m_inflightPipe.store(INVALID_HANDLE_VALUE, std::memory_order_relaxed);
 }
 
 void Fern::PushEvent(const std::string& jsonLine) {
@@ -1270,6 +1322,10 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             json enums = json::array();
 
             for (int i = 0; i < total; ++i) {
+                if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+                    Sein::Warn("PIPE:cmd", "list_enums: aborted (client gone / shutdown)");
+                    break;  // return partial result
+                }
                 uintptr_t obj = Aura::GetByIndex(i);
                 if (!obj) continue;
 

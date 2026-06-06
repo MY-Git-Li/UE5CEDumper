@@ -29,6 +29,13 @@ public partial class ValueSearchViewModel : ViewModelBase
     private readonly IDumpService _dump;
     private readonly ILoggingService _log;
 
+    /// <summary>Cancels the in-flight First/Next scan. Cancelling abandons
+    /// the UI-side wait immediately; the DLL self-terminates the scan at its
+    /// own deadline (usually sub-second) and the orphaned response is
+    /// discarded. (The single synchronous pipe can't interrupt a scan
+    /// mid-flight without disconnecting — see Cancel.h / Fern monitor.)</summary>
+    private System.Threading.CancellationTokenSource? _scanCts;
+
     // ------------------------------------------------------------------
     // Inputs
     // ------------------------------------------------------------------
@@ -346,6 +353,7 @@ public partial class ValueSearchViewModel : ViewModelBase
             return;
         }
 
+        var cts = _scanCts = new System.Threading.CancellationTokenSource();
         try
         {
             IsScanning  = true;
@@ -367,7 +375,7 @@ public partial class ValueSearchViewModel : ViewModelBase
             var result = await _dump.BeginValueScanAsync(
                 SelectedDataType, SelectedScanType, Value,
                 SelectedScanType == ValueScanType.Between ? Value2 : null,
-                GameOnly, MaxResults, effTol, effCase);
+                GameOnly, MaxResults, effTol, effCase, cts.Token);
 
             SessionId = result.SessionId;
             _allCandidates = result.Candidates;
@@ -380,6 +388,10 @@ public partial class ValueSearchViewModel : ViewModelBase
                 summary += "  ⚠ scan truncated (15s deadline) — narrow predicate to see complete set";
             StatusText = summary;
         }
+        catch (OperationCanceledException)
+        {
+            StatusText = "First Scan cancelled.";
+        }
         catch (Exception ex)
         {
             ErrorMessage = $"First Scan failed: {ex.Message}";
@@ -388,6 +400,7 @@ public partial class ValueSearchViewModel : ViewModelBase
         finally
         {
             IsScanning = false;
+            if (ReferenceEquals(_scanCts, cts)) { _scanCts?.Dispose(); _scanCts = null; }
         }
     }
 
@@ -408,6 +421,7 @@ public partial class ValueSearchViewModel : ViewModelBase
             return;
         }
 
+        var cts = _scanCts = new System.Threading.CancellationTokenSource();
         try
         {
             IsScanning  = true;
@@ -420,13 +434,17 @@ public partial class ValueSearchViewModel : ViewModelBase
                 SessionId, SelectedScanType,
                 needsValue ? Value : null,
                 SelectedScanType == ValueScanType.Between ? Value2 : null,
-                effTol, effCase);
+                effTol, effCase, cts.Token);
 
             _allCandidates = result.Candidates;
             ApplyFilter();
 
             StatusText = $"Next Scan ({SelectedScanType}): {result.Total} surviving candidates " +
                          $"in {result.DurationMs} ms";
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = "Next Scan cancelled.";
         }
         catch (Exception ex)
         {
@@ -436,6 +454,7 @@ public partial class ValueSearchViewModel : ViewModelBase
         finally
         {
             IsScanning = false;
+            if (ReferenceEquals(_scanCts, cts)) { _scanCts?.Dispose(); _scanCts = null; }
         }
     }
 
@@ -448,6 +467,11 @@ public partial class ValueSearchViewModel : ViewModelBase
         StatusText = "Session ended. Configure a new scan and click First Scan.";
         ErrorMessage = "";
     }
+
+    /// <summary>Cancel an in-flight First/Next scan. The UI stops waiting
+    /// immediately; the DLL self-terminates the scan at its deadline.</summary>
+    [RelayCommand]
+    private void CancelScan() => _scanCts?.Cancel();
 
     [RelayCommand]
     private void OpenInLiveWalker(ValueCandidate? candidate)
