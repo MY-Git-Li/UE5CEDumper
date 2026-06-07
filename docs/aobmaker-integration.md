@@ -223,8 +223,11 @@ record's `0` still serializes), and omits `isSigned` / `showAsHex` when `false`.
 **Used by:**
 - LiveWalker: per-row **+CE** buttons (field address + pointer target) — see UI Integration
   Points. Type/signed/hex are derived via `CeXmlExportService.MapFieldToCeRecordType`, reusing
-  the exact UE→CE type mapping that drives Copy CE XML / Copy CE Field. Batch adds still go
-  through multi-select **Copy CE Field** (clipboard).
+  the exact UE→CE type mapping that drives Copy CE XML / Copy CE Field.
+- LiveWalker: **+CE Fields** toolbar button — flat batch form of the per-row +CE (loops
+  `CreateMemoryRecord` over the multi-selection, one top-level record per field, early-bails
+  if the pipe drops mid-batch). It does NOT reproduce the hierarchical pointer-chain layout —
+  Copy CE XML / Copy CE Field stay clipboard-only for that.
 
 > **Minimum AOBMaker build:** the typed-record push works against any plugin that handles
 > `CreateMemoryRecord`, but the `showAsHex` flag (pointer / 8-byte fields shown as hex)

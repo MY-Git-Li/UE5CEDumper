@@ -14,6 +14,26 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-07 — Copy CE Field flat direct-push to CE (build ~966)
+
+Follow-up to the +CE work below. Evaluated the deferred "direct-push Copy CE XML / Copy CE
+Field into CE" idea: confirmed CE XML and the AOBMaker bulk-node schema are **near-isomorphic**
+(same tree of desc/addr/offsets/type/hex/group — breadcrumb levels already emit relative
+`+offset` + `offsets=[0]`), but the current `CeXmlExportService` has **no intermediate tree
+model** — ~16 `Emit*` methods build XML inline with 6 threaded `[ThreadStatic]` states, so
+"swap the output" means either a golden-test-gated refactor or a parallel walk, plus a new
+bulk Begin/Chunk/End client. User scoped it down to **flat Copy CE Field only**.
+
+Shipped: a **+CE Fields** toolbar button next to Copy CE Field (visible on multi-selection,
+enabled when AOBMaker is up). It's the multi-select batch form of the per-row +CE button —
+loops `CreateMemoryRecord` over the selection (same `_selectedFieldsSnapshot`→`SelectedField`
+source as `ExportCeFieldXmlAsync`), one flat top-level record per field via
+`MapFieldToCeRecordType`, skips addressless rows, early-bails if the pipe drops mid-batch, and
+reports `added/failed/skipped`. **No bulk-tree client, no Emit-layer refactor** — Copy CE XML /
+Copy CE Field stay clipboard-only for the hierarchical layout. Building blocks already unit-
+tested (type mapping + CreateMemoryRecord serialization); the loop is thin control flow, so no
+new VM-level test (matches the existing LiveWalker test approach — only static helpers tested).
+
 ## 2026-06-07 — Live Walker one-click "Add to CE" + top-toolbar AOBMaker chip (builds ~960-964)
 
 Two "stop copy-pasting addresses into CE by hand" conveniences that lean on the AOBMaker

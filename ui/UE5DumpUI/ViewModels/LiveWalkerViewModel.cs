@@ -1981,6 +1981,76 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// Direct-push variant of Copy CE Field: instead of generating CE XML to the clipboard,
+    /// push each selected field straight into CE's address list as a typed memory record via
+    /// the AOBMaker plugin (the multi-select batch form of the per-row +CE button). This is a
+    /// FLAT push — one top-level record per selected field, typed via
+    /// <see cref="CeXmlExportService.MapFieldToCeRecordType"/>. It intentionally does NOT
+    /// reproduce the hierarchical pointer-chain / container-element structure that
+    /// <see cref="ExportCeFieldXmlAsync"/> builds for the clipboard; use Copy CE Field for that.
+    /// </summary>
+    [RelayCommand]
+    private async Task PushCeFieldToCeAsync()
+    {
+        if (_aobMaker == null) return;
+
+        // Same selection source as ExportCeFieldXmlAsync (snapshot, falling back to the
+        // single selected row if SelectionChanged hasn't synced yet).
+        var selected = _selectedFieldsSnapshot.Count > 0
+            ? new List<LiveFieldValue>(_selectedFieldsSnapshot)
+            : (SelectedField != null ? new List<LiveFieldValue> { SelectedField } : new List<LiveFieldValue>());
+        if (selected.Count == 0)
+        {
+            StatusText = "No fields selected";
+            return;
+        }
+
+        try
+        {
+            ClearStatus();
+            int ok = 0, fail = 0, skipped = 0;
+            foreach (var field in selected)
+            {
+                // Fields without a resolved address (e.g. container/struct headers) can't
+                // become a flat record — skip rather than push a bogus address.
+                if (string.IsNullOrEmpty(field.FieldAddress)) { skipped++; continue; }
+
+                var t = CeXmlExportService.MapFieldToCeRecordType(field);
+                var added = await _aobMaker.CreateMemoryRecordAsync(
+                    field.Name, StripHexPrefix(field.FieldAddress), t.ValueType, t.IsSigned, t.ShowAsHex);
+                if (added)
+                {
+                    ok++;
+                }
+                else
+                {
+                    fail++;
+                    // If the bridge lost the pipe (CE closed mid-batch) stop now rather than
+                    // eating one 2 s connect timeout per remaining field.
+                    if (!_aobMaker.IsAvailable) break;
+                }
+            }
+
+            IsAobMakerAvailable = _aobMaker.IsAvailable;
+            if (!_aobMaker.IsAvailable && ok == 0)
+            {
+                StatusText = "AOBMaker not connected — open CE with the plugin loaded";
+            }
+            else
+            {
+                var extra = (fail > 0 ? $", {fail} failed" : "") + (skipped > 0 ? $", {skipped} skipped" : "");
+                StatusText = $"Added to CE: {ok} record(s){extra}";
+            }
+            _log.Info($"CE Field push: {ok} added, {fail} failed, {skipped} skipped (of {selected.Count} selected)");
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Failed to push CE Field records to CE", ex);
+        }
+    }
+
+    /// <summary>
     /// Compute CE-compatible "Module.exe"+RVA string from an absolute address.
     /// </summary>
     private string ComputeModuleRva(string hexAddr)
