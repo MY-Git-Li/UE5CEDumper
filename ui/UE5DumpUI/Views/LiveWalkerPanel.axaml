@@ -133,6 +133,13 @@
               IsVisible="{Binding HasSelectedFields}"
               ToolTip.Tip="{StaticResource str.Tip.LiveWalker.ExportCEField}"
               Padding="8,4"/>
+      <Button Content="{StaticResource str.LiveWalker.PushCeField}"
+              Command="{Binding PushCeFieldToCeCommand}"
+              IsVisible="{Binding HasSelectedFields}"
+              IsEnabled="{Binding IsAobMakerAvailable}"
+              ToolTip.Tip="{StaticResource str.Tip.LiveWalker.PushCeField}"
+              Foreground="#C586C0"
+              Padding="8,4"/>
       <CheckBox Content="{StaticResource str.LiveWalker.AobToggle}"
                 IsChecked="{Binding UseAobSymbol}"
                 IsEnabled="{Binding IsAobSymbolAvailable}"
