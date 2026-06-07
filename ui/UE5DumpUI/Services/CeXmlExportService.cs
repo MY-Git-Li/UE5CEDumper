@@ -636,9 +636,9 @@ public static class CeXmlExportService
         sb.AppendLine("if syntaxcheck then return end");
         sb.AppendLine();
 
-        // AOBScanModule helper (idempotent — won't redefine if already loaded)
-        sb.AppendLine("if not AOBScanModule then");
-        sb.AppendLine("  function AOBScanModule(moduleName, signature)");
+        // AOBScanModuleUE helper (idempotent — won't redefine if already loaded)
+        sb.AppendLine("if not AOBScanModuleUE then");
+        sb.AppendLine("  function AOBScanModuleUE(moduleName, signature)");
         sb.AppendLine("    local baseAddr = nil");
         sb.AppendLine("    local maxAddr = 0");
         sb.AppendLine("    local modList");
@@ -672,6 +672,7 @@ public static class CeXmlExportService
         sb.AppendLine("    return addr");
         sb.AppendLine("  end");
         sb.AppendLine("end");
+        sb.AppendLine("registerLuaFunctionHighlight('AOBScanModuleUE')");
         sb.AppendLine();
 
         // Close lua engine log helper (idempotent)
@@ -697,7 +698,7 @@ public static class CeXmlExportService
 
         // Scan and register loop
         sb.AppendLine("for _, entry in ipairs(AOBs) do");
-        sb.AppendLine("  local aob_addr_str = AOBScanModule(module_name, entry.aob)");
+        sb.AppendLine("  local aob_addr_str = AOBScanModuleUE(module_name, entry.aob)");
         sb.AppendLine("  if aob_addr_str then");
         sb.AppendLine("    local aob_addr_val = tonumber(aob_addr_str, 16)");
         sb.AppendLine("    local offset_addr = aob_addr_val + entry.pos");
