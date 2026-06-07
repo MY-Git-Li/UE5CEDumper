@@ -14,6 +14,26 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-07 — DLL-build indicator moved next to version + propagation fix (build ~968)
+
+User reported the stale-DLL alert "never shows" next to `v1.0.0.966`. Investigation: the dist
+DLL and UI were both `1.0.0.966`, so for a current deploy **no badge is correct** — the badge
+only fires on mismatch, and there was no positive "matched" signal, so "no badge" was
+ambiguous with "warning broken". Three fixes:
+- **Legibility:** moved the global stale-DLL badge from the left (next to connection status)
+  to **right of the version label** where users look for build info, and added a subtle green
+  **`DLL <n>`** confirmation when the deployed DLL build matches the UI (`MainWindowViewModel.
+  ShowDllBuildOk` / `DllBuildOkText`). Amber mismatch badge + green match indicator now sit
+  together by the version.
+- **Propagation gap (real bug):** `PointerPanelViewModel.NotifyComputedProperties()` raised
+  `BuildVersionMismatch/Unknown` but NOT `ShowGlobalBuildWarning`/`GlobalBuildWarningText` —
+  the only props the top-bar mirror listens for. So an `Update()` that didn't change
+  `DllBuildNumber`'s value (reconnect/refresh to the same DLL) left the badge stale. Now
+  re-raised in `NotifyComputedProperties`. +1 test locking it.
+- Confirmed `build_number` is reported on BOTH the init response and every `get_pointers`
+  snapshot (`Fern.cpp` 545/825), so the value isn't lost on refresh (the stale DumpService
+  comment claiming "init only" is wrong; the code already falls back to `ptrs`).
+
 ## 2026-06-07 — Copy CE Field flat direct-push to CE (build ~966)
 
 Follow-up to the +CE work below. Evaluated the deferred "direct-push Copy CE XML / Copy CE

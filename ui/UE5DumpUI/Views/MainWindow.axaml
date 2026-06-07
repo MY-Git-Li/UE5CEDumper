@@ -51,19 +51,8 @@
                      TextTrimming="CharacterEllipsis"
                      ToolTip.Tip="{Binding ErrorMessage}"
                      IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
-          <!-- Global stale-DLL badge: visible from every tab (the per-tab
-               Diagnostics badge is easy to miss after hand-deploying an old
-               proxy DLL). Amber, only while connected + build mismatch. -->
-          <Border IsVisible="{Binding ShowBuildMismatchBadge}"
-                  Background="#3A2E0A" BorderBrush="#E6A817" BorderThickness="1"
-                  CornerRadius="3" Padding="6,2" Margin="4,0"
-                  VerticalAlignment="Center"
-                  ToolTip.Tip="{Binding BuildMismatchBadgeText}">
-            <TextBlock Text="{Binding BuildMismatchBadgeText}"
-                       Foreground="#E6A817" FontSize="11" FontWeight="SemiBold"
-                       VerticalAlignment="Center"
-                       MaxWidth="440" TextTrimming="CharacterEllipsis"/>
-          </Border>
+          <!-- The global stale-DLL badge now lives next to the version label (right
+               edge of the toolbar) where users look for build info — see below. -->
         </StackPanel>
 
         <!-- Address format selector -->
@@ -252,10 +241,28 @@
           </DropDownButton>
         </Border>
 
-        <!-- Version label -->
-        <TextBlock Text="{Binding AppVersion}"
-                   Foreground="#808080" FontSize="11"
-                   VerticalAlignment="Center" Margin="8,2"/>
+        <!-- Version + DLL-build indicator. The stale-DLL alert sits right next to the
+             UI version (amber when the deployed DLL build differs from / pre-dates the
+             UI's), and a subtle "DLL <n>" confirms a matched deploy so "no alert" isn't
+             ambiguous with "the warning is broken". Both only while connected. -->
+        <StackPanel Orientation="Horizontal" Spacing="6"
+                    VerticalAlignment="Center" Margin="8,2">
+          <TextBlock Text="{Binding AppVersion}"
+                     Foreground="#808080" FontSize="11" VerticalAlignment="Center"/>
+          <Border IsVisible="{Binding ShowBuildMismatchBadge}"
+                  Background="#3A2E0A" BorderBrush="#E6A817" BorderThickness="1"
+                  CornerRadius="3" Padding="6,1" VerticalAlignment="Center"
+                  ToolTip.Tip="{Binding BuildMismatchBadgeText}">
+            <TextBlock Text="{Binding BuildMismatchBadgeText}"
+                       Foreground="#E6A817" FontSize="11" FontWeight="SemiBold"
+                       VerticalAlignment="Center"
+                       MaxWidth="440" TextTrimming="CharacterEllipsis"/>
+          </Border>
+          <TextBlock Text="{Binding DllBuildOkText}"
+                     Foreground="#5A8C5A" FontSize="11" VerticalAlignment="Center"
+                     IsVisible="{Binding ShowDllBuildOk}"
+                     ToolTip.Tip="Deployed DLL build matches the UI build"/>
+        </StackPanel>
       </WrapPanel>
     </Border>
 

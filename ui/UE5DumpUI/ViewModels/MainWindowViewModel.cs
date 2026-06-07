@@ -67,8 +67,18 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public bool ShowBuildMismatchBadge => IsConnected && Pointers.ShowGlobalBuildWarning;
     public string BuildMismatchBadgeText => Pointers.GlobalBuildWarningText;
 
+    /// <summary>Positive counterpart to <see cref="ShowBuildMismatchBadge"/>: true while
+    /// connected AND the DLL build matches the UI's. Shown as a subtle "DLL &lt;n&gt;" next to
+    /// the version so a current deploy is visibly confirmed — "no badge" alone is ambiguous
+    /// with "the warning is broken".</summary>
+    public bool ShowDllBuildOk => IsConnected && Pointers.BuildVersionsMatch;
+    public string DllBuildOkText => $"DLL {Pointers.DllBuildNumber}";
+
     partial void OnIsConnectedChanged(bool value)
-        => OnPropertyChanged(nameof(ShowBuildMismatchBadge));
+    {
+        OnPropertyChanged(nameof(ShowBuildMismatchBadge));
+        OnPropertyChanged(nameof(ShowDllBuildOk));
+    }
     [ObservableProperty] private bool _needsScan;       // True when connected but scan not yet done (proxy DLL mode)
     [ObservableProperty] private bool _isScanning;      // True while trigger_scan is in progress
     [ObservableProperty] private int _selectedTabIndex;
@@ -352,10 +362,14 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         Pointers.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(PointerPanelViewModel.ShowGlobalBuildWarning)
-                               or nameof(PointerPanelViewModel.GlobalBuildWarningText))
+                               or nameof(PointerPanelViewModel.GlobalBuildWarningText)
+                               or nameof(PointerPanelViewModel.BuildVersionsMatch)
+                               or nameof(PointerPanelViewModel.DllBuildNumber))
             {
                 OnPropertyChanged(nameof(ShowBuildMismatchBadge));
                 OnPropertyChanged(nameof(BuildMismatchBadgeText));
+                OnPropertyChanged(nameof(ShowDllBuildOk));
+                OnPropertyChanged(nameof(DllBuildOkText));
             }
             if (e.PropertyName == nameof(PointerPanelViewModel.IsAobMakerAvailable))
                 IsAobMakerAvailable = Pointers.IsAobMakerAvailable;
