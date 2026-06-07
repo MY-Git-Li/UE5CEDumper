@@ -2608,7 +2608,8 @@ public class CeXmlExportServiceTests
             moduleName: "Game.exe");
 
         Assert.Contains("Auto Assembler Script", xml);
-        Assert.Contains("AOBScanModule", xml);
+        Assert.Contains("AOBScanModuleUE", xml);
+        Assert.Contains("registerLuaFunctionHighlight('AOBScanModuleUE')", xml);
         Assert.Contains("registerSymbol", xml);
         Assert.Contains("unregisterSymbol", xml);
         Assert.Contains("\"base\"", xml);
