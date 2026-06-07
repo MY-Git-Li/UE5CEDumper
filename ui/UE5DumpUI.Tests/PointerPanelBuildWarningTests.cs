@@ -49,4 +49,27 @@ public class PointerPanelBuildWarningTests
         Assert.False(vm.BuildVersionMismatch);
         Assert.Contains("pre-dates", vm.GlobalBuildWarningText);
     }
+
+    [Fact]
+    public void Update_ReRaisesShowGlobalBuildWarning_EvenWhenDllBuildUnchanged()
+    {
+        // The global top-bar badge mirror only listens for ShowGlobalBuildWarning /
+        // GlobalBuildWarningText. A second Update() with the SAME DllBuildNumber doesn't
+        // fire OnDllBuildNumberChanged (value unchanged), so NotifyComputedProperties MUST
+        // re-raise them or the badge goes stale on reconnect/refresh.
+        var vm = MakeVm();
+        vm.Update(new EngineState { DllBuildNumber = 920 }); // 0 -> 920
+
+        bool warningRaised = false, textRaised = false;
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(PointerPanelViewModel.ShowGlobalBuildWarning)) warningRaised = true;
+            if (e.PropertyName == nameof(PointerPanelViewModel.GlobalBuildWarningText)) textRaised = true;
+        };
+
+        vm.Update(new EngineState { DllBuildNumber = 920 }); // unchanged
+
+        Assert.True(warningRaised);
+        Assert.True(textRaised);
+    }
 }

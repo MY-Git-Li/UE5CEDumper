@@ -419,6 +419,11 @@ public partial class PointerPanelViewModel : ViewModelBase
         OnPropertyChanged(nameof(BuildVersionsMatch));
         OnPropertyChanged(nameof(BuildVersionMismatch));
         OnPropertyChanged(nameof(BuildVersionUnknown));
+        // The global top-bar badge mirror (MainWindowViewModel) listens for these two;
+        // without re-raising them here an Update() that doesn't change DllBuildNumber's
+        // value (e.g. a reconnect/refresh to the same DLL) would leave the badge stale.
+        OnPropertyChanged(nameof(ShowGlobalBuildWarning));
+        OnPropertyChanged(nameof(GlobalBuildWarningText));
         OnPropertyChanged(nameof(CanSelfTest));
         NotifyAobMakerProperties();
     }
