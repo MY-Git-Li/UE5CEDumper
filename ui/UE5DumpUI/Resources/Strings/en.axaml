@@ -123,7 +123,7 @@
     <sys:String x:Key="str.LiveWalker.AddToCe">+CE</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.AddFieldToCe">Add this field to CE's address list as a typed memory record (via AOBMaker), labelled with the field name — then use CE's "Find out what accesses this address". Needs an AOBMaker plugin built on/after 2026-06-07 for hex display.</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.AddPtrToCe">Add the pointer target to CE's address list as an 8-byte hex memory record (via AOBMaker).</sys:String>
-    <sys:String x:Key="str.LiveWalker.PushCeField">+CE Fields</sys:String>
+    <sys:String x:Key="str.LiveWalker.PushCeField">+CE Field (flat)</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.PushCeField">Push the selected fields straight into CE's address list as typed memory records (via AOBMaker) — the multi-select batch form of the per-row +CE button. Flat (one record per field); for the hierarchical pointer-chain layout use Copy CE Field (clipboard) instead.</sys:String>
 
     <!-- Live Walker: Bookmarks -->
