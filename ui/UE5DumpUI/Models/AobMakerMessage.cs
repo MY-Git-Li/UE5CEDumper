@@ -77,6 +77,27 @@ public class AobMakerMessage
     [JsonPropertyName("content")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Content { get; set; }
+
+    // --- CreateMemoryRecord fields ---
+    // Adds a single typed memory record to CE's address list via the plugin's
+    // addresslist.createMemoryRecord(). ValueType is a CE TVariableType code
+    // (0=Byte,1=Word,2=Dword,3=Qword,4=Single,5=Double,6=String,7=UnicodeString,
+    // 8=ByteArray,9=Binary). ShowAsHex requires an AOBMaker CE plugin compiled
+    // on/after 2026-06-07 (older builds ignore it; default false is back-compatible).
+
+    // Nullable so valueType is ALWAYS emitted for CreateMemoryRecord even when 0
+    // (Byte), yet omitted entirely from unrelated messages (NavigateHexView, etc.).
+    [JsonPropertyName("valueType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ValueType { get; set; }
+
+    [JsonPropertyName("isSigned")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsSigned { get; set; }
+
+    [JsonPropertyName("showAsHex")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ShowAsHex { get; set; }
 }
 
 /// <summary>

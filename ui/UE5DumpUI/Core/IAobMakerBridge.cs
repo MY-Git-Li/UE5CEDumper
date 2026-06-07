@@ -54,6 +54,25 @@ public interface IAobMakerBridge
         string symbol, string module, bool autoActivate = true, CancellationToken ct = default);
 
     /// <summary>
+    /// Add a single typed memory record to CE's address list.
+    /// Sends <c>CreateMemoryRecord</c> — the CE Plugin calls
+    /// <c>addresslist.createMemoryRecord()</c>, sets Description / Address / Type /
+    /// ShowAsSigned / ShowAsHex, and self-verifies before returning success.
+    /// One-click alternative to "copy address, then build the record by hand in CE"
+    /// (e.g. so the user can immediately run CE's "Find out what accesses this address").
+    /// </summary>
+    /// <param name="description">Record label in CE's address list (typically the field Name).</param>
+    /// <param name="address">Bare hex address without 0x prefix (e.g. "7FF769E29110"),
+    /// or a registersymbol name.</param>
+    /// <param name="valueType">CE <c>TVariableType</c> code: 0=Byte, 1=Word, 2=Dword,
+    /// 3=Qword, 4=Single, 5=Double, 6=String, 7=UnicodeString, 8=ByteArray, 9=Binary.</param>
+    /// <param name="isSigned">Display integer types as signed.</param>
+    /// <param name="showAsHex">Display as hex. <b>Requires an AOBMaker CE plugin compiled
+    /// on/after 2026-06-07</b> — older builds silently ignore it (default false is back-compatible).</param>
+    Task<bool> CreateMemoryRecordAsync(string description, string address, int valueType,
+        bool isSigned = false, bool showAsHex = false, CancellationToken ct = default);
+
+    /// <summary>
     /// Embed an arbitrary text/Lua file into the currently open CE table.
     /// Sends <c>InjectTableFile</c> — the CE Plugin handler runs
     /// <c>findTableFile</c> (delete-if-exists) + <c>createTableFile</c> +

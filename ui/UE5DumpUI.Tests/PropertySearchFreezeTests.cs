@@ -185,6 +185,8 @@ public class PropertySearchFreezeTests
         public Task<bool> NavigateDisassemblerAsync(string h, CancellationToken ct = default) => Task.FromResult(false);
         public Task<bool> CreateSymbolScriptAsync(string n, string a, int p, int l, string s, string m,
             bool autoActivate = true, CancellationToken ct = default) => Task.FromResult(false);
+        public Task<bool> CreateMemoryRecordAsync(string description, string address, int valueType,
+            bool isSigned = false, bool showAsHex = false, CancellationToken ct = default) => Task.FromResult(false);
         public Task<(bool Ok, string? ErrorMessage)> InjectTableFileAsync(string f, string c,
             CancellationToken ct = default) => Task.FromResult((false, (string?)null));
     }

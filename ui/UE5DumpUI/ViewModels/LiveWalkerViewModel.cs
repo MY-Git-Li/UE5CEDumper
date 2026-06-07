@@ -2403,6 +2403,62 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // --- AOBMaker CE Plugin: one-click "Add to CE" memory record ---
+
+    /// <summary>
+    /// Add a single typed CE memory record at this field's own address (instance base +
+    /// offset), labelled with the field name and typed to match the field. One-click
+    /// alternative to copy-address-then-build-the-record-by-hand, so the user can jump
+    /// straight to CE's "Find out what accesses this address". Batch adds go through
+    /// the existing multi-select Copy CE Field (clipboard).
+    /// </summary>
+    [RelayCommand]
+    private async Task AddFieldToCeAsync(LiveFieldValue? field)
+    {
+        if (_aobMaker == null || field == null || string.IsNullOrEmpty(field.FieldAddress)) return;
+        var t = CeXmlExportService.MapFieldToCeRecordType(field);
+        await AddRecordToCeAsync(field.Name, field.FieldAddress, t, "field");
+    }
+
+    /// <summary>
+    /// Add a single CE memory record at this field's pointer target (the dereferenced
+    /// object/struct base), typed as an 8-byte hex pointer. Only meaningful for navigable
+    /// pointer fields (PtrAddress populated).
+    /// </summary>
+    [RelayCommand]
+    private async Task AddPtrToCeAsync(LiveFieldValue? field)
+    {
+        if (_aobMaker == null || field == null || string.IsNullOrEmpty(field.PtrAddress)) return;
+        await AddRecordToCeAsync(field.Name, field.PtrAddress, CeXmlExportService.PointerRecordType, "ptr");
+    }
+
+    /// <summary>
+    /// Shared back-end for the per-row Add-to-CE buttons: push one typed memory record to
+    /// CE via the AOBMaker plugin and reflect the outcome in the status line. Keeps the
+    /// always-visible toolbar chip honest by syncing <see cref="IsAobMakerAvailable"/> to
+    /// the bridge's post-call state.
+    /// </summary>
+    private async Task AddRecordToCeAsync(string name, string address,
+        CeXmlExportService.CeRecordType t, string kind)
+    {
+        try
+        {
+            var ok = await _aobMaker!.CreateMemoryRecordAsync(
+                name, StripHexPrefix(address), t.ValueType, t.IsSigned, t.ShowAsHex);
+            IsAobMakerAvailable = _aobMaker.IsAvailable;
+            StatusText = ok
+                ? $"Added to CE: {name}"
+                : (_aobMaker.IsAvailable
+                    ? $"CE rejected record for {name}"
+                    : "AOBMaker not connected — open CE with the plugin loaded");
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"AOBMaker Add-to-CE ({kind}) failed for {name}", ex);
+            StatusText = $"Add to CE failed: {ex.Message}";
+        }
+    }
+
     [RelayCommand]
     private async Task CopyCurrentAddressAsync()
     {

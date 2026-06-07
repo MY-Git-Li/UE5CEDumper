@@ -298,6 +298,9 @@ public class InterestingFunctionsViewModelTests
         public Task<bool> CreateSymbolScriptAsync(string name, string aob, int pos, int aoblen,
             string symbol, string module, bool autoActivate = true, CancellationToken ct = default)
             => Task.FromResult(false);
+        public Task<bool> CreateMemoryRecordAsync(string description, string address, int valueType,
+            bool isSigned = false, bool showAsHex = false, CancellationToken ct = default)
+            => Task.FromResult(false);
         public Task<(bool Ok, string? ErrorMessage)> InjectTableFileAsync(string fileName, string content,
             CancellationToken ct = default)
             => Task.FromResult<(bool, string?)>((false, null));
