@@ -14,6 +14,37 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-07 — Live Walker one-click "Add to CE" + top-toolbar AOBMaker chip (builds ~960-964)
+
+Two "stop copy-pasting addresses into CE by hand" conveniences that lean on the AOBMaker
+CE plugin's existing capabilities — **zero AOBMaker code changes**; all work is on the
+UE5DumpUI client.
+
+**Per-row +CE (one-click typed memory record).** Live Walker rows already had Addr / Name /
+HEX. Added a **+CE** button on the field-address column and on the pointer column that pushes
+a single typed CE memory record straight into the address list via the plugin's
+`CreateMemoryRecord` pipe command (`addresslist.createMemoryRecord()`), so the user can jump
+straight to CE's *Find out what accesses this address* instead of copy-address → build-record
+by hand. The record's type/signed/hex is derived from the field via a new
+`CeXmlExportService.MapFieldToCeRecordType` that **reuses the same UE→CE mapping that drives
+Copy CE XML / Copy CE Field** (single source of truth); the pointer button uses
+`PointerRecordType` (8 Bytes / ShowAsHex). Batch adds intentionally stay on the existing
+multi-select **Copy CE Field** (clipboard) — Copy CE XML / Copy CE Field are unchanged.
+- Bridge: `IAobMakerBridge.CreateMemoryRecordAsync(description, address, valueType, isSigned,
+  showAsHex)` + `AobMakerMessage` gains `valueType` (nullable `int?` so a Byte record's `0`
+  still serializes) / `isSigned` / `showAsHex`. `showAsHex` requires an **AOBMaker plugin
+  built on/after 2026-06-07**; older plugins still create the record, just in decimal.
+
+**Always-visible AOBMaker status chip (top toolbar).** Mirrored the System-tab AOBMaker
+indicator into the main toolbar: colored dot + Connected/Offline + a **⟳** manual refresh
+(`MainWindowViewModel.IsAobMakerAvailable` + `RefreshAobMakerCommand`, mirrored from the
+LiveWalker/Pointers per-tab probes like the stale-DLL badge). Visible from every tab so the
+user can confirm CE connectivity before using HEX/+CE actions; the System-tab indicator stays.
+
+Tests: +CreateMemoryRecord wire round-trip (valueType-always-emitted, false-flags-omitted)
+and +MapFieldToCeRecordType mapping coverage (1299 C# green). Docs:
+[aobmaker-integration.md](aobmaker-integration.md) updated (message type 6 + version note).
+
 ## 2026-06-06 — Global stale-DLL badge + Live Walker tooltip-flicker fix (builds 956-958)
 
 Two small UX fixes from a "manual proxy-DLL deploy" discussion.

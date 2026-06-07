@@ -1896,6 +1896,59 @@ public static class CeXmlExportService
     }
 
     /// <summary>
+    /// CE memory-record type descriptor for the AOBMaker <c>CreateMemoryRecord</c> pipe
+    /// command: a numeric CE <c>TVariableType</c> plus the signed / hex display flags.
+    /// </summary>
+    public readonly record struct CeRecordType(int ValueType, bool IsSigned, bool ShowAsHex);
+
+    // CE TVariableType numeric codes for AOBMaker CreateMemoryRecord.
+    // Source: AOBMaker docs/API-CEPlugin.md (the CE plugin SDK header is WRONG — use these).
+    private const int CeVtByte = 0, CeVtWord = 1, CeVtDword = 2, CeVtQword = 3,
+                      CeVtSingle = 4, CeVtDouble = 5, CeVtString = 6,
+                      CeVtUnicodeString = 7, CeVtByteArray = 8, CeVtBinary = 9;
+
+    /// <summary>
+    /// Map a Live Walker field to a CE memory-record type for a one-click "Add to CE"
+    /// push (AOBMaker <c>CreateMemoryRecord</c>). Reuses the same UE→CE mapping that drives
+    /// Copy CE XML / Copy CE Field so the single-record push stays consistent with the
+    /// clipboard exports. Non-scalar fields (struct/array/etc.) fall back to 8 Bytes /
+    /// ShowAsHex; bit-field bools — which the single-record command can't fully express —
+    /// fall back to the containing Byte.
+    /// </summary>
+    public static CeRecordType MapFieldToCeRecordType(LiveFieldValue field)
+    {
+        var info = MapCeField(field);
+        if (info == null)
+            return PointerRecordType; // non-scalar (struct/array/etc.) -> 8 Bytes hex
+        return new CeRecordType(KeywordToValueType(info.VariableType), info.IsSigned, info.ShowAsHex);
+    }
+
+    /// <summary>
+    /// CE record type for a raw 8-byte pointer target (a dereferenced object/struct base):
+    /// 8 Bytes shown as hex. Used by the one-click "Add ptr target to CE" push.
+    /// </summary>
+    public static CeRecordType PointerRecordType => new(CeVtQword, IsSigned: false, ShowAsHex: true);
+
+    /// <summary>
+    /// Convert a CE VariableType keyword (as produced by <see cref="MapCeField"/>) to its
+    /// numeric <c>TVariableType</c> code. "Binary" (a bit-field bool) maps to Byte since the
+    /// single-record command carries no bit start/length — pushing the containing byte is the
+    /// most useful target for a "what accesses this address" breakpoint.
+    /// </summary>
+    private static int KeywordToValueType(string keyword) => keyword switch
+    {
+        "Byte" => CeVtByte,
+        "2 Bytes" => CeVtWord,
+        "4 Bytes" => CeVtDword,
+        "8 Bytes" => CeVtQword,
+        "Float" => CeVtSingle,
+        "Double" => CeVtDouble,
+        "String" => CeVtString,
+        "Binary" => CeVtByte,
+        _ => CeVtQword,
+    };
+
+    /// <summary>
     /// Map an array inner type name to CE field info.
     /// Similar to MapCeField but takes a type name string (for array element types).
     /// BoolProperty in arrays = full byte (no bitfield).

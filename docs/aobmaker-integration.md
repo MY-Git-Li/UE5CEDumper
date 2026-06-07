@@ -186,6 +186,51 @@ The generated script performs: `AOBScanModule` → read RIP-relative displacemen
 **Used by:**
 - PointerPanel: SYM button registers GWorld pointer as persistent CE symbol
 
+### 6. `CreateMemoryRecord`
+
+Add a single typed memory record straight into CE's address list (the plugin calls
+`getAddressList().createMemoryRecord()`, sets Description / Address / Type / ShowAsSigned /
+ShowAsHex, and self-verifies). One-click alternative to "copy the address, then build the
+record by hand in CE" — e.g. so the user can immediately run CE's **Find out what accesses
+this address** on a Live Walker field.
+
+```json
+// Request
+{
+  "type": "CreateMemoryRecord",
+  "description": "Health",
+  "address": "2DA53B24970",
+  "valueType": 4,
+  "isSigned": false,
+  "showAsHex": false
+}
+
+// Response
+{ "type": "CreateMemoryRecordResult", "success": true }
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `description` | string | Record label in CE's address list (typically the field Name) |
+| `address` | string | Hex address without `0x`, or a registersymbol name |
+| `valueType` | int | CE `TVariableType`: `0`=Byte, `1`=Word, `2`=Dword, `3`=Qword, `4`=Single, `5`=Double, `6`=String, `7`=UnicodeString, `8`=ByteArray, `9`=Binary |
+| `isSigned` | bool | Display integer types as signed |
+| `showAsHex` | bool | Display as hex. **Requires an AOBMaker CE plugin compiled on/after 2026-06-07** — older builds silently ignore it (default `false` is back-compatible). Ignored for string types (6/7). |
+
+The wire model omits `valueType` from unrelated messages (it is a nullable `int?` so a Byte
+record's `0` still serializes), and omits `isSigned` / `showAsHex` when `false`.
+
+**Used by:**
+- LiveWalker: per-row **+CE** buttons (field address + pointer target) — see UI Integration
+  Points. Type/signed/hex are derived via `CeXmlExportService.MapFieldToCeRecordType`, reusing
+  the exact UE→CE type mapping that drives Copy CE XML / Copy CE Field. Batch adds still go
+  through multi-select **Copy CE Field** (clipboard).
+
+> **Minimum AOBMaker build:** the typed-record push works against any plugin that handles
+> `CreateMemoryRecord`, but the `showAsHex` flag (pointer / 8-byte fields shown as hex)
+> needs a plugin **compiled on/after 2026-06-07**. On older plugins the record is still
+> created — it just displays in decimal.
+
 ---
 
 ## Detection & Lifecycle
@@ -278,6 +323,16 @@ Each `NavigateHexViewAsync` / `NavigateDisassemblerAsync` / `CreateAAScriptAsync
 | Field **HEX** | `NavigateHexView` | `field.FieldAddress` (base + offset) |
 | Ptr **HEX** | `NavigateHexView` | `field.PtrAddress` (dereferenced pointer target) |
 | Object **HEX** | `NavigateHexView` | `CurrentAddress` (current object base) |
+| Field **+CE** | `CreateMemoryRecord` | `field.FieldAddress` — typed via `MapFieldToCeRecordType` |
+| Ptr **+CE** | `CreateMemoryRecord` | `field.PtrAddress` — 8 Bytes / ShowAsHex (`PointerRecordType`) |
+
+### Top-Toolbar Status Chip
+
+`MainWindow.axaml` carries an always-visible AOBMaker status chip (colored dot +
+Connected/Offline + **⟳** refresh) bound to `MainWindowViewModel.IsAobMakerAvailable`.
+It mirrors the per-tab availability (LiveWalker / Pointers each probe on tab activation),
+and the **⟳** button re-probes on demand (`RefreshAobMakerCommand`). The System-tab
+indicator (PointerPanel) stays as the detailed in-tab status.
 
 ### Invoke Script Delivery
 
@@ -334,7 +389,8 @@ AOBMaker CE Plugin
 
 | File | Role |
 |------|------|
-| `ui/UE5DumpUI/Core/IAobMakerBridge.cs` | Interface — 6 methods (incl. `InjectTableFileAsync`) |
+| `ui/UE5DumpUI/Core/IAobMakerBridge.cs` | Interface — 7 methods (incl. `CreateMemoryRecordAsync`, `InjectTableFileAsync`) |
+| `ui/UE5DumpUI/Services/CeXmlExportService.cs` | `MapFieldToCeRecordType` / `PointerRecordType` — UE→CE record-type mapping shared with Copy CE XML/Field |
 | `ui/UE5DumpUI/Services/AobMakerBridgeService.cs` | Implementation — pipe client, per-request reconnect |
 | `ui/UE5DumpUI/Models/AobMakerMessage.cs` | Wire model + AOT-safe `JsonSerializerContext` |
 | `ui/UE5DumpUI/Models/EngineState.cs` | AOB metadata (scan addr, pattern, pos, aoblen) |

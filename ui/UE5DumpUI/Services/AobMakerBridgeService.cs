@@ -24,6 +24,7 @@ public sealed class AobMakerBridgeService : IAobMakerBridge, IDisposable
     private const string TypeNavigateDisassembler = "NavigateDisassembler";
     private const string TypeCreateAAScript = "CreateAAScript";
     private const string TypeCreateSymbolScript = "CreateSymbolScript";
+    private const string TypeCreateMemoryRecord = "CreateMemoryRecord";
     private const string TypeInjectTableFile = "InjectTableFile";
 
     // Inject ships an entire helper Lua file payload, runs CE Lua via
@@ -312,6 +313,69 @@ public sealed class AobMakerBridgeService : IAobMakerBridge, IDisposable
             catch (Exception ex)
             {
                 _log?.Warn(Constants.LogCatInit, $"AOBMaker CreateSymbolScript error: {ex.Message}");
+                IsAvailable = false;
+                CleanupPipe();
+                return false;
+            }
+        }
+        finally
+        {
+            _opLock.Release();
+        }
+    }
+
+    public async Task<bool> CreateMemoryRecordAsync(string description, string address,
+        int valueType, bool isSigned = false, bool showAsHex = false, CancellationToken ct = default)
+    {
+        await _opLock.WaitAsync(ct);
+        try
+        {
+            if (!await ReconnectAsync(ct))
+            {
+                IsAvailable = false;
+                return false;
+            }
+
+            try
+            {
+                var request = new AobMakerMessage
+                {
+                    Type = TypeCreateMemoryRecord,
+                    Description = description,
+                    Address = address,
+                    ValueType = valueType,
+                    IsSigned = isSigned,
+                    ShowAsHex = showAsHex
+                };
+
+                await WriteMessageAsync(_pipe!, request, ct);
+
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeoutCts.CancelAfter(ResponseTimeoutMs);
+
+                var response = await ReadMessageAsync(_pipe!, timeoutCts.Token);
+                CleanupPipe();
+                if (response == null || !response.Success)
+                {
+                    _log?.Warn(Constants.LogCatInit,
+                        $"AOBMaker CreateMemoryRecord failed: {response?.Message ?? "no response"}");
+                    return false;
+                }
+
+                IsAvailable = true;
+                _log?.Info(Constants.LogCatInit,
+                    $"AOBMaker: created memory record '{description}' @ {address} (type {valueType})");
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                _log?.Warn(Constants.LogCatInit, $"AOBMaker CreateMemoryRecord timed out for '{description}'");
+                CleanupPipe();
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _log?.Warn(Constants.LogCatInit, $"AOBMaker CreateMemoryRecord error: {ex.Message}");
                 IsAvailable = false;
                 CleanupPipe();
                 return false;

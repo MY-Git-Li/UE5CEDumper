@@ -79,6 +79,12 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int _csxDrilldownDepth; // 0 = flat (dummy), 1+ = real child structures
     [ObservableProperty] private int _previewLimit = 2; // Struct preview sub-field count (0-6)
 
+    // Always-visible top-toolbar AOBMaker status (mirrors the per-tab indicators).
+    [ObservableProperty] private bool _isAobMakerAvailable;
+
+    /// <summary>True when an AOBMaker bridge was supplied — gates the toolbar status chip.</summary>
+    public bool IsAobMakerConfigured => _aobMaker != null;
+
     /// <summary>Computed array element limit: 2^ArrayLimitExponent (2..16384).</summary>
     public int ArrayLimit => 1 << ArrayLimitExponent;
 
@@ -351,6 +357,18 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 OnPropertyChanged(nameof(ShowBuildMismatchBadge));
                 OnPropertyChanged(nameof(BuildMismatchBadgeText));
             }
+            if (e.PropertyName == nameof(PointerPanelViewModel.IsAobMakerAvailable))
+                IsAobMakerAvailable = Pointers.IsAobMakerAvailable;
+        };
+
+        // Mirror the per-tab AOBMaker availability (LiveWalker + Pointers each
+        // probe on their own tab activation) into the always-visible top-toolbar
+        // chip so its state stays correct from any tab without a manual refresh.
+        IsAobMakerAvailable = _aobMaker?.IsAvailable ?? false;
+        LiveWalker.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(LiveWalkerViewModel.IsAobMakerAvailable))
+                IsAobMakerAvailable = LiveWalker.IsAobMakerAvailable;
         };
 
         // Wire Pointers Extra Scan -> refresh all panels after rescan results applied
@@ -1299,6 +1317,39 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             _log.Error($"Save Cheat Table ({source}) failed", ex);
             StatusText = $"Save Cheat Table failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Top-toolbar "&#x27F3;" button: re-probe whether Cheat Engine is running with
+    /// the AOBMaker plugin loaded and update the always-visible status chip. Navigation
+    /// and Add-to-CE actions already re-probe on use, so this is purely for at-a-glance
+    /// feedback. Propagates the result to the Live Walker and Pointers panels so all
+    /// three indicators (and their button enablement) agree.
+    /// </summary>
+    [RelayCommand]
+    private async Task RefreshAobMakerAsync()
+    {
+        if (_aobMaker == null)
+        {
+            IsAobMakerAvailable = false;
+            return;
+        }
+
+        try
+        {
+            var ok = await _aobMaker.CheckAvailabilityAsync();
+            IsAobMakerAvailable = ok;
+            LiveWalker.IsAobMakerAvailable = ok;
+            Pointers.IsAobMakerAvailable = ok;
+            StatusText = ok
+                ? "AOBMaker plugin connected"
+                : "AOBMaker plugin not detected — open Cheat Engine with the AOBMaker plugin loaded";
+        }
+        catch (Exception ex)
+        {
+            IsAobMakerAvailable = false;
+            _log.Error("Refresh AOBMaker status failed", ex);
         }
     }
 

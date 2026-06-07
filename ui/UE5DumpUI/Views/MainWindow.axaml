@@ -79,6 +79,31 @@
                     VerticalAlignment="Center"/>
         </StackPanel>
 
+        <!-- AOBMaker plugin status + manual refresh. Mirrors the System-tab
+             indicator but stays visible from every tab so the user can confirm
+             CE connectivity at a glance before using HEX/ASM/Add-to-CE actions.
+             Only shown when the bridge is configured. -->
+        <StackPanel Orientation="Horizontal" Spacing="4"
+                    VerticalAlignment="Center" Margin="8,2"
+                    IsVisible="{Binding IsAobMakerConfigured}">
+          <Ellipse Width="9" Height="9" Fill="#4EC9B0" VerticalAlignment="Center"
+                   IsVisible="{Binding IsAobMakerAvailable}"/>
+          <Ellipse Width="9" Height="9" Fill="#888888" VerticalAlignment="Center"
+                   IsVisible="{Binding !IsAobMakerAvailable}"/>
+          <TextBlock Text="{StaticResource str.Toolbar.AobMakerLabel}"
+                     Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center"/>
+          <TextBlock Text="{StaticResource str.Toolbar.AobMakerConnected}"
+                     Foreground="#4EC9B0" FontSize="12" VerticalAlignment="Center"
+                     IsVisible="{Binding IsAobMakerAvailable}"/>
+          <TextBlock Text="{StaticResource str.Toolbar.AobMakerOffline}"
+                     Foreground="#888888" FontSize="12" VerticalAlignment="Center"
+                     IsVisible="{Binding !IsAobMakerAvailable}"/>
+          <Button Content="{StaticResource str.Toolbar.AobMakerRefresh}"
+                  Command="{Binding RefreshAobMakerCommand}"
+                  ToolTip.Tip="{StaticResource str.Tip.Toolbar.AobMakerRefresh}"
+                  Padding="6,2" FontSize="12" VerticalAlignment="Center"/>
+        </StackPanel>
+
         <!-- Options popover (⚙):
              Collapses 5 export-shape controls (Collapse Pointers + 4 slider
              limits) into a single dropdown to keep the top toolbar on one
