@@ -35,6 +35,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: false
+          fetch-depth: 0          # full history + all tags — needed for the prev-tag changelog
 
       - name: Init public build submodules
         shell: pwsh
@@ -91,28 +92,43 @@ jobs:
             ${{ env.ZIP }}.sha256
           if-no-files-found: error
 
-      - name: Create DRAFT GitHub Release
+      - name: Build release notes (changelog between the previous tag and this tag)
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
+        # Generate the "previous v* tag -> this tag" commit list and fold it into
+        # the evergreen boilerplate (intro / Setup / unsigned warning). The static
+        # "## Highlights" feature list is gone — the changelog replaces it so the
+        # notes never go stale. Merge commits are dropped (--no-merges) so the list
+        # shows the real dev commits, not the "Merge pull request #N" bubbles on main.
         run: |
-          $tag = $env:GITHUB_REF_NAME
-          # Curated default notes. The Snapshot / SPC Query / Class Pivot
-          # experimental tabs are intentionally omitted (in git history, but not
-          # release-facing). Edit these in the DRAFT before publishing.
+          $cur = $env:GITHUB_REF_NAME
+          # Previous release tag = the newest v* tag reachable from this tag's parent.
+          # Tags are expected on main (the web release page targets the default
+          # branch); a tag pushed onto dev could miss main's merge-commit tags.
+          $prev = (git tag -l "v*" --merged "$cur^" --sort=-creatordate |
+                   Where-Object { $_ -ne $cur } | Select-Object -First 1)
+          if ($prev) {
+            $commits = git log --no-merges "--pretty=format:- %s (%h)" "$prev..$cur"
+            $header  = "## Changes since $prev"
+            $compare = "**Full Changelog**: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/compare/$prev...$cur"
+          } else {
+            $commits = git log --no-merges "--pretty=format:- %s (%h)" $cur
+            $header  = "## Changes"
+            $compare = $null
+          }
+          if (-not $commits) { $commits = @('- (no commits)') }
+
           $notes = @(
             'UE5CEDumper — Unreal Engine 4/5 dumper (C++ DLL + Cheat Engine bridge + Avalonia UI).',
             '',
             'Self-contained Windows x64 build (Native AOT). No .NET runtime install required.',
             '',
-            '## Highlights',
-            '- Dynamic offset detection (GObjects / GNames / GWorld) across UE4 4.18+ and UE5 5.0-5.8+',
-            '- Object Tree / Live Walker / Instance Finder / Property Search',
-            '- Value Search (CE-style by-value scan): numeric / string / vector / TArray / TSet / TMap / TOptional, with server-side filter / sort / paging',
-            '- UFunction discovery + invoke (pipe + CE AA-script export); Console (UFUNCTION exec)',
-            '- Property <-> function bytecode cross-reference (Blueprint + native)',
-            '- CE XML / CSX / SDK header / USMAP export',
+            $header,
+            ''
+          )
+          $notes += $commits
+          if ($compare) { $notes += @('', $compare) }
+          $notes += @(
             '',
             '## Setup',
             '- Inject via the bundled Cheat Engine table (UE5CEDumper.CT), or drop the proxy version.dll into the game''s Binaries\Win64.',
@@ -121,14 +137,23 @@ jobs:
             '> The exe is unsigned — Windows SmartScreen / antivirus may warn on first run. Verify the download with the included .sha256.'
           )
           Set-Content -Path release-notes.md -Value $notes -Encoding utf8
+          Write-Host "Built release notes ($header)."
 
-          # Upsert so this is safe whether the tag was pushed via `git push`
-          # (no release yet -> create a DRAFT) OR created via the web UI
-          # (release already exists -> just attach the assets).
+      - name: Create / update GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          # Upsert so this is safe whether the tag was pushed via `git push` (no
+          # release yet -> create a DRAFT) OR created via the web release page
+          # (release already exists -> overwrite its notes with the changelog).
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
+            gh release edit $tag --notes-file release-notes.md
             gh release upload $tag "$env:ZIP" "$env:ZIP.sha256" --clobber
-            Write-Host "Release $tag already existed — uploaded assets to it."
+            Write-Host "Release $tag already existed — overwrote notes with changelog + uploaded assets."
           } else {
             gh release create $tag "$env:ZIP" "$env:ZIP.sha256" `
               --draft `
