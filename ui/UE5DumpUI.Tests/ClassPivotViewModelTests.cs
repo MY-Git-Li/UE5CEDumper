@@ -427,6 +427,42 @@ public class ClassPivotViewModelTests : IDisposable
         Assert.Equal("BetaField", Assert.Single(vm.Fields).Name);
     }
 
+    [Fact]
+    public async Task CacheHit_DoesNotLetStaleInflightLoadClobberLatest()
+    {
+        // Regression: the monotonic field-load guard was bumped only on the
+        // cache-MISS path, so a miss in flight (class A) that completed AFTER a
+        // switch to an already-CACHED class (B) overwrote B's fields with A's.
+        var store = new GatedStore();
+        var vm = new ClassPivotViewModel(store, new MockLoggingService());
+        await vm.RefreshAsync();
+        await vm.PendingLoad!;
+
+        // Load + complete B so its field list is cached in the VM.
+        vm.SelectedClass = vm.Classes.First(c => c.ClassName == "B");
+        var loadB1 = vm.PendingLoad!;
+        await WaitForGate(store, "B");
+        store.Gates["B"].SetResult(new[] { Field("BetaField") });
+        await loadB1;
+        Assert.Equal("BetaField", Assert.Single(vm.Fields).Name);
+
+        // Select A (cache miss → gated, in flight), then re-select B (cache hit →
+        // applied instantly, no scan). Wait for A's gate so it is genuinely in
+        // flight before B supersedes it (slow-runner safety, as in RapidClassSwitch).
+        vm.SelectedClass = vm.Classes.First(c => c.ClassName == "A");
+        var loadA = vm.PendingLoad!;
+        await WaitForGate(store, "A");
+        vm.SelectedClass = vm.Classes.First(c => c.ClassName == "B");   // cache hit
+        if (vm.PendingLoad != null) await vm.PendingLoad;
+        Assert.Equal("BetaField", Assert.Single(vm.Fields).Name);       // B from cache
+
+        // Let the stale A load finish — it must bail on the entry-bumped guard and
+        // NOT clobber B's cached fields.
+        store.Gates["A"].SetResult(new[] { Field("AlphaField") });
+        await loadA;
+        Assert.Equal("BetaField", Assert.Single(vm.Fields).Name);
+    }
+
     // The store call is deferred to a thread pool (Task.Run), so spin briefly until
     // the gated load has registered its TaskCompletionSource.
     private static async Task WaitForGate(GatedStore store, string cls)

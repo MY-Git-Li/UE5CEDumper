@@ -14,6 +14,38 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-08 — Class Pivot: close the stale-load clobber race on the cache-hit path (build 972)
+
+Verification pass over the experimental Class Pivot tab's snapshot/class selection
+flow (the area that took several rounds to stabilise) surfaced one real latent race.
+`ClassPivotViewModel.LoadClassesAsync` / `LoadFieldsAsync` use a monotonic guard
+(`_classLoadId` / `_fieldLoadId`) so a slower in-flight scan started by a prior
+snapshot/class bails instead of clobbering the picker. **But the `++_loadId` bump only
+happened on the cache-MISS path** — the cache-hit and empty early-return paths returned
+without advancing the counter. So this sequence clobbered:
+
+1. snapshot/class **B** is already cached; select **A** (not cached) → cache miss →
+   `id=N`, heavy `Task.Run` scan in flight.
+2. quickly switch back to **B** (cache hit) → B's list applied instantly, counter
+   **still `N`**.
+3. A's scan completes → guard `id(N) != _loadId(N)` is **false** → A's list overwrites
+   B's → the picker shows the wrong snapshot/class's classes/fields.
+
+Both chains had the hole. Fix: move `int id = ++_classLoadId;` / `++_fieldLoadId;` to
+**method entry**, so cache-hit and early-return also supersede any in-flight stale load
+(it bails on the id mismatch). 3-line change, no behavioural change to the happy path;
+matches the existing guard design. The pre-existing `_loadCts` cancel stays on the
+cache-miss path (it's a perf optimisation for the rapid-miss case; the id guard is the
+correctness mechanism).
+
+Existing tests only covered miss-vs-miss (`RapidClassSwitch`) and a no-in-flight cache
+hit (`ClassList_IsCachedPerSnapshot`); the **miss-in-flight vs cache-hit** cross was
+uncovered. Added `CacheHit_DoesNotLetStaleInflightLoadClobberLatest` (gated store: load+
+cache B, start a gated A miss, re-select B from cache, then let A finish — asserts the
+fields stay B's). **Verified it fails without the fix** (`Expected "BetaField", Actual
+"AlphaField"`) and passes with it. Tests **1300 → 1301 C#**; full `build.ps1` green
+(452 dll_helpers + 1301 C#). Pure C# VM change — no DLL/pipe/AOT surface touched.
+
 ## 2026-06-07 — DLL-build indicator moved next to version + propagation fix (build ~968)
 
 User reported the stale-DLL alert "never shows" next to `v1.0.0.966`. Investigation: the dist
