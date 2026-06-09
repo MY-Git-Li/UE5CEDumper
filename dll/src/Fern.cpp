@@ -1877,6 +1877,9 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             // to avoid concurrent cross-thread reads that some games' anti-tamper
             // flags — slower but stealthier.
             bool parallel = request.value("parallel", true);
+            // Per-object batch body read. Default true (fewer SEH reads + better
+            // locality). UI sends batch_read=false to force one read per field.
+            bool batchRead = request.value("batch_read", true);
 
             ValueScan::DataType dt;
             if (!ValueScan::TryParseDataType(dtStr, dt)) {
@@ -1954,7 +1957,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             auto scanResult = Aura::ScanForValue(
                 dt, st, targetBytes, target2Ptr, gameOnly, maxResults,
                 tolerance, targetString, caseSensitive, multiPtr, multiPtr2,
-                parallel);
+                parallel, batchRead);
 
             uint64_t sessionId = ValueScan::SessionManager::Instance().Begin(
                 dt, std::move(scanResult.candidates),

@@ -148,6 +148,7 @@ public interface IDumpService
         double tolerance = 0.0,
         bool caseSensitive = false,
         bool parallel = true,
+        bool batchRead = true,
         int pageSize = 1000,
         CancellationToken ct = default);
 

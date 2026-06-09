@@ -14,6 +14,45 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-09 — Value Search: per-object batch read (default ON) to speed up First Scan (build 974)
+
+Follow-up to the parallel toggle. The First Scan is a **reflection-driven pointer walk**
+(GObjects → class → field index → read each leaf at `obj+offset`), so its cost is
+scattered cache-miss latency + per-field SEH-read overhead, NOT arithmetic (SIMD wouldn't
+help — data is non-contiguous). One lever that fits the model: read each object's
+fixed-width leaf fields in **one body read** instead of one SEH read per field — fewer
+`__try` frames + better locality.
+
+**DLL.** Per class, `buildClassIndex` precomputes the **body span** over `container==None`
+fixed-width leaves: `[min(offset), max(offset+16)]` (a leaf reads ≤16B; TOptional also its
+flag byte). Per object, a gate decides if batching pays off — `bodyFieldCount >=
+kMinBatchFields(4)` AND `span <= kMaxBatchSpan(64KB)` AND `span <= fields *
+kBatchBytesPerField(512)` (a density cap so a couple of fields spread across a big object
+don't trigger a giant over-read) AND not a string scan. If so, ONE `ReadBytesSafe` fills a
+**reused per-thread buffer** (`objBodyBuf`); a new `readBody(off, dst, size)` lambda serves
+the vector / multi-numeric / single-numeric / optional-flag reads from it, **falling back
+to a direct SEH read** when the buffer is null (gate failed or the read faulted — e.g. the
+span straddled an unmapped page, which `ReadBytesSafe` zeroes-then-returns-false on) or
+doesn't cover the range. Strings (`Ubel::ReadF*At` chase a separate char buffer), TArray
+data, and TSet/TMap sparse data live in other heap allocations → always read directly. The
+candidate's `addr` stays the real `obj+offset` (only the *read* is redirected). Buffer cost
+= (worker threads) × (≤64KB), reused per object — independent of object count, so **no
+meaningful memory growth** (dwarfed by the lean candidate pools).
+
+**Toggle.** `ScanForValue(…, bool batchRead = true)`; Fern parses `batch_read` (default
+true); pipe attaches it **only when false** (wire byte-identical otherwise). UI:
+`ValueSearchViewModel.BatchRead` (default true) → "Batch read" checkbox next to "Parallel
+scan" + tooltip. `IDumpService`/`DumpService` gain the param (before `pageSize`).
+
+**Tests.** +`BeginValueScanAsync_AttachesBatchReadFalseWhenDisabled` (wire omit/false) +
+`ViewModel_BatchRead_DefaultsTrue_AndPassesThrough` (VM default + pass-through via
+`FakeDumpService.LastBatchRead`); both stub signatures updated. **1303 → 1305 C#**; full
+`build.ps1` green (31 utf8 + 452 dll_helpers + 1305 C#); DLL recompiled. **Live-verified
+2026-06-09 (user):** batch-on vs batch-off produce **identical results, no regression /
+crash** (correctness confirmed). Speedup **inconclusive** — the test game's object set was
+too small to measure a clear gain; the win should surface on big-object games (FF7R-class,
+~400K objects). Constants (4 / 64KB / 512) remain tunable once there's a big-game profile.
+
 ## 2026-06-09 — Value Search: "Parallel scan" toggle (default ON) for anti-tamper-sensitive games (build 973)
 
 User report: Value Search First Scan is a bit slow, but its parallel GObjects walk

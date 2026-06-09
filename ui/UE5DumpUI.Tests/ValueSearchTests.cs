@@ -150,6 +150,45 @@ public class ValueSearchTests
     }
 
     [Fact]
+    public async Task BeginValueScanAsync_AttachesBatchReadFalseWhenDisabled()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"]              = req["id"]?.GetValue<int>() ?? 0,
+                ["ok"]              = true,
+                ["session_id"]      = 3UL,
+                ["data_type"]       = "Int32",
+                ["total"]           = 0,
+                ["scanned_classes"] = 0,
+                ["scanned_objects"] = 0,
+                ["duration_ms"]     = 1L,
+                ["deadline_hit"]    = false,
+                ["candidates"]      = new JsonArray(),
+            };
+        });
+
+        // Default (batchRead:true) → omitted.
+        await svc.BeginValueScanAsync(
+            ValueScanDataType.Int32, ValueScanType.Exact, value: "1",
+            ct: TestContext.Current.CancellationToken);
+        Assert.False(captured!.ContainsKey("batch_read"),
+            "batch_read must be omitted when left at its default (true)");
+
+        // Disabled → batch_read:false on the wire.
+        await svc.BeginValueScanAsync(
+            ValueScanDataType.Int32, ValueScanType.Exact, value: "1", batchRead: false,
+            ct: TestContext.Current.CancellationToken);
+        Assert.True(captured!.ContainsKey("batch_read"));
+        Assert.False(captured["batch_read"]?.GetValue<bool>(),
+            "batch_read:false forces one SEH read per field");
+    }
+
+    [Fact]
     public async Task BeginValueScanAsync_ParsesCandidates()
     {
         var svc = MakeService(out var pipe);
@@ -1084,6 +1123,24 @@ public class ValueSearchTests
     }
 
     [Fact]
+    public async Task ViewModel_BatchRead_DefaultsTrue_AndPassesThrough()
+    {
+        var (vm, fake) = MakeVm();
+        fake.NextBeginResult = new ValueScanBeginResult { SessionId = 1UL };
+        vm.SelectedDataType = ValueScanDataType.Int32;
+        vm.SelectedScanType = ValueScanType.Exact;
+        vm.Value = "100";
+
+        Assert.True(vm.BatchRead);                    // default ON
+        await vm.FirstScanCommand.ExecuteAsync(null);
+        Assert.Equal(true, fake.LastBatchRead);
+
+        vm.BatchRead = false;                         // force per-field reads
+        await vm.FirstScanCommand.ExecuteAsync(null);
+        Assert.Equal(false, fake.LastBatchRead);
+    }
+
+    [Fact]
     public async Task FirstScan_RejectsIncompatibleScanTypeForDataType()
     {
         // FString + Bigger is a legal-individually pair but illegal in
@@ -1122,16 +1179,18 @@ public class ValueSearchTests
         public List<ulong> Ends { get; } = new();
 
         public bool? LastParallel { get; private set; }
+        public bool? LastBatchRead { get; private set; }
 
         public override Task<ValueScanBeginResult> BeginValueScanAsync(
             ValueScanDataType dataType, ValueScanType scanType,
             string value, string? value2 = null, bool gameOnly = true,
             int maxResults = 50000, double tolerance = 0.0,
-            bool caseSensitive = false, bool parallel = true, int pageSize = 1000,
-            CancellationToken ct = default)
+            bool caseSensitive = false, bool parallel = true, bool batchRead = true,
+            int pageSize = 1000, CancellationToken ct = default)
         {
             Begins.Add((dataType, scanType, value, value2, gameOnly, maxResults, tolerance, caseSensitive));
             LastParallel = parallel;
+            LastBatchRead = batchRead;
             return Task.FromResult(NextBeginResult);
         }
 

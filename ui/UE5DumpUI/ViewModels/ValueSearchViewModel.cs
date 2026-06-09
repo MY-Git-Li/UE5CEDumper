@@ -59,6 +59,12 @@ public partial class ValueSearchViewModel : ViewModelBase
     /// stealthier. Only the First Scan parallelizes; Refine is already serial.</summary>
     [ObservableProperty] private bool   _parallelScan = true;
 
+    /// <summary>When true (default) the DLL reads each object's fixed-width leaf
+    /// fields in one body read (fewer SEH reads + better locality on the
+    /// scattered object walk). Turn off to force one read per field — slower,
+    /// but reads only the exact bytes each field needs. First Scan only.</summary>
+    [ObservableProperty] private bool   _batchRead = true;
+
     /// <summary>CE-style rounded-scan slack for Float/Double and vector
     /// comparisons. Default 0.5 covers the common case: game UI
     /// displays "338" for a real float of 337.5, so scanning for "338"
@@ -519,7 +525,7 @@ public partial class ValueSearchViewModel : ViewModelBase
             var result = await _dump.BeginValueScanAsync(
                 SelectedDataType, SelectedScanType, Value,
                 SelectedScanType == ValueScanType.Between ? Value2 : null,
-                GameOnly, MaxResults, effTol, effCase, ParallelScan, PageSize, cts.Token);
+                GameOnly, MaxResults, effTol, effCase, ParallelScan, BatchRead, PageSize, cts.Token);
 
             SessionId = result.SessionId;
             await ApplyScanResultAsync(result.Total, result.Candidates);

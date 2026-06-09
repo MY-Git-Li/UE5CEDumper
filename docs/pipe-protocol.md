@@ -188,6 +188,9 @@ CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands f
 // parallel: omitted unless false. false forces a single-threaded GObjects walk
 //           (slower, but avoids the burst of concurrent cross-thread reads some
 //           games' anti-tamper flags). First Scan only — refine is always serial.
+// batch_read: omitted unless false. false forces one SEH read per field instead
+//           of one per-object body read (the DLL default, which is faster — fewer
+//           reads + better locality, with automatic per-field fallback).
 {
   "id": 50, "cmd": "begin_value_scan",
   "data_type": "FString",
@@ -196,7 +199,8 @@ CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands f
   "game_only": true,
   "max_results": 50000,
   "case_sensitive": false,      // optional, string types only
-  "parallel": false             // optional, default true (omitted when parallel)
+  "parallel": false,            // optional, default true (omitted when parallel)
+  "batch_read": false           // optional, default true (omitted when batching)
 }
 
 // Next Scan — refine candidates in an open session.
@@ -216,6 +220,7 @@ CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands f
 - `tolerance` is attached only when non-zero AND the data type is Float/Double/FVector/FRotator/FTransform. Integer + string sessions never carry it; the DLL ignores it for those anyway.
 - `case_sensitive` is attached only when true AND the data type is FString/FName/FText.
 - `parallel` is attached only when **false** (the DLL default is true / full parallel). `false` caps the GObjects walk to one worker thread; the UI exposes it as the default-ON "Parallel scan" toggle for anti-tamper-sensitive games.
+- `batch_read` is attached only when **false** (DLL default true). `false` forces one SEH read per field; default batches each object's fixed-width leaf fields into a single body read (per-thread reused buffer, span-capped, with per-field fallback on fault). Strings + container data are always read directly. UI = default-ON "Batch read" toggle.
 - `(data_type, scan_type)` combinations are validated server-side by `IsScanTypeValidFor` — `FString + Bigger` or `Int32 + Contains` return an explicit error rather than running with garbage semantics.
 
 ### Snapshot Capture (experimental — Phase A)

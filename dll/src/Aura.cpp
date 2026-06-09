@@ -3931,7 +3931,8 @@ ValueScanResult ScanForValue(
     bool                caseSensitive,
     const ValueScan::NumericTargetSet* multiTargets,
     const ValueScan::NumericTargetSet* multiTargets2,
-    bool                parallel)
+    bool                parallel,
+    bool                batchRead)
 {
     ValueScanResult result;
     auto t0 = std::chrono::steady_clock::now();
@@ -4010,6 +4011,15 @@ ValueScanResult ScanForValue(
         std::string             classPath;
         bool                    gameClass = false;   // !IsEnginePackage(classPath)
         std::vector<ScanField>  fields;
+        // Per-object batch-read plan (build 974). The body span covering this
+        // class's DIRECT fixed-width leaf fields (container == None) — the reads
+        // that can be served from ONE object-body read instead of one SEH read
+        // per field. String fields and container DATA live in separate heap
+        // allocations, so they're excluded and always read directly.
+        // batchSpan == 0 → nothing worth batching (computed in buildClassIndex).
+        int32_t                 batchMin       = 0;   // min body-leaf offset from obj
+        int32_t                 batchSpan      = 0;   // (max offset+16) - batchMin; 0 = none
+        int32_t                 bodyFieldCount = 0;   // # of container==None leaves
     };
     // DefKey caches FindDefiningClass results per (classAddr, fieldOffset)
     // so a hot scan over many instances of the same class doesn't re-walk
@@ -4031,9 +4041,24 @@ ValueScanResult ScanForValue(
 
     const int32_t count = GetCount();
 
-    LOG_INFO("ValueScan: First Scan dt=%s st=%d (target %zuB, gameOnly=%d, max=%d) over %d objects",
+    // Per-object batch-read gate (build 974). Reading the object's leaf-field
+    // span once and serving fields from the buffer only pays off when there are
+    // enough fields to amortize the read AND they're packed densely enough that
+    // the unused gaps don't out-cost the SEH reads they replace:
+    //   - kMinBatchFields: need at least this many container==None leaves.
+    //   - kMaxBatchSpan:   absolute cap so a huge object never triggers a giant
+    //                      read (also bounds the per-thread scratch buffer).
+    //   - kBatchBytesPerField: density cap — span must be <= fields * this, so a
+    //                      few fields spread far apart fall back to per-field.
+    // Tunable; validated by live First-Scan timing. Buffer cost is
+    // (worker threads) x (<= kMaxBatchSpan), reused per object — a few MB max.
+    constexpr int32_t kMinBatchFields     = 4;
+    constexpr int32_t kMaxBatchSpan       = 64 * 1024;
+    constexpr int32_t kBatchBytesPerField = 512;
+
+    LOG_INFO("ValueScan: First Scan dt=%s st=%d (target %zuB, gameOnly=%d, max=%d, parallel=%d, batch=%d) over %d objects",
              ValueScan::NameOf(dt), static_cast<int>(st), dtSize,
-             gameOnly ? 1 : 0, maxResults, count);
+             gameOnly ? 1 : 0, maxResults, parallel ? 1 : 0, batchRead ? 1 : 0, count);
 
     // Per-thread output of the parallel GObjects walk. Each thread owns its
     // own caches + candidate buffer (lock-free hot path); results merge in
@@ -4057,6 +4082,11 @@ ValueScanResult ScanForValue(
         // thread's chunk. (Threads may redundantly build the same class index;
         // that cost is negligible vs. the GObjects walk and avoids any locking.)
         std::unordered_map<uintptr_t, ScanClassInfo> classCache;
+
+        // Reused per-object batch-read scratch (build 974). One buffer per
+        // worker thread, resized/overwritten per object — so the batch read
+        // costs (threads x <= kMaxBatchSpan), independent of object count.
+        std::vector<uint8_t> objBodyBuf;
 
     // Recursive struct expansion: walks a UStruct's FProperty chain and
     // emits ScanField entries for every leaf property matching the target
@@ -4336,6 +4366,33 @@ ValueScanResult ScanForValue(
         expandFields(expandFields, classAddr, /*baseOffset=*/0,
                      /*namePrefix=*/"", sci.fields, visited, /*depth=*/0);
 
+        // Precompute the per-object batch-read span over DIRECT fixed-width
+        // leaf fields (container == None). Each such field reads at most 16B
+        // (readBuf) from obj+offset; a TOptional also reads its flag byte at
+        // offset+optionalFlagOffset. Strings/containers chase pointers
+        // elsewhere, so they're excluded. The caller's gate decides whether the
+        // span is worth batching; here we just record it.
+        {
+            constexpr int32_t kLeaf = 16;   // readBuf max per leaf
+            int32_t lo = 0, hi = 0, n = 0;
+            bool first = true;
+            for (const auto& f : sci.fields) {
+                if (f.container != ScanContainer::None) continue;
+                if (f.offset < 0) continue;   // defensive: corrupt offset
+                int32_t end = f.offset + kLeaf;
+                if (f.optionalFlagOffset >= 0)
+                    end = std::max(end, f.offset + f.optionalFlagOffset + 1);
+                if (first) { lo = f.offset; hi = end; first = false; }
+                else { if (f.offset < lo) lo = f.offset; if (end > hi) hi = end; }
+                ++n;
+            }
+            if (n > 0 && hi > lo) {
+                sci.batchMin       = lo;
+                sci.batchSpan      = hi - lo;
+                sci.bodyFieldCount = n;
+            }
+        }
+
         auto inserted = classCache.emplace(classAddr, std::move(sci));
         return &inserted.first->second;
     };
@@ -4406,6 +4463,45 @@ ValueScanResult ScanForValue(
         ScanClassInfo* sci = buildClassIndex(cls);
         if (!sci || sci->fields.empty()) continue;
         if (gameOnly && !sci->gameClass) continue;
+
+        // Per-object batch body read (build 974, default on via `batchRead`).
+        // Read the object's fixed-width-leaf span ONCE into the reused thread-
+        // local buffer, then serve those field reads from it instead of one SEH
+        // read per field. Gated so it only fires when it pays off (enough
+        // fields, span bounded absolutely AND by density), and never for string
+        // scans (they chase a separate char buffer). If the single read FAILS
+        // (e.g. the span straddles an unmapped page — ReadBytesSafe zeroes the
+        // whole buffer on fault), bodyBuf stays null and every field falls back
+        // to its own direct read (the pre-974 behavior).
+        const uint8_t* bodyBuf  = nullptr;
+        int32_t        bodyBase = 0, bodyLen = 0;
+        if (batchRead && !isString
+            && sci->bodyFieldCount >= kMinBatchFields
+            && sci->batchSpan > 0
+            && sci->batchSpan <= kMaxBatchSpan
+            && sci->batchSpan <= sci->bodyFieldCount * kBatchBytesPerField) {
+            objBodyBuf.resize(static_cast<size_t>(sci->batchSpan));
+            if (Macht::ReadBytesSafe(obj + sci->batchMin, objBodyBuf.data(),
+                                     static_cast<size_t>(sci->batchSpan))) {
+                bodyBuf  = objBodyBuf.data();
+                bodyBase = sci->batchMin;
+                bodyLen  = sci->batchSpan;
+            }
+        }
+        // Read `size` bytes of the object body at `off`: from the batch buffer
+        // when it fully covers [off, off+size), else a direct SEH read. Returns
+        // false only on a faulting direct read. Used for the fixed-width direct
+        // leaf reads + the TOptional flag byte; strings / container element data
+        // (separate heap) keep their own direct reads.
+        auto readBody = [&](int32_t off, void* dst, size_t size) -> bool {
+            if (bodyBuf && off >= bodyBase
+                && static_cast<int64_t>(off) + static_cast<int64_t>(size)
+                     <= static_cast<int64_t>(bodyBase) + bodyLen) {
+                std::memcpy(dst, bodyBuf + (off - bodyBase), size);
+                return true;
+            }
+            return Macht::ReadBytesSafe(obj + off, dst, size);
+        };
 
         // Defer instance interning until we know this object has a match;
         // FName lookup is cheap but billions of unused calls add up. On
@@ -4594,7 +4690,7 @@ ValueScanResult ScanForValue(
             // false-hit. optionalFlagOffset is -1 for ordinary leaf fields.
             if (sf.optionalFlagOffset >= 0) {
                 uint8_t isSet = 0;
-                if (!Macht::ReadSafe(obj + sf.offset + sf.optionalFlagOffset, isSet)
+                if (!readBody(sf.offset + sf.optionalFlagOffset, &isSet, 1)
                     || isSet == 0)
                     continue;
             }
@@ -4622,7 +4718,7 @@ ValueScanResult ScanForValue(
                 // Vector / Rotator: read 12 bytes (3 floats) from the
                 // struct start. Caller's targetBytes already encodes
                 // the 12-byte (X,Y,Z) layout.
-                if (!Macht::ReadBytesSafe(valueAddr, readBuf, 12)) continue;
+                if (!readBody(sf.offset, readBuf, 12)) continue;
                 if (!ValueScan::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
                 emitCandidate(valueAddr, ensureDescriptor(sf), -1, readBuf, 12, nullptr);
                 continue;
@@ -4638,13 +4734,13 @@ ValueScanResult ScanForValue(
                 const uint8_t* mtgt2 = nullptr;
                 if (!multiResolve(sf.typeName, memberDt, mtgt, mtgt2)) continue;
                 size_t msz = ValueScan::SizeOf(memberDt);
-                if (!Macht::ReadBytesSafe(valueAddr, readBuf, msz)) continue;
+                if (!readBody(sf.offset, readBuf, msz)) continue;
                 if (!ValueScan::ComparePredicate(memberDt, st, readBuf, mtgt, mtgt2, tolerance)) continue;
                 emitCandidate(valueAddr, ensureDescriptor(sf), -1, readBuf, msz, nullptr);
                 continue;
             }
 
-            if (!Macht::ReadBytesSafe(valueAddr, readBuf, dtSize)) continue;
+            if (!readBody(sf.offset, readBuf, dtSize)) continue;
 
             // BoolProperty bitfield normalisation. The bytes we
             // store as prevValue must reflect the LOGICAL bool
