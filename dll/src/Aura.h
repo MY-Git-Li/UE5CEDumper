@@ -627,7 +627,12 @@ ValueScanResult ScanForValue(
     const std::string&  targetString  = "",
     bool                caseSensitive = false,
     const ValueScan::NumericTargetSet* multiTargets  = nullptr,
-    const ValueScan::NumericTargetSet* multiTargets2 = nullptr);
+    const ValueScan::NumericTargetSet* multiTargets2 = nullptr,
+    // When false, the GObjects walk runs single-threaded (no worker threads
+    // spawned) so concurrent cross-thread reads can't trip a game's anti-tamper.
+    // Default true = full parallel scan (fast). Exposed via the pipe `parallel`
+    // field on begin_value_scan and the Value Search "Parallel scan" toggle.
+    bool                parallel      = true);
 
 // Refine an existing candidate vector in place: re-read each
 // candidate's bytes (or string, for FString/FName/FText DataTypes),

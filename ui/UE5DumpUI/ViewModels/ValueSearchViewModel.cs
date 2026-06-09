@@ -53,6 +53,12 @@ public partial class ValueSearchViewModel : ViewModelBase
     [ObservableProperty] private bool   _gameOnly = true;
     [ObservableProperty] private int    _maxResults = 50000;
 
+    /// <summary>When true (default) the DLL walks GObjects with worker threads
+    /// (fast). Turn off to force a single-threaded scan so concurrent
+    /// cross-thread memory reads don't trip a game's anti-tamper — slower but
+    /// stealthier. Only the First Scan parallelizes; Refine is already serial.</summary>
+    [ObservableProperty] private bool   _parallelScan = true;
+
     /// <summary>CE-style rounded-scan slack for Float/Double and vector
     /// comparisons. Default 0.5 covers the common case: game UI
     /// displays "338" for a real float of 337.5, so scanning for "338"
@@ -513,7 +519,7 @@ public partial class ValueSearchViewModel : ViewModelBase
             var result = await _dump.BeginValueScanAsync(
                 SelectedDataType, SelectedScanType, Value,
                 SelectedScanType == ValueScanType.Between ? Value2 : null,
-                GameOnly, MaxResults, effTol, effCase, PageSize, cts.Token);
+                GameOnly, MaxResults, effTol, effCase, ParallelScan, PageSize, cts.Token);
 
             SessionId = result.SessionId;
             await ApplyScanResultAsync(result.Total, result.Candidates);

@@ -185,6 +185,9 @@ CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands f
 // value2:   second target for Between (numeric/vector only)
 // tolerance: float-only — applies to Float/Double + vector types (per-axis); omitted for integer/string
 // case_sensitive: string types only — omitted unless true (CE-style default is insensitive)
+// parallel: omitted unless false. false forces a single-threaded GObjects walk
+//           (slower, but avoids the burst of concurrent cross-thread reads some
+//           games' anti-tamper flags). First Scan only — refine is always serial.
 {
   "id": 50, "cmd": "begin_value_scan",
   "data_type": "FString",
@@ -192,7 +195,8 @@ CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands f
   "value":     "Engine",
   "game_only": true,
   "max_results": 50000,
-  "case_sensitive": false       // optional, string types only
+  "case_sensitive": false,      // optional, string types only
+  "parallel": false             // optional, default true (omitted when parallel)
 }
 
 // Next Scan — refine candidates in an open session.
@@ -211,6 +215,7 @@ CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands f
 **Wire-shape contract** (locked by tests):
 - `tolerance` is attached only when non-zero AND the data type is Float/Double/FVector/FRotator/FTransform. Integer + string sessions never carry it; the DLL ignores it for those anyway.
 - `case_sensitive` is attached only when true AND the data type is FString/FName/FText.
+- `parallel` is attached only when **false** (the DLL default is true / full parallel). `false` caps the GObjects walk to one worker thread; the UI exposes it as the default-ON "Parallel scan" toggle for anti-tamper-sensitive games.
 - `(data_type, scan_type)` combinations are validated server-side by `IsScanTypeValidFor` — `FString + Bigger` or `Int32 + Contains` return an explicit error rather than running with garbage semantics.
 
 ### Snapshot Capture (experimental — Phase A)

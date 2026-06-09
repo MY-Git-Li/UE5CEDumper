@@ -102,6 +102,13 @@
                   IsChecked="{Binding GameOnly}"
                   Foreground="#CCCCCC" FontSize="12"
                   VerticalAlignment="Center"/>
+        <!-- Parallel scan toggle (default ON). Off = single-threaded DLL walk to
+             avoid concurrent reads tripping a game's anti-tamper (slower). -->
+        <CheckBox Content="{StaticResource str.VS.Parallel}"
+                  IsChecked="{Binding ParallelScan}"
+                  ToolTip.Tip="{StaticResource str.Tip.VS.Parallel}"
+                  Foreground="#CCCCCC" FontSize="12"
+                  VerticalAlignment="Center"/>
         <TextBlock Text="{StaticResource str.VS.MaxResults}"
                    Foreground="#CCCCCC" FontSize="12"
                    VerticalAlignment="Center"
