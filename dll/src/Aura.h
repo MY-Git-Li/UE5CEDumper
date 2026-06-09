@@ -632,7 +632,14 @@ ValueScanResult ScanForValue(
     // spawned) so concurrent cross-thread reads can't trip a game's anti-tamper.
     // Default true = full parallel scan (fast). Exposed via the pipe `parallel`
     // field on begin_value_scan and the Value Search "Parallel scan" toggle.
-    bool                parallel      = true);
+    bool                parallel      = true,
+    // When true (default), each object's fixed-width leaf fields are read in ONE
+    // body read (per-thread reused buffer) instead of one SEH read per field —
+    // fewer reads + better locality on the scattered GObjects walk. Falls back
+    // to per-field reads on a faulting batch read or when the class isn't a good
+    // batch candidate. Exposed via the pipe `batch_read` field + the Value
+    // Search "Batch read" toggle. Strings / container data are always direct.
+    bool                batchRead     = true);
 
 // Refine an existing candidate vector in place: re-read each
 // candidate's bytes (or string, for FString/FName/FText DataTypes),

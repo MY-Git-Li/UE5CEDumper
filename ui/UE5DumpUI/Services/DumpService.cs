@@ -1328,6 +1328,7 @@ public sealed class DumpService : IDumpService
         double tolerance = 0.0,
         bool caseSensitive = false,
         bool parallel = true,
+        bool batchRead = true,
         int pageSize = 1000,
         CancellationToken ct = default)
     {
@@ -1363,6 +1364,11 @@ public sealed class DumpService : IDumpService
         // anti-tamper, slower).
         if (!parallel)
             req["parallel"] = false;
+        // Batch read is the DLL default (true) → attach only when disabled.
+        // batch_read=false forces one SEH read per field instead of one
+        // body read per object.
+        if (!batchRead)
+            req["batch_read"] = false;
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);

@@ -109,6 +109,13 @@
                   ToolTip.Tip="{StaticResource str.Tip.VS.Parallel}"
                   Foreground="#CCCCCC" FontSize="12"
                   VerticalAlignment="Center"/>
+        <!-- Batch read toggle (default ON). Off = one SEH read per field
+             instead of one body read per object. -->
+        <CheckBox Content="{StaticResource str.VS.BatchRead}"
+                  IsChecked="{Binding BatchRead}"
+                  ToolTip.Tip="{StaticResource str.Tip.VS.BatchRead}"
+                  Foreground="#CCCCCC" FontSize="12"
+                  VerticalAlignment="Center"/>
         <TextBlock Text="{StaticResource str.VS.MaxResults}"
                    Foreground="#CCCCCC" FontSize="12"
                    VerticalAlignment="Center"
