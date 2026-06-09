@@ -14,6 +14,37 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-09 — Value Search: "Parallel scan" toggle (default ON) for anti-tamper-sensitive games (build 973)
+
+User report: Value Search First Scan is a bit slow, but its parallel GObjects walk
+(many worker threads reading process memory at once) can trip some games'
+anti-tamper / anti-cheat. Added a **default-ON "Parallel scan" toggle** so the user
+can trade speed for stealth when needed — unchecked forces a single-threaded scan.
+
+**DLL.** `ParallelGObjectsScan` (the shared template behind value scan / find-refs /
+xref / containers) gained an optional `int maxThreads = 0` cap (0 = use
+`ScanThreadCount`'s pick; >0 = clamp). `ScanForValue` gained `bool parallel = true`
+and passes `parallel ? 0 : 1` — so off means **one worker, run inline on the calling
+thread, zero std::threads spawned** (the cancel-watcher still runs but only reads an
+atomic, never game memory). Scoped to First Scan only: `RefineCandidates` re-reads
+just the surviving candidate addresses serially, so it was never the concurrent-read
+concern. Fern's `begin_value_scan` parses `parallel` (default true) and threads it in.
+
+**Wire.** New optional `parallel` field on `begin_value_scan`, attached **only when
+false** (DLL default is true) so existing call sites stay byte-identical. Documented
+in [pipe-protocol.md](pipe-protocol.md).
+
+**UI.** `ValueSearchViewModel.ParallelScan` (default true) → a "Parallel scan" checkbox
+next to "Game classes only" with an anti-tamper tooltip → `BeginValueScanAsync(…,
+parallel, …)`. `IDumpService` / `DumpService` gained the `parallel` param (inserted
+before `pageSize`; the one positional VM call updated).
+
+**Tests.** +`BeginValueScanAsync_AttachesParallelFalseWhenDisabled` (wire: omitted by
+default, `false` when off) + `ViewModel_ParallelScan_DefaultsTrue_AndPassesThrough` (VM
+default + pass-through via a new `FakeDumpService.LastParallel`) + an omit assertion on
+the existing build-request test; both stub signatures updated. **1301 → 1303 C#**; full
+`build.ps1` green (31 utf8 + 452 dll_helpers + 1303 C#); DLL recompiled.
+
 ## 2026-06-08 — Class Pivot: close the stale-load clobber race on the cache-hit path (build 972)
 
 Verification pass over the experimental Class Pivot tab's snapshot/class selection

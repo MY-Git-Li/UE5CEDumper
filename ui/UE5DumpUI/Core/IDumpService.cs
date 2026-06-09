@@ -147,6 +147,7 @@ public interface IDumpService
         int maxResults = 50000,
         double tolerance = 0.0,
         bool caseSensitive = false,
+        bool parallel = true,
         int pageSize = 1000,
         CancellationToken ct = default);
 

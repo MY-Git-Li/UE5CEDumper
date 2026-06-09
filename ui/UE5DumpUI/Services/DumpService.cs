@@ -1327,6 +1327,7 @@ public sealed class DumpService : IDumpService
         int maxResults = 50000,
         double tolerance = 0.0,
         bool caseSensitive = false,
+        bool parallel = true,
         int pageSize = 1000,
         CancellationToken ct = default)
     {
@@ -1356,6 +1357,12 @@ public sealed class DumpService : IDumpService
         // user explicitly opts to case-sensitive AND the type can use it.
         if (caseSensitive && IsStringDataType(dataType))
             req["case_sensitive"] = true;
+        // Parallel scan is the DLL default (true) → only attach when the user
+        // turns it OFF, so existing call sites stay byte-identical on the wire.
+        // parallel=false forces a single-threaded DLL walk (stealthier vs
+        // anti-tamper, slower).
+        if (!parallel)
+            req["parallel"] = false;
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);

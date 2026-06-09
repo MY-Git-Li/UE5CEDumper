@@ -149,8 +149,14 @@ struct ParallelScanResult {
 // to the caller (via ConcatTruncate) because the element type differs per scan.
 // After join, returns {perThread (moved), nthreads, deadlineHit.load()}.
 template <typename PerThreadT, typename BodyFn>
-ParallelScanResult<PerThreadT> ParallelGObjectsScan(int32_t count, BodyFn&& body) {
-    const int nthreads = ScanThreadCount(count);
+ParallelScanResult<PerThreadT> ParallelGObjectsScan(int32_t count, BodyFn&& body, int maxThreads = 0) {
+    int nthreads = ScanThreadCount(count);
+    // maxThreads > 0 caps the auto-picked worker count. A caller passes 1 to
+    // force a fully serial walk (the body runs inline on the calling thread, no
+    // std::threads spawned) — used by Value Search's "parallel" toggle when the
+    // user turns it off, so concurrent cross-thread memory reads can't trip a
+    // game's anti-tamper. 0 = no cap (use whatever ScanThreadCount picked).
+    if (maxThreads > 0 && nthreads > maxThreads) nthreads = maxThreads;
     std::vector<PerThreadT> perThread(static_cast<size_t>(std::max(1, nthreads)));
     std::atomic<bool> deadlineHit{false};
 
@@ -3924,7 +3930,8 @@ ValueScanResult ScanForValue(
     const std::string&  targetString,
     bool                caseSensitive,
     const ValueScan::NumericTargetSet* multiTargets,
-    const ValueScan::NumericTargetSet* multiTargets2)
+    const ValueScan::NumericTargetSet* multiTargets2,
+    bool                parallel)
 {
     ValueScanResult result;
     auto t0 = std::chrono::steady_clock::now();
@@ -4659,7 +4666,7 @@ ValueScanResult ScanForValue(
         for (const auto& kv : classCache) {
             if (!kv.second.fields.empty()) tr.classesWithFields.insert(kv.first);
         }
-    });  // ParallelGObjectsScan
+    }, /*maxThreads=*/ parallel ? 0 : 1);  // ParallelGObjectsScan (1 = serial when toggle off)
 
     // Fold per-thread stats.
     std::unordered_set<uintptr_t> classesWithFields;

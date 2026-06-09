@@ -1872,6 +1872,11 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             // String scans only: opt-in case sensitivity. Default is
             // CE-style case-insensitive matching.
             bool caseSensitive = request.value("case_sensitive", false);
+            // Parallel GObjects walk. Default true (fast). The UI sends
+            // parallel=false to force a single-threaded scan when the user wants
+            // to avoid concurrent cross-thread reads that some games' anti-tamper
+            // flags — slower but stealthier.
+            bool parallel = request.value("parallel", true);
 
             ValueScan::DataType dt;
             if (!ValueScan::TryParseDataType(dtStr, dt)) {
@@ -1948,7 +1953,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
 
             auto scanResult = Aura::ScanForValue(
                 dt, st, targetBytes, target2Ptr, gameOnly, maxResults,
-                tolerance, targetString, caseSensitive, multiPtr, multiPtr2);
+                tolerance, targetString, caseSensitive, multiPtr, multiPtr2,
+                parallel);
 
             uint64_t sessionId = ValueScan::SessionManager::Instance().Begin(
                 dt, std::move(scanResult.candidates),

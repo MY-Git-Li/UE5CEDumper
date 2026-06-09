@@ -72,6 +72,9 @@ public class ValueSearchTests
         Assert.Equal("20",               captured["value2"]?.GetValue<string>());
         Assert.Equal(true,               captured["game_only"]?.GetValue<bool>());
         Assert.Equal(1234,               captured["max_results"]?.GetValue<int>());
+        // parallel defaults to true (the DLL default) → omitted to keep the wire tight.
+        Assert.False(captured.ContainsKey("parallel"),
+            "parallel must be omitted when left at its default (true)");
 
         Assert.Equal(7UL, res.SessionId);
         Assert.Equal("Int32", res.DataType);
@@ -109,6 +112,41 @@ public class ValueSearchTests
         Assert.NotNull(captured);
         Assert.False(captured!.ContainsKey("value2"),
             "value2 must not be sent for non-Between scans");
+    }
+
+    [Fact]
+    public async Task BeginValueScanAsync_AttachesParallelFalseWhenDisabled()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"]              = req["id"]?.GetValue<int>() ?? 0,
+                ["ok"]              = true,
+                ["session_id"]      = 2UL,
+                ["data_type"]       = "Int32",
+                ["total"]           = 0,
+                ["scanned_classes"] = 0,
+                ["scanned_objects"] = 0,
+                ["duration_ms"]     = 1L,
+                ["deadline_hit"]    = false,
+                ["candidates"]      = new JsonArray(),
+            };
+        });
+
+        await svc.BeginValueScanAsync(
+            ValueScanDataType.Int32, ValueScanType.Exact,
+            value: "42", parallel: false,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(captured);
+        Assert.True(captured!.ContainsKey("parallel"),
+            "parallel must be sent when the user disables it");
+        Assert.False(captured["parallel"]?.GetValue<bool>(),
+            "parallel:false forces a single-threaded DLL scan");
     }
 
     [Fact]
@@ -1026,6 +1064,26 @@ public class ValueSearchTests
     }
 
     [Fact]
+    public async Task ViewModel_ParallelScan_DefaultsTrue_AndPassesThrough()
+    {
+        var (vm, fake) = MakeVm();
+        fake.NextBeginResult = new ValueScanBeginResult { SessionId = 1UL };
+        vm.SelectedDataType = ValueScanDataType.Int32;
+        vm.SelectedScanType = ValueScanType.Exact;
+        vm.Value = "100";
+
+        // Default is ON.
+        Assert.True(vm.ParallelScan);
+        await vm.FirstScanCommand.ExecuteAsync(null);
+        Assert.Equal(true, fake.LastParallel);
+
+        // Turning it off forces a single-threaded DLL scan.
+        vm.ParallelScan = false;
+        await vm.FirstScanCommand.ExecuteAsync(null);
+        Assert.Equal(false, fake.LastParallel);
+    }
+
+    [Fact]
     public async Task FirstScan_RejectsIncompatibleScanTypeForDataType()
     {
         // FString + Bigger is a legal-individually pair but illegal in
@@ -1063,14 +1121,17 @@ public class ValueSearchTests
         public List<(ulong, int, int, string?, string?, bool)> Queries { get; } = new();
         public List<ulong> Ends { get; } = new();
 
+        public bool? LastParallel { get; private set; }
+
         public override Task<ValueScanBeginResult> BeginValueScanAsync(
             ValueScanDataType dataType, ValueScanType scanType,
             string value, string? value2 = null, bool gameOnly = true,
             int maxResults = 50000, double tolerance = 0.0,
-            bool caseSensitive = false, int pageSize = 1000,
+            bool caseSensitive = false, bool parallel = true, int pageSize = 1000,
             CancellationToken ct = default)
         {
             Begins.Add((dataType, scanType, value, value2, gameOnly, maxResults, tolerance, caseSensitive));
+            LastParallel = parallel;
             return Task.FromResult(NextBeginResult);
         }
 
