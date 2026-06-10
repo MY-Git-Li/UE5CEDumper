@@ -119,11 +119,9 @@ public partial class InstanceFinderViewModel : ViewModelBase
 
             var result = await _dump.FindInstancesAsync(SearchClassName.Trim(), ExactMatch);
 
-            Instances.Clear();
-            foreach (var r in result.Instances)
-            {
-                Instances.Add(r);
-            }
+            // Detach the bound selection before rebuilding (Avalonia's selection
+            // model throws if Instances is Clear()'d while SelectedInstance is live).
+            UiCollection.Reset(Instances, result.Instances, () => SelectedInstance = null);
 
             HasInstances = Instances.Count > 0;
             if (result.Scanned > 0)
@@ -168,6 +166,7 @@ public partial class InstanceFinderViewModel : ViewModelBase
             if (!AddressHelper.TryNormalizeAddress(LookupAddress, _engineState?.ModuleBase, out var addrStr))
             {
                 LookupStatusText = "Invalid address — expected hex (e.g. 0x7FF... or module.exe+RVA)";
+                SelectedInstance = null;   // detach before clearing the bound collection
                 Instances.Clear();
                 ContainerMatches.Clear();
                 Fields.Clear();
@@ -178,6 +177,7 @@ public partial class InstanceFinderViewModel : ViewModelBase
 
             var result = await _dump.FindByAddressAsync(addrStr);
 
+            SelectedInstance = null;   // detach before clearing the bound collection
             Instances.Clear();
             Fields.Clear();
             HasFields = false;

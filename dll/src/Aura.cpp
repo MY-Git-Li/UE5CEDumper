@@ -4653,6 +4653,17 @@ ValueScanResult ScanForValue(
                 // serialization time from the shared descriptor + elementIndex.
                 for (int32_t idx = 0; idx < arrayNum; ++idx) {
                     if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
+                    // A pathological 10M-element array would otherwise pin this
+                    // worker far past the deadline and ignore a cancel; poll the
+                    // shared deadline/cancel flag every 4K elements (Cancel sets
+                    // deadlineHit via the ParallelGObjectsScan watcher).
+                    if ((idx & 0xFFF) == 0) {
+                        if (deadlineHit.load(std::memory_order_relaxed)) return;
+                        if (std::chrono::steady_clock::now() - t0 > kDeadline) {
+                            deadlineHit.store(true, std::memory_order_relaxed);
+                            return;
+                        }
+                    }
                     scanElement(sf, arrayDataPtr + static_cast<uintptr_t>(idx) * sf.elemStride, idx);
                 }
                 continue;
@@ -4676,6 +4687,15 @@ ValueScanResult ScanForValue(
                                           ? sf.valueOffset : 0;
                 for (int32_t e = 0; e < sa.MaxIndex; ++e) {
                     if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
+                    // Poll the shared deadline/cancel flag every 4K slots so a huge
+                    // TSet/TMap can't hold this worker past the deadline or a cancel.
+                    if ((e & 0xFFF) == 0) {
+                        if (deadlineHit.load(std::memory_order_relaxed)) return;
+                        if (std::chrono::steady_clock::now() - t0 > kDeadline) {
+                            deadlineHit.store(true, std::memory_order_relaxed);
+                            return;
+                        }
+                    }
                     if (!Macht::IsSparseIndexAllocated(sa, e)) continue;
                     scanElement(sf,
                         sa.Data + static_cast<int64_t>(e) * sf.elemStride + slotOff, e);

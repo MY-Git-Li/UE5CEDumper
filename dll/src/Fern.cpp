@@ -812,10 +812,18 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
         return Renge::MakeError(0, "Invalid JSON").dump();
     }
 
-    int id = request.value("id", 0);
-    std::string cmd = request.value("cmd", "");
+    // Parse id/cmd INSIDE the try: a syntactically-valid but non-object request
+    // (e.g. "42" or "[1]"), or a wrongly-typed "id"/"cmd", makes json::value()
+    // throw json::type_error. Outside the try that escaped HandleClient ->
+    // AcceptLoop -> std::terminate -> game crash. Defaults (0 / "") keep the
+    // catch handler usable when the throw happens before assignment.
+    int id = 0;
+    std::string cmd;
 
     try {
+        id  = request.value("id", 0);
+        cmd = request.value("cmd", "");
+
         if (cmd == Renge::CMD_INIT) {
             extern uint32_t g_cachedUEVersion;
             extern bool     g_cachedVersionDetected;
@@ -1008,6 +1016,10 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             if (!ValueScan::TryParseDataType(dtStr, dt) || !ValueScan::IsMultiNumericDataType(dt)) {
                 return Renge::MakeError(id, "snapshot data_type must be NumericNoByte or NumericAll").dump();
             }
+            // Fresh names for this capture: clear the per-UObject name cache so a
+            // long session doesn't accumulate millions of entries and so recycled
+            // UObject addresses can't surface a destroyed object's stale name.
+            Ubel::ClearNameCache();
             json data;
             data["total"] = Aura::GetCount();
             return Renge::MakeResponse(id, data).dump();
@@ -2729,6 +2741,9 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
 
             Sein::Info("PIPE:cmd", "trigger_scan: Starting async engine scan...");
 
+            // Re-scan = game state may have changed; drop stale cached names.
+            Ubel::ClearNameCache();
+
             // Reset state and launch background thread
             m_scan.completed = false;
             m_scan.phase.store(0);
@@ -2922,6 +2937,11 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
     } catch (const std::exception& e) {
         Sein::Error("PIPE:cmd", "PipeServer: Exception in command '%s': %s", cmd.c_str(), e.what());
         return Renge::MakeError(id, std::string("Internal error: ") + e.what()).dump();
+    } catch (...) {
+        // Non-std::exception throw would otherwise escape to AcceptLoop ->
+        // std::terminate. Cheap insurance against a game crash.
+        Sein::Error("PIPE:cmd", "PipeServer: Non-standard exception in command '%s'", cmd.c_str());
+        return Renge::MakeError(id, "Internal error (non-standard exception)").dump();
     }
 }
 

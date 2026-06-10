@@ -555,7 +555,7 @@ public partial class SnapshotViewModel : ViewModelBase
     [RelayCommand]
     private async Task DeleteAsync(SnapshotMeta? meta)
     {
-        if (meta == null || IsCapturing || IsDeleting) return;
+        if (meta == null || IsCapturing || IsDeleting || IsDiffing) return;
         IsDeleting = true;
         StatusText = "Deleting snapshot…";
         try
@@ -588,7 +588,7 @@ public partial class SnapshotViewModel : ViewModelBase
     [RelayCommand]
     private async Task DeleteAllAsync()
     {
-        if (IsCapturing || IsDeleting || Snapshots.Count == 0) return;
+        if (IsCapturing || IsDeleting || IsDiffing || Snapshots.Count == 0) return;
         IsDeleting = true;
         StatusText = "Deleting all snapshots…";
         try

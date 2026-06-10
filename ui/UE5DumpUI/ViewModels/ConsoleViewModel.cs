@@ -215,6 +215,7 @@ public partial class ConsoleViewModel : ViewModelBase
     /// </summary>
     private void ApplyFilter()
     {
+        SelectedResult = null;   // detach before rebuilding the selection-bound list
         Results.Clear();
         if (_allExec.Count == 0) return;
 

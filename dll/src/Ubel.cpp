@@ -301,6 +301,18 @@ std::string GetName(uintptr_t uobjectAddr) {
     return name;
 }
 
+void ClearNameCache() {
+    // Release the per-UObject name cache. Called at the start of each snapshot
+    // capture / engine re-scan so a long session doesn't accumulate one entry
+    // per GObjects slot (millions of strings, ~150-200MB on a 2M-object game)
+    // and so a recycled UObject address can't return a destroyed object's stale
+    // name. swap()-with-empty frees the bucket array too, not just the strings.
+    // The class/struct/enum layout caches are intentionally kept: they are
+    // per-class (small, layout-stable) and expensive to rebuild.
+    std::lock_guard<std::mutex> lk(s_nameCacheMutex);
+    std::unordered_map<uintptr_t, std::string>().swap(s_nameCache);
+}
+
 int32_t GetIndex(uintptr_t uobjectAddr) {
     if (!uobjectAddr) return -1;
     int32_t index = -1;

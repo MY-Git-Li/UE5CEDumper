@@ -27,6 +27,10 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
 
     // Cancellation for the current load operation
     private CancellationTokenSource? _loadCts;
+    // Monotonic load generation: a search/reload supersedes an in-flight full load
+    // so its paging loop stops appending into _allNodes after the cache was
+    // replaced (otherwise search hits and full-list pages interleave).
+    private int _loadGen;
 
     // Debounce timer for FilterText changes (200 ms)
     private System.Threading.Timer? _filterDebounce;
@@ -198,6 +202,7 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
         _loadCts?.Cancel();
         _loadCts = new CancellationTokenSource();
         var ct = _loadCts.Token;
+        int gen = ++_loadGen;
 
         try
         {
@@ -216,6 +221,7 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
                 ct.ThrowIfCancellationRequested();
 
                 var result = await _dump.GetObjectListAsync(offset, Constants.ObjectTreePageSize, ct);
+                if (gen != _loadGen) return;   // superseded by a newer load/search — stop appending
                 total = result.Total;
                 ObjectCount = total;
 
@@ -240,6 +246,8 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
         }
         catch (OperationCanceledException)
         {
+            // Superseded by a newer load/search → leave the cache for that op to own.
+            if (gen != _loadGen) return;
             // User cancelled — keep whatever was loaded so far
             ApplyFilter();
             StatusText = $"Loaded {_allNodes.Count:N0} of {ObjectCount:N0} (cancelled)";
@@ -255,7 +263,7 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
         }
         finally
         {
-            IsLoading = false;
+            if (gen == _loadGen) IsLoading = false;   // only the latest op owns the flag
         }
     }
 
@@ -275,6 +283,11 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
             await LoadAsync();
             return;
         }
+
+        // Supersede any in-flight full load before we replace _allNodes, so its
+        // paging loop stops appending (otherwise search hits + full-list pages mix).
+        _loadCts?.Cancel();
+        _loadGen++;
 
         try
         {
@@ -323,6 +336,11 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ApplyFilter()
     {
+        // Detach the bound selection before clearing: Avalonia's selection model
+        // otherwise nulls SelectedNode DURING the Clear()'s CollectionChanged event,
+        // firing the cross-VM SelectionChanged cascade reentrantly. SearchAsync
+        // re-selects FilteredNodes[0] explicitly after this returns.
+        SelectedNode = null;
         FilteredNodes.Clear();
         var textFilter = FilterText?.Trim() ?? "";
         var classFilter = SelectedClassFilterIndex > 0

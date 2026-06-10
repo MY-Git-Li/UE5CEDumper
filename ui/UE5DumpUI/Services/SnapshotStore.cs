@@ -74,10 +74,21 @@ public sealed class SnapshotStore : ISnapshotStore
     private async Task<SqliteConnection> OpenAsync(CancellationToken ct)
     {
         var conn = new SqliteConnection(ConnectionString);
-        await conn.OpenAsync(ct);
-        await ExecAsync(conn, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;", ct);
-        await EnsureSchemaAsync(conn, ct);
-        return conn;
+        try
+        {
+            await conn.OpenAsync(ct);
+            await ExecAsync(conn, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;", ct);
+            await EnsureSchemaAsync(conn, ct);
+            return conn;
+        }
+        catch
+        {
+            // OpenAsync succeeded but schema init threw/cancelled (the tab-switch
+            // token can land mid-EnsureSchema): dispose so the native handle is
+            // released and the pooled connection is returned, not leaked.
+            await conn.DisposeAsync();
+            throw;
+        }
     }
 
     private static async Task ExecAsync(SqliteConnection conn, string sql, CancellationToken ct)
@@ -330,8 +341,13 @@ public sealed class SnapshotStore : ISnapshotStore
         // Best-effort: if it throws/cancels, the list methods lazily build it.
         try
         {
-            await EnsurePivotIndexAsync(conn, snapshotId, 0, ct);
-            await EnsurePivotIndexAsync(conn, snapshotId, 1, ct);
+            // forceRebuild: a lazy build triggered by browsing this snapshot in the
+            // Pivot tab WHILE it was still capturing would have persisted counts +
+            // the built-marker over partial rows, and the marker check would then
+            // make this finalize call a no-op — permanently wrong counts. Forcing a
+            // rebuild here (snapshot now complete) makes the final state authoritative.
+            await EnsurePivotIndexAsync(conn, snapshotId, 0, ct, forceRebuild: true);
+            await EnsurePivotIndexAsync(conn, snapshotId, 1, ct, forceRebuild: true);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
@@ -759,10 +775,12 @@ public sealed class SnapshotStore : ISnapshotStore
     // (0) vs struct-array (1) classes. Called eagerly at FinalizeSnapshot and lazily
     // from the list methods (covers snapshots captured before this feature).
     internal static async Task EnsurePivotIndexAsync(
-        SqliteConnection conn, long snapshotId, int isArray, CancellationToken ct)
+        SqliteConnection conn, long snapshotId, int isArray, CancellationToken ct,
+        bool forceRebuild = false)
     {
-        await using (var chk = conn.CreateCommand())
+        if (!forceRebuild)
         {
+            await using var chk = conn.CreateCommand();
             chk.CommandText = "SELECT 1 FROM pivot_index_built WHERE snapshot_id=$s AND is_array=$a LIMIT 1;";
             chk.Parameters.AddWithValue("$s", snapshotId);
             chk.Parameters.AddWithValue("$a", isArray);
@@ -770,6 +788,18 @@ public sealed class SnapshotStore : ISnapshotStore
         }
 
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
+        // Clear any prior counts for this snapshot+kind first: makes the rebuild
+        // authoritative (forceRebuild path overwrites a partial mid-capture build)
+        // AND idempotent against the dup-marker race where two concurrent lazy
+        // callers both pass the check above and would otherwise double-INSERT.
+        await using (var del = conn.CreateCommand())
+        {
+            del.Transaction = tx;
+            del.CommandText = "DELETE FROM class_counts WHERE snapshot_id=$s AND is_array=$a;";
+            del.Parameters.AddWithValue("$s", snapshotId);
+            del.Parameters.AddWithValue("$a", isArray);
+            await del.ExecuteNonQueryAsync(ct);
+        }
         await using (var ins = conn.CreateCommand())
         {
             ins.Transaction = tx;
