@@ -375,7 +375,11 @@ public partial class SnapshotViewModel : ViewModelBase
 
                 if (chunk.Objects.Count > 0)
                 {
-                    fieldCount += await _store.WriteChunkAsync(snapshotId, chunk.Objects, ct);
+                    // Microsoft.Data.Sqlite *Async runs synchronously on the caller —
+                    // the per-row insert loop must go off the UI thread or the window
+                    // stutters throughout a multi-minute capture.
+                    var objs = chunk.Objects;
+                    fieldCount += await Task.Run(() => _store.WriteChunkAsync(snapshotId, objs, ct), ct);
                     objectCount += chunk.Objects.Count;
                 }
 
@@ -398,10 +402,14 @@ public partial class SnapshotViewModel : ViewModelBase
             }
 
             StatusText = "Finalising (building pivot index)…";
-            await _store.FinalizeSnapshotAsync(snapshotId, objectCount, fieldCount, ct);
+            // Off the UI thread: FinalizeSnapshotAsync builds the pivot index with a
+            // COUNT(DISTINCT …) GROUP BY over the full snapshot (the documented ~10s
+            // hard freeze), and EnforceQuotaAsync runs wal_checkpoint + DELETE + VACUUM
+            // over a GB-class DB — all synchronous under Microsoft.Data.Sqlite.
+            await Task.Run(() => _store.FinalizeSnapshotAsync(snapshotId, objectCount, fieldCount, ct), ct);
             // FIFO eviction: drop oldest snapshots of this game until the DB
             // fits the quota (the just-captured one is always kept).
-            int dropped = await _store.EnforceQuotaAsync(QuotaBytes, ct);
+            int dropped = await Task.Run(() => _store.EnforceQuotaAsync(QuotaBytes, ct), ct);
             var evicted = dropped > 0 ? $" — dropped {dropped} oldest (quota)" : "";
             StatusText = $"Captured {objectCount:N0} objects, {fieldCount:N0} fields{evicted}";
             Label = "";
@@ -412,7 +420,8 @@ public partial class SnapshotViewModel : ViewModelBase
             StatusText = "Capture cancelled.";
             if (snapshotId > 0)
             {
-                try { await _store.DeleteSnapshotAsync(snapshotId); } catch { /* best effort */ }
+                // DELETE over the partial snapshot — off the UI thread (sync sqlite).
+                try { await Task.Run(() => _store.DeleteSnapshotAsync(snapshotId)); } catch { /* best effort */ }
                 await RefreshAsync();
             }
         }
@@ -546,7 +555,7 @@ public partial class SnapshotViewModel : ViewModelBase
     [RelayCommand]
     private async Task DeleteAsync(SnapshotMeta? meta)
     {
-        if (meta == null || IsCapturing || IsDeleting) return;
+        if (meta == null || IsCapturing || IsDeleting || IsDiffing) return;
         IsDeleting = true;
         StatusText = "Deleting snapshot…";
         try
@@ -579,7 +588,7 @@ public partial class SnapshotViewModel : ViewModelBase
     [RelayCommand]
     private async Task DeleteAllAsync()
     {
-        if (IsCapturing || IsDeleting || Snapshots.Count == 0) return;
+        if (IsCapturing || IsDeleting || IsDiffing || Snapshots.Count == 0) return;
         IsDeleting = true;
         StatusText = "Deleting all snapshots…";
         try

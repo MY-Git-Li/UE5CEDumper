@@ -160,28 +160,34 @@ ParallelScanResult<PerThreadT> ParallelGObjectsScan(int32_t count, BodyFn&& body
     std::vector<PerThreadT> perThread(static_cast<size_t>(std::max(1, nthreads)));
     std::atomic<bool> deadlineHit{false};
 
-    // Cooperative cancellation: a short-lived watcher flips the shared
-    // deadline flag if a cancel is requested (client disconnect via Fern's
-    // monitor, or shutdown), so every worker bails at its next stride check
-    // — no per-body edits needed. Reuses the deadline-bail path the bodies
-    // already poll. (Cheap: one thread that sleeps in 50ms slices and exits
-    // as soon as the parallel run finishes.)
+    // Cooperative cancellation. For the PARALLEL path a short-lived watcher
+    // flips the shared deadline flag on cancel (client disconnect via Fern's
+    // monitor, or shutdown) so every worker bails at its next stride check —
+    // 50ms granularity, exits as soon as the run finishes. For the SERIAL path
+    // (nthreads == 1, the Value Search "parallel" toggle OFF) we deliberately
+    // spawn NO thread: anti-tamper games turn parallel off precisely to avoid
+    // extra thread creation, and an anti-cheat that hooks thread creation would
+    // otherwise still see this watcher. The bodies poll Cancel::Requested()
+    // directly at their stride checks, so serial scans still cancel promptly.
     std::atomic<bool> scanDone{false};
-    std::thread cancelWatcher([&] {
-        while (!scanDone.load(std::memory_order_relaxed)) {
-            if (Cancel::Requested()) {
-                deadlineHit.store(true, std::memory_order_relaxed);
-                return;
+    std::thread cancelWatcher;
+    if (nthreads > 1) {
+        cancelWatcher = std::thread([&] {
+            while (!scanDone.load(std::memory_order_relaxed)) {
+                if (Cancel::Requested()) {
+                    deadlineHit.store(true, std::memory_order_relaxed);
+                    return;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        }
-    });
+        });
+    }
 
     ParallelIndexRanges(count, nthreads, [&](int tid, int32_t beginIdx, int32_t endIdx) {
         body(perThread[tid], beginIdx, endIdx, deadlineHit);
     });
     scanDone.store(true, std::memory_order_relaxed);
-    cancelWatcher.join();
+    if (cancelWatcher.joinable()) cancelWatcher.join();
 
     return { std::move(perThread), nthreads, deadlineHit.load() };
 }
@@ -1524,6 +1530,10 @@ std::vector<ContainerMatch> FindInContainers(uintptr_t addr, int32_t maxResults,
         // deadlineHit check fires from this chunk's first iteration.
         if (((i - beginIdx) & 0x3FF) == 0) {
             if (deadlineHit.load(std::memory_order_relaxed)) return;
+            // Serial path has no cancel-watcher thread — poll Cancel here so the
+            // scan still bails promptly; setting deadlineHit also stops siblings
+            // on the parallel path.
+            if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
             auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
                           std::chrono::steady_clock::now() - t0).count();
             if (dt > kDeadlineMs) {
@@ -2069,6 +2079,10 @@ std::vector<ReferenceMatch> FindReferencesToUObject(uintptr_t target,
         // deadlineHit check fires from this chunk's first iteration.
         if (((i - beginIdx) & 0x3FF) == 0) {
             if (deadlineHit.load(std::memory_order_relaxed)) return;
+            // Serial path has no cancel-watcher thread — poll Cancel here so the
+            // scan still bails promptly; setting deadlineHit also stops siblings
+            // on the parallel path.
+            if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
             auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
                           std::chrono::steady_clock::now() - t0).count();
             if (dt > kDeadlineMs) {
@@ -3458,6 +3472,8 @@ PropertyXrefResult FindPropertyXrefs(uintptr_t propAddr, bool gameOnly,
             // this chunk's first iteration (mirrors FindReferencesToUObject).
             if (((i - beginIdx) & 0x3FF) == 0) {
                 if (deadlineHit.load(std::memory_order_relaxed)) return;
+                // Serial path has no cancel-watcher thread — poll Cancel here too.
+                if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
                 auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
                               std::chrono::steady_clock::now() - t0).count();
                 if (dt > kDeadlineMs) {
@@ -4437,6 +4453,10 @@ ValueScanResult ScanForValue(
         // the deadline + cross-thread deadlineHit check by up to 4095 objects.
         if (((i - beginIdx) & 0xFFF) == 0) {
             if (deadlineHit.load(std::memory_order_relaxed)) return;
+            // Serial path (parallel toggle OFF) has no cancel-watcher thread —
+            // poll Cancel here so the scan still bails promptly; setting
+            // deadlineHit also stops siblings on the parallel path.
+            if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
             if (std::chrono::steady_clock::now() - t0 > kDeadline) {
                 deadlineHit.store(true, std::memory_order_relaxed);
                 return;
@@ -4653,6 +4673,18 @@ ValueScanResult ScanForValue(
                 // serialization time from the shared descriptor + elementIndex.
                 for (int32_t idx = 0; idx < arrayNum; ++idx) {
                     if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
+                    // A pathological 10M-element array would otherwise pin this
+                    // worker far past the deadline and ignore a cancel; poll the
+                    // shared deadline/cancel flag every 4K elements (Cancel sets
+                    // deadlineHit via the ParallelGObjectsScan watcher).
+                    if ((idx & 0xFFF) == 0) {
+                        if (deadlineHit.load(std::memory_order_relaxed)) return;
+                        if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+                        if (std::chrono::steady_clock::now() - t0 > kDeadline) {
+                            deadlineHit.store(true, std::memory_order_relaxed);
+                            return;
+                        }
+                    }
                     scanElement(sf, arrayDataPtr + static_cast<uintptr_t>(idx) * sf.elemStride, idx);
                 }
                 continue;
@@ -4676,6 +4708,16 @@ ValueScanResult ScanForValue(
                                           ? sf.valueOffset : 0;
                 for (int32_t e = 0; e < sa.MaxIndex; ++e) {
                     if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
+                    // Poll the shared deadline/cancel flag every 4K slots so a huge
+                    // TSet/TMap can't hold this worker past the deadline or a cancel.
+                    if ((e & 0xFFF) == 0) {
+                        if (deadlineHit.load(std::memory_order_relaxed)) return;
+                        if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+                        if (std::chrono::steady_clock::now() - t0 > kDeadline) {
+                            deadlineHit.store(true, std::memory_order_relaxed);
+                            return;
+                        }
+                    }
                     if (!Macht::IsSparseIndexAllocated(sa, e)) continue;
                     scanElement(sf,
                         sa.Data + static_cast<int64_t>(e) * sf.elemStride + slotOff, e);

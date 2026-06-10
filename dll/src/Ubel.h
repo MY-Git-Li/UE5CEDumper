@@ -128,6 +128,10 @@ uintptr_t GetOuter(uintptr_t uobjectAddr);
 // Get the FName-based name of a UObject
 std::string GetName(uintptr_t uobjectAddr);
 
+// Release the per-UObject GetName cache (bounds long-session growth + clears
+// stale names after UObject address reuse). Call at snapshot/re-scan start.
+void ClearNameCache();
+
 // Get the full path name (e.g., /Game/BP_Player.BP_Player_C)
 std::string GetFullName(uintptr_t uobjectAddr);
 

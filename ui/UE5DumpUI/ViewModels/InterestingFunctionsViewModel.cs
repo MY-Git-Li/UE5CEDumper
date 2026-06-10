@@ -263,6 +263,7 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     /// </summary>
     private void ApplyFilter()
     {
+        SelectedResult = null;   // detach before rebuilding the selection-bound list
         Results.Clear();
         if (_allRows.Count == 0) return;
 

@@ -1213,12 +1213,22 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 var status = await _dump.GetScanStatusAsync();
                 StatusText = $"Scanning... {status.StatusText}";
 
-                if (!status.Running && status.Phase >= 7 && status.EngineState != null)
+                if (!status.Running)
                 {
-                    _engineState = status.EngineState;
-                    NeedsScan = false;
+                    if (status.Phase >= 7 && status.EngineState != null)
+                    {
+                        _engineState = status.EngineState;
+                        NeedsScan = false;
+                        IsScanning = false;
+                        ApplyEngineState(status.EngineState);
+                        return;
+                    }
+                    // The scan stopped without reaching a complete engine state —
+                    // surface a failure instead of polling scan_status forever.
                     IsScanning = false;
-                    ApplyEngineState(status.EngineState);
+                    StatusText = "Scan did not complete";
+                    SetError(new InvalidOperationException(
+                        $"Scan ended at phase {status.Phase} without an engine state"));
                     return;
                 }
             }

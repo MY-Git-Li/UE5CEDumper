@@ -33,7 +33,10 @@ namespace Cancel {
 inline std::atomic<bool> g_perCommand{false};
 
 // Sticky: set by Fern::Stop() / UE5_Shutdown() so in-flight ops abort and
-// the accept-thread join completes quickly. Never auto-cleared.
+// the accept-thread join completes quickly. Cleared only by Fern::Start()
+// (ResetShutdown) so re-enabling the CE script in the same game process
+// brings the server back to a non-aborting state — otherwise every long op
+// would bail on its first Requested() poll.
 inline std::atomic<bool> g_shutdown{false};
 
 // True when any in-flight long-running operation should abort.
@@ -45,5 +48,6 @@ inline bool Requested() {
 inline void RequestPerCommand() { g_perCommand.store(true,  std::memory_order_relaxed); }
 inline void ResetPerCommand()   { g_perCommand.store(false, std::memory_order_relaxed); }
 inline void RequestShutdown()   { g_shutdown.store(true,    std::memory_order_relaxed); }
+inline void ResetShutdown()     { g_shutdown.store(false,   std::memory_order_relaxed); }
 
 } // namespace Cancel

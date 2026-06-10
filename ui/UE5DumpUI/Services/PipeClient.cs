@@ -35,6 +35,17 @@ public sealed class PipeClient : IPipeClient
     {
         if (IsConnected) return;
 
+        // An unexpected pipe death exits ReadLoop without disposing the stream set
+        // (DisconnectAsync early-returns on !IsConnected), so reconnecting here would
+        // abandon the old NamedPipeClientStream with its OS handle open until GC
+        // finalization. Dispose any leftover set before building a new one.
+        _reader?.Dispose();
+        _writer?.Dispose();
+        _pipe?.Dispose();
+        _reader = null;
+        _writer = null;
+        _pipe = null;
+
         // Dispose previous CTS before creating a new one (prevent WaitHandle leak)
         _cts.Dispose();
         _cts = new CancellationTokenSource();
@@ -88,7 +99,13 @@ public sealed class PipeClient : IPipeClient
 
     public async Task<JsonObject> SendAsync(JsonObject request, CancellationToken ct = default)
     {
-        if (!IsConnected || _writer == null)
+        // Capture the writer into a local: a concurrent DisconnectAsync nulls the
+        // _writer field, and dereferencing the field at write time would throw a
+        // NullReferenceException that the IOException/ObjectDisposedException
+        // filters below don't catch. A disposed local still throws
+        // ObjectDisposedException, which IS filtered.
+        var writer = _writer;
+        if (!IsConnected || writer == null)
             throw new InvalidOperationException("Not connected to pipe server");
 
         int id = Interlocked.Increment(ref _nextId);
@@ -112,7 +129,7 @@ public sealed class PipeClient : IPipeClient
             await _writeLock.WaitAsync(ct);
             try
             {
-                await _writer.WriteLineAsync(json);
+                await writer.WriteLineAsync(json);
             }
             finally
             {
@@ -184,6 +201,19 @@ public sealed class PipeClient : IPipeClient
         }
         finally
         {
+            // Fail every in-flight request so awaiting callers don't hang forever
+            // when the pipe dies unexpectedly (game closed / DLL unloaded). On the
+            // deliberate DisconnectAsync path this is a no-op — that method already
+            // drains + clears _pending before awaiting this loop. An IOException
+            // (vs DisconnectAsync's cancellation) signals a genuine connection loss
+            // so callers surface it as an error rather than a silent cancel.
+            if (!_pending.IsEmpty)
+            {
+                foreach (var kvp in _pending)
+                    kvp.Value.TrySetException(new IOException("Pipe disconnected"));
+                _pending.Clear();
+            }
+
             // If we exit the read loop unexpectedly, mark disconnected
             if (IsConnected)
             {

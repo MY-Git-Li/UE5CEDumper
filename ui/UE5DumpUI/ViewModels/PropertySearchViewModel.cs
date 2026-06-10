@@ -331,6 +331,7 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
     private void ApplyResultFilter()
     {
         var filter = (ResultFilter ?? "").Trim();
+        SelectedResult = null;   // detach before rebuilding the selection-bound list
         Results.Clear();
 
         if (string.IsNullOrEmpty(filter))
