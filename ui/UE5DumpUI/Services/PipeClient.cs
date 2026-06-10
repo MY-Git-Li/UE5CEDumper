@@ -184,6 +184,19 @@ public sealed class PipeClient : IPipeClient
         }
         finally
         {
+            // Fail every in-flight request so awaiting callers don't hang forever
+            // when the pipe dies unexpectedly (game closed / DLL unloaded). On the
+            // deliberate DisconnectAsync path this is a no-op — that method already
+            // drains + clears _pending before awaiting this loop. An IOException
+            // (vs DisconnectAsync's cancellation) signals a genuine connection loss
+            // so callers surface it as an error rather than a silent cancel.
+            if (!_pending.IsEmpty)
+            {
+                foreach (var kvp in _pending)
+                    kvp.Value.TrySetException(new IOException("Pipe disconnected"));
+                _pending.Clear();
+            }
+
             // If we exit the read loop unexpectedly, mark disconnected
             if (IsConnected)
             {

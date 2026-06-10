@@ -238,6 +238,13 @@ bool Fern::Start() {
         return true;
     }
 
+    // Clear the sticky shutdown latch left by a prior Stop()/UE5_Shutdown().
+    // Without this, re-enabling the CE script in the same game process leaves
+    // g_shutdown set, so every long-running op (value scan, instance find,
+    // snapshot capture, SDK dump) aborts on its first Cancel::Requested() poll.
+    Cancel::ResetShutdown();
+    Cancel::ResetPerCommand();
+
     m_running = true;
     m_acceptThread = std::thread(&Fern::AcceptLoop, this);
     m_monitorThread = std::thread(&Fern::MonitorLoop, this);
@@ -288,6 +295,9 @@ void Fern::Stop() {
     if (m_monitorThread.joinable()) {
         m_monitorThread.join();
     }
+
+    // No handler thread is running now — free every remaining value-scan session.
+    ValueScan::SessionManager::Instance().DropAll();
 
     m_clientConnected = false;
     LOG_INFO("PipeServer: Stopped");
@@ -372,6 +382,11 @@ void Fern::AcceptLoop() {
         // Client disconnected
         m_clientConnected = false;
         StopAllWatches();
+        // Drop any value-scan sessions owned by the departed client. Otherwise a
+        // First Scan's candidate set (up to 1M candidates + descriptor/instance
+        // pools) lingers in the game process until the next begin_value_scan
+        // triggers lazy idle-expiry — exactly the "UI closed mid-scan" leak.
+        ValueScan::SessionManager::Instance().DropAll();
         {
             std::lock_guard<std::mutex> lock(m_pipeMutex);
             // Only close if Stop() hasn't already closed it

@@ -541,6 +541,11 @@ public partial class ClassPivotViewModel : ViewModelBase
     /// value-field picker. RowName is the implicit key — no key discovery needed.</summary>
     private async Task LoadDataTableFieldsAsync()
     {
+        // Bump the guard at entry (not after the null-check) so a null/empty
+        // selection also supersedes any in-flight load — otherwise a slow load
+        // for the previous DataTable could complete and repopulate Fields after
+        // the selection was cleared (same race fixed in LoadClasses/Fields).
+        int id = ++_fieldLoadId;
         _dataTable = null;
         SelectedKeyField = null;
         SelectedResult = null;
@@ -550,7 +555,6 @@ public partial class ClassPivotViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanRunPivot));
         if (_dump == null || SelectedDataTable == null) return;
 
-        int id = ++_fieldLoadId;
         try
         {
             var dt = await _dump.WalkDataTableRowsAsync(SelectedDataTable.Address, 0, DataTableRowLimit);
@@ -592,6 +596,8 @@ public partial class ClassPivotViewModel : ViewModelBase
     /// <summary>List the captured struct-array fields of the selected class (C6).</summary>
     private async Task LoadArrayFieldsAsync()
     {
+        // Bump at entry so a null selection also supersedes in-flight loads.
+        int id = ++_classLoadId;
         SelectedArrayField = null;   // detach selections before clearing bound lists
         SelectedKeyField = null;
         SelectedResult = null;
@@ -601,7 +607,6 @@ public partial class ClassPivotViewModel : ViewModelBase
         Results.Clear();
         OnPropertyChanged(nameof(CanRunPivot));
         if (SelectedSnapshot == null || SelectedClass == null) return;
-        int id = ++_classLoadId;
         long snapId = SelectedSnapshot.Id;
         string cls = SelectedClass.ClassName;
         try
@@ -624,6 +629,8 @@ public partial class ClassPivotViewModel : ViewModelBase
     /// value-field picker. The inner-key value is the implicit group key (C6).</summary>
     private async Task LoadArrayPropsAsync()
     {
+        // Bump at entry so a null selection also supersedes in-flight loads.
+        int id = ++_fieldLoadId;
         SelectedKeyField = null;
         SelectedResult = null;
         Fields.Clear();
@@ -631,7 +638,6 @@ public partial class ClassPivotViewModel : ViewModelBase
         Results.Clear();
         OnPropertyChanged(nameof(CanRunPivot));
         if (SelectedSnapshot == null || SelectedClass == null || SelectedArrayField == null) return;
-        int id = ++_fieldLoadId;
         long snapId = SelectedSnapshot.Id;
         string cls = SelectedClass.ClassName;
         string af = SelectedArrayField.ArrayField;

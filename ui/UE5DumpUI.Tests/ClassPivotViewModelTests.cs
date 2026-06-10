@@ -309,6 +309,74 @@ public class ClassPivotViewModelTests : IDisposable
         Assert.Equal("0x1000", vm.Results[0].ObjAddr);   // CE handoff = row struct addr
     }
 
+    /// <summary>DataTable walk gated per address so a test can complete a stale
+    /// (superseded) walk AFTER the selection was cleared.</summary>
+    private sealed class GatedDtDumpService : StubDumpService
+    {
+        public readonly System.Collections.Concurrent.ConcurrentDictionary<string, TaskCompletionSource<DataTableWalkResult>> Gates = new();
+
+        public override Task<FindInstancesResult> FindInstancesAsync(
+            string className, bool exactMatch = false, int limit = 500, CancellationToken ct = default)
+            => Task.FromResult(new FindInstancesResult
+            {
+                Instances = new()
+                {
+                    new InstanceResult { Name = "DT_A", Address = "0xA", ClassName = "DataTable" },
+                    new InstanceResult { Name = "DT_B", Address = "0xB", ClassName = "DataTable" },
+                },
+            });
+
+        public override Task<DataTableWalkResult> WalkDataTableRowsAsync(
+            string addr, int offset = 0, int limit = 64, CancellationToken ct = default)
+        {
+            var tcs = new TaskCompletionSource<DataTableWalkResult>();
+            Gates[addr] = tcs;
+            return tcs.Task;
+        }
+    }
+
+    [Fact]
+    public async Task DataTableSource_NullSelection_SupersedesInflightWalk()
+    {
+        // Regression: LoadDataTableFieldsAsync bumped the field-load guard AFTER the
+        // null-selection early-return, so a slow walk for the previously-selected
+        // DataTable could complete and repopulate Fields after the selection was
+        // cleared. Bumping at entry makes the null path supersede the in-flight walk.
+        var dump = new GatedDtDumpService();
+        var vm = new ClassPivotViewModel(_store, new MockLoggingService(), null, dump);
+        vm.SelectedSource = "DataTable";
+        await vm.PendingLoad!;   // FindInstances → DataTables populated
+
+        // Select A → gated walk begins (genuinely in flight).
+        vm.SelectedDataTable = vm.DataTables.First(d => d.Name == "DT_A");
+        var loadA = vm.PendingLoad!;
+        await WaitForDtGate(dump, "0xA");
+
+        // Clear the selection → entry-bumped guard supersedes A's walk.
+        vm.SelectedDataTable = null;
+        if (vm.PendingLoad != null) await vm.PendingLoad;
+
+        // Let the stale A walk finish — it must bail and NOT repopulate Fields.
+        dump.Gates["0xA"].SetResult(new DataTableWalkResult
+        {
+            RowCount = 1, RowStructName = "FRow",
+            Rows = new()
+            {
+                new DataTableRowInfo { RowName = "Stale", DataAddr = "0x1",
+                    Fields = new() { new LiveFieldValue { Name = "StaleField", TypeName = "IntProperty", TypedValue = "1" } } },
+            },
+        });
+        await loadA;
+
+        Assert.Empty(vm.Fields);   // stale walk bailed on the entry-bumped guard
+    }
+
+    private static async Task WaitForDtGate(GatedDtDumpService dump, string addr)
+    {
+        for (int i = 0; i < 400 && !dump.Gates.ContainsKey(addr); i++)
+            await Task.Delay(5, TestContext.Current.CancellationToken);
+    }
+
     // ---- C5: right-click "Pivot this property" handoff ----
 
     [Fact]

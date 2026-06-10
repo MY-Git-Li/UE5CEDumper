@@ -19,6 +19,11 @@ public partial class InstanceFinderViewModel : ViewModelBase
 
     private EngineState? _engineState;
 
+    // Monotonic guard for the field walk: a fast instance selection must not be
+    // clobbered by a slower walk_instance for a previously-selected instance
+    // (which would render A's fields under B and desync the CE XML export).
+    private int _fieldLoadId;
+
     // Address format
     [ObservableProperty] private int _selectedAddressFormatIndex;
     private AddressFormat AddrFormat => (AddressFormat)SelectedAddressFormatIndex;
@@ -272,6 +277,11 @@ public partial class InstanceFinderViewModel : ViewModelBase
         }
         else
         {
+            // Supersede any in-flight field walk AND clear the loading flag here:
+            // the superseded walk bails in its finally without touching the flag
+            // (id != _fieldLoadId), and no successor load runs to reset it.
+            _fieldLoadId++;
+            IsLoadingFields = false;
             Fields.Clear();
             HasFields = false;
         }
@@ -279,6 +289,7 @@ public partial class InstanceFinderViewModel : ViewModelBase
 
     private async Task LoadInstanceFieldsAsync(InstanceResult instance)
     {
+        int id = ++_fieldLoadId;
         try
         {
             ClearError();
@@ -286,6 +297,7 @@ public partial class InstanceFinderViewModel : ViewModelBase
             ShowCeXml = false;
 
             var result = await _dump.WalkInstanceAsync(instance.Address, arrayLimit: ArrayLimit, previewLimit: PreviewLimit);
+            if (id != _fieldLoadId) return;   // a newer selection / limit change superseded us
 
             // Compute base address for FieldAddress calculation
             ulong baseAddr = 0;
@@ -308,12 +320,14 @@ public partial class InstanceFinderViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            if (id != _fieldLoadId) return;   // stale failure — don't clobber newer state
             SetError(ex);
             _log.Error($"Failed to walk instance at {instance.Address}", ex);
         }
         finally
         {
-            IsLoadingFields = false;
+            if (id == _fieldLoadId)   // only the latest walk owns the loading flag
+                IsLoadingFields = false;
         }
     }
 
