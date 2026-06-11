@@ -499,7 +499,7 @@
     <sys:String x:Key="str.Tip.Con.DbgCam.Refresh">Re-read the live Debug Camera state from the CheatManager instance.</sys:String>
     <sys:String x:Key="str.Tip.Con.DbgCam.ForceOn">Ensure Debug Camera is ON: read current state, and fire ToggleDebugCamera only if it is currently OFF. Idempotent — does nothing if already ON.</sys:String>
     <sys:String x:Key="str.Tip.Con.DbgCam.ForceOff">Ensure Debug Camera is OFF: read current state, and fire ToggleDebugCamera only if it is currently ON. This is the reliable "turn it off" — plain Run just flips whatever state it's in.</sys:String>
-    <sys:String x:Key="str.Tip.Con.DbgCam.CopyCe">Generate a stateful CE memory-record AA Script (tick = camera ON, untick = camera OFF) that calls setDebugCamera — the same robust DLL path as Force On/Off. Ships to AOBMaker if connected, else the clipboard. Requires ue5_invoke_helper.lua embedded in your .CT (Table -> Add File...).</sys:String>
+    <sys:String x:Key="str.Tip.Con.DbgCam.CopyCe">Generate a stateful CE memory-record AA Script (tick = camera ON, untick = camera OFF) — the same robust DLL path as Force On/Off. Self-contained: talks to the DLL mailbox directly, so NO ue5_invoke_helper.lua embed is needed (just UE5Dumper.dll injected). Ships to AOBMaker if connected, else the clipboard.</sys:String>
 
     <!-- Interesting Properties Finder (B' / Unusual Location) -->
     <sys:String x:Key="str.IP.Load">Load</sys:String>

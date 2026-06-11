@@ -23,8 +23,16 @@ public class DebugCameraScriptGeneratorTests
     public void Generate_enables_on_tick_and_disables_on_untick()
     {
         var s = DebugCameraScriptGenerator.Generate();
-        Assert.Contains("setDebugCamera, 1", s);   // [ENABLE]
-        Assert.Contains("setDebugCamera, 0", s);   // [DISABLE]
+        Assert.Contains("writeQword(mb + 0x10, 1)", s);   // [ENABLE] request = ON
+        Assert.Contains("writeQword(mb + 0x10, 0)", s);   // [DISABLE] request = OFF
+    }
+
+    [Fact]
+    public void Both_blocks_trigger_the_set_debug_camera_mailbox_command()
+    {
+        var s = DebugCameraScriptGenerator.Generate();
+        var triggers = s.Split("writeInteger(mb + 0x00, 7)").Length - 1;
+        Assert.Equal(2, triggers);   // CMD_SET_DEBUG_CAMERA=7, one per block
     }
 
     [Fact]
@@ -35,16 +43,19 @@ public class DebugCameraScriptGeneratorTests
         Assert.True(disableIdx > 0);
         var disableBlock = s.Substring(disableIdx);
         // The whole point: unticking the record forces the camera OFF.
-        Assert.Contains("setDebugCamera, 0", disableBlock);
+        Assert.Contains("writeQword(mb + 0x10, 0)", disableBlock);
         Assert.DoesNotContain("-- nop", disableBlock);
     }
 
     [Fact]
-    public void Both_blocks_load_the_embedded_helper()
+    public void Is_self_contained_no_helper_file_dependency()
     {
+        // The fragile part of the old design was depending on the embedded
+        // ue5_invoke_helper.lua (which could be stale). The mailbox round-trip
+        // is inlined so the record works with just the DLL injected.
         var s = DebugCameraScriptGenerator.Generate();
-        var helperLoads = s.Split("findTableFile('ue5_invoke_helper.lua')").Length - 1;
-        Assert.Equal(2, helperLoads);   // one per block (re-declaration-safe)
+        Assert.DoesNotContain("findTableFile", s);
+        Assert.Contains("g_invokeMailbox", s);
     }
 
     [Fact]
