@@ -49,6 +49,13 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly IDumpService _dump;
     private readonly ILoggingService _log;
     private readonly IPlatformService _platform;
+
+    /// <summary>
+    /// Platform service, exposed so the window code-behind can route the
+    /// global focus-in IME-close through the same abstraction (the
+    /// Platform Abstraction rule forbids direct P/Invoke outside it).
+    /// </summary>
+    public IPlatformService Platform => _platform;
     private readonly AobUsageService? _aobUsage;
     private readonly IAobMakerBridge? _aobMaker;  // captured so InterestingFunctions handlers can ship AA Scripts
     private readonly IExperimentalGate? _experimentalGate;
