@@ -167,12 +167,17 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// the slider colour shifts to amber/red at 5-6 to flag the size impact.</summary>
     [ObservableProperty] private int _csxDrilldownDepth;
 
-    /// <summary>Foreground brush for the depth display — default at 0-4, amber at 5, red at 6.</summary>
+    /// <summary>Foreground brush for the depth display — default at 0-3, then
+    /// warms from yellow (4) through orange to deep red (8) as the export
+    /// cost grows. Max is 8.</summary>
     public Avalonia.Media.IBrush CsxDrilldownDepthBrush => CsxDrilldownDepth switch
     {
-        >= 6 => Avalonia.Media.SolidColorBrush.Parse("#E05252"),  // red — likely huge output
-        5    => Avalonia.Media.SolidColorBrush.Parse("#E6A817"),  // amber — warning band
-        _    => Avalonia.Media.SolidColorBrush.Parse("#D4D4D4"),  // default
+        >= 8 => Avalonia.Media.SolidColorBrush.Parse("#E02828"),  // deep red — very large output
+        7    => Avalonia.Media.SolidColorBrush.Parse("#E04A2C"),  // red-orange
+        6    => Avalonia.Media.SolidColorBrush.Parse("#E0702C"),  // orange
+        5    => Avalonia.Media.SolidColorBrush.Parse("#E69A17"),  // amber
+        4    => Avalonia.Media.SolidColorBrush.Parse("#E6C217"),  // yellow — first warning band
+        _    => Avalonia.Media.SolidColorBrush.Parse("#D4D4D4"),  // default 0-3
     };
 
     partial void OnCsxDrilldownDepthChanged(int value)
@@ -2177,6 +2182,14 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         var addressAtStart = CurrentAddress;
         var breadcrumbCountAtStart = Breadcrumbs.Count;
 
+        // Remember the selected row so a refresh (manual or auto) lands back on
+        // it instead of resetting to the top. UpdateDisplay either replaces the
+        // field objects in-place (drops the selection binding) or fully rebuilds
+        // (drops scroll too); restoring by name+offset covers both. Empty when
+        // nothing is selected, so we never yank an un-selected list around.
+        var keepFieldName   = SelectedField?.Name;
+        var keepFieldOffset = SelectedField?.Offset ?? int.MinValue;
+
         // Hard deadline: if the DLL hangs walking a recycled/destroyed object,
         // cancel the pipe request instead of leaving IsLoading stuck forever.
         using var timeoutCts = new CancellationTokenSource(
@@ -2222,7 +2235,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     .FirstOrDefault(f => f.Name == containerField.Name && f.Offset == containerField.Offset);
 
                 if (updatedField != null)
+                {
                     RepopulateContainerView(updatedField);
+                    RestoreSelectedField(keepFieldName, keepFieldOffset);
+                }
                 return;
             }
 
@@ -2237,6 +2253,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 if (CurrentAddress != addressAtStart || Breadcrumbs.Count != breadcrumbCountAtStart) return;
                 _cachedWorld = world;
                 PopulateFromWorld(world);
+                RestoreSelectedField(keepFieldName, keepFieldOffset);
                 return;
             }
 
@@ -2254,6 +2271,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             result = await AutoFillGapsRetryAsync(result, CurrentAddress, classAddr);
             if (CurrentAddress != addressAtStart || Breadcrumbs.Count != breadcrumbCountAtStart) return;
             UpdateDisplay(result);
+            RestoreSelectedField(keepFieldName, keepFieldOffset);
         }
         catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
         {
@@ -2269,6 +2287,31 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         {
             IsLoading = false;
         }
+    }
+
+    /// <summary>
+    /// After a refresh rebuilds the field grid, re-select the row that was
+    /// selected before (matched by name, preferring the same byte offset) and
+    /// scroll it back into view — so Refresh / auto-refresh doesn't reset to the
+    /// top. No-op when nothing was selected or the field is gone.
+    /// </summary>
+    private void RestoreSelectedField(string? name, int offset)
+    {
+        if (string.IsNullOrEmpty(name)) return;
+
+        LiveFieldValue? exact = null, byName = null;
+        foreach (var f in Fields)
+        {
+            if (f.Name != name) continue;
+            byName ??= f;
+            if (f.Offset == offset) { exact = f; break; }
+        }
+
+        var hit = exact ?? byName;
+        if (hit == null) return;
+
+        SelectedField = hit;
+        ScrollToFieldRequested?.Invoke(hit.Name);
     }
 
     [RelayCommand]

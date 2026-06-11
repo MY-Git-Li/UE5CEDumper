@@ -2897,6 +2897,32 @@ static void GuessGapTypes(uintptr_t baseAddr, int32_t gapStart, int32_t gapEnd,
     }
 }
 
+// Format a struct-preview scalar (float/double) WITHOUT scientific notation
+// for human-range magnitudes. `%g` flips to scientific past a few digits (e.g.
+// 18328.64 -> "1.833e+04"), which is unreadable in the Value column preview;
+// the leaf drilldown already uses %f. We mirror that: %f for the broad
+// int32/int64-ish range with trailing zeros trimmed (2245.0000 -> "2245",
+// 129.7000 -> "129.7"), falling back to %g only for truly huge/tiny values
+// where a wall of digits would be worse.
+static std::string FmtPreviewNum(double v) {
+    if (v == 0.0) return "0";
+    double a = (v < 0.0) ? -v : v;
+    char buf[64];
+    if (a >= 1e16 || a < 1e-6) {
+        snprintf(buf, sizeof(buf), "%.6g", v);   // out of human range -> %g
+        return buf;
+    }
+    snprintf(buf, sizeof(buf), "%.4f", v);
+    std::string s(buf);
+    size_t dot = s.find('.');
+    if (dot != std::string::npos) {
+        size_t last = s.find_last_not_of('0');
+        if (last == dot) last--;                 // "2245." -> "2245"
+        s.erase(last + 1);
+    }
+    return s;
+}
+
 InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int32_t arrayLimit, int32_t previewLimit, bool fillGaps) {
     // Clamp arrayLimit to sane range [1, 16384]
     if (arrayLimit < 1) arrayLimit = 1;
@@ -4100,12 +4126,10 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                         const uint8_t* p = structBuf.data() + sf.Offset;
                         if (sf.TypeName == "FloatProperty" && sfSize == 4) {
                             float v; memcpy(&v, p, 4);
-                            char buf[32]; snprintf(buf, sizeof(buf), "%.4g", v);
-                            val = buf;
+                            val = FmtPreviewNum(v);
                         } else if (sf.TypeName == "DoubleProperty" && sfSize == 8) {
                             double v; memcpy(&v, p, 8);
-                            char buf[32]; snprintf(buf, sizeof(buf), "%.4g", v);
-                            val = buf;
+                            val = FmtPreviewNum(v);
                         } else if (sf.TypeName == "IntProperty" && sfSize == 4) {
                             int32_t v; memcpy(&v, p, 4);
                             val = std::to_string(v);
@@ -4549,13 +4573,11 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                         std::string val;
                         if (sf.TypeName == "FloatProperty" && sfSize == 4) {
                             float v; memcpy(&v, p, 4);
-                            char buf[32]; snprintf(buf, sizeof(buf), "%.4g", v);
-                            val = buf;
+                            val = FmtPreviewNum(v);
                         } else if (sf.TypeName == "DoubleProperty"
                                    && sfSize == 8) {
                             double v; memcpy(&v, p, 8);
-                            char buf[32]; snprintf(buf, sizeof(buf), "%.4g", v);
-                            val = buf;
+                            val = FmtPreviewNum(v);
                         } else if (sf.TypeName == "IntProperty"
                                    && sfSize == 4) {
                             int32_t v; memcpy(&v, p, 4);

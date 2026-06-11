@@ -178,7 +178,7 @@
                                  VerticalAlignment="Center" MinWidth="20"/>
                     </StackPanel>
                     <Slider Value="{Binding CsxDrilldownDepth}"
-                            Minimum="0" Maximum="6"
+                            Minimum="0" Maximum="8"
                             TickFrequency="1" IsSnapToTickEnabled="True"
                             ToolTip.Tip="{StaticResource str.Tip.CsxDepth}"/>
                   </StackPanel>
