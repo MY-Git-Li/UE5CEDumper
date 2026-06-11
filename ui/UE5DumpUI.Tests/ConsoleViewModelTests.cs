@@ -54,9 +54,24 @@ public class ConsoleViewModelTests
         /// <summary>Per-address walk queues — lets a test return a different
         /// state for the SAME address before vs. after a toggle.</summary>
         public Dictionary<string, Queue<InstanceWalkResult>> WalkQueueByAddr { get; } = new();
+        /// <summary>Walk overrides that kick in once any WriteMem has run —
+        /// models the DCC reading OFF after the controller-swap nulls its
+        /// OriginalControllerRef.</summary>
+        public Dictionary<string, InstanceWalkResult> WalkByAddrAfterWrite { get; } = new();
         public int WalkCallCount { get; private set; }
         public int FindInstancesCallCount { get; private set; }
         public string LastWalkAddr { get; private set; } = "";
+
+        /// <summary>Every WriteMem call in order — controller-swap assertions.</summary>
+        public List<(string addr, byte[] data)> Writes { get; } = new();
+        private bool _wrote;
+
+        public override Task WriteMemAsync(string addr, byte[] data, CancellationToken ct = default)
+        {
+            Writes.Add((addr, data));
+            _wrote = true;
+            return Task.CompletedTask;
+        }
 
         public override Task<AllFunctionsResult> ListAllFunctionsAsync(
             bool gameOnly = true, int limit = 100000, CancellationToken ct = default)
@@ -80,6 +95,8 @@ public class ConsoleViewModelTests
             LastWalkAddr = addr;
             if (WalkQueueByAddr.TryGetValue(addr, out var q) && q.Count > 0)
                 return Task.FromResult(q.Dequeue());
+            if (_wrote && WalkByAddrAfterWrite.TryGetValue(addr, out var aw))
+                return Task.FromResult(aw);
             if (WalkByAddr.TryGetValue(addr, out var w))
                 return Task.FromResult(w);
             return Task.FromResult(NextWalkResult);
@@ -775,6 +792,96 @@ public class ConsoleViewModelTests
         Assert.Equal("OFF", vm.DebugCameraState);
         Assert.Contains("forced OFF", vm.StatusText);
         Assert.Single(vm.History);                      // recorded like a Run
+        Assert.Empty(fake.Writes);                      // well-behaved → no swap needed
+    }
+
+    // ── Controller-swap fallback (Geri/UE4.27 Shipping: the game's
+    //    DisableDebugCamera is stripped, so the toggle can't turn it off) ──
+
+    private static InstanceWalkResult DccWalkFull(string player, string origPc, string origPlayer) => new()
+    {
+        Fields = new List<LiveFieldValue>
+        {
+            new() { Name="DebugCameraControllerClass", TypeName="ClassProperty",
+                    PtrAddress="0xC0FFEE", Offset=0x08 },
+            new() { Name="Player", TypeName="ObjectProperty",
+                    PtrAddress=player, Offset=0x10 },
+            new() { Name="OriginalControllerRef", TypeName="ObjectProperty",
+                    PtrAddress=origPc, Offset=0x20 },
+            new() { Name="OriginalPlayer", TypeName="ObjectProperty",
+                    PtrAddress=origPlayer, Offset=0x28 },
+        },
+    };
+
+    private static InstanceWalkResult LocalPlayerWalk(string pc) => new()
+    {
+        Fields = new List<LiveFieldValue>
+        {
+            new() { Name="PlayerController", TypeName="ObjectProperty",
+                    PtrAddress=pc, Offset=0x30 },
+        },
+    };
+
+    private static bool PtrEquals(byte[] data, ulong value)
+        => data.Length >= 8 && BitConverter.ToUInt64(data, 0) == value;
+
+    [Fact]
+    public async Task ForceOff_escalates_to_controller_swap_when_toggle_cant_disable()
+    {
+        const string LocalPlayer = "0x1000";
+        const string OrigPc = "0x2000";
+        var fake = new FakeDumpService
+        {
+            NextFindInstances = OneInstance(CmAddr, "CheatManager_0"),
+            NextInvokeResult = new InvokeFunctionResult
+            {
+                Result = 0, Message = "OK", InstanceAddr = CmAddr,
+            },
+        };
+        fake.WalkByAddr[CmAddr] = WalkCheatMgr(DccAddr);
+        // DCC stays ON (OriginalControllerRef non-null) even after the toggle
+        // fires — the game's DisableDebugCamera is a no-op.
+        fake.WalkByAddr[DccAddr] = DccWalkFull(LocalPlayer, OrigPc, LocalPlayer);
+        fake.WalkByAddr[LocalPlayer] = LocalPlayerWalk(DccAddr);
+        // Once the swap writes land, the DCC reads OFF.
+        fake.WalkByAddrAfterWrite[DccAddr] = WalkDcc("0x0");
+        var vm = CreateVm(fake);
+        vm.SeedForTests(DebugCamEntries());
+
+        await vm.ForceDebugCameraOffCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.InvokeCallCount);   // tried the toggle first
+        Assert.Equal("OFF", vm.DebugCameraState); // swap restored OFF
+        Assert.Contains("controller-swap", vm.StatusText);
+        // The critical write: ULocalPlayer.PlayerController = OriginalControllerRef
+        // (LocalPlayer 0x1000 + PlayerController offset 0x30 = 0x1030 ← 0x2000).
+        Assert.Contains(fake.Writes, w => w.addr == "0x1030" && PtrEquals(w.data, 0x2000));
+        // DCC.Player nulled (0xDCC + 0x10 = 0xDDC ← 0).
+        Assert.Contains(fake.Writes, w => w.addr == "0xDDC" && PtrEquals(w.data, 0));
+    }
+
+    [Fact]
+    public async Task ForceOff_swap_bails_when_DCC_not_possessing()
+    {
+        var fake = new FakeDumpService
+        {
+            NextFindInstances = OneInstance(CmAddr, "CheatManager_0"),
+            NextInvokeResult = new InvokeFunctionResult
+            {
+                Result = 0, Message = "OK", InstanceAddr = CmAddr,
+            },
+        };
+        fake.WalkByAddr[CmAddr] = WalkCheatMgr(DccAddr);
+        // OriginalControllerRef non-null (reads ON) but Player is null → not
+        // actually possessing → swap must bail without writing.
+        fake.WalkByAddr[DccAddr] = DccWalkFull(player: "0x0", origPc: "0x2000", origPlayer: "0x0");
+        var vm = CreateVm(fake);
+        vm.SeedForTests(DebugCamEntries());
+
+        await vm.ForceDebugCameraOffCommand.ExecuteAsync(null);
+
+        Assert.Empty(fake.Writes);   // never wrote a partial state
+        Assert.Contains("couldn't run", vm.StatusText);
     }
 
     [Fact]

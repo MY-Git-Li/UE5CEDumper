@@ -805,6 +805,37 @@ public partial class ConsoleViewModel : ViewModelBase
             }
 
             var after = await ReadDebugCameraStateAsync(addr);
+
+            // Escalation: some Shipping builds (e.g. Geri, UE4.27) ship a
+            // ToggleDebugCamera whose DisableDebugCamera cleanup is stripped —
+            // the toggle fires OK but the DebugCameraController keeps
+            // possessing the player (OriginalControllerRef stays set), so the
+            // camera is stuck in free-fly. When Force Off can't disable via
+            // the toggle, do by hand what DisableDebugCamera does: switch the
+            // local player's controller back to the original PlayerController.
+            if (after == true && !wantOn)
+            {
+                var dcc = await GetDccAddrAsync(addr);
+                var swap = dcc != null
+                    ? await TryRestorePlayerControllerAsync(dcc)
+                    : (false, "no DebugCameraController to restore from");
+                if (swap.Item1)
+                {
+                    after = await ReadDebugCameraStateAsync(addr);
+                    SetDebugCameraState(after);
+                    StatusText = after == false
+                        ? $"✓ Debug Camera forced OFF via controller-swap " +
+                          $"fallback ({swap.Item2})."
+                        : $"⚠ Controller-swap ran ({swap.Item2}) but state still " +
+                          $"reads {(after == true ? "ON" : "Unknown")}.";
+                    return;
+                }
+                SetDebugCameraState(after);
+                StatusText = $"⚠ Toggle didn't disable and controller-swap " +
+                             $"couldn't run: {swap.Item2}.";
+                return;
+            }
+
             SetDebugCameraState(after);
             StatusText = after == wantOn
                 ? $"✓ Debug Camera forced {want} (toggled CheatManager {addr})."
@@ -847,5 +878,93 @@ public partial class ConsoleViewModel : ViewModelBase
             : (string.IsNullOrEmpty(result.Error) ? $"Result code {result.Result}" : result.Error);
         AppendHistory(entry, result.Success, text);
         return result;
+    }
+
+    /// <summary>Resolve the live DebugCameraController address from the
+    /// CheatManager's DebugCameraControllerRef. Null when none is spawned
+    /// or the field can't be read.</summary>
+    private async Task<string?> GetDccAddrAsync(string cheatMgrAddr, CancellationToken ct = default)
+    {
+        var cmWalk = await _dump.WalkInstanceAsync(cheatMgrAddr, ct: ct);
+        var refField = FindObjectField(cmWalk, exactName: "DebugCameraControllerRef",
+                                       contains: "DebugCamera", excluding: "Class");
+        if (refField == null || !IsNonNullPtr(refField.PtrAddress)) return null;
+        return refField.PtrAddress;
+    }
+
+    /// <summary>
+    /// Hand-roll what <c>UCheatManager::DisableDebugCamera</c> does when the
+    /// game's own toggle won't: switch the local player's active controller
+    /// back from the DebugCameraController to the original PlayerController.
+    ///
+    /// All offsets are read live from reflection (the walk's field offsets),
+    /// so this is engine-version-agnostic. Writes, mirroring
+    /// <c>UPlayer::SwitchController</c> + <c>OnDeactivate</c>:
+    ///   1. ULocalPlayer.PlayerController = OriginalControllerRef  (the view
+    ///      follows this — the critical write)
+    ///   2. OriginalControllerRef.Player  = ULocalPlayer           (input)
+    ///   3. DCC.Player                    = null
+    ///   4. DCC.OriginalControllerRef/OriginalPlayer = null        (clean state
+    ///      so the badge + a later toggle read OFF)
+    /// Returns (ok, message). Bails (no writes) if any required field/pointer
+    /// is missing, so a partial state never gets written.
+    /// </summary>
+    private async Task<(bool, string)> TryRestorePlayerControllerAsync(string dccAddr, CancellationToken ct = default)
+    {
+        var dccWalk = await _dump.WalkInstanceAsync(dccAddr, ct: ct);
+        var origPcF  = FindObjectField(dccWalk, "OriginalControllerRef", "OriginalController", null);
+        var playerF  = FindObjectField(dccWalk, "Player", "Player", "Controller"); // UPlayer* Player
+        var origPlF  = FindObjectField(dccWalk, "OriginalPlayer", "OriginalPlayer", null);
+
+        if (origPcF == null || playerF == null)
+            return (false, "DCC missing OriginalControllerRef/Player fields");
+        if (!IsNonNullPtr(origPcF.PtrAddress))
+            return (false, "DCC OriginalControllerRef is null (nothing to restore)");
+        if (!IsNonNullPtr(playerF.PtrAddress))
+            return (false, "DCC Player is null (not currently possessing)");
+
+        if (!TryParseAddr(dccAddr, out var dcc)
+            || !TryParseAddr(origPcF.PtrAddress, out var origPc)
+            || !TryParseAddr(playerF.PtrAddress, out var localPlayer))
+            return (false, "unparseable pointer");
+
+        // The local player's active controller field — the one the engine
+        // reads for the player viewpoint.
+        var lpWalk = await _dump.WalkInstanceAsync(playerF.PtrAddress, ct: ct);
+        var pcF = FindObjectField(lpWalk, "PlayerController", "PlayerController", null);
+        if (pcF == null)
+            return (false, "ULocalPlayer missing PlayerController field");
+
+        int playerOff = playerF.Offset;   // APlayerController.Player (same on DCC + origPC)
+
+        await WritePtrAsync(localPlayer, pcF.Offset, origPc, ct);   // 1. view follows origPC
+        await WritePtrAsync(origPc,      playerOff,  localPlayer, ct); // 2. origPC.Player = LP
+        await WritePtrAsync(dcc,         playerOff,  0, ct);          // 3. DCC.Player = null
+        await WritePtrAsync(dcc,         origPcF.Offset, 0, ct);      // 4a. clear active flag
+        if (origPlF != null)
+            await WritePtrAsync(dcc,     origPlF.Offset, 0, ct);      // 4b. clear OriginalPlayer
+
+        _log.Info($"Console.RestorePlayerController: LP={playerF.PtrAddress} " +
+                  $"PC<-{origPcF.PtrAddress} (DCC={dccAddr}, pcOff=0x{pcF.Offset:X}, " +
+                  $"playerOff=0x{playerOff:X})");
+        return (true, $"switched local player back to {origPcF.PtrAddress}");
+    }
+
+    /// <summary>Write an 8-byte little-endian pointer at base+offset.</summary>
+    private Task WritePtrAsync(ulong baseAddr, int offset, ulong value, CancellationToken ct = default)
+    {
+        var addr = "0x" + (baseAddr + (ulong)offset).ToString("X");
+        return _dump.WriteMemAsync(addr, BitConverter.GetBytes(value), ct);
+    }
+
+    /// <summary>Parse a "0x…" / bare-hex pointer string.</summary>
+    private static bool TryParseAddr(string? s, out ulong value)
+    {
+        value = 0;
+        if (string.IsNullOrWhiteSpace(s)) return false;
+        var t = s.Trim();
+        if (t.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) t = t.Substring(2);
+        return ulong.TryParse(t, System.Globalization.NumberStyles.HexNumber,
+                              System.Globalization.CultureInfo.InvariantCulture, out value);
     }
 }
