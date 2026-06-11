@@ -167,12 +167,17 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// the slider colour shifts to amber/red at 5-6 to flag the size impact.</summary>
     [ObservableProperty] private int _csxDrilldownDepth;
 
-    /// <summary>Foreground brush for the depth display — default at 0-4, amber at 5, red at 6.</summary>
+    /// <summary>Foreground brush for the depth display — default at 0-3, then
+    /// warms from yellow (4) through orange to deep red (8) as the export
+    /// cost grows. Max is 8.</summary>
     public Avalonia.Media.IBrush CsxDrilldownDepthBrush => CsxDrilldownDepth switch
     {
-        >= 6 => Avalonia.Media.SolidColorBrush.Parse("#E05252"),  // red — likely huge output
-        5    => Avalonia.Media.SolidColorBrush.Parse("#E6A817"),  // amber — warning band
-        _    => Avalonia.Media.SolidColorBrush.Parse("#D4D4D4"),  // default
+        >= 8 => Avalonia.Media.SolidColorBrush.Parse("#E02828"),  // deep red — very large output
+        7    => Avalonia.Media.SolidColorBrush.Parse("#E04A2C"),  // red-orange
+        6    => Avalonia.Media.SolidColorBrush.Parse("#E0702C"),  // orange
+        5    => Avalonia.Media.SolidColorBrush.Parse("#E69A17"),  // amber
+        4    => Avalonia.Media.SolidColorBrush.Parse("#E6C217"),  // yellow — first warning band
+        _    => Avalonia.Media.SolidColorBrush.Parse("#D4D4D4"),  // default 0-3
     };
 
     partial void OnCsxDrilldownDepthChanged(int value)

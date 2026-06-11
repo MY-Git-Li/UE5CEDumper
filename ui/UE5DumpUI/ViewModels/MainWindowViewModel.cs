@@ -245,11 +245,15 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(CsxDrilldownDepthBrush));
     }
 
-    /// <summary>Toolbar slider colour — default 0-4, amber 5, red 6 to flag exponential output growth.</summary>
+    /// <summary>Toolbar slider colour — default 0-3, then yellow (4) → orange →
+    /// deep red (8) to flag exponential output growth. Max is 8.</summary>
     public Avalonia.Media.IBrush CsxDrilldownDepthBrush => CsxDrilldownDepth switch
     {
-        >= 6 => Avalonia.Media.SolidColorBrush.Parse("#E05252"),
-        5    => Avalonia.Media.SolidColorBrush.Parse("#E6A817"),
+        >= 8 => Avalonia.Media.SolidColorBrush.Parse("#E02828"),
+        7    => Avalonia.Media.SolidColorBrush.Parse("#E04A2C"),
+        6    => Avalonia.Media.SolidColorBrush.Parse("#E0702C"),
+        5    => Avalonia.Media.SolidColorBrush.Parse("#E69A17"),
+        4    => Avalonia.Media.SolidColorBrush.Parse("#E6C217"),
         _    => Avalonia.Media.SolidColorBrush.Parse("#D4D4D4"),
     };
 
