@@ -369,7 +369,7 @@ applies the publisher's `biasFallback` when detection fails. Currently:
 Adding more entries casually risks wrong bias overriding correct
 detection — wait for a real misdetection report before adding.
 
-## Tested games (last verified 2026-05-10)
+## Tested games (last verified 2026-06-11)
 
 - **Everspace 2** ✅ (UE 5.4): item template ID via container scan; Find
   Refs v3 returns 9 correct references in 224ms (cache hot, scan
@@ -455,8 +455,22 @@ detection — wait for a real misdetection report before adding.
   `version.dll` nor `dinput8.dll` proxy gets loaded by the EA launcher —
   must inject via Cheat Engine after the game is running. Scan +
   dump pipeline works identically once the DLL is in-process.
+- **MS Gundam SEED Battle Destiny Remastered** ✅ (UE 4.27, 57K objects
+  → 72K mid-game, build 1016 user logs 2026-06-11, Steam): full scan OK —
+  GObjects=0x7FF758C32550 (GOBJ_ES53_1, UE5-Extended layout strict, Max
+  2.16M / 33 chunks), GNames=0x7FF758BF6200 (GNAM_V8, FNamePool hdrOff=0
+  stride 2, `UE4Names=no` — a UE4.27 on the UE5-style FNamePool),
+  **GWorld=0x7FF758D77040** (GWLD_GH_1). FProperty mode (CPN=no,
+  TagFFV=no; `FField::Next=+0x20`, `Name=+0x28`; `FProp::Offset=+0x4C`,
+  `StructProp=+0x78`). `version.dll` proxy loads (real version.dll).
+  ProcessEvent on **vtable+0x220**, game-thread dispatch validated
+  (15 646 hook fires / 1500 ms) and invokes succeed. Install
+  `H:\SteamLibrary\steamapps\common\SEED BATTLE DESTINY REMASTERED`, exe
+  `Game_SBDR\Binaries\Win64\SEED BATTLE DESTINY REMASTERED.exe`; internal
+  UClasses use a `Life` prefix (`LifeGameInstance` 15 fields,
+  `BP_LifeSaveData_C`). Bandai Namco (publisher=- — no thumbprint match).
 
-GWorld success ratio: **29 / 29 (100% of tested games)** as of 2026-05-12.
+GWorld success ratio: **30 / 30 (100% of tested games)** as of 2026-06-11.
 Satisfactory (modular DLL build): scan side OK — `Macht::AOBScanAllModules`
 falls through to `FactoryGameSteam-CoreUObject-Win64-Shipping.dll`
 under `Engine\Binaries\Win64\` and the 15-game dump corpus includes
