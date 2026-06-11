@@ -7,6 +7,7 @@
 ## Cheat Engine Integration
 
 - `executeCodeEx` internally uses `CreateRemoteThread` — games with thread injection protection will block it silently (returns nil, not an error code)
+- **Don't use `executeCodeEx` to call a DLL export and read its return value — use the mailbox (shared memory) instead.** Even a no-parameter export call (`executeCodeEx(timeout, nil, addr)`) came back `nil`: its return-value capture is unreliable across setups (it depends on the remote thread + exit-code path, which the proxy-DLL / anti-tamper environment defeats). The whole CE↔DLL surface goes through the Mimic single-slot mailbox (`g_invokeMailbox`): CE only does `writeQword`/`readInteger` (= Write/ReadProcessMemory) against the struct, the DLL polling thread executes (and dispatches ProcessEvent to the game thread). That's why `invokeUFunction` and `setDebugCamera` (CMD_SET_DEBUG_CAMERA) use the mailbox, not `executeCodeEx`. See `docs/CE-Bugs-Minesweeper.md` §5 for the related "embedded helper stays cached" gotcha.
 - CE `File -> Open` vs `File -> Save` update **different** dialog objects (`OpenDialog1` vs `SaveDialog1`)
 - `getCheatEngineDir()` returns CE root (e.g., `C:\Program Files\CE 7.5\`) — DLL must be placed next to the CT, NOT in a subdirectory
 - **CT Lua DLL path search**: Try `OpenDialog1.FileName` first, fall back to `SaveDialog1.FileName`, then `getCheatEngineDir()`

@@ -171,3 +171,21 @@ I tested these cases, now they are all correct:
 | `cmp bx, 7F` | `66 83 FB 7F` (007F) | `66 83 FB 7F` (No change, safe) |
 | `cmp bx, 05` | `66 83 FB 05` (0005) | `66 83 FB 05` (No change, safe) |
 | `add bx, C0` | `66 83 C3 C0` (FFC0) | `66 81 C3 C0 00` (00C0) |
+
+---
+
+### 5. Embedded table Lua file stays cached after re-embed (no reload until CE restart)
+**Tested CE Version:** 7.6, 7.7
+
+When a table Lua file (e.g. `ue5_invoke_helper.lua`, added via **Table → Add File…**) has already been `load()`-ed in the current session, **swapping it for an updated copy does NOT take effect** — even if you remove the old file and re-add the new one. CE keeps the previously-loaded globals in the main Lua engine for the rest of the session.
+
+Two things compound this:
+1. **Helpers use a re-declaration guard.** Our `ue5_invoke_helper.lua` wraps its functions in `if not setDebugCamera then … end` so multiple AA Scripts loading the helper don't redefine it. Once the function exists as a global, a later `load()` of the file's source runs the guard, sees the global, and **skips the redefinition** — so the stale function persists.
+2. **`findTableFile` returns the embedded blob**, and `load()` compiles fresh source, but (1) means the fresh source's definitions are never installed over the already-present globals.
+
+**Symptom we hit:** after fixing `setDebugCamera` (executeCodeEx → mailbox) and re-exporting + re-embedding the helper, the generated record still ran the OLD function and returned `state=nil`. Deleting and re-adding the file did nothing.
+
+**Workarounds:**
+- **Fully restart Cheat Engine** (closing just the table or the Lua engine window is not always enough — a full CE restart reliably clears the cached globals).
+- **Or** make the generated script self-contained so it doesn't depend on the embedded helper at all (what we did for "Copy CE Script": inline the mailbox round-trip, no `findTableFile`). This sidesteps the cache entirely.
+- A helper could also force-reload by clearing its own globals before redefining (e.g. drop the `if not …` guard, or set the functions to `nil` first), but that defeats the multi-load guard, so the self-contained route is preferred.
