@@ -485,6 +485,20 @@
     <sys:String x:Key="str.Tip.Con.CopyAaScript">Open the Copy AA Script (Baked) dialog for this exec command — useful when you want to bake the invoke into a CE Auto Assembler script for table sharing.</sys:String>
     <sys:String x:Key="str.Tip.Con.Replay">Re-run this command. Requires the discovery list to still be loaded (re-launch wipes the cache).</sys:String>
 
+    <!-- Console: Debug Camera state-aware helper (visible only when the
+         loaded exec list contains ToggleDebugCamera). ToggleDebugCamera is
+         a stateful toggle; these controls read the CheatManager's
+         DebugCameraControllerRef to show ON/OFF and drive deterministic
+         Force On / Force Off instead of blind toggling. -->
+    <sys:String x:Key="str.Con.DbgCam.Label">Debug Camera</sys:String>
+    <sys:String x:Key="str.Con.DbgCam.ForceOn">Force On</sys:String>
+    <sys:String x:Key="str.Con.DbgCam.ForceOff">Force Off</sys:String>
+    <sys:String x:Key="str.Con.DbgCam.Refresh">↻</sys:String>
+    <sys:String x:Key="str.Tip.Con.DbgCam.State">Live Debug Camera state, read from the CheatManager's DebugCameraControllerRef member — the exact field ToggleDebugCamera branches on. ON = a DebugCameraController is active (next plain toggle would turn it OFF). Press ↻ to re-read.</sys:String>
+    <sys:String x:Key="str.Tip.Con.DbgCam.Refresh">Re-read the live Debug Camera state from the CheatManager instance.</sys:String>
+    <sys:String x:Key="str.Tip.Con.DbgCam.ForceOn">Ensure Debug Camera is ON: read current state, and fire ToggleDebugCamera only if it is currently OFF. Idempotent — does nothing if already ON.</sys:String>
+    <sys:String x:Key="str.Tip.Con.DbgCam.ForceOff">Ensure Debug Camera is OFF: read current state, and fire ToggleDebugCamera only if it is currently ON. This is the reliable "turn it off" — plain Run just flips whatever state it's in.</sys:String>
+
     <!-- Interesting Properties Finder (B' / Unusual Location) -->
     <sys:String x:Key="str.IP.Load">Load</sys:String>
     <sys:String x:Key="str.IP.GameOnly">Game Only</sys:String>
