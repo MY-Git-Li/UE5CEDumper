@@ -125,6 +125,17 @@ function Enter-VsDevEnvironment() {
     #>
     if ($script:vsDevShellLoaded) { return $true }
 
+    # If this shell already has an x64 MSVC dev environment (e.g. inherited from a
+    # parent "Developer PowerShell", or a sibling repo's publish script ran vcvars in
+    # this same session), DON'T enter it again. Enter-VsDevShell PREPENDS the VC paths
+    # to PATH/LIB/INCLUDE every time, so re-entering stacks them until the linker's
+    # command line blows past the 8191-char Windows limit (-> AOT link exits 123).
+    if ($env:VSCMD_ARG_TGT_ARCH -eq 'x64') {
+        $script:vsDevShellLoaded = $true
+        Write-Ok "MSVC x64 environment already loaded (reusing inherited env)"
+        return $true
+    }
+
     $devShellDll = Join-Path $script:vsPath "Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
     if (-not (Test-Path $devShellDll)) {
         Write-Fail "DevShell.dll not found: $devShellDll"
@@ -531,10 +542,19 @@ if ($Target -in "All", "UI", "Test") {
             # No .NET runtime bundled — much smaller than self-contained single-file.
             Write-Step "Publishing UE5DumpUI (Native AOT, Release)..."
 
+            # IlcUseEnvironmentalTools: use the MSVC linker already on PATH (loaded by
+            # Enter-VsDevEnvironment above) instead of letting ILCompiler run its own
+            # findvcvarsall.bat discovery. That discovery captures cmd.exe stdout to
+            # locate link.exe, so when the inherited environment is bloated (e.g. this
+            # shell already ran another repo's vcvars/DevShell publish, stacking
+            # PATH/LIB/INCLUDE), cmd.exe emits "The input line is too long." and that
+            # text leaks into the linker path -> link.exe exits 123. Using the
+            # environmental tools skips that fragile step entirely.
             & dotnet publish $UI_PROJ `
                 -c Release `
                 -r win-x64 `
                 -p:PublishAot=true `
+                -p:IlcUseEnvironmentalTools=true `
                 -o $publishDir `
                 --nologo
 
