@@ -170,6 +170,20 @@ Total commands: 31 (command name constants live in `dll/src/Renge.h`)
 { "id": 42, "cmd": "invoke_function", "func_name": "Attack", "instance_addr": "0x7FF...", "parms_size": 16, "params_hex": "3F800000" }
 ```
 
+### Debug Camera (robust force on/off)
+
+Shared by the Console panel (here) and CE Lua (`setDebugCamera` export). All logic — two-hop state read, ToggleDebugCamera invoke, and controller-swap fallback for Shipping builds that strip `DisableDebugCamera` — lives in the DLL (`UE5_GetDebugCameraState` / `UE5_SetDebugCamera`). `state`: `1` = ON, `0` = OFF, `-1` = unknown/error.
+
+```jsonc
+// Read live state
+{ "id": 50, "cmd": "get_debug_camera_state" }
+// → { "ok": true, "state": 1 }
+
+// Force ON (enable:true) / OFF (enable:false); idempotent
+{ "id": 51, "cmd": "set_debug_camera", "enable": false }
+// → { "ok": true, "state": 0 }
+```
+
 ### Value Search (build 738 + Phase 2 build 757)
 
 CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands form a session: `begin_value_scan` opens, `refine_value_scan` narrows, `end_value_scan` closes. Sessions auto-expire after 5 min idle.

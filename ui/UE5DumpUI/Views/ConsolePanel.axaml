@@ -103,6 +103,12 @@
                 Foreground="#E0A050" Background="Transparent"
                 BorderThickness="1" BorderBrush="#E0A050"
                 Padding="10,2" FontSize="11" FontWeight="SemiBold" Cursor="Hand"/>
+        <Button Content="{StaticResource str.Con.DbgCam.CopyCe}"
+                Command="{Binding CopyDebugCameraScriptCommand}"
+                ToolTip.Tip="{StaticResource str.Tip.Con.DbgCam.CopyCe}"
+                Foreground="#DCDCAA" Background="Transparent"
+                BorderThickness="1" BorderBrush="#DCDCAA"
+                Padding="10,2" FontSize="11" Cursor="Hand"/>
         <ProgressBar IsIndeterminate="True"
                      IsVisible="{Binding IsDebugCameraBusy}"
                      Width="60" Height="4" Foreground="#4EC9B0"

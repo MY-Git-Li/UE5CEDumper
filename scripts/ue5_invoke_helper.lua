@@ -19,6 +19,26 @@
   Public API (re-declaration-safe, syntax-highlighted):
     ok, err = invokeUFunction(className, funcName, parmsSize, params)
     value   = readUFunctionReturn(offset, valueType)
+    state   = setDebugCamera(enable)   -- robust force on/off (1=on,0=off,-1=err)
+    state   = getDebugCameraState()    -- 1=on, 0=off, -1=unknown
+
+  Debug Camera memory-record example (one checkbox = camera on/off).
+  Both blocks call the SAME DLL export, only the arg differs; the DLL
+  reads state, toggles only when needed, and on a disable that the game's
+  stripped ToggleDebugCamera can't honour, switches the local player's
+  controller back to the original PlayerController:
+
+    [ENABLE]
+    {$lua}
+    if syntaxcheck then return end
+    setDebugCamera(1)
+    {$asm}
+
+    [DISABLE]
+    {$lua}
+    if syntaxcheck then return end
+    setDebugCamera(0)
+    {$asm}
 
   Constants exposed:
     UE5_INVOKE_HELPER_VERSION  = '1.0'
@@ -313,6 +333,58 @@ if not readUFunctionReturn then
   end
 
   registerLuaFunctionHighlight('readUFunctionReturn')
+end
+
+-- ============================================================
+-- Public API: Debug Camera robust force on/off
+-- ============================================================
+-- Goes through the SAME single-slot mailbox as invokeUFunction (the
+-- proven CE<->DLL channel) -- NOT executeCodeEx, which doesn't reliably
+-- return the export's int result (observed: state=nil). The DLL handler
+-- (CMD_SET_DEBUG_CAMERA=7) owns the whole toggle + controller-swap
+-- fallback, so the UI (pipe) and CE Lua (here) share one implementation.
+-- Returns the resulting state: 1 = ON, 0 = OFF, -1 = error/unknown.
+if not setDebugCamera then
+
+  local CMD_SET_DEBUG_CAMERA = 7
+
+  -- req: 0 = OFF, 1 = ON, 2 = query (read state, no change).
+  -- Reuses the file-local mailbox helpers + reentrancy guard.
+  local function dbgCamMailbox(req)
+    if _ue5_invoke_busy then
+      error('[ue5_invoke] busy -- another mailbox call is mid-flight')
+    end
+    _ue5_invoke_busy = true
+    local pok, res = pcall(function()
+      local mb = findMailbox()
+      writeQword(mb + OFF_INSTANCE, req)   -- 0x010: request (0/1/2)
+      writeInteger(mb + OFF_STATUS, 0)     -- clear status
+      writeInteger(mb + OFF_CMD, CMD_SET_DEBUG_CAMERA)  -- trigger (write LAST)
+      local ok_w, err_w = waitDone(mb, DEFAULT_TIMEOUT_MS)
+      if not ok_w then error(err_w) end
+      return readInteger(mb + OFF_RESULT)  -- 0x008: resulting state
+    end)
+    _ue5_invoke_busy = false
+    if not pok then error(tostring(res)) end
+    return res
+  end
+
+  --- Force Debug Camera ON (enable ~= 0) or OFF. Idempotent.
+  --- @param enable number|boolean
+  --- @return number state  1=ON, 0=OFF, -1=error
+  function setDebugCamera(enable)
+    return dbgCamMailbox((enable and enable ~= 0) and 1 or 0)
+  end
+  registerLuaFunctionHighlight('setDebugCamera')
+
+  --- Read the live Debug Camera state without changing it.
+  --- @return number state  1=ON, 0=OFF, -1=unknown
+  function getDebugCameraState()
+    local ok, state = pcall(dbgCamMailbox, 2)
+    return ok and state or -1
+  end
+  registerLuaFunctionHighlight('getDebugCameraState')
+
 end
 
 -- ============================================================

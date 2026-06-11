@@ -35,6 +35,8 @@ extern "C" uintptr_t UE5_GetObjectClass(uintptr_t obj);
 extern "C" uintptr_t UE5_FindFunctionByName(uintptr_t classAddr, const char* funcName);
 extern "C" int32_t   UE5_CallProcessEventDirect(uintptr_t instance, uintptr_t ufunc, uintptr_t params);
 extern "C" int32_t   UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t params);
+extern "C" int32_t   UE5_GetDebugCameraState();
+extern "C" int32_t   UE5_SetDebugCamera(int32_t enable);
 // Size-aware variant: the queued request owns a copy of the param buffer, so a
 // timed-out invoke can't use-after-free this handler's stack-local paramBuf.
 extern "C" int32_t   UE5_CallProcessEventEx(uintptr_t instance, uintptr_t ufunc, uintptr_t params, uint32_t paramsSize);
@@ -2929,6 +2931,24 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 data["error"] = errMsg;
             }
 
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // ── get_debug_camera_state: read live Debug Camera ON/OFF ──
+        if (cmd == Renge::CMD_GET_DEBUG_CAMERA_STATE) {
+            int32_t state = UE5_GetDebugCameraState();
+            json data;
+            data["state"] = state;   // 1=on, 0=off, -1=unknown
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // ── set_debug_camera: robust force on/off (toggle + swap fallback) ──
+        if (cmd == Renge::CMD_SET_DEBUG_CAMERA) {
+            bool enable = request.value("enable", false);
+            Sein::Info("PIPE:cmd", "set_debug_camera: enable=%d", enable ? 1 : 0);
+            int32_t state = UE5_SetDebugCamera(enable ? 1 : 0);
+            json data;
+            data["state"] = state;   // resulting state: 1=on, 0=off, -1=error
             return Renge::MakeResponse(id, data).dump();
         }
 

@@ -28,6 +28,9 @@ enum Cmd : int32_t {
     CMD_INVOKE_BY_NAME  = 4,  // Combined: find instance + find function + invoke
     CMD_LIST_FUNCTIONS  = 5,  // List all UFunctions on an instance's class (paginated)
     CMD_LIST_INSTANCES  = 6,  // List all live (non-CDO) instances of a class (paginated)
+    CMD_SET_DEBUG_CAMERA = 7, // Robust Debug Camera force on/off / query.
+                              //   Input:  instanceAddr = 0 (OFF) / 1 (ON) / 2 (query, no change)
+                              //   Output: result = resulting state (1=ON, 0=OFF, -1=error)
 };
 
 // Mailbox status (DLL writes to status field)

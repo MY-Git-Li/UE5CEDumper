@@ -477,7 +477,7 @@ the `bIsBound` flag only; binding enumeration is tracked in
 
 -----
 
-## Frieren.h — C ABI Exports (30 functions, legacy alias: ExportAPI)
+## Frieren.h — C ABI Exports (32 functions, legacy alias: ExportAPI)
 
 ```cpp
 #pragma once
@@ -535,6 +535,13 @@ extern "C" {
     __declspec(dllexport) uintptr_t UE5_FindFunctionByName(uintptr_t classAddr, const char* funcName);
     __declspec(dllexport) int32_t   UE5_CallProcessEvent(uintptr_t instance, uintptr_t func,
                                         void* params, int32_t paramsSize);
+
+    // === Debug Camera (2) — robust force on/off, shared by UI pipe + CE Lua ===
+    // Two-hop reflection state read + ToggleDebugCamera invoke + controller-swap
+    // fallback for Shipping builds that strip DisableDebugCamera. state: 1=ON,
+    // 0=OFF, -1=unknown/error. All offsets resolved live (UE4/UE5-agnostic).
+    __declspec(dllexport) int32_t   UE5_GetDebugCameraState();
+    __declspec(dllexport) int32_t   UE5_SetDebugCamera(int32_t enable);
 
     // === Mailbox (1) ===
     __declspec(dllexport) uintptr_t UE5_GetMailboxAddr();  // shared memory for CE Lua invocation

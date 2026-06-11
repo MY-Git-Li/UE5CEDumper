@@ -102,7 +102,11 @@ public static class BakedScriptGenerator
     // Section emitters
     // ------------------------------------------------------------------
 
-    private static void AppendHelperLoader(StringBuilder sb)
+    /// <summary>Emit the standard "load ue5_invoke_helper.lua from the embedded
+    /// table file" preamble (no filesystem fallback). Public so sibling
+    /// generators (e.g. <see cref="DebugCameraScriptGenerator"/>) reuse the
+    /// exact, proven loader instead of duplicating it.</summary>
+    public static void AppendHelperLoader(StringBuilder sb)
     {
         Line(sb, "-- Load helper from embedded table file (NO filesystem fallback)");
         Line(sb, $"local tf = findTableFile('{HelperFileName}')");
