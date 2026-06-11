@@ -231,6 +231,102 @@ public class ModelTests
         Assert.Null(LiveFieldValue.DecodeHexAsNumeric("IntProperty", "ZZ"));
     }
 
+    // --- DecodeDateTimeStruct (intrinsic FDateTime / FTimespan) ---
+
+    [Fact]
+    public void DecodeDateTimeStruct_DateTime_RealValue_FormatsReadableWithRawTicks()
+    {
+        // m_last_access_date raw bytes from a live save: 0x08DEC804F0983380 ticks.
+        var result = LiveFieldValue.DecodeDateTimeStruct("DateTime", "803398F004C8DE08");
+        Assert.Equal("2026-06-11 22:01:07 (639168120675120000)", result);
+    }
+
+    [Fact]
+    public void DecodeDateTimeStruct_Timespan_RealValue_FormatsReadableWithRawTicks()
+    {
+        // m_total_play_time raw bytes from a live save: 46738270000 ticks ≈ 1h17m53s.
+        var result = LiveFieldValue.DecodeDateTimeStruct("Timespan", "3067D1E10A000000");
+        Assert.Equal("01:17:53 (46738270000)", result);
+    }
+
+    [Fact]
+    public void DecodeDateTimeStruct_DateTime_RoundTripsAnyDate()
+    {
+        var dt = new DateTime(2030, 1, 2, 3, 4, 5);
+        var hex = Convert.ToHexString(BitConverter.GetBytes(dt.Ticks));
+        Assert.Equal($"2030-01-02 03:04:05 ({dt.Ticks})",
+            LiveFieldValue.DecodeDateTimeStruct("DateTime", hex));
+    }
+
+    [Fact]
+    public void DecodeDateTimeStruct_Timespan_MultiDay_ShowsDays()
+    {
+        var ts = new TimeSpan(2, 3, 4, 5); // 2d 03:04:05
+        var hex = Convert.ToHexString(BitConverter.GetBytes(ts.Ticks));
+        Assert.Equal($"2d 03:04:05 ({ts.Ticks})",
+            LiveFieldValue.DecodeDateTimeStruct("Timespan", hex));
+    }
+
+    [Fact]
+    public void DecodeDateTimeStruct_Timespan_Negative_ShowsSign()
+    {
+        var ts = new TimeSpan(-1, -30, 0); // -1:30:00
+        var hex = Convert.ToHexString(BitConverter.GetBytes(ts.Ticks));
+        Assert.Equal($"-01:30:00 ({ts.Ticks})",
+            LiveFieldValue.DecodeDateTimeStruct("Timespan", hex));
+    }
+
+    [Theory]
+    [InlineData("LifeSaveDataSlot")]   // ordinary struct — leave to default {…}
+    [InlineData("FVector")]
+    [InlineData("")]
+    public void DecodeDateTimeStruct_NonMatchingType_ReturnsNull(string structType)
+    {
+        Assert.Null(LiveFieldValue.DecodeDateTimeStruct(structType, "0000000000000000"));
+    }
+
+    [Fact]
+    public void DecodeDateTimeStruct_EmptyOrShortHex_ReturnsNull()
+    {
+        Assert.Null(LiveFieldValue.DecodeDateTimeStruct("DateTime", ""));
+        Assert.Null(LiveFieldValue.DecodeDateTimeStruct("DateTime", null!));
+        Assert.Null(LiveFieldValue.DecodeDateTimeStruct("DateTime", "1234")); // < 8 bytes
+    }
+
+    [Fact]
+    public void DecodeDateTimeStruct_DateTimeOutOfRange_ReturnsNull()
+    {
+        // 0xFFFFFFFFFFFFFFFF is a negative tick count → outside DateTime's valid range.
+        Assert.Null(LiveFieldValue.DecodeDateTimeStruct("DateTime", "FFFFFFFFFFFFFFFF"));
+    }
+
+    [Fact]
+    public void DisplayValue_DateTimeStruct_ShowsReadable_OverridingTypedValue()
+    {
+        // Even if the DLL populated a struct preview into TypedValue, the readable
+        // date wins (DecodeDateTimeStruct is checked first), while edit/export keep raw.
+        var field = new LiveFieldValue
+        {
+            TypeName = "StructProperty",
+            StructTypeName = "DateTime",
+            TypedValue = "{Ticks=639168120675120000}",
+            HexValue = "803398F004C8DE08",
+        };
+        Assert.Equal("2026-06-11 22:01:07 (639168120675120000)", field.DisplayValue);
+    }
+
+    [Fact]
+    public void DisplayValue_OrdinaryStruct_StillShowsBraceName()
+    {
+        var field = new LiveFieldValue
+        {
+            TypeName = "StructProperty",
+            StructTypeName = "LifeSaveDataSlot",
+            HexValue = "0011223344556677",
+        };
+        Assert.Equal("{LifeSaveDataSlot}", field.DisplayValue);
+    }
+
     [Fact]
     public void DisplayValue_FloatZero_WhenTypedValueEmpty_ShowsZero()
     {
