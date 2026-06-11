@@ -338,39 +338,52 @@ end
 -- ============================================================
 -- Public API: Debug Camera robust force on/off
 -- ============================================================
--- Thin wrappers over the UE5_SetDebugCamera / UE5_GetDebugCameraState
--- DLL exports. The whole toggle + controller-swap fallback lives in the
--- DLL, so the UI (via pipe) and CE Lua (here) share one implementation.
+-- Goes through the SAME single-slot mailbox as invokeUFunction (the
+-- proven CE<->DLL channel) -- NOT executeCodeEx, which doesn't reliably
+-- return the export's int result (observed: state=nil). The DLL handler
+-- (CMD_SET_DEBUG_CAMERA=7) owns the whole toggle + controller-swap
+-- fallback, so the UI (pipe) and CE Lua (here) share one implementation.
 -- Returns the resulting state: 1 = ON, 0 = OFF, -1 = error/unknown.
 if not setDebugCamera then
 
-  -- Resolve an export by symbol, tolerating the module-qualified form.
-  local function dbgCamExport(name)
-    local a = getAddressSafe('UE5Dumper.' .. name)
-    if not a or a == 0 then a = getAddressSafe(name) end
-    return a
-  end
+  local CMD_SET_DEBUG_CAMERA = 7
 
-  function getDebugCameraState()
-    local a = dbgCamExport('UE5_GetDebugCameraState')
-    if not a or a == 0 then return -1 end
-    return executeCodeEx(5000, nil, a)
+  -- req: 0 = OFF, 1 = ON, 2 = query (read state, no change).
+  -- Reuses the file-local mailbox helpers + reentrancy guard.
+  local function dbgCamMailbox(req)
+    if _ue5_invoke_busy then
+      error('[ue5_invoke] busy -- another mailbox call is mid-flight')
+    end
+    _ue5_invoke_busy = true
+    local pok, res = pcall(function()
+      local mb = findMailbox()
+      writeQword(mb + OFF_INSTANCE, req)   -- 0x010: request (0/1/2)
+      writeInteger(mb + OFF_STATUS, 0)     -- clear status
+      writeInteger(mb + OFF_CMD, CMD_SET_DEBUG_CAMERA)  -- trigger (write LAST)
+      local ok_w, err_w = waitDone(mb, DEFAULT_TIMEOUT_MS)
+      if not ok_w then error(err_w) end
+      return readInteger(mb + OFF_RESULT)  -- 0x008: resulting state
+    end)
+    _ue5_invoke_busy = false
+    if not pok then error(tostring(res)) end
+    return res
   end
-  registerLuaFunctionHighlight('getDebugCameraState')
 
   --- Force Debug Camera ON (enable ~= 0) or OFF. Idempotent.
   --- @param enable number|boolean
   --- @return number state  1=ON, 0=OFF, -1=error
   function setDebugCamera(enable)
-    local a = dbgCamExport('UE5_SetDebugCamera')
-    if not a or a == 0 then
-      error('[ue5_invoke] UE5_SetDebugCamera export not found -- ' ..
-            'is UE5Dumper.dll injected?')
-    end
-    local arg = ((enable and enable ~= 0) and 1 or 0)
-    return executeCodeEx(5000, { 'integer' }, a, arg)
+    return dbgCamMailbox((enable and enable ~= 0) and 1 or 0)
   end
   registerLuaFunctionHighlight('setDebugCamera')
+
+  --- Read the live Debug Camera state without changing it.
+  --- @return number state  1=ON, 0=OFF, -1=unknown
+  function getDebugCameraState()
+    local ok, state = pcall(dbgCamMailbox, 2)
+    return ok and state or -1
+  end
+  registerLuaFunctionHighlight('getDebugCameraState')
 
 end
 

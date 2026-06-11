@@ -78,6 +78,7 @@ static void HandleInvoke();
 static void HandleInvokeByName();
 static void HandleListFunctions();
 static void HandleListInstances();
+static void HandleSetDebugCamera();
 static void SetError(int32_t code, const char* msg);
 static void SetDone(int32_t resultCode);
 static bool EnsureInitialized();
@@ -162,6 +163,9 @@ static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
                 break;
             case CMD_LIST_INSTANCES:
                 HandleListInstances();
+                break;
+            case CMD_SET_DEBUG_CAMERA:
+                HandleSetDebugCamera();
                 break;
             default:
                 SetError(-1, "Unknown command");
@@ -618,6 +622,27 @@ static void HandleListInstances() {
 }
 
 // ---- Helpers ----
+
+// CMD_SET_DEBUG_CAMERA: robust Debug Camera force on/off, shared with the UI
+// pipe (set_debug_camera). instanceAddr carries the request: 0=OFF, 1=ON,
+// 2=query (read state, no change). result gets the resulting state (1/0/-1).
+// Delegates entirely to the Frieren exports, which own the toggle +
+// controller-swap fallback.
+static void HandleSetDebugCamera() {
+    uint64_t req = g_invokeMailbox.instanceAddr;
+    int32_t state = (req == 2)
+        ? UE5_GetDebugCameraState()
+        : UE5_SetDebugCamera(req != 0 ? 1 : 0);
+    if (state == -1) {
+        strncpy(g_invokeMailbox.errorMsg,
+                "Debug Camera: no live CheatManager / unreadable state",
+                sizeof(g_invokeMailbox.errorMsg) - 1);
+        g_invokeMailbox.errorMsg[sizeof(g_invokeMailbox.errorMsg) - 1] = '\0';
+    }
+    LOG_INFO("Mailbox: SET_DEBUG_CAMERA req=%llu -> state=%d",
+             (unsigned long long)req, state);
+    SetDone(state);
+}
 
 static void SetError(int32_t code, const char* msg) {
     g_invokeMailbox.result = code;
