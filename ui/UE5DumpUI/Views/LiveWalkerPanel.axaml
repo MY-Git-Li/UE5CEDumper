@@ -390,6 +390,7 @@
                 <!-- Other editable types: free-text input -->
                 <TextBox IsVisible="{Binding !IsBoolProperty}"
                          Text="{Binding EditableValue, Mode=TwoWay}"
+                         KeyDown="EditBox_KeyDown"
                          Padding="4,2" BorderThickness="1"
                          BorderBrush="#569CD6"/>
               </Panel>

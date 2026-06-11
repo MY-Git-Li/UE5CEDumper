@@ -195,6 +195,27 @@ public partial class LiveWalkerPanel : UserControl
         }
     }
 
+    /// <summary>
+    /// Commit (Enter) or cancel (Escape) the in-place edit without advancing.
+    /// Avalonia's DataGrid default treats Enter as "commit + move selection to the
+    /// next row (re-entering edit mode)", so each Enter walked the editor down the
+    /// grid. Committing ourselves and marking the event Handled stops the event from
+    /// bubbling to the DataGrid, so the editor closes on the field the user edited.
+    /// </summary>
+    private void EditBox_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter && e.Key != Key.Escape) return;
+
+        var grid = this.FindControl<DataGrid>("FieldGrid");
+        if (grid == null) return;
+
+        if (e.Key == Key.Enter)
+            grid.CommitEdit();
+        else
+            grid.CancelEdit();
+        e.Handled = true;
+    }
+
     /// <summary>Auto-open the dropdown when a BoolProperty enters edit mode.</summary>
     private void BoolCombo_Loaded(object? sender, RoutedEventArgs e)
     {

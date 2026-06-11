@@ -531,6 +531,27 @@ static void WalkUPropertyChain(uintptr_t firstField, std::vector<FieldInfo>& fie
 // back navigation for large classes (e.g., 182 fields → 0ms vs re-walking).
 static std::unordered_map<uintptr_t, ClassInfo> s_walkClassCache;
 
+// Synthesize the native field layout for intrinsic UE core structs that carry no
+// reflected child UPROPERTYs. FDateTime / FTimespan serialize a single `int64 Ticks`
+// via custom serialization, not reflection, so their FField chain is empty and the
+// UI can neither expand nor edit them. Injecting the known layout (one int64 Ticks at
+// offset 0) lets the Live Walker drill in and in-place edit the raw ticks. Display-only
+// formatting (readable date / duration) lives in the UI; the raw int64 is what gets
+// read, edited, and exported. Keep this list small and exact — only structs whose
+// native layout is stable and that genuinely lack reflected members.
+static void InjectIntrinsicStructFields(const std::string& structName,
+                                        std::vector<FieldInfo>& fields) {
+    if (structName == "DateTime" || structName == "Timespan") {
+        FieldInfo ticks{};
+        ticks.Address  = 0;            // synthetic — no backing FProperty
+        ticks.Name     = "Ticks";
+        ticks.TypeName = "Int64Property";
+        ticks.Offset   = 0;
+        ticks.Size     = 8;
+        fields.push_back(ticks);
+    }
+}
+
 ClassInfo WalkClass(uintptr_t uclassAddr) {
     ClassInfo info{};
     if (!uclassAddr) return info;
@@ -617,6 +638,14 @@ ClassInfo WalkClass(uintptr_t uclassAddr) {
         Macht::ReadSafe(super + DynOff::USTRUCT_SUPER, nextSuper);
         super = nextSuper;
         ++depth;
+    }
+
+    // Intrinsic core structs (FDateTime / FTimespan) reflect no child UPROPERTYs, so
+    // the chain above yields nothing. Synthesize their native layout so the UI can
+    // expand and edit the raw ticks. Only fires when no real fields were found, so any
+    // engine build that *does* reflect them is left untouched.
+    if (info.Fields.empty()) {
+        InjectIntrinsicStructFields(info.Name, info.Fields);
     }
 
     // Sort by offset for clean display

@@ -264,7 +264,12 @@ public sealed class LiveFieldValue
 
     /// <summary>Display-friendly value string.</summary>
     public string DisplayValue =>
-        !string.IsNullOrEmpty(TypedValue) ? TypedValue :
+        // Intrinsic FDateTime / FTimespan structs carry no readable preview (a single
+        // raw int64 Ticks). Format them human-readable here, display-only — TypedValue
+        // stays empty so edit (raw ticks via the synthesized child) and CE/CSX export
+        // are unaffected.
+        DecodeDateTimeStruct(StructTypeName, HexValue) ??
+        (!string.IsNullOrEmpty(TypedValue) ? TypedValue :
         !string.IsNullOrEmpty(PtrName) ? $"{PtrName} ({PtrClassName})" :
         !string.IsNullOrEmpty(StructTypeName) ? $"{{{StructTypeName}}}" :
         ArrayCount >= 0 && !string.IsNullOrEmpty(ArrayInnerType)
@@ -276,7 +281,7 @@ public sealed class LiveFieldValue
         !string.IsNullOrEmpty(StrValue) ? $"\"{StrValue}\"" :
         DecodeHexAsNumeric(TypeName, HexValue) ??
         (!string.IsNullOrEmpty(HexValue) ? HexValue :
-        "");
+        ""));
 
     /// <summary>Whether this field is a container that can be drilled into (Array/Map/Set/DataTable with data).</summary>
     public bool IsContainerNavigable =>
@@ -458,6 +463,58 @@ public sealed class LiveFieldValue
                     ((sbyte)bytes[0]).ToString(),
                 _ => null,
             };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Format an intrinsic FDateTime / FTimespan struct from its raw 8-byte value as a
+    /// human-readable date / duration, keeping the raw ticks alongside in parentheses
+    /// (e.g. "2026-06-11 14:30:00 (638..)" / "01:17:53 (467..)"). Display-only: the raw
+    /// int64 ticks remain the value used for in-place edit (via the synthesized Ticks
+    /// child) and for CE XML / CE Field / CSX export.
+    ///
+    /// Ticks are .NET-compatible (100ns since 0001-01-01). The value is shown verbatim as
+    /// wall-clock time — no UTC/local conversion is applied, so what you see matches the
+    /// stored bytes. Returns null for any non-matching type or unparseable data so
+    /// DisplayValue falls through to its default ("{DateTime}").
+    /// </summary>
+    internal static string? DecodeDateTimeStruct(string structType, string hexValue)
+    {
+        if (string.IsNullOrEmpty(hexValue))
+            return null;
+        if (structType is not ("DateTime" or "Timespan"))
+            return null;
+
+        try
+        {
+            var bytes = Convert.FromHexString(hexValue.Replace("...", "").TrimEnd());
+            if (bytes.Length < 8)
+                return null;
+            long ticks = BitConverter.ToInt64(bytes, 0);
+
+            if (structType == "DateTime")
+            {
+                // new DateTime(long) rejects ticks outside [0, DateTime.MaxValue.Ticks];
+                // guard so uninitialized / garbage values fall back to the raw display.
+                if (ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks)
+                    return null;
+                var dt = new DateTime(ticks);
+                return $"{dt:yyyy-MM-dd HH:mm:ss} ({ticks})";
+            }
+            else // Timespan
+            {
+                var ts = new TimeSpan(ticks);
+                var mag = ts.Duration();
+                string sign = ts < TimeSpan.Zero ? "-" : "";
+                string body = mag.Days > 0
+                    ? $"{mag.Days}d {mag.Hours:00}:{mag.Minutes:00}:{mag.Seconds:00}"
+                    : $"{mag.Hours:00}:{mag.Minutes:00}:{mag.Seconds:00}";
+                return $"{sign}{body} ({ticks})";
+            }
         }
         catch
         {
