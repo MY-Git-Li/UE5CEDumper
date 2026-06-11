@@ -93,6 +93,20 @@ __declspec(dllexport) int32_t   UE5_CallProcessEvent(uintptr_t instance, uintptr
 // vtable offset unresolved, -4=SEH exception.
 __declspec(dllexport) int32_t   UE5_CallProcessEventDirect(uintptr_t instance, uintptr_t ufunc, uintptr_t params);
 
+// === Debug Camera (robust force on/off; shared by UI pipe + CE Lua) ===
+// Read the live Debug Camera state. 1 = ON (a DebugCameraController is
+// possessing the player), 0 = OFF, -1 = unknown / no live CheatManager.
+// Two-hop reflection read of DebugCameraController.OriginalControllerRef.
+__declspec(dllexport) int32_t   UE5_GetDebugCameraState();
+
+// Force Debug Camera ON (enable!=0) or OFF (enable==0). Idempotent — no-op if
+// already in the desired state. Fires ToggleDebugCamera only when needed; if a
+// disable can't take (Shipping builds that strip DisableDebugCamera), switches
+// the local player's controller back to the original PlayerController by hand.
+// Returns the resulting state (1/0) or -1 on error. All offsets resolved live
+// from reflection (UE4/UE5 version-agnostic).
+__declspec(dllexport) int32_t   UE5_SetDebugCamera(int32_t enable);
+
 // === Mailbox (CE Lua shared memory interface) ===
 // Returns the address of the g_invokeMailbox buffer.
 // CE Lua can also use getAddress("g_invokeMailbox") directly.

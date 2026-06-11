@@ -1826,6 +1826,26 @@ public sealed class DumpService : IDumpService
         };
     }
 
+    public async Task<int> GetDebugCameraStateAsync(CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "get_debug_camera_state" };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return res["state"]?.GetValue<int>() ?? -1;
+    }
+
+    public async Task<int> SetDebugCameraAsync(bool enable, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "set_debug_camera",
+            ["enable"] = enable,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return res["state"]?.GetValue<int>() ?? -1;
+    }
+
     private static void CheckResponse(JsonObject res)
     {
         var ok = res["ok"]?.GetValue<bool>() ?? false;

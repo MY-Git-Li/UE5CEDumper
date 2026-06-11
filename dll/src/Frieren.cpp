@@ -495,6 +495,178 @@ uintptr_t UE5_FindFunctionByName(uintptr_t classAddr, const char* funcName) {
 }
 
 // ============================================================================
+// Debug Camera robust enable/disable (shared by UI pipe + CE Lua)
+//
+// ToggleDebugCamera is a stateful toggle whose direction depends on internal
+// CheatManager / DebugCameraController state. Some Shipping builds (e.g. Geri,
+// UE4.27) strip DisableDebugCamera's cleanup, so the toggle can enable but
+// never disable — the camera gets stuck in free-fly. These two exports give
+// the UI (via the set_debug_camera pipe cmd) and CE Lua (via a direct export
+// call from an AA [ENABLE]/[DISABLE] block) ONE shared, version-agnostic
+// "force ON / force OFF": read the real active state, toggle only if needed,
+// and when the toggle can't disable, hand-roll UPlayer::SwitchController to
+// switch the local player's controller back to the original PlayerController.
+//
+// All field offsets are resolved live from reflection (Ubel::WalkClassEx) —
+// nothing hardcoded, so this is UE4/UE5 version-agnostic.
+// ============================================================================
+
+static bool DbgCam_IEquals(const std::string& a, const char* b) {
+    size_t bl = std::strlen(b);
+    if (a.size() != bl) return false;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (std::tolower((unsigned char)a[i]) != std::tolower((unsigned char)b[i]))
+            return false;
+    return true;
+}
+
+static bool DbgCam_IContains(const std::string& hay, const char* needle) {
+    std::string h = hay, n = needle;
+    std::transform(h.begin(), h.end(), h.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+    std::transform(n.begin(), n.end(), n.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+    return h.find(n) != std::string::npos;
+}
+
+// Resolve an ObjectProperty field offset by name within a class (inherited
+// fields included). Exact name match first; else the first ObjectProperty
+// whose name contains `contains` and (optionally) not `excluding`. The
+// exclude rule keeps DebugCameraControllerRef from matching the always-non-null
+// DebugCameraControllerClass TSubclassOf slot. Returns -1 if not found.
+static int DbgCam_FieldOffset(uintptr_t classAddr, const char* exact,
+                              const char* contains, const char* excluding) {
+    if (!classAddr) return -1;
+    ClassInfo ci = Ubel::WalkClassEx(classAddr);
+    int fuzzy = -1;
+    for (const auto& f : ci.Fields) {
+        if (DbgCam_IEquals(f.Name, exact)) return f.Offset;
+        if (fuzzy < 0 && contains && DbgCam_IContains(f.Name, contains)
+            && (!excluding || !DbgCam_IContains(f.Name, excluding))
+            && f.TypeName == "ObjectProperty")
+            fuzzy = f.Offset;
+    }
+    return fuzzy;
+}
+
+static uintptr_t DbgCam_ReadPtr(uintptr_t obj, int off) {
+    if (!obj || off < 0) return 0;
+    uintptr_t v = 0;
+    Macht::ReadSafe(obj + (uintptr_t)off, v);
+    return v;
+}
+
+static bool DbgCam_WritePtr(uintptr_t obj, int off, uintptr_t val) {
+    if (!obj || off < 0) return false;
+    return Macht::WriteBytes(obj + (uintptr_t)off, &val, sizeof(val));
+}
+
+// Two-hop active-state read matching what ToggleDebugCamera branches on:
+//   Hop 1: CheatManager.DebugCameraControllerRef — a DCC exists? (this member
+//          PERSISTS after disable in modern UE, so it is NOT the active flag).
+//   Hop 2: DebugCameraController.OriginalControllerRef — the real active flag
+//          (set on activate, nulled on deactivate).
+// Returns 1=ON, 0=OFF, -1=unknown. Outputs the CheatManager + DCC for reuse.
+static int DbgCam_ReadState(uintptr_t& outCm, uintptr_t& outDcc) {
+    outCm = 0; outDcc = 0;
+    uintptr_t cm = UE5_FindInstanceOfClass("CheatManager");
+    if (!cm) return -1;
+    outCm = cm;
+    uintptr_t cmClass = UE5_GetObjectClass(cm);
+    int refOff = DbgCam_FieldOffset(cmClass, "DebugCameraControllerRef",
+                                    "DebugCamera", "Class");
+    if (refOff < 0) return -1;
+    uintptr_t dcc = DbgCam_ReadPtr(cm, refOff);
+    if (!dcc) return 0;                       // no DCC ever spawned ⇒ OFF
+    outDcc = dcc;
+    uintptr_t dccClass = UE5_GetObjectClass(dcc);
+    int origOff = DbgCam_FieldOffset(dccClass, "OriginalControllerRef",
+                                     "OriginalController", nullptr);
+    if (origOff < 0) return -1;
+    return DbgCam_ReadPtr(dcc, origOff) ? 1 : 0;
+}
+
+// Hand-roll UCheatManager::DisableDebugCamera when the game's toggle won't:
+// switch the local player's active controller back to the original PC.
+// Returns true if it wrote (camera should restore), false if it bailed without
+// writing (any required field/pointer missing → never write a partial state).
+static bool DbgCam_SwapControllerBack(uintptr_t dcc) {
+    if (!dcc) return false;
+    uintptr_t dccClass = UE5_GetObjectClass(dcc);
+    int origOff   = DbgCam_FieldOffset(dccClass, "OriginalControllerRef",
+                                       "OriginalController", nullptr);
+    int playerOff = DbgCam_FieldOffset(dccClass, "Player", "Player", "Controller");
+    int origPlOff = DbgCam_FieldOffset(dccClass, "OriginalPlayer",
+                                       "OriginalPlayer", nullptr);
+    if (origOff < 0 || playerOff < 0) return false;
+
+    uintptr_t origPc      = DbgCam_ReadPtr(dcc, origOff);
+    uintptr_t localPlayer = DbgCam_ReadPtr(dcc, playerOff);
+    if (!origPc || !localPlayer) return false;   // not actually possessing
+
+    uintptr_t lpClass = UE5_GetObjectClass(localPlayer);
+    int pcOff = DbgCam_FieldOffset(lpClass, "PlayerController", "PlayerController", nullptr);
+    if (pcOff < 0) return false;
+
+    // Mirror UPlayer::SwitchController(origPC) + OnDeactivate cleanup.
+    DbgCam_WritePtr(localPlayer, pcOff,     origPc);      // 1. view follows origPC (critical)
+    DbgCam_WritePtr(origPc,      playerOff, localPlayer); // 2. origPC.Player = LP
+    DbgCam_WritePtr(dcc,         playerOff, 0);           // 3. DCC.Player = null
+    DbgCam_WritePtr(dcc,         origOff,   0);           // 4a. clear active flag
+    if (origPlOff >= 0)
+        DbgCam_WritePtr(dcc,     origPlOff, 0);           // 4b. clear OriginalPlayer
+
+    LOG_INFO("DbgCam_SwapControllerBack: LP=0x%llX PC<-0x%llX "
+             "(DCC=0x%llX pcOff=0x%X playerOff=0x%X)",
+             (unsigned long long)localPlayer, (unsigned long long)origPc,
+             (unsigned long long)dcc, pcOff, playerOff);
+    return true;
+}
+
+int32_t UE5_GetDebugCameraState() {
+    uintptr_t cm = 0, dcc = 0;
+    return DbgCam_ReadState(cm, dcc);
+}
+
+int32_t UE5_SetDebugCamera(int32_t enable) {
+    bool want = (enable != 0);
+    uintptr_t cm = 0, dcc = 0;
+    int state = DbgCam_ReadState(cm, dcc);
+    if (state < 0) {
+        LOG_WARN("UE5_SetDebugCamera: no readable CheatManager/DebugCamera state");
+        return -1;
+    }
+    if ((state == 1) == want) {
+        LOG_INFO("UE5_SetDebugCamera: already %s — no-op", want ? "ON" : "OFF");
+        return state;
+    }
+
+    // Known state, opposite of desired → fire ToggleDebugCamera once.
+    uintptr_t cmClass = UE5_GetObjectClass(cm);
+    uintptr_t ufunc = UE5_FindFunctionByName(cmClass, "ToggleDebugCamera");
+    if (!ufunc) {
+        LOG_WARN("UE5_SetDebugCamera: ToggleDebugCamera UFunction not found");
+        return -1;
+    }
+    int32_t r = UE5_CallProcessEvent(cm, ufunc, 0);
+    if (r != 0) {
+        LOG_WARN("UE5_SetDebugCamera: ToggleDebugCamera ProcessEvent r=%d", r);
+        return -1;
+    }
+
+    state = DbgCam_ReadState(cm, dcc);
+
+    // Escalation: the toggle fired OK but couldn't disable (stripped
+    // DisableDebugCamera) → switch the controller back by hand.
+    if (!want && state == 1 && dcc) {
+        if (DbgCam_SwapControllerBack(dcc))
+            state = DbgCam_ReadState(cm, dcc);
+    }
+    LOG_INFO("UE5_SetDebugCamera(%d) -> state=%d", enable, state);
+    return state;
+}
+
+// ============================================================================
 // ProcessEvent vtable detection (build 648+)
 //
 // Background: the pre-build-648 detector picked the vtable byte offset purely

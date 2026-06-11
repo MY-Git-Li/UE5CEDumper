@@ -19,6 +19,26 @@
   Public API (re-declaration-safe, syntax-highlighted):
     ok, err = invokeUFunction(className, funcName, parmsSize, params)
     value   = readUFunctionReturn(offset, valueType)
+    state   = setDebugCamera(enable)   -- robust force on/off (1=on,0=off,-1=err)
+    state   = getDebugCameraState()    -- 1=on, 0=off, -1=unknown
+
+  Debug Camera memory-record example (one checkbox = camera on/off).
+  Both blocks call the SAME DLL export, only the arg differs; the DLL
+  reads state, toggles only when needed, and on a disable that the game's
+  stripped ToggleDebugCamera can't honour, switches the local player's
+  controller back to the original PlayerController:
+
+    [ENABLE]
+    {$lua}
+    if syntaxcheck then return end
+    setDebugCamera(1)
+    {$asm}
+
+    [DISABLE]
+    {$lua}
+    if syntaxcheck then return end
+    setDebugCamera(0)
+    {$asm}
 
   Constants exposed:
     UE5_INVOKE_HELPER_VERSION  = '1.0'
@@ -313,6 +333,45 @@ if not readUFunctionReturn then
   end
 
   registerLuaFunctionHighlight('readUFunctionReturn')
+end
+
+-- ============================================================
+-- Public API: Debug Camera robust force on/off
+-- ============================================================
+-- Thin wrappers over the UE5_SetDebugCamera / UE5_GetDebugCameraState
+-- DLL exports. The whole toggle + controller-swap fallback lives in the
+-- DLL, so the UI (via pipe) and CE Lua (here) share one implementation.
+-- Returns the resulting state: 1 = ON, 0 = OFF, -1 = error/unknown.
+if not setDebugCamera then
+
+  -- Resolve an export by symbol, tolerating the module-qualified form.
+  local function dbgCamExport(name)
+    local a = getAddressSafe('UE5Dumper.' .. name)
+    if not a or a == 0 then a = getAddressSafe(name) end
+    return a
+  end
+
+  function getDebugCameraState()
+    local a = dbgCamExport('UE5_GetDebugCameraState')
+    if not a or a == 0 then return -1 end
+    return executeCodeEx(5000, nil, a)
+  end
+  registerLuaFunctionHighlight('getDebugCameraState')
+
+  --- Force Debug Camera ON (enable ~= 0) or OFF. Idempotent.
+  --- @param enable number|boolean
+  --- @return number state  1=ON, 0=OFF, -1=error
+  function setDebugCamera(enable)
+    local a = dbgCamExport('UE5_SetDebugCamera')
+    if not a or a == 0 then
+      error('[ue5_invoke] UE5_SetDebugCamera export not found -- ' ..
+            'is UE5Dumper.dll injected?')
+    end
+    local arg = ((enable and enable ~= 0) and 1 or 0)
+    return executeCodeEx(5000, { 'integer' }, a, arg)
+  end
+  registerLuaFunctionHighlight('setDebugCamera')
+
 end
 
 -- ============================================================

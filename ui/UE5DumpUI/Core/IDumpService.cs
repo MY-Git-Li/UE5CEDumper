@@ -236,4 +236,20 @@ public interface IDumpService
         string? paramsHex = null,
         bool directCall = false,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Read the live Debug Camera state (DLL-side two-hop reflection read of
+    /// DebugCameraController.OriginalControllerRef). 1 = ON, 0 = OFF,
+    /// -1 = unknown / no live CheatManager.
+    /// </summary>
+    Task<int> GetDebugCameraStateAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Force Debug Camera ON (<paramref name="enable"/>=true) or OFF. The DLL
+    /// reads state, toggles only when needed, and on a disable that the game's
+    /// stripped ToggleDebugCamera can't honour, switches the local player's
+    /// controller back to the original PlayerController. Returns the resulting
+    /// state (1 = ON, 0 = OFF, -1 = error).
+    /// </summary>
+    Task<int> SetDebugCameraAsync(bool enable, CancellationToken ct = default);
 }

@@ -600,111 +600,14 @@ public partial class ConsoleViewModel : ViewModelBase
         };
     }
 
-    /// <summary>True when a hex address string denotes a non-null pointer.
-    /// Treats "", "0x0", "0", and unparseable values as null.</summary>
-    private static bool IsNonNullPtr(string? addr)
-    {
-        if (string.IsNullOrWhiteSpace(addr)) return false;
-        var s = addr.Trim();
-        if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) s = s.Substring(2);
-        return ulong.TryParse(s, System.Globalization.NumberStyles.HexNumber,
-                              System.Globalization.CultureInfo.InvariantCulture, out var v)
-               && v != 0;
-    }
+    /// <summary>Map the DLL's tri-state Debug Camera result (1=on, 0=off,
+    /// -1=unknown) onto the badge.</summary>
+    private void ApplyDebugCameraState(int state)
+        => SetDebugCameraState(state switch { 1 => true, 0 => false, _ => (bool?)null });
 
-    /// <summary>
-    /// Resolve the live CheatManager instance address to read state from /
-    /// invoke against. Prefers the sticky pin (so the probe and a manual
-    /// Run agree on one object); otherwise scans for the first non-CDO
-    /// instance of the toggle's class and pins it. Returns null when no
-    /// live instance exists (e.g. on a main menu before a PlayerController
-    /// spawns).
-    /// </summary>
-    private async Task<string?> ResolveCheatInstanceAsync(CancellationToken ct = default)
-    {
-        if (_debugCamEntry == null) return null;
-        var cls = _debugCamEntry.ClassName;
-
-        if (_stickyInstance.TryGetValue(cls, out var pinned) && !string.IsNullOrEmpty(pinned))
-            return pinned;
-
-        var found = await _dump.FindInstancesAsync(cls, exactMatch: false, limit: 100, ct);
-        foreach (var inst in found.Instances)
-        {
-            if (!string.IsNullOrEmpty(inst.Address)
-                && inst.Name.IndexOf("Default__", StringComparison.Ordinal) < 0)
-            {
-                _stickyInstance[cls] = inst.Address;
-                return inst.Address;
-            }
-        }
-        return null;
-    }
-
-    /// <summary>
-    /// Read the live Debug Camera state with a two-hop walk that matches
-    /// exactly what <c>ToggleDebugCamera</c> branches on across UE4/UE5.
-    /// Returns true=ON, false=OFF, null=indeterminate.
-    ///
-    /// Hop 1 — <c>CheatManager.DebugCameraControllerRef</c>: tells us only
-    /// whether a DebugCameraController has ever been spawned. In modern UE,
-    /// <c>DisableDebugCamera()</c> does NOT null this member (it caches the
-    /// spawned controller), so non-null here does NOT mean "active". Null ⇒
-    /// no DCC ⇒ OFF.
-    ///
-    /// Hop 2 — <c>DebugCameraController.OriginalControllerRef</c>: the real
-    /// active flag. It's set when the debug camera possesses the player and
-    /// nulled on disable. This is what the engine's toggle actually checks,
-    /// so it is correct for BOTH versions that null the CheatManager ref on
-    /// disable and versions that cache it.
-    /// </summary>
-    private async Task<bool?> ReadDebugCameraStateAsync(string cheatMgrAddr, CancellationToken ct = default)
-    {
-        // Hop 1: does a DebugCameraController exist? (NOT the *Class slot,
-        // which is a TSubclassOf that is always non-null.)
-        var cmWalk = await _dump.WalkInstanceAsync(cheatMgrAddr, ct: ct);
-        var refField = FindObjectField(cmWalk, exactName: "DebugCameraControllerRef",
-                                       contains: "DebugCamera", excluding: "Class");
-        if (refField == null) return null;                    // unknown
-        if (!IsNonNullPtr(refField.PtrAddress)) return false; // no DCC ⇒ OFF
-
-        // Hop 2: is that DCC currently possessing the player?
-        var dccWalk = await _dump.WalkInstanceAsync(refField.PtrAddress, ct: ct);
-        var activeField =
-               FindObjectField(dccWalk, exactName: "OriginalControllerRef",
-                               contains: "OriginalController", excluding: null)
-            ?? FindObjectField(dccWalk, exactName: "OriginalPlayer",
-                               contains: "OriginalPlayer", excluding: null);
-        if (activeField == null) return null;                 // DCC exists, flag unreadable
-        return IsNonNullPtr(activeField.PtrAddress);          // possessing ⇒ ON
-    }
-
-    /// <summary>
-    /// Locate an ObjectProperty field in a walk result: exact name match
-    /// first (case-insensitive), else the first ObjectProperty whose name
-    /// contains <paramref name="contains"/> and (optionally) does not
-    /// contain <paramref name="excluding"/>. Keeps the state reader robust
-    /// to minor field-name variation across engine versions.
-    /// </summary>
-    private static LiveFieldValue? FindObjectField(
-        InstanceWalkResult walk, string exactName, string contains, string? excluding)
-    {
-        LiveFieldValue? fuzzy = null;
-        foreach (var f in walk.Fields)
-        {
-            if (string.Equals(f.Name, exactName, StringComparison.OrdinalIgnoreCase))
-                return f;
-            if (fuzzy == null
-                && f.Name.IndexOf(contains, StringComparison.OrdinalIgnoreCase) >= 0
-                && (excluding == null
-                    || f.Name.IndexOf(excluding, StringComparison.OrdinalIgnoreCase) < 0)
-                && string.Equals(f.TypeName, "ObjectProperty", StringComparison.OrdinalIgnoreCase))
-                fuzzy = f;
-        }
-        return fuzzy;
-    }
-
-    /// <summary>↻ — re-read and display the live Debug Camera state.</summary>
+    /// <summary>↻ — re-read and display the live Debug Camera state. The
+    /// two-hop reflection read lives DLL-side (get_debug_camera_state); this
+    /// is a thin bridge so the UI and CE Lua share one implementation.</summary>
     [RelayCommand]
     private async Task RefreshDebugCameraStateAsync()
     {
@@ -713,27 +616,19 @@ public partial class ConsoleViewModel : ViewModelBase
         {
             ClearError();
             IsDebugCameraBusy = true;
-            var addr = await ResolveCheatInstanceAsync();
-            if (addr == null)
-            {
-                SetDebugCameraState(null);
-                StatusText = "Debug Camera: no live CheatManager instance " +
-                             "(enter gameplay so a PlayerController spawns, then ↻).";
-                return;
-            }
-            var state = await ReadDebugCameraStateAsync(addr);
-            SetDebugCameraState(state);
+            var state = await _dump.GetDebugCameraStateAsync();
+            ApplyDebugCameraState(state);
             StatusText = state switch
             {
-                true  => $"Debug Camera is ON (CheatManager {addr}).",
-                false => $"Debug Camera is OFF (CheatManager {addr}).",
-                null  => $"Debug Camera state unreadable on {addr} " +
-                         "(DebugCameraControllerRef not found).",
+                1 => "Debug Camera is ON.",
+                0 => "Debug Camera is OFF.",
+                _ => "Debug Camera state unknown (no live CheatManager — " +
+                     "enter gameplay so a PlayerController spawns, then ↻).",
             };
         }
         catch (Exception ex)
         {
-            SetDebugCameraState(null);
+            ApplyDebugCameraState(-1);
             SetError(ex);
             StatusText = $"Debug Camera state read failed: {ex.Message}";
             _log.Error("Console.RefreshDebugCameraState failed", ex);
@@ -751,11 +646,11 @@ public partial class ConsoleViewModel : ViewModelBase
     private Task ForceDebugCameraOffAsync() => ForceDebugCameraAsync(wantOn: false);
 
     /// <summary>
-    /// Deterministic enable/disable built on the toggle: read the live
-    /// state, and fire ToggleDebugCamera once ONLY if it differs from the
-    /// desired state. Idempotent (no-op when already in the target state),
-    /// and refuses to blind-fire when the state can't be read — so it never
-    /// accidentally enables when you asked to disable.
+    /// Deterministic enable/disable — delegates to the DLL (set_debug_camera),
+    /// which reads state, toggles only when needed, and on a disable the game's
+    /// stripped ToggleDebugCamera can't honour, switches the local player's
+    /// controller back to the original PlayerController. Idempotent; returns
+    /// the resulting state. UI and CE Lua share this one DLL implementation.
     /// </summary>
     private async Task ForceDebugCameraAsync(bool wantOn)
     {
@@ -765,83 +660,17 @@ public partial class ConsoleViewModel : ViewModelBase
         {
             ClearError();
             IsDebugCameraBusy = true;
-
-            var addr = await ResolveCheatInstanceAsync();
-            if (addr == null)
+            var state = await _dump.SetDebugCameraAsync(wantOn);
+            ApplyDebugCameraState(state);
+            StatusText = state switch
             {
-                SetDebugCameraState(null);
-                StatusText = $"Force {want}: no live CheatManager instance " +
-                             "(enter gameplay first).";
-                return;
-            }
-
-            var state = await ReadDebugCameraStateAsync(addr);
-            if (state == null)
-            {
-                // Can't read the branch field → blind-firing might do the
-                // opposite of what's asked. Bail with guidance instead.
-                SetDebugCameraState(null);
-                StatusText = $"Force {want}: can't read Debug Camera state on " +
-                             $"{addr} (DebugCameraControllerRef not found). " +
-                             "Use Run to toggle manually.";
-                return;
-            }
-
-            if (state.Value == wantOn)
-            {
-                SetDebugCameraState(state);
-                StatusText = $"Debug Camera already {want} — nothing to do.";
-                return;
-            }
-
-            // Known state, opposite of desired → exactly one toggle flips it.
-            var result = await InvokeDebugCameraToggleAsync(addr);
-            if (!result.Success)
-            {
-                StatusText = $"Force {want} failed: " +
-                             (string.IsNullOrEmpty(result.Error)
-                                ? $"toggle returned {result.Result}" : result.Error);
-                return;
-            }
-
-            var after = await ReadDebugCameraStateAsync(addr);
-
-            // Escalation: some Shipping builds (e.g. Geri, UE4.27) ship a
-            // ToggleDebugCamera whose DisableDebugCamera cleanup is stripped —
-            // the toggle fires OK but the DebugCameraController keeps
-            // possessing the player (OriginalControllerRef stays set), so the
-            // camera is stuck in free-fly. When Force Off can't disable via
-            // the toggle, do by hand what DisableDebugCamera does: switch the
-            // local player's controller back to the original PlayerController.
-            if (after == true && !wantOn)
-            {
-                var dcc = await GetDccAddrAsync(addr);
-                var swap = dcc != null
-                    ? await TryRestorePlayerControllerAsync(dcc)
-                    : (false, "no DebugCameraController to restore from");
-                if (swap.Item1)
-                {
-                    after = await ReadDebugCameraStateAsync(addr);
-                    SetDebugCameraState(after);
-                    StatusText = after == false
-                        ? $"✓ Debug Camera forced OFF via controller-swap " +
-                          $"fallback ({swap.Item2})."
-                        : $"⚠ Controller-swap ran ({swap.Item2}) but state still " +
-                          $"reads {(after == true ? "ON" : "Unknown")}.";
-                    return;
-                }
-                SetDebugCameraState(after);
-                StatusText = $"⚠ Toggle didn't disable and controller-swap " +
-                             $"couldn't run: {swap.Item2}.";
-                return;
-            }
-
-            SetDebugCameraState(after);
-            StatusText = after == wantOn
-                ? $"✓ Debug Camera forced {want} (toggled CheatManager {addr})."
-                : $"⚠ Fired toggle but state reads " +
-                  $"{(after == true ? "ON" : after == false ? "OFF" : "Unknown")} " +
-                  $"— expected {want}. The game may re-drive the camera.";
+                1 when wantOn  => "✓ Debug Camera forced ON.",
+                0 when !wantOn => "✓ Debug Camera forced OFF.",
+                -1 => $"Force {want}: no live CheatManager / unreadable state " +
+                      "(enter gameplay first).",
+                _  => $"⚠ Force {want}: state is now {(state == 1 ? "ON" : "OFF")} " +
+                      "— the game may re-drive the camera.",
+            };
         }
         catch (Exception ex)
         {
@@ -853,118 +682,5 @@ public partial class ConsoleViewModel : ViewModelBase
         {
             IsDebugCameraBusy = false;
         }
-    }
-
-    /// <summary>
-    /// Fire ToggleDebugCamera against a specific (pinned) instance, record
-    /// it in History like a manual Run, and keep the sticky pin fresh.
-    /// </summary>
-    private async Task<InvokeFunctionResult> InvokeDebugCameraToggleAsync(string instAddr)
-    {
-        var entry = _debugCamEntry!;
-        var result = await _dump.InvokeFunctionAsync(
-            funcName: entry.FuncName,
-            instanceAddr: instAddr,
-            className: entry.ClassName,
-            parmsSize: 0,
-            paramsHex: null,
-            directCall: false);
-
-        if (result.Success && !string.IsNullOrEmpty(result.InstanceAddr))
-            _stickyInstance[entry.ClassName] = result.InstanceAddr;
-
-        var text = result.Success
-            ? (string.IsNullOrEmpty(result.Message) ? "OK" : result.Message)
-            : (string.IsNullOrEmpty(result.Error) ? $"Result code {result.Result}" : result.Error);
-        AppendHistory(entry, result.Success, text);
-        return result;
-    }
-
-    /// <summary>Resolve the live DebugCameraController address from the
-    /// CheatManager's DebugCameraControllerRef. Null when none is spawned
-    /// or the field can't be read.</summary>
-    private async Task<string?> GetDccAddrAsync(string cheatMgrAddr, CancellationToken ct = default)
-    {
-        var cmWalk = await _dump.WalkInstanceAsync(cheatMgrAddr, ct: ct);
-        var refField = FindObjectField(cmWalk, exactName: "DebugCameraControllerRef",
-                                       contains: "DebugCamera", excluding: "Class");
-        if (refField == null || !IsNonNullPtr(refField.PtrAddress)) return null;
-        return refField.PtrAddress;
-    }
-
-    /// <summary>
-    /// Hand-roll what <c>UCheatManager::DisableDebugCamera</c> does when the
-    /// game's own toggle won't: switch the local player's active controller
-    /// back from the DebugCameraController to the original PlayerController.
-    ///
-    /// All offsets are read live from reflection (the walk's field offsets),
-    /// so this is engine-version-agnostic. Writes, mirroring
-    /// <c>UPlayer::SwitchController</c> + <c>OnDeactivate</c>:
-    ///   1. ULocalPlayer.PlayerController = OriginalControllerRef  (the view
-    ///      follows this — the critical write)
-    ///   2. OriginalControllerRef.Player  = ULocalPlayer           (input)
-    ///   3. DCC.Player                    = null
-    ///   4. DCC.OriginalControllerRef/OriginalPlayer = null        (clean state
-    ///      so the badge + a later toggle read OFF)
-    /// Returns (ok, message). Bails (no writes) if any required field/pointer
-    /// is missing, so a partial state never gets written.
-    /// </summary>
-    private async Task<(bool, string)> TryRestorePlayerControllerAsync(string dccAddr, CancellationToken ct = default)
-    {
-        var dccWalk = await _dump.WalkInstanceAsync(dccAddr, ct: ct);
-        var origPcF  = FindObjectField(dccWalk, "OriginalControllerRef", "OriginalController", null);
-        var playerF  = FindObjectField(dccWalk, "Player", "Player", "Controller"); // UPlayer* Player
-        var origPlF  = FindObjectField(dccWalk, "OriginalPlayer", "OriginalPlayer", null);
-
-        if (origPcF == null || playerF == null)
-            return (false, "DCC missing OriginalControllerRef/Player fields");
-        if (!IsNonNullPtr(origPcF.PtrAddress))
-            return (false, "DCC OriginalControllerRef is null (nothing to restore)");
-        if (!IsNonNullPtr(playerF.PtrAddress))
-            return (false, "DCC Player is null (not currently possessing)");
-
-        if (!TryParseAddr(dccAddr, out var dcc)
-            || !TryParseAddr(origPcF.PtrAddress, out var origPc)
-            || !TryParseAddr(playerF.PtrAddress, out var localPlayer))
-            return (false, "unparseable pointer");
-
-        // The local player's active controller field — the one the engine
-        // reads for the player viewpoint.
-        var lpWalk = await _dump.WalkInstanceAsync(playerF.PtrAddress, ct: ct);
-        var pcF = FindObjectField(lpWalk, "PlayerController", "PlayerController", null);
-        if (pcF == null)
-            return (false, "ULocalPlayer missing PlayerController field");
-
-        int playerOff = playerF.Offset;   // APlayerController.Player (same on DCC + origPC)
-
-        await WritePtrAsync(localPlayer, pcF.Offset, origPc, ct);   // 1. view follows origPC
-        await WritePtrAsync(origPc,      playerOff,  localPlayer, ct); // 2. origPC.Player = LP
-        await WritePtrAsync(dcc,         playerOff,  0, ct);          // 3. DCC.Player = null
-        await WritePtrAsync(dcc,         origPcF.Offset, 0, ct);      // 4a. clear active flag
-        if (origPlF != null)
-            await WritePtrAsync(dcc,     origPlF.Offset, 0, ct);      // 4b. clear OriginalPlayer
-
-        _log.Info($"Console.RestorePlayerController: LP={playerF.PtrAddress} " +
-                  $"PC<-{origPcF.PtrAddress} (DCC={dccAddr}, pcOff=0x{pcF.Offset:X}, " +
-                  $"playerOff=0x{playerOff:X})");
-        return (true, $"switched local player back to {origPcF.PtrAddress}");
-    }
-
-    /// <summary>Write an 8-byte little-endian pointer at base+offset.</summary>
-    private Task WritePtrAsync(ulong baseAddr, int offset, ulong value, CancellationToken ct = default)
-    {
-        var addr = "0x" + (baseAddr + (ulong)offset).ToString("X");
-        return _dump.WriteMemAsync(addr, BitConverter.GetBytes(value), ct);
-    }
-
-    /// <summary>Parse a "0x…" / bare-hex pointer string.</summary>
-    private static bool TryParseAddr(string? s, out ulong value)
-    {
-        value = 0;
-        if (string.IsNullOrWhiteSpace(s)) return false;
-        var t = s.Trim();
-        if (t.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) t = t.Substring(2);
-        return ulong.TryParse(t, System.Globalization.NumberStyles.HexNumber,
-                              System.Globalization.CultureInfo.InvariantCulture, out value);
     }
 }
