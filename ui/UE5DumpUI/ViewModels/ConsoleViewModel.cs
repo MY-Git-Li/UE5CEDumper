@@ -43,6 +43,34 @@ public partial class ConsoleViewModel : ViewModelBase
     /// <see cref="Results"/>.</summary>
     private List<AllFunctionEntry> _allExec = new();
 
+    /// <summary>
+    /// Sticky-instance cache: className → last successfully-resolved
+    /// non-CDO instance address (hex string).
+    ///
+    /// Why: many exec commands are <b>stateful per-instance</b> —
+    /// <c>UCheatManager::ToggleDebugCamera</c> flips its own
+    /// <c>DebugCameraControllerRef</c> member (null → Enable, set →
+    /// Disable); <c>god</c>/<c>slomo</c>/set-then-reset commands mutate
+    /// the owning object. Such commands MUST land on the <b>same</b>
+    /// UObject on every invoke. Plain classname resolution
+    /// (<c>UE5_FindInstanceOfClass</c>) re-scans GObjects and returns
+    /// "the first non-CDO instance" each call — but the very first invoke
+    /// can mutate the object graph (e.g. EnableDebugCamera spawns an
+    /// <c>ADebugCameraController</c>), so a later call may resolve a
+    /// <i>different</i> instance whose toggle state is fresh → it silently
+    /// re-runs Enable instead of Disable. The classic symptom is
+    /// "Debug Camera turns on but won't turn off".
+    ///
+    /// Fix: pin the address the DLL actually used (echoed back as
+    /// <c>instance_addr</c>) per class and reuse it on the next invoke of
+    /// any exec on that class. Cleared on <see cref="LoadAsync"/> (a
+    /// re-discover is treated as a fresh session — e.g. after reconnecting
+    /// to a different game process) and self-heals on invoke failure
+    /// (stale pin → drop + re-resolve, see <see cref="RunEntryAsync"/>).
+    /// </summary>
+    private readonly Dictionary<string, string> _stickyInstance =
+        new(StringComparer.Ordinal);
+
     /// <summary>Cap on history entries — keeps the tail readable + the
     /// AOT-trimmed binary's ObservableCollection bounded. Old entries
     /// drop off the front when this is exceeded.</summary>
@@ -58,6 +86,34 @@ public partial class ConsoleViewModel : ViewModelBase
     [ObservableProperty] private AllFunctionEntry? _selectedResult;
     [ObservableProperty] private ObservableCollection<ConsoleHistoryEntry> _history = new();
     [ObservableProperty] private string _commandInput = "";
+
+    // ── Debug Camera state-aware helper ────────────────────────────────
+    // ToggleDebugCamera is a stateful toggle: it flips its CheatManager's
+    // DebugCameraControllerRef (null → Enable, set → Disable). Blind Run
+    // can't tell which direction it will go, so "turn it off" is
+    // unreliable. These surface the live state (read from that very
+    // member) and offer deterministic Force On / Force Off.
+
+    /// <summary>True when the loaded exec list contains a
+    /// <c>ToggleDebugCamera</c> command — drives visibility of the Debug
+    /// Camera control row in the panel.</summary>
+    [ObservableProperty] private bool _hasDebugCameraToggle;
+
+    /// <summary>Live Debug Camera state for the badge: "ON" / "OFF" /
+    /// "Unknown". Read from the CheatManager's DebugCameraControllerRef.</summary>
+    [ObservableProperty] private string _debugCameraState = "Unknown";
+
+    /// <summary>Badge foreground colour (hex string → IBrush via Avalonia's
+    /// built-in converter, same pattern as ConsoleHistoryEntry.BadgeColor).</summary>
+    [ObservableProperty] private string _debugCameraBadgeColor = "#888888";
+
+    /// <summary>True while a Debug Camera probe / force is in flight —
+    /// disables the row's buttons to prevent overlapping toggles.</summary>
+    [ObservableProperty] private bool _isDebugCameraBusy;
+
+    /// <summary>The discovered ToggleDebugCamera exec entry (class + func),
+    /// captured at Load. Null when the game ships no such command.</summary>
+    private AllFunctionEntry? _debugCamEntry;
 
     /// <summary>
     /// Raised when the user activates an exec command that has parameters
@@ -149,6 +205,10 @@ public partial class ConsoleViewModel : ViewModelBase
         {
             ClearError();
             IsLoading = true;
+            // A re-discover is a fresh-session boundary: drop any pinned
+            // instances so we don't carry stale addresses across a pipe
+            // reconnect to a different game process.
+            _stickyInstance.Clear();
             StatusText = "Scanning all UFunctions for exec flag (FUNC_Exec=0x200)...";
 
             var result = await _dump.ListAllFunctionsAsync(gameOnly: GameOnly);
@@ -175,6 +235,7 @@ public partial class ConsoleViewModel : ViewModelBase
             });
 
             ApplyFilter();
+            DetectDebugCameraToggle();
 
             if (_allExec.Count == 0)
             {
@@ -340,13 +401,44 @@ public partial class ConsoleViewModel : ViewModelBase
             IsRunning = true;
             StatusText = $"Invoking {entry.ClassName}::{entry.FuncName}…";
 
+            // Sticky instance: reuse the address the DLL last resolved for
+            // this class so stateful toggles (ToggleDebugCamera, god, slomo…)
+            // hit the SAME UObject on every invoke. See _stickyInstance for
+            // the full "can't turn Debug Camera off" rationale.
+            _stickyInstance.TryGetValue(entry.ClassName, out var pinnedAddr);
+            bool usedPin = !string.IsNullOrEmpty(pinnedAddr);
+
             var result = await _dump.InvokeFunctionAsync(
                 funcName: entry.FuncName,
-                instanceAddr: null,
+                instanceAddr: usedPin ? pinnedAddr : null,
                 className: entry.ClassName,
                 parmsSize: 0,
                 paramsHex: null,
                 directCall: false);
+
+            // A pinned address can go stale (object freed, level change, pipe
+            // reconnect). If the pinned call failed, drop the pin and retry
+            // once with a fresh classname resolution so a dead pin self-heals
+            // instead of permanently breaking the command.
+            bool reResolved = false;
+            if (!result.Success && usedPin)
+            {
+                _stickyInstance.Remove(entry.ClassName);
+                reResolved = true;
+                usedPin = false;
+                result = await _dump.InvokeFunctionAsync(
+                    funcName: entry.FuncName,
+                    instanceAddr: null,
+                    className: entry.ClassName,
+                    parmsSize: 0,
+                    paramsHex: null,
+                    directCall: false);
+            }
+
+            // Remember the resolved instance so the next toggle lands on the
+            // same object. The DLL echoes the address it actually used.
+            if (result.Success && !string.IsNullOrEmpty(result.InstanceAddr))
+                _stickyInstance[entry.ClassName] = result.InstanceAddr;
 
             var resultText = result.Success
                 ? (string.IsNullOrEmpty(result.Message) ? "OK" : result.Message)
@@ -356,12 +448,23 @@ public partial class ConsoleViewModel : ViewModelBase
 
             AppendHistory(entry, result.Success, resultText);
 
+            // Surface which instance the call landed on, and whether it was a
+            // pinned reuse / a self-heal re-resolve, so the user can tell a
+            // toggle is hitting one stable object across on/off cycles.
+            var pinNote = !string.IsNullOrEmpty(result.InstanceAddr)
+                ? (reResolved ? $" (re-resolved {result.InstanceAddr})"
+                   : usedPin  ? $" (pinned {result.InstanceAddr})"
+                              : $" (instance {result.InstanceAddr})")
+                : "";
+
             StatusText = result.Success
-                ? $"✓ {entry.FuncName}: {resultText}"
-                : $"✗ {entry.FuncName}: {resultText}";
+                ? $"✓ {entry.FuncName}: {resultText}{pinNote}"
+                : $"✗ {entry.FuncName}: {resultText}{pinNote}";
 
             _log.Info($"Console.Run: {entry.ClassName}::{entry.FuncName} → " +
-                      $"success={result.Success}, code={result.Result}");
+                      $"success={result.Success}, code={result.Result}, " +
+                      $"instance={result.InstanceAddr}, usedPin={usedPin}, " +
+                      $"reResolved={reResolved}");
         }
         catch (Exception ex)
         {
@@ -456,5 +559,293 @@ public partial class ConsoleViewModel : ViewModelBase
         });
         _allExec = list;
         ApplyFilter();
+        DetectDebugCameraToggle();
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Debug Camera state-aware helper
+    // ──────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Scan the loaded exec list for a <c>ToggleDebugCamera</c> command and
+    /// wire up the Debug Camera control row. Resets the badge to "Unknown"
+    /// — the live state is read on demand via the ↻ / Force buttons (a Load
+    /// can happen on a main menu with no live CheatManager).
+    /// </summary>
+    private void DetectDebugCameraToggle()
+    {
+        _debugCamEntry = null;
+        foreach (var e in _allExec)
+        {
+            if (string.Equals(e.FuncName, "ToggleDebugCamera",
+                              StringComparison.OrdinalIgnoreCase))
+            {
+                _debugCamEntry = e;
+                break;
+            }
+        }
+        HasDebugCameraToggle = _debugCamEntry != null;
+        SetDebugCameraState(null);   // unknown until probed
+    }
+
+    /// <summary>Update the badge text + colour from a tri-state read
+    /// (true=ON, false=OFF, null=Unknown).</summary>
+    private void SetDebugCameraState(bool? on)
+    {
+        (DebugCameraState, DebugCameraBadgeColor) = on switch
+        {
+            true  => ("ON",      "#4EC9B0"),   // green — active
+            false => ("OFF",     "#999999"),   // grey — inactive
+            null  => ("Unknown", "#888888"),
+        };
+    }
+
+    /// <summary>True when a hex address string denotes a non-null pointer.
+    /// Treats "", "0x0", "0", and unparseable values as null.</summary>
+    private static bool IsNonNullPtr(string? addr)
+    {
+        if (string.IsNullOrWhiteSpace(addr)) return false;
+        var s = addr.Trim();
+        if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) s = s.Substring(2);
+        return ulong.TryParse(s, System.Globalization.NumberStyles.HexNumber,
+                              System.Globalization.CultureInfo.InvariantCulture, out var v)
+               && v != 0;
+    }
+
+    /// <summary>
+    /// Resolve the live CheatManager instance address to read state from /
+    /// invoke against. Prefers the sticky pin (so the probe and a manual
+    /// Run agree on one object); otherwise scans for the first non-CDO
+    /// instance of the toggle's class and pins it. Returns null when no
+    /// live instance exists (e.g. on a main menu before a PlayerController
+    /// spawns).
+    /// </summary>
+    private async Task<string?> ResolveCheatInstanceAsync(CancellationToken ct = default)
+    {
+        if (_debugCamEntry == null) return null;
+        var cls = _debugCamEntry.ClassName;
+
+        if (_stickyInstance.TryGetValue(cls, out var pinned) && !string.IsNullOrEmpty(pinned))
+            return pinned;
+
+        var found = await _dump.FindInstancesAsync(cls, exactMatch: false, limit: 100, ct);
+        foreach (var inst in found.Instances)
+        {
+            if (!string.IsNullOrEmpty(inst.Address)
+                && inst.Name.IndexOf("Default__", StringComparison.Ordinal) < 0)
+            {
+                _stickyInstance[cls] = inst.Address;
+                return inst.Address;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Read the live Debug Camera state with a two-hop walk that matches
+    /// exactly what <c>ToggleDebugCamera</c> branches on across UE4/UE5.
+    /// Returns true=ON, false=OFF, null=indeterminate.
+    ///
+    /// Hop 1 — <c>CheatManager.DebugCameraControllerRef</c>: tells us only
+    /// whether a DebugCameraController has ever been spawned. In modern UE,
+    /// <c>DisableDebugCamera()</c> does NOT null this member (it caches the
+    /// spawned controller), so non-null here does NOT mean "active". Null ⇒
+    /// no DCC ⇒ OFF.
+    ///
+    /// Hop 2 — <c>DebugCameraController.OriginalControllerRef</c>: the real
+    /// active flag. It's set when the debug camera possesses the player and
+    /// nulled on disable. This is what the engine's toggle actually checks,
+    /// so it is correct for BOTH versions that null the CheatManager ref on
+    /// disable and versions that cache it.
+    /// </summary>
+    private async Task<bool?> ReadDebugCameraStateAsync(string cheatMgrAddr, CancellationToken ct = default)
+    {
+        // Hop 1: does a DebugCameraController exist? (NOT the *Class slot,
+        // which is a TSubclassOf that is always non-null.)
+        var cmWalk = await _dump.WalkInstanceAsync(cheatMgrAddr, ct: ct);
+        var refField = FindObjectField(cmWalk, exactName: "DebugCameraControllerRef",
+                                       contains: "DebugCamera", excluding: "Class");
+        if (refField == null) return null;                    // unknown
+        if (!IsNonNullPtr(refField.PtrAddress)) return false; // no DCC ⇒ OFF
+
+        // Hop 2: is that DCC currently possessing the player?
+        var dccWalk = await _dump.WalkInstanceAsync(refField.PtrAddress, ct: ct);
+        var activeField =
+               FindObjectField(dccWalk, exactName: "OriginalControllerRef",
+                               contains: "OriginalController", excluding: null)
+            ?? FindObjectField(dccWalk, exactName: "OriginalPlayer",
+                               contains: "OriginalPlayer", excluding: null);
+        if (activeField == null) return null;                 // DCC exists, flag unreadable
+        return IsNonNullPtr(activeField.PtrAddress);          // possessing ⇒ ON
+    }
+
+    /// <summary>
+    /// Locate an ObjectProperty field in a walk result: exact name match
+    /// first (case-insensitive), else the first ObjectProperty whose name
+    /// contains <paramref name="contains"/> and (optionally) does not
+    /// contain <paramref name="excluding"/>. Keeps the state reader robust
+    /// to minor field-name variation across engine versions.
+    /// </summary>
+    private static LiveFieldValue? FindObjectField(
+        InstanceWalkResult walk, string exactName, string contains, string? excluding)
+    {
+        LiveFieldValue? fuzzy = null;
+        foreach (var f in walk.Fields)
+        {
+            if (string.Equals(f.Name, exactName, StringComparison.OrdinalIgnoreCase))
+                return f;
+            if (fuzzy == null
+                && f.Name.IndexOf(contains, StringComparison.OrdinalIgnoreCase) >= 0
+                && (excluding == null
+                    || f.Name.IndexOf(excluding, StringComparison.OrdinalIgnoreCase) < 0)
+                && string.Equals(f.TypeName, "ObjectProperty", StringComparison.OrdinalIgnoreCase))
+                fuzzy = f;
+        }
+        return fuzzy;
+    }
+
+    /// <summary>↻ — re-read and display the live Debug Camera state.</summary>
+    [RelayCommand]
+    private async Task RefreshDebugCameraStateAsync()
+    {
+        if (_debugCamEntry == null) return;
+        try
+        {
+            ClearError();
+            IsDebugCameraBusy = true;
+            var addr = await ResolveCheatInstanceAsync();
+            if (addr == null)
+            {
+                SetDebugCameraState(null);
+                StatusText = "Debug Camera: no live CheatManager instance " +
+                             "(enter gameplay so a PlayerController spawns, then ↻).";
+                return;
+            }
+            var state = await ReadDebugCameraStateAsync(addr);
+            SetDebugCameraState(state);
+            StatusText = state switch
+            {
+                true  => $"Debug Camera is ON (CheatManager {addr}).",
+                false => $"Debug Camera is OFF (CheatManager {addr}).",
+                null  => $"Debug Camera state unreadable on {addr} " +
+                         "(DebugCameraControllerRef not found).",
+            };
+        }
+        catch (Exception ex)
+        {
+            SetDebugCameraState(null);
+            SetError(ex);
+            StatusText = $"Debug Camera state read failed: {ex.Message}";
+            _log.Error("Console.RefreshDebugCameraState failed", ex);
+        }
+        finally
+        {
+            IsDebugCameraBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private Task ForceDebugCameraOnAsync()  => ForceDebugCameraAsync(wantOn: true);
+
+    [RelayCommand]
+    private Task ForceDebugCameraOffAsync() => ForceDebugCameraAsync(wantOn: false);
+
+    /// <summary>
+    /// Deterministic enable/disable built on the toggle: read the live
+    /// state, and fire ToggleDebugCamera once ONLY if it differs from the
+    /// desired state. Idempotent (no-op when already in the target state),
+    /// and refuses to blind-fire when the state can't be read — so it never
+    /// accidentally enables when you asked to disable.
+    /// </summary>
+    private async Task ForceDebugCameraAsync(bool wantOn)
+    {
+        if (_debugCamEntry == null) return;
+        var want = wantOn ? "ON" : "OFF";
+        try
+        {
+            ClearError();
+            IsDebugCameraBusy = true;
+
+            var addr = await ResolveCheatInstanceAsync();
+            if (addr == null)
+            {
+                SetDebugCameraState(null);
+                StatusText = $"Force {want}: no live CheatManager instance " +
+                             "(enter gameplay first).";
+                return;
+            }
+
+            var state = await ReadDebugCameraStateAsync(addr);
+            if (state == null)
+            {
+                // Can't read the branch field → blind-firing might do the
+                // opposite of what's asked. Bail with guidance instead.
+                SetDebugCameraState(null);
+                StatusText = $"Force {want}: can't read Debug Camera state on " +
+                             $"{addr} (DebugCameraControllerRef not found). " +
+                             "Use Run to toggle manually.";
+                return;
+            }
+
+            if (state.Value == wantOn)
+            {
+                SetDebugCameraState(state);
+                StatusText = $"Debug Camera already {want} — nothing to do.";
+                return;
+            }
+
+            // Known state, opposite of desired → exactly one toggle flips it.
+            var result = await InvokeDebugCameraToggleAsync(addr);
+            if (!result.Success)
+            {
+                StatusText = $"Force {want} failed: " +
+                             (string.IsNullOrEmpty(result.Error)
+                                ? $"toggle returned {result.Result}" : result.Error);
+                return;
+            }
+
+            var after = await ReadDebugCameraStateAsync(addr);
+            SetDebugCameraState(after);
+            StatusText = after == wantOn
+                ? $"✓ Debug Camera forced {want} (toggled CheatManager {addr})."
+                : $"⚠ Fired toggle but state reads " +
+                  $"{(after == true ? "ON" : after == false ? "OFF" : "Unknown")} " +
+                  $"— expected {want}. The game may re-drive the camera.";
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            StatusText = $"Force {want} failed: {ex.Message}";
+            _log.Error($"Console.ForceDebugCamera({want}) failed", ex);
+        }
+        finally
+        {
+            IsDebugCameraBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Fire ToggleDebugCamera against a specific (pinned) instance, record
+    /// it in History like a manual Run, and keep the sticky pin fresh.
+    /// </summary>
+    private async Task<InvokeFunctionResult> InvokeDebugCameraToggleAsync(string instAddr)
+    {
+        var entry = _debugCamEntry!;
+        var result = await _dump.InvokeFunctionAsync(
+            funcName: entry.FuncName,
+            instanceAddr: instAddr,
+            className: entry.ClassName,
+            parmsSize: 0,
+            paramsHex: null,
+            directCall: false);
+
+        if (result.Success && !string.IsNullOrEmpty(result.InstanceAddr))
+            _stickyInstance[entry.ClassName] = result.InstanceAddr;
+
+        var text = result.Success
+            ? (string.IsNullOrEmpty(result.Message) ? "OK" : result.Message)
+            : (string.IsNullOrEmpty(result.Error) ? $"Result code {result.Result}" : result.Error);
+        AppendHistory(entry, result.Success, text);
+        return result;
     }
 }

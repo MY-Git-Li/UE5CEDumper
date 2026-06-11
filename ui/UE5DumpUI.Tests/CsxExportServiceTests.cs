@@ -25,7 +25,7 @@ public class StubDumpService : IDumpService
     public void RegisterClass(string addr, ClassInfoModel result)
         => _classResults[addr] = result;
 
-    public Task<InstanceWalkResult> WalkInstanceAsync(string addr, string? classAddr = null,
+    public virtual Task<InstanceWalkResult> WalkInstanceAsync(string addr, string? classAddr = null,
         int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, CancellationToken ct = default)
     {
         if (_structResults.TryGetValue(addr, out var result))

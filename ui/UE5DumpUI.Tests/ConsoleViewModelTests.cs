@@ -34,10 +34,55 @@ public class ConsoleViewModelTests
         public int LastInvokeParmsSize { get; private set; }
         public string? LastInvokeInstanceAddr { get; private set; }
 
+        /// <summary>Every instanceAddr passed to InvokeFunctionAsync, in
+        /// call order — lets sticky-instance tests assert exactly when a
+        /// pinned address was reused vs. a fresh null resolution.</summary>
+        public List<string?> InstanceAddrHistory { get; } = new();
+
+        /// <summary>Optional per-call result override; when set it takes
+        /// precedence over <see cref="NextInvokeResult"/> for one call each.
+        /// Used by the self-heal test to fail the pinned attempt + its retry
+        /// while still pinning on an earlier success.</summary>
+        public Queue<InvokeFunctionResult>? InvokeResultQueue { get; set; }
+
+        // ── Debug Camera helper plumbing ───────────────────────────────
+        public FindInstancesResult NextFindInstances { get; set; } = new();
+        public InstanceWalkResult NextWalkResult { get; set; } = new();
+        /// <summary>Stable per-address walk results (e.g. CheatManager →
+        /// DebugCameraControllerRef pointer).</summary>
+        public Dictionary<string, InstanceWalkResult> WalkByAddr { get; } = new();
+        /// <summary>Per-address walk queues — lets a test return a different
+        /// state for the SAME address before vs. after a toggle.</summary>
+        public Dictionary<string, Queue<InstanceWalkResult>> WalkQueueByAddr { get; } = new();
+        public int WalkCallCount { get; private set; }
+        public int FindInstancesCallCount { get; private set; }
+        public string LastWalkAddr { get; private set; } = "";
+
         public override Task<AllFunctionsResult> ListAllFunctionsAsync(
             bool gameOnly = true, int limit = 100000, CancellationToken ct = default)
         {
             return Task.FromResult(NextListResult);
+        }
+
+        public override Task<FindInstancesResult> FindInstancesAsync(
+            string className, bool exactMatch = false, int limit = 500,
+            CancellationToken ct = default)
+        {
+            FindInstancesCallCount++;
+            return Task.FromResult(NextFindInstances);
+        }
+
+        public override Task<InstanceWalkResult> WalkInstanceAsync(
+            string addr, string? classAddr = null, int arrayLimit = 64,
+            int previewLimit = 2, bool fillGaps = false, CancellationToken ct = default)
+        {
+            WalkCallCount++;
+            LastWalkAddr = addr;
+            if (WalkQueueByAddr.TryGetValue(addr, out var q) && q.Count > 0)
+                return Task.FromResult(q.Dequeue());
+            if (WalkByAddr.TryGetValue(addr, out var w))
+                return Task.FromResult(w);
+            return Task.FromResult(NextWalkResult);
         }
 
         public override Task<InvokeFunctionResult> InvokeFunctionAsync(
@@ -50,7 +95,11 @@ public class ConsoleViewModelTests
             LastInvokeClass = className ?? "";
             LastInvokeParmsSize = parmsSize;
             LastInvokeInstanceAddr = instanceAddr;
-            return Task.FromResult(NextInvokeResult);
+            InstanceAddrHistory.Add(instanceAddr);
+            var result = (InvokeResultQueue is { Count: > 0 })
+                ? InvokeResultQueue.Dequeue()
+                : NextInvokeResult;
+            return Task.FromResult(result);
         }
     }
 
@@ -387,6 +436,419 @@ public class ConsoleViewModelTests
 
         await vm.ReplayHistoryCommand.ExecuteAsync(vm.History[0]);
         Assert.Equal(2, fake.InvokeCallCount);
+    }
+
+    // ------------------------------------------------------------------
+    // Sticky-instance pinning (the "Debug Camera won't turn off" fix).
+    //
+    // Stateful exec toggles must land on the SAME UObject across invokes.
+    // The first invoke resolves by classname (instanceAddr=null); the DLL
+    // echoes back the address it used, and every later invoke of any exec
+    // on that class reuses the pinned address.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task FirstRun_resolves_by_classname_then_pins_for_subsequent_runs()
+    {
+        var fake = new FakeDumpService
+        {
+            NextListResult = new AllFunctionsResult { Functions = BuildSampleEntries() },
+            // DLL resolves + echoes the instance it actually used.
+            NextInvokeResult = new InvokeFunctionResult
+            {
+                Result = 0, Message = "ProcessEvent OK", InstanceAddr = "0x1A2B3C",
+            },
+        };
+        var vm = CreateVm(fake);
+        await vm.LoadCommand.ExecuteAsync(null);
+
+        // First: UCheatManager::Fly — no pin yet → classname resolution.
+        vm.SelectedResult = vm.Results[2];
+        Assert.Equal("Fly", vm.SelectedResult.FuncName);
+        await vm.RunSelectedCommand.ExecuteAsync(null);
+
+        // Second: UCheatManager::God — SAME class → reuse the pinned addr.
+        vm.SelectedResult = vm.Results[3];
+        Assert.Equal("God", vm.SelectedResult.FuncName);
+        await vm.RunSelectedCommand.ExecuteAsync(null);
+
+        Assert.Equal(2, fake.InvokeCallCount);
+        // Call 1 passed null (resolve), call 2 passed the pinned address.
+        Assert.Null(fake.InstanceAddrHistory[0]);
+        Assert.Equal("0x1A2B3C", fake.InstanceAddrHistory[1]);
+        Assert.Equal("0x1A2B3C", fake.LastInvokeInstanceAddr);
+    }
+
+    [Fact]
+    public async Task StalePin_failing_invoke_drops_pin_and_retries_with_classname()
+    {
+        var fake = new FakeDumpService
+        {
+            NextListResult = new AllFunctionsResult { Functions = BuildSampleEntries() },
+            // Call 1 (Fly): success → pins 0x1234.
+            // Call 2 (God, pinned attempt): fails → drop pin.
+            // Call 3 (God, classname retry): fails too (still a dead game).
+            InvokeResultQueue = new Queue<InvokeFunctionResult>(new[]
+            {
+                new InvokeFunctionResult { Result = 0,  Message = "OK", InstanceAddr = "0x1234" },
+                new InvokeFunctionResult { Result = -2, Error = "vtable read failed" },
+                new InvokeFunctionResult { Result = -2, Error = "vtable read failed" },
+            }),
+        };
+        var vm = CreateVm(fake);
+        await vm.LoadCommand.ExecuteAsync(null);
+
+        vm.SelectedResult = vm.Results[2]; // Fly — pins
+        await vm.RunSelectedCommand.ExecuteAsync(null);
+
+        vm.SelectedResult = vm.Results[3]; // God — pinned attempt fails → retry
+        await vm.RunSelectedCommand.ExecuteAsync(null);
+
+        Assert.Equal(3, fake.InvokeCallCount);
+        Assert.Null(fake.InstanceAddrHistory[0]);          // Fly: resolve
+        Assert.Equal("0x1234", fake.InstanceAddrHistory[1]); // God: pinned attempt
+        Assert.Null(fake.InstanceAddrHistory[2]);          // God: self-heal retry
+    }
+
+    [Fact]
+    public async Task Pin_is_per_class_and_not_shared_across_classes()
+    {
+        // Two no-arg execs on DIFFERENT classes — a pin for one must not
+        // leak into the other.
+        var entries = new List<AllFunctionEntry>
+        {
+            new() { ClassName="ClassA", FuncName="DoA",
+                    FunctionFlags=FUNC_Exec, NumParms=0, ParmsSize=0 },
+            new() { ClassName="ClassB", FuncName="DoB",
+                    FunctionFlags=FUNC_Exec, NumParms=0, ParmsSize=0 },
+        };
+        var fake = new FakeDumpService
+        {
+            NextInvokeResult = new InvokeFunctionResult
+            {
+                Result = 0, Message = "OK", InstanceAddr = "0xAAAA",
+            },
+        };
+        var vm = CreateVm(fake);
+        vm.SeedForTests(entries);
+
+        // ClassA::DoA — pins ClassA.
+        vm.SelectedResult = vm.Results[0];
+        Assert.Equal("DoA", vm.SelectedResult.FuncName);
+        await vm.RunSelectedCommand.ExecuteAsync(null);
+
+        // ClassB::DoB — different class → must resolve fresh (null), not
+        // reuse ClassA's pin.
+        vm.SelectedResult = vm.Results[1];
+        Assert.Equal("DoB", vm.SelectedResult.FuncName);
+        await vm.RunSelectedCommand.ExecuteAsync(null);
+
+        Assert.Null(fake.InstanceAddrHistory[0]); // ClassA: resolve
+        Assert.Null(fake.InstanceAddrHistory[1]); // ClassB: resolve (no leak)
+    }
+
+    [Fact]
+    public async Task Load_clears_stale_pins_from_a_previous_session()
+    {
+        var fake = new FakeDumpService
+        {
+            NextListResult = new AllFunctionsResult { Functions = BuildSampleEntries() },
+            NextInvokeResult = new InvokeFunctionResult
+            {
+                Result = 0, Message = "OK", InstanceAddr = "0xCAFE",
+            },
+        };
+        var vm = CreateVm(fake);
+        await vm.LoadCommand.ExecuteAsync(null);
+
+        vm.SelectedResult = vm.Results[2]; // Fly — resolves (null), then pins 0xCAFE
+        await vm.RunSelectedCommand.ExecuteAsync(null);
+        Assert.Null(fake.InstanceAddrHistory[0]); // call 1: classname resolution
+
+        // Re-discover (reconnect to a different process) clears pins.
+        await vm.LoadCommand.ExecuteAsync(null);
+
+        vm.SelectedResult = vm.Results[2]; // Fly again — pin cleared → resolve fresh
+        await vm.RunSelectedCommand.ExecuteAsync(null);
+
+        // Without the Load-clear, call 2 would have reused "0xCAFE"; the
+        // null proves the stale pin was dropped.
+        Assert.Null(fake.InstanceAddrHistory[1]);
+    }
+
+    // ------------------------------------------------------------------
+    // Debug Camera state-aware helper. ToggleDebugCamera is a stateful
+    // toggle; the helper reads the CheatManager's DebugCameraControllerRef
+    // to show ON/OFF and drive deterministic Force On / Force Off.
+    // ------------------------------------------------------------------
+
+    private const uint FUNC_Native2 = 0x0000_0400;
+
+    private static List<AllFunctionEntry> DebugCamEntries() => new()
+    {
+        new() { ClassName="CheatManager", FuncName="ToggleDebugCamera",
+                FunctionFlags=FUNC_Exec | FUNC_Native2, NumParms=0, ParmsSize=0 },
+        new() { ClassName="CheatManager", FuncName="Fly",
+                FunctionFlags=FUNC_Exec | FUNC_Native2, NumParms=0, ParmsSize=0 },
+    };
+
+    // Two-hop state read: CheatManager.DebugCameraControllerRef → DCC, then
+    // DCC.OriginalControllerRef = the real active flag.
+    private const string CmAddr  = "0xCM1";
+    private const string DccAddr = "0xDCC";
+
+    /// <summary>CheatManager walk: a persistent DebugCameraControllerRef
+    /// (points at the DCC, or "0x0" = never spawned) plus the *Class decoy
+    /// that must NOT be mistaken for the state.</summary>
+    private static InstanceWalkResult WalkCheatMgr(string dccPtr) => new()
+    {
+        Fields = new List<LiveFieldValue>
+        {
+            new() { Name="DebugCameraControllerClass", TypeName="ClassProperty",
+                    PtrAddress="0xC0FFEE" },               // decoy: always non-null
+            new() { Name="DebugCameraControllerRef", TypeName="ObjectProperty",
+                    PtrAddress=dccPtr },                   // persists across disable
+        },
+    };
+
+    /// <summary>DebugCameraController walk: OriginalControllerRef is the real
+    /// active flag ("0x0" = inactive/OFF, non-null = possessing/ON).</summary>
+    private static InstanceWalkResult WalkDcc(string originalCtrlPtr) => new()
+    {
+        Fields = new List<LiveFieldValue>
+        {
+            new() { Name="OriginalControllerRef", TypeName="ObjectProperty",
+                    PtrAddress=originalCtrlPtr },
+        },
+    };
+
+    private static FindInstancesResult OneInstance(string addr, string name) => new()
+    {
+        Instances = new List<InstanceResult> { new() { Address=addr, Name=name } },
+    };
+
+    /// <summary>Wire a fake to resolve CmAddr and report a steady ON/OFF
+    /// state via the two-hop walk.</summary>
+    private static FakeDumpService DebugCamFake(bool on)
+    {
+        var fake = new FakeDumpService
+        {
+            NextFindInstances = OneInstance(CmAddr, "CheatManager_0"),
+        };
+        fake.WalkByAddr[CmAddr]  = WalkCheatMgr(DccAddr);
+        fake.WalkByAddr[DccAddr] = WalkDcc(on ? "0xB0B0" : "0x0");
+        return fake;
+    }
+
+    [Fact]
+    public void DetectsToggleDebugCamera_and_enables_helper()
+    {
+        var vm = CreateVm(new FakeDumpService());
+        vm.SeedForTests(DebugCamEntries());
+
+        Assert.True(vm.HasDebugCameraToggle);
+        Assert.Equal("Unknown", vm.DebugCameraState);
+    }
+
+    [Fact]
+    public void NoToggleDebugCamera_keeps_helper_hidden()
+    {
+        var vm = CreateVm(new FakeDumpService());
+        vm.SeedForTests(BuildSampleEntries()); // no ToggleDebugCamera
+
+        Assert.False(vm.HasDebugCameraToggle);
+    }
+
+    [Fact]
+    public async Task RefreshState_reads_ON_when_DCC_is_possessing()
+    {
+        var fake = DebugCamFake(on: true);
+        var vm = CreateVm(fake);
+        vm.SeedForTests(DebugCamEntries());
+
+        await vm.RefreshDebugCameraStateCommand.ExecuteAsync(null);
+
+        Assert.Equal("ON", vm.DebugCameraState);
+        Assert.Equal(DccAddr, fake.LastWalkAddr);   // hop 2 reached the DCC
+        Assert.Contains("ON", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task RefreshState_reads_OFF_when_DCC_originalRef_is_null()
+    {
+        // The CheatManager ref PERSISTS (non-null) but the DCC is inactive —
+        // exactly the case that fooled the old single-hop reader.
+        var fake = DebugCamFake(on: false);
+        var vm = CreateVm(fake);
+        vm.SeedForTests(DebugCamEntries());
+
+        await vm.RefreshDebugCameraStateCommand.ExecuteAsync(null);
+
+        Assert.Equal("OFF", vm.DebugCameraState);
+    }
+
+    [Fact]
+    public async Task RefreshState_reads_OFF_when_no_DCC_ever_spawned()
+    {
+        // DebugCameraControllerRef itself is null → no second hop needed.
+        var fake = new FakeDumpService
+        {
+            NextFindInstances = OneInstance(CmAddr, "CheatManager_0"),
+        };
+        fake.WalkByAddr[CmAddr] = WalkCheatMgr("0x0");
+        var vm = CreateVm(fake);
+        vm.SeedForTests(DebugCamEntries());
+
+        await vm.RefreshDebugCameraStateCommand.ExecuteAsync(null);
+
+        Assert.Equal("OFF", vm.DebugCameraState);
+        Assert.Equal(CmAddr, fake.LastWalkAddr); // never walked a DCC
+    }
+
+    [Fact]
+    public async Task RefreshState_prefers_nonCDO_instance()
+    {
+        var fake = new FakeDumpService
+        {
+            NextFindInstances = new FindInstancesResult
+            {
+                Instances = new List<InstanceResult>
+                {
+                    new() { Address="0xCDO", Name="Default__CheatManager" },
+                    new() { Address=CmAddr,  Name="CheatManager_0" },
+                },
+            },
+        };
+        fake.WalkByAddr[CmAddr]  = WalkCheatMgr(DccAddr);
+        fake.WalkByAddr[DccAddr] = WalkDcc("0xB0B0");
+        var vm = CreateVm(fake);
+        vm.SeedForTests(DebugCamEntries());
+
+        await vm.RefreshDebugCameraStateCommand.ExecuteAsync(null);
+
+        Assert.Equal("ON", vm.DebugCameraState);
+        Assert.NotEqual("0xCDO", fake.LastWalkAddr); // skipped the CDO
+    }
+
+    [Fact]
+    public async Task RefreshState_no_instance_reports_unknown()
+    {
+        var fake = new FakeDumpService
+        {
+            NextFindInstances = new FindInstancesResult(), // none
+        };
+        var vm = CreateVm(fake);
+        vm.SeedForTests(DebugCamEntries());
+
+        await vm.RefreshDebugCameraStateCommand.ExecuteAsync(null);
+
+        Assert.Equal("Unknown", vm.DebugCameraState);
+        Assert.Equal(0, fake.WalkCallCount);
+        Assert.Contains("no live CheatManager", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task ForceOff_when_ON_fires_one_toggle_then_reads_OFF()
+    {
+        var fake = new FakeDumpService
+        {
+            NextFindInstances = OneInstance(CmAddr, "CheatManager_0"),
+            NextInvokeResult = new InvokeFunctionResult
+            {
+                Result = 0, Message = "OK", InstanceAddr = CmAddr,
+            },
+        };
+        fake.WalkByAddr[CmAddr] = WalkCheatMgr(DccAddr);
+        // DCC active flag: ON first, OFF after the toggle.
+        fake.WalkQueueByAddr[DccAddr] = new Queue<InstanceWalkResult>(new[]
+        {
+            WalkDcc("0xB0B0"), // before toggle → ON
+            WalkDcc("0x0"),   // after toggle  → OFF
+        });
+        var vm = CreateVm(fake);
+        vm.SeedForTests(DebugCamEntries());
+
+        await vm.ForceDebugCameraOffCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.InvokeCallCount);          // exactly one toggle
+        Assert.Equal(CmAddr, fake.LastInvokeInstanceAddr); // hit the resolved instance
+        Assert.Equal("OFF", vm.DebugCameraState);
+        Assert.Contains("forced OFF", vm.StatusText);
+        Assert.Single(vm.History);                      // recorded like a Run
+    }
+
+    [Fact]
+    public async Task ForceOff_when_already_OFF_is_a_noop()
+    {
+        var fake = DebugCamFake(on: false);
+        var vm = CreateVm(fake);
+        vm.SeedForTests(DebugCamEntries());
+
+        await vm.ForceDebugCameraOffCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, fake.InvokeCallCount);   // nothing fired
+        Assert.Equal("OFF", vm.DebugCameraState);
+        Assert.Contains("already OFF", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task ForceOn_when_already_ON_is_a_noop()
+    {
+        var fake = DebugCamFake(on: true);
+        var vm = CreateVm(fake);
+        vm.SeedForTests(DebugCamEntries());
+
+        await vm.ForceDebugCameraOnCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, fake.InvokeCallCount);
+        Assert.Equal("ON", vm.DebugCameraState);
+        Assert.Contains("already ON", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task ForceOn_when_OFF_fires_one_toggle_then_reads_ON()
+    {
+        var fake = new FakeDumpService
+        {
+            NextFindInstances = OneInstance(CmAddr, "CheatManager_0"),
+            NextInvokeResult = new InvokeFunctionResult
+            {
+                Result = 0, Message = "OK", InstanceAddr = CmAddr,
+            },
+        };
+        fake.WalkByAddr[CmAddr] = WalkCheatMgr(DccAddr);
+        fake.WalkQueueByAddr[DccAddr] = new Queue<InstanceWalkResult>(new[]
+        {
+            WalkDcc("0x0"),   // before → OFF
+            WalkDcc("0xB0B0"), // after  → ON
+        });
+        var vm = CreateVm(fake);
+        vm.SeedForTests(DebugCamEntries());
+
+        await vm.ForceDebugCameraOnCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.InvokeCallCount);
+        Assert.Equal("ON", vm.DebugCameraState);
+        Assert.Contains("forced ON", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task Force_refuses_to_blind_fire_when_state_unreadable()
+    {
+        var fake = new FakeDumpService
+        {
+            NextFindInstances = OneInstance(CmAddr, "CheatManager_0"),
+            // CheatManager walk with no DebugCamera field → indeterminate.
+            NextWalkResult = new InstanceWalkResult { Fields = new List<LiveFieldValue>() },
+        };
+        var vm = CreateVm(fake);
+        vm.SeedForTests(DebugCamEntries());
+
+        await vm.ForceDebugCameraOnCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, fake.InvokeCallCount);   // did NOT blind-fire
+        Assert.Equal("Unknown", vm.DebugCameraState);
+        Assert.Contains("can't read", vm.StatusText);
     }
 
     [Fact]
