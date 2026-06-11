@@ -684,27 +684,47 @@ if ($Target -in "All", "Test") {
     else {
         Write-Step "Building + running tests..."
 
-        # .NET 10 SDK + Microsoft.Testing.Platform 2.x: global.json's
-        # `test.runner = Microsoft.Testing.Platform` switches dotnet test
-        # into MTP mode. Differences from the legacy VSTest mode:
-        #   - Project passed via --project (positional no longer works).
-        #   - `--nologo` / `-v` aren't in MTP's allowed flag list;
-        #     unknown flags get forwarded to the test runner (xunit.v3),
-        #     which doesn't recognize them and prints help + exits 5.
-        #   - VSTest bridge target was dropped in MTP 2.x on .NET 10.
-        # Build args via splatting so an absent --no-restore is OMITTED, not
-        # passed as an empty string — MTP's CommandLineParser throws
-        # IndexOutOfRangeException on a stray empty arg ("Zero tests ran").
-        $testArgs = @('test', '--project', $TEST_PROJ, '-c', $CSharpConfig)
-        if ($SkipRestore) { $testArgs += '--no-restore' }
-        & dotnet @testArgs
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-Fail "Tests failed"
+        # Guard: a NuGet "Update all packages" pass keeps re-adding explicit
+        # Microsoft.Testing.Platform / Microsoft.Testing.Extensions.* pins to the
+        # test csproj. Those override xunit.v3's bundled MTP bridge (compiled
+        # against a specific MTP API surface) and crash the runner at startup with
+        # 'Zero tests ran', exit -532462766, MissingMethodException on
+        # IOutputDevice.DisplayAsync. Catch it HERE — before dotnet test — so the
+        # failure is a clear message instead of a cryptic exit code. xunit.v3
+        # resolves the whole Microsoft.Testing.* stack transitively; it must NOT
+        # be pinned (see the comment in UE5DumpUI.Tests.csproj).
+        $forbiddenMtp = Select-String -Path $TEST_PROJ -Pattern 'PackageReference\s+Include="Microsoft\.Testing\.(Platform|Extensions)' -ErrorAction SilentlyContinue
+        if ($forbiddenMtp) {
+            Write-Fail "Forbidden explicit Microsoft.Testing.* PackageReference(s) in the test csproj:"
+            $forbiddenMtp | ForEach-Object { Write-Host "      line $($_.LineNumber): $($_.Line.Trim())" -ForegroundColor Red }
+            Write-Host "      => Remove them. xunit.v3 resolves Microsoft.Testing.* transitively;" -ForegroundColor Yellow
+            Write-Host "         explicit pins crash the runner (MissingMethodException" -ForegroundColor Yellow
+            Write-Host "         IOutputDevice.DisplayAsync). See the comment in the csproj." -ForegroundColor Yellow
             $exitCode = 1
         }
         else {
-            Write-Ok "All tests passed"
+            # .NET 10 SDK + Microsoft.Testing.Platform 2.x: global.json's
+            # `test.runner = Microsoft.Testing.Platform` switches dotnet test
+            # into MTP mode. Differences from the legacy VSTest mode:
+            #   - Project passed via --project (positional no longer works).
+            #   - `--nologo` / `-v` aren't in MTP's allowed flag list;
+            #     unknown flags get forwarded to the test runner (xunit.v3),
+            #     which doesn't recognize them and prints help + exits 5.
+            #   - VSTest bridge target was dropped in MTP 2.x on .NET 10.
+            # Build args via splatting so an absent --no-restore is OMITTED, not
+            # passed as an empty string — MTP's CommandLineParser throws
+            # IndexOutOfRangeException on a stray empty arg ("Zero tests ran").
+            $testArgs = @('test', '--project', $TEST_PROJ, '-c', $CSharpConfig)
+            if ($SkipRestore) { $testArgs += '--no-restore' }
+            & dotnet @testArgs
+
+            if ($LASTEXITCODE -ne 0) {
+                Write-Fail "Tests failed"
+                $exitCode = 1
+            }
+            else {
+                Write-Ok "All tests passed"
+            }
         }
     }
 }
