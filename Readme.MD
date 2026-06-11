@@ -29,7 +29,7 @@ UE5CEDumper is a interactive inspector toolchain. It provides a **live window** 
 | **4.15 – 4.17** | ✅ | ✅ | ✅ | *Extinction* |
 | **4.18 – 4.20** | ✅ | ✅ | ✅ | *FF7 Remake Intergrade, The Occupation* |
 | **4.21 – 4.24** | ✅ | ✅ | ✅ | *Star Wars Jedi, DQ XI S, IDOLM@STER STARLIT SEASON, Octopath Traveler, DQ I&II / III HD-2D Remaster* |
-| **4.25 – 4.27** | ✅ | ✅ | ✅ | *FF7 Rebirth, Tower of Mask, Hogwarts Legacy, Romancing SaGa 2 RotS, Ghostwire: Tokyo, TimeSplitters Rewind (Early Access V0.3.3), The Artisan of Glimmith, Barn Finders* |
+| **4.25 – 4.27** | ✅ | ✅ | ✅ | *FF7 Rebirth, Tower of Mask, Hogwarts Legacy, Romancing SaGa 2 RotS, Ghostwire: Tokyo, TimeSplitters Rewind (Early Access V0.3.3), The Artisan of Glimmith, Barn Finders, MOBILE SUIT GUNDAM SEED Battle Destiny Remastered* |
 | **5.0 – 5.2** | ✅ | ✅ | ✅ | *Squirrel With A Gun, Caravan Sandwitch, Meltopia, Retro Rewind Demo* |
 | **5.3 – 5.4** | ✅ | ✅ | ✅ | *Satisfactory (v1.1.3.1), Colossal* |
 | **5.5 – 5.7** | ✅ | ✅* | ✅** | *Titan Quest II, EverSpace 2, Lushfoil Photography Sim, Manor Lords, Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT: CARRIER QUALIFICATION Demo* |
@@ -131,7 +131,7 @@ Download AOBMaker here (register is required): https://opencheattables.com/viewt
 ## Important Notes
 
 * **Custom Data Structures**: In games like *FF7 Rebirth*, some critical data (e.g., HP) is stored in custom structures outside standard `UObjects`. The Live Walker can help investigate these regions, but direct discovery is not possible.
-* **GWorld Connectivity**: `GWorld` traversal works in **100% of tested games (29 / 29)** as of 2026-05-12, including Satisfactory (modular UE build with a separate `CoreUObject-Win64-Shipping.dll`) and *Star Wars Jedi: Fallen Order* (UE 4.21, EA Origin / Steam launcher). For unverified games, fall back to **Object Tree** or **Instance Finder** as the primary entry point.
+* **GWorld Connectivity**: `GWorld` traversal works in **100% of tested games (30 / 30)** as of 2026-06-11, including Satisfactory (modular UE build with a separate `CoreUObject-Win64-Shipping.dll`) and *Star Wars Jedi: Fallen Order* (UE 4.21, EA Origin / Steam launcher). For unverified games, fall back to **Object Tree** or **Instance Finder** as the primary entry point.
 * **Proxy DLL caveat for EA-launcher games**: *Star Wars Jedi: Fallen Order* launches via the EA app; neither `version.dll` nor `dinput8.dll` proxy is loaded by the wrapped process (EA's launcher restricts the DLL search path). The DLL must be CE-injected after the game is running. The scan side itself works fine — GObjects / GNames / GWorld all resolve cleanly once the DLL is inside the process. Same pattern likely applies to other EA-launched titles; report any new ones as an issue.
 * **Container Limits**: Array/Map/Set element reading respects a configurable limit to avoid excessive memory reads. Adjust the **Array Limit** slider in the Live Walker when working with large containers.
 
