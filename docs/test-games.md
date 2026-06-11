@@ -30,12 +30,13 @@
 | Barn Finders | UE4.25 (PE: 425, exe: BarnFinders-Win64-Shipping) | User-submitted logs (build 560). Stride 24, 136,953 objects. UE5-Extended layout (strict). GWorld ✅. Standard FProperty mode. Publisher fallback (Atomic Jelly / Plug-In Digital — no thumbprint match). |
 | Colossal | UE5.03 (PE: 503, exe: Colossal-Win64-Shipping, publisher: Atan) | User-submitted logs (build 560). Stride 24, 41,528 objects. UE5-Extended layout (strict). GWorld ✅. TaggedFFieldVariant (UE5.3+). FField::Next=+0x18, FField::Name=+0x20. Publisher Copyright is Epic default placeholder — no thumbprint match. |
 | Extinction | UE4.15 (PE: 415, exe: Extinction.exe, dir: Blink/Binaries/Win64) | User-submitted logs (build 560). Stride 24, 230,732 objects. **Flat (non-chunked)** FFixedUObjectArray. GNames via TNameEntryArray (UE4Names=yes). UProperty mode (UE < 4.25). UField::Next=+0x28. **Lowest UE version verified end-to-end** — expands support below the previously documented 4.18+ floor. Patterns: GOBJ_RE2 (1.8s, 2 batches) / GNAM_CT3 (4.6s, 4 batches) / GWLD_G42_1 (3.3s, 3 batches). Publisher: Modus Games (no thumbprint). |
+| MS Gundam SEED Battle Destiny Remastered (SBDR) | UE4.27 (PE: 427, exe: `SEED BATTLE DESTINY REMASTERED.exe`, dir: `Game_SBDR/Binaries/Win64`) | User-tested Steam title (build 1016). Stride 24, 57,423 objects (→72K mid-game). **All ✅** — GObjects (GOBJ_ES53_1, UE5-Extended layout strict, Max 2.16M / 33 chunks), GNames (GNAM_V8, FNamePool hdrOff=0 stride 2, UE4Names=no — a UE4.27 on the UE5-style FNamePool), **GWorld ✅** (GWLD_GH_1, `0x7FF758D77040`). FProperty mode (CPN=no, TagFFV=no, Outer=+0x20; FField Next=+0x20 Name=+0x28; FProp Offset=+0x4C StructProp=+0x78). `version.dll` proxy loads (real version.dll). ProcessEvent **vtable+0x220** — game-thread dispatch validated (15 646 hooks/1500 ms), invokes OK. Internal UClasses use a "Life" prefix (`LifeGameInstance`, 15 fields; `BP_LifeSaveData_C`). Bandai Namco (publisher=- — no thumbprint match). |
 
 -----
 
 ## GWorld Status Summary
 
-**Working (22/24):** TQ2, EverSpace 2, Hogwarts Legacy, IDOLM@STER, Romancing SaGa 2, Tower of Mask, Ghostwire: Tokyo, Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT Demo, OctoPath Traveler, FF7R, FF7Re, DQ I&II, DQ III, DQ XI S, Lushfoil Photography Sim, Manor Lords, The Artisan of Glimmith, Barn Finders, Colossal, Extinction
+**Working (23/25):** TQ2, EverSpace 2, Hogwarts Legacy, IDOLM@STER, Romancing SaGa 2, Tower of Mask, Ghostwire: Tokyo, Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT Demo, OctoPath Traveler, FF7R, FF7Re, DQ I&II, DQ III, DQ XI S, Lushfoil Photography Sim, Manor Lords, The Artisan of Glimmith, Barn Finders, Colossal, Extinction, MS Gundam SEED Battle Destiny Remastered
 
 **Failing (GWorld not found or untested):** Star Wars Jedi, Satisfactory
 
@@ -45,3 +46,4 @@
 - **FF7R** = Final Fantasy VII Remake Intergrade (UE4.18 Square Enix fork)
 - **Geri** = The Artisan of Glimmith (UE4.27, executable `Geri-Win64-Shipping.exe` — log folder uses this name)
 - **Blink** = Extinction (UE4.15, executable `Extinction.exe`, parent dir `Blink/Binaries/Win64/`)
+- **SBDR** = MOBILE SUIT GUNDAM SEED Battle Destiny Remastered (UE4.27, Steam; executable `SEED BATTLE DESTINY REMASTERED.exe`, project dir `Game_SBDR/Binaries/Win64/`; internal UClasses use a `Life` prefix — `LifeGameInstance`, `BP_LifeSaveData_C`, etc.)
