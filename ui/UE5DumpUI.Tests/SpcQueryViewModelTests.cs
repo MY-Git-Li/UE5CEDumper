@@ -38,6 +38,7 @@ public class SpcQueryViewModelTests : IDisposable
         public Task CopyToClipboardAsync(string text) { LastClipboard = text; return Task.CompletedTask; }
         public Task RevealInExplorerAsync(string path) => Task.CompletedTask;
         public string GetMachineName() => "TEST";
+        public void CloseImeForWindow(IntPtr windowHandle) { }
         public Task<string?> ShowSaveFileDialogAsync(string a, string b, string c) => Task.FromResult<string?>(null);
     }
 

@@ -29,6 +29,17 @@ public interface IPlatformService
     string GetMachineName();
 
     /// <summary>
+    /// Close the IME for the given top-level window handle so keystrokes pass
+    /// through as direct alphanumeric input. Used when focus enters a text
+    /// field: every input field in this app takes ASCII content (hex
+    /// addresses, AOB patterns, numbers, class / property names, file paths),
+    /// so a CJK IME left in composition mode only gets in the way. We do NOT
+    /// restore the prior IME state on focus-out — a user who wants CJK input
+    /// flips the IME back manually. No-op on non-Windows / null handle.
+    /// </summary>
+    void CloseImeForWindow(IntPtr windowHandle);
+
+    /// <summary>
     /// Show a platform save-file dialog.
     /// Returns the chosen file path, or null if user cancelled.
     /// </summary>

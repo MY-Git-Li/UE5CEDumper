@@ -1,6 +1,8 @@
 using System;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using UE5DumpUI.ViewModels;
 
 namespace UE5DumpUI.Views;
@@ -49,6 +51,15 @@ public partial class MainWindow : Window
         // explicit event instead. Width / Height are AvaloniaProperty
         // and flow through OnPropertyChanged.
         PositionChanged += OnPositionChanged;
+        // Close the IME whenever focus enters a text field, app-wide. Every
+        // input field here takes ASCII (hex addresses, AOB patterns, numbers,
+        // class / property names, file paths), so a CJK IME left in composition
+        // mode only gets in the way. A single tunnel-to-bubble handler at the
+        // window root (handledEventsToo so it still fires when a child marks the
+        // event handled) beats wiring 48+ TextBox / AutoCompleteBox / NumericUpDown
+        // controls individually.
+        AddHandler(InputElement.GotFocusEvent, OnGlobalGotFocus,
+            RoutingStrategies.Bubble, handledEventsToo: true);
         // Seed the snapshot with the XAML-declared default so the very
         // first restore (without a prior maximize) still has something
         // sane to fall back to.
@@ -57,6 +68,38 @@ public partial class MainWindow : Window
         _pendingWidth = Width;
         _pendingHeight = Height;
         _pendingPosition = Position;
+    }
+
+    /// <summary>
+    /// App-wide focus-in IME guard. Closes the IME (switches to direct
+    /// alphanumeric input) when focus lands on any text-input control.
+    /// </summary>
+    private void OnGlobalGotFocus(object? sender, FocusChangedEventArgs e)
+    {
+        // AutoCompleteBox and NumericUpDown route keyboard focus to an inner
+        // TextBox, so a single TextBox check covers all three field kinds
+        // without per-control wiring. Non-text controls (buttons, grid cells)
+        // are left alone.
+        if (e.NewFocusedElement is not TextBox)
+        {
+            return;
+        }
+        if (DataContext is not MainWindowViewModel vm)
+        {
+            return;
+        }
+        var hwnd = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+        // Defer one dispatcher tick: Avalonia's Win32 backend associates the
+        // IME context as part of its own focus handling for the same input
+        // event. Closing the IME after that association has settled avoids it
+        // being re-opened underneath us.
+        Avalonia.Threading.Dispatcher.UIThread.Post(
+            () => vm.Platform.CloseImeForWindow(hwnd),
+            Avalonia.Threading.DispatcherPriority.Background);
     }
 
     private void OnClosed(object? sender, EventArgs e)

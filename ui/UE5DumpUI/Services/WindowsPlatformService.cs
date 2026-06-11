@@ -90,6 +90,55 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
         return Environment.MachineName;
     }
 
+    public void CloseImeForWindow(IntPtr windowHandle)
+    {
+        if (windowHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        // Grab the input context for this window. A window with no IME loaded
+        // (e.g. user is on a pure-ASCII keyboard layout) returns NULL — nothing
+        // to do.
+        IntPtr himc = ImmGetContext(windowHandle);
+        if (himc == IntPtr.Zero)
+        {
+            return;
+        }
+
+        try
+        {
+            // Close the IME open status: composition is dismissed and keystrokes
+            // flow through as direct alphanumeric input. This is intentionally
+            // one-directional — we never re-open it on focus-out.
+            ImmSetOpenStatus(himc, false);
+        }
+        catch
+        {
+            // IME control must never crash the UI over a focus change.
+        }
+        finally
+        {
+            ImmReleaseContext(windowHandle, himc);
+        }
+    }
+
+    // --- imm32 IME control (P/Invoke) ------------------------------------
+    // Classic DllImport on blittable-only signatures (IntPtr + Win32 BOOL):
+    // Native-AOT compatible without requiring AllowUnsafeBlocks (which the
+    // LibraryImport source generator would force project-wide).
+
+    [DllImport("imm32.dll", ExactSpelling = true)]
+    private static extern IntPtr ImmGetContext(IntPtr hWnd);
+
+    [DllImport("imm32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ImmSetOpenStatus(IntPtr hIMC, [MarshalAs(UnmanagedType.Bool)] bool fOpen);
+
+    [DllImport("imm32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ImmReleaseContext(IntPtr hWnd, IntPtr hIMC);
+
     public Task RevealInExplorerAsync(string path)
     {
         try

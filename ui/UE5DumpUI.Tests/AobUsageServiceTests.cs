@@ -26,6 +26,7 @@ public sealed class MockPlatformService : IPlatformService
     public Task CopyToClipboardAsync(string text) => Task.CompletedTask;
     public Task RevealInExplorerAsync(string path) => Task.CompletedTask;
     public string GetMachineName() => "TEST-MACHINE";
+    public void CloseImeForWindow(IntPtr windowHandle) { }
     public Task<string?> ShowSaveFileDialogAsync(string defaultFileName, string filterName, string filterExtension) => Task.FromResult<string?>(null);
 }
 
