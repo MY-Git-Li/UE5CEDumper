@@ -698,6 +698,20 @@ public class ConsoleViewModelTests
     }
 
     [Fact]
+    public void CopyDebugCameraScript_raises_RequestDebugCameraCeScript()
+    {
+        var vm = CreateVm(new FakeDumpService());
+        vm.SeedForTests(DebugCamEntries());
+
+        int raised = 0;
+        vm.RequestDebugCameraCeScript += () => raised++;
+
+        vm.CopyDebugCameraScriptCommand.Execute(null);
+
+        Assert.Equal(1, raised);
+    }
+
+    [Fact]
     public void SeedForTests_filters_and_sorts_outside_the_pipe()
     {
         var fake = new FakeDumpService();

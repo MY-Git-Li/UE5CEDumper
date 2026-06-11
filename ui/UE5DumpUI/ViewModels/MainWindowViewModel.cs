@@ -1038,6 +1038,38 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             }
         };
 
+        // Console -> RequestDebugCameraCeScript builds the stateful
+        // setDebugCamera [ENABLE]/[DISABLE] memory-record script and ships it
+        // to AOBMaker (a CE AA-script record) or the clipboard. Self-contained:
+        // no class/func resolution needed — the helper resolves the export.
+        Console.RequestDebugCameraCeScript += async () =>
+        {
+            try
+            {
+                var script = Services.DebugCameraScriptGenerator.Generate();
+                const string description = "Debug Camera (force on/off): setDebugCamera";
+                bool wasAvailable = _aobMaker?.IsAvailable ?? false;
+                bool sentToCe = false;
+                if (_aobMaker != null && wasAvailable)
+                    sentToCe = await _aobMaker.CreateAAScriptAsync(description, script, autoActivate: false);
+                if (!sentToCe)
+                    await _platform.CopyToClipboardAsync(script);
+                StatusText = sentToCe
+                    ? "Debug Camera AA Script created in CE (tick = ON, untick = OFF)."
+                    : wasAvailable
+                        ? "⚠ AOBMaker pipe broke (CE closed?) — Debug Camera script copied to clipboard."
+                        : "AOBMaker not connected — Debug Camera script copied to clipboard " +
+                          "(embed ue5_invoke_helper.lua in your .CT).";
+                _log.Info($"Console Debug Camera CE script " +
+                          $"{(sentToCe ? "sent to CE" : "to clipboard")} (wasAvailable={wasAvailable})");
+            }
+            catch (Exception ex)
+            {
+                _log.Error("Console RequestDebugCameraCeScript handler error", ex);
+                StatusText = $"Debug Camera script export failed: {ex.Message}";
+            }
+        };
+
         _pipeClient.ConnectionStateChanged += (connected) =>
         {
             if (!connected) _log.StopProcessMirror();

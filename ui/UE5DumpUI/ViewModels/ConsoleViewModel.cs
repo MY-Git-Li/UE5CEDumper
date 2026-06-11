@@ -135,6 +135,12 @@ public partial class ConsoleViewModel : ViewModelBase
     /// in CopyBakedScript mode.</summary>
     public event Action<string, string>? RequestCopyBakedScript;
 
+    /// <summary>"Copy CE Script" on the Debug Camera row — MainWindow builds
+    /// the [ENABLE]/[DISABLE] setDebugCamera memory-record script via
+    /// <see cref="Services.DebugCameraScriptGenerator"/> and ships it to
+    /// AOBMaker / clipboard. No args: the script is self-contained.</summary>
+    public event Action? RequestDebugCameraCeScript;
+
     public ConsoleViewModel(IDumpService dump, ILoggingService log)
     {
         _dump = dump;
@@ -644,6 +650,12 @@ public partial class ConsoleViewModel : ViewModelBase
 
     [RelayCommand]
     private Task ForceDebugCameraOffAsync() => ForceDebugCameraAsync(wantOn: false);
+
+    /// <summary>"Copy CE Script" — hand off to MainWindow to generate the
+    /// setDebugCamera [ENABLE]/[DISABLE] memory record and deliver it to
+    /// AOBMaker / clipboard.</summary>
+    [RelayCommand]
+    private void CopyDebugCameraScript() => RequestDebugCameraCeScript?.Invoke();
 
     /// <summary>
     /// Deterministic enable/disable — delegates to the DLL (set_debug_camera),
