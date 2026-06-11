@@ -157,6 +157,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 | Document | Contents |
 |----------|----------|
 | [docs/roadmap.md](docs/roadmap.md) | **Current state** — capability matrix, per-game configuration, tested games, long-running concerns. **Read first** for "what works now". |
+| [docs/tips.md](docs/tips.md) | **User-facing how-to recipes** — goal → which panel/button. First recipe: forcing camera rotation in fixed-view (2.5D/45°) games. |
 | [docs/todo.md](docs/todo.md) | **What's next** — prioritized open work with effort/risk tags. Active plan + carryover gaps + speculative ideas. |
 | [docs/dev-log.md](docs/dev-log.md) | **What shipped** — append-only milestone history per build number. Read when investigating "when/why was X added". |
 | [docs/architecture.md](docs/architecture.md) | Directory structure (17 .cpp + 19 .h DLL files; ~135 UI .cs/.axaml files; 33 test files), git submodules, build environment |
