@@ -17,6 +17,7 @@
 #include "Stark.h"
 #include "ValueScan.h"
 #include "Cancel.h"
+#include "Wirbel.h"
 #include "BuildInfo.h"
 
 #include <json.hpp>
@@ -2949,6 +2950,134 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             int32_t state = UE5_SetDebugCamera(enable ? 1 : 0);
             json data;
             data["state"] = state;   // resulting state: 1=on, 0=off, -1=error
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // ── teleport_*: marker save/recall + cursor teleport (Wirbel) ──
+        // Non-zero Wirbel codes are still ok:true responses with a "code"
+        // field — the UI maps codes to user-facing hints (teleport-spec §8);
+        // MakeError stays reserved for malformed requests.
+        if (cmd == Renge::CMD_TELEPORT_GET_POSE) {
+            Wirbel::Pose p{};
+            char map[Grimoire::TELEPORT_MAPNAME_CAP] = {};
+            uint8_t source = 0;
+            int32_t code = Wirbel::GetPose(p, map, sizeof(map), &source);
+            json data;
+            data["code"] = code;
+            if (code == 0) {
+                data["x"] = p.X;         data["y"] = p.Y;     data["z"] = p.Z;
+                data["pitch"] = p.Pitch; data["yaw"] = p.Yaw; data["roll"] = p.Roll;
+                data["map"] = map;
+                data["source"] = (source == 1) ? "invoke" : "raw";
+            }
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        if (cmd == Renge::CMD_TELEPORT_SAVE_MARKER) {
+            int slot = request.value("slot", -1);
+            int32_t code = Wirbel::SaveMarker(slot);
+            Sein::Info("PIPE:cmd", "teleport_save_marker: slot=%d -> %d", slot, code);
+            json data;
+            data["code"] = code;
+            data["slot"] = slot;
+            if (code == 0) {
+                Wirbel::Marker m{};
+                if (Wirbel::GetMarker(slot, m) == 0) {
+                    data["x"] = m.P.X;         data["y"] = m.P.Y;     data["z"] = m.P.Z;
+                    data["pitch"] = m.P.Pitch; data["yaw"] = m.P.Yaw; data["roll"] = m.P.Roll;
+                    data["map"] = m.MapName;
+                }
+            }
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        if (cmd == Renge::CMD_TELEPORT_RECALL_MARKER) {
+            uint8_t tier = 0;
+            int32_t code;
+            json data;
+            if (request.contains("x") && request.contains("y") && request.contains("z")) {
+                // Explicit-pose variant (BugItGo interop): bypasses the marker
+                // store and the map check. Rotation restored only when given.
+                Wirbel::Pose p{};
+                p.X = request.value("x", 0.0);
+                p.Y = request.value("y", 0.0);
+                p.Z = request.value("z", 0.0);
+                bool hasRot = request.contains("pitch") || request.contains("yaw");
+                p.Pitch = request.value("pitch", 0.0);
+                p.Yaw   = request.value("yaw", 0.0);
+                p.Roll  = request.value("roll", 0.0);
+                code = Wirbel::RecallExplicit(p, hasRot, &tier);
+                Sein::Info("PIPE:cmd", "teleport_recall_marker: explicit -> %d", code);
+            } else {
+                int slot = request.value("slot", -1);
+                bool force = request.value("force", false);
+                code = Wirbel::RecallMarker(slot, force, &tier);
+                Sein::Info("PIPE:cmd", "teleport_recall_marker: slot=%d force=%d -> %d",
+                           slot, force ? 1 : 0, code);
+                if (code == Wirbel::TP_ERR_MAP_MISMATCH) {
+                    Wirbel::Marker m{};
+                    if (Wirbel::GetMarker(slot, m) == 0)
+                        data["markerMap"] = m.MapName;
+                    char cur[Grimoire::TELEPORT_MAPNAME_CAP] = {};
+                    if (Wirbel::GetCurrentMapName(cur, sizeof(cur)))
+                        data["map"] = cur;
+                }
+            }
+            data["code"] = code;
+            data["tier"] = tier;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        if (cmd == Renge::CMD_TELEPORT_TO_CURSOR) {
+            double zOffset = request.value("zOffset", Grimoire::TELEPORT_DEFAULT_ZOFFSET);
+            int channel = request.value("channel", 0);
+            bool fallbackCenter = request.value("fallbackCenter", true);
+            Wirbel::Pose hit{};
+            uint8_t tier = 0;
+            bool usedCenter = false;
+            int32_t code = Wirbel::TeleportToCursor(zOffset, channel, fallbackCenter,
+                                                    &hit, &tier, &usedCenter);
+            Sein::Info("PIPE:cmd", "teleport_to_cursor: z=%.1f ch=%d -> %d",
+                       zOffset, channel, code);
+            json data;
+            data["code"] = code;
+            data["tier"] = tier;
+            data["usedCenter"] = usedCenter;
+            if (code == 0) {
+                data["hitX"] = hit.X;
+                data["hitY"] = hit.Y;
+                data["hitZ"] = hit.Z;
+            }
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        if (cmd == Renge::CMD_TELEPORT_GET_MARKERS) {
+            json arr = json::array();
+            for (int i = 0; i < Grimoire::TELEPORT_SLOTS; ++i) {
+                Wirbel::Marker m{};
+                json jm;
+                jm["slot"] = i;
+                if (Wirbel::GetMarker(i, m) == 0) {
+                    jm["valid"] = true;
+                    jm["x"] = m.P.X;         jm["y"] = m.P.Y;     jm["z"] = m.P.Z;
+                    jm["pitch"] = m.P.Pitch; jm["yaw"] = m.P.Yaw; jm["roll"] = m.P.Roll;
+                    jm["map"] = m.MapName;
+                } else {
+                    jm["valid"] = false;
+                }
+                arr.push_back(jm);
+            }
+            json data;
+            data["markers"] = arr;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        if (cmd == Renge::CMD_TELEPORT_CLEAR_MARKER) {
+            int slot = request.value("slot", -1);
+            int32_t code = Wirbel::ClearMarker(slot);
+            json data;
+            data["code"] = code;
+            data["slot"] = slot;
             return Renge::MakeResponse(id, data).dump();
         }
 

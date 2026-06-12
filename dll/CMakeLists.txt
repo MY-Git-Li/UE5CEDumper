@@ -141,6 +141,7 @@ add_library(UE5Dumper SHARED
     src/Mimic.cpp
     src/Flamme.cpp
     src/Denken.cpp
+    src/Wirbel.cpp
     src/version.rc
 )
 
@@ -229,6 +230,7 @@ set(PROXY_SOURCES
     src/Mimic.cpp
     src/Flamme.cpp
     src/Denken.cpp
+    src/Wirbel.cpp
     src/version.rc
 )
 

@@ -37,6 +37,11 @@ internal enum MainTabIndex
     Snapshot = 11,
     SpcQuery = 12,
     ClassPivot = 13,
+    // Teleport is a normal (always-visible) tab appended after the gated
+    // experimental tabs so existing indices never shift; the hidden
+    // experimental tabs collapse visually, so it renders right after Proxy
+    // Deploy when experimental is off.
+    Teleport = 14,
 }
 
 /// <summary>
@@ -200,6 +205,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public InterestingPropertiesViewModel InterestingProperties { get; }
     public ValueSearchViewModel ValueSearch { get; }
     public ConsoleViewModel Console { get; }
+    public TeleportViewModel Teleport { get; }
     public ProxyDeployViewModel? ProxyDeploy { get; }
     /// <summary>Experimental Snapshot tab — null when no snapshot store was
     /// injected (e.g. in unit tests). Gated behind <see cref="ExperimentalEnabled"/>.</summary>
@@ -309,6 +315,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         InterestingProperties = new InterestingPropertiesViewModel(dump, log, platform);
         ValueSearch = new ValueSearchViewModel(dump, log);
         Console = new ConsoleViewModel(dump, log);
+        Teleport = new TeleportViewModel(dump, log, platform);
         if (snapshotStore != null)
         {
             Snapshot = new SnapshotViewModel(dump, snapshotStore, log, experimentalGate, platform);
@@ -1081,6 +1088,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 IsConnected = connected;
                 StatusText = connected ? "Connected" : "Disconnected";
+                Teleport.SetConnected(connected);
                 if (!connected) WindowTitle = "UE5 Dump UI";
             });
         };
@@ -1103,6 +1111,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         // PropertySearch is IDisposable (owns a debounce System.Threading.Timer);
         // its Dispose had no caller before, leaking the timer until process exit.
         PropertySearch.Dispose();
+        // Teleport owns a DispatcherTimer (auto-refresh) — dispose so it can't
+        // tick after the window closes.
+        Teleport.Dispose();
 
         GC.SuppressFinalize(this);
     }
@@ -1206,6 +1217,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ObjectTree.SetEngineState(state);
         LiveWalker.SetEngineState(state);
         InstanceFinder.SetEngineState(state);
+        Teleport.SetConnected(true);   // refresh markers once the DLL is scanned
         Snapshot?.SetEngineState(state);
         Spc?.SetEngineState(state);
         Pivot?.SetEngineState(state);

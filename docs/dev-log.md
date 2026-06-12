@@ -14,6 +14,55 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-12 — Teleport (BugIt-style): marker save/recall + cursor teleport (build 1027)
+
+Universal teleport feature, DLL-side following the Debug Camera pattern
+(docs/teleport-spec.md is the full contract). Two modes: **generic** — save
+the pawn pose into one of 3 marker slots and recall later; **pointer** —
+teleport to the world position under the mouse cursor (2.5D / 45° games like
+Titan Quest-likes, with a screen-center fallback for cursorless HD-2D titles).
+
+**DLL.** New **`Wirbel`** module (`Wirbel.cpp/.h`). Resolution chain GWorld →
+OwningGameInstance → LocalPlayers[0] → PlayerController → Pawn → RootComponent
+→ RelativeLocation + ControlRotation — all engine base-class property names,
+resolved live by the **new shared `Ubel::FindField` / `Ubel::FindFieldOffset`**
+(extracted from the Debug Camera `DbgCam_FieldOffset`, which now wraps it).
+LWC float/double detected from the `RelativeLocation` property size, applied to
+all FVector/FRotator packing. Recall invokes `K2_SetActorLocation(bTeleport=true)`
+(exact), cursor invokes `K2_TeleportTo` (spot-adjust), rotation via
+`SetControlRotation`, velocity reset via `StopMovementImmediately` — all through
+Stark's game-thread queue; raw property write is the tier-2 fallback (reported
+back as `tier`). Cursor trace: `GetMousePosition` → `GetHitResultUnderCursorByChannel`,
+else deproject + `KismetSystemLibrary::LineTraceSingle` (game-thread only — reads
+the physics scene). Markers store coordinates + map name only (never pointers);
+recall refuses on map mismatch unless forced. DebugCameraController-active case
+hops through `OriginalControllerRef`. **6 exports** `UE5_Teleport*` (30→36),
+**6 pipe cmds** `teleport_*` (~42→48), **mailbox `CMD_TELEPORT=8`**
+(op in instanceAddr, slot in ufuncAddr, pose block in paramsData).
+
+**UI.** New **Teleport tab** (appended last so indices don't shift): live pose
+display + Refresh/Auto, 3 marker rows (Save/Recall/Force/Clear), cursor teleport
+with Z-offset + channel + center-fallback, **BugItGo interop** (Copy-as-BugItGo +
+paste-and-run a `BugItGo X Y Z` / `?BugLoc=…?BugRot=…` string), and CE export.
+**Why BugIt "returns nothing":** it's void with no out-params — its outputs are
+side effects inside the game (log [stripped in Shipping] + screenshot + the
+game-process clipboard), so the dumper reads the pose itself instead.
+
+**CE generators.** `TeleportLuaBundleGenerator` (primary "paste into CE" path) —
+one self-contained Lua with `createHotkey` bindings + busy-check +
+re-registration guard, talking to the mailbox directly. `TeleportScriptGenerator`
++ `CheatTableBuilder` for a 7-row auto-unticking .CT. **3 hotkey schemes**
+(Numpad default / Top-row / Both) — CE distinguishes top-row VKs (0x31) from
+numpad VKs (0x61); Numpad default because ARPGs bind Ctrl+1-3 to skills, Top-row
+recall uses Alt+1-3 to avoid the skill bar. `BugItGoParser` handles the three
+string formats. **+40 C# tests** (1384 total).
+
+⚠ **LIVE-VERIFY PENDING** (10-item smoke checklist in teleport-spec.md §12):
+float vs double games, menu/no-pawn errors, map mismatch + force, cursor vs
+center, hotkey spam busy-skip, Debug Camera interaction, BugItGo round-trip.
+
+-----
+
 ## 2026-06-09 — Value Search: per-object batch read (default ON) to speed up First Scan (build 974)
 
 Follow-up to the parallel toggle. The First Scan is a **reflection-driven pointer walk**

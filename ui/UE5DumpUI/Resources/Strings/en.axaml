@@ -24,6 +24,7 @@
     <sys:String x:Key="str.Tab.InterestingProperties">Interesting Props</sys:String>
     <sys:String x:Key="str.Tab.ValueSearch">Value Search</sys:String>
     <sys:String x:Key="str.Tab.Console">Console</sys:String>
+    <sys:String x:Key="str.Tab.Teleport">Teleport</sys:String>
     <sys:String x:Key="str.Tab.GameClassFilter">Classes</sys:String>
     <!-- Experimental tabs (hidden unless opted in via System-tab credit checkbox) -->
     <sys:String x:Key="str.Tab.Snapshot">Snapshot</sys:String>
@@ -500,6 +501,48 @@
     <sys:String x:Key="str.Tip.Con.DbgCam.ForceOn">Ensure Debug Camera is ON: read current state, and fire ToggleDebugCamera only if it is currently OFF. Idempotent — does nothing if already ON.</sys:String>
     <sys:String x:Key="str.Tip.Con.DbgCam.ForceOff">Ensure Debug Camera is OFF: read current state, and fire ToggleDebugCamera only if it is currently ON. This is the reliable "turn it off" — plain Run just flips whatever state it's in.</sys:String>
     <sys:String x:Key="str.Tip.Con.DbgCam.CopyCe">Generate a stateful CE memory-record AA Script (tick = camera ON, untick = camera OFF) — the same robust DLL path as Force On/Off. Self-contained: talks to the DLL mailbox directly, so NO ue5_invoke_helper.lua embed is needed (just UE5Dumper.dll injected). Ships to AOBMaker if connected, else the clipboard.</sys:String>
+
+    <!-- Teleport panel (BugIt-style: marker save/recall + cursor teleport) -->
+    <sys:String x:Key="str.TP.PoseHeader">Current Pose</sys:String>
+    <sys:String x:Key="str.TP.Refresh">Refresh</sys:String>
+    <sys:String x:Key="str.TP.Auto">Auto (0.5s)</sys:String>
+    <sys:String x:Key="str.TP.Loc">Location (X / Y / Z):</sys:String>
+    <sys:String x:Key="str.TP.Rot">Rotation (Pitch / Yaw / Roll):</sys:String>
+    <sys:String x:Key="str.TP.Map">Map:</sys:String>
+    <sys:String x:Key="str.TP.MarkersHeader">Markers</sys:String>
+    <sys:String x:Key="str.TP.Save">Save</sys:String>
+    <sys:String x:Key="str.TP.Recall">Recall</sys:String>
+    <sys:String x:Key="str.TP.Force">Force</sys:String>
+    <sys:String x:Key="str.TP.Clear">Clear</sys:String>
+    <sys:String x:Key="str.TP.CursorHeader">Cursor Teleport (2.5D / 45° games)</sys:String>
+    <sys:String x:Key="str.TP.ToCursor">Teleport to cursor</sys:String>
+    <sys:String x:Key="str.TP.ZOffset">Z offset:</sys:String>
+    <sys:String x:Key="str.TP.Channel">Channel:</sys:String>
+    <sys:String x:Key="str.TP.FallbackCenter">Fall back to screen center</sys:String>
+    <sys:String x:Key="str.TP.BugHeader">BugItGo Interop</sys:String>
+    <sys:String x:Key="str.TP.CopyBugItGo">Copy as BugItGo</sys:String>
+    <sys:String x:Key="str.TP.RunBugItGo">Run</sys:String>
+    <sys:String x:Key="str.TP.BugHint">Paste 'BugItGo X Y Z', 'X Y Z', or a ?BugLoc=(...)?BugRot=(...) string</sys:String>
+    <sys:String x:Key="str.TP.CeHeader">CE Export</sys:String>
+    <sys:String x:Key="str.TP.Scheme">Hotkey scheme:</sys:String>
+    <sys:String x:Key="str.TP.CopyLua">Copy CE Lua (hotkey bundle)</sys:String>
+    <sys:String x:Key="str.TP.SaveCt">Save .CT…</sys:String>
+    <sys:String x:Key="str.TP.Warning">⚠ Single-player only. Online games will rubber-band or may flag teleports.</sys:String>
+    <sys:String x:Key="str.Tip.TP.Refresh">Read the current pawn's world location and control rotation (DLL resolves the local PlayerController → Pawn → RootComponent via reflection).</sys:String>
+    <sys:String x:Key="str.Tip.TP.Auto">Re-read the pose every 0.5s. Off by default; stops automatically on disconnect.</sys:String>
+    <sys:String x:Key="str.Tip.TP.Save">Save the current pose into this marker slot. Markers live in the DLL — they survive a UI restart as long as the game process lives.</sys:String>
+    <sys:String x:Key="str.Tip.TP.Recall">Teleport back to this marker (invokes K2_SetActorLocation with bTeleport=true, then restores rotation and zeroes velocity). Refused if you've changed maps — use Force.</sys:String>
+    <sys:String x:Key="str.Tip.TP.Force">Recall even if the marker was saved on a different map. May land you in an unloaded area — use with care.</sys:String>
+    <sys:String x:Key="str.Tip.TP.Clear">Forget this marker.</sys:String>
+    <sys:String x:Key="str.Tip.TP.ToCursor">Teleport the pawn to the world position under the mouse cursor (or screen center if no cursor). Uses K2_TeleportTo so the pawn lands beside geometry, not inside it.</sys:String>
+    <sys:String x:Key="str.Tip.TP.ZOffset">Height added above the hit point so the capsule doesn't spawn intersecting the ground (default 100).</sys:String>
+    <sys:String x:Key="str.Tip.TP.Channel">ETraceTypeQuery byte. 0 = Visibility (default engine mapping). Games can remap channels — change this if cursor hits land on the wrong surface.</sys:String>
+    <sys:String x:Key="str.Tip.TP.FallbackCenter">When the game has no cursor (HD-2D-style), trace from the screen center instead.</sys:String>
+    <sys:String x:Key="str.Tip.TP.CopyBugItGo">Read the current pose and copy a 'BugItGo X Y Z' string to the clipboard. (BugIt itself can't return data to the dumper — it writes to the game's own log/clipboard — so this reads the pose directly.)</sys:String>
+    <sys:String x:Key="str.Tip.TP.RunBugItGo">Parse the pasted string and teleport there. Works without any CheatManager — feeds X/Y/Z into the same recall path as markers.</sys:String>
+    <sys:String x:Key="str.Tip.TP.CopyLua">Copy a self-contained CE Lua script that binds hotkeys for save/recall/cursor/copy. Paste into a CE 'Table Lua Script'. Requires UE5Dumper.dll injected. No helper Lua needed.</sys:String>
+    <sys:String x:Key="str.Tip.TP.Scheme">Numpad: Ctrl+Num1-3 save, Num1-3 recall, Num0 cursor (needs NumLock ON). Top-row: Ctrl+1-3 save, Alt+1-3 recall (for laptops / when Ctrl+1-3 is taken). Both: register both.</sys:String>
+    <sys:String x:Key="str.Tip.TP.SaveCt">Save a Cheat Engine .CT with 7 momentary records (Save 1-3, Recall 1-3, Cursor). Bind hotkeys via the Lua bundle instead — these records have no hotkeys attached.</sys:String>
 
     <!-- Interesting Properties Finder (B' / Unusual Location) -->
     <sys:String x:Key="str.IP.Load">Load</sys:String>

@@ -339,6 +339,12 @@
                  IsVisible="{Binding ExperimentalEnabled}">
           <views:ClassPivotPanel DataContext="{Binding Pivot}"/>
         </TabItem>
+
+        <!-- Teleport (normal tab; appended after the gated experimental tabs so
+             existing indices stay stable — see MainTabIndex.Teleport). -->
+        <TabItem Header="{StaticResource str.Tab.Teleport}">
+          <views:TeleportPanel DataContext="{Binding Teleport}"/>
+        </TabItem>
       </TabControl>
     </Grid>
   </DockPanel>

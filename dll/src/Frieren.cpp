@@ -16,6 +16,7 @@
 #include "Fern.h"
 #include "Stark.h"
 #include "Mimic.h"
+#include "Wirbel.h"
 
 #include <string>
 #include <cstring>
@@ -511,42 +512,15 @@ uintptr_t UE5_FindFunctionByName(uintptr_t classAddr, const char* funcName) {
 // nothing hardcoded, so this is UE4/UE5 version-agnostic.
 // ============================================================================
 
-static bool DbgCam_IEquals(const std::string& a, const char* b) {
-    size_t bl = std::strlen(b);
-    if (a.size() != bl) return false;
-    for (size_t i = 0; i < a.size(); ++i)
-        if (std::tolower((unsigned char)a[i]) != std::tolower((unsigned char)b[i]))
-            return false;
-    return true;
-}
-
-static bool DbgCam_IContains(const std::string& hay, const char* needle) {
-    std::string h = hay, n = needle;
-    std::transform(h.begin(), h.end(), h.begin(),
-                   [](unsigned char c) { return (char)std::tolower(c); });
-    std::transform(n.begin(), n.end(), n.begin(),
-                   [](unsigned char c) { return (char)std::tolower(c); });
-    return h.find(n) != std::string::npos;
-}
-
 // Resolve an ObjectProperty field offset by name within a class (inherited
-// fields included). Exact name match first; else the first ObjectProperty
-// whose name contains `contains` and (optionally) not `excluding`. The
-// exclude rule keeps DebugCameraControllerRef from matching the always-non-null
-// DebugCameraControllerClass TSubclassOf slot. Returns -1 if not found.
+// fields included). Thin wrapper over the shared Ubel::FindFieldOffset
+// (extracted from here, build 1015) — the fuzzy branch stays
+// ObjectProperty-only so DebugCameraControllerRef never matches the
+// always-non-null DebugCameraControllerClass TSubclassOf slot.
+// Returns -1 if not found.
 static int DbgCam_FieldOffset(uintptr_t classAddr, const char* exact,
                               const char* contains, const char* excluding) {
-    if (!classAddr) return -1;
-    ClassInfo ci = Ubel::WalkClassEx(classAddr);
-    int fuzzy = -1;
-    for (const auto& f : ci.Fields) {
-        if (DbgCam_IEquals(f.Name, exact)) return f.Offset;
-        if (fuzzy < 0 && contains && DbgCam_IContains(f.Name, contains)
-            && (!excluding || !DbgCam_IContains(f.Name, excluding))
-            && f.TypeName == "ObjectProperty")
-            fuzzy = f.Offset;
-    }
-    return fuzzy;
+    return Ubel::FindFieldOffset(classAddr, exact, contains, excluding, "ObjectProperty");
 }
 
 static uintptr_t DbgCam_ReadPtr(uintptr_t obj, int off) {
@@ -664,6 +638,55 @@ int32_t UE5_SetDebugCamera(int32_t enable) {
     }
     LOG_INFO("UE5_SetDebugCamera(%d) -> state=%d", enable, state);
     return state;
+}
+
+// ============================================================================
+// Teleport (Wirbel) — thin export wrappers. All logic lives in Wirbel.cpp;
+// the pipe (Fern) and the CE mailbox (Mimic CMD_TELEPORT=8) share these.
+// docs/teleport-spec.md is the design contract.
+// ============================================================================
+
+static void Teleport_CopyPose(const Wirbel::Pose& p, double* out6) {
+    if (!out6) return;
+    out6[0] = p.X;     out6[1] = p.Y;   out6[2] = p.Z;
+    out6[3] = p.Pitch; out6[4] = p.Yaw; out6[5] = p.Roll;
+}
+
+int32_t UE5_TeleportGetPose(double* outPose6, char* outMapName, int32_t mapNameCap) {
+    Wirbel::Pose p{};
+    int32_t rc = Wirbel::GetPose(p, outMapName, mapNameCap, nullptr);
+    if (rc == 0) Teleport_CopyPose(p, outPose6);
+    return rc;
+}
+
+int32_t UE5_TeleportSaveMarker(int32_t slot) {
+    return Wirbel::SaveMarker(slot);
+}
+
+int32_t UE5_TeleportRecallMarker(int32_t slot, int32_t force) {
+    return Wirbel::RecallMarker(slot, force != 0, nullptr);
+}
+
+int32_t UE5_TeleportToCursor(double zOffset, int32_t traceChannel,
+                             int32_t fallbackToCenter) {
+    return Wirbel::TeleportToCursor(zOffset, traceChannel, fallbackToCenter != 0,
+                                    nullptr, nullptr, nullptr);
+}
+
+int32_t UE5_TeleportGetMarker(int32_t slot, double* outPose6,
+                              char* outMapName, int32_t mapNameCap) {
+    Wirbel::Marker m{};
+    int32_t rc = Wirbel::GetMarker(slot, m);
+    if (rc == 0) {
+        Teleport_CopyPose(m.P, outPose6);
+        if (outMapName && mapNameCap > 0)
+            CopyToBuffer(m.MapName, outMapName, mapNameCap);
+    }
+    return rc;
+}
+
+int32_t UE5_TeleportClearMarker(int32_t slot) {
+    return Wirbel::ClearMarker(slot);
 }
 
 // ============================================================================

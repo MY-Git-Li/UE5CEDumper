@@ -805,6 +805,44 @@ Error codes:
 
 -----
 
+## Teleport (Wirbel) — marker save/recall + cursor teleport
+
+6 request/response commands (build 1027; full contract in
+[teleport-spec.md](teleport-spec.md) §7). Non-zero `code` is still an
+`ok:true` response — the UI maps codes to user hints; `MakeError` is reserved
+for malformed requests. `tier`: 1 = engine invoke (clean), 2 = raw-write
+fallback (game may snap back). Codes (§8): 0 OK, -1 not-init, -2 no controller,
+-3 no pawn, -4 reflection, -5 invoke-timeout, -6 empty marker, -7 map mismatch,
+-8 no hit, -9 no cursor, -10 write failed.
+
+```jsonc
+{ "cmd": "teleport_get_pose" }
+→ { "x":…,"y":…,"z":…,"pitch":…,"yaw":…,"roll":…,"map":"Map","source":"raw|invoke","code":0 }
+
+{ "cmd": "teleport_save_marker", "slot": 0 }
+→ { "slot":0,"x":…,…,"map":"…","code":0 }
+
+{ "cmd": "teleport_recall_marker", "slot": 0, "force": false }
+→ { "code":0, "tier":1 }   |   { "code":-7,"map":"Map_B","markerMap":"Map_A" }
+// Explicit-pose variant (BugItGo): pass x/y/z (+optional pitch/yaw/roll)
+// instead of slot — bypasses the marker store and the map check.
+{ "cmd": "teleport_recall_marker", "x":…, "y":…, "z":…, "pitch":…, "yaw":…, "roll":… }
+
+{ "cmd": "teleport_to_cursor", "zOffset":100.0, "channel":0, "fallbackCenter":true }
+→ { "code":0,"tier":1,"usedCenter":false,"hitX":…,"hitY":…,"hitZ":… }
+
+{ "cmd": "teleport_get_markers" }
+→ { "markers":[ { "slot":0,"valid":true,"x":…,…,"map":"…" }, { "slot":1,"valid":false }, … ] }
+
+{ "cmd": "teleport_clear_marker", "slot": 0 } → { "slot":0,"code":0 }
+```
+
+The CE Lua path uses the Mimic mailbox `CMD_TELEPORT=8` instead (see
+[teleport-spec.md](teleport-spec.md) §8) — `executeCodeEx` can't read export
+return values.
+
+-----
+
 ## Pagination Pattern
 
 ```

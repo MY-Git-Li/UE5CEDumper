@@ -8,6 +8,11 @@ state.
 
 > **Last refreshed**: 2026-05-29 (build 797) for the rows below. **dev = main @
 > build ~937 (PR #238).** Newer work lives in [dev-log.md](dev-log.md):
+> - build **1027 (2026-06-12)** — **Teleport** tab (Wirbel module): BugIt-style
+>   marker save/recall (3 slots) + cursor teleport for 2.5D/45° games + BugItGo
+>   interop + self-contained CE Lua hotkey bundle (3 schemes). 6 exports / 6 pipe
+>   cmds / mailbox `CMD_TELEPORT=8`. Full contract in
+>   [teleport-spec.md](teleport-spec.md); ⚠ LIVE-VERIFY PENDING (§12 smoke list).
 > - builds **926-937 (2026-06-06)** — Value Search **lean Candidate** (V3-A/B) +
 >   **TSet/TMap scan** (V1a); **app-wide DataGrid sorting fix** (compiled bindings
 >   need explicit `SortMemberPath`); **Value Search keyword filter**; **DLL-side

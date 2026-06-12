@@ -59,6 +59,14 @@ constexpr const char* CMD_QUERY_CANDIDATES         = "query_candidates";
 constexpr const char* CMD_GET_DEBUG_CAMERA_STATE   = "get_debug_camera_state";
 constexpr const char* CMD_SET_DEBUG_CAMERA         = "set_debug_camera";
 
+// Teleport (Wirbel) — marker save/recall + cursor teleport (docs/teleport-spec.md §7)
+constexpr const char* CMD_TELEPORT_GET_POSE        = "teleport_get_pose";
+constexpr const char* CMD_TELEPORT_SAVE_MARKER     = "teleport_save_marker";
+constexpr const char* CMD_TELEPORT_RECALL_MARKER   = "teleport_recall_marker";
+constexpr const char* CMD_TELEPORT_TO_CURSOR       = "teleport_to_cursor";
+constexpr const char* CMD_TELEPORT_GET_MARKERS     = "teleport_get_markers";
+constexpr const char* CMD_TELEPORT_CLEAR_MARKER    = "teleport_clear_marker";
+
 // Snapshot capture (experimental — Phase A). Stateless cursor pagination
 // like get_object_list: begin_snapshot returns the total object count for
 // progress; snapshot_chunk streams [offset, offset+limit) objects with their

@@ -17,7 +17,7 @@ UE5CEDumper/
 │
 ├── dll/                            ← C++ DLL (injected into game process)
 │   ├── CMakeLists.txt              ← DLL build config (versioning, git hash, deps)
-│   └── src/                        ← 17 .cpp + 19 .h (Frieren-themed; see naming-convention.md; +Denken = native x64 disasm, Path 2; +Cancel.h = cooperative cancellation)
+│   └── src/                        ← 18 .cpp + 20 .h (Frieren-themed; see naming-convention.md; +Denken = native x64 disasm, Path 2; +Cancel.h = cooperative cancellation; +Wirbel = teleport, build 1027)
 │       ├── Heiter.cpp              ← dllmain — DLL_PROCESS_ATTACH, AutoStartThreadProc
 │       ├── Methode.cpp             ← CEPlugin — CE plugin Type 5 main menu
 │       ├── Grimoire.h              ← Constants — magic strings, pipe name, UObject offsets, DynOff namespace
@@ -34,6 +34,7 @@ UE5CEDumper/
 │       ├── Ubel.cpp / .h           ← UStructWalker — FField/UProperty chain, WalkInstance, array Phases B-K,
 │       │                              OptionalProperty (intrusive + non-intrusive)
 │       ├── Stark.cpp / .h          ← GameThreadDispatch — MinHook ProcessEvent hook, game-thread queue
+│       ├── Wirbel.cpp / .h         ← Teleport — marker save/recall + cursor teleport (BugIt-style), build 1027
 │       ├── Mimic.cpp / .h          ← Mailbox — shared memory mailbox for CE Lua invocation
 │       ├── Flamme.cpp / .h         ← HintCache — scan hint cache for faster repeat scans
 │       ├── Lugner.cpp              ← ProxyVersion — version.dll proxy DLL forwarding

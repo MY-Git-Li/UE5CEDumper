@@ -41,6 +41,7 @@ narrative identity resonates with what the module *does*.
 | **Heiter.cpp** | 海塔 | Priest who started the journey | — | dllmain: DLL entry point, auto-start logic | The one who set the journey in motion — DLL_PROCESS_ATTACH |
 | **Lugner.cpp** | 呂格納 | Demon master of disguise | #12 | ProxyVersion: version.dll forwarding proxy | The deceiver — pretends to be the real version.dll |
 | **Scharf.h** | 夏爾夫 | Sharp-eyed, scrutinizing examinee | #17 | WalkerAlignment: FProperty offset-vs-alignment validator | Sharp eye for layout flaws — catches misaligned EnumProperty / FName that hint at a wrong FPROPERTY_OFFSET probe |
+| **Wirbel.cpp** | 維爾貝爾 | Northern squad leader, pragmatic soldier | #20 | Teleport: marker save/recall + cursor teleport (BugIt-style) | Swift battlefield repositioning — the soldier who relocates first |
 
 ---
 
@@ -86,6 +87,7 @@ Sein::                      // Logger — chronicler
 Himmel::                    // Signatures — hero's legacy (header-only)
 Flamme::                    // HintCache — ancient wisdom
 Stark::                     // GameThreadDispatch — frontline warrior
+Wirbel::                    // Teleport — swift battlefield repositioning
 Mimic::                     // Mailbox — disguised channel
 Renge::                     // PipeProtocol — liaison rules
 Scharf::                    // FProperty alignment validator (header-only)
@@ -202,7 +204,7 @@ Frieren, Himmel, Stark, Fern, Methode, Mimic, Genau
 | Linie (#14) | 14 | Object cloning/replication |
 | ~~Scharf (#17)~~ | 17 | **In use → FProperty alignment validator (`Scharf.h`)** |
 | Glück (#18) | 18 | Lucky heuristics / fallback logic |
-| Wirbel (#20) | 20 | Strategy/optimization |
+| ~~Wirbel (#20)~~ | 20 | **In use → Teleport (marker save/recall + cursor teleport, `Wirbel.cpp`, build 1027)** |
 | ~~Denken (#25)~~ | 25 | **In use → native UFunction x64 disassembly (`Denken.cpp`, Path 2)** |
 | Kanne (#26) | 26 | Growth/tree operations |
 | Richter (#28) | 28 | Memory region scanning |

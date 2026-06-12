@@ -102,6 +102,13 @@ public class StubDumpService : IDumpService
     public virtual Task<int> GetDebugCameraStateAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<int> SetDebugCameraAsync(bool enable, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<DataTableWalkResult> WalkDataTableRowsAsync(string addr, int offset = 0, int limit = 64, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<TeleportPose> TeleportSaveMarkerAsync(int slot, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<TeleportResult> TeleportRecallMarkerAsync(int slot, bool force, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<TeleportResult> TeleportRecallExplicitAsync(double x, double y, double z, double? pitch = null, double? yaw = null, double? roll = null, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<TeleportResult> TeleportToCursorAsync(double zOffset, int channel, bool fallbackCenter, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<List<TeleportMarker>> TeleportGetMarkersAsync(CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<int> TeleportClearMarkerAsync(int slot, CancellationToken ct = default) => throw new NotImplementedException();
 }
 
 public class CsxExportServiceTests

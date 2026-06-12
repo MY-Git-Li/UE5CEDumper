@@ -1,11 +1,25 @@
 # Teleport (BugIt-style) — Technical Specification
 
-> Status: **SPEC — not yet implemented.** This document is the implementation
-> contract for the universal Teleport feature. It follows the architecture
-> proven by the Debug Camera force on/off feature (PR #264, build 1014):
-> **all logic DLL-side, exposed as C ABI exports + pipe commands + a Mimic
-> mailbox command; the UI and the generated CE Lua are thin, stateless
-> clients.** No pure-Lua / baked-offset variant is in scope.
+> Status: **IMPLEMENTED (build 1027+, branch dev).** This document is the
+> design contract; the feature shipped following it. It mirrors the Debug
+> Camera force on/off architecture (PR #264, build 1014): **all logic
+> DLL-side, exposed as C ABI exports + pipe commands + a Mimic mailbox
+> command; the UI and the generated CE Lua are thin, stateless clients.** No
+> pure-Lua / baked-offset variant is in scope.
+>
+> **Implementation notes (where the shipped code differs from / refines the
+> spec below):**
+> - Module is **`Wirbel`** (`dll/src/Wirbel.cpp/.h`); the shared field-offset
+>   helper landed as **`Ubel::FindField` / `Ubel::FindFieldOffset`** (the
+>   Debug Camera `DbgCam_FieldOffset` now wraps it).
+> - Teleport tab is **appended last** in the TabControl (`MainTabIndex.Teleport`)
+>   so existing indices never shift; the hidden experimental tabs collapse, so
+>   it renders right after Proxy Deploy when experimental mode is off.
+> - **.CT export carries no CE record-level hotkeys** — the Lua bundle is the
+>   hotkey path; the .CT records are 7 momentary auto-unticking actions
+>   (`CtScriptRow`). §9.2B/§9.3 rule 6 (CE `<Hotkeys>` per record) is deferred.
+> - BugItGo explicit-pose recall reuses `teleport_recall_marker` with optional
+>   `x/y/z` (+`pitch/yaw/roll`) fields, exactly as §10.3 specifies.
 
 -----
 
@@ -45,7 +59,7 @@ Deliverables for the user:
 
 -----
 
-## 2. Decisions Already Made (do not re-litigate)
+## 2. Decisions Already Made
 
 | # | Decision |
 |---|----------|
@@ -59,7 +73,7 @@ Deliverables for the user:
 | D8 | Mailbox: **one new command `CMD_TELEPORT = 8`** with an op code, mirroring `CMD_SET_DEBUG_CAMERA`'s "request in `instanceAddr`" precedent. |
 | D9 | We never invoke `UCheatManager::BugIt` to *read* pose. Pose reads are our own reflection walk. BugItGo interop is formatting/parsing on top of our primitives (§10). |
 | D10 | Per CLAUDE.md: all new magic numbers/strings go in `Grimoire.h` (DLL) / the single constants file (UI); all UI strings in `en.axaml`; everything async UI-side; AOT-safe (source-gen JSON). |
-| D11 | Hotkeys: **CE distinguishes top-row digits from numpad digits** (`Ctrl+1` = VK 0x31 ≠ `Ctrl+Num1` = VK 0x61). The generators offer a **3-way scheme selector — Numpad (default) / Top-row / Both** (§9.3). Default is Numpad because ARPGs (e.g. Titan Quest-likes) already bind `Ctrl+1..3` for skills. If a user's game conflicts with both schemes, **the user re-binds inside CE themselves** — no in-app conflict detection, no further discussion. |
+| D11 | Hotkeys: **CE distinguishes top-row digits from numpad digits** (`Ctrl+1` = VK 0x31 ≠ `Ctrl+Num1` = VK 0x61). The generators offer a **3-way scheme selector — Numpad (default) / Top-row / Both** (§9.3). Default is Numpad because ARPGs (e.g. Titan Quest-likes) already bind `Ctrl+1..3` for skills. If a user's game conflicts with both schemes, **the user re-binds inside CE themselves** — no in-app conflict detection. |
 
 -----
 
@@ -540,7 +554,7 @@ Camera), records auto-deactivate:
 Both generators embed the op-code/offset table as comments so a user can
 audit the script (same courtesy as the Debug Camera script).
 
-### 9.3 Hotkey schemes (decision D11 — implement as written, do not re-discuss)
+### 9.3 Hotkey schemes (decision D11)
 
 CE treats top-row digit keys and numpad digit keys as **different virtual-key
 codes**: `1` (top row) = `0x31`, `Numpad 1` = `0x61` (`VK_NUMPAD1`). A
