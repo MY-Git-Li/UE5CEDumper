@@ -30,6 +30,38 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
+## Teleport — follow-ups (deferred / future research)
+
+Teleport shipped (Wirbel, build 1027-1043). Works where the possessed pawn is
+the visible character (SEED) and, via the deep-force, even on hard-cooked HD-2D
+titles (Octopath — character moves). Open items, all per-game / research-grade:
+
+- **Camera/POV doesn't follow on hard-cooked games (Octopath / SE HD-2D)** —
+  Effort: **M-L** · Risk: med. The deep-force moves the pawn's root
+  `ComponentToWorld`, but the camera tracks a separate child component
+  (SpringArm / CameraComponent) or follow-camera actor whose world transform we
+  never refresh — so the view stays put and can get **stuck unrecoverably**
+  (no in-game event re-syncs the view-target chain; a save reload / area
+  transition fixes it). Options, in order of cheapness: (1) invoke
+  `APlayerController::SetViewTargetWithBlend(pawn, 0)` to re-anchor (likely also
+  cooked out on these titles); (2) `APlayerCameraManager::SetGameCameraCutThisFrame()`
+  for an instant cut; (3) deep-force the follow-camera component's
+  `ComponentToWorld` too (need to *find* it — game-specific); (4) recompute
+  child world transforms (manual `UpdateChildTransforms` — native, no
+  reflection, hard). **Deferred**: no universal solution; a failed camera nudge
+  risks making the stuck-camera worse. In-app disclaimer covers it.
+- **Games that drive the visible character from a separate actor (TQ2)** —
+  Effort: **L** · Risk: med. External `SetActorLocation` on `PlayerController.Pawn`
+  provably moves it in memory but the rendered character is a different actor.
+  Needs per-game RE to find + move the real actor. Deferred. See
+  [lessons-learned.md](lessons-learned.md) "TQ2 verdict".
+- **Gamepad / mouse-extra-button hotkeys** — Effort: **M** · Risk: low.
+  Marker hotkey capture is keyboard-only (`RegisterHotKey`). Mouse extra buttons
+  + gamepad need low-level hooks / XInput polling ("record on all-released" per
+  the user's spec). Deferred until requested.
+
+-----
+
 ## Value Search — coverage + memory (build 923 plan)
 
 Dependency order was **V3-A → V3-B → V1a → V3-C → V2**; **all shipped** (V3-C build 949:
