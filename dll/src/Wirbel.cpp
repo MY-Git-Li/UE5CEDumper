@@ -468,6 +468,36 @@ bool InvokeSetActorLocation(uintptr_t pawn, const double xyz[3]) {
     return Invoke(pawn, fi, buf) == 0 && ReturnedTrue(fi, buf);
 }
 
+// Teleport via the ROOT COMPONENT's K2_SetWorldLocation (or K2_SetRelativeLocation
+// when not attached). Unlike a raw RelativeLocation write these run
+// UpdateComponentToWorld, so the cached world transform the renderer uses is
+// refreshed — needed for games (e.g. Octopath Traveler / SE HD-2D) that cook
+// AActor::K2_SetActorLocation OUT of reflection, leaving only the component-level
+// setters. Returns true if invoked OK.
+bool TeleportViaComponent(const Chain& c, const double xyz[3]) {
+    if (!c.root) return false;
+    uintptr_t rootClass = Ubel::GetClass(c.root);
+    bool attached = (c.attachParentOff >= 0) && ReadPtrAt(c.root, c.attachParentOff) != 0;
+    const char* names[] = { "K2_SetWorldLocation", "K2_SetRelativeLocation" };
+    for (const char* n : names) {
+        // K2_SetRelativeLocation only equals world space when not attached.
+        if (!attached || std::strcmp(n, "K2_SetWorldLocation") == 0) {
+            FunctionInfo fi;
+            if (!FindFunc(rootClass, n, fi) || fi.parmsSize <= 0) continue;
+            std::vector<uint8_t> buf(fi.parmsSize, 0);
+            if (!WriteVecParam(buf, fi, "NewLocation", xyz)) continue;
+            WriteBoolParam(buf, fi, "bSweep", false);
+            WriteBoolParam(buf, fi, "bTeleport", true);
+            if (Invoke(c.root, fi, buf) == 0 && ReturnedTrue(fi, buf)) {
+                LOG_INFO("Teleport: %s invoked OK on RootComponent 0x%llX -> (%.1f, %.1f, %.1f)",
+                         n, (unsigned long long)c.root, xyz[0], xyz[1], xyz[2]);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // Invoke AActor::K2_GetActorLocation → world-space FVector. Returns false when
 // the function / return param can't be resolved.
 bool GetActorWorld(uintptr_t pawn, double out[3]) {
@@ -539,11 +569,17 @@ int32_t TeleportPawnTo(const Chain& c, const double xyz[3], const double* destPy
                      "— raw-write fallback", fi.name.c_str());
         }
     } else {
-        LOG_WARN("Teleport: no K2_TeleportTo / K2_SetActorLocation on pawn class — "
-                 "raw-write fallback");
+        LOG_WARN("Teleport: no K2_TeleportTo / K2_SetActorLocation on pawn class "
+                 "(likely cooked out) — trying RootComponent setters");
     }
 
+    // Tier 1b: component-level K2_SetWorldLocation on the root. Runs
+    // UpdateComponentToWorld (the raw write below does NOT), so it actually
+    // moves what's rendered when the actor-level setters were cooked out.
     uint8_t tier = 1;
+    if (!moved && TeleportViaComponent(c, xyz))
+        moved = true;
+
     if (!moved) {
         tier = 2;
         uint8_t raw[24] = {};
@@ -551,7 +587,8 @@ int32_t TeleportPawnTo(const Chain& c, const double xyz[3], const double* destPy
         int32_t sz = (c.relLocSize >= 24) ? 24 : 12;
         if (!Macht::WriteBytes(c.root + static_cast<uintptr_t>(c.relLocOff), raw, sz))
             return TP_ERR_WRITE_FAILED;
-        LOG_WARN("Teleport: tier-2 raw RelativeLocation write (game may snap back)");
+        LOG_WARN("Teleport: tier-2 raw RelativeLocation write (no transform update "
+                 "— may not move the visual)");
     }
     if (tierOut) *tierOut = tier;
 
@@ -593,7 +630,8 @@ int32_t TeleportPawnTo(const Chain& c, const double xyz[3], const double* destPy
                  "forcing via CMC freeze%s", cur[0], cur[1], cur[2],
                  cmc ? "" : " (no CMC found)");
         SetCmcMode(cmc, 0);                          // MOVE_None — freeze physics
-        InvokeSetActorLocation(c.pawn, xyz);         // engine set while frozen
+        if (!InvokeSetActorLocation(c.pawn, xyz))    // engine actor set…
+            TeleportViaComponent(c, xyz);            // …else component setter (updates transform)
         if (!attached) {                              // raw write (world==relative)
             uint8_t raw[24] = {};
             WriteVec3(raw, c.relLocSize, xyz);
@@ -601,7 +639,8 @@ int32_t TeleportPawnTo(const Chain& c, const double xyz[3], const double* destPy
                               (c.relLocSize >= 24) ? 24 : 12);
         }
         SetCmcMode(cmc, 3);                          // MOVE_Falling — re-ground
-        InvokeSetActorLocation(c.pawn, xyz);         // re-assert after thaw
+        if (!InvokeSetActorLocation(c.pawn, xyz))    // re-assert after thaw
+            TeleportViaComponent(c, xyz);
         currentWorld(cur);
         if (dist3(cur, xyz) <= kReachedEps)
             LOG_INFO("Teleport: CMC-freeze force succeeded -> cur=(%.1f,%.1f,%.1f)",
