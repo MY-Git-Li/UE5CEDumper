@@ -555,51 +555,66 @@ int32_t TeleportPawnTo(const Chain& c, const double xyz[3], const double* destPy
     }
     if (tierOut) *tierOut = tier;
 
-    // Verify in WORLD space (K2_GetActorLocation — always world, unlike raw
-    // RelativeLocation which is parent-relative when the root is attached).
-    auto distToTarget = [&](const double w[3]) {
-        double dx = w[0] - xyz[0], dy = w[1] - xyz[1], dz = w[2] - xyz[2];
+    auto dist3 = [](const double a[3], const double b[3]) {
+        double dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
         return std::sqrt(dx * dx + dy * dy + dz * dz);
     };
     bool attached = (c.attachParentOff >= 0)
                     && ReadPtrAt(c.root, c.attachParentOff) != 0;
-    double worldAfter[3] = {};
-    bool gotWorld = GetActorWorld(c.pawn, worldAfter);
 
-    // Gated retry: if the actor is still far from the target after a tier-1
-    // invoke, the game's CharacterMovement is fighting the SetActorLocation
-    // (TQ2-class). Freeze the CMC (MOVE_None), set location, thaw to Falling so
-    // it re-grounds at the new spot. GATED on "first attempt didn't reach the
-    // target", so games where the plain move works (SEED) never hit this path.
+    // Estimate the actor's CURRENT world position to verify the move.
+    // When NOT attached, raw RelativeLocation IS world space — and
+    // K2_GetActorLocation has proven unreliable on some games (TQ2 returns
+    // (0,0,0)), so trust rawRel in that case. Only when attached do we need
+    // K2_GetActorLocation (rawRel would be parent-relative then).
+    auto currentWorld = [&](double out[3]) {
+        double rawRel[3] = {};
+        ReadVec3Mem(c.root + static_cast<uintptr_t>(c.relLocOff), c.relLocSize, rawRel);
+        double world[3] = {};
+        bool gotWorld = GetActorWorld(c.pawn, world);
+        if (attached && gotWorld) { out[0]=world[0]; out[1]=world[1]; out[2]=world[2]; }
+        else { out[0]=rawRel[0]; out[1]=rawRel[1]; out[2]=rawRel[2]; }
+    };
+
     constexpr double kReachedEps = 60.0;   // ~ capsule radius
-    if (moved && gotWorld && distToTarget(worldAfter) > kReachedEps) {
+    double cur[3] = {};
+    currentWorld(cur);
+
+    // Gated retry: a tier-1 invoke that "succeeded" but left the actor far from
+    // the target means the game's CharacterMovement is overriding
+    // SetActorLocation (TQ2-class). Freeze the CMC (MOVE_None), force the
+    // location BOTH ways (engine invoke + raw RelativeLocation write while
+    // frozen — valid since world==relative when not attached), then thaw to
+    // Falling so it re-grounds. GATED on "first attempt didn't reach target", so
+    // games where the plain move already works (SEED) never enter this path.
+    if (moved && dist3(cur, xyz) > kReachedEps) {
         uintptr_t cmc = GetCmc(c);
-        if (cmc) {
-            LOG_WARN("Teleport: actor didn't reach target (world=(%.1f,%.1f,%.1f)) — "
-                     "retrying with CMC MOVE_None bracket",
-                     worldAfter[0], worldAfter[1], worldAfter[2]);
-            SetCmcMode(cmc, 0);                       // MOVE_None — freeze physics
-            InvokeSetActorLocation(c.pawn, xyz);      // set while frozen
-            SetCmcMode(cmc, 3);                       // MOVE_Falling — re-ground
-            InvokeSetActorLocation(c.pawn, xyz);      // re-assert after thaw
-            if (GetActorWorld(c.pawn, worldAfter) && distToTarget(worldAfter) <= kReachedEps)
-                LOG_INFO("Teleport: MOVE_None bracket succeeded -> world=(%.1f,%.1f,%.1f)",
-                         worldAfter[0], worldAfter[1], worldAfter[2]);
-            else
-                LOG_WARN("Teleport: MOVE_None bracket still didn't stick "
-                         "(world=(%.1f,%.1f,%.1f)) — game likely uses a separate "
-                         "authoritative/visual actor for the character",
-                         worldAfter[0], worldAfter[1], worldAfter[2]);
+        LOG_WARN("Teleport: actor didn't reach target (cur=(%.1f,%.1f,%.1f)) — "
+                 "forcing via CMC freeze%s", cur[0], cur[1], cur[2],
+                 cmc ? "" : " (no CMC found)");
+        SetCmcMode(cmc, 0);                          // MOVE_None — freeze physics
+        InvokeSetActorLocation(c.pawn, xyz);         // engine set while frozen
+        if (!attached) {                              // raw write (world==relative)
+            uint8_t raw[24] = {};
+            WriteVec3(raw, c.relLocSize, xyz);
+            Macht::WriteBytes(c.root + static_cast<uintptr_t>(c.relLocOff), raw,
+                              (c.relLocSize >= 24) ? 24 : 12);
         }
+        SetCmcMode(cmc, 3);                          // MOVE_Falling — re-ground
+        InvokeSetActorLocation(c.pawn, xyz);         // re-assert after thaw
+        currentWorld(cur);
+        if (dist3(cur, xyz) <= kReachedEps)
+            LOG_INFO("Teleport: CMC-freeze force succeeded -> cur=(%.1f,%.1f,%.1f)",
+                     cur[0], cur[1], cur[2]);
+        else
+            LOG_WARN("Teleport: CMC-freeze force STILL didn't stick "
+                     "(cur=(%.1f,%.1f,%.1f)) — game drives the character from a "
+                     "separate authoritative actor; external SetActorLocation "
+                     "won't move it", cur[0], cur[1], cur[2]);
     }
 
-    double rawRel[3] = {};
-    ReadVec3Mem(c.root + static_cast<uintptr_t>(c.relLocOff), c.relLocSize, rawRel);
-    LOG_INFO("Teleport: post-move world=(%.1f, %.1f, %.1f) rawRelLoc=(%.1f, %.1f, %.1f) "
-             "target=(%.1f, %.1f, %.1f) attached=%d",
-             worldAfter[0], worldAfter[1], worldAfter[2],
-             rawRel[0], rawRel[1], rawRel[2],
-             xyz[0], xyz[1], xyz[2], attached ? 1 : 0);
+    LOG_INFO("Teleport: post-move cur=(%.1f, %.1f, %.1f) target=(%.1f, %.1f, %.1f) attached=%d",
+             cur[0], cur[1], cur[2], xyz[0], xyz[1], xyz[2], attached ? 1 : 0);
     return TP_OK;
 }
 
