@@ -498,6 +498,51 @@ bool TeleportViaComponent(const Chain& c, const double xyz[3]) {
     return false;
 }
 
+// Last-resort "deep force" for games that cook out EVERY K2 location setter
+// (SE HD-2D / Octopath): the renderer + CharacterMovement read the cached world
+// transform USceneComponent::ComponentToWorld, which a raw RelativeLocation
+// write does NOT refresh — and we can't reach UpdateComponentToWorld by
+// reflection. So scan a bounded window of the RootComponent for FVector(s)
+// holding the OLD world position and overwrite them with the target. The match
+// (3 consecutive floats/doubles all within `eps` of oldPos) is extremely
+// specific for large world coords, so false hits are near-impossible; the
+// component is the only object scanned. Only valid when not attached
+// (world == relative). Returns the number of vectors rewritten.
+int DeepForceWorldPos(const Chain& c, const double oldPos[3], const double target[3]) {
+    if (!c.root || c.relLocSize < 12) return 0;
+    // Skip if the old position is degenerate (origin) — would over-match.
+    if (std::fabs(oldPos[0]) + std::fabs(oldPos[1]) + std::fabs(oldPos[2]) < 1.0) return 0;
+
+    const bool isDouble = c.relLocSize >= 24;
+    const int  vsz  = isDouble ? 24 : 12;
+    const int  step = isDouble ? 8  : 4;
+    constexpr int kWindow = 0x400;             // USceneComponent/CapsuleComponent ≫ 1KB
+    constexpr double kEps2 = 100.0;            // (10 uu)² — tolerate ~1 frame of drift
+    uint8_t buf[kWindow];
+    if (!Macht::ReadBytesSafe(c.root, buf, kWindow)) return 0;
+
+    int rewrote = 0;
+    uint8_t rawTarget[24] = {};
+    WriteVec3(rawTarget, c.relLocSize, target);
+    for (int o = 0; o + vsz <= kWindow; o += step) {
+        double v[3];
+        ReadVec3Buf(buf + o, c.relLocSize, v);
+        double dx = v[0]-oldPos[0], dy = v[1]-oldPos[1], dz = v[2]-oldPos[2];
+        if (dx*dx + dy*dy + dz*dz <= kEps2) {
+            Macht::WriteBytes(c.root + static_cast<uintptr_t>(o), rawTarget, vsz);
+            rewrote++;
+        }
+    }
+    if (rewrote)
+        LOG_INFO("Teleport: deep-force rewrote %d world-transform vector(s) on "
+                 "RootComponent 0x%llX (no K2 setter available)",
+                 rewrote, (unsigned long long)c.root);
+    else
+        LOG_WARN("Teleport: deep-force found no ComponentToWorld vector matching "
+                 "the old position — visual may not move");
+    return rewrote;
+}
+
 // Invoke AActor::K2_GetActorLocation → world-space FVector. Returns false when
 // the function / return param can't be resolved.
 bool GetActorWorld(uintptr_t pawn, double out[3]) {
@@ -524,6 +569,12 @@ int32_t TeleportPawnTo(const Chain& c, const double xyz[3], const double* destPy
                        bool preferTeleportTo, uint8_t* tierOut) {
     uintptr_t pawnClass = Ubel::GetClass(c.pawn);
     bool moved = false;
+
+    // Capture the pre-move world position (RelativeLocation == world when the
+    // root isn't attached) so the deep-force fallback can locate the stale
+    // ComponentToWorld vector if every K2 setter turns out to be cooked out.
+    double oldPos[3] = {};
+    ReadVec3Mem(c.root + static_cast<uintptr_t>(c.relLocOff), c.relLocSize, oldPos);
 
     FunctionInfo fi;
     bool haveFn = FindFunc(pawnClass,
@@ -580,6 +631,8 @@ int32_t TeleportPawnTo(const Chain& c, const double xyz[3], const double* destPy
     if (!moved && TeleportViaComponent(c, xyz))
         moved = true;
 
+    bool attachedForWrite = (c.attachParentOff >= 0)
+                            && ReadPtrAt(c.root, c.attachParentOff) != 0;
     if (!moved) {
         tier = 2;
         uint8_t raw[24] = {};
@@ -589,6 +642,11 @@ int32_t TeleportPawnTo(const Chain& c, const double xyz[3], const double* destPy
             return TP_ERR_WRITE_FAILED;
         LOG_WARN("Teleport: tier-2 raw RelativeLocation write (no transform update "
                  "— may not move the visual)");
+        // Deep force: with no K2 setter, also rewrite the cached world transform
+        // (ComponentToWorld) so the renderer/CMC actually move. World==relative
+        // only when not attached.
+        if (!attachedForWrite)
+            DeepForceWorldPos(c, oldPos, xyz);
     }
     if (tierOut) *tierOut = tier;
 
