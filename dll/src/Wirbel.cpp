@@ -1,0 +1,909 @@
+// ============================================================
+// Wirbel — 維爾貝爾 (北部魔法隊小隊長 — pragmatic soldier)
+// Teleport: marker save/recall + cursor teleport (BugIt-style).
+//
+// Tier model (docs/teleport-spec.md §4):
+//   Tier 1 — invoke engine BlueprintCallable UFunctions through the game
+//            thread (Stark queue via UE5_CallProcessEventEx).
+//   Tier 2 — raw SEH property write fallback (RelativeLocation /
+//            ControlRotation) when reflection/invoke fails.
+//
+// Resolution chain (§5): GWorld → OwningGameInstance → LocalPlayers[0]
+// → PlayerController → Pawn → RootComponent. Every property name below
+// is declared on an ENGINE base class (AController / AActor /
+// USceneComponent), so the lookup is game- and version-agnostic.
+// Markers store coordinates + map name only — never object pointers;
+// the pawn is re-resolved on every operation (stale-pointer rule).
+// ============================================================
+
+#define LOG_CAT "WALK"
+#include "Sein.h"
+#include "Wirbel.h"
+#include "Grimoire.h"
+#include "Macht.h"
+#include "Aura.h"
+#include "Ubel.h"
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <mutex>
+#include <string>
+#include <vector>
+
+// Frieren exports reused internally (extern "C" must live at global scope).
+extern "C" int32_t   UE5_CallProcessEventEx(uintptr_t instance, uintptr_t ufunc,
+                                            uintptr_t params, uint32_t paramsSize);
+extern "C" uintptr_t UE5_FindInstanceOfClass(const char* className);
+extern uintptr_t g_cachedGWorld;   // &GWorld — deref once for UWorld*
+
+namespace {
+
+using Wirbel::Pose;
+using Wirbel::Marker;
+using namespace Wirbel;  // TeleportResult codes
+
+// Serialize whole operations: handlers are reachable from BOTH the Fern
+// pipe thread and the Mimic mailbox polling thread. One op at a time —
+// hotkey spam must never interleave two multi-step teleports.
+std::mutex s_opMutex;
+Marker s_markers[Grimoire::TELEPORT_SLOTS];
+
+bool IEquals(const std::string& a, const char* b) {
+    size_t bl = std::strlen(b);
+    if (a.size() != bl) return false;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (std::tolower(static_cast<unsigned char>(a[i]))
+            != std::tolower(static_cast<unsigned char>(b[i])))
+            return false;
+    return true;
+}
+
+// ---- low-level reads ----
+
+uintptr_t DerefWorld() {
+    if (!g_cachedGWorld) return 0;
+    uintptr_t w = 0;
+    if (!Macht::ReadSafe(g_cachedGWorld, w)) return 0;
+    return w;
+}
+
+uintptr_t ReadPtrAt(uintptr_t obj, int32_t off) {
+    if (!obj || off < 0) return 0;
+    uintptr_t v = 0;
+    Macht::ReadSafe(obj + static_cast<uintptr_t>(off), v);
+    return v;
+}
+
+// ---- FVector / FRotator width helpers ----
+// LWC rule (§5.3): the property/param size decides the width — 24 bytes
+// = 3×double (UE5.0+), 12 bytes = 3×float (UE4). Never keyed off version.
+
+void WriteVec3(uint8_t* dst, int32_t size, const double v[3]) {
+    if (size >= 24) {
+        std::memcpy(dst, v, 24);
+    } else {
+        float f[3] = { static_cast<float>(v[0]), static_cast<float>(v[1]),
+                       static_cast<float>(v[2]) };
+        std::memcpy(dst, f, 12);
+    }
+}
+
+void ReadVec3Buf(const uint8_t* src, int32_t size, double out[3]) {
+    if (size >= 24) {
+        std::memcpy(out, src, 24);
+    } else {
+        float f[3];
+        std::memcpy(f, src, 12);
+        out[0] = f[0]; out[1] = f[1]; out[2] = f[2];
+    }
+}
+
+bool ReadVec3Mem(uintptr_t addr, int32_t size, double out[3]) {
+    uint8_t raw[24] = {};
+    int32_t need = (size >= 24) ? 24 : 12;
+    if (!Macht::ReadBytesSafe(addr, raw, need)) return false;
+    ReadVec3Buf(raw, size, out);
+    return true;
+}
+
+// ---- UFunction lookup + param packing ----
+
+// Find a UFunction by name, walking the WHOLE class hierarchy. UFunctions
+// like K2_SetActorLocation / K2_TeleportTo / SetControlRotation are declared
+// on engine base classes (AActor / AController), several levels above the
+// game's concrete pawn/controller subclass — and Ubel::WalkFunctions only
+// enumerates a single UClass's OWN Children chain. So walk class → Super →
+// Super… until the function is found or the chain ends.
+bool FindFunc(uintptr_t classAddr, const char* name, FunctionInfo& out) {
+    if (!classAddr || !name) return false;
+    uintptr_t cls = classAddr;
+    for (int guard = 0; cls && guard < 64; ++guard) {
+        auto funcs = Ubel::WalkFunctions(cls);
+        for (const auto& f : funcs) {
+            if (IEquals(f.name, name)) { out = f; return true; }
+        }
+        uintptr_t super = 0;
+        if (!Macht::ReadSafe(cls + static_cast<uintptr_t>(DynOff::USTRUCT_SUPER), super)
+            || super == cls)
+            break;
+        cls = super;
+    }
+    return false;
+}
+
+const FunctionParam* FindParam(const FunctionInfo& fi, const char* name) {
+    for (const auto& p : fi.params)
+        if (IEquals(p.name, name)) return &p;
+    return nullptr;
+}
+
+const FunctionParam* FindReturnParam(const FunctionInfo& fi) {
+    for (const auto& p : fi.params)
+        if (p.isReturn) return &p;
+    return nullptr;
+}
+
+bool ParamFits(const std::vector<uint8_t>& buf, const FunctionParam* p, int32_t need) {
+    return p && p->offset >= 0
+        && p->offset + need <= static_cast<int32_t>(buf.size());
+}
+
+void WriteBoolParam(std::vector<uint8_t>& buf, const FunctionInfo& fi,
+                    const char* name, bool v) {
+    const FunctionParam* p = FindParam(fi, name);
+    if (ParamFits(buf, p, 1)) buf[p->offset] = v ? 1 : 0;
+}
+
+void WriteByteParam(std::vector<uint8_t>& buf, const FunctionInfo& fi,
+                    const char* name, uint8_t v) {
+    const FunctionParam* p = FindParam(fi, name);
+    if (ParamFits(buf, p, 1)) buf[p->offset] = v;
+}
+
+bool WriteVecParam(std::vector<uint8_t>& buf, const FunctionInfo& fi,
+                   const char* name, const double v[3]) {
+    const FunctionParam* p = FindParam(fi, name);
+    int32_t need = (p && p->size >= 24) ? 24 : 12;
+    if (!ParamFits(buf, p, need)) return false;
+    WriteVec3(buf.data() + p->offset, p->size, v);
+    return true;
+}
+
+bool ReadVecParam(const std::vector<uint8_t>& buf, const FunctionInfo& fi,
+                  const char* name, double out[3]) {
+    const FunctionParam* p = FindParam(fi, name);
+    int32_t need = (p && p->size >= 24) ? 24 : 12;
+    if (!ParamFits(buf, p, need)) return false;
+    ReadVec3Buf(buf.data() + p->offset, p->size, out);
+    return true;
+}
+
+bool WriteFloatParam(std::vector<uint8_t>& buf, const FunctionInfo& fi,
+                     const char* name, double v) {
+    const FunctionParam* p = FindParam(fi, name);
+    if (p && p->size == 8 && ParamFits(buf, p, 8)) {
+        std::memcpy(buf.data() + p->offset, &v, 8);
+        return true;
+    }
+    if (ParamFits(buf, p, 4)) {
+        float f = static_cast<float>(v);
+        std::memcpy(buf.data() + p->offset, &f, 4);
+        return true;
+    }
+    return false;
+}
+
+bool ReadFloatParam(const std::vector<uint8_t>& buf, const FunctionInfo& fi,
+                    const char* name, double& out) {
+    const FunctionParam* p = FindParam(fi, name);
+    if (p && p->size == 8 && ParamFits(buf, p, 8)) {
+        std::memcpy(&out, buf.data() + p->offset, 8);
+        return true;
+    }
+    if (ParamFits(buf, p, 4)) {
+        float f = 0;
+        std::memcpy(&f, buf.data() + p->offset, 4);
+        out = f;
+        return true;
+    }
+    return false;
+}
+
+bool ReadIntParam(const std::vector<uint8_t>& buf, const FunctionInfo& fi,
+                  const char* name, int32_t& out) {
+    const FunctionParam* p = FindParam(fi, name);
+    if (!ParamFits(buf, p, 4)) return false;
+    std::memcpy(&out, buf.data() + p->offset, 4);
+    return true;
+}
+
+void WritePtrParam(std::vector<uint8_t>& buf, const FunctionInfo& fi,
+                   const char* name, uintptr_t v) {
+    const FunctionParam* p = FindParam(fi, name);
+    if (ParamFits(buf, p, 8)) std::memcpy(buf.data() + p->offset, &v, 8);
+}
+
+// True when the function either has no boolean return or returned true.
+bool ReturnedTrue(const FunctionInfo& fi, const std::vector<uint8_t>& buf) {
+    const FunctionParam* rv = FindReturnParam(fi);
+    if (!rv || rv->offset < 0 || rv->offset >= static_cast<int32_t>(buf.size()))
+        return true;
+    return buf[rv->offset] != 0;
+}
+
+// Invoke through the game thread (Stark). NEVER the static-native direct
+// shortcut here — traces read the physics scene and teleports mutate actor
+// state; both must run on the game thread (§11 caveat 1-2).
+int32_t Invoke(uintptr_t instance, const FunctionInfo& fi, std::vector<uint8_t>& buf) {
+    if (buf.empty()) buf.resize(1, 0);  // never hand ProcessEvent a null buffer
+    return UE5_CallProcessEventEx(instance, fi.address,
+                                  reinterpret_cast<uintptr_t>(buf.data()),
+                                  static_cast<uint32_t>(buf.size()));
+}
+
+// Extract a world-space point from a packed FHitResult out-param using the
+// param's reflected sub-field layout. Prefers ImpactPoint, falls back to
+// Location. The leading bBlockingHit/bStartPenetrating bitfields make any
+// assumed member offset wrong — reflection only (§11 caveat 3).
+bool ExtractHitPoint(const std::vector<uint8_t>& buf, const FunctionParam& hr,
+                     double out[3]) {
+    const FunctionParam::StructSubField* best = nullptr;
+    for (const auto& sf : hr.structFields)
+        if (IEquals(sf.name, "ImpactPoint")) { best = &sf; break; }
+    if (!best) {
+        for (const auto& sf : hr.structFields)
+            if (IEquals(sf.name, "Location")) { best = &sf; break; }
+    }
+    if (!best || best->offset < 0 || hr.offset < 0) return false;
+    int32_t need = (best->size >= 24) ? 24 : 12;
+    int32_t at = hr.offset + best->offset;
+    if (at + need > static_cast<int32_t>(buf.size())) return false;
+    ReadVec3Buf(buf.data() + at, best->size, out);
+    return true;
+}
+
+// ---- resolution chain (§5) ----
+
+struct Chain {
+    uintptr_t world = 0, pc = 0, pawn = 0, root = 0;
+    int32_t relLocOff = -1, relLocSize = 0;       // USceneComponent.RelativeLocation
+    int32_t attachParentOff = -1;                  // USceneComponent.AttachParent
+    int32_t ctrlRotOff = -1, ctrlRotSize = 0;      // AController.ControlRotation
+};
+
+// Resolve the LOCAL PlayerController: engine chain first, instance-scan
+// fallback (prefer the PC whose UPlayer* Player field is non-null).
+uintptr_t ResolveLocalPC(uintptr_t world) {
+    do {
+        if (!world) break;
+        uintptr_t worldClass = Ubel::GetClass(world);
+        int32_t giOff = Ubel::FindFieldOffset(worldClass, "OwningGameInstance",
+                                              "GameInstance", nullptr, "ObjectProperty");
+        uintptr_t gi = ReadPtrAt(world, giOff);
+        if (!gi) break;
+        uintptr_t giClass = Ubel::GetClass(gi);
+        int32_t lpOff = Ubel::FindFieldOffset(giClass, "LocalPlayers", "LocalPlayers",
+                                              nullptr, "ArrayProperty");
+        if (lpOff < 0) break;
+        Macht::TArrayView arr;
+        if (!Macht::ReadTArray(gi + static_cast<uintptr_t>(lpOff), arr) || arr.Count <= 0)
+            break;
+        uintptr_t lp = Macht::ReadTArrayElement(arr, 0);
+        if (!lp) break;
+        uintptr_t lpClass = Ubel::GetClass(lp);
+        int32_t pcOff = Ubel::FindFieldOffset(lpClass, "PlayerController",
+                                              "PlayerController", nullptr, "ObjectProperty");
+        uintptr_t pc = ReadPtrAt(lp, pcOff);
+        if (pc) {
+            LOG_INFO("Teleport: local PC 0x%llX via GWorld chain",
+                     (unsigned long long)pc);
+            return pc;
+        }
+    } while (false);
+
+    auto rset = Aura::FindInstancesByClass("PlayerController", false, 100);
+    uintptr_t firstNonCdo = 0;
+    for (const auto& r : rset.results) {
+        if (!r.addr || r.name.find("Default__") != std::string::npos) continue;
+        if (!firstNonCdo) firstNonCdo = r.addr;
+        uintptr_t cls = Ubel::GetClass(r.addr);
+        int32_t playerOff = Ubel::FindFieldOffset(cls, "Player", "Player",
+                                                  "Controller", "ObjectProperty");
+        if (playerOff >= 0 && ReadPtrAt(r.addr, playerOff)) {
+            LOG_INFO("Teleport: local PC 0x%llX via instance scan (Player set)",
+                     (unsigned long long)r.addr);
+            return r.addr;
+        }
+    }
+    if (firstNonCdo)
+        LOG_WARN("Teleport: PC 0x%llX via instance scan WITHOUT Player check",
+                 (unsigned long long)firstNonCdo);
+    return firstNonCdo;
+}
+
+// §5.6: when the Debug Camera is active the LocalPlayer's controller IS the
+// DebugCameraController (pawnless). Hop to OriginalControllerRef so
+// "fly somewhere with debug camera → save marker" works naturally.
+uintptr_t HopThroughDebugCamera(uintptr_t pc) {
+    if (!pc) return pc;
+    uintptr_t cls = Ubel::GetClass(pc);
+    std::string clsName = Ubel::GetName(cls);
+    if (clsName.find("DebugCameraController") == std::string::npos) return pc;
+    int32_t origOff = Ubel::FindFieldOffset(cls, "OriginalControllerRef",
+                                            "OriginalController", nullptr, "ObjectProperty");
+    uintptr_t orig = ReadPtrAt(pc, origOff);
+    if (orig) {
+        LOG_INFO("Teleport: hopped DebugCameraController 0x%llX -> original PC 0x%llX",
+                 (unsigned long long)pc, (unsigned long long)orig);
+        return orig;
+    }
+    return pc;
+}
+
+uintptr_t ResolvePawn(uintptr_t pc) {
+    uintptr_t cls = Ubel::GetClass(pc);
+    uintptr_t pawn = ReadPtrAt(pc, Ubel::FindFieldOffset(cls, "Pawn"));
+    if (pawn) return pawn;
+    return ReadPtrAt(pc, Ubel::FindFieldOffset(cls, "AcknowledgedPawn"));
+}
+
+int32_t ResolveChain(Chain& c) {
+    c = Chain{};
+    c.world = DerefWorld();
+    if (!c.world) return TP_ERR_NOT_INIT;
+
+    c.pc = ResolveLocalPC(c.world);
+    if (!c.pc) return TP_ERR_NO_CONTROLLER;
+    c.pc = HopThroughDebugCamera(c.pc);
+
+    c.pawn = ResolvePawn(c.pc);
+    if (!c.pawn) return TP_ERR_NO_PAWN;
+
+    uintptr_t pawnClass = Ubel::GetClass(c.pawn);
+    int32_t rootOff = Ubel::FindFieldOffset(pawnClass, "RootComponent",
+                                            "RootComponent", nullptr, "ObjectProperty");
+    c.root = ReadPtrAt(c.pawn, rootOff);
+    if (!c.root) return TP_ERR_REFLECTION;
+
+    uintptr_t rootClass = Ubel::GetClass(c.root);
+    FieldInfo fi{};
+    if (!Ubel::FindField(rootClass, "RelativeLocation", nullptr, nullptr, nullptr, fi))
+        return TP_ERR_REFLECTION;
+    c.relLocOff = fi.Offset;
+    c.relLocSize = fi.Size;
+    c.attachParentOff = Ubel::FindFieldOffset(rootClass, "AttachParent");
+
+    uintptr_t pcClass = Ubel::GetClass(c.pc);
+    if (Ubel::FindField(pcClass, "ControlRotation", nullptr, nullptr, nullptr, fi)) {
+        c.ctrlRotOff = fi.Offset;
+        c.ctrlRotSize = fi.Size;
+    }
+    return TP_OK;
+}
+
+void CopyMapName(uintptr_t world, char* buf, int32_t cap) {
+    if (!buf || cap <= 0) return;
+    std::string mn = world ? Ubel::GetName(world) : std::string();
+    size_t n = (std::min)(mn.size(), static_cast<size_t>(cap - 1));
+    std::memcpy(buf, mn.c_str(), n);
+    buf[n] = '\0';
+}
+
+// ---- pose read (§5.4) ----
+
+int32_t GetPoseImpl(Pose& out, char* mapName, int32_t mapNameCap, uint8_t* outSource) {
+    Chain c;
+    int32_t rc = ResolveChain(c);
+    if (rc != TP_OK) return rc;
+
+    if (outSource) *outSource = 0;
+    double xyz[3] = {};
+    bool got = false;
+
+    bool attached = (c.attachParentOff >= 0) && ReadPtrAt(c.root, c.attachParentOff) != 0;
+    if (attached) {
+        // RelativeLocation is parent-relative on attached pawns — ask the
+        // engine for world space. Failure degrades to the raw read (better
+        // an approximate display than an error).
+        FunctionInfo fi;
+        if (FindFunc(Ubel::GetClass(c.pawn), "K2_GetActorLocation", fi)
+            && fi.parmsSize > 0) {
+            std::vector<uint8_t> buf(fi.parmsSize, 0);
+            const FunctionParam* rv = FindReturnParam(fi);
+            if (rv && Invoke(c.pawn, fi, buf) == 0
+                && ParamFits(buf, rv, (rv->size >= 24) ? 24 : 12)) {
+                ReadVec3Buf(buf.data() + rv->offset, rv->size, xyz);
+                got = true;
+                if (outSource) *outSource = 1;
+            }
+        }
+        if (!got)
+            LOG_WARN("Teleport: attached pawn but K2_GetActorLocation failed — "
+                     "falling back to RelativeLocation (parent-relative!)");
+    }
+    if (!got && !ReadVec3Mem(c.root + static_cast<uintptr_t>(c.relLocOff),
+                             c.relLocSize, xyz))
+        return TP_ERR_REFLECTION;
+
+    double pyr[3] = {};
+    if (c.ctrlRotOff >= 0)
+        ReadVec3Mem(c.pc + static_cast<uintptr_t>(c.ctrlRotOff), c.ctrlRotSize, pyr);
+
+    out.X = xyz[0]; out.Y = xyz[1]; out.Z = xyz[2];
+    out.Pitch = pyr[0]; out.Yaw = pyr[1]; out.Roll = pyr[2];
+    CopyMapName(c.world, mapName, mapNameCap);
+    return TP_OK;
+}
+
+uintptr_t GetCmc(const Chain& c) {
+    int32_t cmOff = Ubel::FindFieldOffset(Ubel::GetClass(c.pawn), "CharacterMovement",
+                                          "CharacterMovement", nullptr, "ObjectProperty");
+    return ReadPtrAt(c.pawn, cmOff);
+}
+
+// Set UCharacterMovementComponent movement mode (MOVE_None=0 … MOVE_Falling=3).
+// BlueprintCallable; "NewMovementMode" is a TEnumAsByte (1 byte). Best-effort.
+void SetCmcMode(uintptr_t cmc, uint8_t mode) {
+    if (!cmc) return;
+    FunctionInfo fi;
+    if (!FindFunc(Ubel::GetClass(cmc), "SetMovementMode", fi)) return;
+    std::vector<uint8_t> buf((std::max<size_t>)(fi.parmsSize, 1), 0);
+    WriteByteParam(buf, fi, "NewMovementMode", mode);
+    Invoke(cmc, fi, buf);
+}
+
+// Pack + invoke AActor::K2_SetActorLocation(target, bSweep=false, bTeleport=true).
+// Returns true when the invoke ran and reported success.
+bool InvokeSetActorLocation(uintptr_t pawn, const double xyz[3]) {
+    FunctionInfo fi;
+    if (!FindFunc(Ubel::GetClass(pawn), "K2_SetActorLocation", fi) || fi.parmsSize <= 0)
+        return false;
+    std::vector<uint8_t> buf(fi.parmsSize, 0);
+    if (!WriteVecParam(buf, fi, "NewLocation", xyz)) return false;
+    WriteBoolParam(buf, fi, "bSweep", false);
+    WriteBoolParam(buf, fi, "bTeleport", true);
+    return Invoke(pawn, fi, buf) == 0 && ReturnedTrue(fi, buf);
+}
+
+// Teleport via the ROOT COMPONENT's K2_SetWorldLocation (or K2_SetRelativeLocation
+// when not attached). Unlike a raw RelativeLocation write these run
+// UpdateComponentToWorld, so the cached world transform the renderer uses is
+// refreshed — needed for games (e.g. Octopath Traveler / SE HD-2D) that cook
+// AActor::K2_SetActorLocation OUT of reflection, leaving only the component-level
+// setters. Returns true if invoked OK.
+bool TeleportViaComponent(const Chain& c, const double xyz[3]) {
+    if (!c.root) return false;
+    uintptr_t rootClass = Ubel::GetClass(c.root);
+    bool attached = (c.attachParentOff >= 0) && ReadPtrAt(c.root, c.attachParentOff) != 0;
+    const char* names[] = { "K2_SetWorldLocation", "K2_SetRelativeLocation" };
+    for (const char* n : names) {
+        // K2_SetRelativeLocation only equals world space when not attached.
+        if (!attached || std::strcmp(n, "K2_SetWorldLocation") == 0) {
+            FunctionInfo fi;
+            if (!FindFunc(rootClass, n, fi) || fi.parmsSize <= 0) continue;
+            std::vector<uint8_t> buf(fi.parmsSize, 0);
+            if (!WriteVecParam(buf, fi, "NewLocation", xyz)) continue;
+            WriteBoolParam(buf, fi, "bSweep", false);
+            WriteBoolParam(buf, fi, "bTeleport", true);
+            if (Invoke(c.root, fi, buf) == 0 && ReturnedTrue(fi, buf)) {
+                LOG_INFO("Teleport: %s invoked OK on RootComponent 0x%llX -> (%.1f, %.1f, %.1f)",
+                         n, (unsigned long long)c.root, xyz[0], xyz[1], xyz[2]);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Invoke AActor::K2_GetActorLocation → world-space FVector. Returns false when
+// the function / return param can't be resolved.
+bool GetActorWorld(uintptr_t pawn, double out[3]) {
+    FunctionInfo fi;
+    if (!FindFunc(Ubel::GetClass(pawn), "K2_GetActorLocation", fi) || fi.parmsSize <= 0)
+        return false;
+    std::vector<uint8_t> buf(fi.parmsSize, 0);
+    const FunctionParam* rv = FindReturnParam(fi);
+    if (!rv || Invoke(pawn, fi, buf) != 0) return false;
+    int32_t need = (rv->size >= 24) ? 24 : 12;
+    if (rv->offset < 0 || rv->offset + need > static_cast<int32_t>(buf.size())) return false;
+    ReadVec3Buf(buf.data() + rv->offset, rv->size, out);
+    return true;
+}
+
+// ---- teleport write (§5.5) ----
+
+// Move the pawn to xyz. Tier 1 = invoke (preferTeleportTo: K2_TeleportTo with
+// FindTeleportSpot adjust; else K2_SetActorLocation bSweep=false bTeleport=true
+// for an exact landing). Tier 2 = raw RelativeLocation write.
+// destPyr (nullable) is only consumed by the K2_TeleportTo DestRotation param;
+// rotation restore for the recall path happens separately in SetRotation.
+int32_t TeleportPawnTo(const Chain& c, const double xyz[3], const double* destPyr,
+                       bool preferTeleportTo, uint8_t* tierOut) {
+    uintptr_t pawnClass = Ubel::GetClass(c.pawn);
+    bool moved = false;
+
+    FunctionInfo fi;
+    bool haveFn = FindFunc(pawnClass,
+                           preferTeleportTo ? "K2_TeleportTo" : "K2_SetActorLocation", fi);
+    if (!haveFn)
+        haveFn = FindFunc(pawnClass,
+                          preferTeleportTo ? "K2_SetActorLocation" : "K2_TeleportTo", fi);
+
+    if (haveFn && fi.parmsSize > 0) {
+        std::vector<uint8_t> buf(fi.parmsSize, 0);
+        bool isTeleportTo = IEquals(fi.name, "K2_TeleportTo");
+        bool packed;
+        if (isTeleportTo) {
+            packed = WriteVecParam(buf, fi, "DestLocation", xyz);
+            double pyr[3] = {};
+            if (destPyr) {
+                std::memcpy(pyr, destPyr, sizeof(pyr));
+            } else if (c.ctrlRotOff >= 0) {
+                // keep current facing
+                ReadVec3Mem(c.pc + static_cast<uintptr_t>(c.ctrlRotOff),
+                            c.ctrlRotSize, pyr);
+            }
+            WriteVecParam(buf, fi, "DestRotation", pyr);
+        } else {
+            packed = WriteVecParam(buf, fi, "NewLocation", xyz);
+            WriteBoolParam(buf, fi, "bSweep", false);
+            WriteBoolParam(buf, fi, "bTeleport", true);
+        }
+        if (packed) {
+            int32_t r = Invoke(c.pawn, fi, buf);
+            if (r == 0 && ReturnedTrue(fi, buf)) {
+                moved = true;
+                LOG_INFO("Teleport: %s invoked OK on pawn 0x%llX -> (%.1f, %.1f, %.1f)",
+                         fi.name.c_str(), (unsigned long long)c.pawn,
+                         xyz[0], xyz[1], xyz[2]);
+            } else {
+                LOG_WARN("Teleport: %s %s (r=%d, parmsSize=%u) — trying raw-write fallback",
+                         fi.name.c_str(),
+                         r == 0 ? "returned false" : "invoke failed", r, fi.parmsSize);
+            }
+        } else {
+            LOG_WARN("Teleport: %s param-pack failed (couldn't locate location param) "
+                     "— raw-write fallback", fi.name.c_str());
+        }
+    } else {
+        LOG_WARN("Teleport: no K2_TeleportTo / K2_SetActorLocation on pawn class "
+                 "(likely cooked out) — trying RootComponent setters");
+    }
+
+    // Tier 1b: component-level K2_SetWorldLocation on the root. Runs
+    // UpdateComponentToWorld (the raw write below does NOT), so it actually
+    // moves what's rendered when the actor-level setters were cooked out.
+    uint8_t tier = 1;
+    if (!moved && TeleportViaComponent(c, xyz))
+        moved = true;
+
+    if (!moved) {
+        tier = 2;
+        uint8_t raw[24] = {};
+        WriteVec3(raw, c.relLocSize, xyz);
+        int32_t sz = (c.relLocSize >= 24) ? 24 : 12;
+        if (!Macht::WriteBytes(c.root + static_cast<uintptr_t>(c.relLocOff), raw, sz))
+            return TP_ERR_WRITE_FAILED;
+        LOG_WARN("Teleport: tier-2 raw RelativeLocation write (no transform update "
+                 "— may not move the visual)");
+    }
+    if (tierOut) *tierOut = tier;
+
+    auto dist3 = [](const double a[3], const double b[3]) {
+        double dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+        return std::sqrt(dx * dx + dy * dy + dz * dz);
+    };
+    bool attached = (c.attachParentOff >= 0)
+                    && ReadPtrAt(c.root, c.attachParentOff) != 0;
+
+    // Estimate the actor's CURRENT world position to verify the move.
+    // When NOT attached, raw RelativeLocation IS world space — and
+    // K2_GetActorLocation has proven unreliable on some games (TQ2 returns
+    // (0,0,0)), so trust rawRel in that case. Only when attached do we need
+    // K2_GetActorLocation (rawRel would be parent-relative then).
+    auto currentWorld = [&](double out[3]) {
+        double rawRel[3] = {};
+        ReadVec3Mem(c.root + static_cast<uintptr_t>(c.relLocOff), c.relLocSize, rawRel);
+        double world[3] = {};
+        bool gotWorld = GetActorWorld(c.pawn, world);
+        if (attached && gotWorld) { out[0]=world[0]; out[1]=world[1]; out[2]=world[2]; }
+        else { out[0]=rawRel[0]; out[1]=rawRel[1]; out[2]=rawRel[2]; }
+    };
+
+    constexpr double kReachedEps = 60.0;   // ~ capsule radius
+    double cur[3] = {};
+    currentWorld(cur);
+
+    // Gated retry: a tier-1 invoke that "succeeded" but left the actor far from
+    // the target means the game's CharacterMovement is overriding
+    // SetActorLocation (TQ2-class). Freeze the CMC (MOVE_None), force the
+    // location BOTH ways (engine invoke + raw RelativeLocation write while
+    // frozen — valid since world==relative when not attached), then thaw to
+    // Falling so it re-grounds. GATED on "first attempt didn't reach target", so
+    // games where the plain move already works (SEED) never enter this path.
+    if (moved && dist3(cur, xyz) > kReachedEps) {
+        uintptr_t cmc = GetCmc(c);
+        LOG_WARN("Teleport: actor didn't reach target (cur=(%.1f,%.1f,%.1f)) — "
+                 "forcing via CMC freeze%s", cur[0], cur[1], cur[2],
+                 cmc ? "" : " (no CMC found)");
+        SetCmcMode(cmc, 0);                          // MOVE_None — freeze physics
+        if (!InvokeSetActorLocation(c.pawn, xyz))    // engine actor set…
+            TeleportViaComponent(c, xyz);            // …else component setter (updates transform)
+        if (!attached) {                              // raw write (world==relative)
+            uint8_t raw[24] = {};
+            WriteVec3(raw, c.relLocSize, xyz);
+            Macht::WriteBytes(c.root + static_cast<uintptr_t>(c.relLocOff), raw,
+                              (c.relLocSize >= 24) ? 24 : 12);
+        }
+        SetCmcMode(cmc, 3);                          // MOVE_Falling — re-ground
+        if (!InvokeSetActorLocation(c.pawn, xyz))    // re-assert after thaw
+            TeleportViaComponent(c, xyz);
+        currentWorld(cur);
+        if (dist3(cur, xyz) <= kReachedEps)
+            LOG_INFO("Teleport: CMC-freeze force succeeded -> cur=(%.1f,%.1f,%.1f)",
+                     cur[0], cur[1], cur[2]);
+        else
+            LOG_WARN("Teleport: CMC-freeze force STILL didn't stick "
+                     "(cur=(%.1f,%.1f,%.1f)) — game drives the character from a "
+                     "separate authoritative actor; external SetActorLocation "
+                     "won't move it", cur[0], cur[1], cur[2]);
+    }
+
+    LOG_INFO("Teleport: post-move cur=(%.1f, %.1f, %.1f) target=(%.1f, %.1f, %.1f) attached=%d",
+             cur[0], cur[1], cur[2], xyz[0], xyz[1], xyz[2], attached ? 1 : 0);
+    return TP_OK;
+}
+
+// Restore Pitch/Yaw/Roll. Invoke AController::SetControlRotation; raw-write
+// ControlRotation as fallback (known-safe — the PC re-consumes it per frame).
+void SetRotation(const Chain& c, const double pyr[3]) {
+    FunctionInfo fi;
+    if (FindFunc(Ubel::GetClass(c.pc), "SetControlRotation", fi) && fi.parmsSize > 0) {
+        std::vector<uint8_t> buf(fi.parmsSize, 0);
+        if (WriteVecParam(buf, fi, "NewRotation", pyr)
+            && Invoke(c.pc, fi, buf) == 0)
+            return;
+    }
+    if (c.ctrlRotOff >= 0) {
+        uint8_t raw[24] = {};
+        WriteVec3(raw, c.ctrlRotSize, pyr);
+        Macht::WriteBytes(c.pc + static_cast<uintptr_t>(c.ctrlRotOff), raw,
+                          (c.ctrlRotSize >= 24) ? 24 : 12);
+    }
+}
+
+// Settle the pawn after a teleport so it actually stays put. Two best-effort
+// steps, each independently skipped when unavailable:
+//   (1) AController::StopMovement — aborts an active move order / path
+//       following. Without this, click-to-move ARPGs (Titan Quest-likes)
+//       immediately walk the pawn back to its commanded destination, so the
+//       teleport "does nothing" even though K2_SetActorLocation succeeded.
+//   (2) UCharacterMovementComponent::StopMovementImmediately — zeroes
+//       conserved velocity (e.g. fall speed) on Character pawns.
+void StopMovement(const Chain& c) {
+    FunctionInfo pcStop;
+    if (FindFunc(Ubel::GetClass(c.pc), "StopMovement", pcStop)) {
+        std::vector<uint8_t> b((std::max<size_t>)(pcStop.parmsSize, 1), 0);
+        Invoke(c.pc, pcStop, b);
+        LOG_INFO("Teleport: AController::StopMovement invoked on PC 0x%llX",
+                 (unsigned long long)c.pc);
+    }
+
+    uintptr_t pawnClass = Ubel::GetClass(c.pawn);
+    int32_t cmOff = Ubel::FindFieldOffset(pawnClass, "CharacterMovement",
+                                          "CharacterMovement", nullptr, "ObjectProperty");
+    uintptr_t cm = ReadPtrAt(c.pawn, cmOff);
+    if (!cm) {
+        LOG_INFO("Teleport: no CharacterMovement on pawn (skip velocity reset)");
+        return;
+    }
+    FunctionInfo fi;
+    if (!FindFunc(Ubel::GetClass(cm), "StopMovementImmediately", fi)) return;
+    std::vector<uint8_t> buf((std::max<size_t>)(fi.parmsSize, 1), 0);
+    Invoke(cm, fi, buf);
+    LOG_INFO("Teleport: StopMovementImmediately invoked on CMC 0x%llX",
+             (unsigned long long)cm);
+}
+
+int32_t RecallTo(const Pose& p, bool restoreRot, uint8_t* tierOut) {
+    Chain c;
+    int32_t rc = ResolveChain(c);
+    if (rc != TP_OK) return rc;
+
+    double xyz[3] = { p.X, p.Y, p.Z };
+    double pyr[3] = { p.Pitch, p.Yaw, p.Roll };
+    rc = TeleportPawnTo(c, xyz, restoreRot ? pyr : nullptr,
+                        /*preferTeleportTo=*/false, tierOut);
+    if (rc != TP_OK) return rc;
+    if (restoreRot) SetRotation(c, pyr);
+    StopMovement(c);
+    return TP_OK;
+}
+
+} // namespace
+
+namespace Wirbel {
+
+int32_t GetPose(Pose& out, char* mapName, int32_t mapNameCap, uint8_t* outSource) {
+    std::lock_guard<std::mutex> lock(s_opMutex);
+    return GetPoseImpl(out, mapName, mapNameCap, outSource);
+}
+
+int32_t SaveMarker(int32_t slot) {
+    std::lock_guard<std::mutex> lock(s_opMutex);
+    if (slot < 0 || slot >= Grimoire::TELEPORT_SLOTS) return TP_ERR_EMPTY_MARKER;
+    Marker m{};
+    int32_t rc = GetPoseImpl(m.P, m.MapName, sizeof(m.MapName), nullptr);
+    if (rc != TP_OK) return rc;
+    m.Valid = true;
+    s_markers[slot] = m;
+    LOG_INFO("Teleport: marker %d saved (%.1f, %.1f, %.1f) map='%s'",
+             slot, m.P.X, m.P.Y, m.P.Z, m.MapName);
+    return TP_OK;
+}
+
+int32_t RecallMarker(int32_t slot, bool force, uint8_t* tierOut) {
+    std::lock_guard<std::mutex> lock(s_opMutex);
+    if (slot < 0 || slot >= Grimoire::TELEPORT_SLOTS) return TP_ERR_EMPTY_MARKER;
+    if (!s_markers[slot].Valid) return TP_ERR_EMPTY_MARKER;
+    Marker m = s_markers[slot];
+
+    if (!force) {
+        // Cross-map recall = void fall / unloaded streaming cell (§11 caveat 5).
+        char cur[Grimoire::TELEPORT_MAPNAME_CAP] = {};
+        CopyMapName(DerefWorld(), cur, sizeof(cur));
+        if (!IEquals(std::string(cur), m.MapName)) {
+            LOG_WARN("Teleport: recall %d refused — map '%s' != marker map '%s'",
+                     slot, cur, m.MapName);
+            return TP_ERR_MAP_MISMATCH;
+        }
+    }
+    int32_t rc = RecallTo(m.P, /*restoreRot=*/true, tierOut);
+    LOG_INFO("Teleport: recall %d -> rc=%d", slot, rc);
+    return rc;
+}
+
+int32_t RecallExplicit(const Pose& pose, bool hasRot, uint8_t* tierOut) {
+    std::lock_guard<std::mutex> lock(s_opMutex);
+    int32_t rc = RecallTo(pose, hasRot, tierOut);
+    LOG_INFO("Teleport: explicit recall (%.1f, %.1f, %.1f) rot=%d -> rc=%d",
+             pose.X, pose.Y, pose.Z, hasRot ? 1 : 0, rc);
+    return rc;
+}
+
+int32_t TeleportToCursor(double zOffset, int32_t traceChannel,
+                         bool fallbackToCenter, Pose* outHit,
+                         uint8_t* tierOut, bool* outUsedCenter) {
+    std::lock_guard<std::mutex> lock(s_opMutex);
+    Chain c;
+    int32_t rc = ResolveChain(c);
+    if (rc != TP_OK) return rc;
+
+    uintptr_t pcClass = Ubel::GetClass(c.pc);
+    FunctionInfo fi;
+
+    // 1. Mouse position (screen-space floats in every UE version).
+    double mx = 0, my = 0;
+    bool haveMouse = false;
+    if (FindFunc(pcClass, "GetMousePosition", fi) && fi.parmsSize > 0) {
+        std::vector<uint8_t> buf(fi.parmsSize, 0);
+        if (Invoke(c.pc, fi, buf) == 0 && ReturnedTrue(fi, buf)) {
+            haveMouse = ReadFloatParam(buf, fi, "LocationX", mx)
+                     && ReadFloatParam(buf, fi, "LocationY", my);
+        }
+    }
+    bool usedCenter = false;
+    if (!haveMouse) {
+        if (!fallbackToCenter) return TP_ERR_NO_CURSOR;
+        if (FindFunc(pcClass, "GetViewportSize", fi) && fi.parmsSize > 0) {
+            std::vector<uint8_t> buf(fi.parmsSize, 0);
+            int32_t sx = 0, sy = 0;
+            if (Invoke(c.pc, fi, buf) == 0
+                && ReadIntParam(buf, fi, "SizeX", sx)
+                && ReadIntParam(buf, fi, "SizeY", sy)
+                && sx > 0 && sy > 0) {
+                mx = sx / 2.0;
+                my = sy / 2.0;
+                usedCenter = true;
+            }
+        }
+        if (!usedCenter) return TP_ERR_NO_CURSOR;
+    }
+    if (outUsedCenter) *outUsedCenter = usedCenter;
+
+    // 2. Hit test. Cursor-channel trace first (only meaningful when the game
+    //    drives a real cursor); deproject + line trace as the fallback ray.
+    double impact[3] = {};
+    bool haveHit = false;
+    if (!usedCenter && FindFunc(pcClass, "GetHitResultUnderCursorByChannel", fi)
+        && fi.parmsSize > 0) {
+        std::vector<uint8_t> buf(fi.parmsSize, 0);
+        WriteByteParam(buf, fi, "TraceChannel", static_cast<uint8_t>(traceChannel));
+        WriteBoolParam(buf, fi, "bTraceComplex", true);
+        const FunctionParam* hr = FindParam(fi, "HitResult");
+        if (hr && Invoke(c.pc, fi, buf) == 0 && ReturnedTrue(fi, buf))
+            haveHit = ExtractHitPoint(buf, *hr, impact);
+    }
+    if (!haveHit) {
+        if (!FindFunc(pcClass, "DeprojectScreenPositionToWorld", fi)
+            || fi.parmsSize <= 0)
+            return TP_ERR_REFLECTION;
+        std::vector<uint8_t> buf(fi.parmsSize, 0);
+        WriteFloatParam(buf, fi, "ScreenX", mx);
+        WriteFloatParam(buf, fi, "ScreenY", my);
+        double loc[3] = {}, dir[3] = {};
+        if (Invoke(c.pc, fi, buf) != 0 || !ReturnedTrue(fi, buf)
+            || !ReadVecParam(buf, fi, "WorldLocation", loc)
+            || !ReadVecParam(buf, fi, "WorldDirection", dir))
+            return TP_ERR_INVOKE;
+
+        double end[3] = {
+            loc[0] + dir[0] * Grimoire::TELEPORT_TRACE_DIST,
+            loc[1] + dir[1] * Grimoire::TELEPORT_TRACE_DIST,
+            loc[2] + dir[2] * Grimoire::TELEPORT_TRACE_DIST,
+        };
+
+        // UKismetSystemLibrary::LineTraceSingle via the library CDO. Static-
+        // native, but it reads the physics scene — game thread ONLY (the
+        // Invoke helper guarantees that; never reuse Mimic's direct path).
+        uintptr_t ksl = UE5_FindInstanceOfClass("KismetSystemLibrary");
+        if (!ksl) return TP_ERR_REFLECTION;
+        FunctionInfo lt;
+        if (!FindFunc(Ubel::GetClass(ksl), "LineTraceSingle", lt) || lt.parmsSize <= 0)
+            return TP_ERR_REFLECTION;
+        std::vector<uint8_t> buf2(lt.parmsSize, 0);
+        WritePtrParam(buf2, lt, "WorldContextObject", c.pawn);
+        WriteVecParam(buf2, lt, "Start", loc);
+        WriteVecParam(buf2, lt, "End", end);
+        WriteByteParam(buf2, lt, "TraceChannel", static_cast<uint8_t>(traceChannel));
+        WriteBoolParam(buf2, lt, "bTraceComplex", true);
+        WriteBoolParam(buf2, lt, "bIgnoreSelf", true);
+        // ActorsToIgnore (TArray), DrawDebugType, colors, DrawTime stay zeroed.
+        const FunctionParam* hr = FindParam(lt, "OutHit");
+        if (!hr) return TP_ERR_REFLECTION;
+        if (Invoke(ksl, lt, buf2) == 0 && ReturnedTrue(lt, buf2))
+            haveHit = ExtractHitPoint(buf2, *hr, impact);
+    }
+    if (!haveHit) return TP_ERR_NO_HIT;
+
+    if (outHit) {
+        outHit->X = impact[0];
+        outHit->Y = impact[1];
+        outHit->Z = impact[2];
+    }
+    double dest[3] = { impact[0], impact[1], impact[2] + zOffset };
+    rc = TeleportPawnTo(c, dest, nullptr, /*preferTeleportTo=*/true, tierOut);
+    if (rc != TP_OK) return rc;
+    StopMovement(c);
+    LOG_INFO("Teleport: cursor -> (%.1f, %.1f, %.1f) center=%d",
+             dest[0], dest[1], dest[2], usedCenter ? 1 : 0);
+    return TP_OK;
+}
+
+int32_t GetMarker(int32_t slot, Marker& out) {
+    std::lock_guard<std::mutex> lock(s_opMutex);
+    if (slot < 0 || slot >= Grimoire::TELEPORT_SLOTS) return TP_ERR_EMPTY_MARKER;
+    out = s_markers[slot];
+    return out.Valid ? TP_OK : TP_ERR_EMPTY_MARKER;
+}
+
+int32_t ClearMarker(int32_t slot) {
+    std::lock_guard<std::mutex> lock(s_opMutex);
+    if (slot < 0 || slot >= Grimoire::TELEPORT_SLOTS) return TP_ERR_EMPTY_MARKER;
+    s_markers[slot] = Marker{};
+    return TP_OK;
+}
+
+bool GetCurrentMapName(char* buf, int32_t cap) {
+    if (!buf || cap <= 0) return false;
+    buf[0] = '\0';
+    uintptr_t world = DerefWorld();
+    if (!world) return false;
+    CopyMapName(world, buf, cap);
+    return buf[0] != '\0';
+}
+
+} // namespace Wirbel

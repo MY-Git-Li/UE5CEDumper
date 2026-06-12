@@ -1846,6 +1846,129 @@ public sealed class DumpService : IDumpService
         return res["state"]?.GetValue<int>() ?? -1;
     }
 
+    // === Teleport (Wirbel) — docs/teleport-spec.md §7 ===
+
+    public async Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "teleport_get_pose" };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return ParsePose(res);
+    }
+
+    public async Task<TeleportPose> TeleportSaveMarkerAsync(int slot, CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "teleport_save_marker", ["slot"] = slot };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return ParsePose(res);
+    }
+
+    public async Task<TeleportResult> TeleportRecallMarkerAsync(int slot, bool force, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "teleport_recall_marker",
+            ["slot"] = slot,
+            ["force"] = force,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return ParseTeleportResult(res);
+    }
+
+    public async Task<TeleportResult> TeleportRecallExplicitAsync(double x, double y, double z,
+        double? pitch = null, double? yaw = null, double? roll = null, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "teleport_recall_marker",
+            ["x"] = x, ["y"] = y, ["z"] = z,
+        };
+        if (pitch.HasValue) req["pitch"] = pitch.Value;
+        if (yaw.HasValue)   req["yaw"]   = yaw.Value;
+        if (roll.HasValue)  req["roll"]  = roll.Value;
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return ParseTeleportResult(res);
+    }
+
+    public async Task<TeleportResult> TeleportToCursorAsync(double zOffset, int channel,
+        bool fallbackCenter, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "teleport_to_cursor",
+            ["zOffset"] = zOffset,
+            ["channel"] = channel,
+            ["fallbackCenter"] = fallbackCenter,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return ParseTeleportResult(res);
+    }
+
+    public async Task<List<TeleportMarker>> TeleportGetMarkersAsync(CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "teleport_get_markers" };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        var list = new List<TeleportMarker>();
+        if (res["markers"] is JsonArray arr)
+        {
+            foreach (var node in arr)
+            {
+                if (node is not JsonObject m) continue;
+                list.Add(new TeleportMarker
+                {
+                    Slot  = m["slot"]?.GetValue<int>() ?? 0,
+                    Valid = m["valid"]?.GetValue<bool>() ?? false,
+                    X = m["x"]?.GetValue<double>() ?? 0,
+                    Y = m["y"]?.GetValue<double>() ?? 0,
+                    Z = m["z"]?.GetValue<double>() ?? 0,
+                    Pitch = m["pitch"]?.GetValue<double>() ?? 0,
+                    Yaw   = m["yaw"]?.GetValue<double>() ?? 0,
+                    Roll  = m["roll"]?.GetValue<double>() ?? 0,
+                    Map   = m["map"]?.GetValue<string>() ?? "",
+                });
+            }
+        }
+        return list;
+    }
+
+    public async Task<int> TeleportClearMarkerAsync(int slot, CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "teleport_clear_marker", ["slot"] = slot };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return res["code"]?.GetValue<int>() ?? -1;
+    }
+
+    private static TeleportPose ParsePose(JsonObject res) => new()
+    {
+        Code  = res["code"]?.GetValue<int>() ?? -1,
+        X = res["x"]?.GetValue<double>() ?? 0,
+        Y = res["y"]?.GetValue<double>() ?? 0,
+        Z = res["z"]?.GetValue<double>() ?? 0,
+        Pitch = res["pitch"]?.GetValue<double>() ?? 0,
+        Yaw   = res["yaw"]?.GetValue<double>() ?? 0,
+        Roll  = res["roll"]?.GetValue<double>() ?? 0,
+        Map    = res["map"]?.GetValue<string>() ?? "",
+        Source = res["source"]?.GetValue<string>() ?? "raw",
+    };
+
+    private static TeleportResult ParseTeleportResult(JsonObject res) => new()
+    {
+        Code = res["code"]?.GetValue<int>() ?? -1,
+        Tier = res["tier"]?.GetValue<int>() ?? 0,
+        CurrentMap = res["map"]?.GetValue<string>(),
+        MarkerMap  = res["markerMap"]?.GetValue<string>(),
+        UsedCenter = res["usedCenter"]?.GetValue<bool>() ?? false,
+        HitX = res["hitX"]?.GetValue<double>() ?? 0,
+        HitY = res["hitY"]?.GetValue<double>() ?? 0,
+        HitZ = res["hitZ"]?.GetValue<double>() ?? 0,
+    };
+
     private static void CheckResponse(JsonObject res)
     {
         var ok = res["ok"]?.GetValue<bool>() ?? false;

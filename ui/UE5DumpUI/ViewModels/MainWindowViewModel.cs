@@ -28,15 +28,18 @@ internal enum MainTabIndex
     InterestingProperties = 4,
     ValueSearch = 5,
     Console = 6,
-    GameClassFilter = 7,
-    ClassStruct = 8,
-    Pointers = 9,
-    ProxyDeploy = 10,
-    // Experimental tabs (hidden unless opted in) are appended last so the
-    // indices above never shift. Not navigation targets today.
-    Snapshot = 11,
-    SpcQuery = 12,
-    ClassPivot = 13,
+    Teleport = 7,
+    GameClassFilter = 8,
+    ClassStruct = 9,
+    // Fixed tail order: the 3 experimental tabs (hidden unless opted in), then
+    // Proxy Deploy (always 2nd-to-last), then System/Pointers (always last) —
+    // regardless of any future tab additions. When experimental is off the 3
+    // tabs collapse, so the visible last two are Proxy Deploy + System.
+    Snapshot = 10,
+    SpcQuery = 11,
+    ClassPivot = 12,
+    ProxyDeploy = 13,
+    Pointers = 14,   // the "System" tab (str.Tab.Pointers = "System")
 }
 
 /// <summary>
@@ -200,6 +203,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public InterestingPropertiesViewModel InterestingProperties { get; }
     public ValueSearchViewModel ValueSearch { get; }
     public ConsoleViewModel Console { get; }
+    public TeleportViewModel Teleport { get; }
     public ProxyDeployViewModel? ProxyDeploy { get; }
     /// <summary>Experimental Snapshot tab — null when no snapshot store was
     /// injected (e.g. in unit tests). Gated behind <see cref="ExperimentalEnabled"/>.</summary>
@@ -278,7 +282,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         IAobMakerBridge? aobMaker = null,
         IProxyDeployService? proxyDeploy = null,
         IExperimentalGate? experimentalGate = null,
-        ISnapshotStore? snapshotStore = null)
+        ISnapshotStore? snapshotStore = null,
+        IGlobalHotkeyService? globalHotkeys = null)
     {
         _pipeClient = pipeClient;
         _dump = dump;
@@ -309,6 +314,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         InterestingProperties = new InterestingPropertiesViewModel(dump, log, platform);
         ValueSearch = new ValueSearchViewModel(dump, log);
         Console = new ConsoleViewModel(dump, log);
+        Teleport = new TeleportViewModel(dump, log, platform, aobMaker, globalHotkeys);
         if (snapshotStore != null)
         {
             Snapshot = new SnapshotViewModel(dump, snapshotStore, log, experimentalGate, platform);
@@ -1081,6 +1087,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 IsConnected = connected;
                 StatusText = connected ? "Connected" : "Disconnected";
+                Teleport.SetConnected(connected);
                 if (!connected) WindowTitle = "UE5 Dump UI";
             });
         };
@@ -1103,6 +1110,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         // PropertySearch is IDisposable (owns a debounce System.Threading.Timer);
         // its Dispose had no caller before, leaking the timer until process exit.
         PropertySearch.Dispose();
+        // Teleport owns a DispatcherTimer (auto-refresh) — dispose so it can't
+        // tick after the window closes.
+        Teleport.Dispose();
 
         GC.SuppressFinalize(this);
     }
@@ -1206,6 +1216,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ObjectTree.SetEngineState(state);
         LiveWalker.SetEngineState(state);
         InstanceFinder.SetEngineState(state);
+        Teleport.SetConnected(true);   // refresh markers once the DLL is scanned
         Snapshot?.SetEngineState(state);
         Spc?.SetEngineState(state);
         Pivot?.SetEngineState(state);

@@ -90,6 +90,25 @@ ClassInfo WalkClass(uintptr_t uclassAddr);
 // inner types, enum names, bool masks, etc. by reading FProperty chain.
 ClassInfo WalkClassEx(uintptr_t uclassAddr);
 
+// --- Shared reflection field lookup ---
+// (Extracted from the Debug Camera helpers in Frieren.cpp, build 1014;
+//  shared by the Debug Camera flow and Wirbel/Teleport.)
+//
+// Find a field by name within a class (inherited fields included).
+// A case-insensitive exact match on `exact` wins; otherwise the first
+// field whose name contains `contains` (and, when given, does NOT contain
+// `excluding`) and whose TypeName equals `typeFilter` (when given) is
+// returned. Returns true and fills `out` on success.
+bool FindField(uintptr_t classAddr, const char* exact,
+               const char* contains, const char* excluding,
+               const char* typeFilter, FieldInfo& out);
+
+// Offset-only convenience wrapper over FindField. Returns -1 when not found.
+int32_t FindFieldOffset(uintptr_t classAddr, const char* exact,
+                        const char* contains = nullptr,
+                        const char* excluding = nullptr,
+                        const char* typeFilter = nullptr);
+
 // Resolve the per-element size of an ArrayProperty's Inner FProperty.
 // Returns 0 if the size cannot be determined (rare: unknown inner type
 // without a usable FPROPERTY_ELEMSIZE or PropertiesSize).

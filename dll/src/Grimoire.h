@@ -181,4 +181,10 @@ constexpr int OBJECTS_PER_CHUNK        = 64 * 1024;
 constexpr int FNAME_CHUNK_SIZE         = 0x20000;  // 128 KB per chunk
 constexpr int FNAME_STRIDE             = 2;         // Alignment stride
 
+// --- Teleport (Wirbel) — docs/teleport-spec.md ---
+constexpr int    TELEPORT_SLOTS           = 3;       // marker slots
+constexpr double TELEPORT_DEFAULT_ZOFFSET = 100.0;   // ≈ capsule half height + margin
+constexpr double TELEPORT_TRACE_DIST      = 100000.0;// screen-center ray length (1 km)
+constexpr int    TELEPORT_MAPNAME_CAP     = 128;     // marker map-name buffer size
+
 } // namespace Grimoire

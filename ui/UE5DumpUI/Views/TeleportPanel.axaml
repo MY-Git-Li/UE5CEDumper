@@ -1,0 +1,245 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UE5DumpUI.ViewModels"
+             x:Class="UE5DumpUI.Views.TeleportPanel"
+             x:DataType="vm:TeleportViewModel"
+             x:Name="Root">
+
+  <ScrollViewer>
+    <StackPanel Margin="10" Spacing="10" MaxWidth="720" HorizontalAlignment="Left">
+
+      <!-- Single-player warning -->
+      <TextBlock Text="{StaticResource str.TP.Warning}"
+                 Foreground="#E0A030" FontSize="12" TextWrapping="Wrap"/>
+
+      <!-- ── Current pose ── -->
+      <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
+              CornerRadius="4" Padding="10">
+        <StackPanel Spacing="6">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="{StaticResource str.TP.PoseHeader}"
+                       Foreground="#DDDDDD" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <Button Content="{StaticResource str.TP.Refresh}"
+                    Command="{Binding RefreshPoseCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.Refresh}"
+                    IsEnabled="{Binding CanOperate}" Padding="10,3"/>
+            <CheckBox Content="{StaticResource str.TP.Auto}"
+                      IsChecked="{Binding AutoRefresh}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.Auto}"
+                      Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center"/>
+            <Border Background="#333337" CornerRadius="3" Padding="6,1"
+                    IsVisible="{Binding PoseSource, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+              <TextBlock Text="{Binding PoseSource}" Foreground="#7FB6E8"
+                         FontSize="11" VerticalAlignment="Center"/>
+            </Border>
+          </StackPanel>
+
+          <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" >
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="{StaticResource str.TP.Loc}"
+                       Foreground="#999999" Margin="0,0,8,2" VerticalAlignment="Center"/>
+            <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="12">
+              <TextBlock Text="{Binding PoseX}" Foreground="#DDDDDD" FontFamily="Consolas, monospace"/>
+              <TextBlock Text="{Binding PoseY}" Foreground="#DDDDDD" FontFamily="Consolas, monospace"/>
+              <TextBlock Text="{Binding PoseZ}" Foreground="#DDDDDD" FontFamily="Consolas, monospace"/>
+            </StackPanel>
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="{StaticResource str.TP.Rot}"
+                       Foreground="#999999" Margin="0,2,8,2" VerticalAlignment="Center"/>
+            <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="12">
+              <TextBlock Text="{Binding PosePitch}" Foreground="#DDDDDD" FontFamily="Consolas, monospace"/>
+              <TextBlock Text="{Binding PoseYaw}" Foreground="#DDDDDD" FontFamily="Consolas, monospace"/>
+              <TextBlock Text="{Binding PoseRoll}" Foreground="#DDDDDD" FontFamily="Consolas, monospace"/>
+            </StackPanel>
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="{StaticResource str.TP.Map}"
+                       Foreground="#999999" Margin="0,2,8,0" VerticalAlignment="Center"/>
+            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding PoseMap}"
+                       Foreground="#BBBBBB" FontFamily="Consolas, monospace" VerticalAlignment="Center"/>
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <!-- ── Markers ── -->
+      <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
+              CornerRadius="4" Padding="10">
+        <StackPanel Spacing="6">
+          <TextBlock Text="{StaticResource str.TP.MarkersHeader}"
+                     Foreground="#DDDDDD" FontWeight="SemiBold"/>
+          <ItemsControl ItemsSource="{Binding Markers}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:TeleportMarkerRow">
+                <Grid ColumnDefinitions="80,Auto,Auto,Auto,Auto,*" Margin="0,3">
+                  <TextBlock Grid.Column="0" Text="{Binding Label}"
+                             Foreground="#CCCCCC" VerticalAlignment="Center"/>
+                  <Button Grid.Column="1" Content="{StaticResource str.TP.Save}"
+                          Command="{Binding $parent[UserControl].((vm:TeleportViewModel)DataContext).SaveMarkerCommand}"
+                          CommandParameter="{Binding Slot}"
+                          ToolTip.Tip="{StaticResource str.Tip.TP.Save}"
+                          IsEnabled="{Binding $parent[UserControl].((vm:TeleportViewModel)DataContext).CanOperate}"
+                          Padding="10,3" Margin="2,0"/>
+                  <Button Grid.Column="2" Content="{StaticResource str.TP.Recall}"
+                          Command="{Binding $parent[UserControl].((vm:TeleportViewModel)DataContext).RecallMarkerCommand}"
+                          CommandParameter="{Binding Slot}"
+                          ToolTip.Tip="{StaticResource str.Tip.TP.Recall}"
+                          IsEnabled="{Binding Valid}"
+                          Padding="10,3" Margin="2,0"/>
+                  <Button Grid.Column="3" Content="{StaticResource str.TP.Force}"
+                          Command="{Binding $parent[UserControl].((vm:TeleportViewModel)DataContext).ForceRecallMarkerCommand}"
+                          CommandParameter="{Binding Slot}"
+                          ToolTip.Tip="{StaticResource str.Tip.TP.Force}"
+                          IsEnabled="{Binding Valid}"
+                          Padding="10,3" Margin="2,0"/>
+                  <Button Grid.Column="4" Content="{StaticResource str.TP.Clear}"
+                          Command="{Binding $parent[UserControl].((vm:TeleportViewModel)DataContext).ClearMarkerCommand}"
+                          CommandParameter="{Binding Slot}"
+                          ToolTip.Tip="{StaticResource str.Tip.TP.Clear}"
+                          IsEnabled="{Binding Valid}"
+                          Padding="10,3" Margin="2,0"/>
+                  <TextBlock Grid.Column="5" Text="{Binding Summary}"
+                             Foreground="#999999" FontFamily="Consolas, monospace"
+                             VerticalAlignment="Center" Margin="8,0,0,0"/>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <!-- ── Marker hotkeys (user-set via key capture) ── -->
+      <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
+              CornerRadius="4" Padding="10"
+              IsVisible="{Binding CanBindCursorHotkey}">
+        <StackPanel Spacing="6">
+          <TextBlock Text="{StaticResource str.TP.HkHeader}"
+                     Foreground="#DDDDDD" FontWeight="SemiBold"/>
+          <TextBlock Text="{StaticResource str.TP.HkHint}"
+                     Foreground="#888888" FontSize="11" TextWrapping="Wrap"/>
+          <ItemsControl ItemsSource="{Binding HotkeyRows}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:TeleportHotkeyRow">
+                <Grid ColumnDefinitions="120,120,Auto,Auto" Margin="0,2">
+                  <TextBlock Grid.Column="0" Text="{Binding DisplayName}"
+                             Foreground="#CCCCCC" VerticalAlignment="Center"/>
+                  <Border Grid.Column="1" Background="#333337" CornerRadius="3"
+                          Padding="6,2" Margin="2,0" MinWidth="90"
+                          HorizontalAlignment="Left">
+                    <TextBlock Text="{Binding DisplayLabel}"
+                               Foreground="#4EC9B0" FontSize="11" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  </Border>
+                  <Button Grid.Column="2" Content="{Binding CaptureButtonText}"
+                          Command="{Binding $parent[UserControl].((vm:TeleportViewModel)DataContext).BeginCaptureCommand}"
+                          CommandParameter="{Binding}"
+                          ToolTip.Tip="{StaticResource str.Tip.TP.HkSet}"
+                          Padding="10,3" Margin="2,0" MinWidth="58"/>
+                  <Button Grid.Column="3" Content="{StaticResource str.TP.HkClear}"
+                          Command="{Binding $parent[UserControl].((vm:TeleportViewModel)DataContext).ClearHotkeyCommand}"
+                          CommandParameter="{Binding}"
+                          IsEnabled="{Binding HasBinding}"
+                          Padding="10,3" Margin="2,0"/>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Border Background="#2D2D30" CornerRadius="3" Padding="6,2"
+                  HorizontalAlignment="Left"
+                  IsVisible="{Binding LastHotkeyFired, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <TextBlock Text="{Binding LastHotkeyFired}" Foreground="#9CDCFE" FontSize="11"/>
+          </Border>
+        </StackPanel>
+      </Border>
+
+      <!-- ── Cursor teleport ── -->
+      <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
+              CornerRadius="4" Padding="10">
+        <StackPanel Spacing="8">
+          <TextBlock Text="{StaticResource str.TP.CursorHeader}"
+                     Foreground="#DDDDDD" FontWeight="SemiBold"/>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Content="{StaticResource str.TP.ToCursor}"
+                    Command="{Binding TeleportToCursorCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.ToCursor}"
+                    IsEnabled="{Binding CanOperate}"
+                    Classes="accent" Padding="12,4"/>
+            <TextBlock Text="{StaticResource str.TP.ZOffset}" Foreground="#999999"
+                       VerticalAlignment="Center"/>
+            <NumericUpDown Value="{Binding ZOffset}" Minimum="0" Maximum="100000"
+                           Increment="10" Width="120"
+                           ToolTip.Tip="{StaticResource str.Tip.TP.ZOffset}"/>
+            <TextBlock Text="{StaticResource str.TP.Channel}" Foreground="#999999"
+                       VerticalAlignment="Center"/>
+            <NumericUpDown Value="{Binding TraceChannel}" Minimum="0" Maximum="32"
+                           Increment="1" Width="130" Padding="4,2"
+                           ToolTip.Tip="{StaticResource str.Tip.TP.Channel}"/>
+          </StackPanel>
+          <CheckBox Content="{StaticResource str.TP.FallbackCenter}"
+                    IsChecked="{Binding FallbackToCenter}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.FallbackCenter}"
+                    Foreground="#CCCCCC" FontSize="12"/>
+          <StackPanel Orientation="Horizontal" Spacing="8"
+                      IsVisible="{Binding CanBindCursorHotkey}">
+            <CheckBox Content="{StaticResource str.TP.CursorHotkey}"
+                      IsChecked="{Binding CursorHotkeyEnabled}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.CursorHotkey}"
+                      Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center"/>
+            <Border Background="#333337" CornerRadius="3" Padding="6,1"
+                    IsVisible="{Binding CursorHotkeyLabel, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+              <TextBlock Text="{Binding CursorHotkeyLabel}" Foreground="#4EC9B0"
+                         FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            </Border>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- ── BugItGo interop ── -->
+      <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
+              CornerRadius="4" Padding="10">
+        <StackPanel Spacing="8">
+          <TextBlock Text="{StaticResource str.TP.BugHeader}"
+                     Foreground="#DDDDDD" FontWeight="SemiBold"/>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Content="{StaticResource str.TP.CopyBugItGo}"
+                    Command="{Binding CopyAsBugItGoCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.CopyBugItGo}"
+                    IsEnabled="{Binding CanOperate}" Padding="12,4"/>
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBox Text="{Binding BugItGoInput}"
+                     PlaceholderText="{StaticResource str.TP.BugHint}"
+                     Width="440" Padding="4,2"
+                     FontFamily="Consolas, monospace"/>
+            <Button Content="{StaticResource str.TP.RunBugItGo}"
+                    Command="{Binding RunBugItGoCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.RunBugItGo}"
+                    IsEnabled="{Binding CanOperate}" Padding="12,4"/>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- ── CE export (records into CE via AOBMaker; .CT is the backup) ── -->
+      <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
+              CornerRadius="4" Padding="10">
+        <StackPanel Spacing="8">
+          <TextBlock Text="{StaticResource str.TP.CeHeader}"
+                     Foreground="#DDDDDD" FontWeight="SemiBold"/>
+          <WrapPanel Orientation="Horizontal">
+            <Button Content="{StaticResource str.TP.AddActions}"
+                    Command="{Binding AddActionsToCeCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.AddActions}"
+                    Padding="12,4" Margin="0,0,8,4"/>
+            <Button Content="{StaticResource str.TP.SaveCt}"
+                    Command="{Binding SaveCtCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.SaveCt}"
+                    Padding="12,4" Margin="0,0,8,4"/>
+          </WrapPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- Status + error -->
+      <TextBlock Text="{Binding StatusText}" Foreground="#9CDCFE"
+                 FontSize="12" TextWrapping="Wrap"/>
+      <TextBlock Text="{Binding ErrorMessage}" Foreground="#F48771"
+                 FontSize="12" TextWrapping="Wrap"
+                 IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

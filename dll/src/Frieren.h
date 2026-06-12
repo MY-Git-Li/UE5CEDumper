@@ -107,6 +107,22 @@ __declspec(dllexport) int32_t   UE5_GetDebugCameraState();
 // from reflection (UE4/UE5 version-agnostic).
 __declspec(dllexport) int32_t   UE5_SetDebugCamera(int32_t enable);
 
+// === Teleport (Wirbel: marker save/recall + cursor teleport) ===
+// All return Wirbel result codes (0 = OK, negatives per docs/teleport-spec.md
+// §8). Pose arrays are X,Y,Z,Pitch,Yaw,Roll as doubles regardless of the
+// engine's FVector width (UE4 floats are widened at the boundary).
+// NOTE for CE: executeCodeEx cannot retrieve these return values — CE Lua
+// integration goes through the Mimic mailbox (CMD_TELEPORT=8) instead.
+__declspec(dllexport) int32_t   UE5_TeleportGetPose(double* outPose6,
+                                    char* outMapName, int32_t mapNameCap);
+__declspec(dllexport) int32_t   UE5_TeleportSaveMarker(int32_t slot);
+__declspec(dllexport) int32_t   UE5_TeleportRecallMarker(int32_t slot, int32_t force);
+__declspec(dllexport) int32_t   UE5_TeleportToCursor(double zOffset,
+                                    int32_t traceChannel, int32_t fallbackToCenter);
+__declspec(dllexport) int32_t   UE5_TeleportGetMarker(int32_t slot, double* outPose6,
+                                    char* outMapName, int32_t mapNameCap);
+__declspec(dllexport) int32_t   UE5_TeleportClearMarker(int32_t slot);
+
 // === Mailbox (CE Lua shared memory interface) ===
 // Returns the address of the g_invokeMailbox buffer.
 // CE Lua can also use getAddress("g_invokeMailbox") directly.

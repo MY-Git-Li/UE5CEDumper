@@ -15,7 +15,9 @@
 #include "Scharf.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <cstring>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -870,6 +872,57 @@ ClassInfo WalkClassEx(uintptr_t uclassAddr) {
     }
 
     return info;
+}
+
+// ============================================================
+// Shared reflection field lookup — see Ubel.h. Semantics preserved from
+// the original Frieren.cpp Debug Camera helper (DbgCam_FieldOffset):
+// case-insensitive exact match first, then the first contains/excluding
+// fuzzy match restricted to `typeFilter` (when given).
+// ============================================================
+
+static bool FieldNameIEquals(const std::string& a, const char* b) {
+    size_t bl = std::strlen(b);
+    if (a.size() != bl) return false;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (std::tolower(static_cast<unsigned char>(a[i]))
+            != std::tolower(static_cast<unsigned char>(b[i])))
+            return false;
+    return true;
+}
+
+static bool FieldNameIContains(const std::string& hay, const char* needle) {
+    std::string h = hay, n = needle;
+    std::transform(h.begin(), h.end(), h.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::transform(n.begin(), n.end(), n.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return h.find(n) != std::string::npos;
+}
+
+bool FindField(uintptr_t classAddr, const char* exact,
+               const char* contains, const char* excluding,
+               const char* typeFilter, FieldInfo& out) {
+    if (!classAddr || !exact) return false;
+    ClassInfo ci = WalkClass(classAddr);
+    const FieldInfo* fuzzy = nullptr;
+    for (const auto& f : ci.Fields) {
+        if (FieldNameIEquals(f.Name, exact)) { out = f; return true; }
+        if (!fuzzy && contains && FieldNameIContains(f.Name, contains)
+            && (!excluding || !FieldNameIContains(f.Name, excluding))
+            && (!typeFilter || f.TypeName == typeFilter))
+            fuzzy = &f;
+    }
+    if (fuzzy) { out = *fuzzy; return true; }
+    return false;
+}
+
+int32_t FindFieldOffset(uintptr_t classAddr, const char* exact,
+                        const char* contains, const char* excluding,
+                        const char* typeFilter) {
+    FieldInfo fi{};
+    return FindField(classAddr, exact, contains, excluding, typeFilter, fi)
+        ? fi.Offset : -1;
 }
 
 // --- WalkFunctions: enumerate UFunctions of a UClass ---

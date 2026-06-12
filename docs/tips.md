@@ -83,3 +83,42 @@ Instance Finder → search `SpringArmComponent` → Live Walker → inspect
 `RelativeRotation` → edit **Yaw** and watch the screen turn → if it gets
 overwritten, flip `bUsePawnControlRotation` / `bInheritYaw`, or invoke
 `K2_SetRelativeRotation` instead of writing raw.
+
+-----
+
+## Save & recall positions / teleport to the cursor
+
+Use the **Teleport** tab (works after Connect + scan). It resolves the local
+player's pawn for you — no per-game class names needed — and teleports by
+invoking the engine's own functions, so it's clean across UE4 and UE5.
+
+**Marker save / recall (BugItGo-style).** Stand where you want, click **Save**
+on Marker 1/2/3. Later click **Recall** to jump back (rotation restored, fall
+velocity zeroed). Markers live in the DLL, so they survive a UI restart as long
+as the game keeps running. Recall is refused with a hint if you've changed maps
+— click **Force** to override (you may land in an unloaded area). Markers store
+coordinates only, so dying / respawning never breaks them.
+
+**Teleport to the cursor (2.5D / 45° games).** For top-down ARPGs (Titan
+Quest-likes) click **Teleport to cursor** — the pawn jumps to whatever's under
+the mouse. For games with no visible cursor (SE HD-2D-style), leave **Fall back
+to screen center** ticked and it traces from the middle of the view instead. If
+hits land on the wrong surface, bump the **Channel** number (games remap trace
+channels); **Z offset** lifts you off the ground so you don't spawn inside it.
+
+**BugItGo interop.** **Copy as BugItGo** puts a `BugItGo X Y Z` string on the
+clipboard (handy for sharing a spot). Paste any `BugItGo X Y Z`, bare `X Y Z`,
+or a full `?BugLoc=(…)?BugRot=(…)` string into the box and click **Run** to
+teleport there — no CheatManager needed. (Note: invoking the game's own `BugIt`
+from the Console tab returns nothing on purpose — it writes to the game's log /
+screenshot / clipboard, not back to the dumper. Use Copy-as-BugItGo instead.)
+
+**Hotkeys in Cheat Engine.** Pick a **Hotkey scheme** (Numpad / Top-row / Both),
+click **Copy CE Lua (hotkey bundle)**, and paste into a CE *Table Lua Script*.
+That binds save/recall/cursor/copy to keys (default: Ctrl+Num1-3 save, Num1-3
+recall, Num0 cursor — NumLock must be on). Use **Top-row** on laptops or when
+the game already uses Ctrl+1-3. Requires `UE5Dumper.dll` injected; the script is
+self-contained (no helper Lua). **Save .CT…** exports the same actions as 7
+momentary records instead.
+
+> Single-player only — online games will rubber-band or may flag teleports.

@@ -18,6 +18,8 @@
 #include "Frieren.h"
 #include "Aura.h"
 #include "Ubel.h"
+#include "Wirbel.h"
+#include "Grimoire.h"
 
 #include <Windows.h>
 #include <timeapi.h>   // timeBeginPeriod / timeEndPeriod (winmm)
@@ -79,6 +81,7 @@ static void HandleInvokeByName();
 static void HandleListFunctions();
 static void HandleListInstances();
 static void HandleSetDebugCamera();
+static void HandleTeleport();
 static void SetError(int32_t code, const char* msg);
 static void SetDone(int32_t resultCode);
 static bool EnsureInitialized();
@@ -166,6 +169,9 @@ static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
                 break;
             case CMD_SET_DEBUG_CAMERA:
                 HandleSetDebugCamera();
+                break;
+            case CMD_TELEPORT:
+                HandleTeleport();
                 break;
             default:
                 SetError(-1, "Unknown command");
@@ -642,6 +648,105 @@ static void HandleSetDebugCamera() {
     LOG_INFO("Mailbox: SET_DEBUG_CAMERA req=%llu -> state=%d",
              (unsigned long long)req, state);
     SetDone(state);
+}
+
+// CMD_TELEPORT: marker save/recall + cursor teleport (Wirbel). Field usage
+// documented in Mimic.h (TeleportOp enum + CMD_TELEPORT comment block) and
+// docs/teleport-spec.md §8. Delegates entirely to Wirbel — this handler only
+// marshals the mailbox fields.
+static void HandleTeleport() {
+    const uint64_t op  = g_invokeMailbox.instanceAddr;
+    const int32_t slot = static_cast<int32_t>(g_invokeMailbox.ufuncAddr);
+
+    // Pose block writer: [0..47] 6 doubles, [48..175] mapName,
+    // [176] source, [177] tier. Zeroes the whole buffer first.
+    auto writePoseBlock = [](const Wirbel::Pose& p, const char* mapName,
+                             uint8_t source, uint8_t tier) {
+        memset(g_invokeMailbox.paramsData, 0, sizeof(g_invokeMailbox.paramsData));
+        double v[6] = { p.X, p.Y, p.Z, p.Pitch, p.Yaw, p.Roll };
+        memcpy(g_invokeMailbox.paramsData, v, sizeof(v));
+        if (mapName) {
+            size_t cap = static_cast<size_t>(Grimoire::TELEPORT_MAPNAME_CAP);
+            size_t n = strnlen(mapName, cap - 1);
+            memcpy(g_invokeMailbox.paramsData + 48, mapName, n);
+            g_invokeMailbox.paramsData[48 + n] = '\0';
+        }
+        g_invokeMailbox.paramsData[176] = source;
+        g_invokeMailbox.paramsData[177] = tier;
+    };
+
+    int32_t rc;
+    switch (op) {
+    case TP_OP_GET_POSE: {
+        Wirbel::Pose p{};
+        char map[Grimoire::TELEPORT_MAPNAME_CAP] = {};
+        uint8_t source = 0;
+        rc = Wirbel::GetPose(p, map, sizeof(map), &source);
+        if (rc == 0) writePoseBlock(p, map, source, 0);
+        break;
+    }
+    case TP_OP_SAVE: {
+        rc = Wirbel::SaveMarker(slot);
+        if (rc == 0) {
+            Wirbel::Marker m{};
+            if (Wirbel::GetMarker(slot, m) == 0)
+                writePoseBlock(m.P, m.MapName, 0, 0);
+        }
+        break;
+    }
+    case TP_OP_RECALL:
+    case TP_OP_RECALL_FORCE: {
+        uint8_t tier = 0;
+        rc = Wirbel::RecallMarker(slot, op == TP_OP_RECALL_FORCE, &tier);
+        memset(g_invokeMailbox.paramsData, 0, sizeof(g_invokeMailbox.paramsData));
+        g_invokeMailbox.paramsData[177] = tier;
+        break;
+    }
+    case TP_OP_CURSOR: {
+        // Read inputs BEFORE outputs overwrite the shared buffer.
+        double zOffset = Grimoire::TELEPORT_DEFAULT_ZOFFSET;
+        memcpy(&zOffset, g_invokeMailbox.paramsData, sizeof(double));
+        uint8_t channel = g_invokeMailbox.paramsData[8];
+        bool fallbackCenter = g_invokeMailbox.paramsData[9] != 0;
+
+        Wirbel::Pose hit{};
+        uint8_t tier = 0;
+        bool usedCenter = false;
+        rc = Wirbel::TeleportToCursor(zOffset, channel, fallbackCenter,
+                                      &hit, &tier, &usedCenter);
+        memset(g_invokeMailbox.paramsData, 0, sizeof(g_invokeMailbox.paramsData));
+        if (rc == 0) {
+            double v[3] = { hit.X, hit.Y, hit.Z };
+            memcpy(g_invokeMailbox.paramsData, v, sizeof(v));
+        }
+        g_invokeMailbox.paramsData[177] = tier;
+        g_invokeMailbox.paramsData[178] = usedCenter ? 1 : 0;
+        break;
+    }
+    case TP_OP_GET_MARKER: {
+        Wirbel::Marker m{};
+        rc = Wirbel::GetMarker(slot, m);
+        if (rc == 0) writePoseBlock(m.P, m.MapName, 0, 0);
+        break;
+    }
+    case TP_OP_CLEAR_MARKER:
+        rc = Wirbel::ClearMarker(slot);
+        break;
+    default:
+        SetError(-1, "Teleport: unknown op");
+        return;
+    }
+
+    if (rc != 0) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "Teleport: op=%llu slot=%d failed code=%d",
+                 (unsigned long long)op, slot, rc);
+        strncpy(g_invokeMailbox.errorMsg, msg, sizeof(g_invokeMailbox.errorMsg) - 1);
+        g_invokeMailbox.errorMsg[sizeof(g_invokeMailbox.errorMsg) - 1] = '\0';
+    }
+    LOG_INFO("Mailbox: TELEPORT op=%llu slot=%d -> rc=%d",
+             (unsigned long long)op, slot, rc);
+    SetDone(rc);
 }
 
 static void SetError(int32_t code, const char* msg) {

@@ -59,9 +59,10 @@ public class App : Application
             _logging.Info(Constants.LogCatInit, $"Log dir:   {logDir}");
 
             // Create main window
+            var globalHotkeys = new WindowsGlobalHotkeyService();
             var mainVm = new MainWindowViewModel(
                 _pipeClient, _dumpService, _logging, _platform, _aobUsage, _aobMakerBridge,
-                _proxyDeploy, _experimentalGate, _snapshotStore);
+                _proxyDeploy, _experimentalGate, _snapshotStore, globalHotkeys);
 
             desktop.MainWindow = new MainWindow
             {

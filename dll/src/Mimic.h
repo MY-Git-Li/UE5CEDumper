@@ -31,6 +31,33 @@ enum Cmd : int32_t {
     CMD_SET_DEBUG_CAMERA = 7, // Robust Debug Camera force on/off / query.
                               //   Input:  instanceAddr = 0 (OFF) / 1 (ON) / 2 (query, no change)
                               //   Output: result = resulting state (1=ON, 0=OFF, -1=error)
+    CMD_TELEPORT        = 8,  // Teleport (Wirbel): marker save/recall + cursor teleport.
+                              //   Input:  instanceAddr = op (TeleportOp below)
+                              //           ufuncAddr    = slot (0..2) for SAVE/RECALL/GET/CLEAR
+                              //           paramsData (op CURSOR only, read BEFORE outputs):
+                              //             [0..7] double zOffset, [8] u8 traceChannel,
+                              //             [9] u8 fallbackToCenter
+                              //   Output: result = Wirbel code (0 OK, negatives per
+                              //           docs/teleport-spec.md §8)
+                              //           paramsData pose block (GET_POSE/SAVE/GET_MARKER):
+                              //             [0..47]   6 doubles X,Y,Z,Pitch,Yaw,Roll
+                              //             [48..175] mapName (null-terminated)
+                              //             [176]     u8 source (0 raw / 1 invoke)
+                              //             [177]     u8 tier (1 invoke / 2 raw write)
+                              //           op CURSOR output:
+                              //             [0..23] 3 doubles hit point, [177] tier,
+                              //             [178] u8 usedCenter
+};
+
+// CMD_TELEPORT op codes (written into instanceAddr by CE Lua / pipe bridge)
+enum TeleportOp : uint64_t {
+    TP_OP_GET_POSE     = 0,
+    TP_OP_SAVE         = 1,
+    TP_OP_RECALL       = 2,
+    TP_OP_RECALL_FORCE = 3,
+    TP_OP_CURSOR       = 4,
+    TP_OP_GET_MARKER   = 5,
+    TP_OP_CLEAR_MARKER = 6,
 };
 
 // Mailbox status (DLL writes to status field)

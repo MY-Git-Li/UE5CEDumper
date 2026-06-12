@@ -42,6 +42,15 @@ public sealed record CtPropertyRow : CheatTableRow
         => FreezeScriptGenerator.Generate(FreezeParams);
 }
 
+/// <summary>Generic raw-script entry — the caller supplies a fully-formed AA
+/// Script body. Used by panels (e.g. Teleport) whose script generation doesn't
+/// fit the Property/Function row kinds.</summary>
+public sealed record CtScriptRow : CheatTableRow
+{
+    public required string Script { get; init; }
+    public override string GenerateScript() => Script;
+}
+
 /// <summary>UFunction baked-invoke entry (uses ue5_invoke_helper.lua).
 /// For functions with parameters the user typically wants to edit the
 /// baked PARAMS table in CE before activating; the builder honours

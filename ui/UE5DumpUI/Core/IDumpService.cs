@@ -252,4 +252,35 @@ public interface IDumpService
     /// state (1 = ON, 0 = OFF, -1 = error).
     /// </summary>
     Task<int> SetDebugCameraAsync(bool enable, CancellationToken ct = default);
+
+    // === Teleport (Wirbel: marker save/recall + cursor teleport) ===
+    // docs/teleport-spec.md §7. Model Code/Codes carry the DLL's Wirbel
+    // result code (0 = OK, negatives mapped by TeleportCodes).
+
+    /// <summary>Read the current pawn pose (location + control rotation + map).</summary>
+    Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default);
+
+    /// <summary>Save the current pose into marker slot 0..2.</summary>
+    Task<TeleportPose> TeleportSaveMarkerAsync(int slot, CancellationToken ct = default);
+
+    /// <summary>Recall to marker slot 0..2. Refused on map mismatch unless
+    /// <paramref name="force"/>.</summary>
+    Task<TeleportResult> TeleportRecallMarkerAsync(int slot, bool force, CancellationToken ct = default);
+
+    /// <summary>Recall to an explicit pose (BugItGo interop). Bypasses the
+    /// marker store and the map check. Rotation restored only when supplied.</summary>
+    Task<TeleportResult> TeleportRecallExplicitAsync(double x, double y, double z,
+        double? pitch = null, double? yaw = null, double? roll = null,
+        CancellationToken ct = default);
+
+    /// <summary>Teleport to the world position under the mouse cursor (or the
+    /// screen center when <paramref name="fallbackCenter"/> and no cursor).</summary>
+    Task<TeleportResult> TeleportToCursorAsync(double zOffset, int channel,
+        bool fallbackCenter, CancellationToken ct = default);
+
+    /// <summary>Read all marker slots.</summary>
+    Task<List<TeleportMarker>> TeleportGetMarkersAsync(CancellationToken ct = default);
+
+    /// <summary>Clear marker slot 0..2.</summary>
+    Task<int> TeleportClearMarkerAsync(int slot, CancellationToken ct = default);
 }

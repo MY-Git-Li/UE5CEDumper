@@ -113,8 +113,8 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      |  loadLibrary / callFunction (28 C ABI exports)|
 |      v                                               |
 |  UE5Dumper.dll  [injected]                           |
-|      +-- Frieren  (ExportAPI)     <- 30 C ABI for CE Lua      |
-|      +-- Fern     (PipeServer)    <- Named Pipe IPC (~42 cmds incl. value scan) |
+|      +-- Frieren  (ExportAPI)     <- 36 C ABI for CE Lua (6 teleport, build 1027) |
+|      +-- Fern     (PipeServer)    <- Named Pipe IPC (~48 cmds incl. value scan + teleport) |
 |      +-- Himmel   (Signatures)    <- 128 AOB + symbol exports |
 |      +-- Genau    (OffsetFinder)  <- GObjects/GNames/GWorld   |
 |      +-- Aura     (ObjectArray)   <- Chunked + Flat arrays + Find Refs/Containers + ScanForValue (lean Candidate V3-A 926; TSet/TMap scan V1a 927) |
@@ -126,6 +126,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- ValueScan (build 738 + Phase 2 757) <- SessionManager + DataType / ScanType / CompareStringPredicate / CompareVectorPredicate |
 |      +-- Denken   (NativeDisasm)  <- Zydis x64 decoder: native UFunction -> [this+off] property xref (Path 2, build 862) |
 |      +-- Cancel   (Cancellation)  <- Cancel::Requested() flag; Fern disconnect-monitor + shutdown-abort stop long ops (build 936) |
+|      +-- Wirbel   (Teleport)      <- BugIt-style marker save/recall + cursor teleport; CMD_TELEPORT=8 mailbox (build 1027) |
 +----------------------+-------------------------------+
                        | Named Pipe: \\.\pipe\UE5DumpBfx
                        | JSON over pipe (newline-delimited)
@@ -141,6 +142,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- InterestingFunctionsPanel <- Scored UFunctions; 📦 batch CT (build 760) |
 |      +-- InterestingPropertiesPanel<- Scored properties (B'); 📦 batch CT (build 760) |
 |      +-- ConsolePanel              <- UFUNCTION(exec) discovery + UCheatManager hint (build 778) |
+|      +-- TeleportPanel             <- marker save/recall + cursor teleport + BugItGo + CE Lua bundle (build 1027) |
 |      +-- ValueSearchPanel          <- CE-style by-value scan (build 738 + Phase 2 757) |
 |      +-- ProxyDeployPanel          <- Proxy DLL management |
 |      +-- CeXmlExport               <- CE XML pointer chains |
