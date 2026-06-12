@@ -65,13 +65,19 @@ Deliverables for the user:
 
 ### Known limitations (live-verified)
 
-- **Cooked-out actor setters** (Octopath Traveler / SE HD-2D): some builds strip
-  `AActor::K2_SetActorLocation` / `K2_TeleportTo` from reflection. Recall falls
-  back to `USceneComponent::K2_SetWorldLocation` on the RootComponent (build
-  1042), which runs `UpdateComponentToWorld` so the visual moves — unlike a raw
-  `RelativeLocation` write, which sets the value but leaves the cached world
-  transform stale (the original "writes but doesn't move" symptom). If the
-  component setters are also stripped it degrades to the raw write.
+- **Cooked-out location setters** (Octopath Traveler / SE HD-2D): some builds
+  strip `AActor::K2_SetActorLocation` / `K2_TeleportTo` AND the component-level
+  `K2_SetWorldLocation` / `K2_SetRelativeLocation` from reflection (only
+  StopMovement-class functions survive). Tiered fallback (build 1042-1043):
+  actor setter → component setter (`UpdateComponentToWorld`, unlike a raw write)
+  → raw `RelativeLocation` write **plus a "deep force"** that scans the
+  RootComponent for the cached world-transform vectors (`ComponentToWorld`,
+  bounds origin) holding the old position and overwrites them with the target.
+  **Octopath: the character now teleports** (deep force rewrote 2 vectors).
+  **Caveat — camera/POV may not follow**: on these titles the camera often
+  tracks a separate child component / camera actor whose world transform we
+  don't refresh, so the character moves but the view may not snap to it. Best-
+  effort; the panel carries an in-app disclaimer.
 
 
 - **Games that drive the visible character from a separate actor** (e.g. Titan
