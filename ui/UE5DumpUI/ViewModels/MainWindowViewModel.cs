@@ -28,20 +28,18 @@ internal enum MainTabIndex
     InterestingProperties = 4,
     ValueSearch = 5,
     Console = 6,
-    GameClassFilter = 7,
-    ClassStruct = 8,
-    Pointers = 9,
-    ProxyDeploy = 10,
-    // Experimental tabs (hidden unless opted in) are appended last so the
-    // indices above never shift. Not navigation targets today.
-    Snapshot = 11,
-    SpcQuery = 12,
-    ClassPivot = 13,
-    // Teleport is a normal (always-visible) tab appended after the gated
-    // experimental tabs so existing indices never shift; the hidden
-    // experimental tabs collapse visually, so it renders right after Proxy
-    // Deploy when experimental is off.
-    Teleport = 14,
+    Teleport = 7,
+    GameClassFilter = 8,
+    ClassStruct = 9,
+    // Fixed tail order: the 3 experimental tabs (hidden unless opted in), then
+    // Proxy Deploy (always 2nd-to-last), then System/Pointers (always last) —
+    // regardless of any future tab additions. When experimental is off the 3
+    // tabs collapse, so the visible last two are Proxy Deploy + System.
+    Snapshot = 10,
+    SpcQuery = 11,
+    ClassPivot = 12,
+    ProxyDeploy = 13,
+    Pointers = 14,   // the "System" tab (str.Tab.Pointers = "System")
 }
 
 /// <summary>

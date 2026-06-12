@@ -309,24 +309,20 @@
         <TabItem Header="{StaticResource str.Tab.Console}">
           <views:ConsolePanel DataContext="{Binding Console}"/>
         </TabItem>
+        <TabItem Header="{StaticResource str.Tab.Teleport}">
+          <views:TeleportPanel DataContext="{Binding Teleport}"/>
+        </TabItem>
         <TabItem Header="{StaticResource str.Tab.GameClassFilter}">
           <views:GameClassFilterPanel DataContext="{Binding GameClassFilter}"/>
         </TabItem>
         <TabItem Header="{StaticResource str.Tab.ClassStruct}">
           <views:ClassStructPanel DataContext="{Binding ClassStruct}"/>
         </TabItem>
-        <TabItem Header="{StaticResource str.Tab.Pointers}" Tag="Pointers">
-          <views:PointerPanel DataContext="{Binding Pointers}"/>
-        </TabItem>
-        <TabItem Header="{StaticResource str.Tab.ProxyDeploy}">
-          <views:ProxyDeployPanel DataContext="{Binding ProxyDeploy}"/>
-        </TabItem>
 
-        <!-- Experimental tabs (Phase 0): hidden unless the user opts in via the
-             System-tab credit checkbox. Appended last so existing tab indices
-             (used by OnSelectedTabIndexChanged) don't shift. Content is a
-             placeholder until Phases A/B/C land. See
-             docs/experimental-snapshot-spc-pivot.md. -->
+        <!-- Fixed tail order (see MainTabIndex): the 3 experimental tabs (hidden
+             unless opted in via the System-tab credit checkbox), then Proxy
+             Deploy (always 2nd-to-last), then System (always last). New tabs go
+             ABOVE this block so these five stay anchored at the end. -->
         <TabItem Header="{StaticResource str.Tab.Snapshot}" Tag="Snapshot"
                  IsVisible="{Binding ExperimentalEnabled}">
           <views:SnapshotPanel DataContext="{Binding Snapshot}"/>
@@ -339,11 +335,11 @@
                  IsVisible="{Binding ExperimentalEnabled}">
           <views:ClassPivotPanel DataContext="{Binding Pivot}"/>
         </TabItem>
-
-        <!-- Teleport (normal tab; appended after the gated experimental tabs so
-             existing indices stay stable — see MainTabIndex.Teleport). -->
-        <TabItem Header="{StaticResource str.Tab.Teleport}">
-          <views:TeleportPanel DataContext="{Binding Teleport}"/>
+        <TabItem Header="{StaticResource str.Tab.ProxyDeploy}">
+          <views:ProxyDeployPanel DataContext="{Binding ProxyDeploy}"/>
+        </TabItem>
+        <TabItem Header="{StaticResource str.Tab.Pointers}" Tag="Pointers">
+          <views:PointerPanel DataContext="{Binding Pointers}"/>
         </TabItem>
       </TabControl>
     </Grid>

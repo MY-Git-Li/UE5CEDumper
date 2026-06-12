@@ -63,6 +63,18 @@ Deliverables for the user:
   run pasted `BugItGo` strings, and explain/handle the "BugIt returns nothing"
   behavior the user observed.
 
+### Known limitations (live-verified)
+
+- **Games that drive the visible character from a separate actor** (e.g. Titan
+  Quest II, UE5): teleport forces `PlayerController.Pawn`'s transform to the
+  target — verified at the memory level, the write sticks and persists — but the
+  on-screen character is a *different* actor, so it doesn't visibly move. Moving
+  the real actor needs per-game reverse engineering; deferred. Teleport works on
+  games where the possessed pawn IS the visible character (SEED Battle Destiny
+  Remastered, etc.). The CMC-freeze retry (build 1041) recovers genuine
+  CharacterMovement-override cases but can't help the separate-actor class. See
+  [lessons-learned.md](lessons-learned.md) "TQ2 verdict".
+
 ### Non-Goals (v1)
 
 - No pure-Lua baked-offset trainer export (explicitly rejected).
