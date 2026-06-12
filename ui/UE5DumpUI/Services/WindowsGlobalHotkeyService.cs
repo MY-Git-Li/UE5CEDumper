@@ -74,31 +74,41 @@ public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
         {
             _thread = new Thread(() =>
             {
-                _threadId = GetCurrentThreadId();
-
                 int chosen = -1;
-                for (int i = 0; i < Candidates.Length; i++)
+                try
                 {
-                    if (RegisterHotKey(IntPtr.Zero, HotkeyId,
-                            Candidates[i].Mod | MOD_NOREPEAT, (uint)Candidates[i].Vk))
+                    _threadId = GetCurrentThreadId();
+                    for (int i = 0; i < Candidates.Length; i++)
                     {
-                        chosen = i;
-                        Label = Candidates[i].Label;
-                        break;
+                        if (RegisterHotKey(IntPtr.Zero, HotkeyId,
+                                Candidates[i].Mod | MOD_NOREPEAT, (uint)Candidates[i].Vk))
+                        {
+                            chosen = i;
+                            Label = Candidates[i].Label;
+                            break;
+                        }
                     }
                 }
-                _ready.Set();
+                catch { /* registration failed → Label stays null below */ }
+                finally { _ready.Set(); }   // always release the ctor's Wait()
+
                 if (chosen < 0) return;
 
                 // Message loop: WM_HOTKEY → fire; WM_QUIT (from Dispose) → exit.
-                while (GetMessage(out MSG msg, IntPtr.Zero, 0, 0) > 0)
+                // Wrapped so NOTHING here can crash the process (uncaught
+                // exceptions on a background thread terminate the app).
+                try
                 {
-                    if (msg.message == WM_HOTKEY)
+                    while (GetMessage(out MSG msg, IntPtr.Zero, 0, 0) > 0)
                     {
-                        try { onPressed(); } catch { /* never let a callback kill the loop */ }
+                        if (msg.message == WM_HOTKEY)
+                        {
+                            try { onPressed(); } catch { /* keep the loop alive */ }
+                        }
                     }
+                    UnregisterHotKey(IntPtr.Zero, HotkeyId);
                 }
-                UnregisterHotKey(IntPtr.Zero, HotkeyId);
+                catch { /* swallow — degrade to no hotkey rather than crash */ }
             })
             {
                 IsBackground = true,
@@ -144,10 +154,16 @@ public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
-    [DllImport("user32.dll", ExactSpelling = true)]
+    // NOTE: the real user32 exports are GetMessageW / PostThreadMessageW —
+    // there is NO bare "GetMessage"/"PostThreadMessage" symbol, so with
+    // ExactSpelling=true the bare names throw EntryPointNotFoundException at the
+    // first call (on the worker thread, uncaught → process crash). Pin the W
+    // entry points explicitly. (RegisterHotKey / UnregisterHotKey have no A/W
+    // variants, so their bare names are correct.)
+    [DllImport("user32.dll", EntryPoint = "GetMessageW", ExactSpelling = true)]
     private static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
 
-    [DllImport("user32.dll", ExactSpelling = true)]
+    [DllImport("user32.dll", EntryPoint = "PostThreadMessageW", ExactSpelling = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool PostThreadMessage(uint idThread, uint Msg, IntPtr wParam, IntPtr lParam);
 
