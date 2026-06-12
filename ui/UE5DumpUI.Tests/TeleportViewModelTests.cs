@@ -301,6 +301,22 @@ public class TeleportViewModelTests
     }
 
     [Fact]
+    public void BeginCapture_toggles_off_when_clicked_again()
+    {
+        var vm = CreateVm(new FakeDumpService(), out _, new FakeHotkeyService());
+        var row = vm.HotkeyRows.First();
+
+        vm.BeginCaptureCommand.Execute(row);   // start
+        Assert.True(vm.IsCapturingHotkey);
+        Assert.Equal("Cancel", row.CaptureButtonText);
+
+        vm.BeginCaptureCommand.Execute(row);   // click "Cancel" → abort
+        Assert.False(vm.IsCapturingHotkey);
+        Assert.Equal("Set", row.CaptureButtonText);
+        Assert.False(row.HasBinding);
+    }
+
+    [Fact]
     public void Capture_escape_cancels()
     {
         var vm = CreateVm(new FakeDumpService(), out _, new FakeHotkeyService());

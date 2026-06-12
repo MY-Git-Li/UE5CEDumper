@@ -525,7 +525,7 @@
     <sys:String x:Key="str.TP.RunBugItGo">Run</sys:String>
     <sys:String x:Key="str.TP.BugHint">Paste 'BugItGo X Y Z', 'X Y Z', or a ?BugLoc=(...)?BugRot=(...) string</sys:String>
     <sys:String x:Key="str.TP.HkHeader">Marker Hotkeys</sys:String>
-    <sys:String x:Key="str.TP.HkHint">Global hotkeys for Save/Recall (fire while the game is focused). Click Set, then press the combo — hold Ctrl/Alt/Shift then a key (e.g. Ctrl+F7), or a single key (e.g. F7). Saved automatically.</sys:String>
+    <sys:String x:Key="str.TP.HkHint">Global hotkeys for Save/Recall (fire while the game is focused). Click Set, then press the combo — hold Ctrl/Alt/Shift then a key (e.g. Ctrl+F7), or a single key (e.g. F7). Click Cancel or press Esc to abort. Keyboard only for now (mouse extra-buttons / gamepad not yet supported). Saved automatically.</sys:String>
     <sys:String x:Key="str.TP.HkSet">Set</sys:String>
     <sys:String x:Key="str.TP.HkClear">Clear</sys:String>
     <sys:String x:Key="str.TP.CeHeader">CE Export</sys:String>

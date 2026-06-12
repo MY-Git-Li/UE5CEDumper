@@ -58,16 +58,28 @@ public class TeleportScriptGeneratorTests
     }
 
     [Fact]
-    public void BuildBatchRows_returns_seven_teleport_rows()
+    public void BuildBatchRows_returns_eight_teleport_rows()
     {
         var rows = TeleportScriptGenerator.BuildBatchRows();
-        Assert.Equal(7, rows.Count);
+        Assert.Equal(8, rows.Count);
         Assert.All(rows, r => Assert.Equal("Teleport", r.Category));
-        // 3 saves, 3 recalls, 1 cursor — all CtScriptRow.
+        // 3 saves, 3 recalls, cursor, clear-all — all CtScriptRow.
         Assert.All(rows, r => Assert.IsType<CtScriptRow>(r));
         Assert.Contains(rows, r => r.Description == "Save marker 1");
         Assert.Contains(rows, r => r.Description == "Recall marker 3");
         Assert.Contains(rows, r => r.Description == "Teleport to cursor");
+        Assert.Contains(rows, r => r.Description == "Clear all markers");
+    }
+
+    [Fact]
+    public void ClearAll_record_loops_slots_with_clear_op()
+    {
+        var s = TeleportScriptGenerator.Generate(TeleportScriptGenerator.Action.ClearAll);
+        Assert.DoesNotContain("\r", s);
+        Assert.Contains("for slot = 0, 2 do", s);
+        Assert.Contains("writeQword(mb + 0x10, 6)", s);   // op CLEAR_MARKER
+        Assert.Contains("writeInteger(mb + 0x00, 8)", s); // CMD_TELEPORT
+        Assert.Contains("createTimer", s);                // auto-untick
     }
 
     [Fact]

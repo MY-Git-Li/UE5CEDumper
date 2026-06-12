@@ -125,11 +125,11 @@
                                Foreground="#4EC9B0" FontSize="11" FontWeight="SemiBold"
                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
                   </Border>
-                  <Button Grid.Column="2" Content="{StaticResource str.TP.HkSet}"
+                  <Button Grid.Column="2" Content="{Binding CaptureButtonText}"
                           Command="{Binding $parent[UserControl].((vm:TeleportViewModel)DataContext).BeginCaptureCommand}"
                           CommandParameter="{Binding}"
                           ToolTip.Tip="{StaticResource str.Tip.TP.HkSet}"
-                          Padding="10,3" Margin="2,0"/>
+                          Padding="10,3" Margin="2,0" MinWidth="58"/>
                   <Button Grid.Column="3" Content="{StaticResource str.TP.HkClear}"
                           Command="{Binding $parent[UserControl].((vm:TeleportViewModel)DataContext).ClearHotkeyCommand}"
                           CommandParameter="{Binding}"

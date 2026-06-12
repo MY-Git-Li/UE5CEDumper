@@ -508,6 +508,19 @@ int32_t TeleportPawnTo(const Chain& c, const double xyz[3], const double* destPy
         LOG_WARN("Teleport: tier-2 raw RelativeLocation write (game may snap back)");
     }
     if (tierOut) *tierOut = tier;
+
+    // Diagnostic: re-read RelativeLocation right after the move. If it equals
+    // the target, the write took at the memory level — a still-stationary pawn
+    // then means the game re-asserts position (CMC client correction / a
+    // separate authoritative actor), NOT that our write missed. If it does NOT
+    // equal the target, we moved the wrong object or the write was reverted
+    // before this read. Either way this disambiguates "no visible effect".
+    double after[3] = {};
+    if (ReadVec3Mem(c.root + static_cast<uintptr_t>(c.relLocOff), c.relLocSize, after)) {
+        LOG_INFO("Teleport: post-move RelativeLocation read-back = (%.1f, %.1f, %.1f) "
+                 "[target (%.1f, %.1f, %.1f)]",
+                 after[0], after[1], after[2], xyz[0], xyz[1], xyz[2]);
+    }
     return TP_OK;
 }
 

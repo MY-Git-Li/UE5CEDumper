@@ -170,9 +170,15 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
-            MarkHotkeyFired("Cursor teleport");
             if (CanOperate && TeleportToCursorCommand.CanExecute(null))
+            {
+                MarkHotkeyFired("Cursor teleport", ran: true);
                 _ = TeleportToCursorCommand.ExecuteAsync(null);
+            }
+            else
+            {
+                MarkHotkeyFired("Cursor teleport", ran: false);
+            }
         });
     }
 
@@ -458,8 +464,14 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
             var row = HotkeyRows.FirstOrDefault(r => r.ActionId == actionId);
-            MarkHotkeyFired(row?.DisplayName ?? actionId);
-            if (!CanOperate) return;
+            string what = row?.DisplayName ?? actionId;
+            if (!CanOperate)
+            {
+                // Honest feedback: the hotkey fired but nothing was sent.
+                MarkHotkeyFired(what, ran: false);
+                return;
+            }
+            MarkHotkeyFired(what, ran: true);
             int slot = actionId[^1] - '0';
             if (actionId.StartsWith("save", StringComparison.Ordinal))
                 _ = SaveMarkerCommand.ExecuteAsync(slot);
@@ -468,19 +480,30 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         });
     }
 
-    private void MarkHotkeyFired(string what)
-        => LastHotkeyFired = $"{what} fired @ {DateTime.Now:HH:mm:ss}";
+    private void MarkHotkeyFired(string what, bool ran)
+        => LastHotkeyFired = ran
+            ? $"{what} fired @ {DateTime.Now:HH:mm:ss}"
+            : $"{what} pressed @ {DateTime.Now:HH:mm:ss} — ignored (not connected)";
 
-    /// <summary>Begin capturing a key combo for a marker hotkey row. The panel
-    /// code-behind forwards the next KeyDown to <see cref="ApplyCapturedKey"/>.</summary>
+    /// <summary>Begin (or cancel) capturing a key combo for a marker hotkey row.
+    /// Clicking Set starts capture; clicking again (now labelled Cancel) aborts
+    /// and keeps the existing binding. The panel code-behind forwards KeyDown to
+    /// <see cref="ApplyCapturedKey"/> while capturing.</summary>
     [RelayCommand]
     private void BeginCapture(TeleportHotkeyRow? row)
     {
         if (row == null || _globalHotkeys == null) return;
+        if (CapturingRow == row)        // toggle: clicking "Cancel" aborts
+        {
+            row.IsCapturing = false;
+            CapturingRow = null;
+            StatusText = "Hotkey capture cancelled.";
+            return;
+        }
         if (CapturingRow != null) CapturingRow.IsCapturing = false;
         CapturingRow = row;
         row.IsCapturing = true;
-        StatusText = $"Press a key combo for '{row.DisplayName}' (hold Ctrl/Alt/Shift then a key; Esc to cancel)…";
+        StatusText = $"Press a key combo for '{row.DisplayName}' (hold Ctrl/Alt/Shift then a key; Esc or Cancel to abort)…";
     }
 
     /// <summary>Called by the code-behind on KeyDown while a row is capturing.
@@ -548,16 +571,17 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 return;
             }
             int ok = 0;
-            // 7 momentary auto-unticking records: Save 1-3, Recall 1-3, Cursor.
+            // 8 momentary auto-unticking records: Save 1-3, Recall 1-3, Cursor, Clear all.
             var specs = new (string Desc, TeleportScriptGenerator.Action Act, int Slot)[]
             {
-                ("Teleport: Save marker 1",   TeleportScriptGenerator.Action.Save,   0),
-                ("Teleport: Save marker 2",   TeleportScriptGenerator.Action.Save,   1),
-                ("Teleport: Save marker 3",   TeleportScriptGenerator.Action.Save,   2),
-                ("Teleport: Recall marker 1", TeleportScriptGenerator.Action.Recall, 0),
-                ("Teleport: Recall marker 2", TeleportScriptGenerator.Action.Recall, 1),
-                ("Teleport: Recall marker 3", TeleportScriptGenerator.Action.Recall, 2),
-                ("Teleport: To cursor",       TeleportScriptGenerator.Action.Cursor, 0),
+                ("Teleport: Save marker 1",   TeleportScriptGenerator.Action.Save,     0),
+                ("Teleport: Save marker 2",   TeleportScriptGenerator.Action.Save,     1),
+                ("Teleport: Save marker 3",   TeleportScriptGenerator.Action.Save,     2),
+                ("Teleport: Recall marker 1", TeleportScriptGenerator.Action.Recall,   0),
+                ("Teleport: Recall marker 2", TeleportScriptGenerator.Action.Recall,   1),
+                ("Teleport: Recall marker 3", TeleportScriptGenerator.Action.Recall,   2),
+                ("Teleport: To cursor",       TeleportScriptGenerator.Action.Cursor,   0),
+                ("Teleport: Clear all markers", TeleportScriptGenerator.Action.ClearAll, 0),
             };
             foreach (var s in specs)
             {
@@ -701,8 +725,12 @@ public partial class TeleportHotkeyRow : ObservableObject
     /// <summary>True while this row is waiting for the user to press a combo.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DisplayLabel))]
+    [NotifyPropertyChangedFor(nameof(CaptureButtonText))]
     private bool _isCapturing;
 
     public bool HasBinding => !string.IsNullOrEmpty(Label);
     public string DisplayLabel => IsCapturing ? "Press keys…" : (HasBinding ? Label : "—");
+
+    /// <summary>"Set" normally, "Cancel" while capturing (the Set button toggles).</summary>
+    public string CaptureButtonText => IsCapturing ? "Cancel" : "Set";
 }
