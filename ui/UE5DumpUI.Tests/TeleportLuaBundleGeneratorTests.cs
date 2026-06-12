@@ -117,6 +117,21 @@ public class TeleportLuaBundleGeneratorTests
     }
 
     [Fact]
+    public void AaRecord_wraps_bundle_in_enable_disable()
+    {
+        var s = TeleportLuaBundleGenerator.GenerateAaRecord(TeleportHotkeyScheme.Numpad);
+        Assert.DoesNotContain("\r", s);
+        Assert.Contains("[ENABLE]", s);
+        Assert.Contains("[DISABLE]", s);
+        Assert.Contains("if syntaxcheck then return end", s);
+        // [ENABLE] registers hotkeys, [DISABLE] tears them down.
+        Assert.Contains("createHotkey(", s);
+        var disable = s.Substring(s.IndexOf("[DISABLE]", System.StringComparison.Ordinal));
+        Assert.Contains("h.destroy()", disable);
+        Assert.Contains("_ue5tpHotkeys = nil", disable);
+    }
+
+    [Fact]
     public void Cursor_params_are_baked_from_arguments()
     {
         var s = TeleportLuaBundleGenerator.Generate(

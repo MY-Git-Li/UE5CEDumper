@@ -519,13 +519,15 @@
     <sys:String x:Key="str.TP.ZOffset">Z offset:</sys:String>
     <sys:String x:Key="str.TP.Channel">Channel:</sys:String>
     <sys:String x:Key="str.TP.FallbackCenter">Fall back to screen center</sys:String>
+    <sys:String x:Key="str.TP.CursorHotkey">Global cursor hotkey (keep game focused)</sys:String>
     <sys:String x:Key="str.TP.BugHeader">BugItGo Interop</sys:String>
     <sys:String x:Key="str.TP.CopyBugItGo">Copy as BugItGo</sys:String>
     <sys:String x:Key="str.TP.RunBugItGo">Run</sys:String>
     <sys:String x:Key="str.TP.BugHint">Paste 'BugItGo X Y Z', 'X Y Z', or a ?BugLoc=(...)?BugRot=(...) string</sys:String>
     <sys:String x:Key="str.TP.CeHeader">CE Export</sys:String>
     <sys:String x:Key="str.TP.Scheme">Hotkey scheme:</sys:String>
-    <sys:String x:Key="str.TP.CopyLua">Copy CE Lua (hotkey bundle)</sys:String>
+    <sys:String x:Key="str.TP.AddHotkeys">Add hotkeys to CE</sys:String>
+    <sys:String x:Key="str.TP.AddActions">Add action records to CE</sys:String>
     <sys:String x:Key="str.TP.SaveCt">Save .CT…</sys:String>
     <sys:String x:Key="str.TP.Warning">⚠ Single-player only. Online games will rubber-band or may flag teleports.</sys:String>
     <sys:String x:Key="str.Tip.TP.Refresh">Read the current pawn's world location and control rotation (DLL resolves the local PlayerController → Pawn → RootComponent via reflection).</sys:String>
@@ -538,11 +540,13 @@
     <sys:String x:Key="str.Tip.TP.ZOffset">Height added above the hit point so the capsule doesn't spawn intersecting the ground (default 100).</sys:String>
     <sys:String x:Key="str.Tip.TP.Channel">ETraceTypeQuery byte. 0 = Visibility (default engine mapping). Games can remap channels — change this if cursor hits land on the wrong surface.</sys:String>
     <sys:String x:Key="str.Tip.TP.FallbackCenter">When the game has no cursor (HD-2D-style), trace from the screen center instead.</sys:String>
+    <sys:String x:Key="str.Tip.TP.CursorHotkey">Bind a system-wide hotkey for cursor teleport so you can keep the game focused (the cursor stays in the game). Auto-picks the first free combo: Ctrl+F8→F5, then Alt+F8→F5. The chosen combo shows beside this box.</sys:String>
     <sys:String x:Key="str.Tip.TP.CopyBugItGo">Read the current pose and copy a 'BugItGo X Y Z' string to the clipboard. (BugIt itself can't return data to the dumper — it writes to the game's own log/clipboard — so this reads the pose directly.)</sys:String>
     <sys:String x:Key="str.Tip.TP.RunBugItGo">Parse the pasted string and teleport there. Works without any CheatManager — feeds X/Y/Z into the same recall path as markers.</sys:String>
-    <sys:String x:Key="str.Tip.TP.CopyLua">Copy a self-contained CE Lua script that binds hotkeys for save/recall/cursor/copy. Paste into a CE 'Table Lua Script'. Requires UE5Dumper.dll injected. No helper Lua needed.</sys:String>
+    <sys:String x:Key="str.Tip.TP.AddHotkeys">Ship a tickable 'Teleport hotkeys' record straight into the open Cheat Engine table via the AOBMaker plugin (and enable it, so hotkeys bind immediately). Ticking the record registers the hotkeys; unticking removes them. Falls back to the clipboard (paste into a CE Table Lua Script) when AOBMaker isn't connected. Requires UE5Dumper.dll injected.</sys:String>
     <sys:String x:Key="str.Tip.TP.Scheme">Numpad: Ctrl+Num1-3 save, Num1-3 recall, Num0 cursor (needs NumLock ON). Top-row: Ctrl+1-3 save, Alt+1-3 recall (for laptops / when Ctrl+1-3 is taken). Both: register both.</sys:String>
-    <sys:String x:Key="str.Tip.TP.SaveCt">Save a Cheat Engine .CT with 7 momentary records (Save 1-3, Recall 1-3, Cursor). Bind hotkeys via the Lua bundle instead — these records have no hotkeys attached.</sys:String>
+    <sys:String x:Key="str.Tip.TP.AddActions">Ship 7 momentary action records (Save 1-3, Recall 1-3, Cursor) into the open Cheat Engine table via AOBMaker — each fires once when ticked and auto-unticks. Bind CE record hotkeys yourself. Requires the AOBMaker plugin connected.</sys:String>
+    <sys:String x:Key="str.Tip.TP.SaveCt">Backup: save a Cheat Engine .CT file with the 7 momentary records, for when AOBMaker isn't connected. Import via CE File → Open.</sys:String>
 
     <!-- Interesting Properties Finder (B' / Unusual Location) -->
     <sys:String x:Key="str.IP.Load">Load</sys:String>

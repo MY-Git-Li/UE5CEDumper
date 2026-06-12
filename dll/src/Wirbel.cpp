@@ -110,11 +110,25 @@ bool ReadVec3Mem(uintptr_t addr, int32_t size, double out[3]) {
 
 // ---- UFunction lookup + param packing ----
 
+// Find a UFunction by name, walking the WHOLE class hierarchy. UFunctions
+// like K2_SetActorLocation / K2_TeleportTo / SetControlRotation are declared
+// on engine base classes (AActor / AController), several levels above the
+// game's concrete pawn/controller subclass — and Ubel::WalkFunctions only
+// enumerates a single UClass's OWN Children chain. So walk class → Super →
+// Super… until the function is found or the chain ends.
 bool FindFunc(uintptr_t classAddr, const char* name, FunctionInfo& out) {
     if (!classAddr || !name) return false;
-    auto funcs = Ubel::WalkFunctions(classAddr);
-    for (const auto& f : funcs) {
-        if (IEquals(f.name, name)) { out = f; return true; }
+    uintptr_t cls = classAddr;
+    for (int guard = 0; cls && guard < 64; ++guard) {
+        auto funcs = Ubel::WalkFunctions(cls);
+        for (const auto& f : funcs) {
+            if (IEquals(f.name, name)) { out = f; return true; }
+        }
+        uintptr_t super = 0;
+        if (!Macht::ReadSafe(cls + static_cast<uintptr_t>(DynOff::USTRUCT_SUPER), super)
+            || super == cls)
+            break;
+        cls = super;
     }
     return false;
 }
@@ -466,11 +480,17 @@ int32_t TeleportPawnTo(const Chain& c, const double xyz[3], const double* destPy
             int32_t r = Invoke(c.pawn, fi, buf);
             if (r == 0 && ReturnedTrue(fi, buf)) {
                 moved = true;
+                LOG_INFO("Teleport: %s invoked OK on pawn 0x%llX -> (%.1f, %.1f, %.1f)",
+                         fi.name.c_str(), (unsigned long long)c.pawn,
+                         xyz[0], xyz[1], xyz[2]);
             } else {
-                LOG_WARN("Teleport: %s %s (r=%d) — trying raw-write fallback",
+                LOG_WARN("Teleport: %s %s (r=%d, parmsSize=%u) — trying raw-write fallback",
                          fi.name.c_str(),
-                         r == 0 ? "returned false" : "invoke failed", r);
+                         r == 0 ? "returned false" : "invoke failed", r, fi.parmsSize);
             }
+        } else {
+            LOG_WARN("Teleport: %s param-pack failed (couldn't locate location param) "
+                     "— raw-write fallback", fi.name.c_str());
         }
     } else {
         LOG_WARN("Teleport: no K2_TeleportTo / K2_SetActorLocation on pawn class — "

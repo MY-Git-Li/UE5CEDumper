@@ -14,6 +14,50 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-12 — Teleport fixes: super-chain lookup, AOBMaker injection, cursor hotkey (build 1035)
+
+Live-test follow-up to the teleport feature below (both TQ2 / UE5 and SEED
+Battle Destiny / UE4.27 reproduced the same bug).
+
+**(1) Core bug — recall did nothing.** Logs showed `no K2_TeleportTo /
+K2_SetActorLocation on pawn class — raw-write fallback` on both games. Root
+cause: `Wirbel::FindFunc` used `Ubel::WalkFunctions(classAddr)`, which only
+enumerates a class's OWN function chain — but `K2_SetActorLocation` /
+`K2_TeleportTo` are declared on **AActor**, several levels above the game's
+concrete pawn subclass. So every teleport fell to the tier-2 raw
+`RelativeLocation` write, which CharacterMovement overwrites each tick → no
+visible move. (Debug Camera worked because `ToggleDebugCamera` is on
+`UCheatManager` itself.) **Fix:** `FindFunc` now walks the class → Super →
+Super… chain (`DynOff::USTRUCT_SUPER`), so inherited engine UFunctions resolve.
+Same fix unblocks `SetControlRotation` (AController), `StopMovementImmediately`
+(UMovementComponent), and the cursor functions (APlayerController). Added
+invoke-success / param-pack-fail logging.
+
+**(2) CE export now injects via AOBMaker (was clipboard).** "Add hotkeys to CE"
+ships a tickable `Teleport hotkeys` AA-script record straight into the open CE
+table via `CreateAAScript` (autoActivate — hotkeys bind immediately; untick to
+remove), mirroring the Debug Camera "Copy CE Script" path; clipboard is the
+fallback. New "Add action records to CE" pushes the 7 momentary records the
+same way. **Save .CT** demoted to a backup. New
+`TeleportLuaBundleGenerator.GenerateAaRecord` wraps the bundle as
+`[ENABLE]/[DISABLE]`.
+
+**(3) Global cursor hotkey.** Cursor teleport is unusable from a UI button
+(switching to the UI moves the cursor out of the game). New
+`WindowsGlobalHotkeyService` (`IGlobalHotkeyService`) registers an OS-global
+hotkey via `RegisterHotKey` on a dedicated message-loop thread, auto-picking
+the first free combo from Ctrl+F8→F5 then Alt+F8→F5 (RegisterHotKey failing on
+a taken combo IS the "is it free?" probe). A panel checkbox toggles it and
+shows the chosen combo; the user keeps the game focused and presses it.
+AOT-safe blittable DllImports.
+
+**(4) Channel field** widened (was clipped to "(").
+
+Build + 1385 C# / 452 dll / 31 utf8 tests green. ⚠ recall/cursor still
+LIVE-VERIFY PENDING with the super-chain fix in place.
+
+-----
+
 ## 2026-06-12 — Teleport (BugIt-style): marker save/recall + cursor teleport (build 1027)
 
 Universal teleport feature, DLL-side following the Debug Camera pattern

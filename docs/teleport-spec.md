@@ -12,6 +12,21 @@
 > - Module is **`Wirbel`** (`dll/src/Wirbel.cpp/.h`); the shared field-offset
 >   helper landed as **`Ubel::FindField` / `Ubel::FindFieldOffset`** (the
 >   Debug Camera `DbgCam_FieldOffset` now wraps it).
+> - **UFunction lookup walks the class Super chain** (build 1035 fix). The
+>   spec assumed reflection would find inherited functions; `Ubel::WalkFunctions`
+>   only lists a class's OWN functions, and `K2_SetActorLocation` / `K2_TeleportTo`
+>   live on `AActor`, so `Wirbel::FindFunc` now climbs class → Super → … Without
+>   this every recall fell to the tier-2 raw write (which CharacterMovement
+>   overwrites) → "recall does nothing".
+> - **CE export injects via AOBMaker** (build 1035), not clipboard: "Add hotkeys
+>   to CE" = `CreateAAScript` tickable record (`GenerateAaRecord`), "Add action
+>   records to CE" = 7 momentary `CreateAAScript` records; clipboard/.CT are
+>   fallbacks. The §9.2A "paste into CE" clipboard path is the fallback now.
+> - **Global cursor hotkey** (build 1035): `WindowsGlobalHotkeyService` /
+>   `IGlobalHotkeyService` registers an OS hotkey (Ctrl+F8→F5, then Alt+F8→F5,
+>   first free wins) so cursor teleport works with the game focused — the §6.2
+>   cursor flow can't be driven from a UI button (focus moves the cursor out of
+>   the game).
 > - Teleport tab is **appended last** in the TabControl (`MainTabIndex.Teleport`)
 >   so existing indices never shift; the hidden experimental tabs collapse, so
 >   it renders right after Proxy Deploy when experimental mode is off.

@@ -284,7 +284,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         IAobMakerBridge? aobMaker = null,
         IProxyDeployService? proxyDeploy = null,
         IExperimentalGate? experimentalGate = null,
-        ISnapshotStore? snapshotStore = null)
+        ISnapshotStore? snapshotStore = null,
+        IGlobalHotkeyService? globalHotkeys = null)
     {
         _pipeClient = pipeClient;
         _dump = dump;
@@ -315,7 +316,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         InterestingProperties = new InterestingPropertiesViewModel(dump, log, platform);
         ValueSearch = new ValueSearchViewModel(dump, log);
         Console = new ConsoleViewModel(dump, log);
-        Teleport = new TeleportViewModel(dump, log, platform);
+        Teleport = new TeleportViewModel(dump, log, platform, aobMaker, globalHotkeys);
         if (snapshotStore != null)
         {
             Snapshot = new SnapshotViewModel(dump, snapshotStore, log, experimentalGate, platform);

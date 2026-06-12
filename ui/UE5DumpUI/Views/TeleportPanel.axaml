@@ -123,13 +123,25 @@
             <TextBlock Text="{StaticResource str.TP.Channel}" Foreground="#999999"
                        VerticalAlignment="Center"/>
             <NumericUpDown Value="{Binding TraceChannel}" Minimum="0" Maximum="32"
-                           Increment="1" Width="90"
+                           Increment="1" Width="130" Padding="4,2"
                            ToolTip.Tip="{StaticResource str.Tip.TP.Channel}"/>
           </StackPanel>
           <CheckBox Content="{StaticResource str.TP.FallbackCenter}"
                     IsChecked="{Binding FallbackToCenter}"
                     ToolTip.Tip="{StaticResource str.Tip.TP.FallbackCenter}"
                     Foreground="#CCCCCC" FontSize="12"/>
+          <StackPanel Orientation="Horizontal" Spacing="8"
+                      IsVisible="{Binding CanBindCursorHotkey}">
+            <CheckBox Content="{StaticResource str.TP.CursorHotkey}"
+                      IsChecked="{Binding CursorHotkeyEnabled}"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.CursorHotkey}"
+                      Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center"/>
+            <Border Background="#333337" CornerRadius="3" Padding="6,1"
+                    IsVisible="{Binding CursorHotkeyLabel, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+              <TextBlock Text="{Binding CursorHotkeyLabel}" Foreground="#4EC9B0"
+                         FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            </Border>
+          </StackPanel>
         </StackPanel>
       </Border>
 
@@ -171,9 +183,13 @@
                       SelectedIndex="{Binding HotkeySchemeIndex}"
                       ToolTip.Tip="{StaticResource str.Tip.TP.Scheme}"
                       Width="170"/>
-            <Button Content="{StaticResource str.TP.CopyLua}"
-                    Command="{Binding CopyLuaBundleCommand}"
-                    ToolTip.Tip="{StaticResource str.Tip.TP.CopyLua}"
+            <Button Content="{StaticResource str.TP.AddHotkeys}"
+                    Command="{Binding AddHotkeysToCeCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.AddHotkeys}"
+                    Classes="accent" Padding="12,4"/>
+            <Button Content="{StaticResource str.TP.AddActions}"
+                    Command="{Binding AddActionsToCeCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.AddActions}"
                     Padding="12,4"/>
             <Button Content="{StaticResource str.TP.SaveCt}"
                     Command="{Binding SaveCtCommand}"

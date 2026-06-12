@@ -58,7 +58,8 @@ public static class TeleportLuaBundleGenerator
     private sealed record ActionHotkeys(string FuncCall, List<Binding> Bindings, string Label);
 
     /// <summary>Build the full bundle script for the given scheme + cursor
-    /// parameters. Line endings are LF only (CE-friendly).</summary>
+    /// parameters. Line endings are LF only (CE-friendly). This is the raw
+    /// form — paste into a CE 'Table Lua Script' or the Lua Engine window.</summary>
     public static string Generate(
         TeleportHotkeyScheme scheme = TeleportHotkeyScheme.Numpad,
         double zOffset = 100.0,
@@ -71,6 +72,37 @@ public static class TeleportLuaBundleGenerator
         EmitHeader(sb, scheme, actions, zOffset, channel, fallbackCenter);
         EmitMailboxHelpers(sb, zOffset, channel, fallbackCenter);
         EmitHotkeyRegistration(sb, actions);
+        return sb.ToString();
+    }
+
+    /// <summary>Build the bundle wrapped as a CE memory-record AA Script, for
+    /// shipping straight into the CE table via AOBMaker (CreateAAScript).
+    /// Ticking the record registers the hotkeys ([ENABLE]); unticking destroys
+    /// them ([DISABLE]). Same mailbox / hotkey body as <see cref="Generate"/>.</summary>
+    public static string GenerateAaRecord(
+        TeleportHotkeyScheme scheme = TeleportHotkeyScheme.Numpad,
+        double zOffset = 100.0,
+        int channel = 0,
+        bool fallbackCenter = true)
+    {
+        var actions = BuildActions(scheme);
+
+        var sb = new StringBuilder(4096);
+        Line(sb, "[ENABLE]");
+        Line(sb, "{$lua}");
+        Line(sb, "if syntaxcheck then return end");
+        EmitHeader(sb, scheme, actions, zOffset, channel, fallbackCenter);
+        EmitMailboxHelpers(sb, zOffset, channel, fallbackCenter);
+        EmitHotkeyRegistration(sb, actions);
+        Line(sb, "{$asm}");
+        Line(sb, "[DISABLE]");
+        Line(sb, "{$lua}");
+        Line(sb, "if _ue5tpHotkeys then");
+        Line(sb, "  for _, h in ipairs(_ue5tpHotkeys) do pcall(function() h.destroy() end) end");
+        Line(sb, "  _ue5tpHotkeys = nil");
+        Line(sb, "end");
+        Line(sb, "print('[Teleport] hotkeys removed.')");
+        Line(sb, "{$asm}");
         return sb.ToString();
     }
 

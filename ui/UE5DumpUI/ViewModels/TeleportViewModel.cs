@@ -20,17 +20,27 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     private readonly IDumpService _dump;
     private readonly ILoggingService _log;
     private readonly IPlatformService _platform;
+    private readonly IAobMakerBridge? _aobMaker;
+    private readonly IGlobalHotkeyService? _globalHotkeys;
+    private IGlobalHotkeyRegistration? _cursorHotkey;
     private Avalonia.Threading.DispatcherTimer? _autoTimer;
     private bool _disposed;
 
-    public TeleportViewModel(IDumpService dump, ILoggingService log, IPlatformService platform)
+    public TeleportViewModel(IDumpService dump, ILoggingService log, IPlatformService platform,
+        IAobMakerBridge? aobMaker = null, IGlobalHotkeyService? globalHotkeys = null)
     {
         _dump = dump;
         _log = log;
         _platform = platform;
+        _aobMaker = aobMaker;
+        _globalHotkeys = globalHotkeys;
         for (int i = 0; i < 3; i++)
             Markers.Add(new TeleportMarkerRow { Slot = i });
     }
+
+    /// <summary>Whether a global cursor-teleport hotkey can be offered
+    /// (a hotkey service was supplied — false in headless tests).</summary>
+    public bool CanBindCursorHotkey => _globalHotkeys != null;
 
     // ── Connection gating ──────────────────────────────────────────────
     [ObservableProperty]
@@ -62,6 +72,12 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private double _zOffset = 100.0;
     [ObservableProperty] private int _traceChannel;      // ETraceTypeQuery byte
     [ObservableProperty] private bool _fallbackToCenter = true;
+
+    /// <summary>Global cursor-teleport hotkey toggle. When on, the dumper grabs
+    /// the first free combo (Ctrl+F8→F5, then Alt+F8→F5) so the user can keep
+    /// the game focused (cursor in the game) and fire a cursor teleport.</summary>
+    [ObservableProperty] private bool _cursorHotkeyEnabled;
+    [ObservableProperty] private string _cursorHotkeyLabel = "";
 
     // ── BugItGo interop ────────────────────────────────────────────────
     [ObservableProperty] private string _bugItGoInput = "";
@@ -98,6 +114,45 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             StatusText = "Not connected";
             AutoRefresh = false;
         }
+    }
+
+    partial void OnCursorHotkeyEnabledChanged(bool value)
+    {
+        if (value)
+        {
+            if (_globalHotkeys == null) { CursorHotkeyEnabled = false; return; }
+            _cursorHotkey?.Dispose();
+            _cursorHotkey = _globalHotkeys.RegisterCursorHotkey(OnCursorHotkeyPressed);
+            if (_cursorHotkey == null)
+            {
+                CursorHotkeyLabel = "";
+                CursorHotkeyEnabled = false;
+                StatusText = "Could not bind a cursor hotkey — Ctrl/Alt+F5..F8 are all taken.";
+            }
+            else
+            {
+                CursorHotkeyLabel = _cursorHotkey.Label;
+                StatusText = $"Cursor teleport bound to {_cursorHotkey.Label} — keep the game " +
+                             "focused and press it to teleport to the cursor.";
+                _log.Info($"Teleport: cursor hotkey bound to {_cursorHotkey.Label}");
+            }
+        }
+        else
+        {
+            _cursorHotkey?.Dispose();
+            _cursorHotkey = null;
+            CursorHotkeyLabel = "";
+        }
+    }
+
+    // Fires on the hotkey thread → marshal to the UI thread, then teleport.
+    private void OnCursorHotkeyPressed()
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (CanOperate && TeleportToCursorCommand.CanExecute(null))
+                _ = TeleportToCursorCommand.ExecuteAsync(null);
+        });
     }
 
     partial void OnAutoRefreshChanged(bool value)
@@ -326,20 +381,83 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
-    private async Task CopyLuaBundleAsync()
+    private async Task AddHotkeysToCeAsync()
     {
         try
         {
+            ClearError();
+            // Primary path: ship a tickable AA-script record into the CE table
+            // via AOBMaker (same mechanism as the Debug Camera "Copy CE Script").
+            // Ticking it registers the hotkeys; unticking removes them.
+            bool available = _aobMaker != null && await _aobMaker.CheckAvailabilityAsync();
+            if (available)
+            {
+                string record = TeleportLuaBundleGenerator.GenerateAaRecord(
+                    Scheme, ZOffset, TraceChannel, FallbackToCenter);
+                bool ok = await _aobMaker!.CreateAAScriptAsync(
+                    $"Teleport hotkeys ({Scheme}) — UE5CEDumper", record, autoActivate: true);
+                StatusText = ok
+                    ? $"Teleport hotkeys record added to CE and enabled ({Scheme})."
+                    : "AOBMaker rejected the hotkeys record — see logs.";
+                _log.Info($"Teleport hotkeys -> CE via AOBMaker (scheme={Scheme}, ok={ok})");
+                if (ok) return;
+            }
+            // Fallback: clipboard (paste into a CE Table Lua Script).
             string lua = TeleportLuaBundleGenerator.Generate(
                 Scheme, ZOffset, TraceChannel, FallbackToCenter);
             await _platform.CopyToClipboardAsync(lua);
-            StatusText = $"Teleport CE Lua bundle copied ({Scheme} hotkeys) — paste into CE.";
-            _log.Info($"Teleport Lua bundle copied (scheme={Scheme})");
+            StatusText = available
+                ? "AOBMaker injection failed — Lua bundle copied to clipboard (paste into a CE Table Lua Script)."
+                : "AOBMaker not connected — Lua bundle copied to clipboard (paste into a CE Table Lua Script).";
+            _log.Info($"Teleport Lua bundle copied to clipboard (scheme={Scheme})");
         }
         catch (Exception ex)
         {
             SetError(ex);
-            _log.Error("Teleport CopyLuaBundle failed", ex);
+            _log.Error("Teleport AddHotkeysToCe failed", ex);
+        }
+    }
+
+    [RelayCommand]
+    private async Task AddActionsToCeAsync()
+    {
+        try
+        {
+            ClearError();
+            bool available = _aobMaker != null && await _aobMaker.CheckAvailabilityAsync();
+            if (!available)
+            {
+                StatusText = "AOBMaker not connected — use 'Save .CT' instead " +
+                             "(open Cheat Engine with the AOBMaker plugin loaded).";
+                return;
+            }
+            int ok = 0;
+            // 7 momentary auto-unticking records: Save 1-3, Recall 1-3, Cursor.
+            var specs = new (string Desc, TeleportScriptGenerator.Action Act, int Slot)[]
+            {
+                ("Teleport: Save marker 1",   TeleportScriptGenerator.Action.Save,   0),
+                ("Teleport: Save marker 2",   TeleportScriptGenerator.Action.Save,   1),
+                ("Teleport: Save marker 3",   TeleportScriptGenerator.Action.Save,   2),
+                ("Teleport: Recall marker 1", TeleportScriptGenerator.Action.Recall, 0),
+                ("Teleport: Recall marker 2", TeleportScriptGenerator.Action.Recall, 1),
+                ("Teleport: Recall marker 3", TeleportScriptGenerator.Action.Recall, 2),
+                ("Teleport: To cursor",       TeleportScriptGenerator.Action.Cursor, 0),
+            };
+            foreach (var s in specs)
+            {
+                string script = TeleportScriptGenerator.Generate(
+                    s.Act, s.Slot, ZOffset, TraceChannel, FallbackToCenter);
+                if (await _aobMaker!.CreateAAScriptAsync(s.Desc, script, autoActivate: false))
+                    ok++;
+            }
+            StatusText = $"Added {ok}/{specs.Length} Teleport action records to CE " +
+                         "(tick a record to fire it once; bind CE hotkeys as you like).";
+            _log.Info($"Teleport actions -> CE via AOBMaker ({ok}/{specs.Length})");
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport AddActionsToCe failed", ex);
         }
     }
 
@@ -432,6 +550,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             _autoTimer.Tick -= AutoTick;
             _autoTimer = null;
         }
+        _cursorHotkey?.Dispose();
+        _cursorHotkey = null;
         GC.SuppressFinalize(this);
     }
 }

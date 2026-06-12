@@ -236,12 +236,13 @@ public class TeleportViewModelTests
     }
 
     [Fact]
-    public async Task CopyLuaBundle_uses_selected_scheme()
+    public async Task AddHotkeysToCe_without_aobmaker_falls_back_to_clipboard_with_scheme()
     {
+        // No AOBMaker bridge supplied → falls back to clipboard (raw bundle).
         var vm = CreateVm(new FakeDumpService(), out var platform);
         vm.HotkeySchemeIndex = 1;   // Top-row
 
-        await vm.CopyLuaBundleCommand.ExecuteAsync(null);
+        await vm.AddHotkeysToCeCommand.ExecuteAsync(null);
 
         Assert.NotNull(platform.LastClipboard);
         // Top-row recall uses Alt+1 (0x12, 0x31), not numpad.
