@@ -18,8 +18,18 @@ public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
     public IGlobalHotkeyRegistration? RegisterCursorHotkey(Action onPressed)
     {
         if (!OperatingSystem.IsWindows()) return null;
-        var reg = new Registration(onPressed);
-        return reg.Label != null ? reg : null;
+        try
+        {
+            var reg = new Registration(onPressed);
+            if (reg.Label != null) return reg;
+            reg.Dispose();   // failed to claim a combo — tear the thread down
+            return null;
+        }
+        catch
+        {
+            // Never let hotkey setup take down the app — degrade to "no hotkey".
+            return null;
+        }
     }
 
     // Candidate ladder (docs/teleport-spec.md cursor hotkey): Ctrl+F8..F5 first
@@ -47,6 +57,13 @@ public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
     {
         private const int HotkeyId = 0xB1F0;   // arbitrary, unique within our thread
         private readonly Thread _thread;
+        // IMPORTANT: this event is NOT disposed in the ctor. ManualResetEventSlim
+        // forbids Dispose() concurrent with Set() (docs), and the worker calls
+        // Set() right as the ctor's Wait() returns — a `using` here raced Set()
+        // against Dispose() and crashed the process natively (the "CTD right
+        // after 'cursor hotkey bound'" symptom). It is disposed in Dispose()
+        // only AFTER the worker thread has joined, so Set() is fully finished.
+        private readonly ManualResetEventSlim _ready = new(false);
         private uint _threadId;
         private volatile bool _disposed;
 
@@ -55,8 +72,6 @@ public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
 
         public Registration(Action onPressed)
         {
-            using var ready = new ManualResetEventSlim(false);
-
             _thread = new Thread(() =>
             {
                 _threadId = GetCurrentThreadId();
@@ -72,7 +87,7 @@ public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
                         break;
                     }
                 }
-                ready.Set();
+                _ready.Set();
                 if (chosen < 0) return;
 
                 // Message loop: WM_HOTKEY → fire; WM_QUIT (from Dispose) → exit.
@@ -90,19 +105,20 @@ public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
                 Name = "UE5CEDumper-CursorHotkey",
             };
             _thread.Start();
-            ready.Wait(2000);
+            _ready.Wait(2000);
         }
 
         public void Dispose()
         {
             if (_disposed) return;
             _disposed = true;
-            if (Label != null && _threadId != 0)
-            {
-                // Break the GetMessage loop; the thread then unregisters the key.
+            // Break the GetMessage loop (no-op if the worker already exited after
+            // a failed registration). Then join so the worker is fully done
+            // before we dispose the event it touched.
+            if (_threadId != 0)
                 PostThreadMessage(_threadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
-                _thread.Join(2000);
-            }
+            _thread.Join(2000);
+            _ready.Dispose();
         }
     }
 
