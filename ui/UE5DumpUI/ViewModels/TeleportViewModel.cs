@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
@@ -22,8 +23,14 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     private readonly IPlatformService _platform;
     private readonly IAobMakerBridge? _aobMaker;
     private readonly IGlobalHotkeyService? _globalHotkeys;
+    private readonly TeleportHotkeyStore? _hotkeyStore;
     private IGlobalHotkeyRegistration? _cursorHotkey;
+    // Live marker-hotkey registrations + the persisted combos, both keyed by
+    // action id ("save0".."recall2").
+    private readonly Dictionary<string, IGlobalHotkeyRegistration> _markerHotkeys = new();
+    private readonly Dictionary<string, TeleportHotkeyBinding> _bindings = new(StringComparer.Ordinal);
     private Avalonia.Threading.DispatcherTimer? _autoTimer;
+    private int _autoTick;
     private bool _disposed;
 
     public TeleportViewModel(IDumpService dump, ILoggingService log, IPlatformService platform,
@@ -36,11 +43,38 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         _globalHotkeys = globalHotkeys;
         for (int i = 0; i < 3; i++)
             Markers.Add(new TeleportMarkerRow { Slot = i });
+
+        // Marker hotkey rows: Save 1-3, Recall 1-3 (Force stays UI-button only).
+        for (int i = 0; i < 3; i++)
+            HotkeyRows.Add(new TeleportHotkeyRow { ActionId = $"save{i}", DisplayName = $"Save marker {i + 1}" });
+        for (int i = 0; i < 3; i++)
+            HotkeyRows.Add(new TeleportHotkeyRow { ActionId = $"recall{i}", DisplayName = $"Recall marker {i + 1}" });
+
+        if (_globalHotkeys != null)
+        {
+            _hotkeyStore = new TeleportHotkeyStore(platform);
+            LoadAndRegisterHotkeys();
+        }
     }
 
-    /// <summary>Whether a global cursor-teleport hotkey can be offered
-    /// (a hotkey service was supplied — false in headless tests).</summary>
+    /// <summary>Whether global teleport hotkeys can be offered (a hotkey service
+    /// was supplied — false in headless tests).</summary>
     public bool CanBindCursorHotkey => _globalHotkeys != null;
+
+    /// <summary>Per-action marker hotkey rows shown in the panel.</summary>
+    public ObservableCollection<TeleportHotkeyRow> HotkeyRows { get; } = new();
+
+    /// <summary>The row currently capturing a key combo (null when idle). The
+    /// panel code-behind feeds KeyDown here while non-null.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsCapturingHotkey))]
+    private TeleportHotkeyRow? _capturingRow;
+
+    public bool IsCapturingHotkey => CapturingRow != null;
+
+    /// <summary>"Save marker 1 fired @ 19:48:50" — last time any global teleport
+    /// hotkey triggered, so the user can confirm the hotkey is live.</summary>
+    [ObservableProperty] private string _lastHotkeyFired = "";
 
     // ── Connection gating ──────────────────────────────────────────────
     [ObservableProperty]
@@ -82,21 +116,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     // ── BugItGo interop ────────────────────────────────────────────────
     [ObservableProperty] private string _bugItGoInput = "";
 
-    // ── CE export ──────────────────────────────────────────────────────
-    /// <summary>0 = Numpad, 1 = Top-row, 2 = Both (matches HotkeySchemeOptions).</summary>
-    [ObservableProperty] private int _hotkeySchemeIndex;
-
-    public ObservableCollection<string> HotkeySchemeOptions { get; } =
-        new() { "Numpad (default)", "Top-row", "Both" };
-
     public ObservableCollection<TeleportMarkerRow> Markers { get; } = new();
-
-    private TeleportHotkeyScheme Scheme => HotkeySchemeIndex switch
-    {
-        1 => TeleportHotkeyScheme.TopRow,
-        2 => TeleportHotkeyScheme.Both,
-        _ => TeleportHotkeyScheme.Numpad,
-    };
 
     /// <summary>Called by MainWindowViewModel on connect/disconnect. On connect,
     /// the marker list is refreshed (markers live in the DLL — they survive a UI
@@ -150,6 +170,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
+            MarkHotkeyFired("Cursor teleport");
             if (CanOperate && TeleportToCursorCommand.CanExecute(null))
                 _ = TeleportToCursorCommand.ExecuteAsync(null);
         });
@@ -165,6 +186,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             };
             _autoTimer.Tick -= AutoTick;
             _autoTimer.Tick += AutoTick;
+            _autoTick = 0;
             _autoTimer.Start();
         }
         else
@@ -175,8 +197,27 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
 
     private async void AutoTick(object? sender, EventArgs e)
     {
-        if (!CanOperate) return;
-        await RefreshPoseAsync();
+        if (!IsConnected) return;
+        // Quiet poll: does NOT toggle IsBusy, so the buttons (bound to
+        // CanOperate) don't flicker disabled/enabled twice a second.
+        await RefreshPoseQuietAsync();
+        // Re-pull markers every ~2s so changes made via CE Lua / global hotkeys
+        // (which the UI didn't initiate) show up.
+        if (++_autoTick % 4 == 0)
+            await RefreshMarkersAsync();
+    }
+
+    private async Task RefreshPoseQuietAsync()
+    {
+        try
+        {
+            var p = await _dump.TeleportGetPoseAsync();
+            if (p.Code == TeleportCodes.Ok) ApplyPose(p);
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Teleport auto-refresh failed", ex);
+        }
     }
 
     // ── Commands ───────────────────────────────────────────────────────
@@ -380,42 +421,117 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         finally { IsBusy = false; }
     }
 
-    [RelayCommand]
-    private async Task AddHotkeysToCeAsync()
+    // ── Marker global hotkeys (user-set via key capture) ────────────────
+
+    private void LoadAndRegisterHotkeys()
     {
-        try
+        if (_hotkeyStore == null || _globalHotkeys == null) return;
+        var saved = _hotkeyStore.Load();
+        foreach (var row in HotkeyRows)
         {
-            ClearError();
-            // Primary path: ship a tickable AA-script record into the CE table
-            // via AOBMaker (same mechanism as the Debug Camera "Copy CE Script").
-            // Ticking it registers the hotkeys; unticking removes them.
-            bool available = _aobMaker != null && await _aobMaker.CheckAvailabilityAsync();
-            if (available)
+            if (!saved.TryGetValue(row.ActionId, out var b)) continue;
+            if (RegisterMarkerHotkey(row.ActionId, b))
             {
-                string record = TeleportLuaBundleGenerator.GenerateAaRecord(
-                    Scheme, ZOffset, TraceChannel, FallbackToCenter);
-                bool ok = await _aobMaker!.CreateAAScriptAsync(
-                    $"Teleport hotkeys ({Scheme}) — UE5CEDumper", record, autoActivate: true);
-                StatusText = ok
-                    ? $"Teleport hotkeys record added to CE and enabled ({Scheme})."
-                    : "AOBMaker rejected the hotkeys record — see logs.";
-                _log.Info($"Teleport hotkeys -> CE via AOBMaker (scheme={Scheme}, ok={ok})");
-                if (ok) return;
+                _bindings[row.ActionId] = b;
+                row.Label = b.Label;
             }
-            // Fallback: clipboard (paste into a CE Table Lua Script).
-            string lua = TeleportLuaBundleGenerator.Generate(
-                Scheme, ZOffset, TraceChannel, FallbackToCenter);
-            await _platform.CopyToClipboardAsync(lua);
-            StatusText = available
-                ? "AOBMaker injection failed — Lua bundle copied to clipboard (paste into a CE Table Lua Script)."
-                : "AOBMaker not connected — Lua bundle copied to clipboard (paste into a CE Table Lua Script).";
-            _log.Info($"Teleport Lua bundle copied to clipboard (scheme={Scheme})");
         }
-        catch (Exception ex)
+    }
+
+    private bool RegisterMarkerHotkey(string actionId, TeleportHotkeyBinding b)
+    {
+        if (_globalHotkeys == null) return false;
+        if (_markerHotkeys.TryGetValue(actionId, out var old))
         {
-            SetError(ex);
-            _log.Error("Teleport AddHotkeysToCe failed", ex);
+            old.Dispose();
+            _markerHotkeys.Remove(actionId);
         }
+        var reg = _globalHotkeys.RegisterSpecific(b.WinMods, b.Vk, b.Label,
+            () => OnMarkerHotkeyPressed(actionId));
+        if (reg == null) return false;
+        _markerHotkeys[actionId] = reg;
+        return true;
+    }
+
+    private void OnMarkerHotkeyPressed(string actionId)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            var row = HotkeyRows.FirstOrDefault(r => r.ActionId == actionId);
+            MarkHotkeyFired(row?.DisplayName ?? actionId);
+            if (!CanOperate) return;
+            int slot = actionId[^1] - '0';
+            if (actionId.StartsWith("save", StringComparison.Ordinal))
+                _ = SaveMarkerCommand.ExecuteAsync(slot);
+            else if (actionId.StartsWith("recall", StringComparison.Ordinal))
+                _ = RecallMarkerCommand.ExecuteAsync(slot);
+        });
+    }
+
+    private void MarkHotkeyFired(string what)
+        => LastHotkeyFired = $"{what} fired @ {DateTime.Now:HH:mm:ss}";
+
+    /// <summary>Begin capturing a key combo for a marker hotkey row. The panel
+    /// code-behind forwards the next KeyDown to <see cref="ApplyCapturedKey"/>.</summary>
+    [RelayCommand]
+    private void BeginCapture(TeleportHotkeyRow? row)
+    {
+        if (row == null || _globalHotkeys == null) return;
+        if (CapturingRow != null) CapturingRow.IsCapturing = false;
+        CapturingRow = row;
+        row.IsCapturing = true;
+        StatusText = $"Press a key combo for '{row.DisplayName}' (hold Ctrl/Alt/Shift then a key; Esc to cancel)…";
+    }
+
+    /// <summary>Called by the code-behind on KeyDown while a row is capturing.
+    /// Returns true when the capture consumed the key (handled).</summary>
+    public bool ApplyCapturedKey(Avalonia.Input.Key key, Avalonia.Input.KeyModifiers mods)
+    {
+        var row = CapturingRow;
+        if (row == null) return false;
+
+        if (key == Avalonia.Input.Key.Escape)
+        {
+            row.IsCapturing = false;
+            CapturingRow = null;
+            StatusText = "Hotkey capture cancelled.";
+            return true;
+        }
+        if (!HotkeyKeyMap.TryConvert(key, mods, out uint winMods, out uint vk, out string label))
+            return false;   // modifier-only / unsupported → keep listening
+
+        row.IsCapturing = false;
+        CapturingRow = null;
+
+        var binding = new TeleportHotkeyBinding(winMods, vk);
+        if (!RegisterMarkerHotkey(row.ActionId, binding))
+        {
+            StatusText = $"'{label}' is already in use by another app — pick a different combo.";
+            return true;
+        }
+        _bindings[row.ActionId] = binding;
+        row.Label = label;
+        _hotkeyStore?.Save(_bindings);
+        StatusText = $"'{row.DisplayName}' bound to {label}. Keep the game focused and press it.";
+        _log.Info($"Teleport: {row.ActionId} hotkey bound to {label}");
+        return true;
+    }
+
+    [RelayCommand]
+    private void ClearHotkey(TeleportHotkeyRow? row)
+    {
+        if (row == null) return;
+        if (_markerHotkeys.TryGetValue(row.ActionId, out var reg))
+        {
+            reg.Dispose();
+            _markerHotkeys.Remove(row.ActionId);
+        }
+        _bindings.Remove(row.ActionId);
+        _hotkeyStore?.Save(_bindings);
+        row.Label = "";
+        row.IsCapturing = false;
+        if (CapturingRow == row) CapturingRow = null;
+        StatusText = $"'{row.DisplayName}' hotkey cleared.";
     }
 
     [RelayCommand]
@@ -552,6 +668,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         }
         _cursorHotkey?.Dispose();
         _cursorHotkey = null;
+        foreach (var reg in _markerHotkeys.Values) reg.Dispose();
+        _markerHotkeys.Clear();
         GC.SuppressFinalize(this);
     }
 }
@@ -565,4 +683,26 @@ public partial class TeleportMarkerRow : ObservableObject
 
     /// <summary>1-based label for the UI ("Marker 1").</summary>
     public string Label => $"Marker {Slot + 1}";
+}
+
+/// <summary>One user-settable marker-hotkey row (Save/Recall × slot).</summary>
+public partial class TeleportHotkeyRow : ObservableObject
+{
+    /// <summary>Stable id: "save0".."save2" / "recall0".."recall2".</summary>
+    public string ActionId { get; init; } = "";
+    public string DisplayName { get; init; } = "";
+
+    /// <summary>Current bound combo label (e.g. "Ctrl+F7"), or "" when unset.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasBinding))]
+    [NotifyPropertyChangedFor(nameof(DisplayLabel))]
+    private string _label = "";
+
+    /// <summary>True while this row is waiting for the user to press a combo.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayLabel))]
+    private bool _isCapturing;
+
+    public bool HasBinding => !string.IsNullOrEmpty(Label);
+    public string DisplayLabel => IsCapturing ? "Press keys…" : (HasBinding ? Label : "—");
 }

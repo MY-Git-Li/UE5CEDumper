@@ -16,13 +16,20 @@ namespace UE5DumpUI.Services;
 public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
 {
     public IGlobalHotkeyRegistration? RegisterCursorHotkey(Action onPressed)
+        => TryRegister(CursorCandidates, onPressed);
+
+    public IGlobalHotkeyRegistration? RegisterSpecific(uint modifiers, uint vk, string label, Action onPressed)
+        => TryRegister(new[] { (modifiers, (int)vk, label) }, onPressed);
+
+    private static IGlobalHotkeyRegistration? TryRegister(
+        (uint Mod, int Vk, string Label)[] candidates, Action onPressed)
     {
         if (!OperatingSystem.IsWindows()) return null;
         try
         {
-            var reg = new Registration(onPressed);
+            var reg = new Registration(candidates, onPressed);
             if (reg.Label != null) return reg;
-            reg.Dispose();   // failed to claim a combo — tear the thread down
+            reg.Dispose();   // no candidate claimable — tear the thread down
             return null;
         }
         catch
@@ -32,25 +39,23 @@ public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
         }
     }
 
-    // Candidate ladder (docs/teleport-spec.md cursor hotkey): Ctrl+F8..F5 first
-    // (ARPGs rarely bind Ctrl+F-keys), then Alt+F8..F5 as the fallback rung.
-    private const uint MOD_ALT = 0x0001;
-    private const uint MOD_CONTROL = 0x0002;
+    // Candidate ladder for the cursor hotkey (docs/teleport-spec.md): Ctrl+F8..F5
+    // first (ARPGs rarely bind Ctrl+F-keys), then Alt+F8..F5 as the fallback rung.
     private const uint MOD_NOREPEAT = 0x4000;
     private const uint WM_HOTKEY = 0x0312;
     private const uint WM_QUIT = 0x0012;
     private const int VK_F5 = 0x74, VK_F6 = 0x75, VK_F7 = 0x76, VK_F8 = 0x77;
 
-    private static readonly (uint Mod, int Vk, string Label)[] Candidates =
+    private static readonly (uint Mod, int Vk, string Label)[] CursorCandidates =
     {
-        (MOD_CONTROL, VK_F8, "Ctrl+F8"),
-        (MOD_CONTROL, VK_F7, "Ctrl+F7"),
-        (MOD_CONTROL, VK_F6, "Ctrl+F6"),
-        (MOD_CONTROL, VK_F5, "Ctrl+F5"),
-        (MOD_ALT,     VK_F8, "Alt+F8"),
-        (MOD_ALT,     VK_F7, "Alt+F7"),
-        (MOD_ALT,     VK_F6, "Alt+F6"),
-        (MOD_ALT,     VK_F5, "Alt+F5"),
+        (HotkeyModifiers.Control, VK_F8, "Ctrl+F8"),
+        (HotkeyModifiers.Control, VK_F7, "Ctrl+F7"),
+        (HotkeyModifiers.Control, VK_F6, "Ctrl+F6"),
+        (HotkeyModifiers.Control, VK_F5, "Ctrl+F5"),
+        (HotkeyModifiers.Alt,     VK_F8, "Alt+F8"),
+        (HotkeyModifiers.Alt,     VK_F7, "Alt+F7"),
+        (HotkeyModifiers.Alt,     VK_F6, "Alt+F6"),
+        (HotkeyModifiers.Alt,     VK_F5, "Alt+F5"),
     };
 
     private sealed class Registration : IGlobalHotkeyRegistration
@@ -70,7 +75,7 @@ public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
         public string? Label { get; private set; }
         string IGlobalHotkeyRegistration.Label => Label ?? "";
 
-        public Registration(Action onPressed)
+        public Registration((uint Mod, int Vk, string Label)[] candidates, Action onPressed)
         {
             _thread = new Thread(() =>
             {
@@ -78,13 +83,13 @@ public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
                 try
                 {
                     _threadId = GetCurrentThreadId();
-                    for (int i = 0; i < Candidates.Length; i++)
+                    for (int i = 0; i < candidates.Length; i++)
                     {
                         if (RegisterHotKey(IntPtr.Zero, HotkeyId,
-                                Candidates[i].Mod | MOD_NOREPEAT, (uint)Candidates[i].Vk))
+                                candidates[i].Mod | MOD_NOREPEAT, (uint)candidates[i].Vk))
                         {
                             chosen = i;
-                            Label = Candidates[i].Label;
+                            Label = candidates[i].Label;
                             break;
                         }
                     }

@@ -103,6 +103,50 @@
         </StackPanel>
       </Border>
 
+      <!-- ── Marker hotkeys (user-set via key capture) ── -->
+      <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
+              CornerRadius="4" Padding="10"
+              IsVisible="{Binding CanBindCursorHotkey}">
+        <StackPanel Spacing="6">
+          <TextBlock Text="{StaticResource str.TP.HkHeader}"
+                     Foreground="#DDDDDD" FontWeight="SemiBold"/>
+          <TextBlock Text="{StaticResource str.TP.HkHint}"
+                     Foreground="#888888" FontSize="11" TextWrapping="Wrap"/>
+          <ItemsControl ItemsSource="{Binding HotkeyRows}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:TeleportHotkeyRow">
+                <Grid ColumnDefinitions="120,120,Auto,Auto" Margin="0,2">
+                  <TextBlock Grid.Column="0" Text="{Binding DisplayName}"
+                             Foreground="#CCCCCC" VerticalAlignment="Center"/>
+                  <Border Grid.Column="1" Background="#333337" CornerRadius="3"
+                          Padding="6,2" Margin="2,0" MinWidth="90"
+                          HorizontalAlignment="Left">
+                    <TextBlock Text="{Binding DisplayLabel}"
+                               Foreground="#4EC9B0" FontSize="11" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  </Border>
+                  <Button Grid.Column="2" Content="{StaticResource str.TP.HkSet}"
+                          Command="{Binding $parent[UserControl].((vm:TeleportViewModel)DataContext).BeginCaptureCommand}"
+                          CommandParameter="{Binding}"
+                          ToolTip.Tip="{StaticResource str.Tip.TP.HkSet}"
+                          Padding="10,3" Margin="2,0"/>
+                  <Button Grid.Column="3" Content="{StaticResource str.TP.HkClear}"
+                          Command="{Binding $parent[UserControl].((vm:TeleportViewModel)DataContext).ClearHotkeyCommand}"
+                          CommandParameter="{Binding}"
+                          IsEnabled="{Binding HasBinding}"
+                          Padding="10,3" Margin="2,0"/>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Border Background="#2D2D30" CornerRadius="3" Padding="6,2"
+                  HorizontalAlignment="Left"
+                  IsVisible="{Binding LastHotkeyFired, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <TextBlock Text="{Binding LastHotkeyFired}" Foreground="#9CDCFE" FontSize="11"/>
+          </Border>
+        </StackPanel>
+      </Border>
+
       <!-- ── Cursor teleport ── -->
       <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
               CornerRadius="4" Padding="10">
@@ -170,32 +214,22 @@
         </StackPanel>
       </Border>
 
-      <!-- ── CE export ── -->
+      <!-- ── CE export (records into CE via AOBMaker; .CT is the backup) ── -->
       <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
               CornerRadius="4" Padding="10">
         <StackPanel Spacing="8">
           <TextBlock Text="{StaticResource str.TP.CeHeader}"
                      Foreground="#DDDDDD" FontWeight="SemiBold"/>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <TextBlock Text="{StaticResource str.TP.Scheme}" Foreground="#999999"
-                       VerticalAlignment="Center"/>
-            <ComboBox ItemsSource="{Binding HotkeySchemeOptions}"
-                      SelectedIndex="{Binding HotkeySchemeIndex}"
-                      ToolTip.Tip="{StaticResource str.Tip.TP.Scheme}"
-                      Width="170"/>
-            <Button Content="{StaticResource str.TP.AddHotkeys}"
-                    Command="{Binding AddHotkeysToCeCommand}"
-                    ToolTip.Tip="{StaticResource str.Tip.TP.AddHotkeys}"
-                    Classes="accent" Padding="12,4"/>
+          <WrapPanel Orientation="Horizontal">
             <Button Content="{StaticResource str.TP.AddActions}"
                     Command="{Binding AddActionsToCeCommand}"
                     ToolTip.Tip="{StaticResource str.Tip.TP.AddActions}"
-                    Padding="12,4"/>
+                    Padding="12,4" Margin="0,0,8,4"/>
             <Button Content="{StaticResource str.TP.SaveCt}"
                     Command="{Binding SaveCtCommand}"
                     ToolTip.Tip="{StaticResource str.Tip.TP.SaveCt}"
-                    Padding="12,4"/>
-          </StackPanel>
+                    Padding="12,4" Margin="0,0,8,4"/>
+          </WrapPanel>
         </StackPanel>
       </Border>
 

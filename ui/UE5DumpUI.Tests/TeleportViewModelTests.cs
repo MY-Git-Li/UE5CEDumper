@@ -68,11 +68,15 @@ public class TeleportViewModelTests
 
     private sealed class FakePlatform : IPlatformService
     {
+        // Unique per-instance AppData root so the marker-hotkey store file from
+        // one test never bleeds into another test's VM load (tests run parallel).
+        private readonly string _dir = Path.Combine(Path.GetTempPath(),
+            "ue5cd-vmtest-" + Guid.NewGuid().ToString("N"));
         public string? LastClipboard { get; private set; }
         public bool TryAcquireSingleInstance() => true;
         public void ReleaseSingleInstance() { }
-        public string GetAppDataPath() => "";
-        public string GetLogDirectoryPath() => "";
+        public string GetAppDataPath() => _dir;
+        public string GetLogDirectoryPath() => _dir;
         public Task CopyToClipboardAsync(string text) { LastClipboard = text; return Task.CompletedTask; }
         public Task RevealInExplorerAsync(string path) => Task.CompletedTask;
         public string GetMachineName() => "TEST";
@@ -81,10 +85,29 @@ public class TeleportViewModelTests
             => Task.FromResult<string?>(null);
     }
 
-    private static TeleportViewModel CreateVm(FakeDumpService fake, out FakePlatform platform)
+    private sealed class FakeHotkeyService : IGlobalHotkeyService
+    {
+        public List<(uint Mods, uint Vk, string Label)> Registered { get; } = new();
+        public IGlobalHotkeyRegistration? RegisterCursorHotkey(Action onPressed)
+            => new FakeReg("Ctrl+F8");
+        public IGlobalHotkeyRegistration? RegisterSpecific(uint modifiers, uint vk, string label, Action onPressed)
+        {
+            Registered.Add((modifiers, vk, label));
+            return new FakeReg(label);
+        }
+        private sealed class FakeReg : IGlobalHotkeyRegistration
+        {
+            public FakeReg(string label) => Label = label;
+            public string Label { get; }
+            public void Dispose() { }
+        }
+    }
+
+    private static TeleportViewModel CreateVm(FakeDumpService fake, out FakePlatform platform,
+        IGlobalHotkeyService? hotkeys = null)
     {
         platform = new FakePlatform();
-        return new TeleportViewModel(fake, new NoopLogger(), platform);
+        return new TeleportViewModel(fake, new NoopLogger(), platform, aobMaker: null, globalHotkeys: hotkeys);
     }
 
     [Fact]
@@ -236,18 +259,71 @@ public class TeleportViewModelTests
     }
 
     [Fact]
-    public async Task AddHotkeysToCe_without_aobmaker_falls_back_to_clipboard_with_scheme()
+    public void Marker_hotkey_rows_are_six_save_and_recall()
     {
-        // No AOBMaker bridge supplied → falls back to clipboard (raw bundle).
-        var vm = CreateVm(new FakeDumpService(), out var platform);
-        vm.HotkeySchemeIndex = 1;   // Top-row
+        var vm = CreateVm(new FakeDumpService(), out _, new FakeHotkeyService());
+        Assert.Equal(6, vm.HotkeyRows.Count);
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "save0" && r.DisplayName == "Save marker 1");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall2" && r.DisplayName == "Recall marker 3");
+        Assert.All(vm.HotkeyRows, r => Assert.False(r.HasBinding));
+    }
 
-        await vm.AddHotkeysToCeCommand.ExecuteAsync(null);
+    [Fact]
+    public void Capture_assigns_combo_and_registers_global_hotkey()
+    {
+        var hk = new FakeHotkeyService();
+        var vm = CreateVm(new FakeDumpService(), out _, hk);
+        var row = vm.HotkeyRows.First(r => r.ActionId == "save0");
 
-        Assert.NotNull(platform.LastClipboard);
-        // Top-row recall uses Alt+1 (0x12, 0x31), not numpad.
-        Assert.Contains("recall(1) end, 0x12, 0x31", platform.LastClipboard);
-        Assert.DoesNotContain("0x61)", platform.LastClipboard);
+        vm.BeginCaptureCommand.Execute(row);
+        Assert.True(vm.IsCapturingHotkey);
+
+        // Hold Ctrl, press F7 → Ctrl+F7 (Win32 MOD_CONTROL=2, VK_F7=0x76).
+        bool handled = vm.ApplyCapturedKey(Avalonia.Input.Key.F7, Avalonia.Input.KeyModifiers.Control);
+
+        Assert.True(handled);
+        Assert.False(vm.IsCapturingHotkey);
+        Assert.Equal("Ctrl+F7", row.Label);
+        Assert.Contains(hk.Registered, x => x.Mods == 2 && x.Vk == 0x76 && x.Label == "Ctrl+F7");
+    }
+
+    [Fact]
+    public void Capture_modifier_only_key_keeps_listening()
+    {
+        var vm = CreateVm(new FakeDumpService(), out _, new FakeHotkeyService());
+        var row = vm.HotkeyRows.First();
+        vm.BeginCaptureCommand.Execute(row);
+
+        // LeftCtrl alone is not a bindable key → not handled, still capturing.
+        bool handled = vm.ApplyCapturedKey(Avalonia.Input.Key.LeftCtrl, Avalonia.Input.KeyModifiers.Control);
+        Assert.False(handled);
+        Assert.True(vm.IsCapturingHotkey);
+    }
+
+    [Fact]
+    public void Capture_escape_cancels()
+    {
+        var vm = CreateVm(new FakeDumpService(), out _, new FakeHotkeyService());
+        var row = vm.HotkeyRows.First();
+        vm.BeginCaptureCommand.Execute(row);
+
+        bool handled = vm.ApplyCapturedKey(Avalonia.Input.Key.Escape, Avalonia.Input.KeyModifiers.None);
+        Assert.True(handled);
+        Assert.False(vm.IsCapturingHotkey);
+        Assert.False(row.HasBinding);
+    }
+
+    [Fact]
+    public void Clear_hotkey_removes_binding()
+    {
+        var vm = CreateVm(new FakeDumpService(), out _, new FakeHotkeyService());
+        var row = vm.HotkeyRows.First();
+        vm.BeginCaptureCommand.Execute(row);
+        vm.ApplyCapturedKey(Avalonia.Input.Key.F5, Avalonia.Input.KeyModifiers.None);
+        Assert.True(row.HasBinding);
+
+        vm.ClearHotkeyCommand.Execute(row);
+        Assert.False(row.HasBinding);
     }
 
     [Fact]

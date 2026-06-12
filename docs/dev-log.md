@@ -14,6 +14,40 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-12 — Teleport: user-set marker hotkeys, ARPG walk-back fix, UI polish (build 1038)
+
+Live-test round 2 (TQ2 / UE5 + SEED Battle Destiny / UE4.27).
+
+**ARPG walk-back.** TQ2 recall logged `K2_SetActorLocation invoked OK … rc=0`
+but the pawn didn't visibly move — the click-to-move controller walked it back.
+`Wirbel::StopMovement` now also invokes **`AController::StopMovement()`** (aborts
+the active move order / path following) before the existing
+`StopMovementImmediately` velocity reset, with logging on each. SEED (3rd-person)
+was already fine; this targets click-to-move ARPGs.
+
+**Marker hotkeys → user-set key capture (replaces the CE Lua bundle).** Per
+user feedback the generated `createHotkey` Lua bundle didn't fire in their CE,
+so the "Add hotkeys to CE" button + bundle path are removed from the panel.
+Instead the UI binds **global** Save/Recall hotkeys itself: a new "Marker
+Hotkeys" section with 6 rows (Save 1-3, Recall 1-3), each a **press-to-set**
+capture — hold Ctrl/Alt/Shift then a key (e.g. Ctrl+F7), or a single key (F7);
+Esc cancels. Bindings persist to `%LOCALAPPDATA%\UE5CEDumper\teleport-hotkeys.txt`
+(plain text, AOT-safe) and re-register on launch. New
+`IGlobalHotkeyService.RegisterSpecific`, `HotkeyKeyMap` (Avalonia Key → Win32
+VK/mods), `TeleportHotkeyStore`. Cursor hotkey stays auto-detect. "Add action
+records to CE" (AOBMaker) + "Save .CT" remain for CE-side hotkeys.
+
+**UI polish.** Auto-refresh no longer flickers the buttons (the 0.5s poll uses a
+quiet pose read that doesn't toggle `IsBusy`); it also re-pulls markers every ~2s
+so CE-Lua/hotkey-triggered saves show. CE-export buttons moved to a `WrapPanel`
+(no longer overflow the border). A "last fired @ HH:MM:SS" chip confirms a global
+hotkey actually triggered. Channel field widened earlier.
+
+Tests +18 → **1405 C#** (capture flow, key-map, store round-trip, hotkey smoke).
+⚠ recall/cursor/marker-hotkeys LIVE-VERIFY PENDING with these fixes.
+
+-----
+
 ## 2026-06-12 — Teleport fixes: super-chain lookup, AOBMaker injection, cursor hotkey (build 1035)
 
 Live-test follow-up to the teleport feature below (both TQ2 / UE5 and SEED

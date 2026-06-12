@@ -529,18 +529,37 @@ void SetRotation(const Chain& c, const double pyr[3]) {
     }
 }
 
-// Best-effort velocity reset so conserved fall velocity doesn't kill the
-// player on arrival. Missing CharacterMovement (non-Character pawn) is fine.
+// Settle the pawn after a teleport so it actually stays put. Two best-effort
+// steps, each independently skipped when unavailable:
+//   (1) AController::StopMovement — aborts an active move order / path
+//       following. Without this, click-to-move ARPGs (Titan Quest-likes)
+//       immediately walk the pawn back to its commanded destination, so the
+//       teleport "does nothing" even though K2_SetActorLocation succeeded.
+//   (2) UCharacterMovementComponent::StopMovementImmediately — zeroes
+//       conserved velocity (e.g. fall speed) on Character pawns.
 void StopMovement(const Chain& c) {
+    FunctionInfo pcStop;
+    if (FindFunc(Ubel::GetClass(c.pc), "StopMovement", pcStop)) {
+        std::vector<uint8_t> b((std::max<size_t>)(pcStop.parmsSize, 1), 0);
+        Invoke(c.pc, pcStop, b);
+        LOG_INFO("Teleport: AController::StopMovement invoked on PC 0x%llX",
+                 (unsigned long long)c.pc);
+    }
+
     uintptr_t pawnClass = Ubel::GetClass(c.pawn);
     int32_t cmOff = Ubel::FindFieldOffset(pawnClass, "CharacterMovement",
                                           "CharacterMovement", nullptr, "ObjectProperty");
     uintptr_t cm = ReadPtrAt(c.pawn, cmOff);
-    if (!cm) return;
+    if (!cm) {
+        LOG_INFO("Teleport: no CharacterMovement on pawn (skip velocity reset)");
+        return;
+    }
     FunctionInfo fi;
     if (!FindFunc(Ubel::GetClass(cm), "StopMovementImmediately", fi)) return;
     std::vector<uint8_t> buf((std::max<size_t>)(fi.parmsSize, 1), 0);
     Invoke(cm, fi, buf);
+    LOG_INFO("Teleport: StopMovementImmediately invoked on CMC 0x%llX",
+             (unsigned long long)cm);
 }
 
 int32_t RecallTo(const Pose& p, bool restoreRot, uint8_t* tierOut) {

@@ -25,6 +25,24 @@ public interface IGlobalHotkeyService
     /// unsupported.
     /// </summary>
     IGlobalHotkeyRegistration? RegisterCursorHotkey(Action onPressed);
+
+    /// <summary>
+    /// Register a SPECIFIC global hotkey (a user-chosen combo). Returns a handle
+    /// on success, or null if the combo is already claimed elsewhere or the
+    /// platform is unsupported. <paramref name="modifiers"/> uses the Win32 MOD_*
+    /// bit flags (Alt=1, Control=2, Shift=4, Win=8); <paramref name="vk"/> is the
+    /// virtual-key code. <paramref name="onPressed"/> fires on a background thread.
+    /// </summary>
+    IGlobalHotkeyRegistration? RegisterSpecific(uint modifiers, uint vk, string label, Action onPressed);
+}
+
+/// <summary>Win32 modifier bit flags for <see cref="IGlobalHotkeyService.RegisterSpecific"/>.</summary>
+public static class HotkeyModifiers
+{
+    public const uint Alt = 0x0001;
+    public const uint Control = 0x0002;
+    public const uint Shift = 0x0004;
+    public const uint Win = 0x0008;
 }
 
 /// <summary>An active global-hotkey registration. Dispose to unregister.</summary>

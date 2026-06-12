@@ -524,9 +524,11 @@
     <sys:String x:Key="str.TP.CopyBugItGo">Copy as BugItGo</sys:String>
     <sys:String x:Key="str.TP.RunBugItGo">Run</sys:String>
     <sys:String x:Key="str.TP.BugHint">Paste 'BugItGo X Y Z', 'X Y Z', or a ?BugLoc=(...)?BugRot=(...) string</sys:String>
+    <sys:String x:Key="str.TP.HkHeader">Marker Hotkeys</sys:String>
+    <sys:String x:Key="str.TP.HkHint">Global hotkeys for Save/Recall (fire while the game is focused). Click Set, then press the combo — hold Ctrl/Alt/Shift then a key (e.g. Ctrl+F7), or a single key (e.g. F7). Saved automatically.</sys:String>
+    <sys:String x:Key="str.TP.HkSet">Set</sys:String>
+    <sys:String x:Key="str.TP.HkClear">Clear</sys:String>
     <sys:String x:Key="str.TP.CeHeader">CE Export</sys:String>
-    <sys:String x:Key="str.TP.Scheme">Hotkey scheme:</sys:String>
-    <sys:String x:Key="str.TP.AddHotkeys">Add hotkeys to CE</sys:String>
     <sys:String x:Key="str.TP.AddActions">Add action records to CE</sys:String>
     <sys:String x:Key="str.TP.SaveCt">Save .CT…</sys:String>
     <sys:String x:Key="str.TP.Warning">⚠ Single-player only. Online games will rubber-band or may flag teleports.</sys:String>
@@ -543,9 +545,8 @@
     <sys:String x:Key="str.Tip.TP.CursorHotkey">Bind a system-wide hotkey for cursor teleport so you can keep the game focused (the cursor stays in the game). Auto-picks the first free combo: Ctrl+F8→F5, then Alt+F8→F5. The chosen combo shows beside this box.</sys:String>
     <sys:String x:Key="str.Tip.TP.CopyBugItGo">Read the current pose and copy a 'BugItGo X Y Z' string to the clipboard. (BugIt itself can't return data to the dumper — it writes to the game's own log/clipboard — so this reads the pose directly.)</sys:String>
     <sys:String x:Key="str.Tip.TP.RunBugItGo">Parse the pasted string and teleport there. Works without any CheatManager — feeds X/Y/Z into the same recall path as markers.</sys:String>
-    <sys:String x:Key="str.Tip.TP.AddHotkeys">Ship a tickable 'Teleport hotkeys' record straight into the open Cheat Engine table via the AOBMaker plugin (and enable it, so hotkeys bind immediately). Ticking the record registers the hotkeys; unticking removes them. Falls back to the clipboard (paste into a CE Table Lua Script) when AOBMaker isn't connected. Requires UE5Dumper.dll injected.</sys:String>
-    <sys:String x:Key="str.Tip.TP.Scheme">Numpad: Ctrl+Num1-3 save, Num1-3 recall, Num0 cursor (needs NumLock ON). Top-row: Ctrl+1-3 save, Alt+1-3 recall (for laptops / when Ctrl+1-3 is taken). Both: register both.</sys:String>
-    <sys:String x:Key="str.Tip.TP.AddActions">Ship 7 momentary action records (Save 1-3, Recall 1-3, Cursor) into the open Cheat Engine table via AOBMaker — each fires once when ticked and auto-unticks. Bind CE record hotkeys yourself. Requires the AOBMaker plugin connected.</sys:String>
+    <sys:String x:Key="str.Tip.TP.HkSet">Click, then press the key combo you want for this action. Hold modifiers (Ctrl/Alt/Shift) then a key, or press a single key. Esc cancels. The combo is registered system-wide so it works while the game is focused.</sys:String>
+    <sys:String x:Key="str.Tip.TP.AddActions">Ship 7 momentary action records (Save 1-3, Recall 1-3, Cursor) into the open Cheat Engine table via AOBMaker — each fires once when ticked and auto-unticks. Bind CE record hotkeys yourself if you prefer CE-side hotkeys. Requires the AOBMaker plugin connected.</sys:String>
     <sys:String x:Key="str.Tip.TP.SaveCt">Backup: save a Cheat Engine .CT file with the 7 momentary records, for when AOBMaker isn't connected. Import via CE File → Open.</sys:String>
 
     <!-- Interesting Properties Finder (B' / Unusual Location) -->
