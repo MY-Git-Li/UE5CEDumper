@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -437,6 +438,51 @@ int32_t GetPoseImpl(Pose& out, char* mapName, int32_t mapNameCap, uint8_t* outSo
     return TP_OK;
 }
 
+uintptr_t GetCmc(const Chain& c) {
+    int32_t cmOff = Ubel::FindFieldOffset(Ubel::GetClass(c.pawn), "CharacterMovement",
+                                          "CharacterMovement", nullptr, "ObjectProperty");
+    return ReadPtrAt(c.pawn, cmOff);
+}
+
+// Set UCharacterMovementComponent movement mode (MOVE_None=0 … MOVE_Falling=3).
+// BlueprintCallable; "NewMovementMode" is a TEnumAsByte (1 byte). Best-effort.
+void SetCmcMode(uintptr_t cmc, uint8_t mode) {
+    if (!cmc) return;
+    FunctionInfo fi;
+    if (!FindFunc(Ubel::GetClass(cmc), "SetMovementMode", fi)) return;
+    std::vector<uint8_t> buf((std::max<size_t>)(fi.parmsSize, 1), 0);
+    WriteByteParam(buf, fi, "NewMovementMode", mode);
+    Invoke(cmc, fi, buf);
+}
+
+// Pack + invoke AActor::K2_SetActorLocation(target, bSweep=false, bTeleport=true).
+// Returns true when the invoke ran and reported success.
+bool InvokeSetActorLocation(uintptr_t pawn, const double xyz[3]) {
+    FunctionInfo fi;
+    if (!FindFunc(Ubel::GetClass(pawn), "K2_SetActorLocation", fi) || fi.parmsSize <= 0)
+        return false;
+    std::vector<uint8_t> buf(fi.parmsSize, 0);
+    if (!WriteVecParam(buf, fi, "NewLocation", xyz)) return false;
+    WriteBoolParam(buf, fi, "bSweep", false);
+    WriteBoolParam(buf, fi, "bTeleport", true);
+    return Invoke(pawn, fi, buf) == 0 && ReturnedTrue(fi, buf);
+}
+
+// Invoke AActor::K2_GetActorLocation → world-space FVector. Returns false when
+// the function / return param can't be resolved.
+bool GetActorWorld(uintptr_t pawn, double out[3]) {
+    FunctionInfo fi;
+    if (!FindFunc(Ubel::GetClass(pawn), "K2_GetActorLocation", fi) || fi.parmsSize <= 0)
+        return false;
+    std::vector<uint8_t> buf(fi.parmsSize, 0);
+    const FunctionParam* rv = FindReturnParam(fi);
+    if (!rv || Invoke(pawn, fi, buf) != 0) return false;
+    int32_t need = (rv->size >= 24) ? 24 : 12;
+    if (rv->offset < 0 || rv->offset + need > static_cast<int32_t>(buf.size())) return false;
+    ReadVec3Buf(buf.data() + rv->offset, rv->size, out);
+    return true;
+}
+
 // ---- teleport write (§5.5) ----
 
 // Move the pawn to xyz. Tier 1 = invoke (preferTeleportTo: K2_TeleportTo with
@@ -509,18 +555,51 @@ int32_t TeleportPawnTo(const Chain& c, const double xyz[3], const double* destPy
     }
     if (tierOut) *tierOut = tier;
 
-    // Diagnostic: re-read RelativeLocation right after the move. If it equals
-    // the target, the write took at the memory level — a still-stationary pawn
-    // then means the game re-asserts position (CMC client correction / a
-    // separate authoritative actor), NOT that our write missed. If it does NOT
-    // equal the target, we moved the wrong object or the write was reverted
-    // before this read. Either way this disambiguates "no visible effect".
-    double after[3] = {};
-    if (ReadVec3Mem(c.root + static_cast<uintptr_t>(c.relLocOff), c.relLocSize, after)) {
-        LOG_INFO("Teleport: post-move RelativeLocation read-back = (%.1f, %.1f, %.1f) "
-                 "[target (%.1f, %.1f, %.1f)]",
-                 after[0], after[1], after[2], xyz[0], xyz[1], xyz[2]);
+    // Verify in WORLD space (K2_GetActorLocation — always world, unlike raw
+    // RelativeLocation which is parent-relative when the root is attached).
+    auto distToTarget = [&](const double w[3]) {
+        double dx = w[0] - xyz[0], dy = w[1] - xyz[1], dz = w[2] - xyz[2];
+        return std::sqrt(dx * dx + dy * dy + dz * dz);
+    };
+    bool attached = (c.attachParentOff >= 0)
+                    && ReadPtrAt(c.root, c.attachParentOff) != 0;
+    double worldAfter[3] = {};
+    bool gotWorld = GetActorWorld(c.pawn, worldAfter);
+
+    // Gated retry: if the actor is still far from the target after a tier-1
+    // invoke, the game's CharacterMovement is fighting the SetActorLocation
+    // (TQ2-class). Freeze the CMC (MOVE_None), set location, thaw to Falling so
+    // it re-grounds at the new spot. GATED on "first attempt didn't reach the
+    // target", so games where the plain move works (SEED) never hit this path.
+    constexpr double kReachedEps = 60.0;   // ~ capsule radius
+    if (moved && gotWorld && distToTarget(worldAfter) > kReachedEps) {
+        uintptr_t cmc = GetCmc(c);
+        if (cmc) {
+            LOG_WARN("Teleport: actor didn't reach target (world=(%.1f,%.1f,%.1f)) — "
+                     "retrying with CMC MOVE_None bracket",
+                     worldAfter[0], worldAfter[1], worldAfter[2]);
+            SetCmcMode(cmc, 0);                       // MOVE_None — freeze physics
+            InvokeSetActorLocation(c.pawn, xyz);      // set while frozen
+            SetCmcMode(cmc, 3);                       // MOVE_Falling — re-ground
+            InvokeSetActorLocation(c.pawn, xyz);      // re-assert after thaw
+            if (GetActorWorld(c.pawn, worldAfter) && distToTarget(worldAfter) <= kReachedEps)
+                LOG_INFO("Teleport: MOVE_None bracket succeeded -> world=(%.1f,%.1f,%.1f)",
+                         worldAfter[0], worldAfter[1], worldAfter[2]);
+            else
+                LOG_WARN("Teleport: MOVE_None bracket still didn't stick "
+                         "(world=(%.1f,%.1f,%.1f)) — game likely uses a separate "
+                         "authoritative/visual actor for the character",
+                         worldAfter[0], worldAfter[1], worldAfter[2]);
+        }
     }
+
+    double rawRel[3] = {};
+    ReadVec3Mem(c.root + static_cast<uintptr_t>(c.relLocOff), c.relLocSize, rawRel);
+    LOG_INFO("Teleport: post-move world=(%.1f, %.1f, %.1f) rawRelLoc=(%.1f, %.1f, %.1f) "
+             "target=(%.1f, %.1f, %.1f) attached=%d",
+             worldAfter[0], worldAfter[1], worldAfter[2],
+             rawRel[0], rawRel[1], rawRel[2],
+             xyz[0], xyz[1], xyz[2], attached ? 1 : 0);
     return TP_OK;
 }
 
