@@ -532,6 +532,7 @@
     <sys:String x:Key="str.TP.AddActions">Add action records to CE</sys:String>
     <sys:String x:Key="str.TP.SaveCt">Save .CT…</sys:String>
     <sys:String x:Key="str.TP.Warning">⚠ Single-player only. Online games will rubber-band or may flag teleports.</sys:String>
+    <sys:String x:Key="str.TP.BestEffort">ℹ Best-effort, per the design spec (docs/teleport-spec.md): the pawn is resolved by reflection and moved via the engine's own functions where available, with memory-write fallbacks. Works on most games, but some drive the character or the camera from separate internal systems — so on certain titles the character may not move, or it teleports but the camera (POV) doesn't follow.</sys:String>
     <sys:String x:Key="str.Tip.TP.Refresh">Read the current pawn's world location and control rotation (DLL resolves the local PlayerController → Pawn → RootComponent via reflection).</sys:String>
     <sys:String x:Key="str.Tip.TP.Auto">Re-read the pose every 0.5s. Off by default; stops automatically on disconnect.</sys:String>
     <sys:String x:Key="str.Tip.TP.Save">Save the current pose into this marker slot. Markers live in the DLL — they survive a UI restart as long as the game process lives.</sys:String>
