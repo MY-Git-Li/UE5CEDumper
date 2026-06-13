@@ -30,6 +30,34 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
+## CE export drilldown — Phase B/C (next session)
+
+Phase A shipped (container element struct/object values expand recursively up to
+Drill Depth, CE XML/Field) + map value-offset/DropDownList/indicator fixes.
+Contract + design: [ce-export-drilldown-spec.md](ce-export-drilldown-spec.md).
+
+- **Phase B — align CSX export with the unified resolver** — Effort: **M** · Risk:
+  med. CSX (`CsxExportService`) does NOT expand container element **struct** values:
+  `ConvertMapElementsToFields` stamps object `PtrAddress` but never struct
+  `StructDataAddr`/`StructClassAddr`, so `Map<Name, Struct>` / `Set<Struct>` stay
+  flat in `.csx`. Stamp the struct addrs (mirror `PopulateMapContainerFields`) and
+  share/port `CeXmlExportService.ResolveDrilldownAsync` so CSX reuses one resolver.
+  **Also check the map value-offset bug there** — CSX computes its own offsets and
+  likely has the same `ComputeMapValueOffset` size-guess flaw fixed for CE XML in
+  PR #277; route it through the value's real alignment too (or consume the DLL's
+  corrected `mapValueOffset`).
+  *Parent: CE XML Phase A PR #276 + map fixes PR #277 (dev-log build 1085 / 1090).*
+- **Phase C — depth-from-current-view tests + recursion guards** — Effort: **S-M** ·
+  Risk: low. Lock the "Drill Depth measured from the current view, breadcrumb costs
+  nothing" semantics with explicit service-level tests. The user declined a hard
+  walk-budget cap (bounded by depth ≤8 + `ArrayLimit` 64), but a cheap **"(N of M
+  shown)" truncation note** when `ArrayLimit` clips a big container would stop a
+  silent partial export from reading as complete. Optional: a soft warning when a
+  deep+wide `Copy CE XML` resolves an unusually large object count.
+  *Parent: same as Phase B.*
+
+-----
+
 ## Teleport — follow-ups (deferred / future research)
 
 Teleport shipped (Wirbel, build 1027-1043). Works where the possessed pawn is
