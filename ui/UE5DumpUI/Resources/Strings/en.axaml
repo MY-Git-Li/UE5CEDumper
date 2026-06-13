@@ -528,7 +528,7 @@
     <sys:String x:Key="str.TP.LastHint">The dumper records where you were just before every Recall / Force / BugItGo / cursor teleport, so you can undo a jump that went wrong. This slot is managed by the system — you can't save into it, only recall it.</sys:String>
     <sys:String x:Key="str.TP.RecallLast">Recall last</sys:String>
     <sys:String x:Key="str.TP.HkHeader">Teleport Hotkeys</sys:String>
-    <sys:String x:Key="str.TP.HkHint">Global hotkeys for Save / Recall / Recall-last / BugItGo (fire while the game is focused). Click Set, then press the combo — hold Ctrl/Alt/Shift then a key (e.g. Ctrl+F7), or a single key (e.g. F7). Click Cancel or press Esc to abort. Keyboard only for now (mouse extra-buttons / gamepad not yet supported). Saved automatically.</sys:String>
+    <sys:String x:Key="str.TP.HkHint">Global hotkeys for Save / Recall / Recall-last / BugItGo / Debug camera (fire while the game is focused). Click Set, then press the combo — hold Ctrl/Alt/Shift then a key (e.g. Ctrl+F7), or a single key (e.g. F7). Click Cancel or press Esc to abort. Keyboard only for now (mouse extra-buttons / gamepad not yet supported). Saved automatically. A combo marked ⚠ is held by another app — free it and reconnect, or bind a different one.</sys:String>
     <sys:String x:Key="str.TP.HkSet">Set</sys:String>
     <sys:String x:Key="str.TP.HkClear">Clear</sys:String>
     <sys:String x:Key="str.TP.CeHeader">CE Export</sys:String>
@@ -553,6 +553,16 @@
     <sys:String x:Key="str.Tip.TP.HkSet">Click, then press the key combo you want for this action. Hold modifiers (Ctrl/Alt/Shift) then a key, or press a single key. Esc cancels. The combo is registered system-wide so it works while the game is focused.</sys:String>
     <sys:String x:Key="str.Tip.TP.AddActions">Ship 11 momentary action records (Save 1-3, Recall 1-3, Recall last, BugIt, BugItGo, Cursor, Clear all) into the open Cheat Engine table via AOBMaker — each fires once when ticked and auto-unticks. Bind CE record hotkeys yourself if you prefer CE-side hotkeys. Requires the AOBMaker plugin connected.</sys:String>
     <sys:String x:Key="str.Tip.TP.SaveCt">Backup: save a Cheat Engine .CT file with the 11 momentary records, for when AOBMaker isn't connected. Import via CE File → Open.</sys:String>
+    <!-- Teleport: Debug Camera (free-look) -->
+    <sys:String x:Key="str.TP.DcHeader">Debug Camera (free-look)</sys:String>
+    <sys:String x:Key="str.TP.DcHint">Detach the view into a free-fly debug camera (UCheatManager::ToggleDebugCamera). Turning it back OFF is handled even on Shipping builds that stripped the disable path — the DLL switches the local player's controller back. Needs a live PlayerController, so enter gameplay first. Available only on games that kept ToggleDebugCamera.</sys:String>
+    <sys:String x:Key="str.TP.DcState">State:</sys:String>
+    <sys:String x:Key="str.TP.DcOn">Force ON</sys:String>
+    <sys:String x:Key="str.TP.DcOff">Force OFF</sys:String>
+    <sys:String x:Key="str.TP.DcRefresh">↻</sys:String>
+    <sys:String x:Key="str.Tip.TP.DcOn">Deterministically enable the debug camera (reads state first, only toggles if needed). Idempotent — pressing again when it's already ON does nothing.</sys:String>
+    <sys:String x:Key="str.Tip.TP.DcOff">Deterministically disable the debug camera and return control to the player. On builds that stripped the disable path, the DLL swaps the local player's controller back to the original PlayerController.</sys:String>
+    <sys:String x:Key="str.Tip.TP.DcRefresh">Re-read the live debug-camera state (1=ON / 0=OFF / unknown if no live CheatManager).</sys:String>
 
     <!-- Interesting Properties Finder (B' / Unusual Location) -->
     <sys:String x:Key="str.IP.Load">Load</sys:String>
