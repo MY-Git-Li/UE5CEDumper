@@ -192,9 +192,22 @@ When enabled, pointer fields are resolved:
 3. **Cycle detection**: `visited` set prevents infinite loops on circular references
 4. **Depth**: Each nesting level decrements depth; stops at 0
 
+CSX shares the **unified `CeXmlExportService.ResolveDrilldownAsync`** resolver
+(build 1098) — so container element values that are **structs** (`Map<…, Struct>`,
+`Set<Struct>`) flatten inline just like CE XML, not as a raw byte blob.
+`ConvertMapElementsToFields` / `ConvertSetStructElementsToFields` stamp each value's
+absolute `StructDataAddr`/`StructClassAddr`, and `BuildLiveChildStructure` routes
+`StructProperty` fields to `EmitStructPropertyFlattened` (`[idx] key / SubField`).
+CSX additionally keeps its own pointer resolution for object-arrays / DataTable rows
+/ multicast delegates (shapes the unified resolver doesn't descend; CE XML emits
+those as flat leaves). A `⚠ Container element limit (N)` status note flags any
+top-level container clipped by `ArrayLimit` so a partial export isn't mistaken for
+a complete one.
+
 ### StructProperty Flattening
 
-Same as CE XML: pre-resolve via `ResolveStructFieldsAsync()`, flatten with `{StructType} / {FieldName}` naming.
+Same as CE XML: pre-resolve via the unified resolver (keyed by `StructDataAddr`),
+flatten with `{StructType} / {FieldName}` naming.
 
 ### StrProperty Special Case
 

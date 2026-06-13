@@ -30,31 +30,26 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
-## CE export drilldown — Phase B/C (next session)
+## CE export drilldown — remaining gaps (Phase A/B/C shipped)
 
-Phase A shipped (container element struct/object values expand recursively up to
-Drill Depth, CE XML/Field) + map value-offset/DropDownList/indicator fixes.
-Contract + design: [ce-export-drilldown-spec.md](ce-export-drilldown-spec.md).
+Phase A (CE XML/Field container-value expansion, build 1085), Phase B (CSX parity,
+build 1098), Phase C (depth-from-current-view tests + CSX truncation note, build
+1098) all shipped. Spec: [ce-export-drilldown-spec.md](ce-export-drilldown-spec.md).
+Open follow-ups (low priority):
 
-- **Phase B — align CSX export with the unified resolver** — Effort: **M** · Risk:
-  med. CSX (`CsxExportService`) does NOT expand container element **struct** values:
-  `ConvertMapElementsToFields` stamps object `PtrAddress` but never struct
-  `StructDataAddr`/`StructClassAddr`, so `Map<Name, Struct>` / `Set<Struct>` stay
-  flat in `.csx`. Stamp the struct addrs (mirror `PopulateMapContainerFields`) and
-  share/port `CeXmlExportService.ResolveDrilldownAsync` so CSX reuses one resolver.
-  **Also check the map value-offset bug there** — CSX computes its own offsets and
-  likely has the same `ComputeMapValueOffset` size-guess flaw fixed for CE XML in
-  PR #277; route it through the value's real alignment too (or consume the DLL's
-  corrected `mapValueOffset`).
-  *Parent: CE XML Phase A PR #276 + map fixes PR #277 (dev-log build 1085 / 1090).*
-- **Phase C — depth-from-current-view tests + recursion guards** — Effort: **S-M** ·
-  Risk: low. Lock the "Drill Depth measured from the current view, breadcrumb costs
-  nothing" semantics with explicit service-level tests. The user declined a hard
-  walk-budget cap (bounded by depth ≤8 + `ArrayLimit` 64), but a cheap **"(N of M
-  shown)" truncation note** when `ArrayLimit` clips a big container would stop a
-  silent partial export from reading as complete. Optional: a soft warning when a
-  deep+wide `Copy CE XML` resolves an unusually large object count.
-  *Parent: same as Phase B.*
+- **CSX struct-array element full re-walk** — Effort: **S** · Risk: low. CSX struct
+  arrays still flatten the shallow Phase-F `StructFields` preview, so nested
+  structs/maps *inside* an array element stay shallow. CE XML's
+  `EmitStructArrayProperty` already re-walks each element via `resolvedStructs`
+  (build 1076); mirror that in `ConvertArrayStructElementsToFields` (stamp
+  `StructDataAddr` per element + route to `EmitStructPropertyFlattened`). The unified
+  resolver already populates `resolvedStructs` for array struct elements — only the
+  CSX emit path ignores it.
+- **Nested-container truncation note** — Effort: **S** · Risk: low. The
+  `⚠ Container element limit` note (CE XML + CSX) only scans top-level fields; a
+  container clipped by `ArrayLimit` *inside* a drilled struct/pointer is unreported.
+  Cheap: scan `resolvedStructs`/`resolvedInstances` values too. (Marked optional in
+  the spec.)
 
 -----
 
