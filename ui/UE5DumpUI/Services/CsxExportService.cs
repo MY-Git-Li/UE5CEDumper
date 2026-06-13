@@ -42,20 +42,29 @@ public static class CsxExportService
         int arrayLimit = 64,
         int drilldownDepth = 0)
     {
-        // Resolve StructProperty inner fields via DLL (reuse existing logic)
-        var resolvedStructs = await CeXmlExportService.ResolveStructFieldsAsync(
-            dump, fields, arrayLimit);
+        // Unified drilldown resolve (docs/ce-export-drilldown-spec.md Phase B): structs
+        // (flatten, depth-free) + pointers + CONTAINER ELEMENT VALUES that are structs
+        // (Map&lt;…,Struct&gt; / Set&lt;Struct&gt; / struct-array), recursively to drilldownDepth.
+        // Shared with Copy CE XML — one resolver, see CeXmlExportService.ResolveDrilldownAsync.
+        // resolvedStructs is keyed by StructDataAddr; resolvedInstances by PtrAddress — the
+        // same keys the CSX emit phase looks up.
+        var resolvedStructs = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+        var resolvedInstances = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+        await CeXmlExportService.ResolveDrilldownAsync(
+            dump, fields, resolvedStructs, resolvedInstances, drilldownDepth, arrayLimit);
 
-        // Pre-resolve pointer target instances for drilldown (recursive up to drilldownDepth)
-        var resolvedInstances = new Dictionary<string, List<LiveFieldValue>>();
+        // CSX additionally drills OBJECT pointers held in object-arrays / DataTable rows /
+        // multicast delegates — container shapes the unified resolver doesn't descend (CE XML
+        // emits those as flat leaves; CSX builds real child structures). The shared
+        // resolvedInstances dict dedupes any address the unified pass already walked.
         if (drilldownDepth > 0)
         {
-            var visited = new HashSet<string>();
+            var visited = new HashSet<string>(StringComparer.Ordinal);
             await ResolvePointerInstancesAsync(dump, fields, resolvedInstances, drilldownDepth, arrayLimit, visited);
             // Also resolve pointer instances within flattened struct fields
             foreach (var innerFields in resolvedStructs.Values)
                 await ResolvePointerInstancesAsync(dump, innerFields, resolvedInstances, drilldownDepth, arrayLimit, visited);
-            // Resolve pointer targets within container elements (Map/Array/Set)
+            // Resolve pointer targets within container elements (Map/Array/Set/DataTable)
             await ResolveContainerPointerInstancesAsync(dump, fields, resolvedInstances, drilldownDepth, arrayLimit, visited);
             foreach (var innerFields in resolvedStructs.Values)
                 await ResolveContainerPointerInstancesAsync(dump, innerFields, resolvedInstances, drilldownDepth, arrayLimit, visited);
@@ -75,11 +84,11 @@ public static class CsxExportService
             if (field.TypeName == "StructProperty")
             {
                 // Flatten struct fields inline with "StructType / FieldName" naming
-                EmitStructPropertyFlattened(sb, field, resolvedStructs, resolvedInstances, drilldownDepth);
+                EmitStructPropertyFlattened(sb, field, resolvedStructs, resolvedInstances, drilldownDepth, "      ");
             }
             else
             {
-                EmitElement(sb, field.Offset, field.Name, field, "      ", resolvedInstances, drilldownDepth);
+                EmitElement(sb, field.Offset, field.Name, field, "      ", resolvedStructs, resolvedInstances, drilldownDepth);
             }
         }
 
@@ -96,18 +105,24 @@ public static class CsxExportService
     private static void EmitStructPropertyFlattened(
         StringBuilder sb,
         LiveFieldValue structField,
-        Dictionary<string, List<LiveFieldValue>> resolvedStructs,
-        Dictionary<string, List<LiveFieldValue>>? resolvedInstances = null,
-        int drilldownDepth = 0)
+        Dictionary<string, List<LiveFieldValue>>? resolvedStructs,
+        Dictionary<string, List<LiveFieldValue>>? resolvedInstances,
+        int drilldownDepth,
+        string indent)
     {
+        // Prefix names each flattened sub-field. For a regular StructProperty this is
+        // the struct type (e.g. "FVector / X"); for a synthetic container element value
+        // (Map&lt;…,Struct&gt; / Set&lt;Struct&gt;) the field Name already encodes the element
+        // (e.g. "[0] structure"), so the sub-fields read "[0] structure / SubField".
         var prefix = !string.IsNullOrEmpty(structField.StructTypeName)
             ? structField.StructTypeName
             : structField.Name;
 
-        // Lookup by StructDataAddr (matches CeXmlExportService.ResolveStructFieldsAsync's
-        // string-keyed result — unique across instances so the same dict can serve
-        // nested struct fields inside drilled targets).
+        // Lookup by StructDataAddr (matches the unified resolver's string-keyed result —
+        // unique across instances so the same dict serves top-level struct fields,
+        // container element struct values, and struct fields inside drilled targets).
         if (!string.IsNullOrEmpty(structField.StructDataAddr)
+            && resolvedStructs != null
             && resolvedStructs.TryGetValue(structField.StructDataAddr, out var innerFields)
             && innerFields.Count > 0)
         {
@@ -115,15 +130,15 @@ public static class CsxExportService
             {
                 var absoluteOffset = structField.Offset + inner.Offset;
                 var description = $"{prefix} / {inner.Name}";
-                EmitElement(sb, absoluteOffset, description, inner, "      ", resolvedInstances, drilldownDepth);
+                EmitElement(sb, absoluteOffset, description, inner, indent, resolvedStructs, resolvedInstances, drilldownDepth);
             }
         }
         else
         {
-            // Unresolved struct — emit as raw bytes block
+            // Unresolved struct (depth exhausted / walk failed) — emit as raw bytes block.
             var typeInfo = new CsxTypeInfo("Array of byte",
                 structField.Size > 0 ? structField.Size : 8, "hexadecimal");
-            EmitElementRaw(sb, structField.Offset, structField.Name, typeInfo, null, "      ");
+            EmitElementRaw(sb, structField.Offset, structField.Name, typeInfo, null, indent);
         }
     }
 
@@ -134,6 +149,7 @@ public static class CsxExportService
     /// </summary>
     private static void EmitElement(StringBuilder sb, int offset, string description,
         LiveFieldValue field, string indent,
+        Dictionary<string, List<LiveFieldValue>>? resolvedStructs = null,
         Dictionary<string, List<LiveFieldValue>>? resolvedInstances = null,
         int drilldownDepth = 0)
     {
@@ -168,7 +184,7 @@ public static class CsxExportService
                     && resolvedInstances.TryGetValue(field.PtrAddress, out var instanceFields))
                 {
                     childStructure = BuildLiveChildStructure(
-                        field.PtrClassName, instanceFields, resolvedInstances, drilldownDepth - 1);
+                        field.PtrClassName, instanceFields, resolvedStructs, resolvedInstances, drilldownDepth - 1);
                 }
                 // No dummy — CE handles native pointer dereference
                 break;
@@ -189,7 +205,7 @@ public static class CsxExportService
                     if (containerFields is { Count: > 0 })
                     {
                         childStructure = BuildLiveChildStructure(
-                            field.Name, containerFields, resolvedInstances, drilldownDepth - 1);
+                            field.Name, containerFields, resolvedStructs, resolvedInstances, drilldownDepth - 1);
                     }
                 }
                 break;
@@ -303,6 +319,7 @@ public static class CsxExportService
     private static string BuildLiveChildStructure(
         string? structName,
         IReadOnlyList<LiveFieldValue> fields,
+        Dictionary<string, List<LiveFieldValue>>? resolvedStructs,
         Dictionary<string, List<LiveFieldValue>> resolvedInstances,
         int remainingDepth)
     {
@@ -316,7 +333,15 @@ public static class CsxExportService
         if (fields.Count > 0)
         {
             foreach (var field in fields)
-                EmitElement(sb, field.Offset, field.Name, field, "            ", resolvedInstances, remainingDepth);
+            {
+                // A StructProperty here is a container element VALUE that is itself a
+                // struct (Map&lt;…,Struct&gt; / Set&lt;Struct&gt;) or a struct member of a drilled
+                // target — flatten its resolved sub-fields inline instead of a raw blob.
+                if (field.TypeName == "StructProperty")
+                    EmitStructPropertyFlattened(sb, field, resolvedStructs, resolvedInstances, remainingDepth, "            ");
+                else
+                    EmitElement(sb, field.Offset, field.Name, field, "            ", resolvedStructs, resolvedInstances, remainingDepth);
+            }
         }
         else
         {
@@ -470,7 +495,46 @@ public static class CsxExportService
         if (IsObjectPropertyType(setField.SetElemType))
             return ConvertSetPointerElementsToFields(setField);
 
+        // Set&lt;Struct&gt;: stamp each element's absolute struct address so the emit phase
+        // flattens its resolved sub-fields inline (mirrors the Map&lt;…,Struct&gt; path).
+        if (setField.SetElemType == "StructProperty"
+            && !string.IsNullOrEmpty(setField.SetElemStructAddr))
+            return ConvertSetStructElementsToFields(setField);
+
         return ConvertSetScalarElementsToFields(setField);
+    }
+
+    /// <summary>
+    /// Convert SetProperty struct elements to synthetic LiveFieldValue list, each carrying
+    /// the element's absolute StructDataAddr for flattening. Element start offset within the
+    /// TSparseArray data buffer is index * stride (no value offset — Set elements are the key).
+    /// </summary>
+    private static List<LiveFieldValue> ConvertSetStructElementsToFields(LiveFieldValue setField)
+    {
+        int stride = ComputeSetElementStride(setField.SetElemSize);
+        ulong dataBase = ParseHexAddr(setField.SetDataAddr);
+        var fields = new List<LiveFieldValue>();
+
+        foreach (var elem in setField.SetElements!)
+        {
+            var keyDisplay = !string.IsNullOrEmpty(elem.KeyPtrName) ? elem.KeyPtrName : elem.Key;
+            var name = !string.IsNullOrEmpty(keyDisplay) ? $"[{elem.Index}] {keyDisplay}" : $"[{elem.Index}]";
+            int offset = elem.Index * stride;
+
+            // AbsAddr returns "" when the data base is unknown; an empty StructDataAddr
+            // makes the emit phase fall back to a raw byte block gracefully.
+            fields.Add(new LiveFieldValue
+            {
+                Name = name,
+                TypeName = "StructProperty",
+                Offset = offset,
+                Size = setField.SetElemSize,
+                StructDataAddr = AbsAddr(dataBase, offset),
+                StructClassAddr = setField.SetElemStructAddr,
+            });
+        }
+
+        return fields;
     }
 
     /// <summary>
@@ -481,10 +545,14 @@ public static class CsxExportService
     /// </summary>
     private static List<LiveFieldValue> ConvertMapElementsToFields(LiveFieldValue mapField)
     {
-        // Use aligned value offset if available; fall back to key size
+        // Use the DLL's aligned value offset (PR #277: real value alignment, not a
+        // size guess — FName-valued maps land correctly); fall back to key size.
         int valOffset = mapField.MapValueOffset > 0 ? mapField.MapValueOffset : mapField.MapKeySize;
         int pairSize = valOffset + mapField.MapValueSize;
         int stride = ComputeSetElementStride(pairSize);
+        bool valStruct = mapField.MapValueType == "StructProperty"
+                         && !string.IsNullOrEmpty(mapField.MapValueStructAddr);
+        ulong dataBase = ParseHexAddr(mapField.MapDataAddr);
         var fields = new List<LiveFieldValue>();
 
         foreach (var elem in mapField.MapElements!)
@@ -493,16 +561,35 @@ public static class CsxExportService
             var name = $"[{elem.Index}] {keyDisplay}";
             int offset = elem.Index * stride + valOffset;
 
-            fields.Add(new LiveFieldValue
+            if (valStruct && dataBase != 0)
             {
-                Name = name,
-                TypeName = mapField.MapValueType,
-                Offset = offset,
-                Size = mapField.MapValueSize,
-                PtrAddress = elem.ValuePtrAddress,
-                PtrName = elem.ValuePtrName,
-                PtrClassName = elem.ValuePtrClassName,
-            });
+                // Map&lt;…, Struct&gt;: stamp the value's absolute struct address (mirrors
+                // CeXmlExportService.BuildContainerValueFields) so the emit phase flattens
+                // its resolved sub-fields inline instead of a raw byte blob. StructTypeName
+                // is left empty so the element label (Name) is used as the sub-field prefix.
+                fields.Add(new LiveFieldValue
+                {
+                    Name = name,
+                    TypeName = "StructProperty",
+                    Offset = offset,
+                    Size = mapField.MapValueSize,
+                    StructDataAddr = AbsAddr(dataBase, offset),
+                    StructClassAddr = mapField.MapValueStructAddr,
+                });
+            }
+            else
+            {
+                fields.Add(new LiveFieldValue
+                {
+                    Name = name,
+                    TypeName = mapField.MapValueType,
+                    Offset = offset,
+                    Size = mapField.MapValueSize,
+                    PtrAddress = elem.ValuePtrAddress,
+                    PtrName = elem.ValuePtrName,
+                    PtrClassName = elem.ValuePtrClassName,
+                });
+            }
         }
 
         return fields;
@@ -712,6 +799,24 @@ public static class CsxExportService
         int hashStart = (elemSize + 3) & ~3; // align to 4
         return hashStart + 8; // + HashNextId(4) + HashIndex(4)
     }
+
+    /// <summary>
+    /// Parse a hex address string ("0x18AB.." or "18AB..") into a ulong; 0 on empty/malformed.
+    /// </summary>
+    private static ulong ParseHexAddr(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return 0;
+        var t = (s.StartsWith("0x") || s.StartsWith("0X")) ? s.Substring(2) : s;
+        return ulong.TryParse(t, System.Globalization.NumberStyles.HexNumber, null, out var v) ? v : 0;
+    }
+
+    /// <summary>
+    /// Format an absolute address (dataBase + offset) as "0x..", or "" when the base is
+    /// unknown. Mirrors CeXmlExportService.AbsAddr so resolver keys and emit-time lookups
+    /// of container element struct values use byte-identical strings.
+    /// </summary>
+    private static string AbsAddr(ulong dataBase, long offset)
+        => dataBase == 0 ? "" : $"0x{dataBase + (ulong)offset:X}";
 
     /// <summary>
     /// Escape special XML characters.

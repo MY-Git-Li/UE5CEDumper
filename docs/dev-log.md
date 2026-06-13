@@ -14,6 +14,57 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-13 — CSX export drilldown parity (Phase B) + depth-from-current-view tests + truncation note (Phase C) (build 1098)
+
+Phase B + C of the CE/CSX export drilldown redesign ([ce-export-drilldown-spec.md](ce-export-drilldown-spec.md)).
+Phase A shipped CE XML/Field container-value expansion (build 1085) + map fixes
+(build 1090); CSX (`CsxExportService`) was still asymmetric — it expanded
+`Map<…,Object>` but `Map<Name,Struct>` / `Set<Struct>` stayed a flat raw byte blob.
+
+**Phase B — CSX reuses the one resolver + flattens container struct values.**
+- `GenerateCsxAsync` now calls **`CeXmlExportService.ResolveDrilldownAsync`** (the
+  unified pass that resolves top-level structs, pointers, AND container element
+  *struct/object values* recursively to Drill Depth, populating `resolvedStructs`
+  keyed by `StructDataAddr` + `resolvedInstances` keyed by `PtrAddress`). CSX keeps
+  its own `ResolvePointerInstancesAsync` / `ResolveContainerPointerInstancesAsync`
+  for the object-pointer-in-object-array / DataTable / multicast shapes the unified
+  resolver doesn't descend (CE XML emits those as flat leaves; CSX builds real child
+  structures) — no regression, the shared `resolvedInstances` dedupes overlap.
+- `ConvertMapElementsToFields` stamps the value's absolute `StructDataAddr`
+  (`MapDataAddr + index*stride + valOffset`) + `StructClassAddr` for struct values
+  (mirrors `BuildContainerValueFields`); new `ConvertSetStructElementsToFields` does
+  the same for `Set<Struct>` (`SetDataAddr + index*stride`). The address formula is
+  byte-identical to the resolver's, so emit-time lookups hit.
+- Emit: `EmitElement` / `BuildLiveChildStructure` thread `resolvedStructs`, and a
+  `StructProperty` field (a container element value, or a struct member of a drilled
+  target) routes to `EmitStructPropertyFlattened` (now indent-parametrised) —
+  flattening its resolved sub-fields inline (`[idx] key / SubField`) and recursing
+  into nested containers/pointers via `EmitElement`. Unresolved (depth exhausted /
+  walk failed) → graceful raw-byte-block fallback.
+- **Map value-offset bug** flagged for Phase B was already handled: CSX consumes the
+  DLL's corrected `map_value_offset` (PR #277's `Scharf::RequiredAlignment` fix), so
+  FName/WeakObjectPtr-valued maps land correctly with no extra CSX change.
+
+**Phase C — depth semantics locked + truncation note.**
+- Service-level tests assert **Drill Depth is measured from the current view, each
+  container level costs one, breadcrumbs cost nothing** (spec §4): a
+  `Map<Name,Struct>` whose value struct holds a nested `Map<Name,Struct>` walks one
+  level at D=1 (inner map stays a pointer) and two at D=2 — verified in both the
+  resolver (`ResolveDrilldown_Depth1_ExpandsOneContainerLevelOnly`) and CSX emit
+  (`GenerateCsx_MapValueStruct_NestedMap_DepthMeasuredFromCurrentView`); plus a
+  breadcrumb-length-independence test for `GenerateHierarchicalXml`.
+- **Truncation note**: `Export CSX` now surfaces the same
+  `⚠ Container element limit (N): Field (Map: X total, Y loaded)` status note that
+  Copy CE XML already shows, so a container clipped by `ArrayLimit` no longer reads
+  as a complete export. (Per the locked decision, no hard walk-budget cap — bounded
+  by Drill Depth ≤8 + `ArrayLimit` + existing cycle detection.)
+
+No DLL change. **1435 C# (+6: 4 CSX struct-value/depth, 2 CE XML depth) + 457 dll +
+31 utf8 green; AOT publish clean (103 MB single-file).** Remaining drilldown gap:
+CSX struct-array elements still use the shallow Phase-F `StructFields` preview rather
+than the full resolver re-walk (CE XML's `EmitStructArrayProperty` does the re-walk);
+nested-container truncation beyond the top level is still unreported (optional).
+
 ## 2026-06-13 — Map value-offset alignment fix + CE-export progress indicator + map value DropDownList (build 1090)
 
 Three follow-ups on the CE export work, reported on SEED `PlayerSelectMsUnitList`

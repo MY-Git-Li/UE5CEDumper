@@ -2052,6 +2052,94 @@ public class CeXmlExportServiceTests
     }
 
     [Fact]
+    public async Task ResolveDrilldown_Depth1_ExpandsOneContainerLevelOnly()
+    {
+        // Map<Name, Struct> whose value struct holds a nested Map<Name, Struct>.
+        // D=1 walks the OUTER value struct (0x4008) but NOT the inner map's value struct
+        // (0x9008); D=2 walks both. Locks "Drill Depth from the current view, each
+        // container level costs one" (docs/ce-export-drilldown-spec.md §4).
+        //
+        // Outer stride = AlignUp(8+0x10,4)+8 = 32; [0] value @ 0*32+8 = 8  -> 0x4008.
+        // Inner stride = AlignUp(8+8,4)+8   = 24; [0] value @ 0*24+8 = 8  -> 0x9008.
+        var stub = new StubDumpService();
+        stub.RegisterStruct("0x4008", new InstanceWalkResult
+        {
+            Fields = new List<LiveFieldValue>
+            {
+                new() { Name = "Inner", TypeName = "MapProperty", Offset = 0,
+                         MapCount = 1, MapKeyType = "NameProperty", MapValueType = "StructProperty",
+                         MapKeySize = 8, MapValueSize = 8, MapValueOffset = 8, MapDataAddr = "0x9000",
+                         MapValueStructAddr = "0xINNER", MapValueStructType = "FInner",
+                         MapElements = new List<ContainerElementValue> { new() { Index = 0, Key = "ik" } } },
+            }
+        });
+        stub.RegisterStruct("0x9008", new InstanceWalkResult
+        {
+            Fields = new List<LiveFieldValue> { new() { Name = "Leaf", TypeName = "IntProperty", Offset = 0, Size = 4 } }
+        });
+
+        var map = new LiveFieldValue
+        {
+            Name = "Outer", TypeName = "MapProperty", Offset = 0x40,
+            MapCount = 1, MapKeyType = "NameProperty", MapValueType = "StructProperty",
+            MapKeySize = 8, MapValueSize = 0x10, MapValueOffset = 8, MapDataAddr = "0x4000",
+            MapValueStructAddr = "0xOUTER", MapValueStructType = "FOuter",
+            MapElements = new List<ContainerElementValue> { new() { Index = 0, Key = "ok" } },
+        };
+
+        var rs1 = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+        var ri1 = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+        await CeXmlExportService.ResolveDrilldownAsync(stub, new List<LiveFieldValue> { map }, rs1, ri1, depth: 1);
+        Assert.True(rs1.ContainsKey("0x4008"));    // outer value struct walked (one level)
+        Assert.False(rs1.ContainsKey("0x9008"));   // inner map value struct NOT walked at D=1
+
+        var rs2 = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+        var ri2 = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+        await CeXmlExportService.ResolveDrilldownAsync(stub, new List<LiveFieldValue> { map }, rs2, ri2, depth: 2);
+        Assert.True(rs2.ContainsKey("0x4008"));
+        Assert.True(rs2.ContainsKey("0x9008"));    // inner expands at D=2
+    }
+
+    [Fact]
+    public void GenerateHierarchicalXml_BreadcrumbLength_DoesNotChangeFieldExpansion()
+    {
+        // Drill Depth is measured from the current view; the breadcrumb navigation path
+        // costs nothing. A struct field resolved to depth D expands identically whether the
+        // breadcrumb trail is 1 hop or 4 hops long.
+        var resolvedStructs = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal)
+        {
+            ["0x5000"] = new()
+            {
+                new() { Name = "X", TypeName = "FloatProperty", Offset = 0, Size = 4 },
+                new() { Name = "Y", TypeName = "FloatProperty", Offset = 4, Size = 4 },
+            }
+        };
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "Loc", TypeName = "StructProperty", Offset = 0x10, Size = 8,
+                     StructTypeName = "FVector2D", StructDataAddr = "0x5000", StructClassAddr = "0x6000" }
+        };
+
+        var shortBc = new[] { MakeBc("0x1000", "GWorld") };
+        var longBc = new[]
+        {
+            MakeBc("0x1000", "GWorld"),
+            MakeBc("0x2000", "A", "A", isPointer: true, offset: 0x8),
+            MakeBc("0x3000", "B", "B", isPointer: true, offset: 0x10),
+            MakeBc("0x4000", "C", "C", isPointer: true, offset: 0x18),
+        };
+
+        var xmlShort = CeXmlExportService.GenerateHierarchicalXml("0x1000", "GWorld", shortBc, fields, resolvedStructs);
+        var xmlLong = CeXmlExportService.GenerateHierarchicalXml("0x1000", "GWorld", longBc, fields, resolvedStructs);
+
+        // Both expand the struct's fields fully — breadcrumb length is irrelevant to depth.
+        Assert.Contains("\"X\"", xmlShort);
+        Assert.Contains("\"Y\"", xmlShort);
+        Assert.Contains("\"X\"", xmlLong);
+        Assert.Contains("\"Y\"", xmlLong);
+    }
+
+    [Fact]
     public void GenerateInstanceXml_ScalarSet_EmitsGroupWithElements()
     {
         // Set<IntProperty> with 3 elements at sparse indices 0,1,5

@@ -1205,4 +1205,185 @@ public class CsxExportServiceTests
         // InterfaceProperty maps to Pointer
         Assert.Contains("Vartype=\"Pointer\"", csx);
     }
+
+    // --- Phase B: container element STRUCT value expansion ---
+
+    [Fact]
+    public async Task GenerateCsx_MapProperty_StructValue_DrilldownOne_FlattensValueFields()
+    {
+        // Map<Name, Struct> (the MissionInfoList shape) — value struct fields flatten inline
+        // instead of staying a raw byte blob. stride = AlignUp(valOffset+valueSize, 4) + 8
+        //   = AlignUp(8 + 16, 4) + 8 = 32; element value at index*32 + valOffset(8).
+        //   [0] value @ 0*32+8 = 8  -> StructDataAddr = 0x10000 + 8  = 0x10008
+        //   [1] value @ 1*32+8 = 40 -> StructDataAddr = 0x10000 + 40 = 0x10028
+        var valueFields = new List<LiveFieldValue>
+        {
+            new() { Name = "Progress", TypeName = "IntProperty", Offset = 0, Size = 4 },
+            new() { Name = "bDone", TypeName = "BoolProperty", Offset = 4, Size = 1 },
+        };
+        _dump.RegisterStruct("0x10008", new InstanceWalkResult { Fields = valueFields });
+        _dump.RegisterStruct("0x10028", new InstanceWalkResult { Fields = valueFields });
+
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "MissionInfoList", TypeName = "MapProperty", Offset = 0x40, Size = 8,
+                     MapCount = 2, MapKeyType = "NameProperty", MapValueType = "StructProperty",
+                     MapKeySize = 8, MapValueSize = 16, MapValueOffset = 8,
+                     MapValueStructAddr = "0xMISSIONSTRUCT", MapValueStructType = "FMissionInfo",
+                     MapDataAddr = "0x10000",
+                     MapElements = new List<ContainerElementValue>
+                     {
+                         new() { Index = 0, Key = "Mission_01" },
+                         new() { Index = 1, Key = "Mission_02" },
+                     }
+            }
+        };
+
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "SaveData", fields, drilldownDepth: 1);
+
+        // Map child structure exists
+        Assert.Contains("Name=\"MissionInfoList\"", csx);
+        // Value struct sub-fields flatten with "[idx] key / SubField" naming
+        Assert.Contains("Description=\"[0] Mission_01 / Progress\"", csx);
+        Assert.Contains("Description=\"[0] Mission_01 / bDone\"", csx);
+        Assert.Contains("Description=\"[1] Mission_02 / Progress\"", csx);
+        // Offsets: element start (index*stride + valOffset) + sub.Offset
+        Assert.Contains("Offset=\"8\"", csx);    // [0] Progress: 8 + 0
+        Assert.Contains("Offset=\"40\"", csx);   // [1] Progress: 40 + 0
+        Assert.Contains("Offset=\"44\"", csx);   // [1] bDone: 40 + 4
+        // Proper type mapping for the flattened sub-fields
+        Assert.Contains("Vartype=\"4 Bytes\"", csx);  // IntProperty
+        Assert.Contains("Vartype=\"Byte\"", csx);     // BoolProperty
+        // The value struct is NOT emitted as a raw byte blob
+        Assert.DoesNotContain("Vartype=\"Array of byte\"", csx);
+    }
+
+    [Fact]
+    public async Task GenerateCsx_SetProperty_StructElem_DrilldownOne_FlattensElementFields()
+    {
+        // Set<Struct> — element struct fields flatten inline (mirrors Map<…,Struct>).
+        // stride = AlignUp(elemSize, 4) + 8 = AlignUp(12, 4) + 8 = 20; element @ index*20.
+        //   [0] @ 0  -> StructDataAddr = 0x20000 + 0  = 0x20000
+        //   [1] @ 20 -> StructDataAddr = 0x20000 + 20 = 0x20014
+        var elemFields = new List<LiveFieldValue>
+        {
+            new() { Name = "Id", TypeName = "IntProperty", Offset = 0, Size = 4 },
+            new() { Name = "Weight", TypeName = "FloatProperty", Offset = 4, Size = 4 },
+        };
+        _dump.RegisterStruct("0x20000", new InstanceWalkResult { Fields = elemFields });
+        _dump.RegisterStruct("0x20014", new InstanceWalkResult { Fields = elemFields });
+
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "TagSet", TypeName = "SetProperty", Offset = 0x60, Size = 8,
+                     SetCount = 2, SetElemType = "StructProperty", SetElemSize = 12,
+                     SetElemStructAddr = "0xTAGSTRUCT", SetElemStructType = "FTag",
+                     SetDataAddr = "0x20000",
+                     SetElements = new List<ContainerElementValue>
+                     {
+                         new() { Index = 0, Key = "Alpha" },
+                         new() { Index = 1, Key = "Beta" },
+                     }
+            }
+        };
+
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1);
+
+        Assert.Contains("Name=\"TagSet\"", csx);
+        Assert.Contains("Description=\"[0] Alpha / Id\"", csx);
+        Assert.Contains("Description=\"[0] Alpha / Weight\"", csx);
+        Assert.Contains("Description=\"[1] Beta / Id\"", csx);
+        // Offsets: [1] Id = 20 + 0; [1] Weight = 20 + 4
+        Assert.Contains("Offset=\"20\"", csx);
+        Assert.Contains("Offset=\"24\"", csx);
+        Assert.Contains("Vartype=\"Float\"", csx);   // FloatProperty
+    }
+
+    [Fact]
+    public async Task GenerateCsx_MapProperty_StructValue_DepthZero_StaysFlatPointer()
+    {
+        // Depth-from-current-view: at D=0 a Map<…,Struct> does NOT expand — it stays a
+        // bare Pointer, even though the value struct could be resolved.
+        _dump.RegisterStruct("0x10008", new InstanceWalkResult
+        {
+            Fields = new List<LiveFieldValue>
+            {
+                new() { Name = "Progress", TypeName = "IntProperty", Offset = 0, Size = 4 },
+            }
+        });
+
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "MissionInfoList", TypeName = "MapProperty", Offset = 0x40, Size = 8,
+                     MapCount = 1, MapKeyType = "NameProperty", MapValueType = "StructProperty",
+                     MapKeySize = 8, MapValueSize = 16, MapValueOffset = 8,
+                     MapValueStructAddr = "0xMISSIONSTRUCT", MapValueStructType = "FMissionInfo",
+                     MapDataAddr = "0x10000",
+                     MapElements = new List<ContainerElementValue> { new() { Index = 0, Key = "Mission_01" } }
+            }
+        };
+
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "SaveData", fields, drilldownDepth: 0);
+
+        // No child structure, no flattened value fields — just the pointer leaf.
+        Assert.DoesNotContain("Name=\"MissionInfoList\"", csx);
+        Assert.DoesNotContain("Progress", csx);
+        Assert.Contains("Description=\"MissionInfoList\"", csx);
+        Assert.Contains("Vartype=\"Pointer\"", csx);
+    }
+
+    [Fact]
+    public async Task GenerateCsx_MapValueStruct_NestedMap_DepthMeasuredFromCurrentView()
+    {
+        // Locks the "Drill Depth measured from the current view; each container level costs
+        // one" semantics for a Map<Name, Struct> whose value struct itself holds a nested
+        // Map<Name, Struct>. D=1 expands ONE level (outer value struct fields show, the inner
+        // map stays a bare pointer); D=2 expands the inner map too.
+        //
+        // Outer: stride = AlignUp(8+16,4)+8 = 32; [0] value @ 8 -> 0x4008.
+        // Inner (a field of the value struct): stride = AlignUp(8+8,4)+8 = 24; [0] value @ 8 -> 0x9008.
+        _dump.RegisterStruct("0x4008", new InstanceWalkResult
+        {
+            Fields = new List<LiveFieldValue>
+            {
+                new() { Name = "Inner", TypeName = "MapProperty", Offset = 0, Size = 8,
+                         MapCount = 1, MapKeyType = "NameProperty", MapValueType = "StructProperty",
+                         MapKeySize = 8, MapValueSize = 8, MapValueOffset = 8,
+                         MapValueStructAddr = "0xINNERSTRUCT", MapValueStructType = "FInner",
+                         MapDataAddr = "0x9000",
+                         MapElements = new List<ContainerElementValue> { new() { Index = 0, Key = "ik" } } },
+            }
+        });
+        _dump.RegisterStruct("0x9008", new InstanceWalkResult
+        {
+            Fields = new List<LiveFieldValue>
+            {
+                new() { Name = "Leaf", TypeName = "IntProperty", Offset = 0, Size = 4 },
+            }
+        });
+
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "Outer", TypeName = "MapProperty", Offset = 0x40, Size = 8,
+                     MapCount = 1, MapKeyType = "NameProperty", MapValueType = "StructProperty",
+                     MapKeySize = 8, MapValueSize = 16, MapValueOffset = 8,
+                     MapValueStructAddr = "0xOUTERSTRUCT", MapValueStructType = "FOuter",
+                     MapDataAddr = "0x4000",
+                     MapElements = new List<ContainerElementValue> { new() { Index = 0, Key = "ok" } }
+            }
+        };
+
+        // D=1: outer value struct flattens (Inner field appears), but the inner map does NOT
+        // expand — no "Inner" child structure, no Leaf.
+        var csx1 = await CsxExportService.GenerateCsxAsync(_dump, "Save", fields, drilldownDepth: 1);
+        Assert.Contains("Name=\"Outer\"", csx1);
+        Assert.Contains("Description=\"[0] ok / Inner\"", csx1);  // value struct flattened one level
+        Assert.DoesNotContain("Name=\"Inner\"", csx1);            // inner map NOT expanded at D=1
+        Assert.DoesNotContain("Leaf", csx1);
+
+        // D=2: the inner map expands too — "Inner" child structure with the Leaf field.
+        var csx2 = await CsxExportService.GenerateCsxAsync(_dump, "Save", fields, drilldownDepth: 2);
+        Assert.Contains("Name=\"Inner\"", csx2);
+        Assert.Contains("Leaf", csx2);
+    }
 }

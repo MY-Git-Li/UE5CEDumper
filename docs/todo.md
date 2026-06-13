@@ -30,6 +30,29 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
+## CE export drilldown — remaining gaps (Phase A/B/C shipped)
+
+Phase A (CE XML/Field container-value expansion, build 1085), Phase B (CSX parity,
+build 1098), Phase C (depth-from-current-view tests + CSX truncation note, build
+1098) all shipped. Spec: [ce-export-drilldown-spec.md](ce-export-drilldown-spec.md).
+Open follow-ups (low priority):
+
+- **CSX struct-array element full re-walk** — Effort: **S** · Risk: low. CSX struct
+  arrays still flatten the shallow Phase-F `StructFields` preview, so nested
+  structs/maps *inside* an array element stay shallow. CE XML's
+  `EmitStructArrayProperty` already re-walks each element via `resolvedStructs`
+  (build 1076); mirror that in `ConvertArrayStructElementsToFields` (stamp
+  `StructDataAddr` per element + route to `EmitStructPropertyFlattened`). The unified
+  resolver already populates `resolvedStructs` for array struct elements — only the
+  CSX emit path ignores it.
+- **Nested-container truncation note** — Effort: **S** · Risk: low. The
+  `⚠ Container element limit` note (CE XML + CSX) only scans top-level fields; a
+  container clipped by `ArrayLimit` *inside* a drilled struct/pointer is unreported.
+  Cheap: scan `resolvedStructs`/`resolvedInstances` values too. (Marked optional in
+  the spec.)
+
+-----
+
 ## Teleport — follow-ups (deferred / future research)
 
 Teleport shipped (Wirbel, build 1027-1043). Works where the possessed pawn is

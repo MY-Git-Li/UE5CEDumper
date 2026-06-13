@@ -1850,8 +1850,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             // Write to file (overwrite if exists — user already confirmed via dialog)
             await File.WriteAllTextAsync(filePath, csx);
 
-            StatusText = "";
-            _log.Info($"CSX exported to {filePath} for {CurrentClassName}");
+            // Surface a truncation note so a partial export (a container clipped by
+            // ArrayLimit) doesn't silently read as complete — same note Copy CE XML shows.
+            var limitWarn = BuildContainerLimitWarning(Fields, ArrayLimit);
+            StatusText = limitWarn ?? "";
+            _log.Info($"CSX exported to {filePath} for {CurrentClassName}"
+                + (limitWarn != null ? $" ({limitWarn})" : ""));
         }
         catch (UnauthorizedAccessException)
         {

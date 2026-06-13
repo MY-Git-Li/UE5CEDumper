@@ -147,5 +147,17 @@ Service-level (`CeXmlExportServiceTests`, no live DLL):
 ---
 *Approved 2026-06-13 — implementation contract (like docs/teleport-spec.md).*
 **Phase A SHIPPED + owner live-verified (build 1085): CE XML/Field now expand
-Map/Set/struct-array struct/object values recursively to Drill Depth. Phase B
-(CSX alignment) + C (extra depth guards) still open.**
+Map/Set/struct-array struct/object values recursively to Drill Depth.**
+**Phase B SHIPPED (build 1098): CSX (`CsxExportService`) reuses the one
+`ResolveDrilldownAsync` resolver and flattens `Map<…,Struct>` / `Set<Struct>`
+value structs inline (`ConvertMapElementsToFields` / new
+`ConvertSetStructElementsToFields` stamp `StructDataAddr`/`StructClassAddr`); the
+map value-offset bug was already covered (CSX consumes the DLL's corrected
+`map_value_offset`).**
+**Phase C SHIPPED (build 1098): depth-from-current-view semantics locked with
+service-level tests (D=1 = one container level, breadcrumbs cost nothing) + a
+`⚠ Container element limit (N)` truncation note added to Export CSX (Copy CE XML
+already had it). Per the locked decision, no hard walk-budget cap.**
+Remaining: CSX struct-array elements still use the shallow Phase-F `StructFields`
+preview (not the full resolver re-walk CE XML's `EmitStructArrayProperty` does);
+nested-container truncation beyond the top level is unreported (optional).
