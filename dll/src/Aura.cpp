@@ -756,6 +756,62 @@ static void DetectStrideForCurrentObjOffset(uintptr_t chunkTable, uintptr_t chun
     }
 }
 
+// Diagnostic ONLY (no behavior change; runs only when normal detection fails):
+// decide whether the FUObjectItems look like the UE5.7+ PACKED encoding
+// (UE_ENABLE_FUOBJECT_ITEM_PACKING). In packed mode the UObject* is not stored
+// directly — it is split across two fields and must be reconstructed:
+//     +0x00  int64  FlagsAndRefCount   (high 32 bits = flags + top pointer bits)
+//     +0x08  uint32 ObjectPtrLow       ((ptr >> 3) low 32 bits)
+//     ptr = ((FlagsAndRefCount >> 32) & PtrMask) << (32 + 3) | (ObjectPtrLow << 3)
+// using the current-engine constants UObjectAlignment=8 (=> 3 trailing zero bits)
+// and EInternalObjectFlags_MinFlagBitIndex=14 (=> PtrMask = low 14 bits = 0x3FFF).
+// If the reconstruction yields valid UObjects we log a clear, actionable hint so
+// this layout is identifiable from the log in the field. Packed support itself is
+// NOT implemented (would need this reconstruction on the hot GetByIndex path plus
+// calibration of the two constants against a real packed game), so this only names
+// the failure — it does not make the dump work.
+static void DiagnosePackedLayout(uintptr_t chunkTable, uintptr_t chunk0) {
+    constexpr uint64_t kPtrMask        = 0x3FFFull;  // ~(0xFFFFFFFF << 14): low 14 bits
+    constexpr int      kTrailingZeroes = 3;          // UObjectAlignment == 8
+    constexpr int      kProbeItems     = 16;
+
+    struct Base { const char* what; uintptr_t addr; };
+    const Base bases[]   = { { "chunked", chunk0 }, { "flat", chunkTable } };
+    const int  strides[] = { 24, 16 };  // packed item is 24B; 16B as a fallback guess
+
+    for (const auto& base : bases) {
+        if (!base.addr) continue;
+        for (int stride : strides) {
+            int valid = 0, probed = 0;
+            for (int idx = 0; idx < kProbeItems; ++idx) {
+                uintptr_t itemAddr = base.addr + static_cast<uintptr_t>(idx) * stride;
+                uint64_t flags  = 0;
+                uint32_t ptrLow = 0;
+                if (!Macht::ReadSafe(itemAddr, flags))          break;
+                if (!Macht::ReadSafe(itemAddr + 0x08, ptrLow))  break;
+                ++probed;
+                if (ptrLow == 0) continue;  // likely a null/empty slot
+                uintptr_t obj = (static_cast<uintptr_t>((flags >> 32) & kPtrMask) << (32 + kTrailingZeroes))
+                              | (static_cast<uintptr_t>(ptrLow) << kTrailingZeroes);
+                if (LooksLikeUObject(obj)) ++valid;
+            }
+            if (valid >= 2) {
+                LOG_WARN("ObjectArray: items look like UE5.7+ PACKED FUObjectItem "
+                         "(UE_ENABLE_FUOBJECT_ITEM_PACKING), %s base / stride %d: %d/%d reconstruct "
+                         "to valid UObjects via ptr=((flags>>32)&0x3FFF)<<35|(ptrLow<<3). This packed "
+                         "encoding is NOT yet supported -> the object walk will be empty. (assumed "
+                         "constants: UObjectAlignment=8, EInternalObjectFlags_MinFlagBitIndex=14 — "
+                         "verify against the game if these changed)",
+                         base.what, stride, valid, probed);
+                return;
+            }
+        }
+    }
+    LOG_INFO("ObjectArray: packed-layout diagnostic negative — items do not match the UE5.7+ packed "
+             "FUObjectItem encoding either; layout is genuinely unrecognised (encrypted ptr? wrong "
+             "GObjects? new variant?).");
+}
+
 // Auto-detect FUObjectItem size AND the within-item object-pointer offset by probing
 // consecutive items in chunks.
 //   stride:  UE5 (most) 16 bytes, UE4 / some UE5 with clustering 24 bytes.
@@ -851,6 +907,10 @@ static void DetectItemSize() {
     } else {
         s_itemObjOffset = 0;
         LOG_WARN("ObjectArray: Could not auto-detect item size, keeping default %d", s_itemSize);
+        // Both the classic and UE5.7+ unpacked passes failed. Before giving up, name
+        // the most likely modern cause so the log is actionable: the UE5.7+ PACKED
+        // FUObjectItem encoding (not yet supported). Pure diagnostic — no behavior change.
+        DiagnosePackedLayout(chunkTable, chunk0);
     }
 }
 
