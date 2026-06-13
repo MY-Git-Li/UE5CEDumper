@@ -48,7 +48,7 @@ public static class Constants
 
     // Live Walker auto-refresh
     public const int DefaultAutoRefreshIntervalSec = 10;
-    public const int MinAutoRefreshIntervalSec = 8;
+    public const int MinAutoRefreshIntervalSec = 6;
     public const int AutoRefreshBenchmarkBufferSec = 5; // Extra seconds added to benchmarked duration
 
     // AOB Usage Tracking
