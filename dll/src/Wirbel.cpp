@@ -51,6 +51,17 @@ using namespace Wirbel;  // TeleportResult codes
 std::mutex s_opMutex;
 Marker s_markers[Grimoire::TELEPORT_SLOTS];
 
+// System "last" slot — the pose captured automatically right before every
+// recall / force / BugItGo / cursor teleport (see SaveLastImpl). Never user
+// saved; recalled one-way via Wirbel::RecallLast so a bad teleport is undoable.
+Marker s_lastMarker;
+
+// BugIt slot — a single user-triggered pose stored by Wirbel::BugItSave and
+// recalled by Wirbel::BugItGo (UE BugIt/BugItGo semantics). Distinct from the
+// markers and the "last" slot; lives DLL-side so the CE Lua hotkeys don't have
+// to carry the coordinates between presses.
+Marker s_bugItMarker;
+
 bool IEquals(const std::string& a, const char* b) {
     size_t bl = std::strlen(b);
     if (a.size() != bl) return false;
@@ -781,6 +792,20 @@ int32_t RecallTo(const Pose& p, bool restoreRot, uint8_t* tierOut) {
     return TP_OK;
 }
 
+// Capture the current pose into the system "last" slot just before a jump, so a
+// failed/unwanted teleport can be undone via Wirbel::RecallLast. Best-effort: an
+// unreadable pose (menu / no pawn) leaves the previous last position intact, and
+// the about-to-run teleport will fail on its own. Caller MUST already hold
+// s_opMutex (uses the lock-free GetPoseImpl, not the public GetPose export).
+void SaveLastImpl() {
+    Marker m{};
+    if (GetPoseImpl(m.P, m.MapName, sizeof(m.MapName), nullptr) != TP_OK) return;
+    m.Valid = true;
+    s_lastMarker = m;
+    LOG_INFO("Teleport: last position auto-saved (%.1f, %.1f, %.1f) map='%s'",
+             m.P.X, m.P.Y, m.P.Z, m.MapName);
+}
+
 } // namespace
 
 namespace Wirbel {
@@ -819,6 +844,7 @@ int32_t RecallMarker(int32_t slot, bool force, uint8_t* tierOut) {
             return TP_ERR_MAP_MISMATCH;
         }
     }
+    SaveLastImpl();   // remember where we were, in case this recall goes wrong
     int32_t rc = RecallTo(m.P, /*restoreRot=*/true, tierOut);
     LOG_INFO("Teleport: recall %d -> rc=%d", slot, rc);
     return rc;
@@ -826,6 +852,7 @@ int32_t RecallMarker(int32_t slot, bool force, uint8_t* tierOut) {
 
 int32_t RecallExplicit(const Pose& pose, bool hasRot, uint8_t* tierOut) {
     std::lock_guard<std::mutex> lock(s_opMutex);
+    SaveLastImpl();   // remember where we were, in case this BugItGo goes wrong
     int32_t rc = RecallTo(pose, hasRot, tierOut);
     LOG_INFO("Teleport: explicit recall (%.1f, %.1f, %.1f) rot=%d -> rc=%d",
              pose.X, pose.Y, pose.Z, hasRot ? 1 : 0, rc);
@@ -933,6 +960,7 @@ int32_t TeleportToCursor(double zOffset, int32_t traceChannel,
         outHit->Z = impact[2];
     }
     double dest[3] = { impact[0], impact[1], impact[2] + zOffset };
+    SaveLastImpl();   // remember where we were, in case this cursor jump goes wrong
     rc = TeleportPawnTo(c, dest, nullptr, /*preferTeleportTo=*/true, tierOut);
     if (rc != TP_OK) return rc;
     StopMovement(c);
@@ -953,6 +981,54 @@ int32_t ClearMarker(int32_t slot) {
     if (slot < 0 || slot >= Grimoire::TELEPORT_SLOTS) return TP_ERR_EMPTY_MARKER;
     s_markers[slot] = Marker{};
     return TP_OK;
+}
+
+int32_t RecallLast(uint8_t* tierOut) {
+    std::lock_guard<std::mutex> lock(s_opMutex);
+    if (!s_lastMarker.Valid) return TP_ERR_EMPTY_MARKER;
+    Marker m = s_lastMarker;
+    // One-way restore: deliberately does NOT SaveLastImpl() here, so the last
+    // slot stays pinned to the pre-teleport pose and repeated recalls always
+    // return to the same spot (recovery, not a toggle).
+    int32_t rc = RecallTo(m.P, /*restoreRot=*/true, tierOut);
+    LOG_INFO("Teleport: recall-last (%.1f, %.1f, %.1f) -> rc=%d",
+             m.P.X, m.P.Y, m.P.Z, rc);
+    return rc;
+}
+
+int32_t GetLast(Marker& out) {
+    std::lock_guard<std::mutex> lock(s_opMutex);
+    out = s_lastMarker;
+    return out.Valid ? TP_OK : TP_ERR_EMPTY_MARKER;
+}
+
+int32_t BugItSave(Pose& out, char* mapName, int32_t mapNameCap, uint8_t* outSource) {
+    std::lock_guard<std::mutex> lock(s_opMutex);
+    Marker m{};
+    int32_t rc = GetPoseImpl(m.P, m.MapName, sizeof(m.MapName), outSource);
+    if (rc != TP_OK) return rc;
+    m.Valid = true;
+    s_bugItMarker = m;
+    out = m.P;
+    if (mapName && mapNameCap > 0) {
+        int32_t n = 0;
+        for (; n < mapNameCap - 1 && m.MapName[n]; ++n) mapName[n] = m.MapName[n];
+        mapName[n] = '\0';
+    }
+    LOG_INFO("Teleport: BugIt stored (%.1f, %.1f, %.1f) map='%s'",
+             m.P.X, m.P.Y, m.P.Z, m.MapName);
+    return TP_OK;
+}
+
+int32_t BugItGo(uint8_t* tierOut) {
+    std::lock_guard<std::mutex> lock(s_opMutex);
+    if (!s_bugItMarker.Valid) return TP_ERR_EMPTY_MARKER;   // no BugIt yet -> no-op
+    Marker m = s_bugItMarker;
+    SaveLastImpl();   // BugItGo is a jump -> record the undo point first
+    int32_t rc = RecallTo(m.P, /*restoreRot=*/true, tierOut);
+    LOG_INFO("Teleport: BugItGo (%.1f, %.1f, %.1f) -> rc=%d",
+             m.P.X, m.P.Y, m.P.Z, rc);
+    return rc;
 }
 
 bool GetCurrentMapName(char* buf, int32_t cap) {

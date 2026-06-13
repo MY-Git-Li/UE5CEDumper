@@ -278,9 +278,17 @@ public interface IDumpService
     Task<TeleportResult> TeleportToCursorAsync(double zOffset, int channel,
         bool fallbackCenter, CancellationToken ct = default);
 
-    /// <summary>Read all marker slots.</summary>
+    /// <summary>Read all marker slots. The response also carries the system
+    /// "last" slot as a sentinel entry with <see cref="TeleportMarker.Slot"/> ==
+    /// -1 (the pose auto-saved before the most recent jump).</summary>
     Task<List<TeleportMarker>> TeleportGetMarkersAsync(CancellationToken ct = default);
 
     /// <summary>Clear marker slot 0..2.</summary>
     Task<int> TeleportClearMarkerAsync(int slot, CancellationToken ct = default);
+
+    /// <summary>Recall the system "last" pose — the position auto-saved DLL-side
+    /// right before the most recent recall / force / BugItGo / cursor teleport,
+    /// so a teleport that went wrong can be undone. One-way restore (the slot is
+    /// never overwritten by this call); map check is skipped.</summary>
+    Task<TeleportResult> TeleportRecallLastAsync(CancellationToken ct = default);
 }

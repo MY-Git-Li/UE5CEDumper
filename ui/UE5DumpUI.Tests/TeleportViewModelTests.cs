@@ -25,6 +25,7 @@ public class TeleportViewModelTests
         public int ClearCalls { get; private set; }
         public int CursorCalls { get; private set; }
         public int GetMarkersCalls { get; private set; }
+        public int RecallLastCalls { get; private set; }
         public (double X, double Y, double Z, double? P)? LastExplicit { get; private set; }
 
         public override Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default)
@@ -48,6 +49,9 @@ public class TeleportViewModelTests
 
         public override Task<int> TeleportClearMarkerAsync(int slot, CancellationToken ct = default)
         { ClearCalls++; return Task.FromResult(0); }
+
+        public override Task<TeleportResult> TeleportRecallLastAsync(CancellationToken ct = default)
+        { RecallLastCalls++; return Task.FromResult(NextResult); }
     }
 
     private sealed class NoopLogger : ILoggingService
@@ -217,7 +221,7 @@ public class TeleportViewModelTests
     }
 
     [Fact]
-    public async Task CopyAsBugItGo_copies_formatted_string()
+    public async Task CopyAsBugItGo_copies_and_fills_run_field()
     {
         var fake = new FakeDumpService { NextPose = new() { Code = 0, X = 100, Y = 200, Z = 300 } };
         var vm = CreateVm(fake, out var platform);
@@ -227,6 +231,22 @@ public class TeleportViewModelTests
 
         Assert.NotNull(platform.LastClipboard);
         Assert.StartsWith("BugItGo 100.000 200.000 300.000", platform.LastClipboard);
+        // Also pasted into the Run field so BugItGo can fire immediately.
+        Assert.StartsWith("BugItGo 100.000 200.000 300.000", vm.BugItGoInput);
+    }
+
+    [Fact]
+    public async Task RunBugItGo_empty_field_shows_message_without_parsing()
+    {
+        var fake = new FakeDumpService();
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        vm.BugItGoInput = "   ";   // whitespace only
+
+        await vm.RunBugItGoCommand.ExecuteAsync(null);
+
+        Assert.Null(fake.LastExplicit);
+        Assert.Contains("empty", vm.StatusText, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -259,13 +279,67 @@ public class TeleportViewModelTests
     }
 
     [Fact]
-    public void Marker_hotkey_rows_are_six_save_and_recall()
+    public void Hotkey_rows_are_save_recall_recalllast_and_bugitgo()
     {
         var vm = CreateVm(new FakeDumpService(), out _, new FakeHotkeyService());
-        Assert.Equal(6, vm.HotkeyRows.Count);
+        // 3 save + 3 recall + recall_last + bugit + bugitgo.
+        Assert.Equal(9, vm.HotkeyRows.Count);
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "save0" && r.DisplayName == "Save marker 1");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall2" && r.DisplayName == "Recall marker 3");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall_last" && r.DisplayName == "Recall last");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "bugit");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "bugitgo");
         Assert.All(vm.HotkeyRows, r => Assert.False(r.HasBinding));
+    }
+
+    [Fact]
+    public async Task RecallLast_calls_dll_and_reports_success()
+    {
+        var fake = new FakeDumpService { NextResult = new() { Code = 0, Tier = 1 } };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.RecallLastCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.RecallLastCalls);
+        Assert.Contains("last position", vm.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RecallLast_empty_slot_explains_auto_save()
+    {
+        var fake = new FakeDumpService { NextResult = new() { Code = TeleportCodes.EmptyMarker } };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.RecallLastCommand.ExecuteAsync(null);
+
+        Assert.Contains("auto-save", vm.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SetConnected_routes_last_sentinel_to_last_display()
+    {
+        var fake = new FakeDumpService
+        {
+            NextMarkers = new()
+            {
+                new() { Slot = 0, Valid = false },
+                new() { Slot = 1, Valid = false },
+                new() { Slot = 2, Valid = false },
+                // slot -1 = system "last" sentinel (Fern get_markers).
+                new() { Slot = -1, Valid = true, X = 12, Y = 3, Z = 80, Map = "World1" },
+            },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+
+        Assert.True(vm.LastValid);
+        Assert.True(vm.CanRecallLast);
+        Assert.Contains("World1", vm.LastSummary);
+        // The sentinel must not leak into the 3 real marker rows.
+        Assert.Equal(3, vm.Markers.Count);
+        Assert.All(vm.Markers, m => Assert.False(m.Valid));
     }
 
     [Fact]

@@ -3067,8 +3067,36 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 }
                 arr.push_back(jm);
             }
+            // Append the system "last" slot as a sentinel entry (slot = -1) so
+            // the UI refreshes it together with the real markers in one round
+            // trip. It is auto-saved DLL-side before every jump and recalled
+            // one-way (teleport_recall_last) — never user-saved/cleared.
+            {
+                Wirbel::Marker last{};
+                json jl;
+                jl["slot"] = -1;
+                if (Wirbel::GetLast(last) == 0) {
+                    jl["valid"] = true;
+                    jl["x"] = last.P.X;         jl["y"] = last.P.Y;     jl["z"] = last.P.Z;
+                    jl["pitch"] = last.P.Pitch; jl["yaw"] = last.P.Yaw; jl["roll"] = last.P.Roll;
+                    jl["map"] = last.MapName;
+                } else {
+                    jl["valid"] = false;
+                }
+                arr.push_back(jl);
+            }
             json data;
             data["markers"] = arr;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        if (cmd == Renge::CMD_TELEPORT_RECALL_LAST) {
+            uint8_t tier = 0;
+            int32_t code = Wirbel::RecallLast(&tier);
+            Sein::Info("PIPE:cmd", "teleport_recall_last -> %d", code);
+            json data;
+            data["code"] = code;
+            data["tier"] = tier;
             return Renge::MakeResponse(id, data).dump();
         }
 

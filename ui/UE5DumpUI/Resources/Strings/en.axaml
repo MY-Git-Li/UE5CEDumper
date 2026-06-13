@@ -524,8 +524,11 @@
     <sys:String x:Key="str.TP.CopyBugItGo">Copy as BugItGo</sys:String>
     <sys:String x:Key="str.TP.RunBugItGo">Run</sys:String>
     <sys:String x:Key="str.TP.BugHint">Paste 'BugItGo X Y Z', 'X Y Z', or a ?BugLoc=(...)?BugRot=(...) string</sys:String>
-    <sys:String x:Key="str.TP.HkHeader">Marker Hotkeys</sys:String>
-    <sys:String x:Key="str.TP.HkHint">Global hotkeys for Save/Recall (fire while the game is focused). Click Set, then press the combo — hold Ctrl/Alt/Shift then a key (e.g. Ctrl+F7), or a single key (e.g. F7). Click Cancel or press Esc to abort. Keyboard only for now (mouse extra-buttons / gamepad not yet supported). Saved automatically.</sys:String>
+    <sys:String x:Key="str.TP.LastHeader">Last Position (auto-saved)</sys:String>
+    <sys:String x:Key="str.TP.LastHint">The dumper records where you were just before every Recall / Force / BugItGo / cursor teleport, so you can undo a jump that went wrong. This slot is managed by the system — you can't save into it, only recall it.</sys:String>
+    <sys:String x:Key="str.TP.RecallLast">Recall last</sys:String>
+    <sys:String x:Key="str.TP.HkHeader">Teleport Hotkeys</sys:String>
+    <sys:String x:Key="str.TP.HkHint">Global hotkeys for Save / Recall / Recall-last / BugItGo (fire while the game is focused). Click Set, then press the combo — hold Ctrl/Alt/Shift then a key (e.g. Ctrl+F7), or a single key (e.g. F7). Click Cancel or press Esc to abort. Keyboard only for now (mouse extra-buttons / gamepad not yet supported). Saved automatically.</sys:String>
     <sys:String x:Key="str.TP.HkSet">Set</sys:String>
     <sys:String x:Key="str.TP.HkClear">Clear</sys:String>
     <sys:String x:Key="str.TP.CeHeader">CE Export</sys:String>
@@ -544,11 +547,12 @@
     <sys:String x:Key="str.Tip.TP.Channel">ETraceTypeQuery byte. 0 = Visibility (default engine mapping). Games can remap channels — change this if cursor hits land on the wrong surface.</sys:String>
     <sys:String x:Key="str.Tip.TP.FallbackCenter">When the game has no cursor (HD-2D-style), trace from the screen center instead.</sys:String>
     <sys:String x:Key="str.Tip.TP.CursorHotkey">Bind a system-wide hotkey for cursor teleport so you can keep the game focused (the cursor stays in the game). Auto-picks the first free combo: Ctrl+F8→F5, then Alt+F8→F5. The chosen combo shows beside this box.</sys:String>
-    <sys:String x:Key="str.Tip.TP.CopyBugItGo">Read the current pose and copy a 'BugItGo X Y Z' string to the clipboard. (BugIt itself can't return data to the dumper — it writes to the game's own log/clipboard — so this reads the pose directly.)</sys:String>
+    <sys:String x:Key="str.Tip.TP.CopyBugItGo">Read the current pose, copy a 'BugItGo X Y Z' string to the clipboard, and paste it into the Run field so you can fire BugItGo immediately. (BugIt itself can't return data to the dumper — it writes to the game's own log/clipboard — so this reads the pose directly.)</sys:String>
     <sys:String x:Key="str.Tip.TP.RunBugItGo">Parse the pasted string and teleport there. Works without any CheatManager — feeds X/Y/Z into the same recall path as markers.</sys:String>
+    <sys:String x:Key="str.Tip.TP.RecallLast">Undo the most recent teleport: jump back to the pose auto-saved just before your last Recall / Force / BugItGo / cursor teleport. One-way — recalling it doesn't change the saved spot, so you can press it repeatedly. The system writes this slot; you can't save into it.</sys:String>
     <sys:String x:Key="str.Tip.TP.HkSet">Click, then press the key combo you want for this action. Hold modifiers (Ctrl/Alt/Shift) then a key, or press a single key. Esc cancels. The combo is registered system-wide so it works while the game is focused.</sys:String>
-    <sys:String x:Key="str.Tip.TP.AddActions">Ship 7 momentary action records (Save 1-3, Recall 1-3, Cursor) into the open Cheat Engine table via AOBMaker — each fires once when ticked and auto-unticks. Bind CE record hotkeys yourself if you prefer CE-side hotkeys. Requires the AOBMaker plugin connected.</sys:String>
-    <sys:String x:Key="str.Tip.TP.SaveCt">Backup: save a Cheat Engine .CT file with the 7 momentary records, for when AOBMaker isn't connected. Import via CE File → Open.</sys:String>
+    <sys:String x:Key="str.Tip.TP.AddActions">Ship 11 momentary action records (Save 1-3, Recall 1-3, Recall last, BugIt, BugItGo, Cursor, Clear all) into the open Cheat Engine table via AOBMaker — each fires once when ticked and auto-unticks. Bind CE record hotkeys yourself if you prefer CE-side hotkeys. Requires the AOBMaker plugin connected.</sys:String>
+    <sys:String x:Key="str.Tip.TP.SaveCt">Backup: save a Cheat Engine .CT file with the 11 momentary records, for when AOBMaker isn't connected. Import via CE File → Open.</sys:String>
 
     <!-- Interesting Properties Finder (B' / Unusual Location) -->
     <sys:String x:Key="str.IP.Load">Load</sys:String>

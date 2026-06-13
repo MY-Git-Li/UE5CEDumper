@@ -346,7 +346,7 @@ int32_t ClearMarker(int32_t slot);
 TraceTypeQuery1, the stock Visibility mapping). Games can remap channels —
 that's why it's a parameter surfaced in the UI, not a constant.
 
-### 6.3 New C ABI exports (Frieren.cpp wrappers) — 30 → 36
+### 6.3 New C ABI exports (Frieren.cpp wrappers) — 30 → 38
 
 ```c
 // All return Wirbel error codes (§8). Pose arrays are X,Y,Z,Pitch,Yaw,Roll.
@@ -358,6 +358,9 @@ int32_t UE5_TeleportToCursor(double zOffset, int32_t traceChannel,
 int32_t UE5_TeleportGetMarker(int32_t slot, double outPose[6],
                               char* outMapName, int32_t mapNameCap); // -6 if empty
 int32_t UE5_TeleportClearMarker(int32_t slot);
+int32_t UE5_TeleportRecallLast();                                   // one-way undo
+int32_t UE5_TeleportGetLast(double outPose[6],
+                            char* outMapName, int32_t mapNameCap);   // -6 if empty
 ```
 
 Reminder (proven by Debug Camera): **CE Lua's `executeCodeEx` cannot retrieve
@@ -366,7 +369,7 @@ pipe/UI and for symmetry/debugging.
 
 -----
 
-## 7. Pipe Protocol (Fern/Renge) — 6 new commands, ~42 → ~48
+## 7. Pipe Protocol (Fern/Renge) — 7 new commands, ~42 → ~49
 
 Request/response only, no events. JSON shapes (`MakeResponse` envelope as
 usual; pose numbers are JSON doubles):
@@ -392,13 +395,20 @@ usual; pose numbers are JSON doubles):
 → { "code":0, "tier":1, "hitX":…, "hitY":…, "hitZ":…,
     "usedCenter": false }
 
-// teleport_get_markers
+// teleport_get_markers — the markers array also carries the system "last"
+// slot as a sentinel entry with slot == -1 (auto-saved pre-jump pose), so the
+// UI refreshes it in the same round trip.
 { "cmd": "teleport_get_markers" }
 → { "markers": [ { "slot":0, "valid":true, "x":…, …, "map":"…" },
-                 { "slot":1, "valid":false }, … ] }
+                 { "slot":1, "valid":false }, …,
+                 { "slot":-1, "valid":true, "x":…, …, "map":"…" } ] }
 
 // teleport_clear_marker
 { "cmd": "teleport_clear_marker", "slot": 0 } → { "code":0 }
+
+// teleport_recall_last — one-way undo of the most recent jump (recall the
+// system "last" pose). EmptyMarker (-6) when nothing has been auto-saved yet.
+{ "cmd": "teleport_recall_last" } → { "code":0, "tier":1 }
 ```
 
 Non-zero `code` still returns a normal response (not a pipe error) so the UI
@@ -436,6 +446,26 @@ Op codes (`Grimoire.h` + mirrored in the C# constants file):
 | 4 | CURSOR | `[0..7]` double zOffset, `[8]` u8 traceChannel, `[9]` u8 fallbackToCenter | `[0..23]` 3×double hit point |
 | 5 | GET_MARKER | — | pose block (`result=-6` if slot empty) |
 | 6 | CLEAR_MARKER | — | — |
+| 7 | RECALL_LAST | — (slot ignored) | `[177]` tier (recall the system auto-saved "last" pose) |
+| 8 | GET_LAST | — | pose block (`result=-6` if nothing auto-saved yet) |
+| 9 | BUGIT_SAVE | — (slot ignored) | pose block (stores the pose in the BugIt slot) |
+| 10 | BUGIT_GO | — | `[177]` tier (`result=-6` no-op if no BugIt stored yet) |
+
+The **BugIt slot** (op 9/10) is a single user-triggered pose (UE BugIt/BugItGo
+semantics) the DLL holds between hotkey presses: BUGIT_SAVE stores the current
+pose (and returns it so the Lua can also clipboard a `BugItGo X Y Z` string),
+BUGIT_GO teleports to it (restores rotation; auto-saves "last" first like every
+jump; no-op when nothing stored). Mailbox-only (CE Lua path) — the UI's own
+BugItGo flow stays textbox-based via `teleport_recall_marker`, so there is no
+pipe command / C export for this slot.
+
+The **"last" slot** (op 7/8) is a system-managed extra marker the DLL writes
+automatically right before *every* jump (RECALL / RECALL_FORCE / CURSOR and the
+pipe BugItGo explicit-pose path), so a teleport that lands the pawn somewhere
+bad can be undone. RECALL_LAST is a **one-way restore** — it never overwrites the
+slot, so repeated calls always return to the same pre-teleport spot. The user
+can never save into it (no SAVE op for "last"); the map check is skipped (the
+pose is always from moments ago on the current map).
 
 Pose block layout in `paramsData` (offsets relative to 0x328):
 
