@@ -14,6 +14,38 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-13 — Map value-offset alignment fix + CE-export progress indicator + map value DropDownList (build 1090)
+
+Three follow-ups on the CE export work, reported on SEED `PlayerSelectMsUnitList`
+(`Map<EnumProperty, NameProperty>`).
+
+**Map value-offset alignment (DLL — the garbage-values bug).** The container view
+showed corrupted FName values (string fragments / CJK). Root cause:
+`Macht::ComputeMapValueOffset` guessed the value's alignment from its **size** —
+for an 8-byte FName (which is `2× uint32`, align **4**) it returned align 8, so
+the value offset became 8 instead of 4, and the derived stride 24 instead of 20.
+Every map element was then read at the wrong address. Fixed by passing the real
+per-type alignment from the existing `Scharf::RequiredAlignment` (NameProperty →
+4, WeakObjectProperty → 4, pointers → 8, …) into `ComputeMapValueOffset` at both
+`Ubel.cpp` map-read sites; struct/variable values (align 0) keep the size guess.
+Fixes the live container view AND the CE export (both consume the DLL's
+`mapValueOffset`). +5 dll self-tests.
+
+**CE-export progress indicator (UI).** `ResolveDrilldownAsync` gained an `onWalk`
+callback; the Copy CE Field / Copy CE XML commands show a live
+`Resolving… N objects` (throttled) during the recursive resolve and a final
+`Copied: N objects, M XML lines.` so big maps/struct-arrays report progress.
+
+**Map value DropDownList instead of a baked-in name (UI).** `EmitMapProperty` no
+longer writes the resolved value into the description (`Value: ms_stdag` → `Value`)
+— the stored int is dynamic. For Name/Enum values it builds a CE `DropDownList`
+(rawInt → resolved name, parsed from `ValueHex`) on the map group and links each
+value leaf to it, so CE displays the LIVE name. Key leaves are likewise label-only
+(`Key`), and enum key/value widths now follow the real byte size (fixes a 1-byte
+enum key shown as a 4-byte `1661982464`).
+
+Owner live-verified. **1429 C# + 457 dll + 31 utf8 green; AOT publish clean (45.5 MB).**
+
 ## 2026-06-13 — CE XML/Field export drilldown: enum width, collapse, container values (build 1085)
 
 Cross-game CE export fixes + a recursive container drilldown, all in the CE XML

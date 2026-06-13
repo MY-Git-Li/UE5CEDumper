@@ -1832,11 +1832,12 @@ public class CeXmlExportServiceTests
         Assert.Contains("<Address>+0</Address>", xml);
         // Element at index 3: offset = 3*16 = 48 = 0x30
         Assert.Contains("<Address>+30</Address>", xml);
-        // Key at +0, Value at +keySize (4)
-        Assert.Contains("Key: 42", xml);
-        Assert.Contains("Value: 3.14", xml);
-        Assert.Contains("Key: 99", xml);
-        Assert.Contains("Value: 2.71", xml);
+        // Key at +0, Value at +keySize (4) — leaves are label-only (the dynamic
+        // value is NOT baked into the description).
+        Assert.Contains("\"Key\"", xml);
+        Assert.Contains("\"Value\"", xml);
+        Assert.DoesNotContain("Key: 42", xml);
+        Assert.DoesNotContain("Value: 3.14", xml);
         // Key type is 4 Bytes (IntProperty), Value type is Float
         Assert.Contains("<VariableType>4 Bytes</VariableType>", xml);
         Assert.Contains("<VariableType>Float</VariableType>", xml);
@@ -1894,9 +1895,43 @@ public class CeXmlExportServiceTests
         // Map group derefs TSparseArray::Data (Offsets=[0]) and expands the element.
         Assert.Contains("<Offset>0</Offset>", xml);
         Assert.Contains("[0] (struct)", xml);
-        // Scalar Int value is shown; the struct key is not emitted as a "Key:" leaf.
-        Assert.Contains("Value: 10", xml);
+        // Scalar Int value leaf is present (label only); the struct key gets no leaf.
+        Assert.Contains("\"Value\"", xml);
+        Assert.DoesNotContain("Value: 10", xml);
         Assert.DoesNotContain("Key:", xml);
+    }
+
+    [Fact]
+    public void MapNameValue_UsesDropDownListNotBakedName()
+    {
+        // Map<Enum, Name>: the value column must NOT bake the resolved name into the
+        // description; instead a DropDownList (rawInt → name) on the map group lets CE
+        // show the live name. (The PlayerSelectMsUnitList shape.)
+        var map = new LiveFieldValue
+        {
+            Name = "PlayerSelectMsUnitList", TypeName = "MapProperty", Offset = 0x100, Size = 0x50,
+            MapCount = 2, MapKeyType = "EnumProperty", MapValueType = "NameProperty",
+            MapKeySize = 1, MapValueSize = 8, MapValueOffset = 4, MapDataAddr = "0x6000",
+            MapElements = new List<ContainerElementValue>
+            {
+                // ValueHex first 4 bytes (LE) = FName ComparisonIndex.
+                new() { Index = 0, Key = "0", Value = "ms_stdag", ValueHex = "A4F2130000000000" },
+                new() { Index = 1, Key = "1", Value = "bes_off",  ValueHex = "0ABC320000000000" },
+            }
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"game.exe\"+1000", "Obj", "Cls", new List<LiveFieldValue> { map });
+
+        // DropDownList present with rawInt:name entries (0x0013F2A4 = 1307812).
+        Assert.Contains("<DropDownList", xml);
+        Assert.Contains(":ms_stdag", xml);
+        Assert.Contains(":bes_off", xml);
+        // Value leaf is label-only — the dynamic name is NOT in the description.
+        Assert.Contains("\"Value\"", xml);
+        Assert.DoesNotContain("Value: ms_stdag", xml);
+        // The leaves link to the shared list.
+        Assert.Contains("<DropDownListLink>", xml);
     }
 
     [Fact]
@@ -2123,13 +2158,13 @@ public class CeXmlExportServiceTests
         Assert.Contains("AttributeAugmentLevels {Map: 6, NameProperty", xml);
         Assert.Contains("<Address>+358</Address>", xml);
 
-        // Map elements: key/value per-element groups
+        // Map elements: element folder shows the key for orientation; the Key/Value
+        // leaves are label-only (no baked-in dynamic value).
         Assert.Contains("[0] firepower", xml);
-        Assert.Contains("Key: firepower", xml);
-        Assert.Contains("Value: 5", xml);
         Assert.Contains("[3] resistance", xml);
-        Assert.Contains("Key: resistance", xml);
-        Assert.Contains("Value: 481", xml);
+        Assert.Contains("\"Key\"", xml);
+        Assert.Contains("\"Value\"", xml);
+        Assert.DoesNotContain("Value: 5", xml);
     }
 
     [Fact]
@@ -2308,10 +2343,12 @@ public class CeXmlExportServiceTests
         Assert.Contains("Scores {Map: 10, NameProperty", xml);
         // But only 1 element is emitted
         Assert.Contains("[5] speed", xml);
-        Assert.Contains("Key: speed", xml);
-        Assert.Contains("Value: 200", xml);
+        // Key/Value leaves are label-only — the dynamic value is NOT baked into the
+        // description (the stored int can change at runtime).
+        Assert.Contains("\"Key\"", xml);
+        Assert.Contains("\"Value\"", xml);
+        Assert.DoesNotContain("Value: 200", xml);
         // No other element indices
-        Assert.DoesNotContain("[0]", xml);
         Assert.DoesNotContain("[1]", xml);
     }
 

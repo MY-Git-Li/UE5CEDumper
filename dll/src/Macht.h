@@ -222,12 +222,20 @@ inline int32_t ComputeSetElementStride(int32_t elemSize) {
 // Compute the aligned byte offset of Value within a TMap TPair<Key, Value>.
 // UE aligns Value to its natural alignment within the pair struct.
 // E.g., TPair<uint8, FStruct80> → value starts at offset 8 (not 1).
-inline int32_t ComputeMapValueOffset(int32_t keySize, int32_t valueSize) {
-    // Guess value alignment from its size (power-of-2, capped at 8)
-    int32_t valAlign = 1;
-    if (valueSize >= 8) valAlign = 8;
-    else if (valueSize >= 4) valAlign = 4;
-    else if (valueSize >= 2) valAlign = 2;
+//
+// valueAlign: pass the value property's REAL alignment (Scharf::RequiredAlignment)
+// when known. Guessing alignment from size is WRONG for FName / FWeakObjectPtr —
+// both are 8 bytes but 4-byte aligned (2× int32), so TPair<uint8 enum, FName>
+// puts the FName at +4, not +8. Reading at +8 (and the inflated stride that
+// follows) corrupts every element. valueAlign <= 0 falls back to the size guess.
+inline int32_t ComputeMapValueOffset(int32_t keySize, int32_t valueSize, int32_t valueAlign = 0) {
+    int32_t valAlign = valueAlign;
+    if (valAlign <= 0) {
+        valAlign = 1;
+        if (valueSize >= 8) valAlign = 8;
+        else if (valueSize >= 4) valAlign = 4;
+        else if (valueSize >= 2) valAlign = 2;
+    }
     return (keySize + valAlign - 1) & ~(valAlign - 1);
 }
 

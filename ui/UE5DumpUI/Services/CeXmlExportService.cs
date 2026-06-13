@@ -242,11 +242,12 @@ public static class CeXmlExportService
         Dictionary<string, List<LiveFieldValue>> resolvedStructs,
         Dictionary<string, List<LiveFieldValue>> resolvedInstances,
         int depth,
-        int arrayLimit = 64)
+        int arrayLimit = 64,
+        Action? onWalk = null)
     {
         var visited = new HashSet<string>(StringComparer.Ordinal);
         await ResolveDrilldownRecAsync(dump, fields, resolvedStructs, resolvedInstances,
-            depth, arrayLimit, visited);
+            depth, arrayLimit, visited, onWalk);
     }
 
     private static async Task ResolveDrilldownRecAsync(
@@ -256,12 +257,14 @@ public static class CeXmlExportService
         Dictionary<string, List<LiveFieldValue>> resolvedInstances,
         int depth,
         int arrayLimit,
-        HashSet<string> visited)
+        HashSet<string> visited,
+        Action? onWalk)
     {
         // (1) Structs at this level — flatten nested (depth-free, MaxStructDepth-bound),
         //     then descend into each resolved struct's own fields (still depth-free) so
         //     containers/pointers INSIDE the struct are reached.
         await ResolveStructFieldsIntoAsync(dump, fields, resolvedStructs, arrayLimit);
+        onWalk?.Invoke();
         foreach (var f in fields)
         {
             if (f.TypeName is not ("StructProperty" or "OptionalProperty")) continue;
@@ -269,7 +272,7 @@ public static class CeXmlExportService
             if (!resolvedStructs.TryGetValue(f.StructDataAddr, out var sub)) continue;
             if (!visited.Add("S:" + f.StructDataAddr)) continue;
             await ResolveDrilldownRecAsync(dump, sub, resolvedStructs, resolvedInstances,
-                depth, arrayLimit, visited);
+                depth, arrayLimit, visited, onWalk);
         }
 
         if (depth <= 0) return;
@@ -282,7 +285,7 @@ public static class CeXmlExportService
             if (resolvedInstances.ContainsKey(f.PtrAddress)) continue;
             if (!visited.Add("P:" + f.PtrAddress)) continue;
             await WalkAndRecurseAsync(dump, f.PtrAddress, f.PtrClassAddr, resolvedStructs,
-                resolvedInstances, depth - 1, arrayLimit, visited);
+                resolvedInstances, depth - 1, arrayLimit, visited, onWalk);
         }
 
         // (3) Container element VALUES (struct + object) — cost 1 level.
@@ -299,12 +302,13 @@ public static class CeXmlExportService
             if (structVals.Count > 0)
             {
                 await ResolveStructFieldsIntoAsync(dump, structVals, resolvedStructs, arrayLimit);
+                onWalk?.Invoke();
                 foreach (var sv in structVals)
                 {
                     if (!resolvedStructs.TryGetValue(sv.StructDataAddr, out var sub)) continue;
                     if (!visited.Add("S:" + sv.StructDataAddr)) continue;
                     await ResolveDrilldownRecAsync(dump, sub, resolvedStructs, resolvedInstances,
-                        depth - 1, arrayLimit, visited);
+                        depth - 1, arrayLimit, visited, onWalk);
                 }
             }
 
@@ -315,7 +319,7 @@ public static class CeXmlExportService
                 if (resolvedInstances.ContainsKey(ov.PtrAddress)) continue;
                 if (!visited.Add("P:" + ov.PtrAddress)) continue;
                 await WalkAndRecurseAsync(dump, ov.PtrAddress, ov.PtrClassAddr, resolvedStructs,
-                    resolvedInstances, depth - 1, arrayLimit, visited);
+                    resolvedInstances, depth - 1, arrayLimit, visited, onWalk);
             }
         }
     }
@@ -324,7 +328,7 @@ public static class CeXmlExportService
         IDumpService dump, string ptrAddr, string ptrClassAddr,
         Dictionary<string, List<LiveFieldValue>> resolvedStructs,
         Dictionary<string, List<LiveFieldValue>> resolvedInstances,
-        int depth, int arrayLimit, HashSet<string> visited)
+        int depth, int arrayLimit, HashSet<string> visited, Action? onWalk)
     {
         try
         {
@@ -332,8 +336,9 @@ public static class CeXmlExportService
             if (r.Fields.Count > 0)
             {
                 resolvedInstances[ptrAddr] = r.Fields;
+                onWalk?.Invoke();
                 await ResolveDrilldownRecAsync(dump, r.Fields, resolvedStructs,
-                    resolvedInstances, depth, arrayLimit, visited);
+                    resolvedInstances, depth, arrayLimit, visited, onWalk);
             }
         }
         catch
@@ -445,6 +450,25 @@ public static class CeXmlExportService
 
     private static string AbsAddr(ulong dataBase, long offset)
         => dataBase == 0 ? "" : $"0x{dataBase + (ulong)offset:X}";
+
+    /// <summary>
+    /// Parse the first <paramref name="numBytes"/> of a byte-sequence hex string
+    /// (e.g. ContainerElementValue.ValueHex "A4AD310000000000") as a little-endian
+    /// integer — the raw int CE reads at the value address (FName ComparisonIndex /
+    /// enum value), used to key the value DropDownList.
+    /// </summary>
+    private static long ParseHexLeInt(string? hex, int numBytes)
+    {
+        if (string.IsNullOrEmpty(hex)) return 0;
+        long v = 0;
+        int n = Math.Min(numBytes, hex.Length / 2);
+        for (int i = 0; i < n; i++)
+        {
+            int b = Convert.ToInt32(hex.Substring(i * 2, 2), 16);
+            v |= (long)b << (i * 8);
+        }
+        return v;
+    }
 
     /// <summary>
     /// Pre-resolve all StructProperty fields in <paramref name="fields"/> by walking
@@ -1719,18 +1743,47 @@ public static class CeXmlExportService
             return;
         }
 
-        // Scalar key → leaf at +0; struct/object keys are summarised in the element
-        // description. Value (scalar / struct / object / nested container) expands via
-        // the shared EmitFields dispatch when resolved (docs/ce-export-drilldown-spec).
-        var ceKey = MapInnerTypeToCeField(field.MapKeyType);
+        // Scalar key/value → leaf; struct/object values drill via EmitFields. The
+        // value column NEVER bakes the resolved name into the description (the stored
+        // int can change at runtime) — Name/Enum values instead get a CE DropDownList
+        // (rawInt → resolved name) on the map group that the leaves link to, so CE
+        // shows the LIVE name. Enum key/value widths follow the real byte size.
         int valOffset = field.MapValueOffset > 0 ? field.MapValueOffset : field.MapKeySize;
         int stride = ComputeSetElementStride(valOffset + field.MapValueSize);
         ulong dataBase = ParseHexAddr(field.MapDataAddr);
         bool valStruct = field.MapValueType == "StructProperty"
                          && !string.IsNullOrEmpty(field.MapValueStructAddr);
+        bool valScalar = !valStruct && !IsObjectPropertyType(field.MapValueType);
+
+        var ceKey = field.MapKeyType == "EnumProperty"
+            ? new CeFieldInfo(CeWidthForSize(field.MapKeySize))
+            : MapInnerTypeToCeField(field.MapKeyType);
+
+        // Shared value DropDownList (rawInt → name) for Name/Enum values.
+        string? valueDropDown = null;
+        string? valueDropLink = null;
+        if (valScalar && (field.MapValueType == "NameProperty" || field.MapValueType == "EnumProperty"))
+        {
+            int ddBytes = field.MapValueType == "NameProperty" ? 4 : field.MapValueSize;
+            var maxDd = _maxDropDownEntries > 0 ? _maxDropDownEntries : 512;
+            var seen = new HashSet<long>();
+            var pairs = new List<(long, string)>();
+            foreach (var e in field.MapElements)
+            {
+                if (string.IsNullOrEmpty(e.Value)) continue;
+                long raw = ParseHexLeInt(e.ValueHex, ddBytes);
+                if (seen.Add(raw)) pairs.Add((raw, e.Value));
+            }
+            if (pairs.Count > 0 && pairs.Count <= maxDd)
+            {
+                valueDropDown = BuildDropDownContent(pairs);
+                desc = EnsureUniqueDropDownDesc(desc);
+                valueDropLink = desc;
+            }
+        }
 
         // Map group: Address=+{fieldOffset}, Offsets=[0] (deref TSparseArray.Data)
-        EmitGroupOpen(sb, indent, desc, $"+{field.Offset:X}", new[] { 0 });
+        EmitGroupOpen(sb, indent, desc, $"+{field.Offset:X}", new[] { 0 }, dropDownContent: valueDropDown);
         var elemIndent = indent + "  ";
 
         foreach (var elem in field.MapElements)
@@ -1746,20 +1799,28 @@ public static class CeXmlExportService
             EmitGroupOpen(sb, elemIndent, elemDesc, $"+{elemByteOffset:X}", null);
             var fieldIndent = elemIndent + "  ";
 
+            // Key leaf at +0 — label only, no baked-in dynamic value.
             if (ceKey != null)
-            {
-                var keyDesc = !string.IsNullOrEmpty(elem.Key) ? $"Key: {elem.Key}" : "Key";
-                EmitLeaf(sb, fieldIndent, keyDesc, ceKey, "+0", null);
-            }
+                EmitLeaf(sb, fieldIndent, "Key", ceKey, "+0", null);
 
-            string valueName = (valStruct || IsObjectPropertyType(field.MapValueType))
-                ? "Value"
-                : (!string.IsNullOrEmpty(elem.Value) ? $"Value: {elem.Value}" : "Value");
-            var valueField = BuildElementValue(valueName, field.MapValueType, valOffset, field.MapValueSize,
-                valStruct, AbsAddr(dataBase, elemByteOffset + valOffset),
-                field.MapValueStructAddr, field.MapValueStructType,
-                elem.ValuePtrAddress, elem.ValuePtrName, elem.ValuePtrClassName);
-            EmitFields(sb, fieldIndent, new[] { valueField }, _resolvedStructsState, _resolvedInstancesState);
+            // Value at +valOffset.
+            if (valStruct || IsObjectPropertyType(field.MapValueType))
+            {
+                var valueField = BuildElementValue("Value", field.MapValueType, valOffset, field.MapValueSize,
+                    valStruct, AbsAddr(dataBase, elemByteOffset + valOffset),
+                    field.MapValueStructAddr, field.MapValueStructType,
+                    elem.ValuePtrAddress, elem.ValuePtrName, elem.ValuePtrClassName);
+                EmitFields(sb, fieldIndent, new[] { valueField }, _resolvedStructsState, _resolvedInstancesState);
+            }
+            else
+            {
+                var ceVal = field.MapValueType == "EnumProperty"
+                    ? new CeFieldInfo(CeWidthForSize(field.MapValueSize))
+                    : MapInnerTypeToCeField(field.MapValueType);
+                if (ceVal != null)
+                    EmitLeaf(sb, fieldIndent, "Value", ceVal, $"+{valOffset:X}", null,
+                        dropDownListLink: valueDropLink);
+            }
 
             EmitGroupClose(sb, elemIndent);
         }

@@ -1748,9 +1748,17 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 : "Resolving struct fields...";
             var resolvedStructs = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
             var resolvedInstances = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+            int lastShown = 0;
             await CeXmlExportService.ResolveDrilldownAsync(
                 _dump, fieldsForXml, resolvedStructs, resolvedInstances,
-                depth: CsxDrilldownDepth, arrayLimit: ArrayLimit);
+                depth: CsxDrilldownDepth, arrayLimit: ArrayLimit,
+                onWalk: () =>
+                {
+                    // Live indicator: objects (structs + pointer targets) resolved so far,
+                    // throttled so a deep/wide map doesn't spam the bound StatusText.
+                    int n = resolvedStructs.Count + resolvedInstances.Count;
+                    if (n - lastShown >= 16) { lastShown = n; StatusText = $"Resolving… {n} objects"; }
+                });
 
             var rootBc = breadcrumbsForXml[0];
 
@@ -1789,7 +1797,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             await _platform.CopyToClipboardAsync(xml);
             var limitWarn = BuildContainerLimitWarning(fieldsForXml, ArrayLimit);
             var aobFallbackWarn = (UseAobSymbol && !isGWorldRoot) ? "AOB skipped (no GWorld path)" : null;
-            StatusText = aobFallbackWarn ?? limitWarn ?? "";
+            // Final indicator: objects (structs + pointer targets) walked + XML line count.
+            int objCount = resolvedStructs.Count + resolvedInstances.Count;
+            int lineCount = xml.Count(c => c == '\n') + 1;
+            var statusExtra = aobFallbackWarn != null ? " " + aobFallbackWarn
+                : (limitWarn != null ? " " + limitWarn : "");
+            StatusText = $"Copied: {objCount} objects, {lineCount} XML lines.{statusExtra}";
             _log.Info($"CE XML copied to clipboard for {CurrentClassName} (AOB={useAob}, " +
                 $"{resolvedStructs.Count} structs / {resolvedInstances.Count} pointers resolved, depth={CsxDrilldownDepth})");
         }
@@ -1943,9 +1956,17 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 : "Resolving struct fields...";
             var resolvedStructs = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
             var resolvedInstances = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+            int lastShown = 0;
             await CeXmlExportService.ResolveDrilldownAsync(
                 _dump, fieldsForXml, resolvedStructs, resolvedInstances,
-                depth: CsxDrilldownDepth, arrayLimit: ArrayLimit);
+                depth: CsxDrilldownDepth, arrayLimit: ArrayLimit,
+                onWalk: () =>
+                {
+                    // Live indicator: objects (structs + pointer targets) resolved so far,
+                    // throttled so a deep/wide map doesn't spam the bound StatusText.
+                    int n = resolvedStructs.Count + resolvedInstances.Count;
+                    if (n - lastShown >= 16) { lastShown = n; StatusText = $"Resolving… {n} objects"; }
+                });
 
             var rootBc = breadcrumbsForXml[0];
 
@@ -1982,7 +2003,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             await _platform.CopyToClipboardAsync(xml);
             var limitWarn = BuildContainerLimitWarning(fieldsForXml, ArrayLimit);
             var aobFallbackWarn = (UseAobSymbol && !isGWorldRoot) ? "AOB skipped (no GWorld path)" : null;
-            StatusText = aobFallbackWarn ?? limitWarn ?? "";
+            // Final indicator: objects (structs + pointer targets) walked + XML line count.
+            int objCount = resolvedStructs.Count + resolvedInstances.Count;
+            int lineCount = xml.Count(c => c == '\n') + 1;
+            var statusExtra = aobFallbackWarn != null ? " " + aobFallbackWarn
+                : (limitWarn != null ? " " + limitWarn : "");
+            StatusText = $"Copied: {objCount} objects, {lineCount} XML lines.{statusExtra}";
             _log.Info($"CE Field XML copied: {selectedSnapshot.Count} field(s) (AOB={useAob}, " +
                 $"{resolvedInstances.Count} pointer targets resolved at depth={CsxDrilldownDepth})");
         }

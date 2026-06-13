@@ -1302,6 +1302,16 @@ static void Test_ValueScan_SparseContainerGeometry() {
     EXPECT("Map<uint8,struct80> value at +8",  Macht::ComputeMapValueOffset(1, 80) == 8);
     EXPECT("Map<int32,uint8> value at +4",     Macht::ComputeMapValueOffset(4, 1) == 4);
     EXPECT("Map<int64,int64> value at +8",     Macht::ComputeMapValueOffset(8, 8) == 8);
+
+    // Explicit value alignment overrides the size guess — REQUIRED for FName
+    // (8 bytes but 4-aligned) and FWeakObjectPtr. Map<Enum, FName>: value at +4,
+    // NOT +8 (the size guess would corrupt every element). Align comes from
+    // Scharf::RequiredAlignment("NameProperty", 8, false) == 4.
+    EXPECT("Map<uint8,FName> value at +4 (align 4)",  Macht::ComputeMapValueOffset(1, 8, 4) == 4);
+    EXPECT("Map<uint8,FName> WOULD be +8 w/o align",  Macht::ComputeMapValueOffset(1, 8)    == 8);
+    EXPECT("Map<uint8,ptr> value at +8 (align 8)",    Macht::ComputeMapValueOffset(1, 8, 8) == 8);
+    EXPECT("Scharf NameProperty(8) align = 4",        Scharf::RequiredAlignment("NameProperty", 8, false) == 4);
+    EXPECT("Scharf WeakObjectProperty align = 4",     Scharf::RequiredAlignment("WeakObjectProperty", 8, false) == 4);
 }
 
 // ----- main ------------------------------------------------------------------
