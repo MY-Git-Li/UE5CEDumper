@@ -17,9 +17,12 @@
 // Size varies by UE version — auto-detected at Init() time:
 //   UE5 (most):  16 bytes { Object*(8), Flags(4), SerialNumber(4) }
 //   UE4 / some UE5: 24 bytes { Object*(8), Flags(4), ClusterRootIndex(4), SerialNumber(4), _pad(4) }
-// Only the Object* field at +0x00 is used; the rest is stride padding.
+// NOTE: this struct mirrors the CLASSIC layout (Object* at +0x00, UE4.x..UE5.6 only).
+// UE5.7+ reordered the item — int64 FlagsAndRefCount moved to +0x00, pushing UObject*
+// to +0x08 — so do NOT read `.Object` straight off a raw item pointer. Use
+// Aura::GetByIndex(), which applies the auto-detected within-item object-ptr offset.
 struct FUObjectItem {
-    uintptr_t Object;           // UObject* (always at +0x00)
+    uintptr_t Object;           // UObject* — at +0x00 on classic layout ONLY (see note above)
     int32_t   Flags;
     int32_t   SerialNumber;
 };
@@ -46,7 +49,9 @@ int32_t GetMax();
 // Get UObject* by index (returns 0 if invalid/null)
 uintptr_t GetByIndex(int32_t index);
 
-// Get FUObjectItem by index (returns nullptr if invalid)
+// Get FUObjectItem by index (returns nullptr if invalid).
+// WARNING: the returned struct's `.Object` field is only valid on the CLASSIC layout
+// (UE4.x..UE5.6). For the object pointer use GetByIndex(), which is offset-aware.
 FUObjectItem* GetItem(int32_t index);
 
 // Read the SerialNumber of the FUObjectItem at the given index.

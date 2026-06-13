@@ -14,6 +14,42 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-13 — UE5.7+ FUObjectItem object-ptr offset auto-detect + Stark hot-hook fast-path + enum width (build 1064)
+
+Vendor/engine-update review (Dumper-7 `92e2669..8883094`, RE-UE4SS `b872ad11..c08dbbc3`,
+UnrealEngine 5.8/dev-5.8/ue5-main). Net actionable findings, with fixes:
+
+**UE5.7+ reordered FUObjectItem — within-item object-ptr offset now auto-detected (Aura).**
+Verified against real EpicGames/UnrealEngine source: from **5.7.0-release** the item leads
+with `int64 FlagsAndRefCount` at +0x00, pushing `UObjectBase* Object` to **+0x08** (unpacked;
+packed `UE_ENABLE_FUOBJECT_ITEM_PACKING` splits it further). UE ≤5.6 keeps `Object` at +0x00.
+`Aura` previously hardcoded the object pointer at item+0x00 (`GetByIndex`/`ProbeStride`/
+`GetSerialNumber`), so a stock 5.7/5.8 game would read `FlagsAndRefCount` as a pointer →
+`LooksLikeHeapPtr` fail → stride-detect fail → empty dump. Fix mirrors Dumper-7's
+`FUObjectItemInitialOffset`: new `s_itemObjOffset`, detected by a **two-pass** `DetectItemSize`
+(classic +0x00 FIRST so every existing game keeps its exact prior path/result; UE5.7+ +0x08
+only when the classic pass is unconvincing). Applied in `GetByIndex`, `ProbeStride`,
+`GetSerialNumber` (serial offset recomputed relative to it), and the `GetItem`→`GetByIndex`
+consumer in Frieren. **Note:** TQ2 (PE-stamped 5.7) keeps Object@+0x00 — confirmed via its
+walk log (valid `World`/`Level` classes) — so it's a forked/early-CL 5.7; we passed it by
+coincidence, not by handling 5.7. ⚠ Still needs live-confirm on a real stock-5.7+ game.
+
+**Stark ProcessEvent hook — lock-free fast path.** ProcessEvent is the hottest engine
+function; the hook took `s_queueMutex` on *every* call. Added an atomic `s_queueDepth`
+mirror so the hook skips the mutex entirely unless an invoke is actually pending. (RE-UE4SS's
+stability PR lesson — keep the hot hook cheap; our hook was already exception-free on the hot
+path.)
+
+**SDK export enum width.** `GenerateEnumDefinition` no longer hardcodes `: uint8_t` — new
+`InferEnumUnderlyingType` picks the narrowest int that fits all entry values (mirrors Dumper-7's
+"uint64 enum truncated to uint8" fix). NOTE: that generator is currently **not wired into the
+live export path** (dead-ish), so this has no shipped-behavior change yet — it just makes the
+function correct for when/if it's connected. +7 tests → **1414 C#**.
+
+Already-aligned (no change): Dumper-7's UE5.8 `FChunkedFixedUObjectArray` reorder — our
+`"UE5.8"` Aura preset `{0x00,0x0C,0x08,0x14,0x10}` already matches ue5-main source exactly.
+OffsetFinder `FStructBaseChain` restriction — N/A (we have no such finder).
+
 ## 2026-06-12 — Teleport: user-set marker hotkeys, ARPG walk-back fix, UI polish (build 1038)
 
 Live-test round 2 (TQ2 / UE5 + SEED Battle Destiny / UE4.27).

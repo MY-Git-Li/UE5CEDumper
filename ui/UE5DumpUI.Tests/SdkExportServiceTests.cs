@@ -400,4 +400,64 @@ public class SdkExportServiceTests
         Assert.DoesNotContain("struct Player1", sdk);
         Assert.DoesNotContain("struct Func1", sdk);
     }
+
+    // --- Enum underlying-type inference (Dumper-7 parity: don't truncate wide enums) ---
+
+    private static EnumDefinition MakeEnum(string name, params long[] values)
+    {
+        var def = new EnumDefinition { Name = name };
+        for (int i = 0; i < values.Length; i++)
+            def.Entries.Add(new EnumEntryValue { Name = $"{name}_{i}", Value = values[i] });
+        return def;
+    }
+
+    [Fact]
+    public void InferEnumUnderlyingType_SmallUnsignedValues_ReturnsUint8()
+    {
+        Assert.Equal("uint8_t", SdkExportService.InferEnumUnderlyingType(MakeEnum("E", 0, 1, 2, 255).Entries));
+    }
+
+    [Fact]
+    public void InferEnumUnderlyingType_ValueOver255_WidensToUint16()
+    {
+        // 256 cannot fit in uint8_t — the exact case Dumper-7 fixed.
+        Assert.Equal("uint16_t", SdkExportService.InferEnumUnderlyingType(MakeEnum("E", 0, 256).Entries));
+    }
+
+    [Fact]
+    public void InferEnumUnderlyingType_LargeValues_WidenToUint32AndUint64()
+    {
+        Assert.Equal("uint32_t", SdkExportService.InferEnumUnderlyingType(MakeEnum("E", 0, 70000).Entries));
+        Assert.Equal("uint64_t", SdkExportService.InferEnumUnderlyingType(MakeEnum("E", 0, 5_000_000_000L).Entries));
+    }
+
+    [Fact]
+    public void InferEnumUnderlyingType_NegativeValues_SelectSignedType()
+    {
+        Assert.Equal("int8_t", SdkExportService.InferEnumUnderlyingType(MakeEnum("E", -1, 0, 1).Entries));
+        Assert.Equal("int16_t", SdkExportService.InferEnumUnderlyingType(MakeEnum("E", -1, 1000).Entries));
+    }
+
+    [Fact]
+    public void InferEnumUnderlyingType_Empty_DefaultsToUint8()
+    {
+        Assert.Equal("uint8_t", SdkExportService.InferEnumUnderlyingType(MakeEnum("E").Entries));
+    }
+
+    [Fact]
+    public void GenerateEnumDefinition_WideValues_EmitsWiderUnderlyingType()
+    {
+        var def = MakeEnum("EBigEnum", 0, 1, 1000);
+        var code = SdkExportService.GenerateEnumDefinition(def);
+        Assert.Contains("enum class EBigEnum : uint16_t", code);
+        Assert.DoesNotContain(": uint8_t", code);
+    }
+
+    [Fact]
+    public void GenerateEnumDefinition_ExplicitUnderlyingType_Wins()
+    {
+        var def = MakeEnum("EForced", 0, 1000);
+        var code = SdkExportService.GenerateEnumDefinition(def, "uint8_t");
+        Assert.Contains("enum class EForced : uint8_t", code);
+    }
 }

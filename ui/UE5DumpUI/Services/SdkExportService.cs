@@ -482,7 +482,12 @@ public static class SdkExportService
         sb.Append("enum class ");
         sb.Append(enumDef.Name);
         sb.Append(" : ");
-        sb.AppendLine(underlyingType ?? "uint8_t");
+        // When the caller does not pin the underlying type, infer the minimal width
+        // from the entry values rather than always emitting uint8_t. Mirrors Dumper-7's
+        // fix for "uint64 enums being uint8": a value > 255 truncated to uint8_t would
+        // not even compile. (Inference can still under-size a wide enum whose values all
+        // happen to fit a narrower type, but it never produces a non-compiling header.)
+        sb.AppendLine(underlyingType ?? InferEnumUnderlyingType(enumDef.Entries));
         sb.AppendLine("{");
 
         foreach (var entry in enumDef.Entries)
@@ -496,6 +501,36 @@ public static class SdkExportService
 
         sb.AppendLine("};");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Pick the narrowest fixed-width C++ integer type that can represent every enum
+    /// entry value. Negative values select a signed type; otherwise unsigned. Defaults
+    /// to uint8_t for an empty set (UE's typical underlying type).
+    /// </summary>
+    internal static string InferEnumUnderlyingType(List<EnumEntryValue> entries)
+    {
+        if (entries.Count == 0) return "uint8_t";
+
+        long min = long.MaxValue, max = long.MinValue;
+        foreach (var e in entries)
+        {
+            if (e.Value < min) min = e.Value;
+            if (e.Value > max) max = e.Value;
+        }
+
+        if (min < 0)
+        {
+            if (min >= sbyte.MinValue && max <= sbyte.MaxValue) return "int8_t";
+            if (min >= short.MinValue && max <= short.MaxValue) return "int16_t";
+            if (min >= int.MinValue && max <= int.MaxValue) return "int32_t";
+            return "int64_t";
+        }
+
+        if (max <= byte.MaxValue) return "uint8_t";
+        if (max <= ushort.MaxValue) return "uint16_t";
+        if (max <= uint.MaxValue) return "uint32_t";
+        return "uint64_t";
     }
 
     /// <summary>
