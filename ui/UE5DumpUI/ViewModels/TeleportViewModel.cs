@@ -44,11 +44,17 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         for (int i = 0; i < 3; i++)
             Markers.Add(new TeleportMarkerRow { Slot = i });
 
-        // Marker hotkey rows: Save 1-3, Recall 1-3 (Force stays UI-button only).
+        // Hotkey rows: Save 1-3, Recall 1-3, then the system Recall-last and the
+        // two BugItGo actions (Force stays UI-button only). Adding a row here is
+        // all it takes — capture, persistence and registration are generic over
+        // ActionId; OnMarkerHotkeyPressed routes the id to the right command.
         for (int i = 0; i < 3; i++)
             HotkeyRows.Add(new TeleportHotkeyRow { ActionId = $"save{i}", DisplayName = $"Save marker {i + 1}" });
         for (int i = 0; i < 3; i++)
             HotkeyRows.Add(new TeleportHotkeyRow { ActionId = $"recall{i}", DisplayName = $"Recall marker {i + 1}" });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "recall_last", DisplayName = "Recall last" });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "bugit",       DisplayName = "Copy BugItGo" });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "bugitgo",     DisplayName = "Run BugItGo" });
 
         if (_globalHotkeys != null)
         {
@@ -79,10 +85,12 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     // ── Connection gating ──────────────────────────────────────────────
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanOperate))]
+    [NotifyPropertyChangedFor(nameof(CanRecallLast))]
     private bool _isConnected;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanOperate))]
+    [NotifyPropertyChangedFor(nameof(CanRecallLast))]
     private bool _isBusy;
 
     /// <summary>Buttons are live only when connected and no op is in flight.</summary>
@@ -115,6 +123,21 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
 
     // ── BugItGo interop ────────────────────────────────────────────────
     [ObservableProperty] private string _bugItGoInput = "";
+
+    // ── System "last" position (auto-saved before every jump) ──────────
+    /// <summary>True once the DLL has auto-saved a pre-teleport pose (enables
+    /// the Recall-last button). System-managed — the user never saves this.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanRecallLast))]
+    private bool _lastValid;
+
+    /// <summary>Human summary of the last auto-saved pose, e.g. "(12.0, 3.0,
+    /// 80.0)  World1", or a placeholder before the first teleport.</summary>
+    [ObservableProperty] private string _lastSummary = "(saved automatically before each teleport)";
+
+    /// <summary>Recall-last is live only when connected, idle, and a pose has
+    /// actually been auto-saved.</summary>
+    public bool CanRecallLast => CanOperate && LastValid;
 
     public ObservableCollection<TeleportMarkerRow> Markers { get; } = new();
 
@@ -340,6 +363,38 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
+    private async Task RecallLastAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var r = await _dump.TeleportRecallLastAsync();
+            if (r.Code == TeleportCodes.EmptyMarker)
+            {
+                StatusText = "No last position yet — recall/force/BugItGo/cursor " +
+                             "auto-saves it before each jump.";
+                return;
+            }
+            if (r.Code != TeleportCodes.Ok)
+            {
+                StatusText = $"Recall last: {TeleportCodes.Describe(r.Code)}";
+                return;
+            }
+            StatusText = r.Tier == 2
+                ? "Recalled to last position (raw write — game may snap back)."
+                : "Recalled to last position.";
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport RecallLast failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    [RelayCommand]
     private async Task TeleportToCursorAsync()
     {
         if (!IsConnected) return;
@@ -383,8 +438,11 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             ApplyPose(p);
             string s = string.Format(CultureInfo.InvariantCulture,
                 "BugItGo {0:0.000} {1:0.000} {2:0.000}", p.X, p.Y, p.Z);
+            // Paste straight into the Run field so the user can fire BugItGo
+            // immediately, and keep the clipboard copy for pasting elsewhere.
+            BugItGoInput = s;
             await _platform.CopyToClipboardAsync(s);
-            StatusText = $"Copied: {s}";
+            StatusText = $"BugIt: {s} (copied + filled the Run field).";
         }
         catch (Exception ex)
         {
@@ -398,6 +456,12 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     private async Task RunBugItGoAsync()
     {
         if (!IsConnected) return;
+        if (string.IsNullOrWhiteSpace(BugItGoInput))
+        {
+            StatusText = "BugItGo field is empty — press 'Copy as BugItGo' to capture " +
+                         "the current pose, or paste coordinates first.";
+            return;
+        }
         if (!BugItGoParser.TryParse(BugItGoInput, out var t) || t is null)
         {
             StatusText = "Could not parse — expected 'BugItGo X Y Z', 'X Y Z', or a " +
@@ -472,6 +536,14 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 return;
             }
             MarkHotkeyFired(what, ran: true);
+            // Non-slot actions first (must precede the digit-suffix parse below;
+            // "recall_last" also starts with "recall" but has no slot).
+            switch (actionId)
+            {
+                case "recall_last": _ = RecallLastCommand.ExecuteAsync(null); return;
+                case "bugit":       _ = CopyAsBugItGoCommand.ExecuteAsync(null); return;
+                case "bugitgo":     _ = RunBugItGoCommand.ExecuteAsync(null); return;
+            }
             int slot = actionId[^1] - '0';
             if (actionId.StartsWith("save", StringComparison.Ordinal))
                 _ = SaveMarkerCommand.ExecuteAsync(slot);
@@ -571,7 +643,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 return;
             }
             int ok = 0;
-            // 8 momentary auto-unticking records: Save 1-3, Recall 1-3, Cursor, Clear all.
+            // 11 momentary auto-unticking records: Save 1-3, Recall 1-3, Recall
+            // last, BugIt, BugItGo, Cursor, Clear all.
             var specs = new (string Desc, TeleportScriptGenerator.Action Act, int Slot)[]
             {
                 ("Teleport: Save marker 1",   TeleportScriptGenerator.Action.Save,     0),
@@ -580,6 +653,9 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 ("Teleport: Recall marker 1", TeleportScriptGenerator.Action.Recall,   0),
                 ("Teleport: Recall marker 2", TeleportScriptGenerator.Action.Recall,   1),
                 ("Teleport: Recall marker 3", TeleportScriptGenerator.Action.Recall,   2),
+                ("Teleport: Recall last",     TeleportScriptGenerator.Action.RecallLast, 0),
+                ("Teleport: BugIt (store pose)", TeleportScriptGenerator.Action.BugIt,   0),
+                ("Teleport: BugItGo (go to stored)", TeleportScriptGenerator.Action.BugItGo, 0),
                 ("Teleport: To cursor",       TeleportScriptGenerator.Action.Cursor,   0),
                 ("Teleport: Clear all markers", TeleportScriptGenerator.Action.ClearAll, 0),
             };
@@ -637,6 +713,16 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             var markers = await _dump.TeleportGetMarkersAsync();
             foreach (var m in markers)
             {
+                // slot == -1 is the system "last" sentinel (see Fern get_markers).
+                if (m.Slot == -1)
+                {
+                    LastValid = m.Valid;
+                    LastSummary = m.Valid
+                        ? string.Format(CultureInfo.InvariantCulture,
+                            "({0:0.0}, {1:0.0}, {2:0.0})  {3}", m.X, m.Y, m.Z, m.Map)
+                        : "(saved automatically before each teleport)";
+                    continue;
+                }
                 if (m.Slot < 0 || m.Slot >= Markers.Count) continue;
                 var row = Markers[m.Slot];
                 row.Valid = m.Valid;

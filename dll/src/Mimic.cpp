@@ -732,6 +732,34 @@ static void HandleTeleport() {
     case TP_OP_CLEAR_MARKER:
         rc = Wirbel::ClearMarker(slot);
         break;
+    case TP_OP_RECALL_LAST: {
+        uint8_t tier = 0;
+        rc = Wirbel::RecallLast(&tier);
+        memset(g_invokeMailbox.paramsData, 0, sizeof(g_invokeMailbox.paramsData));
+        g_invokeMailbox.paramsData[177] = tier;
+        break;
+    }
+    case TP_OP_GET_LAST: {
+        Wirbel::Marker m{};
+        rc = Wirbel::GetLast(m);
+        if (rc == 0) writePoseBlock(m.P, m.MapName, 0, 0);
+        break;
+    }
+    case TP_OP_BUGIT_SAVE: {
+        Wirbel::Pose p{};
+        char map[Grimoire::TELEPORT_MAPNAME_CAP] = {};
+        uint8_t source = 0;
+        rc = Wirbel::BugItSave(p, map, sizeof(map), &source);
+        if (rc == 0) writePoseBlock(p, map, source, 0);
+        break;
+    }
+    case TP_OP_BUGIT_GO: {
+        uint8_t tier = 0;
+        rc = Wirbel::BugItGo(&tier);
+        memset(g_invokeMailbox.paramsData, 0, sizeof(g_invokeMailbox.paramsData));
+        g_invokeMailbox.paramsData[177] = tier;
+        break;
+    }
     default:
         SetError(-1, "Teleport: unknown op");
         return;

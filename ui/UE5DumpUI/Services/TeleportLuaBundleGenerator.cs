@@ -37,18 +37,22 @@ public static class TeleportLuaBundleGenerator
     //   0x10 instanceAddr = teleport op, 0x18 ufuncAddr = slot,
     //   0x228 errorMsg, 0x328 paramsData.
     // CMD_TELEPORT = 8. Ops: 0 GET_POSE, 1 SAVE, 2 RECALL, 3 RECALL_FORCE,
-    //   4 CURSOR, 5 GET_MARKER, 6 CLEAR. (TeleportOp in Mimic.h)
+    //   4 CURSOR, 5 GET_MARKER, 6 CLEAR, 7 RECALL_LAST, 9 BUGIT_SAVE,
+    //   10 BUGIT_GO. (TeleportOp in Mimic.h)
     private const int CmdTeleport = 8;
-    private const int OpGetPose = 0;
     private const int OpSave = 1;
     private const int OpRecall = 2;
     private const int OpCursor = 4;
+    private const int OpRecallLast = 7;
+    private const int OpBugItSave = 9;
+    private const int OpBugItGo = 10;
 
     // VK codes (numeric literals — CE's defines.lua has VK_NUMPAD0..9 but no
     // VK_1-style names for the 0x30..0x39 top row, so we emit literals + a
     // trailing comment for every key, keeping the script self-contained and
     // editable. See docs/teleport-spec.md §9.3 rule 1.)
     private const int VkControl = 0x11;
+    private const int VkShift = 0x10;
     private const int VkAlt = 0x12;
     private const int VkNumpad0 = 0x60;
     private const int VkTopRow0 = 0x30;
@@ -129,13 +133,21 @@ public static class TeleportLuaBundleGenerator
                 $"Recall marker {i}"));
         }
         list.Add(new ActionHotkeys(
+            "function() recallLast() end",
+            RecallLastBindings(scheme),
+            "Recall last"));
+        list.Add(new ActionHotkeys(
             "function() cursor() end",
             CursorBindings(scheme),
             "Teleport to cursor"));
         list.Add(new ActionHotkeys(
-            "function() copyBugItGo() end",
-            CopyBindings(scheme),
-            "Copy pose as BugItGo"));
+            "function() bugIt() end",
+            BugItBindings(scheme),
+            "BugIt (store + copy)"));
+        list.Add(new ActionHotkeys(
+            "function() bugItGo() end",
+            BugItGoBindings(scheme),
+            "BugItGo (go to stored)"));
         return list;
     }
 
@@ -159,6 +171,17 @@ public static class TeleportLuaBundleGenerator
         return b;
     }
 
+    private static List<Binding> RecallLastBindings(TeleportHotkeyScheme s)
+    {
+        // Ctrl+Alt+0 keeps it clear of the per-marker recalls and the copy combo.
+        var b = new List<Binding>();
+        if (s is TeleportHotkeyScheme.Numpad or TeleportHotkeyScheme.Both)
+            b.Add(new Binding(new[] { VkControl, VkAlt, VkNumpad0 }, "Ctrl+Alt+Num0"));
+        if (s is TeleportHotkeyScheme.TopRow or TeleportHotkeyScheme.Both)
+            b.Add(new Binding(new[] { VkControl, VkAlt, VkTopRow0 }, "Ctrl+Alt+0"));
+        return b;
+    }
+
     private static List<Binding> CursorBindings(TeleportHotkeyScheme s)
     {
         var b = new List<Binding>();
@@ -169,13 +192,26 @@ public static class TeleportLuaBundleGenerator
         return b;
     }
 
-    private static List<Binding> CopyBindings(TeleportHotkeyScheme s)
+    private static List<Binding> BugItBindings(TeleportHotkeyScheme s)
     {
+        // "BugIt" = capture/copy — keeps the old copy-pose combo.
         var b = new List<Binding>();
         if (s is TeleportHotkeyScheme.Numpad or TeleportHotkeyScheme.Both)
             b.Add(new Binding(new[] { VkControl, VkNumpad0 }, "Ctrl+Num0"));
         if (s is TeleportHotkeyScheme.TopRow or TeleportHotkeyScheme.Both)
             b.Add(new Binding(new[] { VkControl, VkTopRow0 }, "Ctrl+0"));
+        return b;
+    }
+
+    private static List<Binding> BugItGoBindings(TeleportHotkeyScheme s)
+    {
+        // "BugItGo" = return to the stored BugIt spot. Ctrl+Shift+0 sits clear
+        // of cursor (Num0/Alt+0), BugIt (Ctrl+0) and recall-last (Ctrl+Alt+0).
+        var b = new List<Binding>();
+        if (s is TeleportHotkeyScheme.Numpad or TeleportHotkeyScheme.Both)
+            b.Add(new Binding(new[] { VkControl, VkShift, VkNumpad0 }, "Ctrl+Shift+Num0"));
+        if (s is TeleportHotkeyScheme.TopRow or TeleportHotkeyScheme.Both)
+            b.Add(new Binding(new[] { VkControl, VkShift, VkTopRow0 }, "Ctrl+Shift+0"));
         return b;
     }
 
@@ -253,19 +289,31 @@ public static class TeleportLuaBundleGenerator
                  "Use the UI Force button or re-save here.')");
         Line(sb, "  end");
         Line(sb, "end");
+        // recallLast: undo the most recent jump. The DLL auto-saves the pre-jump
+        // pose before every recall/cursor/BugItGo, so this restores it (op 7).
+        Line(sb, "function recallLast()");
+        Line(sb, $"  local code = tp({OpRecallLast}, 0)");
+        Line(sb, "  if code == -6 then print('[Teleport] no last position saved yet') end");
+        Line(sb, "end");
         Line(sb, $"function cursor()  tp({OpCursor}, 0) end");
         Line(sb);
 
-        // copyBugItGo: GET_POSE then read the pose block + clipboard the string.
-        Line(sb, "function copyBugItGo()");
-        Line(sb, $"  local code, m = tp({OpGetPose}, 0)");
+        // bugIt: BUGIT_SAVE stores the pose DLL-side AND returns the pose block,
+        // so we also clipboard a 'BugItGo X Y Z' string for convenience.
+        Line(sb, "function bugIt()");
+        Line(sb, $"  local code, m = tp({OpBugItSave}, 0)");
         Line(sb, "  if code ~= 0 or not m then return end");
         Line(sb, "  local x = readDouble(m + 0x328)");
         Line(sb, "  local y = readDouble(m + 0x330)");
         Line(sb, "  local z = readDouble(m + 0x338)");
         Line(sb, "  local s = string.format('BugItGo %.3f %.3f %.3f', x, y, z)");
         Line(sb, "  writeToClipboard(s)");
-        Line(sb, "  print('[Teleport] copied: ' .. s)");
+        Line(sb, "  print('[Teleport] BugIt stored + copied: ' .. s)");
+        Line(sb, "end");
+        // bugItGo: teleport to the DLL-stored BugIt pose (no-op when none yet).
+        Line(sb, "function bugItGo()");
+        Line(sb, $"  local code = tp({OpBugItGo}, 0)");
+        Line(sb, "  if code == -6 then print('[Teleport] no BugIt stored yet -- press BugIt first') end");
         Line(sb, "end");
         Line(sb);
     }

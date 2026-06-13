@@ -60,9 +60,12 @@ public static class CeXmlExportService
     private static HashSet<string>? _dropDownDescriptions;
 
     /// <summary>
-    /// When true, pointer/array GroupHeader nodes (those with Offsets=[0]) emit
-    /// &lt;Options moHideChildren="1" moDeactivateChildrenAsWell="1"/&gt; to collapse
-    /// them by default in Cheat Engine. Root node is excluded (stays expanded).
+    /// When true, every non-root GroupHeader folder (pointer/array/map/set deref
+    /// nodes, struct groups, AND array/map/set element folders such as
+    /// <c>[1]</c>) emits &lt;Options moHideChildren="1"
+    /// moDeactivateChildrenAsWell="1"/&gt; to collapse it by default in Cheat
+    /// Engine. The root node is excluded (its address is absolute, not "+...",
+    /// so it stays expanded).
     /// </summary>
     [ThreadStatic]
     private static bool _collapsePointerNodes;
@@ -92,6 +95,19 @@ public static class CeXmlExportService
 
     [ThreadStatic]
     private static int _emitPointerDepth;
+
+    /// <summary>
+    /// Per-call resolved-field dictionaries, mirrored into thread-static state so
+    /// the container emitters (EmitMapProperty / EmitSetProperty / struct-array)
+    /// can expand element VALUES that are structs/objects by delegating to
+    /// EmitFields — without threading the dicts through every emit signature.
+    /// Set at the top of each Generate* entry point; keyed by StructDataAddr /
+    /// PtrAddress respectively (same keys ResolveDrilldownAsync populates).
+    /// </summary>
+    [ThreadStatic]
+    private static Dictionary<string, List<LiveFieldValue>>? _resolvedStructsState;
+    [ThreadStatic]
+    private static Dictionary<string, List<LiveFieldValue>>? _resolvedInstancesState;
 
     /// <summary>CE field metadata for XML generation.</summary>
     private record CeFieldInfo(
@@ -204,6 +220,231 @@ public static class CeXmlExportService
         "ObjectProperty" or "ClassProperty" or "WeakObjectProperty" or
         "SoftObjectProperty" or "SoftClassProperty" or "LazyObjectProperty" or
         "InterfaceProperty";
+
+    // ========================================
+    // Unified drilldown resolver (docs/ce-export-drilldown-spec.md Phase A)
+    // ========================================
+
+    /// <summary>
+    /// One recursive pass that resolves everything the emitter needs to expand:
+    /// (1) StructProperty fields (flattened, depth-free), (2) ObjectProperty
+    /// pointer targets (cost 1 level), and (3) CONTAINER ELEMENT VALUES that are
+    /// structs/objects (Map values, Set elements, struct-array elements — cost 1
+    /// level), recursing into each so nested containers expand too. Populates
+    /// <paramref name="resolvedStructs"/> (keyed by StructDataAddr) and
+    /// <paramref name="resolvedInstances"/> (keyed by PtrAddress) — the same keys
+    /// the emit phase looks up. Replaces the separate ResolveStructFieldsAsync +
+    /// ResolvePointerInstancesAsync calls for CE XML export.
+    /// </summary>
+    public static async Task ResolveDrilldownAsync(
+        IDumpService dump,
+        IReadOnlyList<LiveFieldValue> fields,
+        Dictionary<string, List<LiveFieldValue>> resolvedStructs,
+        Dictionary<string, List<LiveFieldValue>> resolvedInstances,
+        int depth,
+        int arrayLimit = 64)
+    {
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        await ResolveDrilldownRecAsync(dump, fields, resolvedStructs, resolvedInstances,
+            depth, arrayLimit, visited);
+    }
+
+    private static async Task ResolveDrilldownRecAsync(
+        IDumpService dump,
+        IReadOnlyList<LiveFieldValue> fields,
+        Dictionary<string, List<LiveFieldValue>> resolvedStructs,
+        Dictionary<string, List<LiveFieldValue>> resolvedInstances,
+        int depth,
+        int arrayLimit,
+        HashSet<string> visited)
+    {
+        // (1) Structs at this level — flatten nested (depth-free, MaxStructDepth-bound),
+        //     then descend into each resolved struct's own fields (still depth-free) so
+        //     containers/pointers INSIDE the struct are reached.
+        await ResolveStructFieldsIntoAsync(dump, fields, resolvedStructs, arrayLimit);
+        foreach (var f in fields)
+        {
+            if (f.TypeName is not ("StructProperty" or "OptionalProperty")) continue;
+            if (string.IsNullOrEmpty(f.StructDataAddr)) continue;
+            if (!resolvedStructs.TryGetValue(f.StructDataAddr, out var sub)) continue;
+            if (!visited.Add("S:" + f.StructDataAddr)) continue;
+            await ResolveDrilldownRecAsync(dump, sub, resolvedStructs, resolvedInstances,
+                depth, arrayLimit, visited);
+        }
+
+        if (depth <= 0) return;
+
+        // (2) Pointers — cost 1 level.
+        foreach (var f in fields)
+        {
+            if (!IsObjectPropertyType(f.TypeName)) continue;
+            if (string.IsNullOrEmpty(f.PtrAddress) || f.PtrAddress == "0x0") continue;
+            if (resolvedInstances.ContainsKey(f.PtrAddress)) continue;
+            if (!visited.Add("P:" + f.PtrAddress)) continue;
+            await WalkAndRecurseAsync(dump, f.PtrAddress, f.PtrClassAddr, resolvedStructs,
+                resolvedInstances, depth - 1, arrayLimit, visited);
+        }
+
+        // (3) Container element VALUES (struct + object) — cost 1 level.
+        foreach (var f in fields)
+        {
+            var valueFields = BuildContainerValueFields(f);
+            if (valueFields.Count == 0) continue;
+
+            var structVals = valueFields
+                .Where(v => v.TypeName is "StructProperty"
+                            && !string.IsNullOrEmpty(v.StructDataAddr)
+                            && !string.IsNullOrEmpty(v.StructClassAddr))
+                .ToList();
+            if (structVals.Count > 0)
+            {
+                await ResolveStructFieldsIntoAsync(dump, structVals, resolvedStructs, arrayLimit);
+                foreach (var sv in structVals)
+                {
+                    if (!resolvedStructs.TryGetValue(sv.StructDataAddr, out var sub)) continue;
+                    if (!visited.Add("S:" + sv.StructDataAddr)) continue;
+                    await ResolveDrilldownRecAsync(dump, sub, resolvedStructs, resolvedInstances,
+                        depth - 1, arrayLimit, visited);
+                }
+            }
+
+            foreach (var ov in valueFields)
+            {
+                if (!IsObjectPropertyType(ov.TypeName)) continue;
+                if (string.IsNullOrEmpty(ov.PtrAddress) || ov.PtrAddress == "0x0") continue;
+                if (resolvedInstances.ContainsKey(ov.PtrAddress)) continue;
+                if (!visited.Add("P:" + ov.PtrAddress)) continue;
+                await WalkAndRecurseAsync(dump, ov.PtrAddress, ov.PtrClassAddr, resolvedStructs,
+                    resolvedInstances, depth - 1, arrayLimit, visited);
+            }
+        }
+    }
+
+    private static async Task WalkAndRecurseAsync(
+        IDumpService dump, string ptrAddr, string ptrClassAddr,
+        Dictionary<string, List<LiveFieldValue>> resolvedStructs,
+        Dictionary<string, List<LiveFieldValue>> resolvedInstances,
+        int depth, int arrayLimit, HashSet<string> visited)
+    {
+        try
+        {
+            var r = await dump.WalkInstanceAsync(ptrAddr, ptrClassAddr, arrayLimit);
+            if (r.Fields.Count > 0)
+            {
+                resolvedInstances[ptrAddr] = r.Fields;
+                await ResolveDrilldownRecAsync(dump, r.Fields, resolvedStructs,
+                    resolvedInstances, depth, arrayLimit, visited);
+            }
+        }
+        catch
+        {
+            // Pipe error / reclaimed target — leave unresolved; emit falls back to a leaf.
+        }
+    }
+
+    /// <summary>
+    /// Build synthetic value fields for a container's struct/object element VALUES,
+    /// each carrying the value's absolute <c>StructDataAddr</c> (struct) or
+    /// <c>PtrAddress</c> (object) for the resolver to walk. Scalar values are
+    /// skipped (they emit as plain leaves). The absolute address formulas match
+    /// the emitters (and PopulateMapContainerFields) exactly, so the resolver's
+    /// keys line up with the emit-time lookups.
+    /// </summary>
+    private static List<LiveFieldValue> BuildContainerValueFields(LiveFieldValue field)
+    {
+        var list = new List<LiveFieldValue>();
+        switch (field.TypeName)
+        {
+            case "MapProperty" when field.MapElements is { Count: > 0 }:
+            {
+                bool isStruct = field.MapValueType == "StructProperty"
+                                && !string.IsNullOrEmpty(field.MapValueStructAddr);
+                bool isObj = IsObjectPropertyType(field.MapValueType);
+                if (!isStruct && !isObj) break;
+                ulong dataBase = ParseHexAddr(field.MapDataAddr);
+                int valOffset = field.MapValueOffset > 0 ? field.MapValueOffset : field.MapKeySize;
+                int stride = ComputeSetElementStride(valOffset + field.MapValueSize);
+                foreach (var e in field.MapElements)
+                {
+                    long off = (long)e.Index * stride + valOffset;
+                    if (isStruct && dataBase != 0)
+                        list.Add(new LiveFieldValue
+                        {
+                            TypeName = "StructProperty",
+                            StructDataAddr = AbsAddr(dataBase, off),
+                            StructClassAddr = field.MapValueStructAddr,
+                            StructTypeName = field.MapValueStructType,
+                        });
+                    else if (isObj && !string.IsNullOrEmpty(e.ValuePtrAddress) && e.ValuePtrAddress != "0x0")
+                        list.Add(new LiveFieldValue
+                        {
+                            TypeName = field.MapValueType,
+                            PtrAddress = e.ValuePtrAddress,
+                            PtrName = e.ValuePtrName,
+                            PtrClassName = e.ValuePtrClassName,
+                        });
+                }
+                break;
+            }
+            case "SetProperty" when field.SetElements is { Count: > 0 }:
+            {
+                bool isStruct = field.SetElemType == "StructProperty"
+                                && !string.IsNullOrEmpty(field.SetElemStructAddr);
+                bool isObj = IsObjectPropertyType(field.SetElemType);
+                if (!isStruct && !isObj) break;
+                ulong dataBase = ParseHexAddr(field.SetDataAddr);
+                int stride = ComputeSetElementStride(field.SetElemSize);
+                foreach (var e in field.SetElements)
+                {
+                    long off = (long)e.Index * stride;
+                    if (isStruct && dataBase != 0)
+                        list.Add(new LiveFieldValue
+                        {
+                            TypeName = "StructProperty",
+                            StructDataAddr = AbsAddr(dataBase, off),
+                            StructClassAddr = field.SetElemStructAddr,
+                            StructTypeName = field.SetElemStructType,
+                        });
+                    else if (isObj && !string.IsNullOrEmpty(e.KeyPtrAddress) && e.KeyPtrAddress != "0x0")
+                        list.Add(new LiveFieldValue
+                        {
+                            TypeName = field.SetElemType,
+                            PtrAddress = e.KeyPtrAddress,
+                            PtrName = e.KeyPtrName,
+                            PtrClassName = e.KeyPtrClassName,
+                        });
+                }
+                break;
+            }
+            case "ArrayProperty" when field.ArrayInnerType == "StructProperty"
+                    && !string.IsNullOrEmpty(field.ArrayStructClassAddr)
+                    && field.ArrayElements is { Count: > 0 }:
+            {
+                ulong dataBase = ParseHexAddr(field.ArrayDataAddr);
+                if (dataBase == 0) break;
+                foreach (var e in field.ArrayElements)
+                    list.Add(new LiveFieldValue
+                    {
+                        TypeName = "StructProperty",
+                        StructDataAddr = AbsAddr(dataBase, (long)e.Index * field.ArrayElemSize),
+                        StructClassAddr = field.ArrayStructClassAddr,
+                        StructTypeName = field.ArrayStructType,
+                    });
+                break;
+            }
+        }
+        return list;
+    }
+
+    private static ulong ParseHexAddr(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return 0;
+        var t = (s.StartsWith("0x") || s.StartsWith("0X")) ? s.Substring(2) : s;
+        return ulong.TryParse(t, System.Globalization.NumberStyles.HexNumber, null, out var v) ? v : 0;
+    }
+
+    private static string AbsAddr(ulong dataBase, long offset)
+        => dataBase == 0 ? "" : $"0x{dataBase + (ulong)offset:X}";
 
     /// <summary>
     /// Pre-resolve all StructProperty fields in <paramref name="fields"/> by walking
@@ -321,6 +562,7 @@ public static class CeXmlExportService
                     ArrayInnerType = f.ArrayInnerType,
                     ArrayElemSize = f.ArrayElemSize,
                     ArrayStructType = f.ArrayStructType,
+                    ArrayStructClassAddr = f.ArrayStructClassAddr,
                     ArrayElements = f.ArrayElements,
                     ArrayDataAddr = f.ArrayDataAddr,
                     ArrayEnumAddr = f.ArrayEnumAddr,
@@ -337,12 +579,22 @@ public static class CeXmlExportService
                     MapValueType = f.MapValueType,
                     MapKeySize = f.MapKeySize,
                     MapValueSize = f.MapValueSize,
+                    MapValueOffset = f.MapValueOffset,
                     MapDataAddr = f.MapDataAddr,
                     MapElements = f.MapElements,
+                    // Container value/key struct metadata — REQUIRED so a Map/Set/Array
+                    // nested INSIDE a struct can resolve+expand its struct values
+                    // (e.g. MsTuneData → MsTunes {Map → Struct}).
+                    MapKeyStructAddr = f.MapKeyStructAddr,
+                    MapKeyStructType = f.MapKeyStructType,
+                    MapValueStructAddr = f.MapValueStructAddr,
+                    MapValueStructType = f.MapValueStructType,
                     SetCount = f.SetCount,
                     SetElemType = f.SetElemType,
                     SetElemSize = f.SetElemSize,
                     SetDataAddr = f.SetDataAddr,
+                    SetElemStructAddr = f.SetElemStructAddr,
+                    SetElemStructType = f.SetElemStructType,
                     SetElements = f.SetElements,
                 });
             }
@@ -389,6 +641,8 @@ public static class CeXmlExportService
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
         _emitPath = new HashSet<string>(StringComparer.Ordinal);
         _emitPointerDepth = 0;
+        _resolvedStructsState = resolvedStructs;
+        _resolvedInstancesState = resolvedInstances;
         var sb = new StringBuilder();
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
         sb.AppendLine("<CheatTable>");
@@ -468,6 +722,8 @@ public static class CeXmlExportService
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
         _emitPath = new HashSet<string>(StringComparer.Ordinal);
         _emitPointerDepth = 0;
+        _resolvedStructsState = resolvedStructs;
+        _resolvedInstancesState = resolvedInstances;
         var sb = new StringBuilder();
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
         sb.AppendLine("<CheatTable>");
@@ -543,6 +799,10 @@ public static class CeXmlExportService
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
+        _emitPath = new HashSet<string>(StringComparer.Ordinal);
+        _emitPointerDepth = 0;
+        _resolvedStructsState = resolvedStructs;
+        _resolvedInstancesState = resolvedInstances;
 
         // Generate unique symbol name to avoid CE overwrite on repeated copies
         var suffix = Random.Shared.Next(0x100000, 0xFFFFFF).ToString("X6");
@@ -1036,53 +1296,12 @@ public static class CeXmlExportService
         EmitGroupOpen(sb, indent, description, address, null);
         var childIndent = indent + "  ";
 
-        foreach (var child in children)
-        {
-            // StrProperty inside struct: emit as Unicode string with pointer dereference
-            if (child.TypeName == "StrProperty")
-            {
-                EmitStringLeaf(sb, childIndent, child.Name, $"+{child.Offset:X}",
-                    offsets: [0], unicode: true);
-                continue;
-            }
-
-            var ceField = MapCeField(child);
-            if (ceField != null)
-            {
-                // Scalar child: offset relative to struct start
-                var ddLink = TryGetEnumDropDown(child);
-                EmitLeaf(sb, childIndent, ddLink.desc ?? child.Name, ceField,
-                    $"+{child.Offset:X}", null,
-                    dropDownContent: ddLink.content,
-                    dropDownListLink: ddLink.link);
-            }
-            else if (child.IsPointerNavigation)
-            {
-                // Pointer inside struct: emit as 8 Bytes hex placeholder
-                EmitGroupPlaceholder(sb, childIndent, child.Name,
-                    $"+{child.Offset:X}", null, showAsHex: true);
-            }
-            else if (child.ArrayCount >= 0
-                && (child.TypeName == "ArrayProperty"
-                    || child.TypeName == "MulticastInlineDelegateProperty"
-                    || child.TypeName == "MulticastDelegateProperty"))
-            {
-                // Array inside struct — full expansion if element data is available.
-                // Multicast delegates expose an implicit array via ArrayCount/Inner.
-                EmitArrayProperty(sb, childIndent, child);
-            }
-            else if (child.TypeName == "MapProperty" && child.MapCount >= 0)
-            {
-                // Map inside struct — expand with key/value elements
-                EmitMapProperty(sb, childIndent, child);
-            }
-            else if (child.TypeName == "SetProperty" && child.SetCount >= 0)
-            {
-                // Set inside struct — expand with element entries
-                EmitSetProperty(sb, childIndent, child);
-            }
-            // Skip unknown types (delegates, etc.) — they're not useful in CE
-        }
+        // Children's offsets are relative to the struct base; the struct group is
+        // at +structOffset, so EmitFields lays each child at +childOffset under it.
+        // Delegating to EmitFields (instead of a bespoke loop) means struct children
+        // that are themselves structs / pointers / Maps / Sets expand richly when
+        // they were resolved — the core of the drilldown contract.
+        EmitFields(sb, childIndent, children, _resolvedStructsState, _resolvedInstancesState);
 
         EmitGroupClose(sb, indent);
     }
@@ -1404,10 +1623,32 @@ public static class CeXmlExportService
         EmitGroupOpen(sb, indent, desc, $"+{field.Offset:X}", new[] { 0 });
         var elemIndent = indent + "  ";
 
+        ulong arrDataBase = ParseHexAddr(field.ArrayDataAddr);
+        bool canResolveElem = arrDataBase != 0
+                              && !string.IsNullOrEmpty(field.ArrayStructClassAddr)
+                              && _resolvedStructsState != null;
+
         foreach (var elem in field.ArrayElements!)
         {
             int elemByteOffset = elem.Index * field.ArrayElemSize;
             var elemDesc = $"[{elem.Index}]";
+
+            // Prefer a full re-walk of the element struct (nested structs/maps expand)
+            // when the resolver walked it; fall back to the shallow per-element preview.
+            string elemStructAddr = canResolveElem
+                ? AbsAddr(arrDataBase, (long)elem.Index * field.ArrayElemSize) : "";
+            if (canResolveElem
+                && _resolvedStructsState!.TryGetValue(elemStructAddr, out var rs) && rs.Count > 0)
+            {
+                var sv = new LiveFieldValue
+                {
+                    Name = elemDesc, TypeName = "StructProperty", Offset = elemByteOffset,
+                    StructDataAddr = elemStructAddr, StructClassAddr = field.ArrayStructClassAddr,
+                    StructTypeName = field.ArrayStructType,
+                };
+                EmitFields(sb, elemIndent, new[] { sv }, _resolvedStructsState, _resolvedInstancesState);
+                continue;
+            }
 
             if (elem.StructFields is { Count: > 0 })
             {
@@ -1417,12 +1658,25 @@ public static class CeXmlExportService
 
                 foreach (var sf in elem.StructFields)
                 {
-                    var ceField = MapInnerTypeToCeField(sf.TypeName);
+                    // Enum width follows the sub-field's real byte size (a 1-byte
+                    // enum must NOT be read as 4 bytes — that pulls in the next
+                    // field's bytes). Other scalars/pointers map by type name.
+                    var ceField = sf.TypeName == "EnumProperty"
+                        ? new CeFieldInfo(CeWidthForSize(sf.Size))
+                        : MapInnerTypeToCeField(sf.TypeName);
                     if (ceField != null)
                     {
                         EmitLeaf(sb, fieldIndent, sf.Name, ceField, $"+{sf.Offset:X}", null);
                     }
-                    // Skip unmappable types (nested structs, pointers, containers)
+                    else
+                    {
+                        // Non-scalar sub-field (nested struct / map / set / array):
+                        // the Phase F array read doesn't carry its inner data, so
+                        // surface it as a collapsed placeholder folder at its offset
+                        // instead of dropping it silently — the user still sees every
+                        // field and its address (and can add children in CE).
+                        EmitGroupPlaceholder(sb, fieldIndent, sf.Name, $"+{sf.Offset:X}", null);
+                    }
                 }
 
                 EmitGroupClose(sb, elemIndent);
@@ -1456,13 +1710,8 @@ public static class CeXmlExportService
             ? $"{field.Name} {{Map: {field.MapCount}, {keyLabel} \u2192 {valLabel}}}"
             : field.Name;
 
-        // Need key/value type info and elements for addressable CE entries
-        var ceKey = MapInnerTypeToCeField(field.MapKeyType);
-        var ceVal = MapInnerTypeToCeField(field.MapValueType);
-
-        // If types are non-scalar or no elements available, emit as placeholder only
-        if (ceKey == null || ceVal == null
-            || field.MapCount <= 0
+        // Need elements + sizes for addressable CE entries.
+        if (field.MapCount <= 0
             || field.MapElements == null || field.MapElements.Count == 0
             || field.MapKeySize <= 0 || field.MapValueSize <= 0)
         {
@@ -1470,10 +1719,15 @@ public static class CeXmlExportService
             return;
         }
 
-        // Use aligned value offset if available; fall back to key size
+        // Scalar key → leaf at +0; struct/object keys are summarised in the element
+        // description. Value (scalar / struct / object / nested container) expands via
+        // the shared EmitFields dispatch when resolved (docs/ce-export-drilldown-spec).
+        var ceKey = MapInnerTypeToCeField(field.MapKeyType);
         int valOffset = field.MapValueOffset > 0 ? field.MapValueOffset : field.MapKeySize;
-        int pairSize = valOffset + field.MapValueSize;
-        int stride = ComputeSetElementStride(pairSize);
+        int stride = ComputeSetElementStride(valOffset + field.MapValueSize);
+        ulong dataBase = ParseHexAddr(field.MapDataAddr);
+        bool valStruct = field.MapValueType == "StructProperty"
+                         && !string.IsNullOrEmpty(field.MapValueStructAddr);
 
         // Map group: Address=+{fieldOffset}, Offsets=[0] (deref TSparseArray.Data)
         EmitGroupOpen(sb, indent, desc, $"+{field.Offset:X}", new[] { 0 });
@@ -1492,18 +1746,52 @@ public static class CeXmlExportService
             EmitGroupOpen(sb, elemIndent, elemDesc, $"+{elemByteOffset:X}", null);
             var fieldIndent = elemIndent + "  ";
 
-            // Key at +0
-            var keyDesc = !string.IsNullOrEmpty(elem.Key) ? $"Key: {elem.Key}" : "Key";
-            EmitLeaf(sb, fieldIndent, keyDesc, ceKey, "+0", null);
+            if (ceKey != null)
+            {
+                var keyDesc = !string.IsNullOrEmpty(elem.Key) ? $"Key: {elem.Key}" : "Key";
+                EmitLeaf(sb, fieldIndent, keyDesc, ceKey, "+0", null);
+            }
 
-            // Value at +valOffset (aligned within TPair)
-            var valDesc = !string.IsNullOrEmpty(elem.Value) ? $"Value: {elem.Value}" : "Value";
-            EmitLeaf(sb, fieldIndent, valDesc, ceVal, $"+{valOffset:X}", null);
+            string valueName = (valStruct || IsObjectPropertyType(field.MapValueType))
+                ? "Value"
+                : (!string.IsNullOrEmpty(elem.Value) ? $"Value: {elem.Value}" : "Value");
+            var valueField = BuildElementValue(valueName, field.MapValueType, valOffset, field.MapValueSize,
+                valStruct, AbsAddr(dataBase, elemByteOffset + valOffset),
+                field.MapValueStructAddr, field.MapValueStructType,
+                elem.ValuePtrAddress, elem.ValuePtrName, elem.ValuePtrClassName);
+            EmitFields(sb, fieldIndent, new[] { valueField }, _resolvedStructsState, _resolvedInstancesState);
 
             EmitGroupClose(sb, elemIndent);
         }
 
         EmitGroupClose(sb, indent);
+    }
+
+    /// <summary>
+    /// Build the synthetic VALUE field of a container element for the emit phase:
+    /// a struct (StructDataAddr set → drills when resolved), an object pointer
+    /// (PtrAddress set → drills when resolved), or a scalar leaf. Offset is relative
+    /// to the element group; StructDataAddr is absolute (matches the resolver key).
+    /// </summary>
+    private static LiveFieldValue BuildElementValue(
+        string name, string typeName, int offset, int size,
+        bool isStruct, string structDataAddr, string structClassAddr, string structTypeName,
+        string? ptrAddr, string? ptrName, string? ptrClassName)
+    {
+        if (isStruct && !string.IsNullOrEmpty(structDataAddr))
+            return new LiveFieldValue
+            {
+                Name = name, TypeName = "StructProperty", Offset = offset, Size = size,
+                StructDataAddr = structDataAddr, StructClassAddr = structClassAddr,
+                StructTypeName = structTypeName,
+            };
+        if (IsObjectPropertyType(typeName) && !string.IsNullOrEmpty(ptrAddr) && ptrAddr != "0x0")
+            return new LiveFieldValue
+            {
+                Name = name, TypeName = typeName, Offset = offset, Size = size,
+                PtrAddress = ptrAddr!, PtrName = ptrName ?? "", PtrClassName = ptrClassName ?? "",
+            };
+        return new LiveFieldValue { Name = name, TypeName = typeName, Offset = offset, Size = size };
     }
 
     /// <summary>
@@ -1522,11 +1810,9 @@ public static class CeXmlExportService
             ? $"{field.Name} {{Set: {field.SetCount}, {elemLabel}}}"
             : field.Name;
 
-        var ceElem = MapInnerTypeToCeField(field.SetElemType);
-
-        // Non-scalar, empty, or no elements → placeholder
-        if (ceElem == null
-            || field.SetCount <= 0
+        // Empty / no elements → placeholder. Struct/object elements (ceElem == null)
+        // now expand via EmitFields instead of collapsing the whole set.
+        if (field.SetCount <= 0
             || field.SetElements == null || field.SetElements.Count == 0
             || field.SetElemSize <= 0)
         {
@@ -1534,7 +1820,11 @@ public static class CeXmlExportService
             return;
         }
 
+        var ceElem = MapInnerTypeToCeField(field.SetElemType);   // null for struct/object
         int stride = ComputeSetElementStride(field.SetElemSize);
+        ulong dataBase = ParseHexAddr(field.SetDataAddr);
+        bool elemStruct = field.SetElemType == "StructProperty"
+                          && !string.IsNullOrEmpty(field.SetElemStructAddr);
 
         // Set group: Address=+{fieldOffset}, Offsets=[0] (deref TSparseArray.Data)
         EmitGroupOpen(sb, indent, desc, $"+{field.Offset:X}", new[] { 0 });
@@ -1549,7 +1839,20 @@ public static class CeXmlExportService
                     ? $"[{elem.Index}] {elem.Key}"
                     : $"[{elem.Index}]";
 
-            EmitLeaf(sb, childIndent, elemDesc, ceElem, $"+{elemByteOffset:X}", null);
+            if (ceElem != null)
+            {
+                // Scalar element → flat leaf (unchanged).
+                EmitLeaf(sb, childIndent, elemDesc, ceElem, $"+{elemByteOffset:X}", null);
+            }
+            else
+            {
+                // Struct / object element → expand via the shared EmitFields dispatch.
+                var ev = BuildElementValue(elemDesc, field.SetElemType, elemByteOffset, field.SetElemSize,
+                    elemStruct, AbsAddr(dataBase, elemByteOffset),
+                    field.SetElemStructAddr, field.SetElemStructType,
+                    elem.KeyPtrAddress, elem.KeyPtrName, elem.KeyPtrClassName);
+                EmitFields(sb, childIndent, new[] { ev }, _resolvedStructsState, _resolvedInstancesState);
+            }
         }
 
         EmitGroupClose(sb, indent);
@@ -1672,8 +1975,10 @@ public static class CeXmlExportService
             sb.AppendLine($"{indent}  <ShowAsHex>1</ShowAsHex>");
         sb.AppendLine($"{indent}  <ShowAsSigned>0</ShowAsSigned>");
         sb.AppendLine($"{indent}  <GroupHeader>1</GroupHeader>");
-        // Collapse pointer/array nodes: emit Options only for non-root nodes with pointer dereference
-        if (_collapsePointerNodes && offsets != null && address.StartsWith("+"))
+        // Collapse every non-root group folder (pointer/array deref nodes, struct
+        // groups, AND element folders like [1]). Root is excluded — its address is
+        // absolute, not "+...".
+        if (_collapsePointerNodes && address.StartsWith("+"))
             sb.AppendLine($"{indent}  <Options moHideChildren=\"1\" moDeactivateChildrenAsWell=\"1\"/>");
         if (varType != null)
             sb.AppendLine($"{indent}  <VariableType>{varType}</VariableType>");
@@ -1704,8 +2009,9 @@ public static class CeXmlExportService
             sb.AppendLine($"{indent}  <ShowAsHex>1</ShowAsHex>");
         sb.AppendLine($"{indent}  <ShowAsSigned>0</ShowAsSigned>");
         sb.AppendLine($"{indent}  <GroupHeader>1</GroupHeader>");
-        // Collapse pointer/array nodes: emit Options only for non-root nodes with pointer dereference
-        if (_collapsePointerNodes && offsets != null && address.StartsWith("+"))
+        // Collapse every non-root group folder (see EmitGroupOpen). Root is
+        // excluded — its address is absolute, not "+...".
+        if (_collapsePointerNodes && address.StartsWith("+"))
             sb.AppendLine($"{indent}  <Options moHideChildren=\"1\" moDeactivateChildrenAsWell=\"1\"/>");
         sb.AppendLine($"{indent}  <Address>{address}</Address>");
         EmitOffsets(sb, indent, offsets);
@@ -1838,6 +2144,21 @@ public static class CeXmlExportService
     /// - If BoolBitIndex >= 0: Binary type with BitStart/BitLength (CE bit field)
     /// - Otherwise: Byte type (fallback for bool without bit info)
     /// </summary>
+    /// <summary>
+    /// CE integer-width keyword for a property's byte size. UE enums/bytes can be
+    /// 1/2/4/8 bytes wide; emitting the wrong width makes CE read neighbouring
+    /// fields — e.g. a 1-byte enum read as "4 Bytes" pulls in the next 3 bytes
+    /// (the cause of the SaveSlotList enums reporting 5376 instead of 0).
+    /// </summary>
+    private static string CeWidthForSize(int size) => size switch
+    {
+        1 => "Byte",
+        2 => "2 Bytes",
+        4 => "4 Bytes",
+        8 => "8 Bytes",
+        _ => "4 Bytes",   // unknown / unreported size → legacy default
+    };
+
     private static CeFieldInfo? MapCeField(LiveFieldValue field)
     {
         return field.TypeName switch
@@ -1865,8 +2186,9 @@ public static class CeXmlExportService
             // FName index
             "NameProperty" => new CeFieldInfo("4 Bytes"),
 
-            // Enum -- underlying value is typically int32 (4 bytes)
-            "EnumProperty" => new CeFieldInfo("4 Bytes"),
+            // Enum -- width follows the underlying integer size (uint8 default,
+            // but can be 1/2/4/8). Reading a 1-byte enum as 4 bytes corrupts it.
+            "EnumProperty" => new CeFieldInfo(CeWidthForSize(field.Size)),
 
             // StrProperty is handled by EmitStringLeaf (not MapCeField)
             // TextProperty: FText internal pointer chain — CE can't resolve, show as hex

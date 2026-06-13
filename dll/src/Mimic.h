@@ -58,6 +58,12 @@ enum TeleportOp : uint64_t {
     TP_OP_CURSOR       = 4,
     TP_OP_GET_MARKER   = 5,
     TP_OP_CLEAR_MARKER = 6,
+    TP_OP_RECALL_LAST  = 7,  // recall the system "last" pose (auto-saved before
+                             //   every recall/force/BugItGo/cursor jump). slot ignored.
+    TP_OP_GET_LAST     = 8,  // read the system "last" slot (pose block output)
+    TP_OP_BUGIT_SAVE   = 9,  // store current pose into the BugIt slot (pose block
+                             //   output, like SAVE); user-triggered, slot ignored.
+    TP_OP_BUGIT_GO     = 10, // teleport to the stored BugIt pose (no-op when empty)
 };
 
 // Mailbox status (DLL writes to status field)

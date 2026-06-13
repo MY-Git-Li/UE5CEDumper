@@ -38,10 +38,24 @@ public class TeleportLuaBundleGeneratorTests
     public void Emits_all_op_codes()
     {
         var s = TeleportLuaBundleGenerator.Generate();
-        Assert.Contains("tp(1,", s);   // SAVE
-        Assert.Contains("tp(2,", s);   // RECALL
-        Assert.Contains("tp(4,", s);   // CURSOR
-        Assert.Contains("tp(0,", s);   // GET_POSE (copyBugItGo)
+        Assert.Contains("tp(1,", s);    // SAVE
+        Assert.Contains("tp(2,", s);    // RECALL
+        Assert.Contains("tp(4,", s);    // CURSOR
+        Assert.Contains("tp(7,", s);    // RECALL_LAST
+        Assert.Contains("tp(9,", s);    // BUGIT_SAVE (bugIt)
+        Assert.Contains("tp(10,", s);   // BUGIT_GO   (bugItGo)
+    }
+
+    [Fact]
+    public void RecallLast_binds_ctrl_alt_zero()
+    {
+        // Numpad → Ctrl+Alt+Num0 (0x11, 0x12, 0x60).
+        var numpad = TeleportLuaBundleGenerator.Generate(TeleportHotkeyScheme.Numpad);
+        Assert.Contains("function recallLast()", numpad);
+        Assert.Contains("createHotkey(function() recallLast() end, 0x11, 0x12, 0x60)", numpad);
+        // Top-row → Ctrl+Alt+0 (0x11, 0x12, 0x30).
+        var topRow = TeleportLuaBundleGenerator.Generate(TeleportHotkeyScheme.TopRow);
+        Assert.Contains("createHotkey(function() recallLast() end, 0x11, 0x12, 0x30)", topRow);
     }
 
     [Fact]
@@ -61,11 +75,22 @@ public class TeleportLuaBundleGeneratorTests
     }
 
     [Fact]
-    public void CopyBugItGo_reads_pose_and_writes_clipboard()
+    public void BugIt_stores_dll_side_and_copies_clipboard()
     {
         var s = TeleportLuaBundleGenerator.Generate();
-        Assert.Contains("writeToClipboard", s);
+        Assert.Contains("function bugIt()", s);
+        Assert.Contains("tp(9, 0)", s);                  // BUGIT_SAVE stores DLL-side
+        Assert.Contains("writeToClipboard", s);          // and still copies the string
         Assert.Contains("BugItGo %.3f %.3f %.3f", s);
+    }
+
+    [Fact]
+    public void BugItGo_recalls_stored_pose_and_warns_when_empty()
+    {
+        var s = TeleportLuaBundleGenerator.Generate();
+        Assert.Contains("function bugItGo()", s);
+        Assert.Contains("tp(10, 0)", s);                 // BUGIT_GO
+        Assert.Contains("no BugIt stored yet", s);       // -6 no-op guidance
     }
 
     // ── Hotkey schemes (§9.3) ──────────────────────────────────────────
@@ -78,7 +103,8 @@ public class TeleportLuaBundleGeneratorTests
         Assert.Contains("createHotkey(function() save(1) end, 0x11, 0x61)", s);
         Assert.Contains("createHotkey(function() recall(1) end, 0x61)", s);
         Assert.Contains("createHotkey(function() cursor() end, 0x60)", s);
-        Assert.Contains("createHotkey(function() copyBugItGo() end, 0x11, 0x60)", s);
+        Assert.Contains("createHotkey(function() bugIt() end, 0x11, 0x60)", s);
+        Assert.Contains("createHotkey(function() bugItGo() end, 0x11, 0x10, 0x60)", s);
         // No top-row digit VKs in the pure numpad scheme.
         Assert.DoesNotContain("0x31)", s);
     }
@@ -91,7 +117,8 @@ public class TeleportLuaBundleGeneratorTests
         Assert.Contains("createHotkey(function() save(1) end, 0x11, 0x31)", s);
         Assert.Contains("createHotkey(function() recall(1) end, 0x12, 0x31)", s);
         Assert.Contains("createHotkey(function() cursor() end, 0x12, 0x30)", s);
-        Assert.Contains("createHotkey(function() copyBugItGo() end, 0x11, 0x30)", s);
+        Assert.Contains("createHotkey(function() bugIt() end, 0x11, 0x30)", s);
+        Assert.Contains("createHotkey(function() bugItGo() end, 0x11, 0x10, 0x30)", s);
         // No numpad VKs in the pure top-row scheme.
         Assert.DoesNotContain("0x61)", s);
     }
@@ -103,9 +130,9 @@ public class TeleportLuaBundleGeneratorTests
         // Save 1 gets both Ctrl+Num1 and Ctrl+1.
         Assert.Contains("createHotkey(function() save(1) end, 0x11, 0x61)", s);
         Assert.Contains("createHotkey(function() save(1) end, 0x11, 0x31)", s);
-        // 8 actions × 2 bindings = 16 createHotkey calls.
+        // 10 actions × 2 bindings = 20 createHotkey calls.
         int count = s.Split("createHotkey(").Length - 1;
-        Assert.Equal(16, count);
+        Assert.Equal(20, count);
     }
 
     [Fact]
@@ -113,7 +140,7 @@ public class TeleportLuaBundleGeneratorTests
     {
         var s = TeleportLuaBundleGenerator.Generate(TeleportHotkeyScheme.Numpad);
         int count = s.Split("createHotkey(").Length - 1;
-        Assert.Equal(8, count);   // 6 markers + cursor + copy
+        Assert.Equal(10, count);   // 6 markers + recall-last + cursor + bugIt + bugItGo
     }
 
     [Fact]

@@ -689,6 +689,21 @@ int32_t UE5_TeleportClearMarker(int32_t slot) {
     return Wirbel::ClearMarker(slot);
 }
 
+int32_t UE5_TeleportRecallLast() {
+    return Wirbel::RecallLast(nullptr);
+}
+
+int32_t UE5_TeleportGetLast(double* outPose6, char* outMapName, int32_t mapNameCap) {
+    Wirbel::Marker m{};
+    int32_t rc = Wirbel::GetLast(m);
+    if (rc == 0) {
+        Teleport_CopyPose(m.P, outPose6);
+        if (outMapName && mapNameCap > 0)
+            CopyToBuffer(m.MapName, outMapName, mapNameCap);
+    }
+    return rc;
+}
+
 // ============================================================================
 // ProcessEvent vtable detection (build 648+)
 //

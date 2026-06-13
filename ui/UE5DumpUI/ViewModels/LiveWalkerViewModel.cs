@@ -1738,23 +1738,19 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 }
             }
 
-            // Pre-resolve StructProperty inner fields via DLL (top-level only at this stage —
-            // the pointer drill-down step below cascades struct resolution into each
-            // drilled target so nested StructProperty fields also expand).
+            // Unified drilldown resolve (docs/ce-export-drilldown-spec.md Phase A):
+            // structs (flatten) + pointers + CONTAINER ELEMENT VALUES (Map/Set/struct-
+            // array values that are themselves structs/objects), recursively to
+            // CsxDrilldownDepth — so a Map<Name, Struct> / Set<Struct> / nested
+            // Map-of-Struct expands in the export, matching what the UI can drill.
             StatusText = CsxDrilldownDepth > 0
-                ? "Resolving struct + pointer fields..."
+                ? "Resolving struct + pointer + container fields..."
                 : "Resolving struct fields...";
-            var resolvedStructs = await CeXmlExportService.ResolveStructFieldsAsync(
-                _dump, fieldsForXml, arrayLimit: ArrayLimit);
-
-            // Pointer drill-down: walk ObjectProperty / Class / Weak / Soft / Lazy /
-            // Interface targets so the emitter can drop GroupHeader+Offsets=[0] children
-            // in for each pointer leaf. Pass resolvedStructs so the resolver also
-            // walks struct fields inside each drilled target — without that,
-            // drilled children with StructProperty render as empty placeholders.
-            var resolvedInstances = await CeXmlExportService.ResolvePointerInstancesAsync(
-                _dump, fieldsForXml, depth: CsxDrilldownDepth, arrayLimit: ArrayLimit,
-                resolvedStructs: resolvedStructs);
+            var resolvedStructs = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+            var resolvedInstances = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+            await CeXmlExportService.ResolveDrilldownAsync(
+                _dump, fieldsForXml, resolvedStructs, resolvedInstances,
+                depth: CsxDrilldownDepth, arrayLimit: ArrayLimit);
 
             var rootBc = breadcrumbsForXml[0];
 
@@ -1889,7 +1885,27 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             IReadOnlyList<BreadcrumbItem> breadcrumbsForXml;
             List<LiveFieldValue> fieldsForXml;
 
-            if (isContainerView)
+            // Struct-array elements: in the array container view each element row is a
+            // StructProperty navigation (StructDataAddr = element address, StructClassAddr =
+            // element UScriptStruct). The shallow read_array_elements preview only carries
+            // scalar/pointer sub-fields, so the FilterContainerToElement path below would drop
+            // nested struct/map fields. Instead keep the array breadcrumb (its Offsets=[0]
+            // derefs TArray::Data) and export the selected element rows AS struct fields, so
+            // ResolveStructFieldsAsync re-walks each element in full — nested structs/maps
+            // expand exactly like drilling into the element.
+            bool isStructElementSelection = isContainerView
+                && lastBc.ContainerField!.ArrayInnerType == "StructProperty"
+                && !string.IsNullOrEmpty(lastBc.ContainerField.ArrayStructClassAddr)
+                && selectedSnapshot.Count > 0
+                && selectedSnapshot.All(f => f.TypeName == "StructProperty"
+                                             && !string.IsNullOrEmpty(f.StructDataAddr));
+
+            if (isStructElementSelection)
+            {
+                breadcrumbsForXml = Breadcrumbs;
+                fieldsForXml = selectedSnapshot;
+            }
+            else if (isContainerView)
             {
                 breadcrumbsForXml = Breadcrumbs.Take(Breadcrumbs.Count - 1).ToList();
                 fieldsForXml = new List<LiveFieldValue>
@@ -1919,20 +1935,17 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 }
             }
 
-            // Pre-resolve StructProperty inner fields for the selected fields
+            // Unified drilldown resolve (docs/ce-export-drilldown-spec.md Phase A) —
+            // structs + pointers + container element values (Map/Set/struct-array
+            // struct/object values), recursively to CsxDrilldownDepth.
             StatusText = CsxDrilldownDepth > 0
-                ? "Resolving struct + pointer fields..."
+                ? "Resolving struct + pointer + container fields..."
                 : "Resolving struct fields...";
-            var resolvedStructs = await CeXmlExportService.ResolveStructFieldsAsync(
-                _dump, fieldsForXml, arrayLimit: ArrayLimit);
-
-            // Pointer drill-down for the selected fields (and their targets'
-            // nested pointers) up to CsxDrilldownDepth — same toolbar slider
-            // used by CSX. Cascades struct resolution into each drilled
-            // target's fields so nested StructProperty children expand too.
-            var resolvedInstances = await CeXmlExportService.ResolvePointerInstancesAsync(
-                _dump, fieldsForXml, depth: CsxDrilldownDepth, arrayLimit: ArrayLimit,
-                resolvedStructs: resolvedStructs);
+            var resolvedStructs = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+            var resolvedInstances = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+            await CeXmlExportService.ResolveDrilldownAsync(
+                _dump, fieldsForXml, resolvedStructs, resolvedInstances,
+                depth: CsxDrilldownDepth, arrayLimit: ArrayLimit);
 
             var rootBc = breadcrumbsForXml[0];
 

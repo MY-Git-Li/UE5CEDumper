@@ -14,6 +14,107 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-13 — CE XML/Field export drilldown: enum width, collapse, container values (build 1085)
+
+Cross-game CE export fixes + a recursive container drilldown, all in the CE XML
+emitter (`CeXmlExportService`); the DLL is unchanged. Spec: [ce-export-drilldown-spec.md](ce-export-drilldown-spec.md).
+
+**Bug fixes (Copy CE Field / Copy CE XML), reported on SEED `LifeSaveDataSlot`:**
+- **Enum width** — `EnumProperty` was hardcoded to `4 Bytes`, so a 1-byte enum
+  (e.g. `CurrentStoryMissionSeriesId`) was read as 4 bytes and pulled in the next
+  field's bytes (CE showed 5376 instead of 0). Now follows the property's real
+  byte size (`CeWidthForSize(Size)`), in both the scalar path and struct-array
+  sub-fields; the DLL already reports per-sub-field size.
+- **Collapse** — `<Options moHideChildren>` was emitted only on pointer/array
+  *deref* nodes, so array element folders like `[1]` stayed expanded. Now every
+  non-root group folder collapses when "Collapse Pointer Nodes" is on (root has an
+  absolute address, so it stays open).
+- **Struct-array elements** — non-scalar sub-fields are surfaced as collapsed
+  placeholders instead of being silently dropped; **Copy CE Field on a struct
+  array element re-walks it fully** (nested structs/maps expand like drilling in),
+  not just the shallow `read_array_elements` preview.
+
+**Container value drilldown (Phase A of the spec — the design contract
+"UI-drillable ⇒ export-drillable up to Drill Depth"):** `EmitMapProperty` /
+`EmitSetProperty` no longer bail to a placeholder when a key/value is non-scalar —
+container element **values that are structs/objects** now expand. New unified
+`ResolveDrilldownAsync` (replaces the separate struct+pointer resolves for CE XML)
+recursively resolves structs (flatten, free) + pointers (cost 1) + **container
+element values** (struct → `resolvedStructs`, object → `resolvedInstances`, cost 1),
+keyed by the same StructDataAddr/PtrAddress the emit phase looks up; the emitters
+delegate each value back through `EmitFields` so struct/object/nested-container
+values reuse `EmitResolvedStruct`/`EmitDrilledPointer`/`Emit*Property` uniformly.
+So `Map<Name, Struct>` (`MissionInfoList`), `Set<Struct>`, struct arrays, and
+nested `struct → Map<…, Struct>` (`MsTuneData → MsTunes`) all expand. **Also fixed
+a struct-flatten metadata gap** — `ResolveStructRecursiveAsync` wasn't copying
+`MapValueStructAddr` / `SetElemStructAddr` / `ArrayStructClassAddr` / `MapValueOffset`,
+which blocked expanding containers nested *inside* a struct.
+
+**Depth semantics** (user requirement): Drill Depth is measured from the **current
+view** downward — the GWorld→…→view breadcrumb path costs nothing (verified already
+true; locked with a test). Container expansion + pointer deref each cost 1 level;
+struct flatten is free (`MaxStructDepth` bound). Per user decision: shared single
+Drill Depth slider, **no global walk cap** (bounded by depth + `ArrayLimit`).
+
+Tests +6 (Map→Struct emit + resolver + depth-0 flat + updated non-scalar-key
+contract). **1428 C# + 452 dll + 31 utf8 green.** AOT publish clean (45.5 MB).
+CSX alignment (Phase B) + extra depth guards (Phase C) deferred. Owner live-verified.
+
+## 2026-06-13 — Teleport "Recall last" + BugIt/BugItGo hotkeys + DLL BugIt slot (build 1073)
+
+Teleport additions on top of the shipped Wirbel feature (PR #272).
+
+**"Recall last" — system-managed pre-teleport undo.** The DLL now captures the
+current pose into a dedicated system "last" slot (`Wirbel::s_lastMarker`) right
+**before every jump** — RECALL, RECALL_FORCE, the BugItGo explicit-pose path,
+*and* cursor teleport (user chose "all jumps incl. cursor"). If a teleport lands
+the pawn somewhere bad, `Wirbel::RecallLast` jumps back. It's a **one-way
+restore** (user chose this over a toggle): RecallLast deliberately does NOT
+re-save before jumping, so the slot stays pinned to the pre-teleport pose and
+repeated recalls always return to the same spot — and a failed recall never
+loses the original target. The slot is system-only: there is no SAVE path for
+it, the map check is skipped (the pose is always from moments ago on the current
+map), and the capture is best-effort (an unreadable pose leaves the prior last
+intact). New `SaveLastImpl()` (lock-free, callers already hold `s_opMutex`).
+
+Surfaced end-to-end: mailbox ops `TP_OP_RECALL_LAST=7` / `TP_OP_GET_LAST=8`
+(Mimic); pipe `teleport_recall_last` + the "last" slot piggy-backed onto
+`teleport_get_markers` as a **sentinel entry with `slot == -1`** (one round trip,
+no interface churn); C ABI exports `UE5_TeleportRecallLast` / `UE5_TeleportGetLast`
+(36 → 38). UI: a read-only "Last Position (auto-saved)" panel section with a
+Recall-last button (`CanRecallLast` gating) and live summary; CE Lua AA record
+(`Action.RecallLast`, op 7) added to the .CT batch (8 → 9 rows) + AOBMaker
+specs; Lua hotkey bundle gains `recallLast()` bound to **Ctrl+Alt+0 /
+Ctrl+Alt+Num0**.
+
+**BugIt / BugItGo hotkeys.** The in-app global-hotkey rows (key-capture +
+persisted, reusing `TeleportHotkeyStore`) extended from 6 to **9**: added
+`recall_last`, `bugit` (Copy as BugItGo) and `bugitgo` (Run BugItGo). The
+`OnMarkerHotkeyPressed` dispatcher routes these non-slot ids before the
+digit-suffix parse ("recall_last" also starts with "recall"). Hotkey section
+renamed "Marker Hotkeys" → "Teleport Hotkeys".
+
+**BugIt / BugItGo refinements (build 1073).** *(UI)* "Copy as BugItGo" now also
+pastes the `BugItGo X Y Z` string into the Run field so BugItGo fires
+immediately; Run BugItGo guards on an empty field with a clear message before
+parsing. *(Lua AA — DLL-backed)* New **BugIt slot** in Wirbel
+(`s_bugItMarker` + `BugItSave`/`BugItGo`): a single user-triggered pose the DLL
+holds between hotkey presses (UE BugIt/BugItGo semantics) — BugIt stores the
+current pose, BugItGo teleports to it (restores rotation, auto-saves "last"
+first, **no-op when nothing stored**). Surfaced via mailbox ops
+`TP_OP_BUGIT_SAVE=9` / `TP_OP_BUGIT_GO=10` only (CE Lua path — the UI keeps its
+textbox flow, so no pipe/export for this slot). Lua hotkey bundle's old
+`copyBugItGo()` is replaced by `bugIt()` (stores DLL-side **and** clipboards) +
+`bugItGo()` bound to **Ctrl+Shift+0 / Ctrl+Shift+Num0**; per-action AA records +
+.CT batch gain BugIt/BugItGo (9 → 11 rows).
+
+Tests: +9 net (`TeleportViewModel` recall-last + sentinel routing + 9-row
+hotkeys + BugIt field-fill + empty-field guard; `TeleportScriptGenerator` op-7/9/10
++ 11-row batch; `TeleportLuaBundleGenerator` op-7/9/10 + Ctrl+Alt+0 / Ctrl+Shift+0
+bindings + updated 10/20 counts). **1422 C# + 452 dll + 31 utf8 green.** AOT
+publish clean (45.5 MB, no trim warnings). Owner live-verify of the in-game undo
++ BugIt/BugItGo paths still pending.
+
 ## 2026-06-13 — UE5.7+ FUObjectItem object-ptr offset auto-detect + Stark hot-hook fast-path + enum width (build 1064)
 
 Vendor/engine-update review (Dumper-7 `92e2669..8883094`, RE-UE4SS `b872ad11..c08dbbc3`,

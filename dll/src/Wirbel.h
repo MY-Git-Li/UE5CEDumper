@@ -79,6 +79,29 @@ int32_t GetMarker(int32_t slot, Marker& out);
 // Clear a marker slot.
 int32_t ClearMarker(int32_t slot);
 
+// Recall to the system "last" position — the pose captured automatically right
+// before the most recent recall / force / BugItGo / cursor teleport, so a
+// teleport that lands the pawn somewhere bad can be undone. One-way restore:
+// this does NOT itself update the last slot (repeated calls always return to
+// the same pre-teleport spot). System-managed — never user-saved. Map check is
+// skipped (the last pose is always from moments ago on the current map).
+// TP_ERR_EMPTY_MARKER when nothing has been auto-saved yet.
+int32_t RecallLast(uint8_t* tierOut);
+
+// Read the system "last" slot for display. TP_ERR_EMPTY_MARKER when empty.
+int32_t GetLast(Marker& out);
+
+// BugIt: capture the current pose into the dedicated BugIt slot (and return it
+// so the caller can also copy a "BugItGo X Y Z" string). User-triggered single
+// slot, distinct from the markers and the system "last" slot — it persists DLL
+// side so a later BugItGo can teleport back without the caller holding the pose.
+int32_t BugItSave(Pose& out, char* mapName, int32_t mapNameCap, uint8_t* outSource);
+
+// BugItGo: teleport to the pose stored by the most recent BugItSave (restores
+// rotation, one-way like a marker recall). TP_ERR_EMPTY_MARKER (no-op) when no
+// BugIt has been stored yet.
+int32_t BugItGo(uint8_t* tierOut);
+
 // Current UWorld object name ("" when unavailable). Cheap — no chain walk.
 bool GetCurrentMapName(char* buf, int32_t cap);
 

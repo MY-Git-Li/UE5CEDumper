@@ -109,10 +109,23 @@ elementAddr = sparseIndex * stride
 
 ### CollapsePointerNodes Option
 
-When enabled, non-root GroupHeader nodes with `Offsets=[0]` emit:
+When enabled, **every non-root GroupHeader folder** emits the collapse Options —
+pointer/array deref nodes, struct groups, AND array/map/set element folders like
+`[1]` (the root keeps an absolute address, so it stays expanded):
 ```xml
 <Options moHideChildren="1" moDeactivateChildrenAsWell="1"/>
 ```
+
+### Container value drilldown (docs/ce-export-drilldown-spec.md)
+
+Container element **values that are structs/objects** expand recursively, up to
+the Drill Depth slider — `Map<Name, Struct>`, `Set<Struct>`, struct arrays, and
+nested `struct → Map<…, Struct>`. The unified `ResolveDrilldownAsync` walks
+structs (flatten, free) + pointers (cost 1 level) + container element values
+(cost 1 level), and the emitters delegate each value back through `EmitFields`
+so it reuses the struct/pointer/container emit paths. Depth is measured from the
+**current view** (the GWorld→…→view breadcrumb costs nothing). At depth 0 the
+export is flat (struct/object values fall back to a placeholder).
 
 ### Container View Export
 
@@ -120,6 +133,8 @@ When the current view is a container (Array/Map/Set element list):
 - Strip the container breadcrumb from the XML path
 - Use the parent's Address + the ContainerField for emission
 - Prevents false cycle detection (container breadcrumbs share parent address)
+- **Struct-array elements**: a selected element is re-walked in full (Copy CE
+  Field), so nested structs/maps inside it expand like drilling into it.
 
 ---
 
@@ -226,7 +241,7 @@ struct ClassName : public SuperName
 | BoolProperty (bit) | Binary | | | BitStart + BitLength=1 |
 | BoolProperty (byte) | Byte | | | Fallback |
 | NameProperty | 4 Bytes | | | FName index |
-| EnumProperty | 4 Bytes | | | + DropDownList |
+| EnumProperty | Byte / 2 / 4 / 8 Bytes | | | width = property byte size; + DropDownList |
 | StrProperty | String | | | Unicode=1, Offsets=[0] |
 | ObjectProperty | 8 Bytes | | ✓ | Pointer |
 | ClassProperty | 8 Bytes | | ✓ | Pointer |

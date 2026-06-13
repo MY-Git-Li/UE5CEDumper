@@ -1944,6 +1944,14 @@ public sealed class DumpService : IDumpService
         return res["code"]?.GetValue<int>() ?? -1;
     }
 
+    public async Task<TeleportResult> TeleportRecallLastAsync(CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "teleport_recall_last" };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return ParseTeleportResult(res);
+    }
+
     private static TeleportPose ParsePose(JsonObject res) => new()
     {
         Code  = res["code"]?.GetValue<int>() ?? -1,

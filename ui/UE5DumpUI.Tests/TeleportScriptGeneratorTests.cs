@@ -35,6 +35,26 @@ public class TeleportScriptGeneratorTests
     }
 
     [Fact]
+    public void RecallLast_record_uses_op_7()
+    {
+        var s = TeleportScriptGenerator.Generate(TeleportScriptGenerator.Action.RecallLast);
+        Assert.Contains("writeQword(mb + 0x10, 7)", s);   // op RECALL_LAST
+        Assert.Contains("writeInteger(mb + 0x00, 8)", s); // CMD_TELEPORT
+        Assert.Contains("Recall last", s);
+    }
+
+    [Fact]
+    public void BugIt_record_uses_op_9_and_BugItGo_uses_op_10()
+    {
+        var bugit = TeleportScriptGenerator.Generate(TeleportScriptGenerator.Action.BugIt);
+        Assert.Contains("writeQword(mb + 0x10, 9)", bugit);    // op BUGIT_SAVE
+        Assert.Contains("writeInteger(mb + 0x00, 8)", bugit);  // CMD_TELEPORT
+
+        var bugitgo = TeleportScriptGenerator.Generate(TeleportScriptGenerator.Action.BugItGo);
+        Assert.Contains("writeQword(mb + 0x10, 10)", bugitgo); // op BUGIT_GO
+    }
+
+    [Fact]
     public void Cursor_record_uses_op_4_and_bakes_params()
     {
         var s = TeleportScriptGenerator.Generate(
@@ -58,15 +78,18 @@ public class TeleportScriptGeneratorTests
     }
 
     [Fact]
-    public void BuildBatchRows_returns_eight_teleport_rows()
+    public void BuildBatchRows_returns_eleven_teleport_rows()
     {
         var rows = TeleportScriptGenerator.BuildBatchRows();
-        Assert.Equal(8, rows.Count);
+        Assert.Equal(11, rows.Count);
         Assert.All(rows, r => Assert.Equal("Teleport", r.Category));
-        // 3 saves, 3 recalls, cursor, clear-all — all CtScriptRow.
+        // 3 saves, 3 recalls, recall-last, BugIt, BugItGo, cursor, clear-all.
         Assert.All(rows, r => Assert.IsType<CtScriptRow>(r));
         Assert.Contains(rows, r => r.Description == "Save marker 1");
         Assert.Contains(rows, r => r.Description == "Recall marker 3");
+        Assert.Contains(rows, r => r.Description == "Recall last");
+        Assert.Contains(rows, r => r.Description == "BugIt (store pose)");
+        Assert.Contains(rows, r => r.Description == "BugItGo (go to stored)");
         Assert.Contains(rows, r => r.Description == "Teleport to cursor");
         Assert.Contains(rows, r => r.Description == "Clear all markers");
     }

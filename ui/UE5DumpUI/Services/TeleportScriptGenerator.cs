@@ -24,7 +24,7 @@ public static class TeleportScriptGenerator
     // Mailbox layout — see TeleportLuaBundleGenerator / dll/src/Mimic.h.
     private const int CmdTeleport = 8;
 
-    public enum Action { Save, Recall, Cursor, ClearAll }
+    public enum Action { Save, Recall, RecallLast, BugIt, BugItGo, Cursor, ClearAll }
 
     /// <summary>Build the [ENABLE]/[DISABLE] AA Script body for one action.</summary>
     public static string Generate(Action action, int slot = 0,
@@ -37,6 +37,9 @@ public static class TeleportScriptGenerator
         {
             Action.Save => 1,
             Action.Recall => 2,
+            Action.RecallLast => 7,   // TP_OP_RECALL_LAST (slot ignored)
+            Action.BugIt => 9,        // TP_OP_BUGIT_SAVE  (store current pose)
+            Action.BugItGo => 10,     // TP_OP_BUGIT_GO    (go to stored pose)
             Action.Cursor => 4,
             _ => 2,
         };
@@ -44,6 +47,9 @@ public static class TeleportScriptGenerator
         {
             Action.Save => $"Save marker {slot + 1}",
             Action.Recall => $"Recall marker {slot + 1}",
+            Action.RecallLast => "Recall last",
+            Action.BugIt => "BugIt (store pose)",
+            Action.BugItGo => "BugItGo (go to stored)",
             Action.Cursor => "Teleport to cursor",
             _ => "Teleport",
         };
@@ -156,8 +162,9 @@ public static class TeleportScriptGenerator
         return sb.ToString();
     }
 
-    /// <summary>Build the standard 8-row .CT batch (Save 1-3, Recall 1-3,
-    /// Cursor, Clear all) ready for <see cref="CheatTableBuilder.Build"/>.</summary>
+    /// <summary>Build the standard 11-row .CT batch (Save 1-3, Recall 1-3,
+    /// Recall last, BugIt, BugItGo, Cursor, Clear all) ready for
+    /// <see cref="CheatTableBuilder.Build"/>.</summary>
     public static List<CheatTableRow> BuildBatchRows(
         double zOffset = 100.0, int channel = 0, bool fallbackCenter = true)
     {
@@ -176,6 +183,24 @@ public static class TeleportScriptGenerator
                 Description = $"Recall marker {i + 1}",
                 Script = Generate(Action.Recall, i),
             });
+        rows.Add(new CtScriptRow
+        {
+            Category = "Teleport",
+            Description = "Recall last",
+            Script = Generate(Action.RecallLast),
+        });
+        rows.Add(new CtScriptRow
+        {
+            Category = "Teleport",
+            Description = "BugIt (store pose)",
+            Script = Generate(Action.BugIt),
+        });
+        rows.Add(new CtScriptRow
+        {
+            Category = "Teleport",
+            Description = "BugItGo (go to stored)",
+            Script = Generate(Action.BugItGo),
+        });
         rows.Add(new CtScriptRow
         {
             Category = "Teleport",
