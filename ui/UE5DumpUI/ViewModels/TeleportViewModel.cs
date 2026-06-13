@@ -31,6 +31,12 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     private readonly Dictionary<string, TeleportHotkeyBinding> _bindings = new(StringComparer.Ordinal);
     private Avalonia.Threading.DispatcherTimer? _autoTimer;
     private int _autoTick;
+    // Re-entrancy guard: the 500ms DispatcherTimer keeps firing even while a tick
+    // is still awaiting its pipe round-trip. If a long pipe op is hogging the DLL's
+    // single-threaded dispatch loop (e.g. a Copy CE XML drilldown emitting 100k+
+    // lines), back-to-back ticks would pile up get_pose requests that all drain in
+    // a burst. Skip a tick whenever the previous one hasn't finished.
+    private bool _autoTickBusy;
     private bool _disposed;
 
     public TeleportViewModel(IDumpService dump, ILoggingService log, IPlatformService platform,
@@ -227,13 +233,24 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     private async void AutoTick(object? sender, EventArgs e)
     {
         if (!IsConnected) return;
-        // Quiet poll: does NOT toggle IsBusy, so the buttons (bound to
-        // CanOperate) don't flicker disabled/enabled twice a second.
-        await RefreshPoseQuietAsync();
-        // Re-pull markers every ~2s so changes made via CE Lua / global hotkeys
-        // (which the UI didn't initiate) show up.
-        if (++_autoTick % 4 == 0)
-            await RefreshMarkersAsync();
+        // Drop this tick if the previous one is still in flight — prevents
+        // get_pose / get_markers requests from queueing up behind a slow pipe.
+        if (_autoTickBusy) return;
+        _autoTickBusy = true;
+        try
+        {
+            // Quiet poll: does NOT toggle IsBusy, so the buttons (bound to
+            // CanOperate) don't flicker disabled/enabled twice a second.
+            await RefreshPoseQuietAsync();
+            // Re-pull markers every ~2s so changes made via CE Lua / global hotkeys
+            // (which the UI didn't initiate) show up.
+            if (++_autoTick % 4 == 0)
+                await RefreshMarkersAsync();
+        }
+        finally
+        {
+            _autoTickBusy = false;
+        }
     }
 
     private async Task RefreshPoseQuietAsync()
