@@ -45,6 +45,13 @@ struct ArrayLayout {
 static uintptr_t  s_arrayAddr = 0;
 static ArrayLayout s_layout = { 0x00, 0x10, 0x14, 0x18, 0x1C }; // Default layout
 static int         s_itemSize = 16;  // FUObjectItem stride (auto-detected: 16 or 24)
+// Within-item byte offset of the UObject* field inside an FUObjectItem.
+//   +0x00 — classic FUObjectItem (UE4.x .. UE5.6): Object* is the first field.
+//   +0x08 — UE5.7+ reordered item: int64 FlagsAndRefCount moved to item+0x00,
+//           pushing UObject* to +0x08 (verified vs EpicGames/UnrealEngine 5.7.0-release
+//           source). Auto-detected in DetectItemSize; mirrors Dumper-7's
+//           FUObjectItemInitialOffset. Applied by GetByIndex / ProbeStride / GetSerialNumber.
+static int         s_itemObjOffset = 0;
 static bool        s_isFlat   = false; // true = non-chunked flat array (some UE4 builds)
 
 // GAP #1: Decryption hook for encrypted GObjects pointers.
@@ -498,7 +505,7 @@ static void ProbeStride(uintptr_t chunkBase, int stride, int maxItems,
         int64_t byteOff = static_cast<int64_t>(idx) * stride;
 
         uintptr_t obj = 0;
-        if (!Macht::ReadSafe(chunkBase + byteOff, obj)) {
+        if (!Macht::ReadSafe(chunkBase + byteOff + s_itemObjOffset, obj)) {
             ++outBad;
             if (outBad > 30 && outGood == 0) break;  // Too many read failures, give up
             continue;
@@ -626,45 +633,18 @@ static void ProbeAllStrides(uintptr_t base, int maxItems, const char* phase,
     }
 }
 
-// Auto-detect FUObjectItem size by probing consecutive items in chunks.
-// UE5 (most): 16 bytes, UE4 / some UE5 with clustering: 24 bytes.
-//
-// Strategy: For each candidate stride, walk chunk at stride-aligned offsets
-// counting valid items. Use FNamePool-based name resolution (strong) if available,
-// falling back to ClassPrivate chain (weak) if not. Try all strides and pick best.
-// Uses tiebreaker: when named counts are equal, prefer stride with fewer bad items.
-static void DetectItemSize() {
-    uintptr_t chunkTable = 0;
-    if (!Macht::ReadSafe(s_arrayAddr + s_layout.objectsOffset, chunkTable) || !chunkTable) {
-        LOG_WARN("ObjectArray: Cannot read chunk table for item size detection");
-        return;
-    }
-    chunkTable = DecryptObjectPtr(chunkTable);
-
-    // Diagnostic: dump first 64 bytes at chunkTable address
-    {
-        uint64_t dump[8] = {};
-        Macht::ReadBytesSafe(chunkTable, dump, sizeof(dump));
-        LOG_DEBUG("ObjectArray: chunkTable@0x%llX: +00:%016llX +08:%016llX +10:%016llX +18:%016llX +20:%016llX +28:%016llX +30:%016llX +38:%016llX",
-                  (unsigned long long)chunkTable,
-                  dump[0], dump[1], dump[2], dump[3], dump[4], dump[5], dump[6], dump[7]);
-    }
-
-    uintptr_t chunk0 = 0;
-    if (!Macht::ReadSafe(chunkTable, chunk0) || !chunk0) {
-        LOG_WARN("ObjectArray: Cannot read chunk[0] for item size detection");
-        return;
-    }
-
-    int candidates[] = { 16, 24, 20 };
-    constexpr int NUM_CANDIDATES = 3;
-    int bestStride = 0;
-    int bestCount = 0;
-    int bestNamed = 0;
-    int bestBad = INT_MAX;
-    bool bestHasNames = false;
-
+// Run the flat-precheck + chunked/flat stride probes for the CURRENTLY selected
+// within-item object-pointer offset (s_itemObjOffset). Fills best* by reference and
+// may set s_isFlat. Factored out of DetectItemSize so the detection can run once per
+// object-ptr-offset candidate (classic +0x00, then UE5.7+ +0x08). ProbeStride reads
+// the object pointer at item+s_itemObjOffset, so this whole pass is offset-aware.
+static void DetectStrideForCurrentObjOffset(uintptr_t chunkTable, uintptr_t chunk0,
+                                            int candidates[], int numCandidates,
+                                            int& bestStride, int& bestCount, int& bestNamed,
+                                            int& bestBad, bool& bestHasNames) {
+    bestStride = 0; bestCount = 0; bestNamed = 0; bestBad = INT_MAX; bestHasNames = false;
     constexpr int MAX_ITEMS_PHASE1 = 200;
+    bool detected = false;
 
     // --- Pre-check: detect flat (non-chunked) FFixedUObjectArray (UE4.11-4.20) ---
     // In a chunked array, each entry in the chunk table is an 8-byte pointer.
@@ -714,54 +694,57 @@ static void DetectItemSize() {
             // Try flat layout first: probe chunkTable itself as item base (no deref)
             s_isFlat = true;
             ProbeAllStrides(chunkTable, MAX_ITEMS_PHASE1, "P0-flat",
-                            candidates, NUM_CANDIDATES,
+                            candidates, numCandidates,
                             bestStride, bestCount, bestNamed, bestBad, bestHasNames);
 
             if (bestHasNames && bestNamed >= 2) {
                 LOG_INFO("ObjectArray: Flat (non-chunked) array confirmed (P0-flat: %d named, %d bad)",
                          bestNamed, bestBad);
-                goto accept_size;
+                detected = true;
+            } else {
+                // Flat didn't work convincingly — reset and try chunked
+                LOG_INFO("ObjectArray: Flat probe inconclusive (named=%d), falling back to chunked detection",
+                         bestNamed);
+                s_isFlat = false;
+                bestStride = 0; bestCount = 0; bestNamed = 0; bestBad = INT_MAX; bestHasNames = false;
             }
-            // Flat didn't work convincingly — reset and try chunked
-            LOG_INFO("ObjectArray: Flat probe inconclusive (named=%d), falling back to chunked detection",
-                     bestNamed);
-            s_isFlat = false;
-            bestStride = 0; bestCount = 0; bestNamed = 0; bestBad = INT_MAX; bestHasNames = false;
         }
     }
 
     // Phase 1: scan first 200 items of chunk[0] (standard chunked layout)
     // Use 200 items (not 100) to give sparse UE4 arrays enough items for correct stride detection.
-    ProbeAllStrides(chunk0, MAX_ITEMS_PHASE1, "P1",
-                    candidates, NUM_CANDIDATES,
-                    bestStride, bestCount, bestNamed, bestBad, bestHasNames);
+    if (!detected) {
+        ProbeAllStrides(chunk0, MAX_ITEMS_PHASE1, "P1",
+                        candidates, numCandidates,
+                        bestStride, bestCount, bestNamed, bestBad, bestHasNames);
+    }
 
     // Phase 2: if Phase 1 yielded nothing, try deeper in chunk (items 1000+).
     // Some UE4 games have thousands of null slots at the start.
-    if (bestCount == 0) {
+    if (!detected && bestCount == 0) {
         LOG_INFO("ObjectArray: Phase 1 found no items, trying deep scan from item 1000...");
         ProbeAllStrides(chunk0 + static_cast<int64_t>(1000) * 24, 100, "P2-deep",
-                        candidates, NUM_CANDIDATES,
+                        candidates, numCandidates,
                         bestStride, bestCount, bestNamed, bestBad, bestHasNames);
     }
 
     // Phase 3: if still nothing, maybe the array is NOT chunked (some UE4 builds).
     // In non-chunked layout, chunkTable IS the item array directly (no extra deref).
     // Try probing chunkTable itself as the item base.
-    if (bestCount == 0) {
+    if (!detected && bestCount == 0) {
         LOG_INFO("ObjectArray: Phase 2 found nothing. Trying flat (non-chunked) array at chunkTable=0x%llX...",
                  (unsigned long long)chunkTable);
 
         s_isFlat = true;  // Temporarily set for probing
 
         ProbeAllStrides(chunkTable, MAX_ITEMS_PHASE1, "P3-flat",
-                        candidates, NUM_CANDIDATES,
+                        candidates, numCandidates,
                         bestStride, bestCount, bestNamed, bestBad, bestHasNames);
 
         if (bestCount == 0) {
             // Try deep scan on flat array too
             ProbeAllStrides(chunkTable + static_cast<int64_t>(1000) * 24, 100, "P3-flat-deep",
-                            candidates, NUM_CANDIDATES,
+                            candidates, numCandidates,
                             bestStride, bestCount, bestNamed, bestBad, bestHasNames);
         }
 
@@ -771,27 +754,163 @@ static void DetectItemSize() {
             LOG_INFO("ObjectArray: Flat (non-chunked) array layout detected");
         }
     }
+}
 
-accept_size:
-    // Determine minimum threshold for acceptance
-    int threshold = bestHasNames ? 2 : 3;
-    int bestTotal = bestHasNames ? bestNamed : bestCount;
+// Diagnostic ONLY (no behavior change; runs only when normal detection fails):
+// decide whether the FUObjectItems look like the UE5.7+ PACKED encoding
+// (UE_ENABLE_FUOBJECT_ITEM_PACKING). In packed mode the UObject* is not stored
+// directly — it is split across two fields and must be reconstructed:
+//     +0x00  int64  FlagsAndRefCount   (high 32 bits = flags + top pointer bits)
+//     +0x08  uint32 ObjectPtrLow       ((ptr >> 3) low 32 bits)
+//     ptr = ((FlagsAndRefCount >> 32) & PtrMask) << (32 + 3) | (ObjectPtrLow << 3)
+// using the current-engine constants UObjectAlignment=8 (=> 3 trailing zero bits)
+// and EInternalObjectFlags_MinFlagBitIndex=14 (=> PtrMask = low 14 bits = 0x3FFF).
+// If the reconstruction yields valid UObjects we log a clear, actionable hint so
+// this layout is identifiable from the log in the field. Packed support itself is
+// NOT implemented (would need this reconstruction on the hot GetByIndex path plus
+// calibration of the two constants against a real packed game), so this only names
+// the failure — it does not make the dump work.
+static void DiagnosePackedLayout(uintptr_t chunkTable, uintptr_t chunk0) {
+    constexpr uint64_t kPtrMask        = 0x3FFFull;  // ~(0xFFFFFFFF << 14): low 14 bits
+    constexpr int      kTrailingZeroes = 3;          // UObjectAlignment == 8
+    constexpr int      kProbeItems     = 16;
 
-    if (bestTotal >= threshold) {
-        s_itemSize = bestStride;
-        if (bestHasNames) {
-            LOG_INFO("ObjectArray: FUObjectItem size detected as %d bytes (%d items with valid names, %d total valid, %d bad)",
-                     bestStride, bestNamed, bestCount, bestBad);
-        } else {
-            LOG_INFO("ObjectArray: FUObjectItem size detected as %d bytes (%d items validated, no FName check)",
-                     bestStride, bestCount);
+    struct Base { const char* what; uintptr_t addr; };
+    const Base bases[]   = { { "chunked", chunk0 }, { "flat", chunkTable } };
+    const int  strides[] = { 24, 16 };  // packed item is 24B; 16B as a fallback guess
+
+    for (const auto& base : bases) {
+        if (!base.addr) continue;
+        for (int stride : strides) {
+            int valid = 0, probed = 0;
+            for (int idx = 0; idx < kProbeItems; ++idx) {
+                uintptr_t itemAddr = base.addr + static_cast<uintptr_t>(idx) * stride;
+                uint64_t flags  = 0;
+                uint32_t ptrLow = 0;
+                if (!Macht::ReadSafe(itemAddr, flags))          break;
+                if (!Macht::ReadSafe(itemAddr + 0x08, ptrLow))  break;
+                ++probed;
+                if (ptrLow == 0) continue;  // likely a null/empty slot
+                uintptr_t obj = (static_cast<uintptr_t>((flags >> 32) & kPtrMask) << (32 + kTrailingZeroes))
+                              | (static_cast<uintptr_t>(ptrLow) << kTrailingZeroes);
+                if (LooksLikeUObject(obj)) ++valid;
+            }
+            if (valid >= 2) {
+                LOG_WARN("ObjectArray: items look like UE5.7+ PACKED FUObjectItem "
+                         "(UE_ENABLE_FUOBJECT_ITEM_PACKING), %s base / stride %d: %d/%d reconstruct "
+                         "to valid UObjects via ptr=((flags>>32)&0x3FFF)<<35|(ptrLow<<3). This packed "
+                         "encoding is NOT yet supported -> the object walk will be empty. (assumed "
+                         "constants: UObjectAlignment=8, EInternalObjectFlags_MinFlagBitIndex=14 — "
+                         "verify against the game if these changed)",
+                         base.what, stride, valid, probed);
+                return;
+            }
         }
-    } else if (bestStride > 0 && bestTotal > 0) {
-        s_itemSize = bestStride;
-        LOG_WARN("ObjectArray: FUObjectItem size tentatively set to %d bytes (only %d items validated)",
-                 bestStride, bestTotal);
+    }
+    LOG_INFO("ObjectArray: packed-layout diagnostic negative — items do not match the UE5.7+ packed "
+             "FUObjectItem encoding either; layout is genuinely unrecognised (encrypted ptr? wrong "
+             "GObjects? new variant?).");
+}
+
+// Auto-detect FUObjectItem size AND the within-item object-pointer offset by probing
+// consecutive items in chunks.
+//   stride:  UE5 (most) 16 bytes, UE4 / some UE5 with clustering 24 bytes.
+//   objOff:  +0x00 classic (UE4.x..UE5.6), +0x08 UE5.7+ (FlagsAndRefCount moved to front).
+//
+// Strategy: For each candidate stride, walk chunk at stride-aligned offsets counting
+// valid items. Use FNamePool-based name resolution (strong) if available, falling back
+// to ClassPrivate chain (weak) if not. Pick the best stride; tiebreaker prefers fewer bad.
+//
+// Two object-ptr-offset passes run in order: classic +0x00 FIRST so every previously
+// working game keeps its exact prior detection path and result, then UE5.7+ +0x08 ONLY
+// when the classic pass is unconvincing (on a reordered item, reading +0x00 yields the
+// int64 FlagsAndRefCount, which never resolves a name → the classic pass stays weak).
+static void DetectItemSize() {
+    uintptr_t chunkTable = 0;
+    if (!Macht::ReadSafe(s_arrayAddr + s_layout.objectsOffset, chunkTable) || !chunkTable) {
+        LOG_WARN("ObjectArray: Cannot read chunk table for item size detection");
+        return;
+    }
+    chunkTable = DecryptObjectPtr(chunkTable);
+
+    // Diagnostic: dump first 64 bytes at chunkTable address
+    {
+        uint64_t dump[8] = {};
+        Macht::ReadBytesSafe(chunkTable, dump, sizeof(dump));
+        LOG_DEBUG("ObjectArray: chunkTable@0x%llX: +00:%016llX +08:%016llX +10:%016llX +18:%016llX +20:%016llX +28:%016llX +30:%016llX +38:%016llX",
+                  (unsigned long long)chunkTable,
+                  dump[0], dump[1], dump[2], dump[3], dump[4], dump[5], dump[6], dump[7]);
+    }
+
+    uintptr_t chunk0 = 0;
+    if (!Macht::ReadSafe(chunkTable, chunk0) || !chunk0) {
+        LOG_WARN("ObjectArray: Cannot read chunk[0] for item size detection");
+        return;
+    }
+
+    int candidates[] = { 16, 24, 20 };
+    constexpr int NUM_CANDIDATES = 3;
+
+    // Object-ptr-offset candidates, classic first (see header comment).
+    const int objOffPasses[] = { 0x00, 0x08 };
+
+    // Strongest result seen across passes, for the tentative fallback below.
+    int gStride = 0, gCount = 0, gNamed = 0, gBad = INT_MAX, gObjOff = 0;
+    bool gHasNames = false, gFlat = false;
+
+    for (int pass = 0; pass < 2; ++pass) {
+        s_itemObjOffset = objOffPasses[pass];
+        s_isFlat = false;
+
+        int bestStride, bestCount, bestNamed, bestBad;
+        bool bestHasNames;
+        DetectStrideForCurrentObjOffset(chunkTable, chunk0, candidates, NUM_CANDIDATES,
+                                        bestStride, bestCount, bestNamed, bestBad, bestHasNames);
+
+        int threshold = bestHasNames ? 2 : 3;
+        int bestTotal = bestHasNames ? bestNamed : bestCount;
+
+        // Track the strongest pass (strictly-better, so ties keep the earlier/classic pass).
+        if (bestNamed > gNamed || (bestNamed == gNamed && bestCount > gCount)) {
+            gStride = bestStride; gCount = bestCount; gNamed = bestNamed; gBad = bestBad;
+            gHasNames = bestHasNames; gObjOff = s_itemObjOffset; gFlat = s_isFlat;
+        }
+
+        if (bestTotal >= threshold) {
+            s_itemSize = bestStride;   // s_itemObjOffset / s_isFlat already reflect this pass
+            if (s_itemObjOffset != 0) {
+                LOG_INFO("ObjectArray: FUObjectItem size=%d, object-ptr offset=+0x%02X (UE5.7+ reordered item) — %d named, %d total, %d bad%s",
+                         bestStride, s_itemObjOffset, bestNamed, bestCount, bestBad, s_isFlat ? " (flat)" : "");
+            } else if (bestHasNames) {
+                LOG_INFO("ObjectArray: FUObjectItem size detected as %d bytes (%d items with valid names, %d total valid, %d bad)",
+                         bestStride, bestNamed, bestCount, bestBad);
+            } else {
+                LOG_INFO("ObjectArray: FUObjectItem size detected as %d bytes (%d items validated, no FName check)",
+                         bestStride, bestCount);
+            }
+            return;
+        }
+
+        if (pass == 0) {
+            LOG_INFO("ObjectArray: classic (+0x00) item detection weak (named=%d, count=%d) — retrying with UE5.7+ object-ptr offset +0x08",
+                     bestNamed, bestCount);
+        }
+    }
+
+    // Neither pass crossed the confidence threshold — fall back to the strongest seen.
+    s_itemObjOffset = gObjOff;
+    s_isFlat = gFlat;
+    if (gStride > 0 && (gHasNames ? gNamed : gCount) > 0) {
+        s_itemSize = gStride;
+        LOG_WARN("ObjectArray: FUObjectItem size tentatively set to %d bytes, object-ptr offset +0x%02X (only %d items validated)",
+                 gStride, gObjOff, gHasNames ? gNamed : gCount);
     } else {
+        s_itemObjOffset = 0;
         LOG_WARN("ObjectArray: Could not auto-detect item size, keeping default %d", s_itemSize);
+        // Both the classic and UE5.7+ unpacked passes failed. Before giving up, name
+        // the most likely modern cause so the log is actionable: the UE5.7+ PACKED
+        // FUObjectItem encoding (not yet supported). Pure diagnostic — no behavior change.
+        DiagnosePackedLayout(chunkTable, chunk0);
     }
 }
 
@@ -850,7 +969,7 @@ uintptr_t GetByIndex(int32_t index) {
     }
 
     uintptr_t object = 0;
-    Macht::ReadSafe(itemAddr, object);
+    Macht::ReadSafe(itemAddr + s_itemObjOffset, object);  // +0x00 classic, +0x08 UE5.7+
     return object;
 }
 
@@ -898,10 +1017,13 @@ int32_t GetSerialNumber(int32_t index) {
         itemAddr = chunk + static_cast<uintptr_t>(withinChunk) * s_itemSize;
     }
 
-    // SerialNumber offset depends on item stride:
-    //   16B: Object(8) + Flags(4) + Serial(4)                        → +0x0C
-    //   24B: Object(8) + Flags(4) + ClusterRootIndex(4) + Serial(4)  → +0x10
-    int serialOff = (s_itemSize >= 24) ? 0x10 : 0x0C;
+    // SerialNumber offset depends on the FUObjectItem layout:
+    //   classic (objOff==0): Object(8) + Flags(4) [+ ClusterRootIndex(4)] + Serial(4)
+    //                        → +0x0C (16B stride) / +0x10 (24B stride)
+    //   UE5.7+  (objOff!=0): FlagsAndRefCount(8) + Object(8) + SerialNumber(4) + ClusterRootIndex(4)
+    //                        → SerialNumber sits right after Object, i.e. objOff + 0x08
+    int serialOff = (s_itemObjOffset != 0) ? (s_itemObjOffset + 0x08)
+                                           : ((s_itemSize >= 24) ? 0x10 : 0x0C);
     int32_t serial = 0;
     Macht::ReadSafe(itemAddr + serialOff, serial);
     return serial;

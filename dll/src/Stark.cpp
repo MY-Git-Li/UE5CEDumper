@@ -59,6 +59,10 @@ static FnProcessEvent s_originalPE = nullptr;
 // Pending invoke queue
 static std::mutex s_queueMutex;
 static std::queue<std::shared_ptr<InvokeRequest>> s_invokeQueue;
+// Relaxed mirror of s_invokeQueue.size(), maintained under s_queueMutex. Lets the
+// hot ProcessEvent hook skip taking the mutex on the overwhelmingly common path
+// where no invoke is pending (ProcessEvent fires thousands of times per second).
+static std::atomic<size_t> s_queueDepth{0};
 
 // Hook state
 static std::atomic<bool> s_hookActive{false};
@@ -110,8 +114,12 @@ static void __fastcall HookedProcessEvent(void* thisObj, void* ufunc, void* para
     // is enough; we never read this back inside the hot path.
     s_hookFireCount.fetch_add(1, std::memory_order_relaxed);
 
-    // Drain pending invocations from pipe thread
-    {
+    // Drain pending invocations from pipe thread. Fast path: skip the mutex
+    // entirely unless the pipe thread has actually enqueued something. A stale
+    // zero read just defers a freshly enqueued request to the next PE call
+    // (microseconds away), which is harmless — the real happens-before for the
+    // request data is the mutex taken below.
+    if (s_queueDepth.load(std::memory_order_acquire) != 0) {
         std::vector<std::shared_ptr<InvokeRequest>> pending;
 
         {
@@ -120,6 +128,7 @@ static void __fastcall HookedProcessEvent(void* thisObj, void* ufunc, void* para
                 pending.push_back(std::move(s_invokeQueue.front()));
                 s_invokeQueue.pop();
             }
+            s_queueDepth.store(0, std::memory_order_release);
         }
 
         // Execute all pending requests outside the lock
@@ -255,6 +264,7 @@ void Shutdown() {
                 // promise already satisfied — ignore
             }
         }
+        s_queueDepth.store(0, std::memory_order_release);
     }
 
     // Audit fix #14: do NOT call MH_Uninitialize. It patches every hooked
@@ -299,6 +309,7 @@ int32_t EnqueueInvoke(uintptr_t instance, uintptr_t ufunc, uintptr_t params, siz
         // remains valid below for the out-param copy-back even after the game
         // thread drains and pops the queue entry.
         s_invokeQueue.push(req);
+        s_queueDepth.fetch_add(1, std::memory_order_release);  // wake the hook's fast-path gate
     }
 
     LOG_INFO("GameThreadDispatch: enqueued invoke inst=0x%llX func=0x%llX, waiting...",

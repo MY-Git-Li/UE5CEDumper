@@ -868,11 +868,13 @@ static uintptr_t ResolveProcessEventAddr() {
     }
     if (s_processEventOffset < 0) return 0;
 
-    // Find any valid UObject to read its vtable
+    // Find any valid UObject to read its vtable. Use GetByIndex (not GetItem->Object)
+    // so the UE5.7+ within-item object-ptr offset is applied — on a reordered item the
+    // raw FUObjectItem::Object field at +0x00 is the int64 FlagsAndRefCount, not a ptr.
     uintptr_t testObj = 0;
     for (int idx = 1; idx < 100; idx++) {
-        auto* item = Aura::GetItem(idx);
-        if (item && item->Object) { testObj = item->Object; break; }
+        uintptr_t obj = Aura::GetByIndex(idx);
+        if (obj) { testObj = obj; break; }
     }
     if (!testObj) return 0;
 
