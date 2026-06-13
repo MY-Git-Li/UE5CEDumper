@@ -127,6 +127,21 @@ so it reuses the struct/pointer/container emit paths. Depth is measured from the
 **current view** (the GWorld→…→view breadcrumb costs nothing). At depth 0 the
 export is flat (struct/object values fall back to a placeholder).
 
+### Map key/value rendering
+
+- **Value is label-only** (`Value`, not `Value: ms_stdag`) — the stored int is
+  dynamic, so the resolved name is never baked into the description. Key leaves
+  are likewise `Key`-only (the element folder `[N] {key}` shows the key for
+  orientation).
+- **Name/Enum values get a CE `DropDownList`** (rawInt → resolved name, parsed
+  from the element's `ValueHex`) on the map group; each value leaf links to it
+  via `DropDownListLink`, so CE shows the LIVE name for the current int.
+- **Enum key/value widths** follow the real byte size (a 1-byte enum key is
+  `Byte`, not `4 Bytes`).
+- The DLL's map value offset uses the value property's real alignment
+  (`Scharf::RequiredAlignment`), NOT a size guess — required for FName /
+  FWeakObjectPtr (8 bytes but 4-aligned). A wrong guess corrupts every element.
+
 ### Container View Export
 
 When the current view is a container (Array/Map/Set element list):

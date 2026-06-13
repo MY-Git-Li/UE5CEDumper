@@ -3773,7 +3773,15 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                         // Read inline element values if count is manageable
                         if (fv.mapCount > 0
                             && sa.Data && fv.mapKeySize > 0 && fv.mapValueSize > 0) {
-                            int32_t valOffset = Macht::ComputeMapValueOffset(fv.mapKeySize, fv.mapValueSize);
+                            // Value alignment from the real per-type rule (NOT a size
+                            // guess) — FName/FWeakObjectPtr are 8 bytes but 4-aligned, so a
+                            // Map<Enum, Name> puts the value at +4. Wrong align => wrong
+                            // offset AND stride => every element reads garbage. 0 (struct/
+                            // variable) falls back to the size guess inside ComputeMapValueOffset.
+                            int32_t valAlign = Scharf::RequiredAlignment(
+                                valueTypeName, fv.mapValueSize, DynOff::bCasePreservingName);
+                            int32_t valOffset = Macht::ComputeMapValueOffset(
+                                fv.mapKeySize, fv.mapValueSize, valAlign);
                             int32_t pairSize = valOffset + fv.mapValueSize;
                             int32_t stride = Macht::ComputeSetElementStride(pairSize);
                             fv.mapValueOffset = valOffset;
@@ -3896,7 +3904,15 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
 
                         // Read inline element values
                         if (fv.mapCount > 0 && sa.Data && fv.mapKeySize > 0 && fv.mapValueSize > 0) {
-                            int32_t valOffset = Macht::ComputeMapValueOffset(fv.mapKeySize, fv.mapValueSize);
+                            // Value alignment from the real per-type rule (NOT a size
+                            // guess) — FName/FWeakObjectPtr are 8 bytes but 4-aligned, so a
+                            // Map<Enum, Name> puts the value at +4. Wrong align => wrong
+                            // offset AND stride => every element reads garbage. 0 (struct/
+                            // variable) falls back to the size guess inside ComputeMapValueOffset.
+                            int32_t valAlign = Scharf::RequiredAlignment(
+                                valueTypeName, fv.mapValueSize, DynOff::bCasePreservingName);
+                            int32_t valOffset = Macht::ComputeMapValueOffset(
+                                fv.mapKeySize, fv.mapValueSize, valAlign);
                             int32_t pairSize = valOffset + fv.mapValueSize;
                             int32_t stride = Macht::ComputeSetElementStride(pairSize);
                             fv.mapValueOffset = valOffset;
