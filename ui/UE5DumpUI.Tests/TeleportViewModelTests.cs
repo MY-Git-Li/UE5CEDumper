@@ -1,5 +1,6 @@
 using UE5DumpUI.Core;
 using UE5DumpUI.Models;
+using UE5DumpUI.Services;
 using UE5DumpUI.ViewModels;
 using Xunit;
 
@@ -27,6 +28,17 @@ public class TeleportViewModelTests
         public int GetMarkersCalls { get; private set; }
         public int RecallLastCalls { get; private set; }
         public (double X, double Y, double Z, double? P)? LastExplicit { get; private set; }
+
+        public int NextDebugCameraState { get; set; } = -1;
+        public int SetDebugCameraCalls { get; private set; }
+        public int GetDebugCameraCalls { get; private set; }
+        public bool? LastSetDebugCameraEnable { get; private set; }
+
+        public override Task<int> SetDebugCameraAsync(bool enable, CancellationToken ct = default)
+        { SetDebugCameraCalls++; LastSetDebugCameraEnable = enable; return Task.FromResult(NextDebugCameraState); }
+
+        public override Task<int> GetDebugCameraStateAsync(CancellationToken ct = default)
+        { GetDebugCameraCalls++; return Task.FromResult(NextDebugCameraState); }
 
         public override Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default)
         { GetPoseCalls++; return Task.FromResult(NextPose); }
@@ -105,6 +117,14 @@ public class TeleportViewModelTests
             public string Label { get; }
             public void Dispose() { }
         }
+    }
+
+    /// <summary>Every RegisterSpecific fails (combo held by another app) — models
+    /// the "saved hotkey is taken at startup" case.</summary>
+    private sealed class FailingHotkeyService : IGlobalHotkeyService
+    {
+        public IGlobalHotkeyRegistration? RegisterCursorHotkey(Action onPressed) => null;
+        public IGlobalHotkeyRegistration? RegisterSpecific(uint modifiers, uint vk, string label, Action onPressed) => null;
     }
 
     private static TeleportViewModel CreateVm(FakeDumpService fake, out FakePlatform platform,
@@ -279,17 +299,117 @@ public class TeleportViewModelTests
     }
 
     [Fact]
-    public void Hotkey_rows_are_save_recall_recalllast_and_bugitgo()
+    public void Hotkey_rows_are_save_recall_recalllast_bugitgo_and_debugcam()
     {
         var vm = CreateVm(new FakeDumpService(), out _, new FakeHotkeyService());
-        // 3 save + 3 recall + recall_last + bugit + bugitgo.
-        Assert.Equal(9, vm.HotkeyRows.Count);
+        // 3 save + 3 recall + recall_last + bugit + bugitgo + debugcam_on + debugcam_off.
+        Assert.Equal(11, vm.HotkeyRows.Count);
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "save0" && r.DisplayName == "Save marker 1");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall2" && r.DisplayName == "Recall marker 3");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall_last" && r.DisplayName == "Recall last");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "bugit");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "bugitgo");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "debugcam_on" && r.DisplayName == "Debug cam ON");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "debugcam_off" && r.DisplayName == "Debug cam OFF");
         Assert.All(vm.HotkeyRows, r => Assert.False(r.HasBinding));
+    }
+
+    // ── Debug Camera force on/off ──────────────────────────────────────
+
+    [Fact]
+    public async Task ForceDebugCameraOn_calls_dll_and_sets_badge()
+    {
+        var fake = new FakeDumpService { NextDebugCameraState = 1 };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+
+        await vm.ForceDebugCameraOnCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.SetDebugCameraCalls);
+        Assert.True(fake.LastSetDebugCameraEnable);
+        Assert.Equal("ON", vm.DebugCameraState);
+    }
+
+    [Fact]
+    public async Task ForceDebugCameraOff_sends_disable_and_sets_badge()
+    {
+        var fake = new FakeDumpService { NextDebugCameraState = 0 };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+
+        await vm.ForceDebugCameraOffCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.SetDebugCameraCalls);
+        Assert.False(fake.LastSetDebugCameraEnable);
+        Assert.Equal("OFF", vm.DebugCameraState);
+    }
+
+    [Fact]
+    public async Task ForceDebugCamera_does_nothing_when_disconnected()
+    {
+        var fake = new FakeDumpService { NextDebugCameraState = 1 };
+        var vm = CreateVm(fake, out _);   // not connected
+
+        await vm.ForceDebugCameraOnCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, fake.SetDebugCameraCalls);
+        Assert.Equal("Unknown", vm.DebugCameraState);
+    }
+
+    [Fact]
+    public async Task Disconnect_resets_debug_camera_badge()
+    {
+        var fake = new FakeDumpService { NextDebugCameraState = 1 };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+        await vm.ForceDebugCameraOnCommand.ExecuteAsync(null);
+        Assert.Equal("ON", vm.DebugCameraState);
+
+        vm.SetConnected(false);
+
+        Assert.Equal("Unknown", vm.DebugCameraState);
+    }
+
+    // ── Startup hotkey-conflict surfacing ──────────────────────────────
+
+    [Fact]
+    public void Saved_hotkey_taken_at_startup_is_flagged_not_silently_dropped()
+    {
+        var platform = new FakePlatform();
+        // Pre-seed a saved binding so the ctor's LoadAndRegisterHotkeys tries it.
+        new TeleportHotkeyStore(platform).Save(new Dictionary<string, TeleportHotkeyBinding>
+        {
+            ["save0"] = new TeleportHotkeyBinding(HotkeyModifiers.Control, 0x74 /*F5*/),
+        });
+
+        var vm = new TeleportViewModel(new FakeDumpService(), new NoopLogger(), platform,
+            aobMaker: null, globalHotkeys: new FailingHotkeyService());
+
+        var row = vm.HotkeyRows.First(r => r.ActionId == "save0");
+        Assert.True(row.Conflicted);              // flagged, not dropped
+        Assert.True(row.HasBinding);              // label still shown
+        Assert.Contains("⚠", row.DisplayLabel);
+        Assert.True(vm.HasHotkeyWarning);         // top banner is set
+    }
+
+    [Fact]
+    public void Clearing_a_conflicted_hotkey_clears_the_warning()
+    {
+        var platform = new FakePlatform();
+        new TeleportHotkeyStore(platform).Save(new Dictionary<string, TeleportHotkeyBinding>
+        {
+            ["save0"] = new TeleportHotkeyBinding(HotkeyModifiers.Control, 0x74),
+        });
+        var vm = new TeleportViewModel(new FakeDumpService(), new NoopLogger(), platform,
+            aobMaker: null, globalHotkeys: new FailingHotkeyService());
+        var row = vm.HotkeyRows.First(r => r.ActionId == "save0");
+        Assert.True(vm.HasHotkeyWarning);
+
+        vm.ClearHotkeyCommand.Execute(row);
+
+        Assert.False(row.Conflicted);
+        Assert.False(row.HasBinding);
+        Assert.False(vm.HasHotkeyWarning);
     }
 
     [Fact]

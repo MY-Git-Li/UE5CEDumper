@@ -58,9 +58,11 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             HotkeyRows.Add(new TeleportHotkeyRow { ActionId = $"save{i}", DisplayName = $"Save marker {i + 1}" });
         for (int i = 0; i < 3; i++)
             HotkeyRows.Add(new TeleportHotkeyRow { ActionId = $"recall{i}", DisplayName = $"Recall marker {i + 1}" });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "recall_last", DisplayName = "Recall last" });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "bugit",       DisplayName = "Copy BugItGo" });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "bugitgo",     DisplayName = "Run BugItGo" });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "recall_last",  DisplayName = "Recall last" });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "bugit",        DisplayName = "Copy BugItGo" });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "bugitgo",      DisplayName = "Run BugItGo" });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "debugcam_on",  DisplayName = "Debug cam ON" });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "debugcam_off", DisplayName = "Debug cam OFF" });
 
         if (_globalHotkeys != null)
         {
@@ -130,6 +132,25 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     // ── BugItGo interop ────────────────────────────────────────────────
     [ObservableProperty] private string _bugItGoInput = "";
 
+    // ── Debug Camera (Genau/Wirbel via set_debug_camera) ───────────────
+    /// <summary>Tri-state badge text: "ON" / "OFF" / "Unknown". The deterministic
+    /// enable/disable + the "return the camera back" handling all live DLL-side;
+    /// this VM is a thin client over set_debug_camera / get_debug_camera_state,
+    /// the same path the Console panel uses.</summary>
+    [ObservableProperty] private string _debugCameraState = "Unknown";
+    [ObservableProperty] private string _debugCameraBadgeColor = "#888888";
+
+    // ── Startup hotkey-conflict warning ────────────────────────────────
+    /// <summary>Non-empty when one or more saved hotkeys could not be re-bound at
+    /// startup because another app holds the combo. Shown as a top banner; the
+    /// conflicting rows are flagged individually. Kept separate from StatusText so
+    /// a connect/disconnect message can't overwrite it.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasHotkeyWarning))]
+    private string _hotkeyWarning = "";
+
+    public bool HasHotkeyWarning => !string.IsNullOrEmpty(HotkeyWarning);
+
     // ── System "last" position (auto-saved before every jump) ──────────
     /// <summary>True once the DLL has auto-saved a pre-teleport pose (enables
     /// the Recall-last button). System-managed — the user never saves this.</summary>
@@ -162,6 +183,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         {
             StatusText = "Not connected";
             AutoRefresh = false;
+            ApplyDebugCameraState(-1);   // badge back to Unknown
         }
     }
 
@@ -508,22 +530,131 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         finally { IsBusy = false; }
     }
 
+    // ── Debug Camera (deterministic force on/off, shared with Console) ──
+
+    /// <summary>Map the DLL tri-state (1=on, 0=off, -1=unknown) onto the badge.</summary>
+    private void ApplyDebugCameraState(int state)
+        => (DebugCameraState, DebugCameraBadgeColor) = state switch
+        {
+            1  => ("ON",      "#4EC9B0"),   // green — active
+            0  => ("OFF",     "#999999"),   // grey — inactive
+            _  => ("Unknown", "#888888"),
+        };
+
+    [RelayCommand]
+    private Task ForceDebugCameraOnAsync()  => ForceDebugCameraAsync(wantOn: true);
+
+    [RelayCommand]
+    private Task ForceDebugCameraOffAsync() => ForceDebugCameraAsync(wantOn: false);
+
+    /// <summary>↻ — re-read and display the live Debug Camera state.</summary>
+    [RelayCommand]
+    private async Task RefreshDebugCameraAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var state = await _dump.GetDebugCameraStateAsync();
+            ApplyDebugCameraState(state);
+            StatusText = state switch
+            {
+                1 => "Debug Camera is ON.",
+                0 => "Debug Camera is OFF.",
+                _ => "Debug Camera state unknown — enter gameplay so a PlayerController " +
+                     "spawns, then ↻.",
+            };
+        }
+        catch (Exception ex)
+        {
+            ApplyDebugCameraState(-1);
+            SetError(ex);
+            _log.Error("Teleport RefreshDebugCamera failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Deterministic enable/disable — delegates to the DLL
+    /// (set_debug_camera), which reads state, toggles only when needed, and on a
+    /// disable the game's stripped ToggleDebugCamera can't honour, switches the
+    /// local player's controller back to the original PlayerController. Idempotent.</summary>
+    private async Task ForceDebugCameraAsync(bool wantOn)
+    {
+        if (!IsConnected) return;
+        var want = wantOn ? "ON" : "OFF";
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var state = await _dump.SetDebugCameraAsync(wantOn);
+            ApplyDebugCameraState(state);
+            StatusText = state switch
+            {
+                1 when wantOn  => "✓ Debug Camera forced ON.",
+                0 when !wantOn => "✓ Debug Camera forced OFF.",
+                -1 => $"Force {want}: no live CheatManager / unreadable state " +
+                      "(enter gameplay first).",
+                _  => $"⚠ Force {want}: state is now {(state == 1 ? "ON" : "OFF")} " +
+                      "— the game may re-drive the camera.",
+            };
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            StatusText = $"Force {want} failed: {ex.Message}";
+            _log.Error($"Teleport ForceDebugCamera({want}) failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
     // ── Marker global hotkeys (user-set via key capture) ────────────────
 
     private void LoadAndRegisterHotkeys()
     {
         if (_hotkeyStore == null || _globalHotkeys == null) return;
         var saved = _hotkeyStore.Load();
+        var failed = new List<string>();
         foreach (var row in HotkeyRows)
         {
             if (!saved.TryGetValue(row.ActionId, out var b)) continue;
+            // Always show the saved combo so the user knows what was bound, even
+            // when registration fails — otherwise a hotkey silently goes dead and
+            // the row looks unbound.
+            row.Label = b.Label;
             if (RegisterMarkerHotkey(row.ActionId, b))
             {
                 _bindings[row.ActionId] = b;
-                row.Label = b.Label;
+                row.Conflicted = false;
+            }
+            else
+            {
+                // Combo taken by another app this session. Keep it persisted (it
+                // may be free next launch) and flag the row instead of dropping it.
+                row.Conflicted = true;
+                failed.Add($"{row.DisplayName} ({b.Label})");
             }
         }
+        UpdateHotkeyWarning(failed);
     }
+
+    /// <summary>Build (or clear) the top conflict banner from the list of rows
+    /// whose saved combo could not be registered.</summary>
+    private void UpdateHotkeyWarning(List<string> failed)
+    {
+        HotkeyWarning = failed.Count == 0
+            ? ""
+            : $"⚠ {failed.Count} hotkey(s) couldn't be bound — held by another app: " +
+              $"{string.Join(", ", failed)}. Free the combo and reconnect, or re-bind below.";
+    }
+
+    /// <summary>Recompute the banner from the current per-row Conflicted flags
+    /// (called after a successful re-bind or a clear).</summary>
+    private void RecomputeHotkeyWarning()
+        => UpdateHotkeyWarning(HotkeyRows
+            .Where(r => r.Conflicted && r.HasBinding)
+            .Select(r => $"{r.DisplayName} ({r.Label})")
+            .ToList());
 
     private bool RegisterMarkerHotkey(string actionId, TeleportHotkeyBinding b)
     {
@@ -557,9 +688,11 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             // "recall_last" also starts with "recall" but has no slot).
             switch (actionId)
             {
-                case "recall_last": _ = RecallLastCommand.ExecuteAsync(null); return;
-                case "bugit":       _ = CopyAsBugItGoCommand.ExecuteAsync(null); return;
-                case "bugitgo":     _ = RunBugItGoCommand.ExecuteAsync(null); return;
+                case "recall_last":  _ = RecallLastCommand.ExecuteAsync(null); return;
+                case "bugit":        _ = CopyAsBugItGoCommand.ExecuteAsync(null); return;
+                case "bugitgo":      _ = RunBugItGoCommand.ExecuteAsync(null); return;
+                case "debugcam_on":  _ = ForceDebugCameraOnCommand.ExecuteAsync(null); return;
+                case "debugcam_off": _ = ForceDebugCameraOffCommand.ExecuteAsync(null); return;
             }
             int slot = actionId[^1] - '0';
             if (actionId.StartsWith("save", StringComparison.Ordinal))
@@ -623,6 +756,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         }
         _bindings[row.ActionId] = binding;
         row.Label = label;
+        row.Conflicted = false;
+        RecomputeHotkeyWarning();
         _hotkeyStore?.Save(_bindings);
         StatusText = $"'{row.DisplayName}' bound to {label}. Keep the game focused and press it.";
         _log.Info($"Teleport: {row.ActionId} hotkey bound to {label}");
@@ -641,8 +776,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         _bindings.Remove(row.ActionId);
         _hotkeyStore?.Save(_bindings);
         row.Label = "";
+        row.Conflicted = false;
         row.IsCapturing = false;
         if (CapturingRow == row) CapturingRow = null;
+        RecomputeHotkeyWarning();
         StatusText = $"'{row.DisplayName}' hotkey cleared.";
     }
 
@@ -831,8 +968,17 @@ public partial class TeleportHotkeyRow : ObservableObject
     [NotifyPropertyChangedFor(nameof(CaptureButtonText))]
     private bool _isCapturing;
 
+    /// <summary>True when the saved combo could not be registered at startup —
+    /// another app holds it. The label is still shown (so the user knows which
+    /// combo to free or rebind), flagged with a warning.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayLabel))]
+    private bool _conflicted;
+
     public bool HasBinding => !string.IsNullOrEmpty(Label);
-    public string DisplayLabel => IsCapturing ? "Press keys…" : (HasBinding ? Label : "—");
+    public string DisplayLabel => IsCapturing ? "Press keys…"
+        : HasBinding ? (Conflicted ? $"{Label} ⚠" : Label)
+        : "—";
 
     /// <summary>"Set" normally, "Cancel" while capturing (the Set button toggles).</summary>
     public string CaptureButtonText => IsCapturing ? "Cancel" : "Set";
