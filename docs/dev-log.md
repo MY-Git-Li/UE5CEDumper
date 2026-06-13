@@ -14,6 +14,52 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-13 — CE XML/Field export drilldown: enum width, collapse, container values (build 1085)
+
+Cross-game CE export fixes + a recursive container drilldown, all in the CE XML
+emitter (`CeXmlExportService`); the DLL is unchanged. Spec: [ce-export-drilldown-spec.md](ce-export-drilldown-spec.md).
+
+**Bug fixes (Copy CE Field / Copy CE XML), reported on SEED `LifeSaveDataSlot`:**
+- **Enum width** — `EnumProperty` was hardcoded to `4 Bytes`, so a 1-byte enum
+  (e.g. `CurrentStoryMissionSeriesId`) was read as 4 bytes and pulled in the next
+  field's bytes (CE showed 5376 instead of 0). Now follows the property's real
+  byte size (`CeWidthForSize(Size)`), in both the scalar path and struct-array
+  sub-fields; the DLL already reports per-sub-field size.
+- **Collapse** — `<Options moHideChildren>` was emitted only on pointer/array
+  *deref* nodes, so array element folders like `[1]` stayed expanded. Now every
+  non-root group folder collapses when "Collapse Pointer Nodes" is on (root has an
+  absolute address, so it stays open).
+- **Struct-array elements** — non-scalar sub-fields are surfaced as collapsed
+  placeholders instead of being silently dropped; **Copy CE Field on a struct
+  array element re-walks it fully** (nested structs/maps expand like drilling in),
+  not just the shallow `read_array_elements` preview.
+
+**Container value drilldown (Phase A of the spec — the design contract
+"UI-drillable ⇒ export-drillable up to Drill Depth"):** `EmitMapProperty` /
+`EmitSetProperty` no longer bail to a placeholder when a key/value is non-scalar —
+container element **values that are structs/objects** now expand. New unified
+`ResolveDrilldownAsync` (replaces the separate struct+pointer resolves for CE XML)
+recursively resolves structs (flatten, free) + pointers (cost 1) + **container
+element values** (struct → `resolvedStructs`, object → `resolvedInstances`, cost 1),
+keyed by the same StructDataAddr/PtrAddress the emit phase looks up; the emitters
+delegate each value back through `EmitFields` so struct/object/nested-container
+values reuse `EmitResolvedStruct`/`EmitDrilledPointer`/`Emit*Property` uniformly.
+So `Map<Name, Struct>` (`MissionInfoList`), `Set<Struct>`, struct arrays, and
+nested `struct → Map<…, Struct>` (`MsTuneData → MsTunes`) all expand. **Also fixed
+a struct-flatten metadata gap** — `ResolveStructRecursiveAsync` wasn't copying
+`MapValueStructAddr` / `SetElemStructAddr` / `ArrayStructClassAddr` / `MapValueOffset`,
+which blocked expanding containers nested *inside* a struct.
+
+**Depth semantics** (user requirement): Drill Depth is measured from the **current
+view** downward — the GWorld→…→view breadcrumb path costs nothing (verified already
+true; locked with a test). Container expansion + pointer deref each cost 1 level;
+struct flatten is free (`MaxStructDepth` bound). Per user decision: shared single
+Drill Depth slider, **no global walk cap** (bounded by depth + `ArrayLimit`).
+
+Tests +6 (Map→Struct emit + resolver + depth-0 flat + updated non-scalar-key
+contract). **1428 C# + 452 dll + 31 utf8 green.** AOT publish clean (45.5 MB).
+CSX alignment (Phase B) + extra depth guards (Phase C) deferred. Owner live-verified.
+
 ## 2026-06-13 — Teleport "Recall last" + BugIt/BugItGo hotkeys + DLL BugIt slot (build 1073)
 
 Teleport additions on top of the shipped Wirbel feature (PR #272).

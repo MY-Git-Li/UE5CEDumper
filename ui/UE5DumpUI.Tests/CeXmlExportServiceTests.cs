@@ -1869,15 +1869,18 @@ public class CeXmlExportServiceTests
     }
 
     [Fact]
-    public void GenerateInstanceXml_NonScalarMapKey_EmitsPlaceholder()
+    public void GenerateInstanceXml_NonScalarMapKey_StillExpandsScalarValue()
     {
+        // Map<Struct, Int>: a non-scalar KEY no longer collapses the whole map to a
+        // placeholder (docs/ce-export-drilldown-spec.md). The map derefs its Data and
+        // the scalar VALUE expands; the struct key just isn't emitted as a Key leaf.
         var fields = new[]
         {
             new LiveFieldValue
             {
                 Name = "StructMap", TypeName = "MapProperty", Offset = 0x80, Size = 0x50,
                 MapCount = 3, MapKeyType = "StructProperty", MapValueType = "IntProperty",
-                MapKeySize = 16, MapValueSize = 4,
+                MapKeySize = 16, MapValueSize = 4, MapValueOffset = 16, MapDataAddr = "0x5000",
                 MapElements = new List<ContainerElementValue>
                 {
                     new() { Index = 0, Key = "(struct)", Value = "10" },
@@ -1888,10 +1891,129 @@ public class CeXmlExportServiceTests
         var xml = CeXmlExportService.GenerateInstanceXml(
             "\"Game.exe\"+1000", "MyObj", "UMyClass", fields);
 
-        // StructProperty key is non-scalar → placeholder
-        Assert.Contains("<GroupHeader>1</GroupHeader>", xml);
-        // No Offsets=[0] (not a pointer deref since it's a placeholder)
-        Assert.DoesNotContain("<Offset>0</Offset>", xml);
+        // Map group derefs TSparseArray::Data (Offsets=[0]) and expands the element.
+        Assert.Contains("<Offset>0</Offset>", xml);
+        Assert.Contains("[0] (struct)", xml);
+        // Scalar Int value is shown; the struct key is not emitted as a "Key:" leaf.
+        Assert.Contains("Value: 10", xml);
+        Assert.DoesNotContain("Key:", xml);
+    }
+
+    [Fact]
+    public void MapValueStruct_ExpandsWithResolvedFields()
+    {
+        // Map<Name, Struct> (the MissionInfoList shape): when the value struct is
+        // resolved, each element's value expands to the struct's fields — the core
+        // of the drilldown contract (was a placeholder before).
+        var map = new LiveFieldValue
+        {
+            Name = "MissionInfoList", TypeName = "MapProperty", Offset = 0x2F8, Size = 0x50,
+            MapCount = 1, MapKeyType = "NameProperty", MapValueType = "StructProperty",
+            MapKeySize = 8, MapValueSize = 0x10, MapValueOffset = 8, MapDataAddr = "0x4000",
+            MapValueStructAddr = "0xABC", MapValueStructType = "LifeMissionInfo",
+            MapElements = new List<ContainerElementValue>
+            {
+                new() { Index = 0, Key = "mc1om_001", Value = "" },
+            }
+        };
+
+        // Value addr for element 0 = MapDataAddr + 0*stride + valOffset = 0x4000 + 8 = 0x4008.
+        var resolvedStructs = new Dictionary<string, List<LiveFieldValue>>
+        {
+            ["0x4008"] = new()
+            {
+                new() { Name = "Cleared", TypeName = "IntProperty", Offset = 0x0, Size = 4 },
+                new() { Name = "Rank", TypeName = "IntProperty", Offset = 0x4, Size = 4 },
+            }
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "Obj", "Cls",
+            new List<LiveFieldValue> { map }, resolvedStructs);
+
+        Assert.Contains("MissionInfoList {Map: 1, NameProperty", xml);
+        Assert.Contains("[0] mc1om_001", xml);
+        // The value struct's own fields are emitted (the whole point).
+        Assert.Contains("\"Rank\"", xml);
+        Assert.Contains("\"Cleared\"", xml);
+    }
+
+    [Fact]
+    public void MapValueStruct_NotResolved_FallsBackGracefully()
+    {
+        // Same map but no resolved value struct (depth 0 / walk failed): must not
+        // throw and must still emit the map group + element (value as a bare folder),
+        // never the old whole-map placeholder.
+        var map = new LiveFieldValue
+        {
+            Name = "MissionInfoList", TypeName = "MapProperty", Offset = 0x2F8, Size = 0x50,
+            MapCount = 1, MapKeyType = "NameProperty", MapValueType = "StructProperty",
+            MapKeySize = 8, MapValueSize = 0x10, MapValueOffset = 8, MapDataAddr = "0x4000",
+            MapValueStructAddr = "0xABC", MapValueStructType = "LifeMissionInfo",
+            MapElements = new List<ContainerElementValue> { new() { Index = 0, Key = "mc1om_001" } },
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "Obj", "Cls", new List<LiveFieldValue> { map });
+
+        Assert.Contains("[0] mc1om_001", xml);
+        Assert.Contains("<Offset>0</Offset>", xml);   // map still derefs Data
+    }
+
+    [Fact]
+    public async Task ResolveDrilldown_MapValueStruct_WalksValueStructs()
+    {
+        // The resolver must walk each Map<Name, Struct> value struct (at its computed
+        // address) and populate resolvedStructs so the emitter can expand it.
+        var stub = new StubDumpService();
+        stub.RegisterStruct("0x4008", new InstanceWalkResult
+        {
+            Fields = new List<LiveFieldValue>
+            {
+                new() { Name = "Rank", TypeName = "IntProperty", Offset = 0x4, Size = 4 },
+            }
+        });
+
+        var map = new LiveFieldValue
+        {
+            Name = "MissionInfoList", TypeName = "MapProperty", Offset = 0x2F8,
+            MapCount = 1, MapKeyType = "NameProperty", MapValueType = "StructProperty",
+            MapKeySize = 8, MapValueSize = 0x10, MapValueOffset = 8, MapDataAddr = "0x4000",
+            MapValueStructAddr = "0xABC", MapValueStructType = "LifeMissionInfo",
+            MapElements = new List<ContainerElementValue> { new() { Index = 0, Key = "mc1om_001" } },
+        };
+
+        var resolvedStructs = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+        var resolvedInstances = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+        await CeXmlExportService.ResolveDrilldownAsync(
+            stub, new List<LiveFieldValue> { map }, resolvedStructs, resolvedInstances, depth: 2);
+
+        // Value struct at 0x4000 + 0*stride + valOffset(8) = 0x4008 was walked.
+        Assert.True(resolvedStructs.ContainsKey("0x4008"));
+        Assert.Contains(resolvedStructs["0x4008"], f => f.Name == "Rank");
+    }
+
+    [Fact]
+    public async Task ResolveDrilldown_Depth0_DoesNotWalkContainerValues()
+    {
+        // At depth 0 the export is flat — container values are not resolved.
+        var stub = new StubDumpService();
+        stub.RegisterStruct("0x4008", new InstanceWalkResult
+        {
+            Fields = new List<LiveFieldValue> { new() { Name = "Rank", TypeName = "IntProperty", Offset = 0, Size = 4 } }
+        });
+        var map = new LiveFieldValue
+        {
+            Name = "M", TypeName = "MapProperty", Offset = 0x10,
+            MapCount = 1, MapKeyType = "NameProperty", MapValueType = "StructProperty",
+            MapKeySize = 8, MapValueSize = 0x10, MapValueOffset = 8, MapDataAddr = "0x4000",
+            MapValueStructAddr = "0xABC", MapValueStructType = "T",
+            MapElements = new List<ContainerElementValue> { new() { Index = 0, Key = "k" } },
+        };
+        var rs = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+        var ri = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+        await CeXmlExportService.ResolveDrilldownAsync(stub, new List<LiveFieldValue> { map }, rs, ri, depth: 0);
+        Assert.False(rs.ContainsKey("0x4008"));
     }
 
     [Fact]
@@ -2069,6 +2191,89 @@ public class CeXmlExportServiceTests
         Assert.Contains("<VariableType>Float</VariableType>", xml);
         Assert.Contains("<Address>+360</Address>", xml);
         Assert.Contains("<Address>+364</Address>", xml);
+    }
+
+    [Fact]
+    public void StructArray_EnumSubField_UsesRealByteWidth_NonScalarSurfaced_ElementCollapses()
+    {
+        // Mirrors the SEED SaveSlotList[1] bug report: a struct array element
+        // under a pointer chain with (a) a 1-byte EnumProperty sub-field that was
+        // wrongly emitted as "4 Bytes" (CE then read the next field's bytes →
+        // 5376 instead of 0), (b) a non-scalar StructProperty sub-field that was
+        // silently dropped, and (c) an element folder [1] that did not collapse.
+        var breadcrumbs = new[]
+        {
+            MakeBc("0x1000", "GWorld"),
+            MakeBc("0x2000", "m_savedata", "m_savedata", isPointer: true, offset: 0x2A8),
+        };
+        var fields = new List<LiveFieldValue>
+        {
+            new()
+            {
+                Name = "SaveSlotList", TypeName = "ArrayProperty", Offset = 0x7D0, Size = 16,
+                ArrayCount = 1, ArrayInnerType = "StructProperty", ArrayStructType = "LifeSaveDataSlot",
+                ArrayElemSize = 0x6F8,
+                ArrayElements = new List<ArrayElementValue>
+                {
+                    new()
+                    {
+                        Index = 1, Value = "",
+                        StructFields = new List<StructSubFieldValue>
+                        {
+                            new() { Name = "m_last_access_date", TypeName = "StructProperty", Offset = 0x0, Size = 8 },
+                            new() { Name = "CurrentStoryMissionSeriesId", TypeName = "EnumProperty", Offset = 0x10, Size = 1 },
+                            new() { Name = "ScenarioFlag", TypeName = "IntProperty", Offset = 0x2F0, Size = 4 },
+                        }
+                    },
+                }
+            },
+        };
+
+        var xml = CeXmlExportService.GenerateHierarchicalXml(
+            "\"game.exe\"+1000", "GWorld", breadcrumbs, fields,
+            collapsePointerNodes: true);
+
+        // (a) 1-byte enum → "Byte", never "4 Bytes" within its entry
+        var seriesIdx = xml.IndexOf("\"CurrentStoryMissionSeriesId\"", StringComparison.Ordinal);
+        Assert.True(seriesIdx >= 0);
+        var seriesEntry = xml.Substring(seriesIdx,
+            xml.IndexOf("</CheatEntry>", seriesIdx, StringComparison.Ordinal) - seriesIdx);
+        Assert.Contains("<VariableType>Byte</VariableType>", seriesEntry);
+        Assert.DoesNotContain("4 Bytes", seriesEntry);
+
+        // Int sub-field stays 4 Bytes
+        Assert.Contains("\"ScenarioFlag\"", xml);
+
+        // (b) non-scalar struct sub-field surfaced as a placeholder, not dropped
+        Assert.Contains("\"m_last_access_date\"", xml);
+
+        // (c) the [1] element folder collapses (has Options)
+        var elemIdx = xml.IndexOf("\"[1]\"", StringComparison.Ordinal);
+        Assert.True(elemIdx >= 0);
+        var elemHeader = xml.Substring(elemIdx,
+            xml.IndexOf("<CheatEntries>", elemIdx, StringComparison.Ordinal) - elemIdx);
+        Assert.Contains("moHideChildren", elemHeader);
+    }
+
+    [Fact]
+    public void ScalarEnumProperty_WidthFollowsByteSize()
+    {
+        // 1-byte enum → "Byte"; 4-byte enum → "4 Bytes" (legacy width preserved).
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "Force", TypeName = "EnumProperty", Offset = 0x11, Size = 1 },
+            new() { Name = "WideEnum", TypeName = "EnumProperty", Offset = 0x14, Size = 4 },
+        };
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"game.exe\"+1000", "Obj", "Cls", fields);
+
+        var forceIdx = xml.IndexOf("\"Force\"", StringComparison.Ordinal);
+        Assert.Contains("<VariableType>Byte</VariableType>",
+            xml.Substring(forceIdx, xml.IndexOf("</CheatEntry>", forceIdx, StringComparison.Ordinal) - forceIdx));
+
+        var wideIdx = xml.IndexOf("\"WideEnum\"", StringComparison.Ordinal);
+        Assert.Contains("<VariableType>4 Bytes</VariableType>",
+            xml.Substring(wideIdx, xml.IndexOf("</CheatEntry>", wideIdx, StringComparison.Ordinal) - wideIdx));
     }
 
     [Fact]
