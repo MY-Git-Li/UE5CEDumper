@@ -765,6 +765,65 @@ int32_t GetPovImpl(Pov& out) {
 
 // ---- teleport write (§5.5) ----
 
+// DIAGNOSTIC (build 1113, gated): a permanent low-noise "separate visible actor"
+// detector. On normal games the possessed pawn IS the camera's view target, so this
+// stays SILENT. It logs ONLY when APlayerCameraManager.ViewTarget.Target is a
+// DIFFERENT actor than the possessed pawn (a genuine separate-actor game — none seen
+// yet; TQ2 / SEED / Octopath all resolve view-target == pawn) or when ViewTarget
+// can't be resolved at all. ViewTarget is read raw via the StructInner /
+// FStructProperty walk (the camera-manager invoke getters return nothing on some
+// titles). Fires at most once per teleport (a deliberate user action).
+//
+// Build 1114 found the corollary: when the pawn IS the view target yet the on-screen
+// body doesn't move (TQ2), the cause is NOT a separate actor but a stale cached world
+// transform after a raw write — fixed in the CMC-freeze path below by always running
+// the component setter (K2_SetWorldLocation) + deep-force. So the once-off Root/Mesh
+// dump that proved this is removed; this detector remains only for the genuinely
+// different-view-target case it was built to catch.
+void DiagVisibleActor(const Chain& c) {
+    int32_t camOff = Ubel::FindFieldOffset(Ubel::GetClass(c.pc), "PlayerCameraManager",
+                                           "PlayerCameraManager", nullptr, "ObjectProperty");
+    uintptr_t cam = ReadPtrAt(c.pc, camOff);
+    if (!cam) return;   // no camera manager to compare against — stay silent
+
+    // ViewTarget.Target (raw): ViewTarget (FTViewTarget StructProperty, exact match
+    // excludes PendingViewTarget) -> Target (ObjectProperty -> AActor*).
+    uintptr_t camClass = Ubel::GetClass(cam);
+    FieldInfo fiVT{};
+    uintptr_t vtActor = 0;
+    if (Ubel::FindField(camClass, "ViewTarget", nullptr, nullptr, "StructProperty", fiVT)) {
+        uintptr_t vtStruct = StructInner(fiVT);   // FTViewTarget UScriptStruct
+        if (vtStruct) {
+            FieldInfo fiTgt{};
+            if (Ubel::FindField(vtStruct, "Target", "Target", nullptr, nullptr, fiTgt))
+                vtActor = ReadPtrAt(cam, static_cast<uintptr_t>(fiVT.Offset + fiTgt.Offset));
+        }
+    }
+
+    if (vtActor == c.pawn) return;   // normal: camera follows the possessed pawn — silent
+
+    if (!vtActor) {
+        LOG_WARN("Teleport diag: ViewTarget.Target UNRESOLVED on camera class '%s' — can't "
+                 "check for a separate visible actor (ViewTarget not reflected?)",
+                 Ubel::GetName(camClass).c_str());
+        return;
+    }
+    uintptr_t vtClass = Ubel::GetClass(vtActor);
+    double vtLoc[3] = {}, pawnLoc[3] = {};
+    ReadPawnWorld(vtActor, vtLoc);
+    ReadVec3Mem(c.root + static_cast<uintptr_t>(c.relLocOff), c.relLocSize, pawnLoc);
+    int32_t meshOff = Ubel::FindFieldOffset(vtClass, "Mesh", "Mesh", nullptr, "ObjectProperty");
+    int32_t cmcOff  = Ubel::FindFieldOffset(vtClass, "CharacterMovement",
+                                            "CharacterMovement", nullptr, "ObjectProperty");
+    LOG_WARN("Teleport diag: SEPARATE visible actor — camera follows 0x%llX '%s' "
+             "loc=(%.1f, %.1f, %.1f) but possessed pawn is 0x%llX '%s' loc=(%.1f, %.1f, %.1f) "
+             "(view-target hasMesh=%d hasCMC=%d). Candidate actor to teleport instead.",
+             (unsigned long long)vtActor, Ubel::GetName(vtClass).c_str(),
+             vtLoc[0], vtLoc[1], vtLoc[2],
+             (unsigned long long)c.pawn, Ubel::GetName(Ubel::GetClass(c.pawn)).c_str(),
+             pawnLoc[0], pawnLoc[1], pawnLoc[2], meshOff >= 0 ? 1 : 0, cmcOff >= 0 ? 1 : 0);
+}
+
 // Move the pawn to xyz. Tier 1 = invoke (preferTeleportTo: K2_TeleportTo with
 // FindTeleportSpot adjust; else K2_SetActorLocation bSweep=false bTeleport=true
 // for an exact landing). Tier 2 = raw RelativeLocation write.
@@ -774,6 +833,8 @@ int32_t TeleportPawnTo(const Chain& c, const double xyz[3], const double* destPy
                        bool preferTeleportTo, uint8_t* tierOut) {
     uintptr_t pawnClass = Ubel::GetClass(c.pawn);
     bool moved = false;
+
+    DiagVisibleActor(c);   // build 1113: log pawn vs camera ViewTarget (see above)
 
     // Capture the pre-move world position (RelativeLocation == world when the
     // root isn't attached) so the deep-force fallback can locate the stale
@@ -893,26 +954,37 @@ int32_t TeleportPawnTo(const Chain& c, const double xyz[3], const double* destPy
                  "forcing via CMC freeze%s", cur[0], cur[1], cur[2],
                  cmc ? "" : " (no CMC found)");
         SetCmcMode(cmc, 0);                          // MOVE_None — freeze physics
-        if (!InvokeSetActorLocation(c.pawn, xyz))    // engine actor set…
-            TeleportViaComponent(c, xyz);            // …else component setter (updates transform)
+        // Do NOT trust K2_SetActorLocation's return here. On some titles (TQ2 —
+        // standard Character, capsule root + child mesh) it reports success but is
+        // a no-op (CMC reverts), and a raw RelativeLocation write alone leaves the
+        // cached ComponentToWorld stale so the rendered mesh stays at the old spot.
+        // So ALWAYS also run the component setter — K2_SetWorldLocation runs
+        // UpdateComponentToWorld and propagates the refresh to the child mesh — and
+        // deep-force the cached world transform as a fallback. (Previously the
+        // component setter was gated on the actor setter returning false, so a
+        // false-success skipped the one call that refreshes the visual.)
+        InvokeSetActorLocation(c.pawn, xyz);
+        TeleportViaComponent(c, xyz);                // refresh ComponentToWorld + children
         if (!attached) {                              // raw write (world==relative)
             uint8_t raw[24] = {};
             WriteVec3(raw, c.relLocSize, xyz);
             Macht::WriteBytes(c.root + static_cast<uintptr_t>(c.relLocOff), raw,
                               (c.relLocSize >= 24) ? 24 : 12);
+            // Belt-and-suspenders: rewrite any still-stale cached world-transform
+            // vectors (catches the case where K2_SetWorldLocation is also a no-op).
+            DeepForceWorldPos(c, oldPos, xyz);
         }
         SetCmcMode(cmc, 3);                          // MOVE_Falling — re-ground
-        if (!InvokeSetActorLocation(c.pawn, xyz))    // re-assert after thaw
-            TeleportViaComponent(c, xyz);
+        InvokeSetActorLocation(c.pawn, xyz);         // re-assert after thaw…
+        TeleportViaComponent(c, xyz);                // …and re-refresh the transform
         currentWorld(cur);
         if (dist3(cur, xyz) <= kReachedEps)
             LOG_INFO("Teleport: CMC-freeze force succeeded -> cur=(%.1f,%.1f,%.1f)",
                      cur[0], cur[1], cur[2]);
         else
             LOG_WARN("Teleport: CMC-freeze force STILL didn't stick "
-                     "(cur=(%.1f,%.1f,%.1f)) — game drives the character from a "
-                     "separate authoritative actor; external SetActorLocation "
-                     "won't move it", cur[0], cur[1], cur[2]);
+                     "(cur=(%.1f,%.1f,%.1f)) — the memory write didn't hold; the game "
+                     "may re-derive position from a separate source", cur[0], cur[1], cur[2]);
     }
 
     LOG_INFO("Teleport: post-move cur=(%.1f, %.1f, %.1f) target=(%.1f, %.1f, %.1f) attached=%d",
@@ -1079,6 +1151,14 @@ int32_t TeleportToCursor(double zOffset, int32_t traceChannel,
                      && ReadFloatParam(buf, fi, "LocationY", my);
         }
     }
+    // A captured / hidden cursor (controller play or mouse-look games — e.g. TQ2)
+    // reports success with position (0,0); treat that as "no cursor" so the
+    // screen-center fallback kicks in instead of tracing from the screen corner.
+    if (haveMouse && std::fabs(mx) < 1.0 && std::fabs(my) < 1.0) {
+        haveMouse = false;
+        LOG_INFO("Teleport: cursor — GetMousePosition returned (0,0) (cursor "
+                 "captured/hidden) — falling back to screen center");
+    }
     bool usedCenter = false;
     if (!haveMouse) {
         if (!fallbackToCenter) return TP_ERR_NO_CURSOR;
@@ -1097,32 +1177,89 @@ int32_t TeleportToCursor(double zOffset, int32_t traceChannel,
         if (!usedCenter) return TP_ERR_NO_CURSOR;
     }
     if (outUsedCenter) *outUsedCenter = usedCenter;
+    LOG_INFO("Teleport: cursor mouse=(%.0f, %.0f) haveMouse=%d usedCenter=%d channel=%d",
+             mx, my, haveMouse ? 1 : 0, usedCenter ? 1 : 0, traceChannel);
 
-    // 2. Hit test. Cursor-channel trace first (only meaningful when the game
-    //    drives a real cursor); deproject + line trace as the fallback ray.
+    // 2. Hit test. Two trace methods, each scanned across trace channels (the
+    //    requested one first, then 0..9) — click-to-move ARPGs (TQ2) put the
+    //    ground on a CUSTOM ETraceTypeQuery, not Visibility(0), so we auto-find it.
+    //    Deproject + KismetSystemLibrary line trace is the last resort.
+    //    Channel order: loop index 0 = requested channel; index 1..10 = channels
+    //    0..9 (skipping the requested one).
     double impact[3] = {};
     bool haveHit = false;
+    int32_t hitChan = -1;
+
+    // Path 1: GetHitResultUnderCursorByChannel — uses the game's OWN internal
+    // cursor position (works even when our GetMousePosition read (0,0)). Cursor
+    // games only; skipped for the screen-center fallback.
     if (!usedCenter && FindFunc(pcClass, "GetHitResultUnderCursorByChannel", fi)
         && fi.parmsSize > 0) {
-        std::vector<uint8_t> buf(fi.parmsSize, 0);
-        WriteByteParam(buf, fi, "TraceChannel", static_cast<uint8_t>(traceChannel));
-        WriteBoolParam(buf, fi, "bTraceComplex", true);
         const FunctionParam* hr = FindParam(fi, "HitResult");
-        if (hr && Invoke(c.pc, fi, buf) == 0 && ReturnedTrue(fi, buf))
-            haveHit = ExtractHitPoint(buf, *hr, impact);
+        for (int32_t i = 0; !haveHit && i <= 10; ++i) {
+            int32_t chan = (i == 0) ? traceChannel : (i - 1);
+            if (i > 0 && chan == traceChannel) continue;
+            std::vector<uint8_t> buf(fi.parmsSize, 0);
+            WriteByteParam(buf, fi, "TraceChannel", static_cast<uint8_t>(chan));
+            WriteBoolParam(buf, fi, "bTraceComplex", true);
+            if (hr && Invoke(c.pc, fi, buf) == 0 && ReturnedTrue(fi, buf)
+                && ExtractHitPoint(buf, *hr, impact)) {
+                haveHit = true; hitChan = chan;
+            }
+        }
+        LOG_INFO("Teleport: cursor GetHitResultUnderCursorByChannel hit=%d hitChannel=%d",
+                 haveHit ? 1 : 0, hitChan);
+    }
+
+    // Path 2: GetHitResultAtScreenPosition — traces from the SCREEN POSITION
+    // (a real cursor OR the screen center), needs NO cursor and NO
+    // KismetSystemLibrary (which TQ2 doesn't expose).
+    if (!haveHit && FindFunc(pcClass, "GetHitResultAtScreenPosition", fi)
+        && fi.parmsSize > 0) {
+        const FunctionParam* sp = FindParam(fi, "ScreenPosition");  // FVector2D
+        const FunctionParam* hr = FindParam(fi, "HitResult");
+        for (int32_t i = 0; !haveHit && i <= 10; ++i) {
+            int32_t chan = (i == 0) ? traceChannel : (i - 1);
+            if (i > 0 && chan == traceChannel) continue;
+            std::vector<uint8_t> buf(fi.parmsSize, 0);
+            if (sp && sp->offset >= 0) {
+                if (sp->size >= 16) {
+                    double v[2] = { mx, my };
+                    std::memcpy(buf.data() + sp->offset, v, sizeof(v));
+                } else {
+                    float v[2] = { static_cast<float>(mx), static_cast<float>(my) };
+                    std::memcpy(buf.data() + sp->offset, v, sizeof(v));
+                }
+            }
+            WriteByteParam(buf, fi, "TraceChannel", static_cast<uint8_t>(chan));
+            WriteBoolParam(buf, fi, "bTraceComplex", true);
+            if (hr && Invoke(c.pc, fi, buf) == 0 && ReturnedTrue(fi, buf)
+                && ExtractHitPoint(buf, *hr, impact)) {
+                haveHit = true; hitChan = chan;
+            }
+        }
+        LOG_INFO("Teleport: cursor GetHitResultAtScreenPosition screen=(%.0f, %.0f) "
+                 "hit=%d hitChannel=%d", mx, my, haveHit ? 1 : 0, hitChan);
     }
     if (!haveHit) {
         if (!FindFunc(pcClass, "DeprojectScreenPositionToWorld", fi)
-            || fi.parmsSize <= 0)
+            || fi.parmsSize <= 0) {
+            LOG_WARN("Teleport: cursor — DeprojectScreenPositionToWorld not found on PC "
+                     "class '%s' (cooked out?) — can't trace", Ubel::GetName(pcClass).c_str());
             return TP_ERR_REFLECTION;
+        }
         std::vector<uint8_t> buf(fi.parmsSize, 0);
         WriteFloatParam(buf, fi, "ScreenX", mx);
         WriteFloatParam(buf, fi, "ScreenY", my);
         double loc[3] = {}, dir[3] = {};
         if (Invoke(c.pc, fi, buf) != 0 || !ReturnedTrue(fi, buf)
             || !ReadVecParam(buf, fi, "WorldLocation", loc)
-            || !ReadVecParam(buf, fi, "WorldDirection", dir))
+            || !ReadVecParam(buf, fi, "WorldDirection", dir)) {
+            LOG_WARN("Teleport: cursor — DeprojectScreenPositionToWorld invoke failed/empty");
             return TP_ERR_INVOKE;
+        }
+        LOG_INFO("Teleport: cursor deproject loc=(%.1f, %.1f, %.1f) dir=(%.3f, %.3f, %.3f)",
+                 loc[0], loc[1], loc[2], dir[0], dir[1], dir[2]);
 
         double end[3] = {
             loc[0] + dir[0] * Grimoire::TELEPORT_TRACE_DIST,
@@ -1134,10 +1271,16 @@ int32_t TeleportToCursor(double zOffset, int32_t traceChannel,
         // native, but it reads the physics scene — game thread ONLY (the
         // Invoke helper guarantees that; never reuse Mimic's direct path).
         uintptr_t ksl = UE5_FindInstanceOfClass("KismetSystemLibrary");
-        if (!ksl) return TP_ERR_REFLECTION;
-        FunctionInfo lt;
-        if (!FindFunc(Ubel::GetClass(ksl), "LineTraceSingle", lt) || lt.parmsSize <= 0)
+        if (!ksl) {
+            LOG_WARN("Teleport: cursor — KismetSystemLibrary instance/CDO not found");
             return TP_ERR_REFLECTION;
+        }
+        FunctionInfo lt;
+        if (!FindFunc(Ubel::GetClass(ksl), "LineTraceSingle", lt) || lt.parmsSize <= 0) {
+            LOG_WARN("Teleport: cursor — LineTraceSingle not found on KismetSystemLibrary "
+                     "(cooked out?) — no trace fallback");
+            return TP_ERR_REFLECTION;
+        }
         std::vector<uint8_t> buf2(lt.parmsSize, 0);
         WritePtrParam(buf2, lt, "WorldContextObject", c.pawn);
         WriteVecParam(buf2, lt, "Start", loc);
@@ -1147,11 +1290,21 @@ int32_t TeleportToCursor(double zOffset, int32_t traceChannel,
         WriteBoolParam(buf2, lt, "bIgnoreSelf", true);
         // ActorsToIgnore (TArray), DrawDebugType, colors, DrawTime stay zeroed.
         const FunctionParam* hr = FindParam(lt, "OutHit");
-        if (!hr) return TP_ERR_REFLECTION;
-        if (Invoke(ksl, lt, buf2) == 0 && ReturnedTrue(lt, buf2))
-            haveHit = ExtractHitPoint(buf2, *hr, impact);
+        if (!hr) {
+            LOG_WARN("Teleport: cursor — LineTraceSingle has no OutHit param (layout?)");
+            return TP_ERR_REFLECTION;
+        }
+        int32_t ltr = Invoke(ksl, lt, buf2);
+        bool ltHit = (ltr == 0) && ReturnedTrue(lt, buf2);
+        if (ltHit) haveHit = ExtractHitPoint(buf2, *hr, impact);
+        LOG_INFO("Teleport: cursor LineTraceSingle r=%d returnedHit=%d haveHit=%d",
+                 ltr, ltHit ? 1 : 0, haveHit ? 1 : 0);
     }
-    if (!haveHit) return TP_ERR_NO_HIT;
+    if (!haveHit) {
+        LOG_WARN("Teleport: cursor — no blocking hit (channel=%d). Try a different "
+                 "trace channel.", traceChannel);
+        return TP_ERR_NO_HIT;
+    }
 
     if (outHit) {
         outHit->X = impact[0];

@@ -34,7 +34,7 @@ A quick look at what you can actually *do* with it (the [full table-maker featur
 - **One-click Cheat Engine export** — pointer-chain XML, Structure Dissect (CSX), SDK headers, AA scripts, and multi-row `.CT` batches.
 - **No Cheat Engine needed to inject** — drop the `version.dll` **proxy DLL** next to the game, launch, and connect.
 
-> ¹ Teleport works on most games. A few titles drive the *visible* character from a separate internal actor (e.g. Titan Quest II) and can't be moved by an external position write — see [docs/teleport-spec.md](docs/teleport-spec.md) for the details.
+> ¹ Marker save/recall works broadly (including Titan Quest II, after a transform-refresh fix for engine setters that report success but don't move the actor). A few heavily-stripped Shipping builds (e.g. Titan Quest II) can't do *cursor* teleport because they remove the standard cursor / viewport / line-trace APIs and use a custom virtual cursor — see [docs/teleport-spec.md](docs/teleport-spec.md) for the details.
 
 ## Tested Version Matrix
 
