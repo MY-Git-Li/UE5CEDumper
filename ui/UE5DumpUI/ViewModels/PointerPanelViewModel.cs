@@ -140,6 +140,21 @@ public partial class PointerPanelViewModel : ViewModelBase
             ? "⚠ DLL pre-dates the build probe — assume stale, redeploy"
         : "";
 
+    // --- FUObjectItem layout (UE5.7+ packed-mode awareness) ---
+    [ObservableProperty] private bool _itemPacked;
+    [ObservableProperty] private string _itemLayoutMode = "classic";
+    [ObservableProperty] private int _itemObjOffset;
+
+    /// <summary>Drives the GLOBAL "unverified packed layout" badge in the top bar:
+    /// true when connected to a game running the UE5.7+ *** UNVERIFIED *** packed
+    /// FUObjectItem layout. Surfaced from every tab so the user knows reconstructed
+    /// addresses and exports are best-effort.</summary>
+    public bool ShowPackedLayoutBadge => HasData && ItemPacked;
+
+    /// <summary>Text for the global unverified-packed-layout badge.</summary>
+    public string PackedLayoutBadgeText =>
+        "⚠ Unverified UE5.7+ packed layout — addresses best-effort";
+
     // --- Self-Test state ---
     [ObservableProperty] private bool _isSelfTesting;
     [ObservableProperty] private string _selfTestResultText = "";
@@ -334,6 +349,11 @@ public partial class PointerPanelViewModel : ViewModelBase
         SelectedUeVersionOverride = state.IsUserOverride ? VersionToLabel(state.UEVersion) : "Auto";
         _suppressOverrideSelectionEvent = false;
         TotalObjects = state.ObjectCount;
+        ItemPacked = state.ItemPacked;
+        ItemLayoutMode = state.ItemLayoutMode;
+        ItemObjOffset = state.ItemObjOffset;
+        // Ambient flag so static export utilities can embed the best-effort note.
+        Services.PackedLayoutNotice.IsActive = state.ItemPacked;
         GObjectsMethod = state.GObjectsMethod;
         GNamesMethod = state.GNamesMethod;
         GWorldMethod = state.GWorldMethod;
@@ -424,6 +444,9 @@ public partial class PointerPanelViewModel : ViewModelBase
         // value (e.g. a reconnect/refresh to the same DLL) would leave the badge stale.
         OnPropertyChanged(nameof(ShowGlobalBuildWarning));
         OnPropertyChanged(nameof(GlobalBuildWarningText));
+        // Global top-bar unverified-packed-layout badge mirror (MainWindowViewModel).
+        OnPropertyChanged(nameof(ShowPackedLayoutBadge));
+        OnPropertyChanged(nameof(PackedLayoutBadgeText));
         OnPropertyChanged(nameof(CanSelfTest));
         NotifyAobMakerProperties();
     }

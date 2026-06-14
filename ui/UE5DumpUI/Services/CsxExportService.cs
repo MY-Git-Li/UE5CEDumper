@@ -72,6 +72,9 @@ public static class CsxExportService
 
         var sb = new StringBuilder();
         sb.AppendLine();
+        // Embed a best-effort note when the game uses the UE5.7+ UNVERIFIED packed layout.
+        if (PackedLayoutNotice.IsActive)
+            sb.Append(PackedLayoutNotice.XmlComment);
         sb.AppendLine("<Structures>");
         sb.Append("  <Structure Name=\"").Append(EscapeXml(structName))
           .AppendLine("\" AutoFill=\"0\" AutoCreate=\"1\" DefaultHex=\"0\" AutoDestroy=\"0\" DoNotSaveLocal=\"0\" RLECompression=\"1\" AutoCreateStructsize=\"4096\">");

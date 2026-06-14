@@ -58,6 +58,9 @@ constexpr const char* CMD_END_VALUE_SCAN           = "end_value_scan";
 constexpr const char* CMD_QUERY_CANDIDATES         = "query_candidates";
 constexpr const char* CMD_GET_DEBUG_CAMERA_STATE   = "get_debug_camera_state";
 constexpr const char* CMD_SET_DEBUG_CAMERA         = "set_debug_camera";
+// UE5.7+ packed FUObjectItem calibration (runtime tune of the reconstruction constants +
+// optional force-enable) — lets the first real packed game be calibrated without a rebuild.
+constexpr const char* CMD_SET_PACKED_CONSTS        = "set_packed_consts";
 
 // Teleport (Wirbel) — marker save/recall + cursor teleport (docs/teleport-spec.md §7)
 constexpr const char* CMD_TELEPORT_GET_POSE        = "teleport_get_pose";

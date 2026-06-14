@@ -24,6 +24,7 @@
 #include "../src/ValueScan.h"
 #include "../src/Macht.h"   // ComputeSetElementStride / ComputeMapValueOffset (V1a geometry)
 #include "../src/Denken.h"
+#include "../src/PackedItem.h"  // UE5.7+ packed FUObjectItem reconstruction (Reconstruct/Encode)
 
 #include <Windows.h>
 #include <timeapi.h>   // timeBeginPeriod — exercised by the poll-latency check
@@ -1544,6 +1545,92 @@ static void Test_Denken_TerminatesAndGuards() {
     EXPECT("guard: null addr -> !ok", !r2.ok);
 }
 
+// ----- PackedItem (UE5.7+ packed FUObjectItem reconstruction) ----------------
+//
+// No live game uses this layout yet, so the reconstruction MATH is the only
+// thing verifiable today. These tests assert the Encode/Reconstruct round trip
+// (any 8-aligned pointer survives a split-and-rebuild regardless of flag bits)
+// plus the calibration-knob edges (alignBits / ptrMaskBits actually matter).
+
+static void Test_Packed_RoundTrip_Basic() {
+    PackedItem::PackedConsts c;  // defaults: alignBits=3, ptrMask=0x3FFF
+    const uintptr_t ptrs[] = {
+        0x0000000140001000ULL,   // typical module-region pointer
+        0x000001F809E08FB0ULL,   // typical heap pointer (8-aligned)
+        0x0000700000000008ULL,   // high heap, minimal low bits
+        0x0000000000000008ULL,   // smallest non-null aligned value
+    };
+    for (uintptr_t obj : ptrs) {
+        uint64_t flags = 0; uint32_t low = 0;
+        PackedItem::Encode(obj, c, flags, low);
+        EXPECT_EQ_U64("round-trip default consts", PackedItem::Reconstruct(flags, low, c), obj);
+    }
+}
+
+static void Test_Packed_RoundTrip_HighBits() {
+    PackedItem::PackedConsts c;
+    // Top of the 47-bit x64 user-mode range, 8-aligned — proves the 14-bit
+    // ptrMask captures every high pointer bit a real UObject* can carry.
+    const uintptr_t obj = 0x00007FFFFFFFFFF8ULL;
+    uint64_t flags = 0; uint32_t low = 0;
+    PackedItem::Encode(obj, c, flags, low);
+    EXPECT_EQ_U64("round-trip 47-bit high pointer", PackedItem::Reconstruct(flags, low, c), obj);
+}
+
+static void Test_Packed_ZeroAndNull() {
+    PackedItem::PackedConsts c;
+    // ptrLow == 0 must reconstruct to 0 (the "empty/null slot" contract the
+    // object walk relies on), regardless of any flag bits sitting in the high dword.
+    EXPECT_EQ_U64("ptrLow=0 -> null", PackedItem::Reconstruct(0xFFFFFFFF00000000ULL, 0, c), 0ULL);
+    EXPECT_EQ_U64("all-zero -> null", PackedItem::Reconstruct(0, 0, c), 0ULL);
+}
+
+static void Test_Packed_FlagsDoNotLeak() {
+    PackedItem::PackedConsts c;
+    const uintptr_t obj = 0x000001F809E08FB0ULL;
+    uint64_t flags = 0; uint32_t low = 0;
+    // Seed the low 32 bits (real flags/refcount) with noise — they must NOT
+    // bleed into the reconstructed pointer.
+    PackedItem::Encode(obj, c, flags, low, /*flagsExtra=*/0xDEADBEEFull);
+    EXPECT_EQ_U64("flags in low dword do not corrupt ptr",
+                  PackedItem::Reconstruct(flags, low, c), obj);
+    // And confirm the low dword actually carried the seeded flags (so the test
+    // proves isolation, not that flagsExtra was silently dropped).
+    EXPECT_EQ_U64("flagsExtra preserved in low dword", flags & 0xFFFFFFFFull, 0xDEADBEEFull);
+}
+
+static void Test_Packed_AlignBitsKnob() {
+    // A non-default alignBits changes the encoding; round trip must still hold
+    // when Encode and Reconstruct share the same consts.
+    PackedItem::PackedConsts c4; c4.alignBits = 4;  // hypothetical 16-byte alignment
+    const uintptr_t obj = 0x000001F809E08F00ULL;     // 16-aligned
+    uint64_t flags = 0; uint32_t low = 0;
+    PackedItem::Encode(obj, c4, flags, low);
+    EXPECT_EQ_U64("round-trip alignBits=4", PackedItem::Reconstruct(flags, low, c4), obj);
+
+    // Decoding the SAME fields with the default alignBits=3 must yield a
+    // DIFFERENT pointer — i.e. the knob is load-bearing, not ignored.
+    PackedItem::PackedConsts c3;
+    EXPECT("alignBits mismatch diverges",
+           PackedItem::Reconstruct(flags, low, c3) != obj);
+}
+
+static void Test_Packed_PtrMaskKnob() {
+    // Widening ptrMask must not break a pointer whose high bits already fit the
+    // narrower mask (round trip stable), but a deliberately-too-narrow mask must
+    // drop high bits — guarding against the constant being ignored.
+    const uintptr_t obj = 0x00007FFFFFFFFFF8ULL;
+
+    PackedItem::PackedConsts wide; wide.ptrMaskBits = 0x7FFFull;  // 15 bits
+    uint64_t f = 0; uint32_t l = 0;
+    PackedItem::Encode(obj, wide, f, l);
+    EXPECT_EQ_U64("round-trip wider mask", PackedItem::Reconstruct(f, l, wide), obj);
+
+    PackedItem::PackedConsts narrow; narrow.ptrMaskBits = 0x00FFull;  // 8 bits — too narrow
+    EXPECT("too-narrow mask loses high bits",
+           PackedItem::Reconstruct(f, l, narrow) != obj);
+}
+
 int main() {
     std::printf("dll_helpers_test (Renge + Scharf + ValueScan)\n");
     std::printf("------------------------------------------\n");
@@ -1616,6 +1703,14 @@ int main() {
     Test_Denken_FollowsCallHandoff();
     Test_Denken_DoesNotFollowNonThisCall();
     Test_Denken_TerminatesAndGuards();
+
+    // UE5.7+ packed FUObjectItem reconstruction (math-only; no live game exists)
+    Test_Packed_RoundTrip_Basic();
+    Test_Packed_RoundTrip_HighBits();
+    Test_Packed_ZeroAndNull();
+    Test_Packed_FlagsDoNotLeak();
+    Test_Packed_AlignBitsKnob();
+    Test_Packed_PtrMaskKnob();
 
     std::printf("------------------------------------------\n");
     std::printf("Pass: %d   Fail: %d\n", g_pass, g_fail);

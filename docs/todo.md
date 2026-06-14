@@ -21,6 +21,16 @@ Open work only. **Read this when deciding what to do next.**
 
 ## ▶ Next up (genuinely actionable now)
 
+- **UE5.7+ packed FUObjectItem — live-verify + calibrate when a packed game appears** —
+  Effort: **S** (mostly verify) · Risk: low (gated, last-resort only). Packed parsing shipped
+  build 1108 but is **UNVERIFIED** (no `UE_ENABLE_FUOBJECT_ITEM_PACKING` game exists yet). When
+  one does: attach, watch for the `*** UNVERIFIED ... PACKED ... ACTIVATED ***` WARN (or force via
+  `set_packed_consts {force:true}`), then tune `align_bits`/`ptr_mask_bits`/`serial_off` against the
+  echoed `GObjects[0..7]` samples until names resolve; confirm the object walk + a CE XML/CSX export
+  are correct; then promote out of UNVERIFIED (drop the badge gate, pin the constants).
+  Open sub-question: the packed **SerialNumber** offset (currently best-effort `0x0C`) is unpinned.
+  *Parent: PackedItem.h + Aura packed mode + set_packed_consts shipped build 1108 (dev-log 2026-06-14).*
+
 - **DLL cancellation — live-game verification** — Effort: **0** (verify only) · Risk:
   low. Confirm in-game that (a) disabling the script / closing the game while a long
   scan runs no longer hangs, (b) closing the UI mid-scan stops the DLL and a reopened

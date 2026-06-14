@@ -665,12 +665,47 @@ a re-run after warm-up).
 
 ### get_ce_pointer_info
 
+Builds a CE pointer chain (`ce_base` + `ce_offsets`) for a GObjects instance. Under the
+UE5.7+ packed FUObjectItem layout a native CE chain cannot reconstruct the bit-packed
+object pointer, so the response degrades to the absolute object address and sets
+`packed_layout:true` + a `warning` (the chain won't survive a restart / ASLR rebase). The
+direct-layout item hop includes `Aura::GetItemObjOffset()` so it dereferences the Object
+pointer at its real within-item offset (+0x00 classic, +0x08 UE5.7+ unpacked).
+
 ```jsonc
-{
-  "id": 18, "ok": true,
-  "xml": "<CheatTable><CheatEntries>...</CheatEntries></CheatTable>"
-}
+// Direct (classic / unpacked57): full GObjects → chunk → item → field chain
+{ "id": 18, "ok": true, "packed_layout": false,
+  "ce_base": "\"Game.exe\"+1BA1820",
+  "ce_offsets": [64, 264, 24, 0] }            // [field, withinChunk*itemSize+objOff, chunkIndex*8, 0]
+
+// Packed57 (UNVERIFIED): degraded to the absolute object address
+{ "id": 18, "ok": true, "packed_layout": true,
+  "warning": "UE5.7+ packed FUObjectItem layout (UNVERIFIED): ... absolute address only ...",
+  "ce_base": "0x1F809E08FB0", "ce_offsets": [64] }
 ```
+
+### set_packed_consts
+
+Runtime calibration / force-enable for the UE5.7+ **UNVERIFIED** packed FUObjectItem
+reconstruction (no DLL rebuild). Leave a field unchanged with `align_bits<=0` /
+`ptr_mask_bits=="0x0"` / `serial_off<0`. `force:true` switches the live layout to packed
+unconditionally. Echoes the resulting mode + reconstructed `GObjects[0..7]` samples for
+eyeball calibration (tweak constants until names look like real UObjects).
+
+```jsonc
+// Request
+{ "id": 60, "cmd": "set_packed_consts",
+  "align_bits": 3, "ptr_mask_bits": "0x3FFF", "force": true, "serial_off": 12 }
+
+// Response
+{ "id": 60, "ok": true,
+  "item_packed": true, "item_layout_mode": "packed57", "item_obj_offset": 0, "item_size": 24,
+  "samples": [ { "index": 0, "addr": "0x1F800000000", "name": "CoreUObject" }, ... ] }
+```
+
+> `get_pointers` (and `get_offsets`) additionally carry `item_layout_mode` /
+> `item_packed` / `item_obj_offset` / `item_size` so the UI can flag the unverified
+> packed mode (badge + export notes).
 
 ### read_mem / write_mem
 

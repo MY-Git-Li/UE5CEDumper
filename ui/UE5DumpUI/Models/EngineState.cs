@@ -27,6 +27,28 @@ public sealed class EngineState
     public string ModuleName { get; init; } = "";
     public string ModuleBase { get; init; } = "";
 
+    // --- FUObjectItem layout (UE5.7+ packed-mode awareness) ---
+    /// <summary>
+    /// Detected within-item layout: "classic" (UObject*@+0x00, UE4.x..UE5.6),
+    /// "unpacked57" (UObject*@+0x08, UE5.7+ reordered), or "packed57" (UObject* reconstructed
+    /// from two split fields — UE5.7+ UE_ENABLE_FUOBJECT_ITEM_PACKING). Defaults to "classic".
+    /// </summary>
+    public string ItemLayoutMode { get; init; } = "classic";
+
+    /// <summary>
+    /// True when the game uses the *** UNVERIFIED *** UE5.7+ packed FUObjectItem layout. No
+    /// shipping game uses it yet, so reconstructed addresses and every downstream export
+    /// (CE XML / CSX / Teleport) are best-effort. UI surfaces a warning badge and export notes.
+    /// </summary>
+    public bool ItemPacked { get; init; }
+
+    /// <summary>Within-item UObject* offset for the two direct layouts (0x00 classic, 0x08 unpacked). 0 under packed.</summary>
+    public int ItemObjOffset { get; init; }
+
+    /// <summary>One-line note embedded into exports generated while <see cref="ItemPacked"/> is true.</summary>
+    public static string PackedExportNote =>
+        "generated under UNVERIFIED UE5.7+ packed FUObjectItem layout — addresses are best-effort";
+
     /// <summary>How each pointer was found: "aob", "data_scan", "string_ref", "pointer_scan", "not_found"</summary>
     public string GObjectsMethod { get; init; } = "aob";
     public string GNamesMethod { get; init; } = "aob";

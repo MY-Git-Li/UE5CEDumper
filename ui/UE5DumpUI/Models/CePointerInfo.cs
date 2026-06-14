@@ -13,9 +13,23 @@ public sealed class CePointerInfo
     public int WithinChunk { get; init; }
     public int FieldOffset { get; init; }
 
-    /// <summary>CE offset chain (bottom-to-top): field, withinChunk*16, chunkIndex*8, 0.</summary>
+    /// <summary>
+    /// CE offset chain (bottom-to-top). Direct layouts: [field, withinChunk*itemSize+objOffset,
+    /// chunkIndex*8, 0]. Under <see cref="PackedLayout"/> the GObjects-relative chain cannot be
+    /// expressed, so this degrades to a single [field] hop off an absolute <see cref="CeBase"/>.
+    /// </summary>
     public int[] CeOffsets { get; init; } = [];
 
-    /// <summary>CE base address string, e.g. "Game.exe"+1BA1820.</summary>
+    /// <summary>CE base address string, e.g. "Game.exe"+1BA1820, or an absolute address when packed.</summary>
     public string CeBase { get; init; } = "";
+
+    /// <summary>
+    /// True when the game uses the UE5.7+ *** UNVERIFIED *** packed FUObjectItem layout. The
+    /// GObjects-relative pointer chain is unavailable (bit-packed object pointer); CeBase is the
+    /// absolute object address and won't survive a restart / ASLR rebase. See <see cref="Warning"/>.
+    /// </summary>
+    public bool PackedLayout { get; init; }
+
+    /// <summary>Human-readable caveat populated when <see cref="PackedLayout"/> is true (else empty).</summary>
+    public string Warning { get; init; } = "";
 }

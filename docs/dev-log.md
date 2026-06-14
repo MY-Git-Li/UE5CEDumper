@@ -14,6 +14,57 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-14 — UE5.7+ packed FUObjectItem parsing (gated, UNVERIFIED) + peripheral handling (build 1108)
+
+Implemented the third FUObjectItem within-item layout — the UE5.7+ **packed** encoding
+(`UE_ENABLE_FUOBJECT_ITEM_PACKING`) where the `UObject*` is bit-split across two fields and
+reconstructed — **before** any game exists to validate it (it is not Epic-default even in
+`ue5-main`). Built strictly defensively: it can never regress an existing game and is loudly
+flagged as unverified everywhere it surfaces.
+
+**Core (DLL).**
+- New dependency-free `dll/src/PackedItem.h`: `ItemLayoutMode {Classic,Unpacked57,Packed57}`,
+  `PackedConsts {alignBits=3, ptrMaskBits=0x3FFF}`, pure `Reconstruct(flags, ptrLow, consts)`
+  (`obj = ((flags>>32)&PtrMask)<<(32+AlignBits) | (ptrLow<<AlignBits)`) + a test-only `Encode`
+  inverse so the math is round-trip unit-testable without a live game.
+- `Aura.cpp`: `s_layoutMode` + `s_packedConsts` + `s_packedSerialOff`. `GetByIndex` /
+  `GetSerialNumber` branch on the mode (a process-lifetime-constant → perfectly-predicted hot-path
+  branch). New exports `GetItemObjOffset()` / `IsPacked()` / `SetPackedConsts()`.
+- Detection: `DiagnosePackedLayout` promoted to `TryDetectPacked` (reuses a reconstruction-aware
+  `ProbeStride` overload so scoring validates the REBUILT pointer, not the raw FlagsAndRefCount).
+  Wired into `DetectItemSize` as a **last resort** in the `gCount==0` truly-unrecognized branch only
+  — after both direct passes AND the weak tentative fallback — so it never beats even a weak direct
+  match. Activates only on ≥2 reconstructed pointers resolving real FNames; logs
+  `*** UNVERIFIED UE5.7+ PACKED ... ACTIVATED ***`.
+
+**Peripheral (the only structural break).** `Fern.cpp` `get_ce_pointer_info` was the lone
+GObjects-walk CE pointer chain. Fixed a **latent unpacked bug** (added `GetItemObjOffset()` to the
+item hop — was hardcoded to item+0, wrong on Unpacked57) and added a **packed degraded path** (a
+native CE chain can't do bit reconstruction → emit the absolute object address + `packed_layout` +
+`warning`). All other peripherals (CE XML root, CSX `StructDataAddr`, +CE Field `FieldAddress`,
+Teleport via GWorld property chains) consume absolute already-resolved addresses → correct once
+`GetByIndex` reconstructs, no change needed.
+
+**Surfacing (decision: log + badge + export note).** `FillPointerSnapshot` + `CMD_GET_OFFSETS`
+now emit `item_layout_mode` / `item_packed` / `item_obj_offset` / `item_size`; `EngineState` carries
+them. Top-bar **"⚠ Unverified UE5.7+ packed layout"** badge (mirrors the stale-DLL badge pattern).
+Ambient `PackedLayoutNotice` embeds a best-effort note into CE XML / CSX output + a `[UE5.7+ packed?]`
+prefix on +CE Field record names while active.
+
+**Calibration (decision: now).** New `set_packed_consts` pipe command (`align_bits`/`ptr_mask_bits`/
+`force`/`serial_off`) tunes the constants and force-enables packed mode at runtime (no rebuild),
+echoing reconstructed `GObjects[0..7]` samples + names — the live-verify harness for the first real
+packed game. C# `DumpService.SetPackedConstsAsync` + `PackedConstsResult` model.
+
+**Tests.** +6 C++ round-trip/edge tests in `dll_helpers_test` (470 pass) — the only verification
+possible today. +5 C# `DumpServiceTests` (packed EngineState parse + classic fallback +
+CePointerInfo packed-degraded/direct + set_packed_consts samples). 1446 C# pass, AOT clean.
+
+⚠️ **Still UNVERIFIED in-game** — pending a real `UE_ENABLE_FUOBJECT_ITEM_PACKING` game to calibrate
+the two constants + the serial offset and confirm the +0x08 reconstruction.
+
+-----
+
 ## 2026-06-13 — CSX export drilldown parity (Phase B) + depth-from-current-view tests + truncation note (Phase C) (build 1098)
 
 Phase B + C of the CE/CSX export drilldown redesign ([ce-export-drilldown-spec.md](ce-export-drilldown-spec.md)).

@@ -60,6 +60,14 @@ public interface IDumpService
     Task<FindInstancesResult> FindInstancesAsync(string className, bool exactMatch = false, int limit = 500, CancellationToken ct = default);
     Task<CePointerInfo> GetCePointerInfoAsync(string addr, int fieldOffset = 0, CancellationToken ct = default);
 
+    /// <summary>
+    /// Calibrate / force-enable the UE5.7+ *** UNVERIFIED *** packed FUObjectItem reconstruction
+    /// at runtime (no DLL rebuild). Pass alignBits&lt;=0 / ptrMaskBits==0 / serialOff&lt;0 to leave
+    /// a field unchanged; force=true switches the live layout to packed unconditionally. Returns
+    /// the resulting layout state plus reconstructed object samples for eyeball calibration.
+    /// </summary>
+    Task<PackedConstsResult> SetPackedConstsAsync(int alignBits = 0, ulong ptrMaskBits = 0, bool force = false, int serialOff = -1, CancellationToken ct = default);
+
     // --- DataTable Row Browsing ---
     Task<DataTableWalkResult> WalkDataTableRowsAsync(string addr, int offset = 0, int limit = 64, CancellationToken ct = default);
 

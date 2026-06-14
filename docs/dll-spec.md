@@ -200,7 +200,14 @@ namespace Aura {  // legacy alias: ObjectArray
     int32_t   GetItemSize();        // detected stride: 16, 20, or 24
     bool      IsFlat();             // true = FFixedUObjectArray (UE4.11–4.20)
 
-    uintptr_t GetByIndex(int32_t index);  // returns UObject* (0 if slot empty)
+    // --- FUObjectItem within-item layout (Classic / Unpacked57 / Packed57) ---
+    int       GetItemObjOffset();   // UObject* offset for direct layouts (0x00 / 0x08); 0 under packed
+    bool      IsPacked();           // true = UE5.7+ *** UNVERIFIED *** packed layout (PackedItem.h)
+    // Runtime calibration / force-enable for the packed reconstruction (no rebuild).
+    // <=0 / 0 / <0 leave a field unchanged; force=true switches the live layout to packed.
+    void      SetPackedConsts(int alignBits, uint64_t ptrMaskBits, bool force, int serialOff = -1);
+
+    uintptr_t GetByIndex(int32_t index);  // returns UObject* (0 if slot empty; reconstructed under packed)
 
     // Iterate all non-null slots; cb returns false to stop
     void ForEach(std::function<bool(int32_t idx, uintptr_t obj)> cb);
