@@ -8,11 +8,16 @@ state.
 
 > **Last refreshed**: 2026-05-29 (build 797) for the rows below. **dev = main @
 > build ~937 (PR #238).** Newer work lives in [dev-log.md](dev-log.md):
-> - build **1027 (2026-06-12)** — **Teleport** tab (Wirbel module): BugIt-style
->   marker save/recall (3 slots) + cursor teleport for 2.5D/45° games + BugItGo
->   interop + self-contained CE Lua hotkey bundle (3 schemes). 6 exports / 6 pipe
->   cmds / mailbox `CMD_TELEPORT=8`. Full contract in
->   [teleport-spec.md](teleport-spec.md); ⚠ LIVE-VERIFY PENDING (§12 smoke list).
+> - builds **1027–1112 (2026-06-12…14)** — **Teleport** tab (Wirbel module):
+>   BugIt-style marker save/recall (3 slots) + cursor teleport for 2.5D/45° games
+>   + BugItGo interop + Debug-Camera force on/off + **read-only camera POV**
+>   (`Wirbel::GetPov`; getters with a fully-reflected `CameraCachePrivate.POV` raw
+>   fallback). CE integration = mailbox AA records (the old `createHotkey` Lua
+>   bundle was removed build 1111). mailbox `CMD_TELEPORT=8`. Full contract in
+>   [teleport-spec.md](teleport-spec.md). **LIVE-VERIFIED**: teleport works where
+>   the possessed pawn IS the visible character (SEED, DQ III HD-2D); TQ2 = known
+>   separate-actor limit; Octopath moves but camera doesn't follow. **POV reads on
+>   all four tested titles** (getters on SEED/DQ III; raw fallback on TQ2/Octopath).
 > - builds **926-937 (2026-06-06)** — Value Search **lean Candidate** (V3-A/B) +
 >   **TSet/TMap scan** (V1a); **app-wide DataGrid sorting fix** (compiled bindings
 >   need explicit `SortMemberPath`); **Value Search keyword filter**; **DLL-side

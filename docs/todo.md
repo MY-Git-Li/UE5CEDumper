@@ -70,11 +70,14 @@ the visible character (SEED) and, via the deep-force, even on hard-cooked HD-2D
 titles (Octopath — character moves). Open items, all per-game / research-grade:
 
 - **Camera/POV doesn't follow on hard-cooked games (Octopath / SE HD-2D)** —
-  Effort: **M-L** · Risk: med. **Phase 1 DONE (build 1110): read-only camera-POV
-  display** (Teleport tab → "Camera POV" → Get POV; `Wirbel::GetPov` +
-  `teleport_get_pov` + a "Get camera POV" mailbox AA record) so the user can *measure* whether the
-  camera follows the pawn (camera↔pawn delta). The actual fix below is still
-  open. Phase 2 ideas: FOV set/reset (`SetFOV`/`LockedFOV` is the only
+  Effort: **M-L** · Risk: med. **Read-only camera-POV display DONE + LIVE-VERIFIED
+  builds 1110-1112** (Teleport tab → "Camera POV" → Get POV; `Wirbel::GetPov` +
+  `teleport_get_pov` + a "Get camera POV" mailbox AA record). POV now **reads on
+  all four tested titles** — getters on SEED / DQ III, and a fully-reflected
+  `CameraCachePrivate.POV` raw fallback on TQ2 / Octopath (getters present but
+  `ProcessEvent` returns nothing) — so you can *measure* the camera↔pawn delta.
+  **That's the READ; the actual camera-FOLLOW-after-teleport fix below is still
+  open** (POV read confirms the divergence but doesn't move the camera). Phase 2 ideas: FOV set/reset (`SetFOV`/`LockedFOV` is the only
   persistently-settable POV component); a "re-anchor camera" nudge after teleport
   (`SetViewTargetWithBlend(pawn,0)` + `SetGameCameraCutThisFrame()`). There is no
   universal Set POV — `UpdateCamera` overwrites it every tick. See

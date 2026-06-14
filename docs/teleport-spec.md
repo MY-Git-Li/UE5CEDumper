@@ -939,17 +939,19 @@ independent camera.
 
 ### Live-verify (build 1112)
 
-| Game | getters | raw fallback | Note |
-|------|---------|--------------|------|
+**LIVE-VERIFIED ✅ (2026-06-14)** — POV reads on all four tested titles:
+
+| Game | getters | raw fallback | Verified values |
+|------|---------|--------------|-----------------|
 | SEED Battle Destiny Remastered (4.27) | ✅ | — | getters work |
 | DQ III HD-2D Remake (UE5) | ✅ | — | getters work |
-| Octopath Traveler (UE5 HD-2D) | ❌ | ✅ (raw) | getters present but `ProcessEvent` returns nothing; cached POV read works |
-| Titan Quest II (UE5) | ❌ | ✅ (raw) | same; `TQ2PlayerCameraManager`, `CameraCache` off=5472 |
+| Octopath Traveler (UE5 HD-2D) | ❌ | ✅ (raw) | fixed HD-2D cam: pitch -16°, yaw 0, FOV 40, static |
+| Titan Quest II (UE5) | ❌ | ✅ (raw) | angled ARPG cam: pitch -47°, yaw -116.6° fixed, FOV 75, drifting (live follow); `TQ2PlayerCameraManager`, `CameraCache` off=5472 |
 
 PC resolves on all four. On TQ2 / Octopath the getters are **present in
 reflection** (`found loc=1 rot=1`) — not cooked out — but the invoke yields
-nothing; the **raw cached-POV fallback** below recovers it. ⚠ raw read in-game
-LIVE-VERIFY PENDING.
+nothing; the **raw cached-POV fallback** below recovers it (`src=raw`, values sane
+and matching each camera archetype, LWC double-width correct).
 
 ### Raw cached-POV fallback (build 1112)
 
