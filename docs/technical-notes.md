@@ -120,6 +120,26 @@ Detection: when `numElements > OBJECTS_PER_CHUNK`, check if `*(Objects + 8)` is 
 
 Detection via `DetectItemSize()`: walk stride-aligned positions, validate with FNamePool string resolution. Score = `named * 10 - bad * 3`. When all scores negative, pick stride with fewest bad items (fallback v5).
 
+### FUObjectItem within-item layout modes (`PackedItem::ItemLayoutMode`)
+
+The byte offset of the `UObject*` *inside* an item changed across UE versions. `DetectItemSize()` auto-detects the mode (and `Aura::GetByIndex` / `GetSerialNumber` dispatch on it):
+
+| Mode | Item layout | Object read |
+|------|-------------|-------------|
+| `Classic` (UE4.x..UE5.6) | `UObject*`@+0x00, Flags, [ClusterRootIndex], Serial | direct @ item+0x00 |
+| `Unpacked57` (UE5.7+ reordered) | `int64 FlagsAndRefCount`@+0x00, `UObject*`@+0x08, Serial@+0x10 | direct @ item+0x08 |
+| `Packed57` (UE5.7+ `UE_ENABLE_FUOBJECT_ITEM_PACKING`) | `int64 FlagsAndRefCount`@+0x00, `uint32 ObjectPtrLow`@+0x08 | **reconstructed** |
+
+**Packed reconstruction** (`dll/src/PackedItem.h`):
+```
+obj = ((FlagsAndRefCount >> 32) & PtrMask) << (32 + AlignBits) | (uint64(ObjectPtrLow) << AlignBits)
+```
+Constants (calibratable, defaults from assumed UE5.7 source): `AlignBits=3` (UObjectAlignment=8), `PtrMask=0x3FFF` (EInternalObjectFlags_MinFlagBitIndex=14).
+
+**Detection precedence (zero-regression):** two DIRECT passes run first — Classic(+0x00) then Unpacked57(+0x08) — and any (even weak) direct match wins. Packed is a **last resort** tried only in the truly-unrecognized branch (both direct passes found nothing), and only activates when ≥2 *reconstructed* pointers resolve real ASCII FNames (`TryDetectPacked`). So every existing game keeps its exact prior path.
+
+> ⚠️ **`Packed57` is UNVERIFIED** — no shipping game uses `UE_ENABLE_FUOBJECT_ITEM_PACKING` yet (not Epic-default even in `ue5-main`), so the constants and serial offset have never been calibrated against a real game. Activation logs a loud `*** UNVERIFIED ... ACTIVATED ***` WARN; the UI shows a packed-layout badge and embeds a best-effort note in CE XML / CSX / +CE Field exports. The native CE GObjects pointer chain (`get_ce_pointer_info`) cannot express the bit reconstruction → it degrades to the absolute object address. Recalibrate the constants live (no rebuild) via the `set_packed_consts` pipe command (`align_bits` / `ptr_mask_bits` / `force` / `serial_off`), which echoes reconstructed `GObjects[0..7]` samples for eyeball calibration. **Teleport is unaffected** — Wirbel resolves the actor via GWorld property chains, never through FUObjectItem.
+
 -----
 
 ## DynOff — Dynamic Offset Detection

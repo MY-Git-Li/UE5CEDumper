@@ -563,6 +563,15 @@ static void FillPointerSnapshot(json& data) {
     data["build_number"]         = (int)VER_BUILD;
     data["publisher_thumbprint"] = g_cachedPublisherThumbprint ? g_cachedPublisherThumbprint : "";
     data["object_count"]         = Aura::GetCount();
+    // FUObjectItem layout (so the UI can flag the *** UNVERIFIED *** UE5.7+ packed mode).
+    //   classic    — UObject* at item+0x00  (UE4.x..UE5.6)
+    //   unpacked57 — UObject* at item+0x08  (UE5.7+ reordered, direct ptr)
+    //   packed57   — UObject* reconstructed from two split fields (UNVERIFIED)
+    data["item_packed"]          = Aura::IsPacked();
+    data["item_obj_offset"]      = Aura::GetItemObjOffset();
+    data["item_size"]            = Aura::GetItemSize();
+    data["item_layout_mode"]     = Aura::IsPacked() ? "packed57"
+                                   : (Aura::GetItemObjOffset() != 0 ? "unpacked57" : "classic");
     data["gobjects_method"]         = g_cachedGObjectsMethod;
     data["gnames_method"]           = g_cachedGNamesMethod;
     data["gworld_method"]           = g_cachedGWorldMethod;
@@ -2549,16 +2558,38 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             data["within_chunk"]   = withinChunk;
             data["field_offset"]   = fieldOffset;
 
-            // CE offset chain (bottom-to-top):
+            if (Aura::IsPacked()) {
+                // UE5.7+ PACKED FUObjectItem: the UObject* is bit-packed across two item
+                // fields and reconstructed via shift/mask — a native CE pointer chain
+                // CANNOT express that. Degrade to the ABSOLUTE object address (valid for
+                // this session only; won't survive a restart / ASLR rebase). *** UNVERIFIED ***
+                data["packed_layout"] = true;
+                data["warning"] =
+                    "UE5.7+ packed FUObjectItem layout (UNVERIFIED): the GObjects-relative CE "
+                    "pointer chain cannot reconstruct the bit-packed object pointer. Falling back "
+                    "to the ABSOLUTE object address — it will NOT survive a game restart or ASLR "
+                    "rebase, so re-resolve after each launch.";
+                json offsets = json::array();
+                offsets.push_back(fieldOffset);     // single hop: absolute object addr + field
+                data["ce_offsets"] = offsets;
+                data["ce_base"]    = Renge::AddrToStr(addr);  // absolute object address
+                return Renge::MakeResponse(id, data).dump();
+            }
+
+            // CE offset chain (bottom-to-top), DIRECT layouts (classic / UE5.7+ unpacked):
             // Level 4 (outermost): deref FUObjectArray* → chunkTable (offset 0)
             // Level 3: chunkTable + chunkIndex*8 → chunk
-            // Level 2: chunk + withinChunk*itemSize → FUObjectItem.Object (offset 0)
+            // Level 2: chunk + withinChunk*itemSize + objOffset → FUObjectItem.Object*
             // Level 1 (innermost): Object + fieldOffset → value
+            // NOTE: the item hop adds GetItemObjOffset() so the chain dereferences the
+            // Object pointer at its real within-item offset — +0x00 on classic, +0x08 on
+            // UE5.7+ unpacked (where FlagsAndRefCount sits at item+0x00).
+            data["packed_layout"] = false;
             json offsets = json::array();
-            offsets.push_back(fieldOffset);                              // field offset from UObject*
-            offsets.push_back(withinChunk * Aura::GetItemSize()); // item in chunk
-            offsets.push_back(chunkIndex * 8);                           // chunk in table
-            offsets.push_back(0);                                         // deref FUObjectArray.Objects
+            offsets.push_back(fieldOffset);                                              // field offset from UObject*
+            offsets.push_back(withinChunk * Aura::GetItemSize() + Aura::GetItemObjOffset()); // item in chunk → Object*
+            offsets.push_back(chunkIndex * 8);                                           // chunk in table
+            offsets.push_back(0);                                                        // deref FUObjectArray.Objects
 
             data["ce_offsets"] = offsets;
 
@@ -2572,6 +2603,48 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
         }
 
         // === get_offsets: Return all detected FField/FProperty/UStruct offsets ===
+        // === set_packed_consts: runtime calibration / force-enable for the UE5.7+
+        //     *** UNVERIFIED *** packed FUObjectItem reconstruction (no rebuild needed).
+        //     Tweak align_bits / ptr_mask_bits (and optional serial_off) until the echoed
+        //     reconstructed samples resolve real UObject names; force:true dry-runs packed
+        //     mode against a game even when normal detection chose a direct layout. ===
+        if (cmd == Renge::CMD_SET_PACKED_CONSTS) {
+            int  alignBits = request.value("align_bits", 0);   // <=0 => leave unchanged
+            int  serialOff = request.value("serial_off", -1);  // <0  => leave unchanged
+            bool force     = request.value("force", false);
+
+            // ptr_mask_bits may arrive as a hex string ("0x3FFF") or a number; 0 => unchanged.
+            uint64_t ptrMask = 0;
+            if (request.contains("ptr_mask_bits")) {
+                const auto& v = request["ptr_mask_bits"];
+                if (v.is_string())              ptrMask = Renge::StrToAddr(v.get<std::string>());
+                else if (v.is_number_unsigned()) ptrMask = v.get<uint64_t>();
+                else if (v.is_number_integer())  ptrMask = static_cast<uint64_t>(v.get<int64_t>());
+            }
+
+            Aura::SetPackedConsts(alignBits, ptrMask, force, serialOff);
+
+            json data;
+            data["item_packed"]      = Aura::IsPacked();
+            data["item_obj_offset"]  = Aura::GetItemObjOffset();
+            data["item_size"]        = Aura::GetItemSize();
+            data["item_layout_mode"] = Aura::IsPacked() ? "packed57"
+                                       : (Aura::GetItemObjOffset() != 0 ? "unpacked57" : "classic");
+            // Echo reconstructed samples so the operator can eyeball-calibrate live.
+            json samples = json::array();
+            int n = Aura::GetCount();
+            for (int i = 0; i < 8 && i < n; ++i) {
+                uintptr_t obj = Aura::GetByIndex(i);
+                json s;
+                s["index"] = i;
+                s["addr"]  = Renge::AddrToStr(obj);
+                s["name"]  = obj ? Ubel::GetName(obj) : "";
+                samples.push_back(s);
+            }
+            data["samples"] = samples;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
         if (cmd == Renge::CMD_GET_OFFSETS) {
             json data;
             data["build_info"]         = BUILD_VERSION_STRING;
@@ -2584,6 +2657,12 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             data["ustruct_childprops"] = DynOff::USTRUCT_CHILDPROPS;
             data["ustruct_propssize"]  = DynOff::USTRUCT_PROPSSIZE;
             data["ustruct_script"]     = DynOff::USTRUCT_SCRIPT;
+            // FUObjectItem layout self-description (mirrors get_pointers; see FillPointerSnapshot).
+            data["item_packed"]        = Aura::IsPacked();
+            data["item_obj_offset"]    = Aura::GetItemObjOffset();
+            data["item_size"]          = Aura::GetItemSize();
+            data["item_layout_mode"]   = Aura::IsPacked() ? "packed57"
+                                         : (Aura::GetItemObjOffset() != 0 ? "unpacked57" : "classic");
             if (DynOff::bUseFProperty) {
                 data["ffield_class"]       = DynOff::FFIELD_CLASS;
                 data["ffield_next"]        = DynOff::FFIELD_NEXT;

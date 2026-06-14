@@ -14,6 +14,7 @@
 #include "Genau.h"
 #include "Denken.h"
 #include "Cancel.h"
+#include "PackedItem.h"   // UE5.7+ packed FUObjectItem reconstruction (Reconstruct + consts)
 
 // Defined in Frieren.cpp — cached UE version for layout branching
 extern uint32_t g_cachedUEVersion;
@@ -53,6 +54,20 @@ static int         s_itemSize = 16;  // FUObjectItem stride (auto-detected: 16 o
 //           FUObjectItemInitialOffset. Applied by GetByIndex / ProbeStride / GetSerialNumber.
 static int         s_itemObjOffset = 0;
 static bool        s_isFlat   = false; // true = non-chunked flat array (some UE4 builds)
+
+// Within-item layout mode. Classic / Unpacked57 both read the UObject* directly at
+// item+s_itemObjOffset (0x00 / 0x08). Packed57 (UE5.7+ UE_ENABLE_FUOBJECT_ITEM_PACKING)
+// must RECONSTRUCT the pointer from two split fields — see PackedItem.h. Packed57 is a
+// last-resort, auto-detected ONLY when both direct modes fail (see DetectItemSize), and
+// is *** UNVERIFIED *** (no shipping game uses it yet). Process-lifetime constant after
+// Init() → the GetByIndex Packed57 branch is perfectly predicted on the hot path.
+static PackedItem::ItemLayoutMode s_layoutMode = PackedItem::ItemLayoutMode::Classic;
+// Calibratable packed reconstruction constants (defaults from assumed UE5.7 source).
+// Overridable at runtime via SetPackedConsts / the set_packed_consts pipe command so a
+// real packed game can be calibrated without a rebuild.
+static PackedItem::PackedConsts   s_packedConsts;
+// Best-effort SerialNumber offset under packing (layout unknown — see GetSerialNumber).
+static int         s_packedSerialOff = 0x0C;
 
 // GAP #1: Decryption hook for encrypted GObjects pointers.
 // Default nullptr = identity (zero overhead — no indirect call on hot path).
@@ -497,15 +512,32 @@ static bool LooksLikeUObject(uintptr_t obj) {
 // Test a candidate stride against a chunk, counting valid UObject items.
 // Returns the number of items that resolved names (strong) and total valid items (weak).
 // NOTE: No early exit — scans all maxItems for fair comparison across strides.
+//
+// reconstructPacked: when true, the object pointer is RECONSTRUCTED from the UE5.7+
+// packed encoding (flags@item+0x00, ptrLow@item+0x08 -> PackedItem::Reconstruct) instead
+// of read directly at item+s_itemObjOffset. The validation that follows (LooksLikeUObject
+// + FName resolution) runs on the RECONSTRUCTED pointer — critical, because on a packed
+// layout the raw item+0 field is FlagsAndRefCount, never a pointer, so scoring the raw
+// field would mark every packed game all-bad.
 static void ProbeStride(uintptr_t chunkBase, int stride, int maxItems,
-                        int& outGood, int& outNamed, int& outNull, int& outBad) {
+                        int& outGood, int& outNamed, int& outNull, int& outBad,
+                        bool reconstructPacked = false) {
     outGood = outNamed = outNull = outBad = 0;
 
     for (int idx = 0; idx < maxItems; ++idx) {
         int64_t byteOff = static_cast<int64_t>(idx) * stride;
 
         uintptr_t obj = 0;
-        if (!Macht::ReadSafe(chunkBase + byteOff + s_itemObjOffset, obj)) {
+        if (reconstructPacked) {
+            uint64_t flags = 0; uint32_t ptrLow = 0;
+            if (!Macht::ReadSafe(chunkBase + byteOff, flags) ||
+                !Macht::ReadSafe(chunkBase + byteOff + 0x08, ptrLow)) {
+                ++outBad;
+                if (outBad > 30 && outGood == 0) break;
+                continue;
+            }
+            obj = PackedItem::Reconstruct(flags, ptrLow, s_packedConsts);
+        } else if (!Macht::ReadSafe(chunkBase + byteOff + s_itemObjOffset, obj)) {
             ++outBad;
             if (outBad > 30 && outGood == 0) break;  // Too many read failures, give up
             continue;
@@ -756,57 +788,66 @@ static void DetectStrideForCurrentObjOffset(uintptr_t chunkTable, uintptr_t chun
     }
 }
 
-// Diagnostic ONLY (no behavior change; runs only when normal detection fails):
-// decide whether the FUObjectItems look like the UE5.7+ PACKED encoding
-// (UE_ENABLE_FUOBJECT_ITEM_PACKING). In packed mode the UObject* is not stored
-// directly — it is split across two fields and must be reconstructed:
-//     +0x00  int64  FlagsAndRefCount   (high 32 bits = flags + top pointer bits)
-//     +0x08  uint32 ObjectPtrLow       ((ptr >> 3) low 32 bits)
-//     ptr = ((FlagsAndRefCount >> 32) & PtrMask) << (32 + 3) | (ObjectPtrLow << 3)
-// using the current-engine constants UObjectAlignment=8 (=> 3 trailing zero bits)
-// and EInternalObjectFlags_MinFlagBitIndex=14 (=> PtrMask = low 14 bits = 0x3FFF).
-// If the reconstruction yields valid UObjects we log a clear, actionable hint so
-// this layout is identifiable from the log in the field. Packed support itself is
-// NOT implemented (would need this reconstruction on the hot GetByIndex path plus
-// calibration of the two constants against a real packed game), so this only names
-// the failure — it does not make the dump work.
-static void DiagnosePackedLayout(uintptr_t chunkTable, uintptr_t chunk0) {
-    constexpr uint64_t kPtrMask        = 0x3FFFull;  // ~(0xFFFFFFFF << 14): low 14 bits
-    constexpr int      kTrailingZeroes = 3;          // UObjectAlignment == 8
-    constexpr int      kProbeItems     = 16;
+// Result of a packed-layout detection attempt.
+struct PackedProbeResult {
+    bool isFlat = false;   // matched against the flat (chunkTable) base, not chunk0
+    int  stride = 0;       // FUObjectItem stride that matched (24 expected)
+    int  good   = 0;       // reconstructed pointers passing LooksLikeUObject
+    int  named  = 0;       // of those, how many resolved a valid ASCII FName
+    int  probed = 0;       // items examined
+};
 
-    struct Base { const char* what; uintptr_t addr; };
-    const Base bases[]   = { { "chunked", chunk0 }, { "flat", chunkTable } };
+// Detector for the UE5.7+ PACKED FUObjectItem encoding (UE_ENABLE_FUOBJECT_ITEM_PACKING).
+// In packed mode the UObject* is split across two fields and reconstructed — see
+// PackedItem.h. Probes the candidate bases/strides with RECONSTRUCTION enabled (so the
+// validation runs on the rebuilt pointer, not the raw FlagsAndRefCount at item+0) and
+// uses the live (calibratable) s_packedConsts so a tuned constant flows through.
+//
+// *** Anti-false-positive gate ***: this is an UNVERIFIED last-resort path, so the bar is
+// at least as strict as the direct passes — require >=2 reconstructed pointers that each
+// resolve a real ASCII FName when FNamePool is available; only fall back to a pure
+// structural bar (>=8 valid, 0 bad) when names can't be checked. Returns true + fills
+// `out` on a confident match; the CALLER decides activation.
+static bool TryDetectPacked(uintptr_t chunkTable, uintptr_t chunk0, PackedProbeResult& out) {
+    constexpr int kProbeItems = 200;
+    struct Base { const char* what; uintptr_t addr; bool flat; };
+    const Base bases[]   = { { "chunked", chunk0, false }, { "flat", chunkTable, true } };
     const int  strides[] = { 24, 16 };  // packed item is 24B; 16B as a fallback guess
+
+    int  bestScore = INT_MIN;
+    bool found = false;
+    const bool haveNames = Serie::IsInitialized();
 
     for (const auto& base : bases) {
         if (!base.addr) continue;
         for (int stride : strides) {
-            int valid = 0, probed = 0;
-            for (int idx = 0; idx < kProbeItems; ++idx) {
-                uintptr_t itemAddr = base.addr + static_cast<uintptr_t>(idx) * stride;
-                uint64_t flags  = 0;
-                uint32_t ptrLow = 0;
-                if (!Macht::ReadSafe(itemAddr, flags))          break;
-                if (!Macht::ReadSafe(itemAddr + 0x08, ptrLow))  break;
-                ++probed;
-                if (ptrLow == 0) continue;  // likely a null/empty slot
-                uintptr_t obj = (static_cast<uintptr_t>((flags >> 32) & kPtrMask) << (32 + kTrailingZeroes))
-                              | (static_cast<uintptr_t>(ptrLow) << kTrailingZeroes);
-                if (LooksLikeUObject(obj)) ++valid;
-            }
-            if (valid >= 2) {
-                LOG_WARN("ObjectArray: items look like UE5.7+ PACKED FUObjectItem "
-                         "(UE_ENABLE_FUOBJECT_ITEM_PACKING), %s base / stride %d: %d/%d reconstruct "
-                         "to valid UObjects via ptr=((flags>>32)&0x3FFF)<<35|(ptrLow<<3). This packed "
-                         "encoding is NOT yet supported -> the object walk will be empty. (assumed "
-                         "constants: UObjectAlignment=8, EInternalObjectFlags_MinFlagBitIndex=14 — "
-                         "verify against the game if these changed)",
-                         base.what, stride, valid, probed);
-                return;
+            int good, named, null_, bad;
+            ProbeStride(base.addr, stride, kProbeItems, good, named, null_, bad,
+                        /*reconstructPacked=*/true);
+            LOG_INFO("ObjectArray: packed-probe %s base / stride %d: good=%d, named=%d, null=%d, bad=%d",
+                     base.what, stride, good, named, null_, bad);
+
+            bool strong = haveNames ? (named >= 2) : (good >= 8 && bad == 0);
+            if (!strong) continue;
+
+            int score = ComputeStrideScore(named, good, bad);
+            if (score > bestScore) {
+                bestScore  = score;
+                out.isFlat = base.flat;
+                out.stride = stride;
+                out.good   = good;
+                out.named  = named;
+                out.probed = kProbeItems;
+                found = true;
             }
         }
     }
+    return found;
+}
+
+// Negative-case companion to TryDetectPacked: log that the layout is genuinely
+// unrecognised so the field log stays actionable when even packed reconstruction fails.
+static void LogPackedDiagnosticNegative() {
     LOG_INFO("ObjectArray: packed-layout diagnostic negative — items do not match the UE5.7+ packed "
              "FUObjectItem encoding either; layout is genuinely unrecognised (encrypted ptr? wrong "
              "GObjects? new variant?).");
@@ -848,6 +889,11 @@ static void DetectItemSize() {
         return;
     }
 
+    // Reset the layout mode each detection run (Init may be called again on re-attach).
+    // The two direct passes below keep it non-packed; only the last-resort packed branch
+    // promotes it to Packed57.
+    s_layoutMode = PackedItem::ItemLayoutMode::Classic;
+
     int candidates[] = { 16, 24, 20 };
     constexpr int NUM_CANDIDATES = 3;
 
@@ -878,6 +924,8 @@ static void DetectItemSize() {
 
         if (bestTotal >= threshold) {
             s_itemSize = bestStride;   // s_itemObjOffset / s_isFlat already reflect this pass
+            s_layoutMode = (s_itemObjOffset != 0) ? PackedItem::ItemLayoutMode::Unpacked57
+                                                  : PackedItem::ItemLayoutMode::Classic;
             if (s_itemObjOffset != 0) {
                 LOG_INFO("ObjectArray: FUObjectItem size=%d, object-ptr offset=+0x%02X (UE5.7+ reordered item) — %d named, %d total, %d bad%s",
                          bestStride, s_itemObjOffset, bestNamed, bestCount, bestBad, s_isFlat ? " (flat)" : "");
@@ -897,21 +945,47 @@ static void DetectItemSize() {
         }
     }
 
-    // Neither pass crossed the confidence threshold — fall back to the strongest seen.
+    // Neither DIRECT pass crossed the confidence threshold — fall back to the strongest
+    // seen. A weak-but-real direct match still beats the unverified packed path, so the
+    // tentative fallback takes precedence over packed detection below.
     s_itemObjOffset = gObjOff;
     s_isFlat = gFlat;
     if (gStride > 0 && (gHasNames ? gNamed : gCount) > 0) {
         s_itemSize = gStride;
+        s_layoutMode = (gObjOff != 0) ? PackedItem::ItemLayoutMode::Unpacked57
+                                      : PackedItem::ItemLayoutMode::Classic;
         LOG_WARN("ObjectArray: FUObjectItem size tentatively set to %d bytes, object-ptr offset +0x%02X (only %d items validated)",
                  gStride, gObjOff, gHasNames ? gNamed : gCount);
-    } else {
-        s_itemObjOffset = 0;
-        LOG_WARN("ObjectArray: Could not auto-detect item size, keeping default %d", s_itemSize);
-        // Both the classic and UE5.7+ unpacked passes failed. Before giving up, name
-        // the most likely modern cause so the log is actionable: the UE5.7+ PACKED
-        // FUObjectItem encoding (not yet supported). Pure diagnostic — no behavior change.
-        DiagnosePackedLayout(chunkTable, chunk0);
+        return;
     }
+
+    // Both direct modes produced NOTHING — the dump would be empty. As a LAST RESORT try
+    // the UE5.7+ PACKED FUObjectItem encoding (reconstruct the ptr from two split fields).
+    // This path is *** UNVERIFIED *** (no shipping game uses it yet) and only runs here,
+    // where there is nothing to regress — a wrong activation is no worse than the empty
+    // dump it replaces, and it is loudly flagged.
+    PackedProbeResult packed;
+    if (TryDetectPacked(chunkTable, chunk0, packed)) {
+        s_layoutMode    = PackedItem::ItemLayoutMode::Packed57;
+        s_itemSize      = packed.stride;   // 24 expected
+        s_itemObjOffset = 0;               // unused for the object read under packing
+        s_isFlat        = packed.isFlat;
+        LOG_WARN("ObjectArray: *** UNVERIFIED UE5.7+ PACKED FUObjectItem layout ACTIVATED *** "
+                 "stride=%d %s, %d reconstructed (%d named) of %d probed. This packed encoding "
+                 "has NEVER been validated against a real game — object addresses, serial numbers "
+                 "and every downstream export (CE XML / CSX / Teleport) are BEST-EFFORT. "
+                 "Constants: alignBits=%d, ptrMask=0x%llX (recalibrate via set_packed_consts if "
+                 "names look wrong).",
+                 packed.stride, packed.isFlat ? "(flat)" : "(chunked)",
+                 packed.good, packed.named, packed.probed,
+                 s_packedConsts.alignBits, (unsigned long long)s_packedConsts.ptrMaskBits);
+        return;
+    }
+
+    // Even packed reconstruction failed — the layout is genuinely unrecognised.
+    s_itemObjOffset = 0;
+    LOG_WARN("ObjectArray: Could not auto-detect item size, keeping default %d", s_itemSize);
+    LogPackedDiagnosticNegative();
 }
 
 void Init(uintptr_t gobjectsAddr) {
@@ -944,6 +1018,41 @@ bool IsFlat() {
     return s_isFlat;
 }
 
+// Within-item byte offset of the UObject* for the two DIRECT layouts (0x00 classic,
+// 0x08 UE5.7+ unpacked). Meaningless under Packed57 (reconstructed, not stored) — the
+// CE-chain caller in Fern guards on IsPacked() before using this.
+int GetItemObjOffset() {
+    return s_itemObjOffset;
+}
+
+bool IsPacked() {
+    return s_layoutMode == PackedItem::ItemLayoutMode::Packed57;
+}
+
+// Runtime calibration for the *** UNVERIFIED *** packed reconstruction. Lets the first
+// real packed game tune alignBits / ptrMaskBits (and optionally the serial offset) and
+// force-activate packed mode without a rebuild. force=true switches s_layoutMode to
+// Packed57 unconditionally (used by the set_packed_consts pipe command to dry-run the
+// reconstruction against a game even when normal detection chose a direct mode).
+void SetPackedConsts(int alignBits, uint64_t ptrMaskBits, bool force, int serialOff) {
+    if (alignBits > 0)   s_packedConsts.alignBits   = alignBits;
+    if (ptrMaskBits != 0) s_packedConsts.ptrMaskBits = ptrMaskBits;
+    if (serialOff >= 0)  s_packedSerialOff = serialOff;
+    if (force) {
+        s_layoutMode = PackedItem::ItemLayoutMode::Packed57;
+        s_itemObjOffset = 0;
+        LOG_WARN("ObjectArray: *** packed mode FORCE-ENABLED via SetPackedConsts *** "
+                 "alignBits=%d, ptrMask=0x%llX, serialOff=0x%X, stride=%d. This is an "
+                 "UNVERIFIED layout — reconstructed addresses are best-effort.",
+                 s_packedConsts.alignBits, (unsigned long long)s_packedConsts.ptrMaskBits,
+                 s_packedSerialOff, s_itemSize);
+    } else {
+        LOG_INFO("ObjectArray: packed consts updated: alignBits=%d, ptrMask=0x%llX, serialOff=0x%X",
+                 s_packedConsts.alignBits, (unsigned long long)s_packedConsts.ptrMaskBits,
+                 s_packedSerialOff);
+    }
+}
+
 uintptr_t GetByIndex(int32_t index) {
     if (!s_arrayAddr || index < 0 || index >= GetCount()) return 0;
 
@@ -966,6 +1075,14 @@ uintptr_t GetByIndex(int32_t index) {
         if (!Macht::ReadSafe(arrayBase + chunkIndex * sizeof(uintptr_t), chunk) || !chunk) return 0;
 
         itemAddr = chunk + static_cast<uintptr_t>(withinChunk) * s_itemSize;
+    }
+
+    if (s_layoutMode == PackedItem::ItemLayoutMode::Packed57) {
+        // *** UNVERIFIED *** UE5.7+ packed item: UObject* is split across two fields.
+        uint64_t flags = 0; uint32_t ptrLow = 0;
+        if (!Macht::ReadSafe(itemAddr, flags))         return 0;
+        if (!Macht::ReadSafe(itemAddr + 0x08, ptrLow)) return 0;
+        return PackedItem::Reconstruct(flags, ptrLow, s_packedConsts);
     }
 
     uintptr_t object = 0;
@@ -1022,8 +1139,17 @@ int32_t GetSerialNumber(int32_t index) {
     //                        → +0x0C (16B stride) / +0x10 (24B stride)
     //   UE5.7+  (objOff!=0): FlagsAndRefCount(8) + Object(8) + SerialNumber(4) + ClusterRootIndex(4)
     //                        → SerialNumber sits right after Object, i.e. objOff + 0x08
-    int serialOff = (s_itemObjOffset != 0) ? (s_itemObjOffset + 0x08)
+    //   packed57: layout is *** UNVERIFIED *** — SerialNumber position is not pinned.
+    //             Best-effort guess (calibratable via set_packed_consts serial_off). A
+    //             wrong value only degrades FWeakObjectPtr staleness resolution (weak
+    //             refs / delegates), never the core object walk.
+    int serialOff;
+    if (s_layoutMode == PackedItem::ItemLayoutMode::Packed57) {
+        serialOff = s_packedSerialOff;
+    } else {
+        serialOff = (s_itemObjOffset != 0) ? (s_itemObjOffset + 0x08)
                                            : ((s_itemSize >= 24) ? 0x10 : 0x0C);
+    }
     int32_t serial = 0;
     Macht::ReadSafe(itemAddr + serialOff, serial);
     return serial;

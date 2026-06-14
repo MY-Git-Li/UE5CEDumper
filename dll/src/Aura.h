@@ -51,7 +51,9 @@ uintptr_t GetByIndex(int32_t index);
 
 // Get FUObjectItem by index (returns nullptr if invalid).
 // WARNING: the returned struct's `.Object` field is only valid on the CLASSIC layout
-// (UE4.x..UE5.6). For the object pointer use GetByIndex(), which is offset-aware.
+// (UE4.x..UE5.6). It is WRONG on UE5.7+ Unpacked (Object* moved to +0x08) and on
+// UE5.7+ Packed (Object* is reconstructed from two split fields, not stored). For the
+// object pointer ALWAYS use GetByIndex(), which is layout-aware.
 FUObjectItem* GetItem(int32_t index);
 
 // Read the SerialNumber of the FUObjectItem at the given index.
@@ -70,6 +72,20 @@ uintptr_t FindByFullName(const std::string& fullName);
 
 // Get the detected FUObjectItem stride in bytes (16 or 24)
 int GetItemSize();
+
+// Within-item byte offset of the UObject* for the two DIRECT layouts
+// (0x00 classic, 0x08 UE5.7+ unpacked). Not meaningful under packed mode.
+int GetItemObjOffset();
+
+// True when the detected layout is the UE5.7+ *** UNVERIFIED *** packed
+// FUObjectItem encoding (UObject* reconstructed from two split fields).
+bool IsPacked();
+
+// Runtime calibration / force-enable for the packed reconstruction (no rebuild).
+// Pass alignBits<=0 / ptrMaskBits==0 / serialOff<0 to leave that field unchanged.
+// force=true switches the live layout to packed unconditionally (calibration harness
+// for the first real packed game). See PackedItem.h for the encoding.
+void SetPackedConsts(int alignBits, uint64_t ptrMaskBits, bool force, int serialOff = -1);
 
 // Whether the GObjects array is a flat (non-chunked) FFixedUObjectArray.
 // Flat arrays were used in UE4.11-4.20; chunked arrays in UE4.21+ and all UE5.

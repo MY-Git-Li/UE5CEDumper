@@ -670,6 +670,8 @@ public static class CeXmlExportService
         var sb = new StringBuilder();
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
         sb.AppendLine("<CheatTable>");
+        // Best-effort note when the game uses the UE5.7+ UNVERIFIED packed layout (no-op otherwise).
+        sb.Append(PackedLayoutNotice.XmlComment);
         sb.AppendLine("  <CheatEntries>");
 
         // Build the nested structure recursively via indentation tracking
@@ -751,6 +753,8 @@ public static class CeXmlExportService
         var sb = new StringBuilder();
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
         sb.AppendLine("<CheatTable>");
+        // Best-effort note when the game uses the UE5.7+ UNVERIFIED packed layout (no-op otherwise).
+        sb.Append(PackedLayoutNotice.XmlComment);
         sb.AppendLine("  <CheatEntries>");
 
         var indent = "    ";

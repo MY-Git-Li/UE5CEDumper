@@ -120,6 +120,10 @@ public sealed class DumpService : IDumpService
             ObjectCount = ptrs["object_count"]?.GetValue<int>() ?? 0,
             ModuleName = ptrs["module_name"]?.GetValue<string>() ?? "",
             ModuleBase = ptrs["module_base"]?.GetValue<string>() ?? "",
+            // FUObjectItem layout (older DLLs omit these → classic/false fallback)
+            ItemLayoutMode = ptrs["item_layout_mode"]?.GetValue<string>() ?? "classic",
+            ItemPacked = ptrs["item_packed"]?.GetValue<bool>() ?? false,
+            ItemObjOffset = ptrs["item_obj_offset"]?.GetValue<int>() ?? 0,
             GObjectsMethod = ptrs["gobjects_method"]?.GetValue<string>() ?? "aob",
             GNamesMethod = ptrs["gnames_method"]?.GetValue<string>() ?? "aob",
             GWorldMethod = ptrs["gworld_method"]?.GetValue<string>() ?? "aob",
@@ -566,6 +570,47 @@ public sealed class DumpService : IDumpService
             FieldOffset = fieldOffset,
             CeOffsets = offsets.ToArray(),
             CeBase = res["ce_base"]?.GetValue<string>() ?? "",
+            PackedLayout = res["packed_layout"]?.GetValue<bool>() ?? false,
+            Warning = res["warning"]?.GetValue<string>() ?? "",
+        };
+    }
+
+    public async Task<PackedConstsResult> SetPackedConstsAsync(int alignBits = 0, ulong ptrMaskBits = 0, bool force = false, int serialOff = -1, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "set_packed_consts",
+            ["align_bits"] = alignBits,
+            // Send the mask as a hex string so large values round-trip unambiguously.
+            ["ptr_mask_bits"] = "0x" + ptrMaskBits.ToString("X"),
+            ["force"] = force,
+            ["serial_off"] = serialOff,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        var samples = new List<PackedSample>();
+        if (res["samples"] is JsonArray arr)
+        {
+            foreach (var s in arr)
+            {
+                if (s is null) continue;
+                samples.Add(new PackedSample
+                {
+                    Index = s["index"]?.GetValue<int>() ?? 0,
+                    Addr = s["addr"]?.GetValue<string>() ?? "",
+                    Name = s["name"]?.GetValue<string>() ?? "",
+                });
+            }
+        }
+
+        return new PackedConstsResult
+        {
+            ItemLayoutMode = res["item_layout_mode"]?.GetValue<string>() ?? "classic",
+            ItemPacked = res["item_packed"]?.GetValue<bool>() ?? false,
+            ItemObjOffset = res["item_obj_offset"]?.GetValue<int>() ?? 0,
+            ItemSize = res["item_size"]?.GetValue<int>() ?? 0,
+            Samples = samples.ToArray(),
         };
     }
 

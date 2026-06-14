@@ -84,10 +84,17 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public bool ShowDllBuildOk => IsConnected && Pointers.BuildVersionsMatch;
     public string DllBuildOkText => $"DLL {Pointers.DllBuildNumber}";
 
+    /// <summary>Global "unverified UE5.7+ packed layout" badge in the always-visible top bar:
+    /// only while connected AND the game runs the *** UNVERIFIED *** packed FUObjectItem layout.
+    /// Tells the user that reconstructed addresses and every export are best-effort.</summary>
+    public bool ShowPackedLayoutBadge => IsConnected && Pointers.ShowPackedLayoutBadge;
+    public string PackedLayoutBadgeText => Pointers.PackedLayoutBadgeText;
+
     partial void OnIsConnectedChanged(bool value)
     {
         OnPropertyChanged(nameof(ShowBuildMismatchBadge));
         OnPropertyChanged(nameof(ShowDllBuildOk));
+        OnPropertyChanged(nameof(ShowPackedLayoutBadge));
     }
     [ObservableProperty] private bool _needsScan;       // True when connected but scan not yet done (proxy DLL mode)
     [ObservableProperty] private bool _isScanning;      // True while trigger_scan is in progress
@@ -387,6 +394,12 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 OnPropertyChanged(nameof(BuildMismatchBadgeText));
                 OnPropertyChanged(nameof(ShowDllBuildOk));
                 OnPropertyChanged(nameof(DllBuildOkText));
+            }
+            if (e.PropertyName is nameof(PointerPanelViewModel.ShowPackedLayoutBadge)
+                               or nameof(PointerPanelViewModel.PackedLayoutBadgeText))
+            {
+                OnPropertyChanged(nameof(ShowPackedLayoutBadge));
+                OnPropertyChanged(nameof(PackedLayoutBadgeText));
             }
             if (e.PropertyName == nameof(PointerPanelViewModel.IsAobMakerAvailable))
                 IsAobMakerAvailable = Pointers.IsAobMakerAvailable;

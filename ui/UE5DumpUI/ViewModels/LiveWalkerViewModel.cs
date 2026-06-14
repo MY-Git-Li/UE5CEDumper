@@ -2065,7 +2065,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
                 var t = CeXmlExportService.MapFieldToCeRecordType(field);
                 var added = await _aobMaker.CreateMemoryRecordAsync(
-                    field.Name, StripHexPrefix(field.FieldAddress), t.ValueType, t.IsSigned, t.ShowAsHex);
+                    Services.PackedLayoutNotice.RecordNamePrefix + field.Name,
+                    StripHexPrefix(field.FieldAddress), t.ValueType, t.IsSigned, t.ShowAsHex);
                 if (added)
                 {
                     ok++;
@@ -2600,7 +2601,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         try
         {
             var ok = await _aobMaker!.CreateMemoryRecordAsync(
-                name, StripHexPrefix(address), t.ValueType, t.IsSigned, t.ShowAsHex);
+                Services.PackedLayoutNotice.RecordNamePrefix + name,
+                StripHexPrefix(address), t.ValueType, t.IsSigned, t.ShowAsHex);
             IsAobMakerAvailable = _aobMaker.IsAvailable;
             StatusText = ok
                 ? $"Added to CE: {name}"

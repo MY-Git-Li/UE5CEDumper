@@ -1139,4 +1139,139 @@ public class DumpServiceTests
         Assert.Equal(0, res.Unmapped);
         Assert.Single(res.Props);
     }
+
+    // --- UE5.7+ packed FUObjectItem layout surfacing ---
+
+    [Fact]
+    public async Task InitAsync_ParsesPackedItemLayout()
+    {
+        _pipe.SetHandler(req =>
+        {
+            var cmd = req["cmd"]?.GetValue<string>();
+            if (cmd == "init")
+                return new JsonObject { ["ok"] = true, ["ue_version"] = 507 };
+            if (cmd == "get_pointers")
+                return new JsonObject
+                {
+                    ["ok"] = true,
+                    ["gobjects"] = "0x7FF600A12340",
+                    ["object_count"] = 1024,
+                    ["item_packed"] = true,
+                    ["item_layout_mode"] = "packed57",
+                    ["item_obj_offset"] = 0,
+                    ["item_size"] = 24,
+                };
+            return new JsonObject { ["ok"] = true };
+        });
+
+        var svc = CreateService();
+        var state = await svc.InitAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(state.ItemPacked);
+        Assert.Equal("packed57", state.ItemLayoutMode);
+        Assert.Equal(0, state.ItemObjOffset);
+    }
+
+    [Fact]
+    public async Task InitAsync_DefaultsItemLayoutToClassicWhenKeysAbsent()
+    {
+        // Older DLLs omit the item_* keys → must default to classic / not-packed.
+        _pipe.SetHandler(req =>
+        {
+            var cmd = req["cmd"]?.GetValue<string>();
+            if (cmd == "init")
+                return new JsonObject { ["ok"] = true, ["ue_version"] = 504 };
+            if (cmd == "get_pointers")
+                return new JsonObject
+                {
+                    ["ok"] = true,
+                    ["gobjects"] = "0x7FF600A12340",
+                    ["object_count"] = 1024,
+                };
+            return new JsonObject { ["ok"] = true };
+        });
+
+        var svc = CreateService();
+        var state = await svc.InitAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(state.ItemPacked);
+        Assert.Equal("classic", state.ItemLayoutMode);
+        Assert.Equal(0, state.ItemObjOffset);
+    }
+
+    [Fact]
+    public async Task GetCePointerInfo_PackedLayout_DegradesToAbsoluteAddress()
+    {
+        _pipe.SetHandler(req => new JsonObject
+        {
+            ["ok"] = true,
+            ["packed_layout"] = true,
+            ["warning"] = "UE5.7+ packed FUObjectItem layout (UNVERIFIED): absolute address only.",
+            ["ce_base"] = "0x1F809E08FB0",
+            ["ce_offsets"] = new JsonArray { 0x40 },
+            ["internal_index"] = 123,
+        });
+
+        var svc = CreateService();
+        var info = await svc.GetCePointerInfoAsync("0x1F809E08FB0", 0x40, TestContext.Current.CancellationToken);
+
+        Assert.True(info.PackedLayout);
+        Assert.False(string.IsNullOrEmpty(info.Warning));
+        Assert.Equal("0x1F809E08FB0", info.CeBase);
+        Assert.Single(info.CeOffsets);            // degraded: just the field hop
+        Assert.Equal(0x40, info.CeOffsets[0]);
+    }
+
+    [Fact]
+    public async Task GetCePointerInfo_DirectLayout_KeepsFullGObjectsChain()
+    {
+        _pipe.SetHandler(req => new JsonObject
+        {
+            ["ok"] = true,
+            ["packed_layout"] = false,
+            ["ce_base"] = "\"Game.exe\"+1BA1820",
+            ["ce_offsets"] = new JsonArray { 0x40, 0x108, 0x18, 0 },  // field, item+objOff, chunk, deref
+        });
+
+        var svc = CreateService();
+        var info = await svc.GetCePointerInfoAsync("0x1F809E08FB0", 0x40, TestContext.Current.CancellationToken);
+
+        Assert.False(info.PackedLayout);
+        Assert.Equal("", info.Warning);
+        Assert.Equal(4, info.CeOffsets.Length);   // full GObjects→chunk→item→field chain
+    }
+
+    [Fact]
+    public async Task SetPackedConsts_ParsesModeAndSamples()
+    {
+        _pipe.SetHandler(req =>
+        {
+            Assert.Equal("set_packed_consts", req["cmd"]?.GetValue<string>());
+            Assert.True(req["force"]?.GetValue<bool>());
+            return new JsonObject
+            {
+                ["ok"] = true,
+                ["item_packed"] = true,
+                ["item_layout_mode"] = "packed57",
+                ["item_obj_offset"] = 0,
+                ["item_size"] = 24,
+                ["samples"] = new JsonArray
+                {
+                    new JsonObject { ["index"] = 0, ["addr"] = "0x1F800000000", ["name"] = "CoreUObject" },
+                    new JsonObject { ["index"] = 1, ["addr"] = "0x1F800000100", ["name"] = "Package" },
+                },
+            };
+        });
+
+        var svc = CreateService();
+        var res = await svc.SetPackedConstsAsync(alignBits: 3, ptrMaskBits: 0x3FFF, force: true,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.True(res.ItemPacked);
+        Assert.Equal("packed57", res.ItemLayoutMode);
+        Assert.Equal(24, res.ItemSize);
+        Assert.Equal(2, res.Samples.Length);
+        Assert.Equal("CoreUObject", res.Samples[0].Name);
+        Assert.Equal(1, res.Samples[1].Index);
+    }
 }
