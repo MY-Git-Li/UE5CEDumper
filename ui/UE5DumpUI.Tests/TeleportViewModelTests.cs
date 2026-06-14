@@ -199,7 +199,7 @@ public class TeleportViewModelTests
             NextPov = new()
             {
                 Code = 0, CamX = 0, CamY = 0, CamZ = 100, Pitch = -30, Yaw = 45, Roll = 0,
-                Fov = 90, HasPawn = true, PawnX = 0, PawnY = 0, PawnZ = 0,
+                Fov = 90, Source = "raw", HasPawn = true, PawnX = 0, PawnY = 0, PawnZ = 0,
             },
         };
         var vm = CreateVm(fake, out _);
@@ -211,6 +211,7 @@ public class TeleportViewModelTests
         Assert.Equal("100.000", vm.PovZ);
         Assert.Equal("45.00", vm.PovYaw);
         Assert.Equal("90.0°", vm.PovFov);
+        Assert.Equal("raw", vm.PovSource);       // cached-POV fallback surfaced
         Assert.Contains("100.0", vm.PovDelta);   // Δ to pawn
     }
 
@@ -603,5 +604,24 @@ public class TeleportViewModelTests
         vm.SetConnected(false);
         Assert.False(vm.AutoRefresh);
         Assert.False(vm.IsConnected);
+    }
+
+    [Fact]
+    public async Task Disconnect_clears_pov_display()
+    {
+        var fake = new FakeDumpService
+        {
+            NextPov = new() { Code = 0, CamZ = 100, Fov = 90, HasPawn = true },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        await vm.GetPovCommand.ExecuteAsync(null);
+        Assert.Equal("100.000", vm.PovZ);   // populated
+
+        vm.SetConnected(false);
+        Assert.Equal("—", vm.PovZ);          // cleared on disconnect
+        Assert.Equal("—", vm.PovFov);
+        Assert.Equal("", vm.PovSource);
+        Assert.Equal("", vm.PovDelta);
     }
 }

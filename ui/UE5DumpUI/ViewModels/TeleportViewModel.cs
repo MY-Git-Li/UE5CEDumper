@@ -131,6 +131,9 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _povYaw = "—";
     [ObservableProperty] private string _povRoll = "—";
     [ObservableProperty] private string _povFov = "—";
+    /// <summary>"invoke" / "raw" — how the POV was read ("raw" = cached-POV
+    /// fallback, shown as a chip so the user knows the getters didn't respond).</summary>
+    [ObservableProperty] private string _povSource = "";
     /// <summary>"Δ to pawn: 412.3 uu …" — the camera↔pawn distance plus the hint
     /// that an independent camera barely moves it after a teleport.</summary>
     [ObservableProperty] private string _povDelta = "";
@@ -303,6 +306,22 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         catch (Exception ex)
         {
             _log.Error("Teleport auto-refresh failed", ex);
+        }
+
+        // Auto-update the camera POV alongside the pose. POV is unavailable on
+        // games that cook the camera getters out of reflection (TQ2 / Octopath),
+        // so on any failure SKIP the update (leave the last good values / "—")
+        // rather than clearing or surfacing an error — the pose display stays
+        // useful regardless. Separate try/catch so a POV fault never disturbs the
+        // pose refresh above.
+        try
+        {
+            var pov = await _dump.TeleportGetPovAsync();
+            if (pov.Code == TeleportCodes.Ok) ApplyPov(pov);
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Teleport auto-refresh POV failed", ex);
         }
     }
 
@@ -973,6 +992,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         PovFov = p.Fov > 0
             ? p.Fov.ToString("0.0", CultureInfo.InvariantCulture) + "°"
             : "—";
+        PovSource = p.Source;
         PovDelta = p.HasPawn
             ? string.Format(CultureInfo.InvariantCulture,
                 "Δ to pawn: {0:0.0} uu — Get POV again after a teleport; if this barely " +
@@ -985,6 +1005,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         PovX = PovY = PovZ = "—";
         PovPitch = PovYaw = PovRoll = "—";
         PovFov = "—";
+        PovSource = "";
         PovDelta = "";
     }
 

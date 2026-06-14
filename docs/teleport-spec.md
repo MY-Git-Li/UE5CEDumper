@@ -927,11 +927,49 @@ GWorld → … → LocalPlayer.PlayerController        (ResolveLocalPC, NO debug
     invoke GetFOVAngle()        → float            invoke path)
 ```
 
-Both location+rotation getters failing ⇒ `TP_ERR_INVOKE` (game thread idle).
-FOV is best-effort (0 when absent). A best-effort pawn world location (root
-`RelativeLocation`, resolving the pawn through the debug-camera hop) is included
-for the **camera↔pawn delta** the UI shows — a large delta that barely changes
-after a teleport flags an independent camera.
+Both location+rotation getters failing ⇒ `TP_ERR_INVOKE`. On a hard-stripped
+Shipping build that **cooks the getters out of reflection** (`FindFunc` returns
+nothing) this fires immediately with no game-thread round-trip; `GetPovImpl`
+`LOG_WARN`s the camera-manager class + per-getter found-flags + whether
+`CameraCache` is reflected (build 1112 diagnostics). FOV is best-effort (0 when
+absent). A best-effort pawn world location (root `RelativeLocation`, resolving
+the pawn through the debug-camera hop) is included for the **camera↔pawn delta**
+the UI shows — a large delta that barely changes after a teleport flags an
+independent camera.
+
+### Live-verify (build 1112)
+
+| Game | getters | raw fallback | Note |
+|------|---------|--------------|------|
+| SEED Battle Destiny Remastered (4.27) | ✅ | — | getters work |
+| DQ III HD-2D Remake (UE5) | ✅ | — | getters work |
+| Octopath Traveler (UE5 HD-2D) | ❌ | ✅ (raw) | getters present but `ProcessEvent` returns nothing; cached POV read works |
+| Titan Quest II (UE5) | ❌ | ✅ (raw) | same; `TQ2PlayerCameraManager`, `CameraCache` off=5472 |
+
+PC resolves on all four. On TQ2 / Octopath the getters are **present in
+reflection** (`found loc=1 rot=1`) — not cooked out — but the invoke yields
+nothing; the **raw cached-POV fallback** below recovers it. ⚠ raw read in-game
+LIVE-VERIFY PENDING.
+
+### Raw cached-POV fallback (build 1112)
+
+When both `GetCameraLocation`/`GetCameraRotation` invokes return nothing,
+`Wirbel::ReadPovRaw` reads the cached POV directly, **fully by reflection**:
+`CameraCachePrivate` (`FCameraCacheEntry`, StructProperty) → `POV`
+(`FMinimalViewInfo`) → `Location` / `Rotation` / `FOV`. Inner `UScriptStruct*`s
+resolved via `FStructProperty::Struct` (`DynOff::FSTRUCTPROP_STRUCT` probe, same
+as Ubel's value walk); offsets + LWC width from each field's reflected `Size`. No
+hardcoded layout. Result is tagged `source = "raw"` (vs `"invoke"`), surfaced as a
+chip in the UI POV header. `CameraCachePrivate` is private but reflected on the
+titles seen; UE4's public `CameraCache` is covered by the contains-match.
+
+### Auto-refresh (build 1112)
+
+The Teleport tab's **Auto (0.5s)** toggle refreshes the camera POV alongside the
+pawn pose each tick. On any POV failure the update is **skipped** (last good
+values / "—" stay; no error, no clear), so the pose display is unaffected where
+POV is unavailable. POV clears on disconnect. Manual **Get POV** still surfaces
+the error code.
 
 ### Surfaces (build 1110)
 

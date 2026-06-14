@@ -3201,7 +3201,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 if (pov.HasPawn) {
                     data["pawnX"] = pov.Pawn.X; data["pawnY"] = pov.Pawn.Y; data["pawnZ"] = pov.Pawn.Z;
                 }
-                data["source"] = "invoke";
+                data["source"] = (pov.Source == 1) ? "raw" : "invoke";
             }
             return Renge::MakeResponse(id, data).dump();
         }

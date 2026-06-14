@@ -14,6 +14,49 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-14 — Teleport POV: live-verify + raw cached-POV fallback + auto-refresh (build 1112)
+
+**In-game live-verify of the read-only camera POV (build 1110):**
+
+| Game | UE | POV (getters) | After fallback | Teleport (move) |
+|------|----|---------------|----------------|-----------------|
+| SEED Battle Destiny Remastered | 4.27 | ✅ | ✅ | ✅ |
+| DQ III HD-2D Remake | UE5 HD-2D | ✅ | ✅ | ✅ |
+| Octopath Traveler | UE5 HD-2D | ❌ | ✅ (raw) | ⚠ pawn moves, camera doesn't follow |
+| Titan Quest II | UE5 | ❌ | ✅ (raw) | ❌ (separate visual actor) |
+
+**Root cause (from the new diagnostics, NOT the cooked-out hypothesis I first
+guessed).** The local PlayerController resolves on all four; on TQ2 / Octopath
+the camera getters **are present in reflection** (`getters found loc=1 rot=1`) —
+they're *not* cooked out — but `ProcessEvent` returns no value, so `InvokeRetVec`
+yields nothing. Critically the log also reported **`CameraCache` is reflected**
+(Octopath off=992, TQ2 off=5472 on `TQ2PlayerCameraManager`), so a direct read of
+the cached POV is possible.
+
+**Fix — raw cached-POV fallback (DLL).** `Wirbel::ReadPovRaw` walks, fully by
+reflection (no hardcoded struct layout): `APlayerCameraManager.CameraCachePrivate`
+(`FCameraCacheEntry`) → `POV` (`FMinimalViewInfo`) → `Location` / `Rotation` /
+`FOV`. Inner `UScriptStruct*`s come from `FStructProperty::Struct` via the same
+`DynOff::FSTRUCTPROP_STRUCT` probe Ubel's value-walk uses; LWC width from each
+field's reflected `Size`. `GetPovImpl` calls it when both invoke getters yield
+nothing (and to backfill a rare partial), tagging `source = "raw"` (vs "invoke").
+Surfaced as a chip in the UI POV header (+ `Source` on `TeleportPov`, pipe
+`source`, mailbox `paramsData[81]`). The earlier diagnostic `LOG_WARN` now fires
+only when the invoke AND the raw read both fail.
+
+**Auto-refresh (UI).** When the Teleport tab's **Auto (0.5s)** toggle is on, each
+tick now refreshes the camera POV alongside the pawn pose. On any POV failure the
+update is **skipped silently** (last good values / "—" stay; no error, no clear),
+so the pose display is unaffected on games where POV is unavailable. POV clears on
+disconnect. Manual **Get POV** still surfaces the error code.
+
+No C ABI / pipe / mailbox **shape** change (added a `source` value only). +2 tests
+(POV source surfaced, disconnect clears POV). ⚠ raw-fallback in-game LIVE-VERIFY
+PENDING (the offsets are reflected, but the read itself wants confirmation on TQ2 /
+Octopath).
+
+-----
+
 ## 2026-06-14 — Teleport: remove the dead createHotkey Lua bundle (build 1111)
 
 Deleted `TeleportLuaBundleGenerator` (the `createHotkey`-based "Teleport Lua

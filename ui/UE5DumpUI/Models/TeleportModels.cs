@@ -87,6 +87,11 @@ public sealed class TeleportPov
     /// <summary>Effective field-of-view angle in degrees (0 when unavailable).</summary>
     public double Fov { get; init; }
 
+    /// <summary>"invoke" (camera-manager getters) or "raw" (cached POV read,
+    /// used when the getters exist but ProcessEvent returns nothing — e.g. on
+    /// TQ2 / Octopath).</summary>
+    public string Source { get; init; } = "invoke";
+
     /// <summary>True when the pawn world location was resolved for the delta.</summary>
     public bool HasPawn { get; init; }
     public double PawnX { get; init; }

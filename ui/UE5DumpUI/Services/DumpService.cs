@@ -2012,6 +2012,7 @@ public sealed class DumpService : IDumpService
             Yaw   = res["yaw"]?.GetValue<double>() ?? 0,
             Roll  = res["roll"]?.GetValue<double>() ?? 0,
             Fov   = res["fov"]?.GetValue<double>() ?? 0,
+            Source = res["source"]?.GetValue<string>() ?? "invoke",
             HasPawn = res["hasPawn"]?.GetValue<bool>() ?? false,
             PawnX = res["pawnX"]?.GetValue<double>() ?? 0,
             PawnY = res["pawnY"]?.GetValue<double>() ?? 0,
