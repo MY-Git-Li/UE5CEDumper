@@ -111,6 +111,7 @@ public class StubDumpService : IDumpService
     public virtual Task<List<TeleportMarker>> TeleportGetMarkersAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<int> TeleportClearMarkerAsync(int slot, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<TeleportResult> TeleportRecallLastAsync(CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<TeleportPov> TeleportGetPovAsync(CancellationToken ct = default) => throw new NotImplementedException();
 }
 
 public class CsxExportServiceTests

@@ -78,12 +78,23 @@ public class TeleportScriptGeneratorTests
     }
 
     [Fact]
-    public void BuildBatchRows_returns_eleven_teleport_rows()
+    public void GetPov_record_uses_op_11_and_prints_camera()
+    {
+        var s = TeleportScriptGenerator.Generate(TeleportScriptGenerator.Action.GetPov);
+        Assert.Contains("writeQword(mb + 0x10, 11)", s);   // op GET_POV
+        Assert.Contains("writeInteger(mb + 0x00, 8)", s);  // CMD_TELEPORT
+        Assert.Contains("Get camera POV", s);
+        Assert.Contains("readDouble(mb + 0x328)", s);      // reads the POV block back
+        Assert.Contains("camera loc=", s);
+    }
+
+    [Fact]
+    public void BuildBatchRows_returns_twelve_teleport_rows()
     {
         var rows = TeleportScriptGenerator.BuildBatchRows();
-        Assert.Equal(11, rows.Count);
+        Assert.Equal(12, rows.Count);
         Assert.All(rows, r => Assert.Equal("Teleport", r.Category));
-        // 3 saves, 3 recalls, recall-last, BugIt, BugItGo, cursor, clear-all.
+        // 3 saves, 3 recalls, recall-last, BugIt, BugItGo, cursor, Get POV, clear-all.
         Assert.All(rows, r => Assert.IsType<CtScriptRow>(r));
         Assert.Contains(rows, r => r.Description == "Save marker 1");
         Assert.Contains(rows, r => r.Description == "Recall marker 3");
@@ -91,6 +102,7 @@ public class TeleportScriptGeneratorTests
         Assert.Contains(rows, r => r.Description == "BugIt (store pose)");
         Assert.Contains(rows, r => r.Description == "BugItGo (go to stored)");
         Assert.Contains(rows, r => r.Description == "Teleport to cursor");
+        Assert.Contains(rows, r => r.Description == "Get camera POV");
         Assert.Contains(rows, r => r.Description == "Clear all markers");
     }
 

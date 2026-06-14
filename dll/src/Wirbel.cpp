@@ -569,6 +569,200 @@ bool GetActorWorld(uintptr_t pawn, double out[3]) {
     return true;
 }
 
+// ---- camera POV read ----
+
+// Invoke a no-arg getter whose return value is an FVector/FRotator (3×float or
+// 3×double per LWC). Returns false when the function / return param can't be
+// resolved or the invoke fails (game thread idle).
+bool InvokeRetVec(uintptr_t instance, const char* fn, double out[3]) {
+    FunctionInfo fi;
+    if (!FindFunc(Ubel::GetClass(instance), fn, fi) || fi.parmsSize <= 0) return false;
+    std::vector<uint8_t> buf(fi.parmsSize, 0);
+    const FunctionParam* rv = FindReturnParam(fi);
+    if (!rv || Invoke(instance, fi, buf) != 0) return false;
+    int32_t need = (rv->size >= 24) ? 24 : 12;
+    if (rv->offset < 0 || rv->offset + need > static_cast<int32_t>(buf.size())) return false;
+    ReadVec3Buf(buf.data() + rv->offset, rv->size, out);
+    return true;
+}
+
+// Invoke a no-arg getter returning a float/double scalar (e.g. GetFOVAngle).
+bool InvokeRetFloat(uintptr_t instance, const char* fn, double& out) {
+    FunctionInfo fi;
+    if (!FindFunc(Ubel::GetClass(instance), fn, fi) || fi.parmsSize <= 0) return false;
+    std::vector<uint8_t> buf(fi.parmsSize, 0);
+    const FunctionParam* rv = FindReturnParam(fi);
+    if (!rv || rv->offset < 0 || Invoke(instance, fi, buf) != 0) return false;
+    if (rv->size == 8 && rv->offset + 8 <= static_cast<int32_t>(buf.size())) {
+        std::memcpy(&out, buf.data() + rv->offset, 8);
+        return true;
+    }
+    if (rv->offset + 4 <= static_cast<int32_t>(buf.size())) {
+        float f = 0;
+        std::memcpy(&f, buf.data() + rv->offset, 4);
+        out = f;
+        return true;
+    }
+    return false;
+}
+
+// Best-effort pawn world location for the camera-vs-pawn delta. Reads the root
+// RelativeLocation (== world when not attached); leaves out untouched on failure.
+bool ReadPawnWorld(uintptr_t pawn, double out[3]) {
+    if (!pawn) return false;
+    uintptr_t pawnClass = Ubel::GetClass(pawn);
+    int32_t rootOff = Ubel::FindFieldOffset(pawnClass, "RootComponent",
+                                            "RootComponent", nullptr, "ObjectProperty");
+    uintptr_t root = ReadPtrAt(pawn, rootOff);
+    if (!root) return false;
+    FieldInfo rfi{};
+    if (!Ubel::FindField(Ubel::GetClass(root), "RelativeLocation",
+                         nullptr, nullptr, nullptr, rfi))
+        return false;
+    return ReadVec3Mem(root + static_cast<uintptr_t>(rfi.Offset), rfi.Size, out);
+}
+
+// Read FStructProperty::Struct (the inner UScriptStruct*) from a StructProperty
+// FieldInfo, so a nested struct can be walked. Mirrors the probe Ubel uses in
+// its value walk (DynOff::FSTRUCTPROP_STRUCT ± a few slots, validated by a
+// readable UScriptStruct name). Returns 0 when not a struct field / unresolved.
+uintptr_t StructInner(const FieldInfo& fi) {
+    if (fi.TypeName != "StructProperty" || !fi.Address) return 0;
+    static const int kProbes[] = { 0, 4, -4, 8, -8, 0x10, -0x10 };
+    for (int d : kProbes) {
+        int off = DynOff::FSTRUCTPROP_STRUCT + d;
+        if (off < 0) continue;
+        uintptr_t cand = 0;
+        if (!Macht::ReadSafe(fi.Address + static_cast<uintptr_t>(off), cand) || !cand)
+            continue;
+        if (cand < 0x10000 || cand > 0x00007FFFFFFFFFFF) continue;
+        std::string sn = Ubel::GetName(cand);
+        if (!sn.empty() && static_cast<unsigned char>(sn[0]) >= 0x20
+            && static_cast<unsigned char>(sn[0]) < 0x7F)
+            return cand;
+    }
+    return 0;
+}
+
+// Raw-read fallback for the camera POV: when the BlueprintCallable getters exist
+// but ProcessEvent yields nothing (observed on TQ2 / Octopath — getters found
+// but the invoke returns no value), read the cached POV directly. Chain (every
+// offset/size resolved by reflection, no hardcoded struct layout):
+//   APlayerCameraManager.CameraCachePrivate (FCameraCacheEntry, StructProperty)
+//     -> POV (FMinimalViewInfo, StructProperty)
+//        -> Location (FVector) / Rotation (FRotator) / FOV (float).
+// CameraCachePrivate is private but still reflected on the titles seen so far;
+// older UE4 may expose it as the public "CameraCache" (contains-match covers it).
+bool ReadPovRaw(uintptr_t cam, double loc[3], double rot[3], double& fov) {
+    uintptr_t camClass = Ubel::GetClass(cam);
+    FieldInfo fiCache{};
+    if (!Ubel::FindField(camClass, "CameraCachePrivate", "CameraCache",
+                         nullptr, "StructProperty", fiCache))
+        return false;
+    uintptr_t cacheStruct = StructInner(fiCache);
+    if (!cacheStruct) return false;
+
+    FieldInfo fiPov{};
+    if (!Ubel::FindField(cacheStruct, "POV", "POV", nullptr, "StructProperty", fiPov))
+        return false;
+    uintptr_t minView = StructInner(fiPov);
+    if (!minView) return false;
+
+    FieldInfo fiLoc{}, fiRot{};
+    if (!Ubel::FindField(minView, "Location", nullptr, nullptr, nullptr, fiLoc)
+        || !Ubel::FindField(minView, "Rotation", nullptr, nullptr, nullptr, fiRot))
+        return false;
+
+    uintptr_t povBase = cam + static_cast<uintptr_t>(fiCache.Offset)
+                            + static_cast<uintptr_t>(fiPov.Offset);
+    if (!ReadVec3Mem(povBase + static_cast<uintptr_t>(fiLoc.Offset), fiLoc.Size, loc))
+        return false;
+    ReadVec3Mem(povBase + static_cast<uintptr_t>(fiRot.Offset), fiRot.Size, rot);
+
+    FieldInfo fiFov{};
+    if (Ubel::FindField(minView, "FOV", nullptr, nullptr, nullptr, fiFov)) {
+        float f = 0;
+        if (Macht::ReadSafe(povBase + static_cast<uintptr_t>(fiFov.Offset), f)) fov = f;
+    }
+    return true;
+}
+
+int32_t GetPovImpl(Pov& out) {
+    out = Pov{};
+    uintptr_t world = DerefWorld();
+    if (!world) return TP_ERR_NOT_INIT;
+    uintptr_t pc = ResolveLocalPC(world);
+    if (!pc) return TP_ERR_NO_CONTROLLER;
+    // NOTE: deliberately NO HopThroughDebugCamera here — the POV should reflect
+    // the ACTIVE on-screen view. When the Debug Camera is on, the LocalPlayer's
+    // controller IS the DebugCameraController and ITS camera manager produces the
+    // free-fly view the user is looking at, which is what we want to report.
+
+    uintptr_t pcClass = Ubel::GetClass(pc);
+    int32_t camOff = Ubel::FindFieldOffset(pcClass, "PlayerCameraManager",
+                                           "PlayerCameraManager", nullptr, "ObjectProperty");
+    uintptr_t cam = ReadPtrAt(pc, camOff);
+    if (!cam) {
+        LOG_WARN("Teleport: POV failed — PlayerCameraManager unresolved (camOff=%d) on "
+                 "PC class '%s'", camOff, Ubel::GetName(pcClass).c_str());
+        return TP_ERR_REFLECTION;
+    }
+
+    double loc[3] = {}, rot[3] = {}, fov = 0;
+    uint8_t source = 0;   // 0 = invoke getters, 1 = raw cached-POV read
+    bool gotLoc = InvokeRetVec(cam, "GetCameraLocation", loc);
+    bool gotRot = InvokeRetVec(cam, "GetCameraRotation", rot);
+
+    if (gotLoc || gotRot) {
+        InvokeRetFloat(cam, "GetFOVAngle", fov);   // best-effort bonus
+        // Rare partial case: backfill a missing component from the cached POV.
+        if (!gotLoc || !gotRot) {
+            double rl[3] = {}, rr[3] = {}, rf = 0;
+            if (ReadPovRaw(cam, rl, rr, rf)) {
+                if (!gotLoc) { loc[0] = rl[0]; loc[1] = rl[1]; loc[2] = rl[2]; }
+                if (!gotRot) { rot[0] = rr[0]; rot[1] = rr[1]; rot[2] = rr[2]; }
+            }
+        }
+    } else {
+        // Both invoke getters yielded nothing. On hard-stripped Shipping builds
+        // (TQ2 / Octopath) the getters are present in reflection but ProcessEvent
+        // returns no value — read the reflected cached POV directly instead.
+        if (ReadPovRaw(cam, loc, rot, fov)) {
+            source = 1;
+            LOG_INFO("Teleport: POV via raw cached-POV read (invoke getters yielded nothing)");
+        } else {
+            uintptr_t camClass = Ubel::GetClass(cam);
+            FunctionInfo probe;
+            bool hasLocFn = FindFunc(camClass, "GetCameraLocation", probe);
+            bool hasRotFn = FindFunc(camClass, "GetCameraRotation", probe);
+            int32_t cacheOff = Ubel::FindFieldOffset(camClass, "CameraCachePrivate",
+                                                     "CameraCache", nullptr, nullptr);
+            LOG_WARN("Teleport: POV failed on '%s' (cam=0x%llX) — getters found loc=%d "
+                     "rot=%d, raw cached-POV read also failed. CameraCache off=%d.",
+                     Ubel::GetName(camClass).c_str(), (unsigned long long)cam,
+                     hasLocFn ? 1 : 0, hasRotFn ? 1 : 0, cacheOff);
+            return TP_ERR_INVOKE;
+        }
+    }
+
+    out.Cam.X = loc[0]; out.Cam.Y = loc[1]; out.Cam.Z = loc[2];
+    out.Cam.Pitch = rot[0]; out.Cam.Yaw = rot[1]; out.Cam.Roll = rot[2];
+    out.Fov = fov;
+    out.Source = source;
+
+    // Best-effort pawn world position for the delta display (resolve the pawn
+    // via the REAL controller, hopping past the debug camera if it's active).
+    double pxyz[3] = {};
+    if (ReadPawnWorld(ResolvePawn(HopThroughDebugCamera(pc)), pxyz)) {
+        out.HasPawn = true;
+        out.Pawn.X = pxyz[0]; out.Pawn.Y = pxyz[1]; out.Pawn.Z = pxyz[2];
+    }
+    LOG_INFO("Teleport: POV cam=(%.1f, %.1f, %.1f) rot=(%.1f, %.1f, %.1f) fov=%.1f hasPawn=%d src=%s",
+             out.Cam.X, out.Cam.Y, out.Cam.Z, out.Cam.Pitch, out.Cam.Yaw, out.Cam.Roll,
+             out.Fov, out.HasPawn ? 1 : 0, out.Source == 1 ? "raw" : "invoke");
+    return TP_OK;
+}
+
 // ---- teleport write (§5.5) ----
 
 // Move the pawn to xyz. Tier 1 = invoke (preferTeleportTo: K2_TeleportTo with
@@ -813,6 +1007,11 @@ namespace Wirbel {
 int32_t GetPose(Pose& out, char* mapName, int32_t mapNameCap, uint8_t* outSource) {
     std::lock_guard<std::mutex> lock(s_opMutex);
     return GetPoseImpl(out, mapName, mapNameCap, outSource);
+}
+
+int32_t GetPov(Pov& out) {
+    std::lock_guard<std::mutex> lock(s_opMutex);
+    return GetPovImpl(out);
 }
 
 int32_t SaveMarker(int32_t slot) {

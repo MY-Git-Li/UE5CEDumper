@@ -1997,6 +1997,29 @@ public sealed class DumpService : IDumpService
         return ParseTeleportResult(res);
     }
 
+    public async Task<TeleportPov> TeleportGetPovAsync(CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "teleport_get_pov" };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return new TeleportPov
+        {
+            Code  = res["code"]?.GetValue<int>() ?? -1,
+            CamX  = res["camX"]?.GetValue<double>() ?? 0,
+            CamY  = res["camY"]?.GetValue<double>() ?? 0,
+            CamZ  = res["camZ"]?.GetValue<double>() ?? 0,
+            Pitch = res["pitch"]?.GetValue<double>() ?? 0,
+            Yaw   = res["yaw"]?.GetValue<double>() ?? 0,
+            Roll  = res["roll"]?.GetValue<double>() ?? 0,
+            Fov   = res["fov"]?.GetValue<double>() ?? 0,
+            Source = res["source"]?.GetValue<string>() ?? "invoke",
+            HasPawn = res["hasPawn"]?.GetValue<bool>() ?? false,
+            PawnX = res["pawnX"]?.GetValue<double>() ?? 0,
+            PawnY = res["pawnY"]?.GetValue<double>() ?? 0,
+            PawnZ = res["pawnZ"]?.GetValue<double>() ?? 0,
+        };
+    }
+
     private static TeleportPose ParsePose(JsonObject res) => new()
     {
         Code  = res["code"]?.GetValue<int>() ?? -1,

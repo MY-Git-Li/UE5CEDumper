@@ -66,6 +66,14 @@ approach 2 for it to have any effect.
 hook (UE5CEDumper already has the Stark/MinHook ProcessEvent base) or NOP the
 write. Rarely worth it; the first three paths usually suffice.
 
+> **Diagnose first — Teleport tab → "Camera POV" → Get POV.** This reads the
+> live camera location / rotation / FOV (via `GetCameraLocation` /
+> `GetCameraRotation` / `GetFOVAngle`) and shows the camera↔pawn distance. It's
+> read-only (there's no Set POV — `UpdateCamera` would overwrite it), but it
+> tells you *which* approach you need: if the camera location barely changes
+> when you teleport the pawn, the camera is independent (use approach 1's Debug
+> Camera or approach 2/SpringArm) rather than pawn-following.
+
 ### Caveats
 
 - Some games don't use a SpringArm — they `SetViewTargetWithBlend` to a fixed

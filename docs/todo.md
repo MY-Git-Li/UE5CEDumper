@@ -70,7 +70,16 @@ the visible character (SEED) and, via the deep-force, even on hard-cooked HD-2D
 titles (Octopath — character moves). Open items, all per-game / research-grade:
 
 - **Camera/POV doesn't follow on hard-cooked games (Octopath / SE HD-2D)** —
-  Effort: **M-L** · Risk: med. The deep-force moves the pawn's root
+  Effort: **M-L** · Risk: med. **Phase 1 DONE (build 1110): read-only camera-POV
+  display** (Teleport tab → "Camera POV" → Get POV; `Wirbel::GetPov` +
+  `teleport_get_pov` + a "Get camera POV" mailbox AA record) so the user can *measure* whether the
+  camera follows the pawn (camera↔pawn delta). The actual fix below is still
+  open. Phase 2 ideas: FOV set/reset (`SetFOV`/`LockedFOV` is the only
+  persistently-settable POV component); a "re-anchor camera" nudge after teleport
+  (`SetViewTargetWithBlend(pawn,0)` + `SetGameCameraCutThisFrame()`). There is no
+  universal Set POV — `UpdateCamera` overwrites it every tick. See
+  [teleport-spec.md](teleport-spec.md) §15.
+  The deep-force moves the pawn's root
   `ComponentToWorld`, but the camera tracks a separate child component
   (SpringArm / CameraComponent) or follow-camera actor whose world transform we
   never refresh — so the view stays put and can get **stuck unrecoverably**

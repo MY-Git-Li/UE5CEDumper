@@ -537,7 +537,7 @@
     <sys:String x:Key="str.TP.Warning">⚠ Single-player only. Online games will rubber-band or may flag teleports.</sys:String>
     <sys:String x:Key="str.TP.BestEffort">ℹ Best-effort, per the design spec (docs/teleport-spec.md): the pawn is resolved by reflection and moved via the engine's own functions where available, with memory-write fallbacks. Works on most games, but some drive the character or the camera from separate internal systems — so on certain titles the character may not move, or it teleports but the camera (POV) doesn't follow.</sys:String>
     <sys:String x:Key="str.Tip.TP.Refresh">Read the current pawn's world location and control rotation (DLL resolves the local PlayerController → Pawn → RootComponent via reflection).</sys:String>
-    <sys:String x:Key="str.Tip.TP.Auto">Re-read the pose every 0.5s. Off by default; stops automatically on disconnect.</sys:String>
+    <sys:String x:Key="str.Tip.TP.Auto">Re-read the pose every 0.5s, and the camera POV too (POV is skipped silently on games where it isn't available). Off by default; stops automatically on disconnect.</sys:String>
     <sys:String x:Key="str.Tip.TP.Save">Save the current pose into this marker slot. Markers live in the DLL — they survive a UI restart as long as the game process lives.</sys:String>
     <sys:String x:Key="str.Tip.TP.Recall">Teleport back to this marker (invokes K2_SetActorLocation with bTeleport=true, then restores rotation and zeroes velocity). Refused if you've changed maps — use Force.</sys:String>
     <sys:String x:Key="str.Tip.TP.Force">Recall even if the marker was saved on a different map. May land you in an unloaded area — use with care.</sys:String>
@@ -551,8 +551,8 @@
     <sys:String x:Key="str.Tip.TP.RunBugItGo">Parse the pasted string and teleport there. Works without any CheatManager — feeds X/Y/Z into the same recall path as markers.</sys:String>
     <sys:String x:Key="str.Tip.TP.RecallLast">Undo the most recent teleport: jump back to the pose auto-saved just before your last Recall / Force / BugItGo / cursor teleport. One-way — recalling it doesn't change the saved spot, so you can press it repeatedly. The system writes this slot; you can't save into it.</sys:String>
     <sys:String x:Key="str.Tip.TP.HkSet">Click, then press the key combo you want for this action. Hold modifiers (Ctrl/Alt/Shift) then a key, or press a single key. Esc cancels. The combo is registered system-wide so it works while the game is focused.</sys:String>
-    <sys:String x:Key="str.Tip.TP.AddActions">Ship 11 momentary action records (Save 1-3, Recall 1-3, Recall last, BugIt, BugItGo, Cursor, Clear all) into the open Cheat Engine table via AOBMaker — each fires once when ticked and auto-unticks. Bind CE record hotkeys yourself if you prefer CE-side hotkeys. Requires the AOBMaker plugin connected.</sys:String>
-    <sys:String x:Key="str.Tip.TP.SaveCt">Backup: save a Cheat Engine .CT file with the 11 momentary records, for when AOBMaker isn't connected. Import via CE File → Open.</sys:String>
+    <sys:String x:Key="str.Tip.TP.AddActions">Ship 12 momentary action records (Save 1-3, Recall 1-3, Recall last, BugIt, BugItGo, Cursor, Get POV, Clear all) into the open Cheat Engine table via AOBMaker — each fires once when ticked and auto-unticks. Bind CE record hotkeys yourself if you prefer CE-side hotkeys. Requires the AOBMaker plugin connected.</sys:String>
+    <sys:String x:Key="str.Tip.TP.SaveCt">Backup: save a Cheat Engine .CT file with the 12 momentary records, for when AOBMaker isn't connected. Import via CE File → Open.</sys:String>
     <!-- Teleport: Debug Camera (free-look) -->
     <sys:String x:Key="str.TP.DcHeader">Debug Camera (free-look)</sys:String>
     <sys:String x:Key="str.TP.DcHint">Detach the view into a free-fly debug camera (UCheatManager::ToggleDebugCamera). Turning it back OFF is handled even on Shipping builds that stripped the disable path — the DLL switches the local player's controller back. Needs a live PlayerController, so enter gameplay first. Available only on games that kept ToggleDebugCamera.</sys:String>
@@ -563,6 +563,13 @@
     <sys:String x:Key="str.Tip.TP.DcOn">Deterministically enable the debug camera (reads state first, only toggles if needed). Idempotent — pressing again when it's already ON does nothing.</sys:String>
     <sys:String x:Key="str.Tip.TP.DcOff">Deterministically disable the debug camera and return control to the player. On builds that stripped the disable path, the DLL swaps the local player's controller back to the original PlayerController.</sys:String>
     <sys:String x:Key="str.Tip.TP.DcRefresh">Re-read the live debug-camera state (1=ON / 0=OFF / unknown if no live CheatManager).</sys:String>
+    <!-- Teleport: Camera POV (read-only) -->
+    <sys:String x:Key="str.TP.PovHeader">Camera POV (read-only)</sys:String>
+    <sys:String x:Key="str.TP.GetPov">Get POV</sys:String>
+    <sys:String x:Key="str.TP.Fov">FOV:</sys:String>
+    <sys:String x:Key="str.TP.PovHint">The on-screen camera (APlayerCameraManager) — its world location, rotation and field-of-view, read via the engine's GetCameraLocation / GetCameraRotation / GetFOVAngle. This is DISTINCT from the pawn pose above: on games that drive the camera independently of the possessed pawn (HD-2D / fixed-view) the two diverge. Read-only — there is no universal Set POV (the view is recomputed every frame); to actually move the camera, use the Debug Camera buttons below.</sys:String>
+    <sys:String x:Key="str.Tip.TP.GetPov">Read the current on-screen camera location, rotation and FOV (invokes APlayerCameraManager getters on the game thread). Try it during gameplay — in menus/loading the game thread is idle and it can't read. Compare the location to the pawn's: a large delta that barely changes after a teleport means the camera is independent of the pawn.</sys:String>
+    <sys:String x:Key="str.Tip.TP.PovSource">How the POV was read: "invoke" = the camera-manager getters; "raw" = a direct read of the cached POV, used as a fallback on games where the getters exist but return nothing (e.g. TQ2 / Octopath).</sys:String>
 
     <!-- Interesting Properties Finder (B' / Unusual Location) -->
     <sys:String x:Key="str.IP.Load">Load</sys:String>

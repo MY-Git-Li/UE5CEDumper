@@ -44,12 +44,36 @@ struct Marker {
     char MapName[Grimoire::TELEPORT_MAPNAME_CAP] = {};
 };
 
+// Camera point-of-view (read-only). The on-screen view is produced by
+// APlayerCameraManager.CameraCachePrivate.POV, recomputed every tick from the
+// view target — there is NO universal way to SET it (a raw write is overwritten
+// next frame; the real "move the camera" mechanisms are Debug Camera / moving
+// the view-target pawn, which the teleport path already does). So this layer
+// only READS the POV, which is genuinely new information: on games that drive
+// the camera independently of the possessed pawn (HD-2D / fixed-view titles),
+// the camera diverges from the pawn, and surfacing both makes that visible.
+struct Pov {
+    Pose Cam{};         // camera world location (X/Y/Z) + rotation (Pitch/Yaw/Roll)
+    double Fov = 0;     // effective field-of-view angle, degrees (GetFOVAngle)
+    bool HasPawn = false;
+    Pose Pawn{};        // pawn world location (X/Y/Z) — for the camera-vs-pawn delta
+    uint8_t Source = 0; // 0 = invoke getters (GetCameraLocation/Rotation/FOV)
+};
+
 // Read the current pawn pose (location from RootComponent.RelativeLocation,
 // rotation from Controller.ControlRotation). When the pawn's root is
 // attached (vehicle/platform), falls back to invoking K2_GetActorLocation
 // for world-space coordinates. outSource (optional): 0 = raw read,
 // 1 = invoke path.
 int32_t GetPose(Pose& out, char* mapName, int32_t mapNameCap, uint8_t* outSource);
+
+// Read the current camera POV (PlayerController.PlayerCameraManager): world
+// location, rotation, and FOV via the engine's BlueprintCallable getters
+// (GetCameraLocation / GetCameraRotation / GetFOVAngle, stable UE4.18→UE5.x).
+// Distinct from GetPose (which reads the pawn). Best-effort pawn world location
+// is filled for the delta display. Read-only — see the Pov struct note for why
+// there is no Set POV. TP_ERR_INVOKE when the game thread is idle (menu/loading).
+int32_t GetPov(Pov& out);
 
 // Save the current pose + map name into a marker slot (0..TELEPORT_SLOTS-1).
 int32_t SaveMarker(int32_t slot);

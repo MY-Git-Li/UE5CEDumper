@@ -63,6 +63,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "bugitgo",      DisplayName = "Run BugItGo" });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "debugcam_on",  DisplayName = "Debug cam ON" });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "debugcam_off", DisplayName = "Debug cam OFF" });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "pov_get",      DisplayName = "Get POV" });
 
         if (_globalHotkeys != null)
         {
@@ -117,6 +118,25 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _poseSource = "";
 
     [ObservableProperty] private bool _autoRefresh;
+
+    // ── Camera POV (read-only) ─────────────────────────────────────────
+    // The on-screen camera (APlayerCameraManager), DISTINCT from the pawn pose
+    // above. There is no Set POV — the view is recomputed every tick (see
+    // TeleportPov / teleport-spec). Manual Get only (not part of the auto-poll,
+    // which reads the cheap raw pawn pose; POV needs a game-thread invoke).
+    [ObservableProperty] private string _povX = "—";
+    [ObservableProperty] private string _povY = "—";
+    [ObservableProperty] private string _povZ = "—";
+    [ObservableProperty] private string _povPitch = "—";
+    [ObservableProperty] private string _povYaw = "—";
+    [ObservableProperty] private string _povRoll = "—";
+    [ObservableProperty] private string _povFov = "—";
+    /// <summary>"invoke" / "raw" — how the POV was read ("raw" = cached-POV
+    /// fallback, shown as a chip so the user knows the getters didn't respond).</summary>
+    [ObservableProperty] private string _povSource = "";
+    /// <summary>"Δ to pawn: 412.3 uu …" — the camera↔pawn distance plus the hint
+    /// that an independent camera barely moves it after a teleport.</summary>
+    [ObservableProperty] private string _povDelta = "";
 
     // ── Cursor teleport ────────────────────────────────────────────────
     [ObservableProperty] private double _zOffset = 100.0;
@@ -184,6 +204,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             StatusText = "Not connected";
             AutoRefresh = false;
             ApplyDebugCameraState(-1);   // badge back to Unknown
+            ClearPovDisplay();
         }
     }
 
@@ -286,6 +307,22 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         {
             _log.Error("Teleport auto-refresh failed", ex);
         }
+
+        // Auto-update the camera POV alongside the pose. POV is unavailable on
+        // games that cook the camera getters out of reflection (TQ2 / Octopath),
+        // so on any failure SKIP the update (leave the last good values / "—")
+        // rather than clearing or surfacing an error — the pose display stays
+        // useful regardless. Separate try/catch so a POV fault never disturbs the
+        // pose refresh above.
+        try
+        {
+            var pov = await _dump.TeleportGetPovAsync();
+            if (pov.Code == TeleportCodes.Ok) ApplyPov(pov);
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Teleport auto-refresh POV failed", ex);
+        }
     }
 
     // ── Commands ───────────────────────────────────────────────────────
@@ -312,6 +349,37 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         {
             SetError(ex);
             _log.Error("Teleport RefreshPose failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Read the on-screen camera POV (location / rotation / FOV) — this
+    /// is the APlayerCameraManager view, distinct from the pawn pose above. On
+    /// games that drive the camera independently of the pawn (HD-2D / fixed-view)
+    /// the two diverge. Read-only: there is no Set POV (the view is recomputed
+    /// every tick). Use the Debug Camera buttons to actually move the camera.</summary>
+    [RelayCommand]
+    private async Task GetPovAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var pov = await _dump.TeleportGetPovAsync();
+            if (pov.Code != TeleportCodes.Ok)
+            {
+                ClearPovDisplay();
+                StatusText = $"Get POV: {TeleportCodes.Describe(pov.Code)}";
+                return;
+            }
+            ApplyPov(pov);
+            StatusText = "Camera POV read.";
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport GetPov failed", ex);
         }
         finally { IsBusy = false; }
     }
@@ -693,6 +761,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 case "bugitgo":      _ = RunBugItGoCommand.ExecuteAsync(null); return;
                 case "debugcam_on":  _ = ForceDebugCameraOnCommand.ExecuteAsync(null); return;
                 case "debugcam_off": _ = ForceDebugCameraOffCommand.ExecuteAsync(null); return;
+                case "pov_get":      _ = GetPovCommand.ExecuteAsync(null); return;
             }
             int slot = actionId[^1] - '0';
             if (actionId.StartsWith("save", StringComparison.Ordinal))
@@ -797,8 +866,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 return;
             }
             int ok = 0;
-            // 11 momentary auto-unticking records: Save 1-3, Recall 1-3, Recall
-            // last, BugIt, BugItGo, Cursor, Clear all.
+            // 12 momentary auto-unticking records: Save 1-3, Recall 1-3, Recall
+            // last, BugIt, BugItGo, Cursor, Get POV, Clear all.
             var specs = new (string Desc, TeleportScriptGenerator.Action Act, int Slot)[]
             {
                 ("Teleport: Save marker 1",   TeleportScriptGenerator.Action.Save,     0),
@@ -811,6 +880,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 ("Teleport: BugIt (store pose)", TeleportScriptGenerator.Action.BugIt,   0),
                 ("Teleport: BugItGo (go to stored)", TeleportScriptGenerator.Action.BugItGo, 0),
                 ("Teleport: To cursor",       TeleportScriptGenerator.Action.Cursor,   0),
+                ("Teleport: Get camera POV",  TeleportScriptGenerator.Action.GetPov,   0),
                 ("Teleport: Clear all markers", TeleportScriptGenerator.Action.ClearAll, 0),
             };
             foreach (var s in specs)
@@ -909,6 +979,34 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         PoseX = PoseY = PoseZ = "—";
         PosePitch = PoseYaw = PoseRoll = "—";
         PoseMap = PoseSource = "";
+    }
+
+    private void ApplyPov(TeleportPov p)
+    {
+        PovX = p.CamX.ToString("0.000", CultureInfo.InvariantCulture);
+        PovY = p.CamY.ToString("0.000", CultureInfo.InvariantCulture);
+        PovZ = p.CamZ.ToString("0.000", CultureInfo.InvariantCulture);
+        PovPitch = p.Pitch.ToString("0.00", CultureInfo.InvariantCulture);
+        PovYaw = p.Yaw.ToString("0.00", CultureInfo.InvariantCulture);
+        PovRoll = p.Roll.ToString("0.00", CultureInfo.InvariantCulture);
+        PovFov = p.Fov > 0
+            ? p.Fov.ToString("0.0", CultureInfo.InvariantCulture) + "°"
+            : "—";
+        PovSource = p.Source;
+        PovDelta = p.HasPawn
+            ? string.Format(CultureInfo.InvariantCulture,
+                "Δ to pawn: {0:0.0} uu — Get POV again after a teleport; if this barely " +
+                "changes, the camera is independent of the pawn.", p.PawnDistance)
+            : "Pawn position unavailable (no possessed pawn?).";
+    }
+
+    private void ClearPovDisplay()
+    {
+        PovX = PovY = PovZ = "—";
+        PovPitch = PovYaw = PovRoll = "—";
+        PovFov = "—";
+        PovSource = "";
+        PovDelta = "";
     }
 
     private void UpdateMarkerRow(int slot, TeleportPose p)
