@@ -62,6 +62,47 @@ public sealed class TeleportMarker
 }
 
 /// <summary>
+/// Camera point-of-view returned by <c>teleport_get_pov</c> (read-only). The
+/// camera world location/rotation come from APlayerCameraManager's getters
+/// (GetCameraLocation / GetCameraRotation / GetFOVAngle) and are DISTINCT from
+/// <see cref="TeleportPose"/> (the pawn). On games that drive the camera
+/// independently of the possessed pawn (HD-2D / fixed-view), the two diverge —
+/// surfacing both makes that visible. There is no Set POV: the on-screen view
+/// is recomputed every tick, so a write wouldn't stick (see teleport-spec §POV).
+/// </summary>
+public sealed class TeleportPov
+{
+    /// <summary>Wirbel result code (0 = OK). <see cref="TeleportCodes"/> maps these.</summary>
+    public int Code { get; init; }
+
+    // Camera world location.
+    public double CamX { get; init; }
+    public double CamY { get; init; }
+    public double CamZ { get; init; }
+    // Camera rotation.
+    public double Pitch { get; init; }
+    public double Yaw { get; init; }
+    public double Roll { get; init; }
+
+    /// <summary>Effective field-of-view angle in degrees (0 when unavailable).</summary>
+    public double Fov { get; init; }
+
+    /// <summary>True when the pawn world location was resolved for the delta.</summary>
+    public bool HasPawn { get; init; }
+    public double PawnX { get; init; }
+    public double PawnY { get; init; }
+    public double PawnZ { get; init; }
+
+    /// <summary>3D distance camera↔pawn (0 when no pawn). A large value that does
+    /// NOT change when you teleport indicates an independent camera.</summary>
+    public double PawnDistance => HasPawn
+        ? System.Math.Sqrt((CamX - PawnX) * (CamX - PawnX)
+                         + (CamY - PawnY) * (CamY - PawnY)
+                         + (CamZ - PawnZ) * (CamZ - PawnZ))
+        : 0;
+}
+
+/// <summary>
 /// Maps Wirbel result codes (docs/teleport-spec.md §8) to user-facing hint
 /// strings. Kept here (not in the DLL) so the UI owns its own phrasing.
 /// </summary>

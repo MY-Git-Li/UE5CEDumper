@@ -14,6 +14,45 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-14 — Teleport: read-only Camera POV display + Get + Lua (build 1110)
+
+Added a **read-only camera-POV readout** to the Teleport tab (Phase 1 of the POV
+research). It surfaces the on-screen camera's world location / rotation / FOV —
+**distinct from the pawn pose** — so the user can see, per game, whether the
+camera follows the possessed pawn or is driven independently (the Octopath /
+SE HD-2D / TQ2 class). **Read-only by design**: `APlayerCameraManager`'s POV is
+recomputed every tick by `UpdateCamera`, so there is no universal Set POV (a
+write is overwritten next frame); the real "move the camera" paths already exist
+(Debug Camera on the same tab, or moving the view-target pawn, which teleport
+already does). Full rationale + matrix in [teleport-spec.md](teleport-spec.md) §15.
+
+**DLL (Wirbel).** `Wirbel::Pov` struct + `Wirbel::GetPov`: resolves
+`PlayerController.PlayerCameraManager` (NO debug-camera hop — POV must reflect the
+*active* view, which is the debug controller's when it's on) and invokes the
+BlueprintCallable getters `GetCameraLocation` / `GetCameraRotation` / `GetFOVAngle`
+(the Geri-verified struct-return invoke path) via new generic `InvokeRetVec` /
+`InvokeRetFloat` helpers. Both location+rotation getters failing ⇒ `TP_ERR_INVOKE`;
+FOV best-effort. Best-effort pawn world location (root `RelativeLocation`) included
+for the camera↔pawn delta.
+
+**Surfaces.** Export `UE5_TeleportGetPov` (11-double out). Mailbox
+`TP_OP_GET_POV = 11` (POV block in `paramsData`: cam 6 doubles, FOV, pawn 3
+doubles, hasPawn, source). Pipe `teleport_get_pov`. UI: read-only "Camera POV"
+section + **Get POV** button + `pov_get` global hotkey row (OS `RegisterHotKey`)
++ `TeleportPov` DTO + the camera↔pawn delta hint. CE: a "Get camera POV"
+`.CT` / AA **mailbox record** (`TeleportScriptGenerator`, op 11 — ticking it
+fires the round-trip and prints the camera block) → the `.CT`/AA batch is now
+12 rows. POV was deliberately NOT added to the `createHotkey` Lua bundle
+(`TeleportLuaBundleGenerator`) — that path is unreliable in CE and unsurfaced
+since build 1038; the working CE path is the mailbox AA record.
+
+**Tests.** +1 `TeleportScriptGenerator` (op 11 + camera read-back), batch 11→12;
++2 `TeleportViewModel` (POV display + error-code). ⚠ in-game LIVE-VERIFY PENDING
+(camera read is a runtime behavior; the divergence-on-independent-camera claim
+needs a real HD-2D title).
+
+-----
+
 ## 2026-06-14 — UE5.7+ packed FUObjectItem parsing (gated, UNVERIFIED) + peripheral handling (build 1108)
 
 Implemented the third FUObjectItem within-item layout — the UE5.7+ **packed** encoding

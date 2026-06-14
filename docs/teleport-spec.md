@@ -875,3 +875,65 @@ scripts.
 - Ground-snap option for marker recall (trace down from marker + epsilon).
 - Per-game saved cursor-channel preference once a second cursor game is
   live-tested.
+
+-----
+
+## 15. Camera POV (read-only) — build 1110+
+
+A read-only camera-POV readout on the Teleport tab, **distinct from the pawn
+pose** §5 reads. Answers "does this game's camera follow the pawn, or is it
+independent?" (the Octopath / SE HD-2D / TQ2 class — see §1 known limitations).
+
+### Why read-only (no Set POV)
+
+The on-screen view is `APlayerCameraManager.CameraCachePrivate.POV`
+(`FMinimalViewInfo`), **recomputed every tick by `UpdateCamera`** from the view
+target. A raw write to it is overwritten the next frame (see
+[tips.md](tips.md) "Forcing camera rotation", approach 4). The mechanisms that
+*do* move the camera already exist and are not POV writes:
+
+- **Debug Camera** (`ToggleDebugCamera` → free-fly `ADebugCameraController`) —
+  on the same Teleport tab.
+- **Moving the view-target pawn + ControlRotation** — exactly what the marker /
+  cursor teleport already does (the camera follows on normal games).
+- **SpringArm / CameraComponent rotation** or `SetViewTargetWithBlend` to a
+  camera actor — per-game, via Live Walker.
+
+The only persistently-settable POV component is **FOV** (`SetFOV` writes
+`LockedFOV`); that's a deferred Phase-2 idea, not in this read-only cut.
+
+### Resolution & read path (`Wirbel::GetPov`)
+
+```
+GWorld → … → LocalPlayer.PlayerController        (ResolveLocalPC, NO debug-camera
+                                                  hop — POV must reflect the ACTIVE
+                                                  on-screen view, which IS the debug
+                                                  controller's when it's on)
+  → APlayerController.PlayerCameraManager         (ObjectProperty)
+  → invoke GetCameraLocation()  → FVector         (BlueprintCallable, UE4.18→5.x;
+    invoke GetCameraRotation()  → FRotator         the Geri-verified struct-return
+    invoke GetFOVAngle()        → float            invoke path)
+```
+
+Both location+rotation getters failing ⇒ `TP_ERR_INVOKE` (game thread idle).
+FOV is best-effort (0 when absent). A best-effort pawn world location (root
+`RelativeLocation`, resolving the pawn through the debug-camera hop) is included
+for the **camera↔pawn delta** the UI shows — a large delta that barely changes
+after a teleport flags an independent camera.
+
+### Surfaces (build 1110)
+
+- **DLL**: `Wirbel::Pov` struct + `Wirbel::GetPov`; export `UE5_TeleportGetPov`
+  (11-double out: cam[6], fov, pawn[3], hasPawn).
+- **Mailbox**: `TP_OP_GET_POV = 11`; POV block in `paramsData`
+  (`[0..47]` cam 6 doubles, `[48..55]` FOV, `[56..79]` pawn 3 doubles,
+  `[80]` hasPawn, `[81]` source).
+- **Pipe**: `teleport_get_pov` → `{ code, camX/Y/Z, pitch/yaw/roll, fov,
+  hasPawn, pawnX/Y/Z, source }`.
+- **UI**: read-only "Camera POV" section + **Get POV** button + `pov_get`
+  global hotkey row (OS `RegisterHotKey`, not CE); `TeleportPov` DTO.
+- **CE**: `.CT` / AA "Get camera POV" **mailbox record** (`TeleportScriptGenerator`,
+  op 11 — ticking it fires the round-trip and prints the camera block, then
+  auto-unticks). This is the working CE path; the `createHotkey` Lua bundle
+  (`TeleportLuaBundleGenerator`) is unreliable in CE and unsurfaced since
+  build 1038, so POV was deliberately NOT added there.

@@ -64,6 +64,12 @@ enum TeleportOp : uint64_t {
     TP_OP_BUGIT_SAVE   = 9,  // store current pose into the BugIt slot (pose block
                              //   output, like SAVE); user-triggered, slot ignored.
     TP_OP_BUGIT_GO     = 10, // teleport to the stored BugIt pose (no-op when empty)
+    TP_OP_GET_POV      = 11, // read the camera POV (read-only). slot ignored.
+                             //   Output POV block in paramsData:
+                             //     [0..47]  6 doubles cam X,Y,Z,Pitch,Yaw,Roll
+                             //     [48..55] double FOV
+                             //     [56..79] 3 doubles pawn X,Y,Z (delta display)
+                             //     [80]     u8 hasPawn   [81] u8 source
 };
 
 // Mailbox status (DLL writes to status field)

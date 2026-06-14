@@ -760,6 +760,22 @@ static void HandleTeleport() {
         g_invokeMailbox.paramsData[177] = tier;
         break;
     }
+    case TP_OP_GET_POV: {
+        Wirbel::Pov pov{};
+        rc = Wirbel::GetPov(pov);
+        memset(g_invokeMailbox.paramsData, 0, sizeof(g_invokeMailbox.paramsData));
+        if (rc == 0) {
+            double cam[6] = { pov.Cam.X, pov.Cam.Y, pov.Cam.Z,
+                              pov.Cam.Pitch, pov.Cam.Yaw, pov.Cam.Roll };
+            memcpy(g_invokeMailbox.paramsData, cam, sizeof(cam));
+            memcpy(g_invokeMailbox.paramsData + 48, &pov.Fov, sizeof(double));
+            double pawn[3] = { pov.Pawn.X, pov.Pawn.Y, pov.Pawn.Z };
+            memcpy(g_invokeMailbox.paramsData + 56, pawn, sizeof(pawn));
+            g_invokeMailbox.paramsData[80] = pov.HasPawn ? 1 : 0;
+            g_invokeMailbox.paramsData[81] = pov.Source;
+        }
+        break;
+    }
     default:
         SetError(-1, "Teleport: unknown op");
         return;

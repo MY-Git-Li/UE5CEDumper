@@ -18,6 +18,8 @@ public class TeleportViewModelTests
         public TeleportPose NextPose { get; set; } = new() { Code = 0 };
         public TeleportResult NextResult { get; set; } = new() { Code = 0, Tier = 1 };
         public List<TeleportMarker> NextMarkers { get; set; } = new();
+        public TeleportPov NextPov { get; set; } = new() { Code = 0 };
+        public int GetPovCalls { get; private set; }
 
         public int GetPoseCalls { get; private set; }
         public int SaveCalls { get; private set; }
@@ -64,6 +66,9 @@ public class TeleportViewModelTests
 
         public override Task<TeleportResult> TeleportRecallLastAsync(CancellationToken ct = default)
         { RecallLastCalls++; return Task.FromResult(NextResult); }
+
+        public override Task<TeleportPov> TeleportGetPovAsync(CancellationToken ct = default)
+        { GetPovCalls++; return Task.FromResult(NextPov); }
     }
 
     private sealed class NoopLogger : ILoggingService
@@ -186,6 +191,43 @@ public class TeleportViewModelTests
     }
 
     [Fact]
+    public async Task GetPov_populates_camera_display_and_pawn_delta()
+    {
+        var fake = new FakeDumpService
+        {
+            // camera at (0,0,100), pawn at (0,0,0) → delta 100; fov 90.
+            NextPov = new()
+            {
+                Code = 0, CamX = 0, CamY = 0, CamZ = 100, Pitch = -30, Yaw = 45, Roll = 0,
+                Fov = 90, HasPawn = true, PawnX = 0, PawnY = 0, PawnZ = 0,
+            },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.GetPovCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.GetPovCalls);
+        Assert.Equal("100.000", vm.PovZ);
+        Assert.Equal("45.00", vm.PovYaw);
+        Assert.Equal("90.0°", vm.PovFov);
+        Assert.Contains("100.0", vm.PovDelta);   // Δ to pawn
+    }
+
+    [Fact]
+    public async Task GetPov_shows_hint_on_error_code()
+    {
+        var fake = new FakeDumpService { NextPov = new() { Code = TeleportCodes.Invoke } };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.GetPovCommand.ExecuteAsync(null);
+
+        Assert.Equal("—", vm.PovZ);              // cleared
+        Assert.Contains("Game thread idle", vm.StatusText);
+    }
+
+    [Fact]
     public async Task RefreshPose_shows_hint_on_error_code()
     {
         var fake = new FakeDumpService { NextPose = new() { Code = TeleportCodes.NoPawn } };
@@ -299,11 +341,11 @@ public class TeleportViewModelTests
     }
 
     [Fact]
-    public void Hotkey_rows_are_save_recall_recalllast_bugitgo_and_debugcam()
+    public void Hotkey_rows_are_save_recall_recalllast_bugitgo_debugcam_and_pov()
     {
         var vm = CreateVm(new FakeDumpService(), out _, new FakeHotkeyService());
-        // 3 save + 3 recall + recall_last + bugit + bugitgo + debugcam_on + debugcam_off.
-        Assert.Equal(11, vm.HotkeyRows.Count);
+        // 3 save + 3 recall + recall_last + bugit + bugitgo + debugcam_on/off + pov_get.
+        Assert.Equal(12, vm.HotkeyRows.Count);
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "save0" && r.DisplayName == "Save marker 1");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall2" && r.DisplayName == "Recall marker 3");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall_last" && r.DisplayName == "Recall last");
@@ -311,6 +353,7 @@ public class TeleportViewModelTests
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "bugitgo");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "debugcam_on" && r.DisplayName == "Debug cam ON");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "debugcam_off" && r.DisplayName == "Debug cam OFF");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "pov_get" && r.DisplayName == "Get POV");
         Assert.All(vm.HotkeyRows, r => Assert.False(r.HasBinding));
     }
 

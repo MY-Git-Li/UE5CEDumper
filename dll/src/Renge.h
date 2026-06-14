@@ -70,6 +70,7 @@ constexpr const char* CMD_TELEPORT_TO_CURSOR       = "teleport_to_cursor";
 constexpr const char* CMD_TELEPORT_GET_MARKERS     = "teleport_get_markers";
 constexpr const char* CMD_TELEPORT_CLEAR_MARKER    = "teleport_clear_marker";
 constexpr const char* CMD_TELEPORT_RECALL_LAST     = "teleport_recall_last";
+constexpr const char* CMD_TELEPORT_GET_POV         = "teleport_get_pov";
 
 // Snapshot capture (experimental — Phase A). Stateless cursor pagination
 // like get_object_list: begin_snapshot returns the total object count for

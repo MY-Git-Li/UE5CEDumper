@@ -3188,6 +3188,24 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             return Renge::MakeResponse(id, data).dump();
         }
 
+        if (cmd == Renge::CMD_TELEPORT_GET_POV) {
+            Wirbel::Pov pov{};
+            int32_t code = Wirbel::GetPov(pov);
+            json data;
+            data["code"] = code;
+            if (code == 0) {
+                data["camX"] = pov.Cam.X;     data["camY"] = pov.Cam.Y;   data["camZ"] = pov.Cam.Z;
+                data["pitch"] = pov.Cam.Pitch; data["yaw"] = pov.Cam.Yaw; data["roll"] = pov.Cam.Roll;
+                data["fov"] = pov.Fov;
+                data["hasPawn"] = pov.HasPawn;
+                if (pov.HasPawn) {
+                    data["pawnX"] = pov.Pawn.X; data["pawnY"] = pov.Pawn.Y; data["pawnZ"] = pov.Pawn.Z;
+                }
+                data["source"] = "invoke";
+            }
+            return Renge::MakeResponse(id, data).dump();
+        }
+
         return Renge::MakeError(id, "Unknown command: " + cmd).dump();
 
     } catch (const std::exception& e) {

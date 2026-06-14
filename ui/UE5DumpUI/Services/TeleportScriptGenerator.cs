@@ -24,7 +24,7 @@ public static class TeleportScriptGenerator
     // Mailbox layout — see TeleportLuaBundleGenerator / dll/src/Mimic.h.
     private const int CmdTeleport = 8;
 
-    public enum Action { Save, Recall, RecallLast, BugIt, BugItGo, Cursor, ClearAll }
+    public enum Action { Save, Recall, RecallLast, BugIt, BugItGo, Cursor, GetPov, ClearAll }
 
     /// <summary>Build the [ENABLE]/[DISABLE] AA Script body for one action.</summary>
     public static string Generate(Action action, int slot = 0,
@@ -41,6 +41,7 @@ public static class TeleportScriptGenerator
             Action.BugIt => 9,        // TP_OP_BUGIT_SAVE  (store current pose)
             Action.BugItGo => 10,     // TP_OP_BUGIT_GO    (go to stored pose)
             Action.Cursor => 4,
+            Action.GetPov => 11,      // TP_OP_GET_POV     (read camera POV)
             _ => 2,
         };
         string label = action switch
@@ -51,6 +52,7 @@ public static class TeleportScriptGenerator
             Action.BugIt => "BugIt (store pose)",
             Action.BugItGo => "BugItGo (go to stored)",
             Action.Cursor => "Teleport to cursor",
+            Action.GetPov => "Get camera POV",
             _ => "Teleport",
         };
 
@@ -91,6 +93,17 @@ public static class TeleportScriptGenerator
         Line(sb, "  end");
         Line(sb, "  local code = readInteger(mb + 0x08)");
         Line(sb, $"  print('[Teleport] {label} -> code=' .. code)");
+        if (op == 11)
+        {
+            // POV block (op 11 out): [0..47] cam X,Y,Z,Pitch,Yaw,Roll, [48..55] FOV.
+            Line(sb, "  if code == 0 then");
+            Line(sb, "    print(string.format('[Teleport] camera loc=(%.2f, %.2f, %.2f) " +
+                     "rot=(%.2f, %.2f, %.2f) fov=%.1f',");
+            Line(sb, "      readDouble(mb + 0x328), readDouble(mb + 0x330), readDouble(mb + 0x338),");
+            Line(sb, "      readDouble(mb + 0x340), readDouble(mb + 0x348), readDouble(mb + 0x350),");
+            Line(sb, "      readDouble(mb + 0x358)))");
+            Line(sb, "  end");
+        }
         Line(sb, "  if code == -7 then");
         Line(sb, "    showMessage('[Teleport] marker saved on another map -- recall refused. " +
                  "Use the UI Force button.')");
@@ -162,8 +175,8 @@ public static class TeleportScriptGenerator
         return sb.ToString();
     }
 
-    /// <summary>Build the standard 11-row .CT batch (Save 1-3, Recall 1-3,
-    /// Recall last, BugIt, BugItGo, Cursor, Clear all) ready for
+    /// <summary>Build the standard 12-row .CT batch (Save 1-3, Recall 1-3,
+    /// Recall last, BugIt, BugItGo, Cursor, Get POV, Clear all) ready for
     /// <see cref="CheatTableBuilder.Build"/>.</summary>
     public static List<CheatTableRow> BuildBatchRows(
         double zOffset = 100.0, int channel = 0, bool fallbackCenter = true)
@@ -206,6 +219,12 @@ public static class TeleportScriptGenerator
             Category = "Teleport",
             Description = "Teleport to cursor",
             Script = Generate(Action.Cursor, 0, zOffset, channel, fallbackCenter),
+        });
+        rows.Add(new CtScriptRow
+        {
+            Category = "Teleport",
+            Description = "Get camera POV",
+            Script = Generate(Action.GetPov),
         });
         rows.Add(new CtScriptRow
         {

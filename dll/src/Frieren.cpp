@@ -704,6 +704,19 @@ int32_t UE5_TeleportGetLast(double* outPose6, char* outMapName, int32_t mapNameC
     return rc;
 }
 
+int32_t UE5_TeleportGetPov(double* outPov11) {
+    Wirbel::Pov pov{};
+    int32_t rc = Wirbel::GetPov(pov);
+    if (rc == 0 && outPov11) {
+        outPov11[0] = pov.Cam.X;     outPov11[1] = pov.Cam.Y;   outPov11[2] = pov.Cam.Z;
+        outPov11[3] = pov.Cam.Pitch; outPov11[4] = pov.Cam.Yaw; outPov11[5] = pov.Cam.Roll;
+        outPov11[6] = pov.Fov;
+        outPov11[7] = pov.Pawn.X;    outPov11[8] = pov.Pawn.Y;  outPov11[9] = pov.Pawn.Z;
+        outPov11[10] = pov.HasPawn ? 1.0 : 0.0;
+    }
+    return rc;
+}
+
 // ============================================================================
 // ProcessEvent vtable detection (build 648+)
 //

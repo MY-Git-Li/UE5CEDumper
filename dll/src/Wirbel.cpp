@@ -569,6 +569,102 @@ bool GetActorWorld(uintptr_t pawn, double out[3]) {
     return true;
 }
 
+// ---- camera POV read ----
+
+// Invoke a no-arg getter whose return value is an FVector/FRotator (3×float or
+// 3×double per LWC). Returns false when the function / return param can't be
+// resolved or the invoke fails (game thread idle).
+bool InvokeRetVec(uintptr_t instance, const char* fn, double out[3]) {
+    FunctionInfo fi;
+    if (!FindFunc(Ubel::GetClass(instance), fn, fi) || fi.parmsSize <= 0) return false;
+    std::vector<uint8_t> buf(fi.parmsSize, 0);
+    const FunctionParam* rv = FindReturnParam(fi);
+    if (!rv || Invoke(instance, fi, buf) != 0) return false;
+    int32_t need = (rv->size >= 24) ? 24 : 12;
+    if (rv->offset < 0 || rv->offset + need > static_cast<int32_t>(buf.size())) return false;
+    ReadVec3Buf(buf.data() + rv->offset, rv->size, out);
+    return true;
+}
+
+// Invoke a no-arg getter returning a float/double scalar (e.g. GetFOVAngle).
+bool InvokeRetFloat(uintptr_t instance, const char* fn, double& out) {
+    FunctionInfo fi;
+    if (!FindFunc(Ubel::GetClass(instance), fn, fi) || fi.parmsSize <= 0) return false;
+    std::vector<uint8_t> buf(fi.parmsSize, 0);
+    const FunctionParam* rv = FindReturnParam(fi);
+    if (!rv || rv->offset < 0 || Invoke(instance, fi, buf) != 0) return false;
+    if (rv->size == 8 && rv->offset + 8 <= static_cast<int32_t>(buf.size())) {
+        std::memcpy(&out, buf.data() + rv->offset, 8);
+        return true;
+    }
+    if (rv->offset + 4 <= static_cast<int32_t>(buf.size())) {
+        float f = 0;
+        std::memcpy(&f, buf.data() + rv->offset, 4);
+        out = f;
+        return true;
+    }
+    return false;
+}
+
+// Best-effort pawn world location for the camera-vs-pawn delta. Reads the root
+// RelativeLocation (== world when not attached); leaves out untouched on failure.
+bool ReadPawnWorld(uintptr_t pawn, double out[3]) {
+    if (!pawn) return false;
+    uintptr_t pawnClass = Ubel::GetClass(pawn);
+    int32_t rootOff = Ubel::FindFieldOffset(pawnClass, "RootComponent",
+                                            "RootComponent", nullptr, "ObjectProperty");
+    uintptr_t root = ReadPtrAt(pawn, rootOff);
+    if (!root) return false;
+    FieldInfo rfi{};
+    if (!Ubel::FindField(Ubel::GetClass(root), "RelativeLocation",
+                         nullptr, nullptr, nullptr, rfi))
+        return false;
+    return ReadVec3Mem(root + static_cast<uintptr_t>(rfi.Offset), rfi.Size, out);
+}
+
+int32_t GetPovImpl(Pov& out) {
+    out = Pov{};
+    uintptr_t world = DerefWorld();
+    if (!world) return TP_ERR_NOT_INIT;
+    uintptr_t pc = ResolveLocalPC(world);
+    if (!pc) return TP_ERR_NO_CONTROLLER;
+    // NOTE: deliberately NO HopThroughDebugCamera here — the POV should reflect
+    // the ACTIVE on-screen view. When the Debug Camera is on, the LocalPlayer's
+    // controller IS the DebugCameraController and ITS camera manager produces the
+    // free-fly view the user is looking at, which is what we want to report.
+
+    uintptr_t pcClass = Ubel::GetClass(pc);
+    int32_t camOff = Ubel::FindFieldOffset(pcClass, "PlayerCameraManager",
+                                           "PlayerCameraManager", nullptr, "ObjectProperty");
+    uintptr_t cam = ReadPtrAt(pc, camOff);
+    if (!cam) return TP_ERR_REFLECTION;
+
+    double loc[3] = {}, rot[3] = {}, fov = 0;
+    bool gotLoc = InvokeRetVec(cam, "GetCameraLocation", loc);
+    bool gotRot = InvokeRetVec(cam, "GetCameraRotation", rot);
+    // Both getters failing means the game thread is idle (menu/loading) or the
+    // camera-manager class cooked them out — either way no POV to report.
+    if (!gotLoc && !gotRot) return TP_ERR_INVOKE;
+    InvokeRetFloat(cam, "GetFOVAngle", fov);   // best-effort bonus
+
+    out.Cam.X = loc[0]; out.Cam.Y = loc[1]; out.Cam.Z = loc[2];
+    out.Cam.Pitch = rot[0]; out.Cam.Yaw = rot[1]; out.Cam.Roll = rot[2];
+    out.Fov = fov;
+    out.Source = 0;
+
+    // Best-effort pawn world position for the delta display (resolve the pawn
+    // via the REAL controller, hopping past the debug camera if it's active).
+    double pxyz[3] = {};
+    if (ReadPawnWorld(ResolvePawn(HopThroughDebugCamera(pc)), pxyz)) {
+        out.HasPawn = true;
+        out.Pawn.X = pxyz[0]; out.Pawn.Y = pxyz[1]; out.Pawn.Z = pxyz[2];
+    }
+    LOG_INFO("Teleport: POV cam=(%.1f, %.1f, %.1f) rot=(%.1f, %.1f, %.1f) fov=%.1f hasPawn=%d",
+             out.Cam.X, out.Cam.Y, out.Cam.Z, out.Cam.Pitch, out.Cam.Yaw, out.Cam.Roll,
+             out.Fov, out.HasPawn ? 1 : 0);
+    return TP_OK;
+}
+
 // ---- teleport write (§5.5) ----
 
 // Move the pawn to xyz. Tier 1 = invoke (preferTeleportTo: K2_TeleportTo with
@@ -813,6 +909,11 @@ namespace Wirbel {
 int32_t GetPose(Pose& out, char* mapName, int32_t mapNameCap, uint8_t* outSource) {
     std::lock_guard<std::mutex> lock(s_opMutex);
     return GetPoseImpl(out, mapName, mapNameCap, outSource);
+}
+
+int32_t GetPov(Pov& out) {
+    std::lock_guard<std::mutex> lock(s_opMutex);
+    return GetPovImpl(out);
 }
 
 int32_t SaveMarker(int32_t slot) {

@@ -127,6 +127,10 @@ __declspec(dllexport) int32_t   UE5_TeleportClearMarker(int32_t slot);
 __declspec(dllexport) int32_t   UE5_TeleportRecallLast();
 __declspec(dllexport) int32_t   UE5_TeleportGetLast(double* outPose6,
                                     char* outMapName, int32_t mapNameCap);
+// Read the camera POV (read-only). outPov11 receives 11 doubles:
+//   [0..5] camera X,Y,Z,Pitch,Yaw,Roll  [6] FOV
+//   [7..9] pawn X,Y,Z (for the camera-vs-pawn delta)  [10] hasPawn (1/0)
+__declspec(dllexport) int32_t   UE5_TeleportGetPov(double* outPov11);
 
 // === Mailbox (CE Lua shared memory interface) ===
 // Returns the address of the g_invokeMailbox buffer.

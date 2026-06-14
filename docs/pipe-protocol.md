@@ -870,6 +870,11 @@ fallback (game may snap back). Codes (§8): 0 OK, -1 not-init, -2 no controller,
 → { "markers":[ { "slot":0,"valid":true,"x":…,…,"map":"…" }, { "slot":1,"valid":false }, … ] }
 
 { "cmd": "teleport_clear_marker", "slot": 0 } → { "slot":0,"code":0 }
+
+// Camera POV (read-only) — distinct from the pawn pose. There is no Set POV.
+{ "cmd": "teleport_get_pov" }
+→ { "code":0, "camX":…,"camY":…,"camZ":…, "pitch":…,"yaw":…,"roll":…,
+    "fov":…, "hasPawn":true, "pawnX":…,"pawnY":…,"pawnZ":…, "source":"invoke" }
 ```
 
 The CE Lua path uses the Mimic mailbox `CMD_TELEPORT=8` instead (see

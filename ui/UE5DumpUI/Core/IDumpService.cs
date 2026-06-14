@@ -299,4 +299,10 @@ public interface IDumpService
     /// so a teleport that went wrong can be undone. One-way restore (the slot is
     /// never overwritten by this call); map check is skipped.</summary>
     Task<TeleportResult> TeleportRecallLastAsync(CancellationToken ct = default);
+
+    /// <summary>Read the camera POV (read-only): the on-screen camera's world
+    /// location, rotation and FOV via APlayerCameraManager, plus a best-effort
+    /// pawn location for the camera↔pawn delta. There is no Set POV — the view
+    /// is recomputed every tick (see <see cref="TeleportPov"/>).</summary>
+    Task<TeleportPov> TeleportGetPovAsync(CancellationToken ct = default);
 }
