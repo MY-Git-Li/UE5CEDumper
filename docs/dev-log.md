@@ -51,9 +51,15 @@ so the pose display is unaffected on games where POV is unavailable. POV clears 
 disconnect. Manual **Get POV** still surfaces the error code.
 
 No C ABI / pipe / mailbox **shape** change (added a `source` value only). +2 tests
-(POV source surfaced, disconnect clears POV). ⚠ raw-fallback in-game LIVE-VERIFY
-PENDING (the offsets are reflected, but the read itself wants confirmation on TQ2 /
-Octopath).
+(POV source surfaced, disconnect clears POV).
+
+**LIVE-VERIFIED ✅ (2026-06-14).** Both fall-back titles emit `src=raw` with sane
+values matching each camera archetype: **Octopath** fixed HD-2D cam
+(`pitch -16°, yaw 0, FOV 40`, static), **TQ2** angled ARPG cam
+(`pitch -47°, yaw -116.6° fixed, FOV 75`, location/pitch drifting smoothly = a
+live follow camera). LWC double-width read correct on both (UE5). So POV now reads
+on all four tested titles: SEED + DQ III via the getters, TQ2 + Octopath via the
+raw cached-POV fallback. Merged to main via PR #282.
 
 -----
 
@@ -114,9 +120,10 @@ fires the round-trip and prints the camera block) → the `.CT`/AA batch is now
 since build 1038; the working CE path is the mailbox AA record.
 
 **Tests.** +1 `TeleportScriptGenerator` (op 11 + camera read-back), batch 11→12;
-+2 `TeleportViewModel` (POV display + error-code). ⚠ in-game LIVE-VERIFY PENDING
-(camera read is a runtime behavior; the divergence-on-independent-camera claim
-needs a real HD-2D title).
++2 `TeleportViewModel` (POV display + error-code). **LIVE-VERIFIED ✅** — see the
+build 1112 entry above (SEED + DQ III read POV via the getters; TQ2 + Octopath via
+the raw cached-POV fallback, with the camera-vs-pawn divergence confirmed on the
+independent-camera titles).
 
 -----
 
