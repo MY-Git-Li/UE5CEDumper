@@ -80,15 +80,26 @@ Deliverables for the user:
   effort; the panel carries an in-app disclaimer.
 
 
-- **Games that drive the visible character from a separate actor** (e.g. Titan
-  Quest II, UE5): teleport forces `PlayerController.Pawn`'s transform to the
-  target — verified at the memory level, the write sticks and persists — but the
-  on-screen character is a *different* actor, so it doesn't visibly move. Moving
-  the real actor needs per-game reverse engineering; deferred. Teleport works on
-  games where the possessed pawn IS the visible character (SEED Battle Destiny
-  Remastered, etc.). The CMC-freeze retry (build 1041) recovers genuine
-  CharacterMovement-override cases but can't help the separate-actor class. See
-  [lessons-learned.md](lessons-learned.md) "TQ2 verdict".
+- **Engine setters that report success but don't move (e.g. Titan Quest II):**
+  `K2_SetActorLocation` can return `true` yet leave the actor where it was
+  (CharacterMovement reverts it). The CMC-freeze retry (build 1041) forces the
+  memory position, and **build 1113** makes it also refresh the world transform —
+  in the CMC-freeze path it now ALWAYS runs the component setter
+  `K2_SetWorldLocation` (which runs `UpdateComponentToWorld` and propagates to the
+  child mesh) + `DeepForceWorldPos`, instead of trusting the actor setter's return.
+  **TQ2 marker teleport now works.** (TQ2 was previously, *incorrectly*, recorded
+  as a "separate visible actor" game — a `ViewTarget` diagnostic disproved that:
+  the pawn IS the camera view-target and owns the mesh + CMC; see
+  [lessons-learned.md](lessons-learned.md) "TQ2 verdict".) Residual: a minor visual
+  lag — the mesh snaps over on the next move (CMC network smoothing; cosmetic).
+- **Heavily-stripped builds block *cursor* teleport (e.g. Titan Quest II):** some
+  Shipping builds remove `GetMousePosition` (returns `(0,0)` — a custom virtual
+  cursor), `GetViewportSize` (no screen-center fallback), and `KismetSystemLibrary`
+  / `LineTraceSingle` (no line trace), leaving no generic way to read where the
+  cursor points. Build 1114-1116 added robustness — `GetHitResultAtScreenPosition`
+  (no `KismetSystemLibrary` needed) + an auto-scan of trace channels — which helps
+  other cursor games, but can't overcome a build missing the whole toolkit.
+  Marker teleport is unaffected. Per-game RE only; deferred.
 
 ### Non-Goals (v1)
 

@@ -14,6 +14,48 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-14 — Teleport: TQ2 transform-refresh fix + cursor robustness + ViewTarget detector (build 1113-1116)
+
+Chased the long-standing "TQ2 teleport doesn't move the character" via a new
+diagnostic, **disproved the old "separate actor" verdict**, and fixed it.
+
+**Root cause (disproves the old TQ2 verdict).** A `ViewTarget` diagnostic
+(`Wirbel::DiagVisibleActor`) showed TQ2's `APlayerCameraManager.ViewTarget.Target`
+== the possessed pawn (same addr), and the pawn `bp_tq2_player_character_C` is a
+normal Character (child `SkeletalMeshComponent` at rel `(0,0,-96)` on the capsule
+root + `CharacterMovement`). So **not a separate actor**. The real failure:
+`K2_SetActorLocation` **returns success but is a no-op** on TQ2 (CMC reverts), and
+because it claimed success the CMC-freeze path skipped the component-level setter
+that refreshes the world transform — the raw write moved memory but left the
+cached `ComponentToWorld` stale, so the mesh stayed at the old spot.
+
+**Fix (build 1113).** In the CMC-freeze retry, never trust the actor setter's
+return — ALWAYS also run `K2_SetWorldLocation` on the root (runs
+`UpdateComponentToWorld`, propagates to the child mesh) + `DeepForceWorldPos`.
+**TQ2 marker teleport now works** (verified). Gated to the CMC-freeze path, so
+games that already work (SEED / DQ III) are untouched. Residual minor: the mesh
+snaps over on the next move (CMC network smoothing; cosmetic, deferred).
+
+**Cursor robustness (builds 1114-1116, generalizable).** Added
+`GetHitResultAtScreenPosition` (screen-position trace, needs no cursor and no
+`KismetSystemLibrary`), an **auto-scan of trace channels** (requested then 0..9,
+so click-to-move ARPGs' custom ground channel is found without guessing), a
+`(0,0)`-mouse → screen-center fallback, and pinpoint logging. Helps other top-down
+games. **TQ2 cursor teleport stays blocked** — that build strips `GetMousePosition`
+(returns 0,0 — virtual cursor), `GetViewportSize`, and `KismetSystemLibrary`, so
+there's no generic way to read where the cursor points (per-game limitation).
+
+**ViewTarget detector (kept, gated).** `DiagVisibleActor` now logs only when the
+camera's view-target is a genuinely different actor than the pawn (a real
+separate-actor game — none seen yet) — silent on normal teleports. The one-off
+Root/Mesh dump that proved the TQ2 diagnosis was removed.
+
+DLL-only (Wirbel.cpp); no C ABI / pipe / mailbox / UI change. AOT publish clean;
+C# tests unaffected. ⚠ Two TQ2 caveats documented (cursor blocked; minor mesh
+smoothing lag).
+
+-----
+
 ## 2026-06-14 — Teleport POV: live-verify + raw cached-POV fallback + auto-refresh (build 1112)
 
 **In-game live-verify of the read-only camera POV (build 1110):**
@@ -23,7 +65,7 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 | SEED Battle Destiny Remastered | 4.27 | ✅ | ✅ | ✅ |
 | DQ III HD-2D Remake | UE5 HD-2D | ✅ | ✅ | ✅ |
 | Octopath Traveler | UE5 HD-2D | ❌ | ✅ (raw) | ⚠ pawn moves, camera doesn't follow |
-| Titan Quest II | UE5 | ❌ | ✅ (raw) | ❌ (separate visual actor) |
+| Titan Quest II | UE5 | ❌ | ✅ (raw) | ⚠ then ✅ — setter no-op, fixed build 1113 |
 
 **Root cause (from the new diagnostics, NOT the cooked-out hypothesis I first
 guessed).** The local PlayerController resolves on all four; on TQ2 / Octopath

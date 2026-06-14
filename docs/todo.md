@@ -95,10 +95,17 @@ titles (Octopath — character moves). Open items, all per-game / research-grade
   child world transforms (manual `UpdateChildTransforms` — native, no
   reflection, hard). **Deferred**: no universal solution; a failed camera nudge
   risks making the stuck-camera worse. In-app disclaimer covers it.
-- **Games that drive the visible character from a separate actor (TQ2)** —
-  Effort: **L** · Risk: med. External `SetActorLocation` on `PlayerController.Pawn`
-  provably moves it in memory but the rendered character is a different actor.
-  Needs per-game RE to find + move the real actor. Deferred. See
+- **TQ2 teleport — FIXED (build 1113); two minor caveats remain.** The old
+  "separate visible actor" theory was **disproven** (build 1113 ViewTarget
+  diagnostic): TQ2's pawn IS the camera view-target and owns the mesh + CMC. The
+  failure was `K2_SetActorLocation` reporting success but not moving + a stale
+  cached transform; fixed by always running `K2_SetWorldLocation` + deep-force in
+  the CMC-freeze path. Marker teleport now works. Remaining: **(a) cursor teleport
+  blocked** — TQ2 strips `GetMousePosition` (returns 0,0 / virtual cursor),
+  `GetViewportSize`, and `KismetSystemLibrary`, so there's no generic way to read
+  the cursor target (per-game RE only — low value, deferred); **(b) minor visual
+  lag** — the mesh snaps over on the next move after a marker teleport (CMC network
+  smoothing; a CMC smoothing-offset reset would fix it, Effort S, deferred). See
   [lessons-learned.md](lessons-learned.md) "TQ2 verdict".
 - **Gamepad / mouse-extra-button hotkeys** — Effort: **M** · Risk: low.
   Marker hotkey capture is keyboard-only (`RegisterHotKey`). Mouse extra buttons
