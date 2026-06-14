@@ -14,6 +14,30 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-14 — Teleport: remove the dead createHotkey Lua bundle (build 1111)
+
+Deleted `TeleportLuaBundleGenerator` (the `createHotkey`-based "Teleport Lua
+hotkey bundle") and its test. **Why:** it never reliably executed in the user's
+Cheat Engine — the CE-side hotkey registration (`createHotkey`, an earlier cut
+also leaned on the `executeCodeEx` round-trip that can't return export values)
+didn't fire — and the "Copy CE Lua (hotkey bundle)" button that surfaced it was
+already removed back in **build 1038** (when marker hotkeys moved to the app's
+own OS-level `RegisterHotKey` capture). So the generator had been **dead,
+unsurfaced code** ever since; it was confirmed to have **zero live references**
+(only its own test + three doc-comments in `TeleportScriptGenerator`).
+
+**The CE integration path is unchanged and intact:** `TeleportScriptGenerator`
+emits per-action **mailbox AA memory records** (ship via AOBMaker
+`CreateAAScript` or batch into a `.CT`); bind a **CE record-level hotkey** to a
+record (reliable), or use the app's OS-level global hotkeys on the Teleport tab.
+The `TeleportHotkeyScheme` enum (numpad / top-row / both) lived in the deleted
+file and went with it — it was only ever consumed by the bundle.
+
+Removed −2 files (−351 + −170 lines) and the bundle's 14 tests. Build + remaining
+tests green; AOT publish clean. No DLL / pipe / mailbox change.
+
+-----
+
 ## 2026-06-14 — Teleport: read-only Camera POV display + Get + Lua (build 1110)
 
 Added a **read-only camera-POV readout** to the Teleport tab (Phase 1 of the POV

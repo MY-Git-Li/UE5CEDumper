@@ -548,10 +548,22 @@ Force recall.
 
 ### 9.2 Generated CE artifacts
 
+> **⚠ Historical — §9.2A / §9.3 no longer reflect the code.** The
+> `TeleportLuaBundleGenerator` "hotkey bundle" (and its `TeleportHotkeyScheme`
+> selector) was **REMOVED in build 1111** and its "Copy CE Lua" button was gone
+> since **build 1038**: the `createHotkey` registration never reliably fired in
+> CE (an earlier cut also relied on `executeCodeEx`, which can't return export
+> values). The surviving CE path is **§9.2B only** — `TeleportScriptGenerator`'s
+> per-action **mailbox AA records** (ship via AOBMaker / `.CT`); hotkeys come
+> from CE **record-level** bindings or the app's own OS-level global hotkeys
+> (Teleport tab). The §9.3 numpad/top-row/both scheme table is obsolete. The
+> rest of §9.2A below is kept for historical context.
+
 Both generators are pure static classes (mirroring
 `DebugCameraScriptGenerator`), fully unit-testable, LF-only line endings.
 
-**A. `TeleportLuaBundleGenerator`** (primary deliverable — "塞到CE" path).
+**A. `TeleportLuaBundleGenerator`** ~~(primary deliverable — "塞到CE" path)~~
+**[REMOVED build 1111 — see the note above].**
 One self-contained Lua script the user pastes into CE (Table Lua Script or
 Lua Engine window). Contents:
 
@@ -934,6 +946,7 @@ after a teleport flags an independent camera.
   global hotkey row (OS `RegisterHotKey`, not CE); `TeleportPov` DTO.
 - **CE**: `.CT` / AA "Get camera POV" **mailbox record** (`TeleportScriptGenerator`,
   op 11 — ticking it fires the round-trip and prints the camera block, then
-  auto-unticks). This is the working CE path; the `createHotkey` Lua bundle
-  (`TeleportLuaBundleGenerator`) is unreliable in CE and unsurfaced since
-  build 1038, so POV was deliberately NOT added there.
+  auto-unticks). This is the working CE path. POV was deliberately NOT added to
+  the `createHotkey` Lua bundle (`TeleportLuaBundleGenerator`), which was
+  unreliable in CE and unsurfaced since build 1038 — and that whole bundle was
+  subsequently **removed in build 1111** (see the §9.2 note).

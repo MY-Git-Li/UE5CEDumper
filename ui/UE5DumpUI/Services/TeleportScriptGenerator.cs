@@ -5,9 +5,10 @@ using UE5DumpUI.Models;
 namespace UE5DumpUI.Services;
 
 /// <summary>
-/// Generates per-action CE memory-record AA Scripts for Teleport, for users
-/// who prefer .CT records (via <see cref="CheatTableBuilder"/>) over the
-/// hotkey-bundle Lua (<see cref="TeleportLuaBundleGenerator"/>).
+/// Generates per-action CE memory-record AA Scripts for Teleport — the CE
+/// integration path. Ship them straight into the table via AOBMaker
+/// (<c>CreateAAScript</c>), or batch them into a .CT via
+/// <see cref="CheatTableBuilder"/>.
 ///
 /// Every teleport action is MOMENTARY (not a stateful toggle like Debug
 /// Camera), so each record's <c>[ENABLE]</c> fires the mailbox round-trip then
@@ -15,13 +16,14 @@ namespace UE5DumpUI.Services;
 /// itself ~50 ms later; <c>[DISABLE]</c> is a nop. Self-contained: talks to the
 /// Mimic mailbox directly, no helper-Lua dependency.
 ///
-/// CE record-level hotkeys are NOT emitted here — bind keys via the Lua bundle
-/// (<see cref="TeleportLuaBundleGenerator"/>) which is the hotkey path. See
-/// docs/teleport-spec.md §9.2B.
+/// Hotkeys: bind a CE <b>record-level</b> hotkey to a record (reliable), or use
+/// the app's own OS-level global hotkeys on the Teleport tab. The old
+/// <c>createHotkey</c> Lua "hotkey bundle" was REMOVED (build 1111) — it never
+/// reliably fired in CE and had been unsurfaced (no UI button) since build 1038.
 /// </summary>
 public static class TeleportScriptGenerator
 {
-    // Mailbox layout — see TeleportLuaBundleGenerator / dll/src/Mimic.h.
+    // Mailbox layout — see dll/src/Mimic.h (MailboxData / TeleportOp).
     private const int CmdTeleport = 8;
 
     public enum Action { Save, Recall, RecallLast, BugIt, BugItGo, Cursor, GetPov, ClearAll }
