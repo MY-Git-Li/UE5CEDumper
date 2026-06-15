@@ -70,6 +70,24 @@ enum TeleportOp : uint64_t {
                              //     [48..55] double FOV
                              //     [56..79] 3 doubles pawn X,Y,Z (delta display)
                              //     [80]     u8 hasPawn   [81] u8 source
+    TP_OP_RELATIVE     = 12, // teleport along the pawn's facing by a distance.
+                             //   Input  paramsData: [0..7] double distance (uu;
+                             //     negative = backward), [8] u8 mode (0 = horizontal
+                             //     keep-Z, 1 = full 3D include pitch). slot ignored.
+                             //   Output pose block (resulting pose, like GET_POSE) +
+                             //     [177] tier.
+    TP_OP_EXPLICIT     = 13, // teleport to explicit world coordinates (force; no
+                             //   map check). Input paramsData: [0..47] 6 doubles
+                             //   X,Y,Z,Pitch,Yaw,Roll, [48] u8 hasRot (restore
+                             //   rotation). slot ignored. Output: [177] tier.
+    TP_OP_SET_CURSOR   = 14, // force the mouse cursor on/off (writes
+                             //   APlayerController.bShowMouseCursor). Input:
+                             //   ufuncAddr (slot field) = 1 (show) / 0 (hide).
+                             //   Output: result = Wirbel code, paramsData[0] =
+                             //   resulting state (1/0).
+    TP_OP_GET_CURSOR   = 15, // read the current bShowMouseCursor state. slot
+                             //   ignored. Output: result = code, paramsData[0] =
+                             //   state (1/0).
 };
 
 // Mailbox status (DLL writes to status field)

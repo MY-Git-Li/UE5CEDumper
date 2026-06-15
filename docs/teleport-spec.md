@@ -1001,3 +1001,92 @@ the error code.
   the `createHotkey` Lua bundle (`TeleportLuaBundleGenerator`), which was
   unreliable in CE and unsurfaced since build 1038 — and that whole bundle was
   subsequently **removed in build 1111** (see the §9.2 note).
+
+-----
+
+## 16. Directional / explicit-coordinate teleport + force mouse cursor — build 1144+
+
+Three additions, all riding the existing resolution chain (§5) and tier ladder
+(§4) — so they inherit every per-game robustness path already built for recall.
+
+### 16.1 Directional teleport (`Wirbel::TeleportRelative`)
+
+Move the pawn along its facing direction by a signed distance (uu; negative =
+backward). Facing comes from `AActor::GetActorForwardVector` (invoke; the actor's
+exact orientation), falling back to the controller's `ControlRotation` Yaw/Pitch
+trig (UE convention `X = cos(P)cos(Y), Y = cos(P)sin(Y), Z = sin(P)`). Two modes:
+
+- **Horizontal** (default): drop Z from the forward vector and renormalize —
+  the natural "walk toward that compass bearing" on the ground plane, height
+  preserved.
+- **3D**: full forward including pitch (look up/down → move up/down; fly/noclip).
+
+`dest = currentWorldPos + unitForward * distance`, then the standard
+`TeleportPawnTo` write + `StopMovement`. `SaveLastImpl()` runs first, so **Recall
+last undoes it**. Returns the re-read landed pose (so the UI shows the resulting
+X/Y/Z/Pitch/Yaw — the "回算" requirement).
+
+### 16.2 Teleport to explicit coordinates (force)
+
+Reuses the existing `Wirbel::RecallExplicit` (no new core): force-teleport to an
+exact world X/Y/Z, **no map check**, optional rotation restore. Already exposed on
+the pipe via `teleport_recall_marker` (x/y/z variant). New surfaces only add a CE
+mailbox op + export + a dedicated UI section (X/Y/Z + optional Pitch/Yaw/Roll +
+"Fill from current"). Also undoable via Recall last.
+
+### 16.3 Force mouse cursor (`Wirbel::SetMouseCursor` / `GetMouseCursor`)
+
+Write `APlayerController.bShowMouseCursor` (a `BlueprintReadWrite` **bitfield**
+UPROPERTY). `SetShowMouseCursor` is NOT a UFUNCTION, so the bit is written
+directly: resolve the reflected `FBoolProperty` layout
+(`[FieldSize=1, ByteOffset, ByteMask, FieldMask]` at `FBOOLPROP_FIELDSIZE`,
+probed ±), value byte = `pc + Property.Offset + ByteOffset`, toggle `& FieldMask`,
+write back. (`Ubel::FindField` only surfaces `FieldMask`, not `ByteOffset`, so the
+layout is read directly in `Wirbel::ResolveCursorBit`.)
+
+**Input mode (build 1147).** Live-testing on TQ2 + DQIII HD-2D showed the
+property write alone has NO visible effect (logs confirm the bit is written, but
+a `GameOnly` viewport recaptures/hides the OS cursor). So `SetMouseCursor` also
+drives the input mode via `UWidgetBlueprintLibrary` (`ApplyCursorInputMode`):
+- show → `SetInputMode_GameOnly(pc)` THEN
+  `SetInputMode_GameAndUIEx(pc, null, DoNotLock, bHideCursorDuringCapture=FALSE)`
+  — the `false` is the key (the param defaults to `true`, which would hide it).
+  The GameOnly→GameAndUI **transition** is forced (build 1150): a single
+  GameAndUI call from the game's running input state often doesn't show the
+  cursor until the mode actually CHANGES (live: first force shows nothing,
+  OFF-then-ON works — this reproduces that transition in one action).
+- hide → `SetInputMode_GameOnly(pc)`.
+Best-effort: titles without UMG (no `WidgetBlueprintLibrary`) keep just the flag
+write. `SetMouseCursor` now re-reads the bit and reports the actual state (a game
+re-setting it per tick shows as not-stuck).
+
+**Remaining limitation.** Still a one-shot — a game that re-sets the flag / input
+mode every tick may revert it (no keep-forcing loop yet = potential Phase 3).
+Forcing `GameOnly` on **hide** suits titles that hide the cursor by default
+(DQIII); on a cursor-native game (TQ2 ARPG) prefer **show**.
+
+Pairs with Cursor Teleport (§6.2): forcing the cursor visible helps on titles
+that hide it.
+
+### 16.4 Surfaces (build 1144)
+
+- **DLL**: `Wirbel::TeleportRelative` / `SetMouseCursor` / `GetMouseCursor`
+  (+ reused `RecallExplicit`); exports `UE5_TeleportRelative`,
+  `UE5_TeleportRecallExplicit`, `UE5_SetMouseCursor`, `UE5_GetMouseCursor`
+  (30→38 → **42** total).
+- **Mailbox**: `TP_OP_RELATIVE = 12` (in: `[0..7]` double distance, `[8]` mode
+  0=horizontal/1=3D; out: pose block + tier), `TP_OP_EXPLICIT = 13`
+  (in: `[0..47]` 6 doubles, `[48]` hasRot; out: tier), `TP_OP_SET_CURSOR = 14`
+  (in: `ufuncAddr` = 1/0; out: `paramsData[0]` = state), `TP_OP_GET_CURSOR = 15`
+  (out: `paramsData[0]` = state).
+- **Pipe**: `teleport_relative` (`{distance, horizontal}` → pose),
+  `set_mouse_cursor` (`{show}` → `{code, state}`), `get_mouse_cursor`
+  (→ `{code, state}`); explicit coords reuse `teleport_recall_marker`.
+- **UI**: "Teleport in Facing Direction" (distance + horizontal-only toggle),
+  "Teleport to Coordinates (force)" (X/Y/Z + optional rotation + Fill from
+  current), "Force Mouse Cursor" (ON/OFF/↻ + state badge); 4 new global-hotkey
+  rows (`relative`, `coords`, `cursor_on`, `cursor_off`).
+- **CE**: `.CT` / AOBMaker mailbox records for all four + a **"Get current
+  coords"** record (`Action.GetPose`, op 0 — reads back the 6 pose doubles into
+  the mailbox and prints them, build 1147); batch is now **17 rows**. The
+  directional/coordinate records bake the current UI field values.

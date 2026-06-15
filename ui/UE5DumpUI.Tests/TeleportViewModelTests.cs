@@ -69,6 +69,20 @@ public class TeleportViewModelTests
 
         public override Task<TeleportPov> TeleportGetPovAsync(CancellationToken ct = default)
         { GetPovCalls++; return Task.FromResult(NextPov); }
+
+        public int RelativeCalls { get; private set; }
+        public (double Distance, bool Horizontal)? LastRelative { get; private set; }
+        public override Task<TeleportPose> TeleportRelativeAsync(double distance, bool horizontal, CancellationToken ct = default)
+        { RelativeCalls++; LastRelative = (distance, horizontal); return Task.FromResult(NextPose); }
+
+        public int NextCursorState { get; set; } = -1;
+        public int SetCursorCalls { get; private set; }
+        public int GetCursorCalls { get; private set; }
+        public bool? LastSetCursorShow { get; private set; }
+        public override Task<int> SetMouseCursorAsync(bool show, CancellationToken ct = default)
+        { SetCursorCalls++; LastSetCursorShow = show; return Task.FromResult(NextCursorState); }
+        public override Task<int> GetMouseCursorAsync(CancellationToken ct = default)
+        { GetCursorCalls++; return Task.FromResult(NextCursorState); }
     }
 
     private sealed class NoopLogger : ILoggingService
@@ -342,11 +356,12 @@ public class TeleportViewModelTests
     }
 
     [Fact]
-    public void Hotkey_rows_are_save_recall_recalllast_bugitgo_debugcam_and_pov()
+    public void Hotkey_rows_cover_all_teleport_actions()
     {
         var vm = CreateVm(new FakeDumpService(), out _, new FakeHotkeyService());
-        // 3 save + 3 recall + recall_last + bugit + bugitgo + debugcam_on/off + pov_get.
-        Assert.Equal(12, vm.HotkeyRows.Count);
+        // 3 save + 3 recall + recall_last + bugit + bugitgo + debugcam_on/off +
+        // pov_get + relative + coords + cursor_on/off.
+        Assert.Equal(16, vm.HotkeyRows.Count);
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "save0" && r.DisplayName == "Save marker 1");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall2" && r.DisplayName == "Recall marker 3");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall_last" && r.DisplayName == "Recall last");
@@ -355,6 +370,10 @@ public class TeleportViewModelTests
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "debugcam_on" && r.DisplayName == "Debug cam ON");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "debugcam_off" && r.DisplayName == "Debug cam OFF");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "pov_get" && r.DisplayName == "Get POV");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "relative" && r.DisplayName == "TP facing dir");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "coords" && r.DisplayName == "TP to coords");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "cursor_on" && r.DisplayName == "Cursor ON");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "cursor_off" && r.DisplayName == "Cursor OFF");
         Assert.All(vm.HotkeyRows, r => Assert.False(r.HasBinding));
     }
 
@@ -412,6 +431,148 @@ public class TeleportViewModelTests
         vm.SetConnected(false);
 
         Assert.Equal("Unknown", vm.DebugCameraState);
+    }
+
+    // ── Directional teleport ───────────────────────────────────────────
+
+    [Fact]
+    public async Task TeleportRelative_passes_distance_and_mode_and_applies_pose()
+    {
+        var fake = new FakeDumpService
+        {
+            NextPose = new() { Code = 0, X = 7, Y = 8, Z = 9, Yaw = 45 },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        vm.RelativeDistance = 250;
+        vm.RelativeHorizontal = false;
+
+        await vm.TeleportRelativeCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.RelativeCalls);
+        Assert.Equal((250, false), fake.LastRelative);
+        Assert.Equal("7.000", vm.PoseX);          // landed pose surfaced
+        Assert.Contains("Teleported", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task TeleportRelative_does_nothing_when_disconnected()
+    {
+        var fake = new FakeDumpService();
+        var vm = CreateVm(fake, out _);   // not connected
+
+        await vm.TeleportRelativeCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, fake.RelativeCalls);
+    }
+
+    // ── Teleport to explicit coordinates ───────────────────────────────
+
+    [Fact]
+    public async Task TeleportToCoords_without_rotation_passes_xyz_only()
+    {
+        var fake = new FakeDumpService { NextResult = new() { Code = 0, Tier = 1 } };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        vm.CoordX = 11; vm.CoordY = 22; vm.CoordZ = 33;
+        vm.CoordSetRotation = false;
+
+        await vm.TeleportToCoordsCommand.ExecuteAsync(null);
+
+        Assert.NotNull(fake.LastExplicit);
+        Assert.Equal(11, fake.LastExplicit!.Value.X, 3);
+        Assert.Equal(33, fake.LastExplicit.Value.Z, 3);
+        Assert.Null(fake.LastExplicit.Value.P);   // rotation omitted
+        Assert.Contains("Teleported", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task TeleportToCoords_with_rotation_passes_pitch()
+    {
+        var fake = new FakeDumpService { NextResult = new() { Code = 0, Tier = 1 } };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        vm.CoordX = 1; vm.CoordY = 2; vm.CoordZ = 3;
+        vm.CoordSetRotation = true;
+        vm.CoordPitch = -15;
+
+        await vm.TeleportToCoordsCommand.ExecuteAsync(null);
+
+        Assert.NotNull(fake.LastExplicit);
+        Assert.Equal(-15, fake.LastExplicit!.Value.P!.Value, 3);
+    }
+
+    [Fact]
+    public async Task FillCoordsFromCurrent_populates_coord_fields()
+    {
+        var fake = new FakeDumpService
+        {
+            NextPose = new() { Code = 0, X = 100, Y = 200, Z = 300, Pitch = 5, Yaw = 10, Roll = 0 },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.FillCoordsFromCurrentCommand.ExecuteAsync(null);
+
+        Assert.Equal(100, vm.CoordX);
+        Assert.Equal(300, vm.CoordZ);
+        Assert.Equal(10, vm.CoordYaw);
+    }
+
+    // ── Force mouse cursor ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task ForceCursorOn_calls_dll_and_sets_badge()
+    {
+        var fake = new FakeDumpService { NextCursorState = 1 };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+
+        await vm.ForceCursorOnCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.SetCursorCalls);
+        Assert.True(fake.LastSetCursorShow);
+        Assert.Equal("ON", vm.MouseCursorState);
+    }
+
+    [Fact]
+    public async Task ForceCursorOff_sends_hide_and_sets_badge()
+    {
+        var fake = new FakeDumpService { NextCursorState = 0 };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+
+        await vm.ForceCursorOffCommand.ExecuteAsync(null);
+
+        Assert.False(fake.LastSetCursorShow);
+        Assert.Equal("OFF", vm.MouseCursorState);
+    }
+
+    [Fact]
+    public async Task RefreshCursor_reads_live_state()
+    {
+        var fake = new FakeDumpService { NextCursorState = 1 };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+
+        await vm.RefreshCursorCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.GetCursorCalls);
+        Assert.Equal("ON", vm.MouseCursorState);
+    }
+
+    [Fact]
+    public async Task Disconnect_resets_cursor_badge()
+    {
+        var fake = new FakeDumpService { NextCursorState = 1 };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+        await vm.ForceCursorOnCommand.ExecuteAsync(null);
+        Assert.Equal("ON", vm.MouseCursorState);
+
+        vm.SetConnected(false);
+
+        Assert.Equal("Unknown", vm.MouseCursorState);
     }
 
     // ── Startup hotkey-conflict surfacing ──────────────────────────────

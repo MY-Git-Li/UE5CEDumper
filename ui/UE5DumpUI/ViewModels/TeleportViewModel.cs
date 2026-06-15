@@ -64,6 +64,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "debugcam_on",  DisplayName = "Debug cam ON" });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "debugcam_off", DisplayName = "Debug cam OFF" });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "pov_get",      DisplayName = "Get POV" });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "relative",     DisplayName = "TP facing dir" });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "coords",       DisplayName = "TP to coords" });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "cursor_on",    DisplayName = "Cursor ON" });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "cursor_off",   DisplayName = "Cursor OFF" });
 
         if (_globalHotkeys != null)
         {
@@ -160,6 +164,30 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _debugCameraState = "Unknown";
     [ObservableProperty] private string _debugCameraBadgeColor = "#888888";
 
+    // ── Directional teleport (move along the pawn's facing) ────────────
+    /// <summary>Distance in unreal units to step along the facing direction
+    /// (negative = backward).</summary>
+    [ObservableProperty] private double _relativeDistance = 100.0;
+    /// <summary>True = move on the ground plane (Yaw only, keep Z); false = full
+    /// 3D forward (follow pitch — fly / noclip feel).</summary>
+    [ObservableProperty] private bool _relativeHorizontal = true;
+
+    // ── Teleport to explicit coordinates (force, no map check) ─────────
+    [ObservableProperty] private double _coordX;
+    [ObservableProperty] private double _coordY;
+    [ObservableProperty] private double _coordZ;
+    /// <summary>Also restore Pitch/Yaw/Roll when teleporting to the coordinates.</summary>
+    [ObservableProperty] private bool _coordSetRotation;
+    [ObservableProperty] private double _coordPitch;
+    [ObservableProperty] private double _coordYaw;
+    [ObservableProperty] private double _coordRoll;
+
+    // ── Force mouse cursor (writes APlayerController.bShowMouseCursor) ──
+    /// <summary>Tri-state badge: "ON" / "OFF" / "Unknown". One-shot write; games
+    /// that re-set the flag every tick may revert it.</summary>
+    [ObservableProperty] private string _mouseCursorState = "Unknown";
+    [ObservableProperty] private string _mouseCursorBadgeColor = "#888888";
+
     // ── Startup hotkey-conflict warning ────────────────────────────────
     /// <summary>Non-empty when one or more saved hotkeys could not be re-bound at
     /// startup because another app holds the combo. Shown as a top banner; the
@@ -204,6 +232,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             StatusText = "Not connected";
             AutoRefresh = false;
             ApplyDebugCameraState(-1);   // badge back to Unknown
+            ApplyMouseCursorState(-1);   // cursor badge back to Unknown
             ClearPovDisplay();
         }
     }
@@ -676,6 +705,161 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         finally { IsBusy = false; }
     }
 
+    // ── Directional + explicit-coordinate teleport ─────────────────────
+
+    /// <summary>Teleport along the pawn's facing by RelativeDistance uu (negative
+    /// = backward). Horizontal keeps Z; otherwise follows pitch. Undoable via
+    /// Recall last.</summary>
+    [RelayCommand]
+    private async Task TeleportRelativeAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var p = await _dump.TeleportRelativeAsync(RelativeDistance, RelativeHorizontal);
+            if (p.Code != TeleportCodes.Ok)
+            {
+                StatusText = $"TP facing: {TeleportCodes.Describe(p.Code)}";
+                return;
+            }
+            ApplyPose(p);
+            StatusText = string.Format(CultureInfo.InvariantCulture,
+                "Teleported {0:0.#} uu {1} → ({2:0.0}, {3:0.0}, {4:0.0}).",
+                RelativeDistance, RelativeHorizontal ? "horizontally" : "in 3D",
+                p.X, p.Y, p.Z);
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Teleport Relative failed", ex); }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Force-teleport to the explicit X/Y/Z (and optional rotation) — no
+    /// map check. Undoable via Recall last.</summary>
+    [RelayCommand]
+    private async Task TeleportToCoordsAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var r = CoordSetRotation
+                ? await _dump.TeleportRecallExplicitAsync(CoordX, CoordY, CoordZ,
+                    CoordPitch, CoordYaw, CoordRoll)
+                : await _dump.TeleportRecallExplicitAsync(CoordX, CoordY, CoordZ);
+            if (r.Code != TeleportCodes.Ok)
+            {
+                StatusText = $"TP to coords: {TeleportCodes.Describe(r.Code)}";
+                return;
+            }
+            StatusText = string.Format(CultureInfo.InvariantCulture,
+                r.Tier == 2
+                    ? "Teleported to ({0:0.0}, {1:0.0}, {2:0.0}) (raw write — game may snap back)."
+                    : "Teleported to ({0:0.0}, {1:0.0}, {2:0.0}).",
+                CoordX, CoordY, CoordZ);
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Teleport ToCoords failed", ex); }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Populate the X/Y/Z (and rotation) fields from the current pose.</summary>
+    [RelayCommand]
+    private async Task FillCoordsFromCurrentAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var p = await _dump.TeleportGetPoseAsync();
+            if (p.Code != TeleportCodes.Ok)
+            {
+                StatusText = TeleportCodes.Describe(p.Code);
+                return;
+            }
+            ApplyPose(p);
+            CoordX = p.X; CoordY = p.Y; CoordZ = p.Z;
+            CoordPitch = p.Pitch; CoordYaw = p.Yaw; CoordRoll = p.Roll;
+            StatusText = "Filled coordinates from the current pose.";
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Teleport FillCoords failed", ex); }
+        finally { IsBusy = false; }
+    }
+
+    // ── Force mouse cursor on/off (shared with Lua via set_mouse_cursor) ─
+
+    /// <summary>Map the DLL tri-state (1=on, 0=off, -1=unknown) onto the badge.</summary>
+    private void ApplyMouseCursorState(int state)
+        => (MouseCursorState, MouseCursorBadgeColor) = state switch
+        {
+            1 => ("ON",      "#4EC9B0"),
+            0 => ("OFF",     "#999999"),
+            _ => ("Unknown", "#888888"),
+        };
+
+    [RelayCommand]
+    private Task ForceCursorOnAsync()  => ForceCursorAsync(show: true);
+
+    [RelayCommand]
+    private Task ForceCursorOffAsync() => ForceCursorAsync(show: false);
+
+    /// <summary>↻ — re-read and display the live bShowMouseCursor state.</summary>
+    [RelayCommand]
+    private async Task RefreshCursorAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var state = await _dump.GetMouseCursorAsync();
+            ApplyMouseCursorState(state);
+            StatusText = state switch
+            {
+                1 => "Mouse cursor is ON.",
+                0 => "Mouse cursor is OFF.",
+                _ => "Cursor state unknown — enter gameplay so a PlayerController spawns.",
+            };
+        }
+        catch (Exception ex)
+        {
+            ApplyMouseCursorState(-1);
+            SetError(ex);
+            _log.Error("Teleport RefreshCursor failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    private async Task ForceCursorAsync(bool show)
+    {
+        if (!IsConnected) return;
+        var want = show ? "ON" : "OFF";
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var state = await _dump.SetMouseCursorAsync(show);
+            ApplyMouseCursorState(state);
+            StatusText = state switch
+            {
+                1 when show  => "✓ Mouse cursor forced ON.",
+                0 when !show => "✓ Mouse cursor forced OFF.",
+                -1 => $"Force cursor {want}: no live PlayerController / unresolved " +
+                      "(enter gameplay first).",
+                _  => $"⚠ Force cursor {want}: state is now {(state == 1 ? "ON" : "OFF")} " +
+                      "— the game may re-set it each frame.",
+            };
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            StatusText = $"Force cursor {want} failed: {ex.Message}";
+            _log.Error($"Teleport ForceCursor({want}) failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
     // ── Marker global hotkeys (user-set via key capture) ────────────────
 
     private void LoadAndRegisterHotkeys()
@@ -762,6 +946,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 case "debugcam_on":  _ = ForceDebugCameraOnCommand.ExecuteAsync(null); return;
                 case "debugcam_off": _ = ForceDebugCameraOffCommand.ExecuteAsync(null); return;
                 case "pov_get":      _ = GetPovCommand.ExecuteAsync(null); return;
+                case "relative":     _ = TeleportRelativeCommand.ExecuteAsync(null); return;
+                case "coords":       _ = TeleportToCoordsCommand.ExecuteAsync(null); return;
+                case "cursor_on":    _ = ForceCursorOnCommand.ExecuteAsync(null); return;
+                case "cursor_off":   _ = ForceCursorOffCommand.ExecuteAsync(null); return;
             }
             int slot = actionId[^1] - '0';
             if (actionId.StartsWith("save", StringComparison.Ordinal))
@@ -866,8 +1054,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 return;
             }
             int ok = 0;
-            // 12 momentary auto-unticking records: Save 1-3, Recall 1-3, Recall
-            // last, BugIt, BugItGo, Cursor, Get POV, Clear all.
+            // 17 momentary auto-unticking records: Save 1-3, Recall 1-3, Recall
+            // last, BugIt, BugItGo, Cursor, Get POV, Get coords, TP facing dir,
+            // TP to coords, Cursor ON, Cursor OFF, Clear all. The directional/
+            // coords records bake the current UI field values (distance/horiz/XYZ).
             var specs = new (string Desc, TeleportScriptGenerator.Action Act, int Slot)[]
             {
                 ("Teleport: Save marker 1",   TeleportScriptGenerator.Action.Save,     0),
@@ -881,12 +1071,20 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 ("Teleport: BugItGo (go to stored)", TeleportScriptGenerator.Action.BugItGo, 0),
                 ("Teleport: To cursor",       TeleportScriptGenerator.Action.Cursor,   0),
                 ("Teleport: Get camera POV",  TeleportScriptGenerator.Action.GetPov,   0),
+                ("Teleport: Get current coords", TeleportScriptGenerator.Action.GetPose, 0),
+                ("Teleport: TP facing direction", TeleportScriptGenerator.Action.Relative, 0),
+                ("Teleport: TP to coordinates", TeleportScriptGenerator.Action.Explicit, 0),
+                ("Teleport: Cursor ON",       TeleportScriptGenerator.Action.CursorOn,  0),
+                ("Teleport: Cursor OFF",      TeleportScriptGenerator.Action.CursorOff, 0),
                 ("Teleport: Clear all markers", TeleportScriptGenerator.Action.ClearAll, 0),
             };
             foreach (var s in specs)
             {
                 string script = TeleportScriptGenerator.Generate(
-                    s.Act, s.Slot, ZOffset, TraceChannel, FallbackToCenter);
+                    s.Act, s.Slot, ZOffset, TraceChannel, FallbackToCenter,
+                    RelativeDistance, RelativeHorizontal,
+                    CoordX, CoordY, CoordZ, CoordSetRotation,
+                    CoordPitch, CoordYaw, CoordRoll);
                 if (await _aobMaker!.CreateAAScriptAsync(s.Desc, script, autoActivate: false))
                     ok++;
             }
@@ -907,7 +1105,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         try
         {
             var rows = TeleportScriptGenerator.BuildBatchRows(
-                ZOffset, TraceChannel, FallbackToCenter);
+                ZOffset, TraceChannel, FallbackToCenter,
+                RelativeDistance, RelativeHorizontal,
+                CoordX, CoordY, CoordZ, CoordSetRotation,
+                CoordPitch, CoordYaw, CoordRoll);
             string ct = CheatTableBuilder.Build("Teleport — UE5CEDumper", rows);
             var path = await _platform.ShowSaveFileDialogAsync(
                 defaultFileName: CheatTableBuilder.DefaultFileName("Teleport", DateTime.Now),

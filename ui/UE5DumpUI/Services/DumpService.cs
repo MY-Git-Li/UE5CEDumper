@@ -2020,6 +2020,40 @@ public sealed class DumpService : IDumpService
         };
     }
 
+    public async Task<TeleportPose> TeleportRelativeAsync(double distance, bool horizontal,
+        CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "teleport_relative",
+            ["distance"] = distance,
+            ["horizontal"] = horizontal,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return ParsePose(res);
+    }
+
+    public async Task<int> SetMouseCursorAsync(bool show, CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "set_mouse_cursor", ["show"] = show };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        int code = res["code"]?.GetValue<int>() ?? -1;
+        if (code != 0) return -1;
+        return (res["state"]?.GetValue<bool>() ?? false) ? 1 : 0;
+    }
+
+    public async Task<int> GetMouseCursorAsync(CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "get_mouse_cursor" };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        int code = res["code"]?.GetValue<int>() ?? -1;
+        if (code != 0) return -1;
+        return (res["state"]?.GetValue<bool>() ?? false) ? 1 : 0;
+    }
+
     private static TeleportPose ParsePose(JsonObject res) => new()
     {
         Code  = res["code"]?.GetValue<int>() ?? -1,

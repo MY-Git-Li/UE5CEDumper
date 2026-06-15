@@ -551,8 +551,8 @@
     <sys:String x:Key="str.Tip.TP.RunBugItGo">Parse the pasted string and teleport there. Works without any CheatManager — feeds X/Y/Z into the same recall path as markers.</sys:String>
     <sys:String x:Key="str.Tip.TP.RecallLast">Undo the most recent teleport: jump back to the pose auto-saved just before your last Recall / Force / BugItGo / cursor teleport. One-way — recalling it doesn't change the saved spot, so you can press it repeatedly. The system writes this slot; you can't save into it.</sys:String>
     <sys:String x:Key="str.Tip.TP.HkSet">Click, then press the key combo you want for this action. Hold modifiers (Ctrl/Alt/Shift) then a key, or press a single key. Esc cancels. The combo is registered system-wide so it works while the game is focused.</sys:String>
-    <sys:String x:Key="str.Tip.TP.AddActions">Ship 12 momentary action records (Save 1-3, Recall 1-3, Recall last, BugIt, BugItGo, Cursor, Get POV, Clear all) into the open Cheat Engine table via AOBMaker — each fires once when ticked and auto-unticks. Bind CE record hotkeys yourself if you prefer CE-side hotkeys. Requires the AOBMaker plugin connected.</sys:String>
-    <sys:String x:Key="str.Tip.TP.SaveCt">Backup: save a Cheat Engine .CT file with the 12 momentary records, for when AOBMaker isn't connected. Import via CE File → Open.</sys:String>
+    <sys:String x:Key="str.Tip.TP.AddActions">Ship 17 momentary action records (Save 1-3, Recall 1-3, Recall last, BugIt, BugItGo, Cursor, Get POV, Get current coords, TP facing direction, TP to coordinates, Cursor ON, Cursor OFF, Clear all) into the open Cheat Engine table via AOBMaker — each fires once when ticked and auto-unticks. The directional/coordinate records bake the current field values. Bind CE record hotkeys yourself if you prefer CE-side hotkeys. Requires the AOBMaker plugin connected.</sys:String>
+    <sys:String x:Key="str.Tip.TP.SaveCt">Backup: save a Cheat Engine .CT file with the 17 momentary records, for when AOBMaker isn't connected. Import via CE File → Open.</sys:String>
     <!-- Teleport: Debug Camera (free-look) -->
     <sys:String x:Key="str.TP.DcHeader">Debug Camera (free-look)</sys:String>
     <sys:String x:Key="str.TP.DcHint">Detach the view into a free-fly debug camera (UCheatManager::ToggleDebugCamera). Turning it back OFF is handled even on Shipping builds that stripped the disable path — the DLL switches the local player's controller back. Needs a live PlayerController, so enter gameplay first. Available only on games that kept ToggleDebugCamera.</sys:String>
@@ -570,6 +570,35 @@
     <sys:String x:Key="str.TP.PovHint">The on-screen camera (APlayerCameraManager) — its world location, rotation and field-of-view, read via the engine's GetCameraLocation / GetCameraRotation / GetFOVAngle. This is DISTINCT from the pawn pose above: on games that drive the camera independently of the possessed pawn (HD-2D / fixed-view) the two diverge. Read-only — there is no universal Set POV (the view is recomputed every frame); to actually move the camera, use the Debug Camera buttons below.</sys:String>
     <sys:String x:Key="str.Tip.TP.GetPov">Read the current on-screen camera location, rotation and FOV (invokes APlayerCameraManager getters on the game thread). Try it during gameplay — in menus/loading the game thread is idle and it can't read. Compare the location to the pawn's: a large delta that barely changes after a teleport means the camera is independent of the pawn.</sys:String>
     <sys:String x:Key="str.Tip.TP.PovSource">How the POV was read: "invoke" = the camera-manager getters; "raw" = a direct read of the cached POV, used as a fallback on games where the getters exist but return nothing (e.g. TQ2 / Octopath).</sys:String>
+
+    <!-- Teleport: directional / coordinate / cursor force -->
+    <sys:String x:Key="str.TP.RelHeader">Teleport in Facing Direction</sys:String>
+    <sys:String x:Key="str.TP.RelGo">Teleport forward</sys:String>
+    <sys:String x:Key="str.TP.RelDist">Distance (uu):</sys:String>
+    <sys:String x:Key="str.TP.RelHoriz">Horizontal only (keep Z)</sys:String>
+    <sys:String x:Key="str.Tip.TP.RelGo">Step the pawn along the direction it is facing by the distance below (negative distance = backward). The facing comes from the actor's forward vector (GetActorForwardVector), falling back to the control rotation. Undo with Recall last.</sys:String>
+    <sys:String x:Key="str.Tip.TP.RelDist">How far to move along the facing direction, in unreal units (1 uu ≈ 1 cm). Negative values step backward.</sys:String>
+    <sys:String x:Key="str.Tip.TP.RelHoriz">On: move on the ground plane (yaw only, keep your current height) — the natural "walk toward that compass bearing". Off: follow the full view direction including pitch, so looking up/down moves you up/down (fly / noclip feel).</sys:String>
+
+    <sys:String x:Key="str.TP.CoordHeader">Teleport to Coordinates (force)</sys:String>
+    <sys:String x:Key="str.TP.CoordXyz">X / Y / Z:</sys:String>
+    <sys:String x:Key="str.TP.CoordPyr">Pitch / Yaw / Roll:</sys:String>
+    <sys:String x:Key="str.TP.CoordGo">Teleport to coordinates</sys:String>
+    <sys:String x:Key="str.TP.CoordFill">Fill from current</sys:String>
+    <sys:String x:Key="str.TP.CoordSetRot">Also set rotation</sys:String>
+    <sys:String x:Key="str.Tip.TP.CoordGo">Force-teleport the pawn to the exact world X/Y/Z below. No map check, so you can jump anywhere on the current level. Undo with Recall last.</sys:String>
+    <sys:String x:Key="str.Tip.TP.CoordFill">Read the current pose and fill the X/Y/Z (and Pitch/Yaw/Roll) boxes with it — a quick way to nudge from where you are.</sys:String>
+    <sys:String x:Key="str.Tip.TP.CoordSetRot">When ticked, also restore the Pitch/Yaw/Roll below after the jump. Leave off to keep your current facing.</sys:String>
+
+    <sys:String x:Key="str.TP.CursorForceHeader">Force Mouse Cursor</sys:String>
+    <sys:String x:Key="str.TP.CursorForceHint">Force the OS mouse cursor visible or hidden by writing the PlayerController's bShowMouseCursor. Handy when a game hides the cursor but you want Cursor Teleport. One-shot: a game that re-sets the flag every frame may revert it, and a captured input mode can still hide the cursor.</sys:String>
+    <sys:String x:Key="str.TP.CursorStateLabel">State:</sys:String>
+    <sys:String x:Key="str.TP.CursorOn">Force ON</sys:String>
+    <sys:String x:Key="str.TP.CursorOff">Force OFF</sys:String>
+    <sys:String x:Key="str.TP.CursorRefresh">↻</sys:String>
+    <sys:String x:Key="str.Tip.TP.CursorOn">Show the mouse cursor (sets bShowMouseCursor = true on the local PlayerController).</sys:String>
+    <sys:String x:Key="str.Tip.TP.CursorOff">Hide the mouse cursor (sets bShowMouseCursor = false).</sys:String>
+    <sys:String x:Key="str.Tip.TP.CursorRefresh">Re-read the live bShowMouseCursor state (1=ON / 0=OFF / unknown if no live PlayerController).</sys:String>
 
     <!-- Interesting Properties Finder (B' / Unusual Location) -->
     <sys:String x:Key="str.IP.Load">Load</sys:String>
