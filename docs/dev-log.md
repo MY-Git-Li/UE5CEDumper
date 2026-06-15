@@ -14,6 +14,75 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-15 — Value Search → Pivot handoff (value-locator, C2-lite) (build 1161)
+
+The cheap complement to change-driven discovery: when the user **can see a value**
+(Gold = 9410), Value Search already finds its `(class, field, address)` — but it was
+the **only** source panel missing the C5 "Pivot this" handoff that PropertySearch /
+InterestingProperties / LiveWalker have. Added it so a value-scan hit reaches a grouped
+pivot in one click.
+
+A per-row **"📊 Pivot"** button on the Value Search results grid (gated by
+`PivotEnabled`, so it's hidden when experimental features are off) raises
+`ValueSearchViewModel.NavigateToPivot(ClassName, FieldName)` — the hit already carries
+both — which `MainWindowViewModel.HandlePivotHandoff` routes to the Class Pivot tab via
+the existing `PivotForAsync`. Pure VM/XAML reuse of the C5 contract: new event +
+`PivotEnabled` flag + `PivotThis` command (mirrors `PropertySearchViewModel`), wired in
+the same `if (snapshotStore != null)` block + `UpdatePivotHandoffEnabled`. No DLL/pipe
+change. +2 `PivotHandoffCommandTests` → **1478 C# green**, build.ps1 -Target UI publish
+clean. Together with build 1160 this closes the loop both ways: **value-known** → Value
+Search → Pivot, and **value-unknown** → Discover → Pivot.
+
+-----
+
+## 2026-06-15 — Class Pivot: change-driven discovery — the automatic front-door (build 1160)
+
+**The problem (owner):** Class Pivot is under-used because it assumes you already
+know *which class* to pivot. Within a class the key is already auto-suggested
+(`PivotKeyScorer.SuggestKey` + value pre-tick + Identity fallback), but when the
+**target is unknown** the user is stuck at "pick one of thousands of classes".
+
+**The fix (Phase C — C3, change-driven):** a new **"🔍 Suggest targets"** front-door
+on the Class Pivot tab. Capture two snapshots around an in-game action (spend gold /
+take damage / level up), pick *Before* + *After*, press **Discover** → the system
+ranks the **(class, property) targets that MOVED** and shows a short list; **Use →**
+pivots the chosen one (selects the class, forces the discovered property as a
+projected value, switches to Identity grouping, runs). No class/key guessing.
+
+**Why the change signal works:** game-relevant fields are the ones that change
+between captures; static config never moves. The ranking is a transparent weighted
+sum — **interest** (`PropertyScoringTable`, the calibrated HP/Gold/Damage scorer,
+dominant) + **change** (monotonic move beats jitter) + **selectivity** (a change
+confined to FEW instances is the thing you touched, not global render/anim noise) −
+**population** (penalises ubiquitous huge-instance fields). Every sub-score is
+exposed on the candidate for a future cross-game calibration pass.
+
+**Implementation (pure C# over the SQLite corpus — zero DLL/pipe change):**
+- `PivotDiscoveryEngine` (pure, AOT-safe): rolls (instance, field) value-sequences
+  up per (class, prop), gates on "moved", ranks. Same engine/store split as
+  `SpcEngine` / `PivotEngine` — unit-testable without a DB.
+- `SnapshotStore.DiscoverChangesAsync` reuses the **exact** SPC cross-snapshot
+  intersection load — extracted into a shared `LoadIntersectedCandidatesAsync`
+  helper that both `SpcQueryAsync` and discovery now consume (no duplicated load,
+  no SPC behaviour change — guarded by the existing `SpcStoreTests`).
+- Models `DiscoveryQuery / DiscoveryInput / DiscoveryCandidate / DiscoveryResult`.
+- `ClassPivotViewModel`: `DiscoverFrom/To` (default = last two captures), `Discover`
+  + `UseDiscoverCandidate` commands, results grid; the C5 handoff tail extracted to
+  `SelectClassAndTickPropAsync` (shared by right-click "Pivot this" and "Use →").
+- UI: a `<Expander>` "🔍 Suggest targets" section at the top of the Class Pivot tab
+  (before/after pickers + ranked grid: Class · Property · Changed N/M · Δ · Category
+  · sample sequence · score). Join mode = Strict (works cross-session too).
+
+**Tests:** +10 `PivotDiscoveryEngineTests` (rank math: interest beats neutral,
+selective beats ubiquitous, unchanged dropped, direction, determinism, cap),
++7 `DiscoverStoreTests` (end-to-end load/join/wiring), +3 `ClassPivotViewModelTests`
+(discover → use → pivot). **1476 C# green, build.ps1 -Target UI publish clean (AOT).**
+⚠ **In-game live-verify pending** (capture 2 snapshots in a real game, Discover,
+confirm the ranked list surfaces the gameplay field). Remaining C3: the heavier
+scorer (Jaccard stability / compound key) + C2 find-by-value are still open.
+
+-----
+
 ## 2026-06-15 — Dump All Metadata: meta line records FUObjectItem layout (build 1158)
 
 The `.jsonl` dump's `{"kind":"meta"}` line now carries **`item_layout`**

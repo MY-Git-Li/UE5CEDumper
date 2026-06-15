@@ -177,6 +177,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (PropertySearch != null)        PropertySearch.PivotEnabled = on;
         if (InterestingProperties != null) InterestingProperties.PivotEnabled = on;
         if (LiveWalker != null)            LiveWalker.PivotEnabled = on;
+        ValueSearch.PivotEnabled = on;
     }
 
     /// <summary>Address format options for toolbar ComboBox.</summary>
@@ -374,6 +375,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             PropertySearch.NavigateToPivot        += (cls, prop) => HandlePivotHandoff(cls, prop);
             InterestingProperties.NavigateToPivot += (cls, prop) => HandlePivotHandoff(cls, prop);
             LiveWalker.NavigateToPivot            += (cls, prop) => HandlePivotHandoff(cls, prop);
+            // Value-locator -> pivot: a value-scan hit already carries class + field.
+            ValueSearch.NavigateToPivot           += (cls, prop) => HandlePivotHandoff(cls, prop);
         }
         // Gate the handoff menu items to the experimental flag (and pivot existence).
         UpdatePivotHandoffEnabled();

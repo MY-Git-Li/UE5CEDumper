@@ -467,6 +467,17 @@ public partial class ValueSearchViewModel : ViewModelBase
     public event Action<string, int, string>? NavigateToInstance;
     public event Action<string>? RequestCopyText;
 
+    /// <summary>Raised to pivot the chosen candidate's (className, fieldName) in the
+    /// experimental Class Pivot tab — the value-locator → pivot handoff (mirrors the
+    /// C5 right-click handoff on the property panels). A value-scan hit already
+    /// carries ClassName + FieldName, so "I can see this value on screen" reaches a
+    /// grouped pivot in one click.</summary>
+    public event Action<string, string>? NavigateToPivot;
+
+    /// <summary>Gates the per-row "Pivot" button — true only when the experimental
+    /// Class Pivot tab is available. Hidden when experimental features are off.</summary>
+    [ObservableProperty] private bool _pivotEnabled;
+
     public ValueSearchViewModel(IDumpService dump, ILoggingService log)
     {
         _dump = dump;
@@ -639,6 +650,17 @@ public partial class ValueSearchViewModel : ViewModelBase
         if (candidate == null) return;
         if (string.IsNullOrEmpty(candidate.Addr)) return;
         RequestCopyText?.Invoke(candidate.Addr);
+    }
+
+    /// <summary>Hand this hit's (class, field) to the Class Pivot tab — the
+    /// value-locator → pivot handoff. The hit already resolved both, so the user
+    /// goes from "I see this value" straight to grouping its class by this field.</summary>
+    [RelayCommand]
+    private void PivotThis(ValueCandidate? candidate)
+    {
+        candidate ??= SelectedCandidate;
+        if (candidate == null || string.IsNullOrEmpty(candidate.ClassName)) return;
+        NavigateToPivot?.Invoke(candidate.ClassName, candidate.FieldName);
     }
 
     private async Task EndSessionIfAnyAsync()

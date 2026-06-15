@@ -644,88 +644,18 @@ public sealed class SnapshotStore : ISnapshotStore
 
         await using var conn = await OpenAsync(ct);
 
-        // In-memory intersection (port of `discrete`): load the anchor (oldest)
-        // snapshot's fields into a candidate dict keyed by the join identity, then
-        // stream each later snapshot and keep only candidates that recur, appending
-        // their value. One shrinking dict — no SQL self-join, no covering-index
-        // dependency. Class/prop filters narrow at anchor load. Duplicate keys within
-        // a snapshot (e.g. spawn siblings sharing a normalised path under Strict) keep
-        // the first — collapses cross-product noise.
-        var intern = new Dictionary<string, string>(StringComparer.Ordinal);
-        string Intern(string s) { if (intern.TryGetValue(s, out var v)) return v; intern[s] = s; return s; }
-
-        var cands = new Dictionary<string, Cand>();
-
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = SpcRowSql;
-            cmd.Parameters.AddWithValue("$id", query.SnapshotIds[0]);
-            await using var r = await cmd.ExecuteReaderAsync(ct);
-            int rowCount = 0;
-            while (await r.ReadAsync(ct))
-            {
-                // Microsoft.Data.Sqlite's ReadAsync runs synchronously and ignores
-                // the token, so the ONLY way to abort a multi-million-row scan is an
-                // explicit periodic check. ~64k-row cadence keeps the overhead nil.
-                if ((++rowCount & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
-                string cls  = r.IsDBNull(0) ? "" : r.GetString(0);
-                if (deny != null && deny.Contains(cls)) continue;
-                string prop = r.IsDBNull(4) ? "" : r.GetString(4);
-                if (classContains.Length > 0 && cls.IndexOf(classContains, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                if (propContains.Length  > 0 && prop.IndexOf(propContains,  StringComparison.OrdinalIgnoreCase) < 0) continue;
-                string key = SpcKey(mode, r, cls, prop);
-                if (cands.ContainsKey(key)) continue;
-                var c = new Cand { ClassName = Intern(cls), PropName = Intern(prop) };
-                c.Hex.Add(r.IsDBNull(7) ? "" : r.GetString(7));
-                c.Num.Add(r.IsDBNull(8) ? (double?)null : r.GetDouble(8));
-                cands[key] = c;
-            }
-        }
-
-        for (int i = 1; i < n && cands.Count > 0; i++)
-        {
-            foreach (var c in cands.Values) c.Seen = false;
-            bool newest = i == n - 1;
-            await using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText = SpcRowSql;
-                cmd.Parameters.AddWithValue("$id", query.SnapshotIds[i]);
-                await using var r = await cmd.ExecuteReaderAsync(ct);
-                int rowCount = 0;
-                while (await r.ReadAsync(ct))
-                {
-                    if ((++rowCount & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
-                    string cls  = r.IsDBNull(0) ? "" : r.GetString(0);
-                    if (deny != null && deny.Contains(cls)) continue;
-                    string prop = r.IsDBNull(4) ? "" : r.GetString(4);
-                    string key = SpcKey(mode, r, cls, prop);
-                    if (!cands.TryGetValue(key, out var c) || c.Seen) continue;
-                    c.Seen = true;
-                    c.Hex.Add(r.IsDBNull(7) ? "" : r.GetString(7));
-                    c.Num.Add(r.IsDBNull(8) ? (double?)null : r.GetDouble(8));
-                    if (newest)
-                    {
-                        c.NormPath     = r.IsDBNull(1) ? "" : r.GetString(1);
-                        c.ObjAddr      = r.IsDBNull(6) ? "" : r.GetString(6);
-                        c.PropOffset   = r.IsDBNull(5) ? 0  : r.GetInt32(5);
-                        c.DeclaredType = r.IsDBNull(3) ? "" : r.GetString(3);
-                    }
-                }
-            }
-            // Intersection: drop candidates absent from this snapshot.
-            ct.ThrowIfCancellationRequested();
-            List<string>? drop = null;
-            foreach (var kv in cands)
-                if (!kv.Value.Seen) (drop ??= new()).Add(kv.Key);
-            if (drop != null) foreach (var k in drop) cands.Remove(k);
-        }
+        // Shared in-memory intersection load (also used by change-driven Discovery):
+        // candidates present in ALL snapshots, carrying their oldest→newest value
+        // sequence + newest-snapshot display fields. See LoadIntersectedCandidatesAsync.
+        var cands = await LoadIntersectedCandidatesAsync(
+            conn, query.SnapshotIds, mode, classContains, propContains, deny, ct);
 
         // Evaluate the directional chain + absolute predicates; build result rows.
         // Accumulate per-class hit count + per-(class, prop) sub-count to drive the
         // post-query Top-N noise picker (N1).
         var noise = new NoiseAccumulator();
         int evalCount = 0;
-        foreach (var c in cands.Values)
+        foreach (var c in cands)
         {
             if ((++evalCount & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
             if (c.Hex.Count != n) continue;
@@ -766,6 +696,130 @@ public sealed class SnapshotStore : ISnapshotStore
         public bool Seen;
         public readonly List<string>  Hex = new();
         public readonly List<double?> Num = new();
+    }
+
+    // Shared cross-snapshot intersection load for SPC + change-driven Discovery
+    // (extracted from SpcQueryAsync so both consume one code path): load the anchor
+    // (oldest) snapshot's fields into a candidate dict keyed by the join identity,
+    // then stream each later snapshot keeping only candidates that recur, appending
+    // their value. One shrinking dict — no SQL self-join, no covering-index
+    // dependency. Class/prop filters + the per-game denylist narrow at load.
+    // Duplicate keys within a snapshot (e.g. spawn siblings sharing a normalised path
+    // under Strict) keep the first — collapses cross-product noise. Returns only the
+    // candidates present in ALL snapshots (Hex.Count == snapshotIds.Count), with
+    // NormPath / ObjAddr / declared type set from the NEWEST snapshot. The caller
+    // evaluates predicates (SPC) or ranks them (Discovery).
+    private async Task<List<Cand>> LoadIntersectedCandidatesAsync(
+        SqliteConnection conn, IReadOnlyList<long> snapshotIds, SpcJoinMode mode,
+        string classContains, string propContains, HashSet<string>? deny, CancellationToken ct)
+    {
+        int n = snapshotIds.Count;
+        var intern = new Dictionary<string, string>(StringComparer.Ordinal);
+        string Intern(string s) { if (intern.TryGetValue(s, out var v)) return v; intern[s] = s; return s; }
+
+        var cands = new Dictionary<string, Cand>();
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = SpcRowSql;
+            cmd.Parameters.AddWithValue("$id", snapshotIds[0]);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            int rowCount = 0;
+            while (await r.ReadAsync(ct))
+            {
+                // Microsoft.Data.Sqlite's ReadAsync runs synchronously and ignores
+                // the token, so the ONLY way to abort a multi-million-row scan is an
+                // explicit periodic check. ~64k-row cadence keeps the overhead nil.
+                if ((++rowCount & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
+                string cls  = r.IsDBNull(0) ? "" : r.GetString(0);
+                if (deny != null && deny.Contains(cls)) continue;
+                string prop = r.IsDBNull(4) ? "" : r.GetString(4);
+                if (classContains.Length > 0 && cls.IndexOf(classContains, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                if (propContains.Length  > 0 && prop.IndexOf(propContains,  StringComparison.OrdinalIgnoreCase) < 0) continue;
+                string key = SpcKey(mode, r, cls, prop);
+                if (cands.ContainsKey(key)) continue;
+                var c = new Cand { ClassName = Intern(cls), PropName = Intern(prop) };
+                c.Hex.Add(r.IsDBNull(7) ? "" : r.GetString(7));
+                c.Num.Add(r.IsDBNull(8) ? (double?)null : r.GetDouble(8));
+                cands[key] = c;
+            }
+        }
+
+        for (int i = 1; i < n && cands.Count > 0; i++)
+        {
+            foreach (var c in cands.Values) c.Seen = false;
+            bool newest = i == n - 1;
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = SpcRowSql;
+                cmd.Parameters.AddWithValue("$id", snapshotIds[i]);
+                await using var r = await cmd.ExecuteReaderAsync(ct);
+                int rowCount = 0;
+                while (await r.ReadAsync(ct))
+                {
+                    if ((++rowCount & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
+                    string cls  = r.IsDBNull(0) ? "" : r.GetString(0);
+                    if (deny != null && deny.Contains(cls)) continue;
+                    string prop = r.IsDBNull(4) ? "" : r.GetString(4);
+                    string key = SpcKey(mode, r, cls, prop);
+                    if (!cands.TryGetValue(key, out var c) || c.Seen) continue;
+                    c.Seen = true;
+                    c.Hex.Add(r.IsDBNull(7) ? "" : r.GetString(7));
+                    c.Num.Add(r.IsDBNull(8) ? (double?)null : r.GetDouble(8));
+                    if (newest)
+                    {
+                        c.NormPath     = r.IsDBNull(1) ? "" : r.GetString(1);
+                        c.ObjAddr      = r.IsDBNull(6) ? "" : r.GetString(6);
+                        c.PropOffset   = r.IsDBNull(5) ? 0  : r.GetInt32(5);
+                        c.DeclaredType = r.IsDBNull(3) ? "" : r.GetString(3);
+                    }
+                }
+            }
+            // Intersection: drop candidates absent from this snapshot.
+            ct.ThrowIfCancellationRequested();
+            List<string>? drop = null;
+            foreach (var kv in cands)
+                if (!kv.Value.Seen) (drop ??= new()).Add(kv.Key);
+            if (drop != null) foreach (var k in drop) cands.Remove(k);
+        }
+
+        var survivors = new List<Cand>(cands.Count);
+        foreach (var c in cands.Values)
+            if (c.Hex.Count == n) survivors.Add(c);
+        return survivors;
+    }
+
+    public async Task<DiscoveryResult> DiscoverChangesAsync(DiscoveryQuery query, CancellationToken ct = default)
+    {
+        int n = query.SnapshotIds.Count;
+        if (n < 2)
+            throw new ArgumentException("Discovery needs at least two snapshots.", nameof(query));
+        ct.ThrowIfCancellationRequested();   // bail before opening a connection
+
+        string classContains = query.ClassContains?.Trim() ?? "";
+        string propContains  = query.PropContains?.Trim() ?? "";
+        // N1: reuse the per-game Pivot-scope denylist. Captured once so a concurrent
+        // UI-side mutation can't change the filter mid-load.
+        var deny = query.ExcludedClasses is { Count: > 0 } ? query.ExcludedClasses : null;
+
+        await using var conn = await OpenAsync(ct);
+        var cands = await LoadIntersectedCandidatesAsync(
+            conn, query.SnapshotIds, query.JoinMode, classContains, propContains, deny, ct);
+
+        // Hand the surviving value-sequences to the pure ranking engine: it rolls up
+        // per (class, prop), gates on "actually moved", and ranks by interest ×
+        // change × selectivity × population. Mapping to DiscoveryInput keeps the
+        // engine database-agnostic + unit-testable (same split as SpcEngine).
+        var inputs = new List<DiscoveryInput>(cands.Count);
+        foreach (var c in cands)
+            inputs.Add(new DiscoveryInput
+            {
+                ClassName = c.ClassName, PropName = c.PropName, DeclaredType = c.DeclaredType,
+                NormPath = c.NormPath, ObjAddr = c.ObjAddr, Hex = c.Hex, Num = c.Num,
+            });
+
+        int max = query.MaxResults > 0 ? query.MaxResults : 200;
+        return PivotDiscoveryEngine.Rank(inputs, n, max);
     }
 
     // Compute the per-class instance counts for one snapshot ONCE and persist them

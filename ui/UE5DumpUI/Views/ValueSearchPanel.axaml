@@ -267,6 +267,16 @@
                         BorderThickness="1" BorderBrush="#DCDCAA"
                         Padding="6,2" FontSize="11"
                         Cursor="Hand"/>
+                <!-- Value-locator -> pivot handoff. Only shown when the experimental
+                     Class Pivot tab is available (PivotEnabled). -->
+                <Button Content="{StaticResource str.VS.PivotThis}"
+                        Command="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).PivotThisCommand}"
+                        CommandParameter="{Binding}"
+                        IsVisible="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).PivotEnabled}"
+                        Foreground="#9CDCFE" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#9CDCFE"
+                        Padding="6,2" FontSize="11"
+                        Cursor="Hand"/>
               </StackPanel>
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>

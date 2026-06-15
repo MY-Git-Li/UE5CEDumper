@@ -49,6 +49,7 @@
     <sys:String x:Key="str.VS.NewScan">New Scan</sys:String>
     <sys:String x:Key="str.VS.OpenLive">Open in Live Walker</sys:String>
     <sys:String x:Key="str.VS.CopyAddr">Copy Address</sys:String>
+    <sys:String x:Key="str.VS.PivotThis">📊 Pivot</sys:String>
     <sys:String x:Key="str.VS.CaseSensitive">Case sensitive</sys:String>
     <sys:String x:Key="str.VS.Filter">Filter:</sys:String>
     <sys:String x:Key="str.VS.FilterWatermark">Filter the full result set (server-side) — any column, case-insensitive…</sys:String>
@@ -379,6 +380,21 @@
     <sys:String x:Key="str.Pivot.Res.Count">Count</sys:String>
     <sys:String x:Key="str.Pivot.Res.Key">Key</sys:String>
     <sys:String x:Key="str.Pivot.Res.Values">Projected values</sys:String>
+
+    <!-- Class Pivot: change-driven discovery (the automatic front-door) -->
+    <sys:String x:Key="str.Pivot.Discover.Header">🔍 Suggest targets — find what changed</sys:String>
+    <sys:String x:Key="str.Pivot.Discover.Intro">Don't know which class to pivot? Capture two snapshots around an in-game action (e.g. spend gold, take damage), pick them below, and Discover ranks the (class, property) targets that MOVED — by how much each looks like game state (named fields, specific changes, low noise). Pick one and Use → to pivot it. No class/key guessing.</sys:String>
+    <sys:String x:Key="str.Pivot.Discover.From">Before:</sys:String>
+    <sys:String x:Key="str.Pivot.Discover.To">After:</sys:String>
+    <sys:String x:Key="str.Pivot.Discover.Run">🔍 Discover</sys:String>
+    <sys:String x:Key="str.Pivot.Discover.Use">Use → (pivot this)</sys:String>
+    <sys:String x:Key="str.Pivot.Discover.Col.Class">Class</sys:String>
+    <sys:String x:Key="str.Pivot.Discover.Col.Prop">Property</sys:String>
+    <sys:String x:Key="str.Pivot.Discover.Col.Changed">Changed</sys:String>
+    <sys:String x:Key="str.Pivot.Discover.Col.Dir">Δ</sys:String>
+    <sys:String x:Key="str.Pivot.Discover.Col.Cat">Category</sys:String>
+    <sys:String x:Key="str.Pivot.Discover.Col.Seq">Sample (before → after)</sys:String>
+    <sys:String x:Key="str.Pivot.Discover.Col.Score">Score</sys:String>
 
     <!-- Proxy Deploy -->
     <sys:String x:Key="str.ProxyDeploy.ProxyType">Proxy DLL:</sys:String>

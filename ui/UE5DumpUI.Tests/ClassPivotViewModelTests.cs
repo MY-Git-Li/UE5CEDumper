@@ -84,6 +84,7 @@ public class ClassPivotViewModelTests : IDisposable
         public Task<SnapshotUsage> GetUsageAsync(CancellationToken ct = default) => _inner.GetUsageAsync(ct);
         public Task<SnapshotDiffResult> DiffSnapshotsAsync(long a, long b, SnapshotDiffFilter f, CancellationToken ct = default) => _inner.DiffSnapshotsAsync(a, b, f, ct);
         public Task<SpcResult> SpcQueryAsync(SpcQuery q, CancellationToken ct = default) => _inner.SpcQueryAsync(q, ct);
+        public Task<DiscoveryResult> DiscoverChangesAsync(DiscoveryQuery q, CancellationToken ct = default) => _inner.DiscoverChangesAsync(q, ct);
         public Task<PivotResult> PivotAsync(PivotQuery q, CancellationToken ct = default) => _inner.PivotAsync(q, ct);
         public Task<IReadOnlyList<PivotClassInfo>> ListPivotArrayClassesAsync(long s, CancellationToken ct = default) => _inner.ListPivotArrayClassesAsync(s, ct);
         public Task<IReadOnlyList<PivotArrayFieldInfo>> ListPivotArrayFieldsAsync(long s, string c, CancellationToken ct = default) => _inner.ListPivotArrayFieldsAsync(s, c, ct);
@@ -215,6 +216,7 @@ public class ClassPivotViewModelTests : IDisposable
         public Task<SnapshotUsage> GetUsageAsync(CancellationToken ct = default) => throw new NotImplementedException();
         public Task<SnapshotDiffResult> DiffSnapshotsAsync(long a, long b, SnapshotDiffFilter f, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<SpcResult> SpcQueryAsync(SpcQuery q, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<DiscoveryResult> DiscoverChangesAsync(DiscoveryQuery q, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<PivotResult> PivotAsync(PivotQuery q, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<int> EnforceQuotaAsync(long bytes, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<PivotClassInfo>> ListPivotArrayClassesAsync(long s, CancellationToken ct = default) => throw new NotImplementedException();
@@ -403,6 +405,75 @@ public class ClassPivotViewModelTests : IDisposable
 
         Assert.Null(vm.SelectedClass);
         Assert.Contains("not in the selected snapshot", vm.StatusText);
+    }
+
+    // ---- C3: change-driven discovery (the automatic front-door) ----
+
+    // Seed a before/after pair on one PlayerState: Gold drops, Level is constant.
+    private async Task SeedBeforeAfterAsync()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        long s1 = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "before" }, ct);
+        await _store.WriteChunkAsync(s1, new[]
+        {
+            Obj(1, "PlayerState", "/G.M:L.PlayerState_0", ("Gold", 100), ("Level", 5)),
+        }, ct);
+        await _store.FinalizeSnapshotAsync(s1, 1, 2, ct);
+
+        long s2 = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "after" }, ct);
+        await _store.WriteChunkAsync(s2, new[]
+        {
+            Obj(1, "PlayerState", "/G.M:L.PlayerState_0", ("Gold", 50), ("Level", 5)),
+        }, ct);
+        await _store.FinalizeSnapshotAsync(s2, 1, 2, ct);
+    }
+
+    [Fact]
+    public async Task RunDiscover_SurfacesChangedTarget_DropsConstant()
+    {
+        await SeedBeforeAfterAsync();
+        var vm = NewVm();
+        await vm.RefreshAsync();            // loads snapshots + sets From/To defaults
+        Assert.True(vm.CanDiscover);        // two distinct snapshots
+
+        await vm.RunDiscoverCommand.ExecuteAsync(null);
+
+        Assert.Contains(vm.DiscoverResults, c => c.PropName == "Gold");
+        Assert.DoesNotContain(vm.DiscoverResults, c => c.PropName == "Level");
+    }
+
+    [Fact]
+    public async Task UseDiscoverCandidate_PivotsTheChosenTarget()
+    {
+        await SeedBeforeAfterAsync();
+        var vm = NewVm();
+        await vm.RefreshAsync();
+        await vm.RunDiscoverCommand.ExecuteAsync(null);
+        var gold = vm.DiscoverResults.First(c => c.PropName == "Gold");
+
+        await vm.UseDiscoverCandidateAsync(gold);
+
+        Assert.Equal("Snapshot", vm.SelectedSource);
+        Assert.Equal("PlayerState", vm.SelectedClass?.ClassName);
+        Assert.True(vm.Fields.First(f => f.Name == "Gold").IsValue);
+        Assert.NotEmpty(vm.Results);        // pivot auto-ran on the chosen target
+    }
+
+    [Fact]
+    public async Task CanDiscover_RequiresTwoDistinctSnapshots()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        long s1 = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "only" }, ct);
+        await _store.WriteChunkAsync(s1, new[]
+        {
+            Obj(1, "PlayerState", "/G.M:L.PlayerState_0", ("Gold", 100)),
+        }, ct);
+        await _store.FinalizeSnapshotAsync(s1, 1, 1, ct);
+
+        var vm = NewVm();
+        await vm.RefreshAsync();
+        // Only one snapshot → From and To resolve to the same → discovery disabled.
+        Assert.False(vm.CanDiscover);
     }
 
     // ---- C6: Snapshot Array source (inner-key pivot) ----

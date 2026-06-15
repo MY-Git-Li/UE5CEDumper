@@ -63,4 +63,31 @@ public class PivotHandoffCommandTests
 
         Assert.False(fired);
     }
+
+    // Value-locator -> pivot: a value-scan hit already carries class + field, so
+    // "I can see this value" reaches a pivot in one click (same handoff contract).
+
+    [Fact]
+    public void ValueSearch_PivotThis_RaisesNavigateToPivot()
+    {
+        var vm = new ValueSearchViewModel(new StubDumpService(), new MockLoggingService());
+        (string cls, string prop)? got = null;
+        vm.NavigateToPivot += (c, p) => got = (c, p);
+
+        vm.PivotThisCommand.Execute(new ValueCandidate { ClassName = "APlayerState", FieldName = "Gold" });
+
+        Assert.Equal(("APlayerState", "Gold"), got);
+    }
+
+    [Fact]
+    public void ValueSearch_PivotThis_NoClass_DoesNothing()
+    {
+        var vm = new ValueSearchViewModel(new StubDumpService(), new MockLoggingService());
+        bool fired = false;
+        vm.NavigateToPivot += (_, _) => fired = true;
+
+        vm.PivotThisCommand.Execute(new ValueCandidate { ClassName = "", FieldName = "Gold" });
+
+        Assert.False(fired);
+    }
 }
