@@ -62,7 +62,7 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 | **實例搜尋器** | 瞬間定位類別中所有作用中的實例。支援一鍵開啟 Live Walker 檢視。 |
 | **屬性搜尋 (Property Search)** | 跨所有類別搜尋特定屬性名稱，無需瀏覽完整的物件階層。每列附 **Freeze** 按鈕（build 719），會產生在所有實例上鎖住欄位的 CE AA 腳本。 |
 | **類別結構 (Class Structure)** | 瀏覽類別定義的完整欄位佈局、類型、偏移量及繼承鏈。 |
-| **多格式 CE 匯出** | **CE XML** (指標鏈位址紀錄)、**CSX** (CE Structure Dissect)、**SDK Header** (.h)、**CE Field** (單一欄位)、**CE AA Script** (Auto Assembler)。支援純量、位元欄位、結構、陣列、Map/Set、OptionalProperty\<Struct\>、及 UEnum 下拉選單。**N 層指標 drill-down**（toolbar Drill Depth slider 0–4）— Copy CE Field 對 `ObjectProperty` 會跟著指標走進去，把目標物件的 UPROPERTY 以巢狀 `Offsets=[0]` 子節點輸出，貼到 CE 即可看到整個被引用物件的結構。**Soft array 每元素** 在 FSoftObjectPath 子位置輸出 FName leaf（UE4/5.0 單一 FName；UE5.1+ FTopLevelAssetPath PackageName + AssetName），不再只是 8B hex。 |
+| **多格式 CE 匯出** | **CE XML** (指標鏈位址紀錄)、**CSX** (CE Structure Dissect)、**SDK Header** (.h)、**CE Field** (單一欄位)、**CE AA Script** (Auto Assembler)。支援純量、位元欄位、結構、陣列、Map/Set、OptionalProperty\<Struct\>、及 UEnum 下拉選單。**N 層指標 drill-down**（toolbar Drill Depth slider 0–4）— Copy CE Field 對 `ObjectProperty` 會跟著指標走進去，把目標物件的 UPROPERTY 以巢狀 `Offsets=[0]` 子節點輸出，貼到 CE 即可看到整個被引用物件的結構。**Soft array 每元素** 在 FSoftObjectPath 子位置輸出 FName leaf（UE4/5.0 單一 FName；UE5.1+ FTopLevelAssetPath PackageName + AssetName），不再只是 8B hex。**Collapse chain（壓平指標鏈）**（工具列開關）可選擇性地將整條 `GWorld → … → 目標` 指標跳轉壓成單一 CE 多階指標項 — `base` + 一個合併節點 + 目標欄位及其 drill-down — 讓深層導航路徑貼到 CE 時是精簡的多階指標，而非 N 層巢狀群組。 |
 | **Proxy DLL** | `version.dll` 代理注入 — 不需要 Cheat Engine。將檔案放在遊戲 exe 旁，啟動遊戲後連接 UI 即可使用。 |
 | **現代化 UI** | 外部 **Avalonia UI** 透過高速具名管道連線（~50 組 JSON-RPC 指令）。各結果表格皆可排序。以 Native AOT 發佈，零 IL2026 / IL3050 警告。**長時間操作可乾淨取消** — 取消或關閉 UI 時操作會停止，注入的 DLL 不會空轉，遊戲永遠能立即關閉。確保遊戲執行效能不受影響。 |
 

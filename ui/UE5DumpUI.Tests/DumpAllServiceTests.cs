@@ -75,10 +75,10 @@ public class DumpAllServiceTests
         PeHash = "ABC123",
     };
 
-    private static List<string> Dump(FakeDumpForDump dump, DumpOptions? opts = null)
+    private static List<string> Dump(FakeDumpForDump dump, DumpOptions? opts = null, EngineState? engineState = null)
     {
         var ms = new MemoryStream();
-        DumpAllService.GenerateAsync(dump, DefaultEngineState(), ms, opts).GetAwaiter().GetResult();
+        DumpAllService.GenerateAsync(dump, engineState ?? DefaultEngineState(), ms, opts).GetAwaiter().GetResult();
         ms.Position = 0;
         using var sr = new StreamReader(ms, Encoding.UTF8);
         var lines = new List<string>();
@@ -103,8 +103,38 @@ public class DumpAllServiceTests
         // Meta contains UE version + module name + GObjects
         Assert.Contains("\"ue_version\":427", lines[0]);
         Assert.Contains("TestGame-Win64-Shipping.exe", lines[0]);
+        // FUObjectItem layout defaults to classic (no UE5.7+ packing).
+        Assert.Contains("\"item_layout\":\"classic\"", lines[0]);
+        Assert.Contains("\"item_obj_offset\":0", lines[0]);
+        Assert.Contains("\"packed_unverified\":false", lines[0]);
         // Summary counters
         Assert.Contains("\"classes_emitted\":0", lines[^1]);
+    }
+
+    [Fact]
+    public void Generate_PackedLayout_MetaCarriesLayoutAndUnverifiedFlag()
+    {
+        var dump = new FakeDumpForDump();
+        var packed = new EngineState
+        {
+            UEVersion = 570,
+            ModuleName = "Packed-Win64-Shipping.exe",
+            ModuleBase = "0x7FF600000000",
+            GObjectsAddr = "0x7FF600100000",
+            GNamesAddr = "0x7FF600200000",
+            GWorldAddr = "0x7FF600300000",
+            ObjectCount = 10,
+            PeHash = "PACKED",
+            ItemLayoutMode = "packed57",
+            ItemPacked = true,
+            ItemObjOffset = 0,
+        };
+
+        var lines = Dump(dump, engineState: packed);
+
+        // Offline analysis can now distinguish a packed-reconstructed dump.
+        Assert.Contains("\"item_layout\":\"packed57\"", lines[0]);
+        Assert.Contains("\"packed_unverified\":true", lines[0]);
     }
 
     // ==================================================================
