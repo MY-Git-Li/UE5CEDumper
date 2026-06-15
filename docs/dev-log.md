@@ -14,6 +14,67 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-15 — Dump All Metadata: meta line records FUObjectItem layout (build 1158)
+
+The `.jsonl` dump's `{"kind":"meta"}` line now carries **`item_layout`**
+(`classic` / `unpacked57` / `packed57`), **`item_obj_offset`**, and
+**`packed_unverified`** — sourced from the existing `EngineState` fields
+(`ItemLayoutMode` / `ItemObjOffset` / `ItemPacked`). This lets the offline
+analysis corpus flag a dump captured under the UNVERIFIED UE5.7+ packed layout,
+whose reconstructed addresses are best-effort. Pure additive field on
+`DumpAllService.WriteMetaLineAsync`; **no DLL / pipe change**.
+
+Context (owner question): the Dump All Metadata feature is **not adversely affected**
+by the UE5.7+ packed / `+0x08` within-item-offset work — it enumerates objects via
+`get_object_list`, which (like every GObjects consumer) reads object pointers solely
+through the single layout-aware `Aura::GetByIndex` (documented invariant in
+`Aura.h`). On classic-layout games the packed/`+0x08` branches are dormant and the
+dump is byte-identical to before; on UE5.7+ the `+0x08` path makes it correct; packed
+mode is a dormant last-resort (`DetectItemSize` `gCount==0` only). The new meta field
+just makes the layout self-evident in the output. +1 test; 1457 C# / 470 dll / 31
+utf8 green.
+
+-----
+
+## 2026-06-15 — CE export: Collapse chain — fold breadcrumb pointer spine into one CE entry (build 1156)
+
+New LiveWalker **Collapse chain** toggle for **Copy CE XML** / **Copy CE Field**
+(MERGED main via PR #286, `7d2e133` / merge `fcb8276`; owner live-verified in CE).
+When on, the `GWorld → … → target` navigation spine collapses into a SINGLE CE
+multi-level-pointer entry — `base` + one folded node + the target field with its
+drill-down — instead of one nested group per breadcrumb. So the deep
+`OwningGameInstance → m_savedata → SaveSlotList → [1] → OriginalPlayer → Params`
+path pastes as `base → (OwningGameInstance ▸ m_savedata ▸ SaveSlotList ▸ [1] ▸
+OriginalPlayer) → Params → [0..6]`.
+
+**Implementation** (`CeXmlExportService.cs`; DLL unchanged):
+- `FoldBreadcrumbSpine` + a shared `ProjectBreadcrumb` projection
+  (`offset, derefAfter = IsPointerDeref || IsContainerView`). `flattenChain` param
+  threaded through `GenerateHierarchicalXml` / `GenerateAobWrappedXml`.
+- Offsets in CE document order `[F] ++ reverse(D[1..])` as summed hex, where `D[]` =
+  each run of offsets up to & incl. a deref and `F` = the trailing inline run after
+  the last deref. Two adjacent pointers → `[0, OffsetB]`; pointer+inline →
+  `[OffsetB]`; pure-inline spine → `Address=+F` with no `<Offsets>`. Worked example
+  `D=[180,2A8,7D0]`, `F = 6F8+18 = 710` → `+180` / `[710,7D0,2A8]` (matches the
+  hand-authored reference XML).
+- Folds only when ≥ 2 navigation breadcrumbs (fewer = no-op, byte-identical to off).
+- **Robustness:** the fold reads only `(offset, derefAfter)` per breadcrumb and never
+  touches the leaf subtree (`EmitFields`), so new expandable field types can't break
+  the fold and the fold can't change leaf rendering. Both nested and folded emit
+  paths share `ProjectBreadcrumb` so they can't diverge. Every breadcrumb the app
+  creates is inline or single-deref (DataTable's 2-level deref = two single-deref
+  breadcrumbs), so the fold is total over the breadcrumb model.
+
+**UI / wiring:** `LiveWalkerViewModel.CollapseChain` passed at all 4 export call
+sites (Copy CE XML / Field × AOB / hierarchical); `Collapse chain` checkbox in
+`LiveWalkerPanel` (toolbar order AOB, Collapse chain, Guess?) + `en.axaml` strings.
+Docs: `docs/export-formats.md` "Collapse chain Option" section (worked example).
+**+8 tests** (`FoldBreadcrumbSpine` direct: user example exact offsets, Rule-1
+`[0,B]`, Rule-2 `[B]`, pure-inline, <3-node no-op; + AOB/hierarchical integration +
+flatten-off regression). **1456 C# / 470 dll / 31 utf8 green; UI publish trim/AOT clean.**
+
+-----
+
 ## 2026-06-15 — Teleport: cursor first-force fix + cursor-hotkey checkbox scroll fix (build 1150)
 
 Two refinements after the owner re-tested build 1147 (DQIII debug-cam OFF now

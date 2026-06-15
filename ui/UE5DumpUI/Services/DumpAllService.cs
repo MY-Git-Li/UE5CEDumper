@@ -336,6 +336,12 @@ public static class DumpAllService
         AppendJsonString(sb, ",\"gnames\":",   es.GNamesAddr ?? "");
         AppendJsonString(sb, ",\"gworld\":",   es.GWorldAddr ?? "");
         sb.Append(",\"object_count\":").Append(es.ObjectCount);
+        // FUObjectItem layout — lets offline analysis flag UE5.7+ (un)packed dumps.
+        // "packed57" addresses are UNVERIFIED reconstructions (no shipping game uses
+        // it yet), so a dump captured under it must be treated as best-effort.
+        AppendJsonString(sb, ",\"item_layout\":", es.ItemLayoutMode);
+        sb.Append(",\"item_obj_offset\":").Append(es.ItemObjOffset);
+        sb.Append(",\"packed_unverified\":").Append(es.ItemPacked ? "true" : "false");
         AppendJsonString(sb, ",\"pe_hash\":", es.PeHash ?? "");
         AppendJsonString(sb, ",\"publisher_thumbprint\":", es.PublisherThumbprint ?? "");
         sb.Append(",\"dumper_build\":").Append(opts.DumperBuildNumber);
