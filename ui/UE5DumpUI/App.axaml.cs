@@ -40,6 +40,11 @@ public class App : Application
                 return;
             }
 
+            // Opt into Windows "restartable apps": if we're open when the user
+            // reboots / installs an update, Windows relaunches us on next
+            // sign-in (and the window-state restore below puts us back in place).
+            _platform.RegisterForRestart();
+
             // Initialize services
             var logDir = _platform.GetLogDirectoryPath();
             _logging = new LoggingService(logDir);
@@ -64,10 +69,13 @@ public class App : Application
                 _pipeClient, _dumpService, _logging, _platform, _aobUsage, _aobMakerBridge,
                 _proxyDeploy, _experimentalGate, _snapshotStore, globalHotkeys);
 
-            desktop.MainWindow = new MainWindow
-            {
-                DataContext = mainVm
-            };
+            // Restore last-session window placement (position / size / maximized,
+            // validated against the monitors present this session). Attached
+            // before the window is shown so there's no visible reposition.
+            var windowStateStore = new WindowStateStore(_platform);
+            var mainWindow = new MainWindow { DataContext = mainVm };
+            mainWindow.AttachWindowState(windowStateStore);
+            desktop.MainWindow = mainWindow;
 
             desktop.ShutdownRequested += (_, _) =>
             {

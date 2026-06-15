@@ -40,6 +40,17 @@ public partial class MainWindow : Window
     private PixelPoint _pendingPosition;
     private bool _snapshotCommitScheduled;
 
+    // ── Cross-restart placement persistence (AttachWindowState) ──────────────
+    // Restores last-session position / size / maximized state, validated
+    // against the monitors present THIS session (a window saved on a now-absent
+    // second monitor is reset to a centered default). Reuses the normal-vs-
+    // maximized snapshot above so un-maximizing a restored window lands right.
+    private Services.WindowStateStore? _stateStore;
+    private bool _restorePending;     // a saved record was applied; validate on Opened
+    private bool _restoreMaximized;   // saved state was maximized
+    private double _defaultWidth;     // XAML default, used when resetting off-screen
+    private double _defaultHeight;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -68,6 +79,176 @@ public partial class MainWindow : Window
         _pendingWidth = Width;
         _pendingHeight = Height;
         _pendingPosition = Position;
+
+        // Remember the XAML default size (1400x900) as the reset fallback for
+        // when a restored placement turns out to be off every current monitor.
+        _defaultWidth = Width;
+        _defaultHeight = Height;
+    }
+
+    /// <summary>
+    /// Wire up cross-restart window placement. Called once by App right after
+    /// construction and BEFORE the window is shown, so saved geometry is applied
+    /// without a visible jump. Validation against the monitors present THIS
+    /// session happens on Opened (Screens is only reliable once the platform
+    /// window exists).
+    /// </summary>
+    public void AttachWindowState(Services.WindowStateStore store)
+    {
+        _stateStore = store;
+        Closing += OnClosingSaveState;
+
+        if (store.Load() is not { } r)
+        {
+            return; // first run / corrupt → keep XAML defaults + OS placement
+        }
+
+        // Clamp restored size to at least the window minimum so a tiny saved
+        // size can't make the window unusable.
+        double w = Math.Max(r.Width, MinWidth);
+        double h = Math.Max(r.Height, MinHeight);
+        var pos = new PixelPoint(r.X, r.Y);
+
+        // Take placement over from the OS and seed BOTH the live geometry and
+        // the normal-vs-maximized snapshot, so a later un-maximize restores to
+        // exactly this rect.
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Position = pos;
+        Width = w;
+        Height = h;
+        _normalPosition = pos;
+        _normalWidth = w;
+        _normalHeight = h;
+        _pendingPosition = pos;
+        _pendingWidth = w;
+        _pendingHeight = h;
+
+        _restoreMaximized = r.Maximized;
+        _restorePending = true;
+        if (r.Maximized)
+        {
+            // Show maximized immediately; the snapshot above is the restore-down
+            // target (Avalonia doesn't reliably keep the normal rect across a
+            // maximize, hence the existing HandleWindowStateTransition re-apply,
+            // which now consumes our seeded snapshot).
+            WindowState = WindowState.Maximized;
+        }
+
+        Opened += OnOpenedValidatePlacement;
+    }
+
+    /// <summary>
+    /// Once the platform window exists (Screens reliable), confirm the restored
+    /// NORMAL rect is reachable on some current monitor. If not — the monitor was
+    /// removed or the resolution shrank — reset to a default size centered on the
+    /// primary screen. Runs once.
+    /// </summary>
+    private void OnOpenedValidatePlacement(object? sender, EventArgs e)
+    {
+        Opened -= OnOpenedValidatePlacement;
+        if (!_restorePending) return;
+        _restorePending = false;
+
+        var screens = CurrentScreenWorkingAreas();
+        if (screens.Count == 0) return; // no screen info — leave as restored
+
+        double scale = RenderScaling > 0 ? RenderScaling : 1.0;
+        int rx = _normalPosition?.X ?? 0;
+        int ry = _normalPosition?.Y ?? 0;
+        int rw = (int)Math.Round(_normalWidth * scale);
+        int rh = (int)Math.Round(_normalHeight * scale);
+
+        if (Services.WindowPlacement.IsVisibleEnough(rx, ry, rw, rh, screens))
+            return; // restored placement is reachable — keep it
+
+        ResetToDefaultPlacement(scale);
+    }
+
+    /// <summary>Drop to a default-size window centered on the primary monitor.</summary>
+    private void ResetToDefaultPlacement(double scale)
+    {
+        if (WindowState != WindowState.Normal)
+            WindowState = WindowState.Normal;
+
+        Width = _defaultWidth;
+        Height = _defaultHeight;
+
+        var primary = PrimaryWorkingArea();
+        int pw = (int)Math.Round(_defaultWidth * scale);
+        int ph = (int)Math.Round(_defaultHeight * scale);
+        var (cx, cy) = Services.WindowPlacement.CenterIn(primary, pw, ph);
+        var pos = new PixelPoint(cx, cy);
+        Position = pos;
+
+        _normalPosition = pos;
+        _normalWidth = _defaultWidth;
+        _normalHeight = _defaultHeight;
+        _pendingPosition = pos;
+        _pendingWidth = _defaultWidth;
+        _pendingHeight = _defaultHeight;
+    }
+
+    /// <summary>Persist the current placement on close (geometry still valid).</summary>
+    private void OnClosingSaveState(object? sender, WindowClosingEventArgs e)
+    {
+        if (_stateStore is null) return;
+
+        bool maximized = WindowState == WindowState.Maximized
+            || (WindowState == WindowState.Minimized && _previousWindowState == WindowState.Maximized);
+
+        int x, y;
+        double w, h;
+        if (WindowState == WindowState.Normal)
+        {
+            // Live geometry is authoritative when Normal.
+            x = Position.X;
+            y = Position.Y;
+            w = Width;
+            h = Height;
+        }
+        else
+        {
+            // Maximized / minimized report sentinel geometry — use the tracked
+            // normal snapshot so we persist the real restore-down rect.
+            var p = _normalPosition ?? Position;
+            x = p.X;
+            y = p.Y;
+            w = _normalWidth;
+            h = _normalHeight;
+        }
+
+        _stateStore.Save(new Services.WindowStateRecord(x, y, w, h, maximized));
+    }
+
+    /// <summary>Current monitors' working areas as plain physical-pixel rects.</summary>
+    private List<(int X, int Y, int W, int H)> CurrentScreenWorkingAreas()
+    {
+        var list = new List<(int, int, int, int)>();
+        var all = Screens?.All;
+        if (all == null) return list;
+        foreach (var s in all)
+        {
+            var wa = s.WorkingArea;
+            list.Add((wa.X, wa.Y, wa.Width, wa.Height));
+        }
+        return list;
+    }
+
+    /// <summary>Primary monitor working area (fallback: first screen, then 1080p).</summary>
+    private (int X, int Y, int W, int H) PrimaryWorkingArea()
+    {
+        var primary = Screens?.Primary;
+        if (primary == null)
+        {
+            var all = Screens?.All;
+            if (all != null && all.Count > 0) primary = all[0];
+        }
+        if (primary != null)
+        {
+            var wa = primary.WorkingArea;
+            return (wa.X, wa.Y, wa.Width, wa.Height);
+        }
+        return (0, 0, 1920, 1080);
     }
 
     /// <summary>

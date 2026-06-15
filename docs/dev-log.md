@@ -14,6 +14,38 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-15 — Main window placement persistence + restartable-apps opt-in (build 1177)
+
+The UI didn't remember where it was: every launch reset position / size / monitor. Now
+it restores the last session's placement, and opts into Windows' reboot-relaunch.
+
+**Placement persistence.** [`WindowStateStore`](../ui/UE5DumpUI/Services/WindowStateStore.cs)
+saves `x/y/w/h/max` to `%LOCALAPPDATA%\UE5CEDumper\window-state.txt` (plain `key=value`, no
+JSON → Native-AOT safe, same pattern as the teleport hotkey store). `App` attaches it before
+the window is shown (no visible reposition) and the window saves on close. Reuses
+`MainWindow`'s existing normal-vs-maximized snapshot, so a restored-then-un-maximized window
+lands on the right monitor.
+
+**Off-screen reset (the headline ask).** Windows gives no automatic per-app window memory —
+the app must validate. On `Opened` (when `Screens` is reliable), the restored NORMAL rect is
+checked against THIS session's monitors via the pure
+[`WindowPlacement.IsVisibleEnough`](../ui/UE5DumpUI/Services/WindowPlacement.cs) (≥120×40 px
+overlap with some working area). A window saved on a now-absent second monitor, or pushed
+off-screen by a resolution drop, **resets to a default-size window centered on the primary**.
+
+**Restartable-apps opt-in.** New `IPlatformService.RegisterForRestart` (default no-op so the
+5 test doubles + any non-Windows impl need no change) overridden in `WindowsPlatformService`
+with `RegisterApplicationRestart(null, RESTART_NO_CRASH | RESTART_NO_HANG)` — if the app is
+open when the user reboots / installs an update, Windows relaunches it on next sign-in (Win10
++ Win11, gated by the user's "restart apps" setting), and the placement restore above puts it
+back where it was. Not on crash/hang (avoids relaunch loops); registration only triggers if
+alive at shutdown, so a normal close means "don't come back".
+
++22 placement/visibility unit tests → **1505 C# green**; Native AOT publish clean (45.9 MB).
+⚠ in-app LIVE-VERIFY PENDING (drag/maximize/2nd-monitor-removed behavior; reboot relaunch).
+
+-----
+
 ## 2026-06-15 — Third proxy DLL: dxgi.dll (for EXEs importing neither version nor dinput8) (build 1172)
 
 **The problem (owner):** "The Adventures of Elliot" (SQUARE ENIX UE4.27 demo) works via
