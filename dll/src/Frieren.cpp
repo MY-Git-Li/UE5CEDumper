@@ -544,14 +544,27 @@ static bool DbgCam_WritePtr(uintptr_t obj, int off, uintptr_t val) {
 static int DbgCam_ReadState(uintptr_t& outCm, uintptr_t& outDcc) {
     outCm = 0; outDcc = 0;
     uintptr_t cm = UE5_FindInstanceOfClass("CheatManager");
-    if (!cm) return -1;
-    outCm = cm;
-    uintptr_t cmClass = UE5_GetObjectClass(cm);
-    int refOff = DbgCam_FieldOffset(cmClass, "DebugCameraControllerRef",
-                                    "DebugCamera", "Class");
-    if (refOff < 0) return -1;
-    uintptr_t dcc = DbgCam_ReadPtr(cm, refOff);
-    if (!dcc) return 0;                       // no DCC ever spawned ⇒ OFF
+    outCm = cm;   // may be 0 (some titles spawn it lazily)
+
+    // Hop 1: CheatManager.DebugCameraControllerRef.
+    uintptr_t dcc = 0;
+    if (cm) {
+        uintptr_t cmClass = UE5_GetObjectClass(cm);
+        int refOff = DbgCam_FieldOffset(cmClass, "DebugCameraControllerRef",
+                                        "DebugCamera", "Class");
+        if (refOff >= 0) dcc = DbgCam_ReadPtr(cm, refOff);
+    }
+    // Fallback: DebugCameraControllerRef can be null even with the camera live —
+    // some titles don't populate it (DQIII HD-2D), or there are several
+    // CheatManagers and FindInstanceOfClass picked the wrong one. Find the DCC by
+    // instance scan; its OriginalControllerRef is the authoritative active flag.
+    if (!dcc) {
+        dcc = UE5_FindInstanceOfClass("DebugCameraController");
+        if (dcc)
+            LOG_INFO("DbgCam_ReadState: DCC 0x%llX via instance scan "
+                     "(CheatManager ref empty)", (unsigned long long)dcc);
+    }
+    if (!dcc) return cm ? 0 : -1;   // none ⇒ OFF (or unknown if no CheatManager)
     outDcc = dcc;
     uintptr_t dccClass = UE5_GetObjectClass(dcc);
     int origOff = DbgCam_FieldOffset(dccClass, "OriginalControllerRef",
@@ -714,6 +727,37 @@ int32_t UE5_TeleportGetPov(double* outPov11) {
         outPov11[7] = pov.Pawn.X;    outPov11[8] = pov.Pawn.Y;  outPov11[9] = pov.Pawn.Z;
         outPov11[10] = pov.HasPawn ? 1.0 : 0.0;
     }
+    return rc;
+}
+
+int32_t UE5_TeleportRelative(double distance, int32_t horizontalOnly,
+                             double* outNewPose6) {
+    Wirbel::Pose p{};
+    int32_t rc = Wirbel::TeleportRelative(distance, horizontalOnly != 0, p, nullptr);
+    if (rc == 0) Teleport_CopyPose(p, outNewPose6);
+    return rc;
+}
+
+int32_t UE5_TeleportRecallExplicit(double x, double y, double z,
+                                   double pitch, double yaw, double roll,
+                                   int32_t hasRot) {
+    Wirbel::Pose p{};
+    p.X = x; p.Y = y; p.Z = z;
+    p.Pitch = pitch; p.Yaw = yaw; p.Roll = roll;
+    return Wirbel::RecallExplicit(p, hasRot != 0, nullptr);
+}
+
+int32_t UE5_SetMouseCursor(int32_t show, int32_t* outState) {
+    bool state = false;
+    int32_t rc = Wirbel::SetMouseCursor(show != 0, &state);
+    if (outState) *outState = state ? 1 : 0;
+    return rc;
+}
+
+int32_t UE5_GetMouseCursor(int32_t* outState) {
+    bool state = false;
+    int32_t rc = Wirbel::GetMouseCursor(&state);
+    if (outState) *outState = state ? 1 : 0;
     return rc;
 }
 

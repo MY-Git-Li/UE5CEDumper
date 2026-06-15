@@ -131,6 +131,20 @@ __declspec(dllexport) int32_t   UE5_TeleportGetLast(double* outPose6,
 //   [0..5] camera X,Y,Z,Pitch,Yaw,Roll  [6] FOV
 //   [7..9] pawn X,Y,Z (for the camera-vs-pawn delta)  [10] hasPawn (1/0)
 __declspec(dllexport) int32_t   UE5_TeleportGetPov(double* outPov11);
+// Teleport along the pawn's facing by `distance` uu (negative = backward).
+// horizontalOnly!=0 keeps Z (ground-plane move); 0 uses the full 3D forward.
+// outNewPose6 (nullable) receives the resulting X,Y,Z,Pitch,Yaw,Roll.
+__declspec(dllexport) int32_t   UE5_TeleportRelative(double distance,
+                                    int32_t horizontalOnly, double* outNewPose6);
+// Teleport to explicit world coordinates (force — no map check). hasRot!=0 also
+// restores Pitch/Yaw/Roll.
+__declspec(dllexport) int32_t   UE5_TeleportRecallExplicit(double x, double y, double z,
+                                    double pitch, double yaw, double roll, int32_t hasRot);
+// Force the mouse cursor on (show!=0) / off — writes bShowMouseCursor on the
+// local PlayerController. Returns a Wirbel code; *outState (nullable) = result.
+__declspec(dllexport) int32_t   UE5_SetMouseCursor(int32_t show, int32_t* outState);
+// Read the current bShowMouseCursor state. *outState (nullable) = 1/0.
+__declspec(dllexport) int32_t   UE5_GetMouseCursor(int32_t* outState);
 
 // === Mailbox (CE Lua shared memory interface) ===
 // Returns the address of the g_invokeMailbox buffer.

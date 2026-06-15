@@ -875,6 +875,17 @@ fallback (game may snap back). Codes (§8): 0 OK, -1 not-init, -2 no controller,
 { "cmd": "teleport_get_pov" }
 → { "code":0, "camX":…,"camY":…,"camZ":…, "pitch":…,"yaw":…,"roll":…,
     "fov":…, "hasPawn":true, "pawnX":…,"pawnY":…,"pawnZ":…, "source":"invoke" }
+
+// Teleport along the pawn's facing by `distance` uu (negative = backward).
+// horizontal=true keeps Z (ground-plane); false = full 3D forward (incl. pitch).
+// Returns the resulting pose. Undoable via teleport_recall_last.
+{ "cmd": "teleport_relative", "distance":100.0, "horizontal":true }
+→ { "code":0, "tier":1, "x":…,"y":…,"z":…, "pitch":…,"yaw":…,"roll":… }
+
+// Force the mouse cursor on/off (writes APlayerController.bShowMouseCursor).
+{ "cmd": "set_mouse_cursor", "show": true } → { "code":0, "state":true }
+{ "cmd": "get_mouse_cursor" }              → { "code":0, "state":true }
+// (Explicit-coordinate teleport reuses teleport_recall_marker with x/y/z above.)
 ```
 
 The CE Lua path uses the Mimic mailbox `CMD_TELEPORT=8` instead (see

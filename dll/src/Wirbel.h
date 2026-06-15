@@ -126,6 +126,30 @@ int32_t BugItSave(Pose& out, char* mapName, int32_t mapNameCap, uint8_t* outSour
 // BugIt has been stored yet.
 int32_t BugItGo(uint8_t* tierOut);
 
+// Teleport along the pawn's facing direction by `distance` unreal units
+// (negative = backward). horizontalOnly: move on the ground plane (forward from
+// Yaw only, Z preserved) — the natural "walk toward the NW compass bearing".
+// When false, the full 3D forward vector (including Pitch) is used, so looking
+// up/down moves the pawn up/down (fly / noclip feel). The facing comes from the
+// pawn's GetActorForwardVector when available, else the controller's
+// ControlRotation. outNewPose receives the resulting pose (re-read after the
+// move) so the caller can display the landed X/Y/Z/Pitch/Yaw. The pre-jump pose
+// is auto-saved (RecallLast undoes it). tierOut: 1 invoke / 2 raw write.
+int32_t TeleportRelative(double distance, bool horizontalOnly, Pose& outNewPose,
+                         uint8_t* tierOut);
+
+// Force the OS mouse cursor on (show=true) or off — writes the local
+// PlayerController's bShowMouseCursor bitfield (a BlueprintReadWrite UPROPERTY;
+// SetShowMouseCursor is not a UFUNCTION, so the bit is written directly via the
+// reflected FBoolProperty ByteOffset + FieldMask). outState (optional) receives
+// the resulting state. NOTE: games that re-set the flag every tick may revert it
+// (one-shot write); a captured input mode can still hide the OS cursor. See
+// teleport-spec §Cursor.
+int32_t SetMouseCursor(bool show, bool* outState);
+
+// Read the current bShowMouseCursor state on the local PlayerController.
+int32_t GetMouseCursor(bool* outState);
+
 // Current UWorld object name ("" when unavailable). Cheap — no chain walk.
 bool GetCurrentMapName(char* buf, int32_t cap);
 

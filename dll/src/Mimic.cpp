@@ -776,6 +776,45 @@ static void HandleTeleport() {
         }
         break;
     }
+    case TP_OP_RELATIVE: {
+        // Read inputs BEFORE outputs overwrite the shared buffer.
+        double distance = 0;
+        memcpy(&distance, g_invokeMailbox.paramsData, sizeof(double));
+        bool horizontalOnly = g_invokeMailbox.paramsData[8] == 0;  // mode 0 = horizontal
+        Wirbel::Pose p{};
+        uint8_t tier = 0;
+        rc = Wirbel::TeleportRelative(distance, horizontalOnly, p, &tier);
+        if (rc == 0) writePoseBlock(p, nullptr, 0, tier);
+        break;
+    }
+    case TP_OP_EXPLICIT: {
+        // Read inputs BEFORE outputs overwrite the shared buffer.
+        double v[6] = {};
+        memcpy(v, g_invokeMailbox.paramsData, sizeof(v));
+        bool hasRot = g_invokeMailbox.paramsData[48] != 0;
+        Wirbel::Pose p{};
+        p.X = v[0]; p.Y = v[1]; p.Z = v[2];
+        p.Pitch = v[3]; p.Yaw = v[4]; p.Roll = v[5];
+        uint8_t tier = 0;
+        rc = Wirbel::RecallExplicit(p, hasRot, &tier);
+        memset(g_invokeMailbox.paramsData, 0, sizeof(g_invokeMailbox.paramsData));
+        g_invokeMailbox.paramsData[177] = tier;
+        break;
+    }
+    case TP_OP_SET_CURSOR: {
+        bool state = false;
+        rc = Wirbel::SetMouseCursor(slot != 0, &state);   // ufuncAddr(slot) = 1/0
+        memset(g_invokeMailbox.paramsData, 0, sizeof(g_invokeMailbox.paramsData));
+        g_invokeMailbox.paramsData[0] = state ? 1 : 0;
+        break;
+    }
+    case TP_OP_GET_CURSOR: {
+        bool state = false;
+        rc = Wirbel::GetMouseCursor(&state);
+        memset(g_invokeMailbox.paramsData, 0, sizeof(g_invokeMailbox.paramsData));
+        if (rc == 0) g_invokeMailbox.paramsData[0] = state ? 1 : 0;
+        break;
+    }
     default:
         SetError(-1, "Teleport: unknown op");
         return;

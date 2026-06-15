@@ -14,6 +14,109 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-15 — Teleport: cursor first-force fix + cursor-hotkey checkbox scroll fix (build 1150)
+
+Two refinements after the owner re-tested build 1147 (DQIII debug-cam OFF now
+works ✅):
+
+**1. Force Mouse Cursor: first press failed, OFF-then-ON worked** (`原因不明`).
+Logs showed the DLL did the right thing every time (`SetInputMode_GameAndUIEx
+invoked`, `bit now 1`), so the miss was game-side: a single `SetInputMode_GameAndUIEx`
+from the game's running input state doesn't release the capture / show the cursor
+until the input mode actually CHANGES. **Fix:** `ApplyCursorInputMode(show=true)`
+now forces a **GameOnly→GameAndUI transition** (calls `SetInputMode_GameOnly` then
+`SetInputMode_GameAndUIEx`), reproducing the manual OFF-then-ON workaround in one
+press. Refactored the per-call packing into `InvokeWblInputMode`.
+
+**2. "Global cursor hotkey" checkbox ate the first click + scrolled the panel.**
+Classic ScrollViewer focus-driven `RequestBringIntoView`: clicking a
+partially-visible control made the viewport scroll it into view and consumed the
+first click (second click then worked). **Fix:** `TeleportPanel` handles
+`RequestBringIntoViewEvent` on the content-root StackPanel (a child of the
+ScrollContentPresenter, so it marks the event handled before the presenter's class
+handler scrolls) → `e.Handled = true`. Focus no longer auto-scrolls; manual
+wheel/scrollbar unaffected.
+
+DLL 470/470, C# 1448/1448, utf8 31/31 green. ⚠ in-game re-verify pending (does the
+forced transition make the first cursor force stick).
+
+## 2026-06-15 — Teleport: cursor input-mode + DQIII debug-cam fix + Get-coords Lua record (build 1147)
+
+Owner live-tested build 1144 on TQ2 + DQIII HD-2D. **Directional + coord TP work
+on both** ✅. Three follow-ups from the test:
+
+**1. Cursor force had no visible effect (TQ2 + DQIII).** Logs confirmed the
+`bShowMouseCursor` write succeeds (`forced ON addr=… mask=0x01`, code 0) — but a
+`GameOnly` viewport recaptures/hides the OS cursor regardless. **Fix:**
+`Wirbel::SetMouseCursor` now also drives the input mode via `UWidgetBlueprintLibrary`
+(`ApplyCursorInputMode`): show → `SetInputMode_GameAndUIEx(pc, null, DoNotLock,
+bHideCursorDuringCapture=FALSE)` (the `false` is the lever — it defaults `true`);
+hide → `SetInputMode_GameOnly(pc)`. Best-effort (no UMG ⇒ flag-only). Also re-reads
+the bit so the reported state reflects reality. Still one-shot (per-tick re-set =
+possible Phase 3).
+
+**2. DQIII debug camera could enable but not disable** (pre-existing feature, not
+this change). Log: `UE5_SetDebugCamera(1) -> state=0` then every disable
+`already OFF — no-op`. Root cause: `DbgCam_ReadState` finds the DCC only via
+`CheatManager.DebugCameraControllerRef`, which **DQIII never populates** → state
+misread as OFF → disable no-ops (and enable misreports). **Fix:** instance-scan
+fallback — when the CheatManager ref is empty, `UE5_FindInstanceOfClass(
+"DebugCameraController")` finds the live DCC; its `OriginalControllerRef` is the
+authoritative active flag (the same DCC the teleport hop already resolves). Now
+enable reports ON and disable fires the toggle / controller-swap. (See
+[[console-debugcamera-force]].)
+
+**3. "Get current coords" Lua/mailbox call** (owner request). `TP_OP_GET_POSE=0`
+already returns the 6 pose doubles; added a `TeleportScriptGenerator.Action.GetPose`
+CE record that fires op 0 and prints `coords loc=(…) rot=(…)` from the mailbox
+block. Batch 16→**17 rows**.
+
+DLL 470/470, C# **1448/1448**, utf8 31/31 green. ⚠ in-game re-verify pending for
+cursor (does the input-mode call make it visible / stick) + DQIII debug-cam OFF.
+
+## 2026-06-15 — Teleport: directional + explicit-coordinate TP + force mouse cursor (build 1144)
+
+Three user-requested teleport additions, all reusing the existing resolution
+chain + tier ladder (so they inherit every per-game robustness path already built
+for recall). Full design: [teleport-spec §16](teleport-spec.md).
+
+**1. Directional teleport** (`Wirbel::TeleportRelative`). Step the pawn along its
+facing by a signed distance (uu; negative = backward). Facing = invoke
+`AActor::GetActorForwardVector`, falling back to `ControlRotation` Yaw/Pitch trig.
+Two modes: **horizontal** (drop Z + renormalize — ground-plane "walk toward that
+compass bearing", height kept) and **3D** (full forward incl. pitch — fly/noclip).
+`dest = curWorld + unitFwd*distance` → `TeleportPawnTo` + `StopMovement`;
+`SaveLastImpl()` first so **Recall last undoes it**; returns the re-read landed
+pose (the "回算 X/Y/Z/Pitch/Yaw" requirement).
+
+**2. Teleport to explicit coordinates (force).** Reuses the existing
+`Wirbel::RecallExplicit` (no new core) — exact world X/Y/Z, no map check, optional
+rotation. New surfaces: CE mailbox op + export + a dedicated UI section (X/Y/Z +
+optional Pitch/Yaw/Roll + "Fill from current"). Also undoable.
+
+**3. Force mouse cursor** (`Wirbel::SetMouseCursor`/`GetMouseCursor`). Write
+`APlayerController.bShowMouseCursor` (a `BlueprintReadWrite` **bitfield**;
+`SetShowMouseCursor` is not a UFUNCTION). Resolved via the reflected FBoolProperty
+layout (`ResolveCursorBit`: FieldSize/ByteOffset/FieldMask probed ±, since
+`FindField` drops ByteOffset). **One-shot toggle** (Phase 1): games that re-set
+the flag every tick may revert it, and a captured input mode can still hide the OS
+cursor (Phase 2 = keep-forcing + `SetInputMode_GameAndUIEx`). Pairs with Cursor
+Teleport.
+
+**Surfaces.** Exports 38→**42** (`UE5_TeleportRelative`,
+`UE5_TeleportRecallExplicit`, `UE5_SetMouseCursor`, `UE5_GetMouseCursor`); mailbox
+`TP_OP_RELATIVE=12` / `EXPLICIT=13` / `SET_CURSOR=14` / `GET_CURSOR=15`; pipe
+`teleport_relative` / `set_mouse_cursor` / `get_mouse_cursor` (explicit reuses
+`teleport_recall_marker`); UI 3 new sections + 4 hotkey rows
+(`relative`/`coords`/`cursor_on`/`cursor_off`); CE `.CT`/AOBMaker batch 12→**16**
+rows (directional/coord records bake the current field values).
+
+**Tests.** +5 ScriptGenerator (ops 12/13/14 + 16-row batch), +9 ViewModel
+(directional pass-through + pose apply, coords with/without rotation, fill-from-
+current, cursor on/off/refresh/disconnect-reset, 16 hotkey rows). DLL helpers
+470/470, C# **1447/1447** green; AOT clean. ⚠ in-game LIVE-VERIFY PENDING (esp.
+cursor stickiness per-game + directional facing source on fixed-cam titles).
+
 ## 2026-06-14 — Teleport: TQ2 transform-refresh fix + cursor robustness + ViewTarget detector (build 1113-1116)
 
 Chased the long-standing "TQ2 teleport doesn't move the character" via a new

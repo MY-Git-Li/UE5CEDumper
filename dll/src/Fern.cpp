@@ -3206,6 +3206,45 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             return Renge::MakeResponse(id, data).dump();
         }
 
+        if (cmd == Renge::CMD_TELEPORT_RELATIVE) {
+            double distance = request.value("distance", 0.0);
+            bool horizontalOnly = request.value("horizontal", true);
+            Wirbel::Pose p{};
+            uint8_t tier = 0;
+            int32_t code = Wirbel::TeleportRelative(distance, horizontalOnly, p, &tier);
+            Sein::Info("PIPE:cmd", "teleport_relative: d=%.1f horiz=%d -> %d",
+                       distance, horizontalOnly ? 1 : 0, code);
+            json data;
+            data["code"] = code;
+            data["tier"] = tier;
+            if (code == 0) {
+                data["x"] = p.X;         data["y"] = p.Y;     data["z"] = p.Z;
+                data["pitch"] = p.Pitch; data["yaw"] = p.Yaw; data["roll"] = p.Roll;
+            }
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        if (cmd == Renge::CMD_SET_MOUSE_CURSOR) {
+            bool show = request.value("show", true);
+            bool state = false;
+            int32_t code = Wirbel::SetMouseCursor(show, &state);
+            Sein::Info("PIPE:cmd", "set_mouse_cursor: show=%d -> %d (state=%d)",
+                       show ? 1 : 0, code, state ? 1 : 0);
+            json data;
+            data["code"] = code;
+            data["state"] = state;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        if (cmd == Renge::CMD_GET_MOUSE_CURSOR) {
+            bool state = false;
+            int32_t code = Wirbel::GetMouseCursor(&state);
+            json data;
+            data["code"] = code;
+            if (code == 0) data["state"] = state;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
         return Renge::MakeError(id, "Unknown command: " + cmd).dump();
 
     } catch (const std::exception& e) {

@@ -1043,6 +1043,130 @@ void StopMovement(const Chain& c) {
              (unsigned long long)cm);
 }
 
+// ---- feature helpers: directional move + mouse cursor ----
+
+// Normalize a 3-vector in place. Returns false (leaving v untouched) for a
+// near-zero vector so a degenerate facing can't produce NaNs.
+bool Normalize3(double v[3]) {
+    double len = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    if (len < 1e-6) return false;
+    v[0] /= len; v[1] /= len; v[2] /= len;
+    return true;
+}
+
+// Pawn facing as a unit forward vector. Prefers AActor::GetActorForwardVector
+// (BlueprintCallable — the actor's exact orientation); falls back to the
+// controller's ControlRotation Yaw/Pitch trig (UE convention:
+// X = cos(P)cos(Y), Y = cos(P)sin(Y), Z = sin(P)). horizontalOnly drops Z so the
+// move stays on the ground plane. Returns false when neither source is available
+// (or the facing is straight up under horizontalOnly).
+bool GetForward(const Chain& c, bool horizontalOnly, double out[3]) {
+    double f[3] = {};
+    bool got = InvokeRetVec(c.pawn, "GetActorForwardVector", f);
+    if (!got && c.ctrlRotOff >= 0) {
+        double pyr[3] = {};
+        if (ReadVec3Mem(c.pc + static_cast<uintptr_t>(c.ctrlRotOff), c.ctrlRotSize, pyr)) {
+            constexpr double kDeg2Rad = 3.14159265358979323846 / 180.0;
+            double yaw = pyr[1] * kDeg2Rad, pitch = pyr[0] * kDeg2Rad;
+            f[0] = std::cos(pitch) * std::cos(yaw);
+            f[1] = std::cos(pitch) * std::sin(yaw);
+            f[2] = std::sin(pitch);
+            got = true;
+        }
+    }
+    if (!got) return false;
+    if (horizontalOnly) f[2] = 0.0;     // ground-plane move, preserve Z
+    if (!Normalize3(f)) return false;   // facing straight up + horizontalOnly
+    out[0] = f[0]; out[1] = f[1]; out[2] = f[2];
+    return true;
+}
+
+// Resolve APlayerController.bShowMouseCursor down to a single byte address + bit
+// mask from the reflected FBoolProperty layout
+// ([FieldSize=1, ByteOffset, ByteMask, FieldMask] at FBOOLPROP_FIELDSIZE,
+// probed ±). value byte = pc + Property.Offset + ByteOffset; bit = & FieldMask.
+// FindField only surfaces FieldMask (not ByteOffset), so the layout is read here
+// directly. outPc receives the resolved gameplay PlayerController (for the input-
+// mode call). Returns a TeleportResult code (TP_OK on success).
+int32_t ResolveCursorBit(uintptr_t& outPc, uintptr_t& byteAddr, uint8_t& mask) {
+    uintptr_t world = DerefWorld();
+    if (!world) return TP_ERR_NOT_INIT;
+    uintptr_t pc = ResolveLocalPC(world);
+    if (!pc) return TP_ERR_NO_CONTROLLER;
+    pc = HopThroughDebugCamera(pc);   // target the gameplay PC, not a debug cam
+    outPc = pc;
+    uintptr_t cls = Ubel::GetClass(pc);
+    FieldInfo fi{};
+    if (!Ubel::FindField(cls, "bShowMouseCursor", nullptr, nullptr, "BoolProperty", fi)
+        || !fi.Address)
+        return TP_ERR_REFLECTION;
+    int baseOff = DynOff::bUseFProperty ? DynOff::FBOOLPROP_FIELDSIZE
+                                        : DynOff::UBOOLPROP_FIELDSIZE;
+    for (int tryOff : { baseOff, baseOff - 4, baseOff + 4, baseOff + 8, baseOff - 8 }) {
+        if (tryOff < 0) continue;
+        uint8_t b[4] = {};
+        if (!Macht::ReadBytesSafe(fi.Address + tryOff, b, 4)) continue;
+        uint8_t fieldSize = b[0], byteOff = b[1], byteMask = b[2], fieldMask = b[3];
+        if (fieldSize == 1 && fieldMask && (fieldMask & (fieldMask - 1)) == 0
+            && byteOff <= 7 && byteMask && (byteMask & (byteMask - 1)) == 0) {
+            byteAddr = pc + static_cast<uintptr_t>(fi.Offset) + byteOff;
+            mask = fieldMask;
+            return TP_OK;
+        }
+    }
+    LOG_WARN("Teleport: cursor — bShowMouseCursor FBoolProperty layout unresolved");
+    return TP_ERR_REFLECTION;
+}
+
+// Invoke one UWidgetBlueprintLibrary input-mode setter on the game thread.
+// gameAndUI packs the GameAndUI-only params (InWidgetToFocus=null,
+// MouseLock=DoNotLock, bHideCursorDuringCapture=FALSE — the false keeps the OS
+// cursor visible; the param DEFAULTS to true). Returns false if the function
+// isn't reflected.
+bool InvokeWblInputMode(uintptr_t wbl, uintptr_t wblClass, const char* fn,
+                        uintptr_t pc, bool gameAndUI) {
+    FunctionInfo fi;
+    if (!FindFunc(wblClass, fn, fi) || fi.parmsSize <= 0) {
+        LOG_WARN("Teleport: cursor — %s not found on WidgetBlueprintLibrary", fn);
+        return false;
+    }
+    std::vector<uint8_t> buf(fi.parmsSize, 0);
+    WritePtrParam(buf, fi, "PlayerController", pc);
+    if (gameAndUI) {
+        WriteByteParam(buf, fi, "InMouseLockMode", 0);              // DoNotLock
+        WriteBoolParam(buf, fi, "bHideCursorDuringCapture", false);  // keep cursor visible
+    }
+    Invoke(wbl, fi, buf);
+    LOG_INFO("Teleport: cursor — %s invoked on PC 0x%llX", fn, (unsigned long long)pc);
+    return true;
+}
+
+// Drive the player input mode so the cursor isn't recaptured/hidden by a GameOnly
+// viewport. Best-effort: titles without UMG keep just the bShowMouseCursor write.
+// Game thread (touches slate/viewport) — invoked through Stark.
+//
+// show=true forces a GameOnly→GameAndUI TRANSITION: on some titles a single
+// GameAndUI call from the game's running input state doesn't release the mouse
+// capture / show the cursor until the mode actually CHANGES (observed live: the
+// first force shows nothing, but OFF-then-ON works). Cycling through GameOnly
+// first reproduces that transition in one action.
+void ApplyCursorInputMode(uintptr_t pc, bool show) {
+    if (!pc) return;
+    uintptr_t wbl = UE5_FindInstanceOfClass("WidgetBlueprintLibrary");
+    if (!wbl) {
+        LOG_INFO("Teleport: cursor — no WidgetBlueprintLibrary (UMG cooked out?); "
+                 "bShowMouseCursor write only (input mode may still hide it)");
+        return;
+    }
+    uintptr_t wblClass = Ubel::GetClass(wbl);
+    if (show) {
+        InvokeWblInputMode(wbl, wblClass, "SetInputMode_GameOnly", pc, false);
+        InvokeWblInputMode(wbl, wblClass, "SetInputMode_GameAndUIEx", pc, true);
+    } else {
+        InvokeWblInputMode(wbl, wblClass, "SetInputMode_GameOnly", pc, false);
+    }
+}
+
 int32_t RecallTo(const Pose& p, bool restoreRot, uint8_t* tierOut) {
     Chain c;
     int32_t rc = ResolveChain(c);
@@ -1381,6 +1505,77 @@ int32_t BugItGo(uint8_t* tierOut) {
     LOG_INFO("Teleport: BugItGo (%.1f, %.1f, %.1f) -> rc=%d",
              m.P.X, m.P.Y, m.P.Z, rc);
     return rc;
+}
+
+int32_t TeleportRelative(double distance, bool horizontalOnly, Pose& outNewPose,
+                         uint8_t* tierOut) {
+    std::lock_guard<std::mutex> lock(s_opMutex);
+    Chain c;
+    int32_t rc = ResolveChain(c);
+    if (rc != TP_OK) return rc;
+
+    // Current world position (GetPoseImpl handles attached pawns via
+    // K2_GetActorLocation; RelativeLocation == world otherwise).
+    Pose cur{};
+    rc = GetPoseImpl(cur, nullptr, 0, nullptr);
+    if (rc != TP_OK) return rc;
+
+    double fwd[3] = {};
+    if (!GetForward(c, horizontalOnly, fwd)) {
+        LOG_WARN("Teleport: relative move — could not resolve a facing direction");
+        return TP_ERR_REFLECTION;
+    }
+    double dest[3] = { cur.X + fwd[0] * distance,
+                       cur.Y + fwd[1] * distance,
+                       cur.Z + fwd[2] * distance };
+    SaveLastImpl();   // remember the pre-jump pose so RecallLast can undo it
+    rc = TeleportPawnTo(c, dest, nullptr, /*preferTeleportTo=*/false, tierOut);
+    if (rc != TP_OK) return rc;
+    StopMovement(c);
+    GetPoseImpl(outNewPose, nullptr, 0, nullptr);   // best-effort re-read of the landing
+    LOG_INFO("Teleport: relative %.1f uu (%s) fwd=(%.3f, %.3f, %.3f) -> (%.1f, %.1f, %.1f)",
+             distance, horizontalOnly ? "horizontal" : "3D",
+             fwd[0], fwd[1], fwd[2], dest[0], dest[1], dest[2]);
+    return TP_OK;
+}
+
+int32_t SetMouseCursor(bool show, bool* outState) {
+    std::lock_guard<std::mutex> lock(s_opMutex);
+    uintptr_t pc = 0, byteAddr = 0;
+    uint8_t mask = 0;
+    int32_t rc = ResolveCursorBit(pc, byteAddr, mask);
+    if (rc != TP_OK) return rc;
+    uint8_t b = 0;
+    if (!Macht::ReadSafe(byteAddr, b)) return TP_ERR_REFLECTION;
+    if (show) b |= mask;
+    else      b = static_cast<uint8_t>(b & ~mask);
+    if (!Macht::WriteBytes(byteAddr, &b, 1)) return TP_ERR_WRITE_FAILED;
+
+    // The bShowMouseCursor flag alone often isn't enough — a GameOnly input mode
+    // recaptures/hides the OS cursor (observed on TQ2 / DQIII HD-2D). Also drive
+    // the input mode so the cursor actually shows/hides.
+    ApplyCursorInputMode(pc, show);
+
+    // Re-read the bit so the reported state reflects reality (a game that re-sets
+    // it every tick may already have reverted our write between the lines above).
+    uint8_t after = 0;
+    bool stuck = Macht::ReadSafe(byteAddr, after) ? ((after & mask) != 0) : show;
+    if (outState) *outState = stuck;
+    LOG_INFO("Teleport: bShowMouseCursor forced %s (addr=0x%llX mask=0x%02X) — bit now %d",
+             show ? "ON" : "OFF", (unsigned long long)byteAddr, mask, stuck ? 1 : 0);
+    return TP_OK;
+}
+
+int32_t GetMouseCursor(bool* outState) {
+    std::lock_guard<std::mutex> lock(s_opMutex);
+    uintptr_t pc = 0, byteAddr = 0;
+    uint8_t mask = 0;
+    int32_t rc = ResolveCursorBit(pc, byteAddr, mask);
+    if (rc != TP_OK) return rc;
+    uint8_t b = 0;
+    if (!Macht::ReadSafe(byteAddr, b)) return TP_ERR_REFLECTION;
+    if (outState) *outState = (b & mask) != 0;
+    return TP_OK;
 }
 
 bool GetCurrentMapName(char* buf, int32_t cap) {

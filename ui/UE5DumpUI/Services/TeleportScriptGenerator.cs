@@ -26,11 +26,22 @@ public static class TeleportScriptGenerator
     // Mailbox layout — see dll/src/Mimic.h (MailboxData / TeleportOp).
     private const int CmdTeleport = 8;
 
-    public enum Action { Save, Recall, RecallLast, BugIt, BugItGo, Cursor, GetPov, ClearAll }
+    public enum Action
+    {
+        Save, Recall, RecallLast, BugIt, BugItGo, Cursor, GetPov, ClearAll,
+        Relative, Explicit, CursorOn, CursorOff, GetPose,
+    }
 
-    /// <summary>Build the [ENABLE]/[DISABLE] AA Script body for one action.</summary>
+    /// <summary>Build the [ENABLE]/[DISABLE] AA Script body for one action.
+    /// <paramref name="distance"/>/<paramref name="horizontal"/> apply to
+    /// <see cref="Action.Relative"/>; the <paramref name="coordX"/>… and
+    /// <paramref name="hasRot"/>/<paramref name="pitch"/>… apply to
+    /// <see cref="Action.Explicit"/>.</summary>
     public static string Generate(Action action, int slot = 0,
-        double zOffset = 100.0, int channel = 0, bool fallbackCenter = true)
+        double zOffset = 100.0, int channel = 0, bool fallbackCenter = true,
+        double distance = 100.0, bool horizontal = true,
+        double coordX = 0, double coordY = 0, double coordZ = 0,
+        bool hasRot = false, double pitch = 0, double yaw = 0, double roll = 0)
     {
         if (action == Action.ClearAll)
             return GenerateClearAll();
@@ -44,7 +55,19 @@ public static class TeleportScriptGenerator
             Action.BugItGo => 10,     // TP_OP_BUGIT_GO    (go to stored pose)
             Action.Cursor => 4,
             Action.GetPov => 11,      // TP_OP_GET_POV     (read camera POV)
+            Action.Relative => 12,    // TP_OP_RELATIVE    (move along facing)
+            Action.Explicit => 13,    // TP_OP_EXPLICIT    (go to coordinates)
+            Action.CursorOn => 14,    // TP_OP_SET_CURSOR  (slot field = 1)
+            Action.CursorOff => 14,   // TP_OP_SET_CURSOR  (slot field = 0)
+            Action.GetPose => 0,      // TP_OP_GET_POSE    (read current coords)
             _ => 2,
+        };
+        // For SET_CURSOR the slot/ufuncAddr field carries the show flag (1/0).
+        int slotField = action switch
+        {
+            Action.CursorOn => 1,
+            Action.CursorOff => 0,
+            _ => slot,
         };
         string label = action switch
         {
@@ -55,6 +78,11 @@ public static class TeleportScriptGenerator
             Action.BugItGo => "BugItGo (go to stored)",
             Action.Cursor => "Teleport to cursor",
             Action.GetPov => "Get camera POV",
+            Action.Relative => "Teleport facing direction",
+            Action.Explicit => "Teleport to coordinates",
+            Action.CursorOn => "Cursor ON",
+            Action.CursorOff => "Cursor OFF",
+            Action.GetPose => "Get current coords",
             _ => "Teleport",
         };
 
@@ -84,7 +112,22 @@ public static class TeleportScriptGenerator
             Line(sb, $"  writeBytes(mb + 0x330, {channel & 0xFF})            -- trace channel");
             Line(sb, $"  writeBytes(mb + 0x331, {(fallbackCenter ? 1 : 0)})            -- fall back to screen center");
         }
-        Line(sb, $"  writeQword(mb + 0x18, {slot})           -- slot");
+        else if (op == 12)
+        {
+            Line(sb, $"  writeDouble(mb + 0x328, {Lua(distance)})  -- distance (uu; -ve = backward)");
+            Line(sb, $"  writeBytes(mb + 0x330, {(horizontal ? 0 : 1)})            -- mode (0 = horizontal, 1 = 3D)");
+        }
+        else if (op == 13)
+        {
+            Line(sb, $"  writeDouble(mb + 0x328, {Lua(coordX)})  -- X");
+            Line(sb, $"  writeDouble(mb + 0x330, {Lua(coordY)})  -- Y");
+            Line(sb, $"  writeDouble(mb + 0x338, {Lua(coordZ)})  -- Z");
+            Line(sb, $"  writeDouble(mb + 0x340, {Lua(pitch)})  -- Pitch");
+            Line(sb, $"  writeDouble(mb + 0x348, {Lua(yaw)})  -- Yaw");
+            Line(sb, $"  writeDouble(mb + 0x350, {Lua(roll)})  -- Roll");
+            Line(sb, $"  writeBytes(mb + 0x358, {(hasRot ? 1 : 0)})            -- hasRot (restore rotation)");
+        }
+        Line(sb, $"  writeQword(mb + 0x18, {slotField})           -- slot / show flag");
         Line(sb, $"  writeQword(mb + 0x10, {op})             -- op");
         Line(sb, "  writeInteger(mb + 0x04, 0)             -- clear status");
         Line(sb, $"  writeInteger(mb + 0x00, {CmdTeleport})  -- CMD_TELEPORT (write LAST)");
@@ -104,6 +147,17 @@ public static class TeleportScriptGenerator
             Line(sb, "      readDouble(mb + 0x328), readDouble(mb + 0x330), readDouble(mb + 0x338),");
             Line(sb, "      readDouble(mb + 0x340), readDouble(mb + 0x348), readDouble(mb + 0x350),");
             Line(sb, "      readDouble(mb + 0x358)))");
+            Line(sb, "  end");
+        }
+        if (op == 0)
+        {
+            // GET_POSE block (op 0 out): [0..47] X,Y,Z,Pitch,Yaw,Roll (6 doubles).
+            // The 6 values are left in the mailbox paramsData for Lua to read.
+            Line(sb, "  if code == 0 then");
+            Line(sb, "    print(string.format('[Teleport] coords loc=(%.3f, %.3f, %.3f) " +
+                     "rot=(%.3f, %.3f, %.3f)',");
+            Line(sb, "      readDouble(mb + 0x328), readDouble(mb + 0x330), readDouble(mb + 0x338),");
+            Line(sb, "      readDouble(mb + 0x340), readDouble(mb + 0x348), readDouble(mb + 0x350)))");
             Line(sb, "  end");
         }
         Line(sb, "  if code == -7 then");
@@ -177,11 +231,15 @@ public static class TeleportScriptGenerator
         return sb.ToString();
     }
 
-    /// <summary>Build the standard 12-row .CT batch (Save 1-3, Recall 1-3,
-    /// Recall last, BugIt, BugItGo, Cursor, Get POV, Clear all) ready for
+    /// <summary>Build the standard 17-row .CT batch (Save 1-3, Recall 1-3,
+    /// Recall last, BugIt, BugItGo, Cursor, Get POV, Get coords, TP facing dir,
+    /// TP to coords, Cursor ON, Cursor OFF, Clear all) ready for
     /// <see cref="CheatTableBuilder.Build"/>.</summary>
     public static List<CheatTableRow> BuildBatchRows(
-        double zOffset = 100.0, int channel = 0, bool fallbackCenter = true)
+        double zOffset = 100.0, int channel = 0, bool fallbackCenter = true,
+        double distance = 100.0, bool horizontal = true,
+        double coordX = 0, double coordY = 0, double coordZ = 0,
+        bool hasRot = false, double pitch = 0, double yaw = 0, double roll = 0)
     {
         var rows = new List<CheatTableRow>();
         for (int i = 0; i < 3; i++)
@@ -227,6 +285,38 @@ public static class TeleportScriptGenerator
             Category = "Teleport",
             Description = "Get camera POV",
             Script = Generate(Action.GetPov),
+        });
+        rows.Add(new CtScriptRow
+        {
+            Category = "Teleport",
+            Description = "Get current coords",
+            Script = Generate(Action.GetPose),
+        });
+        rows.Add(new CtScriptRow
+        {
+            Category = "Teleport",
+            Description = "TP facing direction",
+            Script = Generate(Action.Relative, 0, zOffset, channel, fallbackCenter,
+                distance, horizontal),
+        });
+        rows.Add(new CtScriptRow
+        {
+            Category = "Teleport",
+            Description = "TP to coordinates",
+            Script = Generate(Action.Explicit, 0, zOffset, channel, fallbackCenter,
+                distance, horizontal, coordX, coordY, coordZ, hasRot, pitch, yaw, roll),
+        });
+        rows.Add(new CtScriptRow
+        {
+            Category = "Teleport",
+            Description = "Cursor ON",
+            Script = Generate(Action.CursorOn),
+        });
+        rows.Add(new CtScriptRow
+        {
+            Category = "Teleport",
+            Description = "Cursor OFF",
+            Script = Generate(Action.CursorOff),
         });
         rows.Add(new CtScriptRow
         {

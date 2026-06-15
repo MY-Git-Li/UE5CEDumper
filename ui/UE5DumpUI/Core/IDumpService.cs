@@ -305,4 +305,21 @@ public interface IDumpService
     /// pawn location for the camera↔pawn delta. There is no Set POV — the view
     /// is recomputed every tick (see <see cref="TeleportPov"/>).</summary>
     Task<TeleportPov> TeleportGetPovAsync(CancellationToken ct = default);
+
+    /// <summary>Teleport along the pawn's facing direction by <paramref name="distance"/>
+    /// unreal units (negative = backward). <paramref name="horizontal"/> keeps Z
+    /// (ground-plane move); when false the full 3D forward (including pitch) is
+    /// used. Returns the resulting pose so the caller can show the landed
+    /// X/Y/Z/Pitch/Yaw. The pre-jump pose is auto-saved (RecallLast undoes it).</summary>
+    Task<TeleportPose> TeleportRelativeAsync(double distance, bool horizontal,
+        CancellationToken ct = default);
+
+    /// <summary>Force the mouse cursor on (<paramref name="show"/>=true) / off by
+    /// writing the local PlayerController's bShowMouseCursor. Returns the resulting
+    /// state: 1 = on, 0 = off, -1 = error/unresolved.</summary>
+    Task<int> SetMouseCursorAsync(bool show, CancellationToken ct = default);
+
+    /// <summary>Read the current bShowMouseCursor state: 1 = on, 0 = off,
+    /// -1 = error/unresolved.</summary>
+    Task<int> GetMouseCursorAsync(CancellationToken ct = default);
 }

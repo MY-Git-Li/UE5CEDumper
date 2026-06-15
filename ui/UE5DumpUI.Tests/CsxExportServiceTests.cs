@@ -112,6 +112,9 @@ public class StubDumpService : IDumpService
     public virtual Task<int> TeleportClearMarkerAsync(int slot, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<TeleportResult> TeleportRecallLastAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<TeleportPov> TeleportGetPovAsync(CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<TeleportPose> TeleportRelativeAsync(double distance, bool horizontal, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<int> SetMouseCursorAsync(bool show, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<int> GetMouseCursorAsync(CancellationToken ct = default) => throw new NotImplementedException();
 }
 
 public class CsxExportServiceTests

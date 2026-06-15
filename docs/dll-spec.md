@@ -550,10 +550,10 @@ extern "C" {
     __declspec(dllexport) int32_t   UE5_GetDebugCameraState();
     __declspec(dllexport) int32_t   UE5_SetDebugCamera(int32_t enable);
 
-    // === Teleport (6) — Wirbel: marker save/recall + cursor teleport ===
+    // === Teleport (13) — Wirbel: marker save/recall + cursor + POV + facing/coord + cursor force ===
     // BugIt-style. All resolve the local pawn via reflection and teleport by
     // invoking engine UFunctions (raw write is a tier-2 fallback). Pose arrays
-    // are X,Y,Z,Pitch,Yaw,Roll doubles. Codes per teleport-spec.md §8.
+    // are X,Y,Z,Pitch,Yaw,Roll doubles. Codes per teleport-spec.md §8/§16.
     // CE Lua uses the mailbox CMD_TELEPORT=8 (executeCodeEx can't read returns).
     __declspec(dllexport) int32_t   UE5_TeleportGetPose(double* outPose6, char* outMap, int32_t mapCap);
     __declspec(dllexport) int32_t   UE5_TeleportSaveMarker(int32_t slot);          // slot 0..2
@@ -561,6 +561,14 @@ extern "C" {
     __declspec(dllexport) int32_t   UE5_TeleportToCursor(double zOffset, int32_t channel, int32_t fallbackCenter);
     __declspec(dllexport) int32_t   UE5_TeleportGetMarker(int32_t slot, double* outPose6, char* outMap, int32_t mapCap);
     __declspec(dllexport) int32_t   UE5_TeleportClearMarker(int32_t slot);
+    __declspec(dllexport) int32_t   UE5_TeleportRecallLast();                       // one-way undo of last jump
+    __declspec(dllexport) int32_t   UE5_TeleportGetLast(double* outPose6, char* outMap, int32_t mapCap);
+    __declspec(dllexport) int32_t   UE5_TeleportGetPov(double* outPov11);           // read-only camera POV
+    // build 1144: directional / explicit-coord teleport + force mouse cursor (§16)
+    __declspec(dllexport) int32_t   UE5_TeleportRelative(double distance, int32_t horizontalOnly, double* outNewPose6);
+    __declspec(dllexport) int32_t   UE5_TeleportRecallExplicit(double x, double y, double z, double pitch, double yaw, double roll, int32_t hasRot);
+    __declspec(dllexport) int32_t   UE5_SetMouseCursor(int32_t show, int32_t* outState);  // writes bShowMouseCursor
+    __declspec(dllexport) int32_t   UE5_GetMouseCursor(int32_t* outState);
 
     // === Mailbox (1) ===
     __declspec(dllexport) uintptr_t UE5_GetMailboxAddr();  // shared memory for CE Lua invocation
