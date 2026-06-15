@@ -76,6 +76,29 @@ public partial class ClassPivotViewModel : ViewModelBase
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private PivotResultRow? _selectedResult;
 
+    // --- Change-driven discovery (C3): the automatic front-door. Instead of making
+    // the user guess which class/key to pivot when the target is unknown, find the
+    // (class, prop) targets whose value MOVED between two snapshots (capture
+    // before/after an in-game action), ranked by "looks like game state". The user
+    // picks from a short list; "Use →" fills the pivot below and runs it. Pure C#
+    // over the SQLite corpus (reuses the SPC intersection load). See
+    // docs/experimental-snapshot-spc-pivot.md §"Phase C — C3".
+    [ObservableProperty] private SnapshotMeta? _discoverFrom;
+    [ObservableProperty] private SnapshotMeta? _discoverTo;
+    [ObservableProperty] private bool   _isDiscovering;
+    [ObservableProperty] private string _discoverStatus = "";
+    [ObservableProperty] private DiscoveryCandidate? _selectedDiscoverResult;
+    /// <summary>The newer snapshot of the discovery pair — the one the pivot targets
+    /// on "Use →" (its values + addresses are current).</summary>
+    private SnapshotMeta? _discoverNewest;
+    private CancellationTokenSource? _discoverCts;
+
+    public ObservableCollection<DiscoveryCandidate> DiscoverResults { get; } = new();
+
+    /// <summary>Discovery needs two distinct snapshots (before/after).</summary>
+    public bool CanDiscover => !IsDiscovering && !IsBusy
+        && DiscoverFrom != null && DiscoverTo != null && DiscoverFrom.Id != DiscoverTo.Id;
+
     /// <summary>Pivot data source: persisted snapshots (scalar), persisted
     /// snapshot struct-arrays (inner-key pivot — Phase C6), or a live DataTable
     /// (zero-config — RowName is the key). DataTable mode needs a live connection.</summary>
@@ -198,7 +221,14 @@ public partial class ClassPivotViewModel : ViewModelBase
         await LoadClassesAsync();
     }
 
-    partial void OnIsBusyChanged(bool value)            => OnPropertyChanged(nameof(CanRunPivot));
+    partial void OnIsBusyChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanRunPivot));
+        OnPropertyChanged(nameof(CanDiscover));
+    }
+    partial void OnDiscoverFromChanged(SnapshotMeta? value) => OnPropertyChanged(nameof(CanDiscover));
+    partial void OnDiscoverToChanged(SnapshotMeta? value)   => OnPropertyChanged(nameof(CanDiscover));
+    partial void OnIsDiscoveringChanged(bool value)         => OnPropertyChanged(nameof(CanDiscover));
     partial void OnSelectedSnapshotChanged(SnapshotMeta? value) => PendingLoad = LoadClassesAsync();
     partial void OnSelectedKeyFieldChanged(string? value) => OnPropertyChanged(nameof(CanRunPivot));
     partial void OnSelectedDataTableChanged(DataTablePick? value) => PendingLoad = LoadDataTableFieldsAsync();
@@ -276,36 +306,45 @@ public partial class ClassPivotViewModel : ViewModelBase
                 return;
             }
 
-            ClassFilter = "";                     // ensure the class isn't filtered out
-            var match = Classes.FirstOrDefault(c => c.ClassName == className);
-            if (match == null)
-            {
-                StatusText = $"'{className}' is not in the selected snapshot — capture it, then retry.";
-                return;
-            }
-
-            if (ReferenceEquals(SelectedClass, match))
-                PendingLoad = LoadFieldsAsync();  // already selected → no change event; reload explicitly
-            else
-                SelectedClass = match;            // triggers the field load
-            pending = PendingLoad;
-            if (pending != null) { try { await pending; } catch { /* surfaced via SetError */ } }
-
-            if (!string.IsNullOrEmpty(propName))
-            {
-                if (SelectedKeyField != propName)
-                {
-                    var pick = Fields.FirstOrDefault(f => f.Name == propName);
-                    if (pick != null) pick.IsValue = true;
-                }
+            if (await SelectClassAndTickPropAsync(className, propName) && !string.IsNullOrEmpty(propName))
                 StatusText = $"Ready: {className} · {propName} — press Run Pivot.";
-            }
         }
         catch (Exception ex)
         {
             _log.Error(Constants.LogCatView, $"Pivot: handoff for {className}.{propName} failed", ex);
             SetError(ex);
         }
+    }
+
+    /// <summary>Select <paramref name="className"/> in the CURRENTLY selected
+    /// snapshot and tick <paramref name="propName"/> as a value field. Assumes the
+    /// snapshot + class list are already loaded; awaits the field load it triggers.
+    /// Returns false (with a status hint) when the class isn't in the snapshot.
+    /// Shared by the C5 right-click handoff (<see cref="PivotForAsync"/>) and the
+    /// change-driven discovery "Use →" (<see cref="UseDiscoverCandidateAsync"/>).</summary>
+    private async Task<bool> SelectClassAndTickPropAsync(string className, string? propName)
+    {
+        ClassFilter = "";                     // ensure the class isn't filtered out
+        var match = Classes.FirstOrDefault(c => c.ClassName == className);
+        if (match == null)
+        {
+            StatusText = $"'{className}' is not in the selected snapshot — capture it, then retry.";
+            return false;
+        }
+
+        if (ReferenceEquals(SelectedClass, match))
+            PendingLoad = LoadFieldsAsync();  // already selected → no change event; reload explicitly
+        else
+            SelectedClass = match;            // triggers the field load
+        var pending = PendingLoad;
+        if (pending != null) { try { await pending; } catch { /* surfaced via SetError */ } }
+
+        if (!string.IsNullOrEmpty(propName) && SelectedKeyField != propName)
+        {
+            var pick = Fields.FirstOrDefault(f => f.Name == propName);
+            if (pick != null) pick.IsValue = true;
+        }
+        return true;
     }
 
     [RelayCommand]
@@ -329,6 +368,10 @@ public partial class ClassPivotViewModel : ViewModelBase
                 _fieldCache.Remove(k);
             // Default to the newest snapshot (triggers class load).
             SelectedSnapshot = Snapshots.Count > 0 ? Snapshots[0] : null;
+            // Discovery defaults: compare the last two captures (To = newest,
+            // From = second-newest) — the common "capture before/after an action" flow.
+            DiscoverTo   = Snapshots.Count > 0 ? Snapshots[0] : null;
+            DiscoverFrom = Snapshots.Count > 1 ? Snapshots[1] : DiscoverTo;
         }
         catch (Exception ex)
         {
@@ -755,13 +798,120 @@ public partial class ClassPivotViewModel : ViewModelBase
         }
     }
 
-    /// <summary>Cancel an in-flight pivot run AND any class/field list load —
-    /// called when the user navigates away from the Class Pivot tab so a heavy
-    /// GROUP BY doesn't keep burning CPU.</summary>
+    /// <summary>Change-driven discovery: rank the (class, prop) targets that moved
+    /// between the two chosen snapshots. The result feeds the pivot via "Use →".</summary>
+    [RelayCommand]
+    private async Task RunDiscoverAsync()
+    {
+        if (!CanDiscover) return;
+        _discoverCts?.Cancel();
+        _discoverCts?.Dispose();
+        var cts = _discoverCts = new CancellationTokenSource();
+        var ct = cts.Token;
+
+        ClearError();
+        IsDiscovering = true;
+        DiscoverStatus = "Scanning for changes…";
+        SelectedDiscoverResult = null;   // detach before clearing the bound grid
+        DiscoverResults.Clear();
+        try
+        {
+            // Order the pair chronologically (lower id = older) so the direction
+            // (↑/↓) and the value sequence read oldest → newest, regardless of which
+            // box the user put each snapshot in. The newer one is the pivot target.
+            long olderId = Math.Min(DiscoverFrom!.Id, DiscoverTo!.Id);
+            long newerId = Math.Max(DiscoverFrom!.Id, DiscoverTo!.Id);
+            _discoverNewest = Snapshots.FirstOrDefault(s => s.Id == newerId);
+
+            var query = new DiscoveryQuery
+            {
+                JoinMode        = SpcJoinMode.Strict,
+                ExcludedClasses = _excludedClasses.Count > 0 ? _excludedClasses : null,
+                MaxResults      = 200,
+            };
+            query.SnapshotIds.Add(olderId);
+            query.SnapshotIds.Add(newerId);
+
+            var res = await Task.Run(() => _store.DiscoverChangesAsync(query, ct), ct);
+            foreach (var row in res.Rows) DiscoverResults.Add(row);
+
+            var trunc = res.Truncated ? $" (top {res.Rows.Count:N0} of {res.ChangedGroups:N0})" : "";
+            DiscoverStatus = res.Rows.Count == 0
+                ? "No fields changed between these two snapshots."
+                : $"{res.ChangedGroups:N0} changed target(s){trunc} — pick one, then Use →.";
+        }
+        catch (OperationCanceledException)
+        {
+            DiscoverStatus = "Discovery cancelled.";
+        }
+        catch (Exception ex)
+        {
+            _log.Error(Constants.LogCatView, "Pivot: discovery failed", ex);
+            SetError(ex);
+            DiscoverStatus = "Discovery failed.";
+        }
+        finally
+        {
+            if (ReferenceEquals(_discoverCts, cts))
+            {
+                IsDiscovering = false;
+                _discoverCts.Dispose();
+                _discoverCts = null;
+            }
+        }
+    }
+
+    /// <summary>"Use →": take a discovered candidate and pivot it — switch to the
+    /// newer snapshot of the discovery pair, select the candidate's class, tick its
+    /// property, and run the pivot so the grouped result appears immediately. This
+    /// is the payoff: the user never had to know the class or key up front.</summary>
+    [RelayCommand]
+    public async Task UseDiscoverCandidateAsync(DiscoveryCandidate? cand)
+    {
+        if (cand == null) return;
+        try
+        {
+            ClearError();
+            SelectedSource = "Snapshot";
+            var target = _discoverNewest ?? DiscoverTo ?? SelectedSnapshot;
+            if (target != null && !ReferenceEquals(SelectedSnapshot, target))
+                SelectedSnapshot = target;    // triggers the class load
+            var pending = PendingLoad;
+            if (pending != null) { try { await pending; } catch { /* surfaced via SetError */ } }
+
+            if (SelectedSnapshot == null)
+            {
+                StatusText = "No snapshot selected — capture one first.";
+                return;
+            }
+            if (await SelectClassAndTickPropAsync(cand.ClassName, cand.PropName))
+            {
+                // The discovered property IS the thing the user wants to watch, so
+                // always project it — and group by Identity so its value shows per
+                // instance. (Don't let the key auto-suggester consume the discovered
+                // property as the group key, which would hide its value in Identity
+                // mode / collapse it in Field mode.)
+                SelectedKeyMode = "Identity (object path)";
+                var pick = Fields.FirstOrDefault(f => f.Name == cand.PropName);
+                if (pick != null) pick.IsValue = true;
+                await RunPivotAsync();        // show the grouped pivot of the target now
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Error(Constants.LogCatView, $"Pivot: use discovery candidate {cand.ClassName}.{cand.PropName} failed", ex);
+            SetError(ex);
+        }
+    }
+
+    /// <summary>Cancel an in-flight pivot run, discovery, AND any class/field list
+    /// load — called when the user navigates away from the Class Pivot tab so a
+    /// heavy GROUP BY / scan doesn't keep burning CPU.</summary>
     public void CancelPendingWork()
     {
         _pivotCts?.Cancel();
         _loadCts?.Cancel();
+        _discoverCts?.Cancel();
     }
 
     /// <summary>Open the selected group's representative object in Live Walker.</summary>

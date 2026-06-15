@@ -5,15 +5,74 @@
              x:Class="UE5DumpUI.Views.ClassPivotPanel"
              x:DataType="vm:ClassPivotViewModel">
 
-  <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,170,Auto,*,Auto">
+  <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,Auto,170,Auto,*,Auto">
 
     <!-- Intro -->
     <TextBlock Grid.Row="0" Text="{StaticResource str.Pivot.Intro}"
                Foreground="#999" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"/>
 
+    <!-- Change-driven discovery: the automatic front-door. Find the (class, prop)
+         targets that moved between two snapshots, ranked, so the user doesn't have to
+         guess a class/key. "Use →" hands the chosen candidate to the pivot below. -->
+    <Expander Grid.Row="1" Margin="0,0,0,8" IsExpanded="True"
+              Header="{StaticResource str.Pivot.Discover.Header}">
+      <StackPanel Orientation="Vertical" Spacing="6">
+        <TextBlock Text="{StaticResource str.Pivot.Discover.Intro}"
+                   Foreground="#999" FontSize="11" TextWrapping="Wrap"/>
+        <WrapPanel Orientation="Horizontal" IsEnabled="{Binding !IsDiscovering}">
+          <TextBlock Text="{StaticResource str.Pivot.Discover.From}" Foreground="#CCCCCC"
+                     VerticalAlignment="Center" Margin="0,0,4,0"/>
+          <ComboBox ItemsSource="{Binding Snapshots}" SelectedItem="{Binding DiscoverFrom}"
+                    MinWidth="170" Margin="0,0,12,0">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="m:SnapshotMeta">
+                <TextBlock Text="{Binding PickerDisplay}"/>
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+          <TextBlock Text="{StaticResource str.Pivot.Discover.To}" Foreground="#CCCCCC"
+                     VerticalAlignment="Center" Margin="0,0,4,0"/>
+          <ComboBox ItemsSource="{Binding Snapshots}" SelectedItem="{Binding DiscoverTo}"
+                    MinWidth="170" Margin="0,0,12,0">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="m:SnapshotMeta">
+                <TextBlock Text="{Binding PickerDisplay}"/>
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+          <Button Content="{StaticResource str.Pivot.Discover.Run}" Command="{Binding RunDiscoverCommand}"
+                  IsEnabled="{Binding CanDiscover}" Classes="accent" Padding="12,4" Margin="0,0,8,0"/>
+          <Button Content="{StaticResource str.Pivot.Discover.Use}" Command="{Binding UseDiscoverCandidateCommand}"
+                  CommandParameter="{Binding SelectedDiscoverResult}"
+                  IsEnabled="{Binding SelectedDiscoverResult, Converter={x:Static ObjectConverters.IsNotNull}}"
+                  Padding="12,4" Margin="0,0,8,0"/>
+          <ProgressBar IsIndeterminate="True" Width="120" Height="4" VerticalAlignment="Center" Margin="4,0,0,0"
+                       IsVisible="{Binding IsDiscovering}"/>
+          <TextBlock Text="{Binding DiscoverStatus}" Foreground="#4EC9B0" FontSize="12"
+                     VerticalAlignment="Center" Margin="8,0,0,0"
+                     IsVisible="{Binding DiscoverStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+        </WrapPanel>
+        <!-- Ranked candidates: highest "looks like game state" first. Select a row →
+             Use → pivots it (selects the class, ticks the property, runs). -->
+        <DataGrid ItemsSource="{Binding DiscoverResults}" SelectedItem="{Binding SelectedDiscoverResult}"
+                  Height="170" IsReadOnly="True" GridLinesVisibility="Horizontal" Background="#1E1E1E"
+                  CanUserResizeColumns="True" CanUserSortColumns="True">
+          <DataGrid.Columns>
+            <DataGridTextColumn Header="{StaticResource str.Pivot.Discover.Col.Class}"   Binding="{Binding ClassName}"      SortMemberPath="ClassName"        Width="*"/>
+            <DataGridTextColumn Header="{StaticResource str.Pivot.Discover.Col.Prop}"    Binding="{Binding PropName}"       SortMemberPath="PropName"         Width="1.2*"/>
+            <DataGridTextColumn Header="{StaticResource str.Pivot.Discover.Col.Changed}" Binding="{Binding ChangedDisplay}" SortMemberPath="InstancesChanged" Width="80"/>
+            <DataGridTextColumn Header="{StaticResource str.Pivot.Discover.Col.Dir}"     Binding="{Binding Direction}"      SortMemberPath="Direction"        Width="44"/>
+            <DataGridTextColumn Header="{StaticResource str.Pivot.Discover.Col.Cat}"     Binding="{Binding CategoryName}"   SortMemberPath="InterestScore"    Width="90"/>
+            <DataGridTextColumn Header="{StaticResource str.Pivot.Discover.Col.Seq}"     Binding="{Binding SampleSequence}" SortMemberPath="SampleSequence"   Width="1.5*"/>
+            <DataGridTextColumn Header="{StaticResource str.Pivot.Discover.Col.Score}"   Binding="{Binding ScoreDisplay}"   SortMemberPath="Score"            Width="70"/>
+          </DataGrid.Columns>
+        </DataGrid>
+      </StackPanel>
+    </Expander>
+
     <!-- Snapshot / class selection. Grayed during a pivot run so the source /
          snapshot / class can't change mid-operation. -->
-    <Border Grid.Row="1" Background="#252526" CornerRadius="4" Padding="12,8" Margin="0,0,0,8"
+    <Border Grid.Row="2" Background="#252526" CornerRadius="4" Padding="12,8" Margin="0,0,0,8"
             BorderBrush="#3C3C3C" BorderThickness="1">
       <WrapPanel Orientation="Horizontal" IsEnabled="{Binding !IsBusy}">
         <TextBlock Text="{StaticResource str.Pivot.Source}" Foreground="#CCCCCC"
@@ -90,7 +149,7 @@
     </Border>
 
     <!-- Key mode -->
-    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8" VerticalAlignment="Center">
+    <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8" VerticalAlignment="Center">
       <TextBlock Text="{StaticResource str.Pivot.GroupBy}" Foreground="#CCCCCC" VerticalAlignment="Center"
                  IsVisible="{Binding IsSnapshotSource}"/>
       <ComboBox ItemsSource="{Binding KeyModeOptions}" SelectedItem="{Binding SelectedKeyMode}" MinWidth="170"
@@ -115,7 +174,7 @@
 
     <!-- Field picker: tick the value fields to project per group. KeyScore hints
          which fields make good group keys; the best is pre-selected above. -->
-    <DataGrid Grid.Row="3" ItemsSource="{Binding Fields}" IsReadOnly="False"
+    <DataGrid Grid.Row="4" ItemsSource="{Binding Fields}" IsReadOnly="False"
               GridLinesVisibility="Horizontal" Background="#1E1E1E"
               IsEnabled="{Binding !IsBusy}"
               CanUserResizeColumns="True" CanUserSortColumns="True">
@@ -135,11 +194,11 @@
       </DataGrid.Columns>
     </DataGrid>
 
-    <TextBlock Grid.Row="4" Text="{StaticResource str.Pivot.ResultsHint}" Foreground="#888"
+    <TextBlock Grid.Row="5" Text="{StaticResource str.Pivot.ResultsHint}" Foreground="#888"
                FontSize="11" TextWrapping="Wrap" Margin="0,8,0,8"/>
 
     <!-- Results: one row per group -->
-    <DataGrid Grid.Row="5" ItemsSource="{Binding Results}" SelectedItem="{Binding SelectedResult}"
+    <DataGrid Grid.Row="6" ItemsSource="{Binding Results}" SelectedItem="{Binding SelectedResult}"
               IsReadOnly="True" GridLinesVisibility="Horizontal" Background="#1E1E1E"
               CanUserResizeColumns="True" CanUserSortColumns="True">
       <DataGrid.Columns>
@@ -151,7 +210,7 @@
 
     <!-- N1: hidden-class chips (Pivot-scope denylist). Only shown when non-empty.
          Click a chip to un-hide; "Clear all" empties the Pivot denylist. -->
-    <Border Grid.Row="6" Background="#252526" CornerRadius="4" Padding="8,6" Margin="0,8,0,0"
+    <Border Grid.Row="7" Background="#252526" CornerRadius="4" Padding="8,6" Margin="0,8,0,0"
             BorderBrush="#3C3C3C" BorderThickness="1"
             IsVisible="{Binding HasHiddenClasses}">
       <StackPanel Orientation="Vertical">

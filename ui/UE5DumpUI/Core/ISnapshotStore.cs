@@ -65,6 +65,16 @@ public interface ISnapshotStore
     /// docs/experimental-snapshot-spc-pivot.md §"Phase B".</summary>
     Task<SpcResult> SpcQueryAsync(SpcQuery query, CancellationToken ct = default);
 
+    /// <summary>Change-driven discovery over the active game's DB: find the
+    /// (class, property) targets whose value MOVED across
+    /// <see cref="DiscoveryQuery.SnapshotIds"/> (≥ 2, oldest → newest), rolled up per
+    /// (class, prop) and ranked by "looks like game state" (interest × change ×
+    /// selectivity × population). The automatic front-door to Class Pivot — no
+    /// class/key guessing. Reuses the SPC intersection load; ranks via the pure
+    /// <see cref="Services.PivotDiscoveryEngine"/>. See
+    /// docs/experimental-snapshot-spc-pivot.md §"Phase C — C3".</summary>
+    Task<DiscoveryResult> DiscoverChangesAsync(DiscoveryQuery query, CancellationToken ct = default);
+
     /// <summary>Classes present in a snapshot with their live-instance counts,
     /// most-populous first — populates the Class Pivot class picker.</summary>
     Task<IReadOnlyList<PivotClassInfo>> ListPivotClassesAsync(

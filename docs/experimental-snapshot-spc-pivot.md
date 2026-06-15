@@ -253,7 +253,21 @@ the repo's test culture).
 Group a class's instances by a key field's value, project value fields across
 snapshots. Pure C# over SQLite — **zero DLL change** (except optional C4).
 
-> **Status (build 877): C1 + C3-lite + C4 + C5 + C6 SHIPPED.** `PivotEngine`
+> **Status (build 1160): C1 + C3-lite + **C3 change-driven discovery** + C4 + C5 + C6 SHIPPED.**
+> **C3 change-driven discovery (build 1160)** is the automatic *front-door* that
+> dissolves the remaining "which class do I even pick?" pain (the reason Pivot was
+> under-used when the target is unknown): a **"🔍 Suggest targets"** Expander on the
+> Class Pivot tab takes a *Before* + *After* snapshot pair, finds the (class, prop)
+> targets whose value MOVED, and ranks them by **interest × change × selectivity ×
+> population** (sub-scores exposed for calibration). **Use →** pivots the chosen
+> candidate (forces it as a projected value + Identity grouping + runs). Pure C# —
+> `PivotDiscoveryEngine` (rolls (instance,field) sequences up per (class,prop), gates
+> on "moved", ranks) + `SnapshotStore.DiscoverChangesAsync`, which **reuses the SPC
+> cross-snapshot intersection load** via the shared `LoadIntersectedCandidatesAsync`
+> helper (no DLL/pipe change). +10 engine / +7 store / +3 VM tests. ⚠ in-game
+> live-verify pending. The original C3-lite + the rest:
+>
+> `PivotEngine`
 > (identity/field grouping + `⟨N: …⟩` collision render) + `PivotKeyScorer`
 > (type/name/cardinality key prior, `SuggestKey`, value interest via
 > `PropertyScoringTable`) + `SnapshotStore.PivotAsync`/`ListPivotClasses`/
@@ -267,7 +281,8 @@ snapshots. Pure C# over SQLite — **zero DLL change** (except optional C4).
 > / InterestingProperties / LiveWalker (`NavigateToPivot` → `PivotForAsync`), gated
 > by a per-VM `PivotEnabled` flag so it's hidden when experimental is off.
 > Remaining: C2 (find-by-value), and the heavier C3 scorer (Jaccard stability /
-> compound key / volatility ranking).
+> compound key). The "volatility ranking" half of C3 shipped as **change-driven
+> discovery (build 1160)** — see the status block above.
 
 ### C — How UE dissolves the key-field problem (the `discrete` pain, your Q#4)
 `discrete`'s root cause: anonymous Unity instances *force* a guessed business
@@ -299,10 +314,16 @@ key. UE's six-layer improvement:
 - **C2 — Find-by-value (value-locator):** port `SnapshotValueLocatorEngine`
   (29i-4) — set-membership over the SQLite corpus, address-agnostic,
   cross-session capable; Exact + Delta modes. Auto-handoff to pivot + CE export.
-- **C3 — Key discovery:** reuse `PropertyScoringTable` for NamePrior + UE type
-  prior; port `discrete`'s stability (Jaccard) + cardinality scores + greedy
-  compound key; class shortlist (CV / presence / field ratios); "likely
-  game-state" volatility ranking (29i-3).
+- **C3 — Key discovery + change-driven discovery:**
+  - *C3-lite (shipped):* reuse `PropertyScoringTable` for NamePrior + UE type prior
+    in `PivotKeyScorer.SuggestKey` (auto-suggests the key field within a class).
+  - *Change-driven discovery ✅ **SHIPPED (build 1160)**:* the "🔍 Suggest targets"
+    front-door — "likely game-state" volatility ranking (29i-3) realised as
+    `PivotDiscoveryEngine` over a Before/After snapshot pair (interest × change ×
+    selectivity × population), reusing the SPC intersection load. This is the part
+    that makes Pivot usable when the target class is unknown.
+  - *Remaining:* port `discrete`'s stability (Jaccard) + greedy compound key + class
+    shortlist (CV / presence / field ratios) for the heavier multi-snapshot scorer.
 - **C4 — DataTable-native pivot:** ✅ **SHIPPED (build 873).** Zero-config (RowName
   is the key). No DLL touch needed — `walk_datatable_rows` already returns the row
   struct fields; `DataTablePivotEngine` + a `Source` toggle on the Class Pivot tab
