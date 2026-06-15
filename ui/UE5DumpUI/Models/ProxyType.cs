@@ -19,6 +19,14 @@ public enum ProxyType
     /// installer or anti-tamper shim.
     /// </summary>
     Dinput8,
+
+    /// <summary>
+    /// Hijack dxgi.dll. Statically imported by every D3D11/D3D12 Unreal
+    /// Engine game on Windows (CreateDXGIFactory1/2). The reliable target
+    /// for EXEs that import neither version.dll nor dinput8.dll (e.g. some
+    /// SQUARE ENIX UE4 builds). Does not apply to Vulkan/OpenGL-only games.
+    /// </summary>
+    Dxgi,
 }
 
 /// <summary>
@@ -34,6 +42,7 @@ public static class ProxyTypeExtensions
     {
         ProxyType.Version => Constants.ProxyDllName,
         ProxyType.Dinput8 => Constants.ProxyDllNameDinput8,
+        ProxyType.Dxgi    => Constants.ProxyDllNameDxgi,
         _                 => Constants.ProxyDllName,
     };
 
@@ -44,6 +53,7 @@ public static class ProxyTypeExtensions
     {
         ProxyType.Version => "version.dll",
         ProxyType.Dinput8 => "dinput8.dll",
+        ProxyType.Dxgi    => "dxgi.dll",
         _                 => "version.dll",
     };
 }

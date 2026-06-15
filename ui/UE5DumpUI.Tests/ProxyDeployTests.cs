@@ -266,6 +266,7 @@ public class ProxyDeployTests
     {
         Assert.Equal("version.dll", Constants.ProxyDllName);
         Assert.Equal("dinput8.dll", Constants.ProxyDllNameDinput8);
+        Assert.Equal("dxgi.dll", Constants.ProxyDllNameDxgi);
         Assert.Equal("UE5CEDumper", Constants.ProxyProductName);
         Assert.False(string.IsNullOrEmpty(Constants.SteamRegistryPath));
         Assert.False(string.IsNullOrEmpty(Constants.SteamRegistryKey));
@@ -293,6 +294,13 @@ public class ProxyDeployTests
     }
 
     [Fact]
+    public void ProxyType_Dxgi_MapsToDxgiDll()
+    {
+        Assert.Equal("dxgi.dll", ProxyType.Dxgi.GetDllName());
+        Assert.Equal("dxgi.dll", ProxyType.Dxgi.GetDisplayName());
+    }
+
+    [Fact]
     public void ProxyType_AllValuesHaveMappings()
     {
         // Guard against silently breaking the switch when a new enum value is
@@ -305,9 +313,10 @@ public class ProxyDeployTests
     }
 
     [Fact]
-    public void ProxyType_VersionAndDinput8_HaveDistinctDllNames()
+    public void ProxyType_AllProxyTypes_HaveDistinctDllNames()
     {
-        Assert.NotEqual(ProxyType.Version.GetDllName(), ProxyType.Dinput8.GetDllName());
+        var names = Enum.GetValues<ProxyType>().Select(t => t.GetDllName()).ToList();
+        Assert.Equal(names.Count, names.Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -324,6 +333,48 @@ public class ProxyDeployTests
     public void IsKnownStubExe_FiltersCrashReportClient(string exeName, bool expected)
     {
         Assert.Equal(expected, ProxyDeployService.IsKnownStubExe(exeName));
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // BuildConflictMessage — redundancy warning only when 2+ coexist
+    // (build 1165 fix: a single deployed proxy of any type is NOT a conflict,
+    //  regardless of which proxy type the UI has selected)
+    // ────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void BuildConflictMessage_NoProxies_ReturnsNull()
+    {
+        Assert.Null(ProxyDeployService.BuildConflictMessage(Array.Empty<string>()));
+    }
+
+    [Fact]
+    public void BuildConflictMessage_SingleProxy_ReturnsNull()
+    {
+        // The exact false-positive the user hit: only dxgi.dll deployed, but
+        // viewing the version.dll tab must NOT warn.
+        Assert.Null(ProxyDeployService.BuildConflictMessage(new[] { "dxgi.dll" }));
+        Assert.Null(ProxyDeployService.BuildConflictMessage(new[] { "version.dll" }));
+    }
+
+    [Fact]
+    public void BuildConflictMessage_TwoProxies_WarnsAndListsBoth()
+    {
+        var msg = ProxyDeployService.BuildConflictMessage(new[] { "version.dll", "dxgi.dll" });
+        Assert.NotNull(msg);
+        Assert.Contains("version.dll", msg);
+        Assert.Contains("dxgi.dll", msg);
+        Assert.Contains("only one will activate", msg);
+    }
+
+    [Fact]
+    public void BuildConflictMessage_ThreeProxies_ListsAll()
+    {
+        // N-proxy-safe: a future 4th type would extend this naturally.
+        var msg = ProxyDeployService.BuildConflictMessage(new[] { "version.dll", "dinput8.dll", "dxgi.dll" });
+        Assert.NotNull(msg);
+        Assert.Contains("version.dll", msg);
+        Assert.Contains("dinput8.dll", msg);
+        Assert.Contains("dxgi.dll", msg);
     }
 
     // ────────────────────────────────────────────────────────────────

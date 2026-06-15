@@ -274,6 +274,25 @@ public sealed class ProxyDeployService : IProxyDeployService
     }
 
     /// <summary>
+    /// Build the multi-proxy redundancy warning from the list of OUR proxy
+    /// DLLs actually present in a game folder, or null when fewer than two
+    /// coexist. Pure (no IO) so the rule is unit-testable.
+    ///
+    /// Only 2+ simultaneously-deployed proxies are a real conflict ("only one
+    /// will activate at runtime"). Exactly one deployed proxy — of ANY type —
+    /// is the normal state and must NOT warn, regardless of which proxy type
+    /// the UI currently has selected. N-proxy-safe.
+    /// </summary>
+    internal static string? BuildConflictMessage(IReadOnlyList<string> deployedProxyNames)
+    {
+        if (deployedProxyNames.Count < 2)
+            return null;
+
+        return $"Multiple proxy DLLs deployed ({string.Join(", ", deployedProxyNames)})"
+             + " — only one will activate at runtime";
+    }
+
+    /// <summary>
     /// Try to detect UE version from the game executable's PE version info.
     /// Returns null if detection fails.
     /// </summary>
@@ -305,16 +324,18 @@ public sealed class ProxyDeployService : IProxyDeployService
             string? sourceVersion = GetDllVersion(sourceDllPath);
 
             string selectedDllName = proxyType.GetDllName();
-            ProxyType otherType = proxyType == ProxyType.Version
-                                  ? ProxyType.Dinput8 : ProxyType.Version;
-            string otherDllName = otherType.GetDllName();
+            // All distinct proxy DLL file names (Distinct guards against a
+            // future enum value whose switch arm fell back to the default).
+            string[] allProxyNames = Enum.GetValues<ProxyType>()
+                .Select(t => t.GetDllName())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
 
             foreach (var game in games)
             {
                 ct.ThrowIfCancellationRequested();
 
                 string targetDll = Path.Combine(game.BinariesDir, selectedDllName);
-                string otherDll  = Path.Combine(game.BinariesDir, otherDllName);
                 game.ErrorMessage = null;
 
                 // Status reflects the SELECTED proxy type's state ────────────
@@ -346,13 +367,25 @@ public sealed class ProxyDeployService : IProxyDeployService
                                   : ProxyDeployStatus.DeployedOutdated;
                 }
 
-                // Conflict detection: also our OTHER proxy in the same folder.
-                // Surface as ErrorMessage so the user sees it without forcing
-                // a separate column. Runtime mutex (Heiter.cpp) ensures only
-                // one activates, but better to flag the redundancy.
-                if (File.Exists(otherDll) && IsOurProxyDll(otherDll))
+                // Redundancy detection: which of OUR proxy DLLs are actually
+                // present in this folder? Warn ONLY when 2+ coexist (only one
+                // activates at runtime — see Heiter.cpp's mutex). This is a
+                // property of the folder, INDEPENDENT of the selected radio —
+                // a single deployed proxy of any type is the normal state and
+                // must not warn (otherwise switching tabs falsely flags every
+                // game that has a different single proxy installed). N-proxy-
+                // safe: no hardcoded type pair.
+                var deployedProxyNames = allProxyNames
+                    .Where(name =>
+                    {
+                        string p = Path.Combine(game.BinariesDir, name);
+                        return File.Exists(p) && IsOurProxyDll(p);
+                    })
+                    .ToList();
+
+                string? conflictMsg = BuildConflictMessage(deployedProxyNames);
+                if (conflictMsg != null)
                 {
-                    string conflictMsg = $"Both {selectedDllName} and {otherDllName} are deployed — only one will activate at runtime";
                     game.ErrorMessage = string.IsNullOrEmpty(game.ErrorMessage)
                                         ? conflictMsg
                                         : $"{game.ErrorMessage}; {conflictMsg}";

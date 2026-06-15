@@ -335,6 +335,82 @@ if(BUILD_PROXY_DINPUT8)
 endif()
 
 # ============================================================
+# Proxy DLL target (alternative): dxgi.dll
+# Hijacks dxgi.dll, which is statically imported by every D3D11/
+# D3D12 Unreal Engine game on Windows (CreateDXGIFactory1/2). This
+# is the reliable hijack target for games whose EXE imports neither
+# version.dll nor dinput8.dll (observed: a SQUARE ENIX UE4.27 demo).
+#
+# Unlike the version/dinput8 proxies, dxgi exports several
+# undocumented internals (DXGID3D10*, Compat*, PIX*) with unknown
+# signatures, so forwarding uses signature-agnostic asm jmp-thunks
+# (Lugner_Dxgi.asm + Lugner_Dxgi.cpp) instead of plain C wrappers.
+# This requires the MASM assembler (enabled below, dxgi target only).
+#
+# As with the other proxies, only one should be active per game
+# folder; the runtime mutex in Heiter.cpp enforces first-loaded-wins.
+# ============================================================
+option(BUILD_PROXY_DXGI "Build the dxgi.dll proxy DLL target" OFF)
+
+if(BUILD_PROXY_DXGI)
+    # MASM is only needed for this target's jmp-thunks; enable it lazily so
+    # the version/dinput8 proxy configures don't pay for it.
+    enable_language(ASM_MASM)
+
+    # Assemble the jmp-thunks in an ISOLATED object library that links nothing.
+    # The main proxy target links Zydis, which exports a PUBLIC /wd4201 compile
+    # option; target compile options apply to ALL languages, so that CL-only
+    # flag would reach ml64 and trigger "MASM warning A4018: invalid
+    # command-line option". Keeping the .asm in a dependency-free object lib
+    # (then folding its objects in via $<TARGET_OBJECTS>) keeps ml64's command
+    # line clean. f0..f19 resolve against mProcs (in Lugner_Dxgi.cpp) at the
+    # final shared-lib link, exactly as before.
+    add_library(UE5Dumper_ProxyDxgi_Thunks OBJECT src/Lugner_Dxgi.asm)
+
+    add_library(UE5Dumper_ProxyDxgi SHARED
+        ${PROXY_SOURCES}
+        src/Lugner_Dxgi.cpp
+        $<TARGET_OBJECTS:UE5Dumper_ProxyDxgi_Thunks>
+    )
+
+    target_include_directories(UE5Dumper_ProxyDxgi PRIVATE ${PROXY_INCLUDE_DIRS})
+
+    target_compile_definitions(UE5Dumper_ProxyDxgi PRIVATE
+        ${PROXY_COMMON_DEFS}
+        UE5_PROXY_DXGI_BUILD
+    )
+
+    if(MSVC)
+        set_property(TARGET UE5Dumper_ProxyDxgi PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+        )
+        # /utf-8 /W4 etc. apply to C/C++ only; MASM (.asm) ignores them.
+        target_compile_options(UE5Dumper_ProxyDxgi PRIVATE
+            $<$<COMPILE_LANGUAGE:CXX>:/utf-8>
+            $<$<COMPILE_LANGUAGE:CXX>:/W4>
+            $<$<COMPILE_LANGUAGE:CXX>:/permissive->
+            $<$<COMPILE_LANGUAGE:CXX>:/EHa>
+            $<$<COMPILE_LANGUAGE:CXX>:/arch:AVX2>
+            $<$<COMPILE_LANGUAGE:CXX>:/favor:blend>
+        )
+    endif()
+
+    target_link_libraries(UE5Dumper_ProxyDxgi PRIVATE ${PROXY_LINK_LIBS})
+
+    # No /DELAYLOAD here: unlike the version/dinput8 proxies, this DLL does
+    # NOT import dxgi.dll (PROXY_LINK_LIBS has no dxgi), so there is no
+    # circular import to break — we load the real dxgi manually by full path.
+    target_link_options(UE5Dumper_ProxyDxgi PRIVATE
+        /DEF:${CMAKE_CURRENT_SOURCE_DIR}/src/ProxyDxgi.def
+    )
+
+    set_target_properties(UE5Dumper_ProxyDxgi PROPERTIES
+        PREFIX ""
+        OUTPUT_NAME "dxgi"
+    )
+endif()
+
+# ============================================================
 # Unit test target — Utf8Helpers self-test
 #
 # Stand-alone executable, no GoogleTest dependency. Builds only when the

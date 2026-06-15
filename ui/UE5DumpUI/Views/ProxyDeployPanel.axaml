@@ -20,6 +20,11 @@
                    IsChecked="{Binding IsDinput8Selected, Mode=TwoWay}"
                    ToolTip.Tip="{StaticResource str.Tip.ProxyDeploy.Type.Dinput8}"
                    Foreground="#D4D4D4" VerticalAlignment="Center"/>
+      <RadioButton GroupName="ProxyType"
+                   Content="{StaticResource str.ProxyDeploy.Type.Dxgi}"
+                   IsChecked="{Binding IsDxgiSelected, Mode=TwoWay}"
+                   ToolTip.Tip="{StaticResource str.Tip.ProxyDeploy.Type.Dxgi}"
+                   Foreground="#D4D4D4" VerticalAlignment="Center"/>
     </StackPanel>
 
     <!-- Toolbar: Scan / Refresh / Selection helpers -->

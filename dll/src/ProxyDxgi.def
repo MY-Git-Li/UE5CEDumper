@@ -1,0 +1,82 @@
+; ============================================================
+; ProxyDxgi.def — Module definition for the dxgi.dll proxy
+;
+; dxgi.dll is statically imported by virtually every D3D11/D3D12
+; Unreal Engine game on Windows (CreateDXGIFactory1/2), making it
+; a reliable hijack target for games whose EXE imports neither
+; version.dll nor dinput8.dll (e.g. some SQUARE ENIX UE4 builds).
+;
+; Each Windows export is mapped to an asm jmp-thunk (f<N> in
+; Lugner_Dxgi.asm) whose target address is the real dxgi export,
+; resolved at load time by Lugner_Dxgi.cpp::DxgiProxy_Init. The
+; @ordinal values match real dxgi.dll so ordinal imports resolve
+; too. The index/ordinal table MUST stay in sync with
+; kDxgiExports[] (Lugner_Dxgi.cpp) and the .asm thunk order.
+;
+; The full export surface (incl. the undocumented DXGID3D10* /
+; Compat* / PIX* internals) is forwarded so that d3d11.dll /
+; d3d12.dll can still resolve their dxgi dependencies through our
+; proxy — omitting them can break D3D device creation.
+;
+; The /DEF: linker flag suppresses default exports, so the UE5_*
+; C ABI entries must be listed explicitly here too (CE Lua's
+; getAddress() resolves the dumper functions through the proxy).
+; ============================================================
+
+LIBRARY dxgi
+EXPORTS
+    ; --- Windows dxgi.dll forwarding (export = asm thunk @ real-ordinal) ---
+    ApplyCompatResolutionQuirking    = f0  @1
+    CompatString                     = f1  @2
+    CompatValue                      = f2  @3
+    DXGIDumpJournal                  = f3  @4
+    PIXBeginCapture                  = f4  @5
+    PIXEndCapture                    = f5  @6
+    PIXGetCaptureState               = f6  @7
+    SetAppCompatStringPointer        = f7  @8
+    UpdateHMDEmulationStatus         = f8  @9
+    CreateDXGIFactory                = f9  @10
+    CreateDXGIFactory1               = f10 @11
+    CreateDXGIFactory2               = f11 @12
+    DXGID3D10CreateDevice            = f12 @13
+    DXGID3D10CreateLayeredDevice     = f13 @14
+    DXGID3D10GetLayeredDeviceSize    = f14 @15
+    DXGID3D10RegisterLayers          = f15 @16
+    DXGIDeclareAdapterRemovalSupport = f16 @17
+    DXGIDisableVBlankVirtualization  = f17 @18
+    DXGIGetDebugInterface1           = f18 @19
+    DXGIReportAdapterConfiguration   = f19 @20
+
+    ; --- UE5 Dumper C ABI exports (for CE Lua getAddress) ---
+    UE5_Init
+    UE5_Shutdown
+    UE5_GetVersion
+    UE5_AutoStart
+    UE5_GetGObjectsAddr
+    UE5_GetGNamesAddr
+    UE5_GetObjectCount
+    UE5_GetObjectByIndex
+    UE5_GetObjectName
+    UE5_GetObjectFullName
+    UE5_GetObjectClass
+    UE5_GetObjectOuter
+    UE5_FindObject
+    UE5_FindClass
+    UE5_WalkClassBegin
+    UE5_WalkClassGetField
+    UE5_WalkClassEnd
+    UE5_ResolveFName
+    UE5_SetObjectDecryption
+    UE5_GetFieldBoolMask
+    UE5_GetFieldStructClass
+    UE5_GetFieldPropertyClass
+    UE5_GetClassPropsSize
+    UE5_FindInstanceOfClass
+    UE5_FindFunctionByName
+    UE5_CallProcessEvent
+    UE5_CallProcessEventDirect
+    UE5_GetMailboxAddr
+    g_invokeMailbox DATA
+    UE5_StartPipeServer
+    UE5_StopPipeServer
+    UE5_IsPipeConnected
