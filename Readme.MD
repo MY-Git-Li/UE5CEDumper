@@ -43,7 +43,7 @@ A quick look at what you can actually *do* with it (the [full table-maker featur
 | **4.15 – 4.17** | ✅ | ✅ | ✅ | *Extinction* |
 | **4.18 – 4.20** | ✅ | ✅ | ✅ | *FF7 Remake Intergrade, The Occupation* |
 | **4.21 – 4.24** | ✅ | ✅ | ✅ | *Star Wars Jedi, DQ XI S, IDOLM@STER STARLIT SEASON, Octopath Traveler, DQ I&II / III HD-2D Remaster* |
-| **4.25 – 4.27** | ✅ | ✅ | ✅ | *FF7 Rebirth, Tower of Mask, Hogwarts Legacy, Romancing SaGa 2 RotS, Ghostwire: Tokyo, TimeSplitters Rewind (Early Access V0.3.3), The Artisan of Glimmith, Barn Finders, MOBILE SUIT GUNDAM SEED Battle Destiny Remastered* |
+| **4.25 – 4.27** | ✅ | ✅ | ✅ | *FF7 Rebirth, Tower of Mask, Hogwarts Legacy, Romancing SaGa 2 RotS, Ghostwire: Tokyo, TimeSplitters Rewind (Early Access V0.3.3), The Artisan of Glimmith, Barn Finders, MOBILE SUIT GUNDAM SEED Battle Destiny Remastered, The Adventures of Elliot Demo* |
 | **5.0 – 5.2** | ✅ | ✅ | ✅ | *Squirrel With A Gun, Caravan Sandwitch, Meltopia, Retro Rewind Demo* |
 | **5.3 – 5.4** | ✅ | ✅ | ✅ | *Satisfactory (v1.1.3.1), Colossal* |
 | **5.5 – 5.7** | ✅ | ✅* | ✅** | *Titan Quest II, EverSpace 2, Lushfoil Photography Sim, Manor Lords, Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT: CARRIER QUALIFICATION Demo* |
@@ -77,7 +77,7 @@ A quick look at what you can actually *do* with it (the [full table-maker featur
 | **Property Search** | Search across all classes for specific property names. Find where a field is defined without browsing the full object hierarchy. **Freeze** button per row (build 719) ships a CE AA Script that locks the field across every live instance. |
 | **Class Structure** | Browse class definitions with full field layouts, types, offsets, and inheritance chains. |
 | **Multi-Format CE Export** | **CE XML** (pointer chain address records), **CSX** (CE Structure Dissect), **SDK Header** (.h), **CE Field** (single field), **CE AA Script** (Auto Assembler). Supports scalars, bitfields, structs, arrays, Map/Set, OptionalProperty\<Struct\>, and UEnum DropDownLists. **N-level pointer drill-down** (toolbar Drill Depth slider 0–4) — Copy CE Field on an `ObjectProperty` follows the pointer and emits the target's UPROPERTYs as nested `Offsets=[0]` children, so a single paste in CE shows the whole referenced object's layout. **Soft array per-element** emits FName leaf at FSoftObjectPath sub-offset (UE4/5.0 single FName; UE5.1+ FTopLevelAssetPath PackageName + AssetName) instead of a flat 8B hex. **Collapse chain** (toolbar toggle) optionally folds the entire `GWorld → … → target` pointer spine into one CE multi-level-pointer entry — `base` + a single merged node + the target field with its drill-down — so a deep navigation path pastes as a compact multi-level pointer instead of N nested groups. |
-| **Proxy DLL** | `version.dll` proxy injection — no Cheat Engine required. Place next to the game exe, launch, and connect the UI. |
+| **Proxy DLL** | Proxy-DLL injection — no Cheat Engine required. Place next to the game exe, launch, and connect the UI. Three hijack targets cover the field: **`version.dll`** (broadest default), **`dinput8.dll`** (gamepad/DirectInput titles), and **`dxgi.dll`** (every D3D11/D3D12 UE game — the reliable target for EXEs that import *neither* version nor dinput8, e.g. some SQUARE ENIX builds). The Proxy Deploy tab scans Steam, deploys the chosen type per game, and warns only when two of our proxies actually coexist. |
 | **Modern UI** | External **Avalonia UI** connected via high-speed Named Pipe (~50 JSON-RPC commands). Sortable result grids throughout. Native AOT published with zero IL2026 / IL3050 warnings. **Long operations cancel cleanly** — they stop when you cancel or close the UI, so the injected DLL never spins idle and the game always closes promptly. Keep your game performance smooth. |
 
 ---
@@ -100,6 +100,8 @@ A quick look at what you can actually *do* with it (the [full table-maker featur
 5.  **Navigate & Analyze**: Same workflow as Option A — browse objects, find instances, export CE structures.
 
 > **Note**: Do not use both methods simultaneously. If the proxy DLL is in the game folder, do not also inject `UE5Dumper.dll` via CE. The DLL detects duplicate instances and skips auto-start to prevent conflicts.
+
+> **Which proxy DLL?** Start with `version.dll` (`build.ps1 -Target ProxyDLL`). If the game launches but the UI can't connect, the EXE probably doesn't import `version.dll` — try **`dxgi.dll`** (`-Target ProxyDxgi`), which every D3D11/D3D12 UE game imports, or `dinput8.dll` (`-Target ProxyDinput8`). `build.ps1` (default `-Target All`) builds all three into `dist\proxy\`, and the **Proxy Deploy** tab lets you pick the type per game and deploy it for you.
 
 | **Game Process (Injected)** |
 | :---: |
@@ -147,8 +149,9 @@ Download AOBMaker here (register is required): https://opencheattables.com/viewt
 ## Important Notes
 
 * **Custom Data Structures**: In games like *FF7 Rebirth*, some critical data (e.g., HP) is stored in custom structures outside standard `UObjects`. The Live Walker can help investigate these regions, but direct discovery is not possible.
-* **GWorld Connectivity**: `GWorld` traversal works in **100% of tested games (30 / 30)** as of 2026-06-11, including Satisfactory (modular UE build with a separate `CoreUObject-Win64-Shipping.dll`) and *Star Wars Jedi: Fallen Order* (UE 4.21, EA Origin / Steam launcher). For unverified games, fall back to **Object Tree** or **Instance Finder** as the primary entry point.
+* **GWorld Connectivity**: `GWorld` traversal works in **100% of tested games (31 / 31)** as of 2026-06-15, including Satisfactory (modular UE build with a separate `CoreUObject-Win64-Shipping.dll`) and *Star Wars Jedi: Fallen Order* (UE 4.21, EA Origin / Steam launcher). For unverified games, fall back to **Object Tree** or **Instance Finder** as the primary entry point.
 * **Proxy DLL caveat for EA-launcher games**: *Star Wars Jedi: Fallen Order* launches via the EA app; neither `version.dll` nor `dinput8.dll` proxy is loaded by the wrapped process (EA's launcher restricts the DLL search path). The DLL must be CE-injected after the game is running. The scan side itself works fine — GObjects / GNames / GWorld all resolve cleanly once the DLL is inside the process. Same pattern likely applies to other EA-launched titles; report any new ones as an issue.
+* **`dxgi.dll` proxy for games that import neither `version.dll` nor `dinput8.dll`**: a few titles (e.g. *The Adventures of Elliot*, a SQUARE ENIX UE4.27 D3D12 demo) simply don't import `version.dll` or `dinput8.dll` in their EXE, so those proxies are never loaded by Windows — unlike the EA case, this is the game's own import table, not a launcher restriction. Use the **`dxgi.dll`** proxy (`build.ps1 -Target ProxyDxgi`, or pick *dxgi.dll* in the Proxy Deploy tab): every D3D11/D3D12 UE game imports `dxgi`, so it loads reliably. Live-verified end-to-end on Elliot (connect + scan + object browse).
 * **Container Limits**: Array/Map/Set element reading respects a configurable limit to avoid excessive memory reads. Adjust the **Array Limit** slider in the Live Walker when working with large containers.
 
 ---
