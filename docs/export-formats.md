@@ -116,6 +116,49 @@ pointer/array deref nodes, struct groups, AND array/map/set element folders like
 <Options moHideChildren="1" moDeactivateChildrenAsWell="1"/>
 ```
 
+### Collapse chain Option (Copy CE XML / Copy CE Field)
+
+When enabled (`flattenChain` / LiveWalker "Collapse chain" toggle), the navigation
+**spine** between `base` and the target field is folded into a **single CE
+multi-level-pointer entry** instead of one nested group per breadcrumb. `base`,
+the target field, and the field's drill-down are untouched — only the GWorld→…→target
+pointer hops collapse. This is purely a transform of the breadcrumb spine; the
+leaf-field subtree (struct/pointer/container expansion via `EmitFields`) is never
+touched, so the toggle composes with every field type and can't change what a leaf
+renders. Implemented by `CeXmlExportService.FoldBreadcrumbSpine`.
+
+**Fold math** (`ProjectBreadcrumb` reduces each breadcrumb to `(offset, derefAfter)`;
+`derefAfter = IsPointerDeref || IsContainerView`). CE resolves `Address=+Xbase`,
+`Offsets O[0..m-1]` as `p = deref(parent + Xbase); for k=m-1..1: p = deref(p + O[k]); final = p + O[0]`
+— so `O[0]` is the **outermost** (no final deref) and `O[m-1]` the first deref after
+base. Folding accumulates each run of offsets up to (and incl.) a deref into `D[]`,
+with `F` = the trailing inline run after the last deref:
+
+```
+Address = +D[0]
+Offsets (CE document order) = [F] ++ reverse(D[1..])
+```
+
+A pure-inline spine (no deref) folds to `Address=+F` with no `<Offsets>`.
+
+**Worked example** — `base → OwningGameInstance(ptr +180) → m_savedata(ptr +2A8) →
+SaveSlotList(array +7D0) → [1](inline +6F8) → OriginalPlayer(inline +18)`:
+`D=[180, 2A8, 7D0]`, `F = 6F8 + 18 = 710` →
+
+```xml
+<Description>"OwningGameInstance ▸ m_savedata ▸ SaveSlotList ▸ [1] ▸ OriginalPlayer"</Description>
+<Address>+180</Address>
+<Offsets>
+  <Offset>710</Offset>   <!-- F: trailing inline run (array elem [1] + OriginalPlayer) -->
+  <Offset>7D0</Offset>   <!-- SaveSlotList deref -->
+  <Offset>2A8</Offset>   <!-- m_savedata deref (innermost, first after base) -->
+</Offsets>
+```
+
+> Two adjacent **pointers** A→B fold to `Offsets=[0, OffsetB]` (the `0` first — it is
+> B's post-deref read offset, the outermost `O[0]`). A pointer A then an **inline**
+> struct B folds to `Offsets=[OffsetB]`. Offsets are emitted as summed hex.
+
 ### Container value drilldown (docs/ce-export-drilldown-spec.md)
 
 Container element **values that are structs/objects** expand recursively, up to

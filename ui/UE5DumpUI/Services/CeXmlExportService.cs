@@ -652,7 +652,8 @@ public static class CeXmlExportService
         Dictionary<string, List<LiveFieldValue>>? resolvedStructs = null,
         bool collapsePointerNodes = false,
         int maxDropDownEntries = 512,
-        Dictionary<string, List<LiveFieldValue>>? resolvedInstances = null)
+        Dictionary<string, List<LiveFieldValue>>? resolvedInstances = null,
+        bool flattenChain = false)
     {
         // Clean breadcrumbs: remove navigation cycles (e.g., Child->Parent->Child)
         // before generating XML to avoid deeply nested duplicate pointer chains.
@@ -689,29 +690,42 @@ public static class CeXmlExportService
         // TArray::Data / TSparseArray::Data pointer at the field offset.
         // Parent's own Offsets=[0] (if pointer) already resolved the dereference,
         // so children just add their field offset.
-        for (int i = 1; i < cleanedBc.Count; i++)
+        // Navigation spine. With Collapse chain on, fold every breadcrumb after the
+        // root into ONE CE multi-level-pointer entry; otherwise emit the nested chain
+        // (one group per breadcrumb). spineLevels = group levels the spine occupies,
+        // so the leaf indent / close loop work for both shapes.
+        int spineLevels;
+        var folded = flattenChain ? FoldBreadcrumbSpine(cleanedBc) : null;
+        if (folded != null)
         {
-            var bc = cleanedBc[i];
-            var childIndent = indent + new string(' ', i * 2);
-
-            // Container breadcrumbs dereference TArray::Data / TSparseArray::Data
-            var needsDeref = bc.IsPointerDeref || bc.IsContainerView;
-            // Use decorated label for containers (includes element count/type info)
-            var desc = bc.IsContainerView ? bc.Label : bc.FieldName;
-
-            var offsets = needsDeref ? new[] { 0 } : null;
-
-            EmitGroupOpen(sb, childIndent, desc,
-                $"+{bc.FieldOffset:X}",
-                offsets,
-                showAsHex: needsDeref);
+            EmitGroupOpen(sb, indent + "  ", folded.Description,
+                folded.Address, folded.Offsets, showAsHex: folded.ShowAsHex);
             openTags++;
+            spineLevels = 1;
+        }
+        else
+        {
+            for (int i = 1; i < cleanedBc.Count; i++)
+            {
+                // Both emit paths derive (offset, deref, label) from ProjectBreadcrumb
+                // so the nested and folded shapes can never disagree about a
+                // breadcrumb's pointer semantics. Containers/pointers deref
+                // TArray::Data / TSparseArray::Data via Offsets=[0]; inline structs
+                // just add their offset.
+                var step = ProjectBreadcrumb(cleanedBc[i]);
+                var childIndent = indent + new string(' ', i * 2);
+                EmitGroupOpen(sb, childIndent, step.Description,
+                    $"+{step.Offset:X}",
+                    step.DerefAfter ? new[] { 0 } : null,
+                    showAsHex: step.DerefAfter);
+                openTags++;
+            }
+            spineLevels = cleanedBc.Count - 1;
         }
 
-        // Leaf fields at the deepest level
-        // Parent breadcrumb (if any) already handled pointer dereference via Offsets=[0],
-        // so all leaf fields simply use Address=+{field.Offset}.
-        var leafIndent = indent + new string(' ', cleanedBc.Count * 2);
+        // Leaf fields at the deepest level. Parent breadcrumb (nested or folded)
+        // already resolved any pointer dereference, so leaf fields use Address=+{off}.
+        var leafIndent = indent + new string(' ', (spineLevels + 1) * 2);
         EmitFields(sb, leafIndent, currentFields, resolvedStructs, resolvedInstances);
 
         // Close all nested levels (innermost first)
@@ -818,7 +832,8 @@ public static class CeXmlExportService
         Dictionary<string, List<LiveFieldValue>>? resolvedStructs = null,
         bool collapsePointerNodes = false,
         int maxDropDownEntries = 512,
-        Dictionary<string, List<LiveFieldValue>>? resolvedInstances = null)
+        Dictionary<string, List<LiveFieldValue>>? resolvedInstances = null,
+        bool flattenChain = false)
     {
         var cleanedBc = CleanBreadcrumbs(breadcrumbs);
 
@@ -869,26 +884,36 @@ public static class CeXmlExportService
         sb.AppendLine($"{baseIndent}  <CheatEntries>");
 
         // ---- Inner breadcrumb chain (skip root at index 0, base replaces it) ----
+        // With Collapse chain on, fold the whole spine into ONE entry under base;
+        // otherwise emit the nested chain. spineLevels = group levels under base.
         var innerOpenTags = 0;
-        for (int i = 1; i < cleanedBc.Count; i++)
+        int spineLevels;
+        var folded = flattenChain ? FoldBreadcrumbSpine(cleanedBc) : null;
+        if (folded != null)
         {
-            var bc = cleanedBc[i];
-            var childIndent = baseIndent + "    " + new string(' ', (i - 1) * 2);
-            var needsDeref = bc.IsPointerDeref || bc.IsContainerView;
-            var desc = bc.IsContainerView ? bc.Label : bc.FieldName;
-
-            var offsets = needsDeref ? new[] { 0 } : null;
-
-            EmitGroupOpen(sb, childIndent, desc,
-                $"+{bc.FieldOffset:X}",
-                offsets,
-                showAsHex: needsDeref);
+            EmitGroupOpen(sb, baseIndent + "    ", folded.Description,
+                folded.Address, folded.Offsets, showAsHex: folded.ShowAsHex);
             innerOpenTags++;
+            spineLevels = 1;
+        }
+        else
+        {
+            for (int i = 1; i < cleanedBc.Count; i++)
+            {
+                // Shared projection: see GenerateHierarchicalXml for the rationale.
+                var step = ProjectBreadcrumb(cleanedBc[i]);
+                var childIndent = baseIndent + "    " + new string(' ', (i - 1) * 2);
+                EmitGroupOpen(sb, childIndent, step.Description,
+                    $"+{step.Offset:X}",
+                    step.DerefAfter ? new[] { 0 } : null,
+                    showAsHex: step.DerefAfter);
+                innerOpenTags++;
+            }
+            spineLevels = Math.Max(0, cleanedBc.Count - 1);
         }
 
         // ---- Leaf fields ----
-        var bcDepth = Math.Max(0, cleanedBc.Count - 1);
-        var leafIndent = baseIndent + "    " + new string(' ', bcDepth * 2);
+        var leafIndent = baseIndent + "    " + new string(' ', spineLevels * 2);
         EmitFields(sb, leafIndent, currentFields, resolvedStructs, resolvedInstances);
 
         // ---- Close inner breadcrumb groups ----
@@ -1062,6 +1087,91 @@ public static class CeXmlExportService
         }
 
         return result;
+    }
+
+    // ========================================
+    // Breadcrumb chain flattening (Collapse chain)
+    // ========================================
+
+    /// <summary>
+    /// One emit step in the navigation spine: the offset added from the parent's
+    /// resolved address, whether a pointer dereference follows the add, and the
+    /// node's display name. The normal (nested) and the flattened (collapsed) emit
+    /// paths BOTH derive their steps from this single projection, so they can never
+    /// disagree about a breadcrumb's pointer semantics -- and any breadcrumb type
+    /// is handled identically by both as long as it is either inline (no
+    /// dereference) or a single dereference.
+    /// </summary>
+    private readonly record struct BreadcrumbStep(int Offset, bool DerefAfter, string Description);
+
+    private static BreadcrumbStep ProjectBreadcrumb(BreadcrumbItem bc)
+        => new(bc.FieldOffset,
+               bc.IsPointerDeref || bc.IsContainerView,
+               bc.IsContainerView ? bc.Label : bc.FieldName);
+
+    /// <summary>Result of collapsing a breadcrumb spine into one CE entry.</summary>
+    internal sealed record FoldedChain(string Address, int[]? Offsets, string Description, bool ShowAsHex);
+
+    /// <summary>
+    /// Collapse the navigation spine (every breadcrumb after the root) into a
+    /// SINGLE CE multi-level-pointer entry, turning a deep GWorld -> ... -> target
+    /// chain into base -> one folded node -> target field instead of N nested
+    /// groups. Returns null when there are fewer than 2 navigation breadcrumbs to
+    /// merge (folding a single node just reproduces the normal output) -- the
+    /// caller then emits the nested chain unchanged.
+    ///
+    /// Math (verified against CE's pointer resolution; see docs/export-formats.md).
+    /// CE resolves an entry with Address=+Xbase and Offsets O[0..m-1] as:
+    ///   start = parentResolved + Xbase;  p = deref(start);
+    ///   for k = m-1..1: p = deref(p + O[k]);  finalAddr = p + O[0]
+    /// i.e. the FIRST listed offset O[0] is the OUTERMOST (added without a final
+    /// deref) and the LAST listed offset O[m-1] is the first deref after the base.
+    /// Folding a spine of (offset, derefAfter) steps:
+    ///   - accumulate each run of offsets up to (and including) a deref step into D[]
+    ///   - F = the trailing inline run after the last deref (0 if it ended on a deref)
+    ///   - Address = +D[0];  Offsets (document order) = [F] ++ reverse(D[1..])
+    /// A pure-inline spine (no deref at all) folds to Address=+F with no Offsets.
+    ///
+    /// Robustness: this reads ONLY (Offset, DerefAfter) per step and never inspects
+    /// the leaf-field subtree, so new expandable field types emitted by EmitFields
+    /// are neither seen nor affected. Every breadcrumb the app creates is inline or
+    /// single-deref (DataTable's 2-level deref is modelled as TWO single-deref
+    /// breadcrumbs), so the fold is total over the current breadcrumb model.
+    /// </summary>
+    internal static FoldedChain? FoldBreadcrumbSpine(IReadOnlyList<BreadcrumbItem> cleanedBc)
+    {
+        // cleanedBc[0] is the root/base (kept as-is by the caller). The spine is
+        // cleanedBc[1..]; need >= 2 nodes there to actually merge anything.
+        if (cleanedBc.Count < 3) return null;
+
+        var d = new List<int>(cleanedBc.Count - 1);   // deref-terminated segment sums
+        int seg = 0;
+        var descParts = new List<string>(cleanedBc.Count - 1);
+        for (int i = 1; i < cleanedBc.Count; i++)
+        {
+            var step = ProjectBreadcrumb(cleanedBc[i]);
+            descParts.Add(step.Description);
+            seg += step.Offset;
+            if (step.DerefAfter) { d.Add(seg); seg = 0; }
+        }
+        int f = seg;
+
+        // Joined spine so the user can see exactly what was collapsed (decision #1).
+        var description = string.Join(" ▸ ", descParts);
+
+        if (d.Count == 0)
+        {
+            // Pure-inline spine: a single horizontal offset, no dereference.
+            return new FoldedChain($"+{f:X}", null, description, ShowAsHex: false);
+        }
+
+        // CE document order: outermost (final, no-deref) offset F first, then the
+        // deref offsets in reverse depth order. Summed hex per offset (decision #2).
+        var offsets = new int[d.Count];
+        offsets[0] = f;
+        for (int k = 1; k < d.Count; k++)
+            offsets[k] = d[d.Count - k];
+        return new FoldedChain($"+{d[0]:X}", offsets, description, ShowAsHex: true);
     }
 
     // ========================================

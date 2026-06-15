@@ -126,6 +126,14 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// <summary>Whether CE XML export should collapse pointer/array nodes.</summary>
     public bool CollapsePointerNodes { get; set; }
 
+    /// <summary>
+    /// Whether Copy CE XML / Copy CE Field should collapse the GWorld-&gt;...-&gt;target
+    /// pointer spine into a single CE multi-level-pointer entry (base + one folded
+    /// node + the target field with its drill-down). LiveWalker-local toggle —
+    /// affects only the two clipboard exports, not CSX / .h / AA Script.
+    /// </summary>
+    [ObservableProperty] private bool _collapseChain;
+
     /// <summary>Max array element count for inline reading (2^N, default 64).</summary>
     private int _arrayLimit = 64;
     public int ArrayLimit
@@ -1781,7 +1789,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     resolvedStructs,
                     collapsePointerNodes: CollapsePointerNodes,
                     maxDropDownEntries: DropDownLimit,
-                    resolvedInstances: resolvedInstances);
+                    resolvedInstances: resolvedInstances,
+                    flattenChain: CollapseChain);
             }
             else
             {
@@ -1791,7 +1800,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     rootAddress, rootBc.Label, breadcrumbsForXml, fieldsForXml, resolvedStructs,
                     collapsePointerNodes: CollapsePointerNodes,
                     maxDropDownEntries: DropDownLimit,
-                    resolvedInstances: resolvedInstances);
+                    resolvedInstances: resolvedInstances,
+                    flattenChain: CollapseChain);
             }
 
             await _platform.CopyToClipboardAsync(xml);
@@ -1991,7 +2001,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     resolvedStructs,
                     collapsePointerNodes: CollapsePointerNodes,
                     maxDropDownEntries: DropDownLimit,
-                    resolvedInstances: resolvedInstances);
+                    resolvedInstances: resolvedInstances,
+                    flattenChain: CollapseChain);
             }
             else
             {
@@ -2001,7 +2012,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     rootAddress, rootBc.Label, breadcrumbsForXml, fieldsForXml, resolvedStructs,
                     collapsePointerNodes: CollapsePointerNodes,
                     maxDropDownEntries: DropDownLimit,
-                    resolvedInstances: resolvedInstances);
+                    resolvedInstances: resolvedInstances,
+                    flattenChain: CollapseChain);
             }
 
             await _platform.CopyToClipboardAsync(xml);
