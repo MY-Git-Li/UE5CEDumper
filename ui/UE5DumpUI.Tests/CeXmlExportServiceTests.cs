@@ -3526,6 +3526,194 @@ public class CeXmlExportServiceTests
         Assert.DoesNotContain("[0]", xml);
     }
 
+    // ========================================
+    // Collapse chain (breadcrumb spine flattening) tests
+    // ========================================
+
+    [Fact]
+    public void FoldBreadcrumbSpine_UserExample_ThreePointersTwoInline_MergesToCeDocumentOrder()
+    {
+        // base → OwningGameInstance(ptr +180) → m_savedata(ptr +2A8) →
+        // SaveSlotList(container +7D0) → [1](inline +6F8) → OriginalPlayer(inline +18)
+        var bc = new List<BreadcrumbItem>
+        {
+            MakeBc("0x1000", "GWorld", isPointer: true),                                  // root
+            MakeBc("0x2000", "OwningGameInstance", isPointer: true, offset: 0x180),
+            MakeBc("0x3000", "m_savedata", isPointer: true, offset: 0x2A8),
+            MakeBc("0x4000", "SaveSlotList", offset: 0x7D0, isContainerView: true),
+            MakeBc("0x5000", "[1]", offset: 0x6F8),                                       // inline struct elem
+            MakeBc("0x6000", "OriginalPlayer", offset: 0x18),                             // inline struct
+        };
+
+        var folded = CeXmlExportService.FoldBreadcrumbSpine(bc);
+
+        Assert.NotNull(folded);
+        Assert.Equal("+180", folded!.Address);
+        // CE document order: outermost F = 0x6F8 + 0x18 = 0x710 first, then deref
+        // offsets in reverse depth: 0x7D0 (SaveSlotList), 0x2A8 (m_savedata).
+        Assert.Equal(new[] { 0x710, 0x7D0, 0x2A8 }, folded.Offsets);
+        Assert.True(folded.ShowAsHex);
+        Assert.Equal("OwningGameInstance ▸ m_savedata ▸ SaveSlotList ▸ [1] ▸ OriginalPlayer",
+            folded.Description);
+    }
+
+    [Fact]
+    public void FoldBreadcrumbSpine_TwoPointers_EmitsZeroThenChildOffset()
+    {
+        // Rule 1: two adjacent pointers fold to Offsets=[0, OffsetB] (0 FIRST).
+        var bc = new List<BreadcrumbItem>
+        {
+            MakeBc("0x1", "Root", isPointer: true),
+            MakeBc("0x2", "A", isPointer: true, offset: 0x100),
+            MakeBc("0x3", "B", isPointer: true, offset: 0x200),
+        };
+
+        var folded = CeXmlExportService.FoldBreadcrumbSpine(bc);
+
+        Assert.NotNull(folded);
+        Assert.Equal("+100", folded!.Address);
+        Assert.Equal(new[] { 0x0, 0x200 }, folded.Offsets);   // [F=0, deref B]
+        Assert.True(folded.ShowAsHex);
+    }
+
+    [Fact]
+    public void FoldBreadcrumbSpine_PointerThenInline_MergesTrailingInlineIntoFinalOffset()
+    {
+        // Rule 2: pointer A then inline struct B fold to Offsets=[OffsetB].
+        var bc = new List<BreadcrumbItem>
+        {
+            MakeBc("0x1", "Root", isPointer: true),
+            MakeBc("0x2", "A", isPointer: true, offset: 0x100),
+            MakeBc("0x3", "B", offset: 0x40),    // inline
+        };
+
+        var folded = CeXmlExportService.FoldBreadcrumbSpine(bc);
+
+        Assert.NotNull(folded);
+        Assert.Equal("+100", folded!.Address);
+        Assert.Equal(new[] { 0x40 }, folded.Offsets);
+        Assert.True(folded.ShowAsHex);
+    }
+
+    [Fact]
+    public void FoldBreadcrumbSpine_PureInlineSpine_NoOffsets()
+    {
+        // No dereference anywhere → single horizontal offset, no <Offsets>.
+        var bc = new List<BreadcrumbItem>
+        {
+            MakeBc("0x1", "Root", isPointer: true),
+            MakeBc("0x2", "A", offset: 0x10),    // inline
+            MakeBc("0x3", "B", offset: 0x20),    // inline
+        };
+
+        var folded = CeXmlExportService.FoldBreadcrumbSpine(bc);
+
+        Assert.NotNull(folded);
+        Assert.Equal("+30", folded!.Address);
+        Assert.Null(folded.Offsets);
+        Assert.False(folded.ShowAsHex);
+    }
+
+    [Fact]
+    public void FoldBreadcrumbSpine_FewerThanTwoNavNodes_ReturnsNull()
+    {
+        // root + 1 navigation node = nothing worth merging → no-op (emit nested).
+        var bc = new List<BreadcrumbItem>
+        {
+            MakeBc("0x1", "Root", isPointer: true),
+            MakeBc("0x2", "A", isPointer: true, offset: 0x100),
+        };
+
+        Assert.Null(CeXmlExportService.FoldBreadcrumbSpine(bc));
+    }
+
+    [Fact]
+    public void GenerateAobWrappedXml_FlattenChain_CollapsesSpineToSingleEntry()
+    {
+        var bc = new List<BreadcrumbItem>
+        {
+            MakeBc("0x1000", "GWorld", isPointer: true),
+            MakeBc("0x2000", "OwningGameInstance", isPointer: true, offset: 0x180),
+            MakeBc("0x3000", "m_savedata", isPointer: true, offset: 0x2A8),
+            MakeBc("0x4000", "SaveSlotList", offset: 0x7D0, isContainerView: true),
+            MakeBc("0x5000", "[1]", offset: 0x6F8),
+            MakeBc("0x6000", "OriginalPlayer", offset: 0x18),
+        };
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "Val", TypeName = "IntProperty", Offset = 0x20, Size = 4 },
+        };
+
+        var xml = CeXmlExportService.GenerateAobWrappedXml(
+            "GWorld", bc, fields,
+            aob: "48 8B 1D ?? ?? ?? ??", aobPos: 3, aobLen: 7, moduleName: "Game.exe",
+            flattenChain: true);
+
+        // Folded node: base address +180 with the merged multi-level offsets in order.
+        Assert.Contains("<Address>+180</Address>", xml);
+        Assert.Matches(
+            @"<Offset>710</Offset>\s*<Offset>7D0</Offset>\s*<Offset>2A8</Offset>", xml);
+        // Joined spine description (decision #1).
+        Assert.Contains("OwningGameInstance ▸ m_savedata ▸ SaveSlotList ▸ [1] ▸ OriginalPlayer", xml);
+        // Intermediate breadcrumbs are NO LONGER standalone group nodes.
+        Assert.DoesNotContain("<Description>\"m_savedata\"</Description>", xml);
+        Assert.DoesNotContain("<Description>\"OriginalPlayer\"</Description>", xml);
+        // Leaf still emitted under the folded node.
+        Assert.Contains("Val", xml);
+        // base still dereferences the symbol (unchanged).
+        Assert.Contains("<Description>\"base\"</Description>", xml);
+    }
+
+    [Fact]
+    public void GenerateHierarchicalXml_FlattenChain_CollapsesSpine()
+    {
+        var bc = new List<BreadcrumbItem>
+        {
+            MakeBc("0x1000", "GWorld", isPointer: true),
+            MakeBc("0x2000", "OwningGameInstance", isPointer: true, offset: 0x180),
+            MakeBc("0x3000", "m_savedata", isPointer: true, offset: 0x2A8),
+            MakeBc("0x4000", "SaveSlotList", offset: 0x7D0, isContainerView: true),
+            MakeBc("0x5000", "[1]", offset: 0x6F8),
+            MakeBc("0x6000", "OriginalPlayer", offset: 0x18),
+        };
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "Val", TypeName = "IntProperty", Offset = 0x20, Size = 4 },
+        };
+
+        var xml = CeXmlExportService.GenerateHierarchicalXml(
+            "0x1000", "GWorld", bc, fields, flattenChain: true);
+
+        Assert.Contains("<Address>+180</Address>", xml);
+        Assert.Matches(
+            @"<Offset>710</Offset>\s*<Offset>7D0</Offset>\s*<Offset>2A8</Offset>", xml);
+        Assert.DoesNotContain("<Description>\"m_savedata\"</Description>", xml);
+    }
+
+    [Fact]
+    public void GenerateAobWrappedXml_FlattenChainOff_KeepsNestedChain()
+    {
+        // Regression: default flattenChain=false preserves the per-breadcrumb nesting.
+        var bc = new List<BreadcrumbItem>
+        {
+            MakeBc("0x1000", "GWorld", isPointer: true),
+            MakeBc("0x2000", "OwningGameInstance", isPointer: true, offset: 0x180),
+            MakeBc("0x3000", "m_savedata", isPointer: true, offset: 0x2A8),
+        };
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "Val", TypeName = "IntProperty", Offset = 0x20, Size = 4 },
+        };
+
+        var xml = CeXmlExportService.GenerateAobWrappedXml(
+            "GWorld", bc, fields,
+            aob: "48 8B 1D ?? ?? ?? ??", aobPos: 3, aobLen: 7, moduleName: "Game.exe");
+
+        // Each breadcrumb is still its own group node.
+        Assert.Contains("<Description>\"OwningGameInstance\"</Description>", xml);
+        Assert.Contains("<Description>\"m_savedata\"</Description>", xml);
+    }
+
     private static BreadcrumbItem MakeBc(string addr, string label,
         string fieldName = "", bool isPointer = false, int offset = 0,
         bool isContainerView = false)
