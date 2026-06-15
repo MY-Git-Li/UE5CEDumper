@@ -139,6 +139,35 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool ImmReleaseContext(IntPtr hWnd, IntPtr hIMC);
 
+    // --- Restartable-apps registration (P/Invoke) ------------------------
+    // Opt into the Windows Restart Manager so that if this app is running when
+    // the user reboots / installs an update, Windows relaunches it on next
+    // sign-in (gated by the user's "Automatically save my restartable apps and
+    // restart them when I sign back in" setting, Win10 + Win11). Registered on
+    // startup and never unregistered: the trigger only fires if the process is
+    // alive at shutdown, so closing the app normally already means "don't bring
+    // me back". RegisterApplicationRestart is Unicode-only (no A/W variants).
+    private const uint RESTART_NO_CRASH = 1;  // don't relaunch after a crash
+    private const uint RESTART_NO_HANG  = 2;  // ...or a hang (avoids relaunch loops)
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern int RegisterApplicationRestart(string? pwzCommandline, uint dwFlags);
+
+    public void RegisterForRestart()
+    {
+        try
+        {
+            // null command line → relaunch the exe with no extra args (this app
+            // is single-instance and takes none). Restart only on reboot/update,
+            // never on crash/hang.
+            RegisterApplicationRestart(null, RESTART_NO_CRASH | RESTART_NO_HANG);
+        }
+        catch
+        {
+            // Best-effort: API absent (pre-Vista) or policy-denied — ignore.
+        }
+    }
+
     public Task RevealInExplorerAsync(string path)
     {
         try

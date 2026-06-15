@@ -43,6 +43,11 @@ public partial class ProxyDeployViewModel : ViewModelBase
         get => SelectedProxyType == ProxyType.Dinput8;
         set { if (value) SelectedProxyType = ProxyType.Dinput8; }
     }
+    public bool IsDxgiSelected
+    {
+        get => SelectedProxyType == ProxyType.Dxgi;
+        set { if (value) SelectedProxyType = ProxyType.Dxgi; }
+    }
 
     /// <summary>
     /// Detected games. Non-replaceable: items are added/removed in place so that
@@ -104,6 +109,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
         // Notify radio button mirror properties so XAML stays in sync.
         OnPropertyChanged(nameof(IsVersionSelected));
         OnPropertyChanged(nameof(IsDinput8Selected));
+        OnPropertyChanged(nameof(IsDxgiSelected));
 
         // If we already have games, re-evaluate their deploy status against
         // the new proxy type. Fire-and-forget — UI doesn't block on toggle.
@@ -281,44 +287,68 @@ public partial class ProxyDeployViewModel : ViewModelBase
             return;
         }
 
-        if (!File.Exists(SourceDllPath))
-        {
-            SetError($"Source DLL not found: {SourceDllPath}");
-            return;
-        }
+        // Resolve the source DLL for EVERY proxy type (all are built side-by-
+        // side into <exeDir>/proxy/). Update All updates each game's already-
+        // deployed proxy DLL(s) to the latest of the SAME type — independent
+        // of the selected radio button. So a new dxgi.dll replaces an old
+        // dxgi.dll, a new version.dll replaces an old version.dll, etc. Adding
+        // a 4th proxy type needs no change here (iterates the enum).
+        var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+        var sources = Enum.GetValues<ProxyType>()
+            .Select(t => (Type: t, Path: Path.Combine(exeDir, "proxy", t.GetDllName())))
+            .Where(s => File.Exists(s.Path))
+            .ToList();
 
-        // Update all games that have our outdated DLL (ignores selection)
-        var outdated = Games.Where(g =>
-            g.Status == ProxyDeployStatus.DeployedOutdated).ToList();
-
-        if (outdated.Count == 0)
+        if (sources.Count == 0)
         {
-            // Show why nothing happened
-            int currentCount = Games.Count(g => g.Status == ProxyDeployStatus.DeployedCurrent);
-            if (currentCount > 0)
-                LastOperationResult = $"All {currentCount} deployed game(s) already up-to-date";
-            else
-                LastOperationResult = "No deployed games to update";
+            SetError($"No source proxy DLLs found in {Path.Combine(exeDir, "proxy")}");
             return;
         }
 
         ClearError();
-        int ok = 0, fail = 0;
+        int updated = 0, fail = 0, upToDate = 0;
 
-        foreach (var game in outdated)
+        foreach (var game in Games)
         {
             ct.ThrowIfCancellationRequested();
-            StatusText = $"Updating {game.Name}...";
 
-            bool success = await _deploy.DeployAsync(SourceDllPath, game, SelectedProxyType, force: true, ct: ct);
-            if (success) ok++;
-            else fail++;
+            foreach (var (type, srcPath) in sources)
+            {
+                string targetDll = Path.Combine(game.BinariesDir, type.GetDllName());
+
+                // Only update a proxy that is ALREADY deployed (and ours) for
+                // this game — never push a fresh type the user didn't choose.
+                if (!File.Exists(targetDll) || !_deploy.IsOurProxyDll(targetDll))
+                    continue;
+
+                string? srcVer = _deploy.GetDllVersion(srcPath);
+                string? tgtVer = _deploy.GetDllVersion(targetDll);
+                if (srcVer != null && srcVer == tgtVer)
+                {
+                    upToDate++;
+                    continue;
+                }
+
+                StatusText = $"Updating {game.Name} ({type.GetDisplayName()})...";
+                bool success = await _deploy.DeployAsync(srcPath, game, type, force: true, ct: ct);
+                if (success) updated++;
+                else fail++;
+            }
         }
 
-        // Refresh status from disk to ensure DataGrid reflects actual state
+        // Refresh status from disk for the currently-selected type's view.
         await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, ct);
 
-        LastOperationResult = $"Updated: {ok} success, {fail} failed";
+        if (updated == 0 && fail == 0)
+        {
+            LastOperationResult = upToDate > 0
+                ? $"All {upToDate} deployed proxy DLL(s) already up-to-date"
+                : "No deployed proxy DLLs to update";
+        }
+        else
+        {
+            LastOperationResult = $"Updated: {updated}, up-to-date: {upToDate}, failed: {fail}";
+        }
         StatusText = LastOperationResult;
         _log.Info("ProxyDeploy", LastOperationResult);
     }

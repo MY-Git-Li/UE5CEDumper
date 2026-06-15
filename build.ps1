@@ -36,7 +36,7 @@ param(
     [ValidateSet("Debug", "Release", "Publish")]
     [string]$Mode = "Release",
 
-    [ValidateSet("All", "DLL", "ProxyDLL", "ProxyDinput8", "UI", "Test")]
+    [ValidateSet("All", "DLL", "ProxyDLL", "ProxyDinput8", "ProxyDxgi", "UI", "Test")]
     [string]$Target = "All",
 
     [switch]$Clean,
@@ -497,6 +497,71 @@ if ($Target -in "All", "ProxyDinput8") {
             }
             else {
                 Write-Fail "dinput8.dll not found in build output"
+                $exitCode = 1
+            }
+        }
+    }
+}
+
+# ============================================================
+# Build Proxy DLL (dxgi.dll) — for D3D11/D3D12 games whose EXE
+# imports neither version.dll nor dinput8.dll (uses MASM thunks)
+# ============================================================
+
+if ($Target -in "All", "ProxyDxgi") {
+    Write-Banner "Proxy DLL (dxgi.dll)  |  $CppConfig"
+
+    $proxyDxgiBuildDir = Join-Path $ROOT_DIR "build_proxy_dxgi"
+
+    # Always do a clean build
+    if (Test-Path $proxyDxgiBuildDir) {
+        Write-Step "Removing dxgi proxy CMake cache for clean build..."
+        Remove-Item $proxyDxgiBuildDir -Recurse -Force
+        Write-Ok "dxgi proxy build directory cleaned"
+    }
+
+    Write-Step "Configuring CMake for dxgi Proxy DLL (Ninja + MSVC + MASM)..."
+    $configOk = Invoke-CmdInVsEnv "cmake -S `"$ROOT_DIR`" -B `"$proxyDxgiBuildDir`" -G Ninja -DCMAKE_BUILD_TYPE=$CppConfig -DBUILD_PROXY_DXGI=ON"
+
+    if (-not $configOk) {
+        Write-Fail "CMake configure failed (dxgi Proxy DLL)"
+        $exitCode = 1
+    }
+    else {
+        Write-Ok "CMake configured (dxgi Proxy DLL)"
+
+        Write-Step "Building dxgi.dll ($CppConfig)..."
+        $buildOk = Invoke-CmdInVsEnv "cmake --build `"$proxyDxgiBuildDir`" --config $CppConfig --target UE5Dumper_ProxyDxgi"
+
+        if (-not $buildOk) {
+            Write-Fail "dxgi Proxy DLL build failed"
+            $exitCode = 1
+        }
+        else {
+            $proxyDll = Get-ChildItem -Path $proxyDxgiBuildDir -Filter "dxgi.dll" -Recurse |
+                        Select-Object -First 1
+
+            if ($proxyDll) {
+                # Place proxy DLL in a subdirectory to prevent UE5DumpUI.exe
+                # from accidentally loading it (Windows DLL search order).
+                $proxyOutDir = Join-Path $DIST_DIR "proxy"
+                if (-not (Test-Path $proxyOutDir)) { New-Item -Path $proxyOutDir -ItemType Directory | Out-Null }
+
+                Copy-Item $proxyDll.FullName -Destination $proxyOutDir -Force
+
+                if ($Mode -eq "Debug") {
+                    $pdbFile = Get-ChildItem -Path $proxyDxgiBuildDir -Filter "dxgi.pdb" -Recurse |
+                               Select-Object -First 1
+                    if ($pdbFile) {
+                        Copy-Item $pdbFile.FullName -Destination $proxyOutDir -Force
+                    }
+                }
+
+                $dllSize = Get-FileSize (Join-Path $proxyOutDir "dxgi.dll")
+                Write-Ok "dxgi.dll ($dllSize) -> dist\proxy\"
+            }
+            else {
+                Write-Fail "dxgi.dll not found in build output"
                 $exitCode = 1
             }
         }

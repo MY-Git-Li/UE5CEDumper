@@ -400,6 +400,7 @@
     <sys:String x:Key="str.ProxyDeploy.ProxyType">Proxy DLL:</sys:String>
     <sys:String x:Key="str.ProxyDeploy.Type.Version">version.dll</sys:String>
     <sys:String x:Key="str.ProxyDeploy.Type.Dinput8">dinput8.dll</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Type.Dxgi">dxgi.dll</sys:String>
     <sys:String x:Key="str.ProxyDeploy.Scan">Scan Steam</sys:String>
     <sys:String x:Key="str.ProxyDeploy.Refresh">Refresh</sys:String>
     <sys:String x:Key="str.ProxyDeploy.Deploy">Deploy</sys:String>
@@ -746,5 +747,6 @@
     <sys:String x:Key="str.Tip.ProxyDeploy.Force">Overwrite even if same version or other proxy detected</sys:String>
     <sys:String x:Key="str.Tip.ProxyDeploy.Type.Version">Hijack version.dll — broadest game compatibility (loaded by virtually every Windows process)</sys:String>
     <sys:String x:Key="str.Tip.ProxyDeploy.Type.Dinput8">Hijack dinput8.dll — fallback when version.dll conflicts with installer or anti-tamper shim</sys:String>
+    <sys:String x:Key="str.Tip.ProxyDeploy.Type.Dxgi">Hijack dxgi.dll — for D3D11/D3D12 games whose EXE imports neither version.dll nor dinput8.dll (most UE games on Windows)</sys:String>
 
 </ResourceDictionary>

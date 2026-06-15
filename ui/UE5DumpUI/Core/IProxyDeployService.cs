@@ -24,9 +24,10 @@ public interface IProxyDeployService
 
     /// <summary>
     /// Check deployment status for each game (for the given proxy type) and
-    /// update Status / InstalledVersion / ErrorMessage. Also detects when
-    /// the OTHER proxy type is deployed in the same folder and surfaces a
-    /// conflict warning via ErrorMessage.
+    /// update Status / InstalledVersion / ErrorMessage. Independently of the
+    /// selected type, flags a redundancy warning via ErrorMessage only when
+    /// 2+ of our proxy DLLs actually coexist in the same folder (only one
+    /// activates at runtime).
     /// </summary>
     Task RefreshDeployStatusAsync(
         IList<DetectedGame> games, string sourceDllPath, ProxyType proxyType,

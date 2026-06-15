@@ -44,4 +44,13 @@ public interface IPlatformService
     /// Returns the chosen file path, or null if user cancelled.
     /// </summary>
     Task<string?> ShowSaveFileDialogAsync(string defaultFileName, string filterName, string filterExtension);
+
+    /// <summary>
+    /// Opt the running process into the Windows Restart Manager so a
+    /// reboot / update relaunches it on next sign-in (Win10 + Win11, gated by
+    /// the user's "restart apps" setting). Default no-op so non-Windows
+    /// implementations and test doubles need not provide it; the real Windows
+    /// service overrides it with <c>RegisterApplicationRestart</c>.
+    /// </summary>
+    void RegisterForRestart() { }
 }

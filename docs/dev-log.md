@@ -14,6 +14,94 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-15 — Main window placement persistence + restartable-apps opt-in (build 1177)
+
+The UI didn't remember where it was: every launch reset position / size / monitor. Now
+it restores the last session's placement, and opts into Windows' reboot-relaunch.
+
+**Placement persistence.** [`WindowStateStore`](../ui/UE5DumpUI/Services/WindowStateStore.cs)
+saves `x/y/w/h/max` to `%LOCALAPPDATA%\UE5CEDumper\window-state.txt` (plain `key=value`, no
+JSON → Native-AOT safe, same pattern as the teleport hotkey store). `App` attaches it before
+the window is shown (no visible reposition) and the window saves on close. Reuses
+`MainWindow`'s existing normal-vs-maximized snapshot, so a restored-then-un-maximized window
+lands on the right monitor.
+
+**Off-screen reset (the headline ask).** Windows gives no automatic per-app window memory —
+the app must validate. On `Opened` (when `Screens` is reliable), the restored NORMAL rect is
+checked against THIS session's monitors via the pure
+[`WindowPlacement.IsVisibleEnough`](../ui/UE5DumpUI/Services/WindowPlacement.cs) (≥120×40 px
+overlap with some working area). A window saved on a now-absent second monitor, or pushed
+off-screen by a resolution drop, **resets to a default-size window centered on the primary**.
+
+**Restartable-apps opt-in.** New `IPlatformService.RegisterForRestart` (default no-op so the
+5 test doubles + any non-Windows impl need no change) overridden in `WindowsPlatformService`
+with `RegisterApplicationRestart(null, RESTART_NO_CRASH | RESTART_NO_HANG)` — if the app is
+open when the user reboots / installs an update, Windows relaunches it on next sign-in (Win10
++ Win11, gated by the user's "restart apps" setting), and the placement restore above puts it
+back where it was. Not on crash/hang (avoids relaunch loops); registration only triggers if
+alive at shutdown, so a normal close means "don't come back".
+
++22 placement/visibility unit tests → **1505 C# green**; Native AOT publish clean (45.9 MB).
+⚠ in-app LIVE-VERIFY PENDING (drag/maximize/2nd-monitor-removed behavior; reboot relaunch).
+
+-----
+
+## 2026-06-15 — Third proxy DLL: dxgi.dll (for EXEs importing neither version nor dinput8) (build 1172)
+
+**The problem (owner):** "The Adventures of Elliot" (SQUARE ENIX UE4.27 demo) works via
+DLL injection but **both** the `version.dll` and `dinput8.dll` proxies are dead — the
+proxy file sits in the game folder yet nothing loads. PE import-table analysis of
+`Elliot-Win64-Shipping.exe` settled it: the EXE imports **neither** `version.dll` nor
+`dinput8.dll` (static *or* delay), so the OS loader never loads those proxies at all. It
+*does* statically import `dxgi.dll` (`CreateDXGIFactory`/`CreateDXGIFactory1`) and
+`WINMM.dll` — it's a D3D12 title (`D3D12\`/`DML\` folders present). So the code comment's
+"version.dll is loaded by almost every process" premise is not reliable; this build is a
+counterexample. (Diagnostic method: parse the EXE import directory directly — see also
+`d3d11.dll` statically importing `dxgi!CreateDXGIFactory2`, which proves a partial proxy
+would break D3D device load.)
+
+**Fix — `dxgi.dll` as a third proxy target.** dxgi is statically imported by every
+D3D11/D3D12 UE game on Windows and is not a KnownDLL, so it's the reliable hijack target
+for this population. Unlike the version/dinput8 proxies (plain C forwarders — every export
+has a known signature), dxgi exports several **undocumented internals** (`DXGID3D10*`,
+`Compat*`, `PIX*`) whose prototypes we don't know, so forwarding goes through
+signature-agnostic **MASM jmp-thunks** (`jmp qword ptr [mProcs+8*N]`), mirroring the
+vendored RE-UE4SS proxy generator. All 20 real-dxgi exports are forwarded at their exact
+ordinals so d3d11/d3d12 can still resolve their dxgi deps through us.
+
+- **C++:** `Lugner_Dxgi.asm` (20 thunks, disasm-verified), `ProxyDxgi.def`
+  (`name=f<N> @ord` + the UE5_* C ABI), `Lugner_Dxgi.cpp` (`DxgiProxy_Init` resolves the
+  real System32 dxgi into `mProcs[]` — same full-path `LoadLibrary` pattern as the working
+  version proxy, so no base-name self-recursion). `Heiter.cpp` calls `DxgiProxy_Init` at
+  the very top of `DllMain` ATTACH (before the proxy mutex, since a passive forwarder still
+  forwards) and logs the result from the (Sein-initialised) auto-start thread.
+- **Build:** `BUILD_PROXY_DXGI` CMake target with `enable_language(ASM_MASM)` (dxgi target
+  only); `build.ps1 -Target ProxyDxgi` → `dist\proxy\dxgi.dll`. No `/DELAYLOAD` (we don't
+  import dxgi). `-Target All` now builds all three proxies.
+- **UI:** `ProxyType.Dxgi` + `Constants.ProxyDllNameDxgi`; `RefreshDeployStatusAsync`
+  conflict detection generalized from the binary version↔dinput8 pair to "all other proxy
+  names"; third RadioButton + strings/tooltip; `IsDxgiSelected` mirror.
+
+Built clean (`dxgi.dll` 2.0 MB, export table matches real dxgi 1:1), **470 dll_helpers +
+1479 C# green**. Deployed to the Elliot folder for live verification. ⚠ in-game LIVE-VERIFY
+PENDING (proxy load + pipe + scan).
+
+**Two Proxy Deploy panel fixes (same build, found during live test):**
+1. **False redundancy warning.** The conflict check fired whenever *any other* proxy DLL
+   existed in a folder, regardless of whether the selected one was deployed — so a game
+   with only `version.dll` falsely showed "Both dinput8.dll and version.dll are deployed"
+   on the dinput8/dxgi tabs. Now `ProxyDeployService.BuildConflictMessage` (pure, tested)
+   warns **only when 2+ of our proxies actually coexist** in the folder, listing all
+   present ones, independent of the selected radio. A single deployed proxy of any type =
+   no warning. N-proxy-safe (iterates the enum; no hardcoded pair).
+2. **Update All was selected-type-only.** Now `UpdateAllAsync` resolves the source DLL for
+   *every* proxy type (`<exeDir>/proxy/<name>`) and, per game, updates each
+   already-deployed proxy of the *same* type to the latest (new dxgi over old dxgi, new
+   version over old version) — regardless of the selected radio, never pushing a fresh
+   type the user didn't choose. Adding a 4th type needs no change. +4 conflict tests.
+
+-----
+
 ## 2026-06-15 — Value Search → Pivot handoff (value-locator, C2-lite) (build 1161)
 
 The cheap complement to change-driven discovery: when the user **can see a value**
