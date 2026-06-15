@@ -311,9 +311,16 @@ key. UE's six-layer improvement:
 - **C1 — PivotEngine core:** group by key tuple **or** by intrinsic identity;
   collision rendering `⟨N: v1,v2,…,+M⟩` (port `discrete` 29e-2 polish). Includes
   the identity mode (no key field).
-- **C2 — Find-by-value (value-locator):** port `SnapshotValueLocatorEngine`
-  (29i-4) — set-membership over the SQLite corpus, address-agnostic,
-  cross-session capable; Exact + Delta modes. Auto-handoff to pivot + CE export.
+- **C2 — Find-by-value (value-locator):**
+  - *Value Search → Pivot handoff ✅ **SHIPPED (build 1161)**:* the live Value Search
+    panel (which already resolves a value to `(class, field, addr)`) gained the C5
+    "📊 Pivot" handoff it was the only source panel missing — `ValueSearchViewModel.
+    NavigateToPivot(ClassName, FieldName)` → `PivotForAsync`. This is the
+    **value-known → pivot** half of "closing the loop" (build 1160's discovery is the
+    value-unknown half), realised by reusing the live scan + C5 contract.
+  - *Remaining:* port `SnapshotValueLocatorEngine` (29i-4) — set-membership over the
+    persisted SQLite corpus (address-agnostic, cross-session, Exact + Delta) so a value
+    can be located without a live scan.
 - **C3 — Key discovery + change-driven discovery:**
   - *C3-lite (shipped):* reuse `PropertyScoringTable` for NamePrior + UE type prior
     in `PivotKeyScorer.SuggestKey` (auto-suggests the key field within a class).

@@ -14,6 +14,27 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-15 — Value Search → Pivot handoff (value-locator, C2-lite) (build 1161)
+
+The cheap complement to change-driven discovery: when the user **can see a value**
+(Gold = 9410), Value Search already finds its `(class, field, address)` — but it was
+the **only** source panel missing the C5 "Pivot this" handoff that PropertySearch /
+InterestingProperties / LiveWalker have. Added it so a value-scan hit reaches a grouped
+pivot in one click.
+
+A per-row **"📊 Pivot"** button on the Value Search results grid (gated by
+`PivotEnabled`, so it's hidden when experimental features are off) raises
+`ValueSearchViewModel.NavigateToPivot(ClassName, FieldName)` — the hit already carries
+both — which `MainWindowViewModel.HandlePivotHandoff` routes to the Class Pivot tab via
+the existing `PivotForAsync`. Pure VM/XAML reuse of the C5 contract: new event +
+`PivotEnabled` flag + `PivotThis` command (mirrors `PropertySearchViewModel`), wired in
+the same `if (snapshotStore != null)` block + `UpdatePivotHandoffEnabled`. No DLL/pipe
+change. +2 `PivotHandoffCommandTests` → **1478 C# green**, build.ps1 -Target UI publish
+clean. Together with build 1160 this closes the loop both ways: **value-known** → Value
+Search → Pivot, and **value-unknown** → Discover → Pivot.
+
+-----
+
 ## 2026-06-15 — Class Pivot: change-driven discovery — the automatic front-door (build 1160)
 
 **The problem (owner):** Class Pivot is under-used because it assumes you already
