@@ -192,10 +192,11 @@ public partial class SpcQueryViewModel : ViewModelBase
     /// <summary>True when GWorld is available — gates the per-row "Locate in GWorld" button.</summary>
     [ObservableProperty] private bool _isGWorldAvailable;
 
-    // Live game session (PeHash-ModuleBase). Result rows carry the NEWEST selected
-    // snapshot's live ObjAddr (the store hands the last id's address), so the
-    // per-row Live/Addr/GWorld actions are only valid when that newest snapshot
-    // belongs to the current live session.
+    // Live game session id (PeHash-CreationTime; unique per launch even on
+    // no-ASLR games). Result rows carry the NEWEST selected snapshot's live
+    // ObjAddr (the store hands the last id's address), so the per-row
+    // Live/Addr/GWorld actions are only valid when that newest snapshot belongs
+    // to the current live session. See EngineState.GameSessionId.
     private string _currentSessionId = "";
 
     /// <summary>GameSessionId of the newest selected snapshot (by Id == capture
@@ -240,7 +241,7 @@ public partial class SpcQueryViewModel : ViewModelBase
     {
         _engineState = state;
         IsGWorldAvailable = state.HasGWorld;
-        _currentSessionId = $"{state.PeHash}-{state.ModuleBase}";   // matches capture-time GameSessionId
+        _currentSessionId = state.GameSessionId;   // PeHash-CreationTime; matches capture-time GameSessionId
         RaiseResultRowActionGates();
         _store.SetActiveGame(state.PeHash);
         LoadDenylistFromStore();

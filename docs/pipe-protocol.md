@@ -303,6 +303,7 @@ across snapshots regardless of reordering, plus its numeric inner fields:
   "object_count": 58432,
   "module_name":  "MyGame-Win64-Shipping.exe",
   "module_base":  "7FF600000000",
+  "process_creation_time": "01D9ABCDEF012345",  // per-launch token (FILETIME hi:lo hex); folded into the UI's GameSessionId for stale-session gating
   "ue_version":   504,
   "gobjects_method": "aob",         // "aob", "data_scan", "string_ref", "pointer_scan", "not_found"
   "gnames_method":   "string_ref",

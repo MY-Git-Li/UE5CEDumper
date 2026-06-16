@@ -84,7 +84,7 @@ public class SnapshotViewModelTests : IDisposable
             GameOnly = true,
             Label = "run1",
         };
-        vm.SetEngineState(new EngineState { PeHash = "PEHASH", UEVersion = 504, ModuleBase = "7FF600000000" });
+        vm.SetEngineState(new EngineState { PeHash = "PEHASH", UEVersion = 504, ModuleBase = "7FF600000000", ProcessCreationTime = "01D9ABCDEF012345" });
 
         Assert.True(vm.CanCapture);
         await vm.CaptureCommand.ExecuteAsync(null);
@@ -97,7 +97,9 @@ public class SnapshotViewModelTests : IDisposable
         var saved = Assert.Single(list);
         Assert.Equal("run1", saved.Label);
         Assert.Equal("PEHASH", saved.PeHash);
-        Assert.Equal("PEHASH-7FF600000000", saved.GameSessionId);
+        // GameSessionId = PeHash-ProcessCreationTime (build 1227+); the per-launch
+        // process creation time replaces ModuleBase, which is constant on no-ASLR games.
+        Assert.Equal("PEHASH-01D9ABCDEF012345", saved.GameSessionId);
         Assert.Equal(504, saved.UeVersion);
         Assert.Equal(3, saved.ObjectCount);     // 3 objects streamed
         Assert.Equal(4, saved.FieldCount);      // 2 + 1 + 1 fields

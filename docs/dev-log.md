@@ -14,6 +14,40 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-16 — Snapshot/SPC stale-session gating: real per-launch token (process creation time) (build 1227)
+
+Closes the 🔴 top-of-todo bug confirmed on SEED 2026-06-16: build 1216 gated the
+Snapshot-diff / SPC per-row Live/Addr/🌍 buttons on `GameSessionId = PeHash-ModuleBase`,
+but SEED's EXE loads at a **constant base** (no effective ASLR), so `ModuleBase` was
+identical across launches and the gate never fired — old-session snapshots stayed
+clickable with stale (post-restart-invalid) addresses.
+
+Fix = swap `ModuleBase` for a true **per-launch token: the game process creation time**.
+
+- **DLL** (`Fern.cpp::FillPointerSnapshot`, shared by `get_pointers` + `scan_status`):
+  emits `process_creation_time` = `GetProcessTimes(GetCurrentProcess(), …)` FILETIME
+  (hi:lo packed → hex). The DLL runs in-process, so this is the game's own creation
+  time — unique per launch even with no ASLR.
+- **C#**: `EngineState.ProcessCreationTime` (parsed in `DumpService.BuildEngineState`) +
+  a shared computed `EngineState.GameSessionId => $"{PeHash}-{ProcessCreationTime}"`.
+  The three former `PeHash-ModuleBase` sites — Snapshot gate (`_currentSessionId`),
+  Snapshot capture meta, SPC gate — now all use `state.GameSessionId`, so the format
+  is defined once and can't drift.
+- **Migration**: existing snapshots stored `PeHash-ModuleBase`; the new current id is
+  `PeHash-CreationTime`, so old-format ids never match → they correctly read as a
+  different (stale) session and gray out. A relaunch now changes the creation time →
+  prior-launch snapshots gray. Same-launch snapshots stay enabled.
+- **Back-compat**: DLLs older than build 1227 omit the field → `ProcessCreationTime`
+  is `""` → `GameSessionId` degrades to `PeHash-` (no per-launch split, as before).
+
+The 1216 button-gating wiring + `CanUse*` props were already correct — only the
+session-id computation changed. Tests: +4 `EngineStateTests` (id format, per-launch
+discrimination at constant base, old-format mismatch, empty-creation-time degrade),
++2 `DumpServiceTests` (parse + degrade), updated the capture test's expected id.
+1541 C# / 510 dll / 31 utf8 green; full DLL + 3 proxies + UI build clean at 1227.
+⚠ in-game live-verify pending (restart SEED → old-session snapshot row actions should
+now gray).
+
 ## 2026-06-16 — Instance Finder "Locate in GWorld" lands ON the target object (build 1224)
 
 User-reported on SEED: Instance Finder → pick a `BP_LifeSaveData_C` instance → **Locate

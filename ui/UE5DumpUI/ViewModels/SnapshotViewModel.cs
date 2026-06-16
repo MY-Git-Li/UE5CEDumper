@@ -25,10 +25,11 @@ public partial class SnapshotViewModel : ViewModelBase
     private readonly IExperimentalGate? _gate;
     private readonly IPlatformService? _platform;
     private EngineState? _engineState;
-    // Live game session (PeHash-ModuleBase, ASLR-randomised per launch). Diff rows'
-    // ObjAddr is the New snapshot's session-local address, so the per-row
-    // Live/Addr/GWorld actions are only valid when the New (DiffB) snapshot belongs
-    // to the current live session.
+    // Live game session id (PeHash-CreationTime; the process creation time is
+    // unique per launch even on no-ASLR games). Diff rows' ObjAddr is the New
+    // snapshot's session-local address, so the per-row Live/Addr/GWorld actions
+    // are only valid when the New (DiffB) snapshot belongs to the current live
+    // session. See EngineState.GameSessionId.
     private string _currentSessionId = "";
     private CancellationTokenSource? _cts;        // capture (streaming) op
     private CancellationTokenSource? _diffCts;    // diff (heavy in-memory) op
@@ -304,7 +305,7 @@ public partial class SnapshotViewModel : ViewModelBase
     {
         _engineState = state;
         IsGWorldAvailable = state.HasGWorld;   // enable the per-row 🌍 button
-        _currentSessionId = $"{state.PeHash}-{state.ModuleBase}";   // matches capture-time GameSessionId
+        _currentSessionId = state.GameSessionId;   // PeHash-CreationTime; matches capture-time GameSessionId
         RaiseDiffRowActionGates();
         // Scope the store to this game's DB, then load its saved snapshots.
         _store.SetActiveGame(state.PeHash);
@@ -411,9 +412,11 @@ public partial class SnapshotViewModel : ViewModelBase
                 Label         = string.IsNullOrWhiteSpace(Label) ? DefaultLabel() : Label.Trim(),
                 CapturedAt    = DateTime.UtcNow.ToString("o"),
                 PeHash        = engine.PeHash,
-                // ModuleBase is ASLR-randomised per launch, so it distinguishes
-                // game restarts (sessions) of the same build for cross-session SPC.
-                GameSessionId = $"{engine.PeHash}-{engine.ModuleBase}",
+                // PeHash-CreationTime: the process creation time differs per
+                // launch even on no-ASLR games (where ModuleBase is constant),
+                // so it distinguishes game restarts (sessions) of the same build
+                // for cross-session SPC + the stale-session row-action gate.
+                GameSessionId = engine.GameSessionId,
                 UeVersion     = engine.UEVersion,
                 Scope         = dataType,
             };
