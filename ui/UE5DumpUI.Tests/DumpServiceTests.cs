@@ -1274,4 +1274,91 @@ public class DumpServiceTests
         Assert.Equal("CoreUObject", res.Samples[0].Name);
         Assert.Equal(1, res.Samples[1].Index);
     }
+
+    // === Property Search: deep descent (build 1222) ===
+
+    [Fact]
+    public async Task SearchPropertiesAsync_DefaultDeepFalse_SendsDeepFalse()
+    {
+        // The shallow direct-field search must stay the default: an unspecified
+        // deep arg sends deep=false so older/expensive descent never runs unasked.
+        JsonObject? lastReq = null;
+        _pipe.SetHandler(req =>
+        {
+            lastReq = req;
+            return new JsonObject
+            {
+                ["ok"] = true,
+                ["total"] = 0,
+                ["scanned_classes"] = 0,
+                ["scanned_objects"] = 0,
+                ["results"] = new JsonArray(),
+            };
+        });
+
+        var svc = CreateService();
+        await svc.SearchPropertiesAsync("GP", ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(lastReq);
+        Assert.Equal("search_properties", lastReq!["cmd"]?.GetValue<string>());
+        Assert.False(lastReq["deep"]?.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task SearchPropertiesAsync_DeepTrue_SendsDeepAndParsesIsNested()
+    {
+        // deep=true must reach the wire, and a nested result row's is_nested
+        // flag must round-trip onto the model (gates Copy Offset / Freeze).
+        JsonObject? lastReq = null;
+        _pipe.SetHandler(req =>
+        {
+            lastReq = req;
+            return new JsonObject
+            {
+                ["ok"] = true,
+                ["total"] = 2,
+                ["scanned_classes"] = 1,
+                ["scanned_objects"] = 100,
+                ["results"] = new JsonArray
+                {
+                    // shallow row — no is_nested field (older-DLL / direct-field shape)
+                    new JsonObject
+                    {
+                        ["class_name"] = "BP_LifeSaveData_C",
+                        ["prop_name"] = "GP",
+                        ["prop_type"] = "IntProperty",
+                        ["prop_offset"] = 0x40,
+                        ["field_addr"] = "0x1000",
+                    },
+                    // deep row — synthetic dotted path + is_nested = true
+                    new JsonObject
+                    {
+                        ["class_name"] = "BP_LifeSaveData_C",
+                        ["prop_name"] = "SaveSlotList[].MsTuneData.GP",
+                        ["prop_type"] = "IntProperty",
+                        ["prop_offset"] = 0x18,
+                        ["field_addr"] = "0x2000",
+                        ["is_nested"] = true,
+                    },
+                },
+            };
+        });
+
+        var svc = CreateService();
+        var res = await svc.SearchPropertiesAsync(
+            "GP", deep: true, ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(lastReq);
+        Assert.True(lastReq!["deep"]?.GetValue<bool>());
+
+        Assert.Equal(2, res.Results.Count);
+        // shallow row: is_nested absent → false → scalar actions stay visible
+        Assert.False(res.Results[0].IsNested);
+        Assert.True(res.Results[0].ShowScalarActions);
+        // deep row: is_nested true → nested, scalar actions hidden, path tooltip shown
+        Assert.True(res.Results[1].IsNested);
+        Assert.False(res.Results[1].ShowScalarActions);
+        Assert.Equal("SaveSlotList[].MsTuneData.GP", res.Results[1].PropName);
+        Assert.NotNull(res.Results[1].PropNameTooltip);
+    }
 }

@@ -378,6 +378,20 @@ struct PropertyMatch {
     uintptr_t   enumAddr    = 0;   // EnumProperty: UEnum* for name resolution
     std::string keyType;           // MapProperty: key type name
     std::string valueType;         // MapProperty: value type name
+
+    // === Deep / nested match (build 1222) ===
+    //
+    // True when this row is a synthetic dotted-path leaf discovered by the
+    // deep descent into StructProperty members + struct-typed container
+    // elements (TArray/TSet<FStruct>, TMap<K,FStruct>). For these:
+    //   - propName carries the dotted path (e.g. "SaveSlotList[].MsTuneData.GP")
+    //   - classAddr / className are the OWNING class (so Find Instances works)
+    //   - fieldAddr is the LEAF FProperty* (so find_property_xrefs works)
+    //   - propOffset is informational only (no single class-absolute address
+    //     once the path crosses a container) — the UI gates Copy Offset / Freeze
+    //     off this flag.
+    //   - preview is never resolved (previewClassAddr stays 0 → Phase 2 skips).
+    bool        isNested = false;
 };
 
 struct PropertySearchResult {
@@ -395,11 +409,20 @@ struct PropertySearchResult {
 // declared on AActor and inherited by 4823 children only emits one row,
 // keyed by the defining class. The PropertyMatch.inheritedByCount
 // records how many other classes share that inherited field.
+//
+// deep: when true, ALSO descend into StructProperty members and struct-typed
+// container elements (TArray/TSet<FStruct>, TMap<K,FStruct>) so a field nested
+// inside a struct/container (e.g. SaveSlotList[].MsTuneData.GP) becomes findable
+// by name. Such matches set PropertyMatch.isNested = true and carry the dotted
+// path in propName. Opt-in (default off) because the schema descent is slower
+// and can surface many synthetic rows; the shallow direct-field search is
+// unchanged when deep == false.
 PropertySearchResult SearchProperties(
     const std::string& query,
     const std::vector<std::string>& typeFilter,
     bool gameOnly,
-    int maxResults = 200);
+    int maxResults = 200,
+    bool deep = false);
 
 // Batched property search: walk GObjects + class fields ONCE and check
 // every property against ALL queries. Returns one PropertySearchResult

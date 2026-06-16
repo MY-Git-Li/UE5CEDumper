@@ -43,6 +43,40 @@ public class PropertySearchMatch
     /// engine inherited field.</summary>
     public int InheritedByCount { get; set; }
 
+    /// <summary>
+    /// True when this row is a synthetic dotted-path leaf found by the
+    /// opt-in deep descent (build 1222) into nested struct members + struct-
+    /// typed container elements. For these <see cref="PropName"/> is a dotted
+    /// path (e.g. "SaveSlotList[].MsTuneData.GP"), <see cref="ClassName"/> is
+    /// the OWNING class (so Find Instances works), and <see cref="FieldAddr"/>
+    /// is the leaf FProperty* (so Find Funcs works). There is no single
+    /// class-absolute address, so Copy Offset / Freeze are hidden for these
+    /// rows (see <see cref="ShowScalarActions"/>).
+    /// </summary>
+    public bool IsNested { get; set; }
+
+    /// <summary>
+    /// Gates the row's Copy Offset + Freeze buttons. Nested (deep) matches
+    /// have a dotted path rather than a class-absolute offset, so those two
+    /// actions don't apply — only finder (locate live instances of the
+    /// owning class) + Find Funcs (xref the leaf FProperty) make sense.
+    /// </summary>
+    public bool ShowScalarActions => !IsNested;
+
+    /// <summary>
+    /// Tooltip for the Property column. Empty for a normal direct field;
+    /// for a nested (deep) match it explains the dotted path is a drill
+    /// route, not a directly-addressable field, and points at how to reach
+    /// a live value.
+    /// </summary>
+    public string? PropNameTooltip => IsNested
+        ? $"Nested field reached via {PropName} on {ClassName}.\n" +
+          "This path crosses struct/container members, so it has no single " +
+          "class-absolute address. Use finder to list instances of the owning " +
+          "class, then Value Search (by value) or Live Walker (drill the path) " +
+          "to reach a live value."
+        : null;  // null => no tooltip popup on plain direct-field rows
+
     /// <summary>Display-friendly offset as hex.</summary>
     public string OffsetHex => $"0x{PropOffset:X}";
 
