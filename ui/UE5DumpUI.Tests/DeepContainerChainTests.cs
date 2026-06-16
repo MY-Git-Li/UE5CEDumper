@@ -155,36 +155,61 @@ public class DeepContainerChainTests
         Assert.Equal(("Tunes", 42, 0), hops[3]);   // deepest = the value's element
     }
 
-    // --- LiveWalkerViewModel.TryParseStructArrayInner (Value Search 🌍 deep-drill) ---
+    // --- LiveWalkerViewModel.TryParseContainerPath (Value Search / SPC 🌍 deep-drill) ---
 
     [Fact]
-    public void TryParseStructArrayInner_DirectInnerField()
+    public void TryParseContainerPath_SingleStructArrayInner()
     {
-        Assert.True(LiveWalkerViewModel.TryParseStructArrayInner(
-            "SaveSlotList[1].GP", out var arr, out var idx, out var inner));
-        Assert.Equal("SaveSlotList", arr);
-        Assert.Equal(1, idx);
-        Assert.Equal(new[] { "GP" }, inner);
+        Assert.True(LiveWalkerViewModel.TryParseContainerPath("SaveSlotList[1].GP", out var segs));
+        Assert.Equal(2, segs.Count);
+        Assert.Equal(("SaveSlotList", 1), segs[0]);
+        Assert.Equal(("GP", -1), segs[1]);
     }
 
     [Fact]
-    public void TryParseStructArrayInner_NestedArrayAndInnerStruct()
+    public void TryParseContainerPath_LeadingDirectStructThenArray()
     {
-        Assert.True(LiveWalkerViewModel.TryParseStructArrayInner(
-            "Save.SaveSlotList[2].MsTuneData.GP2", out var arr, out var idx, out var inner));
-        Assert.Equal("Save.SaveSlotList", arr);   // array path may itself be dotted
-        Assert.Equal(2, idx);
-        Assert.Equal(new[] { "MsTuneData", "GP2" }, inner);
+        Assert.True(LiveWalkerViewModel.TryParseContainerPath("Save.SaveSlotList[2].MsTuneData.GP2", out var segs));
+        Assert.Equal(4, segs.Count);
+        Assert.Equal(("Save", -1), segs[0]);          // leading direct struct
+        Assert.Equal(("SaveSlotList", 2), segs[1]);
+        Assert.Equal(("MsTuneData", -1), segs[2]);
+        Assert.Equal(("GP2", -1), segs[3]);
+    }
+
+    [Fact]
+    public void TryParseContainerPath_LeafArrayElement_IsAContainerPath()
+    {
+        // A bare leaf-array element ("Items[3]") IS now a drillable container path
+        // (the element itself is the value) — the multi-"[N]" drill handles it.
+        Assert.True(LiveWalkerViewModel.TryParseContainerPath("Items[3]", out var segs));
+        Assert.Single(segs);
+        Assert.Equal(("Items", 3), segs[0]);
+    }
+
+    [Fact]
+    public void TryParseContainerPath_DeeplyNested_SEEDRepro()
+    {
+        Assert.True(LiveWalkerViewModel.TryParseContainerPath(
+            "SaveSlotList[0].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[2]", out var segs));
+        Assert.Equal(5, segs.Count);
+        Assert.Equal(("SaveSlotList", 0), segs[0]);
+        Assert.Equal(("MsTuneData", -1), segs[1]);
+        Assert.Equal(("MsTunes", 0), segs[2]);
+        Assert.Equal(("WeaponTuneList", 0), segs[3]);
+        Assert.Equal(("Tunes", 2), segs[^1]);   // last segment = the value's element
     }
 
     [Theory]
-    [InlineData("Items[3]")]      // leaf-array element (ends in "]"), not struct-array-inner
-    [InlineData("Health")]        // plain field
+    [InlineData("Health")]        // plain field — no "[N]"
     [InlineData("")]              // empty
-    [InlineData("[0].GP")]        // no array name before "["
+    [InlineData("[0].GP")]        // no name before "["
     [InlineData("Cargo[].GP")]    // empty index
-    public void TryParseStructArrayInner_RejectsNonStructArrayInner(string name)
+    [InlineData("Cargo[-1]")]     // negative index
+    [InlineData("A.[2]")]         // empty segment name before "["
+    [InlineData("Stats.Health")]  // dotted plain field — still no "[N]"
+    public void TryParseContainerPath_RejectsNonContainerOrMalformed(string name)
     {
-        Assert.False(LiveWalkerViewModel.TryParseStructArrayInner(name, out _, out _, out _));
+        Assert.False(LiveWalkerViewModel.TryParseContainerPath(name, out _));
     }
 }

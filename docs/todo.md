@@ -121,16 +121,42 @@ DLL owns the set, UI is a server-side-filtered/sorted window; V2 build 954: ceil
 raised to 1M, sort/filter verified sub-second). Remaining open: **V1b** (container
 prev-value refine) and **V1c live-verify**.
 
-- **Deep Value-Search candidate → multi-level 🌍 drill** — Effort: **S/M** · Risk: low.
-  Value Search now finds values at any container depth (build 1206), but a deep
-  candidate's "Locate in GWorld" (`TryParseStructArrayInner` + `DrillToStructArrayInnerAsync`)
-  only handles ONE `[N]` (array → element → inner field); a multi-`[N]` display path like
-  `SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[42]` drills partway then
-  reports "continue manually". The by-address path (Instances tab) already fully drills via
-  the structured `ContainerMatch.NestedChain`. To finish: parse the multi-`[N]` display
-  path into a hop chain (or carry a structured chain on the VS candidate) and reuse
-  `DrillContainerChainAsync`. The value is FOUND either way; this is the land-ON-it polish.
-  *Parent: Value Search recursive deep walk shipped build 1206 (dev-log 2026-06-16).*
+- **Deep Value-Search candidate → multi-level 🌍 drill** — ✅ **DONE build 1208.**
+  Generalised `TryParseStructArrayInner`/`DrillToStructArrayInnerAsync` into
+  `TryParseContainerPath` + `DrillDisplayPathAsync` (parse the full multi-`[N]`
+  display path into ordered `(name,index)` segments; drill each as a container
+  hop or direct-struct field; land on the final leaf). Wired into BOTH the VS/SPC
+  `LocateInGWorldAsync` reach branch AND `NavigateToInstanceFieldAsync`
+  (Open-in-Live-Walker — also fixes the offset-0 mis-select for deep candidates).
+  Verified by a 4-agent audit (drill-sites + scan/capture correctness); the value
+  was always FOUND — this was the land-ON-it polish. ⚠ in-game live-verify pending
+  (multi-`[N]` 🌍 should land exactly on the SEED `...Tunes[N]` value).
+
+- **Proper scalar-map value/key capture** — Effort: **M** · Risk: low.
+  `WalkContainerLeaves` only recurses STRUCT map values; a `TMap<K,scalar>` value
+  (and the scalar key of any map) is NOT captured. Build 1208 added a guard so the
+  leaf-container branch no longer emits a *malformed* leaf for scalar-value maps
+  (was: key-region addr + `"K → V"` arrow-label type, silently dropped by both
+  consumers). To capture them properly, extend `ContainerCacheEntry` with
+  `keyType`/`valueType` and emit the value leaf at `slotBase+valueOffset` (type
+  `valueType`) + the key leaf at `slotBase` (type `keyType`). Audit #1/#3.
+  *Affects Value Search + Snapshot; user's SEED case is `Map<Name,FStruct>` (struct
+  value, recursed) so unaffected.*
+
+- **Top-level `TSet<FStruct>` / `TMap<K,FStruct>` depth-1 inner leaves (Value Search)** —
+  Effort: **S/M** · Risk: low. The static depth-1 collector (`collectStructArrayInner`)
+  only covers `TArray<FStruct>`; the recursive `deepEmit` skips `depth<2` to avoid
+  double-counting it. So the DIRECT fields of a struct element in a *top-level*
+  Set/Map are scanned by neither path. (Nested ones — the SEED `MsTunes` case — are
+  depth≥2 and ARE caught.) Fix: add a Set/Map analogue to `collectStructArrayInner`,
+  or relax `deepEmit` to `depth>=1` for the Set/Map element side only. Audit #2.
+
+- **SPC Strict-join `prop_offset` migration edge** — Effort: **S** · Risk: low.
+  1-level struct-array element rows now store `prop_offset=0` (build 1205, was
+  `nf.Offset`); a Strict-mode SPC query that mixes a pre-1205 and a post-1205
+  snapshot keys the same logical field differently. Either zero `prop_offset` for
+  array-element rows in the Strict key, or bump the schema to force recapture.
+  Audit #4. *Cosmetic unless mixing snapshots across the 1205 boundary.*
 
 - **V1b — container prev-value refine (stable key)** — Effort: **M** · Risk: **high**.
   `Candidate.addr` stores a raw element address; TArray realloc already makes it stale,

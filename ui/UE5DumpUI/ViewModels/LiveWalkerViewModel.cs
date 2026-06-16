@@ -1553,6 +1553,20 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     public async Task NavigateToInstanceFieldAsync(string? addr, int fieldOffset, string? fieldName)
     {
         if (string.IsNullOrEmpty(addr)) return;
+        // A container path (e.g. "Cargo[3].ItemId" or the deep
+        // "SaveSlotList[0]...Tunes[2]") can't be reached by the single
+        // offset/element pending-scroll — deep candidates carry fieldOffset=0,
+        // which would otherwise mis-select the first offset-0 field. Walk the
+        // owner then drill the full path explicitly (shared with LocateInGWorld).
+        if (TryParseContainerPath(fieldName, out var pathSegs))
+        {
+            _pendingScrollFieldOffset = null;
+            _pendingScrollFieldName = null;
+            _pendingDrillElementIndex = -1;
+            await NavigateToAddressAsync(addr);
+            await DrillDisplayPathAsync(pathSegs);
+            return;
+        }
         // Pre-arm focus state BEFORE navigating; the post-walk UpdateDisplay
         // handler consumes it once Fields is populated. (Mirrors how
         // OpenReferenceOwnerAsync pre-arms the by-name hint for Find Refs.)
@@ -1599,13 +1613,14 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
             BuildBreadcrumbSpineFromPath(path, objectAddr, stopAtParent);
 
-            // Value inside a struct-array element (Value Search "Array[N].Inner",
-            // e.g. "SaveSlotList[1].GP"): the single-shot pending-scroll can't chain
-            // array → element → inner field, so drill explicitly after reaching the
-            // owner — mirrors the Instance Finder container deep-drill.
-            if (!stopAtParent
-                && TryParseStructArrayInner(scrollFieldName, out var saArrayPath,
-                                            out var saElemIdx, out var saInnerPath))
+            // Value inside a container path (Value Search / SPC "Array[N]...[M]",
+            // e.g. "SaveSlotList[1].GP" or the deep
+            // "SaveSlotList[0].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[2]"):
+            // the single-shot pending-scroll can't chain container → element →
+            // inner field across multiple "[N]" levels, so drill the full path
+            // explicitly after reaching the owner — parity with the Instance
+            // Finder structured-chain deep-drill.
+            if (!stopAtParent && TryParseContainerPath(scrollFieldName, out var pathSegs))
             {
                 _pendingScrollFieldOffset = null;
                 _pendingScrollFieldName = null;
@@ -1617,9 +1632,9 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 ownerResult = await AutoFillGapsRetryAsync(ownerResult, ownerAddr);
                 UpdateDisplay(ownerResult);
 
-                bool saDrilled = await DrillToStructArrayInnerAsync(scrollFieldOffset, saArrayPath, saElemIdx, saInnerPath);
-                _log.Info($"LocateInGWorld: reach+struct-array-drill, {path.Depth} hop(s), drilled={saDrilled} | BC={FormatBreadcrumbTrace()}");
-                StatusText = saDrilled
+                bool landed = await DrillDisplayPathAsync(pathSegs);
+                _log.Info($"LocateInGWorld: reach+container-path-drill, {path.Depth} hop(s), landed={landed} | BC={FormatBreadcrumbTrace()}");
+                StatusText = landed
                     ? $"Located via GWorld — {path.Depth} hop(s) to {path.TargetName}; landed on {scrollFieldName}."
                     : $"Located via GWorld — {path.Depth} hop(s) to {path.TargetName} (drill into {scrollFieldName} manually).";
                 return;
@@ -1889,83 +1904,105 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Parse a Value Search struct-array-inner display name of the form
-    /// "ArrayPath[N].InnerPath" (e.g. "SaveSlotList[1].GP" or
-    /// "Save.SaveSlotList[1].MsTuneData.GP2"). Returns false for a plain field, a
-    /// leaf-array element ("Items[3]", which ends in "]"), or a malformed name.
-    /// <paramref name="arrayPath"/> is the dotted path up to the array;
-    /// <paramref name="innerPath"/> the dotted leaf path inside the element. Pure
-    /// — unit-tested.
+    /// Parse a Value Search / SPC candidate display name into an ordered drill
+    /// path of segments, each either a DIRECT struct field ("Name", index -1) or
+    /// a CONTAINER element ("Name", index N from "Name[N]"). Returns true only
+    /// when the path contains at least one "[N]" element (so it needs container
+    /// drilling); a plain field ("Health"), an empty/malformed name, or a bracket
+    /// not at a segment's end returns false so the caller falls back to the
+    /// single-offset scroll. Handles arbitrary depth, e.g.
+    /// "SaveSlotList[0].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[2]". Pure —
+    /// unit-tested. Generalises the former single-"[N]" struct-array parser.
     /// </summary>
-    internal static bool TryParseStructArrayInner(string? fieldName, out string arrayPath,
-                                                  out int elementIndex, out string[] innerPath)
+    internal static bool TryParseContainerPath(string? fieldName,
+                                               out List<(string name, int index)> segments)
     {
-        arrayPath = "";
-        elementIndex = -1;
-        innerPath = System.Array.Empty<string>();
+        segments = new List<(string name, int index)>();
         if (string.IsNullOrEmpty(fieldName)) return false;
 
-        int open = fieldName.IndexOf('[');
-        if (open <= 0) return false;
-        int close = fieldName.IndexOf(']', open + 1);
-        if (close < 0) return false;
-        // Must be followed by ".<inner>" — a leaf path after the element, not the
-        // end of the string (a bare "Items[3]" is a leaf-array element, not this).
-        if (close + 1 >= fieldName.Length || fieldName[close + 1] != '.') return false;
-
-        var idxStr = fieldName.Substring(open + 1, close - open - 1);
-        if (!int.TryParse(idxStr, out elementIndex) || elementIndex < 0) return false;
-
-        arrayPath = fieldName.Substring(0, open);
-        var innerStr = fieldName.Substring(close + 2);   // after "]."
-        if (arrayPath.Length == 0 || innerStr.Length == 0) return false;
-        innerPath = innerStr.Split('.');
-        return innerPath.Length > 0;
+        bool hasIndex = false;
+        foreach (var raw in fieldName.Split('.'))
+        {
+            if (raw.Length == 0) return false;                 // empty segment — malformed
+            if (raw[^1] == ']')
+            {
+                int open = raw.LastIndexOf('[');
+                if (open <= 0) return false;                   // "]" with no name before "["
+                var idxStr = raw.Substring(open + 1, raw.Length - open - 2);
+                if (!int.TryParse(idxStr, out var idx) || idx < 0) return false;  // "[]"/"[-1]"/non-numeric
+                segments.Add((raw.Substring(0, open), idx));
+                hasIndex = true;
+            }
+            else if (raw.IndexOf('[') >= 0)
+            {
+                return false;                                   // bracket not at the end — unexpected
+            }
+            else
+            {
+                segments.Add((raw, -1));
+            }
+        }
+        return hasIndex;
     }
 
     /// <summary>
-    /// From the currently-displayed owning object, drill array → element [N] →
-    /// inner leaf to land ON a value inside a struct-array element (Value Search
-    /// "Array[N].Inner"). The array's dotted path + the inner dotted path navigate
-    /// intermediate direct structs by name; the array is matched by name (offset
-    /// fallback), the element by "[N]". Returns true on a full drill.
+    /// From the currently-displayed owning object, drill an arbitrary-depth
+    /// display path (parsed by <see cref="TryParseContainerPath"/>) to land ON the
+    /// value. Each segment is either a direct struct field (descend by name) or a
+    /// container element "Name[N]" (drill the container by name → select element
+    /// [N]; if not the last segment, descend into the struct element to continue).
+    /// The final segment is selected/scrolled to. Returns true on a full landing.
+    /// Generalises the single-level struct-array drill to multi-"[N]" paths so
+    /// deep Value Search / SPC candidates reach exactly — parity with the Instance
+    /// Finder structured-chain drill (<see cref="DrillContainerChainAsync"/>).
     /// </summary>
-    private async Task<bool> DrillToStructArrayInnerAsync(int arrayFieldOffset, string arrayPath,
-                                                          int elementIndex, string[] innerPath)
+    private async Task<bool> DrillDisplayPathAsync(List<(string name, int index)> segments)
     {
-        // Navigate the array's leading direct-struct segments; the last is the array.
-        var arraySegs = arrayPath.Split('.');
-        for (int i = 0; i < arraySegs.Length - 1; i++)
+        for (int i = 0; i < segments.Count; i++)
         {
-            var sf = Fields.FirstOrDefault(f => f.Name == arraySegs[i] && f.IsStructNavigation);
-            if (sf == null) return false;
-            await NavigateToFieldAsync(sf);
-        }
-        var arrName = arraySegs[^1];
-        var arrayField = Fields.FirstOrDefault(f => f.Name == arrName && f.IsContainerNavigable)
-                      ?? Fields.FirstOrDefault(f => f.Offset == arrayFieldOffset && f.IsContainerNavigable);
-        if (arrayField == null) return false;
-        await NavigateToContainerAsync(arrayField);
+            var (name, index) = segments[i];
+            bool isLast = i == segments.Count - 1;
 
-        var elemRow = Fields.FirstOrDefault(f =>
-            f.Name == $"[{elementIndex}]" ||
-            f.Name.StartsWith($"[{elementIndex}] ", StringComparison.Ordinal));
-        if (elemRow == null || !elemRow.IsStructNavigation) return false;
-        await NavigateToFieldAsync(elemRow);
+            if (index >= 0)
+            {
+                // Container element: drill the container (by name) then select [N].
+                var containerField = Fields.FirstOrDefault(f => f.Name == name && f.IsContainerNavigable);
+                if (containerField == null) return false;
+                await NavigateToContainerAsync(containerField);
 
-        // Inner path: intermediate segments are direct structs to drill; the last
-        // segment is the leaf value to select.
-        for (int i = 0; i < innerPath.Length - 1; i++)
-        {
-            var sf = Fields.FirstOrDefault(f => f.Name == innerPath[i] && f.IsStructNavigation);
-            if (sf == null) return false;
-            await NavigateToFieldAsync(sf);
+                var elemRow = Fields.FirstOrDefault(f =>
+                    f.Name == $"[{index}]" ||
+                    f.Name.StartsWith($"[{index}] ", StringComparison.Ordinal));
+                if (elemRow == null) return false;
+
+                if (isLast)
+                {
+                    // The element itself is the value (leaf element, e.g. TArray<int>).
+                    SelectedField = elemRow;
+                    ScrollToFieldRequested?.Invoke(elemRow.Name);
+                    return true;
+                }
+                // Descend into the struct element to reach the next segment.
+                if (!elemRow.IsStructNavigation) return false;
+                await NavigateToFieldAsync(elemRow);
+            }
+            else
+            {
+                // Direct struct field.
+                if (isLast)
+                {
+                    var leaf = Fields.FirstOrDefault(f => f.Name == name);
+                    if (leaf == null) return false;
+                    SelectedField = leaf;
+                    ScrollToFieldRequested?.Invoke(leaf.Name);
+                    return true;
+                }
+                var structField = Fields.FirstOrDefault(f => f.Name == name && f.IsStructNavigation);
+                if (structField == null) return false;
+                await NavigateToFieldAsync(structField);
+            }
         }
-        var leaf = Fields.FirstOrDefault(f => f.Name == innerPath[^1]);
-        if (leaf == null) return false;
-        SelectedField = leaf;
-        ScrollToFieldRequested?.Invoke(leaf.Name);
-        return true;
+        return true;   // unreachable for a non-empty path (last segment always returns)
     }
 
     [RelayCommand]

@@ -14,6 +14,50 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-16 — Multi-`[N]` GWorld drill + map-leaf guard + snapshot deadline (build 1208)
+
+Closes the deep-container story's last gap, surfaced when the SEED user pressed
+"Locate in GWorld" on a deep Value Search hit
+(`SaveSlotList[0].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[2]`) and it landed on
+the intermediate `MsTuneData` node instead of the value. A 4-agent audit (drill-site
+mapping + adversarial scan/capture verification) confirmed: the recursive **scan/capture
+is correct — no regression**; the value is always FOUND. The gap was purely the UI
+**land-ON-it drill**, which only parsed the FIRST `[N]`.
+
+**Multi-`[N]` display-path drill (C#).** Replaced the single-`[N]`
+`TryParseStructArrayInner` + `DrillToStructArrayInnerAsync` with
+`TryParseContainerPath` + `DrillDisplayPathAsync` (`LiveWalkerViewModel`):
+- `TryParseContainerPath` splits the display name into ordered `(name, index)`
+  segments — `name[N]` → container element, bare `name` → direct struct field — and
+  returns true only when ≥1 `[N]` is present (a plain field falls back to the single
+  offset scroll). Handles arbitrary depth; rejects malformed `[]`/`[-1]`/empty segments.
+- `DrillDisplayPathAsync` walks each segment from the owner view: drill the container
+  by name → select `[N]` → (if not last) descend into the struct element; bare names
+  navigate a direct sub-struct; the final segment is selected/scrolled-to. Parity with
+  the Instance Finder structured-chain `DrillContainerChainAsync`.
+- Wired into BOTH the VS/SPC `LocateInGWorldAsync` reach branch AND
+  `NavigateToInstanceFieldAsync`. The latter also **fixes the Open-in-Live-Walker
+  offset-0 mis-select**: a deep candidate carries `fieldOffset=0`, which previously
+  matched the first offset-0 field; container paths now drill explicitly instead.
+
+**Audit-surfaced DLL fixes (`Aura.cpp`).**
+- **Map leaf guard (#1).** `WalkContainerLeaves`' leaf-container branch fired for a
+  scalar-value `TMap` (`sides[0].structAddr==0`), emitting a malformed leaf at the KEY
+  region with the `"K → V"` arrow label as the type — harmless (both consumers reject
+  the bogus type) but wrong. Guarded with `cfe.kind != ContainerKind::Map`. Proper
+  scalar-map value/key capture filed as a follow-up (todo).
+- **Snapshot per-object deadline (#7).** `CaptureStructArrays`' walker had cancel-only
+  abort (no time budget, unlike Value Search's 15 s); a pathological deeply-nested
+  object could stall a chunk within the 256 × depth-4 caps. Added a 2 s per-object
+  `steady_clock` budget; the chunk loop's own cancel poll still handles client-gone.
+
+Audit also confirmed unaffected: Instance Finder address search (structured chain),
+Interesting Props/Funcs + Property Search (definition rows, no container path),
+Snapshot Diff row-nav (opens owner). Remaining gaps filed in todo.md (proper scalar-map
+capture, top-level `TSet/TMap<FStruct>` depth-1 VS leaves, SPC Strict `prop_offset`
+migration edge). **510 dll_helpers + 31 utf8 + 1524 C# tests green.** ⚠ in-game
+live-verify pending (multi-`[N]` 🌍 lands exactly on the SEED `…Tunes[N]` value).
+
 ## 2026-06-16 — Recursive (>1 level) container-leaf capture across all four consumers (builds 1205-1207)
 
 Completes the deep-container story: a value buried at ANY (bounded) depth — e.g.

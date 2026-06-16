@@ -1850,8 +1850,16 @@ static void WalkContainerLeaves(uintptr_t structBase, uintptr_t structAddr,
                                            sides[s].structAddr, elemBase, "", depth + 1, 0, visit);
                     WalkContainerLeaves(elemBase, sides[s].structAddr,
                                         sidePath + "[" + std::to_string(e) + "]", depth + 1, lim, visit);
-                } else if (s == 0 && IsScalarLeafType(cfe.innerType)) {
-                    // Leaf-container element (TArray<int> etc.): the element IS the value.
+                } else if (s == 0 && cfe.kind != ContainerKind::Map
+                           && IsScalarLeafType(cfe.innerType)) {
+                    // Leaf-container element (TArray<int> / TSet<int>): the element
+                    // IS the value at slotBase, and cfe.innerType is its real type.
+                    // NOTE: Map is excluded — for a scalar-value map cfe.innerType
+                    // is the "K -> V" arrow label (not a real leaf type) and the
+                    // value lives at slotBase+valueOffset, not slotBase. Emitting
+                    // here would be a malformed leaf (wrong addr + bogus type) that
+                    // both consumers reject. Capturing scalar map values/keys
+                    // properly needs cfe to carry key/value leaf types — TODO.
                     const std::string empty;
                     ContainerLeaf lf{ containerPath, e, 0, slotBase, empty,
                                       slotBase, cfe.innerType, 0 /*caller resolves size*/, 0xFF, depth + 1 };
@@ -6103,7 +6111,17 @@ void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
     WalkLeafLimits lim;
     lim.maxDepth = 4;
     lim.maxElems = arrayCap;
-    lim.aborted  = [] { return Cancel::Requested(); };
+    // Per-object time budget (build 1208): the 256-elem × depth-4 caps still allow
+    // a pathological object (deeply-nested full containers) to walk for a long
+    // time. Unlike Value Search this consumer had cancel-only abort (no deadline),
+    // so a single such object could stall a chunk. Bound each object's walk; the
+    // chunk loop's own cancel poll handles client-gone/shutdown between objects.
+    const auto t0 = std::chrono::steady_clock::now();
+    constexpr auto kPerObjBudget = std::chrono::seconds(2);
+    lim.aborted  = [t0] {
+        return Cancel::Requested()
+            || (std::chrono::steady_clock::now() - t0) > kPerObjBudget;
+    };
 
     WalkContainerLeaves(obj, cls, /*pathPrefix*/ "", /*depth*/ 0, lim,
         [&](const ContainerLeaf& lf) {
