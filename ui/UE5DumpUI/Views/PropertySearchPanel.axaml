@@ -28,6 +28,11 @@
                 ToolTip.Tip="{StaticResource str.Tip.PropertySearch.GameOnly}"
                 Foreground="#CCCCCC" FontSize="12"
                 VerticalAlignment="Center"/>
+      <CheckBox Content="{StaticResource str.PropertySearch.Deep}"
+                IsChecked="{Binding DeepSearch}"
+                ToolTip.Tip="{StaticResource str.Tip.PropertySearch.Deep}"
+                Foreground="#CCCCCC" FontSize="12"
+                VerticalAlignment="Center"/>
       <Button Content="{StaticResource str.PropertySearch.Search}"
               Command="{Binding SearchCommand}"
               ToolTip.Tip="{StaticResource str.Tip.PropertySearch.Search}"
@@ -106,10 +111,21 @@
                             Binding="{Binding SuperName}"
                             SortMemberPath="SuperName"
                             Width="120"/>
-        <DataGridTextColumn Header="Property"
-                            Binding="{Binding PropName}"
-                            SortMemberPath="PropName"
-                            Width="180"/>
+        <!-- Property column: for a normal field this is the plain name; for a
+             deep (nested) match it's a synthetic dotted path
+             (e.g. SaveSlotList[].MsTuneData.GP). The tooltip explains the path
+             is a drill route, not a directly-addressable field. -->
+        <DataGridTemplateColumn Header="Property" Width="220" SortMemberPath="PropName">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:PropertySearchMatch">
+              <TextBlock Text="{Binding PropName}"
+                         VerticalAlignment="Center"
+                         Margin="4,0"
+                         TextTrimming="CharacterEllipsis"
+                         ToolTip.Tip="{Binding PropNameTooltip}"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
         <DataGridTextColumn Header="Type"
                             Binding="{Binding TypeDisplay}"
                             SortMemberPath="TypeDisplay"
@@ -149,18 +165,24 @@
                         CommandParameter="{Binding}"
                         ToolTip.Tip="{StaticResource str.Tip.PropertySearch.FindInstances}"
                         Padding="6,2" FontSize="11"/>
+                <!-- Copy Offset + Freeze are hidden for nested (deep) matches:
+                     a dotted path has no single class-absolute offset, so
+                     neither action applies. finder + Find Funcs stay visible. -->
                 <Button Content="{StaticResource str.PropertySearch.CopyOffset}"
                         Command="{Binding $parent[UserControl].((vm:PropertySearchViewModel)DataContext).CopyOffsetCommand}"
                         CommandParameter="{Binding}"
+                        IsVisible="{Binding ShowScalarActions}"
                         ToolTip.Tip="{StaticResource str.Tip.PropertySearch.CopyOffset}"
                         Padding="6,2" FontSize="11"/>
                 <!-- Freeze button: enabled only when AOBMaker plugin is reachable.
                      Tooltip swaps between the action description and the
                      setup hint via FreezeUnavailableTooltip (matches the
-                     LiveWalker AobMakerNote pattern from build 608). -->
+                     LiveWalker AobMakerNote pattern from build 608). Hidden
+                     entirely for nested matches (no class-absolute offset). -->
                 <Button Content="{StaticResource str.PropertySearch.Freeze}"
                         Command="{Binding $parent[UserControl].((vm:PropertySearchViewModel)DataContext).CopyFreezeScriptCommand}"
                         CommandParameter="{Binding}"
+                        IsVisible="{Binding ShowScalarActions}"
                         IsEnabled="{Binding $parent[UserControl].((vm:PropertySearchViewModel)DataContext).IsAobMakerAvailable}"
                         ToolTip.Tip="{Binding $parent[UserControl].((vm:PropertySearchViewModel)DataContext).FreezeUnavailableTooltip}"
                         Padding="6,2" FontSize="11"/>

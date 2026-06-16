@@ -14,6 +14,73 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-16 — Instance Finder "Locate in GWorld" lands ON the target object (build 1224)
+
+User-reported on SEED: Instance Finder → pick a `BP_LifeSaveData_C` instance → **Locate
+in GWorld** stopped on the **holder** object (`BP_LifeGameInstance_C`, with `m_savedata`
+highlighted) instead of the object the user actually selected.
+
+Root cause: the Instance Finder handler called `LiveWalker.LocateInGWorldAsync(addr, 0,
+null, stopAtParent: true)` — `stopAtParent` deliberately drops the final hop and lands on
+the parent pointer. Value Search / Snapshot / SPC all use `stopAtParent: false` (land ON
+the target). Fix = flip the Instance Finder wiring in `MainWindowViewModel` to
+`stopAtParent: false`, matching the others; the full `GWorld→…→target` spine is still in
+the breadcrumb, so the holder is one click up via `Parent ↑`. Updated the
+`LocateInGWorldAsync` doc comment (the only remaining `stopAtParent: true` consumer is
+Interesting Funcs, whose "where do instances of this class live" semantic genuinely wants
+the holder). C#-only, no DLL change. 1535 C# / 510 dll / 31 utf8 green. ⚠ in-game
+live-verify pending (should now land on `BP_LifeSaveData_C` showing its own fields).
+
+## 2026-06-16 — Property Search: compact `finder` button + opt-in deep struct/container descent (build 1222)
+
+Two user-requested Property Search changes:
+
+1. **`finder` row button** (rename only — behaviour already shipped). The per-row
+   `Find Instances` button is now captioned **`finder`** with a fuller tooltip
+   ("switch to the Instance Finder tab, fill in this row's class name, and run the
+   search"). The fill-class-+-switch-tab-+-auto-run wiring was already in place
+   (`PropertySearchViewModel.FindInstances` → `NavigateToInstanceFinder` →
+   `MainWindowViewModel` runs `InstanceFinder.SearchCommand`); this is purely the
+   `en.axaml` caption/tooltip update, matching the build-1216 compact-caption trend.
+
+2. **Deep (structs/containers) descent** — opt-in checkbox (default **off**) that makes
+   a field buried inside a struct or struct-typed container findable by name. Closes
+   the todo "Property Search: descend into struct / container-element inner properties"
+   (user-flagged on SEED: `GP` lives at `BP_LifeSaveData_C.SaveSlotList[].MsTuneData.GP`
+   and was previously unreachable by name — only via Value Search / Live Walker).
+   - **DLL** (`Aura.cpp`): new schema-only walker `CollectSchemaLeaves` enumerates every
+     scalar leaf reachable through `StructProperty` members + struct-typed
+     `TArray/TSet<FStruct>` / `TMap<K,FStruct>` elements, emitting a synthetic dotted
+     path (`SaveSlotList[].MsTuneData.GP`). Depth-capped (4), path-cycle guarded against
+     self-referential structs, hard-capped at 4000 leaves/class. `SearchProperties` gains
+     a `deep` param: after the shallow direct-field loop it matches the keyword against
+     each leaf's **last segment** (same "property named X" semantics), deduped by the
+     ROOT field's defining class + dotted path (mirrors the shallow inheritance collapse,
+     bumping `inheritedByCount`). Nested matches set `isNested=true`, carry the leaf
+     `FProperty*` as `fieldAddr` (so Find Funcs xref works), and keep `previewClassAddr=0`
+     so Phase-2 preview resolution naturally skips them (no instance read). Shallow search
+     is byte-unchanged when `deep=false`. `SearchPropertiesBatch` (Interesting Properties)
+     is intentionally NOT deep — smaller blast radius.
+   - **Pipe** (`Fern.cpp`): reads `deep` (default false), serialises `is_nested` on
+     nested rows only.
+   - **UI**: `DumpService` / `IDumpService` gain a `deep` arg; `PropertySearchViewModel`
+     gets a `DeepSearch` toggle (status shows `[deep]`). `PropertySearchMatch` gains
+     `IsNested` + computed `ShowScalarActions` (`!IsNested`) + `PropNameTooltip`. In the
+     grid, the Property column became a template column with the path tooltip, and
+     **Copy Offset + Freeze are hidden for nested rows** (a dotted path has no single
+     class-absolute offset) — `finder` + Find Funcs stay. New `en.axaml` strings:
+     `str.PropertySearch.Deep` + `str.Tip.PropertySearch.Deep`.
+   - **Scope decision** (user): findability-first — nested rows expose `finder` (owning
+     class) + Find Funcs (leaf `FProperty`); Copy Offset / Freeze are out of scope for
+     all nested matches.
+
+Tests: +2 `DumpServiceTests` (deep default-false on the wire; deep=true round-trips +
+`is_nested` parses) +3 `PropertySearchMatchTests` (nested hides scalar actions + path
+tooltip; direct field unaffected; `IsNested` back-compat default). **1535 C# / 510 dll /
+31 utf8 green; full DLL + 3 proxies + UI build clean at 1222.** ⚠ in-game live-verify
+pending (deep search on SEED should surface `SaveSlotList[].MsTuneData.GP`; `finder` on a
+nested row lists `BP_LifeSaveData_C` instances).
+
 ## 2026-06-16 — Compact per-row buttons + stale-session gating on Snapshot/SPC (build 1216)
 
 UI tightening + a correctness gate, on user request (the Interesting Funcs row, with

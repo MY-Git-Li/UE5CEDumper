@@ -518,13 +518,18 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             }
         };
 
-        // Wire InstanceFinder -> "Locate in GWorld" (object/class → stop at parent).
+        // Wire InstanceFinder -> "Locate in GWorld". The selected row IS the
+        // target object, so land ON it (stopAtParent: false) — same as Value
+        // Search / Snapshot / SPC. Parent-stop left the user on the holder
+        // object (e.g. BP_LifeGameInstance_C.m_savedata) instead of the object
+        // they picked; the full GWorld→…→target spine is still in the
+        // breadcrumb, so the holder is one click up via Parent ↑.
         InstanceFinder.LocateInGWorld += async (addr) =>
         {
             try
             {
                 SelectedTabIndex = (int)MainTabIndex.LiveWalker;
-                await LiveWalker.LocateInGWorldAsync(addr, 0, null, stopAtParent: true);
+                await LiveWalker.LocateInGWorldAsync(addr, 0, null, stopAtParent: false);
             }
             catch (Exception ex)
             {

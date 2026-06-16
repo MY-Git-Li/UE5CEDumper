@@ -114,9 +114,12 @@ public interface IDumpService
     Task<List<FunctionInfoModel>> WalkFunctionsAsync(string addr, CancellationToken ct = default);
 
     // --- Property Keyword Search ---
+    // deep: opt-in descent into nested struct + struct-typed container element
+    // schemas so a field like SaveSlotList[].MsTuneData.GP is findable by name.
+    // Default off — the shallow direct-field search is unchanged.
     Task<PropertySearchResult> SearchPropertiesAsync(
         string query, string[]? types = null, bool gameOnly = true,
-        int limit = 200, CancellationToken ct = default);
+        bool deep = false, int limit = 200, CancellationToken ct = default);
 
     /// <summary>
     /// Batched property search — DLL walks GObjects once and checks

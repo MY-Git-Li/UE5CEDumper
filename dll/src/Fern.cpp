@@ -1746,6 +1746,9 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             std::string query = request.value("query", "");
             bool gameOnly = request.value("game_only", true);
             int limit = request.value("limit", 200);
+            // Opt-in deep descent into nested struct + container-element schemas
+            // (default off — keeps the shallow direct-field search fast).
+            bool deep = request.value("deep", false);
 
             // Parse optional type filter
             std::vector<std::string> typeFilter;
@@ -1763,7 +1766,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 return Renge::MakeError(id, "Missing query or type filter").dump();
             }
 
-            auto searchResult = Aura::SearchProperties(query, typeFilter, gameOnly, limit);
+            auto searchResult = Aura::SearchProperties(query, typeFilter, gameOnly, limit, deep);
 
             json matches = json::array();
             for (const auto& m : searchResult.results) {
@@ -1789,6 +1792,12 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 // ("which methods use this field?"). Populated during the
                 // field walk regardless of preview.
                 item["field_addr"] = Renge::AddrToStr(m.fieldAddr);
+                // Deep-mode nested leaf: prop_name carries a dotted path and
+                // there is no class-absolute address. UI gates Copy Offset /
+                // Freeze off this flag and keeps finder + Find Funcs. Omitted
+                // (defaults false on the C# side) for shallow rows.
+                if (m.isNested)
+                    item["is_nested"] = true;
                 if (!m.preview.empty())
                     item["preview"] = m.preview;
                 matches.push_back(item);

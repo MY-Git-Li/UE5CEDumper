@@ -3412,6 +3412,133 @@ uintptr_t FindDefiningClass(uintptr_t classAddr, int32_t fieldOffset) {
     return cur;
 }
 
+// === Deep schema-leaf enumeration (build 1222) ===
+//
+// Property Search "Deep" mode descends into nested struct + struct-typed
+// container-element schemas so a field like `GP` living at
+// `BP_LifeSaveData_C.SaveSlotList[].MsTuneData.GP` becomes findable by name.
+//
+// Unlike GetClassContainers (which records the CONTAINERS for a class), this
+// walks every SCALAR LEAF reachable THROUGH StructProperty fields and
+// struct-typed container elements (TArray/TSet<FStruct>, TMap<K,FStruct>),
+// emitting one synthetic dotted path per leaf.
+//
+// Schema-only: NO instance reads — the result depends solely on the type graph,
+// so it is independent of any live object. Depth-capped + path-cycle guarded
+// against self-referential struct definitions, and hard-capped on total leaves
+// per class to bound pathological schemas.
+struct SchemaLeaf {
+    std::string path;            // dotted+indexed path ("SaveSlotList[].MsTuneData.GP")
+    std::string leafName;        // last segment ("GP") — what the keyword matches
+    std::string leafType;        // "IntProperty" / "NameProperty" / ...
+    uintptr_t   leafFieldAddr = 0; // FProperty* of the leaf (find_property_xrefs key)
+    int32_t     leafOffset = 0;  // offset within innermost struct (display only); from class
+                                 // base when !throughContainer
+    int32_t     leafSize = 0;
+    uint8_t     boolMask = 0;
+    int32_t     rootFieldOffset = 0; // offset of the depth-0 property that began the descent
+                                     // (for defining-class dedup, mirrors the shallow path)
+    bool        throughContainer = false; // path crosses >= 1 container hop
+};
+
+// Per-class hard cap on emitted leaves — protects against deep/wide or cyclic
+// schemas. Most game classes produce well under this; a cap of a few thousand
+// covers even the heaviest save-data blobs without unbounded growth.
+static constexpr size_t kMaxSchemaLeavesPerClass = 4000;
+
+static void CollectSchemaLeaves(
+    uintptr_t structAddr,
+    const std::string& namePrefix,
+    int32_t rootFieldOffset,        // -1 at top level → pinned to the first hop's field
+    int32_t accOffset,              // accumulated offset from class base (valid iff !throughContainer)
+    bool throughContainer,
+    int depth,
+    std::unordered_set<uintptr_t>& pathStructs,  // cycle guard along the CURRENT path
+    std::vector<SchemaLeaf>& out)
+{
+    constexpr int kMaxSchemaDepth = 4;
+    if (depth > kMaxSchemaDepth || !structAddr) return;
+    if (out.size() >= kMaxSchemaLeavesPerClass) return;
+    // Cycle guard: a self-referential struct (FFoo holds a TArray<FFoo>) would
+    // otherwise recurse forever. Only guard along the active path so two
+    // sibling fields of the same struct type are both visited.
+    if (!pathStructs.insert(structAddr).second) return;
+
+    ClassInfo ci = Ubel::WalkClassEx(structAddr);
+    for (const auto& f : ci.Fields) {
+        if (out.size() >= kMaxSchemaLeavesPerClass) break;
+        if (!f.Address) continue;
+        std::string fullName = namePrefix.empty() ? f.Name : (namePrefix + "." + f.Name);
+        int32_t rootOff = (rootFieldOffset < 0) ? f.Offset : rootFieldOffset;
+
+        if (IsScalarLeafType(f.TypeName)) {
+            // Only emit at depth >= 1 (nested). Depth-0 leaves are the class's
+            // own direct fields, already covered by the shallow search loop.
+            if (depth >= 1) {
+                SchemaLeaf lf;
+                lf.path             = fullName;
+                lf.leafName         = f.Name;
+                lf.leafType         = f.TypeName;
+                lf.leafFieldAddr    = f.Address;
+                lf.leafOffset       = accOffset + f.Offset;
+                lf.leafSize         = f.Size;
+                lf.boolMask         = f.boolFieldMask;
+                lf.rootFieldOffset  = rootOff;
+                lf.throughContainer = throughContainer;
+                out.push_back(std::move(lf));
+            }
+        }
+        else if (f.TypeName == "StructProperty") {
+            uintptr_t inner = 0;
+            if (Macht::ReadSafe(f.Address + DynOff::FSTRUCTPROP_STRUCT, inner) && inner)
+                CollectSchemaLeaves(inner, fullName, rootOff,
+                                    accOffset + f.Offset, throughContainer,
+                                    depth + 1, pathStructs, out);
+        }
+        else if (f.TypeName == "ArrayProperty" && f.innerType == "StructProperty") {
+            uintptr_t inner = Ubel::GetContainerInnerStructAddr(f.Address);
+            if (inner)
+                CollectSchemaLeaves(inner, fullName + "[]", rootOff,
+                                    /*accOffset reset*/ 0, /*throughContainer*/ true,
+                                    depth + 1, pathStructs, out);
+        }
+        else if (f.TypeName == "SetProperty" && f.elemType == "StructProperty") {
+            uintptr_t inner = Ubel::GetContainerInnerStructAddr(f.Address);
+            if (inner)
+                CollectSchemaLeaves(inner, fullName + "[]", rootOff,
+                                    0, true, depth + 1, pathStructs, out);
+        }
+        else if (f.TypeName == "MapProperty") {
+            Ubel::MapPairLayout layout;
+            if (Ubel::GetMapPairLayout(f.Address, layout)) {
+                // Tag the side only when BOTH sides are structs (mirrors
+                // WalkContainerLeaves); a struct-on-one-side map reads cleaner
+                // as "Map[].Field".
+                const bool bothStruct = layout.valueStructAddr && layout.keyStructAddr;
+                if (layout.valueStructAddr)
+                    CollectSchemaLeaves(layout.valueStructAddr,
+                                        fullName + "[]" + (bothStruct ? ".Value" : ""),
+                                        rootOff, 0, true, depth + 1, pathStructs, out);
+                if (layout.keyStructAddr)
+                    CollectSchemaLeaves(layout.keyStructAddr,
+                                        fullName + "[]" + (bothStruct ? ".Key" : ""),
+                                        rootOff, 0, true, depth + 1, pathStructs, out);
+            }
+        }
+        else if (f.TypeName == "OptionalProperty" && f.innerType == "StructProperty") {
+            // TOptional<FStruct>: value lives at field+0, so offset accumulation
+            // matches a bare StructProperty (same as CollectContainersRecursive).
+            uintptr_t innerProp = 0, inner = 0;
+            if (Macht::ReadSafe(f.Address + DynOff::FARRAYPROP_INNER, innerProp) && innerProp
+                && Macht::ReadSafe(innerProp + DynOff::FSTRUCTPROP_STRUCT, inner) && inner)
+                CollectSchemaLeaves(inner, fullName, rootOff,
+                                    accOffset + f.Offset, throughContainer,
+                                    depth + 1, pathStructs, out);
+        }
+    }
+    pathStructs.erase(structAddr);
+}
+
 // Cache for FindDefiningClass results -- per (classAddr, fieldOffset).
 // Reset implicitly per SearchProperties call (keyed by a thread-local
 // epoch would be over-engineering; the cost is one map per call).
@@ -3420,7 +3547,8 @@ PropertySearchResult SearchProperties(
     const std::string& query,
     const std::vector<std::string>& typeFilter,
     bool gameOnly,
-    int maxResults)
+    int maxResults,
+    bool deep)
 {
     PropertySearchResult result;
 
@@ -3616,6 +3744,94 @@ PropertySearchResult SearchProperties(
 
             dedupIndex[dk] = result.results.size();
             result.results.push_back(std::move(match));
+        }
+
+        // === Deep descent: nested struct + container-element leaves ===
+        //
+        // Opt-in. Emits synthetic dotted-path matches for scalar leaves reached
+        // THROUGH StructProperty members + struct-typed container elements. The
+        // result is findable-by-name only: Find Instances (owning class) and
+        // Find Funcs (leaf FProperty*) work; Copy Offset / Freeze are gated off
+        // in the UI for these rows (no single class-absolute address once the
+        // path crosses a container). Schema-only — no instance reads here.
+        if (deep && static_cast<int>(result.results.size()) < maxResults) {
+            std::vector<SchemaLeaf> leaves;
+            std::unordered_set<uintptr_t> pathStructs;
+            CollectSchemaLeaves(obj, /*namePrefix*/ "", /*rootFieldOffset*/ -1,
+                                /*accOffset*/ 0, /*throughContainer*/ false,
+                                /*depth*/ 0, pathStructs, leaves);
+
+            for (const auto& lf : leaves) {
+                if (static_cast<int>(result.results.size()) >= maxResults) break;
+
+                // Match keyword against the LEAF name (last path segment) —
+                // same "property named X" semantics as the shallow search.
+                if (lowerQuery.empty()
+                    || ToLower(lf.leafName).find(lowerQuery) == std::string::npos)
+                    continue;
+                if (!typeSet.empty()
+                    && typeSet.find(ToLower(lf.leafType)) == typeSet.end())
+                    continue;
+
+                // Defining-class dedup keyed on the ROOT field's defining class
+                // + dotted path. Mirrors the shallow dedup so an inherited
+                // nested struct field emits one row (bumping inheritedByCount
+                // across the subclasses that share it). Reuses the shared
+                // definingCache — a root field IS a direct field of `obj`, so
+                // the (obj, offset) key resolves identically on both paths.
+                FieldKey rfk{ obj, lf.rootFieldOffset };
+                uintptr_t definingAddr = 0;
+                auto rcacheIt = definingCache.find(rfk);
+                if (rcacheIt != definingCache.end()) {
+                    definingAddr = rcacheIt->second;
+                } else {
+                    definingAddr = FindDefiningClass(obj, lf.rootFieldOffset);
+                    definingCache[rfk] = definingAddr;
+                }
+                if (!definingAddr) definingAddr = obj;
+
+                // The dotted path makes sibling leaves under the same root
+                // distinct; rootFieldOffset keys the inheritance collapse.
+                DedupKey dk{ definingAddr, lf.path, lf.rootFieldOffset };
+                auto dedupIt = dedupIndex.find(dk);
+                if (dedupIt != dedupIndex.end()) {
+                    result.results[dedupIt->second].inheritedByCount++;
+                    continue;
+                }
+
+                std::string definingName, definingPath;
+                if (definingAddr == obj) {
+                    definingName = ci.Name;
+                    definingPath = classPath;
+                } else {
+                    definingName = Ubel::GetName(definingAddr);
+                    definingPath = Ubel::GetFullName(definingAddr);
+                }
+
+                PropertyMatch match;
+                match.className   = definingName;
+                match.classAddr   = definingAddr;
+                match.classPath   = definingPath;
+                match.superName   = "";
+                match.propName    = lf.path;        // synthetic dotted path
+                match.propType    = lf.leafType;
+                match.propOffset  = lf.leafOffset;  // informational only (see isNested)
+                match.propSize    = lf.leafSize;
+                match.definingClassName = definingName;
+                match.definingClassAddr = definingAddr;
+                match.definingClassPath = definingPath;
+                match.inheritedByCount  = 0;
+                match.fieldAddr      = lf.leafFieldAddr;  // leaf FProperty* (xref key)
+                match.boolFieldMask  = lf.boolMask;
+                match.isNested       = true;
+                // No preview source — previewClassAddr stays 0 so Phase 2 skips
+                // these rows (the swap makes classAddr 0 → no instance found).
+                match.previewClassAddr      = 0;
+                match.previewPropertiesSize = 0;
+
+                dedupIndex[dk] = result.results.size();
+                result.results.push_back(std::move(match));
+            }
         }
     }
 

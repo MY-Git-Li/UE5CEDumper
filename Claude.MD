@@ -138,7 +138,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- PointerPanel              <- GObjects/GNames addr |
 |      +-- LiveWalkerPanel           <- Instance drill-down  |
 |      +-- InstanceFinderPanel       <- Class instance search|
-|      +-- PropertySearchPanel       <- Search by name (build 610+ dedupe + Freeze button) |
+|      +-- PropertySearchPanel       <- Search by name (build 610+ dedupe + Freeze button; finder btn + opt-in Deep struct/container descent 1222) |
 |      +-- InterestingFunctionsPanel <- Scored UFunctions; 📦 batch CT (build 760) |
 |      +-- InterestingPropertiesPanel<- Scored properties (B'); 📦 batch CT (build 760) |
 |      +-- ConsolePanel              <- UFUNCTION(exec) discovery + UCheatManager hint (build 778) |

@@ -456,7 +456,8 @@
     <sys:String x:Key="str.PropertySearch.ResultFilterHint">Refine current results (no re-query)</sys:String>
     <sys:String x:Key="str.PropertySearch.Search">Search</sys:String>
     <sys:String x:Key="str.PropertySearch.GameOnly">Game classes only</sys:String>
-    <sys:String x:Key="str.PropertySearch.FindInstances">Find Instances</sys:String>
+    <sys:String x:Key="str.PropertySearch.Deep">Deep (structs/containers)</sys:String>
+    <sys:String x:Key="str.PropertySearch.FindInstances">finder</sys:String>
     <sys:String x:Key="str.PropertySearch.CopyOffset">Copy Offset</sys:String>
     <sys:String x:Key="str.PropertySearch.Freeze">Freeze</sys:String>
 
@@ -704,7 +705,8 @@
     <sys:String x:Key="str.Tip.PropertySearch.TypeFilter">Restrict by FProperty type. Type a few characters to filter the suggestion dropdown (e.g. 'opt' → OptionalProperty). Comma-separated for OR.</sys:String>
     <sys:String x:Key="str.Tip.PropertySearch.ResultFilter">Filter the current result list locally (case-insensitive substring across Class / Property / Type / Super / Preview). No DLL roundtrip.</sys:String>
     <sys:String x:Key="str.Tip.PropertySearch.GameOnly">Show only game-specific classes (exclude engine)</sys:String>
-    <sys:String x:Key="str.Tip.PropertySearch.FindInstances">Find live instances of this class</sys:String>
+    <sys:String x:Key="str.Tip.PropertySearch.Deep">Also descend into nested struct members and struct-typed container elements (TArray/TSet/TMap of structs), so a field buried inside a struct/array (e.g. SaveSlotList[].MsTuneData.GP) becomes findable by name. Slower; matches show a dotted path and an owning class. Off = fast direct-field search only.</sys:String>
+    <sys:String x:Key="str.Tip.PropertySearch.FindInstances">Find in Instance Finder: switch to the Instance Finder tab, fill in this row's class name, and run the search to list all live instances of it.</sys:String>
     <sys:String x:Key="str.Tip.PropertySearch.CopyOffset">Copy property offset to clipboard</sys:String>
     <sys:String x:Key="str.Tip.PropertySearch.Freeze">Generate an AA Script that locks this property across all live instances. Requires AOBMaker plugin in CE.</sys:String>
 

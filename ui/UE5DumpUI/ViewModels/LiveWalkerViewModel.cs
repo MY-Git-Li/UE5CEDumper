@@ -1580,13 +1580,15 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// UWorld down to <paramref name="objectAddr"/> (the owning UObject), then
     /// REPLACE the breadcrumb spine with that path and land on the target.
     ///
-    /// <paramref name="stopAtParent"/> distinguishes the two requested behaviours:
-    ///   • false (a property VALUE — Value Search): land ON the owning object and
-    ///     scroll to the value field (<paramref name="scrollFieldOffset"/> /
+    /// <paramref name="stopAtParent"/> distinguishes the two behaviours:
+    ///   • false (land ON the target — Value Search / Snapshot / SPC AND the
+    ///     Instance Finder selected object): build the full GWorld→…→target
+    ///     spine, open the target node, and (for a container VALUE) scroll to /
+    ///     drill the value field (<paramref name="scrollFieldOffset"/> /
     ///     <paramref name="scrollFieldName"/> "[N]").
-    ///   • true  (an OBJECT / class instance — Instance Finder): stop at the
-    ///     PARENT that points to it and highlight that pointer field, WITHOUT
-    ///     drilling into the target.
+    ///   • true  (stop at the PARENT — Interesting Funcs "where do instances of
+    ///     this class live"): drop the final node, land on the holder, and
+    ///     highlight the pointer field that leads to the target.
     ///
     /// On failure the reason is surfaced via StatusText (e.g. "increase depth").
     /// </summary>

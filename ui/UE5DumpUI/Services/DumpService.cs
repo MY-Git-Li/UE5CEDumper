@@ -1272,13 +1272,14 @@ public sealed class DumpService : IDumpService
 
     public async Task<PropertySearchResult> SearchPropertiesAsync(
         string query, string[]? types = null, bool gameOnly = true,
-        int limit = 200, CancellationToken ct = default)
+        bool deep = false, int limit = 200, CancellationToken ct = default)
     {
         var req = new JsonObject
         {
             ["cmd"] = "search_properties",
             ["query"] = query,
             ["game_only"] = gameOnly,
+            ["deep"] = deep,
             ["limit"] = limit
         };
 
@@ -1326,6 +1327,9 @@ public sealed class DumpService : IDumpService
                     DefiningClassPath = obj["defining_class_path"]?.GetValue<string>() ?? "",
                     InheritedByCount  = obj["inherited_by_count"]?.GetValue<int>() ?? 0,
                     FieldAddr         = obj["field_addr"]?.GetValue<string>() ?? "",
+                    // Deep-mode synthetic dotted-path leaf (build 1222). Absent
+                    // on shallow rows + older DLLs → defaults false.
+                    IsNested          = obj["is_nested"]?.GetValue<bool>() ?? false,
                 });
             }
         }

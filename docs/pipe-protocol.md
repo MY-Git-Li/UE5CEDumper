@@ -123,8 +123,12 @@ Total commands: 31 (command name constants live in `dll/src/Renge.h`)
 // Multi-pattern object search (substring match on name/class/path)
 { "id": 19, "cmd": "search_objects", "query": "Player", "limit": 200 }
 
-// Search properties by name across all classes
-{ "id": 20, "cmd": "search_properties", "query": "Health", "limit": 100 }
+// Search properties by name across all classes.
+// Optional "deep": true (default false) also descends into nested struct members
+// + struct-typed container elements (TArray/TSet<FStruct>, TMap<K,FStruct>); such
+// matches set "is_nested": true and carry a dotted path in "prop_name"
+// (e.g. SaveSlotList[].MsTuneData.GP).
+{ "id": 20, "cmd": "search_properties", "query": "Health", "limit": 100, "deep": false }
 
 // List all classes (UClass objects)
 { "id": 21, "cmd": "list_classes", "limit": 500 }

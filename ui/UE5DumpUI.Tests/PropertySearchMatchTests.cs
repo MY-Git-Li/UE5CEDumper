@@ -124,4 +124,46 @@ public class PropertySearchMatchTests
         var m = new PropertySearchMatch { PropType = "FloatProperty" };
         Assert.Equal("FloatProperty", m.TypeDisplay);
     }
+
+    // === Deep / nested match gating (build 1222) ===
+
+    [Fact]
+    public void DirectField_NotNested_ShowsScalarActions_NoPathTooltip()
+    {
+        // A normal direct-field row: Copy Offset / Freeze apply, and the
+        // Property column gets no extra tooltip (null => no popup).
+        var m = new PropertySearchMatch { PropName = "Health", IsNested = false };
+        Assert.True(m.ShowScalarActions);
+        Assert.Null(m.PropNameTooltip);
+    }
+
+    [Fact]
+    public void NestedMatch_HidesScalarActions_AndExplainsPath()
+    {
+        // A deep (nested) row has a dotted path and no class-absolute offset,
+        // so Copy Offset / Freeze are hidden (ShowScalarActions == false) and
+        // the tooltip explains the path is a drill route + names the class.
+        var m = new PropertySearchMatch
+        {
+            ClassName = "BP_LifeSaveData_C",
+            PropName  = "SaveSlotList[].MsTuneData.GP",
+            IsNested  = true,
+        };
+        Assert.False(m.ShowScalarActions);
+        var tip = m.PropNameTooltip;
+        Assert.NotNull(tip);
+        Assert.Contains("SaveSlotList[].MsTuneData.GP", tip);
+        Assert.Contains("BP_LifeSaveData_C", tip);
+        Assert.Contains("finder", tip);
+    }
+
+    [Fact]
+    public void IsNested_DefaultsFalse()
+    {
+        // Back-compat: a row deserialized from an older DLL (no is_nested
+        // field) defaults to a normal direct-field row.
+        var m = new PropertySearchMatch();
+        Assert.False(m.IsNested);
+        Assert.True(m.ShowScalarActions);
+    }
 }

@@ -47,6 +47,16 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _typeFilter = "";
     [ObservableProperty] private string _resultFilter = "";
     [ObservableProperty] private bool _gameClassesOnly = true;
+
+    /// <summary>
+    /// Opt-in deep descent: when on, the search ALSO walks nested struct
+    /// members + struct-typed container elements (TArray/TSet&lt;FStruct&gt;,
+    /// TMap&lt;K,FStruct&gt;) so a field buried at e.g.
+    /// SaveSlotList[].MsTuneData.GP becomes findable by name. Default off
+    /// because the schema descent is slower and surfaces synthetic dotted-path
+    /// rows; the fast shallow direct-field search is the default behaviour.
+    /// </summary>
+    [ObservableProperty] private bool _deepSearch;
     [ObservableProperty] private bool _isSearching;
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private ObservableCollection<PropertySearchMatch> _results = new();
@@ -286,7 +296,8 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
             var result = await _dump.SearchPropertiesAsync(
                 trimmedQuery,
                 types: types.Length > 0 ? types : null,
-                gameOnly: GameClassesOnly);
+                gameOnly: GameClassesOnly,
+                deep: DeepSearch);
 
             // Cache the full set so the client-side ResultFilter can refine
             // without another DLL roundtrip.
@@ -294,7 +305,8 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
             ApplyResultFilter();
 
             var typeSuffix = types.Length > 0 ? $" [types: {string.Join(",", types)}]" : "";
-            StatusText = $"Found {result.Total} properties in {result.ScannedClasses:N0} classes (scanned {result.ScannedObjects:N0} objects)";
+            var deepSuffix = DeepSearch ? " [deep]" : "";
+            StatusText = $"Found {result.Total} properties in {result.ScannedClasses:N0} classes (scanned {result.ScannedObjects:N0} objects){deepSuffix}";
             _log.Info($"SearchProperties: '{trimmedQuery}'{typeSuffix} -> {result.Total} results (classes={result.ScannedClasses}, objects={result.ScannedObjects})");
         }
         catch (Exception ex)
