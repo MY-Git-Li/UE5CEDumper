@@ -509,12 +509,13 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         // Wire InstanceFinder container match -> "Locate in GWorld" (the address is
         // a value inside a container element → reach the owning object + drill in).
-        InstanceFinder.LocateContainerInGWorld += async (addr, fieldOffset, fieldName) =>
+        InstanceFinder.LocateContainerInGWorld += async (addr, fieldOffset, fieldName, elementIntraOffset) =>
         {
             try
             {
                 SelectedTabIndex = (int)MainTabIndex.LiveWalker;
-                await LiveWalker.LocateInGWorldAsync(addr, fieldOffset, fieldName, stopAtParent: false);
+                await LiveWalker.LocateInGWorldAsync(addr, fieldOffset, fieldName,
+                                                     stopAtParent: false, elementIntraOffset: elementIntraOffset);
             }
             catch (Exception ex)
             {

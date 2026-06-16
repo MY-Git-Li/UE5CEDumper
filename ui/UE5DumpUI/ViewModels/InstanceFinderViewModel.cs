@@ -103,9 +103,10 @@ public partial class InstanceFinderViewModel : ViewModelBase
     /// Event raised to locate the OWNER of a container match within the GWorld
     /// graph (the looked-up address fell inside a container element). Payload =
     /// (owner object address, container field byte offset, "FieldName[N]" so the
-    /// walker auto-drills into the element).
+    /// walker drills into the element, intra-element byte offset of the value
+    /// within a struct element — or -1 for a scalar element that IS the value).
     /// </summary>
-    public event Action<string, int, string>? LocateContainerInGWorld;
+    public event Action<string, int, string, int>? LocateContainerInGWorld;
 
     /// <summary>True when GWorld is available — gates the "Locate in GWorld" button.</summary>
     [ObservableProperty] private bool _isGWorldAvailable;
@@ -479,6 +480,11 @@ public partial class InstanceFinderViewModel : ViewModelBase
         var fieldName = match.ElementIndex >= 0
             ? $"{match.FieldName}[{match.ElementIndex}]"
             : match.FieldName;
-        LocateContainerInGWorld?.Invoke(match.OwnerAddress, match.FieldOffset, fieldName);
+        // For a struct element the value is a field INSIDE it (at IntraOffset) — pass
+        // that so the walker drills into the element and lands on the value. For a
+        // scalar element (the element IS the value) pass -1 (drill stops at the row).
+        int elementIntraOffset = (match.InnerType == "StructProperty" && match.ElementIndex >= 0)
+            ? match.IntraOffset : -1;
+        LocateContainerInGWorld?.Invoke(match.OwnerAddress, match.FieldOffset, fieldName, elementIntraOffset);
     }
 }

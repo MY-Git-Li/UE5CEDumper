@@ -83,6 +83,21 @@ the matched element `[N]` (safe — `TryDrillIntoMatchedContainer` only drills
 `IsContainerNavigable` fields), landing the user on the element ready to scroll to
 the value.
 
+**Land ON the nested value (build 1193).** First container-match test correctly
+produced `GWorld → … → BP_LifeSaveData_C → SaveSlotList → [1]` (BFS verified!) but
+stopped on the array element `[1]` — the actual value `GP` is a field *inside* the
+struct element at `[1]+0x4D8`. (Not a depth issue — `GWorldLocateDepth` is the BFS
+hop count to the owning object, unrelated; 5 vs 8 gave the same correct result.)
+`LocateInGWorldAsync` now takes an `elementIntraOffset`: for a `StructProperty`
+container element the Instance Finder passes the match's `IntraOffset`, and the
+reach path does explicit awaited drills — walk owner → `NavigateToContainerAsync`
+(array view) → `NavigateToFieldAsync` (the `[N]` struct element, which carries
+`StructDataAddr`/`StructClassAddr`) → scroll to the field at the intra-offset — so
+the breadcrumb spine ends `… → SaveSlotList → [1]` and the DataGrid lands ON `GP`.
+The single-shot `_pendingScroll*` path can't chain two container levels, hence the
+explicit sequence. Value Search / SPC reach paths still land on the owning field
+for struct-array-inner hits (same extension, deferred — todo).
+
 -----
 
 ## 2026-06-15 — Main window placement persistence + restartable-apps opt-in (build 1177)

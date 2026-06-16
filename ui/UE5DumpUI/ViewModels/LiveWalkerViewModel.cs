@@ -1578,6 +1578,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// </summary>
     public async Task LocateInGWorldAsync(string? objectAddr, int scrollFieldOffset,
                                           string? scrollFieldName, bool stopAtParent,
+                                          int elementIntraOffset = -1,
                                           CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(objectAddr)) return;
@@ -1639,6 +1640,52 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     FieldName = s.FieldName,
                     IsPointerDeref = true,  // every edge we followed is a pointer deref
                 });
+            }
+
+            // Deep nested struct-array value (Instance Finder container match): after
+            // reaching the owning object, explicitly drill array → struct element →
+            // scroll to the field at the intra-element offset, so the user lands ON the
+            // value (not just on the element row). The single-shot pending-scroll path
+            // below can't chain two container levels, so do awaited drills here.
+            if (!stopAtParent && elementIntraOffset >= 0)
+            {
+                _pendingScrollFieldOffset = null;
+                _pendingScrollFieldName = null;
+                _pendingDrillElementIndex = -1;
+
+                var ownerAddr = Breadcrumbs[^1].Address;
+                var ownerResult = await _dump.WalkInstanceAsync(ownerAddr, arrayLimit: ArrayLimit,
+                                                                previewLimit: PreviewLimit, fillGaps: FillGaps, ct: ct);
+                ownerResult = await AutoFillGapsRetryAsync(ownerResult, ownerAddr);
+                UpdateDisplay(ownerResult);   // land on owner (no pending scroll/drill)
+
+                int elemIdx = ParseElementIndexSuffix(scrollFieldName ?? "");
+                var arrayField = Fields.FirstOrDefault(f => f.Offset == scrollFieldOffset && f.IsContainerNavigable);
+                bool drilled = false;
+                if (arrayField != null && elemIdx >= 0)
+                {
+                    await NavigateToContainerAsync(arrayField);   // → array element view
+                    var elemRow = Fields.FirstOrDefault(f =>
+                        f.Name == $"[{elemIdx}]" || f.Name.StartsWith($"[{elemIdx}] ", StringComparison.Ordinal));
+                    if (elemRow != null && elemRow.IsNavigable)
+                    {
+                        await NavigateToFieldAsync(elemRow);      // → struct element view
+                        var leaf = Fields.FirstOrDefault(f => f.Offset == elementIntraOffset);
+                        if (leaf != null)
+                        {
+                            SelectedField = leaf;
+                            ScrollToFieldRequested?.Invoke(leaf.Name);
+                        }
+                        drilled = true;
+                    }
+                }
+
+                _log.Info($"LocateInGWorld: reach+drill mode, {path.Depth} hop(s), visited {path.Visited}, " +
+                          $"{path.DurationMs}ms, drilled={drilled} | BC={FormatBreadcrumbTrace()}");
+                StatusText = drilled
+                    ? $"Located via GWorld — {path.Depth} hop(s) to {path.TargetName}; drilled into the element."
+                    : $"Located via GWorld — {path.Depth} hop(s) to {path.TargetName} (drill into the element manually).";
+                return;
             }
 
             // Decide the field to scroll/highlight once the display node is walked.
