@@ -19,6 +19,12 @@ state.
 >   WeaponTuneList[0].Tunes[2]` repro (28116 objs / 50ms). Build 1199 also fixed the
 >   Live Walker per-row `Addr` copy in container-element views (use the resolved
 >   `FieldAddress`) and moved "Locate in GWorld depth" to the top Options flyout.
+> - build **1202 (2026-06-16)** — **Value Search now descends into `TArray<FStruct>`
+>   elements**: scanning for a value finds it inside a struct-array element (e.g.
+>   `SaveSlotList[1].GP = 46643`), incl. leaves nested in direct sub-structs. One
+>   struct-array level (containers nested *inside* an element are separate allocations —
+>   the by-address deep scan covers those). Snapshot capture + Class Pivot already
+>   handle struct-array elements; SPC Query/Diff inclusion is in [todo.md](todo.md).
 > - builds **1027–1112 (2026-06-12…14)** — **Teleport** tab (Wirbel module):
 >   BugIt-style marker save/recall (3 slots) + cursor teleport for 2.5D/45° games
 >   + BugItGo interop + Debug-Camera force on/off + **read-only camera POV**

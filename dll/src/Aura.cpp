@@ -4670,7 +4670,12 @@ ValueScanResult ScanForValue(
     // Which container a ScanField walks (None = direct scalar field).
     // Array/Set emit one value per element; MapKey/MapValue emit the key
     // or value half of each TPair (build 927, V1a).
-    enum class ScanContainer : uint8_t { None, Array, Set, MapKey, MapValue };
+    // StructArrayInner: a LEAF field that lives inside the element struct of a
+    // TArray<FStruct> (e.g. SaveSlotList[1].GP). The TArray header is at `offset`
+    // within the object; each element struct is `elemStride` bytes; the leaf sits
+    // at `structInnerOffset` within the element. Scanned per element at
+    // arrayData + idx*elemStride + structInnerOffset. (build 1201)
+    enum class ScanContainer : uint8_t { None, Array, Set, MapKey, MapValue, StructArrayInner };
     struct ScanField {
         int32_t       offset;
         int32_t       size;
@@ -4678,8 +4683,9 @@ ValueScanResult ScanForValue(
         std::string   typeName;
         uint8_t       boolFieldMask;
         ScanContainer container    = ScanContainer::None;
-        int32_t       elemStride   = 0;   // Array elem / Set elem / Map pair stride
+        int32_t       elemStride   = 0;   // Array elem / Set elem / Map pair stride / struct-array elem
         int32_t       valueOffset  = 0;   // MapValue: byte offset of value within the TPair
+        int32_t       structInnerOffset = 0;  // StructArrayInner: leaf offset within the element struct
         // V1c: TOptional<T> unset gate. >= 0 → this leaf is a TOptional whose
         // wrapped value is at offset+0 with a trailing bIsSet byte at
         // offset+optionalFlagOffset; the per-instance read skips slots whose
@@ -4786,6 +4792,56 @@ ValueScanResult ScanForValue(
     // motivated this fix. Same applies to FVector / FRotator / FTransform
     // members of any UObject.
     //
+    // Struct-array descent (build 1201): collect LEAF fields inside the element
+    // struct of a TArray<FStruct> so a value held inside an element (e.g.
+    // SaveSlotList[1].GP) is found by VALUE. Emits one StructArrayInner ScanField
+    // per leaf, carrying the outer array field offset + the leaf's element-
+    // relative offset (through direct sub-structs). One struct-array level only:
+    // containers nested inside the element (TArray/TSet/TMap) are SEPARATE
+    // allocations and intentionally NOT followed — the by-address deep scan
+    // (FindInContainersDeep) covers those. Direct-struct nesting inside the
+    // element IS followed (depth-capped).
+    auto collectStructArrayInner = [&](auto& self,
+                                       uintptr_t innerStructAddr,
+                                       int32_t   arrayFieldOffset,
+                                       int32_t   elemStride,
+                                       int32_t   elemRelOffset,
+                                       const std::string& namePrefix,
+                                       std::vector<ScanField>& out,
+                                       int depth) -> void {
+        constexpr int kMaxStructDepth = 4;   // direct-struct nesting inside the element
+        if (depth > kMaxStructDepth || !innerStructAddr) return;
+        ClassInfo ci = Ubel::WalkClassEx(innerStructAddr);
+        for (const auto& f : ci.Fields) {
+            bool accepted = false;
+            for (const auto& t : acceptedTypes) {
+                if (f.TypeName == t) { accepted = true; break; }
+            }
+            if (accepted) {
+                ScanField sf;
+                sf.offset           = arrayFieldOffset;        // TArray header within the object
+                sf.size             = f.Size;
+                sf.name             = namePrefix + "." + f.Name;
+                sf.typeName         = f.TypeName;
+                sf.boolFieldMask    = f.boolFieldMask;
+                sf.container        = ScanContainer::StructArrayInner;
+                sf.elemStride       = elemStride;
+                sf.structInnerOffset = elemRelOffset + f.Offset;
+                sf.elemTypeName     = f.TypeName;              // descriptor type + multiResolve
+                out.push_back(std::move(sf));
+                continue;
+            }
+            // Direct sub-struct: recurse, accumulating the element-relative offset.
+            if (f.TypeName == "StructProperty" && f.Address) {
+                uintptr_t nested = 0;
+                if (Macht::ReadSafe(f.Address + DynOff::FSTRUCTPROP_STRUCT, nested) && nested) {
+                    self(self, nested, arrayFieldOffset, elemStride,
+                         elemRelOffset + f.Offset, namePrefix + "." + f.Name, out, depth + 1);
+                }
+            }
+        }
+    };
+
     // Cycle / pathological-depth guards:
     //   - kMaxDepth = 4. Real UE structs rarely nest beyond 2-3 levels;
     //     beyond 4 we're either in a recursive type loop or pathological
@@ -4887,6 +4943,25 @@ ValueScanResult ScanForValue(
                         sf.elemStride    = stride;
                         sf.elemTypeName  = f.innerType;
                         out.push_back(std::move(sf));
+                        continue;
+                    }
+                }
+
+                // TArray<FStruct>: descend into the element struct's leaf fields
+                // so a value inside an element (SaveSlotList[1].GP) is found by
+                // value. Non-vector scans only (vectors want whole-struct matches,
+                // handled by the inner-name check above). (build 1201)
+                if (acceptedStructNames.empty() && f.innerType == "StructProperty") {
+                    uintptr_t innerStruct = Ubel::GetContainerInnerStructAddr(f.Address);
+                    int32_t   stride      = Ubel::GetArrayInnerElemSize(f.Address);
+                    if (innerStruct && stride > 0) {
+                        std::string arrName = namePrefix.empty()
+                            ? f.Name : (namePrefix + "." + f.Name);
+                        // "[]" placeholder marks where the element index goes at
+                        // display time → "SaveSlotList[3].GP" (FieldDisplayName).
+                        collectStructArrayInner(collectStructArrayInner, innerStruct,
+                                                baseOffset + f.Offset, stride,
+                                                /*elemRelOffset*/ 0, arrName + "[]", out, /*depth*/ 0);
                         continue;
                     }
                 }
@@ -5356,6 +5431,49 @@ ValueScanResult ScanForValue(
                         }
                     }
                     scanElement(sf, arrayDataPtr + static_cast<uintptr_t>(idx) * sf.elemStride, idx);
+                }
+                continue;
+            }
+
+            // Struct-array-inner path (build 1201): a leaf field INSIDE a
+            // TArray<FStruct> element (e.g. SaveSlotList[1].GP). Same TArray
+            // header read as Array, but the value sits at
+            // arrayData + idx*elemStride + structInnerOffset (an element-relative
+            // leaf offset, possibly through direct sub-structs).
+            if (sf.container == ScanContainer::StructArrayInner) {
+                uintptr_t arrayDataPtr = 0;
+                int32_t   arrayNum     = 0;
+                int32_t   arrayMax     = 0;
+                if (!Macht::ReadSafe(obj + sf.offset, arrayDataPtr)) continue;
+                if (!Macht::ReadSafe(obj + sf.offset + 8, arrayNum)) continue;
+                if (!Macht::ReadSafe(obj + sf.offset + 12, arrayMax)) continue;
+
+                constexpr int32_t kMaxElementsPerArray = 10'000'000;
+                if (arrayNum < 0 || arrayNum > kMaxElementsPerArray) {
+                    LOG_WARN("ValueScan: skipping struct TArray with Num=%d on field '%s' at 0x%llX (instance 0x%llX)",
+                             arrayNum, sf.name.c_str(),
+                             (unsigned long long)(obj + sf.offset),
+                             (unsigned long long)obj);
+                    continue;
+                }
+                if (arrayNum == 0) continue;
+                if (arrayMax < arrayNum) continue;
+                if (!arrayDataPtr) continue;
+
+                for (int32_t idx = 0; idx < arrayNum; ++idx) {
+                    if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
+                    if ((idx & 0xFFF) == 0) {
+                        if (deadlineHit.load(std::memory_order_relaxed)) return;
+                        if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+                        if (std::chrono::steady_clock::now() - t0 > kDeadline) {
+                            deadlineHit.store(true, std::memory_order_relaxed);
+                            return;
+                        }
+                    }
+                    scanElement(sf,
+                        arrayDataPtr + static_cast<uintptr_t>(idx) * sf.elemStride
+                                     + static_cast<uintptr_t>(sf.structInnerOffset),
+                        idx);
                 }
                 continue;
             }

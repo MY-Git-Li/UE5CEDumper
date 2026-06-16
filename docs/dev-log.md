@@ -14,6 +14,46 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-16 — Value Search descends into struct arrays (build 1202)
+
+Live-testing the deep-container work surfaced that **Value Search can't find a value
+inside a struct-array element** — scanning for `GP = 46643`
+(`BP_LifeSaveData_C.SaveSlotList[1].GP`, an int inside a `TArray<FStruct>` element)
+returned 0 candidates, because `ScanForValue` never descended `TArray<FStruct>`. The
+user asked to close that gap (the previously-deferred "Value Search descends structs").
+
+**DLL (`ScanForValue`).** New `ScanContainer::StructArrayInner` + a
+`collectStructArrayInner` collector: when field collection hits a `TArray<FStruct>`
+(non-vector scan), it walks the element struct's LEAF fields — including those nested
+in *direct* sub-structs — and emits one `StructArrayInner` ScanField per leaf, carrying
+the outer array's object-relative offset + the leaf's element-relative offset
+(`structInnerOffset`) + the element stride. The per-instance scan reads the TArray
+header and tests each element at `arrayData + idx*stride + structInnerOffset` (reusing
+the existing `scanElement` predicate paths + the 10M circuit-breaker + 15s deadline +
+cancel poll). **One struct-array level**: containers nested *inside* an element
+(`TArray`/`TSet`/`TMap`) are separate heap allocations and are NOT followed — the
+by-address deep scan (`FindInContainersDeep`) covers those. Vector scans keep their
+whole-struct-match semantics (descent gated off). Display: `FieldDisplayName` now honours
+a `[]` placeholder so a struct-array-inner field renders `SaveSlotList[3].GP` (index
+after the array name, not appended at the end), via the descriptor name
+`SaveSlotList[].GP`. +3 dll_helpers EXPECTs → **510 dll_helpers green**.
+
+**Snapshot / SPC / Pivot (engine analysis, per the user's "same-engine → together,
+else todo").** These are *separate* engines from `ScanForValue`:
+- **Snapshot capture ALREADY captures struct-array elements** (`Aura::CaptureStructArrays`
+  → `array_field`/`elem_index`/`inner_prop_name` columns), so `GP` is already in the DB.
+- **Class Pivot ALREADY supports array-element fields** (`SnapshotStore.ListPivotArrayFieldsAsync`
+  + the `array_field IS NOT NULL` array-pivot queries).
+- **SPC Query + Snapshot Diff still exclude them** (`WHERE array_field IS NULL`,
+  SnapshotStore lines 534/562/681) — the one remaining gap. It lives in the C#
+  `SnapshotStore`/`SpcEngine` (a different engine from the Value Search DLL change), so
+  per the rule it's filed in [todo.md](todo.md) rather than bundled here.
+
+1512 C# / 510 dll / 31 utf8 green. **In-game verify pending**: scan `46643` on SEED →
+expect the `SaveSlotList[1].GP` candidate to appear.
+
+-----
+
 ## 2026-06-16 — Deeply-nested container values: recursive find_by_address + multi-level GWorld drill (build 1198)
 
 The first live test of Locate in GWorld (build 1193) surfaced two gaps in the

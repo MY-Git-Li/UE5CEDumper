@@ -141,6 +141,25 @@ Gated behind the System-tab opt-in (`IExperimentalGate`). Design of record:
 (in-memory hash-joins), heavy-query cancellation, persisted pivot index, and
 Windows-only AOT backend all shipped (dev-log builds 805–923).
 
+- **SPC Query + Snapshot Diff: include struct-array-element rows** — Effort: **M** ·
+  Risk: **med**. The snapshot already CAPTURES struct-array elements
+  (`Aura::CaptureStructArrays` → `array_field`/`elem_index`/`inner_prop_name`), and
+  **Class Pivot already consumes them** (`SnapshotStore.ListPivotArrayFieldsAsync` +
+  the `array_field IS NOT NULL` array-pivot path). But **SPC Query + Diff still exclude
+  them** via `WHERE array_field IS NULL` (`SnapshotStore.cs` lines ~534 (diff A), ~562
+  (diff B), ~681 (SPC anchor/load)). So a value like `BP_LifeSaveData_C.SaveSlotList[1].GP`
+  is captured + pivotable but invisible to SPC/Diff. To close it: drop the
+  `array_field IS NULL` filter in those three loads AND extend the candidate join key
+  to include `array_field` + `elem_index` (+ `inner_prop_name`) so distinct elements
+  don't collide in the in-memory hash-join, then surface the array path in the result
+  row (`SpcResultRow`/diff row) display + the live address (`obj_addr + elem stride*idx
+  + inner offset`). This is the **C# `SnapshotStore`/`SpcEngine` engine — separate from
+  the Value Search DLL change** that landed the by-value descent (build 1202), hence
+  filed here rather than bundled. **Verify first** that capture already has `GP`
+  in-game (it should) before building the SPC side.
+  *Parent: Value Search struct-array descent shipped build 1202 (dev-log 2026-06-16);
+  Snapshot/Pivot array-element support already present.*
+
 - **C2 — find-by-value locator + pivot handoff** — Effort: **M** · Risk: **med**.
   Closes the loop: locate which class/field holds a known value, then hand off into
   Class Pivot.
