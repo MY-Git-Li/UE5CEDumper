@@ -1723,6 +1723,145 @@ static const std::vector<ContainerCacheEntry>& GetClassContainers(uintptr_t cls)
     return ins->second;
 }
 
+// === Shared recursive container-leaf walker (build 1204) ===
+//
+// Visits every scalar leaf reachable from a struct THROUGH containers (struct-
+// array elements, map keys/values, set elements, AND leaf-container elements
+// like TArray<int>) + direct sub-structs, to arbitrary (bounded) depth. The
+// same descent that FindInContainersDeep uses to LOCATE an address, but here it
+// ENUMERATES leaves via a visitor — so Value Search (value-match) and Snapshot
+// capture (record) share one engine. Depth-0 (the object's own direct fields)
+// is intentionally NOT emitted — those are captured by each caller's normal
+// direct-field pass; only container-reachable leaves (depth >= 1) are visited.
+struct ContainerLeaf {
+    const std::string& arrayPath;   // dotted path to the deepest container, outer
+                                    // indices substituted, e.g.
+                                    // "SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes"
+    int32_t            elemIndex;   // leaf's element index within that container
+    uintptr_t          elemStructAddr;  // UScriptStruct* of the element (0 = leaf-container element)
+    uintptr_t          elemBaseAddr;    // element's base address (for inner-key rendering)
+    const std::string& leafName;    // leaf field name within the element ("" = the element IS the value)
+    uintptr_t          leafAddr;    // absolute address of the value
+    const std::string& leafType;    // property type name ("IntProperty" / "NameProperty" / ...)
+    int32_t            leafSize;    // byte width (0 for variable/string — caller resolves)
+    uint8_t            boolMask;    // BoolProperty bit mask (0xFF otherwise)
+    int                depth;       // recursion depth at which this leaf was emitted (>= 1)
+};
+using ContainerLeafVisitor = std::function<void(const ContainerLeaf&)>;
+
+struct WalkLeafLimits {
+    int maxDepth = 4;     // container nesting levels
+    int maxElems = 256;   // per-container element cap
+    std::function<bool()> aborted;   // periodic cancel/deadline poll (may be null)
+};
+
+// True for a scalar leaf field (not a container / struct / optional — those are
+// recursed). Such fields are emitted as leaves; the visitor filters by type.
+static bool IsScalarLeafType(const std::string& t) {
+    return t != "ArrayProperty" && t != "SetProperty" && t != "MapProperty"
+        && t != "StructProperty" && t != "OptionalProperty" && !t.empty();
+}
+
+// Emit `structAddr`'s direct scalar leaves (incl. those nested in direct
+// sub-structs), at element path `arrayPath`[`elemIndex`]. Containers inside the
+// struct are NOT emitted here — they're walked via GetClassContainers.
+static void EmitStructDirectLeaves(uintptr_t structAddr, uintptr_t base,
+                                   const std::string& arrayPath, int32_t elemIndex,
+                                   uintptr_t elemStructAddr, uintptr_t elemBaseAddr,
+                                   const std::string& namePrefix, int depth, int structDepth,
+                                   const ContainerLeafVisitor& visit) {
+    constexpr int kMaxStructDepth = 4;
+    if (structDepth > kMaxStructDepth || !structAddr) return;
+    ClassInfo ci = Ubel::WalkClassEx(structAddr);
+    for (const auto& f : ci.Fields) {
+        std::string leafName = namePrefix.empty() ? f.Name : (namePrefix + "." + f.Name);
+        if (IsScalarLeafType(f.TypeName)) {
+            ContainerLeaf lf{ arrayPath, elemIndex, elemStructAddr, elemBaseAddr,
+                              leafName, base + f.Offset, f.TypeName, f.Size, f.boolFieldMask, depth };
+            visit(lf);
+        } else if (f.TypeName == "StructProperty" && f.Address) {
+            uintptr_t nested = 0;
+            if (Macht::ReadSafe(f.Address + DynOff::FSTRUCTPROP_STRUCT, nested) && nested)
+                EmitStructDirectLeaves(nested, base + f.Offset, arrayPath, elemIndex,
+                                       elemStructAddr, elemBaseAddr, leafName, depth, structDepth + 1, visit);
+        }
+    }
+}
+
+// Recursive container walk. `pathPrefix` is the dotted+indexed path accumulated
+// so far ("" at the object). Emits container-element leaves (depth >= 1).
+static void WalkContainerLeaves(uintptr_t structBase, uintptr_t structAddr,
+                                const std::string& pathPrefix, int depth,
+                                const WalkLeafLimits& lim, const ContainerLeafVisitor& visit) {
+    if (depth > lim.maxDepth) return;
+    if (lim.aborted && lim.aborted()) return;
+
+    const auto& containers = GetClassContainers(structAddr);
+    for (const auto& cfe : containers) {
+        if (cfe.stride <= 0) continue;
+        uintptr_t fieldAddr = structBase + cfe.offset;
+
+        uintptr_t bufData = 0;
+        int32_t   capacity = 0;
+        Macht::TSparseArrayView sa{};
+        const bool isSparse = (cfe.kind != ContainerKind::Array);
+        if (cfe.kind == ContainerKind::Array) {
+            Macht::TArrayView arr;
+            if (!Macht::ReadTArray(fieldAddr, arr)) continue;
+            if (arr.Max <= 0 || !arr.Data || arr.Max > 0x100000) continue;
+            // Use Count (logical) for capture — slack slots hold stale data.
+            bufData = arr.Data; capacity = arr.Count;
+        } else {
+            if (!Macht::ReadTSparseArray(fieldAddr, sa)) continue;
+            if (sa.MaxCapacity <= 0 || !sa.Data || sa.MaxCapacity > 0x100000) continue;
+            bufData = sa.Data; capacity = sa.MaxCapacity;
+        }
+        if (capacity <= 0) continue;
+
+        // Path to THIS container (cfe.name is already a direct-struct-dotted name).
+        std::string containerPath = pathPrefix.empty() ? cfe.name : (pathPrefix + "." + cfe.name);
+
+        // Sides to handle: Array/Set element; Map value (+ key). For a struct
+        // side recurse + emit its direct leaves; for a leaf side the element IS
+        // the value.
+        struct Side { uintptr_t structAddr; int32_t regionOff; const char* tag; };
+        Side sides[2];
+        int nSides = 0;
+        if (cfe.kind == ContainerKind::Map) {
+            sides[nSides++] = { cfe.valueStruct, cfe.valueOffset, ".Value" };
+            if (cfe.keyStruct) sides[nSides++] = { cfe.keyStruct, 0, ".Key" };
+        } else {
+            sides[nSides++] = { cfe.elemStruct, 0, "" };
+        }
+
+        const int32_t probe = capacity < lim.maxElems ? capacity : lim.maxElems;
+        for (int32_t e = 0; e < probe; ++e) {
+            if ((e & 0x3F) == 0 && lim.aborted && lim.aborted()) return;
+            if (isSparse && !Macht::IsSparseIndexAllocated(sa, e)) continue;
+            uintptr_t slotBase = bufData + static_cast<int64_t>(e) * cfe.stride;
+
+            for (int s = 0; s < nSides; ++s) {
+                if (sides[s].structAddr) {
+                    // Struct element: emit its direct leaves + recurse its containers.
+                    std::string sidePath = containerPath;
+                    if (cfe.kind == ContainerKind::Map && nSides > 1) sidePath += sides[s].tag;
+                    uintptr_t elemBase = slotBase + sides[s].regionOff;
+                    EmitStructDirectLeaves(sides[s].structAddr, elemBase, sidePath, e,
+                                           sides[s].structAddr, elemBase, "", depth + 1, 0, visit);
+                    WalkContainerLeaves(elemBase, sides[s].structAddr,
+                                        sidePath + "[" + std::to_string(e) + "]", depth + 1, lim, visit);
+                } else if (s == 0 && IsScalarLeafType(cfe.innerType)) {
+                    // Leaf-container element (TArray<int> etc.): the element IS the value.
+                    const std::string empty;
+                    ContainerLeaf lf{ containerPath, e, 0, slotBase, empty,
+                                      slotBase, cfe.innerType, 0 /*caller resolves size*/, 0xFF, depth + 1 };
+                    visit(lf);
+                }
+            }
+        }
+    }
+}
+
 // Helper: emit one ContainerMatch given a resolved hit. Reads owner name +
 // class name lazily so we only pay that cost when a match is actually found.
 static ContainerMatch BuildMatch(uintptr_t obj, int32_t ownerIndex, uintptr_t cls,
@@ -5837,65 +5976,88 @@ std::string RenderInnerKey(const FieldInfo& kf, uintptr_t elemAddr) {
 // TArray<StructProperty> field, resolve the inner UScriptStruct, pick an
 // inner-key field (reorder-immune join key) + its numeric inner fields, and
 // emit up to arrayCap elements.
-void CaptureStructArrays(uintptr_t obj, const ClassInfo& ci,
+// Capture numeric leaves reachable through containers at ANY (bounded) depth
+// (build 1204), via the shared WalkContainerLeaves. The full nested path is
+// baked into SnapshotArray.field (e.g.
+// "SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes") so SPC/Diff,
+// which key on array_field + elem_index, get deep support with no schema change.
+// Leaf-container elements (TArray<int> etc.) are captured too (leaf name "").
+void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
                          ValueScan::DataType numericScope, int32_t arrayCap,
                          std::vector<Aura::SnapshotArray>& out) {
+    if (!obj || !cls) return;
     if (arrayCap <= 0) arrayCap = 256;
-    for (const auto& fi : ci.Fields) {
-        if (fi.TypeName != "ArrayProperty" || fi.innerType != "StructProperty") continue;
-        if (!fi.Address) continue;
 
-        // Inner UScriptStruct: ArrayProperty::Inner (FProperty*) -> StructProperty::Struct.
-        uintptr_t innerProp = 0, innerStruct = 0;
-        if (!Macht::ReadSafe(fi.Address + DynOff::FARRAYPROP_INNER, innerProp) || !innerProp) continue;
-        if (!Macht::ReadSafe(innerProp + DynOff::FSTRUCTPROP_STRUCT, innerStruct) || !innerStruct) continue;
+    const auto& members = ValueScan::MultiNumericMembers(numericScope);
+    if (members.empty()) return;   // not a meta scope -> capture nothing
 
-        ClassInfo si = Ubel::WalkClassEx(innerStruct);  // cached per struct
-        if (si.Fields.empty()) continue;
+    // Regroup the flat leaf stream back into SnapshotArray{field, elements[]}.
+    std::unordered_map<std::string, size_t> arrPos;    // arrayPath -> out[] index
+    std::unordered_map<std::string, size_t> elemPos;   // arrayPath\x01idx -> element pos within that array
 
-        int32_t stride = Ubel::GetArrayInnerElemSize(fi.Address);
-        if (stride <= 0) continue;
+    WalkLeafLimits lim;
+    lim.maxDepth = 4;
+    lim.maxElems = arrayCap;
+    lim.aborted  = [] { return Cancel::Requested(); };
 
-        std::vector<std::string> innerTypes, innerNames;
-        innerTypes.reserve(si.Fields.size());
-        innerNames.reserve(si.Fields.size());
-        for (const auto& f : si.Fields) { innerTypes.push_back(f.TypeName); innerNames.push_back(f.Name); }
+    WalkContainerLeaves(obj, cls, /*pathPrefix*/ "", /*depth*/ 0, lim,
+        [&](const ContainerLeaf& lf) {
+            // Skip TOP-LEVEL leaf-containers (a TArray<int> directly on the object,
+            // depth==1): the main capture loop never tracked those, and capturing
+            // every object's scalar arrays would balloon the DB. Struct-array
+            // element fields (e.g. SaveSlotList[1].GP, depth 1) ARE captured, and
+            // nested leaf-containers (Tunes[N], depth >= 2) too. (build 1204)
+            if (lf.leafName.empty() && lf.depth < 2) return;
+            // Snapshot tracks only numeric leaves within the configured scope.
+            ValueScan::DataType ldt;
+            if (!ValueScan::TryDataTypeFromPropertyTypeName(lf.leafType, ldt)) return;
+            bool inScope = false;
+            for (ValueScan::DataType m : members) if (m == ldt) { inScope = true; break; }
+            if (!inScope) return;
+            size_t sz = ValueScan::SizeOf(ldt);
+            if (sz == 0 || sz > 8) return;
+            uint8_t buf[8] = {};
+            if (!Macht::ReadBytesSafe(lf.leafAddr, buf, sz)) return;
 
-        auto numPicks = ValueScan::SelectSnapshotNumericFields(innerTypes, numericScope);
-        if (numPicks.empty()) continue;  // nothing numeric to track inside the struct
-        int keyIdx = ValueScan::SelectArrayInnerKey(innerTypes, innerNames);
+            // Find/create the SnapshotArray for this path.
+            size_t aPos;
+            auto ai = arrPos.find(lf.arrayPath);
+            if (ai == arrPos.end()) {
+                aPos = out.size();
+                Aura::SnapshotArray sa; sa.field = lf.arrayPath;
+                out.push_back(std::move(sa));
+                arrPos.emplace(lf.arrayPath, aPos);
+            } else aPos = ai->second;
 
-        Macht::TArrayView arr;
-        if (!Macht::ReadTArray(obj + fi.Offset, arr)) continue;
-        if (arr.Count <= 0 || !arr.Data) continue;
-        int32_t n = (std::min)(arr.Count, arrayCap);
+            // Find/create the element (resolve inner-key once, on first leaf).
+            std::string ekey = lf.arrayPath; ekey += '\x01'; ekey += std::to_string(lf.elemIndex);
+            size_t ePos;
+            auto ei = elemPos.find(ekey);
+            if (ei == elemPos.end()) {
+                ePos = out[aPos].elements.size();
+                Aura::SnapshotArrayElement el; el.index = lf.elemIndex;
+                if (lf.elemStructAddr) {
+                    ClassInfo eci = Ubel::WalkClassEx(lf.elemStructAddr);  // cached
+                    std::vector<std::string> types, names;
+                    types.reserve(eci.Fields.size()); names.reserve(eci.Fields.size());
+                    for (const auto& ff : eci.Fields) { types.push_back(ff.TypeName); names.push_back(ff.Name); }
+                    int kIdx = ValueScan::SelectArrayInnerKey(types, names);
+                    if (kIdx >= 0 && kIdx < static_cast<int>(eci.Fields.size())) {
+                        el.keyName  = eci.Fields[kIdx].Name;
+                        el.keyValue = RenderInnerKey(eci.Fields[kIdx], lf.elemBaseAddr);
+                    }
+                }
+                out[aPos].elements.push_back(std::move(el));
+                elemPos.emplace(ekey, ePos);
+            } else ePos = ei->second;
 
-        Aura::SnapshotArray sa;
-        sa.field = fi.Name;
-        for (int32_t e = 0; e < n; ++e) {
-            uintptr_t elemAddr = arr.Data + static_cast<uintptr_t>(e) * static_cast<uintptr_t>(stride);
-            Aura::SnapshotArrayElement el;
-            el.index = e;
-            if (keyIdx >= 0 && keyIdx < static_cast<int>(si.Fields.size())) {
-                const auto& kf = si.Fields[keyIdx];
-                el.keyName  = kf.Name;
-                el.keyValue = RenderInnerKey(kf, elemAddr);
-            }
-            for (const auto& p : numPicks) {
-                const auto& nf = si.Fields[p.fieldIndex];
-                size_t sz = ValueScan::SizeOf(p.dt);
-                if (sz == 0 || sz > 8) continue;
-                uint8_t buf[8] = {};
-                if (!Macht::ReadBytesSafe(elemAddr + nf.Offset, buf, sz)) continue;
-                Aura::SnapshotField f2;
-                f2.name = nf.Name; f2.offset = nf.Offset; f2.type = nf.TypeName;
-                f2.hex = SnapshotBytesToHex(buf, sz);
-                el.fields.push_back(std::move(f2));
-            }
-            if (!el.fields.empty()) sa.elements.push_back(std::move(el));
-        }
-        if (!sa.elements.empty()) out.push_back(std::move(sa));
-    }
+            Aura::SnapshotField f2;
+            f2.name = lf.leafName;   // "" for a leaf-container element (the element IS the value)
+            f2.offset = 0;           // element-relative; not meaningful for a deep path
+            f2.type = lf.leafType;
+            f2.hex  = SnapshotBytesToHex(buf, sz);
+            out[aPos].elements[ePos].fields.push_back(std::move(f2));
+        });
 }
 } // namespace
 
@@ -5967,8 +6129,9 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
             so.fields.push_back(std::move(sf));
         }
 
-        // Struct-array element inner fields (inner-key capture).
-        CaptureStructArrays(obj, ci, numericScope, arrayCap, so.arrays);
+        // Container-element leaves at any (bounded) depth — struct-array / map /
+        // set elements + nested leaf-containers (build 1204).
+        CaptureStructArrays(obj, cls, numericScope, arrayCap, so.arrays);
 
         // Keep objects with any captured scalar field OR array element.
         if (so.fields.empty() && so.arrays.empty()) continue;

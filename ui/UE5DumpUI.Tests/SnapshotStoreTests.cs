@@ -244,6 +244,50 @@ public class SnapshotStoreTests : IDisposable
         Assert.DoesNotContain(diff.Changed, r => r.PropName == "Cargo[1].Quantity");
     }
 
+    // build 1204 — deep nested array_field path (the DLL bakes the full path with
+    // outer indices into SnapshotArray.field) + a leaf-container element (TArray<int>,
+    // empty inner prop). Verifies the diff keys distinct deep paths AND the display
+    // renders "path[N]" (no trailing dot) for an empty inner prop.
+    private static SnapshotCapturedObject DeepSave(string tunesHex, string gpHex)
+    {
+        var o = new SnapshotCapturedObject
+        {
+            Index = 5, Addr = "0x5", Name = "Save_0", ClassName = "BP_Save_C",
+            OuterClassName = "World", Path = "/Game/M.M:L.Save_0",
+        };
+        // Leaf-container element nested deep: element 2 is the int value (no inner prop).
+        var tunes = new SnapshotCapturedArray { Field = "SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes" };
+        tunes.Elements.Add(MakeElem(2, "", "", ("", "IntProperty", tunesHex)));
+        o.Arrays.Add(tunes);
+        // 1-level struct-array element field at a deep-ish path.
+        var slots = new SnapshotCapturedArray { Field = "SaveSlotList" };
+        slots.Elements.Add(MakeElem(1, "Slot", "1", ("GP", "IntProperty", gpHex)));
+        o.Arrays.Add(slots);
+        return o;
+    }
+
+    [Fact]
+    public async Task Diff_DeepNestedPath_AndLeafContainer()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        long a = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "a" }, ct);
+        await _store.WriteChunkAsync(a, new[] { DeepSave("14000000", "33B60000") }, ct);  // Tunes[2]=20, GP=46643
+        await _store.FinalizeSnapshotAsync(a, 1, 2, ct);
+
+        long b = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "b" }, ct);
+        await _store.WriteChunkAsync(b, new[] { DeepSave("15000000", "34B60000") }, ct);  // Tunes[2]=21, GP=46644
+        await _store.FinalizeSnapshotAsync(b, 1, 2, ct);
+
+        var diff = await _store.DiffSnapshotsAsync(a, b, new SnapshotDiffFilter(), ct);
+        Assert.Equal(2, diff.Changed.Count);
+        // Leaf-container element: empty inner prop -> "path[N]" with NO trailing dot.
+        Assert.Contains(diff.Changed, r =>
+            r.PropName == "SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[2]");
+        // 1-level struct-array element field -> "SaveSlotList[1].GP".
+        Assert.Contains(diff.Changed, r => r.PropName == "SaveSlotList[1].GP");
+    }
+
     [Fact]
     public async Task WriteChunk_EmptyIsNoOp()
     {

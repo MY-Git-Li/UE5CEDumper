@@ -585,8 +585,11 @@ public sealed class SnapshotStore : ISnapshotStore
                 if (string.Equals(a.hex, bHex, StringComparison.Ordinal)) continue;  // unchanged
 
                 // Struct-array-element rows display the full path "Array[N].Inner"
-                // (the inner prop name alone collides across elements).
-                string displayProp = arr.Length > 0 ? $"{arr}[{elem}].{prop}" : prop;
+                // (the inner prop name alone collides across elements). A leaf-
+                // container element (TArray<int> etc.) has no inner prop → "Array[N]".
+                string displayProp = arr.Length == 0 ? prop
+                                   : prop.Length == 0 ? $"{arr}[{elem}]"
+                                   : $"{arr}[{elem}].{prop}";
 
                 // Optional store-side filters (the VM passes an empty filter and
                 // filters client-side, but honour these for API completeness).
@@ -720,7 +723,9 @@ public sealed class SnapshotStore : ISnapshotStore
         if (r.IsDBNull(10)) return prop;
         string arr = r.GetString(10);
         if (arr.Length == 0) return prop;
-        return $"{arr}[{(r.IsDBNull(11) ? -1 : r.GetInt32(11))}].{prop}";
+        int elem = r.IsDBNull(11) ? -1 : r.GetInt32(11);
+        // Leaf-container element (TArray<int> etc.) has no inner prop -> "Array[N]".
+        return prop.Length == 0 ? $"{arr}[{elem}]" : $"{arr}[{elem}].{prop}";
     }
 
     // One SPC candidate field: identity + its value sequence (+ display from newest).
