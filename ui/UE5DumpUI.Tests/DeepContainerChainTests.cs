@@ -154,4 +154,37 @@ public class DeepContainerChainTests
         Assert.Equal(("WeaponTuneList", 0, 0), hops[2]);
         Assert.Equal(("Tunes", 42, 0), hops[3]);   // deepest = the value's element
     }
+
+    // --- LiveWalkerViewModel.TryParseStructArrayInner (Value Search 🌍 deep-drill) ---
+
+    [Fact]
+    public void TryParseStructArrayInner_DirectInnerField()
+    {
+        Assert.True(LiveWalkerViewModel.TryParseStructArrayInner(
+            "SaveSlotList[1].GP", out var arr, out var idx, out var inner));
+        Assert.Equal("SaveSlotList", arr);
+        Assert.Equal(1, idx);
+        Assert.Equal(new[] { "GP" }, inner);
+    }
+
+    [Fact]
+    public void TryParseStructArrayInner_NestedArrayAndInnerStruct()
+    {
+        Assert.True(LiveWalkerViewModel.TryParseStructArrayInner(
+            "Save.SaveSlotList[2].MsTuneData.GP2", out var arr, out var idx, out var inner));
+        Assert.Equal("Save.SaveSlotList", arr);   // array path may itself be dotted
+        Assert.Equal(2, idx);
+        Assert.Equal(new[] { "MsTuneData", "GP2" }, inner);
+    }
+
+    [Theory]
+    [InlineData("Items[3]")]      // leaf-array element (ends in "]"), not struct-array-inner
+    [InlineData("Health")]        // plain field
+    [InlineData("")]              // empty
+    [InlineData("[0].GP")]        // no array name before "["
+    [InlineData("Cargo[].GP")]    // empty index
+    public void TryParseStructArrayInner_RejectsNonStructArrayInner(string name)
+    {
+        Assert.False(LiveWalkerViewModel.TryParseStructArrayInner(name, out _, out _, out _));
+    }
 }

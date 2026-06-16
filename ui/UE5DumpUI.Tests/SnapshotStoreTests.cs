@@ -220,7 +220,7 @@ public class SnapshotStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task WriteChunk_WritesArrayRows_ExcludedFromScalarDiff()
+    public async Task WriteChunk_WritesArrayRows_IncludedInDiff()
     {
         var ct = TestContext.Current.CancellationToken;
 
@@ -233,10 +233,15 @@ public class SnapshotStoreTests : IDisposable
         await _store.WriteChunkAsync(b, new[] { ShipWithCargo("5A000000", "50000000") }, ct);  // HP90, Fuel80
         await _store.FinalizeSnapshotAsync(b, 1, 3, ct);
 
-        // The scalar diff sees only HP — array-element Quantity changes are
-        // excluded (they'd join ambiguously on prop_name). Array diffing is Pivot.
+        // build 1203: the diff now INCLUDES struct-array-element rows (keyed by
+        // array_field + elem_index so distinct elements don't collide on prop_name).
+        // HP (100->90) and Cargo[0].Quantity (Fuel 100->80) both changed; Cargo[1]
+        // (Ore, 10->10) is unchanged and must not appear.
         var diff = await _store.DiffSnapshotsAsync(a, b, new SnapshotDiffFilter(), ct);
-        Assert.Equal("HP", Assert.Single(diff.Changed).PropName);
+        Assert.Equal(2, diff.Changed.Count);
+        Assert.Contains(diff.Changed, r => r.PropName == "HP");
+        Assert.Contains(diff.Changed, r => r.PropName == "Cargo[0].Quantity");
+        Assert.DoesNotContain(diff.Changed, r => r.PropName == "Cargo[1].Quantity");
     }
 
     [Fact]

@@ -14,6 +14,46 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-16 — Struct-array values reach end-to-end: VS GWorld drill + SPC/Diff inclusion (build 1203)
+
+Two live follow-ups after the build-1202 Value Search struct-array descent shipped.
+
+**Value Search 🌍 now deep-drills to the inner value (Issue A).** Value Search found
+`SaveSlotList[1].GP` but "Locate in GWorld" landed on the outer `SaveSlotList` array,
+not the inner `GP` — the reach path's single-shot `_pendingScroll` can't chain array →
+element → inner field, and `ParseElementIndexSuffix("SaveSlotList[1].GP")` is -1 (doesn't
+end in `]`). Fix: `LiveWalkerViewModel.LocateInGWorldAsync` now detects a struct-array-
+inner display name via new pure `TryParseStructArrayInner` ("ArrayPath[N].InnerPath" →
+array path, element index, inner dotted path) and runs an explicit awaited drill
+`DrillToStructArrayInnerAsync` (navigate the array's leading direct-struct segments →
+container → element `[N]` → inner direct-struct segments → select the leaf by name).
+Mirrors the Instance Finder container deep-drill; degrades to "drill manually" if a hop
+can't be matched. Handles nested array paths + nested inner structs (by name, so no
+numeric intra-offset needed).
+
+**Snapshot Diff + SPC Query now include struct-array elements (Issue B).** Capturing
+`GP-1` then `GP+1` and running Diff produced nothing — the snapshot ALREADY captures
+struct-array elements (`Aura::CaptureStructArrays` → `array_field`/`elem_index`/
+`inner_prop_name`), and **Class Pivot already consumes them**, but Diff + SPC filtered
+them out with `WHERE array_field IS NULL`. Fix (`SnapshotStore`): drop that filter in the
+diff A/B streams + the SPC load, and extend the join key with `array_field` + `elem_index`
+so distinct elements (`SaveSlotList[0].GP` vs `[1].GP`, identical class/owner/inner-prop)
+don't collide — direct fields contribute `""`/`-1`, leaving their keys unchanged. Rows
+display the full path `SaveSlotList[1].GP` (`SpcDisplayProp` / inline build). Array rows'
+owner-relative `prop_offset` is zeroed (it doesn't address the separate heap element);
+`ObjAddr` stays the owner so "Open in Live Walker" still reaches it. **The deep-nested
+case (a value inside a TArray/TMap nested *inside* a struct element) is still capture-
+limited** — `CaptureStructArrays` does one struct-array level — so SPC/Diff see 1-level
+struct-array values (GP), matching Value Search's descent depth.
+
+Tests: +7 C# (`TryParseStructArrayInner` facts/theory) + reworked the
+`WriteChunk_WritesArrayRows_*` diff test (was "excluded", now asserts HP +
+`Cargo[0].Quantity` both change, `Cargo[1]` unchanged) → **1519 C#**; 510 dll / 31 utf8
+green. Full build + AOT clean. **In-game verify pending**: VS 🌍 lands on `GP`; Snapshot
+Diff of a GP change lists `SaveSlotList[1].GP`.
+
+-----
+
 ## 2026-06-16 — Value Search descends into struct arrays (build 1202)
 
 Live-testing the deep-container work surfaced that **Value Search can't find a value

@@ -1599,6 +1599,32 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
             BuildBreadcrumbSpineFromPath(path, objectAddr, stopAtParent);
 
+            // Value inside a struct-array element (Value Search "Array[N].Inner",
+            // e.g. "SaveSlotList[1].GP"): the single-shot pending-scroll can't chain
+            // array → element → inner field, so drill explicitly after reaching the
+            // owner — mirrors the Instance Finder container deep-drill.
+            if (!stopAtParent
+                && TryParseStructArrayInner(scrollFieldName, out var saArrayPath,
+                                            out var saElemIdx, out var saInnerPath))
+            {
+                _pendingScrollFieldOffset = null;
+                _pendingScrollFieldName = null;
+                _pendingDrillElementIndex = -1;
+
+                var ownerAddr = Breadcrumbs[^1].Address;
+                var ownerResult = await _dump.WalkInstanceAsync(ownerAddr, arrayLimit: ArrayLimit,
+                                                                previewLimit: PreviewLimit, fillGaps: FillGaps, ct: ct);
+                ownerResult = await AutoFillGapsRetryAsync(ownerResult, ownerAddr);
+                UpdateDisplay(ownerResult);
+
+                bool saDrilled = await DrillToStructArrayInnerAsync(scrollFieldOffset, saArrayPath, saElemIdx, saInnerPath);
+                _log.Info($"LocateInGWorld: reach+struct-array-drill, {path.Depth} hop(s), drilled={saDrilled} | BC={FormatBreadcrumbTrace()}");
+                StatusText = saDrilled
+                    ? $"Located via GWorld — {path.Depth} hop(s) to {path.TargetName}; landed on {scrollFieldName}."
+                    : $"Located via GWorld — {path.Depth} hop(s) to {path.TargetName} (drill into {scrollFieldName} manually).";
+                return;
+            }
+
             // Decide the field to scroll/highlight once the display node is walked.
             if (stopAtParent)
             {
@@ -1860,6 +1886,86 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         if (open < 0 || open >= fieldName.Length - 2) return -1;  // no '[' or "[]"
         var inner = fieldName.Substring(open + 1, fieldName.Length - open - 2);
         return int.TryParse(inner, out var idx) && idx >= 0 ? idx : -1;
+    }
+
+    /// <summary>
+    /// Parse a Value Search struct-array-inner display name of the form
+    /// "ArrayPath[N].InnerPath" (e.g. "SaveSlotList[1].GP" or
+    /// "Save.SaveSlotList[1].MsTuneData.GP2"). Returns false for a plain field, a
+    /// leaf-array element ("Items[3]", which ends in "]"), or a malformed name.
+    /// <paramref name="arrayPath"/> is the dotted path up to the array;
+    /// <paramref name="innerPath"/> the dotted leaf path inside the element. Pure
+    /// — unit-tested.
+    /// </summary>
+    internal static bool TryParseStructArrayInner(string? fieldName, out string arrayPath,
+                                                  out int elementIndex, out string[] innerPath)
+    {
+        arrayPath = "";
+        elementIndex = -1;
+        innerPath = System.Array.Empty<string>();
+        if (string.IsNullOrEmpty(fieldName)) return false;
+
+        int open = fieldName.IndexOf('[');
+        if (open <= 0) return false;
+        int close = fieldName.IndexOf(']', open + 1);
+        if (close < 0) return false;
+        // Must be followed by ".<inner>" — a leaf path after the element, not the
+        // end of the string (a bare "Items[3]" is a leaf-array element, not this).
+        if (close + 1 >= fieldName.Length || fieldName[close + 1] != '.') return false;
+
+        var idxStr = fieldName.Substring(open + 1, close - open - 1);
+        if (!int.TryParse(idxStr, out elementIndex) || elementIndex < 0) return false;
+
+        arrayPath = fieldName.Substring(0, open);
+        var innerStr = fieldName.Substring(close + 2);   // after "]."
+        if (arrayPath.Length == 0 || innerStr.Length == 0) return false;
+        innerPath = innerStr.Split('.');
+        return innerPath.Length > 0;
+    }
+
+    /// <summary>
+    /// From the currently-displayed owning object, drill array → element [N] →
+    /// inner leaf to land ON a value inside a struct-array element (Value Search
+    /// "Array[N].Inner"). The array's dotted path + the inner dotted path navigate
+    /// intermediate direct structs by name; the array is matched by name (offset
+    /// fallback), the element by "[N]". Returns true on a full drill.
+    /// </summary>
+    private async Task<bool> DrillToStructArrayInnerAsync(int arrayFieldOffset, string arrayPath,
+                                                          int elementIndex, string[] innerPath)
+    {
+        // Navigate the array's leading direct-struct segments; the last is the array.
+        var arraySegs = arrayPath.Split('.');
+        for (int i = 0; i < arraySegs.Length - 1; i++)
+        {
+            var sf = Fields.FirstOrDefault(f => f.Name == arraySegs[i] && f.IsStructNavigation);
+            if (sf == null) return false;
+            await NavigateToFieldAsync(sf);
+        }
+        var arrName = arraySegs[^1];
+        var arrayField = Fields.FirstOrDefault(f => f.Name == arrName && f.IsContainerNavigable)
+                      ?? Fields.FirstOrDefault(f => f.Offset == arrayFieldOffset && f.IsContainerNavigable);
+        if (arrayField == null) return false;
+        await NavigateToContainerAsync(arrayField);
+
+        var elemRow = Fields.FirstOrDefault(f =>
+            f.Name == $"[{elementIndex}]" ||
+            f.Name.StartsWith($"[{elementIndex}] ", StringComparison.Ordinal));
+        if (elemRow == null || !elemRow.IsStructNavigation) return false;
+        await NavigateToFieldAsync(elemRow);
+
+        // Inner path: intermediate segments are direct structs to drill; the last
+        // segment is the leaf value to select.
+        for (int i = 0; i < innerPath.Length - 1; i++)
+        {
+            var sf = Fields.FirstOrDefault(f => f.Name == innerPath[i] && f.IsStructNavigation);
+            if (sf == null) return false;
+            await NavigateToFieldAsync(sf);
+        }
+        var leaf = Fields.FirstOrDefault(f => f.Name == innerPath[^1]);
+        if (leaf == null) return false;
+        SelectedField = leaf;
+        ScrollToFieldRequested?.Invoke(leaf.Name);
+        return true;
     }
 
     [RelayCommand]
