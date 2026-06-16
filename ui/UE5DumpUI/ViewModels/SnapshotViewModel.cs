@@ -25,6 +25,11 @@ public partial class SnapshotViewModel : ViewModelBase
     private readonly IExperimentalGate? _gate;
     private readonly IPlatformService? _platform;
     private EngineState? _engineState;
+    // Live game session (PeHash-ModuleBase, ASLR-randomised per launch). Diff rows'
+    // ObjAddr is the New snapshot's session-local address, so the per-row
+    // Live/Addr/GWorld actions are only valid when the New (DiffB) snapshot belongs
+    // to the current live session.
+    private string _currentSessionId = "";
     private CancellationTokenSource? _cts;        // capture (streaming) op
     private CancellationTokenSource? _diffCts;    // diff (heavy in-memory) op
 
@@ -116,8 +121,28 @@ public partial class SnapshotViewModel : ViewModelBase
     /// <summary>Two distinct snapshots picked and not mid-diff.</summary>
     public bool CanRunDiff => DiffA != null && DiffB != null && DiffA != DiffB && !IsDiffing && !IsCapturing;
 
+    /// <summary>True only when the New (DiffB) snapshot — whose session-local
+    /// ObjAddr the diff rows carry — belongs to the CURRENT live session, so its
+    /// addresses are still valid in the running game. Gates the per-row Live / Addr
+    /// actions (a cross-session address is stale).</summary>
+    public bool CanUseDiffRowActions =>
+        !string.IsNullOrEmpty(_currentSessionId) && DiffB?.GameSessionId == _currentSessionId;
+    /// <summary>As above, additionally requiring GWorld for the 🌍 button.</summary>
+    public bool CanLocateDiffRowInGWorld => CanUseDiffRowActions && IsGWorldAvailable;
+
     partial void OnDiffAChanged(SnapshotMeta? value)   => OnPropertyChanged(nameof(CanRunDiff));
-    partial void OnDiffBChanged(SnapshotMeta? value)   => OnPropertyChanged(nameof(CanRunDiff));
+    partial void OnDiffBChanged(SnapshotMeta? value)
+    {
+        OnPropertyChanged(nameof(CanRunDiff));
+        RaiseDiffRowActionGates();
+    }
+    partial void OnIsGWorldAvailableChanged(bool value) => OnPropertyChanged(nameof(CanLocateDiffRowInGWorld));
+
+    private void RaiseDiffRowActionGates()
+    {
+        OnPropertyChanged(nameof(CanUseDiffRowActions));
+        OnPropertyChanged(nameof(CanLocateDiffRowInGWorld));
+    }
     partial void OnIsDiffingChanged(bool value)
     {
         OnPropertyChanged(nameof(CanRunDiff));
@@ -279,6 +304,8 @@ public partial class SnapshotViewModel : ViewModelBase
     {
         _engineState = state;
         IsGWorldAvailable = state.HasGWorld;   // enable the per-row 🌍 button
+        _currentSessionId = $"{state.PeHash}-{state.ModuleBase}";   // matches capture-time GameSessionId
+        RaiseDiffRowActionGates();
         // Scope the store to this game's DB, then load its saved snapshots.
         _store.SetActiveGame(state.PeHash);
         LoadDenylistFromStore();
@@ -608,6 +635,8 @@ public partial class SnapshotViewModel : ViewModelBase
     [RelayCommand]
     private void OpenInLiveWalker(SnapshotDiffRow? row)
     {
+        // Stale-session gating is enforced on the button (IsEnabled =
+        // CanUseDiffRowActions); the command itself stays guard-free for testability.
         if (row == null || string.IsNullOrEmpty(row.ObjAddr)) return;
         NavigateToInstance?.Invoke(row.ObjAddr);
     }

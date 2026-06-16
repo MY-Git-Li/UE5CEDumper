@@ -14,6 +14,32 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-16 — Compact per-row buttons + stale-session gating on Snapshot/SPC (build 1216)
+
+UI tightening + a correctness gate, on user request (the Interesting Funcs row, with
+5 buttons, is the density target):
+
+- **Compact captions** (all per-row, in `en.axaml`): `Copy Address` → **`Addr`**
+  (everywhere incl. Value Search), `Open in Live Walker` → **`Live`** (datagrid
+  buttons), and the GWorld button → **`🌍` icon only** (dropped the " GWorld" text).
+  Tooltips keep the full explanation. Confirmed the 9 caption keys are datagrid-only
+  before changing values.
+- **Stale-session gating** — the Snapshot-diff and SPC per-row Live / Addr / 🌍
+  buttons are now **disabled unless the address-source snapshot is the CURRENT live
+  session** (its session-local ObjAddr is meaningless after a restart/reinject):
+  - Live session id = `PeHash-ModuleBase` (matches capture-time `GameSessionId`),
+    captured in each VM's `SetEngineState`.
+  - **Snapshot**: gate on the New pick — `CanUseDiffRowActions =>
+    DiffB.GameSessionId == current` (user: "看 New Session"); 🌍 also needs GWorld.
+  - **SPC**: gate on the newest selected snapshot (by Id == capture time) —
+    `CanUseResultRowActions => NewestSelectedSessionId == current` (user:
+    "看時間最近的一筆"); raised on selection change.
+  - Wired as `IsEnabled` on the buttons (the user's "buttons disabled" requirement);
+    the commands themselves stay guard-free so the existing command unit tests
+    remain valid (the button is the gate, and it's the only invoker).
+
+DLL re-stamped to 1216 (no source change). 510 dll + 31 utf8 + 1530 C# green; AOT clean.
+
 ## 2026-06-16 — Per-row action buttons across Snapshot/SPC/Instance Finder + not-found clears Live Walker (build 1213)
 
 UI-consistency pass on user request, making the per-row action buttons uniform with

@@ -188,17 +188,19 @@
                   <Button Content="{StaticResource str.Snapshot.Diff.OpenWalker}"
                           Command="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).OpenInLiveWalkerCommand}"
                           CommandParameter="{Binding}"
+                          IsEnabled="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).CanUseDiffRowActions}"
                           Foreground="#4EC9B0" Background="Transparent" BorderThickness="1" BorderBrush="#4EC9B0"
                           Padding="6,2" FontSize="11" Cursor="Hand"/>
                   <Button Content="{StaticResource str.Snapshot.Diff.CopyAddr}"
                           Command="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).CopyDiffAddressCommand}"
                           CommandParameter="{Binding}"
+                          IsEnabled="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).CanUseDiffRowActions}"
                           Foreground="#DCDCAA" Background="Transparent" BorderThickness="1" BorderBrush="#DCDCAA"
                           Padding="6,2" FontSize="11" Cursor="Hand"/>
                   <Button Content="{StaticResource str.Snapshot.Diff.LocateGWorld}"
                           Command="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).LocateRowInGWorldCommand}"
                           CommandParameter="{Binding}"
-                          IsEnabled="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).IsGWorldAvailable}"
+                          IsEnabled="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).CanLocateDiffRowInGWorld}"
                           ToolTip.Tip="{StaticResource str.Tip.Snapshot.Diff.LocateGWorld}"
                           Foreground="#C586C0" Background="Transparent" BorderThickness="1" BorderBrush="#C586C0"
                           Padding="6,2" FontSize="11" Cursor="Hand"/>
