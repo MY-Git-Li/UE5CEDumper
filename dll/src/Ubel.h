@@ -119,6 +119,12 @@ int32_t GetArrayInnerElemSize(uintptr_t fieldAddr);
 // Returns 0 when the inner element size is undetermined.
 int32_t GetSetElementStride(uintptr_t fieldAddr);
 
+// Resolve the inner-element UScriptStruct* of an ArrayProperty / SetProperty
+// whose element type is StructProperty (both probe Inner at the same offset).
+// Returns 0 when the element is not a struct or the address can't be resolved.
+// Used by the recursive deep container scan to descend into struct elements.
+uintptr_t GetContainerInnerStructAddr(uintptr_t fieldAddr);
+
 // Per-pair stride within an FMapProperty's TSparseArray.Data buffer
 // (TPair<K,V> aligned + TSetElement hash overhead).
 // Returns 0 when key or value size is undetermined.
@@ -131,6 +137,11 @@ struct MapPairLayout {
     int32_t valueSize   = 0;
     int32_t valueOffset = 0;  // ComputeMapValueOffset(keySize, valueSize)
     int32_t pairStride  = 0;  // ComputeSetElementStride(valueOffset + valueSize)
+    // UScriptStruct* for the key / value when that side is a StructProperty
+    // (0 otherwise). Lets the deep container scan descend into a TMap whose
+    // value (or key) is a struct holding further nested containers.
+    uintptr_t keyStructAddr   = 0;
+    uintptr_t valueStructAddr = 0;
 };
 bool GetMapPairLayout(uintptr_t fieldAddr, MapPairLayout& out);
 

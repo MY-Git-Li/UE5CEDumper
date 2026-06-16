@@ -527,11 +527,14 @@ public sealed class SnapshotStore : ISnapshotStore
 
         // Snapshot A → { key : (hex, numeric) }. Only the old value + direction
         // input is kept (display columns come from B, the newer snapshot).
-        var aMap = new Dictionary<(string cls, long idx, string prop), (string hex, double? num)>();
+        // The key includes array_field + elem_index so struct-array-element rows
+        // (e.g. SaveSlotList[0].GP vs SaveSlotList[1].GP, same class/owner/inner
+        // prop name) don't collide. Direct fields use "" / -1. (build 1203)
+        var aMap = new Dictionary<(string cls, long idx, string prop, string arr, int elem), (string hex, double? num)>();
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT class_fqn, gobjects_index, prop_name, hex, numeric_value " +
-                              "FROM fields WHERE snapshot_id=$id AND array_field IS NULL;";
+            cmd.CommandText = "SELECT class_fqn, gobjects_index, prop_name, hex, numeric_value, " +
+                              "array_field, elem_index FROM fields WHERE snapshot_id=$id;";
             cmd.Parameters.AddWithValue("$id", idA);
             await using var r = await cmd.ExecuteReaderAsync(ct);
             int rowCount = 0;
@@ -543,7 +546,9 @@ public sealed class SnapshotStore : ISnapshotStore
                 if (deny != null && deny.Contains(aCls)) continue;
                 var key = (Intern(aCls),
                            r.IsDBNull(1) ? -1L : r.GetInt64(1),
-                           Intern(r.IsDBNull(2) ? "" : r.GetString(2)));
+                           Intern(r.IsDBNull(2) ? "" : r.GetString(2)),
+                           Intern(r.IsDBNull(5) ? "" : r.GetString(5)),
+                           r.IsDBNull(6) ? -1 : r.GetInt32(6));
                 aMap[key] = (r.IsDBNull(3) ? "" : r.GetString(3),
                              r.IsDBNull(4) ? (double?)null : r.GetDouble(4));
             }
@@ -558,8 +563,8 @@ public sealed class SnapshotStore : ISnapshotStore
         await using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText = "SELECT class_fqn, gobjects_index, prop_name, hex, numeric_value, " +
-                              "norm_path, obj_addr, prop_offset, declared_type " +
-                              "FROM fields WHERE snapshot_id=$id AND array_field IS NULL;";
+                              "norm_path, obj_addr, prop_offset, declared_type, array_field, elem_index " +
+                              "FROM fields WHERE snapshot_id=$id;";
             cmd.Parameters.AddWithValue("$id", idB);
             await using var r = await cmd.ExecuteReaderAsync(ct);
             int rowCount = 0;
@@ -571,16 +576,25 @@ public sealed class SnapshotStore : ISnapshotStore
                 bTotal++;
                 long   idx  = r.IsDBNull(1) ? -1L : r.GetInt64(1);
                 string prop = r.IsDBNull(2) ? "" : r.GetString(2);
-                if (!aMap.TryGetValue((Intern(cls), idx, Intern(prop)), out var a)) continue;  // B-only (added)
+                string arr  = r.IsDBNull(9) ? "" : r.GetString(9);
+                int    elem = r.IsDBNull(10) ? -1 : r.GetInt32(10);
+                if (!aMap.TryGetValue((Intern(cls), idx, Intern(prop), Intern(arr), elem), out var a)) continue;  // B-only (added)
                 matched++;
 
                 string bHex = r.IsDBNull(3) ? "" : r.GetString(3);
                 if (string.Equals(a.hex, bHex, StringComparison.Ordinal)) continue;  // unchanged
 
+                // Struct-array-element rows display the full path "Array[N].Inner"
+                // (the inner prop name alone collides across elements). A leaf-
+                // container element (TArray<int> etc.) has no inner prop → "Array[N]".
+                string displayProp = arr.Length == 0 ? prop
+                                   : prop.Length == 0 ? $"{arr}[{elem}]"
+                                   : $"{arr}[{elem}].{prop}";
+
                 // Optional store-side filters (the VM passes an empty filter and
                 // filters client-side, but honour these for API completeness).
                 if (classContains.Length > 0 && cls.IndexOf(classContains, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                if (propContains.Length  > 0 && prop.IndexOf(propContains,  StringComparison.OrdinalIgnoreCase) < 0) continue;
+                if (propContains.Length  > 0 && displayProp.IndexOf(propContains, StringComparison.OrdinalIgnoreCase) < 0) continue;
 
                 double? bNum = r.IsDBNull(4) ? (double?)null : r.GetDouble(4);
                 var dir = (a.num.HasValue && bNum.HasValue)
@@ -593,7 +607,7 @@ public sealed class SnapshotStore : ISnapshotStore
 
                 // Count noise even past the row cap so the picker isn't biased
                 // toward whichever class happened to land in the first 50k rows.
-                noise.Bump(cls, prop);
+                noise.Bump(cls, displayProp);
                 if (result.Changed.Count >= max) { result.Truncated = true; continue; }  // keep counting churn
                 string type = r.IsDBNull(8) ? "" : r.GetString(8);
                 result.Changed.Add(new SnapshotDiffRow
@@ -601,8 +615,12 @@ public sealed class SnapshotStore : ISnapshotStore
                     ClassName    = cls,
                     NormPath     = r.IsDBNull(5) ? "" : r.GetString(5),
                     ObjectIndex  = (int)idx,
-                    PropName     = prop,
-                    PropOffset   = r.IsDBNull(7) ? 0 : r.GetInt32(7),
+                    PropName     = displayProp,
+                    // Element rows carry an owner-relative prop_offset that doesn't
+                    // address the heap element (separate allocation); 0 it so a
+                    // naive obj_addr+offset doesn't point somewhere wrong. ObjAddr
+                    // stays the owner so "Open in Live Walker" reaches it.
+                    PropOffset   = arr.Length > 0 ? 0 : (r.IsDBNull(7) ? 0 : r.GetInt32(7)),
                     DeclaredType = type,
                     ObjAddr      = r.IsDBNull(6) ? "" : r.GetString(6),
                     OldValue     = SnapshotNumeric.Render(type, a.hex),
@@ -674,19 +692,41 @@ public sealed class SnapshotStore : ISnapshotStore
         return result;
     }
 
-    // 0 class,1 norm,2 outer,3 type,4 prop,5 offset,6 addr,7 hex,8 num,9 gobjects_index
+    // 0 class,1 norm,2 outer,3 type,4 prop,5 offset,6 addr,7 hex,8 num,9 gobjects_index,
+    // 10 array_field,11 elem_index. Struct-array-element rows are now INCLUDED (build 1203);
+    // array_field/elem_index join into the key so distinct elements don't collide.
     private const string SpcRowSql =
         "SELECT class_fqn, norm_path, outer_chain, declared_type, prop_name, prop_offset, " +
-        "obj_addr, hex, numeric_value, gobjects_index " +
-        "FROM fields WHERE snapshot_id=$id AND array_field IS NULL;";
+        "obj_addr, hex, numeric_value, gobjects_index, array_field, elem_index " +
+        "FROM fields WHERE snapshot_id=$id;";
 
-    private static string SpcKey(SpcJoinMode mode, SqliteDataReader r, string cls, string prop) => mode switch
+    private static string SpcKeyBase(SpcJoinMode mode, SqliteDataReader r, string cls, string prop) => mode switch
     {
         SpcJoinMode.Loose     => cls + "\u0001" + (r.IsDBNull(2) ? "" : r.GetString(2)) + "\u0001" + prop,
         SpcJoinMode.InSession => cls + "\u0001" + (r.IsDBNull(9) ? -1L : r.GetInt64(9)) + "\u0001" + prop,
         _ /* Strict */        => cls + "\u0001" + (r.IsDBNull(1) ? "" : r.GetString(1)) + "\u0001" + prop +
                                  "\u0001" + (r.IsDBNull(5) ? 0 : r.GetInt32(5)),
     };
+
+    // Append array_field + elem_index so SaveSlotList[0].GP and SaveSlotList[1].GP
+    // (same class/owner/inner prop) stay distinct; direct fields contribute ""/-1,
+    // leaving their keys byte-for-byte as before. (build 1203)
+    private static string SpcKey(SpcJoinMode mode, SqliteDataReader r, string cls, string prop)
+        => SpcKeyBase(mode, r, cls, prop)
+           + (char)1 + (r.IsDBNull(10) ? "" : r.GetString(10))
+           + (char)1 + (r.IsDBNull(11) ? -1 : r.GetInt32(11)).ToString();
+
+    /// <summary>Display prop for a (possibly array-element) row: "Array[N].Inner"
+    /// when array_field (col 10) / elem_index (col 11) are set, else the inner prop.</summary>
+    private static string SpcDisplayProp(SqliteDataReader r, string prop)
+    {
+        if (r.IsDBNull(10)) return prop;
+        string arr = r.GetString(10);
+        if (arr.Length == 0) return prop;
+        int elem = r.IsDBNull(11) ? -1 : r.GetInt32(11);
+        // Leaf-container element (TArray<int> etc.) has no inner prop -> "Array[N]".
+        return prop.Length == 0 ? $"{arr}[{elem}]" : $"{arr}[{elem}].{prop}";
+    }
 
     // One SPC candidate field: identity + its value sequence (+ display from newest).
     private sealed class Cand
@@ -734,11 +774,15 @@ public sealed class SnapshotStore : ISnapshotStore
                 string cls  = r.IsDBNull(0) ? "" : r.GetString(0);
                 if (deny != null && deny.Contains(cls)) continue;
                 string prop = r.IsDBNull(4) ? "" : r.GetString(4);
+                // Display path: "Array[N].Inner" for struct-array elements, else the
+                // inner prop. The key uses the RAW prop + array_field/elem_index (via
+                // SpcKey) so elements stay distinct; the filter + display use the path.
+                string displayProp = SpcDisplayProp(r, prop);
                 if (classContains.Length > 0 && cls.IndexOf(classContains, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                if (propContains.Length  > 0 && prop.IndexOf(propContains,  StringComparison.OrdinalIgnoreCase) < 0) continue;
+                if (propContains.Length  > 0 && displayProp.IndexOf(propContains, StringComparison.OrdinalIgnoreCase) < 0) continue;
                 string key = SpcKey(mode, r, cls, prop);
                 if (cands.ContainsKey(key)) continue;
-                var c = new Cand { ClassName = Intern(cls), PropName = Intern(prop) };
+                var c = new Cand { ClassName = Intern(cls), PropName = Intern(displayProp) };
                 c.Hex.Add(r.IsDBNull(7) ? "" : r.GetString(7));
                 c.Num.Add(r.IsDBNull(8) ? (double?)null : r.GetDouble(8));
                 cands[key] = c;
@@ -770,7 +814,12 @@ public sealed class SnapshotStore : ISnapshotStore
                     {
                         c.NormPath     = r.IsDBNull(1) ? "" : r.GetString(1);
                         c.ObjAddr      = r.IsDBNull(6) ? "" : r.GetString(6);
-                        c.PropOffset   = r.IsDBNull(5) ? 0  : r.GetInt32(5);
+                        // Struct-array-element rows carry an owner-relative offset
+                        // that doesn't address the heap element (separate allocation);
+                        // 0 it so a naive obj_addr+offset doesn't point somewhere
+                        // wrong. ObjAddr stays the owner for Open in Live Walker.
+                        bool isArrayElem = !r.IsDBNull(10) && r.GetString(10).Length > 0;
+                        c.PropOffset   = isArrayElem ? 0 : (r.IsDBNull(5) ? 0 : r.GetInt32(5));
                         c.DeclaredType = r.IsDBNull(3) ? "" : r.GetString(3);
                     }
                 }

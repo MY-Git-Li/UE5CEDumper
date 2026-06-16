@@ -614,7 +614,7 @@ public sealed class DumpService : IDumpService
         };
     }
 
-    public async Task<AddressLookupResult> FindByAddressAsync(string addr, CancellationToken ct = default)
+    public async Task<AddressLookupResult> FindByAddressAsync(string addr, int containerElemCap = 256, CancellationToken ct = default)
     {
         // Always opt in to the container scan so users can find addresses
         // that fall inside heap-allocated TArray buffers (rather than only
@@ -625,6 +625,15 @@ public sealed class DumpService : IDumpService
             ["cmd"] = "find_by_address",
             ["addr"] = addr,
             ["scan_containers"] = true,
+            // Opt into the recursive deep descent: when the fast shallow scan
+            // finds nothing, the DLL descends struct-array / map-value / set
+            // elements up to this depth to locate values in separately-allocated
+            // nested containers. Only runs on a shallow miss, so the common
+            // (fast) case is unaffected. 5 covers ~4 container-nesting levels.
+            ["container_depth"] = 5,
+            // Per-container element probe cap for the deep descent (configurable
+            // via the Options flyout). Higher = deeper coverage, slower.
+            ["container_elem_cap"] = containerElemCap,
         };
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
@@ -650,6 +659,27 @@ public sealed class DumpService : IDumpService
             foreach (var node in cmArr)
             {
                 if (node is not JsonObject m) continue;
+                var nestedChain = new List<ContainerHop>();
+                if (m["nested_chain"] is JsonArray chArr)
+                {
+                    foreach (var hn in chArr)
+                    {
+                        if (hn is not JsonObject h) continue;
+                        nestedChain.Add(new ContainerHop
+                        {
+                            FieldOffset  = h["field_offset"]?.GetValue<int>() ?? 0,
+                            FieldName    = h["field_name"]?.GetValue<string>() ?? "",
+                            FieldType    = h["field_type"]?.GetValue<string>() ?? "",
+                            InnerType    = h["inner_type"]?.GetValue<string>() ?? "",
+                            ElementIndex = h["element_index"]?.GetValue<int>() ?? 0,
+                            ElementSize  = h["element_size"]?.GetValue<int>() ?? 0,
+                            IntraOffset  = h["intra_offset"]?.GetValue<int>() ?? 0,
+                            DataAddress  = h["data_addr"]?.GetValue<string>() ?? "",
+                            MapValueSide = h["map_value_side"]?.GetValue<bool>() ?? false,
+                            Note         = h["note"]?.GetValue<string>() ?? "",
+                        });
+                    }
+                }
                 containerMatches.Add(new ContainerMatch
                 {
                     OwnerAddress   = m["owner_addr"]?.GetValue<string>() ?? "",
@@ -666,6 +696,7 @@ public sealed class DumpService : IDumpService
                     DataAddress    = m["data_addr"]?.GetValue<string>() ?? "",
                     Count          = m["count"]?.GetValue<int>() ?? 0,
                     Note           = m["note"]?.GetValue<string>() ?? "",
+                    NestedChain    = nestedChain,
                 });
             }
         }

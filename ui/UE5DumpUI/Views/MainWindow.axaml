@@ -182,6 +182,42 @@
                             TickFrequency="1" IsSnapToTickEnabled="True"
                             ToolTip.Tip="{StaticResource str.Tip.CsxDepth}"/>
                   </StackPanel>
+
+                  <Separator Background="#3C3C3C" Height="1"/>
+
+                  <!-- Locate in GWorld depth (BFS hops from GWorld; dims when GWorld
+                       is unavailable). Bound through the Live Walker sub-VM that owns it. -->
+                  <StackPanel Spacing="2" IsEnabled="{Binding LiveWalker.IsGWorldAvailable}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="{StaticResource str.Toolbar.GWorldDepth}"
+                                 Foreground="#CCCCCC" FontSize="12"
+                                 VerticalAlignment="Center"/>
+                      <TextBlock Text="{Binding LiveWalker.GWorldLocateDepth}"
+                                 Foreground="#D4D4D4" FontSize="12" FontWeight="Bold"
+                                 VerticalAlignment="Center" MinWidth="20"/>
+                    </StackPanel>
+                    <Slider Value="{Binding LiveWalker.GWorldLocateDepth}"
+                            Minimum="1" Maximum="32"
+                            TickFrequency="1" IsSnapToTickEnabled="True"
+                            ToolTip.Tip="{StaticResource str.Tip.LiveWalker.GWorldDepth}"/>
+                  </StackPanel>
+
+                  <!-- Deep container scan cap (per-container element probe limit
+                       for the Instances "Lookup" recursive deep scan). 2^exp. -->
+                  <StackPanel Spacing="2">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="{StaticResource str.Toolbar.DeepScanElemCap}"
+                                 Foreground="#CCCCCC" FontSize="12"
+                                 VerticalAlignment="Center"/>
+                      <TextBlock Text="{Binding DeepScanElemCap}"
+                                 Foreground="#D4D4D4" FontSize="12" FontWeight="Bold"
+                                 VerticalAlignment="Center" MinWidth="40"/>
+                    </StackPanel>
+                    <Slider Value="{Binding DeepScanElemCapExponent}"
+                            Minimum="4" Maximum="12"
+                            TickFrequency="1" IsSnapToTickEnabled="True"
+                            ToolTip.Tip="{StaticResource str.Tip.Toolbar.DeepScanElemCap}"/>
+                  </StackPanel>
                 </StackPanel>
               </Flyout>
             </DropDownButton.Flyout>

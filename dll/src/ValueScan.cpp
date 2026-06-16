@@ -749,6 +749,17 @@ bool CompareVectorPredicate(ScanType       st,
 // --- Display helpers ---
 
 std::string FieldDisplayName(const FieldDescriptor& desc, int32_t elementIndex) {
+    // Struct-array-inner descriptors carry a "[]" placeholder marking where the
+    // element index belongs (e.g. "SaveSlotList[].GP" -> "SaveSlotList[3].GP"),
+    // so the index lands after the ARRAY name, not at the very end. UE property
+    // names never contain "[]", so the sentinel is unambiguous.
+    auto ph = desc.fieldName.find("[]");
+    if (ph != std::string::npos) {
+        std::string s = desc.fieldName;
+        if (elementIndex < 0) { s.erase(ph, 2); return s; }   // defensive: no index
+        s.replace(ph, 2, "[" + std::to_string(elementIndex) + "]");
+        return s;
+    }
     if (elementIndex < 0) return desc.fieldName;
     return desc.fieldName + "[" + std::to_string(elementIndex) + "]";
 }

@@ -90,15 +90,23 @@
                                 Binding="{Binding OwnerAddress}"
                                 SortMemberPath="OwnerAddress"
                                 Width="140"/>
-            <DataGridTemplateColumn Header="" Width="120" CanUserResize="False" CanUserSort="False">
+            <DataGridTemplateColumn Header="" Width="Auto" CanUserResize="False" CanUserSort="False">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate x:DataType="m:ContainerMatch">
                   <StackPanel Orientation="Horizontal" Spacing="4"
                               HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <Button Content="Open"
+                    <Button Content="{StaticResource str.VS.OpenLive}"
                             Command="{Binding $parent[DataGrid].((vm:InstanceFinderViewModel)DataContext).OpenContainerOwnerCommand}"
                             CommandParameter="{Binding}"
-                            Padding="6,2" FontSize="11"/>
+                            Foreground="#4EC9B0" Background="Transparent"
+                            BorderThickness="1" BorderBrush="#4EC9B0"
+                            Padding="6,2" FontSize="11" Cursor="Hand"/>
+                    <Button Content="{StaticResource str.VS.CopyAddr}"
+                            Command="{Binding $parent[DataGrid].((vm:InstanceFinderViewModel)DataContext).CopyContainerAddressCommand}"
+                            CommandParameter="{Binding}"
+                            Foreground="#DCDCAA" Background="Transparent"
+                            BorderThickness="1" BorderBrush="#DCDCAA"
+                            Padding="6,2" FontSize="11" Cursor="Hand"/>
                     <Button Content="{StaticResource str.InstanceFinder.LocateGWorldShort}"
                             Command="{Binding $parent[DataGrid].((vm:InstanceFinderViewModel)DataContext).LocateContainerOwnerInGWorldCommand}"
                             CommandParameter="{Binding}"
@@ -106,7 +114,7 @@
                             ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.LocateGWorldContainer}"
                             Foreground="#C586C0" Background="Transparent"
                             BorderThickness="1" BorderBrush="#C586C0"
-                            Padding="6,2" FontSize="11"/>
+                            Padding="6,2" FontSize="11" Cursor="Hand"/>
                   </StackPanel>
                 </DataTemplate>
               </DataGridTemplateColumn.CellTemplate>

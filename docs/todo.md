@@ -40,69 +40,6 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
-## Locate in GWorld — deeply-nested container values (1 follow-up + 1 limit)
-
-Forward-BFS path search shipped builds 1181-1193 (dev-log 2026-06-16). **BFS path
-LIVE-VERIFIED working** on SEED BATTLE DESTINY REMASTERED. The Instance Finder
-container-match 🌍 now lands ON the nested struct value (build 1193: `GWorld → … →
-BP_LifeSaveData_C → SaveSlotList → [1] → GP`). Remaining:
-
-- **Wire the struct-element deep-drill into the Value Search + SPC reach paths** —
-  Effort: **S/M** · Risk: low. The deep-drill (reach owner → drill array → drill
-  struct element `[N]` → scroll to intra-offset) is implemented in
-  `LiveWalkerViewModel.LocateInGWorldAsync` via the `elementIntraOffset` param and is
-  currently fed ONLY by the Instance Finder container-match path
-  (`LocateContainerOwnerInGWorld`, which has the `ContainerMatch.IntraOffset` +
-  `InnerType=="StructProperty"`). A Value Search / SPC hit on a field *inside* a
-  struct-array element (display name like `Cargo[3].Quantity`) still lands on the
-  owning container field only, because those reach calls pass `elementIntraOffset=-1`
-  and a `fieldName` whose `ParseElementIndexSuffix` is -1 (name doesn't end in `[N]`).
-  To finish: when a Value Search/SPC candidate is a struct-array-inner field, derive
-  the element index + the intra-element offset (the candidate already encodes the
-  `[N]` and the inner field) and pass them through `NavigateToInstance` /
-  `LocateInGWorld` → `LocateInGWorldAsync(..., elementIntraOffset)`. Reuses the exact
-  drill that already works for Instance Finder.
-  *Parent: struct-element deep-drill shipped build 1193 (dev-log 2026-06-16).*
-
-- **find_by_address can't resolve a value buried in nested containers** (a LIMIT,
-  decide before building) — Effort: **M/L** · Risk: med.
-  **Repro (SEED BATTLE DESTINY REMASTERED, build 1188):** Instances tab → Lookup
-  address `228F1251BE8` → "No UObject found at this address". That int lives ~6
-  container levels deep: `BP_LifeSaveData_C.SaveSlotList[1]` (struct-array elem) →
-  `MsTuneData` (struct) → `MsTunes` (Map<Name,Struct>) → `[0] MSBSTR00` →
-  `WeaponTuneList` (struct-array) → `[0]` (struct) → `Tunes` (`TArray<int>`) → `[N]`.
-  (It IS reachable — the owner did it by hand in Live Walker.)
-  **Root cause:** `Aura::FindInContainers` (dll/src/Aura.cpp) only walks each
-  UObject's TOP-LEVEL container fields (the `GetClassContainers` per-class cache lists
-  `TArray`/`TSet`/`TMap` fields at the object's own offsets, incl. those nested in
-  `StructProperty` to a shallow depth) and bounds-checks `addr` against each buffer.
-  It does NOT recurse: a `TArray` whose elements are structs that themselves contain a
-  `TMap` whose values are structs containing another `TArray`… is never descended, so
-  an address inside that innermost buffer matches nothing → `find_by_address` returns
-  not-found, and the Instance Finder container 🌍 never appears for it.
-  **Why it's hard:** unbounded recursive container descent across all objects is
-  expensive (the top-level scan already has a 15s deadline) and needs per-element
-  struct re-walks (read TArray → for each elem, walk its UScriptStruct for nested
-  containers → recurse) — effectively a mini object-graph walk per object.
-  **Options for next session (pick scope first):**
-  (a) Bounded recursive descent in `FindInContainers` — add a `maxDepth` (e.g. 3-4)
-      recursion into struct-typed container elements / map values, reusing
-      `Ubel::WalkClassEx` per element struct; cap elements-per-container to keep cost
-      sane; surface a "deep scan" toggle so the default stays fast.
-  (b) Accept the limit + redirect the user: the value is still findable by **Value
-      Search** (scan the value 46643-style → candidate already carries owner + field,
-      and once the VS deep-drill above lands, 🌍 works). Add a hint in the
-      "No UObject found" status pointing at Value Search for nested values.
-  (c) Hybrid: keep `find_by_address` shallow, but add an explicit "deep container
-      scan" button on the Instances tab that runs the bounded recursive variant only
-      on demand.
-  Recommendation: (b) is near-free and covers the real workflow; do (a)/(c) only if
-  by-address lookup of deep values is a recurring need. NOT specific to Locate in
-  GWorld — affects the Instance Finder address Lookup generally.
-  *Parent: FindInContainers (Aura.cpp) surfaced by Locate-in-GWorld live test (dev-log 2026-06-16).*
-
------
-
 ## CE export drilldown — remaining gaps (Phase A/B/C shipped)
 
 Phase A (CE XML/Field container-value expansion, build 1085), Phase B (CSX parity,
@@ -183,6 +120,79 @@ Dependency order was **V3-A → V3-B → V1a → V3-C → V2**; **all shipped** 
 DLL owns the set, UI is a server-side-filtered/sorted window; V2 build 954: ceiling
 raised to 1M, sort/filter verified sub-second). Remaining open: **V1b** (container
 prev-value refine) and **V1c live-verify**.
+
+- **Deep Value-Search candidate → multi-level 🌍 drill** — ✅ **DONE build 1208.**
+  Generalised `TryParseStructArrayInner`/`DrillToStructArrayInnerAsync` into
+  `TryParseContainerPath` + `DrillDisplayPathAsync` (parse the full multi-`[N]`
+  display path into ordered `(name,index)` segments; drill each as a container
+  hop or direct-struct field; land on the final leaf). Wired into BOTH the VS/SPC
+  `LocateInGWorldAsync` reach branch AND `NavigateToInstanceFieldAsync`
+  (Open-in-Live-Walker — also fixes the offset-0 mis-select for deep candidates).
+  Verified by a 4-agent audit (drill-sites + scan/capture correctness); the value
+  was always FOUND — this was the land-ON-it polish. ⚠ in-game live-verify pending
+  (multi-`[N]` 🌍 should land exactly on the SEED `...Tunes[N]` value).
+
+- **Proper scalar-map value/key capture** — Effort: **M** · Risk: low.
+  `WalkContainerLeaves` only recurses STRUCT map values; a `TMap<K,scalar>` value
+  (and the scalar key of any map) is NOT captured. Build 1208 added a guard so the
+  leaf-container branch no longer emits a *malformed* leaf for scalar-value maps
+  (was: key-region addr + `"K → V"` arrow-label type, silently dropped by both
+  consumers). To capture them properly, extend `ContainerCacheEntry` with
+  `keyType`/`valueType` and emit the value leaf at `slotBase+valueOffset` (type
+  `valueType`) + the key leaf at `slotBase` (type `keyType`). Audit #1/#3.
+  *Affects Value Search + Snapshot; user's SEED case is `Map<Name,FStruct>` (struct
+  value, recursed) so unaffected.*
+
+- **Top-level `TSet<FStruct>` / `TMap<K,FStruct>` depth-1 inner leaves (Value Search)** —
+  Effort: **S/M** · Risk: low. The static depth-1 collector (`collectStructArrayInner`)
+  only covers `TArray<FStruct>`; the recursive `deepEmit` skips `depth<2` to avoid
+  double-counting it. So the DIRECT fields of a struct element in a *top-level*
+  Set/Map are scanned by neither path. (Nested ones — the SEED `MsTunes` case — are
+  depth≥2 and ARE caught.) Fix: add a Set/Map analogue to `collectStructArrayInner`,
+  or relax `deepEmit` to `depth>=1` for the Set/Map element side only. Audit #2.
+
+- **SPC Strict-join `prop_offset` migration edge** — Effort: **S** · Risk: low.
+  1-level struct-array element rows now store `prop_offset=0` (build 1205, was
+  `nf.Offset`); a Strict-mode SPC query that mixes a pre-1205 and a post-1205
+  snapshot keys the same logical field differently. Either zero `prop_offset` for
+  array-element rows in the Strict key, or bump the schema to force recapture.
+  Audit #4. *Cosmetic unless mixing snapshots across the 1205 boundary.*
+
+- **Property Search: descend into struct / container-element inner properties** —
+  Effort: **M** · Risk: low. `Aura::SearchProperties` is a keyword search across
+  **all UClass properties only** (`WalkClassEx` direct fields); it does NOT
+  enumerate `UScriptStruct` members or the element type of a `TArray/TSet/TMap`.
+  So a field like `GP` that lives inside a struct element of `SaveSlotList`
+  (`BP_LifeSaveData_C.SaveSlotList[].MsTuneData…GP`) is **not findable by name** —
+  the same "doesn't descend into containers/struct elements" family as the deep
+  reach work. Today the user finds it via Value Search (by value) or Live Walker
+  (drill). To fix: walk struct/container element schemas and present matches with a
+  synthetic dotted path (reuse the `GetClassContainers` / `WalkContainerLeaves`
+  machinery), de-duplicated by (class, struct-path, prop). *User-flagged on SEED,
+  2026-06-16; agreed to defer.*
+
+- **Interesting Props: optional "Locate in GWorld" 🌍** — Effort: **S** · Risk: low.
+  The panel intentionally has no 🌍 (its rows are class/property DEFINITIONS, not
+  instances — no single address to locate; the existing **Live** button opens a
+  live instance). If wanted, add a 🌍 that resolves an instance of the row's class
+  then calls `LocateInGWorldAsync(addr, 0, null, stopAtParent:true)` — exactly the
+  Instance Finder selected-instance flow. *User noted the button's absence on SEED,
+  2026-06-16; offered as opt-in.*
+
+- **Reliable per-launch session token (Snapshot/SPC stale-address gating)** —
+  Effort: **M** · Risk: low. Build 1216 gates the Snapshot-diff / SPC per-row
+  Live/Addr/🌍 buttons on `GameSessionId == current`, where `GameSessionId` is
+  `PeHash-ModuleBase`. This distinguishes launches ONLY when ASLR moves the base;
+  a game that loads at a constant base (ASLR off / fixed preferred base) reuses the
+  same `ModuleBase` every launch, so an old-session snapshot is wrongly treated as
+  current and the buttons stay enabled (the addresses are actually stale). Fix:
+  expose a true per-launch token from the DLL — simplest is the game process
+  creation time (`GetProcessTimes(GetCurrentProcess(), &create, …)`, the DLL is
+  in-process) added to `scan_status`; thread it into `EngineState` + `DumpService`
+  and fold into `GameSessionId` (`PeHash-SessionToken`), so capture stores it and
+  the gate compares it. Existing snapshots (old format) then read as a different
+  session (correct — they're from a prior launch). *User-flagged on SEED,
+  2026-06-16: buttons not graying for old DB snapshots; deferred per "if not easy".*
 
 - **V1b — container prev-value refine (stable key)** — Effort: **M** · Risk: **high**.
   `Candidate.addr` stores a raw element address; TArray realloc already makes it stale,

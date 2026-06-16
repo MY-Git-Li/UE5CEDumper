@@ -1095,6 +1095,20 @@ static void Test_ValueScan_FieldDisplayName() {
     mapVal.fieldName = "Inventory.Value";
     EXPECT("Map value element renders Map.Value[idx]",
            FieldDisplayName(mapVal, 5) == "Inventory.Value[5]");
+
+    // build 1201 — struct-array-inner descriptors carry a "[]" placeholder so
+    // the element index lands after the ARRAY name, not at the very end:
+    // "SaveSlotList[].GP" -> "SaveSlotList[3].GP".
+    FieldDescriptor structArr;
+    structArr.fieldName = "SaveSlotList[].GP";
+    EXPECT("Struct-array-inner inserts index at placeholder",
+           FieldDisplayName(structArr, 3) == "SaveSlotList[3].GP");
+    EXPECT("Struct-array-inner drops empty placeholder when no index",
+           FieldDisplayName(structArr, -1) == "SaveSlotList.GP");
+    FieldDescriptor structArrNested;
+    structArrNested.fieldName = "SaveSlotList[].MsTuneData.GP2";
+    EXPECT("Struct-array-inner nested direct-struct path",
+           FieldDisplayName(structArrNested, 1) == "SaveSlotList[1].MsTuneData.GP2");
 }
 
 // V1c — TOptional<T> bIsSet flag offset. A non-intrusive optional is laid out

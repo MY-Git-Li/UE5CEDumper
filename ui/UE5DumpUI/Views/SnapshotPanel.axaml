@@ -127,12 +127,9 @@
             </ComboBox.ItemTemplate>
           </ComboBox>
           <Button Content="{StaticResource str.Snapshot.Diff.Run}" Command="{Binding RunDiffCommand}"
-                  IsEnabled="{Binding CanRunDiff}" Classes="accent" Padding="12,4" Margin="0,0,8,0"
+                  IsEnabled="{Binding CanRunDiff}" Classes="accent" Padding="12,4"
                   ToolTip.Tip="{StaticResource str.Snapshot.Diff.Hint}"/>
-          <Button Content="{StaticResource str.Snapshot.Diff.OpenWalker}" Command="{Binding OpenInLiveWalkerCommand}"
-                  CommandParameter="{Binding SelectedDiffRow}" Padding="8,4" Margin="0,0,8,0"/>
-          <Button Content="{StaticResource str.Snapshot.Diff.CopyAddr}" Command="{Binding CopyDiffAddressCommand}"
-                  CommandParameter="{Binding SelectedDiffRow}" Padding="8,4"/>
+          <!-- Per-row Open / GWorld / Copy live on each diff row (below). -->
         </WrapPanel>
         <WrapPanel Orientation="Horizontal" IsEnabled="{Binding !IsDiffing}">
           <TextBlock Text="{StaticResource str.Snapshot.Diff.ClassFilter}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
@@ -182,6 +179,35 @@
           <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Field}"  Binding="{Binding PropName}"       SortMemberPath="PropName"  Width="160"/>
           <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.Old}"    Binding="{Binding OldValue}"       SortMemberPath="OldValue"  Width="120"/>
           <DataGridTextColumn Header="{StaticResource str.Snapshot.Diff.Col.New}"    Binding="{Binding NewValue}"       SortMemberPath="NewValue"  Width="120"/>
+          <!-- Per-row actions (mirror Value Search): Open in Live Walker / GWorld /
+               Copy Address, each operating on this row. GWorld is in-session only. -->
+          <DataGridTemplateColumn Header="" Width="Auto" CanUserSort="False">
+            <DataGridTemplateColumn.CellTemplate>
+              <DataTemplate x:DataType="m:SnapshotDiffRow">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                  <Button Content="{StaticResource str.Snapshot.Diff.OpenWalker}"
+                          Command="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).OpenInLiveWalkerCommand}"
+                          CommandParameter="{Binding}"
+                          IsEnabled="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).CanUseDiffRowActions}"
+                          Foreground="#4EC9B0" Background="Transparent" BorderThickness="1" BorderBrush="#4EC9B0"
+                          Padding="6,2" FontSize="11" Cursor="Hand"/>
+                  <Button Content="{StaticResource str.Snapshot.Diff.CopyAddr}"
+                          Command="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).CopyDiffAddressCommand}"
+                          CommandParameter="{Binding}"
+                          IsEnabled="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).CanUseDiffRowActions}"
+                          Foreground="#DCDCAA" Background="Transparent" BorderThickness="1" BorderBrush="#DCDCAA"
+                          Padding="6,2" FontSize="11" Cursor="Hand"/>
+                  <Button Content="{StaticResource str.Snapshot.Diff.LocateGWorld}"
+                          Command="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).LocateRowInGWorldCommand}"
+                          CommandParameter="{Binding}"
+                          IsEnabled="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).CanLocateDiffRowInGWorld}"
+                          ToolTip.Tip="{StaticResource str.Tip.Snapshot.Diff.LocateGWorld}"
+                          Foreground="#C586C0" Background="Transparent" BorderThickness="1" BorderBrush="#C586C0"
+                          Padding="6,2" FontSize="11" Cursor="Hand"/>
+                </StackPanel>
+              </DataTemplate>
+            </DataGridTemplateColumn.CellTemplate>
+          </DataGridTemplateColumn>
         </DataGrid.Columns>
       </DataGrid>
     </DockPanel>

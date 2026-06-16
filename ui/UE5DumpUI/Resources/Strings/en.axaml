@@ -47,10 +47,10 @@
     <sys:String x:Key="str.VS.FirstScan">First Scan</sys:String>
     <sys:String x:Key="str.VS.NextScan">Next Scan</sys:String>
     <sys:String x:Key="str.VS.NewScan">New Scan</sys:String>
-    <sys:String x:Key="str.VS.OpenLive">Open in Live Walker</sys:String>
-    <sys:String x:Key="str.VS.CopyAddr">Copy Address</sys:String>
+    <sys:String x:Key="str.VS.OpenLive">Live</sys:String>
+    <sys:String x:Key="str.VS.CopyAddr">Addr</sys:String>
     <sys:String x:Key="str.VS.PivotThis">📊 Pivot</sys:String>
-    <sys:String x:Key="str.VS.LocateGWorld">🌍 GWorld</sys:String>
+    <sys:String x:Key="str.VS.LocateGWorld">🌍</sys:String>
     <sys:String x:Key="str.Tip.VS.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this value's owning object and show it in Live Walker</sys:String>
     <sys:String x:Key="str.VS.CaseSensitive">Case sensitive</sys:String>
     <sys:String x:Key="str.VS.Filter">Filter:</sys:String>
@@ -113,6 +113,9 @@
     <sys:String x:Key="str.LiveWalker.AddressHint">Address (hex or module.exe+offset)</sys:String>
     <sys:String x:Key="str.LiveWalker.GWorldDepth">GWorld depth:</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.GWorldDepth">Maximum pointer hops to search downward from GWorld when using "Locate in GWorld" (default 5). Larger = finds deeper targets but slower.</sys:String>
+    <sys:String x:Key="str.Toolbar.GWorldDepth">Locate in GWorld depth</sys:String>
+    <sys:String x:Key="str.Toolbar.DeepScanElemCap">Deep container scan cap</sys:String>
+    <sys:String x:Key="str.Tip.Toolbar.DeepScanElemCap">Per-container element probe cap for the Instances "Lookup" deep scan — the recursive descent that finds a value buried in nested containers (e.g. SaveSlotList[1]…Tunes[N]). Only runs when the fast shallow lookup finds nothing. Higher = reaches values at higher element indices but slower; default 256.</sys:String>
     <sys:String x:Key="str.LiveWalker.Go">Go</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportCE">Copy CE XML</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportCEField">Copy CE Field</sys:String>
@@ -294,8 +297,10 @@
     <sys:String x:Key="str.Snapshot.Diff.ClassFilter">Class:</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.PropFilter">Field:</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.Dir">Change:</sys:String>
-    <sys:String x:Key="str.Snapshot.Diff.CopyAddr">Copy Address</sys:String>
-    <sys:String x:Key="str.Snapshot.Diff.OpenWalker">Open in Live Walker</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.CopyAddr">Addr</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.OpenWalker">Live</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.LocateGWorld">🌍</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Diff.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this row's owning object and show it in Live Walker, scrolled to the changed field (in-session diff only)</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.ObjectFilter">Object:</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.Global">Filter all:</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.GlobalHint">match any column…</sys:String>
@@ -328,10 +333,10 @@
     <sys:String x:Key="str.Spc.ResetRange">Reset</sys:String>
     <sys:String x:Key="str.Spc.Run">Run SPC</sys:String>
     <sys:String x:Key="str.Spc.Refresh">Refresh</sys:String>
-    <sys:String x:Key="str.Spc.OpenWalker">Open in Live Walker</sys:String>
-    <sys:String x:Key="str.Spc.LocateGWorld">🌍 GWorld</sys:String>
+    <sys:String x:Key="str.Spc.OpenWalker">Live</sys:String>
+    <sys:String x:Key="str.Spc.LocateGWorld">🌍</sys:String>
     <sys:String x:Key="str.Tip.Spc.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this row's owning object and show it in Live Walker, scrolled to the changed field</sys:String>
-    <sys:String x:Key="str.Spc.CopyAddr">Copy Address</sys:String>
+    <sys:String x:Key="str.Spc.CopyAddr">Addr</sys:String>
     <sys:String x:Key="str.Spc.PickerHeader">Snapshot sequence</sys:String>
     <sys:String x:Key="str.Spc.BaselineHint">The oldest ticked snapshot is the baseline (its predicate is ignored). Each later snapshot's predicate compares it to the previous ticked one. Hit → Copy Address / Open in Live Walker hands the newest snapshot's live address to CE.</sys:String>
     <sys:String x:Key="str.Spc.Col.Use">Use</sys:String>

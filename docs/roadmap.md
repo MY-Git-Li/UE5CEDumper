@@ -8,6 +8,25 @@ state.
 
 > **Last refreshed**: 2026-05-29 (build 797) for the rows below. **dev = main @
 > build ~937 (PR #238).** Newer work lives in [dev-log.md](dev-log.md):
+> - builds **1181–1199 (2026-06-16)** — **Locate in GWorld** (forward-BFS shortest
+>   pointer chain GWorld→target, the inverse of Find Refs) on every "open in Live
+>   Walker" source, plus **deeply-nested container reach**: `find_by_address` now
+>   recursively descends struct-array / map-value / set elements
+>   (`Aura::FindInContainersDeep`, fallback-only so the fast path is untouched) to
+>   find values in separately-allocated nested containers, and the Instance Finder
+>   container 🌍 drills the full multi-level chain to land ON the value.
+>   **LIVE-VERIFIED on SEED** incl. the deep `SaveSlotList[1].MsTuneData.MsTunes[0].
+>   WeaponTuneList[0].Tunes[2]` repro (28116 objs / 50ms). Build 1199 also fixed the
+>   Live Walker per-row `Addr` copy in container-element views (use the resolved
+>   `FieldAddress`) and moved "Locate in GWorld depth" to the top Options flyout.
+> - builds **1202-1207 (2026-06-16)** — **deeply-nested container values reach end-to-end
+>   across ALL four consumers.** A value at ANY (bounded, depth 4) container depth — e.g.
+>   `SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[N]` — is now found by
+>   **Instance Finder address search**, **Value Search** (by value), **Snapshot capture**,
+>   and so **SPC Query + Snapshot Diff** (Class Pivot already had array support). A shared
+>   recursive `Aura::WalkContainerLeaves` drives Value Search + Snapshot capture; Snapshot
+>   bakes the full path into `array_field` (no schema change). 1-level cases use the fast
+>   static paths; gated per class so the common case pays nothing. 1520 C# / 510 dll green.
 > - builds **1027–1112 (2026-06-12…14)** — **Teleport** tab (Wirbel module):
 >   BugIt-style marker save/recall (3 slots) + cursor teleport for 2.5D/45° games
 >   + BugItGo interop + Debug-Camera force on/off + **read-only camera POV**

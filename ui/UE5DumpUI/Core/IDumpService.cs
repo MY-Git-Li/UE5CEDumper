@@ -78,7 +78,10 @@ public interface IDumpService
         int offset = 0, int limit = 64, CancellationToken ct = default);
 
     // --- Address-to-Instance Reverse Lookup ---
-    Task<AddressLookupResult> FindByAddressAsync(string addr, CancellationToken ct = default);
+    // containerElemCap: per-container element probe cap for the recursive deep
+    // container scan (the fallback that finds values in separately-allocated
+    // nested containers). Higher = deeper coverage, slower.
+    Task<AddressLookupResult> FindByAddressAsync(string addr, int containerElemCap = 256, CancellationToken ct = default);
 
     // --- Reverse Reference Search (logical-owner navigation) ---
     Task<FindReferencesResult> FindReferencesToUObjectAsync(

@@ -14,6 +14,413 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-16 — Compact per-row buttons + stale-session gating on Snapshot/SPC (build 1216)
+
+UI tightening + a correctness gate, on user request (the Interesting Funcs row, with
+5 buttons, is the density target):
+
+- **Compact captions** (all per-row, in `en.axaml`): `Copy Address` → **`Addr`**
+  (everywhere incl. Value Search), `Open in Live Walker` → **`Live`** (datagrid
+  buttons), and the GWorld button → **`🌍` icon only** (dropped the " GWorld" text).
+  Tooltips keep the full explanation. Confirmed the 9 caption keys are datagrid-only
+  before changing values.
+- **Stale-session gating** — the Snapshot-diff and SPC per-row Live / Addr / 🌍
+  buttons are now **disabled unless the address-source snapshot is the CURRENT live
+  session** (its session-local ObjAddr is meaningless after a restart/reinject):
+  - Live session id = `PeHash-ModuleBase` (matches capture-time `GameSessionId`),
+    captured in each VM's `SetEngineState`.
+  - **Snapshot**: gate on the New pick — `CanUseDiffRowActions =>
+    DiffB.GameSessionId == current` (user: "看 New Session"); 🌍 also needs GWorld.
+  - **SPC**: gate on the newest selected snapshot (by Id == capture time) —
+    `CanUseResultRowActions => NewestSelectedSessionId == current` (user:
+    "看時間最近的一筆"); raised on selection change.
+  - Wired as `IsEnabled` on the buttons (the user's "buttons disabled" requirement);
+    the commands themselves stay guard-free so the existing command unit tests
+    remain valid (the button is the gate, and it's the only invoker).
+  - **Known limitation**: `GameSessionId = PeHash-ModuleBase` distinguishes launches
+    only when ASLR moves the base. A game that loads at a constant base reuses the
+    same id every launch, so the gate can't tell an old-session snapshot from a
+    current one (buttons stay enabled though the addresses are stale). A true
+    per-launch DLL token (process creation time) is the proper fix — filed in
+    todo.md. Same-launch snapshots correctly stay enabled.
+
+DLL re-stamped to 1216 (no source change). 510 dll + 31 utf8 + 1530 C# green; AOT clean.
+
+## 2026-06-16 — Per-row action buttons across Snapshot/SPC/Instance Finder + not-found clears Live Walker (build 1213)
+
+UI-consistency pass on user request, making the per-row action buttons uniform with
+Value Search (Open in Live Walker / Copy Address / 🌍 GWorld, in that order, same
+teal/gold/purple styling):
+
+- **SPC Query**: the three top-toolbar buttons (Open / GWorld / Copy) moved into a
+  per-row `DataGridTemplateColumn`; toolbar keeps only Run + Refresh. Commands already
+  took the row, so this is pure XAML.
+- **Snapshot diff**: top Open/Copy moved per-row, **plus a new per-row 🌍 GWorld**.
+  `SnapshotViewModel` gained `IsGWorldAvailable` (set in `SetEngineState` from
+  `HasGWorld`), a `LocateInGWorld` event, and a `LocateRowInGWorld` command (reach mode
+  via the row's deep `PropName` path); wired in `MainWindowViewModel` exactly like SPC.
+  In-session diff only (ObjAddr is snapshot-B's session-local address). New strings
+  `str.Snapshot.Diff.LocateGWorld` + tooltip.
+- **Instance Finder** (address-search container matches): the plain "Open" became teal
+  "Open in Live Walker", and a gold "Copy Address" was added (`CopyContainerAddress`
+  copies the owner address via the same `AddressHelper.FormatAddress` as the
+  per-instance copy); button column widened to Auto.
+
+**Locate-in-GWorld not-found now clears the Live Walker view.** Previously a failed
+locate left the *previous* object on screen under the failure message, looking like the
+result. New `LiveWalkerViewModel.ClearDisplayedNode()` (inverse of `UpdateDisplay`) empties
+fields/breadcrumbs/header; called in both `LocateInGWorldAsync` and
+`LocateContainerInGWorldAsync` when `!path.Found`, except on a user `cancelled` (which
+preserves the current view). The failure reason stays in `StatusText`.
+
+DLL re-stamped to 1213 (no source change) so the build-match badge stays green.
+510 dll_helpers + 31 utf8 + 1530 C# green; AOT publish clean (XAML compiled).
+
+## 2026-06-16 — Snapshot capture heartbeat: live status during slow chunks (build 1212)
+
+Follow-up to the 1211 stall fix, on user feedback: *"if there's no error, letting it
+run as-is is fine — but the status needs feedback; sitting on a frozen number, the
+user can't tell hung vs. working."* The capture loop only refreshed `StatusText`
+**after** each chunk returned, so a slow (deep-container) chunk left the line frozen
+for seconds and looked hung.
+
+**Fix (`SnapshotViewModel`, C# only).** A UI-thread `DispatcherTimer` heartbeat (400 ms)
+re-renders the status while capturing — the UI thread is free during the chunk's
+`await`, so it ticks even mid-chunk. `RenderCaptureStatus` now shows: the latest chunk
+counts, a **live-ticking elapsed clock**, animated trailing dots (fixed 3-char slot so
+the count doesn't jitter), an ETA that **auto-omits when a slow chunk makes it stale**,
+and — when the current batch has run > 3 s — an explicit *"still scanning this batch
+(Ns)"* with its own ticking timer. The loop now feeds counts into fields + renders on
+each chunk completion; the heartbeat is stopped before every terminal message
+(Finalising / cancelled / failed) and in `finally`. Together with 1211, a slow batch
+now reads unmistakably as "working", not hung. **1530 C# tests green.**
+
+## 2026-06-16 — Snapshot capture stall fix: deterministic per-object element cap (build 1211)
+
+User-reported on SEED: after the NaN fix, **Snapshot capture stalled near 80%** — at
+23 s it showed ~80 % / "~5 s left", but one chunk (objects ~22,600–22,800) then took
+~24 s and the user cancelled (perceived hang). The pipe log confirms steady chunks
+then a stall on chunk 114; `SendAsync` has no read timeout, so the disconnect was the
+user's Cancel, not a timeout.
+
+Root cause: the recursive capture (build 1205) walks every object's containers to
+depth 4; a cluster of deeply-nested WIDE-container objects each hit the **2 s
+per-object wall-clock deadline** added in 1208, so one 200-object chunk ground for
+~24 s. The per-container 256-elem cap bounds flat width but nested wide containers
+still blow up combinatorially (256^depth).
+
+**Fix (`WalkContainerLeaves` / `WalkLeafLimits`).** Added a **deterministic per-walk
+element-visit budget** (`maxTotalElems`, threaded as a shared `int64_t* visited`
+counter through the recursion; counts each *allocated* element processed, bails fast
+via a top-of-frame + per-element check). Snapshot sets it to **50,000** (far above any
+real object, but caps the blow-up to tens of ms) and lowers the wall-clock abort to a
+**750 ms backstop** (for pathological per-element cost only). Deterministic is the key
+property: the walk order is stable, so two captures of the same state truncate
+*identically* — SPC diff/join stays consistent, which a wall-clock cutoff would break.
+Value Search's deep pass gets the same 50k cap (its 15 s global deadline stays the
+cross-object backstop). On SEED the stall chunk drops from ~24 s to a few seconds.
+
+Supersedes the build-1208 cancel-only-then-2 s deadline as the primary bound; partially
+addresses audit #6 (no per-object budget). Caps are tunable. **510 dll_helpers + 31
+utf8 + 1530 C# green.** ⚠ in-game live-verify pending (capture completes without stall;
+deep `GP` still captured).
+
+## 2026-06-16 — Snapshot NaN-float capture crash fix (build 1210)
+
+User-reported regression: on SEED, **Snapshot "Capture failed — Cannot store 'NaN'
+values"** — the entire capture aborted. Root cause: the recursive capture (build
+1205) now reaches deep `FloatProperty`/`DoubleProperty` leaves, and one held a
+non-finite bit pattern (NaN / ±Infinity — uninitialised slack, garbage in a deep
+struct-array slot, or a genuinely-NaN gameplay float). `SnapshotNumeric.TryFromHex`
+faithfully decoded it to `double.NaN`, which was bound to the `numeric_value REAL`
+column; `Microsoft.Data.Sqlite` rejects NaN/Infinity, failing the whole chunk
+transaction.
+
+**Fix (`SnapshotNumeric.TryFromHex`).** Return `false` for non-finite float/double
+results (`double.IsFinite`), so `numeric_value` is stored as `NULL` instead — the
+raw bits are still preserved in the `hex` column, and SPC/diff direction (which
+can't compare NaN meaningfully anyway) simply treats it as "no numeric value".
+One root fix covers both bind sites (scalar + struct-array element) and every
+reader. +6 regression tests (float/double qNaN/±Inf). **1530 C# tests green.**
+
+Not a recursion *correctness* bug — the value was captured fine; the crash was
+purely the REAL-column bind. Same class of "the deeper walk surfaced data the old
+shallow walk never reached" as the build 1208 drill gap.
+
+## 2026-06-16 — Multi-`[N]` GWorld drill + map-leaf guard + snapshot deadline (build 1208)
+
+Closes the deep-container story's last gap, surfaced when the SEED user pressed
+"Locate in GWorld" on a deep Value Search hit
+(`SaveSlotList[0].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[2]`) and it landed on
+the intermediate `MsTuneData` node instead of the value. A 4-agent audit (drill-site
+mapping + adversarial scan/capture verification) confirmed: the recursive **scan/capture
+is correct — no regression**; the value is always FOUND. The gap was purely the UI
+**land-ON-it drill**, which only parsed the FIRST `[N]`.
+
+**Multi-`[N]` display-path drill (C#).** Replaced the single-`[N]`
+`TryParseStructArrayInner` + `DrillToStructArrayInnerAsync` with
+`TryParseContainerPath` + `DrillDisplayPathAsync` (`LiveWalkerViewModel`):
+- `TryParseContainerPath` splits the display name into ordered `(name, index)`
+  segments — `name[N]` → container element, bare `name` → direct struct field — and
+  returns true only when ≥1 `[N]` is present (a plain field falls back to the single
+  offset scroll). Handles arbitrary depth; rejects malformed `[]`/`[-1]`/empty segments.
+- `DrillDisplayPathAsync` walks each segment from the owner view: drill the container
+  by name → select `[N]` → (if not last) descend into the struct element; bare names
+  navigate a direct sub-struct; the final segment is selected/scrolled-to. Parity with
+  the Instance Finder structured-chain `DrillContainerChainAsync`.
+- Wired into BOTH the VS/SPC `LocateInGWorldAsync` reach branch AND
+  `NavigateToInstanceFieldAsync`. The latter also **fixes the Open-in-Live-Walker
+  offset-0 mis-select**: a deep candidate carries `fieldOffset=0`, which previously
+  matched the first offset-0 field; container paths now drill explicitly instead.
+
+**Audit-surfaced DLL fixes (`Aura.cpp`).**
+- **Map leaf guard (#1).** `WalkContainerLeaves`' leaf-container branch fired for a
+  scalar-value `TMap` (`sides[0].structAddr==0`), emitting a malformed leaf at the KEY
+  region with the `"K → V"` arrow label as the type — harmless (both consumers reject
+  the bogus type) but wrong. Guarded with `cfe.kind != ContainerKind::Map`. Proper
+  scalar-map value/key capture filed as a follow-up (todo).
+- **Snapshot per-object deadline (#7).** `CaptureStructArrays`' walker had cancel-only
+  abort (no time budget, unlike Value Search's 15 s); a pathological deeply-nested
+  object could stall a chunk within the 256 × depth-4 caps. Added a 2 s per-object
+  `steady_clock` budget; the chunk loop's own cancel poll still handles client-gone.
+
+Audit also confirmed unaffected: Instance Finder address search (structured chain),
+Interesting Props/Funcs + Property Search (definition rows, no container path),
+Snapshot Diff row-nav (opens owner). Remaining gaps filed in todo.md (proper scalar-map
+capture, top-level `TSet/TMap<FStruct>` depth-1 VS leaves, SPC Strict `prop_offset`
+migration edge). **510 dll_helpers + 31 utf8 + 1524 C# tests green.** ⚠ in-game
+live-verify pending (multi-`[N]` 🌍 lands exactly on the SEED `…Tunes[N]` value).
+
+## 2026-06-16 — Recursive (>1 level) container-leaf capture across all four consumers (builds 1205-1207)
+
+Completes the deep-container story: a value buried at ANY (bounded) depth — e.g.
+`SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[N]` — is now reachable
+by **Instance Finder address search** (already recursive since 1198), **Snapshot
+capture → SPC Query / Diff**, and **Value Search**.
+
+**Shared recursive walker (`Aura::WalkContainerLeaves`, build 1204/1205).** New file-
+internal walker + `EmitStructDirectLeaves` mirror the `FindInContainersDeep` descent
+but ENUMERATE leaves via a visitor: every scalar leaf reachable through struct-array /
+map / set elements + nested leaf-containers (`TArray<int>`) + direct sub-structs, to
+`maxDepth=4` / `maxElems`, reusing the cached `GetClassContainers`. The visitor gets the
+full dotted+indexed path + the container-hop depth, so each consumer applies its own
+depth boundary. One engine; two consumers.
+
+**Snapshot capture (build 1205).** `CaptureStructArrays` rewritten to drive the walker.
+The FULL nested path is baked into `SnapshotArray.field` (e.g.
+`SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes`) — **no schema change** —
+so SPC Query + Snapshot Diff, which key on `array_field + elem_index`, get deep support
+for free. Nested leaf-containers are captured (inner prop `""`); TOP-LEVEL leaf arrays
+(`depth<2`) are skipped to avoid DB bloat (matches prior behaviour). Inner-key
+(reorder-immune Array-Pivot join) preserved per element. C# diff/SPC render `path[N]`
+(no trailing dot) for empty-inner-prop leaf-containers. **Snapshot + SPC live-verified by
+the owner before this; deep nesting now flows through.**
+
+**Value Search (build 1206).** Kept the fast static depth-1 paths (`StructArrayInner`
+direct leaves + the `TArray<leaf>` branch); added a per-class `needsDeepWalk` gate
+(true only when a container's element struct itself has containers — one cheap
+look-ahead) + a per-instance `WalkContainerLeaves` pass that emits candidates for leaves
+at container depth **>= 2** (so no double-count with the static paths). Deep candidates
+get a per-path descriptor (full display name, `elementIndex=-1`); vectors skipped (the
+walker yields scalar leaves, not whole vector structs). Reuses `emitCandidate` +
+`multiResolve` + the lean pools. Same 15s deadline / cancel.
+
+**Caps / cost.** `maxDepth=4`, `maxElems=256`; gated per class so the common case (no
+struct-element nesting) pays nothing; cancel/deadline poll every 64 elements. Deep VS
+candidates' 🌍 deep-drill degrades gracefully for multi-`[N]` paths (the by-address
+path fully drills; VS finds the value).
+
+Tests: +1 C# (`Diff_DeepNestedPath_AndLeafContainer`) → 1520 C# / 510 dll / 31 utf8
+green; full build + 3 proxies clean. **In-game verify pending**: deep Snapshot diff +
+deep Value Search hit on SEED.
+
+-----
+
+## 2026-06-16 — Struct-array values reach end-to-end: VS GWorld drill + SPC/Diff inclusion (build 1203)
+
+Two live follow-ups after the build-1202 Value Search struct-array descent shipped.
+
+**Value Search 🌍 now deep-drills to the inner value (Issue A).** Value Search found
+`SaveSlotList[1].GP` but "Locate in GWorld" landed on the outer `SaveSlotList` array,
+not the inner `GP` — the reach path's single-shot `_pendingScroll` can't chain array →
+element → inner field, and `ParseElementIndexSuffix("SaveSlotList[1].GP")` is -1 (doesn't
+end in `]`). Fix: `LiveWalkerViewModel.LocateInGWorldAsync` now detects a struct-array-
+inner display name via new pure `TryParseStructArrayInner` ("ArrayPath[N].InnerPath" →
+array path, element index, inner dotted path) and runs an explicit awaited drill
+`DrillToStructArrayInnerAsync` (navigate the array's leading direct-struct segments →
+container → element `[N]` → inner direct-struct segments → select the leaf by name).
+Mirrors the Instance Finder container deep-drill; degrades to "drill manually" if a hop
+can't be matched. Handles nested array paths + nested inner structs (by name, so no
+numeric intra-offset needed).
+
+**Snapshot Diff + SPC Query now include struct-array elements (Issue B).** Capturing
+`GP-1` then `GP+1` and running Diff produced nothing — the snapshot ALREADY captures
+struct-array elements (`Aura::CaptureStructArrays` → `array_field`/`elem_index`/
+`inner_prop_name`), and **Class Pivot already consumes them**, but Diff + SPC filtered
+them out with `WHERE array_field IS NULL`. Fix (`SnapshotStore`): drop that filter in the
+diff A/B streams + the SPC load, and extend the join key with `array_field` + `elem_index`
+so distinct elements (`SaveSlotList[0].GP` vs `[1].GP`, identical class/owner/inner-prop)
+don't collide — direct fields contribute `""`/`-1`, leaving their keys unchanged. Rows
+display the full path `SaveSlotList[1].GP` (`SpcDisplayProp` / inline build). Array rows'
+owner-relative `prop_offset` is zeroed (it doesn't address the separate heap element);
+`ObjAddr` stays the owner so "Open in Live Walker" still reaches it. **The deep-nested
+case (a value inside a TArray/TMap nested *inside* a struct element) is still capture-
+limited** — `CaptureStructArrays` does one struct-array level — so SPC/Diff see 1-level
+struct-array values (GP), matching Value Search's descent depth.
+
+Tests: +7 C# (`TryParseStructArrayInner` facts/theory) + reworked the
+`WriteChunk_WritesArrayRows_*` diff test (was "excluded", now asserts HP +
+`Cargo[0].Quantity` both change, `Cargo[1]` unchanged) → **1519 C#**; 510 dll / 31 utf8
+green. Full build + AOT clean. **In-game verify pending**: VS 🌍 lands on `GP`; Snapshot
+Diff of a GP change lists `SaveSlotList[1].GP`.
+
+-----
+
+## 2026-06-16 — Value Search descends into struct arrays (build 1202)
+
+Live-testing the deep-container work surfaced that **Value Search can't find a value
+inside a struct-array element** — scanning for `GP = 46643`
+(`BP_LifeSaveData_C.SaveSlotList[1].GP`, an int inside a `TArray<FStruct>` element)
+returned 0 candidates, because `ScanForValue` never descended `TArray<FStruct>`. The
+user asked to close that gap (the previously-deferred "Value Search descends structs").
+
+**DLL (`ScanForValue`).** New `ScanContainer::StructArrayInner` + a
+`collectStructArrayInner` collector: when field collection hits a `TArray<FStruct>`
+(non-vector scan), it walks the element struct's LEAF fields — including those nested
+in *direct* sub-structs — and emits one `StructArrayInner` ScanField per leaf, carrying
+the outer array's object-relative offset + the leaf's element-relative offset
+(`structInnerOffset`) + the element stride. The per-instance scan reads the TArray
+header and tests each element at `arrayData + idx*stride + structInnerOffset` (reusing
+the existing `scanElement` predicate paths + the 10M circuit-breaker + 15s deadline +
+cancel poll). **One struct-array level**: containers nested *inside* an element
+(`TArray`/`TSet`/`TMap`) are separate heap allocations and are NOT followed — the
+by-address deep scan (`FindInContainersDeep`) covers those. Vector scans keep their
+whole-struct-match semantics (descent gated off). Display: `FieldDisplayName` now honours
+a `[]` placeholder so a struct-array-inner field renders `SaveSlotList[3].GP` (index
+after the array name, not appended at the end), via the descriptor name
+`SaveSlotList[].GP`. +3 dll_helpers EXPECTs → **510 dll_helpers green**.
+
+**Snapshot / SPC / Pivot (engine analysis, per the user's "same-engine → together,
+else todo").** These are *separate* engines from `ScanForValue`:
+- **Snapshot capture ALREADY captures struct-array elements** (`Aura::CaptureStructArrays`
+  → `array_field`/`elem_index`/`inner_prop_name` columns), so `GP` is already in the DB.
+- **Class Pivot ALREADY supports array-element fields** (`SnapshotStore.ListPivotArrayFieldsAsync`
+  + the `array_field IS NOT NULL` array-pivot queries).
+- **SPC Query + Snapshot Diff still exclude them** (`WHERE array_field IS NULL`,
+  SnapshotStore lines 534/562/681) — the one remaining gap. It lives in the C#
+  `SnapshotStore`/`SpcEngine` (a different engine from the Value Search DLL change), so
+  per the rule it's filed in [todo.md](todo.md) rather than bundled here.
+
+1512 C# / 510 dll / 31 utf8 green. **In-game verify pending**: scan `46643` on SEED →
+expect the `SaveSlotList[1].GP` candidate to appear.
+
+-----
+
+## 2026-06-16 — Deeply-nested container values: recursive find_by_address + multi-level GWorld drill (build 1198)
+
+The first live test of Locate in GWorld (build 1193) surfaced two gaps in the
+todo: a value buried **>1 container level deep** couldn't be found by
+`find_by_address` at all, and the deep-drill (which lands ON a value inside a
+struct-array element) was only fed by the Instance Finder. After investigation
+the user chose **recursive descent + multi-level drill, all through the Instance
+Finder by-address path** (Value Search / SPC wiring intentionally folded in —
+see "Why not VS/SPC" below).
+
+**Repro (SEED BATTLE DESTINY REMASTERED).** `find_by_address 0x228F1251BE8`
+returned **0 matches** while a sibling 1-level value (`SaveSlotList[1]+0x4D8`,
+the inline `GP` field) was found instantly. The deep int lives at
+`BP_LifeSaveData_C.SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[N]`
+— six container hops, each nested container a **separate heap allocation**.
+
+**Why the shallow scan can't see it.** `Aura::FindInContainers` bounds-checks
+`addr` against each container buffer at a fixed offset within the object
+(`GetClassContainers` flattens DIRECT-struct nesting). That finds values stored
+INLINE in a buffer — a `TArray<int>` element, or a field of a struct stored
+inline in a `TArray<FStruct>` (why `SaveSlotList[1]+0x4D8` works). But a
+`TArray<int>` whose *header* is inline in a struct element while its *data*
+lives elsewhere on the heap is a separate allocation — `addr` falls in no
+top-level buffer.
+
+**Recursive deep descent (DLL).** New `Aura::FindInContainersDeep` +
+`MatchAddrInStructContainers` recurse into struct elements: at each level, if
+`addr` is inside a buffer it's the terminal hit (a leaf, or an inline struct
+field); otherwise, for struct-element containers (Array/Set element struct, Map
+value/key struct) descend into each element and recurse, building the full hop
+chain. Bounded by `maxDepth` (UI sends 5), a 256-element-per-container probe
+cap, the existing 15s deadline, and **early-out on the first match** (one match
+answers a by-address lookup). It runs **only as a fallback** when the shallow
+scan finds nothing AND the caller opted in (`container_depth > 1`), so the
+common fast path is untouched (zero regression). `ContainerCacheEntry` now
+carries the element/value/key `UScriptStruct*` + map value offset (resolved at
+cache-build via new `Ubel::GetContainerInnerStructAddr` + an extended
+`GetMapPairLayout` that also returns key/value struct addrs). `GetMapPairLayout`
+now uses the value's **real** alignment (`Scharf::RequiredAlignment`) so the
+pair stride/value offset match `WalkInstance` exactly — the deep matcher indexes
+map slots by the same sparse index the UI shows.
+
+**Multi-level chain (model + pipe).** `ContainerMatch` gains a
+`nestedChain` (`ContainerHop[]`); the outermost container stays in the existing
+fields, each deeper hop is one container drilled into, and the deepest hop's
+intra-offset locates the value. Serialized as `nested_chain` in the
+`find_by_address` response; `find_by_address` reads a new `container_depth`
+param. `ContainerMatch.DisplayPath` (C#) now spans the full chain
+(`…SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[42]`).
+
+**Multi-level GWorld drill (UI).** New `LiveWalkerViewModel.LocateContainerInGWorldAsync(ContainerMatch)`
+reaches the owner via the BFS path, then `DrillContainerChainAsync` walks the
+chain hop-by-hop: navigate any leading DIRECT-struct name segments (e.g.
+`MsTuneData` in `MsTuneData.MsTunes`) → drill the container → select element
+`[N]`; nested hops then drill INTO the struct element to continue; the deepest
+hop scrolls to the value (a struct field at its intra-offset, or the leaf
+element itself). Degrades gracefully — if a hop can't be matched in the live
+view it stops and reports the remaining manual path. The Instance Finder
+container row's 🌍 now passes the whole `ContainerMatch`
+(`LocateContainerInGWorld` event → `Action<ContainerMatch>`); the build-1193
+one-level `elementIntraOffset` branch of `LocateInGWorldAsync` was removed (the
+1-level case is just a single-hop chain through the new path). Shared spine
+builder `BuildBreadcrumbSpineFromPath` extracted.
+
+**Why not VS/SPC (the folded-in todo item).** Investigation found neither
+produces a "value inside a struct-array element" candidate today: Value Search's
+`ScanForValue` never descends into `TArray<FStruct>` elements, and SPC filters
+every array-element row out of its results (`WHERE array_field IS NULL`). So
+there was nothing to wire the deep-drill to — and a VS redirect couldn't reach
+the SEED value anyway (its first hop `SaveSlotList` is already a struct array).
+The by-address path is where the workflow actually lives, so the effort went
+there.
+
+**Tests / build.** +7 C# (`DeepContainerChainTests`: chain `DisplayPath` /
+`DeepestIntraOffset` / `IsDeeplyNested` + the flattened `BuildContainerDrillPath`
+order) → **1512 C#**; **507 dll_helpers / 31 utf8** unchanged green. Full build
+clean (DLL + 3 proxies), AOT publish clean (46 MB).
+
+**LIVE-VERIFIED on SEED (build 1199).** `find_by_address 1B06D16B448` →
+`BP_LifeSaveData_C.SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[2]`
+(scanned 28116 objects in 50ms), and the container-row 🌍 reached the owner (2
+hops) and drilled the full chain to land ON `Tunes[2]` = 20. Two follow-ups from
+the test:
+- **Live Walker `Addr` copy bug (fixed).** In a container-element view the per-row
+  `Addr` button recomputed `CurrentAddress + field.Offset`, but `CurrentAddress` is
+  the OWNING struct (the element lives in a separate heap buffer), so it copied the
+  owner's field at that offset (e.g. `Tunes[2]`'s `Addr` gave the parent's
+  `WeaponId` address). Now `CopyFieldAddressAsync` uses the already-resolved
+  `field.FieldAddress` (same value the Address column + Hex/+CE/Edit buttons use),
+  falling back to `CurrentAddress + Offset` only when it's absent.
+- **"Locate in GWorld depth" moved to the Options flyout.** The depth NumericUpDown
+  left the Live Walker toolbar for the top **Options** dropdown (renamed
+  `Locate in GWorld depth`, slider 1–32), bound through the `LiveWalker` sub-VM
+  (`LiveWalker.GWorldLocateDepth` / `.IsGWorldAvailable` for the dim-when-no-GWorld
+  gate).
+- **Deep-scan element cap is now configurable (build 1200).** The
+  `kMaxElemProbe = 256` constant became a parameter threaded
+  `find_by_address`(`container_elem_cap`) → `FindInContainersDeep(maxElemProbe)`, with
+  a `Deep container scan cap` exponent-slider in the Options flyout (2^4–2^12,
+  default 256) bound via `MainWindowViewModel.DeepScanElemCap(Exponent)` →
+  `InstanceFinder.DeepScanElemCap`. Higher reaches values at higher element indices
+  in the recursive descent at the cost of speed.
+
+-----
+
 ## 2026-06-16 — Locate in GWorld: forward BFS path search (build 1181)
 
 Pressing **Parent** in the Live Walker walks `UObject.OuterPrivate` (the naming

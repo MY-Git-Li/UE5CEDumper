@@ -1,6 +1,34 @@
 namespace UE5DumpUI.Models;
 
 /// <summary>
+/// One nesting hop beyond the outermost container, for a value buried in a
+/// SEPARATELY-allocated nested container (e.g. a TArray&lt;int&gt; inside a
+/// struct element of a TMap value inside a struct element of a TArray). Mirrors
+/// the DLL's <c>ContainerHop</c>. Each hop is one container drilled INTO,
+/// reached from the previous element's struct.
+/// </summary>
+public sealed class ContainerHop
+{
+    /// <summary>Container field offset within the PARENT element struct.</summary>
+    public int FieldOffset { get; init; }
+    /// <summary>Dotted name within that struct (e.g. "MsTuneData.MsTunes").</summary>
+    public string FieldName { get; init; } = "";
+    public string FieldType { get; init; } = "";
+    public string InnerType { get; init; } = "";
+    public int ElementIndex { get; init; }
+    public int ElementSize { get; init; }
+    /// <summary>(addr - elementStart) within this hop's element. Only meaningful
+    /// on the deepest hop (intermediate hops are 0 — the leaf intra lives on the
+    /// last hop).</summary>
+    public int IntraOffset { get; init; }
+    public string DataAddress { get; init; } = "";
+    /// <summary>True when the hit is on the VALUE side of a Map pair (drilling
+    /// the element lands on the value struct).</summary>
+    public bool MapValueSide { get; init; }
+    public string Note { get; init; } = "";
+}
+
+/// <summary>
 /// One container-aware match: the address falls inside a UObject's
 /// ArrayProperty heap buffer (TArray::Data), pinpointing element index
 /// and intra-element offset.
@@ -42,16 +70,37 @@ public sealed class ContainerMatch
     /// </summary>
     public string Note { get; init; } = "";
 
-    /// <summary>Display path: "OwnerName.FieldName[N]+0xK (note)".</summary>
+    /// <summary>
+    /// Additional nesting levels for a deeply-nested value (DLL
+    /// FindInContainersDeep). Empty for a shallow 1-level match. When non-empty,
+    /// this match's own fields describe the OUTERMOST container and each
+    /// <see cref="NestedChain"/> entry a deeper one; the last hop's
+    /// <see cref="ContainerHop.IntraOffset"/> locates the value.
+    /// </summary>
+    public List<ContainerHop> NestedChain { get; init; } = new();
+
+    /// <summary>True when this match descended through one or more nested
+    /// containers (separate heap allocations) — i.e. the deep scan found it.</summary>
+    public bool IsDeeplyNested => NestedChain.Count > 0;
+
+    /// <summary>The intra-element offset of the value within the DEEPEST element
+    /// (outermost <see cref="IntraOffset"/> when there's no nested chain).</summary>
+    public int DeepestIntraOffset => NestedChain.Count > 0 ? NestedChain[^1].IntraOffset : IntraOffset;
+
+    /// <summary>Display path: "OwnerName.FieldName[N].Hop[M]...[K]+0xK (note)".
+    /// Spans the full nested chain for deeply-nested values.</summary>
     public string DisplayPath
     {
         get
         {
             var path = $"{OwnerName}.{FieldName}[{ElementIndex}]";
-            if (IntraOffset > 0)
-                path += $"+0x{IntraOffset:X}";
-            if (!string.IsNullOrEmpty(Note))
-                path += $" ({Note})";
+            foreach (var h in NestedChain)
+                path += $".{h.FieldName}[{h.ElementIndex}]";
+            if (DeepestIntraOffset > 0)
+                path += $"+0x{DeepestIntraOffset:X}";
+            var note = NestedChain.Count > 0 ? NestedChain[^1].Note : Note;
+            if (!string.IsNullOrEmpty(note))
+                path += $" ({note})";
             return path;
         }
     }

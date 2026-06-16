@@ -117,7 +117,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- Fern     (PipeServer)    <- Named Pipe IPC (~53 cmds incl. value scan + teleport + teleport_relative + set/get_mouse_cursor) |
 |      +-- Himmel   (Signatures)    <- 128 AOB + symbol exports |
 |      +-- Genau    (OffsetFinder)  <- GObjects/GNames/GWorld   |
-|      +-- Aura     (ObjectArray)   <- Chunked + Flat arrays + Find Refs/Containers + ScanForValue (lean Candidate V3-A 926; TSet/TMap scan V1a 927) + FindObjectGraphPath (GWorld fwd BFS / Locate in GWorld, 1181) |
+|      +-- Aura     (ObjectArray)   <- Chunked + Flat arrays + Find Refs/Containers (+ recursive deep descent FindInContainersDeep, 1198) + ScanForValue (lean Candidate V3-A 926; TSet/TMap scan V1a 927) + FindObjectGraphPath (GWorld fwd BFS / Locate in GWorld, 1181) |
 |      +-- Serie    (FNamePool)     <- UE5 Pool / UE4 TNameEntry|
 |      +-- Ubel     (UStructWalker) <- FField + UProperty + Phases B-K + Optional + ReadFStringAt/ReadFNameAt/ReadFTextStringAt (public, build 757) |
 |      +-- Macht    (Memory)        <- AOBScan + SEH read/write |

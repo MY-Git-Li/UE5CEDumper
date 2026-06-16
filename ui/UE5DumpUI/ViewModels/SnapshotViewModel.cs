@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
@@ -24,14 +25,32 @@ public partial class SnapshotViewModel : ViewModelBase
     private readonly IExperimentalGate? _gate;
     private readonly IPlatformService? _platform;
     private EngineState? _engineState;
+    // Live game session (PeHash-ModuleBase, ASLR-randomised per launch). Diff rows'
+    // ObjAddr is the New snapshot's session-local address, so the per-row
+    // Live/Addr/GWorld actions are only valid when the New (DiffB) snapshot belongs
+    // to the current live session.
+    private string _currentSessionId = "";
     private CancellationTokenSource? _cts;        // capture (streaming) op
     private CancellationTokenSource? _diffCts;    // diff (heavy in-memory) op
+
+    // Capture heartbeat: the chunk loop only refreshes status AFTER each chunk
+    // returns, so a slow (deep-container) chunk freezes the display for many
+    // seconds and looks hung. A UI-thread timer ticks the elapsed clock + an
+    // animated indicator while capturing — the UI thread is free during the
+    // chunk's await, so the user always sees life even when the object count is
+    // frozen between chunk completions. (build 1212)
+    private DispatcherTimer? _captureHeartbeat;
+    private DateTime _captureStart;
+    private DateTime _lastChunkAt;
+    private int _capOffset, _capTotal, _capObjects, _capFields;
+    private int _heartbeatPhase;
 
     [ObservableProperty] private string _label = "";
     [ObservableProperty] private bool   _gameOnly = true;
     [ObservableProperty] private string _selectedScope = "NumericNoByte";
     [ObservableProperty] private bool   _isCapturing;
     [ObservableProperty] private bool   _isDeleting;
+    [ObservableProperty] private bool   _isGWorldAvailable;   // gates the per-row 🌍 button
     [ObservableProperty] private double _progress;          // 0..1
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private SnapshotMeta? _selectedSnapshot;
@@ -83,6 +102,11 @@ public partial class SnapshotViewModel : ViewModelBase
     /// <summary>Raised to open a diff row's object in the Live Walker tab.</summary>
     public event Action<string>? NavigateToInstance;
 
+    /// <summary>Raised to locate a diff row's owning object in the GWorld graph
+    /// (reach mode — land on the object, scroll to the changed field). Args:
+    /// (objAddr, fieldOffset, fieldName). Same shape as SPC / Value Search.</summary>
+    public event Action<string, int, string>? LocateInGWorld;
+
     public IReadOnlyList<string> DiffDirectionOptions { get; } =
         new[] { "Any", "Increased", "Decreased" };
 
@@ -97,8 +121,28 @@ public partial class SnapshotViewModel : ViewModelBase
     /// <summary>Two distinct snapshots picked and not mid-diff.</summary>
     public bool CanRunDiff => DiffA != null && DiffB != null && DiffA != DiffB && !IsDiffing && !IsCapturing;
 
+    /// <summary>True only when the New (DiffB) snapshot — whose session-local
+    /// ObjAddr the diff rows carry — belongs to the CURRENT live session, so its
+    /// addresses are still valid in the running game. Gates the per-row Live / Addr
+    /// actions (a cross-session address is stale).</summary>
+    public bool CanUseDiffRowActions =>
+        !string.IsNullOrEmpty(_currentSessionId) && DiffB?.GameSessionId == _currentSessionId;
+    /// <summary>As above, additionally requiring GWorld for the 🌍 button.</summary>
+    public bool CanLocateDiffRowInGWorld => CanUseDiffRowActions && IsGWorldAvailable;
+
     partial void OnDiffAChanged(SnapshotMeta? value)   => OnPropertyChanged(nameof(CanRunDiff));
-    partial void OnDiffBChanged(SnapshotMeta? value)   => OnPropertyChanged(nameof(CanRunDiff));
+    partial void OnDiffBChanged(SnapshotMeta? value)
+    {
+        OnPropertyChanged(nameof(CanRunDiff));
+        RaiseDiffRowActionGates();
+    }
+    partial void OnIsGWorldAvailableChanged(bool value) => OnPropertyChanged(nameof(CanLocateDiffRowInGWorld));
+
+    private void RaiseDiffRowActionGates()
+    {
+        OnPropertyChanged(nameof(CanUseDiffRowActions));
+        OnPropertyChanged(nameof(CanLocateDiffRowInGWorld));
+    }
     partial void OnIsDiffingChanged(bool value)
     {
         OnPropertyChanged(nameof(CanRunDiff));
@@ -259,6 +303,9 @@ public partial class SnapshotViewModel : ViewModelBase
     public void SetEngineState(EngineState state)
     {
         _engineState = state;
+        IsGWorldAvailable = state.HasGWorld;   // enable the per-row 🌍 button
+        _currentSessionId = $"{state.PeHash}-{state.ModuleBase}";   // matches capture-time GameSessionId
+        RaiseDiffRowActionGates();
         // Scope the store to this game's DB, then load its saved snapshots.
         _store.SetActiveGame(state.PeHash);
         LoadDenylistFromStore();
@@ -347,12 +394,17 @@ public partial class SnapshotViewModel : ViewModelBase
         IsCapturing = true;
         CaptureSectionOpen = true;   // force the capture region visible while capturing
         Progress = 0;
-        var captureStart = DateTime.UtcNow;
+        _captureStart = DateTime.UtcNow;
+        _lastChunkAt  = _captureStart;
+        _capOffset = _capTotal = _capObjects = _capFields = 0;
+        _heartbeatPhase = 0;
 
         long snapshotId = 0;
         try
         {
             int total = await _dump.BeginSnapshotAsync(dataType, ct);
+            _capTotal = total;
+            StartCaptureHeartbeat();
 
             var meta = new SnapshotMeta
             {
@@ -384,23 +436,18 @@ public partial class SnapshotViewModel : ViewModelBase
                 }
 
                 offset += chunk.Scanned;
+                // Hand the latest counts to the heartbeat (it owns StatusText while
+                // capturing) and refresh immediately so a chunk completion shows at
+                // once; the timer keeps the line live between chunks.
+                _capOffset = offset; _capObjects = objectCount; _capFields = fieldCount;
+                _lastChunkAt = DateTime.UtcNow;
                 Progress = total > 0 ? Math.Min(1.0, offset / (double)total) : 0;
-                // Elapsed + ETA so a multi-minute capture shows progress, not just
-                // a moving bar. ETA = elapsed / fraction-done − elapsed; suppressed
-                // until ≥2% so the early estimate isn't wildly noisy.
-                var elapsed = DateTime.UtcNow - captureStart;
-                string timing = $" · {FmtSpan(elapsed)} elapsed";
-                if (Progress >= 0.02)
-                {
-                    var remain = TimeSpan.FromSeconds(elapsed.TotalSeconds / Progress) - elapsed;
-                    if (remain > TimeSpan.Zero) timing += $", ~{FmtSpan(remain)} left";
-                }
-                StatusText = $"Capturing… {offset:N0}/{total:N0} ({Progress:P0}) — " +
-                             $"{objectCount:N0} objects, {fieldCount:N0} fields{timing}";
+                RenderCaptureStatus();
 
                 if (chunk.Scanned == 0 || offset >= chunk.Total) break;
             }
 
+            StopCaptureHeartbeat();   // stop ticking before the terminal messages
             StatusText = "Finalising (building pivot index)…";
             // Off the UI thread: FinalizeSnapshotAsync builds the pivot index with a
             // COUNT(DISTINCT …) GROUP BY over the full snapshot (the documented ~10s
@@ -417,6 +464,7 @@ public partial class SnapshotViewModel : ViewModelBase
         }
         catch (OperationCanceledException)
         {
+            StopCaptureHeartbeat();
             StatusText = "Capture cancelled.";
             if (snapshotId > 0)
             {
@@ -427,17 +475,79 @@ public partial class SnapshotViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            StopCaptureHeartbeat();
             _log.Error(Constants.LogCatView, "Snapshot: capture failed", ex);
             SetError(ex);
             StatusText = "Capture failed.";
         }
         finally
         {
+            StopCaptureHeartbeat();   // idempotent — belt-and-suspenders cleanup
             IsCapturing = false;
             Progress = 0;
             _cts?.Dispose();
             _cts = null;
         }
+    }
+
+    /// <summary>
+    /// Start the capture heartbeat: a UI-thread timer that re-renders the status
+    /// line every 400 ms so the elapsed clock + animated dots keep moving even
+    /// while a single slow chunk (deep-container objects) is in flight — the
+    /// difference between "still working" and "looks hung". The UI thread is free
+    /// during the chunk's await, so the tick fires.
+    /// </summary>
+    private void StartCaptureHeartbeat()
+    {
+        StopCaptureHeartbeat();
+        RenderCaptureStatus();   // paint once immediately
+        _captureHeartbeat = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _captureHeartbeat.Tick += OnCaptureHeartbeat;
+        _captureHeartbeat.Start();
+    }
+
+    private void StopCaptureHeartbeat()
+    {
+        if (_captureHeartbeat == null) return;
+        _captureHeartbeat.Stop();
+        _captureHeartbeat.Tick -= OnCaptureHeartbeat;
+        _captureHeartbeat = null;
+    }
+
+    private void OnCaptureHeartbeat(object? sender, EventArgs e)
+    {
+        _heartbeatPhase++;
+        RenderCaptureStatus();
+    }
+
+    /// <summary>
+    /// Compose the live "Capturing…" status from the latest chunk counts + a
+    /// live elapsed clock. Animated trailing dots move every tick so the line is
+    /// visibly alive even when the object count is frozen mid-chunk; if the
+    /// current batch has been running a few seconds, say so explicitly — the
+    /// "is it hung or working?" reassurance for deep-container objects.
+    /// </summary>
+    private void RenderCaptureStatus()
+    {
+        var now = DateTime.UtcNow;
+        var elapsed = now - _captureStart;
+        string dots = new string('.', _heartbeatPhase % 4);   // animate 0..3 dots
+        string timing = $" · {FmtSpan(elapsed)} elapsed";
+        if (Progress >= 0.02)
+        {
+            // ETA from fraction-done; auto-omits while a slow chunk makes the
+            // estimate go stale (remain ≤ 0), leaving just the ticking clock.
+            var remain = TimeSpan.FromSeconds(elapsed.TotalSeconds / Progress) - elapsed;
+            if (remain > TimeSpan.Zero) timing += $", ~{FmtSpan(remain)} left";
+        }
+        var batchAge = now - _lastChunkAt;
+        string batch = batchAge > TimeSpan.FromSeconds(3)
+            ? $" · still scanning this batch ({FmtSpan(batchAge)})"
+            : "";
+        // {dots,-3}: fixed 3-char slot so the count column doesn't jitter as the
+        // dots animate.
+        StatusText = $"Capturing{dots,-3} {_capOffset:N0}/{_capTotal:N0} ({Progress:P0}) — " +
+                     $"{_capObjects:N0} objects, {_capFields:N0} fields{timing}{batch}";
     }
 
     [RelayCommand]
@@ -525,8 +635,22 @@ public partial class SnapshotViewModel : ViewModelBase
     [RelayCommand]
     private void OpenInLiveWalker(SnapshotDiffRow? row)
     {
+        // Stale-session gating is enforced on the button (IsEnabled =
+        // CanUseDiffRowActions); the command itself stays guard-free for testability.
         if (row == null || string.IsNullOrEmpty(row.ObjAddr)) return;
         NavigateToInstance?.Invoke(row.ObjAddr);
+    }
+
+    /// <summary>Locate this diff row's owning object in the GWorld graph (reach
+    /// mode — land on it, scroll to the changed field via PropName, which may be a
+    /// deep container path). Only valid for an in-session diff (ObjAddr is the
+    /// session-local address from snapshot B); a cross-session address fails the
+    /// path search gracefully.</summary>
+    [RelayCommand]
+    private void LocateRowInGWorld(SnapshotDiffRow? row)
+    {
+        if (row == null || !IsGWorldAvailable || string.IsNullOrEmpty(row.ObjAddr)) return;
+        LocateInGWorld?.Invoke(row.ObjAddr, row.PropOffset, row.PropName);
     }
 
     /// <summary>Copy the changed field's live address (obj_addr + offset) to the

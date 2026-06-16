@@ -192,6 +192,34 @@ public partial class SpcQueryViewModel : ViewModelBase
     /// <summary>True when GWorld is available — gates the per-row "Locate in GWorld" button.</summary>
     [ObservableProperty] private bool _isGWorldAvailable;
 
+    // Live game session (PeHash-ModuleBase). Result rows carry the NEWEST selected
+    // snapshot's live ObjAddr (the store hands the last id's address), so the
+    // per-row Live/Addr/GWorld actions are only valid when that newest snapshot
+    // belongs to the current live session.
+    private string _currentSessionId = "";
+
+    /// <summary>GameSessionId of the newest selected snapshot (by Id == capture
+    /// time) — the one whose live ObjAddr the result rows carry.</summary>
+    private string NewestSelectedSessionId =>
+        SnapshotPicks.Where(p => p.IsSelected).OrderBy(p => p.Id).LastOrDefault()?.Meta.GameSessionId ?? "";
+
+    /// <summary>True only when the newest selected snapshot belongs to the CURRENT
+    /// live session, so the result rows' ObjAddr is still valid in the running game.
+    /// Gates the per-row Live / Addr actions (a cross-session address is stale).</summary>
+    public bool CanUseResultRowActions =>
+        !string.IsNullOrEmpty(_currentSessionId) && NewestSelectedSessionId == _currentSessionId;
+    /// <summary>As above, additionally requiring GWorld for the 🌍 button.</summary>
+    public bool CanLocateResultRowInGWorld => CanUseResultRowActions && IsGWorldAvailable;
+
+    partial void OnIsGWorldAvailableChanged(bool value) =>
+        OnPropertyChanged(nameof(CanLocateResultRowInGWorld));
+
+    private void RaiseResultRowActionGates()
+    {
+        OnPropertyChanged(nameof(CanUseResultRowActions));
+        OnPropertyChanged(nameof(CanLocateResultRowInGWorld));
+    }
+
     public int SelectedCount => SnapshotPicks.Count(p => p.IsSelected);
 
     /// <summary>At least two snapshots picked and not mid-query.</summary>
@@ -212,6 +240,8 @@ public partial class SpcQueryViewModel : ViewModelBase
     {
         _engineState = state;
         IsGWorldAvailable = state.HasGWorld;
+        _currentSessionId = $"{state.PeHash}-{state.ModuleBase}";   // matches capture-time GameSessionId
+        RaiseResultRowActionGates();
         _store.SetActiveGame(state.PeHash);
         LoadDenylistFromStore();
         _ = RefreshAsync();
@@ -286,6 +316,7 @@ public partial class SpcQueryViewModel : ViewModelBase
             AutoSelectJoinMode();
             OnPropertyChanged(nameof(SelectedCount));
             OnPropertyChanged(nameof(CanRunQuery));
+            RaiseResultRowActionGates();   // newest-selected snapshot may have changed
             UpdateWarning();
         }
     }
@@ -509,6 +540,8 @@ public partial class SpcQueryViewModel : ViewModelBase
     [RelayCommand]
     private void OpenInLiveWalker(SpcResultRow? row)
     {
+        // Stale-session gating is enforced on the button (IsEnabled =
+        // CanUseResultRowActions); the command itself stays guard-free for testability.
         if (row == null || string.IsNullOrEmpty(row.ObjAddr)) return;
         NavigateToInstance?.Invoke(row.ObjAddr);
     }
