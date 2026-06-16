@@ -1752,7 +1752,15 @@ using ContainerLeafVisitor = std::function<void(const ContainerLeaf&)>;
 struct WalkLeafLimits {
     int maxDepth = 4;     // container nesting levels
     int maxElems = 256;   // per-container element cap
-    std::function<bool()> aborted;   // periodic cancel/deadline poll (may be null)
+    // DETERMINISTIC per-walk element-visit budget (0 = unlimited). The per-
+    // container maxElems bounds flat width, but nested wide containers still
+    // blow up combinatorially (256^maxDepth). This caps the TOTAL elements one
+    // top-level walk visits, so a single pathological object (e.g. a deep, wide
+    // container graph) can't stall a snapshot chunk. Deterministic (walk order
+    // is stable) so two captures of the same state truncate identically — SPC
+    // diff stays consistent, unlike a wall-clock deadline. (build 1211)
+    int64_t maxTotalElems = 0;
+    std::function<bool()> aborted;   // cancel + wall-clock backstop poll (may be null)
 };
 
 // True for a scalar leaf field (not a container / struct / optional — those are
@@ -1792,9 +1800,14 @@ static void EmitStructDirectLeaves(uintptr_t structAddr, uintptr_t base,
 // so far ("" at the object). Emits container-element leaves (depth >= 1).
 static void WalkContainerLeaves(uintptr_t structBase, uintptr_t structAddr,
                                 const std::string& pathPrefix, int depth,
-                                const WalkLeafLimits& lim, const ContainerLeafVisitor& visit) {
+                                const WalkLeafLimits& lim, const ContainerLeafVisitor& visit,
+                                int64_t* visited = nullptr) {
     if (depth > lim.maxDepth) return;
     if (lim.aborted && lim.aborted()) return;
+    // Total-element budget exceeded — bail this (and, via the per-element check
+    // below, every in-flight) frame fast. `visited` is shared across the whole
+    // top-level walk by passing the same pointer down the recursion.
+    if (visited && lim.maxTotalElems > 0 && *visited >= lim.maxTotalElems) return;
 
     const auto& containers = GetClassContainers(structAddr);
     for (const auto& cfe : containers) {
@@ -1838,6 +1851,12 @@ static void WalkContainerLeaves(uintptr_t structBase, uintptr_t structAddr,
         for (int32_t e = 0; e < probe; ++e) {
             if ((e & 0x3F) == 0 && lim.aborted && lim.aborted()) return;
             if (isSparse && !Macht::IsSparseIndexAllocated(sa, e)) continue;
+            // Count each PROCESSED (allocated) element against the total budget;
+            // unallocated sparse slots are skipped cheaply and don't count.
+            if (visited) {
+                ++*visited;
+                if (lim.maxTotalElems > 0 && *visited > lim.maxTotalElems) return;
+            }
             uintptr_t slotBase = bufData + static_cast<int64_t>(e) * cfe.stride;
 
             for (int s = 0; s < nSides; ++s) {
@@ -1849,7 +1868,7 @@ static void WalkContainerLeaves(uintptr_t structBase, uintptr_t structAddr,
                     EmitStructDirectLeaves(sides[s].structAddr, elemBase, sidePath, e,
                                            sides[s].structAddr, elemBase, "", depth + 1, 0, visit);
                     WalkContainerLeaves(elemBase, sides[s].structAddr,
-                                        sidePath + "[" + std::to_string(e) + "]", depth + 1, lim, visit);
+                                        sidePath + "[" + std::to_string(e) + "]", depth + 1, lim, visit, visited);
                 } else if (s == 0 && cfe.kind != ContainerKind::Map
                            && IsScalarLeafType(cfe.innerType)) {
                     // Leaf-container element (TArray<int> / TSet<int>): the element
@@ -5827,6 +5846,12 @@ ValueScanResult ScanForValue(
             WalkLeafLimits dlim;
             dlim.maxDepth = 4;
             dlim.maxElems = 256;
+            // Same deterministic per-object element cap as snapshot (build 1211):
+            // a single deeply-nested wide object can't monopolise the global
+            // scan budget. The 15s wall-clock deadline below remains the global
+            // backstop across all objects.
+            dlim.maxTotalElems = 50000;
+            int64_t deepVisited = 0;
             dlim.aborted  = [&] {
                 if (deadlineHit.load(std::memory_order_relaxed)) return true;
                 if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return true; }
@@ -5835,7 +5860,7 @@ ValueScanResult ScanForValue(
                 }
                 return false;
             };
-            WalkContainerLeaves(obj, cls, /*pathPrefix*/ "", /*depth*/ 0, dlim, deepEmit);
+            WalkContainerLeaves(obj, cls, /*pathPrefix*/ "", /*depth*/ 0, dlim, deepEmit, &deepVisited);
         }
     }
 
@@ -6111,16 +6136,21 @@ void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
     WalkLeafLimits lim;
     lim.maxDepth = 4;
     lim.maxElems = arrayCap;
-    // Per-object time budget (build 1208): the 256-elem × depth-4 caps still allow
-    // a pathological object (deeply-nested full containers) to walk for a long
-    // time. Unlike Value Search this consumer had cancel-only abort (no deadline),
-    // so a single such object could stall a chunk. Bound each object's walk; the
-    // chunk loop's own cancel poll handles client-gone/shutdown between objects.
+    // Per-object budget (build 1211): the 256-elem × depth-4 caps still allow a
+    // pathological object (deeply-nested WIDE container graph) to visit billions
+    // of elements — on SEED a cluster of such objects stalled one chunk ~24s and
+    // the user cancelled (perceived hang). Bound each object DETERMINISTICALLY by
+    // total elements visited (reproducible → SPC diff stays consistent), with a
+    // short wall-clock backstop for pathological per-element cost (huge structs /
+    // slow reads). 50k is far above any real object yet caps the blow-up to tens
+    // of ms; the chunk loop's own cancel poll handles client-gone between objects.
+    int64_t visited = 0;
+    lim.maxTotalElems = 50000;
     const auto t0 = std::chrono::steady_clock::now();
-    constexpr auto kPerObjBudget = std::chrono::seconds(2);
+    constexpr auto kPerObjBackstop = std::chrono::milliseconds(750);
     lim.aborted  = [t0] {
         return Cancel::Requested()
-            || (std::chrono::steady_clock::now() - t0) > kPerObjBudget;
+            || (std::chrono::steady_clock::now() - t0) > kPerObjBackstop;
     };
 
     WalkContainerLeaves(obj, cls, /*pathPrefix*/ "", /*depth*/ 0, lim,
@@ -6180,7 +6210,7 @@ void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
             f2.type = lf.leafType;
             f2.hex  = SnapshotBytesToHex(buf, sz);
             out[aPos].elements[ePos].fields.push_back(std::move(f2));
-        });
+        }, &visited);
 }
 } // namespace
 

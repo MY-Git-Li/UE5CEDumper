@@ -14,6 +14,36 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-16 — Snapshot capture stall fix: deterministic per-object element cap (build 1211)
+
+User-reported on SEED: after the NaN fix, **Snapshot capture stalled near 80%** — at
+23 s it showed ~80 % / "~5 s left", but one chunk (objects ~22,600–22,800) then took
+~24 s and the user cancelled (perceived hang). The pipe log confirms steady chunks
+then a stall on chunk 114; `SendAsync` has no read timeout, so the disconnect was the
+user's Cancel, not a timeout.
+
+Root cause: the recursive capture (build 1205) walks every object's containers to
+depth 4; a cluster of deeply-nested WIDE-container objects each hit the **2 s
+per-object wall-clock deadline** added in 1208, so one 200-object chunk ground for
+~24 s. The per-container 256-elem cap bounds flat width but nested wide containers
+still blow up combinatorially (256^depth).
+
+**Fix (`WalkContainerLeaves` / `WalkLeafLimits`).** Added a **deterministic per-walk
+element-visit budget** (`maxTotalElems`, threaded as a shared `int64_t* visited`
+counter through the recursion; counts each *allocated* element processed, bails fast
+via a top-of-frame + per-element check). Snapshot sets it to **50,000** (far above any
+real object, but caps the blow-up to tens of ms) and lowers the wall-clock abort to a
+**750 ms backstop** (for pathological per-element cost only). Deterministic is the key
+property: the walk order is stable, so two captures of the same state truncate
+*identically* — SPC diff/join stays consistent, which a wall-clock cutoff would break.
+Value Search's deep pass gets the same 50k cap (its 15 s global deadline stays the
+cross-object backstop). On SEED the stall chunk drops from ~24 s to a few seconds.
+
+Supersedes the build-1208 cancel-only-then-2 s deadline as the primary bound; partially
+addresses audit #6 (no per-object budget). Caps are tunable. **510 dll_helpers + 31
+utf8 + 1530 C# green.** ⚠ in-game live-verify pending (capture completes without stall;
+deep `GP` still captured).
+
 ## 2026-06-16 — Snapshot NaN-float capture crash fix (build 1210)
 
 User-reported regression: on SEED, **Snapshot "Capture failed — Cannot store 'NaN'
