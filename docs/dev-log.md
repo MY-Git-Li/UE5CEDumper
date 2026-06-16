@@ -55,11 +55,19 @@ unavailable (`EngineState.HasGWorld`, surfaced via each panel's `SetEngineState`
 Not-found surfaces an actionable status ("increase the depth"). 1505 C# green,
 AOT publish clean (45.9MB).
 
-**v1 scope.** Wired from Instance Finder (object/parent mode) + Value Search
-(value/reach mode) — the two distinct behaviours. SPC Query / Property Search /
-Interesting Functions are the same pattern (event + command + `IsGWorldAvailable`
-+ `SetEngineState` + one axaml button) and are easy follow-ons. In-game
-live-verification pending.
+**Trigger panels (build 1187).** Wired from all four "open in Live Walker"
+sources: **Instance Finder** (both the by-class and by-address searches funnel
+through `SelectedInstance` → object/parent mode), **Value Search** (value/reach),
+**SPC Query** (per-row 🌍, value/reach — has the live object + changed-field
+offset), and **Interesting Functions** (per-row 🌍 — a function isn't a world
+object, so MainWindow resolves a live non-CDO instance of its class via
+`FindInstancesAsync` first, then parent mode). **Property Search is intentionally
+excluded** — its rows are class/property *definitions* (deduped to the defining
+class, often abstract → no single live instance); its existing "Find Instances"
+button already bridges to Instance Finder, which has the 🌍 button. Gray-out via
+`EngineState.HasGWorld` (each panel's `SetEngineState`, or a direct
+`IsGWorldAvailable` set for Interesting Functions which has no `SetEngineState`).
+In-game live-verification pending.
 
 -----
 

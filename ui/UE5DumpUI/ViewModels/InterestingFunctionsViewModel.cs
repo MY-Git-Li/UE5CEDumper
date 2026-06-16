@@ -89,6 +89,14 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     public event Action<string, string>? NavigateToFunction;
     public event Action<string, string>? RequestCopyBakedScript;
 
+    /// <summary>Raised to locate a live instance of the function's class within
+    /// the GWorld object graph. Payload = class name (MainWindow resolves a
+    /// representative instance via find_instance, then runs the path search).</summary>
+    public event Action<string>? LocateInGWorld;
+
+    /// <summary>True when GWorld is available — gates the per-row "Locate in GWorld" button.</summary>
+    [ObservableProperty] private bool _isGWorldAvailable;
+
     /// <summary>Raised when the user clicks "Generate Cheat Table" on
     /// the multi-select toolbar. Subscribers (MainWindow) open the
     /// save dialog and write the payload — IO out of the VM keeps the
@@ -307,6 +315,15 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     {
         if (row == null) return;
         NavigateToFunction?.Invoke(row.ClassName, row.FuncName);
+    }
+
+    /// <summary>Locate a live instance of this function's class within the GWorld
+    /// graph (parent mode — stops at the object that points to the instance).</summary>
+    [RelayCommand]
+    private void LocateRowInGWorld(ScoredFunctionRow? row)
+    {
+        if (row == null || !IsGWorldAvailable || string.IsNullOrEmpty(row.ClassName)) return;
+        LocateInGWorld?.Invoke(row.ClassName);
     }
 
     /// <summary>Per-row action: shortcut into the Copy AA Script flow
