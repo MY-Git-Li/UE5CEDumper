@@ -14,6 +14,25 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-16 — Snapshot capture heartbeat: live status during slow chunks (build 1212)
+
+Follow-up to the 1211 stall fix, on user feedback: *"if there's no error, letting it
+run as-is is fine — but the status needs feedback; sitting on a frozen number, the
+user can't tell hung vs. working."* The capture loop only refreshed `StatusText`
+**after** each chunk returned, so a slow (deep-container) chunk left the line frozen
+for seconds and looked hung.
+
+**Fix (`SnapshotViewModel`, C# only).** A UI-thread `DispatcherTimer` heartbeat (400 ms)
+re-renders the status while capturing — the UI thread is free during the chunk's
+`await`, so it ticks even mid-chunk. `RenderCaptureStatus` now shows: the latest chunk
+counts, a **live-ticking elapsed clock**, animated trailing dots (fixed 3-char slot so
+the count doesn't jitter), an ETA that **auto-omits when a slow chunk makes it stale**,
+and — when the current batch has run > 3 s — an explicit *"still scanning this batch
+(Ns)"* with its own ticking timer. The loop now feeds counts into fields + renders on
+each chunk completion; the heartbeat is stopped before every terminal message
+(Finalising / cancelled / failed) and in `finally`. Together with 1211, a slow batch
+now reads unmistakably as "working", not hung. **1530 C# tests green.**
+
 ## 2026-06-16 — Snapshot capture stall fix: deterministic per-object element cap (build 1211)
 
 User-reported on SEED: after the NaN fix, **Snapshot capture stalled near 80%** — at

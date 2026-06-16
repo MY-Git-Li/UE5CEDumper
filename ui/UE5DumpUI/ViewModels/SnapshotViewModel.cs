@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
@@ -26,6 +27,18 @@ public partial class SnapshotViewModel : ViewModelBase
     private EngineState? _engineState;
     private CancellationTokenSource? _cts;        // capture (streaming) op
     private CancellationTokenSource? _diffCts;    // diff (heavy in-memory) op
+
+    // Capture heartbeat: the chunk loop only refreshes status AFTER each chunk
+    // returns, so a slow (deep-container) chunk freezes the display for many
+    // seconds and looks hung. A UI-thread timer ticks the elapsed clock + an
+    // animated indicator while capturing — the UI thread is free during the
+    // chunk's await, so the user always sees life even when the object count is
+    // frozen between chunk completions. (build 1212)
+    private DispatcherTimer? _captureHeartbeat;
+    private DateTime _captureStart;
+    private DateTime _lastChunkAt;
+    private int _capOffset, _capTotal, _capObjects, _capFields;
+    private int _heartbeatPhase;
 
     [ObservableProperty] private string _label = "";
     [ObservableProperty] private bool   _gameOnly = true;
@@ -347,12 +360,17 @@ public partial class SnapshotViewModel : ViewModelBase
         IsCapturing = true;
         CaptureSectionOpen = true;   // force the capture region visible while capturing
         Progress = 0;
-        var captureStart = DateTime.UtcNow;
+        _captureStart = DateTime.UtcNow;
+        _lastChunkAt  = _captureStart;
+        _capOffset = _capTotal = _capObjects = _capFields = 0;
+        _heartbeatPhase = 0;
 
         long snapshotId = 0;
         try
         {
             int total = await _dump.BeginSnapshotAsync(dataType, ct);
+            _capTotal = total;
+            StartCaptureHeartbeat();
 
             var meta = new SnapshotMeta
             {
@@ -384,23 +402,18 @@ public partial class SnapshotViewModel : ViewModelBase
                 }
 
                 offset += chunk.Scanned;
+                // Hand the latest counts to the heartbeat (it owns StatusText while
+                // capturing) and refresh immediately so a chunk completion shows at
+                // once; the timer keeps the line live between chunks.
+                _capOffset = offset; _capObjects = objectCount; _capFields = fieldCount;
+                _lastChunkAt = DateTime.UtcNow;
                 Progress = total > 0 ? Math.Min(1.0, offset / (double)total) : 0;
-                // Elapsed + ETA so a multi-minute capture shows progress, not just
-                // a moving bar. ETA = elapsed / fraction-done − elapsed; suppressed
-                // until ≥2% so the early estimate isn't wildly noisy.
-                var elapsed = DateTime.UtcNow - captureStart;
-                string timing = $" · {FmtSpan(elapsed)} elapsed";
-                if (Progress >= 0.02)
-                {
-                    var remain = TimeSpan.FromSeconds(elapsed.TotalSeconds / Progress) - elapsed;
-                    if (remain > TimeSpan.Zero) timing += $", ~{FmtSpan(remain)} left";
-                }
-                StatusText = $"Capturing… {offset:N0}/{total:N0} ({Progress:P0}) — " +
-                             $"{objectCount:N0} objects, {fieldCount:N0} fields{timing}";
+                RenderCaptureStatus();
 
                 if (chunk.Scanned == 0 || offset >= chunk.Total) break;
             }
 
+            StopCaptureHeartbeat();   // stop ticking before the terminal messages
             StatusText = "Finalising (building pivot index)…";
             // Off the UI thread: FinalizeSnapshotAsync builds the pivot index with a
             // COUNT(DISTINCT …) GROUP BY over the full snapshot (the documented ~10s
@@ -417,6 +430,7 @@ public partial class SnapshotViewModel : ViewModelBase
         }
         catch (OperationCanceledException)
         {
+            StopCaptureHeartbeat();
             StatusText = "Capture cancelled.";
             if (snapshotId > 0)
             {
@@ -427,17 +441,79 @@ public partial class SnapshotViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            StopCaptureHeartbeat();
             _log.Error(Constants.LogCatView, "Snapshot: capture failed", ex);
             SetError(ex);
             StatusText = "Capture failed.";
         }
         finally
         {
+            StopCaptureHeartbeat();   // idempotent — belt-and-suspenders cleanup
             IsCapturing = false;
             Progress = 0;
             _cts?.Dispose();
             _cts = null;
         }
+    }
+
+    /// <summary>
+    /// Start the capture heartbeat: a UI-thread timer that re-renders the status
+    /// line every 400 ms so the elapsed clock + animated dots keep moving even
+    /// while a single slow chunk (deep-container objects) is in flight — the
+    /// difference between "still working" and "looks hung". The UI thread is free
+    /// during the chunk's await, so the tick fires.
+    /// </summary>
+    private void StartCaptureHeartbeat()
+    {
+        StopCaptureHeartbeat();
+        RenderCaptureStatus();   // paint once immediately
+        _captureHeartbeat = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _captureHeartbeat.Tick += OnCaptureHeartbeat;
+        _captureHeartbeat.Start();
+    }
+
+    private void StopCaptureHeartbeat()
+    {
+        if (_captureHeartbeat == null) return;
+        _captureHeartbeat.Stop();
+        _captureHeartbeat.Tick -= OnCaptureHeartbeat;
+        _captureHeartbeat = null;
+    }
+
+    private void OnCaptureHeartbeat(object? sender, EventArgs e)
+    {
+        _heartbeatPhase++;
+        RenderCaptureStatus();
+    }
+
+    /// <summary>
+    /// Compose the live "Capturing…" status from the latest chunk counts + a
+    /// live elapsed clock. Animated trailing dots move every tick so the line is
+    /// visibly alive even when the object count is frozen mid-chunk; if the
+    /// current batch has been running a few seconds, say so explicitly — the
+    /// "is it hung or working?" reassurance for deep-container objects.
+    /// </summary>
+    private void RenderCaptureStatus()
+    {
+        var now = DateTime.UtcNow;
+        var elapsed = now - _captureStart;
+        string dots = new string('.', _heartbeatPhase % 4);   // animate 0..3 dots
+        string timing = $" · {FmtSpan(elapsed)} elapsed";
+        if (Progress >= 0.02)
+        {
+            // ETA from fraction-done; auto-omits while a slow chunk makes the
+            // estimate go stale (remain ≤ 0), leaving just the ticking clock.
+            var remain = TimeSpan.FromSeconds(elapsed.TotalSeconds / Progress) - elapsed;
+            if (remain > TimeSpan.Zero) timing += $", ~{FmtSpan(remain)} left";
+        }
+        var batchAge = now - _lastChunkAt;
+        string batch = batchAge > TimeSpan.FromSeconds(3)
+            ? $" · still scanning this batch ({FmtSpan(batchAge)})"
+            : "";
+        // {dots,-3}: fixed 3-char slot so the count column doesn't jitter as the
+        // dots animate.
+        StatusText = $"Capturing{dots,-3} {_capOffset:N0}/{_capTotal:N0} ({Progress:P0}) — " +
+                     $"{_capObjects:N0} objects, {_capFields:N0} fields{timing}{batch}";
     }
 
     [RelayCommand]
