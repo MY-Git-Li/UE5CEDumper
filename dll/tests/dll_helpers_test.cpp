@@ -25,6 +25,7 @@
 #include "../src/Macht.h"   // ComputeSetElementStride / ComputeMapValueOffset (V1a geometry)
 #include "../src/Denken.h"
 #include "../src/PackedItem.h"  // UE5.7+ packed FUObjectItem reconstruction (Reconstruct/Encode)
+#include "../src/GraphPath.h"   // Pure BFS shortest-path core ("Locate in GWorld")
 
 #include <Windows.h>
 #include <timeapi.h>   // timeBeginPeriod — exercised by the poll-latency check
@@ -1631,6 +1632,186 @@ static void Test_Packed_PtrMaskKnob() {
            PackedItem::Reconstruct(f, l, narrow) != obj);
 }
 
+// ----- GraphPath::BfsShortestObjectPath (Locate in GWorld) -----------------
+//
+// The BFS core is pure (no live memory) so the search invariants — shortest
+// path, cycle safety, depth bound, abort, visited cap, reconstruction — are
+// exercised here against an in-memory mock graph. The live adjacency adapter
+// (EnumerateOutgoingObjectPtrs over real GObjects) is integration-only.
+
+namespace {
+
+struct MockEdge {
+    uintptr_t   to;
+    int32_t     off;
+    std::string name;
+    std::string type;
+    std::string inner;
+    int32_t     elem;
+};
+
+struct MockGraph {
+    std::unordered_map<uintptr_t, std::vector<MockEdge>> adj;
+    void add(uintptr_t from, uintptr_t to, int32_t off = 0,
+             std::string name = "f", std::string type = "ObjectProperty",
+             std::string inner = "", int32_t elem = -1) {
+        adj[from].push_back({to, off, std::move(name), std::move(type), std::move(inner), elem});
+    }
+};
+
+// Build a neighbor functor over a mock graph (generic-lambda compatible).
+#define MOCK_NB(g) [&](uintptr_t node, auto&& emit) {                       \
+        auto it = (g).adj.find(node);                                       \
+        if (it == (g).adj.end()) return;                                    \
+        for (const auto& e : it->second)                                    \
+            if (emit(e.to, e.off, e.name, e.type, e.inner, e.elem)) return; \
+    }
+
+static auto kNeverAbort = [] { return false; };
+
+} // namespace
+
+static void Test_GraphPath_DirectChild() {
+    MockGraph g;
+    g.add(0x1000, 0x2000, 0x40, "Target");
+    auto r = Aura::BfsShortestObjectPath(0x1000ull, 0x2000ull, 5, 1000000,
+                                         MOCK_NB(g), kNeverAbort);
+    EXPECT("direct child found", r.found);
+    EXPECT("direct child status ok", r.status == "ok");
+    EXPECT("direct child 1 hop", r.depthReached == 1);
+    EXPECT("direct child step toObj", r.steps.size() == 1 && r.steps[0].toObj == 0x2000ull);
+    EXPECT("direct child step offset", r.steps.size() == 1 && r.steps[0].fieldOffset == 0x40);
+    EXPECT("direct child step name", r.steps.size() == 1 && r.steps[0].fieldName == "Target");
+}
+
+static void Test_GraphPath_RootEqualsTarget() {
+    MockGraph g;
+    auto r = Aura::BfsShortestObjectPath(0x1000ull, 0x1000ull, 5, 1000000,
+                                         MOCK_NB(g), kNeverAbort);
+    EXPECT("root==target found", r.found);
+    EXPECT("root==target no steps", r.steps.empty());
+    EXPECT("root==target status ok", r.status == "ok");
+}
+
+static void Test_GraphPath_ShortestAmongTwo() {
+    // root -> A -> B -> target  (3 hops)   and   root -> C -> target (2 hops)
+    // BFS must return the 2-hop path regardless of edge insertion order.
+    MockGraph g;
+    g.add(0x1000, 0x2000, 1, "A");      // long branch first
+    g.add(0x2000, 0x3000, 2, "B");
+    g.add(0x3000, 0x9000, 3, "target_via_B");
+    g.add(0x1000, 0x4000, 4, "C");      // short branch
+    g.add(0x4000, 0x9000, 5, "target_via_C");
+    auto r = Aura::BfsShortestObjectPath(0x1000ull, 0x9000ull, 5, 1000000,
+                                         MOCK_NB(g), kNeverAbort);
+    EXPECT("shortest found", r.found);
+    EXPECT("shortest is 2 hops", r.depthReached == 2);
+    EXPECT("shortest goes via C", r.steps.size() == 2 && r.steps[0].toObj == 0x4000ull);
+    EXPECT("shortest last edge name", r.steps.size() == 2 && r.steps[1].fieldName == "target_via_C");
+}
+
+static void Test_GraphPath_Cycle() {
+    // root -> A -> B -> A (cycle), B -> target. Must terminate + find target.
+    MockGraph g;
+    g.add(0x1000, 0x2000, 1, "A");
+    g.add(0x2000, 0x3000, 2, "B");
+    g.add(0x3000, 0x2000, 3, "back_to_A");   // cycle edge
+    g.add(0x3000, 0x9000, 4, "target");
+    auto r = Aura::BfsShortestObjectPath(0x1000ull, 0x9000ull, 10, 1000000,
+                                         MOCK_NB(g), kNeverAbort);
+    EXPECT("cycle terminates + finds", r.found);
+    EXPECT("cycle path 3 hops", r.depthReached == 3);
+    EXPECT("cycle visited bounded", r.visited == 4);  // root, A, B, target
+}
+
+static void Test_GraphPath_DepthBound() {
+    // Linear chain root(0) -> n1 -> n2 -> n3 -> n4 -> n5 -> n6(target at depth 6)
+    MockGraph g;
+    uintptr_t prev = 0x1000;
+    for (int i = 1; i <= 6; ++i) {
+        uintptr_t cur = 0x1000 + static_cast<uintptr_t>(i) * 0x1000;
+        g.add(prev, cur, i, "n" + std::to_string(i));
+        prev = cur;
+    }
+    uintptr_t target = 0x1000 + 6 * 0x1000;
+
+    auto tooShallow = Aura::BfsShortestObjectPath(0x1000ull, target, 5, 1000000,
+                                                  MOCK_NB(g), kNeverAbort);
+    EXPECT("depth 5 cannot reach depth-6 target", !tooShallow.found);
+    EXPECT("depth 5 status not_reachable", tooShallow.status == "not_reachable");
+
+    auto deepEnough = Aura::BfsShortestObjectPath(0x1000ull, target, 6, 1000000,
+                                                  MOCK_NB(g), kNeverAbort);
+    EXPECT("depth 6 reaches depth-6 target", deepEnough.found);
+    EXPECT("depth 6 path is 6 hops", deepEnough.depthReached == 6);
+}
+
+static void Test_GraphPath_Unreachable() {
+    MockGraph g;
+    g.add(0x1000, 0x2000, 1, "A");   // target 0x9000 not in graph
+    auto r = Aura::BfsShortestObjectPath(0x1000ull, 0x9000ull, 5, 1000000,
+                                         MOCK_NB(g), kNeverAbort);
+    EXPECT("unreachable not found", !r.found);
+    EXPECT("unreachable status", r.status == "not_reachable");
+}
+
+static void Test_GraphPath_Abort() {
+    MockGraph g;
+    g.add(0x1000, 0x2000, 1, "A");
+    g.add(0x2000, 0x9000, 2, "target");
+    auto alwaysAbort = [] { return true; };
+    auto r = Aura::BfsShortestObjectPath(0x1000ull, 0x9000ull, 5, 1000000,
+                                         MOCK_NB(g), alwaysAbort);
+    EXPECT("abort not found", !r.found);
+    EXPECT("abort flag set", r.aborted);
+    EXPECT("abort status", r.status == "aborted");
+}
+
+static void Test_GraphPath_VisitedCap() {
+    // root -> A -> B -> target, cap visited at 2 → cannot discover B/target.
+    MockGraph g;
+    g.add(0x1000, 0x2000, 1, "A");
+    g.add(0x2000, 0x3000, 2, "B");
+    g.add(0x3000, 0x9000, 3, "target");
+    auto r = Aura::BfsShortestObjectPath(0x1000ull, 0x9000ull, 10, /*maxVisited=*/2,
+                                         MOCK_NB(g), kNeverAbort);
+    EXPECT("cap not found", !r.found);
+    EXPECT("cap status", r.status == "visited_cap");
+}
+
+static void Test_GraphPath_ContainerEdgePreserved() {
+    // An array-element edge must round-trip its type + element index into the step.
+    MockGraph g;
+    g.add(0x1000, 0x2000, 0x80, "Actors", "ArrayProperty", "ObjectProperty", 5234);
+    auto r = Aura::BfsShortestObjectPath(0x1000ull, 0x2000ull, 5, 1000000,
+                                         MOCK_NB(g), kNeverAbort);
+    EXPECT("container edge found", r.found && r.steps.size() == 1);
+    EXPECT("container edge type", r.steps.size() == 1 && r.steps[0].fieldType == "ArrayProperty");
+    EXPECT("container edge inner", r.steps.size() == 1 && r.steps[0].innerType == "ObjectProperty");
+    EXPECT("container edge element index", r.steps.size() == 1 && r.steps[0].elementIndex == 5234);
+}
+
+static void Test_GraphPath_Reconstruction() {
+    // GWorld(0x1000) -> Level(0x2000) -> Actor(0x3000) -> Comp(0x4000=target)
+    MockGraph g;
+    g.add(0x1000, 0x2000, 0x30, "PersistentLevel");
+    g.add(0x2000, 0x3000, 0x98, "Actors", "ArrayProperty", "ObjectProperty", 12);
+    g.add(0x3000, 0x4000, 0x140, "RootComponent");
+    auto r = Aura::BfsShortestObjectPath(0x1000ull, 0x4000ull, 5, 1000000,
+                                         MOCK_NB(g), kNeverAbort);
+    EXPECT("reconstruct found", r.found && r.steps.size() == 3);
+    if (r.steps.size() == 3) {
+        EXPECT("step0 from=root", r.steps[0].fromObj == 0x1000ull);
+        EXPECT("step0 to=Level",  r.steps[0].toObj == 0x2000ull && r.steps[0].fieldName == "PersistentLevel");
+        EXPECT("step1 to=Actor",  r.steps[1].toObj == 0x3000ull && r.steps[1].elementIndex == 12);
+        EXPECT("step2 to=target", r.steps[2].toObj == 0x4000ull && r.steps[2].fieldName == "RootComponent");
+        EXPECT("steps are ordered root->target",
+               r.steps[0].fromObj == 0x1000ull &&
+               r.steps[1].fromObj == r.steps[0].toObj &&
+               r.steps[2].fromObj == r.steps[1].toObj);
+    }
+}
+
 int main() {
     std::printf("dll_helpers_test (Renge + Scharf + ValueScan)\n");
     std::printf("------------------------------------------\n");
@@ -1711,6 +1892,18 @@ int main() {
     Test_Packed_FlagsDoNotLeak();
     Test_Packed_AlignBitsKnob();
     Test_Packed_PtrMaskKnob();
+
+    // GraphPath BFS core — "Locate in GWorld" shortest-path search (mock graph)
+    Test_GraphPath_DirectChild();
+    Test_GraphPath_RootEqualsTarget();
+    Test_GraphPath_ShortestAmongTwo();
+    Test_GraphPath_Cycle();
+    Test_GraphPath_DepthBound();
+    Test_GraphPath_Unreachable();
+    Test_GraphPath_Abort();
+    Test_GraphPath_VisitedCap();
+    Test_GraphPath_ContainerEdgePreserved();
+    Test_GraphPath_Reconstruction();
 
     std::printf("------------------------------------------\n");
     std::printf("Pass: %d   Fail: %d\n", g_pass, g_fail);

@@ -50,6 +50,8 @@
     <sys:String x:Key="str.VS.OpenLive">Open in Live Walker</sys:String>
     <sys:String x:Key="str.VS.CopyAddr">Copy Address</sys:String>
     <sys:String x:Key="str.VS.PivotThis">📊 Pivot</sys:String>
+    <sys:String x:Key="str.VS.LocateGWorld">🌍 GWorld</sys:String>
+    <sys:String x:Key="str.Tip.VS.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this value's owning object and show it in Live Walker</sys:String>
     <sys:String x:Key="str.VS.CaseSensitive">Case sensitive</sys:String>
     <sys:String x:Key="str.VS.Filter">Filter:</sys:String>
     <sys:String x:Key="str.VS.FilterWatermark">Filter the full result set (server-side) — any column, case-insensitive…</sys:String>
@@ -109,6 +111,8 @@
     <sys:String x:Key="str.LiveWalker.FindRefs">Find Refs</sys:String>
     <sys:String x:Key="str.LiveWalker.Refresh">Refresh</sys:String>
     <sys:String x:Key="str.LiveWalker.AddressHint">Address (hex or module.exe+offset)</sys:String>
+    <sys:String x:Key="str.LiveWalker.GWorldDepth">GWorld depth:</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.GWorldDepth">Maximum pointer hops to search downward from GWorld when using "Locate in GWorld" (default 5). Larger = finds deeper targets but slower.</sys:String>
     <sys:String x:Key="str.LiveWalker.Go">Go</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportCE">Copy CE XML</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportCEField">Copy CE Field</sys:String>
@@ -145,6 +149,7 @@
     <sys:String x:Key="str.InstanceFinder.Search">Search</sys:String>
     <sys:String x:Key="str.InstanceFinder.Address">Address</sys:String>
     <sys:String x:Key="str.InstanceFinder.OpenInWalker">Open in Live Walker</sys:String>
+    <sys:String x:Key="str.InstanceFinder.LocateGWorld">🌍 Locate in GWorld</sys:String>
     <sys:String x:Key="str.InstanceFinder.AddressHint">Address (hex or module.exe+offset)</sys:String>
     <sys:String x:Key="str.InstanceFinder.Lookup">Lookup</sys:String>
     <sys:String x:Key="str.InstanceFinder.ExactMatch">Exact match</sys:String>
@@ -678,6 +683,7 @@
     <sys:String x:Key="str.Tip.InstanceFinder.Lookup">Lookup UObject at the specified address</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.CopyAddr">Copy instance address to clipboard</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.OpenWalker">Open this instance in Live Walker</sys:String>
+    <sys:String x:Key="str.Tip.InstanceFinder.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this instance and show it in Live Walker (stops at the parent that points to it)</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.ExportCE">Export instance as CE XML pointer chain</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.CopyFieldAddr">Copy field absolute address</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.AA">Generate CE Auto Assembler script</sys:String>

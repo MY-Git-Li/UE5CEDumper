@@ -93,6 +93,15 @@ public partial class InstanceFinderViewModel : ViewModelBase
     /// </summary>
     public event Action<string>? NavigateToLiveWalker;
 
+    /// <summary>
+    /// Event raised when the user wants to locate a found instance within the
+    /// GWorld object graph (forward path search). Payload = instance address.
+    /// </summary>
+    public event Action<string>? LocateInGWorld;
+
+    /// <summary>True when GWorld is available — gates the "Locate in GWorld" button.</summary>
+    [ObservableProperty] private bool _isGWorldAvailable;
+
     public InstanceFinderViewModel(IDumpService dump, ILoggingService log, IPlatformService platform)
     {
         _dump = dump;
@@ -103,6 +112,7 @@ public partial class InstanceFinderViewModel : ViewModelBase
     public void SetEngineState(EngineState state)
     {
         _engineState = state;
+        IsGWorldAvailable = state?.HasGWorld ?? false;
     }
 
     [RelayCommand]
@@ -441,5 +451,12 @@ public partial class InstanceFinderViewModel : ViewModelBase
     {
         if (SelectedInstance == null) return;
         NavigateToLiveWalker?.Invoke(SelectedInstance.Address);
+    }
+
+    [RelayCommand]
+    private void LocateSelectedInGWorld()
+    {
+        if (SelectedInstance == null || !IsGWorldAvailable) return;
+        LocateInGWorld?.Invoke(SelectedInstance.Address);
     }
 }

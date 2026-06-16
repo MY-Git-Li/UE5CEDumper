@@ -431,6 +431,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 ObjectTree.SetEngineState(state);
                 LiveWalker.SetEngineState(state);
                 InstanceFinder.SetEngineState(state);
+                ValueSearch.SetEngineState(state);
                 Snapshot?.SetEngineState(state);
                 Spc?.SetEngineState(state);
                 Pivot?.SetEngineState(state);
@@ -474,6 +475,20 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _log.Error("NavigateToLiveWalker handler error", ex);
+            }
+        };
+
+        // Wire InstanceFinder -> "Locate in GWorld" (object/class → stop at parent).
+        InstanceFinder.LocateInGWorld += async (addr) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                await LiveWalker.LocateInGWorldAsync(addr, 0, null, stopAtParent: true);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"InstanceFinder LocateInGWorld handler error: {addr}", ex);
             }
         };
 
@@ -717,6 +732,21 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _log.Error($"ValueSearch NavigateToInstance handler error: {addr}", ex);
+            }
+        };
+
+        // Wire ValueSearch -> "Locate in GWorld" (property value → reach the
+        // owning object + scroll to the value field).
+        ValueSearch.LocateInGWorld += async (addr, fieldOffset, fieldName) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                await LiveWalker.LocateInGWorldAsync(addr, fieldOffset, fieldName, stopAtParent: false);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"ValueSearch LocateInGWorld handler error: {addr}", ex);
             }
         };
         ValueSearch.RequestCopyText += async (text) =>
@@ -1232,6 +1262,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ObjectTree.SetEngineState(state);
         LiveWalker.SetEngineState(state);
         InstanceFinder.SetEngineState(state);
+        ValueSearch.SetEngineState(state);
         Teleport.SetConnected(true);   // refresh markers once the DLL is scanned
         Snapshot?.SetEngineState(state);
         Spc?.SetEngineState(state);

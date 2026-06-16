@@ -30,6 +30,7 @@ extern uint32_t g_cachedUEVersion;
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace Aura {
@@ -2705,6 +2706,158 @@ std::vector<ReferenceMatch> FindReferencesToUObject(uintptr_t target,
              static_cast<int>(matches.size()), static_cast<long long>(dt),
              scanned, count, classesPrimed, scan.nthreads, deadlineHit ? ", DEADLINE HIT" : "");
     return matches;
+}
+
+// ============================================================
+// Forward Object-Graph Path Search ("Locate in GWorld")
+//
+// The inverse of FindReferencesToUObject. EnumerateOutgoingObjectPtrs reuses
+// the per-class reference-metadata cache (GetClassRefMeta) — the same metadata
+// the reverse search walks — but ENQUEUES each child object instead of
+// comparing it against a target. The BFS itself lives in GraphPath.h (pure,
+// unit-tested with a mock graph); this is the live adjacency adapter + the
+// GWorld-agnostic entry point.
+// ============================================================
+
+// Enumerate every outgoing object-pointer edge of `obj`. For each child,
+// invokes emit(child, fieldOffset, fieldName, fieldType, innerType, elementIndex)
+// and returns immediately once emit returns true (target found / cap hit).
+// Mirrors FindReferencesToUObject's per-object read patterns.
+template <typename EmitFn>
+static void EnumerateOutgoingObjectPtrs(uintptr_t obj, EmitFn&& emit) {
+    uintptr_t cls = 0;
+    if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) return;
+    const auto& meta = GetClassRefMeta(cls);
+    if (meta.empty()) return;
+
+    static const std::string kEmpty;
+    static const std::string kArrayProp = "ArrayProperty";
+    static const std::string kMapProp   = "MapProperty";
+    static const std::string kSetProp   = "SetProperty";
+    static const std::string kIfaceProp = "InterfaceProperty";
+
+    // --- Direct ObjectProperty / ClassProperty / InterfaceProperty ---
+    for (const auto& pfe : meta.directPointers) {
+        uintptr_t ptr = 0;
+        if (!Macht::ReadSafe(obj + pfe.offset, ptr) || !ptr) continue;
+        if (emit(ptr, pfe.offset, pfe.name, pfe.typeName, kEmpty, -1)) return;
+    }
+    // --- Weak/Soft/Lazy single fields (FWeakObjectPtr at field+0) ---
+    for (const auto& wpe : meta.weakLikePointers) {
+        uintptr_t r = ResolveWeakAt(obj + wpe.offset);
+        if (!r) continue;
+        if (emit(r, wpe.offset, wpe.name, wpe.typeName, kEmpty, -1)) return;
+    }
+    // --- TArray<UObject*> / TArray<UClass*> (8-byte stride) ---
+    for (const auto& oae : meta.objectArrays) {
+        Macht::TArrayView arr;
+        if (!Macht::ReadTArray(obj + oae.offset, arr) || arr.Count <= 0 || !arr.Data) continue;
+        std::vector<uintptr_t> buf(static_cast<size_t>(arr.Count), 0);
+        if (!Macht::ReadBytesSafe(arr.Data, buf.data(), static_cast<size_t>(arr.Count) * 8)) continue;
+        for (int32_t e = 0; e < arr.Count; ++e) {
+            if (!buf[e]) continue;
+            if (emit(buf[e], oae.offset, oae.name, kArrayProp, oae.innerType, e)) return;
+        }
+    }
+    // --- TArray<FScriptInterface> (16-byte stride, ptr at elem+0) ---
+    for (const auto& iae : meta.interfaceArrays) {
+        Macht::TArrayView arr;
+        if (!Macht::ReadTArray(obj + iae.offset, arr) || arr.Count <= 0 || !arr.Data) continue;
+        for (int32_t e = 0; e < arr.Count; ++e) {
+            uintptr_t ptr = 0;
+            if (!Macht::ReadSafe(arr.Data + static_cast<int64_t>(e) * 16, ptr) || !ptr) continue;
+            if (emit(ptr, iae.offset, iae.name, kArrayProp, kIfaceProp, e)) return;
+        }
+    }
+    // --- TArray<FWeak/Soft/Lazy ObjectPtr> (FWeakObjectPtr at elem+0) ---
+    for (const auto& wae : meta.weakLikeArrays) {
+        Macht::TArrayView arr;
+        if (!Macht::ReadTArray(obj + wae.offset, arr) || arr.Count <= 0 || !arr.Data || wae.elemStride <= 0) continue;
+        for (int32_t e = 0; e < arr.Count; ++e) {
+            uintptr_t r = ResolveWeakAt(arr.Data + static_cast<int64_t>(e) * wae.elemStride);
+            if (!r) continue;
+            if (emit(r, wae.offset, wae.name, kArrayProp, wae.innerType, e)) return;
+        }
+    }
+    // --- TMap<UObject*, V> / TMap<K, UObject*> (allocated slots only) ---
+    for (const auto& ome : meta.objectMaps) {
+        Macht::TSparseArrayView sa;
+        if (!Macht::ReadTSparseArray(obj + ome.offset, sa) || sa.MaxIndex <= 0 || !sa.Data || ome.pairStride <= 0) continue;
+        for (int32_t e = 0; e < sa.MaxIndex; ++e) {
+            if (!Macht::IsSparseIndexAllocated(sa, e)) continue;
+            uintptr_t pair = sa.Data + static_cast<int64_t>(e) * ome.pairStride;
+            if (ome.keyIsObject) {
+                uintptr_t kp = 0;
+                if (Macht::ReadSafe(pair, kp) && kp)
+                    if (emit(kp, ome.offset, ome.name + ".Key", kMapProp, ome.innerLabel, e)) return;
+            }
+            if (ome.valueIsObject) {
+                uintptr_t vp = 0;
+                if (Macht::ReadSafe(pair + ome.valueOffset, vp) && vp)
+                    if (emit(vp, ome.offset, ome.name + ".Value", kMapProp, ome.innerLabel, e)) return;
+            }
+        }
+    }
+    // --- TSet<UObject*> (allocated slots only) ---
+    for (const auto& ose : meta.objectSets) {
+        Macht::TSparseArrayView sa;
+        if (!Macht::ReadTSparseArray(obj + ose.offset, sa) || sa.MaxIndex <= 0 || !sa.Data || ose.elemStride <= 0) continue;
+        for (int32_t e = 0; e < sa.MaxIndex; ++e) {
+            if (!Macht::IsSparseIndexAllocated(sa, e)) continue;
+            uintptr_t ptr = 0;
+            if (!Macht::ReadSafe(sa.Data + static_cast<int64_t>(e) * ose.elemStride, ptr) || !ptr) continue;
+            if (emit(ptr, ose.offset, ose.name, kSetProp, ose.elemTypeName, e)) return;
+        }
+    }
+}
+
+GraphPathResult FindObjectGraphPath(uintptr_t rootObj, uintptr_t targetObj,
+                                    int32_t maxDepth, int32_t deadlineMs) {
+    GraphPathResult res;
+    if (!rootObj || !targetObj || !s_arrayAddr) { res.status = "invalid"; return res; }
+    if (maxDepth <= 0)  maxDepth = 5;
+    if (maxDepth > 32)  maxDepth = 32;     // hard cap — the reachable set grows fast
+    if (deadlineMs <= 0) deadlineMs = 20000;
+
+    constexpr int32_t kMaxVisited = 3000000;  // runaway guard (~48MB of map entries)
+    auto t0 = std::chrono::steady_clock::now();
+
+    LOG_INFO("FindObjectGraphPath: root=0x%llX target=0x%llX maxDepth=%d",
+             static_cast<unsigned long long>(rootObj),
+             static_cast<unsigned long long>(targetObj), maxDepth);
+
+    auto abortFn = [&]() -> bool {
+        if (Cancel::Requested()) return true;
+        auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now() - t0).count();
+        return dt > deadlineMs;
+    };
+    auto neighborFn = [&](uintptr_t node, auto&& emit) {
+        EnumerateOutgoingObjectPtrs(node, std::forward<decltype(emit)>(emit));
+    };
+
+    res = BfsShortestObjectPath(rootObj, targetObj, maxDepth, kMaxVisited,
+                                neighborFn, abortFn);
+
+    auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::steady_clock::now() - t0).count();
+    res.durationMs = static_cast<int64_t>(dt);
+
+    // Translate the core's generic "aborted" into the concrete reason.
+    if (res.aborted)
+        res.status = Cancel::Requested() ? "cancelled" : "deadline";
+
+    // Resolve readable names for the path nodes only (cheap — a handful).
+    for (auto& st : res.steps) {
+        st.toName      = Ubel::GetName(st.toObj);
+        uintptr_t cls  = Ubel::GetClass(st.toObj);
+        st.toClassName = cls ? Ubel::GetName(cls) : "";
+    }
+
+    LOG_INFO("FindObjectGraphPath: %s — %d hop(s), visited %d, %lld ms%s",
+             res.status.c_str(), res.depthReached, res.visited,
+             static_cast<long long>(dt), res.found ? "" : " (no path)");
+    return res;
 }
 
 // === Property Keyword Search ===

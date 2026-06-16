@@ -14,6 +14,55 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-16 — Locate in GWorld: forward BFS path search (build 1181)
+
+Pressing **Parent** in the Live Walker walks `UObject.OuterPrivate` (the naming
+hierarchy) and almost always dead-ends at `/Engine/Transient` — never the
+gameplay-meaningful GWorld spine. New feature answers the inverse question:
+given a found target, **where is it under GWorld?**
+
+**Forward BFS (the engine).** New pure, header-only shortest-path core
+[`GraphPath.h`](../dll/src/GraphPath.h) (`BfsShortestObjectPath`) + a live
+adjacency adapter `EnumerateOutgoingObjectPtrs` in [`Aura.cpp`](../dll/src/Aura.cpp)
+that REUSES the per-class reference-metadata cache (`GetClassRefMeta`) powering
+`FindReferencesToUObject` — the same battle-tested extractor for direct
+Object/Class/Interface, Weak/Soft/Lazy, TArray/TMap/TSet-of-objects, and
+StructProperty-nested pointers — but enqueues children instead of comparing
+against a target. `Aura::FindObjectGraphPath(rootObj, targetObj, maxDepth=5)`
+runs the BFS root-agnostically (the pipe handler resolves GWorld → UWorld and
+passes it in, keeping Aura decoupled from the GWorld globals). BFS first-hit ==
+shortest hops, so "first found == shortest" is free. visited-set dedup bounds it
+to O(reachable), 3M-node cap + 20s deadline + `Cancel::Requested()`. The pure
+core is unit-tested against a mock graph (shortest-among-two, cycles, depth
+bound, root==target, unreachable, abort, visited-cap, reconstruction) — **+10
+tests → dll_helpers 507 green**.
+
+**Pipe.** New `find_path_from_gworld` command (`target` + optional `object_addr`
++ `max_depth`) returns the path steps + resolved target + diagnostics; for a
+known owning object (Value Search / Instance Finder) it skips the FindByAddress
+resolution scan. MulticastSparseDelegate edges are NOT followed (global-TMap walk
+per node too expensive). Spec: [pipe-protocol.md](pipe-protocol.md#find_path_from_gworld).
+
+**UI.** `LiveWalkerViewModel.LocateInGWorldAsync` clears + rebuilds the breadcrumb
+spine from the path and lands on the target via the existing
+`_pendingScrollFieldOffset` machinery. Two behaviours: a property **VALUE**
+(Value Search per-row "🌍 GWorld") lands ON the owning object and scrolls to the
+value field; an **OBJECT / class instance** (Instance Finder "🌍 Locate in
+GWorld") stops at the parent that points to it and highlights the pointer field,
+without drilling in. A **GWorld depth** NumericUpDown (default 5, on the Live
+Walker tab) sets the search depth. All triggers gray out when GWorld is
+unavailable (`EngineState.HasGWorld`, surfaced via each panel's `SetEngineState`).
+Not-found surfaces an actionable status ("increase the depth"). 1505 C# green,
+AOT publish clean (45.9MB).
+
+**v1 scope.** Wired from Instance Finder (object/parent mode) + Value Search
+(value/reach mode) — the two distinct behaviours. SPC Query / Property Search /
+Interesting Functions are the same pattern (event + command + `IsGWorldAvailable`
++ `SetEngineState` + one axaml button) and are easy follow-ons. In-game
+live-verification pending.
+
+-----
+
 ## 2026-06-15 — Main window placement persistence + restartable-apps opt-in (build 1177)
 
 The UI didn't remember where it was: every launch reset position / size / monitor. Now

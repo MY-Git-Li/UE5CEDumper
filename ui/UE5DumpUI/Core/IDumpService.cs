@@ -84,6 +84,15 @@ public interface IDumpService
     Task<FindReferencesResult> FindReferencesToUObjectAsync(
         string addr, int maxResults = 32, CancellationToken ct = default);
 
+    // --- Forward Object-Graph Path Search ("Locate in GWorld") ---
+    // Compute the shortest pointer chain from the live UWorld down to a target
+    // (a UObject, or a property value whose owning object is passed via
+    // objectAddr). Used by Live Walker to replace its breadcrumb spine and land
+    // on the target.
+    Task<GWorldPathResult> FindPathFromGWorldAsync(
+        string target, string? objectAddr = null, int maxDepth = 5,
+        CancellationToken ct = default);
+
     // --- Property Bytecode Cross-Reference ("which methods use this field?") ---
     // Static Kismet-bytecode scan; Blueprint/script functions only (native
     // functions have empty bytecode and are invisible).

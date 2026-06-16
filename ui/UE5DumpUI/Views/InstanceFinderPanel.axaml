@@ -187,6 +187,11 @@
                   Command="{Binding OpenInLiveWalkerCommand}"
                   ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.OpenWalker}"
                   Padding="8,4"/>
+          <Button Content="{StaticResource str.InstanceFinder.LocateGWorld}"
+                  Command="{Binding LocateSelectedInGWorldCommand}"
+                  IsEnabled="{Binding IsGWorldAvailable}"
+                  ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.LocateGWorld}"
+                  Padding="8,4"/>
         </StackPanel>
 
         <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True"
