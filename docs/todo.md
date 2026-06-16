@@ -121,6 +121,17 @@ DLL owns the set, UI is a server-side-filtered/sorted window; V2 build 954: ceil
 raised to 1M, sort/filter verified sub-second). Remaining open: **V1b** (container
 prev-value refine) and **V1c live-verify**.
 
+- **Deep Value-Search candidate → multi-level 🌍 drill** — Effort: **S/M** · Risk: low.
+  Value Search now finds values at any container depth (build 1206), but a deep
+  candidate's "Locate in GWorld" (`TryParseStructArrayInner` + `DrillToStructArrayInnerAsync`)
+  only handles ONE `[N]` (array → element → inner field); a multi-`[N]` display path like
+  `SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[42]` drills partway then
+  reports "continue manually". The by-address path (Instances tab) already fully drills via
+  the structured `ContainerMatch.NestedChain`. To finish: parse the multi-`[N]` display
+  path into a hop chain (or carry a structured chain on the VS candidate) and reuse
+  `DrillContainerChainAsync`. The value is FOUND either way; this is the land-ON-it polish.
+  *Parent: Value Search recursive deep walk shipped build 1206 (dev-log 2026-06-16).*
+
 - **V1b — container prev-value refine (stable key)** — Effort: **M** · Risk: **high**.
   `Candidate.addr` stores a raw element address; TArray realloc already makes it stale,
   and TSparseArray is worse — freed slots get reused, so `c.addr` on refine may point at
@@ -140,16 +151,6 @@ Gated behind the System-tab opt-in (`IExperimentalGate`). Design of record:
 0/A/B/C (C1+C3-lite+C4+C5+C6) + N1 noise picker all shipped; the engine rework
 (in-memory hash-joins), heavy-query cancellation, persisted pivot index, and
 Windows-only AOT backend all shipped (dev-log builds 805–923).
-
-- **Deep-nested (>1 level) struct-array capture for Snapshot/SPC** — Effort: **M** ·
-  Risk: med. SPC/Diff now include 1-level struct-array element values (build 1203), but
-  `Aura::CaptureStructArrays` only captures ONE struct-array level — a value inside a
-  `TArray`/`TMap` nested *inside* a struct element (e.g. `SaveSlotList[1].MsTuneData.
-  MsTunes[0]…Tunes[N]`) isn't captured, so it can't appear in Snapshot/SPC/Pivot. Would
-  need recursive struct-element capture (mirror `FindInContainersDeep`'s descent),
-  bounded by depth + element cap. Matches Value Search's 1-level descent depth today; do
-  only if deep save-data diffing is actually needed (by-address + Live Walker cover the
-  one-off lookup). *Parent: struct-array SPC/Diff inclusion shipped build 1203.*
 
 - **C2 — find-by-value locator + pivot handoff** — Effort: **M** · Risk: **med**.
   Closes the loop: locate which class/field holds a known value, then hand off into

@@ -19,12 +19,14 @@ state.
 >   WeaponTuneList[0].Tunes[2]` repro (28116 objs / 50ms). Build 1199 also fixed the
 >   Live Walker per-row `Addr` copy in container-element views (use the resolved
 >   `FieldAddress`) and moved "Locate in GWorld depth" to the top Options flyout.
-> - builds **1202-1203 (2026-06-16)** — **struct-array element values reach end-to-end.**
->   Value Search descends into `TArray<FStruct>` elements (finds `SaveSlotList[1].GP =
->   46643`, incl. leaves in direct sub-structs); its 🌍 deep-drills to the inner value;
->   and **Snapshot Diff + SPC Query now include struct-array elements** (Class Pivot
->   already did). One struct-array level (deeper nesting = by-address deep scan / a
->   capture-depth todo). 1519 C# / 510 dll green.
+> - builds **1202-1207 (2026-06-16)** — **deeply-nested container values reach end-to-end
+>   across ALL four consumers.** A value at ANY (bounded, depth 4) container depth — e.g.
+>   `SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[N]` — is now found by
+>   **Instance Finder address search**, **Value Search** (by value), **Snapshot capture**,
+>   and so **SPC Query + Snapshot Diff** (Class Pivot already had array support). A shared
+>   recursive `Aura::WalkContainerLeaves` drives Value Search + Snapshot capture; Snapshot
+>   bakes the full path into `array_field` (no schema change). 1-level cases use the fast
+>   static paths; gated per class so the common case pays nothing. 1520 C# / 510 dll green.
 > - builds **1027–1112 (2026-06-12…14)** — **Teleport** tab (Wirbel module):
 >   BugIt-style marker save/recall (3 slots) + cursor teleport for 2.5D/45° games
 >   + BugItGo interop + Debug-Camera force on/off + **read-only camera POV**

@@ -14,6 +14,51 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-16 — Recursive (>1 level) container-leaf capture across all four consumers (builds 1205-1207)
+
+Completes the deep-container story: a value buried at ANY (bounded) depth — e.g.
+`SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[N]` — is now reachable
+by **Instance Finder address search** (already recursive since 1198), **Snapshot
+capture → SPC Query / Diff**, and **Value Search**.
+
+**Shared recursive walker (`Aura::WalkContainerLeaves`, build 1204/1205).** New file-
+internal walker + `EmitStructDirectLeaves` mirror the `FindInContainersDeep` descent
+but ENUMERATE leaves via a visitor: every scalar leaf reachable through struct-array /
+map / set elements + nested leaf-containers (`TArray<int>`) + direct sub-structs, to
+`maxDepth=4` / `maxElems`, reusing the cached `GetClassContainers`. The visitor gets the
+full dotted+indexed path + the container-hop depth, so each consumer applies its own
+depth boundary. One engine; two consumers.
+
+**Snapshot capture (build 1205).** `CaptureStructArrays` rewritten to drive the walker.
+The FULL nested path is baked into `SnapshotArray.field` (e.g.
+`SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes`) — **no schema change** —
+so SPC Query + Snapshot Diff, which key on `array_field + elem_index`, get deep support
+for free. Nested leaf-containers are captured (inner prop `""`); TOP-LEVEL leaf arrays
+(`depth<2`) are skipped to avoid DB bloat (matches prior behaviour). Inner-key
+(reorder-immune Array-Pivot join) preserved per element. C# diff/SPC render `path[N]`
+(no trailing dot) for empty-inner-prop leaf-containers. **Snapshot + SPC live-verified by
+the owner before this; deep nesting now flows through.**
+
+**Value Search (build 1206).** Kept the fast static depth-1 paths (`StructArrayInner`
+direct leaves + the `TArray<leaf>` branch); added a per-class `needsDeepWalk` gate
+(true only when a container's element struct itself has containers — one cheap
+look-ahead) + a per-instance `WalkContainerLeaves` pass that emits candidates for leaves
+at container depth **>= 2** (so no double-count with the static paths). Deep candidates
+get a per-path descriptor (full display name, `elementIndex=-1`); vectors skipped (the
+walker yields scalar leaves, not whole vector structs). Reuses `emitCandidate` +
+`multiResolve` + the lean pools. Same 15s deadline / cancel.
+
+**Caps / cost.** `maxDepth=4`, `maxElems=256`; gated per class so the common case (no
+struct-element nesting) pays nothing; cancel/deadline poll every 64 elements. Deep VS
+candidates' 🌍 deep-drill degrades gracefully for multi-`[N]` paths (the by-address
+path fully drills; VS finds the value).
+
+Tests: +1 C# (`Diff_DeepNestedPath_AndLeafContainer`) → 1520 C# / 510 dll / 31 utf8
+green; full build + 3 proxies clean. **In-game verify pending**: deep Snapshot diff +
+deep Value Search hit on SEED.
+
+-----
+
 ## 2026-06-16 — Struct-array values reach end-to-end: VS GWorld drill + SPC/Diff inclusion (build 1203)
 
 Two live follow-ups after the build-1202 Value Search struct-array descent shipped.

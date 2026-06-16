@@ -4851,6 +4851,12 @@ ValueScanResult ScanForValue(
         int32_t                 batchMin       = 0;   // min body-leaf offset from obj
         int32_t                 batchSpan      = 0;   // (max offset+16) - batchMin; 0 = none
         int32_t                 bodyFieldCount = 0;   // # of container==None leaves
+        // build 1206: this class has a struct-element container whose element
+        // struct itself holds containers — so a value can live > 1 container
+        // level deep (e.g. SaveSlotList[1]…Tunes[N]). When set, the per-instance
+        // scan runs the recursive WalkContainerLeaves pass after the static
+        // fields (the static StructArrayInner path covers only depth 1).
+        bool                    needsDeepWalk  = false;
     };
     // DefKey caches FindDefiningClass results per (classAddr, fieldOffset)
     // so a hot scan over many instances of the same class doesn't re-walk
@@ -5293,12 +5299,29 @@ ValueScanResult ScanForValue(
             }
         }
 
+        // build 1206: does a value live > 1 container level deep? True when a
+        // top-level container's element struct itself has containers (one level
+        // of look-ahead via the cached GetClassContainers). When false the deep
+        // walk is skipped entirely — no per-instance cost for the common case.
+        for (const auto& cfe : GetClassContainers(classAddr)) {
+            uintptr_t es = cfe.elemStruct ? cfe.elemStruct
+                         : cfe.valueStruct ? cfe.valueStruct : cfe.keyStruct;
+            if (es && !GetClassContainers(es).empty()) { sci.needsDeepWalk = true; break; }
+        }
+
         auto inserted = classCache.emplace(classAddr, std::move(sci));
         return &inserted.first->second;
     };
 
         // Thread-local FindDefiningClass result cache (see DefKey above).
         std::unordered_map<DefKey, std::string, DefKeyHash> definingNameCache;
+
+        // Thread-local deep-leaf descriptor pool index, keyed by
+        // (className \x01 full-display-path). Deep leaves (build 1206) have a
+        // per-leaf path rather than a per-ScanField identity, so they can't use
+        // the sf.descriptorIdx cache — they intern here instead (shared across
+        // instances of the same class within this thread).
+        std::unordered_map<std::string, uint32_t> deepDescriptors;
 
         // Multi-numeric meta resolver. For NumericNoByte scans, resolve a
         // field/element's own concrete DataType from its property type
@@ -5518,6 +5541,67 @@ ValueScanResult ScanForValue(
             }
         };
 
+        // Deep-walk descriptor + emit (build 1206). For a leaf found by the
+        // recursive WalkContainerLeaves at container depth >= 2 (the static
+        // StructArrayInner path covers depth 1; the TArray<leaf> branch covers
+        // top-level leaf-containers), build a per-path descriptor and emit a
+        // candidate if the value matches. Vectors are skipped (the walker emits
+        // scalar leaves, not whole vector structs).
+        auto ensureDeepDescriptor = [&](const std::string& displayName,
+                                        const std::string& fieldType) -> uint32_t {
+            std::string key = sci->className; key += '\x01'; key += displayName;
+            auto it = deepDescriptors.find(key);
+            if (it != deepDescriptors.end()) return it->second;
+            ValueScan::FieldDescriptor d;
+            d.className         = sci->className;
+            d.definingClassName = sci->className;
+            d.fieldName         = displayName;   // fully-substituted path, no "[]" placeholder
+            d.fieldType         = fieldType;
+            d.fieldOffset       = 0;             // deep leaf: object-relative offset not meaningful
+            d.boolFieldMask     = 0xFF;
+            uint32_t idx = static_cast<uint32_t>(tr.descriptors.size());
+            tr.descriptors.push_back(std::move(d));
+            deepDescriptors.emplace(std::move(key), idx);
+            return idx;
+        };
+
+        auto deepEmit = [&](const ContainerLeaf& lf) {
+            if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) return;
+            if (lf.depth < 2) return;   // depth 1 already covered by static paths
+            if (isVector) return;       // walker yields scalar leaves, not vector structs
+
+            bool typeOk = false;
+            for (const auto& t : acceptedTypes) if (lf.leafType == t) { typeOk = true; break; }
+
+            std::string disp = lf.arrayPath;
+            disp += '['; disp += std::to_string(lf.elemIndex); disp += ']';
+            if (!lf.leafName.empty()) { disp += '.'; disp += lf.leafName; }
+
+            uint8_t readBuf[16] = {};
+            if (isString) {
+                if (!typeOk) return;
+                std::string readStr;
+                if (dt == ValueScan::DataType::FString)      readStr = Ubel::ReadFStringAt(lf.leafAddr, 0);
+                else if (dt == ValueScan::DataType::FName)    readStr = Ubel::ReadFNameAt(lf.leafAddr, 0);
+                else                                          readStr = Ubel::ReadFTextStringAt(lf.leafAddr, 0);
+                if (!ValueScan::CompareStringPredicate(st, readStr, targetString, caseSensitive)) return;
+                emitCandidate(lf.leafAddr, ensureDeepDescriptor(disp, lf.leafType), -1, nullptr, 0, &readStr);
+            } else if (isMulti) {
+                ValueScan::DataType mdt = dt;
+                const uint8_t* mtgt = nullptr; const uint8_t* mtgt2 = nullptr;
+                if (!multiResolve(lf.leafType, mdt, mtgt, mtgt2)) return;
+                size_t sz = ValueScan::SizeOf(mdt);
+                if (!Macht::ReadBytesSafe(lf.leafAddr, readBuf, sz)) return;
+                if (!ValueScan::ComparePredicate(mdt, st, readBuf, mtgt, mtgt2, tolerance)) return;
+                emitCandidate(lf.leafAddr, ensureDeepDescriptor(disp, lf.leafType), -1, readBuf, sz, nullptr);
+            } else {
+                if (!typeOk) return;
+                if (!Macht::ReadBytesSafe(lf.leafAddr, readBuf, dtSize)) return;
+                if (!ValueScan::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) return;
+                emitCandidate(lf.leafAddr, ensureDeepDescriptor(disp, lf.leafType), -1, readBuf, dtSize, nullptr);
+            }
+        };
+
         for (auto& sf : sci->fields) {
             if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
 
@@ -5723,6 +5807,27 @@ ValueScanResult ScanForValue(
 
             if (!ValueScan::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
             emitCandidate(valueAddr, ensureDescriptor(sf), -1, readBuf, dtSize, nullptr);
+        }
+
+        // Deeply-nested container values (build 1206). The static fields above
+        // reach depth-1 struct-array leaves (StructArrayInner) + top-level leaf-
+        // containers (the TArray<leaf> branch); this recursive pass reaches a
+        // value > 1 container level deep (e.g. SaveSlotList[1].MsTuneData.
+        // MsTunes[0].WeaponTuneList[0].Tunes[N]). Gated per class (needsDeepWalk)
+        // so the common case — no struct-element container nesting — pays nothing.
+        if (sci->needsDeepWalk && static_cast<int32_t>(tr.candidates.size()) < maxResults) {
+            WalkLeafLimits dlim;
+            dlim.maxDepth = 4;
+            dlim.maxElems = 256;
+            dlim.aborted  = [&] {
+                if (deadlineHit.load(std::memory_order_relaxed)) return true;
+                if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return true; }
+                if (std::chrono::steady_clock::now() - t0 > kDeadline) {
+                    deadlineHit.store(true, std::memory_order_relaxed); return true;
+                }
+                return false;
+            };
+            WalkContainerLeaves(obj, cls, /*pathPrefix*/ "", /*depth*/ 0, dlim, deepEmit);
         }
     }
 
