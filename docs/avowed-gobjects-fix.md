@@ -1,9 +1,9 @@
 # Avowed — GObjects Decoy Misdetection Fix (tracking)
 
-> **Status:** 🟡 Phase 1 implemented (DLL-side decoy recovery), awaiting in-game verification by external tester.
-> **Owner:** bbfox0703 (no local copy of the game — relies on remote tester; large timezone gap → slow round-trips).
+> **Status:** ✅ Phase 1 **LIVE-VERIFIED in-game** (Steam build, 2026-06-16). Recovery fires and lands on the real 7.6M-object array; DynOff offset detection then succeeds. Phase 2 optional (perf/cleanup).
+> **Owner:** bbfox0703 (now owns the Steam copy — local iteration possible).
 > **Game:** Avowed (Obsidian Entertainment), `Avowed-Win64-Shipping.exe`, **UE 5.3** (UE503).
-> **First diagnosed build:** 1162 (`609ecfb-dirty`). **Phase 1 built on build:** 1225 (`dev`), DLL compiles clean — awaiting tester.
+> **First diagnosed build:** 1162 (`609ecfb-dirty`). **Phase 1 shipped:** committed `a467082` on `dev` (build 1225); verified on build 1228 (`0b3a4e5`).
 
 This document tracks a long-running, test-gated fix. Because the maintainer does not own Avowed and depends on a remote tester across a wide timezone gap, each verify cycle is slow. Other development continues on the repo in parallel — keep this fix's changes small and isolated.
 
@@ -12,6 +12,8 @@ This document tracks a long-running, test-gated fix. Because the maintainer does
 ## TL;DR
 
 It is **not** "GObjects AOB not found". GObjects is found, but **intermittently resolves to the wrong address** — a `.data` decoy structure that passes the relaxed validator yet yields **0 usable objects**. The *correct* GObjects (≈7.6M objects) is reachable: on the launches where the AOB decoy fails to validate, the existing `data_scan` fallback already finds it. The fix makes that recovery happen deterministically whenever the chosen GObjects yields `Count==0`.
+
+**VERIFIED:** on the Steam build (1228), the AOB again picked a decoy (`0x7FF6E8546868`, Count=0) → recovery evaluated 8 candidates → switched to the real heap array (`0x1B066692800`, Count=7,667,809) → `Objects=7667809` and full DynOff offset detection (Guid struct, FField/UStruct offsets) succeeded. The game is now fully usable in the dumper.
 
 ---
 
@@ -66,7 +68,7 @@ This matches RE-UE4SS's note for the sibling Obsidian/UE5 title **The Outer Worl
 
 ## Fix plan
 
-### Phase 1 — DLL decoy recovery (zero-regression) — ✅ CODED, ⏳ unverified in-game
+### Phase 1 — DLL decoy recovery (zero-regression) — ✅ LIVE-VERIFIED (Steam build 1228)
 
 Strictly additive: a recovery step in `UE5_Init` that runs **only when the chosen GObjects yields `Aura::GetCount() == 0`**. Working games (Count > 0) never enter it, so there is **no regression risk** to the 20+ already-supported titles.
 
@@ -80,12 +82,13 @@ Cost: adds ~0.7s to init **only on the broken-launch path** (one data-section sw
 
 Expected effect: converts the broken launches (init-0/2) into working ones — recovery runs the same data-scan that already succeeded in init-1 → lands on `0x207...` → 7.6M objects, names resolve.
 
-### Phase 2 — proper fixes (require in-game iteration with tester) — ⬜ pending
+### Phase 2 — optional perf/cleanup (NOT required for functionality) — ⬜ backlog
 
-- **Tighten `ValidateGObjects` at the source** so the decoy is rejected up front (avoids the wasted ~6.8s AOB scan + recovery). Candidate approach: in the relaxed-Flat path, validate the **first K consecutive items** at a probed stride and require a high valid ratio (decoy ≈23% vs real ≈100%). ⚠ Touches the shared validator used by all games → must be regression-tested across the test-game matrix before merge.
-- **Calibrate the Obsidian UE5.3 FUObjectArray layout** (NumElements offset / ItemSize). Even the working launch had a `ValidateGObjects` count (`Num=32758`) that disagreed with `Aura`'s `Count=7,667,809`, i.e. the count offset is still being read inconsistently — usable but not clean.
-- **Persist the recovered address / hint** so the wasted AOB pass can be skipped on subsequent launches (note: heap address moves per launch — persist the *method preference*, not the address).
-- **Let the UI "Extra Scan" rescue this case**: `apply_rescan` is gated on `g_cachedGObjects == 0`, but here the cached value is the non-zero decoy, so the button currently cannot overwrite it. Relax the gate to also allow overwrite when `Aura::GetCount() == 0`.
+Phase 1 makes the game fully usable; Phase 2 only improves init time and robustness. Now iterable locally (maintainer owns the Steam copy).
+
+- **Reduce init cost.** The recovery adds ~10s on Avowed (a full data-section sweep + 8-candidate eval) because the loose AOB winner pre-empts the fallback. Tighten `ValidateGObjects` at the source so the decoy is rejected up front: in the relaxed-Flat path, validate the **first K consecutive items** at a probed stride and require a high valid ratio (decoy ≈23% vs real ≈100%). ⚠ Touches the shared validator used by all games → regression-test across the test-game matrix before merge. Alternatively/additionally, persist a per-exe *method preference* ("prefer data_scan") so subsequent launches skip the doomed AOB pass (the heap address itself moves per launch — do **not** persist the address).
+- **NumElements/ItemSize note (low priority).** `Aura` reads `Count=7,667,809 / ItemSize=24` consistently and DynOff detection succeeds, so the array is interpreted correctly. The stale `ValidateGObjects` relaxed-Flat count (`Num=32758`) is read at a different offset but is unused once recovery hands Aura the right base — cosmetic only.
+- **Let the UI "Extra Scan" rescue this case too**: `apply_rescan` is gated on `g_cachedGObjects == 0`, but a decoy is non-zero, so the button cannot overwrite it. Relax the gate to also allow overwrite when `Aura::GetCount() == 0`. (Less urgent now that auto-recovery handles it at init.)
 
 ---
 
@@ -105,12 +108,13 @@ Expected effect: converts the broken launches (init-0/2) into working ones — r
 
 ## Progress log
 
-- **2026-06-16** — Diagnosed from tester's 3-launch log set (build 1162). Confirmed intermittent decoy (`0x7FF6844D6868`) vs real heap GObjects (`0x207...`, 7.6M objects). Root cause = loose `GOBJ_V3` + permissive relaxed-Flat `ValidateGObjects` blocking the `data_scan` fallback. Implemented Phase 1 (zero-regression `Count==0` recovery): `Genau::CollectGObjectsCandidates` + `DataScanGObjectsCandidates` refactor (`Genau.h`/`Genau.cpp`) + recovery loop in `UE5_Init` (`Frieren.cpp`). **DLL build 1225 compiles clean** (`build.ps1 -Target DLL` → SUCCESS). Not committed (maintainer doing parallel dev on `dev`). In-game verification: ⏳ pending tester.
+- **2026-06-16** — Diagnosed from a 3-launch log set (build 1162). Confirmed intermittent decoy (`0x7FF6844D6868`) vs real heap GObjects (`0x207...`, 7.6M objects). Root cause = loose `GOBJ_V3` + permissive relaxed-Flat `ValidateGObjects` blocking the `data_scan` fallback. Implemented Phase 1 (zero-regression `Count==0` recovery): `Genau::CollectGObjectsCandidates` + `DataScanGObjectsCandidates` refactor (`Genau.h`/`Genau.cpp`) + recovery loop in `UE5_Init` (`Frieren.cpp`). DLL build 1225 compiles clean. Committed `a467082` + pushed to `origin/dev`.
+- **2026-06-16 (same day)** — Maintainer bought the Steam copy. **Phase 1 LIVE-VERIFIED on build 1228 (`0b3a4e5`):** AOB picked decoy `0x7FF6E8546868` (Count=0) → recovery evaluated 8 candidates → `Recovery SUCCESS — 0x7FF6E8546868 -> 0x1B066692800 (Count=7667809, names ok)` → `Objects=7667809`; DynOff detection (Guid struct @0x1B06110AC90, fields A–D, ElementSize +0x34 etc.) all succeeded. Game fully usable. Phase 2 demoted to optional perf/cleanup backlog.
 
 ---
 
 ## Open questions / risks
 
-- Does `CollectGObjectsCandidates` reliably surface the real heap array within the candidate cap (16)? In init-1, data_scan returned it as the *first* validated candidate, so cap is almost certainly sufficient — confirm from tester logs.
-- Is `7,667,809` the true object count, or is the NumElements offset still slightly off (Phase 2)? Usable either way, but worth calibrating.
-- Recovery re-runs every broken launch (no persistence yet) — acceptable for now; revisit in Phase 2.
+- ~~Does `CollectGObjectsCandidates` surface the real array within the cap (16)?~~ **Resolved:** on build 1228 it evaluated 8 candidates and recovered successfully.
+- ~~Is `7,667,809` the true object count?~~ **Resolved (good enough):** `Aura` reads it consistently and DynOff detection succeeds on it; any residual count-offset nit is cosmetic (Phase 2 note).
+- Recovery re-runs every decoy launch (~10s, no persistence yet) — acceptable; addressable via Phase 2 method-preference persistence if init time becomes annoying.
