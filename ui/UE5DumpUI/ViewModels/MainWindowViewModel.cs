@@ -105,6 +105,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int _dropDownLimitExponent = 9; // 2^9 = 512
     [ObservableProperty] private int _csxDrilldownDepth; // 0 = flat (dummy), 1+ = real child structures
     [ObservableProperty] private int _previewLimit = 2; // Struct preview sub-field count (0-6)
+    [ObservableProperty] private int _deepScanElemCapExponent = 8; // 2^8 = 256 (find_by_address deep scan per-container cap)
 
     // Always-visible top-toolbar AOBMaker status (mirrors the per-tab indicators).
     [ObservableProperty] private bool _isAobMakerAvailable;
@@ -120,6 +121,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>Show warning when array limit &gt;= 256 (high memory usage).</summary>
     public bool ShowArrayLimitWarning => ArrayLimitExponent >= 8;
+
+    /// <summary>Computed per-container element cap for the find_by_address deep
+    /// container scan: 2^DeepScanElemCapExponent (16..4096).</summary>
+    public int DeepScanElemCap => 1 << DeepScanElemCapExponent;
 
     /// <summary>
     /// Experimental analysis tabs (Snapshot / SPC Query / Class Pivot) stay
@@ -255,6 +260,12 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         LiveWalker.CsxDrilldownDepth = value;
         OnPropertyChanged(nameof(CsxDrilldownDepthBrush));
+    }
+
+    partial void OnDeepScanElemCapExponentChanged(int value)
+    {
+        OnPropertyChanged(nameof(DeepScanElemCap));
+        InstanceFinder.DeepScanElemCap = DeepScanElemCap;
     }
 
     /// <summary>Toolbar slider colour — default 0-3, then yellow (4) → orange →
@@ -508,18 +519,18 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         };
 
         // Wire InstanceFinder container match -> "Locate in GWorld" (the address is
-        // a value inside a container element → reach the owning object + drill in).
-        InstanceFinder.LocateContainerInGWorld += async (addr, fieldOffset, fieldName, elementIntraOffset) =>
+        // a value inside a container element → reach the owning object + drill the
+        // full container chain, including deeply-nested values).
+        InstanceFinder.LocateContainerInGWorld += async (match) =>
         {
             try
             {
                 SelectedTabIndex = (int)MainTabIndex.LiveWalker;
-                await LiveWalker.LocateInGWorldAsync(addr, fieldOffset, fieldName,
-                                                     stopAtParent: false, elementIntraOffset: elementIntraOffset);
+                await LiveWalker.LocateContainerInGWorldAsync(match);
             }
             catch (Exception ex)
             {
-                _log.Error($"InstanceFinder LocateContainerInGWorld handler error: {addr}", ex);
+                _log.Error($"InstanceFinder LocateContainerInGWorld handler error: {match.OwnerAddress}", ex);
             }
         };
 

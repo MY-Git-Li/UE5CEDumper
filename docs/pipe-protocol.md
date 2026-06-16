@@ -587,6 +587,52 @@ Field objects include all `walk_class` fields **plus** live typed values and arr
 { "id": 8, "ok": true, "found": false }
 ```
 
+**Container-aware lookup.** Request may set `"scan_containers": true` to also
+attribute addresses that fall inside a UObject's heap-allocated container buffer
+(TArray/TSet/TMap data — these don't fall within any UObject's PropertiesSize).
+`"container_depth": N` (default 1 = shallow only) opts into a **recursive deep
+descent**: when the fast shallow scan finds nothing, the DLL descends struct-array
+/ map-value / set elements up to depth N to locate values in *separately-allocated*
+nested containers (e.g. a `TArray<int>` whose header is inline in a struct element
+but whose data lives elsewhere). `"container_elem_cap": M` (default 256) caps how
+many elements are probed per container during that descent (UI-configurable via the
+Options flyout). The deep scan runs only on a shallow miss (common case stays
+fast), is bounded by the element cap + the 15s deadline, and early-outs on the
+first match.
+
+```jsonc
+// Container match(es). Shallow 1-level hit has no "nested_chain"; a deeply-nested
+// value carries the full chain (outermost stays in the match fields, each deeper
+// hop in nested_chain; the last hop's intra_offset locates the value).
+{
+  "id": 8, "ok": true, "found": false,
+  "query_addr": "228F1251BE8",
+  "container_scan": {
+    "objects_scanned": 28116, "objects_total": 28116,
+    "classes_primed": 4382, "duration_ms": 51,
+    "deadline_hit": false, "deep_scan": true
+  },
+  "container_matches": [
+    {
+      "owner_addr": "2294EDBE830", "owner_index": 17231,
+      "owner_name": "BP_LifeSaveData_C", "owner_class": "BP_LifeSaveData_C",
+      "field_offset": 1240, "field_name": "SaveSlotList", "field_type": "ArrayProperty",
+      "inner_type": "StructProperty", "element_index": 1, "element_size": 1280,
+      "intra_offset": 0, "data_addr": "226CD6A5000", "count": 4,
+      "nested_chain": [
+        { "field_name": "MsTuneData.MsTunes", "field_type": "MapProperty",
+          "element_index": 0, "element_size": 96, "intra_offset": 0,
+          "data_addr": "...", "map_value_side": true },
+        { "field_name": "WeaponTuneList", "field_type": "ArrayProperty",
+          "element_index": 0, "element_size": 64, "intra_offset": 0, "data_addr": "..." },
+        { "field_name": "Tunes", "field_type": "ArrayProperty", "inner_type": "IntProperty",
+          "element_index": 42, "element_size": 4, "intra_offset": 0, "data_addr": "228F1251B40" }
+      ]
+    }
+  ]
+}
+```
+
 ### find_refs_to_uobject
 
 Reverse reference scan. `references[]` lists each UObject that holds a pointer

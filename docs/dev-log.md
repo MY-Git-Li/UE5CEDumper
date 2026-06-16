@@ -14,6 +14,111 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-16 — Deeply-nested container values: recursive find_by_address + multi-level GWorld drill (build 1198)
+
+The first live test of Locate in GWorld (build 1193) surfaced two gaps in the
+todo: a value buried **>1 container level deep** couldn't be found by
+`find_by_address` at all, and the deep-drill (which lands ON a value inside a
+struct-array element) was only fed by the Instance Finder. After investigation
+the user chose **recursive descent + multi-level drill, all through the Instance
+Finder by-address path** (Value Search / SPC wiring intentionally folded in —
+see "Why not VS/SPC" below).
+
+**Repro (SEED BATTLE DESTINY REMASTERED).** `find_by_address 0x228F1251BE8`
+returned **0 matches** while a sibling 1-level value (`SaveSlotList[1]+0x4D8`,
+the inline `GP` field) was found instantly. The deep int lives at
+`BP_LifeSaveData_C.SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[N]`
+— six container hops, each nested container a **separate heap allocation**.
+
+**Why the shallow scan can't see it.** `Aura::FindInContainers` bounds-checks
+`addr` against each container buffer at a fixed offset within the object
+(`GetClassContainers` flattens DIRECT-struct nesting). That finds values stored
+INLINE in a buffer — a `TArray<int>` element, or a field of a struct stored
+inline in a `TArray<FStruct>` (why `SaveSlotList[1]+0x4D8` works). But a
+`TArray<int>` whose *header* is inline in a struct element while its *data*
+lives elsewhere on the heap is a separate allocation — `addr` falls in no
+top-level buffer.
+
+**Recursive deep descent (DLL).** New `Aura::FindInContainersDeep` +
+`MatchAddrInStructContainers` recurse into struct elements: at each level, if
+`addr` is inside a buffer it's the terminal hit (a leaf, or an inline struct
+field); otherwise, for struct-element containers (Array/Set element struct, Map
+value/key struct) descend into each element and recurse, building the full hop
+chain. Bounded by `maxDepth` (UI sends 5), a 256-element-per-container probe
+cap, the existing 15s deadline, and **early-out on the first match** (one match
+answers a by-address lookup). It runs **only as a fallback** when the shallow
+scan finds nothing AND the caller opted in (`container_depth > 1`), so the
+common fast path is untouched (zero regression). `ContainerCacheEntry` now
+carries the element/value/key `UScriptStruct*` + map value offset (resolved at
+cache-build via new `Ubel::GetContainerInnerStructAddr` + an extended
+`GetMapPairLayout` that also returns key/value struct addrs). `GetMapPairLayout`
+now uses the value's **real** alignment (`Scharf::RequiredAlignment`) so the
+pair stride/value offset match `WalkInstance` exactly — the deep matcher indexes
+map slots by the same sparse index the UI shows.
+
+**Multi-level chain (model + pipe).** `ContainerMatch` gains a
+`nestedChain` (`ContainerHop[]`); the outermost container stays in the existing
+fields, each deeper hop is one container drilled into, and the deepest hop's
+intra-offset locates the value. Serialized as `nested_chain` in the
+`find_by_address` response; `find_by_address` reads a new `container_depth`
+param. `ContainerMatch.DisplayPath` (C#) now spans the full chain
+(`…SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[42]`).
+
+**Multi-level GWorld drill (UI).** New `LiveWalkerViewModel.LocateContainerInGWorldAsync(ContainerMatch)`
+reaches the owner via the BFS path, then `DrillContainerChainAsync` walks the
+chain hop-by-hop: navigate any leading DIRECT-struct name segments (e.g.
+`MsTuneData` in `MsTuneData.MsTunes`) → drill the container → select element
+`[N]`; nested hops then drill INTO the struct element to continue; the deepest
+hop scrolls to the value (a struct field at its intra-offset, or the leaf
+element itself). Degrades gracefully — if a hop can't be matched in the live
+view it stops and reports the remaining manual path. The Instance Finder
+container row's 🌍 now passes the whole `ContainerMatch`
+(`LocateContainerInGWorld` event → `Action<ContainerMatch>`); the build-1193
+one-level `elementIntraOffset` branch of `LocateInGWorldAsync` was removed (the
+1-level case is just a single-hop chain through the new path). Shared spine
+builder `BuildBreadcrumbSpineFromPath` extracted.
+
+**Why not VS/SPC (the folded-in todo item).** Investigation found neither
+produces a "value inside a struct-array element" candidate today: Value Search's
+`ScanForValue` never descends into `TArray<FStruct>` elements, and SPC filters
+every array-element row out of its results (`WHERE array_field IS NULL`). So
+there was nothing to wire the deep-drill to — and a VS redirect couldn't reach
+the SEED value anyway (its first hop `SaveSlotList` is already a struct array).
+The by-address path is where the workflow actually lives, so the effort went
+there.
+
+**Tests / build.** +7 C# (`DeepContainerChainTests`: chain `DisplayPath` /
+`DeepestIntraOffset` / `IsDeeplyNested` + the flattened `BuildContainerDrillPath`
+order) → **1512 C#**; **507 dll_helpers / 31 utf8** unchanged green. Full build
+clean (DLL + 3 proxies), AOT publish clean (46 MB).
+
+**LIVE-VERIFIED on SEED (build 1199).** `find_by_address 1B06D16B448` →
+`BP_LifeSaveData_C.SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[2]`
+(scanned 28116 objects in 50ms), and the container-row 🌍 reached the owner (2
+hops) and drilled the full chain to land ON `Tunes[2]` = 20. Two follow-ups from
+the test:
+- **Live Walker `Addr` copy bug (fixed).** In a container-element view the per-row
+  `Addr` button recomputed `CurrentAddress + field.Offset`, but `CurrentAddress` is
+  the OWNING struct (the element lives in a separate heap buffer), so it copied the
+  owner's field at that offset (e.g. `Tunes[2]`'s `Addr` gave the parent's
+  `WeaponId` address). Now `CopyFieldAddressAsync` uses the already-resolved
+  `field.FieldAddress` (same value the Address column + Hex/+CE/Edit buttons use),
+  falling back to `CurrentAddress + Offset` only when it's absent.
+- **"Locate in GWorld depth" moved to the Options flyout.** The depth NumericUpDown
+  left the Live Walker toolbar for the top **Options** dropdown (renamed
+  `Locate in GWorld depth`, slider 1–32), bound through the `LiveWalker` sub-VM
+  (`LiveWalker.GWorldLocateDepth` / `.IsGWorldAvailable` for the dim-when-no-GWorld
+  gate).
+- **Deep-scan element cap is now configurable (build 1200).** The
+  `kMaxElemProbe = 256` constant became a parameter threaded
+  `find_by_address`(`container_elem_cap`) → `FindInContainersDeep(maxElemProbe)`, with
+  a `Deep container scan cap` exponent-slider in the Options flyout (2^4–2^12,
+  default 256) bound via `MainWindowViewModel.DeepScanElemCap(Exponent)` →
+  `InstanceFinder.DeepScanElemCap`. Higher reaches values at higher element indices
+  in the recursive descent at the cost of speed.
+
+-----
+
 ## 2026-06-16 — Locate in GWorld: forward BFS path search (build 1181)
 
 Pressing **Parent** in the Live Walker walks `UObject.OuterPrivate` (the naming

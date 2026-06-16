@@ -144,6 +144,26 @@ AddressLookupResult FindByAddress(uintptr_t addr);
 
 // === Container-Aware Address Lookup ===
 
+// One nesting hop beyond the outermost container, for a value buried in a
+// SEPARATELY-allocated nested container (e.g. a TArray<int> inside a struct
+// element of a TMap value inside a struct element of a TArray). The outermost
+// container stays in the ContainerMatch fields below; nestedChain holds levels
+// 1..N (each is one container drilled INTO, reached from the previous element's
+// struct). The final hop's intraOffset is where `addr` lands within the
+// deepest element. Empty for a plain 1-level match (back-compat).
+struct ContainerHop {
+    int32_t     fieldOffset   = 0;   // container offset within the PARENT element struct
+    std::string fieldName;           // dotted name within that struct (e.g. "MsTuneData.MsTunes")
+    std::string fieldType;           // "ArrayProperty" / "SetProperty" / "MapProperty"
+    std::string innerType;           // inner element / value type label
+    int32_t     elementIndex  = 0;   // matched element / sparse index
+    int32_t     elementSize   = 0;   // per-element / per-pair stride
+    int32_t     intraOffset   = 0;   // (addr - elementStart) within this hop's element
+    uintptr_t   dataAddr      = 0;   // this hop's buffer base
+    bool        mapValueSide  = false; // true when the hit is on the VALUE side of a Map pair
+    std::string note;                // "" / "slack" / "freed"
+};
+
 // One match for an address that falls inside a UObject field's
 // heap-allocated container buffer (TArray::Data / TSparseArray::Data).
 struct ContainerMatch {
@@ -165,6 +185,11 @@ struct ContainerMatch {
     //   "slack"  — Array index is in [Count, Max) — uninitialised / freed slack
     //   "freed"  — Map/Set slot is on the free list (stale data, may still match)
     std::string note;
+    // Additional nesting levels for a deeply-nested value (FindInContainersDeep).
+    // Empty for a shallow 1-level match. When non-empty, this ContainerMatch's
+    // own fields describe the OUTERMOST container and nestedChain[i] each
+    // deeper container; the deepest hop's intraOffset locates `addr`.
+    std::vector<ContainerHop> nestedChain;
 };
 
 // Diagnostic stats from a container scan — surfaced through the pipe so
@@ -189,6 +214,19 @@ struct ContainerScanStats {
 // the caller can detect a truncated scan via `deadlineHit`.
 std::vector<ContainerMatch> FindInContainers(uintptr_t addr, int32_t maxResults = 16,
                                               ContainerScanStats* stats = nullptr);
+
+// Deep variant: when the shallow FindInContainers finds nothing because the
+// value lives in a SEPARATELY-allocated nested container (a TArray/TMap/TSet
+// whose data buffer is itself stored inside a struct element of an outer
+// container), recursively descend struct-array / map-value / set elements up to
+// `maxDepth` and report the full nested chain (ContainerMatch.nestedChain).
+// Bounded by maxDepth, a per-container element cap, the same 15s deadline, and
+// early-out on the first match — so it's only as expensive as needed and never
+// hangs. Intended as a fallback (call only when FindInContainers returned empty).
+std::vector<ContainerMatch> FindInContainersDeep(uintptr_t addr, int32_t maxResults = 8,
+                                                 int32_t maxDepth = 4,
+                                                 int32_t maxElemProbe = 256,
+                                                 ContainerScanStats* stats = nullptr);
 
 // === Reverse Reference Search (logical-parent navigation) ===
 //

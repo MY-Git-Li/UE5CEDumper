@@ -1578,7 +1578,6 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// </summary>
     public async Task LocateInGWorldAsync(string? objectAddr, int scrollFieldOffset,
                                           string? scrollFieldName, bool stopAtParent,
-                                          int elementIntraOffset = -1,
                                           CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(objectAddr)) return;
@@ -1594,108 +1593,20 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
             if (!path.Found)
             {
-                StatusText = path.Status switch
-                {
-                    "not_reachable"  => $"No path from GWorld within depth {GWorldLocateDepth}. Try increasing the depth.",
-                    "deadline"       => $"GWorld path search timed out at depth {GWorldLocateDepth} (visited {path.Visited:N0}). Try a smaller depth.",
-                    "visited_cap"    => $"GWorld path search space too large at depth {GWorldLocateDepth} (visited {path.Visited:N0}). Try a smaller depth.",
-                    "cancelled"      => "GWorld path search cancelled.",
-                    "no_gworld"      => "GWorld is not available (AOB scan found no UWorld).",
-                    "invalid_target" => "Could not resolve the target object in GObjects.",
-                    _                => $"No GWorld path found ({path.Status}).",
-                };
+                StatusText = GWorldPathFailureStatus(path);
                 return;
             }
 
-            // Build the new breadcrumb spine: GWorld root + one node per hop.
-            // For stopAtParent we drop the final (target) node so the view lands
-            // on the parent and we don't drill into the target itself.
-            int stepCount = path.Steps.Count;
-            int includedSteps = stopAtParent ? Math.Max(0, stepCount - 1) : stepCount;
-
-            Breadcrumbs.Clear();
-            References.Clear();
-            HasReferences = false;
-
-            Breadcrumbs.Add(new BreadcrumbItem
-            {
-                Address = !string.IsNullOrEmpty(path.RootAddr) ? path.RootAddr : objectAddr,
-                Label = !string.IsNullOrEmpty(path.RootName) ? path.RootName : "GWorld",
-                IsPointerDeref = true,
-                FieldOffset = 0,
-                FieldName = "GWorld",
-            });
-
-            for (int i = 0; i < includedSteps; i++)
-            {
-                var s = path.Steps[i];
-                var label = !string.IsNullOrEmpty(s.ToName) ? s.ToName
-                          : (!string.IsNullOrEmpty(s.FieldName) ? s.FieldName : "(node)");
-                if (s.ElementIndex >= 0) label += $"[{s.ElementIndex}]";
-                Breadcrumbs.Add(new BreadcrumbItem
-                {
-                    Address = s.To,
-                    Label = label,
-                    FieldOffset = s.FieldOffset,
-                    FieldName = s.FieldName,
-                    IsPointerDeref = true,  // every edge we followed is a pointer deref
-                });
-            }
-
-            // Deep nested struct-array value (Instance Finder container match): after
-            // reaching the owning object, explicitly drill array → struct element →
-            // scroll to the field at the intra-element offset, so the user lands ON the
-            // value (not just on the element row). The single-shot pending-scroll path
-            // below can't chain two container levels, so do awaited drills here.
-            if (!stopAtParent && elementIntraOffset >= 0)
-            {
-                _pendingScrollFieldOffset = null;
-                _pendingScrollFieldName = null;
-                _pendingDrillElementIndex = -1;
-
-                var ownerAddr = Breadcrumbs[^1].Address;
-                var ownerResult = await _dump.WalkInstanceAsync(ownerAddr, arrayLimit: ArrayLimit,
-                                                                previewLimit: PreviewLimit, fillGaps: FillGaps, ct: ct);
-                ownerResult = await AutoFillGapsRetryAsync(ownerResult, ownerAddr);
-                UpdateDisplay(ownerResult);   // land on owner (no pending scroll/drill)
-
-                int elemIdx = ParseElementIndexSuffix(scrollFieldName ?? "");
-                var arrayField = Fields.FirstOrDefault(f => f.Offset == scrollFieldOffset && f.IsContainerNavigable);
-                bool drilled = false;
-                if (arrayField != null && elemIdx >= 0)
-                {
-                    await NavigateToContainerAsync(arrayField);   // → array element view
-                    var elemRow = Fields.FirstOrDefault(f =>
-                        f.Name == $"[{elemIdx}]" || f.Name.StartsWith($"[{elemIdx}] ", StringComparison.Ordinal));
-                    if (elemRow != null && elemRow.IsNavigable)
-                    {
-                        await NavigateToFieldAsync(elemRow);      // → struct element view
-                        var leaf = Fields.FirstOrDefault(f => f.Offset == elementIntraOffset);
-                        if (leaf != null)
-                        {
-                            SelectedField = leaf;
-                            ScrollToFieldRequested?.Invoke(leaf.Name);
-                        }
-                        drilled = true;
-                    }
-                }
-
-                _log.Info($"LocateInGWorld: reach+drill mode, {path.Depth} hop(s), visited {path.Visited}, " +
-                          $"{path.DurationMs}ms, drilled={drilled} | BC={FormatBreadcrumbTrace()}");
-                StatusText = drilled
-                    ? $"Located via GWorld — {path.Depth} hop(s) to {path.TargetName}; drilled into the element."
-                    : $"Located via GWorld — {path.Depth} hop(s) to {path.TargetName} (drill into the element manually).";
-                return;
-            }
+            BuildBreadcrumbSpineFromPath(path, objectAddr, stopAtParent);
 
             // Decide the field to scroll/highlight once the display node is walked.
             if (stopAtParent)
             {
                 // Highlight the pointer on the parent that leads to the target,
                 // but do NOT auto-drill into it (stop before the class).
-                if (stepCount > 0)
+                if (path.Steps.Count > 0)
                 {
-                    _pendingScrollFieldOffset = path.Steps[stepCount - 1].FieldOffset;
+                    _pendingScrollFieldOffset = path.Steps[^1].FieldOffset;
                     _pendingDrillElementIndex = -1;
                 }
             }
@@ -1729,6 +1640,210 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         {
             IsLoading = false;
         }
+    }
+
+    /// <summary>Map a failed GWorld path search to an actionable status message.</summary>
+    private string GWorldPathFailureStatus(GWorldPathResult path) => path.Status switch
+    {
+        "not_reachable"  => $"No path from GWorld within depth {GWorldLocateDepth}. Try increasing the depth.",
+        "deadline"       => $"GWorld path search timed out at depth {GWorldLocateDepth} (visited {path.Visited:N0}). Try a smaller depth.",
+        "visited_cap"    => $"GWorld path search space too large at depth {GWorldLocateDepth} (visited {path.Visited:N0}). Try a smaller depth.",
+        "cancelled"      => "GWorld path search cancelled.",
+        "no_gworld"      => "GWorld is not available (AOB scan found no UWorld).",
+        "invalid_target" => "Could not resolve the target object in GObjects.",
+        _                => $"No GWorld path found ({path.Status}).",
+    };
+
+    /// <summary>
+    /// Replace the breadcrumb spine with the GWorld→target path: a GWorld root
+    /// node + one node per hop. <paramref name="stopAtParent"/> drops the final
+    /// (target) node so the view lands on the parent pointer.
+    /// </summary>
+    private void BuildBreadcrumbSpineFromPath(GWorldPathResult path, string objectAddr, bool stopAtParent)
+    {
+        int stepCount = path.Steps.Count;
+        int includedSteps = stopAtParent ? Math.Max(0, stepCount - 1) : stepCount;
+
+        Breadcrumbs.Clear();
+        References.Clear();
+        HasReferences = false;
+
+        Breadcrumbs.Add(new BreadcrumbItem
+        {
+            Address = !string.IsNullOrEmpty(path.RootAddr) ? path.RootAddr : objectAddr,
+            Label = !string.IsNullOrEmpty(path.RootName) ? path.RootName : "GWorld",
+            IsPointerDeref = true,
+            FieldOffset = 0,
+            FieldName = "GWorld",
+        });
+
+        for (int i = 0; i < includedSteps; i++)
+        {
+            var s = path.Steps[i];
+            var label = !string.IsNullOrEmpty(s.ToName) ? s.ToName
+                      : (!string.IsNullOrEmpty(s.FieldName) ? s.FieldName : "(node)");
+            if (s.ElementIndex >= 0) label += $"[{s.ElementIndex}]";
+            Breadcrumbs.Add(new BreadcrumbItem
+            {
+                Address = s.To,
+                Label = label,
+                FieldOffset = s.FieldOffset,
+                FieldName = s.FieldName,
+                IsPointerDeref = true,  // every edge we followed is a pointer deref
+            });
+        }
+    }
+
+    /// <summary>
+    /// "Locate in GWorld" for a container-match value (Instance Finder by-address).
+    /// Reaches the owning object via the shortest GWorld path, then drills the
+    /// full container chain — outermost container → element [N] → (nested
+    /// container → element → …) — to land ON the value, even when it lives in a
+    /// deeply-nested, separately-allocated container (the deep-scan case). The
+    /// single-shot <c>_pendingScroll*</c> path can't chain multiple container
+    /// levels, so the drill is an explicit awaited sequence.
+    /// </summary>
+    public async Task LocateContainerInGWorldAsync(ContainerMatch match, CancellationToken ct = default)
+    {
+        if (match == null || string.IsNullOrEmpty(match.OwnerAddress)) return;
+        try
+        {
+            ClearStatus();
+            IsLoading = true;
+            StopAutoRefreshTimer();
+            _preBookmarkBreadcrumbs = null;
+            IsBookmarkSaveMode = false;
+
+            var path = await _dump.FindPathFromGWorldAsync(match.OwnerAddress, match.OwnerAddress,
+                                                           GWorldLocateDepth, ct);
+            if (!path.Found)
+            {
+                StatusText = GWorldPathFailureStatus(path);
+                return;
+            }
+
+            BuildBreadcrumbSpineFromPath(path, match.OwnerAddress, stopAtParent: false);
+
+            // Explicit awaited drill — clear the single-shot pending state.
+            _pendingScrollFieldOffset = null;
+            _pendingScrollFieldName = null;
+            _pendingDrillElementIndex = -1;
+
+            var ownerAddr = Breadcrumbs[^1].Address;
+            var ownerResult = await _dump.WalkInstanceAsync(ownerAddr, arrayLimit: ArrayLimit,
+                                                            previewLimit: PreviewLimit, fillGaps: FillGaps, ct: ct);
+            ownerResult = await AutoFillGapsRetryAsync(ownerResult, ownerAddr);
+            UpdateDisplay(ownerResult);   // land on owner
+
+            int totalHops = 1 + match.NestedChain.Count;
+            int drilled = await DrillContainerChainAsync(match);
+
+            _log.Info($"LocateContainerInGWorld: {path.Depth} hop(s) to {match.OwnerName}, " +
+                      $"drilled {drilled}/{totalHops} container level(s), {path.DurationMs}ms | BC={FormatBreadcrumbTrace()}");
+            StatusText = drilled >= totalHops
+                ? $"Located via GWorld — {path.Depth} hop(s); landed on {match.DisplayPath}."
+                : $"Located via GWorld — {path.Depth} hop(s) to {match.OwnerName}; drilled {drilled}/{totalHops} level(s). " +
+                  $"Continue manually: {match.DisplayPath}.";
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error($"LocateContainerInGWorld failed for {match.OwnerAddress}", ex);
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// Drill the container chain of <paramref name="match"/> hop-by-hop from the
+    /// currently-displayed owning object, landing on the value. Each hop:
+    /// navigate any intermediate DIRECT struct segments (dotted name) → drill the
+    /// container → select element [N]; nested hops then drill INTO the struct
+    /// element to continue. The deepest hop scrolls to the value (a field of the
+    /// struct element at its intra-offset, or the leaf element itself). Returns
+    /// the number of hops drilled; stops early (and reports) if a hop can't be
+    /// matched in the live view.
+    /// </summary>
+    /// <summary>
+    /// Flatten a container match into the ordered drill path, outermost-first:
+    /// the match's own (outermost) container hop followed by each nested-chain
+    /// hop. Each entry is (container field dotted-name, element index, intra
+    /// offset). The last entry is the deepest hop whose intra-offset locates the
+    /// value. Pure — unit-tested.
+    /// </summary>
+    internal static List<(string fieldName, int elementIndex, int intraOffset)> BuildContainerDrillPath(ContainerMatch match)
+    {
+        var hops = new List<(string fieldName, int elementIndex, int intraOffset)>
+        {
+            (match.FieldName, match.ElementIndex, match.IntraOffset),
+        };
+        foreach (var h in match.NestedChain)
+            hops.Add((h.FieldName, h.ElementIndex, h.IntraOffset));
+        return hops;
+    }
+
+    private async Task<int> DrillContainerChainAsync(ContainerMatch match)
+    {
+        var hops = BuildContainerDrillPath(match);
+
+        int drilled = 0;
+        for (int hi = 0; hi < hops.Count; hi++)
+        {
+            var (fieldName, elementIndex, intraOffset) = hops[hi];
+            bool isLast = hi == hops.Count - 1;
+
+            // Navigate leading DIRECT-struct segments (e.g. "MsTuneData" in
+            // "MsTuneData.MsTunes"); the last segment is the container itself.
+            var segments = fieldName.Split('.');
+            for (int s = 0; s < segments.Length - 1; s++)
+            {
+                var structField = Fields.FirstOrDefault(f => f.Name == segments[s] && f.IsStructNavigation);
+                if (structField == null) return drilled;   // can't continue
+                await NavigateToFieldAsync(structField);
+            }
+
+            var containerName = segments[^1];
+            var containerField = Fields.FirstOrDefault(f => f.Name == containerName && f.IsContainerNavigable);
+            if (containerField == null) return drilled;
+            await NavigateToContainerAsync(containerField);   // → element view
+
+            var elemRow = Fields.FirstOrDefault(f =>
+                f.Name == $"[{elementIndex}]" ||
+                f.Name.StartsWith($"[{elementIndex}] ", StringComparison.Ordinal));
+            if (elemRow == null) return drilled;
+
+            if (!isLast)
+            {
+                // Must descend into the struct element to reach the next hop.
+                if (!elemRow.IsStructNavigation) return drilled;
+                await NavigateToFieldAsync(elemRow);
+                drilled++;
+                continue;
+            }
+
+            // Deepest hop — land on the value.
+            if (elemRow.IsStructNavigation)
+            {
+                // Value is a field INSIDE the struct element (at intraOffset).
+                await NavigateToFieldAsync(elemRow);
+                var leaf = Fields.FirstOrDefault(f => f.Offset == intraOffset);
+                if (leaf != null)
+                {
+                    SelectedField = leaf;
+                    ScrollToFieldRequested?.Invoke(leaf.Name);
+                }
+            }
+            else
+            {
+                // The element itself is the value (leaf element, e.g. TArray<int>).
+                SelectedField = elemRow;
+                ScrollToFieldRequested?.Invoke(elemRow.Name);
+            }
+            drilled++;
+        }
+        return drilled;
     }
 
     /// <summary>
@@ -2550,13 +2665,28 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private async Task CopyFieldAddressAsync(LiveFieldValue? field)
     {
-        if (field == null || string.IsNullOrEmpty(CurrentAddress)) return;
+        if (field == null) return;
 
         try
         {
-            var instanceAddr = Convert.ToUInt64(CurrentAddress.Replace("0x", "").Replace("0X", ""), 16);
-            var absAddr = instanceAddr + (ulong)field.Offset;
-            var hexAddr = $"0x{absAddr:X}";
+            // Prefer the field's already-resolved absolute address (the same value
+            // shown in the Address column and used by the Hex / +CE / Edit buttons).
+            // Only fall back to CurrentAddress + Offset when it's missing:
+            // CurrentAddress is the OWNING struct, which is WRONG for a container-
+            // element view — the element lives in a separate heap buffer
+            // (TArray::Data / TSparseArray::Data), not at owner+Offset. Recomputing
+            // there landed on the owning struct's field at the same offset instead.
+            string hexAddr;
+            if (!string.IsNullOrEmpty(field.FieldAddress) && field.FieldAddress != "0x0")
+            {
+                hexAddr = field.FieldAddress;
+            }
+            else if (!string.IsNullOrEmpty(CurrentAddress))
+            {
+                var instanceAddr = Convert.ToUInt64(CurrentAddress.Replace("0x", "").Replace("0X", ""), 16);
+                hexAddr = $"0x{instanceAddr + (ulong)field.Offset:X}";
+            }
+            else return;
 
             var formatted = AddressHelper.FormatAddress(
                 hexAddr, _engineState?.ModuleName, _engineState?.ModuleBase, AddrFormat);

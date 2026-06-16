@@ -123,18 +123,8 @@
               CommandParameter="{Binding #AddressInput.Text}"
               ToolTip.Tip="{StaticResource str.Tip.LiveWalker.Go}"
               Padding="8,4"/>
-      <!-- "Locate in GWorld" search depth (used by the per-row buttons on the
-           Instance Finder / Value Search tabs). Dimmed when GWorld is unavailable. -->
-      <TextBlock Text="{StaticResource str.LiveWalker.GWorldDepth}"
-                 VerticalAlignment="Center" FontSize="11" Foreground="#9CDCFE"
-                 IsEnabled="{Binding IsGWorldAvailable}"
-                 ToolTip.Tip="{StaticResource str.Tip.LiveWalker.GWorldDepth}"/>
-      <NumericUpDown Value="{Binding GWorldLocateDepth}"
-                     Minimum="1" Maximum="32" Increment="1"
-                     IsEnabled="{Binding IsGWorldAvailable}"
-                     Width="110" Padding="4,2" FontSize="12"
-                     VerticalAlignment="Center"
-                     ToolTip.Tip="{StaticResource str.Tip.LiveWalker.GWorldDepth}"/>
+      <!-- "Locate in GWorld" search depth moved to the top Options flyout
+           ("Locate in GWorld depth"). -->
       <Button Content="{StaticResource str.LiveWalker.ExportCE}"
               Command="{Binding ExportCeXmlCommand}"
               IsVisible="{Binding HasData}"

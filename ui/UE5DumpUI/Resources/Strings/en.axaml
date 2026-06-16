@@ -113,6 +113,9 @@
     <sys:String x:Key="str.LiveWalker.AddressHint">Address (hex or module.exe+offset)</sys:String>
     <sys:String x:Key="str.LiveWalker.GWorldDepth">GWorld depth:</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.GWorldDepth">Maximum pointer hops to search downward from GWorld when using "Locate in GWorld" (default 5). Larger = finds deeper targets but slower.</sys:String>
+    <sys:String x:Key="str.Toolbar.GWorldDepth">Locate in GWorld depth</sys:String>
+    <sys:String x:Key="str.Toolbar.DeepScanElemCap">Deep container scan cap</sys:String>
+    <sys:String x:Key="str.Tip.Toolbar.DeepScanElemCap">Per-container element probe cap for the Instances "Lookup" deep scan — the recursive descent that finds a value buried in nested containers (e.g. SaveSlotList[1]…Tunes[N]). Only runs when the fast shallow lookup finds nothing. Higher = reaches values at higher element indices but slower; default 256.</sys:String>
     <sys:String x:Key="str.LiveWalker.Go">Go</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportCE">Copy CE XML</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportCEField">Copy CE Field</sys:String>

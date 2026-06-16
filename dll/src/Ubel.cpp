@@ -1284,6 +1284,23 @@ int32_t GetSetElementStride(uintptr_t fieldAddr) {
 }
 
 // ============================================================
+// GetContainerInnerStructAddr — resolve the inner-element UScriptStruct* of
+// an ArrayProperty / SetProperty whose element is a StructProperty. Both probe
+// Inner at FARRAYPROP_INNER (same offset). Returns 0 when the element is not a
+// struct or the address can't be resolved. Used by the recursive deep
+// container scan to descend into struct elements (separate nested allocations).
+// ============================================================
+uintptr_t GetContainerInnerStructAddr(uintptr_t fieldAddr) {
+    if (!fieldAddr || !DynOff::bUseFProperty) return 0;
+    auto [inner, innerTn] = ProbeInnerProperty(fieldAddr, DynOff::FARRAYPROP_INNER);
+    if (!inner || innerTn != "StructProperty") return 0;
+    uintptr_t innerStruct = 0;
+    if (Macht::ReadSafe(inner + DynOff::FSTRUCTPROP_STRUCT, innerStruct) && innerStruct)
+        return innerStruct;
+    return 0;
+}
+
+// ============================================================
 // GetMapPairStride — per-pair stride within an FMapProperty's
 // TSparseArray.Data buffer (used by container-aware Address Finder).
 // pair_size = ComputeMapValueOffset(keySize, valueSize) + valueSize
@@ -1316,12 +1333,24 @@ bool GetMapPairLayout(uintptr_t fieldAddr, MapPairLayout& out) {
         int32_t valSize = ResolveInnerSize(valueProp, valTn);
         if (keySize <= 0 || valSize <= 0) return false;
 
-        int32_t valOffset = Macht::ComputeMapValueOffset(keySize, valSize);
+        // Use the value property's REAL alignment (not a size guess) so the
+        // pair stride + value offset match WalkInstance exactly — the deep
+        // container scan indexes map slots by the same stride the UI shows
+        // (and FName/FWeakObjectPtr values are 8 bytes but 4-aligned, so a
+        // size guess would mis-stride the whole buffer). See ComputeMapValueOffset.
+        int32_t valAlign  = Scharf::RequiredAlignment(valTn, valSize, DynOff::bCasePreservingName);
+        int32_t valOffset = Macht::ComputeMapValueOffset(keySize, valSize, valAlign);
         int32_t pairSize  = valOffset + valSize;
         out.keySize     = keySize;
         out.valueSize   = valSize;
         out.valueOffset = valOffset;
         out.pairStride  = Macht::ComputeSetElementStride(pairSize);
+        // Resolve key / value UScriptStruct* for the deep container scan, so a
+        // TMap<K, FStruct> (or <FStruct, V>) can be descended into.
+        if (keyTn == "StructProperty")
+            Macht::ReadSafe(keyProp + DynOff::FSTRUCTPROP_STRUCT, out.keyStructAddr);
+        if (valTn == "StructProperty")
+            Macht::ReadSafe(valueProp + DynOff::FSTRUCTPROP_STRUCT, out.valueStructAddr);
         return true;
     }
     return false;

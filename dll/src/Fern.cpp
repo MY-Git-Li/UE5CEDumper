@@ -2353,6 +2353,24 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 Aura::ContainerScanStats stats;
                 auto containerMatches = Aura::FindInContainers(queryAddr, 16, &stats);
 
+                // Deep fallback: the shallow scan only finds values stored
+                // INLINE in a container buffer. A value in a SEPARATELY-
+                // allocated nested container (TArray inside a struct element of
+                // a TMap value inside a struct element of a TArray, …) needs a
+                // recursive descent. Only run it when the shallow scan found
+                // nothing AND the caller opted in via container_depth > 1, so
+                // the common (fast) case is never slowed. (build 1194)
+                int containerDepth = request.value("container_depth", 1);
+                int containerElemCap = request.value("container_elem_cap", 256);
+                bool deepRan = false;
+                if (containerMatches.empty() && containerDepth > 1) {
+                    Aura::ContainerScanStats deepStats;
+                    containerMatches = Aura::FindInContainersDeep(queryAddr, 8, containerDepth,
+                                                                  containerElemCap, &deepStats);
+                    if (containerMatches.empty()) stats = deepStats;   // surface deep deadline/stats
+                    deepRan = true;
+                }
+
                 // Surface scan stats so the UI can distinguish "really not in
                 // any container" from "scan got cut off by the deadline".
                 json scanInfo;
@@ -2361,6 +2379,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 scanInfo["classes_primed"]  = stats.classesPrimed;
                 scanInfo["duration_ms"]     = stats.durationMs;
                 scanInfo["deadline_hit"]    = stats.deadlineHit;
+                scanInfo["deep_scan"]       = deepRan;
                 data["container_scan"]      = scanInfo;
 
                 json arr = json::array();
@@ -2381,6 +2400,26 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                     mj["count"]         = m.count;
                     if (!m.note.empty())
                         mj["note"]      = m.note;
+                    // Deeply-nested value: emit the chain of additional hops so
+                    // the UI can show the full path + drill all levels.
+                    if (!m.nestedChain.empty()) {
+                        json chain = json::array();
+                        for (const auto& h : m.nestedChain) {
+                            json hj;
+                            hj["field_offset"]   = h.fieldOffset;
+                            hj["field_name"]     = h.fieldName;
+                            hj["field_type"]     = h.fieldType;
+                            hj["inner_type"]     = h.innerType;
+                            hj["element_index"]  = h.elementIndex;
+                            hj["element_size"]   = h.elementSize;
+                            hj["intra_offset"]   = h.intraOffset;
+                            hj["data_addr"]      = Renge::AddrToStr(h.dataAddr);
+                            hj["map_value_side"] = h.mapValueSide;
+                            if (!h.note.empty()) hj["note"] = h.note;
+                            chain.push_back(hj);
+                        }
+                        mj["nested_chain"] = chain;
+                    }
                     arr.push_back(mj);
                 }
                 data["container_matches"] = arr;

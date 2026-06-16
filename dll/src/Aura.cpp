@@ -1607,6 +1607,15 @@ struct ContainerCacheEntry {
     std::string   innerType;    // ArrayProperty: inner; Set: elem; Map: "K → V"
     int32_t       stride;       // Bytes per element/pair within Data buffer
     ContainerKind kind;
+    // Struct-element descent metadata (recursive deep scan). UScriptStruct* of
+    // the element / map value / map key when that side is a StructProperty, so
+    // the deep matcher can recurse into a separately-allocated nested container.
+    // 0 when the side is a leaf (the element IS the value). valueOffset is the
+    // byte offset of the value within a Map pair (0 for Array/Set).
+    uintptr_t     elemStruct  = 0;   // Array/Set element struct
+    uintptr_t     valueStruct = 0;   // Map value struct
+    uintptr_t     keyStruct   = 0;   // Map key struct
+    int32_t       valueOffset = 0;   // Map: value offset within the pair
 };
 
 static std::unordered_map<uintptr_t, std::vector<ContainerCacheEntry>> s_classContainerCache;
@@ -1640,18 +1649,28 @@ static void CollectContainersRecursive(
         if (f.TypeName == "ArrayProperty") {
             int32_t es = Ubel::GetArrayInnerElemSize(f.Address);
             if (es <= 0) continue;
-            out.push_back({ absOffset, fullName, f.innerType, es, ContainerKind::Array });
+            ContainerCacheEntry e{ absOffset, fullName, f.innerType, es, ContainerKind::Array };
+            if (f.innerType == "StructProperty")
+                e.elemStruct = Ubel::GetContainerInnerStructAddr(f.Address);
+            out.push_back(std::move(e));
         }
         else if (f.TypeName == "SetProperty") {
             int32_t st = Ubel::GetSetElementStride(f.Address);
             if (st <= 0) continue;
-            out.push_back({ absOffset, fullName, f.elemType, st, ContainerKind::Set });
+            ContainerCacheEntry e{ absOffset, fullName, f.elemType, st, ContainerKind::Set };
+            if (f.elemType == "StructProperty")
+                e.elemStruct = Ubel::GetContainerInnerStructAddr(f.Address);
+            out.push_back(std::move(e));
         }
         else if (f.TypeName == "MapProperty") {
-            int32_t st = Ubel::GetMapPairStride(f.Address);
-            if (st <= 0) continue;
+            Ubel::MapPairLayout layout;
+            if (!Ubel::GetMapPairLayout(f.Address, layout) || layout.pairStride <= 0) continue;
             std::string innerLabel = f.keyType + " → " + f.valueType;
-            out.push_back({ absOffset, fullName, innerLabel, st, ContainerKind::Map });
+            ContainerCacheEntry e{ absOffset, fullName, innerLabel, layout.pairStride, ContainerKind::Map };
+            e.valueStruct = layout.valueStructAddr;
+            e.keyStruct   = layout.keyStructAddr;
+            e.valueOffset = layout.valueOffset;
+            out.push_back(std::move(e));
         }
         else if (f.TypeName == "StructProperty") {
             // Descend into the nested UScriptStruct, accumulating offset
@@ -1891,6 +1910,256 @@ std::vector<ContainerMatch> FindInContainers(uintptr_t addr, int32_t maxResults,
     LOG_INFO("FindInContainers: found %d matches in %lld ms (scanned %d/%d, %d non-empty classes, %d thread(s)%s)",
              static_cast<int>(matches.size()), static_cast<long long>(dt),
              scanned, count, classesWalked, scan.nthreads, scan.deadlineHit ? ", DEADLINE HIT" : "");
+    return matches;
+}
+
+// === Deep (recursive) container descent ===
+//
+// The shallow FindInContainers above bounds-checks `addr` against each
+// container buffer at fixed offsets within the object (incl. those nested in
+// DIRECT structs — GetClassContainers flattens that). It finds inline values:
+// a TArray<int>'s elements, or a field of a struct stored INLINE in a
+// TArray<FStruct> buffer (e.g. SaveSlotList[1].GP at SaveSlotList+0x4D8).
+//
+// It CANNOT find a value in a SEPARATELY-allocated nested container — e.g. a
+// TArray<int> whose header is inline in a struct element but whose data buffer
+// lives elsewhere on the heap (SaveSlotList[1].MsTuneData.MsTunes[0].
+// WeaponTuneList[0].Tunes[N]). The deep matcher recurses into struct elements,
+// reading each level's nested container headers and checking `addr` against
+// THEIR buffers, building the full chain.
+
+// Try to locate `addr` within the containers of the struct at `structAddr`
+// (instance data based at `structBase`), descending into struct elements up to
+// maxDepth. On success appends one-or-more hops (this level down) to `chain`
+// and returns true. `maxElemProbe` caps elements visited per container.
+static bool MatchAddrInStructContainers(
+    uintptr_t addr, uintptr_t structBase, uintptr_t structAddr,
+    int depth, int maxDepth, int maxElemProbe,
+    const std::chrono::steady_clock::time_point& t0, int kDeadlineMs,
+    std::atomic<bool>& deadlineHit, std::vector<ContainerHop>& chain)
+{
+    if (depth > maxDepth) return false;
+    if (deadlineHit.load(std::memory_order_relaxed)) return false;
+    if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return false; }
+    if (std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t0).count() > kDeadlineMs) {
+        deadlineHit.store(true, std::memory_order_relaxed);
+        return false;
+    }
+
+    const auto& containers = GetClassContainers(structAddr);
+    for (const auto& cfe : containers) {
+        if (cfe.stride <= 0) continue;
+        uintptr_t fieldAddr = structBase + cfe.offset;
+
+        uintptr_t bufData = 0;
+        int32_t   capacity = 0;       // Max (array) / MaxCapacity (sparse)
+        int32_t   logicalCount = 0;   // Count (array) / allocated count (sparse)
+        Macht::TSparseArrayView sa{};
+        const bool isSparse = (cfe.kind != ContainerKind::Array);
+
+        if (cfe.kind == ContainerKind::Array) {
+            Macht::TArrayView arr;
+            if (!Macht::ReadTArray(fieldAddr, arr)) continue;
+            if (arr.Max <= 0 || !arr.Data || arr.Max > 0x100000) continue;
+            bufData = arr.Data; capacity = arr.Max; logicalCount = arr.Count;
+        } else {
+            if (!Macht::ReadTSparseArray(fieldAddr, sa)) continue;
+            if (sa.MaxCapacity <= 0 || !sa.Data || sa.MaxCapacity > 0x100000) continue;
+            bufData = sa.Data; capacity = sa.MaxCapacity;
+            logicalCount = sa.MaxIndex - sa.NumFreeIndices;
+        }
+        uintptr_t bufEnd = bufData + static_cast<int64_t>(capacity) * cfe.stride;
+
+        // Case 1 — addr is INSIDE this buffer: a leaf value, or a field of a
+        // struct element stored inline here. This is the terminal hit.
+        if (addr >= bufData && addr < bufEnd) {
+            int32_t intraTotal  = static_cast<int32_t>(addr - bufData);
+            int32_t elemIdx     = intraTotal / cfe.stride;
+            int32_t intraInElem = intraTotal % cfe.stride;
+            const char* note = "";
+            if (cfe.kind == ContainerKind::Array)
+                note = (elemIdx >= logicalCount) ? "slack" : "";
+            else
+                note = Macht::IsSparseIndexAllocated(sa, elemIdx) ? "" : "freed";
+
+            ContainerHop hop;
+            hop.fieldOffset  = cfe.offset;
+            hop.fieldName    = cfe.name;
+            hop.fieldType    = (cfe.kind == ContainerKind::Array) ? "ArrayProperty"
+                             : (cfe.kind == ContainerKind::Set)   ? "SetProperty" : "MapProperty";
+            hop.innerType    = cfe.innerType;
+            hop.elementIndex = elemIdx;
+            hop.elementSize  = cfe.stride;
+            hop.intraOffset  = intraInElem;
+            hop.dataAddr     = bufData;
+            hop.mapValueSide = (cfe.kind == ContainerKind::Map) && (intraInElem >= cfe.valueOffset);
+            hop.note         = note;
+            chain.push_back(std::move(hop));
+            return true;
+        }
+
+        // Case 2 — addr NOT in this buffer, but elements are structs whose
+        // OWN (separately-allocated) nested containers may hold addr. Descend.
+        if (depth >= maxDepth) continue;
+        const bool hasStructElem = (cfe.kind == ContainerKind::Map)
+            ? (cfe.valueStruct != 0 || cfe.keyStruct != 0)
+            : (cfe.elemStruct != 0);
+        if (!hasStructElem) continue;
+
+        const int32_t probeCount = capacity < maxElemProbe ? capacity : maxElemProbe;
+        for (int32_t e = 0; e < probeCount; ++e) {
+            if ((e & 0x3F) == 0 && deadlineHit.load(std::memory_order_relaxed)) return false;
+            if (isSparse && !Macht::IsSparseIndexAllocated(sa, e)) continue;
+            uintptr_t slotBase = bufData + static_cast<int64_t>(e) * cfe.stride;
+
+            // Sides to descend, value-first for maps (the common case).
+            struct Side { uintptr_t s; int32_t regionOff; bool isValue; };
+            Side sides[2];
+            int nSides = 0;
+            if (cfe.kind == ContainerKind::Map) {
+                if (cfe.valueStruct) sides[nSides++] = { cfe.valueStruct, cfe.valueOffset, true };
+                if (cfe.keyStruct)   sides[nSides++] = { cfe.keyStruct, 0, false };
+            } else {
+                sides[nSides++] = { cfe.elemStruct, 0, false };
+            }
+
+            for (int s = 0; s < nSides; ++s) {
+                ContainerHop hop;
+                hop.fieldOffset  = cfe.offset;
+                hop.fieldName    = cfe.name;
+                hop.fieldType    = (cfe.kind == ContainerKind::Array) ? "ArrayProperty"
+                                 : (cfe.kind == ContainerKind::Set)   ? "SetProperty" : "MapProperty";
+                hop.innerType    = cfe.innerType;
+                hop.elementIndex = e;
+                hop.elementSize  = cfe.stride;
+                hop.intraOffset  = 0;   // intermediate hop — leaf intra lives on the deepest hop
+                hop.dataAddr     = bufData;
+                hop.mapValueSide = sides[s].isValue;
+                hop.note         = (isSparse && !Macht::IsSparseIndexAllocated(sa, e)) ? "freed" : "";
+                chain.push_back(std::move(hop));
+                if (MatchAddrInStructContainers(addr, slotBase + sides[s].regionOff,
+                                                sides[s].s, depth + 1, maxDepth, maxElemProbe,
+                                                t0, kDeadlineMs, deadlineHit, chain))
+                    return true;
+                chain.pop_back();   // backtrack — this element didn't lead to addr
+            }
+        }
+    }
+    return false;
+}
+
+std::vector<ContainerMatch> FindInContainersDeep(uintptr_t addr, int32_t maxResults,
+                                                 int32_t maxDepth, int32_t maxElemProbe,
+                                                 ContainerScanStats* stats) {
+    std::vector<ContainerMatch> matches;
+    if (stats) *stats = {};
+    if (!addr || !s_arrayAddr) return matches;
+    if (maxResults <= 0) maxResults = 8;
+    if (maxDepth < 1) maxDepth = 1;
+    if (maxElemProbe < 1) maxElemProbe = 256;   // per-container element cap during descent
+
+    int32_t count = GetCount();
+    if (count <= 0) return matches;
+    if (stats) stats->objectsTotal = count;
+
+    LOG_INFO("FindInContainersDeep: scanning %d objects for addr 0x%llX (maxDepth=%d, maxElemProbe=%d)",
+             count, static_cast<unsigned long long>(addr), maxDepth, maxElemProbe);
+
+    constexpr int kDeadlineMs = 15000;
+    auto t0 = std::chrono::steady_clock::now();
+
+    struct ThreadResult {
+        std::vector<ContainerMatch> matches;
+        int32_t                     scanned       = 0;
+        int32_t                     classesWalked = 0;
+    };
+
+    auto scan = ParallelGObjectsScan<ThreadResult>(count,
+        [&](ThreadResult& tr, int32_t beginIdx, int32_t endIdx,
+            std::atomic<bool>& deadlineHit) {
+        for (int32_t i = beginIdx; i < endIdx && static_cast<int>(tr.matches.size()) < maxResults; ++i) {
+            if (((i - beginIdx) & 0x3FF) == 0) {
+                if (deadlineHit.load(std::memory_order_relaxed)) return;
+                if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+                if (std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - t0).count() > kDeadlineMs) {
+                    deadlineHit.store(true, std::memory_order_relaxed);
+                    return;
+                }
+            }
+            tr.scanned++;
+
+            uintptr_t obj = GetByIndex(i);
+            if (!obj) continue;
+            uintptr_t cls = 0;
+            if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
+
+            const auto& containers = GetClassContainers(cls);
+            if (containers.empty()) continue;
+            ++tr.classesWalked;
+
+            std::vector<ContainerHop> chain;
+            if (!MatchAddrInStructContainers(addr, obj, cls, 0, maxDepth, maxElemProbe,
+                                             t0, kDeadlineMs, deadlineHit, chain)
+                || chain.empty())
+                continue;
+
+            ContainerMatch m;
+            m.ownerObj   = obj;
+            m.ownerIndex = i;
+            uint32_t nameIdx = 0;
+            if (Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_NAME, nameIdx))
+                m.ownerName = Serie::GetString(nameIdx);
+            uint32_t clsNameIdx = 0;
+            if (Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx))
+                m.ownerClassName = Serie::GetString(clsNameIdx);
+
+            const auto& h0 = chain.front();
+            m.fieldOffset  = h0.fieldOffset;
+            m.fieldName    = h0.fieldName;
+            m.fieldType    = h0.fieldType;
+            m.innerType    = h0.innerType;
+            m.elementIndex = h0.elementIndex;
+            m.elementSize  = h0.elementSize;
+            m.intraOffset  = h0.intraOffset;
+            m.dataAddr     = h0.dataAddr;
+            m.note         = h0.note;
+            for (size_t k = 1; k < chain.size(); ++k)
+                m.nestedChain.push_back(chain[k]);
+
+            LOG_INFO("FindInContainersDeep: hit %s.%s (owner=0x%llX, %s, %zu hop(s) deep)",
+                     m.ownerName.c_str(), m.fieldName.c_str(),
+                     static_cast<unsigned long long>(obj), m.ownerClassName.c_str(),
+                     m.nestedChain.size() + 1);
+
+            tr.matches.push_back(std::move(m));
+            // One match is the answer for a by-address lookup — stop siblings.
+            deadlineHit.store(true, std::memory_order_relaxed);
+            return;
+        }
+    });
+
+    int32_t scanned = 0, classesWalked = 0;
+    for (auto& tr : scan.perThread) {
+        scanned       += tr.scanned;
+        classesWalked += tr.classesWalked;
+    }
+    matches = ConcatTruncate(scan.perThread, &ThreadResult::matches, maxResults);
+
+    auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::steady_clock::now() - t0).count();
+    if (stats) {
+        stats->objectsScanned = scanned;
+        stats->classesPrimed  = classesWalked;
+        stats->durationMs     = static_cast<int64_t>(dt);
+        // Early-out sets the shared flag too; a real deadline only when nothing matched.
+        stats->deadlineHit    = scan.deadlineHit && matches.empty();
+    }
+    LOG_INFO("FindInContainersDeep: found %d match(es) in %lld ms (scanned %d/%d, %d thread(s)%s)",
+             static_cast<int>(matches.size()), static_cast<long long>(dt),
+             scanned, count, scan.nthreads,
+             (scan.deadlineHit && matches.empty()) ? ", DEADLINE HIT" : "");
     return matches;
 }
 
