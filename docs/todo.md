@@ -48,7 +48,13 @@ container-match 🌍 now lands ON the nested struct value (build 1193: `GWorld �
 BP_LifeSaveData_C → SaveSlotList → [1] → GP`). Remaining:
 
 - **Wire the struct-element deep-drill into the Value Search + SPC reach paths** —
-  Effort: **S/M** · Risk: low. The deep-drill (reach owner → drill array → drill
+  Effort: **S/M** · Risk: low.
+  **Symptom (observed):** when Value Search / SPC hits a field *inside* a struct-array
+  element (e.g. `Cargo[3].Quantity`), 🌍 currently stops on the OUTER container field
+  and does NOT deep-drill to the inner value. The deep-drill is already implemented
+  but only the Instance Finder container path feeds it; the Instance Finder container
+  route is complete.
+  The deep-drill (reach owner → drill array → drill
   struct element `[N]` → scroll to intra-offset) is implemented in
   `LiveWalkerViewModel.LocateInGWorldAsync` via the `elementIntraOffset` param and is
   currently fed ONLY by the Instance Finder container-match path
