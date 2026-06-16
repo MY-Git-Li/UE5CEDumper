@@ -14,6 +14,28 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-16 — Snapshot NaN-float capture crash fix (build 1210)
+
+User-reported regression: on SEED, **Snapshot "Capture failed — Cannot store 'NaN'
+values"** — the entire capture aborted. Root cause: the recursive capture (build
+1205) now reaches deep `FloatProperty`/`DoubleProperty` leaves, and one held a
+non-finite bit pattern (NaN / ±Infinity — uninitialised slack, garbage in a deep
+struct-array slot, or a genuinely-NaN gameplay float). `SnapshotNumeric.TryFromHex`
+faithfully decoded it to `double.NaN`, which was bound to the `numeric_value REAL`
+column; `Microsoft.Data.Sqlite` rejects NaN/Infinity, failing the whole chunk
+transaction.
+
+**Fix (`SnapshotNumeric.TryFromHex`).** Return `false` for non-finite float/double
+results (`double.IsFinite`), so `numeric_value` is stored as `NULL` instead — the
+raw bits are still preserved in the `hex` column, and SPC/diff direction (which
+can't compare NaN meaningfully anyway) simply treats it as "no numeric value".
+One root fix covers both bind sites (scalar + struct-array element) and every
+reader. +6 regression tests (float/double qNaN/±Inf). **1530 C# tests green.**
+
+Not a recursion *correctness* bug — the value was captured fine; the crash was
+purely the REAL-column bind. Same class of "the deeper walk surfaced data the old
+shallow walk never reached" as the build 1208 drill gap.
+
 ## 2026-06-16 — Multi-`[N]` GWorld drill + map-leaf guard + snapshot deadline (build 1208)
 
 Closes the deep-container story's last gap, surfaced when the SEED user pressed

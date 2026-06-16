@@ -48,4 +48,20 @@ public class SnapshotNumericTests
     {
         Assert.False(SnapshotNumeric.TryFromHex(type, hex, out _));
     }
+
+    [Theory]
+    // Non-finite floats must NOT yield a numeric value: SQLite's REAL column
+    // rejects NaN ("Cannot store 'NaN' values") and NaN/Inf are meaningless for
+    // SPC/diff. The deep recursive capture (build 1205) can reach such leaves.
+    // (Little-endian hex as the DLL emits.)
+    [InlineData("FloatProperty",  "0000C07F")]          // float qNaN  0x7FC00000
+    [InlineData("FloatProperty",  "0000807F")]          // float +Inf  0x7F800000
+    [InlineData("FloatProperty",  "000080FF")]          // float -Inf  0xFF800000
+    [InlineData("DoubleProperty", "000000000000F87F")]  // double qNaN 0x7FF8000000000000
+    [InlineData("DoubleProperty", "000000000000F07F")]  // double +Inf 0x7FF0000000000000
+    [InlineData("DoubleProperty", "000000000000F0FF")]  // double -Inf 0xFFF0000000000000
+    public void TryFromHex_RejectsNonFiniteFloats(string type, string hex)
+    {
+        Assert.False(SnapshotNumeric.TryFromHex(type, hex, out _));
+    }
 }

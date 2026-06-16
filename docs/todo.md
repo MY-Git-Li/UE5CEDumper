@@ -158,6 +158,27 @@ prev-value refine) and **V1c live-verify**.
   array-element rows in the Strict key, or bump the schema to force recapture.
   Audit #4. *Cosmetic unless mixing snapshots across the 1205 boundary.*
 
+- **Property Search: descend into struct / container-element inner properties** —
+  Effort: **M** · Risk: low. `Aura::SearchProperties` is a keyword search across
+  **all UClass properties only** (`WalkClassEx` direct fields); it does NOT
+  enumerate `UScriptStruct` members or the element type of a `TArray/TSet/TMap`.
+  So a field like `GP` that lives inside a struct element of `SaveSlotList`
+  (`BP_LifeSaveData_C.SaveSlotList[].MsTuneData…GP`) is **not findable by name** —
+  the same "doesn't descend into containers/struct elements" family as the deep
+  reach work. Today the user finds it via Value Search (by value) or Live Walker
+  (drill). To fix: walk struct/container element schemas and present matches with a
+  synthetic dotted path (reuse the `GetClassContainers` / `WalkContainerLeaves`
+  machinery), de-duplicated by (class, struct-path, prop). *User-flagged on SEED,
+  2026-06-16; agreed to defer.*
+
+- **Interesting Props: optional "Locate in GWorld" 🌍** — Effort: **S** · Risk: low.
+  The panel intentionally has no 🌍 (its rows are class/property DEFINITIONS, not
+  instances — no single address to locate; the existing **Live** button opens a
+  live instance). If wanted, add a 🌍 that resolves an instance of the row's class
+  then calls `LocateInGWorldAsync(addr, 0, null, stopAtParent:true)` — exactly the
+  Instance Finder selected-instance flow. *User noted the button's absence on SEED,
+  2026-06-16; offered as opt-in.*
+
 - **V1b — container prev-value refine (stable key)** — Effort: **M** · Risk: **high**.
   `Candidate.addr` stores a raw element address; TArray realloc already makes it stale,
   and TSparseArray is worse — freed slots get reused, so `c.addr` on refine may point at

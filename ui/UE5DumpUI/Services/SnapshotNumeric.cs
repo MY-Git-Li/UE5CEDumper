@@ -32,8 +32,14 @@ public static class SnapshotNumeric
 
         switch (declaredType)
         {
-            case "FloatProperty":  if (byteLen < 4) return false; value = BitConverter.ToSingle(b);  return true;
-            case "DoubleProperty": if (byteLen < 8) return false; value = BitConverter.ToDouble(b);  return true;
+            // Non-finite floats (NaN / ±Infinity — uninitialised slack, garbage
+            // in a deep struct-array slot, or a genuinely-NaN gameplay value) have
+            // no meaningful numeric value: SQLite's REAL column rejects NaN ("Cannot
+            // store 'NaN' values"), and NaN comparisons in SPC/diff are nonsense.
+            // Return false → numeric_value stored as NULL; the raw bits are still
+            // preserved in the hex column.
+            case "FloatProperty":  if (byteLen < 4) return false; value = BitConverter.ToSingle(b);  return double.IsFinite(value);
+            case "DoubleProperty": if (byteLen < 8) return false; value = BitConverter.ToDouble(b);  return double.IsFinite(value);
             case "IntProperty":    if (byteLen < 4) return false; value = BitConverter.ToInt32(b);   return true;
             case "UInt32Property": if (byteLen < 4) return false; value = BitConverter.ToUInt32(b);  return true;
             case "Int16Property":  if (byteLen < 2) return false; value = BitConverter.ToInt16(b);   return true;
