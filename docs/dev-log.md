@@ -37,6 +37,12 @@ UI tightening + a correctness gate, on user request (the Interesting Funcs row, 
   - Wired as `IsEnabled` on the buttons (the user's "buttons disabled" requirement);
     the commands themselves stay guard-free so the existing command unit tests
     remain valid (the button is the gate, and it's the only invoker).
+  - **Known limitation**: `GameSessionId = PeHash-ModuleBase` distinguishes launches
+    only when ASLR moves the base. A game that loads at a constant base reuses the
+    same id every launch, so the gate can't tell an old-session snapshot from a
+    current one (buttons stay enabled though the addresses are stale). A true
+    per-launch DLL token (process creation time) is the proper fix — filed in
+    todo.md. Same-launch snapshots correctly stay enabled.
 
 DLL re-stamped to 1216 (no source change). 510 dll + 31 utf8 + 1530 C# green; AOT clean.
 

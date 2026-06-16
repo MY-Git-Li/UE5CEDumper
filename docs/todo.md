@@ -179,6 +179,21 @@ prev-value refine) and **V1c live-verify**.
   Instance Finder selected-instance flow. *User noted the button's absence on SEED,
   2026-06-16; offered as opt-in.*
 
+- **Reliable per-launch session token (Snapshot/SPC stale-address gating)** —
+  Effort: **M** · Risk: low. Build 1216 gates the Snapshot-diff / SPC per-row
+  Live/Addr/🌍 buttons on `GameSessionId == current`, where `GameSessionId` is
+  `PeHash-ModuleBase`. This distinguishes launches ONLY when ASLR moves the base;
+  a game that loads at a constant base (ASLR off / fixed preferred base) reuses the
+  same `ModuleBase` every launch, so an old-session snapshot is wrongly treated as
+  current and the buttons stay enabled (the addresses are actually stale). Fix:
+  expose a true per-launch token from the DLL — simplest is the game process
+  creation time (`GetProcessTimes(GetCurrentProcess(), &create, …)`, the DLL is
+  in-process) added to `scan_status`; thread it into `EngineState` + `DumpService`
+  and fold into `GameSessionId` (`PeHash-SessionToken`), so capture stores it and
+  the gate compares it. Existing snapshots (old format) then read as a different
+  session (correct — they're from a prior launch). *User-flagged on SEED,
+  2026-06-16: buttons not graying for old DB snapshots; deferred per "if not easy".*
+
 - **V1b — container prev-value refine (stable key)** — Effort: **M** · Risk: **high**.
   `Candidate.addr` stores a raw element address; TArray realloc already makes it stale,
   and TSparseArray is worse — freed slots get reused, so `c.addr` on refine may point at
