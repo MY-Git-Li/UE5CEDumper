@@ -40,6 +40,45 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
+## Locate in GWorld — land-on-the-exact-value for deeply-nested container values
+
+Forward-BFS path search shipped builds 1181-1188 (dev-log 2026-06-16). **BFS path
+LIVE-VERIFIED working** on SEED BATTLE DESTINY REMASTERED — clicking 🌍 on an
+Instance Finder container match correctly produced
+`GWorld → … → BP_LifeSaveData_C → SaveSlotList → [1]`. Two related gaps remain,
+both about resolving / landing on a value buried inside NESTED containers (the
+headline "DataGrid stops at the value's address" promise falls short when the
+value is a field inside a struct-array element, or deeper):
+
+- **Land inside the struct-array element, not just on it** — Effort: **M** · Risk: med.
+  A container match `SaveSlotList[1]+0x4D8` (the value GP is a field *inside* the
+  LifeSaveDataSlot struct at element [1]) currently auto-drills into the array and
+  selects row `[1]`, then stops — the user still has to drill into [1] and scroll to
+  GP. To finish the promise, after the array drill, chain one more level: drill into
+  the selected struct element (it already carries `StructDataAddr`/`StructClassAddr`
+  from the array walk → reuse `NavigateToFieldAsync`) **then** scroll to the
+  container match's `IntraOffset` (0x4D8) within the struct. Needs a multi-level
+  "pending nested drill + intra-offset scroll" state (the current `_pendingScroll*` /
+  `TryDrillIntoMatchedContainer` mechanism is single-shot). NOT a BFS/depth issue —
+  the `GWorldLocateDepth` slider (BFS hops to the owning object) is unrelated; 5 vs 8
+  gives the same (correct) result. Wire the same final-drill into the Value Search /
+  SPC reach paths so any nested-struct value lands exactly.
+  *Parent: container-match 🌍 button shipped build 1188 (dev-log 2026-06-16).*
+
+- **find_by_address can't resolve a value buried in nested containers** — Effort: **M/L** ·
+  Risk: med. By-address Lookup of `228F1251BE8` (an int ~6 levels deep:
+  `SaveSlotList[1] → MsTuneData → MsTunes(Map) → [0] → WeaponTuneList → [0] → Tunes[N]`)
+  returned **not found**. `Aura::FindInContainers` only scans an object's TOP-LEVEL
+  container fields (TArray/TSet/TMap buffers) — it doesn't recurse into containers
+  nested inside struct elements / map values, so a value that deep never produces a
+  container match. Options: bound-depth recursive container descent in FindInContainers
+  (cost ↑), or accept it (the value is still reachable by manual drilling, and Value
+  Search finds it by value). Decide scope before building. NOT specific to Locate in
+  GWorld — affects the Instance Finder address Lookup generally.
+  *Parent: FindInContainers (build ~838) surfaced by Locate-in-GWorld live test (dev-log 2026-06-16).*
+
+-----
+
 ## CE export drilldown — remaining gaps (Phase A/B/C shipped)
 
 Phase A (CE XML/Field container-value expansion, build 1085), Phase B (CSX parity,
