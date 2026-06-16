@@ -37,12 +37,15 @@ UI tightening + a correctness gate, on user request (the Interesting Funcs row, 
   - Wired as `IsEnabled` on the buttons (the user's "buttons disabled" requirement);
     the commands themselves stay guard-free so the existing command unit tests
     remain valid (the button is the gate, and it's the only invoker).
-  - **Known limitation**: `GameSessionId = PeHash-ModuleBase` distinguishes launches
-    only when ASLR moves the base. A game that loads at a constant base reuses the
-    same id every launch, so the gate can't tell an old-session snapshot from a
-    current one (buttons stay enabled though the addresses are stale). A true
-    per-launch DLL token (process creation time) is the proper fix — filed in
-    todo.md. Same-launch snapshots correctly stay enabled.
+  - **Known limitation — CONFIRMED broken on SEED (restart-verified 2026-06-16)**:
+    `GameSessionId = PeHash-ModuleBase` distinguishes launches only when ASLR moves
+    the base. The owner viewed snapshots AFTER restarting the game and the buttons
+    still did NOT gray → SEED's EXE loads at a **constant base** (no effective ASLR),
+    so `ModuleBase` is identical across launches and the gate can't tell an old
+    session from the current one. A true per-launch DLL token (process creation
+    time) is the proper fix — promoted to the top of todo.md "▶ Next up". (The 1216
+    button wiring + `CanUse*` props are correct; only the session-id computation
+    needs to change.)
 
 DLL re-stamped to 1216 (no source change). 510 dll + 31 utf8 + 1530 C# green; AOT clean.
 
