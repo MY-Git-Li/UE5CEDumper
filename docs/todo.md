@@ -40,6 +40,69 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
+## Locate in GWorld — deeply-nested container values (1 follow-up + 1 limit)
+
+Forward-BFS path search shipped builds 1181-1193 (dev-log 2026-06-16). **BFS path
+LIVE-VERIFIED working** on SEED BATTLE DESTINY REMASTERED. The Instance Finder
+container-match 🌍 now lands ON the nested struct value (build 1193: `GWorld → … →
+BP_LifeSaveData_C → SaveSlotList → [1] → GP`). Remaining:
+
+- **Wire the struct-element deep-drill into the Value Search + SPC reach paths** —
+  Effort: **S/M** · Risk: low. The deep-drill (reach owner → drill array → drill
+  struct element `[N]` → scroll to intra-offset) is implemented in
+  `LiveWalkerViewModel.LocateInGWorldAsync` via the `elementIntraOffset` param and is
+  currently fed ONLY by the Instance Finder container-match path
+  (`LocateContainerOwnerInGWorld`, which has the `ContainerMatch.IntraOffset` +
+  `InnerType=="StructProperty"`). A Value Search / SPC hit on a field *inside* a
+  struct-array element (display name like `Cargo[3].Quantity`) still lands on the
+  owning container field only, because those reach calls pass `elementIntraOffset=-1`
+  and a `fieldName` whose `ParseElementIndexSuffix` is -1 (name doesn't end in `[N]`).
+  To finish: when a Value Search/SPC candidate is a struct-array-inner field, derive
+  the element index + the intra-element offset (the candidate already encodes the
+  `[N]` and the inner field) and pass them through `NavigateToInstance` /
+  `LocateInGWorld` → `LocateInGWorldAsync(..., elementIntraOffset)`. Reuses the exact
+  drill that already works for Instance Finder.
+  *Parent: struct-element deep-drill shipped build 1193 (dev-log 2026-06-16).*
+
+- **find_by_address can't resolve a value buried in nested containers** (a LIMIT,
+  decide before building) — Effort: **M/L** · Risk: med.
+  **Repro (SEED BATTLE DESTINY REMASTERED, build 1188):** Instances tab → Lookup
+  address `228F1251BE8` → "No UObject found at this address". That int lives ~6
+  container levels deep: `BP_LifeSaveData_C.SaveSlotList[1]` (struct-array elem) →
+  `MsTuneData` (struct) → `MsTunes` (Map<Name,Struct>) → `[0] MSBSTR00` →
+  `WeaponTuneList` (struct-array) → `[0]` (struct) → `Tunes` (`TArray<int>`) → `[N]`.
+  (It IS reachable — the owner did it by hand in Live Walker.)
+  **Root cause:** `Aura::FindInContainers` (dll/src/Aura.cpp) only walks each
+  UObject's TOP-LEVEL container fields (the `GetClassContainers` per-class cache lists
+  `TArray`/`TSet`/`TMap` fields at the object's own offsets, incl. those nested in
+  `StructProperty` to a shallow depth) and bounds-checks `addr` against each buffer.
+  It does NOT recurse: a `TArray` whose elements are structs that themselves contain a
+  `TMap` whose values are structs containing another `TArray`… is never descended, so
+  an address inside that innermost buffer matches nothing → `find_by_address` returns
+  not-found, and the Instance Finder container 🌍 never appears for it.
+  **Why it's hard:** unbounded recursive container descent across all objects is
+  expensive (the top-level scan already has a 15s deadline) and needs per-element
+  struct re-walks (read TArray → for each elem, walk its UScriptStruct for nested
+  containers → recurse) — effectively a mini object-graph walk per object.
+  **Options for next session (pick scope first):**
+  (a) Bounded recursive descent in `FindInContainers` — add a `maxDepth` (e.g. 3-4)
+      recursion into struct-typed container elements / map values, reusing
+      `Ubel::WalkClassEx` per element struct; cap elements-per-container to keep cost
+      sane; surface a "deep scan" toggle so the default stays fast.
+  (b) Accept the limit + redirect the user: the value is still findable by **Value
+      Search** (scan the value 46643-style → candidate already carries owner + field,
+      and once the VS deep-drill above lands, 🌍 works). Add a hint in the
+      "No UObject found" status pointing at Value Search for nested values.
+  (c) Hybrid: keep `find_by_address` shallow, but add an explicit "deep container
+      scan" button on the Instances tab that runs the bounded recursive variant only
+      on demand.
+  Recommendation: (b) is near-free and covers the real workflow; do (a)/(c) only if
+  by-address lookup of deep values is a recurring need. NOT specific to Locate in
+  GWorld — affects the Instance Finder address Lookup generally.
+  *Parent: FindInContainers (Aura.cpp) surfaced by Locate-in-GWorld live test (dev-log 2026-06-16).*
+
+-----
+
 ## CE export drilldown — remaining gaps (Phase A/B/C shipped)
 
 Phase A (CE XML/Field container-value expansion, build 1085), Phase B (CSX parity,

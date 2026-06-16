@@ -93,6 +93,24 @@ public partial class InstanceFinderViewModel : ViewModelBase
     /// </summary>
     public event Action<string>? NavigateToLiveWalker;
 
+    /// <summary>
+    /// Event raised when the user wants to locate a found instance within the
+    /// GWorld object graph (forward path search). Payload = instance address.
+    /// </summary>
+    public event Action<string>? LocateInGWorld;
+
+    /// <summary>
+    /// Event raised to locate the OWNER of a container match within the GWorld
+    /// graph (the looked-up address fell inside a container element). Payload =
+    /// (owner object address, container field byte offset, "FieldName[N]" so the
+    /// walker drills into the element, intra-element byte offset of the value
+    /// within a struct element — or -1 for a scalar element that IS the value).
+    /// </summary>
+    public event Action<string, int, string, int>? LocateContainerInGWorld;
+
+    /// <summary>True when GWorld is available — gates the "Locate in GWorld" button.</summary>
+    [ObservableProperty] private bool _isGWorldAvailable;
+
     public InstanceFinderViewModel(IDumpService dump, ILoggingService log, IPlatformService platform)
     {
         _dump = dump;
@@ -103,6 +121,7 @@ public partial class InstanceFinderViewModel : ViewModelBase
     public void SetEngineState(EngineState state)
     {
         _engineState = state;
+        IsGWorldAvailable = state?.HasGWorld ?? false;
     }
 
     [RelayCommand]
@@ -441,5 +460,31 @@ public partial class InstanceFinderViewModel : ViewModelBase
     {
         if (SelectedInstance == null) return;
         NavigateToLiveWalker?.Invoke(SelectedInstance.Address);
+    }
+
+    [RelayCommand]
+    private void LocateSelectedInGWorld()
+    {
+        if (SelectedInstance == null || !IsGWorldAvailable) return;
+        LocateInGWorld?.Invoke(SelectedInstance.Address);
+    }
+
+    /// <summary>Locate a container match's OWNER within the GWorld graph — the
+    /// looked-up address is a value inside a container element, so reach the
+    /// owning object (via the shortest GWorld path) and auto-drill into the
+    /// element so the user lands next to the value.</summary>
+    [RelayCommand]
+    private void LocateContainerOwnerInGWorld(ContainerMatch? match)
+    {
+        if (match == null || !IsGWorldAvailable || string.IsNullOrEmpty(match.OwnerAddress)) return;
+        var fieldName = match.ElementIndex >= 0
+            ? $"{match.FieldName}[{match.ElementIndex}]"
+            : match.FieldName;
+        // For a struct element the value is a field INSIDE it (at IntraOffset) — pass
+        // that so the walker drills into the element and lands on the value. For a
+        // scalar element (the element IS the value) pass -1 (drill stops at the row).
+        int elementIntraOffset = (match.InnerType == "StructProperty" && match.ElementIndex >= 0)
+            ? match.IntraOffset : -1;
+        LocateContainerInGWorld?.Invoke(match.OwnerAddress, match.FieldOffset, fieldName, elementIntraOffset);
     }
 }

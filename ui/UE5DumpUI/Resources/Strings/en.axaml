@@ -50,6 +50,8 @@
     <sys:String x:Key="str.VS.OpenLive">Open in Live Walker</sys:String>
     <sys:String x:Key="str.VS.CopyAddr">Copy Address</sys:String>
     <sys:String x:Key="str.VS.PivotThis">📊 Pivot</sys:String>
+    <sys:String x:Key="str.VS.LocateGWorld">🌍 GWorld</sys:String>
+    <sys:String x:Key="str.Tip.VS.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this value's owning object and show it in Live Walker</sys:String>
     <sys:String x:Key="str.VS.CaseSensitive">Case sensitive</sys:String>
     <sys:String x:Key="str.VS.Filter">Filter:</sys:String>
     <sys:String x:Key="str.VS.FilterWatermark">Filter the full result set (server-side) — any column, case-insensitive…</sys:String>
@@ -109,6 +111,8 @@
     <sys:String x:Key="str.LiveWalker.FindRefs">Find Refs</sys:String>
     <sys:String x:Key="str.LiveWalker.Refresh">Refresh</sys:String>
     <sys:String x:Key="str.LiveWalker.AddressHint">Address (hex or module.exe+offset)</sys:String>
+    <sys:String x:Key="str.LiveWalker.GWorldDepth">GWorld depth:</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.GWorldDepth">Maximum pointer hops to search downward from GWorld when using "Locate in GWorld" (default 5). Larger = finds deeper targets but slower.</sys:String>
     <sys:String x:Key="str.LiveWalker.Go">Go</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportCE">Copy CE XML</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportCEField">Copy CE Field</sys:String>
@@ -145,6 +149,8 @@
     <sys:String x:Key="str.InstanceFinder.Search">Search</sys:String>
     <sys:String x:Key="str.InstanceFinder.Address">Address</sys:String>
     <sys:String x:Key="str.InstanceFinder.OpenInWalker">Open in Live Walker</sys:String>
+    <sys:String x:Key="str.InstanceFinder.LocateGWorld">🌍 Locate in GWorld</sys:String>
+    <sys:String x:Key="str.InstanceFinder.LocateGWorldShort">🌍</sys:String>
     <sys:String x:Key="str.InstanceFinder.AddressHint">Address (hex or module.exe+offset)</sys:String>
     <sys:String x:Key="str.InstanceFinder.Lookup">Lookup</sys:String>
     <sys:String x:Key="str.InstanceFinder.ExactMatch">Exact match</sys:String>
@@ -323,6 +329,8 @@
     <sys:String x:Key="str.Spc.Run">Run SPC</sys:String>
     <sys:String x:Key="str.Spc.Refresh">Refresh</sys:String>
     <sys:String x:Key="str.Spc.OpenWalker">Open in Live Walker</sys:String>
+    <sys:String x:Key="str.Spc.LocateGWorld">🌍 GWorld</sys:String>
+    <sys:String x:Key="str.Tip.Spc.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this row's owning object and show it in Live Walker, scrolled to the changed field</sys:String>
     <sys:String x:Key="str.Spc.CopyAddr">Copy Address</sys:String>
     <sys:String x:Key="str.Spc.PickerHeader">Snapshot sequence</sys:String>
     <sys:String x:Key="str.Spc.BaselineHint">The oldest ticked snapshot is the baseline (its predicate is ignored). Each later snapshot's predicate compares it to the previous ticked one. Hit → Copy Address / Open in Live Walker hands the newest snapshot's live address to CE.</sys:String>
@@ -467,6 +475,7 @@
     <sys:String x:Key="str.IF.ClearFilters">Clear</sys:String>
     <sys:String x:Key="str.IF.Props">Props</sys:String>
     <sys:String x:Key="str.IF.OpenLive">Live</sys:String>
+    <sys:String x:Key="str.IF.LocateGWorld">🌍</sys:String>
     <sys:String x:Key="str.IF.CopyAaScript">AA(B)</sys:String>
     <sys:String x:Key="str.IF.CopyName">Name</sys:String>
     <sys:String x:Key="str.Tip.IF.Load">Scan all UFunctions across all loaded UClasses. Takes 2-10s on large games (1M+ objects). Score is computed client-side from name keywords + class bonus + flag bonus.</sys:String>
@@ -476,6 +485,7 @@
     <sys:String x:Key="str.Tip.IF.ShowAll">When off, hide rows with score below the InterestingThreshold (currently 5). When on, show every UFunction regardless of score.</sys:String>
     <sys:String x:Key="str.Tip.IF.Props">List the properties this function reads/writes (static Blueprint-bytecode scan). Native functions have no bytecode and show nothing.</sys:String>
     <sys:String x:Key="str.Tip.IF.OpenLive">Try to open this function in Live Walker. If the class has no live (non-CDO) instance, falls back to the Class Struct tab. Auto-expands the Functions section and selects the target row.</sys:String>
+    <sys:String x:Key="str.Tip.IF.LocateGWorld">Locate in GWorld: find a live instance of this function's class, then show the shortest pointer path from GWorld down to it in Live Walker (stops at the parent that points to it)</sys:String>
     <sys:String x:Key="str.Tip.IF.CopyAaScript">Open the Copy AA Script (Baked) dialog for this function. Output requires ue5_invoke_helper.lua embedded in your CE table (Tools -&gt; Export CE Helper Lua File...).</sys:String>
     <sys:String x:Key="str.Tip.IF.CopyName">Copy this function's name to the clipboard. Useful when pasting into a CE script or another tool.</sys:String>
     <sys:String x:Key="str.IF.GenerateCT">📦 Generate CT</sys:String>
@@ -678,6 +688,8 @@
     <sys:String x:Key="str.Tip.InstanceFinder.Lookup">Lookup UObject at the specified address</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.CopyAddr">Copy instance address to clipboard</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.OpenWalker">Open this instance in Live Walker</sys:String>
+    <sys:String x:Key="str.Tip.InstanceFinder.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this instance and show it in Live Walker (stops at the parent that points to it)</sys:String>
+    <sys:String x:Key="str.Tip.InstanceFinder.LocateGWorldContainer">Locate in GWorld: find the shortest pointer path from GWorld down to this container's owning object, then drill into the element so you land next to the value</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.ExportCE">Export instance as CE XML pointer chain</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.CopyFieldAddr">Copy field absolute address</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.AA">Generate CE Auto Assembler script</sys:String>

@@ -14,6 +14,92 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-16 — Locate in GWorld: forward BFS path search (build 1181)
+
+Pressing **Parent** in the Live Walker walks `UObject.OuterPrivate` (the naming
+hierarchy) and almost always dead-ends at `/Engine/Transient` — never the
+gameplay-meaningful GWorld spine. New feature answers the inverse question:
+given a found target, **where is it under GWorld?**
+
+**Forward BFS (the engine).** New pure, header-only shortest-path core
+[`GraphPath.h`](../dll/src/GraphPath.h) (`BfsShortestObjectPath`) + a live
+adjacency adapter `EnumerateOutgoingObjectPtrs` in [`Aura.cpp`](../dll/src/Aura.cpp)
+that REUSES the per-class reference-metadata cache (`GetClassRefMeta`) powering
+`FindReferencesToUObject` — the same battle-tested extractor for direct
+Object/Class/Interface, Weak/Soft/Lazy, TArray/TMap/TSet-of-objects, and
+StructProperty-nested pointers — but enqueues children instead of comparing
+against a target. `Aura::FindObjectGraphPath(rootObj, targetObj, maxDepth=5)`
+runs the BFS root-agnostically (the pipe handler resolves GWorld → UWorld and
+passes it in, keeping Aura decoupled from the GWorld globals). BFS first-hit ==
+shortest hops, so "first found == shortest" is free. visited-set dedup bounds it
+to O(reachable), 3M-node cap + 20s deadline + `Cancel::Requested()`. The pure
+core is unit-tested against a mock graph (shortest-among-two, cycles, depth
+bound, root==target, unreachable, abort, visited-cap, reconstruction) — **+10
+tests → dll_helpers 507 green**.
+
+**Pipe.** New `find_path_from_gworld` command (`target` + optional `object_addr`
++ `max_depth`) returns the path steps + resolved target + diagnostics; for a
+known owning object (Value Search / Instance Finder) it skips the FindByAddress
+resolution scan. MulticastSparseDelegate edges are NOT followed (global-TMap walk
+per node too expensive). Spec: [pipe-protocol.md](pipe-protocol.md#find_path_from_gworld).
+
+**UI.** `LiveWalkerViewModel.LocateInGWorldAsync` clears + rebuilds the breadcrumb
+spine from the path and lands on the target via the existing
+`_pendingScrollFieldOffset` machinery. Two behaviours: a property **VALUE**
+(Value Search per-row "🌍 GWorld") lands ON the owning object and scrolls to the
+value field; an **OBJECT / class instance** (Instance Finder "🌍 Locate in
+GWorld") stops at the parent that points to it and highlights the pointer field,
+without drilling in. A **GWorld depth** NumericUpDown (default 5, on the Live
+Walker tab) sets the search depth. All triggers gray out when GWorld is
+unavailable (`EngineState.HasGWorld`, surfaced via each panel's `SetEngineState`).
+Not-found surfaces an actionable status ("increase the depth"). 1505 C# green,
+AOT publish clean (45.9MB).
+
+**Trigger panels (build 1187).** Wired from all four "open in Live Walker"
+sources: **Instance Finder** (both the by-class and by-address searches funnel
+through `SelectedInstance` → object/parent mode), **Value Search** (value/reach),
+**SPC Query** (per-row 🌍, value/reach — has the live object + changed-field
+offset), and **Interesting Functions** (per-row 🌍 — a function isn't a world
+object, so MainWindow resolves a live non-CDO instance of its class via
+`FindInstancesAsync` first, then parent mode). **Property Search is intentionally
+excluded** — its rows are class/property *definitions* (deduped to the defining
+class, often abstract → no single live instance); its existing "Find Instances"
+button already bridges to Instance Finder, which has the 🌍 button. Gray-out via
+`EngineState.HasGWorld` (each panel's `SetEngineState`, or a direct
+`IsGWorldAvailable` set for Interesting Functions which has no `SetEngineState`).
+In-game live-verification pending.
+
+**Container-match path (build 1188, after first live test).** First in-game test
+(SEED BATTLE DESTINY REMASTERED, build 1187) surfaced an accessibility gap, not a
+BFS bug: a by-ADDRESS lookup of a value *inside* a container element
+(`BP_LifeSaveData_C.SaveSlotList[1].GP`) produces a **container match**, not a
+direct instance → `HasFields=false` → the "🌍 Locate in GWorld" toolbar button
+was hidden and `SelectedInstance` was null, so the only action was the container
+row's pre-existing plain "Open". Logs confirmed `find_path_from_gworld` was never
+called. Fix: the Instance Finder **container-match row** now has its own "🌍"
+button (`LocateContainerOwnerInGWorld` → `LocateContainerInGWorld` event → reach
+mode) that locates the OWNING object via the GWorld path, then auto-drills into
+the matched element `[N]` (safe — `TryDrillIntoMatchedContainer` only drills
+`IsContainerNavigable` fields), landing the user on the element ready to scroll to
+the value.
+
+**Land ON the nested value (build 1193).** First container-match test correctly
+produced `GWorld → … → BP_LifeSaveData_C → SaveSlotList → [1]` (BFS verified!) but
+stopped on the array element `[1]` — the actual value `GP` is a field *inside* the
+struct element at `[1]+0x4D8`. (Not a depth issue — `GWorldLocateDepth` is the BFS
+hop count to the owning object, unrelated; 5 vs 8 gave the same correct result.)
+`LocateInGWorldAsync` now takes an `elementIntraOffset`: for a `StructProperty`
+container element the Instance Finder passes the match's `IntraOffset`, and the
+reach path does explicit awaited drills — walk owner → `NavigateToContainerAsync`
+(array view) → `NavigateToFieldAsync` (the `[N]` struct element, which carries
+`StructDataAddr`/`StructClassAddr`) → scroll to the field at the intra-offset — so
+the breadcrumb spine ends `… → SaveSlotList → [1]` and the DataGrid lands ON `GP`.
+The single-shot `_pendingScroll*` path can't chain two container levels, hence the
+explicit sequence. Value Search / SPC reach paths still land on the owning field
+for struct-array-inner hits (same extension, deferred — todo).
+
+-----
+
 ## 2026-06-15 — Main window placement persistence + restartable-apps opt-in (build 1177)
 
 The UI didn't remember where it was: every launch reset position / size / monitor. Now

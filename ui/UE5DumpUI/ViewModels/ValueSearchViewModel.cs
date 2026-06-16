@@ -478,11 +478,24 @@ public partial class ValueSearchViewModel : ViewModelBase
     /// Class Pivot tab is available. Hidden when experimental features are off.</summary>
     [ObservableProperty] private bool _pivotEnabled;
 
+    /// <summary>Raised to locate the chosen candidate within the GWorld object graph
+    /// (forward path search). Payload = (owning instance address, value field byte
+    /// offset, value field display name — for the "[N]" container element suffix).</summary>
+    public event Action<string, int, string>? LocateInGWorld;
+
+    /// <summary>True when GWorld is available — gates the per-row "Locate in GWorld" button.</summary>
+    [ObservableProperty] private bool _isGWorldAvailable;
+
     public ValueSearchViewModel(IDumpService dump, ILoggingService log)
     {
         _dump = dump;
         _log  = log;
         _selectedSortOption = SortOptions[0];  // scan order
+    }
+
+    public void SetEngineState(EngineState state)
+    {
+        IsGWorldAvailable = state?.HasGWorld ?? false;
     }
 
     [RelayCommand]
@@ -642,6 +655,14 @@ public partial class ValueSearchViewModel : ViewModelBase
         if (candidate == null) return;
         if (string.IsNullOrEmpty(candidate.InstanceAddr)) return;
         NavigateToInstance?.Invoke(candidate.InstanceAddr, candidate.FieldOffset, candidate.FieldName);
+    }
+
+    [RelayCommand]
+    private void LocateCandidateInGWorld(ValueCandidate? candidate)
+    {
+        if (candidate == null || !IsGWorldAvailable) return;
+        if (string.IsNullOrEmpty(candidate.InstanceAddr)) return;
+        LocateInGWorld?.Invoke(candidate.InstanceAddr, candidate.FieldOffset, candidate.FieldName);
     }
 
     [RelayCommand]

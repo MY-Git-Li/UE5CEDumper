@@ -57,6 +57,9 @@ Total commands: 31 (command name constants live in `dll/src/Renge.h`)
 // TMap<UObject*, V> / TMap<K, UObject*>, TSet<UObject*>. Excludes
 // MulticastSparseDelegate (storage is external to the field).
 { "id": 30, "cmd": "find_refs_to_uobject", "addr": "7FF123456789", "max_results": 32 }
+
+// Forward path search ("Locate in GWorld"): shortest pointer chain GWorld → target.
+{ "id": 31, "cmd": "find_path_from_gworld", "target": "7FF123456789", "object_addr": "7FF123456789", "max_depth": 5 }
 ```
 
 ### Class & Instance Walking
@@ -622,6 +625,70 @@ Cache is per-class and persists for DLL lifetime — a cold scan on a 1.18M-obje
 game is typically ~200-300ms; warm scans are ~70ms. Hard deadline is 30s
 (`deadline_hit: true` indicates the scan was truncated and the UI should offer
 a re-run after warm-up).
+
+### find_path_from_gworld
+
+Forward object-graph path search ("Locate in GWorld") — the inverse of
+`find_refs_to_uobject`. Computes the SHORTEST (fewest-hop) pointer chain from the
+live `UWorld` (GWorld) down to a target, by breadth-first walking the same
+outgoing object-pointer edges the reverse search uses (direct Object/Class/
+Interface, Weak/Soft/Lazy, TArray/TMap/TSet of objects, and fields nested in
+StructProperty to depth 3). Reuses the per-class reference-metadata cache.
+
+Request:
+
+```jsonc
+{
+  "id": 31, "cmd": "find_path_from_gworld",
+  "target": "0x7FF6BB100000",     // address to locate (a UObject, or a value inside one)
+  "object_addr": "0x7FF6BB100000",// OPTIONAL — the owning UObject if the caller already
+                                  //   knows it (Value Search / Instance Finder); skips the
+                                  //   FindByAddress resolution scan
+  "max_depth": 5                  // max pointer hops from GWorld (default 5; hard-capped 32)
+}
+```
+
+Response (`steps` is the path `root → steps[0].to → … → target_obj`; empty when
+the target IS the root). When no path exists within the depth budget, `found` is
+false and `status` explains why:
+
+```jsonc
+{
+  "id": 31, "ok": true,
+  "found": true,
+  "status": "ok",               // ok / not_reachable / deadline / cancelled / no_gworld / invalid_target / visited_cap
+  "root_addr":  "0x7FF6AA000000",
+  "root_name":  "World_0",
+  "target_obj": "0x7FF6BB100000",
+  "target_name":  "BP_PlayerState_C_0",
+  "target_class": "BP_PlayerState_C",
+  "target_intra_offset": 0,      // (value addr - target_obj); >0 when target was a value inside the object
+  "max_depth": 5,
+  "depth":     4,                // hop count (== steps.length)
+  "visited":   18342,            // distinct objects discovered
+  "duration_ms": 120,
+  "steps": [
+    { "from": "0x7FF6AA000000", "to": "0x7FF6AA001000",
+      "field_offset": 0x30, "field_name": "PersistentLevel",
+      "field_type": "ObjectProperty", "element_index": -1,
+      "to_name": "PersistentLevel", "to_class": "Level" },
+    { "from": "0x7FF6AA001000", "to": "0x7FF6AA002000",
+      "field_offset": 0x98, "field_name": "Actors",
+      "field_type": "ArrayProperty", "inner_type": "ObjectProperty", "element_index": 12,
+      "to_name": "BP_PlayerController_C_0", "to_class": "BP_PlayerController_C" }
+    // … → target_obj
+  ]
+}
+```
+
+The UI replaces the Live Walker breadcrumb spine with this path. For a property
+VALUE it lands on `target_obj` and scrolls to the value field; for an OBJECT /
+class instance it stops at the parent (drops the final node) and highlights the
+pointer field, without drilling into the target. BFS first-hit == shortest hops.
+20s deadline; also bails on `Cancel::Requested()` (pipe disconnect / shutdown).
+MulticastSparseDelegateProperty edges are intentionally NOT followed (their
+bindings live in a CoreUObject-global TMap — a per-node global walk would be
+prohibitively expensive).
 
 ### get_offsets
 

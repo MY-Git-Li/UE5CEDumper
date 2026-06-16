@@ -2434,6 +2434,116 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             return Renge::MakeResponse(id, data).dump();
         }
 
+        // === find_path_from_gworld: forward BFS path GWorld -> ... -> target ===
+        // "Locate in GWorld": given a target (a UObject, or a property value
+        // address), compute the SHORTEST pointer chain from the live UWorld down
+        // to it, so the UI can replace the Live Walker breadcrumb spine and land
+        // on the target. The inverse of find_refs_to_uobject.
+        if (cmd == Renge::CMD_FIND_PATH_FROM_GWORLD) {
+            extern uintptr_t g_cachedGWorld;
+
+            std::string targetStr = request.value("target", "");
+            if (targetStr.empty()) return Renge::MakeError(id, "Missing target").dump();
+            uintptr_t targetAddr = 0;
+            if (!Renge::TryStrToAddr(targetStr, targetAddr) || !targetAddr)
+                return Renge::MakeError(id, "Invalid target address").dump();
+
+            int32_t maxDepth = request.value("max_depth", 5);
+
+            // --- Resolve the UWorld root (mirror walk_world: deref &GWorld, then
+            //     fall back to a GObjects UWorld instance scan). ---
+            uintptr_t rootObj = 0;
+            if (g_cachedGWorld)
+                Macht::ReadSafe(g_cachedGWorld, rootObj);
+            if (!rootObj) {
+                Aura::ForEach([&](int32_t, uintptr_t obj) -> bool {
+                    uintptr_t cls = Ubel::GetClass(obj);
+                    if (!cls) return true;
+                    if (Ubel::GetName(cls) == "World") {
+                        if (Ubel::GetName(obj).rfind("Default__", 0) == 0) return true; // skip CDO
+                        rootObj = obj;
+                        return false;
+                    }
+                    return true;
+                });
+            }
+            if (!rootObj) {
+                json data;
+                data["found"]  = false;
+                data["status"] = "no_gworld";
+                return Renge::MakeResponse(id, data).dump();
+            }
+
+            // --- Resolve the target UObject + intra-object offset of the value. ---
+            uintptr_t targetObj   = 0;
+            int32_t   intraOffset = 0;
+            std::string objStr = request.value("object_addr", "");
+            if (!objStr.empty()) {
+                // Caller already knows the owning UObject (Value Search / Instance
+                // Finder) — trust it, skip the expensive FindByAddress scan.
+                targetObj = Renge::StrToAddr(objStr);
+                if (targetObj && targetAddr >= targetObj && (targetAddr - targetObj) < 0x10000000)
+                    intraOffset = static_cast<int32_t>(targetAddr - targetObj);
+            }
+            if (!targetObj) {
+                auto la = Aura::FindByAddress(targetAddr);
+                if (la.found) {
+                    targetObj   = la.objectAddr;
+                    intraOffset = la.offsetFromBase;
+                } else {
+                    // Maybe the address is inside a heap container buffer.
+                    Aura::ContainerScanStats cstats;
+                    auto cms = Aura::FindInContainers(targetAddr, 1, &cstats);
+                    if (!cms.empty()) {
+                        targetObj   = cms[0].ownerObj;
+                        intraOffset = 0;  // value is in a heap buffer, not inside the object
+                    }
+                }
+            }
+            if (!targetObj) {
+                json data;
+                data["found"]  = false;
+                data["status"] = "invalid_target";
+                return Renge::MakeResponse(id, data).dump();
+            }
+
+            auto path = Aura::FindObjectGraphPath(rootObj, targetObj, maxDepth);
+
+            json data;
+            data["found"]               = path.found;
+            data["status"]              = path.status;
+            data["root_addr"]           = Renge::AddrToStr(rootObj);
+            data["root_name"]           = Ubel::GetName(rootObj);
+            data["target_obj"]          = Renge::AddrToStr(targetObj);
+            data["target_name"]         = Ubel::GetName(targetObj);
+            {
+                uintptr_t tcls = Ubel::GetClass(targetObj);
+                data["target_class"] = tcls ? Ubel::GetName(tcls) : "";
+            }
+            data["target_intra_offset"] = intraOffset;
+            data["max_depth"]           = maxDepth;
+            data["depth"]               = path.depthReached;
+            data["visited"]             = path.visited;
+            data["duration_ms"]         = path.durationMs;
+
+            json steps = json::array();
+            for (const auto& s : path.steps) {
+                json sj;
+                sj["from"]          = Renge::AddrToStr(s.fromObj);
+                sj["to"]            = Renge::AddrToStr(s.toObj);
+                sj["field_offset"]  = s.fieldOffset;
+                sj["field_name"]    = s.fieldName;
+                sj["field_type"]    = s.fieldType;
+                if (!s.innerType.empty()) sj["inner_type"] = s.innerType;
+                sj["element_index"] = s.elementIndex;
+                sj["to_name"]       = s.toName;
+                sj["to_class"]      = s.toClassName;
+                steps.push_back(sj);
+            }
+            data["steps"] = steps;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
         // === find_property_xrefs: which UFunctions reference a given FProperty ===
         // Static Kismet-bytecode scan (Blueprint/script functions only; native
         // functions have empty Script and are invisible — UI must surface this).

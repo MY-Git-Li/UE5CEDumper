@@ -752,6 +752,61 @@ public sealed class DumpService : IDumpService
         };
     }
 
+    public async Task<GWorldPathResult> FindPathFromGWorldAsync(
+        string target, string? objectAddr = null, int maxDepth = 5,
+        CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "find_path_from_gworld",
+            ["target"] = target,
+            ["max_depth"] = maxDepth,
+        };
+        if (!string.IsNullOrEmpty(objectAddr))
+            req["object_addr"] = objectAddr;
+
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        var steps = new List<GWorldPathStep>();
+        if (res["steps"] is JsonArray stepsArr)
+        {
+            foreach (var node in stepsArr)
+            {
+                if (node is not JsonObject s) continue;
+                steps.Add(new GWorldPathStep
+                {
+                    From         = s["from"]?.GetValue<string>() ?? "",
+                    To           = s["to"]?.GetValue<string>() ?? "",
+                    FieldOffset  = s["field_offset"]?.GetValue<int>() ?? 0,
+                    FieldName    = s["field_name"]?.GetValue<string>() ?? "",
+                    FieldType    = s["field_type"]?.GetValue<string>() ?? "",
+                    InnerType    = s["inner_type"]?.GetValue<string>() ?? "",
+                    ElementIndex = s["element_index"]?.GetValue<int>() ?? -1,
+                    ToName       = s["to_name"]?.GetValue<string>() ?? "",
+                    ToClass      = s["to_class"]?.GetValue<string>() ?? "",
+                });
+            }
+        }
+
+        return new GWorldPathResult
+        {
+            Found             = res["found"]?.GetValue<bool>() ?? false,
+            Status            = res["status"]?.GetValue<string>() ?? "",
+            RootAddr          = res["root_addr"]?.GetValue<string>() ?? "",
+            RootName          = res["root_name"]?.GetValue<string>() ?? "",
+            TargetObj         = res["target_obj"]?.GetValue<string>() ?? "",
+            TargetName        = res["target_name"]?.GetValue<string>() ?? "",
+            TargetClass       = res["target_class"]?.GetValue<string>() ?? "",
+            TargetIntraOffset = res["target_intra_offset"]?.GetValue<int>() ?? 0,
+            MaxDepth          = res["max_depth"]?.GetValue<int>() ?? maxDepth,
+            Depth             = res["depth"]?.GetValue<int>() ?? 0,
+            Visited           = res["visited"]?.GetValue<int>() ?? 0,
+            DurationMs        = res["duration_ms"]?.GetValue<long>() ?? 0,
+            Steps             = steps,
+        };
+    }
+
     public async Task<FindPropertyXrefsResult> FindPropertyXrefsAsync(
         string propAddr, bool gameOnly = true, int maxResults = 200,
         CancellationToken ct = default)

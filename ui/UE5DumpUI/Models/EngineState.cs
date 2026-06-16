@@ -20,6 +20,12 @@ public sealed class EngineState
     public string GNamesAddr { get; init; } = "";
     public string GWorldAddr { get; init; } = "";
 
+    /// <summary>True when GWorld was resolved to a non-null pointer — gates the
+    /// "Locate in GWorld" feature (the forward path search needs a live UWorld
+    /// root). False when the AOB scan failed and no UWorld fallback was found.</summary>
+    public bool HasGWorld =>
+        !string.IsNullOrEmpty(GWorldAddr) && GWorldAddr != "0" && GWorldAddr != "0x0";
+
     /// <summary>FSparseDelegateStorage::SparseDelegates address (UE 5.0+, optional — empty/0 when scan failed or version unsupported).</summary>
     public string SparseDelegatesAddr { get; init; } = "";
 

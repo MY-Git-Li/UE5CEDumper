@@ -354,6 +354,20 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                     _log.Error($"SPC NavigateToInstance handler error: {addr}", ex);
                 }
             };
+            // SPC hit -> Locate in GWorld (value/reach: land on the owning object,
+            // scroll to the changed field).
+            Spc.LocateInGWorld += async (addr, fieldOffset, fieldName) =>
+            {
+                try
+                {
+                    SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                    await LiveWalker.LocateInGWorldAsync(addr, fieldOffset, fieldName, stopAtParent: false);
+                }
+                catch (Exception ex)
+                {
+                    _log.Error($"SPC LocateInGWorld handler error: {addr}", ex);
+                }
+            };
 
             Pivot = new ClassPivotViewModel(snapshotStore, log, platform, dump);
             // Pivot group -> open its representative object in Live Walker.
@@ -431,6 +445,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 ObjectTree.SetEngineState(state);
                 LiveWalker.SetEngineState(state);
                 InstanceFinder.SetEngineState(state);
+                ValueSearch.SetEngineState(state);
+                InterestingFunctions.IsGWorldAvailable = state.HasGWorld;
                 Snapshot?.SetEngineState(state);
                 Spc?.SetEngineState(state);
                 Pivot?.SetEngineState(state);
@@ -474,6 +490,36 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _log.Error("NavigateToLiveWalker handler error", ex);
+            }
+        };
+
+        // Wire InstanceFinder -> "Locate in GWorld" (object/class → stop at parent).
+        InstanceFinder.LocateInGWorld += async (addr) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                await LiveWalker.LocateInGWorldAsync(addr, 0, null, stopAtParent: true);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"InstanceFinder LocateInGWorld handler error: {addr}", ex);
+            }
+        };
+
+        // Wire InstanceFinder container match -> "Locate in GWorld" (the address is
+        // a value inside a container element → reach the owning object + drill in).
+        InstanceFinder.LocateContainerInGWorld += async (addr, fieldOffset, fieldName, elementIntraOffset) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                await LiveWalker.LocateInGWorldAsync(addr, fieldOffset, fieldName,
+                                                     stopAtParent: false, elementIntraOffset: elementIntraOffset);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"InstanceFinder LocateContainerInGWorld handler error: {addr}", ex);
             }
         };
 
@@ -624,6 +670,39 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             }
         };
 
+        // Wire InterestingFunctions -> "Locate in GWorld": resolve a live (non-CDO)
+        // instance of the function's class (same find_instance path as
+        // NavigateToFunction above), then run the GWorld path search in parent mode
+        // (stop before drilling into the instance). A function isn't itself a world
+        // object, so the meaningful target is "where do instances of this class live".
+        InterestingFunctions.LocateInGWorld += async (className) =>
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(className)) return;
+                var instances = await _dump.FindInstancesAsync(className, exactMatch: true, limit: 5);
+                string? liveAddr = null;
+                foreach (var inst in instances.Instances)
+                {
+                    if (string.IsNullOrEmpty(inst.Address)) continue;
+                    if (inst.Name.StartsWith("Default__", StringComparison.Ordinal)) continue;
+                    liveAddr = inst.Address;
+                    break;
+                }
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                if (string.IsNullOrEmpty(liveAddr))
+                {
+                    LiveWalker.StatusText = $"No live (non-CDO) instance of {className} to locate in GWorld.";
+                    return;
+                }
+                await LiveWalker.LocateInGWorldAsync(liveAddr, 0, null, stopAtParent: true);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"InterestingFunctions LocateInGWorld handler error: {className}", ex);
+            }
+        };
+
         // Wire InterestingProperties -> Live Walker. Same pattern as
         // InterestingFunctions: try find_instance for a non-CDO live address,
         // fall back to ClassStruct when none. We don't scroll to the
@@ -717,6 +796,21 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _log.Error($"ValueSearch NavigateToInstance handler error: {addr}", ex);
+            }
+        };
+
+        // Wire ValueSearch -> "Locate in GWorld" (property value → reach the
+        // owning object + scroll to the value field).
+        ValueSearch.LocateInGWorld += async (addr, fieldOffset, fieldName) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                await LiveWalker.LocateInGWorldAsync(addr, fieldOffset, fieldName, stopAtParent: false);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"ValueSearch LocateInGWorld handler error: {addr}", ex);
             }
         };
         ValueSearch.RequestCopyText += async (text) =>
@@ -1232,6 +1326,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ObjectTree.SetEngineState(state);
         LiveWalker.SetEngineState(state);
         InstanceFinder.SetEngineState(state);
+        ValueSearch.SetEngineState(state);
+        InterestingFunctions.IsGWorldAvailable = state.HasGWorld;
         Teleport.SetConnected(true);   // refresh markers once the DLL is scanned
         Snapshot?.SetEngineState(state);
         Spc?.SetEngineState(state);

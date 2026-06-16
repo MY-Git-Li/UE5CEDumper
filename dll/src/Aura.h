@@ -12,6 +12,7 @@
 
 #include "Ubel.h"   // For ::ClassInfo (defined at global scope in Ubel.h, despite the filename) used by WalkClassesBatch
 #include "ValueScan.h"  // For ValueScan::Candidate / DataType / ScanType used by ScanForValue / RefineCandidates
+#include "GraphPath.h"   // GraphPathResult / GraphPathStep + the pure BFS core used by FindObjectGraphPath
 
 // FUObjectItem structure (in FChunkedFixedUObjectArray)
 // Size varies by UE version — auto-detected at Init() time:
@@ -249,6 +250,39 @@ struct ReferenceMatch {
 std::vector<ReferenceMatch> FindReferencesToUObject(uintptr_t target,
                                                      int32_t maxResults = 32,
                                                      ContainerScanStats* stats = nullptr);
+
+// === Forward Object-Graph Path Search ("Locate in GWorld") ===
+//
+// The inverse of FindReferencesToUObject: instead of "who points AT this
+// object", answer "how do I REACH this object by following pointers from a
+// root". Breadth-first search over the outgoing object-pointer edges of the
+// UObject graph (the same edges FindReferencesToUObject walks: direct
+// Object/Class/Interface pointers, Weak/Soft/Lazy, TArray/TMap/TSet of
+// objects, and fields nested in StructProperty to depth 3) — reusing the
+// per-class reference-metadata cache so the first call primes and later calls
+// are fast.
+//
+// `rootObj`   : the UObject to start from (the caller resolves GWorld → UWorld
+//               and passes the live UWorld* here; this function is root-agnostic
+//               so it stays decoupled from the GWorld globals and is testable).
+// `targetObj` : the UObject to reach. For a property VALUE the caller resolves
+//               the owning UObject first (Value Search already knows it; an
+//               arbitrary address resolves via FindByAddress / FindInContainers).
+// `maxDepth`  : maximum hop count root → target (default 5; hard-capped at 32).
+// `deadlineMs`: wall-clock budget; the search also bails on Cancel::Requested().
+//
+// BFS guarantees the path returned is a SHORTEST (fewest-hop) one, and the
+// first such path found in deterministic iteration order. steps is
+// root → steps[0].to → … → targetObj; toName/toClassName are resolved for the
+// path nodes only. status is "ok" / "not_reachable" / "visited_cap" /
+// "cancelled" / "deadline" / "invalid".
+//
+// NOTE: MulticastSparseDelegateProperty edges (bindings that live in
+// CoreUObject's global FSparseDelegateStorage, not in the owning object) are
+// intentionally NOT followed here — they are an unusual gameplay path and a
+// global-TMap walk per node would be prohibitively expensive.
+GraphPathResult FindObjectGraphPath(uintptr_t rootObj, uintptr_t targetObj,
+                                    int32_t maxDepth = 5, int32_t deadlineMs = 20000);
 
 // === Property Keyword Search ===
 

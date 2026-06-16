@@ -184,6 +184,14 @@ public partial class SpcQueryViewModel : ViewModelBase
     /// <summary>Raised to open a result row's object in the Live Walker tab.</summary>
     public event Action<string>? NavigateToInstance;
 
+    /// <summary>Raised to locate a result row's owning object within the GWorld
+    /// object graph. Payload = (owning object address, changed field byte offset,
+    /// field name).</summary>
+    public event Action<string, int, string>? LocateInGWorld;
+
+    /// <summary>True when GWorld is available — gates the per-row "Locate in GWorld" button.</summary>
+    [ObservableProperty] private bool _isGWorldAvailable;
+
     public int SelectedCount => SnapshotPicks.Count(p => p.IsSelected);
 
     /// <summary>At least two snapshots picked and not mid-query.</summary>
@@ -203,6 +211,7 @@ public partial class SpcQueryViewModel : ViewModelBase
     public void SetEngineState(EngineState state)
     {
         _engineState = state;
+        IsGWorldAvailable = state.HasGWorld;
         _store.SetActiveGame(state.PeHash);
         LoadDenylistFromStore();
         _ = RefreshAsync();
@@ -502,6 +511,15 @@ public partial class SpcQueryViewModel : ViewModelBase
     {
         if (row == null || string.IsNullOrEmpty(row.ObjAddr)) return;
         NavigateToInstance?.Invoke(row.ObjAddr);
+    }
+
+    /// <summary>Locate this row's owning object within the GWorld graph (reach mode —
+    /// lands on the object and scrolls to the changed field).</summary>
+    [RelayCommand]
+    private void LocateRowInGWorld(SpcResultRow? row)
+    {
+        if (row == null || !IsGWorldAvailable || string.IsNullOrEmpty(row.ObjAddr)) return;
+        LocateInGWorld?.Invoke(row.ObjAddr, row.PropOffset, row.PropName);
     }
 
     /// <summary>Copy the matched field's live address (newest snapshot's obj_addr
