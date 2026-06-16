@@ -436,6 +436,26 @@ public partial class InstanceFinderViewModel : ViewModelBase
         }
     }
 
+    /// <summary>Copy a container-match row's owning UObject address to the
+    /// clipboard (mirrors the per-instance copy + Value Search's Copy Address).</summary>
+    [RelayCommand]
+    private async Task CopyContainerAddressAsync(ContainerMatch? match)
+    {
+        if (match == null || string.IsNullOrEmpty(match.OwnerAddress)) return;
+
+        try
+        {
+            var formatted = AddressHelper.FormatAddress(
+                match.OwnerAddress, _engineState?.ModuleName, _engineState?.ModuleBase, AddrFormat);
+            await _platform.CopyToClipboardAsync(formatted);
+            LookupStatusText = $"Copied {formatted}  ({match.OwnerClassName})";
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"Failed to copy container owner address for {match.OwnerClassName}", ex);
+        }
+    }
+
     [RelayCommand]
     private async Task GenerateCeAAScriptAsync(InstanceResult? instance)
     {

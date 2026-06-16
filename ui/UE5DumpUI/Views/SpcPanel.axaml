@@ -29,14 +29,9 @@
         <Button Content="{StaticResource str.Spc.Run}" Command="{Binding RunQueryCommand}"
                 IsEnabled="{Binding CanRunQuery}" Classes="accent" Padding="12,4" Margin="0,0,8,0"/>
         <Button Content="{StaticResource str.Spc.Refresh}" Command="{Binding RefreshCommand}"
-                Padding="8,4" Margin="0,0,8,0" IsEnabled="{Binding !IsQuerying}"/>
-        <Button Content="{StaticResource str.Spc.OpenWalker}" Command="{Binding OpenInLiveWalkerCommand}"
-                CommandParameter="{Binding SelectedResult}" Padding="8,4" Margin="0,0,8,0"/>
-        <Button Content="{StaticResource str.Spc.LocateGWorld}" Command="{Binding LocateRowInGWorldCommand}"
-                CommandParameter="{Binding SelectedResult}" IsEnabled="{Binding IsGWorldAvailable}"
-                ToolTip.Tip="{StaticResource str.Tip.Spc.LocateGWorld}" Padding="8,4" Margin="0,0,8,0"/>
-        <Button Content="{StaticResource str.Spc.CopyAddr}" Command="{Binding CopyAddressCommand}"
-                CommandParameter="{Binding SelectedResult}" Padding="8,4"/>
+                Padding="8,4" IsEnabled="{Binding !IsQuerying}"/>
+        <!-- Per-row Open / GWorld / Copy live on each result row (below) — pick a
+             row, then use its own buttons. -->
       </WrapPanel>
     </Border>
 
@@ -141,6 +136,33 @@
         <DataGridTextColumn Header="{StaticResource str.Spc.Res.Field}"    Binding="{Binding PropName}"        SortMemberPath="PropName"        Width="150"/>
         <DataGridTextColumn Header="{StaticResource str.Spc.Res.Type}"     Binding="{Binding DeclaredType}"    SortMemberPath="DeclaredType"    Width="120"/>
         <DataGridTextColumn Header="{StaticResource str.Spc.Res.Sequence}" Binding="{Binding SequenceDisplay}" SortMemberPath="SequenceDisplay" Width="240"/>
+        <!-- Per-row actions (mirror Value Search): Open in Live Walker / GWorld /
+             Copy Address, each operating on this row. -->
+        <DataGridTemplateColumn Header="" Width="Auto" CanUserSort="False">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:SpcResultRow">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <Button Content="{StaticResource str.Spc.OpenWalker}"
+                        Command="{Binding $parent[UserControl].((vm:SpcQueryViewModel)DataContext).OpenInLiveWalkerCommand}"
+                        CommandParameter="{Binding}"
+                        Foreground="#4EC9B0" Background="Transparent" BorderThickness="1" BorderBrush="#4EC9B0"
+                        Padding="6,2" FontSize="11" Cursor="Hand"/>
+                <Button Content="{StaticResource str.Spc.CopyAddr}"
+                        Command="{Binding $parent[UserControl].((vm:SpcQueryViewModel)DataContext).CopyAddressCommand}"
+                        CommandParameter="{Binding}"
+                        Foreground="#DCDCAA" Background="Transparent" BorderThickness="1" BorderBrush="#DCDCAA"
+                        Padding="6,2" FontSize="11" Cursor="Hand"/>
+                <Button Content="{StaticResource str.Spc.LocateGWorld}"
+                        Command="{Binding $parent[UserControl].((vm:SpcQueryViewModel)DataContext).LocateRowInGWorldCommand}"
+                        CommandParameter="{Binding}"
+                        IsEnabled="{Binding $parent[UserControl].((vm:SpcQueryViewModel)DataContext).IsGWorldAvailable}"
+                        ToolTip.Tip="{StaticResource str.Tip.Spc.LocateGWorld}"
+                        Foreground="#C586C0" Background="Transparent" BorderThickness="1" BorderBrush="#C586C0"
+                        Padding="6,2" FontSize="11" Cursor="Hand"/>
+              </StackPanel>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
       </DataGrid.Columns>
     </DataGrid>
 

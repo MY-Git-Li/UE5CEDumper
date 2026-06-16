@@ -14,6 +14,36 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-16 — Per-row action buttons across Snapshot/SPC/Instance Finder + not-found clears Live Walker (build 1213)
+
+UI-consistency pass on user request, making the per-row action buttons uniform with
+Value Search (Open in Live Walker / Copy Address / 🌍 GWorld, in that order, same
+teal/gold/purple styling):
+
+- **SPC Query**: the three top-toolbar buttons (Open / GWorld / Copy) moved into a
+  per-row `DataGridTemplateColumn`; toolbar keeps only Run + Refresh. Commands already
+  took the row, so this is pure XAML.
+- **Snapshot diff**: top Open/Copy moved per-row, **plus a new per-row 🌍 GWorld**.
+  `SnapshotViewModel` gained `IsGWorldAvailable` (set in `SetEngineState` from
+  `HasGWorld`), a `LocateInGWorld` event, and a `LocateRowInGWorld` command (reach mode
+  via the row's deep `PropName` path); wired in `MainWindowViewModel` exactly like SPC.
+  In-session diff only (ObjAddr is snapshot-B's session-local address). New strings
+  `str.Snapshot.Diff.LocateGWorld` + tooltip.
+- **Instance Finder** (address-search container matches): the plain "Open" became teal
+  "Open in Live Walker", and a gold "Copy Address" was added (`CopyContainerAddress`
+  copies the owner address via the same `AddressHelper.FormatAddress` as the
+  per-instance copy); button column widened to Auto.
+
+**Locate-in-GWorld not-found now clears the Live Walker view.** Previously a failed
+locate left the *previous* object on screen under the failure message, looking like the
+result. New `LiveWalkerViewModel.ClearDisplayedNode()` (inverse of `UpdateDisplay`) empties
+fields/breadcrumbs/header; called in both `LocateInGWorldAsync` and
+`LocateContainerInGWorldAsync` when `!path.Found`, except on a user `cancelled` (which
+preserves the current view). The failure reason stays in `StatusText`.
+
+DLL re-stamped to 1213 (no source change) so the build-match badge stays green.
+510 dll_helpers + 31 utf8 + 1530 C# green; AOT publish clean (XAML compiled).
+
 ## 2026-06-16 — Snapshot capture heartbeat: live status during slow chunks (build 1212)
 
 Follow-up to the 1211 stall fix, on user feedback: *"if there's no error, letting it

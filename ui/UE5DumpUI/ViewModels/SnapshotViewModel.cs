@@ -45,6 +45,7 @@ public partial class SnapshotViewModel : ViewModelBase
     [ObservableProperty] private string _selectedScope = "NumericNoByte";
     [ObservableProperty] private bool   _isCapturing;
     [ObservableProperty] private bool   _isDeleting;
+    [ObservableProperty] private bool   _isGWorldAvailable;   // gates the per-row 🌍 button
     [ObservableProperty] private double _progress;          // 0..1
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private SnapshotMeta? _selectedSnapshot;
@@ -95,6 +96,11 @@ public partial class SnapshotViewModel : ViewModelBase
 
     /// <summary>Raised to open a diff row's object in the Live Walker tab.</summary>
     public event Action<string>? NavigateToInstance;
+
+    /// <summary>Raised to locate a diff row's owning object in the GWorld graph
+    /// (reach mode — land on the object, scroll to the changed field). Args:
+    /// (objAddr, fieldOffset, fieldName). Same shape as SPC / Value Search.</summary>
+    public event Action<string, int, string>? LocateInGWorld;
 
     public IReadOnlyList<string> DiffDirectionOptions { get; } =
         new[] { "Any", "Increased", "Decreased" };
@@ -272,6 +278,7 @@ public partial class SnapshotViewModel : ViewModelBase
     public void SetEngineState(EngineState state)
     {
         _engineState = state;
+        IsGWorldAvailable = state.HasGWorld;   // enable the per-row 🌍 button
         // Scope the store to this game's DB, then load its saved snapshots.
         _store.SetActiveGame(state.PeHash);
         LoadDenylistFromStore();
@@ -603,6 +610,18 @@ public partial class SnapshotViewModel : ViewModelBase
     {
         if (row == null || string.IsNullOrEmpty(row.ObjAddr)) return;
         NavigateToInstance?.Invoke(row.ObjAddr);
+    }
+
+    /// <summary>Locate this diff row's owning object in the GWorld graph (reach
+    /// mode — land on it, scroll to the changed field via PropName, which may be a
+    /// deep container path). Only valid for an in-session diff (ObjAddr is the
+    /// session-local address from snapshot B); a cross-session address fails the
+    /// path search gracefully.</summary>
+    [RelayCommand]
+    private void LocateRowInGWorld(SnapshotDiffRow? row)
+    {
+        if (row == null || !IsGWorldAvailable || string.IsNullOrEmpty(row.ObjAddr)) return;
+        LocateInGWorld?.Invoke(row.ObjAddr, row.PropOffset, row.PropName);
     }
 
     /// <summary>Copy the changed field's live address (obj_addr + offset) to the

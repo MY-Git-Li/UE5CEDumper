@@ -350,6 +350,20 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                     _log.Error($"Snapshot NavigateToInstance handler error: {addr}", ex);
                 }
             };
+            // Diff row -> Locate in GWorld (value/reach: land on the owning object,
+            // scroll to the changed field — same shape as SPC / Value Search).
+            Snapshot.LocateInGWorld += async (addr, fieldOffset, fieldName) =>
+            {
+                try
+                {
+                    SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                    await LiveWalker.LocateInGWorldAsync(addr, fieldOffset, fieldName, stopAtParent: false);
+                }
+                catch (Exception ex)
+                {
+                    _log.Error($"Snapshot LocateInGWorld handler error: {addr}", ex);
+                }
+            };
 
             Spc = new SpcQueryViewModel(snapshotStore, log, platform);
             // SPC hit -> open its object in Live Walker (newest snapshot's addr).

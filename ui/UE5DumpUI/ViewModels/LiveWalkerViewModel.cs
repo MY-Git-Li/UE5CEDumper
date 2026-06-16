@@ -1607,6 +1607,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
             if (!path.Found)
             {
+                // Don't leave the previous object on screen as if it were the
+                // result — clear it but keep the failure reason. (A user-initiated
+                // cancel preserves the current view.)
+                if (path.Status != "cancelled") ClearDisplayedNode();
                 StatusText = GWorldPathFailureStatus(path);
                 return;
             }
@@ -1759,6 +1763,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                                                            GWorldLocateDepth, ct);
             if (!path.Found)
             {
+                if (path.Status != "cancelled") ClearDisplayedNode();
                 StatusText = GWorldPathFailureStatus(path);
                 return;
             }
@@ -3571,6 +3576,28 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             SetError(ex);
             _log.Error($"Failed to generate baked script for {func?.Name}", ex);
         }
+    }
+
+    /// <summary>
+    /// Empty the displayed node — fields, breadcrumb spine, header + parent info —
+    /// so a FAILED Locate-in-GWorld doesn't leave the previous object on screen
+    /// looking like the result. The caller sets StatusText with the reason after.
+    /// (Inverse of <see cref="UpdateDisplay"/>.)
+    /// </summary>
+    private void ClearDisplayedNode()
+    {
+        Fields.Clear();
+        Breadcrumbs.Clear();
+        SelectedField = null;
+        HasData = false;
+        ShowCeXml = false;
+        CurrentObjectName = "";
+        CurrentClassName = "";
+        CurrentAddress = "";
+        CurrentOuterAddr = "";
+        CurrentOuterName = "";
+        CurrentOuterClassName = "";
+        HasParent = false;
     }
 
     private void UpdateDisplay(InstanceWalkResult result)

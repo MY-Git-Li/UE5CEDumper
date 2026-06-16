@@ -299,6 +299,8 @@
     <sys:String x:Key="str.Snapshot.Diff.Dir">Change:</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.CopyAddr">Copy Address</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.OpenWalker">Open in Live Walker</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.LocateGWorld">🌍 GWorld</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Diff.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this row's owning object and show it in Live Walker, scrolled to the changed field (in-session diff only)</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.ObjectFilter">Object:</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.Global">Filter all:</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.GlobalHint">match any column…</sys:String>
