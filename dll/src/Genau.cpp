@@ -399,22 +399,27 @@ static bool ValidateGNamesStructural(uintptr_t addr) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FindGObjectsByDataScan — fallback: collect ALL RIP-relative pointer
-// references from .text that resolve into the data section, then validate
-// each candidate as a GObjects/FUObjectArray.
+// DataScanGObjectsCandidates — core of the data-section GObjects scan.
+// Collects RIP-relative static pointer references from .text that resolve into
+// the data section, validates each as a GObjects/FUObjectArray, and appends up
+// to `maxWanted` UNIQUE validated candidate addresses to `out` (skipping `avoid`).
+//
+// Shared by:
+//   - FindGObjectsByDataScan       (maxWanted=1: original "first validated" fallback)
+//   - Genau::CollectGObjectsCandidates (maxWanted>1: post-init decoy recovery)
 // ─────────────────────────────────────────────────────────────────────────────
-static uintptr_t FindGObjectsByDataScan() {
-    Sein::Info("SCAN:GObj", "FindGObjectsByDataScan: Collecting static pointer references...");
+static void DataScanGObjectsCandidates(std::vector<uintptr_t>& out, uintptr_t avoid, size_t maxWanted) {
+    Sein::Info("SCAN:GObj", "DataScanGObjectsCandidates: Collecting static pointer references...");
 
     uintptr_t base = Macht::GetModuleBase(nullptr);
-    if (!base) return 0;
+    if (!base) return;
     size_t modSize = Macht::GetModuleSize(nullptr);
-    if (!modSize) return 0;
+    if (!modSize) return;
 
     auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return 0;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return;
     auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + static_cast<DWORD>(dos->e_lfanew));
-    if (nt->Signature != IMAGE_NT_SIGNATURE) return 0;
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return;
 
     // Find code and data section ranges
     const IMAGE_SECTION_HEADER* section = IMAGE_FIRST_SECTION(nt);
@@ -436,11 +441,11 @@ static uintptr_t FindGObjectsByDataScan() {
     }
 
     if (!codeStart || !dataStart) {
-        Sein::Warn("SCAN:GObj", "FindGObjectsByDataScan: Could not identify code/data sections");
-        return 0;
+        Sein::Warn("SCAN:GObj", "DataScanGObjectsCandidates: Could not identify code/data sections");
+        return;
     }
 
-    Sein::Debug("SCAN:GObj", "FindGObjectsByDataScan: code=[0x%llX-0x%llX], data=[0x%llX-0x%llX]",
+    Sein::Debug("SCAN:GObj", "DataScanGObjectsCandidates: code=[0x%llX-0x%llX], data=[0x%llX-0x%llX]",
               (unsigned long long)codeStart, (unsigned long long)codeEnd,
               (unsigned long long)dataStart, (unsigned long long)dataEnd);
 
@@ -482,7 +487,7 @@ static uintptr_t FindGObjectsByDataScan() {
         }
     }
 
-    Sein::Info("SCAN:GObj", "FindGObjectsByDataScan: Found %zu static pointers in data section", bag.size());
+    Sein::Info("SCAN:GObj", "DataScanGObjectsCandidates: Found %zu static pointers in data section", bag.size());
 
     // Try each candidate with GObjects validation
     // Throttle validation failure logging: data scan can produce 20K+ candidates,
@@ -491,27 +496,40 @@ static uintptr_t FindGObjectsByDataScan() {
     constexpr int kMaxDataScanFailLogs = 20;
     g_validationDbgCount = 0;  // Reset throttle for validators
     for (auto& sp : bag) {
+        if (out.size() >= maxWanted) break;
         uintptr_t candidate = 0;
         if (!Macht::ReadSafe(sp.targetAddr, candidate) || !candidate) continue;
+        if (avoid && candidate == avoid) continue;          // skip known-bad (decoy)
+        bool dup = false;                                    // skip duplicates already collected
+        for (uintptr_t c : out) { if (c == candidate) { dup = true; break; } }
+        if (dup) continue;
         if (ValidateGObjects(candidate)) {
-            Sein::Info("SCAN:GObj", "FindGObjectsByDataScan: GObjects validated at 0x%llX (via instr@0x%llX)",
+            Sein::Info("SCAN:GObj", "DataScanGObjectsCandidates: GObjects validated at 0x%llX (via instr@0x%llX)",
                      (unsigned long long)candidate, (unsigned long long)sp.instrAddr);
-            if (dataScanFailCount > kMaxDataScanFailLogs) {
-                Sein::Info("SCAN:GObj", "FindGObjectsByDataScan: (%d validation failures were suppressed)",
-                         dataScanFailCount - kMaxDataScanFailLogs);
-            }
-            return candidate;
+            out.push_back(candidate);
+            continue;
         }
         dataScanFailCount++;
         if (dataScanFailCount == kMaxDataScanFailLogs) {
-            Sein::Info("SCAN:GObj", "FindGObjectsByDataScan: Throttling validation failure logs (showed first %d)",
+            Sein::Info("SCAN:GObj", "DataScanGObjectsCandidates: Throttling validation failure logs (showed first %d)",
                      kMaxDataScanFailLogs);
             g_validationDbgCount = kMaxValidationDbgLogs;  // Suppress further validator debug output
         }
     }
+    if (dataScanFailCount > kMaxDataScanFailLogs) {
+        Sein::Info("SCAN:GObj", "DataScanGObjectsCandidates: (%d validation failures were suppressed)",
+                 dataScanFailCount - kMaxDataScanFailLogs);
+    }
+    if (out.empty()) {
+        Sein::Warn("SCAN:GObj", "DataScanGObjectsCandidates: No valid GObjects found among %zu candidates", bag.size());
+    }
+}
 
-    Sein::Warn("SCAN:GObj", "FindGObjectsByDataScan: No valid GObjects found among %zu candidates", bag.size());
-    return 0;
+// FindGObjectsByDataScan — fallback: first validated GObjects from the data scan.
+static uintptr_t FindGObjectsByDataScan() {
+    std::vector<uintptr_t> v;
+    DataScanGObjectsCandidates(v, /*avoid=*/0, /*maxWanted=*/1);
+    return v.empty() ? 0 : v[0];
 }
 
 // ============================================================
@@ -3077,6 +3095,19 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
     Sein::Info("DYNO", "==============================");
 
     return true;
+}
+
+// ============================================================
+// CollectGObjectsCandidates — gather multiple validated GObjects candidates
+// for the post-init decoy-recovery path (see Frieren::UE5_Init).  Reuses the
+// proven data-section RIP-relative scan; the caller re-validates each via
+// Aura::Init + name resolution to reject count-only decoys that pass the
+// structural validator but contain no usable objects.
+// ============================================================
+size_t CollectGObjectsCandidates(std::vector<uintptr_t>& out, uintptr_t avoid, size_t maxCandidates) {
+    size_t before = out.size();
+    DataScanGObjectsCandidates(out, avoid, before + maxCandidates);
+    return out.size() - before;
 }
 
 // ============================================================
