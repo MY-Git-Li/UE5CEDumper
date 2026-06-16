@@ -69,6 +69,20 @@ button already bridges to Instance Finder, which has the 🌍 button. Gray-out v
 `IsGWorldAvailable` set for Interesting Functions which has no `SetEngineState`).
 In-game live-verification pending.
 
+**Container-match path (build 1188, after first live test).** First in-game test
+(SEED BATTLE DESTINY REMASTERED, build 1187) surfaced an accessibility gap, not a
+BFS bug: a by-ADDRESS lookup of a value *inside* a container element
+(`BP_LifeSaveData_C.SaveSlotList[1].GP`) produces a **container match**, not a
+direct instance → `HasFields=false` → the "🌍 Locate in GWorld" toolbar button
+was hidden and `SelectedInstance` was null, so the only action was the container
+row's pre-existing plain "Open". Logs confirmed `find_path_from_gworld` was never
+called. Fix: the Instance Finder **container-match row** now has its own "🌍"
+button (`LocateContainerOwnerInGWorld` → `LocateContainerInGWorld` event → reach
+mode) that locates the OWNING object via the GWorld path, then auto-drills into
+the matched element `[N]` (safe — `TryDrillIntoMatchedContainer` only drills
+`IsContainerNavigable` fields), landing the user on the element ready to scroll to
+the value.
+
 -----
 
 ## 2026-06-15 — Main window placement persistence + restartable-apps opt-in (build 1177)

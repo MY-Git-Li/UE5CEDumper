@@ -99,6 +99,14 @@ public partial class InstanceFinderViewModel : ViewModelBase
     /// </summary>
     public event Action<string>? LocateInGWorld;
 
+    /// <summary>
+    /// Event raised to locate the OWNER of a container match within the GWorld
+    /// graph (the looked-up address fell inside a container element). Payload =
+    /// (owner object address, container field byte offset, "FieldName[N]" so the
+    /// walker auto-drills into the element).
+    /// </summary>
+    public event Action<string, int, string>? LocateContainerInGWorld;
+
     /// <summary>True when GWorld is available — gates the "Locate in GWorld" button.</summary>
     [ObservableProperty] private bool _isGWorldAvailable;
 
@@ -458,5 +466,19 @@ public partial class InstanceFinderViewModel : ViewModelBase
     {
         if (SelectedInstance == null || !IsGWorldAvailable) return;
         LocateInGWorld?.Invoke(SelectedInstance.Address);
+    }
+
+    /// <summary>Locate a container match's OWNER within the GWorld graph — the
+    /// looked-up address is a value inside a container element, so reach the
+    /// owning object (via the shortest GWorld path) and auto-drill into the
+    /// element so the user lands next to the value.</summary>
+    [RelayCommand]
+    private void LocateContainerOwnerInGWorld(ContainerMatch? match)
+    {
+        if (match == null || !IsGWorldAvailable || string.IsNullOrEmpty(match.OwnerAddress)) return;
+        var fieldName = match.ElementIndex >= 0
+            ? $"{match.FieldName}[{match.ElementIndex}]"
+            : match.FieldName;
+        LocateContainerInGWorld?.Invoke(match.OwnerAddress, match.FieldOffset, fieldName);
     }
 }

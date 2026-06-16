@@ -150,6 +150,7 @@
     <sys:String x:Key="str.InstanceFinder.Address">Address</sys:String>
     <sys:String x:Key="str.InstanceFinder.OpenInWalker">Open in Live Walker</sys:String>
     <sys:String x:Key="str.InstanceFinder.LocateGWorld">🌍 Locate in GWorld</sys:String>
+    <sys:String x:Key="str.InstanceFinder.LocateGWorldShort">🌍</sys:String>
     <sys:String x:Key="str.InstanceFinder.AddressHint">Address (hex or module.exe+offset)</sys:String>
     <sys:String x:Key="str.InstanceFinder.Lookup">Lookup</sys:String>
     <sys:String x:Key="str.InstanceFinder.ExactMatch">Exact match</sys:String>
@@ -688,6 +689,7 @@
     <sys:String x:Key="str.Tip.InstanceFinder.CopyAddr">Copy instance address to clipboard</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.OpenWalker">Open this instance in Live Walker</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this instance and show it in Live Walker (stops at the parent that points to it)</sys:String>
+    <sys:String x:Key="str.Tip.InstanceFinder.LocateGWorldContainer">Locate in GWorld: find the shortest pointer path from GWorld down to this container's owning object, then drill into the element so you land next to the value</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.ExportCE">Export instance as CE XML pointer chain</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.CopyFieldAddr">Copy field absolute address</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.AA">Generate CE Auto Assembler script</sys:String>

@@ -507,6 +507,21 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             }
         };
 
+        // Wire InstanceFinder container match -> "Locate in GWorld" (the address is
+        // a value inside a container element → reach the owning object + drill in).
+        InstanceFinder.LocateContainerInGWorld += async (addr, fieldOffset, fieldName) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                await LiveWalker.LocateInGWorldAsync(addr, fieldOffset, fieldName, stopAtParent: false);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"InstanceFinder LocateContainerInGWorld handler error: {addr}", ex);
+            }
+        };
+
         // Wire PropertySearch -> InstanceFinder (pre-fill class name +
         // switch tab + auto-run the search). Pre-fill alone left the user
         // having to click Search again, which they correctly flagged as
