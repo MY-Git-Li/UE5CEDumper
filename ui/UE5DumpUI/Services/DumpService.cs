@@ -130,6 +130,9 @@ public sealed class DumpService : IDumpService
             SparseDelegatesMethod = ptrs["sparse_delegates_method"]?.GetValue<string>() ?? "not_found",
             // AOB Usage Tracking
             PeHash = ptrs["pe_hash"]?.GetValue<string>() ?? "",
+            // Per-launch session token (build 1227+; older DLLs omit it → ""
+            // → GameSessionId degrades to "PeHash-" with no per-launch split).
+            ProcessCreationTime = ptrs["process_creation_time"]?.GetValue<string>() ?? "",
             GObjectsPatternId = ptrs["gobjects_pattern_id"]?.GetValue<string>() ?? "",
             GNamesPatternId = ptrs["gnames_pattern_id"]?.GetValue<string>() ?? "",
             GWorldPatternId = ptrs["gworld_pattern_id"]?.GetValue<string>() ?? "",

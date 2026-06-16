@@ -21,24 +21,6 @@ Open work only. **Read this when deciding what to do next.**
 
 ## ▶ Next up (genuinely actionable now)
 
-- **🔴 Snapshot/SPC stale-address gating needs a real per-launch session token (CONFIRMED bug)** —
-  Effort: **M** · Risk: low. Build 1216 disables the Snapshot-diff / SPC per-row
-  Live/Addr/🌍 buttons unless the address-source snapshot's `GameSessionId`
-  (`PeHash-ModuleBase`) == the current session. **CONFIRMED broken on SEED
-  2026-06-16**: the owner viewed snapshots AFTER restarting the game and the buttons
-  still did NOT gray — SEED's EXE loads at a **constant base** (no effective ASLR), so
-  `ModuleBase` is identical across launches and the gate can't tell an old session
-  from the current one (so the gate effectively never fires for such games). Fix:
-  expose a true per-launch token from the DLL — simplest is the game **process
-  creation time** (`GetProcessTimes(GetCurrentProcess(), &create, …)`; the DLL runs
-  in-process), added to `scan_status`; thread it into `EngineState` +
-  `DumpService` scan parse, and fold into `GameSessionId` (`PeHash-CreationTime`) at
-  BOTH capture (`SnapshotViewModel` capture meta) and the gate's `_currentSessionId`
-  (Snapshot + SPC VMs). Existing snapshots (old `PeHash-ModuleBase` format) then read
-  as a different session → correctly gray. The 1216 button-gating wiring + `CanUse*`
-  props are already in place; this only changes how the session id is computed.
-  *Parent: stale-session gating shipped build 1216, PR #292 (dev-log 2026-06-16).*
-
 - **UE5.7+ packed FUObjectItem — live-verify + calibrate when a packed game appears** —
   Effort: **S** (mostly verify) · Risk: low (gated, last-resort only). Packed parsing shipped
   build 1108 but is **UNVERIFIED** (no `UE_ENABLE_FUOBJECT_ITEM_PACKING` game exists yet). When

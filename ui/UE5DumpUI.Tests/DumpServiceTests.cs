@@ -1275,6 +1275,53 @@ public class DumpServiceTests
         Assert.Equal(1, res.Samples[1].Index);
     }
 
+    // === Per-launch session token (build 1227) ===
+
+    [Fact]
+    public async Task GetPointersAsync_ParsesProcessCreationTime_IntoGameSessionId()
+    {
+        // The DLL emits process_creation_time in the get_pointers snapshot; it
+        // must flow into EngineState and fold into GameSessionId = PeHash-CreationTime.
+        _pipe.SetHandler(req => new JsonObject
+        {
+            ["ok"] = true,
+            ["gobjects"] = "0x10",
+            ["gnames"] = "0x20",
+            ["object_count"] = 5,
+            ["pe_hash"] = "ABCD1234",
+            ["module_base"] = "0x7FF600000000",
+            ["process_creation_time"] = "01D9ABCDEF012345",
+        });
+
+        var svc = CreateService();
+        var state = await svc.GetPointersAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("01D9ABCDEF012345", state.ProcessCreationTime);
+        Assert.Equal("ABCD1234-01D9ABCDEF012345", state.GameSessionId);
+    }
+
+    [Fact]
+    public async Task GetPointersAsync_OlderDll_NoCreationTime_GameSessionIdDegrades()
+    {
+        // Back-compat: a DLL older than build 1227 omits process_creation_time →
+        // ProcessCreationTime defaults to "" → GameSessionId = "PeHash-".
+        _pipe.SetHandler(req => new JsonObject
+        {
+            ["ok"] = true,
+            ["gobjects"] = "0x10",
+            ["gnames"] = "0x20",
+            ["object_count"] = 5,
+            ["pe_hash"] = "ABCD1234",
+            ["module_base"] = "0x7FF600000000",
+        });
+
+        var svc = CreateService();
+        var state = await svc.GetPointersAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("", state.ProcessCreationTime);
+        Assert.Equal("ABCD1234-", state.GameSessionId);
+    }
+
     // === Property Search: deep descent (build 1222) ===
 
     [Fact]

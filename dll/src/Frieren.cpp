@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <thread>
 #include <chrono>
+#include <vector>
 
 // Global cached state (also accessed by PipeServer)
 uintptr_t   g_cachedGObjects        = 0;
@@ -174,6 +175,62 @@ bool UE5_Init() {
             LOG_INFO("UE5_Init: Name sanity: %d/%d objects resolved", verified, tested);
             if (verified == 0 && tested >= 5) {
                 LOG_WARN("UE5_Init: WARNING — No objects resolved names! Check FUObjectItem size or FNamePool.");
+            }
+        }
+
+        // --- Decoy recovery (Avowed / Obsidian UE5.x) ---
+        // A relaxed structural match can validate a .data structure that passes
+        // ValidateGObjects yet yields 0 usable objects (observed on Avowed: the
+        // real FUObjectArray lives on the heap and is only reachable via the
+        // data-section scan, which the AOB winner pre-empts). When the chosen
+        // GObjects produced no objects, re-resolve from the data-scan candidate
+        // set and accept the first one that yields a non-empty, name-resolving
+        // array. STRICTLY ADDITIVE: runs only when Count==0, so titles that
+        // already resolve objects are never affected. See docs/avowed-gobjects-fix.md.
+        if (Aura::GetCount() == 0) {
+            LOG_WARN("UE5_Init: GObjects=0x%llX produced 0 objects — likely a decoy match; "
+                     "attempting data-scan recovery...",
+                     static_cast<unsigned long long>(ptrs.GObjects));
+            std::vector<uintptr_t> candidates;
+            Genau::CollectGObjectsCandidates(candidates, ptrs.GObjects);
+            LOG_INFO("UE5_Init: Recovery — evaluating %zu candidate(s)", candidates.size());
+
+            bool recovered = false;
+            for (uintptr_t cand : candidates) {
+                Aura::Init(cand);
+                int cnt = Aura::GetCount();
+                if (cnt <= 0) continue;
+                // Confirm real objects: require at least one resolvable FName.
+                // This rejects count-only decoys the structural validator cannot
+                // distinguish (a wrong NumElements offset can read a plausible
+                // count over memory that is not an object array).
+                int resolved = 0;
+                for (int32_t i = 0; i < cnt && i < 64 && resolved < 2; ++i) {
+                    uintptr_t obj = Aura::GetByIndex(i);
+                    if (!obj) continue;
+                    uint32_t nameIdx = 0;
+                    if (Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_NAME, nameIdx)) {
+                        std::string nm = Serie::GetString(nameIdx);
+                        if (!nm.empty() && nm != "None") ++resolved;
+                    }
+                }
+                if (resolved >= 1) {
+                    LOG_INFO("UE5_Init: Recovery SUCCESS — GObjects 0x%llX -> 0x%llX (Count=%d, names ok)",
+                             static_cast<unsigned long long>(ptrs.GObjects),
+                             static_cast<unsigned long long>(cand), cnt);
+                    ptrs.GObjects = cand;
+                    g_cachedGObjects = cand;
+                    g_cachedGObjectsMethod = "data_scan_recovery";
+                    recovered = true;
+                    break;
+                }
+                LOG_INFO("UE5_Init: Recovery — candidate 0x%llX has Count=%d but no resolvable names, skipping",
+                         static_cast<unsigned long long>(cand), cnt);
+            }
+            if (!recovered) {
+                LOG_WARN("UE5_Init: Recovery failed — no candidate produced a name-resolving array; "
+                         "restoring original GObjects");
+                Aura::Init(ptrs.GObjects);  // keep state consistent (Count stays 0)
             }
         }
 

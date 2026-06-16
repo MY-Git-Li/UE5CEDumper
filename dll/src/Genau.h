@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <vector>
 
 namespace Genau {
 
@@ -117,6 +118,15 @@ bool DetectUEnumNames();
 // Scan .data section for FUObjectArray by validating structure heuristics.
 // Complements FindGObjectsByDataScan (which follows code references instead).
 uintptr_t ExtraScanGObjects();
+
+// Collect GObjects candidates that pass structural validation, discovered via
+// the data-section RIP-relative pointer scan (same mechanism as the FindGObjects
+// data-scan fallback). Used by the post-init decoy-recovery path when the primary
+// GObjects yielded 0 usable objects (e.g. Avowed / Obsidian UE5.x, where a .data
+// structure coincidentally matches but contains no objects). Skips `avoid`.
+// Appends up to `maxCandidates` UNIQUE addresses to `out`; returns the number added.
+size_t CollectGObjectsCandidates(std::vector<uintptr_t>& out, uintptr_t avoid = 0,
+                                 size_t maxCandidates = 16);
 
 // Find GWorld by iterating GObjects for UWorld instance, then scanning .data
 // for a static pointer to that instance.  Requires GObjects + GNames already initialized.

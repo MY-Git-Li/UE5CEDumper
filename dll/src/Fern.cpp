@@ -615,6 +615,24 @@ static void FillPointerSnapshot(json& data) {
         moduleName += (wc < 128) ? static_cast<char>(wc) : '?';
     }
     data["module_name"] = moduleName;
+
+    // Per-launch session token: the game process's creation time (FILETIME,
+    // 100ns intervals since 1601, hi:lo packed → hex). Unique per launch even
+    // when the EXE loads at a CONSTANT base (no effective ASLR, e.g. SEED) —
+    // module_base alone could NOT distinguish launches on such games, so the
+    // Snapshot/SPC stale-session gate (PeHash-CreationTime) folds this in. The
+    // DLL runs in-process, so GetCurrentProcess() is the game. (build 1227)
+    FILETIME ftCreate{}, ftExit{}, ftKernel{}, ftUser{};
+    std::string creationTimeHex = "0";
+    if (GetProcessTimes(GetCurrentProcess(), &ftCreate, &ftExit, &ftKernel, &ftUser)) {
+        ULARGE_INTEGER ct{};
+        ct.LowPart  = ftCreate.dwLowDateTime;
+        ct.HighPart = ftCreate.dwHighDateTime;
+        std::ostringstream ctOss;
+        ctOss << std::hex << std::uppercase << ct.QuadPart;
+        creationTimeHex = ctOss.str();
+    }
+    data["process_creation_time"] = creationTimeHex;
 }
 
 // ============================================================
