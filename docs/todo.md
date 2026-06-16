@@ -21,6 +21,24 @@ Open work only. **Read this when deciding what to do next.**
 
 ## ▶ Next up (genuinely actionable now)
 
+- **🔴 Snapshot/SPC stale-address gating needs a real per-launch session token (CONFIRMED bug)** —
+  Effort: **M** · Risk: low. Build 1216 disables the Snapshot-diff / SPC per-row
+  Live/Addr/🌍 buttons unless the address-source snapshot's `GameSessionId`
+  (`PeHash-ModuleBase`) == the current session. **CONFIRMED broken on SEED
+  2026-06-16**: the owner viewed snapshots AFTER restarting the game and the buttons
+  still did NOT gray — SEED's EXE loads at a **constant base** (no effective ASLR), so
+  `ModuleBase` is identical across launches and the gate can't tell an old session
+  from the current one (so the gate effectively never fires for such games). Fix:
+  expose a true per-launch token from the DLL — simplest is the game **process
+  creation time** (`GetProcessTimes(GetCurrentProcess(), &create, …)`; the DLL runs
+  in-process), added to `scan_status`; thread it into `EngineState` +
+  `DumpService` scan parse, and fold into `GameSessionId` (`PeHash-CreationTime`) at
+  BOTH capture (`SnapshotViewModel` capture meta) and the gate's `_currentSessionId`
+  (Snapshot + SPC VMs). Existing snapshots (old `PeHash-ModuleBase` format) then read
+  as a different session → correctly gray. The 1216 button-gating wiring + `CanUse*`
+  props are already in place; this only changes how the session id is computed.
+  *Parent: stale-session gating shipped build 1216, PR #292 (dev-log 2026-06-16).*
+
 - **UE5.7+ packed FUObjectItem — live-verify + calibrate when a packed game appears** —
   Effort: **S** (mostly verify) · Risk: low (gated, last-resort only). Packed parsing shipped
   build 1108 but is **UNVERIFIED** (no `UE_ENABLE_FUOBJECT_ITEM_PACKING` game exists yet). When
@@ -178,21 +196,6 @@ prev-value refine) and **V1c live-verify**.
   then calls `LocateInGWorldAsync(addr, 0, null, stopAtParent:true)` — exactly the
   Instance Finder selected-instance flow. *User noted the button's absence on SEED,
   2026-06-16; offered as opt-in.*
-
-- **Reliable per-launch session token (Snapshot/SPC stale-address gating)** —
-  Effort: **M** · Risk: low. Build 1216 gates the Snapshot-diff / SPC per-row
-  Live/Addr/🌍 buttons on `GameSessionId == current`, where `GameSessionId` is
-  `PeHash-ModuleBase`. This distinguishes launches ONLY when ASLR moves the base;
-  a game that loads at a constant base (ASLR off / fixed preferred base) reuses the
-  same `ModuleBase` every launch, so an old-session snapshot is wrongly treated as
-  current and the buttons stay enabled (the addresses are actually stale). Fix:
-  expose a true per-launch token from the DLL — simplest is the game process
-  creation time (`GetProcessTimes(GetCurrentProcess(), &create, …)`, the DLL is
-  in-process) added to `scan_status`; thread it into `EngineState` + `DumpService`
-  and fold into `GameSessionId` (`PeHash-SessionToken`), so capture stores it and
-  the gate compares it. Existing snapshots (old format) then read as a different
-  session (correct — they're from a prior launch). *User-flagged on SEED,
-  2026-06-16: buttons not graying for old DB snapshots; deferred per "if not easy".*
 
 - **V1b — container prev-value refine (stable key)** — Effort: **M** · Risk: **high**.
   `Candidate.addr` stores a raw element address; TArray realloc already makes it stale,
