@@ -47,6 +47,7 @@ narrative identity resonates with what the module *does*.
 | **Tot.h** | 托托 | "Saint of the End", Greater Demon | — | Cancellation: cooperative cancel flag for long-running ops | The End — signals every long loop to stop (was `Cancel`) |
 | **Lineal.h** | 莉涅爾 | First-class mage, 15-yr undercover spy | — | PackedItem: UE5.7+ packed FUObjectItem reconstruction | The straightedge — realigns the non-standard packed layout (was `PackedItem`) |
 | **Radar.cpp** | 拉達爾 | Shadow Warrior, plateau village chief | — | ValueScan: CE-style by-value First/Next Scan | The sweep — scans every object for a matching value (was `ValueScan`) |
+| **Solitar.cpp** | 索莉塔 | Greater demon studying humanity | #11 | GodMode: force AActor::bCanBeDamaged (damage immunity) + re-assert worker | Overwhelming, near-unkillable mage — invulnerability; reuses the FBoolProperty bit-write Wirbel uses for the cursor |
 
 ---
 
@@ -93,6 +94,7 @@ Himmel::                    // Signatures — hero's legacy (header-only)
 Flamme::                    // HintCache — ancient wisdom
 Stark::                     // GameThreadDispatch — frontline warrior
 Wirbel::                    // Teleport — swift battlefield repositioning
+Solitar::                   // GodMode — force AActor::bCanBeDamaged (damage immunity)
 Mimic::                     // Mailbox — disguised channel
 Renge::                     // PipeProtocol — liaison rules
 Scharf::                    // FProperty alignment validator (header-only)
@@ -249,7 +251,7 @@ German meanings are given because most names map cleanly to a module function.
 | Character | File form | Meaning / role | Status | Suggested use |
 |---|---|---|---|---|
 | Lügner | Lugner | Master of disguise / envoy | 🟢 ProxyVersion | — |
-| Solitär | Solitar | Greater demon studying humanity | 🟡 GodMode (planned) | Stealth/protection (`Solitar`, see `docs/godmode-spec.md`) |
+| Solitär | Solitar | Greater demon studying humanity | 🟢 GodMode | Force AActor::bCanBeDamaged via FBoolProperty bit + re-assert worker (`Solitar.cpp`, build 1251) |
 | Tot | Tot | "Saint of the End", end-curse | 🟢 Cancellation | Cooperative cancel flag for long-running ops (`Tot.h`, was `Cancel`) |
 | Rivale | Rivale | "Bloody God of War", forges weapons | ⬜ | Builder / generator (CT / AA script) |
 | Qual | Qual | Creator of Zoltraak (universal magic) | ⬜ | Foundational engine / AOB pattern compiler |

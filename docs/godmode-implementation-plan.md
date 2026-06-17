@@ -6,11 +6,14 @@
 > **re-assert loop in v1**, **Path B (self-contained `Solitar`)** — per the
 > locked decisions in spec §2.
 
-> **Status: NOT STARTED.** No code written yet (another session is editing
-> `Wirbel.cpp` / `Frieren.cpp` / `Genau.cpp` / `Aura.cpp`). See
-> **[§Merge safety](#merge-safety)** before starting — the *new* `Solitar.*`
-> files are conflict-free; the *shared-file* edits (Frieren/Fern/Mimic/CMake) are
-> the conflict surface and should land after the concurrent work merges.
+> **Status: DONE (build 1251, branch dev).** All phases shipped; full build +
+> 1551 C# / 548 dll / 31 utf8 tests green. The concurrent DLL work had already
+> merged (PR #298) before this started, so the shared-file edits applied cleanly.
+> **Two intentional deviations:** (1) the UI was folded into the **Teleport tab**
+> as a "God Mode" section (Force ON/OFF + badge + ↻ + Copy CE Script) instead of
+> a new `ProtectionPanel` — lower risk, mirrors the Debug Camera toggle already
+> there; (2) **hotkey rows deferred** (not requested; avoids the 16-row count
+> test). ⚠ In-game live-verify still pending (spec §9).
 
 -----
 

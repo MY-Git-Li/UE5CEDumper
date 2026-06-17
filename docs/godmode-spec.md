@@ -1,8 +1,18 @@
 # GodMode (damage immunity) — Technical Specification
 
-> Status: **DESIGN / DECISIONS LOCKED.** Not yet implemented. This document is
-> the design contract; the companion **[godmode-implementation-plan.md](godmode-implementation-plan.md)**
-> is the step-by-step build plan. Modeled on **[teleport-spec.md](teleport-spec.md)**
+> Status: **IMPLEMENTED (build 1251, branch dev).** All DLL/pipe/mailbox/CE/UI
+> pieces shipped following this contract; 1551 C# + 548 dll + 31 utf8 tests green.
+> **Deviations from the plan (intentional, lower-risk):** the in-app UI was
+> **folded into the Teleport tab as a "God Mode" section** (mirroring the Debug
+> Camera force toggle that already lives there) instead of a separate
+> `ProtectionPanel` — no new tab, no `MainTabIndex` shift. **Hotkey rows were
+> deferred** (the user asked for the Lua-mailbox on/off, not hotkeys; avoids the
+> fragile 16-row count test). `get_protect_state` (want/live/resolvable) ships on
+> the pipe + export but the UI badge uses the simpler `get_god_mode` tri-state,
+> exactly like the Debug Camera badge. ⚠ In-game live-verify still pending
+> (smoke checklist §9). This document is the design contract; the companion
+> **[godmode-implementation-plan.md](godmode-implementation-plan.md)** is the
+> step-by-step build plan. Modeled on **[teleport-spec.md](teleport-spec.md)**
 > and the Debug Camera force on/off architecture (PR #264, build 1014): **all
 > logic DLL-side, exposed as C ABI exports + pipe commands + a Mimic mailbox
 > command; the UI and any generated CE Lua are thin, stateless clients.** No

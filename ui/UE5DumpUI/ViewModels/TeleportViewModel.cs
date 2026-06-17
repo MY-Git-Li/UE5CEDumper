@@ -164,6 +164,13 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _debugCameraState = "Unknown";
     [ObservableProperty] private string _debugCameraBadgeColor = "#888888";
 
+    // ── God Mode (Solitar via set_god_mode) ────────────────────────────
+    /// <summary>Tri-state badge: "ON" (immune) / "OFF" / "Unknown". The pawn
+    /// resolution, bitfield write, and re-assert worker all live DLL-side; this
+    /// VM is a thin client over set_god_mode / get_god_mode.</summary>
+    [ObservableProperty] private string _godModeState = "Unknown";
+    [ObservableProperty] private string _godModeBadgeColor = "#888888";
+
     // ── Directional teleport (move along the pawn's facing) ────────────
     /// <summary>Distance in unreal units to step along the facing direction
     /// (negative = backward).</summary>
@@ -232,6 +239,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             StatusText = "Not connected";
             AutoRefresh = false;
             ApplyDebugCameraState(-1);   // badge back to Unknown
+            ApplyGodModeState(-1);       // godmode badge back to Unknown
             ApplyMouseCursorState(-1);   // cursor badge back to Unknown
             ClearPovDisplay();
         }
@@ -703,6 +711,102 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             _log.Error($"Teleport ForceDebugCamera({want}) failed", ex);
         }
         finally { IsBusy = false; }
+    }
+
+    // ── God Mode (force AActor.bCanBeDamaged, Solitar) ─────────────────
+
+    /// <summary>Map the DLL tri-state (1=immune, 0=can be damaged, &lt;0=unknown)
+    /// onto the badge.</summary>
+    private void ApplyGodModeState(int state)
+        => (GodModeState, GodModeBadgeColor) = state switch
+        {
+            1 => ("ON",      "#4EC9B0"),   // green — immune
+            0 => ("OFF",     "#999999"),   // grey — can be damaged
+            _ => ("Unknown", "#888888"),
+        };
+
+    [RelayCommand]
+    private Task ForceGodModeOnAsync()  => ForceGodModeAsync(wantOn: true);
+
+    [RelayCommand]
+    private Task ForceGodModeOffAsync() => ForceGodModeAsync(wantOn: false);
+
+    /// <summary>↻ — re-read and display the live God Mode state.</summary>
+    [RelayCommand]
+    private async Task RefreshGodModeAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var state = await _dump.GetGodModeAsync();
+            ApplyGodModeState(state);
+            StatusText = state switch
+            {
+                1 => "God Mode is ON (bCanBeDamaged = false).",
+                0 => "God Mode is OFF.",
+                _ => "God Mode state unknown — enter gameplay so a pawn spawns, then ↻.",
+            };
+        }
+        catch (Exception ex)
+        {
+            ApplyGodModeState(-1);
+            SetError(ex);
+            _log.Error("Teleport RefreshGodMode failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Force God Mode on/off — delegates to the DLL (set_god_mode), which
+    /// resolves the pawn, writes bCanBeDamaged, and runs a re-assert worker so the
+    /// flag survives respawns. Idempotent.</summary>
+    private async Task ForceGodModeAsync(bool wantOn)
+    {
+        if (!IsConnected) return;
+        var want = wantOn ? "ON" : "OFF";
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var state = await _dump.SetGodModeAsync(wantOn);
+            ApplyGodModeState(state);
+            StatusText = state switch
+            {
+                1 when wantOn  => "✓ God Mode forced ON (bCanBeDamaged = false).",
+                0 when !wantOn => "✓ God Mode forced OFF.",
+                < 0 => $"Force {want}: no pawn / unreadable (enter gameplay first) — " +
+                       "the flag will apply once a pawn exists.",
+                _  => $"⚠ Force {want}: state is now {(state == 1 ? "ON" : "OFF")}.",
+            };
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            StatusText = $"God Mode force {want} failed: {ex.Message}";
+            _log.Error($"Teleport ForceGodMode({want}) failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Copy a self-contained CE AA script (tick = ON, untick = OFF) that
+    /// drives God Mode through the DLL mailbox (CMD_PROTECT). Paste into a CE
+    /// memory record. Works offline — it's static text.</summary>
+    [RelayCommand]
+    private async Task CopyGodModeScriptAsync()
+    {
+        try
+        {
+            await _platform.CopyToClipboardAsync(
+                UE5DumpUI.Services.ProtectionScriptGenerator.Generate());
+            StatusText = "Copied GodMode CE script (paste into a CE memory record; " +
+                         "tick = ON, untick = OFF).";
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport CopyGodModeScript failed", ex);
+        }
     }
 
     // ── Directional + explicit-coordinate teleport ─────────────────────

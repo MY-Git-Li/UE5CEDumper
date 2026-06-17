@@ -128,6 +128,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- Denken   (NativeDisasm)  <- Zydis x64 decoder: native UFunction -> [this+off] property xref (Path 2, build 862) |
 |      +-- Tot      (Cancellation)  <- Tot::Requested() flag; Fern disconnect-monitor + shutdown-abort stop long ops (build 936) |
 |      +-- Wirbel   (Teleport)      <- marker save/recall + cursor + camera POV + directional/explicit-coord TP + force mouse cursor (bShowMouseCursor) (build 1144); CMD_TELEPORT=8 mailbox (ops 0-15) |
+|      +-- Solitar  (GodMode)       <- force AActor::bCanBeDamaged (FBoolProperty bit) + re-assert worker; CMD_PROTECT=9 mailbox on/off (build 1251) |
 +----------------------+-------------------------------+
                        | Named Pipe: \\.\pipe\UE5DumpBfx
                        | JSON over pipe (newline-delimited)
@@ -143,7 +144,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- InterestingFunctionsPanel <- Scored UFunctions; 📦 batch CT (build 760) |
 |      +-- InterestingPropertiesPanel<- Scored properties (B'); 📦 batch CT (build 760) |
 |      +-- ConsolePanel              <- UFUNCTION(exec) discovery + UCheatManager hint (build 778) |
-|      +-- TeleportPanel             <- marker save/recall + cursor + BugItGo + POV + facing-dir TP + coord TP + force cursor (input-mode, build 1147) + CE Lua/.CT (17-row) |
+|      +-- TeleportPanel             <- marker save/recall + cursor + BugItGo + POV + facing-dir TP + coord TP + force cursor (input-mode, build 1147) + GodMode toggle (Solitar, build 1251) + CE Lua/.CT (17-row) |
 |      +-- ValueSearchPanel          <- CE-style by-value scan (build 738 + Phase 2 757) |
 |      +-- ProxyDeployPanel          <- Proxy DLL management |
 |      +-- CeXmlExport               <- CE XML pointer chains |

@@ -370,6 +370,44 @@
         </StackPanel>
       </Border>
 
+      <!-- ── God Mode (Solitar — force AActor.bCanBeDamaged) ── -->
+      <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
+              CornerRadius="4" Padding="10">
+        <StackPanel Spacing="8">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="{StaticResource str.TP.GmHeader}"
+                       Foreground="#DDDDDD" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <TextBlock Text="{StaticResource str.TP.GmState}" Foreground="#999999"
+                       FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            <Border Background="#333337" CornerRadius="3" Padding="6,1">
+              <TextBlock Text="{Binding GodModeState}"
+                         Foreground="{Binding GodModeBadgeColor}"
+                         FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            </Border>
+          </StackPanel>
+          <TextBlock Text="{StaticResource str.TP.GmHint}"
+                     Foreground="#888888" FontSize="11" TextWrapping="Wrap"/>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Content="{StaticResource str.TP.GmOn}"
+                    Command="{Binding ForceGodModeOnCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.GmOn}"
+                    IsEnabled="{Binding CanOperate}" Padding="12,4"/>
+            <Button Content="{StaticResource str.TP.GmOff}"
+                    Command="{Binding ForceGodModeOffCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.GmOff}"
+                    IsEnabled="{Binding CanOperate}" Padding="12,4"/>
+            <Button Content="{StaticResource str.TP.GmRefresh}"
+                    Command="{Binding RefreshGodModeCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.GmRefresh}"
+                    IsEnabled="{Binding CanOperate}" Padding="10,4"/>
+            <Button Content="{StaticResource str.TP.GmCopyScript}"
+                    Command="{Binding CopyGodModeScriptCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.GmCopyScript}"
+                    Padding="10,4"/>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
       <!-- ── Force mouse cursor (writes bShowMouseCursor) ── -->
       <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
               CornerRadius="4" Padding="10">

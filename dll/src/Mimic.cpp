@@ -82,6 +82,7 @@ static void HandleListFunctions();
 static void HandleListInstances();
 static void HandleSetDebugCamera();
 static void HandleTeleport();
+static void HandleProtect();
 static void SetError(int32_t code, const char* msg);
 static void SetDone(int32_t resultCode);
 static bool EnsureInitialized();
@@ -172,6 +173,9 @@ static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
                 break;
             case CMD_TELEPORT:
                 HandleTeleport();
+                break;
+            case CMD_PROTECT:
+                HandleProtect();
                 break;
             default:
                 SetError(-1, "Unknown command");
@@ -829,6 +833,45 @@ static void HandleTeleport() {
     }
     LOG_INFO("Mailbox: TELEPORT op=%llu slot=%d -> rc=%d",
              (unsigned long long)op, slot, rc);
+    SetDone(rc);
+}
+
+// CMD_PROTECT: GodMode force on/off (Solitar), shared with the UI pipe
+// (set_god_mode). instanceAddr = op (ProtectOp), ufuncAddr = value (0/1) for the
+// SET op. Delegates entirely to the Frieren exports; this handler only marshals
+// the mailbox fields (docs/godmode-spec.md §6.2).
+static void HandleProtect() {
+    const uint64_t op = g_invokeMailbox.instanceAddr;
+    int32_t rc;
+    switch (op) {
+    case PROTECT_OP_SET_GODMODE:
+        rc = UE5_SetGodMode(g_invokeMailbox.ufuncAddr != 0 ? 1 : 0);
+        break;
+    case PROTECT_OP_GET_GODMODE:
+        rc = UE5_GetGodMode();
+        break;
+    case PROTECT_OP_GET_STATE: {
+        int32_t want = 0, live = -1, resolvable = 0;
+        rc = UE5_GetProtectState(&want, &live, &resolvable);
+        memset(g_invokeMailbox.paramsData, 0, sizeof(g_invokeMailbox.paramsData));
+        g_invokeMailbox.paramsData[0] = static_cast<uint8_t>(want ? 1 : 0);
+        g_invokeMailbox.paramsData[1] = (live < 0)
+            ? 0xFF : static_cast<uint8_t>(live ? 1 : 0);
+        g_invokeMailbox.paramsData[2] = static_cast<uint8_t>(resolvable ? 1 : 0);
+        break;
+    }
+    default:
+        SetError(-1, "Protect: unknown op");
+        return;
+    }
+    if (rc < 0) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "GodMode: op=%llu failed code=%d",
+                 (unsigned long long)op, rc);
+        strncpy(g_invokeMailbox.errorMsg, msg, sizeof(g_invokeMailbox.errorMsg) - 1);
+        g_invokeMailbox.errorMsg[sizeof(g_invokeMailbox.errorMsg) - 1] = '\0';
+    }
+    LOG_INFO("Mailbox: PROTECT op=%llu -> rc=%d", (unsigned long long)op, rc);
     SetDone(rc);
 }
 

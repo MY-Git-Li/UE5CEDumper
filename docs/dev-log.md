@@ -14,6 +14,46 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-17 — GodMode (Solitar): force AActor::bCanBeDamaged, with Lua mailbox on/off (build 1251)
+
+UE4/5-wide damage immunity, zero per-game config. Design contract +
+implementation plan: [godmode-spec.md](godmode-spec.md) /
+[godmode-implementation-plan.md](godmode-implementation-plan.md).
+
+**Mechanism:** GodMode ON ⇒ the local player pawn's `AActor::bCanBeDamaged`
+FBoolProperty bit is forced FALSE, so damage routed through the standard engine
+pipeline (`UGameplayStatics::ApplyDamage` → `TakeDamage`, gated on
+`CanBeDamaged()`) is dropped. It's the **same single-bit read-modify-write**
+`Wirbel::ResolveCursorBit` / `SetMouseCursor` already does for
+`bShowMouseCursor`, retargeted to the pawn — **pure memory write, no UFunction
+invoke, no game thread**, so it works even in menus. A re-assert worker
+re-resolves the pawn every ~300 ms and re-writes on drift, so the flag survives
+respawns / level changes. No cached instance pointers (re-resolved per op + per
+tick — the 2026-06-10 audit's stale-pointer rule).
+
+- **New module `Solitar`** (索莉塔, roster #11; naming-convention 🟡→🟢). Path B —
+  self-contained, public `Ubel`/`Aura`/`Macht`/`DynOff` only, zero `Wirbel`
+  coupling. `SetGodMode`/`GetGodMode`/`GetState` + a general `SetActorBool`
+  primitive (v2 hook for "force any bool" from Property Search). Worker joined in
+  `UE5_Shutdown`.
+- **Lua mailbox on/off** (the headline ask): `CMD_PROTECT = 9` + `ProtectOp`
+  (SET_GODMODE / GET_GODMODE / GET_STATE). `ProtectionScriptGenerator` emits a
+  self-contained CE AA toggle record (tick = ON, untick = OFF) driving the
+  mailbox — no helper file. Reachable from the Teleport tab's **Copy CE Script**.
+- **Exports** `UE5_SetGodMode` / `UE5_GetGodMode` / `UE5_GetProtectState`; **pipe**
+  `set_god_mode` / `get_god_mode` / `get_protect_state`.
+- **UI:** a "God Mode" section on the **Teleport tab** (Force ON/OFF + tri-state
+  badge + ↻ + Copy CE Script), mirroring the Debug Camera toggle that already
+  lives there — no new tab, no `MainTabIndex` shift. Hotkeys deferred.
+- **"Invisible" was cut** after review: visual `bHidden` hide isn't useful, and
+  "enemies can't detect you" has no universal reflected bool (AI perception is
+  per-game) — left to Property Search + the general `SetActorBool` primitive.
+- **Tests:** +38 dll_helpers assertions (`Solitar::ApplyBoolBit` single-bit RMW
+  leaves the other 7 bits intact) → 548; +10 C# (7 `ProtectionScriptGenerator` +
+  3 Teleport VM GodMode) → 1551. Full build green. ⚠ in-game live-verify pending.
+
+-----
+
 ## 2026-06-16 — Snapshot/SPC stale-session gating: real per-launch token (process creation time) (build 1227)
 
 Closes the 🔴 top-of-todo bug confirmed on SEED 2026-06-16: build 1216 gated the

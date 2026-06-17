@@ -187,4 +187,7 @@ constexpr double TELEPORT_DEFAULT_ZOFFSET = 100.0;   // ≈ capsule half height 
 constexpr double TELEPORT_TRACE_DIST      = 100000.0;// screen-center ray length (1 km)
 constexpr int    TELEPORT_MAPNAME_CAP     = 128;     // marker map-name buffer size
 
+// --- GodMode (Solitar) — docs/godmode-spec.md ---
+constexpr int    PROTECT_REASSERT_MS      = 300;     // re-assert worker tick (write-on-drift)
+
 } // namespace Grimoire

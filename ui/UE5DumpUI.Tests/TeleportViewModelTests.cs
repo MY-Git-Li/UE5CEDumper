@@ -42,6 +42,17 @@ public class TeleportViewModelTests
         public override Task<int> GetDebugCameraStateAsync(CancellationToken ct = default)
         { GetDebugCameraCalls++; return Task.FromResult(NextDebugCameraState); }
 
+        public int NextGodModeState { get; set; } = -1;
+        public int SetGodModeCalls { get; private set; }
+        public int GetGodModeCalls { get; private set; }
+        public bool? LastSetGodModeEnable { get; private set; }
+
+        public override Task<int> SetGodModeAsync(bool enable, CancellationToken ct = default)
+        { SetGodModeCalls++; LastSetGodModeEnable = enable; return Task.FromResult(NextGodModeState); }
+
+        public override Task<int> GetGodModeAsync(CancellationToken ct = default)
+        { GetGodModeCalls++; return Task.FromResult(NextGodModeState); }
+
         public override Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default)
         { GetPoseCalls++; return Task.FromResult(NextPose); }
 
@@ -405,6 +416,46 @@ public class TeleportViewModelTests
         Assert.Equal(1, fake.SetDebugCameraCalls);
         Assert.False(fake.LastSetDebugCameraEnable);
         Assert.Equal("OFF", vm.DebugCameraState);
+    }
+
+    [Fact]
+    public async Task ForceGodModeOn_calls_dll_and_sets_badge()
+    {
+        var fake = new FakeDumpService { NextGodModeState = 1 };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+
+        await vm.ForceGodModeOnCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.SetGodModeCalls);
+        Assert.True(fake.LastSetGodModeEnable);
+        Assert.Equal("ON", vm.GodModeState);
+    }
+
+    [Fact]
+    public async Task ForceGodModeOff_sends_disable_and_sets_badge()
+    {
+        var fake = new FakeDumpService { NextGodModeState = 0 };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+
+        await vm.ForceGodModeOffCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.SetGodModeCalls);
+        Assert.False(fake.LastSetGodModeEnable);
+        Assert.Equal("OFF", vm.GodModeState);
+    }
+
+    [Fact]
+    public async Task ForceGodMode_does_nothing_when_disconnected()
+    {
+        var fake = new FakeDumpService { NextGodModeState = 1 };
+        var vm = CreateVm(fake, out _);   // not connected
+
+        await vm.ForceGodModeOnCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, fake.SetGodModeCalls);
+        Assert.Equal("Unknown", vm.GodModeState);
     }
 
     [Fact]
