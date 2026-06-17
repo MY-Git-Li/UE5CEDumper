@@ -26,6 +26,7 @@
 #include "../src/Denken.h"
 #include "../src/Lineal.h"  // UE5.7+ packed FUObjectItem reconstruction (Reconstruct/Encode)
 #include "../src/GraphPath.h"   // Pure BFS shortest-path core ("Locate in GWorld")
+#include "../src/Solitar.h"     // GodMode FBoolProperty bit write (ApplyBoolBit, header-inline)
 
 #include <Windows.h>
 #include <timeapi.h>   // timeBeginPeriod — exercised by the poll-latency check
@@ -1826,6 +1827,66 @@ static void Test_GraphPath_Reconstruction() {
     }
 }
 
+// ----- Solitar::ApplyBoolBit (GodMode FBoolProperty bit write) ----------------
+// The critical correctness property: a single-bit read-modify-write must leave
+// the other 7 bitfields packed in the same byte untouched (GodMode ON clears
+// bCanBeDamaged; OFF restores it).
+
+static void Test_Solitar_ApplyBoolBit() {
+    using Solitar::ApplyBoolBit;
+    // Set a bit.
+    EXPECT_EQ_U64("set bit into 0x00",          ApplyBoolBit(0x00, 0x04, true),  0x04);
+    EXPECT_EQ_U64("set already-set bit",        ApplyBoolBit(0x04, 0x04, true),  0x04);
+    EXPECT_EQ_U64("set bit preserves others",   ApplyBoolBit(0xFB, 0x04, true),  0xFF);
+    // Clear a bit (GodMode ON ⇒ bCanBeDamaged FALSE).
+    EXPECT_EQ_U64("clear bit from 0xFF",        ApplyBoolBit(0xFF, 0x04, false), 0xFB);
+    EXPECT_EQ_U64("clear already-clear bit",    ApplyBoolBit(0x00, 0x04, false), 0x00);
+    EXPECT_EQ_U64("clear bit preserves others", ApplyBoolBit(0x05, 0x04, false), 0x01);
+    // Every single-bit mask: set/clear touches only that bit; idempotent.
+    for (int i = 0; i < 8; ++i) {
+        uint8_t mask = static_cast<uint8_t>(1u << i);
+        EXPECT_EQ_U64("clear one bit of 0xFF leaves ~mask",
+                      ApplyBoolBit(0xFF, mask, false), static_cast<uint8_t>(0xFF & ~mask));
+        EXPECT_EQ_U64("set one bit of 0x00 leaves mask",
+                      ApplyBoolBit(0x00, mask, true), mask);
+        uint8_t setOnce = ApplyBoolBit(0xA5, mask, true);
+        EXPECT_EQ_U64("idempotent set",   ApplyBoolBit(setOnce, mask, true),  setOnce);
+        uint8_t clrOnce = ApplyBoolBit(0xA5, mask, false);
+        EXPECT_EQ_U64("idempotent clear", ApplyBoolBit(clrOnce, mask, false), clrOnce);
+    }
+}
+
+// ----- Solitar::MatchProtectionBool (T2 generic invincibility-flag matcher) ---
+// Polarity is the bug-prone part: a wrong value would ENABLE damage. Lock the
+// keyword set + protect-value for each known flag, and confirm unrelated /
+// ambiguous names (deal-damage, visibility) are NOT matched.
+
+static void Test_Solitar_MatchProtectionBool() {
+    bool p = false;
+    // Positive (protect = true): set the flag ON for godmode.
+    EXPECT("binvincible matched",  Solitar::MatchProtectionBool("binvincible", p));
+    EXPECT("binvincible protect=true", p == true);
+    EXPECT("bisinvulnerable matched", Solitar::MatchProtectionBool("bisinvulnerable", p));
+    EXPECT("invulnerable protect=true (NOT read as vulnerable)", p == true);
+    EXPECT("bisimmortal matched",  Solitar::MatchProtectionBool("bisimmortal", p));
+    EXPECT("immortal protect=true", p == true);
+    EXPECT("bmuteki matched",      Solitar::MatchProtectionBool("bmuteki", p));
+    EXPECT("muteki protect=true",  p == true);
+    EXPECT("bdamageimmune matched", Solitar::MatchProtectionBool("bdamageimmune", p));
+    EXPECT("damageimmune protect=true", p == true);
+    // Negative (protect = false): clear the flag for godmode.
+    EXPECT("bcanbedamaged matched", Solitar::MatchProtectionBool("bcanbedamaged", p));
+    EXPECT("canbedamaged protect=false", p == false);
+    EXPECT("bcantakedamage matched", Solitar::MatchProtectionBool("bcantakedamage", p));
+    EXPECT("cantakedamage protect=false", p == false);
+    // Must NOT match: ambiguous deal-damage flags + unrelated bools.
+    EXPECT("bcandamage NOT matched (deal-damage)", !Solitar::MatchProtectionBool("bcandamage", p));
+    EXPECT("bnodamage NOT matched (ambiguous)",    !Solitar::MatchProtectionBool("bnodamage", p));
+    EXPECT("bhidden NOT matched",   !Solitar::MatchProtectionBool("bhidden", p));
+    EXPECT("bvisible NOT matched",  !Solitar::MatchProtectionBool("bvisible", p));
+    EXPECT("breplicates NOT matched", !Solitar::MatchProtectionBool("breplicates", p));
+}
+
 int main() {
     std::printf("dll_helpers_test (Renge + Scharf + Radar)\n");
     std::printf("------------------------------------------\n");
@@ -1918,6 +1979,10 @@ int main() {
     Test_GraphPath_VisitedCap();
     Test_GraphPath_ContainerEdgePreserved();
     Test_GraphPath_Reconstruction();
+
+    // Solitar GodMode — FBoolProperty single-bit read-modify-write
+    Test_Solitar_ApplyBoolBit();
+    Test_Solitar_MatchProtectionBool();
 
     std::printf("------------------------------------------\n");
     std::printf("Pass: %d   Fail: %d\n", g_pass, g_fail);

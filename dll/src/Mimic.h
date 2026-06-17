@@ -47,6 +47,16 @@ enum Cmd : int32_t {
                               //           op CURSOR output:
                               //             [0..23] 3 doubles hit point, [177] tier,
                               //             [178] u8 usedCenter
+    CMD_PROTECT         = 9,  // GodMode (Solitar): force AActor::bCanBeDamaged off.
+                              //   Input:  instanceAddr = op (ProtectOp below)
+                              //           ufuncAddr    = value (0/1) for SET ops
+                              //   Output: result = observed state (1 immune /
+                              //           0 can-be-damaged) or negative
+                              //           Solitar::ProtectResult (docs/godmode-spec.md §6.3)
+                              //           paramsData (op GET_STATE):
+                              //             [0] u8 want (desired toggle 1/0)
+                              //             [1] u8 live (observed 1/0, 0xFF if no pawn)
+                              //             [2] u8 resolvable (1/0)
 };
 
 // CMD_TELEPORT op codes (written into instanceAddr by CE Lua / pipe bridge)
@@ -88,6 +98,16 @@ enum TeleportOp : uint64_t {
     TP_OP_GET_CURSOR   = 15, // read the current bShowMouseCursor state. slot
                              //   ignored. Output: result = code, paramsData[0] =
                              //   state (1/0).
+};
+
+// CMD_PROTECT op codes (written into instanceAddr by CE Lua / pipe bridge).
+enum ProtectOp : uint64_t {
+    PROTECT_OP_SET_GODMODE = 0, // ufuncAddr = 1 (ON) / 0 (OFF). Output result =
+                                //   observed state.
+    PROTECT_OP_GET_GODMODE = 1, // Output result = observed state.
+    PROTECT_OP_GET_STATE   = 2, // Output paramsData[0..2] = want / live / resolvable.
+    // Reserved (v2 — docs/godmode-spec.md §5.4): PROTECT_OP_SET_ACTOR_BOOL = 3,
+    // generic "force any reflected bool" using instanceAddr=obj + className=prop.
 };
 
 // Mailbox status (DLL writes to status field)

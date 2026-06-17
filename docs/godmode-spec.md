@@ -1,8 +1,35 @@
 # GodMode (damage immunity) — Technical Specification
 
-> Status: **DESIGN / DECISIONS LOCKED.** Not yet implemented. This document is
-> the design contract; the companion **[godmode-implementation-plan.md](godmode-implementation-plan.md)**
-> is the step-by-step build plan. Modeled on **[teleport-spec.md](teleport-spec.md)**
+> Status: **IMPLEMENTED (build 1251, branch dev).** All DLL/pipe/mailbox/CE/UI
+> pieces shipped following this contract; 1551 C# + 548 dll + 31 utf8 tests green.
+> **Deviations from the plan (intentional, lower-risk):** the in-app UI was
+> **folded into the Teleport tab as a "God Mode" section** (mirroring the Debug
+> Camera force toggle that already lives there) instead of a separate
+> `ProtectionPanel` — no new tab, no `MainTabIndex` shift. **Hotkey rows shipped**
+> (build 1252): "God Mode ON" / "God Mode OFF" added to the Teleport tab's hotkey
+> list (count 16→18), wired to the same OS global-hotkey path as the other rows.
+> `get_protect_state` (want/live/resolvable) ships on
+> the pipe + export but the UI badge uses the simpler `get_god_mode` tri-state,
+> exactly like the Debug Camera badge.
+>
+> **Build 1256 — generic invincibility-bool scan (T2).** GodMode no longer flips
+> only `bCanBeDamaged`: on toggle it reflection-scans the pawn's whole class
+> hierarchy for FBoolProperty fields matching a universal damage/invincibility
+> keyword table (`Solitar::MatchProtectionBool`: invincib / invulnerab / immort /
+> godmode / unkillable / cannotdie / muteki / damageimmune / cantakedamage /
+> canbedamaged …) with a per-keyword polarity, and applies ALL of them (ON = each
+> flag's "protect" value, OFF = its normal value), re-asserted by the worker. Zero
+> per-game config — same philosophy as `PropertyScoringTable`. The matched flags
+> are logged so the user sees exactly what was found on their game. **Why:**
+> live-test on SEED BATTLE DESTINY REMASTERED showed `bCanBeDamaged` flips
+> successfully (log `rc=1`) but has no effect — SEED is a custom battle framework
+> (`LifeMSUnit : LifeUnitBase : UnitFwBaseUnit`) that doesn't gate damage on it.
+> T2 auto-covers games that DO expose a named invincibility bool; games that are
+> purely value-based (HP number, like SEED appears to be) still need Value Search +
+> Freeze (a generic auto-HP-freeze, "T3", was considered and deferred by the user).
+> ⚠ In-game live-verify still pending (smoke checklist §9). This document is the design contract; the companion
+> **[godmode-implementation-plan.md](godmode-implementation-plan.md)** is the
+> step-by-step build plan. Modeled on **[teleport-spec.md](teleport-spec.md)**
 > and the Debug Camera force on/off architecture (PR #264, build 1014): **all
 > logic DLL-side, exposed as C ABI exports + pipe commands + a Mimic mailbox
 > command; the UI and any generated CE Lua are thin, stateless clients.** No

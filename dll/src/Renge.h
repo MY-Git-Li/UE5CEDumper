@@ -76,6 +76,11 @@ constexpr const char* CMD_TELEPORT_RELATIVE        = "teleport_relative";
 constexpr const char* CMD_SET_MOUSE_CURSOR         = "set_mouse_cursor";
 constexpr const char* CMD_GET_MOUSE_CURSOR         = "get_mouse_cursor";
 
+// GodMode (Solitar) — force AActor::bCanBeDamaged (docs/godmode-spec.md §6.1)
+constexpr const char* CMD_SET_GOD_MODE             = "set_god_mode";
+constexpr const char* CMD_GET_GOD_MODE             = "get_god_mode";
+constexpr const char* CMD_GET_PROTECT_STATE        = "get_protect_state";
+
 // Snapshot capture (experimental — Phase A). Stateless cursor pagination
 // like get_object_list: begin_snapshot returns the total object count for
 // progress; snapshot_chunk streams [offset, offset+limit) objects with their

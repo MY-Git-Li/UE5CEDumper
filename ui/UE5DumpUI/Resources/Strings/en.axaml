@@ -597,6 +597,20 @@
     <sys:String x:Key="str.Tip.TP.DcOn">Deterministically enable the debug camera (reads state first, only toggles if needed). Idempotent — pressing again when it's already ON does nothing.</sys:String>
     <sys:String x:Key="str.Tip.TP.DcOff">Deterministically disable the debug camera and return control to the player. On builds that stripped the disable path, the DLL swaps the local player's controller back to the original PlayerController.</sys:String>
     <sys:String x:Key="str.Tip.TP.DcRefresh">Re-read the live debug-camera state (1=ON / 0=OFF / unknown if no live CheatManager).</sys:String>
+
+    <!-- God Mode (Solitar — force AActor.bCanBeDamaged) -->
+    <sys:String x:Key="str.TP.GmHeader">God Mode</sys:String>
+    <sys:String x:Key="str.TP.GmHint">Forces the player pawn's AActor.bCanBeDamaged to FALSE, so damage routed through the standard engine pipeline (ApplyDamage) is dropped. Re-asserted on a timer while ON, so it survives respawns. Needs a live pawn — enter gameplay first. Games with custom health systems may bypass it: then freeze the health value in Value Search, or find the game's own immortal flag in Property Search. Single-player only — online games replicate this flag server-side.</sys:String>
+    <sys:String x:Key="str.TP.GmState">State:</sys:String>
+    <sys:String x:Key="str.TP.GmOn">Force ON</sys:String>
+    <sys:String x:Key="str.TP.GmOff">Force OFF</sys:String>
+    <sys:String x:Key="str.TP.GmRefresh">↻</sys:String>
+    <sys:String x:Key="str.TP.GmCopyScript">Copy CE Script</sys:String>
+    <sys:String x:Key="str.Tip.TP.GmOn">Turn God Mode ON (clear bCanBeDamaged). Idempotent; the DLL re-asserts the bit every ~300 ms so it survives respawns.</sys:String>
+    <sys:String x:Key="str.Tip.TP.GmOff">Turn God Mode OFF (restore bCanBeDamaged) and stop the re-assert worker.</sys:String>
+    <sys:String x:Key="str.Tip.TP.GmRefresh">Re-read the live God Mode state (1=immune / 0=can be damaged / unknown if no pawn).</sys:String>
+    <sys:String x:Key="str.Tip.TP.GmCopyScript">Copy a self-contained Cheat Engine AA script (tick = ON, untick = OFF) that drives God Mode via the DLL mailbox. Paste into a CE memory record.</sys:String>
+
     <!-- Teleport: Camera POV (read-only) -->
     <sys:String x:Key="str.TP.PovHeader">Camera POV (read-only)</sys:String>
     <sys:String x:Key="str.TP.GetPov">Get POV</sys:String>

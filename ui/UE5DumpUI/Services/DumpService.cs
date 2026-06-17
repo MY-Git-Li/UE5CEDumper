@@ -1984,6 +1984,28 @@ public sealed class DumpService : IDumpService
         return res["state"]?.GetValue<int>() ?? -1;
     }
 
+    // === God Mode (Solitar) — docs/godmode-spec.md §6.1 ===
+
+    public async Task<int> GetGodModeAsync(CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "get_god_mode" };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return res["state"]?.GetValue<int>() ?? -1;
+    }
+
+    public async Task<int> SetGodModeAsync(bool enable, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "set_god_mode",
+            ["enable"] = enable,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return res["state"]?.GetValue<int>() ?? -1;
+    }
+
     // === Teleport (Wirbel) — docs/teleport-spec.md §7 ===
 
     public async Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default)

@@ -146,6 +146,20 @@ __declspec(dllexport) int32_t   UE5_SetMouseCursor(int32_t show, int32_t* outSta
 // Read the current bShowMouseCursor state. *outState (nullable) = 1/0.
 __declspec(dllexport) int32_t   UE5_GetMouseCursor(int32_t* outState);
 
+// === GodMode (Solitar: force AActor::bCanBeDamaged) ===
+// Stateful toggle. GodMode ON ⇒ the local pawn's bCanBeDamaged is forced FALSE
+// and re-asserted on a timer (survives respawns). Pure memory write — no invoke.
+// Returns the OBSERVED live state (1 = immune, 0 = can be damaged) or a negative
+// Solitar::ProtectResult (docs/godmode-spec.md §6.3). CE Lua uses the Mimic
+// mailbox (CMD_PROTECT=9) — executeCodeEx cannot read these return values.
+__declspec(dllexport) int32_t   UE5_SetGodMode(int32_t enable);
+__declspec(dllexport) int32_t   UE5_GetGodMode();
+// Combined state for the UI badge: *outWant = desired toggle (1/0, survives
+// reconnect), *outLive = observed state (1/0, -1 if no pawn), *outResolvable =
+// could the live pawn be read (1/0). All params nullable. Returns 0.
+__declspec(dllexport) int32_t   UE5_GetProtectState(int32_t* outWant,
+                                    int32_t* outLive, int32_t* outResolvable);
+
 // === Mailbox (CE Lua shared memory interface) ===
 // Returns the address of the g_invokeMailbox buffer.
 // CE Lua can also use getAddress("g_invokeMailbox") directly.

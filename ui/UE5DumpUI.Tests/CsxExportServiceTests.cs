@@ -103,6 +103,8 @@ public class StubDumpService : IDumpService
     public virtual Task<InvokeFunctionResult> InvokeFunctionAsync(string funcName, string? instanceAddr = null, string? className = null, int parmsSize = 0, string? paramsHex = null, bool directCall = false, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<int> GetDebugCameraStateAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<int> SetDebugCameraAsync(bool enable, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<int> GetGodModeAsync(CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<int> SetGodModeAsync(bool enable, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<DataTableWalkResult> WalkDataTableRowsAsync(string addr, int offset = 0, int limit = 64, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<TeleportPose> TeleportSaveMarkerAsync(int slot, CancellationToken ct = default) => throw new NotImplementedException();

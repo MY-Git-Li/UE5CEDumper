@@ -38,6 +38,9 @@ extern "C" int32_t   UE5_CallProcessEventDirect(uintptr_t instance, uintptr_t uf
 extern "C" int32_t   UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t params);
 extern "C" int32_t   UE5_GetDebugCameraState();
 extern "C" int32_t   UE5_SetDebugCamera(int32_t enable);
+extern "C" int32_t   UE5_SetGodMode(int32_t enable);
+extern "C" int32_t   UE5_GetGodMode();
+extern "C" int32_t   UE5_GetProtectState(int32_t* outWant, int32_t* outLive, int32_t* outResolvable);
 // Size-aware variant: the queued request owns a copy of the param buffer, so a
 // timed-out invoke can't use-after-free this handler's stack-local paramBuf.
 extern "C" int32_t   UE5_CallProcessEventEx(uintptr_t instance, uintptr_t ufunc, uintptr_t params, uint32_t paramsSize);
@@ -3205,6 +3208,37 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             int32_t state = UE5_SetDebugCamera(enable ? 1 : 0);
             json data;
             data["state"] = state;   // resulting state: 1=on, 0=off, -1=error
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // ── set_god_mode / get_god_mode / get_protect_state (Solitar) ──
+        // GodMode ON ⇒ the local pawn's bCanBeDamaged is forced FALSE and
+        // re-asserted on a timer. Non-negative state = observed live state
+        // (1 immune / 0 can-be-damaged); negative = Solitar::ProtectResult.
+        if (cmd == Renge::CMD_SET_GOD_MODE) {
+            bool enable = request.value("enable", false);
+            Sein::Info("PIPE:cmd", "set_god_mode: enable=%d", enable ? 1 : 0);
+            int32_t state = UE5_SetGodMode(enable ? 1 : 0);
+            json data;
+            data["state"] = state;
+            data["code"]  = (state < 0) ? state : 0;
+            return Renge::MakeResponse(id, data).dump();
+        }
+        if (cmd == Renge::CMD_GET_GOD_MODE) {
+            int32_t state = UE5_GetGodMode();
+            json data;
+            data["state"] = state;
+            data["code"]  = (state < 0) ? state : 0;
+            return Renge::MakeResponse(id, data).dump();
+        }
+        if (cmd == Renge::CMD_GET_PROTECT_STATE) {
+            int32_t want = 0, live = -1, resolvable = 0;
+            int32_t code = UE5_GetProtectState(&want, &live, &resolvable);
+            json data;
+            data["want"]       = want;        // desired toggle (1/0), survives reconnect
+            data["godmode"]    = live;        // observed live state (1/0, -1 = no pawn)
+            data["resolvable"] = resolvable != 0;
+            data["code"]       = code;
             return Renge::MakeResponse(id, data).dump();
         }
 

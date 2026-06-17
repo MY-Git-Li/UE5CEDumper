@@ -18,6 +18,7 @@
 #include "Stark.h"
 #include "Mimic.h"
 #include "Wirbel.h"
+#include "Solitar.h"
 
 #include <string>
 #include <cstring>
@@ -394,6 +395,7 @@ bool UE5_Init() {
 void UE5_Shutdown() {
     LOG_INFO("UE5_Shutdown: Cleaning up...");
     Mimic::StopThread();
+    Solitar::StopWorker();   // join the GodMode re-assert worker before unload
     // Full teardown: RemoveHook + MH_Uninitialize + drain pending invoke queue.
     // Pipe server is stopped after Shutdown() so any in-flight pipe thread
     // blocked on EnqueueInvoke receives its -7 result and unwinds cleanly.
@@ -900,6 +902,25 @@ int32_t UE5_GetMouseCursor(int32_t* outState) {
     bool state = false;
     int32_t rc = Wirbel::GetMouseCursor(&state);
     if (outState) *outState = state ? 1 : 0;
+    return rc;
+}
+
+// === GodMode (Solitar) ===
+
+int32_t UE5_SetGodMode(int32_t enable) {
+    return Solitar::SetGodMode(enable != 0);
+}
+
+int32_t UE5_GetGodMode() {
+    return Solitar::GetGodMode();
+}
+
+int32_t UE5_GetProtectState(int32_t* outWant, int32_t* outLive, int32_t* outResolvable) {
+    Solitar::State st{};
+    int32_t rc = Solitar::GetState(st);
+    if (outWant)       *outWant = st.want;
+    if (outLive)       *outLive = st.live;
+    if (outResolvable) *outResolvable = st.resolvable ? 1 : 0;
     return rc;
 }
 

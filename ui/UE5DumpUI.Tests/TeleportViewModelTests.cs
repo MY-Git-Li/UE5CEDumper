@@ -42,6 +42,17 @@ public class TeleportViewModelTests
         public override Task<int> GetDebugCameraStateAsync(CancellationToken ct = default)
         { GetDebugCameraCalls++; return Task.FromResult(NextDebugCameraState); }
 
+        public int NextGodModeState { get; set; } = -1;
+        public int SetGodModeCalls { get; private set; }
+        public int GetGodModeCalls { get; private set; }
+        public bool? LastSetGodModeEnable { get; private set; }
+
+        public override Task<int> SetGodModeAsync(bool enable, CancellationToken ct = default)
+        { SetGodModeCalls++; LastSetGodModeEnable = enable; return Task.FromResult(NextGodModeState); }
+
+        public override Task<int> GetGodModeAsync(CancellationToken ct = default)
+        { GetGodModeCalls++; return Task.FromResult(NextGodModeState); }
+
         public override Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default)
         { GetPoseCalls++; return Task.FromResult(NextPose); }
 
@@ -361,7 +372,7 @@ public class TeleportViewModelTests
         var vm = CreateVm(new FakeDumpService(), out _, new FakeHotkeyService());
         // 3 save + 3 recall + recall_last + bugit + bugitgo + debugcam_on/off +
         // pov_get + relative + coords + cursor_on/off.
-        Assert.Equal(16, vm.HotkeyRows.Count);
+        Assert.Equal(18, vm.HotkeyRows.Count);
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "save0" && r.DisplayName == "Save marker 1");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall2" && r.DisplayName == "Recall marker 3");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall_last" && r.DisplayName == "Recall last");
@@ -369,6 +380,8 @@ public class TeleportViewModelTests
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "bugitgo");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "debugcam_on" && r.DisplayName == "Debug cam ON");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "debugcam_off" && r.DisplayName == "Debug cam OFF");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "godmode_on" && r.DisplayName == "God Mode ON");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "godmode_off" && r.DisplayName == "God Mode OFF");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "pov_get" && r.DisplayName == "Get POV");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "relative" && r.DisplayName == "TP facing dir");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "coords" && r.DisplayName == "TP to coords");
@@ -405,6 +418,46 @@ public class TeleportViewModelTests
         Assert.Equal(1, fake.SetDebugCameraCalls);
         Assert.False(fake.LastSetDebugCameraEnable);
         Assert.Equal("OFF", vm.DebugCameraState);
+    }
+
+    [Fact]
+    public async Task ForceGodModeOn_calls_dll_and_sets_badge()
+    {
+        var fake = new FakeDumpService { NextGodModeState = 1 };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+
+        await vm.ForceGodModeOnCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.SetGodModeCalls);
+        Assert.True(fake.LastSetGodModeEnable);
+        Assert.Equal("ON", vm.GodModeState);
+    }
+
+    [Fact]
+    public async Task ForceGodModeOff_sends_disable_and_sets_badge()
+    {
+        var fake = new FakeDumpService { NextGodModeState = 0 };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+
+        await vm.ForceGodModeOffCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.SetGodModeCalls);
+        Assert.False(fake.LastSetGodModeEnable);
+        Assert.Equal("OFF", vm.GodModeState);
+    }
+
+    [Fact]
+    public async Task ForceGodMode_does_nothing_when_disconnected()
+    {
+        var fake = new FakeDumpService { NextGodModeState = 1 };
+        var vm = CreateVm(fake, out _);   // not connected
+
+        await vm.ForceGodModeOnCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, fake.SetGodModeCalls);
+        Assert.Equal("Unknown", vm.GodModeState);
     }
 
     [Fact]

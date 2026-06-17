@@ -276,6 +276,22 @@ public interface IDumpService
     /// </summary>
     Task<int> SetDebugCameraAsync(bool enable, CancellationToken ct = default);
 
+    // === God Mode (Solitar: force AActor.bCanBeDamaged) ===
+
+    /// <summary>
+    /// Read the live God Mode state — the DLL observes the local pawn's
+    /// AActor.bCanBeDamaged bit. 1 = immune (ON), 0 = can be damaged (OFF),
+    /// negative = no pawn / unresolvable.
+    /// </summary>
+    Task<int> GetGodModeAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Force God Mode on/off. ON ⇒ bCanBeDamaged forced FALSE on the local pawn
+    /// and re-asserted on a timer (survives respawns). Returns the observed live
+    /// state (1/0) or a negative Solitar::ProtectResult.
+    /// </summary>
+    Task<int> SetGodModeAsync(bool enable, CancellationToken ct = default);
+
     // === Teleport (Wirbel: marker save/recall + cursor teleport) ===
     // docs/teleport-spec.md §7. Model Code/Codes carry the DLL's Wirbel
     // result code (0 = OK, negatives mapped by TeleportCodes).

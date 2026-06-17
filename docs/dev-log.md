@@ -14,6 +14,75 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-17 — GodMode: generic invincibility-bool scan (T2) + diagnostics (builds 1254-1256)
+
+Live-test on **SEED BATTLE DESTINY REMASTERED** showed GodMode flipping
+`bCanBeDamaged` successfully (`walk-0.log`: `set ON -> rc=1`, bit cleared +
+confirmed) but with **no in-game effect** — SEED is a custom battle framework
+(`LifeMSUnit : LifeUnitBase : UnitFwBaseUnit`) that doesn't gate damage on the
+engine's `CanBeDamaged()`.
+
+- **Diagnostics (1254):** `Solitar::ApplyGodNowLocked` logs the resolved pawn
+  address / class / offset / mask / before-after byte (once per toggle); the
+  re-assert worker logs (rate-limited) when it has to re-apply a reverted flag
+  (drift = the game keeps re-setting it → likely value-based health).
+- **Generic invincibility-bool scan (1256, T2):** instead of only `bCanBeDamaged`,
+  GodMode now reflection-scans the pawn's whole class hierarchy for
+  FBoolProperty fields matching a **universal keyword table**
+  (`Solitar::MatchProtectionBool` — invincib / invulnerab / immort / godmode /
+  unkillable / cannotdie / muteki / damageimmune / cantakedamage / canbedamaged,
+  each with a polarity) and applies ALL matches (ON = protect value, OFF = normal),
+  re-asserted by the worker, cached per pawn class. Zero per-game config — same
+  philosophy as `PropertyScoringTable`; the matched flags are logged. Conservative
+  set (excludes ambiguous deal-damage names like bare `candamage`/`nodamage`).
+  Auto-covers games exposing a named invincibility bool; purely value-based games
+  (HP number) still need Value Search + Freeze (generic auto-HP-freeze "T3"
+  considered, deferred by the user). +19 dll_helpers assertions (matcher polarity)
+  → 567. ⚠ in-game live-verify pending.
+
+-----
+
+## 2026-06-17 — GodMode (Solitar): force AActor::bCanBeDamaged, with Lua mailbox on/off (build 1251)
+
+UE4/5-wide damage immunity, zero per-game config. Design contract +
+implementation plan: [godmode-spec.md](godmode-spec.md) /
+[godmode-implementation-plan.md](godmode-implementation-plan.md).
+
+**Mechanism:** GodMode ON ⇒ the local player pawn's `AActor::bCanBeDamaged`
+FBoolProperty bit is forced FALSE, so damage routed through the standard engine
+pipeline (`UGameplayStatics::ApplyDamage` → `TakeDamage`, gated on
+`CanBeDamaged()`) is dropped. It's the **same single-bit read-modify-write**
+`Wirbel::ResolveCursorBit` / `SetMouseCursor` already does for
+`bShowMouseCursor`, retargeted to the pawn — **pure memory write, no UFunction
+invoke, no game thread**, so it works even in menus. A re-assert worker
+re-resolves the pawn every ~300 ms and re-writes on drift, so the flag survives
+respawns / level changes. No cached instance pointers (re-resolved per op + per
+tick — the 2026-06-10 audit's stale-pointer rule).
+
+- **New module `Solitar`** (索莉塔, roster #11; naming-convention 🟡→🟢). Path B —
+  self-contained, public `Ubel`/`Aura`/`Macht`/`DynOff` only, zero `Wirbel`
+  coupling. `SetGodMode`/`GetGodMode`/`GetState` + a general `SetActorBool`
+  primitive (v2 hook for "force any bool" from Property Search). Worker joined in
+  `UE5_Shutdown`.
+- **Lua mailbox on/off** (the headline ask): `CMD_PROTECT = 9` + `ProtectOp`
+  (SET_GODMODE / GET_GODMODE / GET_STATE). `ProtectionScriptGenerator` emits a
+  self-contained CE AA toggle record (tick = ON, untick = OFF) driving the
+  mailbox — no helper file. Reachable from the Teleport tab's **Copy CE Script**.
+- **Exports** `UE5_SetGodMode` / `UE5_GetGodMode` / `UE5_GetProtectState`; **pipe**
+  `set_god_mode` / `get_god_mode` / `get_protect_state`.
+- **UI:** a "God Mode" section on the **Teleport tab** (Force ON/OFF + tri-state
+  badge + ↻ + Copy CE Script), mirroring the Debug Camera toggle that already
+  lives there — no new tab, no `MainTabIndex` shift. **God Mode ON/OFF global-
+  hotkey rows added** (build 1252; Teleport hotkey list 16→18).
+- **"Invisible" was cut** after review: visual `bHidden` hide isn't useful, and
+  "enemies can't detect you" has no universal reflected bool (AI perception is
+  per-game) — left to Property Search + the general `SetActorBool` primitive.
+- **Tests:** +38 dll_helpers assertions (`Solitar::ApplyBoolBit` single-bit RMW
+  leaves the other 7 bits intact) → 548; +10 C# (7 `ProtectionScriptGenerator` +
+  3 Teleport VM GodMode) → 1551. Full build green. ⚠ in-game live-verify pending.
+
+-----
+
 ## 2026-06-16 — Snapshot/SPC stale-session gating: real per-launch token (process creation time) (build 1227)
 
 Closes the 🔴 top-of-todo bug confirmed on SEED 2026-06-16: build 1216 gated the
