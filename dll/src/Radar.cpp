@@ -1,8 +1,9 @@
 // ============================================================
-// ValueScan — SessionManager implementation + type/predicate helpers
+// Radar — 拉達爾 (影子戰士 — Shadow Warrior)
+// CE-style value scan: SessionManager implementation + type/predicate helpers
 // ============================================================
 
-#include "ValueScan.h"
+#include "Radar.h"
 
 #include <algorithm>
 #include <cctype>
@@ -10,7 +11,7 @@
 #include <cstring>
 #include <sstream>
 
-namespace ValueScan {
+namespace Radar {
 
 // --- DataType / ScanType helpers ---
 
@@ -548,7 +549,7 @@ bool ApplyOrdered(ScanType st, T cur, T a, T b) {
 
 // Tolerance-aware double predicate. tol applies as a +- band around
 // the reference value(s); per-scan-type semantics are documented on
-// ComparePredicate in ValueScan.h. Negative tolerance is clamped to 0
+// ComparePredicate in Radar.h. Negative tolerance is clamped to 0
 // (a malformed UI input shouldn't widen the band on the wrong side).
 inline double Absd(double x) { return x < 0.0 ? -x : x; }
 
@@ -611,7 +612,7 @@ namespace {
 // keys, dialogue tags) a byte-level tolower over [A-Z] is sufficient.
 // Non-ASCII bytes (UTF-8 multibyte sequences) compare bitwise — two
 // strings that differ only in non-ASCII case (e.g. "Ä" vs "ä") will
-// not match in case-insensitive mode. Documented in ValueScan.h.
+// not match in case-insensitive mode. Documented in Radar.h.
 inline char FoldAscii(char c) {
     return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + ('a' - 'A')) : c;
 }
@@ -1042,4 +1043,4 @@ SessionManager::Stats SessionManager::GetStats() {
     return s;
 }
 
-}  // namespace ValueScan
+}  // namespace Radar

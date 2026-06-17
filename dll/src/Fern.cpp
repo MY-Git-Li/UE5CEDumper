@@ -15,8 +15,8 @@
 #include "Ubel.h"
 #include "Flamme.h"
 #include "Stark.h"
-#include "ValueScan.h"
-#include "Cancel.h"
+#include "Radar.h"
+#include "Tot.h"
 #include "Wirbel.h"
 #include "BuildInfo.h"
 
@@ -43,7 +43,7 @@ extern "C" int32_t   UE5_SetDebugCamera(int32_t enable);
 extern "C" int32_t   UE5_CallProcessEventEx(uintptr_t instance, uintptr_t ufunc, uintptr_t params, uint32_t paramsSize);
 
 // ============================================================
-// ValueScan wire helpers — parse "100" / "-42" / "3.14" / "true" /
+// Radar wire helpers — parse "100" / "-42" / "3.14" / "true" /
 // "0x..." into the right little-endian byte layout for DataType, and
 // format the inverse for response payloads. Wire schema uses strings
 // to avoid JSON-number precision loss at 64-bit ints; the helpers
@@ -83,7 +83,7 @@ bool ParseVectorBytes(const std::string& raw, uint8_t out[12]) {
     return true;
 }
 
-bool ParseValueBytes(ValueScan::DataType dt, const std::string& raw, uint8_t out[8]) {
+bool ParseValueBytes(Radar::DataType dt, const std::string& raw, uint8_t out[8]) {
     std::memset(out, 0, 8);
     if (raw.empty()) return false;
 
@@ -101,71 +101,71 @@ bool ParseValueBytes(ValueScan::DataType dt, const std::string& raw, uint8_t out
 
     try {
         switch (dt) {
-            case ValueScan::DataType::Int8: {
+            case Radar::DataType::Int8: {
                 long long v = std::stoll(s, nullptr, 0);
                 if (v < INT8_MIN || v > INT8_MAX) return false;
                 int8_t t = static_cast<int8_t>(v);
                 std::memcpy(out, &t, 1);
                 return true;
             }
-            case ValueScan::DataType::Int16: {
+            case Radar::DataType::Int16: {
                 long long v = std::stoll(s, nullptr, 0);
                 if (v < INT16_MIN || v > INT16_MAX) return false;
                 int16_t t = static_cast<int16_t>(v);
                 std::memcpy(out, &t, 2);
                 return true;
             }
-            case ValueScan::DataType::Int32: {
+            case Radar::DataType::Int32: {
                 long long v = std::stoll(s, nullptr, 0);
                 if (v < INT32_MIN || v > INT32_MAX) return false;
                 int32_t t = static_cast<int32_t>(v);
                 std::memcpy(out, &t, 4);
                 return true;
             }
-            case ValueScan::DataType::Int64: {
+            case Radar::DataType::Int64: {
                 long long v = std::stoll(s, nullptr, 0);
                 int64_t t = static_cast<int64_t>(v);
                 std::memcpy(out, &t, 8);
                 return true;
             }
-            case ValueScan::DataType::UInt8: {
+            case Radar::DataType::UInt8: {
                 unsigned long long v = std::stoull(s, nullptr, isHexPrefix(s) ? 16 : 0);
                 if (v > UINT8_MAX) return false;
                 uint8_t t = static_cast<uint8_t>(v);
                 std::memcpy(out, &t, 1);
                 return true;
             }
-            case ValueScan::DataType::UInt16: {
+            case Radar::DataType::UInt16: {
                 unsigned long long v = std::stoull(s, nullptr, isHexPrefix(s) ? 16 : 0);
                 if (v > UINT16_MAX) return false;
                 uint16_t t = static_cast<uint16_t>(v);
                 std::memcpy(out, &t, 2);
                 return true;
             }
-            case ValueScan::DataType::UInt32: {
+            case Radar::DataType::UInt32: {
                 unsigned long long v = std::stoull(s, nullptr, isHexPrefix(s) ? 16 : 0);
                 if (v > UINT32_MAX) return false;
                 uint32_t t = static_cast<uint32_t>(v);
                 std::memcpy(out, &t, 4);
                 return true;
             }
-            case ValueScan::DataType::UInt64: {
+            case Radar::DataType::UInt64: {
                 unsigned long long v = std::stoull(s, nullptr, isHexPrefix(s) ? 16 : 0);
                 uint64_t t = static_cast<uint64_t>(v);
                 std::memcpy(out, &t, 8);
                 return true;
             }
-            case ValueScan::DataType::Float: {
+            case Radar::DataType::Float: {
                 float t = std::stof(s);
                 std::memcpy(out, &t, 4);
                 return true;
             }
-            case ValueScan::DataType::Double: {
+            case Radar::DataType::Double: {
                 double t = std::stod(s);
                 std::memcpy(out, &t, 8);
                 return true;
             }
-            case ValueScan::DataType::Bool: {
+            case Radar::DataType::Bool: {
                 // Accept: true / false / 1 / 0 (case insensitive)
                 std::string lower = s;
                 for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -177,16 +177,16 @@ bool ParseValueBytes(ValueScan::DataType dt, const std::string& raw, uint8_t out
             // byte path is unused. Vector types use ParseVectorBytes
             // into a 12-byte buffer. Fall through to false so a caller
             // that forgets to dispatch fails loudly.
-            case ValueScan::DataType::FString:
-            case ValueScan::DataType::FName:
-            case ValueScan::DataType::FText:
-            case ValueScan::DataType::FVector:
-            case ValueScan::DataType::FRotator:
-            case ValueScan::DataType::FTransform:
+            case Radar::DataType::FString:
+            case Radar::DataType::FName:
+            case Radar::DataType::FText:
+            case Radar::DataType::FVector:
+            case Radar::DataType::FRotator:
+            case Radar::DataType::FTransform:
             // Multi-numeric meta types are parsed via BuildNumericTargets,
             // not this single-width helper. Fail loudly if misrouted.
-            case ValueScan::DataType::NumericNoByte:
-            case ValueScan::DataType::NumericAll:
+            case Radar::DataType::NumericNoByte:
+            case Radar::DataType::NumericAll:
                 return false;
         }
     } catch (...) {
@@ -199,12 +199,12 @@ bool ParseValueBytes(ValueScan::DataType dt, const std::string& raw, uint8_t out
 // per-object metadata are pulled from the session's shared descriptor /
 // instance pools the candidate indexes into (V3-A) — the wire shape is
 // unchanged, the fields are just reassembled from the interned pools.
-json CandidateToJson(const ValueScan::Candidate& c,
-                     ValueScan::DataType dt,
-                     const std::vector<ValueScan::FieldDescriptor>& descriptors,
-                     const std::vector<ValueScan::InstanceRecord>&  instances) {
-    const ValueScan::FieldDescriptor& desc = descriptors[c.descriptorIdx];
-    const ValueScan::InstanceRecord&  inst = instances[c.instanceIdx];
+json CandidateToJson(const Radar::Candidate& c,
+                     Radar::DataType dt,
+                     const std::vector<Radar::FieldDescriptor>& descriptors,
+                     const std::vector<Radar::InstanceRecord>&  instances) {
+    const Radar::FieldDescriptor& desc = descriptors[c.descriptorIdx];
+    const Radar::InstanceRecord&  inst = instances[c.instanceIdx];
 
     json item;
     item["addr"]                = Renge::AddrToStr(c.addr);
@@ -214,14 +214,14 @@ json CandidateToJson(const ValueScan::Candidate& c,
     item["instance_name"]       = inst.instanceName;
     item["class_name"]          = desc.className;
     item["defining_class_name"] = desc.definingClassName;
-    item["field_name"]          = ValueScan::FieldDisplayName(desc, c.elementIndex);
+    item["field_name"]          = Radar::FieldDisplayName(desc, c.elementIndex);
     item["field_type"]          = desc.fieldType;
     item["bool_field_mask"]     = desc.boolFieldMask;
     // Value rendering (numeric per dt / multi per fieldType / vector
-    // "X, Y, Z" / string prevStr) is the single source of truth in ValueScan,
+    // "X, Y, Z" / string prevStr) is the single source of truth in Radar,
     // shared with the server-side filter/sort so the wire + the ordered view
     // always agree on a candidate's displayed value.
-    item["value"] = ValueScan::FormatCandidateValue(c, dt, desc);
+    item["value"] = Radar::FormatCandidateValue(c, dt, desc);
     return item;
 }
 
@@ -244,9 +244,9 @@ bool Fern::Start() {
     // Clear the sticky shutdown latch left by a prior Stop()/UE5_Shutdown().
     // Without this, re-enabling the CE script in the same game process leaves
     // g_shutdown set, so every long-running op (value scan, instance find,
-    // snapshot capture, SDK dump) aborts on its first Cancel::Requested() poll.
-    Cancel::ResetShutdown();
-    Cancel::ResetPerCommand();
+    // snapshot capture, SDK dump) aborts on its first Tot::Requested() poll.
+    Tot::ResetShutdown();
+    Tot::ResetPerCommand();
 
     m_running = true;
     m_acceptThread = std::thread(&Fern::AcceptLoop, this);
@@ -262,7 +262,7 @@ void Fern::Stop() {
     // scan blocking the accept thread bails promptly and the join below
     // completes fast (otherwise disabling the script / closing can hang while
     // a long scan finishes). Sticky — never auto-cleared.
-    Cancel::RequestShutdown();
+    Tot::RequestShutdown();
     StopAllWatches();
 
     // Join background rescan thread if running
@@ -300,7 +300,7 @@ void Fern::Stop() {
     }
 
     // No handler thread is running now — free every remaining value-scan session.
-    ValueScan::SessionManager::Instance().DropAll();
+    Radar::SessionManager::Instance().DropAll();
 
     m_clientConnected = false;
     LOG_INFO("PipeServer: Stopped");
@@ -326,9 +326,9 @@ void Fern::MonitorLoop() {
             DWORD e = GetLastError();
             if (e == ERROR_BROKEN_PIPE || e == ERROR_PIPE_NOT_CONNECTED
                 || e == ERROR_INVALID_HANDLE) {
-                if (!Cancel::g_perCommand.load(std::memory_order_relaxed)) {
+                if (!Tot::g_perCommand.load(std::memory_order_relaxed)) {
                     LOG_WARN("PipeServer: client gone mid-command (err=%lu) — aborting in-flight op", e);
-                    Cancel::RequestPerCommand();
+                    Tot::RequestPerCommand();
                 }
             }
         }
@@ -389,7 +389,7 @@ void Fern::AcceptLoop() {
         // First Scan's candidate set (up to 1M candidates + descriptor/instance
         // pools) lingers in the game process until the next begin_value_scan
         // triggers lazy idle-expiry — exactly the "UI closed mid-scan" leak.
-        ValueScan::SessionManager::Instance().DropAll();
+        Radar::SessionManager::Instance().DropAll();
         {
             std::lock_guard<std::mutex> lock(m_pipeMutex);
             // Only close if Stop() hasn't already closed it
@@ -457,7 +457,7 @@ void Fern::HandleClient(HANDLE pipe) {
 
         // Fresh command: clear any per-command cancel left from a prior
         // (disconnected) client. Shutdown cancellation stays sticky.
-        Cancel::ResetPerCommand();
+        Tot::ResetPerCommand();
 
         // Extract command name for dedup (fast: find "cmd":" in JSON)
         std::string cmd;
@@ -1042,8 +1042,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
         // object. Stateless cursor pagination — advance "offset" by "scanned".
         if (cmd == Renge::CMD_BEGIN_SNAPSHOT) {
             std::string dtStr = request.value("data_type", "NumericNoByte");
-            ValueScan::DataType dt;
-            if (!ValueScan::TryParseDataType(dtStr, dt) || !ValueScan::IsMultiNumericDataType(dt)) {
+            Radar::DataType dt;
+            if (!Radar::TryParseDataType(dtStr, dt) || !Radar::IsMultiNumericDataType(dt)) {
                 return Renge::MakeError(id, "snapshot data_type must be NumericNoByte or NumericAll").dump();
             }
             // Fresh names for this capture: clear the per-UObject name cache so a
@@ -1061,8 +1061,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             int  arrayCap = request.value("array_cap", 256);
             bool gameOnly = request.value("game_only", true);
             std::string dtStr = request.value("data_type", "NumericNoByte");
-            ValueScan::DataType dt;
-            if (!ValueScan::TryParseDataType(dtStr, dt) || !ValueScan::IsMultiNumericDataType(dt)) {
+            Radar::DataType dt;
+            if (!Radar::TryParseDataType(dtStr, dt) || !Radar::IsMultiNumericDataType(dt)) {
                 return Renge::MakeError(id, "snapshot data_type must be NumericNoByte or NumericAll").dump();
             }
 
@@ -1275,7 +1275,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             json enums = json::array();
 
             for (int i = 0; i < total; ++i) {
-                if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+                if ((i & 0xFFF) == 0 && Tot::Requested()) {
                     Sein::Warn("PIPE:cmd", "list_enums: aborted (client gone / shutdown)");
                     break;  // return partial result
                 }
@@ -1920,7 +1920,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
         // requested DataType across all UObject instances, applies the
         // (scan_type, value[, value2]) predicate, and returns enriched
         // candidates + a session_id for follow-up refine_value_scan
-        // calls. See ValueScan.h for the lifecycle contract.
+        // calls. See Radar.h for the lifecycle contract.
         //
         // Native C++ fields (non-UPROPERTY) are intentionally NOT
         // scanned -- the UI's Value Search tab MUST surface this caveat
@@ -1947,26 +1947,26 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             // locality). UI sends batch_read=false to force one read per field.
             bool batchRead = request.value("batch_read", true);
 
-            ValueScan::DataType dt;
-            if (!ValueScan::TryParseDataType(dtStr, dt)) {
+            Radar::DataType dt;
+            if (!Radar::TryParseDataType(dtStr, dt)) {
                 return Renge::MakeError(id, "Unknown data_type: " + dtStr).dump();
             }
-            ValueScan::ScanType st;
-            if (!ValueScan::TryParseScanType(stStr, st)) {
+            Radar::ScanType st;
+            if (!Radar::TryParseScanType(stStr, st)) {
                 return Renge::MakeError(id, "Unknown scan_type: " + stStr).dump();
             }
-            if (!ValueScan::IsFirstScanType(st)) {
+            if (!Radar::IsFirstScanType(st)) {
                 return Renge::MakeError(id, "scan_type '" + stStr +
                     "' is only valid for refine (no prevValue on first scan)").dump();
             }
-            if (!ValueScan::IsScanTypeValidFor(dt, st)) {
+            if (!Radar::IsScanTypeValidFor(dt, st)) {
                 return Renge::MakeError(id, "scan_type '" + stStr +
                     "' is not valid for data_type '" + dtStr + "'").dump();
             }
 
-            const bool isString = ValueScan::IsStringDataType(dt);
-            const bool isVector = ValueScan::IsVectorDataType(dt);
-            const bool isMulti  = ValueScan::IsMultiNumericDataType(dt);
+            const bool isString = Radar::IsStringDataType(dt);
+            const bool isVector = Radar::IsVectorDataType(dt);
+            const bool isMulti  = Radar::IsMultiNumericDataType(dt);
 
             uint8_t targetBytes[12] = {};
             uint8_t target2Bytes[12] = {};
@@ -1975,9 +1975,9 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             // Multi-numeric meta scan: per-width target sets replace the
             // single byte buffer. Built once here, pointed at by the
             // pointers passed to ScanForValue.
-            ValueScan::NumericTargetSet multiTargets, multiTargets2;
-            const ValueScan::NumericTargetSet* multiPtr  = nullptr;
-            const ValueScan::NumericTargetSet* multiPtr2 = nullptr;
+            Radar::NumericTargetSet multiTargets, multiTargets2;
+            const Radar::NumericTargetSet* multiPtr  = nullptr;
+            const Radar::NumericTargetSet* multiPtr2 = nullptr;
 
             if (isString) {
                 // String scans take the user's needle verbatim. Empty
@@ -1989,7 +1989,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                     return Renge::MakeError(id, "Invalid 'value' for data_type " + dtStr +
                         " (expected 'X,Y,Z' float triple)").dump();
                 }
-                if (st == ValueScan::ScanType::Between) {
+                if (st == Radar::ScanType::Between) {
                     if (!ParseVectorBytes(val2Str, target2Bytes)) {
                         return Renge::MakeError(id, "Between requires 'value2' for data_type " + dtStr +
                             " (expected 'X,Y,Z' float triple)").dump();
@@ -1997,13 +1997,13 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                     target2Ptr = target2Bytes;
                 }
             } else if (isMulti) {
-                if (!ValueScan::BuildNumericTargets(dt, valStr, multiTargets)) {
+                if (!Radar::BuildNumericTargets(dt, valStr, multiTargets)) {
                     return Renge::MakeError(id, "Invalid 'value' for data_type " + dtStr +
                         " (does not fit any numeric width)").dump();
                 }
                 multiPtr = &multiTargets;
-                if (st == ValueScan::ScanType::Between) {
-                    if (!ValueScan::BuildNumericTargets(dt, val2Str, multiTargets2)) {
+                if (st == Radar::ScanType::Between) {
+                    if (!Radar::BuildNumericTargets(dt, val2Str, multiTargets2)) {
                         return Renge::MakeError(id, "Between requires a valid 'value2' for data_type " + dtStr).dump();
                     }
                     multiPtr2 = &multiTargets2;
@@ -2012,7 +2012,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 if (!ParseValueBytes(dt, valStr, targetBytes)) {
                     return Renge::MakeError(id, "Invalid 'value' for data_type " + dtStr).dump();
                 }
-                if (st == ValueScan::ScanType::Between) {
+                if (st == Radar::ScanType::Between) {
                     if (!ParseValueBytes(dt, val2Str, target2Bytes)) {
                         return Renge::MakeError(id, "Between requires 'value2' for data_type " + dtStr).dump();
                     }
@@ -2025,7 +2025,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 tolerance, targetString, caseSensitive, multiPtr, multiPtr2,
                 parallel, batchRead);
 
-            uint64_t sessionId = ValueScan::SessionManager::Instance().Begin(
+            uint64_t sessionId = Radar::SessionManager::Instance().Begin(
                 dt, std::move(scanResult.candidates),
                 std::move(scanResult.descriptors), std::move(scanResult.instances));
 
@@ -2038,8 +2038,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             if (pageSize < 0) pageSize = 0;
             json candidates = json::array();
             int totalCount = 0;
-            ValueScan::SessionManager::Instance().ViewWith(sessionId,
-                [&](const ValueScan::Session& sess) {
+            Radar::SessionManager::Instance().ViewWith(sessionId,
+                [&](const Radar::Session& sess) {
                     totalCount = static_cast<int>(sess.candidates.size());
                     const int n = (std::min)(pageSize, totalCount);
                     for (int i = 0; i < n; ++i)
@@ -2049,7 +2049,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
 
             json data;
             data["session_id"]      = sessionId;
-            data["data_type"]       = ValueScan::NameOf(dt);
+            data["data_type"]       = Radar::NameOf(dt);
             data["total"]           = totalCount;
             data["page_size"]       = pageSize;
             data["scanned_classes"] = scanResult.stats.scannedClasses;
@@ -2079,8 +2079,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             double tolerance = request.value("tolerance", 0.0);
             bool caseSensitive = request.value("case_sensitive", false);
 
-            ValueScan::ScanType st;
-            if (!ValueScan::TryParseScanType(stStr, st)) {
+            Radar::ScanType st;
+            if (!Radar::TryParseScanType(stStr, st)) {
                 return Renge::MakeError(id, "Unknown scan_type: " + stStr).dump();
             }
 
@@ -2090,35 +2090,35 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             int pageSize = request.value("page_size", 1000);
             if (pageSize < 0) pageSize = 0;
             int totalCount = 0;
-            ValueScan::DataType dtCaptured = ValueScan::DataType::Int32;
+            Radar::DataType dtCaptured = Radar::DataType::Int32;
             json candidates = json::array();
             Aura::ValueScanStats stats;
             bool parseFailed = false;
             bool scanTypeInvalid = false;
-            bool found = ValueScan::SessionManager::Instance().RefineWith(sessionId,
-                [&](ValueScan::Session& sess) {
-                    const ValueScan::DataType dt = sess.dt;
+            bool found = Radar::SessionManager::Instance().RefineWith(sessionId,
+                [&](Radar::Session& sess) {
+                    const Radar::DataType dt = sess.dt;
                     auto& cs = sess.candidates;
                     dtCaptured = dt;
-                    if (!ValueScan::IsScanTypeValidFor(dt, st)) {
+                    if (!Radar::IsScanTypeValidFor(dt, st)) {
                         scanTypeInvalid = true;
                         return;
                     }
 
-                    const bool isString = ValueScan::IsStringDataType(dt);
-                    const bool isVector = ValueScan::IsVectorDataType(dt);
-                    const bool isMulti  = ValueScan::IsMultiNumericDataType(dt);
+                    const bool isString = Radar::IsStringDataType(dt);
+                    const bool isVector = Radar::IsVectorDataType(dt);
+                    const bool isMulti  = Radar::IsMultiNumericDataType(dt);
 
                     uint8_t targetBytes[12] = {};
                     uint8_t target2Bytes[12] = {};
                     const uint8_t* tgtPtr  = nullptr;
                     const uint8_t* tgt2Ptr = nullptr;
                     std::string targetString;
-                    ValueScan::NumericTargetSet multiTargets, multiTargets2;
-                    const ValueScan::NumericTargetSet* multiPtr  = nullptr;
-                    const ValueScan::NumericTargetSet* multiPtr2 = nullptr;
+                    Radar::NumericTargetSet multiTargets, multiTargets2;
+                    const Radar::NumericTargetSet* multiPtr  = nullptr;
+                    const Radar::NumericTargetSet* multiPtr2 = nullptr;
 
-                    if (!ValueScan::IsPrevValueScanType(st)) {
+                    if (!Radar::IsPrevValueScanType(st)) {
                         if (isString) {
                             targetString = valStr;
                         } else if (isVector) {
@@ -2127,7 +2127,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                                 return;
                             }
                             tgtPtr = targetBytes;
-                            if (st == ValueScan::ScanType::Between) {
+                            if (st == Radar::ScanType::Between) {
                                 if (!ParseVectorBytes(val2Str, target2Bytes)) {
                                     parseFailed = true;
                                     return;
@@ -2135,13 +2135,13 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                                 tgt2Ptr = target2Bytes;
                             }
                         } else if (isMulti) {
-                            if (!ValueScan::BuildNumericTargets(dt, valStr, multiTargets)) {
+                            if (!Radar::BuildNumericTargets(dt, valStr, multiTargets)) {
                                 parseFailed = true;
                                 return;
                             }
                             multiPtr = &multiTargets;
-                            if (st == ValueScan::ScanType::Between) {
-                                if (!ValueScan::BuildNumericTargets(dt, val2Str, multiTargets2)) {
+                            if (st == Radar::ScanType::Between) {
+                                if (!Radar::BuildNumericTargets(dt, val2Str, multiTargets2)) {
                                     parseFailed = true;
                                     return;
                                 }
@@ -2153,7 +2153,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                                 return;
                             }
                             tgtPtr = targetBytes;
-                            if (st == ValueScan::ScanType::Between) {
+                            if (st == Radar::ScanType::Between) {
                                 if (!ParseValueBytes(dt, val2Str, target2Bytes)) {
                                     parseFailed = true;
                                     return;
@@ -2187,7 +2187,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
 
             json data;
             data["session_id"]   = sessionId;
-            data["data_type"]    = ValueScan::NameOf(dtCaptured);
+            data["data_type"]    = Radar::NameOf(dtCaptured);
             data["scan_type"]    = stStr;
             data["total"]        = totalCount;
             data["page_size"]    = pageSize;
@@ -2204,7 +2204,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             if (sessionId == 0) {
                 return Renge::MakeError(id, "Missing or zero session_id").dump();
             }
-            bool ended = ValueScan::SessionManager::Instance().End(sessionId);
+            bool ended = Radar::SessionManager::Instance().End(sessionId);
             json data;
             data["session_id"] = sessionId;
             data["ended"]      = ended;
@@ -2232,8 +2232,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             if (offset < 0) offset = 0;
             if (limit  < 0) limit  = 0;
 
-            ValueScan::SortKey sortKey;
-            if (!ValueScan::TryParseSortKey(sortKeyStr, sortKey)) {
+            Radar::SortKey sortKey;
+            if (!Radar::TryParseSortKey(sortKeyStr, sortKey)) {
                 return Renge::MakeError(id, "Unknown sort_key: " + sortKeyStr).dump();
             }
 
@@ -2241,12 +2241,12 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             int totalCount    = 0;
             int filteredCount = 0;
             std::string dtName;
-            bool found = ValueScan::SessionManager::Instance().QueryWith(
+            bool found = Radar::SessionManager::Instance().QueryWith(
                 sessionId, filter, sortKey, sortDesc,
-                [&](const ValueScan::Session& sess, const std::vector<uint32_t>& order) {
+                [&](const Radar::Session& sess, const std::vector<uint32_t>& order) {
                     totalCount    = static_cast<int>(sess.candidates.size());
                     filteredCount = static_cast<int>(order.size());
-                    dtName        = ValueScan::NameOf(sess.dt);
+                    dtName        = Radar::NameOf(sess.dt);
                     const int begin = (std::min)(offset, filteredCount);
                     const int end   = (std::min)(offset + limit, filteredCount);
                     for (int i = begin; i < end; ++i) {

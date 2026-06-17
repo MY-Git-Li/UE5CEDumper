@@ -1,7 +1,7 @@
 #pragma once
 
 // ============================================================
-// Macht — 黃金鄉的馬哈特 (七大魔王 — Seven Sages, Transmutation)
+// Macht — 黃金鄉馬哈特 (萬物成金魔法 — Seven Sages, Transmutation)
 // Memory: AOB scanning, SEH-protected reads, RIP-relative resolution
 // ============================================================
 

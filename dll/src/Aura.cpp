@@ -1,5 +1,5 @@
 // ============================================================
-// Aura — 斷頭台的奧拉 (服從之秤 — Obedience Scale)
+// Aura — 斷頭台的阿烏拉 (服從之秤 — Obedience Scale)
 // ObjectArray: FUObjectArray slot enumeration and validation
 // ============================================================
 
@@ -13,8 +13,8 @@
 #include "Ubel.h"
 #include "Genau.h"
 #include "Denken.h"
-#include "Cancel.h"
-#include "PackedItem.h"   // UE5.7+ packed FUObjectItem reconstruction (Reconstruct + consts)
+#include "Tot.h"
+#include "Lineal.h"   // UE5.7+ packed FUObjectItem reconstruction (Reconstruct + consts)
 
 // Defined in Frieren.cpp — cached UE version for layout branching
 extern uint32_t g_cachedUEVersion;
@@ -58,15 +58,15 @@ static bool        s_isFlat   = false; // true = non-chunked flat array (some UE
 
 // Within-item layout mode. Classic / Unpacked57 both read the UObject* directly at
 // item+s_itemObjOffset (0x00 / 0x08). Packed57 (UE5.7+ UE_ENABLE_FUOBJECT_ITEM_PACKING)
-// must RECONSTRUCT the pointer from two split fields — see PackedItem.h. Packed57 is a
+// must RECONSTRUCT the pointer from two split fields — see Lineal.h. Packed57 is a
 // last-resort, auto-detected ONLY when both direct modes fail (see DetectItemSize), and
 // is *** UNVERIFIED *** (no shipping game uses it yet). Process-lifetime constant after
 // Init() → the GetByIndex Packed57 branch is perfectly predicted on the hot path.
-static PackedItem::ItemLayoutMode s_layoutMode = PackedItem::ItemLayoutMode::Classic;
+static Lineal::ItemLayoutMode s_layoutMode = Lineal::ItemLayoutMode::Classic;
 // Calibratable packed reconstruction constants (defaults from assumed UE5.7 source).
 // Overridable at runtime via SetPackedConsts / the set_packed_consts pipe command so a
 // real packed game can be calibrated without a rebuild.
-static PackedItem::PackedConsts   s_packedConsts;
+static Lineal::PackedConsts   s_packedConsts;
 // Best-effort SerialNumber offset under packing (layout unknown — see GetSerialNumber).
 static int         s_packedSerialOff = 0x0C;
 
@@ -190,14 +190,14 @@ ParallelScanResult<PerThreadT> ParallelGObjectsScan(int32_t count, BodyFn&& body
     // (nthreads == 1, the Value Search "parallel" toggle OFF) we deliberately
     // spawn NO thread: anti-tamper games turn parallel off precisely to avoid
     // extra thread creation, and an anti-cheat that hooks thread creation would
-    // otherwise still see this watcher. The bodies poll Cancel::Requested()
+    // otherwise still see this watcher. The bodies poll Tot::Requested()
     // directly at their stride checks, so serial scans still cancel promptly.
     std::atomic<bool> scanDone{false};
     std::thread cancelWatcher;
     if (nthreads > 1) {
         cancelWatcher = std::thread([&] {
             while (!scanDone.load(std::memory_order_relaxed)) {
-                if (Cancel::Requested()) {
+                if (Tot::Requested()) {
                     deadlineHit.store(true, std::memory_order_relaxed);
                     return;
                 }
@@ -515,7 +515,7 @@ static bool LooksLikeUObject(uintptr_t obj) {
 // NOTE: No early exit — scans all maxItems for fair comparison across strides.
 //
 // reconstructPacked: when true, the object pointer is RECONSTRUCTED from the UE5.7+
-// packed encoding (flags@item+0x00, ptrLow@item+0x08 -> PackedItem::Reconstruct) instead
+// packed encoding (flags@item+0x00, ptrLow@item+0x08 -> Lineal::Reconstruct) instead
 // of read directly at item+s_itemObjOffset. The validation that follows (LooksLikeUObject
 // + FName resolution) runs on the RECONSTRUCTED pointer — critical, because on a packed
 // layout the raw item+0 field is FlagsAndRefCount, never a pointer, so scoring the raw
@@ -537,7 +537,7 @@ static void ProbeStride(uintptr_t chunkBase, int stride, int maxItems,
                 if (outBad > 30 && outGood == 0) break;
                 continue;
             }
-            obj = PackedItem::Reconstruct(flags, ptrLow, s_packedConsts);
+            obj = Lineal::Reconstruct(flags, ptrLow, s_packedConsts);
         } else if (!Macht::ReadSafe(chunkBase + byteOff + s_itemObjOffset, obj)) {
             ++outBad;
             if (outBad > 30 && outGood == 0) break;  // Too many read failures, give up
@@ -800,7 +800,7 @@ struct PackedProbeResult {
 
 // Detector for the UE5.7+ PACKED FUObjectItem encoding (UE_ENABLE_FUOBJECT_ITEM_PACKING).
 // In packed mode the UObject* is split across two fields and reconstructed — see
-// PackedItem.h. Probes the candidate bases/strides with RECONSTRUCTION enabled (so the
+// Lineal.h. Probes the candidate bases/strides with RECONSTRUCTION enabled (so the
 // validation runs on the rebuilt pointer, not the raw FlagsAndRefCount at item+0) and
 // uses the live (calibratable) s_packedConsts so a tuned constant flows through.
 //
@@ -893,7 +893,7 @@ static void DetectItemSize() {
     // Reset the layout mode each detection run (Init may be called again on re-attach).
     // The two direct passes below keep it non-packed; only the last-resort packed branch
     // promotes it to Packed57.
-    s_layoutMode = PackedItem::ItemLayoutMode::Classic;
+    s_layoutMode = Lineal::ItemLayoutMode::Classic;
 
     int candidates[] = { 16, 24, 20 };
     constexpr int NUM_CANDIDATES = 3;
@@ -925,8 +925,8 @@ static void DetectItemSize() {
 
         if (bestTotal >= threshold) {
             s_itemSize = bestStride;   // s_itemObjOffset / s_isFlat already reflect this pass
-            s_layoutMode = (s_itemObjOffset != 0) ? PackedItem::ItemLayoutMode::Unpacked57
-                                                  : PackedItem::ItemLayoutMode::Classic;
+            s_layoutMode = (s_itemObjOffset != 0) ? Lineal::ItemLayoutMode::Unpacked57
+                                                  : Lineal::ItemLayoutMode::Classic;
             if (s_itemObjOffset != 0) {
                 LOG_INFO("ObjectArray: FUObjectItem size=%d, object-ptr offset=+0x%02X (UE5.7+ reordered item) — %d named, %d total, %d bad%s",
                          bestStride, s_itemObjOffset, bestNamed, bestCount, bestBad, s_isFlat ? " (flat)" : "");
@@ -953,8 +953,8 @@ static void DetectItemSize() {
     s_isFlat = gFlat;
     if (gStride > 0 && (gHasNames ? gNamed : gCount) > 0) {
         s_itemSize = gStride;
-        s_layoutMode = (gObjOff != 0) ? PackedItem::ItemLayoutMode::Unpacked57
-                                      : PackedItem::ItemLayoutMode::Classic;
+        s_layoutMode = (gObjOff != 0) ? Lineal::ItemLayoutMode::Unpacked57
+                                      : Lineal::ItemLayoutMode::Classic;
         LOG_WARN("ObjectArray: FUObjectItem size tentatively set to %d bytes, object-ptr offset +0x%02X (only %d items validated)",
                  gStride, gObjOff, gHasNames ? gNamed : gCount);
         return;
@@ -967,7 +967,7 @@ static void DetectItemSize() {
     // dump it replaces, and it is loudly flagged.
     PackedProbeResult packed;
     if (TryDetectPacked(chunkTable, chunk0, packed)) {
-        s_layoutMode    = PackedItem::ItemLayoutMode::Packed57;
+        s_layoutMode    = Lineal::ItemLayoutMode::Packed57;
         s_itemSize      = packed.stride;   // 24 expected
         s_itemObjOffset = 0;               // unused for the object read under packing
         s_isFlat        = packed.isFlat;
@@ -1011,7 +1011,7 @@ void InitWithExtendedLayout(uintptr_t gobjectsAddr, int forcedItemSize) {
         // caller (which already verified this stride by content) forces it.
         s_itemSize = forcedItemSize;
         s_itemObjOffset = 0;
-        s_layoutMode = PackedItem::ItemLayoutMode::Classic;
+        s_layoutMode = Lineal::ItemLayoutMode::Classic;
         LOG_INFO("ObjectArray: Initialized (forced UE5-Extended, stride=%d) at 0x%llX, Count=%d",
                  forcedItemSize, static_cast<unsigned long long>(gobjectsAddr), GetCount());
     } else {
@@ -1051,7 +1051,7 @@ int GetItemObjOffset() {
 }
 
 bool IsPacked() {
-    return s_layoutMode == PackedItem::ItemLayoutMode::Packed57;
+    return s_layoutMode == Lineal::ItemLayoutMode::Packed57;
 }
 
 // Runtime calibration for the *** UNVERIFIED *** packed reconstruction. Lets the first
@@ -1064,7 +1064,7 @@ void SetPackedConsts(int alignBits, uint64_t ptrMaskBits, bool force, int serial
     if (ptrMaskBits != 0) s_packedConsts.ptrMaskBits = ptrMaskBits;
     if (serialOff >= 0)  s_packedSerialOff = serialOff;
     if (force) {
-        s_layoutMode = PackedItem::ItemLayoutMode::Packed57;
+        s_layoutMode = Lineal::ItemLayoutMode::Packed57;
         s_itemObjOffset = 0;
         LOG_WARN("ObjectArray: *** packed mode FORCE-ENABLED via SetPackedConsts *** "
                  "alignBits=%d, ptrMask=0x%llX, serialOff=0x%X, stride=%d. This is an "
@@ -1102,12 +1102,12 @@ uintptr_t GetByIndex(int32_t index) {
         itemAddr = chunk + static_cast<uintptr_t>(withinChunk) * s_itemSize;
     }
 
-    if (s_layoutMode == PackedItem::ItemLayoutMode::Packed57) {
+    if (s_layoutMode == Lineal::ItemLayoutMode::Packed57) {
         // *** UNVERIFIED *** UE5.7+ packed item: UObject* is split across two fields.
         uint64_t flags = 0; uint32_t ptrLow = 0;
         if (!Macht::ReadSafe(itemAddr, flags))         return 0;
         if (!Macht::ReadSafe(itemAddr + 0x08, ptrLow)) return 0;
-        return PackedItem::Reconstruct(flags, ptrLow, s_packedConsts);
+        return Lineal::Reconstruct(flags, ptrLow, s_packedConsts);
     }
 
     uintptr_t object = 0;
@@ -1169,7 +1169,7 @@ int32_t GetSerialNumber(int32_t index) {
     //             wrong value only degrades FWeakObjectPtr staleness resolution (weak
     //             refs / delegates), never the core object walk.
     int serialOff;
-    if (s_layoutMode == PackedItem::ItemLayoutMode::Packed57) {
+    if (s_layoutMode == Lineal::ItemLayoutMode::Packed57) {
         serialOff = s_packedSerialOff;
     } else {
         serialOff = (s_itemObjOffset != 0) ? (s_itemObjOffset + 0x08)
@@ -1183,7 +1183,7 @@ int32_t GetSerialNumber(int32_t index) {
 void ForEach(std::function<bool(int32_t idx, uintptr_t obj)> cb) {
     int32_t count = GetCount();
     for (int32_t i = 0; i < count; ++i) {
-        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:scan", "Aura::ForEach: aborted (client gone / shutdown)");
             break;  // stop walking; callers see partial/empty result
         }
@@ -1228,7 +1228,7 @@ SearchResultSet SearchByName(const std::string& query, int maxResults) {
     int32_t count = GetCount();
     rset.scanned = count;
     for (int32_t i = 0; i < count && static_cast<int>(rset.results.size()) < maxResults; ++i) {
-        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:search", "SearchByName: aborted (client gone / shutdown)");
             break;  // return partial result
         }
@@ -1282,7 +1282,7 @@ SearchResultSet FindInstancesByClass(const std::string& className, bool exactMat
     int32_t count = GetCount();
     rset.scanned = count;
     for (int32_t i = 0; i < count && static_cast<int>(rset.results.size()) < maxResults; ++i) {
-        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:find", "FindInstancesByClass: aborted (client gone / shutdown)");
             break;  // return partial result
         }
@@ -1988,10 +1988,10 @@ std::vector<ContainerMatch> FindInContainers(uintptr_t addr, int32_t maxResults,
         // deadlineHit check fires from this chunk's first iteration.
         if (((i - beginIdx) & 0x3FF) == 0) {
             if (deadlineHit.load(std::memory_order_relaxed)) return;
-            // Serial path has no cancel-watcher thread — poll Cancel here so the
+            // Serial path has no cancel-watcher thread — poll Tot here so the
             // scan still bails promptly; setting deadlineHit also stops siblings
             // on the parallel path.
-            if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+            if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
             auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
                           std::chrono::steady_clock::now() - t0).count();
             if (dt > kDeadlineMs) {
@@ -2130,7 +2130,7 @@ static bool MatchAddrInStructContainers(
 {
     if (depth > maxDepth) return false;
     if (deadlineHit.load(std::memory_order_relaxed)) return false;
-    if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return false; }
+    if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return false; }
     if (std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - t0).count() > kDeadlineMs) {
         deadlineHit.store(true, std::memory_order_relaxed);
@@ -2271,7 +2271,7 @@ std::vector<ContainerMatch> FindInContainersDeep(uintptr_t addr, int32_t maxResu
         for (int32_t i = beginIdx; i < endIdx && static_cast<int>(tr.matches.size()) < maxResults; ++i) {
             if (((i - beginIdx) & 0x3FF) == 0) {
                 if (deadlineHit.load(std::memory_order_relaxed)) return;
-                if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+                if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
                 if (std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now() - t0).count() > kDeadlineMs) {
                     deadlineHit.store(true, std::memory_order_relaxed);
@@ -2787,10 +2787,10 @@ std::vector<ReferenceMatch> FindReferencesToUObject(uintptr_t target,
         // deadlineHit check fires from this chunk's first iteration.
         if (((i - beginIdx) & 0x3FF) == 0) {
             if (deadlineHit.load(std::memory_order_relaxed)) return;
-            // Serial path has no cancel-watcher thread — poll Cancel here so the
+            // Serial path has no cancel-watcher thread — poll Tot here so the
             // scan still bails promptly; setting deadlineHit also stops siblings
             // on the parallel path.
-            if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+            if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
             auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
                           std::chrono::steady_clock::now() - t0).count();
             if (dt > kDeadlineMs) {
@@ -3286,7 +3286,7 @@ GraphPathResult FindObjectGraphPath(uintptr_t rootObj, uintptr_t targetObj,
              static_cast<unsigned long long>(targetObj), maxDepth);
 
     auto abortFn = [&]() -> bool {
-        if (Cancel::Requested()) return true;
+        if (Tot::Requested()) return true;
         auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
                       std::chrono::steady_clock::now() - t0).count();
         return dt > deadlineMs;
@@ -3304,7 +3304,7 @@ GraphPathResult FindObjectGraphPath(uintptr_t rootObj, uintptr_t targetObj,
 
     // Translate the core's generic "aborted" into the concrete reason.
     if (res.aborted)
-        res.status = Cancel::Requested() ? "cancelled" : "deadline";
+        res.status = Tot::Requested() ? "cancelled" : "deadline";
 
     // Resolve readable names for the path nodes only (cheap — a handful).
     for (auto& st : res.steps) {
@@ -3633,7 +3633,7 @@ PropertySearchResult SearchProperties(
     result.scannedObjects = count;
 
     for (int32_t i = 0; i < count && static_cast<int>(result.results.size()) < maxResults; ++i) {
-        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:search", "SearchProperties: aborted (client gone / shutdown)");
             break;  // return partial result
         }
@@ -3998,7 +3998,7 @@ std::vector<PropertySearchResult> SearchPropertiesBatch(
     int32_t scannedClasses = 0;
 
     for (int32_t i = 0; i < count; ++i) {
-        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:search", "SearchPropertiesBatch: aborted (client gone / shutdown)");
             break;  // return partial result
         }
@@ -4175,7 +4175,7 @@ std::vector<ClassInfo> WalkClassesBatch(const std::vector<uintptr_t>& addrs)
         // Cooperative cancel: a Full SDK dump can pass a large addr[] chunk and
         // each WalkClassEx is heavy. Bail if the client disconnected / shutting
         // down (NOT a time deadline — a long legitimate dump must run to end).
-        if ((batchIdx++ & 0xFFF) == 0 && Cancel::Requested()) {
+        if ((batchIdx++ & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:walk", "WalkClassesBatch: aborted (client gone / shutdown)");
             break;  // return partial result
         }
@@ -4281,7 +4281,7 @@ ClassListResult ListClasses(bool gameOnly, int maxResults) {
     result.scannedObjects = count;
 
     for (int32_t i = 0; i < count && static_cast<int>(result.results.size()) < maxResults; ++i) {
-        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:list", "ListClasses: aborted (client gone / shutdown)");
             break;  // return partial result
         }
@@ -4357,7 +4357,7 @@ AllFunctionsResult EnumerateAllFunctions(bool gameOnly, int maxEntries) {
     result.scannedObjects = count;
 
     for (int32_t i = 0; i < count; ++i) {
-        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:list", "EnumerateAllFunctions: aborted (client gone / shutdown)");
             break;  // return partial result
         }
@@ -4548,8 +4548,8 @@ PropertyXrefResult FindPropertyXrefs(uintptr_t propAddr, bool gameOnly,
             // this chunk's first iteration (mirrors FindReferencesToUObject).
             if (((i - beginIdx) & 0x3FF) == 0) {
                 if (deadlineHit.load(std::memory_order_relaxed)) return;
-                // Serial path has no cancel-watcher thread — poll Cancel here too.
-                if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+                // Serial path has no cancel-watcher thread — poll Tot here too.
+                if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
                 auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
                               std::chrono::steady_clock::now() - t0).count();
                 if (dt > kDeadlineMs) {
@@ -5012,8 +5012,8 @@ static bool ContainerInnerAccepted(
 }
 
 ValueScanResult ScanForValue(
-    ValueScan::DataType dt,
-    ValueScan::ScanType st,
+    Radar::DataType dt,
+    Radar::ScanType st,
     const uint8_t*      targetBytes,
     const uint8_t*      target2Bytes,
     bool                gameOnly,
@@ -5021,8 +5021,8 @@ ValueScanResult ScanForValue(
     double              tolerance,
     const std::string&  targetString,
     bool                caseSensitive,
-    const ValueScan::NumericTargetSet* multiTargets,
-    const ValueScan::NumericTargetSet* multiTargets2,
+    const Radar::NumericTargetSet* multiTargets,
+    const Radar::NumericTargetSet* multiTargets2,
     bool                parallel,
     bool                batchRead)
 {
@@ -5030,10 +5030,10 @@ ValueScanResult ScanForValue(
     auto t0 = std::chrono::steady_clock::now();
     constexpr auto kDeadline = std::chrono::seconds(15);
 
-    const bool isString = ValueScan::IsStringDataType(dt);
-    const bool isVector = ValueScan::IsVectorDataType(dt);
-    const bool isMulti  = ValueScan::IsMultiNumericDataType(dt);
-    const size_t dtSize = ValueScan::SizeOf(dt);
+    const bool isString = Radar::IsStringDataType(dt);
+    const bool isVector = Radar::IsVectorDataType(dt);
+    const bool isMulti  = Radar::IsMultiNumericDataType(dt);
+    const size_t dtSize = Radar::SizeOf(dt);
 
     // Validate inputs per type family.
     if (isString) {
@@ -5041,27 +5041,27 @@ ValueScanResult ScanForValue(
         // buffers are unused. Caller must pass a non-empty target for
         // targeted predicates (substring matchers + Exact); Changed /
         // Unchanged use the candidate's prevStr.
-        if (!ValueScan::IsPrevValueScanType(st) && targetString.empty()) return result;
+        if (!Radar::IsPrevValueScanType(st) && targetString.empty()) return result;
     } else if (isMulti) {
         // Multi-numeric meta scan: the pre-parsed per-width target set
         // replaces targetBytes. First scan requires it (prev-value scan
         // types never reach here — rejected below).
         if (!multiTargets || multiTargets->entries.empty()) return result;
-        if (st == ValueScan::ScanType::Between
+        if (st == Radar::ScanType::Between
             && (!multiTargets2 || multiTargets2->entries.empty())) return result;
     } else {
         if (dtSize == 0 || !targetBytes) return result;
-        if (st == ValueScan::ScanType::Between && !target2Bytes) return result;
+        if (st == Radar::ScanType::Between && !target2Bytes) return result;
     }
     // Prev-value scan types have no meaning on a first scan -- caller (pipe
     // handler) is responsible for rejecting these, but be defensive.
-    if (ValueScan::IsPrevValueScanType(st)) return result;
+    if (Radar::IsPrevValueScanType(st)) return result;
 
-    const auto& acceptedTypes = ValueScan::PropertyTypeNames(dt);
+    const auto& acceptedTypes = Radar::PropertyTypeNames(dt);
     // Vector types match by StructProperty + inner struct name (e.g.
     // "Vector", "Vector3f"). Empty for non-vector dt so the inner-name
     // check is skipped.
-    const auto& acceptedStructNames = ValueScan::VectorStructNames(dt);
+    const auto& acceptedStructNames = Radar::VectorStructNames(dt);
 
     // Per-class field index. classAddr -> filtered subset of FieldInfo
     // that match the requested DataType. Built lazily on first
@@ -5160,8 +5160,8 @@ ValueScanResult ScanForValue(
     constexpr int32_t kMaxBatchSpan       = 64 * 1024;
     constexpr int32_t kBatchBytesPerField = 512;
 
-    LOG_INFO("ValueScan: First Scan dt=%s st=%d (target %zuB, gameOnly=%d, max=%d, parallel=%d, batch=%d) over %d objects",
-             ValueScan::NameOf(dt), static_cast<int>(st), dtSize,
+    LOG_INFO("Radar: First Scan dt=%s st=%d (target %zuB, gameOnly=%d, max=%d, parallel=%d, batch=%d) over %d objects",
+             Radar::NameOf(dt), static_cast<int>(st), dtSize,
              gameOnly ? 1 : 0, maxResults, parallel ? 1 : 0, batchRead ? 1 : 0, count);
 
     // Per-thread output of the parallel GObjects walk. Each thread owns its
@@ -5169,9 +5169,9 @@ ValueScanResult ScanForValue(
     // ascending tid order so the global candidate list stays ascending by
     // object index — identical ordering to the old serial walk.
     struct ThreadResult {
-        std::vector<ValueScan::Candidate>        candidates;   // indices are THREAD-LOCAL
-        std::vector<ValueScan::FieldDescriptor>  descriptors;  // thread-local pool
-        std::vector<ValueScan::InstanceRecord>   instances;    // thread-local pool
+        std::vector<Radar::Candidate>        candidates;   // indices are THREAD-LOCAL
+        std::vector<Radar::FieldDescriptor>  descriptors;  // thread-local pool
+        std::vector<Radar::InstanceRecord>   instances;    // thread-local pool
         int32_t                                  scannedObjects = 0;
         std::unordered_set<uintptr_t>            classesWithFields;
     };
@@ -5413,7 +5413,7 @@ ValueScanResult ScanForValue(
                     // shape, so GetArrayInnerElemSize yields sizeof(T) here.
                     int32_t innerSize = Ubel::GetArrayInnerElemSize(f.Address);
                     sf.optionalFlagOffset =
-                        ValueScan::OptionalFlagOffset(f.Size, innerSize);
+                        Radar::OptionalFlagOffset(f.Size, innerSize);
                     out.push_back(std::move(sf));
                     continue;
                 }
@@ -5597,15 +5597,15 @@ ValueScanResult ScanForValue(
         // member or the value can't fit that width. Only reached on the
         // targeted first-scan path (prev-value scan types never get here).
         auto multiResolve = [&](const std::string& propTypeName,
-                                ValueScan::DataType& memberDt,
+                                Radar::DataType& memberDt,
                                 const uint8_t*&      tgt,
                                 const uint8_t*&      tgt2) -> bool {
-            if (!ValueScan::TryDataTypeFromPropertyTypeName(propTypeName, memberDt)) return false;
+            if (!Radar::TryDataTypeFromPropertyTypeName(propTypeName, memberDt)) return false;
             const uint8_t* e = multiTargets ? multiTargets->Find(memberDt) : nullptr;
             if (!e) return false;
             tgt  = e;
             tgt2 = nullptr;
-            if (st == ValueScan::ScanType::Between) {
+            if (st == Radar::ScanType::Between) {
                 const uint8_t* e2 = multiTargets2 ? multiTargets2->Find(memberDt) : nullptr;
                 if (!e2) return false;
                 tgt2 = e2;
@@ -5628,9 +5628,9 @@ ValueScanResult ScanForValue(
         if (((i - beginIdx) & 0xFFF) == 0) {
             if (deadlineHit.load(std::memory_order_relaxed)) return;
             // Serial path (parallel toggle OFF) has no cancel-watcher thread —
-            // poll Cancel here so the scan still bails promptly; setting
+            // poll Tot here so the scan still bails promptly; setting
             // deadlineHit also stops siblings on the parallel path.
-            if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+            if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
             if (std::chrono::steady_clock::now() - t0 > kDeadline) {
                 deadlineHit.store(true, std::memory_order_relaxed);
                 return;
@@ -5713,7 +5713,7 @@ ValueScanResult ScanForValue(
         // reuses the per-(class,offset) definingNameCache.
         auto ensureDescriptor = [&](ScanField& sf) -> uint32_t {
             if (sf.descriptorIdx >= 0) return static_cast<uint32_t>(sf.descriptorIdx);
-            ValueScan::FieldDescriptor d;
+            Radar::FieldDescriptor d;
             d.className     = sci->className;
             d.fieldName     = sf.name;  // BASE name; element "[i]" added at display time
             d.fieldType     = (sf.container != ScanContainer::None)
@@ -5750,10 +5750,10 @@ ValueScanResult ScanForValue(
                                  const std::string* strValue) {
             if (curInstanceIdx < 0) {
                 curInstanceIdx = static_cast<int32_t>(tr.instances.size());
-                tr.instances.push_back(ValueScan::InstanceRecord{
+                tr.instances.push_back(Radar::InstanceRecord{
                     obj, i, Ubel::GetName(obj) });
             }
-            ValueScan::Candidate cand;
+            Radar::Candidate cand;
             cand.addr          = valueAddr;
             cand.descriptorIdx = descriptorIdx;
             cand.instanceIdx   = static_cast<uint32_t>(curInstanceIdx);
@@ -5775,35 +5775,35 @@ ValueScanResult ScanForValue(
             uint8_t     readBuf[16] = {};
             std::string readStr;
             if (isString) {
-                if (dt == ValueScan::DataType::FString) {
+                if (dt == Radar::DataType::FString) {
                     readStr = Ubel::ReadFStringAt(elemAddr, 0);
-                } else if (dt == ValueScan::DataType::FName) {
+                } else if (dt == Radar::DataType::FName) {
                     readStr = Ubel::ReadFNameAt(elemAddr, 0);
                 } else {
                     readStr = Ubel::ReadFTextStringAt(elemAddr, 0);
                 }
-                if (!ValueScan::CompareStringPredicate(st, readStr, targetString, caseSensitive)) return;
+                if (!Radar::CompareStringPredicate(st, readStr, targetString, caseSensitive)) return;
                 emitCandidate(elemAddr, ensureDescriptor(sf), elemIndex, nullptr, 0, &readStr);
             } else if (isVector) {
                 if (!Macht::ReadBytesSafe(elemAddr, readBuf, 12)) return;
-                if (!ValueScan::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, tolerance)) return;
+                if (!Radar::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, tolerance)) return;
                 emitCandidate(elemAddr, ensureDescriptor(sf), elemIndex, readBuf, 12, nullptr);
             } else if (isMulti) {
                 // Resolve the element's own width (key/value/elem type) + target.
-                ValueScan::DataType elemDt = dt;
+                Radar::DataType elemDt = dt;
                 const uint8_t* mtgt = nullptr;
                 const uint8_t* mtgt2 = nullptr;
                 if (!multiResolve(sf.elemTypeName, elemDt, mtgt, mtgt2)) return;
-                size_t sz = ValueScan::SizeOf(elemDt);
+                size_t sz = Radar::SizeOf(elemDt);
                 if (!Macht::ReadBytesSafe(elemAddr, readBuf, sz)) return;
-                if (!ValueScan::ComparePredicate(elemDt, st, readBuf, mtgt, mtgt2, tolerance)) return;
+                if (!Radar::ComparePredicate(elemDt, st, readBuf, mtgt, mtgt2, tolerance)) return;
                 emitCandidate(elemAddr, ensureDescriptor(sf), elemIndex, readBuf, sz, nullptr);
             } else {
                 // Container elements never share a bitfield byte (TArray /
                 // TSet<bool> + TMap<bool,...> store bool unpacked), so the
                 // boolFieldMask = 0xFF path applies.
                 if (!Macht::ReadBytesSafe(elemAddr, readBuf, dtSize)) return;
-                if (!ValueScan::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) return;
+                if (!Radar::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) return;
                 emitCandidate(elemAddr, ensureDescriptor(sf), elemIndex, readBuf, dtSize, nullptr);
             }
         };
@@ -5819,7 +5819,7 @@ ValueScanResult ScanForValue(
             std::string key = sci->className; key += '\x01'; key += displayName;
             auto it = deepDescriptors.find(key);
             if (it != deepDescriptors.end()) return it->second;
-            ValueScan::FieldDescriptor d;
+            Radar::FieldDescriptor d;
             d.className         = sci->className;
             d.definingClassName = sci->className;
             d.fieldName         = displayName;   // fully-substituted path, no "[]" placeholder
@@ -5848,23 +5848,23 @@ ValueScanResult ScanForValue(
             if (isString) {
                 if (!typeOk) return;
                 std::string readStr;
-                if (dt == ValueScan::DataType::FString)      readStr = Ubel::ReadFStringAt(lf.leafAddr, 0);
-                else if (dt == ValueScan::DataType::FName)    readStr = Ubel::ReadFNameAt(lf.leafAddr, 0);
+                if (dt == Radar::DataType::FString)      readStr = Ubel::ReadFStringAt(lf.leafAddr, 0);
+                else if (dt == Radar::DataType::FName)    readStr = Ubel::ReadFNameAt(lf.leafAddr, 0);
                 else                                          readStr = Ubel::ReadFTextStringAt(lf.leafAddr, 0);
-                if (!ValueScan::CompareStringPredicate(st, readStr, targetString, caseSensitive)) return;
+                if (!Radar::CompareStringPredicate(st, readStr, targetString, caseSensitive)) return;
                 emitCandidate(lf.leafAddr, ensureDeepDescriptor(disp, lf.leafType), -1, nullptr, 0, &readStr);
             } else if (isMulti) {
-                ValueScan::DataType mdt = dt;
+                Radar::DataType mdt = dt;
                 const uint8_t* mtgt = nullptr; const uint8_t* mtgt2 = nullptr;
                 if (!multiResolve(lf.leafType, mdt, mtgt, mtgt2)) return;
-                size_t sz = ValueScan::SizeOf(mdt);
+                size_t sz = Radar::SizeOf(mdt);
                 if (!Macht::ReadBytesSafe(lf.leafAddr, readBuf, sz)) return;
-                if (!ValueScan::ComparePredicate(mdt, st, readBuf, mtgt, mtgt2, tolerance)) return;
+                if (!Radar::ComparePredicate(mdt, st, readBuf, mtgt, mtgt2, tolerance)) return;
                 emitCandidate(lf.leafAddr, ensureDeepDescriptor(disp, lf.leafType), -1, readBuf, sz, nullptr);
             } else {
                 if (!typeOk) return;
                 if (!Macht::ReadBytesSafe(lf.leafAddr, readBuf, dtSize)) return;
-                if (!ValueScan::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) return;
+                if (!Radar::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) return;
                 emitCandidate(lf.leafAddr, ensureDeepDescriptor(disp, lf.leafType), -1, readBuf, dtSize, nullptr);
             }
         };
@@ -5894,7 +5894,7 @@ ValueScanResult ScanForValue(
                 //     iteration; Data ptr may be null in that case.
                 constexpr int32_t kMaxElementsPerArray = 10'000'000;
                 if (arrayNum < 0 || arrayNum > kMaxElementsPerArray) {
-                    LOG_WARN("ValueScan: skipping TArray with Num=%d on field '%s' at 0x%llX (instance 0x%llX)",
+                    LOG_WARN("Radar: skipping TArray with Num=%d on field '%s' at 0x%llX (instance 0x%llX)",
                              arrayNum, sf.name.c_str(),
                              (unsigned long long)(obj + sf.offset),
                              (unsigned long long)obj);
@@ -5910,11 +5910,11 @@ ValueScanResult ScanForValue(
                     if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
                     // A pathological 10M-element array would otherwise pin this
                     // worker far past the deadline and ignore a cancel; poll the
-                    // shared deadline/cancel flag every 4K elements (Cancel sets
+                    // shared deadline/cancel flag every 4K elements (Tot sets
                     // deadlineHit via the ParallelGObjectsScan watcher).
                     if ((idx & 0xFFF) == 0) {
                         if (deadlineHit.load(std::memory_order_relaxed)) return;
-                        if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+                        if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
                         if (std::chrono::steady_clock::now() - t0 > kDeadline) {
                             deadlineHit.store(true, std::memory_order_relaxed);
                             return;
@@ -5940,7 +5940,7 @@ ValueScanResult ScanForValue(
 
                 constexpr int32_t kMaxElementsPerArray = 10'000'000;
                 if (arrayNum < 0 || arrayNum > kMaxElementsPerArray) {
-                    LOG_WARN("ValueScan: skipping struct TArray with Num=%d on field '%s' at 0x%llX (instance 0x%llX)",
+                    LOG_WARN("Radar: skipping struct TArray with Num=%d on field '%s' at 0x%llX (instance 0x%llX)",
                              arrayNum, sf.name.c_str(),
                              (unsigned long long)(obj + sf.offset),
                              (unsigned long long)obj);
@@ -5954,7 +5954,7 @@ ValueScanResult ScanForValue(
                     if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
                     if ((idx & 0xFFF) == 0) {
                         if (deadlineHit.load(std::memory_order_relaxed)) return;
-                        if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+                        if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
                         if (std::chrono::steady_clock::now() - t0 > kDeadline) {
                             deadlineHit.store(true, std::memory_order_relaxed);
                             return;
@@ -5990,7 +5990,7 @@ ValueScanResult ScanForValue(
                     // TSet/TMap can't hold this worker past the deadline or a cancel.
                     if ((e & 0xFFF) == 0) {
                         if (deadlineHit.load(std::memory_order_relaxed)) return;
-                        if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+                        if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
                         if (std::chrono::steady_clock::now() - t0 > kDeadline) {
                             deadlineHit.store(true, std::memory_order_relaxed);
                             return;
@@ -6023,14 +6023,14 @@ ValueScanResult ScanForValue(
                 // FString / FName / FText -- resolve to UTF-8 via Ubel
                 // helpers. Empty resolution returns "" and we still test
                 // it (target may be "" for Exact-empty searches).
-                if (dt == ValueScan::DataType::FString) {
+                if (dt == Radar::DataType::FString) {
                     readStr = Ubel::ReadFStringAt(obj, sf.offset);
-                } else if (dt == ValueScan::DataType::FName) {
+                } else if (dt == Radar::DataType::FName) {
                     readStr = Ubel::ReadFNameAt(obj, sf.offset);
                 } else {
                     readStr = Ubel::ReadFTextStringAt(obj, sf.offset);
                 }
-                if (!ValueScan::CompareStringPredicate(st, readStr, targetString, caseSensitive)) continue;
+                if (!Radar::CompareStringPredicate(st, readStr, targetString, caseSensitive)) continue;
                 emitCandidate(valueAddr, ensureDescriptor(sf), -1, nullptr, 0, &readStr);
                 continue;
             }
@@ -6039,7 +6039,7 @@ ValueScanResult ScanForValue(
                 // struct start. Caller's targetBytes already encodes
                 // the 12-byte (X,Y,Z) layout.
                 if (!readBody(sf.offset, readBuf, 12)) continue;
-                if (!ValueScan::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
+                if (!Radar::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
                 emitCandidate(valueAddr, ensureDescriptor(sf), -1, readBuf, 12, nullptr);
                 continue;
             }
@@ -6049,13 +6049,13 @@ ValueScanResult ScanForValue(
                 // if the value can't fit it. Compare with the per-field
                 // DataType so an int field compares as int, a float field
                 // as float — no byte-reinterpret.
-                ValueScan::DataType memberDt;
+                Radar::DataType memberDt;
                 const uint8_t* mtgt = nullptr;
                 const uint8_t* mtgt2 = nullptr;
                 if (!multiResolve(sf.typeName, memberDt, mtgt, mtgt2)) continue;
-                size_t msz = ValueScan::SizeOf(memberDt);
+                size_t msz = Radar::SizeOf(memberDt);
                 if (!readBody(sf.offset, readBuf, msz)) continue;
-                if (!ValueScan::ComparePredicate(memberDt, st, readBuf, mtgt, mtgt2, tolerance)) continue;
+                if (!Radar::ComparePredicate(memberDt, st, readBuf, mtgt, mtgt2, tolerance)) continue;
                 emitCandidate(valueAddr, ensureDescriptor(sf), -1, readBuf, msz, nullptr);
                 continue;
             }
@@ -6067,12 +6067,12 @@ ValueScanResult ScanForValue(
             // (0/1), not the raw shared byte, so Changed /
             // Unchanged refines compare on a stable value even
             // when sibling bits flip.
-            if (dt == ValueScan::DataType::Bool
+            if (dt == Radar::DataType::Bool
                 && sf.boolFieldMask != 0 && sf.boolFieldMask != 0xFF) {
                 readBuf[0] = ((readBuf[0] & sf.boolFieldMask) != 0) ? 1 : 0;
             }
 
-            if (!ValueScan::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
+            if (!Radar::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
             emitCandidate(valueAddr, ensureDescriptor(sf), -1, readBuf, dtSize, nullptr);
         }
 
@@ -6094,7 +6094,7 @@ ValueScanResult ScanForValue(
             int64_t deepVisited = 0;
             dlim.aborted  = [&] {
                 if (deadlineHit.load(std::memory_order_relaxed)) return true;
-                if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return true; }
+                if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return true; }
                 if (std::chrono::steady_clock::now() - t0 > kDeadline) {
                     deadlineHit.store(true, std::memory_order_relaxed); return true;
                 }
@@ -6149,7 +6149,7 @@ ValueScanResult ScanForValue(
                     std::chrono::steady_clock::now() - t0).count();
     result.stats.durationMs = static_cast<int64_t>(dtms);
 
-    LOG_INFO("ValueScan: First Scan complete -- %d candidates in %lld ms (%d objects, %d classes with matching fields, %d thread(s)%s)",
+    LOG_INFO("Radar: First Scan complete -- %d candidates in %lld ms (%d objects, %d classes with matching fields, %d thread(s)%s)",
              static_cast<int>(result.candidates.size()),
              static_cast<long long>(dtms),
              result.stats.scannedObjects,
@@ -6159,56 +6159,56 @@ ValueScanResult ScanForValue(
 }
 
 ValueScanStats RefineCandidates(
-    ValueScan::DataType                            dt,
-    ValueScan::ScanType                            st,
+    Radar::DataType                            dt,
+    Radar::ScanType                            st,
     const uint8_t*                                 targetBytes,
     const uint8_t*                                 target2Bytes,
-    std::vector<ValueScan::Candidate>&             candidates,
-    const std::vector<ValueScan::FieldDescriptor>& descriptors,
+    std::vector<Radar::Candidate>&             candidates,
+    const std::vector<Radar::FieldDescriptor>& descriptors,
     double                                         tolerance,
     const std::string&                             targetString,
     bool                                           caseSensitive,
-    const ValueScan::NumericTargetSet*             multiTargets,
-    const ValueScan::NumericTargetSet*             multiTargets2)
+    const Radar::NumericTargetSet*             multiTargets,
+    const Radar::NumericTargetSet*             multiTargets2)
 {
     ValueScanStats stats;
     auto t0 = std::chrono::steady_clock::now();
 
-    const bool isString = ValueScan::IsStringDataType(dt);
-    const bool isVector = ValueScan::IsVectorDataType(dt);
-    const bool isMulti  = ValueScan::IsMultiNumericDataType(dt);
-    const size_t dtSize = ValueScan::SizeOf(dt);
+    const bool isString = Radar::IsStringDataType(dt);
+    const bool isVector = Radar::IsVectorDataType(dt);
+    const bool isMulti  = Radar::IsMultiNumericDataType(dt);
+    const size_t dtSize = Radar::SizeOf(dt);
     if (!isString && !isMulti && dtSize == 0) return stats;
 
-    const bool usePrev = ValueScan::IsPrevValueScanType(st);
+    const bool usePrev = Radar::IsPrevValueScanType(st);
     if (isMulti) {
         // Targeted multi-numeric refine needs the pre-parsed target set;
         // prev-value predicates compare against each candidate's snapshot.
         if (!usePrev && (!multiTargets || multiTargets->entries.empty())) return stats;
-        if (!usePrev && st == ValueScan::ScanType::Between
+        if (!usePrev && st == Radar::ScanType::Between
             && (!multiTargets2 || multiTargets2->entries.empty())) return stats;
     } else if (!isString) {
         if (!usePrev && !targetBytes) return stats;
-        if (st == ValueScan::ScanType::Between && !target2Bytes) return stats;
+        if (st == Radar::ScanType::Between && !target2Bytes) return stats;
     }
 
     const int32_t initialSize = static_cast<int32_t>(candidates.size());
 
-    std::vector<ValueScan::Candidate> kept;
+    std::vector<Radar::Candidate> kept;
     kept.reserve(candidates.size());
 
     for (auto& c : candidates) {
         // Per-(class,field) metadata (fieldType / boolFieldMask) lives in
         // the shared descriptor pool the candidate indexes into (V3-A).
-        const ValueScan::FieldDescriptor& desc = descriptors[c.descriptorIdx];
+        const Radar::FieldDescriptor& desc = descriptors[c.descriptorIdx];
         if (isMulti) {
             // Re-resolve this candidate's own width from its stored
             // fieldType (concrete property type, e.g. "FloatProperty").
             // Targeted predicates compare against the matching target
             // entry; prev-value predicates against the snapshot.
-            ValueScan::DataType memberDt;
-            if (!ValueScan::TryDataTypeFromPropertyTypeName(desc.fieldType, memberDt)) continue;
-            size_t msz = ValueScan::SizeOf(memberDt);
+            Radar::DataType memberDt;
+            if (!Radar::TryDataTypeFromPropertyTypeName(desc.fieldType, memberDt)) continue;
+            size_t msz = Radar::SizeOf(memberDt);
             uint8_t readBuf[16] = {};
             if (!Macht::ReadBytesSafe(c.addr, readBuf, msz)) continue;
 
@@ -6219,12 +6219,12 @@ ValueScanStats RefineCandidates(
             } else {
                 cmpTarget = multiTargets ? multiTargets->Find(memberDt) : nullptr;
                 if (!cmpTarget) continue;  // value can't fit this width
-                if (st == ValueScan::ScanType::Between) {
+                if (st == Radar::ScanType::Between) {
                     cmp2 = multiTargets2 ? multiTargets2->Find(memberDt) : nullptr;
                     if (!cmp2) continue;
                 }
             }
-            if (!ValueScan::ComparePredicate(memberDt, st, readBuf, cmpTarget, cmp2, tolerance)) continue;
+            if (!Radar::ComparePredicate(memberDt, st, readBuf, cmpTarget, cmp2, tolerance)) continue;
             std::memcpy(c.prevValue, readBuf, msz);
             kept.push_back(std::move(c));
             continue;
@@ -6259,7 +6259,7 @@ ValueScanStats RefineCandidates(
             }
 
             const std::string& cmpTarget = usePrev ? c.prevStr : targetString;
-            if (!ValueScan::CompareStringPredicate(st, cur, cmpTarget, caseSensitive)) continue;
+            if (!Radar::CompareStringPredicate(st, cur, cmpTarget, caseSensitive)) continue;
 
             c.prevStr = std::move(cur);
             kept.push_back(std::move(c));
@@ -6270,7 +6270,7 @@ ValueScanStats RefineCandidates(
             uint8_t readBuf[16] = {};
             if (!Macht::ReadBytesSafe(c.addr, readBuf, 12)) continue;
             const uint8_t* cmpTarget = usePrev ? c.prevValue : targetBytes;
-            if (!ValueScan::CompareVectorPredicate(st, readBuf, cmpTarget, target2Bytes, tolerance)) continue;
+            if (!Radar::CompareVectorPredicate(st, readBuf, cmpTarget, target2Bytes, tolerance)) continue;
             std::memcpy(c.prevValue, readBuf, 12);
             kept.push_back(std::move(c));
             continue;
@@ -6279,13 +6279,13 @@ ValueScanStats RefineCandidates(
         uint8_t readBuf[16] = {};
         if (!Macht::ReadBytesSafe(c.addr, readBuf, dtSize)) continue;
 
-        if (dt == ValueScan::DataType::Bool
+        if (dt == Radar::DataType::Bool
             && desc.boolFieldMask != 0 && desc.boolFieldMask != 0xFF) {
             readBuf[0] = ((readBuf[0] & desc.boolFieldMask) != 0) ? 1 : 0;
         }
 
         const uint8_t* cmpTarget = usePrev ? c.prevValue : targetBytes;
-        if (!ValueScan::ComparePredicate(dt, st, readBuf, cmpTarget, target2Bytes, tolerance)) continue;
+        if (!Radar::ComparePredicate(dt, st, readBuf, cmpTarget, target2Bytes, tolerance)) continue;
 
         std::memcpy(c.prevValue, readBuf, dtSize);
         kept.push_back(std::move(c));
@@ -6298,7 +6298,7 @@ ValueScanStats RefineCandidates(
                     std::chrono::steady_clock::now() - t0).count();
     stats.durationMs = static_cast<int64_t>(dtms);
 
-    LOG_INFO("ValueScan: Refine st=%d (usePrev=%d): %d -> %d candidates in %lld ms",
+    LOG_INFO("Radar: Refine st=%d (usePrev=%d): %d -> %d candidates in %lld ms",
              static_cast<int>(st), usePrev ? 1 : 0,
              initialSize, static_cast<int>(candidates.size()),
              static_cast<long long>(dtms));
@@ -6329,20 +6329,20 @@ std::string RenderInnerKey(const FieldInfo& kf, uintptr_t elemAddr) {
     if (kf.TypeName == "NameProperty")
         return Ubel::ReadFNameAt(elemAddr, kf.Offset);
 
-    ValueScan::DataType dt;
-    if (ValueScan::TryDataTypeFromPropertyTypeName(kf.TypeName, dt)) {
-        size_t sz = ValueScan::SizeOf(dt);
+    Radar::DataType dt;
+    if (Radar::TryDataTypeFromPropertyTypeName(kf.TypeName, dt)) {
+        size_t sz = Radar::SizeOf(dt);
         uint8_t buf[8] = {};
         if (sz >= 1 && sz <= 8 && Macht::ReadBytesSafe(elemAddr + kf.Offset, buf, sz)) {
             switch (dt) {
-                case ValueScan::DataType::Int8:   return std::to_string(static_cast<int>(static_cast<int8_t>(buf[0])));
-                case ValueScan::DataType::UInt8:  return std::to_string(static_cast<unsigned>(buf[0]));
-                case ValueScan::DataType::Int16:  { int16_t v;  std::memcpy(&v, buf, 2); return std::to_string(v); }
-                case ValueScan::DataType::UInt16: { uint16_t v; std::memcpy(&v, buf, 2); return std::to_string(v); }
-                case ValueScan::DataType::Int32:  { int32_t v;  std::memcpy(&v, buf, 4); return std::to_string(v); }
-                case ValueScan::DataType::UInt32: { uint32_t v; std::memcpy(&v, buf, 4); return std::to_string(v); }
-                case ValueScan::DataType::Int64:  { int64_t v;  std::memcpy(&v, buf, 8); return std::to_string(v); }
-                case ValueScan::DataType::UInt64: { uint64_t v; std::memcpy(&v, buf, 8); return std::to_string(v); }
+                case Radar::DataType::Int8:   return std::to_string(static_cast<int>(static_cast<int8_t>(buf[0])));
+                case Radar::DataType::UInt8:  return std::to_string(static_cast<unsigned>(buf[0]));
+                case Radar::DataType::Int16:  { int16_t v;  std::memcpy(&v, buf, 2); return std::to_string(v); }
+                case Radar::DataType::UInt16: { uint16_t v; std::memcpy(&v, buf, 2); return std::to_string(v); }
+                case Radar::DataType::Int32:  { int32_t v;  std::memcpy(&v, buf, 4); return std::to_string(v); }
+                case Radar::DataType::UInt32: { uint32_t v; std::memcpy(&v, buf, 4); return std::to_string(v); }
+                case Radar::DataType::Int64:  { int64_t v;  std::memcpy(&v, buf, 8); return std::to_string(v); }
+                case Radar::DataType::UInt64: { uint64_t v; std::memcpy(&v, buf, 8); return std::to_string(v); }
                 default: break;
             }
         }
@@ -6361,12 +6361,12 @@ std::string RenderInnerKey(const FieldInfo& kf, uintptr_t elemAddr) {
 // which key on array_field + elem_index, get deep support with no schema change.
 // Leaf-container elements (TArray<int> etc.) are captured too (leaf name "").
 void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
-                         ValueScan::DataType numericScope, int32_t arrayCap,
+                         Radar::DataType numericScope, int32_t arrayCap,
                          std::vector<Aura::SnapshotArray>& out) {
     if (!obj || !cls) return;
     if (arrayCap <= 0) arrayCap = 256;
 
-    const auto& members = ValueScan::MultiNumericMembers(numericScope);
+    const auto& members = Radar::MultiNumericMembers(numericScope);
     if (members.empty()) return;   // not a meta scope -> capture nothing
 
     // Regroup the flat leaf stream back into SnapshotArray{field, elements[]}.
@@ -6389,7 +6389,7 @@ void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
     const auto t0 = std::chrono::steady_clock::now();
     constexpr auto kPerObjBackstop = std::chrono::milliseconds(750);
     lim.aborted  = [t0] {
-        return Cancel::Requested()
+        return Tot::Requested()
             || (std::chrono::steady_clock::now() - t0) > kPerObjBackstop;
     };
 
@@ -6402,12 +6402,12 @@ void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
             // nested leaf-containers (Tunes[N], depth >= 2) too. (build 1204)
             if (lf.leafName.empty() && lf.depth < 2) return;
             // Snapshot tracks only numeric leaves within the configured scope.
-            ValueScan::DataType ldt;
-            if (!ValueScan::TryDataTypeFromPropertyTypeName(lf.leafType, ldt)) return;
+            Radar::DataType ldt;
+            if (!Radar::TryDataTypeFromPropertyTypeName(lf.leafType, ldt)) return;
             bool inScope = false;
-            for (ValueScan::DataType m : members) if (m == ldt) { inScope = true; break; }
+            for (Radar::DataType m : members) if (m == ldt) { inScope = true; break; }
             if (!inScope) return;
-            size_t sz = ValueScan::SizeOf(ldt);
+            size_t sz = Radar::SizeOf(ldt);
             if (sz == 0 || sz > 8) return;
             uint8_t buf[8] = {};
             if (!Macht::ReadBytesSafe(lf.leafAddr, buf, sz)) return;
@@ -6434,7 +6434,7 @@ void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
                     std::vector<std::string> types, names;
                     types.reserve(eci.Fields.size()); names.reserve(eci.Fields.size());
                     for (const auto& ff : eci.Fields) { types.push_back(ff.TypeName); names.push_back(ff.Name); }
-                    int kIdx = ValueScan::SelectArrayInnerKey(types, names);
+                    int kIdx = Radar::SelectArrayInnerKey(types, names);
                     if (kIdx >= 0 && kIdx < static_cast<int>(eci.Fields.size())) {
                         el.keyName  = eci.Fields[kIdx].Name;
                         el.keyValue = RenderInnerKey(eci.Fields[kIdx], lf.elemBaseAddr);
@@ -6456,7 +6456,7 @@ void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
 
 SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
                                          bool gameOnly,
-                                         ValueScan::DataType numericScope,
+                                         Radar::DataType numericScope,
                                          int32_t arrayCap) {
     SnapshotChunkResult result;
     const int32_t total = GetCount();
@@ -6471,7 +6471,7 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
     std::vector<std::string> typeNames;
 
     for (int32_t i = offset; i < end; ++i) {
-        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:snapshot", "CaptureSnapshotChunk: aborted (client gone / shutdown)");
             break;  // return partial chunk
         }
@@ -6495,7 +6495,7 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
         typeNames.reserve(ci.Fields.size());
         for (const auto& f : ci.Fields) typeNames.push_back(f.TypeName);
 
-        auto picks = ValueScan::SelectSnapshotNumericFields(typeNames, numericScope);
+        auto picks = Radar::SelectSnapshotNumericFields(typeNames, numericScope);
 
         SnapshotObject so;
         so.index     = i;  // GObjects index == logical slot index
@@ -6509,7 +6509,7 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
         // Top-level numeric scalar fields.
         for (const auto& p : picks) {
             const auto& fi = ci.Fields[p.fieldIndex];
-            size_t sz = ValueScan::SizeOf(p.dt);
+            size_t sz = Radar::SizeOf(p.dt);
             if (sz == 0 || sz > 8) continue;  // defensive; meta members are 1..8B
             uint8_t buf[8] = {};
             if (!Macht::ReadBytesSafe(obj + fi.Offset, buf, sz)) continue;

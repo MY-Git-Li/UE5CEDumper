@@ -1,7 +1,7 @@
 #pragma once
 
 // ============================================================
-// Sein — 賽恩 (僧侶・記錄者 — Priest, Chronicler)
+// Sein — 贊恩 (僧侶・記錄者 — Priest, Chronicler)
 // Logger: 5-category per-process file logging with rotation
 //
 // Each log message is routed to a category-specific file under

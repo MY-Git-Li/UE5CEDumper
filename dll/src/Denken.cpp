@@ -1,5 +1,5 @@
 // ============================================================
-// Denken — native-code disassembly for Path 2 (see Denken.h)
+// Denken — 鄧肯, 著重探知魔法的過程 native-code disassembly for Path 2 (see Denken.h)
 // ============================================================
 
 #include "Denken.h"
