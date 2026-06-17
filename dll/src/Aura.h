@@ -1,7 +1,7 @@
 #pragma once
 
 // ============================================================
-// Aura — 斷頭台的奧拉 (服從之秤 — Obedience Scale)
+// Aura — 斷頭台的阿烏拉 (服從之秤 — Obedience Scale)
 // ObjectArray: FUObjectArray slot enumeration and validation
 // ============================================================
 

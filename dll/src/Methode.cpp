@@ -1,5 +1,5 @@
 // ============================================================
-// Methode — 梅特黛 (全能分析型 — All-Capable Analyst)
+// Methode — 梅特戴 (全能分析型 — All-Capable Analyst)
 // CEPlugin: CE Plugin Type 5 interface
 //
 // When loaded by CE from its plugin folder, this adds a

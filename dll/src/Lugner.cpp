@@ -1,5 +1,5 @@
 // ============================================================
-// Lugner — 呂格納 (偽裝專家 — Master of Disguise)
+// Lugner — 琉古納 (偽裝專家 — Master of Disguise)
 // ProxyVersion: version.dll forwarding proxy
 //
 // This file is only compiled for the version.dll proxy build

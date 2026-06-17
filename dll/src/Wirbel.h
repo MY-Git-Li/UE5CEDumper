@@ -1,7 +1,7 @@
 #pragma once
 
 // ============================================================
-// Wirbel — 維爾貝爾 (北部魔法隊小隊長 — pragmatic soldier)
+// Wirbel — 威亞貝爾 (北部魔法隊小隊長 — pragmatic soldier)
 // Teleport: marker save/recall + cursor teleport (BugIt-style).
 // Swift battlefield repositioning — the soldier who relocates first.
 //

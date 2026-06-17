@@ -1,7 +1,7 @@
 #pragma once
 
 // ============================================================
-// Tot — 終焉之聖 ("Saint of the End")
+// Tot — 托托, 終極聖女托托 ("Saint of the End")
 // Cancellation: cooperative cancel flag for long-running DLL operations.
 //
 // The pipe server (Fern) processes one command at a time, synchronously,

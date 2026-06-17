@@ -1,7 +1,7 @@
 #pragma once
 
 // ============================================================
-// Frieren — 芙莉蓮 (主角 — Protagonist)
+// Frieren — 芙莉蓮, 葬送のフリーレン (主角 — Protagonist)
 // ExportAPI: ~30 C ABI exports for CE Lua bridge
 // ============================================================
 

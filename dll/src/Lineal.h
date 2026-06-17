@@ -1,5 +1,5 @@
 // ============================================================
-// Lineal — 尺規 ("Ruler / Straightedge" — layout / alignment)
+// Lineal — 莉涅爾 ("Ruler / Straightedge" — layout / alignment)
 // FUObjectItem packing: UE5.7+ packed-pointer split / rejoin reconstruction
 //
 // UE 5.7 added an optional packed FUObjectItem encoding gated by

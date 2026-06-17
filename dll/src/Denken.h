@@ -1,7 +1,7 @@
 #pragma once
 
 // ============================================================
-// Denken — 頓肯 (Frieren naming map #25, "deep analysis / type inference")
+// Denken — 鄧肯, 著重探知魔法的過程 (Frieren naming map #25, "deep analysis / type inference")
 // Native-code disassembly: recover [this + offset] field accesses from a
 // native UFunction's x64 machine code using the Zydis decoder. This is the
 // engine behind Path 2 (cross-referencing native C++ functions to the
