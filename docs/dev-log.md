@@ -14,6 +14,42 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-17 — Aura: bad-dominated classic item pass falls through to +0x08 — stock-UE5.7 (Solarpunk) live-confirmed (build 1257, verified on 1259)
+
+`Aura::DetectItemSize` runs two object-ptr-offset passes — classic `+0x00`
+first, then UE5.7+ `+0x08` — but pass 0 early-accepted **any** stride that
+resolved `>= 2` named items, **ignoring the `bad` count**. On a stock UE5.7
+*reordered* item (`int64 FlagsAndRefCount@+0x00, UObjectBase* Object@+0x08`,
+24-byte stride) a mis-strided 16-byte scan lands on the real Object field only
+~1/3 of the time (`16i mod 24 ∈ {0,16,8}`), producing a deceptive
+`named=66 / bad=69 / null=65` (~1/3 each). 66 ≥ 2 cleared the floor → pass 0
+was accepted → the `+0x08` pass (which picks stride-24/offset-8 cleanly) **never
+ran**. Symptom: ~46% name resolution, init sanity 4/10, enum-detect fails.
+
+**Fix:** add a quality gate to the early-accept — a name-resolving pass is only
+trusted when valid items out-number bad reads (`qualityOk = !bestHasNames ||
+bestNamed > bestBad`). A correct layout resolves nearly every non-null slot
+(`bad ≈ 0`), so it still accepts exactly as before; a bad-dominated classic pass
+now falls through to the `+0x08` pass. The function's existing tentative-fallback
+(picks the strongest pass across both offsets) makes regression structurally
+impossible — a too-strict gate can only re-route a result through the fallback to
+the same stride/offset, never to a worse one. The pass-0 "weak" log line now also
+prints `bad=` so the reason is visible.
+
+**Live-confirmed on Solarpunk** (rokaplay, stock UE5.7, `version.dll` proxy,
+build 1259 DLL = `c381e7d`+fix): the log now shows
+`classic (+0x00) item detection weak (named=66, count=66, bad=69) — retrying
+with UE5.7+ object-ptr offset +0x08` → `FUObjectItem size=24, object-ptr
+offset=+0x08 (UE5.7+ reordered item) — 200 named, 200 total, 0 bad`. Name
+resolution jumped to ~100% (`FindInstancesByClass` reports `named == nonNull`;
+`BP_MainPlayerController_C` now returns 2 instances, was 0), sanity 10/10,
+GWorld recovered via instance-scan, ProcessEvent dispatch validated. This is the
+real stock-5.7+ game the build-1064 `+0x08` work had been waiting on to
+live-confirm (the build-1064 note explicitly flagged "still needs live-confirm on
+a real stock-5.7+ game"). 567 dll_helpers + 1551 C# tests green;
+`DetectItemSize` itself needs a live process so it is not unit-tested. Solarpunk
+added to [roadmap.md](roadmap.md) / [test-games.md](test-games.md) / READMEs.
+
 ## 2026-06-17 — GodMode: generic invincibility-bool scan (T2) + diagnostics (builds 1254-1256)
 
 Live-test on **SEED BATTLE DESTINY REMASTERED** showed GodMode flipping
