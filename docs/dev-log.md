@@ -52,9 +52,13 @@ ints (masked until fix #1 made ByteProperty enums resolve, exposing the contrast
 `Role`/`RemoteRole` named but `UpdateOverlapsMethod`/`SpawnCollisionHandling` raw). Fixed to
 `FENUMPROP_ENUM = FBYTEPROP_ENUM + 8` everywhere. Produces the RE-UE4SS-template stock values
 (Byte 0x70 / Enum 0x78) and TQ2's shifted 0x74 / 0x7C. ByteProperty path untouched (already
-correct) → pure improvement, no regression. ⚠ Needs a TQ2 in-game re-test to confirm
-(offset arithmetic isn't unit-testable; the UE-source invariant + template-matching values
-are the static assurance).
+correct) → pure improvement, no regression. **LIVE-CONFIRMED on TQ2:** the EnumProperty
+fields that previously showed raw ints now resolve —
+`UpdateOverlapsMethodDuringLevelStreaming`→`EActorUpdateOverlapsMethod::UseConfigDefault`,
+`DefaultUpdateOverlapsMethod...`→`OnlyUpdateMovable`, `SpawnCollisionHandlingMethod`→
+`ESpawnActorCollisionHandlingMethod::AlwaysSpawn` — and CE export emits the full
+`0:UseConfigDefault … 4:..._MAX` DropDownList. (Offset arithmetic isn't unit-testable;
+confirmed in-game.)
 
 605 dll_helpers + 1569 C# tests green; full build clean (build 1268).
 
