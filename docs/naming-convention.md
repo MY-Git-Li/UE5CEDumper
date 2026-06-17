@@ -44,6 +44,8 @@ narrative identity resonates with what the module *does*.
 | **Lugner.cpp** | 呂格納 | Demon master of disguise | #12 | ProxyVersion: version.dll forwarding proxy | The deceiver — pretends to be the real version.dll |
 | **Scharf.h** | 夏爾夫 | Sharp-eyed, scrutinizing examinee | #17 | WalkerAlignment: FProperty offset-vs-alignment validator | Sharp eye for layout flaws — catches misaligned EnumProperty / FName that hint at a wrong FPROPERTY_OFFSET probe |
 | **Wirbel.cpp** | 維爾貝爾 | Northern squad leader, pragmatic soldier | #20 | Teleport: marker save/recall + cursor teleport (BugIt-style) | Swift battlefield repositioning — the soldier who relocates first |
+| **Tot.h** | 終焉之聖 | "Saint of the End", Greater Demon | — | Cancellation: cooperative cancel flag for long-running ops | The End — signals every long loop to stop (was `Cancel`) |
+| **Lineal.h** | 尺規 | First-class mage, 15-yr undercover spy | — | PackedItem: UE5.7+ packed FUObjectItem reconstruction | The straightedge — realigns the non-standard packed layout (was `PackedItem`) |
 
 ---
 
@@ -93,6 +95,8 @@ Wirbel::                    // Teleport — swift battlefield repositioning
 Mimic::                     // Mailbox — disguised channel
 Renge::                     // PipeProtocol — liaison rules
 Scharf::                    // FProperty alignment validator (header-only)
+Tot::                       // Cancellation — cooperative cancel flag (header-only; was Cancel)
+Lineal::                    // PackedItem — UE5.7+ packed FUObjectItem reconstruction (header-only; was PackedItem)
 Grimoire::                  // Constants — spell book
 DynOff::                    // Dynamic offsets (in Grimoire.h, unchanged)
 ```
@@ -244,7 +248,7 @@ German meanings are given because most names map cleanly to a module function.
 |---|---|---|---|---|
 | Lügner | Lugner | Master of disguise / envoy | 🟢 ProxyVersion | — |
 | Solitär | Solitar | Greater demon studying humanity | 🟡 GodMode (planned) | Stealth/protection (`Solitar`, see `docs/godmode-spec.md`) |
-| Tot | Tot | "Saint of the End", end-curse | ⬜ | Shutdown / teardown / cleanup |
+| Tot | Tot | "Saint of the End", end-curse | 🟢 Cancellation | Cooperative cancel flag for long-running ops (`Tot.h`, was `Cancel`) |
 | Rivale | Rivale | "Bloody God of War", forges weapons | ⬜ | Builder / generator (CT / AA script) |
 | Qual | Qual | Creator of Zoltraak (universal magic) | ⬜ | Foundational engine / AOB pattern compiler |
 | Linie | Linie | Reads opponent mana ("line") | ⬜ | Analysis / profiling / lineage trace |
@@ -265,7 +269,7 @@ German meanings are given because most names map cleanly to a module function.
 | Sense | Sense | Second-Exam proctor ("scythe") | ⬜ | Reaping / cleanup / harvest-collection |
 | Falsch | Falsch | By-the-book proctor ("false") | ⬜ | Validation / assertion / error detection |
 | Lernen | Lernen | Serie's apprentice ("to learn") | ⬜ | Adaptive heuristics / calibration |
-| Lineal | Lineal | 15-year undercover spy ("ruler") | ⬜ | Layout alignment / measurement |
+| Lineal | Lineal | 15-year undercover spy ("ruler") | 🟢 PackedItem reconstruct | UE5.7+ packed FUObjectItem split/rejoin (`Lineal.h`, was `PackedItem`) |
 
 ### Mages — First-Class Exam & Others
 
@@ -296,7 +300,7 @@ German meanings are given because most names map cleanly to a module function.
 | Grau | Grau | Straight-laced trooper ("gray") | ⬜ | Neutral baseline |
 | Lager | Lager | Carefree trooper ("storage/depot") | ⬜ | Cache / buffer pool / storage |
 | Löwe (Held) | Lowe | Governor / anti-magic ("lion") | ⬜ | Aggressive / dominant heuristic |
-| Radar | Radar | Shadow Warrior chief | ⬜ | Scanning / detection / sweep |
+| Radar | Radar | Shadow Warrior chief | 🟡 ValueScan rename (planned) | CE-style by-value scan — 485 refs, deferred to its own change |
 | Schritt | Schritt | Shadow Warrior ("step") | ⬜ | Stepping / single-step iteration |
 | Routine | Routine | Shadow Warrior librarian | ⬜ | Scheduled / periodic subroutine |
 | Kreis | Kreis | Shadow Warrior blacksmith ("circle") | ⬜ | Ring buffer / loop / cycle |
@@ -328,16 +332,15 @@ German meanings are given because most names map cleanly to a module function.
 > **Not on the Wikipedia roster** (kept anyway): `Mimic` (寶箱怪 chest-mimic gag),
 > `Renge` (蓮格 liaison, poll #22), `Grimoire` (魔導書 — an item, not a character).
 
-### Newer modules still on plain-English names
+### Plain-English module migration status
 
-These shipped without a Frieren name and are candidates for adoption from the pool:
-
-| Module | Current file | Function | Pool suggestion |
+| Module | File | Function | Status |
 |---|---|---|---|
-| Cancellation | `Cancel.h` | `Cancel::Requested()` cooperative cancel | `Tot` (the End) |
-| Value scan | `ValueScan.h/.cpp` | CE-style by-value scan | `Kanone` (blast) / `Radar` (sweep) |
-| Packed item | `PackedItem.h` | UE5.7+ packed FUObjectItem reconstruct | `Lineal` (alignment) |
-| Graph path | `GraphPath.h` | BFS shortest-path core (under `Aura::`) | stays a helper |
+| Cancellation | `Tot.h` (was `Cancel.h`) | cooperative cancel flag | ✅ renamed `Cancel → Tot` |
+| Packed item | `Lineal.h` (was `PackedItem.h`) | UE5.7+ packed FUObjectItem reconstruct | ✅ renamed `PackedItem → Lineal` |
+| Value scan | `ValueScan.h/.cpp` | CE-style by-value scan | 🟡 planned `ValueScan → Radar` (485 refs — own change) |
+| Graph path | `GraphPath.h` | BFS shortest-path core (under `Aura::`) | ✅ kept — helper inside `Aura::`, by design |
+| UTF-8 helpers | `Utf8Helpers.h` | string conversion leaf util | ✅ kept — generic utility, by design |
 
 ---
 

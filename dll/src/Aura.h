@@ -96,7 +96,7 @@ bool IsPacked();
 // Runtime calibration / force-enable for the packed reconstruction (no rebuild).
 // Pass alignBits<=0 / ptrMaskBits==0 / serialOff<0 to leave that field unchanged.
 // force=true switches the live layout to packed unconditionally (calibration harness
-// for the first real packed game). See PackedItem.h for the encoding.
+// for the first real packed game). See Lineal.h for the encoding.
 void SetPackedConsts(int alignBits, uint64_t ptrMaskBits, bool force, int serialOff = -1);
 
 // Whether the GObjects array is a flat (non-chunked) FFixedUObjectArray.
@@ -318,7 +318,7 @@ std::vector<ReferenceMatch> FindReferencesToUObject(uintptr_t target,
 //               the owning UObject first (Value Search already knows it; an
 //               arbitrary address resolves via FindByAddress / FindInContainers).
 // `maxDepth`  : maximum hop count root → target (default 5; hard-capped at 32).
-// `deadlineMs`: wall-clock budget; the search also bails on Cancel::Requested().
+// `deadlineMs`: wall-clock budget; the search also bails on Tot::Requested().
 //
 // BFS guarantees the path returned is a SHORTEST (fewest-hop) one, and the
 // first such path found in deterministic iteration order. steps is

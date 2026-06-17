@@ -90,6 +90,7 @@ git submodule update --init --recursive
 - **UI Strings**: English only. All UI strings in `Resources/Strings/en.axaml`, referenced via `StaticResource` bindings
 - **UE offsets**: All UObject/UStruct offsets must be dynamically verified via OffsetFinder, never hardcoded
 - **AOT compatible**: All C# code must be Native AOT / trimming compatible. No reflection-based APIs — use source generators instead (e.g. `[JsonSerializable]` context for `System.Text.Json`, `[ObservableProperty]` for MVVM). The UI is published as a self-contained trimmed binary
+- **Module naming (Frieren convention)**: Every new C++ DLL module (a file with its own namespace) MUST take an unused character name from the **Frieren roster** in [docs/naming-convention.md](docs/naming-convention.md) — never a plain-English name (the legacy `ValueScan` / `Cancel` / `PackedItem` modules predate this rule and are being migrated). Add the required header comment (`// {Name} — {中文名} ({meaning})` + a one-line function description) and flip that name's status to 🟢 in use in the roster. Kept English by design (the only exceptions): generic leaf utilities (`Utf8Helpers.h`) and algorithm helpers that live inside an existing namespace (`GraphPath.h` under `Aura::`)
 
 -----
 

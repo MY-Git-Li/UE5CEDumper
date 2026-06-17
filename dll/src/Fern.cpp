@@ -16,7 +16,7 @@
 #include "Flamme.h"
 #include "Stark.h"
 #include "ValueScan.h"
-#include "Cancel.h"
+#include "Tot.h"
 #include "Wirbel.h"
 #include "BuildInfo.h"
 
@@ -244,9 +244,9 @@ bool Fern::Start() {
     // Clear the sticky shutdown latch left by a prior Stop()/UE5_Shutdown().
     // Without this, re-enabling the CE script in the same game process leaves
     // g_shutdown set, so every long-running op (value scan, instance find,
-    // snapshot capture, SDK dump) aborts on its first Cancel::Requested() poll.
-    Cancel::ResetShutdown();
-    Cancel::ResetPerCommand();
+    // snapshot capture, SDK dump) aborts on its first Tot::Requested() poll.
+    Tot::ResetShutdown();
+    Tot::ResetPerCommand();
 
     m_running = true;
     m_acceptThread = std::thread(&Fern::AcceptLoop, this);
@@ -262,7 +262,7 @@ void Fern::Stop() {
     // scan blocking the accept thread bails promptly and the join below
     // completes fast (otherwise disabling the script / closing can hang while
     // a long scan finishes). Sticky — never auto-cleared.
-    Cancel::RequestShutdown();
+    Tot::RequestShutdown();
     StopAllWatches();
 
     // Join background rescan thread if running
@@ -326,9 +326,9 @@ void Fern::MonitorLoop() {
             DWORD e = GetLastError();
             if (e == ERROR_BROKEN_PIPE || e == ERROR_PIPE_NOT_CONNECTED
                 || e == ERROR_INVALID_HANDLE) {
-                if (!Cancel::g_perCommand.load(std::memory_order_relaxed)) {
+                if (!Tot::g_perCommand.load(std::memory_order_relaxed)) {
                     LOG_WARN("PipeServer: client gone mid-command (err=%lu) — aborting in-flight op", e);
-                    Cancel::RequestPerCommand();
+                    Tot::RequestPerCommand();
                 }
             }
         }
@@ -457,7 +457,7 @@ void Fern::HandleClient(HANDLE pipe) {
 
         // Fresh command: clear any per-command cancel left from a prior
         // (disconnected) client. Shutdown cancellation stays sticky.
-        Cancel::ResetPerCommand();
+        Tot::ResetPerCommand();
 
         // Extract command name for dedup (fast: find "cmd":" in JSON)
         std::string cmd;
@@ -1275,7 +1275,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             json enums = json::array();
 
             for (int i = 0; i < total; ++i) {
-                if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+                if ((i & 0xFFF) == 0 && Tot::Requested()) {
                     Sein::Warn("PIPE:cmd", "list_enums: aborted (client gone / shutdown)");
                     break;  // return partial result
                 }

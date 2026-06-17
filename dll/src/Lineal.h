@@ -1,5 +1,6 @@
 // ============================================================
-// PackedItem — UE5.7+ packed FUObjectItem pointer reconstruction
+// Lineal — 尺規 ("Ruler / Straightedge" — layout / alignment)
+// FUObjectItem packing: UE5.7+ packed-pointer split / rejoin reconstruction
 //
 // UE 5.7 added an optional packed FUObjectItem encoding gated by
 // UE_ENABLE_FUOBJECT_ITEM_PACKING (slated to become the future default; NOT
@@ -21,7 +22,7 @@
 //
 // *** UNVERIFIED ***: this whole encoding has never been validated against a real
 // packed game. The reconstruction MATH below is unit-tested for round-trip
-// correctness (PackedItem.h has no external dependency so dll_helpers_test can
+// correctness (Lineal.h has no external dependency so dll_helpers_test can
 // include it directly), but the constants and the in-memory item layout are
 // best-effort until a packed game exists to calibrate against.
 //
@@ -32,7 +33,7 @@
 
 #include <cstdint>
 
-namespace PackedItem {
+namespace Lineal {
 
 // Which in-memory FUObjectItem layout Aura detected for the live game.
 //   Classic    — UObject* at item+0x00            (UE4.x .. UE5.6)
@@ -75,4 +76,4 @@ inline void Encode(uintptr_t obj, const PackedConsts& c,
     flagsAndRefCount = (hiPtrBits << 32) | (flagsExtra & 0xFFFFFFFFull);
 }
 
-} // namespace PackedItem
+} // namespace Lineal

@@ -1,7 +1,8 @@
 #pragma once
 
 // ============================================================
-// Cancel — cooperative cancellation for long-running DLL operations.
+// Tot — 終焉之聖 ("Saint of the End")
+// Cancellation: cooperative cancel flag for long-running DLL operations.
 //
 // The pipe server (Fern) processes one command at a time, synchronously,
 // on a single connection. A long scan therefore BLOCKS the pipe thread
@@ -26,7 +27,7 @@
 
 #include <atomic>
 
-namespace Cancel {
+namespace Tot {
 
 // Set when the connected client disconnects mid-command (Fern monitor).
 // Cleared by ResetPerCommand() at the start of each new command.
@@ -50,4 +51,4 @@ inline void ResetPerCommand()   { g_perCommand.store(false, std::memory_order_re
 inline void RequestShutdown()   { g_shutdown.store(true,    std::memory_order_relaxed); }
 inline void ResetShutdown()     { g_shutdown.store(false,   std::memory_order_relaxed); }
 
-} // namespace Cancel
+} // namespace Tot

@@ -13,8 +13,8 @@
 #include "Ubel.h"
 #include "Genau.h"
 #include "Denken.h"
-#include "Cancel.h"
-#include "PackedItem.h"   // UE5.7+ packed FUObjectItem reconstruction (Reconstruct + consts)
+#include "Tot.h"
+#include "Lineal.h"   // UE5.7+ packed FUObjectItem reconstruction (Reconstruct + consts)
 
 // Defined in Frieren.cpp — cached UE version for layout branching
 extern uint32_t g_cachedUEVersion;
@@ -58,15 +58,15 @@ static bool        s_isFlat   = false; // true = non-chunked flat array (some UE
 
 // Within-item layout mode. Classic / Unpacked57 both read the UObject* directly at
 // item+s_itemObjOffset (0x00 / 0x08). Packed57 (UE5.7+ UE_ENABLE_FUOBJECT_ITEM_PACKING)
-// must RECONSTRUCT the pointer from two split fields — see PackedItem.h. Packed57 is a
+// must RECONSTRUCT the pointer from two split fields — see Lineal.h. Packed57 is a
 // last-resort, auto-detected ONLY when both direct modes fail (see DetectItemSize), and
 // is *** UNVERIFIED *** (no shipping game uses it yet). Process-lifetime constant after
 // Init() → the GetByIndex Packed57 branch is perfectly predicted on the hot path.
-static PackedItem::ItemLayoutMode s_layoutMode = PackedItem::ItemLayoutMode::Classic;
+static Lineal::ItemLayoutMode s_layoutMode = Lineal::ItemLayoutMode::Classic;
 // Calibratable packed reconstruction constants (defaults from assumed UE5.7 source).
 // Overridable at runtime via SetPackedConsts / the set_packed_consts pipe command so a
 // real packed game can be calibrated without a rebuild.
-static PackedItem::PackedConsts   s_packedConsts;
+static Lineal::PackedConsts   s_packedConsts;
 // Best-effort SerialNumber offset under packing (layout unknown — see GetSerialNumber).
 static int         s_packedSerialOff = 0x0C;
 
@@ -190,14 +190,14 @@ ParallelScanResult<PerThreadT> ParallelGObjectsScan(int32_t count, BodyFn&& body
     // (nthreads == 1, the Value Search "parallel" toggle OFF) we deliberately
     // spawn NO thread: anti-tamper games turn parallel off precisely to avoid
     // extra thread creation, and an anti-cheat that hooks thread creation would
-    // otherwise still see this watcher. The bodies poll Cancel::Requested()
+    // otherwise still see this watcher. The bodies poll Tot::Requested()
     // directly at their stride checks, so serial scans still cancel promptly.
     std::atomic<bool> scanDone{false};
     std::thread cancelWatcher;
     if (nthreads > 1) {
         cancelWatcher = std::thread([&] {
             while (!scanDone.load(std::memory_order_relaxed)) {
-                if (Cancel::Requested()) {
+                if (Tot::Requested()) {
                     deadlineHit.store(true, std::memory_order_relaxed);
                     return;
                 }
@@ -515,7 +515,7 @@ static bool LooksLikeUObject(uintptr_t obj) {
 // NOTE: No early exit — scans all maxItems for fair comparison across strides.
 //
 // reconstructPacked: when true, the object pointer is RECONSTRUCTED from the UE5.7+
-// packed encoding (flags@item+0x00, ptrLow@item+0x08 -> PackedItem::Reconstruct) instead
+// packed encoding (flags@item+0x00, ptrLow@item+0x08 -> Lineal::Reconstruct) instead
 // of read directly at item+s_itemObjOffset. The validation that follows (LooksLikeUObject
 // + FName resolution) runs on the RECONSTRUCTED pointer — critical, because on a packed
 // layout the raw item+0 field is FlagsAndRefCount, never a pointer, so scoring the raw
@@ -537,7 +537,7 @@ static void ProbeStride(uintptr_t chunkBase, int stride, int maxItems,
                 if (outBad > 30 && outGood == 0) break;
                 continue;
             }
-            obj = PackedItem::Reconstruct(flags, ptrLow, s_packedConsts);
+            obj = Lineal::Reconstruct(flags, ptrLow, s_packedConsts);
         } else if (!Macht::ReadSafe(chunkBase + byteOff + s_itemObjOffset, obj)) {
             ++outBad;
             if (outBad > 30 && outGood == 0) break;  // Too many read failures, give up
@@ -800,7 +800,7 @@ struct PackedProbeResult {
 
 // Detector for the UE5.7+ PACKED FUObjectItem encoding (UE_ENABLE_FUOBJECT_ITEM_PACKING).
 // In packed mode the UObject* is split across two fields and reconstructed — see
-// PackedItem.h. Probes the candidate bases/strides with RECONSTRUCTION enabled (so the
+// Lineal.h. Probes the candidate bases/strides with RECONSTRUCTION enabled (so the
 // validation runs on the rebuilt pointer, not the raw FlagsAndRefCount at item+0) and
 // uses the live (calibratable) s_packedConsts so a tuned constant flows through.
 //
@@ -893,7 +893,7 @@ static void DetectItemSize() {
     // Reset the layout mode each detection run (Init may be called again on re-attach).
     // The two direct passes below keep it non-packed; only the last-resort packed branch
     // promotes it to Packed57.
-    s_layoutMode = PackedItem::ItemLayoutMode::Classic;
+    s_layoutMode = Lineal::ItemLayoutMode::Classic;
 
     int candidates[] = { 16, 24, 20 };
     constexpr int NUM_CANDIDATES = 3;
@@ -925,8 +925,8 @@ static void DetectItemSize() {
 
         if (bestTotal >= threshold) {
             s_itemSize = bestStride;   // s_itemObjOffset / s_isFlat already reflect this pass
-            s_layoutMode = (s_itemObjOffset != 0) ? PackedItem::ItemLayoutMode::Unpacked57
-                                                  : PackedItem::ItemLayoutMode::Classic;
+            s_layoutMode = (s_itemObjOffset != 0) ? Lineal::ItemLayoutMode::Unpacked57
+                                                  : Lineal::ItemLayoutMode::Classic;
             if (s_itemObjOffset != 0) {
                 LOG_INFO("ObjectArray: FUObjectItem size=%d, object-ptr offset=+0x%02X (UE5.7+ reordered item) — %d named, %d total, %d bad%s",
                          bestStride, s_itemObjOffset, bestNamed, bestCount, bestBad, s_isFlat ? " (flat)" : "");
@@ -953,8 +953,8 @@ static void DetectItemSize() {
     s_isFlat = gFlat;
     if (gStride > 0 && (gHasNames ? gNamed : gCount) > 0) {
         s_itemSize = gStride;
-        s_layoutMode = (gObjOff != 0) ? PackedItem::ItemLayoutMode::Unpacked57
-                                      : PackedItem::ItemLayoutMode::Classic;
+        s_layoutMode = (gObjOff != 0) ? Lineal::ItemLayoutMode::Unpacked57
+                                      : Lineal::ItemLayoutMode::Classic;
         LOG_WARN("ObjectArray: FUObjectItem size tentatively set to %d bytes, object-ptr offset +0x%02X (only %d items validated)",
                  gStride, gObjOff, gHasNames ? gNamed : gCount);
         return;
@@ -967,7 +967,7 @@ static void DetectItemSize() {
     // dump it replaces, and it is loudly flagged.
     PackedProbeResult packed;
     if (TryDetectPacked(chunkTable, chunk0, packed)) {
-        s_layoutMode    = PackedItem::ItemLayoutMode::Packed57;
+        s_layoutMode    = Lineal::ItemLayoutMode::Packed57;
         s_itemSize      = packed.stride;   // 24 expected
         s_itemObjOffset = 0;               // unused for the object read under packing
         s_isFlat        = packed.isFlat;
@@ -1011,7 +1011,7 @@ void InitWithExtendedLayout(uintptr_t gobjectsAddr, int forcedItemSize) {
         // caller (which already verified this stride by content) forces it.
         s_itemSize = forcedItemSize;
         s_itemObjOffset = 0;
-        s_layoutMode = PackedItem::ItemLayoutMode::Classic;
+        s_layoutMode = Lineal::ItemLayoutMode::Classic;
         LOG_INFO("ObjectArray: Initialized (forced UE5-Extended, stride=%d) at 0x%llX, Count=%d",
                  forcedItemSize, static_cast<unsigned long long>(gobjectsAddr), GetCount());
     } else {
@@ -1051,7 +1051,7 @@ int GetItemObjOffset() {
 }
 
 bool IsPacked() {
-    return s_layoutMode == PackedItem::ItemLayoutMode::Packed57;
+    return s_layoutMode == Lineal::ItemLayoutMode::Packed57;
 }
 
 // Runtime calibration for the *** UNVERIFIED *** packed reconstruction. Lets the first
@@ -1064,7 +1064,7 @@ void SetPackedConsts(int alignBits, uint64_t ptrMaskBits, bool force, int serial
     if (ptrMaskBits != 0) s_packedConsts.ptrMaskBits = ptrMaskBits;
     if (serialOff >= 0)  s_packedSerialOff = serialOff;
     if (force) {
-        s_layoutMode = PackedItem::ItemLayoutMode::Packed57;
+        s_layoutMode = Lineal::ItemLayoutMode::Packed57;
         s_itemObjOffset = 0;
         LOG_WARN("ObjectArray: *** packed mode FORCE-ENABLED via SetPackedConsts *** "
                  "alignBits=%d, ptrMask=0x%llX, serialOff=0x%X, stride=%d. This is an "
@@ -1102,12 +1102,12 @@ uintptr_t GetByIndex(int32_t index) {
         itemAddr = chunk + static_cast<uintptr_t>(withinChunk) * s_itemSize;
     }
 
-    if (s_layoutMode == PackedItem::ItemLayoutMode::Packed57) {
+    if (s_layoutMode == Lineal::ItemLayoutMode::Packed57) {
         // *** UNVERIFIED *** UE5.7+ packed item: UObject* is split across two fields.
         uint64_t flags = 0; uint32_t ptrLow = 0;
         if (!Macht::ReadSafe(itemAddr, flags))         return 0;
         if (!Macht::ReadSafe(itemAddr + 0x08, ptrLow)) return 0;
-        return PackedItem::Reconstruct(flags, ptrLow, s_packedConsts);
+        return Lineal::Reconstruct(flags, ptrLow, s_packedConsts);
     }
 
     uintptr_t object = 0;
@@ -1169,7 +1169,7 @@ int32_t GetSerialNumber(int32_t index) {
     //             wrong value only degrades FWeakObjectPtr staleness resolution (weak
     //             refs / delegates), never the core object walk.
     int serialOff;
-    if (s_layoutMode == PackedItem::ItemLayoutMode::Packed57) {
+    if (s_layoutMode == Lineal::ItemLayoutMode::Packed57) {
         serialOff = s_packedSerialOff;
     } else {
         serialOff = (s_itemObjOffset != 0) ? (s_itemObjOffset + 0x08)
@@ -1183,7 +1183,7 @@ int32_t GetSerialNumber(int32_t index) {
 void ForEach(std::function<bool(int32_t idx, uintptr_t obj)> cb) {
     int32_t count = GetCount();
     for (int32_t i = 0; i < count; ++i) {
-        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:scan", "Aura::ForEach: aborted (client gone / shutdown)");
             break;  // stop walking; callers see partial/empty result
         }
@@ -1228,7 +1228,7 @@ SearchResultSet SearchByName(const std::string& query, int maxResults) {
     int32_t count = GetCount();
     rset.scanned = count;
     for (int32_t i = 0; i < count && static_cast<int>(rset.results.size()) < maxResults; ++i) {
-        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:search", "SearchByName: aborted (client gone / shutdown)");
             break;  // return partial result
         }
@@ -1282,7 +1282,7 @@ SearchResultSet FindInstancesByClass(const std::string& className, bool exactMat
     int32_t count = GetCount();
     rset.scanned = count;
     for (int32_t i = 0; i < count && static_cast<int>(rset.results.size()) < maxResults; ++i) {
-        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:find", "FindInstancesByClass: aborted (client gone / shutdown)");
             break;  // return partial result
         }
@@ -1988,10 +1988,10 @@ std::vector<ContainerMatch> FindInContainers(uintptr_t addr, int32_t maxResults,
         // deadlineHit check fires from this chunk's first iteration.
         if (((i - beginIdx) & 0x3FF) == 0) {
             if (deadlineHit.load(std::memory_order_relaxed)) return;
-            // Serial path has no cancel-watcher thread — poll Cancel here so the
+            // Serial path has no cancel-watcher thread — poll Tot here so the
             // scan still bails promptly; setting deadlineHit also stops siblings
             // on the parallel path.
-            if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+            if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
             auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
                           std::chrono::steady_clock::now() - t0).count();
             if (dt > kDeadlineMs) {
@@ -2130,7 +2130,7 @@ static bool MatchAddrInStructContainers(
 {
     if (depth > maxDepth) return false;
     if (deadlineHit.load(std::memory_order_relaxed)) return false;
-    if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return false; }
+    if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return false; }
     if (std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - t0).count() > kDeadlineMs) {
         deadlineHit.store(true, std::memory_order_relaxed);
@@ -2271,7 +2271,7 @@ std::vector<ContainerMatch> FindInContainersDeep(uintptr_t addr, int32_t maxResu
         for (int32_t i = beginIdx; i < endIdx && static_cast<int>(tr.matches.size()) < maxResults; ++i) {
             if (((i - beginIdx) & 0x3FF) == 0) {
                 if (deadlineHit.load(std::memory_order_relaxed)) return;
-                if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+                if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
                 if (std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now() - t0).count() > kDeadlineMs) {
                     deadlineHit.store(true, std::memory_order_relaxed);
@@ -2787,10 +2787,10 @@ std::vector<ReferenceMatch> FindReferencesToUObject(uintptr_t target,
         // deadlineHit check fires from this chunk's first iteration.
         if (((i - beginIdx) & 0x3FF) == 0) {
             if (deadlineHit.load(std::memory_order_relaxed)) return;
-            // Serial path has no cancel-watcher thread — poll Cancel here so the
+            // Serial path has no cancel-watcher thread — poll Tot here so the
             // scan still bails promptly; setting deadlineHit also stops siblings
             // on the parallel path.
-            if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+            if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
             auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
                           std::chrono::steady_clock::now() - t0).count();
             if (dt > kDeadlineMs) {
@@ -3286,7 +3286,7 @@ GraphPathResult FindObjectGraphPath(uintptr_t rootObj, uintptr_t targetObj,
              static_cast<unsigned long long>(targetObj), maxDepth);
 
     auto abortFn = [&]() -> bool {
-        if (Cancel::Requested()) return true;
+        if (Tot::Requested()) return true;
         auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
                       std::chrono::steady_clock::now() - t0).count();
         return dt > deadlineMs;
@@ -3304,7 +3304,7 @@ GraphPathResult FindObjectGraphPath(uintptr_t rootObj, uintptr_t targetObj,
 
     // Translate the core's generic "aborted" into the concrete reason.
     if (res.aborted)
-        res.status = Cancel::Requested() ? "cancelled" : "deadline";
+        res.status = Tot::Requested() ? "cancelled" : "deadline";
 
     // Resolve readable names for the path nodes only (cheap — a handful).
     for (auto& st : res.steps) {
@@ -3633,7 +3633,7 @@ PropertySearchResult SearchProperties(
     result.scannedObjects = count;
 
     for (int32_t i = 0; i < count && static_cast<int>(result.results.size()) < maxResults; ++i) {
-        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:search", "SearchProperties: aborted (client gone / shutdown)");
             break;  // return partial result
         }
@@ -3998,7 +3998,7 @@ std::vector<PropertySearchResult> SearchPropertiesBatch(
     int32_t scannedClasses = 0;
 
     for (int32_t i = 0; i < count; ++i) {
-        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:search", "SearchPropertiesBatch: aborted (client gone / shutdown)");
             break;  // return partial result
         }
@@ -4175,7 +4175,7 @@ std::vector<ClassInfo> WalkClassesBatch(const std::vector<uintptr_t>& addrs)
         // Cooperative cancel: a Full SDK dump can pass a large addr[] chunk and
         // each WalkClassEx is heavy. Bail if the client disconnected / shutting
         // down (NOT a time deadline — a long legitimate dump must run to end).
-        if ((batchIdx++ & 0xFFF) == 0 && Cancel::Requested()) {
+        if ((batchIdx++ & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:walk", "WalkClassesBatch: aborted (client gone / shutdown)");
             break;  // return partial result
         }
@@ -4281,7 +4281,7 @@ ClassListResult ListClasses(bool gameOnly, int maxResults) {
     result.scannedObjects = count;
 
     for (int32_t i = 0; i < count && static_cast<int>(result.results.size()) < maxResults; ++i) {
-        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:list", "ListClasses: aborted (client gone / shutdown)");
             break;  // return partial result
         }
@@ -4357,7 +4357,7 @@ AllFunctionsResult EnumerateAllFunctions(bool gameOnly, int maxEntries) {
     result.scannedObjects = count;
 
     for (int32_t i = 0; i < count; ++i) {
-        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:list", "EnumerateAllFunctions: aborted (client gone / shutdown)");
             break;  // return partial result
         }
@@ -4548,8 +4548,8 @@ PropertyXrefResult FindPropertyXrefs(uintptr_t propAddr, bool gameOnly,
             // this chunk's first iteration (mirrors FindReferencesToUObject).
             if (((i - beginIdx) & 0x3FF) == 0) {
                 if (deadlineHit.load(std::memory_order_relaxed)) return;
-                // Serial path has no cancel-watcher thread — poll Cancel here too.
-                if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+                // Serial path has no cancel-watcher thread — poll Tot here too.
+                if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
                 auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
                               std::chrono::steady_clock::now() - t0).count();
                 if (dt > kDeadlineMs) {
@@ -5628,9 +5628,9 @@ ValueScanResult ScanForValue(
         if (((i - beginIdx) & 0xFFF) == 0) {
             if (deadlineHit.load(std::memory_order_relaxed)) return;
             // Serial path (parallel toggle OFF) has no cancel-watcher thread —
-            // poll Cancel here so the scan still bails promptly; setting
+            // poll Tot here so the scan still bails promptly; setting
             // deadlineHit also stops siblings on the parallel path.
-            if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+            if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
             if (std::chrono::steady_clock::now() - t0 > kDeadline) {
                 deadlineHit.store(true, std::memory_order_relaxed);
                 return;
@@ -5910,11 +5910,11 @@ ValueScanResult ScanForValue(
                     if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
                     // A pathological 10M-element array would otherwise pin this
                     // worker far past the deadline and ignore a cancel; poll the
-                    // shared deadline/cancel flag every 4K elements (Cancel sets
+                    // shared deadline/cancel flag every 4K elements (Tot sets
                     // deadlineHit via the ParallelGObjectsScan watcher).
                     if ((idx & 0xFFF) == 0) {
                         if (deadlineHit.load(std::memory_order_relaxed)) return;
-                        if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+                        if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
                         if (std::chrono::steady_clock::now() - t0 > kDeadline) {
                             deadlineHit.store(true, std::memory_order_relaxed);
                             return;
@@ -5954,7 +5954,7 @@ ValueScanResult ScanForValue(
                     if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
                     if ((idx & 0xFFF) == 0) {
                         if (deadlineHit.load(std::memory_order_relaxed)) return;
-                        if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+                        if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
                         if (std::chrono::steady_clock::now() - t0 > kDeadline) {
                             deadlineHit.store(true, std::memory_order_relaxed);
                             return;
@@ -5990,7 +5990,7 @@ ValueScanResult ScanForValue(
                     // TSet/TMap can't hold this worker past the deadline or a cancel.
                     if ((e & 0xFFF) == 0) {
                         if (deadlineHit.load(std::memory_order_relaxed)) return;
-                        if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+                        if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
                         if (std::chrono::steady_clock::now() - t0 > kDeadline) {
                             deadlineHit.store(true, std::memory_order_relaxed);
                             return;
@@ -6094,7 +6094,7 @@ ValueScanResult ScanForValue(
             int64_t deepVisited = 0;
             dlim.aborted  = [&] {
                 if (deadlineHit.load(std::memory_order_relaxed)) return true;
-                if (Cancel::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return true; }
+                if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return true; }
                 if (std::chrono::steady_clock::now() - t0 > kDeadline) {
                     deadlineHit.store(true, std::memory_order_relaxed); return true;
                 }
@@ -6389,7 +6389,7 @@ void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
     const auto t0 = std::chrono::steady_clock::now();
     constexpr auto kPerObjBackstop = std::chrono::milliseconds(750);
     lim.aborted  = [t0] {
-        return Cancel::Requested()
+        return Tot::Requested()
             || (std::chrono::steady_clock::now() - t0) > kPerObjBackstop;
     };
 
@@ -6471,7 +6471,7 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
     std::vector<std::string> typeNames;
 
     for (int32_t i = offset; i < end; ++i) {
-        if ((i & 0xFFF) == 0 && Cancel::Requested()) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:snapshot", "CaptureSnapshotChunk: aborted (client gone / shutdown)");
             break;  // return partial chunk
         }
