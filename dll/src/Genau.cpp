@@ -13,6 +13,7 @@
 #include "Himmel.h"
 #include "Aura.h"
 #include "Serie.h"
+#include "Neu.h"     // UEnum::Names layout parse (legacy TArray vs UE5.6+ FNameData)
 
 #include <string>
 #include <cstring>
@@ -2743,8 +2744,8 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
                     DynOff::FSTRUCTPROP_STRUCT  = bestProbe + 0x2C;
                     DynOff::FARRAYPROP_INNER   = bestProbe + 0x2C;
                     DynOff::FBOOLPROP_FIELDSIZE = bestProbe + 0x2C;
-                    DynOff::FENUMPROP_ENUM     = bestProbe + 0x2C;
                     DynOff::FBYTEPROP_ENUM     = bestProbe + 0x2C;
+                    DynOff::FENUMPROP_ENUM     = DynOff::FBYTEPROP_ENUM + 8;  // Enum follows UnderlyingProp
                 } else if (bestProbe >= 0) {
                     Sein::Info("DYNO", "Phase B: Confirmed default FPROPERTY_OFFSET=0x%02X", DynOff::FPROPERTY_OFFSET);
                 } else {
@@ -3194,9 +3195,11 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
         DynOff::FSTRUCTPROP_STRUCT  = propOffsetOff + 0x2C;
         DynOff::FARRAYPROP_INNER   = propOffsetOff + 0x2C;  // Same subclass extension offset
         DynOff::FBOOLPROP_FIELDSIZE = DynOff::FSTRUCTPROP_STRUCT;
-        // FEnumProperty::Enum and FByteProperty::Enum share the same subclass extension offset
-        DynOff::FENUMPROP_ENUM     = DynOff::FSTRUCTPROP_STRUCT;
+        // FByteProperty::Enum is the first subclass field (== sizeof(FProperty), same place
+        // as FStructProperty::Struct). FEnumProperty has FNumericProperty* UnderlyingProp
+        // BEFORE its UEnum* Enum, so its Enum sits 8 bytes later (UE5.7.4 EnumProperty.h).
         DynOff::FBYTEPROP_ENUM     = DynOff::FSTRUCTPROP_STRUCT;
+        DynOff::FENUMPROP_ENUM     = DynOff::FBYTEPROP_ENUM + 8;
     }
 
     // Infer tagged FFieldVariant from probed offsets:
@@ -3768,26 +3771,31 @@ bool DetectUEnumNames() {
         Sein::Info("DYNO:Enum", "  Found '%s' at 0x%llX, probing for Names offset...",
             cand.name, static_cast<unsigned long long>(enumAddr));
 
-        // Probe offsets 0x30..0x120 (step 8) for TArray<TPair<FName,int64>>
+        // Probe offsets 0x30..0x120 (step 8). At each, try BOTH the legacy
+        // TArray<TPair<FName,int64>> layout AND the UE5.6+ FNameData
+        // struct-of-arrays (Neu disambiguates which one parses) — version-number
+        // gating alone is unreliable on forked engines, so we validate by reading
+        // the actual member FNames (same as before, format-agnostic now).
+        auto readMem = [](uintptr_t a, void* o, size_t n) -> bool {
+            return Macht::ReadBytesSafe(a, o, n);
+        };
+        const int fnameStride = DynOff::bCasePreservingName ? 0x10 : 0x08;
+
         for (int off = 0x30; off <= 0x120; off += 8) {
-            uintptr_t data = 0;
-            int32_t count = 0;
-            if (!Macht::ReadSafe(enumAddr + off, data)) continue;
-            if (!Macht::ReadSafe(enumAddr + off + 8, count)) continue;
+            Neu::EnumNamesLayout layout;
+            if (!Neu::DetectLayout(readMem, enumAddr + off, fnameStride, 16384, layout))
+                continue;
 
             // Validate count range
-            if (count < cand.minCount || count > cand.maxCount) continue;
+            if (layout.count < cand.minCount || layout.count > cand.maxCount) continue;
 
-            // Validate data pointer looks like heap (non-null, user-mode, not tiny)
-            if (data < 0x10000 || data > 0x7FFFFFFFFFFF) continue;
-
-            // Read first few entries and check if FNames resolve to expected substrings
-            // Each entry: TPair<FName(8 bytes), int64(8 bytes)> = 16 bytes
+            // Read first few members and check FNames resolve to expected substrings.
             int verified = 0;
-            for (int i = 0; i < (std::min)(count, 5); ++i) {
-                uintptr_t entryAddr = data + i * 16; // UENUM_ENTRY_SIZE = 0x10
+            const int32_t toCheck = (std::min)(layout.count, 5);
+            for (int32_t i = 0; i < toCheck; ++i) {
                 int32_t nameIdx = 0;
-                if (!Macht::ReadSafe(entryAddr, nameIdx)) break;
+                int64_t val = 0;
+                if (!Neu::ReadEntry(readMem, layout, i, nameIdx, val)) break;
 
                 std::string entryName = Serie::GetString(nameIdx);
                 if (entryName.empty()) continue;
@@ -3807,11 +3815,15 @@ bool DetectUEnumNames() {
 
             if (verified >= 2) {
                 DynOff::UENUM_NAMES = off;
+                DynOff::bEnumNamesNewContainer =
+                    (layout.format == Neu::EnumNamesFormat::FNameData57);
                 DynOff::bUEnumNamesDetected.store(true, std::memory_order_release);
 
                 Sein::Info("DYNO:Enum", "  UEnum::Names detected at UEnum+0x%02X "
-                    "(verified with '%s', count=%d, %d name matches)",
-                    off, cand.name, count, verified);
+                    "(%s, verified with '%s', count=%d, %d name matches)",
+                    off, DynOff::bEnumNamesNewContainer ? "UE5.6+ FNameData"
+                                                        : "legacy TArray",
+                    cand.name, layout.count, verified);
                 return true;
             }
         }

@@ -135,12 +135,20 @@ inline int UPROPERTY_FLAGS    = 0x38;  // UProperty::PropertyFlags (uint64)
 // === FEnumProperty / FByteProperty subclass fields ===
 // Both store UEnum* at the same offset relative to FProperty base.
 // Derived from FSTRUCTPROP_STRUCT (same subclass extension offset).
-inline int FENUMPROP_ENUM       = 0x78;  // FEnumProperty::Enum (UEnum*)
-inline int FBYTEPROP_ENUM       = 0x78;  // FByteProperty::Enum (UEnum*)
+inline int FBYTEPROP_ENUM       = 0x78;  // FByteProperty::Enum (UEnum*) — first subclass field (== sizeof(FProperty))
+// FEnumProperty has FNumericProperty* UnderlyingProp BEFORE its UEnum* Enum, so Enum sits
+// 8 bytes after the FByteProperty position. Verified vs UE5.7.4 EnumProperty.h:143-144.
+// (Detection keeps this = FBYTEPROP_ENUM + 8; default mirrors that.)
+inline int FENUMPROP_ENUM       = 0x80;  // FEnumProperty::Enum (UEnum*) = FBYTEPROP_ENUM + 8
 
 // === UEnum — lazy-detected by DetectUEnumNames() ===
-inline int UENUM_NAMES          = 0x40;  // UEnum::Names (TArray<TPair<FName,int64>>)
-inline int UENUM_ENTRY_SIZE     = 0x10;  // sizeof(TPair<FName,int64>) = 8+8 = 16 bytes
+inline int UENUM_NAMES          = 0x40;  // UEnum::Names (Neu::EnumNamesLayout region offset)
+inline int UENUM_ENTRY_SIZE     = 0x10;  // legacy sizeof(TPair<FName,int64>) = 8+8 = 16 bytes
+// UE5.6+ replaced the interleaved TArray<TPair<FName,int64>> at UENUM_NAMES with the
+// FNameData struct-of-arrays {tagged FName*, tagged int64*, int32 NumValues}. Set by
+// DetectUEnumNames (try-both); the enum reader (Ubel) branches on it. Written before the
+// bUEnumNamesDetected release-store, so plain bool (same pattern as bCasePreservingName).
+inline bool bEnumNamesNewContainer = false;
 // bUEnumNamesDetected uses release/acquire like bOffsetsValidated.
 inline std::atomic<bool> bUEnumNamesDetected{false};
 // Set when detection was attempted but FAILED — prevents retry storm and

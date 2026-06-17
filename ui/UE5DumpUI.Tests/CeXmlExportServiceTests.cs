@@ -2915,6 +2915,48 @@ public class CeXmlExportServiceTests
         Assert.Contains("Armor", xml);
     }
 
+    [Fact]
+    public void GenerateInstanceXml_ScalarEnumProperty_EmitsDropDownListNotDescription()
+    {
+        // A top-level (non-array) EnumProperty must surface its members as a CE
+        // <DropDownList> of value:name options — NOT dumped into the record
+        // <Description>. (Guards the enum-export contract regardless of which UE
+        // enum-names container the DLL read them from.)
+        var fields = new[]
+        {
+            new LiveFieldValue
+            {
+                Name = "ItemType", TypeName = "EnumProperty", Offset = 0x10, Size = 4,
+                EnumName = "Weapon", EnumValue = 1, EnumAddr = "0xE001",
+                EnumEntries = new List<EnumEntryValue>
+                {
+                    new() { Value = 0, Name = "None" },
+                    new() { Value = 1, Name = "Weapon" },
+                    new() { Value = 2, Name = "Armor" },
+                },
+            },
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "Inst", "UObject", fields);
+
+        // DropDownList present with CE "value:name" options (BuildDropDownContent format).
+        Assert.Contains("<DropDownList DisplayValueAsItem=\"1\">", xml);
+        Assert.Contains("0:None", xml);
+        Assert.Contains("1:Weapon", xml);
+        Assert.Contains("2:Armor", xml);
+
+        // The option list must NOT leak into any <Description> line.
+        foreach (var line in xml.Split('\n'))
+        {
+            if (line.Contains("<Description>"))
+            {
+                Assert.DoesNotContain("1:Weapon", line);
+                Assert.DoesNotContain("2:Armor", line);
+            }
+        }
+    }
+
     // ========================================
     // GenerateAobWrappedXml tests
     // ========================================

@@ -25,6 +25,7 @@
 #include "../src/Macht.h"   // ComputeSetElementStride / ComputeMapValueOffset (V1a geometry)
 #include "../src/Denken.h"
 #include "../src/Lineal.h"  // UE5.7+ packed FUObjectItem reconstruction (Reconstruct/Encode)
+#include "../src/Neu.h"     // UEnum::Names layout parse (legacy TArray vs UE5.6+ FNameData)
 #include "../src/GraphPath.h"   // Pure BFS shortest-path core ("Locate in GWorld")
 #include "../src/Solitar.h"     // GodMode FBoolProperty bit write (ApplyBoolBit, header-inline)
 
@@ -1887,6 +1888,211 @@ static void Test_Solitar_MatchProtectionBool() {
     EXPECT("breplicates NOT matched", !Solitar::MatchProtectionBool("breplicates", p));
 }
 
+// ----- Neu: UEnum::Names layout (legacy TArray vs UE5.6+ FNameData) -----------
+// Synthetic memory: register buffers at chosen virtual addresses; the read
+// callback serves bytes from registered ranges and FAILS for any unmapped
+// address — exactly mirroring Macht::ReadSafe on game memory, so the parser's
+// pointer-readability checks (the format disambiguator) are exercised WITHOUT a
+// live process or FNamePool. Names are stored as raw int32 FName comparison
+// indices (string resolution is Serie's job, not Neu's).
+struct NeuFakeMem {
+    std::vector<std::pair<uintptr_t, std::vector<uint8_t>>> regions;
+    void Put(uintptr_t addr, const void* data, size_t n) {
+        std::vector<uint8_t> b(n);
+        std::memcpy(b.data(), data, n);
+        regions.emplace_back(addr, std::move(b));
+    }
+    bool Read(uintptr_t a, void* o, size_t n) const {
+        for (const auto& r : regions) {
+            if (a >= r.first && (a - r.first) + n <= r.second.size()) {
+                std::memcpy(o, r.second.data() + (a - r.first), n);
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
+// Legacy TArray<TPair<FName,int64>> header (padded to 0x20 so +0x10 is readable,
+// like a real UEnum where CppForm/EnumFlags follow the array) + interleaved data.
+static void NeuPutLegacy(NeuFakeMem& fm, uintptr_t region, uintptr_t dataAddr,
+                         const std::vector<std::pair<int32_t,int64_t>>& es, int fnameStride) {
+    const size_t entryStride = static_cast<size_t>(fnameStride) + 8;
+    std::vector<uint8_t> data(es.size() * entryStride, 0);
+    for (size_t i = 0; i < es.size(); ++i) {
+        std::memcpy(&data[i*entryStride], &es[i].first, 4);                            // FName idx @ +0
+        std::memcpy(&data[i*entryStride + fnameStride], &es[i].second, 8);             // int64 value @ +stride
+    }
+    fm.Put(dataAddr, data.data(), data.size());
+    uint8_t hdr[0x20] = {};
+    uint64_t dataU = dataAddr;       std::memcpy(hdr + 0, &dataU, 8);
+    int32_t num = (int32_t)es.size(); std::memcpy(hdr + 8, &num, 4);
+    int32_t maxN = (int32_t)es.size(); std::memcpy(hdr + 12, &maxN, 4);  // ArrayMax
+    fm.Put(region, hdr, sizeof(hdr));
+}
+
+// UE5.6+ FNameData {tagged FName*, tagged int64*, int32 NumValues} + parallel arrays.
+static void NeuPutFNameData(NeuFakeMem& fm, uintptr_t region, uintptr_t namesAddr,
+                            uintptr_t valuesAddr, const std::vector<std::pair<int32_t,int64_t>>& es,
+                            int fnameStride, bool tagged) {
+    std::vector<uint8_t> names(es.size() * fnameStride, 0);
+    std::vector<uint8_t> vals(es.size() * 8, 0);
+    for (size_t i = 0; i < es.size(); ++i) {
+        std::memcpy(&names[i*fnameStride], &es[i].first, 4);  // FName idx at start of each FName slot
+        std::memcpy(&vals[i*8], &es[i].second, 8);
+    }
+    fm.Put(namesAddr, names.data(), names.size());
+    fm.Put(valuesAddr, vals.data(), vals.size());
+    uint8_t hdr[0x18] = {};
+    uint64_t tn = static_cast<uint64_t>(namesAddr)  | (tagged ? 1ull : 0ull);
+    uint64_t tv = static_cast<uint64_t>(valuesAddr) | (tagged ? 1ull : 0ull);
+    int32_t num = (int32_t)es.size();
+    std::memcpy(hdr + 0,  &tn, 8);
+    std::memcpy(hdr + 8,  &tv, 8);
+    std::memcpy(hdr + 16, &num, 4);
+    fm.Put(region, hdr, sizeof(hdr));
+}
+
+static void Test_Neu_Legacy_Basic() {
+    NeuFakeMem fm;
+    std::vector<std::pair<int32_t,int64_t>> es = {{10,0},{20,1},{30,2},{40,3}};
+    NeuPutLegacy(fm, 0x10000000, 0x20000000, es, 8);
+    auto rd = [&](uintptr_t a, void* o, size_t n){ return fm.Read(a, o, n); };
+
+    Neu::EnumNamesLayout L;
+    EXPECT("legacy detect",  Neu::DetectLayout(rd, 0x10000000, 8, 16384, L));
+    EXPECT("legacy format",  L.format == Neu::EnumNamesFormat::Legacy);
+    EXPECT_EQ_U64("legacy count", L.count, 4);
+    int32_t idx = 0; int64_t v = 0;
+    EXPECT("legacy entry0",  Neu::ReadEntry(rd, L, 0, idx, v));
+    EXPECT_EQ_U64("legacy idx0", idx, 10);  EXPECT_EQ_U64("legacy val0", v, 0);
+    Neu::ReadEntry(rd, L, 3, idx, v);
+    EXPECT_EQ_U64("legacy idx3", idx, 40);  EXPECT_EQ_U64("legacy val3", v, 3);
+    // BuildLayout with the known format (what the live reader uses) matches.
+    Neu::EnumNamesLayout L2;
+    EXPECT("legacy build", Neu::BuildLayout(rd, 0x10000000, Neu::EnumNamesFormat::Legacy, 8, 16384, L2));
+    EXPECT_EQ_U64("legacy build count", L2.count, 4);
+}
+
+static void Test_Neu_Legacy_CasePreserving() {
+    NeuFakeMem fm;
+    std::vector<std::pair<int32_t,int64_t>> es = {{5,0},{6,1},{7,2}};
+    NeuPutLegacy(fm, 0x10000000, 0x20000000, es, 0x10);  // FName=16 -> stride 24, value @ +16
+    auto rd = [&](uintptr_t a, void* o, size_t n){ return fm.Read(a, o, n); };
+    Neu::EnumNamesLayout L;
+    EXPECT("legacy CPN detect", Neu::DetectLayout(rd, 0x10000000, 0x10, 16384, L));
+    int32_t idx = 0; int64_t v = 0;
+    Neu::ReadEntry(rd, L, 2, idx, v);
+    EXPECT_EQ_U64("legacy CPN idx2", idx, 7);  EXPECT_EQ_U64("legacy CPN val2", v, 2);
+}
+
+static void Test_Neu_FNameData_Basic() {
+    NeuFakeMem fm;
+    std::vector<std::pair<int32_t,int64_t>> es = {{100,0},{200,1},{300,2},{400,3},{500,4}};
+    NeuPutFNameData(fm, 0x10000000, 0x30000000, 0x40000000, es, 8, /*tagged*/true);
+    auto rd = [&](uintptr_t a, void* o, size_t n){ return fm.Read(a, o, n); };
+    Neu::EnumNamesLayout L;
+    EXPECT("fnd detect", Neu::DetectLayout(rd, 0x10000000, 8, 16384, L));
+    EXPECT("fnd format", L.format == Neu::EnumNamesFormat::FNameData57);
+    EXPECT_EQ_U64("fnd count", L.count, 5);
+    EXPECT_EQ_U64("fnd namesPtr masked",  L.namesPtr,  0x30000000);  // tag bit stripped
+    EXPECT_EQ_U64("fnd valuesPtr masked", L.valuesPtr, 0x40000000);
+    int32_t idx = 0; int64_t v = 0;
+    Neu::ReadEntry(rd, L, 0, idx, v);  EXPECT_EQ_U64("fnd idx0", idx, 100);  EXPECT_EQ_U64("fnd val0", v, 0);
+    Neu::ReadEntry(rd, L, 4, idx, v);  EXPECT_EQ_U64("fnd idx4", idx, 500);  EXPECT_EQ_U64("fnd val4", v, 4);
+}
+
+static void Test_Neu_FNameData_CasePreserving() {
+    NeuFakeMem fm;
+    std::vector<std::pair<int32_t,int64_t>> es = {{11,0},{22,1},{33,2}};
+    NeuPutFNameData(fm, 0x10000000, 0x30000000, 0x40000000, es, 0x10, true);  // FName=16 stride
+    auto rd = [&](uintptr_t a, void* o, size_t n){ return fm.Read(a, o, n); };
+    Neu::EnumNamesLayout L;
+    EXPECT("fnd CPN detect", Neu::DetectLayout(rd, 0x10000000, 0x10, 16384, L));
+    int32_t idx = 0; int64_t v = 0;
+    Neu::ReadEntry(rd, L, 1, idx, v);
+    EXPECT_EQ_U64("fnd CPN idx1", idx, 22);  EXPECT_EQ_U64("fnd CPN val1", v, 1);
+}
+
+static void Test_Neu_FNameData_SparseValues() {
+    // Proves we read the ACTUAL values array, not assume sequential [0,1,2,...].
+    NeuFakeMem fm;
+    std::vector<std::pair<int32_t,int64_t>> es = {{1,0},{2,1},{3,2},{4,4},{5,8},{6,255}};
+    NeuPutFNameData(fm, 0x10000000, 0x30000000, 0x40000000, es, 8, true);
+    auto rd = [&](uintptr_t a, void* o, size_t n){ return fm.Read(a, o, n); };
+    Neu::EnumNamesLayout L;
+    EXPECT("fnd sparse detect", Neu::DetectLayout(rd, 0x10000000, 8, 16384, L));
+    int32_t idx = 0; int64_t v = 0;
+    Neu::ReadEntry(rd, L, 3, idx, v);  EXPECT_EQ_U64("fnd sparse val3", v, 4);
+    Neu::ReadEntry(rd, L, 4, idx, v);  EXPECT_EQ_U64("fnd sparse val4", v, 8);
+    Neu::ReadEntry(rd, L, 5, idx, v);  EXPECT_EQ_U64("fnd sparse val5", v, 255);
+}
+
+static void Test_Neu_TagBitMasked() {
+    // Untagged (low bit 0) name/value pointers must still mask to the same base.
+    NeuFakeMem fm;
+    std::vector<std::pair<int32_t,int64_t>> es = {{7,0},{8,1}};
+    NeuPutFNameData(fm, 0x10000000, 0x30000000, 0x40000000, es, 8, /*tagged*/false);
+    auto rd = [&](uintptr_t a, void* o, size_t n){ return fm.Read(a, o, n); };
+    Neu::EnumNamesLayout L;
+    EXPECT("fnd untagged detect", Neu::DetectLayout(rd, 0x10000000, 8, 16384, L));
+    EXPECT_EQ_U64("fnd untagged namesPtr", L.namesPtr, 0x30000000);
+    int32_t idx = 0; int64_t v = 0;
+    Neu::ReadEntry(rd, L, 1, idx, v);  EXPECT_EQ_U64("fnd untagged idx1", idx, 8);
+}
+
+static void Test_Neu_Disambiguation() {
+    // A legacy header whose Num|Max 8-byte word masks into the pointer numeric
+    // range but at UNMAPPED memory must still be read as Legacy — the FNameData
+    // hypothesis is rejected because its "values pointer" won't dereference.
+    NeuFakeMem fm;
+    std::vector<std::pair<int32_t,int64_t>> es = {{10,0},{20,1}};
+    const int stride = 8; const size_t entryStride = (size_t)stride + 8;
+    std::vector<uint8_t> data(es.size() * entryStride, 0);
+    for (size_t i = 0; i < es.size(); ++i) {
+        std::memcpy(&data[i*entryStride], &es[i].first, 4);
+        std::memcpy(&data[i*entryStride + stride], &es[i].second, 8);
+    }
+    fm.Put(0x20000000, data.data(), data.size());
+    // Num=2, Max=0x55 -> w1 = 0x0000005500000002; (&~1) ~= 0x5500000002 is in the
+    // pointer numeric range yet unmapped. Bait +0x10 with a plausible "NumValues".
+    uint8_t hdr[0x18] = {};
+    uint64_t dataU = 0x20000000;  std::memcpy(hdr + 0, &dataU, 8);
+    int32_t num = 2, maxN = 0x55;  std::memcpy(hdr + 8, &num, 4);  std::memcpy(hdr + 12, &maxN, 4);
+    int32_t bait = 2;              std::memcpy(hdr + 16, &bait, 4);
+    fm.Put(0x10000000, hdr, sizeof(hdr));
+    auto rd = [&](uintptr_t a, void* o, size_t n){ return fm.Read(a, o, n); };
+    Neu::EnumNamesLayout L;
+    EXPECT("disambig detect",       Neu::DetectLayout(rd, 0x10000000, 8, 16384, L));
+    EXPECT("disambig picks Legacy", L.format == Neu::EnumNamesFormat::Legacy);
+    EXPECT_EQ_U64("disambig count", L.count, 2);
+}
+
+static void Test_Neu_Edge() {
+    Neu::EnumNamesLayout L;
+    auto rd_none = [](uintptr_t, void*, size_t){ return false; };
+    EXPECT("edge all-fault -> false", !Neu::DetectLayout(rd_none, 0x10000000, 8, 16384, L));
+
+    {   // count over the cap -> rejected
+        NeuFakeMem fm;
+        std::vector<std::pair<int32_t,int64_t>> es = {{1,0},{2,1},{3,2},{4,3},{5,4}};
+        NeuPutLegacy(fm, 0x10000000, 0x20000000, es, 8);
+        auto rd = [&](uintptr_t a, void* o, size_t n){ return fm.Read(a, o, n); };
+        Neu::EnumNamesLayout L2;
+        EXPECT("edge over-cap -> false", !Neu::DetectLayout(rd, 0x10000000, 8, /*maxCount*/3, L2));
+    }
+    {   // FNameData header present but the arrays are unmapped -> rejected
+        NeuFakeMem fm;
+        uint8_t hdr[0x18] = {};
+        uint64_t tn = 0x30000000ull | 1, tv = 0x40000000ull | 1;  int32_t num = 3;
+        std::memcpy(hdr + 0, &tn, 8);  std::memcpy(hdr + 8, &tv, 8);  std::memcpy(hdr + 16, &num, 4);
+        fm.Put(0x10000000, hdr, sizeof(hdr));   // arrays intentionally NOT registered
+        auto rd = [&](uintptr_t a, void* o, size_t n){ return fm.Read(a, o, n); };
+        Neu::EnumNamesLayout L3;
+        EXPECT("edge unmapped arrays -> false", !Neu::DetectLayout(rd, 0x10000000, 8, 16384, L3));
+    }
+}
+
 int main() {
     std::printf("dll_helpers_test (Renge + Scharf + Radar)\n");
     std::printf("------------------------------------------\n");
@@ -1983,6 +2189,16 @@ int main() {
     // Solitar GodMode — FBoolProperty single-bit read-modify-write
     Test_Solitar_ApplyBoolBit();
     Test_Solitar_MatchProtectionBool();
+
+    // Neu — UEnum::Names layout: legacy TArray vs UE5.6+ FNameData (synthetic memory)
+    Test_Neu_Legacy_Basic();
+    Test_Neu_Legacy_CasePreserving();
+    Test_Neu_FNameData_Basic();
+    Test_Neu_FNameData_CasePreserving();
+    Test_Neu_FNameData_SparseValues();
+    Test_Neu_TagBitMasked();
+    Test_Neu_Disambiguation();
+    Test_Neu_Edge();
 
     std::printf("------------------------------------------\n");
     std::printf("Pass: %d   Fail: %d\n", g_pass, g_fail);

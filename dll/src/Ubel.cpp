@@ -13,6 +13,7 @@
 #include "Genau.h"
 #include "Utf8Helpers.h"
 #include "Scharf.h"
+#include "Neu.h"     // UEnum::Names layout (legacy TArray vs UE5.6+ FNameData)
 
 #include <algorithm>
 #include <cctype>
@@ -99,27 +100,33 @@ static std::string ResolveEnumValue(uintptr_t enumAddr, int64_t value) {
         }
     }
 
-    // Slow path: read UEnum::Names TArray<TPair<FName, int64>> WITHOUT the
-    // lock (game-memory reads are the expensive part), then insert.
-    uintptr_t data = 0;
-    int32_t count = 0;
-    Macht::ReadSafe(enumAddr + DynOff::UENUM_NAMES, data);
-    Macht::ReadSafe(enumAddr + DynOff::UENUM_NAMES + 8, count);
+    // Slow path: parse UEnum::Names WITHOUT the lock (game-memory reads are the
+    // expensive part), then insert. The container is either the legacy
+    // TArray<TPair<FName,int64>> or the UE5.6+ FNameData struct-of-arrays; the
+    // format is a per-game constant established by DetectUEnumNames, so we build
+    // the layout for that KNOWN format (Neu::BuildLayout — no per-enum guessing).
+    auto readMem = [](uintptr_t a, void* o, size_t n) -> bool {
+        return Macht::ReadBytesSafe(a, o, n);
+    };
+    const Neu::EnumNamesFormat fmt = DynOff::bEnumNamesNewContainer
+        ? Neu::EnumNamesFormat::FNameData57
+        : Neu::EnumNamesFormat::Legacy;
+    const int fnameStride = DynOff::bCasePreservingName ? 0x10 : 0x08;
 
     std::vector<std::pair<int64_t, std::string>> entries;
-    if (data && count > 0 && count < 16384) {
-        entries.reserve(count);
-        for (int i = 0; i < count; ++i) {
-            uintptr_t entryAddr = data + static_cast<uintptr_t>(i) * DynOff::UENUM_ENTRY_SIZE;
+    Neu::EnumNamesLayout layout;
+    if (Neu::BuildLayout(readMem, enumAddr + DynOff::UENUM_NAMES, fmt, fnameStride, 16384, layout)) {
+        entries.reserve(layout.count);
+        for (int32_t i = 0; i < layout.count; ++i) {
             int32_t nameIdx = 0;
             int64_t val = 0;
-            Macht::ReadSafe(entryAddr, nameIdx);
-            Macht::ReadSafe(entryAddr + 8, val);
+            if (!Neu::ReadEntry(readMem, layout, i, nameIdx, val)) break;
             std::string name = Serie::GetString(nameIdx);
             entries.push_back({val, std::move(name)});
         }
-        LOG_DEBUG("ResolveEnumValue: Cached UEnum 0x%llX with %d entries",
-            static_cast<unsigned long long>(enumAddr), count);
+        LOG_DEBUG("ResolveEnumValue: Cached UEnum 0x%llX with %d entries (%s)",
+            static_cast<unsigned long long>(enumAddr), layout.count,
+            fmt == Neu::EnumNamesFormat::FNameData57 ? "FNameData" : "legacy");
     }
 
     // Insert (another thread may have built the same enum meanwhile — emplace
@@ -2725,8 +2732,8 @@ static void CorrectSubclassOffsets(const std::vector<FieldInfo>& fields) {
                 // probe will try delta=8 to account for this.
                 DynOff::FARRAYPROP_INNER   = corrected;
                 DynOff::FBOOLPROP_FIELDSIZE = corrected;
-                DynOff::FENUMPROP_ENUM     = corrected;
                 DynOff::FBYTEPROP_ENUM     = corrected;
+                DynOff::FENUMPROP_ENUM     = corrected + 8;  // +8: FEnumProperty::UnderlyingProp precedes Enum
             }
             s_checked.store(true, std::memory_order_release);
             return;
