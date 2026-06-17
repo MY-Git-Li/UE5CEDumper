@@ -41,6 +41,17 @@ uintptr_t DecryptObjectPtr(uintptr_t rawPtr);
 // Initialize with the FUObjectArray address found by OffsetFinder
 void Init(uintptr_t gobjectsAddr);
 
+// Initialize with the layout FORCED to standard UE5 chunked-extended
+// (ObjObjects.Objects @ +0x10, MaxElements @ +0x20, NumElements @ +0x24).
+// Used by the static-struct GObjects recovery (Avowed / Obsidian UE5.3) where
+// the base is already content-validated as this layout, so layout auto-detection
+// (which can mis-pick a relaxed preset reading NumElements at the wrong offset)
+// must be bypassed.
+// forcedItemSize > 0 also FORCES the FUObjectItem stride (object ptr @ +0x00,
+// Classic mode) — needed for Obsidian's 20-byte packed FUObjectItem, which
+// stride auto-detection can mis-read as 24. 0 = auto-detect the stride.
+void InitWithExtendedLayout(uintptr_t gobjectsAddr, int forcedItemSize = 0);
+
 // Get total number of allocated objects
 int32_t GetCount();
 

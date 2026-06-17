@@ -111,6 +111,19 @@ constexpr const char* AOB_GOBJECTS_V11 = "48 8D ?? ?? ?? ?? ?? 4C 8B C9 48 89 01
 constexpr const char* AOB_GOBJECTS_V12 = "48 8B ?? ?? ?? ?? ?? 4C 8B 04 C8 4D 85 C0 74 07";
 // V13: mov rax,[rip+X]; mov rcx,[rax+rcx*8]; lea rax,[rdx+rdx*2]; jmp+3  — Palworld
 constexpr const char* AOB_GOBJECTS_V13 = "48 8B 05 ?? ?? ?? ?? 48 8B 0C C8 4C 8D 04 D1 EB 03";
+// AV1: mov rdx,[rip+X]; movsxd r8,r8d; shl r8,4  — Avowed / Obsidian UE5.3
+//   X resolves to ObjObjects.Objects (chunk table) = GUObjectArray + 0x10, so needs -0x10.
+//   The standard GObjects patterns (incl. patternsleuth's) do NOT match Avowed; this is the
+//   chunk-table load inside FUObjectArray::AllocateUObjectIndex (verified unique).
+constexpr const char* AOB_GOBJECTS_AV1 = "48 8B 15 ?? ?? ?? ?? 4D 63 C0 49 C1 E0 04";
+// AV2: mov rdx,[rip+X]; shr eax,10; lea rcx,[rcx+rcx*4]; shl ecx,2; add rcx,[rdx+rax*8]
+//   The GENERIC FUObjectItem chunk-index codegen (idx>>16 = chunk, (idx&0xffff)*0x14 within
+//   it — the lea*5 + shl<<2 bakes in the 20-byte item stride). X = GUObjectArray + 0x10 (so
+//   -0x10). NOT unique (~10+ identical sites — object access is everywhere) but that is a
+//   FEATURE: it is far more resilient to a game patch than AV1's single AllocateUObjectIndex
+//   site, and the 20-byte stride math makes a false hit on a standard 24-byte-item UE game
+//   essentially impossible. ValidateGObjects picks the real base among the matches.
+constexpr const char* AOB_GOBJECTS_AV2 = "48 8B 15 ?? ?? ?? ?? C1 E8 10 48 8D 0C 89 C1 E1 02 48 03 0C C2";
 
 // --- patternsleuth patterns (instrOffset != 0, use TryPatternRIPOffset) ---
 
@@ -608,6 +621,10 @@ constexpr AobSignature GOBJECTS_PATTERNS[] = {
     SIG_RIP("GOBJ_ES53_1", AOB_GOBJECTS_ES53_1, AobTarget::GObjects, 4, 3, 7, 0, 9, "ES53", "ES2 UE5.3 FUObjectArray ctor+atexit"),
     { "GOBJ_V10", AOB_GOBJECTS_V10, AobTarget::GObjects, AobResolve::RipBoth,
       0, 3, 7, -0x10, 10, 0, false, "V", "Split Fiction UE5.5+ lea+call+call" },
+    SIG_RIP("GOBJ_AV1", AOB_GOBJECTS_AV1, AobTarget::GObjects, 0, 3, 7, -0x10, 10, "AV",
+            "Avowed/Obsidian UE5.3 AllocateUObjectIndex MOV RDX,[ObjObjects.Objects]"),
+    SIG_RIP("GOBJ_AV2", AOB_GOBJECTS_AV2, AobTarget::GObjects, 0, 3, 7, -0x10, 10, "AV",
+            "Avowed/Obsidian UE5.3 FUObjectItem chunk-index (20B stride, ~10+ sites, patch-resilient)"),
     SIG_RIP("GOBJ_G42_4", AOB_GOBJECTS_G42_4, AobTarget::GObjects, 0, 3, 7, 0, 11, "G42", "UE4.2 long lea+call+epilogue"),
     SIG_RIP("GOBJ_SAT425_2", AOB_GOBJECTS_SAT425_2, AobTarget::GObjects, 0, 3, 7, 0, 11, "SAT425", "Satisfactory UE4.25 UObjectBaseInit 31-byte sequence"),
     SIG_RIP("GOBJ_SAT422_1", AOB_GOBJECTS_SAT422_1, AobTarget::GObjects, 0, 3, 7, 0, 12, "SAT422", "Satisfactory UE4.22 FEngineLoop::PreInit 4-CALL chain"),

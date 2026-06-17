@@ -60,6 +60,15 @@ ScanHints LoadHints(const char* peHash);
 void SaveResults(const char* peHash, const Genau::EnginePointers& ptrs,
                  const char* processName);
 
+/// Correct the cached gObjects resolution method AFTER post-init decoy recovery
+/// (UE5_Init). SaveResults runs inside FindAll — before recovery — so it records
+/// the decoy's "aob" method + winning patternId. Once recovery re-resolves GObjects
+/// via the data scan, call this to rewrite method (e.g. "data_scan_recovery") and
+/// CLEAR the patternId, so the next launch's LoadHints does not prioritise an AOB
+/// pattern that only matched a decoy (ExtractHint returns a hint only when method
+/// == "aob"). No-op if the cache file or record doesn't exist. Never throws.
+void UpdateGObjectsMethod(const char* peHash, const char* method);
+
 /// Persist (or clear) the user-set UE version override for a game.
 ///   ueVersion == 0 → clear the override (revert to auto-detect on next launch).
 ///   ueVersion != 0 → save the override; auto-detect is skipped on next launch.

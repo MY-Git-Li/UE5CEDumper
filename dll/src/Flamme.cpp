@@ -275,6 +275,58 @@ void SaveResults(const char* peHash, const Genau::EnginePointers& ptrs,
 }
 
 // ============================================================
+// UpdateGObjectsMethod
+// ============================================================
+
+void UpdateGObjectsMethod(const char* peHash, const char* method) {
+    if (!peHash || !peHash[0] || !method) return;
+
+    try {
+        auto path = GetCacheFilePath();
+        if (path.empty() || !fs::exists(path)) return;   // nothing written yet → nothing to fix
+
+        json root;
+        {
+            std::ifstream ifs(path);
+            if (!ifs.is_open()) return;
+            root = json::parse(ifs, nullptr, /*allow_exceptions=*/false);
+            ifs.close();
+        }
+        if (!root.is_object()) return;
+
+        auto gamesIt = root.find("games");
+        if (gamesIt == root.end() || !gamesIt->is_object()) return;
+        auto recIt = gamesIt->find(peHash);
+        if (recIt == gamesIt->end() || !recIt->is_object()) return;
+
+        json& go = (*recIt)["gObjects"];
+        if (!go.is_object()) go = json::object();
+        go["method"]    = method;
+        go["patternId"] = "";   // the AOB pattern only matched a decoy — do not hint it next launch
+
+        // Atomic write (temp + rename), mirroring SaveResults.
+        auto tempPath = path;
+        tempPath += L".tmp";
+        {
+            std::ofstream ofs(tempPath, std::ios::trunc);
+            if (!ofs.is_open()) {
+                LOG_WARN("HintCache: UpdateGObjectsMethod failed to open temp file");
+                return;
+            }
+            ofs << root.dump(2);
+        }
+        fs::rename(tempPath, path);
+
+        LOG_INFO("HintCache: Updated gObjects method for PE=%s -> %s (patternId cleared)", peHash, method);
+
+    } catch (const std::exception& ex) {
+        LOG_WARN("HintCache: UpdateGObjectsMethod failed: %s", ex.what());
+    } catch (...) {
+        LOG_WARN("HintCache: UpdateGObjectsMethod failed (unknown error)");
+    }
+}
+
+// ============================================================
 // SaveUserOverride
 // ============================================================
 

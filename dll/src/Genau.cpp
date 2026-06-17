@@ -532,6 +532,155 @@ static uintptr_t FindGObjectsByDataScan() {
     return v.empty() ? 0 : v[0];
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Static-struct GObjects resolution (Avowed / Obsidian UE5.3 and similar).
+//
+// Some games place GUObjectArray as a STATIC FUObjectArray in the module's
+// zero-init .data/BSS, and NO AOB pattern — not even RE-UE4SS/patternsleuth's —
+// matches the code that references it. The struct is still referenced by
+// `lea/mov reg,[rip+disp]` (e.g. inside FUObjectArray::AllocateUObjectIndex).
+// Our regular data scan DEREFERENCES those .data slots (correct for heap-allocated
+// GObjects), so it never tries the slot itself as the struct base and lands on
+// decoys. This resolver probes a small window around each referenced .data slot
+// as a standard UE5 chunked FUObjectArray and validates by CONTENT — the first
+// objects must resolve to clean printable-ASCII names.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A real UObject name is short printable ASCII (e.g. "Class", "/Script/CoreUObject").
+// A wrong base/stride decodes FName indices to garbage — non-ASCII (CJK) or control
+// bytes — so an ASCII+alnum gate cleanly separates the true array from decoys.
+static bool IsCleanAsciiName(const std::string& s) {
+    if (s.empty() || s.size() > 128 || s == "None") return false;
+    bool hasAlnum = false;
+    for (unsigned char c : s) {
+        if (c < 0x20 || c > 0x7E) return false;
+        if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
+            hasAlnum = true;
+    }
+    return hasAlnum;
+}
+
+// Score `base` as a standard UE5 chunked FUObjectArray (ObjObjects.Objects @ +0x10,
+// NumElements @ +0x24): returns the count of clean-named objects among the first
+// slots, or 0 if `base` is not a valid, name-resolving object array. The FUObjectItem
+// stride is NOT fixed — Obsidian's UE5.3 packs it to 20 bytes (0x14) instead of the
+// standard 24 (0x18) — so we try several and report the one that decodes cleanly via
+// outStride (the winning stride, fed to Aura::InitWithExtendedLayout).
+static int ScoreGObjectsStaticBase(uintptr_t base, int* outStride) {
+    uintptr_t chunkTable = 0;
+    if (!Macht::ReadSafe(base + 0x10, chunkTable)) return 0;     // ObjObjects.Objects
+    chunkTable = Aura::DecryptObjectPtr(chunkTable);
+    if (!LooksLikeDataPtr(chunkTable)) return 0;
+    int32_t num = 0;
+    if (!Macht::ReadSafe(base + 0x24, num)) return 0;           // NumElements
+    if (num < 16 || num > 0x800000) return 0;
+    uintptr_t chunk0 = 0;
+    if (!Macht::ReadSafe(chunkTable, chunk0) || !LooksLikeDataPtr(chunk0)) return 0;
+
+    // The first chunk is a contiguous FUObjectItem[]; the first entries are the
+    // permanent core objects (Class / Package / etc.), all named. Object ptr @ +0x00.
+    static const int kStrides[] = { 0x14, 0x18, 0x10, 0x20 };   // 20 (Obsidian-packed), 24 (std), 16, 32
+    const int kProbe = 64;
+    int bestClean = 0, bestStride = 0;
+    for (int stride : kStrides) {
+        int scanned = 0, clean = 0;
+        for (int i = 0; i < kProbe && i < num; ++i) {
+            uintptr_t obj = 0;
+            if (!Macht::ReadSafe(chunk0 + static_cast<uintptr_t>(i) * stride, obj)) continue;
+            if (!LooksLikeDataPtr(obj)) continue;
+            ++scanned;
+            uint32_t nameIdx = 0;
+            if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_NAME, nameIdx)) continue;
+            if (IsCleanAsciiName(Serie::GetString(nameIdx))) ++clean;
+        }
+        // Require a clear majority of clean names plus an absolute floor.
+        if (scanned >= 8 && clean >= 6 && clean * 2 >= scanned && clean > bestClean) {
+            bestClean = clean;
+            bestStride = stride;
+        }
+    }
+    if (outStride) *outStride = bestStride;
+    return bestClean;
+}
+
+uintptr_t FindGObjectsStaticStruct(int* outItemStride) {
+    if (outItemStride) *outItemStride = 0;
+    Sein::Info("SCAN:GObj", "FindGObjectsStaticStruct: scanning for a static FUObjectArray...");
+
+    uintptr_t modBase = Macht::GetModuleBase(nullptr);
+    if (!modBase) return 0;
+    auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(modBase);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return 0;
+    auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(modBase + static_cast<DWORD>(dos->e_lfanew));
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return 0;
+
+    const IMAGE_SECTION_HEADER* section = IMAGE_FIRST_SECTION(nt);
+    uintptr_t codeStart = 0, codeEnd = 0, dataStart = 0, dataEnd = 0;
+    for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++section) {
+        if (!section->Misc.VirtualSize || !section->VirtualAddress) continue;
+        uintptr_t s0 = modBase + section->VirtualAddress;
+        uintptr_t s1 = s0 + section->Misc.VirtualSize;
+        if (section->Characteristics & IMAGE_SCN_MEM_EXECUTE) {
+            if (!codeStart || s0 < codeStart) codeStart = s0;
+            if (s1 > codeEnd) codeEnd = s1;
+        } else if (section->Characteristics & IMAGE_SCN_MEM_WRITE) {
+            if (!dataStart || s0 < dataStart) dataStart = s0;
+            if (s1 > dataEnd) dataEnd = s1;   // cover the zero-init (BSS) tail too
+        }
+    }
+    if (!codeStart || !dataStart) return 0;
+
+    // Collect every unique writable-.data slot referenced by lea/mov reg,[rip+disp].
+    std::vector<uintptr_t> targets;
+    targets.reserve(1u << 16);
+    for (uintptr_t scan = codeStart; scan + 7 < codeEnd; ++scan) {
+        uint8_t b0 = 0, b1 = 0, b2 = 0;
+        if (!Macht::ReadSafe(scan, b0)) continue;
+        if (b0 != 0x48 && b0 != 0x4C) continue;
+        if (!Macht::ReadSafe(scan + 1, b1)) continue;
+        if (b1 != 0x8B && b1 != 0x8D) continue;        // MOV / LEA
+        if (!Macht::ReadSafe(scan + 2, b2)) continue;
+        if ((b2 & 0x07) != 0x05) continue;             // RIP-relative ModR/M
+        int32_t rel = 0;
+        if (!Macht::ReadSafe<int32_t>(scan + 3, rel)) continue;
+        uintptr_t tgt = scan + 7 + rel;
+        if (tgt >= dataStart && tgt < dataEnd) targets.push_back(tgt);
+    }
+    std::sort(targets.begin(), targets.end());
+    targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
+    Sein::Info("SCAN:GObj", "FindGObjectsStaticStruct: probing %zu unique .data refs", targets.size());
+
+    // Probe a small window around each referenced slot — a code ref may point at any
+    // member of the struct, so step back up to ObjAvailableList (+0x58) to find the base.
+    uintptr_t bestBase = 0;
+    int bestScore = 0, bestStride = 0;
+    for (uintptr_t tgt : targets) {
+        for (int off = -0x58; off <= 0x10; off += 8) {
+            int stride = 0;
+            int score = ScoreGObjectsStaticBase(tgt + off, &stride);
+            if (score > bestScore) {
+                bestScore = score;
+                bestBase = tgt + off;
+                bestStride = stride;
+                if (bestScore >= 32) {   // unambiguous: a dense run of clean core objects
+                    if (outItemStride) *outItemStride = bestStride;
+                    Sein::Info("SCAN:GObj", "FindGObjectsStaticStruct: static GObjects at 0x%llX (clean=%d, stride=%d)",
+                               static_cast<unsigned long long>(bestBase), bestScore, bestStride);
+                    return bestBase;
+                }
+            }
+        }
+    }
+    if (bestBase) {
+        if (outItemStride) *outItemStride = bestStride;
+        Sein::Info("SCAN:GObj", "FindGObjectsStaticStruct: static GObjects at 0x%llX (clean=%d, stride=%d)",
+                   static_cast<unsigned long long>(bestBase), bestScore, bestStride);
+    } else {
+        Sein::Warn("SCAN:GObj", "FindGObjectsStaticStruct: no static FUObjectArray found");
+    }
+    return bestBase;
+}
+
 // ============================================================
 // ScanForTarget — Unified AOB scanning engine
 //
@@ -3202,6 +3351,33 @@ uintptr_t ExtraScanGObjects() {
 // Thread-safe: reads game memory and existing ObjectArray/FNamePool statics
 // (immutable after init), no global state mutation.
 // ============================================================
+// Find the byte offset of a reflected property by NAME within a UStruct (walks the
+// FField property chain + super-struct chain). Uses the runtime-calibrated DynOff
+// offsets, so it is version-independent (the NAMES — e.g. "OwningGameInstance" — are
+// stable UE members; only their offsets vary). Returns -1 if not found.
+static int FindPropertyOffsetByName(uintptr_t structPtr, const char* propName) {
+    int superGuard = 0;
+    for (uintptr_t s = structPtr; s && superGuard++ < 64; ) {
+        uintptr_t field = 0;
+        if (Macht::ReadSafe(s + DynOff::USTRUCT_CHILDPROPS, field)) {
+            int fieldGuard = 0;
+            while (field && fieldGuard++ < 8192) {
+                uint32_t nameIdx = 0;
+                if (Macht::ReadSafe(field + DynOff::FFIELD_NAME, nameIdx) &&
+                    Serie::GetString(nameIdx) == propName) {
+                    int32_t off = 0;
+                    return Macht::ReadSafe(field + DynOff::FPROPERTY_OFFSET, off) ? off : -1;
+                }
+                if (!Macht::ReadSafe(field + DynOff::FFIELD_NEXT, field)) break;
+            }
+        }
+        uintptr_t super = 0;
+        if (!Macht::ReadSafe(s + DynOff::USTRUCT_SUPER, super) || super == s) break;
+        s = super;
+    }
+    return -1;
+}
+
 uintptr_t ExtraScanGWorld() {
     Sein::Info("SCAN:GWld", "ExtraScanGWorld: Starting instance scan...");
 
@@ -3212,47 +3388,45 @@ uintptr_t ExtraScanGWorld() {
         return 0;
     }
 
-    uintptr_t worldInstance = 0;
+    // Step 1: collect ALL non-CDO UWorld instances (addr + GObjects index). Games like
+    // Avowed have many UWorlds (UI "stage" worlds + the active map); the FIRST one is
+    // usually a stage that no global points to. So instead of "pick a world then look for
+    // a pointer to it", we scan .data for any slot that POINTS to one of these — that slot
+    // IS a UWorld* global (the real GWorld; the decoy points to non-world garbage and is
+    // skipped) — and prefer the highest-index world (most recently created = the active map).
+    std::vector<std::pair<uintptr_t, int32_t>> worlds;   // (instance addr, index), sorted by addr
     for (int32_t i = 0; i < count; ++i) {
         uintptr_t obj = Aura::GetByIndex(i);
         if (!obj) continue;
-
-        // Read class pointer
         uintptr_t cls = 0;
         if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
-
-        // Read class name
         uint32_t clsNameIdx = 0;
         if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx)) continue;
-        std::string clsName = Serie::GetString(clsNameIdx);
-        if (clsName != "World") continue;
-
-        // Read object name — skip CDOs
+        if (Serie::GetString(clsNameIdx) != "World") continue;
         uint32_t nameIdx = 0;
         if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_NAME, nameIdx)) continue;
         std::string name = Serie::GetString(nameIdx);
         if (name.empty() || name.find("Default__") != std::string::npos) continue;
-
-        worldInstance = obj;
-        Sein::Info("SCAN:GWld", "ExtraScanGWorld: Found UWorld instance '%s' at 0x%llX (index=%d)",
-                 name.c_str(), (unsigned long long)obj, i);
-        break;
+        worlds.emplace_back(obj, i);
     }
-
-    if (!worldInstance) {
+    if (worlds.empty()) {
         Sein::Warn("SCAN:GWld", "ExtraScanGWorld: No UWorld instance found in GObjects (scanned %d objects)", count);
         return 0;
     }
+    std::sort(worlds.begin(), worlds.end());   // by addr, for binary search
+    Sein::Info("SCAN:GWld", "ExtraScanGWorld: %zu non-CDO UWorld instance(s) — scanning .data for a static pointer",
+             worlds.size());
 
-    // Step 2: Scan .data sections for a pointer to this instance
+    // Step 2: scan writable .data for an 8-byte slot whose value is one of those worlds.
     uintptr_t base = Macht::GetModuleBase(nullptr);
     if (!base) return 0;
-
     auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
     if (dos->e_magic != IMAGE_DOS_SIGNATURE) return 0;
     auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + static_cast<DWORD>(dos->e_lfanew));
     if (nt->Signature != IMAGE_NT_SIGNATURE) return 0;
 
+    struct Match { int32_t idx; uintptr_t slot; uintptr_t world; };
+    std::vector<Match> matches;
     const IMAGE_SECTION_HEADER* section = IMAGE_FIRST_SECTION(nt);
     for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++section) {
         if (!section->Misc.VirtualSize || !section->VirtualAddress) continue;
@@ -3262,25 +3436,54 @@ uintptr_t ExtraScanGWorld() {
 
         uintptr_t secBase = base + section->VirtualAddress;
         size_t    secSize = section->Misc.VirtualSize;
-
-        Sein::Debug("SCAN:GWld", "ExtraScanGWorld: Scanning section [0x%llX-0x%llX] for ptr=0x%llX",
-                  (unsigned long long)secBase, (unsigned long long)(secBase + secSize),
-                  (unsigned long long)worldInstance);
-
         for (size_t off = 0; off + sizeof(uintptr_t) <= secSize; off += sizeof(uintptr_t)) {
             uintptr_t val = 0;
-            if (!Macht::ReadSafe(secBase + off, val)) continue;
-            if (val == worldInstance) {
-                uintptr_t gworldAddr = secBase + off;
-                Sein::Info("SCAN:GWld", "ExtraScanGWorld: Found GWorld at 0x%llX (contains 0x%llX)",
-                         (unsigned long long)gworldAddr, (unsigned long long)worldInstance);
-                return gworldAddr;
+            if (!Macht::ReadSafe(secBase + off, val) || val < 0x10000) continue;
+            auto it = std::lower_bound(worlds.begin(), worlds.end(), std::make_pair(val, 0));
+            if (it != worlds.end() && it->first == val) {
+                matches.push_back({ it->second, secBase + off, val });
             }
         }
     }
 
-    Sein::Warn("SCAN:GWld", "ExtraScanGWorld: No static pointer to UWorld instance found in .data sections");
-    return 0;
+    if (matches.empty()) {
+        Sein::Warn("SCAN:GWld", "ExtraScanGWorld: No static pointer to any UWorld instance found in .data sections");
+        return 0;
+    }
+
+    // Pick the .data-referenced world that is the ACTIVE game world. World-Partition games
+    // (Avowed) spawn many transient "_Generated_" sub-worlds — higher GObjects index, but
+    // OwningGameInstance == 0. Only the real game world has a non-null OwningGameInstance.
+    // So: by index DESCENDING, take the first match whose OwningGameInstance is non-null;
+    // if that property can't be located or none qualifies, fall back to the highest index.
+    std::sort(matches.begin(), matches.end(),
+              [](const Match& a, const Match& b) { return a.idx > b.idx; });
+
+    int ogiOff = -1;
+    {
+        uintptr_t cls = 0;
+        if (Macht::ReadSafe(matches[0].world + Grimoire::OFF_UOBJECT_CLASS, cls) && cls)
+            ogiOff = FindPropertyOffsetByName(cls, "OwningGameInstance");
+    }
+
+    const Match* chosen = nullptr;
+    const char* how = "highest-index";
+    if (ogiOff >= 0) {
+        for (const Match& m : matches) {
+            uintptr_t ogi = 0;
+            if (Macht::ReadSafe(m.world + ogiOff, ogi) && ogi >= 0x10000) {
+                chosen = &m;
+                how = "active (OwningGameInstance set)";
+                break;
+            }
+        }
+    }
+    if (!chosen) chosen = &matches[0];   // fallback: highest index
+
+    Sein::Info("SCAN:GWld", "ExtraScanGWorld: GWorld at 0x%llX -> UWorld 0x%llX (index=%d, %zu candidate(s), %s)",
+             (unsigned long long)chosen->slot, (unsigned long long)chosen->world,
+             chosen->idx, matches.size(), how);
+    return chosen->slot;
 }
 
 bool FindAll(EnginePointers& out, ScanProgressFn progress) {

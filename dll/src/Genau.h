@@ -128,6 +128,18 @@ uintptr_t ExtraScanGObjects();
 size_t CollectGObjectsCandidates(std::vector<uintptr_t>& out, uintptr_t avoid = 0,
                                  size_t maxCandidates = 16);
 
+// Locate a STATIC FUObjectArray living in the module's .data/BSS, for games where
+// GUObjectArray is a static global that NO AOB pattern matches (Avowed / Obsidian
+// UE5.3 — confirmed even RE-UE4SS/patternsleuth's patterns fail). Scans .text for
+// `lea/mov reg,[rip+disp]` slots in writable .data, then probes a window around each
+// as a standard UE5 chunked FUObjectArray (ObjObjects @ +0x10, NumElements @ +0x24)
+// and validates by CONTENT — the first objects must resolve to clean printable-ASCII
+// names. Returns the base of the best match (0 if none). Requires Serie initialized.
+// outItemStride (optional) receives the FUObjectItem stride that decoded cleanly
+// (e.g. 0x14 for Obsidian's packed item, 0x18 standard) — pass it to
+// Aura::InitWithExtendedLayout so the stride isn't re-detected (and mis-picked).
+uintptr_t FindGObjectsStaticStruct(int* outItemStride = nullptr);
+
 // Find GWorld by iterating GObjects for UWorld instance, then scanning .data
 // for a static pointer to that instance.  Requires GObjects + GNames already initialized.
 uintptr_t ExtraScanGWorld();
