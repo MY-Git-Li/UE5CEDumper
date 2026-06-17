@@ -5,8 +5,10 @@ the anime **"Frieren: Beyond Journey's End"** (葬送的芙莉蓮).
 
 **Rule**: Every Frieren-named entity MUST have a comment explaining its actual function.
 
-> Naming based on the **3rd Official Character Popularity Poll** (2026-03-29,
-> 12.7M total votes). See [Sources](#sources) at the end.
+> In-use assignments were informed by the **3rd Official Character Popularity Poll**
+> (2026-03-29, 12.7M votes). The pool of names available for *new* modules is the full
+> **[Wikipedia character roster](#full-character-roster--name-pool)** below.
+> See [Sources](#sources) at the end.
 
 ---
 
@@ -197,22 +199,151 @@ Frieren, Himmel, Stark, Fern, Methode, Mimic, Genau
 
 ### Available for Future Use
 
-| Character | Poll # | Suggested Use |
-|-----------|--------|---------------|
-| Solitär (#11) | 11 | Stealth/concealment features |
-| Sense (#13) | 13 | Object destruction/cleanup |
-| Linie (#14) | 14 | Object cloning/replication |
-| ~~Scharf (#17)~~ | 17 | **In use → FProperty alignment validator (`Scharf.h`)** |
-| Glück (#18) | 18 | Lucky heuristics / fallback logic |
-| ~~Wirbel (#20)~~ | 20 | **In use → Teleport (marker save/recall + cursor teleport, `Wirbel.cpp`, build 1027)** |
-| ~~Denken (#25)~~ | 25 | **In use → native UFunction x64 disassembly (`Denken.cpp`, Path 2)** |
-| Kanne (#26) | 26 | Growth/tree operations |
-| Richter (#28) | 28 | Memory region scanning |
+> Superseded by the **Full Character Roster** below, which draws the available-name
+> pool from the complete Wikipedia character list (not just the poll Top 30).
+
+---
+
+## Full Character Roster — Name Pool
+
+Source: **[List of Frieren characters — Wikipedia](https://en.wikipedia.org/wiki/List_of_Frieren_characters)**.
+This is the authoritative pool of names usable for new DLL modules.
+
+**Legend**: 🟢 in use · 🟡 reserved (designed, not yet built) · ⬜ available
+
+**File-name rule**: C++ identifiers strip the umlaut dots — `ä→a ö→o ü→u`
+(matching the existing `Übel→Ubel`, `Lügner→Lugner` convention), e.g.
+`Glück→Gluck`, `Böse→Bose`, `Löwe→Lowe`, `Dünste→Dunste`, `Lektüre→Lekture`.
+German meanings are given because most names map cleanly to a module function.
+
+### Frieren's Party & The Hero Party
+
+| Character | File form | Meaning / role | Status | Suggested use |
+|---|---|---|---|---|
+| Frieren | Frieren | Protagonist, slayer-mage | 🟢 ExportAPI | — |
+| Fern | Fern | Frieren's apprentice | 🟢 PipeServer | — |
+| Stark | Stark | Frontline warrior | 🟢 GameThreadDispatch | — |
+| Sein | Sein | Healing priest, chronicler | 🟢 Logger | — |
+| Himmel | Himmel | The hero, remembered forever | 🟢 Signatures | — |
+| Heiter | Heiter | Priest who started the journey | 🟢 dllmain | — |
+| Eisen | Eisen | Dwarf warrior, "iron", sturdy/retired | ⬜ | Robust/stable core or legacy-stable path |
+
+### Demons — Confidant & Seven Sages of Destruction
+
+| Character | File form | Meaning / role | Status | Suggested use |
+|---|---|---|---|---|
+| Aura | Aura | Scales of Obedience (mind control) | 🟢 ObjectArray | — |
+| Macht | Macht | Gold transmutation curse | 🟢 Memory | — |
+| Schlacht | Schlacht | "The Omniscient", precognition | ⬜ | Prediction / lookahead / speculative scan |
+| Grausam | Grausam | Master of illusion magic ("cruel") | ⬜ | Decoy / obfuscation / anti-debug counter |
+| Böse | Bose | Immortal Sage, barrier magic ("evil") | ⬜ | Protection / guard / anti-tamper shield |
+
+### Demons — Greater & Other
+
+| Character | File form | Meaning / role | Status | Suggested use |
+|---|---|---|---|---|
+| Lügner | Lugner | Master of disguise / envoy | 🟢 ProxyVersion | — |
+| Solitär | Solitar | Greater demon studying humanity | 🟡 GodMode (planned) | Stealth/protection (`Solitar`, see `docs/godmode-spec.md`) |
+| Tot | Tot | "Saint of the End", end-curse | ⬜ | Shutdown / teardown / cleanup |
+| Rivale | Rivale | "Bloody God of War", forges weapons | ⬜ | Builder / generator (CT / AA script) |
+| Qual | Qual | Creator of Zoltraak (universal magic) | ⬜ | Foundational engine / AOB pattern compiler |
+| Linie | Linie | Reads opponent mana ("line") | ⬜ | Analysis / profiling / lineage trace |
+| Draht | Draht | Lügner's assistant ("wire") | ⬜ | Wiring / binding / IPC plumbing |
+| Revolte | Revolte | Four-handed general, four swords | ⬜ | Parallelism / multi-threaded dispatch |
+| Hemmung | Hemmung | Mist→energy ("inhibition") | ⬜ | Throttle / rate-limit / backpressure |
+| Solide | Solide | Blindfold swordsman ("solid") | ⬜ | Robust read validation |
+| Jung | Jung | Curious demon child ("young") | ⬜ | Experimental / sandbox features |
+| Zart | Zart | "Lingering Shadow", spatial transference | ⬜ | Memory remap/relocate (note: Wirbel owns teleport) |
+
+### Mages — Continental Magic Association
+
+| Character | File form | Meaning / role | Status | Suggested use |
+|---|---|---|---|---|
+| Serie | Serie | Living-history great mage | 🟢 FNamePool | — |
+| Genau | Genau | First-Exam proctor / examiner | 🟢 OffsetFinder | — |
+| Methode | Methode | All-capable analyst, detection | 🟢 CEPlugin | — |
+| Sense | Sense | Second-Exam proctor ("scythe") | ⬜ | Reaping / cleanup / harvest-collection |
+| Falsch | Falsch | By-the-book proctor ("false") | ⬜ | Validation / assertion / error detection |
+| Lernen | Lernen | Serie's apprentice ("to learn") | ⬜ | Adaptive heuristics / calibration |
+| Lineal | Lineal | 15-year undercover spy ("ruler") | ⬜ | Layout alignment / measurement |
+
+### Mages — First-Class Exam & Others
+
+| Character | File form | Meaning / role | Status | Suggested use |
+|---|---|---|---|---|
+| Übel | Ubel | Cleaving-magic assassin | 🟢 UStructWalker | — |
+| Wirbel | Wirbel | Magic Corps captain ("whirl") | 🟢 Teleport | — |
+| Scharf | Scharf | Petals→steel blades ("sharp") | 🟢 WalkerAlignment | — |
+| Denken | Denken | Court magician, Macht's student | 🟢 NativeDisasm | — |
+| Land | Land | Creates flawless clones | ⬜ | Cloning / replication / duplicate detection |
+| Kanne | Kanne | Controls water ("watering can") | ⬜ | Flow / streaming / pipelining |
+| Lawine | Lawine | Freezes water ("avalanche") | ⬜ | Snapshot/freeze or bulk cascade |
+| Edel | Edel | Hypnosis magic ("noble") | ⬜ | Override / control injection |
+| Richter | Richter | Staff repair ("judge") | ⬜ | Scoring / judging / recovery-repair |
+| Laufen | Laufen | High-speed movement ("to run") | ⬜ | Fast-path / SIMD acceleration |
+| Ehre | Ehre | Controls rocks ("honor") | ⬜ | Foundation / stability |
+| Blei | Blei | Edel's teammate ("lead" metal) | ⬜ | Weighting / ballast |
+| Dünste | Dunste | Edel's teammate ("vapors") | ⬜ | Volatile / transient state |
+| Ton | Ton | Lone-wolf exam mage ("clay") | ⬜ | Shaping / serialization / formatting |
+
+### Northern Empire — Special Forces & Shadow Warriors
+
+| Character | File form | Meaning / role | Status | Suggested use |
+|---|---|---|---|---|
+| Phrase | Phrase | Special Forces captain | ⬜ | Parsing / syntax / expression eval |
+| Kanone | Kanone | Special Forces ("cannon") | ⬜ | Bulk / heavy blast scan |
+| Neu | Neu | Discovers undercover ("new") | ⬜ | Discovery / detection / diff |
+| Grau | Grau | Straight-laced trooper ("gray") | ⬜ | Neutral baseline |
+| Lager | Lager | Carefree trooper ("storage/depot") | ⬜ | Cache / buffer pool / storage |
+| Löwe (Held) | Lowe | Governor / anti-magic ("lion") | ⬜ | Aggressive / dominant heuristic |
+| Radar | Radar | Shadow Warrior chief | ⬜ | Scanning / detection / sweep |
+| Schritt | Schritt | Shadow Warrior ("step") | ⬜ | Stepping / single-step iteration |
+| Routine | Routine | Shadow Warrior librarian | ⬜ | Scheduled / periodic subroutine |
+| Kreis | Kreis | Shadow Warrior blacksmith ("circle") | ⬜ | Ring buffer / loop / cycle |
+| Lore | Lore | Shadow Warrior nun ("lore") | ⬜ | Knowledge base / metadata store |
+| Walross | Walross | Ex-Hero Rasen ("walrus") | ⬜ | (thematic) |
+| Wolf / Iris / Klematis / Gazelle | Wolf / Iris / Klematis / Gazelle | Minor Shadow Warriors | ⬜ | (thematic pool) |
+
+### Other Characters
+
+| Character | File form | Meaning / role | Status | Suggested use |
+|---|---|---|---|---|
+| Flamme | Flamme | Ancient master, concealment | 🟢 HintCache | — |
+| Gehen | Gehen | Dwarf who built a canyon bridge | ⬜ | Bridge / IPC connector (strong fit) |
+| Glück | Gluck | Lord allied with Macht ("luck") | ⬜ | Lucky heuristic / fallback logic |
+| Kraft | Kraft | Ancient elven monk ("force/power") | ⬜ | Heavy-compute / force utility |
+| Orden | Orden | Noble house head ("order") | ⬜ | Ordering / sorting / sequencing |
+| Fass | Fass | Dwarf seeking ale ("barrel/cask") | ⬜ | Container / buffer |
+| Voll | Voll | Old dwarf friend ("full") | ⬜ | Capacity / completeness check |
+| Milliarde | Milliarde | Old elf ("billion") | ⬜ | Large-count handling |
+| Lektüre | Lekture | Denken's late wife ("reading") | ⬜ | Reader / parser |
+| Lecker | Lecker | Talented cook ("delicious") | ⬜ | Presentation / formatting |
+| Granat | Granat | Town graf ("garnet") | ⬜ | (thematic) |
+| Stoltz | Stoltz | Stark's brother ("proud") | ⬜ | (thematic) |
+| Eisen | Eisen | (see Hero Party) | ⬜ | Robust/stable core |
+
+> **Title-only / unnamed roles excluded** (not clean identifiers): Emperor,
+> Hero of the South, Sword Village Chief, Stark's Father, Sein's Older Brother.
+>
+> **Not on the Wikipedia roster** (kept anyway): `Mimic` (寶箱怪 chest-mimic gag),
+> `Renge` (蓮格 liaison, poll #22), `Grimoire` (魔導書 — an item, not a character).
+
+### Newer modules still on plain-English names
+
+These shipped without a Frieren name and are candidates for adoption from the pool:
+
+| Module | Current file | Function | Pool suggestion |
+|---|---|---|---|
+| Cancellation | `Cancel.h` | `Cancel::Requested()` cooperative cancel | `Tot` (the End) |
+| Value scan | `ValueScan.h/.cpp` | CE-style by-value scan | `Kanone` (blast) / `Radar` (sweep) |
+| Packed item | `PackedItem.h` | UE5.7+ packed FUObjectItem reconstruct | `Lineal` (alignment) |
+| Graph path | `GraphPath.h` | BFS shortest-path core (under `Aura::`) | stays a helper |
 
 ---
 
 ## Sources
 
+- [List of Frieren characters — Wikipedia](https://en.wikipedia.org/wiki/List_of_Frieren_characters) — **primary name-pool roster**
 - [Frieren: 8 Most Popular Characters, Officially Ranked By Japan Poll — GameRant](https://gamerant.com/frieren-most-popular-characters-third-popularity-poll/)
 - [Himmel Officially Loses No. 1 Spot — CBR](https://www.cbr.com/frieren-official-character-ranking-2026-himmel-lose/)
 - [Frieren Character Popularity Poll Results — Oricon](https://us.oricon-group.com/news/8194/)
