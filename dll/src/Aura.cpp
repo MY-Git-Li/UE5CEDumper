@@ -865,8 +865,13 @@ static void LogPackedDiagnosticNegative() {
 //
 // Two object-ptr-offset passes run in order: classic +0x00 FIRST so every previously
 // working game keeps its exact prior detection path and result, then UE5.7+ +0x08 ONLY
-// when the classic pass is unconvincing (on a reordered item, reading +0x00 yields the
-// int64 FlagsAndRefCount, which never resolves a name → the classic pass stays weak).
+// when the classic pass is unconvincing. On a reordered (UE5.7+) item, reading +0x00
+// yields the int64 FlagsAndRefCount; a stride-ALIGNED scan never resolves a name, but a
+// MIS-strided scan (e.g. stride 16 over a 24-byte item) lands on the real +0x08 Object
+// field ~1/3 of the time, so the classic pass can look weakly "valid" with named ≈ bad ≈
+// null ≈ 1/3 each (seen on Solarpunk, stock UE5.7). Hence the accept gate also requires
+// named > bad: a correct layout resolves nearly every non-null slot (bad ≈ 0), so a
+// bad-dominated pass is rejected and the +0x08 pass gets its turn.
 static void DetectItemSize() {
     uintptr_t chunkTable = 0;
     if (!Macht::ReadSafe(s_arrayAddr + s_layout.objectsOffset, chunkTable) || !chunkTable) {
@@ -916,6 +921,12 @@ static void DetectItemSize() {
 
         int threshold = bestHasNames ? 2 : 3;
         int bestTotal = bestHasNames ? bestNamed : bestCount;
+        // A name-resolving pass is only trustworthy if valid items clearly outnumber bad
+        // reads. On a UE5.7+ reordered item the mis-strided classic (+0x00) scan lands on
+        // the real Object field only ~1/3 of the time (named ≈ bad), so reject a bad-
+        // dominated pass and let the +0x08 pass run. A correct layout has bad ≈ 0. The
+        // count-only path (no FName check) keeps its prior behaviour (no bad confidence).
+        bool qualityOk = !bestHasNames || bestNamed > bestBad;
 
         // Track the strongest pass (strictly-better, so ties keep the earlier/classic pass).
         if (bestNamed > gNamed || (bestNamed == gNamed && bestCount > gCount)) {
@@ -923,7 +934,7 @@ static void DetectItemSize() {
             gHasNames = bestHasNames; gObjOff = s_itemObjOffset; gFlat = s_isFlat;
         }
 
-        if (bestTotal >= threshold) {
+        if (bestTotal >= threshold && qualityOk) {
             s_itemSize = bestStride;   // s_itemObjOffset / s_isFlat already reflect this pass
             s_layoutMode = (s_itemObjOffset != 0) ? Lineal::ItemLayoutMode::Unpacked57
                                                   : Lineal::ItemLayoutMode::Classic;
@@ -941,8 +952,8 @@ static void DetectItemSize() {
         }
 
         if (pass == 0) {
-            LOG_INFO("ObjectArray: classic (+0x00) item detection weak (named=%d, count=%d) — retrying with UE5.7+ object-ptr offset +0x08",
-                     bestNamed, bestCount);
+            LOG_INFO("ObjectArray: classic (+0x00) item detection weak (named=%d, count=%d, bad=%d) — retrying with UE5.7+ object-ptr offset +0x08",
+                     bestNamed, bestCount, bestBad);
         }
     }
 
