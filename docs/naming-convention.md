@@ -27,23 +27,23 @@ narrative identity resonates with what the module *does*.
 |---|---|---|---|---|---|
 | **Frieren.cpp** | 芙莉蓮 | Protagonist | #4 (1v1: #1) | ExportAPI: ~30 C ABI exports for CE Lua | Everyone meets her first — the sole gateway to the DLL |
 | **Genau.cpp** | 葛納烏 | First-class mage examiner | **#1** | OffsetFinder: AOB signatures, GObjects/GNames/GWorld | The examiner who *screens* candidates — scans & validates every pattern |
-| **Macht.cpp** | 黃金鄉的馬哈特 | Seven Sages, transmutation | #5 | Memory: AOBScan, SEH reads, RIP resolution, AVX2 SIMD | Raw elemental power — direct memory manipulation |
-| **Aura.cpp** | 斷頭台的奧拉 | Obedience Scale demon | #3 | ObjectArray: FUObjectArray slot enumeration | Weighs every soul on her scale — validates each object slot |
+| **Macht.cpp** | 黃金鄉馬哈特 | Seven Sages, transmutation | #5 | Memory: AOBScan, SEH reads, RIP resolution, AVX2 SIMD | Raw elemental power — direct memory manipulation |
+| **Aura.cpp** | 斷頭台的阿烏拉 | Obedience Scale demon | #3 | ObjectArray: FUObjectArray slot enumeration | Weighs every soul on her scale — validates each object slot |
 | **Serie.cpp** | 賽莉耶 | Living-history great mage | #6 | FNamePool: FName string resolution (UE5 pool + UE4 TNameEntry) | Remembers every mage's name across millennia — the name oracle |
 | **Ubel.cpp** | 尤蓓爾 | Surgical-precision assassin | #15 | UStructWalker: FField chain traversal, property reading | "If she can visualize it, she can cut it" — surgical struct dissection |
 | **Fern.cpp** | 費倫 | Frieren's apprentice | #8 | PipeServer: Named Pipe JSON IPC (~30 commands) | The communicator, messenger — bridges worlds |
-| **Sein.cpp** | 賽恩 | Priest, journey chronicler | #24 | Logger: 5-category per-process file logging with rotation | The quiet observer who records everything |
+| **Sein.cpp** | 贊恩 | Priest, journey chronicler | #24 | Logger: 5-category per-process file logging with rotation | The quiet observer who records everything |
 | **Himmel.cpp** | 欣梅爾 | Hero, remembered forever | #2 | Signatures: 128+ AOB pattern database | The hero's *legacy* — immutable knowledge left for those who follow |
 | **Flamme.cpp** | 弗蘭梅 | Ancient master, knowledge keeper | — | HintCache: per-game AOB result caching | Ancient wisdom passed down — accelerates future scans |
 | **Grimoire.h** | 魔導書 | Grimoire | — | Constants, magic strings, DynOff namespace | Book of spells — the configuration tome |
 | **Renge.cpp** | 蓮格 | Liaison character | #22 | PipeProtocol: IPC command/event definitions | Communication protocol — the rules of engagement |
 | **Stark.cpp** | 修塔爾克 | Brave warrior, frontline | #7 | GameThreadDispatch: MinHook ProcessEvent hook | Charges into the front line — executes on the game thread |
 | **Mimic.cpp** | 寶箱怪 | Chest mimic (classic gag) | #21 | Mailbox: CE Lua shared-memory interface | Disguised as an innocent exported struct — actually a secret channel |
-| **Methode.cpp** | 梅特黛 | All-capable analyst mage | #16 | CEPlugin: CE Plugin Type 5 interface | Analytical entry point — examines everything |
+| **Methode.cpp** | 梅特戴 | All-capable analyst mage | #16 | CEPlugin: CE Plugin Type 5 interface | Analytical entry point — examines everything |
 | **Heiter.cpp** | 海塔 | Priest who started the journey | — | dllmain: DLL entry point, auto-start logic | The one who set the journey in motion — DLL_PROCESS_ATTACH |
-| **Lugner.cpp** | 呂格納 | Demon master of disguise | #12 | ProxyVersion: version.dll forwarding proxy | The deceiver — pretends to be the real version.dll |
+| **Lugner.cpp** | 琉古納 | Demon master of disguise | #12 | ProxyVersion: version.dll forwarding proxy | The deceiver — pretends to be the real version.dll |
 | **Scharf.h** | 夏爾夫 | Sharp-eyed, scrutinizing examinee | #17 | WalkerAlignment: FProperty offset-vs-alignment validator | Sharp eye for layout flaws — catches misaligned EnumProperty / FName that hint at a wrong FPROPERTY_OFFSET probe |
-| **Wirbel.cpp** | 維爾貝爾 | Northern squad leader, pragmatic soldier | #20 | Teleport: marker save/recall + cursor teleport (BugIt-style) | Swift battlefield repositioning — the soldier who relocates first |
+| **Wirbel.cpp** | 威亞貝爾 | Northern squad leader, pragmatic soldier | #20 | Teleport: marker save/recall + cursor teleport (BugIt-style) | Swift battlefield repositioning — the soldier who relocates first |
 | **Tot.h** | 托托 | "Saint of the End", Greater Demon | — | Cancellation: cooperative cancel flag for long-running ops | The End — signals every long loop to stop (was `Cancel`) |
 | **Lineal.h** | 莉涅爾 | First-class mage, 15-yr undercover spy | — | PackedItem: UE5.7+ packed FUObjectItem reconstruction | The straightedge — realigns the non-standard packed layout (was `PackedItem`) |
 | **Radar.cpp** | 拉達爾 | Shadow Warrior, plateau village chief | — | ValueScan: CE-style by-value First/Next Scan | The sweep — scans every object for a matching value (was `ValueScan`) |
@@ -127,7 +127,7 @@ namespace Genau {
 ```
 
 ```cpp
-// Macht — 黃金鄉的馬哈特 (七大魔王 — Seven Sages, Transmutation)
+// Macht — 黃金鄉馬哈特 (萬物成金魔法 — Seven Sages, Transmutation)
 // Memory: AOB scanning, SEH-protected reads/writes, RIP-relative resolution
 namespace Macht {
     // ...
@@ -170,7 +170,7 @@ Total votes: **12,700,122** | Voting period: 2026-03-08 ~ 2026-03-29
 |---|-----------|-------|---------|
 | 1 | Genau (葛納烏) | 1,396,535 | **OffsetFinder** |
 | 2 | Himmel (欣梅爾) | 1,327,500 | **Signatures** |
-| 3 | Aura (奧拉) | 1,020,761 | **ObjectArray** |
+| 3 | Aura (阿烏拉) | 1,020,761 | **ObjectArray** |
 | 4 | Frieren (芙莉蓮) | 836,891 | **ExportAPI** |
 | 5 | Macht (馬哈特) | 811,841 | **Memory** |
 | 6 | Serie (賽莉耶) | 707,902 | **FNamePool** |
@@ -179,20 +179,20 @@ Total votes: **12,700,122** | Voting period: 2026-03-08 ~ 2026-03-29
 | 9 | Demon Attacking Rufen Region | 365,049 | — |
 | 10 | Bought Skeleton (骨頭) | 339,302 | — |
 | 11 | Solitär (索莉塔) | — | — |
-| 12 | Lügner (呂格納) | — | **ProxyVersion** |
+| 12 | Lügner (琉古納) | — | **ProxyVersion** |
 | 13 | Sense (乘斯) | — | — |
 | 14 | Linie (莉涅) | — | — |
 | 15 | Übel (尤蓓爾) | — | **UStructWalker** |
-| 16 | Methode (梅特黛) | — | **CEPlugin** |
+| 16 | Methode (梅特戴) | — | **CEPlugin** |
 | 17 | Scharf (夏爾夫) | — | — |
 | 18 | Glück (格呂克) | — | — |
 | 19 | Stoltz (修托爾茲) | — | — |
-| 20 | Wirbel (維爾貝爾) | — | — |
+| 20 | Wirbel (威亞貝爾) | — | — |
 | 21 | Mimic (寶箱怪) | — | **Mailbox** |
 | 22 | Renge (蓮格) | — | **PipeProtocol** |
 | 23 | Hero of the South | — | — |
-| 24 | Sein (賽恩) | — | **Logger** |
-| 25 | Denken (頓肯) | — | **NativeDisasm** |
+| 24 | Sein (贊恩) | — | **Logger** |
+| 25 | Denken (鄧肯) | — | **NativeDisasm** |
 | 26 | Kanne (卡妮) | — | — |
 | 27 | Land (蘭特) | — | — |
 | 28 | Richter (里希特) | — | — |
