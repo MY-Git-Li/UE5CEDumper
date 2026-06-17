@@ -14,6 +14,50 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-17 — UE5.6+ enum support: FNameData UEnum::Names container + FEnumProperty::Enum offset (build 1268; FNameData live-confirmed on TQ2)
+
+Two enum-layout fixes, both UE5.6+/5.7 changes, surfaced via TQ2 (forked UE5.7) and
+the Solarpunk investigation.
+
+**1. UEnum::Names container changed in UE5.6+ (new `Neu` module, 諾伊).** UE5.6 replaced
+the interleaved `TArray<TPair<FName,int64>>` at `UEnum::Names` (offset unchanged, 0x40)
+with `FNameData` = `{ UPTRINT TaggedNames@+0 (FName*, &~1), UPTRINT TaggedValues@+8
+(int64*, &~1), int32 NumValues@+0x10 }` — a struct-of-arrays with tagged pointers
+(verified vs UE5.7.4 `Class.h:3390`). The old single-format reader mis-read TaggedValues
+(a pointer) as the legacy array count → detection failed → enum names showed as raw ints
+(stock-UE5.7 Solarpunk: detection failed entirely). New dependency-free `dll/src/Neu.h`:
+pure `BuildLayout`(known format) / `DetectLayout`(try-both) / `ReadEntry` over an injected
+read functor — handles tag-bit masking + FName stride (8 / 0x10 CPN), unit-testable with
+synthetic buffers (no live process / FNamePool; string resolution stays in Serie).
+`Genau::DetectUEnumNames` now tries BOTH formats at each probed offset and validates via
+the member-FName substring check (records `DynOff::bEnumNamesNewContainer`);
+`Ubel::ResolveEnumValue` reads via `Neu::BuildLayout` for the detected per-game format.
+`s_enumCache` / `GetEnumEntries` / pipe `enum_entries` / every C# consumer (Live Walker
+display, CE XML/Field DropDownList, CSX, drilldown) are unchanged — the wire shape is
+identical, so the fix flows straight through. +8 `Neu` unit tests (synthetic legacy +
+FNameData × normal/CPN, sparse values, tag masking, format disambiguation, edge/bad-ptr).
+**LIVE-CONFIRMED on TQ2 (UE5.7):** log shows `UEnum::Names detected at UEnum+0x40 (UE5.6+
+FNameData ...)`; `Role`→ROLE_Authority, `RemoteRole`→ROLE_SimulatedProxy,
+`NetDormancy`→DORM_Awake resolve, and CE export emits the `0:ROLE_None … 4:ROLE_MAX`
+DropDownList (not a Description dump). TQ2 also detects the +0x08 FUObjectItem (200/0) — the
+build-1257 quality gate fixed its object resolution too; TQ2 was misdetected as +0x00 before.
+
+**2. `FEnumProperty::Enum` is `FByteProperty::Enum + 8`.** Long-standing latent bug: the
+offset detection set `FENUMPROP_ENUM == FBYTEPROP_ENUM == FStructProperty::Struct` at all
+four sites (Grimoire default + Genau Phase-B + Genau main path + Ubel CorrectSubclassOffsets).
+But `FEnumProperty` has `FNumericProperty* UnderlyingProp` BEFORE its `UEnum* Enum`
+(UE5.7.4 `EnumProperty.h:143-144`), whereas `FByteProperty::Enum` is the first subclass
+field. So EnumProperty read `UnderlyingProp` as the UEnum* → resolution always failed → raw
+ints (masked until fix #1 made ByteProperty enums resolve, exposing the contrast on TQ2:
+`Role`/`RemoteRole` named but `UpdateOverlapsMethod`/`SpawnCollisionHandling` raw). Fixed to
+`FENUMPROP_ENUM = FBYTEPROP_ENUM + 8` everywhere. Produces the RE-UE4SS-template stock values
+(Byte 0x70 / Enum 0x78) and TQ2's shifted 0x74 / 0x7C. ByteProperty path untouched (already
+correct) → pure improvement, no regression. ⚠ Needs a TQ2 in-game re-test to confirm
+(offset arithmetic isn't unit-testable; the UE-source invariant + template-matching values
+are the static assurance).
+
+605 dll_helpers + 1569 C# tests green; full build clean (build 1268).
+
 ## 2026-06-17 — Aura: bad-dominated classic item pass falls through to +0x08 — stock-UE5.7 (Solarpunk) live-confirmed (build 1257, verified on 1259)
 
 `Aura::DetectItemSize` runs two object-ptr-offset passes — classic `+0x00`

@@ -300,7 +300,7 @@ German meanings are given because most names map cleanly to a module function.
 |---|---|---|---|---|
 | Phrase | Phrase | Special Forces captain | ⬜ | Parsing / syntax / expression eval |
 | Kanone | Kanone | Special Forces ("cannon") | ⬜ | Bulk / heavy blast scan |
-| Neu | Neu | Discovers undercover ("new") | ⬜ | Discovery / detection / diff |
+| Neu | Neu | Discovers undercover ("new") | 🟢 EnumNames | UEnum::Names parse — legacy `TArray<TPair<FName,int64>>` vs the UE5.6+ FNameData struct-of-arrays disguised at the same offset (`Neu.h`, build 1266) |
 | Grau | Grau | Straight-laced trooper ("gray") | ⬜ | Neutral baseline |
 | Lager | Lager | Carefree trooper ("storage/depot") | ⬜ | Cache / buffer pool / storage |
 | Löwe (Held) | Lowe | Governor / anti-magic ("lion") | ⬜ | Aggressive / dominant heuristic |
