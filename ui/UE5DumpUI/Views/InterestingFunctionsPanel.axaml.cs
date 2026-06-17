@@ -1,6 +1,9 @@
+using System.Collections;
+using System.Collections.Generic;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 using UE5DumpUI.ViewModels;
 
@@ -8,9 +11,20 @@ namespace UE5DumpUI.Views;
 
 public partial class InterestingFunctionsPanel : UserControl
 {
+    // AOT-safe sort comparers for the two template data columns (Score /
+    // Cat) — they have no column-level Binding so their reflection sort is
+    // trimmed under AOT (aot-pitfalls.md §4.5). Text columns sort out-of-box.
+    private static readonly IReadOnlyDictionary<string, IComparer> ResultsSortComparers =
+        new Dictionary<string, IComparer>
+        {
+            ["FinalScore"]    = DataGridSortComparers.Number<ScoredFunctionRow>(r => r.FinalScore),
+            ["CategoryLabel"] = DataGridSortComparers.Ordinal<ScoredFunctionRow>(r => r.CategoryLabel),
+        };
+
     public InterestingFunctionsPanel()
     {
         InitializeComponent();
+        this.FindControl<DataGrid>("ResultsGrid")?.WireSortComparers(ResultsSortComparers);
     }
 
     private void InitializeComponent()

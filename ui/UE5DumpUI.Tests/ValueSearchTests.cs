@@ -1264,6 +1264,79 @@ public class ValueSearchTests
         Assert.Null(val2);
     }
 
+    // --- "inst" button: open the hit's owning class in the Instance Finder ---
+
+    [Fact]
+    public void OpenInInstanceFinder_RaisesNavigate_WithClassName()
+    {
+        var (vm, _) = MakeVm();
+        string? got = null;
+        vm.NavigateToInstanceFinder += c => got = c;
+
+        vm.OpenInInstanceFinderCommand.Execute(
+            new ValueCandidate { ClassName = "BP_Player_C", FieldName = "Health" });
+
+        Assert.Equal("BP_Player_C", got);
+    }
+
+    [Fact]
+    public void OpenInInstanceFinder_EmptyClass_DoesNothing()
+    {
+        var (vm, _) = MakeVm();
+        bool fired = false;
+        vm.NavigateToInstanceFinder += _ => fired = true;
+
+        vm.OpenInInstanceFinderCommand.Execute(new ValueCandidate { ClassName = "" });
+
+        Assert.False(fired);
+    }
+
+    // --- Column-header click → server-side sort (the grid is windowed, so a
+    //     header click drives the DLL sort, not a client-side page sort) ---
+
+    [Fact]
+    public async Task ApplyColumnSort_DrivesServerSideSort_AndTogglesDirection()
+    {
+        var (vm, fake) = MakeVm();
+        fake.NextBeginResult  = new ValueScanBeginResult  { SessionId = 1UL, Total = 5 };
+        fake.NextWindowResult = new ValueScanWindowResult { SessionId = 1UL, Total = 5, FilteredTotal = 5 };
+        vm.SelectedDataType = ValueScanDataType.Int32;
+        vm.SelectedScanType = ValueScanType.Exact;
+        vm.Value = "1";
+        await vm.FirstScanCommand.ExecuteAsync(null);
+        fake.Queries.Clear();
+
+        // Click "Value" header → sort by value, ascending, over the full set.
+        vm.ApplyColumnSort("value");
+        Assert.Equal("value", vm.SelectedSortOption?.Key);
+        Assert.False(vm.SortDescending);
+        Assert.Contains(fake.Queries, q => q.Item5 == "value" && q.Item6 == false);
+
+        // Click the same header again → flip to descending (same key).
+        fake.Queries.Clear();
+        vm.ApplyColumnSort("value");
+        Assert.Equal("value", vm.SelectedSortOption?.Key);
+        Assert.True(vm.SortDescending);
+        Assert.Contains(fake.Queries, q => q.Item5 == "value" && q.Item6 == true);
+
+        // Click a different header → new key, back to ascending, single query.
+        fake.Queries.Clear();
+        vm.ApplyColumnSort("offset");
+        Assert.Equal("offset", vm.SelectedSortOption?.Key);
+        Assert.False(vm.SortDescending);
+        Assert.Single(fake.Queries);
+        Assert.Contains(fake.Queries, q => q.Item5 == "offset" && q.Item6 == false);
+    }
+
+    [Fact]
+    public void ApplyColumnSort_UnknownKey_IsIgnored()
+    {
+        var (vm, _) = MakeVm();
+        var before = vm.SelectedSortOption;
+        vm.ApplyColumnSort("not-a-real-key");
+        Assert.Same(before, vm.SelectedSortOption);
+    }
+
     // --- V3-C: server-side window / filter / sort / paging ---
 
     [Fact]

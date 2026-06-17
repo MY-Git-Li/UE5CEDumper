@@ -1,9 +1,12 @@
+using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 using UE5DumpUI.ViewModels;
 
@@ -12,6 +15,16 @@ namespace UE5DumpUI.Views;
 public partial class LiveWalkerPanel : UserControl
 {
     private static readonly IBrush HighlightBrush = new SolidColorBrush(Color.FromArgb(60, 255, 200, 0));
+
+    // AOT-safe sort comparer for the FieldGrid's only template data column
+    // ("Value"). Text columns sort out-of-box via their Binding path; the
+    // Value column has no column-level binding, so its reflection sort is
+    // trimmed under AOT — wire an explicit comparer (aot-pitfalls.md §4.5).
+    private static readonly IReadOnlyDictionary<string, IComparer> FieldsSortComparers =
+        new Dictionary<string, IComparer>
+        {
+            ["DisplayValue"] = DataGridSortComparers.Ordinal<LiveFieldValue>(r => r.DisplayValue),
+        };
 
     // Audit fix #18: track the currently-subscribed VM so we can `-=` from
     // it before re-subscribing to a new one. Without this, every
@@ -23,6 +36,7 @@ public partial class LiveWalkerPanel : UserControl
     public LiveWalkerPanel()
     {
         InitializeComponent();
+        this.FindControl<DataGrid>("FieldGrid")?.WireSortComparers(FieldsSortComparers);
         DataContextChanged += OnDataContextChanged;
         DetachedFromVisualTree += OnDetached;
     }
@@ -35,6 +49,7 @@ public partial class LiveWalkerPanel : UserControl
             _subscribedVm.ScrollToFieldRequested -= OnScrollToFieldRequested;
             _subscribedVm.ScrollToFirstSearchMatch -= OnScrollToFirstSearchMatch;
             _subscribedVm.ScrollToFunctionRequested -= OnScrollToFunctionRequested;
+            _subscribedVm.ScrollFieldIntoView -= OnScrollFieldIntoView;
             _subscribedVm = null;
         }
 
@@ -43,6 +58,7 @@ public partial class LiveWalkerPanel : UserControl
             vm.ScrollToFieldRequested += OnScrollToFieldRequested;
             vm.ScrollToFirstSearchMatch += OnScrollToFirstSearchMatch;
             vm.ScrollToFunctionRequested += OnScrollToFunctionRequested;
+            vm.ScrollFieldIntoView += OnScrollFieldIntoView;
             _subscribedVm = vm;
         }
     }
@@ -55,6 +71,7 @@ public partial class LiveWalkerPanel : UserControl
             _subscribedVm.ScrollToFieldRequested -= OnScrollToFieldRequested;
             _subscribedVm.ScrollToFirstSearchMatch -= OnScrollToFirstSearchMatch;
             _subscribedVm.ScrollToFunctionRequested -= OnScrollToFunctionRequested;
+            _subscribedVm.ScrollFieldIntoView -= OnScrollFieldIntoView;
             _subscribedVm = null;
         }
     }
@@ -88,6 +105,18 @@ public partial class LiveWalkerPanel : UserControl
                 .FirstOrDefault(f => f.IsSearchMatch);
             if (target != null)
                 grid.ScrollIntoView(target, null);
+        }, DispatcherPriority.Background);
+    }
+
+    // Match-navigation (prev/next): the VM already set SelectedField to this
+    // exact row, so scroll it into view. Using the object (not the name)
+    // keeps us on the right row when field names repeat.
+    private void OnScrollFieldIntoView(LiveFieldValue field)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var grid = this.FindControl<DataGrid>("FieldGrid");
+            grid?.ScrollIntoView(field, null);
         }, DispatcherPriority.Background);
     }
 

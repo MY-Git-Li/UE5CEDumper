@@ -1,6 +1,9 @@
+using System.Collections;
+using System.Collections.Generic;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 using UE5DumpUI.ViewModels;
 
@@ -8,9 +11,24 @@ namespace UE5DumpUI.Views;
 
 public partial class InterestingPropertiesPanel : UserControl
 {
+    // AOT-safe sort comparers for the columns whose sort property isn't
+    // rooted by a column-level Binding: the three template columns (Score /
+    // Cat / Location) and the Offset text column (sorts by PropOffset while
+    // it displays OffsetHex). Without these the header click is a silent
+    // no-op under AOT (aot-pitfalls.md §4.5).
+    private static readonly IReadOnlyDictionary<string, IComparer> ResultsSortComparers =
+        new Dictionary<string, IComparer>
+        {
+            ["FinalScore"]    = DataGridSortComparers.Number<ScoredPropertyRow>(r => r.FinalScore),
+            ["CategoryLabel"] = DataGridSortComparers.Ordinal<ScoredPropertyRow>(r => r.CategoryLabel),
+            ["UnusualBadge"]  = DataGridSortComparers.Ordinal<ScoredPropertyRow>(r => r.UnusualBadge),
+            ["PropOffset"]    = DataGridSortComparers.Number<ScoredPropertyRow>(r => r.PropOffset),
+        };
+
     public InterestingPropertiesPanel()
     {
         InitializeComponent();
+        this.FindControl<DataGrid>("ResultsGrid")?.WireSortComparers(ResultsSortComparers);
     }
 
     private void InitializeComponent()

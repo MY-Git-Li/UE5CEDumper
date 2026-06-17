@@ -100,7 +100,7 @@
               FontSize="12"
               FontFamily="Consolas, Menlo, monospace">
       <DataGrid.Columns>
-        <DataGridTemplateColumn Header="Score" Width="60" SortMemberPath="FinalScore">
+        <DataGridTemplateColumn Header="Score" Width="60" SortMemberPath="FinalScore" CanUserSort="True">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:ScoredFunctionRow">
               <TextBlock Text="{Binding FinalScore}"
@@ -112,7 +112,7 @@
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
-        <DataGridTemplateColumn Header="Cat" Width="80" SortMemberPath="CategoryLabel">
+        <DataGridTemplateColumn Header="Cat" Width="80" SortMemberPath="CategoryLabel" CanUserSort="True">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:ScoredFunctionRow">
               <TextBlock Text="{Binding CategoryLabel}"

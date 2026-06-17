@@ -223,6 +223,11 @@ public partial class ValueSearchViewModel : ViewModelBase
     private string _sortKey = "";
     private bool   _sortDesc;
 
+    // Set while a single ApplyColumnSort updates BOTH the sort key and the
+    // direction, so the two property-change handlers don't each kick off a
+    // (superseded) server query — ApplyColumnSort issues exactly one reload.
+    private bool _suppressSortReload;
+
     // Rows fetched per window (begin/refine first page + Load More + reloads).
     private const int PageSize = 1000;
 
@@ -344,7 +349,35 @@ public partial class ValueSearchViewModel : ViewModelBase
     {
         _sortKey  = SelectedSortOption?.Key ?? "";
         _sortDesc = SortDescending;
+        if (_suppressSortReload) return;
         if (HasSession) _ = LoadWindowAsync(reset: true);
+    }
+
+    /// <summary>Drive the server-side sort from a DataGrid column-header click.
+    /// The grid is windowed (V3-C) so client-side column sorting would only
+    /// reorder the loaded page — instead a header click maps to one of the
+    /// <see cref="SortOptions"/> keys and re-sorts the WHOLE session set in the
+    /// DLL (keeping the Sort picker + Desc toggle in sync). Clicking the active
+    /// column toggles direction; clicking a new column starts ascending.</summary>
+    public void ApplyColumnSort(string sortKey)
+    {
+        var opt = SortOptions.FirstOrDefault(o => o.Key == sortKey);
+        if (opt == null) return;
+
+        if (SelectedSortOption?.Key == sortKey)
+        {
+            SortDescending = !SortDescending;          // toggle direction (single reload)
+            return;
+        }
+
+        // New column → switch the sort key and reset to ascending. Suppress
+        // the per-property reload so the two changes coalesce into ONE server
+        // query (otherwise the first would only be superseded/cancelled).
+        _suppressSortReload = true;
+        SortDescending = false;
+        SelectedSortOption = opt;
+        _suppressSortReload = false;
+        ApplyUiSort();
     }
 
     [RelayCommand]
@@ -466,6 +499,12 @@ public partial class ValueSearchViewModel : ViewModelBase
     // element suffix for container hits.
     public event Action<string, int, string>? NavigateToInstance;
     public event Action<string>? RequestCopyText;
+
+    /// <summary>Raised to open the chosen candidate's owning class in the
+    /// Instance Finder tab — pre-fills the class name and auto-runs the
+    /// search (mirrors the Property Search / Game Class "finder" handoff).
+    /// Payload = class name.</summary>
+    public event Action<string>? NavigateToInstanceFinder;
 
     /// <summary>Raised to pivot the chosen candidate's (className, fieldName) in the
     /// experimental Class Pivot tab — the value-locator → pivot handoff (mirrors the
@@ -655,6 +694,16 @@ public partial class ValueSearchViewModel : ViewModelBase
         if (candidate == null) return;
         if (string.IsNullOrEmpty(candidate.InstanceAddr)) return;
         NavigateToInstance?.Invoke(candidate.InstanceAddr, candidate.FieldOffset, candidate.FieldName);
+    }
+
+    /// <summary>Open this hit's owning class in the Instance Finder tab,
+    /// pre-filling the class name and running the search.</summary>
+    [RelayCommand]
+    private void OpenInInstanceFinder(ValueCandidate? candidate)
+    {
+        candidate ??= SelectedCandidate;
+        if (candidate == null || string.IsNullOrEmpty(candidate.ClassName)) return;
+        NavigateToInstanceFinder?.Invoke(candidate.ClassName);
     }
 
     [RelayCommand]

@@ -217,10 +217,10 @@
               FontSize="12"
               FontFamily="Consolas, Menlo, monospace">
       <DataGrid.Columns>
-        <DataGridTextColumn Header="Class" Binding="{Binding ClassName}" Width="240"/>
-        <DataGridTextColumn Header="Command" Binding="{Binding FuncName}" Width="200"/>
-        <DataGridTextColumn Header="Flags" Binding="{Binding ShortFlags}" Width="140"/>
-        <DataGridTextColumn Header="Params" Binding="{Binding ParamsLabel}" Width="80"/>
+        <DataGridTextColumn Header="Class" Binding="{Binding ClassName}" SortMemberPath="ClassName" Width="240"/>
+        <DataGridTextColumn Header="Command" Binding="{Binding FuncName}" SortMemberPath="FuncName" Width="200"/>
+        <DataGridTextColumn Header="Flags" Binding="{Binding ShortFlags}" SortMemberPath="ShortFlags" Width="140"/>
+        <DataGridTextColumn Header="Params" Binding="{Binding ParamsLabel}" SortMemberPath="ParamsLabel" Width="80"/>
         <DataGridTemplateColumn Header="" Width="Auto">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:AllFunctionEntry">
