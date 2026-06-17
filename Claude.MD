@@ -172,6 +172,8 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 | [docs/test-games.md](docs/test-games.md) | 20 test games with UE versions, GWorld status, stride info |
 | [docs/naming-convention.md](docs/naming-convention.md) | Frieren-themed C++ file / namespace mapping (Macht/Genau/Aura/Serie/Ubel/Frieren/Fern/...) |
 | [docs/aobmaker-integration.md](docs/aobmaker-integration.md) | AOBMaker CE Plugin pipe bridge (HEX / ASM / SYM / CreateAAScript) |
+| [docs/reversing-nonstandard-ue-games.md](docs/reversing-nonstandard-ue-games.md) | **Playbook** for games where AOB + heuristics fail (forked/repacked engines): patternsleuth CLI → capstone .data-cluster → Ghidra headless decompile → caller `LEA` → encode the fix. The Avowed (Obsidian, packed 20-byte FUObjectItem) case. |
+| [tools/README.md](tools/README.md) | Offline RE helpers — Ghidra scripts (`find_gobjects`/`decompile_functions`/`find_callers` Java + the pyghidra symbol/AOB exporters) and a capstone PE disassembler (`pe/disasm_function.py`). |
 | [scripts/analysis/README.md](scripts/analysis/README.md) | Offline analysis tooling — `analyze_dumps.py` (cross-game keyword calibration) + `diff_dumps.py` (same-game patch diff, build 780). |
 | [docs/simd-scanning-notes.md](docs/simd-scanning-notes.md) | AOBMaker SIMD scanning research: AVX2 anchor technique (reference) |
 | [docs/CE-Bugs-Minesweeper.md](docs/CE-Bugs-Minesweeper.md) | CE-specific quirks and undocumented API behaviors |
