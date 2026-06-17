@@ -997,6 +997,30 @@ void Init(uintptr_t gobjectsAddr) {
              static_cast<unsigned long long>(gobjectsAddr), GetCount(), s_itemSize);
 }
 
+void InitWithExtendedLayout(uintptr_t gobjectsAddr, int forcedItemSize) {
+    s_arrayAddr = gobjectsAddr;
+    // UE5 chunked-extended: { Objects@+0x10, MaxElements@+0x20, NumElements@+0x24,
+    // MaxChunks@+0x28, NumChunks@+0x2C }. Forced (no DetectLayout) — the caller has
+    // already confirmed this layout by content (first objects resolve to clean names),
+    // so we must not let relaxed auto-detection read NumElements at a wrong offset.
+    s_layout = { 0x10, 0x20, 0x24, 0x28, 0x2C };
+    s_isFlat = false;
+    if (forcedItemSize > 0) {
+        // Classic direct item: object pointer at +0x00. Obsidian's UE5.3 packs
+        // FUObjectItem to 20 bytes (0x14) — auto-detection can mis-pick 24, so the
+        // caller (which already verified this stride by content) forces it.
+        s_itemSize = forcedItemSize;
+        s_itemObjOffset = 0;
+        s_layoutMode = PackedItem::ItemLayoutMode::Classic;
+        LOG_INFO("ObjectArray: Initialized (forced UE5-Extended, stride=%d) at 0x%llX, Count=%d",
+                 forcedItemSize, static_cast<unsigned long long>(gobjectsAddr), GetCount());
+    } else {
+        DetectItemSize();
+        LOG_INFO("ObjectArray: Initialized (forced UE5-Extended) at 0x%llX, Count=%d, ItemSize=%d",
+                 static_cast<unsigned long long>(gobjectsAddr), GetCount(), s_itemSize);
+    }
+}
+
 int32_t GetCount() {
     if (!s_arrayAddr) return 0;
     int32_t count = 0;

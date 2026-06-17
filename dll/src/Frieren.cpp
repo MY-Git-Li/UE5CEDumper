@@ -10,6 +10,7 @@
 #include "Grimoire.h"
 #include "Macht.h"
 #include "Genau.h"
+#include "Flamme.h"
 #include "Aura.h"
 #include "Serie.h"
 #include "Ubel.h"
@@ -184,51 +185,100 @@ bool UE5_Init() {
         // real FUObjectArray lives on the heap and is only reachable via the
         // data-section scan, which the AOB winner pre-empts). When the chosen
         // GObjects produced no objects, re-resolve from the data-scan candidate
-        // set and accept the first one that yields a non-empty, name-resolving
-        // array. STRICTLY ADDITIVE: runs only when Count==0, so titles that
-        // already resolve objects are never affected. See docs/avowed-gobjects-fix.md.
+        // set. The data scan surfaces MULTIPLE validatable candidates — several
+        // small real-ish object lists plus the one true master array — so we must
+        // not accept the first that resolves a name (that picks a small partial
+        // list, e.g. Count~1.4K). Instead score every candidate by a spread name-
+        // resolution sample and pick the qualifying one with the LARGEST object
+        // count: the master GObjects (~millions) dwarfs partial lists (~thousands).
+        // STRICTLY ADDITIVE: runs only when Count==0, so titles that already
+        // resolve objects are never affected. See docs/avowed-gobjects-fix.md.
         if (Aura::GetCount() == 0) {
             LOG_WARN("UE5_Init: GObjects=0x%llX produced 0 objects — likely a decoy match; "
-                     "attempting data-scan recovery...",
+                     "attempting recovery...",
                      static_cast<unsigned long long>(ptrs.GObjects));
+
+            // Primary recovery: a STATIC FUObjectArray in the module's .data/BSS that
+            // no AOB matches (Avowed / Obsidian UE5.3 — even patternsleuth fails). The
+            // base is content-validated (first objects resolve to clean names), so the
+            // layout is known — force UE5-Extended so Aura reads NumElements at +0x24.
+            int staticStride = 0;
+            uintptr_t staticBase = Genau::FindGObjectsStaticStruct(&staticStride);
+            if (staticBase) {
+                Aura::InitWithExtendedLayout(staticBase, staticStride);
+                if (Aura::GetCount() > 0) {
+                    LOG_INFO("UE5_Init: Recovery SUCCESS (static struct scan) — GObjects 0x%llX -> 0x%llX (Count=%d, stride=%d)",
+                             static_cast<unsigned long long>(ptrs.GObjects),
+                             static_cast<unsigned long long>(staticBase), Aura::GetCount(), staticStride);
+                    ptrs.GObjects = staticBase;
+                    g_cachedGObjects = staticBase;
+                    g_cachedGObjectsMethod = "static_struct_recovery";
+                    g_cachedGObjectsPatternId = nullptr;
+                    Flamme::UpdateGObjectsMethod(g_cachedPeHash, "static_struct_recovery");
+                }
+            }
+        }
+
+        // Fallback recovery: GObjects genuinely HEAP-allocated (the .data slot holds a
+        // pointer to it). Evaluate the data-scan candidates and pick the largest array
+        // whose first slots resolve to names — a small partial list must not win.
+        if (Aura::GetCount() == 0) {
             std::vector<uintptr_t> candidates;
             Genau::CollectGObjectsCandidates(candidates, ptrs.GObjects);
-            LOG_INFO("UE5_Init: Recovery — evaluating %zu candidate(s)", candidates.size());
+            LOG_INFO("UE5_Init: Recovery (heap fallback) — evaluating %zu candidate(s)", candidates.size());
 
-            bool recovered = false;
+            uintptr_t best = 0;
+            int bestCnt = 0, bestResolved = 0, bestScanned = 0;
             for (uintptr_t cand : candidates) {
                 Aura::Init(cand);
                 int cnt = Aura::GetCount();
                 if (cnt <= 0) continue;
-                // Confirm real objects: require at least one resolvable FName.
-                // This rejects count-only decoys the structural validator cannot
-                // distinguish (a wrong NumElements offset can read a plausible
-                // count over memory that is not an object array).
-                int resolved = 0;
-                for (int32_t i = 0; i < cnt && i < 64 && resolved < 2; ++i) {
+                // Scan the FIRST slots and count resolvable names. These hold the
+                // master array's permanent core objects (CoreUObject classes/packages)
+                // — densely named, so a real object array resolves several names here.
+                // DO NOT spread the sample across the whole array: the true master is
+                // huge and SPARSE (live named objects are a tiny fraction of capacity),
+                // so a spread sample resolves almost nothing and wrongly rejects it,
+                // leaving a small dense partial-list to win. Early-out once we have
+                // enough confirmations so the dense core is cheap to verify.
+                int limit = cnt < 65536 ? cnt : 65536;
+                int scanned = 0, resolved = 0;
+                for (int i = 0; i < limit && resolved < 8; ++i) {
                     uintptr_t obj = Aura::GetByIndex(i);
                     if (!obj) continue;
+                    ++scanned;
                     uint32_t nameIdx = 0;
                     if (Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_NAME, nameIdx)) {
                         std::string nm = Serie::GetString(nameIdx);
                         if (!nm.empty() && nm != "None") ++resolved;
                     }
                 }
-                if (resolved >= 1) {
-                    LOG_INFO("UE5_Init: Recovery SUCCESS — GObjects 0x%llX -> 0x%llX (Count=%d, names ok)",
-                             static_cast<unsigned long long>(ptrs.GObjects),
-                             static_cast<unsigned long long>(cand), cnt);
-                    ptrs.GObjects = cand;
-                    g_cachedGObjects = cand;
-                    g_cachedGObjectsMethod = "data_scan_recovery";
-                    recovered = true;
-                    break;
+                LOG_INFO("UE5_Init: Recovery — candidate 0x%llX Count=%d, names %d resolved (scanned %d of first %d)",
+                         static_cast<unsigned long long>(cand), cnt, resolved, scanned, limit);
+                if (resolved < 2) continue;                 // not a real object array
+                if (cnt > bestCnt) {                         // among real arrays, the master has the largest count
+                    best = cand; bestCnt = cnt; bestResolved = resolved; bestScanned = scanned;
                 }
-                LOG_INFO("UE5_Init: Recovery — candidate 0x%llX has Count=%d but no resolvable names, skipping",
-                         static_cast<unsigned long long>(cand), cnt);
             }
-            if (!recovered) {
-                LOG_WARN("UE5_Init: Recovery failed — no candidate produced a name-resolving array; "
+
+            if (best) {
+                LOG_INFO("UE5_Init: Recovery SUCCESS — GObjects 0x%llX -> 0x%llX "
+                         "(Count=%d, %d names resolved in first %d slots)",
+                         static_cast<unsigned long long>(ptrs.GObjects),
+                         static_cast<unsigned long long>(best), bestCnt, bestResolved, bestScanned);
+                Aura::Init(best);                           // re-init Aura on the chosen master array
+                ptrs.GObjects = best;
+                g_cachedGObjects = best;
+                g_cachedGObjectsMethod = "data_scan_recovery";
+                // FindAll already wrote the hint cache with the decoy's "aob" method +
+                // winning patternId (before this recovery ran), and the UI re-saves the
+                // record from these globals over the pipe. Correct both: rewrite the
+                // method and CLEAR the now-misleading patternId so neither the DLL hint
+                // cache nor the UI's re-save prioritises the decoy-only AOB pattern.
+                g_cachedGObjectsPatternId = nullptr;
+                Flamme::UpdateGObjectsMethod(g_cachedPeHash, "data_scan_recovery");
+            } else {
+                LOG_WARN("UE5_Init: Recovery failed — no candidate qualified as an object array; "
                          "restoring original GObjects");
                 Aura::Init(ptrs.GObjects);  // keep state consistent (Count stays 0)
             }
@@ -263,6 +313,41 @@ bool UE5_Init() {
     } else {
         LOG_WARN("UE5_Init: Partial init — GObjects=%s GNames=%s — skipping offset validation",
                  ptrs.GObjects ? "OK" : "MISSING", ptrs.GNames ? "OK" : "MISSING");
+    }
+
+    // --- GWorld recovery (Avowed / Obsidian UE5.3) ---
+    // GWorld's AOB can land on a decoy (like GObjects did). Validate that *GWorld is a
+    // UObject whose class is "World"; if not, recover by finding a live UWorld instance
+    // in GObjects and the static .data pointer to it. Needs a working GObjects + offsets,
+    // so it runs after the GObjects recovery + offset validation above. Gated on a real
+    // object array, so titles with a correct GWorld are unaffected.
+    if (ptrs.GObjects && ptrs.GNames && ptrs.GWorld && Aura::GetCount() > 0) {
+        bool gworldOk = false;
+        uintptr_t uworld = 0;
+        if (Macht::ReadSafe(ptrs.GWorld, uworld) && uworld) {
+            uintptr_t cls = 0;
+            if (Macht::ReadSafe(uworld + Grimoire::OFF_UOBJECT_CLASS, cls) && cls) {
+                uint32_t cn = 0;
+                if (Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, cn) &&
+                    Serie::GetString(cn) == "World") {
+                    gworldOk = true;
+                }
+            }
+        }
+        if (!gworldOk) {
+            LOG_WARN("UE5_Init: GWorld=0x%llX does not deref to a UWorld — recovering via GObjects instance scan...",
+                     static_cast<unsigned long long>(ptrs.GWorld));
+            uintptr_t rec = Genau::ExtraScanGWorld();
+            if (rec) {
+                ptrs.GWorld = rec;
+                g_cachedGWorld = rec;
+                g_cachedGWorldMethod = "instance_scan_recovery";
+                g_cachedGWorldPatternId = nullptr;   // the GWLD_* AOB found a decoy — drop its stale label
+                LOG_INFO("UE5_Init: GWorld recovered -> 0x%llX", static_cast<unsigned long long>(rec));
+            } else {
+                LOG_WARN("UE5_Init: GWorld recovery failed (no UWorld instance / static pointer found)");
+            }
+        }
     }
 
     s_initialized = true;
