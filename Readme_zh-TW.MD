@@ -1,13 +1,13 @@
 # UE5CEDumper
 <img src="./img/UE5CEDumper.jpg" alt="UE5CEDumper"/>  
 
-一套針對 Unreal Engine 4 & 5 遊戲的**執行期結構探查工具**、配和 Cheat Engine、可更方便的開發 Table。
+一套針對 Unreal Engine 4 & 5 遊戲的**執行期結構探查工具**、配合 Cheat Engine、可更方便的開發 Table。
 
 UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumper，它為遊戲記憶體提供了一個**即時視窗**，讓你能即時瀏覽物件、尋找實例，並匯出支援 Cheat Engine (CE) 的結構定義。
 
 > 本工具為「實戰型」的 Table 製作人員打造，旨在消除UE物件的偵測、識別到在 CE 中的實作之間的鴻溝。
 
-> 這並不定一般 Dumper 無法把大量資料倒出並分析，其集中在簡單找到 UE 結構，並和 CE 開發配合使用。故請視為是一個通用型的 UE 工具。
+> 這並不是一般 Dumper、無法把大量資料倒出並分析，其集中在簡單找到 UE 結構，並和 CE 開發配合使用。故請視為是一個通用型的 UE 工具。
 
 ---
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D4)](https://www.microsoft.com/windows)
@@ -22,6 +22,20 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 <img src="./img/MainUI.webp" alt="Main UI"/>  
 <img src="./img/Value_Search.webp" alt="Value Search"/>  
 
+## 重點亮點 (Highlights)
+
+快速了解你實際能用它做什麼（完整的 [Table 製作功能列表](#專為-table-製作人員設計的功能) 在下方）：
+
+- **即時記憶體檢查** — 瀏覽遊戲物件、找出某類別的每個實例，並以即時數值深入 struct / class 佈局。
+- **Value Search（數值搜尋）** — Cheat-Engine 風格的 First Scan / Next Scan，掃描每個 UE 屬性（數字、字串、向量、array / map / set），讓你不需知道 offset 就能找到要修改的目標。
+- **Teleport（傳送）** — 將位置存入 3 個 marker 槽並隨後召回（BugItGo 風格），或在俯視 / 2.5D 遊戲中**傳送到滑鼠游標位置**。可自設全域熱鍵。也會讀取即時**相機 POV**（位置 / 旋轉 / FOV），讓你看出遊戲相機是跟著 pawn 還是獨立運作。¹
+- **Debug Camera（除錯相機）** — 在內建此功能的遊戲中強制開 / 關自由飛行除錯相機（即使在通常會卡住的 Shipping build 也能可靠開關）。
+- **Console（主控台）** — 發現並一鍵呼叫許多遊戲保留的 `fly` / `god` / `ghost` / 遊戲特定 cheat 指令。
+- **一鍵 Cheat Engine 匯出** — 指標鏈 XML、Structure Dissect (CSX)、SDK headers、AA 腳本，以及多列 `.CT` 批次。
+- **注入免 Cheat Engine** — 把 `version.dll` **proxy DLL** 放到遊戲旁，啟動後連接即可。
+
+> ¹ Marker 存檔 / 召回廣泛可用（包含泰坦任務 2，已修正某些「回報成功卻不移動 actor」的引擎 setter 的 transform 重新整理問題）。少數被大量精簡的 Shipping build（例如泰坦任務 2）無法做*游標*傳送，因為它們移除了標準的游標 / viewport / line-trace API 並改用自訂虛擬游標 — 詳見 [docs/teleport-spec.md](docs/teleport-spec.md)。
+
 ## 實測版本矩陣 (Tested Version Matrix)
 
 | UE 版本 | GObjects | GNames | DynOff | 已驗證遊戲 |
@@ -29,9 +43,9 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 | **4.15 – 4.17** | ✅ | ✅ | ✅ | *Extinction* |
 | **4.18 – 4.20** | ✅ | ✅ | ✅ | *Final Fantasy VII Remake Intergrade, The Occupation* |
 | **4.21 – 4.24** | ✅ | ✅ | ✅ | *《STAR WARS 絕地：組織殞落™》, 勇者鬥惡龍 XI S, 偶像大師 星耀季節, 八方旅人, 勇者鬥惡龍 I&II / III HD-2D 重製版* |
-| **4.25 – 4.27** | ✅ | ✅ | ✅ | *Final Fantasy VII Rebirth, Tower of Mask, 霍格華茲的傳承, 復活邪神 2 七英雄的復仇, Ghostwire: Tokyo, TimeSplitters Rewind (Early Access V0.3.3), The Artisan of Glimmith, Barn Finders, 機動戰士 GUNDAM SEED 激鬥命運 復刻版* |
+| **4.25 – 4.27** | ✅ | ✅ | ✅ | *Final Fantasy VII Rebirth, Tower of Mask, 霍格華茲的傳承, 復活邪神 2 七英雄的復仇, Ghostwire: Tokyo, TimeSplitters Rewind (Early Access V0.3.3), The Artisan of Glimmith, Barn Finders, 機動戰士 GUNDAM SEED 激鬥命運 復刻版, 冒險家艾略特的千年奇譚 Demo (The Adventures of Elliot)* |
 | **5.0 – 5.2** | ✅ | ✅ | ✅ | *Squirrel With A Gun, Caravan Sandwitch, Meltopia, Retro Rewind Demo* |
-| **5.3 – 5.4** | ✅ | ✅ | ✅ | *Satisfactory (v1.1.3.1 滿意工廠), Colossal* |
+| **5.3 – 5.4** | ✅ | ✅ | ✅ | *Satisfactory (v1.1.3.1 滿意工廠), Colossal, Avowed (Obsidian — packed 20-byte FUObjectItem；static-struct GObjects AOB), 艾恩葛朗特 迴盪新聲 Demo (Echoes of Aincrad, Bandai Namco — dxgi.dll proxy)* |
 | **5.5 – 5.7** | ✅ | ✅* | ✅** | *泰坦任務 2, EverSpace 2, Lushfoil Photography Sim, 莊園領主 (Manor Lords), Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT: CARRIER QUALIFICATION Demo* |
 
 *\*GNames 在 5.5+ 版本使用 .data 指標掃描回退機制。*
@@ -63,7 +77,7 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 | **屬性搜尋 (Property Search)** | 跨所有類別搜尋特定屬性名稱，無需瀏覽完整的物件階層。每列附 **Freeze** 按鈕（build 719），會產生在所有實例上鎖住欄位的 CE AA 腳本。 |
 | **類別結構 (Class Structure)** | 瀏覽類別定義的完整欄位佈局、類型、偏移量及繼承鏈。 |
 | **多格式 CE 匯出** | **CE XML** (指標鏈位址紀錄)、**CSX** (CE Structure Dissect)、**SDK Header** (.h)、**CE Field** (單一欄位)、**CE AA Script** (Auto Assembler)。支援純量、位元欄位、結構、陣列、Map/Set、OptionalProperty\<Struct\>、及 UEnum 下拉選單。**N 層指標 drill-down**（toolbar Drill Depth slider 0–4）— Copy CE Field 對 `ObjectProperty` 會跟著指標走進去，把目標物件的 UPROPERTY 以巢狀 `Offsets=[0]` 子節點輸出，貼到 CE 即可看到整個被引用物件的結構。**Soft array 每元素** 在 FSoftObjectPath 子位置輸出 FName leaf（UE4/5.0 單一 FName；UE5.1+ FTopLevelAssetPath PackageName + AssetName），不再只是 8B hex。**Collapse chain（壓平指標鏈）**（工具列開關）可選擇性地將整條 `GWorld → … → 目標` 指標跳轉壓成單一 CE 多階指標項 — `base` + 一個合併節點 + 目標欄位及其 drill-down — 讓深層導航路徑貼到 CE 時是精簡的多階指標，而非 N 層巢狀群組。 |
-| **Proxy DLL** | `version.dll` 代理注入 — 不需要 Cheat Engine。將檔案放在遊戲 exe 旁，啟動遊戲後連接 UI 即可使用。 |
+| **Proxy DLL** | Proxy-DLL 注入 — 不需要 Cheat Engine。將檔案放在遊戲 exe 旁，啟動遊戲後連接 UI 即可。三種劫持目標涵蓋各類遊戲：**`version.dll`**（最廣泛的預設）、**`dinput8.dll`**（手把 / DirectInput 遊戲），以及 **`dxgi.dll`**（每款 D3D11/D3D12 UE 遊戲都會匯入 — 對於*既不*匯入 version *也不*匯入 dinput8 的 EXE，例如某些 SQUARE ENIX build，是最可靠的目標）。Proxy Deploy 分頁會掃描 Steam、為每款遊戲部署所選類型，並僅在我們的兩種 proxy 真的同時存在時才警告。 |
 | **現代化 UI** | 外部 **Avalonia UI** 透過高速具名管道連線（~50 組 JSON-RPC 指令）。各結果表格皆可排序。以 Native AOT 發佈，零 IL2026 / IL3050 警告。**長時間操作可乾淨取消** — 取消或關閉 UI 時操作會停止，注入的 DLL 不會空轉，遊戲永遠能立即關閉。確保遊戲執行效能不受影響。 |
 
 ---
@@ -86,6 +100,8 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 5. **瀏覽及分析**: 與方式 A 相同 — 瀏覽物件、尋找實例、匯出 CE 結構。
 
 > **注意**: 請勿同時使用兩種方式。若 Proxy DLL 已放在遊戲目錄中，請勿再透過 CE 注入 `UE5Dumper.dll`。DLL 會偵測重複實例並跳過自動啟動以避免衝突。
+
+> **該用哪個 Proxy DLL？** 先試 `version.dll`（`build.ps1 -Target ProxyDLL`）。若遊戲能啟動但 UI 無法連接，通常代表該 EXE 沒有匯入 `version.dll` — 改試 **`dxgi.dll`**（`-Target ProxyDxgi`，每款 D3D11/D3D12 UE 遊戲都會匯入），或 `dinput8.dll`（`-Target ProxyDinput8`）。`build.ps1`（預設 `-Target All`）會把三種都建置到 `dist\proxy\`，而 **Proxy Deploy** 分頁可讓你為每款遊戲挑選類型並自動部署。
 
 | **Game Process (Injected)** |
 | :---: |
@@ -135,8 +151,9 @@ AOBMaker 下載連結（需先註冊）：https://opencheattables.com/viewtopic.
 ## 重要注意事項 (Important Notes)
 
 * **自定義數據結構**: 在如《FF7 Rebirth》等遊戲中，部分關鍵數據（如 HP）存儲在標準 `UObject` 之外的自定義結構中。Live Walker 可協助探查這些區域，但無法直接自動發現。
-* **GWorld 連通性**: 截至 2026-06-11，`GWorld` 遍歷在 **100% 實測遊戲中正常運作（30 / 30）**，已涵蓋 Satisfactory（modular UE，獨立 `CoreUObject-Win64-Shipping.dll`）以及《STAR WARS 絕地：組織殞落》(UE 4.21，EA 啟動器 / Steam)。如遇尚未驗證的遊戲，請改用 **Object Tree** 或 **Instance Finder** 作為主要進入點。
+* **GWorld 連通性**: 截至 2026-06-17，`GWorld` 遍歷在 **100% 實測遊戲中正常運作（33 / 33）**，已涵蓋 Satisfactory（modular UE，獨立 `CoreUObject-Win64-Shipping.dll`）、《STAR WARS 絕地：組織殞落》(UE 4.21，EA 啟動器 / Steam)，以及 *Avowed*（其 `GWorld` AOB 落在誘餌位址，改以掃描 `.data` 尋找指向作用中遊戲世界的指標來回復 — 取 `OwningGameInstance` 非空的那個，並略過 World-Partition 的 `_Generated_` cell）。如遇尚未驗證的遊戲，請改用 **Object Tree** 或 **Instance Finder** 作為主要進入點。
 * **EA 啟動器遊戲的 Proxy DLL 限制**: 《STAR WARS 絕地：組織殞落》透過 EA 啟動器啟動，`version.dll` 或 `dinput8.dll` proxy 皆無法被遊戲行程載入（EA 啟動器會限制 DLL 搜尋路徑）。需待遊戲啟動後改以 CE Dll Injection 注入。掃描端本身無問題 — DLL 進入行程後 GObjects / GNames / GWorld 均能正常解析。其他 EA 啟動器標題可能也有相同情況；若遇到請開 issue 回報。
+* **針對既不匯入 `version.dll` 也不匯入 `dinput8.dll` 的遊戲使用 `dxgi.dll` proxy**: 少數遊戲（例如 *The Adventures of Elliot*，一款 SQUARE ENIX UE4.27 D3D12 demo；*Echoes of Aincrad Demo*，一款 Bandai Namco UE5.4 D3D12 遊戲）的 EXE 根本不匯入 `version.dll` 或 `dinput8.dll`，因此 Windows 永遠不會載入那些 proxy — 與 EA 的情況不同，這是遊戲自身的 import table，而非啟動器限制。請改用 **`dxgi.dll`** proxy（`build.ps1 -Target ProxyDxgi`，或在 Proxy Deploy 分頁選 *dxgi.dll*）：每款 D3D11/D3D12 UE 遊戲都會匯入 `dxgi`，因此能可靠載入。已在 Elliot 與 Echoes of Aincrad Demo 上端到端實測（連接 + 掃描 + 物件瀏覽）。
 * **容器元素限制**: Array/Map/Set 的元素讀取受可調限制值控制，避免過度記憶體存取。如需處理大型容器，請在 Live Walker 中調整 **Array Limit** 滑桿。
 
 ---
@@ -144,8 +161,8 @@ AOBMaker 下載連結（需先註冊）：https://opencheattables.com/viewtopic.
 ## 專案貢獻 (Contributing)
 
 請參閱 [CONTRIBUTING.md](CONTRIBUTING.md) 以瞭解：
-- **提交 AOB 特徵碼** — 需要提供哪些證據及驗證流程。
-- **回報偵測失敗** — 需要附上哪些日誌與資訊。
+- **回報偵測失敗** — 需要附上哪些日誌與資訊（最有幫助！）。
+- **提交 AOB 特徵碼** — 給想直接貢獻的逆向工程者。
 - **程式碼貢獻** — PR 流程與程式碼風格規範。
 
 ---
@@ -156,13 +173,13 @@ AOBMaker 下載連結（需先註冊）：https://opencheattables.com/viewtopic.
 |---|---|
 | [Encryqed/Dumper-7](https://github.com/Encryqed/Dumper-7) | 動態偏移量偵測模式、FField/FProperty 探測策略 |
 | [UE4SS-RE/RE-UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) | UE5 執行時反射機制參考 |
-| [Spuckwaffel/UEDumper](https://github.com/Spuckwaffel/UEDumper) | UI 架構參考 |
-| [trumank/patternsleuth](https://github.com/trumank/patternsleuth) | AOB 特徵碼 |
+| [Spuckwaffel/UEDumper](https://github.com/Spuckwaffel/UEDumper) | 即時編輯器 UI 架構參考 |
+| [trumank/patternsleuth](https://github.com/trumank/patternsleuth) | GObjects/GNames 的額外 AOB 特徵碼 |
 | [Do0ks/GSpots](https://github.com/Do0ks/GSpots) | GObjects/GNames 的 AOB 特徵碼 |
 | [nlohmann/json](https://github.com/nlohmann/json) | DLL 使用的 JSON 函式庫 |
 | [cheat-engine/cheat-engine](https://github.com/cheat-engine/cheat-engine) | CE Lua 腳本 API 參考 |
 | **AOBMaker (內部工具)** | AOB 特徵碼產生工具，AA 腳本產生工具、快速 CE-goto 功能 (非必備) |
-| UE4 Dumper.CT | Cake-san 的 Cheat Table — 額外的 UE4 AOB 特徵碼 |
+| UE4 Dumper.CT | Cake-san 的 Cheat Table — 額外的 UE4 AOB 特徵碼（Signatures.h 中的 CT 系列） |
 
 ---
 
