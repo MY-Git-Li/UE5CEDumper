@@ -12,8 +12,8 @@
 > **Two intentional deviations:** (1) the UI was folded into the **Teleport tab**
 > as a "God Mode" section (Force ON/OFF + badge + ↻ + Copy CE Script) instead of
 > a new `ProtectionPanel` — lower risk, mirrors the Debug Camera toggle already
-> there; (2) **hotkey rows deferred** (not requested; avoids the 16-row count
-> test). ⚠ In-game live-verify still pending (spec §9).
+> there; (2) **hotkey rows added** (build 1252): "God Mode ON" / "God Mode OFF"
+> on the Teleport tab (count 16→18). ⚠ In-game live-verify still pending (spec §9).
 
 -----
 

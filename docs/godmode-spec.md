@@ -5,9 +5,10 @@
 > **Deviations from the plan (intentional, lower-risk):** the in-app UI was
 > **folded into the Teleport tab as a "God Mode" section** (mirroring the Debug
 > Camera force toggle that already lives there) instead of a separate
-> `ProtectionPanel` — no new tab, no `MainTabIndex` shift. **Hotkey rows were
-> deferred** (the user asked for the Lua-mailbox on/off, not hotkeys; avoids the
-> fragile 16-row count test). `get_protect_state` (want/live/resolvable) ships on
+> `ProtectionPanel` — no new tab, no `MainTabIndex` shift. **Hotkey rows shipped**
+> (build 1252): "God Mode ON" / "God Mode OFF" added to the Teleport tab's hotkey
+> list (count 16→18), wired to the same OS global-hotkey path as the other rows.
+> `get_protect_state` (want/live/resolvable) ships on
 > the pipe + export but the UI badge uses the simpler `get_god_mode` tri-state,
 > exactly like the Debug Camera badge. ⚠ In-game live-verify still pending
 > (smoke checklist §9). This document is the design contract; the companion

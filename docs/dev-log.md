@@ -44,7 +44,8 @@ tick — the 2026-06-10 audit's stale-pointer rule).
   `set_god_mode` / `get_god_mode` / `get_protect_state`.
 - **UI:** a "God Mode" section on the **Teleport tab** (Force ON/OFF + tri-state
   badge + ↻ + Copy CE Script), mirroring the Debug Camera toggle that already
-  lives there — no new tab, no `MainTabIndex` shift. Hotkeys deferred.
+  lives there — no new tab, no `MainTabIndex` shift. **God Mode ON/OFF global-
+  hotkey rows added** (build 1252; Teleport hotkey list 16→18).
 - **"Invisible" was cut** after review: visual `bHidden` hide isn't useful, and
   "enemies can't detect you" has no universal reflected bool (AI perception is
   per-game) — left to Property Search + the general `SetActorBool` primitive.

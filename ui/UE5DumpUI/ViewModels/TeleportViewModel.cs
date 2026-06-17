@@ -63,6 +63,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "bugitgo",      DisplayName = "Run BugItGo" });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "debugcam_on",  DisplayName = "Debug cam ON" });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "debugcam_off", DisplayName = "Debug cam OFF" });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "godmode_on",   DisplayName = "God Mode ON" });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "godmode_off",  DisplayName = "God Mode OFF" });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "pov_get",      DisplayName = "Get POV" });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "relative",     DisplayName = "TP facing dir" });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "coords",       DisplayName = "TP to coords" });
@@ -1049,6 +1051,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 case "bugitgo":      _ = RunBugItGoCommand.ExecuteAsync(null); return;
                 case "debugcam_on":  _ = ForceDebugCameraOnCommand.ExecuteAsync(null); return;
                 case "debugcam_off": _ = ForceDebugCameraOffCommand.ExecuteAsync(null); return;
+                case "godmode_on":   _ = ForceGodModeOnCommand.ExecuteAsync(null); return;
+                case "godmode_off":  _ = ForceGodModeOffCommand.ExecuteAsync(null); return;
                 case "pov_get":      _ = GetPovCommand.ExecuteAsync(null); return;
                 case "relative":     _ = TeleportRelativeCommand.ExecuteAsync(null); return;
                 case "coords":       _ = TeleportToCoordsCommand.ExecuteAsync(null); return;

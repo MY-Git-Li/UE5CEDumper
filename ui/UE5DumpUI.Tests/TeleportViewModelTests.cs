@@ -372,7 +372,7 @@ public class TeleportViewModelTests
         var vm = CreateVm(new FakeDumpService(), out _, new FakeHotkeyService());
         // 3 save + 3 recall + recall_last + bugit + bugitgo + debugcam_on/off +
         // pov_get + relative + coords + cursor_on/off.
-        Assert.Equal(16, vm.HotkeyRows.Count);
+        Assert.Equal(18, vm.HotkeyRows.Count);
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "save0" && r.DisplayName == "Save marker 1");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall2" && r.DisplayName == "Recall marker 3");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall_last" && r.DisplayName == "Recall last");
@@ -380,6 +380,8 @@ public class TeleportViewModelTests
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "bugitgo");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "debugcam_on" && r.DisplayName == "Debug cam ON");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "debugcam_off" && r.DisplayName == "Debug cam OFF");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "godmode_on" && r.DisplayName == "God Mode ON");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "godmode_off" && r.DisplayName == "God Mode OFF");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "pov_get" && r.DisplayName == "Get POV");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "relative" && r.DisplayName == "TP facing dir");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "coords" && r.DisplayName == "TP to coords");
