@@ -44,8 +44,9 @@ narrative identity resonates with what the module *does*.
 | **Lugner.cpp** | 呂格納 | Demon master of disguise | #12 | ProxyVersion: version.dll forwarding proxy | The deceiver — pretends to be the real version.dll |
 | **Scharf.h** | 夏爾夫 | Sharp-eyed, scrutinizing examinee | #17 | WalkerAlignment: FProperty offset-vs-alignment validator | Sharp eye for layout flaws — catches misaligned EnumProperty / FName that hint at a wrong FPROPERTY_OFFSET probe |
 | **Wirbel.cpp** | 維爾貝爾 | Northern squad leader, pragmatic soldier | #20 | Teleport: marker save/recall + cursor teleport (BugIt-style) | Swift battlefield repositioning — the soldier who relocates first |
-| **Tot.h** | 終焉之聖 | "Saint of the End", Greater Demon | — | Cancellation: cooperative cancel flag for long-running ops | The End — signals every long loop to stop (was `Cancel`) |
-| **Lineal.h** | 尺規 | First-class mage, 15-yr undercover spy | — | PackedItem: UE5.7+ packed FUObjectItem reconstruction | The straightedge — realigns the non-standard packed layout (was `PackedItem`) |
+| **Tot.h** | 托托 | "Saint of the End", Greater Demon | — | Cancellation: cooperative cancel flag for long-running ops | The End — signals every long loop to stop (was `Cancel`) |
+| **Lineal.h** | 莉涅爾 | First-class mage, 15-yr undercover spy | — | PackedItem: UE5.7+ packed FUObjectItem reconstruction | The straightedge — realigns the non-standard packed layout (was `PackedItem`) |
+| **Radar.cpp** | 拉達爾 | Shadow Warrior, plateau village chief | — | ValueScan: CE-style by-value First/Next Scan | The sweep — scans every object for a matching value (was `ValueScan`) |
 
 ---
 
@@ -97,6 +98,7 @@ Renge::                     // PipeProtocol — liaison rules
 Scharf::                    // FProperty alignment validator (header-only)
 Tot::                       // Cancellation — cooperative cancel flag (header-only; was Cancel)
 Lineal::                    // PackedItem — UE5.7+ packed FUObjectItem reconstruction (header-only; was PackedItem)
+Radar::                     // ValueScan — CE-style by-value scan (was ValueScan)
 Grimoire::                  // Constants — spell book
 DynOff::                    // Dynamic offsets (in Grimoire.h, unchanged)
 ```
@@ -300,7 +302,7 @@ German meanings are given because most names map cleanly to a module function.
 | Grau | Grau | Straight-laced trooper ("gray") | ⬜ | Neutral baseline |
 | Lager | Lager | Carefree trooper ("storage/depot") | ⬜ | Cache / buffer pool / storage |
 | Löwe (Held) | Lowe | Governor / anti-magic ("lion") | ⬜ | Aggressive / dominant heuristic |
-| Radar | Radar | Shadow Warrior chief | 🟡 ValueScan rename (planned) | CE-style by-value scan — 485 refs, deferred to its own change |
+| Radar | Radar | Shadow Warrior chief | 🟢 ValueScan | CE-style by-value First/Next Scan (`Radar.cpp/.h`, was `ValueScan`) |
 | Schritt | Schritt | Shadow Warrior ("step") | ⬜ | Stepping / single-step iteration |
 | Routine | Routine | Shadow Warrior librarian | ⬜ | Scheduled / periodic subroutine |
 | Kreis | Kreis | Shadow Warrior blacksmith ("circle") | ⬜ | Ring buffer / loop / cycle |
@@ -338,7 +340,7 @@ German meanings are given because most names map cleanly to a module function.
 |---|---|---|---|
 | Cancellation | `Tot.h` (was `Cancel.h`) | cooperative cancel flag | ✅ renamed `Cancel → Tot` |
 | Packed item | `Lineal.h` (was `PackedItem.h`) | UE5.7+ packed FUObjectItem reconstruct | ✅ renamed `PackedItem → Lineal` |
-| Value scan | `ValueScan.h/.cpp` | CE-style by-value scan | 🟡 planned `ValueScan → Radar` (485 refs — own change) |
+| Value scan | `Radar.cpp/.h` (was `ValueScan.*`) | CE-style by-value scan | ✅ renamed `ValueScan → Radar` |
 | Graph path | `GraphPath.h` | BFS shortest-path core (under `Aura::`) | ✅ kept — helper inside `Aura::`, by design |
 | UTF-8 helpers | `Utf8Helpers.h` | string conversion leaf util | ✅ kept — generic utility, by design |
 

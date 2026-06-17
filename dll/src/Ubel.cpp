@@ -323,7 +323,7 @@ int32_t GetIndex(uintptr_t uobjectAddr) {
 }
 
 // Public thin wrappers around the file-static ReadFString / ReadFName /
-// ReadFTextString helpers so cross-TU consumers (Aura ValueScan path)
+// ReadFTextString helpers so cross-TU consumers (Aura Radar path)
 // don't need to duplicate the FString header decode + UTF-16 sanitize
 // logic. Keeping the static helpers in place avoids touching the
 // thousand-plus existing call sites in this TU.

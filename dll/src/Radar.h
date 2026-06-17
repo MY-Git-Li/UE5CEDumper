@@ -1,7 +1,8 @@
 #pragma once
 
 // ============================================================
-// ValueScan — CE-style First Scan / Next Scan workflow
+// Radar — 拉達爾 (影子戰士 — Shadow Warrior)
+// CE-style value scan: First Scan / Next Scan workflow
 //
 // Walks GObjects + UProperty metadata to find every UPROPERTY-declared
 // field whose typed value matches the user's target. Each candidate is
@@ -68,7 +69,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace ValueScan {
+namespace Radar {
 
 // Data types supported by the scan engine. Numeric primitives are the
 // MVP; string types (FString/FName/FText) and vector types (FVector/
@@ -593,4 +594,4 @@ bool CompareVectorPredicate(ScanType       st,
                             const uint8_t* target2Bytes = nullptr,
                             double         tolerance    = 0.0);
 
-}  // namespace ValueScan
+}  // namespace Radar

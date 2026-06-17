@@ -90,7 +90,7 @@ git submodule update --init --recursive
 - **UI Strings**: English only. All UI strings in `Resources/Strings/en.axaml`, referenced via `StaticResource` bindings
 - **UE offsets**: All UObject/UStruct offsets must be dynamically verified via OffsetFinder, never hardcoded
 - **AOT compatible**: All C# code must be Native AOT / trimming compatible. No reflection-based APIs — use source generators instead (e.g. `[JsonSerializable]` context for `System.Text.Json`, `[ObservableProperty]` for MVVM). The UI is published as a self-contained trimmed binary
-- **Module naming (Frieren convention)**: Every new C++ DLL module (a file with its own namespace) MUST take an unused character name from the **Frieren roster** in [docs/naming-convention.md](docs/naming-convention.md) — never a plain-English name (the legacy `ValueScan` / `Cancel` / `PackedItem` modules predate this rule and are being migrated). Add the required header comment (`// {Name} — {中文名} ({meaning})` + a one-line function description) and flip that name's status to 🟢 in use in the roster. Kept English by design (the only exceptions): generic leaf utilities (`Utf8Helpers.h`) and algorithm helpers that live inside an existing namespace (`GraphPath.h` under `Aura::`)
+- **Module naming (Frieren convention)**: Every new C++ DLL module (a file with its own namespace) MUST take an unused character name from the **Frieren roster** in [docs/naming-convention.md](docs/naming-convention.md) — never a plain-English name (the historical plain-English modules have all been migrated: `Cancel`→`Tot`, `PackedItem`→`Lineal`, `ValueScan`→`Radar`). Add the required header comment (`// {Name} — {中文名} ({meaning})` + a one-line function description) and flip that name's status to 🟢 in use in the roster. Kept English by design (the only exceptions): generic leaf utilities (`Utf8Helpers.h`) and algorithm helpers that live inside an existing namespace (`GraphPath.h` under `Aura::`)
 
 -----
 
@@ -124,9 +124,9 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- Macht    (Memory)        <- AOBScan + SEH read/write |
 |      +-- Sein     (Logger)        <- 5-category per-process   |
 |      +-- Stark    (GameThreadDispatch) <- MinHook ProcessEvent hook |
-|      +-- ValueScan (build 738 + Phase 2 757) <- SessionManager + DataType / ScanType / CompareStringPredicate / CompareVectorPredicate |
+|      +-- Radar    (ValueScan)     <- SessionManager + DataType / ScanType / CompareStringPredicate / CompareVectorPredicate (build 738 + Phase 2 757) |
 |      +-- Denken   (NativeDisasm)  <- Zydis x64 decoder: native UFunction -> [this+off] property xref (Path 2, build 862) |
-|      +-- Cancel   (Cancellation)  <- Cancel::Requested() flag; Fern disconnect-monitor + shutdown-abort stop long ops (build 936) |
+|      +-- Tot      (Cancellation)  <- Tot::Requested() flag; Fern disconnect-monitor + shutdown-abort stop long ops (build 936) |
 |      +-- Wirbel   (Teleport)      <- marker save/recall + cursor + camera POV + directional/explicit-coord TP + force mouse cursor (bShowMouseCursor) (build 1144); CMD_TELEPORT=8 mailbox (ops 0-15) |
 +----------------------+-------------------------------+
                        | Named Pipe: \\.\pipe\UE5DumpBfx

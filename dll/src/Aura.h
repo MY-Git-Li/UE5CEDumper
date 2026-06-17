@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "Ubel.h"   // For ::ClassInfo (defined at global scope in Ubel.h, despite the filename) used by WalkClassesBatch
-#include "ValueScan.h"  // For ValueScan::Candidate / DataType / ScanType used by ScanForValue / RefineCandidates
+#include "Radar.h"  // For Radar::Candidate / DataType / ScanType used by ScanForValue / RefineCandidates
 #include "GraphPath.h"   // GraphPathResult / GraphPathStep + the pure BFS core used by FindObjectGraphPath
 
 // FUObjectItem structure (in FChunkedFixedUObjectArray)
@@ -703,11 +703,11 @@ struct ValueScanStats {
 };
 
 struct ValueScanResult {
-    std::vector<ValueScan::Candidate>       candidates;
+    std::vector<Radar::Candidate>       candidates;
     // Shared metadata pools the candidates index into (V3-A). Moved into
-    // the ValueScan::Session alongside the candidates by SessionManager::Begin.
-    std::vector<ValueScan::FieldDescriptor> descriptors;
-    std::vector<ValueScan::InstanceRecord>  instances;
+    // the Radar::Session alongside the candidates by SessionManager::Begin.
+    std::vector<Radar::FieldDescriptor> descriptors;
+    std::vector<Radar::InstanceRecord>  instances;
     ValueScanStats                          stats;
 };
 
@@ -744,8 +744,8 @@ struct ValueScanResult {
 // Between). A field whose width can't represent the value (no matching
 // entry) is skipped. `multiTargets` must be non-null for this path.
 ValueScanResult ScanForValue(
-    ValueScan::DataType dt,
-    ValueScan::ScanType st,
+    Radar::DataType dt,
+    Radar::ScanType st,
     const uint8_t*      targetBytes,
     const uint8_t*      target2Bytes,
     bool                gameOnly,
@@ -753,8 +753,8 @@ ValueScanResult ScanForValue(
     double              tolerance     = 0.0,
     const std::string&  targetString  = "",
     bool                caseSensitive = false,
-    const ValueScan::NumericTargetSet* multiTargets  = nullptr,
-    const ValueScan::NumericTargetSet* multiTargets2 = nullptr,
+    const Radar::NumericTargetSet* multiTargets  = nullptr,
+    const Radar::NumericTargetSet* multiTargets2 = nullptr,
     // When false, the GObjects walk runs single-threaded (no worker threads
     // spawned) so concurrent cross-thread reads can't trip a game's anti-tamper.
     // Default true = full parallel scan (fast). Exposed via the pipe `parallel`
@@ -782,17 +782,17 @@ ValueScanResult ScanForValue(
 // predicates compare against `multiTargets`/`multiTargets2` (matched by
 // that width), prev-value predicates against the candidate's prevValue.
 ValueScanStats RefineCandidates(
-    ValueScan::DataType                          dt,
-    ValueScan::ScanType                          st,
+    Radar::DataType                          dt,
+    Radar::ScanType                          st,
     const uint8_t*                               targetBytes,
     const uint8_t*                               target2Bytes,
-    std::vector<ValueScan::Candidate>&           candidates,
-    const std::vector<ValueScan::FieldDescriptor>& descriptors,
+    std::vector<Radar::Candidate>&           candidates,
+    const std::vector<Radar::FieldDescriptor>& descriptors,
     double                                       tolerance     = 0.0,
     const std::string&                           targetString  = "",
     bool                                         caseSensitive = false,
-    const ValueScan::NumericTargetSet*           multiTargets  = nullptr,
-    const ValueScan::NumericTargetSet*           multiTargets2 = nullptr);
+    const Radar::NumericTargetSet*           multiTargets  = nullptr,
+    const Radar::NumericTargetSet*           multiTargets2 = nullptr);
 
 // ------------------------------------------------------------------
 // Snapshot capture (experimental — Phase A1a). A type-agnostic, streamed
@@ -800,7 +800,7 @@ ValueScanStats RefineCandidates(
 // UI to persist snapshots for diff / SPC / pivot. Stateless cursor
 // pagination (mirrors GetCount/GetByIndex + get_object_list): each chunk
 // walks [offset, offset+limit) GObjects indices. Reuses Ubel::WalkClassEx
-// (cached) + ValueScan::SelectSnapshotNumericFields. Array elements are
+// (cached) + Radar::SelectSnapshotNumericFields. Array elements are
 // captured in Phase A1b.
 // ------------------------------------------------------------------
 struct SnapshotField {
@@ -849,7 +849,7 @@ struct SnapshotChunkResult {
 // type captures nothing. arrayCap bounds elements captured per struct array.
 SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
                                          bool gameOnly,
-                                         ValueScan::DataType numericScope,
+                                         Radar::DataType numericScope,
                                          int32_t arrayCap = 256);
 
 } // namespace Aura

@@ -5012,8 +5012,8 @@ static bool ContainerInnerAccepted(
 }
 
 ValueScanResult ScanForValue(
-    ValueScan::DataType dt,
-    ValueScan::ScanType st,
+    Radar::DataType dt,
+    Radar::ScanType st,
     const uint8_t*      targetBytes,
     const uint8_t*      target2Bytes,
     bool                gameOnly,
@@ -5021,8 +5021,8 @@ ValueScanResult ScanForValue(
     double              tolerance,
     const std::string&  targetString,
     bool                caseSensitive,
-    const ValueScan::NumericTargetSet* multiTargets,
-    const ValueScan::NumericTargetSet* multiTargets2,
+    const Radar::NumericTargetSet* multiTargets,
+    const Radar::NumericTargetSet* multiTargets2,
     bool                parallel,
     bool                batchRead)
 {
@@ -5030,10 +5030,10 @@ ValueScanResult ScanForValue(
     auto t0 = std::chrono::steady_clock::now();
     constexpr auto kDeadline = std::chrono::seconds(15);
 
-    const bool isString = ValueScan::IsStringDataType(dt);
-    const bool isVector = ValueScan::IsVectorDataType(dt);
-    const bool isMulti  = ValueScan::IsMultiNumericDataType(dt);
-    const size_t dtSize = ValueScan::SizeOf(dt);
+    const bool isString = Radar::IsStringDataType(dt);
+    const bool isVector = Radar::IsVectorDataType(dt);
+    const bool isMulti  = Radar::IsMultiNumericDataType(dt);
+    const size_t dtSize = Radar::SizeOf(dt);
 
     // Validate inputs per type family.
     if (isString) {
@@ -5041,27 +5041,27 @@ ValueScanResult ScanForValue(
         // buffers are unused. Caller must pass a non-empty target for
         // targeted predicates (substring matchers + Exact); Changed /
         // Unchanged use the candidate's prevStr.
-        if (!ValueScan::IsPrevValueScanType(st) && targetString.empty()) return result;
+        if (!Radar::IsPrevValueScanType(st) && targetString.empty()) return result;
     } else if (isMulti) {
         // Multi-numeric meta scan: the pre-parsed per-width target set
         // replaces targetBytes. First scan requires it (prev-value scan
         // types never reach here — rejected below).
         if (!multiTargets || multiTargets->entries.empty()) return result;
-        if (st == ValueScan::ScanType::Between
+        if (st == Radar::ScanType::Between
             && (!multiTargets2 || multiTargets2->entries.empty())) return result;
     } else {
         if (dtSize == 0 || !targetBytes) return result;
-        if (st == ValueScan::ScanType::Between && !target2Bytes) return result;
+        if (st == Radar::ScanType::Between && !target2Bytes) return result;
     }
     // Prev-value scan types have no meaning on a first scan -- caller (pipe
     // handler) is responsible for rejecting these, but be defensive.
-    if (ValueScan::IsPrevValueScanType(st)) return result;
+    if (Radar::IsPrevValueScanType(st)) return result;
 
-    const auto& acceptedTypes = ValueScan::PropertyTypeNames(dt);
+    const auto& acceptedTypes = Radar::PropertyTypeNames(dt);
     // Vector types match by StructProperty + inner struct name (e.g.
     // "Vector", "Vector3f"). Empty for non-vector dt so the inner-name
     // check is skipped.
-    const auto& acceptedStructNames = ValueScan::VectorStructNames(dt);
+    const auto& acceptedStructNames = Radar::VectorStructNames(dt);
 
     // Per-class field index. classAddr -> filtered subset of FieldInfo
     // that match the requested DataType. Built lazily on first
@@ -5160,8 +5160,8 @@ ValueScanResult ScanForValue(
     constexpr int32_t kMaxBatchSpan       = 64 * 1024;
     constexpr int32_t kBatchBytesPerField = 512;
 
-    LOG_INFO("ValueScan: First Scan dt=%s st=%d (target %zuB, gameOnly=%d, max=%d, parallel=%d, batch=%d) over %d objects",
-             ValueScan::NameOf(dt), static_cast<int>(st), dtSize,
+    LOG_INFO("Radar: First Scan dt=%s st=%d (target %zuB, gameOnly=%d, max=%d, parallel=%d, batch=%d) over %d objects",
+             Radar::NameOf(dt), static_cast<int>(st), dtSize,
              gameOnly ? 1 : 0, maxResults, parallel ? 1 : 0, batchRead ? 1 : 0, count);
 
     // Per-thread output of the parallel GObjects walk. Each thread owns its
@@ -5169,9 +5169,9 @@ ValueScanResult ScanForValue(
     // ascending tid order so the global candidate list stays ascending by
     // object index — identical ordering to the old serial walk.
     struct ThreadResult {
-        std::vector<ValueScan::Candidate>        candidates;   // indices are THREAD-LOCAL
-        std::vector<ValueScan::FieldDescriptor>  descriptors;  // thread-local pool
-        std::vector<ValueScan::InstanceRecord>   instances;    // thread-local pool
+        std::vector<Radar::Candidate>        candidates;   // indices are THREAD-LOCAL
+        std::vector<Radar::FieldDescriptor>  descriptors;  // thread-local pool
+        std::vector<Radar::InstanceRecord>   instances;    // thread-local pool
         int32_t                                  scannedObjects = 0;
         std::unordered_set<uintptr_t>            classesWithFields;
     };
@@ -5413,7 +5413,7 @@ ValueScanResult ScanForValue(
                     // shape, so GetArrayInnerElemSize yields sizeof(T) here.
                     int32_t innerSize = Ubel::GetArrayInnerElemSize(f.Address);
                     sf.optionalFlagOffset =
-                        ValueScan::OptionalFlagOffset(f.Size, innerSize);
+                        Radar::OptionalFlagOffset(f.Size, innerSize);
                     out.push_back(std::move(sf));
                     continue;
                 }
@@ -5597,15 +5597,15 @@ ValueScanResult ScanForValue(
         // member or the value can't fit that width. Only reached on the
         // targeted first-scan path (prev-value scan types never get here).
         auto multiResolve = [&](const std::string& propTypeName,
-                                ValueScan::DataType& memberDt,
+                                Radar::DataType& memberDt,
                                 const uint8_t*&      tgt,
                                 const uint8_t*&      tgt2) -> bool {
-            if (!ValueScan::TryDataTypeFromPropertyTypeName(propTypeName, memberDt)) return false;
+            if (!Radar::TryDataTypeFromPropertyTypeName(propTypeName, memberDt)) return false;
             const uint8_t* e = multiTargets ? multiTargets->Find(memberDt) : nullptr;
             if (!e) return false;
             tgt  = e;
             tgt2 = nullptr;
-            if (st == ValueScan::ScanType::Between) {
+            if (st == Radar::ScanType::Between) {
                 const uint8_t* e2 = multiTargets2 ? multiTargets2->Find(memberDt) : nullptr;
                 if (!e2) return false;
                 tgt2 = e2;
@@ -5713,7 +5713,7 @@ ValueScanResult ScanForValue(
         // reuses the per-(class,offset) definingNameCache.
         auto ensureDescriptor = [&](ScanField& sf) -> uint32_t {
             if (sf.descriptorIdx >= 0) return static_cast<uint32_t>(sf.descriptorIdx);
-            ValueScan::FieldDescriptor d;
+            Radar::FieldDescriptor d;
             d.className     = sci->className;
             d.fieldName     = sf.name;  // BASE name; element "[i]" added at display time
             d.fieldType     = (sf.container != ScanContainer::None)
@@ -5750,10 +5750,10 @@ ValueScanResult ScanForValue(
                                  const std::string* strValue) {
             if (curInstanceIdx < 0) {
                 curInstanceIdx = static_cast<int32_t>(tr.instances.size());
-                tr.instances.push_back(ValueScan::InstanceRecord{
+                tr.instances.push_back(Radar::InstanceRecord{
                     obj, i, Ubel::GetName(obj) });
             }
-            ValueScan::Candidate cand;
+            Radar::Candidate cand;
             cand.addr          = valueAddr;
             cand.descriptorIdx = descriptorIdx;
             cand.instanceIdx   = static_cast<uint32_t>(curInstanceIdx);
@@ -5775,35 +5775,35 @@ ValueScanResult ScanForValue(
             uint8_t     readBuf[16] = {};
             std::string readStr;
             if (isString) {
-                if (dt == ValueScan::DataType::FString) {
+                if (dt == Radar::DataType::FString) {
                     readStr = Ubel::ReadFStringAt(elemAddr, 0);
-                } else if (dt == ValueScan::DataType::FName) {
+                } else if (dt == Radar::DataType::FName) {
                     readStr = Ubel::ReadFNameAt(elemAddr, 0);
                 } else {
                     readStr = Ubel::ReadFTextStringAt(elemAddr, 0);
                 }
-                if (!ValueScan::CompareStringPredicate(st, readStr, targetString, caseSensitive)) return;
+                if (!Radar::CompareStringPredicate(st, readStr, targetString, caseSensitive)) return;
                 emitCandidate(elemAddr, ensureDescriptor(sf), elemIndex, nullptr, 0, &readStr);
             } else if (isVector) {
                 if (!Macht::ReadBytesSafe(elemAddr, readBuf, 12)) return;
-                if (!ValueScan::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, tolerance)) return;
+                if (!Radar::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, tolerance)) return;
                 emitCandidate(elemAddr, ensureDescriptor(sf), elemIndex, readBuf, 12, nullptr);
             } else if (isMulti) {
                 // Resolve the element's own width (key/value/elem type) + target.
-                ValueScan::DataType elemDt = dt;
+                Radar::DataType elemDt = dt;
                 const uint8_t* mtgt = nullptr;
                 const uint8_t* mtgt2 = nullptr;
                 if (!multiResolve(sf.elemTypeName, elemDt, mtgt, mtgt2)) return;
-                size_t sz = ValueScan::SizeOf(elemDt);
+                size_t sz = Radar::SizeOf(elemDt);
                 if (!Macht::ReadBytesSafe(elemAddr, readBuf, sz)) return;
-                if (!ValueScan::ComparePredicate(elemDt, st, readBuf, mtgt, mtgt2, tolerance)) return;
+                if (!Radar::ComparePredicate(elemDt, st, readBuf, mtgt, mtgt2, tolerance)) return;
                 emitCandidate(elemAddr, ensureDescriptor(sf), elemIndex, readBuf, sz, nullptr);
             } else {
                 // Container elements never share a bitfield byte (TArray /
                 // TSet<bool> + TMap<bool,...> store bool unpacked), so the
                 // boolFieldMask = 0xFF path applies.
                 if (!Macht::ReadBytesSafe(elemAddr, readBuf, dtSize)) return;
-                if (!ValueScan::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) return;
+                if (!Radar::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) return;
                 emitCandidate(elemAddr, ensureDescriptor(sf), elemIndex, readBuf, dtSize, nullptr);
             }
         };
@@ -5819,7 +5819,7 @@ ValueScanResult ScanForValue(
             std::string key = sci->className; key += '\x01'; key += displayName;
             auto it = deepDescriptors.find(key);
             if (it != deepDescriptors.end()) return it->second;
-            ValueScan::FieldDescriptor d;
+            Radar::FieldDescriptor d;
             d.className         = sci->className;
             d.definingClassName = sci->className;
             d.fieldName         = displayName;   // fully-substituted path, no "[]" placeholder
@@ -5848,23 +5848,23 @@ ValueScanResult ScanForValue(
             if (isString) {
                 if (!typeOk) return;
                 std::string readStr;
-                if (dt == ValueScan::DataType::FString)      readStr = Ubel::ReadFStringAt(lf.leafAddr, 0);
-                else if (dt == ValueScan::DataType::FName)    readStr = Ubel::ReadFNameAt(lf.leafAddr, 0);
+                if (dt == Radar::DataType::FString)      readStr = Ubel::ReadFStringAt(lf.leafAddr, 0);
+                else if (dt == Radar::DataType::FName)    readStr = Ubel::ReadFNameAt(lf.leafAddr, 0);
                 else                                          readStr = Ubel::ReadFTextStringAt(lf.leafAddr, 0);
-                if (!ValueScan::CompareStringPredicate(st, readStr, targetString, caseSensitive)) return;
+                if (!Radar::CompareStringPredicate(st, readStr, targetString, caseSensitive)) return;
                 emitCandidate(lf.leafAddr, ensureDeepDescriptor(disp, lf.leafType), -1, nullptr, 0, &readStr);
             } else if (isMulti) {
-                ValueScan::DataType mdt = dt;
+                Radar::DataType mdt = dt;
                 const uint8_t* mtgt = nullptr; const uint8_t* mtgt2 = nullptr;
                 if (!multiResolve(lf.leafType, mdt, mtgt, mtgt2)) return;
-                size_t sz = ValueScan::SizeOf(mdt);
+                size_t sz = Radar::SizeOf(mdt);
                 if (!Macht::ReadBytesSafe(lf.leafAddr, readBuf, sz)) return;
-                if (!ValueScan::ComparePredicate(mdt, st, readBuf, mtgt, mtgt2, tolerance)) return;
+                if (!Radar::ComparePredicate(mdt, st, readBuf, mtgt, mtgt2, tolerance)) return;
                 emitCandidate(lf.leafAddr, ensureDeepDescriptor(disp, lf.leafType), -1, readBuf, sz, nullptr);
             } else {
                 if (!typeOk) return;
                 if (!Macht::ReadBytesSafe(lf.leafAddr, readBuf, dtSize)) return;
-                if (!ValueScan::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) return;
+                if (!Radar::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) return;
                 emitCandidate(lf.leafAddr, ensureDeepDescriptor(disp, lf.leafType), -1, readBuf, dtSize, nullptr);
             }
         };
@@ -5894,7 +5894,7 @@ ValueScanResult ScanForValue(
                 //     iteration; Data ptr may be null in that case.
                 constexpr int32_t kMaxElementsPerArray = 10'000'000;
                 if (arrayNum < 0 || arrayNum > kMaxElementsPerArray) {
-                    LOG_WARN("ValueScan: skipping TArray with Num=%d on field '%s' at 0x%llX (instance 0x%llX)",
+                    LOG_WARN("Radar: skipping TArray with Num=%d on field '%s' at 0x%llX (instance 0x%llX)",
                              arrayNum, sf.name.c_str(),
                              (unsigned long long)(obj + sf.offset),
                              (unsigned long long)obj);
@@ -5940,7 +5940,7 @@ ValueScanResult ScanForValue(
 
                 constexpr int32_t kMaxElementsPerArray = 10'000'000;
                 if (arrayNum < 0 || arrayNum > kMaxElementsPerArray) {
-                    LOG_WARN("ValueScan: skipping struct TArray with Num=%d on field '%s' at 0x%llX (instance 0x%llX)",
+                    LOG_WARN("Radar: skipping struct TArray with Num=%d on field '%s' at 0x%llX (instance 0x%llX)",
                              arrayNum, sf.name.c_str(),
                              (unsigned long long)(obj + sf.offset),
                              (unsigned long long)obj);
@@ -6023,14 +6023,14 @@ ValueScanResult ScanForValue(
                 // FString / FName / FText -- resolve to UTF-8 via Ubel
                 // helpers. Empty resolution returns "" and we still test
                 // it (target may be "" for Exact-empty searches).
-                if (dt == ValueScan::DataType::FString) {
+                if (dt == Radar::DataType::FString) {
                     readStr = Ubel::ReadFStringAt(obj, sf.offset);
-                } else if (dt == ValueScan::DataType::FName) {
+                } else if (dt == Radar::DataType::FName) {
                     readStr = Ubel::ReadFNameAt(obj, sf.offset);
                 } else {
                     readStr = Ubel::ReadFTextStringAt(obj, sf.offset);
                 }
-                if (!ValueScan::CompareStringPredicate(st, readStr, targetString, caseSensitive)) continue;
+                if (!Radar::CompareStringPredicate(st, readStr, targetString, caseSensitive)) continue;
                 emitCandidate(valueAddr, ensureDescriptor(sf), -1, nullptr, 0, &readStr);
                 continue;
             }
@@ -6039,7 +6039,7 @@ ValueScanResult ScanForValue(
                 // struct start. Caller's targetBytes already encodes
                 // the 12-byte (X,Y,Z) layout.
                 if (!readBody(sf.offset, readBuf, 12)) continue;
-                if (!ValueScan::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
+                if (!Radar::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
                 emitCandidate(valueAddr, ensureDescriptor(sf), -1, readBuf, 12, nullptr);
                 continue;
             }
@@ -6049,13 +6049,13 @@ ValueScanResult ScanForValue(
                 // if the value can't fit it. Compare with the per-field
                 // DataType so an int field compares as int, a float field
                 // as float — no byte-reinterpret.
-                ValueScan::DataType memberDt;
+                Radar::DataType memberDt;
                 const uint8_t* mtgt = nullptr;
                 const uint8_t* mtgt2 = nullptr;
                 if (!multiResolve(sf.typeName, memberDt, mtgt, mtgt2)) continue;
-                size_t msz = ValueScan::SizeOf(memberDt);
+                size_t msz = Radar::SizeOf(memberDt);
                 if (!readBody(sf.offset, readBuf, msz)) continue;
-                if (!ValueScan::ComparePredicate(memberDt, st, readBuf, mtgt, mtgt2, tolerance)) continue;
+                if (!Radar::ComparePredicate(memberDt, st, readBuf, mtgt, mtgt2, tolerance)) continue;
                 emitCandidate(valueAddr, ensureDescriptor(sf), -1, readBuf, msz, nullptr);
                 continue;
             }
@@ -6067,12 +6067,12 @@ ValueScanResult ScanForValue(
             // (0/1), not the raw shared byte, so Changed /
             // Unchanged refines compare on a stable value even
             // when sibling bits flip.
-            if (dt == ValueScan::DataType::Bool
+            if (dt == Radar::DataType::Bool
                 && sf.boolFieldMask != 0 && sf.boolFieldMask != 0xFF) {
                 readBuf[0] = ((readBuf[0] & sf.boolFieldMask) != 0) ? 1 : 0;
             }
 
-            if (!ValueScan::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
+            if (!Radar::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
             emitCandidate(valueAddr, ensureDescriptor(sf), -1, readBuf, dtSize, nullptr);
         }
 
@@ -6149,7 +6149,7 @@ ValueScanResult ScanForValue(
                     std::chrono::steady_clock::now() - t0).count();
     result.stats.durationMs = static_cast<int64_t>(dtms);
 
-    LOG_INFO("ValueScan: First Scan complete -- %d candidates in %lld ms (%d objects, %d classes with matching fields, %d thread(s)%s)",
+    LOG_INFO("Radar: First Scan complete -- %d candidates in %lld ms (%d objects, %d classes with matching fields, %d thread(s)%s)",
              static_cast<int>(result.candidates.size()),
              static_cast<long long>(dtms),
              result.stats.scannedObjects,
@@ -6159,56 +6159,56 @@ ValueScanResult ScanForValue(
 }
 
 ValueScanStats RefineCandidates(
-    ValueScan::DataType                            dt,
-    ValueScan::ScanType                            st,
+    Radar::DataType                            dt,
+    Radar::ScanType                            st,
     const uint8_t*                                 targetBytes,
     const uint8_t*                                 target2Bytes,
-    std::vector<ValueScan::Candidate>&             candidates,
-    const std::vector<ValueScan::FieldDescriptor>& descriptors,
+    std::vector<Radar::Candidate>&             candidates,
+    const std::vector<Radar::FieldDescriptor>& descriptors,
     double                                         tolerance,
     const std::string&                             targetString,
     bool                                           caseSensitive,
-    const ValueScan::NumericTargetSet*             multiTargets,
-    const ValueScan::NumericTargetSet*             multiTargets2)
+    const Radar::NumericTargetSet*             multiTargets,
+    const Radar::NumericTargetSet*             multiTargets2)
 {
     ValueScanStats stats;
     auto t0 = std::chrono::steady_clock::now();
 
-    const bool isString = ValueScan::IsStringDataType(dt);
-    const bool isVector = ValueScan::IsVectorDataType(dt);
-    const bool isMulti  = ValueScan::IsMultiNumericDataType(dt);
-    const size_t dtSize = ValueScan::SizeOf(dt);
+    const bool isString = Radar::IsStringDataType(dt);
+    const bool isVector = Radar::IsVectorDataType(dt);
+    const bool isMulti  = Radar::IsMultiNumericDataType(dt);
+    const size_t dtSize = Radar::SizeOf(dt);
     if (!isString && !isMulti && dtSize == 0) return stats;
 
-    const bool usePrev = ValueScan::IsPrevValueScanType(st);
+    const bool usePrev = Radar::IsPrevValueScanType(st);
     if (isMulti) {
         // Targeted multi-numeric refine needs the pre-parsed target set;
         // prev-value predicates compare against each candidate's snapshot.
         if (!usePrev && (!multiTargets || multiTargets->entries.empty())) return stats;
-        if (!usePrev && st == ValueScan::ScanType::Between
+        if (!usePrev && st == Radar::ScanType::Between
             && (!multiTargets2 || multiTargets2->entries.empty())) return stats;
     } else if (!isString) {
         if (!usePrev && !targetBytes) return stats;
-        if (st == ValueScan::ScanType::Between && !target2Bytes) return stats;
+        if (st == Radar::ScanType::Between && !target2Bytes) return stats;
     }
 
     const int32_t initialSize = static_cast<int32_t>(candidates.size());
 
-    std::vector<ValueScan::Candidate> kept;
+    std::vector<Radar::Candidate> kept;
     kept.reserve(candidates.size());
 
     for (auto& c : candidates) {
         // Per-(class,field) metadata (fieldType / boolFieldMask) lives in
         // the shared descriptor pool the candidate indexes into (V3-A).
-        const ValueScan::FieldDescriptor& desc = descriptors[c.descriptorIdx];
+        const Radar::FieldDescriptor& desc = descriptors[c.descriptorIdx];
         if (isMulti) {
             // Re-resolve this candidate's own width from its stored
             // fieldType (concrete property type, e.g. "FloatProperty").
             // Targeted predicates compare against the matching target
             // entry; prev-value predicates against the snapshot.
-            ValueScan::DataType memberDt;
-            if (!ValueScan::TryDataTypeFromPropertyTypeName(desc.fieldType, memberDt)) continue;
-            size_t msz = ValueScan::SizeOf(memberDt);
+            Radar::DataType memberDt;
+            if (!Radar::TryDataTypeFromPropertyTypeName(desc.fieldType, memberDt)) continue;
+            size_t msz = Radar::SizeOf(memberDt);
             uint8_t readBuf[16] = {};
             if (!Macht::ReadBytesSafe(c.addr, readBuf, msz)) continue;
 
@@ -6219,12 +6219,12 @@ ValueScanStats RefineCandidates(
             } else {
                 cmpTarget = multiTargets ? multiTargets->Find(memberDt) : nullptr;
                 if (!cmpTarget) continue;  // value can't fit this width
-                if (st == ValueScan::ScanType::Between) {
+                if (st == Radar::ScanType::Between) {
                     cmp2 = multiTargets2 ? multiTargets2->Find(memberDt) : nullptr;
                     if (!cmp2) continue;
                 }
             }
-            if (!ValueScan::ComparePredicate(memberDt, st, readBuf, cmpTarget, cmp2, tolerance)) continue;
+            if (!Radar::ComparePredicate(memberDt, st, readBuf, cmpTarget, cmp2, tolerance)) continue;
             std::memcpy(c.prevValue, readBuf, msz);
             kept.push_back(std::move(c));
             continue;
@@ -6259,7 +6259,7 @@ ValueScanStats RefineCandidates(
             }
 
             const std::string& cmpTarget = usePrev ? c.prevStr : targetString;
-            if (!ValueScan::CompareStringPredicate(st, cur, cmpTarget, caseSensitive)) continue;
+            if (!Radar::CompareStringPredicate(st, cur, cmpTarget, caseSensitive)) continue;
 
             c.prevStr = std::move(cur);
             kept.push_back(std::move(c));
@@ -6270,7 +6270,7 @@ ValueScanStats RefineCandidates(
             uint8_t readBuf[16] = {};
             if (!Macht::ReadBytesSafe(c.addr, readBuf, 12)) continue;
             const uint8_t* cmpTarget = usePrev ? c.prevValue : targetBytes;
-            if (!ValueScan::CompareVectorPredicate(st, readBuf, cmpTarget, target2Bytes, tolerance)) continue;
+            if (!Radar::CompareVectorPredicate(st, readBuf, cmpTarget, target2Bytes, tolerance)) continue;
             std::memcpy(c.prevValue, readBuf, 12);
             kept.push_back(std::move(c));
             continue;
@@ -6279,13 +6279,13 @@ ValueScanStats RefineCandidates(
         uint8_t readBuf[16] = {};
         if (!Macht::ReadBytesSafe(c.addr, readBuf, dtSize)) continue;
 
-        if (dt == ValueScan::DataType::Bool
+        if (dt == Radar::DataType::Bool
             && desc.boolFieldMask != 0 && desc.boolFieldMask != 0xFF) {
             readBuf[0] = ((readBuf[0] & desc.boolFieldMask) != 0) ? 1 : 0;
         }
 
         const uint8_t* cmpTarget = usePrev ? c.prevValue : targetBytes;
-        if (!ValueScan::ComparePredicate(dt, st, readBuf, cmpTarget, target2Bytes, tolerance)) continue;
+        if (!Radar::ComparePredicate(dt, st, readBuf, cmpTarget, target2Bytes, tolerance)) continue;
 
         std::memcpy(c.prevValue, readBuf, dtSize);
         kept.push_back(std::move(c));
@@ -6298,7 +6298,7 @@ ValueScanStats RefineCandidates(
                     std::chrono::steady_clock::now() - t0).count();
     stats.durationMs = static_cast<int64_t>(dtms);
 
-    LOG_INFO("ValueScan: Refine st=%d (usePrev=%d): %d -> %d candidates in %lld ms",
+    LOG_INFO("Radar: Refine st=%d (usePrev=%d): %d -> %d candidates in %lld ms",
              static_cast<int>(st), usePrev ? 1 : 0,
              initialSize, static_cast<int>(candidates.size()),
              static_cast<long long>(dtms));
@@ -6329,20 +6329,20 @@ std::string RenderInnerKey(const FieldInfo& kf, uintptr_t elemAddr) {
     if (kf.TypeName == "NameProperty")
         return Ubel::ReadFNameAt(elemAddr, kf.Offset);
 
-    ValueScan::DataType dt;
-    if (ValueScan::TryDataTypeFromPropertyTypeName(kf.TypeName, dt)) {
-        size_t sz = ValueScan::SizeOf(dt);
+    Radar::DataType dt;
+    if (Radar::TryDataTypeFromPropertyTypeName(kf.TypeName, dt)) {
+        size_t sz = Radar::SizeOf(dt);
         uint8_t buf[8] = {};
         if (sz >= 1 && sz <= 8 && Macht::ReadBytesSafe(elemAddr + kf.Offset, buf, sz)) {
             switch (dt) {
-                case ValueScan::DataType::Int8:   return std::to_string(static_cast<int>(static_cast<int8_t>(buf[0])));
-                case ValueScan::DataType::UInt8:  return std::to_string(static_cast<unsigned>(buf[0]));
-                case ValueScan::DataType::Int16:  { int16_t v;  std::memcpy(&v, buf, 2); return std::to_string(v); }
-                case ValueScan::DataType::UInt16: { uint16_t v; std::memcpy(&v, buf, 2); return std::to_string(v); }
-                case ValueScan::DataType::Int32:  { int32_t v;  std::memcpy(&v, buf, 4); return std::to_string(v); }
-                case ValueScan::DataType::UInt32: { uint32_t v; std::memcpy(&v, buf, 4); return std::to_string(v); }
-                case ValueScan::DataType::Int64:  { int64_t v;  std::memcpy(&v, buf, 8); return std::to_string(v); }
-                case ValueScan::DataType::UInt64: { uint64_t v; std::memcpy(&v, buf, 8); return std::to_string(v); }
+                case Radar::DataType::Int8:   return std::to_string(static_cast<int>(static_cast<int8_t>(buf[0])));
+                case Radar::DataType::UInt8:  return std::to_string(static_cast<unsigned>(buf[0]));
+                case Radar::DataType::Int16:  { int16_t v;  std::memcpy(&v, buf, 2); return std::to_string(v); }
+                case Radar::DataType::UInt16: { uint16_t v; std::memcpy(&v, buf, 2); return std::to_string(v); }
+                case Radar::DataType::Int32:  { int32_t v;  std::memcpy(&v, buf, 4); return std::to_string(v); }
+                case Radar::DataType::UInt32: { uint32_t v; std::memcpy(&v, buf, 4); return std::to_string(v); }
+                case Radar::DataType::Int64:  { int64_t v;  std::memcpy(&v, buf, 8); return std::to_string(v); }
+                case Radar::DataType::UInt64: { uint64_t v; std::memcpy(&v, buf, 8); return std::to_string(v); }
                 default: break;
             }
         }
@@ -6361,12 +6361,12 @@ std::string RenderInnerKey(const FieldInfo& kf, uintptr_t elemAddr) {
 // which key on array_field + elem_index, get deep support with no schema change.
 // Leaf-container elements (TArray<int> etc.) are captured too (leaf name "").
 void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
-                         ValueScan::DataType numericScope, int32_t arrayCap,
+                         Radar::DataType numericScope, int32_t arrayCap,
                          std::vector<Aura::SnapshotArray>& out) {
     if (!obj || !cls) return;
     if (arrayCap <= 0) arrayCap = 256;
 
-    const auto& members = ValueScan::MultiNumericMembers(numericScope);
+    const auto& members = Radar::MultiNumericMembers(numericScope);
     if (members.empty()) return;   // not a meta scope -> capture nothing
 
     // Regroup the flat leaf stream back into SnapshotArray{field, elements[]}.
@@ -6402,12 +6402,12 @@ void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
             // nested leaf-containers (Tunes[N], depth >= 2) too. (build 1204)
             if (lf.leafName.empty() && lf.depth < 2) return;
             // Snapshot tracks only numeric leaves within the configured scope.
-            ValueScan::DataType ldt;
-            if (!ValueScan::TryDataTypeFromPropertyTypeName(lf.leafType, ldt)) return;
+            Radar::DataType ldt;
+            if (!Radar::TryDataTypeFromPropertyTypeName(lf.leafType, ldt)) return;
             bool inScope = false;
-            for (ValueScan::DataType m : members) if (m == ldt) { inScope = true; break; }
+            for (Radar::DataType m : members) if (m == ldt) { inScope = true; break; }
             if (!inScope) return;
-            size_t sz = ValueScan::SizeOf(ldt);
+            size_t sz = Radar::SizeOf(ldt);
             if (sz == 0 || sz > 8) return;
             uint8_t buf[8] = {};
             if (!Macht::ReadBytesSafe(lf.leafAddr, buf, sz)) return;
@@ -6434,7 +6434,7 @@ void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
                     std::vector<std::string> types, names;
                     types.reserve(eci.Fields.size()); names.reserve(eci.Fields.size());
                     for (const auto& ff : eci.Fields) { types.push_back(ff.TypeName); names.push_back(ff.Name); }
-                    int kIdx = ValueScan::SelectArrayInnerKey(types, names);
+                    int kIdx = Radar::SelectArrayInnerKey(types, names);
                     if (kIdx >= 0 && kIdx < static_cast<int>(eci.Fields.size())) {
                         el.keyName  = eci.Fields[kIdx].Name;
                         el.keyValue = RenderInnerKey(eci.Fields[kIdx], lf.elemBaseAddr);
@@ -6456,7 +6456,7 @@ void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
 
 SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
                                          bool gameOnly,
-                                         ValueScan::DataType numericScope,
+                                         Radar::DataType numericScope,
                                          int32_t arrayCap) {
     SnapshotChunkResult result;
     const int32_t total = GetCount();
@@ -6495,7 +6495,7 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
         typeNames.reserve(ci.Fields.size());
         for (const auto& f : ci.Fields) typeNames.push_back(f.TypeName);
 
-        auto picks = ValueScan::SelectSnapshotNumericFields(typeNames, numericScope);
+        auto picks = Radar::SelectSnapshotNumericFields(typeNames, numericScope);
 
         SnapshotObject so;
         so.index     = i;  // GObjects index == logical slot index
@@ -6509,7 +6509,7 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
         // Top-level numeric scalar fields.
         for (const auto& p : picks) {
             const auto& fi = ci.Fields[p.fieldIndex];
-            size_t sz = ValueScan::SizeOf(p.dt);
+            size_t sz = Radar::SizeOf(p.dt);
             if (sz == 0 || sz > 8) continue;  // defensive; meta members are 1..8B
             uint8_t buf[8] = {};
             if (!Macht::ReadBytesSafe(obj + fi.Offset, buf, sz)) continue;
