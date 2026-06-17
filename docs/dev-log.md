@@ -14,6 +14,34 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-17 — GodMode: generic invincibility-bool scan (T2) + diagnostics (builds 1254-1256)
+
+Live-test on **SEED BATTLE DESTINY REMASTERED** showed GodMode flipping
+`bCanBeDamaged` successfully (`walk-0.log`: `set ON -> rc=1`, bit cleared +
+confirmed) but with **no in-game effect** — SEED is a custom battle framework
+(`LifeMSUnit : LifeUnitBase : UnitFwBaseUnit`) that doesn't gate damage on the
+engine's `CanBeDamaged()`.
+
+- **Diagnostics (1254):** `Solitar::ApplyGodNowLocked` logs the resolved pawn
+  address / class / offset / mask / before-after byte (once per toggle); the
+  re-assert worker logs (rate-limited) when it has to re-apply a reverted flag
+  (drift = the game keeps re-setting it → likely value-based health).
+- **Generic invincibility-bool scan (1256, T2):** instead of only `bCanBeDamaged`,
+  GodMode now reflection-scans the pawn's whole class hierarchy for
+  FBoolProperty fields matching a **universal keyword table**
+  (`Solitar::MatchProtectionBool` — invincib / invulnerab / immort / godmode /
+  unkillable / cannotdie / muteki / damageimmune / cantakedamage / canbedamaged,
+  each with a polarity) and applies ALL matches (ON = protect value, OFF = normal),
+  re-asserted by the worker, cached per pawn class. Zero per-game config — same
+  philosophy as `PropertyScoringTable`; the matched flags are logged. Conservative
+  set (excludes ambiguous deal-damage names like bare `candamage`/`nodamage`).
+  Auto-covers games exposing a named invincibility bool; purely value-based games
+  (HP number) still need Value Search + Freeze (generic auto-HP-freeze "T3"
+  considered, deferred by the user). +19 dll_helpers assertions (matcher polarity)
+  → 567. ⚠ in-game live-verify pending.
+
+-----
+
 ## 2026-06-17 — GodMode (Solitar): force AActor::bCanBeDamaged, with Lua mailbox on/off (build 1251)
 
 UE4/5-wide damage immunity, zero per-game config. Design contract +

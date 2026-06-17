@@ -30,10 +30,12 @@
 #include "Ubel.h"
 
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 // &GWorld — deref once for UWorld* (defined in Frieren.cpp; same as Wirbel).
 extern uintptr_t g_cachedGWorld;
@@ -56,6 +58,22 @@ std::mutex s_mutex;
 std::thread       s_worker;
 std::mutex        s_workerMutex;
 std::atomic<bool> s_workerStop{false};
+
+// T2 generic scan: cached protection-bool targets for the current pawn class —
+// bCanBeDamaged + every reflected invincibility bool matched by
+// MatchProtectionBool. Rebuilt only when the resolved pawn class changes (the
+// offsets/masks are class-stable, so the worker reuses them across ticks).
+// Guarded by s_mutex (only touched inside ApplyGodNowLocked).
+struct BoolTarget {
+    int32_t     fieldOffset = 0;        // Offset_Internal of the property in the object
+    uint8_t     byteOff = 0;            // ByteOffset within the FBoolProperty
+    uint8_t     mask = 0;              // FieldMask (single bit)
+    bool        protect = false;       // value written when GodMode is ON
+    bool        isCanBeDamaged = false; // the canonical badge indicator
+    std::string name;
+};
+std::vector<BoolTarget> s_targets;
+uintptr_t               s_targetsClass = 0;
 
 // ---- low-level reads (copied from Wirbel; public APIs only) ----
 
@@ -154,10 +172,30 @@ int32_t ResolvePawnRef(PawnRef& out) {
     return PR_OK;
 }
 
-// Resolve a reflected FBoolProperty down to a single byte address + bit mask.
-// Generalized from Wirbel::ResolveCursorBit: FindField only surfaces FieldMask
-// (not ByteOffset), so the [FieldSize, ByteOffset, ByteMask, FieldMask] layout
-// is read directly at fi.Address + FBOOLPROP_FIELDSIZE (probed ±4/±8).
+// Read an FBoolProperty's [FieldSize, ByteOffset, ByteMask, FieldMask] layout from
+// the FProperty address (probed ±4/±8, same as Wirbel::ResolveCursorBit). FindField
+// only surfaces FieldMask, so the within-byte offset must be read here directly.
+bool ReadBoolLayout(uintptr_t fpropAddr, uint8_t& byteOff, uint8_t& mask) {
+    if (!fpropAddr) return false;
+    int baseOff = DynOff::bUseFProperty ? DynOff::FBOOLPROP_FIELDSIZE
+                                        : DynOff::UBOOLPROP_FIELDSIZE;
+    for (int tryOff : { baseOff, baseOff - 4, baseOff + 4, baseOff + 8, baseOff - 8 }) {
+        if (tryOff < 0) continue;
+        uint8_t b[4] = {};
+        if (!Macht::ReadBytesSafe(fpropAddr + tryOff, b, 4)) continue;
+        uint8_t fieldSize = b[0], bo = b[1], bm = b[2], fm = b[3];
+        if (fieldSize == 1 && fm && (fm & (fm - 1)) == 0
+            && bo <= 7 && bm && (bm & (bm - 1)) == 0) {
+            byteOff = bo;
+            mask = fm;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Resolve a reflected FBoolProperty (by name) down to a single byte address + bit
+// mask on a live object. Generalized from Wirbel::ResolveCursorBit.
 int32_t ResolveActorBoolBit(uintptr_t obj, uintptr_t classAddr,
                             const char* exact, const char* contains,
                             uintptr_t& byteAddr, uint8_t& mask) {
@@ -166,63 +204,106 @@ int32_t ResolveActorBoolBit(uintptr_t obj, uintptr_t classAddr,
     if (!Ubel::FindField(classAddr, exact, contains, nullptr, "BoolProperty", fi)
         || !fi.Address)
         return PR_ERR_REFLECT;
-    int baseOff = DynOff::bUseFProperty ? DynOff::FBOOLPROP_FIELDSIZE
-                                        : DynOff::UBOOLPROP_FIELDSIZE;
-    for (int tryOff : { baseOff, baseOff - 4, baseOff + 4, baseOff + 8, baseOff - 8 }) {
-        if (tryOff < 0) continue;
-        uint8_t b[4] = {};
-        if (!Macht::ReadBytesSafe(fi.Address + tryOff, b, 4)) continue;
-        uint8_t fieldSize = b[0], byteOff = b[1], byteMask = b[2], fieldMask = b[3];
-        if (fieldSize == 1 && fieldMask && (fieldMask & (fieldMask - 1)) == 0
-            && byteOff <= 7 && byteMask && (byteMask & (byteMask - 1)) == 0) {
-            byteAddr = obj + static_cast<uintptr_t>(fi.Offset) + byteOff;
-            mask = fieldMask;
-            return PR_OK;
-        }
+    uint8_t byteOff = 0;
+    if (!ReadBoolLayout(fi.Address, byteOff, mask)) return PR_ERR_REFLECT;
+    byteAddr = obj + static_cast<uintptr_t>(fi.Offset) + byteOff;
+    return PR_OK;
+}
+
+std::string ToLower(const std::string& s) {
+    std::string r = s;
+    for (char& c : r) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return r;
+}
+
+// T2 generic scan: walk the pawn class (incl. inherited fields) for damage /
+// invincibility FBoolProperty fields and cache them as protection targets.
+// Universal keyword table (MatchProtectionBool) — no per-game config. Rebuilt
+// only when the pawn class changes. Logs the discovered flags when verbose
+// (so the user sees exactly what generic analysis found on their game).
+void BuildTargets(uintptr_t pawnClass, bool verbose) {
+    s_targets.clear();
+    s_targetsClass = pawnClass;
+    if (!pawnClass) return;
+    ClassInfo ci = Ubel::WalkClassEx(pawnClass);
+    for (const auto& f : ci.Fields) {
+        if (f.TypeName != "BoolProperty" || !f.Address) continue;
+        std::string lower = ToLower(f.Name);
+        bool protect = false;
+        if (!MatchProtectionBool(lower, protect)) continue;
+        uint8_t byteOff = 0, mask = 0;
+        if (!ReadBoolLayout(f.Address, byteOff, mask)) continue;
+        BoolTarget t;
+        t.fieldOffset = f.Offset;
+        t.byteOff = byteOff;
+        t.mask = mask;
+        t.protect = protect;
+        t.isCanBeDamaged = (lower.find("canbedamaged") != std::string::npos);
+        t.name = f.Name;
+        s_targets.push_back(std::move(t));
+        if (s_targets.size() >= 16) break;   // sanity cap
     }
-    return PR_ERR_REFLECT;
+    if (verbose) {
+        LOG_INFO("GodMode: scanned class 0x%llX ('%s') -> %zu protection bool(s)",
+                 (unsigned long long)pawnClass, Ubel::GetName(pawnClass).c_str(),
+                 s_targets.size());
+        for (const auto& t : s_targets)
+            LOG_INFO("GodMode:   '%s' @+0x%X mask=0x%02X protect=%d%s",
+                     t.name.c_str(), t.fieldOffset, t.mask, t.protect ? 1 : 0,
+                     t.isCanBeDamaged ? " [canonical]" : "");
+    }
 }
 
 // Apply the desired GodMode state to the live pawn. Caller MUST hold s_mutex.
-// Returns the OBSERVED godmode state (1 = immune, 0 = can be damaged) or a
-// negative ProtectResult. verbose: log the resolved pawn/class/offset/mask +
-// before/after byte (once per explicit toggle — diagnostics). outDrifted (opt):
-// set true when the live bit differed from desired on entry (the game reverted
-// our write between ticks — a strong hint the flag isn't its damage gate).
+// Writes EVERY cached protection target (bCanBeDamaged + any invincibility bool
+// the T2 scan matched on the pawn class): ON ⇒ each bool's "protect" value, OFF ⇒
+// the inverse (its normal-gameplay value). Returns the OBSERVED godmode state
+// (1 = immune, 0 = can be damaged) from the canonical bCanBeDamaged target, or a
+// negative ProtectResult. verbose: log the scan + summary (once per explicit
+// toggle). outDrifted (opt): set true when any target had drifted from the
+// desired value on entry (the game reverted our write — a hint it uses
+// value-based health, not these flags).
 int32_t ApplyGodNowLocked(bool verbose, bool* outDrifted = nullptr) {
     if (outDrifted) *outDrifted = false;
     PawnRef p;
     int32_t rc = ResolvePawnRef(p);
     if (rc != PR_OK) return rc;
 
-    uintptr_t byteAddr = 0;
-    uint8_t mask = 0;
-    rc = ResolveActorBoolBit(p.pawn, p.pawnClass, "bCanBeDamaged", "CanBeDamaged",
-                             byteAddr, mask);
-    if (rc != PR_OK) return rc;
+    // Rebuild the protection-target set when the pawn class changes (T2 scan).
+    if (p.pawnClass != s_targetsClass)
+        BuildTargets(p.pawnClass, verbose);
+    if (s_targets.empty())
+        return PR_ERR_REFLECT;   // not even bCanBeDamaged resolved
 
-    uint8_t b = 0;
-    if (!Macht::ReadSafe(byteAddr, b)) return PR_ERR_REFLECT;
-    // GodMode ON ⇒ bCanBeDamaged FALSE (clear the bit). Write only on drift.
-    bool desiredProp = !s_wantGod.load();
-    bool curProp = (b & mask) != 0;
-    if (outDrifted) *outDrifted = (curProp != desiredProp);
-    uint8_t nb = ApplyBoolBit(b, mask, desiredProp);
-    if (nb != b && !Macht::WriteBytes(byteAddr, &nb, 1)) return PR_ERR_WRITE;
+    bool desiredOn = s_wantGod.load();
+    bool anyDrift = false;
+    int32_t observed = desiredOn ? 1 : 0;   // fallback if no canonical target
 
-    uint8_t after = 0;
-    bool propVal = Macht::ReadSafe(byteAddr, after) ? ((after & mask) != 0) : desiredProp;
-    if (verbose) {
-        std::string cn = Ubel::GetName(p.pawnClass);
-        LOG_INFO("GodMode: pawn=0x%llX class='%s' bCanBeDamaged @+0x%X mask=0x%02X "
-                 "before=%d after=%d (want=%d -> godmode=%d). If damage still "
-                 "applies, the game doesn't gate on bCanBeDamaged (custom health).",
-                 (unsigned long long)p.pawn, cn.c_str(),
-                 (unsigned)(byteAddr - p.pawn), mask,
-                 curProp ? 1 : 0, propVal ? 1 : 0,
-                 s_wantGod.load() ? 1 : 0, propVal ? 0 : 1);
+    for (const auto& t : s_targets) {
+        uintptr_t byteAddr = p.pawn + static_cast<uintptr_t>(t.fieldOffset) + t.byteOff;
+        uint8_t b = 0;
+        if (!Macht::ReadSafe(byteAddr, b)) continue;
+        bool want = desiredOn ? t.protect : !t.protect;   // ON = protect, OFF = normal
+        if (((b & t.mask) != 0) != want) {
+            anyDrift = true;
+            uint8_t nb = ApplyBoolBit(b, t.mask, want);
+            if (!Macht::WriteBytes(byteAddr, &nb, 1)) continue;
+        }
+        if (t.isCanBeDamaged) {
+            uint8_t after = 0;
+            bool canDmg = Macht::ReadSafe(byteAddr, after) ? ((after & t.mask) != 0)
+                                                           : !desiredOn;
+            observed = canDmg ? 0 : 1;   // godmode = NOT can-be-damaged
+        }
     }
-    return propVal ? 0 : 1;   // godmode observed = NOT can-be-damaged
+    if (outDrifted) *outDrifted = anyDrift;
+    if (verbose)
+        LOG_INFO("GodMode: applied %zu protection bool(s) on pawn=0x%llX class='%s' "
+                 "(want=%d -> godmode=%d). If damage still applies, the game uses "
+                 "value-based health — freeze HP in Value Search instead.",
+                 s_targets.size(), (unsigned long long)p.pawn,
+                 Ubel::GetName(p.pawnClass).c_str(), desiredOn ? 1 : 0, observed);
+    return observed;
 }
 
 // ---- re-assert worker ----
@@ -248,9 +329,9 @@ void WorkerLoop() {
             // Drift = the game re-set bCanBeDamaged since our last tick → the
             // flag is almost certainly NOT what gates its damage.
             if (driftCount <= 5 || driftCount % 100 == 0)
-                LOG_WARN("GodMode: re-assert re-cleared bCanBeDamaged (drift #%d) — "
-                         "the game keeps re-setting it; it likely does not gate "
-                         "damage on this flag (use Value Search + Freeze on HP).",
+                LOG_WARN("GodMode: re-asserted protection flag(s) (drift #%d) — the "
+                         "game keeps re-setting them; it likely uses value-based "
+                         "health, not these flags (use Value Search + Freeze on HP).",
                          driftCount);
         }
     }

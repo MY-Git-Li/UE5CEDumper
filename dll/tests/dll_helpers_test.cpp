@@ -1856,6 +1856,37 @@ static void Test_Solitar_ApplyBoolBit() {
     }
 }
 
+// ----- Solitar::MatchProtectionBool (T2 generic invincibility-flag matcher) ---
+// Polarity is the bug-prone part: a wrong value would ENABLE damage. Lock the
+// keyword set + protect-value for each known flag, and confirm unrelated /
+// ambiguous names (deal-damage, visibility) are NOT matched.
+
+static void Test_Solitar_MatchProtectionBool() {
+    bool p = false;
+    // Positive (protect = true): set the flag ON for godmode.
+    EXPECT("binvincible matched",  Solitar::MatchProtectionBool("binvincible", p));
+    EXPECT("binvincible protect=true", p == true);
+    EXPECT("bisinvulnerable matched", Solitar::MatchProtectionBool("bisinvulnerable", p));
+    EXPECT("invulnerable protect=true (NOT read as vulnerable)", p == true);
+    EXPECT("bisimmortal matched",  Solitar::MatchProtectionBool("bisimmortal", p));
+    EXPECT("immortal protect=true", p == true);
+    EXPECT("bmuteki matched",      Solitar::MatchProtectionBool("bmuteki", p));
+    EXPECT("muteki protect=true",  p == true);
+    EXPECT("bdamageimmune matched", Solitar::MatchProtectionBool("bdamageimmune", p));
+    EXPECT("damageimmune protect=true", p == true);
+    // Negative (protect = false): clear the flag for godmode.
+    EXPECT("bcanbedamaged matched", Solitar::MatchProtectionBool("bcanbedamaged", p));
+    EXPECT("canbedamaged protect=false", p == false);
+    EXPECT("bcantakedamage matched", Solitar::MatchProtectionBool("bcantakedamage", p));
+    EXPECT("cantakedamage protect=false", p == false);
+    // Must NOT match: ambiguous deal-damage flags + unrelated bools.
+    EXPECT("bcandamage NOT matched (deal-damage)", !Solitar::MatchProtectionBool("bcandamage", p));
+    EXPECT("bnodamage NOT matched (ambiguous)",    !Solitar::MatchProtectionBool("bnodamage", p));
+    EXPECT("bhidden NOT matched",   !Solitar::MatchProtectionBool("bhidden", p));
+    EXPECT("bvisible NOT matched",  !Solitar::MatchProtectionBool("bvisible", p));
+    EXPECT("breplicates NOT matched", !Solitar::MatchProtectionBool("breplicates", p));
+}
+
 int main() {
     std::printf("dll_helpers_test (Renge + Scharf + Radar)\n");
     std::printf("------------------------------------------\n");
@@ -1951,6 +1982,7 @@ int main() {
 
     // Solitar GodMode — FBoolProperty single-bit read-modify-write
     Test_Solitar_ApplyBoolBit();
+    Test_Solitar_MatchProtectionBool();
 
     std::printf("------------------------------------------\n");
     std::printf("Pass: %d   Fail: %d\n", g_pass, g_fail);

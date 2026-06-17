@@ -10,6 +10,7 @@
 // ============================================================
 
 #include <cstdint>
+#include <string>
 
 namespace Solitar {
 
@@ -36,6 +37,36 @@ struct State {
 inline uint8_t ApplyBoolBit(uint8_t cur, uint8_t mask, bool value) {
     return value ? static_cast<uint8_t>(cur | mask)
                  : static_cast<uint8_t>(cur & ~mask);
+}
+
+// Generic damage/invincibility flag matcher (T2 — docs/godmode-spec.md §5.2a).
+// Given an ALREADY-LOWERCASED reflected bool property name, return true when it
+// is a known damage/invincibility flag and set outProtect to the value that
+// means "protected" (what GodMode ON writes; OFF writes the inverse). Universal
+// keyword table — no per-game config, same philosophy as PropertyScoringTable.
+// Pure — covered by dll_helpers_test. Deliberately conservative: only
+// unambiguous receive-damage / invincibility terms (NOT bare "candamage" /
+// "nodamage" / "damageable", which can mean "deals damage" on a pawn).
+inline bool MatchProtectionBool(const std::string& nameLower, bool& outProtect) {
+    struct Rule { const char* kw; bool protect; };
+    static const Rule kRules[] = {
+        { "invulnerab",      true  },  // bInvulnerable / bIsInvulnerable
+        { "invincib",        true  },  // bInvincible / bIsInvincible
+        { "immort",          true  },  // bImmortal / bIsImmortal
+        { "godmode",         true  },  // bGodMode
+        { "unkillable",      true  },
+        { "cannotdie",       true  },
+        { "cannotbekilled",  true  },
+        { "deathless",       true  },
+        { "muteki",          true  },  // 無敵 (romaji) — common in JP titles
+        { "damageimmun",     true  },  // bDamageImmune / DamageImmunity
+        { "notakedamage",    true  },
+        { "cantakedamage",   false },  // false = cannot take damage
+        { "canbedamaged",    false },  // AActor::bCanBeDamaged
+    };
+    for (const auto& r : kRules)
+        if (nameLower.find(r.kw) != std::string::npos) { outProtect = r.protect; return true; }
+    return false;
 }
 
 // Turn GodMode on/off. GodMode ON ⇒ AActor::bCanBeDamaged set FALSE. Applies to
