@@ -185,8 +185,12 @@ int32_t ResolveActorBoolBit(uintptr_t obj, uintptr_t classAddr,
 
 // Apply the desired GodMode state to the live pawn. Caller MUST hold s_mutex.
 // Returns the OBSERVED godmode state (1 = immune, 0 = can be damaged) or a
-// negative ProtectResult.
-int32_t ApplyGodNowLocked() {
+// negative ProtectResult. verbose: log the resolved pawn/class/offset/mask +
+// before/after byte (once per explicit toggle — diagnostics). outDrifted (opt):
+// set true when the live bit differed from desired on entry (the game reverted
+// our write between ticks — a strong hint the flag isn't its damage gate).
+int32_t ApplyGodNowLocked(bool verbose, bool* outDrifted = nullptr) {
+    if (outDrifted) *outDrifted = false;
     PawnRef p;
     int32_t rc = ResolvePawnRef(p);
     if (rc != PR_OK) return rc;
@@ -201,11 +205,23 @@ int32_t ApplyGodNowLocked() {
     if (!Macht::ReadSafe(byteAddr, b)) return PR_ERR_REFLECT;
     // GodMode ON ⇒ bCanBeDamaged FALSE (clear the bit). Write only on drift.
     bool desiredProp = !s_wantGod.load();
+    bool curProp = (b & mask) != 0;
+    if (outDrifted) *outDrifted = (curProp != desiredProp);
     uint8_t nb = ApplyBoolBit(b, mask, desiredProp);
     if (nb != b && !Macht::WriteBytes(byteAddr, &nb, 1)) return PR_ERR_WRITE;
 
     uint8_t after = 0;
     bool propVal = Macht::ReadSafe(byteAddr, after) ? ((after & mask) != 0) : desiredProp;
+    if (verbose) {
+        std::string cn = Ubel::GetName(p.pawnClass);
+        LOG_INFO("GodMode: pawn=0x%llX class='%s' bCanBeDamaged @+0x%X mask=0x%02X "
+                 "before=%d after=%d (want=%d -> godmode=%d). If damage still "
+                 "applies, the game doesn't gate on bCanBeDamaged (custom health).",
+                 (unsigned long long)p.pawn, cn.c_str(),
+                 (unsigned)(byteAddr - p.pawn), mask,
+                 curProp ? 1 : 0, propVal ? 1 : 0,
+                 s_wantGod.load() ? 1 : 0, propVal ? 0 : 1);
+    }
     return propVal ? 0 : 1;   // godmode observed = NOT can-be-damaged
 }
 
@@ -213,6 +229,7 @@ int32_t ApplyGodNowLocked() {
 
 void WorkerLoop() {
     LOG_INFO("GodMode: re-assert worker started (%d ms)", Grimoire::PROTECT_REASSERT_MS);
+    int driftCount = 0;
     while (!s_workerStop.load()) {
         // Sleep in slices so StopWorker() is responsive (join latency bounded).
         for (int slept = 0;
@@ -223,7 +240,19 @@ void WorkerLoop() {
 
         std::lock_guard<std::mutex> lk(s_mutex);
         if (!s_wantGod.load()) continue;   // toggled off between ticks
-        ApplyGodNowLocked();               // write-on-drift handled inside
+        bool drifted = false;
+        ApplyGodNowLocked(false, &drifted);   // write-on-drift handled inside
+        if (drifted) {
+            ++driftCount;
+            // Rate-limited: a game reverting the bit every frame would spam.
+            // Drift = the game re-set bCanBeDamaged since our last tick → the
+            // flag is almost certainly NOT what gates its damage.
+            if (driftCount <= 5 || driftCount % 100 == 0)
+                LOG_WARN("GodMode: re-assert re-cleared bCanBeDamaged (drift #%d) — "
+                         "the game keeps re-setting it; it likely does not gate "
+                         "damage on this flag (use Value Search + Freeze on HP).",
+                         driftCount);
+        }
     }
     LOG_INFO("GodMode: re-assert worker stopped");
 }
@@ -245,7 +274,7 @@ int32_t SetGodMode(bool on) {
     {
         std::lock_guard<std::mutex> lk(s_mutex);
         s_wantGod.store(on);
-        rc = ApplyGodNowLocked();
+        rc = ApplyGodNowLocked(/*verbose=*/true);
     }
     // Start/stop the worker OUTSIDE s_mutex — StopWorker() joins a thread that
     // itself locks s_mutex, so joining under s_mutex would deadlock.
