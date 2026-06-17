@@ -853,6 +853,24 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             }
         };
 
+        // Wire ValueSearch -> InstanceFinder (the per-row "inst" button:
+        // pre-fill the hit's owning class + switch tab + auto-run the search,
+        // mirroring the Property Search / Game Class "finder" handoff above).
+        ValueSearch.NavigateToInstanceFinder += async (className) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.InstanceFinder; // Switch to Instance Finder tab
+                InstanceFinder.SearchClassName = className;
+                if (InstanceFinder.SearchCommand.CanExecute(null))
+                    await InstanceFinder.SearchCommand.ExecuteAsync(null);
+            }
+            catch (Exception ex)
+            {
+                _log.Error("ValueSearch NavigateToInstanceFinder handler error", ex);
+            }
+        };
+
         // Wire InterestingFunctions -> clipboard. The VM avoids holding
         // IPlatformService directly so its test stubs stay minimal; the
         // MainWindow knows the platform service and can do the actual

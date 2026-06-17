@@ -21,20 +21,6 @@ Open work only. **Read this when deciding what to do next.**
 
 ## ▶ Next up (genuinely actionable now)
 
-- **Solarpunk (stock UE 5.7) — re-test with current build to live-confirm the +0x08 path** —
-  Effort: **0** (verify only) · Risk: low. A reviewed build-**1060** log (2026-06-12, **one day
-  before** the build-1064 +0x08 fix) showed a broken dump: name resolution **45.9%**, init sanity
-  4/10, FUObjectItem mis-detected as 16-byte Object@+0x00 (chunk0 **bad>valid**), enum-detect
-  failed, `BP_MainPlayerController_C` 0 found — yet GObjects/GNames/GWorld all validated and
-  drilled objects walked clean. Solarpunk is stock UE5.7 (`UE507`, rokaplay GmbH, PE
-  `F14E48C508121000`) → exactly the Object@**+0x08** case (likely **Unpacked57**, 16-byte) that the
-  build-1064 two-pass detection targets but has **never been live-confirmed on a stock 5.7 game**.
-  Re-attach with the current build (~1256), expect ~95%+ name resolution + `item_obj_offset=0x08`;
-  if clean, add to [test-games.md](test-games.md) + README + [roadmap.md](roadmap.md). Also recheck
-  the GWorld deref (build 1060 gave a tiny `UWorld*=0x1C2D5` — possibly just menu state).
-  *Parent: UE5.7+ +0x08 two-pass detection shipped build 1064, PR #275 (dev-log 2026-06-13) —
-  "still needs live-confirm on a real stock-5.7+ game".*
-
 - **UE5.7+ packed FUObjectItem — live-verify + calibrate when a packed game appears** —
   Effort: **S** (mostly verify) · Risk: low (gated, last-resort only). Packed parsing shipped
   build 1108 but is **UNVERIFIED** (no `UE_ENABLE_FUOBJECT_ITEM_PACKING` game exists yet). When

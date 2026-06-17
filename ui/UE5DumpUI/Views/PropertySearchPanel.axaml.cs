@@ -1,7 +1,10 @@
+using System.Collections;
+using System.Collections.Generic;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input;
 using Avalonia.Threading;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 using UE5DumpUI.ViewModels;
 
@@ -9,9 +12,24 @@ namespace UE5DumpUI.Views;
 
 public partial class PropertySearchPanel : UserControl
 {
+    // AOT-safe sort comparers for the columns whose sort property isn't
+    // rooted by a column-level Binding: the three template columns (Scope /
+    // Property / Preview) and the Offset text column (sorts by PropOffset
+    // while it displays OffsetHex). Without these the header click is a
+    // silent no-op under AOT (aot-pitfalls.md §4.5).
+    private static readonly IReadOnlyDictionary<string, IComparer> ResultsSortComparers =
+        new Dictionary<string, IComparer>
+        {
+            ["InheritedByCount"] = DataGridSortComparers.Number<PropertySearchMatch>(r => r.InheritedByCount),
+            ["PropName"]         = DataGridSortComparers.Ordinal<PropertySearchMatch>(r => r.PropName),
+            ["PropOffset"]       = DataGridSortComparers.Number<PropertySearchMatch>(r => r.PropOffset),
+            ["Preview"]          = DataGridSortComparers.Ordinal<PropertySearchMatch>(r => r.Preview),
+        };
+
     public PropertySearchPanel()
     {
         InitializeComponent();
+        this.FindControl<DataGrid>("ResultsGrid")?.WireSortComparers(ResultsSortComparers);
         Loaded += OnPanelLoaded;
         DataContextChanged += OnDataContextChanged;
     }

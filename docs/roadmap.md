@@ -498,8 +498,22 @@ detection — wait for a real misdetection report before adding.
   `Game_SBDR\Binaries\Win64\SEED BATTLE DESTINY REMASTERED.exe`; internal
   UClasses use a `Life` prefix (`LifeGameInstance` 15 fields,
   `BP_LifeSaveData_C`). Bandai Namco (publisher=- — no thumbprint match).
+- **Solarpunk** ✅ (stock UE 5.7, ~149K objects, rokaplay, `version.dll` proxy,
+  build 1259 user logs 2026-06-17): the real stock-UE5.7 game that exposed +
+  live-confirmed the **`Object`@+0x08 within-item layout** (24-byte FUObjectItem:
+  `FlagsAndRefCount@0, Object@8, Serial@0x10`). The classic `+0x00` pass is
+  bad-dominated (`named=66 / bad=69` — a stride-16 mis-read hits Object only ~1/3
+  of the time) so `Aura::DetectItemSize` now falls through to the `+0x08` pass →
+  `size=24, offset=+0x08, 200 named / 0 bad` → name resolution ~100% (was 45.9% /
+  sanity 4/10 before the **build-1257** fix → now 10/10). GObjects `GOBJ_V13`,
+  GNames `GNAM_SAT425_3`, **GWorld ✅ via instance-scan recovery** (raw deref hits
+  a decoy `0x1C2D5`). ProcessEvent vtable+0x260, dispatch validated. Closes the
+  build-1064 "+0x08 needs a real stock-5.7 game" live-confirm.
 
-GWorld success ratio: **30 / 30 (100% of tested games)** as of 2026-06-11.
+GWorld success ratio: **100% of all tested games** — see the
+[test-games.md](test-games.md) GWorld Status Summary for the authoritative tally
+(**29 / 29** as of 2026-06-17, incl. Solarpunk stock-UE5.7 via the `+0x08` fix);
+the list above itemises only a subset and is otherwise last-verified 2026-06-11.
 Satisfactory (modular DLL build): scan side OK — `Macht::AOBScanAllModules`
 falls through to `FactoryGameSteam-CoreUObject-Win64-Shipping.dll`
 under `Engine\Binaries\Win64\` and the 15-game dump corpus includes

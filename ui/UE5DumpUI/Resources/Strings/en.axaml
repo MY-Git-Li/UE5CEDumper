@@ -48,6 +48,8 @@
     <sys:String x:Key="str.VS.NextScan">Next Scan</sys:String>
     <sys:String x:Key="str.VS.NewScan">New Scan</sys:String>
     <sys:String x:Key="str.VS.OpenLive">Live</sys:String>
+    <sys:String x:Key="str.VS.OpenInst">inst</sys:String>
+    <sys:String x:Key="str.Tip.VS.OpenInst">Open this hit's owning class in the Instance Finder tab — pre-fills the class name and runs the search.</sys:String>
     <sys:String x:Key="str.VS.CopyAddr">Addr</sys:String>
     <sys:String x:Key="str.VS.PivotThis">📊 Pivot</sys:String>
     <sys:String x:Key="str.VS.LocateGWorld">🌍</sys:String>
@@ -58,7 +60,7 @@
     <sys:String x:Key="str.VS.Sort">Sort:</sys:String>
     <sys:String x:Key="str.VS.SortDesc">Desc</sys:String>
     <sys:String x:Key="str.VS.LoadMore">Load More</sys:String>
-    <sys:String x:Key="str.Tip.VS.Sort">Filter and sort run in the DLL over the WHOLE result set; the grid shows one page at a time. Load More fetches the next page.</sys:String>
+    <sys:String x:Key="str.Tip.VS.Sort">Filter and sort run in the DLL over the WHOLE result set; the grid shows one page at a time. Load More fetches the next page. Clicking a column header sorts by that column (server-side) and updates this picker; click again to flip direction.</sys:String>
     <sys:String x:Key="str.VS.Cancel">Cancel</sys:String>
     <sys:String x:Key="str.Tip.VS.Cancel">Cancel the in-flight scan. The UI stops waiting immediately; the DLL self-terminates the scan at its deadline (usually sub-second).</sys:String>
     <sys:String x:Key="str.Tip.VS.CaseSensitive">When checked, string scans (FString / FName / FText) match case exactly. Default unchecked = CE-style case-insensitive matching. Only affects string DataTypes.</sys:String>
@@ -89,6 +91,10 @@
     <!-- Live Walker -->
     <sys:String x:Key="str.LiveWalker.SearchHint">Search fields...</sys:String>
     <sys:String x:Key="str.LiveWalker.SearchCount">{0} matches</sys:String>
+    <sys:String x:Key="str.LiveWalker.MatchPrev">▲</sys:String>
+    <sys:String x:Key="str.LiveWalker.MatchNext">▼</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.MatchPrev">Jump to the previous matching field (wraps to the last match)</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.MatchNext">Jump to the next matching field (wraps to the first match)</sys:String>
     <sys:String x:Key="str.LiveWalker.GenerateCeAA">Copy CE AA Script</sys:String>
 
     <!-- Class Structure -->

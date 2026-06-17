@@ -61,7 +61,8 @@
                IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
 
     <!-- Results DataGrid -->
-    <DataGrid ItemsSource="{Binding Results}"
+    <DataGrid x:Name="ResultsGrid"
+              ItemsSource="{Binding Results}"
               SelectedItem="{Binding SelectedResult}"
               IsReadOnly="True"
               CanUserResizeColumns="True"
@@ -72,7 +73,7 @@
               FontSize="12"
               FontFamily="Consolas, Menlo, monospace">
       <DataGrid.Columns>
-        <DataGridTemplateColumn Header="Score" Width="55" SortMemberPath="Score">
+        <DataGridTemplateColumn Header="Score" Width="55" SortMemberPath="Score" CanUserSort="True">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:GameClassEntry">
               <TextBlock Text="{Binding Score}" Foreground="#E5C07B"
@@ -103,6 +104,7 @@
         <DataGridTextColumn Header="Size"
                             Binding="{Binding SizeHex}"
                             SortMemberPath="PropertiesSize"
+                            CanUserSort="True"
                             Width="70"/>
         <DataGridTemplateColumn Header="" Width="Auto" CanUserSort="False">
           <DataGridTemplateColumn.CellTemplate>

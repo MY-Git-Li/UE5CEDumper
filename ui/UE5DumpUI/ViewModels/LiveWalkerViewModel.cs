@@ -264,6 +264,13 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     public event Action? ScrollToFirstSearchMatch;
 
     /// <summary>
+    /// Raised when the View should scroll to (and the selection already points
+    /// at) a specific field row. Carries the exact object so match navigation
+    /// lands on the right row even when field names repeat (container elements).
+    /// </summary>
+    public event Action<LiveFieldValue>? ScrollFieldIntoView;
+
+    /// <summary>
     /// Raised when the View should scroll the FunctionGrid to a specific
     /// UFunction by name. Used by cross-tab navigation from Interesting
     /// Funcs so the user lands on the correct row even when the function
@@ -3353,6 +3360,37 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         // Force DataGrid to re-evaluate row styles by resetting the collection
         var items = new ObservableCollection<LiveFieldValue>(Fields);
         Fields = items;
+    }
+
+    /// <summary>Move the selection to the next highlighted search match
+    /// (down arrow). Wraps from the last match back to the first.</summary>
+    [RelayCommand]
+    private void NextSearchMatch() => NavigateSearchMatch(+1);
+
+    /// <summary>Move the selection to the previous highlighted search match
+    /// (up arrow). Wraps from the first match back to the last.</summary>
+    [RelayCommand]
+    private void PrevSearchMatch() => NavigateSearchMatch(-1);
+
+    /// <summary>Step the selection through the highlighted search matches.
+    /// Search only re-colours matching rows; this lets the user actually jump
+    /// between them (setting SelectedField anchors the grid selection). When
+    /// the current selection isn't a match, forward starts at the first match
+    /// and backward at the last. Stepping wraps around both ends.</summary>
+    private void NavigateSearchMatch(int direction)
+    {
+        if (!HasSearchResults) return;
+        var matches = Fields.Where(f => f.IsSearchMatch).ToList();
+        if (matches.Count == 0) return;
+
+        int cur = SelectedField != null ? matches.IndexOf(SelectedField) : -1;
+        int next = cur < 0
+            ? (direction > 0 ? 0 : matches.Count - 1)
+            : (cur + direction + matches.Count) % matches.Count;
+
+        var target = matches[next];
+        SelectedField = target;
+        ScrollFieldIntoView?.Invoke(target);
     }
 
     private async Task NavigateToAsync(string addr, string label, int fieldOffset, string fieldName, bool isPointer)

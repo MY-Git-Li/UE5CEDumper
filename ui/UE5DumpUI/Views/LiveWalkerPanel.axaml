@@ -325,6 +325,25 @@
       <TextBox PlaceholderText="{StaticResource str.LiveWalker.SearchHint}"
                Text="{Binding SearchText, Mode=TwoWay}"
                Width="250" Padding="4,2" FontSize="12"/>
+      <!-- Prev / next match navigation: search only re-colours matches, so
+           these step the selection between them (wrap-around). Enabled only
+           when there are matches. -->
+      <Button Content="{StaticResource str.LiveWalker.MatchPrev}"
+              Command="{Binding PrevSearchMatchCommand}"
+              IsEnabled="{Binding HasSearchResults}"
+              ToolTip.Tip="{StaticResource str.Tip.LiveWalker.MatchPrev}"
+              Padding="7,2" FontSize="11" Cursor="Hand"
+              Foreground="#4EC9B0" Background="Transparent"
+              BorderThickness="1" BorderBrush="#555"
+              VerticalAlignment="Center"/>
+      <Button Content="{StaticResource str.LiveWalker.MatchNext}"
+              Command="{Binding NextSearchMatchCommand}"
+              IsEnabled="{Binding HasSearchResults}"
+              ToolTip.Tip="{StaticResource str.Tip.LiveWalker.MatchNext}"
+              Padding="7,2" FontSize="11" Cursor="Hand"
+              Foreground="#4EC9B0" Background="Transparent"
+              BorderThickness="1" BorderBrush="#555"
+              VerticalAlignment="Center"/>
       <TextBlock Text="{Binding SearchMatchCount, StringFormat='{}{0} matches'}"
                  Foreground="#888" VerticalAlignment="Center" FontSize="12"
                  IsVisible="{Binding HasSearchResults}"/>
@@ -376,6 +395,7 @@
                             Width="115" IsReadOnly="True"/>
         <DataGridTemplateColumn Header="{StaticResource str.LiveWalker.Value}"
                                 SortMemberPath="DisplayValue"
+                                CanUserSort="True"
                                 Width="200" MinWidth="100">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:LiveFieldValue">
