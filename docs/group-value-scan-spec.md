@@ -8,10 +8,13 @@ reuse seam + the phase roadmap).
 Shipped: P1 builds 1276-1278 (group scan), Deep builds 1283-1285 (opt-in deep
 containers, single + group), P2 builds 1295-1302 (per-slot prev-value / ordered /
 Between predicates + locked-offset table; the "Copy CE / export" sub-piece was
-deliberately dropped — export from Live Walker), P4 increment 1 builds 1303-1309
-(opt-in cross-object actor block — owned sub-objects' numerics, approach C). P1/Deep
-+ the P2 prev-value refine in-game verified on SEED (UE4.27); Between first-scan +
-P4 cross-object live-verify pending. See [dev-log.md](dev-log.md) for the milestone history.
+deliberately dropped — export from Live Walker), **P4 increment 1 builds 1303-1313
+(opt-in cross-object actor block — owned sub-objects' numerics, approach C; MERGED
+main PR #313 `d977a34`)**. P1/Deep + the P2 prev-value refine in-game verified on
+SEED (UE4.27); **P4 cross-object in-game VERIFIED on TQ2 (UE5.07, GAS)**; Between
+first-scan live-verify still pending. **Next: P4 increment 2** (per-slot
+`owner_class` for the Pivot handoff — see §3.2 P4). See [dev-log.md](dev-log.md)
+for the milestone history.
 
 -----
 
@@ -127,9 +130,15 @@ usable from the DB-driven features.
   `WalkContainerLeaves` (struct-valued maps *are*) — needs `ContainerCacheEntry` to carry
   key/value leaf types (the TODO is in the walker comment).
 - **P4 — cross-object actor block (owned sub-objects), opt-in. APPROACH C — ownership +
-  value-driven (NOT class-name matching). Increment 1 SHIPPED (builds 1303-1309, dev;
-  ⚠ in-game verify pending). Remaining: increment 2 = per-slot `owner_class` for the Pivot
-  handoff.** The goal is **not** "find an Attribute Component"
+  value-driven (NOT class-name matching). Increment 1 SHIPPED + MERGED main PR #313
+  (builds 1303-1313); in-game VERIFIED on TQ2 (UE5.07, GAS) — `bp_tq2_character_stats_component`
+  → `AttributesComponent` (ASC) → `m_pAttributeSetHealth.CurrentHealth`. Remaining: increment 2
+  = per-slot `owner_class` so the Pivot handoff pivots on the sub-object's class (today it uses
+  the actor's class — `GroupSlotMatch.ClassName` is denormalized from the candidate actor; for a
+  cross-object slot the Pivot should use the OWNED sub-object's class instead). Add an
+  `owner_class` to the wire `slots[]` (DLL `GroupCandidateToJson`, from the leaf's owning object),
+  parse it in `ParseGroupCandidate`, and have `PivotGroupSlot` prefer it.** The goal is **not**
+  "find an Attribute Component"
   — it is **"merge an actor + the numeric leaves of the sub-objects it OWNS into ONE block"**,
   so a group whose N values are *distributed across* {actor, its components, its GAS
   AttributeSets} is matched. (Values that *co-locate* in a single object — including one

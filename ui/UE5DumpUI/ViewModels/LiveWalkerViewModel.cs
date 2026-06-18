@@ -1712,6 +1712,17 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 UpdateDisplay(ownerResult);
 
                 bool landed = await DrillDisplayPathAsync(pathSegs);
+                // Fall back to the byte-offset scroll ONLY when the drill failed
+                // WITHOUT navigating away — i.e. the first path segment isn't a field
+                // on THIS object, so we're still on the owner. That's the cross-object
+                // case (P4): the field name is the path FROM THE CANDIDATE to the owner
+                // (e.g. "GameCharacters[0].MP" on a manager — the owner IS the find_path
+                // target and holds MP as a DIRECT field at scrollFieldOffset). If the
+                // drill instead navigated partway in before failing (e.g. a single-value
+                // deep path whose container reallocated), we're no longer on the owner,
+                // so skip the fallback rather than land on an unrelated row.
+                if (!landed && Breadcrumbs.Count > 0 && Breadcrumbs[^1].Address == ownerAddr)
+                    landed = ScrollToFieldByOffset(scrollFieldOffset);
                 _log.Info($"LocateInGWorld: reach+container-path-drill, {path.Depth} hop(s), landed={landed} | BC={FormatBreadcrumbTrace()}");
                 StatusText = landed
                     ? $"Located via GWorld — {path.Depth} hop(s) to {path.TargetName}; landed on {scrollFieldName}."
@@ -2014,6 +2025,29 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 containing = f;
         }
         return exact ?? containing;
+    }
+
+    /// <summary>
+    /// Select + scroll the currently-displayed field list to the row at
+    /// <paramref name="wantOffset"/> (exact, else the containing top-level field
+    /// via <see cref="FindFieldByOffsetOrContaining"/>). Returns false when no row
+    /// is at or before the offset. Shared by the UpdateDisplay scroll hint and the
+    /// Locate-in-GWorld container-drill fallback.
+    /// </summary>
+    private bool ScrollToFieldByOffset(int wantOffset)
+    {
+        var hit = FindFieldByOffsetOrContaining(Fields, wantOffset);
+        if (hit == null)
+        {
+            _log.Info($"ScrollToFieldByOffset: offset 0x{wantOffset:X} not found among top-level fields");
+            _pendingDrillElementIndex = -1;
+            return false;
+        }
+        SelectedField = hit;
+        ScrollToFieldRequested?.Invoke(hit.Name);
+        _log.Info($"ScrollToFieldByOffset: offset 0x{wantOffset:X} -> field '{hit.Name}' @0x{hit.Offset:X}");
+        TryDrillIntoMatchedContainer(hit);
+        return true;
     }
 
     internal static bool TryParseContainerPath(string? fieldName,
@@ -3847,23 +3881,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             // map/array/set hit; TryDrillIntoMatchedContainer then drills to
             // the matched element when the display name carried a "[N]".
             _pendingScrollFieldOffset = null;
-            // Exact offset match, else the containing top-level field (a leaf
-            // inside a nested struct — e.g. a GAS FGameplayAttributeData
-            // .CurrentValue at owner+0x120 inside the CurrentHealth StructProperty
-            // at 0x118 — has no top-level row at its exact offset).
-            var hit = FindFieldByOffsetOrContaining(Fields, wantOffset);
-            if (hit != null)
-            {
-                SelectedField = hit;
-                ScrollToFieldRequested?.Invoke(hit.Name);
-                _log.Info($"UpdateDisplay: auto-scrolled to offset 0x{wantOffset:X} -> field '{hit.Name}' @0x{hit.Offset:X}");
-                TryDrillIntoMatchedContainer(hit);
-            }
-            else
-            {
-                _log.Info($"UpdateDisplay: pending scroll offset 0x{wantOffset:X} not found among top-level fields");
-                _pendingDrillElementIndex = -1;
-            }
+            ScrollToFieldByOffset(wantOffset);
         }
 
         // Store class address and load functions asynchronously. Track
