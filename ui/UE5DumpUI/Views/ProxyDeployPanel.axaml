@@ -162,7 +162,7 @@
 
         <!-- Status -->
         <DataGridTextColumn Header="{StaticResource str.ProxyDeploy.ColStatus}"
-                            Binding="{Binding Status}" SortMemberPath="Status" Width="160" IsReadOnly="True"/>
+                            Binding="{Binding Status}" SortMemberPath="Status" Width="200" IsReadOnly="True"/>
 
         <!-- Installed Version -->
         <DataGridTextColumn Header="{StaticResource str.ProxyDeploy.ColVersion}"

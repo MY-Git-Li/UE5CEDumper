@@ -28,8 +28,10 @@ public partial class ProxyDeployViewModel : ViewModelBase
     /// Which proxy DLL the user wants to deploy. Bound to the RadioButtons
     /// at the top of the panel. Changing this triggers a status refresh so
     /// the DataGrid reflects the deploy state of the newly-selected DLL.
+    /// Defaults to dxgi.dll — statically imported by every D3D11/D3D12 UE
+    /// game on Windows, so it is the most broadly reliable hijack target.
     /// </summary>
-    [ObservableProperty] private ProxyType _selectedProxyType = ProxyType.Version;
+    [ObservableProperty] private ProxyType _selectedProxyType = ProxyType.Dxgi;
 
     // Two-way bindings for radio button state — Avalonia RadioButtons bind
     // to bool, so we expose convenience properties that mirror SelectedProxyType.
