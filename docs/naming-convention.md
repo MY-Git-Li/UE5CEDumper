@@ -192,13 +192,13 @@ Total votes: **12,700,122** | Voting period: 2026-03-08 ~ 2026-03-29
 | 20 | Wirbel (威亞貝爾) | — | — |
 | 21 | Mimic (寶箱怪) | — | **Mailbox** |
 | 22 | Renge (蓮格) | — | **PipeProtocol** |
-| 23 | Hero of the South | — | — |
+| 23 | Hero of the South (南方勇者) | — | — |
 | 24 | Sein (贊恩) | — | **Logger** |
 | 25 | Denken (鄧肯) | — | **NativeDisasm** |
 | 26 | Kanne (卡妮) | — | — |
 | 27 | Land (蘭特) | — | — |
 | 28 | Richter (里希特) | — | — |
-| 29 | Rivale (リヴァーレ) | — | — |
+| 29 | Rivale (利瓦雷) | — | — |
 | 30 | Receptionist (櫃台人員) | — | — |
 
 ### One-Vote-Per-Person Top 7
