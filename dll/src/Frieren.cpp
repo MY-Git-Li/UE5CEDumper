@@ -372,14 +372,17 @@ bool UE5_Init() {
                 g_cachedGWorld = rec;
                 g_cachedGWorldMethod = method;
                 g_cachedGWorldPatternId = nullptr;       // the GWLD_* AOB found a decoy — drop its stale label
-                // The AOB symbol fields would otherwise still describe the (decoy) AOB match,
-                // leaving the UI's GWorld "AOB" symbol toggle wrongly enabled — it keys on a
-                // non-empty gworld_aob (IsAobSymbolAvailable). Recovery slots are not static
-                // module symbols, so AOB-symbol export does not apply. Clearing these makes the
-                // toggle auto-uncheck + gray out, re-evaluated on the next connect.
-                g_cachedGWorldAob    = nullptr;
-                g_cachedGWorldAobPos = 0;
-                g_cachedGWorldAobLen = 0;
+                // The AOB symbol/scan fields would otherwise still describe the (decoy) AOB
+                // match, leaving the UI's GWorld "AOB" symbol toggle wrongly enabled (it keys
+                // on a non-empty gworld_aob via IsAobSymbolAvailable) and the Pointers panel
+                // still showing the decoy's "AOB: <scan addr>" line. Recovery slots are not
+                // static module symbols, so AOB-symbol export / disasm do not apply. Clearing
+                // these makes the toggle auto-uncheck + gray out and the scan-addr line hide,
+                // re-evaluated on the next connect; the UI shows the recovery method instead.
+                g_cachedGWorldAob      = nullptr;
+                g_cachedGWorldAobPos   = 0;
+                g_cachedGWorldAobLen   = 0;
+                g_cachedGWorldScanAddr = 0;
                 LOG_INFO("UE5_Init: GWorld recovered via %s -> 0x%llX",
                          method, static_cast<unsigned long long>(rec));
             } else {

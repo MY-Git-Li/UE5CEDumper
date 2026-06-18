@@ -14,7 +14,7 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
-## 2026-06-18 — GWorld `engine_recovery` gap-fill: GEngine→GameViewport→&World when no static slot exists + AOB-toggle gating fix + test hook (build 1288; DLL-only)
+## 2026-06-18 — GWorld `engine_recovery` gap-fill: GEngine→GameViewport→&World when no static slot exists + AOB-toggle gating fix + test hook (builds 1288-1291; DLL + Pointers-panel clarity)
 
 When the GWorld AOB lands on a decoy, recovery already tries `ExtraScanGWorld` (find a live UWorld in GObjects, then scan `.data` for a static slot pointing at it). But that returns 0 when **no** static slot in the main module points at the live world — the world pointer lives only behind the engine's runtime objects (or in a separately-loaded engine DLL). New **`Genau::RecoverGWorldViaEngine`** fills exactly that gap.
 
@@ -26,7 +26,11 @@ When the GWorld AOB lands on a decoy, recovery already tries `ExtraScanGWorld` (
 
 **Test hook (the path is otherwise unreachable without a game whose AOB genuinely fails).** `UE5DUMP_FORCE_GWORLD_RECOVERY` in the GAME process env: `=1` forces the full recovery chain even when the AOB GWorld is valid; `=engine` additionally skips `ExtraScanGWorld` so it goes straight to the engine path (to exercise the new code on a game where `ExtraScanGWorld` would have succeeded). Non-destructive — if recovery fails, the valid AOB GWorld is left untouched.
 
-Strictly gated (only runs when `*GWorld` doesn't deref to a UWorld AND `Aura::GetCount()>0`), so titles with a correct GWorld are byte-identical — zero regression. DLL builds clean (build 1288); no new unit tests (live-scan path, as with `ExtraScanGWorld`). In-game live-verify pending (use the env-var hook on any working game, or wait for a no-static-slot title).
+Strictly gated (only runs when `*GWorld` doesn't deref to a UWorld AND `Aura::GetCount()>0`), so titles with a correct GWorld are byte-identical — zero regression. DLL builds clean (build 1288); no new unit tests (live-scan path, as with `ExtraScanGWorld`).
+
+**Follow-up (builds 1290-1291) — in-game on SEED (UE4.27) the path RAN correctly but the Pointers panel read like "still AOB".** The env-var hook fired and `engine_recovery` succeeded (`GWorld recovered via engine_recovery -> 0x1AD…`, the live `&viewport.World` heap slot), but the UI still showed a GWorld **"AOB: \<scan addr\>"** line and gave no positive sign of recovery. Two gaps: (1) recovery cleared `gworld_aob`/`pattern_id` but NOT `g_cachedGWorldScanAddr`, so the panel's scan-addr row (`HasGWorldScanAddr`) stayed visible with the decoy's instruction address; (2) GWorld had no method-label display at all — `ShowGWorldWarning` only fires on `not_found`, so a *recovered* GWorld looked like a plain AOB hit (GObjects/GNames already show `⚠ AOB failed — found via \<method\>`). Fixes: DLL now also nulls `g_cachedGWorldScanAddr` on every recovery branch (scan-addr row hides; `Register Symbol`/ASM already gated on `gworld_aob`); C# adds `GWorldMethodLabel` + `ShowGWorldRecovered` (`method != aob && != not_found`) and a GWorld fallback row mirroring GObjects, and `FormatMethodLabel` gains friendly arms (`engine recovery` / `instance scan recovery` / `data scan recovery`). The Live Walker "AOB" checkbox graying was already correct (keyed on the cleared `gworld_aob`). 620 dll + 1592 C# green, AOT publish clean (46.3 MB).
+
+Test it on any working game (no rare no-static-slot title needed): set the game-process env `UE5DUMP_FORCE_GWORLD_RECOVERY=engine`, connect, and check the Pointers panel shows `⚠ AOB failed — found via engine recovery` with no scan-addr row, and the Live Walker "AOB" checkbox is grayed.
 
 ## 2026-06-18 — Two fixes: CE Copy Field off-by-8 on map-VALUE struct fields + Proxy Deploy "NotDeployed" when another proxy type is deployed (build 1286; UI-only)
 

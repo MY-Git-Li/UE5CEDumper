@@ -207,6 +207,11 @@ public partial class PointerPanelViewModel : ViewModelBase
     /// <summary>True when GWorld was not found at all.</summary>
     public bool ShowGWorldWarning => HasData && GWorldMethod == "not_found";
 
+    /// <summary>True when GWorld was found via a recovery path (not direct AOB, and not missing) —
+    /// e.g. instance_scan_recovery / engine_recovery. Surfaces the method so a recovered GWorld
+    /// reads as such instead of looking like a normal AOB hit.</summary>
+    public bool ShowGWorldRecovered => HasData && GWorldMethod != "aob" && GWorldMethod != "not_found";
+
     /// <summary>True when ALL GObjects AOB patterns failed (0 hits).</summary>
     public bool GObjectsAobAllFailed => HasData && GObjectsPatternsHit == 0;
 
@@ -221,6 +226,9 @@ public partial class PointerPanelViewModel : ViewModelBase
 
     /// <summary>Formatted scan method label for GNames.</summary>
     public string GNamesMethodLabel => FormatMethodLabel(GNamesMethod);
+
+    /// <summary>Formatted scan method label for GWorld.</summary>
+    public string GWorldMethodLabel => FormatMethodLabel(GWorldMethod);
 
     /// <summary>True when GObjects has a non-empty pattern ID to display.</summary>
     public bool HasGObjectsPatternId => HasData && !string.IsNullOrEmpty(GObjectsPatternId);
@@ -417,11 +425,13 @@ public partial class PointerPanelViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowGObjectsWarning));
         OnPropertyChanged(nameof(ShowGNamesWarning));
         OnPropertyChanged(nameof(ShowGWorldWarning));
+        OnPropertyChanged(nameof(ShowGWorldRecovered));
         OnPropertyChanged(nameof(GObjectsAobAllFailed));
         OnPropertyChanged(nameof(GNamesAobAllFailed));
         OnPropertyChanged(nameof(GWorldAobAllFailed));
         OnPropertyChanged(nameof(GObjectsMethodLabel));
         OnPropertyChanged(nameof(GNamesMethodLabel));
+        OnPropertyChanged(nameof(GWorldMethodLabel));
         OnPropertyChanged(nameof(HasGObjectsPatternId));
         OnPropertyChanged(nameof(HasGNamesPatternId));
         OnPropertyChanged(nameof(HasGWorldPatternId));
@@ -576,8 +586,11 @@ public partial class PointerPanelViewModel : ViewModelBase
     private static string FormatMethodLabel(string method) => method switch
     {
         "data_scan" => "data scan",
+        "data_scan_recovery" => "data scan recovery",
         "data_heuristic" => "data heuristic",
         "instance_scan" => "instance scan",
+        "instance_scan_recovery" => "instance scan recovery",
+        "engine_recovery" => "engine recovery",
         "string_ref" => "string ref",
         "pointer_scan" => "pointer scan",
         "not_found" => "not found",
