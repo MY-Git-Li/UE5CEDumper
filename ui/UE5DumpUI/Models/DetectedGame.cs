@@ -19,6 +19,14 @@ public enum ProxyDeployStatus
     /// <summary>A version.dll exists but is NOT ours — another program's proxy. Blocked.</summary>
     OtherProxy,
 
+    /// <summary>
+    /// The SELECTED proxy type is not deployed, but another of OUR proxy types
+    /// (e.g. dxgi.dll while the version.dll radio is selected) IS deployed in the
+    /// folder. Distinct from <see cref="NotDeployed"/> (a genuinely clean folder)
+    /// so the user does not redeploy a redundant second proxy on top of a working one.
+    /// </summary>
+    DeployedOtherType,
+
     /// <summary>File operation failed because the game is running (file locked).</summary>
     ErrorLocked,
 

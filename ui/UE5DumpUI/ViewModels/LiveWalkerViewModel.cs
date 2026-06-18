@@ -485,6 +485,27 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// When <paramref name="parent"/> is a Map container view, the per-element
+    /// value offset (aligned value offset, falling back to key size) — exactly
+    /// the offset <see cref="PopulateMapContainerFields"/> uses to place each
+    /// element's value inside the TPair. A drilled Map value's raw field offset
+    /// is only the element-base offset (index*stride); adding this lands the
+    /// CE/CSX pointer chain on the value rather than valueOffset bytes short.
+    /// Returns 0 for any non-map parent (direct struct fields and struct/set
+    /// array elements have value == element base), so it is a safe additive
+    /// correction to a drilled breadcrumb's FieldOffset.
+    /// </summary>
+    internal static int MapValueDrillOffset(BreadcrumbItem? parent)
+    {
+        if (parent is { IsContainerView: true, ContainerField: { } cf }
+            && cf.MapCount > 0 && !string.IsNullOrEmpty(cf.MapKeyType))
+        {
+            return cf.MapValueOffset > 0 ? cf.MapValueOffset : cf.MapKeySize;
+        }
+        return 0;
+    }
+
     [RelayCommand]
     private async Task NavigateToFieldAsync(LiveFieldValue? field)
     {
@@ -502,10 +523,21 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             if (Breadcrumbs.Count > 0)
                 Breadcrumbs[^1].ScrollHintFieldName = field.Name;
 
+            // CE/CSX chain offsets are relative to the parent's RESOLVED address.
+            // When drilling a Map element's VALUE, the parent (the Map container
+            // view) resolves to the element-storage base, but the value sits at
+            // +valueOffset inside each element (the key is at the front of the
+            // TPair). field.Offset is only the element-base offset (index*stride),
+            // so the breadcrumb must carry the FULL offset to the value or every
+            // child lands valueOffset bytes short (the off-by-8 on FName-keyed
+            // maps). Zero for non-map parents, so other navigation is unchanged.
+            int navOffset = field.Offset + MapValueDrillOffset(
+                Breadcrumbs.Count > 0 ? Breadcrumbs[^1] : null);
+
             if (!string.IsNullOrEmpty(field.PtrAddress) && field.PtrAddress != "0x0")
             {
                 // ObjectProperty navigation (pointer dereference)
-                await NavigateToAsync(field.PtrAddress, field.Name, field.Offset, field.Name, isPointer: true);
+                await NavigateToAsync(field.PtrAddress, field.Name, navOffset, field.Name, isPointer: true);
             }
             else if (!string.IsNullOrEmpty(field.StructDataAddr) && field.StructDataAddr != "0x0")
             {
@@ -525,11 +557,11 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     Address = field.StructDataAddr,
                     Label = displayName,
                     ClassAddr = field.StructClassAddr,
-                    FieldOffset = field.Offset,
+                    FieldOffset = navOffset,
                     FieldName = field.Name,
                     IsPointerDeref = isDataTableRow,
                 });
-                _log.Info($"NAV→Struct {field.Name} addr={field.StructDataAddr} off=0x{field.Offset:X} dtRow={isDataTableRow} | BC={FormatBreadcrumbTrace()}");
+                _log.Info($"NAV→Struct {field.Name} addr={field.StructDataAddr} off=0x{navOffset:X} dtRow={isDataTableRow} | BC={FormatBreadcrumbTrace()}");
                 UpdateDisplay(result);
             }
         }
