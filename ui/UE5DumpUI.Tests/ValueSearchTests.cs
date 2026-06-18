@@ -1226,15 +1226,16 @@ public class ValueSearchTests
         public GroupScanBeginResult NextGroupBeginResult { get; set; } = new();
         public GroupScanRefineResult NextGroupRefineResult { get; set; } = new();
         public GroupScanWindowResult NextGroupWindowResult { get; set; } = new();
-        public List<(List<GroupSlotInput> slots, bool gameOnly, int maxResults, bool deep)> GroupBegins { get; } = new();
+        public List<(List<GroupSlotInput> slots, bool gameOnly, int maxResults, bool deep, bool crossObject)> GroupBegins { get; } = new();
         public List<(ulong sessionId, List<GroupSlotInput> slots)> GroupRefines { get; } = new();
         public List<ulong> GroupEnds { get; } = new();
 
         public override Task<GroupScanBeginResult> BeginGroupScanAsync(
             IReadOnlyList<GroupSlotInput> slots, bool gameOnly = true,
-            int maxResults = 50000, bool deep = false, int pageSize = 1000, CancellationToken ct = default)
+            int maxResults = 50000, bool deep = false, bool crossObject = false,
+            int pageSize = 1000, CancellationToken ct = default)
         {
-            GroupBegins.Add((slots.ToList(), gameOnly, maxResults, deep));
+            GroupBegins.Add((slots.ToList(), gameOnly, maxResults, deep, crossObject));
             return Task.FromResult(NextGroupBeginResult);
         }
 
@@ -1635,6 +1636,87 @@ public class ValueSearchTests
 
         Assert.Empty(fake.GroupBegins);                       // validation blocked it
         Assert.False(string.IsNullOrEmpty(vm.ErrorMessage));
+    }
+
+    // ---- P4: cross-object (owned sub-objects) ----
+
+    [Fact]
+    public async Task BeginGroupScanAsync_AttachesCrossObject_WhenEnabled_OmitsByDefault()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"] = req["id"]?.GetValue<int>() ?? 0, ["ok"] = true,
+                ["session_id"] = 1UL, ["total"] = 0, ["candidates"] = new JsonArray(),
+            };
+        });
+        var slots = new List<GroupSlotInput> { new() { Value = "1" }, new() { Value = "2" } };
+
+        await svc.BeginGroupScanAsync(slots, crossObject: false, ct: TestContext.Current.CancellationToken);
+        Assert.False(captured!.ContainsKey("cross_object"), "cross_object omitted when off (wire-tight)");
+
+        await svc.BeginGroupScanAsync(slots, crossObject: true, ct: TestContext.Current.CancellationToken);
+        Assert.True(captured!["cross_object"]?.GetValue<bool>(), "cross_object attached when on");
+    }
+
+    [Fact]
+    public void GroupSlotMatch_HandoffAddr_PrefersOwnerOverActor()
+    {
+        var own = new GroupSlotMatch { InstanceAddr = "7FF6AA", OwnerAddr = "" };
+        Assert.Equal("7FF6AA", own.HandoffAddr);    // own-block leaf -> handoff opens the actor
+
+        var cross = new GroupSlotMatch { InstanceAddr = "7FF6AA", OwnerAddr = "1234BB" };
+        Assert.Equal("1234BB", cross.HandoffAddr);  // cross-object leaf -> opens the owned sub-object
+    }
+
+    [Fact]
+    public void GroupFirstScan_PassesCrossObjectFlag()
+    {
+        var (vm, fake) = MakeVm();
+        vm.IsGroupMode = true;
+        vm.CrossObjectScan = true;
+        vm.GroupInputs[0].Value = "10";
+        vm.GroupInputs[1].Value = "20";
+        fake.NextGroupBeginResult = new GroupScanBeginResult { SessionId = 3UL, Total = 0 };
+
+        vm.GroupFirstScanCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+
+        var begin = Assert.Single(fake.GroupBegins);
+        Assert.True(begin.crossObject);
+    }
+
+    // ---- Locate-in-GWorld handoff: decoupled from the IsGWorldAvailable flag ----
+    // (Gating the button on a C# flag that read false on TQ2 — proxy mode — silently
+    // disabled it even though GWorld was resolved; the DLL path search is the truth.)
+
+    [Fact]
+    public void GroupLocate_InvokesEvenWhenGWorldFlagFalse()
+    {
+        var (vm, _) = MakeVm();
+        Assert.False(vm.IsGWorldAvailable);          // no engine state set -> flag is false
+        string? located = null;
+        vm.LocateInGWorld += (addr, _, _) => located = addr;
+
+        vm.LocateGroupSlotInGWorldCommand.Execute(new GroupSlotMatch { OwnerAddr = "0x1234" });
+
+        Assert.Equal("0x1234", located);             // still fires — DLL decides GWorld availability
+    }
+
+    [Fact]
+    public void GroupLocate_NoAddress_ReportsInsteadOfSilentNoOp()
+    {
+        var (vm, _) = MakeVm();
+        bool fired = false;
+        vm.LocateInGWorld += (_, _, _) => fired = true;
+
+        vm.LocateGroupSlotInGWorldCommand.Execute(new GroupSlotMatch { OwnerAddr = "", InstanceAddr = "" });
+
+        Assert.False(fired);                                  // no address -> no locate
+        Assert.False(string.IsNullOrEmpty(vm.StatusText));    // but the user is told why (not a silent no-op)
     }
 
     [Fact]

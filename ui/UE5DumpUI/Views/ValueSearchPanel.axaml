@@ -312,11 +312,13 @@
                             Padding="6,2" FontSize="11"
                             Cursor="Hand"/>
                     <!-- Locate in GWorld: reach the owning object via the shortest
-                         pointer path from GWorld. Disabled when GWorld is unavailable. -->
+                         pointer path from GWorld. Always clickable — the DLL's path
+                         search is the source of truth and reports if GWorld is
+                         unavailable (gating on the C# flag wrongly disabled it on
+                         games where GWorld was actually resolved, e.g. TQ2). -->
                     <Button Content="{StaticResource str.VS.LocateGWorld}"
                             Command="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).LocateCandidateInGWorldCommand}"
                             CommandParameter="{Binding}"
-                            IsEnabled="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).IsGWorldAvailable}"
                             ToolTip.Tip="{StaticResource str.Tip.VS.LocateGWorld}"
                             Foreground="#C586C0" Background="Transparent"
                             BorderThickness="1" BorderBrush="#C586C0"
@@ -384,6 +386,13 @@
                     ToolTip.Tip="{StaticResource str.Tip.VS.Deep}"
                     Foreground="#CCCCCC" FontSize="12"
                     VerticalAlignment="Center" Margin="12,0,0,0"/>
+          <!-- Cross-object (P4): also match groups whose values are spread across an
+               actor and the sub-objects it owns (components + GAS AttributeSets). -->
+          <CheckBox Content="{StaticResource str.VS.CrossObject}"
+                    IsChecked="{Binding CrossObjectScan}"
+                    ToolTip.Tip="{StaticResource str.Tip.VS.CrossObject}"
+                    Foreground="#CCCCCC" FontSize="12"
+                    VerticalAlignment="Center" Margin="8,0,0,0"/>
         </StackPanel>
 
         <!-- Group action buttons -->
@@ -534,7 +543,6 @@
                         <Button Content="{StaticResource str.VS.LocateGWorld}"
                                 Command="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).LocateGroupSlotInGWorldCommand}"
                                 CommandParameter="{Binding}"
-                                IsEnabled="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).IsGWorldAvailable}"
                                 ToolTip.Tip="{StaticResource str.Tip.VS.LocateGWorld}"
                                 Foreground="#C586C0" Background="Transparent"
                                 BorderThickness="1" BorderBrush="#C586C0"

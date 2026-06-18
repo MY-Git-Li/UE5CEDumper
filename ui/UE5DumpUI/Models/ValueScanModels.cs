@@ -229,9 +229,15 @@ public class GroupSlotMatch
     public string    FieldType      { get; set; } = "";
     public byte      BoolFieldMask  { get; set; } = 0xFF;
     public string    LeafValue      { get; set; } = "";   // current value at the leaf
-    public string    Addr           { get; set; } = "";   // leaf address (instance + offset)
-    public string    InstanceAddr   { get; set; } = "";   // owning object (denormalized for self-contained handoffs)
+    public string    Addr           { get; set; } = "";   // leaf address (owner + offset)
+    public string    InstanceAddr   { get; set; } = "";   // candidate actor (denormalized for self-contained handoffs)
+    public string    OwnerAddr      { get; set; } = "";   // object directly holding the leaf — actor, or owned sub-object (P4)
     public string    ClassName      { get; set; } = "";   // owning class (for the Pivot handoff)
+
+    /// <summary>The object a per-slot handoff should target: the leaf's direct owner
+    /// (an owned sub-object for a cross-object leaf), falling back to the candidate
+    /// actor when the DLL didn't supply one (own-block leaf / older payload).</summary>
+    public string HandoffAddr => string.IsNullOrEmpty(OwnerAddr) ? InstanceAddr : OwnerAddr;
     public List<int> MatchedOffsets { get; set; } = new();
     public bool      Locked         { get; set; }
 

@@ -1672,6 +1672,7 @@ public sealed class DumpService : IDumpService
                     BoolFieldMask = (byte)(so["bool_field_mask"]?.GetValue<int>() ?? 0xFF),
                     LeafValue     = so["leaf_value"]?.GetValue<string>() ?? "",
                     Addr          = so["addr"]?.GetValue<string>() ?? "",
+                    OwnerAddr     = so["owner_addr"]?.GetValue<string>() ?? "",
                     Locked        = so["locked"]?.GetValue<bool>() ?? false,
                 };
                 if (so["matched_offsets"] is JsonArray mo)
@@ -1691,6 +1692,7 @@ public sealed class DumpService : IDumpService
         bool gameOnly = true,
         int maxResults = 50000,
         bool deep = false,
+        bool crossObject = false,
         int pageSize = 1000,
         CancellationToken ct = default)
     {
@@ -1719,6 +1721,8 @@ public sealed class DumpService : IDumpService
         };
         if (deep)
             req["deep"] = true;
+        if (crossObject)
+            req["cross_object"] = true;
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
 

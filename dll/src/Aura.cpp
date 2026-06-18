@@ -6482,9 +6482,10 @@ struct GroupLeafMeta {
     std::string fieldName;       // direct: "Stats.Str"; deep: "SaveSlotList[1]...Tunes[2]"
     std::string fieldType;       // UE property type ("IntProperty" / "FloatProperty" / ...)
     std::string definingClass;   // struct/class the leaf is declared in
-    int32_t     offset       = 0;   // bytes from the object base (direct); 0 for deep container leaves
+    int32_t     offset       = 0;   // bytes from the OWNING object base (direct); 0 for deep container leaves
     int32_t     elementIndex = -1;  // -1 direct field; >=0 container element index
-    uintptr_t   leafAddr     = 0;   // ABSOLUTE value address (direct: obj+offset; deep: element addr)
+    uintptr_t   leafAddr     = 0;   // ABSOLUTE value address (direct: owner+offset; deep: element addr)
+    uintptr_t   ownerAddr    = 0;   // object directly holding the leaf (actor, or owned sub-object for P4)
     uint8_t     boolMask     = 0xFF;
 };
 
@@ -6544,6 +6545,7 @@ void CollectGroupLeaves(uintptr_t obj, uintptr_t structAddr, int32_t baseOffset,
             m.offset        = baseOffset + f.Offset;
             m.elementIndex  = -1;
             m.leafAddr      = obj + baseOffset + f.Offset;   // direct: absolute = obj + offset
+            m.ownerAddr     = obj;                            // the object directly holding this leaf
             m.boolMask      = f.boolFieldMask;
             metas.push_back(std::move(m));
         } else if (f.TypeName == "StructProperty" && f.Address) {
@@ -6556,6 +6558,85 @@ void CollectGroupLeaves(uintptr_t obj, uintptr_t structAddr, int32_t baseOffset,
         }
     }
     visited.pop_back();
+}
+
+// True when `child`'s Outer chain reaches `actor` within `maxHops` steps. A
+// UActorComponent's Outer is the actor (1 hop); a GAS UAttributeSet's Outer is
+// the UAbilitySystemComponent whose Outer is the actor (2 hops). Bounds the
+// cross-object reach (P4) to objects the actor genuinely OWNS — a pointer to a
+// shared / global object (another actor, the world, GameInstance) fails the test
+// and is never followed.
+bool IsOwnedBy(uintptr_t child, uintptr_t actor, int maxHops) {
+    uintptr_t o = child;
+    for (int h = 0; h < maxHops; ++h) {
+        o = Ubel::GetOuter(o);
+        if (!o) return false;
+        if (o == actor) return true;
+    }
+    return false;
+}
+
+// Cross-object block assembly (P4, approach C). Append the numeric leaves of the
+// sub-objects `actor` OWNS to the actor's block (`leaves`/`metas`), so a group
+// whose values are distributed across {actor, its components, its GAS
+// AttributeSets} is matched as ONE block. A bounded 2-level BFS over OWNED objects:
+//   depth 1 — the actor's direct owned sub-objects (custom HealthComponent /
+//             StatsComponent / InventoryComponent / the ASC itself);
+//   depth 2 — each of those sub-objects' owned objects (the GAS ASC's
+//             SpawnedAttributes -> the UAttributeSet objects), so a value held on
+//             an AttributeSet is reached actor -> ASC -> AttributeSet.
+// Sub-objects are discovered with EnumerateOutgoingObjectPtrs (the same
+// outgoing-pointer adapter Locate-in-GWorld uses — direct ObjectProperty fields
+// AND object-pointer CONTAINERS like OwnedComponents TSet / SpawnedAttributes
+// TArray, which neither P1 nor Deep walks) and kept only when the actor OWNS them
+// (IsOwnedBy: Outer chains back to the actor within 2 hops). Selectivity is the
+// value AND across slots, NOT a class-name filter (a Mesh's RelativeLocation simply
+// won't equal the searched values). Each sub-object leaf carries its own ownerAddr
+// (the sub-object) so the handoffs land on the right object. Bounded by leafCap +
+// a sub-object count cap.
+void AppendOwnedSubObjectLeaves(uintptr_t actor, bool wantByte,
+                                std::vector<Orden::Leaf>& leaves,
+                                std::vector<GroupLeafMeta>& metas, size_t leafCap) {
+    constexpr int    kMaxOwnedSubs = 64;   // most actors own < 20 components
+    constexpr int    kMaxOwnDepth  = 2;    // actor -> component -> AttributeSet
+    int subCount = 0;
+    std::unordered_set<uintptr_t> seen;
+    seen.insert(actor);                    // never re-collect the actor itself
+    std::vector<uintptr_t> subVisited;
+
+    // Explicit owned-object work-list (object + accumulated display path + depth).
+    struct Frontier { uintptr_t obj; std::string prefix; int depth; };
+    std::vector<Frontier> frontier;
+    frontier.push_back({actor, std::string(), 0});
+
+    while (!frontier.empty()) {
+        Frontier cur = frontier.back();
+        frontier.pop_back();
+        if (cur.depth >= kMaxOwnDepth) continue;   // don't expand past the depth bound
+        EnumerateOutgoingObjectPtrs(cur.obj,
+            [&](uintptr_t child, int32_t /*ptrOff*/, const std::string& ptrName,
+                const std::string& /*ptrType*/, const std::string& /*innerType*/,
+                int32_t elemIdx) -> bool {
+                if (leaves.size() >= leafCap || subCount >= kMaxOwnedSubs) return true;  // stop
+                if (!child || seen.count(child)) return false;
+                if (!IsOwnedBy(child, actor, /*maxHops*/ kMaxOwnDepth)) return false;
+                uintptr_t childCls = Ubel::GetClass(child);
+                if (!childCls) return false;
+                seen.insert(child);
+                ++subCount;
+                // Accumulate the path so the offset table reads e.g.
+                // "HealthComp.CurrentHealth" or "AbilitySystem.SpawnedAttributes[0].Health.CurrentValue".
+                std::string prefix = cur.prefix;
+                if (!prefix.empty()) prefix += ".";
+                prefix += ptrName;
+                if (elemIdx >= 0) { prefix += "["; prefix += std::to_string(elemIdx); prefix += "]"; }
+                subVisited.clear();
+                CollectGroupLeaves(child, childCls, 0, prefix, wantByte, 0,
+                                   subVisited, leaves, metas, leafCap);
+                frontier.push_back({child, prefix, cur.depth + 1});   // expand one more level
+                return false;  // keep enumerating this parent's other owned children
+            });
+    }
 }
 
 // Feasibility re-check after a refine prunes per-slot lists: a System of
@@ -6580,7 +6661,8 @@ bool GroupCandidateFeasible(const Radar::GroupCandidate& gc) {
 }  // namespace
 
 GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
-                                  bool gameOnly, int32_t maxResults, bool deep) {
+                                  bool gameOnly, int32_t maxResults, bool deep,
+                                  bool crossObject) {
     GroupScanResult result;
     auto t0 = std::chrono::steady_clock::now();
     constexpr auto kDeadline = std::chrono::seconds(15);
@@ -6667,6 +6749,7 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
                 sm.elementIndex  = meta.elementIndex;
                 sm.offset        = meta.offset;
                 sm.leafAddr      = meta.leafAddr;
+                sm.ownerAddr     = meta.ownerAddr ? meta.ownerAddr : obj;  // P4: leaf's owning object
                 std::memcpy(sm.prevValue, blkLeaves[static_cast<size_t>(leafIdx)].bytes, 8);
                 gc.slotMatches[s].push_back(sm);
             }
@@ -6684,6 +6767,7 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
     // Deep-block scratch + walker (built once; the refs it captures are updated
     // per object). The walker reuses the SAME recursive descent as snapshot capture.
     std::string curClassName;
+    uintptr_t   curObjAddr = 0;
     std::unordered_map<std::string, GroupBlock> deepBlocks;
     WalkLeafLimits dlim;
     dlim.maxDepth      = 4;
@@ -6729,6 +6813,7 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
         m.offset        = 0;
         m.elementIndex  = lf.elemIndex;
         m.leafAddr      = lf.leafAddr;
+        m.ownerAddr     = curObjAddr;   // deep leaves are owned by the scanned object
         m.boolMask      = lf.boolMask;
         blk.metas.push_back(std::move(m));
     };
@@ -6754,10 +6839,16 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
         ++scanned;
 
         std::string className = Ubel::GetName(cls);
+        curObjAddr = obj;
 
         // --- Object block: the object's direct + struct-nested numeric leaves. ---
         leaves.clear(); metas.clear(); visited.clear();
         CollectGroupLeaves(obj, cls, 0, "", wantByte, 0, visited, leaves, metas, kLeafCap);
+        // Cross-object (opt-in): also fold in the numeric leaves of the sub-objects
+        // this actor OWNS (components + GAS AttributeSets), so a group whose values
+        // span {actor, components, attribute sets} matches as one block.
+        if (crossObject)
+            AppendOwnedSubObjectLeaves(obj, wantByte, leaves, metas, kLeafCap);
         if (leaves.size() >= nSlots && Orden::MatchGroup(leaves, ordenSlots, matchOut))
             emitGroupCandidate(obj, i, name, className, leaves, metas, matchOut);
 

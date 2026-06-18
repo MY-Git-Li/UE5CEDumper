@@ -8,9 +8,10 @@ reuse seam + the phase roadmap).
 Shipped: P1 builds 1276-1278 (group scan), Deep builds 1283-1285 (opt-in deep
 containers, single + group), P2 builds 1295-1302 (per-slot prev-value / ordered /
 Between predicates + locked-offset table; the "Copy CE / export" sub-piece was
-deliberately dropped — export from Live Walker). P1/Deep + the P2 prev-value
-refine in-game verified on SEED (UE4.27); Between first-scan live-verify pending.
-See [dev-log.md](dev-log.md) for the milestone history.
+deliberately dropped — export from Live Walker), P4 increment 1 builds 1303-1309
+(opt-in cross-object actor block — owned sub-objects' numerics, approach C). P1/Deep
++ the P2 prev-value refine in-game verified on SEED (UE4.27); Between first-scan +
+P4 cross-object live-verify pending. See [dev-log.md](dev-log.md) for the milestone history.
 
 -----
 
@@ -117,37 +118,84 @@ usable from the DB-driven features.
   group refine (`Aura::RefineGroupCandidates`) also takes `Changed / Unchanged / Increased
   / Decreased`, comparing each leaf against its stored `GroupSlotMatch::prevValue`. The
   locked-offset table (`🔒 Class — Str@0x20, Def@0x24`) surfaces once every slot locks
-  (`AllLocked`). The third sub-piece — a **"Copy CE Script" / export of the matched object
-  — was intentionally not built**: the resolved chain is exported from Live Walker.
-  Prev-value refine in-game VERIFIED on SEED; *remaining:* Between first-scan live-verify.
+  (`AllLocked`). The third sub-piece — a **"Copy CE Script" / export of the matched object —
+  is a deliberate WON'T-DO** (owner decision, not pending work): the resolved pointer chain is
+  exported from **Live Walker**, which already does it. Do not re-add a group-side CE/export
+  button. Prev-value refine in-game VERIFIED on SEED; *remaining:* Between first-scan live-verify.
 - **P3 — numeric containers as blocks.** **Largely done** via the opt-in Deep mode.
   *Remaining:* scalar-**valued** maps (`TMap<Name,int>` values) aren't emitted by
   `WalkContainerLeaves` (struct-valued maps *are*) — needs `ContainerCacheEntry` to carry
   key/value leaf types (the TODO is in the walker comment).
-- **P4 — Attribute Component cross-object (opt-in).** The one cross-class exception:
-  follow `ObjectProperty` pointers whose target class name matches `AttributeSet` /
-  `Component`, 1–2 hops, include the sub-object's numeric leaves in the actor's block
-  (a 2-hop path candidate + pointer-aware refine). Reuse the read-ptr+validate pattern in
-  `FindReferencesToUObject`. Default OFF (no forward object-pointer schema descent exists
-  today). Highest risk — isolate.
+- **P4 — cross-object actor block (owned sub-objects), opt-in. APPROACH C — ownership +
+  value-driven (NOT class-name matching). Increment 1 SHIPPED (builds 1303-1309, dev;
+  ⚠ in-game verify pending). Remaining: increment 2 = per-slot `owner_class` for the Pivot
+  handoff.** The goal is **not** "find an Attribute Component"
+  — it is **"merge an actor + the numeric leaves of the sub-objects it OWNS into ONE block"**,
+  so a group whose N values are *distributed across* {actor, its components, its GAS
+  AttributeSets} is matched. (Values that *co-locate* in a single object — including one
+  `UAttributeSet` or one bespoke stats component — are ALREADY found by P1: every UObject,
+  AttributeSet included, is scanned as its own block. P4 adds **only** the
+  cross-object-distributed case.)
+
+  **Why not class-name matching (the original P4 sketch).** Keying on the target class name
+  matching `AttributeSet` / `Component` is both too narrow and too broad: `AttributeSet` only
+  catches GAS — a minority of shipped titles (SEED, our main UE4.27 test game, uses a bespoke
+  `LifeMSUnit : LifeUnitBase` framework, **not** GAS) — while `Component` catches every
+  `UActorComponent` (Mesh / Movement / Capsule / Audio / Widget / Collision — almost none of
+  them stats), which would explode the leaf budget and destroy the group AND's selectivity.
+  `ClassLocationScorer` already encodes this lesson (scores by property-name keywords +
+  penalises Audio/Niagara/Widget/Particle; never trusts class names alone). Terminology: the
+  **component** is `UAbilitySystemComponent`; the value-holder is `UAttributeSet` (a `UObject`,
+  not a component) whose values are `FGameplayAttributeData{ BaseValue, CurrentValue }` floats.
+
+  **Mechanism (`Aura::AppendOwnedSubObjectLeaves`, a bounded 2-level BFS over owned objects).**
+  For each candidate actor, after its own-object block:
+  1. **Discover OWNED sub-objects (not by class name).** Reuse `EnumerateOutgoingObjectPtrs`
+     (the outgoing-pointer adapter Locate-in-GWorld uses) to follow the actor's non-null
+     `ObjectProperty` fields **plus object-pointer CONTAINERS** — `OwnedComponents`
+     (`TSet<UActorComponent*>`) and a GAS ASC's `SpawnedAttributes` (`TArray<UAttributeSet*>`),
+     neither of which P1/Deep follows (Deep walks *numeric* containers, not object-pointer ones).
+     Gate each target by `IsOwnedBy(child, actor, 2)` — the child's Outer chain reaches the actor
+     within ≤ 2 hops — so shared / global objects (other actors, GameInstance, the world) are
+     never followed. **Depth 1** = the actor's components; **depth 2** = the GAS AttributeSets
+     reached actor → ASC → AttributeSet (the BFS expands each owned component one more level).
+  2. **Merge** each owned sub-object's numeric leaves (`CollectGroupLeaves`, absolute
+     `leafAddr = sub + offset`) into the actor's block, then run `Orden::MatchGroup` over the
+     union → a match means the N values co-occur at distinct addresses across the owned tree.
+     Selectivity comes from the **value AND** — a Mesh's `RelativeLocation` won't equal "Str=24"
+     so it self-filters; the scorer's noise-type list only **skips** obvious non-stat components
+     up front (a cost optimisation, not the gate).
+  3. **Refine** re-reads each leaf's absolute `leafAddr` (already the `GroupSlotMatch` contract)
+     — a sub-object freed between scans → SEH-safe read faults → that leaf drops, same as the
+     deep-container refine. The candidate carries the owning-actor instance for handoffs; a
+     cross-object slot's `field_name` is `Sub<ClassName>.Field` (or `[i]` for a container-reached
+     sub-object).
+
+  Reuses the read-ptr + Outer-validate pattern from `FindReferencesToUObject`. Default OFF (a
+  third opt-in alongside Deep). Bounded (≤ N owned sub-objects, shared leaf budget, same 15 s
+  deadline). Highest risk — kept fully isolated behind the flag so P1 / Deep / single-value stay
+  byte-identical.
 
 -----
 
 ## 4. Pipe / UI surface
 
-- **Pipe** — `begin_group_scan` (`values[]`, optional `deep`), `refine_group_scan`,
-  `query_group_candidates`, `end_group_scan`. Each input slot carries `value`, `data_type`,
-  (P2) `scan_type` (default `Exact`; begin = Exact/Bigger/Smaller/Between, refine also
-  Changed/Unchanged/Increased/Decreased), and `value2` (Between upper bound only).
+- **Pipe** — `begin_group_scan` (`values[]`, optional `deep`, optional `cross_object`),
+  `refine_group_scan`, `query_group_candidates`, `end_group_scan`. Each input slot carries
+  `value`, `data_type`, (P2) `scan_type` (default `Exact`; begin = Exact/Bigger/Smaller/Between,
+  refine also Changed/Unchanged/Increased/Decreased), and `value2` (Between upper bound only).
   Object-level candidate with nested `slots[]` (each: `value`, `scan_type`, `value2`,
-  `field_name`, `field_offset`, `field_type`, `leaf_value`, `addr`, `matched_offsets[]`,
-  `locked`). See [pipe-protocol.md](pipe-protocol.md).
+  `field_name`, `field_offset`, `field_type`, `leaf_value`, `addr`, `owner_addr`,
+  `matched_offsets[]`, `locked`). `owner_addr` (P4) is the object directly holding the leaf —
+  the actor, or an owned sub-object for a cross-object leaf. See [pipe-protocol.md](pipe-protocol.md).
 - **UI** — Value Search tab Single/Group `ToggleSwitch`; group mode = 2–4 row editable
   input grid (per-row width scope + **scan-type ComboBox** + value box, which hides for
   prev-value types, plus a second `..to` box for Between) + master-detail results DataGrid
   whose detail header shows the **locked-offset table** once all slots lock. A shared
-  **"Deep (nested containers)"** checkbox (default off) on both modes. Handoffs (Live Walker
-  / Locate-in-GWorld / Copy / Pivot) reuse the single-value events.
+  **"Deep (nested containers)"** checkbox (default off) on both modes, plus a group-only
+  **"Cross-object (owned components)"** checkbox (P4). Handoffs (Live Walker / Locate-in-GWorld
+  / Copy / Pivot) reuse the single-value events; a cross-object slot's handoff targets the
+  owning sub-object (via `owner_addr`).
 
 -----
 
