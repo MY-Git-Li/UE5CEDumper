@@ -19,7 +19,7 @@ UE5CEDumper is a interactive inspector toolchain. It provides a **live window** 
 [![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-CC785C?logo=claude)](https://claude.ai/code)
 
 ## Sample screenshots
-<img src="./img/MainUI.webp" alt="Main UI"/>  
+<video src="https://github.com/bbfox0703/UE5CEDumper/raw/main/MainUI.webm" width="100%" controls autoplay loop muted></video>  
 <img src="./img/Value_Search.webp" alt="Value Search"/>  
 
 ## Highlights
