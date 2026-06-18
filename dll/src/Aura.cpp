@@ -6486,6 +6486,7 @@ struct GroupLeafMeta {
     int32_t     elementIndex = -1;  // -1 direct field; >=0 container element index
     uintptr_t   leafAddr     = 0;   // ABSOLUTE value address (direct: owner+offset; deep: element addr)
     uintptr_t   ownerAddr    = 0;   // object directly holding the leaf (actor, or owned sub-object for P4)
+    std::string ownerClass;         // class name of ownerAddr's object (P4 inc 2; drives the Pivot handoff)
     uint8_t     boolMask     = 0xFF;
 };
 
@@ -6513,7 +6514,8 @@ inline bool GroupNumericLeafType(const std::string& typeName, bool wantByte,
 // containers (TArray/TSet/TMap) are P3 and intentionally not followed here.
 // `obj` is the instance base; `structAddr` is the UStruct being walked;
 // `baseOffset` accumulates obj->structAddr. leaves[k] <-> metas[k].
-void CollectGroupLeaves(uintptr_t obj, uintptr_t structAddr, int32_t baseOffset,
+void CollectGroupLeaves(uintptr_t obj, const std::string& ownerClassName,
+                        uintptr_t structAddr, int32_t baseOffset,
                         const std::string& namePrefix, bool wantByte, int depth,
                         std::vector<uintptr_t>& visited,
                         std::vector<Orden::Leaf>& leaves,
@@ -6546,12 +6548,13 @@ void CollectGroupLeaves(uintptr_t obj, uintptr_t structAddr, int32_t baseOffset,
             m.elementIndex  = -1;
             m.leafAddr      = obj + baseOffset + f.Offset;   // direct: absolute = obj + offset
             m.ownerAddr     = obj;                            // the object directly holding this leaf
+            m.ownerClass    = ownerClassName;                 // class of obj (constant across this walk)
             m.boolMask      = f.boolFieldMask;
             metas.push_back(std::move(m));
         } else if (f.TypeName == "StructProperty" && f.Address) {
             uintptr_t nested = 0;
             if (Macht::ReadSafe(f.Address + DynOff::FSTRUCTPROP_STRUCT, nested) && nested) {
-                CollectGroupLeaves(obj, nested, baseOffset + f.Offset,
+                CollectGroupLeaves(obj, ownerClassName, nested, baseOffset + f.Offset,
                                    namePrefix.empty() ? f.Name : (namePrefix + "." + f.Name),
                                    wantByte, depth + 1, visited, leaves, metas, leafCap);
             }
@@ -6631,7 +6634,10 @@ void AppendOwnedSubObjectLeaves(uintptr_t actor, bool wantByte,
                 prefix += ptrName;
                 if (elemIdx >= 0) { prefix += "["; prefix += std::to_string(elemIdx); prefix += "]"; }
                 subVisited.clear();
-                CollectGroupLeaves(child, childCls, 0, prefix, wantByte, 0,
+                // Each cross-object leaf is OWNED by this sub-object, so its Pivot
+                // handoff class is the sub-object's class, not the actor's (P4 inc 2).
+                std::string childClassName = Ubel::GetName(childCls);
+                CollectGroupLeaves(child, childClassName, childCls, 0, prefix, wantByte, 0,
                                    subVisited, leaves, metas, leafCap);
                 frontier.push_back({child, prefix, cur.depth + 1});   // expand one more level
                 return false;  // keep enumerating this parent's other owned children
@@ -6750,6 +6756,7 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
                 sm.offset        = meta.offset;
                 sm.leafAddr      = meta.leafAddr;
                 sm.ownerAddr     = meta.ownerAddr ? meta.ownerAddr : obj;  // P4: leaf's owning object
+                sm.ownerClass    = meta.ownerClass.empty() ? className : meta.ownerClass;  // P4 inc 2
                 std::memcpy(sm.prevValue, blkLeaves[static_cast<size_t>(leafIdx)].bytes, 8);
                 gc.slotMatches[s].push_back(sm);
             }
@@ -6813,7 +6820,8 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
         m.offset        = 0;
         m.elementIndex  = lf.elemIndex;
         m.leafAddr      = lf.leafAddr;
-        m.ownerAddr     = curObjAddr;   // deep leaves are owned by the scanned object
+        m.ownerAddr     = curObjAddr;     // deep leaves are owned by the scanned object
+        m.ownerClass    = curClassName;   // ...so the Pivot handoff uses its class (P4 inc 2)
         m.boolMask      = lf.boolMask;
         blk.metas.push_back(std::move(m));
     };
@@ -6843,7 +6851,7 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
 
         // --- Object block: the object's direct + struct-nested numeric leaves. ---
         leaves.clear(); metas.clear(); visited.clear();
-        CollectGroupLeaves(obj, cls, 0, "", wantByte, 0, visited, leaves, metas, kLeafCap);
+        CollectGroupLeaves(obj, className, cls, 0, "", wantByte, 0, visited, leaves, metas, kLeafCap);
         // Cross-object (opt-in): also fold in the numeric leaves of the sub-objects
         // this actor OWNS (components + GAS AttributeSets), so a group whose values
         // span {actor, components, attribute sets} matches as one block.

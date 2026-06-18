@@ -281,7 +281,8 @@ Object-aware "group scan": find objects (blocks) that **simultaneously** hold AL
 // whose values are split across {actor, components, attribute sets} is found.
 // Ownership-gated (the sub-object's Outer must chain back to the actor); selectivity
 // is the value AND, not a class-name filter. A cross-object slot's `field_name` is
-// the path (e.g. "HealthComp.CurrentHealth") and `owner_addr` is the owning sub-object.
+// the path (e.g. "HealthComp.CurrentHealth"), `owner_addr` is the owning sub-object,
+// and `owner_class` (P4 inc 2) is that sub-object's class (drives the Pivot handoff).
 
 // Next Scan — re-target every slot (count MUST match the first scan). Survivors
 // are objects where every slot still matches at a distinct offset; the per-slot
@@ -313,18 +314,20 @@ A group candidate is **object-level** with nested per-slot matches:
       "field_name": "Str", "field_offset": 32, "field_type": "IntProperty",
       "bool_field_mask": 255, "leaf_value": "24", "addr": "7FF6..C0",
       "owner_addr": "7FF6..A0",                         // own-block leaf -> owner == the candidate actor
+      "owner_class": "BP_PlayerStats_C",               // ...so owner_class == class_name here
       "matched_offsets": [32], "locked": true },      // locked once a single offset remains
     { "slot_index": 1, "value": "10", "scan_type": "Exact",
       "field_name": "HealthComp.CurrentHealth",        // cross_object leaf: path from the actor
       "field_offset": 64, "field_type": "FloatProperty",
       "leaf_value": "10", "addr": "1AD0..40",
       "owner_addr": "1AD0..00",                         // the OWNED sub-object holding the leaf (handoffs open it)
+      "owner_class": "UHealthComponent",               // (P4 inc 2) the sub-object's class -> drives the Pivot handoff
       "matched_offsets": [64], "locked": true }
   ]
 }
 ```
 
-`scan_type` echoes each slot's stored predicate (`Radar::NameOf(ScanType)`); a prev-value slot carries an empty `value` and its `leaf_value` is the current bytes; a Between slot additionally echoes `value2` (the upper bound). `addr` / `field_offset` / `field_name` on each slot drive the same Live Walker / Locate-in-GWorld / Copy handoffs as a single-value candidate. `owner_addr` (P4) is the object directly holding the leaf — the candidate actor for an own-block leaf, or an owned sub-object for a cross-object leaf; the per-slot handoffs target it. The object's `class_name` drives Instance Finder / Class Pivot. Once every slot's `locked` is true the UI shows the **locked-offset table** (class + each value's offset).
+`scan_type` echoes each slot's stored predicate (`Radar::NameOf(ScanType)`); a prev-value slot carries an empty `value` and its `leaf_value` is the current bytes; a Between slot additionally echoes `value2` (the upper bound). `addr` / `field_offset` / `field_name` on each slot drive the same Live Walker / Locate-in-GWorld / Copy handoffs as a single-value candidate. `owner_addr` (P4) is the object directly holding the leaf — the candidate actor for an own-block leaf, or an owned sub-object for a cross-object leaf; the per-slot handoffs target it. `owner_class` (P4 inc 2) is that owning object's class (== `class_name` for an own-block leaf, the owned sub-object's class for a cross-object leaf) and drives the per-slot **Pivot** handoff so it lands on the class that declares the field, not the actor. The object's `class_name` drives Instance Finder / Class Pivot at the candidate level. Once every slot's `locked` is true the UI shows the **locked-offset table** (class + each value's offset).
 
 ### Snapshot Capture (experimental — Phase A)
 

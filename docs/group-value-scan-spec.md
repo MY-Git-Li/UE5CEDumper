@@ -10,11 +10,12 @@ containers, single + group), P2 builds 1295-1302 (per-slot prev-value / ordered 
 Between predicates + locked-offset table; the "Copy CE / export" sub-piece was
 deliberately dropped — export from Live Walker), **P4 increment 1 builds 1303-1313
 (opt-in cross-object actor block — owned sub-objects' numerics, approach C; MERGED
-main PR #313 `d977a34`)**. P1/Deep + the P2 prev-value refine in-game verified on
-SEED (UE4.27); **P4 cross-object in-game VERIFIED on TQ2 (UE5.07, GAS)**; Between
-first-scan live-verify still pending. **Next: P4 increment 2** (per-slot
-`owner_class` for the Pivot handoff — see §3.2 P4). See [dev-log.md](dev-log.md)
-for the milestone history.
+main PR #313 `d977a34`)**, **P4 increment 2 builds 1318-1319 (per-slot `owner_class`
+on the wire → the group-scan Pivot handoff targets the owned sub-object's class, not
+the actor's)**. P1/Deep + the P2 prev-value refine in-game verified on SEED (UE4.27);
+**P4 cross-object in-game VERIFIED on TQ2 (UE5.07, GAS)**; Between first-scan +
+inc 2 Pivot-class live-verify still pending. See [dev-log.md](dev-log.md) for the
+milestone history.
 
 -----
 
@@ -132,13 +133,17 @@ usable from the DB-driven features.
 - **P4 — cross-object actor block (owned sub-objects), opt-in. APPROACH C — ownership +
   value-driven (NOT class-name matching). Increment 1 SHIPPED + MERGED main PR #313
   (builds 1303-1313); in-game VERIFIED on TQ2 (UE5.07, GAS) — `bp_tq2_character_stats_component`
-  → `AttributesComponent` (ASC) → `m_pAttributeSetHealth.CurrentHealth`. Remaining: increment 2
-  = per-slot `owner_class` so the Pivot handoff pivots on the sub-object's class (today it uses
-  the actor's class — `GroupSlotMatch.ClassName` is denormalized from the candidate actor; for a
-  cross-object slot the Pivot should use the OWNED sub-object's class instead). Add an
-  `owner_class` to the wire `slots[]` (DLL `GroupCandidateToJson`, from the leaf's owning object),
-  parse it in `ParseGroupCandidate`, and have `PivotGroupSlot` prefer it.** The goal is **not**
-  "find an Attribute Component"
+  → `AttributesComponent` (ASC) → `m_pAttributeSetHealth.CurrentHealth`. **Increment 2 SHIPPED
+  (builds 1318-1319): per-slot `owner_class` so the Pivot handoff pivots on the sub-object's
+  class.** Each leaf carries `ownerClass` (the class of its `ownerAddr` object), threaded through
+  `Aura::CollectGroupLeaves` (own-block/deep leaf → the candidate class; cross-object leaf →
+  `Ubel::GetName(childCls)` of the owned sub-object) onto `Radar::GroupSlotMatch::ownerClass`;
+  `Fern::GroupCandidateToJson` emits `owner_class`; C# `ParseGroupCandidate` reads it into
+  `GroupSlotMatch.OwnerClass`; the computed `PivotClassName => OwnerClass ?? ClassName` (mirrors
+  `HandoffAddr`) feeds `PivotGroupSlot`. The Pivot is class-driven — it selects the class in the
+  captured snapshot — so the owner class is the correctness fix; the per-slot `field_name` stays
+  the actor-relative path (only used as an optional pre-tick hint, harmless when it doesn't match
+  on the owner). The goal is **not** "find an Attribute Component"
   — it is **"merge an actor + the numeric leaves of the sub-objects it OWNS into ONE block"**,
   so a group whose N values are *distributed across* {actor, its components, its GAS
   AttributeSets} is matched. (Values that *co-locate* in a single object — including one
@@ -194,17 +199,19 @@ usable from the DB-driven features.
   `value`, `data_type`, (P2) `scan_type` (default `Exact`; begin = Exact/Bigger/Smaller/Between,
   refine also Changed/Unchanged/Increased/Decreased), and `value2` (Between upper bound only).
   Object-level candidate with nested `slots[]` (each: `value`, `scan_type`, `value2`,
-  `field_name`, `field_offset`, `field_type`, `leaf_value`, `addr`, `owner_addr`,
+  `field_name`, `field_offset`, `field_type`, `leaf_value`, `addr`, `owner_addr`, `owner_class`,
   `matched_offsets[]`, `locked`). `owner_addr` (P4) is the object directly holding the leaf —
-  the actor, or an owned sub-object for a cross-object leaf. See [pipe-protocol.md](pipe-protocol.md).
+  the actor, or an owned sub-object for a cross-object leaf; `owner_class` (P4 inc 2) is that
+  owning object's class and drives the per-slot Pivot handoff. See [pipe-protocol.md](pipe-protocol.md).
 - **UI** — Value Search tab Single/Group `ToggleSwitch`; group mode = 2–4 row editable
   input grid (per-row width scope + **scan-type ComboBox** + value box, which hides for
   prev-value types, plus a second `..to` box for Between) + master-detail results DataGrid
   whose detail header shows the **locked-offset table** once all slots lock. A shared
   **"Deep (nested containers)"** checkbox (default off) on both modes, plus a group-only
   **"Cross-object (owned components)"** checkbox (P4). Handoffs (Live Walker / Locate-in-GWorld
-  / Copy / Pivot) reuse the single-value events; a cross-object slot's handoff targets the
-  owning sub-object (via `owner_addr`).
+  / Copy / Pivot) reuse the single-value events; a cross-object slot's object handoffs (Live
+  Walker / Locate) target the owning sub-object (via `owner_addr`) and its Pivot handoff targets
+  the owner's class (via `owner_class`, P4 inc 2).
 
 -----
 

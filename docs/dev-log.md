@@ -14,6 +14,18 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-19 — Group Scan P4 (increment 2): per-slot `owner_class` → the group-scan Pivot handoff targets the owned sub-object's class, not the actor's (builds 1318-1319; DLL + pipe + UI; closes P4)
+
+P4 increment 1 made a cross-object slot's **object** handoffs (Live Walker / Locate-in-GWorld) open the owned sub-object via `owner_addr` / `GroupSlotMatch.HandoffAddr`. Its **Pivot** handoff still used the candidate **actor's** class (`GroupSlotMatch.ClassName`, denormalized from the candidate in `ParseGroupCandidate`), so pivoting on a cross-object slot — e.g. a GAS attribute held on a `UAttributeSet`, or a stat on a `UHealthComponent` — would select the wrong class. The Class Pivot is **class-driven** (`SelectClassAndTickPropAsync` looks the class up in the captured snapshot; `propName` is only an optional pre-tick hint), so the class is the correctness fix.
+
+**Mechanism — `owner_class` mirrors `owner_addr` end to end.**
+- DLL: each leaf carries an `ownerClass` (the class name of its `ownerAddr` object). `Aura::CollectGroupLeaves` gains an `ownerClassName` param threaded from its two call sites — the main object block passes the candidate class; `AppendOwnedSubObjectLeaves` passes `Ubel::GetName(childCls)` of the owned sub-object — so own-block + struct-nested leaves get the actor's class and each cross-object leaf gets its sub-object's class. Deep-container leaves use the scanned object's class (`curClassName`). `emitGroupCandidate` copies it onto `Radar::GroupSlotMatch::ownerClass` (empty → candidate class, defensive). `Fern::GroupCandidateToJson` emits `owner_class` next to `owner_addr`.
+- C#: `ParseGroupCandidate` reads `owner_class` into `GroupSlotMatch.OwnerClass`; a computed `PivotClassName => string.IsNullOrEmpty(OwnerClass) ? ClassName : OwnerClass` (mirrors the existing `HandoffAddr`) feeds `PivotGroupSlot`. For an own-block leaf `owner_class == class_name`, so the Pivot is unchanged there.
+
+The per-slot `field_name` stays the actor-relative path (`HealthComp.CurrentHealth`); when pivoting on the owner class it simply won't match the pre-tick `FirstOrDefault` and no field is pre-ticked — harmless, the Pivot still lands on the right class. **Refine / Orden / session untouched** — `RefineGroupCandidates` copies surviving `sm` entries, so `ownerClass` rides along. P1 / Deep / cross-object scan logic byte-identical (additive field only).
+
+627 dll + 1610 C# (+2: `PivotClassName` owner-vs-actor model test; `PivotGroupSlotCommand` honours the owner class for a cross-object slot and falls back for an own-block slot) green; AOT publish clean (46.4 MB). This closes P4 (increments 1 + 2). In-game Pivot-class verify (a GAS title — TQ2 / DQ7R) still nice-to-have. See [group-value-scan-spec.md](group-value-scan-spec.md) §3.2 P4.
+
 ## 2026-06-18 — Group Scan P4 (increment 1): cross-object actor block — fold owned sub-objects' numerics into the actor's block (builds 1303-1313; DLL + pipe + UI; approach C, opt-in; in-game VERIFIED on TQ2 GAS) + Locate-in-GWorld silent-no-op + nested-struct-field-scroll fixes
 
 P1 already finds a group whose N values **co-locate** in one object (incl. a single `UAttributeSet` — every UObject is its own block). P4 adds the **cross-object-distributed** case: a group whose values are spread across {an actor, the components it owns, its GAS AttributeSets} — e.g. Health on the pawn + Gold on an `InventoryComponent`. Opt-in (a third toggle alongside Deep).
