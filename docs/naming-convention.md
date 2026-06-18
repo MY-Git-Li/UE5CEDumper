@@ -48,6 +48,7 @@ narrative identity resonates with what the module *does*.
 | **Lineal.h** | 莉涅爾 | First-class mage, 15-yr undercover spy | — | PackedItem: UE5.7+ packed FUObjectItem reconstruction | The straightedge — realigns the non-standard packed layout (was `PackedItem`) |
 | **Radar.cpp** | 拉達爾 | Shadow Warrior, plateau village chief | — | ValueScan: CE-style by-value First/Next Scan | The sweep — scans every object for a matching value (was `ValueScan`) |
 | **Solitar.cpp** | 索莉塔 | Greater demon studying humanity | #11 | GodMode: force AActor::bCanBeDamaged (damage immunity) + re-assert worker | Overwhelming, near-unkillable mage — invulnerability; reuses the FBoolProperty bit-write Wirbel uses for the cursor |
+| **Orden.h** | 歐爾登 | Noble house head ("order") | — | GroupMatch: source-agnostic SDR/assignment core for multi-value group scan | Brings *order* to a scattered set of values — assigns each value to its leaf slot (header-only, pure) |
 
 ---
 
@@ -101,6 +102,7 @@ Scharf::                    // FProperty alignment validator (header-only)
 Tot::                       // Cancellation — cooperative cancel flag (header-only; was Cancel)
 Lineal::                    // PackedItem — UE5.7+ packed FUObjectItem reconstruction (header-only; was PackedItem)
 Radar::                     // ValueScan — CE-style by-value scan (was ValueScan)
+Orden::                     // GroupMatch — source-agnostic SDR matcher (multi-value group scan; header-only)
 Grimoire::                  // Constants — spell book
 DynOff::                    // Dynamic offsets (in Grimoire.h, unchanged)
 ```
@@ -192,13 +194,13 @@ Total votes: **12,700,122** | Voting period: 2026-03-08 ~ 2026-03-29
 | 20 | Wirbel (威亞貝爾) | — | — |
 | 21 | Mimic (寶箱怪) | — | **Mailbox** |
 | 22 | Renge (蓮格) | — | **PipeProtocol** |
-| 23 | Hero of the South | — | — |
+| 23 | Hero of the South (南方勇者) | — | — |
 | 24 | Sein (贊恩) | — | **Logger** |
 | 25 | Denken (鄧肯) | — | **NativeDisasm** |
 | 26 | Kanne (卡妮) | — | — |
 | 27 | Land (蘭特) | — | — |
 | 28 | Richter (里希特) | — | — |
-| 29 | Rivale (リヴァーレ) | — | — |
+| 29 | Rivale (利瓦雷) | — | — |
 | 30 | Receptionist (櫃台人員) | — | — |
 
 ### One-Vote-Per-Person Top 7
@@ -320,7 +322,7 @@ German meanings are given because most names map cleanly to a module function.
 | Gehen | Gehen | Dwarf who built a canyon bridge | ⬜ | Bridge / IPC connector (strong fit) |
 | Glück | Gluck | Lord allied with Macht ("luck") | ⬜ | Lucky heuristic / fallback logic |
 | Kraft | Kraft | Ancient elven monk ("force/power") | ⬜ | Heavy-compute / force utility |
-| Orden | Orden | Noble house head ("order") | ⬜ | Ordering / sorting / sequencing |
+| Orden | Orden | Noble house head ("order") | 🟢 GroupMatch | Source-agnostic SDR matcher for multi-value group scan (`Orden.h`, header-only, build 1276) |
 | Fass | Fass | Dwarf seeking ale ("barrel/cask") | ⬜ | Container / buffer |
 | Voll | Voll | Old dwarf friend ("full") | ⬜ | Capacity / completeness check |
 | Milliarde | Milliarde | Old elf ("billion") | ⬜ | Large-count handling |

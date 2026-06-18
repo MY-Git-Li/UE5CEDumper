@@ -523,6 +523,157 @@ private:
     uint64_t                                                    nextId_ = 1;
 };
 
+// ============================================================
+// Multiple values group scan (build 1276) — object-aware "group scan".
+//
+// A group scan looks for objects (blocks) that SIMULTANEOUSLY hold ALL of N
+// user values (2..4) at DISTINCT numeric-property offsets, in any order. The
+// pure combinatorial match lives in Orden.h (source-agnostic); the structures
+// below persist a group session so refine can re-read the located offsets.
+//
+// One logical hit = one owning UObject + a per-slot CONVERGENCE LIST of the
+// offsets whose current value still satisfies that slot. On the first scan a
+// slot may match several offsets; refine re-reads them and shrinks each list. A
+// slot list of size 1 is "locked" (the field is identified). The owning object
+// stays a candidate only while a System of Distinct Representatives exists
+// across the slots (checked via Orden::HasDistinctAssignment in Aura's
+// scan/refine — kept out of this header to avoid an Orden<->Radar include cycle,
+// since Orden.h includes Radar.h).
+//
+// Descriptor / instance pools are reused exactly as the single-value Session,
+// so a slot match is a lean index pair. GroupSessionManager mirrors
+// SessionManager (same 300s expiry, coarse lock, V3-C view cache). Kept a
+// SIBLING of SessionManager — not folded in — so the battle-tested single-value
+// path is untouched.
+// ============================================================
+
+// One input value slot of a group scan. `targets` is the pre-parsed multi-width
+// target set (BuildNumericTargets); `value` is the raw user string echoed back
+// on the wire. P1 is exact-match per slot (st == Exact); P2 adds prev-value
+// scan types.
+struct SlotSpec {
+    DataType         dt = DataType::NumericNoByte;  // per-slot meta or concrete width
+    ScanType         st = ScanType::Exact;
+    std::string      value;                          // original user value (display/echo)
+    NumericTargetSet targets;                        // pre-parsed per fitting width
+};
+
+// One converging match of a slot inside a candidate object. `offset` is the byte
+// offset from the owning object to the leaf value (== descriptor.fieldOffset for
+// a direct field; a separate field so containers can carry an element-address
+// offset later). `prevValue` is the last-observed bytes at that leaf so the wire
+// can render it and a future prev-value refine can compare.
+struct GroupSlotMatch {
+    uint32_t  descriptorIdx = 0;   // -> GroupSession::descriptors
+    int32_t   elementIndex  = -1;  // -1 = direct field; >=0 = container element index
+    int32_t   offset        = 0;   // bytes from instanceAddr to the leaf (direct); 0 for deep
+    uintptr_t leafAddr      = 0;   // ABSOLUTE address of the value — direct: instance+offset;
+                                   // deep (container element): the element's own address.
+                                   // Refine re-reads this (SEH-safe; stale on container realloc = drop).
+    uint8_t   prevValue[16] = {};  // last-observed leaf bytes
+};
+
+// One group candidate: an owning object plus, per slot, the convergence list of
+// matches. slotMatches.size() == session.slots.size(); every inner list is
+// non-empty while the candidate lives (an emptied slot drops the candidate).
+struct GroupCandidate {
+    uint32_t                                 instanceIdx = 0;  // -> GroupSession::instances
+    std::vector<std::vector<GroupSlotMatch>> slotMatches;
+};
+
+struct GroupSession {
+    uint64_t                              id = 0;
+    std::vector<SlotSpec>                 slots;
+    std::vector<GroupCandidate>           candidates;
+    std::vector<FieldDescriptor>          descriptors;  // shared via GroupSlotMatch::descriptorIdx
+    std::vector<InstanceRecord>           instances;    // shared via GroupCandidate::instanceIdx
+    std::chrono::steady_clock::time_point lastUse;
+
+    // V3-C cached ordered view (same contract as Session::view*).
+    bool                                  viewValid    = false;
+    std::string                           viewFilter;
+    uint8_t                               viewSortKey  = 0;
+    bool                                  viewSortDesc = false;
+    std::vector<uint32_t>                 viewOrder;
+};
+
+// Build the display order over a group-candidate pool: keep candidates whose
+// owning class / instance / any slot field-name or value contains `filter`
+// (case-insensitive; "" keeps all), then stable-sort by (sortKey, sortDesc).
+// Object-level keys (ClassName / InstanceName / InstanceIndex) plus slot-0's
+// Offset / Value are supported; unsupported keys fall back to scan order. Pure /
+// std-only. Returns candidate indices in display order.
+std::vector<uint32_t> BuildGroupOrderedView(
+    const std::vector<GroupCandidate>&  candidates,
+    const std::vector<SlotSpec>&        slots,
+    const std::vector<FieldDescriptor>& descriptors,
+    const std::vector<InstanceRecord>&  instances,
+    const std::string& filter, SortKey sortKey, bool sortDesc);
+
+// Sibling of SessionManager for group sessions. Same lifecycle/expiry/lock/view
+// contract; the single-value SessionManager is left untouched.
+class GroupSessionManager {
+public:
+    static GroupSessionManager& Instance();
+
+    uint64_t Begin(std::vector<SlotSpec>        slots,
+                   std::vector<GroupCandidate>  candidates,
+                   std::vector<FieldDescriptor> descriptors,
+                   std::vector<InstanceRecord>  instances);
+
+    // Run `fn(GroupSession&)` under the lock; may prune candidates. Invalidates
+    // the cached view afterwards.
+    template <typename Fn>
+    bool RefineWith(uint64_t sessionId, Fn&& fn) {
+        std::lock_guard<std::mutex> lk(mu_);
+        auto it = sessions_.find(sessionId);
+        if (it == sessions_.end()) return false;
+        it->second->lastUse = std::chrono::steady_clock::now();
+        fn(*it->second);
+        it->second->viewValid = false;
+        return true;
+    }
+
+    // V3-C window query — ensures the cached ordered view matches (filter,
+    // sortKey, sortDesc), then `fn(const GroupSession&, const std::vector<uint32_t>&)`.
+    template <typename Fn>
+    bool QueryWith(uint64_t sessionId, const std::string& filter,
+                   SortKey sortKey, bool sortDesc, Fn&& fn) {
+        std::lock_guard<std::mutex> lk(mu_);
+        auto it = sessions_.find(sessionId);
+        if (it == sessions_.end()) return false;
+        GroupSession& s = *it->second;
+        s.lastUse = std::chrono::steady_clock::now();
+        const uint8_t keyRaw = static_cast<uint8_t>(sortKey);
+        if (!s.viewValid || s.viewFilter != filter
+            || s.viewSortKey != keyRaw || s.viewSortDesc != sortDesc) {
+            s.viewOrder = BuildGroupOrderedView(s.candidates, s.slots, s.descriptors,
+                                                s.instances, filter, sortKey, sortDesc);
+            s.viewFilter   = filter;
+            s.viewSortKey  = keyRaw;
+            s.viewSortDesc = sortDesc;
+            s.viewValid    = true;
+        }
+        fn(static_cast<const GroupSession&>(s), s.viewOrder);
+        return true;
+    }
+
+    bool End(uint64_t sessionId);
+    void ExpireOldSessions();
+    void DropAll();
+
+private:
+    GroupSessionManager() = default;
+    GroupSessionManager(const GroupSessionManager&) = delete;
+    GroupSessionManager& operator=(const GroupSessionManager&) = delete;
+
+    static constexpr std::chrono::seconds kExpirySeconds{300};
+
+    std::mutex                                                      mu_;
+    std::unordered_map<uint64_t, std::unique_ptr<GroupSession>>     sessions_;
+    uint64_t                                                        nextId_ = 1;
+};
+
 // Typed compare predicate. Returns true if rawBytes (size = SizeOf(dt))
 // satisfies (scanType, targetBytes, target2Bytes) where target2Bytes is
 // only consulted for ScanType::Between.

@@ -1181,16 +1181,18 @@ public class ValueSearchTests
         public bool? LastParallel { get; private set; }
         public bool? LastBatchRead { get; private set; }
 
+        public bool? LastDeep { get; private set; }
         public override Task<ValueScanBeginResult> BeginValueScanAsync(
             ValueScanDataType dataType, ValueScanType scanType,
             string value, string? value2 = null, bool gameOnly = true,
             int maxResults = 50000, double tolerance = 0.0,
             bool caseSensitive = false, bool parallel = true, bool batchRead = true,
-            int pageSize = 1000, CancellationToken ct = default)
+            bool deep = false, int pageSize = 1000, CancellationToken ct = default)
         {
             Begins.Add((dataType, scanType, value, value2, gameOnly, maxResults, tolerance, caseSensitive));
             LastParallel = parallel;
             LastBatchRead = batchRead;
+            LastDeep = deep;
             return Task.FromResult(NextBeginResult);
         }
 
@@ -1219,6 +1221,41 @@ public class ValueSearchTests
             Ends.Add(sessionId);
             return Task.CompletedTask;
         }
+
+        // --- group scan ---
+        public GroupScanBeginResult NextGroupBeginResult { get; set; } = new();
+        public GroupScanRefineResult NextGroupRefineResult { get; set; } = new();
+        public GroupScanWindowResult NextGroupWindowResult { get; set; } = new();
+        public List<(List<GroupSlotInput> slots, bool gameOnly, int maxResults, bool deep)> GroupBegins { get; } = new();
+        public List<(ulong sessionId, List<string> values)> GroupRefines { get; } = new();
+        public List<ulong> GroupEnds { get; } = new();
+
+        public override Task<GroupScanBeginResult> BeginGroupScanAsync(
+            IReadOnlyList<GroupSlotInput> slots, bool gameOnly = true,
+            int maxResults = 50000, bool deep = false, int pageSize = 1000, CancellationToken ct = default)
+        {
+            GroupBegins.Add((slots.ToList(), gameOnly, maxResults, deep));
+            return Task.FromResult(NextGroupBeginResult);
+        }
+
+        public override Task<GroupScanRefineResult> RefineGroupScanAsync(
+            ulong sessionId, IReadOnlyList<string> values, int pageSize = 1000, CancellationToken ct = default)
+        {
+            GroupRefines.Add((sessionId, values.ToList()));
+            return Task.FromResult(NextGroupRefineResult);
+        }
+
+        public override Task<GroupScanWindowResult> QueryGroupCandidatesAsync(
+            ulong sessionId, int offset, int limit,
+            string? filter = null, string? sortKey = null, bool sortDesc = false,
+            CancellationToken ct = default)
+            => Task.FromResult(NextGroupWindowResult);
+
+        public override Task EndGroupScanAsync(ulong sessionId, CancellationToken ct = default)
+        {
+            GroupEnds.Add(sessionId);
+            return Task.CompletedTask;
+        }
     }
 
     private static (ValueSearchViewModel vm, FakeDumpService fake) MakeVm()
@@ -1226,6 +1263,272 @@ public class ValueSearchTests
         var fake = new FakeDumpService();
         var vm = new ValueSearchViewModel(fake, new MockLoggingService());
         return (vm, fake);
+    }
+
+    // ------------------------------------------------------------------
+    // Multiple values group scan (build 1276)
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task BeginGroupScanAsync_BuildsValuesArray_AndParsesNestedSlots()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"]              = req["id"]?.GetValue<int>() ?? 0,
+                ["ok"]              = true,
+                ["session_id"]      = 9UL,
+                ["total"]           = 1,
+                ["slot_count"]      = 2,
+                ["scanned_classes"] = 3,
+                ["scanned_objects"] = 100,
+                ["duration_ms"]     = 5L,
+                ["deadline_hit"]    = false,
+                ["candidates"]      = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["instance_addr"]       = "7FF600000000",
+                        ["instance_index"]      = 42,
+                        ["instance_name"]       = "BP_Player_C_0",
+                        ["class_name"]          = "BP_Player_C",
+                        ["defining_class_name"] = "ACharacter",
+                        ["slots"]               = new JsonArray
+                        {
+                            new JsonObject
+                            {
+                                ["slot_index"]      = 0,
+                                ["value"]           = "24",
+                                ["field_name"]      = "Str",
+                                ["field_offset"]    = 0x20,
+                                ["field_type"]      = "IntProperty",
+                                ["bool_field_mask"] = 0xFF,
+                                ["leaf_value"]      = "24",
+                                ["addr"]            = "7FF600000020",
+                                ["matched_offsets"] = new JsonArray { 0x20 },
+                                ["locked"]          = true,
+                            },
+                            new JsonObject
+                            {
+                                ["slot_index"]      = 1,
+                                ["value"]           = "10",
+                                ["field_name"]      = "Def",
+                                ["field_offset"]    = 0x24,
+                                ["field_type"]      = "IntProperty",
+                                ["bool_field_mask"] = 0xFF,
+                                ["leaf_value"]      = "10",
+                                ["addr"]            = "7FF600000024",
+                                ["matched_offsets"] = new JsonArray { 0x24, 0x40 },
+                                ["locked"]          = false,
+                            },
+                        },
+                    },
+                },
+            };
+        });
+
+        var slots = new List<GroupSlotInput>
+        {
+            new() { DataType = ValueScanDataType.NumericNoByte, Value = "24" },
+            new() { DataType = ValueScanDataType.NumericAll,    Value = "10" },
+        };
+        var res = await svc.BeginGroupScanAsync(slots, gameOnly: true, maxResults: 1234,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(captured);
+        Assert.Equal("begin_group_scan", captured!["cmd"]?.GetValue<string>());
+        var values = Assert.IsType<JsonArray>(captured["values"]);
+        Assert.Equal(2, values.Count);
+        Assert.Equal("24",            values[0]!["value"]?.GetValue<string>());
+        Assert.Equal("NumericNoByte", values[0]!["data_type"]?.GetValue<string>());
+        Assert.Equal("NumericAll",    values[1]!["data_type"]?.GetValue<string>());
+
+        Assert.Equal(9UL, res.SessionId);
+        Assert.Equal(2, res.SlotCount);
+        var gc = Assert.Single(res.Candidates);
+        Assert.Equal("BP_Player_C", gc.ClassName);
+        Assert.Equal(2, gc.Slots.Count);
+        Assert.True(gc.Slots[0].Locked);
+        Assert.Equal("Str", gc.Slots[0].FieldName);
+        Assert.Equal(0x20, gc.Slots[0].FieldOffset);
+        // Owner denormalized onto each slot so per-slot handoffs are self-contained.
+        Assert.Equal("7FF600000000", gc.Slots[0].InstanceAddr);
+        Assert.Equal("BP_Player_C",  gc.Slots[1].ClassName);
+        Assert.False(gc.Slots[1].Locked);
+        Assert.Equal(new[] { 0x24, 0x40 }, gc.Slots[1].MatchedOffsets);
+    }
+
+    [Fact]
+    public async Task RefineGroupScanAsync_SendsValuesArray()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"]          = req["id"]?.GetValue<int>() ?? 0,
+                ["ok"]          = true,
+                ["session_id"]  = 9UL,
+                ["total"]       = 0,
+                ["duration_ms"] = 1L,
+                ["candidates"]  = new JsonArray(),
+            };
+        });
+
+        await svc.RefineGroupScanAsync(9UL, new[] { "24", "11" },
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(captured);
+        Assert.Equal("refine_group_scan", captured!["cmd"]?.GetValue<string>());
+        Assert.Equal(9UL, captured["session_id"]?.GetValue<ulong>());
+        var values = Assert.IsType<JsonArray>(captured["values"]);
+        Assert.Equal(2, values.Count);
+        Assert.Equal("24", values[0]!["value"]?.GetValue<string>());
+        Assert.Equal("11", values[1]!["value"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public void GroupMode_TogglesSingleMode()
+    {
+        var (vm, _) = MakeVm();
+        Assert.True(vm.IsSingleMode);
+        Assert.False(vm.IsGroupMode);
+        vm.IsGroupMode = true;
+        Assert.False(vm.IsSingleMode);
+    }
+
+    [Fact]
+    public void GroupRows_AddRemove_RespectTwoToFourBounds()
+    {
+        var (vm, _) = MakeVm();
+        Assert.Equal(2, vm.GroupInputs.Count);   // starts with 2
+        Assert.True(vm.CanAddGroupRow);
+        Assert.False(vm.CanRemoveGroupRow);      // can't go below 2
+
+        vm.AddGroupRowCommand.Execute(null);
+        vm.AddGroupRowCommand.Execute(null);
+        Assert.Equal(4, vm.GroupInputs.Count);
+        Assert.False(vm.CanAddGroupRow);         // capped at 4
+
+        vm.AddGroupRowCommand.Execute(null);     // no-op past 4
+        Assert.Equal(4, vm.GroupInputs.Count);
+
+        vm.RemoveGroupRowCommand.Execute(null);
+        vm.RemoveGroupRowCommand.Execute(null);
+        Assert.Equal(2, vm.GroupInputs.Count);
+        Assert.False(vm.CanRemoveGroupRow);
+    }
+
+    [Fact]
+    public async Task GroupFirstScan_PopulatesCandidates_AndOpensSession()
+    {
+        var (vm, fake) = MakeVm();
+        vm.IsGroupMode = true;
+        vm.GroupInputs[0].Value = "24";
+        vm.GroupInputs[1].Value = "10";
+        fake.NextGroupBeginResult = new GroupScanBeginResult
+        {
+            SessionId = 77UL,
+            Total     = 1,
+            SlotCount = 2,
+            Candidates =
+            {
+                new GroupCandidate
+                {
+                    InstanceAddr = "7FF6AA",
+                    ClassName    = "BP_Stats_C",
+                    Slots        = { new GroupSlotMatch { Value = "24", FieldName = "Str", Locked = true } },
+                },
+            },
+        };
+
+        await vm.GroupFirstScanCommand.ExecuteAsync(null);
+
+        Assert.True(vm.HasGroupSession);
+        Assert.Equal(77UL, vm.GroupSessionId);
+        Assert.Single(vm.GroupCandidates);
+        Assert.Single(fake.GroupBegins);
+        Assert.Equal(2, fake.GroupBegins[0].slots.Count);
+    }
+
+    [Fact]
+    public async Task GroupFirstScan_RejectsEmptyValue()
+    {
+        var (vm, fake) = MakeVm();
+        vm.IsGroupMode = true;
+        vm.GroupInputs[0].Value = "24";
+        vm.GroupInputs[1].Value = "";   // missing
+
+        await vm.GroupFirstScanCommand.ExecuteAsync(null);
+
+        Assert.Empty(fake.GroupBegins);
+        Assert.False(string.IsNullOrEmpty(vm.ErrorMessage));
+    }
+
+    [Fact]
+    public async Task BeginGroupScanAsync_AttachesDeepWhenEnabled_OmitsByDefault()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"] = req["id"]?.GetValue<int>() ?? 0, ["ok"] = true,
+                ["session_id"] = 1UL, ["total"] = 0, ["candidates"] = new JsonArray(),
+            };
+        });
+        var slots = new List<GroupSlotInput> { new() { Value = "1" }, new() { Value = "2" } };
+
+        await svc.BeginGroupScanAsync(slots, deep: false, ct: TestContext.Current.CancellationToken);
+        Assert.False(captured!.ContainsKey("deep"), "deep must be omitted when off (wire-tight)");
+
+        await svc.BeginGroupScanAsync(slots, deep: true, ct: TestContext.Current.CancellationToken);
+        Assert.True(captured!["deep"]?.GetValue<bool>(), "deep must be attached when on");
+    }
+
+    [Fact]
+    public async Task BeginValueScanAsync_AttachesDeepWhenEnabled()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"] = req["id"]?.GetValue<int>() ?? 0, ["ok"] = true,
+                ["session_id"] = 1UL, ["data_type"] = "Int32", ["total"] = 0,
+                ["scanned_classes"] = 0, ["scanned_objects"] = 0, ["duration_ms"] = 0L,
+                ["deadline_hit"] = false, ["candidates"] = new JsonArray(),
+            };
+        });
+        await svc.BeginValueScanAsync(ValueScanDataType.Int32, ValueScanType.Exact, "10",
+            deep: true, ct: TestContext.Current.CancellationToken);
+        Assert.True(captured!["deep"]?.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task GroupFirstScan_PassesDeepFlag()
+    {
+        var (vm, fake) = MakeVm();
+        vm.IsGroupMode = true;
+        vm.DeepScan = true;
+        vm.GroupInputs[0].Value = "10";
+        vm.GroupInputs[1].Value = "20";
+        fake.NextGroupBeginResult = new GroupScanBeginResult { SessionId = 5UL, Total = 0 };
+
+        await vm.GroupFirstScanCommand.ExecuteAsync(null);
+
+        Assert.Single(fake.GroupBegins);
+        Assert.True(fake.GroupBegins[0].deep);
     }
 
     [Fact]

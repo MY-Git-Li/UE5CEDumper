@@ -28,6 +28,7 @@
 #include "../src/Neu.h"     // UEnum::Names layout parse (legacy TArray vs UE5.6+ FNameData)
 #include "../src/GraphPath.h"   // Pure BFS shortest-path core ("Locate in GWorld")
 #include "../src/Solitar.h"     // GodMode FBoolProperty bit write (ApplyBoolBit, header-inline)
+#include "../src/Orden.h"       // Multi-value group scan: source-agnostic SDR matcher (MatchGroup)
 
 #include <Windows.h>
 #include <timeapi.h>   // timeBeginPeriod — exercised by the poll-latency check
@@ -2093,6 +2094,139 @@ static void Test_Neu_Edge() {
     }
 }
 
+// ----- Orden::MatchGroup — multi-value group scan SDR matcher --------------
+//
+// Orden works on already-read Leaf structs (no memory functor) — the scanner
+// produces the leaves, Orden does the pure combinatorial match. Helpers build
+// synthetic leaves + multi-width slot targets via the SAME BuildNumericTargets
+// machinery the live scan uses.
+
+static Orden::Leaf OrdenLeaf(Radar::DataType width, int32_t pos,
+                             const void* raw, size_t n, uint32_t descIdx = 0) {
+    Orden::Leaf lf;
+    lf.position      = pos;
+    lf.width         = width;
+    lf.descriptorIdx = descIdx;
+    lf.elementIndex  = -1;
+    std::memcpy(lf.bytes, raw, n);
+    return lf;
+}
+static Orden::Leaf OrdenLeafI32(int32_t pos, int32_t v, uint32_t descIdx = 0) {
+    return OrdenLeaf(Radar::DataType::Int32, pos, &v, 4, descIdx);
+}
+static Orden::Leaf OrdenLeafI16(int32_t pos, int16_t v) {
+    return OrdenLeaf(Radar::DataType::Int16, pos, &v, 2);
+}
+static Orden::Leaf OrdenLeafFloat(int32_t pos, float v) {
+    return OrdenLeaf(Radar::DataType::Float, pos, &v, 4);
+}
+
+static void Test_Orden_DistinctValues() {
+    // Four numeric leaves at scattered offsets; four slots in a DIFFERENT order.
+    // Mirrors the spec example: Str 24, Def 10, Dex 14, Int 8.
+    std::vector<Orden::Leaf> leaves = {
+        OrdenLeafI32(0x18, 8),    // Int  (smallest offset, last input slot)
+        OrdenLeafI32(0x1C, 14),   // Dex
+        OrdenLeafI32(0x20, 24),   // Str
+        OrdenLeafI32(0x24, 10),   // Def
+        OrdenLeafI32(0x2C, 99),   // unrelated leaf
+    };
+    Radar::NumericTargetSet t0, t1, t2, t3;
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "24", t0);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "10", t1);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "14", t2);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "8",  t3);
+    std::vector<Orden::SlotTarget> slots = {{&t0},{&t1},{&t2},{&t3}};
+
+    std::vector<Orden::SlotMatches> out;
+    EXPECT("group distinct match", Orden::MatchGroup(leaves, slots, out));
+    EXPECT("group 4 slots", out.size() == 4);
+    // Each value is unique -> each slot resolves to exactly one leaf (locked).
+    EXPECT("slot0 (24) singleton", out[0].leafIdx.size() == 1);
+    EXPECT("slot0 -> pos 0x20", leaves[out[0].leafIdx[0]].position == 0x20);
+    EXPECT("slot3 (8) -> pos 0x18 (order-independent)",
+           out[3].leafIdx.size() == 1 && leaves[out[3].leafIdx[0]].position == 0x18);
+}
+
+static void Test_Orden_MissingValueRejected() {
+    // No leaf holds 10 -> the Def slot has zero matches -> reject whole block.
+    std::vector<Orden::Leaf> leaves = {
+        OrdenLeafI32(0x10, 24), OrdenLeafI32(0x14, 14), OrdenLeafI32(0x18, 8),
+    };
+    Radar::NumericTargetSet t0, t1, t2, t3;
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "24", t0);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "10", t1);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "14", t2);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "8",  t3);
+    std::vector<Orden::SlotTarget> slots = {{&t0},{&t1},{&t2},{&t3}};
+    std::vector<Orden::SlotMatches> out;
+    EXPECT("group missing value rejected", !Orden::MatchGroup(leaves, slots, out));
+}
+
+static void Test_Orden_DuplicateValuesSDR() {
+    // Two slots want 24, one wants 10. Needs TWO distinct leaves holding 24.
+    Radar::NumericTargetSet t24a, t24b, t10;
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "24", t24a);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "24", t24b);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "10", t10);
+    std::vector<Orden::SlotTarget> slots = {{&t24a},{&t24b},{&t10}};
+
+    {   // two leaves hold 24 -> distinct assignment exists
+        std::vector<Orden::Leaf> leaves = {
+            OrdenLeafI32(0x10, 24), OrdenLeafI32(0x14, 24), OrdenLeafI32(0x18, 10),
+        };
+        std::vector<Orden::SlotMatches> out;
+        EXPECT("dup-value SDR ok (two 24s)", Orden::MatchGroup(leaves, slots, out));
+    }
+    {   // only ONE leaf holds 24 -> cannot satisfy both 24 slots
+        std::vector<Orden::Leaf> leaves = {
+            OrdenLeafI32(0x10, 24), OrdenLeafI32(0x18, 10),
+        };
+        std::vector<Orden::SlotMatches> out;
+        EXPECT("dup-value SDR fail (one 24)", !Orden::MatchGroup(leaves, slots, out));
+    }
+}
+
+static void Test_Orden_MultiWidthMatch() {
+    // "24" must match the same value stored as Int16, Int32, or Float; "25" must not.
+    Radar::NumericTargetSet t24, t25;
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "24", t24);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "25", t25);
+
+    std::vector<Orden::Leaf> leaves = {
+        OrdenLeafI16(0x10, 24), OrdenLeafFloat(0x14, 24.0f), OrdenLeafI32(0x18, 24),
+    };
+    {   // two slots both want 24 -> match against the int16 + float + int32 pool
+        std::vector<Orden::SlotTarget> slots = {{&t24},{&t24}};
+        std::vector<Orden::SlotMatches> out;
+        EXPECT("multi-width 24 matches", Orden::MatchGroup(leaves, slots, out));
+        EXPECT("multi-width slot0 has >=2 leaves", out[0].leafIdx.size() >= 2);
+    }
+    {   // 25 is absent at every width
+        std::vector<Orden::SlotTarget> slots = {{&t25},{&t24}};
+        std::vector<Orden::SlotMatches> out;
+        EXPECT("multi-width 25 absent rejected", !Orden::MatchGroup(leaves, slots, out));
+    }
+}
+
+static void Test_Orden_ConvergenceAndAssignment() {
+    // HasDistinctAssignment directly models refine convergence: as per-slot lists
+    // shrink they stay feasible until one empties.
+    std::vector<Orden::SlotMatches> m(2);
+    m[0].leafIdx = {0, 1};
+    m[1].leafIdx = {1};
+    EXPECT("SDR feasible before convergence", Orden::HasDistinctAssignment(m, 2));
+    // Refine locks slot1->leaf1, forcing slot0->leaf0 (still feasible).
+    m[0].leafIdx = {0};
+    EXPECT("SDR feasible after lock", Orden::HasDistinctAssignment(m, 2));
+    // Both collapse onto the same single leaf -> no distinct assignment.
+    m[0].leafIdx = {1};
+    EXPECT("SDR infeasible on collision", !Orden::HasDistinctAssignment(m, 2));
+    // An emptied slot (its value vanished on refine) -> reject.
+    m[0].leafIdx.clear();
+    EXPECT("SDR infeasible on empty slot", !Orden::HasDistinctAssignment(m, 2));
+}
+
 int main() {
     std::printf("dll_helpers_test (Renge + Scharf + Radar)\n");
     std::printf("------------------------------------------\n");
@@ -2199,6 +2333,13 @@ int main() {
     Test_Neu_TagBitMasked();
     Test_Neu_Disambiguation();
     Test_Neu_Edge();
+
+    // Orden — multi-value group scan SDR matcher (synthetic leaves, no game)
+    Test_Orden_DistinctValues();
+    Test_Orden_MissingValueRejected();
+    Test_Orden_DuplicateValuesSDR();
+    Test_Orden_MultiWidthMatch();
+    Test_Orden_ConvergenceAndAssignment();
 
     std::printf("------------------------------------------\n");
     std::printf("Pass: %d   Fail: %d\n", g_pass, g_fail);

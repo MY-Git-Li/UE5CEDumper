@@ -1467,6 +1467,7 @@ public sealed class DumpService : IDumpService
         bool caseSensitive = false,
         bool parallel = true,
         bool batchRead = true,
+        bool deep = false,
         int pageSize = 1000,
         CancellationToken ct = default)
     {
@@ -1507,6 +1508,9 @@ public sealed class DumpService : IDumpService
         // body read per object.
         if (!batchRead)
             req["batch_read"] = false;
+        // Deep container pass is opt-in (default off) → attach only when enabled.
+        if (deep)
+            req["deep"] = true;
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
@@ -1633,6 +1637,176 @@ public sealed class DumpService : IDumpService
         var req = new JsonObject
         {
             ["cmd"] = "end_value_scan",
+            ["session_id"] = sessionId,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+    }
+
+    // --- Multiple values group scan (CE-style "group scan", build 1276) ---
+
+    private static GroupCandidate ParseGroupCandidate(JsonObject obj)
+    {
+        var gc = new GroupCandidate
+        {
+            InstanceAddr      = obj["instance_addr"]?.GetValue<string>() ?? "",
+            InstanceIndex     = obj["instance_index"]?.GetValue<int>() ?? -1,
+            InstanceName      = obj["instance_name"]?.GetValue<string>() ?? "",
+            ClassName         = obj["class_name"]?.GetValue<string>() ?? "",
+            DefiningClassName = obj["defining_class_name"]?.GetValue<string>() ?? "",
+        };
+        if (obj["slots"] is JsonArray slots)
+        {
+            foreach (var s in slots)
+            {
+                if (s is not JsonObject so) continue;
+                var sm = new GroupSlotMatch
+                {
+                    SlotIndex     = so["slot_index"]?.GetValue<int>() ?? 0,
+                    Value         = so["value"]?.GetValue<string>() ?? "",
+                    FieldName     = so["field_name"]?.GetValue<string>() ?? "",
+                    FieldOffset   = so["field_offset"]?.GetValue<int>() ?? 0,
+                    FieldType     = so["field_type"]?.GetValue<string>() ?? "",
+                    BoolFieldMask = (byte)(so["bool_field_mask"]?.GetValue<int>() ?? 0xFF),
+                    LeafValue     = so["leaf_value"]?.GetValue<string>() ?? "",
+                    Addr          = so["addr"]?.GetValue<string>() ?? "",
+                    Locked        = so["locked"]?.GetValue<bool>() ?? false,
+                };
+                if (so["matched_offsets"] is JsonArray mo)
+                    foreach (var off in mo)
+                        if (off != null) sm.MatchedOffsets.Add(off.GetValue<int>());
+                // Denormalize the owner so per-slot handoffs are self-contained.
+                sm.InstanceAddr = gc.InstanceAddr;
+                sm.ClassName    = gc.ClassName;
+                gc.Slots.Add(sm);
+            }
+        }
+        return gc;
+    }
+
+    public async Task<GroupScanBeginResult> BeginGroupScanAsync(
+        IReadOnlyList<GroupSlotInput> slots,
+        bool gameOnly = true,
+        int maxResults = 50000,
+        bool deep = false,
+        int pageSize = 1000,
+        CancellationToken ct = default)
+    {
+        var values = new JsonArray();
+        foreach (var sp in slots)
+        {
+            // Cast to JsonNode so overload resolution picks Add(JsonNode?) — the
+            // generic Add<T>(T) is RequiresDynamicCode/UnreferencedCode (AOT-unsafe).
+            values.Add((JsonNode)new JsonObject
+            {
+                ["value"]     = sp.Value,
+                ["data_type"] = sp.DataType.ToString(),
+            });
+        }
+        var req = new JsonObject
+        {
+            ["cmd"] = "begin_group_scan",
+            ["game_only"] = gameOnly,
+            ["max_results"] = maxResults,
+            ["page_size"] = pageSize,
+            ["values"] = values,
+        };
+        if (deep)
+            req["deep"] = true;
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        var result = new GroupScanBeginResult
+        {
+            SessionId      = res["session_id"]?.GetValue<ulong>() ?? 0,
+            Total          = res["total"]?.GetValue<int>() ?? 0,
+            SlotCount      = res["slot_count"]?.GetValue<int>() ?? slots.Count,
+            ScannedClasses = res["scanned_classes"]?.GetValue<int>() ?? 0,
+            ScannedObjects = res["scanned_objects"]?.GetValue<int>() ?? 0,
+            DurationMs     = res["duration_ms"]?.GetValue<long>() ?? 0,
+            DeadlineHit    = res["deadline_hit"]?.GetValue<bool>() ?? false,
+        };
+        if (res["candidates"] is JsonArray arr)
+            foreach (var item in arr)
+                if (item is JsonObject o) result.Candidates.Add(ParseGroupCandidate(o));
+        return result;
+    }
+
+    // Refine takes the NEW value per slot (same count as the first scan). The
+    // per-slot width scope is fixed by the session, so only the value is sent.
+    public async Task<GroupScanRefineResult> RefineGroupScanAsync(
+        ulong sessionId,
+        IReadOnlyList<string> values,
+        int pageSize = 1000,
+        CancellationToken ct = default)
+    {
+        var arr = new JsonArray();
+        // Cast to JsonNode (see BeginGroupScanAsync) so the AOT-safe Add(JsonNode?)
+        // overload is chosen instead of the generic Add<T>(T).
+        foreach (var v in values) arr.Add((JsonNode)new JsonObject { ["value"] = v });
+        var req = new JsonObject
+        {
+            ["cmd"] = "refine_group_scan",
+            ["session_id"] = sessionId,
+            ["page_size"] = pageSize,
+            ["values"] = arr,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        var result = new GroupScanRefineResult
+        {
+            SessionId  = res["session_id"]?.GetValue<ulong>() ?? sessionId,
+            Total      = res["total"]?.GetValue<int>() ?? 0,
+            DurationMs = res["duration_ms"]?.GetValue<long>() ?? 0,
+        };
+        if (res["candidates"] is JsonArray ca)
+            foreach (var item in ca)
+                if (item is JsonObject o) result.Candidates.Add(ParseGroupCandidate(o));
+        return result;
+    }
+
+    public async Task<GroupScanWindowResult> QueryGroupCandidatesAsync(
+        ulong sessionId,
+        int offset,
+        int limit,
+        string? filter = null,
+        string? sortKey = null,
+        bool sortDesc = false,
+        CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "query_group_candidates",
+            ["session_id"] = sessionId,
+            ["offset"] = offset,
+            ["limit"] = limit,
+        };
+        if (!string.IsNullOrEmpty(filter))  req["filter"]    = filter;
+        if (!string.IsNullOrEmpty(sortKey)) req["sort_key"]  = sortKey;
+        if (sortDesc)                       req["sort_desc"] = true;
+
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        var result = new GroupScanWindowResult
+        {
+            SessionId     = res["session_id"]?.GetValue<ulong>() ?? sessionId,
+            Total         = res["total"]?.GetValue<int>() ?? 0,
+            FilteredTotal = res["filtered_total"]?.GetValue<int>() ?? 0,
+            Offset        = res["offset"]?.GetValue<int>() ?? offset,
+        };
+        if (res["candidates"] is JsonArray arr)
+            foreach (var item in arr)
+                if (item is JsonObject o) result.Candidates.Add(ParseGroupCandidate(o));
+        return result;
+    }
+
+    public async Task EndGroupScanAsync(ulong sessionId, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "end_group_scan",
             ["session_id"] = sessionId,
         };
         var res = await _pipe.SendAsync(req, ct);

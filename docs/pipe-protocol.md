@@ -243,6 +243,69 @@ CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands f
 - `parallel` is attached only when **false** (the DLL default is true / full parallel). `false` caps the GObjects walk to one worker thread; the UI exposes it as the default-ON "Parallel scan" toggle for anti-tamper-sensitive games.
 - `batch_read` is attached only when **false** (DLL default true). `false` forces one SEH read per field; default batches each object's fixed-width leaf fields into a single body read (per-thread reused buffer, span-capped, with per-field fallback on fault). Strings + container data are always read directly. UI = default-ON "Batch read" toggle.
 - `(data_type, scan_type)` combinations are validated server-side by `IsScanTypeValidFor` — `FString + Bigger` or `Int32 + Contains` return an explicit error rather than running with garbage semantics.
+- `deep` (build 1283) is attached only when **true** (default off). It forces the recursive deep-container leaf pass on every class — reaching values buried inside deeply-nested containers (struct arrays, struct-valued maps, nested `TArray`/`TSet`) that the auto `needsDeepWalk` heuristic doesn't flag. Heavier per object; the UI exposes it as the default-OFF "Deep" toggle.
+
+### Multiple Values Group Scan (build 1276)
+
+Object-aware "group scan": find objects (blocks) that **simultaneously** hold ALL of N values (2..4) at **distinct** numeric-property offsets, in any order (the object/schema-aware analogue of Cheat Engine's Group Scan). Far more selective than N separate single-value scans — matching e.g. Str + Def + Dex narrows thousands of hits to a handful. A separate session family (`GroupSessionManager`, same 5-min idle expiry). P1: each slot is a `NumericNoByte`/`NumericAll` exact match over direct numeric properties (+ one-level StructProperty descent); numeric containers + GAS attribute-component cross-object reach are later phases.
+
+```jsonc
+// First Scan — open a group session. `values` carries 2..4 slots; each slot's
+// data_type defaults to "NumericNoByte" (fans out over int16/int32/int64/float/
+// double widths) and may be "NumericAll" (adds 1-byte). scan_type is Exact (P1).
+{
+  "id": 60, "cmd": "begin_group_scan",
+  "game_only": true, "max_results": 50000, "page_size": 1000,
+  "deep": false,                                        // optional (build 1283); see below
+  "values": [
+    { "value": "24", "data_type": "NumericNoByte" },
+    { "value": "10" },                                  // data_type optional -> NumericNoByte
+    { "value": "14" },
+    { "value": "8"  }
+  ]
+}
+// `deep` (default off): also treat each numeric CONTAINER as its own block — a
+// numeric TArray/TSet's elements, or each struct-array/map element's inner numeric
+// fields — and match the group WITHIN one array/element. Finds groups hidden in
+// deeply-nested containers (e.g. SaveSlotList[1].MsTuneData.MsTunes[0].
+// WeaponTuneList[0].Tunes[N]). Attached only when true. A deep candidate's slot
+// `field_name` is the fully-indexed path and `addr` is the absolute element address.
+
+// Next Scan — re-target every slot (count MUST match the first scan). Survivors
+// are objects where every slot still matches at a distinct offset; the per-slot
+// matched-offset list narrows toward a single "locked" offset.
+{ "id": 61, "cmd": "refine_group_scan", "session_id": 99,
+  "values": [ {"value":"24"}, {"value":"10"}, {"value":"15"}, {"value":"10"} ] }
+
+// Window query (server-side filter/sort/page over the OBJECT-level rows).
+// sort_key: "" / "scan" / "class" / "instance" / "value" (first slot) / "offset" (first slot).
+{ "id": 62, "cmd": "query_group_candidates", "session_id": 99,
+  "offset": 0, "limit": 1000, "filter": "", "sort_key": "class", "sort_desc": false }
+
+// End — drop the session (idempotent).
+{ "id": 63, "cmd": "end_group_scan", "session_id": 99 }
+```
+
+A group candidate is **object-level** with nested per-slot matches:
+
+```jsonc
+{
+  "instance_addr": "7FF6..A0", "instance_index": 12345, "instance_name": "BP_PlayerStats_C_0",
+  "class_name": "BP_PlayerStats_C", "defining_class_name": "...",
+  "slots": [
+    { "slot_index": 0, "value": "24",
+      "field_name": "Str", "field_offset": 32, "field_type": "IntProperty",
+      "bool_field_mask": 255, "leaf_value": "24", "addr": "7FF6..C0",
+      "matched_offsets": [32], "locked": true },      // locked once a single offset remains
+    { "slot_index": 1, "value": "10",
+      "field_name": "Def", "field_offset": 36, "field_type": "IntProperty",
+      "leaf_value": "10", "addr": "7FF6..C4",
+      "matched_offsets": [36, 64], "locked": false }  // still converging
+  ]
+}
+```
+
+`addr` / `field_offset` / `field_name` on each slot drive the same Live Walker / Locate-in-GWorld / Copy handoffs as a single-value candidate; the object's `class_name` drives Instance Finder / Class Pivot.
 
 ### Snapshot Capture (experimental — Phase A)
 

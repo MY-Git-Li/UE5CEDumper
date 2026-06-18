@@ -172,6 +172,7 @@ public interface IDumpService
         bool caseSensitive = false,
         bool parallel = true,
         bool batchRead = true,
+        bool deep = false,
         int pageSize = 1000,
         CancellationToken ct = default);
 
@@ -200,6 +201,35 @@ public interface IDumpService
         CancellationToken ct = default);
 
     Task EndValueScanAsync(ulong sessionId, CancellationToken ct = default);
+
+    // --- Multiple values group scan (build 1276) ---
+    // Find objects holding ALL of N values (2..4) at distinct numeric-property
+    // offsets. Object-level candidates with nested per-slot matches; otherwise
+    // the same windowed session lifecycle as the single-value scan.
+    Task<GroupScanBeginResult> BeginGroupScanAsync(
+        IReadOnlyList<GroupSlotInput> slots,
+        bool gameOnly = true,
+        int maxResults = 50000,
+        bool deep = false,
+        int pageSize = 1000,
+        CancellationToken ct = default);
+
+    Task<GroupScanRefineResult> RefineGroupScanAsync(
+        ulong sessionId,
+        IReadOnlyList<string> values,
+        int pageSize = 1000,
+        CancellationToken ct = default);
+
+    Task<GroupScanWindowResult> QueryGroupCandidatesAsync(
+        ulong sessionId,
+        int offset,
+        int limit,
+        string? filter = null,
+        string? sortKey = null,
+        bool sortDesc = false,
+        CancellationToken ct = default);
+
+    Task EndGroupScanAsync(ulong sessionId, CancellationToken ct = default);
 
     // --- Snapshot Capture (experimental — Phase A) ---
     // Stateless cursor pagination (like get_object_list): begin returns the
