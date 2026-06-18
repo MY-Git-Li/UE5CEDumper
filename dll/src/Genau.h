@@ -144,4 +144,17 @@ uintptr_t FindGObjectsStaticStruct(int* outItemStride = nullptr);
 // for a static pointer to that instance.  Requires GObjects + GNames already initialized.
 uintptr_t ExtraScanGWorld();
 
+// Gap-fill for ExtraScanGWorld: when NO static .data slot points at the live UWorld
+// (ExtraScanGWorld returned 0), recover GWorld via the engine object graph —
+// GEngine -> GameViewport -> &World (the address of the live UWorld* FIELD inside the
+// viewport, which the engine keeps updated across level transitions). All offsets are
+// resolved by reflected member NAME (version-independent); the World field falls back to
+// a bounded memory probe if it isn't reflected. Requires GObjects + GNames + offsets.
+// Returns a deref-once slot (read once -> current UWorld) or 0.
+//
+// NOTE: the returned slot is a HEAP object field, not a static module symbol — valid for
+// live operations (teleport / live walk / path search) but NOT for cross-session CE
+// symbol export. Callers wanting a static anchor should prefer ExtraScanGWorld's slot.
+uintptr_t RecoverGWorldViaEngine();
+
 } // namespace Genau

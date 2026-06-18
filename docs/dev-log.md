@@ -14,6 +14,20 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-18 — GWorld `engine_recovery` gap-fill: GEngine→GameViewport→&World when no static slot exists + AOB-toggle gating fix + test hook (build 1288; DLL-only)
+
+When the GWorld AOB lands on a decoy, recovery already tries `ExtraScanGWorld` (find a live UWorld in GObjects, then scan `.data` for a static slot pointing at it). But that returns 0 when **no** static slot in the main module points at the live world — the world pointer lives only behind the engine's runtime objects (or in a separately-loaded engine DLL). New **`Genau::RecoverGWorldViaEngine`** fills exactly that gap.
+
+**The recovered slot — a live engine-updated field, not a static symbol.** It returns `viewport + worldOff` = the address of the `UWorld*` FIELD inside `UGameViewportClient`, which the engine keeps updated across level transitions. A single deref yields the current world, matching how every consumer reads GWorld (`Wirbel::DerefWorld` / `ReadSafe(GWorld, uworld)`), so teleport / live walk / path search work unchanged and survive level loads within a session. **Known limit (by design):** this slot is a HEAP object field, not a static module address — valid for live ops but NOT for cross-session CE symbol export. That's fine: the gap case has no static anchor to export anyway, which is why the AOB toggle is force-disabled (below).
+
+**Finding GEngine without a class name.** Class names vary (`UGameEngine` or a game subclass), so GEngine is identified by a stable reflected MEMBER, not a name: walk GObjects once, and for each distinct class resolve the `GameViewport` property offset via `FindPropertyOffsetByName` (version-independent; cached per class in an `unordered_map` so non-engine classes are walked at most once and cache −1). The first live non-CDO object whose `GameViewport` is non-null is GEngine. The viewport's `World` offset is then taken from reflection (`FindPropertyOffsetByName(vpCls, "World")`), falling back to a bounded memory probe (scan pointer-aligned fields ≤ class `PropertiesSize` for one that derefs to a class-`"World"` object) because `UGameViewportClient::World` is a private, often-unreflected member.
+
+**AOB-toggle gating fix — why the Live Walker "AOB" checkbox now grays out on recovery.** The recovery block cleared `g_cachedGWorldPatternId` but left `g_cachedGWorldAob`/`Pos`/`Len` populated with the decoy match (set at `Frieren.cpp` init from `ptrs.gworldAob`). The UI's `IsAobSymbolAvailable` keys on a non-empty `gworld_aob`, so the GWorld "AOB" symbol toggle wrongly stayed enabled+checked for CE export even though GWorld came from recovery. Now **all** recovery branches null those three fields, so the existing C# does the rest with zero changes: `IsAobSymbolAvailable=false` → `IsEnabled=false` (grayed, `LiveWalkerPanel.axaml:147`) + `OnIsAobSymbolAvailableChanged` sets `UseAobSymbol=false` (unchecked), re-evaluated on each (re)connect via `SetEngineState`. This also fixes the pre-existing `instance_scan_recovery` path, which had the same latent bug.
+
+**Test hook (the path is otherwise unreachable without a game whose AOB genuinely fails).** `UE5DUMP_FORCE_GWORLD_RECOVERY` in the GAME process env: `=1` forces the full recovery chain even when the AOB GWorld is valid; `=engine` additionally skips `ExtraScanGWorld` so it goes straight to the engine path (to exercise the new code on a game where `ExtraScanGWorld` would have succeeded). Non-destructive — if recovery fails, the valid AOB GWorld is left untouched.
+
+Strictly gated (only runs when `*GWorld` doesn't deref to a UWorld AND `Aura::GetCount()>0`), so titles with a correct GWorld are byte-identical — zero regression. DLL builds clean (build 1288); no new unit tests (live-scan path, as with `ExtraScanGWorld`). In-game live-verify pending (use the env-var hook on any working game, or wait for a no-static-slot title).
+
 ## 2026-06-18 — Two fixes: CE Copy Field off-by-8 on map-VALUE struct fields + Proxy Deploy "NotDeployed" when another proxy type is deployed (build 1286; UI-only)
 
 Two reported bugs, both C#-only, 1592 tests green (+7).

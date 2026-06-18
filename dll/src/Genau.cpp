@@ -20,6 +20,7 @@
 #include <vector>
 #include <algorithm>  // std::sort
 #include <atomic>     // FindSparseDelegateStorage cache
+#include <unordered_map>  // RecoverGWorldViaEngine per-class offset cache
 #include <chrono>     // AOBScanBatch timing
 #include <Winver.h>   // GetFileVersionInfoW / VerQueryValueW
 #include <Psapi.h>    // EnumProcessModules
@@ -3487,6 +3488,119 @@ uintptr_t ExtraScanGWorld() {
              (unsigned long long)chosen->slot, (unsigned long long)chosen->world,
              chosen->idx, matches.size(), how);
     return chosen->slot;
+}
+
+// ============================================================
+// RecoverGWorldViaEngine — gap-fill when ExtraScanGWorld finds no static slot.
+//
+// Some titles keep no static .data pointer to the live UWorld in the main module
+// (the world pointer lives only behind the engine's runtime objects, or in a
+// separately-loaded engine DLL). ExtraScanGWorld then returns 0. Instead of a
+// static module slot we return the address of the engine's LIVE "current world"
+// pointer field: GEngine -> GameViewport -> &World. UGameViewportClient::World is
+// updated by the engine on level transitions, so a single deref of this slot
+// always yields the current UWorld — exactly how every GWorld consumer reads it
+// (DerefWorld() / ReadSafe(GWorld, uworld)).
+//
+// GEngine is identified by a reflected member, not a class name: the (sole) live
+// non-CDO object whose class exposes a "GameViewport" object property with a
+// non-null value. Class names vary (UGameEngine or a game subclass), but the
+// member name is a stable UE member; FindPropertyOffsetByName makes the offset
+// version-independent.
+// ============================================================
+uintptr_t RecoverGWorldViaEngine() {
+    Sein::Info("SCAN:GWld", "RecoverGWorldViaEngine: no static slot — trying GEngine->GameViewport->World...");
+
+    int32_t count = Aura::GetCount();
+    if (count <= 0) {
+        Sein::Warn("SCAN:GWld", "RecoverGWorldViaEngine: ObjectArray not initialized (count=%d)", count);
+        return 0;
+    }
+
+    // Step 1: find the live GEngine + its GameViewport. Walk GObjects once; resolve the
+    // "GameViewport" property offset PER DISTINCT CLASS (cached) so non-engine classes are
+    // walked at most once. A class with no GameViewport property caches -1 and is skipped.
+    std::unordered_map<uintptr_t, int> gvOffByClass;
+    uintptr_t engine = 0, viewport = 0;
+    int gvOff = -1;
+    for (int32_t i = 0; i < count; ++i) {
+        uintptr_t obj = Aura::GetByIndex(i);
+        if (!obj) continue;
+        uintptr_t cls = 0;
+        if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
+
+        int off;
+        auto it = gvOffByClass.find(cls);
+        if (it != gvOffByClass.end()) {
+            off = it->second;
+        } else {
+            off = FindPropertyOffsetByName(cls, "GameViewport");
+            gvOffByClass.emplace(cls, off);
+        }
+        if (off < 0) continue;                       // not a UEngine-derived class
+
+        // Skip CDOs (Default__GameEngine has the property too but a null viewport).
+        uint32_t nameIdx = 0;
+        if (Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_NAME, nameIdx)) {
+            std::string nm = Serie::GetString(nameIdx);
+            if (nm.find("Default__") != std::string::npos) continue;
+        }
+
+        uintptr_t vp = 0;
+        if (Macht::ReadSafe(obj + off, vp) && vp >= 0x10000) {
+            engine = obj; viewport = vp; gvOff = off;
+            break;                                    // first live engine wins
+        }
+    }
+    if (!engine || !viewport) {
+        Sein::Warn("SCAN:GWld", "RecoverGWorldViaEngine: no live GEngine with a non-null GameViewport found");
+        return 0;
+    }
+    Sein::Info("SCAN:GWld", "RecoverGWorldViaEngine: GEngine=0x%llX GameViewport=0x%llX (GameViewport off=0x%X)",
+               (unsigned long long)engine, (unsigned long long)viewport, gvOff);
+
+    // Helper: does *slot deref to a UObject whose class FName is "World"?
+    auto derefsToWorld = [](uintptr_t slot) -> bool {
+        uintptr_t w = 0;
+        if (!Macht::ReadSafe(slot, w) || w < 0x10000) return false;
+        uintptr_t cls = 0;
+        if (!Macht::ReadSafe(w + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) return false;
+        uint32_t cn = 0;
+        return Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, cn) && Serie::GetString(cn) == "World";
+    };
+
+    uintptr_t vpCls = 0;
+    if (!Macht::ReadSafe(viewport + Grimoire::OFF_UOBJECT_CLASS, vpCls) || !vpCls) {
+        Sein::Warn("SCAN:GWld", "RecoverGWorldViaEngine: GameViewport has no readable class");
+        return 0;
+    }
+
+    // Step 2: prefer the reflected "World" property on the viewport.
+    int worldOff = FindPropertyOffsetByName(vpCls, "World");
+    if (worldOff >= 0 && derefsToWorld(viewport + (uintptr_t)worldOff)) {
+        uintptr_t slot = viewport + (uintptr_t)worldOff;
+        Sein::Info("SCAN:GWld", "RecoverGWorldViaEngine: World reflected at off=0x%X -> slot=0x%llX",
+                   worldOff, (unsigned long long)slot);
+        return slot;
+    }
+
+    // Step 2b: UGameViewportClient::World is a private member in many builds (not reflected).
+    // Probe the viewport object's pointer-aligned fields for one that points at a class-"World"
+    // object. Bound the scan to the class PropertiesSize (fallback cap if unreadable).
+    int32_t vpSize = 0;
+    Macht::ReadSafe(vpCls + DynOff::USTRUCT_PROPSSIZE, vpSize);
+    if (vpSize <= 0 || vpSize > 0x4000) vpSize = 0x800;
+    for (int32_t off = 0; off + (int32_t)sizeof(uintptr_t) <= vpSize; off += (int32_t)sizeof(uintptr_t)) {
+        if (derefsToWorld(viewport + (uintptr_t)off)) {
+            uintptr_t slot = viewport + (uintptr_t)off;
+            Sein::Info("SCAN:GWld", "RecoverGWorldViaEngine: World probed at off=0x%X -> slot=0x%llX",
+                       off, (unsigned long long)slot);
+            return slot;
+        }
+    }
+
+    Sein::Warn("SCAN:GWld", "RecoverGWorldViaEngine: GameViewport has no UWorld* field (size=0x%X)", vpSize);
+    return 0;
 }
 
 bool FindAll(EnginePointers& out, ScanProgressFn progress) {
