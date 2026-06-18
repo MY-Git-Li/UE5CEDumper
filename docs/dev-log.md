@@ -14,6 +14,18 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-18 — Live Walker bookmark fixes: PLV_game routing bug + slot tooltips + selection/scroll restore (build 1275; UI-only, in-game verify pending)
+
+Three bookmark fixes on the Live Walker tab, all UI-side (DLL untouched).
+
+**1. "Saved at PersistentLevel, jumped to PLV_game" — World actor-list view hijacked the restore.** The UI `view-0.log` revealed the real path: the user had drilled `PersistentLevel → OwningWorld`, and `OwningWorld` points back to the UWorld, so that breadcrumb's address equals `_cachedWorld.WorldAddr`. The four "is this the GWorld view?" checks (`NavigateToBreadcrumbAsync`, `GoBackAsync` ×2, `LoadBookmarkAsync`) used **address-equality only** → `PopulateFromWorld` (the synthetic actor list, headed by the world name "PLV_game") replaced the saved object instead of walking the UWorld instance. Only the auto-refresh path was already guarded (its comment documents the same "sub-World shares GWorld address" trap via `Breadcrumbs.Count == 1`). Fix: new `IsGWorldActorListRoot(crumb)` = `crumb.FieldName == "GWorld" && _cachedWorld != null && crumb.Address == _cachedWorld.WorldAddr`, applied at all four sites. **`FieldName == "GWorld"` is the unique discriminator** — no UObject field is named "GWorld", only the synthetic Start-from-GWorld / locate-spine root crumb is. Deeper crumbs (OwningWorld) now fall through to a normal instance walk. Two new tests cover both routes (deep-crumb-walks-instance vs. GWorld-root-shows-actor-list).
+
+**2. Slot tooltips.** `BookmarkSlot.TooltipText` is now a **computed** read-only property (notified via the `IsOccupied` setter): empty slots read *"Bookmark N: empty — no bookmark saved. Click ★ then this slot to save…"*, occupied slots read *"Jump to bookmark N: Class :: Object … Click to restore this view."* The ★ tooltips (`str.Tip.LiveWalker.BookmarkSave` / `…SaveActive`) now spell out the two-step click-★-then-slot flow.
+
+**3. Selection + view-position restore.** Saving a bookmark now also captures the **selected row(s)** (one or many, from `_selectedFieldsSnapshot` with a `SelectedField` fallback) and a **scroll anchor** (the topmost visible row). Loading re-selects those rows and scrolls the anchor back into view via two new VM↔View events (`CaptureViewAnchor` / `RestoreBookmarkView`). Note: the Avalonia `DataGrid` (12.0.0) exposes **no public pixel-offset scroll API** — `_verticalOffset` / `SetVerticalOffset` are internal and reflecting into them would violate the AOT/no-reflection rule (its template uses `PART_VerticalScrollbar` + `PART_RowsPresenter`, no `ScrollViewer`) — so view-position restore is anchor-based (`ScrollIntoView` of the saved top row), bringing the same region back rather than a pixel-exact offset. `DataGrid.SelectedItems` is a get-only but mutable `IList` (guarded with a `NotSupportedException` → `SelectedItem` fallback).
+
+605 dll_helpers + 31 utf8 + 1576 C# tests green (+7 new bookmark tests); UI AOT publish clean (build 1275). In-game verification pending.
+
 ## 2026-06-17 — UE5.6+ enum support: FNameData UEnum::Names container + FEnumProperty::Enum offset (build 1268; FNameData live-confirmed on TQ2)
 
 Two enum-layout fixes, both UE5.6+/5.7 changes, surfaced via TQ2 (forked UE5.7) and

@@ -283,6 +283,19 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// experimental Class Pivot tab (className, fieldName). C5 right-click handoff.</summary>
     public event Action<string, string>? NavigateToPivot;
 
+    /// <summary>
+    /// Raised synchronously while saving a bookmark so the View can report the
+    /// DataGrid's topmost visible row (written into the carrier) for scroll restore.
+    /// </summary>
+    public event Action<ViewAnchorRef>? CaptureViewAnchor;
+
+    /// <summary>
+    /// Raised after a bookmark finishes loading: the View re-selects the saved
+    /// field rows (matched by name + offset) and scrolls the saved anchor row back
+    /// into view, so the bookmark returns to what the user was looking at.
+    /// </summary>
+    public event Action<IReadOnlyList<BookmarkFieldRef>, BookmarkFieldRef?>? RestoreBookmarkView;
+
     /// <summary>Gates the "Pivot this property" context-menu item — true only when
     /// the experimental Class Pivot tab is available (mirrors the gate).</summary>
     [ObservableProperty] private bool _pivotEnabled;
@@ -381,6 +394,23 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             IsLoading = false;
         }
     }
+
+    /// <summary>
+    /// True when <paramref name="crumb"/> is the synthetic GWorld actor-list root
+    /// (the "Start from GWorld" view). Only this crumb may be re-displayed via
+    /// <see cref="PopulateFromWorld"/>. A deeper breadcrumb such as OwningWorld can
+    /// resolve to the very same UWorld address, but it was reached through a normal
+    /// pointer field and must be walked as an instance — otherwise navigating or
+    /// restoring a bookmark to it swaps the saved object for the GWorld actor list
+    /// (headed by the world name, e.g. "PLV_game"). The FieldName=="GWorld" marker
+    /// is unique to the synthetic root (no UObject field is named "GWorld"); this
+    /// mirrors the Breadcrumbs.Count==1 guard the auto-refresh path already uses.
+    /// </summary>
+    private bool IsGWorldActorListRoot(BreadcrumbItem? crumb) =>
+        crumb != null
+        && crumb.FieldName == "GWorld"
+        && _cachedWorld != null
+        && crumb.Address == _cachedWorld.WorldAddr;
 
     private void PopulateFromWorld(WorldWalkResult world)
     {
@@ -1192,10 +1222,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            // If navigating back to GWorld, re-display actor list
-            if (_cachedWorld != null && item.Address == _cachedWorld.WorldAddr)
+            // If navigating back to the GWorld actor-list root, re-display the
+            // actor list. A deeper crumb sharing the world address (OwningWorld)
+            // is NOT the root — it falls through to a normal instance walk.
+            if (IsGWorldActorListRoot(item))
             {
-                PopulateFromWorld(_cachedWorld);
+                PopulateFromWorld(_cachedWorld!);
                 if (!string.IsNullOrEmpty(scrollHint))
                     ScrollToFieldRequested?.Invoke(scrollHint);
                 return;
@@ -1253,9 +1285,9 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                         RepopulateContainerView(lastBc.ContainerField, lastBc);
                         return;
                     }
-                    if (_cachedWorld != null && lastBc.Address == _cachedWorld.WorldAddr)
+                    if (IsGWorldActorListRoot(lastBc))
                     {
-                        PopulateFromWorld(_cachedWorld);
+                        PopulateFromWorld(_cachedWorld!);
                         return;
                     }
                     var classAddr = string.IsNullOrEmpty(lastBc.ClassAddr) ? null : lastBc.ClassAddr;
@@ -1305,10 +1337,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            // If going back to GWorld, re-display actor list
-            if (_cachedWorld != null && prev.Address == _cachedWorld.WorldAddr)
+            // If going back to the GWorld actor-list root, re-display the actor
+            // list. A deeper crumb sharing the world address (OwningWorld) is not
+            // the root — it falls through to a normal instance walk below.
+            if (IsGWorldActorListRoot(prev))
             {
-                PopulateFromWorld(_cachedWorld);
+                PopulateFromWorld(_cachedWorld!);
                 if (!string.IsNullOrEmpty(scrollHint))
                     ScrollToFieldRequested?.Invoke(scrollHint);
                 return;
@@ -2032,15 +2066,29 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         slot.SavedClassAddr = _currentClassAddr;
         slot.SavedCachedWorld = _cachedWorld;
 
+        // Capture the selected rows (one or many) so loading re-selects them.
+        // Prefer the multi-select snapshot; fall back to the single SelectedField
+        // anchor (set when a row is clicked without a grid SelectionChanged sync).
+        slot.SavedSelectedFields = _selectedFieldsSnapshot
+            .Select(f => new BookmarkFieldRef(f.Name, f.Offset))
+            .ToList();
+        if (slot.SavedSelectedFields.Count == 0 && SelectedField != null)
+            slot.SavedSelectedFields.Add(new BookmarkFieldRef(SelectedField.Name, SelectedField.Offset));
+
+        // Capture the scroll anchor (topmost visible row; View fills this in synchronously).
+        var anchor = new ViewAnchorRef();
+        CaptureViewAnchor?.Invoke(anchor);
+        slot.SavedTopRow = anchor.TopRow;
+
         // Truncate label for button display
         var label = !string.IsNullOrEmpty(CurrentObjectName) ? CurrentObjectName : CurrentClassName;
         if (label.Length > 14) label = label[..14] + "..";
         slot.Label = label;
-        slot.TooltipText = $"{CurrentClassName} :: {CurrentObjectName}\n{CurrentAddress}";
-        slot.IsOccupied = true;
+        slot.IsOccupied = true;  // also refreshes the computed TooltipText
 
         StatusText = $"Bookmark {slot.DisplayNumber} saved";
-        _log.Info($"Bookmark saved slot={slot.SlotIndex} addr={CurrentAddress} name={CurrentObjectName}");
+        var topName = slot.SavedTopRow?.Name ?? "-";
+        _log.Info($"Bookmark saved slot={slot.SlotIndex} addr={CurrentAddress} name={CurrentObjectName} sel={slot.SavedSelectedFields.Count} top={topName}");
     }
 
     [RelayCommand]
@@ -2092,32 +2140,38 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
             _cachedWorld = slot.SavedCachedWorld;
 
-            // Re-walk the saved address to get fresh field data
+            // Re-display the saved view. Branches are mutually exclusive and all
+            // rebuild Fields, so selection + scroll restore happens once at the end.
             var lastBc = Breadcrumbs.LastOrDefault();
             if (lastBc != null)
             {
                 if (lastBc.IsContainerView && lastBc.ContainerField != null)
                 {
                     RepopulateContainerView(lastBc.ContainerField, lastBc);
-                    StatusText = $"Bookmark {slot.DisplayNumber} loaded";
-                    return;
                 }
-                if (_cachedWorld != null && lastBc.Address == _cachedWorld.WorldAddr)
+                else if (IsGWorldActorListRoot(lastBc))
                 {
-                    PopulateFromWorld(_cachedWorld);
-                    StatusText = $"Bookmark {slot.DisplayNumber} loaded";
-                    return;
+                    // Only the genuine GWorld root re-shows the actor list — a deeper
+                    // OwningWorld crumb at the same address is walked as an instance.
+                    PopulateFromWorld(_cachedWorld!);
                 }
-                var classAddr = string.IsNullOrEmpty(lastBc.ClassAddr) ? null : lastBc.ClassAddr;
-                var result = await _dump.WalkInstanceAsync(
-                    lastBc.Address, classAddr,
-                    arrayLimit: ArrayLimit, previewLimit: PreviewLimit, fillGaps: FillGaps);
-                result = await AutoFillGapsRetryAsync(result, lastBc.Address, classAddr);
-                UpdateDisplay(result);
+                else
+                {
+                    var classAddr = string.IsNullOrEmpty(lastBc.ClassAddr) ? null : lastBc.ClassAddr;
+                    var result = await _dump.WalkInstanceAsync(
+                        lastBc.Address, classAddr,
+                        arrayLimit: ArrayLimit, previewLimit: PreviewLimit, fillGaps: FillGaps);
+                    result = await AutoFillGapsRetryAsync(result, lastBc.Address, classAddr);
+                    UpdateDisplay(result);
+                }
             }
 
+            // Re-select the rows the user had selected + restore the scroll position.
+            RestoreBookmarkView?.Invoke(slot.SavedSelectedFields, slot.SavedTopRow);
+
             StatusText = $"Bookmark {slot.DisplayNumber} loaded";
-            _log.Info($"Bookmark loaded slot={slot.SlotIndex} addr={slot.SavedAddress}");
+            var topName = slot.SavedTopRow?.Name ?? "-";
+            _log.Info($"Bookmark loaded slot={slot.SlotIndex} addr={slot.SavedAddress} sel={slot.SavedSelectedFields.Count} top={topName}");
         }
         catch (Exception ex)
         {
@@ -2135,15 +2189,16 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     private void ClearBookmark(BookmarkSlot? slot)
     {
         if (slot == null) return;
-        slot.IsOccupied = false;
+        slot.IsOccupied = false;  // also refreshes the computed TooltipText (empty hint)
         slot.Label = "";
-        slot.TooltipText = "";
         slot.SavedBreadcrumbs.Clear();
         slot.SavedAddress = "";
         slot.SavedObjectName = "";
         slot.SavedClassName = "";
         slot.SavedClassAddr = "";
         slot.SavedCachedWorld = null;
+        slot.SavedSelectedFields.Clear();
+        slot.SavedTopRow = null;
     }
 
     /// <summary>Clear all bookmark slots (called on disconnect).</summary>
@@ -3948,13 +4003,25 @@ public sealed class BookmarkSlot : ObservableObject
     public int DisplayNumber => SlotIndex + 1;
 
     private bool _isOccupied;
-    public bool IsOccupied { get => _isOccupied; set => SetProperty(ref _isOccupied, value); }
+    public bool IsOccupied
+    {
+        get => _isOccupied;
+        // TooltipText is computed from IsOccupied + the saved metadata (which is
+        // always assigned before IsOccupied flips true), so refresh the hint here.
+        set { if (SetProperty(ref _isOccupied, value)) OnPropertyChanged(nameof(TooltipText)); }
+    }
 
     private string _label = "";
     public string Label { get => _label; set => SetProperty(ref _label, value); }
 
-    private string _tooltipText = "";
-    public string TooltipText { get => _tooltipText; set => SetProperty(ref _tooltipText, value); }
+    /// <summary>
+    /// Hover hint for the slot button. Always non-empty so the user can tell an
+    /// empty slot from a filled one before clicking: empty slots explain how to
+    /// save, occupied slots show the target and invite a jump-back.
+    /// </summary>
+    public string TooltipText => IsOccupied
+        ? $"Jump to bookmark {DisplayNumber}: {SavedClassName} :: {SavedObjectName}\n{SavedAddress}\nClick to restore this view (object, selected rows, scroll)."
+        : $"Bookmark {DisplayNumber}: empty - no bookmark saved.\nClick ★ then this slot to save the current view here.";
 
     // Saved navigation state
     public List<BreadcrumbItem> SavedBreadcrumbs { get; set; } = new();
@@ -3963,4 +4030,25 @@ public sealed class BookmarkSlot : ObservableObject
     public string SavedClassName { get; set; } = "";
     public string SavedClassAddr { get; set; } = "";
     public WorldWalkResult? SavedCachedWorld { get; set; }
+
+    /// <summary>Field rows (name + byte offset) the user had selected at save time.</summary>
+    public List<BookmarkFieldRef> SavedSelectedFields { get; set; } = new();
+
+    /// <summary>
+    /// Topmost visible field row at save time — the anchor used to restore the
+    /// scroll position. Null when no row was visible (e.g. empty grid). The
+    /// Avalonia DataGrid exposes no public pixel-offset scroll API, so the view
+    /// position is restored by scrolling this row back into view.
+    /// </summary>
+    public BookmarkFieldRef? SavedTopRow { get; set; }
 }
+
+/// <summary>Identifies a field row for bookmark re-selection (name + byte offset).</summary>
+public sealed record BookmarkFieldRef(string Name, int Offset);
+
+/// <summary>
+/// Mutable carrier letting a synchronous event handler hand a value back to the
+/// raiser. Used to pull the DataGrid's topmost-visible row from the View into the
+/// ViewModel when a bookmark is saved (for scroll-position restore).
+/// </summary>
+public sealed class ViewAnchorRef { public BookmarkFieldRef? TopRow; }
