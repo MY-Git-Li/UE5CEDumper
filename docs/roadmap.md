@@ -192,6 +192,14 @@ Native C++ fields (non-UPROPERTY) are explicitly excluded — banner directs the
 
 **Live verification (ES2, UE 5.5, build 757)**: FString Contains "Engine" → 54 candidates / 323ms; FName Contains "Engine" → 7119 / 415ms; FText Contains "Engine" → 1 / 396ms; FVector Exact tol=0.01 → 49966 / 303ms; FRotator Exact tol=0.01 → 16819 / 290ms. No `LOG_WARN: skipping TArray` fired across ~1.15M scanned objects.
 
+### Multiple Values Group Scan (object-aware "Group Scan"; builds 1276-1313)
+
+A **Single / Group** toggle in the Value Search tab. Group mode finds **objects** that simultaneously hold ALL of N values (2–4) at **distinct** numeric-property offsets, in any order (Str + Def + Dex + Int in one stats object) — multiplicatively more selective than N separate scans. Full design + extension points (the source-agnostic `Orden` SDR matcher = the reuse seam for Snapshot/SPC/Pivot): [group-value-scan-spec.md](group-value-scan-spec.md).
+
+- **P1 + Deep** (builds 1276-1285): per-object numeric leaves (direct + struct descent); an opt-in **Deep** checkbox additionally matches a group *within* one nested numeric container / struct-array element (shared with the single-value deep pass). In-game verified on SEED (UE4.27).
+- **P2** (builds 1295-1302, MERGED PR #311): **per-slot scan type** — First Scan `Exact / Bigger / Smaller / Between` (Between = the bounded-unknown entry, e.g. an HP bar in [1,100]); Next Scan also the prev-value four `Changed / Unchanged / Increased / Decreased` (compare each located leaf vs its own previous round). A **locked-offset table** (`🔒 Class — Str@0x20, Def@0x24`) appears once every slot converges. (A "Copy CE / export" was deliberately dropped — export the chain from Live Walker.) prev-value refine in-game verified on SEED.
+- **P4 increment 1** (builds 1303-1313, MERGED PR #313): an opt-in **Cross-object (owned components)** checkbox folds the numeric leaves of the sub-objects an actor OWNS (its components + a GAS ASC's `SpawnedAttributes` → `UAttributeSet`, a 2-level owned BFS gated by an Outer-chains-back test) into the actor's block, so a group whose values span {actor, components, attribute sets} matches. Ownership + value driven, not class-name driven. In-game VERIFIED on TQ2 (UE5.07, GAS). *Next: increment 2 = per-slot `owner_class` for the Pivot handoff.*
+
 ## Multi-row → One .CT batch generator (build 760, pick #3)
 
 Interesting Functions + Interesting Properties tabs gain a **📦 Generate CT** toolbar button that wraps the current DataGrid multi-select (`SelectionMode="Extended"`) into a single ready-to-share `.CT` file. Promotes the discover→use workflow from "research toy" to "shareable cheat-table author".
