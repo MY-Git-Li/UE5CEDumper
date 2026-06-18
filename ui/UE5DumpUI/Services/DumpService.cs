@@ -1673,6 +1673,7 @@ public sealed class DumpService : IDumpService
                     LeafValue     = so["leaf_value"]?.GetValue<string>() ?? "",
                     Addr          = so["addr"]?.GetValue<string>() ?? "",
                     OwnerAddr     = so["owner_addr"]?.GetValue<string>() ?? "",
+                    OwnerClass    = so["owner_class"]?.GetValue<string>() ?? "",
                     Locked        = so["locked"]?.GetValue<bool>() ?? false,
                 };
                 if (so["matched_offsets"] is JsonArray mo)

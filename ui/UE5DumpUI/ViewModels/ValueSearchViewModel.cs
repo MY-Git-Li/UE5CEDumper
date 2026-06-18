@@ -1135,8 +1135,11 @@ public partial class ValueSearchViewModel : ViewModelBase
     [RelayCommand]
     private void PivotGroupSlot(GroupSlotMatch? slot)
     {
-        if (slot == null || string.IsNullOrEmpty(slot.ClassName) || string.IsNullOrEmpty(slot.FieldName)) return;
-        NavigateToPivot?.Invoke(slot.ClassName, slot.FieldName);
+        // PivotClassName is the leaf's direct owner class — the owned sub-object's
+        // class for a cross-object leaf (P4 inc 2), else the candidate actor — so the
+        // Pivot lands on the class that actually declares the field.
+        if (slot == null || string.IsNullOrEmpty(slot.PivotClassName) || string.IsNullOrEmpty(slot.FieldName)) return;
+        NavigateToPivot?.Invoke(slot.PivotClassName, slot.FieldName);
     }
 
     [RelayCommand]

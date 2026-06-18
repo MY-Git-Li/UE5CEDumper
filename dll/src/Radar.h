@@ -584,6 +584,9 @@ struct GroupSlotMatch {
     uintptr_t ownerAddr     = 0;   // object directly holding the leaf: the candidate actor for an
                                    // own-block leaf, or an OWNED sub-object for a cross-object leaf
                                    // (P4). Drives the per-slot handoffs to the right object.
+    std::string ownerClass;        // class name of ownerAddr's object: the candidate class for an
+                                   // own-block leaf, the OWNED sub-object's class for a cross-object
+                                   // leaf (P4 inc 2). Drives the per-slot Pivot handoff to the right class.
     uint8_t   prevValue[16] = {};  // last-observed leaf bytes
 };
 

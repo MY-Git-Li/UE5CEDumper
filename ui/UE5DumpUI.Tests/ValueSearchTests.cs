@@ -1674,6 +1674,43 @@ public class ValueSearchTests
     }
 
     [Fact]
+    public void GroupSlotMatch_PivotClassName_PrefersOwnerOverActor()
+    {
+        // Own-block leaf: the DLL emits owner_class == candidate class (or omits it on
+        // an older payload) -> Pivot uses the candidate actor's class.
+        var own = new GroupSlotMatch { ClassName = "BP_Player_C", OwnerClass = "" };
+        Assert.Equal("BP_Player_C", own.PivotClassName);
+
+        // Cross-object leaf: the owned sub-object's class -> Pivot lands on the class
+        // that actually declares the field (e.g. the GAS UAttributeSet), not the actor.
+        var cross = new GroupSlotMatch { ClassName = "BP_Player_C", OwnerClass = "BP_HealthSet_C" };
+        Assert.Equal("BP_HealthSet_C", cross.PivotClassName);
+    }
+
+    [Fact]
+    public void GroupPivot_UsesOwnerClassForCrossObjectSlot()
+    {
+        var (vm, _) = MakeVm();
+        (string cls, string prop)? got = null;
+        vm.NavigateToPivot += (c, p) => got = (c, p);
+
+        // A cross-object slot: Pivot must target the owned sub-object's class.
+        vm.PivotGroupSlotCommand.Execute(new GroupSlotMatch
+        {
+            ClassName = "BP_Player_C", OwnerClass = "BP_HealthSet_C", FieldName = "CurrentHealth.BaseValue",
+        });
+        Assert.Equal(("BP_HealthSet_C", "CurrentHealth.BaseValue"), got);
+
+        // An own-block slot (no owner_class) falls back to the candidate actor's class.
+        got = null;
+        vm.PivotGroupSlotCommand.Execute(new GroupSlotMatch
+        {
+            ClassName = "BP_Player_C", OwnerClass = "", FieldName = "Gold",
+        });
+        Assert.Equal(("BP_Player_C", "Gold"), got);
+    }
+
+    [Fact]
     public void GroupFirstScan_PassesCrossObjectFlag()
     {
         var (vm, fake) = MakeVm();

@@ -287,6 +287,10 @@ json GroupCandidateToJson(const Radar::GroupCandidate& gc,
             // Owning object of the leaf (P4): the candidate actor for an own-block
             // leaf, or an owned sub-object for a cross-object leaf — drives handoffs.
             sj["owner_addr"]      = Renge::AddrToStr(m0.ownerAddr);
+            // Owning object's class (P4 inc 2): the candidate class for an own-block
+            // leaf, the owned sub-object's class for a cross-object leaf — drives the
+            // per-slot Pivot handoff to the right class.
+            sj["owner_class"]     = m0.ownerClass;
             Radar::Candidate tmp;
             std::memcpy(tmp.prevValue, m0.prevValue, sizeof(tmp.prevValue));
             tmp.descriptorIdx = m0.descriptorIdx;
