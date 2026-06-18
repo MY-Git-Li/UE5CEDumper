@@ -212,4 +212,48 @@ public class DeepContainerChainTests
     {
         Assert.False(LiveWalkerViewModel.TryParseContainerPath(name, out _));
     }
+
+    // --- LiveWalkerViewModel.FindFieldByOffsetOrContaining (Locate-in-GWorld
+    //     scroll-to-field; nested-struct leaves like GAS FGameplayAttributeData) ---
+
+    [Fact]
+    public void FindFieldByOffsetOrContaining_ExactOffsetWins()
+    {
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "MaximumHealth",      Offset = 0xC8 },
+            new() { Name = "CurrentHealth",      Offset = 0x118 },
+            new() { Name = "RegenerationHealth", Offset = 0x128 },
+        };
+        Assert.Equal("CurrentHealth",
+            LiveWalkerViewModel.FindFieldByOffsetOrContaining(fields, 0x118)?.Name);
+    }
+
+    [Fact]
+    public void FindFieldByOffsetOrContaining_NestedStructLeaf_LandsOnContainingField()
+    {
+        // GAS FGameplayAttributeData: the matched leaf is CurrentHealth.CurrentValue
+        // at owner+0x120 — inside the CurrentHealth StructProperty at 0x118, with no
+        // top-level row at 0x120 — so it lands on CurrentHealth. A different struct's
+        // inner value (MaximumHealth.CurrentValue at 0xD0) lands on MaximumHealth, so
+        // distinct slots reach distinct rows (the TQ2 "both land on the same object" fix).
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "MaximumHealth",         Offset = 0xC8 },
+            new() { Name = "FreeReservationHealth", Offset = 0xD8 },
+            new() { Name = "CurrentHealth",         Offset = 0x118 },
+            new() { Name = "RegenerationHealth",    Offset = 0x128 },
+        };
+        Assert.Equal("CurrentHealth",
+            LiveWalkerViewModel.FindFieldByOffsetOrContaining(fields, 0x120)?.Name);
+        Assert.Equal("MaximumHealth",
+            LiveWalkerViewModel.FindFieldByOffsetOrContaining(fields, 0xD0)?.Name);
+    }
+
+    [Fact]
+    public void FindFieldByOffsetOrContaining_OffsetBeforeAnyField_ReturnsNull()
+    {
+        var fields = new List<LiveFieldValue> { new() { Name = "A", Offset = 0x10 } };
+        Assert.Null(LiveWalkerViewModel.FindFieldByOffsetOrContaining(fields, 0x4));
+    }
 }

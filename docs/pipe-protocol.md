@@ -260,6 +260,7 @@ Object-aware "group scan": find objects (blocks) that **simultaneously** hold AL
   "id": 60, "cmd": "begin_group_scan",
   "game_only": true, "max_results": 50000, "page_size": 1000,
   "deep": false,                                        // optional (build 1283); see below
+  "cross_object": false,                                // optional (P4, build 1303); see below
   "values": [
     { "value": "24", "data_type": "NumericNoByte" },
     { "value": "10", "scan_type": "Bigger" },           // scan_type optional -> "Exact"
@@ -273,6 +274,14 @@ Object-aware "group scan": find objects (blocks) that **simultaneously** hold AL
 // deeply-nested containers (e.g. SaveSlotList[1].MsTuneData.MsTunes[0].
 // WeaponTuneList[0].Tunes[N]). Attached only when true. A deep candidate's slot
 // `field_name` is the fully-indexed path and `addr` is the absolute element address.
+//
+// `cross_object` (P4, default off): also fold the numeric leaves of the sub-objects
+// each actor OWNS into the actor's block (a bounded 2-level owned BFS: depth 1 =
+// components, depth 2 = a GAS ASC's SpawnedAttributes -> UAttributeSet), so a group
+// whose values are split across {actor, components, attribute sets} is found.
+// Ownership-gated (the sub-object's Outer must chain back to the actor); selectivity
+// is the value AND, not a class-name filter. A cross-object slot's `field_name` is
+// the path (e.g. "HealthComp.CurrentHealth") and `owner_addr` is the owning sub-object.
 
 // Next Scan — re-target every slot (count MUST match the first scan). Survivors
 // are objects where every slot still matches at a distinct offset; the per-slot
@@ -303,16 +312,19 @@ A group candidate is **object-level** with nested per-slot matches:
     { "slot_index": 0, "value": "24", "scan_type": "Exact",
       "field_name": "Str", "field_offset": 32, "field_type": "IntProperty",
       "bool_field_mask": 255, "leaf_value": "24", "addr": "7FF6..C0",
+      "owner_addr": "7FF6..A0",                         // own-block leaf -> owner == the candidate actor
       "matched_offsets": [32], "locked": true },      // locked once a single offset remains
-    { "slot_index": 1, "value": "", "scan_type": "Increased",
-      "field_name": "Def", "field_offset": 36, "field_type": "IntProperty",
-      "leaf_value": "12", "addr": "7FF6..C4",          // leaf_value = current bytes (12, was 10)
-      "matched_offsets": [36, 64], "locked": false }  // still converging
+    { "slot_index": 1, "value": "10", "scan_type": "Exact",
+      "field_name": "HealthComp.CurrentHealth",        // cross_object leaf: path from the actor
+      "field_offset": 64, "field_type": "FloatProperty",
+      "leaf_value": "10", "addr": "1AD0..40",
+      "owner_addr": "1AD0..00",                         // the OWNED sub-object holding the leaf (handoffs open it)
+      "matched_offsets": [64], "locked": true }
   ]
 }
 ```
 
-`scan_type` echoes each slot's stored predicate (`Radar::NameOf(ScanType)`); a prev-value slot carries an empty `value` and its `leaf_value` is the current bytes; a Between slot additionally echoes `value2` (the upper bound). `addr` / `field_offset` / `field_name` on each slot drive the same Live Walker / Locate-in-GWorld / Copy handoffs as a single-value candidate; the object's `class_name` drives Instance Finder / Class Pivot. Once every slot's `locked` is true the UI shows the **locked-offset table** (class + each value's offset).
+`scan_type` echoes each slot's stored predicate (`Radar::NameOf(ScanType)`); a prev-value slot carries an empty `value` and its `leaf_value` is the current bytes; a Between slot additionally echoes `value2` (the upper bound). `addr` / `field_offset` / `field_name` on each slot drive the same Live Walker / Locate-in-GWorld / Copy handoffs as a single-value candidate. `owner_addr` (P4) is the object directly holding the leaf — the candidate actor for an own-block leaf, or an owned sub-object for a cross-object leaf; the per-slot handoffs target it. The object's `class_name` drives Instance Finder / Class Pivot. Once every slot's `locked` is true the UI shows the **locked-offset table** (class + each value's offset).
 
 ### Snapshot Capture (experimental — Phase A)
 

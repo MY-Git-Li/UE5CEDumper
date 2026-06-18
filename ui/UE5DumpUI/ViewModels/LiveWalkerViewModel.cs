@@ -1994,6 +1994,28 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// "SaveSlotList[0].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[2]". Pure —
     /// unit-tested. Generalises the former single-"[N]" struct-array parser.
     /// </summary>
+    /// <summary>
+    /// Resolve the field row a byte-offset scroll hint should land on: the field
+    /// at <paramref name="wantOffset"/> exactly, or — when none exists because the
+    /// leaf lives inside a nested struct (a GAS <c>FGameplayAttributeData.CurrentValue</c>
+    /// at owner+0x120 sits inside the <c>CurrentHealth</c> StructProperty at 0x118) —
+    /// the containing top-level field, i.e. the one with the largest offset ≤ the
+    /// leaf offset. Returns null only when no field is at or before the offset.
+    /// Pure / static so the contract is unit-testable without a populated grid.
+    /// </summary>
+    internal static LiveFieldValue? FindFieldByOffsetOrContaining(
+        IReadOnlyList<LiveFieldValue> fields, int wantOffset)
+    {
+        LiveFieldValue? exact = null, containing = null;
+        foreach (var f in fields)
+        {
+            if (f.Offset == wantOffset) { exact = f; break; }
+            if (f.Offset <= wantOffset && (containing == null || f.Offset > containing.Offset))
+                containing = f;
+        }
+        return exact ?? containing;
+    }
+
     internal static bool TryParseContainerPath(string? fieldName,
                                                out List<(string name, int index)> segments)
     {
@@ -3825,12 +3847,16 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             // map/array/set hit; TryDrillIntoMatchedContainer then drills to
             // the matched element when the display name carried a "[N]".
             _pendingScrollFieldOffset = null;
-            var hit = Fields.FirstOrDefault(f => f.Offset == wantOffset);
+            // Exact offset match, else the containing top-level field (a leaf
+            // inside a nested struct — e.g. a GAS FGameplayAttributeData
+            // .CurrentValue at owner+0x120 inside the CurrentHealth StructProperty
+            // at 0x118 — has no top-level row at its exact offset).
+            var hit = FindFieldByOffsetOrContaining(Fields, wantOffset);
             if (hit != null)
             {
                 SelectedField = hit;
                 ScrollToFieldRequested?.Invoke(hit.Name);
-                _log.Info($"UpdateDisplay: auto-scrolled to offset 0x{wantOffset:X} field '{hit.Name}'");
+                _log.Info($"UpdateDisplay: auto-scrolled to offset 0x{wantOffset:X} -> field '{hit.Name}' @0x{hit.Offset:X}");
                 TryDrillIntoMatchedContainer(hit);
             }
             else

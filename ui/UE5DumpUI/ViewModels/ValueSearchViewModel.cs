@@ -73,6 +73,13 @@ public partial class ValueSearchViewModel : ViewModelBase
     /// each numeric array / struct-array element becomes its own match block.</summary>
     [ObservableProperty] private bool   _deepScan;
 
+    /// <summary>Opt-in cross-object pass (Group mode only, default OFF; P4). When on,
+    /// each actor's block also folds in the numeric leaves of the sub-objects it OWNS
+    /// (its components + a GAS ASC's AttributeSets), so a group whose values are
+    /// distributed across {actor, components, attribute sets} is matched as one block.
+    /// Ownership + value driven (not class-name driven).</summary>
+    [ObservableProperty] private bool   _crossObjectScan;
+
     /// <summary>CE-style rounded-scan slack for Float/Double and vector
     /// comparisons. Default 0.5 covers the common case: game UI
     /// displays "338" for a real float of 337.5, so scanning for "338"
@@ -715,11 +722,27 @@ public partial class ValueSearchViewModel : ViewModelBase
         NavigateToInstanceFinder?.Invoke(candidate.ClassName);
     }
 
+    // The reason "Locate in GWorld" can't run for `addr`, or null if it can. Lets
+    // the handoffs report WHY a click did nothing instead of returning silently —
+    // a "click does nothing, no message" no-op is impossible to diagnose otherwise.
+    //
+    // Intentionally does NOT gate on the C# IsGWorldAvailable flag: the DLL's
+    // find_path_from_gworld is the source of truth for GWorld (it returns an
+    // "invalid" / "no path" status when there's no live UWorld, which the locate
+    // flow surfaces). Gating here on a stale/false IsGWorldAvailable was disabling
+    // the button on games where GWorld was actually resolved (e.g. TQ2, proxy mode).
+    private static string? GWorldLocateBlockReason(string? addr) =>
+        string.IsNullOrEmpty(addr)
+            ? "No owning-object address to locate for this match."
+            : null;
+
     [RelayCommand]
     private void LocateCandidateInGWorld(ValueCandidate? candidate)
     {
-        if (candidate == null || !IsGWorldAvailable) return;
-        if (string.IsNullOrEmpty(candidate.InstanceAddr)) return;
+        if (candidate == null) return;
+        var reason = GWorldLocateBlockReason(candidate.InstanceAddr);
+        if (reason != null) { StatusText = reason; return; }
+        _log.Info($"Value Search Locate in GWorld -> {candidate.InstanceAddr} (off=0x{candidate.FieldOffset:X}, {candidate.FieldName})");
         LocateInGWorld?.Invoke(candidate.InstanceAddr, candidate.FieldOffset, candidate.FieldName);
     }
 
@@ -918,7 +941,7 @@ public partial class ValueSearchViewModel : ViewModelBase
             await EndGroupSessionIfAnyAsync();
 
             var result = await _dump.BeginGroupScanAsync(
-                GroupInputs.ToList(), GameOnly, MaxResults, DeepScan, PageSize, cts.Token);
+                GroupInputs.ToList(), GameOnly, MaxResults, DeepScan, CrossObjectScan, PageSize, cts.Token);
 
             GroupSessionId = result.SessionId;
             await ApplyGroupScanResultAsync(result.Total, result.Candidates);
@@ -1085,15 +1108,21 @@ public partial class ValueSearchViewModel : ViewModelBase
     [RelayCommand]
     private void OpenGroupSlotInLiveWalker(GroupSlotMatch? slot)
     {
-        if (slot == null || string.IsNullOrEmpty(slot.InstanceAddr)) return;
-        NavigateToInstance?.Invoke(slot.InstanceAddr, slot.FieldOffset, slot.FieldName);
+        // HandoffAddr is the leaf's direct owner — the owned sub-object for a
+        // cross-object leaf (P4), else the actor — so Live Walker opens the object
+        // that actually holds the field.
+        if (slot == null || string.IsNullOrEmpty(slot.HandoffAddr)) return;
+        NavigateToInstance?.Invoke(slot.HandoffAddr, slot.FieldOffset, slot.FieldName);
     }
 
     [RelayCommand]
     private void LocateGroupSlotInGWorld(GroupSlotMatch? slot)
     {
-        if (slot == null || !IsGWorldAvailable || string.IsNullOrEmpty(slot.InstanceAddr)) return;
-        LocateInGWorld?.Invoke(slot.InstanceAddr, slot.FieldOffset, slot.FieldName);
+        if (slot == null) return;
+        var reason = GWorldLocateBlockReason(slot.HandoffAddr);
+        if (reason != null) { StatusText = reason; return; }
+        _log.Info($"Group Locate in GWorld -> {slot.HandoffAddr} (off=0x{slot.FieldOffset:X}, {slot.FieldName})");
+        LocateInGWorld?.Invoke(slot.HandoffAddr, slot.FieldOffset, slot.FieldName);
     }
 
     [RelayCommand]

@@ -211,6 +211,7 @@ public interface IDumpService
         bool gameOnly = true,
         int maxResults = 50000,
         bool deep = false,
+        bool crossObject = false,
         int pageSize = 1000,
         CancellationToken ct = default);
 

@@ -577,10 +577,13 @@ struct SlotSpec {
 struct GroupSlotMatch {
     uint32_t  descriptorIdx = 0;   // -> GroupSession::descriptors
     int32_t   elementIndex  = -1;  // -1 = direct field; >=0 = container element index
-    int32_t   offset        = 0;   // bytes from instanceAddr to the leaf (direct); 0 for deep
-    uintptr_t leafAddr      = 0;   // ABSOLUTE address of the value — direct: instance+offset;
+    int32_t   offset        = 0;   // bytes from the OWNING object to the leaf (direct); 0 for deep
+    uintptr_t leafAddr      = 0;   // ABSOLUTE address of the value — direct: owner+offset;
                                    // deep (container element): the element's own address.
                                    // Refine re-reads this (SEH-safe; stale on container realloc = drop).
+    uintptr_t ownerAddr     = 0;   // object directly holding the leaf: the candidate actor for an
+                                   // own-block leaf, or an OWNED sub-object for a cross-object leaf
+                                   // (P4). Drives the per-slot handoffs to the right object.
     uint8_t   prevValue[16] = {};  // last-observed leaf bytes
 };
 

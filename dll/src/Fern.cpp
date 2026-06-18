@@ -282,8 +282,11 @@ json GroupCandidateToJson(const Radar::GroupCandidate& gc,
             sj["field_offset"]    = m0.offset;
             sj["field_type"]      = d.fieldType;
             sj["bool_field_mask"] = d.boolFieldMask;
-            // Absolute leaf address (direct: instance+offset; deep: container element).
+            // Absolute leaf address (direct: owner+offset; deep: container element).
             sj["addr"]            = Renge::AddrToStr(m0.leafAddr);
+            // Owning object of the leaf (P4): the candidate actor for an own-block
+            // leaf, or an owned sub-object for a cross-object leaf — drives handoffs.
+            sj["owner_addr"]      = Renge::AddrToStr(m0.ownerAddr);
             Radar::Candidate tmp;
             std::memcpy(tmp.prevValue, m0.prevValue, sizeof(tmp.prevValue));
             tmp.descriptorIdx = m0.descriptorIdx;
@@ -2360,6 +2363,9 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             // element as its own block so a group hidden in a deeply-nested array
             // (e.g. ...WeaponTuneList[0].Tunes[N]) is found.
             bool deep = request.value("deep", false);
+            // Opt-in cross-object mode (P4): fold each actor's OWNED sub-object
+            // (components + GAS AttributeSets) numeric leaves into the actor's block.
+            bool crossObject = request.value("cross_object", false);
             if (pageSize < 0) pageSize = 0;
 
             if (!request.contains("values") || !request["values"].is_array()) {
@@ -2415,7 +2421,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             }
             const int slotCount = static_cast<int>(slots.size());
 
-            auto scanResult = Aura::ScanForValueGroup(slots, gameOnly, maxResults, deep);
+            auto scanResult = Aura::ScanForValueGroup(slots, gameOnly, maxResults, deep, crossObject);
 
             uint64_t sessionId = Radar::GroupSessionManager::Instance().Begin(
                 std::move(slots), std::move(scanResult.candidates),

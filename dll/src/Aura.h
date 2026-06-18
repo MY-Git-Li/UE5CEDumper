@@ -831,11 +831,18 @@ struct GroupScanResult {
 // MsTunes[0].WeaponTuneList[0].Tunes[N]) is found. Matches WITHIN one array/element
 // (the user's "array as a block" rule). Bounded by the same depth/element caps as
 // snapshot capture; only runs for objects that actually own containers.
+// `crossObject` (P4, opt-in, default off): merge the numeric leaves of the
+// sub-objects each actor OWNS (its components + a GAS ASC's SpawnedAttributes,
+// reached via EnumerateOutgoingObjectPtrs and gated by an Outer-chains-back test)
+// INTO the actor's own block, so a group whose values are distributed across
+// {actor, components, AttributeSets} is matched. Ownership + value driven, NOT
+// class-name driven (selectivity comes from the value AND). See group-value-scan-spec.md §3.2.
 GroupScanResult ScanForValueGroup(
     const std::vector<Radar::SlotSpec>& slots,
     bool                                gameOnly,
-    int32_t                             maxResults = 100000,
-    bool                                deep       = false);
+    int32_t                             maxResults  = 100000,
+    bool                                deep        = false,
+    bool                                crossObject = false);
 
 // Next scan (P1: exact per slot). Re-reads each candidate's per-slot
 // convergence offsets, keeps those still equal to the slot's NEW target,
