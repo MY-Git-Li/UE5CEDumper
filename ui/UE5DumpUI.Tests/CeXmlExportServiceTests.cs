@@ -3756,6 +3756,128 @@ public class CeXmlExportServiceTests
         Assert.Contains("<Description>\"m_savedata\"</Description>", xml);
     }
 
+    // ========================================
+    // Map VALUE offset off-by-8 (SEED MsTunes {Map<FName, LifeMsTuneDataRow>}):
+    // a drilled map-value struct's children landed 'valueOffset' bytes short
+    // because the value crumb resolved to the element base instead of the value
+    // base. LiveWalkerViewModel.MapValueDrillOffset now bakes valueOffset into
+    // the crumb's FieldOffset; these cover the helper + the resulting CE chain.
+    // ========================================
+
+    [Fact]
+    public void MapValueDrillOffset_MapParent_ReturnsAlignedValueOffset()
+    {
+        // FName-keyed map: value at +8 inside each TPair.
+        var mapCrumb = new BreadcrumbItem
+        {
+            IsContainerView = true,
+            ContainerField = new LiveFieldValue
+            {
+                TypeName = "MapProperty", MapCount = 132, MapKeyType = "NameProperty",
+                MapKeySize = 8, MapValueOffset = 8,
+            },
+        };
+        Assert.Equal(8, LiveWalkerViewModel.MapValueDrillOffset(mapCrumb));
+    }
+
+    [Fact]
+    public void MapValueDrillOffset_MapParentNoAlignedOffset_FallsBackToKeySize()
+    {
+        var mapCrumb = new BreadcrumbItem
+        {
+            IsContainerView = true,
+            ContainerField = new LiveFieldValue
+            {
+                TypeName = "MapProperty", MapCount = 3, MapKeyType = "StructProperty",
+                MapKeySize = 16, MapValueOffset = 0,
+            },
+        };
+        Assert.Equal(16, LiveWalkerViewModel.MapValueDrillOffset(mapCrumb));
+    }
+
+    [Fact]
+    public void MapValueDrillOffset_NonMapParent_ReturnsZero()
+    {
+        // Pointer crumb (normal object drill) — no correction.
+        Assert.Equal(0, LiveWalkerViewModel.MapValueDrillOffset(
+            MakeBc("0x1", "Obj", "Obj", isPointer: true, offset: 0x30)));
+
+        // Struct/Set array element values sit at the element base, so the array
+        // container view also contributes no correction.
+        var arrCrumb = new BreadcrumbItem
+        {
+            IsContainerView = true,
+            ContainerField = new LiveFieldValue { TypeName = "ArrayProperty", ArrayCount = 4 },
+        };
+        Assert.Equal(0, LiveWalkerViewModel.MapValueDrillOffset(arrCrumb));
+
+        // Null parent (navigating from the root).
+        Assert.Equal(0, LiveWalkerViewModel.MapValueDrillOffset(null));
+    }
+
+    [Fact]
+    public void GenerateHierarchicalXml_MapValueStructCrumb_ChildOffsetsChainFromValueBase()
+    {
+        // SEED repro: ... → MsTunes {Map<FName, LifeMsTuneDataRow>} (deref) →
+        // [0] MSB_STR00 (the map VALUE struct) → its fields. After the off-by-8
+        // fix the value crumb's FieldOffset includes valueOffset(8), so it
+        // resolves to the value base and WeaponTuneList @ +0x18 chains correctly
+        // (previously the value crumb sat at +0 = element base, dragging every
+        // child 8 bytes short → CE dereferenced garbage).
+        var breadcrumbs = new[]
+        {
+            MakeBc("0x1000", "GWorld"),
+            // MsTunes map container view: derefs TSparseArray::Data at +250.
+            new BreadcrumbItem
+            {
+                Address = "0x1000",
+                Label = "MsTunes {Map: 132, NameProperty → StructProperty}",
+                FieldName = "MsTunes",
+                FieldOffset = 0x250,
+                IsContainerView = true,
+                ContainerField = new LiveFieldValue
+                {
+                    Name = "MsTunes", TypeName = "MapProperty", MapCount = 132,
+                    MapKeyType = "NameProperty", MapKeySize = 8, MapValueOffset = 8,
+                },
+            },
+            // [0] MSB_STR00 — map VALUE struct. FieldOffset already includes the
+            // +8 valueOffset (index 0 * stride + 8), as the ViewModel now bakes in.
+            MakeBc("0x2008", "[0] MSB_STR00 (LifeMsTuneDataRow)", "[0] MSB_STR00", offset: 0x8),
+        };
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "BodyTune", TypeName = "StructProperty", Offset = 0x0, Size = 0x18 },
+            new()
+            {
+                Name = "WeaponTuneList", TypeName = "ArrayProperty", Offset = 0x18, Size = 16,
+                ArrayCount = 4, ArrayInnerType = "StructProperty", ArrayStructType = "LifeWeaponTune",
+                ArrayElemSize = 0x28,
+                ArrayElements = new List<ArrayElementValue> { new() { Index = 0, Value = "" } },
+            },
+            new() { Name = "PointRest", TypeName = "IntProperty", Offset = 0x28, Size = 4 },
+        };
+
+        var xml = CeXmlExportService.GenerateHierarchicalXml(
+            "0x1000", "GWorld", breadcrumbs, fields);
+
+        // Map crumb derefs at +250.
+        Assert.Contains("<Address>+250</Address>", xml);
+
+        // The value-struct crumb resolves to the value base (+8 inside the element),
+        // NOT the element base (+0).
+        var msbIdx = xml.IndexOf("\"[0] MSB_STR00\"", StringComparison.Ordinal);
+        Assert.True(msbIdx >= 0);
+        var msbHeader = xml.Substring(msbIdx,
+            xml.IndexOf("<CheatEntries>", msbIdx, StringComparison.Ordinal) - msbIdx);
+        Assert.Contains("<Address>+8</Address>", msbHeader);
+
+        // WeaponTuneList keeps its struct-relative offset 0x18 (now chained from
+        // the value base) and derefs its TArray::Data.
+        Assert.Contains("WeaponTuneList", xml);
+        Assert.Contains("<Address>+18</Address>", xml);
+    }
+
     private static BreadcrumbItem MakeBc(string addr, string label,
         string fieldName = "", bool isPointer = false, int offset = 0,
         bool isContainerView = false)

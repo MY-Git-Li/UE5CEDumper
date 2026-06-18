@@ -293,6 +293,32 @@ public sealed class ProxyDeployService : IProxyDeployService
     }
 
     /// <summary>
+    /// Classify a game whose SELECTED proxy type file is ABSENT. If another of
+    /// OUR proxy types is already deployed in the folder, that's
+    /// <see cref="ProxyDeployStatus.DeployedOtherType"/> (redeploying the
+    /// selected type would create a redundant second proxy) — otherwise the
+    /// folder is genuinely clean (<see cref="ProxyDeployStatus.NotDeployed"/>).
+    /// <paramref name="deployedProxyNames"/> lists OUR proxy DLLs present in the
+    /// folder; since the selected type's file is absent, it never appears here,
+    /// so a non-empty list always means an OTHER type. The returned message
+    /// names the single other-type proxy; when 2+ coexist the per-folder
+    /// <see cref="BuildConflictMessage"/> already lists them all, so this
+    /// returns no message to avoid duplicating the list. Pure (no IO) so the
+    /// rule is unit-testable.
+    /// </summary>
+    internal static (ProxyDeployStatus status, string? message) ClassifyAbsentSelected(
+        IReadOnlyList<string> deployedProxyNames)
+    {
+        if (deployedProxyNames.Count == 0)
+            return (ProxyDeployStatus.NotDeployed, null);
+
+        string? message = deployedProxyNames.Count == 1
+            ? $"Deployed as {deployedProxyNames[0]}"
+            : null;
+        return (ProxyDeployStatus.DeployedOtherType, message);
+    }
+
+    /// <summary>
     /// Try to detect UE version from the game executable's PE version info.
     /// Returns null if detection fails.
     /// </summary>
@@ -338,10 +364,28 @@ public sealed class ProxyDeployService : IProxyDeployService
                 string targetDll = Path.Combine(game.BinariesDir, selectedDllName);
                 game.ErrorMessage = null;
 
+                // Which of OUR proxy DLLs are actually present in this folder?
+                // Computed up front because it drives BOTH the absent-selected
+                // classification (is the folder truly clean, or is another of our
+                // proxy types deployed?) and the 2+ redundancy warning below. This
+                // is a property of the folder, INDEPENDENT of the selected radio.
+                var deployedProxyNames = allProxyNames
+                    .Where(name =>
+                    {
+                        string p = Path.Combine(game.BinariesDir, name);
+                        return File.Exists(p) && IsOurProxyDll(p);
+                    })
+                    .ToList();
+
                 // Status reflects the SELECTED proxy type's state ────────────
                 if (!File.Exists(targetDll))
                 {
-                    game.Status = ProxyDeployStatus.NotDeployed;
+                    // Absent selected type: clean folder → NotDeployed; another of
+                    // our types present → DeployedOtherType (don't mislead the user
+                    // into redeploying on top of a working proxy of a different type).
+                    var (status, message) = ClassifyAbsentSelected(deployedProxyNames);
+                    game.Status = status;
+                    game.ErrorMessage = message;
                     game.InstalledVersion = null;
                 }
                 else if (!IsOurProxyDll(targetDll))
@@ -367,22 +411,12 @@ public sealed class ProxyDeployService : IProxyDeployService
                                   : ProxyDeployStatus.DeployedOutdated;
                 }
 
-                // Redundancy detection: which of OUR proxy DLLs are actually
-                // present in this folder? Warn ONLY when 2+ coexist (only one
-                // activates at runtime — see Heiter.cpp's mutex). This is a
-                // property of the folder, INDEPENDENT of the selected radio —
-                // a single deployed proxy of any type is the normal state and
-                // must not warn (otherwise switching tabs falsely flags every
-                // game that has a different single proxy installed). N-proxy-
-                // safe: no hardcoded type pair.
-                var deployedProxyNames = allProxyNames
-                    .Where(name =>
-                    {
-                        string p = Path.Combine(game.BinariesDir, name);
-                        return File.Exists(p) && IsOurProxyDll(p);
-                    })
-                    .ToList();
-
+                // Redundancy detection: warn ONLY when 2+ of OUR proxies coexist
+                // (only one activates at runtime — see Heiter.cpp's mutex). A
+                // single deployed proxy of any type is the normal state and must
+                // not warn (otherwise switching tabs falsely flags every game
+                // that has a different single proxy installed). N-proxy-safe: no
+                // hardcoded type pair. deployedProxyNames was computed up front.
                 string? conflictMsg = BuildConflictMessage(deployedProxyNames);
                 if (conflictMsg != null)
                 {

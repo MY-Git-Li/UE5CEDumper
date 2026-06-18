@@ -248,11 +248,12 @@ public class ProxyDeployTests
     {
         var values = Enum.GetValues<ProxyDeployStatus>();
 
-        Assert.Equal(6, values.Length);
+        Assert.Equal(7, values.Length);
         Assert.Contains(ProxyDeployStatus.NotDeployed, values);
         Assert.Contains(ProxyDeployStatus.DeployedCurrent, values);
         Assert.Contains(ProxyDeployStatus.DeployedOutdated, values);
         Assert.Contains(ProxyDeployStatus.OtherProxy, values);
+        Assert.Contains(ProxyDeployStatus.DeployedOtherType, values);
         Assert.Contains(ProxyDeployStatus.ErrorLocked, values);
         Assert.Contains(ProxyDeployStatus.ErrorOther, values);
     }
@@ -375,6 +376,40 @@ public class ProxyDeployTests
         Assert.Contains("version.dll", msg);
         Assert.Contains("dinput8.dll", msg);
         Assert.Contains("dxgi.dll", msg);
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // ClassifyAbsentSelected — selected proxy type absent (build: the user's
+    // report: on the version.dll tab a game with dxgi.dll already deployed
+    // wrongly read "NotDeployed"; it must read DeployedOtherType instead)
+    // ────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void ClassifyAbsentSelected_CleanFolder_IsNotDeployed()
+    {
+        var (status, message) = ProxyDeployService.ClassifyAbsentSelected(Array.Empty<string>());
+        Assert.Equal(ProxyDeployStatus.NotDeployed, status);
+        Assert.Null(message);
+    }
+
+    [Fact]
+    public void ClassifyAbsentSelected_OneOtherProxy_IsDeployedOtherTypeAndNamesIt()
+    {
+        // Exactly the screenshot: version.dll selected (absent), dxgi.dll deployed.
+        var (status, message) = ProxyDeployService.ClassifyAbsentSelected(new[] { "dxgi.dll" });
+        Assert.Equal(ProxyDeployStatus.DeployedOtherType, status);
+        Assert.NotNull(message);
+        Assert.Contains("dxgi.dll", message);
+    }
+
+    [Fact]
+    public void ClassifyAbsentSelected_TwoOtherProxies_IsDeployedOtherTypeWithNoMessage()
+    {
+        // 2+ coexisting is additionally surfaced by BuildConflictMessage, so this
+        // returns no message to avoid listing the proxies twice.
+        var (status, message) = ProxyDeployService.ClassifyAbsentSelected(new[] { "dxgi.dll", "dinput8.dll" });
+        Assert.Equal(ProxyDeployStatus.DeployedOtherType, status);
+        Assert.Null(message);
     }
 
     // ────────────────────────────────────────────────────────────────
