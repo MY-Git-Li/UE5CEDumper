@@ -795,6 +795,23 @@ public partial class ValueSearchViewModel : ViewModelBase
         ValueScanDataType.NumericAll,
     };
 
+    /// <summary>Per-slot scan-type choices for group mode (P2). First-scan types
+    /// (Exact / Bigger / Smaller) compare against the row's value; prev-value types
+    /// (Changed / Unchanged / Increased / Decreased) compare against the previous
+    /// round and need a session, so they're only valid on a refine — the value box
+    /// hides for them. Between + substring predicates are intentionally excluded.</summary>
+    public IReadOnlyList<ValueScanType> GroupScanTypeOptions { get; } = new[]
+    {
+        ValueScanType.Exact,
+        ValueScanType.Bigger,
+        ValueScanType.Smaller,
+        ValueScanType.Between,
+        ValueScanType.Changed,
+        ValueScanType.Unchanged,
+        ValueScanType.Increased,
+        ValueScanType.Decreased,
+    };
+
     /// <summary>The bound group-result rows (current server window). Each row is
     /// one object; its Slots expand in the master-detail grid.</summary>
     [ObservableProperty] private ObservableCollection<GroupCandidate> _groupCandidates = new();
@@ -854,13 +871,33 @@ public partial class ValueSearchViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanRemoveGroupRow));
     }
 
-    private bool GroupValuesValid(out string error)
+    private bool GroupValuesValid(bool firstScan, out string error)
     {
         error = "";
         if (GroupInputs.Count is < 2 or > 4) { error = "Group scan needs 2 to 4 values."; return false; }
         foreach (var g in GroupInputs)
         {
-            if (string.IsNullOrWhiteSpace(g.Value)) { error = "Every group value is required."; return false; }
+            bool prevValue = IsPrevValueScanType(g.ScanType);
+            // Prev-value predicates need a baseline that only exists after a First
+            // Scan — reject them up front so the user does First Scan (with a
+            // targeted type) first, then refines with Increased/etc.
+            if (firstScan && prevValue)
+            {
+                error = $"Scan type '{g.ScanType}' needs a previous scan — First Scan with Exact / Bigger / Smaller, then Next Scan with it.";
+                return false;
+            }
+            // A targeted predicate needs a value; a prev-value one doesn't.
+            if (!prevValue && string.IsNullOrWhiteSpace(g.Value))
+            {
+                error = "Every targeted group value is required.";
+                return false;
+            }
+            // Between needs the upper bound too.
+            if (g.ScanType == ValueScanType.Between && string.IsNullOrWhiteSpace(g.Value2))
+            {
+                error = "A Between row needs both a low and a high value.";
+                return false;
+            }
         }
         return true;
     }
@@ -869,7 +906,7 @@ public partial class ValueSearchViewModel : ViewModelBase
     private async Task GroupFirstScanAsync()
     {
         if (IsScanning) return;
-        if (!GroupValuesValid(out var err)) { ErrorMessage = err; return; }
+        if (!GroupValuesValid(firstScan: true, out var err)) { ErrorMessage = err; return; }
 
         var cts = _scanCts = new System.Threading.CancellationTokenSource();
         try
@@ -909,7 +946,7 @@ public partial class ValueSearchViewModel : ViewModelBase
     private async Task GroupNextScanAsync()
     {
         if (IsScanning || !HasGroupSession) return;
-        if (!GroupValuesValid(out var err)) { ErrorMessage = err; return; }
+        if (!GroupValuesValid(firstScan: false, out var err)) { ErrorMessage = err; return; }
 
         var cts = _scanCts = new System.Threading.CancellationTokenSource();
         try
@@ -918,8 +955,7 @@ public partial class ValueSearchViewModel : ViewModelBase
             ErrorMessage = "";
             StatusText = "Refining group scan...";
 
-            var values = GroupInputs.Select(g => g.Value).ToList();
-            var result = await _dump.RefineGroupScanAsync(GroupSessionId, values, PageSize, cts.Token);
+            var result = await _dump.RefineGroupScanAsync(GroupSessionId, GroupInputs.ToList(), PageSize, cts.Token);
 
             await ApplyGroupScanResultAsync(result.Total, result.Candidates);
             StatusText = $"Group Next Scan: {result.Total} surviving objects in {result.DurationMs} ms";

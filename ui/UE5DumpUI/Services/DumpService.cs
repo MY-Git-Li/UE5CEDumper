@@ -1664,6 +1664,8 @@ public sealed class DumpService : IDumpService
                 {
                     SlotIndex     = so["slot_index"]?.GetValue<int>() ?? 0,
                     Value         = so["value"]?.GetValue<string>() ?? "",
+                    ScanType      = so["scan_type"]?.GetValue<string>() ?? "Exact",
+                    Value2        = so["value2"]?.GetValue<string>() ?? "",
                     FieldName     = so["field_name"]?.GetValue<string>() ?? "",
                     FieldOffset   = so["field_offset"]?.GetValue<int>() ?? 0,
                     FieldType     = so["field_type"]?.GetValue<string>() ?? "",
@@ -1697,11 +1699,15 @@ public sealed class DumpService : IDumpService
         {
             // Cast to JsonNode so overload resolution picks Add(JsonNode?) — the
             // generic Add<T>(T) is RequiresDynamicCode/UnreferencedCode (AOT-unsafe).
-            values.Add((JsonNode)new JsonObject
+            var slot = new JsonObject
             {
                 ["value"]     = sp.Value,
                 ["data_type"] = sp.DataType.ToString(),
-            });
+                ["scan_type"] = sp.ScanType.ToString(),  // per-slot predicate (P2)
+            };
+            if (sp.ScanType == ValueScanType.Between)
+                slot["value2"] = sp.Value2;              // Between upper bound
+            values.Add((JsonNode)slot);
         }
         var req = new JsonObject
         {
@@ -1732,18 +1738,30 @@ public sealed class DumpService : IDumpService
         return result;
     }
 
-    // Refine takes the NEW value per slot (same count as the first scan). The
-    // per-slot width scope is fixed by the session, so only the value is sent.
+    // Refine takes the NEW (value, scan_type) per slot (same count as the first
+    // scan). The per-slot width scope is fixed by the session. P2: a prev-value
+    // scan type (Changed/Increased/...) carries no value — it compares against the
+    // previous round — so the value is sent but ignored DLL-side for those.
     public async Task<GroupScanRefineResult> RefineGroupScanAsync(
         ulong sessionId,
-        IReadOnlyList<string> values,
+        IReadOnlyList<GroupSlotInput> slots,
         int pageSize = 1000,
         CancellationToken ct = default)
     {
         var arr = new JsonArray();
         // Cast to JsonNode (see BeginGroupScanAsync) so the AOT-safe Add(JsonNode?)
         // overload is chosen instead of the generic Add<T>(T).
-        foreach (var v in values) arr.Add((JsonNode)new JsonObject { ["value"] = v });
+        foreach (var sp in slots)
+        {
+            var slot = new JsonObject
+            {
+                ["value"]     = sp.Value,
+                ["scan_type"] = sp.ScanType.ToString(),
+            };
+            if (sp.ScanType == ValueScanType.Between)
+                slot["value2"] = sp.Value2;
+            arr.Add((JsonNode)slot);
+        }
         var req = new JsonObject
         {
             ["cmd"] = "refine_group_scan",

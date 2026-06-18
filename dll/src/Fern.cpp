@@ -266,6 +266,9 @@ json GroupCandidateToJson(const Radar::GroupCandidate& gc,
         json sj;
         sj["slot_index"] = static_cast<int>(s);
         sj["value"]      = spec.value;
+        sj["scan_type"]  = Radar::NameOf(spec.st);  // per-slot predicate (P2)
+        if (spec.st == Radar::ScanType::Between)
+            sj["value2"] = spec.value2;             // Between upper bound
 
         json offsets = json::array();
         for (const auto& m : matches) offsets.push_back(m.offset);
@@ -2376,18 +2379,38 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 if (!Radar::TryParseDataType(dtStr, dt)) {
                     return Renge::MakeError(id, "Unknown data_type in values: " + dtStr).dump();
                 }
-                // P1: slots fan out over numeric widths (NumericNoByte default /
-                // NumericAll). Concrete per-slot widths are a P2 extension.
+                // Slots fan out over numeric widths (NumericNoByte default /
+                // NumericAll); concrete per-slot widths remain a later extension.
                 if (!Radar::IsMultiNumericDataType(dt)) {
                     return Renge::MakeError(id, "group slot data_type must be NumericNoByte or NumericAll: " + dtStr).dump();
+                }
+                // P2: per-slot first-scan predicate (default Exact). The targeted
+                // types make sense on the first scan — Exact / Bigger / Smaller /
+                // Between (the last carries an upper bound in `value2`). Prev-value
+                // types have no baseline yet, and substring types are string-only.
+                Radar::ScanType st = Radar::ScanType::Exact;
+                std::string stStr = vj.value("scan_type", "Exact");
+                if (!Radar::TryParseScanType(stStr, st)) {
+                    return Renge::MakeError(id, "Unknown scan_type in values: " + stStr).dump();
+                }
+                if (Radar::IsPrevValueScanType(st) || Radar::IsSubstringScanType(st)) {
+                    return Renge::MakeError(id, "group first-scan scan_type must be Exact / Bigger / Smaller / Between: " + stStr).dump();
                 }
                 Radar::SlotSpec sp;
                 if (!Radar::BuildNumericTargets(dt, valStr, sp.targets)) {
                     return Renge::MakeError(id, "Invalid group value '" + valStr + "' (fits no numeric width)").dump();
                 }
-                sp.dt    = dt;
-                sp.st    = Radar::ScanType::Exact;
-                sp.value = valStr;
+                if (st == Radar::ScanType::Between) {
+                    std::string val2Str = vj.value("value2", "");
+                    if (!Radar::BuildNumericTargets(dt, val2Str, sp.targets2)) {
+                        return Renge::MakeError(id, "Invalid group Between upper value '" + val2Str + "' (fits no numeric width)").dump();
+                    }
+                    sp.value2 = val2Str;
+                }
+                sp.dt        = dt;
+                sp.st        = st;
+                sp.value     = valStr;
+                sp.tolerance = vj.value("tolerance", 0.0);
                 slots.push_back(std::move(sp));
             }
             const int slotCount = static_cast<int>(slots.size());
@@ -2445,20 +2468,54 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             json candidates = json::array();
             int  totalCount = 0;
             bool countMismatch = false, parseFailed = false;
+            std::string badScanType;
             Aura::ValueScanStats stats;
             bool found = Radar::GroupSessionManager::Instance().RefineWith(sessionId,
                 [&](Radar::GroupSession& sess) {
                     if (valuesJson.size() != sess.slots.size()) { countMismatch = true; return; }
-                    // Re-target each slot from the new values (dt is fixed by the first scan).
+                    // Re-target each slot from the new (value, scan_type). The dt is
+                    // fixed by the first scan. P2: prev-value predicates carry NO
+                    // value (they compare each leaf against its own prevValue), so
+                    // only targeted types rebuild the numeric target set.
                     for (size_t s = 0; s < sess.slots.size(); ++s) {
                         std::string valStr = valuesJson[s].value("value", "");
-                        Radar::NumericTargetSet nt;
-                        if (!Radar::BuildNumericTargets(sess.slots[s].dt, valStr, nt)) {
-                            parseFailed = true;
-                            return;
+                        std::string stStr  = valuesJson[s].value("scan_type", "Exact");
+                        Radar::ScanType st;
+                        if (!Radar::TryParseScanType(stStr, st)
+                            || Radar::IsSubstringScanType(st)) {
+                            badScanType = stStr; return;
                         }
-                        sess.slots[s].targets = std::move(nt);
-                        sess.slots[s].value   = valStr;
+                        sess.slots[s].st        = st;
+                        sess.slots[s].tolerance = valuesJson[s].value("tolerance", 0.0);
+                        if (Radar::IsPrevValueScanType(st)) {
+                            sess.slots[s].value    = valStr;  // echoed for display (may be "")
+                            sess.slots[s].targets  = Radar::NumericTargetSet{};
+                            sess.slots[s].value2   = "";
+                            sess.slots[s].targets2 = Radar::NumericTargetSet{};
+                        } else {
+                            Radar::NumericTargetSet nt;
+                            if (!Radar::BuildNumericTargets(sess.slots[s].dt, valStr, nt)) {
+                                parseFailed = true;
+                                return;
+                            }
+                            sess.slots[s].targets = std::move(nt);
+                            sess.slots[s].value   = valStr;
+                            // Between carries an upper bound in value2; other
+                            // targeted types clear it so a stale bound can't linger.
+                            if (st == Radar::ScanType::Between) {
+                                std::string val2Str = valuesJson[s].value("value2", "");
+                                Radar::NumericTargetSet nt2;
+                                if (!Radar::BuildNumericTargets(sess.slots[s].dt, val2Str, nt2)) {
+                                    parseFailed = true;
+                                    return;
+                                }
+                                sess.slots[s].targets2 = std::move(nt2);
+                                sess.slots[s].value2   = val2Str;
+                            } else {
+                                sess.slots[s].value2   = "";
+                                sess.slots[s].targets2 = Radar::NumericTargetSet{};
+                            }
+                        }
                     }
                     stats = Aura::RefineGroupCandidates(sess.slots, sess.candidates,
                                                         sess.descriptors, sess.instances);
@@ -2469,9 +2526,10 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                             sess.candidates[i], sess.slots, sess.descriptors, sess.instances));
                 });
 
-            if (!found)         return Renge::MakeError(id, "session_not_found").dump();
-            if (countMismatch)  return Renge::MakeError(id, "refine value count must match the first scan").dump();
-            if (parseFailed)    return Renge::MakeError(id, "Invalid refine value (fits no numeric width)").dump();
+            if (!found)             return Renge::MakeError(id, "session_not_found").dump();
+            if (countMismatch)      return Renge::MakeError(id, "refine value count must match the first scan").dump();
+            if (!badScanType.empty()) return Renge::MakeError(id, "group refine scan_type must be Exact / Bigger / Smaller / Between / Changed / Unchanged / Increased / Decreased: " + badScanType).dump();
+            if (parseFailed)        return Renge::MakeError(id, "Invalid refine value (fits no numeric width)").dump();
 
             json data;
             data["session_id"]  = sessionId;

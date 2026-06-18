@@ -156,6 +156,11 @@ size_t SizeOf(DataType dt);
 // Human-readable name (matches the JSON wire shape: "Int32" / "Float" / ...)
 const char* NameOf(DataType dt);
 
+// Wire string for a ScanType ("Exact" / "Bigger" / "Increased" / ...). Inverse
+// of TryParseScanType; used to echo a session's stored per-slot predicate back
+// to the UI (the group scan persists ScanType as an enum, not the raw string).
+const char* NameOf(ScanType st);
+
 // Parse from wire string; returns true on match, false on unknown.
 bool TryParseDataType(const std::string& s, DataType& out);
 bool TryParseScanType(const std::string& s, ScanType& out);
@@ -549,13 +554,19 @@ private:
 
 // One input value slot of a group scan. `targets` is the pre-parsed multi-width
 // target set (BuildNumericTargets); `value` is the raw user string echoed back
-// on the wire. P1 is exact-match per slot (st == Exact); P2 adds prev-value
-// scan types.
+// on the wire. P2: `st` is the per-slot predicate — a first-scan targeted type
+// (Exact / Bigger / Smaller) on begin, plus the prev-value types (Changed /
+// Unchanged / Increased / Decreased) on refine, where the compare is against
+// each matched leaf's stored prevValue and `targets` is unused. `tolerance` is
+// the float +- band (0 = exact / strict; only meaningful for Float/Double leaves).
 struct SlotSpec {
     DataType         dt = DataType::NumericNoByte;  // per-slot meta or concrete width
     ScanType         st = ScanType::Exact;
     std::string      value;                          // original user value (display/echo)
     NumericTargetSet targets;                        // pre-parsed per fitting width
+    double           tolerance = 0.0;                // float compare band (0 = exact)
+    std::string      value2;                         // Between upper bound (display/echo)
+    NumericTargetSet targets2;                       // pre-parsed upper bound (Between only)
 };
 
 // One converging match of a slot inside a candidate object. `offset` is the byte

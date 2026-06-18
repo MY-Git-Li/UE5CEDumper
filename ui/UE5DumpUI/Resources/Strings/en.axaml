@@ -84,6 +84,7 @@
     <sys:String x:Key="str.VS.Group.FilterWatermark">Filter matched objects (server-side) — class / instance / field / value…</sys:String>
     <sys:String x:Key="str.Tip.VS.Group.FirstScan">Scan every object for one that simultaneously holds all of the entered values at distinct numeric-property offsets (in any order). Each value defaults to NumericNoByte (matches int16/int32/int64/float/double widths). Use Group Next Scan with the new values to narrow and lock each field's offset.</sys:String>
     <sys:String x:Key="str.VS.Group.LockedField">Located field</sys:String>
+    <sys:String x:Key="str.Tip.VS.Group.ScanType">Per-value match predicate. First Scan: Exact / Bigger / Smaller (compares against the value). Next Scan also allows Changed / Unchanged / Increased / Decreased — these compare against the previous round instead of a value (the value box hides), so you can find objects where the values moved a known way without knowing the exact numbers.</sys:String>
 
     <!-- Object Tree -->
     <sys:String x:Key="str.ObjectTree.Title">Object Tree</sys:String>

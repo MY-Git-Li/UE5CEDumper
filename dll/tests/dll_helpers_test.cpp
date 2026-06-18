@@ -2227,6 +2227,96 @@ static void Test_Orden_ConvergenceAndAssignment() {
     EXPECT("SDR infeasible on empty slot", !Orden::HasDistinctAssignment(m, 2));
 }
 
+static void Test_Orden_OrderedFirstScan() {
+    // P2: per-slot ordered predicates on the FIRST scan (Bigger / Smaller),
+    // routed through Radar::ComparePredicate by LeafSatisfiesSlot. Leaves at
+    // Str 24, Def 10.
+    std::vector<Orden::Leaf> leaves = {
+        OrdenLeafI32(0x10, 24), OrdenLeafI32(0x14, 10),
+    };
+    Radar::NumericTargetSet t20, t15, t30;
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "20", t20);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "15", t15);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "30", t30);
+    {   // slot0: > 20 (24 ok), slot1: < 15 (10 ok) -> distinct match
+        std::vector<Orden::SlotTarget> slots = {
+            { &t20, Radar::ScanType::Bigger,  0.0 },
+            { &t15, Radar::ScanType::Smaller, 0.0 },
+        };
+        std::vector<Orden::SlotMatches> out;
+        EXPECT("group ordered first-scan match", Orden::MatchGroup(leaves, slots, out));
+    }
+    {   // slot0: > 30 -> no leaf qualifies -> reject the whole block
+        std::vector<Orden::SlotTarget> slots = {
+            { &t30, Radar::ScanType::Bigger,  0.0 },
+            { &t15, Radar::ScanType::Smaller, 0.0 },
+        };
+        std::vector<Orden::SlotMatches> out;
+        EXPECT("group ordered first-scan reject (no leaf > 30)",
+               !Orden::MatchGroup(leaves, slots, out));
+    }
+}
+
+static void Test_Orden_BetweenFirstScan() {
+    // P2: per-slot Between (inclusive range) on the first scan — needs both the
+    // lower (`targets`) and upper (`targets2`) bound. Leaves Str 24, Def 10.
+    std::vector<Orden::Leaf> leaves = {
+        OrdenLeafI32(0x10, 24), OrdenLeafI32(0x14, 10),
+    };
+    Radar::NumericTargetSet lo20, hi30, lo5, hi12, hi8;
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "20", lo20);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "30", hi30);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "5",  lo5);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "12", hi12);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "8",  hi8);
+    {   // slot0 in [20,30] (24 ok), slot1 in [5,12] (10 ok) -> distinct match
+        std::vector<Orden::SlotTarget> slots = {
+            { &lo20, Radar::ScanType::Between, 0.0, &hi30 },
+            { &lo5,  Radar::ScanType::Between, 0.0, &hi12 },
+        };
+        std::vector<Orden::SlotMatches> out;
+        EXPECT("group Between first-scan match", Orden::MatchGroup(leaves, slots, out));
+    }
+    {   // slot1 in [5,8] -> 10 is out of range -> reject the block
+        std::vector<Orden::SlotTarget> slots = {
+            { &lo20, Radar::ScanType::Between, 0.0, &hi30 },
+            { &lo5,  Radar::ScanType::Between, 0.0, &hi8 },
+        };
+        std::vector<Orden::SlotMatches> out;
+        EXPECT("group Between first-scan reject (10 not in [5,8])",
+               !Orden::MatchGroup(leaves, slots, out));
+    }
+    {   // missing upper bound -> Between can't evaluate -> no match
+        std::vector<Orden::SlotTarget> slots = {
+            { &lo20, Radar::ScanType::Between, 0.0, nullptr },
+            { &lo5,  Radar::ScanType::Between, 0.0, &hi12 },
+        };
+        std::vector<Orden::SlotMatches> out;
+        EXPECT("group Between missing upper bound rejected",
+               !Orden::MatchGroup(leaves, slots, out));
+    }
+}
+
+static void Test_Orden_PrevValueRejectedOnFirstScan() {
+    // Prev-value predicates (Increased / ...) have no baseline on the first scan,
+    // so LeafSatisfiesSlot — and thus MatchGroup — must never match them,
+    // regardless of the leaf value. (The refine path is what honours them.)
+    std::vector<Orden::Leaf> leaves = {
+        OrdenLeafI32(0x10, 24), OrdenLeafI32(0x14, 10),
+    };
+    Radar::NumericTargetSet t24, t10;
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "24", t24);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "10", t10);
+    std::vector<Orden::SlotTarget> slots = {
+        { &t24, Radar::ScanType::Increased, 0.0 },   // prev-value: never matches here
+        { &t10, Radar::ScanType::Exact,     0.0 },
+    };
+    std::vector<Orden::SlotMatches> out;
+    EXPECT("group prev-value slot never matches on first scan",
+           !Orden::MatchGroup(leaves, slots, out));
+    EXPECT("group prev-value slot0 collected zero leaves", out[0].leafIdx.empty());
+}
+
 int main() {
     std::printf("dll_helpers_test (Renge + Scharf + Radar)\n");
     std::printf("------------------------------------------\n");
@@ -2340,6 +2430,9 @@ int main() {
     Test_Orden_DuplicateValuesSDR();
     Test_Orden_MultiWidthMatch();
     Test_Orden_ConvergenceAndAssignment();
+    Test_Orden_OrderedFirstScan();
+    Test_Orden_BetweenFirstScan();
+    Test_Orden_PrevValueRejectedOnFirstScan();
 
     std::printf("------------------------------------------\n");
     std::printf("Pass: %d   Fail: %d\n", g_pass, g_fail);

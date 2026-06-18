@@ -1,3 +1,5 @@
+using CommunityToolkit.Mvvm.ComponentModel;
+
 namespace UE5DumpUI.Models;
 
 /// <summary>
@@ -174,17 +176,38 @@ public class ValueScanWindowResult
 // ===================== Multiple values group scan (build 1276) =====================
 
 /// <summary>
-/// One input value row of a "Group" scan (2..4 rows). The user supplies a value
-/// and, optionally, a numeric width scope. P1 fans out over numeric widths
-/// (NumericNoByte default / NumericAll) and matches each slot exactly; concrete
-/// per-slot widths + prev-value scan types are a P2 extension. Plain settable
-/// POCO — the editable DataGrid writes each cell back via the property setter.
+/// One input value row of a "Group" scan (2..4 rows). The user supplies a value,
+/// a per-slot width scope, and (P2) a per-slot scan type. The width scope fans
+/// out over numeric widths (NumericNoByte default / NumericAll). The scan type is
+/// a first-scan targeted predicate (Exact / Bigger / Smaller) on the first scan,
+/// and additionally a prev-value predicate (Changed / Unchanged / Increased /
+/// Decreased) on a refine — for those the value box is hidden. Observable so the
+/// editable grid's value-cell visibility reacts to the scan-type cell.
 /// </summary>
-public class GroupSlotInput
+public partial class GroupSlotInput : ObservableObject
 {
-    public ValueScanDataType DataType { get; set; } = ValueScanDataType.NumericNoByte;
-    public ValueScanType     ScanType { get; set; } = ValueScanType.Exact;  // P1: always Exact
-    public string            Value    { get; set; } = "";
+    [ObservableProperty] private ValueScanDataType _dataType = ValueScanDataType.NumericNoByte;
+    [ObservableProperty] private ValueScanType     _scanType = ValueScanType.Exact;
+    [ObservableProperty] private string            _value    = "";
+    [ObservableProperty] private string            _value2   = "";
+
+    /// <summary>False for prev-value predicates (Changed / Increased / Decreased /
+    /// Unchanged): they compare against the previous round, so no value is needed
+    /// and the grid hides the value box — mirroring single mode.</summary>
+    public bool RequiresValueInput => !IsPrevValueScanType(ScanType);
+
+    /// <summary>True only for Between — reveals the second (upper bound) value box.</summary>
+    public bool RequiresValue2Input => ScanType == ValueScanType.Between;
+
+    partial void OnScanTypeChanged(ValueScanType value)
+    {
+        OnPropertyChanged(nameof(RequiresValueInput));
+        OnPropertyChanged(nameof(RequiresValue2Input));
+    }
+
+    private static bool IsPrevValueScanType(ValueScanType st) =>
+        st is ValueScanType.Changed or ValueScanType.Unchanged
+           or ValueScanType.Increased or ValueScanType.Decreased;
 }
 
 /// <summary>
@@ -199,6 +222,8 @@ public class GroupSlotMatch
 {
     public int       SlotIndex      { get; set; }
     public string    Value          { get; set; } = "";   // the slot's target value
+    public string    ScanType       { get; set; } = "Exact";  // per-slot predicate (P2)
+    public string    Value2         { get; set; } = "";   // Between upper bound (P2)
     public string    FieldName      { get; set; } = "";   // representative match
     public int       FieldOffset    { get; set; }
     public string    FieldType      { get; set; } = "";
@@ -211,12 +236,26 @@ public class GroupSlotMatch
     public bool      Locked         { get; set; }
 
     public string OffsetHex => $"0x{FieldOffset:X}";
-    // Detail-row caption: "Str  24 → 0x20  (IntProperty)" once locked, else the
-    // target value + how many candidate offsets still match.
+
+    // Match criterion: the target value for a targeted slot, or a directional
+    // token for a prev-value slot (which carries no value).
+    private string Criterion => ScanType switch
+    {
+        "Increased" => "↑ increased",
+        "Decreased" => "↓ decreased",
+        "Changed"   => "≠ changed",
+        "Unchanged" => "= unchanged",
+        "Between"   => $"{Value}..{Value2}",
+        _           => Value,
+    };
+
+    // Detail-row caption: "Str  24 → 0x20  (IntProperty)" once locked (or
+    // "Str  ↑ increased → 0x20 ..." for a prev-value slot), else the criterion +
+    // how many candidate offsets still match.
     public string DisplayLabel =>
         Locked
-            ? $"{(string.IsNullOrEmpty(FieldName) ? "?" : FieldName)}  {Value} → {OffsetHex}  ({FieldType})"
-            : $"value {Value}: {MatchedOffsets.Count} candidate offset(s)";
+            ? $"{(string.IsNullOrEmpty(FieldName) ? "?" : FieldName)}  {Criterion} → {OffsetHex}  ({FieldType})"
+            : $"{Criterion}: {MatchedOffsets.Count} candidate offset(s)";
     public string LockLabel => Locked ? "🔒" : $"×{MatchedOffsets.Count}";
 }
 
@@ -238,11 +277,22 @@ public class GroupCandidate
     public string LocationLabel =>
         (!string.IsNullOrEmpty(DefiningClassName) && DefiningClassName != ClassName)
             ? $"{ClassName}  ({DefiningClassName})" : ClassName;
-    // Compact master-row summary: "Str=24, Def=10, Dex=14, Int=8".
+    // Compact master-row summary: "Str=24, Def=10, Dex=14, Int=8". A prev-value
+    // slot carries no target value, so fall back to its current leaf value.
     public string SlotSummary =>
         string.Join(", ", Slots.Select(s =>
-            $"{(string.IsNullOrEmpty(s.FieldName) ? "?" : s.FieldName)}={s.Value}"));
+            $"{(string.IsNullOrEmpty(s.FieldName) ? "?" : s.FieldName)}={(string.IsNullOrEmpty(s.Value) ? s.LeafValue : s.Value)}"));
     public bool AllLocked => Slots.Count > 0 && Slots.All(s => s.Locked);
+
+    // ---- Locked-offset table (P2) ----
+    // The actionable output once every slot has converged to a single offset:
+    // the class plus each value's byte offset, ready to rebuild a struct / pointer
+    // chain. (Export it from Live Walker — the panel only displays it here.)
+    public bool HasOffsetTable => AllLocked;
+    public string OffsetTable =>
+        string.Join(", ", Slots.Select(s =>
+            $"{(string.IsNullOrEmpty(s.FieldName) ? "?" : s.FieldName)}@{s.OffsetHex}"));
+    public string OffsetTableLabel => $"🔒 {ClassName} — {OffsetTable}";
 }
 
 /// <summary>Response from <c>begin_group_scan</c> — object-level candidates.</summary>

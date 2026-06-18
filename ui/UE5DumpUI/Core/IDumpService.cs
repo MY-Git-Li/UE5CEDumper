@@ -216,7 +216,7 @@ public interface IDumpService
 
     Task<GroupScanRefineResult> RefineGroupScanAsync(
         ulong sessionId,
-        IReadOnlyList<string> values,
+        IReadOnlyList<GroupSlotInput> slots,
         int pageSize = 1000,
         CancellationToken ct = default);
 

@@ -347,8 +347,21 @@
                 <ComboBox ItemsSource="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).GroupDataTypeOptions}"
                           SelectedItem="{Binding DataType}"
                           MinWidth="120" Padding="4,2" FontSize="12"/>
+                <!-- Per-slot predicate (P2). Prev-value types (Changed/Increased/...)
+                     compare against the previous round; the value box hides for them. -->
+                <ComboBox ItemsSource="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).GroupScanTypeOptions}"
+                          SelectedItem="{Binding ScanType}"
+                          ToolTip.Tip="{StaticResource str.Tip.VS.Group.ScanType}"
+                          MinWidth="100" Padding="4,2" FontSize="12"/>
                 <TextBox Text="{Binding Value}" PlaceholderText="value"
+                         IsVisible="{Binding RequiresValueInput}"
                          Width="160" Padding="4,2" FontSize="12"/>
+                <!-- Between upper bound — only shown when scan type is Between. -->
+                <TextBlock Text=".." Foreground="#888888" VerticalAlignment="Center"
+                           IsVisible="{Binding RequiresValue2Input}"/>
+                <TextBox Text="{Binding Value2}" PlaceholderText="to"
+                         IsVisible="{Binding RequiresValue2Input}"
+                         Width="120" Padding="4,2" FontSize="12"/>
               </StackPanel>
             </DataTemplate>
           </ItemsControl.ItemTemplate>
@@ -476,6 +489,18 @@
           <DataGrid.RowDetailsTemplate>
             <DataTemplate x:DataType="m:GroupCandidate">
               <Border Background="#252526" Padding="8,4" Margin="20,2,0,6">
+                <StackPanel>
+                  <!-- Locked-offset table (P2): the actionable summary once every
+                       slot has converged to a single offset — class + each value's
+                       byte offset. Export the chain itself from Live Walker. -->
+                  <Border IsVisible="{Binding HasOffsetTable}"
+                          Background="#16302A" BorderBrush="#2E5E50" BorderThickness="1"
+                          CornerRadius="3" Padding="6,3" Margin="0,0,0,6">
+                    <TextBlock Text="{Binding OffsetTableLabel}"
+                               Foreground="#4EC9B0" FontSize="12"
+                               FontFamily="Consolas, Menlo, monospace"
+                               TextWrapping="Wrap"/>
+                  </Border>
                 <ItemsControl ItemsSource="{Binding Slots}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="m:GroupSlotMatch">
@@ -518,6 +543,7 @@
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
+                </StackPanel>
               </Border>
             </DataTemplate>
           </DataGrid.RowDetailsTemplate>

@@ -1227,7 +1227,7 @@ public class ValueSearchTests
         public GroupScanRefineResult NextGroupRefineResult { get; set; } = new();
         public GroupScanWindowResult NextGroupWindowResult { get; set; } = new();
         public List<(List<GroupSlotInput> slots, bool gameOnly, int maxResults, bool deep)> GroupBegins { get; } = new();
-        public List<(ulong sessionId, List<string> values)> GroupRefines { get; } = new();
+        public List<(ulong sessionId, List<GroupSlotInput> slots)> GroupRefines { get; } = new();
         public List<ulong> GroupEnds { get; } = new();
 
         public override Task<GroupScanBeginResult> BeginGroupScanAsync(
@@ -1239,9 +1239,9 @@ public class ValueSearchTests
         }
 
         public override Task<GroupScanRefineResult> RefineGroupScanAsync(
-            ulong sessionId, IReadOnlyList<string> values, int pageSize = 1000, CancellationToken ct = default)
+            ulong sessionId, IReadOnlyList<GroupSlotInput> slots, int pageSize = 1000, CancellationToken ct = default)
         {
-            GroupRefines.Add((sessionId, values.ToList()));
+            GroupRefines.Add((sessionId, slots.ToList()));
             return Task.FromResult(NextGroupRefineResult);
         }
 
@@ -1346,6 +1346,7 @@ public class ValueSearchTests
         Assert.Equal("24",            values[0]!["value"]?.GetValue<string>());
         Assert.Equal("NumericNoByte", values[0]!["data_type"]?.GetValue<string>());
         Assert.Equal("NumericAll",    values[1]!["data_type"]?.GetValue<string>());
+        Assert.Equal("Exact",         values[0]!["scan_type"]?.GetValue<string>());  // per-slot predicate defaults to Exact
 
         Assert.Equal(9UL, res.SessionId);
         Assert.Equal(2, res.SlotCount);
@@ -1381,8 +1382,11 @@ public class ValueSearchTests
             };
         });
 
-        await svc.RefineGroupScanAsync(9UL, new[] { "24", "11" },
-            ct: TestContext.Current.CancellationToken);
+        await svc.RefineGroupScanAsync(9UL, new[]
+        {
+            new GroupSlotInput { Value = "24", ScanType = ValueScanType.Exact },
+            new GroupSlotInput { Value = "",   ScanType = ValueScanType.Increased },  // prev-value: no value
+        }, ct: TestContext.Current.CancellationToken);
 
         Assert.NotNull(captured);
         Assert.Equal("refine_group_scan", captured!["cmd"]?.GetValue<string>());
@@ -1390,7 +1394,8 @@ public class ValueSearchTests
         var values = Assert.IsType<JsonArray>(captured["values"]);
         Assert.Equal(2, values.Count);
         Assert.Equal("24", values[0]!["value"]?.GetValue<string>());
-        Assert.Equal("11", values[1]!["value"]?.GetValue<string>());
+        Assert.Equal("Exact", values[0]!["scan_type"]?.GetValue<string>());
+        Assert.Equal("Increased", values[1]!["scan_type"]?.GetValue<string>());  // per-slot predicate (P2)
     }
 
     [Fact]
@@ -1468,6 +1473,167 @@ public class ValueSearchTests
         await vm.GroupFirstScanCommand.ExecuteAsync(null);
 
         Assert.Empty(fake.GroupBegins);
+        Assert.False(string.IsNullOrEmpty(vm.ErrorMessage));
+    }
+
+    // ---- P2: per-slot prev-value/ordered scan types + locked-offset table ----
+
+    [Fact]
+    public void GroupSlotInput_RequiresValueInput_ReactsToScanType()
+    {
+        var slot = new GroupSlotInput();
+        Assert.True(slot.RequiresValueInput);                 // Exact (default) needs a value
+
+        var changes = new List<string>();
+        slot.PropertyChanged += (_, e) => { if (e.PropertyName != null) changes.Add(e.PropertyName); };
+
+        slot.ScanType = ValueScanType.Increased;              // prev-value: value box hides
+        Assert.False(slot.RequiresValueInput);
+        Assert.Contains(nameof(GroupSlotInput.RequiresValueInput), changes);
+
+        slot.ScanType = ValueScanType.Bigger;                 // targeted again: value box returns
+        Assert.True(slot.RequiresValueInput);
+    }
+
+    [Fact]
+    public async Task GroupFirstScan_RejectsPrevValueScanType()
+    {
+        var (vm, fake) = MakeVm();
+        vm.IsGroupMode = true;
+        vm.GroupInputs[0].Value = "24";
+        vm.GroupInputs[1].ScanType = ValueScanType.Increased;  // no baseline on a first scan
+
+        await vm.GroupFirstScanCommand.ExecuteAsync(null);
+
+        Assert.Empty(fake.GroupBegins);                        // never reached the DLL
+        Assert.False(string.IsNullOrEmpty(vm.ErrorMessage));
+    }
+
+    [Fact]
+    public async Task GroupNextScan_PassesPerSlotScanTypes()
+    {
+        var (vm, fake) = MakeVm();
+        vm.IsGroupMode = true;
+        vm.GroupInputs[0].Value = "24";
+        vm.GroupInputs[1].Value = "10";
+        fake.NextGroupBeginResult = new GroupScanBeginResult { SessionId = 5UL, Total = 1 };
+        await vm.GroupFirstScanCommand.ExecuteAsync(null);     // open a session
+        Assert.True(vm.HasGroupSession);
+
+        // Now refine: slot 0 "Increased" (no value), slot 1 still Exact 10.
+        vm.GroupInputs[0].ScanType = ValueScanType.Increased;
+        vm.GroupInputs[0].Value = "";
+        await vm.GroupNextScanCommand.ExecuteAsync(null);
+
+        var refine = Assert.Single(fake.GroupRefines);
+        Assert.Equal(5UL, refine.sessionId);
+        Assert.Equal(ValueScanType.Increased, refine.slots[0].ScanType);
+        Assert.Equal(ValueScanType.Exact,     refine.slots[1].ScanType);
+    }
+
+    [Fact]
+    public void GroupCandidate_OffsetTable_OnlyWhenAllLocked()
+    {
+        var gc = new GroupCandidate
+        {
+            ClassName = "BP_Stats_C",
+            Slots =
+            {
+                new GroupSlotMatch { FieldName = "Str", FieldOffset = 0x20, Locked = true },
+                new GroupSlotMatch { FieldName = "Def", FieldOffset = 0x24, Locked = false },
+            },
+        };
+        Assert.False(gc.HasOffsetTable);                       // a slot is still converging
+
+        gc.Slots[1].Locked = true;
+        Assert.True(gc.HasOffsetTable);
+        Assert.Equal("Str@0x20, Def@0x24", gc.OffsetTable);
+        Assert.Equal("🔒 BP_Stats_C — Str@0x20, Def@0x24", gc.OffsetTableLabel);
+    }
+
+    [Fact]
+    public void GroupSlotMatch_DisplayLabel_RendersPrevValueCriterion()
+    {
+        var targeted = new GroupSlotMatch
+        {
+            FieldName = "Str", FieldOffset = 0x20, FieldType = "IntProperty",
+            Value = "24", ScanType = "Exact", Locked = true,
+        };
+        Assert.Equal("Str  24 → 0x20  (IntProperty)", targeted.DisplayLabel);
+
+        var prev = new GroupSlotMatch
+        {
+            FieldName = "Hp", FieldOffset = 0x40, FieldType = "FloatProperty",
+            Value = "", ScanType = "Increased", Locked = true,
+        };
+        Assert.Equal("Hp  ↑ increased → 0x40  (FloatProperty)", prev.DisplayLabel);
+
+        var between = new GroupSlotMatch
+        {
+            FieldName = "Hp", FieldOffset = 0x40, FieldType = "IntProperty",
+            Value = "1", Value2 = "100", ScanType = "Between", Locked = true,
+        };
+        Assert.Equal("Hp  1..100 → 0x40  (IntProperty)", between.DisplayLabel);
+    }
+
+    [Fact]
+    public void GroupSlotInput_RequiresValue2Input_OnlyForBetween()
+    {
+        var slot = new GroupSlotInput();
+        Assert.False(slot.RequiresValue2Input);               // Exact: no upper bound
+
+        var changes = new List<string>();
+        slot.PropertyChanged += (_, e) => { if (e.PropertyName != null) changes.Add(e.PropertyName); };
+
+        slot.ScanType = ValueScanType.Between;
+        Assert.True(slot.RequiresValue2Input);                // Between reveals the 2nd box
+        Assert.True(slot.RequiresValueInput);                 // and still needs the low value
+        Assert.Contains(nameof(GroupSlotInput.RequiresValue2Input), changes);
+
+        slot.ScanType = ValueScanType.Exact;
+        Assert.False(slot.RequiresValue2Input);
+    }
+
+    [Fact]
+    public async Task BeginGroupScanAsync_SendsValue2_ForBetweenOnly()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"] = req["id"]?.GetValue<int>() ?? 0, ["ok"] = true,
+                ["session_id"] = 1UL, ["total"] = 0, ["candidates"] = new JsonArray(),
+            };
+        });
+        var slots = new List<GroupSlotInput>
+        {
+            new() { Value = "1", Value2 = "100", ScanType = ValueScanType.Between },
+            new() { Value = "5", ScanType = ValueScanType.Exact },
+        };
+
+        await svc.BeginGroupScanAsync(slots, ct: TestContext.Current.CancellationToken);
+
+        var values = Assert.IsType<JsonArray>(captured!["values"]);
+        Assert.Equal("Between", values[0]!["scan_type"]?.GetValue<string>());
+        Assert.Equal("100", values[0]!["value2"]?.GetValue<string>());
+        Assert.False(((JsonObject)values[1]!).ContainsKey("value2"), "value2 only for Between");
+    }
+
+    [Fact]
+    public async Task GroupFirstScan_RejectsBetweenMissingUpperValue()
+    {
+        var (vm, fake) = MakeVm();
+        vm.IsGroupMode = true;
+        vm.GroupInputs[0].ScanType = ValueScanType.Between;
+        vm.GroupInputs[0].Value = "1";        // low present, high (Value2) missing
+        vm.GroupInputs[1].Value = "10";
+
+        await vm.GroupFirstScanCommand.ExecuteAsync(null);
+
+        Assert.Empty(fake.GroupBegins);                       // validation blocked it
         Assert.False(string.IsNullOrEmpty(vm.ErrorMessage));
     }
 

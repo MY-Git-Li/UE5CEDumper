@@ -247,20 +247,23 @@ CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands f
 
 ### Multiple Values Group Scan (build 1276)
 
-Object-aware "group scan": find objects (blocks) that **simultaneously** hold ALL of N values (2..4) at **distinct** numeric-property offsets, in any order (the object/schema-aware analogue of Cheat Engine's Group Scan). Far more selective than N separate single-value scans — matching e.g. Str + Def + Dex narrows thousands of hits to a handful. A separate session family (`GroupSessionManager`, same 5-min idle expiry). P1: each slot is a `NumericNoByte`/`NumericAll` exact match over direct numeric properties (+ one-level StructProperty descent); numeric containers + GAS attribute-component cross-object reach are later phases.
+Object-aware "group scan": find objects (blocks) that **simultaneously** hold ALL of N values (2..4) at **distinct** numeric-property offsets, in any order (the object/schema-aware analogue of Cheat Engine's Group Scan). Far more selective than N separate single-value scans — matching e.g. Str + Def + Dex narrows thousands of hits to a handful. A separate session family (`GroupSessionManager`, same 5-min idle expiry). Each slot is a `NumericNoByte`/`NumericAll` match over direct numeric properties (+ one-level StructProperty descent; deep containers via `deep`). P2 (build 1296): each slot carries its own `scan_type` — see below. Numeric containers + GAS attribute-component cross-object reach are later phases.
 
 ```jsonc
 // First Scan — open a group session. `values` carries 2..4 slots; each slot's
 // data_type defaults to "NumericNoByte" (fans out over int16/int32/int64/float/
-// double widths) and may be "NumericAll" (adds 1-byte). scan_type is Exact (P1).
+// double widths) and may be "NumericAll" (adds 1-byte). scan_type (P2, default
+// "Exact") is a first-scan targeted predicate: Exact / Bigger / Smaller / Between.
+// Between carries an upper bound in `value2` (the bounded-unknown entry point —
+// e.g. an HP bar you know is in [1,100] but whose exact value you don't).
 {
   "id": 60, "cmd": "begin_group_scan",
   "game_only": true, "max_results": 50000, "page_size": 1000,
   "deep": false,                                        // optional (build 1283); see below
   "values": [
     { "value": "24", "data_type": "NumericNoByte" },
-    { "value": "10" },                                  // data_type optional -> NumericNoByte
-    { "value": "14" },
+    { "value": "10", "scan_type": "Bigger" },           // scan_type optional -> "Exact"
+    { "value": "1",  "scan_type": "Between", "value2": "100" },  // 1 <= leaf <= 100
     { "value": "8"  }
   ]
 }
@@ -273,9 +276,13 @@ Object-aware "group scan": find objects (blocks) that **simultaneously** hold AL
 
 // Next Scan — re-target every slot (count MUST match the first scan). Survivors
 // are objects where every slot still matches at a distinct offset; the per-slot
-// matched-offset list narrows toward a single "locked" offset.
+// matched-offset list narrows toward a single "locked" offset. P2: each slot's
+// scan_type may be a targeted type (Exact/Bigger/Smaller, with a new value, or
+// Between with value+value2) OR a prev-value type (Changed/Unchanged/Increased/
+// Decreased) — those compare each located leaf against ITS value from the previous
+// round and need no value. Substring predicates are rejected. (data_type is fixed.)
 { "id": 61, "cmd": "refine_group_scan", "session_id": 99,
-  "values": [ {"value":"24"}, {"value":"10"}, {"value":"15"}, {"value":"10"} ] }
+  "values": [ {"value":"24"}, {"scan_type":"Increased"}, {"value":"1","scan_type":"Between","value2":"100"}, {"scan_type":"Unchanged"} ] }
 
 // Window query (server-side filter/sort/page over the OBJECT-level rows).
 // sort_key: "" / "scan" / "class" / "instance" / "value" (first slot) / "offset" (first slot).
@@ -293,19 +300,19 @@ A group candidate is **object-level** with nested per-slot matches:
   "instance_addr": "7FF6..A0", "instance_index": 12345, "instance_name": "BP_PlayerStats_C_0",
   "class_name": "BP_PlayerStats_C", "defining_class_name": "...",
   "slots": [
-    { "slot_index": 0, "value": "24",
+    { "slot_index": 0, "value": "24", "scan_type": "Exact",
       "field_name": "Str", "field_offset": 32, "field_type": "IntProperty",
       "bool_field_mask": 255, "leaf_value": "24", "addr": "7FF6..C0",
       "matched_offsets": [32], "locked": true },      // locked once a single offset remains
-    { "slot_index": 1, "value": "10",
+    { "slot_index": 1, "value": "", "scan_type": "Increased",
       "field_name": "Def", "field_offset": 36, "field_type": "IntProperty",
-      "leaf_value": "10", "addr": "7FF6..C4",
+      "leaf_value": "12", "addr": "7FF6..C4",          // leaf_value = current bytes (12, was 10)
       "matched_offsets": [36, 64], "locked": false }  // still converging
   ]
 }
 ```
 
-`addr` / `field_offset` / `field_name` on each slot drive the same Live Walker / Locate-in-GWorld / Copy handoffs as a single-value candidate; the object's `class_name` drives Instance Finder / Class Pivot.
+`scan_type` echoes each slot's stored predicate (`Radar::NameOf(ScanType)`); a prev-value slot carries an empty `value` and its `leaf_value` is the current bytes; a Between slot additionally echoes `value2` (the upper bound). `addr` / `field_offset` / `field_name` on each slot drive the same Live Walker / Locate-in-GWorld / Copy handoffs as a single-value candidate; the object's `class_name` drives Instance Finder / Class Pivot. Once every slot's `locked` is true the UI shows the **locked-offset table** (class + each value's offset).
 
 ### Snapshot Capture (experimental — Phase A)
 

@@ -25,7 +25,10 @@
 // a Leaf carries its resolved Radar::DataType width, and a slot's target is a
 // Radar::NumericTargetSet (the same pre-parsed "one buffer per fitting width"
 // structure BuildNumericTargets produces), so "Str = 24" transparently matches
-// an Int16 / Int32 / Int64 / Float / Double leaf.
+// an Int16 / Int32 / Int64 / Float / Double leaf. P2: a slot also carries a
+// Radar::ScanType predicate (Exact / Bigger / Smaller on the first scan) routed
+// through Radar::ComparePredicate; prev-value predicates are handled by the
+// caller's refine, not here (LeafSatisfiesSlot rejects them — no baseline).
 //
 // Dependency-free apart from Radar.h (itself std-only — see dll/CMakeLists.txt:
 // "Radar.cpp is std-only"), so it unit-tests with synthetic leaves and NO live
@@ -62,11 +65,21 @@ struct Leaf {
 
 // One slot's target: the pre-parsed multi-width target set for the user's value
 // (built once per slot via Radar::BuildNumericTargets for a meta type, or a
-// single-entry set for a concrete width). A leaf satisfies the slot when the
-// set has an entry for the leaf's width AND the bytes compare equal. (P1 is
-// exact-match only; P2 adds prev-value scan types here.)
+// single-entry set for a concrete width) plus a per-slot predicate.
+//
+// P2: `st` is the slot's first-scan predicate (Exact / Bigger / Smaller /
+// Between — a targeted compare against `targets`, with `targets2` the upper
+// bound for Between). Prev-value predicates (Changed / Increased / Decreased /
+// Unchanged) compare against a per-leaf baseline that only exists AFTER a
+// refine, so they are honoured by the refine path (Aura::RefineGroupCandidates),
+// never by the first-scan MatchGroup below — LeafSatisfiesSlot rejects them so a
+// prev-value slot can never spuriously match on the first scan. `tolerance` is
+// the float +- band (0 = exact / strict).
 struct SlotTarget {
-    const Radar::NumericTargetSet* targets = nullptr;
+    const Radar::NumericTargetSet* targets   = nullptr;
+    Radar::ScanType                st        = Radar::ScanType::Exact;
+    double                         tolerance = 0.0;
+    const Radar::NumericTargetSet* targets2  = nullptr;  // Between upper bound
 };
 
 // Per-slot list of leaf indices (into the Leaf vector) that currently satisfy
@@ -77,14 +90,25 @@ struct SlotMatches {
     std::vector<int> leafIdx;
 };
 
-// True when `leaf` satisfies `slot` under exact-match semantics.
+// True when `leaf` satisfies `slot` under the slot's first-scan predicate
+// (Exact / Bigger / Smaller / Between). Prev-value predicates have no baseline
+// on the first scan, so they never match here (the refine path handles them).
+// The width-fit gate is unchanged: a value that can't be represented at the
+// leaf's width is skipped. Exact reduces to byte-equality via ComparePredicate;
+// Between additionally needs the upper bound (`targets2`) to fit the width.
 inline bool LeafSatisfiesSlot(const Leaf& leaf, const SlotTarget& slot) {
     if (!slot.targets) return false;
+    if (Radar::IsPrevValueScanType(slot.st)) return false;  // refine-only; no first-scan baseline
     const uint8_t* tb = slot.targets->Find(leaf.width);
     if (!tb) return false;                                  // value can't fit this width
     const size_t n = Radar::SizeOf(leaf.width);
     if (n == 0 || n > sizeof(leaf.bytes)) return false;     // non-fixed-width (string/etc.)
-    return std::memcmp(leaf.bytes, tb, n) == 0;
+    const uint8_t* tb2 = nullptr;
+    if (slot.st == Radar::ScanType::Between) {
+        tb2 = slot.targets2 ? slot.targets2->Find(leaf.width) : nullptr;
+        if (!tb2) return false;                             // upper bound can't fit this width
+    }
+    return Radar::ComparePredicate(leaf.width, slot.st, leaf.bytes, tb, tb2, slot.tolerance);
 }
 
 // Internal: Kuhn's augmenting path — try to assign `slot` a distinct leaf,

@@ -6598,7 +6598,14 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
 
     std::vector<Orden::SlotTarget> ordenSlots;
     ordenSlots.reserve(nSlots);
-    for (const auto& sp : slots) ordenSlots.push_back(Orden::SlotTarget{ &sp.targets });
+    for (const auto& sp : slots) {
+        Orden::SlotTarget t;
+        t.targets   = &sp.targets;
+        t.st        = sp.st;
+        t.tolerance = sp.tolerance;
+        t.targets2  = &sp.targets2;   // Between upper bound (unused for other types)
+        ordenSlots.push_back(t);
+    }
 
     const int32_t total = GetCount();
     constexpr size_t kLeafCap        = 4096;   // object-block leaf cap
@@ -6804,6 +6811,13 @@ ValueScanStats RefineGroupCandidates(
         if (gc.instanceIdx >= instances.size()) continue;   // defensive
         bool alive = true;
         for (size_t s = 0; s < nSlots && alive; ++s) {
+            // P2: per-slot predicate. Prev-value types (Changed/Increased/...)
+            // compare each leaf's re-read bytes against its own stored prevValue;
+            // targeted types (Exact/Bigger/Smaller) against the slot's new target
+            // for that leaf's width. prevValue is updated to the latest bytes on
+            // every survival so the next refine compares against "what we saw".
+            const Radar::ScanType st = slots[s].st;
+            const bool usePrev = Radar::IsPrevValueScanType(st);
             std::vector<Radar::GroupSlotMatch> keep;
             keep.reserve(gc.slotMatches[s].size());
             for (auto& sm : gc.slotMatches[s]) {
@@ -6815,8 +6829,14 @@ ValueScanStats RefineGroupCandidates(
                 if (sz == 0 || sz > 8) continue;
                 uint8_t buf[8] = {};
                 if (!Macht::ReadBytesSafe(sm.leafAddr, buf, sz)) continue;
-                const uint8_t* tb = slots[s].targets.Find(width);
-                if (!tb || std::memcmp(buf, tb, sz) != 0) continue;   // P1: exact per slot
+                const uint8_t* cmp = usePrev ? sm.prevValue : slots[s].targets.Find(width);
+                if (!cmp) continue;                          // value can't fit this width
+                const uint8_t* cmp2 = nullptr;
+                if (st == Radar::ScanType::Between) {
+                    cmp2 = slots[s].targets2.Find(width);
+                    if (!cmp2) continue;                     // upper bound can't fit this width
+                }
+                if (!Radar::ComparePredicate(width, st, buf, cmp, cmp2, slots[s].tolerance)) continue;
                 std::memcpy(sm.prevValue, buf, sz);
                 keep.push_back(sm);
             }
