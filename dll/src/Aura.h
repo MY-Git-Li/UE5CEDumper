@@ -766,7 +766,12 @@ ValueScanResult ScanForValue(
     // to per-field reads on a faulting batch read or when the class isn't a good
     // batch candidate. Exposed via the pipe `batch_read` field + the Value
     // Search "Batch read" toggle. Strings / container data are always direct.
-    bool                batchRead     = true);
+    bool                batchRead     = true,
+    // Opt-in (default off): force the recursive deep-container leaf pass for EVERY
+    // class, not only those whose struct-array elements own containers (the auto
+    // `needsDeepWalk` heuristic). Reaches values buried in deeply-nested containers
+    // the heuristic misses. Heavier per object — exposed via the "Deep" toggle.
+    bool                deep          = false);
 
 // Refine an existing candidate vector in place: re-read each
 // candidate's bytes (or string, for FString/FName/FText DataTypes),
@@ -793,6 +798,54 @@ ValueScanStats RefineCandidates(
     bool                                         caseSensitive = false,
     const Radar::NumericTargetSet*           multiTargets  = nullptr,
     const Radar::NumericTargetSet*           multiTargets2 = nullptr);
+
+// ------------------------------------------------------------------
+// Multiple values group scan (build 1276). Object-aware "group scan": find
+// objects (blocks) that SIMULTANEOUSLY hold ALL of N user values at DISTINCT
+// numeric-property offsets, in any order. The pure SDR match is
+// Orden::MatchGroup; this layer enumerates each object's numeric leaves
+// (direct fields + depth-capped StructProperty descent, mirroring
+// ScanForValue's reach — numeric containers are P3) and persists per-slot
+// convergence lists so a refine can re-read the located offsets.
+//
+// Runs single-threaded (mirrors CaptureSnapshotChunk): group result sets are
+// small by construction (the AND across slots is highly selective), so the
+// parallel scan machinery isn't warranted for P1. Honors Tot::Requested() + a
+// 15s deadline + maxResults.
+struct GroupScanResult {
+    std::vector<Radar::GroupCandidate>  candidates;
+    std::vector<Radar::FieldDescriptor> descriptors;  // shared via GroupSlotMatch::descriptorIdx
+    std::vector<Radar::InstanceRecord>  instances;     // shared via GroupCandidate::instanceIdx
+    ValueScanStats                      stats;
+};
+
+// First scan. `slots` carry the pre-parsed per-slot targets (caller enforces
+// the 2..4 count). A block becomes a candidate only when Orden::MatchGroup
+// finds a System of Distinct Representatives across all slots. The leaf
+// enumeration scope is derived from the slots (1-byte fields are read only
+// when a slot wants them) so it stays lean by default.
+// `deep` (opt-in, default off): additionally treat each numeric CONTAINER as its
+// own block — a numeric TArray/TSet's elements, or each struct-array/map element's
+// inner numeric fields — via the shared recursive WalkContainerLeaves walker, so a
+// group hidden inside a deeply-nested container (e.g. SaveSlotList[1].MsTuneData.
+// MsTunes[0].WeaponTuneList[0].Tunes[N]) is found. Matches WITHIN one array/element
+// (the user's "array as a block" rule). Bounded by the same depth/element caps as
+// snapshot capture; only runs for objects that actually own containers.
+GroupScanResult ScanForValueGroup(
+    const std::vector<Radar::SlotSpec>& slots,
+    bool                                gameOnly,
+    int32_t                             maxResults = 100000,
+    bool                                deep       = false);
+
+// Next scan (P1: exact per slot). Re-reads each candidate's per-slot
+// convergence offsets, keeps those still equal to the slot's NEW target,
+// updates prevValue, and drops the candidate when any slot empties OR no
+// distinct cross-slot assignment survives. `slots` carry the NEW targets.
+ValueScanStats RefineGroupCandidates(
+    const std::vector<Radar::SlotSpec>&        slots,
+    std::vector<Radar::GroupCandidate>&        candidates,
+    const std::vector<Radar::FieldDescriptor>& descriptors,
+    const std::vector<Radar::InstanceRecord>&  instances);
 
 // ------------------------------------------------------------------
 // Snapshot capture (experimental — Phase A1a). A type-agnostic, streamed

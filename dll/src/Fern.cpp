@@ -228,6 +228,71 @@ json CandidateToJson(const Radar::Candidate& c,
     return item;
 }
 
+// Build the wire JSON for one group-scan candidate (build 1276). A group hit is
+// OBJECT-level: one owning UObject + a nested `slots` array. Each slot carries
+// the user's target value, its converging matched offsets, a `locked` flag (the
+// field is identified once a single offset remains), and — for the
+// representative (first) match — the resolved field name / offset / type / leaf
+// value / leaf address so the UI's per-slot row can drive the same handoffs
+// (Open in Live Walker / Locate in GWorld / Copy) as a single-value candidate.
+json GroupCandidateToJson(const Radar::GroupCandidate& gc,
+                          const std::vector<Radar::SlotSpec>&        slots,
+                          const std::vector<Radar::FieldDescriptor>& descriptors,
+                          const std::vector<Radar::InstanceRecord>&  instances) {
+    const Radar::InstanceRecord& inst = instances[gc.instanceIdx];
+
+    json item;
+    item["instance_addr"]  = Renge::AddrToStr(inst.instanceAddr);
+    item["instance_index"] = inst.instanceIndex;
+    item["instance_name"]  = inst.instanceName;
+
+    // All slot matches of one candidate share the owning object's class.
+    std::string className, definingClass;
+    for (const auto& sl : gc.slotMatches) {
+        if (!sl.empty()) {
+            className     = descriptors[sl[0].descriptorIdx].className;
+            definingClass = descriptors[sl[0].descriptorIdx].definingClassName;
+            break;
+        }
+    }
+    item["class_name"]          = className;
+    item["defining_class_name"] = definingClass;
+
+    json slotsJson = json::array();
+    for (size_t s = 0; s < gc.slotMatches.size(); ++s) {
+        const Radar::SlotSpec& spec = slots[s];
+        const auto& matches = gc.slotMatches[s];
+
+        json sj;
+        sj["slot_index"] = static_cast<int>(s);
+        sj["value"]      = spec.value;
+
+        json offsets = json::array();
+        for (const auto& m : matches) offsets.push_back(m.offset);
+        sj["matched_offsets"] = offsets;
+        sj["locked"]          = (matches.size() == 1);
+
+        if (!matches.empty()) {
+            const Radar::GroupSlotMatch& m0 = matches[0];
+            const Radar::FieldDescriptor& d = descriptors[m0.descriptorIdx];
+            sj["field_name"]      = Radar::FieldDisplayName(d, m0.elementIndex);
+            sj["field_offset"]    = m0.offset;
+            sj["field_type"]      = d.fieldType;
+            sj["bool_field_mask"] = d.boolFieldMask;
+            // Absolute leaf address (direct: instance+offset; deep: container element).
+            sj["addr"]            = Renge::AddrToStr(m0.leafAddr);
+            Radar::Candidate tmp;
+            std::memcpy(tmp.prevValue, m0.prevValue, sizeof(tmp.prevValue));
+            tmp.descriptorIdx = m0.descriptorIdx;
+            tmp.elementIndex  = m0.elementIndex;
+            sj["leaf_value"]  = Radar::FormatCandidateValue(tmp, spec.dt, d);
+        }
+        slotsJson.push_back(std::move(sj));
+    }
+    item["slots"] = slotsJson;
+    return item;
+}
+
 }  // namespace
 
 // ScanProgress — global progress state updated by UE5_Init(), read by scan_status
@@ -304,6 +369,7 @@ void Fern::Stop() {
 
     // No handler thread is running now — free every remaining value-scan session.
     Radar::SessionManager::Instance().DropAll();
+    Radar::GroupSessionManager::Instance().DropAll();
 
     m_clientConnected = false;
     LOG_INFO("PipeServer: Stopped");
@@ -393,6 +459,7 @@ void Fern::AcceptLoop() {
         // pools) lingers in the game process until the next begin_value_scan
         // triggers lazy idle-expiry — exactly the "UI closed mid-scan" leak.
         Radar::SessionManager::Instance().DropAll();
+        Radar::GroupSessionManager::Instance().DropAll();
         {
             std::lock_guard<std::mutex> lock(m_pipeMutex);
             // Only close if Stop() hasn't already closed it
@@ -1949,6 +2016,9 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             // Per-object batch body read. Default true (fewer SEH reads + better
             // locality). UI sends batch_read=false to force one read per field.
             bool batchRead = request.value("batch_read", true);
+            // Opt-in deep-container pass (default off): reach values buried in
+            // deeply-nested containers the auto heuristic doesn't flag.
+            bool deep = request.value("deep", false);
 
             Radar::DataType dt;
             if (!Radar::TryParseDataType(dtStr, dt)) {
@@ -2026,7 +2096,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             auto scanResult = Aura::ScanForValue(
                 dt, st, targetBytes, target2Ptr, gameOnly, maxResults,
                 tolerance, targetString, caseSensitive, multiPtr, multiPtr2,
-                parallel, batchRead);
+                parallel, batchRead, deep);
 
             uint64_t sessionId = Radar::SessionManager::Instance().Begin(
                 dt, std::move(scanResult.candidates),
@@ -2268,6 +2338,205 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             data["data_type"]      = dtName;
             data["total"]          = totalCount;     // full session size
             data["filtered_total"] = filteredCount;  // matches after filter
+            data["offset"]         = offset;
+            data["count"]          = static_cast<int>(candidates.size());
+            data["candidates"]     = candidates;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // === begin_group_scan: Multiple values group scan (build 1276). Find
+        // objects that SIMULTANEOUSLY hold ALL of N user values (2..4) at
+        // DISTINCT numeric-property offsets, in any order. P1: each slot is a
+        // NumericNoByte/NumericAll exact match. Returns a session_id + first page
+        // of OBJECT-level candidates (nested per-slot matches). ===
+        if (cmd == Renge::CMD_BEGIN_GROUP_SCAN) {
+            bool gameOnly  = request.value("game_only", true);
+            int  maxResults = request.value("max_results", 50000);
+            int  pageSize   = request.value("page_size", 1000);
+            // Opt-in deep mode: also treat each numeric container / struct-array
+            // element as its own block so a group hidden in a deeply-nested array
+            // (e.g. ...WeaponTuneList[0].Tunes[N]) is found.
+            bool deep = request.value("deep", false);
+            if (pageSize < 0) pageSize = 0;
+
+            if (!request.contains("values") || !request["values"].is_array()) {
+                return Renge::MakeError(id, "begin_group_scan requires a 'values' array").dump();
+            }
+            const auto& valuesJson = request["values"];
+            if (valuesJson.size() < 2 || valuesJson.size() > 4) {
+                return Renge::MakeError(id, "group scan requires 2..4 values").dump();
+            }
+
+            std::vector<Radar::SlotSpec> slots;
+            slots.reserve(valuesJson.size());
+            for (const auto& vj : valuesJson) {
+                std::string dtStr  = vj.value("data_type", "NumericNoByte");
+                std::string valStr = vj.value("value", "");
+                Radar::DataType dt;
+                if (!Radar::TryParseDataType(dtStr, dt)) {
+                    return Renge::MakeError(id, "Unknown data_type in values: " + dtStr).dump();
+                }
+                // P1: slots fan out over numeric widths (NumericNoByte default /
+                // NumericAll). Concrete per-slot widths are a P2 extension.
+                if (!Radar::IsMultiNumericDataType(dt)) {
+                    return Renge::MakeError(id, "group slot data_type must be NumericNoByte or NumericAll: " + dtStr).dump();
+                }
+                Radar::SlotSpec sp;
+                if (!Radar::BuildNumericTargets(dt, valStr, sp.targets)) {
+                    return Renge::MakeError(id, "Invalid group value '" + valStr + "' (fits no numeric width)").dump();
+                }
+                sp.dt    = dt;
+                sp.st    = Radar::ScanType::Exact;
+                sp.value = valStr;
+                slots.push_back(std::move(sp));
+            }
+            const int slotCount = static_cast<int>(slots.size());
+
+            auto scanResult = Aura::ScanForValueGroup(slots, gameOnly, maxResults, deep);
+
+            uint64_t sessionId = Radar::GroupSessionManager::Instance().Begin(
+                std::move(slots), std::move(scanResult.candidates),
+                std::move(scanResult.descriptors), std::move(scanResult.instances));
+
+            // Like begin_value_scan: the DLL session owns the full set; return
+            // `total` + only the first page (scan order) — the UI pages/filters/
+            // sorts via query_group_candidates.
+            json candidates = json::array();
+            int totalCount = 0;
+            Radar::GroupSessionManager::Instance().QueryWith(
+                sessionId, "", Radar::SortKey::ScanOrder, false,
+                [&](const Radar::GroupSession& sess, const std::vector<uint32_t>& order) {
+                    totalCount = static_cast<int>(sess.candidates.size());
+                    const int n = (std::min)(pageSize, static_cast<int>(order.size()));
+                    for (int i = 0; i < n; ++i)
+                        candidates.push_back(GroupCandidateToJson(
+                            sess.candidates[order[i]], sess.slots, sess.descriptors, sess.instances));
+                });
+
+            json data;
+            data["session_id"]      = sessionId;
+            data["total"]           = totalCount;
+            data["page_size"]       = pageSize;
+            data["slot_count"]      = slotCount;
+            data["scanned_classes"] = scanResult.stats.scannedClasses;
+            data["scanned_objects"] = scanResult.stats.scannedObjects;
+            data["duration_ms"]     = static_cast<int64_t>(scanResult.stats.durationMs);
+            data["deadline_hit"]    = scanResult.stats.deadlineHit;
+            data["candidates"]      = candidates;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // === refine_group_scan: Next Scan for a group session. New `values`
+        // (same count as the first scan) replace each slot's target; survivors
+        // are objects where every slot still matches at a distinct offset
+        // (convergence narrows the located offsets toward a lock). ===
+        if (cmd == Renge::CMD_REFINE_GROUP_SCAN) {
+            uint64_t sessionId = request.value("session_id", 0ULL);
+            if (sessionId == 0) {
+                return Renge::MakeError(id, "Missing or zero session_id").dump();
+            }
+            if (!request.contains("values") || !request["values"].is_array()) {
+                return Renge::MakeError(id, "refine_group_scan requires a 'values' array").dump();
+            }
+            const auto& valuesJson = request["values"];
+            int pageSize = request.value("page_size", 1000);
+            if (pageSize < 0) pageSize = 0;
+
+            json candidates = json::array();
+            int  totalCount = 0;
+            bool countMismatch = false, parseFailed = false;
+            Aura::ValueScanStats stats;
+            bool found = Radar::GroupSessionManager::Instance().RefineWith(sessionId,
+                [&](Radar::GroupSession& sess) {
+                    if (valuesJson.size() != sess.slots.size()) { countMismatch = true; return; }
+                    // Re-target each slot from the new values (dt is fixed by the first scan).
+                    for (size_t s = 0; s < sess.slots.size(); ++s) {
+                        std::string valStr = valuesJson[s].value("value", "");
+                        Radar::NumericTargetSet nt;
+                        if (!Radar::BuildNumericTargets(sess.slots[s].dt, valStr, nt)) {
+                            parseFailed = true;
+                            return;
+                        }
+                        sess.slots[s].targets = std::move(nt);
+                        sess.slots[s].value   = valStr;
+                    }
+                    stats = Aura::RefineGroupCandidates(sess.slots, sess.candidates,
+                                                        sess.descriptors, sess.instances);
+                    totalCount = static_cast<int>(sess.candidates.size());
+                    const int n = (std::min)(pageSize, totalCount);
+                    for (int i = 0; i < n; ++i)
+                        candidates.push_back(GroupCandidateToJson(
+                            sess.candidates[i], sess.slots, sess.descriptors, sess.instances));
+                });
+
+            if (!found)         return Renge::MakeError(id, "session_not_found").dump();
+            if (countMismatch)  return Renge::MakeError(id, "refine value count must match the first scan").dump();
+            if (parseFailed)    return Renge::MakeError(id, "Invalid refine value (fits no numeric width)").dump();
+
+            json data;
+            data["session_id"]  = sessionId;
+            data["total"]       = totalCount;
+            data["page_size"]   = pageSize;
+            data["duration_ms"] = static_cast<int64_t>(stats.durationMs);
+            data["candidates"]  = candidates;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // === end_group_scan: drop a group-scan session (idempotent). ===
+        if (cmd == Renge::CMD_END_GROUP_SCAN) {
+            uint64_t sessionId = request.value("session_id", 0ULL);
+            if (sessionId == 0) {
+                return Renge::MakeError(id, "Missing or zero session_id").dump();
+            }
+            bool ended = Radar::GroupSessionManager::Instance().End(sessionId);
+            json data;
+            data["session_id"] = sessionId;
+            data["ended"]      = ended;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // === query_group_candidates: server-side window over a group-scan
+        // session (filter + sort + page over OBJECT-level rows). ===
+        if (cmd == Renge::CMD_QUERY_GROUP_CANDIDATES) {
+            uint64_t sessionId = request.value("session_id", 0ULL);
+            if (sessionId == 0) {
+                return Renge::MakeError(id, "Missing or zero session_id").dump();
+            }
+            int offset = request.value("offset", 0);
+            int limit  = request.value("limit", 1000);
+            std::string filter     = request.value("filter", "");
+            std::string sortKeyStr = request.value("sort_key", "");
+            bool sortDesc = request.value("sort_desc", false);
+            if (offset < 0) offset = 0;
+            if (limit  < 0) limit  = 0;
+
+            Radar::SortKey sortKey;
+            if (!Radar::TryParseSortKey(sortKeyStr, sortKey)) {
+                return Renge::MakeError(id, "Unknown sort_key: " + sortKeyStr).dump();
+            }
+
+            json candidates = json::array();
+            int totalCount    = 0;
+            int filteredCount = 0;
+            bool found = Radar::GroupSessionManager::Instance().QueryWith(
+                sessionId, filter, sortKey, sortDesc,
+                [&](const Radar::GroupSession& sess, const std::vector<uint32_t>& order) {
+                    totalCount    = static_cast<int>(sess.candidates.size());
+                    filteredCount = static_cast<int>(order.size());
+                    const int begin = (std::min)(offset, filteredCount);
+                    const int end   = (std::min)(offset + limit, filteredCount);
+                    for (int i = begin; i < end; ++i)
+                        candidates.push_back(GroupCandidateToJson(
+                            sess.candidates[order[i]], sess.slots, sess.descriptors, sess.instances));
+                });
+            if (!found) {
+                return Renge::MakeError(id, "session_not_found").dump();
+            }
+
+            json data;
+            data["session_id"]     = sessionId;
+            data["total"]          = totalCount;
+            data["filtered_total"] = filteredCount;
             data["offset"]         = offset;
             data["count"]          = static_cast<int>(candidates.size());
             data["candidates"]     = candidates;

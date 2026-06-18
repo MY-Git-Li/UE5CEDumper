@@ -1043,4 +1043,138 @@ SessionManager::Stats SessionManager::GetStats() {
     return s;
 }
 
+// --- Group scan: ordered view + GroupSessionManager (build 1276) ---
+
+std::vector<uint32_t> BuildGroupOrderedView(
+    const std::vector<GroupCandidate>&  candidates,
+    const std::vector<SlotSpec>&        slots,
+    const std::vector<FieldDescriptor>& descriptors,
+    const std::vector<InstanceRecord>&  instances,
+    const std::string& filter, SortKey sortKey, bool sortDesc) {
+
+    const std::string needle = ToLower(filter);
+
+    // Render a slot match's value exactly as the wire does (resolves the field's
+    // own width for a NumericNoByte/NumericAll slot via descriptor.fieldType).
+    auto slotValue = [&](const GroupSlotMatch& sm, const SlotSpec& spec) -> std::string {
+        const FieldDescriptor& d = descriptors[sm.descriptorIdx];
+        Candidate tmp;
+        std::memcpy(tmp.prevValue, sm.prevValue, sizeof(tmp.prevValue));
+        tmp.descriptorIdx = sm.descriptorIdx;
+        tmp.elementIndex  = sm.elementIndex;
+        return FormatCandidateValue(tmp, spec.dt, d);
+    };
+
+    auto matchesFilter = [&](const GroupCandidate& gc) -> bool {
+        if (needle.empty()) return true;
+        if (ContainsCI(instances[gc.instanceIdx].instanceName, needle)) return true;
+        for (size_t s = 0; s < gc.slotMatches.size(); ++s) {
+            const SlotSpec& spec = slots[s];  // slotMatches.size() == slots.size() invariant
+            for (const auto& sm : gc.slotMatches[s]) {
+                const FieldDescriptor& d = descriptors[sm.descriptorIdx];
+                if (ContainsCI(d.className, needle)) return true;
+                if (ContainsCI(d.definingClassName, needle)) return true;
+                if (ContainsCI(d.fieldName, needle)) return true;
+                if (ContainsCI(slotValue(sm, spec), needle)) return true;
+            }
+        }
+        return false;
+    };
+
+    std::vector<uint32_t> idx;
+    idx.reserve(candidates.size());
+    for (uint32_t i = 0; i < candidates.size(); ++i)
+        if (matchesFilter(candidates[i])) idx.push_back(i);
+
+    if (sortKey == SortKey::ScanOrder) {
+        if (sortDesc) std::reverse(idx.begin(), idx.end());
+        return idx;
+    }
+
+    // Object-level key extractors (use the first non-empty slot / slot 0).
+    auto firstMatch = [&](const GroupCandidate& gc) -> const GroupSlotMatch* {
+        for (const auto& sl : gc.slotMatches)
+            if (!sl.empty()) return &sl[0];
+        return nullptr;
+    };
+    auto classOf = [&](const GroupCandidate& gc) -> std::string {
+        const GroupSlotMatch* m = firstMatch(gc);
+        return m ? descriptors[m->descriptorIdx].className : std::string();
+    };
+    auto slot0Offset = [&](const GroupCandidate& gc) -> int32_t {
+        return (!gc.slotMatches.empty() && !gc.slotMatches[0].empty())
+                 ? gc.slotMatches[0][0].offset : 0;
+    };
+    auto slot0Num = [&](const GroupCandidate& gc) -> double {
+        if (gc.slotMatches.empty() || gc.slotMatches[0].empty()) return 0.0;
+        const GroupSlotMatch& sm = gc.slotMatches[0][0];
+        DataType m = slots.empty() ? DataType::Int32 : slots[0].dt;
+        if (IsMultiNumericDataType(m))
+            TryDataTypeFromPropertyTypeName(descriptors[sm.descriptorIdx].fieldType, m);
+        return DecodeNumericToDouble(m, sm.prevValue);
+    };
+
+    auto less = [&](uint32_t a, uint32_t b) -> bool {
+        const GroupCandidate& ca = candidates[a];
+        const GroupCandidate& cb = candidates[b];
+        switch (sortKey) {
+            case SortKey::ClassName:     return classOf(ca) < classOf(cb);
+            case SortKey::InstanceName:  return instances[ca.instanceIdx].instanceName
+                                              < instances[cb.instanceIdx].instanceName;
+            case SortKey::InstanceIndex: return instances[ca.instanceIdx].instanceIndex
+                                              < instances[cb.instanceIdx].instanceIndex;
+            case SortKey::Offset:        return slot0Offset(ca) < slot0Offset(cb);
+            case SortKey::Value:         return slot0Num(ca) < slot0Num(cb);
+            default:                     return false;  // unsupported key -> scan order
+        }
+    };
+    std::stable_sort(idx.begin(), idx.end(), [&](uint32_t a, uint32_t b) {
+        return sortDesc ? less(b, a) : less(a, b);
+    });
+    return idx;
+}
+
+GroupSessionManager& GroupSessionManager::Instance() {
+    // Intentionally leaked singleton — same reasoning as SessionManager::Instance.
+    static GroupSessionManager* inst = new GroupSessionManager();
+    return *inst;
+}
+
+uint64_t GroupSessionManager::Begin(std::vector<SlotSpec>        slots,
+                                    std::vector<GroupCandidate>  candidates,
+                                    std::vector<FieldDescriptor> descriptors,
+                                    std::vector<InstanceRecord>  instances) {
+    ExpireOldSessions();
+    std::lock_guard<std::mutex> lk(mu_);
+    uint64_t id = nextId_++;
+    auto sess = std::make_unique<GroupSession>();
+    sess->id          = id;
+    sess->slots       = std::move(slots);
+    sess->candidates  = std::move(candidates);
+    sess->descriptors = std::move(descriptors);
+    sess->instances   = std::move(instances);
+    sess->lastUse     = std::chrono::steady_clock::now();
+    sessions_.emplace(id, std::move(sess));
+    return id;
+}
+
+bool GroupSessionManager::End(uint64_t sessionId) {
+    std::lock_guard<std::mutex> lk(mu_);
+    return sessions_.erase(sessionId) > 0;
+}
+
+void GroupSessionManager::ExpireOldSessions() {
+    auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lk(mu_);
+    for (auto it = sessions_.begin(); it != sessions_.end(); ) {
+        if (now - it->second->lastUse > kExpirySeconds) it = sessions_.erase(it);
+        else ++it;
+    }
+}
+
+void GroupSessionManager::DropAll() {
+    std::lock_guard<std::mutex> lk(mu_);
+    sessions_.clear();
+}
+
 }  // namespace Radar

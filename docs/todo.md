@@ -40,6 +40,22 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
+## Multiple Values Group Scan — remaining phases (P1 shipped build 1276)
+
+P1 (object-aware group scan, direct numeric leaves + one-level struct descent, exact-per-slot, mode toggle + master-detail UI) shipped builds 1276-1278 — new `Orden` SDR matcher. Follow-ups, in order:
+
+- ~~**P1 in-game verification**~~ **DONE** — verified on SEED (UE4.27): single Value Search + Group Search both pass; Deep mode surfaces the buried `Tunes` block. *(dev-log 2026-06-18.)*
+
+- **P2 — prev-value per slot + offset-table + Copy CE** — Effort: **M** · Risk: low. Add per-slot `Changed/Increased/Decreased/Unchanged` to `Orden::SlotTarget` + `RefineGroupCandidates` (the real power when you don't know exact values); surface the locked-offset table (class + N offsets) and a "Copy CE Script" / export of the resolved object. *Parent: P1 refine is exact-only.*
+
+- **P3 — numeric containers as blocks — LARGELY DONE (opt-in Deep, builds 1283-1285)**. The "Deep" toggle now treats each numeric `TArray/TSet` + each struct-array/map element as its own block via the recursive `WalkContainerLeaves`, matching the group WITHIN one array (finds the SEED `Tunes[N]` case). Single-value Deep forces the existing deep pass on all classes. *Remaining gaps* (Effort **S**): scalar-VALUED maps (`TMap<Name,int>` values) aren't emitted by `WalkContainerLeaves` (struct-valued maps are) — needs `cfe` to carry key/value leaf types (TODO already in the walker comment); and in-game verify of the Deep path on SEED. *Parent: dev-log 2026-06-18 deep entry.*
+
+- **P4 — Attribute Component cross-object (opt-in)** — Effort: **L** · Risk: high (isolate). Follow `ObjectProperty` pointers whose target class name matches `AttributeSet`/`Component`, 1-2 hops, including the sub-object's numeric leaves in the actor's block (2-hop path candidate + pointer-aware refine). Reuse the read-ptr+validate pattern from `FindReferencesToUObject`. Default OFF (like Property Search "Deep"). *Parent: no forward object-pointer schema descent exists today.*
+
+- **Deferred — Snapshot / SPC Query / Class Pivot group-match** — Effort: **M each** · Risk: low. The `Orden::MatchGroup` seam is source-agnostic; later feed `SnapshotCapturedObject.Fields` (hex→bytes) / SPC per-object sequences / a multi-field `DiscoveryInput` to run the SAME matcher over captured data ("N values co-occur in one snapshot object" / "N-field intersection query" / "pivot on co-varying tuples"). *Parent: P1 deliberately kept the matcher live-scan-agnostic for this.*
+
+-----
+
 ## CE export drilldown — remaining gaps (Phase A/B/C shipped)
 
 Phase A (CE XML/Field container-value expansion, build 1085), Phase B (CSX parity,

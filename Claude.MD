@@ -115,16 +115,17 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      v                                               |
 |  UE5Dumper.dll  [injected]                           |
 |      +-- Frieren  (ExportAPI)     <- C ABI for CE Lua (13 teleport incl. Relative/RecallExplicit/Set+GetMouseCursor, build 1144) |
-|      +-- Fern     (PipeServer)    <- Named Pipe IPC (~53 cmds incl. value scan + teleport + teleport_relative + set/get_mouse_cursor) |
+|      +-- Fern     (PipeServer)    <- Named Pipe IPC (~57 cmds incl. value scan + group scan + teleport + teleport_relative + set/get_mouse_cursor) |
 |      +-- Himmel   (Signatures)    <- 128 AOB + symbol exports |
 |      +-- Genau    (OffsetFinder)  <- GObjects/GNames/GWorld   |
-|      +-- Aura     (ObjectArray)   <- Chunked + Flat arrays + Find Refs/Containers (+ recursive deep descent FindInContainersDeep, 1198) + ScanForValue (lean Candidate V3-A 926; TSet/TMap scan V1a 927) + FindObjectGraphPath (GWorld fwd BFS / Locate in GWorld, 1181) |
+|      +-- Aura     (ObjectArray)   <- Chunked + Flat arrays + Find Refs/Containers (+ recursive deep descent FindInContainersDeep, 1198) + ScanForValue (lean Candidate V3-A 926; TSet/TMap scan V1a 927) + ScanForValueGroup (multi-value group scan via Orden, 1276) + FindObjectGraphPath (GWorld fwd BFS / Locate in GWorld, 1181) |
 |      +-- Serie    (FNamePool)     <- UE5 Pool / UE4 TNameEntry|
 |      +-- Ubel     (UStructWalker) <- FField + UProperty + Phases B-K + Optional + ReadFStringAt/ReadFNameAt/ReadFTextStringAt (public, build 757) |
 |      +-- Macht    (Memory)        <- AOBScan + SEH read/write |
 |      +-- Sein     (Logger)        <- 5-category per-process   |
 |      +-- Stark    (GameThreadDispatch) <- MinHook ProcessEvent hook |
-|      +-- Radar    (ValueScan)     <- SessionManager + DataType / ScanType / CompareStringPredicate / CompareVectorPredicate (build 738 + Phase 2 757) |
+|      +-- Radar    (ValueScan)     <- SessionManager + DataType / ScanType / CompareStringPredicate / CompareVectorPredicate (build 738 + Phase 2 757) + GroupSessionManager (multi-value group scan, 1276) |
+|      +-- Orden    (GroupMatch)    <- source-agnostic SDR/assignment matcher for multi-value group scan (header-only, build 1276) |
 |      +-- Denken   (NativeDisasm)  <- Zydis x64 decoder: native UFunction -> [this+off] property xref (Path 2, build 862) |
 |      +-- Tot      (Cancellation)  <- Tot::Requested() flag; Fern disconnect-monitor + shutdown-abort stop long ops (build 936) |
 |      +-- Wirbel   (Teleport)      <- marker save/recall + cursor + camera POV + directional/explicit-coord TP + force mouse cursor (bShowMouseCursor) (build 1144); CMD_TELEPORT=8 mailbox (ops 0-15) |
@@ -145,7 +146,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- InterestingPropertiesPanel<- Scored properties (B'); 📦 batch CT (build 760) |
 |      +-- ConsolePanel              <- UFUNCTION(exec) discovery + UCheatManager hint (build 778) |
 |      +-- TeleportPanel             <- marker save/recall + cursor + BugItGo + POV + facing-dir TP + coord TP + force cursor (input-mode, build 1147) + GodMode toggle (Solitar, build 1251) + CE Lua/.CT (17-row) |
-|      +-- ValueSearchPanel          <- CE-style by-value scan (build 738 + Phase 2 757) |
+|      +-- ValueSearchPanel          <- CE-style by-value scan (build 738 + Phase 2 757) + Single/Group mode toggle (multi-value group scan, master-detail, build 1276) |
 |      +-- ProxyDeployPanel          <- Proxy DLL management |
 |      +-- CeXmlExport               <- CE XML pointer chains |
 |      +-- CsxExport                 <- CE Structure Dissect  |
@@ -166,7 +167,8 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 | [docs/dev-log.md](docs/dev-log.md) | **What shipped** — append-only milestone history per build number. Read when investigating "when/why was X added". |
 | [docs/architecture.md](docs/architecture.md) | Directory structure (17 .cpp + 19 .h DLL files; ~135 UI .cs/.axaml files; 33 test files), git submodules, build environment |
 | [docs/dll-spec.md](docs/dll-spec.md) | C++ DLL interface: 30 C ABI exports, offset tables, CE Lua bridge (Frieren-themed file/namespace names) |
-| [docs/pipe-protocol.md](docs/pipe-protocol.md) | Named Pipe JSON IPC protocol (~42 commands incl. Value Search begin/refine/end, Request/Response/Event) |
+| [docs/pipe-protocol.md](docs/pipe-protocol.md) | Named Pipe JSON IPC protocol (~46 commands incl. Value Search + Group Scan begin/refine/query/end, Request/Response/Event) |
+| [docs/group-value-scan-spec.md](docs/group-value-scan-spec.md) | **Multiple Values Group Scan** — architecture (`Orden` source-agnostic SDR matcher, block model, deep containers) + the **extension points** for Snapshot/SPC/Pivot reuse + P2/P3/P4 roadmap. Read for "how a future feature plugs into group matching". |
 | [docs/ui-spec.md](docs/ui-spec.md) | Avalonia UI tech stack (Avalonia 12.0.2 / .NET 10), AOT compatibility, component specs |
 | [docs/export-formats.md](docs/export-formats.md) | CE XML, CSX, SDK Header, USMAP export rules, pointer chain model, type mappings |
 | [docs/technical-notes.md](docs/technical-notes.md) | UE version differences, FField vs UProperty, FNamePool, DynOff, Property Type Layouts (Phases B-K), Address Finder layered lookup |

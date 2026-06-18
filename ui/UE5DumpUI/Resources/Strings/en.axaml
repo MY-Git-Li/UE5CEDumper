@@ -42,6 +42,8 @@
     <sys:String x:Key="str.VS.GameOnly">Game classes only</sys:String>
     <sys:String x:Key="str.VS.Parallel">Parallel scan</sys:String>
     <sys:String x:Key="str.VS.BatchRead">Batch read</sys:String>
+    <sys:String x:Key="str.VS.Deep">Deep (nested containers)</sys:String>
+    <sys:String x:Key="str.Tip.VS.Deep">Opt-in (default off). Also scans deeply-nested containers — struct arrays, struct-valued maps, and nested TArray/TSet — so a value buried inside e.g. SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[N] is found. Heavier per object, so enable only when a shallow scan misses the value. In Group mode each numeric array / struct-array element becomes its own match block, so the group is matched WITHIN one array.</sys:String>
     <sys:String x:Key="str.VS.MaxResults">Max:</sys:String>
     <sys:String x:Key="str.Tip.VS.MaxResults">Upper bound on candidates returned by a scan, counted across ALL objects and TArray elements combined (not per array). When the limit is hit the scan stops early and the status row shows a truncation note — raise this, or narrow the value/predicate, to see the full set. Inside a single array every element (index 0..Num-1) is scanned — there is no per-array cap; only arrays with a corrupt/absurd length (over 10,000,000 elements) are skipped as a safety guard. Scans also bail after a 15-second deadline.</sys:String>
     <sys:String x:Key="str.VS.FirstScan">First Scan</sys:String>
@@ -70,6 +72,18 @@
     <sys:String x:Key="str.Tip.VS.FirstScan">Walk every UPROPERTY field of the chosen type across all UObject instances (including TArray elements of that type), apply the predicate, and start a session for Next Scan refines. For strings use Contains / StartsWith / EndsWith. For vectors enter "X,Y,Z".</sys:String>
     <sys:String x:Key="str.Tip.VS.NextScan">Re-read each candidate and prune by the new predicate. Changed / Unchanged / Increased / Decreased compare against the previous round.</sys:String>
     <sys:String x:Key="str.Tip.VS.NewScan">End the current session and reset for a fresh scan.</sys:String>
+    <!-- Multiple values group scan (build 1276) -->
+    <sys:String x:Key="str.VS.Mode.Single">Single value</sys:String>
+    <sys:String x:Key="str.VS.Mode.Group">Multiple values (group)</sys:String>
+    <sys:String x:Key="str.VS.Group.Hint">Find objects that hold ALL of these values at once (e.g. Str + Def + Dex + Int in the same stats object). Order doesn't matter; far more selective than searching one value. Enter 2–4 values.</sys:String>
+    <sys:String x:Key="str.VS.Group.AddRow">+ value</sys:String>
+    <sys:String x:Key="str.VS.Group.RemoveRow">− value</sys:String>
+    <sys:String x:Key="str.VS.Group.FirstScan">Group First Scan</sys:String>
+    <sys:String x:Key="str.VS.Group.NextScan">Group Next Scan</sys:String>
+    <sys:String x:Key="str.VS.Group.NewScan">New Group Scan</sys:String>
+    <sys:String x:Key="str.VS.Group.FilterWatermark">Filter matched objects (server-side) — class / instance / field / value…</sys:String>
+    <sys:String x:Key="str.Tip.VS.Group.FirstScan">Scan every object for one that simultaneously holds all of the entered values at distinct numeric-property offsets (in any order). Each value defaults to NumericNoByte (matches int16/int32/int64/float/double widths). Use Group Next Scan with the new values to narrow and lock each field's offset.</sys:String>
+    <sys:String x:Key="str.VS.Group.LockedField">Located field</sys:String>
 
     <!-- Object Tree -->
     <sys:String x:Key="str.ObjectTree.Title">Object Tree</sys:String>

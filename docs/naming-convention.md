@@ -48,6 +48,7 @@ narrative identity resonates with what the module *does*.
 | **Lineal.h** | 莉涅爾 | First-class mage, 15-yr undercover spy | — | PackedItem: UE5.7+ packed FUObjectItem reconstruction | The straightedge — realigns the non-standard packed layout (was `PackedItem`) |
 | **Radar.cpp** | 拉達爾 | Shadow Warrior, plateau village chief | — | ValueScan: CE-style by-value First/Next Scan | The sweep — scans every object for a matching value (was `ValueScan`) |
 | **Solitar.cpp** | 索莉塔 | Greater demon studying humanity | #11 | GodMode: force AActor::bCanBeDamaged (damage immunity) + re-assert worker | Overwhelming, near-unkillable mage — invulnerability; reuses the FBoolProperty bit-write Wirbel uses for the cursor |
+| **Orden.h** | 歐爾登 | Noble house head ("order") | — | GroupMatch: source-agnostic SDR/assignment core for multi-value group scan | Brings *order* to a scattered set of values — assigns each value to its leaf slot (header-only, pure) |
 
 ---
 
@@ -101,6 +102,7 @@ Scharf::                    // FProperty alignment validator (header-only)
 Tot::                       // Cancellation — cooperative cancel flag (header-only; was Cancel)
 Lineal::                    // PackedItem — UE5.7+ packed FUObjectItem reconstruction (header-only; was PackedItem)
 Radar::                     // ValueScan — CE-style by-value scan (was ValueScan)
+Orden::                     // GroupMatch — source-agnostic SDR matcher (multi-value group scan; header-only)
 Grimoire::                  // Constants — spell book
 DynOff::                    // Dynamic offsets (in Grimoire.h, unchanged)
 ```
@@ -320,7 +322,7 @@ German meanings are given because most names map cleanly to a module function.
 | Gehen | Gehen | Dwarf who built a canyon bridge | ⬜ | Bridge / IPC connector (strong fit) |
 | Glück | Gluck | Lord allied with Macht ("luck") | ⬜ | Lucky heuristic / fallback logic |
 | Kraft | Kraft | Ancient elven monk ("force/power") | ⬜ | Heavy-compute / force utility |
-| Orden | Orden | Noble house head ("order") | ⬜ | Ordering / sorting / sequencing |
+| Orden | Orden | Noble house head ("order") | 🟢 GroupMatch | Source-agnostic SDR matcher for multi-value group scan (`Orden.h`, header-only, build 1276) |
 | Fass | Fass | Dwarf seeking ale ("barrel/cask") | ⬜ | Container / buffer |
 | Voll | Voll | Old dwarf friend ("full") | ⬜ | Capacity / completeness check |
 | Milliarde | Milliarde | Old elf ("billion") | ⬜ | Large-count handling |

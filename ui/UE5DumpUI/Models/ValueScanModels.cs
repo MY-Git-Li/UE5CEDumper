@@ -170,3 +170,109 @@ public class ValueScanWindowResult
     public int    Offset        { get; set; }
     public List<ValueCandidate> Candidates { get; set; } = new();
 }
+
+// ===================== Multiple values group scan (build 1276) =====================
+
+/// <summary>
+/// One input value row of a "Group" scan (2..4 rows). The user supplies a value
+/// and, optionally, a numeric width scope. P1 fans out over numeric widths
+/// (NumericNoByte default / NumericAll) and matches each slot exactly; concrete
+/// per-slot widths + prev-value scan types are a P2 extension. Plain settable
+/// POCO — the editable DataGrid writes each cell back via the property setter.
+/// </summary>
+public class GroupSlotInput
+{
+    public ValueScanDataType DataType { get; set; } = ValueScanDataType.NumericNoByte;
+    public ValueScanType     ScanType { get; set; } = ValueScanType.Exact;  // P1: always Exact
+    public string            Value    { get; set; } = "";
+}
+
+/// <summary>
+/// One slot's converging match inside a <see cref="GroupCandidate"/>. While the
+/// scan narrows, <see cref="MatchedOffsets"/> may list several offsets; once a
+/// single offset remains the field is identified (<see cref="Locked"/>). The
+/// representative (first) match carries the resolved field name / offset / type
+/// + leaf value + leaf address so a per-slot row can drive the same handoffs
+/// (Open in Live Walker / Locate in GWorld / Copy) as a single-value candidate.
+/// </summary>
+public class GroupSlotMatch
+{
+    public int       SlotIndex      { get; set; }
+    public string    Value          { get; set; } = "";   // the slot's target value
+    public string    FieldName      { get; set; } = "";   // representative match
+    public int       FieldOffset    { get; set; }
+    public string    FieldType      { get; set; } = "";
+    public byte      BoolFieldMask  { get; set; } = 0xFF;
+    public string    LeafValue      { get; set; } = "";   // current value at the leaf
+    public string    Addr           { get; set; } = "";   // leaf address (instance + offset)
+    public string    InstanceAddr   { get; set; } = "";   // owning object (denormalized for self-contained handoffs)
+    public string    ClassName      { get; set; } = "";   // owning class (for the Pivot handoff)
+    public List<int> MatchedOffsets { get; set; } = new();
+    public bool      Locked         { get; set; }
+
+    public string OffsetHex => $"0x{FieldOffset:X}";
+    // Detail-row caption: "Str  24 → 0x20  (IntProperty)" once locked, else the
+    // target value + how many candidate offsets still match.
+    public string DisplayLabel =>
+        Locked
+            ? $"{(string.IsNullOrEmpty(FieldName) ? "?" : FieldName)}  {Value} → {OffsetHex}  ({FieldType})"
+            : $"value {Value}: {MatchedOffsets.Count} candidate offset(s)";
+    public string LockLabel => Locked ? "🔒" : $"×{MatchedOffsets.Count}";
+}
+
+/// <summary>
+/// One group hit: an owning UObject plus its per-slot matches. A logical match
+/// means the object simultaneously holds every slot's value at a distinct
+/// offset. Mirrors <see cref="ValueCandidate"/>'s owner fields so the master row
+/// can hand off to Instance Finder / Class Pivot.
+/// </summary>
+public class GroupCandidate
+{
+    public string InstanceAddr      { get; set; } = "";
+    public int    InstanceIndex     { get; set; }
+    public string InstanceName      { get; set; } = "";
+    public string ClassName         { get; set; } = "";
+    public string DefiningClassName { get; set; } = "";
+    public List<GroupSlotMatch> Slots { get; set; } = new();
+
+    public string LocationLabel =>
+        (!string.IsNullOrEmpty(DefiningClassName) && DefiningClassName != ClassName)
+            ? $"{ClassName}  ({DefiningClassName})" : ClassName;
+    // Compact master-row summary: "Str=24, Def=10, Dex=14, Int=8".
+    public string SlotSummary =>
+        string.Join(", ", Slots.Select(s =>
+            $"{(string.IsNullOrEmpty(s.FieldName) ? "?" : s.FieldName)}={s.Value}"));
+    public bool AllLocked => Slots.Count > 0 && Slots.All(s => s.Locked);
+}
+
+/// <summary>Response from <c>begin_group_scan</c> — object-level candidates.</summary>
+public class GroupScanBeginResult
+{
+    public ulong SessionId      { get; set; }
+    public int   Total          { get; set; }
+    public int   SlotCount      { get; set; }
+    public int   ScannedClasses { get; set; }
+    public int   ScannedObjects { get; set; }
+    public long  DurationMs     { get; set; }
+    public bool  DeadlineHit    { get; set; }
+    public List<GroupCandidate> Candidates { get; set; } = new();
+}
+
+/// <summary>Response from <c>refine_group_scan</c> — surviving object count + first page.</summary>
+public class GroupScanRefineResult
+{
+    public ulong SessionId  { get; set; }
+    public int   Total      { get; set; }
+    public long  DurationMs { get; set; }
+    public List<GroupCandidate> Candidates { get; set; } = new();
+}
+
+/// <summary>Response from <c>query_group_candidates</c> — server-side window.</summary>
+public class GroupScanWindowResult
+{
+    public ulong SessionId     { get; set; }
+    public int   Total         { get; set; }
+    public int   FilteredTotal { get; set; }
+    public int   Offset        { get; set; }
+    public List<GroupCandidate> Candidates { get; set; } = new();
+}

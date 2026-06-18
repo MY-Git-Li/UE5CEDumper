@@ -57,6 +57,11 @@ constexpr const char* CMD_BEGIN_VALUE_SCAN         = "begin_value_scan";
 constexpr const char* CMD_REFINE_VALUE_SCAN        = "refine_value_scan";
 constexpr const char* CMD_END_VALUE_SCAN           = "end_value_scan";
 constexpr const char* CMD_QUERY_CANDIDATES         = "query_candidates";
+// Multiple values group scan (build 1276) — object-aware "group scan".
+constexpr const char* CMD_BEGIN_GROUP_SCAN         = "begin_group_scan";
+constexpr const char* CMD_REFINE_GROUP_SCAN        = "refine_group_scan";
+constexpr const char* CMD_END_GROUP_SCAN           = "end_group_scan";
+constexpr const char* CMD_QUERY_GROUP_CANDIDATES   = "query_group_candidates";
 constexpr const char* CMD_GET_DEBUG_CAMERA_STATE   = "get_debug_camera_state";
 constexpr const char* CMD_SET_DEBUG_CAMERA         = "set_debug_camera";
 // UE5.7+ packed FUObjectItem calibration (runtime tune of the reconstruction constants +

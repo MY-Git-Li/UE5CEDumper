@@ -65,6 +65,14 @@ public partial class ValueSearchViewModel : ViewModelBase
     /// but reads only the exact bytes each field needs. First Scan only.</summary>
     [ObservableProperty] private bool   _batchRead = true;
 
+    /// <summary>Opt-in deep-container pass (default OFF). When on, the scan also
+    /// walks deeply-nested containers (struct-arrays, struct-valued maps, nested
+    /// TArray/TSet) so a value buried inside e.g.
+    /// <c>SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[N]</c> is
+    /// found. Heavier per object — shared by Single and Group modes. In Group mode
+    /// each numeric array / struct-array element becomes its own match block.</summary>
+    [ObservableProperty] private bool   _deepScan;
+
     /// <summary>CE-style rounded-scan slack for Float/Double and vector
     /// comparisons. Default 0.5 covers the common case: game UI
     /// displays "338" for a real float of 337.5, so scanning for "338"
@@ -530,6 +538,7 @@ public partial class ValueSearchViewModel : ViewModelBase
         _dump = dump;
         _log  = log;
         _selectedSortOption = SortOptions[0];  // scan order
+        _selectedGroupSortOption = GroupSortOptions[0];  // scan order (group mode)
     }
 
     public void SetEngineState(EngineState state)
@@ -588,7 +597,7 @@ public partial class ValueSearchViewModel : ViewModelBase
             var result = await _dump.BeginValueScanAsync(
                 SelectedDataType, SelectedScanType, Value,
                 SelectedScanType == ValueScanType.Between ? Value2 : null,
-                GameOnly, MaxResults, effTol, effCase, ParallelScan, BatchRead, PageSize, cts.Token);
+                GameOnly, MaxResults, effTol, effCase, ParallelScan, BatchRead, DeepScan, PageSize, cts.Token);
 
             SessionId = result.SessionId;
             await ApplyScanResultAsync(result.Total, result.Candidates);
@@ -750,6 +759,343 @@ public partial class ValueSearchViewModel : ViewModelBase
         finally
         {
             SessionId = 0;
+        }
+    }
+
+    // ==================================================================
+    // Group mode — Multiple values group scan (build 1276)
+    //
+    // A separate, parallel workflow that finds OBJECTS holding ALL of N values
+    // (2..4) at distinct numeric-property offsets. Shares the IsScanning flag,
+    // CancelScan, GameOnly/MaxResults inputs, and all four cross-tab handoff
+    // events with single mode; everything else (inputs, session, results,
+    // windowing) is its own state so the single-value path is untouched.
+    // ==================================================================
+
+    /// <summary>Single (default) vs Group input/results mode toggle.</summary>
+    [ObservableProperty] private bool _isGroupMode;
+    public bool IsSingleMode => !IsGroupMode;
+    partial void OnIsGroupModeChanged(bool value) => OnPropertyChanged(nameof(IsSingleMode));
+
+    /// <summary>The 2..4 editable input rows for a group scan.</summary>
+    public ObservableCollection<GroupSlotInput> GroupInputs { get; } = new()
+    {
+        new GroupSlotInput(), new GroupSlotInput(),
+    };
+
+    public bool CanAddGroupRow    => GroupInputs.Count < 4;
+    public bool CanRemoveGroupRow => GroupInputs.Count > 2;
+
+    /// <summary>Per-slot width scope choices (P1): the multi-numeric meta types
+    /// only. NumericNoByte (default) fans out over int16..double; NumericAll also
+    /// includes 1-byte fields.</summary>
+    public IReadOnlyList<ValueScanDataType> GroupDataTypeOptions { get; } = new[]
+    {
+        ValueScanDataType.NumericNoByte,
+        ValueScanDataType.NumericAll,
+    };
+
+    /// <summary>The bound group-result rows (current server window). Each row is
+    /// one object; its Slots expand in the master-detail grid.</summary>
+    [ObservableProperty] private ObservableCollection<GroupCandidate> _groupCandidates = new();
+    [ObservableProperty] private GroupCandidate? _selectedGroupCandidate;
+
+    [ObservableProperty] private ulong _groupSessionId;
+    public bool HasGroupSession => GroupSessionId != 0;
+    partial void OnGroupSessionIdChanged(ulong value) => OnPropertyChanged(nameof(HasGroupSession));
+
+    [ObservableProperty] private int _groupTotal;
+    [ObservableProperty] private int _groupFilteredTotal;
+    [ObservableProperty] private string _groupWindowStatus = "";
+
+    public bool GroupHasMore => GroupCandidates.Count < GroupFilteredTotal;
+    partial void OnGroupCandidatesChanged(ObservableCollection<GroupCandidate> value)
+        => OnPropertyChanged(nameof(GroupHasMore));
+    partial void OnGroupFilteredTotalChanged(int value)
+        => OnPropertyChanged(nameof(GroupHasMore));
+
+    [ObservableProperty] private string _groupFilterText = "";
+    partial void OnGroupFilterTextChanged(string value) => _ = DebouncedGroupReloadAsync();
+
+    /// <summary>Server-side sort picker for the group results (object-level rows).</summary>
+    public IReadOnlyList<ValueSortOption> GroupSortOptions { get; } = new[]
+    {
+        new ValueSortOption("Scan order",  "scan"),
+        new ValueSortOption("Class",       "class"),
+        new ValueSortOption("Instance",    "instance"),
+        new ValueSortOption("First value", "value"),
+        new ValueSortOption("First offset","offset"),
+    };
+    [ObservableProperty] private ValueSortOption? _selectedGroupSortOption;
+    [ObservableProperty] private bool _groupSortDescending;
+    partial void OnSelectedGroupSortOptionChanged(ValueSortOption? value) => ApplyGroupUiSort();
+    partial void OnGroupSortDescendingChanged(bool value) => ApplyGroupUiSort();
+
+    private string _groupSortKey = "";
+    private bool   _groupSortDesc;
+    private System.Threading.CancellationTokenSource? _groupViewCts;
+    private System.Threading.CancellationTokenSource? _groupFilterCts;
+
+    [RelayCommand]
+    private void AddGroupRow()
+    {
+        if (GroupInputs.Count >= 4) return;
+        GroupInputs.Add(new GroupSlotInput());
+        OnPropertyChanged(nameof(CanAddGroupRow));
+        OnPropertyChanged(nameof(CanRemoveGroupRow));
+    }
+
+    [RelayCommand]
+    private void RemoveGroupRow()
+    {
+        if (GroupInputs.Count <= 2) return;
+        GroupInputs.RemoveAt(GroupInputs.Count - 1);
+        OnPropertyChanged(nameof(CanAddGroupRow));
+        OnPropertyChanged(nameof(CanRemoveGroupRow));
+    }
+
+    private bool GroupValuesValid(out string error)
+    {
+        error = "";
+        if (GroupInputs.Count is < 2 or > 4) { error = "Group scan needs 2 to 4 values."; return false; }
+        foreach (var g in GroupInputs)
+        {
+            if (string.IsNullOrWhiteSpace(g.Value)) { error = "Every group value is required."; return false; }
+        }
+        return true;
+    }
+
+    [RelayCommand]
+    private async Task GroupFirstScanAsync()
+    {
+        if (IsScanning) return;
+        if (!GroupValuesValid(out var err)) { ErrorMessage = err; return; }
+
+        var cts = _scanCts = new System.Threading.CancellationTokenSource();
+        try
+        {
+            IsScanning = true;
+            ErrorMessage = "";
+            StatusText = $"Group scanning for {GroupInputs.Count} values...";
+
+            await EndGroupSessionIfAnyAsync();
+
+            var result = await _dump.BeginGroupScanAsync(
+                GroupInputs.ToList(), GameOnly, MaxResults, DeepScan, PageSize, cts.Token);
+
+            GroupSessionId = result.SessionId;
+            await ApplyGroupScanResultAsync(result.Total, result.Candidates);
+
+            var summary = $"Group First Scan: {result.Total} matching objects in {result.DurationMs} ms " +
+                          $"(scanned {result.ScannedObjects} objects, {result.ScannedClasses} classes)";
+            if (result.DeadlineHit)
+                summary += "  ⚠ truncated (15s deadline / result cap) — refine to narrow";
+            StatusText = summary;
+        }
+        catch (OperationCanceledException) { StatusText = "Group First Scan cancelled."; }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Group First Scan failed: {ex.Message}";
+            _log.Error("ValueSearch group first scan failed", ex);
+        }
+        finally
+        {
+            IsScanning = false;
+            if (ReferenceEquals(_scanCts, cts)) { _scanCts?.Dispose(); _scanCts = null; }
+        }
+    }
+
+    [RelayCommand]
+    private async Task GroupNextScanAsync()
+    {
+        if (IsScanning || !HasGroupSession) return;
+        if (!GroupValuesValid(out var err)) { ErrorMessage = err; return; }
+
+        var cts = _scanCts = new System.Threading.CancellationTokenSource();
+        try
+        {
+            IsScanning = true;
+            ErrorMessage = "";
+            StatusText = "Refining group scan...";
+
+            var values = GroupInputs.Select(g => g.Value).ToList();
+            var result = await _dump.RefineGroupScanAsync(GroupSessionId, values, PageSize, cts.Token);
+
+            await ApplyGroupScanResultAsync(result.Total, result.Candidates);
+            StatusText = $"Group Next Scan: {result.Total} surviving objects in {result.DurationMs} ms";
+        }
+        catch (OperationCanceledException) { StatusText = "Group Next Scan cancelled."; }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Group Next Scan failed: {ex.Message}";
+            _log.Error("ValueSearch group refine failed", ex);
+        }
+        finally
+        {
+            IsScanning = false;
+            if (ReferenceEquals(_scanCts, cts)) { _scanCts?.Dispose(); _scanCts = null; }
+        }
+    }
+
+    [RelayCommand]
+    private async Task GroupNewScanAsync()
+    {
+        await EndGroupSessionIfAnyAsync();
+        GroupCandidates = new ObservableCollection<GroupCandidate>();
+        GroupTotal = 0;
+        GroupFilteredTotal = 0;
+        _groupSortKey = "";
+        _groupSortDesc = false;
+        UpdateGroupWindowStatus();
+        StatusText = "Group session ended. Configure values and click Group First Scan.";
+        ErrorMessage = "";
+    }
+
+    private bool IsGroupDefaultView =>
+        string.IsNullOrEmpty(GroupFilterText)
+        && (string.IsNullOrEmpty(_groupSortKey) || _groupSortKey == "scan")
+        && !_groupSortDesc;
+
+    private async Task ApplyGroupScanResultAsync(int total, IList<GroupCandidate> inlineFirstPage)
+    {
+        GroupTotal = total;
+        if (IsGroupDefaultView)
+        {
+            GroupFilteredTotal = total;
+            GroupCandidates = new ObservableCollection<GroupCandidate>(inlineFirstPage);
+            UpdateGroupWindowStatus();
+        }
+        else
+        {
+            await LoadGroupWindowAsync(reset: true);
+        }
+    }
+
+    private async Task LoadGroupWindowAsync(bool reset)
+    {
+        if (!HasGroupSession) return;
+        _groupViewCts?.Cancel();
+        var cts = _groupViewCts = new System.Threading.CancellationTokenSource();
+        try
+        {
+            int offset = reset ? 0 : GroupCandidates.Count;
+            var w = await _dump.QueryGroupCandidatesAsync(
+                GroupSessionId, offset, PageSize,
+                string.IsNullOrEmpty(GroupFilterText) ? null : GroupFilterText,
+                string.IsNullOrEmpty(_groupSortKey) ? null : _groupSortKey,
+                _groupSortDesc, cts.Token);
+            GroupTotal = w.Total;
+            GroupFilteredTotal = w.FilteredTotal;
+            if (reset)
+                GroupCandidates = new ObservableCollection<GroupCandidate>(w.Candidates);
+            else
+                foreach (var c in w.Candidates) GroupCandidates.Add(c);
+            OnPropertyChanged(nameof(GroupHasMore));
+            UpdateGroupWindowStatus();
+        }
+        catch (OperationCanceledException) { /* superseded */ }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Group query failed: {ex.Message}";
+            _log.Error("ValueSearch query_group_candidates failed", ex);
+        }
+        finally
+        {
+            if (ReferenceEquals(_groupViewCts, cts)) { _groupViewCts?.Dispose(); _groupViewCts = null; }
+        }
+    }
+
+    private async Task DebouncedGroupReloadAsync()
+    {
+        if (!HasGroupSession) return;
+        _groupFilterCts?.Cancel();
+        var cts = _groupFilterCts = new System.Threading.CancellationTokenSource();
+        try
+        {
+            await Task.Delay(250, cts.Token);
+            await LoadGroupWindowAsync(reset: true);
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            if (ReferenceEquals(_groupFilterCts, cts)) { _groupFilterCts?.Dispose(); _groupFilterCts = null; }
+        }
+    }
+
+    private void ApplyGroupUiSort()
+    {
+        _groupSortKey  = SelectedGroupSortOption?.Key ?? "";
+        _groupSortDesc = GroupSortDescending;
+        if (HasGroupSession) _ = LoadGroupWindowAsync(reset: true);
+    }
+
+    [RelayCommand]
+    private Task GroupLoadMoreAsync() => LoadGroupWindowAsync(reset: false);
+
+    private void UpdateGroupWindowStatus()
+    {
+        if (GroupTotal == 0) { GroupWindowStatus = ""; return; }
+        string filt = (GroupFilteredTotal != GroupTotal) ? $" (filtered from {GroupTotal})" : "";
+        GroupWindowStatus = GroupHasMore
+            ? $"Showing {GroupCandidates.Count} of {GroupFilteredTotal}{filt} — Load More for the rest"
+            : $"Showing all {GroupFilteredTotal}{filt}";
+    }
+
+    // --- Group handoffs. Slot leaves reuse the SAME four events as single mode
+    // (each GroupSlotMatch carries its owning InstanceAddr + ClassName so the
+    // handoff is self-contained); the master row hands its class to Instance
+    // Finder. ---
+
+    [RelayCommand]
+    private void OpenGroupSlotInLiveWalker(GroupSlotMatch? slot)
+    {
+        if (slot == null || string.IsNullOrEmpty(slot.InstanceAddr)) return;
+        NavigateToInstance?.Invoke(slot.InstanceAddr, slot.FieldOffset, slot.FieldName);
+    }
+
+    [RelayCommand]
+    private void LocateGroupSlotInGWorld(GroupSlotMatch? slot)
+    {
+        if (slot == null || !IsGWorldAvailable || string.IsNullOrEmpty(slot.InstanceAddr)) return;
+        LocateInGWorld?.Invoke(slot.InstanceAddr, slot.FieldOffset, slot.FieldName);
+    }
+
+    [RelayCommand]
+    private void CopyGroupSlotAddress(GroupSlotMatch? slot)
+    {
+        if (slot == null || string.IsNullOrEmpty(slot.Addr)) return;
+        RequestCopyText?.Invoke(slot.Addr);
+    }
+
+    [RelayCommand]
+    private void PivotGroupSlot(GroupSlotMatch? slot)
+    {
+        if (slot == null || string.IsNullOrEmpty(slot.ClassName) || string.IsNullOrEmpty(slot.FieldName)) return;
+        NavigateToPivot?.Invoke(slot.ClassName, slot.FieldName);
+    }
+
+    [RelayCommand]
+    private void OpenGroupInInstanceFinder(GroupCandidate? candidate)
+    {
+        candidate ??= SelectedGroupCandidate;
+        if (candidate == null || string.IsNullOrEmpty(candidate.ClassName)) return;
+        NavigateToInstanceFinder?.Invoke(candidate.ClassName);
+    }
+
+    private async Task EndGroupSessionIfAnyAsync()
+    {
+        if (GroupSessionId == 0) return;
+        try
+        {
+            await _dump.EndGroupScanAsync(GroupSessionId);
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"ValueSearch End group session {GroupSessionId} failed: {ex.Message}");
+        }
+        finally
+        {
+            GroupSessionId = 0;
         }
     }
 }

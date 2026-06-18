@@ -15,6 +15,7 @@
 #include "Denken.h"
 #include "Tot.h"
 #include "Lineal.h"   // UE5.7+ packed FUObjectItem reconstruction (Reconstruct + consts)
+#include "Orden.h"    // Multi-value group scan: source-agnostic SDR matcher (MatchGroup)
 
 // Defined in Frieren.cpp — cached UE version for layout branching
 extern uint32_t g_cachedUEVersion;
@@ -5035,7 +5036,8 @@ ValueScanResult ScanForValue(
     const Radar::NumericTargetSet* multiTargets,
     const Radar::NumericTargetSet* multiTargets2,
     bool                parallel,
-    bool                batchRead)
+    bool                batchRead,
+    bool                deep)
 {
     ValueScanResult result;
     auto t0 = std::chrono::steady_clock::now();
@@ -5586,6 +5588,10 @@ ValueScanResult ScanForValue(
                          : cfe.valueStruct ? cfe.valueStruct : cfe.keyStruct;
             if (es && !GetClassContainers(es).empty()) { sci.needsDeepWalk = true; break; }
         }
+        // Opt-in "Deep": force the recursive container pass on every class (not just
+        // the auto-detected struct-element-container nesting), so a value buried in
+        // a container the heuristic doesn't flag is still reached.
+        if (deep && !GetClassContainers(classAddr).empty()) sci.needsDeepWalk = true;
 
         auto inserted = classCache.emplace(classAddr, std::move(sci));
         return &inserted.first->second;
@@ -6464,6 +6470,369 @@ void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
         }, &visited);
 }
 } // namespace
+
+// ============================================================
+// Multiple values group scan (build 1276) — see Aura.h + Orden.h.
+// ============================================================
+namespace {
+
+// One numeric leaf's display/refine metadata, index-aligned with the
+// Orden::Leaf vector produced per block (leaves[k] <-> metas[k]).
+struct GroupLeafMeta {
+    std::string fieldName;       // direct: "Stats.Str"; deep: "SaveSlotList[1]...Tunes[2]"
+    std::string fieldType;       // UE property type ("IntProperty" / "FloatProperty" / ...)
+    std::string definingClass;   // struct/class the leaf is declared in
+    int32_t     offset       = 0;   // bytes from the object base (direct); 0 for deep container leaves
+    int32_t     elementIndex = -1;  // -1 direct field; >=0 container element index
+    uintptr_t   leafAddr     = 0;   // ABSOLUTE value address (direct: obj+offset; deep: element addr)
+    uint8_t     boolMask     = 0xFF;
+};
+
+// One deep block = a numeric container's elements, or one struct-array/map
+// element's inner numeric fields. Orden runs over each block independently so a
+// group is matched WITHIN one array/element (the "array as a block" rule), not
+// scattered across the whole object's deep tree.
+struct GroupBlock {
+    std::vector<Orden::Leaf>   leaves;
+    std::vector<GroupLeafMeta> metas;
+};
+
+// Is `typeName` a numeric scalar in scope? `wantByte` includes Int8/UInt8.
+// Bool + non-numeric return false (TryDataTypeFromPropertyTypeName rejects Bool).
+inline bool GroupNumericLeafType(const std::string& typeName, bool wantByte,
+                                 Radar::DataType& dt) {
+    if (!Radar::TryDataTypeFromPropertyTypeName(typeName, dt)) return false;
+    if ((dt == Radar::DataType::Int8 || dt == Radar::DataType::UInt8) && !wantByte) return false;
+    const size_t sz = Radar::SizeOf(dt);
+    return sz >= 1 && sz <= 8;
+}
+
+// Collect an object's numeric scalar leaves: direct fields + depth-capped
+// direct-StructProperty descent (mirrors ScanForValue's reach for P1). Numeric
+// containers (TArray/TSet/TMap) are P3 and intentionally not followed here.
+// `obj` is the instance base; `structAddr` is the UStruct being walked;
+// `baseOffset` accumulates obj->structAddr. leaves[k] <-> metas[k].
+void CollectGroupLeaves(uintptr_t obj, uintptr_t structAddr, int32_t baseOffset,
+                        const std::string& namePrefix, bool wantByte, int depth,
+                        std::vector<uintptr_t>& visited,
+                        std::vector<Orden::Leaf>& leaves,
+                        std::vector<GroupLeafMeta>& metas, size_t leafCap) {
+    constexpr int kMaxGroupDepth = 4;
+    if (depth > kMaxGroupDepth || !structAddr) return;
+    if (leaves.size() >= leafCap) return;
+    for (uintptr_t v : visited) if (v == structAddr) return;  // cycle guard
+    visited.push_back(structAddr);
+
+    ClassInfo ci = Ubel::WalkClassEx(structAddr);  // cached per struct
+    for (const auto& f : ci.Fields) {
+        if (leaves.size() >= leafCap) break;
+        Radar::DataType dt;
+        if (GroupNumericLeafType(f.TypeName, wantByte, dt)) {
+            const size_t sz = Radar::SizeOf(dt);
+            uint8_t buf[8] = {};
+            if (!Macht::ReadBytesSafe(obj + baseOffset + f.Offset, buf, sz)) continue;
+            Orden::Leaf lf;
+            lf.position     = baseOffset + f.Offset;
+            lf.width        = dt;
+            lf.elementIndex = -1;
+            std::memcpy(lf.bytes, buf, sz);
+            leaves.push_back(lf);
+            GroupLeafMeta m;
+            m.fieldName     = namePrefix.empty() ? f.Name : (namePrefix + "." + f.Name);
+            m.fieldType     = f.TypeName;
+            m.definingClass = ci.Name;
+            m.offset        = baseOffset + f.Offset;
+            m.elementIndex  = -1;
+            m.leafAddr      = obj + baseOffset + f.Offset;   // direct: absolute = obj + offset
+            m.boolMask      = f.boolFieldMask;
+            metas.push_back(std::move(m));
+        } else if (f.TypeName == "StructProperty" && f.Address) {
+            uintptr_t nested = 0;
+            if (Macht::ReadSafe(f.Address + DynOff::FSTRUCTPROP_STRUCT, nested) && nested) {
+                CollectGroupLeaves(obj, nested, baseOffset + f.Offset,
+                                   namePrefix.empty() ? f.Name : (namePrefix + "." + f.Name),
+                                   wantByte, depth + 1, visited, leaves, metas, leafCap);
+            }
+        }
+    }
+    visited.pop_back();
+}
+
+// Feasibility re-check after a refine prunes per-slot lists: a System of
+// Distinct Representatives must still exist, each leaf keyed by its ABSOLUTE
+// address so two slots can't both claim the same value (works for direct and
+// deep container leaves alike).
+bool GroupCandidateFeasible(const Radar::GroupCandidate& gc) {
+    std::vector<uintptr_t> leafKeys;
+    auto keyIdx = [&](uintptr_t a) -> int {
+        for (size_t k = 0; k < leafKeys.size(); ++k)
+            if (leafKeys[k] == a) return static_cast<int>(k);
+        leafKeys.push_back(a);
+        return static_cast<int>(leafKeys.size() - 1);
+    };
+    std::vector<Orden::SlotMatches> m(gc.slotMatches.size());
+    for (size_t s = 0; s < gc.slotMatches.size(); ++s)
+        for (const auto& sm : gc.slotMatches[s])
+            m[s].leafIdx.push_back(keyIdx(sm.leafAddr));
+    return Orden::HasDistinctAssignment(m, static_cast<int>(leafKeys.size()));
+}
+
+}  // namespace
+
+GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
+                                  bool gameOnly, int32_t maxResults, bool deep) {
+    GroupScanResult result;
+    auto t0 = std::chrono::steady_clock::now();
+    constexpr auto kDeadline = std::chrono::seconds(15);
+
+    const size_t nSlots = slots.size();
+    if (nSlots < 2) return result;                       // a group needs >= 2 values
+    for (const auto& sp : slots)
+        if (sp.targets.entries.empty()) return result;   // a slot that fits no width => no hits
+
+    // Lean leaf enumeration: only read 1-byte fields when a slot wants them.
+    bool wantByte = false;
+    for (const auto& sp : slots)
+        if (sp.dt == Radar::DataType::NumericAll ||
+            sp.dt == Radar::DataType::Int8 || sp.dt == Radar::DataType::UInt8) { wantByte = true; break; }
+
+    std::vector<Orden::SlotTarget> ordenSlots;
+    ordenSlots.reserve(nSlots);
+    for (const auto& sp : slots) ordenSlots.push_back(Orden::SlotTarget{ &sp.targets });
+
+    const int32_t total = GetCount();
+    constexpr size_t kLeafCap        = 4096;   // object-block leaf cap
+    constexpr size_t kMaxDeepBlocks  = 8192;   // distinct container blocks per object
+    constexpr size_t kMaxBlockLeaves = 1024;   // leaves per deep block
+
+    std::unordered_map<uintptr_t, char>       eligible;        // cls -> 1 keep / 0 skip (game_only)
+    std::unordered_map<uintptr_t, uint32_t>   instanceIntern;  // obj -> instanceIdx (blocks share)
+    std::unordered_map<std::string, uint32_t> descIntern;      // "class|name|off" -> descriptorIdx
+
+    auto internInstance = [&](uintptr_t obj, int32_t objIndex, const std::string& name) -> uint32_t {
+        auto it = instanceIntern.find(obj);
+        if (it != instanceIntern.end()) return it->second;
+        uint32_t idx = static_cast<uint32_t>(result.instances.size());
+        Radar::InstanceRecord inst;
+        inst.instanceAddr  = obj;
+        inst.instanceIndex = objIndex;
+        inst.instanceName  = name;
+        result.instances.push_back(std::move(inst));
+        instanceIntern.emplace(obj, idx);
+        return idx;
+    };
+
+    auto internDesc = [&](const std::string& className, const GroupLeafMeta& meta) -> uint32_t {
+        // Direct leaves intern by (class, field, offset) across instances; deep
+        // leaves carry the fully-indexed path in fieldName so they're distinct.
+        std::string key = className; key += '|'; key += meta.fieldName;
+        key += '|'; key += std::to_string(meta.offset);
+        auto it = descIntern.find(key);
+        if (it != descIntern.end()) return it->second;
+        Radar::FieldDescriptor d;
+        d.className         = className;
+        d.definingClassName = meta.definingClass;
+        d.fieldName         = meta.fieldName;
+        d.fieldType         = meta.fieldType;
+        d.fieldOffset       = meta.offset;
+        d.boolFieldMask     = meta.boolMask;
+        uint32_t idx = static_cast<uint32_t>(result.descriptors.size());
+        result.descriptors.push_back(std::move(d));
+        descIntern.emplace(std::move(key), idx);
+        return idx;
+    };
+
+    // Emit one group candidate from a matched block (object-block or deep-block).
+    auto emitGroupCandidate = [&](uintptr_t obj, int32_t objIndex, const std::string& name,
+                                  const std::string& className,
+                                  const std::vector<Orden::Leaf>& blkLeaves,
+                                  const std::vector<GroupLeafMeta>& blkMetas,
+                                  const std::vector<Orden::SlotMatches>& mout) {
+        uint32_t instanceIdx = internInstance(obj, objIndex, name);
+        Radar::GroupCandidate gc;
+        gc.instanceIdx = instanceIdx;
+        gc.slotMatches.resize(nSlots);
+        for (size_t s = 0; s < nSlots; ++s) {
+            for (int leafIdx : mout[s].leafIdx) {
+                const GroupLeafMeta& meta = blkMetas[static_cast<size_t>(leafIdx)];
+                Radar::GroupSlotMatch sm;
+                sm.descriptorIdx = internDesc(className, meta);
+                sm.elementIndex  = meta.elementIndex;
+                sm.offset        = meta.offset;
+                sm.leafAddr      = meta.leafAddr;
+                std::memcpy(sm.prevValue, blkLeaves[static_cast<size_t>(leafIdx)].bytes, 8);
+                gc.slotMatches[s].push_back(sm);
+            }
+        }
+        result.candidates.push_back(std::move(gc));
+    };
+
+    // Per-object scratch (reused).
+    std::vector<Orden::Leaf>        leaves;
+    std::vector<GroupLeafMeta>      metas;
+    std::vector<uintptr_t>          visited;
+    std::vector<Orden::SlotMatches> matchOut;
+    int32_t scanned = 0;
+
+    // Deep-block scratch + walker (built once; the refs it captures are updated
+    // per object). The walker reuses the SAME recursive descent as snapshot capture.
+    std::string curClassName;
+    std::unordered_map<std::string, GroupBlock> deepBlocks;
+    WalkLeafLimits dlim;
+    dlim.maxDepth      = 4;
+    dlim.maxElems      = 256;
+    dlim.maxTotalElems = 50000;
+    dlim.aborted = [&] {
+        return Tot::Requested() || (std::chrono::steady_clock::now() - t0 > kDeadline);
+    };
+    ContainerLeafVisitor deepVisitor = [&](const ContainerLeaf& lf) {
+        if (lf.depth < 1) return;                       // depth 0 = object direct (object-block)
+        Radar::DataType dt;
+        if (!GroupNumericLeafType(lf.leafType, wantByte, dt)) return;   // numeric scope only
+        const size_t sz = Radar::SizeOf(dt);
+        uint8_t buf[8] = {};
+        if (!Macht::ReadBytesSafe(lf.leafAddr, buf, sz)) return;
+
+        std::string idx = "["; idx += std::to_string(lf.elemIndex); idx += "]";
+        std::string blockKey, display;
+        if (lf.leafName.empty()) {            // scalar-container element: the whole array is one block
+            blockKey = lf.arrayPath;
+            display  = lf.arrayPath + idx;
+        } else {                              // struct-array / map element: this element is one block
+            blockKey = lf.arrayPath + idx;
+            display  = lf.arrayPath + idx + "." + lf.leafName;
+        }
+        auto bit = deepBlocks.find(blockKey);
+        if (bit == deepBlocks.end()) {
+            if (deepBlocks.size() >= kMaxDeepBlocks) return;
+            bit = deepBlocks.emplace(blockKey, GroupBlock{}).first;
+        }
+        GroupBlock& blk = bit->second;
+        if (blk.leaves.size() >= kMaxBlockLeaves) return;
+        Orden::Leaf ol;
+        ol.position     = lf.elemIndex;
+        ol.width        = dt;
+        ol.elementIndex = lf.elemIndex;
+        std::memcpy(ol.bytes, buf, sz);
+        blk.leaves.push_back(ol);
+        GroupLeafMeta m;
+        m.fieldName     = display;
+        m.fieldType     = lf.leafType;
+        m.definingClass = curClassName;
+        m.offset        = 0;
+        m.elementIndex  = lf.elemIndex;
+        m.leafAddr      = lf.leafAddr;
+        m.boolMask      = lf.boolMask;
+        blk.metas.push_back(std::move(m));
+    };
+
+    for (int32_t i = 0; i < total; ++i) {
+        if ((i & 0xFFF) == 0) {
+            if (Tot::Requested()) { result.stats.deadlineHit = true; break; }
+            if (std::chrono::steady_clock::now() - t0 > kDeadline) { result.stats.deadlineHit = true; break; }
+        }
+        uintptr_t obj = GetByIndex(i);
+        if (!obj) continue;
+        std::string name = Ubel::GetName(obj);
+        if (name.empty()) continue;
+        uintptr_t cls = Ubel::GetClass(obj);
+        if (!cls) continue;
+
+        auto eit = eligible.find(cls);
+        if (eit == eligible.end()) {
+            bool keep = !(gameOnly && IsEnginePackage(Ubel::GetFullName(cls)));
+            eit = eligible.emplace(cls, static_cast<char>(keep ? 1 : 0)).first;
+        }
+        if (!eit->second) continue;
+        ++scanned;
+
+        std::string className = Ubel::GetName(cls);
+
+        // --- Object block: the object's direct + struct-nested numeric leaves. ---
+        leaves.clear(); metas.clear(); visited.clear();
+        CollectGroupLeaves(obj, cls, 0, "", wantByte, 0, visited, leaves, metas, kLeafCap);
+        if (leaves.size() >= nSlots && Orden::MatchGroup(leaves, ordenSlots, matchOut))
+            emitGroupCandidate(obj, i, name, className, leaves, metas, matchOut);
+
+        // --- Deep blocks (opt-in): each numeric container / struct-array element
+        // is its own block, reached via the recursive container walk. Finds groups
+        // hidden inside deeply-nested containers (e.g. ...WeaponTuneList[0].Tunes[N]). ---
+        if (deep && static_cast<int32_t>(result.candidates.size()) < maxResults) {
+            curClassName = className;
+            deepBlocks.clear();
+            WalkContainerLeaves(obj, cls, /*pathPrefix*/ "", /*depth*/ 0, dlim, deepVisitor);
+            for (auto& kv : deepBlocks) {
+                GroupBlock& blk = kv.second;
+                if (blk.leaves.size() < nSlots) continue;
+                if (Orden::MatchGroup(blk.leaves, ordenSlots, matchOut))
+                    emitGroupCandidate(obj, i, name, className, blk.leaves, blk.metas, matchOut);
+                if (static_cast<int32_t>(result.candidates.size()) >= maxResults) break;
+            }
+        }
+
+        if (static_cast<int32_t>(result.candidates.size()) >= maxResults) {
+            result.stats.deadlineHit = true;  // truncated (cap hit)
+            break;
+        }
+    }
+
+    result.stats.scannedObjects = scanned;
+    result.stats.scannedClasses = static_cast<int32_t>(eligible.size());
+    result.stats.durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+    return result;
+}
+
+ValueScanStats RefineGroupCandidates(
+    const std::vector<Radar::SlotSpec>&        slots,
+    std::vector<Radar::GroupCandidate>&        candidates,
+    const std::vector<Radar::FieldDescriptor>& descriptors,
+    const std::vector<Radar::InstanceRecord>&  instances) {
+    ValueScanStats stats;
+    auto t0 = std::chrono::steady_clock::now();
+    const size_t nSlots = slots.size();
+
+    // Group result sets are small (the AND across slots is highly selective) and
+    // refine only re-reads each candidate's located leaves, so process the whole
+    // set into a fresh survivors vector. Each slot match re-reads its ABSOLUTE
+    // leafAddr (direct: obj+offset; deep: container element — stale on container
+    // realloc, where the SEH-safe read faults and the match is dropped).
+    std::vector<Radar::GroupCandidate> survivors;
+    survivors.reserve(candidates.size());
+    for (auto& gc : candidates) {
+        if (gc.slotMatches.size() != nSlots) continue;
+        if (gc.instanceIdx >= instances.size()) continue;   // defensive
+        bool alive = true;
+        for (size_t s = 0; s < nSlots && alive; ++s) {
+            std::vector<Radar::GroupSlotMatch> keep;
+            keep.reserve(gc.slotMatches[s].size());
+            for (auto& sm : gc.slotMatches[s]) {
+                if (sm.descriptorIdx >= descriptors.size()) continue;
+                Radar::DataType width;
+                if (!Radar::TryDataTypeFromPropertyTypeName(descriptors[sm.descriptorIdx].fieldType, width))
+                    continue;
+                const size_t sz = Radar::SizeOf(width);
+                if (sz == 0 || sz > 8) continue;
+                uint8_t buf[8] = {};
+                if (!Macht::ReadBytesSafe(sm.leafAddr, buf, sz)) continue;
+                const uint8_t* tb = slots[s].targets.Find(width);
+                if (!tb || std::memcmp(buf, tb, sz) != 0) continue;   // P1: exact per slot
+                std::memcpy(sm.prevValue, buf, sz);
+                keep.push_back(sm);
+            }
+            gc.slotMatches[s] = std::move(keep);
+            if (gc.slotMatches[s].empty()) alive = false;
+        }
+        if (alive && GroupCandidateFeasible(gc))
+            survivors.push_back(std::move(gc));
+    }
+    candidates = std::move(survivors);
+
+    stats.scannedObjects = static_cast<int32_t>(candidates.size());
+    stats.durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+    return stats;
+}
 
 SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
                                          bool gameOnly,
