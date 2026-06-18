@@ -1,11 +1,13 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 using UE5DumpUI.ViewModels;
@@ -50,6 +52,8 @@ public partial class LiveWalkerPanel : UserControl
             _subscribedVm.ScrollToFirstSearchMatch -= OnScrollToFirstSearchMatch;
             _subscribedVm.ScrollToFunctionRequested -= OnScrollToFunctionRequested;
             _subscribedVm.ScrollFieldIntoView -= OnScrollFieldIntoView;
+            _subscribedVm.CaptureViewAnchor -= OnCaptureViewAnchor;
+            _subscribedVm.RestoreBookmarkView -= OnRestoreBookmarkView;
             _subscribedVm = null;
         }
 
@@ -59,6 +63,8 @@ public partial class LiveWalkerPanel : UserControl
             vm.ScrollToFirstSearchMatch += OnScrollToFirstSearchMatch;
             vm.ScrollToFunctionRequested += OnScrollToFunctionRequested;
             vm.ScrollFieldIntoView += OnScrollFieldIntoView;
+            vm.CaptureViewAnchor += OnCaptureViewAnchor;
+            vm.RestoreBookmarkView += OnRestoreBookmarkView;
             _subscribedVm = vm;
         }
     }
@@ -72,6 +78,8 @@ public partial class LiveWalkerPanel : UserControl
             _subscribedVm.ScrollToFirstSearchMatch -= OnScrollToFirstSearchMatch;
             _subscribedVm.ScrollToFunctionRequested -= OnScrollToFunctionRequested;
             _subscribedVm.ScrollFieldIntoView -= OnScrollFieldIntoView;
+            _subscribedVm.CaptureViewAnchor -= OnCaptureViewAnchor;
+            _subscribedVm.RestoreBookmarkView -= OnRestoreBookmarkView;
             _subscribedVm = null;
         }
     }
@@ -117,6 +125,77 @@ public partial class LiveWalkerPanel : UserControl
         {
             var grid = this.FindControl<DataGrid>("FieldGrid");
             grid?.ScrollIntoView(field, null);
+        }, DispatcherPriority.Background);
+    }
+
+    // Bookmark save: report the topmost visible field row so loading can scroll
+    // back to it. The DataGrid has no public pixel-offset API, so we anchor on a
+    // row. Synchronous — the VM reads the carrier right after raising the event.
+    private void OnCaptureViewAnchor(ViewAnchorRef anchor)
+    {
+        var grid = this.FindControl<DataGrid>("FieldGrid");
+        if (grid == null) return;
+
+        // Topmost realised data row whose top edge sits at/below the grid's top
+        // (rows scrolled above the viewport translate to a negative Y).
+        LiveFieldValue? topField = null;
+        double bestY = double.MaxValue;
+        foreach (var row in grid.GetVisualDescendants().OfType<DataGridRow>())
+        {
+            if (row.DataContext is not LiveFieldValue f) continue;
+            var pt = row.TranslatePoint(new Point(0, 0), grid);
+            if (pt is { } p && p.Y >= -1 && p.Y < bestY) { bestY = p.Y; topField = f; }
+        }
+        if (topField != null)
+            anchor.TopRow = new BookmarkFieldRef(topField.Name, topField.Offset);
+    }
+
+    // Bookmark load: re-select the saved rows (one or many) and scroll the saved
+    // anchor row back into view, so the bookmark returns to what was on screen.
+    private void OnRestoreBookmarkView(IReadOnlyList<BookmarkFieldRef> selected, BookmarkFieldRef? topRow)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var grid = this.FindControl<DataGrid>("FieldGrid");
+            if (grid?.ItemsSource == null) return;
+            var rows = grid.ItemsSource.Cast<LiveFieldValue>().ToList();
+
+            // Prefer an exact name+offset match; fall back to name only (container
+            // element rows can share offset 0 across elements).
+            static LiveFieldValue? Match(List<LiveFieldValue> rs, BookmarkFieldRef r)
+                => rs.FirstOrDefault(f => f.Name == r.Name && f.Offset == r.Offset)
+                   ?? rs.FirstOrDefault(f => f.Name == r.Name);
+
+            if (selected.Count > 0)
+            {
+                try
+                {
+                    grid.SelectedItems.Clear();
+                    foreach (var sel in selected)
+                    {
+                        var hit = Match(rows, sel);
+                        if (hit != null && !grid.SelectedItems.Contains(hit))
+                            grid.SelectedItems.Add(hit);
+                    }
+                }
+                catch (System.NotSupportedException)
+                {
+                    // Defensive: if this Avalonia build's SelectedItems list is
+                    // read-only, fall back to restoring the single anchor row.
+                    grid.SelectedItem = Match(rows, selected[0]);
+                }
+            }
+
+            // Restore the view position after selection-driven layout settles.
+            // Anchor on the saved top row, falling back to the first selected row.
+            Dispatcher.UIThread.Post(() =>
+            {
+                var anchor = topRow != null ? Match(rows, topRow) : null;
+                if (anchor == null && selected.Count > 0)
+                    anchor = Match(rows, selected[0]);
+                if (anchor != null)
+                    grid.ScrollIntoView(anchor, null);
+            }, DispatcherPriority.Background);
         }, DispatcherPriority.Background);
     }
 

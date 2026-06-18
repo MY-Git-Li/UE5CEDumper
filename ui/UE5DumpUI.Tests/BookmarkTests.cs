@@ -14,13 +14,15 @@ public class BookmarkTests
 
         Assert.False(slot.IsOccupied);
         Assert.Equal("", slot.Label);
-        Assert.Equal("", slot.TooltipText);
+        Assert.Contains("empty", slot.TooltipText);  // computed empty-slot hint
         Assert.Empty(slot.SavedBreadcrumbs);
         Assert.Equal("", slot.SavedAddress);
         Assert.Equal("", slot.SavedObjectName);
         Assert.Equal("", slot.SavedClassName);
         Assert.Equal("", slot.SavedClassAddr);
         Assert.Null(slot.SavedCachedWorld);
+        Assert.Empty(slot.SavedSelectedFields);
+        Assert.Null(slot.SavedTopRow);
     }
 
     [Fact]
@@ -42,10 +44,10 @@ public class BookmarkTests
 
         slot.IsOccupied = true;
         slot.Label = "Test";
-        slot.TooltipText = "Tip";
 
         Assert.Contains("IsOccupied", changedProps);
         Assert.Contains("Label", changedProps);
+        // TooltipText is computed; flipping IsOccupied raises its change too.
         Assert.Contains("TooltipText", changedProps);
     }
 
@@ -153,9 +155,10 @@ public class BookmarkTests
 
         Assert.False(slot.IsOccupied);
         Assert.Equal("", slot.Label);
-        Assert.Equal("", slot.TooltipText);
+        Assert.Contains("empty", slot.TooltipText);  // back to the empty-slot hint
         Assert.Empty(slot.SavedBreadcrumbs);
         Assert.Equal("", slot.SavedAddress);
+        Assert.Empty(slot.SavedSelectedFields);
     }
 
     [Fact]
@@ -220,6 +223,164 @@ public class BookmarkTests
 
         // Should not throw or change state
         await vm.LoadBookmarkCommand.ExecuteAsync(slot);
+    }
+
+    [Fact]
+    public void BookmarkSlot_TooltipText_Occupied_ShowsTargetAndJumpHint()
+    {
+        var vm = CreateViewModel();
+        SetupViewModelWithData(vm, objectName: "PlayerPawn", className: "Pawn");
+        var slot = vm.BookmarkSlots[0];
+
+        vm.SaveBookmarkToSlotCommand.Execute(slot);
+
+        Assert.Contains("Pawn", slot.TooltipText);
+        Assert.Contains("PlayerPawn", slot.TooltipText);
+        Assert.Contains("Jump", slot.TooltipText);   // occupied slots invite a jump-back
+        Assert.DoesNotContain("empty", slot.TooltipText);
+    }
+
+    [Fact]
+    public void SaveBookmarkToSlot_CapturesSelectedRows()
+    {
+        var vm = CreateViewModel();
+        SetupViewModelWithData(vm);
+        vm.UpdateSelectedFields(new List<LiveFieldValue>
+        {
+            new() { Name = "Health", Offset = 0x10 },
+            new() { Name = "Mana",   Offset = 0x14 },
+        });
+        var slot = vm.BookmarkSlots[0];
+
+        vm.SaveBookmarkToSlotCommand.Execute(slot);
+
+        Assert.Equal(2, slot.SavedSelectedFields.Count);
+        Assert.Contains(slot.SavedSelectedFields, f => f.Name == "Health" && f.Offset == 0x10);
+        Assert.Contains(slot.SavedSelectedFields, f => f.Name == "Mana" && f.Offset == 0x14);
+    }
+
+    [Fact]
+    public void SaveBookmarkToSlot_NoSnapshot_FallsBackToSelectedFieldAnchor()
+    {
+        var vm = CreateViewModel();
+        SetupViewModelWithData(vm);
+        // Single-row selection set without a grid SelectionChanged sync.
+        vm.SelectedField = new LiveFieldValue { Name = "Stamina", Offset = 0x20 };
+        var slot = vm.BookmarkSlots[0];
+
+        vm.SaveBookmarkToSlotCommand.Execute(slot);
+
+        Assert.Single(slot.SavedSelectedFields);
+        Assert.Equal("Stamina", slot.SavedSelectedFields[0].Name);
+        Assert.Equal(0x20, slot.SavedSelectedFields[0].Offset);
+    }
+
+    [Fact]
+    public void SaveBookmarkToSlot_CapturesViewAnchorFromView()
+    {
+        var vm = CreateViewModel();
+        SetupViewModelWithData(vm);
+        // The View answers the capture request synchronously with the top row.
+        vm.CaptureViewAnchor += a => a.TopRow = new BookmarkFieldRef("Stamina", 0x40);
+        var slot = vm.BookmarkSlots[0];
+
+        vm.SaveBookmarkToSlotCommand.Execute(slot);
+
+        Assert.NotNull(slot.SavedTopRow);
+        Assert.Equal("Stamina", slot.SavedTopRow!.Name);
+        Assert.Equal(0x40, slot.SavedTopRow.Offset);
+    }
+
+    [Fact]
+    public async Task LoadBookmark_RaisesRestoreWithSavedSelectionAndAnchor()
+    {
+        var vm = CreateViewModel();
+        SetupViewModelWithData(vm);
+        vm.UpdateSelectedFields(new List<LiveFieldValue> { new() { Name = "Gold", Offset = 0x30 } });
+        vm.CaptureViewAnchor += a => a.TopRow = new BookmarkFieldRef("HeaderRow", 0x0);
+        var slot = vm.BookmarkSlots[0];
+        vm.SaveBookmarkToSlotCommand.Execute(slot);
+
+        IReadOnlyList<BookmarkFieldRef>? gotSel = null;
+        BookmarkFieldRef? gotTop = null;
+        var raised = false;
+        vm.RestoreBookmarkView += (sel, top) => { gotSel = sel; gotTop = top; raised = true; };
+
+        await vm.LoadBookmarkCommand.ExecuteAsync(slot);
+
+        Assert.True(raised);
+        Assert.NotNull(gotSel);
+        Assert.Single(gotSel!);
+        Assert.Equal("Gold", gotSel![0].Name);
+        Assert.NotNull(gotTop);
+        Assert.Equal("HeaderRow", gotTop!.Name);
+    }
+
+    // --- PLV_game routing bug: a deeper crumb sharing the UWorld address ---
+
+    [Fact]
+    public async Task LoadBookmark_DeepCrumbAtWorldAddress_WalksInstance_NotActorList()
+    {
+        // Regression: navigating PersistentLevel -> OwningWorld lands on a crumb
+        // whose address equals the UWorld address. Loading that bookmark must walk
+        // it as an instance, NOT swap in the GWorld actor-list view ("PLV_game").
+        var dump = new StubDumpService();
+        dump.RegisterStruct("0xA8B0", new InstanceWalkResult
+        {
+            Name = "PLV_game", ClassName = "World", Address = "0xA8B0",
+            Fields = new List<LiveFieldValue> { new() { Name = "OwningGameInstance", Offset = 0x10 } },
+        });
+        var vm = new LiveWalkerViewModel(dump, new MockLoggingService(),
+            new MockPlatformService(Path.GetTempPath()));
+
+        var slot = vm.BookmarkSlots[0];
+        slot.SavedCachedWorld = new WorldWalkResult
+        {
+            WorldAddr = "0xA8B0", WorldName = "PLV_game",
+            LevelAddr = "0x4500", LevelName = "PersistentLevel", LevelOffset = 0x30,
+        };
+        slot.SavedBreadcrumbs = new List<BreadcrumbItem>
+        {
+            new() { Address = "0xA8B0", Label = "GWorld", FieldName = "GWorld", IsPointerDeref = true },
+            new() { Address = "0x4500", Label = "PersistentLevel", FieldName = "PersistentLevel", IsPointerDeref = true, FieldOffset = 0x30 },
+            new() { Address = "0xA8B0", Label = "OwningWorld", FieldName = "OwningWorld", IsPointerDeref = true, FieldOffset = 0xB8 },
+        };
+        slot.SavedAddress = "0xA8B0";
+        slot.IsOccupied = true;
+
+        await vm.LoadBookmarkCommand.ExecuteAsync(slot);
+
+        Assert.Contains(vm.Fields, f => f.Name == "OwningGameInstance");  // instance walk
+        Assert.Equal("World", vm.CurrentClassName);
+        Assert.DoesNotContain(vm.Fields, f => f.Name == "PersistentLevel"); // actor-list absent
+    }
+
+    [Fact]
+    public async Task LoadBookmark_GWorldRoot_ShowsActorList()
+    {
+        // Control: the genuine GWorld root (FieldName=="GWorld", sole crumb) DOES
+        // restore the synthetic actor-list view.
+        var dump = new StubDumpService();
+        var vm = new LiveWalkerViewModel(dump, new MockLoggingService(),
+            new MockPlatformService(Path.GetTempPath()));
+
+        var slot = vm.BookmarkSlots[0];
+        slot.SavedCachedWorld = new WorldWalkResult
+        {
+            WorldAddr = "0xA8B0", WorldName = "PLV_game",
+            LevelAddr = "0x4500", LevelName = "PersistentLevel", LevelOffset = 0x30,
+        };
+        slot.SavedBreadcrumbs = new List<BreadcrumbItem>
+        {
+            new() { Address = "0xA8B0", Label = "GWorld", FieldName = "GWorld", IsPointerDeref = true },
+        };
+        slot.SavedAddress = "0xA8B0";
+        slot.IsOccupied = true;
+
+        await vm.LoadBookmarkCommand.ExecuteAsync(slot);
+
+        Assert.Equal("UWorld", vm.CurrentClassName);
+        Assert.Contains(vm.Fields, f => f.Name == "PersistentLevel");  // actor-list signature
     }
 
     // --- Helpers ---
