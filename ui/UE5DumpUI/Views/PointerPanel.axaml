@@ -242,6 +242,13 @@
             <TextBlock Text="{StaticResource str.Pointers.AobAllFailed}"
                        Foreground="#E05252" FontSize="11" Margin="0,3,0,0"
                        IsVisible="{Binding GWorldAobAllFailed}"/>
+            <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,3,0,0"
+                        IsVisible="{Binding ShowGWorldRecovered}">
+              <TextBlock Text="{StaticResource str.Pointers.AobFailed}"
+                         Foreground="#E6A817" FontSize="11"/>
+              <TextBlock Text="{Binding GWorldMethodLabel}"
+                         Foreground="#E6A817" FontSize="11" FontWeight="SemiBold"/>
+            </StackPanel>
             <TextBlock Text="{StaticResource str.Pointers.GWorldNotFound}"
                        Foreground="#888" FontSize="11" Margin="0,3,0,0"
                        IsVisible="{Binding ShowGWorldWarning}"/>

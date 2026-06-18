@@ -318,9 +318,11 @@ bool UE5_Init() {
 
     // --- GWorld recovery (Avowed / Obsidian UE5.3) ---
     // GWorld's AOB can land on a decoy (like GObjects did). Validate that *GWorld is a
-    // UObject whose class is "World"; if not, recover by finding a live UWorld instance
-    // in GObjects and the static .data pointer to it. Needs a working GObjects + offsets,
-    // so it runs after the GObjects recovery + offset validation above. Gated on a real
+    // UObject whose class is "World"; if not, recover in two stages: (1) find a live UWorld
+    // instance in GObjects and the static .data pointer to it (ExtraScanGWorld); (2) if no
+    // static slot exists, fall back to the engine object graph — GEngine->GameViewport->&World
+    // (RecoverGWorldViaEngine, a live engine-updated UWorld* field). Needs a working GObjects +
+    // offsets, so it runs after the GObjects recovery + offset validation above. Gated on a real
     // object array, so titles with a correct GWorld are unaffected.
     if (ptrs.GObjects && ptrs.GNames && ptrs.GWorld && Aura::GetCount() > 0) {
         bool gworldOk = false;
@@ -335,18 +337,56 @@ bool UE5_Init() {
                 }
             }
         }
+
+        // TEST HOOK — the recovery path is otherwise only reachable on a game whose GWorld
+        // AOB genuinely fails. Set UE5DUMP_FORCE_GWORLD_RECOVERY in the GAME process env to
+        // exercise it on demand:
+        //   =1       force the full recovery chain (ExtraScanGWorld, then engine path)
+        //   =engine  also skip ExtraScanGWorld -> go straight to RecoverGWorldViaEngine
+        // Non-destructive: if recovery fails the valid AOB GWorld is left untouched.
+        char forceEnv[32] = {0};
+        DWORD forceLen = GetEnvironmentVariableA("UE5DUMP_FORCE_GWORLD_RECOVERY", forceEnv, sizeof(forceEnv));
+        bool forceRecovery   = (forceLen > 0 && forceLen < sizeof(forceEnv));
+        bool forceEngineOnly = forceRecovery && _stricmp(forceEnv, "engine") == 0;
+        if (forceRecovery && gworldOk) {
+            LOG_WARN("UE5_Init: TEST HOOK UE5DUMP_FORCE_GWORLD_RECOVERY=%s — forcing recovery (AOB GWorld was valid)",
+                     forceEnv);
+            gworldOk = false;
+        }
+
         if (!gworldOk) {
-            LOG_WARN("UE5_Init: GWorld=0x%llX does not deref to a UWorld — recovering via GObjects instance scan...",
+            LOG_WARN("UE5_Init: GWorld=0x%llX does not deref to a UWorld — recovering...",
                      static_cast<unsigned long long>(ptrs.GWorld));
-            uintptr_t rec = Genau::ExtraScanGWorld();
+            uintptr_t   rec    = 0;
+            const char* method = nullptr;
+            if (!forceEngineOnly) {
+                rec = Genau::ExtraScanGWorld();          // primary: static .data slot
+                if (rec) method = "instance_scan_recovery";
+            }
+            if (!rec) {
+                rec = Genau::RecoverGWorldViaEngine();    // gap-fill: live GameViewport->World slot
+                if (rec) method = "engine_recovery";
+            }
             if (rec) {
                 ptrs.GWorld = rec;
                 g_cachedGWorld = rec;
-                g_cachedGWorldMethod = "instance_scan_recovery";
-                g_cachedGWorldPatternId = nullptr;   // the GWLD_* AOB found a decoy — drop its stale label
-                LOG_INFO("UE5_Init: GWorld recovered -> 0x%llX", static_cast<unsigned long long>(rec));
+                g_cachedGWorldMethod = method;
+                g_cachedGWorldPatternId = nullptr;       // the GWLD_* AOB found a decoy — drop its stale label
+                // The AOB symbol/scan fields would otherwise still describe the (decoy) AOB
+                // match, leaving the UI's GWorld "AOB" symbol toggle wrongly enabled (it keys
+                // on a non-empty gworld_aob via IsAobSymbolAvailable) and the Pointers panel
+                // still showing the decoy's "AOB: <scan addr>" line. Recovery slots are not
+                // static module symbols, so AOB-symbol export / disasm do not apply. Clearing
+                // these makes the toggle auto-uncheck + gray out and the scan-addr line hide,
+                // re-evaluated on the next connect; the UI shows the recovery method instead.
+                g_cachedGWorldAob      = nullptr;
+                g_cachedGWorldAobPos   = 0;
+                g_cachedGWorldAobLen   = 0;
+                g_cachedGWorldScanAddr = 0;
+                LOG_INFO("UE5_Init: GWorld recovered via %s -> 0x%llX",
+                         method, static_cast<unsigned long long>(rec));
             } else {
-                LOG_WARN("UE5_Init: GWorld recovery failed (no UWorld instance / static pointer found)");
+                LOG_WARN("UE5_Init: GWorld recovery failed (no static slot, no engine/viewport path)");
             }
         }
     }
