@@ -83,6 +83,23 @@ bool TryParseDataType(const std::string& s, DataType& out) {
     return false;
 }
 
+const char* NameOf(ScanType st) {
+    switch (st) {
+        case ScanType::Exact:      return "Exact";
+        case ScanType::Bigger:     return "Bigger";
+        case ScanType::Smaller:    return "Smaller";
+        case ScanType::Between:    return "Between";
+        case ScanType::Changed:    return "Changed";
+        case ScanType::Unchanged:  return "Unchanged";
+        case ScanType::Increased:  return "Increased";
+        case ScanType::Decreased:  return "Decreased";
+        case ScanType::Contains:   return "Contains";
+        case ScanType::StartsWith: return "StartsWith";
+        case ScanType::EndsWith:   return "EndsWith";
+    }
+    return "Exact";
+}
+
 bool TryParseScanType(const std::string& s, ScanType& out) {
     if (s == "Exact")      { out = ScanType::Exact;      return true; }
     if (s == "Bigger")     { out = ScanType::Bigger;     return true; }

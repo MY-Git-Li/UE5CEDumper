@@ -6,8 +6,11 @@ importantly — the **connection points where future features plug in** (the `Or
 reuse seam + the phase roadmap).
 
 Shipped: P1 builds 1276-1278 (group scan), Deep builds 1283-1285 (opt-in deep
-containers, single + group). In-game verified on SEED (UE4.27). See
-[dev-log.md](dev-log.md) for the milestone history.
+containers, single + group), P2 builds 1295-1302 (per-slot prev-value / ordered /
+Between predicates + locked-offset table; the "Copy CE / export" sub-piece was
+deliberately dropped — export from Live Walker). P1/Deep + the P2 prev-value
+refine in-game verified on SEED (UE4.27); Between first-scan live-verify pending.
+See [dev-log.md](dev-log.md) for the milestone history.
 
 -----
 
@@ -106,10 +109,17 @@ usable from the DB-driven features.
 
 ### 3.2 Phase roadmap (open work)  → tracked in [todo.md](todo.md)
 
-- **P2 — prev-value per slot + locked-offset table + Copy CE.** Add per-slot
-  `Changed / Increased / Decreased / Unchanged` to `Orden::SlotTarget` + the group refine
-  (the real power when you *don't* know exact values). Surface the resolved offset table
-  (class + N offsets) and a "Copy CE Script" / export of the matched object.
+- **P2 — prev-value per slot + locked-offset table. DONE (builds 1295-1302).** Per-slot
+  predicate lives on `Orden::SlotTarget` (`st` + `tolerance` + `targets2`, routed through
+  `Radar::ComparePredicate`; `LeafSatisfiesSlot` rejects prev-value types on the first
+  scan — no baseline). First scan takes `Exact / Bigger / Smaller / Between` (the last
+  carries an upper bound in `value2`/`targets2` — the bounded-unknown entry point); the
+  group refine (`Aura::RefineGroupCandidates`) also takes `Changed / Unchanged / Increased
+  / Decreased`, comparing each leaf against its stored `GroupSlotMatch::prevValue`. The
+  locked-offset table (`🔒 Class — Str@0x20, Def@0x24`) surfaces once every slot locks
+  (`AllLocked`). The third sub-piece — a **"Copy CE Script" / export of the matched object
+  — was intentionally not built**: the resolved chain is exported from Live Walker.
+  Prev-value refine in-game VERIFIED on SEED; *remaining:* Between first-scan live-verify.
 - **P3 — numeric containers as blocks.** **Largely done** via the opt-in Deep mode.
   *Remaining:* scalar-**valued** maps (`TMap<Name,int>` values) aren't emitted by
   `WalkContainerLeaves` (struct-valued maps *are*) — needs `ContainerCacheEntry` to carry
@@ -126,13 +136,18 @@ usable from the DB-driven features.
 ## 4. Pipe / UI surface
 
 - **Pipe** — `begin_group_scan` (`values[]`, optional `deep`), `refine_group_scan`,
-  `query_group_candidates`, `end_group_scan`. Object-level candidate with nested `slots[]`
-  (each: `value`, `field_name`, `field_offset`, `field_type`, `leaf_value`, `addr`,
-  `matched_offsets[]`, `locked`). See [pipe-protocol.md](pipe-protocol.md).
+  `query_group_candidates`, `end_group_scan`. Each input slot carries `value`, `data_type`,
+  (P2) `scan_type` (default `Exact`; begin = Exact/Bigger/Smaller/Between, refine also
+  Changed/Unchanged/Increased/Decreased), and `value2` (Between upper bound only).
+  Object-level candidate with nested `slots[]` (each: `value`, `scan_type`, `value2`,
+  `field_name`, `field_offset`, `field_type`, `leaf_value`, `addr`, `matched_offsets[]`,
+  `locked`). See [pipe-protocol.md](pipe-protocol.md).
 - **UI** — Value Search tab Single/Group `ToggleSwitch`; group mode = 2–4 row editable
-  input grid + master-detail results DataGrid. A shared **"Deep (nested containers)"**
-  checkbox (default off) on both modes. Handoffs (Live Walker / Locate-in-GWorld / Copy /
-  Pivot) reuse the single-value events.
+  input grid (per-row width scope + **scan-type ComboBox** + value box, which hides for
+  prev-value types, plus a second `..to` box for Between) + master-detail results DataGrid
+  whose detail header shows the **locked-offset table** once all slots lock. A shared
+  **"Deep (nested containers)"** checkbox (default off) on both modes. Handoffs (Live Walker
+  / Locate-in-GWorld / Copy / Pivot) reuse the single-value events.
 
 -----
 
