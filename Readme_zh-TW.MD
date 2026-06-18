@@ -19,7 +19,7 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 [![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-CC785C?logo=claude)](https://claude.ai/code)
 
 ## 螢幕截圖 (Screenshots)
-<video src="https://github.com/bbfox0703/UE5CEDumper/raw/main/img/MainUI.webm" width="100%" controls autoplay loop muted></video>  
+<video src="https://github.com/bbfox0703/UE5CEDumper/raw/main/img/MainUI.mp4" width="100%" controls autoplay loop muted></video>  
 <img src="./img/Value_Search.webp" alt="Value Search"/>  
 
 ## 重點亮點 (Highlights)
