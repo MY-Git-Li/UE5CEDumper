@@ -1153,13 +1153,16 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             int  limit    = request.value("limit", 100);
             int  arrayCap = request.value("array_cap", 256);
             bool gameOnly = request.value("game_only", true);
+            // Native-C (P3, opt-in): also capture each object's unmanaged-hole
+            // guesses as synthetic "<raw@0xNN>" fields (normalized canonical type).
+            bool nativeC  = request.value("native_c", false);
             std::string dtStr = request.value("data_type", "NumericNoByte");
             Radar::DataType dt;
             if (!Radar::TryParseDataType(dtStr, dt) || !Radar::IsMultiNumericDataType(dt)) {
                 return Renge::MakeError(id, "snapshot data_type must be NumericNoByte or NumericAll").dump();
             }
 
-            auto chunk = Aura::CaptureSnapshotChunk(offset, limit, gameOnly, dt, arrayCap);
+            auto chunk = Aura::CaptureSnapshotChunk(offset, limit, gameOnly, dt, arrayCap, nativeC);
 
             auto encodeFields = [](const std::vector<Aura::SnapshotField>& src) {
                 json arr = json::array();

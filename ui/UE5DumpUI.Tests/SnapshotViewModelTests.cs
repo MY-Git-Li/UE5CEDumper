@@ -30,6 +30,7 @@ public class SnapshotViewModelTests : IDisposable
     {
         public string? LastDataType;
         public bool? LastGameOnly;
+        public bool? LastNativeC;
 
         public override Task<int> BeginSnapshotAsync(string dataType, CancellationToken ct = default)
         {
@@ -38,9 +39,11 @@ public class SnapshotViewModelTests : IDisposable
         }
 
         public override Task<SnapshotChunkResult> SnapshotChunkAsync(
-            string dataType, bool gameOnly, int offset, int limit, CancellationToken ct = default)
+            string dataType, bool gameOnly, int offset, int limit,
+            bool nativeC = false, CancellationToken ct = default)
         {
             LastGameOnly = gameOnly;
+            LastNativeC = nativeC;
             var r = new SnapshotChunkResult { Total = 3 };
             if (offset == 0)
             {
@@ -92,6 +95,7 @@ public class SnapshotViewModelTests : IDisposable
         Assert.False(vm.IsCapturing);
         Assert.Equal("NumericNoByte", dump.LastDataType);
         Assert.True(dump.LastGameOnly);
+        Assert.False(dump.LastNativeC);   // Native-C default OFF (P3)
 
         var list = await _store.ListSnapshotsAsync(TestContext.Current.CancellationToken);
         var saved = Assert.Single(list);
@@ -107,6 +111,24 @@ public class SnapshotViewModelTests : IDisposable
         // The list refreshed into the VM, and the label reset for the next run.
         Assert.Single(vm.Snapshots);
         Assert.Equal("", vm.Label);
+    }
+
+    [Fact]
+    public async Task Capture_PassesIncludeNativeFields_ToSnapshotChunk()
+    {
+        var dump = new CaptureStub();
+        var vm = new SnapshotViewModel(dump, _store, new MockLoggingService())
+        {
+            SelectedScope = "NumericNoByte",
+            GameOnly = true,
+            IncludeNativeFields = true,   // P3 opt-in
+            Label = "native-run",
+        };
+        vm.SetEngineState(new EngineState { PeHash = "PEHASH", UEVersion = 504, ModuleBase = "7FF600000000", ProcessCreationTime = "01D9ABCDEF012345" });
+
+        await vm.CaptureCommand.ExecuteAsync(null);
+
+        Assert.True(dump.LastNativeC);
     }
 
     [Fact]

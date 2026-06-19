@@ -258,7 +258,8 @@ public interface IDumpService
     Task<int> BeginSnapshotAsync(string dataType, CancellationToken ct = default);
 
     Task<SnapshotChunkResult> SnapshotChunkAsync(
-        string dataType, bool gameOnly, int offset, int limit, CancellationToken ct = default);
+        string dataType, bool gameOnly, int offset, int limit,
+        bool nativeC = false, CancellationToken ct = default);
 
     // --- All Functions Enumeration (Interesting Functions Finder) ---
     Task<AllFunctionsResult> ListAllFunctionsAsync(

@@ -38,23 +38,21 @@ Open work only. **Read this when deciding what to do next.**
   *Parent: cooperative cancel + shutdown-abort + disconnect monitor shipped build
   936-937, PR #238 (dev-log 2026-06-06).*
 
-- **Native-C Value Scan — P3 (Snapshot/SPC/Pivot) — P0 + P1 + P2 SHIPPED on dev** —
-  Effort: **M** (P3 snapshot capture) · Risk: **low** (downstream is generic).
-  Full design in [native-c-value-scan-spec.md](native-c-value-scan-spec.md). Finds native
-  (non-`UPROPERTY`) HP/MP in a UObject's **holes** via "Guess What" (`Ubel::GuessGapTypes`).
-  **DONE:** P0 prereqs + P1 single Value Search (raw-hole scan + Newest-first coupling —
-  **in-game VERIFIED on Octopath**) + P2 Group Scan (`ScanForValueGroup(nativeC)` +
-  `AppendRawHoleLeaves`: object-block-only, ≤64 raw leaves/obj, stride 4, slot-width union;
-  `native_c` on `begin_group_scan`; UI group checkbox + `GroupSlotMatch.Origin`). The §7.1
-  small-value hard-deny was simplified to cap + banner guidance (group refine can't add raw
-  leaves; cap+maxResults+deadline bound cost — see spec §7.1). **REMAINING:**
-  - **P3 — Snapshot/SPC/Pivot**: `captureNativeC` on `CaptureSnapshotChunk` → `AppendRawHoleFields`
-    (pre-guess each hole via `GuessGapTypes`, **normalize** to canonical type via
-    `Ubel::NormalizeGuessedTypeToProperty`, **drop Pointer/Padding**), `native_c` on
-    `snapshot_chunk`, update `str.Snapshot.Intro`. Raw rows reuse the existing `fields` schema
-    (no migration); SPC/Pivot join by the offset-encoded `<raw@0x..>` name.
-  - **In-game verify P2** (group native-C) on a Native-C game.
-  *Parent: P0+P1+P2 shipped on dev (this session); builds on value_search_caveats, the `Orden`
+- **Native-C Value Scan — P0–P3 ALL SHIPPED on dev; only in-game verify of P3 remains** —
+  Effort: **0** (verify only) · Risk: low. Full design + status in
+  [native-c-value-scan-spec.md](native-c-value-scan-spec.md). Opt-in raw/unmanaged
+  (non-`UPROPERTY`) scan for native HP/MP via "Guess What" (`Ubel::GuessGapTypes`), across
+  Value Search + Group Scan + Snapshot→SPC→Pivot. **DONE + in-game VERIFIED:** P1 single
+  (Octopath), P2 group (FF7 Rebirth). **P3 DONE (build+tests+AOT green):**
+  `CaptureSnapshotChunk(captureNativeC)` → `AppendRawHoleFields` (GuessGapTypes →
+  `NormalizeGuessedTypeToProperty` → drop Pointer/Padding → `<raw@0xNN>` fields,
+  numericScope-filtered, ≤256/obj); pipe `native_c` on `snapshot_chunk`; C#
+  `SnapshotViewModel.IncludeNativeFields` toggle + intro string. SPC Query + Class Pivot
+  consume raw rows with ZERO code changes (key on prop_name=offset + canonical declared_type;
+  existing `fields` schema, no migration). **REMAINING: in-game verify P3** — capture a
+  native snapshot pair around a stat change, confirm SPC diff tracks a `<raw@0x..>` value +
+  Class Pivot decodes it (not hex). Then the whole feature is closeable.
+  *Parent: P0–P3 shipped on dev (this session); builds on value_search_caveats, the `Orden`
   seam (group-value-scan-spec §3.1), and the "Guess What" build (commit 75ea723).*
 
 -----

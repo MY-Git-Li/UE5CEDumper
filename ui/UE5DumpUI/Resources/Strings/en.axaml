@@ -309,7 +309,9 @@
     <sys:String x:Key="str.Experimental.Placeholder">This experimental feature is under construction. See docs/experimental-snapshot-spc-pivot.md.</sys:String>
 
     <!-- Snapshot tab (experimental — Phase A) -->
-    <sys:String x:Key="str.Snapshot.Intro">Capture every numeric UPROPERTY of every (scoped) object into a persisted snapshot. Snapshots feed SPC Query and Class Pivot. Native (non-UPROPERTY) fields are not captured.</sys:String>
+    <sys:String x:Key="str.Snapshot.Intro">Capture every numeric UPROPERTY of every (scoped) object into a persisted snapshot. Snapshots feed SPC Query and Class Pivot. Enable "Native-C" to also capture unmanaged (non-UPROPERTY) raw values.</sys:String>
+    <sys:String x:Key="str.Snapshot.NativeC">Native-C (raw)</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.NativeC">Opt-in (default off). In addition to reflected UPROPERTY fields, captures each object's UNMANAGED holes (non-UPROPERTY raw bytes) as synthetic "&lt;raw@0xNN&gt;" fields — the bytes are interpreted via the Guess-What heuristic and normalized to a numeric type (pointer/padding guesses are dropped). Lets SPC Query diff and Class Pivot track native values (HP/MP) that reflection can't see. Slower and larger per capture. Raw fields join across snapshots by offset; a guess that flips type between captures (rare for stable values) simply won't join.</sys:String>
     <sys:String x:Key="str.Snapshot.CaptureHeader">Capture snapshot</sys:String>
     <sys:String x:Key="str.Snapshot.CompareHeader">Compare snapshots (diff)</sys:String>
     <sys:String x:Key="str.Snapshot.NotConnected">Connect to a game to capture snapshots.</sys:String>

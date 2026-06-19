@@ -1916,7 +1916,8 @@ public sealed class DumpService : IDumpService
     }
 
     public async Task<SnapshotChunkResult> SnapshotChunkAsync(
-        string dataType, bool gameOnly, int offset, int limit, CancellationToken ct = default)
+        string dataType, bool gameOnly, int offset, int limit,
+        bool nativeC = false, CancellationToken ct = default)
     {
         var req = new JsonObject
         {
@@ -1926,6 +1927,9 @@ public sealed class DumpService : IDumpService
             ["offset"] = offset,
             ["limit"] = limit,
         };
+        // Native-C raw-hole capture (P3), opt-in → attach only when on (back-compat).
+        if (nativeC)
+            req["native_c"] = (JsonNode)true;
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
 

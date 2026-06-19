@@ -983,9 +983,16 @@ struct SnapshotChunkResult {
 // capture). gameOnly skips engine-package classes. numericScope must be a
 // multi-numeric meta type (NumericNoByte default / NumericAll); a non-meta
 // type captures nothing. arrayCap bounds elements captured per struct array.
+//
+// captureNativeC (P3, opt-in, default off): ALSO append each object's
+// unmanaged-hole guesses (non-UPROPERTY raw bytes interpreted via the Guess-What
+// engine, normalized to canonical property types, Pointer/Padding dropped) as
+// synthetic "<raw@0xNN>" fields, so the snapshot carries native values for SPC
+// diff / Class Pivot. See native-c-value-scan-spec.md §8.
 SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
                                          bool gameOnly,
                                          Radar::DataType numericScope,
-                                         int32_t arrayCap = 256);
+                                         int32_t arrayCap = 256,
+                                         bool captureNativeC = false);
 
 } // namespace Aura

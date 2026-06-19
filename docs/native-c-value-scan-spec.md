@@ -30,7 +30,16 @@
 > (`StatusList_2_C` matched `<raw@0x414>=6568, <raw@0x42C>=9999999`). Newest-first is
 > a **visible opt-in checkbox in BOTH single and group modes** (auto-checked with
 > native-C, user can uncheck — e.g. for an early-spawned/low-index operated-character
-> value vs a late-spawned/high-index UI panel). **P3 (snapshot/SPC/pivot) remains.**
+> value vs a late-spawned/high-index UI panel). **P3 = Snapshot/SPC/Pivot** — DONE:
+> `CaptureSnapshotChunk(captureNativeC)` + `AppendRawHoleFields` (GuessGapTypes per
+> hole → `NormalizeGuessedTypeToProperty` to canonical type → drop Pointer/Padding →
+> synthetic `<raw@0xNN>` `SnapshotField`s, numericScope-filtered, ≤256/object); pipe
+> `native_c` on `snapshot_chunk`; C# `SnapshotViewModel.IncludeNativeFields` toggle +
+> `str.Snapshot.Intro` updated. **SPC Query + Class Pivot consume raw rows with ZERO
+> code changes** — they key on `prop_name` (which encodes the offset) + the canonical
+> `declared_type` (so `SnapshotNumeric.TryFromHex` decodes it), reusing the existing
+> `fields` schema (no migration). **The whole Native-C feature (P0–P3) is now shipped;
+> P3 in-game verify pending.**
 
 -----
 

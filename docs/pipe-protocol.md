@@ -364,7 +364,11 @@ Type-agnostic streamed capture of every numeric UPROPERTY of every (scoped) UObj
   "game_only": true,
   "offset":    0,
   "limit":     100,
-  "array_cap": 256 }
+  "array_cap": 256,
+  "native_c":  false }   // optional (P3): also capture each object's unmanaged-hole
+                         //   guesses as synthetic "<raw@0xNN>" fields (Guess-What +
+                         //   normalize to canonical type; pointer/padding dropped),
+                         //   so SPC Query / Class Pivot can track native values.
 ```
 
 Each chunk object may also carry an `arrays` field (Phase A1b) — struct-array

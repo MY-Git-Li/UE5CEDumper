@@ -7336,10 +7336,74 @@ ValueScanStats RefineGroupCandidates(
     return stats;
 }
 
+// Native-C (P3): append an object's UNMANAGED-hole guesses as synthetic snapshot
+// fields, so a captured snapshot ALSO carries native (non-UPROPERTY) values for the
+// SPC diff / Class Pivot consumers. Reuses the "Guess What" engine (Ubel::GuessGapTypes)
+// over each hole, then NORMALIZES each guessed type to the canonical UE property-type
+// string (Ubel::NormalizeGuessedTypeToProperty) — MANDATORY, because the C# consumer
+// SnapshotNumeric.TryFromHex switches on exact "FloatProperty"/"IntProperty"/... and
+// would store a NULL numeric_value (breaking SPC compare + Pivot decode) for a suffixed
+// "Float?"/"Int32?". Pointer/Padding guesses normalize to "" and are DROPPED (not
+// gameplay numerics; they'd pollute the Pivot value picker). Field names are
+// "<raw@0xNN>" — offset-only, so the same hole joins across snapshots regardless of the
+// guessed value, and so SPC/Pivot (which key on prop_name + offset) treat it uniformly;
+// matches the P1/P2 discriminator. Honors the snapshot numericScope (e.g. Byte guesses
+// drop under NumericNoByte). Bounded per object (kMaxRawSnapFields).
+void AppendRawHoleFields(uintptr_t obj, uintptr_t cls, Radar::DataType numericScope,
+                         std::vector<SnapshotField>& out) {
+    const std::vector<Radar::DataType>& members = Radar::MultiNumericMembers(numericScope);
+    if (members.empty()) return;   // numericScope isn't a meta type -> capture nothing
+
+    const ClassInfo& ci = Ubel::WalkClassEx(cls);   // cached
+    const int32_t headerEnd = DynOff::UOBJECT_OUTER + 8;
+    constexpr int32_t kSanity   = 0x10000;
+    constexpr int32_t kFallback = 0x400;
+    int32_t propsSize = ci.PropertiesSize;
+    int32_t winEnd = (propsSize > headerEnd && propsSize <= kSanity) ? propsSize
+                   : (propsSize > kSanity) ? kSanity
+                   : (headerEnd + kFallback);
+    if (winEnd <= headerEnd) return;
+
+    auto holes = Ubel::ComputeClassHoles(ci, headerEnd, winEnd);
+    if (holes.empty()) return;
+
+    auto inScope = [&](Radar::DataType dt) {
+        for (Radar::DataType m : members) if (m == dt) return true;
+        return false;
+    };
+
+    constexpr int kMaxRawSnapFields = 256;   // per object
+    int added = 0;
+    std::vector<Ubel::LiveFieldValue> guesses;
+    for (const auto& hole : holes) {
+        if (added >= kMaxRawSnapFields) break;
+        guesses.clear();
+        Ubel::GuessGapTypes(obj, hole.start, hole.end, guesses);
+        for (const auto& g : guesses) {
+            if (added >= kMaxRawSnapFields) break;
+            std::string canon = Ubel::NormalizeGuessedTypeToProperty(g.typeName);
+            if (canon.empty()) continue;   // padding / pointer -> drop
+            Radar::DataType dt;
+            if (!Radar::TryDataTypeFromPropertyTypeName(canon, dt)) continue;
+            if (!inScope(dt)) continue;    // honor numericScope (e.g. Byte under NoByte)
+            SnapshotField sf;
+            char nb[32];
+            snprintf(nb, sizeof(nb), "<raw@0x%X>", g.offset);
+            sf.name   = nb;
+            sf.offset = g.offset;
+            sf.type   = canon;            // canonical -> SnapshotNumeric decodes it
+            sf.hex    = g.hexValue;       // little-endian hex, width already matches canon
+            out.push_back(std::move(sf));
+            ++added;
+        }
+    }
+}
+
 SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
                                          bool gameOnly,
                                          Radar::DataType numericScope,
-                                         int32_t arrayCap) {
+                                         int32_t arrayCap,
+                                         bool captureNativeC) {
     SnapshotChunkResult result;
     const int32_t total = GetCount();
     result.total = total;
@@ -7426,6 +7490,12 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
         // Container-element leaves at any (bounded) depth — struct-array / map /
         // set elements + nested leaf-containers (build 1204).
         CaptureStructArrays(obj, cls, numericScope, arrayCap, so.arrays);
+
+        // Native-C (P3, opt-in): append this object's unmanaged-hole guesses as
+        // synthetic "<raw@0xNN>" fields so the snapshot also carries native
+        // (non-UPROPERTY) values for SPC diff / Class Pivot.
+        if (captureNativeC)
+            AppendRawHoleFields(obj, cls, numericScope, so.fields);
 
         // Keep objects with any captured scalar field OR array element.
         if (so.fields.empty() && so.arrays.empty()) continue;
