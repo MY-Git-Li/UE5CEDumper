@@ -7413,94 +7413,117 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
     const int32_t end = (std::min)(offset + limit, total);
     result.scanned = (end > offset) ? (end - offset) : 0;
 
-    // Wall-clock deadline so an expensive chunk (large classes, and — once it
-    // lands — the opt-in Native-C / deep capture per object) can't stall the
-    // capture thread indefinitely. This loop previously had ONLY a Tot cancel
-    // check; unlike ScanForValue / ScanForValueGroup it had no time backstop
-    // (see docs/native-c-value-scan-spec.md §11). On a deadline we return the
-    // chunk PARTIAL with result.scanned set to the actual progress so the C#
-    // pager advances correctly (the i != offset guard guarantees progress, so
-    // paging can't stall).
-    constexpr auto kCaptureDeadline = std::chrono::seconds(15);
-    const auto t0 = std::chrono::steady_clock::now();
+    if (result.scanned <= 0) return result;
 
-    // Reused scratch so per-object capture doesn't churn the heap.
-    std::vector<std::string> typeNames;
+    // Parallel capture: the chunk's objects are walked across worker threads — the
+    // single-threaded walk was the dominant cost on huge games (FF7 Rebirth ~433K
+    // objects: snapshot ran 10+ min and didn't finish). Every per-object dependency
+    // is parallel-safe: Ubel's class/name/struct caches are mutex-guarded and return
+    // value copies (the same primitives ScanForValue already parallelizes), the
+    // Native-C GuessGapTypes pass uses a thread_local buffer, and Macht reads are
+    // SEH-isolated. Each worker fills its OWN object vector; we concat them after
+    // (order is irrelevant — every row carries its GObjects index, the SQLite key).
+    //
+    // The chunk processes its WHOLE [offset, end) range — there is deliberately NO
+    // per-chunk wall-clock deadline: the C# pager advances by `scanned` (= the full
+    // range), so progress must stay CONTIGUOUS (an early parallel return would leave
+    // index holes that the pager would skip = data loss). The per-object caps
+    // (deep-walk maxTotalElems / Native-C kMaxRawSnapFields) plus the chunk size
+    // bound the work, and Tot (client-gone / shutdown) still cancels cooperatively
+    // via the parallel watcher + the body's stride check. SnapshotChunkSize is sized
+    // >= ScanThreadCount's 8192 threshold so each full chunk runs multi-threaded.
+    struct ThreadResult { std::vector<SnapshotObject> objects; };
+    const int32_t chunkLen = end - offset;
 
-    for (int32_t i = offset; i < end; ++i) {
-        if ((i & 0xFFF) == 0 && Tot::Requested()) {
-            Sein::Warn("PIPE:snapshot", "CaptureSnapshotChunk: aborted (client gone / shutdown)");
-            break;  // return partial chunk
+    auto scan = ParallelGObjectsScan<ThreadResult>(chunkLen,
+        [&](ThreadResult& tr, int32_t beginIdx, int32_t endIdx,
+            std::atomic<bool>& deadlineHit) {
+        std::vector<std::string> typeNames;   // per-thread reused scratch
+        for (int32_t k = beginIdx; k < endIdx; ++k) {
+            // Range-relative stride so EACH worker polls cancel on its first
+            // iteration (beginIdx) + every 4096 after, regardless of where its
+            // sub-range starts (matches the ScanForValue / FindRefs idiom; a
+            // chunk-global `k & 0xFFF` would delay cancel on off-aligned workers).
+            if (((k - beginIdx) & 0xFFF) == 0) {
+                if (deadlineHit.load(std::memory_order_relaxed)) return;
+                if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+            }
+            const int32_t i = offset + k;   // real GObjects index
+            uintptr_t obj = GetByIndex(i);
+            if (!obj) continue;
+
+            std::string name = Ubel::GetName(obj);
+            if (name.empty()) continue;  // skip unnamed slots (matches get_object_list)
+
+            uintptr_t cls = Ubel::GetClass(obj);
+            if (!cls) continue;
+
+            // game_only filter keys on the class path (engine packages skipped).
+            std::string classPath = Ubel::GetFullName(cls);
+            if (gameOnly && IsEnginePackage(classPath)) continue;
+
+            ClassInfo ci = Ubel::WalkClassEx(cls);  // cached per class (value copy)
+            if (ci.Fields.empty()) continue;
+
+            typeNames.clear();
+            typeNames.reserve(ci.Fields.size());
+            for (const auto& f : ci.Fields) typeNames.push_back(f.TypeName);
+
+            auto picks = Radar::SelectSnapshotNumericFields(typeNames, numericScope);
+
+            SnapshotObject so;
+            so.index     = i;  // GObjects index == logical slot index
+            so.addr      = obj;
+            so.name      = std::move(name);
+            so.className = ci.Name;
+            so.path      = Ubel::GetFullName(obj);
+            uintptr_t outer = Ubel::GetOuter(obj);
+            so.outerClassName = outer ? Ubel::GetName(Ubel::GetClass(outer)) : "";
+
+            // Top-level numeric scalar fields.
+            for (const auto& p : picks) {
+                const auto& fi = ci.Fields[p.fieldIndex];
+                size_t sz = Radar::SizeOf(p.dt);
+                if (sz == 0 || sz > 8) continue;  // defensive; meta members are 1..8B
+                uint8_t buf[8] = {};
+                if (!Macht::ReadBytesSafe(obj + fi.Offset, buf, sz)) continue;
+
+                SnapshotField sf;
+                sf.name   = fi.Name;
+                sf.offset = fi.Offset;
+                sf.type   = fi.TypeName;
+                sf.hex    = SnapshotBytesToHex(buf, sz);
+                so.fields.push_back(std::move(sf));
+            }
+
+            // Container-element leaves at any (bounded) depth — struct-array / map /
+            // set elements + nested leaf-containers (build 1204).
+            CaptureStructArrays(obj, cls, numericScope, arrayCap, so.arrays);
+
+            // Native-C (P3, opt-in): append this object's unmanaged-hole guesses as
+            // synthetic "<raw@0xNN>" fields so the snapshot also carries native
+            // (non-UPROPERTY) values for SPC diff / Class Pivot.
+            if (captureNativeC)
+                AppendRawHoleFields(obj, cls, numericScope, so.fields);
+
+            // Keep objects with any captured scalar field OR array element.
+            if (so.fields.empty() && so.arrays.empty()) continue;
+            tr.objects.push_back(std::move(so));
         }
-        if (i != offset && (i & 0x3F) == 0 &&
-            std::chrono::steady_clock::now() - t0 > kCaptureDeadline) {
-            result.scanned = i - offset;  // partial — report actual progress
-            Sein::Warn("PIPE:snapshot",
-                       "CaptureSnapshotChunk: deadline hit after %d objs (partial chunk)",
-                       i - offset);
-            break;
-        }
-        uintptr_t obj = GetByIndex(i);
-        if (!obj) continue;
+    });
 
-        std::string name = Ubel::GetName(obj);
-        if (name.empty()) continue;  // skip unnamed slots (matches get_object_list)
+    // Merge per-thread objects (ascending tid -> ascending index; order is
+    // irrelevant to the SQLite store, which keys each row by its GObjects index).
+    size_t totalObjs = 0;
+    for (auto& tr : scan.perThread) totalObjs += tr.objects.size();
+    result.objects.reserve(totalObjs);
+    for (auto& tr : scan.perThread)
+        for (auto& so : tr.objects) result.objects.push_back(std::move(so));
 
-        uintptr_t cls = Ubel::GetClass(obj);
-        if (!cls) continue;
-
-        // game_only filter keys on the class path (engine packages skipped).
-        std::string classPath = Ubel::GetFullName(cls);
-        if (gameOnly && IsEnginePackage(classPath)) continue;
-
-        ClassInfo ci = Ubel::WalkClassEx(cls);  // cached per class
-        if (ci.Fields.empty()) continue;
-
-        typeNames.clear();
-        typeNames.reserve(ci.Fields.size());
-        for (const auto& f : ci.Fields) typeNames.push_back(f.TypeName);
-
-        auto picks = Radar::SelectSnapshotNumericFields(typeNames, numericScope);
-
-        SnapshotObject so;
-        so.index     = i;  // GObjects index == logical slot index
-        so.addr      = obj;
-        so.name      = std::move(name);
-        so.className = ci.Name;
-        so.path      = Ubel::GetFullName(obj);
-        uintptr_t outer = Ubel::GetOuter(obj);
-        so.outerClassName = outer ? Ubel::GetName(Ubel::GetClass(outer)) : "";
-
-        // Top-level numeric scalar fields.
-        for (const auto& p : picks) {
-            const auto& fi = ci.Fields[p.fieldIndex];
-            size_t sz = Radar::SizeOf(p.dt);
-            if (sz == 0 || sz > 8) continue;  // defensive; meta members are 1..8B
-            uint8_t buf[8] = {};
-            if (!Macht::ReadBytesSafe(obj + fi.Offset, buf, sz)) continue;
-
-            SnapshotField sf;
-            sf.name   = fi.Name;
-            sf.offset = fi.Offset;
-            sf.type   = fi.TypeName;
-            sf.hex    = SnapshotBytesToHex(buf, sz);
-            so.fields.push_back(std::move(sf));
-        }
-
-        // Container-element leaves at any (bounded) depth — struct-array / map /
-        // set elements + nested leaf-containers (build 1204).
-        CaptureStructArrays(obj, cls, numericScope, arrayCap, so.arrays);
-
-        // Native-C (P3, opt-in): append this object's unmanaged-hole guesses as
-        // synthetic "<raw@0xNN>" fields so the snapshot also carries native
-        // (non-UPROPERTY) values for SPC diff / Class Pivot.
-        if (captureNativeC)
-            AppendRawHoleFields(obj, cls, numericScope, so.fields);
-
-        // Keep objects with any captured scalar field OR array element.
-        if (so.fields.empty() && so.arrays.empty()) continue;
-        result.objects.push_back(std::move(so));
-    }
+    // Tot cancellation (client gone / shutdown) — the partial chunk is discarded by
+    // the disconnected/closing C# side, so result.scanned is left at the full range.
+    if (scan.deadlineHit)
+        Sein::Warn("PIPE:snapshot", "CaptureSnapshotChunk: cancelled (client gone / shutdown)");
 
     return result;
 }

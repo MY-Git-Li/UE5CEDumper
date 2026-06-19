@@ -76,12 +76,30 @@ Open work only. **Read this when deciding what to do next.**
   `StreamReader.ReadLineAsync` accumulate any size; DLL 15s per-chunk deadline re-chunks slow
   chunks). **NEEDS in-game re-test on FF7 Rebirth — if still too slow, the bottleneck is the
   single-threaded DLL walk → do (3).** Could raise further / batch SQLite inserts if needed.
-  (3) **DLL `CaptureSnapshotChunk` is single-threaded**; the reflected walk
-  alone is heavy at 433K. Consider parallelizing (mirror `ScanForValue`'s `ParallelGObjectsScan`)
-  and/or a class-scoped capture (only capture instances of a chosen class) for huge games.
-  Also surface a clearer "X% captured, still running" progress + an explicit cap/stop. Until
-  fixed, recommend Native-C snapshot only on smaller games or with a class scope.
+  (3) ~~DLL `CaptureSnapshotChunk` is single-threaded~~ **PARALLELIZED (this session, 待測 /
+  in-game re-test pending):** the per-object capture loop now runs across worker threads via
+  `ParallelGObjectsScan` (each worker fills its own `SnapshotObject` vector, merged after; whole
+  chunk processed → `scanned` stays contiguous for the pager; Tot-cancel only, no wall-clock
+  early return). Chunk size raised to **8192** so each full chunk clears `ScanThreadCount`'s
+  >=8192 worker-thread threshold + amortizes the per-chunk cancel watcher. Verified by an
+  adversarial 3-lens race/correctness audit (capture-helper statics, GuessGapTypes/WalkClassEx
+  copy-out, pager contiguity) — no crash/corruption/mis-paging; the worker stride-check was
+  fixed to range-relative for prompt cancel. **NEEDS in-game re-test on FF7 Rebirth** (combined
+  with the GuessGapTypes + chunk wins, this is the big one). Still open if needed: class-scoped
+  capture (only a chosen class's instances) + a clearer "X% captured" progress.
   *Parent: Native-C P3 in-game test (FF7 Rebirth), this session.*
+
+- **DynOff calibrated offsets are non-atomic — tighten the second writer (low-risk hardening)** —
+  Effort: **S** · Risk: low. The race audit of the parallel snapshot flagged a PRE-EXISTING
+  technical data race the parallel readers widen: `DynOff::FSTRUCTPROP_STRUCT` (and the sibling
+  calibrated `DynOff::` ints) are non-atomic. `Ubel::CorrectSubclassOffsets` serializes its writes
+  (`s_calibrationMutex` + acquire/release `s_checked`), but there's a SECOND unguarded writer at
+  `Ubel.cpp:~4288` (`DynOff::FSTRUCTPROP_STRUCT = tryOffset;` inside `WalkInstance`), and the
+  snapshot/WalkClassEx-enrichment readers aren't gated by `s_checked`. Benign in practice
+  (idempotent convergent writes + aligned-int load/store atomicity on x64), so NOT a crash risk,
+  but technically UB. Lowest-risk fix: drop the redundant `~4288` write (verify `CorrectSubclassOffsets`
+  already covers that calibration first — don't regress StructProperty struct-name resolution), or
+  make the calibrated offsets `std::atomic<int>` with relaxed loads. *Parent: parallel-snapshot race audit, this session.*
 
 -----
 
