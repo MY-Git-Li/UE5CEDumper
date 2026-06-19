@@ -2861,15 +2861,42 @@ static int IsLikelyDouble(double dVal) {
 void GuessGapTypes(uintptr_t baseAddr, int32_t gapStart, int32_t gapEnd,
                    std::vector<LiveFieldValue>& outFields)
 {
+    // Perf: read the WHOLE gap once into a reused buffer, then guess in-buffer.
+    // The old path did one SEH read per position PLUS a per-BYTE SEH read in the
+    // zero-run probe — pathologically slow when this runs over every hole of every
+    // object during a Native-C snapshot of a 433K-object game (FF7 Rebirth). One
+    // bulk read replaces all of them. On a faulting bulk read (e.g. a gap straddling
+    // an unmapped tail) or an over-large gap, `gb` stays null and the helpers fall
+    // back to the original per-read SEH path — so behavior (the guesses) is identical,
+    // only the source of the bytes changes. Output is byte-for-byte unchanged.
+    const int32_t gapLen = gapEnd - gapStart;
+    if (gapLen <= 0) return;
+    static thread_local std::vector<uint8_t> s_gapBuf;
+    const uint8_t* gb = nullptr;
+    if (gapLen <= 0x10000) {
+        s_gapBuf.resize(static_cast<size_t>(gapLen));
+        if (Macht::ReadBytesSafe(baseAddr + gapStart, s_gapBuf.data(),
+                                 static_cast<size_t>(gapLen)))
+            gb = s_gapBuf.data();
+    }
+    auto readChunk = [&](int32_t at, uint8_t* dst, int32_t len) -> bool {
+        if (gb) { std::memcpy(dst, gb + (at - gapStart), static_cast<size_t>(len)); return true; }
+        return Macht::ReadBytesSafe(baseAddr + at, dst, len);
+    };
+    auto byteAt = [&](int32_t at, uint8_t& b) -> bool {
+        if (gb) { b = gb[at - gapStart]; return true; }
+        return Macht::ReadSafe<uint8_t>(baseAddr + at, b);
+    };
+
     int32_t pos = gapStart;
 
     while (pos < gapEnd) {
         int32_t remaining = gapEnd - pos;
 
-        // Read up to 8 bytes for analysis
+        // Read up to 8 bytes for analysis (from the bulk buffer, or direct on fallback)
         uint8_t buf[8] = {};
         int32_t readLen = std::min(remaining, static_cast<int32_t>(8));
-        if (!Macht::ReadBytesSafe(baseAddr + pos, buf, readLen)) {
+        if (!readChunk(pos, buf, readLen)) {
             pos++;
             continue;
         }
@@ -2885,7 +2912,7 @@ void GuessGapTypes(uintptr_t baseAddr, int32_t gapStart, int32_t gapEnd,
                 int32_t zeroRun = 0;
                 for (int32_t probe = pos; probe < gapEnd && zeroRun < 256; probe++) {
                     uint8_t b = 0;
-                    if (!Macht::ReadSafe<uint8_t>(baseAddr + probe, b) || b != 0) break;
+                    if (!byteAt(probe, b) || b != 0) break;
                     zeroRun++;
                 }
                 if (zeroRun >= 4) {

@@ -62,9 +62,11 @@ Open work only. **Read this when deciding what to do next.**
   Native-C ON ran **16+ min and left >50% of objects uncaptured**, so P3 couldn't be verified
   there. Likely causes, in order: (1) **Native-C `AppendRawHoleFields` calls `Ubel::GuessGapTypes`,
   which reads memory BYTE-BY-BYTE** (the zero-run probe does one `Macht::ReadSafe<uint8_t>` per
-  byte) — over every hole of every object that's very slow. Fix: a buffer-based variant that
-  reads the `[header,PropertiesSize)` window ONCE (like the P1/P2 native pass already do) and
-  guesses in-buffer. (2) **Capture is one pipe round-trip per 200 objects** (`Constants.SnapshotChunkSize`)
+  byte) — over every hole of every object that's very slow. **FIX SHIPPED (this session):** `Ubel::GuessGapTypes` now reads the whole gap
+  ONCE into a reused `thread_local` buffer and guesses in-buffer — the per-position AND
+  per-byte (zero-run probe) SEH reads are eliminated; output is byte-identical; an SEH
+  fallback is kept for a faulting / over-large gap. Also speeds up LiveWalker "Guess What".
+  **Re-test FF7 Rebirth to see if this alone makes Native-C capture feasible.** (2) **Capture is one pipe round-trip per 200 objects** (`Constants.SnapshotChunkSize`)
   → ~2166 chunks for 433K objects + a SQLite write burst each; raise the chunk size and/or
   batch the inserts. (3) **DLL `CaptureSnapshotChunk` is single-threaded**; the reflected walk
   alone is heavy at 433K. Consider parallelizing (mirror `ScanForValue`'s `ParallelGObjectsScan`)
