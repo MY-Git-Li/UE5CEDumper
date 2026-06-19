@@ -23,12 +23,18 @@
 // trampolines (Lugner_Dxgi.asm) instead. This mirrors RE-UE4SS's
 // proxy generator (vendor/RE-UE4SS/UE4SS/proxy_generator).
 //
-// Mutual exclusion: when multiple UE5CEDumper proxy DLLs sit in
-// the same game folder, Heiter.cpp's mutex makes only the first to
-// load run full init. DxgiProxy_Init still runs in BOTH paths
-// (active and passive) — a passive forwarder must keep forwarding
-// dxgi calls — so it is called at the very top of DllMain, before
-// the mutex check.
+// LAZY resolution: the real dxgi exports are resolved on the FIRST
+// forwarded dxgi call (from the asm thunks, via DxgiProxy_EnsureResolved
+// below) — NOT eagerly in DllMain. An earlier version resolved eagerly in
+// DllMain; that ran LoadLibrary(real dxgi.dll) under the loader lock while
+// the EXE's static imports were still being initialised, and crashed games
+// that import dxgi.dll directly and before d3d11.dll (e.g. Octopath
+// Traveler): the real dxgi was not yet mapped, so the eager load forced a
+// full recursive load of dxgi + its dependency tree under the lock, dying
+// before our logger even came up. The first real dxgi call
+// (CreateDXGIFactory1 during RHI init) happens on a game thread AFTER
+// DllMain returns and the loader lock is released — the safe place to load,
+// exactly like the version.dll / dinput8.dll proxies.
 // ============================================================
 
 #ifdef UE5_PROXY_DXGI_BUILD
@@ -43,11 +49,6 @@
 // The .asm references this exact symbol via `extern mProcs:QWORD`,
 // so it must have C linkage (no name mangling) and the matching name.
 extern "C" uintptr_t mProcs[20] = { 0 };
-
-// Status, logged later from the (Sein-initialised) auto-start thread
-// because DxgiProxy_Init runs before Sein::Init in DllMain.
-extern "C" bool g_dxgiProxyLoaded = false;
-extern "C" int  g_dxgiProxyResolved = 0;
 
 // Export names in f0..f19 order. MUST stay in sync with ProxyDxgi.def
 // and the asm thunk order. Resolution is by NAME (version-robust: a name
@@ -76,55 +77,53 @@ static const char* const kDxgiExports[20] = {
     "DXGIReportAdapterConfiguration",   // f19 @20
 };
 
-// Populate mProcs from the real System32 dxgi.dll. Must run before any
-// forwarded dxgi export can be called. The game's first dxgi call
-// (CreateDXGIFactory1 during RHI init) happens after the EXE entry point
-// — i.e. after our DllMain returns — so resolving synchronously in
-// DllMain ATTACH is both necessary (a delayed thread would race the call
-// and jump through a null slot) and sufficient.
+// Populate mProcs from the real System32 dxgi.dll, once. Called from the
+// asm forwarding thunks (ResolveAll in Lugner_Dxgi.asm) on the FIRST
+// forwarded dxgi call.
 //
-// LoadLibrary of a leaf system DLL from DllMain is the established proxy
-// pattern (RE-UE4SS does the same); dxgi has minimal loader-time init and
-// no dependency back on us, so it does not risk loader-lock recursion.
-// Intentionally does NOT log: Sein is not initialised this early — status
-// is recorded into globals and logged by DxgiProxy_LogStatus().
-extern "C" void DxgiProxy_Init()
+// SAFE to LoadLibrary here (unlike the old DllMain path): the first dxgi
+// call (CreateDXGIFactory1 during the game's RHI init) runs on a game
+// thread after the EXE entry point — i.e. after every static-import
+// DllMain has completed and the loader lock has been released.
+//
+// The SRWLOCK serialises concurrent first-callers: a second thread blocks
+// until the first finishes, so it never observes a half-populated mProcs[]
+// (would otherwise jump through a null slot). In practice the first dxgi
+// call is single-threaded RHI init, so the lock is essentially uncontended.
+//
+// Logging here is safe and immediate: Sein::Init + InitProcessMirror ran in
+// DllMain before any game code executed, so the logger is fully up. (In the
+// rare passive-forwarder case where Sein was never initialised, Sein routes
+// to its early buffer — harmless.)
+extern "C" void DxgiProxy_EnsureResolved()
 {
-    static bool s_done = false;
-    if (s_done) return;
-    s_done = true;
+    static SRWLOCK s_lock = SRWLOCK_INIT;
+    static bool    s_done = false;
 
-    wchar_t sysDir[MAX_PATH] = {};
-    GetSystemDirectoryW(sysDir, MAX_PATH);
+    AcquireSRWLockExclusive(&s_lock);
+    if (!s_done) {
+        s_done = true;
 
-    wchar_t realPath[MAX_PATH] = {};
-    wsprintfW(realPath, L"%s\\dxgi.dll", sysDir);
+        wchar_t sysDir[MAX_PATH] = {};
+        GetSystemDirectoryW(sysDir, MAX_PATH);
 
-    HMODULE real = LoadLibraryW(realPath);
-    if (!real) {
-        g_dxgiProxyLoaded = false;
-        return;
+        wchar_t realPath[MAX_PATH] = {};
+        wsprintfW(realPath, L"%s\\dxgi.dll", sysDir);
+
+        HMODULE real = LoadLibraryW(realPath);
+        if (real) {
+            int resolved = 0;
+            for (int i = 0; i < 20; ++i) {
+                mProcs[i] = reinterpret_cast<uintptr_t>(GetProcAddress(real, kDxgiExports[i]));
+                if (mProcs[i]) ++resolved;
+            }
+            LOG_INFO("dxgi proxy: lazily forwarded %d/20 exports to real System32 dxgi.dll", resolved);
+        } else {
+            LOG_ERROR("dxgi proxy: FAILED to load real System32 dxgi.dll (err=%lu) — forwarded calls will crash",
+                      GetLastError());
+        }
     }
-    g_dxgiProxyLoaded = true;
-
-    int resolved = 0;
-    for (int i = 0; i < 20; ++i) {
-        mProcs[i] = reinterpret_cast<uintptr_t>(GetProcAddress(real, kDxgiExports[i]));
-        if (mProcs[i]) ++resolved;
-    }
-    g_dxgiProxyResolved = resolved;
-}
-
-// Emit the resolution result once the logger is up. Called from the proxy
-// auto-start thread (Heiter.cpp) after Sein::Init / InitProcessMirror.
-extern "C" void DxgiProxy_LogStatus()
-{
-    if (g_dxgiProxyLoaded) {
-        LOG_INFO("dxgi proxy: forwarded %d/20 exports to real System32 dxgi.dll",
-                 g_dxgiProxyResolved);
-    } else {
-        LOG_ERROR("dxgi proxy: FAILED to load real System32 dxgi.dll — forwarded calls will crash");
-    }
+    ReleaseSRWLockExclusive(&s_lock);
 }
 
 #endif // UE5_PROXY_DXGI_BUILD

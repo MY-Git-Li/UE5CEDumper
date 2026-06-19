@@ -8,10 +8,11 @@
 ;
 ; Each Windows export is mapped to an asm jmp-thunk (f<N> in
 ; Lugner_Dxgi.asm) whose target address is the real dxgi export,
-; resolved at load time by Lugner_Dxgi.cpp::DxgiProxy_Init. The
-; @ordinal values match real dxgi.dll so ordinal imports resolve
-; too. The index/ordinal table MUST stay in sync with
-; kDxgiExports[] (Lugner_Dxgi.cpp) and the .asm thunk order.
+; resolved LAZILY on the first forwarded call by
+; Lugner_Dxgi.cpp::DxgiProxy_EnsureResolved (NOT in DllMain — see
+; that file for why). The @ordinal values match real dxgi.dll so
+; ordinal imports resolve too. The index/ordinal table MUST stay in
+; sync with kDxgiExports[] (Lugner_Dxgi.cpp) and the .asm thunk order.
 ;
 ; The full export surface (incl. the undocumented DXGID3D10* /
 ; Compat* / PIX* internals) is forwarded so that d3d11.dll /
