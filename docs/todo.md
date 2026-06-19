@@ -38,6 +38,41 @@ Open work only. **Read this when deciding what to do next.**
   *Parent: cooperative cancel + shutdown-abort + disconnect monitor shipped build
   936-937, PR #238 (dev-log 2026-06-06).*
 
+- **Native-C Value Scan — P0–P3 ALL SHIPPED on dev; only in-game verify of P3 remains** —
+  Effort: **0** (verify only) · Risk: low. Full design + status in
+  [native-c-value-scan-spec.md](native-c-value-scan-spec.md). Opt-in raw/unmanaged
+  (non-`UPROPERTY`) scan for native HP/MP via "Guess What" (`Ubel::GuessGapTypes`), across
+  Value Search + Group Scan + Snapshot→SPC→Pivot. **DONE + in-game VERIFIED:** P1 single
+  (Octopath), P2 group (FF7 Rebirth). **P3 DONE (build+tests+AOT green):**
+  `CaptureSnapshotChunk(captureNativeC)` → `AppendRawHoleFields` (GuessGapTypes →
+  `NormalizeGuessedTypeToProperty` → drop Pointer/Padding → `<raw@0xNN>` fields,
+  numericScope-filtered, ≤256/obj); pipe `native_c` on `snapshot_chunk`; C#
+  `SnapshotViewModel.IncludeNativeFields` toggle + intro string. SPC Query + Class Pivot
+  consume raw rows with ZERO code changes (key on prop_name=offset + canonical declared_type;
+  existing `fields` schema, no migration). **REMAINING: in-game verify P3** — BLOCKED on the
+  snapshot-perf item below (FF7 Rebirth capture with Native-C didn't finish — 16+ min, >50%
+  uncaptured). Verify on a smaller / faster game, or after the perf work: capture a native
+  snapshot pair around a stat change, confirm SPC diff tracks a `<raw@0x..>` value + Class
+  Pivot decodes it (not hex).
+  *Parent: P0–P3 shipped on dev (this session); builds on value_search_caveats, the `Orden`
+  seam (group-value-scan-spec §3.1), and the "Guess What" build (commit 75ea723).*
+
+- **Snapshot capture too slow on huge games (FF7 Rebirth ~433K objects) — esp. with Native-C** —
+  Effort: **M-L** · Risk: med (touches the hot capture path). FF7 Rebirth snapshot with
+  Native-C ON ran **16+ min and left >50% of objects uncaptured**, so P3 couldn't be verified
+  there. Likely causes, in order: (1) **Native-C `AppendRawHoleFields` calls `Ubel::GuessGapTypes`,
+  which reads memory BYTE-BY-BYTE** (the zero-run probe does one `Macht::ReadSafe<uint8_t>` per
+  byte) — over every hole of every object that's very slow. Fix: a buffer-based variant that
+  reads the `[header,PropertiesSize)` window ONCE (like the P1/P2 native pass already do) and
+  guesses in-buffer. (2) **Capture is one pipe round-trip per 200 objects** (`Constants.SnapshotChunkSize`)
+  → ~2166 chunks for 433K objects + a SQLite write burst each; raise the chunk size and/or
+  batch the inserts. (3) **DLL `CaptureSnapshotChunk` is single-threaded**; the reflected walk
+  alone is heavy at 433K. Consider parallelizing (mirror `ScanForValue`'s `ParallelGObjectsScan`)
+  and/or a class-scoped capture (only capture instances of a chosen class) for huge games.
+  Also surface a clearer "X% captured, still running" progress + an explicit cap/stop. Until
+  fixed, recommend Native-C snapshot only on smaller games or with a class scope.
+  *Parent: Native-C P3 in-game test (FF7 Rebirth), this session.*
+
 -----
 
 ## Related Objects panel — Phase 2 + follow-ups (Phase 1 shipped builds 1323-1327)
@@ -47,6 +82,8 @@ Phase 1 (the "Related" tab: given an actor, list Self/Class/Outer + Controller�
 - **Phase 2 — `Edel` current-target auto-detect** — Effort: **M** · Risk: med (per-game heuristic). New `Edel` DLL module: GWorld → OwningGameInstance → LocalPlayers → PlayerController (+ AcknowledgedPawn) → enumerate object-pointer fields whose name/target looks like a target/focus/lock/selected/hovered actor (not the player's own pawn); rank candidates → feed the chosen address into the Related panel's `LoadForAddressAsync`. Solves "I don't know which keyword to search" (the TQ2 test hit exactly this — `Actor` = FX noise, `creature` = templates/CDOs). Reserve the `Edel` roster name (🟡 → 🟢) when built. *Parent: Related Objects Phase 1, dev-log 2026-06-19.*
 
 - **Locate in GWorld — unreachable for streaming / World-Partition actors** — Effort: **M-L** · Risk: med. TQ2 in-game: `find_path_from_gworld` returns **`not_reachable`** (fast — ~170ms, visited ~243K/504K) for a just-spawned `bp_ai_default_character_C` + its ASC: nothing in the GWorld forward graph references them (WP runtime actors held via native/weak structures the walk doesn't traverse; only player-referenced / aggro'd AI chars are reachable, as the giant-eagle-template-via-`AIInfoComponent` success showed). The UI message + `PIPE:path` log now explain this instead of wrongly suggesting "increase depth" (build 1327 = option A). Real-fix options if pursued: (a) walk `ULevel.Actors` / WP runtime-cell levels explicitly so level actors become reachable; (b) reverse-locate (Find Refs → climb to a reachable anchor — but a fully-unreferenced actor has no anchor either); (c) **Phase 2 Edel sidesteps it** — once the player references the target, the enemy is forward-reachable and Locate works. **Prefer (c).** *Parent: Related Objects Phase 1 in-game test, dev-log 2026-06-19.*
+
+- **Locate from GEngine — alternate root for UI-widget / GameInstance-owned objects** — Effort: **M** · Risk: low (additive, new root only). Octopath in-game (2026-06-19, Native-C P1 testing): `find_path_from_gworld` correctly returns `not_reachable` for a value on `PartyCharacterPanel_C` (a UMG `UUserWidget`) — `visited=385` (576 @depth8). NOT a bug: UMG widgets / managers hang off the **GameInstance / GameViewport / LocalPlayer**, reached from **GEngine**, not from **UWorld**; the forward BFS follows REFLECTED object-pointer edges only, so the world's reflected graph (gameplay actors/components, ~385 on a menu screen) never leads to them. Live Walker **Parent** reaches `GameEngine0` via the **Outer** naming chain (unrelated to forward reachability) — which is why the user expected a path. Enhancement: add a **"Locate from GEngine"** root (resolve `GEngine` like `Genau::RecoverGWorldViaEngine` already does → BFS via `FindObjectGraphPath` with `rootObj = GEngine`) so widget/instance-owned values get a real chain (GEngine → GameViewport → … → WidgetTree → widget). Reuse the same pipe/BFS; just a second root + a UI affordance (e.g. fall back automatically, or a "from GEngine" button when GWorld returns not_reachable). Note for users meanwhile: a widget's value is usually a UI *display copy*; the authoritative gameplay value lives on a GWorld-reachable object. *Parent: Native-C P1 in-game test (Octopath), this session; `FindObjectGraphPath` is already root-agnostic.*
 
 -----
 

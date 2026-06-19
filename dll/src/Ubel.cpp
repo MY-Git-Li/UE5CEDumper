@@ -439,6 +439,16 @@ static void WalkFFieldChain(uintptr_t firstField, std::vector<FieldInfo>& fields
         // Read offset and size (FProperty fields, may not be valid for non-property FFields)
         Macht::ReadSafe<int32_t>(current + DynOff::FPROPERTY_OFFSET, fi.Offset);
         Macht::ReadSafe<int32_t>(current + DynOff::FPROPERTY_ELEMSIZE, fi.Size);
+        // ArrayDim sits immediately before ElementSize (adjacent int32s) on every
+        // UE 4.18-5.7 layout (see Genau Step 9). Reading it lets a static C-array
+        // UPROPERTY (Type Foo[N]) report its full Size*ArrayDim footprint so the
+        // Native-C hole scan doesn't treat its tail as unmanaged. Garbage/zero -> 1.
+        {
+            int32_t arrayDim = 1;
+            if (Macht::ReadSafe<int32_t>(current + DynOff::FPROPERTY_ELEMSIZE - 4, arrayDim)
+                && arrayDim >= 1 && arrayDim <= 0x10000)
+                fi.ArrayDim = arrayDim;
+        }
         Macht::ReadSafe<uint64_t>(current + DynOff::FPROPERTY_FLAGS, fi.PropertyFlags);
 
         // Alignment sanity warning. See Scharf.h for the per-type rules — uses
@@ -504,6 +514,14 @@ static void WalkUPropertyChain(uintptr_t firstField, std::vector<FieldInfo>& fie
         // Read UProperty-specific fields
         Macht::ReadSafe<int32_t>(current + DynOff::UPROPERTY_OFFSET, fi.Offset);
         Macht::ReadSafe<int32_t>(current + DynOff::UPROPERTY_ELEMSIZE, fi.Size);
+        // ArrayDim precedes ElementSize on the UProperty layout too (UE4 <4.25);
+        // see the FProperty path above. Garbage/zero -> keep the default 1.
+        {
+            int32_t arrayDim = 1;
+            if (Macht::ReadSafe<int32_t>(current + DynOff::UPROPERTY_ELEMSIZE - 4, arrayDim)
+                && arrayDim >= 1 && arrayDim <= 0x10000)
+                fi.ArrayDim = arrayDim;
+        }
         Macht::ReadSafe<uint64_t>(current + DynOff::UPROPERTY_FLAGS, fi.PropertyFlags);
 
         // UE4 UBoolProperty -> FieldMask byte
@@ -2838,9 +2856,10 @@ static int IsLikelyDouble(double dVal) {
     return 0;
 }
 
-// Guess types for a gap region and append results to outFields
-static void GuessGapTypes(uintptr_t baseAddr, int32_t gapStart, int32_t gapEnd,
-                          std::vector<LiveFieldValue>& outFields)
+// Guess types for a gap region and append results to outFields.
+// Declared in Ubel.h (non-static) so the Native-C value scan can reuse it.
+void GuessGapTypes(uintptr_t baseAddr, int32_t gapStart, int32_t gapEnd,
+                   std::vector<LiveFieldValue>& outFields)
 {
     int32_t pos = gapStart;
 
@@ -5114,51 +5133,26 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
         int32_t headerEnd = isRawStruct ? 0 : (DynOff::UOBJECT_OUTER + 8);
         int32_t scanEnd = ci.PropertiesSize;
 
-        // Collect known field intervals, CLAMPED to the scan window
-        // [headerEnd, scanEnd]. Clamping the START to headerEnd is what makes the
-        // leading region [headerEnd, firstField) survive as a gap: a reflected
-        // field with a low/garbage Offset_Internal (< headerEnd, e.g. an offset
-        // misread into the UObject header) would otherwise fail the
-        // `iv.start > cursor` test below yet STILL advance the gap cursor past
-        // headerEnd (cursor = max(cursor, iv.end)), silently swallowing the whole
-        // pre-first-field region — the user-visible "the gap before the first
-        // field never gets guessed rows" bug. Everything below headerEnd
-        // (vtable/flags/class/name/outer) stays EXCLUDED from occupied, so the
-        // well-known UObject header is never turned into guessed rows. Clamping
-        // the END to scanEnd guards against a field with a garbage-huge size
-        // eating the trailing gaps as well.
-        struct Interval { int32_t start; int32_t end; };
-        std::vector<Interval> occupied;
+        // Collect known field intervals from the rendered reflected fields and
+        // compute the complement within [headerEnd, scanEnd) via the shared
+        // Ubel::ComputeHoles helper. ComputeHoles clamps each interval to the
+        // window before merging — clamping the START to headerEnd is what makes
+        // the leading region [headerEnd, firstField) survive as a gap (the
+        // user-visible "gap before the first field never gets guessed rows" bug,
+        // fixed in commit 75ea723), and everything below headerEnd
+        // (vtable/flags/class/name/outer) stays excluded so the well-known
+        // UObject header is never turned into guessed rows. Clamping the END to
+        // scanEnd guards a field with a garbage-huge size from eating trailing
+        // gaps. (This per-instance pass intervals on the rendered LiveFieldValue
+        // sizes — element-size, not Size*ArrayDim — so its output is unchanged by
+        // the new ArrayDim field; the ArrayDim-aware footprint is used only by the
+        // class-level Ubel::ComputeClassHoles consumed by the Native-C scan.)
+        std::vector<Ubel::Interval> occupied;
+        occupied.reserve(result.fields.size());
         for (const auto& f : result.fields) {
-            int32_t s = f.offset;
-            int32_t e = f.offset + (f.size > 0 ? f.size : 1);
-            if (s < headerEnd) s = headerEnd;
-            if (e > scanEnd)   e = scanEnd;
-            if (s >= e) continue;   // entirely below headerEnd or above scanEnd
-            occupied.push_back({s, e});
+            occupied.push_back({ f.offset, f.offset + (f.size > 0 ? f.size : 1) });
         }
-        std::sort(occupied.begin(), occupied.end(),
-            [](const Interval& a, const Interval& b) { return a.start < b.start; });
-
-        // Merge overlapping intervals
-        std::vector<Interval> merged;
-        for (const auto& iv : occupied) {
-            if (!merged.empty() && iv.start <= merged.back().end)
-                merged.back().end = std::max(merged.back().end, iv.end);
-            else
-                merged.push_back(iv);
-        }
-
-        // Compute gaps
-        std::vector<Interval> gaps;
-        int32_t cursor = headerEnd;
-        for (const auto& iv : merged) {
-            if (iv.start > cursor)
-                gaps.push_back({cursor, iv.start});
-            cursor = std::max(cursor, iv.end);
-        }
-        if (cursor < scanEnd)
-            gaps.push_back({cursor, scanEnd});
+        std::vector<Ubel::Interval> gaps = Ubel::ComputeHoles(occupied, headerEnd, scanEnd);
 
         // Fill each gap with guessed types
         size_t beforeCount = result.fields.size();

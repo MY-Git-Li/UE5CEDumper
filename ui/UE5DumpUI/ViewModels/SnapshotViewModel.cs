@@ -48,6 +48,11 @@ public partial class SnapshotViewModel : ViewModelBase
 
     [ObservableProperty] private string _label = "";
     [ObservableProperty] private bool   _gameOnly = true;
+    /// <summary>Native-C (P3, opt-in, default OFF). When on, each captured object also
+    /// gets its unmanaged holes (non-UPROPERTY raw bytes) guessed + normalized into
+    /// synthetic "&lt;raw@0xNN&gt;" fields, so SPC diff / Class Pivot can track native
+    /// (HP/MP) values. Slower + larger capture; Pointer/Padding guesses are dropped.</summary>
+    [ObservableProperty] private bool   _includeNativeFields;
     [ObservableProperty] private string _selectedScope = "NumericNoByte";
     [ObservableProperty] private bool   _isCapturing;
     [ObservableProperty] private bool   _isDeleting;
@@ -426,7 +431,7 @@ public partial class SnapshotViewModel : ViewModelBase
             while (!ct.IsCancellationRequested)
             {
                 var chunk = await _dump.SnapshotChunkAsync(
-                    dataType, GameOnly, offset, Constants.SnapshotChunkSize, ct);
+                    dataType, GameOnly, offset, Constants.SnapshotChunkSize, IncludeNativeFields, ct);
 
                 if (chunk.Objects.Count > 0)
                 {

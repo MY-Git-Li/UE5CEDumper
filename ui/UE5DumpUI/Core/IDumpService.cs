@@ -186,6 +186,8 @@ public interface IDumpService
         bool parallel = true,
         bool batchRead = true,
         bool deep = false,
+        bool nativeC = false,
+        bool newestFirst = false,
         int pageSize = 1000,
         CancellationToken ct = default);
 
@@ -225,6 +227,8 @@ public interface IDumpService
         int maxResults = 50000,
         bool deep = false,
         bool crossObject = false,
+        bool nativeC = false,
+        bool newestFirst = false,
         int pageSize = 1000,
         CancellationToken ct = default);
 
@@ -254,7 +258,8 @@ public interface IDumpService
     Task<int> BeginSnapshotAsync(string dataType, CancellationToken ct = default);
 
     Task<SnapshotChunkResult> SnapshotChunkAsync(
-        string dataType, bool gameOnly, int offset, int limit, CancellationToken ct = default);
+        string dataType, bool gameOnly, int offset, int limit,
+        bool nativeC = false, CancellationToken ct = default);
 
     // --- All Functions Enumeration (Interesting Functions Finder) ---
     Task<AllFunctionsResult> ListAllFunctionsAsync(

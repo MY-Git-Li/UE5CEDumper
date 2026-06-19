@@ -220,6 +220,13 @@ json CandidateToJson(const Radar::Candidate& c,
     item["field_name"]          = Radar::FieldDisplayName(desc, c.elementIndex);
     item["field_type"]          = desc.fieldType;
     item["bool_field_mask"]     = desc.boolFieldMask;
+    // Native-C (P1): badge a raw-hole hit + the width it was interpreted at, so
+    // the UI can distinguish unmanaged native values from reflected ones. Only
+    // emitted when set (absent => reflected, keeps the wire lean + back-compat).
+    if (desc.isNativeC) {
+        item["is_native_c"] = true;
+        item["guessed_type"] = desc.guessedType;
+    }
     // Value rendering (numeric per dt / multi per fieldType / vector
     // "X, Y, Z" / string prevStr) is the single source of truth in Radar,
     // shared with the server-side filter/sort so the wire + the ordered view
@@ -282,6 +289,12 @@ json GroupCandidateToJson(const Radar::GroupCandidate& gc,
             sj["field_offset"]    = m0.offset;
             sj["field_type"]      = d.fieldType;
             sj["bool_field_mask"] = d.boolFieldMask;
+            // Native-C (P2): badge a raw-hole slot match + its interpreted width
+            // (omitted for reflected leaves — back-compat / lean wire).
+            if (d.isNativeC) {
+                sj["is_native_c"]  = true;
+                sj["guessed_type"] = d.guessedType;
+            }
             // Absolute leaf address (direct: owner+offset; deep: container element).
             sj["addr"]            = Renge::AddrToStr(m0.leafAddr);
             // Owning object of the leaf (P4): the candidate actor for an own-block
@@ -1140,13 +1153,16 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             int  limit    = request.value("limit", 100);
             int  arrayCap = request.value("array_cap", 256);
             bool gameOnly = request.value("game_only", true);
+            // Native-C (P3, opt-in): also capture each object's unmanaged-hole
+            // guesses as synthetic "<raw@0xNN>" fields (normalized canonical type).
+            bool nativeC  = request.value("native_c", false);
             std::string dtStr = request.value("data_type", "NumericNoByte");
             Radar::DataType dt;
             if (!Radar::TryParseDataType(dtStr, dt) || !Radar::IsMultiNumericDataType(dt)) {
                 return Renge::MakeError(id, "snapshot data_type must be NumericNoByte or NumericAll").dump();
             }
 
-            auto chunk = Aura::CaptureSnapshotChunk(offset, limit, gameOnly, dt, arrayCap);
+            auto chunk = Aura::CaptureSnapshotChunk(offset, limit, gameOnly, dt, arrayCap, nativeC);
 
             auto encodeFields = [](const std::vector<Aura::SnapshotField>& src) {
                 json arr = json::array();
@@ -2030,6 +2046,14 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             // Opt-in deep-container pass (default off): reach values buried in
             // deeply-nested containers the auto heuristic doesn't flag.
             bool deep = request.value("deep", false);
+            // Native-C (P1, opt-in, default off): also scan each object's
+            // unmanaged holes (non-UPROPERTY bytes) for the value, at native_align
+            // stride (1/2/4/8, default 4). newest_first walks GObjects high-index
+            // first so truncated results keep the newest instances (the UI couples
+            // newest_first on by default with native_c).
+            bool nativeC     = request.value("native_c", false);
+            int32_t nativeAlign = request.value("native_align", 4);
+            bool newestFirst = request.value("newest_first", false);
 
             Radar::DataType dt;
             if (!Radar::TryParseDataType(dtStr, dt)) {
@@ -2107,7 +2131,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             auto scanResult = Aura::ScanForValue(
                 dt, st, targetBytes, target2Ptr, gameOnly, maxResults,
                 tolerance, targetString, caseSensitive, multiPtr, multiPtr2,
-                parallel, batchRead, deep);
+                parallel, batchRead, deep, nativeC, nativeAlign, newestFirst);
 
             uint64_t sessionId = Radar::SessionManager::Instance().Begin(
                 dt, std::move(scanResult.candidates),
@@ -2371,6 +2395,13 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             // Opt-in cross-object mode (P4): fold each actor's OWNED sub-object
             // (components + GAS AttributeSets) numeric leaves into the actor's block.
             bool crossObject = request.value("cross_object", false);
+            // Opt-in Native-C mode (P2): also fold each object's unmanaged-hole
+            // leaves (non-UPROPERTY bytes) into its block — object block only,
+            // bounded per object. Intentionally noisy on first scan.
+            bool nativeC = request.value("native_c", false);
+            // Newest-first (P2): walk high-index objects first so a deadline-
+            // truncated huge game keeps the newest objects (UI coupled with native).
+            bool newestFirst = request.value("newest_first", false);
             if (pageSize < 0) pageSize = 0;
 
             if (!request.contains("values") || !request["values"].is_array()) {
@@ -2426,7 +2457,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             }
             const int slotCount = static_cast<int>(slots.size());
 
-            auto scanResult = Aura::ScanForValueGroup(slots, gameOnly, maxResults, deep, crossObject);
+            auto scanResult = Aura::ScanForValueGroup(slots, gameOnly, maxResults, deep, crossObject, nativeC, newestFirst);
 
             uint64_t sessionId = Radar::GroupSessionManager::Instance().Begin(
                 std::move(slots), std::move(scanResult.candidates),

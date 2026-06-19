@@ -819,7 +819,24 @@ ValueScanResult ScanForValue(
     // class, not only those whose struct-array elements own containers (the auto
     // `needsDeepWalk` heuristic). Reaches values buried in deeply-nested containers
     // the heuristic misses. Heavier per object — exposed via the "Deep" toggle.
-    bool                deep          = false);
+    bool                deep          = false,
+    // Native-C (P1, opt-in, default off): ALSO scan each object's UNMANAGED holes
+    // — the byte ranges within [UObject header, class PropertiesSize) that no
+    // reflected property covers — for the requested numeric value, interpreting
+    // the raw bytes at the user's width. Finds native (non-UPROPERTY) C++ members
+    // (HP/MP/...). Numeric/multi-numeric dt only (skipped for string/vector/bool).
+    // Intentionally noisy on first scan — pair with newestFirst + Next-Scan refine.
+    // See docs/native-c-value-scan-spec.md.
+    bool                nativeC       = false,
+    // Stride (1/2/4/8, default 4) for sliding within each hole when nativeC is on.
+    int32_t             nativeAlign   = 4,
+    // Walk GObjects high-index-first so that when results hit maxResults the
+    // SURVIVORS are the most-recently-allocated instances (just-spawned pawns)
+    // rather than low-index CDOs/templates. Default false = ascending (oldest
+    // first). Recommended alongside nativeC (the UI couples the two). Applies to
+    // the whole scan (reflected + native), affecting only which matches survive
+    // truncation, not which exist.
+    bool                newestFirst   = false);
 
 // Refine an existing candidate vector in place: re-read each
 // candidate's bytes (or string, for FString/FName/FText DataTypes),
@@ -890,7 +907,18 @@ GroupScanResult ScanForValueGroup(
     bool                                gameOnly,
     int32_t                             maxResults  = 100000,
     bool                                deep        = false,
-    bool                                crossObject = false);
+    bool                                crossObject = false,
+    // Native-C (P2, opt-in, default off): also fold each object's unmanaged-hole
+    // leaves (non-UPROPERTY bytes within [header, PropertiesSize)) into its block,
+    // so a group including a native value matches. Object block only (never deep);
+    // EMIT-ON-MATCH (a raw leaf is kept only when its bytes satisfy a slot), bounded
+    // to <= 64 matching raw leaves per object. See native-c-value-scan-spec.md §7.
+    bool                                nativeC     = false,
+    // Walk GObjects newest-first (high index → low) so a 15s-deadline truncation on
+    // a huge game keeps the most-recently-allocated objects (just-spawned UI/actors
+    // holding native values) instead of low-index CDOs/templates. The UI couples this
+    // on with native-C. Default false (ascending).
+    bool                                newestFirst = false);
 
 // Next scan (P1: exact per slot). Re-reads each candidate's per-slot
 // convergence offsets, keeps those still equal to the slot's NEW target,
@@ -955,9 +983,16 @@ struct SnapshotChunkResult {
 // capture). gameOnly skips engine-package classes. numericScope must be a
 // multi-numeric meta type (NumericNoByte default / NumericAll); a non-meta
 // type captures nothing. arrayCap bounds elements captured per struct array.
+//
+// captureNativeC (P3, opt-in, default off): ALSO append each object's
+// unmanaged-hole guesses (non-UPROPERTY raw bytes interpreted via the Guess-What
+// engine, normalized to canonical property types, Pointer/Padding dropped) as
+// synthetic "<raw@0xNN>" fields, so the snapshot carries native values for SPC
+// diff / Class Pivot. See native-c-value-scan-spec.md §8.
 SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
                                          bool gameOnly,
                                          Radar::DataType numericScope,
-                                         int32_t arrayCap = 256);
+                                         int32_t arrayCap = 256,
+                                         bool captureNativeC = false);
 
 } // namespace Aura

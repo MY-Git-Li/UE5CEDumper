@@ -212,6 +212,13 @@ const std::vector<DataType>& MultiNumericMembers(DataType dt);
 // scan + refine engines to resolve each candidate's own width.
 bool TryDataTypeFromPropertyTypeName(const std::string& propTypeName, DataType& out);
 
+// Inverse of TryDataTypeFromPropertyTypeName: a concrete numeric DataType ->
+// its canonical UE property-type string ("IntProperty" / "FloatProperty" /
+// "ByteProperty" / ...). Returns "" for non-numeric / meta / Bool types.
+// Used by the Native-C value scan to stamp synthetic raw-hole descriptors with
+// a fieldType the refine path (TryDataTypeFromPropertyTypeName) round-trips.
+const char* PropertyTypeNameOf(DataType dt);
+
 // Snapshot capture (Phase A1a): given the property type-name of each field
 // of a class (in ClassInfo.Fields order), select those whose declared type
 // is a member of the given numeric meta scope (NumericNoByte / NumericAll),
@@ -317,6 +324,13 @@ struct FieldDescriptor {
     // BoolProperty bitfield support: when boolFieldMask != 0xFF the field
     // shares a byte with siblings. Read as `(byte & mask) != 0`.
     uint8_t     boolFieldMask = 0xFF;
+    // Native-C (P1): true when this descriptor is a synthetic raw-hole leaf
+    // (an unmanaged, non-UPROPERTY offset) rather than a reflected field. The
+    // refine path is identical (re-read addr, re-resolve width from fieldType);
+    // this flag + guessedType only drive UI badging (className stays the owning
+    // class, fieldName encodes the offset as "<raw@0xNN>", definingClassName "").
+    bool        isNativeC = false;
+    std::string guessedType;        // human label of the interpreted width (e.g. "Int32")
 };
 
 // Per-owning-object metadata. One entry per distinct UObject that owns at

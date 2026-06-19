@@ -80,6 +80,31 @@ public partial class ValueSearchViewModel : ViewModelBase
     /// Ownership + value driven (not class-name driven).</summary>
     [ObservableProperty] private bool   _crossObjectScan;
 
+    /// <summary>Native-C (P1, opt-in, default OFF). When on, the scan ALSO inspects
+    /// each object's unmanaged holes — the byte ranges within the object that no
+    /// UPROPERTY covers — for the requested numeric value, so native (non-UPROPERTY)
+    /// C++ members like HP/MP become findable. Intentionally noisy on first scan:
+    /// pair with Newest-first + Next-Scan refine. Numeric data types only.</summary>
+    [ObservableProperty] private bool   _nativeCScan;
+
+    /// <summary>Walk GObjects newest-first (high index → low) so that when results
+    /// hit the cap the survivors are the most-recently-allocated instances rather
+    /// than low-index CDOs/templates. Auto-enabled when Native-C is turned on (the
+    /// user may then uncheck it); auto-cleared when Native-C is turned off. Useful
+    /// on its own for catching a just-spawned actor. Default OFF.</summary>
+    [ObservableProperty] private bool   _newestFirst;
+
+    // Couple Newest-first to Native-C per the owner's rule: enabling Native-C
+    // pre-checks Newest-first (the common case — native first-scans get truncated
+    // and you usually want the newest instances), but the user can uncheck it
+    // (e.g. when hunting an operated-character value that's allocated early and
+    // persists). Disabling Native-C clears Newest-first if it's still set.
+    partial void OnNativeCScanChanged(bool value)
+    {
+        if (value) NewestFirst = true;
+        else if (NewestFirst) NewestFirst = false;
+    }
+
     /// <summary>CE-style rounded-scan slack for Float/Double and vector
     /// comparisons. Default 0.5 covers the common case: game UI
     /// displays "338" for a real float of 337.5, so scanning for "338"
@@ -609,7 +634,8 @@ public partial class ValueSearchViewModel : ViewModelBase
             var result = await _dump.BeginValueScanAsync(
                 SelectedDataType, SelectedScanType, Value,
                 SelectedScanType == ValueScanType.Between ? Value2 : null,
-                GameOnly, MaxResults, effTol, effCase, ParallelScan, BatchRead, DeepScan, PageSize, cts.Token);
+                GameOnly, MaxResults, effTol, effCase, ParallelScan, BatchRead, DeepScan,
+                NativeCScan, NewestFirst, PageSize, cts.Token);
 
             SessionId = result.SessionId;
             await ApplyScanResultAsync(result.Total, result.Candidates);
@@ -956,7 +982,8 @@ public partial class ValueSearchViewModel : ViewModelBase
             await EndGroupSessionIfAnyAsync();
 
             var result = await _dump.BeginGroupScanAsync(
-                GroupInputs.ToList(), GameOnly, MaxResults, DeepScan, CrossObjectScan, PageSize, cts.Token);
+                GroupInputs.ToList(), GameOnly, MaxResults, DeepScan, CrossObjectScan,
+                NativeCScan, NewestFirst, PageSize, cts.Token);
 
             GroupSessionId = result.SessionId;
             await ApplyGroupScanResultAsync(result.Total, result.Candidates);

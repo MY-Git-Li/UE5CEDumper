@@ -5,6 +5,7 @@
 // UStructWalker: FField chain traversal and property reading
 // ============================================================
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -15,7 +16,12 @@ struct FieldInfo {
     std::string Name;
     std::string TypeName;
     int32_t     Offset;
-    int32_t     Size;
+    int32_t     Size;           // ElementSize — ONE element (per-element stride)
+    int32_t     ArrayDim = 1;   // Static C-array dimension (Type Foo[N]); 1 for scalars.
+                                // Full field footprint = Size * ArrayDim. Read from
+                                // FProperty::ArrayDim (== ElementSize - 4 on every UE
+                                // layout). Used by Ubel::ComputeClassHoles so a static
+                                // array isn't mistaken for a hole after its first element.
     uint64_t    PropertyFlags;
 
     // === Extended type metadata (populated by WalkClassEx) ===
@@ -348,6 +354,109 @@ struct InstanceWalkResult {
 // arrayLimit: max array element count for inline reading (default 64, max 16384).
 // previewLimit: max sub-fields to show in StructProperty preview (0 = none, default 2, max 6).
 InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr = 0, int32_t arrayLimit = 64, int32_t previewLimit = 2, bool fillGaps = false);
+
+// ============================================================
+// Unmanaged-region ("hole") computation — shared by the Guess-What gap pass
+// (WalkInstance) and the Native-C value scan (see docs/native-c-value-scan-spec.md).
+//
+// A "hole" is a byte range inside an object's footprint that NO reflected
+// property covers — where non-UPROPERTY native C++ members live. These are
+// PURE helpers (no game-memory reads) so they are unit-testable without a
+// process. Pure algorithm helpers in an existing namespace are exempt from the
+// Frieren module-naming rule (same class as GraphPath.h under Aura::).
+// ============================================================
+
+// Half-open byte interval [start, end).
+struct Interval { int32_t start; int32_t end; };
+
+// Complement of `occupied` within the window [windowStart, windowEnd): the byte
+// ranges no occupied interval covers. Each occupied interval is clamped to the
+// window first (a field reaching below windowStart or above windowEnd is trimmed,
+// not dropped — this is what lets the leading region [windowStart, firstField)
+// survive as a hole), then sorted, merged, and the gaps between merged intervals
+// (plus the trailing gap to windowEnd) are returned. Empty when fully covered or
+// the window is empty. Pure.
+inline std::vector<Interval> ComputeHoles(const std::vector<Interval>& occupied,
+                                          int32_t windowStart, int32_t windowEnd) {
+    std::vector<Interval> holes;
+    if (windowStart >= windowEnd) return holes;
+
+    std::vector<Interval> clamped;
+    clamped.reserve(occupied.size());
+    for (const auto& iv : occupied) {
+        int32_t s = iv.start, e = iv.end;
+        if (s < windowStart) s = windowStart;
+        if (e > windowEnd)   e = windowEnd;
+        if (s >= e) continue;                  // entirely outside the window
+        clamped.push_back({s, e});
+    }
+    std::sort(clamped.begin(), clamped.end(),
+        [](const Interval& a, const Interval& b) { return a.start < b.start; });
+
+    std::vector<Interval> merged;
+    for (const auto& iv : clamped) {
+        if (!merged.empty() && iv.start <= merged.back().end)
+            merged.back().end = (std::max)(merged.back().end, iv.end);
+        else
+            merged.push_back(iv);
+    }
+
+    int32_t cursor = windowStart;
+    for (const auto& iv : merged) {
+        if (iv.start > cursor) holes.push_back({cursor, iv.start});
+        cursor = (std::max)(cursor, iv.end);
+    }
+    if (cursor < windowEnd) holes.push_back({cursor, windowEnd});
+    return holes;
+}
+
+// Class-level convenience: build the occupied set from a walked class's reflected
+// fields (footprint = Offset + Size * ArrayDim, so a static C-array Type Foo[N]
+// occupies all N elements, not just the first) and return the holes within
+// [windowStart, windowEnd). The caller derives the window (typically
+// [UObject header end, class PropertiesSize)). Pure (ClassInfo is already walked).
+inline std::vector<Interval> ComputeClassHoles(const ClassInfo& ci,
+                                               int32_t windowStart, int32_t windowEnd) {
+    std::vector<Interval> occupied;
+    occupied.reserve(ci.Fields.size());
+    for (const auto& f : ci.Fields) {
+        int32_t elemSize = (f.Size > 0) ? f.Size : 1;
+        int32_t dim      = (f.ArrayDim > 0) ? f.ArrayDim : 1;
+        // Guard against a garbage-huge product overflowing int32.
+        int64_t span = static_cast<int64_t>(elemSize) * dim;
+        if (span > 0x7FFFFFF0) span = 0x7FFFFFF0;
+        occupied.push_back({ f.Offset, static_cast<int32_t>(f.Offset + span) });
+    }
+    return ComputeHoles(occupied, windowStart, windowEnd);
+}
+
+// Normalize a "Guess What" type label (GuessGapTypes emits confidence-suffixed
+// names like "Float?", and non-numeric "Padding"/"Pointer?") to the CANONICAL
+// UE property-type string the rest of the stack requires — Radar::
+// TryDataTypeFromPropertyTypeName (DLL) and SnapshotNumeric.TryFromHex (C#) both
+// switch on EXACT "FloatProperty"/"IntProperty"/... strings with a default-reject.
+// Returns "" for labels that have no gameplay-numeric meaning (Padding / Pointer),
+// signalling the caller to DROP the row. The human-readable guessed label is
+// carried separately (never in the property-type field). Pure.
+inline std::string NormalizeGuessedTypeToProperty(const std::string& guessedType) {
+    if (guessedType == "Float"  || guessedType == "Float?")  return "FloatProperty";
+    if (guessedType == "Double" || guessedType == "Double?") return "DoubleProperty";
+    if (guessedType == "Int32"  || guessedType == "Int32?")  return "IntProperty";
+    if (guessedType == "Int16"  || guessedType == "Int16?")  return "Int16Property";
+    if (guessedType == "Byte"   || guessedType == "Byte?")   return "ByteProperty";
+    if (guessedType == "Int64"  || guessedType == "Int64?")  return "Int64Property";
+    return "";  // Padding / Pointer? / unknown -> drop
+}
+
+// Heuristically guess field types for a raw byte gap [gapStart, gapEnd) of the
+// object at baseAddr, appending one LiveFieldValue per guessed slot (each with
+// .guessed = true). Reads memory (SEH-safe via Macht). The "Guess What" engine;
+// promoted from a file-local static so the Native-C scan can reuse it. Emits
+// confidence-suffixed labels (Float / Float? / Int32? / Padding / Pointer? / ...);
+// callers feeding Snapshot / Value Search pass each .typeName through
+// NormalizeGuessedTypeToProperty.
+void GuessGapTypes(uintptr_t baseAddr, int32_t gapStart, int32_t gapEnd,
+                   std::vector<LiveFieldValue>& outFields);
 
 // --- DataTable Row Browsing ---
 

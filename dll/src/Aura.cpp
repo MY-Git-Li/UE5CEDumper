@@ -5042,7 +5042,10 @@ ValueScanResult ScanForValue(
     const Radar::NumericTargetSet* multiTargets2,
     bool                parallel,
     bool                batchRead,
-    bool                deep)
+    bool                deep,
+    bool                nativeC,
+    int32_t             nativeAlign,
+    bool                newestFirst)
 {
     ValueScanResult result;
     auto t0 = std::chrono::steady_clock::now();
@@ -5052,6 +5055,17 @@ ValueScanResult ScanForValue(
     const bool isVector = Radar::IsVectorDataType(dt);
     const bool isMulti  = Radar::IsMultiNumericDataType(dt);
     const size_t dtSize = Radar::SizeOf(dt);
+
+    // Native-C raw-hole scan is numeric-only: a raw byte range can't sensibly be
+    // an FString/FName/FText/FVector/bool-bitfield, so the native pass is a no-op
+    // for those dt families (the reflected scan is unaffected). Eligible = a
+    // concrete fixed-width numeric (1..8B, excluding Bool) or a multi-numeric meta.
+    const bool nativeEligible = nativeC &&
+        (isMulti || (!isString && !isVector && dt != Radar::DataType::Bool
+                     && dtSize >= 1 && dtSize <= 8));
+    // Stride for sliding within a hole. Clamp to {1,2,4,8}; default/garbage -> 4.
+    int32_t nativeStride = (nativeAlign == 1 || nativeAlign == 2
+                            || nativeAlign == 4 || nativeAlign == 8) ? nativeAlign : 4;
 
     // Validate inputs per type family.
     if (isString) {
@@ -5142,6 +5156,15 @@ ValueScanResult ScanForValue(
         // scan runs the recursive WalkContainerLeaves pass after the static
         // fields (the static StructArrayInner path covers only depth 1).
         bool                    needsDeepWalk  = false;
+        // Native-C (P1): the unmanaged byte ranges of this class (complement of
+        // reflected coverage within [winStart, winEnd)). Computed once per class
+        // (layout is build-stable) and reused by every instance. Empty unless the
+        // native scan is enabled. winTruncated = PropertiesSize exceeded the 64KB
+        // sanity cap so members past winEnd weren't scanned.
+        std::vector<Ubel::Interval> nativeHoles;
+        int32_t                 nativeWinStart = 0;
+        int32_t                 nativeWinEnd   = 0;
+        bool                    nativeTruncated = false;
     };
     // DefKey caches FindDefiningClass results per (classAddr, fieldOffset)
     // so a hot scan over many instances of the same class doesn't re-walk
@@ -5209,6 +5232,10 @@ ValueScanResult ScanForValue(
         // worker thread, resized/overwritten per object — so the batch read
         // costs (threads x <= kMaxBatchSpan), independent of object count.
         std::vector<uint8_t> objBodyBuf;
+
+        // Native-C (P1): reused per-object window buffer for the unmanaged-hole
+        // scan ([winStart, winEnd) read once, probed in-buffer). Thread-local.
+        std::vector<uint8_t> nativeBuf;
 
     // Recursive struct expansion: walks a UStruct's FProperty chain and
     // emits ScanField entries for every leaf property matching the target
@@ -5598,6 +5625,30 @@ ValueScanResult ScanForValue(
         // a container the heuristic doesn't flag is still reached.
         if (deep && !GetClassContainers(classAddr).empty()) sci.needsDeepWalk = true;
 
+        // Native-C (P1): precompute this class's unmanaged holes once. Window =
+        // [UObject header end, PropertiesSize) — PropertiesSize is the exact end
+        // of the reflected region, so every native member lives below it. Sanity-
+        // clamp huge/garbage PropertiesSize (packed / non-standard engines):
+        // > 64KB -> clamp + flag truncated; <= header -> conservative 1KB window.
+        if (nativeEligible) {
+            const int32_t headerEnd = DynOff::UOBJECT_OUTER + 8;   // 0x28 / 0x30 (CPN)
+            constexpr int32_t kSanity   = 0x10000;   // 64KB corruption guard
+            constexpr int32_t kFallback = 0x400;     // 1KB when PropertiesSize unusable
+            int32_t propsSize = ci.PropertiesSize;
+            int32_t winEnd;
+            if (propsSize > headerEnd && propsSize <= kSanity) {
+                winEnd = propsSize;
+            } else if (propsSize > kSanity) {
+                winEnd = kSanity;
+                sci.nativeTruncated = true;
+            } else {
+                winEnd = headerEnd + kFallback;
+            }
+            sci.nativeWinStart = headerEnd;
+            sci.nativeWinEnd   = winEnd;
+            sci.nativeHoles    = Ubel::ComputeClassHoles(ci, headerEnd, winEnd);
+        }
+
         auto inserted = classCache.emplace(classAddr, std::move(sci));
         return &inserted.first->second;
     };
@@ -5611,6 +5662,12 @@ ValueScanResult ScanForValue(
         // the sf.descriptorIdx cache — they intern here instead (shared across
         // instances of the same class within this thread).
         std::unordered_map<std::string, uint32_t> deepDescriptors;
+
+        // Thread-local raw-hole descriptor pool index (Native-C, P1), keyed by
+        // className \x02 offset \x02 canonical-type. A raw leaf has no ScanField
+        // identity, so it interns here (shared across instances of the same class
+        // within this thread). Built on first emit per (class, offset, width).
+        std::unordered_map<std::string, uint32_t> rawDescriptors;
 
         // Multi-numeric meta resolver. For NumericNoByte scans, resolve a
         // field/element's own concrete DataType from its property type
@@ -5660,7 +5717,14 @@ ValueScanResult ScanForValue(
             if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) return;
         }
 
-        uintptr_t obj = GetByIndex(i);
+        // Newest-first: map the ascending loop index to a DESCENDING GObjects
+        // index so the ascending-tid merge keeps the HIGHEST (most-recently-
+        // allocated) indices when truncating to maxResults — the just-spawned
+        // pawn survives instead of low-index CDOs/templates. realIdx is the true
+        // GObjects index used everywhere (GetByIndex + the InstanceRecord); the
+        // loop var i only drives chunk partitioning + the periodic deadline check.
+        const int32_t realIdx = newestFirst ? (count - 1 - i) : i;
+        uintptr_t obj = GetByIndex(realIdx);
         if (!obj) continue;
         tr.scannedObjects++;
 
@@ -5773,7 +5837,7 @@ ValueScanResult ScanForValue(
             if (curInstanceIdx < 0) {
                 curInstanceIdx = static_cast<int32_t>(tr.instances.size());
                 tr.instances.push_back(Radar::InstanceRecord{
-                    obj, i, Ubel::GetName(obj) });
+                    obj, realIdx, Ubel::GetName(obj) });
             }
             Radar::Candidate cand;
             cand.addr          = valueAddr;
@@ -6123,6 +6187,86 @@ ValueScanResult ScanForValue(
                 return false;
             };
             WalkContainerLeaves(obj, cls, /*pathPrefix*/ "", /*depth*/ 0, dlim, deepEmit, &deepVisited);
+        }
+
+        // === Native-C (P1): scan this object's UNMANAGED holes ===
+        // The reflected loop above covered every UPROPERTY; this pass tests the
+        // requested numeric value at the user's width across the byte ranges no
+        // property covers (where native, non-UPROPERTY C++ members live). Holes +
+        // window are precomputed per class (sci->nativeHoles). Read the window
+        // ONCE (SEH-safe) and probe in-buffer; on a faulting read (rare unmapped
+        // tail) skip native for this object — its reflected matches are unaffected.
+        if (nativeEligible && !sci->nativeHoles.empty()
+            && static_cast<int32_t>(tr.candidates.size()) < maxResults) {
+            const int32_t winStart = sci->nativeWinStart;
+            const int32_t winEnd   = sci->nativeWinEnd;
+            nativeBuf.resize(static_cast<size_t>(winEnd - winStart));
+            if (Macht::ReadBytesSafe(obj + winStart, nativeBuf.data(), nativeBuf.size())) {
+                // Intern a synthetic raw descriptor for (this class, offset, width).
+                auto ensureRawDescriptor = [&](int32_t offset, Radar::DataType width) -> uint32_t {
+                    const char* canon = Radar::PropertyTypeNameOf(width);
+                    std::string key = sci->className;
+                    key += '\x02'; key += std::to_string(offset);
+                    key += '\x02'; key += canon;
+                    auto rit = rawDescriptors.find(key);
+                    if (rit != rawDescriptors.end()) return rit->second;
+                    Radar::FieldDescriptor d;
+                    d.className     = sci->className;
+                    d.definingClassName = "";   // unmanaged — no declaring class
+                    char nb[32];
+                    snprintf(nb, sizeof(nb), "<raw@0x%X>", offset);
+                    d.fieldName     = nb;
+                    d.fieldType     = canon;   // canonical -> refine round-trips
+                    d.fieldOffset   = offset;
+                    d.boolFieldMask = 0xFF;
+                    d.isNativeC     = true;
+                    d.guessedType   = Radar::NameOf(width);
+                    uint32_t idx = static_cast<uint32_t>(tr.descriptors.size());
+                    tr.descriptors.push_back(std::move(d));
+                    rawDescriptors.emplace(std::move(key), idx);
+                    return idx;
+                };
+
+                // Bounds keep a single wide object from monopolising the scan:
+                // emitted native candidates and offset probes are both capped per
+                // object (the global maxResults + 15s deadline still apply).
+                constexpr int32_t kMaxRawPerObj = 256;
+                constexpr int32_t kMaxRawProbes = 32768;
+                int32_t rawEmitted = 0, probes = 0;
+
+                for (const auto& hole : sci->nativeHoles) {
+                    if (rawEmitted >= kMaxRawPerObj || probes >= kMaxRawProbes) break;
+                    if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
+                    int32_t off = (hole.start + (nativeStride - 1)) & ~(nativeStride - 1);
+                    for (; off < hole.end; off += nativeStride) {
+                        if (rawEmitted >= kMaxRawPerObj || probes >= kMaxRawProbes) break;
+                        if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
+                        ++probes;
+                        const uint8_t* p = nativeBuf.data() + (off - winStart);
+                        if (isMulti) {
+                            // Test each member width that fits and whose target the
+                            // user's value can represent (one candidate per match).
+                            for (const auto& e : multiTargets->entries) {
+                                size_t msz = Radar::SizeOf(e.dt);
+                                if (msz == 0 || off + static_cast<int32_t>(msz) > hole.end) continue;
+                                const uint8_t* mtgt2 = nullptr;
+                                if (st == Radar::ScanType::Between) {
+                                    mtgt2 = multiTargets2 ? multiTargets2->Find(e.dt) : nullptr;
+                                    if (!mtgt2) continue;
+                                }
+                                if (!Radar::ComparePredicate(e.dt, st, p, e.bytes, mtgt2, tolerance)) continue;
+                                emitCandidate(obj + off, ensureRawDescriptor(off, e.dt), -1, p, msz, nullptr);
+                                if (++rawEmitted >= kMaxRawPerObj) break;
+                            }
+                        } else {
+                            if (off + static_cast<int32_t>(dtSize) > hole.end) break;  // width can't fit the hole's tail
+                            if (!Radar::ComparePredicate(dt, st, p, targetBytes, target2Bytes, tolerance)) continue;
+                            emitCandidate(obj + off, ensureRawDescriptor(off, dt), -1, p, dtSize, nullptr);
+                            ++rawEmitted;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -6493,6 +6637,8 @@ struct GroupLeafMeta {
     uintptr_t   ownerAddr    = 0;   // object directly holding the leaf (actor, or owned sub-object for P4)
     std::string ownerClass;         // class name of ownerAddr's object (P4 inc 2; drives the Pivot handoff)
     uint8_t     boolMask     = 0xFF;
+    bool        isNativeC    = false;  // P2: raw-hole leaf (unmanaged, non-UPROPERTY)
+    std::string guessedType;           // P2: interpreted width label (e.g. "Int32"); "" for reflected
 };
 
 // One deep block = a numeric container's elements, or one struct-array/map
@@ -6775,9 +6921,109 @@ std::vector<RelatedObject> GetRelatedObjects(uintptr_t target, int32_t maxResult
     return out;
 }
 
+// Native-C (P2, opt-in). Append an object's UNMANAGED-hole leaves to its group
+// block, so a group whose values include native (non-UPROPERTY) C++ members is
+// matched. Computes the class's holes (complement of reflected coverage within
+// [UObject header, PropertiesSize), via Ubel::ComputeClassHoles), reads the window
+// ONCE (SEH-safe), and at each aligned offset tests each candidate `width`.
+//
+// EMIT-ON-MATCH: unlike the reflected CollectGroupLeaves (which emits every field
+// because reflected fields are few), a raw scan would emit thousands of useless
+// leaves per object (every offset × every width). So a raw leaf is emitted ONLY
+// when its bytes satisfy at least ONE slot's predicate — the same leaves Orden
+// would keep anyway. This keeps the leaf set tiny (matches are rare), the SDR cheap,
+// and — critically — means the per-object cap never truncates a REAL match (the
+// emit-all + small-cap version could drop the 2nd value past the cap). `slots`
+// carry the per-slot targets/predicate; `widths` is their width union (read once
+// per offset). Each emitted leaf is synthetic (isNativeC, "<raw@0xNN>", canonical
+// fieldType so refine round-trips). OBJECT-BLOCK ONLY (never deep). Bounded by a
+// probe cap + the per-object emit cap + the shared leafCap. Stride fixed at 4.
+void AppendRawHoleLeaves(uintptr_t obj, uintptr_t cls, const std::string& className,
+                         const std::vector<Radar::SlotSpec>& slots,
+                         const std::vector<Radar::DataType>& widths,
+                         std::vector<uint8_t>& winBuf,
+                         std::vector<Orden::Leaf>& leaves,
+                         std::vector<GroupLeafMeta>& metas, size_t leafCap) {
+    if (widths.empty() || leaves.size() >= leafCap) return;
+
+    const ClassInfo& ci = Ubel::WalkClassEx(cls);   // cached
+    const int32_t headerEnd = DynOff::UOBJECT_OUTER + 8;
+    constexpr int32_t kSanity   = 0x10000;
+    constexpr int32_t kFallback = 0x400;
+    int32_t propsSize = ci.PropertiesSize;
+    int32_t winEnd = (propsSize > headerEnd && propsSize <= kSanity) ? propsSize
+                   : (propsSize > kSanity) ? kSanity
+                   : (headerEnd + kFallback);
+    if (winEnd <= headerEnd) return;
+
+    auto holes = Ubel::ComputeClassHoles(ci, headerEnd, winEnd);
+    if (holes.empty()) return;
+
+    winBuf.resize(static_cast<size_t>(winEnd - headerEnd));
+    if (!Macht::ReadBytesSafe(obj + headerEnd, winBuf.data(), winBuf.size())) return;
+
+    constexpr int32_t kMaxRawGroupLeaves = 64;     // emitted (matching) raw leaves / object
+    constexpr int32_t kMaxRawGroupProbes = 65536;  // offset×width probes / object (cost bound)
+    constexpr int32_t kStride            = 4;
+    int32_t rawAdded = 0, probes = 0;
+    for (const auto& hole : holes) {
+        if (rawAdded >= kMaxRawGroupLeaves || probes >= kMaxRawGroupProbes
+            || leaves.size() >= leafCap) break;
+        int32_t off = (hole.start + (kStride - 1)) & ~(kStride - 1);
+        for (; off < hole.end; off += kStride) {
+            if (rawAdded >= kMaxRawGroupLeaves || probes >= kMaxRawGroupProbes
+                || leaves.size() >= leafCap) break;
+            const uint8_t* p = winBuf.data() + (off - headerEnd);
+            for (Radar::DataType w : widths) {
+                size_t sz = Radar::SizeOf(w);
+                if (sz == 0 || off + static_cast<int32_t>(sz) > hole.end) continue;
+                ++probes;
+                // Emit only if these bytes satisfy SOME slot's predicate at this width.
+                bool matchesAny = false;
+                for (const auto& sp : slots) {
+                    const uint8_t* tgt = sp.targets.Find(w);
+                    if (!tgt) continue;
+                    const uint8_t* tgt2 = nullptr;
+                    if (sp.st == Radar::ScanType::Between) {
+                        tgt2 = sp.targets2.Find(w);
+                        if (!tgt2) continue;
+                    }
+                    if (Radar::ComparePredicate(w, sp.st, p, tgt, tgt2, sp.tolerance)) {
+                        matchesAny = true; break;
+                    }
+                }
+                if (!matchesAny) continue;
+
+                Orden::Leaf lf;
+                lf.position     = off;
+                lf.width        = w;
+                lf.elementIndex = -1;
+                std::memcpy(lf.bytes, p, sz);
+                leaves.push_back(lf);
+                GroupLeafMeta m;
+                char nb[32];
+                snprintf(nb, sizeof(nb), "<raw@0x%X>", off);
+                m.fieldName     = nb;
+                m.fieldType     = Radar::PropertyTypeNameOf(w);
+                m.definingClass = "";
+                m.offset        = off;
+                m.elementIndex  = -1;
+                m.leafAddr      = obj + off;
+                m.ownerAddr     = obj;
+                m.ownerClass    = className;
+                m.boolMask      = 0xFF;
+                m.isNativeC     = true;
+                m.guessedType   = Radar::NameOf(w);
+                metas.push_back(std::move(m));
+                if (++rawAdded >= kMaxRawGroupLeaves) break;
+            }
+        }
+    }
+}
+
 GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
                                   bool gameOnly, int32_t maxResults, bool deep,
-                                  bool crossObject) {
+                                  bool crossObject, bool nativeC, bool newestFirst) {
     GroupScanResult result;
     auto t0 = std::chrono::steady_clock::now();
     constexpr auto kDeadline = std::chrono::seconds(15);
@@ -6792,6 +7038,20 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
     for (const auto& sp : slots)
         if (sp.dt == Radar::DataType::NumericAll ||
             sp.dt == Radar::DataType::Int8 || sp.dt == Radar::DataType::UInt8) { wantByte = true; break; }
+
+    // Native-C (P2): the union of widths any slot can represent (distinct dt across
+    // all slots' target entries). The raw-hole pass reads only these widths at each
+    // hole offset, so an int-only group never probes float holes, etc.
+    std::vector<Radar::DataType> nativeWidths;
+    if (nativeC) {
+        for (const auto& sp : slots)
+            for (const auto& e : sp.targets.entries) {
+                bool seen = false;
+                for (Radar::DataType w : nativeWidths) if (w == e.dt) { seen = true; break; }
+                if (!seen) nativeWidths.push_back(e.dt);
+            }
+    }
+    std::vector<uint8_t> nativeWinBuf;   // reused per-object window buffer
 
     std::vector<Orden::SlotTarget> ordenSlots;
     ordenSlots.reserve(nSlots);
@@ -6840,6 +7100,8 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
         d.fieldType         = meta.fieldType;
         d.fieldOffset       = meta.offset;
         d.boolFieldMask     = meta.boolMask;
+        d.isNativeC         = meta.isNativeC;     // P2: native-C badge flows via the descriptor
+        d.guessedType       = meta.guessedType;
         uint32_t idx = static_cast<uint32_t>(result.descriptors.size());
         result.descriptors.push_back(std::move(d));
         descIntern.emplace(std::move(key), idx);
@@ -6940,7 +7202,13 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
             if (Tot::Requested()) { result.stats.deadlineHit = true; break; }
             if (std::chrono::steady_clock::now() - t0 > kDeadline) { result.stats.deadlineHit = true; break; }
         }
-        uintptr_t obj = GetByIndex(i);
+        // Newest-first (coupled with native-C in the UI): walk high-index first so
+        // that when the 15s deadline truncates a huge game (FF7 Rebirth ~433K
+        // objects), the survivors are the most-recently-allocated objects — the
+        // just-spawned UI widgets / actors that hold native values — rather than
+        // low-index CDOs/templates. `idx` is the true GObjects index used everywhere.
+        const int32_t objIdx = newestFirst ? (total - 1 - i) : i;
+        uintptr_t obj = GetByIndex(objIdx);
         if (!obj) continue;
         std::string name = Ubel::GetName(obj);
         if (name.empty()) continue;
@@ -6966,8 +7234,14 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
         // span {actor, components, attribute sets} matches as one block.
         if (crossObject)
             AppendOwnedSubObjectLeaves(obj, wantByte, leaves, metas, kLeafCap);
+        // Native-C (opt-in): also fold in this object's unmanaged-hole leaves so a
+        // group including a native (non-UPROPERTY) value matches. Object block only
+        // (never deep — see AppendRawHoleLeaves). Bounded per object.
+        if (nativeC)
+            AppendRawHoleLeaves(obj, cls, className, slots, nativeWidths, nativeWinBuf,
+                                leaves, metas, kLeafCap);
         if (leaves.size() >= nSlots && Orden::MatchGroup(leaves, ordenSlots, matchOut))
-            emitGroupCandidate(obj, i, name, className, leaves, metas, matchOut);
+            emitGroupCandidate(obj, objIdx, name, className, leaves, metas, matchOut);
 
         // --- Deep blocks (opt-in): each numeric container / struct-array element
         // is its own block, reached via the recursive container walk. Finds groups
@@ -6980,7 +7254,7 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
                 GroupBlock& blk = kv.second;
                 if (blk.leaves.size() < nSlots) continue;
                 if (Orden::MatchGroup(blk.leaves, ordenSlots, matchOut))
-                    emitGroupCandidate(obj, i, name, className, blk.leaves, blk.metas, matchOut);
+                    emitGroupCandidate(obj, objIdx, name, className, blk.leaves, blk.metas, matchOut);
                 if (static_cast<int32_t>(result.candidates.size()) >= maxResults) break;
             }
         }
@@ -7062,10 +7336,74 @@ ValueScanStats RefineGroupCandidates(
     return stats;
 }
 
+// Native-C (P3): append an object's UNMANAGED-hole guesses as synthetic snapshot
+// fields, so a captured snapshot ALSO carries native (non-UPROPERTY) values for the
+// SPC diff / Class Pivot consumers. Reuses the "Guess What" engine (Ubel::GuessGapTypes)
+// over each hole, then NORMALIZES each guessed type to the canonical UE property-type
+// string (Ubel::NormalizeGuessedTypeToProperty) — MANDATORY, because the C# consumer
+// SnapshotNumeric.TryFromHex switches on exact "FloatProperty"/"IntProperty"/... and
+// would store a NULL numeric_value (breaking SPC compare + Pivot decode) for a suffixed
+// "Float?"/"Int32?". Pointer/Padding guesses normalize to "" and are DROPPED (not
+// gameplay numerics; they'd pollute the Pivot value picker). Field names are
+// "<raw@0xNN>" — offset-only, so the same hole joins across snapshots regardless of the
+// guessed value, and so SPC/Pivot (which key on prop_name + offset) treat it uniformly;
+// matches the P1/P2 discriminator. Honors the snapshot numericScope (e.g. Byte guesses
+// drop under NumericNoByte). Bounded per object (kMaxRawSnapFields).
+void AppendRawHoleFields(uintptr_t obj, uintptr_t cls, Radar::DataType numericScope,
+                         std::vector<SnapshotField>& out) {
+    const std::vector<Radar::DataType>& members = Radar::MultiNumericMembers(numericScope);
+    if (members.empty()) return;   // numericScope isn't a meta type -> capture nothing
+
+    const ClassInfo& ci = Ubel::WalkClassEx(cls);   // cached
+    const int32_t headerEnd = DynOff::UOBJECT_OUTER + 8;
+    constexpr int32_t kSanity   = 0x10000;
+    constexpr int32_t kFallback = 0x400;
+    int32_t propsSize = ci.PropertiesSize;
+    int32_t winEnd = (propsSize > headerEnd && propsSize <= kSanity) ? propsSize
+                   : (propsSize > kSanity) ? kSanity
+                   : (headerEnd + kFallback);
+    if (winEnd <= headerEnd) return;
+
+    auto holes = Ubel::ComputeClassHoles(ci, headerEnd, winEnd);
+    if (holes.empty()) return;
+
+    auto inScope = [&](Radar::DataType dt) {
+        for (Radar::DataType m : members) if (m == dt) return true;
+        return false;
+    };
+
+    constexpr int kMaxRawSnapFields = 256;   // per object
+    int added = 0;
+    std::vector<Ubel::LiveFieldValue> guesses;
+    for (const auto& hole : holes) {
+        if (added >= kMaxRawSnapFields) break;
+        guesses.clear();
+        Ubel::GuessGapTypes(obj, hole.start, hole.end, guesses);
+        for (const auto& g : guesses) {
+            if (added >= kMaxRawSnapFields) break;
+            std::string canon = Ubel::NormalizeGuessedTypeToProperty(g.typeName);
+            if (canon.empty()) continue;   // padding / pointer -> drop
+            Radar::DataType dt;
+            if (!Radar::TryDataTypeFromPropertyTypeName(canon, dt)) continue;
+            if (!inScope(dt)) continue;    // honor numericScope (e.g. Byte under NoByte)
+            SnapshotField sf;
+            char nb[32];
+            snprintf(nb, sizeof(nb), "<raw@0x%X>", g.offset);
+            sf.name   = nb;
+            sf.offset = g.offset;
+            sf.type   = canon;            // canonical -> SnapshotNumeric decodes it
+            sf.hex    = g.hexValue;       // little-endian hex, width already matches canon
+            out.push_back(std::move(sf));
+            ++added;
+        }
+    }
+}
+
 SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
                                          bool gameOnly,
                                          Radar::DataType numericScope,
-                                         int32_t arrayCap) {
+                                         int32_t arrayCap,
+                                         bool captureNativeC) {
     SnapshotChunkResult result;
     const int32_t total = GetCount();
     result.total = total;
@@ -7075,6 +7413,17 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
     const int32_t end = (std::min)(offset + limit, total);
     result.scanned = (end > offset) ? (end - offset) : 0;
 
+    // Wall-clock deadline so an expensive chunk (large classes, and — once it
+    // lands — the opt-in Native-C / deep capture per object) can't stall the
+    // capture thread indefinitely. This loop previously had ONLY a Tot cancel
+    // check; unlike ScanForValue / ScanForValueGroup it had no time backstop
+    // (see docs/native-c-value-scan-spec.md §11). On a deadline we return the
+    // chunk PARTIAL with result.scanned set to the actual progress so the C#
+    // pager advances correctly (the i != offset guard guarantees progress, so
+    // paging can't stall).
+    constexpr auto kCaptureDeadline = std::chrono::seconds(15);
+    const auto t0 = std::chrono::steady_clock::now();
+
     // Reused scratch so per-object capture doesn't churn the heap.
     std::vector<std::string> typeNames;
 
@@ -7082,6 +7431,14 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
         if ((i & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:snapshot", "CaptureSnapshotChunk: aborted (client gone / shutdown)");
             break;  // return partial chunk
+        }
+        if (i != offset && (i & 0x3F) == 0 &&
+            std::chrono::steady_clock::now() - t0 > kCaptureDeadline) {
+            result.scanned = i - offset;  // partial — report actual progress
+            Sein::Warn("PIPE:snapshot",
+                       "CaptureSnapshotChunk: deadline hit after %d objs (partial chunk)",
+                       i - offset);
+            break;
         }
         uintptr_t obj = GetByIndex(i);
         if (!obj) continue;
@@ -7133,6 +7490,12 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
         // Container-element leaves at any (bounded) depth — struct-array / map /
         // set elements + nested leaf-containers (build 1204).
         CaptureStructArrays(obj, cls, numericScope, arrayCap, so.arrays);
+
+        // Native-C (P3, opt-in): append this object's unmanaged-hole guesses as
+        // synthetic "<raw@0xNN>" fields so the snapshot also carries native
+        // (non-UPROPERTY) values for SPC diff / Class Pivot.
+        if (captureNativeC)
+            AppendRawHoleFields(obj, cls, numericScope, so.fields);
 
         // Keep objects with any captured scalar field OR array element.
         if (so.fields.empty() && so.arrays.empty()) continue;

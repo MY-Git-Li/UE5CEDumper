@@ -1478,6 +1478,9 @@ public sealed class DumpService : IDumpService
         FieldType         = obj["field_type"]?.GetValue<string>() ?? "",
         BoolFieldMask     = (byte)(obj["bool_field_mask"]?.GetValue<int>() ?? 0xFF),
         Value             = obj["value"]?.GetValue<string>() ?? "",
+        // Native-C (P1): present only for raw-hole hits (absent => reflected).
+        IsNativeField     = obj["is_native_c"]?.GetValue<bool>() ?? false,
+        GuessedType       = obj["guessed_type"]?.GetValue<string>() ?? "",
     };
 
     private static bool ToleranceAppliesTo(ValueScanDataType dt) =>
@@ -1509,6 +1512,8 @@ public sealed class DumpService : IDumpService
         bool parallel = true,
         bool batchRead = true,
         bool deep = false,
+        bool nativeC = false,
+        bool newestFirst = false,
         int pageSize = 1000,
         CancellationToken ct = default)
     {
@@ -1552,6 +1557,16 @@ public sealed class DumpService : IDumpService
         // Deep container pass is opt-in (default off) → attach only when enabled.
         if (deep)
             req["deep"] = true;
+        // Native-C raw-hole scan (P1) is opt-in (default off) → attach only when
+        // enabled. The (JsonNode) cast dodges the generic JsonObject indexer's
+        // Add<T> AOT/trim trap (IL2026/IL3050). native_align stays at the DLL
+        // default (4) for now — no UI stride control yet.
+        if (nativeC)
+            req["native_c"] = (JsonNode)true;
+        // Newest-first GObjects ordering is opt-in (default off) → attach only when
+        // enabled (auto-set with native_c, but independently toggleable).
+        if (newestFirst)
+            req["newest_first"] = (JsonNode)true;
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
@@ -1716,6 +1731,9 @@ public sealed class DumpService : IDumpService
                     OwnerAddr     = so["owner_addr"]?.GetValue<string>() ?? "",
                     OwnerClass    = so["owner_class"]?.GetValue<string>() ?? "",
                     Locked        = so["locked"]?.GetValue<bool>() ?? false,
+                    // Native-C (P2): present only for raw-hole slot matches.
+                    IsNativeField = so["is_native_c"]?.GetValue<bool>() ?? false,
+                    GuessedType   = so["guessed_type"]?.GetValue<string>() ?? "",
                 };
                 if (so["matched_offsets"] is JsonArray mo)
                     foreach (var off in mo)
@@ -1735,6 +1753,8 @@ public sealed class DumpService : IDumpService
         int maxResults = 50000,
         bool deep = false,
         bool crossObject = false,
+        bool nativeC = false,
+        bool newestFirst = false,
         int pageSize = 1000,
         CancellationToken ct = default)
     {
@@ -1765,6 +1785,12 @@ public sealed class DumpService : IDumpService
             req["deep"] = true;
         if (crossObject)
             req["cross_object"] = true;
+        // Native-C raw-hole pass (P2), opt-in → attach only when on (back-compat).
+        if (nativeC)
+            req["native_c"] = (JsonNode)true;
+        // Newest-first ordering (P2): attach only when on (auto-set with native_c).
+        if (newestFirst)
+            req["newest_first"] = (JsonNode)true;
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
 
@@ -1890,7 +1916,8 @@ public sealed class DumpService : IDumpService
     }
 
     public async Task<SnapshotChunkResult> SnapshotChunkAsync(
-        string dataType, bool gameOnly, int offset, int limit, CancellationToken ct = default)
+        string dataType, bool gameOnly, int offset, int limit,
+        bool nativeC = false, CancellationToken ct = default)
     {
         var req = new JsonObject
         {
@@ -1900,6 +1927,9 @@ public sealed class DumpService : IDumpService
             ["offset"] = offset,
             ["limit"] = limit,
         };
+        // Native-C raw-hole capture (P3), opt-in → attach only when on (back-compat).
+        if (nativeC)
+            req["native_c"] = (JsonNode)true;
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
 

@@ -1182,17 +1182,22 @@ public class ValueSearchTests
         public bool? LastBatchRead { get; private set; }
 
         public bool? LastDeep { get; private set; }
+        public bool? LastNativeC { get; private set; }
+        public bool? LastNewestFirst { get; private set; }
         public override Task<ValueScanBeginResult> BeginValueScanAsync(
             ValueScanDataType dataType, ValueScanType scanType,
             string value, string? value2 = null, bool gameOnly = true,
             int maxResults = 50000, double tolerance = 0.0,
             bool caseSensitive = false, bool parallel = true, bool batchRead = true,
-            bool deep = false, int pageSize = 1000, CancellationToken ct = default)
+            bool deep = false, bool nativeC = false, bool newestFirst = false,
+            int pageSize = 1000, CancellationToken ct = default)
         {
             Begins.Add((dataType, scanType, value, value2, gameOnly, maxResults, tolerance, caseSensitive));
             LastParallel = parallel;
             LastBatchRead = batchRead;
             LastDeep = deep;
+            LastNativeC = nativeC;
+            LastNewestFirst = newestFirst;
             return Task.FromResult(NextBeginResult);
         }
 
@@ -1226,16 +1231,17 @@ public class ValueSearchTests
         public GroupScanBeginResult NextGroupBeginResult { get; set; } = new();
         public GroupScanRefineResult NextGroupRefineResult { get; set; } = new();
         public GroupScanWindowResult NextGroupWindowResult { get; set; } = new();
-        public List<(List<GroupSlotInput> slots, bool gameOnly, int maxResults, bool deep, bool crossObject)> GroupBegins { get; } = new();
+        public List<(List<GroupSlotInput> slots, bool gameOnly, int maxResults, bool deep, bool crossObject, bool nativeC, bool newestFirst)> GroupBegins { get; } = new();
         public List<(ulong sessionId, List<GroupSlotInput> slots)> GroupRefines { get; } = new();
         public List<ulong> GroupEnds { get; } = new();
 
         public override Task<GroupScanBeginResult> BeginGroupScanAsync(
             IReadOnlyList<GroupSlotInput> slots, bool gameOnly = true,
             int maxResults = 50000, bool deep = false, bool crossObject = false,
-            int pageSize = 1000, CancellationToken ct = default)
+            bool nativeC = false, bool newestFirst = false, int pageSize = 1000,
+            CancellationToken ct = default)
         {
-            GroupBegins.Add((slots.ToList(), gameOnly, maxResults, deep, crossObject));
+            GroupBegins.Add((slots.ToList(), gameOnly, maxResults, deep, crossObject, nativeC, newestFirst));
             return Task.FromResult(NextGroupBeginResult);
         }
 
@@ -1664,6 +1670,38 @@ public class ValueSearchTests
     }
 
     [Fact]
+    public async Task BeginGroupScanAsync_AttachesNativeC_WhenEnabled_OmitsByDefault()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"] = req["id"]?.GetValue<int>() ?? 0, ["ok"] = true,
+                ["session_id"] = 1UL, ["total"] = 0, ["candidates"] = new JsonArray(),
+            };
+        });
+        var slots = new List<GroupSlotInput> { new() { Value = "1" }, new() { Value = "2" } };
+
+        await svc.BeginGroupScanAsync(slots, nativeC: false, ct: TestContext.Current.CancellationToken);
+        Assert.False(captured!.ContainsKey("native_c"), "native_c omitted when off (wire-tight)");
+
+        await svc.BeginGroupScanAsync(slots, nativeC: true, ct: TestContext.Current.CancellationToken);
+        Assert.True(captured!["native_c"]?.GetValue<bool>(), "native_c attached when on");
+    }
+
+    [Fact]
+    public void GroupSlotMatch_Origin_ReflectsNativeFlag()
+    {
+        Assert.Equal("Reflected",
+            new UE5DumpUI.Models.GroupSlotMatch { IsNativeField = false }.Origin);
+        Assert.Equal("Native-C (Int32)",
+            new UE5DumpUI.Models.GroupSlotMatch { IsNativeField = true, GuessedType = "Int32" }.Origin);
+    }
+
+    [Fact]
     public void GroupSlotMatch_HandoffAddr_PrefersOwnerOverActor()
     {
         var own = new GroupSlotMatch { InstanceAddr = "7FF6AA", OwnerAddr = "" };
@@ -1801,6 +1839,82 @@ public class ValueSearchTests
     }
 
     [Fact]
+    public async Task BeginValueScanAsync_AttachesNativeCAndNewestFirstOnlyWhenEnabled()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"] = req["id"]?.GetValue<int>() ?? 0, ["ok"] = true,
+                ["session_id"] = 1UL, ["data_type"] = "Int32", ["total"] = 0,
+                ["scanned_classes"] = 0, ["scanned_objects"] = 0, ["duration_ms"] = 0L,
+                ["deadline_hit"] = false, ["candidates"] = new JsonArray(),
+            };
+        });
+        // Off by default → omitted (wire-tight, back-compat with old DLLs).
+        await svc.BeginValueScanAsync(ValueScanDataType.Int32, ValueScanType.Exact, "10",
+            ct: TestContext.Current.CancellationToken);
+        Assert.False(captured!.ContainsKey("native_c"));
+        Assert.False(captured!.ContainsKey("newest_first"));
+
+        await svc.BeginValueScanAsync(ValueScanDataType.Int32, ValueScanType.Exact, "10",
+            nativeC: true, newestFirst: true, ct: TestContext.Current.CancellationToken);
+        Assert.True(captured!["native_c"]?.GetValue<bool>());
+        Assert.True(captured!["newest_first"]?.GetValue<bool>());
+    }
+
+    [Fact]
+    public void NativeCScan_Couples_NewestFirst()
+    {
+        var (vm, _) = MakeVm();
+        Assert.False(vm.NativeCScan);
+        Assert.False(vm.NewestFirst);
+
+        // Enabling Native-C pre-checks Newest-first.
+        vm.NativeCScan = true;
+        Assert.True(vm.NewestFirst);
+
+        // User may independently uncheck Newest-first while Native-C stays on.
+        vm.NewestFirst = false;
+        Assert.True(vm.NativeCScan);
+        Assert.False(vm.NewestFirst);
+
+        // Re-enabling re-checks it; disabling Native-C then clears it.
+        vm.NewestFirst = true;
+        vm.NativeCScan = false;
+        Assert.False(vm.NewestFirst);
+    }
+
+    [Fact]
+    public void ValueCandidate_Origin_ReflectsNativeFlag()
+    {
+        var reflected = new UE5DumpUI.Models.ValueCandidate { IsNativeField = false };
+        Assert.Equal("Reflected", reflected.Origin);
+
+        var native = new UE5DumpUI.Models.ValueCandidate
+        { IsNativeField = true, GuessedType = "Int32" };
+        Assert.Equal("Native-C (Int32)", native.Origin);
+    }
+
+    [Fact]
+    public async Task FirstScan_PassesNativeCAndNewestFirst()
+    {
+        var (vm, fake) = MakeVm();
+        fake.NextBeginResult = new ValueScanBeginResult { SessionId = 7UL, DataType = "Int32", Total = 0 };
+        vm.NativeCScan = true;            // also auto-checks NewestFirst
+        vm.SelectedDataType = ValueScanDataType.Int32;
+        vm.Value = "100";
+
+        await vm.FirstScanCommand.ExecuteAsync(null);
+
+        Assert.True(fake.LastNativeC);
+        Assert.True(fake.LastNewestFirst);
+    }
+
+    [Fact]
     public async Task GroupFirstScan_PassesDeepFlag()
     {
         var (vm, fake) = MakeVm();
@@ -1814,6 +1928,25 @@ public class ValueSearchTests
 
         Assert.Single(fake.GroupBegins);
         Assert.True(fake.GroupBegins[0].deep);
+    }
+
+    [Fact]
+    public async Task GroupFirstScan_PassesNativeCFlag()
+    {
+        var (vm, fake) = MakeVm();
+        vm.IsGroupMode = true;
+        vm.NativeCScan = true;            // shared toggle; group sends native_c
+        vm.GroupInputs[0].Value = "777";
+        vm.GroupInputs[1].Value = "1234";
+        fake.NextGroupBeginResult = new GroupScanBeginResult { SessionId = 9UL, Total = 0 };
+
+        await vm.GroupFirstScanCommand.ExecuteAsync(null);
+
+        Assert.Single(fake.GroupBegins);
+        Assert.True(fake.GroupBegins[0].nativeC);
+        // Native-C couples Newest-first on → group passes it too (reaches high-index
+        // UI/actor objects before a deadline truncation on a huge game).
+        Assert.True(fake.GroupBegins[0].newestFirst);
     }
 
     [Fact]

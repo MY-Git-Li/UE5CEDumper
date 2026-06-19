@@ -333,6 +333,24 @@ bool TryDataTypeFromPropertyTypeName(const std::string& propTypeName, DataType& 
     return false;
 }
 
+const char* PropertyTypeNameOf(DataType dt) {
+    // Inverse of TryDataTypeFromPropertyTypeName — keep the two in lock-step so a
+    // native-scan descriptor stamped here always re-resolves on refine.
+    switch (dt) {
+        case DataType::Int8:   return "Int8Property";
+        case DataType::UInt8:  return "ByteProperty";
+        case DataType::Int16:  return "Int16Property";
+        case DataType::UInt16: return "UInt16Property";
+        case DataType::Int32:  return "IntProperty";
+        case DataType::UInt32: return "UInt32Property";
+        case DataType::Int64:  return "Int64Property";
+        case DataType::UInt64: return "UInt64Property";
+        case DataType::Float:  return "FloatProperty";
+        case DataType::Double: return "DoubleProperty";
+        default:               return "";   // Bool / string / vector / meta
+    }
+}
+
 std::vector<SnapshotFieldPick> SelectSnapshotNumericFields(
     const std::vector<std::string>& propTypeNames, DataType numericScope) {
     std::vector<SnapshotFieldPick> picks;

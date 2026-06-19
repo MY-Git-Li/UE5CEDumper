@@ -28,6 +28,11 @@
                     IsEnabled="{Binding CanEditSettings}" Margin="0,0,12,0"/>
           <CheckBox Content="{StaticResource str.Snapshot.GameOnly}" IsChecked="{Binding GameOnly}" Foreground="#CCCCCC"
                     IsEnabled="{Binding CanEditSettings}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+          <!-- Native-C (P3): also capture unmanaged-hole guesses so SPC/Pivot can track
+               native (non-UPROPERTY) values. Slower + larger; default OFF. -->
+          <CheckBox Content="{StaticResource str.Snapshot.NativeC}" IsChecked="{Binding IncludeNativeFields}"
+                    ToolTip.Tip="{StaticResource str.Tip.Snapshot.NativeC}" Foreground="#E0A050"
+                    IsEnabled="{Binding CanEditSettings}" VerticalAlignment="Center" Margin="0,0,12,0"/>
           <TextBlock Text="{StaticResource str.Snapshot.Quota}" Foreground="#CCCCCC"
                      VerticalAlignment="Center" Margin="0,0,6,0"/>
           <ComboBox ItemsSource="{Binding QuotaOptions}" SelectedItem="{Binding SelectedQuotaLabel}"
