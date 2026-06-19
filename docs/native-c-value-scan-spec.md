@@ -26,7 +26,11 @@
 > `NativeCScan`) + `Origin` on `GroupSlotMatch`). **Group also got newest-first**
 > (coupled with native): on a huge game (FF7 Rebirth ~433K objects) the single-
 > threaded 15s scan truncated before reaching high-index UI widgets, so newest-first
-> walks high→low to reach them first. **P3 (snapshot/SPC/pivot) remains.**
+> walks high→low to reach them first. **P2 in-game VERIFIED on FF7 Rebirth**
+> (`StatusList_2_C` matched `<raw@0x414>=6568, <raw@0x42C>=9999999`). Newest-first is
+> a **visible opt-in checkbox in BOTH single and group modes** (auto-checked with
+> native-C, user can uncheck — e.g. for an early-spawned/low-index operated-character
+> value vs a late-spawned/high-index UI panel). **P3 (snapshot/SPC/pivot) remains.**
 
 -----
 
