@@ -62,8 +62,13 @@ public static class Constants
     // %LOCALAPPDATA%\UE5CEDumper, named snapshots.<pe_hash>.db so each game's
     // snapshots stay isolated (no cross-game mixing / growth / corruption).
     public const string SnapshotDbPrefix = "snapshots";
-    // Objects streamed per snapshot_chunk pipe round-trip.
-    public const int SnapshotChunkSize = 200;
+    // Objects streamed per snapshot_chunk pipe round-trip. Raised 200 -> 1000 to
+    // cut round-trip + SQLite-transaction overhead on huge games (FF7 Rebirth
+    // ~433K objects: 2166 chunks -> ~433). Safe: the pipe is byte-mode (no message
+    // cap) + StreamReader.ReadLineAsync accumulates any size, and the DLL's 15s
+    // per-chunk deadline re-chunks a slow chunk (returns partial, pager advances by
+    // scanned). See docs/todo.md snapshot-perf item (in-game re-test pending).
+    public const int SnapshotChunkSize = 1000;
 
     // UI
     public const int DefaultWindowWidth = 1400;
