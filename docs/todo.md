@@ -66,9 +66,14 @@ Open work only. **Read this when deciding what to do next.**
   ONCE into a reused `thread_local` buffer and guesses in-buffer — the per-position AND
   per-byte (zero-run probe) SEH reads are eliminated; output is byte-identical; an SEH
   fallback is kept for a faulting / over-large gap. Also speeds up LiveWalker "Guess What".
-  **Re-test FF7 Rebirth to see if this alone makes Native-C capture feasible.** (2) **Capture is one pipe round-trip per 200 objects** (`Constants.SnapshotChunkSize`)
-  → ~2166 chunks for 433K objects + a SQLite write burst each; raise the chunk size and/or
-  batch the inserts. (3) **DLL `CaptureSnapshotChunk` is single-threaded**; the reflected walk
+  (still 10+ min after this fix, so the round-trip overhead below dominates too.) (2)
+  ~~one pipe round-trip per 200 objects~~ **CHUNK RAISED 200 → 1000 (this session, 待測 /
+  in-game re-test pending):** `Constants.SnapshotChunkSize` — ~2166 chunks → ~433 for 433K
+  objects, also cutting the per-chunk SQLite write-transaction count. Safe (byte-mode pipe +
+  `StreamReader.ReadLineAsync` accumulate any size; DLL 15s per-chunk deadline re-chunks slow
+  chunks). **NEEDS in-game re-test on FF7 Rebirth — if still too slow, the bottleneck is the
+  single-threaded DLL walk → do (3).** Could raise further / batch SQLite inserts if needed.
+  (3) **DLL `CaptureSnapshotChunk` is single-threaded**; the reflected walk
   alone is heavy at 433K. Consider parallelizing (mirror `ScanForValue`'s `ParallelGObjectsScan`)
   and/or a class-scoped capture (only capture instances of a chosen class) for huge games.
   Also surface a clearer "X% captured, still running" progress + an explicit cap/stop. Until
