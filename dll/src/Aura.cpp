@@ -6923,17 +6923,23 @@ std::vector<RelatedObject> GetRelatedObjects(uintptr_t target, int32_t maxResult
 
 // Native-C (P2, opt-in). Append an object's UNMANAGED-hole leaves to its group
 // block, so a group whose values include native (non-UPROPERTY) C++ members is
-// matched. Mirrors the single-value native pass (ScanForValue): compute the
-// class's holes (complement of reflected coverage within [UObject header,
-// PropertiesSize), via Ubel::ComputeClassHoles), read the window ONCE (SEH-safe),
-// and at each aligned offset emit one Orden::Leaf per candidate `width` that fits.
-// Each leaf is a synthetic raw leaf (isNativeC, fieldName "<raw@0xNN>", canonical
-// fieldType so refine round-trips). Bounded: <= kMaxRawGroupLeaves per object AND
-// the shared leafCap. OBJECT-BLOCK ONLY — never folded into deep blocks (that would
-// explode the leaf budget × the group AND's selectivity). `widths` is the union of
-// the slots' target widths (so we only read widths some slot can match).
-// Stride is fixed at 4 (group scan exposes no per-slot stride control).
+// matched. Computes the class's holes (complement of reflected coverage within
+// [UObject header, PropertiesSize), via Ubel::ComputeClassHoles), reads the window
+// ONCE (SEH-safe), and at each aligned offset tests each candidate `width`.
+//
+// EMIT-ON-MATCH: unlike the reflected CollectGroupLeaves (which emits every field
+// because reflected fields are few), a raw scan would emit thousands of useless
+// leaves per object (every offset × every width). So a raw leaf is emitted ONLY
+// when its bytes satisfy at least ONE slot's predicate — the same leaves Orden
+// would keep anyway. This keeps the leaf set tiny (matches are rare), the SDR cheap,
+// and — critically — means the per-object cap never truncates a REAL match (the
+// emit-all + small-cap version could drop the 2nd value past the cap). `slots`
+// carry the per-slot targets/predicate; `widths` is their width union (read once
+// per offset). Each emitted leaf is synthetic (isNativeC, "<raw@0xNN>", canonical
+// fieldType so refine round-trips). OBJECT-BLOCK ONLY (never deep). Bounded by a
+// probe cap + the per-object emit cap + the shared leafCap. Stride fixed at 4.
 void AppendRawHoleLeaves(uintptr_t obj, uintptr_t cls, const std::string& className,
+                         const std::vector<Radar::SlotSpec>& slots,
                          const std::vector<Radar::DataType>& widths,
                          std::vector<uint8_t>& winBuf,
                          std::vector<Orden::Leaf>& leaves,
@@ -6956,22 +6962,43 @@ void AppendRawHoleLeaves(uintptr_t obj, uintptr_t cls, const std::string& classN
     winBuf.resize(static_cast<size_t>(winEnd - headerEnd));
     if (!Macht::ReadBytesSafe(obj + headerEnd, winBuf.data(), winBuf.size())) return;
 
-    constexpr int32_t kMaxRawGroupLeaves = 64;   // per object — keeps the SDR + leaf budget sane
+    constexpr int32_t kMaxRawGroupLeaves = 64;     // emitted (matching) raw leaves / object
+    constexpr int32_t kMaxRawGroupProbes = 65536;  // offset×width probes / object (cost bound)
     constexpr int32_t kStride            = 4;
-    int32_t rawAdded = 0;
+    int32_t rawAdded = 0, probes = 0;
     for (const auto& hole : holes) {
-        if (rawAdded >= kMaxRawGroupLeaves || leaves.size() >= leafCap) break;
+        if (rawAdded >= kMaxRawGroupLeaves || probes >= kMaxRawGroupProbes
+            || leaves.size() >= leafCap) break;
         int32_t off = (hole.start + (kStride - 1)) & ~(kStride - 1);
         for (; off < hole.end; off += kStride) {
-            if (rawAdded >= kMaxRawGroupLeaves || leaves.size() >= leafCap) break;
+            if (rawAdded >= kMaxRawGroupLeaves || probes >= kMaxRawGroupProbes
+                || leaves.size() >= leafCap) break;
+            const uint8_t* p = winBuf.data() + (off - headerEnd);
             for (Radar::DataType w : widths) {
                 size_t sz = Radar::SizeOf(w);
                 if (sz == 0 || off + static_cast<int32_t>(sz) > hole.end) continue;
+                ++probes;
+                // Emit only if these bytes satisfy SOME slot's predicate at this width.
+                bool matchesAny = false;
+                for (const auto& sp : slots) {
+                    const uint8_t* tgt = sp.targets.Find(w);
+                    if (!tgt) continue;
+                    const uint8_t* tgt2 = nullptr;
+                    if (sp.st == Radar::ScanType::Between) {
+                        tgt2 = sp.targets2.Find(w);
+                        if (!tgt2) continue;
+                    }
+                    if (Radar::ComparePredicate(w, sp.st, p, tgt, tgt2, sp.tolerance)) {
+                        matchesAny = true; break;
+                    }
+                }
+                if (!matchesAny) continue;
+
                 Orden::Leaf lf;
                 lf.position     = off;
                 lf.width        = w;
                 lf.elementIndex = -1;
-                std::memcpy(lf.bytes, winBuf.data() + (off - headerEnd), sz);
+                std::memcpy(lf.bytes, p, sz);
                 leaves.push_back(lf);
                 GroupLeafMeta m;
                 char nb[32];
@@ -6996,7 +7023,7 @@ void AppendRawHoleLeaves(uintptr_t obj, uintptr_t cls, const std::string& classN
 
 GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
                                   bool gameOnly, int32_t maxResults, bool deep,
-                                  bool crossObject, bool nativeC) {
+                                  bool crossObject, bool nativeC, bool newestFirst) {
     GroupScanResult result;
     auto t0 = std::chrono::steady_clock::now();
     constexpr auto kDeadline = std::chrono::seconds(15);
@@ -7175,7 +7202,13 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
             if (Tot::Requested()) { result.stats.deadlineHit = true; break; }
             if (std::chrono::steady_clock::now() - t0 > kDeadline) { result.stats.deadlineHit = true; break; }
         }
-        uintptr_t obj = GetByIndex(i);
+        // Newest-first (coupled with native-C in the UI): walk high-index first so
+        // that when the 15s deadline truncates a huge game (FF7 Rebirth ~433K
+        // objects), the survivors are the most-recently-allocated objects — the
+        // just-spawned UI widgets / actors that hold native values — rather than
+        // low-index CDOs/templates. `idx` is the true GObjects index used everywhere.
+        const int32_t objIdx = newestFirst ? (total - 1 - i) : i;
+        uintptr_t obj = GetByIndex(objIdx);
         if (!obj) continue;
         std::string name = Ubel::GetName(obj);
         if (name.empty()) continue;
@@ -7205,10 +7238,10 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
         // group including a native (non-UPROPERTY) value matches. Object block only
         // (never deep — see AppendRawHoleLeaves). Bounded per object.
         if (nativeC)
-            AppendRawHoleLeaves(obj, cls, className, nativeWidths, nativeWinBuf,
+            AppendRawHoleLeaves(obj, cls, className, slots, nativeWidths, nativeWinBuf,
                                 leaves, metas, kLeafCap);
         if (leaves.size() >= nSlots && Orden::MatchGroup(leaves, ordenSlots, matchOut))
-            emitGroupCandidate(obj, i, name, className, leaves, metas, matchOut);
+            emitGroupCandidate(obj, objIdx, name, className, leaves, metas, matchOut);
 
         // --- Deep blocks (opt-in): each numeric container / struct-array element
         // is its own block, reached via the recursive container walk. Finds groups
@@ -7221,7 +7254,7 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
                 GroupBlock& blk = kv.second;
                 if (blk.leaves.size() < nSlots) continue;
                 if (Orden::MatchGroup(blk.leaves, ordenSlots, matchOut))
-                    emitGroupCandidate(obj, i, name, className, blk.leaves, blk.metas, matchOut);
+                    emitGroupCandidate(obj, objIdx, name, className, blk.leaves, blk.metas, matchOut);
                 if (static_cast<int32_t>(result.candidates.size()) >= maxResults) break;
             }
         }

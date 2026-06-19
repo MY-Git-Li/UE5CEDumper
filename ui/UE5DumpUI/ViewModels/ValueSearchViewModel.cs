@@ -983,7 +983,7 @@ public partial class ValueSearchViewModel : ViewModelBase
 
             var result = await _dump.BeginGroupScanAsync(
                 GroupInputs.ToList(), GameOnly, MaxResults, DeepScan, CrossObjectScan,
-                NativeCScan, PageSize, cts.Token);
+                NativeCScan, NewestFirst, PageSize, cts.Token);
 
             GroupSessionId = result.SessionId;
             await ApplyGroupScanResultAsync(result.Total, result.Candidates);

@@ -911,8 +911,14 @@ GroupScanResult ScanForValueGroup(
     // Native-C (P2, opt-in, default off): also fold each object's unmanaged-hole
     // leaves (non-UPROPERTY bytes within [header, PropertiesSize)) into its block,
     // so a group including a native value matches. Object block only (never deep);
-    // bounded to <= 64 raw leaves per object. See native-c-value-scan-spec.md §7.
-    bool                                nativeC     = false);
+    // EMIT-ON-MATCH (a raw leaf is kept only when its bytes satisfy a slot), bounded
+    // to <= 64 matching raw leaves per object. See native-c-value-scan-spec.md §7.
+    bool                                nativeC     = false,
+    // Walk GObjects newest-first (high index → low) so a 15s-deadline truncation on
+    // a huge game keeps the most-recently-allocated objects (just-spawned UI/actors
+    // holding native values) instead of low-index CDOs/templates. The UI couples this
+    // on with native-C. Default false (ascending).
+    bool                                newestFirst = false);
 
 // Next scan (P1: exact per slot). Re-reads each candidate's per-slot
 // convergence offsets, keeps those still equal to the slot's NEW target,

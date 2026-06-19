@@ -2396,6 +2396,9 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             // leaves (non-UPROPERTY bytes) into its block — object block only,
             // bounded per object. Intentionally noisy on first scan.
             bool nativeC = request.value("native_c", false);
+            // Newest-first (P2): walk high-index objects first so a deadline-
+            // truncated huge game keeps the newest objects (UI coupled with native).
+            bool newestFirst = request.value("newest_first", false);
             if (pageSize < 0) pageSize = 0;
 
             if (!request.contains("values") || !request["values"].is_array()) {
@@ -2451,7 +2454,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             }
             const int slotCount = static_cast<int>(slots.size());
 
-            auto scanResult = Aura::ScanForValueGroup(slots, gameOnly, maxResults, deep, crossObject, nativeC);
+            auto scanResult = Aura::ScanForValueGroup(slots, gameOnly, maxResults, deep, crossObject, nativeC, newestFirst);
 
             uint64_t sessionId = Radar::GroupSessionManager::Instance().Begin(
                 std::move(slots), std::move(scanResult.candidates),

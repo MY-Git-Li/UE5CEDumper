@@ -17,12 +17,16 @@
 > — `<raw@0x2C0>` Int32 = 777 found alongside the reflected hit; P2 in-game
 > pending). P1 = single Value Search raw-hole scan + Newest-first coupling
 > (owner decision, §11). **P2 = Group Scan Native-C** (`ScanForValueGroup(nativeC)`
-> + `AppendRawHoleLeaves`: per-object holes folded into the object block, one
-> `Orden::Leaf` per slot-width union at stride 4, ≤64 raw leaves/object, OBJECT
+> + `AppendRawHoleLeaves`: per-object holes folded into the object block,
+> **EMIT-ON-MATCH** (a raw leaf is kept only when its bytes satisfy a slot — keeps
+> the leaf set tiny so the ≤64/object cap never drops a real match), stride 4, OBJECT
 > BLOCK ONLY — never deep; `GroupLeafMeta.isNativeC`/`guessedType` → descriptor →
-> per-slot `is_native_c`/`guessed_type`; pipe `native_c` on `begin_group_scan`; UI
-> Native-C checkbox in the group options row (shares `NativeCScan`) + `Origin` on
-> `GroupSlotMatch`). **P3 (snapshot/SPC/pivot) remains.**
+> per-slot `is_native_c`/`guessed_type`; pipe `native_c`+`newest_first` on
+> `begin_group_scan`; UI Native-C checkbox in the group options row (shares
+> `NativeCScan`) + `Origin` on `GroupSlotMatch`). **Group also got newest-first**
+> (coupled with native): on a huge game (FF7 Rebirth ~433K objects) the single-
+> threaded 15s scan truncated before reaching high-index UI widgets, so newest-first
+> walks high→low to reach them first. **P3 (snapshot/SPC/pivot) remains.**
 
 -----
 
@@ -389,15 +393,27 @@ reads each candidate offset, appends `Orden::Leaf` + `GroupLeafMeta` per §5.2.
 
 **As shipped (P2):**
 
-1. **Aggressive per-object raw-leaf cap** — `kMaxRawGroupLeaves = 64` in
-   `Aura::AppendRawHoleLeaves`, far below the block-level `kMaxBlockLeaves = 1024`, so a
-   wide hole window can't dominate the per-slot lists (the primary cost+selectivity bound).
-2. **Object block only** — raw holes are appended to the actor's own block (alongside the
-   reflected + cross-object leaves), **never** to the deep-container blocks (folding would
-   explode the budget × the group AND). Stride 4; only the union of slot widths is probed.
-3. **Banner + workflow guidance** — the Native-C banner + the group tooltip steer the user
-   to **distinctive values** (which the value-AND makes highly selective — P1 found 777
-   with zero noise) and to converge with Next Scan.
+1. **EMIT-ON-MATCH (primary mechanism)** — `Aura::AppendRawHoleLeaves` emits a raw leaf
+   ONLY when its bytes satisfy at least one slot's predicate (the same leaves Orden would
+   keep). Unlike the reflected `CollectGroupLeaves` (every field, because fields are few),
+   a raw "emit-all" pass would add thousands of useless leaves per object — which both
+   slows the scan AND lets the per-object cap truncate a real 2nd-value match past the cap
+   (the FF7 Rebirth bug: emit-all + a 64-cap dropped `9999999`'s leaf on a wide widget).
+   Emit-on-match keeps the set tiny (matches are rare), so the cap is never the binding
+   constraint and the SDR stays cheap.
+2. **Per-object caps** — `kMaxRawGroupLeaves = 64` emitted matches + `kMaxRawGroupProbes =
+   65536` offset×width probes, far below the block-level `kMaxBlockLeaves = 1024`.
+3. **Object block only** — raw holes are appended to the actor's own block (alongside the
+   reflected + cross-object leaves), **never** to the deep-container blocks. Stride 4; only
+   the union of slot widths is probed.
+4. **Newest-first (coupled with native)** — group scan is single-threaded and was low→high,
+   so on a huge game (FF7 Rebirth ~433K objects) the 15 s deadline truncated before reaching
+   high-index UI widgets (the just-spawned objects that hold native values). `newestFirst`
+   walks high→low (`objIdx = total-1-i`) so the newest objects are reached first; the UI
+   couples it on with native-C (same as single-value).
+5. **Banner + workflow guidance** — the Native-C banner + the group tooltip steer the user
+   to **distinctive values** (the value-AND makes them highly selective) and to converge
+   with Next Scan.
 
 **Deferred (owner can revisit):** the original "hard-deny small common targets (`|value| <
 256`) on the first scan" was simplified to the cap + guidance above. Rationale: group

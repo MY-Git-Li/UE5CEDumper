@@ -1754,6 +1754,7 @@ public sealed class DumpService : IDumpService
         bool deep = false,
         bool crossObject = false,
         bool nativeC = false,
+        bool newestFirst = false,
         int pageSize = 1000,
         CancellationToken ct = default)
     {
@@ -1787,6 +1788,9 @@ public sealed class DumpService : IDumpService
         // Native-C raw-hole pass (P2), opt-in → attach only when on (back-compat).
         if (nativeC)
             req["native_c"] = (JsonNode)true;
+        // Newest-first ordering (P2): attach only when on (auto-set with native_c).
+        if (newestFirst)
+            req["newest_first"] = (JsonNode)true;
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
 

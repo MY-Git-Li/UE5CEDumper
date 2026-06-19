@@ -228,6 +228,7 @@ public interface IDumpService
         bool deep = false,
         bool crossObject = false,
         bool nativeC = false,
+        bool newestFirst = false,
         int pageSize = 1000,
         CancellationToken ct = default);
 

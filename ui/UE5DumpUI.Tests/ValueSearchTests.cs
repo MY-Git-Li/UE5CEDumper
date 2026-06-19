@@ -1231,16 +1231,17 @@ public class ValueSearchTests
         public GroupScanBeginResult NextGroupBeginResult { get; set; } = new();
         public GroupScanRefineResult NextGroupRefineResult { get; set; } = new();
         public GroupScanWindowResult NextGroupWindowResult { get; set; } = new();
-        public List<(List<GroupSlotInput> slots, bool gameOnly, int maxResults, bool deep, bool crossObject, bool nativeC)> GroupBegins { get; } = new();
+        public List<(List<GroupSlotInput> slots, bool gameOnly, int maxResults, bool deep, bool crossObject, bool nativeC, bool newestFirst)> GroupBegins { get; } = new();
         public List<(ulong sessionId, List<GroupSlotInput> slots)> GroupRefines { get; } = new();
         public List<ulong> GroupEnds { get; } = new();
 
         public override Task<GroupScanBeginResult> BeginGroupScanAsync(
             IReadOnlyList<GroupSlotInput> slots, bool gameOnly = true,
             int maxResults = 50000, bool deep = false, bool crossObject = false,
-            bool nativeC = false, int pageSize = 1000, CancellationToken ct = default)
+            bool nativeC = false, bool newestFirst = false, int pageSize = 1000,
+            CancellationToken ct = default)
         {
-            GroupBegins.Add((slots.ToList(), gameOnly, maxResults, deep, crossObject, nativeC));
+            GroupBegins.Add((slots.ToList(), gameOnly, maxResults, deep, crossObject, nativeC, newestFirst));
             return Task.FromResult(NextGroupBeginResult);
         }
 
@@ -1943,6 +1944,9 @@ public class ValueSearchTests
 
         Assert.Single(fake.GroupBegins);
         Assert.True(fake.GroupBegins[0].nativeC);
+        // Native-C couples Newest-first on → group passes it too (reaches high-index
+        // UI/actor objects before a deadline truncation on a huge game).
+        Assert.True(fake.GroupBegins[0].newestFirst);
     }
 
     [Fact]
