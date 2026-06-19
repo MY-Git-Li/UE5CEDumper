@@ -23,14 +23,12 @@ extern "C" bool UE5_AutoStart();
 extern "C" bool UE5_StartPipeServer();
 extern "C" void UE5_Shutdown();
 
-#ifdef UE5_PROXY_DXGI_BUILD
-// dxgi proxy: resolve the real dxgi exports into mProcs[] (jumped through
-// by Lugner_Dxgi.asm). Defined in Lugner_Dxgi.cpp. DxgiProxy_Init must run
-// synchronously and very early (before any forwarded dxgi call); the
-// matching status log is deferred until the logger is up.
-extern "C" void DxgiProxy_Init();
-extern "C" void DxgiProxy_LogStatus();
-#endif
+// Note: the dxgi proxy resolves the real dxgi exports LAZILY, from its asm
+// forwarding thunks (Lugner_Dxgi.asm -> DxgiProxy_EnsureResolved) on the
+// first forwarded dxgi call. It is intentionally NOT resolved here in
+// DllMain: loading dxgi.dll under the loader lock during the EXE's static-
+// import init crashes games that import dxgi.dll before d3d11 (e.g.
+// Octopath Traveler). See Lugner_Dxgi.cpp for the full rationale.
 
 // Mailbox — shared memory interface for CE Lua
 #include "Mimic.h"
@@ -78,12 +76,6 @@ static DWORD WINAPI AutoStartThreadProc(LPVOID)
     }
 
     LOG_INFO("DllMain ProxyStart: proxy DLL mode — starting pipe server only (no scan)");
-
-#ifdef UE5_PROXY_DXGI_BUILD
-    // Now that Sein is initialised, report how the early (pre-Sein)
-    // dxgi export resolution went.
-    DxgiProxy_LogStatus();
-#endif
 
     // Brief delay for game to finish early init (avoid pipe creation during process startup)
     Sleep(500);
@@ -141,15 +133,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID /*reserved*/) {
     case DLL_PROCESS_ATTACH: {
         g_hDllModule = hModule;
         DisableThreadLibraryCalls(hModule);
-
-#ifdef UE5_PROXY_DXGI_BUILD
-        // Resolve the real dxgi.dll exports FIRST — before the proxy mutex
-        // check (a passive forwarder still needs working thunks) and before
-        // the game's entry point can call any dxgi function. Synchronous by
-        // necessity: the asm thunks jump through mProcs[], so a delayed
-        // resolution would race the first call into a null slot.
-        DxgiProxy_Init();
-#endif
 
 #ifdef UE5_PROXY_BUILD
         // First-loaded-wins: if another UE5CEDumper proxy DLL has already

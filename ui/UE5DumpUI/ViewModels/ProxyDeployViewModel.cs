@@ -28,10 +28,15 @@ public partial class ProxyDeployViewModel : ViewModelBase
     /// Which proxy DLL the user wants to deploy. Bound to the RadioButtons
     /// at the top of the panel. Changing this triggers a status refresh so
     /// the DataGrid reflects the deploy state of the newly-selected DLL.
-    /// Defaults to dxgi.dll — statically imported by every D3D11/D3D12 UE
-    /// game on Windows, so it is the most broadly reliable hijack target.
+    /// Defaults to version.dll — called at normal runtime (GetFileVersionInfo /
+    /// COM / manifest parsing) rather than under the early loader lock, so it is
+    /// the safest activation timing for the broadest set of games. (dxgi.dll is
+    /// statically imported very early and some games call it before the CRT is
+    /// initialised — e.g. Octopath Traveler instant-exits with the dxgi proxy;
+    /// see docs/dev-log.md. Pick dxgi only for EXEs importing neither version
+    /// nor dinput8.)
     /// </summary>
-    [ObservableProperty] private ProxyType _selectedProxyType = ProxyType.Dxgi;
+    [ObservableProperty] private ProxyType _selectedProxyType = ProxyType.Version;
 
     // Two-way bindings for radio button state — Avalonia RadioButtons bind
     // to bool, so we expose convenience properties that mirror SelectedProxyType.

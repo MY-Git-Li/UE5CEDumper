@@ -14,6 +14,23 @@ Entries for **builds ≤696** (2026-05-09 → 2026-05-12) are archived in
 
 -----
 
+## 2026-06-19 — dxgi proxy on Octopath: diagnosed a fundamental EARLY-LOAD / loader-lock fragility (NOT fixed for Octopath — use version.dll); shipped 2 genuine early-load correctness fixes along the way (build 1351; `Sein.cpp` + `Lugner_Dxgi.asm` + `Lugner_Dxgi.cpp` + `Heiter.cpp`)
+
+User report: Octopath Traveler **instant-exits without running** with the dxgi.dll proxy, but the **version.dll proxy works fine** on the same game. No log written. **Outcome: Octopath uses version.dll (it imports version.dll; version.dll proxy is live-verified working on it). The dxgi proxy has a deeper early-load limitation on Octopath that two fixes did NOT fully close — hardening deferred (user chose version.dll).** This entry records the full debugger-backed diagnosis so the next person doesn't re-walk it.
+
+**Three distinct crashes, each cdb-confirmed on the actual `%LOCALAPPDATA%\CrashDumps\*.dmp` (WinDbg `Microsoft.WinDbg` via winget → `amd64\cdb.exe`; MS symbol server for ntdll; our frames symbolised against a layout-identical `/MAP` rebuild):**
+1. **OLD eager build → AV EXECUTE at 0x0** — a forwarded dxgi call jumped through a null `mProcs[N]` (`DxgiProxy_Init`'s `LoadLibrary(real dxgi)` had failed → table never populated).
+2. **lazy build → AV WRITE null+0x24** in `ntdll!RtlpWaitOnCriticalSection` (`inc [DebugInfo+0x24=ContentionCount]`, DebugInfo NULL = **uninitialised CRT lock** `__acrt_lock_table+0xF0`), called from `Sein::GetTimestamp → localtime_s → __tzset`.
+3. **lazy + GetLocalTime build → AV in `ntdll!RtlAllocateHeap`** (null heap), called from `DxgiProxy_EnsureResolved → Sein::Error(LOG_ERROR) → GetTimestamp → std::string`, with **`ntdll!LdrpLoadDll`/`LdrpFindLoadedDllByName` on the stack** = we are inside loader activity.
+
+**Real root cause (all three are the same disease).** **Octopath calls into dxgi EXTREMELY early — under the loader lock, before our DLL's CRT is initialised** (no log = our `DllMain` never completed). At that point our heavy "whole-dumper-as-dxgi.dll" proxy cannot: (a) **load the real same-named `dxgi.dll`** — `LoadLibraryW(System32\dxgi.dll)` while our `dxgi.dll` is loaded + under loader lock returns NULL (the dump shows real dxgi never mapped; `LdrpFindLoadedDllByName` on the stack), nor (b) **log / allocate** — the CRT heap + locks aren't ready (`__tzset` lock, `RtlAllocateHeap` null heap). The **version.dll** proxy dodges all of it because its exports (`GetFileVersionInfo…`) are called at normal runtime, NOT under early loader lock. RE-UE4SS gets away with the same DllMain-LoadLibrary pattern only because its proxy is a thin shim; we fold the whole dumper in.
+
+**Two genuine fixes shipped (kept — they fix real latent early-load bugs, just not enough to make Octopath's dxgi work):**
+- **`Sein::GetTimestamp()` → Win32 `GetLocalTime()` + `snprintf`** (was CRT `localtime_s`/`std::put_time` → `__tzset`). Removes the crash-2 class entirely; safe at any load time; shared by main DLL + all 3 proxies. *Lesson: never call CRT locale/timezone fns from DllMain/early-load.*
+- **dxgi forwarders → lazy self-resolving asm trampolines** + removed eager `DxgiProxy_Init`/`DxgiProxy_LogStatus` from `DllMain` (`LoadLibrary` in `DllMain` is wrong; lazy is how version/dinput8 already work). Fixed the crash-1 class for the non-early case.
+
+**Resolution / guidance.** **For Octopath (and any game that imports version.dll), use the version.dll proxy.** The dxgi proxy remains the right tool ONLY for games that import neither version.dll nor dinput8 (e.g. Elliot) AND that don't call dxgi under early loader lock. Making dxgi robust for the Octopath case needs a thin-shim split or a CRT-free + renamed-real-dxgi-copy forwarding path — deferred. New reusable triage tools left in `tools/pe/`: `pe_imports_exports.py` (PE import/export) + `minidump_triage.py` (minidump modules/exception/stack). main DLL + ProxyDxgi rebuild green; dxgi.dll imports `GetLocalTime`, 70 exports intact.
+
 ## 2026-06-19 — LiveWalker "Guess What": fill the LEADING gap before the first field (clamp `occupied` to the scan window) + tighten the Double normal band + float/double aliasing guard (builds 1330-1333; DLL)
 
 User report: "Guess What" fills the gaps *between* known fields (e.g. first field `0x100`, last `0x300` → the `0x100..0x300` holes get guessed rows), but the **leading region from the end of the UObject header (~`0x28`) up to the first field never gets guessed**. Differential symptom — mid gaps fill, leading gap doesn't.

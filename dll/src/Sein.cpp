@@ -121,18 +121,24 @@ static fs::path GetLogDirectory() {
 }
 
 static std::string GetTimestamp() {
-    auto now = std::chrono::system_clock::now();
-    auto t = std::chrono::system_clock::to_time_t(now);
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now.time_since_epoch()) % 1000;
+    // Use the Win32 GetLocalTime() API, NOT the CRT localtime_s/std::put_time
+    // path. The CRT path triggers __tzset() + locale-facet init on first use,
+    // which dereferences not-yet-ready CRT/process global state and AVs when
+    // this DLL is loaded EARLY in a host EXE's static-import graph (its DllMain
+    // runs before the process is "warm"). Concrete failure: hijacking dxgi.dll
+    // on Octopath Traveler — dxgi is imported before d3d11, so our DllMain's
+    // very first log line faulted inside __tzset (write to null+0x24). The
+    // version.dll/dinput8.dll proxies never hit it only because they load late.
+    // GetLocalTime reads the system clock + timezone via ntdll with zero CRT
+    // global dependency, so it is safe at any load time.
+    SYSTEMTIME st;
+    GetLocalTime(&st);
 
-    struct tm tm_buf;
-    localtime_s(&tm_buf, &t);
-
-    std::ostringstream oss;
-    oss << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S")
-        << '.' << std::setfill('0') << std::setw(3) << ms.count();
-    return oss.str();
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%04u-%02u-%02u %02u:%02u:%02u.%03u",
+             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute,
+             st.wSecond, st.wMilliseconds);
+    return std::string(buf);
 }
 
 // ================================================================
