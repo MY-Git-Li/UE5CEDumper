@@ -2827,7 +2827,13 @@ static int IsLikelyDouble(double dVal) {
     memcpy(&iVal, &dVal, 8);
     if (iVal >= -10000 && iVal <= 10000) return 0;
 
-    if (absVal >= 0.001 && absVal <= 1e12) return 1;
+    // Normal-confidence magnitude band. Kept WIDER than float's [0.001, 1e6]
+    // because doubles exist precisely to hold values beyond float precision
+    // (e.g. UE5 LWC large world coordinates), but the old 1e12 upper bound was
+    // far too permissive — random 8-byte patterns that land in [1e9, 1e12] as a
+    // double were getting flagged "Double?" as noise. Trimming to 1e9 keeps
+    // realistic large-world doubles while cutting that garbage tail.
+    if (absVal >= 0.001 && absVal <= 1e9) return 1;
 
     return 0;
 }
@@ -2938,6 +2944,31 @@ static void GuessGapTypes(uintptr_t baseAddr, int32_t gapStart, int32_t gapEnd,
             double dVal = 0;
             memcpy(&dVal, buf, 8);
             int dblConf = IsLikelyDouble(dVal);
+
+            // Float/double aliasing guard ("prefer the integer reading first").
+            // An 8-aligned slot whose LOW 4 bytes are exactly zero is
+            // byte-identical to [int32 0 / padding][float at +4]. A real double
+            // almost never has its low 32 mantissa bits all zero UNLESS it is a
+            // deliberately clean whole/.5 value (100.0, 12.5, …). So when the low
+            // half is zero AND the double is NOT such a clean value (e.g. 0.875,
+            // 0.25), drop the double: the int32 0 IS the "integer" reading, so we
+            // let Int32(+0) emit it and the next position surface the real float
+            // — instead of swallowing all 8 bytes as a noisy "Double?". (UE
+            // gameplay data is float-dominated; standalone doubles are rare
+            // outside UE5 LWC large coords, which have nonzero low bytes anyway.)
+            // High-confidence clean doubles (dblConf==2) are never touched.
+            if (dblConf == 1) {
+                bool lowHalfZero =
+                    (buf[0] == 0 && buf[1] == 0 && buf[2] == 0 && buf[3] == 0);
+                // dVal is bounded by IsLikelyDouble's accepted band here, so the
+                // int64 cast for the fractional test cannot overflow.
+                double da = dVal < 0 ? -dVal : dVal;
+                double dfrac = da - static_cast<double>(static_cast<int64_t>(da));
+                bool cleanValue = (dfrac == 0.0 || dfrac == 0.5);
+                if (lowHalfZero && !cleanValue)
+                    dblConf = 0;   // fall through to Int32(+0), then Float(+4)
+            }
+
             if (dblConf > 0) {
                 LiveFieldValue fv;
                 fv.name = FormatGuessedName(pos, "double");
@@ -5083,12 +5114,28 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
         int32_t headerEnd = isRawStruct ? 0 : (DynOff::UOBJECT_OUTER + 8);
         int32_t scanEnd = ci.PropertiesSize;
 
-        // Collect known field intervals
+        // Collect known field intervals, CLAMPED to the scan window
+        // [headerEnd, scanEnd]. Clamping the START to headerEnd is what makes the
+        // leading region [headerEnd, firstField) survive as a gap: a reflected
+        // field with a low/garbage Offset_Internal (< headerEnd, e.g. an offset
+        // misread into the UObject header) would otherwise fail the
+        // `iv.start > cursor` test below yet STILL advance the gap cursor past
+        // headerEnd (cursor = max(cursor, iv.end)), silently swallowing the whole
+        // pre-first-field region — the user-visible "the gap before the first
+        // field never gets guessed rows" bug. Everything below headerEnd
+        // (vtable/flags/class/name/outer) stays EXCLUDED from occupied, so the
+        // well-known UObject header is never turned into guessed rows. Clamping
+        // the END to scanEnd guards against a field with a garbage-huge size
+        // eating the trailing gaps as well.
         struct Interval { int32_t start; int32_t end; };
         std::vector<Interval> occupied;
         for (const auto& f : result.fields) {
-            int32_t fEnd = f.offset + (f.size > 0 ? f.size : 1);
-            occupied.push_back({f.offset, fEnd});
+            int32_t s = f.offset;
+            int32_t e = f.offset + (f.size > 0 ? f.size : 1);
+            if (s < headerEnd) s = headerEnd;
+            if (e > scanEnd)   e = scanEnd;
+            if (s >= e) continue;   // entirely below headerEnd or above scanEnd
+            occupied.push_back({s, e});
         }
         std::sort(occupied.begin(), occupied.end(),
             [](const Interval& a, const Interval& b) { return a.start < b.start; });
