@@ -289,6 +289,12 @@ json GroupCandidateToJson(const Radar::GroupCandidate& gc,
             sj["field_offset"]    = m0.offset;
             sj["field_type"]      = d.fieldType;
             sj["bool_field_mask"] = d.boolFieldMask;
+            // Native-C (P2): badge a raw-hole slot match + its interpreted width
+            // (omitted for reflected leaves — back-compat / lean wire).
+            if (d.isNativeC) {
+                sj["is_native_c"]  = true;
+                sj["guessed_type"] = d.guessedType;
+            }
             // Absolute leaf address (direct: owner+offset; deep: container element).
             sj["addr"]            = Renge::AddrToStr(m0.leafAddr);
             // Owning object of the leaf (P4): the candidate actor for an own-block
@@ -2386,6 +2392,10 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             // Opt-in cross-object mode (P4): fold each actor's OWNED sub-object
             // (components + GAS AttributeSets) numeric leaves into the actor's block.
             bool crossObject = request.value("cross_object", false);
+            // Opt-in Native-C mode (P2): also fold each object's unmanaged-hole
+            // leaves (non-UPROPERTY bytes) into its block — object block only,
+            // bounded per object. Intentionally noisy on first scan.
+            bool nativeC = request.value("native_c", false);
             if (pageSize < 0) pageSize = 0;
 
             if (!request.contains("values") || !request["values"].is_array()) {
@@ -2441,7 +2451,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             }
             const int slotCount = static_cast<int>(slots.size());
 
-            auto scanResult = Aura::ScanForValueGroup(slots, gameOnly, maxResults, deep, crossObject);
+            auto scanResult = Aura::ScanForValueGroup(slots, gameOnly, maxResults, deep, crossObject, nativeC);
 
             uint64_t sessionId = Radar::GroupSessionManager::Instance().Begin(
                 std::move(slots), std::move(scanResult.candidates),

@@ -12,15 +12,17 @@
 > cross-checked by an adversarial review pass — but **verify against current code
 > before implementing** (line numbers drift).
 >
-> **Implementation status:** **P0 + P1 SHIPPED** to `dev` (build + 691 dll / 1623 C#
-> tests + AOT 46.5MB all green; in-game verification pending). P1 = single Value
-> Search Native-C raw-hole scan + the Newest-first ordering coupling (owner decision,
-> §11): `ScanForValue(nativeC, nativeAlign, newestFirst)` + synthetic raw
-> `FieldDescriptor` (`isNativeC`/`guessedType`) + `Radar::PropertyTypeNameOf` +
-> pipe `native_c`/`native_align`/`newest_first` + `is_native_c`/`guessed_type` on
-> candidates + UI Native-C/Newest-first checkboxes (coupled: enabling Native-C
-> pre-checks Newest-first; the user may uncheck it; disabling Native-C clears it) +
-> dynamic banner + Origin column. **P2 (group) + P3 (snapshot/SPC/pivot) remain.**
+> **Implementation status:** **P0 + P1 + P2 SHIPPED** to `dev` (build + 691 dll /
+> ~1626 C# tests + AOT 46.5MB all green; **P1 in-game VERIFIED on Octopath**
+> — `<raw@0x2C0>` Int32 = 777 found alongside the reflected hit; P2 in-game
+> pending). P1 = single Value Search raw-hole scan + Newest-first coupling
+> (owner decision, §11). **P2 = Group Scan Native-C** (`ScanForValueGroup(nativeC)`
+> + `AppendRawHoleLeaves`: per-object holes folded into the object block, one
+> `Orden::Leaf` per slot-width union at stride 4, ≤64 raw leaves/object, OBJECT
+> BLOCK ONLY — never deep; `GroupLeafMeta.isNativeC`/`guessedType` → descriptor →
+> per-slot `is_native_c`/`guessed_type`; pipe `native_c` on `begin_group_scan`; UI
+> Native-C checkbox in the group options row (shares `NativeCScan`) + `Origin` on
+> `GroupSlotMatch`). **P3 (snapshot/SPC/pivot) remains.**
 
 -----
 
@@ -385,17 +387,27 @@ reads each candidate offset, appends `Orden::Leaf` + `GroupLeafMeta` per §5.2.
 > `perSlotCap=8`) can assemble N distinct offsets that are all **noise**. The AND requires
 > distinct *offsets*, not distinct *meaning*.
 
-Mitigations (all required for native-C group):
+**As shipped (P2):**
 
-1. **Deny small common targets on the FIRST scan.** Refuse native-C group leaves for any
-   slot whose target is `|value| < 256` (or in a small deny-list) on first scan; admit
-   them only after a refine round (or require the slot use a prev-value
-   Changed/Decreased predicate, P2).
-2. **Aggressive per-object raw-leaf cap** — `kMaxRawHolesPerObject ≈ 64`, far below the
-   block-level `kMaxBlockLeaves = 1024` ([Aura.cpp:6810](../dll/src/Aura.cpp)), so a wide
-   hole window can't dominate the per-slot lists.
-3. **Never fold raw holes into Deep blocks** — Native-C is a separate single-block opt-in
-   only (folding would explode the budget × selectivity).
+1. **Aggressive per-object raw-leaf cap** — `kMaxRawGroupLeaves = 64` in
+   `Aura::AppendRawHoleLeaves`, far below the block-level `kMaxBlockLeaves = 1024`, so a
+   wide hole window can't dominate the per-slot lists (the primary cost+selectivity bound).
+2. **Object block only** — raw holes are appended to the actor's own block (alongside the
+   reflected + cross-object leaves), **never** to the deep-container blocks (folding would
+   explode the budget × the group AND). Stride 4; only the union of slot widths is probed.
+3. **Banner + workflow guidance** — the Native-C banner + the group tooltip steer the user
+   to **distinctive values** (which the value-AND makes highly selective — P1 found 777
+   with zero noise) and to converge with Next Scan.
+
+**Deferred (owner can revisit):** the original "hard-deny small common targets (`|value| <
+256`) on the first scan" was simplified to the cap + guidance above. Rationale: group
+refine (`RefineGroupCandidates`) only *narrows* existing candidates — it cannot *add* raw
+leaves — so a first-scan deny would make native group unusable for small-value groups
+rather than "allow after refine". The cap + `maxResults` + the 15 s deadline already bound
+the **cost** deterministically (no crash/hang); the residual **noise** for all-small groups
+is the user's informed choice (banner-warned), exactly as in single-value P1. If users
+drown on small-value groups, add a soft warning (decode `SlotSpec.value`; flag when every
+slot `|value| < 256`) rather than a hard block.
 
 -----
 

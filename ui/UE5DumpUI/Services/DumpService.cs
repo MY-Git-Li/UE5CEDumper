@@ -1731,6 +1731,9 @@ public sealed class DumpService : IDumpService
                     OwnerAddr     = so["owner_addr"]?.GetValue<string>() ?? "",
                     OwnerClass    = so["owner_class"]?.GetValue<string>() ?? "",
                     Locked        = so["locked"]?.GetValue<bool>() ?? false,
+                    // Native-C (P2): present only for raw-hole slot matches.
+                    IsNativeField = so["is_native_c"]?.GetValue<bool>() ?? false,
+                    GuessedType   = so["guessed_type"]?.GetValue<string>() ?? "",
                 };
                 if (so["matched_offsets"] is JsonArray mo)
                     foreach (var off in mo)
@@ -1750,6 +1753,7 @@ public sealed class DumpService : IDumpService
         int maxResults = 50000,
         bool deep = false,
         bool crossObject = false,
+        bool nativeC = false,
         int pageSize = 1000,
         CancellationToken ct = default)
     {
@@ -1780,6 +1784,9 @@ public sealed class DumpService : IDumpService
             req["deep"] = true;
         if (crossObject)
             req["cross_object"] = true;
+        // Native-C raw-hole pass (P2), opt-in → attach only when on (back-compat).
+        if (nativeC)
+            req["native_c"] = (JsonNode)true;
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
 

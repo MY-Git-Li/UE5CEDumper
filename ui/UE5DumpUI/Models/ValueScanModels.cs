@@ -263,6 +263,17 @@ public class GroupSlotMatch
     public List<int> MatchedOffsets { get; set; } = new();
     public bool      Locked         { get; set; }
 
+    /// <summary>Native-C (P2): true when this slot matched an UNMANAGED hole (a raw,
+    /// non-UPROPERTY offset) rather than a reflected field. Drives the Origin badge.</summary>
+    public bool      IsNativeField  { get; set; }
+    /// <summary>Native-C: the interpreted width (e.g. "Int32"); empty for reflected.</summary>
+    public string    GuessedType    { get; set; } = "";
+
+    /// <summary>Origin badge: "Native-C (Int32)" for a raw-hole slot, else "Reflected".</summary>
+    public string Origin => IsNativeField
+        ? (string.IsNullOrEmpty(GuessedType) ? "Native-C" : $"Native-C ({GuessedType})")
+        : "Reflected";
+
     public string OffsetHex => $"0x{FieldOffset:X}";
 
     // Match criterion: the target value for a targeted slot, or a directional

@@ -431,6 +431,14 @@
                     ToolTip.Tip="{StaticResource str.Tip.VS.CrossObject}"
                     Foreground="#CCCCCC" FontSize="12"
                     VerticalAlignment="Center" Margin="8,0,0,0"/>
+          <!-- Native-C (P2): also fold each object's unmanaged-hole leaves into its
+               group block, so a group including a native (non-UPROPERTY) value matches.
+               Shares NativeCScan with single mode. -->
+          <CheckBox Content="{StaticResource str.VS.NativeC}"
+                    IsChecked="{Binding NativeCScan}"
+                    ToolTip.Tip="{StaticResource str.Tip.VS.NativeC.Group}"
+                    Foreground="#E0A050" FontSize="12"
+                    VerticalAlignment="Center" Margin="8,0,0,0"/>
         </StackPanel>
 
         <!-- Group action buttons -->

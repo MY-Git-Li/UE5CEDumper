@@ -227,6 +227,7 @@ public interface IDumpService
         int maxResults = 50000,
         bool deep = false,
         bool crossObject = false,
+        bool nativeC = false,
         int pageSize = 1000,
         CancellationToken ct = default);
 

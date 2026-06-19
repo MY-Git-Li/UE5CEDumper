@@ -1231,16 +1231,16 @@ public class ValueSearchTests
         public GroupScanBeginResult NextGroupBeginResult { get; set; } = new();
         public GroupScanRefineResult NextGroupRefineResult { get; set; } = new();
         public GroupScanWindowResult NextGroupWindowResult { get; set; } = new();
-        public List<(List<GroupSlotInput> slots, bool gameOnly, int maxResults, bool deep, bool crossObject)> GroupBegins { get; } = new();
+        public List<(List<GroupSlotInput> slots, bool gameOnly, int maxResults, bool deep, bool crossObject, bool nativeC)> GroupBegins { get; } = new();
         public List<(ulong sessionId, List<GroupSlotInput> slots)> GroupRefines { get; } = new();
         public List<ulong> GroupEnds { get; } = new();
 
         public override Task<GroupScanBeginResult> BeginGroupScanAsync(
             IReadOnlyList<GroupSlotInput> slots, bool gameOnly = true,
             int maxResults = 50000, bool deep = false, bool crossObject = false,
-            int pageSize = 1000, CancellationToken ct = default)
+            bool nativeC = false, int pageSize = 1000, CancellationToken ct = default)
         {
-            GroupBegins.Add((slots.ToList(), gameOnly, maxResults, deep, crossObject));
+            GroupBegins.Add((slots.ToList(), gameOnly, maxResults, deep, crossObject, nativeC));
             return Task.FromResult(NextGroupBeginResult);
         }
 
@@ -1669,6 +1669,38 @@ public class ValueSearchTests
     }
 
     [Fact]
+    public async Task BeginGroupScanAsync_AttachesNativeC_WhenEnabled_OmitsByDefault()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"] = req["id"]?.GetValue<int>() ?? 0, ["ok"] = true,
+                ["session_id"] = 1UL, ["total"] = 0, ["candidates"] = new JsonArray(),
+            };
+        });
+        var slots = new List<GroupSlotInput> { new() { Value = "1" }, new() { Value = "2" } };
+
+        await svc.BeginGroupScanAsync(slots, nativeC: false, ct: TestContext.Current.CancellationToken);
+        Assert.False(captured!.ContainsKey("native_c"), "native_c omitted when off (wire-tight)");
+
+        await svc.BeginGroupScanAsync(slots, nativeC: true, ct: TestContext.Current.CancellationToken);
+        Assert.True(captured!["native_c"]?.GetValue<bool>(), "native_c attached when on");
+    }
+
+    [Fact]
+    public void GroupSlotMatch_Origin_ReflectsNativeFlag()
+    {
+        Assert.Equal("Reflected",
+            new UE5DumpUI.Models.GroupSlotMatch { IsNativeField = false }.Origin);
+        Assert.Equal("Native-C (Int32)",
+            new UE5DumpUI.Models.GroupSlotMatch { IsNativeField = true, GuessedType = "Int32" }.Origin);
+    }
+
+    [Fact]
     public void GroupSlotMatch_HandoffAddr_PrefersOwnerOverActor()
     {
         var own = new GroupSlotMatch { InstanceAddr = "7FF6AA", OwnerAddr = "" };
@@ -1895,6 +1927,22 @@ public class ValueSearchTests
 
         Assert.Single(fake.GroupBegins);
         Assert.True(fake.GroupBegins[0].deep);
+    }
+
+    [Fact]
+    public async Task GroupFirstScan_PassesNativeCFlag()
+    {
+        var (vm, fake) = MakeVm();
+        vm.IsGroupMode = true;
+        vm.NativeCScan = true;            // shared toggle; group sends native_c
+        vm.GroupInputs[0].Value = "777";
+        vm.GroupInputs[1].Value = "1234";
+        fake.NextGroupBeginResult = new GroupScanBeginResult { SessionId = 9UL, Total = 0 };
+
+        await vm.GroupFirstScanCommand.ExecuteAsync(null);
+
+        Assert.Single(fake.GroupBegins);
+        Assert.True(fake.GroupBegins[0].nativeC);
     }
 
     [Fact]

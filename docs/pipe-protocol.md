@@ -271,6 +271,12 @@ Object-aware "group scan": find objects (blocks) that **simultaneously** hold AL
   "game_only": true, "max_results": 50000, "page_size": 1000,
   "deep": false,                                        // optional (build 1283); see below
   "cross_object": false,                                // optional (P4, build 1303); see below
+  "native_c": false,                                    // optional (P2): fold each object's
+                                                        //   unmanaged-hole leaves into its block —
+                                                        //   object block only, <=64 raw leaves/obj,
+                                                        //   stride 4, slot-width union. Matching slots
+                                                        //   carry is_native_c + guessed_type. Noisy on
+                                                        //   first scan; prefer distinctive values.
   "values": [
     { "value": "24", "data_type": "NumericNoByte" },
     { "value": "10", "scan_type": "Bigger" },           // scan_type optional -> "Exact"

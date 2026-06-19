@@ -38,25 +38,24 @@ Open work only. **Read this when deciding what to do next.**
   *Parent: cooperative cancel + shutdown-abort + disconnect monitor shipped build
   936-937, PR #238 (dev-log 2026-06-06).*
 
-- **Native-C Value Scan — P2 (Group) + P3 (Snapshot/SPC/Pivot) — P0 + P1 SHIPPED on dev** —
-  Effort: **M-L** (P2 group + P3 snapshot) · Risk: **med** (selectivity + capture cost).
+- **Native-C Value Scan — P3 (Snapshot/SPC/Pivot) — P0 + P1 + P2 SHIPPED on dev** —
+  Effort: **M** (P3 snapshot capture) · Risk: **low** (downstream is generic).
   Full design in [native-c-value-scan-spec.md](native-c-value-scan-spec.md). Finds native
   (non-`UPROPERTY`) HP/MP in a UObject's **holes** via "Guess What" (`Ubel::GuessGapTypes`).
-  **DONE:** P0 prereqs (`Ubel::ComputeHoles`/`ComputeClassHoles`/`NormalizeGuessedTypeToProperty`,
-  public `GuessGapTypes`, `FieldInfo.ArrayDim`, `CaptureSnapshotChunk` deadline) + P1 single
-  Value Search (raw-hole scan + Newest-first coupling, `Radar::PropertyTypeNameOf`, pipe
-  `native_c`/`native_align`/`newest_first`, UI checkboxes/banner/Origin column). **REMAINING:**
-  - **P2 — Group Scan**: `AppendRawHoleLeaves` into `ScanForValueGroup` (mirror the Deep/
-    Cross-object opt-in), `native_c` on `begin_group_scan`. §7.1 guards: deny small common
-    values (`|v|<256`) on first group scan, cap raw leaves/object (~64), never fold into Deep.
+  **DONE:** P0 prereqs + P1 single Value Search (raw-hole scan + Newest-first coupling —
+  **in-game VERIFIED on Octopath**) + P2 Group Scan (`ScanForValueGroup(nativeC)` +
+  `AppendRawHoleLeaves`: object-block-only, ≤64 raw leaves/obj, stride 4, slot-width union;
+  `native_c` on `begin_group_scan`; UI group checkbox + `GroupSlotMatch.Origin`). The §7.1
+  small-value hard-deny was simplified to cap + banner guidance (group refine can't add raw
+  leaves; cap+maxResults+deadline bound cost — see spec §7.1). **REMAINING:**
   - **P3 — Snapshot/SPC/Pivot**: `captureNativeC` on `CaptureSnapshotChunk` → `AppendRawHoleFields`
-    (pre-guess each hole via `GuessGapTypes`, **normalize** to canonical type, **drop Pointer/
-    Padding**), `native_c` on `snapshot_chunk`, update `str.Snapshot.Intro`. Raw rows reuse the
-    existing `fields` schema (no migration); SPC/Pivot join by the offset-encoded `<raw@0x..>` name.
-  - **In-game verify P1** on a Native-C game (native HP/MP non-`UPROPERTY`); confirm reflected
-    results unchanged with the toggle off.
-  *Parent: P0+P1 shipped on dev (this session); builds on value_search_caveats, the `Orden` seam
-  (group-value-scan-spec §3.1), and the "Guess What" build (commit 75ea723).*
+    (pre-guess each hole via `GuessGapTypes`, **normalize** to canonical type via
+    `Ubel::NormalizeGuessedTypeToProperty`, **drop Pointer/Padding**), `native_c` on
+    `snapshot_chunk`, update `str.Snapshot.Intro`. Raw rows reuse the existing `fields` schema
+    (no migration); SPC/Pivot join by the offset-encoded `<raw@0x..>` name.
+  - **In-game verify P2** (group native-C) on a Native-C game.
+  *Parent: P0+P1+P2 shipped on dev (this session); builds on value_search_caveats, the `Orden`
+  seam (group-value-scan-spec §3.1), and the "Guess What" build (commit 75ea723).*
 
 -----
 

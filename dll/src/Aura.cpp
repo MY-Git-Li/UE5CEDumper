@@ -6637,6 +6637,8 @@ struct GroupLeafMeta {
     uintptr_t   ownerAddr    = 0;   // object directly holding the leaf (actor, or owned sub-object for P4)
     std::string ownerClass;         // class name of ownerAddr's object (P4 inc 2; drives the Pivot handoff)
     uint8_t     boolMask     = 0xFF;
+    bool        isNativeC    = false;  // P2: raw-hole leaf (unmanaged, non-UPROPERTY)
+    std::string guessedType;           // P2: interpreted width label (e.g. "Int32"); "" for reflected
 };
 
 // One deep block = a numeric container's elements, or one struct-array/map
@@ -6919,9 +6921,82 @@ std::vector<RelatedObject> GetRelatedObjects(uintptr_t target, int32_t maxResult
     return out;
 }
 
+// Native-C (P2, opt-in). Append an object's UNMANAGED-hole leaves to its group
+// block, so a group whose values include native (non-UPROPERTY) C++ members is
+// matched. Mirrors the single-value native pass (ScanForValue): compute the
+// class's holes (complement of reflected coverage within [UObject header,
+// PropertiesSize), via Ubel::ComputeClassHoles), read the window ONCE (SEH-safe),
+// and at each aligned offset emit one Orden::Leaf per candidate `width` that fits.
+// Each leaf is a synthetic raw leaf (isNativeC, fieldName "<raw@0xNN>", canonical
+// fieldType so refine round-trips). Bounded: <= kMaxRawGroupLeaves per object AND
+// the shared leafCap. OBJECT-BLOCK ONLY — never folded into deep blocks (that would
+// explode the leaf budget × the group AND's selectivity). `widths` is the union of
+// the slots' target widths (so we only read widths some slot can match).
+// Stride is fixed at 4 (group scan exposes no per-slot stride control).
+void AppendRawHoleLeaves(uintptr_t obj, uintptr_t cls, const std::string& className,
+                         const std::vector<Radar::DataType>& widths,
+                         std::vector<uint8_t>& winBuf,
+                         std::vector<Orden::Leaf>& leaves,
+                         std::vector<GroupLeafMeta>& metas, size_t leafCap) {
+    if (widths.empty() || leaves.size() >= leafCap) return;
+
+    const ClassInfo& ci = Ubel::WalkClassEx(cls);   // cached
+    const int32_t headerEnd = DynOff::UOBJECT_OUTER + 8;
+    constexpr int32_t kSanity   = 0x10000;
+    constexpr int32_t kFallback = 0x400;
+    int32_t propsSize = ci.PropertiesSize;
+    int32_t winEnd = (propsSize > headerEnd && propsSize <= kSanity) ? propsSize
+                   : (propsSize > kSanity) ? kSanity
+                   : (headerEnd + kFallback);
+    if (winEnd <= headerEnd) return;
+
+    auto holes = Ubel::ComputeClassHoles(ci, headerEnd, winEnd);
+    if (holes.empty()) return;
+
+    winBuf.resize(static_cast<size_t>(winEnd - headerEnd));
+    if (!Macht::ReadBytesSafe(obj + headerEnd, winBuf.data(), winBuf.size())) return;
+
+    constexpr int32_t kMaxRawGroupLeaves = 64;   // per object — keeps the SDR + leaf budget sane
+    constexpr int32_t kStride            = 4;
+    int32_t rawAdded = 0;
+    for (const auto& hole : holes) {
+        if (rawAdded >= kMaxRawGroupLeaves || leaves.size() >= leafCap) break;
+        int32_t off = (hole.start + (kStride - 1)) & ~(kStride - 1);
+        for (; off < hole.end; off += kStride) {
+            if (rawAdded >= kMaxRawGroupLeaves || leaves.size() >= leafCap) break;
+            for (Radar::DataType w : widths) {
+                size_t sz = Radar::SizeOf(w);
+                if (sz == 0 || off + static_cast<int32_t>(sz) > hole.end) continue;
+                Orden::Leaf lf;
+                lf.position     = off;
+                lf.width        = w;
+                lf.elementIndex = -1;
+                std::memcpy(lf.bytes, winBuf.data() + (off - headerEnd), sz);
+                leaves.push_back(lf);
+                GroupLeafMeta m;
+                char nb[32];
+                snprintf(nb, sizeof(nb), "<raw@0x%X>", off);
+                m.fieldName     = nb;
+                m.fieldType     = Radar::PropertyTypeNameOf(w);
+                m.definingClass = "";
+                m.offset        = off;
+                m.elementIndex  = -1;
+                m.leafAddr      = obj + off;
+                m.ownerAddr     = obj;
+                m.ownerClass    = className;
+                m.boolMask      = 0xFF;
+                m.isNativeC     = true;
+                m.guessedType   = Radar::NameOf(w);
+                metas.push_back(std::move(m));
+                if (++rawAdded >= kMaxRawGroupLeaves) break;
+            }
+        }
+    }
+}
+
 GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
                                   bool gameOnly, int32_t maxResults, bool deep,
-                                  bool crossObject) {
+                                  bool crossObject, bool nativeC) {
     GroupScanResult result;
     auto t0 = std::chrono::steady_clock::now();
     constexpr auto kDeadline = std::chrono::seconds(15);
@@ -6936,6 +7011,20 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
     for (const auto& sp : slots)
         if (sp.dt == Radar::DataType::NumericAll ||
             sp.dt == Radar::DataType::Int8 || sp.dt == Radar::DataType::UInt8) { wantByte = true; break; }
+
+    // Native-C (P2): the union of widths any slot can represent (distinct dt across
+    // all slots' target entries). The raw-hole pass reads only these widths at each
+    // hole offset, so an int-only group never probes float holes, etc.
+    std::vector<Radar::DataType> nativeWidths;
+    if (nativeC) {
+        for (const auto& sp : slots)
+            for (const auto& e : sp.targets.entries) {
+                bool seen = false;
+                for (Radar::DataType w : nativeWidths) if (w == e.dt) { seen = true; break; }
+                if (!seen) nativeWidths.push_back(e.dt);
+            }
+    }
+    std::vector<uint8_t> nativeWinBuf;   // reused per-object window buffer
 
     std::vector<Orden::SlotTarget> ordenSlots;
     ordenSlots.reserve(nSlots);
@@ -6984,6 +7073,8 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
         d.fieldType         = meta.fieldType;
         d.fieldOffset       = meta.offset;
         d.boolFieldMask     = meta.boolMask;
+        d.isNativeC         = meta.isNativeC;     // P2: native-C badge flows via the descriptor
+        d.guessedType       = meta.guessedType;
         uint32_t idx = static_cast<uint32_t>(result.descriptors.size());
         result.descriptors.push_back(std::move(d));
         descIntern.emplace(std::move(key), idx);
@@ -7110,6 +7201,12 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
         // span {actor, components, attribute sets} matches as one block.
         if (crossObject)
             AppendOwnedSubObjectLeaves(obj, wantByte, leaves, metas, kLeafCap);
+        // Native-C (opt-in): also fold in this object's unmanaged-hole leaves so a
+        // group including a native (non-UPROPERTY) value matches. Object block only
+        // (never deep — see AppendRawHoleLeaves). Bounded per object.
+        if (nativeC)
+            AppendRawHoleLeaves(obj, cls, className, nativeWidths, nativeWinBuf,
+                                leaves, metas, kLeafCap);
         if (leaves.size() >= nSlots && Orden::MatchGroup(leaves, ordenSlots, matchOut))
             emitGroupCandidate(obj, i, name, className, leaves, metas, matchOut);
 
