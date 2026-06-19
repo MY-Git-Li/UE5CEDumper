@@ -1711,7 +1711,7 @@ public class ValueSearchTests
     }
 
     [Fact]
-    public void GroupFirstScan_PassesCrossObjectFlag()
+    public async Task GroupFirstScan_PassesCrossObjectFlag()
     {
         var (vm, fake) = MakeVm();
         vm.IsGroupMode = true;
@@ -1720,7 +1720,7 @@ public class ValueSearchTests
         vm.GroupInputs[1].Value = "20";
         fake.NextGroupBeginResult = new GroupScanBeginResult { SessionId = 3UL, Total = 0 };
 
-        vm.GroupFirstScanCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+        await vm.GroupFirstScanCommand.ExecuteAsync(null);
 
         var begin = Assert.Single(fake.GroupBegins);
         Assert.True(begin.crossObject);

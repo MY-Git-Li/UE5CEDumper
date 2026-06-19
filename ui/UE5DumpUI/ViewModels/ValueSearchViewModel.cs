@@ -537,6 +537,11 @@ public partial class ValueSearchViewModel : ViewModelBase
     /// offset, value field display name — for the "[N]" container element suffix).</summary>
     public event Action<string, int, string>? LocateInGWorld;
 
+    /// <summary>Raised to show the chosen candidate's owning object's related
+    /// objects (components, GAS ASC → AttributeSets, Controller↔Pawn) in the
+    /// Related tab. Payload = owning instance address.</summary>
+    public event Action<string>? NavigateToRelatedObjects;
+
     /// <summary>True when GWorld is available — gates the per-row "Locate in GWorld" button.</summary>
     [ObservableProperty] private bool _isGWorldAvailable;
 
@@ -720,6 +725,16 @@ public partial class ValueSearchViewModel : ViewModelBase
         candidate ??= SelectedCandidate;
         if (candidate == null || string.IsNullOrEmpty(candidate.ClassName)) return;
         NavigateToInstanceFinder?.Invoke(candidate.ClassName);
+    }
+
+    /// <summary>Show this hit's owning object's related objects (components, GAS
+    /// ASC → AttributeSets, Controller↔Pawn) in the Related tab.</summary>
+    [RelayCommand]
+    private void ShowRelatedObjects(ValueCandidate? candidate)
+    {
+        candidate ??= SelectedCandidate;
+        if (candidate == null || string.IsNullOrEmpty(candidate.InstanceAddr)) return;
+        NavigateToRelatedObjects?.Invoke(candidate.InstanceAddr);
     }
 
     // The reason "Locate in GWorld" can't run for `addr`, or null if it can. Lets

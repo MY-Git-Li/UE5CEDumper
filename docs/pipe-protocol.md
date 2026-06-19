@@ -60,6 +60,11 @@ Total commands: 31 (command name constants live in `dll/src/Renge.h`)
 
 // Forward path search ("Locate in GWorld"): shortest pointer chain GWorld → target.
 { "id": 31, "cmd": "find_path_from_gworld", "target": "7FF123456789", "object_addr": "7FF123456789", "max_depth": 5 }
+
+// Related-object graph ("Related Objects" panel): an object's class/outer, its
+// Controller<->Pawn counterpart, and the sub-objects it OWNS (components, GAS
+// AbilitySystemComponent → AttributeSets). Forward owned walk up to depth 3.
+{ "id": 32, "cmd": "get_related_objects", "addr": "7FF123456789", "max_results": 128 }
 ```
 
 ### Class & Instance Walking
@@ -82,7 +87,7 @@ Total commands: 31 (command name constants live in `dll/src/Renge.h`)
 { "id": 11, "cmd": "walk_world" }
 
 // Find all instances of a class by name
-{ "id": 12, "cmd": "find_instances", "class_name": "BP_Player_C", "limit": 100 }
+{ "id": 12, "cmd": "find_instances", "class_name": "BP_Player_C", "limit": 100, "exact_match": false, "newest_first": false }
 ```
 
 ### Array Reading
@@ -646,6 +651,15 @@ Field objects include all `walk_class` fields **plus** live typed values and arr
 }
 ```
 
+Request params: `exact_match` (substring vs exact class-name match) and
+`newest_first` (default `false`). The DLL walks GObjects ascending and stops at
+`limit`, so the default returns the **lowest** indices — the class-default object
+/ template / earliest instances (good for finding a Blueprint's defaults), and
+for a high-population class the **newest** instances are truncated off the end.
+`newest_first: true` walks from the high (most-recently-allocated) end instead,
+so the just-spawned instances survive the cap (e.g. catch an enemy that just
+appeared). `index` (InternalIndex) is returned per instance for client-side sort.
+
 ### find_by_address
 
 ```jsonc
@@ -761,6 +775,50 @@ Cache is per-class and persists for DLL lifetime — a cold scan on a 1.18M-obje
 game is typically ~200-300ms; warm scans are ~70ms. Hard deadline is 30s
 (`deadline_hit: true` indicates the scan was truncated and the UI should offer
 a re-run after warm-up).
+
+### get_related_objects
+
+Forward owned-object graph for one UObject ("Related Objects" panel). `related[]`
+lists, in this order: the object itself (`relation: "Self"`), its `Class` and
+`Outer`, its `Controller`/`Pawn` counterpart (reflected by field name), then the
+sub-objects it OWNS, discovered by a bounded owned walk up to depth 3 over
+outgoing object pointers gated by an Outer-chain ownership test (the same
+mechanism the cross-object group scan uses):
+
+- **depth 1** — direct owned sub-objects (`UActorComponent`s, custom
+  Health/Stats components, the GAS `AbilitySystemComponent`);
+- **depth 2-3** — each sub-object's owned objects (the ASC's `UAttributeSet`s),
+  so a GAS AttributeSet is reached even when nested behind a stats/ability layer:
+  pawn → stats component → ASC → AttributeSet (some games — e.g. TQ2 — don't hang
+  the ASC directly off the actor, so depth 2 reached only the ASC from the pawn).
+
+`relation` is one of `Self` / `Class` / `Outer` / `Controller` / `Pawn` /
+`AbilitySystem (ASC)` / `AttributeSet` / `Owned Component` / `Owned Object` (the
+ASC/AttributeSet/Component labels are a class-name convenience on top of the
+structural walk, not the discovery filter). `field_name` is the field/path on
+`parent_addr` that points here (empty for Self/Class/Outer); `field_offset` is
+the offset within the parent (-1 when N/A). Fast and bounded — no full GObjects
+scan; the reverse "who points AT this object" view is `find_refs_to_uobject`.
+
+```jsonc
+{
+  "id": 32, "ok": true,
+  "query_addr": "7FF6AA000000",
+  "related": [
+    { "addr": "7FF6AA000000", "index": 100, "name": "BP_Enemy_C_0",
+      "class": "BP_Enemy_C", "relation": "Self",
+      "field_name": "", "field_offset": -1, "depth": 0, "parent_addr": "0" },
+    { "addr": "7FF6BB000000", "index": 200, "name": "AbilitySystem_0",
+      "class": "AbilitySystemComponent", "relation": "AbilitySystem (ASC)",
+      "field_name": "AbilitySystem", "field_offset": 0x2A8, "depth": 1,
+      "parent_addr": "7FF6AA000000" },
+    { "addr": "7FF6CC000000", "index": 300, "name": "HealthSet_0",
+      "class": "MyHealthAttributeSet", "relation": "AttributeSet",
+      "field_name": "SpawnedAttributes[0]", "field_offset": 0x1B0, "depth": 2,
+      "parent_addr": "7FF6BB000000" }
+  ]
+}
+```
 
 ### find_path_from_gworld
 

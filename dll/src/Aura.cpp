@@ -1284,7 +1284,7 @@ SearchResultSet SearchByName(const std::string& query, int maxResults) {
     return rset;
 }
 
-SearchResultSet FindInstancesByClass(const std::string& className, bool exactMatch, int maxResults) {
+SearchResultSet FindInstancesByClass(const std::string& className, bool exactMatch, int maxResults, bool newestFirst) {
     SearchResultSet rset;
 
     // Convert query to lowercase for case-insensitive comparison
@@ -1293,8 +1293,13 @@ SearchResultSet FindInstancesByClass(const std::string& className, bool exactMat
 
     int32_t count = GetCount();
     rset.scanned = count;
-    for (int32_t i = 0; i < count && static_cast<int>(rset.results.size()) < maxResults; ++i) {
-        if ((i & 0xFFF) == 0 && Tot::Requested()) {
+    // `n` is the visit counter (0..count); `i` is the real GObjects index, walked
+    // high->low when newestFirst so the most-recently-allocated matches (the newest
+    // runtime spawns) are the ones kept under the maxResults cap. Default low->high
+    // keeps the oldest (CDO / class-default / earliest instances).
+    for (int32_t n = 0; n < count && static_cast<int>(rset.results.size()) < maxResults; ++n) {
+        int32_t i = newestFirst ? (count - 1 - n) : n;
+        if ((n & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:find", "FindInstancesByClass: aborted (client gone / shutdown)");
             break;  // return partial result
         }
@@ -6665,6 +6670,110 @@ bool GroupCandidateFeasible(const Radar::GroupCandidate& gc) {
 }
 
 }  // namespace
+
+// === Related-object graph (forward, owned) — see Aura.h for the contract ===
+// Reuses EnumerateOutgoingObjectPtrs (the outgoing-pointer adapter) + IsOwnedBy
+// (the Outer-chain ownership gate) — the SAME pieces the P4 cross-object group
+// scan uses, here collecting OBJECTS instead of numeric leaves. Bounded + fast.
+std::vector<RelatedObject> GetRelatedObjects(uintptr_t target, int32_t maxResults) {
+    std::vector<RelatedObject> out;
+    if (!target) return out;
+    if (maxResults <= 0) maxResults = 128;
+
+    auto add = [&](uintptr_t obj, const char* relation, const std::string& fieldName,
+                   int32_t fieldOffset, int32_t depth, uintptr_t parent) {
+        if (!obj || out.size() >= static_cast<size_t>(maxResults)) return;
+        RelatedObject r;
+        r.addr        = obj;
+        int32_t idx   = -1;
+        r.index       = Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_INDEX, idx) ? idx : -1;
+        r.name        = Ubel::GetName(obj);
+        uintptr_t c   = Ubel::GetClass(obj);
+        r.className   = c ? Ubel::GetName(c) : std::string();
+        r.relation    = relation;
+        r.fieldName   = fieldName;
+        r.fieldOffset = fieldOffset;
+        r.depth       = depth;
+        r.parentAddr  = parent;
+        out.push_back(std::move(r));
+    };
+
+    // --- Hierarchy: Self / Class / Outer ---
+    add(target, "Self", std::string(), -1, 0, 0);
+    uintptr_t cls = Ubel::GetClass(target);
+    if (cls) add(cls, "Class", std::string(), -1, 0, target);
+    if (uintptr_t outer = Ubel::GetOuter(target)) add(outer, "Outer", std::string(), -1, 0, target);
+
+    // --- Counterpart: Pawn <-> Controller (reflected field by name) ---
+    if (cls) {
+        int32_t ctrlOff = Ubel::FindFieldOffset(cls, "Controller");
+        if (ctrlOff >= 0) {
+            uintptr_t ctrl = 0;
+            if (Macht::ReadSafe(target + ctrlOff, ctrl) && ctrl)
+                add(ctrl, "Controller", "Controller", ctrlOff, 0, target);
+        }
+        const char* pawnField = "AcknowledgedPawn";
+        int32_t pawnOff = Ubel::FindFieldOffset(cls, "AcknowledgedPawn");
+        if (pawnOff < 0) { pawnField = "Pawn"; pawnOff = Ubel::FindFieldOffset(cls, "Pawn"); }
+        if (pawnOff >= 0) {
+            uintptr_t pawn = 0;
+            if (Macht::ReadSafe(target + pawnOff, pawn) && pawn)
+                add(pawn, "Pawn", pawnField, pawnOff, 0, target);
+        }
+    }
+
+    // --- Owned sub-objects (up to depth 3): components/ASC, then the ASC's
+    //     AttributeSets — incl. pawn -> stats component -> ASC -> AttributeSet ---
+    // Label is a class-name convenience; discovery is the structural owned walk.
+    auto classify = [](const std::string& clsName) -> const char* {
+        std::string lo = clsName;
+        for (auto& ch : lo) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        if (lo.find("abilitysystemcomponent") != std::string::npos) return "AbilitySystem (ASC)";
+        if (lo.find("attributeset")           != std::string::npos) return "AttributeSet";
+        if (lo.find("component")              != std::string::npos) return "Owned Component";
+        return "Owned Object";
+    };
+
+    constexpr int kMaxOwnedSubs = 128;
+    // Depth 3 so a GAS AttributeSet nested behind a stats/ability component is
+    // reached when entering from the PAWN: pawn -> stats component -> ASC ->
+    // AttributeSet (some games — e.g. TQ2 — don't hang the ASC directly off the
+    // actor). Still bounded by kMaxOwnedSubs + the seen-set; IsOwnedBy uses the
+    // same hop budget so a depth-3 leaf whose Outer chains back is still kept.
+    constexpr int kMaxOwnDepth  = 3;     // pawn -> stats component -> ASC -> AttributeSet
+    std::unordered_set<uintptr_t> seen;
+    seen.insert(target);
+    int subCount = 0;
+    struct Frontier { uintptr_t obj; int depth; };
+    std::vector<Frontier> frontier;
+    frontier.push_back({target, 0});
+    while (!frontier.empty()) {
+        Frontier cur = frontier.back();
+        frontier.pop_back();
+        if (cur.depth >= kMaxOwnDepth) continue;
+        if (out.size() >= static_cast<size_t>(maxResults) || subCount >= kMaxOwnedSubs) break;
+        if (Tot::Requested()) break;
+        EnumerateOutgoingObjectPtrs(cur.obj,
+            [&](uintptr_t child, int32_t ptrOff, const std::string& ptrName,
+                const std::string& /*ptrType*/, const std::string& /*innerType*/,
+                int32_t elemIdx) -> bool {
+                if (out.size() >= static_cast<size_t>(maxResults) || subCount >= kMaxOwnedSubs)
+                    return true;  // stop enumerating
+                if (!child || seen.count(child)) return false;
+                if (!IsOwnedBy(child, target, kMaxOwnDepth)) return false;
+                uintptr_t childCls = Ubel::GetClass(child);
+                if (!childCls) return false;
+                seen.insert(child);
+                ++subCount;
+                std::string fname = ptrName;
+                if (elemIdx >= 0) { fname += '['; fname += std::to_string(elemIdx); fname += ']'; }
+                add(child, classify(Ubel::GetName(childCls)), fname, ptrOff, cur.depth + 1, cur.obj);
+                frontier.push_back({child, cur.depth + 1});
+                return false;  // keep enumerating this parent's other owned children
+            });
+    }
+    return out;
+}
 
 GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
                                   bool gameOnly, int32_t maxResults, bool deep,

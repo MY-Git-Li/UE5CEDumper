@@ -57,7 +57,11 @@ public interface IDumpService
     // --- Live Data Walker ---
     Task<InstanceWalkResult> WalkInstanceAsync(string addr, string? classAddr = null, int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, CancellationToken ct = default);
     Task<WorldWalkResult> WalkWorldAsync(int actorLimit = 200, int arrayLimit = 64, CancellationToken ct = default);
-    Task<FindInstancesResult> FindInstancesAsync(string className, bool exactMatch = false, int limit = 500, CancellationToken ct = default);
+    // newestFirst: scan GObjects from the high (most-recently-allocated) end so
+    // the newest runtime spawns survive the limit cap (catch a just-spawned
+    // enemy). Default low->high keeps the oldest matches (CDO / class-default /
+    // earliest instances — good for finding a Blueprint's template/defaults).
+    Task<FindInstancesResult> FindInstancesAsync(string className, bool exactMatch = false, int limit = 500, bool newestFirst = false, CancellationToken ct = default);
     Task<CePointerInfo> GetCePointerInfoAsync(string addr, int fieldOffset = 0, CancellationToken ct = default);
 
     /// <summary>
@@ -95,6 +99,15 @@ public interface IDumpService
     Task<GWorldPathResult> FindPathFromGWorldAsync(
         string target, string? objectAddr = null, int maxDepth = 5,
         CancellationToken ct = default);
+
+    // --- Related-object graph (forward, owned) — "Related Objects" panel ---
+    // Given a UObject (typically an actor), list itself, its class/outer, its
+    // Controller<->Pawn counterpart, and the sub-objects it OWNS (components, and
+    // for GAS games the AbilitySystemComponent -> its UAttributeSets). The fast
+    // forward view; the reverse "who references this object" is
+    // FindReferencesToUObjectAsync.
+    Task<RelatedObjectsResult> GetRelatedObjectsAsync(
+        string addr, int maxResults = 128, CancellationToken ct = default);
 
     // --- Property Bytecode Cross-Reference ("which methods use this field?") ---
     // Static Kismet-bytecode scan; Blueprint/script functions only (native

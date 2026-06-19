@@ -124,7 +124,12 @@ SearchResultSet SearchByName(const std::string& query, int maxResults = 200);
 
 // Find all instances whose class name matches (case-insensitive partial match)
 // Returns addr, index, name, className, outer for each instance
-SearchResultSet FindInstancesByClass(const std::string& className, bool exactMatch = false, int maxResults = 500);
+// newestFirst: walk GObjects from the high (most-recently-allocated) end so the
+// newest runtime spawns survive the maxResults cap. Default low->high keeps the
+// OLDEST maxResults (CDO / class-default / earliest instances) — ideal for
+// finding a Blueprint's template/defaults, but it truncates the newest off the
+// end for high-population classes (so "catch the just-spawned enemy" needs newestFirst).
+SearchResultSet FindInstancesByClass(const std::string& className, bool exactMatch = false, int maxResults = 500, bool newestFirst = false);
 
 // Address-to-Instance reverse lookup result.
 //
@@ -299,6 +304,49 @@ struct ReferenceMatch {
 std::vector<ReferenceMatch> FindReferencesToUObject(uintptr_t target,
                                                      int32_t maxResults = 32,
                                                      ContainerScanStats* stats = nullptr);
+
+// === Related-object graph (forward, owned) — "Related Objects" panel ===
+//
+// Given any UObject (typically an actor/pawn the user is inspecting), assemble
+// the objects most useful for understanding it in one bounded call:
+//   - Self / Class / Outer                         (the naming hierarchy)
+//   - Controller <-> Pawn counterpart              (reflected by field name)
+//   - the sub-objects it OWNS, via an owned walk up to depth 3:
+//       depth 1 — direct owned sub-objects (UActorComponents, custom
+//                 Health/Stats components, the GAS AbilitySystemComponent)
+//       depth 2-3 — each sub-object's owned objects (the ASC's UAttributeSets),
+//                 so a GAS AttributeSet is reached even when nested behind a
+//                 stats/ability layer: pawn -> stats component -> ASC -> AttributeSet
+//                 (some games — e.g. TQ2 — don't hang the ASC directly off the actor).
+//
+// Discovery is STRUCTURAL — EnumerateOutgoingObjectPtrs (direct ObjectProperty
+// fields AND object-pointer containers: OwnedComponents TSet, SpawnedAttributes
+// TArray) gated by IsOwnedBy (Outer chains back to the target within 2 hops) —
+// the SAME mechanism the cross-object group scan (P4) uses. So a game's custom
+// component is found the same way as the engine ASC; the "AbilitySystem (ASC)" /
+// "AttributeSet" / "Owned Component" *labels* are a class-name convenience on top
+// of the structural walk, not the discovery filter.
+//
+// Fast and bounded (no full GObjects scan): the reverse "who references this
+// object" view is the separate FindReferencesToUObject.
+struct RelatedObject {
+    uintptr_t   addr        = 0;
+    int32_t     index       = -1;     // InternalIndex (Grimoire::OFF_UOBJECT_INDEX); -1 if unreadable
+    std::string name;
+    std::string className;
+    std::string relation;             // "Self" / "Class" / "Outer" / "Controller" /
+                                      // "Pawn" / "AbilitySystem (ASC)" / "AttributeSet" /
+                                      // "Owned Component" / "Owned Object"
+    std::string fieldName;            // field/path on parentAddr that points here ("" for Self/Class/Outer)
+    int32_t     fieldOffset = -1;     // offset within parentAddr (CE / GWorld handoff); -1 if N/A
+    int32_t     depth       = 0;      // 0 hierarchy/counterpart, 1..2 owned BFS
+    uintptr_t   parentAddr  = 0;      // object holding the pointer to this one
+};
+
+// See the section comment above. `maxResults` caps the list (default 128 — far
+// above any real actor's owned-object count). Returns Self first, then
+// Class/Outer/counterpart, then owned sub-objects in BFS order.
+std::vector<RelatedObject> GetRelatedObjects(uintptr_t target, int32_t maxResults = 128);
 
 // === Forward Object-Graph Path Search ("Locate in GWorld") ===
 //

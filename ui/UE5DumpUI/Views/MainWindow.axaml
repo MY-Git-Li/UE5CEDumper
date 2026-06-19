@@ -365,6 +365,9 @@
         <TabItem Header="{StaticResource str.Tab.ClassStruct}">
           <views:ClassStructPanel DataContext="{Binding ClassStruct}"/>
         </TabItem>
+        <TabItem Header="{StaticResource str.Tab.RelatedObjects}">
+          <views:RelatedObjectsPanel DataContext="{Binding RelatedObjects}"/>
+        </TabItem>
 
         <!-- Fixed tail order (see MainTabIndex): the 3 experimental tabs (hidden
              unless opted in via the System-tab credit checkbox), then Proxy

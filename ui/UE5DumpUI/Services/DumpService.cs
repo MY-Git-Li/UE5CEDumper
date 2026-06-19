@@ -504,14 +504,15 @@ public sealed class DumpService : IDumpService
         return result;
     }
 
-    public async Task<FindInstancesResult> FindInstancesAsync(string className, bool exactMatch = false, int limit = 500, CancellationToken ct = default)
+    public async Task<FindInstancesResult> FindInstancesAsync(string className, bool exactMatch = false, int limit = 500, bool newestFirst = false, CancellationToken ct = default)
     {
         var req = new JsonObject
         {
             ["cmd"] = "find_instances",
             ["class_name"] = className,
             ["exact_match"] = exactMatch,
-            ["limit"] = limit
+            ["limit"] = limit,
+            ["newest_first"] = newestFirst
         };
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
@@ -783,6 +784,46 @@ public sealed class DumpService : IDumpService
             QueryAddress = res["query_addr"]?.GetValue<string>() ?? addr,
             References   = refs,
             Scan         = scanStats,
+        };
+    }
+
+    public async Task<RelatedObjectsResult> GetRelatedObjectsAsync(
+        string addr, int maxResults = 128, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "get_related_objects",
+            ["addr"] = addr,
+            ["max_results"] = maxResults,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        var related = new List<RelatedObject>();
+        if (res["related"] is JsonArray arr)
+        {
+            foreach (var node in arr)
+            {
+                if (node is not JsonObject r) continue;
+                related.Add(new RelatedObject
+                {
+                    Address       = r["addr"]?.GetValue<string>() ?? "",
+                    Index         = r["index"]?.GetValue<int>() ?? -1,
+                    Name          = r["name"]?.GetValue<string>() ?? "",
+                    ClassName     = r["class"]?.GetValue<string>() ?? "",
+                    Relation      = r["relation"]?.GetValue<string>() ?? "",
+                    FieldName     = r["field_name"]?.GetValue<string>() ?? "",
+                    FieldOffset   = r["field_offset"]?.GetValue<int>() ?? -1,
+                    Depth         = r["depth"]?.GetValue<int>() ?? 0,
+                    ParentAddress = r["parent_addr"]?.GetValue<string>() ?? "",
+                });
+            }
+        }
+
+        return new RelatedObjectsResult
+        {
+            QueryAddress = res["query_addr"]?.GetValue<string>() ?? addr,
+            Related = related,
         };
     }
 

@@ -1805,9 +1805,10 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             std::string className = request.value("class_name", "");
             bool exactMatch = request.value("exact_match", false);
             int limit = request.value("limit", 500);
+            bool newestFirst = request.value("newest_first", false);
             if (className.empty()) return Renge::MakeError(id, "Missing class_name").dump();
 
-            auto rset = Aura::FindInstancesByClass(className, exactMatch, limit);
+            auto rset = Aura::FindInstancesByClass(className, exactMatch, limit, newestFirst);
 
             // Diagnostic: if name resolution ratio is low, dump FNamePool state
             if (rset.nonNull > 1000 && rset.named > 0) {
@@ -2840,6 +2841,40 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             return Renge::MakeResponse(id, data).dump();
         }
 
+        // === get_related_objects: forward owned-object graph for one UObject ===
+        // "Related Objects" panel: given any UObject (typically an actor), list
+        // itself, its class/outer, its Controller<->Pawn counterpart, and the
+        // sub-objects it OWNS (components, and for GAS games the ASC -> its
+        // UAttributeSet objects). The fast forward view; the reverse "who points
+        // at this" view stays find_refs_to_uobject.
+        if (cmd == Renge::CMD_GET_RELATED_OBJECTS) {
+            std::string addrStr = request.value("addr", "");
+            if (addrStr.empty()) return Renge::MakeError(id, "Missing addr").dump();
+            uintptr_t target = Renge::StrToAddr(addrStr);
+            int32_t maxResults = request.value("max_results", 128);
+
+            auto rels = Aura::GetRelatedObjects(target, maxResults);
+
+            json arr = json::array();
+            for (const auto& r : rels) {
+                json rj;
+                rj["addr"]         = Renge::AddrToStr(r.addr);
+                rj["index"]        = r.index;
+                rj["name"]         = r.name;
+                rj["class"]        = r.className;
+                rj["relation"]     = r.relation;
+                rj["field_name"]   = r.fieldName;
+                rj["field_offset"] = r.fieldOffset;
+                rj["depth"]        = r.depth;
+                rj["parent_addr"]  = Renge::AddrToStr(r.parentAddr);
+                arr.push_back(rj);
+            }
+            json data;
+            data["query_addr"] = addrStr;
+            data["related"]    = arr;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
         // === find_path_from_gworld: forward BFS path GWorld -> ... -> target ===
         // "Locate in GWorld": given a target (a UObject, or a property value
         // address), compute the SHORTEST pointer chain from the live UWorld down
@@ -2914,6 +2949,16 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             }
 
             auto path = Aura::FindObjectGraphPath(rootObj, targetObj, maxDepth);
+
+            // Surface the result in the pipe log next to the request (the full
+            // trace also lands in the OARR/offsets log). not_reachable with a large
+            // `visited` = the object simply isn't referenced from the GWorld graph
+            // (e.g. a just-spawned / streaming actor), NOT a depth/timeout issue.
+            Sein::Info("PIPE:path",
+                "find_path_from_gworld: target=0x%llX status=%s found=%d hops=%d visited=%d %lldms (maxDepth=%d)",
+                static_cast<unsigned long long>(targetObj), path.status.c_str(),
+                path.found ? 1 : 0, path.depthReached, path.visited,
+                static_cast<long long>(path.durationMs), maxDepth);
 
             json data;
             data["found"]               = path.found;

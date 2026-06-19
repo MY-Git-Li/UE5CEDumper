@@ -115,10 +115,10 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      v                                               |
 |  UE5Dumper.dll  [injected]                           |
 |      +-- Frieren  (ExportAPI)     <- C ABI for CE Lua (13 teleport incl. Relative/RecallExplicit/Set+GetMouseCursor, build 1144) |
-|      +-- Fern     (PipeServer)    <- Named Pipe IPC (~57 cmds incl. value scan + group scan + teleport + teleport_relative + set/get_mouse_cursor) |
+|      +-- Fern     (PipeServer)    <- Named Pipe IPC (~58 cmds incl. value scan + group scan + teleport + teleport_relative + set/get_mouse_cursor + get_related_objects) |
 |      +-- Himmel   (Signatures)    <- 128 AOB + symbol exports |
 |      +-- Genau    (OffsetFinder)  <- GObjects/GNames/GWorld   |
-|      +-- Aura     (ObjectArray)   <- Chunked + Flat arrays + Find Refs/Containers (+ recursive deep descent FindInContainersDeep, 1198) + ScanForValue (lean Candidate V3-A 926; TSet/TMap scan V1a 927) + ScanForValueGroup (multi-value group scan via Orden, 1276) + FindObjectGraphPath (GWorld fwd BFS / Locate in GWorld, 1181) |
+|      +-- Aura     (ObjectArray)   <- Chunked + Flat arrays + Find Refs/Containers (+ recursive deep descent FindInContainersDeep, 1198) + ScanForValue (lean Candidate V3-A 926; TSet/TMap scan V1a 927) + ScanForValueGroup (multi-value group scan via Orden, 1276) + FindObjectGraphPath (GWorld fwd BFS / Locate in GWorld, 1181) + GetRelatedObjects (forward owned graph: Self/Class/Outer/Controller↔Pawn/components/ASC/AttributeSet, 1323) |
 |      +-- Serie    (FNamePool)     <- UE5 Pool / UE4 TNameEntry|
 |      +-- Ubel     (UStructWalker) <- FField + UProperty + Phases B-K + Optional + ReadFStringAt/ReadFNameAt/ReadFTextStringAt (public, build 757) |
 |      +-- Macht    (Memory)        <- AOBScan + SEH read/write |
@@ -140,13 +140,14 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- ClassStructPanel          <- Property Grid        |
 |      +-- PointerPanel              <- GObjects/GNames addr |
 |      +-- LiveWalkerPanel           <- Instance drill-down  |
-|      +-- InstanceFinderPanel       <- Class instance search|
+|      +-- InstanceFinderPanel       <- Class instance search (+ "Newest first" opt-in: scan GObjects high-index end for just-spawned instances, 1325) |
 |      +-- PropertySearchPanel       <- Search by name (build 610+ dedupe + Freeze button; finder btn + opt-in Deep struct/container descent 1222) |
 |      +-- InterestingFunctionsPanel <- Scored UFunctions; 📦 batch CT (build 760) |
 |      +-- InterestingPropertiesPanel<- Scored properties (B'); 📦 batch CT (build 760) |
 |      +-- ConsolePanel              <- UFUNCTION(exec) discovery + UCheatManager hint (build 778) |
 |      +-- TeleportPanel             <- marker save/recall + cursor + BugItGo + POV + facing-dir TP + coord TP + force cursor (input-mode, build 1147) + GodMode toggle (Solitar, build 1251) + CE Lua/.CT (17-row) |
 |      +-- ValueSearchPanel          <- CE-style by-value scan (build 738 + Phase 2 757) + Single/Group mode toggle (multi-value group scan, master-detail, build 1276) |
+|      +-- RelatedObjectsPanel        <- Related Objects: an actor's class/outer + Controller↔Pawn + owned components/ASC/AttributeSet; 🌍 GWorld / Live Walker / finder handoffs; fed from InstanceFinder/ValueSearch/LiveWalker (build 1323) |
 |      +-- ProxyDeployPanel          <- Proxy DLL management |
 |      +-- CeXmlExport               <- CE XML pointer chains |
 |      +-- CsxExport                 <- CE Structure Dissect  |

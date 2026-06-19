@@ -393,6 +393,83 @@ public class DumpServiceTests
     }
 
     [Fact]
+    public async Task GetRelatedObjectsAsync_ParsesGraphAndPreservesOrder()
+    {
+        _pipe.SetHandler(req =>
+        {
+            Assert.Equal("get_related_objects", req["cmd"]?.GetValue<string>());
+            Assert.Equal("0x7FF6AA00", req["addr"]?.GetValue<string>());
+            return new JsonObject
+            {
+                ["ok"] = true,
+                ["query_addr"] = "0x7FF6AA00",
+                ["related"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["addr"] = "0x7FF6AA00", ["index"] = 100,
+                        ["name"] = "BP_Enemy_C_0", ["class"] = "BP_Enemy_C",
+                        ["relation"] = "Self", ["field_name"] = "",
+                        ["field_offset"] = -1, ["depth"] = 0, ["parent_addr"] = "0x0",
+                    },
+                    new JsonObject
+                    {
+                        ["addr"] = "0x7FF6BB00", ["index"] = 200,
+                        ["name"] = "AbilitySystem_0", ["class"] = "AbilitySystemComponent",
+                        ["relation"] = "AbilitySystem (ASC)", ["field_name"] = "AbilitySystem",
+                        ["field_offset"] = 0x2A8, ["depth"] = 1, ["parent_addr"] = "0x7FF6AA00",
+                    },
+                    new JsonObject
+                    {
+                        ["addr"] = "0x7FF6CC00", ["index"] = 300,
+                        ["name"] = "HealthSet_0", ["class"] = "MyHealthAttributeSet",
+                        ["relation"] = "AttributeSet", ["field_name"] = "SpawnedAttributes[0]",
+                        ["field_offset"] = 0x1B0, ["depth"] = 2, ["parent_addr"] = "0x7FF6BB00",
+                    },
+                },
+            };
+        });
+
+        var svc = CreateService();
+        var result = await svc.GetRelatedObjectsAsync("0x7FF6AA00", ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal("0x7FF6AA00", result.QueryAddress);
+        Assert.Equal(3, result.Related.Count);
+
+        var self = result.Related[0];
+        Assert.Equal("Self", self.Relation);
+        Assert.Equal("BP_Enemy_C", self.ClassName);
+
+        var asc = result.Related[1];
+        Assert.Equal("AbilitySystem (ASC)", asc.Relation);
+        Assert.Equal(0x2A8, asc.FieldOffset);
+        Assert.Equal(1, asc.Depth);
+        Assert.Equal("0x7FF6AA00", asc.ParentAddress);
+
+        var attr = result.Related[2];
+        Assert.Equal("AttributeSet", attr.Relation);
+        Assert.Equal(2, attr.Depth);
+        Assert.Equal("SpawnedAttributes[0]", attr.FieldName);
+        Assert.Contains("0x1B0", attr.FieldDisplay);   // offset hint surfaced
+    }
+
+    [Fact]
+    public async Task FindInstancesAsync_SendsNewestFirstFlag()
+    {
+        bool? sentNewestFirst = null;
+        _pipe.SetHandler(req =>
+        {
+            sentNewestFirst = req["newest_first"]?.GetValue<bool>();
+            return new JsonObject { ["ok"] = true, ["instances"] = new JsonArray() };
+        });
+
+        var svc = CreateService();
+        await svc.FindInstancesAsync("BP_Enemy_C", newestFirst: true, ct: TestContext.Current.CancellationToken);
+
+        Assert.True(sentNewestFirst);   // default path (false) is covered by every other find_instances test
+    }
+
+    [Fact]
     public async Task WalkClassAsync_ParsesFields()
     {
         _pipe.SetHandler(_ => new JsonObject

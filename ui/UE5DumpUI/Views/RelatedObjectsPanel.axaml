@@ -1,0 +1,105 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UE5DumpUI.ViewModels"
+             xmlns:m="using:UE5DumpUI.Models"
+             x:Class="UE5DumpUI.Views.RelatedObjectsPanel"
+             x:DataType="vm:RelatedObjectsViewModel">
+
+  <DockPanel Margin="8">
+    <!-- Top: target address + load. The address is usually handed off from
+         Instance Finder / Value Search / Live Walker, but can be pasted. -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+      <TextBox PlaceholderText="{StaticResource str.Related.AddressHint}"
+               Text="{Binding TargetAddress}"
+               x:Name="TargetAddressInput"
+               KeyDown="TargetAddressInput_KeyDown"
+               Width="320" Padding="4,2"/>
+      <Button Content="{StaticResource str.Related.Load}"
+              Command="{Binding LoadCommand}"
+              ToolTip.Tip="{StaticResource str.Tip.Related.Load}"
+              Classes="accent" Padding="12,4"/>
+      <TextBlock Text="{Binding QueryClassName}"
+                 Foreground="#4EC9B0" FontWeight="Bold"
+                 VerticalAlignment="Center" Margin="8,0,0,0"/>
+    </StackPanel>
+
+    <!-- Status + indeterminate progress -->
+    <TextBlock DockPanel.Dock="Top" Text="{Binding StatusText}"
+               Foreground="#888" Margin="0,0,0,4" TextWrapping="Wrap"/>
+    <ProgressBar DockPanel.Dock="Top"
+                 IsIndeterminate="{Binding IsBusy}"
+                 IsVisible="{Binding IsBusy}"
+                 Height="2" Margin="0,0,0,4"/>
+
+    <!-- Related objects: Self / Class / Outer / Controller<->Pawn /
+         Owned Component / AbilitySystem (ASC) / AttributeSet / Owned Object.
+         Each row hands off to 🌍 Locate in GWorld / Live Walker / finder
+         (Find Class) / copy address. -->
+    <DataGrid x:Name="RelatedGrid"
+              ItemsSource="{Binding Related}"
+              SelectedItem="{Binding SelectedRelated}"
+              IsReadOnly="True"
+              CanUserResizeColumns="True"
+              GridLinesVisibility="Horizontal"
+              HeadersVisibility="Column"
+              BorderThickness="0"
+              Background="#1E1E1E"
+              Foreground="#D4D4D4"
+              FontFamily="Consolas" FontSize="12">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="{StaticResource str.Related.ColRelation}"
+                            Binding="{Binding Relation}"
+                            SortMemberPath="Relation"
+                            Width="150" CanUserSort="True"/>
+        <DataGridTextColumn Header="{StaticResource str.Related.ColObject}"
+                            Binding="{Binding Display}"
+                            SortMemberPath="Display"
+                            Width="2*" CanUserSort="True"/>
+        <DataGridTextColumn Header="{StaticResource str.Related.ColField}"
+                            Binding="{Binding FieldDisplay}"
+                            Width="*" CanUserSort="False"/>
+        <DataGridTextColumn Header="{StaticResource str.Related.ColAddress}"
+                            Binding="{Binding Address}"
+                            SortMemberPath="Address"
+                            Width="150" CanUserSort="True"/>
+        <DataGridTemplateColumn Header="" Width="Auto" CanUserResize="False" CanUserSort="False">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:RelatedObject">
+              <StackPanel Orientation="Horizontal" Spacing="4"
+                          HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Button Content="{StaticResource str.InstanceFinder.LocateGWorldShort}"
+                        Command="{Binding $parent[DataGrid].((vm:RelatedObjectsViewModel)DataContext).LocateRowInGWorldCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.Related.GWorld}"
+                        Foreground="#C586C0" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#C586C0"
+                        Padding="6,2" FontSize="11" Cursor="Hand"/>
+                <Button Content="{StaticResource str.VS.OpenLive}"
+                        Command="{Binding $parent[DataGrid].((vm:RelatedObjectsViewModel)DataContext).OpenInLiveWalkerCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.Related.Walk}"
+                        Foreground="#4EC9B0" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#4EC9B0"
+                        Padding="6,2" FontSize="11" Cursor="Hand"/>
+                <Button Content="{StaticResource str.PropertySearch.FindInstances}"
+                        Command="{Binding $parent[DataGrid].((vm:RelatedObjectsViewModel)DataContext).FindClassCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.Related.Find}"
+                        Foreground="#569CD6" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#569CD6"
+                        Padding="6,2" FontSize="11" Cursor="Hand"/>
+                <Button Content="{StaticResource str.VS.CopyAddr}"
+                        Command="{Binding $parent[DataGrid].((vm:RelatedObjectsViewModel)DataContext).CopyAddressCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.Related.Copy}"
+                        Foreground="#DCDCAA" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#DCDCAA"
+                        Padding="6,2" FontSize="11" Cursor="Hand"/>
+              </StackPanel>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</UserControl>
