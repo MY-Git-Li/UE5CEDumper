@@ -7075,6 +7075,17 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
     const int32_t end = (std::min)(offset + limit, total);
     result.scanned = (end > offset) ? (end - offset) : 0;
 
+    // Wall-clock deadline so an expensive chunk (large classes, and — once it
+    // lands — the opt-in Native-C / deep capture per object) can't stall the
+    // capture thread indefinitely. This loop previously had ONLY a Tot cancel
+    // check; unlike ScanForValue / ScanForValueGroup it had no time backstop
+    // (see docs/native-c-value-scan-spec.md §11). On a deadline we return the
+    // chunk PARTIAL with result.scanned set to the actual progress so the C#
+    // pager advances correctly (the i != offset guard guarantees progress, so
+    // paging can't stall).
+    constexpr auto kCaptureDeadline = std::chrono::seconds(15);
+    const auto t0 = std::chrono::steady_clock::now();
+
     // Reused scratch so per-object capture doesn't churn the heap.
     std::vector<std::string> typeNames;
 
@@ -7082,6 +7093,14 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
         if ((i & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:snapshot", "CaptureSnapshotChunk: aborted (client gone / shutdown)");
             break;  // return partial chunk
+        }
+        if (i != offset && (i & 0x3F) == 0 &&
+            std::chrono::steady_clock::now() - t0 > kCaptureDeadline) {
+            result.scanned = i - offset;  // partial — report actual progress
+            Sein::Warn("PIPE:snapshot",
+                       "CaptureSnapshotChunk: deadline hit after %d objs (partial chunk)",
+                       i - offset);
+            break;
         }
         uintptr_t obj = GetByIndex(i);
         if (!obj) continue;

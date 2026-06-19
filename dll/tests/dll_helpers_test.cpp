@@ -29,6 +29,7 @@
 #include "../src/GraphPath.h"   // Pure BFS shortest-path core ("Locate in GWorld")
 #include "../src/Solitar.h"     // GodMode FBoolProperty bit write (ApplyBoolBit, header-inline)
 #include "../src/Orden.h"       // Multi-value group scan: source-agnostic SDR matcher (MatchGroup)
+#include "../src/Ubel.h"        // Native-C scan P0: ComputeHoles / ComputeClassHoles / NormalizeGuessedTypeToProperty (inline, pure)
 
 #include <Windows.h>
 #include <timeapi.h>   // timeBeginPeriod — exercised by the poll-latency check
@@ -2317,6 +2318,110 @@ static void Test_Orden_PrevValueRejectedOnFirstScan() {
     EXPECT("group prev-value slot0 collected zero leaves", out[0].leafIdx.empty());
 }
 
+// ----- Ubel: Native-C scan P0 — hole computation + type normalization --------
+//
+// Pure helpers (no game memory). ComputeHoles is the interval-complement core
+// shared by the Guess-What gap pass (WalkInstance) and the Native-C value scan;
+// ComputeClassHoles is the ArrayDim-aware class-level builder the scan will use;
+// NormalizeGuessedTypeToProperty maps Guess labels to canonical property strings.
+
+static void Test_Holes_ComputeHoles_Basic() {
+    // Two occupied fields in [0x28, 0x40): a gap before, between, and after.
+    std::vector<Ubel::Interval> occ = { {0x30, 0x34}, {0x38, 0x3C} };
+    auto holes = Ubel::ComputeHoles(occ, 0x28, 0x40);
+    EXPECT("3 holes", holes.size() == 3);
+    if (holes.size() == 3) {
+        EXPECT_EQ_U64("hole0 start", holes[0].start, 0x28); EXPECT_EQ_U64("hole0 end", holes[0].end, 0x30);
+        EXPECT_EQ_U64("hole1 start", holes[1].start, 0x34); EXPECT_EQ_U64("hole1 end", holes[1].end, 0x38);
+        EXPECT_EQ_U64("hole2 start", holes[2].start, 0x3C); EXPECT_EQ_U64("hole2 end", holes[2].end, 0x40);
+    }
+}
+
+static void Test_Holes_LeadingGapSurvives() {
+    // Regression for commit 75ea723: a field at/after the first real offset must
+    // NOT swallow the [windowStart, firstField) leading region.
+    std::vector<Ubel::Interval> occ = { {0x40, 0x44} };
+    auto holes = Ubel::ComputeHoles(occ, 0x28, 0x80);
+    EXPECT("leading + trailing = 2 holes", holes.size() == 2);
+    if (holes.size() == 2) {
+        EXPECT_EQ_U64("leading hole start", holes[0].start, 0x28);
+        EXPECT_EQ_U64("leading hole end",   holes[0].end,   0x40);
+        EXPECT_EQ_U64("trailing hole start", holes[1].start, 0x44);
+        EXPECT_EQ_U64("trailing hole end",   holes[1].end,   0x80);
+    }
+}
+
+static void Test_Holes_FullyCovered() {
+    std::vector<Ubel::Interval> occ = { {0x28, 0x40} };
+    EXPECT("fully covered -> no holes", Ubel::ComputeHoles(occ, 0x28, 0x40).empty());
+    // Overlapping + adjacent intervals merge to full coverage.
+    std::vector<Ubel::Interval> occ2 = { {0x28, 0x34}, {0x30, 0x3A}, {0x3A, 0x40} };
+    EXPECT("merged coverage -> no holes", Ubel::ComputeHoles(occ2, 0x28, 0x40).empty());
+}
+
+static void Test_Holes_ClampsOutOfWindow() {
+    // A field reaching below windowStart is trimmed (header bytes excluded), and
+    // a field with a garbage-huge end is trimmed to windowEnd — neither drops the
+    // surrounding holes.
+    std::vector<Ubel::Interval> occ = { {0x00, 0x2C}, {0x30, 0x7FFFFFF0} };
+    auto holes = Ubel::ComputeHoles(occ, 0x28, 0x40);
+    EXPECT("one middle hole", holes.size() == 1);
+    if (holes.size() == 1) {
+        EXPECT_EQ_U64("hole start (after clamped header field)", holes[0].start, 0x2C);
+        EXPECT_EQ_U64("hole end (before clamped huge field)",   holes[0].end,   0x30);
+    }
+    // Empty / inverted window yields nothing.
+    EXPECT("empty window -> no holes", Ubel::ComputeHoles(occ, 0x40, 0x40).empty());
+    EXPECT("inverted window -> no holes", Ubel::ComputeHoles(occ, 0x40, 0x28).empty());
+}
+
+static void Test_Holes_ComputeClassHoles_ArrayDim() {
+    // A static C-array UPROPERTY int Foo[10] at 0x40 (ElementSize 4, ArrayDim 10)
+    // occupies [0x40, 0x68) — its tail must NOT be reported as a hole (the
+    // phantom-hole bug the ArrayDim read fixes). A scalar int at 0x68 follows.
+    ClassInfo ci;
+    ci.PropertiesSize = 0x80;
+    FieldInfo arr; arr.Offset = 0x40; arr.Size = 4; arr.ArrayDim = 10; ci.Fields.push_back(arr);
+    FieldInfo sc;  sc.Offset = 0x68;  sc.Size = 4;  sc.ArrayDim = 1;  ci.Fields.push_back(sc);
+
+    auto holes = Ubel::ComputeClassHoles(ci, 0x28, 0x80);
+    // Expect: [0x28,0x40) leading, [0x6C,0x80) trailing. NO [0x44,0x68) phantom.
+    EXPECT("array-dim: 2 holes (no phantom)", holes.size() == 2);
+    if (holes.size() == 2) {
+        EXPECT_EQ_U64("leading hole end == array start", holes[0].end, 0x40);
+        EXPECT_EQ_U64("trailing hole start == after scalar", holes[1].start, 0x6C);
+    }
+    // Sanity: if ArrayDim were ignored (==1) a phantom [0x44,0x68) would appear.
+    FieldInfo arrBad = arr; arrBad.ArrayDim = 1;
+    ClassInfo ciBad; ciBad.PropertiesSize = 0x80; ciBad.Fields = { arrBad, sc };
+    EXPECT("array-dim=1 control yields a phantom hole",
+           Ubel::ComputeClassHoles(ciBad, 0x28, 0x80).size() == 3);
+}
+
+static void Test_Holes_NormalizeGuessedType() {
+    using DT = Radar::DataType;
+    // Every label GuessGapTypes can emit must normalize to a canonical property
+    // string that BOTH Radar::TryDataTypeFromPropertyTypeName (DLL) and (verified
+    // separately, C# side) SnapshotNumeric.TryFromHex accept — or to "" (drop).
+    struct Case { const char* guess; const char* canon; };
+    const Case cases[] = {
+        {"Float",  "FloatProperty"},  {"Float?",  "FloatProperty"},
+        {"Double", "DoubleProperty"}, {"Double?", "DoubleProperty"},
+        {"Int32?", "IntProperty"},    {"Int16?",  "Int16Property"},
+        {"Byte?",  "ByteProperty"},
+    };
+    for (const auto& c : cases) {
+        std::string canon = Ubel::NormalizeGuessedTypeToProperty(c.guess);
+        EXPECT(c.guess, canon == c.canon);
+        DT dt;
+        EXPECT("normalized resolves in Radar", Radar::TryDataTypeFromPropertyTypeName(canon, dt));
+    }
+    // Padding / Pointer? have no gameplay-numeric meaning -> dropped.
+    EXPECT("Padding -> drop",  Ubel::NormalizeGuessedTypeToProperty("Padding").empty());
+    EXPECT("Pointer? -> drop", Ubel::NormalizeGuessedTypeToProperty("Pointer?").empty());
+    EXPECT("unknown -> drop",  Ubel::NormalizeGuessedTypeToProperty("Mystery").empty());
+}
+
 int main() {
     std::printf("dll_helpers_test (Renge + Scharf + Radar)\n");
     std::printf("------------------------------------------\n");
@@ -2433,6 +2538,14 @@ int main() {
     Test_Orden_OrderedFirstScan();
     Test_Orden_BetweenFirstScan();
     Test_Orden_PrevValueRejectedOnFirstScan();
+
+    // Ubel — Native-C scan P0: hole computation + Guess-type normalization (pure)
+    Test_Holes_ComputeHoles_Basic();
+    Test_Holes_LeadingGapSurvives();
+    Test_Holes_FullyCovered();
+    Test_Holes_ClampsOutOfWindow();
+    Test_Holes_ComputeClassHoles_ArrayDim();
+    Test_Holes_NormalizeGuessedType();
 
     std::printf("------------------------------------------\n");
     std::printf("Pass: %d   Fail: %d\n", g_pass, g_fail);

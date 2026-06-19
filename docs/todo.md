@@ -38,6 +38,26 @@ Open work only. **Read this when deciding what to do next.**
   *Parent: cooperative cancel + shutdown-abort + disconnect monitor shipped build
   936-937, PR #238 (dev-log 2026-06-06).*
 
+- **Native-C Value Scan — opt-in raw/unmanaged in-object scan (DESIGN DONE, not built)** —
+  Effort: **L** (P0 prereqs + P1 single + P2 group + P3 snapshot) · Risk: **med**
+  (noise/truncation UX + selectivity). Full design in
+  [native-c-value-scan-spec.md](native-c-value-scan-spec.md). Finds native (non-`UPROPERTY`)
+  HP/MP living in a UObject's **holes** (complement of reflected coverage within
+  `PropertiesSize`), interpreting raw bytes via the existing "Guess What"
+  (`Ubel::GuessGapTypes`); opt-in in Value Search + Group Scan + Snapshot→SPC→Pivot. Reuses the
+  `Orden` seam + Deep/Cross-object opt-in plumbing; **no new module/namespace** (reuses
+  Ubel/Aura/Radar/Orden). **P0 prereqs first:** extract `Ubel::ComputeHoles` (interval-list
+  input — NOT a byte-identical lift of the per-instance gap pass), make `GuessGapTypes` public,
+  read `ArrayDim` into `FieldInfo` (else phantom holes on `Type Foo[N]`), the mandatory
+  **Guess→canonical property-type-string** normalization (`"Float?"`→`FloatProperty` etc., else
+  NULL `numeric_value` / dropped group leaves), and **ADD a wall-clock deadline to
+  `CaptureSnapshotChunk`** (it currently has none). **Owner call before P1:** is an un-scoped
+  first-scan-over-all-objects native option offered, or gated to class-scoped / Next-Scan-only?
+  (un-scoped first scan + index-ordered truncation keeps low-index CDOs, drops the high-index
+  spawned pawn the user wants → recommend class-scoped + high-index-first).
+  *Parent: builds on the value_search_caveats locked-in "native fields invisible" rule, the group
+  scan `Orden` seam (group-value-scan-spec §3.1), and the "Guess What" build (commit 75ea723).*
+
 -----
 
 ## Related Objects panel — Phase 2 + follow-ups (Phase 1 shipped builds 1323-1327)

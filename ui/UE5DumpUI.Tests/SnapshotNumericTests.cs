@@ -64,4 +64,23 @@ public class SnapshotNumericTests
     {
         Assert.False(SnapshotNumeric.TryFromHex(type, hex, out _));
     }
+
+    [Theory]
+    // Native-C scan P0 contract (docs/native-c-value-scan-spec.md §4.3): the DLL's
+    // Ubel::NormalizeGuessedTypeToProperty maps every "Guess What" label to one of
+    // these canonical property-type strings before emitting a native snapshot row.
+    // SnapshotNumeric.TryFromHex MUST accept each (with correctly-sized hex) or the
+    // native field would store NULL numeric_value and silently break SPC / Pivot.
+    // This is the C# half of the cross-language round-trip the DLL test locks via
+    // Radar::TryDataTypeFromPropertyTypeName.
+    [InlineData("FloatProperty",  "0000803F")]          // <- Float / Float?  (1.0)
+    [InlineData("DoubleProperty", "000000000000F03F")]  // <- Double / Double? (1.0)
+    [InlineData("IntProperty",    "01000000")]          // <- Int32?
+    [InlineData("Int16Property",  "0100")]              // <- Int16?
+    [InlineData("ByteProperty",   "01")]                // <- Byte?
+    [InlineData("Int64Property",  "0100000000000000")]  // <- Int64? (if ever emitted)
+    public void TryFromHex_AcceptsEveryNormalizedNativeType(string canonicalType, string hex)
+    {
+        Assert.True(SnapshotNumeric.TryFromHex(canonicalType, hex, out _));
+    }
 }
