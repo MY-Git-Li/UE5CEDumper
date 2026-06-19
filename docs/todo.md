@@ -49,11 +49,29 @@ Open work only. **Read this when deciding what to do next.**
   numericScope-filtered, ≤256/obj); pipe `native_c` on `snapshot_chunk`; C#
   `SnapshotViewModel.IncludeNativeFields` toggle + intro string. SPC Query + Class Pivot
   consume raw rows with ZERO code changes (key on prop_name=offset + canonical declared_type;
-  existing `fields` schema, no migration). **REMAINING: in-game verify P3** — capture a
-  native snapshot pair around a stat change, confirm SPC diff tracks a `<raw@0x..>` value +
-  Class Pivot decodes it (not hex). Then the whole feature is closeable.
+  existing `fields` schema, no migration). **REMAINING: in-game verify P3** — BLOCKED on the
+  snapshot-perf item below (FF7 Rebirth capture with Native-C didn't finish — 16+ min, >50%
+  uncaptured). Verify on a smaller / faster game, or after the perf work: capture a native
+  snapshot pair around a stat change, confirm SPC diff tracks a `<raw@0x..>` value + Class
+  Pivot decodes it (not hex).
   *Parent: P0–P3 shipped on dev (this session); builds on value_search_caveats, the `Orden`
   seam (group-value-scan-spec §3.1), and the "Guess What" build (commit 75ea723).*
+
+- **Snapshot capture too slow on huge games (FF7 Rebirth ~433K objects) — esp. with Native-C** —
+  Effort: **M-L** · Risk: med (touches the hot capture path). FF7 Rebirth snapshot with
+  Native-C ON ran **16+ min and left >50% of objects uncaptured**, so P3 couldn't be verified
+  there. Likely causes, in order: (1) **Native-C `AppendRawHoleFields` calls `Ubel::GuessGapTypes`,
+  which reads memory BYTE-BY-BYTE** (the zero-run probe does one `Macht::ReadSafe<uint8_t>` per
+  byte) — over every hole of every object that's very slow. Fix: a buffer-based variant that
+  reads the `[header,PropertiesSize)` window ONCE (like the P1/P2 native pass already do) and
+  guesses in-buffer. (2) **Capture is one pipe round-trip per 200 objects** (`Constants.SnapshotChunkSize`)
+  → ~2166 chunks for 433K objects + a SQLite write burst each; raise the chunk size and/or
+  batch the inserts. (3) **DLL `CaptureSnapshotChunk` is single-threaded**; the reflected walk
+  alone is heavy at 433K. Consider parallelizing (mirror `ScanForValue`'s `ParallelGObjectsScan`)
+  and/or a class-scoped capture (only capture instances of a chosen class) for huge games.
+  Also surface a clearer "X% captured, still running" progress + an explicit cap/stop. Until
+  fixed, recommend Native-C snapshot only on smaller games or with a class scope.
+  *Parent: Native-C P3 in-game test (FF7 Rebirth), this session.*
 
 -----
 
