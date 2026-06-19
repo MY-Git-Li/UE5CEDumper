@@ -1182,17 +1182,22 @@ public class ValueSearchTests
         public bool? LastBatchRead { get; private set; }
 
         public bool? LastDeep { get; private set; }
+        public bool? LastNativeC { get; private set; }
+        public bool? LastNewestFirst { get; private set; }
         public override Task<ValueScanBeginResult> BeginValueScanAsync(
             ValueScanDataType dataType, ValueScanType scanType,
             string value, string? value2 = null, bool gameOnly = true,
             int maxResults = 50000, double tolerance = 0.0,
             bool caseSensitive = false, bool parallel = true, bool batchRead = true,
-            bool deep = false, int pageSize = 1000, CancellationToken ct = default)
+            bool deep = false, bool nativeC = false, bool newestFirst = false,
+            int pageSize = 1000, CancellationToken ct = default)
         {
             Begins.Add((dataType, scanType, value, value2, gameOnly, maxResults, tolerance, caseSensitive));
             LastParallel = parallel;
             LastBatchRead = batchRead;
             LastDeep = deep;
+            LastNativeC = nativeC;
+            LastNewestFirst = newestFirst;
             return Task.FromResult(NextBeginResult);
         }
 
@@ -1798,6 +1803,82 @@ public class ValueSearchTests
         await svc.BeginValueScanAsync(ValueScanDataType.Int32, ValueScanType.Exact, "10",
             deep: true, ct: TestContext.Current.CancellationToken);
         Assert.True(captured!["deep"]?.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task BeginValueScanAsync_AttachesNativeCAndNewestFirstOnlyWhenEnabled()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"] = req["id"]?.GetValue<int>() ?? 0, ["ok"] = true,
+                ["session_id"] = 1UL, ["data_type"] = "Int32", ["total"] = 0,
+                ["scanned_classes"] = 0, ["scanned_objects"] = 0, ["duration_ms"] = 0L,
+                ["deadline_hit"] = false, ["candidates"] = new JsonArray(),
+            };
+        });
+        // Off by default → omitted (wire-tight, back-compat with old DLLs).
+        await svc.BeginValueScanAsync(ValueScanDataType.Int32, ValueScanType.Exact, "10",
+            ct: TestContext.Current.CancellationToken);
+        Assert.False(captured!.ContainsKey("native_c"));
+        Assert.False(captured!.ContainsKey("newest_first"));
+
+        await svc.BeginValueScanAsync(ValueScanDataType.Int32, ValueScanType.Exact, "10",
+            nativeC: true, newestFirst: true, ct: TestContext.Current.CancellationToken);
+        Assert.True(captured!["native_c"]?.GetValue<bool>());
+        Assert.True(captured!["newest_first"]?.GetValue<bool>());
+    }
+
+    [Fact]
+    public void NativeCScan_Couples_NewestFirst()
+    {
+        var (vm, _) = MakeVm();
+        Assert.False(vm.NativeCScan);
+        Assert.False(vm.NewestFirst);
+
+        // Enabling Native-C pre-checks Newest-first.
+        vm.NativeCScan = true;
+        Assert.True(vm.NewestFirst);
+
+        // User may independently uncheck Newest-first while Native-C stays on.
+        vm.NewestFirst = false;
+        Assert.True(vm.NativeCScan);
+        Assert.False(vm.NewestFirst);
+
+        // Re-enabling re-checks it; disabling Native-C then clears it.
+        vm.NewestFirst = true;
+        vm.NativeCScan = false;
+        Assert.False(vm.NewestFirst);
+    }
+
+    [Fact]
+    public void ValueCandidate_Origin_ReflectsNativeFlag()
+    {
+        var reflected = new UE5DumpUI.Models.ValueCandidate { IsNativeField = false };
+        Assert.Equal("Reflected", reflected.Origin);
+
+        var native = new UE5DumpUI.Models.ValueCandidate
+        { IsNativeField = true, GuessedType = "Int32" };
+        Assert.Equal("Native-C (Int32)", native.Origin);
+    }
+
+    [Fact]
+    public async Task FirstScan_PassesNativeCAndNewestFirst()
+    {
+        var (vm, fake) = MakeVm();
+        fake.NextBeginResult = new ValueScanBeginResult { SessionId = 7UL, DataType = "Int32", Total = 0 };
+        vm.NativeCScan = true;            // also auto-checks NewestFirst
+        vm.SelectedDataType = ValueScanDataType.Int32;
+        vm.Value = "100";
+
+        await vm.FirstScanCommand.ExecuteAsync(null);
+
+        Assert.True(fake.LastNativeC);
+        Assert.True(fake.LastNewestFirst);
     }
 
     [Fact]

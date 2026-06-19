@@ -20,7 +20,18 @@
         <TextBlock Text="⚠" Foreground="#E0A050"
                    FontSize="14" FontWeight="Bold"
                    VerticalAlignment="Center"/>
+        <!-- Default disclosure: native fields invisible (locked in by
+             project_value_search_caveats + the banner test). Shown when the
+             Native-C opt-in is OFF. -->
         <TextBlock Text="{StaticResource str.VS.Banner}"
+                   IsVisible="{Binding !NativeCScan}"
+                   Foreground="#F0CC80" FontSize="12"
+                   TextWrapping="Wrap"
+                   VerticalAlignment="Center"/>
+        <!-- Native-C ON: the disclosure no longer applies — warn that the raw
+             scan is intentionally noisy on first scan instead. -->
+        <TextBlock Text="{StaticResource str.VS.NativeBanner}"
+                   IsVisible="{Binding NativeCScan}"
                    Foreground="#F0CC80" FontSize="12"
                    TextWrapping="Wrap"
                    VerticalAlignment="Center"/>
@@ -154,6 +165,20 @@
                       ToolTip.Tip="{StaticResource str.Tip.VS.Deep}"
                       Foreground="#CCCCCC" FontSize="12"
                       VerticalAlignment="Center"/>
+            <!-- Native-C (P1, opt-in, default off): also scan unmanaged holes for
+                 native (non-UPROPERTY) values. Auto-enables Newest-first. -->
+            <CheckBox Content="{StaticResource str.VS.NativeC}"
+                      IsChecked="{Binding NativeCScan}"
+                      ToolTip.Tip="{StaticResource str.Tip.VS.NativeC}"
+                      Foreground="#E0A050" FontSize="12"
+                      VerticalAlignment="Center"/>
+            <!-- Newest-first GObjects ordering (auto-checked with Native-C; user can
+                 uncheck). Detailed when-to-use guidance in the tooltip. -->
+            <CheckBox Content="{StaticResource str.VS.NewestFirst}"
+                      IsChecked="{Binding NewestFirst}"
+                      ToolTip.Tip="{StaticResource str.Tip.VS.NewestFirst}"
+                      Foreground="#CCCCCC" FontSize="12"
+                      VerticalAlignment="Center"/>
             <TextBlock Text="{StaticResource str.VS.MaxResults}"
                        Foreground="#CCCCCC" FontSize="12"
                        VerticalAlignment="Center"
@@ -269,6 +294,9 @@
           <DataGrid.Columns>
             <DataGridTextColumn Header="Class.Field" Binding="{Binding LocationLabel}" SortMemberPath="LocationLabel" Width="320"/>
             <DataGridTextColumn Header="Type" Binding="{Binding FieldType}" SortMemberPath="FieldType" Width="120"/>
+            <!-- Native-C (P1): "Reflected" vs "Native-C (Int32)". Client-computed,
+                 so NOT server-sortable (the windowed session has no Origin key). -->
+            <DataGridTextColumn Header="Origin" Binding="{Binding Origin}" CanUserSort="False" Width="130"/>
             <DataGridTextColumn Header="Value" Binding="{Binding Value}" SortMemberPath="Value" Width="120"/>
             <DataGridTextColumn Header="Offset" Binding="{Binding OffsetHex}" SortMemberPath="FieldOffset" Width="80"/>
             <DataGridTextColumn Header="Address" Binding="{Binding Addr}" SortMemberPath="Addr" Width="160"/>

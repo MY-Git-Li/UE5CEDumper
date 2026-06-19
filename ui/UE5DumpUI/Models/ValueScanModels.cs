@@ -105,7 +105,22 @@ public class ValueCandidate
     public byte   BoolFieldMask     { get; set; } = 0xFF;
     public string Value             { get; set; } = "";   // formatted current value
 
+    /// <summary>Native-C (P1): true when this hit came from an UNMANAGED hole
+    /// (a non-UPROPERTY raw offset) rather than a reflected field. Drives the
+    /// "Origin" badge so users can tell native guesses from reflected matches.</summary>
+    public bool   IsNativeField     { get; set; }
+    /// <summary>Native-C: the width the raw bytes were interpreted at (e.g.
+    /// "Int32"). Empty for reflected fields.</summary>
+    public string GuessedType       { get; set; } = "";
+
     public string OffsetHex => $"0x{FieldOffset:X}";
+
+    /// <summary>Origin badge for the DataGrid: "Native-C (Int32)" for a raw-hole
+    /// hit, "Reflected" otherwise. Lets the user sort/group native guesses apart
+    /// from reflected matches (native first-scan is intentionally noisy).</summary>
+    public string Origin => IsNativeField
+        ? (string.IsNullOrEmpty(GuessedType) ? "Native-C" : $"Native-C ({GuessedType})")
+        : "Reflected";
 
     /// <summary>Compact location label for the DataGrid: "ClassName.FieldName".
     /// If the defining class differs from the owning class, it's shown

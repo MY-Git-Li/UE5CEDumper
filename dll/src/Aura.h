@@ -819,7 +819,24 @@ ValueScanResult ScanForValue(
     // class, not only those whose struct-array elements own containers (the auto
     // `needsDeepWalk` heuristic). Reaches values buried in deeply-nested containers
     // the heuristic misses. Heavier per object — exposed via the "Deep" toggle.
-    bool                deep          = false);
+    bool                deep          = false,
+    // Native-C (P1, opt-in, default off): ALSO scan each object's UNMANAGED holes
+    // — the byte ranges within [UObject header, class PropertiesSize) that no
+    // reflected property covers — for the requested numeric value, interpreting
+    // the raw bytes at the user's width. Finds native (non-UPROPERTY) C++ members
+    // (HP/MP/...). Numeric/multi-numeric dt only (skipped for string/vector/bool).
+    // Intentionally noisy on first scan — pair with newestFirst + Next-Scan refine.
+    // See docs/native-c-value-scan-spec.md.
+    bool                nativeC       = false,
+    // Stride (1/2/4/8, default 4) for sliding within each hole when nativeC is on.
+    int32_t             nativeAlign   = 4,
+    // Walk GObjects high-index-first so that when results hit maxResults the
+    // SURVIVORS are the most-recently-allocated instances (just-spawned pawns)
+    // rather than low-index CDOs/templates. Default false = ascending (oldest
+    // first). Recommended alongside nativeC (the UI couples the two). Applies to
+    // the whole scan (reflected + native), affecting only which matches survive
+    // truncation, not which exist.
+    bool                newestFirst   = false);
 
 // Refine an existing candidate vector in place: re-read each
 // candidate's bytes (or string, for FString/FName/FText DataTypes),

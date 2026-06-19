@@ -11,6 +11,16 @@
 > All `file:line` citations are against the tree at the time of writing and were
 > cross-checked by an adversarial review pass — but **verify against current code
 > before implementing** (line numbers drift).
+>
+> **Implementation status:** **P0 + P1 SHIPPED** to `dev` (build + 691 dll / 1623 C#
+> tests + AOT 46.5MB all green; in-game verification pending). P1 = single Value
+> Search Native-C raw-hole scan + the Newest-first ordering coupling (owner decision,
+> §11): `ScanForValue(nativeC, nativeAlign, newestFirst)` + synthetic raw
+> `FieldDescriptor` (`isNativeC`/`guessedType`) + `Radar::PropertyTypeNameOf` +
+> pipe `native_c`/`native_align`/`newest_first` + `is_native_c`/`guessed_type` on
+> candidates + UI Native-C/Newest-first checkboxes (coupled: enabling Native-C
+> pre-checks Newest-first; the user may uncheck it; disabling Native-C clears it) +
+> dynamic banner + Origin column. **P2 (group) + P3 (snapshot/SPC/pivot) remain.**
 
 -----
 

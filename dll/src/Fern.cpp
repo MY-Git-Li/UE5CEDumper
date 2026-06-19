@@ -220,6 +220,13 @@ json CandidateToJson(const Radar::Candidate& c,
     item["field_name"]          = Radar::FieldDisplayName(desc, c.elementIndex);
     item["field_type"]          = desc.fieldType;
     item["bool_field_mask"]     = desc.boolFieldMask;
+    // Native-C (P1): badge a raw-hole hit + the width it was interpreted at, so
+    // the UI can distinguish unmanaged native values from reflected ones. Only
+    // emitted when set (absent => reflected, keeps the wire lean + back-compat).
+    if (desc.isNativeC) {
+        item["is_native_c"] = true;
+        item["guessed_type"] = desc.guessedType;
+    }
     // Value rendering (numeric per dt / multi per fieldType / vector
     // "X, Y, Z" / string prevStr) is the single source of truth in Radar,
     // shared with the server-side filter/sort so the wire + the ordered view
@@ -2030,6 +2037,14 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             // Opt-in deep-container pass (default off): reach values buried in
             // deeply-nested containers the auto heuristic doesn't flag.
             bool deep = request.value("deep", false);
+            // Native-C (P1, opt-in, default off): also scan each object's
+            // unmanaged holes (non-UPROPERTY bytes) for the value, at native_align
+            // stride (1/2/4/8, default 4). newest_first walks GObjects high-index
+            // first so truncated results keep the newest instances (the UI couples
+            // newest_first on by default with native_c).
+            bool nativeC     = request.value("native_c", false);
+            int32_t nativeAlign = request.value("native_align", 4);
+            bool newestFirst = request.value("newest_first", false);
 
             Radar::DataType dt;
             if (!Radar::TryParseDataType(dtStr, dt)) {
@@ -2107,7 +2122,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             auto scanResult = Aura::ScanForValue(
                 dt, st, targetBytes, target2Ptr, gameOnly, maxResults,
                 tolerance, targetString, caseSensitive, multiPtr, multiPtr2,
-                parallel, batchRead, deep);
+                parallel, batchRead, deep, nativeC, nativeAlign, newestFirst);
 
             uint64_t sessionId = Radar::SessionManager::Instance().Begin(
                 dt, std::move(scanResult.candidates),

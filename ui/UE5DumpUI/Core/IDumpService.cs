@@ -186,6 +186,8 @@ public interface IDumpService
         bool parallel = true,
         bool batchRead = true,
         bool deep = false,
+        bool nativeC = false,
+        bool newestFirst = false,
         int pageSize = 1000,
         CancellationToken ct = default);
 

@@ -226,7 +226,10 @@ CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands f
   "max_results": 50000,
   "case_sensitive": false,      // optional, string types only
   "parallel": false,            // optional, default true (omitted when parallel)
-  "batch_read": false           // optional, default true (omitted when batching)
+  "batch_read": false,          // optional, default true (omitted when batching)
+  "native_c": true,             // optional (P1), default false; see below
+  "native_align": 4,            // optional (P1), stride 1/2/4/8, default 4
+  "newest_first": true          // optional (P1), default false; see below
 }
 
 // Next Scan — refine candidates in an open session.
@@ -249,6 +252,8 @@ CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands f
 - `batch_read` is attached only when **false** (DLL default true). `false` forces one SEH read per field; default batches each object's fixed-width leaf fields into a single body read (per-thread reused buffer, span-capped, with per-field fallback on fault). Strings + container data are always read directly. UI = default-ON "Batch read" toggle.
 - `(data_type, scan_type)` combinations are validated server-side by `IsScanTypeValidFor` — `FString + Bigger` or `Int32 + Contains` return an explicit error rather than running with garbage semantics.
 - `deep` (build 1283) is attached only when **true** (default off). It forces the recursive deep-container leaf pass on every class — reaching values buried inside deeply-nested containers (struct arrays, struct-valued maps, nested `TArray`/`TSet`) that the auto `needsDeepWalk` heuristic doesn't flag. Heavier per object; the UI exposes it as the default-OFF "Deep" toggle.
+- `native_c` (P1, Native-C value scan) is attached only when **true** (default off). It additionally scans each object's **unmanaged holes** — the byte ranges within `[UObject header, class PropertiesSize)` that no UPROPERTY covers — for the requested value at the user's width, so native (non-UPROPERTY) C++ members (HP/MP) are findable. Numeric/multi-numeric data types only (a no-op for string/vector/bool). `native_align` (default 4, values 1/2/4/8) is the stride for sliding within each hole. Matching candidates carry `is_native_c: true` + `guessed_type` (the interpreted width, e.g. `"Int32"`). Intentionally noisy on first scan — pair with `newest_first` + Next-Scan refine. See [native-c-value-scan-spec.md](native-c-value-scan-spec.md).
+- `newest_first` (P1) is attached only when **true** (default off). It walks GObjects high-index-first so that when results hit `max_results` the survivors are the most-recently-allocated instances (a just-spawned pawn) rather than low-index CDOs/templates. Applies to the whole scan (reflected + native); affects only which matches survive truncation. The UI auto-checks it when `native_c` is enabled (the user can uncheck it).
 
 ### Multiple Values Group Scan (build 1276)
 

@@ -1478,6 +1478,9 @@ public sealed class DumpService : IDumpService
         FieldType         = obj["field_type"]?.GetValue<string>() ?? "",
         BoolFieldMask     = (byte)(obj["bool_field_mask"]?.GetValue<int>() ?? 0xFF),
         Value             = obj["value"]?.GetValue<string>() ?? "",
+        // Native-C (P1): present only for raw-hole hits (absent => reflected).
+        IsNativeField     = obj["is_native_c"]?.GetValue<bool>() ?? false,
+        GuessedType       = obj["guessed_type"]?.GetValue<string>() ?? "",
     };
 
     private static bool ToleranceAppliesTo(ValueScanDataType dt) =>
@@ -1509,6 +1512,8 @@ public sealed class DumpService : IDumpService
         bool parallel = true,
         bool batchRead = true,
         bool deep = false,
+        bool nativeC = false,
+        bool newestFirst = false,
         int pageSize = 1000,
         CancellationToken ct = default)
     {
@@ -1552,6 +1557,16 @@ public sealed class DumpService : IDumpService
         // Deep container pass is opt-in (default off) → attach only when enabled.
         if (deep)
             req["deep"] = true;
+        // Native-C raw-hole scan (P1) is opt-in (default off) → attach only when
+        // enabled. The (JsonNode) cast dodges the generic JsonObject indexer's
+        // Add<T> AOT/trim trap (IL2026/IL3050). native_align stays at the DLL
+        // default (4) for now — no UI stride control yet.
+        if (nativeC)
+            req["native_c"] = (JsonNode)true;
+        // Newest-first GObjects ordering is opt-in (default off) → attach only when
+        // enabled (auto-set with native_c, but independently toggleable).
+        if (newestFirst)
+            req["newest_first"] = (JsonNode)true;
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);

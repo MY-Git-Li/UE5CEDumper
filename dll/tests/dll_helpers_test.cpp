@@ -481,6 +481,31 @@ static void Test_ValueScan_DataTypeFromPropertyTypeName() {
     EXPECT("every NumericAll property name resolves", allResolve(allNames));
 }
 
+static void Test_ValueScan_PropertyTypeNameOf_Inverse() {
+    using DT = Radar::DataType;
+    // PropertyTypeNameOf must be the exact inverse of
+    // TryDataTypeFromPropertyTypeName for every concrete numeric width — the
+    // Native-C scan stamps raw descriptors with PropertyTypeNameOf(dt) and refine
+    // re-resolves them via TryDataTypeFromPropertyTypeName, so a mismatch would
+    // silently drop native candidates on the first Next Scan.
+    const DT widths[] = {
+        DT::Int8, DT::UInt8, DT::Int16, DT::UInt16, DT::Int32,
+        DT::UInt32, DT::Int64, DT::UInt64, DT::Float, DT::Double,
+    };
+    for (DT w : widths) {
+        const char* name = Radar::PropertyTypeNameOf(w);
+        EXPECT("PropertyTypeNameOf non-empty", name[0] != '\0');
+        DT back;
+        EXPECT("PropertyTypeNameOf round-trips",
+               Radar::TryDataTypeFromPropertyTypeName(name, back) && back == w);
+    }
+    // Non-numeric / meta / bool have no property-type name.
+    EXPECT("Bool -> empty",         Radar::PropertyTypeNameOf(DT::Bool)[0]        == '\0');
+    EXPECT("FString -> empty",      Radar::PropertyTypeNameOf(DT::FString)[0]     == '\0');
+    EXPECT("FVector -> empty",      Radar::PropertyTypeNameOf(DT::FVector)[0]     == '\0');
+    EXPECT("NumericNoByte -> empty",Radar::PropertyTypeNameOf(DT::NumericNoByte)[0] == '\0');
+}
+
 // Helper: does the set contain an entry for `dt`, and (optionally) does
 // it decode to the expected scalar value?
 static void Test_ValueScan_BuildNumericTargets() {
@@ -2475,6 +2500,7 @@ int main() {
     // build 794 — multi-numeric (NumericNoByte) meta type
     Test_ValueScan_MultiNumericMembers();
     Test_ValueScan_DataTypeFromPropertyTypeName();
+    Test_ValueScan_PropertyTypeNameOf_Inverse();
     Test_ValueScan_BuildNumericTargets();
     // Phase A1a — snapshot field selection
     Test_ValueScan_SelectSnapshotNumericFields();
