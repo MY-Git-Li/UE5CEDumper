@@ -40,6 +40,16 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
+## Related Objects panel — Phase 2 + follow-ups (Phase 1 shipped builds 1323-1327)
+
+Phase 1 (the "Related" tab: given an actor, list Self/Class/Outer + Controller↔Pawn + owned components/ASC/AttributeSet via a depth-3 owned walk; 🌍 GWorld / Live Walker / finder / copy per row; 🔗 Related handoff from Instance Finder / Value Search / Live Walker) + the Instance Finder **"Newest first"** opt-in shipped builds 1323-1326. **In-game VERIFIED on TQ2:** `bp_ai_default_character_C` → Related lists 58 objects incl. `TQ2AIController`, `GrimAbilitySystemComponent` (ASC), `bp_tq2_character_stats_component_C` (AttributesComponent) → `AttributeSetHealth.CurrentHealth` = live HP (73.57). Follow-ups, in order:
+
+- **Phase 2 — `Edel` current-target auto-detect** — Effort: **M** · Risk: med (per-game heuristic). New `Edel` DLL module: GWorld → OwningGameInstance → LocalPlayers → PlayerController (+ AcknowledgedPawn) → enumerate object-pointer fields whose name/target looks like a target/focus/lock/selected/hovered actor (not the player's own pawn); rank candidates → feed the chosen address into the Related panel's `LoadForAddressAsync`. Solves "I don't know which keyword to search" (the TQ2 test hit exactly this — `Actor` = FX noise, `creature` = templates/CDOs). Reserve the `Edel` roster name (🟡 → 🟢) when built. *Parent: Related Objects Phase 1, dev-log 2026-06-19.*
+
+- **Locate in GWorld — unreachable for streaming / World-Partition actors** — Effort: **M-L** · Risk: med. TQ2 in-game: `find_path_from_gworld` returns **`not_reachable`** (fast — ~170ms, visited ~243K/504K) for a just-spawned `bp_ai_default_character_C` + its ASC: nothing in the GWorld forward graph references them (WP runtime actors held via native/weak structures the walk doesn't traverse; only player-referenced / aggro'd AI chars are reachable, as the giant-eagle-template-via-`AIInfoComponent` success showed). The UI message + `PIPE:path` log now explain this instead of wrongly suggesting "increase depth" (build 1327 = option A). Real-fix options if pursued: (a) walk `ULevel.Actors` / WP runtime-cell levels explicitly so level actors become reachable; (b) reverse-locate (Find Refs → climb to a reachable anchor — but a fully-unreferenced actor has no anchor either); (c) **Phase 2 Edel sidesteps it** — once the player references the target, the enemy is forward-reachable and Locate works. **Prefer (c).** *Parent: Related Objects Phase 1 in-game test, dev-log 2026-06-19.*
+
+-----
+
 ## Multiple Values Group Scan — remaining phases (P1 shipped build 1276)
 
 P1 (object-aware group scan, direct numeric leaves + one-level struct descent, exact-per-slot, mode toggle + master-detail UI) shipped builds 1276-1278 — new `Orden` SDR matcher. Follow-ups, in order:

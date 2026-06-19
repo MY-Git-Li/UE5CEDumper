@@ -37,6 +37,12 @@
               Padding="8,4"
               Foreground="#4EC9B0"
               ToolTip.Tip="{StaticResource str.Tip.LiveWalker.FindRefs}"/>
+      <Button Content="{StaticResource str.Related.ShowButton}"
+              Command="{Binding ShowRelatedObjectsCommand}"
+              IsVisible="{Binding HasData}"
+              Padding="8,4"
+              Foreground="#CE9178"
+              ToolTip.Tip="{StaticResource str.Tip.Related.Show}"/>
       <Button Content="{StaticResource str.LiveWalker.Refresh}"
               Command="{Binding RefreshCommand}"
               ToolTip.Tip="{StaticResource str.Tip.LiveWalker.Refresh}"

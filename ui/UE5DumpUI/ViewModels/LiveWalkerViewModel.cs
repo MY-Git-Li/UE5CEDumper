@@ -296,6 +296,11 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// </summary>
     public event Action<IReadOnlyList<BookmarkFieldRef>, BookmarkFieldRef?>? RestoreBookmarkView;
 
+    /// <summary>Raised to show the currently-walked object's related objects
+    /// (components, GAS ASC → AttributeSets, Controller↔Pawn) in the Related
+    /// tab. Payload = current object address.</summary>
+    public event Action<string>? NavigateToRelatedObjects;
+
     /// <summary>Gates the "Pivot this property" context-menu item — true only when
     /// the experimental Class Pivot tab is available (mirrors the gate).</summary>
     [ObservableProperty] private bool _pivotEnabled;
@@ -1528,6 +1533,13 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
+    private void ShowRelatedObjects()
+    {
+        if (string.IsNullOrEmpty(CurrentAddress) || CurrentAddress == "0x0") return;
+        NavigateToRelatedObjects?.Invoke(CurrentAddress);
+    }
+
+    [RelayCommand]
     private async Task OpenReferenceOwnerAsync(ReferenceMatch? match)
     {
         if (match == null || string.IsNullOrEmpty(match.OwnerAddress)) return;
@@ -1776,7 +1788,13 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// <summary>Map a failed GWorld path search to an actionable status message.</summary>
     private string GWorldPathFailureStatus(GWorldPathResult path) => path.Status switch
     {
-        "not_reachable"  => $"No path from GWorld within depth {GWorldLocateDepth}. Try increasing the depth.",
+        // not_reachable means the BFS exhausted everything reachable from GWorld
+        // (within the depth) WITHOUT finding the target — the object isn't
+        // referenced by any forward pointer chain from GWorld. Raising the depth
+        // does NOT help (the reachable set is already exhausted). This is common
+        // for just-spawned or streaming / World-Partition actors that nothing
+        // references yet.
+        "not_reachable"  => $"Not reachable — nothing in the GWorld graph references this object (searched {path.Visited:N0} objects). Common for just-spawned or streaming/World-Partition actors; raising depth won't help. Try once it's aggro'd/selected in-game, or use Find Refs to find a holder.",
         "deadline"       => $"GWorld path search timed out at depth {GWorldLocateDepth} (visited {path.Visited:N0}). Try a smaller depth.",
         "visited_cap"    => $"GWorld path search space too large at depth {GWorldLocateDepth} (visited {path.Visited:N0}). Try a smaller depth.",
         "cancelled"      => "GWorld path search cancelled.",

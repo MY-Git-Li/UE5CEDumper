@@ -31,15 +31,16 @@ internal enum MainTabIndex
     Teleport = 7,
     GameClassFilter = 8,
     ClassStruct = 9,
+    RelatedObjects = 10,
     // Fixed tail order: the 3 experimental tabs (hidden unless opted in), then
     // Proxy Deploy (always 2nd-to-last), then System/Pointers (always last) —
     // regardless of any future tab additions. When experimental is off the 3
     // tabs collapse, so the visible last two are Proxy Deploy + System.
-    Snapshot = 10,
-    SpcQuery = 11,
-    ClassPivot = 12,
-    ProxyDeploy = 13,
-    Pointers = 14,   // the "System" tab (str.Tab.Pointers = "System")
+    Snapshot = 11,
+    SpcQuery = 12,
+    ClassPivot = 13,
+    ProxyDeploy = 14,
+    Pointers = 15,   // the "System" tab (str.Tab.Pointers = "System")
 }
 
 /// <summary>
@@ -215,6 +216,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public InterestingFunctionsViewModel InterestingFunctions { get; }
     public InterestingPropertiesViewModel InterestingProperties { get; }
     public ValueSearchViewModel ValueSearch { get; }
+    public RelatedObjectsViewModel RelatedObjects { get; }
     public ConsoleViewModel Console { get; }
     public TeleportViewModel Teleport { get; }
     public ProxyDeployViewModel? ProxyDeploy { get; }
@@ -332,6 +334,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         InterestingFunctions = new InterestingFunctionsViewModel(dump, log, aobMaker, platform);
         InterestingProperties = new InterestingPropertiesViewModel(dump, log, platform);
         ValueSearch = new ValueSearchViewModel(dump, log);
+        RelatedObjects = new RelatedObjectsViewModel(dump, log, platform);
         Console = new ConsoleViewModel(dump, log);
         Teleport = new TeleportViewModel(dump, log, platform, aobMaker, globalHotkeys);
         if (snapshotStore != null)
@@ -552,6 +555,66 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 _log.Error($"InstanceFinder LocateContainerInGWorld handler error: {match.OwnerAddress}", ex);
             }
         };
+
+        // Wire RelatedObjects -> LiveWalker / "Locate in GWorld" / InstanceFinder.
+        // Each related-object row lands ON the picked object (stopAtParent: false),
+        // same as Instance Finder / Value Search.
+        RelatedObjects.NavigateToLiveWalker += async (addr) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                await LiveWalker.NavigateToAddressCommand.ExecuteAsync(addr);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"RelatedObjects NavigateToLiveWalker handler error: {addr}", ex);
+            }
+        };
+        RelatedObjects.LocateInGWorld += async (addr) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                await LiveWalker.LocateInGWorldAsync(addr, 0, null, stopAtParent: false);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"RelatedObjects LocateInGWorld handler error: {addr}", ex);
+            }
+        };
+        RelatedObjects.NavigateToInstanceFinder += async (className) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.InstanceFinder;
+                InstanceFinder.SearchClassName = className;
+                if (InstanceFinder.SearchCommand.CanExecute(null))
+                    await InstanceFinder.SearchCommand.ExecuteAsync(null);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"RelatedObjects NavigateToInstanceFinder handler error: {className}", ex);
+            }
+        };
+
+        // Wire Instance Finder / Value Search / Live Walker -> Related Objects:
+        // hand the chosen object's address to the Related tab and load its graph.
+        async Task OpenRelatedAsync(string addr)
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.RelatedObjects;
+                await RelatedObjects.LoadForAddressAsync(addr);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"NavigateToRelatedObjects handler error: {addr}", ex);
+            }
+        }
+        InstanceFinder.NavigateToRelatedObjects += async (addr) => await OpenRelatedAsync(addr);
+        ValueSearch.NavigateToRelatedObjects += async (addr) => await OpenRelatedAsync(addr);
+        LiveWalker.NavigateToRelatedObjects += async (addr) => await OpenRelatedAsync(addr);
 
         // Wire PropertySearch -> InstanceFinder (pre-fill class name +
         // switch tab + auto-run the search). Pre-fill alone left the user

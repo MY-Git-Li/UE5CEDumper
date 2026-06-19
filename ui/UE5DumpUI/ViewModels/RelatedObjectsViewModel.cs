@@ -1,0 +1,132 @@
+using System.Collections.ObjectModel;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using UE5DumpUI.Core;
+using UE5DumpUI.Models;
+
+namespace UE5DumpUI.ViewModels;
+
+/// <summary>
+/// ViewModel for the "Related Objects" panel. Given a UObject (typically an
+/// actor/pawn the user is inspecting — handed off from Instance Finder / Value
+/// Search / Live Walker, or pasted manually), show the objects most useful for
+/// understanding it: itself, its class/outer, its Controller↔Pawn counterpart,
+/// and the sub-objects it OWNS (components, and for GAS games the
+/// AbilitySystemComponent → its AttributeSets). Each row hands off to Locate in
+/// GWorld / Open in Live Walker / Find Class — the same cross-tab event pattern
+/// the other panels use.
+/// </summary>
+public partial class RelatedObjectsViewModel : ViewModelBase
+{
+    private readonly IDumpService _dump;
+    private readonly ILoggingService _log;
+    private readonly IPlatformService _platform;
+
+    [ObservableProperty] private string _targetAddress = "";
+    [ObservableProperty] private string _queryClassName = "";
+    [ObservableProperty] private ObservableCollection<RelatedObject> _related = new();
+    [ObservableProperty] private RelatedObject? _selectedRelated;
+    [ObservableProperty] private bool _isBusy;
+    [ObservableProperty] private string _statusText = "";
+
+    /// <summary>Navigate the selected row's object into the Live Walker.</summary>
+    public event Action<string>? NavigateToLiveWalker;
+
+    /// <summary>Locate the selected row's object within the GWorld graph
+    /// (forward path search). Payload = object address.</summary>
+    public event Action<string>? LocateInGWorld;
+
+    /// <summary>Find all instances of the selected row's class. Payload = class name.</summary>
+    public event Action<string>? NavigateToInstanceFinder;
+
+    public RelatedObjectsViewModel(IDumpService dump, ILoggingService log, IPlatformService platform)
+    {
+        _dump = dump;
+        _log = log;
+        _platform = platform;
+    }
+
+    /// <summary>Handoff entry point from another panel: set the address and load.</summary>
+    public async Task LoadForAddressAsync(string addr)
+    {
+        TargetAddress = addr;
+        await LoadAsync();
+    }
+
+    [RelayCommand]
+    private async Task LoadAsync()
+    {
+        var addr = (TargetAddress ?? "").Trim();
+        if (string.IsNullOrEmpty(addr))
+        {
+            StatusText = "Enter or hand off a UObject address.";
+            return;
+        }
+        try
+        {
+            IsBusy = true;
+            StatusText = "Scanning related objects…";
+            Related.Clear();
+            QueryClassName = "";
+            var result = await _dump.GetRelatedObjectsAsync(addr);
+            foreach (var r in result.Related)
+            {
+                Related.Add(r);
+                // The "Self" row carries the queried object's own class — surface
+                // it in the header so the user knows what they're looking at.
+                if (QueryClassName.Length == 0 && r.Relation == "Self")
+                    QueryClassName = r.ClassName;
+            }
+            StatusText = Related.Count > 0
+                ? $"{Related.Count} related object(s)."
+                : "No related objects found (is the address a live UObject?).";
+            _log.Info($"GetRelatedObjects: {addr} -> {Related.Count}");
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Error: {ex.Message}";
+            _log.Error($"GetRelatedObjects failed for {addr}", ex);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private void OpenInLiveWalker(RelatedObject? row)
+    {
+        row ??= SelectedRelated;
+        if (row == null || string.IsNullOrEmpty(row.Address)) return;
+        NavigateToLiveWalker?.Invoke(row.Address);
+    }
+
+    // "Locate in GWorld" is intentionally NOT gated on a C# GWorld-available
+    // flag: the DLL's find_path is the source of truth, and gating the button on
+    // a stale C# flag previously produced a silent no-op (build 1311). The
+    // LiveWalker handler reports availability via its own StatusText.
+    [RelayCommand]
+    private void LocateRowInGWorld(RelatedObject? row)
+    {
+        row ??= SelectedRelated;
+        if (row == null || string.IsNullOrEmpty(row.Address)) return;
+        LocateInGWorld?.Invoke(row.Address);
+    }
+
+    [RelayCommand]
+    private void FindClass(RelatedObject? row)
+    {
+        row ??= SelectedRelated;
+        if (row == null || string.IsNullOrEmpty(row.ClassName)) return;
+        NavigateToInstanceFinder?.Invoke(row.ClassName);
+    }
+
+    [RelayCommand]
+    private async Task CopyAddress(RelatedObject? row)
+    {
+        row ??= SelectedRelated;
+        if (row == null || string.IsNullOrEmpty(row.Address)) return;
+        await _platform.CopyToClipboardAsync(row.Address);
+        StatusText = $"Copied {row.Address}";
+    }
+}

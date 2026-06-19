@@ -26,10 +26,27 @@
     <sys:String x:Key="str.Tab.Console">Console</sys:String>
     <sys:String x:Key="str.Tab.Teleport">Teleport</sys:String>
     <sys:String x:Key="str.Tab.GameClassFilter">Classes</sys:String>
+    <sys:String x:Key="str.Tab.RelatedObjects">Related</sys:String>
     <!-- Experimental tabs (hidden unless opted in via System-tab credit checkbox) -->
     <sys:String x:Key="str.Tab.Snapshot">Snapshot</sys:String>
     <sys:String x:Key="str.Tab.SpcQuery">SPC Query</sys:String>
     <sys:String x:Key="str.Tab.ClassPivot">Class Pivot</sys:String>
+
+    <!-- Related Objects panel -->
+    <sys:String x:Key="str.Related.AddressHint">UObject / actor address (hex) — or hand off from another tab</sys:String>
+    <sys:String x:Key="str.Related.Load">Load</sys:String>
+    <sys:String x:Key="str.Related.ColRelation">Relation</sys:String>
+    <sys:String x:Key="str.Related.ColObject">Object</sys:String>
+    <sys:String x:Key="str.Related.ColField">Field</sys:String>
+    <sys:String x:Key="str.Related.ColAddress">Address</sys:String>
+    <sys:String x:Key="str.Related.ShowButton">🔗 Related</sys:String>
+    <sys:String x:Key="str.Related.IconButton">🔗</sys:String>
+    <sys:String x:Key="str.Tip.Related.Show">Show this object's related objects — components, GAS AbilitySystemComponent → AttributeSets, Controller↔Pawn — in the Related tab</sys:String>
+    <sys:String x:Key="str.Tip.Related.Load">List this object's class/outer, its Controller↔Pawn counterpart, and the sub-objects it owns (components, GAS AbilitySystemComponent → AttributeSets)</sys:String>
+    <sys:String x:Key="str.Tip.Related.GWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this object and show it in Live Walker</sys:String>
+    <sys:String x:Key="str.Tip.Related.Walk">Open this object in Live Walker for field-by-field inspection</sys:String>
+    <sys:String x:Key="str.Tip.Related.Find">Find all live instances of this object's class (Instance Finder)</sys:String>
+    <sys:String x:Key="str.Tip.Related.Copy">Copy this object's address to the clipboard</sys:String>
 
     <!-- Value Search -->
     <sys:String x:Key="str.VS.Banner">Native C++ fields (non-UPROPERTY) cannot be found here — even if they live inside a UObject's memory. Use Cheat Engine's raw memory scan for those.</sys:String>
@@ -180,6 +197,7 @@
     <sys:String x:Key="str.InstanceFinder.AddressHint">Address (hex or module.exe+offset)</sys:String>
     <sys:String x:Key="str.InstanceFinder.Lookup">Lookup</sys:String>
     <sys:String x:Key="str.InstanceFinder.ExactMatch">Exact match</sys:String>
+    <sys:String x:Key="str.InstanceFinder.NewestFirst">Newest first</sys:String>
     <sys:String x:Key="str.InstanceFinder.ContainerMatches">Container matches (address falls inside a TArray buffer):</sys:String>
 
     <!-- Pointer Panel -->
@@ -728,6 +746,7 @@
     <!-- Tooltips: Instance Finder -->
     <sys:String x:Key="str.Tip.InstanceFinder.Search">Search for instances of the specified class</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.ExactMatch">Match class name exactly (no substring)</sys:String>
+    <sys:String x:Key="str.Tip.InstanceFinder.NewestFirst">Scan from the newest (highest InternalIndex) end → catches just-spawned instances (e.g. an enemy that just appeared) and avoids the result cap truncating the newest. Off = oldest first (class-default object / template / earliest instances — good for finding a Blueprint's defaults). Tip: click the Index column to re-sort either way.</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.Lookup">Lookup UObject at the specified address</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.CopyAddr">Copy instance address to clipboard</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.OpenWalker">Open this instance in Live Walker</sys:String>

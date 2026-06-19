@@ -67,6 +67,13 @@ public partial class InstanceFinderViewModel : ViewModelBase
     // --- Class name search ---
     [ObservableProperty] private string _searchClassName = "";
     [ObservableProperty] private bool _exactMatch;
+
+    /// <summary>Opt-in: scan GObjects from the high (newest-allocated) end so the
+    /// most-recently-spawned instances survive the result cap — use to catch a
+    /// just-spawned enemy. Off (default) keeps the lowest indices (CDO /
+    /// class-default / earliest instances — good for finding a Blueprint's
+    /// template/defaults).</summary>
+    [ObservableProperty] private bool _newestFirst;
     [ObservableProperty] private ObservableCollection<InstanceResult> _instances = new();
     [ObservableProperty] private InstanceResult? _selectedInstance;
     [ObservableProperty] private ObservableCollection<LiveFieldValue> _fields = new();
@@ -108,6 +115,11 @@ public partial class InstanceFinderViewModel : ViewModelBase
     /// </summary>
     public event Action<ContainerMatch>? LocateContainerInGWorld;
 
+    /// <summary>Event raised to show the selected instance's related objects
+    /// (components, GAS ASC → AttributeSets, Controller↔Pawn) in the Related
+    /// tab. Payload = instance address.</summary>
+    public event Action<string>? NavigateToRelatedObjects;
+
     /// <summary>True when GWorld is available — gates the "Locate in GWorld" button.</summary>
     [ObservableProperty] private bool _isGWorldAvailable;
 
@@ -141,7 +153,7 @@ public partial class InstanceFinderViewModel : ViewModelBase
             StatusText = "Searching...";
             ShowCeXml = false;
 
-            var result = await _dump.FindInstancesAsync(SearchClassName.Trim(), ExactMatch);
+            var result = await _dump.FindInstancesAsync(SearchClassName.Trim(), ExactMatch, newestFirst: NewestFirst);
 
             // Detach the bound selection before rebuilding (Avalonia's selection
             // model throws if Instances is Clear()'d while SelectedInstance is live).
@@ -492,6 +504,13 @@ public partial class InstanceFinderViewModel : ViewModelBase
     {
         if (SelectedInstance == null || !IsGWorldAvailable) return;
         LocateInGWorld?.Invoke(SelectedInstance.Address);
+    }
+
+    [RelayCommand]
+    private void ShowRelatedObjects()
+    {
+        if (SelectedInstance == null) return;
+        NavigateToRelatedObjects?.Invoke(SelectedInstance.Address);
     }
 
     /// <summary>Locate a container match's OWNER within the GWorld graph — the

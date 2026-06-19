@@ -35,6 +35,32 @@ public class ModelTests
     }
 
     [Fact]
+    public void RelatedObject_DisplayFieldAndAddressValue()
+    {
+        var asc = new RelatedObject
+        {
+            Address = "0x7FF6BB00", Name = "AbilitySystem_0",
+            ClassName = "AbilitySystemComponent", Relation = "AbilitySystem (ASC)",
+            FieldName = "AbilitySystem", FieldOffset = 0x2A8, Depth = 1,
+        };
+        Assert.Equal("AbilitySystem_0 : AbilitySystemComponent", asc.Display);
+        Assert.Equal("AbilitySystem @ 0x2A8", asc.FieldDisplay);
+        Assert.Equal(0x7FF6BB00UL, asc.AddressValue);
+
+        // Self/Class/Outer rows carry no field — FieldDisplay collapses to empty.
+        var self = new RelatedObject { Name = "X", ClassName = "Y", FieldOffset = -1 };
+        Assert.Equal("X : Y", self.Display);
+        Assert.Equal("", self.FieldDisplay);
+
+        // Either half empty → Display falls back to the non-empty one.
+        Assert.Equal("OnlyClass", new RelatedObject { ClassName = "OnlyClass" }.Display);
+        Assert.Equal("OnlyName", new RelatedObject { Name = "OnlyName" }.Display);
+
+        // Unparseable address → 0 (keeps the hex sort comparer total).
+        Assert.Equal(0UL, new RelatedObject { Address = "" }.AddressValue);
+    }
+
+    [Fact]
     public void FieldInfoModel_InitProperties()
     {
         var field = new FieldInfoModel
