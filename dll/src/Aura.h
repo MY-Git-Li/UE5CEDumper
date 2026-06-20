@@ -339,7 +339,10 @@ struct RelatedObject {
                                       // "Owned Component" / "Owned Object"
     std::string fieldName;            // field/path on parentAddr that points here ("" for Self/Class/Outer)
     int32_t     fieldOffset = -1;     // offset within parentAddr (CE / GWorld handoff); -1 if N/A
-    int32_t     depth       = 0;      // 0 hierarchy/counterpart, 1..2 owned BFS
+                                      // (-1 for container ELEMENT rows too: the element lives in
+                                      //  the heap Data buffer, not at parentAddr+offset; the [idx]
+                                      //  is encoded in fieldName instead)
+    int32_t     depth       = 0;      // 0 hierarchy/counterpart, 1..3 owned BFS
     uintptr_t   parentAddr  = 0;      // object holding the pointer to this one
 };
 
@@ -347,6 +350,39 @@ struct RelatedObject {
 // above any real actor's owned-object count). Returns Self first, then
 // Class/Outer/counterpart, then owned sub-objects in BFS order.
 std::vector<RelatedObject> GetRelatedObjects(uintptr_t target, int32_t maxResults = 128);
+
+// === Outgoing object-pointer enumeration (public façade) ===
+//
+// One outgoing object-pointer edge of an object — the public form of the
+// internal EnumerateOutgoingObjectPtrs adapter (a file-static template inside
+// Aura.cpp). Mirrors that adapter's RAW 8-value emit verbatim (no consumer-side
+// normalization): for a CONTAINER element edge, fieldOffset is the container
+// HEADER field offset (NOT -1) and elementIndex (>= 0) is the only element
+// marker; fieldName is the bare field name plus only a ".Key"/".Value" suffix
+// for map pairs (no "[i]" index — that lives in elementIndex). For a DIRECT edge,
+// elementIndex is -1 and elemStride/elemValueOffset are 0. (Consumers that want a
+// per-element offset compute it from fieldOffset + elementIndex*elemStride +
+// elemValueOffset, or treat element rows specially — as Edel does.)
+struct OutgoingPtr {
+    uintptr_t   target          = 0;
+    int32_t     fieldOffset     = -1;   // container HEADER offset for element rows; -1 only if the source emitted -1
+    std::string fieldName;
+    std::string fieldType;       // "ObjectProperty" / "ArrayProperty" / "MapProperty" / "SetProperty" / ...
+    std::string innerType;
+    int32_t     elementIndex    = -1;   // >= 0 marks a container element edge
+    int32_t     elemStride      = 0;
+    int32_t     elemValueOffset = 0;
+};
+
+// Collect EVERY outgoing object pointer of `obj` (direct Object/Class/Interface,
+// weak/soft/lazy single fields, TArray<UObject*>, interface arrays, TMap, TSet
+// of objects) into `out`, with NO ownership gate. The public seam for consumers
+// that SCORE outgoing edges rather than BFS them (Edel current-target
+// detection). Reuses the same per-class reference-metadata cache the
+// reverse/forward graph walks use, so it is fast. Bounded by maxEdges (appends
+// stop once out.size() reaches it).
+void CollectOutgoingObjectPtrs(uintptr_t obj, std::vector<OutgoingPtr>& out,
+                               int32_t maxEdges = 1024);
 
 // === Forward Object-Graph Path Search ("Locate in GWorld") ===
 //

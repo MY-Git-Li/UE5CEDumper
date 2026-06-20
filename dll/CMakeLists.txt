@@ -143,6 +143,7 @@ add_library(UE5Dumper SHARED
     src/Denken.cpp
     src/Wirbel.cpp
     src/Solitar.cpp
+    src/Edel.cpp
     src/version.rc
 )
 
@@ -233,6 +234,7 @@ set(PROXY_SOURCES
     src/Denken.cpp
     src/Wirbel.cpp
     src/Solitar.cpp
+    src/Edel.cpp
     src/version.rc
 )
 

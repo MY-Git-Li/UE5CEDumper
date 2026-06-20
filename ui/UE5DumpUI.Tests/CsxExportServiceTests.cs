@@ -80,7 +80,8 @@ public class StubDumpService : IDumpService
     public Task<ArrayElementsResult> ReadArrayElementsAsync(string addr, int fieldOffset, string innerAddr, string innerType, int elemSize, int offset = 0, int limit = 64, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<AddressLookupResult> FindByAddressAsync(string addr, int containerElemCap = 256, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<FindReferencesResult> FindReferencesToUObjectAsync(string addr, int maxResults = 32, CancellationToken ct = default) => throw new NotImplementedException();
-    public Task<RelatedObjectsResult> GetRelatedObjectsAsync(string addr, int maxResults = 128, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<RelatedObjectsResult> GetRelatedObjectsAsync(string addr, int maxResults = 128, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<CurrentTargetResult> DetectCurrentTargetAsync(int maxCandidates = 8, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<GWorldPathResult> FindPathFromGWorldAsync(string target, string? objectAddr = null, int maxDepth = 5, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<FindPropertyXrefsResult> FindPropertyXrefsAsync(string propAddr, bool gameOnly = true, int maxResults = 200, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<FunctionPropRefsResult> WalkFunctionPropsAsync(string funcAddr, CancellationToken ct = default) => throw new NotImplementedException();

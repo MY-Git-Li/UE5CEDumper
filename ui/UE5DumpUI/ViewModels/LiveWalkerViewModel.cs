@@ -1806,9 +1806,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 if (!landed && Breadcrumbs.Count > 0 && Breadcrumbs[^1].Address == ownerAddr)
                     landed = ScrollToFieldByOffset(scrollFieldOffset);
                 _log.Info($"LocateInGWorld: reach+container-path-drill, {path.Depth} hop(s), landed={landed} | BC={FormatBreadcrumbTrace()}");
-                StatusText = landed
+                StatusText = (landed
                     ? $"Located via GWorld — {path.Depth} hop(s) to {path.TargetName}; landed on {scrollFieldName}."
-                    : $"Located via GWorld — {path.Depth} hop(s) to {path.TargetName} (drill into {scrollFieldName} manually).";
+                    : $"Located via GWorld — {path.Depth} hop(s) to {path.TargetName} (drill into {scrollFieldName} manually).")
+                    + GWorldViaLevelNote(path);
                 return;
             }
 
@@ -1840,9 +1841,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             _log.Info($"LocateInGWorld: {(stopAtParent ? "parent" : "reach")} mode, {path.Depth} hop(s), " +
                       $"visited {path.Visited}, {path.DurationMs}ms | BC={FormatBreadcrumbTrace()}");
 
-            StatusText = stopAtParent
+            StatusText = (stopAtParent
                 ? $"Located via GWorld — {path.Depth} hop(s); parent of {path.TargetName} ({path.TargetClass})."
-                : $"Located via GWorld — {path.Depth} hop(s) to {path.TargetName} ({path.TargetClass}).";
+                : $"Located via GWorld — {path.Depth} hop(s) to {path.TargetName} ({path.TargetClass}).")
+                + GWorldViaLevelNote(path);
         }
         catch (Exception ex)
         {
@@ -1855,6 +1857,14 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>Suffix noting a streaming/World-Partition recovery — the world→level
+    /// hop was reached via ULevel::OwningWorld (a back-reference), not a forward
+    /// static pointer, so the chain isn't a clean CE pointer chain.</summary>
+    private static string GWorldViaLevelNote(GWorldPathResult path) =>
+        path.Status == "ok_via_level"
+            ? " (via the world's level list — streaming/WP actor; the world→level hop is a back-reference, not a static pointer)"
+            : "";
+
     /// <summary>Map a failed GWorld path search to an actionable status message.</summary>
     private string GWorldPathFailureStatus(GWorldPathResult path) => path.Status switch
     {
@@ -1864,7 +1874,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         // does NOT help (the reachable set is already exhausted). This is common
         // for just-spawned or streaming / World-Partition actors that nothing
         // references yet.
-        "not_reachable"  => $"Not reachable — nothing in the GWorld graph references this object (searched {path.Visited:N0} objects). Common for just-spawned or streaming/World-Partition actors; raising depth won't help. Try once it's aggro'd/selected in-game, or use Find Refs to find a holder.",
+        "not_reachable"  => $"Not reachable — nothing in the GWorld graph references this object, and it isn't in any of the world's levels' actor lists either (searched {path.Visited:N0} objects). Raising depth won't help. If it's a streaming/World-Partition actor, try once it's loaded/aggro'd; or 🔗 Related from an Instance Finder hit, or use Find Refs to find a holder.",
         "deadline"       => $"GWorld path search timed out at depth {GWorldLocateDepth} (visited {path.Visited:N0}). Try a smaller depth.",
         "visited_cap"    => $"GWorld path search space too large at depth {GWorldLocateDepth} (visited {path.Visited:N0}). Try a smaller depth.",
         "cancelled"      => "GWorld path search cancelled.",
@@ -1926,6 +1936,26 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     {
         var label = !string.IsNullOrEmpty(s.ToName) ? s.ToName
                   : (!string.IsNullOrEmpty(s.FieldName) ? s.FieldName : "(node)");
+
+        // Synthetic "world → level" hop from the streaming/World-Partition recovery
+        // (Aura::RecoverViaWorldLevel): the level was reached via ULevel::OwningWorld
+        // BACK-reference, not a forward static pointer, so it's a plain navigation
+        // anchor (navigate by Address) — NOT a pointer deref. Marking it non-deref
+        // keeps CE export from fabricating an offset for a hop that has none.
+        if (s.FieldType == "WorldLevel")
+        {
+            return new[]
+            {
+                new BreadcrumbItem
+                {
+                    Address = s.To,
+                    Label = label,
+                    FieldOffset = -1,
+                    FieldName = "(world level)",
+                    IsPointerDeref = false,
+                },
+            };
+        }
 
         // Resolve the element stride + within-element pointer offset for splittable
         // container hops. Object/class arrays are the hardcoded 8-byte pointer slot

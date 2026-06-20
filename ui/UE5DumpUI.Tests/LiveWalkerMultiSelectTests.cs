@@ -411,6 +411,28 @@ public class LiveWalkerMultiSelectTests
     }
 
     [Fact]
+    public void PathStepToBreadcrumbs_WorldLevel_EmitsSingleNonDerefNavCrumb()
+    {
+        // The streaming/World-Partition recovery (Aura::RecoverViaWorldLevel) emits
+        // a synthetic world -> level hop reached via ULevel::OwningWorld (a
+        // back-reference, not a forward pointer). It must render as a plain nav
+        // anchor (navigate by Address, NOT a pointer deref) so CE export doesn't
+        // fabricate an offset for a hop that has none.
+        var step = new GWorldPathStep
+        {
+            From = "0x100", To = "0x200", FieldOffset = -1, FieldName = "Levels",
+            FieldType = "WorldLevel", ElementIndex = -1,
+            ToName = "PersistentLevel", ToClass = "Level",
+        };
+        var crumbs = LiveWalkerViewModel.PathStepToBreadcrumbs(step);
+        Assert.Single(crumbs);
+        Assert.Equal("0x200", crumbs[0].Address);          // navigate to the level by address
+        Assert.False(crumbs[0].IsPointerDeref);            // NOT a deref — no static offset
+        Assert.False(crumbs[0].IsContainerView);
+        Assert.Equal("PersistentLevel", crumbs[0].Label);  // resolved level name
+    }
+
+    [Fact]
     public void PathStepToBreadcrumbs_DirectPointerField_SingleCrumb()
     {
         var step = new GWorldPathStep

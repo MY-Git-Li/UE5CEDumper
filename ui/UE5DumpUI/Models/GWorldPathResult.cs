@@ -48,7 +48,10 @@ public sealed class GWorldPathStep
 /// shortest pointer chain from the live UWorld down to a target object. When
 /// <see cref="Found"/> is false, <see cref="Status"/> explains why
 /// ("not_reachable" / "deadline" / "cancelled" / "no_gworld" /
-/// "invalid_target" / "visited_cap").
+/// "invalid_target" / "visited_cap"). When found, <see cref="Status"/> is "ok",
+/// or "ok_via_level" when the actor was recovered through the world's level list
+/// (a streaming / World-Partition actor whose ULevel isn't forward-reachable —
+/// the world→level hop is a back-reference, not a static pointer).
 /// </summary>
 public sealed class GWorldPathResult
 {

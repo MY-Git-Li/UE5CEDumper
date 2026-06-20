@@ -18,6 +18,11 @@
               Command="{Binding LoadCommand}"
               ToolTip.Tip="{StaticResource str.Tip.Related.Load}"
               Classes="accent" Padding="12,4"/>
+      <Button Content="{StaticResource str.Related.DetectTarget}"
+              Command="{Binding DetectTargetCommand}"
+              ToolTip.Tip="{StaticResource str.Tip.Related.DetectTarget}"
+              IsEnabled="{Binding !IsBusy}"
+              Padding="12,4"/>
       <TextBlock Text="{Binding QueryClassName}"
                  Foreground="#4EC9B0" FontWeight="Bold"
                  VerticalAlignment="Center" Margin="8,0,0,0"/>
@@ -30,6 +35,30 @@
                  IsIndeterminate="{Binding IsBusy}"
                  IsVisible="{Binding IsBusy}"
                  Height="2" Margin="0,0,0,4"/>
+
+    <!-- Target candidates (Phase 2 / Edel). Shown after "Detect target"; the
+         top candidate is auto-loaded into the grid below, but the user can
+         click another to inspect it instead. -->
+    <StackPanel DockPanel.Dock="Top" IsVisible="{Binding HasCandidates}" Margin="0,0,0,6">
+      <TextBlock Text="{StaticResource str.Related.CandidatesHeader}"
+                 Foreground="#888" Margin="0,0,0,2"/>
+      <ListBox ItemsSource="{Binding TargetCandidates}"
+               SelectedItem="{Binding SelectedCandidate}"
+               IsEnabled="{Binding !IsBusy}"
+               MaxHeight="120" Background="#1E1E1E"
+               BorderThickness="1" BorderBrush="#333">
+        <ListBox.ItemTemplate>
+          <DataTemplate x:DataType="m:TargetCandidate">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <TextBlock Text="{Binding Display}" Foreground="#D4D4D4"
+                         FontFamily="Consolas" VerticalAlignment="Center"/>
+              <TextBlock Text="{Binding ScoreDisplay}" Foreground="#888"
+                         FontSize="11" VerticalAlignment="Center"/>
+            </StackPanel>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+    </StackPanel>
 
     <!-- Related objects: Self / Class / Outer / Controller<->Pawn /
          Owned Component / AbilitySystem (ASC) / AttributeSet / Owned Object.

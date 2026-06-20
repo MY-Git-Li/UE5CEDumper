@@ -32,6 +32,7 @@ constexpr const char* CMD_FIND_BY_ADDRESS  = "find_by_address";
 constexpr const char* CMD_FIND_REFS_TO_UOBJ = "find_refs_to_uobject";
 constexpr const char* CMD_FIND_PATH_FROM_GWORLD = "find_path_from_gworld";
 constexpr const char* CMD_GET_RELATED_OBJECTS = "get_related_objects";
+constexpr const char* CMD_GET_CURRENT_TARGET = "get_current_target";
 constexpr const char* CMD_FIND_PROPERTY_XREFS = "find_property_xrefs";
 constexpr const char* CMD_WALK_FUNCTION_PROPS = "walk_function_props";
 constexpr const char* CMD_GET_CE_PTR_INFO  = "get_ce_pointer_info";
