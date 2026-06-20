@@ -116,6 +116,12 @@ public interface IDumpService
     Task<CurrentTargetResult> DetectCurrentTargetAsync(
         int maxCandidates = 8, CancellationToken ct = default);
 
+    // --- Live Walker "Start from GameEngine" ---
+    // Resolve the live GEngine object (by reflected GameViewport member, not by
+    // class name) so the Live Walker can root on it. Found=false when no live
+    // engine exists yet (e.g. pre-init).
+    Task<GameEngineResult> ResolveGameEngineAsync(CancellationToken ct = default);
+
     // --- Property Bytecode Cross-Reference ("which methods use this field?") ---
     // Static Kismet-bytecode scan; Blueprint/script functions only (native
     // functions have empty bytecode and are invisible).

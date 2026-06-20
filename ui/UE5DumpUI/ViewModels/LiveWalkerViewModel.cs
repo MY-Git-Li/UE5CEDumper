@@ -134,8 +134,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// </summary>
     [ObservableProperty] private bool _collapseChain;
 
-    /// <summary>Max array element count for inline reading (2^N, default 64).</summary>
-    private int _arrayLimit = 64;
+    /// <summary>Max array element count for inline reading (2^N, default 128).</summary>
+    private int _arrayLimit = 128;
     public int ArrayLimit
     {
         get => _arrayLimit;
@@ -220,9 +220,28 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     partial void OnIsAobMakerAvailableChanged(bool value)
         => OnPropertyChanged(nameof(AobMakerNote));
 
-    // AOB Symbol toggle for CE XML export
-    [ObservableProperty] private bool _useAobSymbol;
-    [ObservableProperty] private bool _isAobSymbolAvailable;
+    // AOB Symbol toggle for CE XML export. The AOB anchor only makes sense when
+    // the Live Walker root is GWorld (the AOB symbol resolves GWorld); from any
+    // other root (e.g. "Start from GameEngine" / "Open in Live Walker") the
+    // export must use a direct absolute address, so the checkbox is disabled.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanUseAobSymbol))]
+    private bool _useAobSymbol;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanUseAobSymbol))]
+    private bool _isAobSymbolAvailable;
+
+    /// <summary>True when breadcrumb[0] is the synthetic GWorld root — the only
+    /// root for which the AOB anchor is valid. Recomputed from Breadcrumbs on
+    /// every change (subscribed in the constructor).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanUseAobSymbol))]
+    private bool _isRootGWorld;
+
+    /// <summary>Gates the AOB checkbox's IsEnabled: the AOB symbol exists AND the
+    /// current Live Walker root is GWorld.</summary>
+    public bool CanUseAobSymbol => IsAobSymbolAvailable && IsRootGWorld;
 
     // Guess What toggle: fill gaps between known fields with heuristic guesses
     [ObservableProperty] private bool _fillGaps;
@@ -328,6 +347,13 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         // Initialize 4 empty bookmark slots
         for (int i = 0; i < 4; i++)
             BookmarkSlots.Add(new BookmarkSlot { SlotIndex = i });
+
+        // Keep IsRootGWorld in sync with the breadcrumb root so the AOB option
+        // auto-disables whenever the walk root isn't GWorld (Start from
+        // GameEngine / Open in Live Walker / etc.). Subscribing here covers every
+        // mutation site (Clear/Add on navigate, RemoveAt on Back) at once.
+        Breadcrumbs.CollectionChanged += (_, _) =>
+            IsRootGWorld = Breadcrumbs.Count > 0 && Breadcrumbs[0].FieldName == "GWorld";
     }
 
     public void SetEngineState(EngineState state)
@@ -339,7 +365,16 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
     partial void OnIsAobSymbolAvailableChanged(bool value)
     {
-        if (!value)
+        if (!CanUseAobSymbol)
+            UseAobSymbol = false;
+    }
+
+    partial void OnIsRootGWorldChanged(bool value)
+    {
+        // Leaving a GWorld root (e.g. Start from GameEngine) silently un-checks
+        // the AOB option so a stale check can't drive an AOB export from a root
+        // the symbol doesn't anchor.
+        if (!CanUseAobSymbol)
             UseAobSymbol = false;
     }
 
@@ -393,6 +428,57 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         {
             SetError(ex);
             _log.Error("Failed to load GWorld", ex);
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// Root the Live Walker on the live GEngine object. The DLL resolves it by a
+    /// reflected member (GameViewport), not by class name, so it works across UE
+    /// versions / game UGameEngine subclasses. This is a non-GWorld root: the AOB
+    /// option stays disabled and CE export anchors on the engine's absolute
+    /// (session-only) address. No GWorld-style follow-on features are wired —
+    /// the user drills GameInstance / GameViewport / World manually.
+    /// </summary>
+    [RelayCommand]
+    private async Task StartFromGameEngineAsync()
+    {
+        try
+        {
+            ClearStatus();
+            IsLoading = true;
+            StopAutoRefreshTimer();
+            _preBookmarkBreadcrumbs = null;
+            IsBookmarkSaveMode = false;
+
+            var engine = await _dump.ResolveGameEngineAsync();
+            if (!engine.Found || string.IsNullOrEmpty(engine.Address))
+            {
+                StatusText = "GameEngine not found — no live UEngine with a GameViewport (scan first / load a level)";
+                _log.Info("StartFromGameEngine: resolve returned no live engine");
+                return;
+            }
+
+            // Walk the engine as the root. FieldName "GameEngine" marks a
+            // non-GWorld root (≠ the "GWorld" / "Custom" markers), so IsRootGWorld
+            // stays false and the AOB checkbox disables itself.
+            Breadcrumbs.Clear();
+            References.Clear();
+            HasReferences = false;
+            await NavigateToAsync(engine.Address, "GameEngine", 0, "GameEngine", isPointer: true);
+
+            var note = engine.GameInstanceOk ? "" : "  (GameInstance null — engine may be mid-boot)";
+            StatusText = $"Started from GameEngine ({engine.ClassName}){note}";
+            _log.Info($"StartFromGameEngine: {engine.ClassName} @ {engine.Address} " +
+                      $"viewportOk={engine.GameViewportOk} instanceOk={engine.GameInstanceOk}");
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Failed to start from GameEngine", ex);
         }
         finally
         {

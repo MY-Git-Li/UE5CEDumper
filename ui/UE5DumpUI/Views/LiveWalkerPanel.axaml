@@ -14,6 +14,10 @@
               Command="{Binding StartFromWorldCommand}"
               ToolTip.Tip="{StaticResource str.Tip.LiveWalker.StartWorld}"
               Classes="accent" Padding="12,4"/>
+      <Button Content="{StaticResource str.LiveWalker.StartGameEngine}"
+              Command="{Binding StartFromGameEngineCommand}"
+              ToolTip.Tip="{StaticResource str.Tip.LiveWalker.StartGameEngine}"
+              Padding="12,4"/>
       <Button Content="{StaticResource str.LiveWalker.Back}"
               Command="{Binding GoBackCommand}"
               ToolTip.Tip="{StaticResource str.Tip.LiveWalker.Back}"
@@ -150,7 +154,7 @@
               Padding="8,4"/>
       <CheckBox Content="{StaticResource str.LiveWalker.AobToggle}"
                 IsChecked="{Binding UseAobSymbol}"
-                IsEnabled="{Binding IsAobSymbolAvailable}"
+                IsEnabled="{Binding CanUseAobSymbol}"
                 IsVisible="{Binding HasData}"
                 ToolTip.Tip="{StaticResource str.Tip.LiveWalker.AobToggle}"
                 Padding="4,2" FontSize="11" Foreground="#9CDCFE"

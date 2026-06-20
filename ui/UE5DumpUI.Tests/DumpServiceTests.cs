@@ -513,6 +513,50 @@ public class DumpServiceTests
     }
 
     [Fact]
+    public async Task ResolveGameEngineAsync_ParsesFoundEngine()
+    {
+        _pipe.SetHandler(req =>
+        {
+            Assert.Equal("resolve_game_engine", req["cmd"]?.GetValue<string>());
+            return new JsonObject
+            {
+                ["ok"] = true,
+                ["found"] = true,
+                ["addr"] = "0x1AD12340",
+                ["class"] = "GameEngine",
+                ["game_viewport_ok"] = true,
+                ["game_instance_ok"] = true,
+            };
+        });
+
+        var svc = CreateService();
+        var result = await svc.ResolveGameEngineAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(result.Found);
+        Assert.Equal("0x1AD12340", result.Address);
+        Assert.Equal("GameEngine", result.ClassName);
+        Assert.True(result.GameViewportOk);
+        Assert.True(result.GameInstanceOk);
+    }
+
+    [Fact]
+    public async Task ResolveGameEngineAsync_ParsesNotFound()
+    {
+        _pipe.SetHandler(req =>
+        {
+            Assert.Equal("resolve_game_engine", req["cmd"]?.GetValue<string>());
+            return new JsonObject { ["ok"] = true, ["found"] = false };
+        });
+
+        var svc = CreateService();
+        var result = await svc.ResolveGameEngineAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(result.Found);
+        Assert.Equal("", result.Address);
+        Assert.False(result.GameInstanceOk);
+    }
+
+    [Fact]
     public async Task FindInstancesAsync_SendsNewestFirstFlag()
     {
         bool? sentNewestFirst = null;

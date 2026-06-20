@@ -31,8 +31,8 @@ public partial class InstanceFinderViewModel : ViewModelBase
     /// <summary>Whether CE XML export should collapse pointer/array nodes.</summary>
     public bool CollapsePointerNodes { get; set; }
 
-    /// <summary>Max array element count for inline reading (2^N, default 64).</summary>
-    private int _arrayLimit = 64;
+    /// <summary>Max array element count for inline reading (2^N, default 128).</summary>
+    private int _arrayLimit = 128;
     public int ArrayLimit
     {
         get => _arrayLimit;

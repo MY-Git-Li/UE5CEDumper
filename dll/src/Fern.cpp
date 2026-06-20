@@ -2956,6 +2956,24 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             return Renge::MakeResponse(id, data).dump();
         }
 
+        // === resolve_game_engine: locate the live UEngine object ===
+        // For the Live Walker "Start from GameEngine" root. Returns the live
+        // engine address + class name + whether its standard pointer members
+        // (GameViewport / GameInstance) are present and non-null. The UI then
+        // walks the address like any instance (no GWorld / AOB involved).
+        if (cmd == Renge::CMD_RESOLVE_GAME_ENGINE) {
+            Genau::GameEngineInfo info = Genau::FindGameEngine();
+            json data;
+            data["found"] = (info.engineAddr != 0);
+            if (info.engineAddr) {
+                data["addr"]             = Renge::AddrToStr(info.engineAddr);
+                data["class"]            = info.className;
+                data["game_viewport_ok"] = info.gameViewportOk;
+                data["game_instance_ok"] = info.gameInstanceOk;
+            }
+            return Renge::MakeResponse(id, data).dump();
+        }
+
         // === find_path_from_gworld: forward BFS path GWorld -> ... -> target ===
         // "Locate in GWorld": given a target (a UObject, or a property value
         // address), compute the SHORTEST pointer chain from the live UWorld down

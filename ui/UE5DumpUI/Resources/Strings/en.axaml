@@ -75,7 +75,7 @@
     <sys:String x:Key="str.VS.MaxResults">Max:</sys:String>
     <sys:String x:Key="str.Tip.VS.MaxResults">Upper bound on candidates returned by a scan, counted across ALL objects and TArray elements combined (not per array). When the limit is hit the scan stops early and the status row shows a truncation note — raise this, or narrow the value/predicate, to see the full set. Inside a single array every element (index 0..Num-1) is scanned — there is no per-array cap; only arrays with a corrupt/absurd length (over 10,000,000 elements) are skipped as a safety guard. Scans also bail after the Timeout deadline (10–60s, default 15 — see the Timeout slider).</sys:String>
     <sys:String x:Key="str.VS.Timeout">Timeout:</sys:String>
-    <sys:String x:Key="str.Tip.VS.Timeout">Maximum seconds a First / Group scan may run before it bails early and returns whatever matched so far (the status row notes the truncation). Range 10–60s, default 15. Raise it for huge games (400K+ objects) that keep hitting the deadline; lower it for snappier scans on small games. Applies to both Single and Group First Scan; Next Scan (refine) re-reads only the existing candidates and is already fast.</sys:String>
+    <sys:String x:Key="str.Tip.VS.Timeout">Maximum seconds a First / Group scan may run before it bails early and returns whatever matched so far (the status row notes the truncation). Range 10–90s, default 25. Raise it for huge games (400K+ objects) that keep hitting the deadline; lower it for snappier scans on small games. Applies to both Single and Group First Scan; Next Scan (refine) re-reads only the existing candidates and is already fast.</sys:String>
     <sys:String x:Key="str.VS.FirstScan">First Scan</sys:String>
     <sys:String x:Key="str.VS.NextScan">Next Scan</sys:String>
     <sys:String x:Key="str.VS.NewScan">New Scan</sys:String>
@@ -157,6 +157,7 @@
 
     <!-- Live Walker -->
     <sys:String x:Key="str.LiveWalker.StartWorld">Start from GWorld</sys:String>
+    <sys:String x:Key="str.LiveWalker.StartGameEngine">Start from GameEngine</sys:String>
     <sys:String x:Key="str.LiveWalker.Back">Back</sys:String>
     <sys:String x:Key="str.LiveWalker.Parent">Parent &#x2191;</sys:String>
     <sys:String x:Key="str.LiveWalker.FindRefs">Find Refs</sys:String>
@@ -802,6 +803,7 @@
 
     <!-- Tooltips: Live Walker -->
     <sys:String x:Key="str.Tip.LiveWalker.StartWorld">Navigate to GWorld and list top-level objects</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.StartGameEngine">Root the walker on the live GameEngine (UEngine) object — drill GameInstance / GameViewport / World. Found by reflected member, not class name. AOB export is unavailable from this root (direct address only).</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.Back">Go back to previous object</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.Refresh">Re-read current object fields from memory</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.FindRefs">Find UObjects that hold a pointer to this one (true logical owner — Outer/Parent often only gives the naming-hierarchy package)</sys:String>
