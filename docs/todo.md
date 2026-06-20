@@ -484,12 +484,26 @@ Shipped + unit-tests-pass but unproven on real games:
   container crumb in `ExportCeFieldXmlAsync` + `CleanBreadcrumbs`) all **LIVE-VERIFIED on Elliot AND the
   deeply-nested Gundam SEED chain** (nested + Collapse-chain). Unit-tested
   (`...ObjectArray_WithResolvedElement_DrillsElementGroup`, `...PathThroughObjectArrayElement_EmitsElementDerefNode`,
-  `DedupeConsecutiveBreadcrumbs_*`, `..._DeepDistinctChain_Unchanged`). **Remaining follow-ups (not
-  blocking):** (a) Map/Set element hops in a GWorld-path spine still collapse to one crumb (only
-  object-pointer ARRAYS split — stride/value-offset not carried in the path step); (b) the
-  path-synthetic container crumb has no `ContainerField`, so Back-nav onto it re-walks the parent
-  (cosmetic breadcrumb-bar duplicate; was the re-entry that caused 2c) — give it a `ContainerField` or
-  fix the Back-nav fallback.
+  `DedupeConsecutiveBreadcrumbs_*`, `..._DeepDistinctChain_Unchanged`). **(b) DONE + LIVE-VERIFIED
+  (builds 1380-1388) — Back-nav onto a path-synthetic container crumb now re-hydrates the array element view.** The
+  crumb's `ContainerField` is null (the `GWorldPathStep` carries no `ArrayDataAddr`/`ArrayCount`/element
+  list), so Back-nav fell through to a parent re-walk and rendered the PARENT object grid (a silent
+  mis-render — NOT a literal duplicate; the 2c dedup already covers the export-time crumb). "Give it a
+  `ContainerField`" is infeasible (path step lacks the data) → `TryRepopulateSyntheticContainerAsync`
+  LAZILY re-walks the parent + matches the field by name+offset + `RepopulateContainerView`, wired into
+  all 4 re-display sites (NavigateToBreadcrumb, GoBack normal + pre-bookmark restore, LoadBookmark) +
+  `RefreshAsync`'s container gate broadened. 7 new tests; C# 1648/0, AOT 46.5 MB. **(a) DONE +
+  LIVE-VERIFIED (builds 1389-1390) — Map/Set (and interface-array) element hops in a GWorld-path spine
+  now split into container + element crumbs.** The DLL `emit()` lambda was widened 6→8 args to thread `elemStride`
+  (Map `pairStride` / Set `elemStride` / interface-array 16) + `elemValueOffset` (Map value's within-pair
+  offset; 0 for set/key/interface) through `GraphEdge`/`GraphPathStep` → Fern `elem_stride`/`elem_value_offset`
+  → C# `GWorldPathStep` → `PathStepToBreadcrumbs` (element crumb offset = `ElementIndex*stride + valueOffset`;
+  container crumb strips the `.Key`/`.Value` suffix so Back-nav re-hydration matches). All emit callers
+  updated (`GetRelatedObjects`/`AppendOwnedSubObjectLeaves`/test mock); object/class arrays keep the
+  hardcoded-8 path. 6 new tests (5 C# + 1 dll round-trip); C++ 697/0, C# 1653/0, AOT 46.5 MB. Adversarial
+  review confirmed Map/Set/Set offsets correct + reachable; accepted nits: struct-nested dotted base name
+  doesn't re-hydrate (pre-existing, affects arrays too, CE math still correct) + int32 element-offset
+  arithmetic (theoretical, `FieldOffset` is int by design).
 - **Value Search 1M cap (V2)** (build 954). Set Max near 1,000,000 on a broadly-matching
   value; confirm First Scan completes (or hits the 15 s deadline cleanly), the grid pages
   via Load More, and the server-side keyword filter + sort picker stay responsive at that

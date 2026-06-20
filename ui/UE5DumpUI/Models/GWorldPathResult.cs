@@ -26,6 +26,16 @@ public sealed class GWorldPathStep
     /// <summary>-1 for a direct field; >=0 for an array/map/set element.</summary>
     public int ElementIndex { get; init; } = -1;
 
+    /// <summary>Element stride in the container's Data buffer (Map pairStride / Set stride /
+    /// interface-array 16-byte slot), used to split a container element hop into container +
+    /// element CE derefs. 0 = not carried (object/class arrays use the implicit 8-byte pointer
+    /// stride, hardcoded by the UI).</summary>
+    public int ElemStride { get; init; }
+
+    /// <summary>Within-element offset of the followed pointer — the Map value's offset within
+    /// its key/value pair. 0 for arrays, sets, and map keys.</summary>
+    public int ElemValueOffset { get; init; }
+
     /// <summary>Resolved name of the child object.</summary>
     public string ToName { get; init; } = "";
 

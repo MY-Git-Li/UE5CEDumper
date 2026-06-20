@@ -3029,6 +3029,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 sj["field_type"]    = s.fieldType;
                 if (!s.innerType.empty()) sj["inner_type"] = s.innerType;
                 sj["element_index"] = s.elementIndex;
+                if (s.elemStride > 0)      sj["elem_stride"]       = s.elemStride;
+                if (s.elemValueOffset > 0) sj["elem_value_offset"] = s.elemValueOffset;
                 sj["to_name"]       = s.toName;
                 sj["to_class"]      = s.toClassName;
                 steps.push_back(sj);
