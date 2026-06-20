@@ -573,6 +573,79 @@ public class DumpServiceTests
     }
 
     [Fact]
+    public async Task FindInstancesAsync_SendsClassAndNameFilter()
+    {
+        string? sentClass = null;
+        string? sentName = null;
+        _pipe.SetHandler(req =>
+        {
+            sentClass = req["class_name"]?.GetValue<string>();
+            sentName = req["name_filter"]?.GetValue<string>();
+            return new JsonObject { ["ok"] = true, ["instances"] = new JsonArray() };
+        });
+
+        var svc = CreateService();
+        await svc.FindInstancesAsync("WB_HUD_MagicStone_C", nameFilter: "MagicStone",
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal("WB_HUD_MagicStone_C", sentClass);
+        Assert.Equal("MagicStone", sentName);
+    }
+
+    [Fact]
+    public async Task FindInstancesAsync_NameOnly_SendsEmptyClass()
+    {
+        string? sentClass = null;
+        string? sentName = null;
+        _pipe.SetHandler(req =>
+        {
+            sentClass = req["class_name"]?.GetValue<string>();
+            sentName = req["name_filter"]?.GetValue<string>();
+            return new JsonObject { ["ok"] = true, ["instances"] = new JsonArray() };
+        });
+
+        var svc = CreateService();
+        await svc.FindInstancesAsync("", nameFilter: "MagicStone",
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal("", sentClass);
+        Assert.Equal("MagicStone", sentName);
+    }
+
+    [Fact]
+    public async Task FindInstancesAsync_ParsesTruncatedFlag()
+    {
+        _pipe.SetHandler(_ => new JsonObject
+        {
+            ["ok"] = true,
+            ["truncated"] = true,
+            ["instances"] = new JsonArray(),
+        });
+
+        var svc = CreateService();
+        var result = await svc.FindInstancesAsync("Component",
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Truncated);
+    }
+
+    [Fact]
+    public async Task FindInstancesAsync_TruncatedDefaultsFalse()
+    {
+        _pipe.SetHandler(_ => new JsonObject
+        {
+            ["ok"] = true,
+            ["instances"] = new JsonArray(),
+        });
+
+        var svc = CreateService();
+        var result = await svc.FindInstancesAsync("PlayerController",
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Truncated);
+    }
+
+    [Fact]
     public async Task WalkClassAsync_ParsesFields()
     {
         _pipe.SetHandler(_ => new JsonObject

@@ -15,4 +15,9 @@ public sealed class FindInstancesResult
 
     /// <summary>Objects whose class name resolved successfully.</summary>
     public int Named { get; init; }
+
+    /// <summary>True when the scan hit the result cap (more matches likely exist).
+    /// The GObjects scan is exhaustive, but the returned list is capped — surface
+    /// this so the user knows to narrow the query rather than trust a partial list.</summary>
+    public bool Truncated { get; init; }
 }

@@ -75,6 +75,7 @@
     <sys:String x:Key="str.VS.MaxResults">Max:</sys:String>
     <sys:String x:Key="str.Tip.VS.MaxResults">Upper bound on candidates returned by a scan, counted across ALL objects and TArray elements combined (not per array). When the limit is hit the scan stops early and the status row shows a truncation note — raise this, or narrow the value/predicate, to see the full set. Inside a single array every element (index 0..Num-1) is scanned — there is no per-array cap; only arrays with a corrupt/absurd length (over 10,000,000 elements) are skipped as a safety guard. Scans also bail after the Timeout deadline (10–60s, default 15 — see the Timeout slider).</sys:String>
     <sys:String x:Key="str.VS.Timeout">Timeout:</sys:String>
+    <sys:String x:Key="str.Tip.VS.Mode">Switch between Single value (scan one value at a time, CE-style) and Group (find objects holding ALL of 2–4 values at distinct offsets — far more selective for pinning down a specific actor).</sys:String>
     <sys:String x:Key="str.Tip.VS.Timeout">Maximum seconds a First / Group scan may run before it bails early and returns whatever matched so far (the status row notes the truncation). Range 10–90s, default 25. Raise it for huge games (400K+ objects) that keep hitting the deadline; lower it for snappier scans on small games. Applies to both Single and Group First Scan; Next Scan (refine) re-reads only the existing candidates and is already fast.</sys:String>
     <sys:String x:Key="str.VS.FirstScan">First Scan</sys:String>
     <sys:String x:Key="str.VS.NextScan">Next Scan</sys:String>
@@ -126,7 +127,7 @@
     <sys:String x:Key="str.ObjectTree.CopyClassName">Copy Type</sys:String>
     <sys:String x:Key="str.ObjectTree.CopyObjectName">Copy Name</sys:String>
     <sys:String x:Key="str.ObjectTree.CopyAddress">Copy Address</sys:String>
-    <sys:String x:Key="str.ObjectTree.FilterHint">Filter loaded objects...</sys:String>
+    <sys:String x:Key="str.ObjectTree.FilterHint">Filter (space = AND, e.g. BP_ char)</sys:String>
     <sys:String x:Key="str.ObjectTree.ClassFilter">Class Type:</sys:String>
     <sys:String x:Key="str.ObjectTree.Cancel">Cancel</sys:String>
 
@@ -201,6 +202,7 @@
 
     <!-- Instance Finder -->
     <sys:String x:Key="str.InstanceFinder.ClassNameHint">Class name (e.g. PlayerController)</sys:String>
+    <sys:String x:Key="str.InstanceFinder.ObjectNameHint">Object name (optional, e.g. WB_HUD_MagicStone)</sys:String>
     <sys:String x:Key="str.InstanceFinder.Search">Search</sys:String>
     <sys:String x:Key="str.InstanceFinder.Address">Address</sys:String>
     <sys:String x:Key="str.InstanceFinder.OpenInWalker">Open in Live Walker</sys:String>
@@ -520,7 +522,7 @@
     <sys:String x:Key="str.GameClassFilter.Load">Load</sys:String>
     <sys:String x:Key="str.GameClassFilter.GameOnly">Game classes only</sys:String>
     <sys:String x:Key="str.GameClassFilter.FilterHint">Filter by name...</sys:String>
-    <sys:String x:Key="str.GameClassFilter.FindInstances">Find Instances</sys:String>
+    <sys:String x:Key="str.GameClassFilter.FindInstances">inst</sys:String>
     <sys:String x:Key="str.GameClassFilter.WalkClass">Walk Class</sys:String>
     <sys:String x:Key="str.GameClassFilter.SuperLabel">Super:</sys:String>
     <sys:String x:Key="str.GameClassFilter.SuperHint">(All)</sys:String>
@@ -534,6 +536,7 @@
     <sys:String x:Key="str.IF.FilterHint">Filter by name (function or class)...</sys:String>
     <sys:String x:Key="str.IF.ShowAll">Show All (incl. low-score)</sys:String>
     <sys:String x:Key="str.IF.ClearFilters">Clear</sys:String>
+    <sys:String x:Key="str.IF.OpenInst">inst</sys:String>
     <sys:String x:Key="str.IF.Props">Props</sys:String>
     <sys:String x:Key="str.IF.OpenLive">Live</sys:String>
     <sys:String x:Key="str.IF.LocateGWorld">🌍</sys:String>
@@ -542,6 +545,8 @@
     <sys:String x:Key="str.Tip.IF.Load">Scan all UFunctions across all loaded UClasses. Takes 2-10s on large games (1M+ objects). Score is computed client-side from name keywords + class bonus + flag bonus.</sys:String>
     <sys:String x:Key="str.Tip.IF.GameOnly">Skip /Script/Engine, /Script/CoreUObject, etc. Typically reduces the result set ~5x for shipping games. Recheck + re-Load to refresh.</sys:String>
     <sys:String x:Key="str.Tip.IF.Filter">Substring match against function name OR class name (case-insensitive). e.g. "Money" or "PlayerCharacter".</sys:String>
+    <sys:String x:Key="str.Tip.IF.ClearFilters">Clear the name filter, category, and Show-all toggle (reset to defaults).</sys:String>
+    <sys:String x:Key="str.Tip.IF.OpenInst">Open this row's class in the Instance Finder tab — pre-fills the class name and runs the search to list its live instances.</sys:String>
     <sys:String x:Key="str.Tip.IF.Category">Filter by category. Categories are picked from the strongest-scoring keyword bucket per function (Stats &gt; Inventory &gt; Movement &gt; Combat &gt; Utility tied with same score).</sys:String>
     <sys:String x:Key="str.Tip.IF.ShowAll">When off, hide rows with score below the InterestingThreshold (currently 5). When on, show every UFunction regardless of score.</sys:String>
     <sys:String x:Key="str.Tip.IF.Props">List the properties this function reads/writes (static Blueprint-bytecode scan). Native functions have no bytecode and show nothing.</sys:String>
@@ -566,6 +571,7 @@
     <sys:String x:Key="str.Con.HistoryHeader">Recent invocations</sys:String>
     <sys:String x:Key="str.Tip.Con.Load">Scan every UFunction and surface those marked with UFUNCTION(exec) (FUNC_Exec=0x200). Many games leave these intact in cooked Shipping — they're the cheat surface the developer already curated.</sys:String>
     <sys:String x:Key="str.Tip.Con.GameOnly">When OFF (default), engine-side UCheatManager exec commands are included — usually what you want. Flip ON to see only game-specific exec commands.</sys:String>
+    <sys:String x:Key="str.Tip.Con.ClearFilter">Clear the command-name filter and show the full list again.</sys:String>
     <sys:String x:Key="str.Tip.Con.Filter">Substring match against command name OR class name (case-insensitive). Empty = show all.</sys:String>
     <sys:String x:Key="str.Tip.Con.CommandInput">Type an exec command name and press Run. No-arg commands invoke directly; commands with parameters open the InvokeParamDialog. Leading slash is stripped (/fly == fly).</sys:String>
     <sys:String x:Key="str.Tip.Con.RunCommand">Resolve the typed command against the loaded list and invoke. Match is case-insensitive exact funcName; first match wins if multiple classes implement the same name.</sys:String>
@@ -631,6 +637,7 @@
     <sys:String x:Key="str.Tip.TP.Recall">Teleport back to this marker (invokes K2_SetActorLocation with bTeleport=true, then restores rotation and zeroes velocity). Refused if you've changed maps — use Force.</sys:String>
     <sys:String x:Key="str.Tip.TP.Force">Recall even if the marker was saved on a different map. May land you in an unloaded area — use with care.</sys:String>
     <sys:String x:Key="str.Tip.TP.Clear">Forget this marker.</sys:String>
+    <sys:String x:Key="str.Tip.TP.HkClear">Clear this row's hotkey binding.</sys:String>
     <sys:String x:Key="str.Tip.TP.ToCursor">Teleport the pawn to the world position under the mouse cursor (or screen center if no cursor). Uses K2_TeleportTo so the pawn lands beside geometry, not inside it.</sys:String>
     <sys:String x:Key="str.Tip.TP.ZOffset">Height added above the hit point so the capsule doesn't spawn intersecting the ground (default 100).</sys:String>
     <sys:String x:Key="str.Tip.TP.Channel">ETraceTypeQuery byte. 0 = Visibility (default engine mapping). Games can remap channels — change this if cursor hits land on the wrong surface.</sys:String>
@@ -710,11 +717,14 @@
     <sys:String x:Key="str.IP.UnusualOnly">⚠ Unusual Only</sys:String>
     <sys:String x:Key="str.IP.ShowAll">Show All (incl. low-score)</sys:String>
     <sys:String x:Key="str.IP.ClearFilters">Clear</sys:String>
+    <sys:String x:Key="str.IP.OpenInst">inst</sys:String>
     <sys:String x:Key="str.IP.OpenLive">Live</sys:String>
     <sys:String x:Key="str.IP.CopyName">Name</sys:String>
     <sys:String x:Key="str.Tip.IP.Load">Fan-out search across the seed keyword list (HP/Damage/Gold/Speed/etc.) and score the results client-side. Highlights properties in non-canonical locations (LocalPlayer / HUD / GameViewportClient) — the kind of cheat-relevant fields a CE user would miss looking only in Character/Pawn.</sys:String>
     <sys:String x:Key="str.Tip.IP.GameOnly">Skip /Script/Engine, /Script/CoreUObject, etc. Recommended on — game-specific properties are the cheat-table targets.</sys:String>
     <sys:String x:Key="str.Tip.IP.Filter">Substring match against property name OR class name (case-insensitive). e.g. "Health" or "PlayerState".</sys:String>
+    <sys:String x:Key="str.Tip.IP.ClearFilters">Clear the name filter, category, and the Unusual-only / Show-all toggles (reset to defaults).</sys:String>
+    <sys:String x:Key="str.Tip.IP.OpenInst">Open this row's class in the Instance Finder tab — pre-fills the class name and runs the search to list its live instances.</sys:String>
     <sys:String x:Key="str.Tip.IP.Category">Filter by category. Stats / Combat / Resources / Movement / Utility / Other.</sys:String>
     <sys:String x:Key="str.Tip.IP.UnusualOnly">Show only properties whose owning class is in the Unusual Location list (LocalPlayer / GameViewportClient / HUD / CheatManager) — properties developers placed outside the conventional Character/Pawn/PlayerState containers.</sys:String>
     <sys:String x:Key="str.Tip.IP.ShowAll">When off, hide rows below the InterestingThreshold (currently 4). When on, show every property regardless of score.</sys:String>
@@ -754,12 +764,18 @@
     <sys:String x:Key="str.Tip.ObjectTree.Reload">Reload all objects from game process</sys:String>
     <sys:String x:Key="str.Tip.ObjectTree.Cancel">Cancel current loading operation</sys:String>
     <sys:String x:Key="str.Tip.ObjectTree.Search">Search objects by name or class</sys:String>
+    <sys:String x:Key="str.Tip.ObjectTree.SearchField">Type a name/class substring and press Enter or the magnifier to search every object in the game. Leave it empty and press the magnifier (or Reload) to list all objects again. Recent searches are suggested as you type.</sys:String>
     <sys:String x:Key="str.Tip.ObjectTree.ClassFilter">Filter by class type</sys:String>
-    <sys:String x:Key="str.Tip.ObjectTree.TextFilter">Filter loaded objects by text</sys:String>
+    <sys:String x:Key="str.Tip.ObjectTree.Collapse">Collapse the Object Tree to give the right-hand panels the full window width</sys:String>
+    <sys:String x:Key="str.Tip.ObjectTree.Expand">Show the Object Tree</sys:String>
+    <sys:String x:Key="str.Tip.ObjectTree.TextFilter">Filter the loaded objects by text. Separate multiple terms with spaces — every term must match (AND), each against Name, Class, or Address. Example: "BP_ char" keeps objects matching both BP_ and char. Leave the Search box empty + press the magnifier (or Reload) to list all again.</sys:String>
 
     <!-- Tooltips: Instance Finder -->
-    <sys:String x:Key="str.Tip.InstanceFinder.Search">Search for instances of the specified class</sys:String>
-    <sys:String x:Key="str.Tip.InstanceFinder.ExactMatch">Match class name exactly (no substring)</sys:String>
+    <sys:String x:Key="str.Tip.InstanceFinder.ClassName">Class name to search for (substring by default, e.g. "Character"). Tick Exact match for a whole-name match. Combine with the Object name box (AND), or leave this empty to search by object name alone.</sys:String>
+    <sys:String x:Key="str.Tip.InstanceFinder.AddressField">An address to reverse-look-up — hex (0x7FF…) or module.exe+offset. Finds the UObject that contains it (or the nearest one / the container it lives in).</sys:String>
+    <sys:String x:Key="str.Tip.InstanceFinder.Search">Search for instances by class name and/or object name (at least one is required)</sys:String>
+    <sys:String x:Key="str.Tip.InstanceFinder.ObjectName">Optional: also require the object's NAME to contain this text (case-insensitive). Combined with the class name as AND. Leave the class box empty to search by object name alone. Filtering runs in the game (across every object) so you won't miss matches hidden behind unrelated objects — but the result list is still capped; if you see "⚠ capped" in the status, narrow the search.</sys:String>
+    <sys:String x:Key="str.Tip.InstanceFinder.ExactMatch">Match class name exactly (no substring). Applies to the class box only.</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.NewestFirst">Scan from the newest (highest InternalIndex) end → catches just-spawned instances (e.g. an enemy that just appeared) and avoids the result cap truncating the newest. Off = oldest first (class-default object / template / earliest instances — good for finding a Blueprint's defaults). Tip: click the Index column to re-sort either way.</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.Lookup">Lookup UObject at the specified address</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.CopyAddr">Copy instance address to clipboard</sys:String>
@@ -771,6 +787,7 @@
     <sys:String x:Key="str.Tip.InstanceFinder.AA">Generate CE Auto Assembler script</sys:String>
 
     <!-- Tooltips: Property Search -->
+    <sys:String x:Key="str.Tip.PropertySearch.Query">Property name to search for (substring, case-insensitive), e.g. Health, Mana, Gold. Combine with the Type filter to narrow further. Press Enter or Search to run.</sys:String>
     <sys:String x:Key="str.Tip.PropertySearch.Search">Search across all classes. Either Name or Type must be set; comma-separate multiple types.</sys:String>
     <sys:String x:Key="str.Tip.PropertySearch.TypeFilter">Restrict by FProperty type. Type a few characters to filter the suggestion dropdown (e.g. 'opt' → OptionalProperty). Comma-separated for OR.</sys:String>
     <sys:String x:Key="str.Tip.PropertySearch.ResultFilter">Filter the current result list locally (case-insensitive substring across Class / Property / Type / Super / Preview). No DLL roundtrip.</sys:String>
@@ -818,7 +835,7 @@
     <sys:String x:Key="str.Tip.LiveWalker.GuessWhat">Fill gaps between known fields with guessed data types (pointer, float, int, etc.)</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.CopyFieldAddr">Copy field absolute address</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.CopyFieldName">Copy field name to clipboard</sys:String>
-    <sys:String x:Key="str.Tip.LiveWalker.Search">Search fields by name</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.Search">Search/highlight fields by name. Keywords that return matches are remembered for this session (up to 8, most-recent first) — type a few letters to pick one again. The box clears when you navigate to different data (drill-down / Back / Parent); it's kept across tab switches and refreshes.</sys:String>
 
     <!-- Tooltips: Pointer Panel -->
     <sys:String x:Key="str.Tip.Pointers.Copy">Copy address to clipboard</sys:String>

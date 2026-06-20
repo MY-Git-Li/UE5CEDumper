@@ -1820,12 +1820,16 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
         // === find_instances: Search GObjects for instances of a given class ===
         if (cmd == Renge::CMD_FIND_INSTANCES) {
             std::string className = request.value("class_name", "");
+            std::string nameFilter = request.value("name_filter", "");
             bool exactMatch = request.value("exact_match", false);
             int limit = request.value("limit", 500);
             bool newestFirst = request.value("newest_first", false);
-            if (className.empty()) return Renge::MakeError(id, "Missing class_name").dump();
+            // Either query is sufficient: class-only (legacy), name-only, or both
+            // (AND). Only an empty-empty request is rejected.
+            if (className.empty() && nameFilter.empty())
+                return Renge::MakeError(id, "Missing class_name or name_filter").dump();
 
-            auto rset = Aura::FindInstancesByClass(className, exactMatch, limit, newestFirst);
+            auto rset = Aura::FindInstancesByClass(className, exactMatch, limit, newestFirst, nameFilter);
 
             // Diagnostic: if name resolution ratio is low, dump FNamePool state
             if (rset.nonNull > 1000 && rset.named > 0) {
@@ -1853,6 +1857,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             data["scanned"]   = rset.scanned;
             data["non_null"]  = rset.nonNull;
             data["named"]     = rset.named;
+            data["truncated"] = rset.truncated;
             data["instances"] = instances;
             return Renge::MakeResponse(id, data).dump();
         }

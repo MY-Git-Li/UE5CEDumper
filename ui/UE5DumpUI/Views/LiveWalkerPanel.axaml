@@ -332,9 +332,14 @@
     <!-- Search bar -->
     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,4"
                 IsVisible="{Binding HasData}">
-      <TextBox PlaceholderText="{StaticResource str.LiveWalker.SearchHint}"
-               Text="{Binding SearchText, Mode=TwoWay}"
-               Width="250" Padding="4,2" FontSize="12"/>
+      <!-- AutoCompleteBox surfaces the per-session remembered keywords (LRU,
+           longest-valid). FilterMode=Contains so typing "m" lists "magic". -->
+      <AutoCompleteBox PlaceholderText="{StaticResource str.LiveWalker.SearchHint}"
+                       Text="{Binding SearchText, Mode=TwoWay}"
+                       ItemsSource="{Binding SearchHistory}"
+                       FilterMode="Contains"
+                       ToolTip.Tip="{StaticResource str.Tip.LiveWalker.Search}"
+                       Width="250" Padding="4,2" FontSize="12"/>
       <!-- Prev / next match navigation: search only re-colours matches, so
            these step the selection between them (wrap-around). Enabled only
            when there are matches. -->

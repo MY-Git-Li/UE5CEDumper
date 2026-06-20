@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 
 namespace UE5DumpUI.ViewModels;
@@ -45,6 +46,18 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _displayCount = "";
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private int _selectedAddressFormatIndex;
+
+    /// <summary>
+    /// Collapses the left Object Tree to a thin strip so the right-hand panels
+    /// get the full window width. View state only (not persisted): the panel's
+    /// ◀ button toggles it on, a slim re-expand strip with ▶ restores it, and
+    /// MainWindow resizes the grid column / hides the splitter in response.
+    /// </summary>
+    [ObservableProperty] private bool _isCollapsed;
+
+    /// <summary>Toggle the collapsed state of the Object Tree column.</summary>
+    [RelayCommand]
+    private void ToggleCollapse() => IsCollapsed = !IsCollapsed;
 
     /// <summary>Class type filter options. Index 0 = show all, others = exact ClassName match.</summary>
     public string[] ClassFilterOptions { get; } =
@@ -342,7 +355,10 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
         // re-selects FilteredNodes[0] explicitly after this returns.
         SelectedNode = null;
         FilteredNodes.Clear();
-        var textFilter = FilterText?.Trim() ?? "";
+        // Multi-term text filter: whitespace-separated terms are ANDed (each term
+        // must hit Name / ClassName / Address), so "BP_ char" narrows to objects
+        // matching both — the two-layer filter without a second box.
+        var terms = ObjectTreeFilter.SplitTerms(FilterText);
         var classFilter = SelectedClassFilterIndex > 0
             ? ClassFilterOptions[SelectedClassFilterIndex] : null;
 
@@ -355,11 +371,9 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
                 !node.ClassName.Equals(classFilter, StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            // Text filter (substring match on Name, ClassName, or Address)
-            if (!string.IsNullOrEmpty(textFilter) &&
-                !node.Name.Contains(textFilter, StringComparison.OrdinalIgnoreCase) &&
-                !node.ClassName.Contains(textFilter, StringComparison.OrdinalIgnoreCase) &&
-                !node.Address.Contains(textFilter, StringComparison.OrdinalIgnoreCase))
+            // Text filter: every term must match Name, ClassName, or Address
+            if (terms.Length > 0 &&
+                !ObjectTreeFilter.MatchesAllTerms(terms, node.Name, node.ClassName, node.Address))
                 continue;
 
             matchCount++;
@@ -369,7 +383,7 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
                 FilteredNodes.Add(node);
         }
 
-        bool hasAnyFilter = !string.IsNullOrEmpty(textFilter) || classFilter != null;
+        bool hasAnyFilter = terms.Length > 0 || classFilter != null;
         var totalSuffix = ObjectCount > 0 && ObjectCount != _allNodes.Count
             ? $" / {ObjectCount:N0} total ({100.0 * _allNodes.Count / ObjectCount:F1}%)"
             : "";

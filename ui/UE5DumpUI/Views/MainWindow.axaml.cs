@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -51,6 +52,16 @@ public partial class MainWindow : Window
     private double _defaultWidth;     // XAML default, used when resetting off-screen
     private double _defaultHeight;
 
+    // ── Object Tree collapse ────────────────────────────────────────────────
+    // When ObjectTree.IsCollapsed flips, resize the left grid column to a thin
+    // strip (and hide the splitter) so the right panels get full width. The
+    // pre-collapse Width / MinWidth are saved so re-expand restores whatever
+    // the user had dragged the splitter to. View state only — not persisted.
+    private ObjectTreeViewModel? _subscribedObjectTree;
+    private GridLength _savedTreeWidth = new(Constants.TreePanelWidth);
+    private double _savedTreeMinWidth = 200;
+    private const double CollapsedTreeStripWidth = 26;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -58,6 +69,10 @@ public partial class MainWindow : Window
         // window closes, so background DispatcherTimers and Threading.Timer
         // callbacks don't fire post-close on torn-down state.
         Closed += OnClosed;
+        // Track the ObjectTree sub-VM so the Object Tree collapse toggle can
+        // resize the left grid column from code-behind (Width/MinWidth can't be
+        // both bound and splitter-dragged cleanly).
+        DataContextChanged += OnMainDataContextChanged;
         // Position isn't an AvaloniaProperty in 12 — listen via the
         // explicit event instead. Width / Height are AvaloniaProperty
         // and flow through OnPropertyChanged.
@@ -420,6 +435,74 @@ public partial class MainWindow : Window
     /// SelectedItem is the outer TabControl's selection, so inner
     /// SelectionChanged events bubbling from child grids are harmless.
     /// </remarks>
+    /// <summary>
+    /// (Re)subscribe to the ObjectTree sub-VM's PropertyChanged so collapse
+    /// toggles resize the left grid column. Resubscribes if the DataContext is
+    /// swapped (it normally isn't), and syncs the column to the current state.
+    /// </summary>
+    private void OnMainDataContextChanged(object? sender, EventArgs e)
+    {
+        if (_subscribedObjectTree != null)
+        {
+            _subscribedObjectTree.PropertyChanged -= OnObjectTreePropertyChanged;
+            _subscribedObjectTree = null;
+        }
+
+        if (DataContext is MainWindowViewModel vm)
+        {
+            _subscribedObjectTree = vm.ObjectTree;
+            _subscribedObjectTree.PropertyChanged += OnObjectTreePropertyChanged;
+            ApplyObjectTreeCollapse(_subscribedObjectTree.IsCollapsed);
+        }
+    }
+
+    private void OnObjectTreePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ObjectTreeViewModel.IsCollapsed)
+            && sender is ObjectTreeViewModel ot)
+        {
+            ApplyObjectTreeCollapse(ot.IsCollapsed);
+        }
+    }
+
+    /// <summary>
+    /// Collapse the Object Tree column to a thin strip (or restore it). The
+    /// pre-collapse Width + MinWidth are saved so re-expand returns to whatever
+    /// the user dragged the splitter to.
+    /// </summary>
+    private void ApplyObjectTreeCollapse(bool collapsed)
+    {
+        // ColumnDefinition x:Name doesn't generate a field in Avalonia, so reach
+        // the two columns through the named Grid.
+        if (ContentGrid is null || ContentGrid.ColumnDefinitions.Count < 2 || TreeSplitter is null) return;
+        var treeColumn = ContentGrid.ColumnDefinitions[0];
+        var splitterColumn = ContentGrid.ColumnDefinitions[1];
+
+        if (collapsed)
+        {
+            // Don't overwrite the saved width if we're already collapsed.
+            if (treeColumn.Width.Value > CollapsedTreeStripWidth || treeColumn.MinWidth > 0)
+            {
+                _savedTreeWidth = treeColumn.Width;
+                _savedTreeMinWidth = treeColumn.MinWidth;
+            }
+            treeColumn.MinWidth = 0;
+            treeColumn.Width = new GridLength(CollapsedTreeStripWidth);
+            splitterColumn.Width = new GridLength(0);
+            TreeSplitter.IsVisible = false;
+        }
+        else
+        {
+            treeColumn.MinWidth = _savedTreeMinWidth;
+            // Fall back to the XAML default if the saved width is degenerate.
+            treeColumn.Width = _savedTreeWidth.IsAbsolute && _savedTreeWidth.Value > CollapsedTreeStripWidth
+                ? _savedTreeWidth
+                : new GridLength(Constants.TreePanelWidth);
+            splitterColumn.Width = new GridLength(4);
+            TreeSplitter.IsVisible = true;
+        }
+    }
+
     private void MainTabs_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (sender is not TabControl tabs) return;
@@ -432,6 +515,10 @@ public partial class MainWindow : Window
         {
             vm.LiveWalker.StopAutoRefreshTimer();
         }
+        // NOTE: the field-search keyword is intentionally NOT cleared on tab
+        // switch — it's kept. The Live Walker clears it itself when the grid
+        // navigates to different data (drill-down / Back / Parent), where a
+        // leftover keyword no longer applies. See UpdateDisplay(clearFieldSearch).
 
         // Cancel any experimental tab's in-flight HEAVY query when navigating
         // away from it. Leaving a multi-million-row SPC / diff / pivot running on

@@ -258,6 +258,33 @@ public class InterestingFunctionsViewModelTests
     }
 
     [Fact]
+    public async Task OpenInInstanceFinder_FiresNavigateToInstanceFinderWithClass()
+    {
+        var (vm, _) = MakeVm();
+        await vm.LoadCommand.ExecuteAsync(null);
+        var addMoney = vm.Results.First(r => r.FuncName == "AddMoney");
+
+        string? capturedClass = null;
+        vm.NavigateToInstanceFinder += cls => capturedClass = cls;
+
+        vm.OpenInInstanceFinderCommand.Execute(addMoney);
+
+        Assert.Equal("PlayerCharacter", capturedClass);
+    }
+
+    [Fact]
+    public void OpenInInstanceFinder_NullRow_DoesNotFireEvent()
+    {
+        var (vm, _) = MakeVm();
+        bool fired = false;
+        vm.NavigateToInstanceFinder += _ => fired = true;
+
+        vm.OpenInInstanceFinderCommand.Execute(null);
+
+        Assert.False(fired);
+    }
+
+    [Fact]
     public void OpenInLiveWalker_NullRow_DoesNotFireEvent()
     {
         var (vm, _) = MakeVm();

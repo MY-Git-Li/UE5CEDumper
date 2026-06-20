@@ -89,6 +89,10 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     public event Action<string, string>? NavigateToFunction;
     public event Action<string, string>? RequestCopyBakedScript;
 
+    /// <summary>Raised by the per-row "inst" button to open the function's class
+    /// in the Instance Finder tab. Payload = class name.</summary>
+    public event Action<string>? NavigateToInstanceFinder;
+
     /// <summary>Raised to locate a live instance of the function's class within
     /// the GWorld object graph. Payload = class name (MainWindow resolves a
     /// representative instance via find_instance, then runs the path search).</summary>
@@ -315,6 +319,16 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     {
         if (row == null) return;
         NavigateToFunction?.Invoke(row.ClassName, row.FuncName);
+    }
+
+    /// <summary>Per-row "inst" action: open this function's class in the
+    /// Instance Finder tab (pre-fill the class name + run the search). Mirrors
+    /// the Property Search / Value Search "inst" handoff.</summary>
+    [RelayCommand]
+    private void OpenInInstanceFinder(ScoredFunctionRow? row)
+    {
+        if (row == null || string.IsNullOrEmpty(row.ClassName)) return;
+        NavigateToInstanceFinder?.Invoke(row.ClassName);
     }
 
     /// <summary>Locate a live instance of this function's class within the GWorld

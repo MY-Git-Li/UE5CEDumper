@@ -66,6 +66,13 @@ public partial class InstanceFinderViewModel : ViewModelBase
 
     // --- Class name search ---
     [ObservableProperty] private string _searchClassName = "";
+    /// <summary>Optional object-name filter (case-insensitive substring), ANDed
+    /// with the class query. Resolved DLL-side (filter-then-cap) so it doesn't
+    /// miss matches the way a client-side filter on capped class results would —
+    /// but the returned list is still capped at <c>limit</c>; truncation is
+    /// surfaced in the status text. Either box may be empty: class-only,
+    /// name-only, or both.</summary>
+    [ObservableProperty] private string _searchObjectName = "";
     [ObservableProperty] private bool _exactMatch;
 
     /// <summary>Opt-in: scan GObjects from the high (newest-allocated) end so the
@@ -141,10 +148,26 @@ public partial class InstanceFinderViewModel : ViewModelBase
         IsGWorldAvailable = state?.HasGWorld ?? false;
     }
 
+    /// <summary>Cross-tab handoff entry point (the per-row "inst" buttons on
+    /// Property Search / Value Search / Interesting Funcs+Props / Classes /
+    /// Related). Runs a class-name search and clears any stale Object-name
+    /// filter so the handoff lists instances of the class itself, not ANDed
+    /// with a leftover name the user typed earlier.</summary>
+    public async Task SearchForClassAsync(string className)
+    {
+        SearchObjectName = "";
+        SearchClassName = className;
+        if (SearchCommand.CanExecute(null))
+            await SearchCommand.ExecuteAsync(null);
+    }
+
     [RelayCommand]
     private async Task SearchAsync()
     {
-        if (string.IsNullOrWhiteSpace(SearchClassName)) return;
+        var className = SearchClassName?.Trim() ?? "";
+        var nameFilter = SearchObjectName?.Trim() ?? "";
+        // Need at least one criterion — both empty is a no-op (mirrors the DLL guard).
+        if (className.Length == 0 && nameFilter.Length == 0) return;
 
         try
         {
@@ -153,29 +176,33 @@ public partial class InstanceFinderViewModel : ViewModelBase
             StatusText = "Searching...";
             ShowCeXml = false;
 
-            var result = await _dump.FindInstancesAsync(SearchClassName.Trim(), ExactMatch, newestFirst: NewestFirst);
+            var result = await _dump.FindInstancesAsync(className, ExactMatch, newestFirst: NewestFirst, nameFilter: nameFilter);
 
             // Detach the bound selection before rebuilding (Avalonia's selection
             // model throws if Instances is Clear()'d while SelectedInstance is live).
             UiCollection.Reset(Instances, result.Instances, () => SelectedInstance = null);
 
             HasInstances = Instances.Count > 0;
+            // The GObjects scan is exhaustive, but the returned list is capped —
+            // be honest when it was hit so the user narrows instead of trusting a
+            // partial list (broad object-name terms like "Component" overflow easily).
+            var capNote = result.Truncated ? $" — ⚠ capped at {Instances.Count}, narrow the search" : "";
             if (result.Scanned > 0)
             {
                 var pct = result.NonNull > 0 ? 100.0 * result.Named / result.NonNull : 0;
-                StatusText = $"Found {Instances.Count} instances (scanned {result.Scanned:N0}, non-null {result.NonNull:N0}, named {result.Named:N0} ({pct:F1}%))";
+                StatusText = $"Found {Instances.Count} instances (scanned {result.Scanned:N0}, non-null {result.NonNull:N0}, named {result.Named:N0} ({pct:F1}%)){capNote}";
             }
             else
             {
-                StatusText = $"Found {Instances.Count} instances";
+                StatusText = $"Found {Instances.Count} instances{capNote}";
             }
-            _log.Info($"FindInstances: '{SearchClassName}' -> {Instances.Count} results (scanned={result.Scanned}, nonNull={result.NonNull}, named={result.Named})");
+            _log.Info($"FindInstances: class='{className}' name='{nameFilter}' -> {Instances.Count} results (scanned={result.Scanned}, nonNull={result.NonNull}, named={result.Named})");
         }
         catch (Exception ex)
         {
             SetError(ex);
             StatusText = "Search failed";
-            _log.Error($"FindInstances failed for '{SearchClassName}'", ex);
+            _log.Error($"FindInstances failed for class='{className}' name='{nameFilter}'", ex);
         }
         finally
         {

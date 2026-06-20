@@ -248,7 +248,7 @@ public class ClassPivotViewModelTests : IDisposable
     private sealed class DtDumpService : StubDumpService
     {
         public override Task<FindInstancesResult> FindInstancesAsync(
-            string className, bool exactMatch = false, int limit = 500, bool newestFirst = false, CancellationToken ct = default)
+            string className, bool exactMatch = false, int limit = 500, bool newestFirst = false, string nameFilter = "", CancellationToken ct = default)
             => Task.FromResult(new FindInstancesResult
             {
                 Instances = new()
@@ -318,7 +318,7 @@ public class ClassPivotViewModelTests : IDisposable
         public readonly System.Collections.Concurrent.ConcurrentDictionary<string, TaskCompletionSource<DataTableWalkResult>> Gates = new();
 
         public override Task<FindInstancesResult> FindInstancesAsync(
-            string className, bool exactMatch = false, int limit = 500, bool newestFirst = false, CancellationToken ct = default)
+            string className, bool exactMatch = false, int limit = 500, bool newestFirst = false, string nameFilter = "", CancellationToken ct = default)
             => Task.FromResult(new FindInstancesResult
             {
                 Instances = new()
