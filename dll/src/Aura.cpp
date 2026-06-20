@@ -1284,12 +1284,19 @@ SearchResultSet SearchByName(const std::string& query, int maxResults) {
     return rset;
 }
 
-SearchResultSet FindInstancesByClass(const std::string& className, bool exactMatch, int maxResults, bool newestFirst) {
+SearchResultSet FindInstancesByClass(const std::string& className, bool exactMatch, int maxResults, bool newestFirst, const std::string& nameFilter) {
     SearchResultSet rset;
 
-    // Convert query to lowercase for case-insensitive comparison
+    // Convert queries to lowercase for case-insensitive comparison
     std::string lowerQuery = className;
     for (auto& c : lowerQuery) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    std::string lowerName = nameFilter;
+    for (auto& c : lowerName) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    // An empty class query means "match any class" (object-name-only search).
+    const bool matchAnyClass = lowerQuery.empty();
+    // An empty name query means "no object-name gate".
+    const bool gateByName = !lowerName.empty();
 
     int32_t count = GetCount();
     rset.scanned = count;
@@ -1319,25 +1326,37 @@ SearchResultSet FindInstancesByClass(const std::string& className, bool exactMat
         if (clsName.empty()) continue;
         rset.named++;
 
-        // Case-insensitive match: exact (equality) or partial (substring)
-        std::string lowerClsName = clsName;
-        for (auto& c : lowerClsName) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        // Class match (skipped entirely for object-name-only search):
+        // exact (equality) or partial (substring), case-insensitive.
+        if (!matchAnyClass) {
+            std::string lowerClsName = clsName;
+            for (auto& c : lowerClsName) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
-        if (exactMatch) {
-            if (lowerClsName != lowerQuery) continue;
-        } else {
-            if (lowerClsName.find(lowerQuery) == std::string::npos) continue;
+            if (exactMatch) {
+                if (lowerClsName != lowerQuery) continue;
+            } else {
+                if (lowerClsName.find(lowerQuery) == std::string::npos) continue;
+            }
+        }
+
+        // Read object name (needed for the optional name gate and the result).
+        std::string objName;
+        uint32_t nameIdx = 0;
+        if (Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_NAME, nameIdx)) {
+            objName = Serie::GetString(nameIdx);
+        }
+
+        // Object-name gate (case-insensitive substring), when requested.
+        if (gateByName) {
+            std::string lowerObjName = objName;
+            for (auto& c : lowerObjName) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (lowerObjName.find(lowerName) == std::string::npos) continue;
         }
 
         SearchResult sr;
         sr.addr = obj;
         sr.index = i;
-
-        // Read object name
-        uint32_t nameIdx = 0;
-        if (Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_NAME, nameIdx)) {
-            sr.name = Serie::GetString(nameIdx);
-        }
+        sr.name = objName;
         sr.className = clsName;
 
         // Read outer
@@ -1346,8 +1365,12 @@ SearchResultSet FindInstancesByClass(const std::string& className, bool exactMat
         rset.results.push_back(std::move(sr));
     }
 
-    Sein::Info("PIPE:find", "FindInstancesByClass '%s': %d found, scanned=%d, nonNull=%d, named=%d",
-                 className.c_str(), (int)rset.results.size(), rset.scanned, rset.nonNull, rset.named);
+    // We stopped collecting once the cap was reached, so more matches may exist.
+    rset.truncated = (static_cast<int>(rset.results.size()) >= maxResults);
+
+    Sein::Info("PIPE:find", "FindInstancesByClass class='%s' name='%s': %d found%s, scanned=%d, nonNull=%d, named=%d",
+                 className.c_str(), nameFilter.c_str(), (int)rset.results.size(),
+                 rset.truncated ? " (capped)" : "", rset.scanned, rset.nonNull, rset.named);
     return rset;
 }
 

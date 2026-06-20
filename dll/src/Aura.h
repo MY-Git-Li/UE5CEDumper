@@ -118,18 +118,23 @@ struct SearchResultSet {
     int32_t scanned = 0;    // Total indices iterated (= GetCount() at call time)
     int32_t nonNull = 0;    // Objects that were non-null
     int32_t named   = 0;    // Objects whose class name resolved successfully
+    bool truncated  = false;// Hit the maxResults cap — more matches likely exist
 };
 
 SearchResultSet SearchByName(const std::string& query, int maxResults = 200);
 
 // Find all instances whose class name matches (case-insensitive partial match)
+// AND, optionally, whose OBJECT name contains nameFilter (case-insensitive
+// substring). Either query may be empty: an empty className matches every
+// class (object-name-only search), an empty nameFilter applies no name gate.
+// At least one of the two must be non-empty (the caller enforces this).
 // Returns addr, index, name, className, outer for each instance
 // newestFirst: walk GObjects from the high (most-recently-allocated) end so the
 // newest runtime spawns survive the maxResults cap. Default low->high keeps the
 // OLDEST maxResults (CDO / class-default / earliest instances) — ideal for
 // finding a Blueprint's template/defaults, but it truncates the newest off the
 // end for high-population classes (so "catch the just-spawned enemy" needs newestFirst).
-SearchResultSet FindInstancesByClass(const std::string& className, bool exactMatch = false, int maxResults = 500, bool newestFirst = false);
+SearchResultSet FindInstancesByClass(const std::string& className, bool exactMatch = false, int maxResults = 500, bool newestFirst = false, const std::string& nameFilter = "");
 
 // Address-to-Instance reverse lookup result.
 //

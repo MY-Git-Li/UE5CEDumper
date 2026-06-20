@@ -213,6 +213,7 @@
                           Command="{Binding $parent[UserControl].((vm:TeleportViewModel)DataContext).ClearHotkeyCommand}"
                           CommandParameter="{Binding}"
                           IsEnabled="{Binding HasBinding}"
+                          ToolTip.Tip="{StaticResource str.Tip.TP.HkClear}"
                           Padding="10,3" Margin="2,0"/>
                 </Grid>
               </DataTemplate>

@@ -504,12 +504,13 @@ public sealed class DumpService : IDumpService
         return result;
     }
 
-    public async Task<FindInstancesResult> FindInstancesAsync(string className, bool exactMatch = false, int limit = 500, bool newestFirst = false, CancellationToken ct = default)
+    public async Task<FindInstancesResult> FindInstancesAsync(string className, bool exactMatch = false, int limit = 500, bool newestFirst = false, string nameFilter = "", CancellationToken ct = default)
     {
         var req = new JsonObject
         {
             ["cmd"] = "find_instances",
             ["class_name"] = className,
+            ["name_filter"] = nameFilter ?? "",
             ["exact_match"] = exactMatch,
             ["limit"] = limit,
             ["newest_first"] = newestFirst
@@ -522,6 +523,7 @@ public sealed class DumpService : IDumpService
             Scanned = res["scanned"]?.GetValue<int>() ?? 0,
             NonNull = res["non_null"]?.GetValue<int>() ?? 0,
             Named = res["named"]?.GetValue<int>() ?? 0,
+            Truncated = res["truncated"]?.GetValue<bool>() ?? false,
         };
 
         if (res["instances"] is JsonArray arr)

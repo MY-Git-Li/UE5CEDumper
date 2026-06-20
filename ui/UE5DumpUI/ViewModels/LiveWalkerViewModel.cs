@@ -7,6 +7,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 
@@ -202,6 +203,16 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int _searchMatchCount;
     [ObservableProperty] private bool _hasSearchResults;
 
+    /// <summary>Remembered field-search keywords for this session (LRU, max 8,
+    /// longest-valid wins). Drives the search box's AutoCompleteBox suggestions.
+    /// Persists across tab switches even though the live <see cref="SearchText"/>
+    /// is cleared on switch; lives for the VM (= app session) lifetime.</summary>
+    [ObservableProperty] private ObservableCollection<string> _searchHistory = new();
+
+    // Debounce so we only remember a keyword the user has SETTLED on (typing
+    // pauses), not every intermediate prefix while typing toward it.
+    private Timer? _searchHistoryDebounce;
+
     // AOBMaker CE Plugin integration
     [ObservableProperty] private bool _isAobMakerAvailable;
 
@@ -395,6 +406,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private async Task StartFromWorldAsync()
     {
+        // Fresh root walk (GWorld actor list) — drop any field-search filter.
+        ClearFieldSearchForNavigation();
         try
         {
             ClearStatus();
@@ -671,6 +684,11 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     private async Task NavigateToContainerAsync(LiveFieldValue? field)
     {
         if (field == null || !field.IsContainerNavigable) return;
+
+        // Drilling into a container shows different data (its elements) — the
+        // field-search keyword no longer applies. (This path rebuilds Fields via
+        // Populate*ContainerFields, bypassing UpdateDisplay's own clear.)
+        ClearFieldSearchForNavigation();
 
         try
         {
@@ -1364,6 +1382,9 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     {
         if (item == null) return;
 
+        // Jumping to a breadcrumb shows different data — drop the field filter.
+        ClearFieldSearchForNavigation();
+
         try
         {
             ClearStatus();
@@ -1435,6 +1456,9 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     {
         // Cancel bookmark save mode on any navigation
         IsBookmarkSaveMode = false;
+
+        // Back shows different (previous) data — drop the field-search filter.
+        ClearFieldSearchForNavigation();
 
         // If at root breadcrumb and we have pre-bookmark state, restore it
         if (Breadcrumbs.Count < 2 && _preBookmarkBreadcrumbs != null)
@@ -1563,6 +1587,9 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     private async Task GoToParentAsync()
     {
         if (string.IsNullOrEmpty(CurrentOuterAddr) || CurrentOuterAddr == "0x0") return;
+
+        // Parent (Outer) is a different object — drop the field-search filter.
+        ClearFieldSearchForNavigation();
 
         try
         {
@@ -2506,6 +2533,9 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
         if (!slot.IsOccupied) return;
 
+        // Loading a bookmark jumps to different data — drop the field filter.
+        ClearFieldSearchForNavigation();
+
         try
         {
             ClearStatus();
@@ -3240,7 +3270,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             var result = await _dump.WalkInstanceAsync(CurrentAddress, classAddr, arrayLimit: ArrayLimit, previewLimit: PreviewLimit, fillGaps: FillGaps, ct: ct);
             result = await AutoFillGapsRetryAsync(result, CurrentAddress, classAddr);
             if (CurrentAddress != addressAtStart || Breadcrumbs.Count != breadcrumbCountAtStart) return;
-            UpdateDisplay(result);
+            // Refresh re-walks the SAME object — keep the active field-search filter.
+            UpdateDisplay(result, clearFieldSearch: false);
             RestoreSelectedField(keepFieldName, keepFieldOffset);
         }
         catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
@@ -3726,6 +3757,9 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         // _countdownTimer (via StopCountdownTimer) — single call covers it.
         StopAutoRefreshTimer();
 
+        _searchHistoryDebounce?.Dispose();
+        _searchHistoryDebounce = null;
+
         GC.SuppressFinalize(this);
     }
 
@@ -3783,6 +3817,63 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     partial void OnSearchTextChanged(string value)
     {
         ApplySearch(value);
+
+        // Schedule a "remember this keyword" pass once typing settles. Only the
+        // keyword the user pauses on is kept (longest-valid), so intermediate
+        // prefixes typed on the way to it are never remembered. Clearing or a
+        // sub-minimum keyword cancels any pending pass and schedules nothing.
+        if (_disposed) return;
+        _searchHistoryDebounce?.Dispose();
+        _searchHistoryDebounce = null;
+        if ((value?.Trim().Length ?? 0) < SearchKeywordHistory.MinLength) return;
+        _searchHistoryDebounce = new Timer(
+            _ => Dispatcher.UIThread.Post(FinalizeSearchKeyword),
+            null, 700, Timeout.Infinite);
+    }
+
+    /// <summary>
+    /// Commit the current search text to the keyword history if it's a valid,
+    /// settled keyword (>= MinLength chars AND produced at least one match).
+    /// Runs on the UI thread after the typing-debounce fires.
+    /// </summary>
+    private void FinalizeSearchKeyword()
+    {
+        if (_disposed) return;
+        var k = SearchText?.Trim() ?? "";
+        if (k.Length < SearchKeywordHistory.MinLength || SearchMatchCount <= 0) return;
+        SearchKeywordHistory.Remember(SearchHistory, k);
+    }
+
+    /// <summary>
+    /// Commit any pending (debounced) keyword immediately. Call this BEFORE
+    /// clearing <see cref="SearchText"/> on a tab switch so a quick
+    /// type-then-switch (within the debounce window) still remembers the keyword
+    /// — a tab switch is itself a strong "settled" signal.
+    /// </summary>
+    public void FlushPendingSearchKeyword()
+    {
+        _searchHistoryDebounce?.Dispose();
+        _searchHistoryDebounce = null;
+        FinalizeSearchKeyword();
+    }
+
+    /// <summary>
+    /// Clear the field-search keyword because the grid is navigating to DIFFERENT
+    /// data (drill-down into a container, Back, Parent, breadcrumb, bookmark, the
+    /// GWorld actor-list root, or a fresh walk) — a leftover filter no longer
+    /// applies. The remembered-keyword history is flushed first so the keyword we
+    /// were filtering by is kept, then the live text is cleared. No-op when the
+    /// box is already empty. Deliberately NOT called from Refresh / auto-refresh
+    /// (same object, refreshed values) so an active filter survives a refresh.
+    /// Some navigation paths rebuild Fields directly and bypass UpdateDisplay
+    /// (container drill-down, world root, synthetic-container re-hydration), so
+    /// this is called at the navigation command entry points too, not only here.
+    /// </summary>
+    private void ClearFieldSearchForNavigation()
+    {
+        if (string.IsNullOrEmpty(SearchText)) return;
+        FlushPendingSearchKeyword();
+        SearchText = "";
     }
 
     private void ApplySearch(string query)
@@ -4105,8 +4196,17 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         HasParent = false;
     }
 
-    private void UpdateDisplay(InstanceWalkResult result)
+    /// <param name="clearFieldSearch">When true (every navigation — drill-down,
+    /// Back, Parent, Go, breadcrumb, bookmark, start), clear the field-search
+    /// keyword: the grid is now showing DIFFERENT data so a leftover filter no
+    /// longer applies. Refresh / auto-refresh pass false (same object, refreshed
+    /// values) so the active filter survives a refresh. The remembered-keyword
+    /// history (LRU) is flushed first, then the live text is cleared.</param>
+    private void UpdateDisplay(InstanceWalkResult result, bool clearFieldSearch = true)
     {
+        if (clearFieldSearch)
+            ClearFieldSearchForNavigation();
+
         CurrentObjectName = result.Name;
         CurrentClassName = result.ClassName;
         CurrentAddress = result.Address;

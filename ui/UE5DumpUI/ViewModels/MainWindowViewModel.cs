@@ -588,9 +588,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             try
             {
                 SelectedTabIndex = (int)MainTabIndex.InstanceFinder;
-                InstanceFinder.SearchClassName = className;
-                if (InstanceFinder.SearchCommand.CanExecute(null))
-                    await InstanceFinder.SearchCommand.ExecuteAsync(null);
+                await InstanceFinder.SearchForClassAsync(className);
             }
             catch (Exception ex)
             {
@@ -626,9 +624,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             try
             {
                 SelectedTabIndex = (int)MainTabIndex.InstanceFinder; // Switch to Instance Finder tab
-                InstanceFinder.SearchClassName = className;
-                if (InstanceFinder.SearchCommand.CanExecute(null))
-                    await InstanceFinder.SearchCommand.ExecuteAsync(null);
+                await InstanceFinder.SearchForClassAsync(className);
             }
             catch (Exception ex)
             {
@@ -659,9 +655,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             try
             {
                 SelectedTabIndex = (int)MainTabIndex.InstanceFinder; // Switch to Instance Finder tab
-                InstanceFinder.SearchClassName = className;
-                if (InstanceFinder.SearchCommand.CanExecute(null))
-                    await InstanceFinder.SearchCommand.ExecuteAsync(null);
+                await InstanceFinder.SearchForClassAsync(className);
             }
             catch (Exception ex)
             {
@@ -694,6 +688,34 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _log.Error("GameClassFilter NavigateToClassStruct handler error", ex);
+            }
+        };
+
+        // Wire InterestingFunctions / InterestingProperties -> InstanceFinder
+        // (per-row "inst" button: pre-fill class name + switch tab + auto-run,
+        // mirroring the Property Search / Value Search "inst" handoff).
+        InterestingFunctions.NavigateToInstanceFinder += async (className) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.InstanceFinder;
+                await InstanceFinder.SearchForClassAsync(className);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"InterestingFunctions NavigateToInstanceFinder handler error: {className}", ex);
+            }
+        };
+        InterestingProperties.NavigateToInstanceFinder += async (className) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.InstanceFinder;
+                await InstanceFinder.SearchForClassAsync(className);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"InterestingProperties NavigateToInstanceFinder handler error: {className}", ex);
             }
         };
 
@@ -924,9 +946,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             try
             {
                 SelectedTabIndex = (int)MainTabIndex.InstanceFinder; // Switch to Instance Finder tab
-                InstanceFinder.SearchClassName = className;
-                if (InstanceFinder.SearchCommand.CanExecute(null))
-                    await InstanceFinder.SearchCommand.ExecuteAsync(null);
+                await InstanceFinder.SearchForClassAsync(className);
             }
             catch (Exception ex)
             {

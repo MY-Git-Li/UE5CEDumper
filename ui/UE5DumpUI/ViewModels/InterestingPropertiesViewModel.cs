@@ -76,6 +76,10 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
     public event Action<string, string>? NavigateToProperty;
     public event Action<string>? RequestCopyText;
 
+    /// <summary>Raised by the per-row "inst" button to open the property's class
+    /// in the Instance Finder tab. Payload = class name.</summary>
+    public event Action<string>? NavigateToInstanceFinder;
+
     /// <summary>Raised to pivot the selected property in the experimental Class
     /// Pivot tab (className, propName). C5 right-click handoff.</summary>
     public event Action<string, string>? NavigateToPivot;
@@ -303,6 +307,16 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
     {
         if (row == null) return;
         NavigateToProperty?.Invoke(row.ClassName, row.PropName);
+    }
+
+    /// <summary>Per-row "inst" action: open this property's class in the Instance
+    /// Finder tab (pre-fill the class name + run the search). Mirrors the
+    /// Property Search / Value Search "inst" handoff.</summary>
+    [RelayCommand]
+    private void OpenInInstanceFinder(ScoredPropertyRow? row)
+    {
+        if (row == null || string.IsNullOrEmpty(row.ClassName)) return;
+        NavigateToInstanceFinder?.Invoke(row.ClassName);
     }
 
     /// <summary>Per-row action: pivot the property's class in the Class Pivot tab.</summary>

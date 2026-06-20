@@ -61,7 +61,11 @@ public interface IDumpService
     // the newest runtime spawns survive the limit cap (catch a just-spawned
     // enemy). Default low->high keeps the oldest matches (CDO / class-default /
     // earliest instances — good for finding a Blueprint's template/defaults).
-    Task<FindInstancesResult> FindInstancesAsync(string className, bool exactMatch = false, int limit = 500, bool newestFirst = false, CancellationToken ct = default);
+    // nameFilter: optional case-insensitive substring on the OBJECT name; ANDed
+    // with the class query. Either query may be empty (class-only, name-only, or
+    // both), but not both — the DLL scans all GObjects so name search isn't
+    // bounded by the client-side result cap.
+    Task<FindInstancesResult> FindInstancesAsync(string className, bool exactMatch = false, int limit = 500, bool newestFirst = false, string nameFilter = "", CancellationToken ct = default);
     Task<CePointerInfo> GetCePointerInfoAsync(string addr, int fieldOffset = 0, CancellationToken ct = default);
 
     /// <summary>

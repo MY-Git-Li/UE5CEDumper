@@ -25,6 +25,7 @@
                Width="240" Padding="4,2"/>
       <Button Content="{StaticResource str.Con.ClearFilter}"
               Command="{Binding ClearFilterCommand}"
+              ToolTip.Tip="{StaticResource str.Tip.Con.ClearFilter}"
               Padding="6,2" FontSize="11"
               VerticalAlignment="Center"/>
     </StackPanel>

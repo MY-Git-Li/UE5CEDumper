@@ -314,17 +314,34 @@
     </Border>
 
     <!-- Main Content: Left Tree + Right Tabs -->
-    <Grid>
+    <Grid x:Name="ContentGrid">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="350" MinWidth="200"/>
         <ColumnDefinition Width="4"/>
         <ColumnDefinition Width="*"/>
       </Grid.ColumnDefinitions>
 
-      <!-- Left: Object Tree -->
-      <views:ObjectTreePanel Grid.Column="0" DataContext="{Binding ObjectTree}"/>
+      <!-- Left: Object Tree, with a slim re-expand strip shown when collapsed.
+           MainWindow.axaml.cs resizes TreeColumn / hides TreeSplitter in
+           response to ObjectTree.IsCollapsed so the right panels get full width. -->
+      <Panel Grid.Column="0">
+        <!-- IsVisible resolves against this element's own DataContext (the
+             ObjectTree sub-VM set just above), so bind IsCollapsed directly. -->
+        <views:ObjectTreePanel DataContext="{Binding ObjectTree}"
+                               IsVisible="{Binding !IsCollapsed}"/>
+        <Border IsVisible="{Binding ObjectTree.IsCollapsed}"
+                Background="#252526" BorderBrush="#3C3C3C" BorderThickness="0,0,1,0">
+          <Button Content="&#x25B6;"
+                  Command="{Binding ObjectTree.ToggleCollapseCommand}"
+                  ToolTip.Tip="{StaticResource str.Tip.ObjectTree.Expand}"
+                  VerticalAlignment="Top" HorizontalAlignment="Center"
+                  Margin="0,6,0,0" Padding="4,3"
+                  Background="Transparent" BorderThickness="0"
+                  Foreground="#888" Cursor="Hand" FontSize="12"/>
+        </Border>
+      </Panel>
 
-      <GridSplitter Grid.Column="1" Background="#3C3C3C"
+      <GridSplitter x:Name="TreeSplitter" Grid.Column="1" Background="#3C3C3C"
                     ResizeDirection="Columns"/>
 
       <!-- Right: Tab panels -->

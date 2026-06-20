@@ -44,6 +44,7 @@
       <ToggleSwitch IsChecked="{Binding IsGroupMode}"
                     OffContent="{StaticResource str.VS.Mode.Single}"
                     OnContent="{StaticResource str.VS.Mode.Group}"
+                    ToolTip.Tip="{StaticResource str.Tip.VS.Mode}"
                     FontSize="12"/>
     </StackPanel>
 

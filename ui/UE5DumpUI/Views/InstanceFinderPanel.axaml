@@ -12,7 +12,14 @@
                Text="{Binding SearchClassName}"
                x:Name="SearchClassNameInput"
                KeyDown="SearchClassNameInput_KeyDown"
-               Width="300" Padding="4,2"/>
+               ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.ClassName}"
+               Width="260" Padding="4,2"/>
+      <TextBox PlaceholderText="{StaticResource str.InstanceFinder.ObjectNameHint}"
+               Text="{Binding SearchObjectName}"
+               x:Name="SearchObjectNameInput"
+               KeyDown="SearchClassNameInput_KeyDown"
+               ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.ObjectName}"
+               Width="220" Padding="4,2"/>
       <CheckBox Content="{StaticResource str.InstanceFinder.ExactMatch}"
                 IsChecked="{Binding ExactMatch}"
                 ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.ExactMatch}"
@@ -39,6 +46,7 @@
                Text="{Binding LookupAddress}"
                x:Name="LookupAddressInput"
                KeyDown="LookupAddressInput_KeyDown"
+               ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.AddressField}"
                Width="300" Padding="4,2"/>
       <Button Content="{StaticResource str.InstanceFinder.Lookup}"
               Command="{Binding LookupAddressCommand}"
