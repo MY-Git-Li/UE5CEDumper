@@ -5045,11 +5045,12 @@ ValueScanResult ScanForValue(
     bool                deep,
     bool                nativeC,
     int32_t             nativeAlign,
-    bool                newestFirst)
+    bool                newestFirst,
+    int32_t             deadlineMs)
 {
     ValueScanResult result;
     auto t0 = std::chrono::steady_clock::now();
-    constexpr auto kDeadline = std::chrono::seconds(15);
+    const auto kDeadline = std::chrono::milliseconds(deadlineMs > 0 ? deadlineMs : 15000);
 
     const bool isString = Radar::IsStringDataType(dt);
     const bool isVector = Radar::IsVectorDataType(dt);
@@ -7023,10 +7024,11 @@ void AppendRawHoleLeaves(uintptr_t obj, uintptr_t cls, const std::string& classN
 
 GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
                                   bool gameOnly, int32_t maxResults, bool deep,
-                                  bool crossObject, bool nativeC, bool newestFirst) {
+                                  bool crossObject, bool nativeC, bool newestFirst,
+                                  int32_t deadlineMs) {
     GroupScanResult result;
     auto t0 = std::chrono::steady_clock::now();
-    constexpr auto kDeadline = std::chrono::seconds(15);
+    const auto kDeadline = std::chrono::milliseconds(deadlineMs > 0 ? deadlineMs : 15000);
 
     const size_t nSlots = slots.size();
     if (nSlots < 2) return result;                       // a group needs >= 2 values

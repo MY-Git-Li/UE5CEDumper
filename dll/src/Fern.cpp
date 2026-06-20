@@ -2054,6 +2054,12 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             bool nativeC     = request.value("native_c", false);
             int32_t nativeAlign = request.value("native_align", 4);
             bool newestFirst = request.value("newest_first", false);
+            // User-adjustable scan deadline (Value Search "Timeout" slider, 10-60s).
+            // Default 15000ms. Clamp to a sane band so a malformed request can't
+            // hang the scan thread forever or starve it below a useful budget.
+            int32_t deadlineMs = request.value("deadline_ms", 15000);
+            if (deadlineMs < 1000)   deadlineMs = 1000;
+            if (deadlineMs > 300000) deadlineMs = 300000;
 
             Radar::DataType dt;
             if (!Radar::TryParseDataType(dtStr, dt)) {
@@ -2131,7 +2137,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             auto scanResult = Aura::ScanForValue(
                 dt, st, targetBytes, target2Ptr, gameOnly, maxResults,
                 tolerance, targetString, caseSensitive, multiPtr, multiPtr2,
-                parallel, batchRead, deep, nativeC, nativeAlign, newestFirst);
+                parallel, batchRead, deep, nativeC, nativeAlign, newestFirst, deadlineMs);
 
             uint64_t sessionId = Radar::SessionManager::Instance().Begin(
                 dt, std::move(scanResult.candidates),
@@ -2402,6 +2408,11 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             // Newest-first (P2): walk high-index objects first so a deadline-
             // truncated huge game keeps the newest objects (UI coupled with native).
             bool newestFirst = request.value("newest_first", false);
+            // User-adjustable scan deadline (Value Search "Timeout" slider, 10-60s).
+            // Default 15000ms; clamped to the same band as begin_value_scan.
+            int32_t deadlineMs = request.value("deadline_ms", 15000);
+            if (deadlineMs < 1000)   deadlineMs = 1000;
+            if (deadlineMs > 300000) deadlineMs = 300000;
             if (pageSize < 0) pageSize = 0;
 
             if (!request.contains("values") || !request["values"].is_array()) {
@@ -2457,7 +2468,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             }
             const int slotCount = static_cast<int>(slots.size());
 
-            auto scanResult = Aura::ScanForValueGroup(slots, gameOnly, maxResults, deep, crossObject, nativeC, newestFirst);
+            auto scanResult = Aura::ScanForValueGroup(slots, gameOnly, maxResults, deep, crossObject, nativeC, newestFirst, deadlineMs);
 
             uint64_t sessionId = Radar::GroupSessionManager::Instance().Begin(
                 std::move(slots), std::move(scanResult.candidates),

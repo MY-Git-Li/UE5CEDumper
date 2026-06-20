@@ -469,6 +469,47 @@ public class ValueSearchTests
     }
 
     [Fact]
+    public async Task ViewModel_ScanTimeout_ThreadsDeadlineMsToService()
+    {
+        // The Timeout slider (seconds) must reach the DLL as deadline_ms = seconds*1000
+        // on both First Scan (single) and Group First Scan.
+        var (vm, fake) = MakeVm();
+        fake.NextBeginResult = new ValueScanBeginResult { SessionId = 1UL };
+        vm.SelectedDataType = ValueScanDataType.Int32;
+        vm.SelectedScanType = ValueScanType.Exact;
+        vm.Value = "100";
+
+        // Default 15s → 15000ms.
+        await vm.FirstScanCommand.ExecuteAsync(null);
+        Assert.Equal(15000, fake.LastDeadlineMs);
+
+        // Slider moved to 45s → 45000ms.
+        vm.ScanTimeoutSeconds = 45;
+        await vm.FirstScanCommand.ExecuteAsync(null);
+        Assert.Equal(45000, fake.LastDeadlineMs);
+
+        // Group First Scan threads the same value.
+        fake.NextGroupBeginResult = new GroupScanBeginResult { SessionId = 2UL };
+        vm.IsGroupMode = true;
+        vm.GroupInputs[0].Value = "1";
+        vm.GroupInputs[1].Value = "2";
+        await vm.GroupFirstScanCommand.ExecuteAsync(null);
+        Assert.Equal(45000, fake.LastGroupDeadlineMs);
+    }
+
+    [Fact]
+    public void ViewModel_ScanTimeout_ClampsToBand()
+    {
+        var (vm, _) = MakeVm();
+        vm.ScanTimeoutSeconds = 3;    // below floor
+        Assert.Equal(10, vm.ScanTimeoutSeconds);
+        vm.ScanTimeoutSeconds = 999;  // above ceiling
+        Assert.Equal(60, vm.ScanTimeoutSeconds);
+        vm.ScanTimeoutSeconds = 30;   // in band
+        Assert.Equal(30, vm.ScanTimeoutSeconds);
+    }
+
+    [Fact]
     public async Task EndValueScanAsync_SendsSessionId()
     {
         var svc = MakeService(out var pipe);
@@ -1184,13 +1225,14 @@ public class ValueSearchTests
         public bool? LastDeep { get; private set; }
         public bool? LastNativeC { get; private set; }
         public bool? LastNewestFirst { get; private set; }
+        public int? LastDeadlineMs { get; private set; }
         public override Task<ValueScanBeginResult> BeginValueScanAsync(
             ValueScanDataType dataType, ValueScanType scanType,
             string value, string? value2 = null, bool gameOnly = true,
             int maxResults = 50000, double tolerance = 0.0,
             bool caseSensitive = false, bool parallel = true, bool batchRead = true,
             bool deep = false, bool nativeC = false, bool newestFirst = false,
-            int pageSize = 1000, CancellationToken ct = default)
+            int pageSize = 1000, int deadlineMs = 15000, CancellationToken ct = default)
         {
             Begins.Add((dataType, scanType, value, value2, gameOnly, maxResults, tolerance, caseSensitive));
             LastParallel = parallel;
@@ -1198,6 +1240,7 @@ public class ValueSearchTests
             LastDeep = deep;
             LastNativeC = nativeC;
             LastNewestFirst = newestFirst;
+            LastDeadlineMs = deadlineMs;
             return Task.FromResult(NextBeginResult);
         }
 
@@ -1234,14 +1277,16 @@ public class ValueSearchTests
         public List<(List<GroupSlotInput> slots, bool gameOnly, int maxResults, bool deep, bool crossObject, bool nativeC, bool newestFirst)> GroupBegins { get; } = new();
         public List<(ulong sessionId, List<GroupSlotInput> slots)> GroupRefines { get; } = new();
         public List<ulong> GroupEnds { get; } = new();
+        public int? LastGroupDeadlineMs { get; private set; }
 
         public override Task<GroupScanBeginResult> BeginGroupScanAsync(
             IReadOnlyList<GroupSlotInput> slots, bool gameOnly = true,
             int maxResults = 50000, bool deep = false, bool crossObject = false,
             bool nativeC = false, bool newestFirst = false, int pageSize = 1000,
-            CancellationToken ct = default)
+            int deadlineMs = 15000, CancellationToken ct = default)
         {
             GroupBegins.Add((slots.ToList(), gameOnly, maxResults, deep, crossObject, nativeC, newestFirst));
+            LastGroupDeadlineMs = deadlineMs;
             return Task.FromResult(NextGroupBeginResult);
         }
 

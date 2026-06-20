@@ -1827,20 +1827,76 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         });
 
         for (int i = 0; i < includedSteps; i++)
+            foreach (var bc in PathStepToBreadcrumbs(path.Steps[i]))
+                Breadcrumbs.Add(bc);
+    }
+
+    /// <summary>
+    /// Convert one GWorld-path hop into the breadcrumb level(s) it represents.
+    ///
+    /// A <c>TArray&lt;ObjectProperty&gt;</c> element hop crosses TWO dereferences —
+    /// deref <c>TArray::Data</c> (the array field at <c>FieldOffset</c>), then deref
+    /// the element pointer at <c>index*8</c> within that buffer — but the DLL path
+    /// collapses both into ONE hop (FieldOffset = array field, ElementIndex = the
+    /// element). Emitting it as a single breadcrumb makes the CE chain stop at the
+    /// TArray::Data buffer and apply the next field's offset to IT instead of to the
+    /// element's target object (wrong addresses for everything below). So such a hop
+    /// is split into TWO crumbs here — a container crumb (deref Data) + an element
+    /// crumb (deref the pointer at index*8) — matching what manual navigation
+    /// produces. Only raw object-pointer arrays split (the element slot IS an 8-byte
+    /// <c>UObject*</c>); struct-array / Map / Set element hops keep the single crumb
+    /// (their element isn't a plain pointer at a known stride).
+    /// </summary>
+    internal static IReadOnlyList<BreadcrumbItem> PathStepToBreadcrumbs(GWorldPathStep s)
+    {
+        var label = !string.IsNullOrEmpty(s.ToName) ? s.ToName
+                  : (!string.IsNullOrEmpty(s.FieldName) ? s.FieldName : "(node)");
+
+        bool isObjPtrArrayElem = s.ElementIndex >= 0
+            && s.FieldType == "ArrayProperty"
+            && (s.InnerType == "ObjectProperty" || s.InnerType == "ClassProperty");
+
+        if (isObjPtrArrayElem)
         {
-            var s = path.Steps[i];
-            var label = !string.IsNullOrEmpty(s.ToName) ? s.ToName
-                      : (!string.IsNullOrEmpty(s.FieldName) ? s.FieldName : "(node)");
-            if (s.ElementIndex >= 0) label += $"[{s.ElementIndex}]";
-            Breadcrumbs.Add(new BreadcrumbItem
+            return new[]
+            {
+                // Level 1 — the array field: deref TArray::Data. Flagged as a
+                // container view so CleanBreadcrumbs skips it as a cycle endpoint
+                // (it shares the parent object's resolved region). ContainerField
+                // stays null (path-derived, not re-populatable); Back-nav handles
+                // that with a plain re-walk.
+                new BreadcrumbItem
+                {
+                    Address = !string.IsNullOrEmpty(s.From) ? s.From : s.To,
+                    Label = !string.IsNullOrEmpty(s.FieldName) ? s.FieldName : "(array)",
+                    FieldOffset = s.FieldOffset,
+                    FieldName = s.FieldName,
+                    IsContainerView = true,
+                },
+                // Level 2 — the element pointer at index*8: deref to the child object.
+                new BreadcrumbItem
+                {
+                    Address = s.To,
+                    Label = $"[{s.ElementIndex}]",
+                    FieldOffset = s.ElementIndex * 8,  // ObjectProperty stride = 8 (pointer)
+                    FieldName = $"[{s.ElementIndex}]",
+                    IsPointerDeref = true,
+                },
+            };
+        }
+
+        if (s.ElementIndex >= 0) label += $"[{s.ElementIndex}]";
+        return new[]
+        {
+            new BreadcrumbItem
             {
                 Address = s.To,
                 Label = label,
                 FieldOffset = s.FieldOffset,
                 FieldName = s.FieldName,
                 IsPointerDeref = true,  // every edge we followed is a pointer deref
-            });
-        }
+            },
+        };
     }
 
     /// <summary>
@@ -2512,11 +2568,20 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             ClearStatus();
             IsLoading = true;
 
+            // Collapse consecutive duplicate crumbs FIRST (before the container
+            // split below), so a redundant trailing container crumb — e.g. a
+            // Locate-in-GWorld path-synthetic SpawnedAttributes(C) followed by the
+            // user re-entering that same container — doesn't leave one copy in the
+            // spine while the other becomes the field (which double-derefs the array
+            // field offset). The later duplicate is kept (it carries the live
+            // ContainerField needed by FilterContainerToElement).
+            var dedupedBc = CeXmlExportService.DedupeConsecutiveBreadcrumbs(Breadcrumbs);
+
             // Container view: strip container breadcrumb, build ONE filtered
             // ContainerField containing all selected elements (preserves CE's
             // hierarchical structure — header + nested elements under same
             // pointer chain — instead of N detached top-level entries).
-            var lastBc = Breadcrumbs[^1];
+            var lastBc = dedupedBc[^1];
             var isContainerView = lastBc.IsContainerView && lastBc.ContainerField != null;
 
             IReadOnlyList<BreadcrumbItem> breadcrumbsForXml;
@@ -2539,18 +2604,18 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
             if (isStructElementSelection)
             {
-                breadcrumbsForXml = Breadcrumbs;
+                breadcrumbsForXml = dedupedBc;
                 fieldsForXml = selectedSnapshot;
             }
             else if (isContainerView)
             {
-                breadcrumbsForXml = Breadcrumbs.Take(Breadcrumbs.Count - 1).ToList();
+                breadcrumbsForXml = dedupedBc.Take(dedupedBc.Count - 1).ToList();
                 fieldsForXml = new List<LiveFieldValue>
                     { FilterContainerToElement(lastBc.ContainerField!, selectedSnapshot) };
             }
             else
             {
-                breadcrumbsForXml = Breadcrumbs;
+                breadcrumbsForXml = dedupedBc;
                 fieldsForXml = selectedSnapshot;
             }
 

@@ -53,6 +53,22 @@ public partial class ValueSearchViewModel : ViewModelBase
     [ObservableProperty] private bool   _gameOnly = true;
     [ObservableProperty] private int    _maxResults = 50000;
 
+    /// <summary>Scan deadline in SECONDS (the "Timeout" slider, 10–60s). When a
+    /// First / Group scan exceeds this wall-clock budget the DLL bails early and
+    /// returns whatever matched so far (the status banner notes the truncation).
+    /// Default 15s matches the historical hard deadline; raise it for huge games
+    /// that keep truncating, lower it for snappier scans on small ones. Threaded to
+    /// the DLL as <c>deadline_ms</c> on begin_value_scan / begin_group_scan.</summary>
+    [ObservableProperty] private int    _scanTimeoutSeconds = 15;
+
+    // Defensive clamp (the slider already bounds 10–60) so a programmatic / restored
+    // value can't push an out-of-band deadline onto the wire.
+    partial void OnScanTimeoutSecondsChanged(int value)
+    {
+        if (value < 10) ScanTimeoutSeconds = 10;
+        else if (value > 60) ScanTimeoutSeconds = 60;
+    }
+
     /// <summary>When true (default) the DLL walks GObjects with worker threads
     /// (fast). Turn off to force a single-threaded scan so concurrent
     /// cross-thread memory reads don't trip a game's anti-tamper — slower but
@@ -635,7 +651,7 @@ public partial class ValueSearchViewModel : ViewModelBase
                 SelectedDataType, SelectedScanType, Value,
                 SelectedScanType == ValueScanType.Between ? Value2 : null,
                 GameOnly, MaxResults, effTol, effCase, ParallelScan, BatchRead, DeepScan,
-                NativeCScan, NewestFirst, PageSize, cts.Token);
+                NativeCScan, NewestFirst, PageSize, ScanTimeoutSeconds * 1000, cts.Token);
 
             SessionId = result.SessionId;
             await ApplyScanResultAsync(result.Total, result.Candidates);
@@ -644,7 +660,7 @@ public partial class ValueSearchViewModel : ViewModelBase
                           $"(scanned {result.ScannedObjects} objects, " +
                           $"{result.ScannedClasses} classes with matching fields)";
             if (result.DeadlineHit)
-                summary += "  ⚠ scan truncated (15s deadline) — narrow predicate to see complete set";
+                summary += $"  ⚠ scan truncated ({ScanTimeoutSeconds}s deadline) — raise the Timeout slider or narrow the predicate";
             StatusText = summary;
         }
         catch (OperationCanceledException)
@@ -983,7 +999,7 @@ public partial class ValueSearchViewModel : ViewModelBase
 
             var result = await _dump.BeginGroupScanAsync(
                 GroupInputs.ToList(), GameOnly, MaxResults, DeepScan, CrossObjectScan,
-                NativeCScan, NewestFirst, PageSize, cts.Token);
+                NativeCScan, NewestFirst, PageSize, ScanTimeoutSeconds * 1000, cts.Token);
 
             GroupSessionId = result.SessionId;
             await ApplyGroupScanResultAsync(result.Total, result.Candidates);
@@ -991,7 +1007,7 @@ public partial class ValueSearchViewModel : ViewModelBase
             var summary = $"Group First Scan: {result.Total} matching objects in {result.DurationMs} ms " +
                           $"(scanned {result.ScannedObjects} objects, {result.ScannedClasses} classes)";
             if (result.DeadlineHit)
-                summary += "  ⚠ truncated (15s deadline / result cap) — refine to narrow";
+                summary += $"  ⚠ truncated ({ScanTimeoutSeconds}s deadline / result cap) — raise the Timeout slider or refine";
             StatusText = summary;
         }
         catch (OperationCanceledException) { StatusText = "Group First Scan cancelled."; }

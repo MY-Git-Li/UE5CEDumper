@@ -229,7 +229,8 @@ CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands f
   "batch_read": false,          // optional, default true (omitted when batching)
   "native_c": true,             // optional (P1), default false; see below
   "native_align": 4,            // optional (P1), stride 1/2/4/8, default 4
-  "newest_first": true          // optional (P1), default false; see below
+  "newest_first": true,         // optional (P1), default false; see below
+  "deadline_ms": 30000          // optional, default 15000; see below
 }
 
 // Next Scan — refine candidates in an open session.
@@ -254,6 +255,7 @@ CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands f
 - `deep` (build 1283) is attached only when **true** (default off). It forces the recursive deep-container leaf pass on every class — reaching values buried inside deeply-nested containers (struct arrays, struct-valued maps, nested `TArray`/`TSet`) that the auto `needsDeepWalk` heuristic doesn't flag. Heavier per object; the UI exposes it as the default-OFF "Deep" toggle.
 - `native_c` (P1, Native-C value scan) is attached only when **true** (default off). It additionally scans each object's **unmanaged holes** — the byte ranges within `[UObject header, class PropertiesSize)` that no UPROPERTY covers — for the requested value at the user's width, so native (non-UPROPERTY) C++ members (HP/MP) are findable. Numeric/multi-numeric data types only (a no-op for string/vector/bool). `native_align` (default 4, values 1/2/4/8) is the stride for sliding within each hole. Matching candidates carry `is_native_c: true` + `guessed_type` (the interpreted width, e.g. `"Int32"`). Intentionally noisy on first scan — pair with `newest_first` + Next-Scan refine. See [native-c-value-scan-spec.md](native-c-value-scan-spec.md).
 - `newest_first` (P1) is attached only when **true** (default off). It walks GObjects high-index-first so that when results hit `max_results` the survivors are the most-recently-allocated instances (a just-spawned pawn) rather than low-index CDOs/templates. Applies to the whole scan (reflected + native); affects only which matches survive truncation. The UI auto-checks it when `native_c` is enabled (the user can uncheck it).
+- `deadline_ms` (scan wall-clock budget) is attached only when **≠ 15000** (the DLL default). When the GObjects walk exceeds it the scan bails early, sets `deadline_hit: true`, and returns whatever matched so far. The DLL clamps the value to **[1000, 300000]** ms. The UI exposes it as the Value Search "Timeout" slider (10–60 s); raise it for huge games (400K+ objects) that keep hitting the deadline. Applies to `begin_value_scan` and `begin_group_scan`; refine re-reads only the existing candidates and is unaffected. Older DLLs that don't read the field simply use the fixed 15 s.
 
 ### Multiple Values Group Scan (build 1276)
 
@@ -269,6 +271,7 @@ Object-aware "group scan": find objects (blocks) that **simultaneously** hold AL
 {
   "id": 60, "cmd": "begin_group_scan",
   "game_only": true, "max_results": 50000, "page_size": 1000,
+  "deadline_ms": 30000,                                 // optional, default 15000 (clamp 1000..300000); see begin_value_scan
   "deep": false,                                        // optional (build 1283); see below
   "cross_object": false,                                // optional (P4, build 1303); see below
   "native_c": false,                                    // optional (P2): fold each object's
