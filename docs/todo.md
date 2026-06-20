@@ -477,20 +477,19 @@ Pick up when the active plan finishes or when blocked.
 
 Shipped + unit-tests-pass but unproven on real games:
 
-- **Copy CE Field drills object-pointer arrays — leaf + GWorld-path spine + dup-crumb dedup** (builds
-  1364-1376, this session). LEAF side (`SpawnedAttributes[2]` → `CharacterAttributeSet` → `HealthPoint`)
-  LIVE-VERIFIED on Elliot. SPINE side (2b): a "Locate in GWorld" path through `PlayerArray[0]` now
-  splits into a container + element crumb (`PathStepToBreadcrumbs`). DEDUP (2c): a duplicate consecutive
-  container crumb (e.g. re-entering SpawnedAttributes after a path-synthetic crumb's Back-nav fallback)
-  no longer doubles the `+offset` deref — `DedupeConsecutiveBreadcrumbs` collapses adjacent identical
-  crumbs in `ExportCeFieldXmlAsync` + `CleanBreadcrumbs`. **LIVE-RE-TEST (2b+2c):** redo Locate-in-GWorld
-  → Copy CE Field (both nested AND Collapse-chain) and confirm no duplicate `SpawnedAttributes` node and
-  correct addresses. Unit-tested (`...ObjectArray_WithResolvedElement_DrillsElementGroup`,
-  `...PathThroughObjectArrayElement_EmitsElementDerefNode`, `DedupeConsecutiveBreadcrumbs_*`). Open
-  follow-ups: (a) Map/Set element hops in a GWorld-path spine still collapse to one crumb (only
-  object-pointer ARRAYS split — stride/value-offset not in the path step); (b) the path-synthetic
-  container crumb has no `ContainerField`, so Back-nav onto it re-walks the parent (cosmetic bar
-  duplicate + the re-entry that caused 2c) — give it a ContainerField or fix Back-nav fallback.
+- **Copy CE Field drills object-pointer arrays — leaf + GWorld-path spine + dup-crumb dedup — DONE +
+  MERGED (PR #323, builds 1364-1379).** LEAF (`SpawnedAttributes[2]` → `CharacterAttributeSet` →
+  `HealthPoint`), SPINE 2b (`PathStepToBreadcrumbs` splits a Locate-in-GWorld `PlayerArray[0]` hop into
+  container + element), and DEDUP 2c (`DedupeConsecutiveBreadcrumbs` collapses a redundant consecutive
+  container crumb in `ExportCeFieldXmlAsync` + `CleanBreadcrumbs`) all **LIVE-VERIFIED on Elliot AND the
+  deeply-nested Gundam SEED chain** (nested + Collapse-chain). Unit-tested
+  (`...ObjectArray_WithResolvedElement_DrillsElementGroup`, `...PathThroughObjectArrayElement_EmitsElementDerefNode`,
+  `DedupeConsecutiveBreadcrumbs_*`, `..._DeepDistinctChain_Unchanged`). **Remaining follow-ups (not
+  blocking):** (a) Map/Set element hops in a GWorld-path spine still collapse to one crumb (only
+  object-pointer ARRAYS split — stride/value-offset not carried in the path step); (b) the
+  path-synthetic container crumb has no `ContainerField`, so Back-nav onto it re-walks the parent
+  (cosmetic breadcrumb-bar duplicate; was the re-entry that caused 2c) — give it a `ContainerField` or
+  fix the Back-nav fallback.
 - **Value Search 1M cap (V2)** (build 954). Set Max near 1,000,000 on a broadly-matching
   value; confirm First Scan completes (or hits the 15 s deadline cleanly), the grid pages
   via Load More, and the server-side keyword filter + sort picker stay responsive at that
