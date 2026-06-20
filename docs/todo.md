@@ -484,17 +484,17 @@ Shipped + unit-tests-pass but unproven on real games:
   container crumb in `ExportCeFieldXmlAsync` + `CleanBreadcrumbs`) all **LIVE-VERIFIED on Elliot AND the
   deeply-nested Gundam SEED chain** (nested + Collapse-chain). Unit-tested
   (`...ObjectArray_WithResolvedElement_DrillsElementGroup`, `...PathThroughObjectArrayElement_EmitsElementDerefNode`,
-  `DedupeConsecutiveBreadcrumbs_*`, `..._DeepDistinctChain_Unchanged`). **(b) DONE (builds 1380-1388,
-  dev) — Back-nav onto a path-synthetic container crumb now re-hydrates the array element view.** The
+  `DedupeConsecutiveBreadcrumbs_*`, `..._DeepDistinctChain_Unchanged`). **(b) DONE + LIVE-VERIFIED
+  (builds 1380-1388) — Back-nav onto a path-synthetic container crumb now re-hydrates the array element view.** The
   crumb's `ContainerField` is null (the `GWorldPathStep` carries no `ArrayDataAddr`/`ArrayCount`/element
   list), so Back-nav fell through to a parent re-walk and rendered the PARENT object grid (a silent
   mis-render — NOT a literal duplicate; the 2c dedup already covers the export-time crumb). "Give it a
   `ContainerField`" is infeasible (path step lacks the data) → `TryRepopulateSyntheticContainerAsync`
   LAZILY re-walks the parent + matches the field by name+offset + `RepopulateContainerView`, wired into
   all 4 re-display sites (NavigateToBreadcrumb, GoBack normal + pre-bookmark restore, LoadBookmark) +
-  `RefreshAsync`'s container gate broadened. 7 new tests; C# 1648/0, AOT 46.5 MB. **(a) DONE (builds
-  1389-1390, dev) — Map/Set (and interface-array) element hops in a GWorld-path spine now split into
-  container + element crumbs.** The DLL `emit()` lambda was widened 6→8 args to thread `elemStride`
+  `RefreshAsync`'s container gate broadened. 7 new tests; C# 1648/0, AOT 46.5 MB. **(a) DONE +
+  LIVE-VERIFIED (builds 1389-1390) — Map/Set (and interface-array) element hops in a GWorld-path spine
+  now split into container + element crumbs.** The DLL `emit()` lambda was widened 6→8 args to thread `elemStride`
   (Map `pairStride` / Set `elemStride` / interface-array 16) + `elemValueOffset` (Map value's within-pair
   offset; 0 for set/key/interface) through `GraphEdge`/`GraphPathStep` → Fern `elem_stride`/`elem_value_offset`
   → C# `GWorldPathStep` → `PathStepToBreadcrumbs` (element crumb offset = `ElementIndex*stride + valueOffset`;
