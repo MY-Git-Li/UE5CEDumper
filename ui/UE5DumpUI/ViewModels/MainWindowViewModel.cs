@@ -102,7 +102,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int _selectedTabIndex;
     [ObservableProperty] private int _selectedAddressFormatIndex;
     [ObservableProperty] private bool _collapsePointerNodes;
-    [ObservableProperty] private int _arrayLimitExponent = 6; // 2^6 = 64
+    [ObservableProperty] private int _arrayLimitExponent = 7; // 2^7 = 128
     [ObservableProperty] private int _dropDownLimitExponent = 9; // 2^9 = 512
     [ObservableProperty] private int _csxDrilldownDepth; // 0 = flat (dummy), 1+ = real child structures
     [ObservableProperty] private int _previewLimit = 2; // Struct preview sub-field count (0-6)

@@ -871,6 +871,22 @@ public sealed class DumpService : IDumpService
         };
     }
 
+    public async Task<GameEngineResult> ResolveGameEngineAsync(CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "resolve_game_engine" };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        return new GameEngineResult
+        {
+            Found          = res["found"]?.GetValue<bool>() ?? false,
+            Address        = res["addr"]?.GetValue<string>() ?? "",
+            ClassName      = res["class"]?.GetValue<string>() ?? "",
+            GameViewportOk = res["game_viewport_ok"]?.GetValue<bool>() ?? false,
+            GameInstanceOk = res["game_instance_ok"]?.GetValue<bool>() ?? false,
+        };
+    }
+
     public async Task<GWorldPathResult> FindPathFromGWorldAsync(
         string target, string? objectAddr = null, int maxDepth = 5,
         CancellationToken ct = default)

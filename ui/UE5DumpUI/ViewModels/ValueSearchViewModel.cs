@@ -53,20 +53,20 @@ public partial class ValueSearchViewModel : ViewModelBase
     [ObservableProperty] private bool   _gameOnly = true;
     [ObservableProperty] private int    _maxResults = 50000;
 
-    /// <summary>Scan deadline in SECONDS (the "Timeout" slider, 10–60s). When a
+    /// <summary>Scan deadline in SECONDS (the "Timeout" slider, 10–90s). When a
     /// First / Group scan exceeds this wall-clock budget the DLL bails early and
     /// returns whatever matched so far (the status banner notes the truncation).
-    /// Default 15s matches the historical hard deadline; raise it for huge games
-    /// that keep truncating, lower it for snappier scans on small ones. Threaded to
-    /// the DLL as <c>deadline_ms</c> on begin_value_scan / begin_group_scan.</summary>
-    [ObservableProperty] private int    _scanTimeoutSeconds = 15;
+    /// Default 25s; raise it for huge games that keep truncating, lower it for
+    /// snappier scans on small ones. Threaded to the DLL as <c>deadline_ms</c> on
+    /// begin_value_scan / begin_group_scan.</summary>
+    [ObservableProperty] private int    _scanTimeoutSeconds = 25;
 
-    // Defensive clamp (the slider already bounds 10–60) so a programmatic / restored
+    // Defensive clamp (the slider already bounds 10–90) so a programmatic / restored
     // value can't push an out-of-band deadline onto the wire.
     partial void OnScanTimeoutSecondsChanged(int value)
     {
         if (value < 10) ScanTimeoutSeconds = 10;
-        else if (value > 60) ScanTimeoutSeconds = 60;
+        else if (value > 90) ScanTimeoutSeconds = 90;
     }
 
     /// <summary>When true (default) the DLL walks GObjects with worker threads

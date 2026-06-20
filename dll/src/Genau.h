@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <vector>
+#include <string>
 
 namespace Genau {
 
@@ -156,5 +157,24 @@ uintptr_t ExtraScanGWorld();
 // live operations (teleport / live walk / path search) but NOT for cross-session CE
 // symbol export. Callers wanting a static anchor should prefer ExtraScanGWorld's slot.
 uintptr_t RecoverGWorldViaEngine();
+
+// Result of FindGameEngine — the live UEngine/UGameEngine object for the Live
+// Walker "Start from GameEngine" root. engineAddr is 0 when no live engine was
+// found. The two *Ok flags report whether the standard pointer members
+// (GameViewport / GameInstance) are present AND non-null — i.e. this is the
+// active engine, not a CDO or an early-boot stub.
+struct GameEngineInfo {
+    uintptr_t   engineAddr     = 0;
+    uintptr_t   classAddr      = 0;
+    std::string className;            // e.g. "GameEngine" or a game subclass
+    bool        gameViewportOk = false;
+    bool        gameInstanceOk = false;
+};
+
+// Resolve the live GEngine object (same reflected-member detection as
+// RecoverGWorldViaEngine — version-independent, NOT keyed on the class name)
+// and validate its standard pointer fields. Requires GObjects + GNames +
+// offsets. Returns an all-zero/false GameEngineInfo when none is found.
+GameEngineInfo FindGameEngine();
 
 } // namespace Genau

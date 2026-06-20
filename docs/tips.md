@@ -6,6 +6,37 @@ a goal to the panels / buttons that get you there. Add new recipes as separate
 
 -----
 
+## Walking the engine from the top: "Start from GameEngine"
+
+The Live Walker tab has two root entry points:
+
+- **Start from GWorld** — roots on the live `UWorld` and lists its top-level
+  actors. Best for "find an actor / enemy / component in the level".
+- **Start from GameEngine** — roots on the live `UEngine`/`UGameEngine` object.
+  Best for reaching engine-owned state: `GameInstance` (→ subsystems, save data,
+  local players), `GameViewport`, the engine's own `World`, audio/subsystem
+  managers, etc.
+
+It's resolved by a reflected member (the engine's `GameViewport` property), **not
+by class name**, so it works regardless of UE version or a game-specific
+`UGameEngine` subclass. From the engine root, drill down with normal pointer
+navigation (`GameInstance → …`).
+
+### What works from a GameEngine root (and what doesn't)
+
+- **Copy CE XML / Copy CE Field — yes.** The exported pointer chain is anchored
+  on the engine object's **absolute runtime address** plus the breadcrumb spine.
+  It's valid for the current session.
+- **The `AOB` checkbox is disabled** from a GameEngine (or any non-GWorld) root.
+  The AOB symbol anchors specifically on **GWorld**, so it can only stabilize a
+  GWorld-rooted chain across restarts. From other roots the export uses the
+  direct address — which is why the option greys out. If you need a
+  restart-stable chain, start from GWorld instead, or re-resolve the engine
+  address each session.
+- No "Locate in GameEngine" / reverse-path features — those are GWorld-only.
+
+-----
+
 ## Forcing camera rotation in a fixed-view (2.5D / 45°) game
 
 UE4 and UE5 share the camera pipeline, so the same handful of entry points work

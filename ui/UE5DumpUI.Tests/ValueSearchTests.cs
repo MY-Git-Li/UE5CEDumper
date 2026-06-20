@@ -479,9 +479,9 @@ public class ValueSearchTests
         vm.SelectedScanType = ValueScanType.Exact;
         vm.Value = "100";
 
-        // Default 15s → 15000ms.
+        // Default 25s → 25000ms.
         await vm.FirstScanCommand.ExecuteAsync(null);
-        Assert.Equal(15000, fake.LastDeadlineMs);
+        Assert.Equal(25000, fake.LastDeadlineMs);
 
         // Slider moved to 45s → 45000ms.
         vm.ScanTimeoutSeconds = 45;
@@ -504,7 +504,7 @@ public class ValueSearchTests
         vm.ScanTimeoutSeconds = 3;    // below floor
         Assert.Equal(10, vm.ScanTimeoutSeconds);
         vm.ScanTimeoutSeconds = 999;  // above ceiling
-        Assert.Equal(60, vm.ScanTimeoutSeconds);
+        Assert.Equal(90, vm.ScanTimeoutSeconds);
         vm.ScanTimeoutSeconds = 30;   // in band
         Assert.Equal(30, vm.ScanTimeoutSeconds);
     }

@@ -3508,21 +3508,23 @@ uintptr_t ExtraScanGWorld() {
 // member name is a stable UE member; FindPropertyOffsetByName makes the offset
 // version-independent.
 // ============================================================
-uintptr_t RecoverGWorldViaEngine() {
-    Sein::Info("SCAN:GWld", "RecoverGWorldViaEngine: no static slot — trying GEngine->GameViewport->World...");
+// Find the live GEngine object: the (sole) non-CDO whose class exposes a
+// "GameViewport" object property with a non-null value. Class names vary
+// (UGameEngine or a game subclass), but the member is a stable UE member, so
+// FindPropertyOffsetByName makes the offset version-independent. Walks GObjects
+// once, resolving the GameViewport offset PER DISTINCT CLASS (cached) so
+// non-engine classes are walked at most once (cached -1 = skip).
+// Optionally outputs the GameViewport pointer + its offset. Returns 0 if none.
+// Shared by RecoverGWorldViaEngine (GWorld recovery) and FindGameEngine
+// (Live Walker "Start from GameEngine").
+static uintptr_t FindLiveGameEngine(uintptr_t* outViewport, int* outGvOff) {
+    if (outViewport) *outViewport = 0;
+    if (outGvOff) *outGvOff = -1;
 
     int32_t count = Aura::GetCount();
-    if (count <= 0) {
-        Sein::Warn("SCAN:GWld", "RecoverGWorldViaEngine: ObjectArray not initialized (count=%d)", count);
-        return 0;
-    }
+    if (count <= 0) return 0;
 
-    // Step 1: find the live GEngine + its GameViewport. Walk GObjects once; resolve the
-    // "GameViewport" property offset PER DISTINCT CLASS (cached) so non-engine classes are
-    // walked at most once. A class with no GameViewport property caches -1 and is skipped.
     std::unordered_map<uintptr_t, int> gvOffByClass;
-    uintptr_t engine = 0, viewport = 0;
-    int gvOff = -1;
     for (int32_t i = 0; i < count; ++i) {
         uintptr_t obj = Aura::GetByIndex(i);
         if (!obj) continue;
@@ -3548,10 +3550,27 @@ uintptr_t RecoverGWorldViaEngine() {
 
         uintptr_t vp = 0;
         if (Macht::ReadSafe(obj + off, vp) && vp >= 0x10000) {
-            engine = obj; viewport = vp; gvOff = off;
-            break;                                    // first live engine wins
+            if (outViewport) *outViewport = vp;
+            if (outGvOff) *outGvOff = off;
+            return obj;                               // first live engine wins
         }
     }
+    return 0;
+}
+
+uintptr_t RecoverGWorldViaEngine() {
+    Sein::Info("SCAN:GWld", "RecoverGWorldViaEngine: no static slot — trying GEngine->GameViewport->World...");
+
+    int32_t count = Aura::GetCount();
+    if (count <= 0) {
+        Sein::Warn("SCAN:GWld", "RecoverGWorldViaEngine: ObjectArray not initialized (count=%d)", count);
+        return 0;
+    }
+
+    // Step 1: find the live GEngine + its GameViewport (shared helper).
+    uintptr_t viewport = 0;
+    int gvOff = -1;
+    uintptr_t engine = FindLiveGameEngine(&viewport, &gvOff);
     if (!engine || !viewport) {
         Sein::Warn("SCAN:GWld", "RecoverGWorldViaEngine: no live GEngine with a non-null GameViewport found");
         return 0;
@@ -3601,6 +3620,45 @@ uintptr_t RecoverGWorldViaEngine() {
 
     Sein::Warn("SCAN:GWld", "RecoverGWorldViaEngine: GameViewport has no UWorld* field (size=0x%X)", vpSize);
     return 0;
+}
+
+// Resolve the live GEngine object for the Live Walker "Start from GameEngine"
+// root + validate its standard pointer members. Detection is by reflected
+// member (GameViewport), NOT by class name, so it works across UE versions and
+// game-specific UGameEngine subclasses. A meaningful (non-null) GameInstance is
+// the extra "this is the active engine" signal the UI surfaces.
+GameEngineInfo FindGameEngine() {
+    GameEngineInfo info;
+
+    uintptr_t viewport = 0;
+    uintptr_t engine = FindLiveGameEngine(&viewport, nullptr);
+    if (!engine) {
+        Sein::Warn("SCAN:Eng", "FindGameEngine: no live GEngine with a non-null GameViewport found");
+        return info;
+    }
+    info.engineAddr     = engine;
+    info.gameViewportOk = (viewport != 0);
+
+    uintptr_t cls = 0;
+    if (Macht::ReadSafe(engine + Grimoire::OFF_UOBJECT_CLASS, cls) && cls) {
+        info.classAddr = cls;
+        uint32_t cn = 0;
+        if (Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, cn))
+            info.className = Serie::GetString(cn);
+
+        // Validate a meaningful GameInstance pointer (reflected member, non-null).
+        int giOff = FindPropertyOffsetByName(cls, "GameInstance");
+        if (giOff >= 0) {
+            uintptr_t gi = 0;
+            if (Macht::ReadSafe(engine + static_cast<uintptr_t>(giOff), gi) && gi >= 0x10000)
+                info.gameInstanceOk = true;
+        }
+    }
+
+    Sein::Info("SCAN:Eng", "FindGameEngine: GEngine=0x%llX class='%s' viewportOk=%d instanceOk=%d",
+               (unsigned long long)engine, info.className.c_str(),
+               info.gameViewportOk ? 1 : 0, info.gameInstanceOk ? 1 : 0);
+    return info;
 }
 
 bool FindAll(EnginePointers& out, ScanProgressFn progress) {

@@ -192,14 +192,14 @@
                            Minimum="100" Maximum="1000000" Increment="10000"
                            ToolTip.Tip="{StaticResource str.Tip.VS.MaxResults}"
                            Width="170" FontSize="12"/>
-            <!-- User-adjustable scan deadline (was a hard 15s). 10–60s, default 15.
+            <!-- User-adjustable scan deadline (was a hard 15s). 10–90s, default 25.
                  Threaded to the DLL as deadline_ms; shared by Single + Group modes. -->
             <TextBlock Text="{StaticResource str.VS.Timeout}"
                        Foreground="#CCCCCC" FontSize="12"
                        VerticalAlignment="Center" Margin="8,0,0,0"
                        ToolTip.Tip="{StaticResource str.Tip.VS.Timeout}"/>
             <Slider Value="{Binding ScanTimeoutSeconds}"
-                    Minimum="10" Maximum="60"
+                    Minimum="10" Maximum="90"
                     TickFrequency="5" IsSnapToTickEnabled="True"
                     Width="110" VerticalAlignment="Center"
                     ToolTip.Tip="{StaticResource str.Tip.VS.Timeout}"/>
@@ -463,13 +463,13 @@
                     Foreground="#CCCCCC" FontSize="12"
                     VerticalAlignment="Center" Margin="8,0,0,0"/>
           <!-- User-adjustable scan deadline (was a hard 15s). Shares ScanTimeoutSeconds
-               with single mode (10–60s, default 15; threaded as deadline_ms). -->
+               with single mode (10–90s, default 25; threaded as deadline_ms). -->
           <TextBlock Text="{StaticResource str.VS.Timeout}"
                      Foreground="#CCCCCC" FontSize="12"
                      VerticalAlignment="Center" Margin="12,0,0,0"
                      ToolTip.Tip="{StaticResource str.Tip.VS.Timeout}"/>
           <Slider Value="{Binding ScanTimeoutSeconds}"
-                  Minimum="10" Maximum="60"
+                  Minimum="10" Maximum="90"
                   TickFrequency="5" IsSnapToTickEnabled="True"
                   Width="110" VerticalAlignment="Center"
                   ToolTip.Tip="{StaticResource str.Tip.VS.Timeout}"/>
