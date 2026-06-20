@@ -84,6 +84,38 @@ inline std::string Sanitize(const std::string& in) {
     return out;
 }
 
+// Heuristic guard against a junk / misidentified FName whose "wide" bit landed
+// on an ANSI buffer. An asset path like "/Game/Foo/Bar" reinterpreted as
+// UTF-16LE decodes to a long run of CJK mojibake — each ASCII byte-pair becomes
+// one BMP code unit (e.g. bytes "/M" → U+4D2F 䴯). Genuine wide FNames are short
+// localized display strings; UE asset/class/property FNames are ASCII. Return
+// true when a wide decode is implausible so callers drop it instead of
+// surfacing 亂碼 (DQ3 HD-2D: a value in raw heap resolved to a 435-char mojibake
+// class name through a backward-scan false positive).
+//
+// Operates on the raw UTF-16 code units (NUL-terminated within `len`). The
+// signal is length + non-ASCII density: a real wide FName is never long, and a
+// long mostly-non-ASCII wide name is the mojibake fingerprint. Trade-off: a
+// legitimately long all-CJK FName (rare to nonexistent in UE) would also be
+// dropped — acceptable for this dumper's domain.
+inline bool IsImplausibleWideName(const wchar_t* data, size_t len) {
+    if (!data) return false;
+    size_t total = 0, nonAscii = 0;
+    for (size_t i = 0; i < len; ++i) {
+        uint16_t u = static_cast<uint16_t>(data[i]);
+        if (u == 0) break;          // NUL-terminated
+        ++total;
+        if (u >= 0x80) ++nonAscii;
+    }
+    if (total == 0) return false;
+    // No real wide FName approaches this length — long wide = mojibake.
+    if (total > 64) return true;
+    // Medium length dominated by non-ASCII (>=75%) is the mojibake signature,
+    // while still preserving realistic short localized names (< 24 chars).
+    if (total > 24 && nonAscii * 4 >= total * 3) return true;
+    return false;
+}
+
 inline std::string EncodeUtf16(const wchar_t* data, size_t len) {
     std::string result;
     if (!data || len == 0) return result;

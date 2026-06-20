@@ -1353,6 +1353,20 @@ SearchResultSet FindInstancesByClass(const std::string& className, bool exactMat
 
 // Helper: populate an AddressLookupResult from a UObject pointer.
 // `kind` distinguishes confidence levels — see AddressLookupResult comment.
+// A genuine FName resolves to non-empty printable ASCII. Serie::GetString
+// sanitizes non-printable ANSI bytes to '?' and (after the wide-name guard)
+// returns "" for mojibake, so any '?', non-ASCII byte, or emptiness marks a
+// junk decode. Used to gate backward-scan candidates whose arbitrary +0x18
+// bytes can resolve to garbage names — keeps find_by_address from surfacing a
+// misidentified "object" that the Live Walker then walks into 亂碼.
+static bool IsCleanFName(const std::string& s) {
+    if (s.empty() || s.size() > 256) return false;
+    for (unsigned char c : s) {
+        if (c == '?' || c < 0x20 || c >= 0x7F) return false;
+    }
+    return true;
+}
+
 static void FillLookupResult(AddressLookupResult& out, uintptr_t obj, int32_t index,
                              int32_t offsetFromBase, bool exact,
                              const char* kind = nullptr) {
@@ -1552,21 +1566,45 @@ AddressLookupResult FindByAddress(uintptr_t addr) {
         if (!Macht::ReadSafe(probe + Grimoire::OFF_UOBJECT_INDEX, idx)) continue;
         if (idx < 0 || idx > 0x800000) continue;
 
-        // Read FName ComparisonIndex — must resolve to a non-empty string
+        // Read FName ComparisonIndex — must resolve to a clean name.
+        // NOTE: a plain printable-ASCII check is NOT enough — Serie::GetString
+        // sanitizes junk bytes to '?' (0x3F, itself printable), so a garbage
+        // name like "Property??IntProperty" would slip through. IsCleanFName
+        // rejects any '?' / non-ASCII / empty result.
         uint32_t nameIdx = 0;
         if (!Macht::ReadSafe(probe + Grimoire::OFF_UOBJECT_NAME, nameIdx)) continue;
         if (nameIdx == 0) continue;  // Index 0 = "None", skip
         std::string name = Serie::GetString(nameIdx);
-        if (name.empty() || name == "None") continue;
+        if (name == "None" || !IsCleanFName(name)) continue;
 
-        // Additional validation: name should contain only printable ASCII
-        bool validName = true;
-        for (char c : name) {
-            if (c < 0x20 || c > 0x7E) { validName = false; break; }
+        // Validate the CLASS too. A backward-scan false positive is arbitrary
+        // bytes that merely resemble a UObject header; its ClassPrivate points
+        // at junk whose name decodes to '?'-runs (ANSI) or CJK mojibake (wide).
+        // Accepting it makes the Live Walker surface 亂碼 (DQ3 HD-2D: a value in
+        // raw heap resolved to 'Property??IntProperty' with a 435-char mojibake
+        // class). Require a clean class FName so only real subobjects pass.
+        // (cls + clsVtable were already validated as in-module above.)
+        std::string clsName;
+        {
+            uint32_t clsNameIdx = 0;
+            if (Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx))
+                clsName = Serie::GetString(clsNameIdx);
         }
-        if (!validName) continue;
+        if (!IsCleanFName(clsName)) continue;
 
-        // This looks like a valid UObject!
+        // Containment gate: the backward scan exists to attribute addr to a
+        // non-GObjects SUBobject that CONTAINS it. Require addr to fall within
+        // this object's PropertiesSize — otherwise it's merely the nearest
+        // header, not the owner. Without this, rejecting a close junk header
+        // (above) would let the scan latch onto a real but far object (e.g. addr
+        // +0x2630 past a BackgroundBlur) and mislabel it "backward". A genuine
+        // miss falls through to the low-confidence "nearest" path instead.
+        int32_t propsSize = 0;
+        if (!Macht::ReadSafe(cls + DynOff::USTRUCT_PROPSSIZE, propsSize)) continue;
+        if (propsSize <= 0 || propsSize > 0x100000) continue;
+        if ((addr - probe) >= static_cast<uintptr_t>(propsSize)) continue;
+
+        // This looks like a valid UObject that contains addr!
         uintptr_t dist = addr - probe;
 
         LOG_INFO("FindByAddress: Backward scan hit at 0x%llX (%s), dist=0x%llX, idx=%d",

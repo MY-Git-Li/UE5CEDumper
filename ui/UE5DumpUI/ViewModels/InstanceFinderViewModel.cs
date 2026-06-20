@@ -251,7 +251,17 @@ public partial class InstanceFinderViewModel : ViewModelBase
                 };
                 Instances.Add(instance);
                 HasInstances = true;
-                SelectedInstance = instance;  // Auto-select to trigger field loading
+
+                // "nearest" means the address is BEYOND the UObject's
+                // PropertiesSize — we are NOT inside it (typically raw heap /
+                // native allocation, or a container buffer the value lives in).
+                // Don't auto-walk it: presenting its fields implies the value
+                // lives there, which is misleading. Surface it as a clickable
+                // hint and warn instead. ("backward" is a real subobject the DLL
+                // validated, so auto-walking it is genuinely useful — keep it.)
+                bool lowConfidence = result.MatchKind == "nearest";
+                if (!lowConfidence)
+                    SelectedInstance = instance;  // Auto-select to trigger field loading
 
                 // Be honest about confidence — "nearest" / "backward" mean addr
                 // is BEYOND the UObject's PropertiesSize, often misleading
@@ -261,7 +271,7 @@ public partial class InstanceFinderViewModel : ViewModelBase
                     "exact"    => "Exact UObject match",
                     "contains" => $"Inside {result.Name} (offset +0x{result.OffsetFromBase:X})",
                     "backward" => $"Past {result.Name} (offset +0x{result.OffsetFromBase:X}) — backward scan",
-                    "nearest"  => $"Nearest UObject is {result.Name} (offset +0x{result.OffsetFromBase:X}, beyond bounds — likely heap data)",
+                    "nearest"  => $"⚠ Not inside any UObject — this value is likely raw heap / native data. Nearest is {result.Name} at +0x{result.OffsetFromBase:X} (click the row to inspect it anyway).",
                     _          => $"Match: {result.Name} (offset +0x{result.OffsetFromBase:X})",
                 };
                 if (HasContainerMatches)

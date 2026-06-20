@@ -212,6 +212,72 @@ static void Test_EncodeUtf16_OutputAlwaysValidUtf8() {
     EXPECT("EncodeUtf16 output passes Sanitize unchanged", encoded == sanitized);
 }
 
+// ----- IsImplausibleWideName tests -------------------------------------------
+
+// Build the UTF-16 code units that result from reading an ASCII byte sequence
+// as UTF-16LE — exactly the mojibake an ANSI buffer produces under a stray wide
+// flag (e.g. "/M" → 0x4D2F 䴯). Mirrors the DQ3 HD-2D backward-scan junk.
+static std::wstring AsciiAsUtf16LE(const std::string& ascii) {
+    std::wstring out;
+    for (size_t i = 0; i + 1 < ascii.size(); i += 2) {
+        uint16_t u = static_cast<uint16_t>(
+            (static_cast<unsigned char>(ascii[i + 1]) << 8) |
+             static_cast<unsigned char>(ascii[i]));
+        out.push_back(static_cast<wchar_t>(u));
+    }
+    return out;
+}
+
+static void Test_ImplausibleWide_RejectsAsciiAsUtf16Mojibake() {
+    // A real asset path reinterpreted as UTF-16LE — the actual failure mode.
+    std::string path =
+        "/Game/NiagaraCore/Materials/IMP_L_C01_Church_05_Inst.IMP_L_C01_Church";
+    std::wstring moji = AsciiAsUtf16LE(path);
+    EXPECT("long ASCII-as-UTF16 path is implausible",
+           Utf8Helpers::IsImplausibleWideName(moji.data(), moji.size()));
+}
+
+static void Test_ImplausibleWide_AcceptsShortLocalized() {
+    // Genuine short localized names must survive (no false drops).
+    wchar_t jp[] = { 0x30EC, 0x30D9, 0x30EB };       // レベル
+    EXPECT("short katakana name is plausible",
+           !Utf8Helpers::IsImplausibleWideName(jp, 3));
+    wchar_t mixed[] = { 'H', 'P', 0x4F53, 0x529B };  // HP体力
+    EXPECT("short mixed ASCII+CJK is plausible",
+           !Utf8Helpers::IsImplausibleWideName(mixed, 4));
+}
+
+static void Test_ImplausibleWide_AcceptsAsciiAndEmpty() {
+    wchar_t ascii[] = { 'P', 'l', 'a', 'y', 'e', 'r', 'P', 'a', 'w', 'n' };
+    EXPECT("ascii wide name is plausible",
+           !Utf8Helpers::IsImplausibleWideName(ascii, 10));
+    EXPECT("zero length is plausible (nothing to reject)",
+           !Utf8Helpers::IsImplausibleWideName(ascii, 0));
+    EXPECT("null data is plausible",
+           !Utf8Helpers::IsImplausibleWideName(nullptr, 5));
+}
+
+static void Test_ImplausibleWide_LengthAndDensityRules() {
+    // > 64 wide chars of anything → implausible (length rule); real wide FNames
+    // are short localized strings, never this long.
+    std::wstring longAscii(80, L'A');
+    EXPECT("80 wide chars exceed the length cap",
+           Utf8Helpers::IsImplausibleWideName(longAscii.data(), longAscii.size()));
+    // 30 all-CJK chars → implausible (density rule: >24 chars and >=75% non-ASCII).
+    std::wstring midCjk(30, static_cast<wchar_t>(0x4E2D));
+    EXPECT("30 CJK chars trip the density rule",
+           Utf8Helpers::IsImplausibleWideName(midCjk.data(), midCjk.size()));
+    // 20 all-CJK chars → still plausible (under the 24-char density gate).
+    std::wstring shortCjk(20, static_cast<wchar_t>(0x4E2D));
+    EXPECT("20 CJK chars stay plausible",
+           !Utf8Helpers::IsImplausibleWideName(shortCjk.data(), shortCjk.size()));
+    // NUL terminates the count: long buffer, NUL at index 3 → plausible.
+    std::wstring nulCut(80, static_cast<wchar_t>(0x4E2D));
+    nulCut[3] = 0;
+    EXPECT("NUL terminator caps the counted length",
+           !Utf8Helpers::IsImplausibleWideName(nulCut.data(), nulCut.size()));
+}
+
 // ----- main ------------------------------------------------------------------
 
 int main() {
@@ -237,6 +303,11 @@ int main() {
     Test_EncodeUtf16_ReversedSurrogates();
     Test_EncodeUtf16_MixedRealistic();
     Test_EncodeUtf16_OutputAlwaysValidUtf8();
+
+    Test_ImplausibleWide_RejectsAsciiAsUtf16Mojibake();
+    Test_ImplausibleWide_AcceptsShortLocalized();
+    Test_ImplausibleWide_AcceptsAsciiAndEmpty();
+    Test_ImplausibleWide_LengthAndDensityRules();
 
     std::printf("---------------------\n");
     std::printf("Pass: %d   Fail: %d\n", g_pass, g_fail);
