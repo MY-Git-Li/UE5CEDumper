@@ -920,7 +920,7 @@ false and `status` explains why:
 {
   "id": 31, "ok": true,
   "found": true,
-  "status": "ok",               // ok / not_reachable / deadline / cancelled / no_gworld / invalid_target / visited_cap
+  "status": "ok",               // ok / ok_via_level / not_reachable / deadline / cancelled / no_gworld / invalid_target / visited_cap
   "root_addr":  "0x7FF6AA000000",
   "root_name":  "World_0",
   "target_obj": "0x7FF6BB100000",
@@ -949,6 +949,19 @@ The UI replaces the Live Walker breadcrumb spine with this path. For a property
 VALUE it lands on `target_obj` and scrolls to the value field; for an OBJECT /
 class instance it stops at the parent (drops the final node) and highlights the
 pointer field, without drilling into the target. BFS first-hit == shortest hops.
+
+**`ok_via_level` recovery (streaming / World-Partition actors).** When the plain
+BFS returns `not_reachable` and the target is (or is owned by) an actor whose
+`ULevel` isn't forward-reachable from the world, the DLL recovers the chain
+through the world's level list: it reaches the owning `ULevel` by its
+`OwningWorld` back-reference (an actor's Outer IS its level), finds the actor in
+`ULevel::Actors`, and returns `found: true` with `status: "ok_via_level"`. The
+first step is a SYNTHETIC `world → level` hop (`field_type: "WorldLevel"`,
+`field_offset: -1`) — a back-reference, NOT a forward static pointer, so the
+chain is for in-tool reachability / Live Walker navigation, not a clean CE
+pointer chain. The remaining steps (`Actors[k] → actor → … → target`) are real
+edges. A truly unreferenced actor not in any world level still returns
+`not_reachable`.
 20s deadline; also bails on `Cancel::Requested()` (pipe disconnect / shutdown).
 MulticastSparseDelegateProperty edges are intentionally NOT followed (their
 bindings live in a CoreUObject-global TMap — a per-node global walk would be

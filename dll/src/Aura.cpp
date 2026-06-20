@@ -3320,6 +3320,105 @@ void CollectOutgoingObjectPtrs(uintptr_t obj, std::vector<OutgoingPtr>& out,
         });
 }
 
+// Locate-in-GWorld recovery for a streaming / World-Partition actor whose ULevel
+// is NOT forward-reachable from the root UWorld (so the plain BFS returns
+// not_reachable). Key insight: an AActor's Outer IS its ULevel, and
+// ULevel::OwningWorld points back at the world — so we reach the owning level by
+// that BACK-reference (no forward pointer needed), confirm the actor is in
+// ULevel::Actors, and emit:
+//   world →(world-level back-ref)→ ULevel → Actors[k] → actor [→ … → target]
+// The world→level hop is synthetic (fieldType "WorldLevel") because, by
+// construction, if the level were forward-reachable the actor would have been too
+// (level → Actors → actor is a reflected chain) — so the plain BFS would already
+// have found it. Returns found=true / status "ok_via_level" on success, or a
+// default {found=false} GraphPathResult to signal "no recovery available".
+template <typename AbortFn>
+static GraphPathResult RecoverViaWorldLevel(uintptr_t rootWorld, uintptr_t target,
+                                            int32_t maxDepth, AbortFn&& abortFn) {
+    GraphPathResult res;  // found=false by default
+
+    // The root must be a UWorld for the OwningWorld back-reference to mean anything.
+    uintptr_t rootCls = Ubel::GetClass(rootWorld);
+    if (!rootCls || Ubel::GetName(rootCls) != "World") return res;
+
+    // Climb the Outer chain from `target` to the first object whose Outer is a
+    // ULevel — that object is the owning ACTOR (target itself when target is an
+    // actor; the owning actor when target is a component / AttributeSet). Bounded.
+    uintptr_t actor = target, level = 0;
+    for (int hop = 0; hop < 8 && actor; ++hop) {
+        uintptr_t outer = Ubel::GetOuter(actor);
+        if (!outer) break;
+        uintptr_t outerCls = Ubel::GetClass(outer);
+        if (outerCls && Ubel::GetName(outerCls) == "Level") { level = outer; break; }
+        actor = outer;
+    }
+    if (!level || !actor) return res;
+
+    // Confirm the level belongs to THIS world (guards multi-world / PIE). If the
+    // OwningWorld field can't be resolved, proceed best-effort (don't reject).
+    uintptr_t levelCls = Ubel::GetClass(level);
+    if (!levelCls) return res;
+    int32_t owOff = Ubel::FindFieldOffset(levelCls, "OwningWorld", "OwningWorld",
+                                          nullptr, "ObjectProperty");
+    if (owOff >= 0) {
+        uintptr_t ow = 0;
+        if (Macht::ReadSafe(level + owOff, ow) && ow && ow != rootWorld) return res;
+    }
+
+    // Find the actor's index in ULevel::Actors (TArray<AActor*>).
+    int32_t actorsOff = Ubel::FindFieldOffset(levelCls, "Actors", "Actors",
+                                              nullptr, "ArrayProperty");
+    if (actorsOff < 0) return res;
+    Macht::TArrayView arr;
+    if (!Macht::ReadTArray(level + actorsOff, arr) || arr.Count <= 0 || !arr.Data) return res;
+    int32_t scanN = arr.Count > 500000 ? 500000 : arr.Count;   // sane cap
+    std::vector<uintptr_t> buf(static_cast<size_t>(scanN), 0);
+    if (!Macht::ReadBytesSafe(arr.Data, buf.data(), static_cast<size_t>(scanN) * 8)) return res;
+    int32_t k = -1;
+    for (int32_t i = 0; i < scanN; ++i) { if (buf[i] == actor) { k = i; break; } }
+    if (k < 0) return res;   // actor genuinely not in this level's Actors — don't fabricate
+
+    // --- Build the chain. ---
+    std::vector<GraphPathStep> steps;
+    // (1) world → level: synthetic back-reference hop (no static pointer).
+    {
+        GraphPathStep s;
+        s.fromObj = rootWorld; s.toObj = level;
+        s.fieldOffset = -1; s.fieldName = "Levels"; s.fieldType = "WorldLevel";
+        s.elementIndex = -1;
+        steps.push_back(std::move(s));
+    }
+    // (2) level → Actors[k] → actor: a REAL object-array element edge.
+    {
+        GraphPathStep s;
+        s.fromObj = level; s.toObj = actor;
+        s.fieldOffset = actorsOff; s.fieldName = "Actors"; s.fieldType = "ArrayProperty";
+        s.innerType = "ObjectProperty"; s.elementIndex = k;
+        s.elemStride = 0; s.elemValueOffset = 0;   // object array: UI hardcodes the 8B stride
+        steps.push_back(std::move(s));
+    }
+    // (3) actor → … → target: the short forward chain to the owned sub-object
+    //     (empty when target IS the actor). The actor is now "reachable", and an
+    //     owned component / AttributeSet is a few forward hops away (Related proves
+    //     the chain exists). Bounded; if it isn't forward-linked, we still return
+    //     the chain to the actor (landing on the owner is useful).
+    if (actor != target) {
+        auto neighborFn = [&](uintptr_t node, auto&& emit) {
+            EnumerateOutgoingObjectPtrs(node, std::forward<decltype(emit)>(emit));
+        };
+        GraphPathResult tail = BfsShortestObjectPath(actor, target, /*maxDepth*/ 6,
+                                                     /*maxVisited*/ 500000, neighborFn, abortFn);
+        if (tail.found)
+            for (auto& s : tail.steps) steps.push_back(std::move(s));
+    }
+
+    res.steps        = std::move(steps);
+    res.found        = true;
+    res.status       = "ok_via_level";
+    res.depthReached = static_cast<int32_t>(res.steps.size());
+    return res;
+}
+
 GraphPathResult FindObjectGraphPath(uintptr_t rootObj, uintptr_t targetObj,
                                     int32_t maxDepth, int32_t deadlineMs) {
     GraphPathResult res;
@@ -3355,6 +3454,22 @@ GraphPathResult FindObjectGraphPath(uintptr_t rootObj, uintptr_t targetObj,
     // Translate the core's generic "aborted" into the concrete reason.
     if (res.aborted)
         res.status = Tot::Requested() ? "cancelled" : "deadline";
+
+    // Recovery: a streaming / World-Partition actor whose owning ULevel isn't
+    // forward-reachable from the world. Reach the level by its OwningWorld
+    // back-reference (see RecoverViaWorldLevel). Only on a clean not_reachable —
+    // never override a deadline/cancel/cap (those mean "search incomplete", not
+    // "definitively unreferenced"), and never re-run the heavy work on success.
+    if (!res.found && res.status == "not_reachable") {
+        GraphPathResult rec = RecoverViaWorldLevel(rootObj, targetObj, maxDepth, abortFn);
+        if (rec.found) {
+            int32_t prevVisited = res.visited;   // keep the BFS diagnostic count
+            res = std::move(rec);
+            res.visited = prevVisited;
+            LOG_INFO("FindObjectGraphPath: recovered via world-level back-reference (%d step(s))",
+                     res.depthReached);
+        }
+    }
 
     // Resolve readable names for the path nodes only (cheap — a handful).
     for (auto& st : res.steps) {
