@@ -454,6 +454,11 @@ std::string GetString(int32_t nameIndex, int32_t number) {
         // doesn't process trailing zeros / past-end garbage.
         size_t actualLen = 0;
         while (actualLen < static_cast<size_t>(len) && wbuf[actualLen] != 0) ++actualLen;
+        // Reject a junk/misidentified FName whose wide bit landed on an ANSI
+        // buffer (asset path → long CJK mojibake). Returning "" lets callers
+        // (FindByAddress backward scan, object list, Live Walker) treat the
+        // decode as a miss instead of surfacing 亂碼.
+        if (Utf8Helpers::IsImplausibleWideName(wbuf.data(), actualLen)) return "";
         result = Utf8Helpers::EncodeUtf16(wbuf.data(), actualLen);
     } else {
         // ANSI name — sanitize non-ASCII bytes to produce valid UTF-8.
