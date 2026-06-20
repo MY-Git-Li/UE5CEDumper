@@ -1904,52 +1904,78 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Convert one GWorld-path hop into the breadcrumb level(s) it represents.
     ///
-    /// A <c>TArray&lt;ObjectProperty&gt;</c> element hop crosses TWO dereferences —
-    /// deref <c>TArray::Data</c> (the array field at <c>FieldOffset</c>), then deref
-    /// the element pointer at <c>index*8</c> within that buffer — but the DLL path
-    /// collapses both into ONE hop (FieldOffset = array field, ElementIndex = the
-    /// element). Emitting it as a single breadcrumb makes the CE chain stop at the
-    /// TArray::Data buffer and apply the next field's offset to IT instead of to the
-    /// element's target object (wrong addresses for everything below). So such a hop
-    /// is split into TWO crumbs here — a container crumb (deref Data) + an element
-    /// crumb (deref the pointer at index*8) — matching what manual navigation
-    /// produces. Only raw object-pointer arrays split (the element slot IS an 8-byte
-    /// <c>UObject*</c>); struct-array / Map / Set element hops keep the single crumb
-    /// (their element isn't a plain pointer at a known stride).
+    /// A container element hop crosses TWO dereferences — deref the container field
+    /// (the <c>TArray::Data</c> / <c>TSparseArray::Data</c> pointer sits at
+    /// <c>field+0</c>), then deref the element pointer at its computed offset within
+    /// that buffer — but the DLL path collapses both into ONE hop (FieldOffset =
+    /// container field, ElementIndex = the element). Emitting it as a single
+    /// breadcrumb makes the CE chain stop at the Data buffer and apply the next
+    /// field's offset to IT instead of to the element's target object (wrong
+    /// addresses for everything below). So such a hop is split into TWO crumbs — a
+    /// container crumb (deref Data) + an element crumb (deref the element pointer) —
+    /// matching what manual navigation produces.
+    ///
+    /// Element geometry: object/class arrays use the implicit 8-byte <c>UObject*</c>
+    /// stride; Map/Set hops carry their element stride + the map value's within-pair
+    /// offset on the step (<see cref="GWorldPathStep.ElemStride"/> /
+    /// <see cref="GWorldPathStep.ElemValueOffset"/>) so the element offset is
+    /// <c>ElementIndex*stride + valueOffset</c>. We only split when the stride is
+    /// known; struct arrays and other inner types keep the single crumb.
     /// </summary>
     internal static IReadOnlyList<BreadcrumbItem> PathStepToBreadcrumbs(GWorldPathStep s)
     {
         var label = !string.IsNullOrEmpty(s.ToName) ? s.ToName
                   : (!string.IsNullOrEmpty(s.FieldName) ? s.FieldName : "(node)");
 
-        bool isObjPtrArrayElem = s.ElementIndex >= 0
-            && s.FieldType == "ArrayProperty"
-            && (s.InnerType == "ObjectProperty" || s.InnerType == "ClassProperty");
-
-        if (isObjPtrArrayElem)
+        // Resolve the element stride + within-element pointer offset for splittable
+        // container hops. Object/class arrays are the hardcoded 8-byte pointer slot
+        // (independent of the path step). Map/Set and interface arrays (FScriptInterface,
+        // 16-byte slot, ptr at elem+0) carry their stride on the step.
+        int splitStride = 0, splitValueOffset = 0;
+        if (s.ElementIndex >= 0 && s.FieldType == "ArrayProperty"
+            && (s.InnerType == "ObjectProperty" || s.InnerType == "ClassProperty"))
         {
+            splitStride = 8;            // ObjectProperty stride = 8 (pointer)
+            splitValueOffset = 0;
+        }
+        else if (s.ElementIndex >= 0 && s.ElemStride > 0
+                 && (s.FieldType == "MapProperty" || s.FieldType == "SetProperty"
+                     || (s.FieldType == "ArrayProperty" && s.InnerType == "InterfaceProperty")))
+        {
+            splitStride = s.ElemStride;
+            splitValueOffset = s.ElemValueOffset;   // map value within-pair offset; 0 for set / map key / interface
+        }
+
+        if (splitStride > 0)
+        {
+            // The container label drops the Map ".Key"/".Value" suffix so it names
+            // the real field — and so Back-nav re-hydration (which matches the crumb
+            // against a fresh parent walk by FieldName+FieldOffset) finds it.
+            string baseName = StripContainerKeyValueSuffix(s.FieldName);
+            string kvHint = s.FieldName.EndsWith(".Key", StringComparison.Ordinal) ? ".Key"
+                          : s.FieldName.EndsWith(".Value", StringComparison.Ordinal) ? ".Value" : "";
             return new[]
             {
-                // Level 1 — the array field: deref TArray::Data. Flagged as a
-                // container view so CleanBreadcrumbs skips it as a cycle endpoint
-                // (it shares the parent object's resolved region). ContainerField
-                // stays null (path-derived, not re-populatable); Back-nav handles
-                // that with a plain re-walk.
+                // Level 1 — the container field: deref the Data pointer (at field+0).
+                // Flagged as a container view so CleanBreadcrumbs skips it as a cycle
+                // endpoint (it shares the parent object's resolved region).
+                // ContainerField stays null (path-derived); Back-nav re-hydrates it
+                // via a live parent walk.
                 new BreadcrumbItem
                 {
                     Address = !string.IsNullOrEmpty(s.From) ? s.From : s.To,
-                    Label = !string.IsNullOrEmpty(s.FieldName) ? s.FieldName : "(array)",
+                    Label = !string.IsNullOrEmpty(baseName) ? baseName : "(container)",
                     FieldOffset = s.FieldOffset,
-                    FieldName = s.FieldName,
+                    FieldName = baseName,
                     IsContainerView = true,
                 },
-                // Level 2 — the element pointer at index*8: deref to the child object.
+                // Level 2 — the element pointer at index*stride (+ value offset).
                 new BreadcrumbItem
                 {
                     Address = s.To,
-                    Label = $"[{s.ElementIndex}]",
-                    FieldOffset = s.ElementIndex * 8,  // ObjectProperty stride = 8 (pointer)
-                    FieldName = $"[{s.ElementIndex}]",
+                    Label = $"[{s.ElementIndex}]{kvHint}",
+                    FieldOffset = s.ElementIndex * splitStride + splitValueOffset,
+                    FieldName = $"[{s.ElementIndex}]{kvHint}",
                     IsPointerDeref = true,
                 },
             };
@@ -1967,6 +1993,19 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 IsPointerDeref = true,  // every edge we followed is a pointer deref
             },
         };
+    }
+
+    /// <summary>Drop a Map step's trailing ".Key"/".Value" suffix so the container
+    /// crumb names the underlying TMap field (used for Back-nav re-hydration match).</summary>
+    private static string StripContainerKeyValueSuffix(string fieldName)
+    {
+        if (fieldName.EndsWith(".Key", StringComparison.Ordinal)
+            || fieldName.EndsWith(".Value", StringComparison.Ordinal))
+        {
+            int dot = fieldName.LastIndexOf('.');
+            if (dot > 0) return fieldName[..dot];
+        }
+        return fieldName;
     }
 
     /// <summary>

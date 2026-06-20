@@ -1691,23 +1691,27 @@ struct MockEdge {
     std::string type;
     std::string inner;
     int32_t     elem;
+    int32_t     stride;
+    int32_t     valOff;
 };
 
 struct MockGraph {
     std::unordered_map<uintptr_t, std::vector<MockEdge>> adj;
     void add(uintptr_t from, uintptr_t to, int32_t off = 0,
              std::string name = "f", std::string type = "ObjectProperty",
-             std::string inner = "", int32_t elem = -1) {
-        adj[from].push_back({to, off, std::move(name), std::move(type), std::move(inner), elem});
+             std::string inner = "", int32_t elem = -1,
+             int32_t stride = 0, int32_t valOff = 0) {
+        adj[from].push_back({to, off, std::move(name), std::move(type), std::move(inner),
+                             elem, stride, valOff});
     }
 };
 
 // Build a neighbor functor over a mock graph (generic-lambda compatible).
-#define MOCK_NB(g) [&](uintptr_t node, auto&& emit) {                       \
-        auto it = (g).adj.find(node);                                       \
-        if (it == (g).adj.end()) return;                                    \
-        for (const auto& e : it->second)                                    \
-            if (emit(e.to, e.off, e.name, e.type, e.inner, e.elem)) return; \
+#define MOCK_NB(g) [&](uintptr_t node, auto&& emit) {                                       \
+        auto it = (g).adj.find(node);                                                       \
+        if (it == (g).adj.end()) return;                                                    \
+        for (const auto& e : it->second)                                                    \
+            if (emit(e.to, e.off, e.name, e.type, e.inner, e.elem, e.stride, e.valOff)) return; \
     }
 
 static auto kNeverAbort = [] { return false; };
@@ -1832,6 +1836,28 @@ static void Test_GraphPath_ContainerEdgePreserved() {
     EXPECT("container edge type", r.steps.size() == 1 && r.steps[0].fieldType == "ArrayProperty");
     EXPECT("container edge inner", r.steps.size() == 1 && r.steps[0].innerType == "ObjectProperty");
     EXPECT("container edge element index", r.steps.size() == 1 && r.steps[0].elementIndex == 5234);
+}
+
+static void Test_GraphPath_MapSetElementGeometryRoundTrip() {
+    // A Map-value element edge must round-trip its element stride + within-pair value
+    // offset into the step so the UI can split it into container + element CE derefs.
+    MockGraph g;
+    // MapProperty, sparse slot 3, pairStride=0x18, valueOffset=0x10 (the .Value edge).
+    g.add(0x1000, 0x2000, 0xC0, "Attrs.Value", "MapProperty", "ObjectProperty", 3, 0x18, 0x10);
+    auto r = Aura::BfsShortestObjectPath(0x1000ull, 0x2000ull, 5, 1000000,
+                                         MOCK_NB(g), kNeverAbort);
+    EXPECT("map edge found", r.found && r.steps.size() == 1);
+    EXPECT("map edge type", r.steps.size() == 1 && r.steps[0].fieldType == "MapProperty");
+    EXPECT("map edge element index", r.steps.size() == 1 && r.steps[0].elementIndex == 3);
+    EXPECT("map edge stride", r.steps.size() == 1 && r.steps[0].elemStride == 0x18);
+    EXPECT("map edge value offset", r.steps.size() == 1 && r.steps[0].elemValueOffset == 0x10);
+    // A direct (non-element) edge leaves the geometry zeroed.
+    MockGraph g2;
+    g2.add(0x1000, 0x2000, 0x40, "Direct");
+    auto r2 = Aura::BfsShortestObjectPath(0x1000ull, 0x2000ull, 5, 1000000,
+                                          MOCK_NB(g2), kNeverAbort);
+    EXPECT("direct edge zero stride", r2.steps.size() == 1 && r2.steps[0].elemStride == 0
+                                       && r2.steps[0].elemValueOffset == 0);
 }
 
 static void Test_GraphPath_Reconstruction() {
@@ -2539,6 +2565,7 @@ int main() {
     Test_GraphPath_Abort();
     Test_GraphPath_VisitedCap();
     Test_GraphPath_ContainerEdgePreserved();
+    Test_GraphPath_MapSetElementGeometryRoundTrip();
     Test_GraphPath_Reconstruction();
 
     // Solitar GodMode — FBoolProperty single-bit read-modify-write

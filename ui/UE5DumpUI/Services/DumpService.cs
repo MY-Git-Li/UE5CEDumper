@@ -858,6 +858,8 @@ public sealed class DumpService : IDumpService
                     FieldType    = s["field_type"]?.GetValue<string>() ?? "",
                     InnerType    = s["inner_type"]?.GetValue<string>() ?? "",
                     ElementIndex = s["element_index"]?.GetValue<int>() ?? -1,
+                    ElemStride      = s["elem_stride"]?.GetValue<int>() ?? 0,
+                    ElemValueOffset = s["elem_value_offset"]?.GetValue<int>() ?? 0,
                     ToName       = s["to_name"]?.GetValue<string>() ?? "",
                     ToClass      = s["to_class"]?.GetValue<string>() ?? "",
                 });

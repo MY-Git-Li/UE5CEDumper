@@ -20,8 +20,13 @@
 // neighborFn contract:
 //   neighborFn(uintptr_t node, auto&& emit)
 //     enumerate `node`'s outgoing object-pointer edges, calling
-//       emit(child, fieldOffset, fieldName, fieldType, innerType, elementIndex)
-//     for each. `emit` returns true when the search wants to STOP (target
+//       emit(child, fieldOffset, fieldName, fieldType, innerType, elementIndex,
+//            elemStride, elemValueOffset)
+//     for each. `elemStride`/`elemValueOffset` describe a container element's
+//     geometry (stride between elements in the Data buffer + the followed
+//     pointer's within-element offset) so a Map/Set element hop can be split into
+//     container+element CE derefs; both are 0 for direct/non-element edges.
+//     `emit` returns true when the search wants to STOP (target
 //     found or the visited cap was hit) — neighborFn MUST stop enumerating
 //     and return promptly when emit returns true. The visited-set check
 //     happens inside emit BEFORE any per-edge string is retained, so passing
@@ -48,6 +53,8 @@ struct GraphEdge {
     std::string fieldType;           // "ObjectProperty" / "ArrayProperty" / "MapProperty" / ...
     std::string innerType;           // container element type ("" for direct fields)
     int32_t     elementIndex = -1;   // -1 = direct field; >=0 array/map/set element (sparse idx)
+    int32_t     elemStride   = 0;    // element stride in the container Data buffer (8 obj-array, pairStride map, elemStride set; 0 = n/a)
+    int32_t     elemValueOffset = 0; // within-element offset of the followed ptr (map value); 0 for array/set/map-key
 };
 
 // One step of the resolved path: parent --edge--> child.
@@ -59,6 +66,8 @@ struct GraphPathStep {
     std::string fieldType;
     std::string innerType;
     int32_t     elementIndex = -1;
+    int32_t     elemStride   = 0;    // see GraphEdge — element geometry for Map/Set split
+    int32_t     elemValueOffset = 0;
     // Resolved lazily by the live wrapper for path nodes only (empty in the
     // pure core / tests).
     std::string toName;
@@ -124,13 +133,15 @@ inline GraphPathResult BfsShortestObjectPath(uintptr_t root, uintptr_t target,
         bool stop = false;
         neighborFn(obj, [&](uintptr_t child, int32_t fieldOffset,
                             const std::string& fieldName, const std::string& fieldType,
-                            const std::string& innerType, int32_t elementIndex) -> bool {
+                            const std::string& innerType, int32_t elementIndex,
+                            int32_t elemStride, int32_t elemValueOffset) -> bool {
             if (!child) return false;
             if (visited.find(child) != visited.end()) return false;  // seen — no retain, no copy
             if (static_cast<int32_t>(visited.size()) >= maxVisited) { capHit = true; stop = true; return true; }
 
             visited.emplace(child, ParentLink{
-                obj, GraphEdge{fieldOffset, fieldName, fieldType, innerType, elementIndex}});
+                obj, GraphEdge{fieldOffset, fieldName, fieldType, innerType, elementIndex,
+                               elemStride, elemValueOffset}});
 
             if (child == target) { foundChild = child; stop = true; return true; }
             queue.push_back({child, depth + 1});
@@ -163,6 +174,8 @@ inline GraphPathResult BfsShortestObjectPath(uintptr_t root, uintptr_t target,
         st.fieldType    = pl.edge.fieldType;
         st.innerType    = pl.edge.innerType;
         st.elementIndex = pl.edge.elementIndex;
+        st.elemStride       = pl.edge.elemStride;
+        st.elemValueOffset  = pl.edge.elemValueOffset;
         rev.push_back(std::move(st));
         cur = pl.parent;
     }

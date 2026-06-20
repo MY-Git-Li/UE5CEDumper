@@ -440,6 +440,109 @@ public class LiveWalkerMultiSelectTests
     }
 
     [Fact]
+    public void PathStepToBreadcrumbs_MapValueElement_SplitsWithStrideAndValueOffset()
+    {
+        // A GWorld-path hop through a TMap<K, UObject*> value must split into a
+        // container crumb (deref TSparseArray::Data at the map field) + an element
+        // crumb at index*pairStride + valueOffset. The container crumb drops the
+        // ".Value" suffix so it names the real TMap field.
+        var step = new GWorldPathStep
+        {
+            From = "0x100", To = "0x200",
+            FieldOffset = 0xC0, FieldName = "SpawnedAttributes.Value",
+            FieldType = "MapProperty", InnerType = "Object", ElementIndex = 3,
+            ElemStride = 0x18, ElemValueOffset = 0x10,
+            ToName = "AttributeSet", ToClass = "AttributeSet",
+        };
+
+        var crumbs = LiveWalkerViewModel.PathStepToBreadcrumbs(step);
+
+        Assert.Equal(2, crumbs.Count);
+        Assert.Equal(0xC0, crumbs[0].FieldOffset);
+        Assert.True(crumbs[0].IsContainerView);
+        Assert.Equal("SpawnedAttributes", crumbs[0].FieldName);          // ".Value" stripped
+        Assert.Equal(3 * 0x18 + 0x10, crumbs[1].FieldOffset);           // 0x58
+        Assert.True(crumbs[1].IsPointerDeref);
+        Assert.False(crumbs[1].IsContainerView);
+        Assert.Equal("[3].Value", crumbs[1].FieldName);
+        Assert.Equal("0x200", crumbs[1].Address);
+    }
+
+    [Fact]
+    public void PathStepToBreadcrumbs_MapKeyElement_SplitsWithZeroValueOffset()
+    {
+        // Map KEY edge: value offset is 0 → element at index*pairStride.
+        var step = new GWorldPathStep
+        {
+            From = "0x100", To = "0x200",
+            FieldOffset = 0x40, FieldName = "Lookup.Key",
+            FieldType = "MapProperty", InnerType = "Object", ElementIndex = 2,
+            ElemStride = 0x18, ElemValueOffset = 0,
+        };
+        var crumbs = LiveWalkerViewModel.PathStepToBreadcrumbs(step);
+        Assert.Equal(2, crumbs.Count);
+        Assert.Equal("Lookup", crumbs[0].FieldName);                    // ".Key" stripped
+        Assert.Equal(2 * 0x18, crumbs[1].FieldOffset);                  // 0x30
+        Assert.Equal("[2].Key", crumbs[1].FieldName);
+    }
+
+    [Fact]
+    public void PathStepToBreadcrumbs_SetElement_SplitsAtIndexTimesStride()
+    {
+        var step = new GWorldPathStep
+        {
+            From = "0x100", To = "0x200",
+            FieldOffset = 0x80, FieldName = "ActiveActors",
+            FieldType = "SetProperty", InnerType = "Object", ElementIndex = 4,
+            ElemStride = 0x10, ElemValueOffset = 0,
+        };
+        var crumbs = LiveWalkerViewModel.PathStepToBreadcrumbs(step);
+        Assert.Equal(2, crumbs.Count);
+        Assert.True(crumbs[0].IsContainerView);
+        Assert.Equal("ActiveActors", crumbs[0].FieldName);
+        Assert.Equal(4 * 0x10, crumbs[1].FieldOffset);                  // 0x40
+        Assert.Equal("[4]", crumbs[1].FieldName);
+    }
+
+    [Fact]
+    public void PathStepToBreadcrumbs_InterfaceArrayElement_SplitsAtIndexTimes16()
+    {
+        // TArray<FScriptInterface>: 16-byte slot with the object pointer at elem+0 →
+        // splittable via the DLL-threaded stride (16), value offset 0.
+        var step = new GWorldPathStep
+        {
+            From = "0x100", To = "0x200",
+            FieldOffset = 0x50, FieldName = "Listeners",
+            FieldType = "ArrayProperty", InnerType = "InterfaceProperty", ElementIndex = 3,
+            ElemStride = 16, ElemValueOffset = 0,
+        };
+        var crumbs = LiveWalkerViewModel.PathStepToBreadcrumbs(step);
+        Assert.Equal(2, crumbs.Count);
+        Assert.True(crumbs[0].IsContainerView);
+        Assert.Equal("Listeners", crumbs[0].FieldName);
+        Assert.Equal(3 * 16, crumbs[1].FieldOffset);    // 0x30
+        Assert.True(crumbs[1].IsPointerDeref);
+        Assert.Equal("[3]", crumbs[1].FieldName);
+    }
+
+    [Fact]
+    public void PathStepToBreadcrumbs_MapElement_NoStride_KeepsSingleCrumb()
+    {
+        // Defensive: an older DLL that doesn't carry ElemStride (==0) must not split
+        // (a 0-stride element offset would be wrong) — fall back to one crumb.
+        var step = new GWorldPathStep
+        {
+            From = "0x100", To = "0x200",
+            FieldOffset = 0x40, FieldName = "Lookup.Value",
+            FieldType = "MapProperty", InnerType = "Object", ElementIndex = 2,
+            ElemStride = 0, ElemValueOffset = 0,
+        };
+        var crumbs = LiveWalkerViewModel.PathStepToBreadcrumbs(step);
+        Assert.Single(crumbs);
+        Assert.Equal(0x40, crumbs[0].FieldOffset);
+    }
+
+    [Fact]
     public void GenerateHierarchicalXml_PathThroughObjectArrayElement_EmitsElementDerefNode()
     {
         // End-to-end: a GWorld path GameState → PlayerArray[0] → PlayerState →

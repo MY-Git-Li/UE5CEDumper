@@ -3196,8 +3196,12 @@ std::vector<ReferenceMatch> FindReferencesToUObject(uintptr_t target,
 // ============================================================
 
 // Enumerate every outgoing object-pointer edge of `obj`. For each child,
-// invokes emit(child, fieldOffset, fieldName, fieldType, innerType, elementIndex)
+// invokes emit(child, fieldOffset, fieldName, fieldType, innerType, elementIndex,
+//              elemStride, elemValueOffset)
 // and returns immediately once emit returns true (target found / cap hit).
+// elemStride/elemValueOffset describe a container element's geometry (stride in
+// the Data buffer + the followed pointer's within-element offset) so a Map/Set
+// element hop can be split into container+element CE derefs; 0 for direct edges.
 // Mirrors FindReferencesToUObject's per-object read patterns.
 template <typename EmitFn>
 static void EnumerateOutgoingObjectPtrs(uintptr_t obj, EmitFn&& emit) {
@@ -3216,13 +3220,13 @@ static void EnumerateOutgoingObjectPtrs(uintptr_t obj, EmitFn&& emit) {
     for (const auto& pfe : meta.directPointers) {
         uintptr_t ptr = 0;
         if (!Macht::ReadSafe(obj + pfe.offset, ptr) || !ptr) continue;
-        if (emit(ptr, pfe.offset, pfe.name, pfe.typeName, kEmpty, -1)) return;
+        if (emit(ptr, pfe.offset, pfe.name, pfe.typeName, kEmpty, -1, 0, 0)) return;
     }
     // --- Weak/Soft/Lazy single fields (FWeakObjectPtr at field+0) ---
     for (const auto& wpe : meta.weakLikePointers) {
         uintptr_t r = ResolveWeakAt(obj + wpe.offset);
         if (!r) continue;
-        if (emit(r, wpe.offset, wpe.name, wpe.typeName, kEmpty, -1)) return;
+        if (emit(r, wpe.offset, wpe.name, wpe.typeName, kEmpty, -1, 0, 0)) return;
     }
     // --- TArray<UObject*> / TArray<UClass*> (8-byte stride) ---
     for (const auto& oae : meta.objectArrays) {
@@ -3232,7 +3236,9 @@ static void EnumerateOutgoingObjectPtrs(uintptr_t obj, EmitFn&& emit) {
         if (!Macht::ReadBytesSafe(arr.Data, buf.data(), static_cast<size_t>(arr.Count) * 8)) continue;
         for (int32_t e = 0; e < arr.Count; ++e) {
             if (!buf[e]) continue;
-            if (emit(buf[e], oae.offset, oae.name, kArrayProp, oae.innerType, e)) return;
+            // Object/class arrays use the implicit 8-byte pointer stride — the UI
+            // hardcodes it, so stride/valueOffset are not carried (0,0).
+            if (emit(buf[e], oae.offset, oae.name, kArrayProp, oae.innerType, e, 0, 0)) return;
         }
     }
     // --- TArray<FScriptInterface> (16-byte stride, ptr at elem+0) ---
@@ -3242,7 +3248,9 @@ static void EnumerateOutgoingObjectPtrs(uintptr_t obj, EmitFn&& emit) {
         for (int32_t e = 0; e < arr.Count; ++e) {
             uintptr_t ptr = 0;
             if (!Macht::ReadSafe(arr.Data + static_cast<int64_t>(e) * 16, ptr) || !ptr) continue;
-            if (emit(ptr, iae.offset, iae.name, kArrayProp, kIfaceProp, e)) return;
+            // FScriptInterface is a 16-byte slot with the object pointer at elem+0,
+            // so the hop IS splittable: stride 16, value offset 0.
+            if (emit(ptr, iae.offset, iae.name, kArrayProp, kIfaceProp, e, 16, 0)) return;
         }
     }
     // --- TArray<FWeak/Soft/Lazy ObjectPtr> (FWeakObjectPtr at elem+0) ---
@@ -3252,7 +3260,7 @@ static void EnumerateOutgoingObjectPtrs(uintptr_t obj, EmitFn&& emit) {
         for (int32_t e = 0; e < arr.Count; ++e) {
             uintptr_t r = ResolveWeakAt(arr.Data + static_cast<int64_t>(e) * wae.elemStride);
             if (!r) continue;
-            if (emit(r, wae.offset, wae.name, kArrayProp, wae.innerType, e)) return;
+            if (emit(r, wae.offset, wae.name, kArrayProp, wae.innerType, e, 0, 0)) return;
         }
     }
     // --- TMap<UObject*, V> / TMap<K, UObject*> (allocated slots only) ---
@@ -3265,12 +3273,12 @@ static void EnumerateOutgoingObjectPtrs(uintptr_t obj, EmitFn&& emit) {
             if (ome.keyIsObject) {
                 uintptr_t kp = 0;
                 if (Macht::ReadSafe(pair, kp) && kp)
-                    if (emit(kp, ome.offset, ome.name + ".Key", kMapProp, ome.innerLabel, e)) return;
+                    if (emit(kp, ome.offset, ome.name + ".Key", kMapProp, ome.innerLabel, e, ome.pairStride, 0)) return;
             }
             if (ome.valueIsObject) {
                 uintptr_t vp = 0;
                 if (Macht::ReadSafe(pair + ome.valueOffset, vp) && vp)
-                    if (emit(vp, ome.offset, ome.name + ".Value", kMapProp, ome.innerLabel, e)) return;
+                    if (emit(vp, ome.offset, ome.name + ".Value", kMapProp, ome.innerLabel, e, ome.pairStride, ome.valueOffset)) return;
             }
         }
     }
@@ -3282,7 +3290,7 @@ static void EnumerateOutgoingObjectPtrs(uintptr_t obj, EmitFn&& emit) {
             if (!Macht::IsSparseIndexAllocated(sa, e)) continue;
             uintptr_t ptr = 0;
             if (!Macht::ReadSafe(sa.Data + static_cast<int64_t>(e) * ose.elemStride, ptr) || !ptr) continue;
-            if (emit(ptr, ose.offset, ose.name, kSetProp, ose.elemTypeName, e)) return;
+            if (emit(ptr, ose.offset, ose.name, kSetProp, ose.elemTypeName, e, ose.elemStride, 0)) return;
         }
     }
 }
@@ -6771,7 +6779,7 @@ void AppendOwnedSubObjectLeaves(uintptr_t actor, bool wantByte,
         EnumerateOutgoingObjectPtrs(cur.obj,
             [&](uintptr_t child, int32_t /*ptrOff*/, const std::string& ptrName,
                 const std::string& /*ptrType*/, const std::string& /*innerType*/,
-                int32_t elemIdx) -> bool {
+                int32_t elemIdx, int32_t /*elemStride*/, int32_t /*elemValueOffset*/) -> bool {
                 if (leaves.size() >= leafCap || subCount >= kMaxOwnedSubs) return true;  // stop
                 if (!child || seen.count(child)) return false;
                 if (!IsOwnedBy(child, actor, /*maxHops*/ kMaxOwnDepth)) return false;
@@ -6903,7 +6911,7 @@ std::vector<RelatedObject> GetRelatedObjects(uintptr_t target, int32_t maxResult
         EnumerateOutgoingObjectPtrs(cur.obj,
             [&](uintptr_t child, int32_t ptrOff, const std::string& ptrName,
                 const std::string& /*ptrType*/, const std::string& /*innerType*/,
-                int32_t elemIdx) -> bool {
+                int32_t elemIdx, int32_t /*elemStride*/, int32_t /*elemValueOffset*/) -> bool {
                 if (out.size() >= static_cast<size_t>(maxResults) || subCount >= kMaxOwnedSubs)
                     return true;  // stop enumerating
                 if (!child || seen.count(child)) return false;
