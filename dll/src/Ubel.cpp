@@ -5181,6 +5181,44 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
         }
         std::vector<Ubel::Interval> gaps = Ubel::ComputeHoles(occupied, headerEnd, scanEnd);
 
+        // Diagnostic (Guess?-only): dump the reflected field footprints + the
+        // computed raw gaps so a user comparing against a CE Structure Dissect can
+        // see EXACTLY which property covers a given region. A TMap/TSet's inline
+        // allocator bytes (data-ptr / num / max / hash) show as raw ints in CE but
+        // are correctly "occupied" here by the single Map/Set property, so no
+        // guessed rows are emitted there. One compact line per walk; only when
+        // gap-filling is on (the Live Walker "Guess?" toggle). Sorted by offset,
+        // field count capped to bound the line length.
+        {
+            std::vector<const LiveFieldValue*> sorted;
+            sorted.reserve(result.fields.size());
+            for (const auto& f : result.fields)
+                if (!f.guessed) sorted.push_back(&f);
+            std::sort(sorted.begin(), sorted.end(),
+                [](const LiveFieldValue* a, const LiveFieldValue* b) { return a->offset < b->offset; });
+            std::string fieldStr;
+            fieldStr.reserve(sorted.size() * 24 + 64);
+            char lb[128];
+            size_t emitted = 0;
+            for (const auto* f : sorted) {
+                if (emitted++ >= 800) { fieldStr += "...(truncated) "; break; }
+                snprintf(lb, sizeof(lb), "0x%X=%d(%s) ",
+                         static_cast<unsigned>(f->offset), f->size, f->typeName.c_str());
+                fieldStr += lb;
+            }
+            std::string gapStr;
+            for (const auto& g : gaps) {
+                snprintf(lb, sizeof(lb), "[0x%X,0x%X) ",
+                         static_cast<unsigned>(g.start), static_cast<unsigned>(g.end));
+                gapStr += lb;
+            }
+            Sein::Info("WALK:guess",
+                "GuessGaps '%s' (%s) header=0x%X end=0x%X fields=%zu gaps=%zu | FIELDS: %s| GAPS: %s",
+                result.name.c_str(), result.className.c_str(),
+                static_cast<unsigned>(headerEnd), static_cast<unsigned>(scanEnd),
+                sorted.size(), gaps.size(), fieldStr.c_str(), gapStr.c_str());
+        }
+
         // Fill each gap with guessed types
         size_t beforeCount = result.fields.size();
         for (const auto& gap : gaps) {

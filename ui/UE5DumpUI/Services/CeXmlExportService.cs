@@ -221,6 +221,16 @@ public static class CeXmlExportService
         "SoftObjectProperty" or "SoftClassProperty" or "LazyObjectProperty" or
         "InterfaceProperty";
 
+    // Array inner types whose element slot holds a RAW 8-byte UObject* — so a
+    // drilled element can dereference it with Offsets=[0]. This is a STRICT subset
+    // of IsObjectPropertyType and matches the DLL's Ubel::IsPointerArrayType:
+    // Weak (FWeakObjectPtr {ObjectIndex, SerialNumber}), Soft (FSoftObjectPath) and
+    // Lazy (FGuid) elements are NOT raw pointers even though the DLL resolves them
+    // to a live UObject* — dereferencing their slot would land CE at a garbage
+    // address, so they must keep their existing leaf / Phase-G handling.
+    private static bool IsRawObjectPtrArrayInner(string innerType) =>
+        innerType is "ObjectProperty" or "ClassProperty";
+
     // ========================================
     // Unified drilldown resolver (docs/ce-export-drilldown-spec.md Phase A)
     // ========================================
@@ -435,6 +445,27 @@ public static class CeXmlExportService
                         StructClassAddr = field.ArrayStructClassAddr,
                         StructTypeName = field.ArrayStructType,
                     });
+                break;
+            }
+            // TArray<ObjectProperty> (object pointers, e.g. SpawnedAttributes): emit
+            // each non-null element pointer so the resolver walks the target object
+            // and populates resolvedInstances — without this, drilling into a
+            // selected object-array element was a no-op (the element emitted as a
+            // plain 8-byte pointer regardless of drilldown depth). ArrayElementValue
+            // carries no PtrClassAddr; WalkInstance resolves the class from the
+            // pointer itself when class_addr is omitted.
+            case "ArrayProperty" when IsRawObjectPtrArrayInner(field.ArrayInnerType)
+                    && field.ArrayElements is { Count: > 0 }:
+            {
+                foreach (var e in field.ArrayElements)
+                    if (!string.IsNullOrEmpty(e.PtrAddress) && e.PtrAddress != "0x0")
+                        list.Add(new LiveFieldValue
+                        {
+                            TypeName = field.ArrayInnerType,
+                            PtrAddress = e.PtrAddress,
+                            PtrName = e.PtrName,
+                            PtrClassName = e.PtrClassName,
+                        });
                 break;
             }
         }
@@ -1055,11 +1086,50 @@ public static class CeXmlExportService
     /// This gives the clean CE pointer chain: Root(A) -> field(B) instead of
     /// Root(A) -> field(B) -> Outer(C) -> field(A) -> field(B).
     /// </summary>
+    /// <summary>
+    /// Collapse runs of CONSECUTIVE breadcrumb crumbs that resolve to the exact
+    /// same deref step — same field offset, same resolved address, same name, and
+    /// same container/pointer kind. Such a pair is always redundant (you can't move
+    /// from object X to X via the same field) and would otherwise emit a duplicate
+    /// CE deref level. This happens e.g. when a Locate-in-GWorld path leaves a
+    /// synthetic container crumb and the user then re-enters that same container,
+    /// stacking two identical <c>Foo(C,+N)</c> crumbs. The LATER crumb is kept (it
+    /// carries the live <c>ContainerField</c> for a real container view; an earlier
+    /// path-synthetic crumb has none). Unlike the cycle pass below, this also
+    /// collapses container-view crumbs (which the cycle pass deliberately skips).
+    /// </summary>
+    internal static IReadOnlyList<BreadcrumbItem> DedupeConsecutiveBreadcrumbs(
+        IReadOnlyList<BreadcrumbItem> breadcrumbs)
+    {
+        if (breadcrumbs.Count <= 1) return breadcrumbs;
+        var result = new List<BreadcrumbItem>(breadcrumbs.Count);
+        foreach (var bc in breadcrumbs)
+        {
+            if (result.Count > 0)
+            {
+                var prev = result[^1];
+                if (prev.FieldOffset == bc.FieldOffset
+                    && prev.IsContainerView == bc.IsContainerView
+                    && string.Equals(prev.Address, bc.Address, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(prev.FieldName, bc.FieldName, StringComparison.Ordinal))
+                {
+                    result[^1] = bc;  // keep the later (richer) crumb
+                    continue;
+                }
+            }
+            result.Add(bc);
+        }
+        return result;
+    }
+
     internal static IReadOnlyList<BreadcrumbItem> CleanBreadcrumbs(IReadOnlyList<BreadcrumbItem> breadcrumbs)
     {
         if (breadcrumbs.Count <= 1) return breadcrumbs;
 
-        var result = new List<BreadcrumbItem>(breadcrumbs);
+        // First collapse consecutive duplicate crumbs (e.g. a path-synthetic
+        // container crumb followed by the user re-entering the same container),
+        // then run the cycle-removal pass below.
+        var result = new List<BreadcrumbItem>(DedupeConsecutiveBreadcrumbs(breadcrumbs));
 
         bool changed = true;
         while (changed)
@@ -1510,6 +1580,26 @@ public static class CeXmlExportService
             return;
         }
 
+        // TArray<ObjectProperty> with pre-resolved element targets → per-element
+        // drilled group (one EmitDrilledPointer per pointer slot). The array group
+        // derefs TArray.Data (Offsets=[0]); each element pointer is then dereffed by
+        // its own Offsets=[0] so the target's fields lay out at their natural
+        // offsets. Elements whose target wasn't resolved (depth/cycle/limit, or a
+        // null slot) fall back to the flat 8-byte leaf. Only taken when at least
+        // one element actually resolved, so depth=0 / unresolved arrays keep the
+        // prior generic-leaf behavior below.
+        if (IsRawObjectPtrArrayInner(field.ArrayInnerType)
+            && _resolvedInstancesState != null
+            && field.ArrayElements is { Count: > 0 }
+            && field.ArrayElemSize > 0
+            && field.ArrayElements.Any(e => !string.IsNullOrEmpty(e.PtrAddress)
+                    && e.PtrAddress != "0x0"
+                    && _resolvedInstancesState.ContainsKey(e.PtrAddress)))
+        {
+            EmitObjectArrayProperty(sb, indent, field, desc);
+            return;
+        }
+
         // Map inner type to CE type
         var ceElem = MapInnerTypeToCeField(field.ArrayInnerType);
 
@@ -1649,6 +1739,66 @@ public static class CeXmlExportService
                 EmitLeaf(sb, childIndent, elemDesc, ceElem,
                     $"+{elemByteOffset:X}", null);
             }
+        }
+
+        EmitGroupClose(sb, indent);
+    }
+
+    /// <summary>
+    /// Emit a TArray&lt;ObjectProperty&gt; whose element pointer targets were
+    /// pre-resolved by the drilldown resolver. The array group derefs TArray.Data
+    /// (Offsets=[0]); each resolved element becomes a drilled GroupHeader (its own
+    /// Offsets=[0] derefs the 8-byte element pointer, children at their natural
+    /// offsets) via EmitDrilledPointer — so nested structs/pointers/containers
+    /// expand and the same cycle/depth guards apply. Unresolved or null elements
+    /// fall back to a flat 8-byte pointer leaf (the pre-fix behavior).
+    /// </summary>
+    private static void EmitObjectArrayProperty(StringBuilder sb, string indent,
+        LiveFieldValue field, string desc)
+    {
+        // Array group: Address=+{fieldOffset}, Offsets=[0] derefs TArray.Data.
+        EmitGroupOpen(sb, indent, desc, $"+{field.Offset:X}", new[] { 0 });
+        var elemIndent = indent + "  ";
+
+        foreach (var elem in field.ArrayElements!)
+        {
+            int elemByteOffset = elem.Index * field.ArrayElemSize;
+            // Base name without the class suffix — EmitDrilledPointer re-appends
+            // "(ClassName)" itself, so the synth field must NOT carry it (else the
+            // class shows twice). The leaf fallback adds it explicitly below.
+            var baseName = !string.IsNullOrEmpty(elem.PtrName)
+                ? $"[{elem.Index}] {elem.PtrName}"
+                : $"[{elem.Index}]";
+
+            if (!string.IsNullOrEmpty(elem.PtrAddress) && elem.PtrAddress != "0x0"
+                && _resolvedInstancesState != null
+                && _resolvedInstancesState.TryGetValue(elem.PtrAddress, out var children)
+                && children.Count > 0)
+            {
+                // Synthetic pointer field so EmitDrilledPointer derefs the element
+                // slot (+elemByteOffset, Offsets=[0]) and lays out the target's fields.
+                var synth = new LiveFieldValue
+                {
+                    Name = baseName,
+                    TypeName = field.ArrayInnerType,
+                    Offset = elemByteOffset,
+                    PtrAddress = elem.PtrAddress,
+                    PtrName = elem.PtrName,
+                    PtrClassName = elem.PtrClassName,
+                };
+                EmitDrilledPointer(sb, elemIndent, synth, children,
+                    _resolvedStructsState, _resolvedInstancesState!);
+                continue;
+            }
+
+            // Unresolved / null → flat 8-byte pointer leaf (matches the generic
+            // object-array leaf shape: "[N] PtrName (PtrClassName)").
+            var leafName = !string.IsNullOrEmpty(elem.PtrClassName)
+                ? $"{baseName} ({elem.PtrClassName})"
+                : baseName;
+            EmitLeaf(sb, elemIndent, leafName,
+                new CeFieldInfo("8 Bytes", ShowAsHex: true),
+                $"+{elemByteOffset:X}", null);
         }
 
         EmitGroupClose(sb, indent);

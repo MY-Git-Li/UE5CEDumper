@@ -192,6 +192,20 @@
                            Minimum="100" Maximum="1000000" Increment="10000"
                            ToolTip.Tip="{StaticResource str.Tip.VS.MaxResults}"
                            Width="170" FontSize="12"/>
+            <!-- User-adjustable scan deadline (was a hard 15s). 10–60s, default 15.
+                 Threaded to the DLL as deadline_ms; shared by Single + Group modes. -->
+            <TextBlock Text="{StaticResource str.VS.Timeout}"
+                       Foreground="#CCCCCC" FontSize="12"
+                       VerticalAlignment="Center" Margin="8,0,0,0"
+                       ToolTip.Tip="{StaticResource str.Tip.VS.Timeout}"/>
+            <Slider Value="{Binding ScanTimeoutSeconds}"
+                    Minimum="10" Maximum="60"
+                    TickFrequency="5" IsSnapToTickEnabled="True"
+                    Width="110" VerticalAlignment="Center"
+                    ToolTip.Tip="{StaticResource str.Tip.VS.Timeout}"/>
+            <TextBlock Text="{Binding ScanTimeoutSeconds, StringFormat='{}{0}s'}"
+                       Foreground="#D4D4D4" FontSize="12" FontWeight="Bold"
+                       VerticalAlignment="Center" MinWidth="28"/>
           </StackPanel>
 
           <!-- Row 2: action buttons -->
@@ -448,6 +462,20 @@
                     ToolTip.Tip="{StaticResource str.Tip.VS.NewestFirst}"
                     Foreground="#CCCCCC" FontSize="12"
                     VerticalAlignment="Center" Margin="8,0,0,0"/>
+          <!-- User-adjustable scan deadline (was a hard 15s). Shares ScanTimeoutSeconds
+               with single mode (10–60s, default 15; threaded as deadline_ms). -->
+          <TextBlock Text="{StaticResource str.VS.Timeout}"
+                     Foreground="#CCCCCC" FontSize="12"
+                     VerticalAlignment="Center" Margin="12,0,0,0"
+                     ToolTip.Tip="{StaticResource str.Tip.VS.Timeout}"/>
+          <Slider Value="{Binding ScanTimeoutSeconds}"
+                  Minimum="10" Maximum="60"
+                  TickFrequency="5" IsSnapToTickEnabled="True"
+                  Width="110" VerticalAlignment="Center"
+                  ToolTip.Tip="{StaticResource str.Tip.VS.Timeout}"/>
+          <TextBlock Text="{Binding ScanTimeoutSeconds, StringFormat='{}{0}s'}"
+                     Foreground="#D4D4D4" FontSize="12" FontWeight="Bold"
+                     VerticalAlignment="Center" MinWidth="28"/>
         </StackPanel>
 
         <!-- Group action buttons -->

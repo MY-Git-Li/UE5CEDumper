@@ -363,6 +363,215 @@ public class LiveWalkerMultiSelectTests
         Assert.DoesNotContain("\"[4]\"", xml);
     }
 
+    // ------------------------------------------------------------------
+    // PathStepToBreadcrumbs — GWorld-path array-element hop splitting
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void PathStepToBreadcrumbs_ObjectArrayElement_SplitsIntoContainerPlusElement()
+    {
+        // A GWorld-path hop through a TArray<ObjectProperty> element must expand
+        // into TWO crumbs: the array field (deref TArray::Data) + the element
+        // (deref the pointer at index*8). Regression for the Locate-in-GWorld
+        // "[0] missing → wrong addresses downstream" Copy CE Field bug.
+        var step = new GWorldPathStep
+        {
+            From = "0x3AB399520", To = "0x3AB399C40",
+            FieldOffset = 0x2E0, FieldName = "PlayerArray",
+            FieldType = "ArrayProperty", InnerType = "ObjectProperty",
+            ElementIndex = 0, ToName = "PlayerState", ToClass = "PlayerState",
+        };
+
+        var crumbs = LiveWalkerViewModel.PathStepToBreadcrumbs(step);
+
+        Assert.Equal(2, crumbs.Count);
+        // Level 1: array field — container-view deref of TArray::Data at +2E0.
+        Assert.Equal(0x2E0, crumbs[0].FieldOffset);
+        Assert.True(crumbs[0].IsContainerView);
+        Assert.Equal("PlayerArray", crumbs[0].FieldName);
+        // Level 2: element pointer at index*8 = 0, pointer deref to PlayerState.
+        Assert.Equal(0, crumbs[1].FieldOffset);
+        Assert.True(crumbs[1].IsPointerDeref);
+        Assert.False(crumbs[1].IsContainerView);
+        Assert.Equal("[0]", crumbs[1].FieldName);
+        Assert.Equal("0x3AB399C40", crumbs[1].Address);
+    }
+
+    [Fact]
+    public void PathStepToBreadcrumbs_ObjectArrayElement_ElementOffsetIsIndexTimes8()
+    {
+        var step = new GWorldPathStep
+        {
+            From = "0xA", To = "0xB", FieldOffset = 0x10, FieldName = "Arr",
+            FieldType = "ArrayProperty", InnerType = "ClassProperty", ElementIndex = 2,
+        };
+        var crumbs = LiveWalkerViewModel.PathStepToBreadcrumbs(step);
+        Assert.Equal(2, crumbs.Count);
+        Assert.Equal(0x10, crumbs[1].FieldOffset);  // index 2 * 8-byte ptr stride = 0x10
+    }
+
+    [Fact]
+    public void PathStepToBreadcrumbs_DirectPointerField_SingleCrumb()
+    {
+        var step = new GWorldPathStep
+        {
+            From = "0xA", To = "0xB", FieldOffset = 0x340, FieldName = "PawnPrivate",
+            FieldType = "ObjectProperty", ElementIndex = -1, ToName = "BP_PlayerCharacter_C",
+        };
+        var crumbs = LiveWalkerViewModel.PathStepToBreadcrumbs(step);
+        Assert.Single(crumbs);
+        Assert.Equal(0x340, crumbs[0].FieldOffset);
+        Assert.True(crumbs[0].IsPointerDeref);
+        Assert.False(crumbs[0].IsContainerView);
+    }
+
+    [Fact]
+    public void PathStepToBreadcrumbs_StructArrayElement_DoesNotSplit()
+    {
+        // Struct-array element stride isn't a plain 8-byte pointer → keep the
+        // single crumb (current behavior) rather than emit a wrong index*8 deref.
+        var step = new GWorldPathStep
+        {
+            From = "0xA", To = "0xB", FieldOffset = 0x10, FieldName = "Items",
+            FieldType = "ArrayProperty", InnerType = "StructProperty", ElementIndex = 1,
+        };
+        var crumbs = LiveWalkerViewModel.PathStepToBreadcrumbs(step);
+        Assert.Single(crumbs);
+    }
+
+    [Fact]
+    public void GenerateHierarchicalXml_PathThroughObjectArrayElement_EmitsElementDerefNode()
+    {
+        // End-to-end: a GWorld path GameState → PlayerArray[0] → PlayerState →
+        // PawnPrivate must emit the array field (+2E0, deref Data), THEN the
+        // element ([0] +0, deref ptr), THEN PawnPrivate (+340) NESTED under the
+        // element — not PawnPrivate directly under the array (which would apply
+        // +340 to the Data buffer base).
+        var steps = new[]
+        {
+            new GWorldPathStep { From="0xW", To="0x3AB399520", FieldOffset=0x1B0, FieldName="GameState", FieldType="ObjectProperty", ElementIndex=-1, ToName="GameState" },
+            new GWorldPathStep { From="0x3AB399520", To="0x3AB399C40", FieldOffset=0x2E0, FieldName="PlayerArray", FieldType="ArrayProperty", InnerType="ObjectProperty", ElementIndex=0, ToName="PlayerState" },
+            new GWorldPathStep { From="0x3AB399C40", To="0x13F828040", FieldOffset=0x340, FieldName="PawnPrivate", FieldType="ObjectProperty", ElementIndex=-1, ToName="BP_PlayerCharacter_C" },
+        };
+        var breadcrumbs = new List<BreadcrumbItem> { MakeBc("0xW", "GWorld", "GWorld", isPointer: true) };
+        foreach (var s in steps)
+            breadcrumbs.AddRange(LiveWalkerViewModel.PathStepToBreadcrumbs(s));
+
+        var fields = new List<LiveFieldValue>
+            { new() { Name = "Health", TypeName = "FloatProperty", Offset = 0x30, Size = 4 } };
+
+        var xml = CeXmlExportService.GenerateHierarchicalXml(
+            "\"game.exe\"+1000", "GWorld", breadcrumbs, fields);
+
+        // The element [0] deref node must exist (was missing → the bug).
+        int elemIdx = xml.IndexOf("\"[0]\"", StringComparison.Ordinal);
+        Assert.True(elemIdx >= 0, "element [0] deref node missing from the chain");
+        Assert.Contains("<Address>+2E0</Address>", xml);  // PlayerArray (deref Data)
+        Assert.Contains("<Address>+340</Address>", xml);  // PawnPrivate
+        // PawnPrivate must come AFTER [0] in the document (nested under it), so the
+        // +340 resolves against PlayerState, not the TArray::Data buffer.
+        int pawnIdx = xml.IndexOf("\"PawnPrivate\"", StringComparison.Ordinal);
+        Assert.True(pawnIdx > elemIdx, "PawnPrivate must nest under the [0] element");
+    }
+
+    // ------------------------------------------------------------------
+    // DedupeConsecutiveBreadcrumbs — collapse redundant duplicate crumbs
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void DedupeConsecutiveBreadcrumbs_CollapsesIdenticalContainerNeighbors_KeepsLater()
+    {
+        // Two identical consecutive container crumbs (e.g. a Locate-in-GWorld
+        // path-synthetic SpawnedAttributes(C) + the user re-entering it) collapse
+        // to one — keeping the LATER crumb (it has the live ContainerField).
+        var cf = new LiveFieldValue
+        {
+            Name = "SpawnedAttributes", TypeName = "ArrayProperty",
+            ArrayInnerType = "ObjectProperty", ArrayCount = 3,
+        };
+        var list = new List<BreadcrumbItem>
+        {
+            MakeBc("0x5E1BD8A0", "ASC", "AbilitySystemComponent", isPointer: true, offset: 0x7E0),
+            new BreadcrumbItem { Address = "0x5E1BD8A0", Label = "SpawnedAttributes", FieldName = "SpawnedAttributes", FieldOffset = 0x10A8, IsContainerView = true },                      // synthetic, no ContainerField
+            new BreadcrumbItem { Address = "0x5E1BD8A0", Label = "SpawnedAttributes", FieldName = "SpawnedAttributes", FieldOffset = 0x10A8, IsContainerView = true, ContainerField = cf }, // real
+        };
+
+        var result = CeXmlExportService.DedupeConsecutiveBreadcrumbs(list);
+
+        Assert.Equal(2, result.Count);
+        Assert.Equal("AbilitySystemComponent", result[0].FieldName);
+        Assert.Equal("SpawnedAttributes", result[1].FieldName);
+        Assert.NotNull(result[1].ContainerField);  // kept the later (richer) crumb
+    }
+
+    [Fact]
+    public void DedupeConsecutiveBreadcrumbs_KeepsDistinctSplitCrumbs()
+    {
+        // The PathStepToBreadcrumbs split (container + element) must NOT be
+        // collapsed — they differ by name/address/kind.
+        var list = new List<BreadcrumbItem>
+        {
+            new BreadcrumbItem { Address = "0x3AB399520", FieldName = "PlayerArray", FieldOffset = 0x2E0, IsContainerView = true },
+            new BreadcrumbItem { Address = "0x3AB399C40", FieldName = "[0]", FieldOffset = 0x0, IsPointerDeref = true },
+        };
+        var result = CeXmlExportService.DedupeConsecutiveBreadcrumbs(list);
+        Assert.Equal(2, result.Count);
+    }
+
+    [Fact]
+    public void GenerateHierarchicalXml_DuplicateConsecutiveContainerCrumbs_EmitsSingleDeref()
+    {
+        // A spine carrying two identical consecutive container crumbs must collapse
+        // to ONE CE deref level (CleanBreadcrumbs dedups), not double-deref +10A8.
+        var breadcrumbs = new List<BreadcrumbItem>
+        {
+            MakeBc("0x1000", "Root"),
+            new BreadcrumbItem { Address = "0x5000", Label = "ASC", FieldName = "ASC", FieldOffset = 0x7E0, IsPointerDeref = true },
+            new BreadcrumbItem { Address = "0x6000", Label = "Spawned", FieldName = "Spawned", FieldOffset = 0x10A8, IsContainerView = true },
+            new BreadcrumbItem { Address = "0x6000", Label = "Spawned", FieldName = "Spawned", FieldOffset = 0x10A8, IsContainerView = true },
+        };
+        var fields = new List<LiveFieldValue>
+            { new() { Name = "X", TypeName = "FloatProperty", Offset = 0x10, Size = 4 } };
+
+        var xml = CeXmlExportService.GenerateHierarchicalXml(
+            "\"g.exe\"+1000", "Root", breadcrumbs, fields);
+
+        Assert.Equal(1, CountOccurrences(xml, "<Address>+10A8</Address>"));
+    }
+
+    // Deep distinct chain (the Gundam SEED repro) must pass through the dedup +
+    // clean passes UNTOUCHED — guards DedupeConsecutiveBreadcrumbs / CleanBreadcrumbs
+    // against over-collapsing a legitimate deeply-nested export.
+    private static List<BreadcrumbItem> SeedDeepChain() => new()
+    {
+        MakeBc("0x100", "GWorld", "GWorld", isPointer: true),
+        new BreadcrumbItem { Address = "0x200", FieldName = "OwningGameInstance",  FieldOffset = 0x180, IsPointerDeref = true },
+        new BreadcrumbItem { Address = "0x300", FieldName = "m_savedata",          FieldOffset = 0x2A8, IsPointerDeref = true },
+        new BreadcrumbItem { Address = "0x400", FieldName = "SaveSlotList",        FieldOffset = 0x7D0, IsContainerView = true },
+        new BreadcrumbItem { Address = "0x500", FieldName = "[1]",                 FieldOffset = 0x6F8, IsPointerDeref = true },
+        new BreadcrumbItem { Address = "0x600", FieldName = "MsTuneData.MsTunes",  FieldOffset = 0x0,   IsContainerView = true },
+        new BreadcrumbItem { Address = "0x700", FieldName = "[0]",                 FieldOffset = 0x8,   IsPointerDeref = true },
+        new BreadcrumbItem { Address = "0x800", FieldName = "WeaponTuneList",      FieldOffset = 0x18,  IsContainerView = true },
+    };
+
+    [Fact]
+    public void DedupeConsecutiveBreadcrumbs_DeepDistinctChain_Unchanged()
+    {
+        var chain = SeedDeepChain();
+        var result = CeXmlExportService.DedupeConsecutiveBreadcrumbs(chain);
+        Assert.Equal(chain.Count, result.Count);
+        for (int i = 0; i < chain.Count; i++)
+            Assert.Equal(chain[i].FieldName, result[i].FieldName);
+    }
+
+    [Fact]
+    public void CleanBreadcrumbs_DeepDistinctChain_PreservesAllLevels()
+    {
+        var chain = SeedDeepChain();
+        var result = CeXmlExportService.CleanBreadcrumbs(chain);
+        Assert.Equal(chain.Count, result.Count);
+    }
+
     private static int CountOccurrences(string source, string substring)
     {
         int count = 0;

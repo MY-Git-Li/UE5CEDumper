@@ -1515,6 +1515,7 @@ public sealed class DumpService : IDumpService
         bool nativeC = false,
         bool newestFirst = false,
         int pageSize = 1000,
+        int deadlineMs = 15000,
         CancellationToken ct = default)
     {
         var req = new JsonObject
@@ -1567,6 +1568,11 @@ public sealed class DumpService : IDumpService
         // enabled (auto-set with native_c, but independently toggleable).
         if (newestFirst)
             req["newest_first"] = (JsonNode)true;
+        // Scan deadline (Value Search "Timeout" slider). DLL default is 15000ms →
+        // attach only when the user picked a different budget, keeping the common
+        // case byte-identical on the wire. (JsonNode) cast dodges the AOT Add<T> trap.
+        if (deadlineMs != 15000)
+            req["deadline_ms"] = (JsonNode)deadlineMs;
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
@@ -1756,6 +1762,7 @@ public sealed class DumpService : IDumpService
         bool nativeC = false,
         bool newestFirst = false,
         int pageSize = 1000,
+        int deadlineMs = 15000,
         CancellationToken ct = default)
     {
         var values = new JsonArray();
@@ -1791,6 +1798,10 @@ public sealed class DumpService : IDumpService
         // Newest-first ordering (P2): attach only when on (auto-set with native_c).
         if (newestFirst)
             req["newest_first"] = (JsonNode)true;
+        // Scan deadline (Value Search "Timeout" slider). DLL default 15000ms →
+        // attach only when changed, keeping the common case wire-identical.
+        if (deadlineMs != 15000)
+            req["deadline_ms"] = (JsonNode)deadlineMs;
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
 

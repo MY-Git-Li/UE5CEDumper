@@ -582,6 +582,95 @@ public class CeXmlExportServiceTests
     }
 
     [Fact]
+    public void GenerateInstanceXml_ObjectArray_WithResolvedElement_DrillsElementGroup()
+    {
+        // Array<ObjectProperty> (e.g. SpawnedAttributes): exporting it with a
+        // resolved element pointer must drill that element into a GroupHeader
+        // (Offsets=[0] derefs the 8-byte element pointer) + the target's fields —
+        // not a flat 8-byte leaf. Regression for the "Copy CE Field doesn't drill
+        // an object-array element" bug.
+        const string elem2Ptr = "0x1E727ADC10";
+        var field = new LiveFieldValue
+        {
+            Name = "SpawnedAttributes", TypeName = "ArrayProperty",
+            ArrayInnerType = "ObjectProperty",
+            ArrayCount = 3, ArrayElemSize = 8, Offset = 0x10A8,
+            ArrayDataAddr = "0x1E727ADC00",
+            ArrayElements = new List<ArrayElementValue>
+            {
+                new() { Index = 0, PtrAddress = "0x1E040000", PtrName = "ShieldAttributeSet", PtrClassName = "ShieldAttributeSet" },
+                new() { Index = 1, PtrAddress = "0x1E5F0000", PtrName = "ExtraAttributeSet",  PtrClassName = "ExtraAttributeSet" },
+                new() { Index = 2, PtrAddress = elem2Ptr,     PtrName = "CharacterAttributeSet", PtrClassName = "CharacterAttributeSet" },
+            },
+        };
+        var resolvedInstances = new Dictionary<string, List<LiveFieldValue>>
+        {
+            [elem2Ptr] = new()
+            {
+                new LiveFieldValue { Name = "HealthPoint", TypeName = "FloatProperty", Offset = 0x30, Size = 4 },
+            },
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "BP_PlayerCharacter_C", "BP_PlayerCharacter_C",
+            new[] { field }, resolvedInstances: resolvedInstances);
+
+        // Element [2] must drill: GroupHeader + Address=+10 (index 2 * 8) + Offsets=[0].
+        var elemStart = xml.IndexOf("[2] CharacterAttributeSet", StringComparison.Ordinal);
+        Assert.True(elemStart >= 0, "Element [2] entry missing");
+        var headerEnd = xml.IndexOf("<CheatEntries>", elemStart, StringComparison.Ordinal);
+        Assert.True(headerEnd > elemStart, "Element [2] must open <CheatEntries> (drilled group)");
+        var headerBlock = xml.Substring(elemStart, headerEnd - elemStart);
+        Assert.Contains("<GroupHeader>1</GroupHeader>", headerBlock);
+        Assert.Contains("<Address>+10</Address>", headerBlock);
+        Assert.Contains("<Offset>0</Offset>", headerBlock);
+        // The class name must appear exactly once (no double "(Class) (Class)").
+        Assert.Contains("[2] CharacterAttributeSet (CharacterAttributeSet)", xml);
+        Assert.DoesNotContain("(CharacterAttributeSet) (CharacterAttributeSet)", xml);
+        // The target's child field appears at its natural offset within the element.
+        Assert.Contains("\"HealthPoint\"", xml);
+        Assert.Contains("<Address>+30</Address>", xml);
+        Assert.Contains("<VariableType>Float</VariableType>", xml);
+        // Unresolved sibling [0] stays a flat 8-byte leaf with its class suffix.
+        Assert.Contains("[0] ShieldAttributeSet (ShieldAttributeSet)", xml);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_WeakObjectArray_ResolvedElement_DoesNotDrill()
+    {
+        // Regression guard: a WeakObjectProperty array slot is FWeakObjectPtr
+        // {int32 ObjectIndex, int32 SerialNumber} — NOT a raw UObject*. Even when
+        // the DLL resolves an element to a live object (PtrAddress in
+        // resolvedInstances), drilling it (Offsets=[0]) would tell CE to deref a
+        // non-pointer → garbage address. Only ObjectProperty/ClassProperty arrays
+        // may drill; Weak/Soft/Lazy must keep their existing leaf handling.
+        const string elemPtr = "0x1E727ADC10";
+        var field = new LiveFieldValue
+        {
+            Name = "WeakRefs", TypeName = "ArrayProperty",
+            ArrayInnerType = "WeakObjectProperty",
+            ArrayCount = 1, ArrayElemSize = 8, Offset = 0x40,
+            ArrayDataAddr = "0x1E727AD000",
+            ArrayElements = new List<ArrayElementValue>
+            {
+                new() { Index = 0, PtrAddress = elemPtr, PtrName = "SomeActor", PtrClassName = "AActor" },
+            },
+        };
+        var resolvedInstances = new Dictionary<string, List<LiveFieldValue>>
+        {
+            [elemPtr] = new() { new LiveFieldValue { Name = "Health", TypeName = "FloatProperty", Offset = 0x10, Size = 4 } },
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass",
+            new[] { field }, resolvedInstances: resolvedInstances);
+
+        // Must NOT drill the resolved target's fields into the weak-array element.
+        Assert.DoesNotContain("\"Health\"", xml);
+        Assert.DoesNotContain("<Address>+10</Address>", xml);
+    }
+
+    [Fact]
     public void GenerateInstanceXml_ObjectProperty_NoMatchingResolvedInstance_FallsBackToFlatLeaf()
     {
         // resolvedInstances has different PtrAddress → no match → should fall

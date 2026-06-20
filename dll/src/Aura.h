@@ -836,7 +836,13 @@ ValueScanResult ScanForValue(
     // first). Recommended alongside nativeC (the UI couples the two). Applies to
     // the whole scan (reflected + native), affecting only which matches survive
     // truncation, not which exist.
-    bool                newestFirst   = false);
+    bool                newestFirst   = false,
+    // Scan deadline in milliseconds (default 15000 = 15s). When the GObjects walk
+    // exceeds this wall-clock budget the scan bails early (stats.deadlineHit fires)
+    // and returns whatever matched so far. Exposed via the pipe `deadline_ms` field
+    // + the Value Search "Timeout" slider (10-60s) so huge games that don't finish
+    // in 15s can be given a longer budget. <= 0 falls back to the 15s default.
+    int32_t             deadlineMs    = 15000);
 
 // Refine an existing candidate vector in place: re-read each
 // candidate's bytes (or string, for FString/FName/FText DataTypes),
@@ -918,7 +924,12 @@ GroupScanResult ScanForValueGroup(
     // a huge game keeps the most-recently-allocated objects (just-spawned UI/actors
     // holding native values) instead of low-index CDOs/templates. The UI couples this
     // on with native-C. Default false (ascending).
-    bool                                newestFirst = false);
+    bool                                newestFirst = false,
+    // Scan deadline in milliseconds (default 15000 = 15s). When the group walk
+    // exceeds this budget it bails early (stats.deadlineHit fires) and returns the
+    // matches found so far. Exposed via the pipe `deadline_ms` field + the Value
+    // Search "Timeout" slider (10-60s). <= 0 falls back to the 15s default.
+    int32_t                             deadlineMs  = 15000);
 
 // Next scan (P1: exact per slot). Re-reads each candidate's per-slot
 // convergence offsets, keeps those still equal to the slot's NEW target,
