@@ -572,6 +572,235 @@ public class LiveWalkerMultiSelectTests
         Assert.Equal(chain.Count, result.Count);
     }
 
+    // --- Back-nav re-hydration of path-synthetic container crumbs (follow-up b) ---
+    //
+    // PathStepToBreadcrumbs splits a Locate-in-GWorld object-pointer-array hop into a
+    // container crumb whose ContainerField is null (the GWorld path step carries no
+    // TArray::Data base / element count / resolved element list). Back-nav onto such a
+    // crumb must LAZILY re-walk the parent object and re-populate the ARRAY ELEMENT
+    // view — not fall through to the parent object's field grid (the pre-fix
+    // mis-render). These tests drive that through the real Back-nav commands.
+
+    private const string SynthParentAddr = "0x1000";
+    private const int SynthArrayOffset = 0x10A8;
+
+    private static StubDumpService MakeStubWithArrayParent()
+    {
+        var dump = new StubDumpService();
+        dump.RegisterStruct(SynthParentAddr, new InstanceWalkResult
+        {
+            Name = "MyActor",
+            ClassName = "ACharacter",
+            Address = SynthParentAddr,
+            Fields = new List<LiveFieldValue>
+            {
+                // Parent-grid signature field — must NOT surface if re-hydration worked.
+                new() { Name = "SomeOtherField", Offset = 0x10, TypeName = "IntProperty" },
+                // The object-pointer array the synthetic crumb refers to.
+                new()
+                {
+                    Name = "SpawnedAttributes",
+                    Offset = SynthArrayOffset,
+                    TypeName = "ArrayProperty",
+                    ArrayCount = 2,
+                    ArrayInnerType = "ObjectProperty",
+                    ArrayElemSize = 8,
+                    ArrayDataAddr = "0x5000",
+                    ArrayElements = new List<ArrayElementValue>
+                    {
+                        new() { Index = 0, PtrAddress = "0x6000", PtrName = "CharacterAttributeSet", PtrClassName = "AttributeSet" },
+                        new() { Index = 1, PtrAddress = "0x6010", PtrName = "OtherAttributeSet", PtrClassName = "AttributeSet" },
+                    },
+                },
+            },
+        });
+        return dump;
+    }
+
+    private static LiveWalkerViewModel MakeVm(StubDumpService dump)
+        => new LiveWalkerViewModel(dump, new MockLoggingService(),
+                                   new MockPlatformService(System.IO.Path.GetTempPath()));
+
+    private static BreadcrumbItem SyntheticArrayContainerCrumb()
+        => new BreadcrumbItem
+        {
+            Address = SynthParentAddr,
+            Label = "SpawnedAttributes",
+            FieldName = "SpawnedAttributes",
+            FieldOffset = SynthArrayOffset,
+            IsContainerView = true,
+            ContainerField = null,   // the path-synthetic hallmark
+        };
+
+    [Fact]
+    public async Task NavigateToBreadcrumb_SyntheticContainerCrumb_RehydratesContainerView()
+    {
+        var vm = MakeVm(MakeStubWithArrayParent());
+        var container = SyntheticArrayContainerCrumb();
+        vm.Breadcrumbs.Clear();
+        vm.Breadcrumbs.Add(new BreadcrumbItem { Address = SynthParentAddr, Label = "MyActor", FieldName = "MyActor" });
+        vm.Breadcrumbs.Add(container);
+        vm.Breadcrumbs.Add(new BreadcrumbItem { Address = "0x6000", Label = "[0]", FieldName = "[0]", IsPointerDeref = true });
+
+        await vm.NavigateToBreadcrumbCommand.ExecuteAsync(container);
+
+        // Array element view (NOT the parent object grid).
+        Assert.Equal("Array<ObjectProperty>", vm.CurrentClassName);
+        Assert.Contains(vm.Fields, f => f.Name == "[0]" && f.PtrName == "CharacterAttributeSet");
+        Assert.Contains(vm.Fields, f => f.Name == "[1]");
+        Assert.DoesNotContain(vm.Fields, f => f.Name == "SomeOtherField"); // parent-grid signature
+        Assert.Equal(2, vm.Breadcrumbs.Count);                             // trailing element crumb truncated
+    }
+
+    [Fact]
+    public async Task GoBack_SyntheticContainerCrumb_RehydratesContainerView()
+    {
+        var vm = MakeVm(MakeStubWithArrayParent());
+        vm.Breadcrumbs.Clear();
+        vm.Breadcrumbs.Add(new BreadcrumbItem { Address = SynthParentAddr, Label = "MyActor", FieldName = "MyActor" });
+        vm.Breadcrumbs.Add(SyntheticArrayContainerCrumb());
+        vm.Breadcrumbs.Add(new BreadcrumbItem { Address = "0x6000", Label = "[0]", FieldName = "[0]", IsPointerDeref = true });
+
+        await vm.GoBackCommand.ExecuteAsync(null);
+
+        // GoBack pops the element crumb, landing on the synthetic container crumb,
+        // which must re-hydrate the array element view rather than the parent grid.
+        Assert.Equal("Array<ObjectProperty>", vm.CurrentClassName);
+        Assert.Contains(vm.Fields, f => f.Name == "[0]");
+        Assert.DoesNotContain(vm.Fields, f => f.Name == "SomeOtherField");
+    }
+
+    [Fact]
+    public async Task NavigateToBreadcrumb_SyntheticContainerCrumb_NoLiveMatch_FallsThroughToReWalk()
+    {
+        // If the parent re-walk no longer contains the array field (e.g. memory moved),
+        // the helper returns false and the existing parent re-walk renders the object grid.
+        var dump = new StubDumpService();
+        dump.RegisterStruct(SynthParentAddr, new InstanceWalkResult
+        {
+            Name = "MyActor", ClassName = "ACharacter", Address = SynthParentAddr,
+            Fields = new List<LiveFieldValue> { new() { Name = "SomeOtherField", Offset = 0x10, TypeName = "IntProperty" } },
+        });
+        var vm = MakeVm(dump);
+        var container = SyntheticArrayContainerCrumb();
+        vm.Breadcrumbs.Clear();
+        vm.Breadcrumbs.Add(new BreadcrumbItem { Address = SynthParentAddr, Label = "MyActor", FieldName = "MyActor" });
+        vm.Breadcrumbs.Add(container);
+
+        await vm.NavigateToBreadcrumbCommand.ExecuteAsync(container);
+
+        // Graceful degradation: parent object grid, no exception.
+        Assert.Contains(vm.Fields, f => f.Name == "SomeOtherField");
+        Assert.NotEqual("Array<ObjectProperty>", vm.CurrentClassName);
+    }
+
+    [Fact]
+    public async Task Refresh_SyntheticContainerCrumb_KeepsContainerView()
+    {
+        // Auto-refresh / Refresh while viewing a re-hydrated synthetic container must
+        // re-walk the parent and keep the array element view — not revert to a grid by
+        // re-walking the stale CurrentAddress.
+        var vm = MakeVm(MakeStubWithArrayParent());
+        vm.Breadcrumbs.Clear();
+        vm.Breadcrumbs.Add(new BreadcrumbItem { Address = SynthParentAddr, Label = "MyActor", FieldName = "MyActor" });
+        vm.Breadcrumbs.Add(SyntheticArrayContainerCrumb());
+        vm.CurrentAddress = "0x6000";   // stale deeper address; refresh must NOT render it as a grid
+        vm.HasData = true;
+
+        await vm.RefreshCommand.ExecuteAsync(null);
+
+        Assert.Equal("Array<ObjectProperty>", vm.CurrentClassName);
+        Assert.Contains(vm.Fields, f => f.Name == "[0]");
+        Assert.DoesNotContain(vm.Fields, f => f.Name == "SomeOtherField");
+    }
+
+    [Fact]
+    public async Task LoadBookmark_SyntheticContainerCrumb_RehydratesContainerView()
+    {
+        // A bookmark saved while viewing a re-hydrated synthetic container must restore
+        // the array element view on load — not the parent object grid (4th re-display site).
+        var vm = MakeVm(MakeStubWithArrayParent());
+        var slot = vm.BookmarkSlots[0];
+        slot.SavedBreadcrumbs = new List<BreadcrumbItem>
+        {
+            new() { Address = SynthParentAddr, Label = "MyActor", FieldName = "MyActor" },
+            SyntheticArrayContainerCrumb(),
+        };
+        slot.SavedAddress = SynthParentAddr;
+        slot.IsOccupied = true;
+
+        await vm.LoadBookmarkCommand.ExecuteAsync(slot);
+
+        Assert.Equal("Array<ObjectProperty>", vm.CurrentClassName);
+        Assert.Contains(vm.Fields, f => f.Name == "[0]");
+        Assert.DoesNotContain(vm.Fields, f => f.Name == "SomeOtherField");
+    }
+
+    [Fact]
+    public async Task GoBack_AtRoot_PreBookmarkRestore_SyntheticContainer_Rehydrates()
+    {
+        // Covers the 3rd wiring site: GoBack-at-root pre-bookmark restore branch.
+        var vm = MakeVm(MakeStubWithArrayParent());
+
+        // Pre-bookmark state ends on a synthetic container crumb.
+        vm.Breadcrumbs.Clear();
+        vm.Breadcrumbs.Add(new BreadcrumbItem { Address = SynthParentAddr, Label = "MyActor", FieldName = "MyActor" });
+        vm.Breadcrumbs.Add(SyntheticArrayContainerCrumb());
+        vm.CurrentAddress = SynthParentAddr;
+
+        // Load a single-crumb bookmark — captures the pre-bookmark trail and leaves
+        // Breadcrumbs.Count == 1, arming the Back-at-root restore branch.
+        var slot = vm.BookmarkSlots[0];
+        slot.SavedBreadcrumbs = new List<BreadcrumbItem>
+        {
+            new() { Address = "0x2000", Label = "Other", FieldName = "Other" },
+        };
+        slot.SavedAddress = "0x2000";
+        slot.IsOccupied = true;
+        await vm.LoadBookmarkCommand.ExecuteAsync(slot);
+        Assert.Single(vm.Breadcrumbs);
+
+        // Back at root restores the pre-bookmark trail; its tail (synthetic container)
+        // must re-hydrate the array element view.
+        await vm.GoBackCommand.ExecuteAsync(null);
+
+        Assert.Equal("Array<ObjectProperty>", vm.CurrentClassName);
+        Assert.Contains(vm.Fields, f => f.Name == "[0]");
+        Assert.DoesNotContain(vm.Fields, f => f.Name == "SomeOtherField");
+    }
+
+    [Fact]
+    public async Task NavigateToBreadcrumb_SyntheticContainer_FieldFoundButNotPopulatable_FallsThrough()
+    {
+        // willRepopulate==false branch: the field matches by name+offset but is no longer
+        // a populatable container (e.g. the array emptied to count 0 between scan and
+        // back-nav) → fall through to the parent grid rather than a stale/empty view.
+        var dump = new StubDumpService();
+        dump.RegisterStruct(SynthParentAddr, new InstanceWalkResult
+        {
+            Name = "MyActor", ClassName = "ACharacter", Address = SynthParentAddr,
+            Fields = new List<LiveFieldValue>
+            {
+                new()
+                {
+                    Name = "SpawnedAttributes", Offset = SynthArrayOffset,
+                    TypeName = "ArrayProperty",
+                    ArrayCount = 0, ArrayInnerType = "ObjectProperty",   // present but empty
+                },
+            },
+        });
+        var vm = MakeVm(dump);
+        var container = SyntheticArrayContainerCrumb();
+        vm.Breadcrumbs.Clear();
+        vm.Breadcrumbs.Add(new BreadcrumbItem { Address = SynthParentAddr, Label = "MyActor", FieldName = "MyActor" });
+        vm.Breadcrumbs.Add(container);
+
+        await vm.NavigateToBreadcrumbCommand.ExecuteAsync(container);
+
+        Assert.NotEqual("Array<ObjectProperty>", vm.CurrentClassName);
+        Assert.Contains(vm.Fields, f => f.Name == "SpawnedAttributes");
+    }
+
     private static int CountOccurrences(string source, string substring)
     {
         int count = 0;

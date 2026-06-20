@@ -943,6 +943,50 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Re-populate a path-synthetic container crumb on Back-navigation.
+    ///
+    /// <see cref="PathStepToBreadcrumbs"/> emits the array-field level of a
+    /// Locate-in-GWorld object-pointer-array hop as a container crumb whose
+    /// <see cref="BreadcrumbItem.ContainerField"/> is deliberately left null — the
+    /// GWorld path step carries no TArray::Data base / element count / resolved
+    /// element list, so the view cannot be rebuilt from the crumb alone. The normal
+    /// container re-populate branch is gated on ContainerField != null, so without
+    /// this such a crumb would fall through to a plain parent re-walk and render the
+    /// PARENT object's field grid instead of the array element view (a silent
+    /// mis-render — the crumb label says e.g. "SpawnedAttributes" but the grid shows
+    /// the owning object). Here we lazily hydrate it: re-walk the parent object live
+    /// (the crumb's Address is the parent), match the container field by name +
+    /// offset (the same lookup <c>RefreshCurrentView</c> uses), and re-populate the
+    /// container element view from the freshly-resolved field. Returns true if it
+    /// handled the crumb; false (no live match / not a container) lets the caller
+    /// fall through to the existing re-walk.
+    /// </summary>
+    private async Task<bool> TryRepopulateSyntheticContainerAsync(BreadcrumbItem item)
+    {
+        if (!item.IsContainerView || item.ContainerField != null) return false;
+
+        var classAddr = string.IsNullOrEmpty(item.ClassAddr) ? null : item.ClassAddr;
+        var result = await _dump.WalkInstanceAsync(item.Address, classAddr, arrayLimit: ArrayLimit, previewLimit: PreviewLimit, fillGaps: FillGaps);
+        result = await AutoFillGapsRetryAsync(result, item.Address, classAddr);
+
+        var field = result.Fields.FirstOrDefault(f => f.Name == item.FieldName && f.Offset == item.FieldOffset);
+        if (field == null) return false;
+
+        // Only handle when the matched field actually resolves to a populatable
+        // container (mirrors RepopulateContainerView's non-DataTable branches);
+        // otherwise let the caller fall through to a normal re-walk.
+        bool willRepopulate =
+            (field.ArrayCount > 0 && !string.IsNullOrEmpty(field.ArrayInnerType)) ||
+            (field.MapCount > 0 && !string.IsNullOrEmpty(field.MapKeyType)) ||
+            (field.SetCount > 0 && !string.IsNullOrEmpty(field.SetElemType));
+        if (!willRepopulate) return false;
+
+        RepopulateContainerView(field, item);
+        _log.Info($"NAV⇒SyntheticContainer rehydrated {item.FieldName} @ {item.Address} off=0x{item.FieldOffset:X}");
+        return true;
+    }
+
     private void PopulateSetContainerFields(List<ContainerElementValue> elements, LiveFieldValue sourceField)
     {
         var elemLabel = !string.IsNullOrEmpty(sourceField.SetElemType) ? sourceField.SetElemType : "?";
@@ -1259,6 +1303,17 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 return;
             }
 
+            // Path-synthetic container crumb (IsContainerView but no live ContainerField,
+            // from PathStepToBreadcrumbs): lazily re-hydrate the container view from a live
+            // parent walk instead of falling through to a parent-grid re-walk.
+            if (item.IsContainerView && item.ContainerField == null
+                && await TryRepopulateSyntheticContainerAsync(item))
+            {
+                if (!string.IsNullOrEmpty(scrollHint))
+                    ScrollToFieldRequested?.Invoke(scrollHint);
+                return;
+            }
+
             // If navigating back to the GWorld actor-list root, re-display the
             // actor list. A deeper crumb sharing the world address (OwningWorld)
             // is NOT the root — it falls through to a normal instance walk.
@@ -1322,6 +1377,11 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                         RepopulateContainerView(lastBc.ContainerField, lastBc);
                         return;
                     }
+                    if (lastBc.IsContainerView && lastBc.ContainerField == null
+                        && await TryRepopulateSyntheticContainerAsync(lastBc))
+                    {
+                        return;
+                    }
                     if (IsGWorldActorListRoot(lastBc))
                     {
                         PopulateFromWorld(_cachedWorld!);
@@ -1369,6 +1429,16 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             if (prev.IsContainerView && prev.ContainerField != null)
             {
                 RepopulateContainerView(prev.ContainerField, prev);
+                if (!string.IsNullOrEmpty(scrollHint))
+                    ScrollToFieldRequested?.Invoke(scrollHint);
+                return;
+            }
+
+            // Path-synthetic container crumb: re-hydrate from a live parent walk
+            // (see TryRepopulateSyntheticContainerAsync) rather than re-walking to the parent grid.
+            if (prev.IsContainerView && prev.ContainerField == null
+                && await TryRepopulateSyntheticContainerAsync(prev))
+            {
                 if (!string.IsNullOrEmpty(scrollHint))
                     ScrollToFieldRequested?.Invoke(scrollHint);
                 return;
@@ -2311,6 +2381,15 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 {
                     RepopulateContainerView(lastBc.ContainerField, lastBc);
                 }
+                else if (lastBc.IsContainerView && lastBc.ContainerField == null
+                         && await TryRepopulateSyntheticContainerAsync(lastBc))
+                {
+                    // Path-synthetic container crumb (no live ContainerField): re-hydrated
+                    // from a live parent walk inside the condition — mirrors the 3 Back-nav
+                    // dispatch sites so a bookmark saved on such a view restores the array
+                    // element view, not the parent object grid. Falls through to the walk
+                    // below when no live match (graceful degradation).
+                }
                 else if (IsGWorldActorListRoot(lastBc))
                 {
                     // Only the genuine GWorld root re-shows the actor list — a deeper
@@ -2932,8 +3011,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             ClearStatus();
             IsLoading = true;
 
-            // If refreshing a container view, re-walk the parent instance and re-extract container data
-            if (Breadcrumbs.Count > 0 && Breadcrumbs[^1].IsContainerView && Breadcrumbs[^1].ContainerField != null)
+            // If refreshing a container view, re-walk the parent instance and re-extract container data.
+            // Path-synthetic container crumbs (from PathStepToBreadcrumbs) carry no live ContainerField,
+            // so match by the crumb's own field name+offset in that case — otherwise refresh would skip
+            // this branch and re-walk a stale address, reverting the re-hydrated container to a grid
+            // (mirrors TryRepopulateSyntheticContainerAsync on the Back-nav side).
+            if (Breadcrumbs.Count > 0 && Breadcrumbs[^1].IsContainerView)
             {
                 var containerBc = Breadcrumbs[^1];
 
@@ -2947,8 +3030,6 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     return;
                 }
 
-                var containerField = containerBc.ContainerField!;
-
                 // Re-walk the parent instance to get fresh container data
                 string? parentClassAddr = null;
                 if (Breadcrumbs.Count >= 2)
@@ -2961,9 +3042,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 var parentResult = await _dump.WalkInstanceAsync(containerBc.Address, parentClassAddr, arrayLimit: ArrayLimit, previewLimit: PreviewLimit, fillGaps: FillGaps, ct: ct);
                 if (CurrentAddress != addressAtStart || Breadcrumbs.Count != breadcrumbCountAtStart) return;
 
-                // Find the container field by name and offset in the refreshed result
+                // Find the container field by name and offset in the refreshed result. Use the live
+                // ContainerField identity when present, else the crumb's own field name+offset.
+                var matchName   = containerBc.ContainerField?.Name   ?? containerBc.FieldName;
+                var matchOffset = containerBc.ContainerField?.Offset ?? containerBc.FieldOffset;
                 var updatedField = parentResult.Fields
-                    .FirstOrDefault(f => f.Name == containerField.Name && f.Offset == containerField.Offset);
+                    .FirstOrDefault(f => f.Name == matchName && f.Offset == matchOffset);
 
                 if (updatedField != null)
                 {
