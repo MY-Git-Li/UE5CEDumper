@@ -29,6 +29,15 @@ public partial class RelatedObjectsViewModel : ViewModelBase
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private string _statusText = "";
 
+    // --- Phase 2: current-target auto-detect (Edel) ---
+    [ObservableProperty] private ObservableCollection<TargetCandidate> _targetCandidates = new();
+    [ObservableProperty] private TargetCandidate? _selectedCandidate;
+    [ObservableProperty] private bool _hasCandidates;
+
+    // Set while DetectTarget seeds SelectedCandidate to the auto-pick, so the
+    // selection-changed handler doesn't double-load what DetectTarget already loaded.
+    private bool _suppressCandidateLoad;
+
     /// <summary>Navigate the selected row's object into the Live Walker.</summary>
     public event Action<string>? NavigateToLiveWalker;
 
@@ -128,5 +137,58 @@ public partial class RelatedObjectsViewModel : ViewModelBase
         if (row == null || string.IsNullOrEmpty(row.Address)) return;
         await _platform.CopyToClipboardAsync(row.Address);
         StatusText = $"Copied {row.Address}";
+    }
+
+    /// <summary>
+    /// Auto-detect the actor the local player is currently targeting (Edel) and
+    /// load the top candidate into the related graph. Falls back gracefully:
+    /// when nothing clearly looks like a target, the candidates are shown as
+    /// greyed guesses and nothing is auto-loaded — the user picks one or pastes
+    /// an address. Solves "I don't know which class-name to search".
+    /// </summary>
+    [RelayCommand]
+    private async Task DetectTargetAsync()
+    {
+        try
+        {
+            IsBusy = true;
+            StatusText = "Detecting current target…";
+            TargetCandidates.Clear();
+            HasCandidates = false;
+            var r = await _dump.DetectCurrentTargetAsync();
+            foreach (var c in r.Candidates) TargetCandidates.Add(c);
+            HasCandidates = TargetCandidates.Count > 0;
+            StatusText = r.Note;
+            _log.Info($"DetectCurrentTarget: resolved={r.Resolved} candidates={TargetCandidates.Count}");
+
+            // Only auto-load when the detector is confident (top score > 0);
+            // weak/zero-score guesses are shown but NOT auto-loaded.
+            if (r.Resolved && TargetCandidates.Count > 0)
+            {
+                _suppressCandidateLoad = true;
+                SelectedCandidate = TargetCandidates[0];
+                _suppressCandidateLoad = false;
+                await LoadForAddressAsync(TargetCandidates[0].Address);
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Error: {ex.Message}";
+            _log.Error("DetectCurrentTarget failed", ex);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>User picked a candidate in the list — load it into the graph
+    /// (skip the auto-pick already loaded by DetectTarget, and re-picks of the
+    /// currently-loaded address).</summary>
+    partial void OnSelectedCandidateChanged(TargetCandidate? value)
+    {
+        if (_suppressCandidateLoad || value == null || string.IsNullOrEmpty(value.Address)) return;
+        if (string.Equals(value.Address, TargetAddress, System.StringComparison.OrdinalIgnoreCase)) return;
+        _ = LoadForAddressAsync(value.Address);
     }
 }

@@ -65,6 +65,11 @@ Total commands: 31 (command name constants live in `dll/src/Renge.h`)
 // Controller<->Pawn counterpart, and the sub-objects it OWNS (components, GAS
 // AbilitySystemComponent → AttributeSets). Forward owned walk up to depth 3.
 { "id": 32, "cmd": "get_related_objects", "addr": "7FF123456789", "max_results": 128 }
+
+// Current-target auto-detect ("Related Objects" Phase 2, Edel): resolve
+// GWorld → PlayerController → Pawn and return a ranked list of candidate
+// "current target" actors (best-first; top is the auto-pick).
+{ "id": 33, "cmd": "get_current_target", "max_candidates": 8 }
 ```
 
 ### Class & Instance Walking
@@ -834,6 +839,53 @@ scan; the reverse "who points AT this object" view is `find_refs_to_uobject`.
       "class": "MyHealthAttributeSet", "relation": "AttributeSet",
       "field_name": "SpawnedAttributes[0]", "field_offset": 0x1B0, "depth": 2,
       "parent_addr": "7FF6BB000000" }
+  ]
+}
+```
+
+### get_current_target
+
+Auto-detect the actor the local player is currently targeting / focused on
+("Related Objects" Phase 2, the `Edel` module). Resolves the player chain
+(GWorld → `OwningGameInstance` → `LocalPlayers[0]` → `PlayerController` → `Pawn`,
+with the same instance-scan + DebugCamera-hop fallbacks as teleport), enumerates
+the outgoing object pointers of {PC, Pawn, their depth-1 owned `ActorComponent`s},
+and **scores** each candidate: kept only if it walks like an `AActor` (a bounded
+super-class FName walk), excludes the player's own PC/Pawn, and ranks by a
+structural-gate-then-keyword formula (+50 positive-keyword, +30 is-Pawn / +15
+is-Actor, −40 infra-negative like `ViewTarget`/`Owner`/`camera`, −60 not-Actor,
++10 near-combat source, +5 real GObjects index). The English keyword table is a
+scoring boost, not a gate, so the detector degrades to a ranked guess-list on
+non-English / obfuscated games instead of returning nothing.
+
+The chain diagnostics (`resolved`/`world`/`player_controller`/`player_pawn`/`note`)
+are ALWAYS present so the UI can say exactly where detection stopped.
+`resolved` is true only when the chain reached a Pawn AND the top candidate has a
+positive `score` that clears the runner-up by a ≥20 margin (the confident
+auto-pick — a guard against arbitrarily picking one of several equally-plausible
+actors); otherwise candidates may still be returned as weak guesses the user
+picks from manually. Read-only, fast, bounded (no full
+GObjects scan except the PC instance-scan fallback).
+
+```jsonc
+{
+  "id": 33, "ok": true,
+  "resolved": true,
+  "world": "1AD00000000",
+  "player_controller": "7FF6AA000000",
+  "player_pawn": "7FF6BB000000",
+  "note": "Detected target: Enemy_0 (BP_Enemy_C) — score 95 via CurrentTarget.",
+  "candidates": [
+    { "addr": "7FF6CC000000", "index": 500, "name": "Enemy_0",
+      "class": "BP_Enemy_C", "score": 95,
+      "source_addr": "7FF6AA000000", "source_class": "BP_PlayerController_C",
+      "field_name": "CurrentTarget", "field_offset": 0x3C0,
+      "reason": "field 'CurrentTarget', is-Pawn" },
+    { "addr": "7FF6DD000000", "index": 600, "name": "Ally_0",
+      "class": "BP_Ally_C", "score": 45,
+      "source_addr": "7FF6BB000000", "source_class": "BP_Pawn_C",
+      "field_name": "FocusActor", "field_offset": -1,
+      "reason": "field 'FocusActor', is-Pawn" }
   ]
 }
 ```

@@ -454,6 +454,65 @@ public class DumpServiceTests
     }
 
     [Fact]
+    public async Task DetectCurrentTargetAsync_ParsesChainAndPreservesCandidateOrder()
+    {
+        _pipe.SetHandler(req =>
+        {
+            Assert.Equal("get_current_target", req["cmd"]?.GetValue<string>());
+            Assert.Equal(8, req["max_candidates"]?.GetValue<int>());
+            return new JsonObject
+            {
+                ["ok"] = true,
+                ["resolved"] = true,
+                ["world"] = "0x1AD0000",
+                ["player_controller"] = "0x7FF6AA00",
+                ["player_pawn"] = "0x7FF6BB00",
+                ["note"] = "Detected target: Enemy_0 (BP_Enemy_C) — score 95 via CurrentTarget.",
+                ["candidates"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["addr"] = "0x7FF6CC00", ["index"] = 500,
+                        ["name"] = "Enemy_0", ["class"] = "BP_Enemy_C",
+                        ["score"] = 95, ["source_addr"] = "0x7FF6AA00",
+                        ["source_class"] = "BP_PlayerController_C",
+                        ["field_name"] = "CurrentTarget", ["field_offset"] = 0x3C0,
+                        ["reason"] = "field 'CurrentTarget', is-Pawn",
+                    },
+                    new JsonObject
+                    {
+                        ["addr"] = "0x7FF6DD00", ["index"] = 600,
+                        ["name"] = "Ally_0", ["class"] = "BP_Ally_C",
+                        ["score"] = 45, ["source_addr"] = "0x7FF6BB00",
+                        ["source_class"] = "BP_Pawn_C",
+                        ["field_name"] = "FocusActor", ["field_offset"] = -1,
+                        ["reason"] = "field 'FocusActor', is-Pawn",
+                    },
+                },
+            };
+        });
+
+        var svc = CreateService();
+        var result = await svc.DetectCurrentTargetAsync(ct: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Resolved);
+        Assert.Equal("0x7FF6BB00", result.PlayerPawn);
+        Assert.StartsWith("Detected target", result.Note);
+        Assert.Equal(2, result.Candidates.Count);
+
+        var top = result.Candidates[0];   // order preserved (server ranks best-first)
+        Assert.Equal("Enemy_0", top.Name);
+        Assert.Equal(95, top.Score);
+        Assert.Equal("CurrentTarget", top.FieldName);
+        Assert.Equal(0x3C0, top.FieldOffset);
+        Assert.Contains("CurrentTarget", top.ScoreDisplay);
+
+        var second = result.Candidates[1];
+        Assert.Equal("Ally_0", second.Name);
+        Assert.Equal(-1, second.FieldOffset);   // container/path edge tolerated
+    }
+
+    [Fact]
     public async Task FindInstancesAsync_SendsNewestFirstFlag()
     {
         bool? sentNewestFirst = null;

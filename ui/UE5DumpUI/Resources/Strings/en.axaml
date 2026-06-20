@@ -35,6 +35,8 @@
     <!-- Related Objects panel -->
     <sys:String x:Key="str.Related.AddressHint">UObject / actor address (hex) — or hand off from another tab</sys:String>
     <sys:String x:Key="str.Related.Load">Load</sys:String>
+    <sys:String x:Key="str.Related.DetectTarget">🎯 Detect target</sys:String>
+    <sys:String x:Key="str.Related.CandidatesHeader">Target candidates (best first — click one to inspect):</sys:String>
     <sys:String x:Key="str.Related.ColRelation">Relation</sys:String>
     <sys:String x:Key="str.Related.ColObject">Object</sys:String>
     <sys:String x:Key="str.Related.ColField">Field</sys:String>
@@ -43,6 +45,7 @@
     <sys:String x:Key="str.Related.IconButton">🔗</sys:String>
     <sys:String x:Key="str.Tip.Related.Show">Show this object's related objects — components, GAS AbilitySystemComponent → AttributeSets, Controller↔Pawn — in the Related tab</sys:String>
     <sys:String x:Key="str.Tip.Related.Load">List this object's class/outer, its Controller↔Pawn counterpart, and the sub-objects it owns (components, GAS AbilitySystemComponent → AttributeSets)</sys:String>
+    <sys:String x:Key="str.Tip.Related.DetectTarget">Auto-detect the actor the player is currently targeting (GWorld → PlayerController → Pawn → target field) and load its related objects — no class-name guessing</sys:String>
     <sys:String x:Key="str.Tip.Related.GWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this object and show it in Live Walker</sys:String>
     <sys:String x:Key="str.Tip.Related.Walk">Open this object in Live Walker for field-by-field inspection</sys:String>
     <sys:String x:Key="str.Tip.Related.Find">Find all live instances of this object's class (Instance Finder)</sys:String>

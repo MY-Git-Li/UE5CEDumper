@@ -49,6 +49,7 @@ narrative identity resonates with what the module *does*.
 | **Radar.cpp** | 拉達爾 | Shadow Warrior, plateau village chief | — | ValueScan: CE-style by-value First/Next Scan | The sweep — scans every object for a matching value (was `ValueScan`) |
 | **Solitar.cpp** | 索莉塔 | Greater demon studying humanity | #11 | GodMode: force AActor::bCanBeDamaged (damage immunity) + re-assert worker | Overwhelming, near-unkillable mage — invulnerability; reuses the FBoolProperty bit-write Wirbel uses for the cursor |
 | **Orden.h** | 歐爾登 | Noble house head ("order") | — | GroupMatch: source-agnostic SDR/assignment core for multi-value group scan | Brings *order* to a scattered set of values — assigns each value to its leaf slot (header-only, pure) |
+| **Edel.cpp** | 艾德爾 | Hypnosis-magic mage ("noble") | — | CurrentTarget: auto-detect the actor the player is targeting (GWorld→PlayerController→Pawn, score outgoing object-ptr fields) | Reads what the player's mind is fixed on — the focused enemy, so the user needn't guess a class-name keyword |
 
 ---
 
@@ -103,6 +104,7 @@ Tot::                       // Cancellation — cooperative cancel flag (header-
 Lineal::                    // PackedItem — UE5.7+ packed FUObjectItem reconstruction (header-only; was PackedItem)
 Radar::                     // ValueScan — CE-style by-value scan (was ValueScan)
 Orden::                     // GroupMatch — source-agnostic SDR matcher (multi-value group scan; header-only)
+Edel::                      // CurrentTarget — auto-detect the player's current target actor
 Grimoire::                  // Constants — spell book
 DynOff::                    // Dynamic offsets (in Grimoire.h, unchanged)
 ```
@@ -288,7 +290,7 @@ German meanings are given because most names map cleanly to a module function.
 | Land | Land | Creates flawless clones | ⬜ | Cloning / replication / duplicate detection |
 | Kanne | Kanne | Controls water ("watering can") | ⬜ | Flow / streaming / pipelining |
 | Lawine | Lawine | Freezes water ("avalanche") | ⬜ | Snapshot/freeze or bulk cascade |
-| Edel | Edel | Hypnosis magic ("noble") | ⬜ | Override / control injection |
+| Edel | Edel | Hypnosis magic ("noble") | 🟢 CurrentTarget | Auto-detect the actor the player is currently targeting: GWorld→PlayerController→Pawn, score the player's outgoing object-ptr fields (`Edel.cpp/.h`, build 1400) |
 | Richter | Richter | Staff repair ("judge") | ⬜ | Scoring / judging / recovery-repair |
 | Laufen | Laufen | High-speed movement ("to run") | ⬜ | Fast-path / SIMD acceleration |
 | Ehre | Ehre | Controls rocks ("honor") | ⬜ | Foundation / stability |

@@ -18,6 +18,7 @@
 #include "Radar.h"
 #include "Tot.h"
 #include "Wirbel.h"
+#include "Edel.h"
 #include "BuildInfo.h"
 
 #include <json.hpp>
@@ -2892,7 +2893,12 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
         if (cmd == Renge::CMD_GET_RELATED_OBJECTS) {
             std::string addrStr = request.value("addr", "");
             if (addrStr.empty()) return Renge::MakeError(id, "Missing addr").dump();
-            uintptr_t target = Renge::StrToAddr(addrStr);
+            // Strict parse (mirror find_path_from_gworld): an unsubstituted CE
+            // placeholder / signed / trailing-garbage addr must be an explicit
+            // error, not an ambiguous ok:true empty list.
+            uintptr_t target = 0;
+            if (!Renge::TryStrToAddr(addrStr, target) || !target)
+                return Renge::MakeError(id, "Invalid addr").dump();
             int32_t maxResults = request.value("max_results", 128);
 
             auto rels = Aura::GetRelatedObjects(target, maxResults);
@@ -2914,6 +2920,39 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             json data;
             data["query_addr"] = addrStr;
             data["related"]    = arr;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // === get_current_target: auto-detect the actor the player is targeting ===
+        // "Related Objects" Phase 2 (Edel): resolve GWorld -> PlayerController ->
+        // Pawn, score the player's outgoing object-pointer fields, and return a
+        // ranked candidate list (best-first) the UI feeds into the Related panel.
+        if (cmd == Renge::CMD_GET_CURRENT_TARGET) {
+            int32_t maxCandidates = request.value("max_candidates", 8);
+            Edel::CurrentTargetResult tr = Edel::DetectCurrentTarget(maxCandidates);
+
+            json arr = json::array();
+            for (const auto& c : tr.candidates) {
+                json cj;
+                cj["addr"]         = Renge::AddrToStr(c.addr);
+                cj["index"]        = c.index;
+                cj["name"]         = c.name;
+                cj["class"]        = c.className;
+                cj["score"]        = c.score;
+                cj["source_addr"]  = Renge::AddrToStr(c.sourceObject);
+                cj["source_class"] = c.sourceClass;
+                cj["field_name"]   = c.fieldName;
+                cj["field_offset"] = c.fieldOffset;
+                cj["reason"]       = c.reason;
+                arr.push_back(cj);
+            }
+            json data;
+            data["resolved"]          = tr.resolved;
+            data["world"]             = Renge::AddrToStr(tr.world);
+            data["player_controller"] = Renge::AddrToStr(tr.playerController);
+            data["player_pawn"]       = Renge::AddrToStr(tr.playerPawn);
+            data["note"]              = tr.note;
+            data["candidates"]        = arr;
             return Renge::MakeResponse(id, data).dump();
         }
 

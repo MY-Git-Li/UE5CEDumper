@@ -3295,6 +3295,31 @@ static void EnumerateOutgoingObjectPtrs(uintptr_t obj, EmitFn&& emit) {
     }
 }
 
+// Public façade over the file-static EnumerateOutgoingObjectPtrs template — see
+// Aura.h. Lets Edel (current-target detection) score outgoing edges without
+// duplicating the container / weak-ptr traversal.
+void CollectOutgoingObjectPtrs(uintptr_t obj, std::vector<OutgoingPtr>& out,
+                               int32_t maxEdges) {
+    if (!obj) return;
+    if (maxEdges <= 0) maxEdges = 1024;
+    EnumerateOutgoingObjectPtrs(obj,
+        [&](uintptr_t child, int32_t ptrOff, const std::string& ptrName,
+            const std::string& ptrType, const std::string& innerType,
+            int32_t elemIdx, int32_t elemStride, int32_t elemValueOffset) -> bool {
+            OutgoingPtr e;
+            e.target          = child;
+            e.fieldOffset     = ptrOff;
+            e.fieldName       = ptrName;
+            e.fieldType       = ptrType;
+            e.innerType       = innerType;
+            e.elementIndex    = elemIdx;
+            e.elemStride      = elemStride;
+            e.elemValueOffset = elemValueOffset;
+            out.push_back(std::move(e));
+            return out.size() >= static_cast<size_t>(maxEdges);  // stop at the cap
+        });
+}
+
 GraphPathResult FindObjectGraphPath(uintptr_t rootObj, uintptr_t targetObj,
                                     int32_t maxDepth, int32_t deadlineMs) {
     GraphPathResult res;
@@ -6835,6 +6860,28 @@ std::vector<RelatedObject> GetRelatedObjects(uintptr_t target, int32_t maxResult
     if (!target) return out;
     if (maxResults <= 0) maxResults = 128;
 
+    // Bound the owned walk: a wall-clock deadline + cooperative cancel + a hard
+    // emit-iteration cap, so a target exposing a huge reflected object-pointer
+    // container (e.g. an AllActors-style TArray<AActor*> with up to ~1M
+    // elements) can't stall the synchronous pipe worker. Mirrors
+    // FindObjectGraphPath's abort pattern (rejected elements never advance the
+    // add-caps, so without this the loop is unbounded).
+    auto t0 = std::chrono::steady_clock::now();
+    constexpr int64_t kDeadlineMs = 8000;
+    constexpr int64_t kMaxVisited = 200000;
+    int64_t visited = 0;
+    auto aborted = [&]() -> bool {
+        if (Tot::Requested()) return true;
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now() - t0).count() > kDeadlineMs;
+    };
+
+    // Dedup across the WHOLE result. Seeding `seen` from add() means a
+    // hierarchy/counterpart object (Class / Outer / Controller / Pawn) can't be
+    // re-emitted as an owned sub-object — Controller/Pawn are reflected
+    // ObjectProperty fields, so the owned BFS would otherwise re-walk them on a
+    // game whose pawn owns a controller-like sub-object.
+    std::unordered_set<uintptr_t> seen;
     auto add = [&](uintptr_t obj, const char* relation, const std::string& fieldName,
                    int32_t fieldOffset, int32_t depth, uintptr_t parent) {
         if (!obj || out.size() >= static_cast<size_t>(maxResults)) return;
@@ -6850,6 +6897,7 @@ std::vector<RelatedObject> GetRelatedObjects(uintptr_t target, int32_t maxResult
         r.fieldOffset = fieldOffset;
         r.depth       = depth;
         r.parentAddr  = parent;
+        seen.insert(obj);
         out.push_back(std::move(r));
     };
 
@@ -6884,7 +6932,10 @@ std::vector<RelatedObject> GetRelatedObjects(uintptr_t target, int32_t maxResult
         std::string lo = clsName;
         for (auto& ch : lo) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
         if (lo.find("abilitysystemcomponent") != std::string::npos) return "AbilitySystem (ASC)";
-        if (lo.find("attributeset")           != std::string::npos) return "AttributeSet";
+        // Guard "attributeset" against a class that is ALSO a component (e.g. a
+        // hypothetical "AttributeSetComponent") so it isn't mislabeled.
+        if (lo.find("attributeset") != std::string::npos
+            && lo.find("component") == std::string::npos) return "AttributeSet";
         if (lo.find("component")              != std::string::npos) return "Owned Component";
         return "Owned Object";
     };
@@ -6896,8 +6947,9 @@ std::vector<RelatedObject> GetRelatedObjects(uintptr_t target, int32_t maxResult
     // actor). Still bounded by kMaxOwnedSubs + the seen-set; IsOwnedBy uses the
     // same hop budget so a depth-3 leaf whose Outer chains back is still kept.
     constexpr int kMaxOwnDepth  = 3;     // pawn -> stats component -> ASC -> AttributeSet
-    std::unordered_set<uintptr_t> seen;
-    seen.insert(target);
+    // `seen` is declared above and already holds `target` (add(target,"Self",...)
+    // inserted it) plus every hierarchy/counterpart object, so none of those can
+    // reappear as an owned row.
     int subCount = 0;
     struct Frontier { uintptr_t obj; int depth; };
     std::vector<Frontier> frontier;
@@ -6907,11 +6959,14 @@ std::vector<RelatedObject> GetRelatedObjects(uintptr_t target, int32_t maxResult
         frontier.pop_back();
         if (cur.depth >= kMaxOwnDepth) continue;
         if (out.size() >= static_cast<size_t>(maxResults) || subCount >= kMaxOwnedSubs) break;
-        if (Tot::Requested()) break;
+        if (aborted()) break;
         EnumerateOutgoingObjectPtrs(cur.obj,
             [&](uintptr_t child, int32_t ptrOff, const std::string& ptrName,
                 const std::string& /*ptrType*/, const std::string& /*innerType*/,
                 int32_t elemIdx, int32_t /*elemStride*/, int32_t /*elemValueOffset*/) -> bool {
+                // Bound REJECTED iterations too (a huge non-owned container would
+                // otherwise spin without ever advancing the add-caps).
+                if (++visited > kMaxVisited || aborted()) return true;  // stop enumerating
                 if (out.size() >= static_cast<size_t>(maxResults) || subCount >= kMaxOwnedSubs)
                     return true;  // stop enumerating
                 if (!child || seen.count(child)) return false;
@@ -6922,7 +6977,12 @@ std::vector<RelatedObject> GetRelatedObjects(uintptr_t target, int32_t maxResult
                 ++subCount;
                 std::string fname = ptrName;
                 if (elemIdx >= 0) { fname += '['; fname += std::to_string(elemIdx); fname += ']'; }
-                add(child, classify(Ubel::GetName(childCls)), fname, ptrOff, cur.depth + 1, cur.obj);
+                // A container ELEMENT pointer lives in the heap Data buffer, not
+                // at cur.obj+ptrOff (which is the container header field), so
+                // report -1 rather than a misleading "@ 0xNN" handoff hint; the
+                // [idx] is already encoded in fname.
+                int32_t foff = (elemIdx >= 0) ? -1 : ptrOff;
+                add(child, classify(Ubel::GetName(childCls)), fname, foff, cur.depth + 1, cur.obj);
                 frontier.push_back({child, cur.depth + 1});
                 return false;  // keep enumerating this parent's other owned children
             });

@@ -109,6 +109,13 @@ public interface IDumpService
     Task<RelatedObjectsResult> GetRelatedObjectsAsync(
         string addr, int maxResults = 128, CancellationToken ct = default);
 
+    // --- Current-target auto-detect (Related Objects Phase 2, Edel) ---
+    // Resolve GWorld -> PlayerController -> Pawn and return a ranked list of
+    // candidate "current target" actors (best-first). The top candidate is the
+    // auto-pick; the chain diagnostics say where detection stopped on failure.
+    Task<CurrentTargetResult> DetectCurrentTargetAsync(
+        int maxCandidates = 8, CancellationToken ct = default);
+
     // --- Property Bytecode Cross-Reference ("which methods use this field?") ---
     // Static Kismet-bytecode scan; Blueprint/script functions only (native
     // functions have empty bytecode and are invisible).

@@ -827,6 +827,50 @@ public sealed class DumpService : IDumpService
         };
     }
 
+    public async Task<CurrentTargetResult> DetectCurrentTargetAsync(
+        int maxCandidates = 8, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "get_current_target",
+            ["max_candidates"] = maxCandidates,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        var candidates = new List<TargetCandidate>();
+        if (res["candidates"] is JsonArray arr)
+        {
+            foreach (var node in arr)
+            {
+                if (node is not JsonObject c) continue;
+                candidates.Add(new TargetCandidate
+                {
+                    Address       = c["addr"]?.GetValue<string>() ?? "",
+                    Index         = c["index"]?.GetValue<int>() ?? -1,
+                    Name          = c["name"]?.GetValue<string>() ?? "",
+                    ClassName     = c["class"]?.GetValue<string>() ?? "",
+                    Score         = c["score"]?.GetValue<int>() ?? 0,
+                    SourceAddress = c["source_addr"]?.GetValue<string>() ?? "",
+                    SourceClass   = c["source_class"]?.GetValue<string>() ?? "",
+                    FieldName     = c["field_name"]?.GetValue<string>() ?? "",
+                    FieldOffset   = c["field_offset"]?.GetValue<int>() ?? -1,
+                    Reason        = c["reason"]?.GetValue<string>() ?? "",
+                });
+            }
+        }
+
+        return new CurrentTargetResult
+        {
+            Resolved         = res["resolved"]?.GetValue<bool>() ?? false,
+            World            = res["world"]?.GetValue<string>() ?? "",
+            PlayerController = res["player_controller"]?.GetValue<string>() ?? "",
+            PlayerPawn       = res["player_pawn"]?.GetValue<string>() ?? "",
+            Note             = res["note"]?.GetValue<string>() ?? "",
+            Candidates       = candidates,
+        };
+    }
+
     public async Task<GWorldPathResult> FindPathFromGWorldAsync(
         string target, string? objectAddr = null, int maxDepth = 5,
         CancellationToken ct = default)
