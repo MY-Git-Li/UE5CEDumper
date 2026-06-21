@@ -118,7 +118,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- Fern     (PipeServer)    <- Named Pipe IPC (~59 cmds incl. value scan + group scan + teleport + teleport_relative + set/get_mouse_cursor + get_related_objects + get_current_target) |
 |      +-- Himmel   (Signatures)    <- 128 AOB + symbol exports |
 |      +-- Genau    (OffsetFinder)  <- GObjects/GNames/GWorld   |
-|      +-- Aura     (ObjectArray)   <- Chunked + Flat arrays + Find Refs/Containers (+ recursive deep descent FindInContainersDeep, 1198) + ScanForValue (lean Candidate V3-A 926; TSet/TMap scan V1a 927) + ScanForValueGroup (multi-value group scan via Orden, 1276) + FindObjectGraphPath (GWorld fwd BFS / Locate in GWorld, 1181; + RecoverViaWorldLevel streaming/WP actor recovery via ULevel::OwningWorld back-ref, status ok_via_level, 1405) + GetRelatedObjects (forward owned graph: Self/Class/Outer/Controller↔Pawn/components/ASC/AttributeSet, 1323) + CollectOutgoingObjectPtrs (public outgoing-edge façade for Edel, 1400) |
+|      +-- Aura     (ObjectArray)   <- Chunked + Flat arrays + Find Refs/Containers (+ recursive deep descent FindInContainersDeep, 1198) + ScanForValue (lean Candidate V3-A 926; TSet/TMap scan V1a 927) + ScanForValueGroup (multi-value group scan via Orden, 1276) + FindObjectGraphPath (GWorld fwd BFS / Locate in GWorld, 1181; + RecoverViaWorldLevel streaming/WP actor recovery via ULevel::OwningWorld back-ref, status ok_via_level, 1405) + GetRelatedObjects (forward owned graph: Self/Class/Outer/Controller↔Pawn/components/ASC/AttributeSet, 1323) + CollectOutgoingObjectPtrs (public outgoing-edge façade for Edel, 1400) + FindInstancesByClass server-side exclude_classes-before-cap + full-pool class_histogram via split loop gated by buildHistogram, 1444) |
 |      +-- Serie    (FNamePool)     <- UE5 Pool / UE4 TNameEntry|
 |      +-- Ubel     (UStructWalker) <- FField + UProperty + Phases B-K + Optional + ReadFStringAt/ReadFNameAt/ReadFTextStringAt (public, build 757) |
 |      +-- Macht    (Memory)        <- AOBScan + SEH read/write |
@@ -141,7 +141,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- ClassStructPanel          <- Property Grid        |
 |      +-- PointerPanel              <- GObjects/GNames addr |
 |      +-- LiveWalkerPanel           <- Instance drill-down  |
-|      +-- InstanceFinderPanel       <- Class instance search (+ "Newest first" opt-in: scan GObjects high-index end for just-spawned instances, 1325) |
+|      +-- InstanceFinderPanel       <- Class instance search (+ "Newest first" opt-in: scan GObjects high-index end for just-spawned instances, 1325; + server-side class-noise exclude-before-cap re-run + full-pool class_histogram + configurable Max cap + client keyword filter, 1444) |
 |      +-- PropertySearchPanel       <- Search by name (build 610+ dedupe + Freeze button; finder btn + opt-in Deep struct/container descent 1222) |
 |      +-- InterestingFunctionsPanel <- Scored UFunctions; 📦 batch CT (build 760) |
 |      +-- InterestingPropertiesPanel<- Scored properties (B'); 📦 batch CT (build 760) |

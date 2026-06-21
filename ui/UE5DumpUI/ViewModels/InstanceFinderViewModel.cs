@@ -14,11 +14,12 @@ namespace UE5DumpUI.ViewModels;
 /// ViewModel for the Instance Finder panel.
 /// Search for instances by class name, view live values, export CE XML.
 /// </summary>
-public partial class InstanceFinderViewModel : ViewModelBase
+public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
 {
     private readonly IDumpService _dump;
     private readonly ILoggingService _log;
     private readonly IPlatformService _platform;
+    private bool _disposed;
 
     private EngineState? _engineState;
 
@@ -26,6 +27,29 @@ public partial class InstanceFinderViewModel : ViewModelBase
     // clobbered by a slower walk_instance for a previously-selected instance
     // (which would render A's fields under B and desync the CE XML export).
     private int _fieldLoadId;
+
+    // Monotonic guard for the class search: a re-run triggered by a class-noise
+    // toggle (or a fresh manual search) supersedes any in-flight search, so a
+    // slow response can't clobber _allInstances after a newer one already landed.
+    private int _searchGen;
+
+    // True once a class/name search has run (so a class-noise toggle re-RUNS the
+    // server scan with the new exclusion set). False on the reverse-address path,
+    // where a toggle on leftover facets must NOT trigger a class search.
+    private bool _hasActiveClassSearch;
+
+    // The class/name query that produced the current results — replayed verbatim by
+    // a class-noise re-run (the toggle changed the exclusion set, not the query, and
+    // the user may have edited the boxes without pressing Search).
+    private string _lastClassQuery = "";
+    private string _lastNameQuery = "";
+
+    // Cancels an in-flight class-noise re-run when another toggle lands fast
+    // (debounce-by-cancel — discrete ticks, so no timer needed here).
+    private CancellationTokenSource? _reRunCts;
+
+    // Debounce timer for the temporary keyword filter box (200 ms; mirrors Object Tree).
+    private System.Threading.Timer? _filterDebounce;
 
     // Address format
     [ObservableProperty] private int _selectedAddressFormatIndex;
@@ -84,6 +108,21 @@ public partial class InstanceFinderViewModel : ViewModelBase
     /// class-default / earliest instances — good for finding a Blueprint's
     /// template/defaults).</summary>
     [ObservableProperty] private bool _newestFirst;
+
+    /// <summary>Configurable result cap (the server returns at most this many rows;
+    /// the GObjects scan itself is always exhaustive). Raised from the old hard 500
+    /// to 5000 so a wanted instance is far less likely to fall off the end, and
+    /// server-side class-noise exclusion frees cap slots on top. Clamped 100..50000
+    /// (UI NumericUpDown + a DLL-side clamp).</summary>
+    [ObservableProperty] private int _instanceSearchCap = 5000;
+
+    /// <summary>Temporary client-side keyword filter over the CURRENTLY-RETURNED
+    /// rows (whitespace-separated terms ANDed across Name / Class / Address, like
+    /// the Object Tree box). Separate from the class-noise <see cref="ClassFilter"/>:
+    /// this only narrows what's already on screen (cap-blind, instant), it does not
+    /// re-query the server. Debounced 200 ms.</summary>
+    [ObservableProperty] private string _instanceFilterText = "";
+
     [ObservableProperty] private ObservableCollection<InstanceResult> _instances = new();
     [ObservableProperty] private InstanceResult? _selectedInstance;
     [ObservableProperty] private ObservableCollection<LiveFieldValue> _fields = new();
@@ -159,12 +198,44 @@ public partial class InstanceFinderViewModel : ViewModelBase
         _dump = dump;
         _log = log;
         _platform = platform;
-        ClassFilter = new ClassFacetFilter(ApplyInstanceFilter)
+        ClassFilter = new ClassFacetFilter(OnClassFilterChanged)
         {
             AutoDetectProvider = async names =>
                 (await _dump.DetectNoiseClassesAsync(names))
                     .Select(n => (n.ClassName, n.IsNoise, n.Reason)).ToList(),
         };
+    }
+
+    /// <summary>Class-noise picker changed. When a class search is active the
+    /// exclusion is server-authoritative — re-RUN the scan with the new
+    /// <see cref="ClassFacetFilter.ExcludedClasses"/> so an instance previously
+    /// buried past the cap can surface (and an unticked class returns). We also
+    /// re-project the current rows immediately for instant feedback while the
+    /// re-run is in flight. With no active search (reverse-address path), it's a
+    /// plain client re-projection.</summary>
+    private void OnClassFilterChanged()
+    {
+        ApplyInstanceFilter();   // instant: hide/show within the already-returned rows
+        if (!_hasActiveClassSearch) return;
+
+        // Supersede any in-flight re-run, then replay the SAME query server-side
+        // with the updated exclusion set.
+        _reRunCts?.Cancel();
+        _reRunCts = new CancellationTokenSource();
+        var ct = _reRunCts.Token;
+        _ = ReRunWithExclusionsAsync(ct);
+    }
+
+    private async Task ReRunWithExclusionsAsync(CancellationToken ct)
+    {
+        try
+        {
+            await RunSearchCoreAsync(_lastClassQuery, _lastNameQuery, ClassFilter.ExcludedClasses, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer toggle (or a fresh search) superseded this re-run — drop it.
+        }
     }
 
     /// <summary>Re-project <see cref="_allInstances"/> into the bound
@@ -176,16 +247,56 @@ public partial class InstanceFinderViewModel : ViewModelBase
     private void ApplyInstanceFilter()
     {
         var prev = SelectedInstance;
+        // Two client-side filters layered: the class-noise picker (server-authoritative
+        // after a re-run; this leg is belt-and-suspenders + instant pre-re-run feedback)
+        // AND the temporary keyword box (whitespace = AND across Name/Class/Address).
+        var terms = ObjectTreeFilter.SplitTerms(InstanceFilterText);
         UiCollection.Reset(
             Instances,
-            _allInstances.Where(i => !ClassFilter.IsExcluded(i.ClassName)),
+            _allInstances.Where(i => !ClassFilter.IsExcluded(i.ClassName)
+                                     && (terms.Length == 0
+                                         || ObjectTreeFilter.MatchesAllTerms(terms, i.Name, i.ClassName, i.Address))),
             () => SelectedInstance = null);
         HasInstances = Instances.Count > 0;
+        // After a server-side exclude re-run the excluded rows are no longer in
+        // _allInstances, so "hidden" counts keyword-filtered rows (plus, briefly, the
+        // just-ticked class before the re-run lands). Either way it's "hidden from the
+        // returned set" — keep the label generic so it never mis-attributes.
         int hidden = _allInstances.Count - Instances.Count;
-        ClassFilterNote = hidden > 0 ? $"{hidden} hidden by class filter" : "";
+        ClassFilterNote = hidden > 0 ? $"{hidden} hidden by filter" : "";
         // Restore selection (and its field walk) if it wasn't filtered out.
         if (prev != null && Instances.Contains(prev))
             SelectedInstance = prev;
+    }
+
+    /// <summary>Debounce the temporary keyword box (200 ms) then re-project the
+    /// returned rows — purely client-side, no server round-trip. Mirrors the Object
+    /// Tree filter so typing doesn't re-filter on every keystroke.</summary>
+    partial void OnInstanceFilterTextChanged(string value)
+    {
+        if (_disposed) return;
+        _filterDebounce?.Dispose();
+        _filterDebounce = new System.Threading.Timer(
+            _ => Avalonia.Threading.Dispatcher.UIThread.Post(ApplyInstanceFilter),
+            null, 200, Timeout.Infinite);
+    }
+
+    /// <summary>Dispose the keyword debounce timer and cancel any in-flight class
+    /// re-run when the VM is torn down — the Timer/CTS lambdas otherwise root the VM
+    /// and can fire after teardown (mirrors ObjectTreeViewModel.Dispose).</summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        _filterDebounce?.Dispose();
+        _filterDebounce = null;
+
+        try { _reRunCts?.Cancel(); } catch { /* already disposed */ }
+        _reRunCts?.Dispose();
+        _reRunCts = null;
+
+        GC.SuppressFinalize(this);
     }
 
     public void SetEngineState(EngineState state)
@@ -215,30 +326,60 @@ public partial class InstanceFinderViewModel : ViewModelBase
         // Need at least one criterion — both empty is a no-op (mirrors the DLL guard).
         if (className.Length == 0 && nameFilter.Length == 0) return;
 
+        // A fresh manual query: drop any server-side exclusions left from a PREVIOUS
+        // search (now that exclusion persists server-side, a class hidden for "Pawn"
+        // would otherwise silently filter "Inventory" — possibly with no visible row
+        // to untick). Reset() does NOT fire onChanged, so this won't re-run here.
+        _reRunCts?.Cancel();          // supersede an in-flight class-noise re-run
+        ClassFilter.Reset();
+        _hasActiveClassSearch = true;
+        _lastClassQuery = className;
+        _lastNameQuery = nameFilter;
+
+        await RunSearchCoreAsync(className, nameFilter, ClassFilter.ExcludedClasses);
+    }
+
+    /// <summary>Core class/name scan, shared by the manual search and the
+    /// class-noise re-run. <paramref name="excludeClasses"/> is sent server-side so
+    /// excluded classes never consume a result-cap slot; the response's full-pool
+    /// histogram drives the picker. A monotonic <see cref="_searchGen"/> guard drops
+    /// a stale response when a newer search/re-run has already landed.</summary>
+    private async Task RunSearchCoreAsync(string className, string nameFilter,
+        IReadOnlyList<string> excludeClasses, CancellationToken ct = default)
+    {
+        int gen = ++_searchGen;
+        bool reRun = excludeClasses.Count > 0;
         try
         {
             ClearError();
             IsSearching = true;
-            StatusText = "Searching...";
+            StatusText = reRun ? "Re-searching..." : "Searching...";
             ShowCeXml = false;
 
-            var result = await _dump.FindInstancesAsync(className, ExactMatch, newestFirst: NewestFirst, nameFilter: nameFilter);
+            var result = await _dump.FindInstancesAsync(
+                className, ExactMatch, limit: InstanceSearchCap, newestFirst: NewestFirst,
+                nameFilter: nameFilter, excludeClasses: excludeClasses, ct: ct);
+            if (gen != _searchGen) return;   // superseded by a newer search/re-run
 
-            // Keep the full result so the class-noise filter can re-project without
-            // re-searching; build the Top-N class histogram (counts are a lower
-            // bound when the result was capped). ApplyInstanceFilter then detaches
-            // the bound selection and rebuilds Instances (hiding excluded classes).
+            // Keep the full (post-exclude) result so the keyword box can re-project
+            // without re-searching. The picker is driven by the SERVER histogram —
+            // tallied over the full matched pool PRE-exclude — so an excluded class
+            // (or one whose instances all sit past the cap) still appears and can be
+            // unticked. RebuildFromCounts preserves the excluded set and does NOT
+            // fire onChanged (no re-run loop). The histogram is over the full scan,
+            // so it's exact — never "partial".
             _allInstances = new List<InstanceResult>(result.Instances);
-            ClassFilter.Rebuild(_allInstances.Select(i => i.ClassName), countsPartial: result.Truncated);
+            ClassFilter.RebuildFromCounts(
+                result.ClassHistogram.Select(c => (c.ClassName, c.Count)),
+                result.ClassDistinct, countsPartial: false);
             ApplyInstanceFilter();
 
             int found = _allInstances.Count;
-            // The GObjects scan is exhaustive, but the returned list is capped —
-            // be honest when it was hit so the user narrows instead of trusting a
-            // partial list (broad object-name terms like "Component" overflow easily).
-            // The "N hidden by class filter" note lives in ClassFilterNote (set by
-            // ApplyInstanceFilter) so it stays live as the user toggles the picker.
-            var capNote = result.Truncated ? $" — ⚠ capped at {found}, narrow the search" : "";
+            // truncated now means "more NON-EXCLUDED matches exist past the cap" — so
+            // point at the two levers that recover them: exclude noise, or raise Max.
+            var capNote = result.Truncated
+                ? $" — ⚠ capped at {found} of max {InstanceSearchCap}; exclude noise classes, raise Max, or narrow"
+                : "";
             if (result.Scanned > 0)
             {
                 var pct = result.NonNull > 0 ? 100.0 * result.Named / result.NonNull : 0;
@@ -248,17 +389,25 @@ public partial class InstanceFinderViewModel : ViewModelBase
             {
                 StatusText = $"Found {found} instances{capNote}";
             }
-            _log.Info($"FindInstances: class='{className}' name='{nameFilter}' -> {found} results (scanned={result.Scanned}, nonNull={result.NonNull}, named={result.Named})");
+            _log.Info($"FindInstances: class='{className}' name='{nameFilter}' exclude={excludeClasses.Count} -> {found} results (scanned={result.Scanned}, nonNull={result.NonNull}, named={result.Named}, distinct={result.ClassDistinct})");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // OUR re-run was superseded by a newer toggle / fresh search — let the
+            // caller (ReRunWithExclusionsAsync) swallow it; not an error. The manual
+            // path passes ct=default, so this filter never matches there.
+            throw;
         }
         catch (Exception ex)
         {
+            if (gen != _searchGen) return;   // stale failure — don't clobber newer state
             SetError(ex);
             StatusText = "Search failed";
             _log.Error($"FindInstances failed for class='{className}' name='{nameFilter}'", ex);
         }
         finally
         {
-            IsSearching = false;
+            if (gen == _searchGen) IsSearching = false;   // only the latest op owns the flag
         }
     }
 
@@ -266,6 +415,14 @@ public partial class InstanceFinderViewModel : ViewModelBase
     private async Task LookupAddressAsync()
     {
         if (string.IsNullOrWhiteSpace(LookupAddress)) return;
+
+        // Reverse-address lookup is not a class set: supersede any in-flight class
+        // search / class-noise re-run (cancel + bump the gen guard so a late response
+        // can't overwrite the single lookup result) and stop class-noise toggles from
+        // re-running a class search over the now-stale leftover facets.
+        _reRunCts?.Cancel();
+        _searchGen++;
+        _hasActiveClassSearch = false;
 
         try
         {

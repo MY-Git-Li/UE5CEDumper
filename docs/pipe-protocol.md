@@ -91,8 +91,12 @@ Total commands: 31 (command name constants live in `dll/src/Renge.h`)
 // Walk GWorld → PersistentLevel → Actors
 { "id": 11, "cmd": "walk_world" }
 
-// Find all instances of a class by name
-{ "id": 12, "cmd": "find_instances", "class_name": "BP_Player_C", "limit": 100, "exact_match": false, "newest_first": false }
+// Find all instances of a class by name. `limit` (default 500, clamped 1..50000)
+// caps the RETURNED list; the GObjects scan is always exhaustive. `exclude_classes`
+// (optional) skips those classes server-side BEFORE the cap (the class-noise
+// filter), so a wanted instance that today sits past the cap survives once the
+// noise classes ahead of it are excluded.
+{ "id": 12, "cmd": "find_instances", "class_name": "BP_Player_C", "limit": 5000, "exact_match": false, "newest_first": false, "exclude_classes": ["StaticMeshActor", "NiagaraActor"] }
 ```
 
 ### Array Reading
@@ -680,16 +684,25 @@ Field objects include all `walk_class` fields **plus** live typed values and arr
 ```jsonc
 {
   "id": 12, "ok": true,
-  "class_name":    "BP_Player_C",
-  "total_scanned": 58432,
+  "total":     308,            // returned instance count (== instances.length, <= limit)
+  "scanned":   58432,          // GObjects indices walked (full array)
+  "non_null":  41020,
+  "named":     40998,
+  "truncated": true,           // more NON-EXCLUDED matches exist than the cap returned
   "instances": [
     {
       "addr":  "7FF6AA000000",
       "name":  "BP_Player_C_0",
       "class": "BP_Player_C",
+      "index": 344179,         // InternalIndex (client-side sort)
       "outer": "7FF6BB000000"
     }
-  ]
+  ],
+  // Class-noise picker: full-pool histogram (Top-40, count desc) tallied over the
+  // whole matched set PRE-exclude — so an excluded class (or one whose instances
+  // all sit past the cap) still appears here and can be unticked to restore it.
+  "class_histogram": [ { "class_name": "StaticMeshActor", "count": 8046 }, ... ],
+  "class_distinct":  279        // true distinct matched-class count (>= histogram length)
 }
 ```
 
@@ -701,6 +714,17 @@ for a high-population class the **newest** instances are truncated off the end.
 `newest_first: true` walks from the high (most-recently-allocated) end instead,
 so the just-spawned instances survive the cap (e.g. catch an enemy that just
 appeared). `index` (InternalIndex) is returned per instance for client-side sort.
+
+`exclude_classes` (optional string array) is the **server-side class-noise
+filter**: matched rows whose class is in the set are skipped BEFORE they consume a
+`limit` slot (comparison is EXACT + case-sensitive — names come from
+`class_histogram`, correctly cased). Because the histogram is tallied over the full
+matched pool *pre-exclude* and *independently of the cap*, the picker can still show
+— and untick — a class whose instances were all excluded or pushed past the cap.
+The DLL scans the whole array for this path (the cheap internal callers that don't
+need the histogram keep the old early-exit at `limit`). `truncated` now means "more
+non-excluded matches exist than were returned" — narrow the query, exclude more
+noise, or raise `limit`.
 
 ### find_by_address
 

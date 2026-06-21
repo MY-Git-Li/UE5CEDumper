@@ -9,6 +9,7 @@
 #include <functional>
 #include <string>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "Ubel.h"   // For ::ClassInfo (defined at global scope in Ubel.h, despite the filename) used by WalkClassesBatch
@@ -119,7 +120,15 @@ struct SearchResultSet {
     int32_t scanned = 0;    // Total indices iterated (= GetCount() at call time)
     int32_t nonNull = 0;    // Objects that were non-null
     int32_t named   = 0;    // Objects whose class name resolved successfully
-    bool truncated  = false;// Hit the maxResults cap — more matches likely exist
+    bool truncated  = false;// More non-excluded matches exist than the cap returned
+    // Class-noise histogram for FindInstancesByClass (build with the same
+    // count-desc/name-asc shape as the value-scan picker). Tallied over the FULL
+    // matched pool — every row satisfying the class+name query, counted BEFORE
+    // the exclude-skip and INDEPENDENTLY of the result cap — so an excluded class
+    // (or one whose instances all sit past the cap) still appears in the picker
+    // and stays untickable. Empty for the SearchByName / internal-caller paths.
+    std::vector<std::pair<std::string, int>> classHistogram;
+    int32_t classDistinct = 0;   // distinct matched classes (>= classHistogram.size() when capped)
 };
 
 SearchResultSet SearchByName(const std::string& query, int maxResults = 200);
@@ -135,7 +144,24 @@ SearchResultSet SearchByName(const std::string& query, int maxResults = 200);
 // OLDEST maxResults (CDO / class-default / earliest instances) — ideal for
 // finding a Blueprint's template/defaults, but it truncates the newest off the
 // end for high-population classes (so "catch the just-spawned enemy" needs newestFirst).
-SearchResultSet FindInstancesByClass(const std::string& className, bool exactMatch = false, int maxResults = 500, bool newestFirst = false, const std::string& nameFilter = "");
+//
+// excludeClasses: server-side class-noise filter. A matched row whose class name
+// is in this set is SKIPPED before it consumes a result-cap slot — so a wanted
+// instance that today sits past the cap survives once the noise classes ahead of
+// it are excluded (the UI re-runs the scan when the class-noise picker changes).
+// Comparison is EXACT and case-SENSITIVE (names come from rset.classHistogram,
+// correctly cased) — deliberately NOT the case-insensitive substring match used
+// for the className query. The histogram is still tallied over the full pool
+// PRE-exclude so excluded classes stay visible/untickable in the picker.
+//
+// buildHistogram: when true (the pipe `find_instances` path), the scan does NOT
+// stop at the cap — it walks ALL of GObjects so rset.classHistogram counts every
+// matched class even when its instances all sit past the cap (the histogram-vanish
+// fix), and applies excludeClasses before the cap. When false (the cheap internal
+// callers: Wirbel/Edel/Solitar/Mimic/Frieren, which want a bounded first-N scan and
+// ignore the histogram), the loop keeps the old early-exit at maxResults and skips
+// the tally — so those hot paths are not regressed into a full-array walk.
+SearchResultSet FindInstancesByClass(const std::string& className, bool exactMatch = false, int maxResults = 500, bool newestFirst = false, const std::string& nameFilter = "", const std::vector<std::string>& excludeClasses = {}, bool buildHistogram = false);
 
 // Address-to-Instance reverse lookup result.
 //

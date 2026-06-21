@@ -16,8 +16,19 @@ public sealed class FindInstancesResult
     /// <summary>Objects whose class name resolved successfully.</summary>
     public int Named { get; init; }
 
-    /// <summary>True when the scan hit the result cap (more matches likely exist).
-    /// The GObjects scan is exhaustive, but the returned list is capped — surface
-    /// this so the user knows to narrow the query rather than trust a partial list.</summary>
+    /// <summary>True when more NON-EXCLUDED matches exist than the returned list's
+    /// cap. The GObjects scan is exhaustive; the returned list is capped — surface
+    /// this so the user excludes noise classes (which frees cap slots server-side)
+    /// or narrows, rather than trusting a partial list.</summary>
     public bool Truncated { get; init; }
+
+    /// <summary>Server-side class-noise histogram (Top-40, count desc), tallied over
+    /// the FULL matched pool PRE-exclude — so an excluded class (or one whose
+    /// instances all sit past the cap) still appears in the picker and stays
+    /// untickable. Drives <see cref="Helpers.ClassFacetFilter.RebuildFromCounts"/>.</summary>
+    public List<ClassCount> ClassHistogram { get; init; } = new();
+
+    /// <summary>True distinct matched-class count (>= ClassHistogram.Count when the
+    /// histogram was capped at Top-40).</summary>
+    public int ClassDistinct { get; init; }
 }

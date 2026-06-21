@@ -1855,13 +1855,24 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             std::string nameFilter = request.value("name_filter", "");
             bool exactMatch = request.value("exact_match", false);
             int limit = request.value("limit", 500);
+            // Clamp the configurable cap: <1 would return nothing; the 50000 ceiling
+            // bounds a pathological broad search to a ~6-9MB single payload (the scan
+            // walks all of GObjects either way; this only bounds the returned list).
+            if (limit < 1) limit = 1;
+            if (limit > 50000) limit = 50000;
             bool newestFirst = request.value("newest_first", false);
+            // Server-side class-noise filter: skip these classes BEFORE the cap so a
+            // wanted instance past the cap survives once noise is excluded. The UI
+            // re-runs find_instances whenever the class-noise picker changes.
+            std::vector<std::string> excludeClasses = ParseExcludeClasses(request);
             // Either query is sufficient: class-only (legacy), name-only, or both
             // (AND). Only an empty-empty request is rejected.
             if (className.empty() && nameFilter.empty())
                 return Renge::MakeError(id, "Missing class_name or name_filter").dump();
 
-            auto rset = Aura::FindInstancesByClass(className, exactMatch, limit, newestFirst, nameFilter);
+            // buildHistogram=true: full-pool class tally + exclude-before-cap (the
+            // pipe path always needs the picker histogram).
+            auto rset = Aura::FindInstancesByClass(className, exactMatch, limit, newestFirst, nameFilter, excludeClasses, /*buildHistogram=*/true);
 
             // Diagnostic: if name resolution ratio is low, dump FNamePool state
             if (rset.nonNull > 1000 && rset.named > 0) {
@@ -1885,12 +1896,16 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             }
 
             json data;
-            data["total"]     = static_cast<int>(rset.results.size());
-            data["scanned"]   = rset.scanned;
-            data["non_null"]  = rset.nonNull;
-            data["named"]     = rset.named;
-            data["truncated"] = rset.truncated;
-            data["instances"] = instances;
+            data["total"]          = static_cast<int>(rset.results.size());
+            data["scanned"]        = rset.scanned;
+            data["non_null"]       = rset.nonNull;
+            data["named"]          = rset.named;
+            data["truncated"]      = rset.truncated;
+            data["instances"]      = instances;
+            // Class-noise picker: full-pool histogram (Top-40) + true distinct count,
+            // mirroring the value-scan begin/refine responses.
+            data["class_histogram"] = HistogramToJson(rset.classHistogram, kClassHistogramMaxRows);
+            data["class_distinct"]  = rset.classDistinct;
             return Renge::MakeResponse(id, data).dump();
         }
 

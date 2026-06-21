@@ -646,6 +646,75 @@ public class DumpServiceTests
     }
 
     [Fact]
+    public async Task FindInstancesAsync_SendsExcludeClassesAndLimit()
+    {
+        JsonNode? sentExclude = null;
+        int? sentLimit = null;
+        _pipe.SetHandler(req =>
+        {
+            sentExclude = req["exclude_classes"];
+            sentLimit = req["limit"]?.GetValue<int>();
+            return new JsonObject { ["ok"] = true, ["instances"] = new JsonArray() };
+        });
+
+        var svc = CreateService();
+        await svc.FindInstancesAsync("Actor", limit: 5000,
+            excludeClasses: new[] { "WidgetTree", "SoundCue" },
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(5000, sentLimit);
+        var arr = Assert.IsType<JsonArray>(sentExclude);
+        Assert.Equal(new[] { "WidgetTree", "SoundCue" },
+            arr.Select(n => n!.GetValue<string>()));
+    }
+
+    [Fact]
+    public async Task FindInstancesAsync_OmitsExcludeClasses_WhenEmpty()
+    {
+        bool hasKey = true;
+        _pipe.SetHandler(req =>
+        {
+            // Absent (not just null) so the common no-exclude page stays byte-identical.
+            hasKey = req.AsObject().ContainsKey("exclude_classes");
+            return new JsonObject { ["ok"] = true, ["instances"] = new JsonArray() };
+        });
+
+        var svc = CreateService();
+        await svc.FindInstancesAsync("PlayerController",
+            excludeClasses: System.Array.Empty<string>(),
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.False(hasKey);
+    }
+
+    [Fact]
+    public async Task FindInstancesAsync_ParsesClassHistogramAndDistinct()
+    {
+        _pipe.SetHandler(_ => new JsonObject
+        {
+            ["ok"] = true,
+            ["instances"] = new JsonArray(),
+            ["class_distinct"] = 137,
+            ["class_histogram"] = new JsonArray
+            {
+                new JsonObject { ["class_name"] = "BP_Enemy_C", ["count"] = 42 },
+                new JsonObject { ["class_name"] = "WidgetTree", ["count"] = 9 },
+            },
+        });
+
+        var svc = CreateService();
+        var result = await svc.FindInstancesAsync("Actor",
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(137, result.ClassDistinct);
+        Assert.Equal(2, result.ClassHistogram.Count);
+        Assert.Equal("BP_Enemy_C", result.ClassHistogram[0].ClassName);
+        Assert.Equal(42, result.ClassHistogram[0].Count);
+        Assert.Equal("WidgetTree", result.ClassHistogram[1].ClassName);
+        Assert.Equal(9, result.ClassHistogram[1].Count);
+    }
+
+    [Fact]
     public async Task WalkClassAsync_ParsesFields()
     {
         _pipe.SetHandler(_ => new JsonObject

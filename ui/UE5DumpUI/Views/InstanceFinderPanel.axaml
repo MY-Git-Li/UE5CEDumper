@@ -29,6 +29,17 @@
                 IsChecked="{Binding NewestFirst}"
                 ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.NewestFirst}"
                 VerticalAlignment="Center" Margin="0,0,4,0"/>
+      <!-- Configurable result cap (game-side scan is always exhaustive; this only
+           caps the returned list). Clamped 100–50000, also clamped DLL-side. -->
+      <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
+                  ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.MaxResults}">
+        <TextBlock Text="{StaticResource str.InstanceFinder.MaxResults}"
+                   Foreground="#888" VerticalAlignment="Center"/>
+        <NumericUpDown Value="{Binding InstanceSearchCap}"
+                       Minimum="100" Maximum="50000" Increment="500"
+                       FormatString="0" Width="120" FontSize="12"
+                       VerticalAlignment="Center"/>
+      </StackPanel>
       <Button Content="{StaticResource str.InstanceFinder.Search}"
               Command="{Binding SearchCommand}"
               ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.Search}"
@@ -140,6 +151,17 @@
         </DataGrid>
       </DockPanel>
     </Border>
+
+    <!-- Temporary keyword filter over the returned instance rows. Client-side +
+         instant (whitespace = AND across Name / Class / Address). Separate from the
+         class-noise ⚑ filter: this only narrows what's already on screen and does
+         NOT reach past the result cap. -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
+      <TextBox PlaceholderText="{StaticResource str.InstanceFinder.KeywordHint}"
+               Text="{Binding InstanceFilterText}"
+               ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.Keyword}"
+               Width="300" Padding="4,2"/>
+    </StackPanel>
 
     <!-- Main content: instances list (top) + field values (bottom) -->
     <Grid>

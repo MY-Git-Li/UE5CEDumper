@@ -504,7 +504,7 @@ public sealed class DumpService : IDumpService
         return result;
     }
 
-    public async Task<FindInstancesResult> FindInstancesAsync(string className, bool exactMatch = false, int limit = 500, bool newestFirst = false, string nameFilter = "", CancellationToken ct = default)
+    public async Task<FindInstancesResult> FindInstancesAsync(string className, bool exactMatch = false, int limit = 500, bool newestFirst = false, string nameFilter = "", IReadOnlyList<string>? excludeClasses = null, CancellationToken ct = default)
     {
         var req = new JsonObject
         {
@@ -515,6 +515,8 @@ public sealed class DumpService : IDumpService
             ["limit"] = limit,
             ["newest_first"] = newestFirst
         };
+        // Server-side class-noise exclusion (omitted from the wire when empty).
+        AttachExcludeClasses(req, excludeClasses);
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
 
@@ -524,6 +526,8 @@ public sealed class DumpService : IDumpService
             NonNull = res["non_null"]?.GetValue<int>() ?? 0,
             Named = res["named"]?.GetValue<int>() ?? 0,
             Truncated = res["truncated"]?.GetValue<bool>() ?? false,
+            ClassHistogram = ParseClassHistogram(res),
+            ClassDistinct = res["class_distinct"]?.GetValue<int>() ?? 0,
         };
 
         if (res["instances"] is JsonArray arr)
