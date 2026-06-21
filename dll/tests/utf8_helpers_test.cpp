@@ -298,18 +298,20 @@ static void Test_SanitizeAnsi_RejectsJunkRun() {
     // FNamePool, so the decode begins with a non-printable packed-entry header byte and
     // concatenates engine-intrinsic tokens — "??ByteProperty??IntProperty". The first
     // junk byte is decisive: SanitizeAnsiName returns "" so the caller renders 'None'.
-    const char idx2[] = { (char)0x0C, (char)0x03, 'B','y','t','e','P','r','o','p','e','r','t','y',
-                          (char)0x0B, (char)0x03, 'I','n','t','P','r','o','p','e','r','t','y' };
+    // unsigned char so the >0x7F header bytes don't truncate (C4310); reinterpret to
+    // const char* for the call (the production buffer is char* read from process memory).
+    const unsigned char idx2[] = { 0x0C, 0x03, 'B','y','t','e','P','r','o','p','e','r','t','y',
+                                   0x0B, 0x03, 'I','n','t','P','r','o','p','e','r','t','y' };
     EXPECT_EQ_STR("packed-header junk run rejected",
-                  Utf8Helpers::SanitizeAnsiName(idx2, sizeof(idx2)), "");
+                  Utf8Helpers::SanitizeAnsiName(reinterpret_cast<const char*>(idx2), sizeof(idx2)), "");
     // The index-1 variant starts with the clean 'None' tail then hits junk — still "".
-    const char idx1[] = { 'n','e', (char)0x0C, (char)0x03, 'B','y','t','e','P','r','o','p','e','r','t','y' };
+    const unsigned char idx1[] = { 'n','e', 0x0C, 0x03, 'B','y','t','e','P','r','o','p','e','r','t','y' };
     EXPECT_EQ_STR("clean-prefix-then-junk rejected",
-                  Utf8Helpers::SanitizeAnsiName(idx1, sizeof(idx1)), "");
+                  Utf8Helpers::SanitizeAnsiName(reinterpret_cast<const char*>(idx1), sizeof(idx1)), "");
     // A single high byte (e.g. Latin-1 0xE9) means a non-narrow / corrupt entry → "".
-    const char hi[] = { 'A', 'b', (char)0xE9, 'c' };
+    const unsigned char hi[] = { 'A', 'b', 0xE9, 'c' };
     EXPECT_EQ_STR("high byte rejected",
-                  Utf8Helpers::SanitizeAnsiName(hi, sizeof(hi)), "");
+                  Utf8Helpers::SanitizeAnsiName(reinterpret_cast<const char*>(hi), sizeof(hi)), "");
 }
 
 static void Test_SanitizeAnsi_NulAndBounds() {
