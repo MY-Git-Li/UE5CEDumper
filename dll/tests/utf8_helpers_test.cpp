@@ -278,6 +278,58 @@ static void Test_ImplausibleWide_LengthAndDensityRules() {
            !Utf8Helpers::IsImplausibleWideName(nulCut.data(), nulCut.size()));
 }
 
+// ----- SanitizeAnsiName tests ------------------------------------------------
+
+static void Test_SanitizeAnsi_CleanNamePassthrough() {
+    EXPECT_EQ_STR("clean ascii name",
+                  Utf8Helpers::SanitizeAnsiName("IntProperty", 11), "IntProperty");
+    EXPECT_EQ_STR("clean name with underscore/digits",
+                  Utf8Helpers::SanitizeAnsiName("SpawnTriggerLabel_3", 19), "SpawnTriggerLabel_3");
+    // A legitimate literal '?' (0x3F) is printable and must be preserved.
+    EXPECT_EQ_STR("literal question mark preserved",
+                  Utf8Helpers::SanitizeAnsiName("What?", 5), "What?");
+    // Other printable specials a name may legitimately contain.
+    EXPECT_EQ_STR("printable specials preserved",
+                  Utf8Helpers::SanitizeAnsiName("A$B@C.D", 7), "A$B@C.D");
+}
+
+static void Test_SanitizeAnsi_RejectsJunkRun() {
+    // The exact Elliot bug: an invalid FName index (2) lands mid-'None' in a packed
+    // FNamePool, so the decode begins with a non-printable packed-entry header byte and
+    // concatenates engine-intrinsic tokens — "??ByteProperty??IntProperty". The first
+    // junk byte is decisive: SanitizeAnsiName returns "" so the caller renders 'None'.
+    const char idx2[] = { (char)0x0C, (char)0x03, 'B','y','t','e','P','r','o','p','e','r','t','y',
+                          (char)0x0B, (char)0x03, 'I','n','t','P','r','o','p','e','r','t','y' };
+    EXPECT_EQ_STR("packed-header junk run rejected",
+                  Utf8Helpers::SanitizeAnsiName(idx2, sizeof(idx2)), "");
+    // The index-1 variant starts with the clean 'None' tail then hits junk — still "".
+    const char idx1[] = { 'n','e', (char)0x0C, (char)0x03, 'B','y','t','e','P','r','o','p','e','r','t','y' };
+    EXPECT_EQ_STR("clean-prefix-then-junk rejected",
+                  Utf8Helpers::SanitizeAnsiName(idx1, sizeof(idx1)), "");
+    // A single high byte (e.g. Latin-1 0xE9) means a non-narrow / corrupt entry → "".
+    const char hi[] = { 'A', 'b', (char)0xE9, 'c' };
+    EXPECT_EQ_STR("high byte rejected",
+                  Utf8Helpers::SanitizeAnsiName(hi, sizeof(hi)), "");
+}
+
+static void Test_SanitizeAnsi_NulAndBounds() {
+    // NUL terminates within maxLen; trailing bytes are ignored.
+    const char withNul[] = { 'O','k', 0, 'j','u','n','k' };
+    EXPECT_EQ_STR("stops at NUL",
+                  Utf8Helpers::SanitizeAnsiName(withNul, sizeof(withNul)), "Ok");
+    // maxLen bounds the scan even with no NUL.
+    EXPECT_EQ_STR("maxLen bounds the read",
+                  Utf8Helpers::SanitizeAnsiName("IntProperty", 3), "Int");
+    EXPECT_EQ_STR("empty (zero len)",
+                  Utf8Helpers::SanitizeAnsiName("anything", 0), "");
+    EXPECT_EQ_STR("null data",
+                  Utf8Helpers::SanitizeAnsiName(nullptr, 8), "");
+    // Immediate NUL → empty (degenerate entry → caller renders 'None').
+    const char nul0[] = { 0, 'x' };
+    EXPECT_EQ_STR("immediate NUL is empty",
+                  Utf8Helpers::SanitizeAnsiName(nul0, sizeof(nul0)), "");
+}
+
 // ----- main ------------------------------------------------------------------
 
 int main() {
@@ -308,6 +360,10 @@ int main() {
     Test_ImplausibleWide_AcceptsShortLocalized();
     Test_ImplausibleWide_AcceptsAsciiAndEmpty();
     Test_ImplausibleWide_LengthAndDensityRules();
+
+    Test_SanitizeAnsi_CleanNamePassthrough();
+    Test_SanitizeAnsi_RejectsJunkRun();
+    Test_SanitizeAnsi_NulAndBounds();
 
     std::printf("---------------------\n");
     std::printf("Pass: %d   Fail: %d\n", g_pass, g_fail);
