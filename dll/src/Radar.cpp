@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <sstream>
@@ -812,8 +813,39 @@ int32_t OptionalFlagOffset(int32_t optionalSize, int32_t innerSize) {
 
 namespace {
 
-// Numeric scalar -> string. Byte-for-byte the historical wire format (default
-// ostringstream precision for float/double), so the UI display is unchanged.
+// Render a float/double WITHOUT scientific notation, the way the Live Walker
+// drilldown (Ubel::InterpretValue / FmtPreviewNum) already does. The historical
+// `oss << v` used the default ostringstream precision (6 significant figures,
+// %g format), which flips to the unreadable exponent form past ~6 digits — e.g.
+// a garbage FloatProperty showed "5.73356e+17" in the Value column. This keeps
+// the SAME 6 significant figures for in-range values (so normal hits like
+// "1.39391" / "100" / "81.0702" are byte-identical to before) but adapts the
+// decimal places to the magnitude so the output is always plain fixed-point.
+// Trailing zeros are then trimmed. Non-finite values keep their plain spelling.
+std::string FormatNoSci(double v, int sigFigs) {
+    if (!std::isfinite(v)) {
+        if (std::isnan(v)) return "nan";
+        return v < 0.0 ? "-inf" : "inf";
+    }
+    if (v == 0.0) return "0";
+    double a = std::fabs(v);
+    int mag = static_cast<int>(std::floor(std::log10(a)));  // exponent of the value
+    int decimals = sigFigs - 1 - mag;                       // places to keep N sig figs
+    if (decimals < 0)  decimals = 0;
+    if (decimals > 17) decimals = 17;   // a double carries ~15-17 sig digits anyway
+    char buf[340];                      // max double at decimals=0 -> ~309 integer digits
+    std::snprintf(buf, sizeof(buf), "%.*f", decimals, v);
+    std::string s(buf);
+    auto dot = s.find('.');
+    if (dot != std::string::npos) {
+        size_t last = s.find_last_not_of('0');
+        s.erase((last == dot) ? dot : last + 1);   // drop the dot if the fraction is all zeros
+    }
+    return s;
+}
+
+// Numeric scalar -> string. Integers via the stream; float/double via the
+// no-scientific-notation formatter above (matches the Live Walker display).
 std::string FormatScalarBytes(DataType dt, const uint8_t* b) {
     std::ostringstream oss;
     switch (dt) {
@@ -825,8 +857,8 @@ std::string FormatScalarBytes(DataType dt, const uint8_t* b) {
         case DataType::UInt16: { uint16_t v; std::memcpy(&v, b, 2); oss << v; break; }
         case DataType::UInt32: { uint32_t v; std::memcpy(&v, b, 4); oss << v; break; }
         case DataType::UInt64: { uint64_t v; std::memcpy(&v, b, 8); oss << v; break; }
-        case DataType::Float:  { float  v; std::memcpy(&v, b, 4); oss << v; break; }
-        case DataType::Double: { double v; std::memcpy(&v, b, 8); oss << v; break; }
+        case DataType::Float:  { float  v; std::memcpy(&v, b, 4); return FormatNoSci(v, 6); }
+        case DataType::Double: { double v; std::memcpy(&v, b, 8); return FormatNoSci(v, 6); }
         case DataType::Bool:   { oss << (b[0] ? "true" : "false"); break; }
         default: break;  // strings/vectors/multi handled by FormatCandidateValue
     }
@@ -836,10 +868,8 @@ std::string FormatScalarBytes(DataType dt, const uint8_t* b) {
 std::string FormatVectorBytes12(const uint8_t* b) {
     float v[3] = { 0.0f, 0.0f, 0.0f };
     std::memcpy(v, b, 12);
-    std::ostringstream oss;
-    oss.precision(4);
-    oss << v[0] << ", " << v[1] << ", " << v[2];
-    return oss.str();
+    // Per-component fixed-point (no scientific notation), matching the scalar path.
+    return FormatNoSci(v[0], 6) + ", " + FormatNoSci(v[1], 6) + ", " + FormatNoSci(v[2], 6);
 }
 
 std::string ToLower(std::string s) {

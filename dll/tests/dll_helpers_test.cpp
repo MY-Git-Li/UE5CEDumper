@@ -1255,6 +1255,29 @@ static void Test_ValueScan_OrderedView() {
     EXPECT("FormatCandidateValue Bool true", FormatCandidateValue(bc, DataType::Bool, descs[0]) == "true");
     EXPECT("DecodeNumericToDouble Bool true", DecodeNumericToDouble(DataType::Bool, bc.prevValue) == 1.0);
 
+    // --- float/double: fixed-point, never scientific notation (Value Search +
+    // Group Scan share FormatCandidateValue). In-range values keep the same 6
+    // significant figures as the historical default; huge/garbage floats render
+    // as plain digits instead of "5.73356e+17". ---
+    {
+        auto fcand = [](float f) { Candidate c; std::memcpy(c.prevValue, &f, 4); return c; };
+        auto dcand = [](double d) { Candidate c; std::memcpy(c.prevValue, &d, 8); return c; };
+        auto noExp = [](const std::string& s) {
+            return s.find('e') == std::string::npos && s.find('E') == std::string::npos;
+        };
+
+        EXPECT("Float normal keeps 6 sig figs",
+               FormatCandidateValue(fcand(1.39391f), DataType::Float, descs[0]) == "1.39391");
+        EXPECT("Float whole -> integer (no trailing .0)",
+               FormatCandidateValue(fcand(100.0f), DataType::Float, descs[0]) == "100");
+        EXPECT("Float huge -> fixed-point, no exponent",
+               noExp(FormatCandidateValue(fcand(5.73356e17f), DataType::Float, descs[0])));
+        EXPECT("Double huge -> fixed-point, no exponent",
+               noExp(FormatCandidateValue(dcand(1.0e20), DataType::Double, descs[0])));
+        EXPECT("Float tiny -> fixed-point, no exponent",
+               noExp(FormatCandidateValue(fcand(1.0e-7f), DataType::Float, descs[0])));
+    }
+
     // --- sort key parsing ---
     SortKey k;
     EXPECT("parse 'value'", TryParseSortKey("value", k) && k == SortKey::Value);
