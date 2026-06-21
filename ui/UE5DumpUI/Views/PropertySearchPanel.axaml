@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:UE5DumpUI.ViewModels"
              xmlns:m="using:UE5DumpUI.Models"
+             xmlns:views="using:UE5DumpUI.Views"
              x:Class="UE5DumpUI.Views.PropertySearchPanel"
              x:DataType="vm:PropertySearchViewModel">
 
@@ -40,6 +41,9 @@
               Classes="accent" Padding="12,4"/>
       <TextBlock Text="{Binding StatusText}"
                  Foreground="#888" VerticalAlignment="Center" Margin="8,0"/>
+      <TextBlock Text="{Binding ClassFilterNote}"
+                 IsVisible="{Binding ClassFilterNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                 Foreground="#E0A050" VerticalAlignment="Center" FontSize="12"/>
     </StackPanel>
 
     <!-- Result filter (client-side; no DLL roundtrip) -->
@@ -50,6 +54,7 @@
                Text="{Binding ResultFilter}"
                ToolTip.Tip="{StaticResource str.Tip.PropertySearch.ResultFilter}"
                Width="320" Padding="4,2" FontSize="12"/>
+      <views:ClassFacetFilterButton Filter="{Binding ClassFilter}"/>
     </StackPanel>
 
     <!-- Loading indicator -->

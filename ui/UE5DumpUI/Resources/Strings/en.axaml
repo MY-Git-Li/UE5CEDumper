@@ -420,6 +420,14 @@
     <sys:String x:Key="str.Noise.Clear">Clear all</sys:String>
     <sys:String x:Key="str.Noise.Reset">Reset ticks</sys:String>
     <sys:String x:Key="str.Noise.RemoveTip">Remove from denylist</sys:String>
+
+    <!-- Client-side class-noise filter (Instance / Interesting Funcs+Props / Property Search) -->
+    <sys:String x:Key="str.ClassFilter.Button">Class filter</sys:String>
+    <sys:String x:Key="str.Tip.ClassFilter">Group these results by class and hide noise classes (UI widgets, sound, system components) from the list. Hiding is display-only — untick or Clear to restore.</sys:String>
+    <sys:String x:Key="str.ClassFilter.Hint">Tick a class to hide its rows from the results below (e.g. UI widgets, sound, system components). This only hides them from view — the underlying data is unchanged. Untick or Clear to restore.</sys:String>
+    <sys:String x:Key="str.ClassFilter.Partial">⚠ Counts are partial — the result list was capped, so these are a lower bound.</sys:String>
+    <sys:String x:Key="str.ClassFilter.Clear">Clear (show all)</sys:String>
+
     <!-- Class Pivot: right-click hide + hidden-class chips -->
     <sys:String x:Key="str.Pivot.HideClass">Hide selected class from picker</sys:String>
     <sys:String x:Key="str.Pivot.HiddenHeader">Hidden classes (Pivot only):</sys:String>
