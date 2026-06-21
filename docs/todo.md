@@ -523,11 +523,6 @@ Shipped + unit-tests-pass but unproven on real games:
   review confirmed Map/Set/Set offsets correct + reachable; accepted nits: struct-nested dotted base name
   doesn't re-hydrate (pre-existing, affects arrays too, CE math still correct) + int32 element-offset
   arithmetic (theoretical, `FieldOffset` is int by design).
-- **Value Search 1M cap (V2)** (build 954). Set Max near 1,000,000 on a broadly-matching
-  value; confirm First Scan completes (or hits the 15 s deadline cleanly), the grid pages
-  via Load More, and the server-side keyword filter + sort picker stay responsive at that
-  size (scale bench says ~0.6–0.7 s per filter/sort change over 1M; verify it feels OK
-  in-app, where it's debounced).
 - **Value Search `TOptional<T>` scan (V1c)** (build 942). Scan a known value held in a
   `TOptional<int/float/FString>` UPROPERTY → confirm the row appears under the optional's
   field name and a Next Scan prunes; confirm an **unset** optional doesn't surface on a
