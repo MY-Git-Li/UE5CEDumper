@@ -2611,6 +2611,15 @@ public sealed class DumpService : IDumpService
         Roll  = res["roll"]?.GetValue<double>() ?? 0,
         Map    = res["map"]?.GetValue<string>() ?? "",
         Source = res["source"]?.GetValue<string>() ?? "raw",
+        PawnAddr    = res["pawn_addr"]?.GetValue<string>() ?? "",
+        HasMovement = res["has_movement"]?.GetValue<bool>() ?? false,
+        VelX  = res["vel_x"]?.GetValue<double>() ?? 0,
+        VelY  = res["vel_y"]?.GetValue<double>() ?? 0,
+        VelZ  = res["vel_z"]?.GetValue<double>() ?? 0,
+        AccX  = res["acc_x"]?.GetValue<double>() ?? 0,
+        AccY  = res["acc_y"]?.GetValue<double>() ?? 0,
+        AccZ  = res["acc_z"]?.GetValue<double>() ?? 0,
+        Speed = res["speed"]?.GetValue<double>() ?? 0,
     };
 
     private static TeleportResult ParseTeleportResult(JsonObject res) => new()

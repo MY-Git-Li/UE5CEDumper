@@ -24,6 +24,34 @@ public sealed class TeleportPose
     /// <summary>"raw" (direct property read) or "invoke"
     /// (K2_GetActorLocation, used for attached/vehicle pawns).</summary>
     public string Source { get; init; } = "raw";
+
+    /// <summary>Resolved pawn object address as a hex string ("0x0"/"" when
+    /// unavailable) — the object whose coordinates this pose reports. Used by the
+    /// Teleport tab's "Locate in GWorld" handoff to select this exact pawn in the
+    /// Live Walker. <see cref="HasPawnAddr"/> tests validity.</summary>
+    public string PawnAddr { get; init; } = "";
+
+    /// <summary>True when <see cref="PawnAddr"/> is a usable non-null address.</summary>
+    public bool HasPawnAddr =>
+        !string.IsNullOrEmpty(PawnAddr) && PawnAddr != "0x0" && PawnAddr != "0X0";
+
+    /// <summary>True when the pawn has a UCharacterMovementComponent whose
+    /// reflected Velocity field resolved, so <see cref="VelX"/>/<see cref="Speed"/>
+    /// (and usually <see cref="AccX"/>) are live. False on vehicle / custom-framework
+    /// pawns — the UI then shows velocity/acceleration as "unavailable".</summary>
+    public bool HasMovement { get; init; }
+
+    // Live velocity (cm/s) and acceleration (cm/s²) off the CharacterMovement.
+    // Only meaningful when HasMovement is true.
+    public double VelX { get; init; }
+    public double VelY { get; init; }
+    public double VelZ { get; init; }
+    public double AccX { get; init; }
+    public double AccY { get; init; }
+    public double AccZ { get; init; }
+
+    /// <summary>Velocity magnitude |Velocity| in cm/s (0 when no movement).</summary>
+    public double Speed { get; init; }
 }
 
 /// <summary>Result of a teleport action (recall / cursor).</summary>

@@ -43,6 +43,7 @@ namespace {
 
 using Wirbel::Pose;
 using Wirbel::Marker;
+using Wirbel::MovementState;
 using namespace Wirbel;  // TeleportResult codes
 
 // Serialize whole operations: handlers are reachable from BOTH the Fern
@@ -285,6 +286,11 @@ struct Chain {
     int32_t ctrlRotOff = -1, ctrlRotSize = 0;      // AController.ControlRotation
 };
 
+// Fill `m` with the pawn address + live velocity/acceleration off the pawn's
+// CharacterMovement (defined after GetCmc; forward-declared so GetPoseImpl can
+// reuse the chain it already resolved).
+void ReadMovementState(const Chain& c, MovementState& m);
+
 // Resolve the LOCAL PlayerController: engine chain first, instance-scan
 // fallback (prefer the PC whose UPlayer* Player field is non-null).
 uintptr_t ResolveLocalPC(uintptr_t world) {
@@ -405,7 +411,8 @@ void CopyMapName(uintptr_t world, char* buf, int32_t cap) {
 
 // ---- pose read (§5.4) ----
 
-int32_t GetPoseImpl(Pose& out, char* mapName, int32_t mapNameCap, uint8_t* outSource) {
+int32_t GetPoseImpl(Pose& out, char* mapName, int32_t mapNameCap, uint8_t* outSource,
+                    MovementState* move = nullptr) {
     Chain c;
     int32_t rc = ResolveChain(c);
     if (rc != TP_OK) return rc;
@@ -446,6 +453,7 @@ int32_t GetPoseImpl(Pose& out, char* mapName, int32_t mapNameCap, uint8_t* outSo
     out.X = xyz[0]; out.Y = xyz[1]; out.Z = xyz[2];
     out.Pitch = pyr[0]; out.Yaw = pyr[1]; out.Roll = pyr[2];
     CopyMapName(c.world, mapName, mapNameCap);
+    if (move) ReadMovementState(c, *move);
     return TP_OK;
 }
 
@@ -453,6 +461,49 @@ uintptr_t GetCmc(const Chain& c) {
     int32_t cmOff = Ubel::FindFieldOffset(Ubel::GetClass(c.pawn), "CharacterMovement",
                                           "CharacterMovement", nullptr, "ObjectProperty");
     return ReadPtrAt(c.pawn, cmOff);
+}
+
+// Read the pawn's live velocity/acceleration off its CharacterMovement. Pure
+// reflected-property memory reads (no invoke), so it is safe on the pipe thread
+// exactly like the RelativeLocation read in GetPoseImpl. UMovementComponent::
+// Velocity and UCharacterMovementComponent::Acceleration are FVectors whose
+// width (12B float / 24B double LWC) is taken from the reflected field Size, so
+// this stays UE4/UE5-agnostic. When the pawn has no CharacterMovement (vehicle /
+// custom framework), HasMovement stays false and the values stay zero.
+void ReadMovementState(const Chain& c, MovementState& m) {
+    m = MovementState{};
+    m.PawnAddr = c.pawn;
+
+    uintptr_t cmc = GetCmc(c);
+    if (!cmc) {
+        LOG_INFO("Teleport: no CharacterMovement on pawn — velocity/acceleration unavailable");
+        return;
+    }
+    uintptr_t cmcClass = Ubel::GetClass(cmc);
+
+    FieldInfo vfi{};
+    if (Ubel::FindField(cmcClass, "Velocity", nullptr, nullptr, nullptr, vfi)
+        && vfi.Offset >= 0) {
+        double vel[3] = {};
+        if (ReadVec3Mem(cmc + static_cast<uintptr_t>(vfi.Offset), vfi.Size, vel)) {
+            m.VelX = vel[0]; m.VelY = vel[1]; m.VelZ = vel[2];
+            m.Speed = std::sqrt(vel[0] * vel[0] + vel[1] * vel[1] + vel[2] * vel[2]);
+            m.HasMovement = true;
+        }
+    }
+
+    FieldInfo afi{};
+    if (Ubel::FindField(cmcClass, "Acceleration", nullptr, nullptr, nullptr, afi)
+        && afi.Offset >= 0) {
+        double acc[3] = {};
+        if (ReadVec3Mem(cmc + static_cast<uintptr_t>(afi.Offset), afi.Size, acc)) {
+            m.AccX = acc[0]; m.AccY = acc[1]; m.AccZ = acc[2];
+        }
+    }
+
+    if (!m.HasMovement)
+        LOG_INFO("Teleport: CharacterMovement 0x%llX has no reflected Velocity field",
+                 (unsigned long long)cmc);
 }
 
 // Set UCharacterMovementComponent movement mode (MOVE_None=0 … MOVE_Falling=3).
@@ -1202,7 +1253,14 @@ namespace Wirbel {
 
 int32_t GetPose(Pose& out, char* mapName, int32_t mapNameCap, uint8_t* outSource) {
     std::lock_guard<std::mutex> lock(s_opMutex);
-    return GetPoseImpl(out, mapName, mapNameCap, outSource);
+    return GetPoseImpl(out, mapName, mapNameCap, outSource, nullptr);
+}
+
+int32_t GetPoseAndMovement(Pose& out, char* mapName, int32_t mapNameCap,
+                           uint8_t* outSource, MovementState& move) {
+    std::lock_guard<std::mutex> lock(s_opMutex);
+    move = MovementState{};
+    return GetPoseImpl(out, mapName, mapNameCap, outSource, &move);
 }
 
 int32_t GetPov(Pov& out) {
