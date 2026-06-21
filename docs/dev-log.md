@@ -16,6 +16,18 @@ builds ≤696 in
 
 -----
 
+## 2026-06-21 — Value Search / Group Scan: float/double render as fixed-point, never scientific notation (build 1483; DLL-only; MERGED main PR #339 `44bb943`, dev=main; in-game VERIFIED)
+
+A large / garbage `FloatProperty` showed `5.73356e+17` in the Value column instead of plain digits. The DLL's `Radar::FormatScalarBytes` rendered float/double through the default `ostringstream` precision (`oss << v` = `%g`, 6 significant figures), which flips to the exponent form once the magnitude passes ~6 digits — unlike the Live Walker drilldown (`Ubel::InterpretValue`, `%.10f`/`%.15f`), which is always fixed-point.
+
+**Fix — new `Radar::FormatNoSci(v, sigFigs)`.** It keeps the SAME 6 significant figures for in-range values (so normal hits like `1.39391` / `100` / `81.0702` stay byte-identical to before), but derives the decimal places from the magnitude (`decimals = sigFigs - 1 - floor(log10(|v|))`, clamped `0..17`, `buf[340]` for the worst-case ~309-digit double integer span) so the output is always plain fixed-point, then trims trailing zeros (dropping the dot when the fraction is all-zero; integer-part trailing zeros like `1500` survive because the erase starts at the dot). Non-finite values keep their `inf` / `-inf` / `nan` spelling.
+
+**One change, two surfaces.** Both single Value Search (the `Fern` candidate `value`) and the multi-value Group Scan (`leaf_value`) format through the shared `Radar::FormatCandidateValue` → `FormatScalarBytes`, so the fix lands on both at once; `FormatVectorBytes12` (FVector / FRotator components) gets the same per-component treatment. The **numeric value sort is unaffected** — it compares via `DecodeNumericToDouble` (true numeric), not the display string; only the vector value-sort uses the string (already lexicographic, unchanged in spirit).
+
+**The other panels the user asked to check were already safe.** Snapshot / SPC Query / Class Pivot all render through the C# `SnapshotNumeric.Render`, which uses the `"0.######"` custom format string — fixed-point by construction, so it never emits an exponent. No change was needed there (they carry slightly lower precision than the DLL path, but that was not the reported issue).
+
+**Tests + verification.** +5 dll assertions (in-range exact strings `1.39391` / `100`, plus no-exponent checks for a huge float, a `1e20` double, and a `1e-7` tiny float). dll 727/0. Also removed the now-verified "Value Search 1M cap (V2)" todo (the owner confirmed a ~1M-cap scan runs OK). **In-game VERIFIED by the user.**
+
 ## 2026-06-21 — Export CSX: CE 7.7+ Binary (bit-switch) format behind a dropdown (builds 1478-1480; UI-only, no DLL/pipe change; in-game VERIFIED by the user)
 
 CE before 7.7 has no bit-switch type in Structure Dissect, so a bit-field `BoolProperty` was exported as a whole `Vartype="Byte"` with the bit noted in the description (a series of same-address bytes). CE 7.7+ supports `Vartype="Binary"` (`BitStart`/`BitSize`), which Copy CE XML / Copy CE Field already emit. This brings CSX in line — **without** changing the legacy output.
