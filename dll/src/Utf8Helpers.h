@@ -116,6 +116,35 @@ inline bool IsImplausibleWideName(const wchar_t* data, size_t len) {
     return false;
 }
 
+// Decode a narrow (ANSI) UE FName payload into a clean string, or "" when it is junk.
+// A real narrow FName is pure printable ASCII by construction — UE stores localized /
+// non-ASCII text with the wide bit set (handled by EncodeUtf16 + IsImplausibleWideName).
+// So ANY byte outside [0x20,0x7F), other than a NUL terminator, means the bytes are NOT
+// a valid narrow FName: the entry is corrupt, or an invalid / uninitialized FName index
+// landed mid-entry inside a packed FNamePool. (In a packed pool, indices 1 and 2 fall
+// inside the 6-byte 'None' entry, so an uninitialized 4-byte NameProperty value such as
+// ComparisonIndex=2 decodes the tail of 'None' plus adjacent packed-entry header bytes.)
+// Returning "" lets callers treat it as a miss and render 'None' instead of surfacing a
+// misleading concatenation like "??ByteProperty??IntProperty" (the sanitized header
+// bytes between packed entries + the engine-intrinsic name tokens they sit next to).
+//
+// This is the ANSI sibling of IsImplausibleWideName, but stricter: a narrow FName has NO
+// legitimate non-printable bytes, so the first one is decisive (no length/density
+// threshold — that under-fires on a junk run dominated by printable name tokens). A
+// legitimate literal '?' (0x3F) is printable and is preserved.
+inline std::string SanitizeAnsiName(const char* data, size_t maxLen) {
+    if (!data) return "";
+    std::string out;
+    out.reserve(maxLen < 64 ? maxLen : 64);
+    for (size_t i = 0; i < maxLen; ++i) {
+        unsigned char c = static_cast<unsigned char>(data[i]);
+        if (c == 0) break;                      // NUL terminator
+        if (c < 0x20 || c >= 0x7F) return "";   // non-ASCII => corrupt / misidentified entry
+        out += static_cast<char>(c);
+    }
+    return out;
+}
+
 inline std::string EncodeUtf16(const wchar_t* data, size_t len) {
     std::string result;
     if (!data || len == 0) return result;

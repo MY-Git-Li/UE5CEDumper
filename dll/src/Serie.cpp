@@ -403,17 +403,10 @@ std::string GetString(int32_t nameIndex, int32_t number) {
         if (!Macht::ReadBytesSafe(entry + s_ue4StringOffset, buf, 255)) return "";
         buf[255] = '\0';
 
-        // Sanitize: ensure valid ASCII
-        std::string result;
-        result.reserve(64);
-        for (int i = 0; i < 255 && buf[i]; ++i) {
-            auto c = static_cast<unsigned char>(buf[i]);
-            if (c >= 0x20 && c < 0x7F) {
-                result += static_cast<char>(c);
-            } else {
-                result += '?';
-            }
-        }
+        // Sanitize to printable ASCII; reject a junk-laden decode (invalid/uninitialized
+        // FName index) so the caller renders 'None' instead of "??ByteProperty??...".
+        std::string result = Utf8Helpers::SanitizeAnsiName(buf, 255);
+        if (result.empty()) return "";
 
         if (number > 0) {
             result += "_" + std::to_string(number - 1);
@@ -461,21 +454,17 @@ std::string GetString(int32_t nameIndex, int32_t number) {
         if (Utf8Helpers::IsImplausibleWideName(wbuf.data(), actualLen)) return "";
         result = Utf8Helpers::EncodeUtf16(wbuf.data(), actualLen);
     } else {
-        // ANSI name — sanitize non-ASCII bytes to produce valid UTF-8.
-        // UE FNames should be pure ASCII; non-ASCII means corrupted/encrypted data.
+        // ANSI name — a real narrow FName is pure printable ASCII. SanitizeAnsiName
+        // returns "" when any byte is non-ASCII, which means the entry is corrupt or an
+        // invalid/uninitialized FName index landed mid-entry inside a packed FNamePool
+        // (e.g. index 2 falls inside the 'None' entry → "??ByteProperty??IntProperty").
+        // Returning "" lets callers render 'None' instead of a misleading concatenation.
+        // A literal '?' (0x3F) is printable and is preserved. The wide branch above has
+        // the equivalent guard via IsImplausibleWideName.
         std::vector<char> buf(len + 1, 0);
         if (!Macht::ReadBytesSafe(entry + strStart, buf.data(), len)) return "";
-        result.reserve(len);
-        for (int i = 0; i < len; ++i) {
-            auto c = static_cast<unsigned char>(buf[i]);
-            if (c >= 0x20 && c < 0x7F) {
-                result += static_cast<char>(c);
-            } else if (c == 0) {
-                break; // Null terminator
-            } else {
-                result += '?';
-            }
-        }
+        result = Utf8Helpers::SanitizeAnsiName(buf.data(), static_cast<size_t>(len));
+        if (result.empty()) return "";
     }
 
     // Append _N suffix if number > 0

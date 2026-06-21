@@ -168,6 +168,25 @@ Open follow-ups (low priority):
   container clipped by `ArrayLimit` *inside* a drilled struct/pointer is unreported.
   Cheap: scan `resolvedStructs`/`resolvedInstances` values too. (Marked optional in
   the spec.)
+- **FName → live readable string in CE via a "UE FName to String" custom type** —
+  Effort: **M-L** · Risk: med (CE-Lua + per-game GNames config). Highest-value of the
+  remaining sample.CSX gaps. Today FName is shown statically: **CSX** emits a raw
+  8-byte qword (`MapCsxType` `NameProperty`→`8 Bytes` — no name at all); **Copy CE XML /
+  Field** emit the 4-byte `ComparisonIndex` + a static `DropDownList` snapshot (index→string
+  captured at export time, arrays only; single scalar FNames mostly show the raw index).
+  sample.CSX instead uses `Vartype="Custom" Customtype="UE FName to String"` — a CE custom
+  type (Lua, registered via `registerCustomTypeLua`) that resolves the FName index against
+  GNames **live, inside CE, at runtime**, so any FName value updates to its current string.
+  The exporter change is the easy 10% (emit `Custom`/`Customtype` for `NameProperty`, opt-in,
+  keep DropDownList as fallback); the real work is **shipping + auto-configuring a GNames-aware
+  FName custom-type Lua**: parse the pool block layout (UE4 `TNameEntry` vs UE5 `FNamePool`,
+  stride/casing — knowledge already in the DLL's `Serie` module) and feed it the live GNames
+  address. GNames must be **ASLR/restart-stable** → reuse the AOB / GWorld-anchor recovery from
+  the Copy CE AA Script work (dev-log 2026-06-21). Benefits all three exporters (CSX gains names
+  at all; CE XML/Field gain live resolution vs the frozen snapshot + single-scalar coverage).
+  Decide: keep DropDownList as a no-setup fallback when the custom type isn't installed.
+  *Parent: CSX 7.7+ Binary format + sample.CSX audit (dev-log 2026-06-21, PR #335); FNamePool =
+  `Serie` module; GNames anchor = `project-aa-script-gworld-walk`.*
 
 -----
 
