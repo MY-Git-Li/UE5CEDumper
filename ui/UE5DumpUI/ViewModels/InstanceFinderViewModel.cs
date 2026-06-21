@@ -159,7 +159,12 @@ public partial class InstanceFinderViewModel : ViewModelBase
         _dump = dump;
         _log = log;
         _platform = platform;
-        ClassFilter = new ClassFacetFilter(ApplyInstanceFilter);
+        ClassFilter = new ClassFacetFilter(ApplyInstanceFilter)
+        {
+            AutoDetectProvider = async names =>
+                (await _dump.DetectNoiseClassesAsync(names))
+                    .Select(n => (n.ClassName, n.IsNoise, n.Reason)).ToList(),
+        };
     }
 
     /// <summary>Re-project <see cref="_allInstances"/> into the bound

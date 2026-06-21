@@ -162,7 +162,12 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
         _log = log;
         _aobMaker = aobMaker;
         _platform = platform;
-        ClassFilter = new ClassFacetFilter(ApplyResultFilter);
+        ClassFilter = new ClassFacetFilter(ApplyResultFilter)
+        {
+            AutoDetectProvider = async names =>
+                (await _dump.DetectNoiseClassesAsync(names))
+                    .Select(n => (n.ClassName, n.IsNoise, n.Reason)).ToList(),
+        };
         // Seed the availability flag from the bridge's cached value so the
         // first paint of the panel isn't always "unavailable" — the actual
         // pipe probe happens lazily in RefreshAobMakerAvailabilityAsync.

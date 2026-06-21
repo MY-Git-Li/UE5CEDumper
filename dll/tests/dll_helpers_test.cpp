@@ -30,6 +30,7 @@
 #include "../src/Solitar.h"     // GodMode FBoolProperty bit write (ApplyBoolBit, header-inline)
 #include "../src/Orden.h"       // Multi-value group scan: source-agnostic SDR matcher (MatchGroup)
 #include "../src/Ubel.h"        // Native-C scan P0: ComputeHoles / ComputeClassHoles / NormalizeGuessedTypeToProperty (inline, pure)
+#include "../src/Aura.h"        // IsEnginePackage (header-inline, pure) — engine/game package gate
 
 #include <Windows.h>
 #include <timeapi.h>   // timeBeginPeriod — exercised by the poll-latency check
@@ -1302,6 +1303,39 @@ static void Test_ValueScan_OrderedView() {
     EXPECT("CanonicalExcludeKey order-insensitive",
            CanonicalExcludeKey({ "B", "A" }) == CanonicalExcludeKey({ "A", "B" }));
     EXPECT("CanonicalExcludeKey empty -> empty", CanonicalExcludeKey({}).empty());
+}
+
+// IsEnginePackage: the "Game classes only" / auto-detect package gate. The
+// critical case is GetFullName's "//Script/Engine/Class" double-leading-slash
+// '/'-separator format — a strict prefix compare misses it, which silently made
+// gameOnly a no-op for every engine class.
+static void Test_IsEnginePackage() {
+    using Aura::IsEnginePackage;
+
+    // The real-world format GetFullName emits: double leading slash, '/' sep.
+    EXPECT("engine: //Script/Engine/AnimSequence",        IsEnginePackage("//Script/Engine/AnimSequence"));
+    EXPECT("engine: //Script/Engine/StaticMeshComponent", IsEnginePackage("//Script/Engine/StaticMeshComponent"));
+    EXPECT("engine: //Script/CoreUObject/Object",         IsEnginePackage("//Script/CoreUObject/Object"));
+    EXPECT("engine: //Script/Niagara/NiagaraScript",      IsEnginePackage("//Script/Niagara/NiagaraScript"));
+    EXPECT("engine: //Script/Paper2D/PaperFlipbook",      IsEnginePackage("//Script/Paper2D/PaperFlipbook"));
+    EXPECT("engine: //Script/CinematicCamera/CineCameraComponent",
+           IsEnginePackage("//Script/CinematicCamera/CineCameraComponent"));
+
+    // Canonical single-slash + '.'-separator format also matches.
+    EXPECT("engine: /Script/Engine.Actor (canonical)", IsEnginePackage("/Script/Engine.Actor"));
+
+    // Game classes are NOT engine — must survive gameOnly.
+    EXPECT("game: //Game/BP/BP_Enemy_C",        !IsEnginePackage("//Game/BP/BP_Enemy_C"));
+    EXPECT("game: //Script/MyGame/MyCharacter", !IsEnginePackage("//Script/MyGame/MyCharacter"));
+
+    // Boundary: a game module whose name merely STARTS WITH an engine prefix
+    // must not be mistaken for the engine module.
+    EXPECT("boundary: //Script/EngineGameplay/Foo not engine",
+           !IsEnginePackage("//Script/EngineGameplay/Foo"));
+
+    // Degenerate inputs.
+    EXPECT("empty -> not engine", !IsEnginePackage(""));
+    EXPECT("all slashes -> not engine", !IsEnginePackage("///"));
 }
 
 // Group-scan server-side class filter: exclude skip + histogram bucket on the
@@ -2642,6 +2676,7 @@ int main() {
     Test_ValueScan_FieldDisplayName();
     Test_ValueScan_OptionalFlagOffset();
     Test_ValueScan_OrderedView();
+    Test_IsEnginePackage();
     Test_GroupScan_ExcludeAndHistogram();
     Test_ValueScan_OrderedViewScale();
     Test_ValueScan_SparseContainerGeometry();

@@ -2170,6 +2170,43 @@ public sealed class DumpService : IDumpService
         return result;
     }
 
+    public async Task<IReadOnlyList<NoiseClassInfo>> DetectNoiseClassesAsync(
+        IReadOnlyList<string> classNames, CancellationToken ct = default)
+    {
+        var result = new List<NoiseClassInfo>();
+        if (classNames == null || classNames.Count == 0) return result;
+
+        var names = new JsonArray();
+        foreach (var n in classNames)
+            if (!string.IsNullOrEmpty(n)) names.Add((JsonNode)n);
+        if (names.Count == 0) return result;
+
+        var req = new JsonObject
+        {
+            ["cmd"] = "detect_noise_classes",
+            ["class_names"] = names,
+        };
+
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        if (res["classes"] is JsonArray arr)
+        {
+            foreach (var item in arr)
+            {
+                if (item is not JsonObject obj) continue;
+                result.Add(new NoiseClassInfo
+                {
+                    ClassName = obj["class_name"]?.GetValue<string>() ?? "",
+                    IsNoise   = obj["is_noise"]?.GetValue<bool>() ?? false,
+                    Reason    = obj["reason"]?.GetValue<string>() ?? "",
+                });
+            }
+        }
+
+        return result;
+    }
+
     /// <summary>
     /// Enumerate every UFunction across every loaded UClass. Backs the
     /// "Interesting Functions Finder" panel.

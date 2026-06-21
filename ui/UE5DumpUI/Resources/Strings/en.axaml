@@ -427,6 +427,8 @@
     <sys:String x:Key="str.ClassFilter.Hint">Tick a class to hide its rows from the results below (e.g. UI widgets, sound, system components). This only hides them from view — the underlying data is unchanged. Untick or Clear to restore.</sys:String>
     <sys:String x:Key="str.ClassFilter.Partial">⚠ Counts are partial — the result list was capped, so these are a lower bound.</sys:String>
     <sys:String x:Key="str.ClassFilter.Clear">Clear (show all)</sys:String>
+    <sys:String x:Key="str.ClassFilter.AutoDetect">Auto-detect</sys:String>
+    <sys:String x:Key="str.Tip.ClassFilter.AutoDetect">Pre-tick classes that are provably engine/system noise — UI widgets, sound, textures, materials, particles, anim instances, or classes in an engine package. Safe by construction (never your gameplay classes); the picks are reversible — untick any you want to keep.</sys:String>
 
     <!-- Class Pivot: right-click hide + hidden-class chips -->
     <sys:String x:Key="str.Pivot.HideClass">Hide selected class from picker</sys:String>

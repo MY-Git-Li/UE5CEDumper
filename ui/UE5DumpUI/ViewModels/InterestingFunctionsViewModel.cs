@@ -134,7 +134,12 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
         _log = log;
         _aobMaker = aobMaker;
         _platform = platform;
-        ClassFilter = new ClassFacetFilter(ApplyFilter);
+        ClassFilter = new ClassFacetFilter(ApplyFilter)
+        {
+            AutoDetectProvider = async names =>
+                (await _dump.DetectNoiseClassesAsync(names))
+                    .Select(n => (n.ClassName, n.IsNoise, n.Reason)).ToList(),
+        };
     }
 
     /// <summary>

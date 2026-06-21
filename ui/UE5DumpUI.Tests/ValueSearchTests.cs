@@ -2307,6 +2307,50 @@ public class ValueSearchTests
     }
 
     [Fact]
+    public async Task DetectNoiseClassesAsync_BuildsRequest_AndParses()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject
+            {
+                ["id"] = req["id"]?.GetValue<int>() ?? 0, ["ok"] = true,
+                ["classes"] = new JsonArray
+                {
+                    new JsonObject { ["class_name"] = "Widget", ["is_noise"] = true, ["reason"] = "engine base class" },
+                    new JsonObject { ["class_name"] = "BP_Enemy_C", ["is_noise"] = false, ["reason"] = "" },
+                },
+            };
+        });
+
+        var res = await svc.DetectNoiseClassesAsync(new[] { "Widget", "BP_Enemy_C" },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("detect_noise_classes", captured!["cmd"]?.GetValue<string>());
+        Assert.Equal(2, (captured["class_names"] as JsonArray)!.Count);
+        Assert.Equal(2, res.Count);
+        Assert.True(res[0].IsNoise);
+        Assert.Equal("engine base class", res[0].Reason);
+        Assert.False(res[1].IsNoise);
+    }
+
+    [Fact]
+    public async Task DetectNoiseClassesAsync_EmptyInput_NoPipeCall()
+    {
+        var svc = MakeService(out var pipe);
+        bool called = false;
+        pipe.SetHandler(req => { called = true; return new JsonObject { ["id"] = req["id"]?.GetValue<int>() ?? 0, ["ok"] = true }; });
+
+        var res = await svc.DetectNoiseClassesAsync(System.Array.Empty<string>(),
+            TestContext.Current.CancellationToken);
+
+        Assert.Empty(res);
+        Assert.False(called);   // short-circuits, no pipe traffic
+    }
+
+    [Fact]
     public async Task FirstScan_AfterExcludingClass_ResetsFilterForNewSession()
     {
         var (vm, fake) = MakeVm();

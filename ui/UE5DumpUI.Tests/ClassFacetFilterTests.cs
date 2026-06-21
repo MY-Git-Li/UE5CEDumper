@@ -272,6 +272,99 @@ public class ClassFacetFilterTests
         Assert.False(f.CanOpen);
     }
 
+    // ── Auto-detect (Phase 3, opt-in soft pre-tick) ──────────────────────────
+
+    private static System.Func<System.Collections.Generic.IReadOnlyList<string>,
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<(string, bool, string)>>>
+        Provider(params (string name, bool noise, string reason)[] verdicts)
+        => _ => System.Threading.Tasks.Task.FromResult(
+            (System.Collections.Generic.IReadOnlyList<(string, bool, string)>)
+            verdicts.Select(v => (v.name, v.noise, v.reason)).ToList());
+
+    [Fact]
+    public void HasAutoDetect_FalseWithoutProvider()
+    {
+        var f = Make(out _);
+        Assert.False(f.HasAutoDetect);
+        Assert.False(f.CanAutoDetect);
+    }
+
+    [Fact]
+    public async Task AutoDetect_PreTicksNoiseRows_LabelsReason_FiresOnce()
+    {
+        var f = Make(out var changes);
+        f.Rebuild(new[] { "Widget", "Widget", "BP_Enemy_C", "SoundCue" });
+        f.AutoDetectProvider = Provider(
+            ("Widget", true, "engine base class"),
+            ("BP_Enemy_C", false, ""),
+            ("SoundCue", true, "engine base class"));
+        Assert.True(f.HasAutoDetect);
+        Assert.True(f.CanAutoDetect);
+
+        await f.AutoDetectCommand.ExecuteAsync(null);
+
+        Assert.True(f.IsExcluded("Widget"));
+        Assert.True(f.IsExcluded("SoundCue"));
+        Assert.False(f.IsExcluded("BP_Enemy_C"));
+        Assert.Equal(2, f.ExcludedCount);
+        Assert.Equal(1, changes[0]);   // one re-filter for the whole batch, not per row
+        var widget = f.Facets.Single(r => r.ClassName == "Widget");
+        Assert.True(widget.Picked);
+        Assert.Equal("engine base class", widget.NoiseReason);
+    }
+
+    [Fact]
+    public async Task AutoDetect_PreservesManualPicks_NeverUnticks()
+    {
+        var f = Make(out _);
+        f.Rebuild(new[] { "Widget", "BP_Enemy_C" });
+        f.Facets.Single(r => r.ClassName == "BP_Enemy_C").Picked = true;  // manual exclude
+        f.AutoDetectProvider = Provider(
+            ("Widget", true, "engine package"),
+            ("BP_Enemy_C", false, ""));   // classifier says NOT noise
+
+        await f.AutoDetectCommand.ExecuteAsync(null);
+
+        Assert.True(f.IsExcluded("BP_Enemy_C"));   // manual pick survives
+        Assert.True(f.IsExcluded("Widget"));       // auto pick added
+        Assert.Equal(2, f.ExcludedCount);
+    }
+
+    [Fact]
+    public async Task AutoDetect_RespectsDeliberateUntick_OnReClick()
+    {
+        var f = Make(out _);
+        f.Rebuild(new[] { "Widget" });
+        f.AutoDetectProvider = Provider(("Widget", true, "engine base class"));
+        await f.AutoDetectCommand.ExecuteAsync(null);
+        Assert.True(f.IsExcluded("Widget"));
+
+        // User decides Widget actually matters -> unticks it.
+        f.Facets.Single(r => r.ClassName == "Widget").Picked = false;
+        Assert.False(f.IsExcluded("Widget"));
+        Assert.Equal("", f.Facets.Single(r => r.ClassName == "Widget").NoiseReason);  // stale hint cleared
+
+        // Re-click Auto-detect: the deliberate keep is respected (not re-hidden).
+        await f.AutoDetectCommand.ExecuteAsync(null);
+        Assert.False(f.IsExcluded("Widget"));
+    }
+
+    [Fact]
+    public async Task AutoDetect_ReasonHint_SurvivesReScanRebuild()
+    {
+        var f = Make(out _);
+        f.Rebuild(new[] { "Widget", "Pawn" });
+        f.AutoDetectProvider = Provider(("Widget", true, "engine package"), ("Pawn", false, ""));
+        await f.AutoDetectCommand.ExecuteAsync(null);
+        Assert.Equal("engine package", f.Facets.Single(r => r.ClassName == "Widget").NoiseReason);
+
+        // A re-scan rebuilds the rows; the exclusion AND its rule hint persist.
+        f.Rebuild(new[] { "Widget", "Pawn", "Orc" });
+        var widget = f.Facets.Single(r => r.ClassName == "Widget");
+        Assert.True(widget.Picked);
+        Assert.Equal("engine package", widget.NoiseReason);
+    }
+
     // ── Summary ──────────────────────────────────────────────────────────────
 
     [Fact]

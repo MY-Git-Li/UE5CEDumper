@@ -35,6 +35,13 @@ public sealed partial class ClassFacetFilter : ObservableObject
     private readonly Action _onChanged;
     private readonly HashSet<string> _excluded = new(StringComparer.Ordinal);
 
+    // Auto-detect bookkeeping (Phase 3): the matched rule per auto-flagged class
+    // (so the green hint survives a re-scan rebuild), and the classes the user
+    // explicitly UN-ticked after an auto-suggestion (so a later Auto-detect click
+    // respects the keep instead of silently re-hiding them).
+    private readonly Dictionary<string, string> _noiseReasonByClass = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _autoKept = new(StringComparer.Ordinal);
+
     // Guards bulk Picked writes (Rebuild / Clear) from re-entrantly firing the
     // per-row toggle handler (which would re-run the owner's filter once per row).
     private bool _suppress;
@@ -68,12 +75,119 @@ public sealed partial class ClassFacetFilter : ObservableObject
     /// reach <see cref="ClearCommand"/>.</summary>
     public bool CanOpen => HasFacets || AnyExcluded;
 
-    partial void OnHasFacetsChanged(bool value) => OnPropertyChanged(nameof(CanOpen));
+    partial void OnHasFacetsChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanOpen));
+        OnPropertyChanged(nameof(CanAutoDetect));
+        AutoDetectCommand.NotifyCanExecuteChanged();
+    }
 
     partial void OnExcludedCountChanged(int value)
     {
         OnPropertyChanged(nameof(AnyExcluded));
         OnPropertyChanged(nameof(CanOpen));
+    }
+
+    // ── Phase 3: opt-in, safe auto-detect (provider-injected) ────────────────
+
+    private Func<IReadOnlyList<string>, Task<IReadOnlyList<(string className, bool isNoise, string reason)>>>? _autoDetectProvider;
+
+    /// <summary>Optional async classifier the owner injects (a DLL round-trip via
+    /// <c>detect_noise_classes</c>). When set, the picker shows an "Auto-detect"
+    /// button; clicking it pre-ticks the facet rows the classifier flags as
+    /// engine/system noise (safe rules only) and labels each with the matched
+    /// rule. Null = the button is hidden (no auto-detect on this surface).</summary>
+    public Func<IReadOnlyList<string>, Task<IReadOnlyList<(string className, bool isNoise, string reason)>>>? AutoDetectProvider
+    {
+        get => _autoDetectProvider;
+        set
+        {
+            _autoDetectProvider = value;
+            OnPropertyChanged(nameof(HasAutoDetect));
+            OnPropertyChanged(nameof(CanAutoDetect));
+            AutoDetectCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    /// <summary>True when an auto-detect provider is wired (drives button visibility).</summary>
+    public bool HasAutoDetect => _autoDetectProvider != null;
+
+    /// <summary>Drives the auto-detect button's enabled state.</summary>
+    public bool CanAutoDetect => _autoDetectProvider != null && HasFacets && !IsAutoDetecting;
+
+    [ObservableProperty] private bool _isAutoDetecting;
+
+    partial void OnIsAutoDetectingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanAutoDetect));
+        AutoDetectCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>Classify the current facet classes and pre-tick the engine/system
+    /// ones (opt-in, one-shot, reversible — the user can untick or Clear).</summary>
+    [RelayCommand(CanExecute = nameof(CanAutoDetect))]
+    private async Task AutoDetectAsync()
+    {
+        var provider = _autoDetectProvider;
+        if (provider == null || Facets.Count == 0) return;
+        var names = Facets.Select(f => f.ClassName).ToList();
+        IsAutoDetecting = true;
+        try
+        {
+            var verdicts = await provider(names);
+            int flagged = ApplyAutoSuggestions(verdicts);
+            // Explain the outcome so a click is never a silent no-op.
+            Summary = flagged > 0
+                ? $"Auto-detect: {flagged} system class(es) hidden"
+                : "Auto-detect: no system classes found";
+        }
+        catch
+        {
+            // Best-effort — a classify failure (e.g. game not connected) leaves
+            // the picker untouched, but tell the user instead of doing nothing.
+            Summary = "Auto-detect unavailable (is the game connected?)";
+        }
+        finally
+        {
+            IsAutoDetecting = false;
+        }
+    }
+
+    // Pre-tick the noise rows + remember each matched rule (so the hint survives a
+    // re-scan rebuild). Adds to the excluded set and fires onChanged ONCE if
+    // anything new got hidden. Never UN-ticks (won't undo manual picks) and
+    // respects classes the user deliberately kept (_autoKept). Returns the count
+    // newly hidden.
+    private int ApplyAutoSuggestions(IReadOnlyList<(string className, bool isNoise, string reason)> verdicts)
+    {
+        var byName = new Dictionary<string, (bool isNoise, string reason)>(StringComparer.Ordinal);
+        foreach (var v in verdicts)
+            if (!string.IsNullOrEmpty(v.className)) byName[v.className] = (v.isNoise, v.reason);
+
+        int flagged = 0;
+        _suppress = true;
+        foreach (var row in Facets)
+        {
+            if (!byName.TryGetValue(row.ClassName, out var verdict)) continue;
+            if (!verdict.isNoise) continue;                    // only act on noise verdicts
+            if (_autoKept.Contains(row.ClassName)) continue;   // respect a deliberate keep
+            row.NoiseReason = verdict.reason;
+            _noiseReasonByClass[row.ClassName] = verdict.reason;   // persist across rebuilds
+            if (_excluded.Add(row.ClassName))
+            {
+                row.Picked = true;             // suppressed: no per-row re-filter
+                flagged++;
+            }
+        }
+        _suppress = false;
+
+        if (flagged > 0)
+        {
+            ExcludedCount = _excluded.Count;
+            UpdateSummary();
+            _onChanged();
+        }
+        return flagged;
     }
 
     /// <param name="onChanged">Invoked whenever the exclusion set changes; the
@@ -151,6 +265,9 @@ public sealed partial class ClassFacetFilter : ObservableObject
                 ClassName = className,
                 HitCount  = count,
                 Picked    = _excluded.Contains(className),
+                // Re-seed the auto-detect rule hint so it survives a re-scan
+                // rebuild (mirrors how Picked is re-seeded from _excluded).
+                NoiseReason = _noiseReasonByClass.TryGetValue(className, out var rsn) ? rsn : "",
             });
         }
         _suppress = false;
@@ -166,8 +283,23 @@ public sealed partial class ClassFacetFilter : ObservableObject
     internal void NotifyRowToggled(ClassFacetRow row)
     {
         if (_suppress || string.IsNullOrEmpty(row.ClassName)) return;
-        if (row.Picked) _excluded.Add(row.ClassName);
-        else _excluded.Remove(row.ClassName);
+        if (row.Picked)
+        {
+            _excluded.Add(row.ClassName);
+            _autoKept.Remove(row.ClassName);   // re-hiding it -> no longer "kept"
+        }
+        else
+        {
+            _excluded.Remove(row.ClassName);
+            // Unticking a class Auto-detect had flagged is a deliberate keep:
+            // remember it so a later Auto-detect won't silently re-hide it, and
+            // drop the now-contradictory green rule hint.
+            if (_noiseReasonByClass.Remove(row.ClassName))
+            {
+                row.NoiseReason = "";
+                _autoKept.Add(row.ClassName);
+            }
+        }
         ExcludedCount = _excluded.Count;
         UpdateSummary();
         _onChanged();
@@ -180,8 +312,10 @@ public sealed partial class ClassFacetFilter : ObservableObject
     {
         if (_excluded.Count == 0) return;
         _excluded.Clear();
+        _noiseReasonByClass.Clear();
+        _autoKept.Clear();
         _suppress = true;
-        foreach (var r in Facets) r.Picked = false;
+        foreach (var r in Facets) { r.Picked = false; r.NoiseReason = ""; }
         _suppress = false;
         ExcludedCount = 0;
         UpdateSummary();
@@ -195,6 +329,8 @@ public sealed partial class ClassFacetFilter : ObservableObject
     public void Reset()
     {
         _excluded.Clear();
+        _noiseReasonByClass.Clear();
+        _autoKept.Clear();
         _suppress = true;
         Facets.Clear();
         _suppress = false;
@@ -232,4 +368,9 @@ public sealed partial class ClassFacetRow : ObservableObject
     [ObservableProperty] private bool _picked;
 
     partial void OnPickedChanged(bool value) => _owner.NotifyRowToggled(this);
+
+    /// <summary>The matched auto-detect rule (e.g. "engine package" / "engine
+    /// base class"); empty unless Auto-detect flagged this class. Shown as a
+    /// dim hint next to the row so the user can audit the suggestion.</summary>
+    [ObservableProperty] private string _noiseReason = "";
 }

@@ -33,6 +33,7 @@ constexpr const char* CMD_FIND_REFS_TO_UOBJ = "find_refs_to_uobject";
 constexpr const char* CMD_FIND_PATH_FROM_GWORLD = "find_path_from_gworld";
 constexpr const char* CMD_GET_RELATED_OBJECTS = "get_related_objects";
 constexpr const char* CMD_GET_CURRENT_TARGET = "get_current_target";
+constexpr const char* CMD_DETECT_NOISE_CLASSES = "detect_noise_classes";
 constexpr const char* CMD_RESOLVE_GAME_ENGINE = "resolve_game_engine";
 constexpr const char* CMD_FIND_PROPERTY_XREFS = "find_property_xrefs";
 constexpr const char* CMD_WALK_FUNCTION_PROPS = "walk_function_props";

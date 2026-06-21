@@ -38,6 +38,11 @@
                        Margin="2,0,2,6"/>
             <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
                         Margin="2,6,2,2">
+              <Button Content="{StaticResource str.ClassFilter.AutoDetect}"
+                      Command="{Binding AutoDetectCommand}"
+                      IsVisible="{Binding HasAutoDetect}"
+                      ToolTip.Tip="{StaticResource str.Tip.ClassFilter.AutoDetect}"
+                      Padding="10,3"/>
               <Button Content="{StaticResource str.ClassFilter.Clear}"
                       Command="{Binding ClearCommand}"
                       IsEnabled="{Binding AnyExcluded}" Padding="10,3"/>
@@ -49,8 +54,13 @@
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="helpers:ClassFacetRow">
                     <CheckBox IsChecked="{Binding Picked}" Margin="0,1" Padding="4,0">
-                      <TextBlock Text="{Binding Display}"
-                                 FontFamily="Consolas, Menlo, monospace" FontSize="12"/>
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="{Binding Display}"
+                                   FontFamily="Consolas, Menlo, monospace" FontSize="12"/>
+                        <TextBlock Text="{Binding NoiseReason}" Foreground="#6A9955"
+                                   FontSize="10" FontStyle="Italic" VerticalAlignment="Center"
+                                   IsVisible="{Binding NoiseReason, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                      </StackPanel>
                     </CheckBox>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>

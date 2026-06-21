@@ -2726,6 +2726,32 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             return Renge::MakeResponse(id, data).dump();
         }
 
+        // === detect_noise_classes: classify class names as engine/system
+        // "noise" for the opt-in auto-detect in the class-noise picker. Marks a
+        // class noise iff it lives in an engine package OR its super-chain reaches
+        // a pure-engine leaf base (Widget/SoundBase/Texture/MaterialInterface/
+        // ParticleSystem/NiagaraSystem/AnimInstance). NEVER name-substring; NEVER
+        // ActorComponent. The UI only pre-ticks the (reversible) picker. ===
+        if (cmd == Renge::CMD_DETECT_NOISE_CLASSES) {
+            std::vector<std::string> names;
+            if (request.contains("class_names") && request["class_names"].is_array())
+                for (const auto& e : request["class_names"])
+                    if (e.is_string()) names.push_back(e.get<std::string>());
+
+            auto verdicts = Aura::ClassifyNoiseClasses(names);
+            json arr = json::array();
+            for (const auto& v : verdicts) {
+                json o;
+                o["class_name"] = v.className;
+                o["is_noise"]   = v.isNoise;
+                o["reason"]     = v.reason;
+                arr.push_back(std::move(o));
+            }
+            json data;
+            data["classes"] = arr;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
         // === list_classes: List all UClass objects (optionally game-only) ===
         if (cmd == Renge::CMD_LIST_CLASSES) {
             bool gameOnly = request.value("game_only", true);

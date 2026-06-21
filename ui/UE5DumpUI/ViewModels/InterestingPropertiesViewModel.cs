@@ -112,7 +112,12 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
         _dump = dump;
         _log  = log;
         _platform = platform;
-        ClassFilter = new ClassFacetFilter(ApplyFilter);
+        ClassFilter = new ClassFacetFilter(ApplyFilter)
+        {
+            AutoDetectProvider = async names =>
+                (await _dump.DetectNoiseClassesAsync(names))
+                    .Select(n => (n.ClassName, n.IsNoise, n.Reason)).ToList(),
+        };
     }
 
     /// <summary>

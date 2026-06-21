@@ -265,6 +265,22 @@ CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands f
   - `begin_value_scan` / `refine_value_scan` / `begin_group_scan` / `refine_group_scan` responses carry **`class_histogram`** — a Top-40 array `[{ "class_name": "...", "count": N }, …]` tallied over the **FULL session** (pre-filter, pre-exclude; sorted count-desc, name-asc) — plus **`class_distinct`** (the true distinct-class count, ≥ the array length when capped). For group scans the bucket is the candidate's **object-level class** (the first non-empty slot's match class — NOT per-slot `owner_class`). Refine recomputes it over the pruned survivor set. The UI's "Class filter" picker is built from this; older DLLs that omit it just show no picker.
   - `query_candidates` / `query_group_candidates` accept **`exclude_classes`** — a string array of class names to hide. Attached only when **non-empty** (omitted = no exclusion, so the common page stays byte-identical for the view cache). The DLL skips candidates whose owning class (group: object-level class) is in the set when building the ordered view, so `filtered_total` reflects post-filter **and** post-exclude. The exclusion is reversible (it never prunes the session) and folds into the per-session view cache key, so toggling re-windows without a re-scan.
 
+#### `detect_noise_classes` (P3, opt-in safe auto-detect)
+
+Classifies a set of class names as engine/system "noise" so the class-noise picker's **Auto-detect** button can pre-tick them. Shared by every panel that hosts the picker (Instance / Interesting Funcs+Props / Property Search / Value Search). Pre-tick only — the UI never auto-prunes, and the picks are reversible.
+
+```jsonc
+{ "id": 70, "cmd": "detect_noise_classes",
+  "class_names": ["WBP_HUD_C", "BP_Enemy_C", "SoundCue", "Texture2D"] }
+// → { "ok": true, "classes": [
+//      { "class_name": "WBP_HUD_C",  "is_noise": true,  "reason": "engine base class" },
+//      { "class_name": "BP_Enemy_C", "is_noise": false, "reason": "" },
+//      { "class_name": "SoundCue",   "is_noise": true,  "reason": "engine base class" },
+//      { "class_name": "Texture2D",  "is_noise": true,  "reason": "engine package" } ] }
+```
+
+A class is `is_noise: true` **only** by safe-by-construction rules: (a) it lives in an engine package (`Aura::IsEnginePackage` on the class full path — `/Script/Engine`, `/UMG`, `/Slate`, `/Niagara`, `/AudioMixer`, …), or (b) its super-chain reaches a pure-engine **leaf base** that structurally cannot hold gameplay save data — `Widget`/`UserWidget`, `SoundBase`, `Texture`, `MaterialInterface`, `ParticleSystem`, `NiagaraSystem`, `AnimInstance`. It **never** uses class-name substrings and **never** flags `ActorComponent` descendants (gameplay HP/MP lives there) — both documented hard bans. One GObjects pass resolves the names to UClasses (metaclass-gated, de-duped); unresolved names come back `is_noise:false`. The C# client omits the call entirely when `class_names` is empty.
+
 ### Multiple Values Group Scan (build 1276)
 
 Object-aware "group scan": find objects (blocks) that **simultaneously** hold ALL of N values (2..4) at **distinct** numeric-property offsets, in any order (the object/schema-aware analogue of Cheat Engine's Group Scan). Far more selective than N separate single-value scans — matching e.g. Str + Def + Dex narrows thousands of hits to a handful. A separate session family (`GroupSessionManager`, same 5-min idle expiry). Each slot is a `NumericNoByte`/`NumericAll` match over direct numeric properties (+ one-level StructProperty descent; deep containers via `deep`). P2 (build 1296): each slot carries its own `scan_type` — see below. Numeric containers + GAS attribute-component cross-object reach are later phases.

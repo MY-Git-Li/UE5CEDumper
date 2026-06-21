@@ -606,13 +606,28 @@ public partial class ValueSearchViewModel : ViewModelBase
         _log  = log;
         _selectedSortOption = SortOptions[0];  // scan order
         _selectedGroupSortOption = GroupSortOptions[0];  // scan order (group mode)
-        ClassFilter = new ClassFacetFilter(() => { if (HasSession) _ = LoadWindowAsync(reset: true); });
-        GroupClassFilter = new ClassFacetFilter(() => { if (HasGroupSession) _ = LoadGroupWindowAsync(reset: true); });
+        ClassFilter = new ClassFacetFilter(() => { if (HasSession) _ = LoadWindowAsync(reset: true); })
+        {
+            AutoDetectProvider = AutoDetectNoiseAsync,
+        };
+        GroupClassFilter = new ClassFacetFilter(() => { if (HasGroupSession) _ = LoadGroupWindowAsync(reset: true); })
+        {
+            AutoDetectProvider = AutoDetectNoiseAsync,
+        };
     }
 
     public void SetEngineState(EngineState state)
     {
         IsGWorldAvailable = state?.HasGWorld ?? false;
+    }
+
+    // Shared auto-detect provider for both class filters: classify the facet
+    // class names via the DLL (safe rules) and adapt to the helper's tuple shape.
+    private async Task<IReadOnlyList<(string className, bool isNoise, string reason)>>
+        AutoDetectNoiseAsync(IReadOnlyList<string> names)
+    {
+        var verdicts = await _dump.DetectNoiseClassesAsync(names);
+        return verdicts.Select(n => (n.ClassName, n.IsNoise, n.Reason)).ToList();
     }
 
     [RelayCommand]
