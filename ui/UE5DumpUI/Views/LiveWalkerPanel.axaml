@@ -65,6 +65,7 @@
                      Foreground="#D4D4D4"
                      FormatString="0"
                      ShowButtonSpinner="True"
+                     VerticalAlignment="Center" VerticalContentAlignment="Center"
                      ToolTip.Tip="Auto-refresh interval (seconds)"/>
       <TextBlock Text="{Binding AutoRefreshStatusText}"
                  Foreground="#888" VerticalAlignment="Center" FontSize="11"

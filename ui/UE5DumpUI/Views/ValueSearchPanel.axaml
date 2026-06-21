@@ -193,7 +193,8 @@
             <NumericUpDown Value="{Binding MaxResults}"
                            Minimum="100" Maximum="1000000" Increment="10000"
                            ToolTip.Tip="{StaticResource str.Tip.VS.MaxResults}"
-                           Width="170" FontSize="12"/>
+                           Width="170" FontSize="12"
+                           VerticalAlignment="Center" VerticalContentAlignment="Center"/>
             <!-- User-adjustable scan deadline (was a hard 15s). 10–90s, default 25.
                  Threaded to the DLL as deadline_ms; shared by Single + Group modes. -->
             <TextBlock Text="{StaticResource str.VS.Timeout}"
