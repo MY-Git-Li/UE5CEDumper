@@ -396,10 +396,17 @@ Type-agnostic streamed capture of every numeric UPROPERTY of every (scoped) UObj
   "offset":    0,
   "limit":     100,
   "array_cap": 256,
-  "native_c":  false }   // optional (P3): also capture each object's unmanaged-hole
+  "native_c":  false,    // optional (P3): also capture each object's unmanaged-hole
                          //   guesses as synthetic "<raw@0xNN>" fields (Guess-What +
                          //   normalize to canonical type; pointer/padding dropped),
                          //   so SPC Query / Class Pivot can track native values.
+  "auto_skip_noise": true }  // optional, DLL default false (UI sends true by default):
+                         //   skip pure engine/system classes (UI widgets, textures,
+                         //   sounds, Niagara, anim instances, /Script engine packages)
+                         //   at CAPTURE time so they never enter the snapshot — faster
+                         //   capture + smaller DB. A gameplay guardrail force-keeps
+                         //   Actor/Pawn/Character/component-derived classes (a player
+                         //   Pawn's X/Y/Z is never dropped). Mirrors ClassifyNoiseClasses.
 ```
 
 Each chunk object may also carry an `arrays` field (Phase A1b) — struct-array

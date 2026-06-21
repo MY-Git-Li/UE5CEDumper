@@ -4587,13 +4587,9 @@ bool ClassDerivesFromAny(uintptr_t classObj,
 }
 
 std::vector<NoiseClassVerdict> ClassifyNoiseClasses(const std::vector<std::string>& classNames) {
-    // Pure-engine LEAF bases whose instances structurally cannot hold gameplay
-    // save data (reflected FName has no U/A prefix). DELIBERATELY excludes
-    // ActorComponent (gameplay HP/MP lives in components) — a documented hard ban.
-    static const std::unordered_set<std::string> kNoiseBases = {
-        "UserWidget", "Widget", "SoundBase", "Texture", "MaterialInterface",
-        "ParticleSystem", "NiagaraSystem", "AnimInstance",
-    };
+    // Pure-engine LEAF bases (shared with the snapshot source-level skip so both
+    // surfaces agree on what counts as noise). See SnapshotEngineNoiseBases().
+    const std::unordered_set<std::string>& kNoiseBases = SnapshotEngineNoiseBases();
 
     // Verdict slot per distinct requested name, preserving input order.
     std::vector<NoiseClassVerdict> out;
@@ -7753,11 +7749,35 @@ void AppendRawHoleFields(uintptr_t obj, uintptr_t cls, Radar::DataType numericSc
     }
 }
 
+// True if `cls` is pure engine/system noise that should be skipped at snapshot
+// CAPTURE time (source-level) so it never enters the store — the in-loop mirror
+// of ClassifyNoiseClasses (same /Script-package + engine-leaf-base rules), but
+// single-pass with no histogram pre-scan. The gameplay guardrail wins first
+// (Actor/component/Pawn-derived classes are force-kept; see DecideSnapshotNoise +
+// SnapshotGameplayKeepBases). `classPath` is the caller's already-computed
+// Ubel::GetFullName(cls) — reused on a cache miss, ignored on a hit. Per-thread
+// memoized on the class pointer to amortize the bounded super-chain walks across
+// a chunk's many same-class instances. Thread-safe: pure string + read-only
+// memory reads (the thread_local cache is per-worker, no shared state).
+static bool IsSnapshotNoiseClass(uintptr_t cls, const std::string& classPath) {
+    thread_local std::unordered_map<uintptr_t, char> verdictCache;
+    auto it = verdictCache.find(cls);
+    if (it != verdictCache.end()) return it->second != 0;
+
+    bool noise = DecideSnapshotNoise(
+        ClassDerivesFromAny(cls, SnapshotGameplayKeepBases()),   // guardrail wins
+        IsEnginePackage(classPath),
+        ClassDerivesFromAny(cls, SnapshotEngineNoiseBases()));
+    verdictCache.emplace(cls, noise ? char{1} : char{0});
+    return noise;
+}
+
 SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
                                          bool gameOnly,
                                          Radar::DataType numericScope,
                                          int32_t arrayCap,
-                                         bool captureNativeC) {
+                                         bool captureNativeC,
+                                         bool skipNoiseClasses) {
     SnapshotChunkResult result;
     const int32_t total = GetCount();
     result.total = total;
@@ -7815,6 +7835,14 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
             // game_only filter keys on the class path (engine packages skipped).
             std::string classPath = Ubel::GetFullName(cls);
             if (gameOnly && IsEnginePackage(classPath)) continue;
+
+            // Auto-detect Engine/System noise (opt-in, default ON in the UI): skip
+            // pure engine/system classes BEFORE the costly per-field walk so they
+            // never enter the snapshot — cutting capture time + DB size at the
+            // source. The gameplay guardrail inside IsSnapshotNoiseClass force-keeps
+            // Actor/component/Pawn-derived classes, so a player Pawn's X/Y/Z is
+            // never dropped. Verdict is thread-local memoized per class.
+            if (skipNoiseClasses && IsSnapshotNoiseClass(cls, classPath)) continue;
 
             ClassInfo ci = Ubel::WalkClassEx(cls);  // cached per class (value copy)
             if (ci.Fields.empty()) continue;

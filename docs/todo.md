@@ -98,8 +98,15 @@ Open work only. **Read this when deciding what to do next.**
   adversarial 3-lens race/correctness audit (capture-helper statics, GuessGapTypes/WalkClassEx
   copy-out, pager contiguity) — no crash/corruption/mis-paging; the worker stride-check was
   fixed to range-relative for prompt cancel. **NEEDS in-game re-test on FF7 Rebirth** (combined
-  with the GuessGapTypes + chunk wins, this is the big one). Still open if needed: class-scoped
-  capture (only a chosen class's instances) + a clearer "X% captured" progress.
+  with the GuessGapTypes + chunk wins, this is the big one). (4) **Source-level noise skip
+  SHIPPED (builds 1484-1486, dev, in-game verify pending):** the "Auto detect Engine/System
+  noise" option (default ON) `continue`s past pure engine/system classes (UI widgets, textures,
+  sounds, Niagara, anim instances, `/Script` engine packages) in the capture loop BEFORE the
+  per-field walk — cutting the dominant per-object cost for the many noise objects a big game
+  carries + shrinking the DB, with a gameplay guardrail that force-keeps Actor/Pawn/Character/
+  component-derived classes. Complements (1)-(3); especially helps games heavy in engine UI/FX
+  objects. Still open if needed: class-scoped capture (only a chosen class's instances) + a
+  clearer "X% captured" progress.
   *Parent: Native-C P3 in-game test (FF7 Rebirth), this session.*
 
 - **DynOff calibrated offsets are non-atomic — tighten the second writer (low-risk hardening)** —

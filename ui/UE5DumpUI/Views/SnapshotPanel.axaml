@@ -28,6 +28,12 @@
                     IsEnabled="{Binding CanEditSettings}" Margin="0,0,12,0"/>
           <CheckBox Content="{StaticResource str.Snapshot.GameOnly}" IsChecked="{Binding GameOnly}" Foreground="#CCCCCC"
                     IsEnabled="{Binding CanEditSettings}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+          <!-- Auto detect Engine/System noise (default ON): skip pure engine/system
+               classes at the SOURCE so they never enter the snapshot (faster + smaller).
+               A gameplay guardrail keeps Actor/Pawn/Character/components. -->
+          <CheckBox Content="{StaticResource str.Snapshot.AutoSkipNoise}" IsChecked="{Binding AutoSkipNoise}"
+                    ToolTip.Tip="{StaticResource str.Tip.Snapshot.AutoSkipNoise}" Foreground="#CCCCCC"
+                    IsEnabled="{Binding CanEditSettings}" VerticalAlignment="Center" Margin="0,0,12,0"/>
           <!-- Native-C (P3): also capture unmanaged-hole guesses so SPC/Pivot can track
                native (non-UPROPERTY) values. Slower + larger; default OFF. -->
           <CheckBox Content="{StaticResource str.Snapshot.NativeC}" IsChecked="{Binding IncludeNativeFields}"

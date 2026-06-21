@@ -694,6 +694,53 @@ inline bool IsEnginePackage(const std::string& rawPath) {
     return false;
 }
 
+// === Snapshot source-level noise classification (header-inline, pure) ===
+//
+// These power the Snapshot "Auto detect Engine/System noise" option, which skips
+// pure engine/system classes BEFORE they enter the capture (vs the post-capture
+// Noise Picker that only filters the finished snapshot). They mirror the rules of
+// Aura::ClassifyNoiseClasses (the result-list auto-detect) so both surfaces agree.
+// Kept header-inline + pure (no game-memory reads) so the lightweight DLL test can
+// exercise the precedence + set membership without linking the whole DLL.
+
+// Pure-engine LEAF bases whose instances structurally cannot hold gameplay save
+// data (their reflected FName has no U/A prefix). DELIBERATELY excludes
+// ActorComponent (gameplay HP/MP lives in components) — a documented hard ban.
+// Single source of truth shared by ClassifyNoiseClasses + the snapshot skip.
+inline const std::unordered_set<std::string>& SnapshotEngineNoiseBases() {
+    static const std::unordered_set<std::string> kBases = {
+        "UserWidget", "Widget", "SoundBase", "Texture", "MaterialInterface",
+        "ParticleSystem", "NiagaraSystem", "AnimInstance",
+    };
+    return kBases;
+}
+
+// Gameplay bases that must NEVER be source-skipped from a snapshot: their
+// instances are the usual carriers of the values users hunt — a Pawn's X/Y/Z, HP
+// in components / GAS AttributeSets (kept via ActorComponent), and the
+// controller/player-state graph. This guardrail wins over every noise rule below
+// because a CAPTURE-time skip is irreversible (the object never enters the store),
+// so "Auto detect Engine/System noise" can never drop a player Pawn.
+inline const std::unordered_set<std::string>& SnapshotGameplayKeepBases() {
+    static const std::unordered_set<std::string> kBases = {
+        "Actor", "ActorComponent", "Pawn", "Character",
+        "Controller", "PlayerState", "GameInstance",
+    };
+    return kBases;
+}
+
+// Pure precedence for the snapshot source-level noise decision, factored out so
+// it is unit-testable without a live process (the derives/package predicates that
+// produce these booleans read game memory). The gameplay guardrail wins: a
+// keep-base-derived class is never noise. Otherwise: an engine /Script package OR
+// an engine leaf base => noise.
+inline bool DecideSnapshotNoise(bool derivesFromKeepBase,
+                                bool isEnginePackage,
+                                bool derivesFromNoiseBase) {
+    if (derivesFromKeepBase) return false;
+    return isEnginePackage || derivesFromNoiseBase;
+}
+
 // === All-Functions Enumeration (Interesting Functions Finder) ===
 
 // Lightweight per-function metadata returned by EnumerateAllFunctions.
@@ -1141,10 +1188,18 @@ struct SnapshotChunkResult {
 // engine, normalized to canonical property types, Pointer/Padding dropped) as
 // synthetic "<raw@0xNN>" fields, so the snapshot carries native values for SPC
 // diff / Class Pivot. See native-c-value-scan-spec.md §8.
+//
+// skipNoiseClasses ("Auto detect Engine/System noise", opt-in, default off here
+// for back-compat / UI default ON): when true, pure engine/system classes are
+// skipped BEFORE the costly per-field walk so they never enter the snapshot —
+// cutting capture time + DB size at the source. A gameplay guardrail force-keeps
+// Actor/component/Pawn-derived classes (see SnapshotGameplayKeepBases), so a
+// player Pawn's X/Y/Z is never dropped. Single-pass: no histogram pre-scan.
 SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
                                          bool gameOnly,
                                          Radar::DataType numericScope,
                                          int32_t arrayCap = 256,
-                                         bool captureNativeC = false);
+                                         bool captureNativeC = false,
+                                         bool skipNoiseClasses = false);
 
 } // namespace Aura

@@ -1361,6 +1361,50 @@ static void Test_IsEnginePackage() {
     EXPECT("all slashes -> not engine", !IsEnginePackage("///"));
 }
 
+// Snapshot "Auto detect Engine/System noise" source-level skip: the PURE
+// precedence (DecideSnapshotNoise) + the keep/noise base sets. The live
+// super-chain / package predicates that FEED the booleans read game memory and
+// can't run here, so we lock down (a) that the gameplay guardrail always wins —
+// the Pawn pitfall: a player Pawn's X/Y/Z must never be source-skipped — and (b)
+// that the keep set holds the gameplay carriers while the noise set holds only
+// engine leaves (and NO gameplay carrier).
+static void Test_SnapshotNoise_GuardrailAndSets() {
+    using namespace Aura;
+
+    // Guardrail wins: a keep-base-derived class is NEVER noise, no matter what
+    // the package/noise-base predicates say (the irreversible-skip safety net).
+    EXPECT("keep beats engine package", DecideSnapshotNoise(true,  true,  false) == false);
+    EXPECT("keep beats noise base",     DecideSnapshotNoise(true,  false, true)  == false);
+    EXPECT("keep beats both",           DecideSnapshotNoise(true,  true,  true)  == false);
+
+    // Non-keep classes: engine /Script package OR engine leaf base => noise.
+    EXPECT("engine package is noise",   DecideSnapshotNoise(false, true,  false) == true);
+    EXPECT("engine leaf base is noise", DecideSnapshotNoise(false, false, true)  == true);
+    EXPECT("both rules => noise",       DecideSnapshotNoise(false, true,  true)  == true);
+
+    // Plain game class (not keep, not engine, not a noise leaf) is kept.
+    EXPECT("plain game class kept",     DecideSnapshotNoise(false, false, false) == false);
+
+    // Keep set must contain the gameplay value carriers (Pawn pitfall guard).
+    const auto& keep = SnapshotGameplayKeepBases();
+    EXPECT("Actor kept",          keep.count("Actor") == 1);
+    EXPECT("ActorComponent kept", keep.count("ActorComponent") == 1);  // HP/MP in components
+    EXPECT("Pawn kept",           keep.count("Pawn") == 1);
+    EXPECT("Character kept",      keep.count("Character") == 1);
+    EXPECT("Controller kept",     keep.count("Controller") == 1);
+    EXPECT("PlayerState kept",    keep.count("PlayerState") == 1);
+
+    // Noise set must hold engine leaves but NO gameplay carrier (so a class that
+    // derives from Pawn/Actor/component can never be flagged via the noise rule).
+    const auto& noise = SnapshotEngineNoiseBases();
+    EXPECT("Widget is noise base",        noise.count("Widget") == 1);
+    EXPECT("UserWidget is noise base",    noise.count("UserWidget") == 1);
+    EXPECT("NiagaraSystem is noise base", noise.count("NiagaraSystem") == 1);
+    EXPECT("Actor NOT a noise base",          noise.count("Actor") == 0);
+    EXPECT("Pawn NOT a noise base",           noise.count("Pawn") == 0);
+    EXPECT("ActorComponent NOT a noise base", noise.count("ActorComponent") == 0);
+}
+
 // Group-scan server-side class filter: exclude skip + histogram bucket on the
 // candidate's OBJECT-level class (first non-empty slot's match), including the
 // defensive case where slot 0 is empty so the class comes from a later slot.
@@ -2700,6 +2744,7 @@ int main() {
     Test_ValueScan_OptionalFlagOffset();
     Test_ValueScan_OrderedView();
     Test_IsEnginePackage();
+    Test_SnapshotNoise_GuardrailAndSets();
     Test_GroupScan_ExcludeAndHistogram();
     Test_ValueScan_OrderedViewScale();
     Test_ValueScan_SparseContainerGeometry();
