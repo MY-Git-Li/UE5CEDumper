@@ -172,6 +172,13 @@ public interface IDumpService
     Task<ClassListResult> ListClassesAsync(
         bool gameOnly = true, int limit = 5000, CancellationToken ct = default);
 
+    // --- Class-noise auto-detect (class-filter Phase 3) ---
+    // Classify class names as engine/system "noise" (safe-by-construction:
+    // engine package OR super-chain to a pure-engine leaf base). Backs the opt-in
+    // "auto-detect system classes" pre-tick in the class-noise picker.
+    Task<IReadOnlyList<NoiseClassInfo>> DetectNoiseClassesAsync(
+        IReadOnlyList<string> classNames, CancellationToken ct = default);
+
     // --- Value Search (CE-style First Scan + Next Scan) ---
     //
     // Walks GObjects + UProperty metadata for every UPROPERTY field
@@ -231,6 +238,7 @@ public interface IDumpService
         string? filter = null,
         string? sortKey = null,
         bool sortDesc = false,
+        IReadOnlyList<string>? excludeClasses = null,
         CancellationToken ct = default);
 
     Task EndValueScanAsync(ulong sessionId, CancellationToken ct = default);
@@ -264,6 +272,7 @@ public interface IDumpService
         string? filter = null,
         string? sortKey = null,
         bool sortDesc = false,
+        IReadOnlyList<string>? excludeClasses = null,
         CancellationToken ct = default);
 
     Task EndGroupScanAsync(ulong sessionId, CancellationToken ct = default);

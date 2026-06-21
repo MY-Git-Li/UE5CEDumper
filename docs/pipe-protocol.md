@@ -261,6 +261,25 @@ CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands f
 - `native_c` (P1, Native-C value scan) is attached only when **true** (default off). It additionally scans each object's **unmanaged holes** — the byte ranges within `[UObject header, class PropertiesSize)` that no UPROPERTY covers — for the requested value at the user's width, so native (non-UPROPERTY) C++ members (HP/MP) are findable. Numeric/multi-numeric data types only (a no-op for string/vector/bool). `native_align` (default 4, values 1/2/4/8) is the stride for sliding within each hole. Matching candidates carry `is_native_c: true` + `guessed_type` (the interpreted width, e.g. `"Int32"`). Intentionally noisy on first scan — pair with `newest_first` + Next-Scan refine. See [native-c-value-scan-spec.md](native-c-value-scan-spec.md).
 - `newest_first` (P1) is attached only when **true** (default off). It walks GObjects high-index-first so that when results hit `max_results` the survivors are the most-recently-allocated instances (a just-spawned pawn) rather than low-index CDOs/templates. Applies to the whole scan (reflected + native); affects only which matches survive truncation. The UI auto-checks it when `native_c` is enabled (the user can uncheck it).
 - `deadline_ms` (scan wall-clock budget) is attached only when **≠ 15000** (the DLL default). When the GObjects walk exceeds it the scan bails early, sets `deadline_hit: true`, and returns whatever matched so far. The DLL clamps the value to **[1000, 300000]** ms. The UI exposes it as the Value Search "Timeout" slider (10–60 s); raise it for huge games (400K+ objects) that keep hitting the deadline. Applies to `begin_value_scan` and `begin_group_scan`; refine re-reads only the existing candidates and is unaffected. Older DLLs that don't read the field simply use the fixed 15 s.
+- **Class-noise filter (P2, server-side).** Because the candidate set is windowed (the DLL owns it, the UI sees one page), the class-distinct "noise picker" runs server-side:
+  - `begin_value_scan` / `refine_value_scan` / `begin_group_scan` / `refine_group_scan` responses carry **`class_histogram`** — a Top-40 array `[{ "class_name": "...", "count": N }, …]` tallied over the **FULL session** (pre-filter, pre-exclude; sorted count-desc, name-asc) — plus **`class_distinct`** (the true distinct-class count, ≥ the array length when capped). For group scans the bucket is the candidate's **object-level class** (the first non-empty slot's match class — NOT per-slot `owner_class`). Refine recomputes it over the pruned survivor set. The UI's "Class filter" picker is built from this; older DLLs that omit it just show no picker.
+  - `query_candidates` / `query_group_candidates` accept **`exclude_classes`** — a string array of class names to hide. Attached only when **non-empty** (omitted = no exclusion, so the common page stays byte-identical for the view cache). The DLL skips candidates whose owning class (group: object-level class) is in the set when building the ordered view, so `filtered_total` reflects post-filter **and** post-exclude. The exclusion is reversible (it never prunes the session) and folds into the per-session view cache key, so toggling re-windows without a re-scan.
+
+#### `detect_noise_classes` (P3, opt-in safe auto-detect)
+
+Classifies a set of class names as engine/system "noise" so the class-noise picker's **Auto-detect** button can pre-tick them. Shared by every panel that hosts the picker (Instance / Interesting Funcs+Props / Property Search / Value Search). Pre-tick only — the UI never auto-prunes, and the picks are reversible.
+
+```jsonc
+{ "id": 70, "cmd": "detect_noise_classes",
+  "class_names": ["WBP_HUD_C", "BP_Enemy_C", "SoundCue", "Texture2D"] }
+// → { "ok": true, "classes": [
+//      { "class_name": "WBP_HUD_C",  "is_noise": true,  "reason": "engine base class" },
+//      { "class_name": "BP_Enemy_C", "is_noise": false, "reason": "" },
+//      { "class_name": "SoundCue",   "is_noise": true,  "reason": "engine base class" },
+//      { "class_name": "Texture2D",  "is_noise": true,  "reason": "engine package" } ] }
+```
+
+A class is `is_noise: true` **only** by safe-by-construction rules: (a) it lives in an engine package (`Aura::IsEnginePackage` on the class full path — `/Script/Engine`, `/UMG`, `/Slate`, `/Niagara`, `/AudioMixer`, …), or (b) its super-chain reaches a pure-engine **leaf base** that structurally cannot hold gameplay save data — `Widget`/`UserWidget`, `SoundBase`, `Texture`, `MaterialInterface`, `ParticleSystem`, `NiagaraSystem`, `AnimInstance`. It **never** uses class-name substrings and **never** flags `ActorComponent` descendants (gameplay HP/MP lives there) — both documented hard bans. One GObjects pass resolves the names to UClasses (metaclass-gated, de-duped); unresolved names come back `is_noise:false`. The C# client omits the call entirely when `class_names` is empty.
 
 ### Multiple Values Group Scan (build 1276)
 

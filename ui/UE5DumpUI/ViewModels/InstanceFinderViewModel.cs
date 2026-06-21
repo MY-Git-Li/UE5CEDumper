@@ -1,7 +1,10 @@
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 
@@ -135,11 +138,54 @@ public partial class InstanceFinderViewModel : ViewModelBase
     /// separately-allocated containers). Set from the top Options flyout.</summary>
     [ObservableProperty] private int _deepScanElemCap = 256;
 
+    /// <summary>Full (capped) class-search result. <see cref="Instances"/> is a
+    /// class-noise-filtered projection of this; kept so the filter can re-project
+    /// without re-searching. Only the class-search path populates it — the
+    /// reverse-address lookup path clears it (its single result isn't a class set).</summary>
+    private List<InstanceResult> _allInstances = new();
+
+    /// <summary>Client-side class-noise filter: hides ticked classes (UI widgets,
+    /// sound, system components) from <see cref="Instances"/>. Ticking re-runs
+    /// <see cref="ApplyInstanceFilter"/> over <see cref="_allInstances"/>.</summary>
+    public ClassFacetFilter ClassFilter { get; }
+
+    /// <summary>Live "N hidden by class filter" note (empty when nothing hidden).
+    /// Recomputed on every search + every class-filter toggle so the user can tell
+    /// an empty grid caused by a stale exclusion from a genuine miss.</summary>
+    [ObservableProperty] private string _classFilterNote = "";
+
     public InstanceFinderViewModel(IDumpService dump, ILoggingService log, IPlatformService platform)
     {
         _dump = dump;
         _log = log;
         _platform = platform;
+        ClassFilter = new ClassFacetFilter(ApplyInstanceFilter)
+        {
+            AutoDetectProvider = async names =>
+                (await _dump.DetectNoiseClassesAsync(names))
+                    .Select(n => (n.ClassName, n.IsNoise, n.Reason)).ToList(),
+        };
+    }
+
+    /// <summary>Re-project <see cref="_allInstances"/> into the bound
+    /// <see cref="Instances"/> collection, hiding classes the user ticked in the
+    /// class-noise filter. Runs after a class search and on every filter toggle.
+    /// Preserves the current selection (and its loaded field grid) when the
+    /// selected instance survives the filter — so toggling a noise class doesn't
+    /// wipe what the user is inspecting.</summary>
+    private void ApplyInstanceFilter()
+    {
+        var prev = SelectedInstance;
+        UiCollection.Reset(
+            Instances,
+            _allInstances.Where(i => !ClassFilter.IsExcluded(i.ClassName)),
+            () => SelectedInstance = null);
+        HasInstances = Instances.Count > 0;
+        int hidden = _allInstances.Count - Instances.Count;
+        ClassFilterNote = hidden > 0 ? $"{hidden} hidden by class filter" : "";
+        // Restore selection (and its field walk) if it wasn't filtered out.
+        if (prev != null && Instances.Contains(prev))
+            SelectedInstance = prev;
     }
 
     public void SetEngineState(EngineState state)
@@ -178,25 +224,31 @@ public partial class InstanceFinderViewModel : ViewModelBase
 
             var result = await _dump.FindInstancesAsync(className, ExactMatch, newestFirst: NewestFirst, nameFilter: nameFilter);
 
-            // Detach the bound selection before rebuilding (Avalonia's selection
-            // model throws if Instances is Clear()'d while SelectedInstance is live).
-            UiCollection.Reset(Instances, result.Instances, () => SelectedInstance = null);
+            // Keep the full result so the class-noise filter can re-project without
+            // re-searching; build the Top-N class histogram (counts are a lower
+            // bound when the result was capped). ApplyInstanceFilter then detaches
+            // the bound selection and rebuilds Instances (hiding excluded classes).
+            _allInstances = new List<InstanceResult>(result.Instances);
+            ClassFilter.Rebuild(_allInstances.Select(i => i.ClassName), countsPartial: result.Truncated);
+            ApplyInstanceFilter();
 
-            HasInstances = Instances.Count > 0;
+            int found = _allInstances.Count;
             // The GObjects scan is exhaustive, but the returned list is capped —
             // be honest when it was hit so the user narrows instead of trusting a
             // partial list (broad object-name terms like "Component" overflow easily).
-            var capNote = result.Truncated ? $" — ⚠ capped at {Instances.Count}, narrow the search" : "";
+            // The "N hidden by class filter" note lives in ClassFilterNote (set by
+            // ApplyInstanceFilter) so it stays live as the user toggles the picker.
+            var capNote = result.Truncated ? $" — ⚠ capped at {found}, narrow the search" : "";
             if (result.Scanned > 0)
             {
                 var pct = result.NonNull > 0 ? 100.0 * result.Named / result.NonNull : 0;
-                StatusText = $"Found {Instances.Count} instances (scanned {result.Scanned:N0}, non-null {result.NonNull:N0}, named {result.Named:N0} ({pct:F1}%)){capNote}";
+                StatusText = $"Found {found} instances (scanned {result.Scanned:N0}, non-null {result.NonNull:N0}, named {result.Named:N0} ({pct:F1}%)){capNote}";
             }
             else
             {
-                StatusText = $"Found {Instances.Count} instances{capNote}";
+                StatusText = $"Found {found} instances{capNote}";
             }
-            _log.Info($"FindInstances: class='{className}' name='{nameFilter}' -> {Instances.Count} results (scanned={result.Scanned}, nonNull={result.NonNull}, named={result.Named})");
+            _log.Info($"FindInstances: class='{className}' name='{nameFilter}' -> {found} results (scanned={result.Scanned}, nonNull={result.NonNull}, named={result.Named})");
         }
         catch (Exception ex)
         {
@@ -231,6 +283,9 @@ public partial class InstanceFinderViewModel : ViewModelBase
                 LookupStatusText = "Invalid address — expected hex (e.g. 0x7FF... or module.exe+RVA)";
                 SelectedInstance = null;   // detach before clearing the bound collection
                 Instances.Clear();
+                _allInstances.Clear();
+                ClassFilter.Reset();       // the lookup result isn't a class set
+                ClassFilterNote = "";
                 ContainerMatches.Clear();
                 Fields.Clear();
                 HasFields = false;
@@ -242,6 +297,9 @@ public partial class InstanceFinderViewModel : ViewModelBase
 
             SelectedInstance = null;   // detach before clearing the bound collection
             Instances.Clear();
+            _allInstances.Clear();
+            ClassFilter.Reset();       // the lookup result isn't a class set
+            ClassFilterNote = "";
             Fields.Clear();
             HasFields = false;
             ContainerMatches.Clear();

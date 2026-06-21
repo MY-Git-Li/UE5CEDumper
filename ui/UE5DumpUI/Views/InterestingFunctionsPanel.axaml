@@ -3,6 +3,7 @@
              xmlns:vm="using:UE5DumpUI.ViewModels"
              xmlns:m="using:UE5DumpUI.Models"
              xmlns:svc="using:UE5DumpUI.Services"
+             xmlns:views="using:UE5DumpUI.Views"
              x:Class="UE5DumpUI.Views.InterestingFunctionsPanel"
              x:DataType="vm:InterestingFunctionsViewModel">
 
@@ -44,6 +45,7 @@
               ToolTip.Tip="{StaticResource str.Tip.IF.ClearFilters}"
               Padding="6,2" FontSize="11"
               VerticalAlignment="Center"/>
+      <views:ClassFacetFilterButton Filter="{Binding ClassFilter}"/>
       <Button Content="{StaticResource str.IF.GenerateCT}"
               Click="OnGenerateCtClick"
               ToolTip.Tip="{StaticResource str.Tip.IF.GenerateCT}"
@@ -68,6 +70,9 @@
                  FontFamily="Consolas, Menlo, monospace"
                  VerticalAlignment="Center"
                  ToolTip.Tip="{Binding StatusText}"/>
+      <TextBlock Text="{Binding ClassFilterNote}"
+                 IsVisible="{Binding ClassFilterNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                 Foreground="#E0A050" FontSize="12" VerticalAlignment="Center"/>
       <!-- AOBMaker availability indicator — single place (build 688).
            Was previously repeated per-row in the Notes column; that
            was pure noise since the value is VM-level. Visible only

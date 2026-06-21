@@ -1,8 +1,10 @@
 using System.Collections.ObjectModel;
+using System.Linq;
 using Avalonia.Input.Platform;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 
@@ -142,6 +144,16 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
     /// handoff stays invisible when experimental features are off.</summary>
     [ObservableProperty] private bool _pivotEnabled;
 
+    /// <summary>Client-side class-noise filter: hides ticked classes (UI widgets,
+    /// sound, system components) from <see cref="Results"/>. Lives over the full
+    /// <see cref="_allResults"/> set; ticking re-runs <see cref="ApplyResultFilter"/>.</summary>
+    public ClassFacetFilter ClassFilter { get; }
+
+    /// <summary>Live "N hidden by class filter" note (empty when nothing hidden) —
+    /// lets the user tell an empty grid caused by a stale class exclusion from a
+    /// genuine miss. Recomputed by <see cref="ApplyResultFilter"/>.</summary>
+    [ObservableProperty] private string _classFilterNote = "";
+
     public PropertySearchViewModel(IDumpService dump, ILoggingService log,
                                    IAobMakerBridge? aobMaker = null,
                                    IPlatformService? platform = null)
@@ -150,6 +162,12 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
         _log = log;
         _aobMaker = aobMaker;
         _platform = platform;
+        ClassFilter = new ClassFacetFilter(ApplyResultFilter)
+        {
+            AutoDetectProvider = async names =>
+                (await _dump.DetectNoiseClassesAsync(names))
+                    .Select(n => (n.ClassName, n.IsNoise, n.Reason)).ToList(),
+        };
         // Seed the availability flag from the bridge's cached value so the
         // first paint of the panel isn't always "unavailable" — the actual
         // pipe probe happens lazily in RefreshAobMakerAvailabilityAsync.
@@ -302,6 +320,8 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
             // Cache the full set so the client-side ResultFilter can refine
             // without another DLL roundtrip.
             _allResults = new List<PropertySearchMatch>(result.Results);
+            // Build the class histogram over the FULL result, then filter.
+            ClassFilter.Rebuild(_allResults.Select(m => m.ClassName));
             ApplyResultFilter();
 
             var typeSuffix = types.Length > 0 ? $" [types: {string.Join(",", types)}]" : "";
@@ -343,20 +363,20 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
     private void ApplyResultFilter()
     {
         var filter = (ResultFilter ?? "").Trim();
+        var hasFilter = filter.Length > 0;
         SelectedResult = null;   // detach before rebuilding the selection-bound list
         Results.Clear();
 
-        if (string.IsNullOrEmpty(filter))
-        {
-            foreach (var m in _allResults) Results.Add(m);
-            return;
-        }
-
+        int hiddenByClass = 0;
         foreach (var m in _allResults)
         {
-            if (MatchesFilter(m, filter))
-                Results.Add(m);
+            if (hasFilter && !MatchesFilter(m, filter)) continue;
+            // Class-noise exclusion last, so the count reflects rows that would
+            // otherwise be visible.
+            if (ClassFilter.IsExcluded(m.ClassName)) { hiddenByClass++; continue; }
+            Results.Add(m);
         }
+        ClassFilterNote = hiddenByClass > 0 ? $"{hiddenByClass} hidden by class filter" : "";
     }
 
     private static bool MatchesFilter(PropertySearchMatch m, string filter)

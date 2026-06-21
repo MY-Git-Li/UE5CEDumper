@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
+using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 
@@ -114,6 +116,16 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     /// </summary>
     public event Action<string>? RequestCopyText;
 
+    /// <summary>Client-side class-noise filter: hides ticked classes (UI widgets,
+    /// sound, system components) from <see cref="Results"/>. Lives over the full
+    /// <see cref="_allRows"/> set; ticking re-runs <see cref="ApplyFilter"/>.</summary>
+    public ClassFacetFilter ClassFilter { get; }
+
+    /// <summary>Live "N hidden by class filter" note (empty when nothing hidden) —
+    /// lets the user tell an empty grid caused by a stale class exclusion from a
+    /// genuine miss. Recomputed by <see cref="ApplyFilter"/>.</summary>
+    [ObservableProperty] private string _classFilterNote = "";
+
     public InterestingFunctionsViewModel(IDumpService dump, ILoggingService log,
                                           IAobMakerBridge? aobMaker = null,
                                           IPlatformService? platform = null)
@@ -122,6 +134,12 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
         _log = log;
         _aobMaker = aobMaker;
         _platform = platform;
+        ClassFilter = new ClassFacetFilter(ApplyFilter)
+        {
+            AutoDetectProvider = async names =>
+                (await _dump.DetectNoiseClassesAsync(names))
+                    .Select(n => (n.ClassName, n.IsNoise, n.Reason)).ToList(),
+        };
     }
 
     /// <summary>
@@ -238,6 +256,8 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
                 return rows;
             });
 
+            // Build the class histogram over the FULL scored set, then filter.
+            ClassFilter.Rebuild(_allRows.Select(r => r.ClassName));
             ApplyFilter();
 
             int interesting = 0;
@@ -284,6 +304,7 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
         var cat        = CategoryFilter;
         var threshold  = ShowAll ? int.MinValue : KeywordScoringTable.InterestingThreshold;
 
+        int hiddenByClass = 0;
         foreach (var row in _allRows)
         {
             if (row.FinalScore < threshold) continue;
@@ -300,8 +321,12 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
                     continue;
                 }
             }
+            // Class-noise exclusion last, so the count reflects rows that would
+            // otherwise be visible.
+            if (ClassFilter.IsExcluded(row.ClassName)) { hiddenByClass++; continue; }
             Results.Add(row);
         }
+        ClassFilterNote = hiddenByClass > 0 ? $"{hiddenByClass} hidden by class filter" : "";
     }
 
     [RelayCommand]

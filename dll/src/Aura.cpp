@@ -3567,53 +3567,7 @@ static bool IsClassLikeMeta(const std::string& metaClassName) {
         || metaClassName == "DynamicClass";
 }
 
-// Engine packages to skip when gameOnly is true
-static bool IsEnginePackage(const std::string& path) {
-    static const char* kEnginePrefixes[] = {
-        "/Script/Engine",
-        "/Script/CoreUObject",
-        "/Script/CoreOnline",
-        "/Script/UMG",
-        "/Script/Slate",
-        "/Script/SlateCore",
-        "/Script/InputCore",
-        "/Script/PhysicsCore",
-        "/Script/NavigationSystem",
-        "/Script/AIModule",
-        "/Script/Niagara",
-        "/Script/MovieScene",
-        "/Script/LevelSequence",
-        "/Script/Landscape",
-        "/Script/Foliage",
-        "/Script/AnimGraphRuntime",
-        "/Script/AudioMixer",
-        "/Script/ChaosCloth",
-        "/Script/ChaosSolverEngine",
-        "/Script/ClothingSystemRuntimeNv",
-        "/Script/GeometryCollectionEngine",
-        "/Script/FieldSystemEngine",
-        "/Script/GameplayTags",
-        "/Script/GameplayTasks",
-        "/Script/GameplayAbilities",
-        "/Script/PacketHandler",
-        "/Script/PropertyAccess",
-        "/Script/DeveloperSettings",
-        "/Script/AssetRegistry",
-        "/Script/MediaAssets",
-        "/Script/HeadMountedDisplay",
-    };
-
-    for (const auto* prefix : kEnginePrefixes) {
-        size_t prefixLen = std::strlen(prefix);
-        // Match exact prefix followed by end-of-string, '/', or '.'
-        if (path.compare(0, prefixLen, prefix) == 0) {
-            if (path.size() == prefixLen || path[prefixLen] == '/' || path[prefixLen] == '.') {
-                return true;
-            }
-        }
-    }
-    return false;
-}
+// IsEnginePackage moved to Aura.h (header-inline, pure + unit-tested).
 
 static std::string ToLower(const std::string& s) {
     std::string out = s;
@@ -4560,6 +4514,100 @@ ClassListResult ListClasses(bool gameOnly, int maxResults) {
     Sein::Info("PIPE:list", "ListClasses: %d classes (gameOnly=%d, scanned %d objects)",
                  static_cast<int>(result.results.size()), gameOnly ? 1 : 0, result.scannedObjects);
     return result;
+}
+
+// === Class-noise auto-detect (class-filter Phase 3) ===
+
+bool ClassDerivesFromAny(uintptr_t classObj,
+                         const std::unordered_set<std::string>& baseNames) {
+    uintptr_t cls = classObj;
+    for (int guard = 0; cls && guard < 64; ++guard) {   // bounded; super-chains are ~5-10 deep
+        if (baseNames.count(Ubel::GetName(cls))) return true;
+        uintptr_t super = 0;
+        if (!Macht::ReadSafe(cls + static_cast<uintptr_t>(DynOff::USTRUCT_SUPER), super)
+            || !super || super == cls)
+            break;
+        cls = super;
+    }
+    return false;
+}
+
+std::vector<NoiseClassVerdict> ClassifyNoiseClasses(const std::vector<std::string>& classNames) {
+    // Pure-engine LEAF bases whose instances structurally cannot hold gameplay
+    // save data (reflected FName has no U/A prefix). DELIBERATELY excludes
+    // ActorComponent (gameplay HP/MP lives in components) — a documented hard ban.
+    static const std::unordered_set<std::string> kNoiseBases = {
+        "UserWidget", "Widget", "SoundBase", "Texture", "MaterialInterface",
+        "ParticleSystem", "NiagaraSystem", "AnimInstance",
+    };
+
+    // Verdict slot per distinct requested name, preserving input order.
+    std::vector<NoiseClassVerdict> out;
+    std::unordered_map<std::string, size_t> indexByName;
+    out.reserve(classNames.size());
+    for (const auto& n : classNames) {
+        if (n.empty() || indexByName.count(n)) continue;
+        indexByName.emplace(n, out.size());
+        NoiseClassVerdict v; v.className = n;
+        out.push_back(std::move(v));
+    }
+    if (out.empty()) return out;
+
+    // The histogram keys on the SHORT class name, so two distinct UClasses can
+    // share one requested name across packages (a game class + an engine
+    // namesake). Resolve CONSERVATIVELY: a name is noise only if EVERY UClass
+    // with that name is noise — a single non-noise namesake spares it. This
+    // upholds "never false-exclude a gameplay class" even on a short-name
+    // collision (we'd rather miss hiding an engine namesake than hide a game
+    // class). So we scan the WHOLE GObjects array (no first-wins early-out).
+    std::vector<char> resolved(out.size(), 0);
+    std::vector<char> allNoise(out.size(), 1);   // AND-accumulator across namesakes
+
+    int32_t count = GetCount();
+    for (int32_t i = 0; i < count; ++i) {
+        if ((i & 0xFFF) == 0 && Tot::Requested()) break;
+        uintptr_t obj = GetByIndex(i);
+        if (!obj) continue;
+
+        // Is obj a UClass? (metaclass-name gate, same as ListClasses.)
+        uintptr_t metaCls = 0;
+        if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, metaCls) || !metaCls) continue;
+        uint32_t metaNameIdx = 0;
+        if (!Macht::ReadSafe(metaCls + Grimoire::OFF_UOBJECT_NAME, metaNameIdx)) continue;
+        if (!IsClassLikeMeta(Serie::GetString(metaNameIdx))) continue;
+
+        auto it = indexByName.find(Ubel::GetName(obj));   // the class's own name
+        if (it == indexByName.end()) continue;
+        const size_t idx = it->second;
+
+        bool thisNoise = false;
+        std::string thisReason;
+        if (IsEnginePackage(Ubel::GetFullName(obj))) {
+            thisNoise = true;  thisReason = "engine package";
+        } else if (ClassDerivesFromAny(obj, kNoiseBases)) {
+            thisNoise = true;  thisReason = "engine base class";
+        }
+
+        resolved[idx] = 1;
+        if (thisNoise) {
+            if (out[idx].reason.empty()) out[idx].reason = thisReason;  // remember a rule label
+        } else {
+            allNoise[idx] = 0;   // a non-noise namesake spares the name
+        }
+    }
+
+    int flagged = 0;
+    for (size_t idx = 0; idx < out.size(); ++idx) {
+        out[idx].isNoise = resolved[idx] && allNoise[idx];
+        if (!out[idx].isNoise) out[idx].reason.clear();
+        else ++flagged;
+    }
+
+    int resolvedCount = 0;
+    for (char r : resolved) if (r) ++resolvedCount;
+    Sein::Info("PIPE:noise", "ClassifyNoiseClasses: %d/%d names resolved, %d flagged noise",
+               resolvedCount, static_cast<int>(out.size()), flagged);
+    return out;
 }
 
 // --- EnumerateAllFunctions ---
@@ -6520,6 +6568,12 @@ ValueScanResult ScanForValue(
     }
     result.stats.scannedClasses = static_cast<int32_t>(classesWithFields.size());
     result.stats.deadlineHit    = scan.deadlineHit;
+    // Reflect a maxResults cap hit too (mirrors the group scan): the candidate
+    // set — and the class histogram built from it — is then a lower bound, so the
+    // UI's "counts are partial / truncated" warning must show. The walk self-caps
+    // per thread, so reaching maxResults means more matches existed.
+    if (static_cast<int32_t>(result.candidates.size()) >= maxResults)
+        result.stats.deadlineHit = true;
 
     auto dtms = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - t0).count();

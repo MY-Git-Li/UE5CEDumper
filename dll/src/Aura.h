@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "Ubel.h"   // For ::ClassInfo (defined at global scope in Ubel.h, despite the filename) used by WalkClassesBatch
@@ -593,6 +594,79 @@ struct ClassListResult {
 
 // List all UClass objects, optionally filtering out engine packages.
 ClassListResult ListClasses(bool gameOnly, int maxResults = 5000);
+
+// === Class-noise auto-detect (class-filter Phase 3) ===
+//
+// SAFE-by-construction classifier for the opt-in "auto-detect system classes"
+// suggestion in the class-noise picker. Given a set of class names (from a
+// result histogram), it resolves each to its UClass in GObjects and marks it
+// "noise" iff EITHER (a) it lives in an engine package (/Script/Engine, /UMG,
+// /Slate, /Niagara, /AudioMixer, … — IsEnginePackage), OR (b) its super-chain
+// derives from a pure-engine LEAF base that structurally cannot hold gameplay
+// save data (UserWidget/Widget, SoundBase, Texture, MaterialInterface,
+// ParticleSystem, NiagaraSystem, AnimInstance). It NEVER uses class-name
+// substrings and NEVER flags ActorComponent descendants (gameplay state lives
+// there) — those are documented hard bans. The UI only PRE-TICKS the picker
+// with the result (reversible), never auto-prunes.
+struct NoiseClassVerdict {
+    std::string className;
+    bool        isNoise = false;
+    std::string reason;   // human label of the matched rule (empty when not noise)
+};
+
+// Classify the given class names (one GObjects pass; unresolved names come back
+// isNoise=false). Order mirrors the input; duplicates de-duped.
+std::vector<NoiseClassVerdict> ClassifyNoiseClasses(const std::vector<std::string>& classNames);
+
+// True if `classObj`'s super-chain (itself included) has an FName exactly equal
+// to any entry in `baseNames`. Bounded 64-hop walk with a self-loop break (the
+// reusable generalization of Edel::ClassifyBySuperChain). Pure read-only.
+bool ClassDerivesFromAny(uintptr_t classObj, const std::unordered_set<std::string>& baseNames);
+
+// True if `path` (a class full path from Ubel::GetFullName) is in a known UE
+// engine/plugin package — the gate behind the "Game classes only" filter and the
+// auto-detect package rule. Tolerant of GetFullName's "//Script/Engine/Class"
+// double-leading-slash, '/'-separator format. Pure / string-only (unit-tested);
+// header-inline so the lightweight DLL test can exercise it without linking the
+// whole DLL.
+inline bool IsEnginePackage(const std::string& rawPath) {
+    static const char* const kEnginePrefixes[] = {
+        "/Script/Engine", "/Script/CoreUObject", "/Script/CoreOnline",
+        "/Script/UMG", "/Script/Slate", "/Script/SlateCore", "/Script/InputCore",
+        "/Script/EnhancedInput", "/Script/PhysicsCore", "/Script/NavigationSystem",
+        "/Script/AIModule", "/Script/Niagara", "/Script/Paper2D",
+        "/Script/CinematicCamera", "/Script/GameplayCameras", "/Script/MovieScene",
+        "/Script/LevelSequence", "/Script/Landscape", "/Script/Foliage",
+        "/Script/AnimGraphRuntime", "/Script/AudioMixer", "/Script/ChaosCloth",
+        "/Script/ChaosSolverEngine", "/Script/ClothingSystemRuntimeNv",
+        "/Script/GeometryCollectionEngine", "/Script/FieldSystemEngine",
+        "/Script/ProceduralMeshComponent", "/Script/GameplayTags",
+        "/Script/GameplayTasks", "/Script/GameplayAbilities", "/Script/PacketHandler",
+        "/Script/PropertyAccess", "/Script/DeveloperSettings", "/Script/AssetRegistry",
+        "/Script/MediaAssets", "/Script/HeadMountedDisplay",
+    };
+
+    // GetFullName emits engine paths as "//Script/Engine/Class" — a DOUBLE
+    // leading slash with '/' separators (documented format quirk; see dev-log).
+    // A strict prefix compare misses that ("//Script…" != "/Script…"), which
+    // silently made gameOnly a no-op for EVERY engine class (and made the
+    // class-noise auto-detect's package rule miss them too). Collapse the leading
+    // slash run to a single '/'; the trailing-char check already accepts '/' as a
+    // separator, so "/Script/Engine/Class" then matches correctly.
+    size_t firstNonSlash = rawPath.find_first_not_of('/');
+    if (firstNonSlash == std::string::npos) return false;   // empty / all slashes
+    const std::string path = "/" + rawPath.substr(firstNonSlash);
+
+    for (const auto* prefix : kEnginePrefixes) {
+        const std::string pfx(prefix);
+        if (path.compare(0, pfx.size(), pfx) == 0) {
+            // Exact prefix followed by end-of-string, '/', or '.'.
+            if (path.size() == pfx.size() || path[pfx.size()] == '/' || path[pfx.size()] == '.')
+                return true;
+        }
+    }
+    return false;
+}
 
 // === All-Functions Enumeration (Interesting Functions Finder) ===
 

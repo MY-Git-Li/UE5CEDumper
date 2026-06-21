@@ -30,6 +30,7 @@
 #include "../src/Solitar.h"     // GodMode FBoolProperty bit write (ApplyBoolBit, header-inline)
 #include "../src/Orden.h"       // Multi-value group scan: source-agnostic SDR matcher (MatchGroup)
 #include "../src/Ubel.h"        // Native-C scan P0: ComputeHoles / ComputeClassHoles / NormalizeGuessedTypeToProperty (inline, pure)
+#include "../src/Aura.h"        // IsEnginePackage (header-inline, pure) — engine/game package gate
 
 #include <Windows.h>
 #include <timeapi.h>   // timeBeginPeriod — exercised by the poll-latency check
@@ -1260,6 +1261,144 @@ static void Test_ValueScan_OrderedView() {
     EXPECT("parse '' -> ScanOrder", TryParseSortKey("", k) && k == SortKey::ScanOrder);
     EXPECT("parse 'offset'", TryParseSortKey("offset", k) && k == SortKey::Offset);
     EXPECT("parse unknown -> false", !TryParseSortKey("bogus", k));
+
+    // --- class-noise exclude (server-side, P2) ---
+    {
+        std::unordered_set<std::string> excl = { "BP_Enemy_C" };
+        auto e = BuildOrderedView(cands, descs, insts, dt, "", SortKey::ScanOrder, false, excl);
+        EXPECT("exclude BP_Enemy_C drops c1,c3", e.size() == 2 && e[0] == 0 && e[1] == 2);
+        // exclude composes with the keyword filter: Health rows are all on the
+        // excluded Player class -> empty.
+        std::unordered_set<std::string> exclP = { "BP_Player_C" };
+        auto e2 = BuildOrderedView(cands, descs, insts, dt, "health", SortKey::ScanOrder, false, exclP);
+        EXPECT("exclude Player + filter 'health' -> empty", e2.empty());
+        // empty exclude set == no exclusion (default arg path).
+        auto e3 = BuildOrderedView(cands, descs, insts, dt, "", SortKey::ScanOrder, false, {});
+        EXPECT("empty exclude keeps all 4", e3.size() == 4);
+    }
+
+    // --- class histogram (count desc, name asc; over the WHOLE pool) ---
+    {
+        auto h = BuildClassHistogram(cands, descs);
+        EXPECT("histogram 2 classes", h.size() == 2);
+        // tie at count 2 -> name ascending: BP_Enemy_C before BP_Player_C.
+        EXPECT("histogram[0] BP_Enemy_C:2",  h.size() == 2 && h[0].first == "BP_Enemy_C" && h[0].second == 2);
+        EXPECT("histogram[1] BP_Player_C:2", h.size() == 2 && h[1].first == "BP_Player_C" && h[1].second == 2);
+    }
+
+    // histogram count-desc ordering (distinct counts) over a separate pool.
+    {
+        std::vector<FieldDescriptor> hd(2);
+        hd[0].className = "WidgetBlueprintGeneratedClass";
+        hd[1].className = "BP_Pawn_C";
+        std::vector<Candidate> hc(5);
+        for (int i = 0; i < 5; ++i) hc[i].descriptorIdx = (i < 3) ? 0u : 1u;  // Widget x3, Pawn x2
+        auto h = BuildClassHistogram(hc, hd);
+        EXPECT("histogram count-desc Widget(3) then Pawn(2)",
+               h.size() == 2 && h[0].first == "WidgetBlueprintGeneratedClass" && h[0].second == 3
+               && h[1].first == "BP_Pawn_C" && h[1].second == 2);
+    }
+
+    // --- CanonicalExcludeKey: order-insensitive cache key ---
+    EXPECT("CanonicalExcludeKey order-insensitive",
+           CanonicalExcludeKey({ "B", "A" }) == CanonicalExcludeKey({ "A", "B" }));
+    EXPECT("CanonicalExcludeKey empty -> empty", CanonicalExcludeKey({}).empty());
+}
+
+// IsEnginePackage: the "Game classes only" / auto-detect package gate. The
+// critical case is GetFullName's "//Script/Engine/Class" double-leading-slash
+// '/'-separator format — a strict prefix compare misses it, which silently made
+// gameOnly a no-op for every engine class.
+static void Test_IsEnginePackage() {
+    using Aura::IsEnginePackage;
+
+    // The real-world format GetFullName emits: double leading slash, '/' sep.
+    EXPECT("engine: //Script/Engine/AnimSequence",        IsEnginePackage("//Script/Engine/AnimSequence"));
+    EXPECT("engine: //Script/Engine/StaticMeshComponent", IsEnginePackage("//Script/Engine/StaticMeshComponent"));
+    EXPECT("engine: //Script/CoreUObject/Object",         IsEnginePackage("//Script/CoreUObject/Object"));
+    EXPECT("engine: //Script/Niagara/NiagaraScript",      IsEnginePackage("//Script/Niagara/NiagaraScript"));
+    EXPECT("engine: //Script/Paper2D/PaperFlipbook",      IsEnginePackage("//Script/Paper2D/PaperFlipbook"));
+    EXPECT("engine: //Script/CinematicCamera/CineCameraComponent",
+           IsEnginePackage("//Script/CinematicCamera/CineCameraComponent"));
+
+    // Canonical single-slash + '.'-separator format also matches.
+    EXPECT("engine: /Script/Engine.Actor (canonical)", IsEnginePackage("/Script/Engine.Actor"));
+
+    // Game classes are NOT engine — must survive gameOnly.
+    EXPECT("game: //Game/BP/BP_Enemy_C",        !IsEnginePackage("//Game/BP/BP_Enemy_C"));
+    EXPECT("game: //Script/MyGame/MyCharacter", !IsEnginePackage("//Script/MyGame/MyCharacter"));
+
+    // Boundary: a game module whose name merely STARTS WITH an engine prefix
+    // must not be mistaken for the engine module.
+    EXPECT("boundary: //Script/EngineGameplay/Foo not engine",
+           !IsEnginePackage("//Script/EngineGameplay/Foo"));
+
+    // Degenerate inputs.
+    EXPECT("empty -> not engine", !IsEnginePackage(""));
+    EXPECT("all slashes -> not engine", !IsEnginePackage("///"));
+}
+
+// Group-scan server-side class filter: exclude skip + histogram bucket on the
+// candidate's OBJECT-level class (first non-empty slot's match), including the
+// defensive case where slot 0 is empty so the class comes from a later slot.
+static void Test_GroupScan_ExcludeAndHistogram() {
+    using namespace Radar;
+
+    std::vector<FieldDescriptor> descs(2);
+    descs[0].className = "BP_Enemy_C";
+    descs[0].fieldName = "HP"; descs[0].fieldType = "IntProperty";
+    descs[1].className = "WidgetBlueprintGeneratedClass";
+    descs[1].fieldName = "Opacity"; descs[1].fieldType = "FloatProperty";
+
+    std::vector<InstanceRecord> insts(3);
+    for (int i = 0; i < 3; ++i) {
+        insts[i].instanceAddr  = 0x1000 + (uintptr_t)i * 0x100;
+        insts[i].instanceIndex = i;
+        insts[i].instanceName  = "Obj_" + std::to_string(i);
+    }
+
+    // Two slots (invariant: slotMatches.size() == slots.size()).
+    std::vector<SlotSpec> slots(2);
+    slots[0].dt = DataType::Int32;
+    slots[1].dt = DataType::Int32;
+
+    auto sm = [](uint32_t desc) { GroupSlotMatch m; m.descriptorIdx = desc; return m; };
+    auto mk = [&](uint32_t inst, bool emptyLeadingSlot, uint32_t classDesc) {
+        GroupCandidate gc; gc.instanceIdx = inst;
+        if (emptyLeadingSlot) {
+            gc.slotMatches.push_back({});            // slot 0 empty (defensive)
+            gc.slotMatches.push_back({ sm(classDesc) });  // class resolved from slot 1
+        } else {
+            gc.slotMatches.push_back({ sm(classDesc) });
+            gc.slotMatches.push_back({ sm(classDesc) });
+        }
+        return gc;
+    };
+    std::vector<GroupCandidate> cands = {
+        mk(0, false, 0),  // c0: BP_Enemy_C
+        mk(1, false, 1),  // c1: WidgetBlueprintGeneratedClass
+        mk(2, true,  0),  // c2: BP_Enemy_C via the 2nd slot (empty leading slot)
+    };
+
+    // Histogram buckets on object-level class: Enemy=2 (c0,c2), Widget=1 (c1).
+    auto h = BuildGroupClassHistogram(cands, descs);
+    EXPECT("group histogram Enemy(2) then Widget(1)",
+           h.size() == 2 && h[0].first == "BP_Enemy_C" && h[0].second == 2
+           && h[1].first == "WidgetBlueprintGeneratedClass" && h[1].second == 1);
+
+    // Exclude the widget class -> drops only c1.
+    std::unordered_set<std::string> exclW = { "WidgetBlueprintGeneratedClass" };
+    auto vW = BuildGroupOrderedView(cands, slots, descs, insts, "", SortKey::ScanOrder, false, exclW);
+    EXPECT("group exclude Widget drops c1", vW.size() == 2 && vW[0] == 0 && vW[1] == 2);
+
+    // Exclude the enemy class -> drops c0 AND c2 (incl. the empty-leading-slot one).
+    std::unordered_set<std::string> exclE = { "BP_Enemy_C" };
+    auto vE = BuildGroupOrderedView(cands, slots, descs, insts, "", SortKey::ScanOrder, false, exclE);
+    EXPECT("group exclude Enemy drops c0,c2", vE.size() == 1 && vE[0] == 1);
+
+    // Empty exclude keeps all three.
+    auto vAll = BuildGroupOrderedView(cands, slots, descs, insts, "", SortKey::ScanOrder, false, {});
+    EXPECT("group empty exclude keeps all", vAll.size() == 3);
 }
 
 // V2 (build 950) — scaling smoke for the server-side ordered view. The cap
@@ -2537,6 +2676,8 @@ int main() {
     Test_ValueScan_FieldDisplayName();
     Test_ValueScan_OptionalFlagOffset();
     Test_ValueScan_OrderedView();
+    Test_IsEnginePackage();
+    Test_GroupScan_ExcludeAndHistogram();
     Test_ValueScan_OrderedViewScale();
     Test_ValueScan_SparseContainerGeometry();
 

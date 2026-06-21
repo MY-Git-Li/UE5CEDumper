@@ -1,0 +1,74 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:helpers="using:UE5DumpUI.Helpers"
+             x:Class="UE5DumpUI.Views.ClassFacetFilterButton"
+             x:Name="Root">
+
+  <!-- The button's DataContext is the Filter property (an ElementName binding,
+       so it needs no x:DataType); x:DataType on the same button then types every
+       inner compiled binding against ClassFacetFilter. The owner sets Filter via
+       a plain styled-property binding, so there is no DataContext reassignment in
+       the owner's scope (avoids the compiled-binding scope gotcha). -->
+  <Button DataContext="{Binding #Root.Filter}"
+          x:DataType="helpers:ClassFacetFilter"
+          IsEnabled="{Binding CanOpen}"
+          ToolTip.Tip="{StaticResource str.Tip.ClassFilter}"
+          Padding="8,4" VerticalAlignment="Center" Cursor="Hand">
+    <StackPanel Orientation="Horizontal" Spacing="5">
+      <TextBlock Text="{StaticResource str.ClassFilter.Button}" VerticalAlignment="Center"/>
+      <Border Background="#3C5A99" CornerRadius="8" Padding="6,0" MinWidth="18"
+              IsVisible="{Binding AnyExcluded}" VerticalAlignment="Center">
+        <TextBlock Text="{Binding ExcludedCount}" Foreground="White" FontSize="11"
+                   HorizontalAlignment="Center"/>
+      </Border>
+    </StackPanel>
+
+    <Button.Flyout>
+      <Flyout Placement="Bottom">
+        <Border Width="400" Padding="4">
+          <DockPanel>
+            <TextBlock DockPanel.Dock="Top"
+                       Text="{StaticResource str.ClassFilter.Hint}"
+                       TextWrapping="Wrap" Foreground="#AAAAAA" FontSize="11"
+                       Margin="2,2,2,6"/>
+            <TextBlock DockPanel.Dock="Top"
+                       Text="{StaticResource str.ClassFilter.Partial}"
+                       IsVisible="{Binding CountsPartial}"
+                       TextWrapping="Wrap" Foreground="#E0A050" FontSize="11"
+                       Margin="2,0,2,6"/>
+            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
+                        Margin="2,6,2,2">
+              <Button Content="{StaticResource str.ClassFilter.AutoDetect}"
+                      Command="{Binding AutoDetectCommand}"
+                      IsVisible="{Binding HasAutoDetect}"
+                      ToolTip.Tip="{StaticResource str.Tip.ClassFilter.AutoDetect}"
+                      Padding="10,3"/>
+              <Button Content="{StaticResource str.ClassFilter.Clear}"
+                      Command="{Binding ClearCommand}"
+                      IsEnabled="{Binding AnyExcluded}" Padding="10,3"/>
+              <TextBlock Text="{Binding Summary}" Foreground="#888888" FontSize="11"
+                         VerticalAlignment="Center"/>
+            </StackPanel>
+            <ScrollViewer MaxHeight="320" HorizontalScrollBarVisibility="Auto">
+              <ItemsControl ItemsSource="{Binding Facets}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="helpers:ClassFacetRow">
+                    <CheckBox IsChecked="{Binding Picked}" Margin="0,1" Padding="4,0">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="{Binding Display}"
+                                   FontFamily="Consolas, Menlo, monospace" FontSize="12"/>
+                        <TextBlock Text="{Binding NoiseReason}" Foreground="#6A9955"
+                                   FontSize="10" FontStyle="Italic" VerticalAlignment="Center"
+                                   IsVisible="{Binding NoiseReason, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                      </StackPanel>
+                    </CheckBox>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </DockPanel>
+        </Border>
+      </Flyout>
+    </Button.Flyout>
+  </Button>
+</UserControl>

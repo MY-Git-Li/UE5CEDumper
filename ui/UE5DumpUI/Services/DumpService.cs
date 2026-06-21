@@ -1564,6 +1564,41 @@ public sealed class DumpService : IDumpService
         || dt == ValueScanDataType.FName
         || dt == ValueScanDataType.FText;
 
+    // Parse the optional class-noise histogram (begin/refine value+group scan
+    // responses). Empty when absent. Shared by all four parse paths.
+    private static List<ClassCount> ParseClassHistogram(JsonNode? res)
+    {
+        var list = new List<ClassCount>();
+        if (res?["class_histogram"] is JsonArray arr)
+        {
+            foreach (var item in arr)
+            {
+                if (item is JsonObject o)
+                {
+                    list.Add(new ClassCount
+                    {
+                        ClassName = o["class_name"]?.GetValue<string>() ?? "",
+                        Count     = o["count"]?.GetValue<int>() ?? 0,
+                    });
+                }
+            }
+        }
+        return list;
+    }
+
+    // Attach the optional exclude_classes string array to a query request,
+    // omitting it entirely when empty so the common (no-exclude) page stays
+    // byte-identical on the wire. The (JsonNode) cast on string dodges the
+    // generic Add<T> AOT/trim trap (IL2026/IL3050).
+    private static void AttachExcludeClasses(JsonObject req, IReadOnlyList<string>? excludeClasses)
+    {
+        if (excludeClasses == null || excludeClasses.Count == 0) return;
+        var arr = new JsonArray();
+        foreach (var c in excludeClasses)
+            if (!string.IsNullOrEmpty(c)) arr.Add((JsonNode)c);
+        if (arr.Count > 0) req["exclude_classes"] = arr;
+    }
+
     public async Task<ValueScanBeginResult> BeginValueScanAsync(
         ValueScanDataType dataType,
         ValueScanType scanType,
@@ -1650,6 +1685,8 @@ public sealed class DumpService : IDumpService
             ScannedObjects = res["scanned_objects"]?.GetValue<int>() ?? 0,
             DurationMs     = res["duration_ms"]?.GetValue<long>() ?? 0,
             DeadlineHit    = res["deadline_hit"]?.GetValue<bool>() ?? false,
+            ClassHistogram = ParseClassHistogram(res),
+            ClassDistinct  = res["class_distinct"]?.GetValue<int>() ?? 0,
         };
 
         if (res["candidates"] is JsonArray arr)
@@ -1700,6 +1737,8 @@ public sealed class DumpService : IDumpService
             ScanType   = res["scan_type"]?.GetValue<string>() ?? "",
             Total      = res["total"]?.GetValue<int>() ?? 0,
             DurationMs = res["duration_ms"]?.GetValue<long>() ?? 0,
+            ClassHistogram = ParseClassHistogram(res),
+            ClassDistinct  = res["class_distinct"]?.GetValue<int>() ?? 0,
         };
 
         if (res["candidates"] is JsonArray arr)
@@ -1720,6 +1759,7 @@ public sealed class DumpService : IDumpService
         string? filter = null,
         string? sortKey = null,
         bool sortDesc = false,
+        IReadOnlyList<string>? excludeClasses = null,
         CancellationToken ct = default)
     {
         var req = new JsonObject
@@ -1734,6 +1774,7 @@ public sealed class DumpService : IDumpService
         if (!string.IsNullOrEmpty(filter))  req["filter"]    = filter;
         if (!string.IsNullOrEmpty(sortKey)) req["sort_key"]  = sortKey;
         if (sortDesc)                       req["sort_desc"] = true;
+        AttachExcludeClasses(req, excludeClasses);
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
@@ -1878,6 +1919,8 @@ public sealed class DumpService : IDumpService
             ScannedObjects = res["scanned_objects"]?.GetValue<int>() ?? 0,
             DurationMs     = res["duration_ms"]?.GetValue<long>() ?? 0,
             DeadlineHit    = res["deadline_hit"]?.GetValue<bool>() ?? false,
+            ClassHistogram = ParseClassHistogram(res),
+            ClassDistinct  = res["class_distinct"]?.GetValue<int>() ?? 0,
         };
         if (res["candidates"] is JsonArray arr)
             foreach (var item in arr)
@@ -1924,6 +1967,8 @@ public sealed class DumpService : IDumpService
             SessionId  = res["session_id"]?.GetValue<ulong>() ?? sessionId,
             Total      = res["total"]?.GetValue<int>() ?? 0,
             DurationMs = res["duration_ms"]?.GetValue<long>() ?? 0,
+            ClassHistogram = ParseClassHistogram(res),
+            ClassDistinct  = res["class_distinct"]?.GetValue<int>() ?? 0,
         };
         if (res["candidates"] is JsonArray ca)
             foreach (var item in ca)
@@ -1938,6 +1983,7 @@ public sealed class DumpService : IDumpService
         string? filter = null,
         string? sortKey = null,
         bool sortDesc = false,
+        IReadOnlyList<string>? excludeClasses = null,
         CancellationToken ct = default)
     {
         var req = new JsonObject
@@ -1950,6 +1996,7 @@ public sealed class DumpService : IDumpService
         if (!string.IsNullOrEmpty(filter))  req["filter"]    = filter;
         if (!string.IsNullOrEmpty(sortKey)) req["sort_key"]  = sortKey;
         if (sortDesc)                       req["sort_desc"] = true;
+        AttachExcludeClasses(req, excludeClasses);
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
@@ -2116,6 +2163,43 @@ public sealed class DumpService : IDumpService
                     PropertyCount   = obj["property_count"]?.GetValue<int>() ?? 0,
                     PropertiesSize  = obj["properties_size"]?.GetValue<int>() ?? 0,
                     Score           = obj["score"]?.GetValue<int>() ?? 0,
+                });
+            }
+        }
+
+        return result;
+    }
+
+    public async Task<IReadOnlyList<NoiseClassInfo>> DetectNoiseClassesAsync(
+        IReadOnlyList<string> classNames, CancellationToken ct = default)
+    {
+        var result = new List<NoiseClassInfo>();
+        if (classNames == null || classNames.Count == 0) return result;
+
+        var names = new JsonArray();
+        foreach (var n in classNames)
+            if (!string.IsNullOrEmpty(n)) names.Add((JsonNode)n);
+        if (names.Count == 0) return result;
+
+        var req = new JsonObject
+        {
+            ["cmd"] = "detect_noise_classes",
+            ["class_names"] = names,
+        };
+
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        if (res["classes"] is JsonArray arr)
+        {
+            foreach (var item in arr)
+            {
+                if (item is not JsonObject obj) continue;
+                result.Add(new NoiseClassInfo
+                {
+                    ClassName = obj["class_name"]?.GetValue<string>() ?? "",
+                    IsNoise   = obj["is_noise"]?.GetValue<bool>() ?? false,
+                    Reason    = obj["reason"]?.GetValue<string>() ?? "",
                 });
             }
         }
