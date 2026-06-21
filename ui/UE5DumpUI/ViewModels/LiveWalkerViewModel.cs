@@ -3069,23 +3069,100 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         try
         {
             ClearStatus();
-            var symbolName = !string.IsNullOrEmpty(CurrentClassName)
-                ? CurrentClassName.Replace(" ", "_").Replace("-", "_")
-                : "UE5_Symbol";
+            // Sanitize to a valid CE symbol / XML token — container leaves carry
+            // class names like "Array<int>" / "Map<FName, int>" whose < > , would
+            // otherwise corrupt the <Description> XML and the registerSymbol name.
+            var symbolName = SanitizeCeSymbol(CurrentClassName);
 
-            var formattedAddr = AddressHelper.FormatAddress(
-                CurrentAddress, _engineState?.ModuleName, _engineState?.ModuleBase, AddrFormat);
-
-            var xml = CeXmlExportService.GenerateRegisterSymbolXml(symbolName, formattedAddr);
+            var (xml, note) = BuildAaScript(symbolName);
 
             await _platform.CopyToClipboardAsync(xml);
-            _log.Info($"CE AA script copied to clipboard for {CurrentClassName}");
+            StatusText = $"CE AA script copied — {note}";
+            _log.Info($"CE AA script copied for {CurrentClassName} — {note}");
         }
         catch (Exception ex)
         {
             SetError(ex);
             _log.Error("Failed to generate CE AA script", ex);
         }
+    }
+
+    /// <summary>
+    /// Build the "Copy CE AA Script" output. When the live path is rooted at
+    /// GWorld and forward-walkable, emit a RESTART-STABLE script that walks
+    /// GWorld → … → this object at enable time — AOB-anchored when GWorld itself
+    /// came from an AOB scan (UseAobSymbol + a known GWorld AOB), otherwise a
+    /// hardcoded GWorld base the user updates after a restart. Any other path
+    /// keeps the legacy hardcoded absolute address (dies on ASLR, but is all we
+    /// can do off a non-GWorld root). Returns the XML + a one-line status note.
+    /// </summary>
+    private (string xml, string note) BuildAaScript(string symbolName)
+    {
+        var spine = CeXmlExportService.CleanBreadcrumbs(
+            CeXmlExportService.DedupeConsecutiveBreadcrumbs(Breadcrumbs));
+
+        // Gate: rooted at the synthetic GWorld crumb, every later crumb is a real
+        // forward offset (a WorldLevel back-reference recovery hop carries
+        // FieldOffset -1 and cannot be reproduced by a forward walk), and the
+        // spine actually lands on the object we're about to register.
+        bool gworldWalkable =
+            spine.Count > 0
+            && spine[0].FieldName == "GWorld"
+            && spine.Skip(1).All(bc => bc.FieldOffset >= 0)
+            && AddressesEqual(spine[^1].Address, CurrentAddress);
+
+        if (gworldWalkable)
+        {
+            // Respect the AOB checkbox (same condition as Copy CE Field's useAob):
+            // unchecked → hardcoded GWorld base even when an AOB is available.
+            var useAob = UseAobSymbol && !string.IsNullOrEmpty(_engineState?.GWorldAob);
+            if (useAob)
+            {
+                return (CeXmlExportService.GenerateGWorldWalkedSymbolXml(
+                            symbolName, spine, useAob: true,
+                            _engineState!.GWorldAob, _engineState.GWorldAobPos, _engineState.GWorldAobLen,
+                            gworldSlotAddr: ""),
+                        "GWorld AOB walk (restart-stable)");
+            }
+            if (_engineState != null && _engineState.HasGWorld)
+            {
+                return (CeXmlExportService.GenerateGWorldWalkedSymbolXml(
+                            symbolName, spine, useAob: false,
+                            aob: "", aobPos: 0, aobLen: 0,
+                            gworldSlotAddr: _engineState.GWorldAddr),
+                        "GWorld hardcoded-base walk — update the GWorld value after a restart");
+            }
+        }
+
+        // Legacy hardcoded address. Distinguish "root isn't GWorld" from "GWorld
+        // root but the spine can't be forward-walked" (a WorldLevel -1 hop, a
+        // spine that doesn't land on the object, or no resolvable GWorld base) so
+        // the status line isn't misleading.
+        var note = (spine.Count > 0 && spine[0].FieldName == "GWorld")
+            ? "hardcoded address (GWorld path not forward-walkable)"
+            : "hardcoded address (not a GWorld-rooted path)";
+        var formattedAddr = AddressHelper.FormatAddress(
+            CurrentAddress, _engineState?.ModuleName, _engineState?.ModuleBase, AddrFormat);
+        return (CeXmlExportService.GenerateRegisterSymbolXml(symbolName, formattedAddr), note);
+    }
+
+    /// <summary>Compare two CE address strings for equality, tolerant of
+    /// 0x-prefix and hex-digit casing. Returns false if either fails to parse.</summary>
+    private static bool AddressesEqual(string a, string b)
+        => AddressHelper.TryNormalizeAddress(a, null, out var na)
+           && AddressHelper.TryNormalizeAddress(b, null, out var nb)
+           && string.Equals(na, nb, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Reduce a class name to a valid CE symbol / XML token: every char
+    /// that isn't a letter, digit, or underscore becomes '_' (so container names
+    /// like "Array&lt;int&gt;" / "Map&lt;FName, int&gt;" can't corrupt the XML or the
+    /// registerSymbol name). Falls back to "UE5_Symbol" when nothing survives.</summary>
+    private static string SanitizeCeSymbol(string? name)
+    {
+        if (string.IsNullOrEmpty(name)) return "UE5_Symbol";
+        var chars = name.Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '_').ToArray();
+        var s = new string(chars).Trim('_');
+        return string.IsNullOrEmpty(s) ? "UE5_Symbol" : s;
     }
 
     [RelayCommand]

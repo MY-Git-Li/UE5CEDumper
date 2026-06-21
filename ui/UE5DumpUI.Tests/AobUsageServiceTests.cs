@@ -23,7 +23,10 @@ public sealed class MockPlatformService : IPlatformService
     public void ReleaseSingleInstance() { }
     public string GetAppDataPath() => _appDataPath;
     public string GetLogDirectoryPath() => Path.Combine(_appDataPath, "Logs");
-    public Task CopyToClipboardAsync(string text) => Task.CompletedTask;
+
+    /// <summary>Last text passed to <see cref="CopyToClipboardAsync"/> (null until first call).</summary>
+    public string? LastClipboard { get; private set; }
+    public Task CopyToClipboardAsync(string text) { LastClipboard = text; return Task.CompletedTask; }
     public Task RevealInExplorerAsync(string path) => Task.CompletedTask;
     public string GetMachineName() => "TEST-MACHINE";
     public void CloseImeForWindow(IntPtr windowHandle) { }

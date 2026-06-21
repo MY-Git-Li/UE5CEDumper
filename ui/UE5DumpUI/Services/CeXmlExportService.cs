@@ -980,55 +980,9 @@ public static class CeXmlExportService
         sb.AppendLine("if syntaxcheck then return end");
         sb.AppendLine();
 
-        // AOBScanModuleUE helper (idempotent — won't redefine if already loaded)
-        sb.AppendLine("if not AOBScanModuleUE then");
-        sb.AppendLine("  function AOBScanModuleUE(moduleName, signature)");
-        sb.AppendLine("    local baseAddr = nil");
-        sb.AppendLine("    local maxAddr = 0");
-        sb.AppendLine("    local modList");
-        sb.AppendLine("    synchronize(function()");
-        sb.AppendLine("      modList = enumModules()");
-        sb.AppendLine("    end)");
-        sb.AppendLine("    for _, mod in ipairs(modList) do");
-        sb.AppendLine("      if string.lower(mod.Name) == string.lower(moduleName) then");
-        sb.AppendLine("        baseAddr = mod.Address");
-        sb.AppendLine("        maxAddr = baseAddr + mod.Size");
-        sb.AppendLine("        break");
-        sb.AppendLine("      end");
-        sb.AppendLine("    end");
-        sb.AppendLine("    if not baseAddr then return nil end");
-        sb.AppendLine("    local ms = createMemScan()");
-        sb.AppendLine("    synchronize(function()");
-        sb.AppendLine("      ms.firstScan(soExactValue, vtByteArray, nil, signature,");
-        sb.AppendLine("        nil, baseAddr, maxAddr, '+X-C-W', fsmNotAligned, '1', true, true, false, false)");
-        sb.AppendLine("    end)");
-        sb.AppendLine("    ms.waitTillDone()");
-        sb.AppendLine("    local results = createFoundList(ms)");
-        sb.AppendLine("    results.initialize()");
-        sb.AppendLine("    local addr");
-        sb.AppendLine("    synchronize(function()");
-        sb.AppendLine("      if results.getCount() &gt; 0 then");
-        sb.AppendLine("        addr = results[0]");
-        sb.AppendLine("      end");
-        sb.AppendLine("    end)");
-        sb.AppendLine("    results.destroy()");
-        sb.AppendLine("    ms.destroy()");
-        sb.AppendLine("    return addr");
-        sb.AppendLine("  end");
-        sb.AppendLine("end");
-        sb.AppendLine("registerLuaFunctionHighlight('AOBScanModuleUE')");
-        sb.AppendLine();
-
-        // Close lua engine log helper (idempotent)
-        sb.AppendLine("if not closeLuaEngine then");
-        sb.AppendLine("  function closeLuaEngine()");
-        sb.AppendLine("    synchronize(function()");
-        sb.AppendLine("      getLuaEngine().Close()");
-        sb.AppendLine("    end)");
-        sb.AppendLine("  end");
-        sb.AppendLine("end");
-        sb.AppendLine("registerLuaFunctionHighlight('closeLuaEngine')");
-        sb.AppendLine();
+        // Idempotent Lua helpers, shared verbatim with GenerateGWorldWalkedSymbolXml.
+        AppendAobScanModuleUEHelper(sb);
+        AppendCloseLuaEngineHelper(sb);
 
         // AOB entries table
         sb.AppendLine("local AOBs = {");
@@ -1070,6 +1024,210 @@ public static class CeXmlExportService
         sb.AppendLine("closeLuaEngine()");
         sb.AppendLine("{$asm}");
     }
+
+    /// <summary>AOBScanModuleUE Lua helper (idempotent — won't redefine if already
+    /// loaded). Shared verbatim by BuildAobAssemblerScript and the GWorld-walk script.</summary>
+    private static void AppendAobScanModuleUEHelper(StringBuilder sb)
+    {
+        sb.AppendLine("if not AOBScanModuleUE then");
+        sb.AppendLine("  function AOBScanModuleUE(moduleName, signature)");
+        sb.AppendLine("    local baseAddr = nil");
+        sb.AppendLine("    local maxAddr = 0");
+        sb.AppendLine("    local modList");
+        sb.AppendLine("    synchronize(function()");
+        sb.AppendLine("      modList = enumModules()");
+        sb.AppendLine("    end)");
+        sb.AppendLine("    for _, mod in ipairs(modList) do");
+        sb.AppendLine("      if string.lower(mod.Name) == string.lower(moduleName) then");
+        sb.AppendLine("        baseAddr = mod.Address");
+        sb.AppendLine("        maxAddr = baseAddr + mod.Size");
+        sb.AppendLine("        break");
+        sb.AppendLine("      end");
+        sb.AppendLine("    end");
+        sb.AppendLine("    if not baseAddr then return nil end");
+        sb.AppendLine("    local ms = createMemScan()");
+        sb.AppendLine("    synchronize(function()");
+        sb.AppendLine("      ms.firstScan(soExactValue, vtByteArray, nil, signature,");
+        sb.AppendLine("        nil, baseAddr, maxAddr, '+X-C-W', fsmNotAligned, '1', true, true, false, false)");
+        sb.AppendLine("    end)");
+        sb.AppendLine("    ms.waitTillDone()");
+        sb.AppendLine("    local results = createFoundList(ms)");
+        sb.AppendLine("    results.initialize()");
+        sb.AppendLine("    local addr");
+        sb.AppendLine("    synchronize(function()");
+        sb.AppendLine("      if results.getCount() &gt; 0 then");
+        sb.AppendLine("        addr = results[0]");
+        sb.AppendLine("      end");
+        sb.AppendLine("    end)");
+        sb.AppendLine("    results.destroy()");
+        sb.AppendLine("    ms.destroy()");
+        sb.AppendLine("    return addr");
+        sb.AppendLine("  end");
+        sb.AppendLine("end");
+        sb.AppendLine("registerLuaFunctionHighlight('AOBScanModuleUE')");
+        sb.AppendLine();
+    }
+
+    /// <summary>closeLuaEngine Lua helper (idempotent). Shared verbatim by
+    /// BuildAobAssemblerScript and the GWorld-walk script.</summary>
+    private static void AppendCloseLuaEngineHelper(StringBuilder sb)
+    {
+        sb.AppendLine("if not closeLuaEngine then");
+        sb.AppendLine("  function closeLuaEngine()");
+        sb.AppendLine("    synchronize(function()");
+        sb.AppendLine("      getLuaEngine().Close()");
+        sb.AppendLine("    end)");
+        sb.AppendLine("  end");
+        sb.AppendLine("end");
+        sb.AppendLine("registerLuaFunctionHighlight('closeLuaEngine')");
+        sb.AppendLine();
+    }
+
+    /// <summary>
+    /// Generate a RESTART-STABLE Auto Assembler script that registers the current
+    /// object as a CE symbol by WALKING from GWorld down the navigation spine at
+    /// enable time — instead of the hardcoded absolute address that dies on ASLR.
+    ///
+    /// The GWorld slot (&amp;GWorld) is recovered either by an AOB scan
+    /// (<paramref name="useAob"/>=true — survives restart automatically) or
+    /// hardcoded from <paramref name="gworldSlotAddr"/> (useAob=false — the user
+    /// updates that value after a restart). The Lua then deref's *GWorld → UWorld*
+    /// and applies each breadcrumb step (readQword on a pointer-deref crumb, plain
+    /// add on an inline-struct crumb), null-guarding every hop, and finally
+    /// registerSymbol's the resulting leaf address.
+    ///
+    /// The caller MUST pass a GWorld-rooted, forward-walkable spine: breadcrumbs[0]
+    /// is the GWorld root (its offset is unused — the base deref replaces it) and
+    /// every later crumb has FieldOffset &gt;= 0. breadcrumbs[^1] is the object being
+    /// registered. Pointer math uses tonumber(hex,16)/readQword — both proven 64-bit
+    /// in this project's shipped Lua (ue5_freeze_helper, BuildAobAssemblerScript).
+    /// Internal (not public): the sole caller (LiveWalkerViewModel.BuildAaScript)
+    /// enforces the forward-walkable precondition, and the tests reach it via
+    /// InternalsVisibleTo — so the contract can't be bypassed by an outside caller.
+    /// </summary>
+    internal static string GenerateGWorldWalkedSymbolXml(
+        string leafSymbol,
+        IReadOnlyList<BreadcrumbItem> breadcrumbs,
+        bool useAob,
+        string aob, int aobPos, int aobLen,
+        string gworldSlotAddr)
+    {
+        var cleanedBc = CleanBreadcrumbs(breadcrumbs);
+        // Unique GWorld symbol per script so two enabled tables can't unregister
+        // each other's GWorld on [DISABLE] (mirrors GenerateAobWrappedXml's suffix).
+        var gworldSymbol = $"gworld_base_{Random.Shared.Next(0x100000, 0xFFFFFF):X6}";
+
+        var sb = new StringBuilder();
+        sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+        sb.AppendLine("<CheatTable>");
+        sb.AppendLine("  <CheatEntries>");
+        sb.AppendLine("    <CheatEntry>");
+        sb.AppendLine("      <ID>0</ID>");
+        sb.AppendLine($"      <Description>\"{leafSymbol}\"</Description>");
+        sb.AppendLine("      <VariableType>Auto Assembler Script</VariableType>");
+        sb.AppendLine("      <AssemblerScript>");
+
+        // ---- ENABLE ----
+        sb.AppendLine("[ENABLE]");
+        sb.AppendLine("{$lua}");
+        sb.AppendLine("if syntaxcheck then return end");
+        sb.AppendLine();
+        if (useAob) AppendAobScanModuleUEHelper(sb);
+        AppendCloseLuaEngineHelper(sb);
+
+        // ---- Resolve the GWorld slot (&GWorld) into gworld_base + register it ----
+        if (useAob)
+        {
+            sb.AppendLine($"local entry = {{aob='{aob}', pos={aobPos}, aoblen={aobLen}, symbol='{gworldSymbol}'}}");
+            sb.AppendLine("local gworld_base = nil");
+            sb.AppendLine("local aob_addr_str = AOBScanModuleUE(process, entry.aob)");
+            sb.AppendLine("if aob_addr_str then");
+            sb.AppendLine("  local aob_addr_val = tonumber(aob_addr_str, 16)");
+            sb.AppendLine("  local relative_offset = readInteger(aob_addr_val + entry.pos, true)");
+            sb.AppendLine("  gworld_base = relative_offset + aob_addr_val + entry.aoblen");
+            sb.AppendLine("  synchronize(function()");
+            sb.AppendLine("    unregisterSymbol(entry.symbol)");
+            sb.AppendLine("    registerSymbol(entry.symbol, gworld_base)");
+            sb.AppendLine("  end)");
+            sb.AppendLine("  print(string.format('[GWorldWalk] %s = %X', entry.symbol, gworld_base))");
+            sb.AppendLine("else");
+            sb.AppendLine("  print('[GWorldWalk] WARNING: GWorld AOB scan failed')");
+            sb.AppendLine("end");
+        }
+        else
+        {
+            var baseHex = NormalizeHex(gworldSlotAddr);
+            sb.AppendLine($"local gworld_base = tonumber('{baseHex}', 16)   -- GWorld slot pointer; UPDATE THIS after a game restart");
+            sb.AppendLine("synchronize(function()");
+            sb.AppendLine($"  unregisterSymbol('{gworldSymbol}')");
+            sb.AppendLine($"  registerSymbol('{gworldSymbol}', gworld_base)");
+            sb.AppendLine("end)");
+        }
+        sb.AppendLine();
+
+        // ---- Walk the spine: *GWorld -> UWorld* -> ... -> leaf ----
+        // Every hop guards `addr and addr ~= 0`: CE readQword returns NIL (not 0)
+        // on an unreadable page, so a mid-walk null (e.g. a streaming/World-Partition
+        // transition) must short-circuit before `readQword(nil + off)` / `nil + off`
+        // throws — mirrors the shipped idiom in ue5_freeze_helper.lua.
+        sb.AppendLine("local addr = gworld_base and readQword(gworld_base) or 0   -- *GWorld = UWorld*");
+        for (int i = 1; i < cleanedBc.Count; i++)
+        {
+            var step = ProjectBreadcrumb(cleanedBc[i]);
+            var note = SanitizeLuaComment(step.Description);
+            if (step.DerefAfter)
+                sb.AppendLine($"if addr and addr ~= 0 then addr = readQword(addr + 0x{step.Offset:X}) end   -- {note}");
+            else
+                sb.AppendLine($"if addr and addr ~= 0 then addr = addr + 0x{step.Offset:X} end   -- {note} (inline)");
+        }
+        sb.AppendLine();
+
+        // ---- Register the leaf (only when the walk produced a live address) ----
+        sb.AppendLine("if addr and addr ~= 0 then");
+        sb.AppendLine("  synchronize(function()");
+        sb.AppendLine($"    unregisterSymbol('{leafSymbol}')");
+        sb.AppendLine($"    registerSymbol('{leafSymbol}', addr)");
+        sb.AppendLine("  end)");
+        sb.AppendLine($"  print(string.format('[GWorldWalk] {leafSymbol} = %X', addr))");
+        sb.AppendLine("else");
+        sb.AppendLine($"  print('[GWorldWalk] WARNING: null pointer mid-walk; {leafSymbol} not registered')");
+        sb.AppendLine("end");
+        sb.AppendLine("closeLuaEngine()");
+        sb.AppendLine("{$asm}");
+        sb.AppendLine();
+
+        // ---- DISABLE ----
+        sb.AppendLine("[DISABLE]");
+        sb.AppendLine("{$lua}");
+        sb.AppendLine("if syntaxcheck then return end");
+        sb.AppendLine($"unregisterSymbol('{leafSymbol}')");
+        sb.AppendLine($"unregisterSymbol('{gworldSymbol}')");
+        sb.AppendLine("closeLuaEngine()");
+        sb.AppendLine("{$asm}");
+
+        sb.AppendLine("      </AssemblerScript>");
+        sb.AppendLine("    </CheatEntry>");
+        sb.AppendLine("  </CheatEntries>");
+        sb.AppendLine("</CheatTable>");
+        return sb.ToString();
+    }
+
+    /// <summary>Strip a leading 0x/0X and surrounding whitespace, leaving bare hex
+    /// digits for a Lua tonumber(.,16). Returns "0" for empty input.</summary>
+    private static string NormalizeHex(string? addr)
+    {
+        var s = (addr ?? "").Trim();
+        if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) s = s.Substring(2);
+        return string.IsNullOrEmpty(s) ? "0" : s;
+    }
+
+    /// <summary>Make a breadcrumb description safe inside a single-line Lua comment
+    /// embedded in XML: strip newlines (would end the comment early) and XML-escape
+    /// &amp;/&lt;/&gt; (CE un-escapes them back before Lua sees the text).</summary>
+    private static string SanitizeLuaComment(string? s)
+        => string.IsNullOrEmpty(s) ? ""
+            : s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;")
+               .Replace("\r", " ").Replace("\n", " ");
 
     // ========================================
     // Breadcrumb cleaning
