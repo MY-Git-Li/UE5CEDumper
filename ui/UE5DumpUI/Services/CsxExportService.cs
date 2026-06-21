@@ -5,6 +5,20 @@ using UE5DumpUI.Models;
 namespace UE5DumpUI.Services;
 
 /// <summary>
+/// CSX output format version. CE before 7.7 has no bit-switch type, so a bit-field bool is
+/// emitted as a whole Byte with the bit index noted in the description (a series of same-address
+/// bytes). CE 7.7+ supports Vartype="Binary" (BitStart/BitSize), so a bit-field bool becomes a
+/// real single-bit element. Copy CE XML / Copy CE Field already emit Binary; this brings CSX in line.
+/// </summary>
+public enum CsxFormat
+{
+    /// <summary>Legacy: bit-field bools -> Byte + "(bit N, mask 0xNN)" appended to the description.</summary>
+    PreCe77,
+    /// <summary>CE 7.7+: bit-field bools -> Vartype="Binary" with BitStart/BitSize.</summary>
+    Ce77Plus,
+}
+
+/// <summary>
 /// Generates Cheat Engine Structure Dissect (.CSX) export from Live Walker data.
 ///
 /// CSX is the XML format used by CE's "Define new structure" → "Import from file".
@@ -40,7 +54,8 @@ public static class CsxExportService
         string structName,
         IReadOnlyList<LiveFieldValue> fields,
         int arrayLimit = 64,
-        int drilldownDepth = 0)
+        int drilldownDepth = 0,
+        CsxFormat format = CsxFormat.PreCe77)
     {
         // Unified drilldown resolve (docs/ce-export-drilldown-spec.md Phase B): structs
         // (flatten, depth-free) + pointers + CONTAINER ELEMENT VALUES that are structs
@@ -87,11 +102,11 @@ public static class CsxExportService
             if (field.TypeName == "StructProperty")
             {
                 // Flatten struct fields inline with "StructType / FieldName" naming
-                EmitStructPropertyFlattened(sb, field, resolvedStructs, resolvedInstances, drilldownDepth, "      ");
+                EmitStructPropertyFlattened(sb, field, resolvedStructs, resolvedInstances, drilldownDepth, "      ", format);
             }
             else
             {
-                EmitElement(sb, field.Offset, field.Name, field, "      ", resolvedStructs, resolvedInstances, drilldownDepth);
+                EmitElement(sb, field.Offset, field.Name, field, "      ", resolvedStructs, resolvedInstances, drilldownDepth, format);
             }
         }
 
@@ -111,7 +126,8 @@ public static class CsxExportService
         Dictionary<string, List<LiveFieldValue>>? resolvedStructs,
         Dictionary<string, List<LiveFieldValue>>? resolvedInstances,
         int drilldownDepth,
-        string indent)
+        string indent,
+        CsxFormat format)
     {
         // Prefix names each flattened sub-field. For a regular StructProperty this is
         // the struct type (e.g. "FVector / X"); for a synthetic container element value
@@ -133,7 +149,7 @@ public static class CsxExportService
             {
                 var absoluteOffset = structField.Offset + inner.Offset;
                 var description = $"{prefix} / {inner.Name}";
-                EmitElement(sb, absoluteOffset, description, inner, indent, resolvedStructs, resolvedInstances, drilldownDepth);
+                EmitElement(sb, absoluteOffset, description, inner, indent, resolvedStructs, resolvedInstances, drilldownDepth, format);
             }
         }
         else
@@ -154,12 +170,28 @@ public static class CsxExportService
         LiveFieldValue field, string indent,
         Dictionary<string, List<LiveFieldValue>>? resolvedStructs = null,
         Dictionary<string, List<LiveFieldValue>>? resolvedInstances = null,
-        int drilldownDepth = 0)
+        int drilldownDepth = 0,
+        CsxFormat format = CsxFormat.PreCe77)
     {
+        // CE 7.7+ : a bit-field BoolProperty becomes a real Binary element (BitStart/BitSize)
+        // instead of the Pre-7.7 "Byte + (bit N, mask) in description" workaround. Only bit-packed
+        // bools (BoolBitIndex >= 0) qualify; whole-byte bools (BoolBitIndex == -1, mask 0xFF) keep
+        // the Byte path below. The byte address uses the `offset` PARAMETER (already absolute for
+        // flattened-struct / container-element fields — field.Offset would be struct-relative) plus
+        // BoolByteOffset (the byte within the field holding the bit), matching the DLL read/write
+        // path (Ubel/Solitar/Wirbel all read/write at base + Offset + ByteOffset).
+        if (format == CsxFormat.Ce77Plus
+            && field.TypeName == "BoolProperty"
+            && field.BoolBitIndex >= 0)
+        {
+            EmitBinaryBitfieldElement(sb, offset + field.BoolByteOffset, description, field.BoolBitIndex, indent);
+            return;
+        }
+
         var typeInfo = MapCsxType(field.TypeName, field.Size);
         string? childStructure = null;
 
-        // BoolProperty with bitmask: CSX has no bitmask type,
+        // Pre-7.7 BoolProperty with bitmask: CSX has no bitmask type,
         // so we append bit info to the description for the user.
         if (field.TypeName == "BoolProperty" && field.BoolBitIndex >= 0)
         {
@@ -187,7 +219,7 @@ public static class CsxExportService
                     && resolvedInstances.TryGetValue(field.PtrAddress, out var instanceFields))
                 {
                     childStructure = BuildLiveChildStructure(
-                        field.PtrClassName, instanceFields, resolvedStructs, resolvedInstances, drilldownDepth - 1);
+                        field.PtrClassName, instanceFields, resolvedStructs, resolvedInstances, drilldownDepth - 1, format);
                 }
                 // No dummy — CE handles native pointer dereference
                 break;
@@ -208,7 +240,7 @@ public static class CsxExportService
                     if (containerFields is { Count: > 0 })
                     {
                         childStructure = BuildLiveChildStructure(
-                            field.Name, containerFields, resolvedStructs, resolvedInstances, drilldownDepth - 1);
+                            field.Name, containerFields, resolvedStructs, resolvedInstances, drilldownDepth - 1, format);
                     }
                 }
                 break;
@@ -241,6 +273,29 @@ public static class CsxExportService
         {
             sb.AppendLine("/>");
         }
+    }
+
+    /// <summary>
+    /// Emit a CE 7.7+ Binary &lt;Element&gt; for a single bit-field bool. Attribute order matches
+    /// CE's Structure Dissect output (Offset, BitSize, Vartype, BitStart, Bytesize, OffsetHex,
+    /// Description, DisplayMethod). BitSize is always 1 (a UE FBoolProperty is single-bit by
+    /// construction — FieldMask is a validated power-of-2); Bytesize is 1 (the Binary view spans
+    /// the one byte at <paramref name="byteOffset"/>). Self-closing — bit-field bools never carry a
+    /// child structure. <paramref name="byteOffset"/> is the ABSOLUTE byte address (caller already
+    /// added BoolByteOffset), used for both the decimal Offset and the hex OffsetHex.
+    /// </summary>
+    private static void EmitBinaryBitfieldElement(StringBuilder sb, int byteOffset,
+        string description, int bitStart, string indent)
+    {
+        sb.Append(indent)
+          .Append("<Element Offset=\"").Append(byteOffset).Append('"')
+          .Append(" BitSize=\"1\"")
+          .Append(" Vartype=\"Binary\"")
+          .Append(" BitStart=\"").Append(bitStart).Append('"')
+          .Append(" Bytesize=\"1\"")
+          .Append(" OffsetHex=\"").Append(byteOffset.ToString("X8")).Append('"')
+          .Append(" Description=\"").Append(EscapeXml(description)).Append('"')
+          .AppendLine(" DisplayMethod=\"unsigned integer\"/>");
     }
 
     /// <summary>
@@ -324,7 +379,8 @@ public static class CsxExportService
         IReadOnlyList<LiveFieldValue> fields,
         Dictionary<string, List<LiveFieldValue>>? resolvedStructs,
         Dictionary<string, List<LiveFieldValue>> resolvedInstances,
-        int remainingDepth)
+        int remainingDepth,
+        CsxFormat format)
     {
         var name = !string.IsNullOrEmpty(structName) ? structName : "Unknown";
 
@@ -341,9 +397,9 @@ public static class CsxExportService
                 // struct (Map&lt;…,Struct&gt; / Set&lt;Struct&gt;) or a struct member of a drilled
                 // target — flatten its resolved sub-fields inline instead of a raw blob.
                 if (field.TypeName == "StructProperty")
-                    EmitStructPropertyFlattened(sb, field, resolvedStructs, resolvedInstances, remainingDepth, "            ");
+                    EmitStructPropertyFlattened(sb, field, resolvedStructs, resolvedInstances, remainingDepth, "            ", format);
                 else
-                    EmitElement(sb, field.Offset, field.Name, field, "            ", resolvedStructs, resolvedInstances, remainingDepth);
+                    EmitElement(sb, field.Offset, field.Name, field, "            ", resolvedStructs, resolvedInstances, remainingDepth, format);
             }
         }
         else

@@ -2758,8 +2758,15 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // Two thin commands feed the Export CSX dropdown (LiveWalkerPanel.axaml): the legacy
+    // Pre-CE-7.7 byte form and the CE 7.7+ Binary (bit-switch) form. Both delegate to one core.
     [RelayCommand]
-    private async Task ExportCsxAsync()
+    private Task ExportCsxPre77Async() => ExportCsxCoreAsync(CsxFormat.PreCe77);
+
+    [RelayCommand]
+    private Task ExportCsx77Async() => ExportCsxCoreAsync(CsxFormat.Ce77Plus);
+
+    private async Task ExportCsxCoreAsync(CsxFormat format)
     {
         if (string.IsNullOrEmpty(CurrentAddress) || !HasData) return;
 
@@ -2785,7 +2792,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             IsLoading = true;
             StatusText = CsxDrilldownDepth > 0 ? "Resolving struct + pointer fields..." : "Resolving struct fields...";
             var csx = await CsxExportService.GenerateCsxAsync(
-                _dump, structName, Fields, arrayLimit: ArrayLimit, drilldownDepth: CsxDrilldownDepth);
+                _dump, structName, Fields, arrayLimit: ArrayLimit, drilldownDepth: CsxDrilldownDepth, format: format);
 
             // Write to file (overwrite if exists — user already confirmed via dialog)
             await File.WriteAllTextAsync(filePath, csx);
@@ -2794,7 +2801,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             // ArrayLimit) doesn't silently read as complete — same note Copy CE XML shows.
             var limitWarn = BuildContainerLimitWarning(Fields, ArrayLimit);
             StatusText = limitWarn ?? "";
-            _log.Info($"CSX exported to {filePath} for {CurrentClassName}"
+            var formatLabel = format == CsxFormat.Ce77Plus ? "CE 7.7+ Binary" : "Pre-CE 7.7";
+            _log.Info($"CSX ({formatLabel}) exported to {filePath} for {CurrentClassName}"
                 + (limitWarn != null ? $" ({limitWarn})" : ""));
         }
         catch (UnauthorizedAccessException)
