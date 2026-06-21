@@ -596,6 +596,21 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             }
         };
 
+        // Wire Teleport "Locate in GWorld" -> land ON the player pawn (the object
+        // whose Current Pose is shown), same shape as Instance Finder / Related.
+        Teleport.LocateInGWorld += async (addr) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                await LiveWalker.LocateInGWorldAsync(addr, 0, null, stopAtParent: false);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"Teleport LocateInGWorld handler error: {addr}", ex);
+            }
+        };
+
         // Wire Instance Finder / Value Search / Live Walker -> Related Objects:
         // hand the chosen object's address to the Related tab and load its graph.
         async Task OpenRelatedAsync(string addr)

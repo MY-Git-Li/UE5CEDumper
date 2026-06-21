@@ -78,6 +78,11 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>Raised when the user clicks "Locate in GWorld" on the Current Pose
+    /// card — carries the player pawn address. MainWindowViewModel switches to the
+    /// Live Walker and runs LocateInGWorldAsync (goto + select that exact pawn).</summary>
+    public event Action<string>? LocateInGWorld;
+
     /// <summary>Whether global teleport hotkeys can be offered (a hotkey service
     /// was supplied — false in headless tests).</summary>
     public bool CanBindCursorHotkey => _globalHotkeys != null;
@@ -122,6 +127,26 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _poseRoll = "—";
     [ObservableProperty] private string _poseMap = "";
     [ObservableProperty] private string _poseSource = "";
+
+    /// <summary>Resolved pawn address shown on the Current Pose card ("" when
+    /// unavailable) — this is the object the "Locate in GWorld" button targets.</summary>
+    [ObservableProperty] private string _pawnAddrDisplay = "";
+
+    // ── Live velocity / acceleration (from the pawn's CharacterMovement) ───
+    // Polled in the same round-trip as the pose (Feature A). Values are cm/s
+    // (velocity) / cm/s² (acceleration). On pawns with no CharacterMovement
+    // (vehicle / custom movement framework) the readouts show "—" and
+    // MovementNote explains why, rather than a misleading 0.
+    [ObservableProperty] private string _velX = "—";
+    [ObservableProperty] private string _velY = "—";
+    [ObservableProperty] private string _velZ = "—";
+    [ObservableProperty] private string _speed = "—";
+    [ObservableProperty] private string _accX = "—";
+    [ObservableProperty] private string _accY = "—";
+    [ObservableProperty] private string _accZ = "—";
+    /// <summary>Non-empty when velocity/acceleration are unavailable (no
+    /// CharacterMovement) — shown as a small hint under the readout.</summary>
+    [ObservableProperty] private string _movementNote = "";
 
     [ObservableProperty] private bool _autoRefresh;
 
@@ -340,7 +365,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         try
         {
             var p = await _dump.TeleportGetPoseAsync();
-            if (p.Code == TeleportCodes.Ok) ApplyPose(p);
+            if (p.Code == TeleportCodes.Ok) ApplyPoseAndMovement(p);
         }
         catch (Exception ex)
         {
@@ -381,13 +406,51 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 StatusText = TeleportCodes.Describe(p.Code);
                 return;
             }
-            ApplyPose(p);
+            ApplyPoseAndMovement(p);
             StatusText = $"Pose read ({p.Source}).";
         }
         catch (Exception ex)
         {
             SetError(ex);
             _log.Error("Teleport RefreshPose failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Locate the Current Pose's pawn in the Live Walker — reads a fresh
+    /// pose to get the live pawn address, then hands it to the GWorld locator
+    /// (goto + select). One-click: works even without auto-refresh on. NOT gated
+    /// on a C# GWorld-available flag (a stale flag once caused a silent no-op,
+    /// build 1311) — the DLL's find_path is the source of truth and the Live
+    /// Walker reports reachability via its own status (incl. ok_via_level for
+    /// World-Partition / streaming pawns).</summary>
+    [RelayCommand]
+    private async Task LocateCurrentPoseInGWorldAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var p = await _dump.TeleportGetPoseAsync();
+            if (p.Code != TeleportCodes.Ok)
+            {
+                StatusText = TeleportCodes.Describe(p.Code);
+                return;
+            }
+            ApplyPoseAndMovement(p);
+            if (!p.HasPawnAddr)
+            {
+                StatusText = "No pawn to locate (the current pose has no resolved pawn address).";
+                return;
+            }
+            StatusText = $"Locating pawn {p.PawnAddr} in GWorld…";
+            LocateInGWorld?.Invoke(p.PawnAddr);
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport LocateCurrentPoseInGWorld failed", ex);
         }
         finally { IsBusy = false; }
     }
@@ -581,7 +644,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 StatusText = TeleportCodes.Describe(p.Code);
                 return;
             }
-            ApplyPose(p);
+            ApplyPoseAndMovement(p);
             string s = string.Format(CultureInfo.InvariantCulture,
                 "BugItGo {0:0.000} {1:0.000} {2:0.000}", p.X, p.Y, p.Z);
             // Paste straight into the Run field so the user can fire BugItGo
@@ -884,7 +947,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 StatusText = TeleportCodes.Describe(p.Code);
                 return;
             }
-            ApplyPose(p);
+            ApplyPoseAndMovement(p);
             CoordX = p.X; CoordY = p.Y; CoordZ = p.Z;
             CoordPitch = p.Pitch; CoordYaw = p.Yaw; CoordRoll = p.Roll;
             StatusText = "Filled coordinates from the current pose.";
@@ -1283,11 +1346,54 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         PoseSource = p.Source;
     }
 
+    // Pose PLUS the movement/pawn readout — only for teleport_get_pose results,
+    // which alone carry pawn_addr + velocity/acceleration. The incidental
+    // ApplyPose callers (Save marker / directional TP, whose responses lack those
+    // fields) must NOT use this, or they would clobber the readout to
+    // "unavailable" and clear the pawn address on a perfectly normal pawn.
+    private void ApplyPoseAndMovement(TeleportPose p)
+    {
+        ApplyPose(p);
+        PawnAddrDisplay = p.HasPawnAddr ? p.PawnAddr : "";
+        ApplyMovement(p);
+    }
+
+    // Velocity/acceleration off the CharacterMovement (cm/s, cm/s²). When the
+    // pawn has none (HasMovement false), show "—" + an explanatory note rather
+    // than a misleading 0 — see TeleportPose.HasMovement.
+    private void ApplyMovement(TeleportPose p)
+    {
+        if (p.HasMovement)
+        {
+            VelX = p.VelX.ToString("0.0", CultureInfo.InvariantCulture);
+            VelY = p.VelY.ToString("0.0", CultureInfo.InvariantCulture);
+            VelZ = p.VelZ.ToString("0.0", CultureInfo.InvariantCulture);
+            AccX = p.AccX.ToString("0.0", CultureInfo.InvariantCulture);
+            AccY = p.AccY.ToString("0.0", CultureInfo.InvariantCulture);
+            AccZ = p.AccZ.ToString("0.0", CultureInfo.InvariantCulture);
+            Speed = p.Speed.ToString("0.0", CultureInfo.InvariantCulture) + " cm/s";
+            MovementNote = "";
+        }
+        else
+        {
+            VelX = VelY = VelZ = "—";
+            AccX = AccY = AccZ = "—";
+            Speed = "—";
+            MovementNote = "Velocity/acceleration unavailable — this pawn has no "
+                + "CharacterMovement (vehicle / custom movement framework).";
+        }
+    }
+
     private void ClearPoseDisplay()
     {
         PoseX = PoseY = PoseZ = "—";
         PosePitch = PoseYaw = PoseRoll = "—";
         PoseMap = PoseSource = "";
+        PawnAddrDisplay = "";
+        MovementNote = "";
+        VelX = VelY = VelZ = "—";
+        AccX = AccY = AccZ = "—";
+        Speed = "—";
     }
 
     private void ApplyPov(TeleportPov p)

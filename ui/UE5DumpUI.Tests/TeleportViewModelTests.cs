@@ -838,4 +838,147 @@ public class TeleportViewModelTests
         Assert.Equal("", vm.PovSource);
         Assert.Equal("", vm.PovDelta);
     }
+
+    // ── Velocity / acceleration readout + Locate in GWorld ─────────────
+
+    [Fact]
+    public async Task RefreshPose_populates_velocity_when_movement_present()
+    {
+        var fake = new FakeDumpService
+        {
+            NextPose = new()
+            {
+                Code = 0, X = 1, Y = 2, Z = 3, Map = "W", Source = "raw",
+                PawnAddr = "0x1234", HasMovement = true,
+                VelX = 100, VelY = 0, VelZ = -50, Speed = 111.8,
+                AccX = 10, AccY = 20, AccZ = 0,
+            },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.RefreshPoseCommand.ExecuteAsync(null);
+
+        Assert.Equal("100.0", vm.VelX);
+        Assert.Equal("-50.0", vm.VelZ);
+        Assert.Equal("10.0", vm.AccX);
+        Assert.Contains("cm/s", vm.Speed);
+        Assert.Equal("", vm.MovementNote);            // available → no note
+        Assert.Equal("0x1234", vm.PawnAddrDisplay);
+    }
+
+    [Fact]
+    public async Task RefreshPose_marks_velocity_unavailable_without_movement()
+    {
+        var fake = new FakeDumpService
+        {
+            NextPose = new() { Code = 0, PawnAddr = "0xABC", HasMovement = false },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.RefreshPoseCommand.ExecuteAsync(null);
+
+        Assert.Equal("—", vm.VelX);
+        Assert.Equal("—", vm.Speed);
+        Assert.Equal("—", vm.AccZ);
+        Assert.Contains("unavailable", vm.MovementNote, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("0xABC", vm.PawnAddrDisplay);    // pawn addr still shown
+    }
+
+    [Fact]
+    public async Task RefreshPose_error_clears_velocity_and_pawn()
+    {
+        var fake = new FakeDumpService
+        {
+            NextPose = new() { Code = 0, PawnAddr = "0xAAA", HasMovement = true, VelX = 5, Speed = 5 },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        await vm.RefreshPoseCommand.ExecuteAsync(null);
+        Assert.Equal("5.0", vm.VelX);                 // populated
+        Assert.Equal("0xAAA", vm.PawnAddrDisplay);
+
+        fake.NextPose = new() { Code = TeleportCodes.NoPawn };
+        await vm.RefreshPoseCommand.ExecuteAsync(null);
+
+        Assert.Equal("—", vm.VelX);                   // cleared on error
+        Assert.Equal("", vm.PawnAddrDisplay);
+        Assert.Equal("", vm.MovementNote);
+    }
+
+    [Fact]
+    public async Task LocateCurrentPose_fires_event_with_pawn_addr()
+    {
+        var fake = new FakeDumpService
+        {
+            NextPose = new() { Code = 0, PawnAddr = "0xDEAD", HasMovement = true },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        string? located = null;
+        vm.LocateInGWorld += a => located = a;
+
+        await vm.LocateCurrentPoseInGWorldCommand.ExecuteAsync(null);
+
+        Assert.Equal("0xDEAD", located);
+        Assert.Equal(1, fake.GetPoseCalls);           // reads a fresh pose first
+        Assert.Equal("0xDEAD", vm.PawnAddrDisplay);   // display updated too
+    }
+
+    [Fact]
+    public async Task LocateCurrentPose_no_pawn_addr_does_not_fire()
+    {
+        var fake = new FakeDumpService
+        {
+            NextPose = new() { Code = 0, PawnAddr = "0x0" },   // unresolved pawn
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        bool fired = false;
+        vm.LocateInGWorld += _ => fired = true;
+
+        await vm.LocateCurrentPoseInGWorldCommand.ExecuteAsync(null);
+
+        Assert.False(fired);
+        Assert.Contains("no pawn", vm.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LocateCurrentPose_error_code_shows_hint_without_firing()
+    {
+        var fake = new FakeDumpService { NextPose = new() { Code = TeleportCodes.NoPawn } };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        bool fired = false;
+        vm.LocateInGWorld += _ => fired = true;
+
+        await vm.LocateCurrentPoseInGWorldCommand.ExecuteAsync(null);
+
+        Assert.False(fired);
+        Assert.Contains("pawn", vm.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LocateCurrentPose_noop_when_disconnected()
+    {
+        var fake = new FakeDumpService { NextPose = new() { Code = 0, PawnAddr = "0x1" } };
+        var vm = CreateVm(fake, out _);   // not connected
+        bool fired = false;
+        vm.LocateInGWorld += _ => fired = true;
+
+        await vm.LocateCurrentPoseInGWorldCommand.ExecuteAsync(null);
+
+        Assert.False(fired);
+        Assert.Equal(0, fake.GetPoseCalls);
+    }
+
+    [Fact]
+    public void TeleportPose_HasPawnAddr_rejects_null_and_zero()
+    {
+        Assert.False(new TeleportPose { PawnAddr = "" }.HasPawnAddr);
+        Assert.False(new TeleportPose { PawnAddr = "0x0" }.HasPawnAddr);
+        Assert.False(new TeleportPose { PawnAddr = "0X0" }.HasPawnAddr);
+        Assert.True(new TeleportPose { PawnAddr = "0x7FF00010" }.HasPawnAddr);
+    }
 }

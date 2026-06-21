@@ -3845,7 +3845,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             Wirbel::Pose p{};
             char map[Grimoire::TELEPORT_MAPNAME_CAP] = {};
             uint8_t source = 0;
-            int32_t code = Wirbel::GetPose(p, map, sizeof(map), &source);
+            Wirbel::MovementState mv{};
+            int32_t code = Wirbel::GetPoseAndMovement(p, map, sizeof(map), &source, mv);
             json data;
             data["code"] = code;
             if (code == 0) {
@@ -3853,6 +3854,19 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 data["pitch"] = p.Pitch; data["yaw"] = p.Yaw; data["roll"] = p.Roll;
                 data["map"] = map;
                 data["source"] = (source == 1) ? "invoke" : "raw";
+                // Feature B: the resolved pawn — for the "Locate in GWorld" handoff
+                // (hex string, matching find_path's object_addr / get_current_target's
+                // player_pawn). "0x0" when unresolved.
+                data["pawn_addr"] = Renge::AddrToStr(mv.PawnAddr);
+                // Feature A: live velocity/acceleration off the CharacterMovement.
+                // has_movement=false on vehicle / custom-framework pawns (no CMC):
+                // the vel/acc fields are then absent and the UI shows "unavailable".
+                data["has_movement"] = mv.HasMovement;
+                if (mv.HasMovement) {
+                    data["vel_x"] = mv.VelX; data["vel_y"] = mv.VelY; data["vel_z"] = mv.VelZ;
+                    data["acc_x"] = mv.AccX; data["acc_y"] = mv.AccY; data["acc_z"] = mv.AccZ;
+                    data["speed"] = mv.Speed;
+                }
             }
             return Renge::MakeResponse(id, data).dump();
         }

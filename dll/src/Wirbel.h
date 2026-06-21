@@ -60,12 +60,37 @@ struct Pov {
     uint8_t Source = 0; // 0 = invoke getters (GetCameraLocation/Rotation/FOV)
 };
 
+// Live movement state read alongside the pose in a single resolution pass.
+// PawnAddr is the resolved pawn object (for a "Locate in GWorld" handoff — the
+// pawn whose coordinates GetPose reports). Velocity/Acceleration come straight
+// off the pawn's UCharacterMovementComponent (UMovementComponent::Velocity is
+// the authoritative live velocity; UCharacterMovementComponent::Acceleration is
+// CMC-only) — both reflected UPROPERTY FVectors, widened to double like Pose.
+// HasMovement is false when the pawn has NO CharacterMovement (vehicle / custom
+// movement framework): velocity/acceleration stay zero and the UI shows
+// "unavailable" rather than a misleading 0. Speed = |Velocity| (cm/s).
+struct MovementState {
+    uintptr_t PawnAddr = 0;
+    bool HasMovement = false;
+    double VelX = 0, VelY = 0, VelZ = 0;
+    double AccX = 0, AccY = 0, AccZ = 0;
+    double Speed = 0;
+};
+
 // Read the current pawn pose (location from RootComponent.RelativeLocation,
 // rotation from Controller.ControlRotation). When the pawn's root is
 // attached (vehicle/platform), falls back to invoking K2_GetActorLocation
 // for world-space coordinates. outSource (optional): 0 = raw read,
 // 1 = invoke path.
 int32_t GetPose(Pose& out, char* mapName, int32_t mapNameCap, uint8_t* outSource);
+
+// Read the pose AND the live movement state (pawn address + velocity /
+// acceleration off the CharacterMovement) in ONE resolution pass — used by the
+// Teleport tab to surface current speed and to hand the pawn off to "Locate in
+// GWorld". `move` is filled only when the pose read succeeds (TP_OK); its
+// HasMovement flag tells the caller whether velocity/acceleration are valid.
+int32_t GetPoseAndMovement(Pose& out, char* mapName, int32_t mapNameCap,
+                           uint8_t* outSource, MovementState& move);
 
 // Read the current camera POV (PlayerController.PlayerCameraManager): world
 // location, rotation, and FOV via the engine's BlueprintCallable getters

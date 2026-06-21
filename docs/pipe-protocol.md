@@ -1239,7 +1239,12 @@ fallback (game may snap back). Codes (§8): 0 OK, -1 not-init, -2 no controller,
 
 ```jsonc
 { "cmd": "teleport_get_pose" }
-→ { "x":…,"y":…,"z":…,"pitch":…,"yaw":…,"roll":…,"map":"Map","source":"raw|invoke","code":0 }
+→ { "x":…,"y":…,"z":…,"pitch":…,"yaw":…,"roll":…,"map":"Map","source":"raw|invoke","code":0,
+//   pawn_addr = the resolved pawn (hex str, "0x0" if none) for the "Locate in GWorld" handoff.
+//   has_movement = pawn has a CharacterMovement; when true, the live vel_/acc_/speed fields are
+//   present (velocity cm/s, acceleration cm/s²). Absent on vehicle / custom-framework pawns.
+    "pawn_addr":"0x…", "has_movement":true,
+    "vel_x":…,"vel_y":…,"vel_z":…, "acc_x":…,"acc_y":…,"acc_z":…, "speed":… }
 
 { "cmd": "teleport_save_marker", "slot": 0 }
 → { "slot":0,"x":…,…,"map":"…","code":0 }
