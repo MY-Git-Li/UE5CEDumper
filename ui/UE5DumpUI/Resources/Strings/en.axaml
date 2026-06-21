@@ -852,7 +852,7 @@
     <sys:String x:Key="str.Tip.LiveWalker.CollapseChain">Collapse the multi-level GWorld-to-target pointer hops into a single CE multi-level-pointer entry (keeps base, one merged spine node, and the target field with its drill-down). Applies to Copy CE XML and Copy CE Field only.</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.ExportCsx">Export CE Structure Dissect script (.csx)</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.ExportHeader">Export C++ SDK header (.h)</sys:String>
-    <sys:String x:Key="str.Tip.LiveWalker.CeAA">Generate CE Auto Assembler script to clipboard</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.CeAA">Copy an Auto Assembler script that registers this object as a CE symbol. On a GWorld-rooted path it emits a RESTART-STABLE script: it walks GWorld → … → this object at enable time (Lua), so it keeps working after the game restarts — AOB-anchored when GWorld came from an AOB scan (AOB symbol ticked), or with a hardcoded GWorld base you update after a restart. Off a non-GWorld path it falls back to a hardcoded absolute address (breaks on restart).</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.GuessWhat">Fill gaps between known fields with guessed data types (pointer, float, int, etc.)</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.CopyFieldAddr">Copy field absolute address</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.CopyFieldName">Copy field name to clipboard</sys:String>
