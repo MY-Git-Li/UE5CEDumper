@@ -231,6 +231,7 @@ public interface IDumpService
         string? filter = null,
         string? sortKey = null,
         bool sortDesc = false,
+        IReadOnlyList<string>? excludeClasses = null,
         CancellationToken ct = default);
 
     Task EndValueScanAsync(ulong sessionId, CancellationToken ct = default);
@@ -264,6 +265,7 @@ public interface IDumpService
         string? filter = null,
         string? sortKey = null,
         bool sortDesc = false,
+        IReadOnlyList<string>? excludeClasses = null,
         CancellationToken ct = default);
 
     Task EndGroupScanAsync(ulong sessionId, CancellationToken ct = default);

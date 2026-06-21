@@ -1255,12 +1255,19 @@ public class ValueSearchTests
             return Task.FromResult(NextRefineResult);
         }
 
+        /// <summary>Most recent exclude_classes passed to QueryCandidatesAsync
+        /// (null when the caller passed none) — lets tests assert the class
+        /// filter threads its excluded set into the server window query.</summary>
+        public IReadOnlyList<string>? LastQueryExclude { get; private set; }
+
         public override Task<ValueScanWindowResult> QueryCandidatesAsync(
             ulong sessionId, int offset, int limit,
             string? filter = null, string? sortKey = null, bool sortDesc = false,
+            IReadOnlyList<string>? excludeClasses = null,
             CancellationToken ct = default)
         {
             Queries.Add((sessionId, offset, limit, filter, sortKey, sortDesc));
+            LastQueryExclude = excludeClasses;
             return Task.FromResult(NextWindowResult);
         }
 
@@ -1297,11 +1304,17 @@ public class ValueSearchTests
             return Task.FromResult(NextGroupRefineResult);
         }
 
+        public IReadOnlyList<string>? LastGroupQueryExclude { get; private set; }
+
         public override Task<GroupScanWindowResult> QueryGroupCandidatesAsync(
             ulong sessionId, int offset, int limit,
             string? filter = null, string? sortKey = null, bool sortDesc = false,
+            IReadOnlyList<string>? excludeClasses = null,
             CancellationToken ct = default)
-            => Task.FromResult(NextGroupWindowResult);
+        {
+            LastGroupQueryExclude = excludeClasses;
+            return Task.FromResult(NextGroupWindowResult);
+        }
 
         public override Task EndGroupScanAsync(ulong sessionId, CancellationToken ct = default)
         {
@@ -2171,6 +2184,193 @@ public class ValueSearchTests
         Assert.False(captured!.ContainsKey("filter"));
         Assert.False(captured.ContainsKey("sort_key"));
         Assert.False(captured.ContainsKey("sort_desc"));
+        Assert.False(captured.ContainsKey("exclude_classes"));
+    }
+
+    // --- P2: class-noise filter (server-side histogram + exclude_classes) ---
+
+    [Fact]
+    public async Task QueryCandidatesAsync_AttachesExcludeClasses()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject { ["id"] = req["id"]?.GetValue<int>() ?? 0, ["ok"] = true, ["candidates"] = new JsonArray() };
+        });
+
+        await svc.QueryCandidatesAsync(1UL, 0, 1000,
+            excludeClasses: new[] { "WidgetBlueprintGeneratedClass", "SoundCue" },
+            ct: TestContext.Current.CancellationToken);
+
+        var arr = captured!["exclude_classes"] as JsonArray;
+        Assert.NotNull(arr);
+        Assert.Equal(2, arr!.Count);
+        Assert.Equal("WidgetBlueprintGeneratedClass", arr[0]?.GetValue<string>());
+        Assert.Equal("SoundCue", arr[1]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task QueryCandidatesAsync_OmitsExcludeWhenEmpty()
+    {
+        var svc = MakeService(out var pipe);
+        JsonObject? captured = null;
+        pipe.SetHandler(req =>
+        {
+            captured = (JsonObject)req.DeepClone();
+            return new JsonObject { ["id"] = req["id"]?.GetValue<int>() ?? 0, ["ok"] = true, ["candidates"] = new JsonArray() };
+        });
+
+        await svc.QueryCandidatesAsync(1UL, 0, 1000,
+            excludeClasses: System.Array.Empty<string>(), ct: TestContext.Current.CancellationToken);
+
+        Assert.False(captured!.ContainsKey("exclude_classes"));
+    }
+
+    [Fact]
+    public async Task BeginValueScanAsync_ParsesClassHistogram()
+    {
+        var svc = MakeService(out var pipe);
+        pipe.SetHandler(req => new JsonObject
+        {
+            ["id"]             = req["id"]?.GetValue<int>() ?? 0,
+            ["ok"]             = true,
+            ["session_id"]     = 3UL,
+            ["data_type"]      = "Int32",
+            ["total"]          = 100,
+            ["class_distinct"] = 7,
+            ["class_histogram"] = new JsonArray
+            {
+                new JsonObject { ["class_name"] = "WidgetBlueprintGeneratedClass", ["count"] = 60 },
+                new JsonObject { ["class_name"] = "BP_Pawn_C", ["count"] = 40 },
+            },
+            ["candidates"] = new JsonArray(),
+        });
+
+        var res = await svc.BeginValueScanAsync(
+            ValueScanDataType.Int32, ValueScanType.Exact, "1",
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(7, res.ClassDistinct);
+        Assert.Equal(2, res.ClassHistogram.Count);
+        Assert.Equal("WidgetBlueprintGeneratedClass", res.ClassHistogram[0].ClassName);
+        Assert.Equal(60, res.ClassHistogram[0].Count);
+    }
+
+    [Fact]
+    public async Task FirstScan_PopulatesClassFilterFromHistogram()
+    {
+        var (vm, fake) = MakeVm();
+        fake.NextBeginResult = new ValueScanBeginResult
+        {
+            SessionId = 1UL, DataType = "Int32", Total = 100, ClassDistinct = 2,
+            ClassHistogram = { new ClassCount { ClassName = "Widget", Count = 60 },
+                               new ClassCount { ClassName = "Pawn",   Count = 40 } },
+            Candidates = { new ValueCandidate { Value = "1" } },
+        };
+        vm.SelectedDataType = ValueScanDataType.Int32;
+        vm.SelectedScanType = ValueScanType.Exact;
+        vm.Value = "1";
+
+        await vm.FirstScanCommand.ExecuteAsync(null);
+
+        Assert.True(vm.ClassFilter.HasFacets);
+        Assert.Equal(2, vm.ClassFilter.Facets.Count);
+        Assert.Equal("Widget", vm.ClassFilter.Facets[0].ClassName);
+        Assert.Equal(60, vm.ClassFilter.Facets[0].HitCount);
+    }
+
+    [Fact]
+    public async Task TogglingClassFilter_QueriesServer_WithExcludeClasses()
+    {
+        var (vm, fake) = MakeVm();
+        fake.NextBeginResult = new ValueScanBeginResult
+        {
+            SessionId = 1UL, DataType = "Int32", Total = 100, ClassDistinct = 2,
+            ClassHistogram = { new ClassCount { ClassName = "Widget", Count = 60 },
+                               new ClassCount { ClassName = "Pawn",   Count = 40 } },
+            Candidates = { new ValueCandidate { Value = "1" } },
+        };
+        fake.NextWindowResult = new ValueScanWindowResult { SessionId = 1UL, Total = 100, FilteredTotal = 40 };
+        vm.SelectedDataType = ValueScanDataType.Int32;
+        vm.SelectedScanType = ValueScanType.Exact;
+        vm.Value = "1";
+        await vm.FirstScanCommand.ExecuteAsync(null);
+
+        // Tick "Widget" -> the helper re-runs the window query with the exclude set.
+        vm.ClassFilter.Facets.Single(r => r.ClassName == "Widget").Picked = true;
+        await Task.Yield();
+
+        Assert.NotNull(fake.LastQueryExclude);
+        Assert.Contains("Widget", fake.LastQueryExclude!);
+    }
+
+    [Fact]
+    public async Task FirstScan_AfterExcludingClass_ResetsFilterForNewSession()
+    {
+        var (vm, fake) = MakeVm();
+        fake.NextBeginResult = new ValueScanBeginResult
+        {
+            SessionId = 1UL, DataType = "Int32", Total = 100, ClassDistinct = 2,
+            ClassHistogram = { new ClassCount { ClassName = "Widget", Count = 60 },
+                               new ClassCount { ClassName = "Pawn",   Count = 40 } },
+            Candidates = { new ValueCandidate { Value = "1" } },
+        };
+        fake.NextWindowResult = new ValueScanWindowResult { SessionId = 1UL, Total = 100, FilteredTotal = 40 };
+        vm.SelectedDataType = ValueScanDataType.Int32;
+        vm.SelectedScanType = ValueScanType.Exact;
+        vm.Value = "1";
+        await vm.FirstScanCommand.ExecuteAsync(null);
+        vm.ClassFilter.Facets.Single(r => r.ClassName == "Widget").Picked = true;
+        await Task.Yield();
+        Assert.True(vm.ClassFilter.AnyExcluded);
+        int queriesBefore = fake.Queries.Count;
+
+        // A fresh First Scan (NO New Scan) for a different value: the retired
+        // session must NOT leak its exclusions into the new one.
+        fake.NextBeginResult = new ValueScanBeginResult
+        {
+            SessionId = 2UL, DataType = "Int32", Total = 5, ClassDistinct = 1,
+            ClassHistogram = { new ClassCount { ClassName = "Orc", Count = 5 } },
+            Candidates = { new ValueCandidate { Value = "2" } },
+        };
+        vm.Value = "2";
+        await vm.FirstScanCommand.ExecuteAsync(null);
+
+        Assert.False(vm.ClassFilter.AnyExcluded);                       // stale exclusion cleared
+        Assert.Equal(new[] { "Orc" }, vm.ClassFilter.Facets.Select(f => f.ClassName));
+        Assert.Equal(queriesBefore, fake.Queries.Count);               // default view -> inline page, no stale exclude query
+    }
+
+    [Fact]
+    public async Task GroupFirstScan_AfterExcludingClass_ResetsFilterForNewSession()
+    {
+        var (vm, fake) = MakeVm();
+        fake.NextGroupBeginResult = new GroupScanBeginResult
+        {
+            SessionId = 1UL, Total = 10, ClassDistinct = 1,
+            ClassHistogram = { new ClassCount { ClassName = "WidgetX", Count = 10 } },
+        };
+        fake.NextGroupWindowResult = new GroupScanWindowResult { SessionId = 1UL, Total = 10, FilteredTotal = 0 };
+        vm.GroupInputs[0].Value = "24";
+        vm.GroupInputs[1].Value = "10";
+        await vm.GroupFirstScanCommand.ExecuteAsync(null);
+        vm.GroupClassFilter.Facets.Single(r => r.ClassName == "WidgetX").Picked = true;
+        await Task.Yield();
+        Assert.True(vm.GroupClassFilter.AnyExcluded);
+
+        fake.NextGroupBeginResult = new GroupScanBeginResult
+        {
+            SessionId = 2UL, Total = 3, ClassDistinct = 1,
+            ClassHistogram = { new ClassCount { ClassName = "BP_Boss_C", Count = 3 } },
+        };
+        vm.GroupInputs[0].Value = "1";
+        vm.GroupInputs[1].Value = "2";
+        await vm.GroupFirstScanCommand.ExecuteAsync(null);
+
+        Assert.False(vm.GroupClassFilter.AnyExcluded);
+        Assert.Equal(new[] { "BP_Boss_C" }, vm.GroupClassFilter.Facets.Select(f => f.ClassName));
     }
 
     private static async Task<(ValueSearchViewModel vm, FakeDumpService fake)> StartSessionAsync(int total, int inlineCount = 1)

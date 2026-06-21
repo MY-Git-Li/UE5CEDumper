@@ -86,6 +86,14 @@ public sealed partial class ClassFacetFilter : ObservableObject
     public bool IsExcluded(string? className)
         => _excluded.Count > 0 && !string.IsNullOrEmpty(className) && _excluded.Contains(className);
 
+    /// <summary>Snapshot of the currently-hidden class names. For SERVER-SIDE
+    /// owners (Value Search): pass this to the DLL window query as
+    /// <c>exclude_classes</c> so the histogram-driven exclusion is applied over
+    /// the full session, not just the loaded page. A fresh array each call so an
+    /// in-flight async query holds a stable copy.</summary>
+    public IReadOnlyList<string> ExcludedClasses
+        => _excluded.Count == 0 ? System.Array.Empty<string>() : _excluded.ToArray();
+
     /// <summary>
     /// Rebuild the Top-N histogram from the current FULL result set. Preserves
     /// the excluded set (re-ticks rebuilt rows that are still hidden). Does NOT
@@ -105,23 +113,49 @@ public sealed partial class ClassFacetFilter : ObservableObject
             counts[cn] = counts.TryGetValue(cn, out var n) ? n + 1 : 1;
         }
 
+        var top = counts
+            .OrderByDescending(k => k.Value)
+            .ThenBy(k => k.Key, StringComparer.Ordinal)
+            .Take(topN)
+            .Select(kv => (kv.Key, kv.Value));
+        PopulateFacets(top, counts.Count, countsPartial);
+    }
+
+    /// <summary>
+    /// Rebuild from a PRE-COUNTED histogram (server-side path: the DLL owns the
+    /// full windowed candidate set, so it computes the class counts over the
+    /// whole session and sends back the Top-N). <paramref name="counts"/> is
+    /// expected already sorted (count desc); <paramref name="distinctTotal"/> is
+    /// the true number of distinct classes (≥ counts.Count when the server
+    /// capped). Preserves the excluded set like <see cref="Rebuild"/>.
+    /// </summary>
+    public void RebuildFromCounts(IEnumerable<(string className, int count)> counts,
+                                  int distinctTotal, bool countsPartial = false)
+    {
+        var list = counts.Where(c => !string.IsNullOrEmpty(c.className)).ToList();
+        PopulateFacets(list, Math.Max(distinctTotal, list.Count), countsPartial);
+    }
+
+    // Shared facet (re)population. `top` is the already-sorted, already-capped
+    // (className, count) sequence; `distinctTotal` is the full distinct-class
+    // count (may exceed top.Count when capped).
+    private void PopulateFacets(IEnumerable<(string className, int count)> top,
+                                int distinctTotal, bool countsPartial)
+    {
         _suppress = true;
         Facets.Clear();
-        foreach (var kv in counts
-                     .OrderByDescending(k => k.Value)
-                     .ThenBy(k => k.Key, StringComparer.Ordinal)
-                     .Take(topN))
+        foreach (var (className, count) in top)
         {
             Facets.Add(new ClassFacetRow(this)
             {
-                ClassName = kv.Key,
-                HitCount  = kv.Value,
-                Picked    = _excluded.Contains(kv.Key),
+                ClassName = className,
+                HitCount  = count,
+                Picked    = _excluded.Contains(className),
             });
         }
         _suppress = false;
 
-        DistinctCount = counts.Count;
+        DistinctCount = distinctTotal;
         CountsPartial = countsPartial;
         HasFacets     = Facets.Count > 0;
         ExcludedCount = _excluded.Count;

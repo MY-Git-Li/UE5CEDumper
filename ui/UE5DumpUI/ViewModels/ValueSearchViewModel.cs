@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
+using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 
 namespace UE5DumpUI.ViewModels;
@@ -301,7 +303,8 @@ public partial class ValueSearchViewModel : ViewModelBase
     private bool IsDefaultView =>
         string.IsNullOrEmpty(FilterText)
         && (string.IsNullOrEmpty(_sortKey) || _sortKey == "scan")
-        && !_sortDesc;
+        && !_sortDesc
+        && !ClassFilter.AnyExcluded;   // class exclusion needs the server window path
 
     /// <summary>After a First/Next scan: adopt <paramref name="total"/> and
     /// show window 0. When the view is default (no filter, scan order) the
@@ -338,7 +341,7 @@ public partial class ValueSearchViewModel : ViewModelBase
                 SessionId, offset, PageSize,
                 string.IsNullOrEmpty(FilterText) ? null : FilterText,
                 string.IsNullOrEmpty(_sortKey) ? null : _sortKey,
-                _sortDesc, cts.Token);
+                _sortDesc, ClassFilter.ExcludedClasses, cts.Token);
             Total = w.Total;
             FilteredTotal = w.FilteredTotal;
             if (reset)
@@ -586,12 +589,25 @@ public partial class ValueSearchViewModel : ViewModelBase
     /// <summary>True when GWorld is available — gates the per-row "Locate in GWorld" button.</summary>
     [ObservableProperty] private bool _isGWorldAvailable;
 
+    /// <summary>Server-side class-noise filter for SINGLE mode. Unlike the
+    /// client-side panels, the candidate set is windowed in the DLL — so the
+    /// histogram comes from the begin/refine response and ticking re-queries the
+    /// window with an <c>exclude_classes</c> list. Ticking triggers a server
+    /// window reload (debounce-free; the DLL filter is fast).</summary>
+    public ClassFacetFilter ClassFilter { get; }
+
+    /// <summary>Server-side class-noise filter for GROUP mode (buckets on the
+    /// candidate's object-level class).</summary>
+    public ClassFacetFilter GroupClassFilter { get; }
+
     public ValueSearchViewModel(IDumpService dump, ILoggingService log)
     {
         _dump = dump;
         _log  = log;
         _selectedSortOption = SortOptions[0];  // scan order
         _selectedGroupSortOption = GroupSortOptions[0];  // scan order (group mode)
+        ClassFilter = new ClassFacetFilter(() => { if (HasSession) _ = LoadWindowAsync(reset: true); });
+        GroupClassFilter = new ClassFacetFilter(() => { if (HasGroupSession) _ = LoadGroupWindowAsync(reset: true); });
     }
 
     public void SetEngineState(EngineState state)
@@ -654,13 +670,19 @@ public partial class ValueSearchViewModel : ViewModelBase
                 NativeCScan, NewestFirst, PageSize, ScanTimeoutSeconds * 1000, cts.Token);
 
             SessionId = result.SessionId;
+            // Populate the class-noise picker from the server histogram BEFORE
+            // applying the window (ApplyScanResultAsync consults ClassFilter via
+            // IsDefaultView). countsPartial when the scan hit its deadline / cap.
+            ClassFilter.RebuildFromCounts(
+                result.ClassHistogram.Select(c => (c.ClassName, c.Count)),
+                result.ClassDistinct, countsPartial: result.DeadlineHit);
             await ApplyScanResultAsync(result.Total, result.Candidates);
 
             var summary = $"First Scan: {result.Total} candidates in {result.DurationMs} ms " +
                           $"(scanned {result.ScannedObjects} objects, " +
                           $"{result.ScannedClasses} classes with matching fields)";
             if (result.DeadlineHit)
-                summary += $"  ⚠ scan truncated ({ScanTimeoutSeconds}s deadline) — raise the Timeout slider or narrow the predicate";
+                summary += $"  ⚠ truncated ({ScanTimeoutSeconds}s deadline / result cap) — raise the Timeout slider or narrow the predicate";
             StatusText = summary;
         }
         catch (OperationCanceledException)
@@ -711,6 +733,10 @@ public partial class ValueSearchViewModel : ViewModelBase
                 SelectedScanType == ValueScanType.Between ? Value2 : null,
                 effTol, effCase, PageSize, cts.Token);
 
+            // Refine prunes the existing set (no re-scan), so the histogram is exact.
+            ClassFilter.RebuildFromCounts(
+                result.ClassHistogram.Select(c => (c.ClassName, c.Count)),
+                result.ClassDistinct);
             await ApplyScanResultAsync(result.Total, result.Candidates);
 
             StatusText = $"Next Scan ({SelectedScanType}): {result.Total} surviving candidates " +
@@ -741,6 +767,7 @@ public partial class ValueSearchViewModel : ViewModelBase
         FilteredTotal = 0;
         _sortKey = "";
         _sortDesc = false;
+        // ClassFilter is reset by EndSessionIfAnyAsync above (single source of truth).
         UpdateWindowStatus();
         StatusText = "Session ended. Configure a new scan and click First Scan.";
         ErrorMessage = "";
@@ -839,6 +866,12 @@ public partial class ValueSearchViewModel : ViewModelBase
         finally
         {
             SessionId = 0;
+            // The class-noise facets + exclusions belong to the retired session —
+            // clear them so a fresh First Scan can't inherit a stale exclude_classes
+            // (a class hidden for a different value would silently filter the new
+            // result, sometimes with no visible row to untick). The subsequent
+            // RebuildFromCounts repopulates from the new scan's histogram.
+            ClassFilter.Reset();
         }
     }
 
@@ -1002,6 +1035,9 @@ public partial class ValueSearchViewModel : ViewModelBase
                 NativeCScan, NewestFirst, PageSize, ScanTimeoutSeconds * 1000, cts.Token);
 
             GroupSessionId = result.SessionId;
+            GroupClassFilter.RebuildFromCounts(
+                result.ClassHistogram.Select(c => (c.ClassName, c.Count)),
+                result.ClassDistinct, countsPartial: result.DeadlineHit);
             await ApplyGroupScanResultAsync(result.Total, result.Candidates);
 
             var summary = $"Group First Scan: {result.Total} matching objects in {result.DurationMs} ms " +
@@ -1038,6 +1074,9 @@ public partial class ValueSearchViewModel : ViewModelBase
 
             var result = await _dump.RefineGroupScanAsync(GroupSessionId, GroupInputs.ToList(), PageSize, cts.Token);
 
+            GroupClassFilter.RebuildFromCounts(
+                result.ClassHistogram.Select(c => (c.ClassName, c.Count)),
+                result.ClassDistinct);
             await ApplyGroupScanResultAsync(result.Total, result.Candidates);
             StatusText = $"Group Next Scan: {result.Total} surviving objects in {result.DurationMs} ms";
         }
@@ -1063,6 +1102,7 @@ public partial class ValueSearchViewModel : ViewModelBase
         GroupFilteredTotal = 0;
         _groupSortKey = "";
         _groupSortDesc = false;
+        // GroupClassFilter is reset by EndGroupSessionIfAnyAsync above.
         UpdateGroupWindowStatus();
         StatusText = "Group session ended. Configure values and click Group First Scan.";
         ErrorMessage = "";
@@ -1071,7 +1111,8 @@ public partial class ValueSearchViewModel : ViewModelBase
     private bool IsGroupDefaultView =>
         string.IsNullOrEmpty(GroupFilterText)
         && (string.IsNullOrEmpty(_groupSortKey) || _groupSortKey == "scan")
-        && !_groupSortDesc;
+        && !_groupSortDesc
+        && !GroupClassFilter.AnyExcluded;
 
     private async Task ApplyGroupScanResultAsync(int total, IList<GroupCandidate> inlineFirstPage)
     {
@@ -1100,7 +1141,7 @@ public partial class ValueSearchViewModel : ViewModelBase
                 GroupSessionId, offset, PageSize,
                 string.IsNullOrEmpty(GroupFilterText) ? null : GroupFilterText,
                 string.IsNullOrEmpty(_groupSortKey) ? null : _groupSortKey,
-                _groupSortDesc, cts.Token);
+                _groupSortDesc, GroupClassFilter.ExcludedClasses, cts.Token);
             GroupTotal = w.Total;
             GroupFilteredTotal = w.FilteredTotal;
             if (reset)
@@ -1222,6 +1263,7 @@ public partial class ValueSearchViewModel : ViewModelBase
         finally
         {
             GroupSessionId = 0;
+            GroupClassFilter.Reset();   // see EndSessionIfAnyAsync — stale-exclusion guard
         }
     }
 }

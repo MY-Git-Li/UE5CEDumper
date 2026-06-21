@@ -199,6 +199,38 @@ bool ParseValueBytes(Radar::DataType dt, const std::string& raw, uint8_t out[8])
     return false;
 }
 
+// Top-N cap for the class-noise histogram on the wire (begin/refine responses).
+// The UI's "counts partial" warning compares class_distinct against this.
+static constexpr int kClassHistogramMaxRows = 40;
+
+// Serialize a class histogram (already sorted count-desc) to the wire, capped
+// at `maxRows` so the noise picker stays small. Shared by the value + group
+// begin/refine responses (class_histogram = [{class_name, count}, ...]).
+json HistogramToJson(const std::vector<std::pair<std::string, int>>& hist, int maxRows) {
+    json arr = json::array();
+    const int n = (std::min)(static_cast<int>(hist.size()), maxRows);
+    for (int i = 0; i < n; ++i) {
+        json o;
+        o["class_name"] = hist[i].first;
+        o["count"]      = hist[i].second;
+        arr.push_back(std::move(o));
+    }
+    return arr;
+}
+
+// Parse a request's optional "exclude_classes" string array into a vector
+// (empty when absent / not an array). Drives the server-side class-noise filter
+// on query_candidates / query_group_candidates.
+std::vector<std::string> ParseExcludeClasses(const json& request) {
+    std::vector<std::string> out;
+    auto it = request.find("exclude_classes");
+    if (it != request.end() && it->is_array()) {
+        for (const auto& e : *it)
+            if (e.is_string()) out.push_back(e.get<std::string>());
+    }
+    return out;
+}
+
 // Build the wire JSON for one candidate. Per-(class,field) metadata and
 // per-object metadata are pulled from the session's shared descriptor /
 // instance pools the candidate indexes into (V3-A) — the wire shape is
@@ -2158,6 +2190,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             if (pageSize < 0) pageSize = 0;
             json candidates = json::array();
             int totalCount = 0;
+            json histogram = json::array();
+            int classDistinct = 0;
             Radar::SessionManager::Instance().ViewWith(sessionId,
                 [&](const Radar::Session& sess) {
                     totalCount = static_cast<int>(sess.candidates.size());
@@ -2165,6 +2199,10 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                     for (int i = 0; i < n; ++i)
                         candidates.push_back(CandidateToJson(
                             sess.candidates[i], sess.dt, sess.descriptors, sess.instances));
+                    // Class-noise histogram over the FULL set (top 40 + distinct count).
+                    auto hist = Radar::BuildClassHistogram(sess.candidates, sess.descriptors);
+                    classDistinct = static_cast<int>(hist.size());
+                    histogram = HistogramToJson(hist, kClassHistogramMaxRows);
                 });
 
             json data;
@@ -2177,6 +2215,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             data["duration_ms"]     = static_cast<int64_t>(scanResult.stats.durationMs);
             data["deadline_hit"]    = scanResult.stats.deadlineHit;
             data["candidates"]      = candidates;
+            data["class_histogram"] = histogram;
+            data["class_distinct"]  = classDistinct;
             return Renge::MakeResponse(id, data).dump();
         }
 
@@ -2212,6 +2252,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             int totalCount = 0;
             Radar::DataType dtCaptured = Radar::DataType::Int32;
             json candidates = json::array();
+            json histogram = json::array();
+            int classDistinct = 0;
             Aura::ValueScanStats stats;
             bool parseFailed = false;
             bool scanTypeInvalid = false;
@@ -2292,6 +2334,10 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                     for (int i = 0; i < n; ++i)
                         candidates.push_back(CandidateToJson(
                             cs[i], dt, sess.descriptors, sess.instances));
+                    // Recompute the class histogram over the pruned survivor set.
+                    auto hist = Radar::BuildClassHistogram(cs, sess.descriptors);
+                    classDistinct = static_cast<int>(hist.size());
+                    histogram = HistogramToJson(hist, kClassHistogramMaxRows);
                 });
 
             if (!found) {
@@ -2313,6 +2359,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             data["page_size"]    = pageSize;
             data["duration_ms"]  = static_cast<int64_t>(stats.durationMs);
             data["candidates"]   = candidates;
+            data["class_histogram"] = histogram;
+            data["class_distinct"]  = classDistinct;
             return Renge::MakeResponse(id, data).dump();
         }
 
@@ -2349,6 +2397,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             std::string filter     = request.value("filter", "");
             std::string sortKeyStr = request.value("sort_key", "");
             bool sortDesc = request.value("sort_desc", false);
+            std::vector<std::string> excludeClasses = ParseExcludeClasses(request);
             if (offset < 0) offset = 0;
             if (limit  < 0) limit  = 0;
 
@@ -2362,7 +2411,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             int filteredCount = 0;
             std::string dtName;
             bool found = Radar::SessionManager::Instance().QueryWith(
-                sessionId, filter, sortKey, sortDesc,
+                sessionId, filter, sortKey, sortDesc, excludeClasses,
                 [&](const Radar::Session& sess, const std::vector<uint32_t>& order) {
                     totalCount    = static_cast<int>(sess.candidates.size());
                     filteredCount = static_cast<int>(order.size());
@@ -2485,14 +2534,20 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             // sorts via query_group_candidates.
             json candidates = json::array();
             int totalCount = 0;
+            json histogram = json::array();
+            int classDistinct = 0;
             Radar::GroupSessionManager::Instance().QueryWith(
-                sessionId, "", Radar::SortKey::ScanOrder, false,
+                sessionId, "", Radar::SortKey::ScanOrder, false, std::vector<std::string>{},
                 [&](const Radar::GroupSession& sess, const std::vector<uint32_t>& order) {
                     totalCount = static_cast<int>(sess.candidates.size());
                     const int n = (std::min)(pageSize, static_cast<int>(order.size()));
                     for (int i = 0; i < n; ++i)
                         candidates.push_back(GroupCandidateToJson(
                             sess.candidates[order[i]], sess.slots, sess.descriptors, sess.instances));
+                    // Class-noise histogram over the FULL set (object-level class).
+                    auto hist = Radar::BuildGroupClassHistogram(sess.candidates, sess.descriptors);
+                    classDistinct = static_cast<int>(hist.size());
+                    histogram = HistogramToJson(hist, kClassHistogramMaxRows);
                 });
 
             json data;
@@ -2505,6 +2560,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             data["duration_ms"]     = static_cast<int64_t>(scanResult.stats.durationMs);
             data["deadline_hit"]    = scanResult.stats.deadlineHit;
             data["candidates"]      = candidates;
+            data["class_histogram"] = histogram;
+            data["class_distinct"]  = classDistinct;
             return Renge::MakeResponse(id, data).dump();
         }
 
@@ -2526,6 +2583,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
 
             json candidates = json::array();
             int  totalCount = 0;
+            json histogram = json::array();
+            int  classDistinct = 0;
             bool countMismatch = false, parseFailed = false;
             std::string badScanType;
             Aura::ValueScanStats stats;
@@ -2583,6 +2642,10 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                     for (int i = 0; i < n; ++i)
                         candidates.push_back(GroupCandidateToJson(
                             sess.candidates[i], sess.slots, sess.descriptors, sess.instances));
+                    // Recompute the class histogram over the pruned survivor set.
+                    auto hist = Radar::BuildGroupClassHistogram(sess.candidates, sess.descriptors);
+                    classDistinct = static_cast<int>(hist.size());
+                    histogram = HistogramToJson(hist, kClassHistogramMaxRows);
                 });
 
             if (!found)             return Renge::MakeError(id, "session_not_found").dump();
@@ -2596,6 +2659,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             data["page_size"]   = pageSize;
             data["duration_ms"] = static_cast<int64_t>(stats.durationMs);
             data["candidates"]  = candidates;
+            data["class_histogram"] = histogram;
+            data["class_distinct"]  = classDistinct;
             return Renge::MakeResponse(id, data).dump();
         }
 
@@ -2624,6 +2689,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             std::string filter     = request.value("filter", "");
             std::string sortKeyStr = request.value("sort_key", "");
             bool sortDesc = request.value("sort_desc", false);
+            std::vector<std::string> excludeClasses = ParseExcludeClasses(request);
             if (offset < 0) offset = 0;
             if (limit  < 0) limit  = 0;
 
@@ -2636,7 +2702,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             int totalCount    = 0;
             int filteredCount = 0;
             bool found = Radar::GroupSessionManager::Instance().QueryWith(
-                sessionId, filter, sortKey, sortDesc,
+                sessionId, filter, sortKey, sortDesc, excludeClasses,
                 [&](const Radar::GroupSession& sess, const std::vector<uint32_t>& order) {
                     totalCount    = static_cast<int>(sess.candidates.size());
                     filteredCount = static_cast<int>(order.size());

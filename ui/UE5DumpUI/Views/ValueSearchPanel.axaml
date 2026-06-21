@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:UE5DumpUI.ViewModels"
              xmlns:m="using:UE5DumpUI.Models"
+             xmlns:views="using:UE5DumpUI.Views"
              x:Class="UE5DumpUI.Views.ValueSearchPanel"
              x:DataType="vm:ValueSearchViewModel">
 
@@ -253,7 +254,7 @@
              (V3-C): the DLL owns the candidates and the grid shows one window at a
              time, so a loaded-window-only filter/sort would be untrustworthy. -->
         <Grid DockPanel.Dock="Top" Margin="0,0,0,4"
-              ColumnDefinitions="Auto,*,Auto,Auto,Auto"
+              ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto"
               ToolTip.Tip="{StaticResource str.Tip.VS.Sort}">
           <TextBlock Grid.Column="0" Text="{StaticResource str.VS.Filter}"
                      Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,8,0"/>
@@ -276,6 +277,8 @@
                         IsChecked="{Binding SortDescending}"
                         Margin="6,0,0,0" Padding="8,2" FontSize="11"
                         VerticalAlignment="Center" Cursor="Hand"/>
+          <views:ClassFacetFilterButton Grid.Column="5" Margin="6,0,0,0"
+                                        Filter="{Binding ClassFilter}"/>
         </Grid>
 
         <!-- Window paging bar: "showing N of M" + Load More (V3-C). -->
@@ -508,7 +511,7 @@
 
         <!-- Group filter + sort (server-side over the matched-object set) -->
         <Grid DockPanel.Dock="Top" Margin="0,0,0,4"
-              ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+              ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
           <TextBlock Grid.Column="0" Text="{StaticResource str.VS.Filter}"
                      Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,8,0"/>
           <TextBox Grid.Column="1" Text="{Binding GroupFilterText}"
@@ -530,6 +533,8 @@
                         IsChecked="{Binding GroupSortDescending}"
                         Margin="6,0,0,0" Padding="8,2" FontSize="11"
                         VerticalAlignment="Center" Cursor="Hand"/>
+          <views:ClassFacetFilterButton Grid.Column="5" Margin="6,0,0,0"
+                                        Filter="{Binding GroupClassFilter}"/>
         </Grid>
 
         <!-- Group window paging bar -->

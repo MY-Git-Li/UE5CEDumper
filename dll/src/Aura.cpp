@@ -6520,6 +6520,12 @@ ValueScanResult ScanForValue(
     }
     result.stats.scannedClasses = static_cast<int32_t>(classesWithFields.size());
     result.stats.deadlineHit    = scan.deadlineHit;
+    // Reflect a maxResults cap hit too (mirrors the group scan): the candidate
+    // set — and the class histogram built from it — is then a lower bound, so the
+    // UI's "counts are partial / truncated" warning must show. The walk self-caps
+    // per thread, so reaching maxResults means more matches existed.
+    if (static_cast<int32_t>(result.candidates.size()) >= maxResults)
+        result.stats.deadlineHit = true;
 
     auto dtms = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - t0).count();

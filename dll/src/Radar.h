@@ -61,12 +61,15 @@
 // "Open in Live Walker" works without further address-→-instance lookup.
 // ============================================================
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace Radar {
@@ -382,6 +385,7 @@ struct Session {
     std::string                           viewFilter;
     uint8_t                               viewSortKey  = 0;
     bool                                  viewSortDesc = false;
+    std::string                           viewExclude;  // canonical key of excluded classes
     std::vector<uint32_t>                 viewOrder;
 };
 
@@ -426,16 +430,37 @@ enum class SortKey : uint8_t {
 };
 bool TryParseSortKey(const std::string& s, SortKey& out);
 
+// Canonicalize an excluded-class list into a stable cache key (sorted, '\n'-
+// joined) so the view cache is order-insensitive to the wire list. Pure.
+inline std::string CanonicalExcludeKey(const std::vector<std::string>& classes) {
+    if (classes.empty()) return std::string();
+    std::vector<std::string> v = classes;
+    std::sort(v.begin(), v.end());
+    std::string key;
+    for (const auto& s : v) { key += s; key.push_back('\n'); }
+    return key;
+}
+
 // Build the display order over a candidate pool: keep only candidates whose
 // displayed columns contain `filter` (case-insensitive substring; "" keeps
-// all), then stable-sort by (sortKey, sortDesc). Returns candidate indices in
-// display order — the caller slices the requested window out of it.
+// all) AND whose class is NOT in `excludeClasses` (the client-side class-noise
+// picker, applied server-side over the full set), then stable-sort by
+// (sortKey, sortDesc). Returns candidate indices in display order — the caller
+// slices the requested window out of it.
 std::vector<uint32_t> BuildOrderedView(
     const std::vector<Candidate>&       candidates,
     const std::vector<FieldDescriptor>& descriptors,
     const std::vector<InstanceRecord>&  instances,
     DataType dt, const std::string& filter,
-    SortKey sortKey, bool sortDesc);
+    SortKey sortKey, bool sortDesc,
+    const std::unordered_set<std::string>& excludeClasses = {});
+
+// Tally a value-scan candidate pool by owning class name, sorted by count desc
+// (ties: class name asc). Computed over the WHOLE pool (pre-filter, pre-exclude)
+// so the noise picker stays stable as the user filters/excludes. Pure / std-only.
+std::vector<std::pair<std::string, int>> BuildClassHistogram(
+    const std::vector<Candidate>&       candidates,
+    const std::vector<FieldDescriptor>& descriptors);
 
 class SessionManager {
 public:
@@ -488,21 +513,26 @@ public:
     // game memory), so it never touches the game thread.
     template <typename Fn>
     bool QueryWith(uint64_t sessionId, const std::string& filter,
-                   SortKey sortKey, bool sortDesc, Fn&& fn) {
+                   SortKey sortKey, bool sortDesc,
+                   const std::vector<std::string>& excludeClasses, Fn&& fn) {
         std::lock_guard<std::mutex> lk(mu_);
         auto it = sessions_.find(sessionId);
         if (it == sessions_.end()) return false;
         Session& s = *it->second;
         s.lastUse = std::chrono::steady_clock::now();
         const uint8_t keyRaw = static_cast<uint8_t>(sortKey);
+        const std::string exclKey = CanonicalExcludeKey(excludeClasses);
         if (!s.viewValid || s.viewFilter != filter
-            || s.viewSortKey != keyRaw || s.viewSortDesc != sortDesc) {
+            || s.viewSortKey != keyRaw || s.viewSortDesc != sortDesc
+            || s.viewExclude != exclKey) {
+            std::unordered_set<std::string> exclSet(excludeClasses.begin(), excludeClasses.end());
             s.viewOrder = BuildOrderedView(s.candidates, s.descriptors,
                                            s.instances, s.dt, filter,
-                                           sortKey, sortDesc);
+                                           sortKey, sortDesc, exclSet);
             s.viewFilter   = filter;
             s.viewSortKey  = keyRaw;
             s.viewSortDesc = sortDesc;
+            s.viewExclude  = exclKey;
             s.viewValid    = true;
         }
         fn(static_cast<const Session&>(s), s.viewOrder);
@@ -625,6 +655,7 @@ struct GroupSession {
     std::string                           viewFilter;
     uint8_t                               viewSortKey  = 0;
     bool                                  viewSortDesc = false;
+    std::string                           viewExclude;  // canonical key of excluded classes
     std::vector<uint32_t>                 viewOrder;
 };
 
@@ -639,7 +670,16 @@ std::vector<uint32_t> BuildGroupOrderedView(
     const std::vector<SlotSpec>&        slots,
     const std::vector<FieldDescriptor>& descriptors,
     const std::vector<InstanceRecord>&  instances,
-    const std::string& filter, SortKey sortKey, bool sortDesc);
+    const std::string& filter, SortKey sortKey, bool sortDesc,
+    const std::unordered_set<std::string>& excludeClasses = {});
+
+// Tally a group-candidate pool by the candidate's OBJECT-level class (first
+// non-empty slot's first match descriptor className — same key BuildGroupOrdered-
+// View sorts/filters on, NOT per-slot owner_class), sorted count desc / name asc.
+// Computed over the whole pool. Pure / std-only.
+std::vector<std::pair<std::string, int>> BuildGroupClassHistogram(
+    const std::vector<GroupCandidate>&  candidates,
+    const std::vector<FieldDescriptor>& descriptors);
 
 // Sibling of SessionManager for group sessions. Same lifecycle/expiry/lock/view
 // contract; the single-value SessionManager is left untouched.
@@ -669,20 +709,25 @@ public:
     // sortKey, sortDesc), then `fn(const GroupSession&, const std::vector<uint32_t>&)`.
     template <typename Fn>
     bool QueryWith(uint64_t sessionId, const std::string& filter,
-                   SortKey sortKey, bool sortDesc, Fn&& fn) {
+                   SortKey sortKey, bool sortDesc,
+                   const std::vector<std::string>& excludeClasses, Fn&& fn) {
         std::lock_guard<std::mutex> lk(mu_);
         auto it = sessions_.find(sessionId);
         if (it == sessions_.end()) return false;
         GroupSession& s = *it->second;
         s.lastUse = std::chrono::steady_clock::now();
         const uint8_t keyRaw = static_cast<uint8_t>(sortKey);
+        const std::string exclKey = CanonicalExcludeKey(excludeClasses);
         if (!s.viewValid || s.viewFilter != filter
-            || s.viewSortKey != keyRaw || s.viewSortDesc != sortDesc) {
+            || s.viewSortKey != keyRaw || s.viewSortDesc != sortDesc
+            || s.viewExclude != exclKey) {
+            std::unordered_set<std::string> exclSet(excludeClasses.begin(), excludeClasses.end());
             s.viewOrder = BuildGroupOrderedView(s.candidates, s.slots, s.descriptors,
-                                                s.instances, filter, sortKey, sortDesc);
+                                                s.instances, filter, sortKey, sortDesc, exclSet);
             s.viewFilter   = filter;
             s.viewSortKey  = keyRaw;
             s.viewSortDesc = sortDesc;
+            s.viewExclude  = exclKey;
             s.viewValid    = true;
         }
         fn(static_cast<const GroupSession&>(s), s.viewOrder);

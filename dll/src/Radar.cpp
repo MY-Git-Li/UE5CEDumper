@@ -955,15 +955,20 @@ std::vector<uint32_t> BuildOrderedView(
     const std::vector<FieldDescriptor>& descriptors,
     const std::vector<InstanceRecord>&  instances,
     DataType dt, const std::string& filter,
-    SortKey sortKey, bool sortDesc) {
+    SortKey sortKey, bool sortDesc,
+    const std::unordered_set<std::string>& excludeClasses) {
 
     const std::string needle = ToLower(filter);
+    const bool hasExclude = !excludeClasses.empty();
 
     std::vector<uint32_t> idx;
     idx.reserve(candidates.size());
     for (uint32_t i = 0; i < candidates.size(); ++i) {
         const Candidate&       c = candidates[i];
         const FieldDescriptor& d = descriptors[c.descriptorIdx];
+        // Class-noise exclude (case-sensitive exact class match — the picker
+        // sends exact class names from the histogram). Cheap; before the filter.
+        if (hasExclude && excludeClasses.count(d.className)) continue;
         const InstanceRecord&  n = instances[c.instanceIdx];
         if (CandidateMatchesFilter(c, dt, d, n, needle)) idx.push_back(i);
     }
@@ -1010,6 +1015,30 @@ std::vector<uint32_t> BuildOrderedView(
         return sortDesc ? less(b, a) : less(a, b);
     });
     return idx;
+}
+
+// Sort a class-count map into a (count desc, name asc) vector. Shared by the
+// single + group histograms.
+static std::vector<std::pair<std::string, int>> SortClassHistogram(
+    std::unordered_map<std::string, int>& counts) {
+    std::vector<std::pair<std::string, int>> v(counts.begin(), counts.end());
+    std::sort(v.begin(), v.end(),
+        [](const std::pair<std::string, int>& a, const std::pair<std::string, int>& b) {
+            if (a.second != b.second) return a.second > b.second;
+            return a.first < b.first;
+        });
+    return v;
+}
+
+std::vector<std::pair<std::string, int>> BuildClassHistogram(
+    const std::vector<Candidate>&       candidates,
+    const std::vector<FieldDescriptor>& descriptors) {
+    std::unordered_map<std::string, int> counts;
+    for (const auto& c : candidates) {
+        const std::string& cn = descriptors[c.descriptorIdx].className;
+        if (!cn.empty()) ++counts[cn];
+    }
+    return SortClassHistogram(counts);
 }
 
 // --- SessionManager ---
@@ -1080,14 +1109,28 @@ SessionManager::Stats SessionManager::GetStats() {
 
 // --- Group scan: ordered view + GroupSessionManager (build 1276) ---
 
+// Candidate's OBJECT-level class = first non-empty slot's first match's
+// descriptor className (mirrors BuildGroupOrderedView's classOf / sort key).
+// Returns by const ref so the exclude-skip + histogram hot paths don't allocate
+// a string per candidate.
+static const std::string& GroupCandidateClass(const GroupCandidate& gc,
+                                              const std::vector<FieldDescriptor>& descriptors) {
+    static const std::string kEmpty;
+    for (const auto& sl : gc.slotMatches)
+        if (!sl.empty()) return descriptors[sl[0].descriptorIdx].className;
+    return kEmpty;
+}
+
 std::vector<uint32_t> BuildGroupOrderedView(
     const std::vector<GroupCandidate>&  candidates,
     const std::vector<SlotSpec>&        slots,
     const std::vector<FieldDescriptor>& descriptors,
     const std::vector<InstanceRecord>&  instances,
-    const std::string& filter, SortKey sortKey, bool sortDesc) {
+    const std::string& filter, SortKey sortKey, bool sortDesc,
+    const std::unordered_set<std::string>& excludeClasses) {
 
     const std::string needle = ToLower(filter);
+    const bool hasExclude = !excludeClasses.empty();
 
     // Render a slot match's value exactly as the wire does (resolves the field's
     // own width for a NumericNoByte/NumericAll slot via descriptor.fieldType).
@@ -1118,8 +1161,13 @@ std::vector<uint32_t> BuildGroupOrderedView(
 
     std::vector<uint32_t> idx;
     idx.reserve(candidates.size());
-    for (uint32_t i = 0; i < candidates.size(); ++i)
+    for (uint32_t i = 0; i < candidates.size(); ++i) {
+        // Class-noise exclude on the candidate's object class (NOT per-slot
+        // owner_class) so it matches single-scan / find_instances semantics.
+        if (hasExclude && excludeClasses.count(GroupCandidateClass(candidates[i], descriptors)))
+            continue;
         if (matchesFilter(candidates[i])) idx.push_back(i);
+    }
 
     if (sortKey == SortKey::ScanOrder) {
         if (sortDesc) std::reverse(idx.begin(), idx.end());
@@ -1167,6 +1215,17 @@ std::vector<uint32_t> BuildGroupOrderedView(
         return sortDesc ? less(b, a) : less(a, b);
     });
     return idx;
+}
+
+std::vector<std::pair<std::string, int>> BuildGroupClassHistogram(
+    const std::vector<GroupCandidate>&  candidates,
+    const std::vector<FieldDescriptor>& descriptors) {
+    std::unordered_map<std::string, int> counts;
+    for (const auto& gc : candidates) {
+        const std::string& cn = GroupCandidateClass(gc, descriptors);
+        if (!cn.empty()) ++counts[cn];
+    }
+    return SortClassHistogram(counts);
 }
 
 GroupSessionManager& GroupSessionManager::Instance() {

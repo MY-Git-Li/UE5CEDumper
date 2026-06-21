@@ -146,6 +146,17 @@ public class ValueCandidate
 /// refine. <see cref="DeadlineHit"/> tells the UI to show a "scan
 /// truncated" warning so the user knows to narrow the predicate.
 /// </summary>
+/// <summary>One class-noise histogram entry: a class name and how many of the
+/// session's candidates belong to it. The DLL computes this over the WHOLE
+/// session (pre-filter, pre-exclude) and returns the Top-N; the Value Search
+/// class-filter picker is driven by it (server-side sibling of the client-side
+/// histogram on the Instance / Interesting / Property Search tabs).</summary>
+public sealed class ClassCount
+{
+    public string ClassName { get; set; } = "";
+    public int    Count     { get; set; }
+}
+
 public class ValueScanBeginResult
 {
     public ulong  SessionId      { get; set; }
@@ -156,6 +167,10 @@ public class ValueScanBeginResult
     public long   DurationMs     { get; set; }
     public bool   DeadlineHit    { get; set; }
     public List<ValueCandidate> Candidates { get; set; } = new();
+    /// <summary>Top-N class histogram over the full session (for the class filter).</summary>
+    public List<ClassCount> ClassHistogram { get; set; } = new();
+    /// <summary>True number of distinct classes (≥ ClassHistogram.Count when capped).</summary>
+    public int ClassDistinct { get; set; }
 }
 
 /// <summary>Response from <c>refine_value_scan</c>. <see cref="Total"/> is the
@@ -170,6 +185,8 @@ public class ValueScanRefineResult
     public int    Total      { get; set; }
     public long   DurationMs { get; set; }
     public List<ValueCandidate> Candidates { get; set; } = new();
+    public List<ClassCount> ClassHistogram { get; set; } = new();
+    public int ClassDistinct { get; set; }
 }
 
 /// <summary>Response from <c>query_candidates</c> (V3-C server-side window).
@@ -345,6 +362,8 @@ public class GroupScanBeginResult
     public long  DurationMs     { get; set; }
     public bool  DeadlineHit    { get; set; }
     public List<GroupCandidate> Candidates { get; set; } = new();
+    public List<ClassCount> ClassHistogram { get; set; } = new();
+    public int ClassDistinct { get; set; }
 }
 
 /// <summary>Response from <c>refine_group_scan</c> — surviving object count + first page.</summary>
@@ -354,6 +373,8 @@ public class GroupScanRefineResult
     public int   Total      { get; set; }
     public long  DurationMs { get; set; }
     public List<GroupCandidate> Candidates { get; set; } = new();
+    public List<ClassCount> ClassHistogram { get; set; } = new();
+    public int ClassDistinct { get; set; }
 }
 
 /// <summary>Response from <c>query_group_candidates</c> — server-side window.</summary>
