@@ -3444,9 +3444,12 @@ void CollectOutgoingObjectPtrs(uintptr_t obj, std::vector<OutgoingPtr>& out,
 // (level → Actors → actor is a reflected chain) — so the plain BFS would already
 // have found it. Returns found=true / status "ok_via_level" on success, or a
 // default {found=false} GraphPathResult to signal "no recovery available".
+// maxDepth is intentionally not a parameter: this recovery uses its own fixed bounds
+// (the Outer climb is capped at 8 hops; the actor→target tail BFS at a deliberate 6),
+// independent of the caller's BFS depth.
 template <typename AbortFn>
 static GraphPathResult RecoverViaWorldLevel(uintptr_t rootWorld, uintptr_t target,
-                                            int32_t maxDepth, AbortFn&& abortFn) {
+                                            AbortFn&& abortFn) {
     GraphPathResult res;  // found=false by default
 
     // The root must be a UWorld for the OwningWorld back-reference to mean anything.
@@ -3573,7 +3576,7 @@ GraphPathResult FindObjectGraphPath(uintptr_t rootObj, uintptr_t targetObj,
     // never override a deadline/cancel/cap (those mean "search incomplete", not
     // "definitively unreferenced"), and never re-run the heavy work on success.
     if (!res.found && res.status == "not_reachable") {
-        GraphPathResult rec = RecoverViaWorldLevel(rootObj, targetObj, maxDepth, abortFn);
+        GraphPathResult rec = RecoverViaWorldLevel(rootObj, targetObj, abortFn);
         if (rec.found) {
             int32_t prevVisited = res.visited;   // keep the BFS diagnostic count
             res = std::move(rec);
