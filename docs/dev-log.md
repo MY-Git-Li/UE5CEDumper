@@ -16,6 +16,20 @@ builds ≤696 in
 
 -----
 
+## 2026-06-21 — Export CSX: CE 7.7+ Binary (bit-switch) format behind a dropdown (builds 1478-1480; UI-only, no DLL/pipe change; in-game VERIFIED by the user)
+
+CE before 7.7 has no bit-switch type in Structure Dissect, so a bit-field `BoolProperty` was exported as a whole `Vartype="Byte"` with the bit noted in the description (a series of same-address bytes). CE 7.7+ supports `Vartype="Binary"` (`BitStart`/`BitSize`), which Copy CE XML / Copy CE Field already emit. This brings CSX in line — **without** changing the legacy output.
+
+**The Export CSX button is now a `DropDownButton` + `MenuFlyout`** (mirrors the toolbar Export/Tools dropdowns) with two items → `ExportCsxPre77Async` / `ExportCsx77Async`, both delegating to `ExportCsxCoreAsync(CsxFormat)`. New `enum CsxFormat { PreCe77, Ce77Plus }` (default `PreCe77`) threads as an optional last arg through `GenerateCsxAsync → EmitStructPropertyFlattened → EmitElement → BuildLiveChildStructure` (all three bit-field-bool sites funnel through `EmitElement`). `PreCe77` is the unchanged path; an early-return `Ce77Plus` branch emits a real bit switch via new `EmitBinaryBitfieldElement`, byte-identical to a native CE 7.7 export (`<Element Offset="90" BitSize="1" Vartype="Binary" BitStart="2" Bytesize="1" OffsetHex="0000005A" Description="bCanBeDamaged" .../>`).
+
+**Correctness.** Only bit-field bools (`BoolBitIndex >= 0`) become `Binary`; whole-byte bools (mask `0xFF`) stay `Byte` in both formats. Byte address = the EmitElement **`offset` parameter** (already absolute — `field.Offset` is struct-relative for flattened-struct fields) **plus `BoolByteOffset`**, matching the DLL read/write path (`Ubel`/`Solitar`/`Wirbel` all use `base + Offset + ByteOffset`). `BitSize` is always 1 (UE `FBoolProperty` is single-bit). The Pre-7.7 `(bit N, mask)` suffix is dropped in 7.7+ (BitStart carries it).
+
+**Two real bugs caught by the design's adversarial verify + a nested-struct regression test.** (1) The first-draft formula used `field.Offset` instead of the `offset` param → wrong byte for bools inside flattened structs; fixed to `offset + BoolByteOffset`. (2) `CeXmlExportService.ResolveStructRecursiveAsync`'s field reconstruction copied `BoolBitIndex`/`BoolFieldMask` but **dropped `BoolByteOffset`** — a latent gap that the `Offset="263"` nested-struct test exposed; now preserved (harmless to CE XML, required for CSX 7.7+).
+
+**sample.CSX audit:** no new XML tags (only `Structures`/`Structure`/`Elements`/`Element`, all already emitted). Other gaps it shows — `Custom`/`Customtype="UE FName to String"` (FName→text), `ChildStruct` by-name references, `PreviewPriority`, per-field `String`, `RLECount` — are **separate backlog items**, not part of this change. Known pre-existing limitation: a bit-field bool inside a **struct-array** element stays `Byte` (`StructSubFieldValue` carries no bool mask).
+
+**Tests + verification.** +4 `CsxExportServiceTests` (sample-exact Binary, `ByteOffset>0` address, nested-struct absolute-offset regression, non-bitfield stays Byte; existing Pre-7.7 bool tests unchanged + green). Evaluated via a 6-agent workflow (4 readers → design → refute-verify). C# 1756/0, AOT 46.9 MB green. **In-game (CE 7.7+) VERIFIED by the user** — the exported .CSX bit switches load correctly.
+
 ## 2026-06-21 — Live Walker "Copy CE AA Script" made restart-stable: GWorld-anchored Lua walk instead of a hardcoded leaf address (builds 1450-1474; UI-only; MERGED main PR #333 `544038a`, dev=main; in-game CE VERIFIED)
 
 "Copy CE AA Script" used to emit only `define(Name, <abs addr>)` + `registersymbol` — dead after a game restart (ASLR). On a GWorld-rooted, forward-walkable path it now emits an Auto Assembler script whose Lua walks GWorld → … → the current object at *enable* time and `registerSymbol`s the result, so the symbol survives a restart.

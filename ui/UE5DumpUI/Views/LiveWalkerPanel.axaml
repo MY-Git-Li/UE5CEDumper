@@ -171,11 +171,21 @@
                 ToolTip.Tip="{StaticResource str.Tip.LiveWalker.GuessWhat}"
                 Padding="4,2" FontSize="11" Foreground="#CE9178"
                 VerticalAlignment="Center"/>
-      <Button Content="{StaticResource str.LiveWalker.ExportCsx}"
-              Command="{Binding ExportCsxCommand}"
-              IsVisible="{Binding HasData}"
-              ToolTip.Tip="{StaticResource str.Tip.LiveWalker.ExportCsx}"
-              Padding="8,4"/>
+      <DropDownButton Content="{StaticResource str.LiveWalker.ExportCsx}"
+                      IsVisible="{Binding HasData}"
+                      ToolTip.Tip="{StaticResource str.Tip.LiveWalker.ExportCsx}"
+                      Padding="8,4">
+        <DropDownButton.Flyout>
+          <MenuFlyout>
+            <MenuItem Header="{StaticResource str.LiveWalker.ExportCsxPre77}"
+                      Command="{Binding ExportCsxPre77Command}"
+                      ToolTip.Tip="{StaticResource str.Tip.LiveWalker.ExportCsxPre77}"/>
+            <MenuItem Header="{StaticResource str.LiveWalker.ExportCsx77}"
+                      Command="{Binding ExportCsx77Command}"
+                      ToolTip.Tip="{StaticResource str.Tip.LiveWalker.ExportCsx77}"/>
+          </MenuFlyout>
+        </DropDownButton.Flyout>
+      </DropDownButton>
       <Button Content="{StaticResource str.LiveWalker.ExportHeader}"
               Command="{Binding ExportSdkHeaderCommand}"
               IsVisible="{Binding HasData}"

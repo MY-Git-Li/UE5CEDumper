@@ -200,7 +200,8 @@ When the current view is a container (Array/Map/Set element list):
 
 **Output**: File (`.CSX`, CE Structure Dissect XML)
 **Service**: `CsxExportService.cs`
-**Entry point**: `ExportCsxAsync`
+**Entry point**: `ExportCsxPre77Async` / `ExportCsx77Async` (the Export CSX dropdown's two
+items; both delegate to `ExportCsxCoreAsync(CsxFormat)`)
 
 ### CSX Format
 
@@ -258,6 +259,46 @@ Emits as `Vartype="Pointer"` with a child structure containing:
 ```xml
 <Element Offset="0" Vartype="Unicode String" Bytesize="18" Description="Value"/>
 ```
+
+### Format Version: Pre-CE-7.7 vs CE-7.7+ (bit-field bools)
+
+The Export CSX button is a dropdown (`DropDownButton` + `MenuFlyout`) with two items, each
+exporting in one of two CE format versions (enum `CsxFormat`, default `PreCe77`):
+
+- **Pre-CE 7.7** (`CsxFormat.PreCe77`): CE before 7.7 has no bit-switch type in Structure
+  Dissect, so a **bit-field** `BoolProperty` (`BoolBitIndex >= 0`) is emitted as a whole
+  `Vartype="Byte"` with the bit noted in the description — `Description="bFlag (bit N, mask 0xNN)"`.
+  Several bit-field bools on one byte become a series of same-address `Byte` elements.
+- **CE 7.7+** (`CsxFormat.Ce77Plus`): emits a real bit switch, byte-identical to a native CE 7.7
+  export (attribute order `Offset, BitSize, Vartype, BitStart, Bytesize, OffsetHex, Description,
+  DisplayMethod`):
+  ```xml
+  <Element Offset="90" BitSize="1" Vartype="Binary" BitStart="2" Bytesize="1"
+           OffsetHex="0000005A" Description="bCanBeDamaged" DisplayMethod="unsigned integer"/>
+  ```
+
+Rules (`EmitBinaryBitfieldElement`, gated in `EmitElement`):
+- Only **bit-field** bools (`BoolBitIndex >= 0`) become `Binary`. A whole-byte bool
+  (`BoolBitIndex == -1`, mask `0xFF`) stays `Byte` in **both** formats.
+- Byte address = the EmitElement **`offset` parameter** (already absolute for flattened-struct /
+  drilled-child fields — `field.Offset` would be struct-relative) **plus `BoolByteOffset`** (the
+  byte within the field holding the bit), matching the DLL read/write path (`Ubel`/`Solitar`/
+  `Wirbel` all use `base + Offset + ByteOffset`). `BoolByteOffset` is preserved through struct
+  flattening by `CeXmlExportService.ResolveStructRecursiveAsync`'s reconstruction.
+- `BitSize`/`BitLength` is always `1` (a UE `FBoolProperty` is single-bit by construction —
+  `FieldMask` is a validated power-of-2). The Pre-7.7 `(bit N, mask)` description suffix is
+  dropped in 7.7+ (`BitStart` carries it). Mirrors the proven Copy CE XML / Copy CE Field path
+  (`CeXmlExportService.MapCeField`: `BoolProperty when BoolBitIndex >= 0 => Binary`).
+- **Known limitation** (pre-existing, both formats): a bit-field bool inside a **struct-array**
+  element emits as a plain `Byte` — `StructSubFieldValue` carries no bool mask, so there is no
+  bit info to emit. Top-level, flattened-struct-member, and drilled-pointer-target bit-field
+  bools all emit `Binary` correctly.
+
+The two leading `CsxFormat` paths are the only consumers of `GenerateCsxAsync`'s `format` arg.
+The other sample.CSX features the exporter does **not** yet emit (CE `Custom` /
+`Customtype="UE FName to String"` FName decoding, `ChildStruct` by-name references,
+`PreviewPriority`, per-field `String`, `RLECount`) are separate backlog items, not part of the
+bit-switch format.
 
 ---
 

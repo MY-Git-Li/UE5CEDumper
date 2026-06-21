@@ -613,6 +613,10 @@ public static class CeXmlExportService
                     TypedValue = f.TypedValue,
                     BoolBitIndex = f.BoolBitIndex,
                     BoolFieldMask = f.BoolFieldMask,
+                    // Preserve the within-field byte index so a flattened bit-field bool keeps
+                    // landing on the right byte (base + Offset + ByteOffset). CE XML ignores it,
+                    // but CSX 7.7+ Binary export needs it to place the bit switch correctly.
+                    BoolByteOffset = f.BoolByteOffset,
                     ArrayCount = f.ArrayCount,
                     ArrayInnerType = f.ArrayInnerType,
                     ArrayElemSize = f.ArrayElemSize,

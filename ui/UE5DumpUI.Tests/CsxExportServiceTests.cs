@@ -199,6 +199,99 @@ public class CsxExportServiceTests
         Assert.Contains("Description=\"bIsLightingScenario (bit 0, mask 0x01)\"", csx);
         // Both at same offset
         Assert.Contains("OffsetHex=\"00000240\"", csx);
+        // Default (Pre-7.7) must NOT emit a Binary bit-switch element
+        Assert.DoesNotContain("Vartype=\"Binary\"", csx);
+    }
+
+    [Fact]
+    public async Task GenerateCsx_BoolProperty_Ce77Plus_EmitsBinaryBitSwitch()
+    {
+        // Reproduce sample.CSX line 760 exactly: AActor::bCanBeDamaged at byte 0x5A=90, bit 2.
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "bCanBeDamaged", TypeName = "BoolProperty", Offset = 0x5A, Size = 1,
+                     BoolBitIndex = 2, BoolFieldMask = 0x04, BoolByteOffset = 0 },
+        };
+
+        var csx = await CsxExportService.GenerateCsxAsync(
+            _dump, "TestStruct", fields, format: CsxFormat.Ce77Plus);
+
+        // Byte-identical to the CE 7.7+ sample element (attribute order + values)
+        Assert.Contains(
+            "<Element Offset=\"90\" BitSize=\"1\" Vartype=\"Binary\" BitStart=\"2\" Bytesize=\"1\" OffsetHex=\"0000005A\" Description=\"bCanBeDamaged\" DisplayMethod=\"unsigned integer\"/>",
+            csx);
+        // The Pre-7.7 "(bit N, mask)" suffix and the Byte type must be gone in Binary mode
+        Assert.DoesNotContain("(bit ", csx);
+        Assert.DoesNotContain("Vartype=\"Byte\"", csx);
+    }
+
+    [Fact]
+    public async Task GenerateCsx_BoolProperty_Ce77Plus_AddsBoolByteOffsetToAddress()
+    {
+        // A bit packed into a later byte of the property's storage: byte = Offset + ByteOffset.
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "bPacked", TypeName = "BoolProperty", Offset = 0x10, Size = 1,
+                     BoolBitIndex = 4, BoolFieldMask = 0x10, BoolByteOffset = 3 },
+        };
+
+        var csx = await CsxExportService.GenerateCsxAsync(
+            _dump, "TestStruct", fields, format: CsxFormat.Ce77Plus);
+
+        // byteOffset = 0x10 + 3 = 0x13 = 19 for BOTH decimal Offset and hex OffsetHex
+        Assert.Contains("Offset=\"19\"", csx);
+        Assert.Contains("OffsetHex=\"00000013\"", csx);
+        Assert.Contains("BitStart=\"4\"", csx);
+        Assert.Contains("Vartype=\"Binary\"", csx);
+    }
+
+    [Fact]
+    public async Task GenerateCsx_BoolProperty_Ce77Plus_NestedStruct_UsesAbsoluteByteOffset()
+    {
+        // Regression guard: a bit-field bool inside a flattened StructProperty must use the
+        // ABSOLUTE byte (parent.Offset + inner.Offset + BoolByteOffset), not the struct-relative
+        // inner.Offset. Using field.Offset here would emit the wrong byte.
+        _dump.RegisterStruct("0x1000", new InstanceWalkResult
+        {
+            Fields = new List<LiveFieldValue>
+            {
+                new() { Name = "bInnerFlag", TypeName = "BoolProperty", Offset = 0x4, Size = 1,
+                         BoolBitIndex = 4, BoolFieldMask = 0x10, BoolByteOffset = 3 },
+            }
+        });
+
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "State", TypeName = "StructProperty", Offset = 0x100, Size = 8,
+                     StructTypeName = "FState", StructDataAddr = "0x1000", StructClassAddr = "0x2000" },
+        };
+
+        var csx = await CsxExportService.GenerateCsxAsync(
+            _dump, "TestStruct", fields, format: CsxFormat.Ce77Plus);
+
+        // Absolute byte = 0x100 + 0x4 + 3 = 0x107 = 263
+        Assert.Contains("Offset=\"263\"", csx);
+        Assert.Contains("OffsetHex=\"00000107\"", csx);
+        Assert.Contains("BitStart=\"4\"", csx);
+        Assert.Contains("Vartype=\"Binary\"", csx);
+        Assert.Contains("Description=\"FState / bInnerFlag\"", csx);
+    }
+
+    [Fact]
+    public async Task GenerateCsx_BoolProperty_Ce77Plus_NonBitfield_StaysByte()
+    {
+        // Whole-byte bool (BoolBitIndex == -1, mask 0xFF) is not a bit switch — stays Byte even in 7.7+.
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "bWholeByte", TypeName = "BoolProperty", Offset = 0x20, Size = 1,
+                     BoolBitIndex = -1, BoolFieldMask = 0xFF },
+        };
+
+        var csx = await CsxExportService.GenerateCsxAsync(
+            _dump, "TestStruct", fields, format: CsxFormat.Ce77Plus);
+
+        Assert.Contains("Vartype=\"Byte\"", csx);
+        Assert.DoesNotContain("Vartype=\"Binary\"", csx);
     }
 
     [Fact]
