@@ -2043,7 +2043,7 @@ public sealed class DumpService : IDumpService
 
     public async Task<SnapshotChunkResult> SnapshotChunkAsync(
         string dataType, bool gameOnly, int offset, int limit,
-        bool nativeC = false, CancellationToken ct = default)
+        bool nativeC = false, bool autoSkipNoise = true, CancellationToken ct = default)
     {
         var req = new JsonObject
         {
@@ -2052,6 +2052,10 @@ public sealed class DumpService : IDumpService
             ["game_only"] = gameOnly,
             ["offset"] = offset,
             ["limit"] = limit,
+            // Auto detect Engine/System noise (source-level skip; default ON). Sent
+            // unconditionally so the DLL applies the checkbox's real value (the DLL
+            // default is OFF for flag-unaware callers).
+            ["auto_skip_noise"] = autoSkipNoise,
         };
         // Native-C raw-hole capture (P3), opt-in → attach only when on (back-compat).
         if (nativeC)

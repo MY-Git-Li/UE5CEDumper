@@ -329,6 +329,8 @@
     <sys:String x:Key="str.Snapshot.NotConnected">Connect to a game to capture snapshots.</sys:String>
     <sys:String x:Key="str.Snapshot.Scope">Scope:</sys:String>
     <sys:String x:Key="str.Snapshot.GameOnly">Game objects only</sys:String>
+    <sys:String x:Key="str.Snapshot.AutoSkipNoise">Auto detect Engine/System noise</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.AutoSkipNoise">On by default. Skips pure engine/system classes (UI widgets, textures, sounds, particle/Niagara systems, anim instances, and /Script engine packages) at the SOURCE — they never enter the snapshot, so capture is faster and the DB is smaller. This differs from the Noise picker below, which filters the finished snapshot AFTER capture. Source-level skipping is irreversible: re-capture (with this off) to bring a skipped class back. A gameplay guardrail force-keeps any Actor / Pawn / Character / ActorComponent / Controller / PlayerState-derived class, so a player Pawn's X/Y/Z (and HP/MP living in components or GAS AttributeSets) is never dropped. Mirrors the auto-detect already used in Value Search and the Instance finder.</sys:String>
     <sys:String x:Key="str.Snapshot.Label">Label:</sys:String>
     <sys:String x:Key="str.Snapshot.LabelWatermark">(optional — defaults to a timestamp)</sys:String>
     <sys:String x:Key="str.Snapshot.Capture">Capture Snapshot</sys:String>

@@ -31,6 +31,7 @@ public class SnapshotViewModelTests : IDisposable
         public string? LastDataType;
         public bool? LastGameOnly;
         public bool? LastNativeC;
+        public bool? LastAutoSkipNoise;
 
         public override Task<int> BeginSnapshotAsync(string dataType, CancellationToken ct = default)
         {
@@ -40,10 +41,11 @@ public class SnapshotViewModelTests : IDisposable
 
         public override Task<SnapshotChunkResult> SnapshotChunkAsync(
             string dataType, bool gameOnly, int offset, int limit,
-            bool nativeC = false, CancellationToken ct = default)
+            bool nativeC = false, bool autoSkipNoise = true, CancellationToken ct = default)
         {
             LastGameOnly = gameOnly;
             LastNativeC = nativeC;
+            LastAutoSkipNoise = autoSkipNoise;
             var r = new SnapshotChunkResult { Total = 3 };
             if (offset == 0)
             {
@@ -96,6 +98,7 @@ public class SnapshotViewModelTests : IDisposable
         Assert.Equal("NumericNoByte", dump.LastDataType);
         Assert.True(dump.LastGameOnly);
         Assert.False(dump.LastNativeC);   // Native-C default OFF (P3)
+        Assert.True(dump.LastAutoSkipNoise);   // Auto-skip noise default ON (source-level skip)
 
         var list = await _store.ListSnapshotsAsync(TestContext.Current.CancellationToken);
         var saved = Assert.Single(list);
@@ -129,6 +132,24 @@ public class SnapshotViewModelTests : IDisposable
         await vm.CaptureCommand.ExecuteAsync(null);
 
         Assert.True(dump.LastNativeC);
+    }
+
+    [Fact]
+    public async Task Capture_PassesAutoSkipNoise_ToSnapshotChunk()
+    {
+        var dump = new CaptureStub();
+        var vm = new SnapshotViewModel(dump, _store, new MockLoggingService())
+        {
+            SelectedScope = "NumericNoByte",
+            GameOnly = true,
+            AutoSkipNoise = false,   // user opted OUT of the source-level skip
+            Label = "no-skip-run",
+        };
+        vm.SetEngineState(new EngineState { PeHash = "PEHASH", UEVersion = 504, ModuleBase = "7FF600000000", ProcessCreationTime = "01D9ABCDEF012345" });
+
+        await vm.CaptureCommand.ExecuteAsync(null);
+
+        Assert.False(dump.LastAutoSkipNoise);
     }
 
     [Fact]

@@ -102,7 +102,7 @@ public class StubDumpService : IDumpService
     public virtual Task<GroupScanWindowResult> QueryGroupCandidatesAsync(ulong sessionId, int offset, int limit, string? filter = null, string? sortKey = null, bool sortDesc = false, IReadOnlyList<string>? excludeClasses = null, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task EndGroupScanAsync(ulong sessionId, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<int> BeginSnapshotAsync(string dataType, CancellationToken ct = default) => throw new NotImplementedException();
-    public virtual Task<SnapshotChunkResult> SnapshotChunkAsync(string dataType, bool gameOnly, int offset, int limit, bool nativeC = false, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<SnapshotChunkResult> SnapshotChunkAsync(string dataType, bool gameOnly, int offset, int limit, bool nativeC = false, bool autoSkipNoise = true, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<RescanStartResult> StartRescanAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public Task<RescanStatusResult> GetRescanStatusAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public Task<EngineState> ApplyRescanAsync(CancellationToken ct = default) => throw new NotImplementedException();

@@ -48,6 +48,14 @@ public partial class SnapshotViewModel : ViewModelBase
 
     [ObservableProperty] private string _label = "";
     [ObservableProperty] private bool   _gameOnly = true;
+    /// <summary>Auto detect Engine/System noise (default ON). When on, the DLL skips
+    /// pure engine/system classes (UI widgets, textures, sounds, Niagara, anim
+    /// instances, /Script engine packages) BEFORE they enter the snapshot — saving
+    /// capture time + DB size at the source, vs the post-capture Noise Picker that
+    /// only filters the finished snapshot. A gameplay guardrail force-keeps
+    /// Actor/Pawn/Character/component-derived classes, so a player Pawn's X/Y/Z is
+    /// never dropped. Irreversible (re-capture to bring a skipped class back).</summary>
+    [ObservableProperty] private bool   _autoSkipNoise = true;
     /// <summary>Native-C (P3, opt-in, default OFF). When on, each captured object also
     /// gets its unmanaged holes (non-UPROPERTY raw bytes) guessed + normalized into
     /// synthetic "&lt;raw@0xNN&gt;" fields, so SPC diff / Class Pivot can track native
@@ -395,6 +403,13 @@ public partial class SnapshotViewModel : ViewModelBase
 
         var engine = _engineState!;
         var dataType = SelectedScope;
+        // Lock the capture options ONCE: every snapshot_chunk in the paging loop
+        // below must carry the same values, so a mid-capture toggle can't make the
+        // chunks inconsistent. (The checkboxes are also disabled via CanEditSettings
+        // while capturing — this is belt-and-suspenders.)
+        bool gameOnly       = GameOnly;
+        bool autoSkipNoise  = AutoSkipNoise;
+        bool includeNative  = IncludeNativeFields;
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
         IsCapturing = true;
@@ -431,7 +446,8 @@ public partial class SnapshotViewModel : ViewModelBase
             while (!ct.IsCancellationRequested)
             {
                 var chunk = await _dump.SnapshotChunkAsync(
-                    dataType, GameOnly, offset, Constants.SnapshotChunkSize, IncludeNativeFields, ct);
+                    dataType, gameOnly, offset, Constants.SnapshotChunkSize,
+                    includeNative, autoSkipNoise, ct);
 
                 if (chunk.Objects.Count > 0)
                 {
