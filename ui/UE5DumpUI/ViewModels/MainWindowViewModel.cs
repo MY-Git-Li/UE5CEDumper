@@ -1348,6 +1348,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         ObjectTree.Dispose();
         LiveWalker.Dispose();
+        // InstanceFinder owns a keyword-filter debounce Timer + a class-noise re-run
+        // CTS (the Timer/CTS lambdas root the VM); dispose so they can't fire after teardown.
+        InstanceFinder.Dispose();
         // PropertySearch is IDisposable (owns a debounce System.Threading.Timer);
         // its Dispose had no caller before, leaking the timer until process exit.
         PropertySearch.Dispose();

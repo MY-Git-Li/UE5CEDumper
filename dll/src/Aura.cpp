@@ -1284,7 +1284,7 @@ SearchResultSet SearchByName(const std::string& query, int maxResults) {
     return rset;
 }
 
-SearchResultSet FindInstancesByClass(const std::string& className, bool exactMatch, int maxResults, bool newestFirst, const std::string& nameFilter) {
+SearchResultSet FindInstancesByClass(const std::string& className, bool exactMatch, int maxResults, bool newestFirst, const std::string& nameFilter, const std::vector<std::string>& excludeClasses, bool buildHistogram) {
     SearchResultSet rset;
 
     // Convert queries to lowercase for case-insensitive comparison
@@ -1298,13 +1298,33 @@ SearchResultSet FindInstancesByClass(const std::string& className, bool exactMat
     // An empty name query means "no object-name gate".
     const bool gateByName = !lowerName.empty();
 
+    // Server-side class-noise exclusion — EXACT, case-SENSITIVE (names came from a
+    // prior histogram, correctly cased; folding case here would over-exclude a game
+    // class that merely shares a substring with an engine class).
+    const std::unordered_set<std::string> excludeSet(excludeClasses.begin(), excludeClasses.end());
+    const bool hasExclude = !excludeSet.empty();
+
+    // Full-pool class tally (only when the picker needs it). Counted over EVERY row
+    // that satisfies the class+name query, BEFORE the exclude-skip and INDEPENDENTLY
+    // of the result cap — so an excluded class (or one whose instances all sit past
+    // the cap) still shows in the Top-N and stays untickable.
+    std::unordered_map<std::string, int> histMap;
+    // Matched rows that survived the exclude filter (may exceed results.size() when
+    // the cap truncated the returned list — that's what drives `truncated`).
+    int matchedNonExcluded = 0;
+
     int32_t count = GetCount();
     rset.scanned = count;
     // `n` is the visit counter (0..count); `i` is the real GObjects index, walked
     // high->low when newestFirst so the most-recently-allocated matches (the newest
     // runtime spawns) are the ones kept under the maxResults cap. Default low->high
     // keeps the oldest (CDO / class-default / earliest instances).
-    for (int32_t n = 0; n < count && static_cast<int>(rset.results.size()) < maxResults; ++n) {
+    //
+    // buildHistogram=false (internal callers): keep the cheap early-exit at the cap.
+    // buildHistogram=true (pipe): walk ALL of GObjects so the histogram is complete.
+    for (int32_t n = 0; n < count; ++n) {
+        if (!buildHistogram && static_cast<int>(rset.results.size()) >= maxResults)
+            break;   // cheap path: stop collecting once the cap is full
         int32_t i = newestFirst ? (count - 1 - n) : n;
         if ((n & 0xFFF) == 0 && Tot::Requested()) {
             Sein::Warn("PIPE:find", "FindInstancesByClass: aborted (client gone / shutdown)");
@@ -1353,24 +1373,55 @@ SearchResultSet FindInstancesByClass(const std::string& className, bool exactMat
             if (lowerObjName.find(lowerName) == std::string::npos) continue;
         }
 
-        SearchResult sr;
-        sr.addr = obj;
-        sr.index = i;
-        sr.name = objName;
-        sr.className = clsName;
+        // This row satisfies the class+name query. Tally it PRE-exclude (full pool)
+        // so the picker can still surface — and untick — an excluded/past-cap class.
+        if (buildHistogram) ++histMap[clsName];
 
-        // Read outer
-        Macht::ReadSafe(obj + DynOff::UOBJECT_OUTER, sr.outer);
+        // Server-side class-noise skip: excluded classes never consume a cap slot,
+        // so a wanted instance that today sits past the cap survives the exclusion.
+        if (hasExclude && excludeSet.count(clsName)) continue;
+        ++matchedNonExcluded;
 
-        rset.results.push_back(std::move(sr));
+        // Collect into the returned list only until the cap is full; past that we
+        // keep scanning purely to finish the histogram (buildHistogram path).
+        if (static_cast<int>(rset.results.size()) < maxResults) {
+            SearchResult sr;
+            sr.addr = obj;
+            sr.index = i;
+            sr.name = objName;
+            sr.className = clsName;
+
+            // Read outer
+            Macht::ReadSafe(obj + DynOff::UOBJECT_OUTER, sr.outer);
+
+            rset.results.push_back(std::move(sr));
+        }
     }
 
-    // We stopped collecting once the cap was reached, so more matches may exist.
-    rset.truncated = (static_cast<int>(rset.results.size()) >= maxResults);
+    // truncated now means "more non-excluded matches exist than the cap returned".
+    // On the cheap internal path matchedNonExcluded stops at the cap (we break), so
+    // fall back to the classic "hit the cap" test there.
+    rset.truncated = buildHistogram
+        ? (matchedNonExcluded > static_cast<int>(rset.results.size()))
+        : (static_cast<int>(rset.results.size()) >= maxResults);
 
-    Sein::Info("PIPE:find", "FindInstancesByClass class='%s' name='%s': %d found%s, scanned=%d, nonNull=%d, named=%d",
+    // Materialize + sort the histogram (count desc, then name asc — mirrors the
+    // value-scan picker shape).
+    if (buildHistogram) {
+        rset.classHistogram.reserve(histMap.size());
+        for (const auto& kv : histMap) rset.classHistogram.emplace_back(kv.first, kv.second);
+        std::sort(rset.classHistogram.begin(), rset.classHistogram.end(),
+                  [](const std::pair<std::string, int>& a, const std::pair<std::string, int>& b) {
+                      if (a.second != b.second) return a.second > b.second;   // count desc
+                      return a.first < b.first;                               // name asc
+                  });
+        rset.classDistinct = static_cast<int>(rset.classHistogram.size());
+    }
+
+    Sein::Info("PIPE:find", "FindInstancesByClass class='%s' name='%s': %d found%s, scanned=%d, nonNull=%d, named=%d, distinct=%d, excluded=%d",
                  className.c_str(), nameFilter.c_str(), (int)rset.results.size(),
-                 rset.truncated ? " (capped)" : "", rset.scanned, rset.nonNull, rset.named);
+                 rset.truncated ? " (capped)" : "", rset.scanned, rset.nonNull, rset.named,
+                 rset.classDistinct, (int)excludeSet.size());
     return rset;
 }
 

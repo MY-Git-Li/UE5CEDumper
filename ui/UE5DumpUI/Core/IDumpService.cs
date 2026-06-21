@@ -65,7 +65,12 @@ public interface IDumpService
     // with the class query. Either query may be empty (class-only, name-only, or
     // both), but not both — the DLL scans all GObjects so name search isn't
     // bounded by the client-side result cap.
-    Task<FindInstancesResult> FindInstancesAsync(string className, bool exactMatch = false, int limit = 500, bool newestFirst = false, string nameFilter = "", CancellationToken ct = default);
+    // excludeClasses: server-side class-noise filter — the DLL skips these classes
+    // (EXACT, case-sensitive) BEFORE the result cap, so a wanted instance past the
+    // cap survives once the noise classes ahead of it are excluded. The response
+    // carries a full-pool class histogram (ClassHistogram / ClassDistinct) that
+    // includes excluded classes so the picker can still untick them.
+    Task<FindInstancesResult> FindInstancesAsync(string className, bool exactMatch = false, int limit = 500, bool newestFirst = false, string nameFilter = "", IReadOnlyList<string>? excludeClasses = null, CancellationToken ct = default);
     Task<CePointerInfo> GetCePointerInfoAsync(string addr, int fieldOffset = 0, CancellationToken ct = default);
 
     /// <summary>
