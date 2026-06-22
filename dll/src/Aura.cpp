@@ -1769,6 +1769,14 @@ struct ContainerCacheEntry {
     uintptr_t     valueStruct = 0;   // Map value struct
     uintptr_t     keyStruct   = 0;   // Map key struct
     int32_t       valueOffset = 0;   // Map: value offset within the pair
+    // Scalar (non-struct) Map side leaf types — the real property type names of a
+    // SCALAR map key/value (e.g. TMap<Name,int>: keyLeafType="NameProperty",
+    // valueLeafType="IntProperty"). Set only for Maps; "" when that side is a
+    // StructProperty (then *Struct above is used) and unused for Array/Set (whose
+    // single leaf type is `innerType`). Lets WalkContainerLeaves emit scalar map
+    // values/keys as leaves — `innerType` is the "K -> V" label, NOT a leaf type.
+    std::string   keyLeafType;       // P3 scalar-keyed maps
+    std::string   valueLeafType;     // P3 scalar-valued maps
 };
 
 static std::unordered_map<uintptr_t, std::vector<ContainerCacheEntry>> s_classContainerCache;
@@ -1823,6 +1831,11 @@ static void CollectContainersRecursive(
             e.valueStruct = layout.valueStructAddr;
             e.keyStruct   = layout.keyStructAddr;
             e.valueOffset = layout.valueOffset;
+            // Real leaf type per side (used by WalkContainerLeaves when the side is
+            // scalar, i.e. *Struct == 0). Harmless when the side is a struct — the
+            // emit gate keys on *Struct == 0, and "StructProperty" is non-scalar.
+            e.keyLeafType   = f.keyType;
+            e.valueLeafType = f.valueType;
             out.push_back(std::move(e));
         }
         else if (f.TypeName == "StructProperty") {
@@ -2026,15 +2039,41 @@ static void WalkContainerLeaves(uintptr_t structBase, uintptr_t structAddr,
                            && IsScalarLeafType(cfe.innerType)) {
                     // Leaf-container element (TArray<int> / TSet<int>): the element
                     // IS the value at slotBase, and cfe.innerType is its real type.
-                    // NOTE: Map is excluded — for a scalar-value map cfe.innerType
-                    // is the "K -> V" arrow label (not a real leaf type) and the
-                    // value lives at slotBase+valueOffset, not slotBase. Emitting
-                    // here would be a malformed leaf (wrong addr + bogus type) that
-                    // both consumers reject. Capturing scalar map values/keys
-                    // properly needs cfe to carry key/value leaf types — TODO.
+                    // (Map scalar sides are handled below — for a Map, cfe.innerType
+                    // is the "K -> V" label, not a leaf type, and the two sides live
+                    // at distinct offsets, so they need the per-side handling.)
                     const std::string empty;
                     ContainerLeaf lf{ containerPath, e, 0, slotBase, empty,
                                       slotBase, cfe.innerType, 0 /*caller resolves size*/, 0xFF, depth + 1 };
+                    visit(lf);
+                }
+            }
+
+            // Scalar Map sides (P3 — scalar-valued / scalar-keyed maps, e.g.
+            // TMap<Name,int>). The struct-side loop above handled struct key/value
+            // sides; here we emit the LEAF a scalar key/value forms. The value
+            // lives at slotBase+valueOffset, the key at slotBase (pair+0). Paths
+            // get ".Value" / ".Key" so the two never collide — matching the
+            // top-level static map scan (sf.name = base + ".Value"/".Key") and the
+            // struct-both-sides convention. Each side is emitted only when it is
+            // scalar (*Struct == 0); a struct side is already covered above, so a
+            // map never double-emits a side. leafName "" = the element IS the value
+            // (consumers treat the whole side as one scalar container / block).
+            if (cfe.kind == ContainerKind::Map) {
+                if (cfe.valueStruct == 0 && IsScalarLeafType(cfe.valueLeafType)) {
+                    const std::string empty;
+                    std::string vpath = containerPath; vpath += ".Value";
+                    ContainerLeaf lf{ vpath, e, 0, slotBase, empty,
+                                      slotBase + cfe.valueOffset, cfe.valueLeafType,
+                                      0 /*caller resolves size*/, 0xFF, depth + 1 };
+                    visit(lf);
+                }
+                if (cfe.keyStruct == 0 && IsScalarLeafType(cfe.keyLeafType)) {
+                    const std::string empty;
+                    std::string kpath = containerPath; kpath += ".Key";
+                    ContainerLeaf lf{ kpath, e, 0, slotBase, empty,
+                                      slotBase /*key at pair+0*/, cfe.keyLeafType,
+                                      0 /*caller resolves size*/, 0xFF, depth + 1 };
                     visit(lf);
                 }
             }
