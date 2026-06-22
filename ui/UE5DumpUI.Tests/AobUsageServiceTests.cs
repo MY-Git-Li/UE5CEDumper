@@ -213,6 +213,140 @@ public class AobUsageServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RecordScan_PreservesVersionDetectRevAcrossRoundTrip()
+    {
+        // The DLL stamps versionDetectRev when it saves a detected version. AobUsageService
+        // does a routine read-modify-write after every connect — it MUST preserve that stamp,
+        // otherwise the next launch sees rev=0, treats the cache as stale, and re-runs the
+        // slow UE-version detection (defeating the whole acceleration).
+        var svc = CreateService();
+        const string peHash = "5F3A1B2CCDD40000";
+
+        Directory.CreateDirectory(Path.GetDirectoryName(svc.FilePath)!);
+        var seed = new AobUsageFile
+        {
+            MachineName = "TEST-MACHINE",
+            Games = new()
+            {
+                [peHash] = new AobUsageRecord
+                {
+                    PeHash = peHash,
+                    GameName = "TestGame.exe",
+                    UEVersion = 427,
+                    VersionDetected = false,
+                    LowConfidence = true,
+                    VersionDetectRev = 1,
+                    ScanCount = 5,
+                },
+            },
+        };
+        await File.WriteAllTextAsync(svc.FilePath,
+            JsonSerializer.Serialize(seed, AobUsageJsonContext.Default.AobUsageFile),
+            TestContext.Current.CancellationToken);
+
+        await svc.RecordScanAsync(MakeState(peHash));
+
+        var file = await svc.LoadFileAsync();
+        var record = file.Games[peHash];
+        Assert.Equal(1, record.VersionDetectRev);   // stamp preserved (not clobbered)
+        Assert.Equal(6, record.ScanCount);            // sanity: routine update still happened
+    }
+
+    [Fact]
+    public async Task RecordScan_WritesLowConfidenceFromState()
+    {
+        var svc = CreateService();
+        var state = new EngineState
+        {
+            PeHash = "AABBCCDD11223344",
+            ModuleName = "Stripped.exe",
+            UEVersion = 427,
+            VersionDetected = false,
+            IsLowConfidence = true,
+        };
+
+        await svc.RecordScanAsync(state);
+
+        var file = await svc.LoadFileAsync();
+        Assert.True(file.Games["AABBCCDD11223344"].LowConfidence);
+    }
+
+    [Fact]
+    public async Task RecordScan_OverrideDoesNotClobberPriorDetection()
+    {
+        // Invariant #4 (update branch): when the version came from a user override, the override
+        // value must NOT overwrite the last genuine detection cached as ueVersion — otherwise
+        // clearing the override later would reuse the override value as a confident auto-detection.
+        var svc = CreateService();
+        const string peHash = "5F3A1B2CCDD40000";
+
+        Directory.CreateDirectory(Path.GetDirectoryName(svc.FilePath)!);
+        var seed = new AobUsageFile
+        {
+            MachineName = "TEST-MACHINE",
+            Games = new()
+            {
+                [peHash] = new AobUsageRecord
+                {
+                    PeHash = peHash,
+                    GameName = "TestGame.exe",
+                    UEVersion = 504,            // the last GENUINE detection
+                    VersionDetected = true,
+                    LowConfidence = false,
+                    VersionDetectRev = 1,
+                    ScanCount = 3,
+                },
+            },
+        };
+        await File.WriteAllTextAsync(svc.FilePath,
+            JsonSerializer.Serialize(seed, AobUsageJsonContext.Default.AobUsageFile),
+            TestContext.Current.CancellationToken);
+
+        // A scan reports the value as an ACTIVE user override (e.g. user forced 427).
+        var overrideState = new EngineState
+        {
+            PeHash = peHash,
+            ModuleName = "TestGame.exe",
+            UEVersion = 427,
+            VersionDetected = true,   // the DLL surfaces an override as confident...
+            IsUserOverride = true,    // ...but this flag means "don't cache it as a detection"
+        };
+        await svc.RecordScanAsync(overrideState);
+
+        var record = (await svc.LoadFileAsync()).Games[peHash];
+        Assert.Equal(504, record.UEVersion);          // prior real detection untouched (NOT 427)
+        Assert.True(record.VersionDetected);
+        Assert.False(record.LowConfidence);
+        Assert.Equal(1, record.VersionDetectRev);     // DLL stamp preserved
+        Assert.Equal(4, record.ScanCount);            // routine update still happened
+    }
+
+    [Fact]
+    public async Task RecordScan_NewRecordWithOverrideCachesNoDetection()
+    {
+        // Invariant #4 (new-record branch): a first-ever scan that reports an active override must
+        // not seed the cache with the override value as a detection (versionDetectRev stays 0, so
+        // the next launch re-detects rather than reusing the override as a confident auto-detection).
+        var svc = CreateService();
+        var overrideState = new EngineState
+        {
+            PeHash = "11220000333344445",
+            ModuleName = "Fresh.exe",
+            UEVersion = 427,
+            VersionDetected = true,
+            IsUserOverride = true,
+        };
+
+        await svc.RecordScanAsync(overrideState);
+
+        var record = (await svc.LoadFileAsync()).Games["11220000333344445"];
+        Assert.Equal(0, record.UEVersion);            // override value NOT cached as a detection
+        Assert.False(record.VersionDetected);
+        Assert.False(record.LowConfidence);
+        Assert.Equal(0, record.VersionDetectRev);     // unstamped → next launch re-detects
+    }
+
+    [Fact]
     public void FilePath_ContainsMachineName()
     {
         var svc = CreateService();

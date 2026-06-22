@@ -16,6 +16,18 @@ builds ≤696 in
 
 -----
 
+## 2026-06-22 — UE version detection cached per peHash — no more re-detecting stripped-version games on every connect (build 1521; DLL + UI; dev)
+
+**Symptom.** Every connect re-ran the full UE-version detection. For publisher-stripped games (SquareEnix — Elliot, etc.) `DetectVersionDetailed()` falls through the cheap PE-VERSIONINFO path into the **slow memory string scan** (Tier 1/2/3 over the whole module image, 5+ s on large games). Re-running it on the *same binary* every launch is pure wasted time — the answer never changes.
+
+**Root cause.** The HintCache already carried `ueVersion`/`versionDetected` and `Genau::FindAll` already had a cache-reuse branch — but it was gated on `publisher == nullptr && versionDetected == true`. SquareEnix games match a publisher thumbprint **and** detect as `versionDetected == false` (inferred), so **both gates failed → full re-detect every time**. The old comment justified this as "keep the badge honest" — but `DetectVersionDetailed` scans the module's **static image**, so it is deterministic per binary; the same peHash always yields the same answer. Re-running buys nothing.
+
+**Fix — gate cache-reuse on a detection-logic revision instead of the publisher flag.** New `Genau::kVersionDetectLogicRev` ([Genau.h](../dll/src/Genau.h)) is stamped into each saved version (`Flamme::SaveResults` writes `versionDetectRev` + `lowConfidence`). The reuse branch now trusts the cache for **any** same-peHash game — publisher-stripped, inferred, low-confidence, all of it — whenever `hints.versionDetectRev == kVersionDetectLogicRev`, restoring `bVersionDetected`/`bLowConfidence` **verbatim** so the UI badge and the "set an override" nudge stay exactly as honest as a fresh detect. A logic change → bump the rev → every cache re-detects **once** and re-stamps. The constant is deliberately **decoupled from the build number** (a build-number gate would re-detect on every dev rebuild and defeat the cache for the very games it targets).
+
+**The DLL↔UI write-ordering trap.** Both the DLL (`Flamme`, during `FindAll`) and the C# UI (`AobUsageService.RecordScanAsync`, after connect) write the shared JSON — and the UI write lands *second*. The UI deserializes into the strongly-typed (AOT source-gen) `AobUsageRecord`, which **drops any JSON field it doesn't model** — so without a matching C# field the DLL's `versionDetectRev` stamp would be erased on every connect, silently forcing a re-detect next launch. So `AobUsageRecord` gains `VersionDetectRev` (DLL-authoritative — **preserved, never assigned** by `RecordScanAsync`, exactly like `UEVersionUserOverride`) and `LowConfidence` (written from `EngineState.IsLowConfidence`). The rev never travels the pipe — it lives only in the cache file. Existing escape hatches unchanged: the per-game **Delete cache** button forces a fresh detect; a **UE version override** still wins over everything.
+
+**Tests.** `AobUsageServiceTests` gains `RecordScan_PreservesVersionDetectRevAcrossRoundTrip` (the stamp survives the UI's read-modify-write) + `RecordScan_WritesLowConfidenceFromState`, mirroring the existing override-preservation test.
+
 ## 2026-06-21 — Snapshot: "Auto detect Engine/System noise" — skip engine/system classes at CAPTURE time (builds 1484-1486; DLL + UI; dev; in-game verify pending)
 
 Snapshot already had a **Noise Picker**, but it only filters the *finished* snapshot at diff time (`DenylistScope.Diff`, store-side) — every object still enters the SQLite store, so it neither speeds up capture nor shrinks the DB. This adds a capture-time option that prevents pure engine/system classes from **ever entering** the snapshot, mirroring the auto-detect already used in Value Search + the Instance finder. **Default ON.**
