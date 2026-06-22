@@ -47,6 +47,7 @@
     <sys:String x:Key="str.Tip.Related.Load">List this object's class/outer, its Controller↔Pawn counterpart, and the sub-objects it owns (components, GAS AbilitySystemComponent → AttributeSets)</sys:String>
     <sys:String x:Key="str.Tip.Related.DetectTarget">Auto-detect the actor the player is currently targeting (GWorld → PlayerController → Pawn → target field) and load its related objects — no class-name guessing</sys:String>
     <sys:String x:Key="str.Tip.Related.GWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this object and show it in Live Walker</sys:String>
+    <sys:String x:Key="str.Tip.Related.GameEngine">Locate in GameEngine: find the shortest pointer path from the live UGameEngine down to this object. Reaches engine / GameInstance / LocalPlayer / engine-subsystem objects the GWorld graph can't — but NOT most world actors (use Locate in GWorld for those)</sys:String>
     <sys:String x:Key="str.Tip.Related.Walk">Open this object in Live Walker for field-by-field inspection</sys:String>
     <sys:String x:Key="str.Tip.Related.Find">Find all live instances of this object's class (Instance Finder)</sys:String>
     <sys:String x:Key="str.Tip.Related.Copy">Copy this object's address to the clipboard</sys:String>
@@ -217,6 +218,8 @@
     <sys:String x:Key="str.InstanceFinder.OpenInWalker">Open in Live Walker</sys:String>
     <sys:String x:Key="str.InstanceFinder.LocateGWorld">🌍 Locate in GWorld</sys:String>
     <sys:String x:Key="str.InstanceFinder.LocateGWorldShort">🌍</sys:String>
+    <sys:String x:Key="str.InstanceFinder.LocateGameEngine">⚙ Locate in GameEngine</sys:String>
+    <sys:String x:Key="str.InstanceFinder.LocateGameEngineShort">⚙</sys:String>
     <sys:String x:Key="str.InstanceFinder.AddressHint">Address (hex or module.exe+offset)</sys:String>
     <sys:String x:Key="str.InstanceFinder.Lookup">Lookup</sys:String>
     <sys:String x:Key="str.InstanceFinder.ExactMatch">Exact match</sys:String>

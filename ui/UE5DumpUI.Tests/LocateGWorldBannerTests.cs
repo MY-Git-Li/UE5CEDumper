@@ -20,7 +20,8 @@ public class LocateGWorldBannerTests
     {
         public GWorldPathResult Next = new();
         public override Task<GWorldPathResult> FindPathFromGWorldAsync(
-            string target, string? objectAddr = null, int maxDepth = 5, CancellationToken ct = default)
+            string target, string? objectAddr = null, int maxDepth = 5, CancellationToken ct = default,
+            string rootKind = "gworld")
             => Task.FromResult(Next);
     }
 
@@ -80,6 +81,39 @@ public class LocateGWorldBannerTests
         await vm.LocateInGWorldAsync("0x2000", 0, null, stopAtParent: false);
 
         Assert.False(vm.HasLocateFailure);
+    }
+
+    [Fact]
+    public async Task LocateInGameEngine_NotReachable_BannerMentionsGameEngine()
+    {
+        // The engine-rooted variant must surface a GameEngine-specific reason (an
+        // engine root reaches engine-layer objects but not most world actors), so
+        // the user isn't told to "raise depth" or expect level-list recovery.
+        var stub = new PathStub
+        {
+            Next = new GWorldPathResult { Found = false, Status = "not_reachable", Visited = 42 },
+        };
+        var vm = MakeVm(stub);
+
+        await vm.LocateInGameEngineAsync("0x1000", 0, null, stopAtParent: false);
+
+        Assert.True(vm.HasLocateFailure);
+        Assert.Contains("GameEngine", vm.LocateFailureMessage);
+    }
+
+    [Fact]
+    public async Task LocateInGameEngine_NoEngine_BannerExplains()
+    {
+        var stub = new PathStub
+        {
+            Next = new GWorldPathResult { Found = false, Status = "no_engine" },
+        };
+        var vm = MakeVm(stub);
+
+        await vm.LocateInGameEngineAsync("0x1000", 0, null, stopAtParent: false);
+
+        Assert.True(vm.HasLocateFailure);
+        Assert.Contains("UGameEngine", vm.LocateFailureMessage);
     }
 
     [Fact]

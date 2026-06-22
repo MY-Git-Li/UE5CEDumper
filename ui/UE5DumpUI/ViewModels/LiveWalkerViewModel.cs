@@ -1935,9 +1935,11 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// </summary>
     public async Task LocateInGWorldAsync(string? objectAddr, int scrollFieldOffset,
                                           string? scrollFieldName, bool stopAtParent,
-                                          CancellationToken ct = default)
+                                          CancellationToken ct = default, string rootKind = "gworld")
     {
         if (string.IsNullOrEmpty(objectAddr)) return;
+        // User-facing label for the chosen BFS root ("GWorld" vs "GameEngine").
+        string rootLabel = rootKind == "engine" ? "GameEngine" : "GWorld";
         try
         {
             ClearStatus();
@@ -1946,7 +1948,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             _preBookmarkBreadcrumbs = null;
             IsBookmarkSaveMode = false;
 
-            var path = await _dump.FindPathFromGWorldAsync(objectAddr, objectAddr, GWorldLocateDepth, ct);
+            var path = await _dump.FindPathFromGWorldAsync(objectAddr, objectAddr, GWorldLocateDepth, ct, rootKind);
 
             if (!path.Found)
             {
@@ -1954,14 +1956,14 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 {
                     // User-initiated cancel — preserve the current view and report
                     // it as a mild top-line status (not a failure banner).
-                    StatusText = GWorldPathFailureStatus(path);
+                    StatusText = GWorldPathFailureStatus(path, rootLabel);
                     return;
                 }
                 // Don't leave the previous object on screen as if it were the
                 // result — clear it and raise a prominent failure banner so the
                 // empty grid doesn't read as "nothing loaded yet".
                 ClearDisplayedNode();
-                LocateFailureMessage = GWorldPathFailureStatus(path);
+                LocateFailureMessage = GWorldPathFailureStatus(path, rootLabel);
                 return;
             }
 
@@ -1998,10 +2000,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 // so skip the fallback rather than land on an unrelated row.
                 if (!landed && Breadcrumbs.Count > 0 && Breadcrumbs[^1].Address == ownerAddr)
                     landed = ScrollToFieldByOffset(scrollFieldOffset);
-                _log.Info($"LocateInGWorld: reach+container-path-drill, {path.Depth} hop(s), landed={landed} | BC={FormatBreadcrumbTrace()}");
+                _log.Info($"LocateIn{rootLabel}: reach+container-path-drill, {path.Depth} hop(s), landed={landed} | BC={FormatBreadcrumbTrace()}");
                 StatusText = (landed
-                    ? $"Located via GWorld — {path.Depth} hop(s) to {path.TargetName}; landed on {scrollFieldName}."
-                    : $"Located via GWorld — {path.Depth} hop(s) to {path.TargetName} (drill into {scrollFieldName} manually).")
+                    ? $"Located via {rootLabel} — {path.Depth} hop(s) to {path.TargetName}; landed on {scrollFieldName}."
+                    : $"Located via {rootLabel} — {path.Depth} hop(s) to {path.TargetName} (drill into {scrollFieldName} manually).")
                     + GWorldViaLevelNote(path);
                 return;
             }
@@ -2031,12 +2033,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             result = await AutoFillGapsRetryAsync(result, displayAddr);
             UpdateDisplay(result);
 
-            _log.Info($"LocateInGWorld: {(stopAtParent ? "parent" : "reach")} mode, {path.Depth} hop(s), " +
+            _log.Info($"LocateIn{rootLabel}: {(stopAtParent ? "parent" : "reach")} mode, {path.Depth} hop(s), " +
                       $"visited {path.Visited}, {path.DurationMs}ms | BC={FormatBreadcrumbTrace()}");
 
             StatusText = (stopAtParent
-                ? $"Located via GWorld — {path.Depth} hop(s); parent of {path.TargetName} ({path.TargetClass})."
-                : $"Located via GWorld — {path.Depth} hop(s) to {path.TargetName} ({path.TargetClass}).")
+                ? $"Located via {rootLabel} — {path.Depth} hop(s); parent of {path.TargetName} ({path.TargetClass})."
+                : $"Located via {rootLabel} — {path.Depth} hop(s) to {path.TargetName} ({path.TargetClass}).")
                 + GWorldViaLevelNote(path);
         }
         catch (Exception ex)
@@ -2044,9 +2046,9 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             // Surface the exception prominently (ErrorMessage isn't bound in this
             // panel — without this a thrown locate would be invisible to the user).
             ClearDisplayedNode();
-            LocateFailureMessage = $"Locate in GWorld failed: {ex.Message}";
+            LocateFailureMessage = $"Locate in {rootLabel} failed: {ex.Message}";
             SetError(ex);
-            _log.Error($"LocateInGWorld failed for {objectAddr}", ex);
+            _log.Error($"LocateIn{rootLabel} failed for {objectAddr}", ex);
         }
         finally
         {
@@ -2062,23 +2064,40 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             ? " (via the world's level list — streaming/WP actor; the world→level hop is a back-reference, not a static pointer)"
             : "";
 
-    /// <summary>Map a failed GWorld path search to an actionable status message.</summary>
-    private string GWorldPathFailureStatus(GWorldPathResult path) => path.Status switch
+    /// <summary>Map a failed path search to an actionable status message.
+    /// <paramref name="rootLabel"/> is "GWorld" (default) or "GameEngine" — it tailors
+    /// the not_reachable explanation, since an engine root reaches engine-layer objects
+    /// but NOT most world actors (the level-list recovery is World-root only).</summary>
+    private string GWorldPathFailureStatus(GWorldPathResult path, string rootLabel = "GWorld") => path.Status switch
     {
-        // not_reachable means the BFS exhausted everything reachable from GWorld
+        // not_reachable means the BFS exhausted everything reachable from the root
         // (within the depth) WITHOUT finding the target — the object isn't
-        // referenced by any forward pointer chain from GWorld. Raising the depth
-        // does NOT help (the reachable set is already exhausted). This is common
-        // for just-spawned or streaming / World-Partition actors that nothing
-        // references yet.
-        "not_reachable"  => $"Not reachable — nothing in the GWorld graph references this object, and it isn't in any of the world's levels' actor lists either (searched {path.Visited:N0} objects). Raising depth won't help. If it's a streaming/World-Partition actor, try once it's loaded/aggro'd; or 🔗 Related from an Instance Finder hit, or use Find Refs to find a holder.",
-        "deadline"       => $"GWorld path search timed out at depth {GWorldLocateDepth} (visited {path.Visited:N0}). Try a smaller depth.",
-        "visited_cap"    => $"GWorld path search space too large at depth {GWorldLocateDepth} (visited {path.Visited:N0}). Try a smaller depth.",
-        "cancelled"      => "GWorld path search cancelled.",
+        // referenced by any forward pointer chain from the root. Raising the depth
+        // does NOT help (the reachable set is already exhausted).
+        "not_reachable"  => rootLabel == "GameEngine"
+            ? $"Not reachable from GameEngine — nothing in the engine's forward graph references this object (searched {path.Visited:N0}). An engine root reaches engine / GameInstance / LocalPlayer / engine-subsystem objects, but NOT most world actors: those live below GWorld, and the streaming/World-Partition recovery (via a level's actor list) only works from a World root. For a world actor, use 🌍 Locate in GWorld instead."
+            : $"Not reachable — nothing in the GWorld graph references this object, and it isn't in any of the world's levels' actor lists either (searched {path.Visited:N0} objects). Raising depth won't help. If it's a streaming/World-Partition actor, try once it's loaded/aggro'd; or 🔗 Related from an Instance Finder hit, or use Find Refs to find a holder.",
+        "deadline"       => $"{rootLabel} path search timed out at depth {GWorldLocateDepth} (visited {path.Visited:N0}). Try a smaller depth.",
+        "visited_cap"    => $"{rootLabel} path search space too large at depth {GWorldLocateDepth} (visited {path.Visited:N0}). Try a smaller depth.",
+        "cancelled"      => $"{rootLabel} path search cancelled.",
         "no_gworld"      => "GWorld is not available (AOB scan found no UWorld).",
+        "no_engine"      => "The live UGameEngine could not be resolved (no active engine with GameViewport / GameInstance).",
         "invalid_target" => "Could not resolve the target object in GObjects.",
-        _                => $"No GWorld path found ({path.Status}).",
+        _                => $"No {rootLabel} path found ({path.Status}).",
     };
+
+    /// <summary>"Locate in GameEngine": the same forward path search as
+    /// <see cref="LocateInGWorldAsync"/> but rooted at the live UGameEngine instead of
+    /// GWorld. Reaches engine-layer objects (GameInstance / LocalPlayer / engine
+    /// subsystems) the GWorld graph never touches — but is NOT a superset: an engine
+    /// root sits one hop above the world, so streaming / World-Partition actors
+    /// (recovered for a World root via ULevel::OwningWorld) are typically
+    /// not_reachable from here.</summary>
+    public Task LocateInGameEngineAsync(string? objectAddr, int scrollFieldOffset,
+                                        string? scrollFieldName, bool stopAtParent,
+                                        CancellationToken ct = default)
+        => LocateInGWorldAsync(objectAddr, scrollFieldOffset, scrollFieldName, stopAtParent,
+                               ct, rootKind: "engine");
 
     /// <summary>
     /// Replace the breadcrumb spine with the GWorld→target path: a GWorld root

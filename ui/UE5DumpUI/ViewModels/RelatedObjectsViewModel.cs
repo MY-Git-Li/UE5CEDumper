@@ -45,6 +45,12 @@ public partial class RelatedObjectsViewModel : ViewModelBase
     /// (forward path search). Payload = object address.</summary>
     public event Action<string>? LocateInGWorld;
 
+    /// <summary>Locate the selected row's object within the GameEngine graph
+    /// (forward path search rooted at the live UGameEngine). Payload = object
+    /// address. Complements <see cref="LocateInGWorld"/> — reaches engine-layer
+    /// objects the GWorld graph never touches.</summary>
+    public event Action<string>? LocateInGameEngine;
+
     /// <summary>Find all instances of the selected row's class. Payload = class name.</summary>
     public event Action<string>? NavigateToInstanceFinder;
 
@@ -120,6 +126,17 @@ public partial class RelatedObjectsViewModel : ViewModelBase
         row ??= SelectedRelated;
         if (row == null || string.IsNullOrEmpty(row.Address)) return;
         LocateInGWorld?.Invoke(row.Address);
+    }
+
+    // Same as LocateRowInGWorld but roots the path search at the live UGameEngine.
+    // Not gated on a C# availability flag — the DLL's find_path is the source of
+    // truth and reports availability via the LiveWalker StatusText (see above).
+    [RelayCommand]
+    private void LocateRowInGameEngine(RelatedObject? row)
+    {
+        row ??= SelectedRelated;
+        if (row == null || string.IsNullOrEmpty(row.Address)) return;
+        LocateInGameEngine?.Invoke(row.Address);
     }
 
     [RelayCommand]

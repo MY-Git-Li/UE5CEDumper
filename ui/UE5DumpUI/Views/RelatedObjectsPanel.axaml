@@ -103,6 +103,13 @@
                         Foreground="#C586C0" Background="Transparent"
                         BorderThickness="1" BorderBrush="#C586C0"
                         Padding="6,2" FontSize="11" Cursor="Hand"/>
+                <Button Content="{StaticResource str.InstanceFinder.LocateGameEngineShort}"
+                        Command="{Binding $parent[DataGrid].((vm:RelatedObjectsViewModel)DataContext).LocateRowInGameEngineCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.Related.GameEngine}"
+                        Foreground="#C586C0" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#C586C0"
+                        Padding="6,2" FontSize="11" Cursor="Hand"/>
                 <Button Content="{StaticResource str.VS.OpenLive}"
                         Command="{Binding $parent[DataGrid].((vm:RelatedObjectsViewModel)DataContext).OpenInLiveWalkerCommand}"
                         CommandParameter="{Binding}"
