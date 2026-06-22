@@ -83,6 +83,11 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     /// Live Walker and runs LocateInGWorldAsync (goto + select that exact pawn).</summary>
     public event Action<string>? LocateInGWorld;
 
+    /// <summary>Engine-rooted counterpart of <see cref="LocateInGWorld"/> (path search
+    /// rooted at the live UGameEngine). NOTE: a pawn is a world actor and usually lives
+    /// below GWorld, so this is typically unreachable — provided for parity.</summary>
+    public event Action<string>? LocateInGameEngine;
+
     /// <summary>Whether global teleport hotkeys can be offered (a hotkey service
     /// was supplied — false in headless tests).</summary>
     public bool CanBindCursorHotkey => _globalHotkeys != null;
@@ -425,9 +430,18 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     /// Walker reports reachability via its own status (incl. ok_via_level for
     /// World-Partition / streaming pawns).</summary>
     [RelayCommand]
-    private async Task LocateCurrentPoseInGWorldAsync()
+    private Task LocateCurrentPoseInGWorldAsync() => LocateCurrentPoseAsync(useEngine: false);
+
+    /// <summary>Engine-rooted counterpart of <see cref="LocateCurrentPoseInGWorldAsync"/>.
+    /// A pawn is a world actor, usually below GWorld, so this is typically unreachable —
+    /// provided for parity (see the tooltip).</summary>
+    [RelayCommand]
+    private Task LocateCurrentPoseInGameEngineAsync() => LocateCurrentPoseAsync(useEngine: true);
+
+    private async Task LocateCurrentPoseAsync(bool useEngine)
     {
         if (!IsConnected) return;
+        string root = useEngine ? "GameEngine" : "GWorld";
         try
         {
             IsBusy = true;
@@ -444,13 +458,14 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 StatusText = "No pawn to locate (the current pose has no resolved pawn address).";
                 return;
             }
-            StatusText = $"Locating pawn {p.PawnAddr} in GWorld…";
-            LocateInGWorld?.Invoke(p.PawnAddr);
+            StatusText = $"Locating pawn {p.PawnAddr} in {root}…";
+            if (useEngine) LocateInGameEngine?.Invoke(p.PawnAddr);
+            else           LocateInGWorld?.Invoke(p.PawnAddr);
         }
         catch (Exception ex)
         {
             SetError(ex);
-            _log.Error("Teleport LocateCurrentPoseInGWorld failed", ex);
+            _log.Error($"Teleport LocateCurrentPose ({root}) failed", ex);
         }
         finally { IsBusy = false; }
     }

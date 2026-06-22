@@ -100,14 +100,17 @@ public interface IDumpService
     Task<FindReferencesResult> FindReferencesToUObjectAsync(
         string addr, int maxResults = 32, CancellationToken ct = default);
 
-    // --- Forward Object-Graph Path Search ("Locate in GWorld") ---
-    // Compute the shortest pointer chain from the live UWorld down to a target
-    // (a UObject, or a property value whose owning object is passed via
-    // objectAddr). Used by Live Walker to replace its breadcrumb spine and land
-    // on the target.
+    // --- Forward Object-Graph Path Search ("Locate in GWorld" / "in GameEngine") ---
+    // Compute the shortest pointer chain from a root down to a target (a UObject,
+    // or a property value whose owning object is passed via objectAddr). Used by
+    // Live Walker to replace its breadcrumb spine and land on the target.
+    // rootKind selects the BFS root: "gworld" (default — the live UWorld) or
+    // "engine" (the live UGameEngine; reaches engine-layer objects the GWorld
+    // graph never touches, but NOT a superset — world actors are typically
+    // not_reachable from the engine).
     Task<GWorldPathResult> FindPathFromGWorldAsync(
         string target, string? objectAddr = null, int maxDepth = 5,
-        CancellationToken ct = default);
+        CancellationToken ct = default, string rootKind = "gworld");
 
     // --- Related-object graph (forward, owned) — "Related Objects" panel ---
     // Given a UObject (typically an actor), list itself, its class/outer, its

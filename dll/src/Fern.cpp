@@ -3115,28 +3115,50 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
 
             int32_t maxDepth = request.value("max_depth", 5);
 
-            // --- Resolve the UWorld root (mirror walk_world: deref &GWorld, then
-            //     fall back to a GObjects UWorld instance scan). ---
+            // --- Resolve the BFS root. Default is the live UWorld (GWorld);
+            //     root_kind="engine" roots the SAME forward BFS at the live
+            //     UGameEngine instead ("Locate in GameEngine"), so the UI can
+            //     reach engine-layer objects (GameInstance / LocalPlayer / engine
+            //     subsystems) that the GWorld graph never touches. NOTE: an engine
+            //     root is NOT a superset of GWorld — it sits one hop ABOVE the
+            //     world, so streaming / World-Partition actors (which the GWorld
+            //     path recovers via RecoverViaWorldLevel, itself gated on a World
+            //     root) are typically not_reachable from the engine. ---
+            const std::string rootKind = request.value("root_kind", "gworld");
             uintptr_t rootObj = 0;
-            if (g_cachedGWorld)
-                Macht::ReadSafe(g_cachedGWorld, rootObj);
-            if (!rootObj) {
-                Aura::ForEach([&](int32_t, uintptr_t obj) -> bool {
-                    uintptr_t cls = Ubel::GetClass(obj);
-                    if (!cls) return true;
-                    if (Ubel::GetName(cls) == "World") {
-                        if (Ubel::GetName(obj).rfind("Default__", 0) == 0) return true; // skip CDO
-                        rootObj = obj;
-                        return false;
-                    }
-                    return true;
-                });
-            }
-            if (!rootObj) {
-                json data;
-                data["found"]  = false;
-                data["status"] = "no_gworld";
-                return Renge::MakeResponse(id, data).dump();
+            if (rootKind == "engine") {
+                rootObj = Genau::FindGameEngine().engineAddr;
+                if (!rootObj) {
+                    json data;
+                    data["found"]     = false;
+                    data["status"]    = "no_engine";
+                    data["root_kind"] = rootKind;
+                    return Renge::MakeResponse(id, data).dump();
+                }
+            } else {
+                // Mirror walk_world: deref &GWorld, then fall back to a GObjects
+                // UWorld instance scan.
+                if (g_cachedGWorld)
+                    Macht::ReadSafe(g_cachedGWorld, rootObj);
+                if (!rootObj) {
+                    Aura::ForEach([&](int32_t, uintptr_t obj) -> bool {
+                        uintptr_t cls = Ubel::GetClass(obj);
+                        if (!cls) return true;
+                        if (Ubel::GetName(cls) == "World") {
+                            if (Ubel::GetName(obj).rfind("Default__", 0) == 0) return true; // skip CDO
+                            rootObj = obj;
+                            return false;
+                        }
+                        return true;
+                    });
+                }
+                if (!rootObj) {
+                    json data;
+                    data["found"]     = false;
+                    data["status"]    = "no_gworld";
+                    data["root_kind"] = rootKind;
+                    return Renge::MakeResponse(id, data).dump();
+                }
             }
 
             // --- Resolve the target UObject + intra-object offset of the value. ---
@@ -3179,7 +3201,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             // `visited` = the object simply isn't referenced from the GWorld graph
             // (e.g. a just-spawned / streaming actor), NOT a depth/timeout issue.
             Sein::Info("PIPE:path",
-                "find_path_from_gworld: target=0x%llX status=%s found=%d hops=%d visited=%d %lldms (maxDepth=%d)",
+                "find_path_from_gworld: root_kind=%s root=0x%llX target=0x%llX status=%s found=%d hops=%d visited=%d %lldms (maxDepth=%d)",
+                rootKind.c_str(), static_cast<unsigned long long>(rootObj),
                 static_cast<unsigned long long>(targetObj), path.status.c_str(),
                 path.found ? 1 : 0, path.depthReached, path.visited,
                 static_cast<long long>(path.durationMs), maxDepth);
@@ -3187,6 +3210,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             json data;
             data["found"]               = path.found;
             data["status"]              = path.status;
+            data["root_kind"]           = rootKind;
             data["root_addr"]           = Renge::AddrToStr(rootObj);
             data["root_name"]           = Ubel::GetName(rootObj);
             data["target_obj"]          = Renge::AddrToStr(targetObj);

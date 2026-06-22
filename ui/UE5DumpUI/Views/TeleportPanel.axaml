@@ -30,6 +30,16 @@
                     Command="{Binding LocateCurrentPoseInGWorldCommand}"
                     ToolTip.Tip="{StaticResource str.Tip.TP.Locate}"
                     IsEnabled="{Binding CanOperate}" Padding="10,3"/>
+            <!-- Locate in GameEngine: compact icon button (not big text) per the
+                 icon-style spec; a pawn is usually below GWorld so this is mostly
+                 for parity. Connection-gated (CanOperate), not GWorld-gated. -->
+            <Button Content="{StaticResource str.TP.LocateGameEngine}"
+                    Command="{Binding LocateCurrentPoseInGameEngineCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.LocateGameEngine}"
+                    IsEnabled="{Binding CanOperate}"
+                    Foreground="#C586C0" Background="Transparent"
+                    BorderThickness="1" BorderBrush="#C586C0"
+                    Padding="6,2" FontSize="11" Cursor="Hand" VerticalAlignment="Center"/>
             <CheckBox Content="{StaticResource str.TP.Auto}"
                       IsChecked="{Binding AutoRefresh}"
                       ToolTip.Tip="{StaticResource str.Tip.TP.Auto}"

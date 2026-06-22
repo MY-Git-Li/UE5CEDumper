@@ -143,6 +143,13 @@
                             Foreground="#C586C0" Background="Transparent"
                             BorderThickness="1" BorderBrush="#C586C0"
                             Padding="6,2" FontSize="11" Cursor="Hand"/>
+                    <Button Content="{StaticResource str.InstanceFinder.LocateGameEngineShort}"
+                            Command="{Binding $parent[DataGrid].((vm:InstanceFinderViewModel)DataContext).LocateContainerOwnerInGameEngineCommand}"
+                            CommandParameter="{Binding}"
+                            ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.LocateGameEngineContainer}"
+                            Foreground="#C586C0" Background="Transparent"
+                            BorderThickness="1" BorderBrush="#C586C0"
+                            Padding="6,2" FontSize="11" Cursor="Hand"/>
                   </StackPanel>
                 </DataTemplate>
               </DataGridTemplateColumn.CellTemplate>
@@ -249,6 +256,15 @@
                   IsEnabled="{Binding IsGWorldAvailable}"
                   ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.LocateGWorld}"
                   Padding="8,4"/>
+          <!-- Locate in GameEngine: kept as a compact icon button (not big text)
+               even beside the big-text GWorld button, per the icon-style spec. Not
+               gated on IsGWorldAvailable — engine availability is independent. -->
+          <Button Content="{StaticResource str.InstanceFinder.LocateGameEngineShort}"
+                  Command="{Binding LocateSelectedInGameEngineCommand}"
+                  ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.LocateGameEngine}"
+                  Foreground="#C586C0" Background="Transparent"
+                  BorderThickness="1" BorderBrush="#C586C0"
+                  Padding="6,2" FontSize="11" Cursor="Hand"/>
           <Button Content="{StaticResource str.Related.ShowButton}"
                   Command="{Binding ShowRelatedObjectsCommand}"
                   ToolTip.Tip="{StaticResource str.Tip.Related.Show}"

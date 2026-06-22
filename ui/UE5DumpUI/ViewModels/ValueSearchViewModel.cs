@@ -592,6 +592,10 @@ public partial class ValueSearchViewModel : ViewModelBase
     /// offset, value field display name — for the "[N]" container element suffix).</summary>
     public event Action<string, int, string>? LocateInGWorld;
 
+    /// <summary>Engine-rooted counterpart of <see cref="LocateInGWorld"/> — the path
+    /// search is rooted at the live UGameEngine instead of GWorld. Same payload.</summary>
+    public event Action<string, int, string>? LocateInGameEngine;
+
     /// <summary>Raised to show the chosen candidate's owning object's related
     /// objects (components, GAS ASC → AttributeSets, Controller↔Pawn) in the
     /// Related tab. Payload = owning instance address.</summary>
@@ -855,6 +859,16 @@ public partial class ValueSearchViewModel : ViewModelBase
         if (reason != null) { StatusText = reason; return; }
         _log.Info($"Value Search Locate in GWorld -> {candidate.InstanceAddr} (off=0x{candidate.FieldOffset:X}, {candidate.FieldName})");
         LocateInGWorld?.Invoke(candidate.InstanceAddr, candidate.FieldOffset, candidate.FieldName);
+    }
+
+    [RelayCommand]
+    private void LocateCandidateInGameEngine(ValueCandidate? candidate)
+    {
+        if (candidate == null) return;
+        var reason = GWorldLocateBlockReason(candidate.InstanceAddr);
+        if (reason != null) { StatusText = reason; return; }
+        _log.Info($"Value Search Locate in GameEngine -> {candidate.InstanceAddr} (off=0x{candidate.FieldOffset:X}, {candidate.FieldName})");
+        LocateInGameEngine?.Invoke(candidate.InstanceAddr, candidate.FieldOffset, candidate.FieldName);
     }
 
     [RelayCommand]
@@ -1250,6 +1264,16 @@ public partial class ValueSearchViewModel : ViewModelBase
         if (reason != null) { StatusText = reason; return; }
         _log.Info($"Group Locate in GWorld -> {slot.HandoffAddr} (off=0x{slot.FieldOffset:X}, {slot.FieldName})");
         LocateInGWorld?.Invoke(slot.HandoffAddr, slot.FieldOffset, slot.FieldName);
+    }
+
+    [RelayCommand]
+    private void LocateGroupSlotInGameEngine(GroupSlotMatch? slot)
+    {
+        if (slot == null) return;
+        var reason = GWorldLocateBlockReason(slot.HandoffAddr);
+        if (reason != null) { StatusText = reason; return; }
+        _log.Info($"Group Locate in GameEngine -> {slot.HandoffAddr} (off=0x{slot.FieldOffset:X}, {slot.FieldName})");
+        LocateInGameEngine?.Invoke(slot.HandoffAddr, slot.FieldOffset, slot.FieldName);
     }
 
     [RelayCommand]

@@ -100,6 +100,10 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     /// representative instance via find_instance, then runs the path search).</summary>
     public event Action<string>? LocateInGWorld;
 
+    /// <summary>Engine-rooted counterpart of <see cref="LocateInGWorld"/> (path search
+    /// rooted at the live UGameEngine). Payload = class name.</summary>
+    public event Action<string>? LocateInGameEngine;
+
     /// <summary>True when GWorld is available — gates the per-row "Locate in GWorld" button.</summary>
     [ObservableProperty] private bool _isGWorldAvailable;
 
@@ -363,6 +367,15 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     {
         if (row == null || !IsGWorldAvailable || string.IsNullOrEmpty(row.ClassName)) return;
         LocateInGWorld?.Invoke(row.ClassName);
+    }
+
+    /// <summary>Engine-rooted counterpart — not gated on IsGWorldAvailable (engine
+    /// availability is independent of GWorld; the DLL reports no_engine via the banner).</summary>
+    [RelayCommand]
+    private void LocateRowInGameEngine(ScoredFunctionRow? row)
+    {
+        if (row == null || string.IsNullOrEmpty(row.ClassName)) return;
+        LocateInGameEngine?.Invoke(row.ClassName);
     }
 
     /// <summary>Per-row action: shortcut into the Copy AA Script flow

@@ -161,6 +161,12 @@
                         ToolTip.Tip="{StaticResource str.Tip.Spc.LocateGWorld}"
                         Foreground="#C586C0" Background="Transparent" BorderThickness="1" BorderBrush="#C586C0"
                         Padding="6,2" FontSize="11" Cursor="Hand"/>
+                <Button Content="{StaticResource str.Spc.LocateGameEngine}"
+                        Command="{Binding $parent[UserControl].((vm:SpcQueryViewModel)DataContext).LocateRowInGameEngineCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.Spc.LocateGameEngine}"
+                        Foreground="#C586C0" Background="Transparent" BorderThickness="1" BorderBrush="#C586C0"
+                        Padding="6,2" FontSize="11" Cursor="Hand"/>
               </StackPanel>
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>

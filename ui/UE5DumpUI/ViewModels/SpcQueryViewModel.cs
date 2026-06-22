@@ -189,6 +189,10 @@ public partial class SpcQueryViewModel : ViewModelBase
     /// field name).</summary>
     public event Action<string, int, string>? LocateInGWorld;
 
+    /// <summary>Engine-rooted counterpart of <see cref="LocateInGWorld"/> (path search
+    /// rooted at the live UGameEngine). Same payload.</summary>
+    public event Action<string, int, string>? LocateInGameEngine;
+
     /// <summary>True when GWorld is available — gates the per-row "Locate in GWorld" button.</summary>
     [ObservableProperty] private bool _isGWorldAvailable;
 
@@ -554,6 +558,15 @@ public partial class SpcQueryViewModel : ViewModelBase
     {
         if (row == null || !IsGWorldAvailable || string.IsNullOrEmpty(row.ObjAddr)) return;
         LocateInGWorld?.Invoke(row.ObjAddr, row.PropOffset, row.PropName);
+    }
+
+    /// <summary>Engine-rooted counterpart — not gated on IsGWorldAvailable (engine
+    /// availability is independent of GWorld; the DLL reports no_engine via the banner).</summary>
+    [RelayCommand]
+    private void LocateRowInGameEngine(SpcResultRow? row)
+    {
+        if (row == null || string.IsNullOrEmpty(row.ObjAddr)) return;
+        LocateInGameEngine?.Invoke(row.ObjAddr, row.PropOffset, row.PropName);
     }
 
     /// <summary>Copy the matched field's live address (newest snapshot's obj_addr

@@ -895,7 +895,7 @@ public sealed class DumpService : IDumpService
 
     public async Task<GWorldPathResult> FindPathFromGWorldAsync(
         string target, string? objectAddr = null, int maxDepth = 5,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string rootKind = "gworld")
     {
         var req = new JsonObject
         {
@@ -905,6 +905,10 @@ public sealed class DumpService : IDumpService
         };
         if (!string.IsNullOrEmpty(objectAddr))
             req["object_addr"] = objectAddr;
+        // Default root is GWorld; only send root_kind for the engine-rooted variant
+        // so the DLL's default path (and the pipe log) stay unchanged.
+        if (rootKind != "gworld")
+            req["root_kind"] = rootKind;
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);

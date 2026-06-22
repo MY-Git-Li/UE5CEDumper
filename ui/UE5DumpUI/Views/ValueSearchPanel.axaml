@@ -389,6 +389,14 @@
                             BorderThickness="1" BorderBrush="#C586C0"
                             Padding="6,2" FontSize="11"
                             Cursor="Hand"/>
+                    <Button Content="{StaticResource str.VS.LocateGameEngine}"
+                            Command="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).LocateCandidateInGameEngineCommand}"
+                            CommandParameter="{Binding}"
+                            ToolTip.Tip="{StaticResource str.Tip.VS.LocateGameEngine}"
+                            Foreground="#C586C0" Background="Transparent"
+                            BorderThickness="1" BorderBrush="#C586C0"
+                            Padding="6,2" FontSize="11"
+                            Cursor="Hand"/>
                   </StackPanel>
                 </DataTemplate>
               </DataGridTemplateColumn.CellTemplate>
@@ -650,6 +658,13 @@
                                 Command="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).LocateGroupSlotInGWorldCommand}"
                                 CommandParameter="{Binding}"
                                 ToolTip.Tip="{StaticResource str.Tip.VS.LocateGWorld}"
+                                Foreground="#C586C0" Background="Transparent"
+                                BorderThickness="1" BorderBrush="#C586C0"
+                                Padding="6,2" FontSize="11" Cursor="Hand"/>
+                        <Button Content="{StaticResource str.VS.LocateGameEngine}"
+                                Command="{Binding $parent[UserControl].((vm:ValueSearchViewModel)DataContext).LocateGroupSlotInGameEngineCommand}"
+                                CommandParameter="{Binding}"
+                                ToolTip.Tip="{StaticResource str.Tip.VS.LocateGameEngine}"
                                 Foreground="#C586C0" Background="Transparent"
                                 BorderThickness="1" BorderBrush="#C586C0"
                                 Padding="6,2" FontSize="11" Cursor="Hand"/>
