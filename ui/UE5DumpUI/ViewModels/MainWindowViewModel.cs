@@ -475,6 +475,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 InstanceFinder.SetEngineState(state);
                 ValueSearch.SetEngineState(state);
                 InterestingFunctions.IsGWorldAvailable = state.HasGWorld;
+                InterestingProperties.IsGWorldAvailable = state.HasGWorld;
                 Snapshot?.SetEngineState(state);
                 Spc?.SetEngineState(state);
                 Pivot?.SetEngineState(state);
@@ -887,6 +888,37 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _log.Error($"InterestingProperties NavigateToProperty handler error: {className}.{propName}", ex);
+            }
+        };
+
+        // Wire InterestingProperties -> "Locate in GWorld": same className→live-instance
+        // resolution as InterestingFunctions (a property is a class-level definition,
+        // not a world object, so we locate where instances of its class live).
+        InterestingProperties.LocateInGWorld += async (className) =>
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(className)) return;
+                var instances = await _dump.FindInstancesAsync(className, exactMatch: true, limit: 5);
+                string? liveAddr = null;
+                foreach (var inst in instances.Instances)
+                {
+                    if (string.IsNullOrEmpty(inst.Address)) continue;
+                    if (inst.Name.StartsWith("Default__", StringComparison.Ordinal)) continue;
+                    liveAddr = inst.Address;
+                    break;
+                }
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                if (string.IsNullOrEmpty(liveAddr))
+                {
+                    LiveWalker.StatusText = $"No live (non-CDO) instance of {className} to locate in GWorld.";
+                    return;
+                }
+                await LiveWalker.LocateInGWorldAsync(liveAddr, 0, null, stopAtParent: true);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"InterestingProperties LocateInGWorld handler error: {className}", ex);
             }
         };
 
@@ -1477,6 +1509,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         InstanceFinder.SetEngineState(state);
         ValueSearch.SetEngineState(state);
         InterestingFunctions.IsGWorldAvailable = state.HasGWorld;
+        InterestingProperties.IsGWorldAvailable = state.HasGWorld;
         Teleport.SetConnected(true);   // refresh markers once the DLL is scanned
         Snapshot?.SetEngineState(state);
         Spc?.SetEngineState(state);

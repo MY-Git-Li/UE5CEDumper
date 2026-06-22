@@ -82,6 +82,16 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
     /// in the Instance Finder tab. Payload = class name.</summary>
     public event Action<string>? NavigateToInstanceFinder;
 
+    /// <summary>Raised to locate a live instance of the property's class within the
+    /// GWorld object graph. Payload = class name (MainWindow resolves a
+    /// representative non-CDO instance via find_instance, then runs the path
+    /// search). Mirrors the Interesting Functions per-row 🌍 handoff.</summary>
+    public event Action<string>? LocateInGWorld;
+
+    /// <summary>True when GWorld is available — gates the per-row "Locate in GWorld"
+    /// button (set by MainWindow from the engine state's HasGWorld flag).</summary>
+    [ObservableProperty] private bool _isGWorldAvailable;
+
     /// <summary>Raised to pivot the selected property in the experimental Class
     /// Pivot tab (className, propName). C5 right-click handoff.</summary>
     public event Action<string, string>? NavigateToPivot;
@@ -342,6 +352,17 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
     {
         if (row == null || string.IsNullOrEmpty(row.ClassName)) return;
         NavigateToInstanceFinder?.Invoke(row.ClassName);
+    }
+
+    /// <summary>Per-row 🌍 action: locate a live instance of this property's class
+    /// within the GWorld graph (parent mode — stops at the object that points to the
+    /// instance). MainWindow resolves the representative instance. Mirrors the
+    /// Interesting Functions LocateRowInGWorld command.</summary>
+    [RelayCommand]
+    private void LocateRowInGWorld(ScoredPropertyRow? row)
+    {
+        if (row == null || !IsGWorldAvailable || string.IsNullOrEmpty(row.ClassName)) return;
+        LocateInGWorld?.Invoke(row.ClassName);
     }
 
     /// <summary>Per-row action: pivot the property's class in the Class Pivot tab.</summary>

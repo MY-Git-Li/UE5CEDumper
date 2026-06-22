@@ -166,6 +166,7 @@
     <sys:String x:Key="str.LiveWalker.FindRefs">Find Refs</sys:String>
     <sys:String x:Key="str.LiveWalker.Refresh">Refresh</sys:String>
     <sys:String x:Key="str.LiveWalker.AddressHint">Address (hex or module.exe+offset)</sys:String>
+    <sys:String x:Key="str.LiveWalker.LocateFailedTitle">Locate in GWorld failed</sys:String>
     <sys:String x:Key="str.LiveWalker.GWorldDepth">GWorld depth:</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.GWorldDepth">Maximum pointer hops to search downward from GWorld when using "Locate in GWorld" (default 5). Larger = finds deeper targets but slower.</sys:String>
     <sys:String x:Key="str.Toolbar.GWorldDepth">Locate in GWorld depth</sys:String>
@@ -748,6 +749,7 @@
     <sys:String x:Key="str.IP.ClearFilters">Clear</sys:String>
     <sys:String x:Key="str.IP.OpenInst">inst</sys:String>
     <sys:String x:Key="str.IP.OpenLive">Live</sys:String>
+    <sys:String x:Key="str.IP.LocateGWorld">🌍</sys:String>
     <sys:String x:Key="str.IP.CopyName">Name</sys:String>
     <sys:String x:Key="str.Tip.IP.Load">Fan-out search across the seed keyword list (HP/Damage/Gold/Speed/etc.) and score the results client-side. Highlights properties in non-canonical locations (LocalPlayer / HUD / GameViewportClient) — the kind of cheat-relevant fields a CE user would miss looking only in Character/Pawn.</sys:String>
     <sys:String x:Key="str.Tip.IP.GameOnly">Skip /Script/Engine, /Script/CoreUObject, etc. Recommended on — game-specific properties are the cheat-table targets.</sys:String>
@@ -758,6 +760,7 @@
     <sys:String x:Key="str.Tip.IP.UnusualOnly">Show only properties whose owning class is in the Unusual Location list (LocalPlayer / GameViewportClient / HUD / CheatManager) — properties developers placed outside the conventional Character/Pawn/PlayerState containers.</sys:String>
     <sys:String x:Key="str.Tip.IP.ShowAll">When off, hide rows below the InterestingThreshold (currently 4). When on, show every property regardless of score.</sys:String>
     <sys:String x:Key="str.Tip.IP.OpenLive">Open this property's owning class in Live Walker (live instance lookup), or fall back to Class Struct if no live instance exists.</sys:String>
+    <sys:String x:Key="str.Tip.IP.LocateGWorld">Locate in GWorld: find a live instance of this property's class, then show the shortest pointer path from GWorld down to it in Live Walker (stops at the parent that points to it). Disabled until GWorld is resolved.</sys:String>
     <sys:String x:Key="str.Tip.IP.CopyName">Copy this property's name to the clipboard.</sys:String>
     <sys:String x:Key="str.IP.GenerateCT">📦 Generate CT</sys:String>
     <sys:String x:Key="str.Tip.IP.GenerateCT">Generate one .CT file containing freeze entries for every selected row. Use Ctrl/Shift+click in the grid to multi-select first. Each entry uses ue5_freeze_helper.lua — embed it in the resulting CT via Tools → Inject Freeze Helper, or open the CT in CE and edit CFG.value before enabling. Struct / array / non-scalar rows are skipped.</sys:String>

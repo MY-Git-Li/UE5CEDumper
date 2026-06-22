@@ -601,9 +601,10 @@
       </DataGrid.Columns>
     </DataGrid>
 
-    <!-- Empty-state logo: shown when DataGrid has no data -->
+    <!-- Empty-state logo: shown when DataGrid has no data AND there is no
+         locate-failure banner to display (the banner takes over the area). -->
     <Image Source="/Assets/UE5CEDumper.jpg"
-           IsVisible="{Binding !HasData}"
+           IsVisible="{Binding ShowEmptyStateLogo}"
            IsHitTestVisible="False"
            Opacity="0.6"
            Stretch="Uniform"
@@ -611,6 +612,27 @@
            VerticalAlignment="Center"
            MaxWidth="{Binding $parent[Panel].Bounds.Width, Converter={x:Static conv:MultiplyConverter.Instance}, ConverterParameter=0.75}"
            MaxHeight="{Binding $parent[Panel].Bounds.Height, Converter={x:Static conv:MultiplyConverter.Instance}, ConverterParameter=0.75}"/>
+
+    <!-- Locate-in-GWorld failure banner: replaces the idle logo so a failed
+         locate doesn't look identical to "nothing loaded yet". Shows the full
+         actionable reason (not_reachable / deadline / exception) prominently. -->
+    <Border IsVisible="{Binding HasLocateFailure}"
+            HorizontalAlignment="Center" VerticalAlignment="Center"
+            MaxWidth="600" Margin="24"
+            Background="#2A1E14" BorderBrush="#E0A050" BorderThickness="1,1,1,6"
+            CornerRadius="6" Padding="20,16">
+      <StackPanel Orientation="Horizontal" Spacing="14">
+        <TextBlock Text="⚠" FontSize="28" Foreground="#E0A050"
+                   VerticalAlignment="Top"/>
+        <StackPanel Spacing="6" MaxWidth="500">
+          <TextBlock Text="{StaticResource str.LiveWalker.LocateFailedTitle}"
+                     Foreground="#F0C070" FontSize="14" FontWeight="Bold"/>
+          <TextBlock Text="{Binding LocateFailureMessage}"
+                     Foreground="#D4D4D4" FontSize="12.5"
+                     TextWrapping="Wrap"/>
+        </StackPanel>
+      </StackPanel>
+    </Border>
 
     <!-- Credit footer: pinned to the bottom of the empty-state panel so
          the attribution sits visibly below the logo. Hidden once the
