@@ -380,6 +380,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// tab. Payload = current object address.</summary>
     public event Action<string>? NavigateToRelatedObjects;
 
+    /// <summary>Raised by a field row's "inst" button to open that field's pointed-to
+    /// object class in the Instance Finder tab (pre-fill class name + run search).
+    /// Payload = class name. Mirrors the Property Search / Interesting Funcs+Props
+    /// "inst" handoff (MainWindow switches tab + runs SearchForClassAsync).</summary>
+    public event Action<string>? NavigateToInstanceFinder;
+
     /// <summary>Gates the "Pivot this property" context-menu item — true only when
     /// the experimental Class Pivot tab is available (mirrors the gate).</summary>
     [ObservableProperty] private bool _pivotEnabled;
@@ -3240,9 +3246,37 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
             var (xml, note) = BuildAaScript(symbolName);
 
-            await _platform.CopyToClipboardAsync(xml);
-            StatusText = $"CE AA script copied — {note}";
-            _log.Info($"CE AA script copied for {CurrentClassName} — {note}");
+            // When the AOBMaker plugin is reachable, push the AA script straight into
+            // CE's address list (same one-click handoff as the per-field +CE buttons)
+            // instead of only copying XML to the clipboard. CreateAAScript wants the
+            // raw assembler body — the un-escaped text inside <AssemblerScript> — not
+            // the XML wrapper. autoActivate:false matches clipboard semantics: the
+            // entry lands in the list disabled; the user ticks it to register the
+            // symbol (and, on a GWorld-walked script, run the walk).
+            bool wasAvailable = _aobMaker?.IsAvailable ?? false;
+            bool sentToCe = false;
+            if (_aobMaker != null && wasAvailable)
+            {
+                var script = CeXmlExportService.ExtractAssemblerScript(xml);
+                if (!string.IsNullOrEmpty(script))
+                    sentToCe = await _aobMaker.CreateAAScriptAsync(
+                        $"\"{symbolName}\"", script, autoActivate: false);
+                IsAobMakerAvailable = _aobMaker.IsAvailable;
+            }
+
+            if (sentToCe)
+            {
+                StatusText = $"AA script added to CE address list — {note} (tick it to register the symbol)";
+                _log.Info($"CE AA script pushed to CE for {CurrentClassName} — {note}");
+            }
+            else
+            {
+                await _platform.CopyToClipboardAsync(xml);
+                StatusText = wasAvailable
+                    ? $"⚠ AOBMaker pipe broke (CE closed?) — CE AA script copied to clipboard — {note}"
+                    : $"CE AA script copied — {note}";
+                _log.Info($"CE AA script copied for {CurrentClassName} — {note}");
+            }
         }
         catch (Exception ex)
         {
@@ -3607,6 +3641,18 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>Open the Instance Finder for this field's pointed-to object class.
+    /// Only meaningful for object-pointer fields — PtrClassName holds the runtime
+    /// class of the referenced object (empty for scalars / null pointers), which
+    /// also gates the button's visibility. MainWindow switches to the Instance
+    /// Finder tab and runs the search.</summary>
+    [RelayCommand]
+    private void OpenFieldInInstanceFinder(LiveFieldValue? field)
+    {
+        if (field == null || string.IsNullOrEmpty(field.PtrClassName)) return;
+        NavigateToInstanceFinder?.Invoke(field.PtrClassName);
+    }
+
     [RelayCommand]
     private async Task CopyPtrAddressAsync(LiveFieldValue? field)
     {
@@ -3863,6 +3909,21 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
+    private async Task CopyCurrentClassNameAsync()
+    {
+        if (string.IsNullOrEmpty(CurrentClassName)) return;
+
+        try
+        {
+            await _platform.CopyToClipboardAsync(CurrentClassName);
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"Failed to copy current class name", ex);
+        }
+    }
+
+    [RelayCommand]
     private async Task CopyOuterAddressAsync()
     {
         if (string.IsNullOrEmpty(CurrentOuterAddr) || CurrentOuterAddr == "0x0") return;
@@ -3876,6 +3937,52 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         catch (Exception ex)
         {
             _log.Error($"Failed to copy outer address", ex);
+        }
+    }
+
+    [RelayCommand]
+    private async Task CopyOuterNameAsync()
+    {
+        if (string.IsNullOrEmpty(CurrentOuterName)) return;
+
+        try
+        {
+            await _platform.CopyToClipboardAsync(CurrentOuterName);
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"Failed to copy outer name", ex);
+        }
+    }
+
+    [RelayCommand]
+    private async Task CopyOuterClassNameAsync()
+    {
+        if (string.IsNullOrEmpty(CurrentOuterClassName)) return;
+
+        try
+        {
+            await _platform.CopyToClipboardAsync(CurrentOuterClassName);
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"Failed to copy outer class name", ex);
+        }
+    }
+
+    /// <summary>Navigate CE's hex view to the Outer object's address (AOBMaker plugin).
+    /// Mirrors <see cref="HexObjectAddressAsync"/> but targets the Outer (parent) base.</summary>
+    [RelayCommand]
+    private async Task HexOuterAddressAsync()
+    {
+        if (_aobMaker == null || string.IsNullOrEmpty(CurrentOuterAddr) || CurrentOuterAddr == "0x0") return;
+        try
+        {
+            await _aobMaker.NavigateHexViewAsync(StripHexPrefix(CurrentOuterAddr));
+        }
+        catch (Exception ex)
+        {
+            _log.Error("AOBMaker HEX outer address failed", ex);
         }
     }
 

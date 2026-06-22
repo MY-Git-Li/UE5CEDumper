@@ -16,6 +16,22 @@ builds ≤696 in
 
 -----
 
+## 2026-06-22 — Live Walker button-layout pass: "AA" in the header (+ push-to-CE), Class / Outer / per-field "inst" buttons, address-field hint (builds 1550-1560; UI-only; unit + AOT verified; adversarial review 0 issues)
+
+A user-directed cleanup of the Live Walker toolbar/header buttons, plus one behaviour upgrade. Five changes, all UI-only (no DLL change, no re-inject):
+
+1. **"Copy CE AA Script" → compact "AA" button**, relocated from the export toolbar row into the object-info **header** row (right of HEX / Addr / Name / Class), so the symbol-registration action sits with the object it registers. **New behaviour:** when the AOBMaker CE plugin is connected, the AA button now **pushes the script straight into CE's address list** (`IAobMakerBridge.CreateAAScriptAsync`, `autoActivate:false`) instead of only copying XML; it falls back to the clipboard `<CheatTable>` XML when the plugin isn't reachable, with an honest status line. The in-game-verified AA-script generators (GWorld-walk / register-symbol) were **left untouched** — a new `CeXmlExportService.ExtractAssemblerScript(xml)` pulls the raw `[ENABLE]/[DISABLE]` body out of the generated XML (CreateAAScript wants the raw script, not the wrapper), un-escaping `&lt;`/`&gt;`/`&amp;` (`&amp;` last). `symbolName` is sanitised to `[A-Za-z0-9_]`, so no entity corruption is possible.
+
+2. **Address input got its missing hover hint** (`str.Tip.LiveWalker.AddressInput`). Audited (no code change needed) that `AddressHelper.TryNormalizeAddress` already handles a CE-copied `"module.exe"+offset`: `Trim('"')` strips the quotes, the module token is only used to *detect* the format shape (`Contains('.') || Any(IsLetter)`) so internal **spaces are harmless**, and `LastIndexOf('+')` tolerates a `+` inside the filename. Locked in with 5 new `AddressHelperTests`.
+
+3. **"Class" button** added to the header row → copies the class name to the clipboard.
+
+4. **Outer row** gained **HEX / Name / Class** buttons beside the existing Addr (mirroring the header row; the HEX hex-view nav is gated on the AOBMaker plugin).
+
+5. **Per-field "inst" button** in the field grid's Name column → opens the field's pointed-to object class in the Instance Finder tab and runs the search (new `LiveWalkerViewModel.NavigateToInstanceFinder` event → MainWindow switches tab + `InstanceFinder.SearchForClassAsync`, the same handoff Interesting Funcs/Props/Property Search use). Visible only for object-pointer fields (gated on `LiveFieldValue.PtrClassName`, the pointee's live runtime class).
+
+**Verification.** C# 1801/0 (+13 tests: 5 AddressHelper, 4 ExtractAssemblerScript, plus the relocated-button regression coverage), AOT 47.0 MB clean (no trim warnings). 4-dimension adversarial review (XAML / VM-wiring / AA-push / coverage → verify) returned 0 confirmed / 5 dismissed. Also cleared 6 pre-existing `xUnit1051` warnings in `LocateGWorldBannerTests` (pass `TestContext.Current.CancellationToken`). *In-game verification of the AOBMaker push-to-CE path is the one remaining manual check.*
+
 ## 2026-06-22 — Locate in GameEngine: a GEngine-rooted ⚙ companion to Locate in GWorld on all 10 surfaces (builds 1542-1544; DLL + UI; MERGED main PR #345 `f488592`; in-game VERIFIED)
 
 A companion to **Locate in GWorld** that roots the forward-BFS shortest-path search at the live **UGameEngine** instead of GWorld, so engine-layer objects (GameInstance / LocalPlayer / GameViewport / engine subsystems / UMG widgets) that no GWorld pointer chain reaches now get a real chain (GEngine → … → target). It surfaces as a small **⚙ icon button** sitting next to every 🌍 — ALWAYS icon-style even where the GWorld button is big-text (Instance Finder bottom toolbar, Teleport pose). This closes the long-standing "widget / GameInstance-owned value returns `not_reachable` from GWorld" gap (the Octopath `PartyCharacterPanel_C` case).

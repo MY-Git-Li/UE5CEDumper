@@ -702,6 +702,22 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ValueSearch.NavigateToRelatedObjects += async (addr) => await OpenRelatedAsync(addr);
         LiveWalker.NavigateToRelatedObjects += async (addr) => await OpenRelatedAsync(addr);
 
+        // Wire LiveWalker -> InstanceFinder (per-field "inst" button: open the
+        // field's pointed-to object class + switch tab + auto-run, mirroring the
+        // Property Search / Interesting Funcs+Props "inst" handoff).
+        LiveWalker.NavigateToInstanceFinder += async (className) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.InstanceFinder;
+                await InstanceFinder.SearchForClassAsync(className);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"LiveWalker NavigateToInstanceFinder handler error: {className}", ex);
+            }
+        };
+
         // Wire PropertySearch -> InstanceFinder (pre-fill class name +
         // switch tab + auto-run the search). Pre-fill alone left the user
         // having to click Search again, which they correctly flagged as

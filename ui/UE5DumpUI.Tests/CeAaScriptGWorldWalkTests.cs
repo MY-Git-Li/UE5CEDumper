@@ -294,4 +294,60 @@ public class CeAaScriptGWorldWalkTests
         Assert.DoesNotContain("<FName", platform.LastClipboard);
         Assert.Contains("Map_FName", platform.LastClipboard);
     }
+
+    // ── ExtractAssemblerScript: raw body for the AOBMaker CreateAAScript push ──
+
+    [Fact]
+    public void Extract_returns_raw_body_without_xml_wrapper()
+    {
+        var xml = CeXmlExportService.GenerateRegisterSymbolXml("BP_Test", "\"Game.exe\"+1234");
+        var body = CeXmlExportService.ExtractAssemblerScript(xml);
+
+        // The body is exactly what CE executes — the [ENABLE]/[DISABLE] script.
+        Assert.StartsWith("[ENABLE]", body);
+        Assert.Contains("define(BP_Test,\"Game.exe\"+1234)", body);
+        Assert.Contains("registersymbol(BP_Test)", body);
+        Assert.Contains("[DISABLE]", body);
+        Assert.Contains("unregistersymbol(BP_Test)", body);
+        // No XML wrapper survives.
+        Assert.DoesNotContain("<AssemblerScript>", body);
+        Assert.DoesNotContain("<CheatTable>", body);
+        Assert.DoesNotContain("<CheatEntry>", body);
+    }
+
+    [Fact]
+    public void Extract_from_gworld_walk_xml_yields_runnable_lua()
+    {
+        var xml = CeXmlExportService.GenerateGWorldWalkedSymbolXml(
+            "BP_Test", SampleSpine(), useAob: false,
+            aob: "", aobPos: 0, aobLen: 0, gworldSlotAddr: "0x7FF61234ABCD");
+        var body = CeXmlExportService.ExtractAssemblerScript(xml);
+
+        Assert.Contains("{$lua}", body);
+        Assert.Contains("registerSymbol('BP_Test', addr)", body);
+        Assert.DoesNotContain("</AssemblerScript>", body);
+    }
+
+    [Fact]
+    public void Extract_unescapes_xml_entities_so_lua_runs_verbatim()
+    {
+        // CE un-escapes &amp;/&lt;/&gt; before running the script; the pushed body
+        // must match the clipboard-pasted one byte-for-byte.
+        var xml = "<CheatTable><CheatEntries><CheatEntry><AssemblerScript>\n"
+                + "[ENABLE]\nlocal x = a &amp; b   -- A&lt;B and C&gt;D\n[DISABLE]\n"
+                + "      </AssemblerScript></CheatEntry></CheatEntries></CheatTable>";
+        var body = CeXmlExportService.ExtractAssemblerScript(xml);
+
+        Assert.Contains("local x = a & b   -- A<B and C>D", body);
+        Assert.DoesNotContain("&amp;", body);
+        Assert.DoesNotContain("&lt;", body);
+        Assert.DoesNotContain("&gt;", body);
+    }
+
+    [Fact]
+    public void Extract_returns_empty_when_no_assembler_script_marker()
+    {
+        Assert.Equal("", CeXmlExportService.ExtractAssemblerScript("<CheatTable></CheatTable>"));
+        Assert.Equal("", CeXmlExportService.ExtractAssemblerScript(""));
+    }
 }

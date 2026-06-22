@@ -945,6 +945,32 @@ public static class CeXmlExportService
     }
 
     /// <summary>
+    /// Extract the raw Auto Assembler body (the un-escaped text inside the generated
+    /// &lt;AssemblerScript&gt; node) from a CE AA-script CheatTable XML. CE's
+    /// CreateAAScript (AOBMaker plugin) wants the raw script text, not the XML wrapper,
+    /// so this lets the "Copy CE AA Script" handoff push straight into CE's address
+    /// list when the plugin is reachable. Returns "" when no &lt;AssemblerScript&gt;
+    /// marker is present (e.g. a non-AA CheatTable XML). The only XML entities our
+    /// generators ever emit inside the script are &amp;amp; / &amp;lt; / &amp;gt; (from
+    /// Lua-comment sanitisation), which CE un-escapes before running — reproduced here
+    /// so the pushed script byte-matches the clipboard-pasted one.
+    /// </summary>
+    public static string ExtractAssemblerScript(string xml)
+    {
+        if (string.IsNullOrEmpty(xml)) return "";
+        const string open = "<AssemblerScript>";
+        const string close = "</AssemblerScript>";
+        var s = xml.IndexOf(open, StringComparison.Ordinal);
+        if (s < 0) return "";
+        s += open.Length;
+        var e = xml.IndexOf(close, s, StringComparison.Ordinal);
+        if (e < 0) return "";
+        var body = xml.Substring(s, e - s).Trim();
+        // Unescape &amp; last so an escaped entity like "&amp;lt;" isn't collapsed twice.
+        return body.Replace("&lt;", "<").Replace("&gt;", ">").Replace("&amp;", "&");
+    }
+
+    /// <summary>
     /// Generate CE XML with an AOB-scanning AA script root instead of a hardcoded address.
     /// The script scans for the GWorld AOB pattern at runtime, registers a unique CE symbol,
     /// and a "base" pointer entry dereferences it. All breadcrumb/field children nest under base.

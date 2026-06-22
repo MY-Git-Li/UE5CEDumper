@@ -85,4 +85,45 @@ public class AddressHelperTests
             "0x7FF700000000");
         Assert.Equal("0x7FF700001234", result);
     }
+
+    [Fact]
+    public void ModuleNameWithSpaces_ResolvesAbsolute()
+    {
+        // Windows module names can contain spaces; the module token is only used to
+        // DETECT the module+offset shape (it must contain a '.' or a letter), so an
+        // internal space must not break parsing. Quoted, CE-copied form.
+        var result = AddressHelper.NormalizeAddress(
+            "\"My Game-Win64-Shipping.exe\"+1A2B",
+            "0x7FF700000000");
+        Assert.Equal("0x7FF700001A2B", result);
+    }
+
+    [Fact]
+    public void ModuleNameWithSpaces_Unquoted_ResolvesAbsolute()
+    {
+        var result = AddressHelper.NormalizeAddress(
+            "My Game.exe+1A2B",
+            "0x7FF700000000");
+        Assert.Equal("0x7FF700001A2B", result);
+    }
+
+    [Fact]
+    public void ModuleNameWithPlus_LastPlusIsSeparator()
+    {
+        // The offset separator is the LAST '+', so a '+' inside the module name
+        // (legal on Windows) is still handled correctly.
+        var result = AddressHelper.NormalizeAddress(
+            "\"My+Game.exe\"+1A2B",
+            "0x7FF700000000");
+        Assert.Equal("0x7FF700001A2B", result);
+    }
+
+    [Fact]
+    public void TryNormalize_QuotedModuleWithSpaces_Succeeds()
+    {
+        var ok = AddressHelper.TryNormalizeAddress(
+            "\"My Game.exe\"+1A2B", "0x7FF700000000", out var normalized);
+        Assert.True(ok);
+        Assert.Equal("0x7FF700001A2B", normalized);
+    }
 }

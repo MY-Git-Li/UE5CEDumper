@@ -128,6 +128,7 @@
       <TextBox PlaceholderText="{StaticResource str.LiveWalker.AddressHint}"
                x:Name="AddressInput"
                KeyDown="AddressInput_KeyDown"
+               ToolTip.Tip="{StaticResource str.Tip.LiveWalker.AddressInput}"
                Width="280" Padding="4,2"/>
       <Button Content="{StaticResource str.LiveWalker.Go}"
               Command="{Binding NavigateToAddressCommand}"
@@ -209,11 +210,9 @@
               IsVisible="{Binding HasData}"
               ToolTip.Tip="{StaticResource str.Tip.LiveWalker.ExportHeader}"
               Padding="8,4"/>
-      <Button Content="{StaticResource str.LiveWalker.GenerateCeAA}"
-              Command="{Binding GenerateCeAAScriptCommand}"
-              IsVisible="{Binding HasData}"
-              ToolTip.Tip="{StaticResource str.Tip.LiveWalker.CeAA}"
-              Padding="8,4"/>
+      <!-- "Copy CE AA Script" moved to the object-info header row as a compact
+           "AA" button (next to HEX / Addr / Name / Class), where it sits with the
+           object it registers. -->
     </StackPanel>
 
     <!-- Breadcrumb -->
@@ -273,6 +272,24 @@
                   BorderThickness="1" BorderBrush="#555"
                   Cursor="Hand" FontSize="10"
                   ToolTip.Tip="Copy object name"/>
+          <!-- Copy the class name to clipboard -->
+          <Button Content="{StaticResource str.LiveWalker.CopyClass}"
+                  Command="{Binding CopyCurrentClassNameCommand}"
+                  Padding="3,1"
+                  Foreground="#D4D4D4" Background="Transparent"
+                  BorderThickness="1" BorderBrush="#555"
+                  Cursor="Hand" FontSize="10"
+                  ToolTip.Tip="{StaticResource str.Tip.LiveWalker.CopyClass}"/>
+          <!-- "Copy CE AA Script" (relocated from the export toolbar): pushes
+               straight into CE's address list when the AOBMaker plugin is
+               connected, otherwise copies the CheatTable XML to the clipboard. -->
+          <Button Content="{StaticResource str.LiveWalker.CeAAShort}"
+                  Command="{Binding GenerateCeAAScriptCommand}"
+                  Padding="3,1"
+                  Foreground="#E5C07B" Background="Transparent"
+                  BorderThickness="1" BorderBrush="#555"
+                  Cursor="Hand" FontSize="10" FontWeight="Bold"
+                  ToolTip.Tip="{StaticResource str.Tip.LiveWalker.CeAA}"/>
         </StackPanel>
         <!-- Parent (Outer) info -->
         <StackPanel Orientation="Horizontal" Spacing="8"
@@ -288,6 +305,16 @@
               <TextBlock Foreground="#666" FontFamily="Consolas" FontSize="11" Text="{Binding CurrentOuterAddr}"/>
             </StackPanel>
           </Button>
+          <!-- Outer helper buttons (HEX / Addr / Name / Class), mirroring the
+               object-info row above. HEX needs the AOBMaker plugin. -->
+          <Button Content="{StaticResource str.Pointers.AobMakerHex}"
+                  Command="{Binding HexOuterAddressCommand}"
+                  IsEnabled="{Binding IsAobMakerAvailable}"
+                  ToolTip.Tip="{StaticResource str.LiveWalker.HexOuterTip}"
+                  Padding="4,2"
+                  FontSize="10" FontFamily="Consolas"
+                  Foreground="#569CD6" Background="Transparent"
+                  BorderThickness="1" BorderBrush="#555" Cursor="Hand"/>
           <Button Content="Addr"
                   Command="{Binding CopyOuterAddressCommand}"
                   Padding="3,1"
@@ -295,6 +322,20 @@
                   BorderThickness="1" BorderBrush="#555"
                   Cursor="Hand" FontSize="10"
                   ToolTip.Tip="Copy Outer CE address"/>
+          <Button Content="Name"
+                  Command="{Binding CopyOuterNameCommand}"
+                  Padding="3,1"
+                  Foreground="#D4D4D4" Background="Transparent"
+                  BorderThickness="1" BorderBrush="#555"
+                  Cursor="Hand" FontSize="10"
+                  ToolTip.Tip="{StaticResource str.Tip.LiveWalker.CopyOuterName}"/>
+          <Button Content="{StaticResource str.LiveWalker.CopyClass}"
+                  Command="{Binding CopyOuterClassNameCommand}"
+                  Padding="3,1"
+                  Foreground="#D4D4D4" Background="Transparent"
+                  BorderThickness="1" BorderBrush="#555"
+                  Cursor="Hand" FontSize="10"
+                  ToolTip.Tip="{StaticResource str.Tip.LiveWalker.CopyOuterClass}"/>
         </StackPanel>
       </StackPanel>
     </Border>
@@ -549,17 +590,31 @@
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
-        <DataGridTemplateColumn Header="{StaticResource str.LiveWalker.CopyName}" Width="50" CanUserSort="False">
+        <DataGridTemplateColumn Header="{StaticResource str.LiveWalker.CopyName}" Width="92" CanUserSort="False">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:LiveFieldValue">
-              <Button Content="Name"
-                      Command="{Binding $parent[UserControl].((vm:LiveWalkerViewModel)DataContext).CopyFieldNameCommand}"
-                      CommandParameter="{Binding}"
-                      ToolTip.Tip="{StaticResource str.Tip.LiveWalker.CopyFieldName}"
-                      Padding="4,2" Margin="2"
-                      Foreground="#D4D4D4" Background="Transparent"
-                      BorderThickness="1" BorderBrush="#555"
-                      Cursor="Hand" FontSize="10"/>
+              <StackPanel Orientation="Horizontal">
+                <Button Content="Name"
+                        Command="{Binding $parent[UserControl].((vm:LiveWalkerViewModel)DataContext).CopyFieldNameCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.LiveWalker.CopyFieldName}"
+                        Padding="4,2" Margin="2"
+                        Foreground="#D4D4D4" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#555"
+                        Cursor="Hand" FontSize="10"/>
+                <!-- inst: open the field's object class in the Instance Finder tab
+                     (visible only for object-pointer fields, where PtrClassName is
+                     the live class of the referenced object). -->
+                <Button Content="{StaticResource str.IF.OpenInst}"
+                        Command="{Binding $parent[UserControl].((vm:LiveWalkerViewModel)DataContext).OpenFieldInInstanceFinderCommand}"
+                        CommandParameter="{Binding}"
+                        IsVisible="{Binding PtrClassName, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                        ToolTip.Tip="{StaticResource str.Tip.LiveWalker.FieldInst}"
+                        Padding="4,2" Margin="0,2,2,2"
+                        Foreground="#4EC9B0" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#555"
+                        Cursor="Hand" FontSize="10"/>
+              </StackPanel>
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
