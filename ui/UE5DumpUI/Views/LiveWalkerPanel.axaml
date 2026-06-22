@@ -153,25 +153,42 @@
               ToolTip.Tip="{StaticResource str.Tip.LiveWalker.PushCeField}"
               Foreground="#C586C0"
               Padding="8,4"/>
-      <CheckBox Content="{StaticResource str.LiveWalker.AobToggle}"
-                IsChecked="{Binding UseAobSymbol}"
-                IsEnabled="{Binding CanUseAobSymbol}"
-                IsVisible="{Binding HasData}"
-                ToolTip.Tip="{StaticResource str.Tip.LiveWalker.AobToggle}"
-                Padding="4,2" FontSize="11" Foreground="#9CDCFE"
-                VerticalAlignment="Center"/>
-      <CheckBox Content="{StaticResource str.LiveWalker.CollapseChain}"
-                IsChecked="{Binding CollapseChain}"
-                IsVisible="{Binding HasData}"
-                ToolTip.Tip="{StaticResource str.Tip.LiveWalker.CollapseChain}"
-                Padding="4,2" FontSize="11" Foreground="#4EC9B0"
-                VerticalAlignment="Center"/>
-      <CheckBox Content="{StaticResource str.LiveWalker.GuessWhat}"
-                IsChecked="{Binding FillGaps}"
-                IsVisible="{Binding HasData}"
-                ToolTip.Tip="{StaticResource str.Tip.LiveWalker.GuessWhat}"
-                Padding="4,2" FontSize="11" Foreground="#CE9178"
-                VerticalAlignment="Center"/>
+      <!-- Consolidated export options: memory-record Description format (+Offset /
+           +Type) plus the AOB / Collapse chain / Guess? toggles that used to be inline
+           checkboxes. The AOB item keeps its IsEnabled=CanUseAobSymbol gray-out and the
+           Guess? item keeps reflecting the VM's auto-check (SetFillGapsSilently). -->
+      <DropDownButton Content="{StaticResource str.LiveWalker.ExportOptions}"
+                      IsVisible="{Binding HasData}"
+                      ToolTip.Tip="{StaticResource str.Tip.LiveWalker.ExportOptions}"
+                      Padding="8,4" VerticalAlignment="Center">
+        <DropDownButton.Flyout>
+          <!-- MenuFlyout + checkable MenuItems: same proven pattern as Export CSX,
+               with reliable DataContext inheritance and TwoWay IsChecked write-back
+               (a plain Flyout's content did NOT reliably write the toggles back). -->
+          <MenuFlyout Placement="Bottom">
+            <MenuItem Header="{StaticResource str.LiveWalker.DescShowOffset}"
+                      ToggleType="CheckBox" IsChecked="{Binding DescShowOffset, Mode=TwoWay}"
+                      ToolTip.Tip="{StaticResource str.Tip.LiveWalker.DescShowOffset}"/>
+            <MenuItem Header="{StaticResource str.LiveWalker.DescShowType}"
+                      ToggleType="CheckBox" IsChecked="{Binding DescShowType, Mode=TwoWay}"
+                      ToolTip.Tip="{StaticResource str.Tip.LiveWalker.DescShowType}"/>
+            <Separator/>
+            <MenuItem Header="{StaticResource str.LiveWalker.AobToggle}"
+                      ToggleType="CheckBox" IsChecked="{Binding UseAobSymbol, Mode=TwoWay}"
+                      IsEnabled="{Binding CanUseAobSymbol}"
+                      ToolTip.Tip="{StaticResource str.Tip.LiveWalker.AobToggle}"/>
+            <MenuItem Header="{StaticResource str.LiveWalker.CollapseChain}"
+                      ToggleType="CheckBox" IsChecked="{Binding CollapseChain, Mode=TwoWay}"
+                      ToolTip.Tip="{StaticResource str.Tip.LiveWalker.CollapseChain}"/>
+            <MenuItem Header="{StaticResource str.LiveWalker.DedupShared}"
+                      ToggleType="CheckBox" IsChecked="{Binding DedupSharedObjects, Mode=TwoWay}"
+                      ToolTip.Tip="{StaticResource str.Tip.LiveWalker.DedupShared}"/>
+            <MenuItem Header="{StaticResource str.LiveWalker.GuessWhat}"
+                      ToggleType="CheckBox" IsChecked="{Binding FillGaps, Mode=TwoWay}"
+                      ToolTip.Tip="{StaticResource str.Tip.LiveWalker.GuessWhat}"/>
+          </MenuFlyout>
+        </DropDownButton.Flyout>
+      </DropDownButton>
       <DropDownButton Content="{StaticResource str.LiveWalker.ExportCsx}"
                       IsVisible="{Binding HasData}"
                       ToolTip.Tip="{StaticResource str.Tip.LiveWalker.ExportCsx}"

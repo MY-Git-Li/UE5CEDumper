@@ -353,8 +353,9 @@ public class LiveWalkerMultiSelectTests
 
         // Exactly one CE document
         Assert.Equal(1, CountOccurrences(xml, "<?xml"));
-        // Array group preserves "5 x ..." in description
-        Assert.Contains("Scores [5 x IntProperty (4B)]", xml);
+        // Array group description is now the bare field name (no array descriptor)
+        Assert.Contains("\"Scores\"", xml);
+        Assert.DoesNotContain("[5 x IntProperty", xml);
         // Both selected elements appear; the unselected ones do not
         Assert.Contains("\"[1]\"", xml);
         Assert.Contains("\"[3]\"", xml);

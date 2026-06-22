@@ -83,6 +83,21 @@ public static class CeXmlExportService
     private static bool _includeGuessed;
 
     /// <summary>
+    /// Opt-in description decorations (user toggles in the Live Walker export
+    /// options dropdown). When off (the default) a memory-record Description is
+    /// just the node's bare Name. _descShowOffset appends the node's own +offset
+    /// (hex, no prefix); _descShowType appends the node's class / struct / element
+    /// type. Both can combine: "Name (7E0, ClassName)". Set at the top of each
+    /// Generate* entry point alongside the other ThreadStatic state. The folded
+    /// chain (Collapse chain) honours offset but never type — see DecorateDesc's
+    /// allowType.
+    /// </summary>
+    [ThreadStatic]
+    private static bool _descShowOffset;
+    [ThreadStatic]
+    private static bool _descShowType;
+
+    /// <summary>
     /// Path-based cycle detection for drilled pointer emit. Holds the PtrAddresses
     /// currently on the emit stack — we push on entry into EmitDrilledPointer and
     /// pop on exit. If a target appears in this set, the pointer is a back-edge
@@ -97,6 +112,22 @@ public static class CeXmlExportService
     private static HashSet<string>? _emitPath;
 
     /// <summary>
+    /// Opt-in shared-object dedup (default on for the Live Walker exports). The
+    /// drilldown resolves each distinct object's fields ONCE (resolvedInstances is
+    /// keyed by PtrAddress), but the emit phase re-expands a shared object's whole
+    /// subtree under EVERY parent that points to it — on a dense graph (a field that
+    /// reaches GWorld → Actors[…]) that unrolls into billions of duplicate entries.
+    /// With dedup on, each object's subtree is emitted the FIRST time it's reached and
+    /// every later reference becomes a flat pointer leaf marked "(shared)". Unlike
+    /// _emitPath (push/pop, per-path) this set is global to the whole export and never
+    /// cleared mid-walk, so it also subsumes cycle protection.
+    /// </summary>
+    [ThreadStatic]
+    private static bool _dedupShared;
+    [ThreadStatic]
+    private static HashSet<string>? _emittedInstances;
+
+    /// <summary>
     /// Hard ceiling on EmitDrilledPointer recursion depth — covers the rare case
     /// where ResolvePointerInstancesAsync produced a long but acyclic chain that
     /// would still trigger an XML blow-up. Set generously so legitimate trees
@@ -107,6 +138,31 @@ public static class CeXmlExportService
 
     [ThreadStatic]
     private static int _emitPointerDepth;
+
+    /// <summary>
+    /// Global safety ceiling on the number of CE entries one Generate* call may emit.
+    /// A densely-connected object graph (a field that reaches GWorld → PersistentLevel
+    /// → Actors[…] → components → …) makes the drilldown re-expand shared sub-objects
+    /// combinatorially — the per-path cycle guard (_emitPath) and per-pointer depth cap
+    /// (MaxEmitPointerDepth) don't bound the BREADTH, so the StringBuilder previously
+    /// grew until OutOfMemory (Copy CE XML on a full character view). Once this many
+    /// entries are emitted the recursion stops and the export is flagged truncated.
+    /// Generous enough that any legitimate single-object export fits; only a runaway
+    /// deep-drill on a dense graph trips it.
+    /// </summary>
+    private const int MaxEmitEntries = 60_000;
+
+    [ThreadStatic]
+    private static int _emitEntryCount;
+    [ThreadStatic]
+    private static bool _emitTruncated;
+
+    /// <summary>
+    /// True when the most recent Generate* call hit <see cref="MaxEmitEntries"/> and
+    /// stopped emitting early (the export is incomplete). The caller reads this right
+    /// after the synchronous Generate* call (same thread) to warn the user.
+    /// </summary>
+    public static bool LastExportTruncated => _emitTruncated;
 
     /// <summary>
     /// Per-call resolved-field dictionaries, mirrored into thread-static state so
@@ -701,7 +757,10 @@ public static class CeXmlExportService
         int maxDropDownEntries = 512,
         Dictionary<string, List<LiveFieldValue>>? resolvedInstances = null,
         bool flattenChain = false,
-        bool includeGuessed = false)
+        bool includeGuessed = false,
+        bool descShowOffset = false,
+        bool descShowType = false,
+        bool dedupShared = false)
     {
         // Clean breadcrumbs: remove navigation cycles (e.g., Child->Parent->Child)
         // before generating XML to avoid deeply nested duplicate pointer chains.
@@ -710,11 +769,17 @@ public static class CeXmlExportService
         _nextId = 100;
         _collapsePointerNodes = collapsePointerNodes;
         _includeGuessed = includeGuessed;
+        _descShowOffset = descShowOffset;
+        _descShowType = descShowType;
+        _dedupShared = dedupShared;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
         _emitPath = new HashSet<string>(StringComparer.Ordinal);
         _emitPointerDepth = 0;
+        _emitEntryCount = 0;
+        _emitTruncated = false;
+        _emittedInstances = new HashSet<string>(StringComparer.Ordinal);
         _resolvedStructsState = resolvedStructs;
         _resolvedInstancesState = resolvedInstances;
         var sb = new StringBuilder();
@@ -763,7 +828,8 @@ public static class CeXmlExportService
                 // just add their offset.
                 var step = ProjectBreadcrumb(cleanedBc[i]);
                 var childIndent = indent + new string(' ', i * 2);
-                EmitGroupOpen(sb, childIndent, step.Description,
+                EmitGroupOpen(sb, childIndent,
+                    DecorateDesc(step.Description, step.Offset, SpineTypeLabel(cleanedBc[i])),
                     $"+{step.Offset:X}",
                     step.DerefAfter ? new[] { 0 } : null,
                     showAsHex: step.DerefAfter);
@@ -803,16 +869,25 @@ public static class CeXmlExportService
         bool collapsePointerNodes = false,
         int maxDropDownEntries = 512,
         Dictionary<string, List<LiveFieldValue>>? resolvedInstances = null,
-        bool includeGuessed = false)
+        bool includeGuessed = false,
+        bool descShowOffset = false,
+        bool descShowType = false,
+        bool dedupShared = false)
     {
         _nextId = 100;
         _collapsePointerNodes = collapsePointerNodes;
         _includeGuessed = includeGuessed;
+        _descShowOffset = descShowOffset;
+        _descShowType = descShowType;
+        _dedupShared = dedupShared;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
         _emitPath = new HashSet<string>(StringComparer.Ordinal);
         _emitPointerDepth = 0;
+        _emitEntryCount = 0;
+        _emitTruncated = false;
+        _emittedInstances = new HashSet<string>(StringComparer.Ordinal);
         _resolvedStructsState = resolvedStructs;
         _resolvedInstancesState = resolvedInstances;
         var sb = new StringBuilder();
@@ -885,18 +960,27 @@ public static class CeXmlExportService
         int maxDropDownEntries = 512,
         Dictionary<string, List<LiveFieldValue>>? resolvedInstances = null,
         bool flattenChain = false,
-        bool includeGuessed = false)
+        bool includeGuessed = false,
+        bool descShowOffset = false,
+        bool descShowType = false,
+        bool dedupShared = false)
     {
         var cleanedBc = CleanBreadcrumbs(breadcrumbs);
 
         _nextId = 100;
         _collapsePointerNodes = collapsePointerNodes;
         _includeGuessed = includeGuessed;
+        _descShowOffset = descShowOffset;
+        _descShowType = descShowType;
+        _dedupShared = dedupShared;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
         _emitPath = new HashSet<string>(StringComparer.Ordinal);
         _emitPointerDepth = 0;
+        _emitEntryCount = 0;
+        _emitTruncated = false;
+        _emittedInstances = new HashSet<string>(StringComparer.Ordinal);
         _resolvedStructsState = resolvedStructs;
         _resolvedInstancesState = resolvedInstances;
 
@@ -956,7 +1040,8 @@ public static class CeXmlExportService
                 // Shared projection: see GenerateHierarchicalXml for the rationale.
                 var step = ProjectBreadcrumb(cleanedBc[i]);
                 var childIndent = baseIndent + "    " + new string(' ', (i - 1) * 2);
-                EmitGroupOpen(sb, childIndent, step.Description,
+                EmitGroupOpen(sb, childIndent,
+                    DecorateDesc(step.Description, step.Offset, SpineTypeLabel(cleanedBc[i])),
                     $"+{step.Offset:X}",
                     step.DerefAfter ? new[] { 0 } : null,
                     showAsHex: step.DerefAfter);
@@ -1357,7 +1442,96 @@ public static class CeXmlExportService
     private static BreadcrumbStep ProjectBreadcrumb(BreadcrumbItem bc)
         => new(bc.FieldOffset,
                bc.IsPointerDeref || bc.IsContainerView,
-               bc.IsContainerView ? bc.Label : bc.FieldName);
+               // Default Description = the clean field/property name. Container-view
+               // breadcrumbs carry their "[N x Type]" suffix only in Label, so prefer
+               // FieldName and fall back to a suffix-stripped Label when (rarely) the
+               // field name wasn't recorded. The +Offset/+Type decoration is applied
+               // by the caller (it differs for the folded vs nested spine).
+               !string.IsNullOrEmpty(bc.FieldName) ? bc.FieldName : StripDescriptorSuffix(bc.Label));
+
+    /// <summary>
+    /// Best-effort: strip a trailing " [..." container descriptor (e.g.
+    /// "LocalPlayers [1 x ObjectProperty]" → "LocalPlayers") from a breadcrumb
+    /// Label that has no separate FieldName. Leaves anything without that pattern
+    /// untouched.
+    /// </summary>
+    private static string StripDescriptorSuffix(string label)
+    {
+        if (string.IsNullOrEmpty(label)) return label;
+        int br = label.IndexOf(" [", StringComparison.Ordinal);
+        return br > 0 ? label.Substring(0, br) : label;
+    }
+
+    /// <summary>
+    /// Best-effort +Type label for a navigation-spine breadcrumb. Container-view
+    /// breadcrumbs carry their source field (ContainerField), so the element /
+    /// signature type is recoverable; pointer / inline-struct breadcrumbs do not
+    /// carry a class name, so they return null (the spine node then shows just its
+    /// name + optional offset). Only used by the nested spine — the folded spine
+    /// never carries a type.
+    /// </summary>
+    private static string? SpineTypeLabel(BreadcrumbItem bc)
+    {
+        // Container-view spine node (PlayerArray, SupportActionGauge): surface the
+        // element / signature type from the source field. Path-derived container
+        // crumbs carry no ContainerField (re-hydrated only on Back-nav) → no type.
+        if (bc.IsContainerView)
+        {
+            var cf = bc.ContainerField;
+            if (cf == null) return null;
+            if (cf.ArrayCount >= 0)
+                return !string.IsNullOrEmpty(cf.ArrayStructType) ? cf.ArrayStructType
+                     : !string.IsNullOrEmpty(cf.ArrayInnerType) ? cf.ArrayInnerType : null;
+            if (cf.MapCount >= 0 && !string.IsNullOrEmpty(cf.MapKeyType))
+                return $"{cf.MapKeyType} → {(string.IsNullOrEmpty(cf.MapValueType) ? "?" : cf.MapValueType)}";
+            if (cf.SetCount >= 0 && !string.IsNullOrEmpty(cf.SetElemType))
+                return cf.SetElemType;
+            if (cf.DataTableRowCount >= 0 && !string.IsNullOrEmpty(cf.DataTableStructName))
+                return cf.DataTableStructName;
+            return null;
+        }
+
+        // Pointer-deref / array-element spine node (GameState, [0]=PlayerState,
+        // PawnPrivate=BP_PlayerCharacter_C): the resolved target object's class,
+        // captured on the breadcrumb at navigation / path-build time.
+        return !string.IsNullOrEmpty(bc.TargetClassName) ? bc.TargetClassName : null;
+    }
+
+    /// <summary>
+    /// Build a CE memory-record Description from a node's bare <paramref name="name"/>,
+    /// applying the opt-in "+Offset" / "+Type" decorations the user enabled. With
+    /// both toggles off (the default) the result is just the name. The offset is
+    /// rendered as bare uppercase hex (matching the "+{offset:X}" used in the CE
+    /// Address); the type is the node's class / struct / element type.
+    ///
+    /// <paramref name="allowType"/> = false suppresses the type even when the
+    /// _descShowType toggle is on (the folded Collapse-chain spine never carries a
+    /// type — only a name and, optionally, an offset).
+    ///
+    /// A null/empty <paramref name="typeLabel"/> simply omits the type part, so a
+    /// scalar leaf with +Type on still shows just its (optionally offset-annotated)
+    /// name without an empty "()".
+    /// </summary>
+    private static string DecorateDesc(string name, int offset, string? typeLabel, bool allowType = true)
+    {
+        bool wantOffset = _descShowOffset;
+        bool wantType = _descShowType && allowType && !string.IsNullOrEmpty(typeLabel);
+        if (!wantOffset && !wantType) return name;
+
+        string annotation = wantOffset && wantType ? $"{offset:X}, {typeLabel}"
+            : wantOffset ? $"{offset:X}"
+            : typeLabel!;
+        return $"{name} ({annotation})";
+    }
+
+    /// <summary>
+    /// +Type label for a scalar / pointer leaf: the resolved pointer class for
+    /// object-shaped properties (Object/Class/Weak/Soft/Lazy/Interface, which
+    /// MapCeField emits as an 8-byte hex leaf), else null. Pure scalars / strings
+    /// never populate PtrClassName, so they get no type.
+    /// </summary>
+    private static string? LeafTypeLabel(LiveFieldValue f)
+        => !string.IsNullOrEmpty(f.PtrClassName) ? f.PtrClassName : null;
 
     /// <summary>Result of collapsing a breadcrumb spine into one CE entry.</summary>
     internal sealed record FoldedChain(string Address, int[]? Offsets, string Description, bool ShowAsHex);
@@ -1400,7 +1574,9 @@ public static class CeXmlExportService
         for (int i = 1; i < cleanedBc.Count; i++)
         {
             var step = ProjectBreadcrumb(cleanedBc[i]);
-            descParts.Add(step.Description);
+            // The folded spine accepts +Offset on each merged hop but never +Type
+            // (allowType:false) — the collapsed nodes only show name (+offset).
+            descParts.Add(DecorateDesc(step.Description, step.Offset, null, allowType: false));
             seg += step.Offset;
             if (step.DerefAfter) { d.Add(seg); seg = 0; }
         }
@@ -1440,6 +1616,13 @@ public static class CeXmlExportService
     {
         foreach (var field in fields)
         {
+            // Global safety budget: a dense object graph can fan the drilldown out
+            // combinatorially. Once the cap is hit, stop emitting (the per-path cycle
+            // guard + depth cap don't bound breadth) so the StringBuilder can't grow
+            // to OutOfMemory. Every recursive emitter funnels its children through
+            // EmitFields, so this single break bounds the whole tree.
+            if (_emitEntryCount >= MaxEmitEntries) { _emitTruncated = true; break; }
+
             // Guessed ("Guess?") fields are CE-exportable only when the user explicitly
             // focuses a single guessed field (Copy CE Field sets _includeGuessed). In any
             // bulk/container/drilldown context (_includeGuessed=false, incl. all recursive
@@ -1504,7 +1687,7 @@ public static class CeXmlExportService
                 {
                     // Flat leaf — at minimum CE shows the first 8 bytes of
                     // the optional slot so the user can poke at the value.
-                    EmitLeaf(sb, indent, field.Name,
+                    EmitLeaf(sb, indent, DecorateDesc(field.Name, field.Offset, LeafTypeLabel(field)),
                         new CeFieldInfo("8 Bytes", ShowAsHex: true),
                         $"+{field.Offset:X}", null);
                 }
@@ -1545,10 +1728,18 @@ public static class CeXmlExportService
                 continue;
             }
 
+            // A guessed ("Guess?") field's Description is left exactly as its name —
+            // it carries its own guessed-type marker and the user explicitly asked
+            // for it untouched. Every other leaf gets +Offset; object-shaped pointer
+            // leaves (emitted as an 8-byte hex leaf by MapCeField) also carry their
+            // resolved class under +Type.
+            string ScalarDesc() => field.IsGuessed
+                ? field.Name : DecorateDesc(field.Name, field.Offset, LeafTypeLabel(field));
+
             // StrProperty: emit as Unicode string with pointer dereference to wchar_t* Data
             if (field.TypeName == "StrProperty")
             {
-                EmitStringLeaf(sb, indent, field.Name, $"+{field.Offset:X}",
+                EmitStringLeaf(sb, indent, ScalarDesc(), $"+{field.Offset:X}",
                     offsets: [0], unicode: true);
                 continue;
             }
@@ -1557,8 +1748,9 @@ public static class CeXmlExportService
             if (ceField != null)
             {
                 // Non-array EnumProperty/ByteProperty: DropDownList support
-                var ddLink = TryGetEnumDropDown(field);
-                EmitLeaf(sb, indent, ddLink.desc ?? field.Name, ceField,
+                var baseDesc = ScalarDesc();
+                var ddLink = TryGetEnumDropDown(field, baseDesc);
+                EmitLeaf(sb, indent, ddLink.desc ?? baseDesc, ceField,
                     $"+{field.Offset:X}", null,
                     dropDownContent: ddLink.content,
                     dropDownListLink: ddLink.link);
@@ -1575,8 +1767,12 @@ public static class CeXmlExportService
     /// Check if a non-array enum field should have a DropDownList.
     /// Returns (content, link, desc): content for first occurrence, link for shared reuse,
     /// desc = unique description to use in the CE entry (ensures DropDownListLink matching).
+    /// <paramref name="baseDesc"/> is the already-decorated entry name; the unique
+    /// link key is derived from it so the +Offset/+Type decoration stays consistent
+    /// between the DropDownList owner and any leaves linking to it.
     /// </summary>
-    private static (string? content, string? link, string? desc) TryGetEnumDropDown(LiveFieldValue field)
+    private static (string? content, string? link, string? desc) TryGetEnumDropDown(
+        LiveFieldValue field, string baseDesc)
     {
         if (field.TypeName is not ("EnumProperty" or "ByteProperty")) return (null, null, null);
         if (field.EnumEntries is not { Count: > 0 }) return (null, null, null);
@@ -1595,7 +1791,7 @@ public static class CeXmlExportService
 
         // First occurrence: emit DropDownList content; use unique description for link matching
         var content = BuildDropDownContent(field.EnumEntries.Select(e => (e.Value, e.Name)));
-        var desc = EnsureUniqueDropDownDesc(field.Name);
+        var desc = EnsureUniqueDropDownDesc(baseDesc);
         if (!string.IsNullOrEmpty(enumKey))
             _dropDownOwners[enumKey] = desc;
         return (content, null, desc);
@@ -1625,6 +1821,32 @@ public static class CeXmlExportService
         Dictionary<string, List<LiveFieldValue>>? resolvedStructs,
         Dictionary<string, List<LiveFieldValue>> resolvedInstances)
     {
+        // Global emit budget (see MaxEmitEntries): once tripped, drilled pointers
+        // stop expanding entirely — emit nothing and unwind. Caller loops that don't
+        // route through EmitFields (object-array elements) reach here per element, so
+        // this is the second backstop against the StringBuilder OOM.
+        if (_emitEntryCount >= MaxEmitEntries) { _emitTruncated = true; return; }
+
+        // ---- Shared-object dedup (see _dedupShared) ----
+        // Each distinct object's subtree is emitted ONCE; a later reference to the
+        // same PtrAddress becomes a flat pointer leaf marked "(shared)" instead of
+        // re-expanding the whole subtree (the combinatorial OOM source). _emittedInstances
+        // is global + never popped, so a back-edge to an already-emitted ancestor is also
+        // caught here — making it a strict superset of the _emitPath cycle guard. We only
+        // CHECK here; the address is MARKED emitted once we actually commit to the group
+        // below, so a cycle/depth-elided first hit doesn't suppress a later full expansion.
+        bool dedupTrack = _dedupShared && !string.IsNullOrEmpty(field.PtrAddress)
+                          && field.PtrAddress != "0x0";
+        if (dedupTrack && _emittedInstances != null
+            && _emittedInstances.Contains(field.PtrAddress))
+        {
+            EmitLeaf(sb, indent,
+                DecorateDesc(field.Name, field.Offset, field.PtrClassName) + " (shared)",
+                new CeFieldInfo("8 Bytes", ShowAsHex: true),
+                $"+{field.Offset:X}", null);
+            return;
+        }
+
         // ---- Cycle / depth guards ----
         // ResolvePointerInstancesAsync caches resolved[X] keyed by PtrAddress, so
         // back-pointers (UWorld -> PersistentLevel -> OwningWorld) are still
@@ -1641,19 +1863,21 @@ public static class CeXmlExportService
             // for the pointer, instead of nothing or an unbounded group. The
             // description tags the reason so it's not mysterious in CE.
             var reason = alreadyOnPath ? " (cycle elided)" : " (max drill depth reached)";
-            var classTag = !string.IsNullOrEmpty(field.PtrClassName)
-                ? $" ({field.PtrClassName})" : "";
-            EmitLeaf(sb, indent, field.Name + classTag + reason,
+            EmitLeaf(sb, indent,
+                DecorateDesc(field.Name, field.Offset, field.PtrClassName) + reason,
                 new CeFieldInfo("8 Bytes", ShowAsHex: true),
                 $"+{field.Offset:X}", null);
             return;
         }
 
-        // Description: include the resolved class name when known so the user
-        // can tell BP_X (UCharacter) from BP_X (UPawn) without expanding.
-        var description = !string.IsNullOrEmpty(field.PtrClassName)
-            ? $"{field.Name} ({field.PtrClassName})"
-            : field.Name;
+        // Committing to the full expansion — mark this object emitted so any later
+        // reference to it dedups to a "(shared)" flat leaf.
+        if (dedupTrack)
+            (_emittedInstances ??= new HashSet<string>(StringComparer.Ordinal)).Add(field.PtrAddress);
+
+        // Default Description = the bare field name; the +Type opt-in re-adds the
+        // resolved class so the user can tell BP_X (UCharacter) from BP_X (UPawn).
+        var description = DecorateDesc(field.Name, field.Offset, field.PtrClassName);
 
         // Address=+{fieldOffset}, Offsets=[0] — CE dereferences the pointer
         // and treats children's +{N} as offsets from the resolved target.
@@ -1683,10 +1907,8 @@ public static class CeXmlExportService
         // Struct is inline: just offset from parent, no dereference
         var address = $"+{structField.Offset:X}";
 
-        // Struct group header with struct type name in description
-        var description = !string.IsNullOrEmpty(structField.StructTypeName)
-            ? $"{structField.Name} ({structField.StructTypeName})"
-            : structField.Name;
+        // Default Description = the bare field name; +Type re-adds the struct type.
+        var description = DecorateDesc(structField.Name, structField.Offset, structField.StructTypeName);
 
         EmitGroupOpen(sb, indent, description, address, null);
         var childIndent = indent + "  ";
@@ -1713,12 +1935,12 @@ public static class CeXmlExportService
     private static void EmitArrayProperty(StringBuilder sb, string indent,
         LiveFieldValue field)
     {
-        // Build description: "FieldName [N x Type (SizeB)]"
+        // Default Description = the bare field name. The old "[N x Type (SizeB)]"
+        // descriptor is dropped; the +Type opt-in re-adds just the element type
+        // (struct type for struct arrays, else the inner property type).
         var typeLabel = !string.IsNullOrEmpty(field.ArrayStructType)
             ? field.ArrayStructType : field.ArrayInnerType;
-        var desc = field.ArrayCount > 0 && !string.IsNullOrEmpty(typeLabel)
-            ? $"{field.Name} [{field.ArrayCount} x {typeLabel} ({field.ArrayElemSize}B)]"
-            : field.Name;
+        var desc = DecorateDesc(field.Name, field.Offset, typeLabel);
 
         // Phase F: struct array with resolved sub-fields → per-element group emission
         if (field.ArrayInnerType == "StructProperty"
@@ -1743,7 +1965,9 @@ public static class CeXmlExportService
                 foreach (var elem in field.ArrayElements)
                 {
                     int elemByteOffset = elem.Index * field.ArrayElemSize;
-                    EmitGroupPlaceholder(sb, elemIndent, $"[{elem.Index}]", $"+{elemByteOffset:X}", null);
+                    EmitGroupPlaceholder(sb, elemIndent,
+                        DecorateDesc($"[{elem.Index}]", elemByteOffset, field.ArrayStructType),
+                        $"+{elemByteOffset:X}", null);
                 }
             }
 
@@ -1893,26 +2117,15 @@ public static class CeXmlExportService
 
         foreach (var elem in field.ArrayElements)
         {
-            // Element description: simplified [N] when dropdown is active, else full names
-            string elemDesc;
-            if (dropDownLinkTarget != null)
-            {
-                // DisplayValueAsItem=1 handles showing the resolved name in CE's Value column
-                elemDesc = $"[{elem.Index}]";
-            }
-            else if (!string.IsNullOrEmpty(elem.PtrName))
-            {
-                elemDesc = !string.IsNullOrEmpty(elem.PtrClassName)
-                    ? $"[{elem.Index}] {elem.PtrName} ({elem.PtrClassName})"
-                    : $"[{elem.Index}] {elem.PtrName}";
-            }
-            else if (!string.IsNullOrEmpty(elem.EnumName))
-                elemDesc = $"[{elem.Index}] {elem.EnumName}";
-            else
-                elemDesc = $"[{elem.Index}]";
-
-            // Element: simple offset from the already-dereferenced Data pointer
+            // Element: simple offset from the already-dereferenced Data pointer.
             int elemByteOffset = elem.Index * field.ArrayElemSize;
+
+            // Default Description = the bare index "[N]". The instance name (PtrName)
+            // and enum value name are dropped — CE's Value column / the DropDownList
+            // already show the live value. The +Type opt-in re-adds an object
+            // element's class; scalar/enum elements have no class so stay just "[N]".
+            string elemDesc = DecorateDesc($"[{elem.Index}]", elemByteOffset,
+                !string.IsNullOrEmpty(elem.PtrClassName) ? elem.PtrClassName : null);
 
             if (dropDownLinkTarget != null)
             {
@@ -1950,12 +2163,11 @@ public static class CeXmlExportService
         foreach (var elem in field.ArrayElements!)
         {
             int elemByteOffset = elem.Index * field.ArrayElemSize;
-            // Base name without the class suffix — EmitDrilledPointer re-appends
-            // "(ClassName)" itself, so the synth field must NOT carry it (else the
-            // class shows twice). The leaf fallback adds it explicitly below.
-            var baseName = !string.IsNullOrEmpty(elem.PtrName)
-                ? $"[{elem.Index}] {elem.PtrName}"
-                : $"[{elem.Index}]";
+            // Bare index name. The instance name (PtrName) is dropped; EmitDrilledPointer
+            // (resolved path) and DecorateDesc (leaf fallback) re-add the element's class
+            // only when the +Type opt-in is on. The synth Name must be just "[N]" so the
+            // decoration isn't doubled.
+            var baseName = $"[{elem.Index}]";
 
             if (!string.IsNullOrEmpty(elem.PtrAddress) && elem.PtrAddress != "0x0"
                 && _resolvedInstancesState != null
@@ -1978,12 +2190,9 @@ public static class CeXmlExportService
                 continue;
             }
 
-            // Unresolved / null → flat 8-byte pointer leaf (matches the generic
-            // object-array leaf shape: "[N] PtrName (PtrClassName)").
-            var leafName = !string.IsNullOrEmpty(elem.PtrClassName)
-                ? $"{baseName} ({elem.PtrClassName})"
-                : baseName;
-            EmitLeaf(sb, elemIndent, leafName,
+            // Unresolved / null → flat 8-byte pointer leaf. Default "[N]"; +Type re-adds class.
+            EmitLeaf(sb, elemIndent,
+                DecorateDesc(baseName, elemByteOffset, elem.PtrClassName),
                 new CeFieldInfo("8 Bytes", ShowAsHex: true),
                 $"+{elemByteOffset:X}", null);
         }
@@ -2043,16 +2252,21 @@ public static class CeXmlExportService
         foreach (var elem in field.ArrayElements ?? new List<ArrayElementValue>())
         {
             int elemByteOffset = elem.Index * field.ArrayElemSize;
-            string elemDesc = !string.IsNullOrEmpty(elem.Value)
+            // The soft-path string is a meaningful asset identity (not an object
+            // instance name), so it's kept as the element's name. +Offset annotates;
+            // there is no class type here so +Type is a no-op.
+            string elemKey = !string.IsNullOrEmpty(elem.Value)
                 ? $"[{elem.Index}] {elem.Value}"
                 : $"[{elem.Index}]";
+            string elemDesc = DecorateDesc(elemKey, elemByteOffset, null);
 
             EmitGroupOpen(sb, elemIndent, elemDesc, $"+{elemByteOffset:X}", null);
             var fieldIndent = elemIndent + "  ";
 
             // FWeakObjectPtr at +0 — useful when the asset is currently loaded
-            // (8 bytes packing ObjectIndex + SerialNumber).
-            EmitLeaf(sb, fieldIndent, "WeakPtr", ceWeakPtr, "+0", null);
+            // (8 bytes packing ObjectIndex + SerialNumber). +Offset annotates these
+            // fixed FSoftObjectPath sub-leaves the same way Map Key/Value leaves are.
+            EmitLeaf(sb, fieldIndent, DecorateDesc("WeakPtr", 0, null), ceWeakPtr, "+0", null);
 
             // FName ComparisonIndex (and Number at +4) for the
             // AssetPathName / PackageName at +0x10.
@@ -2061,12 +2275,12 @@ public static class CeXmlExportService
                 : "AssetPath";
             if (sharedDropDown != null)
             {
-                EmitLeaf(sb, fieldIndent, firstFNameLabel, ceFNameIdx,
+                EmitLeaf(sb, fieldIndent, DecorateDesc(firstFNameLabel, 0x10, null), ceFNameIdx,
                     "+10", null, dropDownContent: sharedDropDown);
             }
             else
             {
-                EmitLeaf(sb, fieldIndent, firstFNameLabel, ceFNameIdx,
+                EmitLeaf(sb, fieldIndent, DecorateDesc(firstFNameLabel, 0x10, null), ceFNameIdx,
                     "+10", null);
             }
 
@@ -2076,7 +2290,7 @@ public static class CeXmlExportService
             if (field.SoftArrayIsTopLevelAssetPath)
             {
                 int assetNameOffset = 0x10 + field.SoftArrayFNameSize;
-                EmitLeaf(sb, fieldIndent, "AssetName", ceFNameIdx,
+                EmitLeaf(sb, fieldIndent, DecorateDesc("AssetName", assetNameOffset, null), ceFNameIdx,
                     $"+{assetNameOffset:X}", null);
             }
 
@@ -2106,7 +2320,10 @@ public static class CeXmlExportService
         foreach (var elem in field.ArrayElements!)
         {
             int elemByteOffset = elem.Index * field.ArrayElemSize;
-            var elemDesc = $"[{elem.Index}]";
+            // Bare index for the synth field (EmitResolvedStruct re-decorates it via
+            // EmitFields); a separately-decorated form for the shallow placeholder paths.
+            var elemName = $"[{elem.Index}]";
+            var elemDesc = DecorateDesc(elemName, elemByteOffset, field.ArrayStructType);
 
             // Prefer a full re-walk of the element struct (nested structs/maps expand)
             // when the resolver walked it; fall back to the shallow per-element preview.
@@ -2117,7 +2334,7 @@ public static class CeXmlExportService
             {
                 var sv = new LiveFieldValue
                 {
-                    Name = elemDesc, TypeName = "StructProperty", Offset = elemByteOffset,
+                    Name = elemName, TypeName = "StructProperty", Offset = elemByteOffset,
                     StructDataAddr = elemStructAddr, StructClassAddr = field.ArrayStructClassAddr,
                     StructTypeName = field.ArrayStructType,
                 };
@@ -2141,7 +2358,10 @@ public static class CeXmlExportService
                         : MapInnerTypeToCeField(sf.TypeName);
                     if (ceField != null)
                     {
-                        EmitLeaf(sb, fieldIndent, sf.Name, ceField, $"+{sf.Offset:X}", null);
+                        EmitLeaf(sb, fieldIndent,
+                            DecorateDesc(sf.Name, sf.Offset,
+                                !string.IsNullOrEmpty(sf.PtrClassName) ? sf.PtrClassName : null),
+                            ceField, $"+{sf.Offset:X}", null);
                     }
                     else
                     {
@@ -2150,7 +2370,8 @@ public static class CeXmlExportService
                         // surface it as a collapsed placeholder folder at its offset
                         // instead of dropping it silently — the user still sees every
                         // field and its address (and can add children in CE).
-                        EmitGroupPlaceholder(sb, fieldIndent, sf.Name, $"+{sf.Offset:X}", null);
+                        EmitGroupPlaceholder(sb, fieldIndent,
+                            DecorateDesc(sf.Name, sf.Offset, null), $"+{sf.Offset:X}", null);
                     }
                 }
 
@@ -2181,9 +2402,10 @@ public static class CeXmlExportService
     {
         var keyLabel = !string.IsNullOrEmpty(field.MapKeyType) ? field.MapKeyType : "?";
         var valLabel = !string.IsNullOrEmpty(field.MapValueType) ? field.MapValueType : "?";
-        var desc = field.MapCount > 0
-            ? $"{field.Name} {{Map: {field.MapCount}, {keyLabel} \u2192 {valLabel}}}"
-            : field.Name;
+        // Default Description = the bare field name; the old "{Map: N, K \u2192 V}"
+        // descriptor is dropped. +Type re-adds the concise "K \u2192 V" type signature.
+        var desc = DecorateDesc(field.Name, field.Offset,
+            field.MapCount > 0 ? $"{keyLabel} \u2192 {valLabel}" : null);
 
         // Need elements + sizes for addressable CE entries.
         if (field.MapCount <= 0
@@ -2240,11 +2462,13 @@ public static class CeXmlExportService
         foreach (var elem in field.MapElements)
         {
             int elemByteOffset = elem.Index * stride;
+            // An object key's instance name is dropped (+Type re-adds its class); a
+            // scalar/string key is the slot's identity, so it's kept as the name.
             var elemDesc = !string.IsNullOrEmpty(elem.KeyPtrName)
-                ? $"[{elem.Index}] {elem.KeyPtrName}"
+                ? DecorateDesc($"[{elem.Index}]", elemByteOffset, elem.KeyPtrClassName)
                 : !string.IsNullOrEmpty(elem.Key)
-                    ? $"[{elem.Index}] {elem.Key}"
-                    : $"[{elem.Index}]";
+                    ? DecorateDesc($"[{elem.Index}] {elem.Key}", elemByteOffset, null)
+                    : DecorateDesc($"[{elem.Index}]", elemByteOffset, null);
 
             // Element group: inline from Data pointer
             EmitGroupOpen(sb, elemIndent, elemDesc, $"+{elemByteOffset:X}", null);
@@ -2252,7 +2476,7 @@ public static class CeXmlExportService
 
             // Key leaf at +0 — label only, no baked-in dynamic value.
             if (ceKey != null)
-                EmitLeaf(sb, fieldIndent, "Key", ceKey, "+0", null);
+                EmitLeaf(sb, fieldIndent, DecorateDesc("Key", 0, null), ceKey, "+0", null);
 
             // Value at +valOffset.
             if (valStruct || IsObjectPropertyType(field.MapValueType))
@@ -2269,7 +2493,8 @@ public static class CeXmlExportService
                     ? new CeFieldInfo(CeWidthForSize(field.MapValueSize))
                     : MapInnerTypeToCeField(field.MapValueType);
                 if (ceVal != null)
-                    EmitLeaf(sb, fieldIndent, "Value", ceVal, $"+{valOffset:X}", null,
+                    EmitLeaf(sb, fieldIndent, DecorateDesc("Value", valOffset, null), ceVal,
+                        $"+{valOffset:X}", null,
                         dropDownListLink: valueDropLink);
             }
 
@@ -2318,9 +2543,10 @@ public static class CeXmlExportService
     private static void EmitSetProperty(StringBuilder sb, string indent, LiveFieldValue field)
     {
         var elemLabel = !string.IsNullOrEmpty(field.SetElemType) ? field.SetElemType : "?";
-        var desc = field.SetCount > 0
-            ? $"{field.Name} {{Set: {field.SetCount}, {elemLabel}}}"
-            : field.Name;
+        // Default Description = the bare field name; the old "{Set: N, T}" descriptor
+        // is dropped. +Type re-adds the element type.
+        var desc = DecorateDesc(field.Name, field.Offset,
+            field.SetCount > 0 ? elemLabel : null);
 
         // Empty / no elements → placeholder. Struct/object elements (ceElem == null)
         // now expand via EmitFields instead of collapsing the whole set.
@@ -2345,21 +2571,25 @@ public static class CeXmlExportService
         foreach (var elem in field.SetElements)
         {
             int elemByteOffset = elem.Index * stride;
-            var elemDesc = !string.IsNullOrEmpty(elem.KeyPtrName)
-                ? $"[{elem.Index}] {elem.KeyPtrName}"
+            // An object element's instance name is dropped (its class returns via +Type
+            // downstream); a scalar/string element value is its identity, kept as the name.
+            string bareName = !string.IsNullOrEmpty(elem.KeyPtrName)
+                ? $"[{elem.Index}]"
                 : !string.IsNullOrEmpty(elem.Key)
                     ? $"[{elem.Index}] {elem.Key}"
                     : $"[{elem.Index}]";
 
             if (ceElem != null)
             {
-                // Scalar element → flat leaf (unchanged).
-                EmitLeaf(sb, childIndent, elemDesc, ceElem, $"+{elemByteOffset:X}", null);
+                // Scalar element → flat leaf (decorated with +Offset; no class type).
+                EmitLeaf(sb, childIndent, DecorateDesc(bareName, elemByteOffset, null),
+                    ceElem, $"+{elemByteOffset:X}", null);
             }
             else
             {
-                // Struct / object element → expand via the shared EmitFields dispatch.
-                var ev = BuildElementValue(elemDesc, field.SetElemType, elemByteOffset, field.SetElemSize,
+                // Struct / object element → expand via the shared EmitFields dispatch,
+                // which re-decorates bareName with the struct/class type + offset.
+                var ev = BuildElementValue(bareName, field.SetElemType, elemByteOffset, field.SetElemSize,
                     elemStruct, AbsAddr(dataBase, elemByteOffset),
                     field.SetElemStructAddr, field.SetElemStructType,
                     elem.KeyPtrAddress, elem.KeyPtrName, elem.KeyPtrClassName);
@@ -2386,7 +2616,10 @@ public static class CeXmlExportService
     {
         var structName = !string.IsNullOrEmpty(field.DataTableStructName)
             ? field.DataTableStructName : "Row";
-        var desc = $"{field.Name} [DataTable: {field.DataTableRowCount} x {structName}]";
+        // Default Description = the bare field name; the old "[DataTable: N x Struct]"
+        // descriptor is dropped. +Type re-adds the row struct name.
+        var desc = DecorateDesc(field.Name, field.Offset,
+            field.DataTableRowCount > 0 ? structName : null);
 
         // Need row data for addressable CE entries
         if (field.DataTableRowData == null || field.DataTableRowData.Count == 0
@@ -2402,9 +2635,12 @@ public static class CeXmlExportService
 
         foreach (var row in field.DataTableRowData)
         {
-            // Level 2: Row — deref uint8* at sparseIndex*stride+fnameSize
+            // Level 2: Row — deref uint8* at sparseIndex*stride+fnameSize. The row's
+            // FName key is its identity, kept as the name; +Offset annotates.
             int rowPtrOffset = row.SparseIndex * field.DataTableStride + field.DataTableFNameSize;
-            var rowDesc = $"[{row.SparseIndex}] {row.RowName}";
+            var rowBare = !string.IsNullOrEmpty(row.RowName)
+                ? $"[{row.SparseIndex}] {row.RowName}" : $"[{row.SparseIndex}]";
+            var rowDesc = DecorateDesc(rowBare, rowPtrOffset, null);
 
             if (row.Fields.Count == 0)
             {
@@ -2421,16 +2657,18 @@ public static class CeXmlExportService
                 // StrProperty within row: Unicode string with pointer deref
                 if (rowField.TypeName == "StrProperty")
                 {
-                    EmitStringLeaf(sb, fieldIndent, rowField.Name, $"+{rowField.Offset:X}",
-                        offsets: [0], unicode: true);
+                    EmitStringLeaf(sb, fieldIndent,
+                        DecorateDesc(rowField.Name, rowField.Offset, LeafTypeLabel(rowField)),
+                        $"+{rowField.Offset:X}", offsets: [0], unicode: true);
                     continue;
                 }
 
                 var ceField = MapCeField(rowField);
                 if (ceField != null)
                 {
-                    var ddLink = TryGetEnumDropDown(rowField);
-                    EmitLeaf(sb, fieldIndent, ddLink.desc ?? rowField.Name, ceField,
+                    var baseDesc = DecorateDesc(rowField.Name, rowField.Offset, LeafTypeLabel(rowField));
+                    var ddLink = TryGetEnumDropDown(rowField, baseDesc);
+                    EmitLeaf(sb, fieldIndent, ddLink.desc ?? baseDesc, ceField,
                         $"+{rowField.Offset:X}", null,
                         dropDownContent: ddLink.content,
                         dropDownListLink: ddLink.link);
@@ -2475,6 +2713,7 @@ public static class CeXmlExportService
         string address, int[]? offsets, bool showAsHex = false, string? varType = null,
         string? dropDownContent = null, string? dropDownListLink = null)
     {
+        _emitEntryCount++;
         sb.AppendLine($"{indent}<CheatEntry>");
         sb.AppendLine($"{indent}  <ID>{_nextId++}</ID>");
         sb.AppendLine($"{indent}  <Description>\"{description}\"</Description>");
@@ -2514,6 +2753,7 @@ public static class CeXmlExportService
     private static void EmitGroupPlaceholder(StringBuilder sb, string indent, string description,
         string address, int[]? offsets, bool showAsHex = false)
     {
+        _emitEntryCount++;
         sb.AppendLine($"{indent}<CheatEntry>");
         sb.AppendLine($"{indent}  <ID>{_nextId++}</ID>");
         sb.AppendLine($"{indent}  <Description>\"{description}\"</Description>");
@@ -2537,6 +2777,7 @@ public static class CeXmlExportService
         CeFieldInfo ceField, string address, int[]? offsets,
         string? dropDownContent = null, string? dropDownListLink = null)
     {
+        _emitEntryCount++;
         sb.AppendLine($"{indent}<CheatEntry>");
         sb.AppendLine($"{indent}  <ID>{_nextId++}</ID>");
         sb.AppendLine($"{indent}  <Description>\"{description}\"</Description>");
@@ -2569,6 +2810,7 @@ public static class CeXmlExportService
     private static void EmitStringLeaf(StringBuilder sb, string indent, string description,
         string address, int[]? offsets, bool unicode, int length = 256)
     {
+        _emitEntryCount++;
         sb.AppendLine($"{indent}<CheatEntry>");
         sb.AppendLine($"{indent}  <ID>{_nextId++}</ID>");
         sb.AppendLine($"{indent}  <Description>\"{description}\"</Description>");
@@ -2640,8 +2882,11 @@ public static class CeXmlExportService
     private static void EmitNavigableField(StringBuilder sb, string indent,
         LiveFieldValue field, string address, int[]? offsets)
     {
-        EmitGroupPlaceholder(sb, indent, field.Name, address, offsets,
-            showAsHex: field.IsPointerNavigation);
+        // Unresolved struct / pointer leaf placeholder. +Type re-adds the pointer's
+        // class or the inline struct's type; +Offset annotates the field offset.
+        var typeLabel = field.IsPointerNavigation ? field.PtrClassName : field.StructTypeName;
+        EmitGroupPlaceholder(sb, indent, DecorateDesc(field.Name, field.Offset, typeLabel),
+            address, offsets, showAsHex: field.IsPointerNavigation);
     }
 
     /// <summary>

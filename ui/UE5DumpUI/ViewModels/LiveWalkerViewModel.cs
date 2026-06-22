@@ -257,6 +257,20 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     // Guess What toggle: fill gaps between known fields with heuristic guesses
     [ObservableProperty] private bool _fillGaps;
 
+    // Memory-record Description opt-ins for Copy CE XML / Copy CE Field. Off by
+    // default (Description = bare Name). DescShowOffset appends the node's +offset;
+    // DescShowType appends its class / struct / element type. Both honoured by the
+    // nested spine + every drilldown node; the folded (Collapse chain) spine honours
+    // offset only. Threaded into the CeXmlExportService Generate* calls.
+    [ObservableProperty] private bool _descShowOffset;
+    [ObservableProperty] private bool _descShowType;
+
+    // Dedup shared objects in Copy CE XML / Copy CE Field drilldown (default ON).
+    // A shared object (e.g. one PlayerState reached from several fields) is expanded
+    // ONCE; later references become a flat "(shared)" pointer leaf. Prevents the
+    // combinatorial blow-up that otherwise OOMs Copy CE XML on a dense object graph.
+    [ObservableProperty] private bool _dedupSharedObjects = true;
+
     // AOBMaker CE Plugin detection cooldown (avoids spamming pipe connect on rapid navigation)
     private DateTime _lastAobMakerCheck = DateTime.MinValue;
     private static readonly TimeSpan AobMakerCheckCooldown = TimeSpan.FromSeconds(5);
@@ -679,6 +693,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     ClassAddr = field.StructClassAddr,
                     FieldOffset = navOffset,
                     FieldName = field.Name,
+                    TargetClassName = field.StructTypeName,
                     IsPointerDeref = isDataTableRow,
                 });
                 _log.Info($"NAV→Struct {field.Name} addr={field.StructDataAddr} off=0x{navOffset:X} dtRow={isDataTableRow} | BC={FormatBreadcrumbTrace()}");
@@ -2144,6 +2159,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     Label = $"[{s.ElementIndex}]{kvHint}",
                     FieldOffset = s.ElementIndex * splitStride + splitValueOffset,
                     FieldName = $"[{s.ElementIndex}]{kvHint}",
+                    TargetClassName = s.ToClass,
                     IsPointerDeref = true,
                 },
             };
@@ -2158,6 +2174,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 Label = label,
                 FieldOffset = s.FieldOffset,
                 FieldName = s.FieldName,
+                TargetClassName = s.ToClass,
                 IsPointerDeref = true,  // every edge we followed is a pointer deref
             },
         };
@@ -2745,7 +2762,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     collapsePointerNodes: CollapsePointerNodes,
                     maxDropDownEntries: DropDownLimit,
                     resolvedInstances: resolvedInstances,
-                    flattenChain: CollapseChain);
+                    flattenChain: CollapseChain,
+                    descShowOffset: DescShowOffset,
+                    descShowType: DescShowType,
+                    dedupShared: DedupSharedObjects);
             }
             else
             {
@@ -2756,7 +2776,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     collapsePointerNodes: CollapsePointerNodes,
                     maxDropDownEntries: DropDownLimit,
                     resolvedInstances: resolvedInstances,
-                    flattenChain: CollapseChain);
+                    flattenChain: CollapseChain,
+                    descShowOffset: DescShowOffset,
+                    descShowType: DescShowType,
+                    dedupShared: DedupSharedObjects);
             }
 
             await _platform.CopyToClipboardAsync(xml);
@@ -2767,8 +2790,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             int lineCount = xml.Count(c => c == '\n') + 1;
             var statusExtra = aobFallbackWarn != null ? " " + aobFallbackWarn
                 : (limitWarn != null ? " " + limitWarn : "");
-            StatusText = $"Copied: {objCount} objects, {lineCount} XML lines.{statusExtra}";
+            var truncWarn = CeXmlExportService.LastExportTruncated
+                ? " ⚠ Truncated (object graph too large) — lower Drill Depth or use Copy CE Field"
+                : "";
+            StatusText = $"Copied: {objCount} objects, {lineCount} XML lines.{statusExtra}{truncWarn}";
             _log.Info($"CE XML copied to clipboard for {CurrentClassName} (AOB={useAob}, " +
+                $"descOffset={DescShowOffset}, descType={DescShowType}, " +
                 $"{resolvedStructs.Count} structs / {resolvedInstances.Count} pointers resolved, depth={CsxDrilldownDepth})");
         }
         catch (Exception ex)
@@ -2982,7 +3009,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     maxDropDownEntries: DropDownLimit,
                     resolvedInstances: resolvedInstances,
                     flattenChain: CollapseChain,
-                    includeGuessed: includeGuessed);
+                    includeGuessed: includeGuessed,
+                    descShowOffset: DescShowOffset,
+                    descShowType: DescShowType,
+                    dedupShared: DedupSharedObjects);
             }
             else
             {
@@ -2994,7 +3024,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     maxDropDownEntries: DropDownLimit,
                     resolvedInstances: resolvedInstances,
                     flattenChain: CollapseChain,
-                    includeGuessed: includeGuessed);
+                    includeGuessed: includeGuessed,
+                    descShowOffset: DescShowOffset,
+                    descShowType: DescShowType,
+                    dedupShared: DedupSharedObjects);
             }
 
             await _platform.CopyToClipboardAsync(xml);
@@ -3005,8 +3038,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             int lineCount = xml.Count(c => c == '\n') + 1;
             var statusExtra = aobFallbackWarn != null ? " " + aobFallbackWarn
                 : (limitWarn != null ? " " + limitWarn : "");
-            StatusText = $"Copied: {objCount} objects, {lineCount} XML lines.{statusExtra}";
+            var truncWarn = CeXmlExportService.LastExportTruncated
+                ? " ⚠ Truncated (object graph too large) — lower Drill Depth or use Copy CE Field"
+                : "";
+            StatusText = $"Copied: {objCount} objects, {lineCount} XML lines.{statusExtra}{truncWarn}";
             _log.Info($"CE Field XML copied: {selectedSnapshot.Count} field(s) (AOB={useAob}, includeGuessed={includeGuessed}, " +
+                $"descOffset={DescShowOffset}, descType={DescShowType}, " +
                 $"{resolvedInstances.Count} pointer targets resolved at depth={CsxDrilldownDepth})");
         }
         catch (Exception ex)
@@ -4080,6 +4117,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             Label = displayName,
             FieldOffset = fieldOffset,
             FieldName = fieldName,
+            TargetClassName = result.ClassName,
             IsPointerDeref = isPointer,
         });
 
@@ -4606,6 +4644,13 @@ public sealed class BreadcrumbItem
 
     /// <summary>Field name (e.g., "m_pAttributeSetHealth").</summary>
     public string FieldName { get; init; } = "";
+
+    /// <summary>Class name of the object this breadcrumb resolves to (the pointer
+    /// target / array element / struct type). Drives the +Type opt-in for a spine
+    /// node that is NOT a container view (GameState, PawnPrivate, an array element
+    /// [0]). Container-view nodes surface their element type via ContainerField
+    /// instead. Empty when the class wasn't known at push time.</summary>
+    public string TargetClassName { get; init; } = "";
 
     /// <summary>True if navigation was through a pointer dereference (ObjectProperty), false for inline struct.</summary>
     public bool IsPointerDeref { get; init; }
