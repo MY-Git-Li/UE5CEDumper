@@ -39,8 +39,37 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _currentObjectName = "";
     [ObservableProperty] private string _currentClassName = "";
     [ObservableProperty] private string _currentAddress = "";
+    [NotifyPropertyChangedFor(nameof(ShowEmptyStateLogo))]
     [ObservableProperty] private bool _hasData;
     [ObservableProperty] private LiveFieldValue? _selectedField;
+
+    /// <summary>Prominent failure message shown as a centered warning banner in the
+    /// empty grid area — used for "Locate in GWorld" failures (not_reachable,
+    /// deadline, …) and locate exceptions. Empty = no banner. This replaces the
+    /// misleading idle-logo empty state so a failed locate doesn't look identical to
+    /// "nothing loaded yet"; the actionable reason (<see cref="GWorldPathFailureStatus"/>)
+    /// is no longer buried in the low-contrast top status line.</summary>
+    [NotifyPropertyChangedFor(nameof(HasLocateFailure))]
+    [NotifyPropertyChangedFor(nameof(ShowEmptyStateLogo))]
+    [ObservableProperty] private string _locateFailureMessage = "";
+
+    /// <summary>True when a <see cref="LocateFailureMessage"/> is present — drives the
+    /// failure banner's visibility.</summary>
+    public bool HasLocateFailure => !string.IsNullOrEmpty(LocateFailureMessage);
+
+    /// <summary>Show the idle app-logo empty state ONLY when there is no data AND no
+    /// locate failure to report — so the failure banner takes over the empty area
+    /// instead of the logo.</summary>
+    public bool ShowEmptyStateLogo => !HasData && string.IsNullOrEmpty(LocateFailureMessage);
+
+    /// <summary>Whenever real data is shown (HasData goes true) the failure banner is
+    /// retired structurally — independent of which path displayed the data (some nav
+    /// paths set HasData directly and bypass UpdateDisplay). The banner is only ever
+    /// raised while HasData is false, so this never clobbers a still-relevant banner.</summary>
+    partial void OnHasDataChanged(bool value)
+    {
+        if (value) LocateFailureMessage = "";
+    }
 
     // Multi-selection snapshot. Updated by LiveWalkerPanel's SelectionChanged
     // handler whenever the DataGrid's SelectedItems changes. Drives Copy CE
@@ -426,11 +455,13 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         finally { _suppressFillGapsRefresh = false; }
     }
 
-    /// <summary>Clear both error message and status text (e.g., container limit warnings).</summary>
+    /// <summary>Clear error message, status text, and any locate-failure banner
+    /// (e.g., at the start of a new operation).</summary>
     private void ClearStatus()
     {
         ClearError();
         StatusText = "";
+        LocateFailureMessage = "";
     }
 
     [RelayCommand]
@@ -1898,7 +1929,9 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     ///     this class live"): drop the final node, land on the holder, and
     ///     highlight the pointer field that leads to the target.
     ///
-    /// On failure the reason is surfaced via StatusText (e.g. "increase depth").
+    /// On failure the reason is surfaced via <see cref="LocateFailureMessage"/> as a
+    /// prominent in-grid banner (a user-initiated cancel keeps the current view and
+    /// uses the mild top status line instead).
     /// </summary>
     public async Task LocateInGWorldAsync(string? objectAddr, int scrollFieldOffset,
                                           string? scrollFieldName, bool stopAtParent,
@@ -1917,11 +1950,18 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
             if (!path.Found)
             {
+                if (path.Status == "cancelled")
+                {
+                    // User-initiated cancel — preserve the current view and report
+                    // it as a mild top-line status (not a failure banner).
+                    StatusText = GWorldPathFailureStatus(path);
+                    return;
+                }
                 // Don't leave the previous object on screen as if it were the
-                // result — clear it but keep the failure reason. (A user-initiated
-                // cancel preserves the current view.)
-                if (path.Status != "cancelled") ClearDisplayedNode();
-                StatusText = GWorldPathFailureStatus(path);
+                // result — clear it and raise a prominent failure banner so the
+                // empty grid doesn't read as "nothing loaded yet".
+                ClearDisplayedNode();
+                LocateFailureMessage = GWorldPathFailureStatus(path);
                 return;
             }
 
@@ -2001,6 +2041,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            // Surface the exception prominently (ErrorMessage isn't bound in this
+            // panel — without this a thrown locate would be invisible to the user).
+            ClearDisplayedNode();
+            LocateFailureMessage = $"Locate in GWorld failed: {ex.Message}";
             SetError(ex);
             _log.Error($"LocateInGWorld failed for {objectAddr}", ex);
         }
@@ -2217,8 +2261,13 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                                                            GWorldLocateDepth, ct);
             if (!path.Found)
             {
-                if (path.Status != "cancelled") ClearDisplayedNode();
-                StatusText = GWorldPathFailureStatus(path);
+                if (path.Status == "cancelled")
+                {
+                    StatusText = GWorldPathFailureStatus(path);
+                    return;
+                }
+                ClearDisplayedNode();
+                LocateFailureMessage = GWorldPathFailureStatus(path);
                 return;
             }
 
@@ -2247,6 +2296,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            ClearDisplayedNode();
+            LocateFailureMessage = $"Locate in GWorld failed: {ex.Message}";
             SetError(ex);
             _log.Error($"LocateContainerInGWorld failed for {match.OwnerAddress}", ex);
         }
@@ -4384,7 +4435,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         CurrentObjectName = result.Name;
         CurrentClassName = result.ClassName;
         CurrentAddress = result.Address;
-        HasData = true;
+        HasData = true;   // OnHasDataChanged retires any failure banner once data shows
         ShowCeXml = false;
 
         // Update parent (Outer) info
