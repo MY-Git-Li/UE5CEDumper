@@ -155,6 +155,10 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
     /// </summary>
     public event Action<string>? LocateInGWorld;
 
+    /// <summary>Engine-rooted counterpart of <see cref="LocateInGWorld"/> (path search
+    /// rooted at the live UGameEngine). Payload = instance address.</summary>
+    public event Action<string>? LocateInGameEngine;
+
     /// <summary>
     /// Event raised to locate the OWNER of a container match within the GWorld
     /// graph (the looked-up address fell inside a container element). The whole
@@ -163,6 +167,10 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
     /// deeply-nested values found by the recursive deep scan.
     /// </summary>
     public event Action<ContainerMatch>? LocateContainerInGWorld;
+
+    /// <summary>Engine-rooted counterpart of <see cref="LocateContainerInGWorld"/>
+    /// (path search rooted at the live UGameEngine).</summary>
+    public event Action<ContainerMatch>? LocateContainerInGameEngine;
 
     /// <summary>Event raised to show the selected instance's related objects
     /// (components, GAS ASC → AttributeSets, Controller↔Pawn) in the Related
@@ -758,6 +766,16 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
         LocateInGWorld?.Invoke(SelectedInstance.Address);
     }
 
+    // Engine-rooted counterpart — not gated on IsGWorldAvailable (engine
+    // availability is independent of GWorld; the DLL reports no_engine via the
+    // Live Walker banner).
+    [RelayCommand]
+    private void LocateSelectedInGameEngine()
+    {
+        if (SelectedInstance == null) return;
+        LocateInGameEngine?.Invoke(SelectedInstance.Address);
+    }
+
     [RelayCommand]
     private void ShowRelatedObjects()
     {
@@ -778,5 +796,13 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
         // … → deepest value), which covers both 1-level struct-element values
         // and deeply-nested values from the recursive deep scan.
         LocateContainerInGWorld?.Invoke(match);
+    }
+
+    // Engine-rooted counterpart — not gated on IsGWorldAvailable (see above).
+    [RelayCommand]
+    private void LocateContainerOwnerInGameEngine(ContainerMatch? match)
+    {
+        if (match == null || string.IsNullOrEmpty(match.OwnerAddress)) return;
+        LocateContainerInGameEngine?.Invoke(match);
     }
 }

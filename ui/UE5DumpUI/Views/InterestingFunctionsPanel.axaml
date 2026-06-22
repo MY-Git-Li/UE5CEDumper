@@ -170,6 +170,14 @@
                         BorderThickness="1" BorderBrush="#C586C0"
                         Padding="6,2" FontSize="11"
                         Cursor="Hand"/>
+                <Button Content="{StaticResource str.IF.LocateGameEngine}"
+                        Command="{Binding $parent[UserControl].((vm:InterestingFunctionsViewModel)DataContext).LocateRowInGameEngineCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.IF.LocateGameEngine}"
+                        Foreground="#C586C0" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#C586C0"
+                        Padding="6,2" FontSize="11"
+                        Cursor="Hand"/>
                 <Button Content="{StaticResource str.IF.CopyAaScript}"
                         Command="{Binding $parent[UserControl].((vm:InterestingFunctionsViewModel)DataContext).CopyAaScriptCommand}"
                         CommandParameter="{Binding}"

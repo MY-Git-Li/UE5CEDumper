@@ -367,6 +367,18 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                     _log.Error($"Snapshot LocateInGWorld handler error: {addr}", ex);
                 }
             };
+            Snapshot.LocateInGameEngine += async (addr, fieldOffset, fieldName) =>
+            {
+                try
+                {
+                    SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                    await LiveWalker.LocateInGameEngineAsync(addr, fieldOffset, fieldName, stopAtParent: false);
+                }
+                catch (Exception ex)
+                {
+                    _log.Error($"Snapshot LocateInGameEngine handler error: {addr}", ex);
+                }
+            };
 
             Spc = new SpcQueryViewModel(snapshotStore, log, platform);
             // SPC hit -> open its object in Live Walker (newest snapshot's addr).
@@ -394,6 +406,18 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 catch (Exception ex)
                 {
                     _log.Error($"SPC LocateInGWorld handler error: {addr}", ex);
+                }
+            };
+            Spc.LocateInGameEngine += async (addr, fieldOffset, fieldName) =>
+            {
+                try
+                {
+                    SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                    await LiveWalker.LocateInGameEngineAsync(addr, fieldOffset, fieldName, stopAtParent: false);
+                }
+                catch (Exception ex)
+                {
+                    _log.Error($"SPC LocateInGameEngine handler error: {addr}", ex);
                 }
             };
 
@@ -540,6 +564,18 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 _log.Error($"InstanceFinder LocateInGWorld handler error: {addr}", ex);
             }
         };
+        InstanceFinder.LocateInGameEngine += async (addr) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                await LiveWalker.LocateInGameEngineAsync(addr, 0, null, stopAtParent: false);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"InstanceFinder LocateInGameEngine handler error: {addr}", ex);
+            }
+        };
 
         // Wire InstanceFinder container match -> "Locate in GWorld" (the address is
         // a value inside a container element → reach the owning object + drill the
@@ -554,6 +590,18 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _log.Error($"InstanceFinder LocateContainerInGWorld handler error: {match.OwnerAddress}", ex);
+            }
+        };
+        InstanceFinder.LocateContainerInGameEngine += async (match) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                await LiveWalker.LocateContainerInGameEngineAsync(match);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"InstanceFinder LocateContainerInGameEngine handler error: {match.OwnerAddress}", ex);
             }
         };
 
@@ -621,6 +669,18 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _log.Error($"Teleport LocateInGWorld handler error: {addr}", ex);
+            }
+        };
+        Teleport.LocateInGameEngine += async (addr) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                await LiveWalker.LocateInGameEngineAsync(addr, 0, null, stopAtParent: false);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"Teleport LocateInGameEngine handler error: {addr}", ex);
             }
         };
 
@@ -845,6 +905,33 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 _log.Error($"InterestingFunctions LocateInGWorld handler error: {className}", ex);
             }
         };
+        InterestingFunctions.LocateInGameEngine += async (className) =>
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(className)) return;
+                var instances = await _dump.FindInstancesAsync(className, exactMatch: true, limit: 5);
+                string? liveAddr = null;
+                foreach (var inst in instances.Instances)
+                {
+                    if (string.IsNullOrEmpty(inst.Address)) continue;
+                    if (inst.Name.StartsWith("Default__", StringComparison.Ordinal)) continue;
+                    liveAddr = inst.Address;
+                    break;
+                }
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                if (string.IsNullOrEmpty(liveAddr))
+                {
+                    LiveWalker.StatusText = $"No live (non-CDO) instance of {className} to locate in GameEngine.";
+                    return;
+                }
+                await LiveWalker.LocateInGameEngineAsync(liveAddr, 0, null, stopAtParent: true);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"InterestingFunctions LocateInGameEngine handler error: {className}", ex);
+            }
+        };
 
         // Wire InterestingProperties -> Live Walker. Same pattern as
         // InterestingFunctions: try find_instance for a non-CDO live address,
@@ -933,6 +1020,33 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 _log.Error($"InterestingProperties LocateInGWorld handler error: {className}", ex);
             }
         };
+        InterestingProperties.LocateInGameEngine += async (className) =>
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(className)) return;
+                var instances = await _dump.FindInstancesAsync(className, exactMatch: true, limit: 5);
+                string? liveAddr = null;
+                foreach (var inst in instances.Instances)
+                {
+                    if (string.IsNullOrEmpty(inst.Address)) continue;
+                    if (inst.Name.StartsWith("Default__", StringComparison.Ordinal)) continue;
+                    liveAddr = inst.Address;
+                    break;
+                }
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                if (string.IsNullOrEmpty(liveAddr))
+                {
+                    LiveWalker.StatusText = $"No live (non-CDO) instance of {className} to locate in GameEngine.";
+                    return;
+                }
+                await LiveWalker.LocateInGameEngineAsync(liveAddr, 0, null, stopAtParent: true);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"InterestingProperties LocateInGameEngine handler error: {className}", ex);
+            }
+        };
 
         InterestingProperties.RequestCopyText += async (text) =>
         {
@@ -985,6 +1099,18 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _log.Error($"ValueSearch LocateInGWorld handler error: {addr}", ex);
+            }
+        };
+        ValueSearch.LocateInGameEngine += async (addr, fieldOffset, fieldName) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                await LiveWalker.LocateInGameEngineAsync(addr, fieldOffset, fieldName, stopAtParent: false);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"ValueSearch LocateInGameEngine handler error: {addr}", ex);
             }
         };
         ValueSearch.RequestCopyText += async (text) =>

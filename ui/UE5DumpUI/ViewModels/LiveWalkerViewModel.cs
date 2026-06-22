@@ -53,6 +53,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     [NotifyPropertyChangedFor(nameof(ShowEmptyStateLogo))]
     [ObservableProperty] private string _locateFailureMessage = "";
 
+    /// <summary>The failure banner's title — auto-switches between "Locate in GWorld
+    /// failed" and "Locate in GameEngine failed" so the heading matches the root the
+    /// user picked (the body already names the root; this keeps them consistent). Set
+    /// by each locate method from its rootLabel; only shown while a banner is up.</summary>
+    [ObservableProperty] private string _locateFailureTitle = "Locate failed";
+
     /// <summary>True when a <see cref="LocateFailureMessage"/> is present — drives the
     /// failure banner's visibility.</summary>
     public bool HasLocateFailure => !string.IsNullOrEmpty(LocateFailureMessage);
@@ -1940,6 +1946,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         if (string.IsNullOrEmpty(objectAddr)) return;
         // User-facing label for the chosen BFS root ("GWorld" vs "GameEngine").
         string rootLabel = rootKind == "engine" ? "GameEngine" : "GWorld";
+        LocateFailureTitle = $"Locate in {rootLabel} failed";
         try
         {
             ClearStatus();
@@ -2098,6 +2105,11 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                                         CancellationToken ct = default)
         => LocateInGWorldAsync(objectAddr, scrollFieldOffset, scrollFieldName, stopAtParent,
                                ct, rootKind: "engine");
+
+    /// <summary>"Locate in GameEngine" for a container-match value — the engine-rooted
+    /// counterpart of <see cref="LocateContainerInGWorldAsync"/>.</summary>
+    public Task LocateContainerInGameEngineAsync(ContainerMatch match, CancellationToken ct = default)
+        => LocateContainerInGWorldAsync(match, ct, rootKind: "engine");
 
     /// <summary>
     /// Replace the breadcrumb spine with the GWorld→target path: a GWorld root
@@ -2265,9 +2277,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// single-shot <c>_pendingScroll*</c> path can't chain multiple container
     /// levels, so the drill is an explicit awaited sequence.
     /// </summary>
-    public async Task LocateContainerInGWorldAsync(ContainerMatch match, CancellationToken ct = default)
+    public async Task LocateContainerInGWorldAsync(ContainerMatch match, CancellationToken ct = default,
+                                                   string rootKind = "gworld")
     {
         if (match == null || string.IsNullOrEmpty(match.OwnerAddress)) return;
+        string rootLabel = rootKind == "engine" ? "GameEngine" : "GWorld";
+        LocateFailureTitle = $"Locate in {rootLabel} failed";
         try
         {
             ClearStatus();
@@ -2277,16 +2292,16 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             IsBookmarkSaveMode = false;
 
             var path = await _dump.FindPathFromGWorldAsync(match.OwnerAddress, match.OwnerAddress,
-                                                           GWorldLocateDepth, ct);
+                                                           GWorldLocateDepth, ct, rootKind);
             if (!path.Found)
             {
                 if (path.Status == "cancelled")
                 {
-                    StatusText = GWorldPathFailureStatus(path);
+                    StatusText = GWorldPathFailureStatus(path, rootLabel);
                     return;
                 }
                 ClearDisplayedNode();
-                LocateFailureMessage = GWorldPathFailureStatus(path);
+                LocateFailureMessage = GWorldPathFailureStatus(path, rootLabel);
                 return;
             }
 
@@ -2306,19 +2321,19 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             int totalHops = 1 + match.NestedChain.Count;
             int drilled = await DrillContainerChainAsync(match);
 
-            _log.Info($"LocateContainerInGWorld: {path.Depth} hop(s) to {match.OwnerName}, " +
+            _log.Info($"LocateContainerIn{rootLabel}: {path.Depth} hop(s) to {match.OwnerName}, " +
                       $"drilled {drilled}/{totalHops} container level(s), {path.DurationMs}ms | BC={FormatBreadcrumbTrace()}");
             StatusText = drilled >= totalHops
-                ? $"Located via GWorld — {path.Depth} hop(s); landed on {match.DisplayPath}."
-                : $"Located via GWorld — {path.Depth} hop(s) to {match.OwnerName}; drilled {drilled}/{totalHops} level(s). " +
+                ? $"Located via {rootLabel} — {path.Depth} hop(s); landed on {match.DisplayPath}."
+                : $"Located via {rootLabel} — {path.Depth} hop(s) to {match.OwnerName}; drilled {drilled}/{totalHops} level(s). " +
                   $"Continue manually: {match.DisplayPath}.";
         }
         catch (Exception ex)
         {
             ClearDisplayedNode();
-            LocateFailureMessage = $"Locate in GWorld failed: {ex.Message}";
+            LocateFailureMessage = $"Locate in {rootLabel} failed: {ex.Message}";
             SetError(ex);
-            _log.Error($"LocateContainerInGWorld failed for {match.OwnerAddress}", ex);
+            _log.Error($"LocateContainerIn{rootLabel} failed for {match.OwnerAddress}", ex);
         }
         finally
         {

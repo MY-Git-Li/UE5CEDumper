@@ -121,6 +121,10 @@ public partial class SnapshotViewModel : ViewModelBase
     /// (objAddr, fieldOffset, fieldName). Same shape as SPC / Value Search.</summary>
     public event Action<string, int, string>? LocateInGWorld;
 
+    /// <summary>Engine-rooted counterpart of <see cref="LocateInGWorld"/> (path search
+    /// rooted at the live UGameEngine). Same payload.</summary>
+    public event Action<string, int, string>? LocateInGameEngine;
+
     public IReadOnlyList<string> DiffDirectionOptions { get; } =
         new[] { "Any", "Increased", "Decreased" };
 
@@ -675,6 +679,15 @@ public partial class SnapshotViewModel : ViewModelBase
     {
         if (row == null || !IsGWorldAvailable || string.IsNullOrEmpty(row.ObjAddr)) return;
         LocateInGWorld?.Invoke(row.ObjAddr, row.PropOffset, row.PropName);
+    }
+
+    /// <summary>Engine-rooted counterpart — not gated on IsGWorldAvailable (engine
+    /// availability is independent of GWorld; the DLL reports no_engine via the banner).</summary>
+    [RelayCommand]
+    private void LocateRowInGameEngine(SnapshotDiffRow? row)
+    {
+        if (row == null || string.IsNullOrEmpty(row.ObjAddr)) return;
+        LocateInGameEngine?.Invoke(row.ObjAddr, row.PropOffset, row.PropName);
     }
 
     /// <summary>Copy the changed field's live address (obj_addr + offset) to the

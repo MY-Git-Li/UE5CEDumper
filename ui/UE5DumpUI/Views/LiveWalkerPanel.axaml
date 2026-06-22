@@ -625,7 +625,7 @@
         <TextBlock Text="⚠" FontSize="28" Foreground="#E0A050"
                    VerticalAlignment="Top"/>
         <StackPanel Spacing="6" MaxWidth="500">
-          <TextBlock Text="{StaticResource str.LiveWalker.LocateFailedTitle}"
+          <TextBlock Text="{Binding LocateFailureTitle}"
                      Foreground="#F0C070" FontSize="14" FontWeight="Bold"/>
           <TextBlock Text="{Binding LocateFailureMessage}"
                      Foreground="#D4D4D4" FontSize="12.5"

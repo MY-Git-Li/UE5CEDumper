@@ -90,6 +90,8 @@
     <sys:String x:Key="str.VS.PivotThis">📊 Pivot</sys:String>
     <sys:String x:Key="str.VS.LocateGWorld">🌍</sys:String>
     <sys:String x:Key="str.Tip.VS.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this value's owning object and show it in Live Walker</sys:String>
+    <sys:String x:Key="str.VS.LocateGameEngine">⚙</sys:String>
+    <sys:String x:Key="str.Tip.VS.LocateGameEngine">Locate in GameEngine: find the shortest pointer path from the live UGameEngine down to this value's owning object and show it in Live Walker. Reaches engine / GameInstance / LocalPlayer objects the GWorld graph can't — but for most world actors, use Locate in GWorld.</sys:String>
     <sys:String x:Key="str.VS.CaseSensitive">Case sensitive</sys:String>
     <sys:String x:Key="str.VS.Filter">Filter:</sys:String>
     <sys:String x:Key="str.VS.FilterWatermark">Filter the full result set (server-side) — any column, case-insensitive…</sys:String>
@@ -167,7 +169,6 @@
     <sys:String x:Key="str.LiveWalker.FindRefs">Find Refs</sys:String>
     <sys:String x:Key="str.LiveWalker.Refresh">Refresh</sys:String>
     <sys:String x:Key="str.LiveWalker.AddressHint">Address (hex or module.exe+offset)</sys:String>
-    <sys:String x:Key="str.LiveWalker.LocateFailedTitle">Locate in GWorld failed</sys:String>
     <sys:String x:Key="str.LiveWalker.GWorldDepth">GWorld depth:</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.GWorldDepth">Maximum pointer hops to search downward from GWorld when using "Locate in GWorld" (default 5). Larger = finds deeper targets but slower.</sys:String>
     <sys:String x:Key="str.Toolbar.GWorldDepth">Locate in GWorld depth</sys:String>
@@ -374,6 +375,8 @@
     <sys:String x:Key="str.Snapshot.Diff.OpenWalker">Live</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.LocateGWorld">🌍</sys:String>
     <sys:String x:Key="str.Tip.Snapshot.Diff.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this row's owning object and show it in Live Walker, scrolled to the changed field (in-session diff only)</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.LocateGameEngine">⚙</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Diff.LocateGameEngine">Locate in GameEngine: shortest pointer path from the live UGameEngine down to this row's owning object, shown in Live Walker scrolled to the changed field (in-session diff only). Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.ObjectFilter">Object:</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.Global">Filter all:</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.GlobalHint">match any column…</sys:String>
@@ -409,6 +412,8 @@
     <sys:String x:Key="str.Spc.OpenWalker">Live</sys:String>
     <sys:String x:Key="str.Spc.LocateGWorld">🌍</sys:String>
     <sys:String x:Key="str.Tip.Spc.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this row's owning object and show it in Live Walker, scrolled to the changed field</sys:String>
+    <sys:String x:Key="str.Spc.LocateGameEngine">⚙</sys:String>
+    <sys:String x:Key="str.Tip.Spc.LocateGameEngine">Locate in GameEngine: shortest pointer path from the live UGameEngine down to this row's owning object, shown in Live Walker scrolled to the changed field. Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
     <sys:String x:Key="str.Spc.CopyAddr">Addr</sys:String>
     <sys:String x:Key="str.Spc.PickerHeader">Snapshot sequence</sys:String>
     <sys:String x:Key="str.Spc.BaselineHint">The oldest ticked snapshot is the baseline (its predicate is ignored). Each later snapshot's predicate compares it to the previous ticked one. Hit → Copy Address / Open in Live Walker hands the newest snapshot's live address to CE.</sys:String>
@@ -566,6 +571,7 @@
     <sys:String x:Key="str.IF.Props">Props</sys:String>
     <sys:String x:Key="str.IF.OpenLive">Live</sys:String>
     <sys:String x:Key="str.IF.LocateGWorld">🌍</sys:String>
+    <sys:String x:Key="str.IF.LocateGameEngine">⚙</sys:String>
     <sys:String x:Key="str.IF.CopyAaScript">AA(B)</sys:String>
     <sys:String x:Key="str.IF.CopyName">Name</sys:String>
     <sys:String x:Key="str.Tip.IF.Load">Scan all UFunctions across all loaded UClasses. Takes 2-10s on large games (1M+ objects). Score is computed client-side from name keywords + class bonus + flag bonus.</sys:String>
@@ -578,6 +584,7 @@
     <sys:String x:Key="str.Tip.IF.Props">List the properties this function reads/writes (static Blueprint-bytecode scan). Native functions have no bytecode and show nothing.</sys:String>
     <sys:String x:Key="str.Tip.IF.OpenLive">Try to open this function in Live Walker. If the class has no live (non-CDO) instance, falls back to the Class Struct tab. Auto-expands the Functions section and selects the target row.</sys:String>
     <sys:String x:Key="str.Tip.IF.LocateGWorld">Locate in GWorld: find a live instance of this function's class, then show the shortest pointer path from GWorld down to it in Live Walker (stops at the parent that points to it)</sys:String>
+    <sys:String x:Key="str.Tip.IF.LocateGameEngine">Locate in GameEngine: find a live instance of this function's class, then show the shortest pointer path from the live UGameEngine down to it in Live Walker (stops at the parent that points to it). Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
     <sys:String x:Key="str.Tip.IF.CopyAaScript">Open the Copy AA Script (Baked) dialog for this function. Output requires ue5_invoke_helper.lua embedded in your CE table (Tools -&gt; Export CE Helper Lua File...).</sys:String>
     <sys:String x:Key="str.Tip.IF.CopyName">Copy this function's name to the clipboard. Useful when pasting into a CE script or another tool.</sys:String>
     <sys:String x:Key="str.IF.GenerateCT">📦 Generate CT</sys:String>
@@ -632,6 +639,7 @@
     <sys:String x:Key="str.TP.Map">Map:</sys:String>
     <sys:String x:Key="str.TP.Pawn">Pawn:</sys:String>
     <sys:String x:Key="str.TP.Locate">🌍 Locate in GWorld</sys:String>
+    <sys:String x:Key="str.TP.LocateGameEngine">⚙</sys:String>
     <sys:String x:Key="str.TP.Velocity">Velocity (X / Y / Z):</sys:String>
     <sys:String x:Key="str.TP.Speed">Speed:</sys:String>
     <sys:String x:Key="str.TP.Accel">Acceleration (X / Y / Z):</sys:String>
@@ -665,6 +673,7 @@
     <sys:String x:Key="str.Tip.TP.Refresh">Read the current pawn's world location and control rotation (DLL resolves the local PlayerController → Pawn → RootComponent via reflection).</sys:String>
     <sys:String x:Key="str.Tip.TP.Auto">Re-read the pose every 0.5s, and the camera POV too (POV is skipped silently on games where it isn't available). Off by default; stops automatically on disconnect.</sys:String>
     <sys:String x:Key="str.Tip.TP.Locate">Find this pawn (the object whose Current Pose is shown) in the Live Walker and select it — switches to Live Walker, walks the GWorld → … → pawn path, and lands on it. Reads a fresh pose first to get the live pawn address. World-Partition / streaming pawns resolve via the level back-reference (Live Walker shows 'via level'); a just-spawned, unreferenced pawn may be unreachable.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LocateGameEngine">Locate in GameEngine: find this pawn via the live UGameEngine graph instead of GWorld. NOTE: a pawn is a world actor and usually lives BELOW GWorld, so this is typically unreachable — use the 🌍 Locate in GWorld button for pawns. Provided only for parity.</sys:String>
     <sys:String x:Key="str.Tip.TP.Velocity">Live velocity (cm/s) and acceleration (cm/s²) read straight from the pawn's CharacterMovement (no invoke). Enable Auto to watch them change while moving. Shown as — with a note on pawns that have no CharacterMovement (vehicles / custom movement frameworks).</sys:String>
     <sys:String x:Key="str.Tip.TP.Save">Save the current pose into this marker slot. Markers live in the DLL — they survive a UI restart as long as the game process lives.</sys:String>
     <sys:String x:Key="str.Tip.TP.Recall">Teleport back to this marker (invokes K2_SetActorLocation with bTeleport=true, then restores rotation and zeroes velocity). Refused if you've changed maps — use Force.</sys:String>
@@ -753,6 +762,7 @@
     <sys:String x:Key="str.IP.OpenInst">inst</sys:String>
     <sys:String x:Key="str.IP.OpenLive">Live</sys:String>
     <sys:String x:Key="str.IP.LocateGWorld">🌍</sys:String>
+    <sys:String x:Key="str.IP.LocateGameEngine">⚙</sys:String>
     <sys:String x:Key="str.IP.CopyName">Name</sys:String>
     <sys:String x:Key="str.Tip.IP.Load">Fan-out search across the seed keyword list (HP/Damage/Gold/Speed/etc.) and score the results client-side. Highlights properties in non-canonical locations (LocalPlayer / HUD / GameViewportClient) — the kind of cheat-relevant fields a CE user would miss looking only in Character/Pawn.</sys:String>
     <sys:String x:Key="str.Tip.IP.GameOnly">Skip /Script/Engine, /Script/CoreUObject, etc. Recommended on — game-specific properties are the cheat-table targets.</sys:String>
@@ -764,6 +774,7 @@
     <sys:String x:Key="str.Tip.IP.ShowAll">When off, hide rows below the InterestingThreshold (currently 4). When on, show every property regardless of score.</sys:String>
     <sys:String x:Key="str.Tip.IP.OpenLive">Open this property's owning class in Live Walker (live instance lookup), or fall back to Class Struct if no live instance exists.</sys:String>
     <sys:String x:Key="str.Tip.IP.LocateGWorld">Locate in GWorld: find a live instance of this property's class, then show the shortest pointer path from GWorld down to it in Live Walker (stops at the parent that points to it). Disabled until GWorld is resolved.</sys:String>
+    <sys:String x:Key="str.Tip.IP.LocateGameEngine">Locate in GameEngine: find a live instance of this property's class, then show the shortest pointer path from the live UGameEngine down to it in Live Walker (stops at the parent that points to it). Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
     <sys:String x:Key="str.Tip.IP.CopyName">Copy this property's name to the clipboard.</sys:String>
     <sys:String x:Key="str.IP.GenerateCT">📦 Generate CT</sys:String>
     <sys:String x:Key="str.Tip.IP.GenerateCT">Generate one .CT file containing freeze entries for every selected row. Use Ctrl/Shift+click in the grid to multi-select first. Each entry uses ue5_freeze_helper.lua — embed it in the resulting CT via Tools → Inject Freeze Helper, or open the CT in CE and edit CFG.value before enabling. Struct / array / non-scalar rows are skipped.</sys:String>
@@ -819,6 +830,8 @@
     <sys:String x:Key="str.Tip.InstanceFinder.OpenWalker">Open this instance in Live Walker</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to this instance and show it in Live Walker (stops at the parent that points to it)</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.LocateGWorldContainer">Locate in GWorld: find the shortest pointer path from GWorld down to this container's owning object, then drill into the element so you land next to the value</sys:String>
+    <sys:String x:Key="str.Tip.InstanceFinder.LocateGameEngine">Locate in GameEngine: find the shortest pointer path from the live UGameEngine down to this instance and show it in Live Walker (stops at the parent that points to it). Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
+    <sys:String x:Key="str.Tip.InstanceFinder.LocateGameEngineContainer">Locate in GameEngine: find the shortest pointer path from the live UGameEngine down to this container's owning object, then drill into the element so you land next to the value. Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.ExportCE">Export instance as CE XML pointer chain</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.CopyFieldAddr">Copy field absolute address</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.AA">Generate CE Auto Assembler script</sys:String>
