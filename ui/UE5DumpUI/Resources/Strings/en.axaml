@@ -177,6 +177,10 @@
     <sys:String x:Key="str.LiveWalker.ExportCEFields">Copy CE Fields</sys:String>
     <sys:String x:Key="str.LiveWalker.AobToggle">AOB</sys:String>
     <sys:String x:Key="str.LiveWalker.CollapseChain">Collapse chain</sys:String>
+    <sys:String x:Key="str.LiveWalker.ExportOptions">Options</sys:String>
+    <sys:String x:Key="str.LiveWalker.DedupShared">Dedup shared objects</sys:String>
+    <sys:String x:Key="str.LiveWalker.DescShowOffset">Append +Offset</sys:String>
+    <sys:String x:Key="str.LiveWalker.DescShowType">Append +Type</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportCsx">Export CSX</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportCsxPre77">CSX — Pre-CE 7.7 (Byte)</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportCsx77">CSX — CE 7.7+ (Binary bitfields)</sys:String>
@@ -855,6 +859,10 @@
     <sys:String x:Key="str.Tip.LiveWalker.ExportCE">Copy full CE XML pointer chain to clipboard</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.ExportCEField">Copy CE XML for the selected field(s) only (Ctrl/Shift-click to multi-select)</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.AobToggle">Use AOB-scanned GWorld symbol instead of hardcoded address (survives game restarts)</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.ExportOptions">Copy CE XML / Copy CE Field options: memory-record Description format (+Offset / +Type) and the AOB / Collapse chain / Guess? toggles.</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.DescShowOffset">Append each node's field offset (hex) to its CE Description — e.g. "AbilitySystemComponent (7E0)". Off = name only.</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.DescShowType">Append each node's class / struct / element type to its CE Description — e.g. "AbilitySystemComponent (LSAbilitySystemComponent)", "[0] (ShieldAttributeSet)". The folded (Collapse chain) spine never adds a type. Off = name only.</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.DedupShared">Expand each drilled object once: a shared object reached from several fields (or a back-reference) is fully expanded the first time and shown as a flat "(shared)" pointer afterwards. Prevents the huge / out-of-memory export when the drilldown reaches a densely-connected object (e.g. the World). Off = expand every reference fully (can be very large at high Drill Depth).</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.CollapseChain">Collapse the multi-level GWorld-to-target pointer hops into a single CE multi-level-pointer entry (keeps base, one merged spine node, and the target field with its drill-down). Applies to Copy CE XML and Copy CE Field only.</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.ExportCsx">Export CE Structure Dissect script (.csx). Pick the CE format version from the dropdown.</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.ExportCsxPre77">Legacy format for CE before 7.7: a bit-field bool is exported as a whole Byte with the bit index noted in its description (no bit switch).</sys:String>
