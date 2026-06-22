@@ -16,6 +16,21 @@ namespace Genau {
 // Phase: 0=idle, 1=version, 2=GObjects, 3=GNames, 4=GWorld, 5=init, 6=dynoff, 7=complete
 using ScanProgressFn = std::function<void(int phase, const char* text)>;
 
+// Revision of the UE-version *detection logic* (DetectVersionDetailed + tier/anchor
+// rules + publisher bias). The HintCache stamps each saved version with this value so
+// a later launch can trust a cached version and SKIP the slow memory string scan.
+//
+// Because DetectVersionDetailed scans the module's own STATIC image (deterministic per
+// binary), re-detecting the same peHash always yields the same answer — so a cache hit
+// is safe regardless of publisher or confidence. The only reason to re-detect is if this
+// logic changed and an older cached value might now be detected differently.
+//
+// >>> BUMP THIS whenever DetectVersionFromPEResource / DetectVersionDetailed / tier rules /
+//     HasUEAnchorNearby / publisher-bias change, so every cached version is recomputed once
+//     under the new logic. Do NOT tie it to the build number — that would re-detect on every
+//     rebuild and defeat the cache for stripped-version games (SquareEnix).
+constexpr uint32_t kVersionDetectLogicRev = 1;
+
 struct EnginePointers {
     uintptr_t GObjects  = 0;   // FUObjectArray*
     uintptr_t GNames    = 0;   // FNamePool* or TNameEntryArray*

@@ -1954,6 +1954,10 @@ struct PublisherEntry {
     uint32_t    biasFallback;  // UE version to use when memory scan fails
 };
 
+// NOTE: changing a biasFallback VALUE here affects the version a cached game resolves to →
+// bump Genau::kVersionDetectLogicRev so already-cached games re-detect under the new bias.
+// (Adding/removing a publisher does NOT need a bump for the low-confidence BADGE — FindAll's
+// reuse branch re-applies publisher low-confidence LIVE from the per-launch DetectPublisherFromPE.)
 static const PublisherEntry kPublishers[] = {
     // FF7 Remake (4.18), FF7 Rebirth (4.26 fork), DQ I&II HD-2D (4.27).
     // 427 is the most-common case — Rebirth/Remake structural detection
@@ -3673,7 +3677,7 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
 
     // UE version detection — priority order:
     //   1. User-set persistent override (from HintCache, set via UI) — always wins.
-    //   2. Cached high-confidence detection from a previous scan.
+    //   2. Cached detection from a previous scan whose logic rev matches the current DLL.
     //   3. Fresh detection (PE VERSIONINFO + Tier 1/2 string scan + Tier 3 anchored fallback).
     //   4. Hard fallback (504 by default, or publisher-biased if we can identify the shipper).
     //
@@ -3682,8 +3686,14 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
     // Structural findings (UE4 TNameEntryArray, hash-prefixed headers) override the version
     // later anyway, so a cached value is safe.
     //
-    // NOTE: Only skip DetectVersion when versionDetected==true (high-confidence hit).
-    // When versionDetected==false (inferred/fallback), re-run to avoid amplifying misdetections.
+    // Cache-reuse policy (build 1521+): trust the cached version for ANY same-peHash game —
+    // including publisher-stripped ones (SquareEnix) and inferred/low-confidence results —
+    // as long as it was stamped by the current detection-logic rev (kVersionDetectLogicRev).
+    // DetectVersionDetailed scans the module's STATIC image, so the same binary always yields
+    // the same answer; re-running it every launch only burns time. The cached versionDetected /
+    // lowConfidence flags are restored verbatim, so the UI badge (and the "set an override"
+    // nudge for stripped/forked engines) stays exactly as honest as a fresh detection. A logic
+    // change → bump kVersionDetectLogicRev → every cache re-detects once and re-stamps.
     if (progress) progress(1, "Detecting UE version...");
 
     // Probe publisher (cheap, just PE info) regardless of cached state — useful for UI display
@@ -3707,24 +3717,32 @@ bool FindAll(EnginePointers& out, ScanProgressFn progress) {
         out.bLowConfidence   = false;
         LOG_INFO("FindAll: UE Version = %u (USER OVERRIDE — persistent for this game)",
                  out.UEVersion);
-    } else if (hints.hasVersionHint && hints.ueVersion != 0 && hints.versionDetected
-               && publisher == nullptr) {
-        // Use cached high-confidence detection ONLY when no publisher thumbprint matched.
-        // Known-misleading publishers (SquareEnix) ship stripped/forked engine builds whose
-        // version strings can't be trusted — older builds may have cached versionDetected=true
-        // from less-strict detection logic, so we re-run detection (and force low confidence)
-        // every launch to keep the UI badge honest.
-        out.UEVersion = hints.ueVersion;
-        out.bVersionDetected = true;
+    } else if (hints.hasVersionHint && hints.ueVersion != 0
+               && hints.versionDetectRev == kVersionDetectLogicRev) {
+        // Reuse the cached version (skip the slow memory string scan) whenever it was stamped
+        // by the current detection-logic rev — regardless of publisher or confidence. The same
+        // binary produces the same detection deterministically, so a re-scan only wastes time.
+        // Restore the cached confidence so the UI badge / override nudge survive (versionDetected
+        // verbatim; lowConfidence cached OR live-publisher, see below).
+        out.UEVersion        = hints.ueVersion;
+        out.bVersionDetected = hints.versionDetected;
         out.bUserOverride    = false;
-        out.bLowConfidence   = false;
-        LOG_INFO("FindAll: UE Version = %u (cached, detected) — skipped DetectVersion",
-                 out.UEVersion);
+        // Restore the cached low-confidence flag, but ALSO force it live whenever a publisher
+        // thumbprint matched — DetectPublisherFromPE ran above (cheap, PE-only) and a publisher
+        // match means unreliable version strings, so the badge must always nudge toward an override.
+        // Applying it live (not just from cache) keeps the badge honest even if the publisher table
+        // gains a new shipper after this game was already cached (the old publisher gate was live too).
+        out.bLowConfidence   = hints.lowConfidence || (publisher != nullptr);
+        LOG_INFO("FindAll: UE Version = %u (cached, rev=%u, detected=%s, lowConf=%s) — skipped DetectVersion",
+                 out.UEVersion, hints.versionDetectRev,
+                 out.bVersionDetected ? "yes" : "no",
+                 out.bLowConfidence   ? "yes" : "no");
     } else {
-        if (publisher && hints.hasVersionHint && hints.ueVersion != 0 && hints.versionDetected) {
-            LOG_WARN("FindAll: Publisher (%s) is on the unreliable-version-string list — "
-                     "ignoring cached versionDetected=true and re-running detection.",
-                     publisher->thumbprint);
+        if (hints.hasVersionHint && hints.ueVersion != 0
+            && hints.versionDetectRev != kVersionDetectLogicRev) {
+            LOG_INFO("FindAll: Cached version %u was stamped by logic rev %u (current %u) — "
+                     "re-detecting once and re-stamping.",
+                     hints.ueVersion, hints.versionDetectRev, kVersionDetectLogicRev);
         }
 
         VersionScanResult dr = DetectVersionDetailed();

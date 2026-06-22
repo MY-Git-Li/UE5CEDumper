@@ -32,7 +32,13 @@ struct ScanHints {
     // Only valid when hasVersionHint == true.
     uint32_t    ueVersion        = 0;
     bool        versionDetected  = false;  // true = version was reliably detected last time
-    bool        hasVersionHint   = false;  // true = ueVersion/versionDetected are populated
+    bool        lowConfidence    = false;  // cached bLowConfidence (Tier 3 / publisher bias) — preserves the override nudge
+    bool        hasVersionHint   = false;  // true = ueVersion/versionDetected/lowConfidence are populated
+
+    // Detection-logic revision that produced the cached ueVersion (see Genau::kVersionDetectLogicRev).
+    // The reuse path trusts the cache only when this equals the current logic rev; a mismatch
+    // (older DLL / changed logic / absent field = 0) forces a one-time re-detection + re-stamp.
+    uint32_t    versionDetectRev = 0;
 
     // User-set persistent override (highest priority — wins over auto-detect on every scan).
     // 0 = no override. Set/cleared via the set_ue_version_override pipe cmd.

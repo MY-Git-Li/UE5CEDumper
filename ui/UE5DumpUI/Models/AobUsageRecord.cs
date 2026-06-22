@@ -39,6 +39,21 @@ public sealed class AobUsageRecord
     public bool VersionDetected { get; set; }
 
     /// <summary>
+    /// Cached low-confidence flag (Tier 3 bare-pattern OR publisher-bias fallback).
+    /// Mirrors EngineState.IsLowConfidence. The DLL restores this on a cache hit so the
+    /// "set an override" nudge survives even when version detection is skipped.
+    /// </summary>
+    public bool LowConfidence { get; set; }
+
+    /// <summary>
+    /// Detection-logic revision that produced <see cref="UEVersion"/> (DLL Genau::kVersionDetectLogicRev).
+    /// DLL-authoritative — the DLL stamps it; the UI only round-trips it. RecordScanAsync MUST NOT
+    /// touch it (like <see cref="UEVersionUserOverride"/>), otherwise the DLL's stamp is erased and
+    /// the next launch re-runs the slow version detection. 0 = absent / stamped by an older DLL.
+    /// </summary>
+    public int VersionDetectRev { get; set; }
+
+    /// <summary>
     /// User-set persistent UE version override (0 / unset = no override).
     /// Written by the DLL via the set_ue_version_override pipe cmd.
     /// AobUsageService preserves this on round-trip — RecordScanAsync MUST NOT touch it.

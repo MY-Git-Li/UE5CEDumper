@@ -112,10 +112,18 @@ ScanHints LoadHints(const char* peHash) {
         // Extract cached UE version (skip expensive DetectVersion on repeat scans)
         auto uvIt = rec.find("ueVersion");
         auto vdIt = rec.find("versionDetected");
+        auto lcIt = rec.find("lowConfidence");
+        auto rvIt = rec.find("versionDetectRev");
         if (uvIt != rec.end() && uvIt->is_number_integer()) {
             hints.ueVersion = uvIt->get<uint32_t>();
             hints.versionDetected = (vdIt != rec.end() && vdIt->is_boolean())
                                     ? vdIt->get<bool>() : false;
+            // lowConfidence/versionDetected are written by both the DLL (always) and the C# UI
+            // (DefaultIgnoreCondition omits a false bool) — an absent field reads as false.
+            hints.lowConfidence = (lcIt != rec.end() && lcIt->is_boolean())
+                                    ? lcIt->get<bool>() : false;
+            hints.versionDetectRev = (rvIt != rec.end() && rvIt->is_number_integer())
+                                    ? rvIt->get<uint32_t>() : 0;
             hints.hasVersionHint = true;
         }
 
@@ -222,8 +230,21 @@ void SaveResults(const char* peHash, const Genau::EnginePointers& ptrs,
 
         rec["peHash"]   = peHash;
         rec["gameName"] = processName ? processName : "";
-        rec["ueVersion"] = static_cast<int>(ptrs.UEVersion);
-        rec["versionDetected"] = ptrs.bVersionDetected;
+        // Cache the version-detection result ONLY when it's a genuine detection. When the
+        // version came from a user override (bUserOverride), FindAll skipped detection entirely
+        // and ptrs.UEVersion is just the override value — caching it (with versionDetectRev) would
+        // let it masquerade as a confident detection once the override is later cleared. So we
+        // leave the prior real-detection fields untouched; the override itself lives in
+        // ueVersionUserOverride, and clearing it correctly reverts to the last real detection
+        // (or re-detects if none was ever cached).
+        if (!ptrs.bUserOverride) {
+            rec["ueVersion"]        = static_cast<int>(ptrs.UEVersion);
+            rec["versionDetected"]  = ptrs.bVersionDetected;
+            rec["lowConfidence"]    = ptrs.bLowConfidence;
+            // Stamp the detection-logic revision so the next launch can trust this cached
+            // version and skip the slow DetectVersion scan (until the logic rev changes).
+            rec["versionDetectRev"] = static_cast<int>(Genau::kVersionDetectLogicRev);
+        }
         // Preserve any pre-existing ueVersionUserOverride from the previous record —
         // a fresh scan must not silently clobber a user-set persistent override.
         // If the field was absent before, leave it absent (no zero-stamp).

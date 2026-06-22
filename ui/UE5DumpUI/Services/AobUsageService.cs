@@ -51,8 +51,20 @@ public sealed class AobUsageService
             {
                 // Update existing record
                 existing.GameName = state.ModuleName;
-                existing.UEVersion = state.UEVersion;
-                existing.VersionDetected = state.VersionDetected;
+                // Cache the detected version ONLY when it's a genuine detection. An override
+                // value (IsUserOverride) must not overwrite the last real detection — otherwise
+                // clearing the override later would reuse the override value as a confident
+                // detection (the DLL applies the same guard in Flamme::SaveResults; the UI write
+                // lands second, so it must mirror it). The override lives in UEVersionUserOverride.
+                if (!state.IsUserOverride)
+                {
+                    existing.UEVersion = state.UEVersion;
+                    existing.VersionDetected = state.VersionDetected;
+                    existing.LowConfidence = state.IsLowConfidence;
+                }
+                // NOTE: VersionDetectRev is DLL-authoritative — preserved here (never assigned),
+                // exactly like UEVersionUserOverride. Clobbering it would force the next launch
+                // to re-run the slow UE-version detection.
                 UpdateScanEntry(existing.GObjects, state.GObjectsMethod, state.GObjectsPatternId, state.GObjectsPatternsTried, state.GObjectsPatternsHit);
                 UpdateScanEntry(existing.GNames, state.GNamesMethod, state.GNamesPatternId, state.GNamesPatternsTried, state.GNamesPatternsHit);
                 UpdateScanEntry(existing.GWorld, state.GWorldMethod, state.GWorldPatternId, state.GWorldPatternsTried, state.GWorldPatternsHit);
@@ -61,13 +73,16 @@ public sealed class AobUsageService
             }
             else
             {
-                // New game record
+                // New game record. Cache the version only for a genuine detection (mirror the
+                // update branch + Flamme::SaveResults). VersionDetectRev left 0 so a record the
+                // DLL hasn't stamped yet forces a one-time re-detection on the next launch.
                 var record = new AobUsageRecord
                 {
                     PeHash = state.PeHash,
                     GameName = state.ModuleName,
-                    UEVersion = state.UEVersion,
-                    VersionDetected = state.VersionDetected,
+                    UEVersion = state.IsUserOverride ? 0 : state.UEVersion,
+                    VersionDetected = !state.IsUserOverride && state.VersionDetected,
+                    LowConfidence = !state.IsUserOverride && state.IsLowConfidence,
                     LastScanUtc = DateTime.UtcNow.ToString("o"),
                     ScanCount = 1,
                 };

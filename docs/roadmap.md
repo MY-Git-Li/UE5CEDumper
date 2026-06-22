@@ -407,6 +407,18 @@ applies the publisher's `biasFallback` when detection fails. Currently:
 Adding more entries casually risks wrong bias overriding correct
 detection — wait for a real misdetection report before adding.
 
+**Version detection is cached per `peHash` (build 1521).** The slow
+`DetectVersionDetailed` memory string scan (5+ s on large games) runs only
+**once** per game build; subsequent connects reuse the cached version when it
+was stamped by the current `Genau::kVersionDetectLogicRev`, so stripped-version
+publisher games (Square Enix) no longer re-detect every connect. The
+low-confidence badge stays honest — the cache-reuse path re-applies publisher
+low-confidence **live** (`bLowConfidence = cached || publisher!=nullptr`), since
+`DetectPublisherFromPE` runs every launch. **Changing a `biasFallback` value
+above requires bumping `kVersionDetectLogicRev`** so already-cached games
+re-detect under the new bias. Force a fresh detect anytime via the per-game
+Delete-cache button; a UE version override still wins over everything.
+
 ## Tested games (last verified 2026-06-11)
 
 - **Everspace 2** ✅ (UE 5.4): item template ID via container scan; Find

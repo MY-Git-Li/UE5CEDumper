@@ -36,7 +36,7 @@ UE5CEDumper/
 │       ├── Stark.cpp / .h          ← GameThreadDispatch — MinHook ProcessEvent hook, game-thread queue
 │       ├── Wirbel.cpp / .h         ← Teleport — marker save/recall + cursor teleport (BugIt-style), build 1027
 │       ├── Mimic.cpp / .h          ← Mailbox — shared memory mailbox for CE Lua invocation
-│       ├── Flamme.cpp / .h         ← HintCache — scan hint cache for faster repeat scans
+│       ├── Flamme.cpp / .h         ← HintCache — per-game cache (AOB pattern IDs + UE version, keyed by peHash) for faster repeat scans
 │       ├── Lugner.cpp              ← ProxyVersion — version.dll proxy DLL forwarding
 │       ├── Lugner_Dinput8.cpp      ← dinput8.dll proxy variant
 │       ├── ProxyVersion.def        ← version.dll export forwarding
