@@ -16,7 +16,7 @@ builds ≤696 in
 
 -----
 
-## 2026-06-22 — Live Walker button-layout pass: "AA" in the header (+ push-to-CE), Class / Outer / per-field "inst" buttons, address-field hint (builds 1550-1560; UI-only; unit + AOT verified; adversarial review 0 issues)
+## 2026-06-22 — Live Walker button-layout pass: "AA" in the header (+ push-to-CE), Class / Outer / per-field "inst" buttons, address-field hint (builds 1550-1560; UI-only; MERGED main PR #346 `34f6a0c`; in-game VERIFIED)
 
 A user-directed cleanup of the Live Walker toolbar/header buttons, plus one behaviour upgrade. Five changes, all UI-only (no DLL change, no re-inject):
 
@@ -30,7 +30,7 @@ A user-directed cleanup of the Live Walker toolbar/header buttons, plus one beha
 
 5. **Per-field "inst" button** in the field grid's Name column → opens the field's pointed-to object class in the Instance Finder tab and runs the search (new `LiveWalkerViewModel.NavigateToInstanceFinder` event → MainWindow switches tab + `InstanceFinder.SearchForClassAsync`, the same handoff Interesting Funcs/Props/Property Search use). Visible only for object-pointer fields (gated on `LiveFieldValue.PtrClassName`, the pointee's live runtime class).
 
-**Verification.** C# 1801/0 (+13 tests: 5 AddressHelper, 4 ExtractAssemblerScript, plus the relocated-button regression coverage), AOT 47.0 MB clean (no trim warnings). 4-dimension adversarial review (XAML / VM-wiring / AA-push / coverage → verify) returned 0 confirmed / 5 dismissed. Also cleared 6 pre-existing `xUnit1051` warnings in `LocateGWorldBannerTests` (pass `TestContext.Current.CancellationToken`). *In-game verification of the AOBMaker push-to-CE path is the one remaining manual check.*
+**Verification.** C# 1801/0 (+13 tests: 5 AddressHelper, 4 ExtractAssemblerScript, plus the relocated-button regression coverage), AOT 47.0 MB clean (no trim warnings). 4-dimension adversarial review (XAML / VM-wiring / AA-push / coverage → verify) returned 0 confirmed / 5 dismissed. Also cleared 6 pre-existing `xUnit1051` warnings in `LocateGWorldBannerTests` (pass `TestContext.Current.CancellationToken`). **In-game VERIFIED** — with the AOBMaker plugin connected, the header **AA** button adds the symbol-registration entry straight into CE's address list (no clipboard round-trip).
 
 ## 2026-06-22 — Locate in GameEngine: a GEngine-rooted ⚙ companion to Locate in GWorld on all 10 surfaces (builds 1542-1544; DLL + UI; MERGED main PR #345 `f488592`; in-game VERIFIED)
 
