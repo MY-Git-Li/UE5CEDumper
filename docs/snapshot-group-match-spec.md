@@ -16,6 +16,23 @@ change.** The gap is purely the matcher + query + UI.
 
 -----
 
+## 0. Decisions (locked 2026-06-22)
+
+1. **Host** — a **Diff / Group toggle inside the Snapshot panel** (experimental-gated).
+2. **Matcher** — a **C# port of `Orden`** (run in C# over loaded snapshot rows; no
+   DLL round-trip).
+3. **v1 = Mode B (cross-snapshot comparison, ≥ 2 snapshots)** — **not**
+   single-snapshot. A single snapshot is a *frozen instant*: it can show *absolute*
+   values but **no change**, so it cannot express the motivating case. The value of
+   the snapshot context is the **≥2-snapshot comparison** (Current HP `Decreased` +
+   Max HP `Unchanged`). **Mode A (single-snapshot absolute) is kept only as the
+   degenerate path** of the same engine — selecting 1 snapshot lights up only
+   absolute predicates; selecting ≥2 enables the relative ones. It is not a separate
+   milestone, and for a pure absolute *live* find the live Value Search Group is the
+   better tool.
+
+-----
+
 ## 1. Why — the gap
 
 The three Snapshot surfaces are all **single-value / single-field** today:
@@ -56,15 +73,18 @@ right now", the live Group Scan is still the better tool.
 
 ## 2. Two modes
 
-### Mode A — single-snapshot group find (absolute)
+### Mode A — single-snapshot group find (absolute) — *degenerate, not v1*
 *"Which objects in snapshot S hold these N values, each at a distinct numeric
 offset, in any order?"*
 
 Per-slot **absolute** predicate (the live group's First-Scan set):
-`Exact / Bigger / Smaller / Between`. One snapshot, no temporal axis. This is the
-most direct answer to the user's question and the v1 deliverable.
+`Exact / Bigger / Smaller / Between`. One snapshot → **no temporal axis → shows no
+change** (a frozen instant). Kept only as the **degenerate** path of the Mode B
+engine (1 snapshot selected → only absolute predicates light up); it is *not* the
+v1 headline. For an absolute find against the *current* game state, the live Value
+Search Group is the better tool (fresh addresses).
 
-### Mode B — cross-snapshot group comparison (temporal) — the motivating case
+### Mode B — cross-snapshot group comparison (temporal) — the motivating case AND v1
 *"Which objects' group of stats moved in THIS pattern across snapshots — some
 changed, some stayed put?"*
 
@@ -203,14 +223,20 @@ Alternatives considered (rejected for v1):
 
 | Phase | Scope | Effort · Risk |
 |---|---|---|
-| **S1 — C# Orden port** | `Services/GroupMatch.cs`: `Leaf` / `SlotTarget` / `MatchGroup` / `HasDistinctAssignment` (Kuhn), pure + AOT-safe; xUnit tests mirroring the DLL Orden cases. | **S** · low |
-| **S2 — `GroupMatchEngine` + `SnapshotStore.GroupMatchAsync` (Mode A)** | Single-snapshot load (reuse Diff hash-join), per-object leaves via `SnapshotNumeric`, run `MatchGroup`, emit `GroupCandidate`. Absolute predicates only. | **M** · low-med |
-| **S3 — UI (Snapshot panel Group mode)** | Diff/Group toggle; extract the shared group input + master-detail control; wire handoffs (same-session addr). | **M** · med (XAML extract / AOT binding) |
-| **S4 — Mode B (cross-snapshot temporal)** | N-snapshot intersection (reuse `LoadIntersectedCandidatesAsync` + `SpcKey`), per-slot relative predicates **incl. `Unchanged`**, optional absolute AND. This is the §3 motivating feature. | **M-L** · med |
-| **S5 — Deep blocks (optional)** | Snapshot already stores struct-array elements (`SnapshotCapturedArray/Element`, inner-key) → array-as-block group match, mirroring the live deep group's per-block `MatchGroup`. | **M** · med |
+| **S1 — C# Orden port + predicate eval** | `Services/GroupMatch.cs`: `Leaf` / `SlotTarget` / `MatchGroup` / `HasDistinctAssignment` (Kuhn) **plus per-slot predicate evaluation** — absolute (`Exact/Bigger/Smaller/Between`) **and** relative (`Changed/Unchanged/Increased/Decreased`) over a value *sequence*. Pure + AOT-safe; xUnit tests mirroring the DLL Orden cases. | **S-M** · low |
+| **S2 — Engine + store, single-snapshot (the Mode A path)** | `GroupMatchEngine` + `SnapshotStore.GroupMatchAsync(snapshotId,…)`: load ONE snapshot's fields grouped by object (reuse the Diff hash-join), build per-object leaves via `SnapshotNumeric`, run `MatchGroup` with **absolute** per-slot predicates, emit `GroupCandidate`. End-to-end + unit tests on the absolute path. *(This single-snapshot path becomes the degenerate 1-snapshot case once S4 generalizes the engine.)* | **M** · low-med |
+| **S3 — UI (Snapshot panel Diff/Group toggle)** | Group mode wired to S2: 2-4 slot input grid + master-detail results (extract the shared input + RowDetails control); handoffs reuse the Diff/SPC same-session-addr contract. | **M** · med (XAML extract / AOT binding) |
+| **S4 — Mode B (cross-snapshot comparison)** | Extend the engine + store to the **≥2-snapshot intersection** (reuse SPC `LoadIntersectedCandidatesAsync` + `SpcKey`) so each leaf carries the value **sequence**; add per-slot **relative** predicates (`Changed/Unchanged/Increased/Decreased` incl. **`Unchanged`**, optional absolute AND); UI gains the ordered ≥2-snapshot picker + per-slot predicate column (relative enabled once ≥2 selected). **The motivating `Current HP↓ / Max HP unchanged` case.** | **M-L** · med |
 
-v1 = S1–S3 (Mode A). The user's priority (the `Current HP / Max HP` case) lands in
-**S4 (Mode B)** — schedule S4 close behind v1.
+v1 = **S1-S4** — build through Mode B; **commit each phase**; run the integration /
+in-game test together **after S4**. Build order is absolute-first (S2) → temporal
+(S4); the single-snapshot path remains as Mode A (the degenerate case).
+
+**Out of scope here — deep blocks (struct-array element as a block).** Matching a
+group *inside* a nested struct-array over the snapshot corpus belongs to **SPC
+Query**'s scope, not this feature (owner decision 2026-06-22). The live deep group
+already covers live memory; the snapshot/SPC-corpus version is tracked under SPC
+Query.
 
 -----
 
@@ -231,18 +257,22 @@ v1 = S1–S3 (Mode A). The user's priority (the `Current HP / Max HP` case) land
 
 -----
 
-## 8. Open decisions (confirm before building)
+## 8. Open decisions
 
-1. **Host** — Snapshot panel Diff/Group toggle *(recommended)* vs Value Search
-   "Source" selector vs SPC fold-in.
-2. **v1 scope** — Mode A single-snapshot first *(recommended)* then S4 Mode B;
-   or go straight to Mode B (the user's motivating case) and treat Mode A as a
-   degenerate (1-snapshot) case of the same engine.
-3. **Matcher** — C# Orden port *(recommended)* vs DLL round-trip.
-4. **Mode B predicate UI** — per-slot relative predicate column (Changed/
-   Unchanged/Increased/Decreased) **+** optional absolute window per slot; do we
-   also allow an absolute-only slot mixed with relative-only slots in the same
-   query? (Yes — independent per slot, like the live group.)
+Decisions 1-3 are **locked** (see §0): host = Snapshot panel Diff/Group toggle;
+matcher = C# `Orden` port; **v1 = Mode B** (≥2-snapshot comparison), Mode A
+degenerate. Remaining, to settle during S1-S3:
+
+1. **Mixed slots** — allow an absolute-only slot mixed with relative-only slots in
+   one query (e.g. `Current HP Decreased` + `Max HP Unchanged` + `Level Exact 30`)?
+   (Lean: **yes** — predicates are independent per slot, exactly like the live group.)
+2. **Snapshot count > 2** — for 3+ selected snapshots, does each slot's relative
+   predicate become a per-step *chain* (like SPC's per-snapshot predicate list) or
+   just first-vs-last? (Lean: **start first-vs-last** for 2 snapshots; extend to a
+   chain only if a real case needs it.)
+3. **Baseline for absolute predicates in Mode B** — when a slot also carries an
+   absolute window, evaluate it on the newest snapshot, the oldest, or any/all?
+   (Lean: **newest**, mirroring "current value".)
 
 -----
 
