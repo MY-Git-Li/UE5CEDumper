@@ -1730,4 +1730,46 @@ public class DumpServiceTests
         Assert.Equal("SaveSlotList[].MsTuneData.GP", res.Results[1].PropName);
         Assert.NotNull(res.Results[1].PropNameTooltip);
     }
+
+    // "Auto detect Engine/System noise" PRE-filter: the opt-in toggle must reach the
+    // wire as auto_skip_noise=true ONLY when enabled (off keeps the request byte-
+    // identical, matching the other opt-in scan toggles).
+    [Fact]
+    public async Task BeginValueScanAsync_AutoSkipNoise_AttachedOnlyWhenOn()
+    {
+        JsonObject? captured = null;
+        _pipe.SetHandler(req => { captured = req; return new JsonObject { ["ok"] = true }; });
+        var svc = CreateService();
+
+        await svc.BeginValueScanAsync(ValueScanDataType.Int32, ValueScanType.Exact, "100",
+            ct: TestContext.Current.CancellationToken);
+        Assert.NotNull(captured);
+        Assert.False(captured!.ContainsKey("auto_skip_noise"));   // default off → omitted
+
+        await svc.BeginValueScanAsync(ValueScanDataType.Int32, ValueScanType.Exact, "100",
+            autoSkipNoise: true, ct: TestContext.Current.CancellationToken);
+        Assert.NotNull(captured);
+        Assert.True(captured!["auto_skip_noise"]?.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task BeginGroupScanAsync_AutoSkipNoise_AttachedOnlyWhenOn()
+    {
+        JsonObject? captured = null;
+        _pipe.SetHandler(req => { captured = req; return new JsonObject { ["ok"] = true }; });
+        var svc = CreateService();
+        var slots = new List<GroupSlotInput>
+        {
+            new() { DataType = ValueScanDataType.NumericNoByte, ScanType = ValueScanType.Exact, Value = "100" },
+            new() { DataType = ValueScanDataType.NumericNoByte, ScanType = ValueScanType.Exact, Value = "50" },
+        };
+
+        await svc.BeginGroupScanAsync(slots, ct: TestContext.Current.CancellationToken);
+        Assert.NotNull(captured);
+        Assert.False(captured!.ContainsKey("auto_skip_noise"));   // default off → omitted
+
+        await svc.BeginGroupScanAsync(slots, autoSkipNoise: true, ct: TestContext.Current.CancellationToken);
+        Assert.NotNull(captured);
+        Assert.True(captured!["auto_skip_noise"]?.GetValue<bool>());
+    }
 }

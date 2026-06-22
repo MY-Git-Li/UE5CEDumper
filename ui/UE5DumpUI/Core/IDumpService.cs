@@ -219,6 +219,7 @@ public interface IDumpService
         bool newestFirst = false,
         int pageSize = 1000,
         int deadlineMs = 15000,
+        bool autoSkipNoise = false,
         CancellationToken ct = default);
 
     Task<ValueScanRefineResult> RefineValueScanAsync(
@@ -262,6 +263,7 @@ public interface IDumpService
         bool newestFirst = false,
         int pageSize = 1000,
         int deadlineMs = 15000,
+        bool autoSkipNoise = false,
         CancellationToken ct = default);
 
     Task<GroupScanRefineResult> RefineGroupScanAsync(

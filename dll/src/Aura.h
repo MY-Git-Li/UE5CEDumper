@@ -1030,7 +1030,17 @@ ValueScanResult ScanForValue(
     // and returns whatever matched so far. Exposed via the pipe `deadline_ms` field
     // + the Value Search "Timeout" slider (10-60s) so huge games that don't finish
     // in 15s can be given a longer budget. <= 0 falls back to the 15s default.
-    int32_t             deadlineMs    = 15000);
+    int32_t             deadlineMs    = 15000,
+    // Pre-filter "Auto detect Engine/System noise" (opt-in, default OFF here; UI
+    // checkbox also defaults unchecked). When true, pure engine/system classes are
+    // skipped at the SOURCE (before the per-object field walk) so their instances
+    // never enter the candidate set — a looser, heuristic complement to the exact
+    // post-scan class picker. A gameplay guardrail force-keeps Actor/Pawn/Character/
+    // ActorComponent/Controller/PlayerState/GameInstance-derived classes (see
+    // SnapshotGameplayKeepBases), so a player Pawn's X/Y/Z and HP/MP in components /
+    // AttributeSets are NEVER source-skipped. Reuses the snapshot IsSnapshotNoiseClass
+    // verdict so all surfaces agree. Locked at First Scan; refine reuses survivors.
+    bool                preFilterNoise = false);
 
 // Refine an existing candidate vector in place: re-read each
 // candidate's bytes (or string, for FString/FName/FText DataTypes),
@@ -1117,7 +1127,14 @@ GroupScanResult ScanForValueGroup(
     // exceeds this budget it bails early (stats.deadlineHit fires) and returns the
     // matches found so far. Exposed via the pipe `deadline_ms` field + the Value
     // Search "Timeout" slider (10-60s). <= 0 falls back to the 15s default.
-    int32_t                             deadlineMs  = 15000);
+    int32_t                             deadlineMs  = 15000,
+    // Pre-filter "Auto detect Engine/System noise" (opt-in, default OFF; UI checkbox
+    // defaults unchecked). When true, pure engine/system classes are skipped at the
+    // SOURCE (before each object's leaf enumeration) so they never enter the group
+    // candidate set. Same gameplay guardrail as ScanForValue / snapshot capture
+    // (Actor/Pawn/component/... force-kept via SnapshotGameplayKeepBases), so a
+    // player Pawn / its components / AttributeSets are never source-skipped.
+    bool                                preFilterNoise = false);
 
 // Next scan (P1: exact per slot). Re-reads each candidate's per-slot
 // convergence offsets, keeps those still equal to the slot's NEW target,

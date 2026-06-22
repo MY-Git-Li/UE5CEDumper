@@ -5335,6 +5335,11 @@ static bool ContainerInnerAccepted(
     return accepted;
 }
 
+// Forward decl: the snapshot source-level noise verdict (defined below, near
+// CaptureSnapshotChunk) is reused by the Value Search / Group Scan pre-filter so
+// all three surfaces apply the SAME engine/system skip + gameplay guardrail.
+static bool IsSnapshotNoiseClass(uintptr_t cls, const std::string& classPath);
+
 ValueScanResult ScanForValue(
     Radar::DataType dt,
     Radar::ScanType st,
@@ -5353,7 +5358,8 @@ ValueScanResult ScanForValue(
     bool                nativeC,
     int32_t             nativeAlign,
     bool                newestFirst,
-    int32_t             deadlineMs)
+    int32_t             deadlineMs,
+    bool                preFilterNoise)
 {
     ValueScanResult result;
     auto t0 = std::chrono::steady_clock::now();
@@ -5448,6 +5454,8 @@ ValueScanResult ScanForValue(
         std::string             className;
         std::string             classPath;
         bool                    gameClass = false;   // !IsEnginePackage(classPath)
+        bool                    noiseClass = false;  // pre-filter: engine/system noise
+                                                     // (only computed when preFilterNoise)
         std::vector<ScanField>  fields;
         // Per-object batch-read plan (build 974). The body span covering this
         // class's DIRECT fixed-width leaf fields (container == None) — the reads
@@ -5887,6 +5895,11 @@ ValueScanResult ScanForValue(
         sci.className = ci.Name;
         sci.classPath = ci.FullPath;
         sci.gameClass = !IsEnginePackage(ci.FullPath);
+        // Pre-filter "Auto detect Engine/System noise": compute the source-level
+        // skip verdict once per class (reusing the snapshot helper so all surfaces
+        // agree + its gameplay guardrail force-keeps Pawn/Actor/component/...).
+        // Only when the toggle is on, so the OFF path pays no super-chain walk.
+        sci.noiseClass = preFilterNoise && IsSnapshotNoiseClass(classAddr, ci.FullPath);
 
         std::unordered_set<uintptr_t> visited;
         expandFields(expandFields, classAddr, /*baseOffset=*/0,
@@ -6051,6 +6064,11 @@ ValueScanResult ScanForValue(
         ScanClassInfo* sci = buildClassIndex(cls);
         if (!sci || sci->fields.empty()) continue;
         if (gameOnly && !sci->gameClass) continue;
+        // Pre-filter (opt-in): skip pure engine/system classes at the source so
+        // their instances never enter the candidate set. noiseClass is false unless
+        // preFilterNoise was on (guarded in buildClassIndex), and the guardrail
+        // inside IsSnapshotNoiseClass keeps player Pawn / components / AttributeSets.
+        if (sci->noiseClass) continue;
 
         // Per-object batch body read (build 974, default on via `batchRead`).
         // Read the object's fixed-width-leaf span ONCE into the reused thread-
@@ -7373,7 +7391,7 @@ void AppendRawHoleLeaves(uintptr_t obj, uintptr_t cls, const std::string& classN
 GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
                                   bool gameOnly, int32_t maxResults, bool deep,
                                   bool crossObject, bool nativeC, bool newestFirst,
-                                  int32_t deadlineMs) {
+                                  int32_t deadlineMs, bool preFilterNoise) {
     GroupScanResult result;
     auto t0 = std::chrono::steady_clock::now();
     const auto kDeadline = std::chrono::milliseconds(deadlineMs > 0 ? deadlineMs : 15000);
@@ -7567,7 +7585,15 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
 
         auto eit = eligible.find(cls);
         if (eit == eligible.end()) {
-            bool keep = !(gameOnly && IsEnginePackage(Ubel::GetFullName(cls)));
+            // game_only + the opt-in "Auto detect Engine/System noise" pre-filter
+            // share one GetFullName(cls) read. The pre-filter reuses the snapshot
+            // noise verdict (engine /Script packages + engine leaf bases), whose
+            // gameplay guardrail force-keeps Actor/Pawn/component/... so a player
+            // Pawn / its components / AttributeSets are never source-skipped.
+            std::string clsPath = (gameOnly || preFilterNoise) ? Ubel::GetFullName(cls)
+                                                               : std::string();
+            bool keep = !(gameOnly && IsEnginePackage(clsPath))
+                     && !(preFilterNoise && IsSnapshotNoiseClass(cls, clsPath));
             eit = eligible.emplace(cls, static_cast<char>(keep ? 1 : 0)).first;
         }
         if (!eit->second) continue;
