@@ -4054,14 +4054,24 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Auto-retry with fill_gaps when a walk returns 0 fields but PropertiesSize indicates data exists.
-    /// This gives users raw byte analysis instead of an empty panel for classes with no UPROPERTY fields.
-    /// Only triggers when FillGaps toggle is off (avoids double-fill_gaps).
+    /// Auto-retry with fill_gaps when a walk returns 0 fields but PropertiesSize
+    /// indicates data exists. This gives users raw byte analysis instead of an
+    /// empty panel for structs/objects with no reflected UPROPERTY fields — e.g. a
+    /// USTRUCT whose members lack UPROPERTY, so its ChildProperties chain is empty
+    /// (UE still reflects the type + size, but not the individual fields).
+    /// Only triggers when the FillGaps toggle is off (avoids double-fill_gaps).
+    ///
+    /// Threshold is PropertiesSize &gt; 0 (any non-empty layout). A real UObject's
+    /// PropertiesSize always includes its header (~0x28+), and the DLL's gap-fill
+    /// clamps guesses to [header, PropertiesSize), so a header-only UObject still
+    /// yields no guessed rows — nothing is fabricated. The previous &gt; 0x30 floor
+    /// silently excluded small raw structs (e.g. a 36-byte / 0x24 struct), leaving
+    /// the grid AND Copy CE XML / CE Field empty for them.
     /// </summary>
     private async Task<InstanceWalkResult> AutoFillGapsRetryAsync(
         InstanceWalkResult result, string addr, string? classAddr = null)
     {
-        if (result.Fields.Count == 0 && result.PropertiesSize > 0x30 && !FillGaps)
+        if (result.Fields.Count == 0 && result.PropertiesSize > 0 && !FillGaps)
         {
             _log.Info($"Auto fill_gaps: 0 fields but propsSize={result.PropertiesSize}, retrying with fill_gaps for {addr}");
             result = await _dump.WalkInstanceAsync(addr, classAddr,

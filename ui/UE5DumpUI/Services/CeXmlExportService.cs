@@ -2701,6 +2701,24 @@ public static class CeXmlExportService
             // Interface: first 8 bytes is UObject*, show as pointer
             "InterfaceProperty" => new CeFieldInfo("8 Bytes", ShowAsHex: true),
 
+            // "Guess What" heuristic labels (Ubel::GuessGapTypes) — produced for the
+            // Live Walker "Guess?" toggle AND the auto-fill_gaps fallback for structs/
+            // objects with no reflected UPROPERTY fields. These are confidence-suffixed
+            // display labels ("Float?", "Int32?", ...), NOT canonical UE property-type
+            // strings, so without explicit cases MapCeField returns null and EmitFields
+            // silently DROPS the row (the null path falls to `field.IsNavigable`, which
+            // is always false for guessed fields). Mapping them mirrors the DLL's
+            // Ubel::NormalizeGuessedTypeToProperty so Copy CE XML / Copy CE Field export
+            // guessed scalar rows. ("Padding" — an all-zero run — is intentionally left
+            // to the null default: it is not a meaningful value to watch in CE.)
+            "Float" or "Float?" => new CeFieldInfo("Float"),
+            "Double" or "Double?" => new CeFieldInfo("Double"),
+            "Int32" or "Int32?" => new CeFieldInfo("4 Bytes", IsSigned: true),
+            "Int16" or "Int16?" => new CeFieldInfo("2 Bytes", IsSigned: true),
+            "Int64" or "Int64?" => new CeFieldInfo("8 Bytes", IsSigned: true),
+            "Byte" or "Byte?" => new CeFieldInfo("Byte"),
+            "Pointer?" => new CeFieldInfo("8 Bytes", ShowAsHex: true),
+
             _ => null // Unknown -- not a scalar (StructProperty, ArrayProperty, etc.)
         };
     }
