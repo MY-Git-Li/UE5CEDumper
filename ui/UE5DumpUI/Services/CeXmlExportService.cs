@@ -71,6 +71,18 @@ public static class CeXmlExportService
     private static bool _collapsePointerNodes;
 
     /// <summary>
+    /// When false (default), EmitFields SKIPS guessed (.IsGuessed) fields — so bulk
+    /// exports (Copy CE XML, and Copy CE Field on a struct/container/reflected field)
+    /// never dump the speculative "Guess?" rows, including nested guessed fields that
+    /// surface during struct/pointer drilldown. Set true ONLY by the lone-focused-
+    /// guessed-field Copy CE Field path, so a single guessed field the user explicitly
+    /// targeted still exports (a guessed field is always a scalar leaf, so true only
+    /// ever applies to a childless top-level field — recursion never sees it).
+    /// </summary>
+    [ThreadStatic]
+    private static bool _includeGuessed;
+
+    /// <summary>
     /// Path-based cycle detection for drilled pointer emit. Holds the PtrAddresses
     /// currently on the emit stack — we push on entry into EmitDrilledPointer and
     /// pop on exit. If a target appears in this set, the pointer is a back-edge
@@ -688,7 +700,8 @@ public static class CeXmlExportService
         bool collapsePointerNodes = false,
         int maxDropDownEntries = 512,
         Dictionary<string, List<LiveFieldValue>>? resolvedInstances = null,
-        bool flattenChain = false)
+        bool flattenChain = false,
+        bool includeGuessed = false)
     {
         // Clean breadcrumbs: remove navigation cycles (e.g., Child->Parent->Child)
         // before generating XML to avoid deeply nested duplicate pointer chains.
@@ -696,6 +709,7 @@ public static class CeXmlExportService
 
         _nextId = 100;
         _collapsePointerNodes = collapsePointerNodes;
+        _includeGuessed = includeGuessed;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -788,10 +802,12 @@ public static class CeXmlExportService
         Dictionary<string, List<LiveFieldValue>>? resolvedStructs = null,
         bool collapsePointerNodes = false,
         int maxDropDownEntries = 512,
-        Dictionary<string, List<LiveFieldValue>>? resolvedInstances = null)
+        Dictionary<string, List<LiveFieldValue>>? resolvedInstances = null,
+        bool includeGuessed = false)
     {
         _nextId = 100;
         _collapsePointerNodes = collapsePointerNodes;
+        _includeGuessed = includeGuessed;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -868,12 +884,14 @@ public static class CeXmlExportService
         bool collapsePointerNodes = false,
         int maxDropDownEntries = 512,
         Dictionary<string, List<LiveFieldValue>>? resolvedInstances = null,
-        bool flattenChain = false)
+        bool flattenChain = false,
+        bool includeGuessed = false)
     {
         var cleanedBc = CleanBreadcrumbs(breadcrumbs);
 
         _nextId = 100;
         _collapsePointerNodes = collapsePointerNodes;
+        _includeGuessed = includeGuessed;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -1422,6 +1440,13 @@ public static class CeXmlExportService
     {
         foreach (var field in fields)
         {
+            // Guessed ("Guess?") fields are CE-exportable only when the user explicitly
+            // focuses a single guessed field (Copy CE Field sets _includeGuessed). In any
+            // bulk/container/drilldown context (_includeGuessed=false, incl. all recursive
+            // calls) drop them, so a struct/pointer export never silently dumps a pile of
+            // speculative guessed rows the user didn't ask for.
+            if (field.IsGuessed && !_includeGuessed) continue;
+
             // Check if this StructProperty has pre-resolved children. Key is
             // StructDataAddr (absolute address) — unique across instances, so
             // the same dict can serve nested struct fields inside drilled

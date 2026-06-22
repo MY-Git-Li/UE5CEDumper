@@ -154,8 +154,11 @@ public sealed class LiveFieldValue
     /// <summary>For ArrayProperty (Phase G soft arrays): true when FSoftObjectPath uses FTopLevelAssetPath (UE >= 5.1) — two FNames at +0x10 / +0x10+fnameSize. False = single FName AssetPathName at +0x10 (UE4 / UE5.0).</summary>
     public bool SoftArrayIsTopLevelAssetPath { get; init; }
 
-    /// <summary>For ArrayProperty Phase B: inline scalar element values (up to 64).</summary>
-    public List<ArrayElementValue>? ArrayElements { get; init; }
+    /// <summary>For ArrayProperty Phase B: inline scalar element values (up to 64).
+    /// Settable so NavigateToArrayContainerAsync can persist on-demand-fetched elements
+    /// (struct arrays whose inner struct reflects 0 fields get no inline walk preview)
+    /// onto the cached container field, so Back-navigation re-renders the same rows.</summary>
+    public List<ArrayElementValue>? ArrayElements { get; set; }
 
     /// <summary>For ArrayProperty (enum/byte-with-enum): UEnum* address for CE DropDownList sharing.</summary>
     public string ArrayEnumAddr { get; init; } = "";

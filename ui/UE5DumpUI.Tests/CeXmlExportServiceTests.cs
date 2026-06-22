@@ -267,15 +267,14 @@ public class CeXmlExportServiceTests
     }
 
     [Fact]
-    public void GenerateHierarchicalXml_GuessedFields_ExportAsCeScalars()
+    public void GenerateHierarchicalXml_GuessedFields_ExportWhenIncludeGuessed()
     {
-        // Repro: a UScriptStruct with no reflected UPROPERTY fields (e.g.
+        // A UScriptStruct with no reflected UPROPERTY fields (e.g.
         // CustomAbilityEffectDuration) is shown as "Guess What" raw fields
         // (Ubel::GuessGapTypes) with confidence-suffixed type labels and
-        // IsGuessed=true. Regression: those rows were SILENTLY DROPPED from CE
-        // export because MapCeField returned null for the non-canonical labels and
-        // the null path falls to field.IsNavigable (always false for guessed
-        // fields). They must now emit as proper CE scalar leaves.
+        // IsGuessed=true. When the user explicitly FOCUSES a guessed field and does
+        // Copy CE Field, the export passes includeGuessed=true and each guessed
+        // scalar maps to its canonical CE VariableType and is emitted.
         var breadcrumbs = new[]
         {
             MakeBc("0x1000", "Root"),
@@ -292,7 +291,7 @@ public class CeXmlExportServiceTests
         };
 
         var xml = CeXmlExportService.GenerateHierarchicalXml(
-            "\"TestGame.exe\"+1000", "Root", breadcrumbs, fields);
+            "\"TestGame.exe\"+1000", "Root", breadcrumbs, fields, includeGuessed: true);
 
         // Each guessed scalar maps to its canonical CE VariableType and is emitted.
         Assert.Contains("<VariableType>Float</VariableType>", xml);
@@ -302,6 +301,29 @@ public class CeXmlExportServiceTests
         Assert.Contains("float@8", xml);
         Assert.Contains("i32@0", xml);
         Assert.Contains("byte@18", xml);
+    }
+
+    [Fact]
+    public void GenerateHierarchicalXml_GuessedFields_SkippedByDefault()
+    {
+        // Bulk exports (Copy CE XML, and Copy CE Field on a struct/container/reflected
+        // field) default to includeGuessed=false, so speculative guessed rows are NOT
+        // dumped — only genuine reflected fields are emitted. Otherwise a struct export
+        // would silently scatter a pile of Guess? fields the user never asked for.
+        var breadcrumbs = new[] { MakeBc("0x1000", "Root") };
+        var fields = new[]
+        {
+            new LiveFieldValue { Name = "RealHP",  TypeName = "FloatProperty", Offset = 0x0, Size = 4, TypedValue = "100" },
+            new LiveFieldValue { Name = "i32@8",   TypeName = "Int32?", Offset = 0x8, Size = 4, IsGuessed = true, TypedValue = "12345" },
+            new LiveFieldValue { Name = "float@C", TypeName = "Float?", Offset = 0xC, Size = 4, IsGuessed = true, TypedValue = "180" },
+        };
+
+        var xml = CeXmlExportService.GenerateHierarchicalXml(
+            "\"TestGame.exe\"+1000", "Root", breadcrumbs, fields);  // includeGuessed defaults false
+
+        Assert.Contains("RealHP", xml);       // reflected field emitted
+        Assert.DoesNotContain("i32@8", xml);  // guessed rows dropped
+        Assert.DoesNotContain("float@C", xml);
     }
 
     [Fact]
