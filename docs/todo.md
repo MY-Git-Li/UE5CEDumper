@@ -143,7 +143,7 @@ P1 (object-aware group scan, direct numeric leaves + one-level struct descent, e
 
 - ~~**P2 — prev-value per slot + offset-table**~~ **DONE (builds 1295-1302)** — per-slot scan type now on `Orden::SlotTarget` (`st`+`tolerance`+`targets2`, routed through `ComparePredicate`) + `RefineGroupCandidates`: First Scan takes Exact/Bigger/Smaller/**Between** per slot (Between = bounded-unknown entry, e.g. HP in [1,100]), Next Scan also takes the prev-value four (Changed/Unchanged/Increased/Decreased — compare each leaf vs its own previous round). Locked-offset table (`🔒 Class — Str@0x20, Def@0x24`) shows once all slots lock. **"Copy CE Script" / export is a deliberate WON'T-DO (not pending work)** — the owner exports the resolved chain from Live Walker (which already does it); do not re-add a group-side CE/export button. **prev-value group refine in-game VERIFIED on SEED** (Unchanged/Unchanged/Increased ran clean); Between first-scan live-verify still nice-to-have. *(dev-log 2026-06-18.)*
 
-- **P3 — numeric containers as blocks — LARGELY DONE (opt-in Deep, builds 1283-1285)**. The "Deep" toggle now treats each numeric `TArray/TSet` + each struct-array/map element as its own block via the recursive `WalkContainerLeaves`, matching the group WITHIN one array (finds the SEED `Tunes[N]` case). Single-value Deep forces the existing deep pass on all classes. *Remaining gaps* (Effort **S**): scalar-VALUED maps (`TMap<Name,int>` values) aren't emitted by `WalkContainerLeaves` (struct-valued maps are) — needs `cfe` to carry key/value leaf types (TODO already in the walker comment); and in-game verify of the Deep path on SEED. *Parent: dev-log 2026-06-18 deep entry.*
+- **P3 — numeric containers as blocks — DONE (opt-in Deep, builds 1283-1285; scalar maps builds 1561-1562)**. The "Deep" toggle treats each numeric `TArray/TSet` + each struct-array/map element as its own block via the recursive `WalkContainerLeaves`, matching the group WITHIN one array (finds the SEED `Tunes[N]` case); single-value Deep forces the existing deep pass on all classes. The scalar-map follow-up added **scalar-valued + scalar-keyed maps** (`TMap<Name,int>` → value block `<map>.Value`, key block `<map>.Key`) by extending `ContainerCacheEntry` with `keyLeafType`/`valueLeafType` — closes the walker TODO **and** the Value Search "Proper scalar-map value/key capture" item (one shared fix); struct sides byte-identical, adversarial 4-lens review 0-confirmed. *Remaining (verify only):* in-game verify of the Deep path + a scalar-map (`Map<Name,int>`) game on SEED. *Parent: dev-log 2026-06-18 deep entry + 2026-06-22 scalar-map entry.*
 
 - **Deferred — Snapshot / SPC Query / Class Pivot group-match** — Effort: **M each** · Risk: low. The `Orden::MatchGroup` seam is source-agnostic; later feed `SnapshotCapturedObject.Fields` (hex→bytes) / SPC per-object sequences / a multi-field `DiscoveryInput` to run the SAME matcher over captured data ("N values co-occur in one snapshot object" / "N-field intersection query" / "pivot on co-varying tuples"). *Parent: P1 deliberately kept the matcher live-scan-agnostic for this.*
 
@@ -265,17 +265,6 @@ prev-value refine) and **V1c live-verify**.
   Verified by a 4-agent audit (drill-sites + scan/capture correctness); the value
   was always FOUND — this was the land-ON-it polish. ⚠ in-game live-verify pending
   (multi-`[N]` 🌍 should land exactly on the SEED `...Tunes[N]` value).
-
-- **Proper scalar-map value/key capture** — Effort: **M** · Risk: low.
-  `WalkContainerLeaves` only recurses STRUCT map values; a `TMap<K,scalar>` value
-  (and the scalar key of any map) is NOT captured. Build 1208 added a guard so the
-  leaf-container branch no longer emits a *malformed* leaf for scalar-value maps
-  (was: key-region addr + `"K → V"` arrow-label type, silently dropped by both
-  consumers). To capture them properly, extend `ContainerCacheEntry` with
-  `keyType`/`valueType` and emit the value leaf at `slotBase+valueOffset` (type
-  `valueType`) + the key leaf at `slotBase` (type `keyType`). Audit #1/#3.
-  *Affects Value Search + Snapshot; user's SEED case is `Map<Name,FStruct>` (struct
-  value, recursed) so unaffected.*
 
 - **Top-level `TSet<FStruct>` / `TMap<K,FStruct>` depth-1 inner leaves (Value Search)** —
   Effort: **S/M** · Risk: low. The static depth-1 collector (`collectStructArrayInner`)

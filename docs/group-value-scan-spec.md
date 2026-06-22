@@ -12,10 +12,12 @@ deliberately dropped — export from Live Walker), **P4 increment 1 builds 1303-
 (opt-in cross-object actor block — owned sub-objects' numerics, approach C; MERGED
 main PR #313 `d977a34`)**, **P4 increment 2 builds 1318-1319 (per-slot `owner_class`
 on the wire → the group-scan Pivot handoff targets the owned sub-object's class, not
-the actor's)**. P1/Deep + the P2 prev-value refine in-game verified on SEED (UE4.27);
+the actor's)**, **P3 scalar-valued/keyed maps builds 1561-1562 (`TMap<Name,int>` value
++ key leaves, closing the `WalkContainerLeaves` gap; DLL-only, adversarial review
+0-confirmed)**. P1/Deep + the P2 prev-value refine in-game verified on SEED (UE4.27);
 **P4 cross-object in-game VERIFIED on TQ2 (UE5.07, GAS)**; Between first-scan +
-inc 2 Pivot-class live-verify still pending. See [dev-log.md](dev-log.md) for the
-milestone history.
+inc 2 Pivot-class + P3 scalar-map live-verify still pending. See [dev-log.md](dev-log.md)
+for the milestone history.
 
 -----
 
@@ -126,10 +128,17 @@ usable from the DB-driven features.
   is a deliberate WON'T-DO** (owner decision, not pending work): the resolved pointer chain is
   exported from **Live Walker**, which already does it. Do not re-add a group-side CE/export
   button. Prev-value refine in-game VERIFIED on SEED; *remaining:* Between first-scan live-verify.
-- **P3 — numeric containers as blocks.** **Largely done** via the opt-in Deep mode.
-  *Remaining:* scalar-**valued** maps (`TMap<Name,int>` values) aren't emitted by
-  `WalkContainerLeaves` (struct-valued maps *are*) — needs `ContainerCacheEntry` to carry
-  key/value leaf types (the TODO is in the walker comment).
+- **P3 — numeric containers as blocks. DONE** (opt-in Deep, builds 1283-1285; scalar maps
+  builds 1561-1562). The Deep toggle treats each numeric `TArray/TSet` + each struct-array /
+  map element as its own block; the scalar-map follow-up extended `ContainerCacheEntry` with
+  `keyLeafType` / `valueLeafType` so `WalkContainerLeaves` now also emits **scalar-valued and
+  scalar-keyed maps** (`TMap<Name,int>` → value block `<map>.Value`, key block `<map>.Key`;
+  `.Value`/`.Key` mirror the static top-level map scan, never collide; struct sides
+  byte-identical). Shared by deep Value Search / Snapshot / Group Scan; also closes the Value
+  Search "Proper scalar-map value/key capture" todo (one shared fix). *Remaining (verify
+  only):* in-game on a scalar-map game. Caveat (pre-existing, not a P3 gap): scalar-map
+  snapshot elements join cross-snapshot on the positional sparse-slot index, exactly like
+  struct-map / array elements — the SPC/Diff join never uses an inner key.
 - **P4 — cross-object actor block (owned sub-objects), opt-in. APPROACH C — ownership +
   value-driven (NOT class-name matching). Increment 1 SHIPPED + MERGED main PR #313
   (builds 1303-1313); in-game VERIFIED on TQ2 (UE5.07, GAS) — `bp_tq2_character_stats_component`
