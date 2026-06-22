@@ -181,6 +181,14 @@
                       ToolTip.Tip="{StaticResource str.Tip.VS.NewestFirst}"
                       Foreground="#CCCCCC" FontSize="12"
                       VerticalAlignment="Center"/>
+            <!-- "Auto detect Engine/System noise" PRE-filter (opt-in, default off):
+                 source-level skip of pure engine/system classes; gameplay guardrail
+                 keeps Pawn/Actor/component/AttributeSet. Shared with Group mode. -->
+            <CheckBox Content="{StaticResource str.VS.AutoSkipNoise}"
+                      IsChecked="{Binding PreFilterNoise}"
+                      ToolTip.Tip="{StaticResource str.Tip.VS.AutoSkipNoise}"
+                      Foreground="#CCCCCC" FontSize="12"
+                      VerticalAlignment="Center"/>
             <TextBlock Text="{StaticResource str.VS.MaxResults}"
                        Foreground="#CCCCCC" FontSize="12"
                        VerticalAlignment="Center"
@@ -465,6 +473,14 @@
           <CheckBox Content="{StaticResource str.VS.NewestFirst}"
                     IsChecked="{Binding NewestFirst}"
                     ToolTip.Tip="{StaticResource str.Tip.VS.NewestFirst}"
+                    Foreground="#CCCCCC" FontSize="12"
+                    VerticalAlignment="Center" Margin="8,0,0,0"/>
+          <!-- "Auto detect Engine/System noise" PRE-filter (opt-in, default off):
+               same source-level skip + gameplay guardrail as single mode. Shares
+               PreFilterNoise with single mode. -->
+          <CheckBox Content="{StaticResource str.VS.AutoSkipNoise}"
+                    IsChecked="{Binding PreFilterNoise}"
+                    ToolTip.Tip="{StaticResource str.Tip.VS.AutoSkipNoise}"
                     Foreground="#CCCCCC" FontSize="12"
                     VerticalAlignment="Center" Margin="8,0,0,0"/>
           <!-- User-adjustable scan deadline (was a hard 15s). Shares ScanTimeoutSeconds

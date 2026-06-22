@@ -2117,6 +2117,11 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             int32_t deadlineMs = request.value("deadline_ms", 15000);
             if (deadlineMs < 1000)   deadlineMs = 1000;
             if (deadlineMs > 300000) deadlineMs = 300000;
+            // "Auto detect Engine/System noise" pre-filter (opt-in, default off):
+            // skip pure engine/system classes at the source so their instances never
+            // enter the candidate set. Gameplay guardrail (Pawn/Actor/component/...)
+            // is enforced DLL-side, so a player Pawn's X/Y/Z is never skipped.
+            bool autoSkipNoise = request.value("auto_skip_noise", false);
 
             Radar::DataType dt;
             if (!Radar::TryParseDataType(dtStr, dt)) {
@@ -2194,7 +2199,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             auto scanResult = Aura::ScanForValue(
                 dt, st, targetBytes, target2Ptr, gameOnly, maxResults,
                 tolerance, targetString, caseSensitive, multiPtr, multiPtr2,
-                parallel, batchRead, deep, nativeC, nativeAlign, newestFirst, deadlineMs);
+                parallel, batchRead, deep, nativeC, nativeAlign, newestFirst, deadlineMs,
+                autoSkipNoise);
 
             uint64_t sessionId = Radar::SessionManager::Instance().Begin(
                 dt, std::move(scanResult.candidates),
@@ -2488,6 +2494,9 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             if (deadlineMs < 1000)   deadlineMs = 1000;
             if (deadlineMs > 300000) deadlineMs = 300000;
             if (pageSize < 0) pageSize = 0;
+            // "Auto detect Engine/System noise" pre-filter (opt-in, default off) —
+            // same source-level skip + gameplay guardrail as begin_value_scan.
+            bool autoSkipNoise = request.value("auto_skip_noise", false);
 
             if (!request.contains("values") || !request["values"].is_array()) {
                 return Renge::MakeError(id, "begin_group_scan requires a 'values' array").dump();
@@ -2542,7 +2551,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             }
             const int slotCount = static_cast<int>(slots.size());
 
-            auto scanResult = Aura::ScanForValueGroup(slots, gameOnly, maxResults, deep, crossObject, nativeC, newestFirst, deadlineMs);
+            auto scanResult = Aura::ScanForValueGroup(slots, gameOnly, maxResults, deep, crossObject, nativeC, newestFirst, deadlineMs, autoSkipNoise);
 
             uint64_t sessionId = Radar::GroupSessionManager::Instance().Begin(
                 std::move(slots), std::move(scanResult.candidates),

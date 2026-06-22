@@ -5335,6 +5335,11 @@ static bool ContainerInnerAccepted(
     return accepted;
 }
 
+// Forward decl: the snapshot source-level noise verdict (defined below, near
+// CaptureSnapshotChunk) is reused by the Value Search / Group Scan pre-filter so
+// all three surfaces apply the SAME engine/system skip + gameplay guardrail.
+static bool IsSnapshotNoiseClass(uintptr_t cls, const std::string& classPath);
+
 ValueScanResult ScanForValue(
     Radar::DataType dt,
     Radar::ScanType st,
@@ -5353,7 +5358,8 @@ ValueScanResult ScanForValue(
     bool                nativeC,
     int32_t             nativeAlign,
     bool                newestFirst,
-    int32_t             deadlineMs)
+    int32_t             deadlineMs,
+    bool                preFilterNoise)
 {
     ValueScanResult result;
     auto t0 = std::chrono::steady_clock::now();
@@ -5448,6 +5454,8 @@ ValueScanResult ScanForValue(
         std::string             className;
         std::string             classPath;
         bool                    gameClass = false;   // !IsEnginePackage(classPath)
+        bool                    noiseClass = false;  // pre-filter: engine/system noise
+                                                     // (only computed when preFilterNoise)
         std::vector<ScanField>  fields;
         // Per-object batch-read plan (build 974). The body span covering this
         // class's DIRECT fixed-width leaf fields (container == None) — the reads
@@ -5887,6 +5895,11 @@ ValueScanResult ScanForValue(
         sci.className = ci.Name;
         sci.classPath = ci.FullPath;
         sci.gameClass = !IsEnginePackage(ci.FullPath);
+        // Pre-filter "Auto detect Engine/System noise": compute the source-level
+        // skip verdict once per class (reusing the snapshot helper so all surfaces
+        // agree + its gameplay guardrail force-keeps Pawn/Actor/component/...).
+        // Only when the toggle is on, so the OFF path pays no super-chain walk.
+        sci.noiseClass = preFilterNoise && IsSnapshotNoiseClass(classAddr, ci.FullPath);
 
         std::unordered_set<uintptr_t> visited;
         expandFields(expandFields, classAddr, /*baseOffset=*/0,
@@ -5977,6 +5990,13 @@ ValueScanResult ScanForValue(
         // within this thread). Built on first emit per (class, offset, width).
         std::unordered_map<std::string, uint32_t> rawDescriptors;
 
+        // Thread-local descriptor pool for Native-C raw holes found INSIDE struct-
+        // array elements (Deep + Native-C, P3), keyed by container-path \x03 element-
+        // index \x03 offset \x03 canonical-type. Separate from rawDescriptors so an
+        // object-body hole and a struct-element hole at the same numeric offset don't
+        // collide.
+        std::unordered_map<std::string, uint32_t> deepRawDescriptors;
+
         // Multi-numeric meta resolver. For NumericNoByte scans, resolve a
         // field/element's own concrete DataType from its property type
         // name and point `tgt`/`tgt2` at the matching pre-parsed target.
@@ -6051,6 +6071,11 @@ ValueScanResult ScanForValue(
         ScanClassInfo* sci = buildClassIndex(cls);
         if (!sci || sci->fields.empty()) continue;
         if (gameOnly && !sci->gameClass) continue;
+        // Pre-filter (opt-in): skip pure engine/system classes at the source so
+        // their instances never enter the candidate set. noiseClass is false unless
+        // preFilterNoise was on (guarded in buildClassIndex), and the guardrail
+        // inside IsSnapshotNoiseClass keeps player Pawn / components / AttributeSets.
+        if (sci->noiseClass) continue;
 
         // Per-object batch body read (build 974, default on via `batchRead`).
         // Read the object's fixed-width-leaf span ONCE into the reused thread-
@@ -6571,6 +6596,148 @@ ValueScanResult ScanForValue(
                             if (!Radar::ComparePredicate(dt, st, p, targetBytes, target2Bytes, tolerance)) continue;
                             emitCandidate(obj + off, ensureRawDescriptor(off, dt), -1, p, dtSize, nullptr);
                             ++rawEmitted;
+                        }
+                    }
+                }
+            }
+        }
+
+        // === Native-C deep (P3): UNMANAGED holes INSIDE struct-array elements ===
+        // The object-body native pass above only covers [header, PropertiesSize) of
+        // the object itself — a struct-array element lives in the TArray's OWN heap
+        // buffer, outside that window, so a native (non-UPROPERTY) value inside a
+        // 0-reflected-field element struct (e.g. CustomAbilityEffectDuration's elapsed
+        // seconds) was unreachable by both the reflected deep pass (no fields to emit)
+        // and the object-body native pass. When Deep + Native-C are BOTH on, walk each
+        // struct-element container of this class and probe each element's holes (the
+        // bytes its element struct does not reflect — the whole element for a 0-field
+        // struct) for the target value. Self-contained: reuses GetClassContainers +
+        // Ubel::ComputeClassHoles; the shared WalkContainerLeaves (also used by group
+        // scan) is untouched. Bounded per container + per object; honors the deadline.
+        if (nativeEligible && deep
+            && static_cast<int32_t>(tr.candidates.size()) < maxResults) {
+            // Native-C analog of ensureDeepDescriptor: like the deep REFLECTED path,
+            // the element index is baked into the descriptor display name (and key) and
+            // candidates pass elementIndex=-1 (the path string is the full identity) —
+            // this matches the established deep-leaf convention. Bounded by the per-
+            // object emit cap below, so the descriptor pool stays small. The only
+            // difference vs ensureDeepDescriptor is isNativeC=true + guessedType.
+            auto ensureDeepRawDescriptor =
+                [&](const std::string& path, int32_t elemIdx, int32_t off,
+                    Radar::DataType width) -> uint32_t {
+                const char* canon = Radar::PropertyTypeNameOf(width);
+                std::string key = path; key += '\x03';
+                key += std::to_string(elemIdx); key += '\x03';
+                key += std::to_string(off);     key += '\x03'; key += canon;
+                auto it = deepRawDescriptors.find(key);
+                if (it != deepRawDescriptors.end()) return it->second;
+                Radar::FieldDescriptor d;
+                d.className         = sci->className;
+                d.definingClassName = "";          // unmanaged — no declaring class
+                char nb[96];
+                snprintf(nb, sizeof(nb), "%s[%d].<raw@0x%X>", path.c_str(), elemIdx, off);
+                d.fieldName     = nb;
+                d.fieldType     = canon;            // canonical -> refine round-trips
+                d.fieldOffset   = 0;                // deep leaf: object-relative offset n/a
+                d.boolFieldMask = 0xFF;
+                d.isNativeC     = true;
+                d.guessedType   = Radar::NameOf(width);
+                uint32_t idx = static_cast<uint32_t>(tr.descriptors.size());
+                tr.descriptors.push_back(std::move(d));
+                deepRawDescriptors.emplace(std::move(key), idx);
+                return idx;
+            };
+
+            constexpr int32_t kMaxDeepRawElems = 4096;  // elements probed per container
+            constexpr int32_t kMaxDeepRawEmit  = 256;   // candidates emitted per object
+            int32_t deepRawEmitted = 0;
+            std::vector<uint8_t> elemBuf;
+
+            const auto& containers = GetClassContainers(cls);
+            for (const auto& cfe : containers) {
+                if (deepRawEmitted >= kMaxDeepRawEmit) break;
+                if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
+                if (cfe.stride <= 0) continue;
+                // Only struct-element sides (array/set element, or map value struct).
+                uintptr_t elemStruct = (cfe.kind == ContainerKind::Map) ? cfe.valueStruct : cfe.elemStruct;
+                int32_t   regionOff  = (cfe.kind == ContainerKind::Map) ? cfe.valueOffset : 0;
+                if (!elemStruct) continue;
+
+                // Holes = the element struct's bytes NOT covered by a reflected field
+                // (the native region). For a 0-UPROPERTY struct that's the whole
+                // element; for a partially-reflected struct only its gaps.
+                ClassInfo eci = Ubel::WalkClassEx(elemStruct);   // cached
+                const int32_t maxRegion = cfe.stride - regionOff;   // bytes available to this side
+                int32_t structSize = eci.PropertiesSize;
+                if (structSize <= 0)        structSize = maxRegion;
+                if (structSize > maxRegion) structSize = maxRegion;  // never read past the element slot
+                if (structSize <= 0 || structSize > 0x10000) continue;
+                auto holes = Ubel::ComputeClassHoles(eci, 0, structSize);
+                if (holes.empty()) continue;
+
+                // Read the container header (mirror WalkContainerLeaves' guards).
+                uintptr_t fieldAddr = obj + cfe.offset;
+                uintptr_t bufData = 0; int32_t capacity = 0;
+                Macht::TSparseArrayView sa{};
+                const bool isSparse = (cfe.kind != ContainerKind::Array);
+                if (cfe.kind == ContainerKind::Array) {
+                    Macht::TArrayView arr;
+                    if (!Macht::ReadTArray(fieldAddr, arr)) continue;
+                    if (arr.Count <= 0 || !arr.Data || arr.Max <= 0 || arr.Max > 0x100000) continue;
+                    bufData = arr.Data; capacity = arr.Count;
+                } else {
+                    if (!Macht::ReadTSparseArray(fieldAddr, sa)) continue;
+                    if (sa.MaxCapacity <= 0 || !sa.Data || sa.MaxCapacity > 0x100000) continue;
+                    bufData = sa.Data; capacity = sa.MaxCapacity;
+                }
+                if (capacity <= 0) continue;
+
+                elemBuf.resize(static_cast<size_t>(structSize));
+                const int32_t probe = capacity < kMaxDeepRawElems ? capacity : kMaxDeepRawElems;
+                for (int32_t e = 0; e < probe; ++e) {
+                    if (deepRawEmitted >= kMaxDeepRawEmit) break;
+                    if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
+                    if ((e & 0xFFF) == 0) {
+                        if (deadlineHit.load(std::memory_order_relaxed)) break;
+                        if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); break; }
+                        if (std::chrono::steady_clock::now() - t0 > kDeadline) {
+                            deadlineHit.store(true, std::memory_order_relaxed); break;
+                        }
+                    }
+                    if (isSparse && !Macht::IsSparseIndexAllocated(sa, e)) continue;
+                    uintptr_t elemBase = bufData + static_cast<int64_t>(e) * cfe.stride + regionOff;
+                    if (!Macht::ReadBytesSafe(elemBase, elemBuf.data(), elemBuf.size())) continue;
+
+                    for (const auto& hole : holes) {
+                        if (deepRawEmitted >= kMaxDeepRawEmit) break;
+                        int32_t off = (hole.start + (nativeStride - 1)) & ~(nativeStride - 1);
+                        for (; off < hole.end; off += nativeStride) {
+                            if (deepRawEmitted >= kMaxDeepRawEmit) break;
+                            if (static_cast<int32_t>(tr.candidates.size()) >= maxResults) break;
+                            const uint8_t* p = elemBuf.data() + off;
+                            if (isMulti) {
+                                for (const auto& me : multiTargets->entries) {
+                                    size_t msz = Radar::SizeOf(me.dt);
+                                    if (msz == 0 || off + static_cast<int32_t>(msz) > hole.end) continue;
+                                    const uint8_t* mtgt2 = nullptr;
+                                    if (st == Radar::ScanType::Between) {
+                                        mtgt2 = multiTargets2 ? multiTargets2->Find(me.dt) : nullptr;
+                                        if (!mtgt2) continue;
+                                    }
+                                    if (!Radar::ComparePredicate(me.dt, st, p, me.bytes, mtgt2, tolerance)) continue;
+                                    emitCandidate(elemBase + off,
+                                                  ensureDeepRawDescriptor(cfe.name, e, off, me.dt),
+                                                  -1, p, msz, nullptr);
+                                    if (++deepRawEmitted >= kMaxDeepRawEmit) break;
+                                }
+                            } else {
+                                if (off + static_cast<int32_t>(dtSize) > hole.end) break;
+                                if (!Radar::ComparePredicate(dt, st, p, targetBytes, target2Bytes, tolerance)) continue;
+                                emitCandidate(elemBase + off,
+                                              ensureDeepRawDescriptor(cfe.name, e, off, dt),
+                                              -1, p, dtSize, nullptr);
+                                ++deepRawEmitted;
+                            }
                         }
                     }
                 }
@@ -7373,7 +7540,7 @@ void AppendRawHoleLeaves(uintptr_t obj, uintptr_t cls, const std::string& classN
 GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
                                   bool gameOnly, int32_t maxResults, bool deep,
                                   bool crossObject, bool nativeC, bool newestFirst,
-                                  int32_t deadlineMs) {
+                                  int32_t deadlineMs, bool preFilterNoise) {
     GroupScanResult result;
     auto t0 = std::chrono::steady_clock::now();
     const auto kDeadline = std::chrono::milliseconds(deadlineMs > 0 ? deadlineMs : 15000);
@@ -7567,7 +7734,15 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
 
         auto eit = eligible.find(cls);
         if (eit == eligible.end()) {
-            bool keep = !(gameOnly && IsEnginePackage(Ubel::GetFullName(cls)));
+            // game_only + the opt-in "Auto detect Engine/System noise" pre-filter
+            // share one GetFullName(cls) read. The pre-filter reuses the snapshot
+            // noise verdict (engine /Script packages + engine leaf bases), whose
+            // gameplay guardrail force-keeps Actor/Pawn/component/... so a player
+            // Pawn / its components / AttributeSets are never source-skipped.
+            std::string clsPath = (gameOnly || preFilterNoise) ? Ubel::GetFullName(cls)
+                                                               : std::string();
+            bool keep = !(gameOnly && IsEnginePackage(clsPath))
+                     && !(preFilterNoise && IsSnapshotNoiseClass(cls, clsPath));
             eit = eligible.emplace(cls, static_cast<char>(keep ? 1 : 0)).first;
         }
         if (!eit->second) continue;

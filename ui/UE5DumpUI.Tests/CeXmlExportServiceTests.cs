@@ -266,6 +266,83 @@ public class CeXmlExportServiceTests
         Assert.Contains("Health", xml);
     }
 
+    [Fact]
+    public void GenerateHierarchicalXml_GuessedFields_ExportWhenIncludeGuessed()
+    {
+        // A UScriptStruct with no reflected UPROPERTY fields (e.g.
+        // CustomAbilityEffectDuration) is shown as "Guess What" raw fields
+        // (Ubel::GuessGapTypes) with confidence-suffixed type labels and
+        // IsGuessed=true. When the user explicitly FOCUSES a guessed field and does
+        // Copy CE Field, the export passes includeGuessed=true and each guessed
+        // scalar maps to its canonical CE VariableType and is emitted.
+        var breadcrumbs = new[]
+        {
+            MakeBc("0x1000", "Root"),
+            MakeBc("0x2000", "Buff", "BuffItemEffects", isPointer: true, offset: 0xD48),
+        };
+
+        var fields = new[]
+        {
+            new LiveFieldValue { Name = "i32@0",   TypeName = "Int32?",  Offset = 0x0, Size = 4, IsGuessed = true, TypedValue = "12345" },
+            new LiveFieldValue { Name = "float@8", TypeName = "Float?",  Offset = 0x8, Size = 4, IsGuessed = true, TypedValue = "180" },
+            new LiveFieldValue { Name = "float@C", TypeName = "Float",   Offset = 0xC, Size = 4, IsGuessed = true, TypedValue = "0.8164" },
+            new LiveFieldValue { Name = "dbl@10",  TypeName = "Double?", Offset = 0x10, Size = 8, IsGuessed = true, TypedValue = "1.5" },
+            new LiveFieldValue { Name = "byte@18", TypeName = "Byte?",   Offset = 0x18, Size = 1, IsGuessed = true, TypedValue = "3" },
+        };
+
+        var xml = CeXmlExportService.GenerateHierarchicalXml(
+            "\"TestGame.exe\"+1000", "Root", breadcrumbs, fields, includeGuessed: true);
+
+        // Each guessed scalar maps to its canonical CE VariableType and is emitted.
+        Assert.Contains("<VariableType>Float</VariableType>", xml);
+        Assert.Contains("<VariableType>4 Bytes</VariableType>", xml);
+        Assert.Contains("<VariableType>Double</VariableType>", xml);
+        Assert.Contains("<VariableType>Byte</VariableType>", xml);
+        Assert.Contains("float@8", xml);
+        Assert.Contains("i32@0", xml);
+        Assert.Contains("byte@18", xml);
+    }
+
+    [Fact]
+    public void GenerateHierarchicalXml_GuessedFields_SkippedByDefault()
+    {
+        // Bulk exports (Copy CE XML, and Copy CE Field on a struct/container/reflected
+        // field) default to includeGuessed=false, so speculative guessed rows are NOT
+        // dumped — only genuine reflected fields are emitted. Otherwise a struct export
+        // would silently scatter a pile of Guess? fields the user never asked for.
+        var breadcrumbs = new[] { MakeBc("0x1000", "Root") };
+        var fields = new[]
+        {
+            new LiveFieldValue { Name = "RealHP",  TypeName = "FloatProperty", Offset = 0x0, Size = 4, TypedValue = "100" },
+            new LiveFieldValue { Name = "i32@8",   TypeName = "Int32?", Offset = 0x8, Size = 4, IsGuessed = true, TypedValue = "12345" },
+            new LiveFieldValue { Name = "float@C", TypeName = "Float?", Offset = 0xC, Size = 4, IsGuessed = true, TypedValue = "180" },
+        };
+
+        var xml = CeXmlExportService.GenerateHierarchicalXml(
+            "\"TestGame.exe\"+1000", "Root", breadcrumbs, fields);  // includeGuessed defaults false
+
+        Assert.Contains("RealHP", xml);       // reflected field emitted
+        Assert.DoesNotContain("i32@8", xml);  // guessed rows dropped
+        Assert.DoesNotContain("float@C", xml);
+    }
+
+    [Fact]
+    public void MapFieldToCeRecordType_GuessedFloat_IsSingle()
+    {
+        // The same guessed-label mapping must drive the AOBMaker single-record push
+        // (MapFieldToCeRecordType reuses MapCeField), so a guessed Float? row pushed
+        // to CE lands as a Single, not a fallback 8-byte pointer.
+        var floatRec = CeXmlExportService.MapFieldToCeRecordType(
+            new LiveFieldValue { Name = "float@8", TypeName = "Float?", Offset = 0x8, Size = 4, IsGuessed = true });
+        Assert.Equal(4, floatRec.ValueType); // CeVtSingle
+        Assert.False(floatRec.ShowAsHex);
+
+        var i32Rec = CeXmlExportService.MapFieldToCeRecordType(
+            new LiveFieldValue { Name = "i32@0", TypeName = "Int32?", Offset = 0x0, Size = 4, IsGuessed = true });
+        Assert.Equal(2, i32Rec.ValueType); // CeVtDword
+        Assert.True(i32Rec.IsSigned);
+    }
+
     // ========================================
     // Resolved struct expansion tests
     // ========================================

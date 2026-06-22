@@ -1619,6 +1619,7 @@ public sealed class DumpService : IDumpService
         bool newestFirst = false,
         int pageSize = 1000,
         int deadlineMs = 15000,
+        bool autoSkipNoise = false,
         CancellationToken ct = default)
     {
         var req = new JsonObject
@@ -1676,6 +1677,10 @@ public sealed class DumpService : IDumpService
         // case byte-identical on the wire. (JsonNode) cast dodges the AOT Add<T> trap.
         if (deadlineMs != 15000)
             req["deadline_ms"] = (JsonNode)deadlineMs;
+        // "Auto detect Engine/System noise" pre-filter is opt-in (default off) →
+        // attach only when on, keeping the common-case wire shape byte-identical.
+        if (autoSkipNoise)
+            req["auto_skip_noise"] = (JsonNode)true;
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
@@ -1872,6 +1877,7 @@ public sealed class DumpService : IDumpService
         bool newestFirst = false,
         int pageSize = 1000,
         int deadlineMs = 15000,
+        bool autoSkipNoise = false,
         CancellationToken ct = default)
     {
         var values = new JsonArray();
@@ -1911,6 +1917,9 @@ public sealed class DumpService : IDumpService
         // attach only when changed, keeping the common case wire-identical.
         if (deadlineMs != 15000)
             req["deadline_ms"] = (JsonNode)deadlineMs;
+        // "Auto detect Engine/System noise" pre-filter (opt-in, default off).
+        if (autoSkipNoise)
+            req["auto_skip_noise"] = (JsonNode)true;
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
 

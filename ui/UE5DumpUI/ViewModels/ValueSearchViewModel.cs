@@ -123,6 +123,17 @@ public partial class ValueSearchViewModel : ViewModelBase
         else if (NewestFirst) NewestFirst = false;
     }
 
+    /// <summary>"Auto detect Engine/System noise" PRE-filter (opt-in, default OFF).
+    /// When on, pure engine/system classes (UI widgets, textures, sounds, particle/
+    /// Niagara systems, anim instances, /Script engine packages) are skipped at the
+    /// SOURCE during the scan, so their instances never enter the candidate set —
+    /// a looser, heuristic complement to the exact post-scan class picker. A
+    /// gameplay guardrail force-keeps Actor / Pawn / Character / ActorComponent /
+    /// Controller / PlayerState / GameInstance-derived classes, so a player Pawn's
+    /// X/Y/Z (and HP/MP in components or GAS AttributeSets) is never source-skipped.
+    /// Shared by Single + Group modes; locked at First Scan (refine reuses survivors).</summary>
+    [ObservableProperty] private bool _preFilterNoise;
+
     /// <summary>CE-style rounded-scan slack for Float/Double and vector
     /// comparisons. Default 0.5 covers the common case: game UI
     /// displays "338" for a real float of 337.5, so scanning for "338"
@@ -682,7 +693,8 @@ public partial class ValueSearchViewModel : ViewModelBase
                 SelectedDataType, SelectedScanType, Value,
                 SelectedScanType == ValueScanType.Between ? Value2 : null,
                 GameOnly, MaxResults, effTol, effCase, ParallelScan, BatchRead, DeepScan,
-                NativeCScan, NewestFirst, PageSize, ScanTimeoutSeconds * 1000, cts.Token);
+                NativeCScan, NewestFirst, PageSize, ScanTimeoutSeconds * 1000,
+                PreFilterNoise, cts.Token);
 
             SessionId = result.SessionId;
             // Populate the class-noise picker from the server histogram BEFORE
@@ -1047,7 +1059,8 @@ public partial class ValueSearchViewModel : ViewModelBase
 
             var result = await _dump.BeginGroupScanAsync(
                 GroupInputs.ToList(), GameOnly, MaxResults, DeepScan, CrossObjectScan,
-                NativeCScan, NewestFirst, PageSize, ScanTimeoutSeconds * 1000, cts.Token);
+                NativeCScan, NewestFirst, PageSize, ScanTimeoutSeconds * 1000,
+                PreFilterNoise, cts.Token);
 
             GroupSessionId = result.SessionId;
             GroupClassFilter.RebuildFromCounts(

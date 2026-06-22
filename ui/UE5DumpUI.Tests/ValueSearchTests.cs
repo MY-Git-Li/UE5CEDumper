@@ -1226,13 +1226,16 @@ public class ValueSearchTests
         public bool? LastNativeC { get; private set; }
         public bool? LastNewestFirst { get; private set; }
         public int? LastDeadlineMs { get; private set; }
+        public bool? LastAutoSkipNoise { get; private set; }
+
         public override Task<ValueScanBeginResult> BeginValueScanAsync(
             ValueScanDataType dataType, ValueScanType scanType,
             string value, string? value2 = null, bool gameOnly = true,
             int maxResults = 50000, double tolerance = 0.0,
             bool caseSensitive = false, bool parallel = true, bool batchRead = true,
             bool deep = false, bool nativeC = false, bool newestFirst = false,
-            int pageSize = 1000, int deadlineMs = 15000, CancellationToken ct = default)
+            int pageSize = 1000, int deadlineMs = 15000, bool autoSkipNoise = false,
+            CancellationToken ct = default)
         {
             Begins.Add((dataType, scanType, value, value2, gameOnly, maxResults, tolerance, caseSensitive));
             LastParallel = parallel;
@@ -1241,6 +1244,7 @@ public class ValueSearchTests
             LastNativeC = nativeC;
             LastNewestFirst = newestFirst;
             LastDeadlineMs = deadlineMs;
+            LastAutoSkipNoise = autoSkipNoise;
             return Task.FromResult(NextBeginResult);
         }
 
@@ -1285,15 +1289,17 @@ public class ValueSearchTests
         public List<(ulong sessionId, List<GroupSlotInput> slots)> GroupRefines { get; } = new();
         public List<ulong> GroupEnds { get; } = new();
         public int? LastGroupDeadlineMs { get; private set; }
+        public bool? LastGroupAutoSkipNoise { get; private set; }
 
         public override Task<GroupScanBeginResult> BeginGroupScanAsync(
             IReadOnlyList<GroupSlotInput> slots, bool gameOnly = true,
             int maxResults = 50000, bool deep = false, bool crossObject = false,
             bool nativeC = false, bool newestFirst = false, int pageSize = 1000,
-            int deadlineMs = 15000, CancellationToken ct = default)
+            int deadlineMs = 15000, bool autoSkipNoise = false, CancellationToken ct = default)
         {
             GroupBegins.Add((slots.ToList(), gameOnly, maxResults, deep, crossObject, nativeC, newestFirst));
             LastGroupDeadlineMs = deadlineMs;
+            LastGroupAutoSkipNoise = autoSkipNoise;
             return Task.FromResult(NextGroupBeginResult);
         }
 
