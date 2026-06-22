@@ -190,6 +190,8 @@
     <sys:String x:Key="str.LiveWalker.Value">Value</sys:String>
     <sys:String x:Key="str.LiveWalker.CopyAddress">Addr</sys:String>
     <sys:String x:Key="str.LiveWalker.CopyName">Name</sys:String>
+    <sys:String x:Key="str.LiveWalker.CopyClass">Class</sys:String>
+    <sys:String x:Key="str.LiveWalker.CeAAShort">AA</sys:String>
     <sys:String x:Key="str.LiveWalker.PtrValue">[Ptr]</sys:String>
     <sys:String x:Key="str.LiveWalker.CopyPtr">Ptr</sys:String>
     <sys:String x:Key="str.LiveWalker.AutoRefresh">Auto</sys:String>
@@ -198,6 +200,10 @@
     <sys:String x:Key="str.LiveWalker.HexFieldTip">Navigate CE hex view to field address (via AOBMaker CE Plugin)</sys:String>
     <sys:String x:Key="str.LiveWalker.HexPtrTip">Navigate CE hex view to pointer target (via AOBMaker CE Plugin)</sys:String>
     <sys:String x:Key="str.LiveWalker.HexObjectTip">Navigate CE hex view to current object address (via AOBMaker CE Plugin)</sys:String>
+    <sys:String x:Key="str.LiveWalker.HexOuterTip">Navigate CE hex view to the Outer object address (via AOBMaker CE Plugin)</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.CopyClass">Copy the class name to clipboard</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.CopyOuterName">Copy the Outer object name to clipboard</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.CopyOuterClass">Copy the Outer class name to clipboard</sys:String>
     <sys:String x:Key="str.LiveWalker.AddToCe">+CE</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.AddFieldToCe">Add this field to CE's address list as a typed memory record (via AOBMaker), labelled with the field name — then use CE's "Find out what accesses this address". Needs an AOBMaker plugin built on/after 2026-06-07 for hex display.</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.AddPtrToCe">Add the pointer target to CE's address list as an 8-byte hex memory record (via AOBMaker).</sys:String>
@@ -874,7 +880,9 @@
     <sys:String x:Key="str.Tip.LiveWalker.Back">Go back to previous object</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.Refresh">Re-read current object fields from memory</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.FindRefs">Find UObjects that hold a pointer to this one (true logical owner — Outer/Parent often only gives the naming-hierarchy package)</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.AddressInput">Address to navigate to. Accepts plain hex (0x7FF… or 7FF…) or a CE module+offset such as Game.exe+1A2B3C. A CE-copied, quoted form like &quot;Game.exe&quot;+1A2B is accepted too — the surrounding quotes are stripped and module names containing spaces work. Press Enter or click Go.</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.Go">Navigate to the specified address</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.FieldInst">List live instances of this field's object class in the Instance Finder tab — pre-fills the class name and runs the search.</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.ExportCE">Copy full CE XML pointer chain to clipboard</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.ExportCEField">Copy CE XML for the selected field(s) only (Ctrl/Shift-click to multi-select)</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.AobToggle">Use AOB-scanned GWorld symbol instead of hardcoded address (survives game restarts)</sys:String>

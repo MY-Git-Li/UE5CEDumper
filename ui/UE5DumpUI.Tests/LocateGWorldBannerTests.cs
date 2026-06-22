@@ -37,7 +37,8 @@ public class LocateGWorldBannerTests
         };
         var vm = MakeVm(stub);
 
-        await vm.LocateInGWorldAsync("0x1000", 0, null, stopAtParent: false);
+        await vm.LocateInGWorldAsync("0x1000", 0, null, stopAtParent: false,
+            ct: TestContext.Current.CancellationToken);
 
         Assert.True(vm.HasLocateFailure);
         Assert.Contains("Not reachable", vm.LocateFailureMessage);
@@ -55,7 +56,8 @@ public class LocateGWorldBannerTests
         };
         var vm = MakeVm(stub);
 
-        await vm.LocateInGWorldAsync("0x1000", 0, null, stopAtParent: false);
+        await vm.LocateInGWorldAsync("0x1000", 0, null, stopAtParent: false,
+            ct: TestContext.Current.CancellationToken);
 
         // A user-initiated cancel must NOT raise the failure banner — it preserves the
         // current view and reports via the mild top status line instead.
@@ -72,13 +74,15 @@ public class LocateGWorldBannerTests
         };
         var vm = MakeVm(stub);
 
-        await vm.LocateInGWorldAsync("0x1000", 0, null, stopAtParent: false);
+        await vm.LocateInGWorldAsync("0x1000", 0, null, stopAtParent: false,
+            ct: TestContext.Current.CancellationToken);
         Assert.True(vm.HasLocateFailure);
 
         // A fresh locate attempt clears the prior banner up-front (ClearStatus) even
         // before its own result lands.
         stub.Next = new GWorldPathResult { Found = false, Status = "cancelled" };
-        await vm.LocateInGWorldAsync("0x2000", 0, null, stopAtParent: false);
+        await vm.LocateInGWorldAsync("0x2000", 0, null, stopAtParent: false,
+            ct: TestContext.Current.CancellationToken);
 
         Assert.False(vm.HasLocateFailure);
     }
@@ -95,7 +99,8 @@ public class LocateGWorldBannerTests
         };
         var vm = MakeVm(stub);
 
-        await vm.LocateInGameEngineAsync("0x1000", 0, null, stopAtParent: false);
+        await vm.LocateInGameEngineAsync("0x1000", 0, null, stopAtParent: false,
+            ct: TestContext.Current.CancellationToken);
 
         Assert.True(vm.HasLocateFailure);
         Assert.Contains("GameEngine", vm.LocateFailureMessage);
@@ -110,7 +115,8 @@ public class LocateGWorldBannerTests
         };
         var vm = MakeVm(stub);
 
-        await vm.LocateInGameEngineAsync("0x1000", 0, null, stopAtParent: false);
+        await vm.LocateInGameEngineAsync("0x1000", 0, null, stopAtParent: false,
+            ct: TestContext.Current.CancellationToken);
 
         Assert.True(vm.HasLocateFailure);
         Assert.Contains("UGameEngine", vm.LocateFailureMessage);

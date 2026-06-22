@@ -8,6 +8,14 @@ state.
 
 > **Last refreshed**: 2026-05-29 (build 797) for the rows below. **dev = main @
 > build ~937 (PR #238).** Newer work lives in [dev-log.md](dev-log.md):
+> - builds **1531–1544 (2026-06-22)** — **Locate in GWorld** gained a per-row 🌍 on
+>   **Interesting Properties** (the last clean gap) and a prominent **⚠ failure
+>   banner** in Live Walker — a failed `not_reachable` locate no longer looks like
+>   the idle empty state, and exceptions surface too (PR #344). **Locate in
+>   GameEngine** (⚙) shipped as a GEngine-rooted companion on all 10 🌍 surfaces —
+>   `root_kind=engine` on the existing path handler — reaching engine-layer objects
+>   (GameInstance / LocalPlayer / UMG widgets) that no GWorld chain reaches, a
+>   deliberate complement (weaker for world actors by design; PR #345).
 > - builds **1181–1199 (2026-06-16)** — **Locate in GWorld** (forward-BFS shortest
 >   pointer chain GWorld→target, the inverse of Find Refs) on every "open in Live
 >   Walker" source, plus **deeply-nested container reach**: `find_by_address` now
