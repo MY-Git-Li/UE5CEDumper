@@ -528,17 +528,18 @@ public partial class SnapshotViewModel : ViewModelBase
                 }, lct);
 
                 await Task.WhenAll(producer, consumer);
-            }   // session DisposeAsync commits the tail + restores pragmas BEFORE finalize
 
-            StopCaptureHeartbeat();   // stop ticking before the terminal messages
-            StatusText = "Finalising (building pivot index)…";
-            // Off the UI thread: FinalizeSnapshotAsync builds the pivot index with a
-            // COUNT(DISTINCT …) GROUP BY over the full snapshot (the documented ~10s
-            // hard freeze), and EnforceQuotaAsync runs wal_checkpoint + DELETE + VACUUM
-            // over a GB-class DB — all synchronous under Microsoft.Data.Sqlite.
-            await Task.Run(() => _store.FinalizeSnapshotAsync(snapshotId, objectCount, fieldCount, ct), ct);
+                StopCaptureHeartbeat();   // stop ticking before the terminal messages
+                StatusText = "Finalising…";
+                // Incremental pivot counts on the session connection — replaces the ~10s
+                // COUNT(DISTINCT) GROUP BY ×2 the lazy build runs (the documented finalize
+                // freeze). Dispose then restores pragmas + closes.
+                await session.CompleteSnapshotAsync(snapshotId, objectCount, fieldCount, ct);
+            }
+
             // FIFO eviction: drop oldest snapshots of this game until the DB
-            // fits the quota (the just-captured one is always kept).
+            // fits the quota (the just-captured one is always kept). EnforceQuotaAsync now
+            // skips the checkpoint + VACUUM entirely when the capture stays under quota.
             int dropped = await Task.Run(() => _store.EnforceQuotaAsync(QuotaBytes, ct), ct);
             var evicted = dropped > 0 ? $" — dropped {dropped} oldest (quota)" : "";
             // Phase-0 telemetry: one summary line so a capture's cost breakdown is in the

@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Microsoft.Data.Sqlite;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
@@ -38,6 +40,69 @@ public class SnapshotStoreTests : IDisposable
         foreach (var (name, type, hex) in fields)
             o.Fields.Add(new SnapshotCapturedField { Name = name, Type = type, Hex = hex, Offset = 0 });
         return o;
+    }
+
+    // An object whose ONLY rows are struct-array elements (no scalar fields) — so it lands
+    // in the is_array=1 pivot bucket, not is_array=0.
+    private static SnapshotCapturedObject EnemyWithArray(int index)
+    {
+        var o = new SnapshotCapturedObject
+        {
+            Index = index, Addr = $"0x{index:X}", Name = $"BP_Enemy_C_{index}",
+            ClassName = "BP_Enemy_C", OuterClassName = "World",
+            Path = $"/Game/Map.Map:PersistentLevel.BP_Enemy_C_{index}",
+        };
+        var arr = new SnapshotCapturedArray { Field = "Tunes" };
+        arr.Elements.Add(new SnapshotCapturedArrayElement
+        {
+            Index = 0,
+            Fields = { new SnapshotCapturedField { Name = "V", Type = "IntProperty", Hex = "01000000" } },
+        });
+        o.Arrays.Add(arr);
+        return o;
+    }
+
+    [Fact]
+    public async Task CaptureSession_IncrementalPivotCounts_MatchGroupByBuild()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        SnapshotCapturedObject[] Chunk1() => new[]
+        {
+            MakeObject(1, ("HP", "IntProperty", "0A000000")),
+            MakeObject(2, ("HP", "IntProperty", "14000000")),
+            EnemyWithArray(3),
+        };
+        SnapshotCapturedObject[] Chunk2() => new[]
+        {
+            MakeObject(4, ("HP", "IntProperty", "1E000000")),
+            EnemyWithArray(5),
+        };
+
+        // (A) Capture via the bulk session → incremental pivot counts (no GROUP BY).
+        long idA = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "A", Scope = "NumericNoByte" }, ct);
+        int objA = 0, fieldA = 0;
+        await using (var s = await _store.BeginCaptureSessionAsync(ct))
+        {
+            var c1 = Chunk1(); var c2 = Chunk2();
+            fieldA += s.WriteChunk(idA, c1, ct); objA += c1.Length;
+            fieldA += s.WriteChunk(idA, c2, ct); objA += c2.Length;
+            await s.CompleteSnapshotAsync(idA, objA, fieldA, ct);
+        }
+
+        // (B) Identical data via the one-shot path + the GROUP-BY finalize (the oracle).
+        long idB = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "B", Scope = "NumericNoByte" }, ct);
+        var all = Chunk1().Concat(Chunk2()).ToArray();
+        int fieldB = await _store.WriteChunkAsync(idB, all, ct);
+        await _store.FinalizeSnapshotAsync(idB, all.Length, fieldB, ct);
+
+        Assert.Equal(fieldB, fieldA);   // same rows written
+        static string Render(IReadOnlyList<PivotClassInfo> xs) =>
+            string.Join("|", xs.Select(x => $"{x.ClassName}={x.InstanceCount}").OrderBy(t => t));
+        // Scalar (is_array=0) + struct-array (is_array=1) counts must match the GROUP BY.
+        Assert.Equal(Render(await _store.ListPivotClassesAsync(idB, ct)),
+                     Render(await _store.ListPivotClassesAsync(idA, ct)));
+        Assert.Equal(Render(await _store.ListPivotArrayClassesAsync(idB, ct)),
+                     Render(await _store.ListPivotArrayClassesAsync(idA, ct)));
     }
 
     [Fact]

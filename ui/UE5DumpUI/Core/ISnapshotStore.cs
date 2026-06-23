@@ -21,6 +21,16 @@ public interface ICaptureSession : IAsyncDisposable
     /// Microsoft.Data.Sqlite); the caller runs it off the UI thread.</summary>
     int WriteChunk(long snapshotId, IReadOnlyList<SnapshotCapturedObject> objects,
                    CancellationToken ct = default);
+
+    /// <summary>Finalise the captured snapshot on the session connection: commit the row
+    /// tail, stamp object/field totals, and write the per-class pivot counts (class_counts)
+    /// INCREMENTALLY from per-class distinct GObjects-index sets accumulated while writing —
+    /// replacing the ~10 s <c>COUNT(DISTINCT) GROUP BY ×2</c> the lazy build runs. Call once,
+    /// after the last <see cref="WriteChunk"/> and before disposing. The lazy GROUP-BY build
+    /// (<c>EnsurePivotIndexAsync</c>) remains the fallback for snapshots NOT captured via a
+    /// session.</summary>
+    Task CompleteSnapshotAsync(long snapshotId, int objectCount, int fieldCount,
+                               CancellationToken ct = default);
 }
 
 public interface ISnapshotStore

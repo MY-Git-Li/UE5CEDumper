@@ -377,10 +377,17 @@ public sealed class SnapshotStore : ISnapshotStore
         private const int CommitEveryChunks = 16;
         private readonly ILoggingService? _log;
         private readonly SqliteConnection _conn;
-        private SqliteTransaction _tx;
+        private SqliteTransaction? _tx;
         private readonly ChunkInserter _ins;
         private int _sinceCommit;
         private bool _disposed;
+        private bool _completed;
+        // Phase-2 D: per-(class, is_array) DISTINCT GObjects-index sets, accumulated while
+        // writing so CompleteSnapshotAsync can INSERT class_counts with no GROUP BY scan.
+        // is_array 0 = the object wrote ≥1 scalar field; 1 = it wrote ≥1 array-element field.
+        // Mirrors EnsurePivotIndexAsync's "array_field IS NULL / IS NOT NULL" split exactly.
+        private readonly Dictionary<(string cls, int isArray), HashSet<long>> _pivot = new();
+        private readonly Dictionary<string, string> _intern = new(StringComparer.Ordinal);
 
         public CaptureSession(SqliteConnection conn, ILoggingService? log)
         {
@@ -390,15 +397,33 @@ public sealed class SnapshotStore : ISnapshotStore
             _ins  = new ChunkInserter(_conn, _tx);
         }
 
+        private string Intern(string s) { if (_intern.TryGetValue(s, out var v)) return v; _intern[s] = s; return s; }
+
         public int WriteChunk(long snapshotId, IReadOnlyList<SnapshotCapturedObject> objects, CancellationToken ct = default)
         {
             if (objects.Count == 0) return 0;
+
+            // Accumulate the per-class distinct-index pivot counts (cheap; one pass).
+            foreach (var obj in objects)
+            {
+                bool hasScalar = obj.Fields.Count > 0;
+                bool hasArray = false;
+                foreach (var arr in obj.Arrays)
+                {
+                    foreach (var el in arr.Elements)
+                        if (el.Fields.Count > 0) { hasArray = true; break; }
+                    if (hasArray) break;
+                }
+                if (hasScalar) Bucket(obj.ClassName, 0).Add(obj.Index);
+                if (hasArray)  Bucket(obj.ClassName, 1).Add(obj.Index);
+            }
+
             int rows = _ins.Insert(snapshotId, objects, ct);
             // Commit every N chunks so the WAL doesn't grow to the whole capture before
             // the single final commit (bounds disk + lets a later checkpoint reclaim).
             if (++_sinceCommit >= CommitEveryChunks)
             {
-                _tx.Commit();
+                _tx!.Commit();
                 _tx.Dispose();
                 _tx = (SqliteTransaction)_conn.BeginTransaction();
                 _ins.Rebind(_tx);
@@ -407,16 +432,88 @@ public sealed class SnapshotStore : ISnapshotStore
             return rows;
         }
 
+        private HashSet<long> Bucket(string cls, int isArray)
+        {
+            var key = (Intern(cls), isArray);
+            if (!_pivot.TryGetValue(key, out var set)) { set = new HashSet<long>(); _pivot[key] = set; }
+            return set;
+        }
+
+        public async Task CompleteSnapshotAsync(long snapshotId, int objectCount, int fieldCount, CancellationToken ct = default)
+        {
+            // Flush the captured rows, then write totals + incremental pivot counts in a
+            // fresh transaction (so a reader can't observe a half-written class_counts).
+            _tx!.Commit();
+            await _tx.DisposeAsync();
+            _tx = null;
+
+            await using var tx = (SqliteTransaction)await _conn.BeginTransactionAsync(ct);
+
+            await using (var u = _conn.CreateCommand())
+            {
+                u.Transaction = tx;
+                u.CommandText = "UPDATE snapshots SET object_count=$oc, field_count=$fc WHERE id=$id;";
+                u.Parameters.AddWithValue("$oc", objectCount);
+                u.Parameters.AddWithValue("$fc", fieldCount);
+                u.Parameters.AddWithValue("$id", snapshotId);
+                await u.ExecuteNonQueryAsync(ct);
+            }
+
+            // Authoritative pivot counts: clear any partial lazy build for this snapshot,
+            // then write the accumulated counts + mark both kinds built (so the lazy
+            // EnsurePivotIndexAsync GROUP-BY path becomes a no-op for this snapshot).
+            await using (var del = _conn.CreateCommand())
+            {
+                del.Transaction = tx;
+                del.CommandText = "DELETE FROM class_counts WHERE snapshot_id=$s;";
+                del.Parameters.AddWithValue("$s", snapshotId);
+                await del.ExecuteNonQueryAsync(ct);
+            }
+            await using (var insCmd = _conn.CreateCommand())
+            {
+                insCmd.Transaction = tx;
+                insCmd.CommandText =
+                    "INSERT INTO class_counts(snapshot_id, class_fqn, is_array, instance_count) VALUES($s,$c,$a,$n);";
+                var ps = insCmd.Parameters.Add("$s", SqliteType.Integer); ps.Value = snapshotId;
+                var pc = insCmd.Parameters.Add("$c", SqliteType.Text);
+                var pa = insCmd.Parameters.Add("$a", SqliteType.Integer);
+                var pn = insCmd.Parameters.Add("$n", SqliteType.Integer);
+                foreach (var kv in _pivot)
+                {
+                    pc.Value = kv.Key.cls;
+                    pa.Value = kv.Key.isArray;
+                    pn.Value = kv.Value.Count;
+                    await insCmd.ExecuteNonQueryAsync(ct);
+                }
+            }
+            await using (var mark = _conn.CreateCommand())
+            {
+                mark.Transaction = tx;
+                mark.CommandText = "INSERT OR IGNORE INTO pivot_index_built(snapshot_id, is_array) VALUES($s,0),($s,1);";
+                mark.Parameters.AddWithValue("$s", snapshotId);
+                await mark.ExecuteNonQueryAsync(ct);
+            }
+
+            await tx.CommitAsync(ct);
+            _completed = true;
+        }
+
         public async ValueTask DisposeAsync()
         {
             if (_disposed) return;
             _disposed = true;
-            try { _tx.Commit(); }
-            catch (Exception ex) { _log?.Warn(Constants.LogCatView, $"CaptureSession: final commit failed: {ex.Message}"); }
+            // CompleteSnapshotAsync already committed + nulled _tx; only commit here when
+            // disposing WITHOUT completing (a cancelled / failed capture — the partial rows
+            // are discarded by the caller's DeleteSnapshotAsync afterwards).
+            if (!_completed && _tx != null)
+            {
+                try { _tx.Commit(); }
+                catch (Exception ex) { _log?.Warn(Constants.LogCatView, $"CaptureSession: final commit failed: {ex.Message}"); }
+                await _tx.DisposeAsync();
+            }
             // Restore durability now that the bulk load is done (best-effort).
             try { await ExecAsync(_conn, "PRAGMA synchronous=NORMAL;", default); } catch { /* closing anyway */ }
             _ins.Dispose();
-            await _tx.DisposeAsync();
             await _conn.DisposeAsync();
         }
     }
@@ -516,11 +613,21 @@ public sealed class SnapshotStore : ISnapshotStore
     {
         if (quotaBytes <= 0) return 0;  // unlimited
 
+        // Estimate the on-disk footprint WITHOUT a checkpoint — db + WAL + shm — so a
+        // capture that stays under quota pays NO wal_checkpoint(TRUNCATE) (the checkpoint +
+        // VACUUM run only on the eviction path below). The estimate slightly overcounts
+        // (the WAL may hold frames already in the db), which is safe for a quota gate; the
+        // accurate post-checkpoint size is re-checked before any eviction.
+        long estBytes = FileSizeOf(DatabasePath)
+                      + FileSizeOf(DatabasePath + "-wal")
+                      + FileSizeOf(DatabasePath + "-shm");
+        if (estBytes <= quotaBytes) return 0;   // under quota → no connection, no checkpoint, no VACUUM
+
         await using var conn = await OpenAsync(ct);
         await ExecAsync(conn, "PRAGMA wal_checkpoint(TRUNCATE);", ct);
 
-        long fileBytes = FileSizeOf(DatabasePath);
-        if (fileBytes <= quotaBytes) return 0;
+        long fileBytes = FileSizeOf(DatabasePath);   // accurate size after folding the WAL
+        if (fileBytes <= quotaBytes) return 0;       // WAL frames were redundant — actually under
 
         // Read snapshots newest-first with their field counts.
         var rows = new List<(long id, int fields)>();
