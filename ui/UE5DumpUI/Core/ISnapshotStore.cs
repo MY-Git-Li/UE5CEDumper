@@ -8,6 +8,21 @@ namespace UE5DumpUI.Core;
 /// the UI holds the whole capture), then finalised with its totals. Raw ADO.NET
 /// only — no EF Core (reflection-based query breaks trim/AOT).
 /// </summary>
+/// <summary>
+/// A bulk-capture write session (one connection + bulk pragmas + a transaction committed
+/// every N chunks). <see cref="WriteChunk"/> runs SYNCHRONOUSLY — call it from a background
+/// consumer task, never the UI thread. Disposing commits the tail + restores durability
+/// pragmas. See <see cref="ISnapshotStore.BeginCaptureSessionAsync"/>.
+/// </summary>
+public interface ICaptureSession : IAsyncDisposable
+{
+    /// <summary>Insert one captured chunk's rows on the session's connection/transaction.
+    /// Returns the number of field rows written. Synchronous (SQLite is sync under
+    /// Microsoft.Data.Sqlite); the caller runs it off the UI thread.</summary>
+    int WriteChunk(long snapshotId, IReadOnlyList<SnapshotCapturedObject> objects,
+                   CancellationToken ct = default);
+}
+
 public interface ISnapshotStore
 {
     /// <summary>Absolute path of the SQLite database file for the active game.</summary>
@@ -27,9 +42,20 @@ public interface ISnapshotStore
     Task<long> CreateSnapshotAsync(SnapshotMeta meta, CancellationToken ct = default);
 
     /// <summary>Append one captured chunk (flattened to field rows) under one
-    /// transaction. Returns the number of field rows written.</summary>
+    /// transaction. Returns the number of field rows written. One connection +
+    /// transaction per call — used by tests / seeding; the streaming capture flow uses
+    /// <see cref="BeginCaptureSessionAsync"/> for the bulk path.</summary>
     Task<int> WriteChunkAsync(long snapshotId, IReadOnlyList<SnapshotCapturedObject> objects,
                               CancellationToken ct = default);
+
+    /// <summary>Open a bulk-capture write session: ONE connection with bulk-load pragmas
+    /// (`synchronous=OFF` etc., safe because a partial capture is discarded) + a
+    /// transaction committed every N chunks, so a multi-million-row capture isn't paying
+    /// a fresh connection + `EnsureSchema` + fsync per chunk. The streaming capture loop
+    /// writes each chunk via <see cref="ICaptureSession.WriteChunk"/> from a background
+    /// consumer task; <see cref="IAsyncDisposable.DisposeAsync"/> commits the tail and
+    /// restores durability pragmas.</summary>
+    Task<ICaptureSession> BeginCaptureSessionAsync(CancellationToken ct = default);
 
     /// <summary>Record the final object/field totals on the snapshot row.</summary>
     Task FinalizeSnapshotAsync(long snapshotId, int objectCount, int fieldCount,
