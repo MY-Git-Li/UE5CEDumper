@@ -209,6 +209,10 @@ A **Single / Group** toggle in the Value Search tab. Group mode finds **objects*
 - **P4 increment 1** (builds 1303-1313, MERGED PR #313): an opt-in **Cross-object (owned components)** checkbox folds the numeric leaves of the sub-objects an actor OWNS (its components + a GAS ASC's `SpawnedAttributes` → `UAttributeSet`, a 2-level owned BFS gated by an Outer-chains-back test) into the actor's block, so a group whose values span {actor, components, attribute sets} matches. Ownership + value driven, not class-name driven. In-game VERIFIED on TQ2 (UE5.07, GAS).
 - **P4 increment 2** (builds 1318-1319): each slot carries an `owner_class` so a cross-object slot's **Pivot** handoff lands on the owned sub-object's class (the stats component / `UAttributeSet`) instead of the candidate actor's. The object handoffs (Live Walker / Locate) already targeted the sub-object by address (inc 1); this completes the class side. Closes P4.
 
+### Snapshot Group Match — Multiple Values over a captured snapshot (S1–S4, builds 1563-1568; in-game verify pending)
+
+The same object-aware Group Scan, run over the **captured-snapshot** corpus via a pure-C# port of the `Orden` SDR matcher (the seam group-value-scan-spec §3.1 reserved). A **Diff / Group** toggle in the Snapshot panel. **Mode A** finds objects holding N absolute values in one snapshot; **Mode B** (pick a "Compare with" older snapshot) compares each value across two snapshots with per-slot `Changed / Unchanged / Increased / Decreased` — the **"Current HP↓ + Max HP unchanged"** case (groups need `Unchanged`). No DLL/schema change. Spec: [snapshot-group-match-spec.md](snapshot-group-match-spec.md). Deep struct-array blocks + SPC/Pivot group-match deferred (same matcher, later).
+
 ## Multi-row → One .CT batch generator (build 760, pick #3)
 
 Interesting Functions + Interesting Properties tabs gain a **📦 Generate CT** toolbar button that wraps the current DataGrid multi-select (`SelectionMode="Extended"`) into a single ready-to-share `.CT` file. Promotes the discover→use workflow from "research toy" to "shareable cheat-table author".

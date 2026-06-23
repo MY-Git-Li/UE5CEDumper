@@ -398,6 +398,32 @@
     <sys:String x:Key="str.Snapshot.Diff.Col.Old">Old</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.Col.New">New</sys:String>
 
+    <!-- Snapshot Group Match (Multiple Values over a captured snapshot) -->
+    <sys:String x:Key="str.Snapshot.Group.ModeLabel">Mode:</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.ModeDiff">Diff</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.ModeGroup">Group (Multiple Values)</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Snapshot">Snapshot:</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Find">Find</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Clear">Clear</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.AddRow">+ value</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.RemoveRow">− value</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Deep">Deep (nested containers)</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Group.Deep">Also match values inside NESTED containers / struct-array elements (e.g. a deeply-nested SaveSlotList[1]…Tunes[2]), folded into the owning object's block. Needed when the value you're after lives in an array/map, not a direct field. Off = direct fields only (faster, less noise).</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.ValueHint">value</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Value2Hint">to</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.CompareWith">Compare with:</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Group.CompareWith">Pick an OLDER snapshot to compare against (Mode B). Enables the relative predicates (Changed / Unchanged / Increased / Decreased) — e.g. find an object whose Current HP decreased while Max HP stayed unchanged. Leave empty for absolute single-snapshot matching.</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.CompareClear">✕</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Group.CompareClear">Clear the compare snapshot — back to single-snapshot (absolute) matching.</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Hint">Find objects holding ALL of 2–4 values at distinct numeric offsets. Leave "Compare with" empty to match absolute values in one snapshot; pick an older snapshot there to compare across time, then Increased / Decreased / Unchanged work (e.g. "Current HP↓ + Max HP unchanged").</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Col.Class">Class</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Col.Object">Object</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Col.Matched">Matched values</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.OpenWalker">Live</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.CopyAddr">Addr</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.LocateGWorld">🌍</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.LocateGameEngine">⚙</sys:String>
+
     <!-- SPC Query (experimental) -->
     <sys:String x:Key="str.Spc.Intro">Find fields whose value SEQUENCE across snapshots matches a direction chain — no type, no value. Pick two or more snapshots (they may span game sessions), set how each should compare to the previous one (Increased / Decreased / Unchanged / Changed), and run. This is CE's "Unknown Initial Value + Increased/Decreased" generalised across persisted snapshots and restarts.</sys:String>
     <sys:String x:Key="str.Spc.Join">Join:</sys:String>

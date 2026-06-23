@@ -305,4 +305,161 @@ public class SnapshotViewModelTests : IDisposable
         vm.OpenInLiveWalkerCommand.Execute(new SnapshotDiffRow { ObjAddr = "" });
         Assert.Null(navAddr);
     }
+
+    // ---- Snapshot Group Match (S3 UI) ----
+
+    private static SnapshotCapturedObject GMakeObj(int idx, string cls,
+        params (string n, string t, int off, string h)[] fields)
+    {
+        var o = new SnapshotCapturedObject
+        {
+            Index = idx, Addr = $"0x{idx * 0x1000:X}", Name = $"{cls}_{idx}",
+            ClassName = cls, OuterClassName = "World", Path = $"/Game/Map:{cls}_{idx}",
+        };
+        foreach (var (n, t, off, h) in fields)
+            o.Fields.Add(new SnapshotCapturedField { Name = n, Type = t, Offset = off, Hex = h });
+        return o;
+    }
+
+    private async Task<SnapshotViewModel> NewVmWithSnapshotAsync(CancellationToken ct)
+    {
+        _store.SetActiveGame("GVM");
+        long id = await _store.CreateSnapshotAsync(
+            new SnapshotMeta { Label = "s", Scope = "NumericNoByte", PeHash = "GVM", GameSessionId = "GVM-T" }, ct);
+        await _store.WriteChunkAsync(id, new[]
+        {
+            GMakeObj(1, "BP_Player_C",
+                ("Str", "IntProperty", 0x20, "18000000"),   // 24
+                ("Def", "IntProperty", 0x24, "0A000000"),   // 10
+                ("Dex", "IntProperty", 0x28, "0E000000")),  // 14
+            GMakeObj(2, "BP_Player_C",
+                ("Str", "IntProperty", 0x20, "18000000"),   // 24
+                ("Def", "IntProperty", 0x24, "63000000")),  // 99 (no 10 -> won't match)
+        }, ct);
+        await _store.FinalizeSnapshotAsync(id, 2, 5, ct);
+
+        var vm = new SnapshotViewModel(new CaptureStub(), _store, new MockLoggingService());
+        vm.SetEngineState(new EngineState { PeHash = "GVM", UEVersion = 504, ModuleBase = "7FF600000000", ProcessCreationTime = "T" });
+        await vm.RefreshCommand.ExecuteAsync(null);   // deterministic load (don't rely on the fire-and-forget refresh)
+        return vm;
+    }
+
+    [Fact]
+    public async Task GroupMatch_PopulatesCandidates_FromSeededSnapshot()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var vm = await NewVmWithSnapshotAsync(ct);
+
+        vm.IsGroupMode = true;
+        Assert.NotNull(vm.GroupSnapshot);                  // defaulted to the newest snapshot
+        vm.GroupInputs[0].ScanType = ValueScanType.Exact; vm.GroupInputs[0].Value = "24";
+        vm.GroupInputs[1].ScanType = ValueScanType.Exact; vm.GroupInputs[1].Value = "10";
+        Assert.True(vm.CanRunGroupMatch);
+
+        await vm.RunGroupMatchCommand.ExecuteAsync(null);
+
+        var c = Assert.Single(vm.GroupCandidates);
+        Assert.Equal(1, c.InstanceIndex);                  // only object 1 holds 24 AND 10
+        Assert.All(c.Slots, s => Assert.True(s.Locked));
+    }
+
+    [Fact]
+    public async Task GroupRows_AddRemove_BoundedTwoToFour()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var vm = await NewVmWithSnapshotAsync(ct);
+
+        Assert.Equal(2, vm.GroupInputs.Count);
+        Assert.False(vm.CanRemoveGroupRow);                // at the min
+        vm.AddGroupRowCommand.Execute(null);
+        vm.AddGroupRowCommand.Execute(null);
+        Assert.Equal(4, vm.GroupInputs.Count);
+        Assert.False(vm.CanAddGroupRow);                   // at the max
+        vm.AddGroupRowCommand.Execute(null);               // no-op past 4
+        Assert.Equal(4, vm.GroupInputs.Count);
+        vm.RemoveGroupRowCommand.Execute(null);
+        Assert.Equal(3, vm.GroupInputs.Count);
+    }
+
+    [Fact]
+    public async Task GroupMatch_MissingValue_ShowsErrorNoCandidates()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var vm = await NewVmWithSnapshotAsync(ct);
+
+        vm.GroupInputs[0].Value = "24";                    // slot 2 left blank -> store validation error
+        await vm.RunGroupMatchCommand.ExecuteAsync(null);
+
+        Assert.Empty(vm.GroupCandidates);
+        Assert.False(string.IsNullOrEmpty(vm.GroupStatusText));
+    }
+
+    private async Task<SnapshotViewModel> NewVmWith2SnapshotsAsync(CancellationToken ct)
+    {
+        var vm = await NewVmWithSnapshotAsync(ct);
+        long id2 = await _store.CreateSnapshotAsync(
+            new SnapshotMeta { Label = "s2", Scope = "NumericNoByte", PeHash = "GVM", GameSessionId = "GVM-T" }, ct);
+        await _store.WriteChunkAsync(id2, new[] { GMakeObj(9, "BP_Player_C", ("Str", "IntProperty", 0x20, "18000000")) }, ct);
+        await _store.FinalizeSnapshotAsync(id2, 1, 1, ct);
+        await vm.RefreshCommand.ExecuteAsync(null);
+        return vm;
+    }
+
+    [Fact]
+    public async Task GroupCompareSnapshot_PreservedAcrossRefresh()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var vm = await NewVmWith2SnapshotsAsync(ct);
+        Assert.True(vm.Snapshots.Count >= 2);
+
+        vm.GroupSnapshot = vm.Snapshots[0];
+        vm.GroupCompareSnapshot = vm.Snapshots[1];   // Mode B
+        Assert.True(vm.IsGroupCompareMode);
+        long compareId = vm.GroupCompareSnapshot!.Id;
+
+        await vm.RefreshCommand.ExecuteAsync(null);  // e.g. after a capture completes
+
+        Assert.NotNull(vm.GroupCompareSnapshot);     // preserved (was: silently dropped -> reverts to Mode A)
+        Assert.Equal(compareId, vm.GroupCompareSnapshot!.Id);
+        Assert.True(vm.IsGroupCompareMode);
+    }
+
+    [Fact]
+    public async Task GroupRowActions_DisabledForCrossSessionSnapshot()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _store.SetActiveGame("GVM");
+        long id = await _store.CreateSnapshotAsync(
+            new SnapshotMeta { Label = "old-session", Scope = "NumericNoByte", PeHash = "GVM", GameSessionId = "GVM-OLD" }, ct);
+        await _store.WriteChunkAsync(id, new[] { GMakeObj(1, "BP_Player_C", ("Str", "IntProperty", 0x20, "18000000")) }, ct);
+        await _store.FinalizeSnapshotAsync(id, 1, 1, ct);
+
+        var vm = new SnapshotViewModel(new CaptureStub(), _store, new MockLoggingService());
+        // Current live session is GVM-NEW; the snapshot is from GVM-OLD (a previous run).
+        vm.SetEngineState(new EngineState { PeHash = "GVM", UEVersion = 504, ModuleBase = "7FF600000000", ProcessCreationTime = "NEW" });
+        await vm.RefreshCommand.ExecuteAsync(null);
+        vm.GroupSnapshot = vm.Snapshots[0];
+
+        // Cross-session: every per-slot handoff (Live / Copy / Locate-GWorld / Locate-GameEngine)
+        // must be disabled — its captured obj_addr is stale in the running game.
+        Assert.False(vm.CanUseGroupRowActions);
+        Assert.False(vm.CanLocateGroupRowInGWorld);
+    }
+
+    [Fact]
+    public async Task IsGroupCompareMode_RaisedWhenPrimaryChanges()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var vm = await NewVmWith2SnapshotsAsync(ct);
+        vm.GroupSnapshot = vm.Snapshots[0];
+        vm.GroupCompareSnapshot = vm.Snapshots[1];
+        Assert.True(vm.IsGroupCompareMode);
+
+        bool raised = false;
+        vm.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(vm.IsGroupCompareMode)) raised = true; };
+        vm.GroupSnapshot = vm.Snapshots[1];          // primary now equals compare -> collapses to Mode A
+
+        Assert.True(raised);                          // OnGroupSnapshotChanged re-raises it
+        Assert.False(vm.IsGroupCompareMode);
+    }
 }
