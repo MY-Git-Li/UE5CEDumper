@@ -156,6 +156,8 @@
     <sys:String x:Key="str.ClassStruct.Size">Size</sys:String>
     <sys:String x:Key="str.ClassStruct.Super">Super Class</sys:String>
     <sys:String x:Key="str.ClassStruct.PropsSize">Properties Size</sys:String>
+    <sys:String x:Key="str.ClassStruct.FindClassFunc">🔎 Find Class Funcs</sys:String>
+    <sys:String x:Key="str.Tip.ClassStruct.FindClassFunc">Find UFunctions that take THIS class as a parameter or return value (reflection scan — includes native functions). Distinct from the per-field "Find Funcs" in the grid below.</sys:String>
     <sys:String x:Key="str.ClassStruct.NoClass">Select an object to view its class structure</sys:String>
     <sys:String x:Key="str.Xref.FindFunctions">Find functions using this field</sys:String>
     <sys:String x:Key="str.Xref.FindFuncsButton">Find Funcs</sys:String>
@@ -605,6 +607,7 @@
     <sys:String x:Key="str.GameClassFilter.FilterHint">Filter by name...</sys:String>
     <sys:String x:Key="str.GameClassFilter.FindInstances">inst</sys:String>
     <sys:String x:Key="str.GameClassFilter.WalkClass">Walk Class</sys:String>
+    <sys:String x:Key="str.GameClassFilter.FindFunc">Find Func</sys:String>
     <sys:String x:Key="str.GameClassFilter.SuperLabel">Super:</sys:String>
     <sys:String x:Key="str.GameClassFilter.SuperHint">(All)</sys:String>
     <sys:String x:Key="str.GameClassFilter.PackageLabel">Package:</sys:String>
@@ -644,6 +647,8 @@
     <sys:String x:Key="str.IF.UsesCol">Uses</sys:String>
     <sys:String x:Key="str.Common.CancelBatch">✕ Cancel</sys:String>
     <sys:String x:Key="str.Common.BatchFuncs">⤋ Funcs</sys:String>
+    <sys:String x:Key="str.Common.BatchFindFunc">⤋ Find Func</sys:String>
+    <sys:String x:Key="str.Tip.Common.BatchFindFunc">Fill the "Funcs" column for the selected rows (or all currently-filtered rows if none selected): which UFunctions take each class as a parameter or return value (reflection scan — includes native functions). Each call is a full game-wide sweep, so narrow the filter or select rows first. Already-scanned rows are skipped (cached).</sys:String>
     <sys:String x:Key="str.Common.FuncsCol">Funcs</sys:String>
     <sys:String x:Key="str.Tip.Common.BatchFuncs">Fill the "Funcs" column for the selected rows (or all rows if none selected): which UFunctions reference each property (Blueprint bytecode xref). Each call is a full game scan, so this is slower than the function-side batch — select rows first (Ctrl/Shift+click) to scope it. Most rows show 0 (native-only access / unreferenced).</sys:String>
 
@@ -915,6 +920,7 @@
     <sys:String x:Key="str.Tip.GameClassFilter.Clear">Clear all filters</sys:String>
     <sys:String x:Key="str.Tip.GameClassFilter.FindInstances">Find live instances of this class</sys:String>
     <sys:String x:Key="str.Tip.GameClassFilter.WalkClass">Open class in Live Walker to inspect fields</sys:String>
+    <sys:String x:Key="str.Tip.GameClassFilter.FindFunc">Find UFunctions that take this class as a parameter or return value (reflection scan — includes native functions, unlike the per-field bytecode xref)</sys:String>
 
     <!-- Live Walker: Functions -->
     <sys:String x:Key="str.LiveWalker.Functions">Functions</sys:String>

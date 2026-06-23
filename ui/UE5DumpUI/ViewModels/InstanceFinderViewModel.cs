@@ -124,6 +124,7 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _instanceFilterText = "";
 
     [ObservableProperty] private ObservableCollection<InstanceResult> _instances = new();
+    [ObservableProperty] private bool _isXrefBatchRunning;
     [ObservableProperty] private InstanceResult? _selectedInstance;
     [ObservableProperty] private ObservableCollection<LiveFieldValue> _fields = new();
     [ObservableProperty] private bool _isSearching;
@@ -303,6 +304,10 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
         try { _reRunCts?.Cancel(); } catch { /* already disposed */ }
         _reRunCts?.Dispose();
         _reRunCts = null;
+
+        try { _xrefBatchCts?.Cancel(); } catch { /* already disposed */ }
+        _xrefBatchCts?.Dispose();
+        _xrefBatchCts = null;
 
         GC.SuppressFinalize(this);
     }
@@ -739,6 +744,80 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
         await Views.PropertyXrefDialog.ShowForClassAsync(
             instance.ClassName, instance.ClassAddress, _dump, _platform);
     }
+
+    // Batch Find Func over the currently-filtered instance rows (or selected).
+    // Many rows share a class, so dedup by ClassAddress within the run — each
+    // distinct class is a full game-wide sweep done once. Skip already-scanned
+    // (XrefInfo persists across the keyword filter).
+    private CancellationTokenSource? _xrefBatchCts;
+    private const int XrefBatchWarnThreshold = 25;
+
+    [RelayCommand]
+    private async Task BatchFindFuncsAsync(IList<InstanceResult>? selected)
+    {
+        var targets = ((selected != null && selected.Count > 0) ? selected : (IList<InstanceResult>)Instances).ToList();
+        if (targets.Count == 0) { StatusText = "No instances to scan."; return; }
+
+        // Cost is driven by DISTINCT not-yet-done classes, not raw row count.
+        int distinctClasses = targets
+            .Where(i => !string.IsNullOrEmpty(i.ClassAddress) && string.IsNullOrEmpty(i.XrefInfo))
+            .Select(i => i.ClassAddress).Distinct().Count();
+        if (distinctClasses > XrefBatchWarnThreshold)
+        {
+            var ok = await Views.ConfirmDialog.ShowAsync(
+                "Batch: find functions",
+                $"Scan {distinctClasses} distinct classes (across {targets.Count} rows)? Each class "
+              + "runs a FULL game-wide reflection sweep; rows sharing a class reuse one scan. "
+              + "Tip: narrow the filter first.",
+                confirmText: "Run");
+            if (!ok) return;
+        }
+
+        _xrefBatchCts?.Cancel();
+        _xrefBatchCts = new CancellationTokenSource();
+        var ct = _xrefBatchCts.Token;
+        IsXrefBatchRunning = true;
+        var classCache = new Dictionary<string, string>();
+        int rows = 0, classesScanned = 0, reused = 0;
+        try
+        {
+            foreach (var inst in targets)
+            {
+                ct.ThrowIfCancellationRequested();
+                rows++;
+                if (!string.IsNullOrEmpty(inst.XrefInfo)) { reused++; continue; }
+                if (string.IsNullOrEmpty(inst.ClassAddress)) { inst.XrefInfo = "—"; continue; }
+                if (classCache.TryGetValue(inst.ClassAddress, out var hit)) { inst.XrefInfo = hit; reused++; continue; }
+                try
+                {
+                    var res = await _dump.FindFunctionsByClassAsync(inst.ClassAddress, true, 200, ct);
+                    var summary = XrefFormat.FunctionsSummary(res.Xrefs);
+                    classCache[inst.ClassAddress] = summary;
+                    inst.XrefInfo = summary;
+                    classesScanned++;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    inst.XrefInfo = "—";
+                    _log.Error($"Batch Find Func failed for {inst.ClassName}", ex);
+                }
+                if ((rows & 0x7) == 0)
+                    StatusText = $"Find Func: {classesScanned} classes scanned ({rows}/{targets.Count} rows)…";
+            }
+            StatusText = $"Find Func done: {classesScanned} classes scanned across {targets.Count} rows"
+                       + (reused > 0 ? $" ({reused} reused/cached)." : ".");
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = $"Find Func cancelled ({classesScanned} classes scanned).";
+        }
+        finally { IsXrefBatchRunning = false; }
+    }
+
+    /// <summary>Cancel an in-flight batch Find Func run.</summary>
+    [RelayCommand]
+    private void CancelXrefBatch() => _xrefBatchCts?.Cancel();
 
     /// <summary>Copy a container-match row's owning UObject address to the
     /// clipboard (mirrors the per-instance copy + Value Search's Copy Address).</summary>

@@ -1,9 +1,11 @@
+using CommunityToolkit.Mvvm.ComponentModel;
+
 namespace UE5DumpUI.Models;
 
 /// <summary>
 /// A single UClass entry from the list_classes command.
 /// </summary>
-public class GameClassEntry
+public partial class GameClassEntry : ObservableObject
 {
     public string ClassName { get; set; } = "";
     public string ClassAddr { get; set; } = "";
@@ -15,6 +17,10 @@ public class GameClassEntry
 
     /// <summary>Display-friendly properties size as hex.</summary>
     public string SizeHex => $"0x{PropertiesSize:X}";
+
+    /// <summary>Batch "Find Func" result: which UFunctions take this class as a
+    /// parameter/return. Format "N · func1, func2[, …]" / "0" / "—" / "" (not run).</summary>
+    [ObservableProperty] private string _xrefInfo = "";
 
     /// <summary>
     /// Package prefix derived from <see cref="ClassPath"/> — the leading

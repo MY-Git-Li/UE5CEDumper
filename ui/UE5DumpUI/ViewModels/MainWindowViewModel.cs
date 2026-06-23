@@ -330,7 +330,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         LiveWalker = new LiveWalkerViewModel(dump, log, platform, aobMaker);
         InstanceFinder = new InstanceFinderViewModel(dump, log, platform);
         PropertySearch = new PropertySearchViewModel(dump, log, aobMaker, platform);
-        GameClassFilter = new GameClassFilterViewModel(dump, log);
+        GameClassFilter = new GameClassFilterViewModel(dump, log, platform);
         InterestingFunctions = new InterestingFunctionsViewModel(dump, log, aobMaker, platform);
         InterestingProperties = new InterestingPropertiesViewModel(dump, log, platform);
         ValueSearch = new ValueSearchViewModel(dump, log);

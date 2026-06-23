@@ -45,6 +45,19 @@
               ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.Search}"
               Classes="accent" Padding="12,4"/>
       <views:ClassFacetFilterButton Filter="{Binding ClassFilter}"/>
+      <Button Content="{StaticResource str.Common.BatchFindFunc}"
+              Click="OnBatchFindFuncsClick"
+              IsEnabled="{Binding !IsXrefBatchRunning}"
+              ToolTip.Tip="{StaticResource str.Tip.Common.BatchFindFunc}"
+              Foreground="#C586C0" Background="Transparent"
+              BorderThickness="1" BorderBrush="#C586C0"
+              Padding="6,2" FontSize="11" VerticalAlignment="Center" Cursor="Hand"/>
+      <Button Content="{StaticResource str.Common.CancelBatch}"
+              Command="{Binding CancelXrefBatchCommand}"
+              IsVisible="{Binding IsXrefBatchRunning}"
+              Foreground="#E06C75" Background="Transparent"
+              BorderThickness="1" BorderBrush="#E06C75"
+              Padding="6,2" FontSize="11" VerticalAlignment="Center" Cursor="Hand"/>
       <TextBlock Text="{Binding StatusText}"
                  Foreground="#888" VerticalAlignment="Center" Margin="8,0"/>
       <TextBlock Text="{Binding ClassFilterNote}"
@@ -180,8 +193,10 @@
 
       <!-- Instance list -->
       <DataGrid Grid.Row="0"
+                x:Name="InstancesGrid"
                 ItemsSource="{Binding Instances}"
                 SelectedItem="{Binding SelectedInstance}"
+                SelectionMode="Extended"
                 IsReadOnly="True"
                 CanUserResizeColumns="True"
                 GridLinesVisibility="Horizontal"
@@ -205,6 +220,17 @@
                               Binding="{Binding Index}"
                               SortMemberPath="Index"
                               Width="80"/>
+          <DataGridTemplateColumn Header="{StaticResource str.Common.FuncsCol}" Width="190" CanUserSort="False">
+            <DataGridTemplateColumn.CellTemplate>
+              <DataTemplate x:DataType="m:InstanceResult">
+                <TextBlock Text="{Binding XrefInfo}"
+                           Foreground="#C586C0"
+                           VerticalAlignment="Center" Margin="4,0"
+                           TextTrimming="CharacterEllipsis"
+                           ToolTip.Tip="{Binding XrefInfo}"/>
+              </DataTemplate>
+            </DataGridTemplateColumn.CellTemplate>
+          </DataGridTemplateColumn>
           <DataGridTemplateColumn Header="{StaticResource str.InstanceFinder.CopyAddress}" Width="50" CanUserSort="False">
             <DataGridTemplateColumn.CellTemplate>
               <DataTemplate x:DataType="m:InstanceResult">
