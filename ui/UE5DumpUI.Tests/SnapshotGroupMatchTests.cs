@@ -161,17 +161,16 @@ public class SnapshotGroupMatchTests : IDisposable
     }
 
     [Fact]
-    public async Task Validation_ModeB_NotYetAvailable()
+    public async Task Validation_ThreeSnapshots_NotSupported()
     {
         var ct = TestContext.Current.CancellationToken;
         long id = await SeedAsync(ct, Obj(1, "C", ("X", "IntProperty", 0, IntHex(1)), ("Y", "IntProperty", 4, IntHex(2))));
         var res = await _store.GroupMatchAsync(new SnapshotGroupQuery
         {
-            SnapshotIds = { id, id + 1 },   // two snapshots = Mode B
+            SnapshotIds = { id, id + 1, id + 2 },   // 3 snapshots: v1 supports 1 (absolute) or 2 (compare)
             Slots = { Slot(ValueScanType.Exact, "1"), Slot(ValueScanType.Exact, "2") },
         }, ct);
         Assert.NotNull(res.Error);
-        Assert.Contains("Mode B", res.Error);
     }
 
     [Fact]
@@ -185,5 +184,100 @@ public class SnapshotGroupMatchTests : IDisposable
             Slots = { Slot(ValueScanType.Decreased, ""), Slot(ValueScanType.Exact, "2") },
         }, ct);
         Assert.NotNull(res.Error);
+    }
+
+    // ---- Mode B (cross-snapshot temporal comparison) ----
+
+    private async System.Threading.Tasks.Task<(long oldId, long newId)> SeedPairAsync(
+        System.Threading.CancellationToken ct,
+        SnapshotCapturedObject[] oldObjs, SnapshotCapturedObject[] newObjs)
+    {
+        long oldId = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "old", Scope = "NumericNoByte", GameSessionId = "S" }, ct);
+        await _store.WriteChunkAsync(oldId, oldObjs, ct);
+        await _store.FinalizeSnapshotAsync(oldId, oldObjs.Length, 0, ct);
+        long newId = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "new", Scope = "NumericNoByte", GameSessionId = "S" }, ct);
+        await _store.WriteChunkAsync(newId, newObjs, ct);
+        await _store.FinalizeSnapshotAsync(newId, newObjs.Length, 0, ct);
+        return (oldId, newId);
+    }
+
+    [Fact]
+    public async Task ModeB_Decreased_Unchanged_HpPair_MatchesOnlyTheDamagedActor()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (oldId, newId) = await SeedPairAsync(ct,
+            oldObjs: new[]
+            {
+                Obj(1, "BP_Player_C", ("CurHP", "IntProperty", 0x10, IntHex(100)), ("MaxHP", "IntProperty", 0x14, IntHex(100))),
+                Obj(2, "BP_Player_C", ("CurHP", "IntProperty", 0x10, IntHex(100)), ("MaxHP", "IntProperty", 0x14, IntHex(100))),
+            },
+            newObjs: new[]
+            {
+                Obj(1, "BP_Player_C", ("CurHP", "IntProperty", 0x10, IntHex(80)),  ("MaxHP", "IntProperty", 0x14, IntHex(100))), // took damage
+                Obj(2, "BP_Player_C", ("CurHP", "IntProperty", 0x10, IntHex(120)), ("MaxHP", "IntProperty", 0x14, IntHex(120))), // level-up (both changed)
+            });
+
+        var res = await _store.GroupMatchAsync(new SnapshotGroupQuery
+        {
+            SnapshotIds = { oldId, newId },
+            Slots = { Slot(ValueScanType.Decreased, ""), Slot(ValueScanType.Unchanged, "") },
+        }, ct);
+
+        Assert.Null(res.Error);
+        var c = Assert.Single(res.Candidates);     // only obj 1: CurHP↓ + MaxHP unchanged
+        Assert.Equal(1, c.InstanceIndex);
+    }
+
+    [Fact]
+    public async Task ModeB_MixedRelativeAndAbsolute_OnNewest()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (oldId, newId) = await SeedPairAsync(ct,
+            oldObjs: new[]
+            {
+                Obj(1, "BP_Player_C",
+                    ("CurHP", "IntProperty", 0x10, IntHex(100)),
+                    ("MaxHP", "IntProperty", 0x14, IntHex(100)),
+                    ("Level", "IntProperty", 0x18, IntHex(30))),
+            },
+            newObjs: new[]
+            {
+                Obj(1, "BP_Player_C",
+                    ("CurHP", "IntProperty", 0x10, IntHex(80)),    // Decreased
+                    ("MaxHP", "IntProperty", 0x14, IntHex(100)),   // Unchanged
+                    ("Level", "IntProperty", 0x18, IntHex(30))),   // Exact 30 (newest)
+            });
+
+        var res = await _store.GroupMatchAsync(new SnapshotGroupQuery
+        {
+            SnapshotIds = { oldId, newId },
+            Slots =
+            {
+                Slot(ValueScanType.Decreased, ""),
+                Slot(ValueScanType.Unchanged, ""),
+                Slot(ValueScanType.Exact, "30"),
+            },
+        }, ct);
+
+        Assert.Null(res.Error);
+        Assert.Single(res.Candidates);
+    }
+
+    [Fact]
+    public async Task ModeB_Increased_DetectsGain()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (oldId, newId) = await SeedPairAsync(ct,
+            oldObjs: new[] { Obj(1, "BP_C", ("Gold", "IntProperty", 0x10, IntHex(50)), ("Keep", "IntProperty", 0x14, IntHex(7))) },
+            newObjs: new[] { Obj(1, "BP_C", ("Gold", "IntProperty", 0x10, IntHex(90)), ("Keep", "IntProperty", 0x14, IntHex(7))) });
+
+        var res = await _store.GroupMatchAsync(new SnapshotGroupQuery
+        {
+            SnapshotIds = { oldId, newId },
+            Slots = { Slot(ValueScanType.Increased, ""), Slot(ValueScanType.Unchanged, "") },
+        }, ct);
+
+        Assert.Null(res.Error);
+        Assert.Single(res.Candidates);
     }
 }

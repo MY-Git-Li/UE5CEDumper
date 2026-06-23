@@ -23,9 +23,21 @@ public partial class SnapshotViewModel
     /// <summary>Diff / Group mode toggle for the lower results area. Off = Diff (default).</summary>
     [ObservableProperty] private bool _isGroupMode;
 
-    /// <summary>The single snapshot to search (Mode A). Mode B will take an ordered
-    /// set (S4).</summary>
+    /// <summary>The primary snapshot to search — the newest in Mode B.</summary>
     [ObservableProperty] private SnapshotMeta? _groupSnapshot;
+
+    /// <summary>Optional OLDER snapshot to compare against (Mode B). Null / same as
+    /// <see cref="GroupSnapshot"/> = Mode A (single-snapshot absolute). When set and
+    /// distinct, each leaf carries its value across both snapshots so the relative
+    /// predicates (Changed / Unchanged / Increased / Decreased) work — e.g. "Current
+    /// HP decreased + Max HP unchanged".</summary>
+    [ObservableProperty] private SnapshotMeta? _groupCompareSnapshot;
+
+    /// <summary>True when a distinct compare snapshot is picked (Mode B).</summary>
+    public bool IsGroupCompareMode =>
+        GroupCompareSnapshot != null && GroupSnapshot != null && GroupCompareSnapshot.Id != GroupSnapshot.Id;
+
+    partial void OnGroupCompareSnapshotChanged(SnapshotMeta? value) => OnPropertyChanged(nameof(IsGroupCompareMode));
 
     [ObservableProperty] private bool _isGroupMatching;
     [ObservableProperty] private string _groupStatusText = "";
@@ -44,10 +56,15 @@ public partial class SnapshotViewModel
     public IReadOnlyList<ValueScanDataType> GroupDataTypeOptions { get; } =
         new[] { ValueScanDataType.NumericNoByte, ValueScanDataType.NumericAll };
 
-    /// <summary>Mode A predicates — absolute only (a single snapshot has no baseline
-    /// for Changed/Unchanged/Increased/Decreased; those arrive with Mode B in S4).</summary>
-    public IReadOnlyList<ValueScanType> GroupScanTypeOptions { get; } =
-        new[] { ValueScanType.Exact, ValueScanType.Bigger, ValueScanType.Smaller, ValueScanType.Between };
+    /// <summary>Per-slot predicates. Absolute (Exact/Bigger/Smaller/Between) work in
+    /// both modes; the relative four (Changed/Unchanged/Increased/Decreased) need a
+    /// "Compare with" snapshot (Mode B) — the store rejects them with a clear message
+    /// otherwise, so they're always offered.</summary>
+    public IReadOnlyList<ValueScanType> GroupScanTypeOptions { get; } = new[]
+    {
+        ValueScanType.Exact, ValueScanType.Bigger, ValueScanType.Smaller, ValueScanType.Between,
+        ValueScanType.Changed, ValueScanType.Unchanged, ValueScanType.Increased, ValueScanType.Decreased,
+    };
 
     public bool CanAddGroupRow    => GroupInputs.Count < 4;
     public bool CanRemoveGroupRow => GroupInputs.Count > 2;
@@ -111,6 +128,10 @@ public partial class SnapshotViewModel
         GroupStatusText = "";
     }
 
+    /// <summary>Drop the compare snapshot — back to Mode A (single-snapshot absolute).</summary>
+    [RelayCommand]
+    private void ClearGroupCompare() => GroupCompareSnapshot = null;
+
     [RelayCommand]
     private async Task RunGroupMatchAsync()
     {
@@ -127,7 +148,6 @@ public partial class SnapshotViewModel
         {
             var query = new SnapshotGroupQuery
             {
-                SnapshotIds = { GroupSnapshot!.Id },
                 ExcludedClasses = _excludedClasses.Count > 0 ? _excludedClasses : null,
                 Slots = GroupInputs.Select(g => new SnapshotGroupSlotInput
                 {
@@ -137,6 +157,9 @@ public partial class SnapshotViewModel
                     Value2 = g.Value2,
                 }).ToList(),
             };
+            query.SnapshotIds.Add(GroupSnapshot!.Id);
+            if (GroupCompareSnapshot != null && GroupCompareSnapshot.Id != GroupSnapshot!.Id)
+                query.SnapshotIds.Add(GroupCompareSnapshot.Id);   // Mode B (store orders oldest→newest)
             var res = await Task.Run(() => _store.GroupMatchAsync(query, ct), ct);
 
             SelectedGroupCandidate = null;

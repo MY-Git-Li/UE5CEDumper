@@ -362,7 +362,7 @@ public partial class SnapshotViewModel : ViewModelBase
             // runs) by id, since Reset detaches every selection bound to Snapshots.
             long? keepA = DiffA?.Id, keepB = DiffB?.Id, keepG = GroupSnapshot?.Id;
             UiCollection.Reset(Snapshots, list,
-                () => { SelectedSnapshot = null; DiffA = null; DiffB = null; GroupSnapshot = null; });
+                () => { SelectedSnapshot = null; DiffA = null; DiffB = null; GroupSnapshot = null; GroupCompareSnapshot = null; });
             if (keepA.HasValue) DiffA = Snapshots.FirstOrDefault(s => s.Id == keepA.Value);
             if (keepB.HasValue) DiffB = Snapshots.FirstOrDefault(s => s.Id == keepB.Value);
             // Group mode searches a single snapshot — preserve the pick, else default to newest.

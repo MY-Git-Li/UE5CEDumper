@@ -409,7 +409,11 @@
     <sys:String x:Key="str.Snapshot.Group.RemoveRow">− value</sys:String>
     <sys:String x:Key="str.Snapshot.Group.ValueHint">value</sys:String>
     <sys:String x:Key="str.Snapshot.Group.Value2Hint">to</sys:String>
-    <sys:String x:Key="str.Snapshot.Group.Hint">Find objects holding ALL of 2–4 values at distinct numeric offsets in one captured snapshot. (Cross-snapshot Increased / Decreased / Unchanged comparison — incl. "Current HP↓ + Max HP unchanged" — arrives in a later build.)</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.CompareWith">Compare with:</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Group.CompareWith">Pick an OLDER snapshot to compare against (Mode B). Enables the relative predicates (Changed / Unchanged / Increased / Decreased) — e.g. find an object whose Current HP decreased while Max HP stayed unchanged. Leave empty for absolute single-snapshot matching.</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.CompareClear">✕</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Group.CompareClear">Clear the compare snapshot — back to single-snapshot (absolute) matching.</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Hint">Find objects holding ALL of 2–4 values at distinct numeric offsets. Leave "Compare with" empty to match absolute values in one snapshot; pick an older snapshot there to compare across time, then Increased / Decreased / Unchanged work (e.g. "Current HP↓ + Max HP unchanged").</sys:String>
     <sys:String x:Key="str.Snapshot.Group.Col.Class">Class</sys:String>
     <sys:String x:Key="str.Snapshot.Group.Col.Object">Object</sys:String>
     <sys:String x:Key="str.Snapshot.Group.Col.Matched">Matched values</sys:String>

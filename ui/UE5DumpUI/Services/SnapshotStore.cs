@@ -642,9 +642,11 @@ public sealed class SnapshotStore : ISnapshotStore
     }
 
     // ============================================================
-    // Snapshot Group Match (S2 — Mode A, single-snapshot absolute).
-    // Runs the C# Orden port (Services.GroupMatch) over one snapshot's objects.
-    // Mode B (cross-snapshot, relative predicates) lands in S4.
+    // Snapshot Group Match. Runs the C# Orden port (Services.GroupMatch) over a
+    // snapshot's objects. Mode A (1 snapshot) = absolute predicates over one frozen
+    // instant; Mode B (2 snapshots) = cross-snapshot temporal comparison, per-slot
+    // relative predicates (Changed/Unchanged/Increased/Decreased, incl. the
+    // "Current HP↓ + Max HP unchanged" group) + optional absolute on the newest.
     // See docs/snapshot-group-match-spec.md.
     // ============================================================
     public async Task<SnapshotGroupResult> GroupMatchAsync(
@@ -664,12 +666,14 @@ public sealed class SnapshotStore : ISnapshotStore
             result.Error = "Select a snapshot.";
             return result;
         }
-        if (query.SnapshotIds.Count > 1)
+        if (query.SnapshotIds.Count > 2)
         {
-            // S2 ships Mode A only; the cross-snapshot engine arrives in S4.
-            result.Error = "Cross-snapshot comparison (Mode B) is not available yet.";
+            // v1 compares exactly two snapshots (first-vs-last); 3+-snapshot predicate
+            // chains are a later extension (docs/snapshot-group-match-spec.md §8).
+            result.Error = "Group comparison supports 1 snapshot (absolute) or 2 (compare).";
             return result;
         }
+        bool modeB = query.SnapshotIds.Count == 2;
 
         // ---- translate input slots to the pure matcher's slots ----
         var slots = new GroupMatch.Slot[query.Slots.Count];
@@ -682,23 +686,27 @@ public sealed class SnapshotStore : ISnapshotStore
                 result.Error = $"Predicate '{s.ScanType}' is not supported by group match.";
                 return result;
             }
-            if (IsRelativeGroupPredicate(pred.Value))
+            bool isRel = IsRelativeGroupPredicate(pred.Value);
+            if (isRel && !modeB)
             {
                 // No baseline in a single snapshot — relative predicates need Mode B.
-                result.Error = "Changed / Unchanged / Increased / Decreased need 2+ snapshots (Mode B).";
+                result.Error = "Changed / Unchanged / Increased / Decreased need 2 snapshots (compare).";
                 return result;
             }
             double? target = TryParseValue(s.Value);
             double? target2 = TryParseValue(s.Value2);
-            if (target is null)
+            if (!isRel)   // absolute predicates require a target (relative ones don't)
             {
-                result.Error = $"Slot {i + 1}: enter a numeric value.";
-                return result;
-            }
-            if (pred.Value == GroupMatch.Predicate.Between && target2 is null)
-            {
-                result.Error = $"Slot {i + 1}: Between needs an upper bound.";
-                return result;
+                if (target is null)
+                {
+                    result.Error = $"Slot {i + 1}: enter a numeric value.";
+                    return result;
+                }
+                if (pred.Value == GroupMatch.Predicate.Between && target2 is null)
+                {
+                    result.Error = $"Slot {i + 1}: Between needs an upper bound.";
+                    return result;
+                }
             }
             slots[i] = new GroupMatch.Slot
             {
@@ -711,11 +719,21 @@ public sealed class SnapshotStore : ISnapshotStore
             };
         }
 
-        long snapshotId = query.SnapshotIds[0];
         int max = query.MaxResults > 0 ? query.MaxResults : 50000;
         var deny = query.ExcludedClasses is { Count: > 0 } ? query.ExcludedClasses : null;
 
         await using var conn = await OpenAsync(ct);
+
+        if (modeB)
+        {
+            // Sort ascending so [0] is the oldest, [last] the newest (snapshot id is
+            // monotonic = capture order). The matcher compares first-vs-last.
+            var ids = query.SnapshotIds.OrderBy(x => x).ToList();
+            await GroupMatchModeBAsync(conn, ids, query.JoinMode, slots, query.Slots, deny, max, result, ct);
+            return result;
+        }
+
+        long snapshotId = query.SnapshotIds[0];
 
         // Stream the snapshot's DIRECT numeric fields ordered by object identity
         // (class, GObjects index) so each object's leaves arrive contiguously; match
@@ -866,6 +884,135 @@ public sealed class SnapshotStore : ISnapshotStore
         string h = baseAddr.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? baseAddr[2..] : baseAddr;
         return ulong.TryParse(h, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var b)
             ? $"0x{b + (ulong)offset:X}" : baseAddr;
+    }
+
+    // Mode B — cross-snapshot temporal group match over exactly 2 snapshots
+    // (oldest -> newest). Hash-join the OLD snapshot's direct fields, then stream the
+    // NEW snapshot grouping rows per object; each field present in BOTH becomes a leaf
+    // carrying the [old, new] value sequence, so relative predicates (Changed /
+    // Unchanged / Increased / Decreased) compare across time and absolute predicates
+    // use the newest value. Object-block only (array_field rows excluded — deep blocks
+    // are SPC Query's scope). Identity join = the same SpcKey SPC/Diff use.
+    private async Task GroupMatchModeBAsync(
+        SqliteConnection conn, IReadOnlyList<long> ids, SpcJoinMode mode,
+        GroupMatch.Slot[] slots, List<SnapshotGroupSlotInput> inputs,
+        HashSet<string>? deny, int max, SnapshotGroupResult result, CancellationToken ct)
+    {
+        long oldId = ids[0], newId = ids[ids.Count - 1];
+        const string sql =
+            "SELECT class_fqn, norm_path, outer_chain, declared_type, prop_name, prop_offset, " +
+            "obj_addr, hex, numeric_value, gobjects_index, array_field, elem_index FROM fields " +
+            "WHERE snapshot_id=$id AND (array_field IS NULL OR array_field='');";
+
+        var intern = new Dictionary<string, string>(StringComparer.Ordinal);
+        string Intern(string s) { if (intern.TryGetValue(s, out var v)) return v; intern[s] = s; return s; }
+
+        // Pass 1: OLD snapshot -> fieldKey -> (hex, num).
+        var oldFields = new Dictionary<string, (string hex, double? num)>(StringComparer.Ordinal);
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = sql;
+            cmd.Parameters.AddWithValue("$id", oldId);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            int rc = 0;
+            while (await r.ReadAsync(ct))
+            {
+                if ((++rc & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
+                string cls = r.IsDBNull(0) ? "" : r.GetString(0);
+                if (deny != null && deny.Contains(cls)) continue;
+                string prop = r.IsDBNull(4) ? "" : r.GetString(4);
+                oldFields[Intern(SpcKey(mode, r, cls, prop))] =
+                    (r.IsDBNull(7) ? "" : r.GetString(7), r.IsDBNull(8) ? (double?)null : r.GetDouble(8));
+            }
+        }
+
+        // Pass 2: NEW snapshot -> bucket shared fields per object.
+        var objs = new Dictionary<string, GroupObjAcc>(StringComparer.Ordinal);
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = sql;
+            cmd.Parameters.AddWithValue("$id", newId);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            int rc = 0;
+            while (await r.ReadAsync(ct))
+            {
+                if ((++rc & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
+                string cls = r.IsDBNull(0) ? "" : r.GetString(0);
+                if (deny != null && deny.Contains(cls)) continue;
+                string prop = r.IsDBNull(4) ? "" : r.GetString(4);
+                if (!oldFields.TryGetValue(SpcKey(mode, r, cls, prop), out var old)) continue; // not in old -> unstable
+                string objKey = SpcObjectKey(mode, r, cls);
+                if (!objs.TryGetValue(objKey, out var acc))
+                {
+                    acc = new GroupObjAcc
+                    {
+                        ClassName = Intern(cls),
+                        NormPath  = r.IsDBNull(1) ? "" : r.GetString(1),
+                        ObjAddr   = r.IsDBNull(6) ? "" : r.GetString(6),
+                        Index     = r.IsDBNull(9) ? -1 : r.GetInt64(9),
+                    };
+                    objs[Intern(objKey)] = acc;
+                }
+                string type = r.IsDBNull(3) ? "" : r.GetString(3);
+                string newHex = r.IsDBNull(7) ? "" : r.GetString(7);
+                double? newNum = r.IsDBNull(8) ? (double?)null : r.GetDouble(8);
+                int off = r.IsDBNull(5) ? 0 : r.GetInt32(5);
+                acc.Leaves.Add(new GroupMatch.Leaf
+                {
+                    Offset = off,
+                    DeclaredType = type,
+                    Hex = new[] { old.hex, newHex },     // [oldest, newest]
+                    Num = new double?[] { old.num, newNum },
+                    Tag = acc.FName.Count,
+                });
+                acc.FName.Add(prop);
+                acc.FOff.Add(off);
+                acc.FType.Add(type);
+                acc.FVal.Add(SnapshotNumeric.Render(type, newHex));   // show the newest value
+            }
+        }
+
+        // Match each object that shares >= 1 field across both snapshots.
+        int totalMatched = 0, scanned = 0;
+        foreach (var acc in objs.Values)
+        {
+            if ((++scanned & 0x3FFF) == 0) ct.ThrowIfCancellationRequested();
+            if (acc.Leaves.Count == 0) continue;
+            if (GroupMatch.Run(acc.Leaves, slots, out var perSlot))
+            {
+                totalMatched++;
+                if (result.Candidates.Count < max)
+                    result.Candidates.Add(BuildGroupCandidate(
+                        acc.ClassName, acc.Index, acc.ObjAddr, acc.NormPath,
+                        acc.Leaves, slots, perSlot, acc.FName, acc.FOff, acc.FType, acc.FVal, inputs));
+            }
+        }
+        result.Total = totalMatched;
+        result.ScannedObjects = scanned;
+        result.Truncated = totalMatched > result.Candidates.Count;
+    }
+
+    // The object-identity portion of an SpcKey (no prop/offset/array) — the grouping
+    // key for Mode B. Mirrors SpcKeyBase's per-mode identity. Reader columns:
+    // 1 norm_path, 2 outer_chain, 9 gobjects_index.
+    private static string SpcObjectKey(SpcJoinMode mode, SqliteDataReader r, string cls) => mode switch
+    {
+        SpcJoinMode.Loose     => cls + (char)1 + (r.IsDBNull(2) ? "" : r.GetString(2)),
+        SpcJoinMode.InSession => cls + (char)1 + (r.IsDBNull(9) ? -1L : r.GetInt64(9)),
+        _ /* Strict */        => cls + (char)1 + (r.IsDBNull(1) ? "" : r.GetString(1)),
+    };
+
+    // Per-object accumulator for Mode B: the object's identity + display fields (from
+    // the newest snapshot) + its shared-field leaves carrying [old, new] sequences.
+    private sealed class GroupObjAcc
+    {
+        public string ClassName = "", NormPath = "", ObjAddr = "";
+        public long Index;
+        public readonly List<GroupMatch.Leaf> Leaves = new();
+        public readonly List<string> FName = new();
+        public readonly List<int>    FOff  = new();
+        public readonly List<string> FType = new();
+        public readonly List<string> FVal  = new();
     }
 
     public async Task<SpcResult> SpcQueryAsync(SpcQuery query, CancellationToken ct = default)

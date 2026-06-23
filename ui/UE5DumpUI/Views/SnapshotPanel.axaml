@@ -256,6 +256,18 @@
                 <DataTemplate x:DataType="m:SnapshotMeta"><TextBlock Text="{Binding PickerDisplay}"/></DataTemplate>
               </ComboBox.ItemTemplate>
             </ComboBox>
+            <!-- Optional compare snapshot (Mode B): enables Increased/Decreased/Unchanged. -->
+            <TextBlock Text="{StaticResource str.Snapshot.Group.CompareWith}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,6,0"/>
+            <ComboBox ItemsSource="{Binding Snapshots}" SelectedItem="{Binding GroupCompareSnapshot}" MinWidth="180" Margin="0,0,4,0"
+                      IsEnabled="{Binding !IsGroupMatching}"
+                      ToolTip.Tip="{StaticResource str.Tip.Snapshot.Group.CompareWith}">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="m:SnapshotMeta"><TextBlock Text="{Binding PickerDisplay}"/></DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+            <Button Content="{StaticResource str.Snapshot.Group.CompareClear}" Command="{Binding ClearGroupCompareCommand}"
+                    IsVisible="{Binding IsGroupCompareMode}" ToolTip.Tip="{StaticResource str.Tip.Snapshot.Group.CompareClear}"
+                    Padding="6,3" Margin="0,0,12,0"/>
             <Button Content="{StaticResource str.Snapshot.Group.Find}" Command="{Binding RunGroupMatchCommand}"
                     IsEnabled="{Binding CanRunGroupMatch}" Classes="accent" Padding="12,4" Margin="0,0,8,0"/>
             <Button Content="{StaticResource str.Snapshot.Group.Clear}" Command="{Binding ClearGroupCommand}" Padding="8,4" Margin="0,0,8,0"/>
