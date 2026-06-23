@@ -293,11 +293,14 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
-          <StackPanel Orientation="Horizontal" Spacing="6">
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
             <Button Content="{StaticResource str.Snapshot.Group.AddRow}" Command="{Binding AddGroupRowCommand}"
                     IsEnabled="{Binding CanAddGroupRow}" Padding="8,3"/>
             <Button Content="{StaticResource str.Snapshot.Group.RemoveRow}" Command="{Binding RemoveGroupRowCommand}"
                     IsEnabled="{Binding CanRemoveGroupRow}" Padding="8,3"/>
+            <CheckBox Content="{StaticResource str.Snapshot.Group.Deep}" IsChecked="{Binding GroupDeep}"
+                      ToolTip.Tip="{StaticResource str.Tip.Snapshot.Group.Deep}" Foreground="#CCCCCC"
+                      IsEnabled="{Binding !IsGroupMatching}" VerticalAlignment="Center" Margin="12,0,0,0"/>
           </StackPanel>
         </StackPanel>
 

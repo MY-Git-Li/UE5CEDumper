@@ -47,6 +47,13 @@ public partial class SnapshotViewModel
     }
 
     [ObservableProperty] private bool _isGroupMatching;
+
+    /// <summary>Deep (opt-in, default off): also match nested container / struct-array
+    /// element values (the captured `array_field` rows, e.g. a deeply-nested
+    /// `…Tunes[2]`), folded into the owning object's block. Mirrors the live Group
+    /// Scan's Deep toggle. Off = the object's direct fields only.</summary>
+    [ObservableProperty] private bool _groupDeep;
+
     [ObservableProperty] private string _groupStatusText = "";
     [ObservableProperty] private GroupCandidate? _selectedGroupCandidate;
 
@@ -165,6 +172,7 @@ public partial class SnapshotViewModel
         {
             var query = new SnapshotGroupQuery
             {
+                Deep = GroupDeep,
                 ExcludedClasses = _excludedClasses.Count > 0 ? _excludedClasses : null,
                 Slots = GroupInputs.Select(g => new SnapshotGroupSlotInput
                 {

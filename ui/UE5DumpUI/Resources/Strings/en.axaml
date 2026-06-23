@@ -407,6 +407,8 @@
     <sys:String x:Key="str.Snapshot.Group.Clear">Clear</sys:String>
     <sys:String x:Key="str.Snapshot.Group.AddRow">+ value</sys:String>
     <sys:String x:Key="str.Snapshot.Group.RemoveRow">− value</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Deep">Deep (nested containers)</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Group.Deep">Also match values inside NESTED containers / struct-array elements (e.g. a deeply-nested SaveSlotList[1]…Tunes[2]), folded into the owning object's block. Needed when the value you're after lives in an array/map, not a direct field. Off = direct fields only (faster, less noise).</sys:String>
     <sys:String x:Key="str.Snapshot.Group.ValueHint">value</sys:String>
     <sys:String x:Key="str.Snapshot.Group.Value2Hint">to</sys:String>
     <sys:String x:Key="str.Snapshot.Group.CompareWith">Compare with:</sys:String>

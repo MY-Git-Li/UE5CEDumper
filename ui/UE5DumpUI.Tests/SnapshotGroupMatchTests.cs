@@ -280,4 +280,83 @@ public class SnapshotGroupMatchTests : IDisposable
         Assert.Null(res.Error);
         Assert.Single(res.Candidates);
     }
+
+    // ---- Deep (nested container / struct-array elements) — the SEED Tunes case ----
+
+    // Object with a NESTED leaf-container array (e.g. ...Tunes) and NO direct fields:
+    // each element is a value with no inner prop name (prop_name="").
+    private static SnapshotCapturedObject ObjWithArray(int index, string cls, string arrayField,
+        params (int elem, string hex)[] elems)
+    {
+        var o = new SnapshotCapturedObject
+        {
+            Index = index, Addr = $"0x{index * 0x1000:X}", Name = $"{cls}_{index}",
+            ClassName = cls, OuterClassName = "World", Path = $"/Game/Map:{cls}_{index}",
+        };
+        var arr = new SnapshotCapturedArray { Field = arrayField };
+        foreach (var (elem, hex) in elems)
+            arr.Elements.Add(new SnapshotCapturedArrayElement
+            {
+                Index = elem,
+                Fields = { new SnapshotCapturedField { Name = "", Type = "IntProperty", Hex = hex } },
+            });
+        o.Arrays.Add(arr);
+        return o;
+    }
+
+    [Fact]
+    public async Task ModeA_Deep_FindsValuesInNestedArray_OffMisses()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        // The object holds 10 + 20 ONLY inside a nested Tunes array (no direct fields).
+        long id = await SeedAsync(ct,
+            ObjWithArray(1, "BP_Save_C", "SaveSlot[0].Tunes", (0, IntHex(10)), (2, IntHex(20))));
+
+        // Deep OFF: the array values are invisible -> nothing matches.
+        var off = await _store.GroupMatchAsync(new SnapshotGroupQuery
+        {
+            SnapshotIds = { id }, Deep = false,
+            Slots = { Slot(ValueScanType.Exact, "10"), Slot(ValueScanType.Exact, "20") },
+        }, ct);
+        Assert.Empty(off.Candidates);
+
+        // Deep ON: Tunes[0]=10 + Tunes[2]=20 at distinct elements -> match, path shown.
+        var on = await _store.GroupMatchAsync(new SnapshotGroupQuery
+        {
+            SnapshotIds = { id }, Deep = true,
+            Slots = { Slot(ValueScanType.Exact, "10"), Slot(ValueScanType.Exact, "20") },
+        }, ct);
+        var c = Assert.Single(on.Candidates);
+        Assert.Equal("BP_Save_C", c.ClassName);
+        Assert.Contains(c.Slots, s => s.FieldName.Contains("Tunes[0]"));
+        Assert.Contains(c.Slots, s => s.FieldName.Contains("Tunes[2]"));
+    }
+
+    [Fact]
+    public async Task ModeB_Deep_FindsNestedArrayChange_TheSeedTunesCase()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        // Tunes[2] changes 20 -> 21 (Increased); Tunes[0] unchanged — the user's SEED test.
+        var (oldId, newId) = await SeedPairAsync(ct,
+            oldObjs: new[] { ObjWithArray(1, "BP_Save_C", "SaveSlot[0].Tunes", (0, IntHex(10)), (2, IntHex(20))) },
+            newObjs: new[] { ObjWithArray(1, "BP_Save_C", "SaveSlot[0].Tunes", (0, IntHex(10)), (2, IntHex(21))) });
+
+        // Deep OFF: no direct fields -> the change is invisible.
+        var off = await _store.GroupMatchAsync(new SnapshotGroupQuery
+        {
+            SnapshotIds = { oldId, newId }, Deep = false,
+            Slots = { Slot(ValueScanType.Increased, ""), Slot(ValueScanType.Unchanged, "") },
+        }, ct);
+        Assert.Empty(off.Candidates);
+
+        // Deep ON: Tunes[2] Increased + Tunes[0] Unchanged -> match.
+        var on = await _store.GroupMatchAsync(new SnapshotGroupQuery
+        {
+            SnapshotIds = { oldId, newId }, Deep = true,
+            Slots = { Slot(ValueScanType.Increased, ""), Slot(ValueScanType.Unchanged, "") },
+        }, ct);
+        var c = Assert.Single(on.Candidates);
+        Assert.Equal("BP_Save_C", c.ClassName);
+        Assert.Contains(c.Slots, s => s.FieldName.Contains("Tunes[2]"));
+    }
 }

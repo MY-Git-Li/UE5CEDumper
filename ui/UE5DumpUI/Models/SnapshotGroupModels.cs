@@ -35,6 +35,11 @@ public sealed class SnapshotGroupQuery
     /// <summary>Oldest → newest. One = Mode A; ≥ 2 = Mode B (S4).</summary>
     public List<long> SnapshotIds { get; set; } = new();
     public List<SnapshotGroupSlotInput> Slots { get; set; } = new();
+    /// <summary>Deep (opt-in, default off): also match an object's NESTED container /
+    /// struct-array element values (the captured <c>array_field</c> rows, e.g.
+    /// <c>SaveSlotList[1]…Tunes[2]</c>), folded into the owning object's block. Off =
+    /// the object's direct fields only. Mirrors the live Group Scan's Deep toggle.</summary>
+    public bool Deep { get; set; }
     /// <summary>Per-game class denylist (noise picker) — excluded before matching.</summary>
     public HashSet<string>? ExcludedClasses { get; set; }
     public int MaxResults { get; set; } = 50000;

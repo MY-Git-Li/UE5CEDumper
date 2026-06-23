@@ -729,7 +729,7 @@ public sealed class SnapshotStore : ISnapshotStore
             // Sort ascending so [0] is the oldest, [last] the newest (snapshot id is
             // monotonic = capture order). The matcher compares first-vs-last.
             var ids = query.SnapshotIds.OrderBy(x => x).ToList();
-            await GroupMatchModeBAsync(conn, ids, query.JoinMode, slots, query.Slots, deny, max, result, ct);
+            await GroupMatchModeBAsync(conn, ids, query.JoinMode, slots, query.Slots, query.Deep, deny, max, result, ct);
             return result;
         }
 
@@ -743,8 +743,11 @@ public sealed class SnapshotStore : ISnapshotStore
         await using var cmd = conn.CreateCommand();
         cmd.CommandText =
             "SELECT class_fqn, gobjects_index, obj_addr, norm_path, prop_name, prop_offset, " +
-            "declared_type, hex, numeric_value FROM fields " +
-            "WHERE snapshot_id=$id AND (array_field IS NULL OR array_field='') " +
+            "declared_type, hex, numeric_value, array_field, elem_index FROM fields " +
+            "WHERE snapshot_id=$id " +
+            // Deep: also fold the object's nested container / struct-array element values
+            // (array_field rows) into its block; default = direct fields only.
+            (query.Deep ? "" : "AND (array_field IS NULL OR array_field='') ") +
             "ORDER BY class_fqn, gobjects_index;";
         cmd.Parameters.AddWithValue("$id", snapshotId);
         await using var r = await cmd.ExecuteReaderAsync(ct);
@@ -795,7 +798,14 @@ public sealed class SnapshotStore : ISnapshotStore
             string type = r.IsDBNull(6) ? "" : r.GetString(6);
             string hex  = r.IsDBNull(7) ? "" : r.GetString(7);
             double? num = r.IsDBNull(8) ? (double?)null : r.GetDouble(8);
-            int off = r.IsDBNull(5) ? 0 : r.GetInt32(5);
+            string prop = r.IsDBNull(4) ? "" : r.GetString(4);
+            string arrayField = r.IsDBNull(9) ? "" : r.GetString(9);
+            bool isArray = arrayField.Length > 0;
+            // Array-element heap address isn't captured (separate allocation) — use
+            // offset 0 + the full path as the identifier; direct fields keep their offset.
+            int off = isArray ? 0 : (r.IsDBNull(5) ? 0 : r.GetInt32(5));
+            string display = isArray
+                ? GroupFieldDisplay(prop, arrayField, r.IsDBNull(10) ? -1 : r.GetInt32(10)) : prop;
             leaves.Add(new GroupMatch.Leaf
             {
                 Offset = off,
@@ -804,7 +814,7 @@ public sealed class SnapshotStore : ISnapshotStore
                 Num = new double?[] { num },
                 Tag = fName.Count,
             });
-            fName.Add(r.IsDBNull(4) ? "" : r.GetString(4));
+            fName.Add(display);
             fOff.Add(off);
             fType.Add(type);
             fVal.Add(SnapshotNumeric.Render(type, hex));
@@ -886,6 +896,15 @@ public sealed class SnapshotStore : ISnapshotStore
             ? $"0x{b + (ulong)offset:X}" : baseAddr;
     }
 
+    // Display name for a Deep group leaf: "Array[N].Inner" for a struct-array element,
+    // "Array[N]" for a leaf-container element (no inner prop, e.g. TArray<int>), else the
+    // plain prop name for a direct field. Mirrors SpcDisplayProp.
+    private static string GroupFieldDisplay(string propName, string arrayField, int elemIndex)
+    {
+        if (string.IsNullOrEmpty(arrayField)) return propName;
+        return propName.Length == 0 ? $"{arrayField}[{elemIndex}]" : $"{arrayField}[{elemIndex}].{propName}";
+    }
+
     // Mode B — cross-snapshot temporal group match over exactly 2 snapshots
     // (oldest -> newest). Hash-join the OLD snapshot's direct fields, then stream the
     // NEW snapshot grouping rows per object; each field present in BOTH becomes a leaf
@@ -895,14 +914,18 @@ public sealed class SnapshotStore : ISnapshotStore
     // are SPC Query's scope). Identity join = the same SpcKey SPC/Diff use.
     private async Task GroupMatchModeBAsync(
         SqliteConnection conn, IReadOnlyList<long> ids, SpcJoinMode mode,
-        GroupMatch.Slot[] slots, List<SnapshotGroupSlotInput> inputs,
+        GroupMatch.Slot[] slots, List<SnapshotGroupSlotInput> inputs, bool deep,
         HashSet<string>? deny, int max, SnapshotGroupResult result, CancellationToken ct)
     {
         long oldId = ids[0], newId = ids[ids.Count - 1];
-        const string sql =
+        // Deep: include the captured array_field rows so nested container / struct-array
+        // element values (e.g. SaveSlotList[1]…Tunes[2]) fold into the owning object's
+        // block; the SpcKey join already keys on array_field+elem_index so an element
+        // joins to its own counterpart across snapshots. Default = direct fields only.
+        string sql =
             "SELECT class_fqn, norm_path, outer_chain, declared_type, prop_name, prop_offset, " +
             "obj_addr, hex, numeric_value, gobjects_index, array_field, elem_index FROM fields " +
-            "WHERE snapshot_id=$id AND (array_field IS NULL OR array_field='');";
+            "WHERE snapshot_id=$id" + (deep ? ";" : " AND (array_field IS NULL OR array_field='');");
 
         var intern = new Dictionary<string, string>(StringComparer.Ordinal);
         string Intern(string s) { if (intern.TryGetValue(s, out var v)) return v; intern[s] = s; return s; }
@@ -956,7 +979,11 @@ public sealed class SnapshotStore : ISnapshotStore
                 string type = r.IsDBNull(3) ? "" : r.GetString(3);
                 string newHex = r.IsDBNull(7) ? "" : r.GetString(7);
                 double? newNum = r.IsDBNull(8) ? (double?)null : r.GetDouble(8);
-                int off = r.IsDBNull(5) ? 0 : r.GetInt32(5);
+                string arrayField = r.IsDBNull(10) ? "" : r.GetString(10);
+                bool isArray = arrayField.Length > 0;
+                int off = isArray ? 0 : (r.IsDBNull(5) ? 0 : r.GetInt32(5));
+                string display = isArray
+                    ? GroupFieldDisplay(prop, arrayField, r.IsDBNull(11) ? -1 : r.GetInt32(11)) : prop;
                 acc.Leaves.Add(new GroupMatch.Leaf
                 {
                     Offset = off,
@@ -965,7 +992,7 @@ public sealed class SnapshotStore : ISnapshotStore
                     Num = new double?[] { old.num, newNum },
                     Tag = acc.FName.Count,
                 });
-                acc.FName.Add(prop);
+                acc.FName.Add(display);
                 acc.FOff.Add(off);
                 acc.FType.Add(type);
                 acc.FVal.Add(SnapshotNumeric.Render(type, newHex));   // show the newest value
