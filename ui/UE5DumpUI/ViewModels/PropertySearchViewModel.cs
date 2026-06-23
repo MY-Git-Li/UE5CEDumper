@@ -483,12 +483,14 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
         _xrefBatchCts = new CancellationTokenSource();
         var ct = _xrefBatchCts.Token;
         IsXrefBatchRunning = true;
-        int done = 0, withFuncs = 0;
+        int done = 0, withFuncs = 0, cached = 0;
         try
         {
             foreach (var match in targets)
             {
                 ct.ThrowIfCancellationRequested();
+                // Skip rows already scanned (XrefInfo persists across filter changes).
+                if (!string.IsNullOrEmpty(match.XrefInfo)) { cached++; continue; }
                 try
                 {
                     var res = await _dump.FindPropertyXrefsAsync(match.FieldAddr, true, 200, ct);
@@ -504,7 +506,8 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
                 done++;
                 StatusText = $"Find Funcs: {done}/{targets.Count} scanned ({withFuncs} referenced)…";
             }
-            StatusText = $"Find Funcs done: {withFuncs}/{targets.Count} properties referenced by a function.";
+            StatusText = $"Find Funcs done: {withFuncs}/{targets.Count} referenced by a function"
+                       + (cached > 0 ? $" ({cached} cached)." : ".");
         }
         catch (OperationCanceledException)
         {

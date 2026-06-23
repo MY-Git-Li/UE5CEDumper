@@ -189,12 +189,14 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
         _xrefBatchCts = new CancellationTokenSource();
         var ct = _xrefBatchCts.Token;
         IsXrefBatchRunning = true;
-        int done = 0, withFuncs = 0;
+        int done = 0, withFuncs = 0, cached = 0;
         try
         {
             foreach (var row in targets)
             {
                 ct.ThrowIfCancellationRequested();
+                // Skip rows already scanned (XrefInfo persists across filter changes).
+                if (!string.IsNullOrEmpty(row.XrefInfo)) { cached++; continue; }
                 try
                 {
                     var res = await _dump.FindPropertyXrefsAsync(row.Match.FieldAddr, true, 200, ct);
@@ -210,7 +212,8 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
                 done++;
                 StatusText = $"Find Funcs: {done}/{targets.Count} scanned ({withFuncs} referenced)…";
             }
-            StatusText = $"Find Funcs done: {withFuncs}/{targets.Count} properties referenced by a function.";
+            StatusText = $"Find Funcs done: {withFuncs}/{targets.Count} referenced by a function"
+                       + (cached > 0 ? $" ({cached} cached)." : ".");
         }
         catch (OperationCanceledException)
         {

@@ -202,12 +202,16 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
         _xrefBatchCts = new CancellationTokenSource();
         var ct = _xrefBatchCts.Token;
         IsXrefBatchRunning = true;
-        int done = 0, withFields = 0;
+        int done = 0, withFields = 0, cached = 0;
         try
         {
             foreach (var row in targets)
             {
                 ct.ThrowIfCancellationRequested();
+                // Skip rows already scanned (XrefInfo persists across filter changes
+                // since the row instance is reused) — re-batch after a new filter only
+                // does the newly-included, not-yet-done rows.
+                if (!string.IsNullOrEmpty(row.XrefInfo)) { cached++; continue; }
                 if (string.IsNullOrEmpty(row.FuncAddr)) { row.XrefInfo = "—"; continue; }
                 try
                 {
@@ -232,7 +236,8 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
                 if ((done & 0x7) == 0)
                     StatusText = $"Props: {done}/{targets.Count} scanned ({withFields} use class fields)…";
             }
-            StatusText = $"Props done: {withFields}/{targets.Count} functions use class fields.";
+            StatusText = $"Props done: {withFields}/{targets.Count} use class fields"
+                       + (cached > 0 ? $" ({cached} cached)." : ".");
         }
         catch (OperationCanceledException)
         {
