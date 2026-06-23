@@ -37,7 +37,14 @@ public partial class SnapshotViewModel
     public bool IsGroupCompareMode =>
         GroupCompareSnapshot != null && GroupSnapshot != null && GroupCompareSnapshot.Id != GroupSnapshot.Id;
 
-    partial void OnGroupCompareSnapshotChanged(SnapshotMeta? value) => OnPropertyChanged(nameof(IsGroupCompareMode));
+    partial void OnGroupCompareSnapshotChanged(SnapshotMeta? value)
+    {
+        OnPropertyChanged(nameof(IsGroupCompareMode));
+        // The result rows' obj_addr come from the NEWER of the two snapshots, so the
+        // session-validity gate must re-evaluate when the compare pick changes.
+        OnPropertyChanged(nameof(CanUseGroupRowActions));
+        OnPropertyChanged(nameof(CanLocateGroupRowInGWorld));
+    }
 
     [ObservableProperty] private bool _isGroupMatching;
     [ObservableProperty] private string _groupStatusText = "";
@@ -73,11 +80,20 @@ public partial class SnapshotViewModel
     public bool CanRunGroupMatch =>
         GroupSnapshot != null && GroupInputs.Count is >= 2 and <= 4 && !IsGroupMatching;
 
+    /// <summary>The NEWER of the two selected snapshots — the one whose (current-session)
+    /// obj_addr the result rows carry in Mode B (the store reads display fields from
+    /// max(id)). Mode A = the single snapshot.</summary>
+    private SnapshotMeta? NewestGroupSnapshot =>
+        GroupCompareSnapshot == null ? GroupSnapshot
+        : GroupSnapshot == null ? GroupCompareSnapshot
+        : (GroupCompareSnapshot.Id > GroupSnapshot.Id ? GroupCompareSnapshot : GroupSnapshot);
+
     /// <summary>The group results' obj_addr is only live in the CURRENT session — gate
     /// the per-slot Live / Copy handoffs (a cross-session address is stale), mirroring
-    /// the diff rows.</summary>
+    /// the diff rows. Validates the NEWER snapshot (the address source), so a larger-id
+    /// compare snapshot from a stale session can't be mis-gated as live.</summary>
     public bool CanUseGroupRowActions =>
-        !string.IsNullOrEmpty(_currentSessionId) && GroupSnapshot?.GameSessionId == _currentSessionId;
+        !string.IsNullOrEmpty(_currentSessionId) && NewestGroupSnapshot?.GameSessionId == _currentSessionId;
 
     public bool CanLocateGroupRowInGWorld => CanUseGroupRowActions && IsGWorldAvailable;
 
@@ -86,6 +102,7 @@ public partial class SnapshotViewModel
         OnPropertyChanged(nameof(CanRunGroupMatch));
         OnPropertyChanged(nameof(CanUseGroupRowActions));
         OnPropertyChanged(nameof(CanLocateGroupRowInGWorld));
+        OnPropertyChanged(nameof(IsGroupCompareMode));   // depends on both snapshots
     }
 
     partial void OnIsGroupMatchingChanged(bool value) => OnPropertyChanged(nameof(CanRunGroupMatch));

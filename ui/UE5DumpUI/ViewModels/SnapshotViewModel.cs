@@ -360,14 +360,18 @@ public partial class SnapshotViewModel : ViewModelBase
             var list = await Task.Run(() => _store.ListSnapshotsAsync());
             // Preserve the diff picks across a refresh (a capture finishes -> this
             // runs) by id, since Reset detaches every selection bound to Snapshots.
-            long? keepA = DiffA?.Id, keepB = DiffB?.Id, keepG = GroupSnapshot?.Id;
+            long? keepA = DiffA?.Id, keepB = DiffB?.Id, keepG = GroupSnapshot?.Id, keepGC = GroupCompareSnapshot?.Id;
             UiCollection.Reset(Snapshots, list,
                 () => { SelectedSnapshot = null; DiffA = null; DiffB = null; GroupSnapshot = null; GroupCompareSnapshot = null; });
             if (keepA.HasValue) DiffA = Snapshots.FirstOrDefault(s => s.Id == keepA.Value);
             if (keepB.HasValue) DiffB = Snapshots.FirstOrDefault(s => s.Id == keepB.Value);
-            // Group mode searches a single snapshot — preserve the pick, else default to newest.
+            // Group mode: preserve the primary pick (default to newest) AND the optional
+            // compare pick (Mode B) — else a capture-triggered refresh silently drops the
+            // compare snapshot and reverts Mode B to Mode A. Don't default the compare:
+            // null = Mode A is the intended default.
             if (keepG.HasValue) GroupSnapshot = Snapshots.FirstOrDefault(s => s.Id == keepG.Value);
             GroupSnapshot ??= Snapshots.FirstOrDefault();
+            if (keepGC.HasValue) GroupCompareSnapshot = Snapshots.FirstOrDefault(s => s.Id == keepGC.Value);
             await UpdateUsageAsync();
             // Convenience: default the diff pickers to the two newest snapshots
             // (A = older, B = newer) so "Run Diff" is one click after capturing.
@@ -604,7 +608,13 @@ public partial class SnapshotViewModel : ViewModelBase
     /// burning CPU while another tab competes (the root cause of the tab-switch
     /// UI hang). The streaming capture op is deliberately NOT cancelled here —
     /// it yields between chunks and the user shouldn't silently lose a capture.</summary>
-    public void CancelPendingWork() => _diffCts?.Cancel();
+    public void CancelPendingWork()
+    {
+        _diffCts?.Cancel();
+        // A group match over a big snapshot is the same heavy in-memory op (the whole
+        // snapshot, off the UI thread) — abort it on tab-switch / window-close too.
+        _groupCts?.Cancel();
+    }
 
     [RelayCommand]
     private async Task RunDiffAsync()

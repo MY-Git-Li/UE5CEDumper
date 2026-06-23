@@ -393,4 +393,51 @@ public class SnapshotViewModelTests : IDisposable
         Assert.Empty(vm.GroupCandidates);
         Assert.False(string.IsNullOrEmpty(vm.GroupStatusText));
     }
+
+    private async Task<SnapshotViewModel> NewVmWith2SnapshotsAsync(CancellationToken ct)
+    {
+        var vm = await NewVmWithSnapshotAsync(ct);
+        long id2 = await _store.CreateSnapshotAsync(
+            new SnapshotMeta { Label = "s2", Scope = "NumericNoByte", PeHash = "GVM", GameSessionId = "GVM-T" }, ct);
+        await _store.WriteChunkAsync(id2, new[] { GMakeObj(9, "BP_Player_C", ("Str", "IntProperty", 0x20, "18000000")) }, ct);
+        await _store.FinalizeSnapshotAsync(id2, 1, 1, ct);
+        await vm.RefreshCommand.ExecuteAsync(null);
+        return vm;
+    }
+
+    [Fact]
+    public async Task GroupCompareSnapshot_PreservedAcrossRefresh()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var vm = await NewVmWith2SnapshotsAsync(ct);
+        Assert.True(vm.Snapshots.Count >= 2);
+
+        vm.GroupSnapshot = vm.Snapshots[0];
+        vm.GroupCompareSnapshot = vm.Snapshots[1];   // Mode B
+        Assert.True(vm.IsGroupCompareMode);
+        long compareId = vm.GroupCompareSnapshot!.Id;
+
+        await vm.RefreshCommand.ExecuteAsync(null);  // e.g. after a capture completes
+
+        Assert.NotNull(vm.GroupCompareSnapshot);     // preserved (was: silently dropped -> reverts to Mode A)
+        Assert.Equal(compareId, vm.GroupCompareSnapshot!.Id);
+        Assert.True(vm.IsGroupCompareMode);
+    }
+
+    [Fact]
+    public async Task IsGroupCompareMode_RaisedWhenPrimaryChanges()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var vm = await NewVmWith2SnapshotsAsync(ct);
+        vm.GroupSnapshot = vm.Snapshots[0];
+        vm.GroupCompareSnapshot = vm.Snapshots[1];
+        Assert.True(vm.IsGroupCompareMode);
+
+        bool raised = false;
+        vm.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(vm.IsGroupCompareMode)) raised = true; };
+        vm.GroupSnapshot = vm.Snapshots[1];          // primary now equals compare -> collapses to Mode A
+
+        Assert.True(raised);                          // OnGroupSnapshotChanged re-raises it
+        Assert.False(vm.IsGroupCompareMode);
+    }
 }

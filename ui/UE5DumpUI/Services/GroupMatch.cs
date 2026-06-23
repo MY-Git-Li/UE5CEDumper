@@ -149,9 +149,17 @@ public static class GroupMatch
                 if (!TargetFitsWidth(target, leaf.DeclaredType)) return false;
                 if (leaf.Num.Count == 0) return false;
                 if (leaf.Num[leaf.Num.Count - 1] is not double v) return false; // NaN/null in newest
+                // Comparisons use the decoded double (leaf.Num), like the rest of the
+                // snapshot subsystem (SPC / Diff / Pivot all key on numeric_value). Integer
+                // values above 2^53 lose precision — a known, snapshot-WIDE limitation; the
+                // live DLL's byte-exact path is unaffected, and Changed/Unchanged below use
+                // exact hex. Exact tolerance is a FLOAT band only (matches the DLL, where
+                // integer Exact is exact equality regardless of the tolerance band).
                 return slot.Predicate switch
                 {
-                    Predicate.Exact => Math.Abs(v - target) <= slot.Tolerance,
+                    Predicate.Exact => IsFloat(leaf.DeclaredType)
+                        ? Math.Abs(v - target) <= slot.Tolerance
+                        : v == target,
                     Predicate.Bigger => v > target,
                     Predicate.Smaller => v < target,
                     Predicate.Between => slot.Target2 is double hi
