@@ -1273,6 +1273,7 @@ SearchResultSet SearchByName(const std::string& query, int maxResults) {
             if (Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx)) {
                 sr.className = Serie::GetString(clsNameIdx);
             }
+            sr.classAddr = cls;
         }
 
         // Get outer
@@ -1390,6 +1391,7 @@ SearchResultSet FindInstancesByClass(const std::string& className, bool exactMat
             sr.index = i;
             sr.name = objName;
             sr.className = clsName;
+            sr.classAddr = cls;   // ClassPrivate read above — key for find_functions_by_class
 
             // Read outer
             Macht::ReadSafe(obj + DynOff::UOBJECT_OUTER, sr.outer);
@@ -5094,6 +5096,16 @@ PropertyXrefResult FindFunctionsByClassParam(uintptr_t classAddr, bool gameOnly,
     PropertyXrefResult out;
     if (!classAddr || !s_arrayAddr) return out;
     if (maxResults <= 0) maxResults = 200;
+
+    // ParamTargetType reads the FProperty subclass-extension slot
+    // (DynOff::FSTRUCTPROP_STRUCT / UProperty +0x2C), which is only an ESTIMATE
+    // until Ubel::CorrectSubclassOffsets fine-tunes it — and that runs lazily,
+    // inside WalkClassEx/WalkInstance only (never at init). Force one calibrating
+    // walk of the target class up front so a COLD scan (before any Class Struct /
+    // Live Walker walk) reads the correct slot on shifted-layout games (UE5.7+).
+    // Idempotent + per-class cached → a no-op once warm. (Calibration keys off a
+    // StructProperty in the class hierarchy; near-universal for gameplay classes.)
+    Ubel::WalkClassEx(classAddr);
 
     int32_t count = GetCount();
     if (count <= 0) return out;

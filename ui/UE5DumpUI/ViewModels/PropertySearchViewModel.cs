@@ -521,6 +521,8 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _xrefBatchCts?.Cancel();
+        _xrefBatchCts?.Dispose();
         _resultFilterDebounce?.Dispose();
         _resultFilterDebounce = null;
         GC.SuppressFinalize(this);

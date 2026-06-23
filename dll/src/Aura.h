@@ -111,6 +111,7 @@ struct SearchResult {
     int32_t   index;       // InternalIndex in GObjects
     std::string name;
     std::string className;
+    uintptr_t classAddr = 0;   // UClass* — key for find_functions_by_class
     uintptr_t outer;
 };
 

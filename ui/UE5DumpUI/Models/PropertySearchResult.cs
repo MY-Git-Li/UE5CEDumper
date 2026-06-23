@@ -113,10 +113,6 @@ public partial class PropertySearchMatch : ObservableObject
     /// defining class path so the user can see whether it's an engine
     /// (/Script/Engine.*) or game (/Game/* /Script/MyGame.*) field.
     /// </summary>
-    /// <summary>Batch "Find Funcs" result: which UFunctions reference this
-    /// property. Format "N · func1, func2[, …]" / "0" / "—" / "" (not run).</summary>
-    [ObservableProperty] private string _xrefInfo = "";
-
     public string InheritanceTooltip => InheritedByCount == 0
         ? $"This property is unique to {ClassName} -- likely a " +
           $"game-specific field rather than an engine inheritance.\n" +
@@ -126,6 +122,10 @@ public partial class PropertySearchMatch : ObservableObject
           $"this offset on any instance of {DefiningClassName} (or any " +
           $"subclass) has identical effect.\n" +
           $"Path: {DefiningClassPath}";
+
+    /// <summary>Batch "Find Funcs" result: which UFunctions reference this
+    /// property. Format "N · func1, func2[, …]" / "0" / "—" / "" (not run).</summary>
+    [ObservableProperty] private string _xrefInfo = "";
 }
 
 /// <summary>

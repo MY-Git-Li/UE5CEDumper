@@ -1149,9 +1149,6 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
 
                 uintptr_t cls = Ubel::GetClass(obj);
                 item["class"] = cls ? Ubel::GetName(cls) : "";
-                // UClass* for this instance — the key for find_functions_by_class
-                // ("which functions take this class as a param?").
-                item["class_addr"] = cls ? Renge::AddrToStr(cls) : "";
 
                 uintptr_t outer = Ubel::GetOuter(obj);
                 item["outer"] = outer ? Renge::AddrToStr(outer) : "";
@@ -1905,6 +1902,8 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 item["index"] = sr.index;
                 item["name"]  = sr.name;
                 item["class"] = sr.className;
+                // UClass* — key for find_functions_by_class ("Find Func" on a row).
+                item["class_addr"] = sr.classAddr ? Renge::AddrToStr(sr.classAddr) : "";
                 item["outer"] = Renge::AddrToStr(sr.outer);
                 instances.push_back(item);
             }
