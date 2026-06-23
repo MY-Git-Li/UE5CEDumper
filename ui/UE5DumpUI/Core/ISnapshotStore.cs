@@ -65,6 +65,15 @@ public interface ISnapshotStore
     /// docs/experimental-snapshot-spc-pivot.md §"Phase B".</summary>
     Task<SpcResult> SpcQueryAsync(SpcQuery query, CancellationToken ct = default);
 
+    /// <summary>Snapshot Group Match: find objects in the snapshot(s) that hold ALL
+    /// of N values (2–4) at DISTINCT numeric offsets, in any order — the object-aware
+    /// "Group Scan" over captured data (the <c>Orden</c> reuse seam, run in C#).
+    /// <see cref="SnapshotGroupQuery.SnapshotIds"/> length 1 = Mode A (single-snapshot
+    /// absolute); ≥ 2 = Mode B (cross-snapshot temporal — relative predicates incl.
+    /// Unchanged). Pure SQL fetch + <see cref="Services.GroupMatch"/>. See
+    /// docs/snapshot-group-match-spec.md.</summary>
+    Task<SnapshotGroupResult> GroupMatchAsync(SnapshotGroupQuery query, CancellationToken ct = default);
+
     /// <summary>Change-driven discovery over the active game's DB: find the
     /// (class, property) targets whose value MOVED across
     /// <see cref="DiscoveryQuery.SnapshotIds"/> (≥ 2, oldest → newest), rolled up per
