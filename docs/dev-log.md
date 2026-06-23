@@ -16,7 +16,7 @@ builds ≤696 in
 
 -----
 
-## 2026-06-23 — Snapshot capture perf: the bottleneck was a DEBUG LOG (~50× faster after the fix) — telemetry → split → 1-line cap (Phases 0-2 + split + fix; builds 1585-1597; dev; in-game VERIFIED)
+## 2026-06-23 — Snapshot capture perf: the bottleneck was a DEBUG LOG (~50× faster after the fix) — telemetry → split → 1-line cap (Phases 0-2 + split + fix; builds 1585-1597; in-game VERIFIED; MERGED main PR #350 `ffc0f2c`)
 
 **Headline:** the snapshot-capture bottleneck was **not** the object walk, the DB write, or the JSON parse — it was the `PipeClient` **`Pipe RX: {line}` debug log** writing the multi-MB `snapshot_chunk` JSON response body per chunk. In-game it was **98,075 ms of a 1m40s SEED capture (98%)**. Capping the logged body at 1024 chars took SEED from **1m40s → 2s** (verified: `walk 317ms / serialize 120ms / read 1363ms / rxlog 0 / jsonparse 56ms / build 480ms / write 843ms`). The whole point of "measure first" — every prior guess (walk, write, finalize, JSON DOM parse) was wrong; only the telemetry found it.
 
