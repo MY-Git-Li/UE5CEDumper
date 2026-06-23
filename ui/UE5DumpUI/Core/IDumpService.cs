@@ -141,6 +141,15 @@ public interface IDumpService
         string propAddr, bool gameOnly = true, int maxResults = 200,
         CancellationToken ct = default);
 
+    // --- Class-level reflection xref ("which functions take this class?") ---
+    // Reflection scan over every UFunction's parameter chain; finds functions
+    // declaring `classAddr` as a direct param/return. Unlike the per-field
+    // bytecode scan above, this ALSO catches native functions. Reuses the
+    // FindPropertyXrefsResult shape (Kind = "param"/"return").
+    Task<FindPropertyXrefsResult> FindFunctionsByClassAsync(
+        string classAddr, bool gameOnly = true, int maxResults = 200,
+        CancellationToken ct = default);
+
     // Reverse edge: the properties a single UFunction reads/writes.
     Task<FunctionPropRefsResult> WalkFunctionPropsAsync(
         string funcAddr, CancellationToken ct = default);

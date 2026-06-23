@@ -58,4 +58,21 @@ public partial class InterestingPropertiesPanel : UserControl
         }
         vm.GenerateCheatTableCommand.Execute(rows);
     }
+
+    /// <summary>
+    /// Forward the grid's multi-select (empty = all rows) to the batch Find
+    /// Funcs command, which fills each row's inline "Funcs" column.
+    /// </summary>
+    private void OnBatchFindFuncsClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not InterestingPropertiesViewModel vm) return;
+        var grid = this.FindControl<DataGrid>("ResultsGrid");
+        var rows = new List<ScoredPropertyRow>();
+        if (grid?.SelectedItems is { } sel)
+        {
+            foreach (var item in sel)
+                if (item is ScoredPropertyRow r) rows.Add(r);
+        }
+        vm.BatchFindFuncsCommand.Execute(rows);
+    }
 }

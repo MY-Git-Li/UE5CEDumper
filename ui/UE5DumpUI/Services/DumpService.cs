@@ -541,6 +541,7 @@ public sealed class DumpService : IDumpService
                     Index = obj["index"]?.GetValue<int>() ?? -1,
                     Name = obj["name"]?.GetValue<string>() ?? "",
                     ClassName = obj["class"]?.GetValue<string>() ?? "",
+                    ClassAddress = obj["class_addr"]?.GetValue<string>() ?? "",
                     OuterAddr = obj["outer"]?.GetValue<string>() ?? "",
                 });
             }
@@ -1005,6 +1006,62 @@ public sealed class DumpService : IDumpService
         return new FindPropertyXrefsResult
         {
             QueryAddress = res["query_addr"]?.GetValue<string>() ?? propAddr,
+            Xrefs        = xrefs,
+            Scan         = scanStats,
+        };
+    }
+
+    public async Task<FindPropertyXrefsResult> FindFunctionsByClassAsync(
+        string classAddr, bool gameOnly = true, int maxResults = 200,
+        CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "find_functions_by_class",
+            ["class_addr"] = classAddr,
+            ["game_only"] = gameOnly,
+            ["max_results"] = maxResults,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+
+        PropertyXrefScanStats? scanStats = null;
+        if (res["scan"] is JsonObject scanNode)
+        {
+            scanStats = new PropertyXrefScanStats
+            {
+                FunctionsScanned    = scanNode["functions_scanned"]?.GetValue<int>() ?? 0,
+                FunctionsWithScript = scanNode["functions_with_script"]?.GetValue<int>() ?? 0,
+                ObjectsTotal        = scanNode["objects_total"]?.GetValue<int>() ?? 0,
+                DurationMs          = scanNode["duration_ms"]?.GetValue<long>() ?? 0,
+                DeadlineHit         = scanNode["deadline_hit"]?.GetValue<bool>() ?? false,
+            };
+        }
+
+        var xrefs = new List<PropertyXrefMatch>();
+        if (res["xrefs"] is JsonArray xrefsArr)
+        {
+            foreach (var node in xrefsArr)
+            {
+                if (node is not JsonObject x) continue;
+                xrefs.Add(new PropertyXrefMatch
+                {
+                    FunctionAddress   = x["func_addr"]?.GetValue<string>() ?? "",
+                    FunctionName      = x["func_name"]?.GetValue<string>() ?? "",
+                    FunctionFullName  = x["func_full"]?.GetValue<string>() ?? "",
+                    OwnerClassName    = x["owner_class"]?.GetValue<string>() ?? "",
+                    OwnerClassAddress = x["owner_class_addr"]?.GetValue<string>() ?? "",
+                    Occurrences       = x["occurrences"]?.GetValue<int>() ?? 0,
+                    WriteCount        = x["write_count"]?.GetValue<int>() ?? 0,
+                    Kind              = x["kind"]?.GetValue<string>() ?? "",
+                    EventName         = "",   // n/a for the class-param direction
+                });
+            }
+        }
+
+        return new FindPropertyXrefsResult
+        {
+            QueryAddress = res["query_addr"]?.GetValue<string>() ?? classAddr,
             Xrefs        = xrefs,
             Scan         = scanStats,
         };

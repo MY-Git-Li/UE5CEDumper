@@ -62,6 +62,7 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool _isSearching;
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private ObservableCollection<PropertySearchMatch> _results = new();
+    [ObservableProperty] private bool _isXrefBatchRunning;
     [ObservableProperty] private PropertySearchMatch? _selectedResult;
 
     /// <summary>
@@ -449,10 +450,79 @@ public partial class PropertySearchViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // Find Funcs is the EXPENSIVE direction — each call is a full game-wide
+    // bytecode sweep — so warn past a low row count and update progress per row.
+    private CancellationTokenSource? _xrefBatchCts;
+    private const int XrefBatchWarnThreshold = 25;
+
+    /// <summary>
+    /// Batch "Find Funcs": run find_property_xrefs for the selected rows (or all
+    /// results if none selected) and write a compact "N · func1, func2" summary
+    /// into each match's inline <see cref="PropertySearchMatch.XrefInfo"/> cell.
+    /// Cancellable. Nested (deep) rows carry a leaf FieldAddr, so they're included.
+    /// </summary>
+    [RelayCommand]
+    private async Task BatchFindFuncsAsync(IList<PropertySearchMatch>? selected)
+    {
+        var targets = ((selected != null && selected.Count > 0) ? selected : (IList<PropertySearchMatch>)Results)
+            .Where(m => !string.IsNullOrEmpty(m.FieldAddr)).ToList();
+        if (targets.Count == 0) { StatusText = "No rows with a field address to scan."; return; }
+
+        if (targets.Count > XrefBatchWarnThreshold)
+        {
+            var ok = await Views.ConfirmDialog.ShowAsync(
+                "Batch: find functions",
+                $"Scan {targets.Count} properties? Each runs a FULL game-wide bytecode "
+              + "sweep (hundreds of ms each), so this can take a while. Tip: select fewer "
+              + "rows first (Ctrl/Shift+click) to scope it.",
+                confirmText: "Run");
+            if (!ok) return;
+        }
+
+        _xrefBatchCts?.Cancel();
+        _xrefBatchCts = new CancellationTokenSource();
+        var ct = _xrefBatchCts.Token;
+        IsXrefBatchRunning = true;
+        int done = 0, withFuncs = 0;
+        try
+        {
+            foreach (var match in targets)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    var res = await _dump.FindPropertyXrefsAsync(match.FieldAddr, true, 200, ct);
+                    match.XrefInfo = XrefFormat.FunctionsSummary(res.Xrefs);
+                    if (res.Xrefs.Count > 0) withFuncs++;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    match.XrefInfo = "—";
+                    _log.Error($"Batch Find Funcs failed for {match.PropName}", ex);
+                }
+                done++;
+                StatusText = $"Find Funcs: {done}/{targets.Count} scanned ({withFuncs} referenced)…";
+            }
+            StatusText = $"Find Funcs done: {withFuncs}/{targets.Count} properties referenced by a function.";
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = $"Find Funcs cancelled at {done}/{targets.Count}.";
+        }
+        finally { IsXrefBatchRunning = false; }
+    }
+
+    /// <summary>Cancel an in-flight batch Find Funcs run.</summary>
+    [RelayCommand]
+    private void CancelXrefBatch() => _xrefBatchCts?.Cancel();
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        _xrefBatchCts?.Cancel();
+        _xrefBatchCts?.Dispose();
         _resultFilterDebounce?.Dispose();
         _resultFilterDebounce = null;
         GC.SuppressFinalize(this);

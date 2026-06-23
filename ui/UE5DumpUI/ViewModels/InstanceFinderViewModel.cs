@@ -708,6 +708,38 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>Copy an instance's object name to the clipboard (mirrors Live
+    /// Walker's per-object Name copy).</summary>
+    [RelayCommand]
+    private async Task CopyInstanceNameAsync(InstanceResult? instance)
+    {
+        if (instance == null || string.IsNullOrEmpty(instance.Name)) return;
+        try { await _platform.CopyToClipboardAsync(instance.Name); }
+        catch (Exception ex) { _log.Error("Failed to copy instance name", ex); }
+    }
+
+    /// <summary>Copy an instance's class name to the clipboard (mirrors Live
+    /// Walker's per-object Class copy).</summary>
+    [RelayCommand]
+    private async Task CopyInstanceClassNameAsync(InstanceResult? instance)
+    {
+        if (instance == null || string.IsNullOrEmpty(instance.ClassName)) return;
+        try { await _platform.CopyToClipboardAsync(instance.ClassName); }
+        catch (Exception ex) { _log.Error("Failed to copy instance class name", ex); }
+    }
+
+    /// <summary>"Find Func": which UFunctions take this instance's class as a
+    /// parameter/return value (find_functions_by_class — reflection, so native
+    /// functions are included too, unlike the per-field bytecode xref). Opens
+    /// the shared xref dialog in class mode.</summary>
+    [RelayCommand]
+    private async Task FindFunctionsForInstanceAsync(InstanceResult? instance)
+    {
+        if (instance == null || string.IsNullOrEmpty(instance.ClassAddress)) return;
+        await Views.PropertyXrefDialog.ShowForClassAsync(
+            instance.ClassName, instance.ClassAddress, _dump, _platform);
+    }
+
     /// <summary>Copy a container-match row's owning UObject address to the
     /// clipboard (mirrors the per-instance copy + Value Search's Copy Address).</summary>
     [RelayCommand]

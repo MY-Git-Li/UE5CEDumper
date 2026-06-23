@@ -1,3 +1,5 @@
+using CommunityToolkit.Mvvm.ComponentModel;
+
 namespace UE5DumpUI.Models;
 
 /// <summary>
@@ -11,7 +13,7 @@ namespace UE5DumpUI.Models;
 /// dedup story changes (e.g. a future "Show inheritance expanded"
 /// toggle could emit one row per inheriting class).
 /// </summary>
-public class PropertySearchMatch
+public partial class PropertySearchMatch : ObservableObject
 {
     public string ClassName { get; set; } = "";
     public string ClassAddr { get; set; } = "";
@@ -120,6 +122,10 @@ public class PropertySearchMatch
           $"this offset on any instance of {DefiningClassName} (or any " +
           $"subclass) has identical effect.\n" +
           $"Path: {DefiningClassPath}";
+
+    /// <summary>Batch "Find Funcs" result: which UFunctions reference this
+    /// property. Format "N · func1, func2[, …]" / "0" / "—" / "" (not run).</summary>
+    [ObservableProperty] private string _xrefInfo = "";
 }
 
 /// <summary>

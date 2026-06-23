@@ -29,6 +29,10 @@ public sealed class PropertyXrefDialog : Window
     private readonly IPlatformService _platform;
     private readonly string _fieldName;
     private readonly string _propAddr;
+    private readonly string _classAddr;
+    // Class mode: scan find_functions_by_class (which UFunctions take this class
+    // as a param) instead of find_property_xrefs. Reuses the same grid/columns.
+    private readonly bool _classMode;
     private CheckBox _gameOnlyBox = null!;
     private TextBlock _statusLabel = null!;
     private DataGrid _grid = null!;
@@ -56,15 +60,59 @@ public sealed class PropertyXrefDialog : Window
         await dialog.ShowDialog(owner);
     }
 
+    /// <summary>
+    /// Show the dialog in CLASS mode: which UFunctions take <paramref name="classAddr"/>
+    /// (a UClass / UScriptStruct) as a parameter or return value
+    /// (find_functions_by_class). Reflection-based, so native functions are
+    /// included. Shared by the Instances and Classes surfaces.
+    /// </summary>
+    public static async Task ShowForClassAsync(
+        string className, string classAddr,
+        IDumpService dump, IPlatformService? platform)
+    {
+        if (string.IsNullOrEmpty(classAddr) || classAddr == "0x0" || platform == null)
+            return;
+        if (Avalonia.Application.Current?.ApplicationLifetime is not
+            Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+            || desktop.MainWindow is not { } owner)
+            return;
+        var dialog = new PropertyXrefDialog(className, classAddr, dump, platform);
+        await dialog.ShowDialog(owner);
+    }
+
     public PropertyXrefDialog(string fieldName, string fieldType, string propAddr,
                               IDumpService dump, IPlatformService platform)
+        : this(dump, platform, classMode: false,
+               fieldName: fieldName ?? "", propAddr: propAddr ?? "", classAddr: "",
+               title: $"Functions using field: {fieldName ?? ""}",
+               targetText: $"{fieldType} {fieldName}  @ {propAddr}",
+               caveat: "Note: Blueprint/script functions only. Native (C++) functions have no bytecode "
+                     + "and cannot be detected here — an empty result on an engine field is expected.")
+    { }
+
+    private PropertyXrefDialog(string className, string classAddr,
+                               IDumpService dump, IPlatformService platform)
+        : this(dump, platform, classMode: true,
+               fieldName: className ?? "", propAddr: "", classAddr: classAddr ?? "",
+               title: $"Functions taking class: {className ?? ""}",
+               targetText: $"class {className}  @ {classAddr}",
+               caveat: "Reflection scan of UFunction parameters — finds functions that take this "
+                     + "class/struct as a parameter or return value (native functions included). "
+                     + "Functions that only touch the class via native machine code are not listed.")
+    { }
+
+    private PropertyXrefDialog(IDumpService dump, IPlatformService platform, bool classMode,
+                               string fieldName, string propAddr, string classAddr,
+                               string title, string targetText, string caveat)
     {
-        _fieldName = fieldName ?? "";
-        _propAddr = propAddr ?? "";
+        _fieldName = fieldName;
+        _propAddr = propAddr;
+        _classAddr = classAddr;
+        _classMode = classMode;
         _dump = dump;
         _platform = platform;
 
-        Title = $"Functions using field: {_fieldName}";
+        Title = title;
         Width = 860;
         MinWidth = 560;
         Height = 520;
@@ -84,7 +132,7 @@ public sealed class PropertyXrefDialog : Window
 
         var targetLbl = new TextBlock
         {
-            Text = $"{fieldType} {_fieldName}  @ {_propAddr}",
+            Text = targetText,
             Foreground = new SolidColorBrush(Color.Parse("#DCDCAA")),
             FontSize = 12,
             VerticalAlignment = VerticalAlignment.Center,
@@ -125,17 +173,16 @@ public sealed class PropertyXrefDialog : Window
         root.Children.Add(_statusLabel);
 
         // === Footer: native-coverage caveat + buttons ===
-        var caveat = new TextBlock
+        var caveatBlock = new TextBlock
         {
-            Text = "Note: Blueprint/script functions only. Native (C++) functions have no bytecode "
-                 + "and cannot be detected here — an empty result on an engine field is expected.",
+            Text = caveat,
             Foreground = new SolidColorBrush(Color.Parse("#7A7A7A")),
             FontSize = 10,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 8, 0, 0),
         };
-        DockPanel.SetDock(caveat, Dock.Bottom);
-        root.Children.Add(caveat);
+        DockPanel.SetDock(caveatBlock, Dock.Bottom);
+        root.Children.Add(caveatBlock);
 
         var btnRow = new StackPanel
         {
@@ -268,31 +315,40 @@ public sealed class PropertyXrefDialog : Window
 
     private async Task RunScanAsync()
     {
-        if (string.IsNullOrEmpty(_propAddr) || _propAddr == "0x0")
+        var target = _classMode ? _classAddr : _propAddr;
+        if (string.IsNullOrEmpty(target) || target == "0x0")
         {
-            _statusLabel.Text = "No FProperty address for this field.";
+            _statusLabel.Text = _classMode
+                ? "No UClass address for this row."
+                : "No FProperty address for this field.";
             _statusLabel.Foreground = new SolidColorBrush(Color.Parse("#F44747"));
             return;
         }
 
         _btnRefresh.IsEnabled = false;
-        _statusLabel.Text = "Scanning bytecode…";
+        _statusLabel.Text = _classMode ? "Scanning parameters…" : "Scanning bytecode…";
         _statusLabel.Foreground = new SolidColorBrush(Color.Parse("#808080"));
 
         try
         {
             var gameOnly = _gameOnlyBox.IsChecked == true;
-            var res = await _dump.FindPropertyXrefsAsync(_propAddr, gameOnly);
+            var res = _classMode
+                ? await _dump.FindFunctionsByClassAsync(_classAddr, gameOnly)
+                : await _dump.FindPropertyXrefsAsync(_propAddr, gameOnly);
             _grid.ItemsSource = res.Xrefs;
 
             var s = res.Scan;
             var stats = s == null
                 ? ""
-                : $" — scanned {s.FunctionsScanned:N0} funcs ({s.FunctionsWithScript:N0} with bytecode) "
+                : (_classMode
+                    ? $" — scanned {s.FunctionsScanned:N0} funcs ({s.FunctionsWithScript:N0} matched) "
+                    : $" — scanned {s.FunctionsScanned:N0} funcs ({s.FunctionsWithScript:N0} with bytecode) ")
                 + $"over {s.ObjectsTotal:N0} objects in {s.DurationMs}ms"
                 + (s.DeadlineHit ? " [DEADLINE HIT — partial]" : "");
 
-            _statusLabel.Text = $"{res.Xrefs.Count} function(s) reference this field{stats}";
+            _statusLabel.Text = _classMode
+                ? $"{res.Xrefs.Count} function(s) take this class{stats}"
+                : $"{res.Xrefs.Count} function(s) reference this field{stats}";
             _statusLabel.Foreground = new SolidColorBrush(Color.Parse(
                 res.Xrefs.Count > 0 ? "#4EC9B0" : "#D4D4D4"));
         }

@@ -138,6 +138,7 @@
 
     <!-- Instance Finder -->
     <sys:String x:Key="str.InstanceFinder.CopyAddress">Copy Address</sys:String>
+    <sys:String x:Key="str.InstanceFinder.FindFunc">Find Func</sys:String>
 
     <!-- Live Walker -->
     <sys:String x:Key="str.LiveWalker.SearchHint">Search fields...</sys:String>
@@ -638,6 +639,13 @@
     <sys:String x:Key="str.Tip.IF.CopyName">Copy this function's name to the clipboard. Useful when pasting into a CE script or another tool.</sys:String>
     <sys:String x:Key="str.IF.GenerateCT">📦 Generate CT</sys:String>
     <sys:String x:Key="str.Tip.IF.GenerateCT">Generate one .CT file containing baked-invoke entries for every selected row. Use Ctrl/Shift+click in the grid to multi-select first. Functions with parameters: the helper zero-fills PARAMS; edit the baked PARAMS table in the generated entry before activating.</sys:String>
+    <sys:String x:Key="str.IF.BatchProps">⤋ Props</sys:String>
+    <sys:String x:Key="str.Tip.IF.BatchProps">Fill the "Uses" column for the selected rows at once (or all rows if none selected), so you see which class fields each function reads/writes without opening the per-row popup. Fast — each call reads only that one function's bytecode. Most rows show 0 (native funcs / no field access).</sys:String>
+    <sys:String x:Key="str.IF.UsesCol">Uses</sys:String>
+    <sys:String x:Key="str.Common.CancelBatch">✕ Cancel</sys:String>
+    <sys:String x:Key="str.Common.BatchFuncs">⤋ Funcs</sys:String>
+    <sys:String x:Key="str.Common.FuncsCol">Funcs</sys:String>
+    <sys:String x:Key="str.Tip.Common.BatchFuncs">Fill the "Funcs" column for the selected rows (or all rows if none selected): which UFunctions reference each property (Blueprint bytecode xref). Each call is a full game scan, so this is slower than the function-side batch — select rows first (Ctrl/Shift+click) to scope it. Most rows show 0 (native-only access / unreferenced).</sys:String>
 
     <!-- Console (UFUNCTION(exec) discovery + invoke) -->
     <sys:String x:Key="str.Con.Load">Load</sys:String>
@@ -884,6 +892,8 @@
     <sys:String x:Key="str.Tip.InstanceFinder.ExportCE">Export instance as CE XML pointer chain</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.CopyFieldAddr">Copy field absolute address</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.AA">Generate CE Auto Assembler script</sys:String>
+    <sys:String x:Key="str.Tip.InstanceFinder.CopyName">Copy the object name to clipboard</sys:String>
+    <sys:String x:Key="str.Tip.InstanceFinder.FindFunc">Find UFunctions that take this instance's class as a parameter or return value (reflection scan — includes native functions, unlike the per-field bytecode xref)</sys:String>
 
     <!-- Tooltips: Property Search -->
     <sys:String x:Key="str.Tip.PropertySearch.Query">Property name to search for (substring, case-insensitive), e.g. Health, Mana, Gold. Combine with the Type filter to narrow further. Press Enter or Search to run.</sys:String>

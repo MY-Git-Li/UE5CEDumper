@@ -55,6 +55,21 @@
                ToolTip.Tip="{StaticResource str.Tip.PropertySearch.ResultFilter}"
                Width="320" Padding="4,2" FontSize="12"/>
       <views:ClassFacetFilterButton Filter="{Binding ClassFilter}"/>
+      <Button Content="{StaticResource str.Common.BatchFuncs}"
+              Click="OnBatchFindFuncsClick"
+              IsEnabled="{Binding !IsXrefBatchRunning}"
+              ToolTip.Tip="{StaticResource str.Tip.Common.BatchFuncs}"
+              Foreground="#C586C0" Background="Transparent"
+              BorderThickness="1" BorderBrush="#C586C0"
+              Padding="6,2" FontSize="11"
+              VerticalAlignment="Center" Cursor="Hand"/>
+      <Button Content="{StaticResource str.Common.CancelBatch}"
+              Command="{Binding CancelXrefBatchCommand}"
+              IsVisible="{Binding IsXrefBatchRunning}"
+              Foreground="#E06C75" Background="Transparent"
+              BorderThickness="1" BorderBrush="#E06C75"
+              Padding="6,2" FontSize="11"
+              VerticalAlignment="Center" Cursor="Hand"/>
     </StackPanel>
 
     <!-- Loading indicator -->
@@ -153,6 +168,17 @@
                          VerticalAlignment="Center"
                          Margin="4,0"
                          TextTrimming="CharacterEllipsis"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+        <DataGridTemplateColumn Header="{StaticResource str.Common.FuncsCol}" Width="190" CanUserSort="False">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:PropertySearchMatch">
+              <TextBlock Text="{Binding XrefInfo}"
+                         Foreground="#C586C0" FontSize="11"
+                         VerticalAlignment="Center" Margin="4,0"
+                         TextTrimming="CharacterEllipsis"
+                         ToolTip.Tip="{Binding XrefInfo}"/>
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
