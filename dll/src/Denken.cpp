@@ -152,7 +152,7 @@ void TraceBlock(Ctx& ctx, uintptr_t startAddr, ThisRegs tr, int depth) {
                 const auto& op = ops[i];
                 if (op.type != ZYDIS_OPERAND_TYPE_MEMORY) continue;
                 if (op.mem.index != ZYDIS_REGISTER_NONE) continue;   // skip SIB-indexed
-                if (!op.mem.disp.has_displacement) continue;         // no displacement
+                if (op.mem.disp.size == 0) continue;                 // no displacement (Zydis v5: has_displacement removed; size is width in bits, 0 == absent)
                 const ZydisRegister base = Canon(op.mem.base);
                 if (base == ZYDIS_REGISTER_NONE) continue;           // absolute / RIP-less
                 if (base == ZYDIS_REGISTER_RIP) continue;            // global, not a field

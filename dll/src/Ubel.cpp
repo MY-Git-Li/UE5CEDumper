@@ -199,6 +199,36 @@ static std::string ReadFString(uintptr_t instanceAddr, int32_t offset) {
 }
 
 // ============================================================
+// ReadFUtf8String — read a UE5.5+ FUtf8String / FAnsiString
+// (TArray<char>, 1-byte elements) from a live instance.
+// Shares FString's { Data ptr (8B), int32 Count (4B), int32 Max (4B) }
+// header, differing only in element size (1 byte vs wchar_t's 2).
+// FUtf8String holds UTF-8 bytes directly; FAnsiString holds ANSI
+// (codepage) bytes — for ASCII the two are identical, and non-ASCII
+// ANSI is best-effort (any invalid sequence is scrubbed by Sanitize so
+// downstream JSON can never trip). Returns empty on failure / empty /
+// over-long string. Used for both new UE5.5+ string property variants.
+// ============================================================
+static std::string ReadFUtf8String(uintptr_t instanceAddr, int32_t offset) {
+    uintptr_t data = 0;
+    int32_t count = 0;
+    Macht::ReadSafe(instanceAddr + offset, data);
+    Macht::ReadSafe(instanceAddr + offset + 8, count);
+
+    if (!data || count <= 0 || count > 256) return "";
+
+    // count includes the null terminator in most UE builds.
+    std::vector<char> bytes(count, 0);
+    if (!Macht::ReadBytesSafe(data, bytes.data(), static_cast<size_t>(count)))
+        return "";
+    bytes.back() = 0;
+
+    size_t actualLen = 0;
+    while (actualLen < bytes.size() && bytes[actualLen] != 0) ++actualLen;
+    return Utf8Helpers::Sanitize(std::string(bytes.data(), actualLen));
+}
+
+// ============================================================
 // ReadSoftObjectPath — resolve FSoftObjectPath at the given
 // address to a human-readable asset path string.
 //
@@ -4512,18 +4542,43 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
             // Fall through to generic scalar handling below
         }
 
-        // Handle StrProperty: read FString (TArray<wchar_t>) → UTF-8
-        if (fi.TypeName == "StrProperty") {
-            fv.strValue = ReadFString(instanceAddr, fi.Offset);
-            fv.typedValue = fv.strValue.empty() ? "(empty)" : fv.strValue;
-            // Hex of the TArray<wchar_t> header (Data ptr + Count)
-            uintptr_t strData = 0;
-            int32_t strCount = 0;
-            Macht::ReadSafe(instanceAddr + fi.Offset, strData);
-            Macht::ReadSafe(instanceAddr + fi.Offset + 8, strCount);
-            char buf[48];
-            snprintf(buf, sizeof(buf), "%016llX %08X",
-                static_cast<unsigned long long>(strData), strCount);
+        // Handle StrProperty / FUtf8StrProperty / FAnsiStrProperty: read the
+        // string container → UTF-8. UE5.5+ added the 1-byte Utf8/Ansi variants
+        // (FFieldClass names "Utf8StrProperty" / "AnsiStrProperty"); they share
+        // FString's header but use ReadFUtf8String for the 1-byte payload.
+        {
+            const bool isWideStr = (fi.TypeName == "StrProperty");
+            const bool isByteStr = (fi.TypeName == "Utf8StrProperty" ||
+                                    fi.TypeName == "AnsiStrProperty");
+            if (isWideStr || isByteStr) {
+                fv.strValue = isWideStr ? ReadFString(instanceAddr, fi.Offset)
+                                        : ReadFUtf8String(instanceAddr, fi.Offset);
+                fv.typedValue = fv.strValue.empty() ? "(empty)" : fv.strValue;
+                // Hex of the TArray header (Data ptr + Count)
+                uintptr_t strData = 0;
+                int32_t strCount = 0;
+                Macht::ReadSafe(instanceAddr + fi.Offset, strData);
+                Macht::ReadSafe(instanceAddr + fi.Offset + 8, strCount);
+                char buf[48];
+                snprintf(buf, sizeof(buf), "%016llX %08X",
+                    static_cast<unsigned long long>(strData), strCount);
+                fv.hexValue = buf;
+                result.fields.push_back(std::move(fv));
+                continue;
+            }
+        }
+
+        // Verse VM property types (UE5.8 / UEFN): VValue/VRestValue/VCell hold a
+        // Verse VM cell handle and VerseString wraps Verse::FNativeString — none
+        // are a plain FString/scalar, so label them and show the raw pointer
+        // rather than mis-decoding. (Recognized-but-not-decoded; safe.)
+        if (fi.TypeName == "VValueProperty"  || fi.TypeName == "VRestValueProperty" ||
+            fi.TypeName == "VCellProperty"   || fi.TypeName == "VerseStringProperty") {
+            fv.typedValue = "(Verse: " + fi.TypeName + ")";
+            uintptr_t vptr = 0;
+            Macht::ReadSafe(instanceAddr + fi.Offset, vptr);
+            char buf[20];
+            snprintf(buf, sizeof(buf), "%016llX", static_cast<unsigned long long>(vptr));
             fv.hexValue = buf;
             result.fields.push_back(std::move(fv));
             continue;
@@ -5295,9 +5350,10 @@ void ResolvePropertyPreviews(
             continue;
         }
 
-        // --- StrProperty: read FString ---
-        if (t == "StrProperty") {
-            std::string s = ReadFString(inst, off);
+        // --- StrProperty / Utf8StrProperty / AnsiStrProperty: read string ---
+        if (t == "StrProperty" || t == "Utf8StrProperty" || t == "AnsiStrProperty") {
+            std::string s = (t == "StrProperty") ? ReadFString(inst, off)
+                                                 : ReadFUtf8String(inst, off);
             if (s.empty()) {
                 m.preview = "(empty)";
             } else {
@@ -5308,6 +5364,13 @@ void ResolvePropertyPreviews(
                 }
                 m.preview = "\"" + s + "\"";
             }
+            continue;
+        }
+
+        // --- Verse VM property types: not a readable scalar/string ---
+        if (t == "VValueProperty" || t == "VRestValueProperty" ||
+            t == "VCellProperty"  || t == "VerseStringProperty") {
+            m.preview = "(Verse)";
             continue;
         }
 
@@ -5662,9 +5725,12 @@ DataTableWalkResult WalkDataTableRows(uintptr_t dataTableAddr, int32_t offset, i
                         fv.structClassAddr = structClass;
                 }
 
-                // StrProperty: decode FString value
+                // StrProperty / Utf8StrProperty / AnsiStrProperty: decode value
                 if (fi.TypeName == "StrProperty") {
                     fv.strValue = ReadFString(rowPtr, fi.Offset);
+                } else if (fi.TypeName == "Utf8StrProperty" ||
+                           fi.TypeName == "AnsiStrProperty") {
+                    fv.strValue = ReadFUtf8String(rowPtr, fi.Offset);
                 }
 
                 // EnumProperty: resolve enum name
