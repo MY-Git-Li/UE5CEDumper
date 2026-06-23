@@ -233,6 +233,7 @@
                   <Button Content="{StaticResource str.Snapshot.Diff.LocateGameEngine}"
                           Command="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).LocateRowInGameEngineCommand}"
                           CommandParameter="{Binding}"
+                          IsEnabled="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).CanUseDiffRowActions}"
                           ToolTip.Tip="{StaticResource str.Tip.Snapshot.Diff.LocateGameEngine}"
                           Foreground="#C586C0" Background="Transparent" BorderThickness="1" BorderBrush="#C586C0"
                           Padding="6,2" FontSize="11" Cursor="Hand"/>
@@ -355,6 +356,7 @@
                         <Button Content="{StaticResource str.Snapshot.Group.LocateGameEngine}"
                                 Command="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).LocateGroupSlotInGameEngineCommand}"
                                 CommandParameter="{Binding}"
+                                IsEnabled="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).CanUseGroupRowActions}"
                                 ToolTip.Tip="{StaticResource str.Tip.Snapshot.Diff.LocateGameEngine}"
                                 Foreground="#C586C0" Background="Transparent" BorderThickness="1" BorderBrush="#C586C0"
                                 Padding="6,2" FontSize="11" Cursor="Hand"/>

@@ -425,6 +425,28 @@ public class SnapshotViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task GroupRowActions_DisabledForCrossSessionSnapshot()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _store.SetActiveGame("GVM");
+        long id = await _store.CreateSnapshotAsync(
+            new SnapshotMeta { Label = "old-session", Scope = "NumericNoByte", PeHash = "GVM", GameSessionId = "GVM-OLD" }, ct);
+        await _store.WriteChunkAsync(id, new[] { GMakeObj(1, "BP_Player_C", ("Str", "IntProperty", 0x20, "18000000")) }, ct);
+        await _store.FinalizeSnapshotAsync(id, 1, 1, ct);
+
+        var vm = new SnapshotViewModel(new CaptureStub(), _store, new MockLoggingService());
+        // Current live session is GVM-NEW; the snapshot is from GVM-OLD (a previous run).
+        vm.SetEngineState(new EngineState { PeHash = "GVM", UEVersion = 504, ModuleBase = "7FF600000000", ProcessCreationTime = "NEW" });
+        await vm.RefreshCommand.ExecuteAsync(null);
+        vm.GroupSnapshot = vm.Snapshots[0];
+
+        // Cross-session: every per-slot handoff (Live / Copy / Locate-GWorld / Locate-GameEngine)
+        // must be disabled — its captured obj_addr is stale in the running game.
+        Assert.False(vm.CanUseGroupRowActions);
+        Assert.False(vm.CanLocateGroupRowInGWorld);
+    }
+
+    [Fact]
     public async Task IsGroupCompareMode_RaisedWhenPrimaryChanges()
     {
         var ct = TestContext.Current.CancellationToken;
