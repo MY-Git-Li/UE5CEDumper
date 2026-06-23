@@ -233,6 +233,48 @@
               </DataTemplate>
             </DataGridTemplateColumn.CellTemplate>
           </DataGridTemplateColumn>
+          <DataGridTemplateColumn Header="{StaticResource str.LiveWalker.CopyName}" Width="52" CanUserSort="False">
+            <DataGridTemplateColumn.CellTemplate>
+              <DataTemplate x:DataType="m:InstanceResult">
+                <Button Content="{StaticResource str.LiveWalker.CopyName}"
+                        Command="{Binding $parent[UserControl].((vm:InstanceFinderViewModel)DataContext).CopyInstanceNameCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.CopyName}"
+                        Padding="4,2" Margin="2"
+                        Foreground="#D4D4D4" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#555"
+                        Cursor="Hand" FontSize="10"/>
+              </DataTemplate>
+            </DataGridTemplateColumn.CellTemplate>
+          </DataGridTemplateColumn>
+          <DataGridTemplateColumn Header="{StaticResource str.LiveWalker.CopyClass}" Width="52" CanUserSort="False">
+            <DataGridTemplateColumn.CellTemplate>
+              <DataTemplate x:DataType="m:InstanceResult">
+                <Button Content="{StaticResource str.LiveWalker.CopyClass}"
+                        Command="{Binding $parent[UserControl].((vm:InstanceFinderViewModel)DataContext).CopyInstanceClassNameCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.LiveWalker.CopyClass}"
+                        Padding="4,2" Margin="2"
+                        Foreground="#D4D4D4" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#555"
+                        Cursor="Hand" FontSize="10"/>
+              </DataTemplate>
+            </DataGridTemplateColumn.CellTemplate>
+          </DataGridTemplateColumn>
+          <DataGridTemplateColumn Header="{StaticResource str.InstanceFinder.FindFunc}" Width="74" CanUserSort="False">
+            <DataGridTemplateColumn.CellTemplate>
+              <DataTemplate x:DataType="m:InstanceResult">
+                <Button Content="{StaticResource str.InstanceFinder.FindFunc}"
+                        Command="{Binding $parent[UserControl].((vm:InstanceFinderViewModel)DataContext).FindFunctionsForInstanceCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.FindFunc}"
+                        Padding="4,2" Margin="2"
+                        Foreground="#C586C0" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#C586C0"
+                        Cursor="Hand" FontSize="10"/>
+              </DataTemplate>
+            </DataGridTemplateColumn.CellTemplate>
+          </DataGridTemplateColumn>
         </DataGrid.Columns>
       </DataGrid>
 

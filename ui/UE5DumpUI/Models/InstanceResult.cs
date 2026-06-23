@@ -9,5 +9,7 @@ public sealed class InstanceResult
     public int Index { get; init; }
     public string Name { get; init; } = "";
     public string ClassName { get; init; } = "";
+    /// <summary>UClass* address — the key for find_functions_by_class.</summary>
+    public string ClassAddress { get; init; } = "";
     public string OuterAddr { get; init; } = "";
 }

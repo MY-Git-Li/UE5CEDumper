@@ -839,6 +839,18 @@ struct PropertyXrefResult {
 PropertyXrefResult FindPropertyXrefs(uintptr_t propAddr, bool gameOnly,
                                      int32_t maxResults = 200);
 
+// === Class-level reflection xref: functions taking a class as a param ===
+//
+// Which UFunctions declare `classAddr` (a UClass* / UScriptStruct*) as a direct
+// parameter or return value. Complements FindPropertyXrefs (per-field bytecode,
+// which misses functions taking a whole class by value/ref) — pure reflection
+// over each function's param chain, so it ALSO catches native (FUNC_Native)
+// functions whose Script is empty. Reuses the PropertyXref result shape: `kind`
+// = "param"/"return", `occurrences` = matching param count, `writeCount` = 0.
+// v1: direct params only (array/map element types are a future enhancement).
+PropertyXrefResult FindFunctionsByClassParam(uintptr_t classAddr, bool gameOnly,
+                                             int32_t maxResults = 200);
+
 // === Reverse edge: function -> properties it reads/writes ===
 //
 // Given ONE UFunction, parse its Kismet bytecode and list every FProperty it

@@ -1149,6 +1149,9 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
 
                 uintptr_t cls = Ubel::GetClass(obj);
                 item["class"] = cls ? Ubel::GetName(cls) : "";
+                // UClass* for this instance — the key for find_functions_by_class
+                // ("which functions take this class as a param?").
+                item["class_addr"] = cls ? Renge::AddrToStr(cls) : "";
 
                 uintptr_t outer = Ubel::GetOuter(obj);
                 item["outer"] = outer ? Renge::AddrToStr(outer) : "";
@@ -3288,6 +3291,47 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 xj["kind"]             = x.kind;
                 if (!x.eventName.empty())
                     xj["event"]        = x.eventName;
+                arr.push_back(xj);
+            }
+            data["xrefs"] = arr;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // === find_functions_by_class: which UFunctions take a class as a param ===
+        // Reflection scan over each UFunction's param chain — catches NATIVE
+        // functions too (params are reflected even when Script is empty), unlike
+        // find_property_xrefs. Same response shape so the UI reuses one parser.
+        if (cmd == Renge::CMD_FIND_FUNCTIONS_BY_CLASS) {
+            std::string addrStr = request.value("class_addr", "");
+            if (addrStr.empty()) return Renge::MakeError(id, "Missing class_addr").dump();
+            uintptr_t classAddr = Renge::StrToAddr(addrStr);
+            bool    gameOnly   = request.value("game_only", true);
+            int32_t maxResults = request.value("max_results", 200);
+
+            auto res = Aura::FindFunctionsByClassParam(classAddr, gameOnly, maxResults);
+
+            json data;
+            data["query_addr"] = addrStr;
+
+            json scanInfo;
+            scanInfo["functions_scanned"]     = res.stats.functionsScanned;
+            scanInfo["functions_with_script"] = res.stats.functionsWithScript;  // reused: matched
+            scanInfo["objects_total"]         = res.stats.objectsTotal;
+            scanInfo["duration_ms"]           = res.stats.durationMs;
+            scanInfo["deadline_hit"]          = res.stats.deadlineHit;
+            data["scan"] = scanInfo;
+
+            json arr = json::array();
+            for (const auto& x : res.xrefs) {
+                json xj;
+                xj["func_addr"]        = Renge::AddrToStr(x.funcAddr);
+                xj["func_name"]        = x.funcName;
+                xj["func_full"]        = x.funcFullName;
+                xj["owner_class"]      = x.ownerClassName;
+                xj["owner_class_addr"] = Renge::AddrToStr(x.ownerClassAddr);
+                xj["occurrences"]      = x.occurrences;
+                xj["write_count"]      = x.writeCount;
+                xj["kind"]             = x.kind;   // "param" / "return"
                 arr.push_back(xj);
             }
             data["xrefs"] = arr;

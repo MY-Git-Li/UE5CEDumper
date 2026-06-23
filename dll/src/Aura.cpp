@@ -5028,6 +5028,151 @@ PropertyXrefResult FindPropertyXrefs(uintptr_t propAddr, bool gameOnly,
     return out;
 }
 
+// --- FindFunctionsByClassParam: reflection xref (class as parameter) ---------
+//
+// The target UClass*/UScriptStruct* a Struct/Object-family FProperty (or UE4
+// UProperty) param points at, via its subclass-extension slot; 0 otherwise.
+// Mirrors the param-type enrichment in Ubel::WalkFunctions.
+static uintptr_t ParamTargetType(uintptr_t fieldAddr) {
+    std::string pName, pType;
+    if (!Ubel::ResolvePropertyNameType(fieldAddr, pName, pType)) return 0;
+    const bool classBearing =
+        pType == "StructProperty"     || pType == "ObjectProperty"     ||
+        pType == "ClassProperty"      || pType == "WeakObjectProperty" ||
+        pType == "SoftObjectProperty" || pType == "SoftClassProperty"  ||
+        pType == "InterfaceProperty"  || pType == "LazyObjectProperty";
+    if (!classBearing) return 0;
+    // FStructProperty::Struct and FObjectPropertyBase::PropertyClass share the
+    // FProperty subclass-extension slot; UE4 (<4.25) UProperty uses Offset+0x2C.
+    const int slot = DynOff::bUseFProperty ? DynOff::FSTRUCTPROP_STRUCT
+                                           : (DynOff::UPROPERTY_OFFSET + 0x2C);
+    uintptr_t target = 0;
+    Macht::ReadSafe(fieldAddr + slot, target);
+    return target;
+}
+
+// Count `func`'s params whose declared type pointer == targetClass; set
+// hasReturnMatch if any matched param is the return value. Walks the function's
+// own FProperty (USTRUCT_CHILDPROPS) or UE4 UProperty (USTRUCT_CHILDREN) chain
+// exactly as Ubel::WalkFunctions does.
+static int32_t CountClassParams(uintptr_t func, uintptr_t targetClass,
+                                bool& hasReturnMatch) {
+    constexpr uint64_t CPF_ReturnParm = 0x0400;
+    hasReturnMatch = false;
+    const bool fprop = DynOff::bUseFProperty;
+    uintptr_t chain = 0;
+    const int chainOff = fprop ? DynOff::USTRUCT_CHILDPROPS : DynOff::USTRUCT_CHILDREN;
+    if (!Macht::ReadSafe(func + chainOff, chain) || !chain) return 0;
+    uintptr_t cur = fprop ? DynOff::StripFFieldTag(chain) : chain;
+    int32_t matches = 0, limit = 256;
+    std::unordered_set<uintptr_t> seen;
+    while (cur != 0 && limit-- > 0) {
+        if (!seen.insert(cur).second) break;
+        if (fprop && DynOff::IsFFieldVariantUObject(cur)) break;
+
+        if (ParamTargetType(cur) == targetClass) {   // targetClass != 0 (caller-checked)
+            matches++;
+            uint64_t flags = 0;
+            const int flagsOff = fprop ? DynOff::FPROPERTY_FLAGS : DynOff::UPROPERTY_FLAGS;
+            Macht::ReadSafe(cur + flagsOff, flags);
+            if (flags & CPF_ReturnParm) hasReturnMatch = true;
+        }
+        uintptr_t next = 0;
+        const int nextOff = fprop ? DynOff::FFIELD_NEXT : DynOff::UFIELD_NEXT;
+        if (!Macht::ReadSafe(cur + nextOff, next)) break;
+        cur = fprop ? DynOff::StripFFieldTag(next) : next;
+    }
+    return matches;
+}
+
+// See Aura.h: which UFunctions take `classAddr` as a direct param/return. Same
+// parallel-GObjects scaffolding as FindPropertyXrefs, but the per-function inner
+// step is a reflection param-chain walk instead of a bytecode byte-scan — so it
+// catches native functions too.
+PropertyXrefResult FindFunctionsByClassParam(uintptr_t classAddr, bool gameOnly,
+                                             int32_t maxResults) {
+    PropertyXrefResult out;
+    if (!classAddr || !s_arrayAddr) return out;
+    if (maxResults <= 0) maxResults = 200;
+
+    int32_t count = GetCount();
+    if (count <= 0) return out;
+    out.stats.objectsTotal = count;
+
+    LOG_INFO("FindFunctionsByClassParam: scanning %d objects for UFunctions taking class 0x%llX as param (gameOnly=%d)",
+             count, static_cast<unsigned long long>(classAddr), gameOnly ? 1 : 0);
+
+    constexpr int kDeadlineMs = 30000;
+    auto t0 = std::chrono::steady_clock::now();
+
+    struct ThreadResult {
+        std::vector<PropertyXref> xrefs;
+        int32_t funcsScanned = 0;
+        int32_t funcsMatched = 0;
+    };
+
+    auto scan = ParallelGObjectsScan<ThreadResult>(count,
+        [&](ThreadResult& tr, int32_t beginIdx, int32_t endIdx,
+            std::atomic<bool>& deadlineHit) {
+        for (int32_t i = beginIdx;
+             i < endIdx && static_cast<int>(tr.xrefs.size()) < maxResults; ++i) {
+            if (((i - beginIdx) & 0x3FF) == 0) {
+                if (deadlineHit.load(std::memory_order_relaxed)) return;
+                if (Tot::Requested()) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+                auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::steady_clock::now() - t0).count();
+                if (dt > kDeadlineMs) { deadlineHit.store(true, std::memory_order_relaxed); return; }
+            }
+
+            uintptr_t obj = GetByIndex(i);
+            if (!obj) continue;
+
+            // UFunction? Its UClass name is "Function".
+            uintptr_t cls = 0;
+            if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
+            uint32_t clsNameIdx = 0;
+            if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx)) continue;
+            if (Serie::GetString(clsNameIdx) != "Function") continue;
+            tr.funcsScanned++;
+
+            bool hasReturn = false;
+            int32_t matches = CountClassParams(obj, classAddr, hasReturn);
+            if (matches == 0) continue;
+
+            // Owning class = UFunction's Outer. Apply gameOnly on its path.
+            uintptr_t owner = Ubel::GetOuter(obj);
+            if (gameOnly && owner && IsEnginePackage(Ubel::GetFullName(owner))) continue;
+            tr.funcsMatched++;
+
+            PropertyXref x;
+            x.funcAddr       = obj;
+            x.funcName       = Ubel::GetName(obj);
+            x.funcFullName   = Ubel::GetFullName(obj);
+            x.ownerClassAddr = owner;
+            x.ownerClassName = owner ? Ubel::GetName(owner) : "";
+            x.occurrences    = matches;
+            x.writeCount     = 0;
+            x.kind           = hasReturn ? "return" : "param";
+            tr.xrefs.push_back(std::move(x));
+        }
+    });
+
+    out.xrefs = ConcatTruncate(scan.perThread, &ThreadResult::xrefs, maxResults);
+    for (auto& tr : scan.perThread) {
+        out.stats.functionsScanned    += tr.funcsScanned;
+        out.stats.functionsWithScript += tr.funcsMatched;  // reused slot: functions matched
+    }
+    out.stats.deadlineHit = scan.deadlineHit;
+    out.stats.durationMs  = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - t0).count();
+
+    LOG_INFO("FindFunctionsByClassParam: %zu matches (scanned %d functions, %lldms%s)",
+             out.xrefs.size(), out.stats.functionsScanned,
+             static_cast<long long>(out.stats.durationMs),
+             out.stats.deadlineHit ? ", DEADLINE" : "");
+    return out;
+}
+
 // Map a value-access opcode to a property-scope label (see FunctionPropRef::scope).
 static const char* ScopeForOpcode(uint8_t op) {
     switch (op) {

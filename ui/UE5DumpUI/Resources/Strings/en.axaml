@@ -138,6 +138,7 @@
 
     <!-- Instance Finder -->
     <sys:String x:Key="str.InstanceFinder.CopyAddress">Copy Address</sys:String>
+    <sys:String x:Key="str.InstanceFinder.FindFunc">Find Func</sys:String>
 
     <!-- Live Walker -->
     <sys:String x:Key="str.LiveWalker.SearchHint">Search fields...</sys:String>
@@ -884,6 +885,8 @@
     <sys:String x:Key="str.Tip.InstanceFinder.ExportCE">Export instance as CE XML pointer chain</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.CopyFieldAddr">Copy field absolute address</sys:String>
     <sys:String x:Key="str.Tip.InstanceFinder.AA">Generate CE Auto Assembler script</sys:String>
+    <sys:String x:Key="str.Tip.InstanceFinder.CopyName">Copy the object name to clipboard</sys:String>
+    <sys:String x:Key="str.Tip.InstanceFinder.FindFunc">Find UFunctions that take this instance's class as a parameter or return value (reflection scan — includes native functions, unlike the per-field bytecode xref)</sys:String>
 
     <!-- Tooltips: Property Search -->
     <sys:String x:Key="str.Tip.PropertySearch.Query">Property name to search for (substring, case-insensitive), e.g. Health, Mana, Gold. Combine with the Type filter to narrow further. Press Enter or Search to run.</sys:String>
