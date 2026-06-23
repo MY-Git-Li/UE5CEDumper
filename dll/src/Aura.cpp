@@ -5253,10 +5253,35 @@ static void EnsureUFunctionFuncOffset() {
 // (ProcessInternal). Returns 0 if the Func offset isn't detected yet or the
 // slot doesn't hold a code pointer. Used by the UI "Disassemble in CE" button
 // (push to CE via AOBMaker) on the xref dialog.
+// Read UFunction::FunctionFlags via the version-aware offset (mirrors the
+// probe in Ubel::WalkFunctions): primary by UE version, then a fallback sweep.
+static uint32_t ReadFunctionFlags(uintptr_t funcAddr) {
+    int primary = (g_cachedUEVersion >= 550) ? 0xC0
+                : (g_cachedUEVersion >= 425) ? 0xB0
+                : (g_cachedUEVersion >= 421) ? 0x98 : 0x88;
+    uint32_t flags = 0;
+    if (Macht::ReadSafe<uint32_t>(funcAddr + primary, flags) && flags != 0) return flags;
+    for (int tryOff : { 0xB0, 0xC0, 0x88, 0x98, 0xA8, 0xB8 }) {
+        if (tryOff == primary) continue;
+        if (Macht::ReadSafe<uint32_t>(funcAddr + tryOff, flags) && flags != 0) return flags;
+    }
+    return 0;
+}
+
 uintptr_t GetFunctionCodeAddr(uintptr_t funcAddr) {
     if (!funcAddr) return 0;
     EnsureUFunctionFuncOffset();
     if (DynOff::UFUNCTION_FUNC == 0) return 0;
+
+    // Only NATIVE (FUNC_Native) functions have a per-function .text entry worth
+    // disassembling — their Func points at the execXxx thunk. Blueprint/script
+    // functions point Func at the SHARED interpreter (UObject::ProcessInternal),
+    // which is not this function's code, so return 0 for them — the UI then shows
+    // the honest "Blueprint-only" message instead of pushing the interpreter
+    // dispatcher and reporting a misleading success.
+    constexpr uint32_t FUNC_Native = 0x00000400;
+    if ((ReadFunctionFlags(funcAddr) & FUNC_Native) == 0) return 0;
+
     uintptr_t exec = 0;
     if (!Macht::ReadSafe(funcAddr + DynOff::UFUNCTION_FUNC, exec) ||
         !Macht::LooksLikeCodePointer(exec))

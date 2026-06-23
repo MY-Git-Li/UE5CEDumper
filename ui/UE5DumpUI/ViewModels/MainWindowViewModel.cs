@@ -53,6 +53,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly IDumpService _dump;
     private readonly ILoggingService _log;
     private readonly IPlatformService _platform;
+    // Held so Dispose can detach it from the static PropertyXrefDialog event
+    // (the lambda captures `this`; without unsubscribe each VM would leak —
+    // matters for the test suite, which builds the VM repeatedly).
+    private readonly Action<string> _xrefLocateHandler;
 
     /// <summary>
     /// Platform service, exposed so the window code-behind can route the
@@ -927,7 +931,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         // resolving a live (non-CDO) instance + navigating to Live Walker — same
         // class-name path as the Interesting Functions locate just above.
         Views.PropertyXrefDialog.SharedAobMaker = aobMaker;
-        Views.PropertyXrefDialog.LocateClassInGWorldRequested += async (className) =>
+        _xrefLocateHandler = async (className) =>
         {
             try
             {
@@ -954,6 +958,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 _log.Error($"Xref dialog LocateClass handler error: {className}", ex);
             }
         };
+        Views.PropertyXrefDialog.LocateClassInGWorldRequested += _xrefLocateHandler;
 
         InterestingFunctions.LocateInGameEngine += async (className) =>
         {
@@ -1580,6 +1585,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+
+        // Detach from the static xref-dialog hooks so this VM doesn't leak.
+        Views.PropertyXrefDialog.LocateClassInGWorldRequested -= _xrefLocateHandler;
+        Views.PropertyXrefDialog.SharedAobMaker = null;
 
         ObjectTree.Dispose();
         LiveWalker.Dispose();
