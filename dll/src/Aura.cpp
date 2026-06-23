@@ -5247,6 +5247,23 @@ static void EnsureUFunctionFuncOffset() {
              best ? "" : " (NOT FOUND — Path 2 native analysis disabled)");
 }
 
+// Resolve a UFunction's native code entry point (UFunction->Func). For native
+// (FUNC_Native) functions this is the execXxx thunk in .text — the address to
+// disassemble; for Blueprint functions it points at the interpreter
+// (ProcessInternal). Returns 0 if the Func offset isn't detected yet or the
+// slot doesn't hold a code pointer. Used by the UI "Disassemble in CE" button
+// (push to CE via AOBMaker) on the xref dialog.
+uintptr_t GetFunctionCodeAddr(uintptr_t funcAddr) {
+    if (!funcAddr) return 0;
+    EnsureUFunctionFuncOffset();
+    if (DynOff::UFUNCTION_FUNC == 0) return 0;
+    uintptr_t exec = 0;
+    if (!Macht::ReadSafe(funcAddr + DynOff::UFUNCTION_FUNC, exec) ||
+        !Macht::LooksLikeCodePointer(exec))
+        return 0;
+    return exec;
+}
+
 // --- Path 2: disassemble a native UFunction and map [this+off] to props ---
 //
 // Returns the method tag ("disasm" when the decoder ran, "none" when the exec

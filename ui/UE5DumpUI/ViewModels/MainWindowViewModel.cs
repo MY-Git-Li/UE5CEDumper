@@ -921,6 +921,40 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 _log.Error($"InterestingFunctions LocateInGWorld handler error: {className}", ex);
             }
         };
+
+        // Xref dialog (code-behind, no per-instance DI): give it the app's AOBMaker
+        // bridge for "Disassemble in CE", and handle its "Locate class" request by
+        // resolving a live (non-CDO) instance + navigating to Live Walker — same
+        // class-name path as the Interesting Functions locate just above.
+        Views.PropertyXrefDialog.SharedAobMaker = aobMaker;
+        Views.PropertyXrefDialog.LocateClassInGWorldRequested += async (className) =>
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(className)) return;
+                var instances = await _dump.FindInstancesAsync(className, exactMatch: true, limit: 5);
+                string? liveAddr = null;
+                foreach (var inst in instances.Instances)
+                {
+                    if (string.IsNullOrEmpty(inst.Address)) continue;
+                    if (inst.Name.StartsWith("Default__", StringComparison.Ordinal)) continue;
+                    liveAddr = inst.Address;
+                    break;
+                }
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                if (string.IsNullOrEmpty(liveAddr))
+                {
+                    LiveWalker.StatusText = $"No live (non-CDO) instance of {className} to locate in GWorld.";
+                    return;
+                }
+                await LiveWalker.LocateInGWorldAsync(liveAddr, 0, null, stopAtParent: true);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"Xref dialog LocateClass handler error: {className}", ex);
+            }
+        };
+
         InterestingFunctions.LocateInGameEngine += async (className) =>
         {
             try

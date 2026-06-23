@@ -150,6 +150,11 @@ public interface IDumpService
         string classAddr, bool gameOnly = true, int maxResults = 200,
         CancellationToken ct = default);
 
+    // Resolve a UFunction's native code entry point (UFunction->Func) — the .text
+    // address for the xref dialog's "Disassemble in CE" push. Returns "" if the
+    // offset isn't detected or the slot isn't a code pointer.
+    Task<string> GetFunctionCodeAddrAsync(string funcAddr, CancellationToken ct = default);
+
     // Reverse edge: the properties a single UFunction reads/writes.
     Task<FunctionPropRefsResult> WalkFunctionPropsAsync(
         string funcAddr, CancellationToken ct = default);

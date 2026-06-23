@@ -37,6 +37,7 @@ constexpr const char* CMD_DETECT_NOISE_CLASSES = "detect_noise_classes";
 constexpr const char* CMD_RESOLVE_GAME_ENGINE = "resolve_game_engine";
 constexpr const char* CMD_FIND_PROPERTY_XREFS = "find_property_xrefs";
 constexpr const char* CMD_FIND_FUNCTIONS_BY_CLASS = "find_functions_by_class";
+constexpr const char* CMD_GET_FUNCTION_CODE_ADDR = "get_function_code_addr";
 constexpr const char* CMD_WALK_FUNCTION_PROPS = "walk_function_props";
 constexpr const char* CMD_GET_CE_PTR_INFO  = "get_ce_pointer_info";
 constexpr const char* CMD_GET_OFFSETS      = "get_offsets";
