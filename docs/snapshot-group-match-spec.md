@@ -1,10 +1,13 @@
 # Snapshot Group Match — Multiple Values over captured snapshots (Design)
 
-> **Status: BUILT — S1–S4 shipped on `dev` (builds 1563-1568); in-game verify pending.**
-> Mode A (single-snapshot absolute) + Mode B (cross-snapshot temporal, incl. the
-> `Unchanged` predicate) are implemented, unit-tested, and adversarial-reviewed (6
-> findings fixed). Deep struct-array blocks are deferred to SPC Query (out of scope
-> here). This remains the design of record; `docs/dev-log.md` has the milestone entry.
+> **Status: SHIPPED + MERGED main (PR #348 `a45419d`); in-game VERIFIED on SEED.**
+> S1–S5 (builds 1563-1569). Mode A (single-snapshot absolute) + Mode B (cross-snapshot
+> temporal, incl. the `Unchanged` predicate) + S5 **Deep** (nested array / struct-array
+> values, e.g. `…Tunes[2]`). Adversarial-reviewed (6 findings fixed) + a cross-session
+> ⚙-gate fix. In-game verified: Deep + `{Increased, Unchanged}` isolated the changed
+> `SaveSlotList[1]…Tunes[2]`. Array-AS-BLOCK (each array its own block) remains an
+> optional refinement. This remains the design of record; `docs/dev-log.md` has the
+> milestone entries.
 
 Brings the object-aware **Group Scan** capability (today live-memory only, in the
 Value Search tab) to the **captured-snapshot** corpus — the Orden-reuse target the
