@@ -250,6 +250,39 @@ public class SpcGroupMatchTests : IDisposable
     }
 
     [Fact]
+    public async Task ThreeSnapshotChain_DeepNestedTunes_PerSlotChains_TheInGameSeedCase()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        // Mirrors the in-game SEED verification (BP_LifeSaveData_C, a deeply-nested Tunes[7]
+        // int array). Across 3 snapshots:
+        //   Tunes[1]: 15 -> 15 -> 150   (· Unchanged Increased)
+        //   Tunes[2]: 20 -> 21 -> 21    (· Increased Unchanged)
+        // plus a third all-Any slot riding along (like the in-game version_no field).
+        const string path = "SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes";
+        var ids = await SeedSeqAsync(ct,
+            new[] { ObjWithArray(1, "BP_LifeSaveData_C", path,
+                (0, IntHex(10)), (1, IntHex(15)),  (2, IntHex(20)), (3, IntHex(0)), (4, IntHex(25)), (5, IntHex(3)), (6, IntHex(0))) },
+            new[] { ObjWithArray(1, "BP_LifeSaveData_C", path,
+                (0, IntHex(10)), (1, IntHex(15)),  (2, IntHex(21)), (3, IntHex(0)), (4, IntHex(25)), (5, IntHex(3)), (6, IntHex(0))) },
+            new[] { ObjWithArray(1, "BP_LifeSaveData_C", path,
+                (0, IntHex(10)), (1, IntHex(150)), (2, IntHex(21)), (3, IntHex(0)), (4, IntHex(25)), (5, IntHex(3)), (6, IntHex(0))) });
+
+        var q = Query(ids,
+            Slot(Cell(SpcPredicateKind.Any), Cell(SpcPredicateKind.Unchanged), Cell(SpcPredicateKind.Increased)),  // Tunes[1]
+            Slot(Cell(SpcPredicateKind.Any), Cell(SpcPredicateKind.Increased), Cell(SpcPredicateKind.Unchanged)),  // Tunes[2]
+            Slot(Cell(SpcPredicateKind.Any), Cell(SpcPredicateKind.Any),       Cell(SpcPredicateKind.Any)));       // ride-along
+        var res = await _store.SpcGroupQueryAsync(q, ct);
+
+        Assert.Null(res.Error);
+        var c = Assert.Single(res.Candidates);
+        Assert.Equal("BP_LifeSaveData_C", c.ClassName);
+        Assert.Equal(3, c.Slots.Count);
+        // The two chained slots resolve to the right elements with their newest values.
+        Assert.Contains(c.Slots, s => s.FieldName.Contains("Tunes[1]") && s.LeafValue == "150");
+        Assert.Contains(c.Slots, s => s.FieldName.Contains("Tunes[2]") && s.LeafValue == "21");
+    }
+
+    [Fact]
     public async Task ArrayElements_SlotMatchingTwo_IsNotFalselyLocked()
     {
         var ct = TestContext.Current.CancellationToken;

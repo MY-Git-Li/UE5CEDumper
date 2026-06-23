@@ -65,7 +65,15 @@ public partial class SpcQueryViewModel
         else       { _groupCts?.Cancel(); }
     }
 
-    partial void OnActiveGroupSlotChanged(int value) => ApplyActiveGroupSlotToPicks();
+    partial void OnActiveGroupSlotChanged(int value)
+    {
+        ApplyActiveGroupSlotToPicks();
+        OnPropertyChanged(nameof(EditingSlotLabel));
+    }
+
+    /// <summary>Prominent "Now editing: Value N" label beside the Values header, so it's
+    /// obvious which slot's column the snapshot grid below is currently editing.</summary>
+    public string EditingSlotLabel => $"Now editing: Value {ActiveGroupSlot + 1}";
 
     /// <summary>Re-point every pick's active-slot facade at the current slot.</summary>
     internal void ApplyActiveGroupSlotToPicks()

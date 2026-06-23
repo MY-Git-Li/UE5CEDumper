@@ -16,7 +16,7 @@ builds ≤696 in
 
 -----
 
-## 2026-06-23 — SPC Query Multiple Values (Single/Group toggle): N-snapshot, object-aware group matching with per-slot predicate chains (builds 1575-1582; C#-only; adversarial-reviewed; in-game verify pending)
+## 2026-06-23 — SPC Query Multiple Values (Single/Group toggle): N-snapshot, object-aware group matching with per-slot predicate chains (builds 1575-1584; C#-only; adversarial-reviewed; in-game VERIFIED on SEED)
 
 Brings the object-aware **Group Scan** to the **SPC Query** tab — the `Orden` reuse seam group-value-scan-spec §3.1 reserved for SPC (*"run Orden per object after the SPC load"*). Where the just-shipped **Snapshot Group Match Mode B** compares exactly **2** snapshots first-vs-last, **SPC Group** is the full **N-snapshot** generalisation: each of the 2-4 value-slots carries its **own per-snapshot predicate CHAIN** (the SPC directional chain `Any/Unchanged/Changed/Increased/Decreased` + a per-snapshot absolute window), and a match is one OBJECT whose N fields each satisfy their chain at DISTINCT offsets. The motivating case it can express that Mode B can't: *Current HP `·→↓→↑`* while *Max HP `·→=→=`* over `[full, damaged, healed]` — a per-snapshot pattern, not a single step. No DLL change, no DB schema change (pure C#).
 
@@ -31,7 +31,9 @@ Brings the object-aware **Group Scan** to the **SPC Query** tab — the `Orden` 
 
 Plus one self-found edge fix: `RemoveGroupSlot` could leave `ActiveGroupSlot = -1` when the active slot is removed (the bound ComboBox's selected-item-removed path) → move selection off the doomed slot first.
 
-C# 1849/0; Native AOT publish clean (47.4 MB), no IL2026/IL3050. **In-game verify pending:** capture 3 snapshots around a stat change, then SPC → Group → set a per-slot chain per value (e.g. Current HP `↓ then ↑`, Max HP `= then =`) → confirm it isolates the right object. See [group-value-scan-spec.md](group-value-scan-spec.md) §3.1.
+**In-game VERIFIED on SEED (UE4.27).** 3 snapshots of the deep nested `BP_LifeSaveData_C` save data — `…WeaponTuneList[0].Tunes[1]` 15→15→**150** and `…Tunes[2]` 20→**21**→21 — with Value 1 chain `· = ↑`, Value 2 chain `· ↑ =`, Value 3 all-Any: SPC Group isolated the single object, both deep array slots locked onto the right elements (`Tunes[1]=150`, `Tunes[2]=21`), the all-Any slot rode along on `version_no`. Locked into a regression test (`ThreeSnapshotChain_DeepNestedTunes_PerSlotChains_TheInGameSeedCase`) that reproduces the exact shape. **UI follow-up (build 1584):** a prominent green "Now editing: Value N" chip beside the *Values (width scope per value)* header (computed `EditingSlotLabel`) so it's obvious which slot's column the snapshot grid is editing.
+
+C# 1850/0; Native AOT publish clean (47.4 MB), no IL2026/IL3050. See [group-value-scan-spec.md](group-value-scan-spec.md) §3.1.
 
 ## 2026-06-23 — Snapshot Group Match S5: Deep mode (nested container / struct-array values) — driven by the SEED in-game test (build 1569; commit `382e759`)
 

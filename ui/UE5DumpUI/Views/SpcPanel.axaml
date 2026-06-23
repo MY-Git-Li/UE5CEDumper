@@ -287,7 +287,14 @@
 
       <!-- Value slots: width scope per value + add/remove + which value the grid edits -->
       <StackPanel Grid.Row="2" Spacing="6" Margin="0,0,0,8">
-        <TextBlock Text="{StaticResource str.Spc.Group.SlotsHeader}" Foreground="#9CDCFE" FontWeight="SemiBold"/>
+        <StackPanel Orientation="Horizontal" Spacing="10">
+          <TextBlock Text="{StaticResource str.Spc.Group.SlotsHeader}" Foreground="#9CDCFE" FontWeight="SemiBold" VerticalAlignment="Center"/>
+          <!-- Prominent active-slot indicator: which value's chain the grid below edits. -->
+          <Border Background="#264F26" BorderBrush="#4EC9B0" BorderThickness="1" CornerRadius="3"
+                  Padding="8,2" VerticalAlignment="Center">
+            <TextBlock Text="{Binding EditingSlotLabel}" Foreground="#7FE0A0" FontWeight="Bold"/>
+          </Border>
+        </StackPanel>
         <WrapPanel Orientation="Horizontal">
           <ItemsControl ItemsSource="{Binding GroupSlots}">
             <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
