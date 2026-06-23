@@ -16,6 +16,12 @@ builds ≤696 in
 
 -----
 
+## 2026-06-23 — Snapshot Group Match S5: Deep mode (nested container / struct-array values) — driven by the SEED in-game test (build 1569; commit `382e759`)
+
+First in-game test on SEED (the canonical `Tunes` case): the user changed `SaveSlotList[1].MsTuneData.MsTunes[0].WeaponTuneList[0].Tunes[2]` 20→21 across two snapshots and the group match `{Increased, Unchanged}` **missed it** (matched 3 direct-field noise objects instead). Diagnosis (verified against the snapshot DB): the value IS captured — 103,148 `Tunes` rows; `BP_LifeSaveData_C` has **16 direct fields but 52,257 array fields** — but S1-S4 matched DIRECT fields only (the `array_field` rows were excluded as "deep = SPC's scope"), so the `Increased` slot couldn't reach `Tunes[2]`.
+
+**Fix — a "Deep (nested containers)" checkbox** (opt-in, default off; mirrors the live Group Scan's Deep toggle). When on, both `GroupMatchAsync` (Mode A) and `GroupMatchModeBAsync` (Mode B) include the captured `array_field` rows, folded into the OWNING object's block: the `SpcKey` join already keys on `array_field`+`elem_index` (so an element joins to its own counterpart across snapshots) and `SpcObjectKey` buckets them under the owner. The matched slot shows the full path (`Increased → SaveSlot[0]…Tunes[2]`). Array-element leaves use offset 0 (the heap element address isn't captured — the path is the identifier) + the owner `obj_addr` for handoffs, like the Diff array rows. `SnapshotGroupQuery.Deep` + `GroupFieldDisplay` (mirrors `SpcDisplayProp`) + `GroupDeep` VM property + the en.axaml checkbox. 2 tests (Mode A + Mode B Deep find the nested value; OFF misses) — the latter IS the user's SEED case. C# 1834/0. **Re-test in-game with Deep ON.** *(Object-flat deep = array elements as the owner's leaves; array-AS-BLOCK, i.e. each array its own block like the live deep, remains a possible future refinement.)*
+
 ## 2026-06-23 — Snapshot Group Match: Multiple Values over the captured-snapshot corpus (S1–S4; builds 1563-1568; C#-only; adversarial-reviewed; in-game verify pending)
 
 Brings the object-aware **Group Scan** (find objects holding ALL of N values at distinct numeric offsets, in any order) to the **Snapshot** experimental feature — the `Orden` reuse seam group-value-scan-spec §3.1 reserved, run in pure C#. Design of record: [snapshot-group-match-spec.md](snapshot-group-match-spec.md). Four phases, each committed:
