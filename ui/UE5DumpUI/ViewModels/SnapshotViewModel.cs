@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
+using System.Threading.Channels;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -45,6 +46,13 @@ public partial class SnapshotViewModel : ViewModelBase
     private DateTime _lastChunkAt;
     private int _capOffset, _capTotal, _capObjects, _capFields;
     private int _heartbeatPhase;
+    // Phase-0 telemetry totals (ms): DLL walk, DLL JSON build, full fetch round-trip
+    // (walk+serialize+pipe+parse), and SQLite write. parse = fetch - walk - serialize.
+    private long _capWalkMs, _capSerMs, _capFetchMs, _capWriteMs;
+    // Split of the old "parse+pipe" bucket (C#-side): pipe read, the "Pipe RX" debug log,
+    // the JsonNode DOM parse, and the model-build loop. The remainder (parse+pipe minus
+    // these four) ≈ the DLL's .dump() + the pipe transfer.
+    private long _capReadMs, _capRxLogMs, _capParseMs, _capBuildMs;
 
     [ObservableProperty] private string _label = "";
     [ObservableProperty] private bool   _gameOnly = true;
@@ -435,6 +443,8 @@ public partial class SnapshotViewModel : ViewModelBase
         _captureStart = DateTime.UtcNow;
         _lastChunkAt  = _captureStart;
         _capOffset = _capTotal = _capObjects = _capFields = 0;
+        _capWalkMs = _capSerMs = _capFetchMs = _capWriteMs = 0;
+        _capReadMs = _capRxLogMs = _capParseMs = _capBuildMs = 0;
         _heartbeatPhase = 0;
 
         long snapshotId = 0;
@@ -459,46 +469,99 @@ public partial class SnapshotViewModel : ViewModelBase
             };
             snapshotId = await _store.CreateSnapshotAsync(meta, ct);
 
-            int offset = 0, objectCount = 0, fieldCount = 0;
-            while (!ct.IsCancellationRequested)
+            // Producer/consumer: fetch chunk N+1 over the pipe while chunk N is written
+            // to SQLite, so the DLL walk and the DB write OVERLAP instead of running
+            // back-to-back. The consumer owns one bulk-capture session (single connection,
+            // bulk pragmas, commit-every-N). A linked CTS lets a consumer (write) failure
+            // stop the producer without deadlocking on the bounded channel, and vice-versa.
+            int objectCount = 0, fieldCount = 0;
+            await using (var session = await _store.BeginCaptureSessionAsync(ct))
+            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
-                var chunk = await _dump.SnapshotChunkAsync(
-                    dataType, gameOnly, offset, Constants.SnapshotChunkSize,
-                    includeNative, autoSkipNoise, ct);
+                var lct = linked.Token;
+                var channel = Channel.CreateBounded<SnapshotChunkResult>(
+                    new BoundedChannelOptions(2) { SingleReader = true, SingleWriter = true });
 
-                if (chunk.Objects.Count > 0)
+                var producer = Task.Run(async () =>
                 {
-                    // Microsoft.Data.Sqlite *Async runs synchronously on the caller —
-                    // the per-row insert loop must go off the UI thread or the window
-                    // stutters throughout a multi-minute capture.
-                    var objs = chunk.Objects;
-                    fieldCount += await Task.Run(() => _store.WriteChunkAsync(snapshotId, objs, ct), ct);
-                    objectCount += chunk.Objects.Count;
-                }
+                    try
+                    {
+                        int offset = 0;
+                        while (!lct.IsCancellationRequested)
+                        {
+                            var fetchSw = System.Diagnostics.Stopwatch.StartNew();
+                            var chunk = await _dump.SnapshotChunkAsync(
+                                dataType, gameOnly, offset, Constants.SnapshotChunkSize,
+                                includeNative, autoSkipNoise, lct);
+                            fetchSw.Stop();
+                            // Phase-0 telemetry: full fetch round-trip + DLL-reported splits
+                            // + the C#-side parse+pipe breakdown (read / RX-log / parse / build).
+                            _capFetchMs += fetchSw.ElapsedMilliseconds;
+                            _capWalkMs  += chunk.WalkMs;
+                            _capSerMs   += chunk.SerializeMs;
+                            _capReadMs  += chunk.ReadMs;
+                            _capRxLogMs += chunk.RxLogMs;
+                            _capParseMs += chunk.ParseMs;
+                            _capBuildMs += chunk.BuildMs;
+                            offset += chunk.Scanned;
+                            _capOffset = offset;     // display-only; heartbeat reads on UI thread
+                            _lastChunkAt = DateTime.UtcNow;
+                            await channel.Writer.WriteAsync(chunk, lct);
+                            if (chunk.Scanned == 0 || offset >= chunk.Total) break;
+                        }
+                    }
+                    // Swallow cancellation (real ct OR consumer-triggered) — the consumer
+                    // surfaces the real fault; non-cancel exceptions propagate out + fault
+                    // the producer task, which WhenAll surfaces.
+                    catch (OperationCanceledException) { }
+                    finally { channel.Writer.TryComplete(); }
+                }, lct);
 
-                offset += chunk.Scanned;
-                // Hand the latest counts to the heartbeat (it owns StatusText while
-                // capturing) and refresh immediately so a chunk completion shows at
-                // once; the timer keeps the line live between chunks.
-                _capOffset = offset; _capObjects = objectCount; _capFields = fieldCount;
-                _lastChunkAt = DateTime.UtcNow;
-                Progress = total > 0 ? Math.Min(1.0, offset / (double)total) : 0;
-                RenderCaptureStatus();
+                var consumer = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await foreach (var chunk in channel.Reader.ReadAllAsync(lct))
+                        {
+                            if (chunk.Objects.Count == 0) continue;
+                            var writeSw = System.Diagnostics.Stopwatch.StartNew();
+                            int n = session.WriteChunk(snapshotId, chunk.Objects, lct);
+                            writeSw.Stop();
+                            _capWriteMs += writeSw.ElapsedMilliseconds;
+                            objectCount += chunk.Objects.Count;
+                            fieldCount  += n;
+                            _capObjects = objectCount;   // display-only
+                            _capFields  = fieldCount;
+                        }
+                    }
+                    catch { linked.Cancel(); throw; }   // unblock the producer on a write failure
+                }, lct);
 
-                if (chunk.Scanned == 0 || offset >= chunk.Total) break;
+                await Task.WhenAll(producer, consumer);
+
+                StopCaptureHeartbeat();   // stop ticking before the terminal messages
+                StatusText = "Finalising…";
+                // Incremental pivot counts on the session connection — replaces the ~10s
+                // COUNT(DISTINCT) GROUP BY ×2 the lazy build runs (the documented finalize
+                // freeze). Dispose then restores pragmas + closes.
+                await session.CompleteSnapshotAsync(snapshotId, objectCount, fieldCount, ct);
             }
 
-            StopCaptureHeartbeat();   // stop ticking before the terminal messages
-            StatusText = "Finalising (building pivot index)…";
-            // Off the UI thread: FinalizeSnapshotAsync builds the pivot index with a
-            // COUNT(DISTINCT …) GROUP BY over the full snapshot (the documented ~10s
-            // hard freeze), and EnforceQuotaAsync runs wal_checkpoint + DELETE + VACUUM
-            // over a GB-class DB — all synchronous under Microsoft.Data.Sqlite.
-            await Task.Run(() => _store.FinalizeSnapshotAsync(snapshotId, objectCount, fieldCount, ct), ct);
             // FIFO eviction: drop oldest snapshots of this game until the DB
-            // fits the quota (the just-captured one is always kept).
+            // fits the quota (the just-captured one is always kept). EnforceQuotaAsync now
+            // skips the checkpoint + VACUUM entirely when the capture stays under quota.
             int dropped = await Task.Run(() => _store.EnforceQuotaAsync(QuotaBytes, ct), ct);
             var evicted = dropped > 0 ? $" — dropped {dropped} oldest (quota)" : "";
+            // Phase-0 telemetry: one summary line with the full cost breakdown for
+            // before/after comparison. parse+pipe is now split into pipe-read / RX-log /
+            // json-parse / model-build; the leftover (other) ≈ the DLL .dump() + pipe transfer.
+            long parseMs = Math.Max(0, _capFetchMs - _capWalkMs - _capSerMs);
+            long otherMs = Math.Max(0, parseMs - _capReadMs - _capRxLogMs - _capParseMs - _capBuildMs);
+            _log.Info(Constants.LogCatView,
+                $"Capture done: {objectCount:N0} objects, {fieldCount:N0} fields in " +
+                $"{FmtSpan(DateTime.UtcNow - _captureStart)} — walk {_capWalkMs}ms, serialize {_capSerMs}ms, " +
+                $"parse+pipe {parseMs}ms [read {_capReadMs} / rxlog {_capRxLogMs} / jsonparse {_capParseMs} / " +
+                $"build {_capBuildMs} / other {otherMs}], write {_capWriteMs}ms");
             StatusText = $"Captured {objectCount:N0} objects, {fieldCount:N0} fields{evicted}";
             Label = "";
             await RefreshAsync();
@@ -572,6 +635,10 @@ public partial class SnapshotViewModel : ViewModelBase
     {
         var now = DateTime.UtcNow;
         var elapsed = now - _captureStart;
+        // Progress is computed HERE (UI thread, via the heartbeat) from the producer's
+        // _capOffset/_capTotal, so the background producer never mutates the bound
+        // ObservableProperty off-thread.
+        Progress = _capTotal > 0 ? Math.Min(1.0, _capOffset / (double)_capTotal) : 0;
         string dots = new string('.', _heartbeatPhase % 4);   // animate 0..3 dots
         string timing = $" · {FmtSpan(elapsed)} elapsed";
         if (Progress >= 0.02)
@@ -588,7 +655,18 @@ public partial class SnapshotViewModel : ViewModelBase
         // {dots,-3}: fixed 3-char slot so the count column doesn't jitter as the
         // dots animate.
         StatusText = $"Capturing{dots,-3} {_capOffset:N0}/{_capTotal:N0} ({Progress:P0}) — " +
-                     $"{_capObjects:N0} objects, {_capFields:N0} fields{timing}{batch}";
+                     $"{_capObjects:N0} objects, {_capFields:N0} fields{timing}{CapturePerfSuffix()}{batch}";
+    }
+
+    // Phase-0 telemetry: a compact walk/serialize/parse/write breakdown (seconds),
+    // shown once the totals are meaningful so we optimise capture on real numbers.
+    private string CapturePerfSuffix()
+    {
+        long parse = _capFetchMs - _capWalkMs - _capSerMs;
+        if (parse < 0) parse = 0;
+        if (_capFetchMs + _capWriteMs < 500) return "";   // too early to be useful
+        return $" · walk {_capWalkMs / 1000.0:0.0}s / ser {_capSerMs / 1000.0:0.0}s / " +
+               $"parse {parse / 1000.0:0.0}s / write {_capWriteMs / 1000.0:0.0}s";
     }
 
     [RelayCommand]

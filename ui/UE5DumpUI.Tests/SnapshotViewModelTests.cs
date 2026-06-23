@@ -46,7 +46,11 @@ public class SnapshotViewModelTests : IDisposable
             LastGameOnly = gameOnly;
             LastNativeC = nativeC;
             LastAutoSkipNoise = autoSkipNoise;
-            var r = new SnapshotChunkResult { Total = 3 };
+            var r = new SnapshotChunkResult
+            {
+                Total = 3, WalkMs = 5, SerializeMs = 2,
+                ReadMs = 3, RxLogMs = 1, ParseMs = 7, BuildMs = 4,
+            };
             if (offset == 0)
             {
                 r.Scanned = 2;
@@ -77,6 +81,60 @@ public class SnapshotViewModelTests : IDisposable
                 o.Fields.Add(new SnapshotCapturedField { Name = n, Type = t, Hex = h });
             return o;
         }
+    }
+
+    // Delivers one chunk, then BLOCKS on the second fetch until cancelled — so a test can
+    // cancel mid-stream deterministically and assert the partial snapshot is cleaned up.
+    private sealed class BlockingCaptureStub : StubDumpService
+    {
+        public readonly TaskCompletionSource SecondChunkReached =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override Task<int> BeginSnapshotAsync(string dataType, CancellationToken ct = default)
+            => Task.FromResult(100);
+
+        public override async Task<SnapshotChunkResult> SnapshotChunkAsync(
+            string dataType, bool gameOnly, int offset, int limit,
+            bool nativeC = false, bool autoSkipNoise = true, CancellationToken ct = default)
+        {
+            if (offset == 0)
+            {
+                var r = new SnapshotChunkResult { Total = 100, Scanned = 2 };
+                var o = new SnapshotCapturedObject
+                {
+                    Index = 0, Addr = "0x0", Name = "Obj_0",
+                    ClassName = "BP_Thing_C", OuterClassName = "World",
+                    Path = "/Game/Map.Map:PersistentLevel.Obj_0",
+                };
+                o.Fields.Add(new SnapshotCapturedField { Name = "A", Type = "IntProperty", Hex = "01000000" });
+                r.Objects.Add(o);
+                return r;
+            }
+            SecondChunkReached.TrySetResult();
+            await Task.Delay(System.Threading.Timeout.Infinite, ct);   // throws OCE on cancel
+            return new SnapshotChunkResult { Total = 100, Scanned = 0 };
+        }
+    }
+
+    [Fact]
+    public async Task Capture_CancelMidStream_DeletesPartialSnapshot()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dump = new BlockingCaptureStub();
+        var vm = new SnapshotViewModel(dump, _store, new MockLoggingService())
+        {
+            SelectedScope = "NumericNoByte", GameOnly = true, Label = "partial",
+        };
+        vm.SetEngineState(new EngineState { PeHash = "PEHASH", UEVersion = 504, ModuleBase = "7FF600000000", ProcessCreationTime = "01D9ABCDEF012345" });
+
+        var task = vm.CaptureCommand.ExecuteAsync(null);
+        await dump.SecondChunkReached.Task.WaitAsync(TimeSpan.FromSeconds(10), ct);   // producer blocked on chunk 2
+        vm.CancelCommand.Execute(null);
+        await task;
+
+        Assert.False(vm.IsCapturing);
+        Assert.Contains("cancel", vm.StatusText, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(await _store.ListSnapshotsAsync(ct));   // the partial snapshot was deleted
     }
 
     [Fact]

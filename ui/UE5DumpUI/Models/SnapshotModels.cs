@@ -106,5 +106,16 @@ public sealed class SnapshotChunkResult
 {
     public int Total   { get; set; }   // GObjects count
     public int Scanned { get; set; }   // indices iterated (advance offset by this)
+    // Phase-0 telemetry (DLL-side, per chunk): the parallel walk+merge and the JSON
+    // DOM-build wall-times. Default 0 keeps older DLLs / test stubs back-compatible.
+    public long WalkMs      { get; set; }
+    public long SerializeMs { get; set; }
+    // C#-side split of the old "parse+pipe" bucket, so a capture pinpoints exactly which
+    // stage of the JSON round-trip costs the seconds: pipe read of the response line, the
+    // "Pipe RX" debug-log of that line, the JsonNode DOM parse, and the model-build loop.
+    public long ReadMs      { get; set; }   // _reader.ReadLineAsync (pipe I/O of the response)
+    public long RxLogMs     { get; set; }   // the "Pipe RX: {line}" debug log (string build + write)
+    public long ParseMs     { get; set; }   // JsonNode.Parse (DOM build from the line)
+    public long BuildMs     { get; set; }   // materialising SnapshotCapturedObject[] from the DOM
     public List<SnapshotCapturedObject> Objects { get; set; } = new();
 }

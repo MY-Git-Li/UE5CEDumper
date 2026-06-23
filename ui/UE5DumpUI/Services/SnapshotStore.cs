@@ -215,114 +215,307 @@ public sealed class SnapshotStore : ISnapshotStore
                                            CancellationToken ct = default)
     {
         if (objects.Count == 0) return 0;
-
         await using var conn = await OpenAsync(ct);
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
+        using var ins = new ChunkInserter(conn, tx);
+        int rows = ins.Insert(snapshotId, objects, ct);
+        await tx.CommitAsync(ct);
+        return rows;
+    }
 
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = """
-            INSERT INTO fields(snapshot_id, class_fqn, norm_path, outer_chain, prop_name, prop_offset,
-                               declared_type, gobjects_index, obj_addr, numeric_value, hex)
-            VALUES ($snap, $cls, $np, $oc, $pn, $off, $dt, $idx, $addr, $num, $hex);
-            """;
-        var pSnap = cmd.Parameters.Add("$snap", SqliteType.Integer);
-        var pCls  = cmd.Parameters.Add("$cls",  SqliteType.Text);
-        var pNp   = cmd.Parameters.Add("$np",   SqliteType.Text);
-        var pOc   = cmd.Parameters.Add("$oc",   SqliteType.Text);
-        var pPn   = cmd.Parameters.Add("$pn",   SqliteType.Text);
-        var pOff  = cmd.Parameters.Add("$off",  SqliteType.Integer);
-        var pDt   = cmd.Parameters.Add("$dt",   SqliteType.Text);
-        var pIdx  = cmd.Parameters.Add("$idx",  SqliteType.Integer);
-        var pAddr = cmd.Parameters.Add("$addr", SqliteType.Text);
-        var pNum  = cmd.Parameters.Add("$num",  SqliteType.Real);
-        var pHex  = cmd.Parameters.Add("$hex",  SqliteType.Text);
-
-        // Second command for struct-array element rows (carries the array
-        // columns; SPC/Pivot inner-join on array_field + inner_key + inner_prop).
-        await using var arrCmd = conn.CreateCommand();
-        arrCmd.Transaction = tx;
-        arrCmd.CommandText = """
-            INSERT INTO fields(snapshot_id, class_fqn, norm_path, outer_chain, prop_name, prop_offset,
-                               declared_type, gobjects_index, obj_addr, numeric_value, hex,
-                               array_field, elem_index, inner_key_name, inner_key_value, inner_prop_name)
-            VALUES ($snap, $cls, $np, $oc, $pn, $off, $dt, $idx, $addr, $num, $hex,
-                    $af, $ei, $ikn, $ikv, $ipn);
-            """;
-        var aSnap = arrCmd.Parameters.Add("$snap", SqliteType.Integer);
-        var aCls  = arrCmd.Parameters.Add("$cls",  SqliteType.Text);
-        var aNp   = arrCmd.Parameters.Add("$np",   SqliteType.Text);
-        var aOc   = arrCmd.Parameters.Add("$oc",   SqliteType.Text);
-        var aPn   = arrCmd.Parameters.Add("$pn",   SqliteType.Text);
-        var aOff  = arrCmd.Parameters.Add("$off",  SqliteType.Integer);
-        var aDt   = arrCmd.Parameters.Add("$dt",   SqliteType.Text);
-        var aIdx  = arrCmd.Parameters.Add("$idx",  SqliteType.Integer);
-        var aAddr = arrCmd.Parameters.Add("$addr", SqliteType.Text);
-        var aNum  = arrCmd.Parameters.Add("$num",  SqliteType.Real);
-        var aHex  = arrCmd.Parameters.Add("$hex",  SqliteType.Text);
-        var aAf   = arrCmd.Parameters.Add("$af",   SqliteType.Text);
-        var aEi   = arrCmd.Parameters.Add("$ei",   SqliteType.Integer);
-        var aIkn  = arrCmd.Parameters.Add("$ikn",  SqliteType.Text);
-        var aIkv  = arrCmd.Parameters.Add("$ikv",  SqliteType.Text);
-        var aIpn  = arrCmd.Parameters.Add("$ipn",  SqliteType.Text);
-
-        int rows = 0;
-        foreach (var obj in objects)
+    public async Task<ICaptureSession> BeginCaptureSessionAsync(CancellationToken ct = default)
+    {
+        var conn = await OpenAsync(ct);   // WAL + synchronous=NORMAL + EnsureSchema
+        try
         {
-            string normPath = SnapshotIdentity.NormalizePath(obj.Path);
-            foreach (var f in obj.Fields)
-            {
-                pSnap.Value = snapshotId;
-                pCls.Value  = obj.ClassName;
-                pNp.Value   = normPath;
-                pOc.Value   = obj.OuterClassName;
-                pPn.Value   = f.Name;
-                pOff.Value  = f.Offset;
-                pDt.Value   = f.Type;
-                pIdx.Value  = obj.Index;
-                pAddr.Value = obj.Addr;
-                pNum.Value  = SnapshotNumeric.TryFromHex(f.Type, f.Hex, out var num)
-                                ? num : (object)DBNull.Value;
-                pHex.Value  = f.Hex;
-                await cmd.ExecuteNonQueryAsync(ct);
-                rows++;
-            }
+            // Bulk-load pragmas: a snapshot is rebuildable (a crash mid-capture leaves a
+            // partial DB the next open/cleanup discards), so trade durability for speed
+            // during capture. Restored to NORMAL when the session disposes.
+            await ExecAsync(conn, "PRAGMA synchronous=OFF; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-262144;", ct);
+            return new CaptureSession(conn, _log);
+        }
+        catch
+        {
+            await conn.DisposeAsync();
+            throw;
+        }
+    }
 
-            // Struct-array element rows (one per inner numeric field).
-            foreach (var arr in obj.Arrays)
+    // Builds + binds the scalar + struct-array INSERT commands for the `fields` table
+    // once, then inserts each captured object's rows. Shared by the one-shot
+    // WriteChunkAsync (tests / seeding) and the long-lived CaptureSession so the
+    // row-binding logic lives in ONE place. Commands bind to the connection; Rebind()
+    // re-points them at a new transaction after the session commits + reopens one.
+    private sealed class ChunkInserter : IDisposable
+    {
+        private readonly SqliteCommand _cmd, _arrCmd;
+        private readonly SqliteParameter pSnap, pCls, pNp, pOc, pPn, pOff, pDt, pIdx, pAddr, pNum, pHex;
+        private readonly SqliteParameter aSnap, aCls, aNp, aOc, aPn, aOff, aDt, aIdx, aAddr, aNum, aHex, aAf, aEi, aIkn, aIkv, aIpn;
+
+        public ChunkInserter(SqliteConnection conn, SqliteTransaction tx)
+        {
+            _cmd = conn.CreateCommand();
+            _cmd.Transaction = tx;
+            _cmd.CommandText = """
+                INSERT INTO fields(snapshot_id, class_fqn, norm_path, outer_chain, prop_name, prop_offset,
+                                   declared_type, gobjects_index, obj_addr, numeric_value, hex)
+                VALUES ($snap, $cls, $np, $oc, $pn, $off, $dt, $idx, $addr, $num, $hex);
+                """;
+            pSnap = _cmd.Parameters.Add("$snap", SqliteType.Integer);
+            pCls  = _cmd.Parameters.Add("$cls",  SqliteType.Text);
+            pNp   = _cmd.Parameters.Add("$np",   SqliteType.Text);
+            pOc   = _cmd.Parameters.Add("$oc",   SqliteType.Text);
+            pPn   = _cmd.Parameters.Add("$pn",   SqliteType.Text);
+            pOff  = _cmd.Parameters.Add("$off",  SqliteType.Integer);
+            pDt   = _cmd.Parameters.Add("$dt",   SqliteType.Text);
+            pIdx  = _cmd.Parameters.Add("$idx",  SqliteType.Integer);
+            pAddr = _cmd.Parameters.Add("$addr", SqliteType.Text);
+            pNum  = _cmd.Parameters.Add("$num",  SqliteType.Real);
+            pHex  = _cmd.Parameters.Add("$hex",  SqliteType.Text);
+
+            // Second command for struct-array element rows (carries the array
+            // columns; SPC/Pivot inner-join on array_field + inner_key + inner_prop).
+            _arrCmd = conn.CreateCommand();
+            _arrCmd.Transaction = tx;
+            _arrCmd.CommandText = """
+                INSERT INTO fields(snapshot_id, class_fqn, norm_path, outer_chain, prop_name, prop_offset,
+                                   declared_type, gobjects_index, obj_addr, numeric_value, hex,
+                                   array_field, elem_index, inner_key_name, inner_key_value, inner_prop_name)
+                VALUES ($snap, $cls, $np, $oc, $pn, $off, $dt, $idx, $addr, $num, $hex,
+                        $af, $ei, $ikn, $ikv, $ipn);
+                """;
+            aSnap = _arrCmd.Parameters.Add("$snap", SqliteType.Integer);
+            aCls  = _arrCmd.Parameters.Add("$cls",  SqliteType.Text);
+            aNp   = _arrCmd.Parameters.Add("$np",   SqliteType.Text);
+            aOc   = _arrCmd.Parameters.Add("$oc",   SqliteType.Text);
+            aPn   = _arrCmd.Parameters.Add("$pn",   SqliteType.Text);
+            aOff  = _arrCmd.Parameters.Add("$off",  SqliteType.Integer);
+            aDt   = _arrCmd.Parameters.Add("$dt",   SqliteType.Text);
+            aIdx  = _arrCmd.Parameters.Add("$idx",  SqliteType.Integer);
+            aAddr = _arrCmd.Parameters.Add("$addr", SqliteType.Text);
+            aNum  = _arrCmd.Parameters.Add("$num",  SqliteType.Real);
+            aHex  = _arrCmd.Parameters.Add("$hex",  SqliteType.Text);
+            aAf   = _arrCmd.Parameters.Add("$af",   SqliteType.Text);
+            aEi   = _arrCmd.Parameters.Add("$ei",   SqliteType.Integer);
+            aIkn  = _arrCmd.Parameters.Add("$ikn",  SqliteType.Text);
+            aIkv  = _arrCmd.Parameters.Add("$ikv",  SqliteType.Text);
+            aIpn  = _arrCmd.Parameters.Add("$ipn",  SqliteType.Text);
+        }
+
+        // Re-point the prepared commands at a fresh transaction (after a session commit).
+        public void Rebind(SqliteTransaction tx) { _cmd.Transaction = tx; _arrCmd.Transaction = tx; }
+
+        public int Insert(long snapshotId, IReadOnlyList<SnapshotCapturedObject> objects, CancellationToken ct)
+        {
+            int rows = 0, objIdx = 0;
+            foreach (var obj in objects)
             {
-                foreach (var el in arr.Elements)
+                if ((++objIdx & 0x3FF) == 0) ct.ThrowIfCancellationRequested();
+                string normPath = SnapshotIdentity.NormalizePath(obj.Path);
+                foreach (var f in obj.Fields)
                 {
-                    object keyName  = string.IsNullOrEmpty(el.KeyName) ? DBNull.Value : el.KeyName;
-                    object keyValue = string.IsNullOrEmpty(el.KeyName) ? DBNull.Value : el.KeyValue;
-                    foreach (var f in el.Fields)
+                    pSnap.Value = snapshotId;
+                    pCls.Value  = obj.ClassName;
+                    pNp.Value   = normPath;
+                    pOc.Value   = obj.OuterClassName;
+                    pPn.Value   = f.Name;
+                    pOff.Value  = f.Offset;
+                    pDt.Value   = f.Type;
+                    pIdx.Value  = obj.Index;
+                    pAddr.Value = obj.Addr;
+                    pNum.Value  = SnapshotNumeric.TryFromHex(f.Type, f.Hex, out var num)
+                                    ? num : (object)DBNull.Value;
+                    pHex.Value  = f.Hex;
+                    _cmd.ExecuteNonQuery();
+                    rows++;
+                }
+
+                // Struct-array element rows (one per inner numeric field).
+                foreach (var arr in obj.Arrays)
+                {
+                    foreach (var el in arr.Elements)
                     {
-                        aSnap.Value = snapshotId;
-                        aCls.Value  = obj.ClassName;
-                        aNp.Value   = normPath;
-                        aOc.Value   = obj.OuterClassName;
-                        aPn.Value   = f.Name;
-                        aOff.Value  = f.Offset;
-                        aDt.Value   = f.Type;
-                        aIdx.Value  = obj.Index;
-                        aAddr.Value = obj.Addr;
-                        aNum.Value  = SnapshotNumeric.TryFromHex(f.Type, f.Hex, out var anum)
-                                        ? anum : (object)DBNull.Value;
-                        aHex.Value  = f.Hex;
-                        aAf.Value   = arr.Field;
-                        aEi.Value   = el.Index;
-                        aIkn.Value  = keyName;
-                        aIkv.Value  = keyValue;
-                        aIpn.Value  = f.Name;
-                        await arrCmd.ExecuteNonQueryAsync(ct);
-                        rows++;
+                        object keyName  = string.IsNullOrEmpty(el.KeyName) ? DBNull.Value : el.KeyName;
+                        object keyValue = string.IsNullOrEmpty(el.KeyName) ? DBNull.Value : el.KeyValue;
+                        foreach (var f in el.Fields)
+                        {
+                            aSnap.Value = snapshotId;
+                            aCls.Value  = obj.ClassName;
+                            aNp.Value   = normPath;
+                            aOc.Value   = obj.OuterClassName;
+                            aPn.Value   = f.Name;
+                            aOff.Value  = f.Offset;
+                            aDt.Value   = f.Type;
+                            aIdx.Value  = obj.Index;
+                            aAddr.Value = obj.Addr;
+                            aNum.Value  = SnapshotNumeric.TryFromHex(f.Type, f.Hex, out var anum)
+                                            ? anum : (object)DBNull.Value;
+                            aHex.Value  = f.Hex;
+                            aAf.Value   = arr.Field;
+                            aEi.Value   = el.Index;
+                            aIkn.Value  = keyName;
+                            aIkv.Value  = keyValue;
+                            aIpn.Value  = f.Name;
+                            _arrCmd.ExecuteNonQuery();
+                            rows++;
+                        }
                     }
                 }
             }
+            return rows;
         }
 
-        await tx.CommitAsync(ct);
-        return rows;
+        public void Dispose() { _cmd.Dispose(); _arrCmd.Dispose(); }
+    }
+
+    // Bulk-capture write session (see ICaptureSession): one long-lived connection +
+    // bulk-load pragmas + a transaction committed every N chunks, so a multi-million-row
+    // capture isn't paying a fresh connection + EnsureSchema + fsync per chunk. Used by a
+    // single background consumer task — NOT thread-safe (one writer).
+    private sealed class CaptureSession : ICaptureSession
+    {
+        private const int CommitEveryChunks = 16;
+        private readonly ILoggingService? _log;
+        private readonly SqliteConnection _conn;
+        private SqliteTransaction? _tx;
+        private readonly ChunkInserter _ins;
+        private int _sinceCommit;
+        private bool _disposed;
+        private bool _completed;
+        // Phase-2 D: per-(class, is_array) DISTINCT GObjects-index sets, accumulated while
+        // writing so CompleteSnapshotAsync can INSERT class_counts with no GROUP BY scan.
+        // is_array 0 = the object wrote ≥1 scalar field; 1 = it wrote ≥1 array-element field.
+        // Mirrors EnsurePivotIndexAsync's "array_field IS NULL / IS NOT NULL" split exactly.
+        private readonly Dictionary<(string cls, int isArray), HashSet<long>> _pivot = new();
+        private readonly Dictionary<string, string> _intern = new(StringComparer.Ordinal);
+
+        public CaptureSession(SqliteConnection conn, ILoggingService? log)
+        {
+            _conn = conn;
+            _log  = log;
+            _tx   = (SqliteTransaction)_conn.BeginTransaction();
+            _ins  = new ChunkInserter(_conn, _tx);
+        }
+
+        private string Intern(string s) { if (_intern.TryGetValue(s, out var v)) return v; _intern[s] = s; return s; }
+
+        public int WriteChunk(long snapshotId, IReadOnlyList<SnapshotCapturedObject> objects, CancellationToken ct = default)
+        {
+            if (objects.Count == 0) return 0;
+
+            // Accumulate the per-class distinct-index pivot counts (cheap; one pass).
+            foreach (var obj in objects)
+            {
+                bool hasScalar = obj.Fields.Count > 0;
+                bool hasArray = false;
+                foreach (var arr in obj.Arrays)
+                {
+                    foreach (var el in arr.Elements)
+                        if (el.Fields.Count > 0) { hasArray = true; break; }
+                    if (hasArray) break;
+                }
+                if (hasScalar) Bucket(obj.ClassName, 0).Add(obj.Index);
+                if (hasArray)  Bucket(obj.ClassName, 1).Add(obj.Index);
+            }
+
+            int rows = _ins.Insert(snapshotId, objects, ct);
+            // Commit every N chunks so the WAL doesn't grow to the whole capture before
+            // the single final commit (bounds disk + lets a later checkpoint reclaim).
+            if (++_sinceCommit >= CommitEveryChunks)
+            {
+                _tx!.Commit();
+                _tx.Dispose();
+                _tx = (SqliteTransaction)_conn.BeginTransaction();
+                _ins.Rebind(_tx);
+                _sinceCommit = 0;
+            }
+            return rows;
+        }
+
+        private HashSet<long> Bucket(string cls, int isArray)
+        {
+            var key = (Intern(cls), isArray);
+            if (!_pivot.TryGetValue(key, out var set)) { set = new HashSet<long>(); _pivot[key] = set; }
+            return set;
+        }
+
+        public async Task CompleteSnapshotAsync(long snapshotId, int objectCount, int fieldCount, CancellationToken ct = default)
+        {
+            // Flush the captured rows, then write totals + incremental pivot counts in a
+            // fresh transaction (so a reader can't observe a half-written class_counts).
+            _tx!.Commit();
+            await _tx.DisposeAsync();
+            _tx = null;
+
+            await using var tx = (SqliteTransaction)await _conn.BeginTransactionAsync(ct);
+
+            await using (var u = _conn.CreateCommand())
+            {
+                u.Transaction = tx;
+                u.CommandText = "UPDATE snapshots SET object_count=$oc, field_count=$fc WHERE id=$id;";
+                u.Parameters.AddWithValue("$oc", objectCount);
+                u.Parameters.AddWithValue("$fc", fieldCount);
+                u.Parameters.AddWithValue("$id", snapshotId);
+                await u.ExecuteNonQueryAsync(ct);
+            }
+
+            // Authoritative pivot counts: clear any partial lazy build for this snapshot,
+            // then write the accumulated counts + mark both kinds built (so the lazy
+            // EnsurePivotIndexAsync GROUP-BY path becomes a no-op for this snapshot).
+            await using (var del = _conn.CreateCommand())
+            {
+                del.Transaction = tx;
+                del.CommandText = "DELETE FROM class_counts WHERE snapshot_id=$s;";
+                del.Parameters.AddWithValue("$s", snapshotId);
+                await del.ExecuteNonQueryAsync(ct);
+            }
+            await using (var insCmd = _conn.CreateCommand())
+            {
+                insCmd.Transaction = tx;
+                insCmd.CommandText =
+                    "INSERT INTO class_counts(snapshot_id, class_fqn, is_array, instance_count) VALUES($s,$c,$a,$n);";
+                var ps = insCmd.Parameters.Add("$s", SqliteType.Integer); ps.Value = snapshotId;
+                var pc = insCmd.Parameters.Add("$c", SqliteType.Text);
+                var pa = insCmd.Parameters.Add("$a", SqliteType.Integer);
+                var pn = insCmd.Parameters.Add("$n", SqliteType.Integer);
+                foreach (var kv in _pivot)
+                {
+                    pc.Value = kv.Key.cls;
+                    pa.Value = kv.Key.isArray;
+                    pn.Value = kv.Value.Count;
+                    await insCmd.ExecuteNonQueryAsync(ct);
+                }
+            }
+            await using (var mark = _conn.CreateCommand())
+            {
+                mark.Transaction = tx;
+                mark.CommandText = "INSERT OR IGNORE INTO pivot_index_built(snapshot_id, is_array) VALUES($s,0),($s,1);";
+                mark.Parameters.AddWithValue("$s", snapshotId);
+                await mark.ExecuteNonQueryAsync(ct);
+            }
+
+            await tx.CommitAsync(ct);
+            _completed = true;
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            // CompleteSnapshotAsync already committed + nulled _tx; only commit here when
+            // disposing WITHOUT completing (a cancelled / failed capture — the partial rows
+            // are discarded by the caller's DeleteSnapshotAsync afterwards).
+            if (!_completed && _tx != null)
+            {
+                try { _tx.Commit(); }
+                catch (Exception ex) { _log?.Warn(Constants.LogCatView, $"CaptureSession: final commit failed: {ex.Message}"); }
+                await _tx.DisposeAsync();
+            }
+            // Restore durability now that the bulk load is done (best-effort).
+            try { await ExecAsync(_conn, "PRAGMA synchronous=NORMAL;", default); } catch { /* closing anyway */ }
+            _ins.Dispose();
+            await _conn.DisposeAsync();
+        }
     }
 
     public async Task FinalizeSnapshotAsync(long snapshotId, int objectCount, int fieldCount,
@@ -420,11 +613,21 @@ public sealed class SnapshotStore : ISnapshotStore
     {
         if (quotaBytes <= 0) return 0;  // unlimited
 
+        // Estimate the on-disk footprint WITHOUT a checkpoint — db + WAL + shm — so a
+        // capture that stays under quota pays NO wal_checkpoint(TRUNCATE) (the checkpoint +
+        // VACUUM run only on the eviction path below). The estimate slightly overcounts
+        // (the WAL may hold frames already in the db), which is safe for a quota gate; the
+        // accurate post-checkpoint size is re-checked before any eviction.
+        long estBytes = FileSizeOf(DatabasePath)
+                      + FileSizeOf(DatabasePath + "-wal")
+                      + FileSizeOf(DatabasePath + "-shm");
+        if (estBytes <= quotaBytes) return 0;   // under quota → no connection, no checkpoint, no VACUUM
+
         await using var conn = await OpenAsync(ct);
         await ExecAsync(conn, "PRAGMA wal_checkpoint(TRUNCATE);", ct);
 
-        long fileBytes = FileSizeOf(DatabasePath);
-        if (fileBytes <= quotaBytes) return 0;
+        long fileBytes = FileSizeOf(DatabasePath);   // accurate size after folding the WAL
+        if (fileBytes <= quotaBytes) return 0;       // WAL frames were redundant — actually under
 
         // Read snapshots newest-first with their field counts.
         var rows = new List<(long id, int fields)>();

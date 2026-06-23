@@ -1191,6 +1191,7 @@ struct SnapshotObject {
 struct SnapshotChunkResult {
     int32_t total   = 0;   // GObjects count
     int32_t scanned = 0;   // indices iterated this chunk (advance offset by this)
+    int64_t walkMs  = 0;   // Phase-0 telemetry: parallel walk+merge wall-time for this chunk
     std::vector<SnapshotObject> objects;  // only objects with >=1 numeric field
 };
 

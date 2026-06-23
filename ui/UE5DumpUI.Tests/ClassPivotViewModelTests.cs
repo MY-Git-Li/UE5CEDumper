@@ -77,6 +77,7 @@ public class ClassPivotViewModelTests : IDisposable
         public void SetActiveGame(string? p) => _inner.SetActiveGame(p);
         public Task<long> CreateSnapshotAsync(SnapshotMeta m, CancellationToken ct = default) => _inner.CreateSnapshotAsync(m, ct);
         public Task<int> WriteChunkAsync(long s, IReadOnlyList<SnapshotCapturedObject> o, CancellationToken ct = default) => _inner.WriteChunkAsync(s, o, ct);
+        public Task<ICaptureSession> BeginCaptureSessionAsync(CancellationToken ct = default) => _inner.BeginCaptureSessionAsync(ct);
         public Task FinalizeSnapshotAsync(long s, int oc, int fc, CancellationToken ct = default) => _inner.FinalizeSnapshotAsync(s, oc, fc, ct);
         public Task<IReadOnlyList<SnapshotMeta>> ListSnapshotsAsync(CancellationToken ct = default) => _inner.ListSnapshotsAsync(ct);
         public Task DeleteSnapshotAsync(long s, CancellationToken ct = default) => _inner.DeleteSnapshotAsync(s, ct);
@@ -212,6 +213,7 @@ public class ClassPivotViewModelTests : IDisposable
 
         public Task<long> CreateSnapshotAsync(SnapshotMeta meta, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<int> WriteChunkAsync(long id, IReadOnlyList<SnapshotCapturedObject> o, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<ICaptureSession> BeginCaptureSessionAsync(CancellationToken ct = default) => throw new NotImplementedException();
         public Task FinalizeSnapshotAsync(long id, int oc, int fc, CancellationToken ct = default) => throw new NotImplementedException();
         public Task DeleteSnapshotAsync(long id, CancellationToken ct = default) => throw new NotImplementedException();
         public Task DeleteAllSnapshotsAsync(CancellationToken ct = default) => throw new NotImplementedException();
