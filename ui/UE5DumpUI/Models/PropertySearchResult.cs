@@ -1,3 +1,5 @@
+using CommunityToolkit.Mvvm.ComponentModel;
+
 namespace UE5DumpUI.Models;
 
 /// <summary>
@@ -11,7 +13,7 @@ namespace UE5DumpUI.Models;
 /// dedup story changes (e.g. a future "Show inheritance expanded"
 /// toggle could emit one row per inheriting class).
 /// </summary>
-public class PropertySearchMatch
+public partial class PropertySearchMatch : ObservableObject
 {
     public string ClassName { get; set; } = "";
     public string ClassAddr { get; set; } = "";
@@ -111,6 +113,10 @@ public class PropertySearchMatch
     /// defining class path so the user can see whether it's an engine
     /// (/Script/Engine.*) or game (/Game/* /Script/MyGame.*) field.
     /// </summary>
+    /// <summary>Batch "Find Funcs" result: which UFunctions reference this
+    /// property. Format "N · func1, func2[, …]" / "0" / "—" / "" (not run).</summary>
+    [ObservableProperty] private string _xrefInfo = "";
+
     public string InheritanceTooltip => InheritedByCount == 0
         ? $"This property is unique to {ClassName} -- likely a " +
           $"game-specific field rather than an engine inheritance.\n" +

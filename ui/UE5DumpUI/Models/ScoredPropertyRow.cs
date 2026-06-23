@@ -1,3 +1,4 @@
+using CommunityToolkit.Mvvm.ComponentModel;
 using UE5DumpUI.Services;
 
 namespace UE5DumpUI.Models;
@@ -12,7 +13,7 @@ namespace UE5DumpUI.Models;
 /// at a higher-than-normal class bonus AND sitting in a non-canonical
 /// container (LocalPlayer / HUD / GameViewportClient / etc).
 /// </summary>
-public sealed class ScoredPropertyRow
+public sealed partial class ScoredPropertyRow : ObservableObject
 {
     public required PropertySearchMatch Match            { get; init; }
     public required int                 FinalScore       { get; init; }
@@ -56,4 +57,8 @@ public sealed class ScoredPropertyRow
     public string DefiningClassName => Match.DefiningClassName;
     public int    InheritedByCount  => Match.InheritedByCount;
     public string InheritanceBadge  => Match.InheritanceBadge;
+
+    /// <summary>Batch "Find Funcs" result: which UFunctions reference this
+    /// property. Format "N · func1, func2[, …]" / "0" / "—" / "" (not run).</summary>
+    [ObservableProperty] private string _xrefInfo = "";
 }

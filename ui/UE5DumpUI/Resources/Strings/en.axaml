@@ -639,6 +639,13 @@
     <sys:String x:Key="str.Tip.IF.CopyName">Copy this function's name to the clipboard. Useful when pasting into a CE script or another tool.</sys:String>
     <sys:String x:Key="str.IF.GenerateCT">📦 Generate CT</sys:String>
     <sys:String x:Key="str.Tip.IF.GenerateCT">Generate one .CT file containing baked-invoke entries for every selected row. Use Ctrl/Shift+click in the grid to multi-select first. Functions with parameters: the helper zero-fills PARAMS; edit the baked PARAMS table in the generated entry before activating.</sys:String>
+    <sys:String x:Key="str.IF.BatchProps">⤋ Props</sys:String>
+    <sys:String x:Key="str.Tip.IF.BatchProps">Fill the "Uses" column for the selected rows at once (or all rows if none selected), so you see which class fields each function reads/writes without opening the per-row popup. Fast — each call reads only that one function's bytecode. Most rows show 0 (native funcs / no field access).</sys:String>
+    <sys:String x:Key="str.IF.UsesCol">Uses</sys:String>
+    <sys:String x:Key="str.Common.CancelBatch">✕ Cancel</sys:String>
+    <sys:String x:Key="str.Common.BatchFuncs">⤋ Funcs</sys:String>
+    <sys:String x:Key="str.Common.FuncsCol">Funcs</sys:String>
+    <sys:String x:Key="str.Tip.Common.BatchFuncs">Fill the "Funcs" column for the selected rows (or all rows if none selected): which UFunctions reference each property (Blueprint bytecode xref). Each call is a full game scan, so this is slower than the function-side batch — select rows first (Ctrl/Shift+click) to scope it. Most rows show 0 (native-only access / unreferenced).</sys:String>
 
     <!-- Console (UFUNCTION(exec) discovery + invoke) -->
     <sys:String x:Key="str.Con.Load">Load</sys:String>

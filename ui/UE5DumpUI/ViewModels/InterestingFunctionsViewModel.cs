@@ -56,6 +56,7 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     [ObservableProperty] private string _statusText = "Click Load to scan all UFunctions";
     [ObservableProperty] private ObservableCollection<ScoredFunctionRow> _results = new();
     [ObservableProperty] private ScoredFunctionRow? _selectedResult;
+    [ObservableProperty] private bool _isXrefBatchRunning;
 
     /// <summary>True when the AOBMaker CE Plugin pipe responded to the
     /// last availability check. Defaults true so the UI doesn't gray
@@ -166,6 +167,83 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
             _log.Error($"FindFuncProps failed for {row.FuncName}", ex);
         }
     }
+
+    // Props direction is cheap (one function's own bytecode per call), so warn
+    // only past a high row count.
+    private CancellationTokenSource? _xrefBatchCts;
+    private const int XrefBatchWarnThreshold = 100;
+
+    /// <summary>
+    /// Batch "Props": run walk_function_props for the selected rows (or all
+    /// current results if none selected) and write a compact "N · name1, name2"
+    /// summary into each row's inline <see cref="ScoredFunctionRow.XrefInfo"/>
+    /// cell — so the user sees the (often 0) result inline instead of opening
+    /// the modal per row. Cancellable; only class-member fields are counted.
+    /// </summary>
+    [RelayCommand]
+    private async Task BatchFindFuncPropsAsync(IList<ScoredFunctionRow>? selected)
+    {
+        var targets = (selected != null && selected.Count > 0)
+            ? selected.ToList()
+            : Results.ToList();
+        if (targets.Count == 0) { StatusText = "No rows to scan — Load first."; return; }
+
+        if (targets.Count > XrefBatchWarnThreshold)
+        {
+            var ok = await Views.ConfirmDialog.ShowAsync(
+                "Batch: properties used",
+                $"Analyse {targets.Count} functions? Each reads one function's own "
+              + "bytecode (fast). Tip: select fewer rows first (Ctrl/Shift+click) to scope it.",
+                confirmText: "Run");
+            if (!ok) return;
+        }
+
+        _xrefBatchCts?.Cancel();
+        _xrefBatchCts = new CancellationTokenSource();
+        var ct = _xrefBatchCts.Token;
+        IsXrefBatchRunning = true;
+        int done = 0, withFields = 0;
+        try
+        {
+            foreach (var row in targets)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (string.IsNullOrEmpty(row.FuncAddr)) { row.XrefInfo = "—"; continue; }
+                try
+                {
+                    var res = await _dump.WalkFunctionPropsAsync(row.FuncAddr, ct);
+                    var fields = res.Props.Where(p => p.IsClassField).ToList();
+                    if (fields.Count > 0)
+                    {
+                        withFields++;
+                        var preview = string.Join(", ", fields.Take(2).Select(p => p.Name));
+                        row.XrefInfo = fields.Count > 2 ? $"{fields.Count} · {preview}, …"
+                                                        : $"{fields.Count} · {preview}";
+                    }
+                    else row.XrefInfo = "0";
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    row.XrefInfo = "—";
+                    _log.Error($"Batch props failed for {row.FuncName}", ex);
+                }
+                done++;
+                if ((done & 0x7) == 0)
+                    StatusText = $"Props: {done}/{targets.Count} scanned ({withFields} use class fields)…";
+            }
+            StatusText = $"Props done: {withFields}/{targets.Count} functions use class fields.";
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = $"Props batch cancelled at {done}/{targets.Count}.";
+        }
+        finally { IsXrefBatchRunning = false; }
+    }
+
+    /// <summary>Cancel an in-flight batch Props run.</summary>
+    [RelayCommand]
+    private void CancelXrefBatch() => _xrefBatchCts?.Cancel();
 
     /// <summary>
     /// Per-row hint shown in the Notes column. Same value across every

@@ -54,6 +54,23 @@
               Padding="6,2" FontSize="11"
               VerticalAlignment="Center"
               Cursor="Hand"/>
+      <Button Content="{StaticResource str.IF.BatchProps}"
+              Click="OnBatchFindPropsClick"
+              IsEnabled="{Binding !IsXrefBatchRunning}"
+              ToolTip.Tip="{StaticResource str.Tip.IF.BatchProps}"
+              Foreground="#C586C0" Background="Transparent"
+              BorderThickness="1" BorderBrush="#C586C0"
+              Padding="6,2" FontSize="11"
+              VerticalAlignment="Center"
+              Cursor="Hand"/>
+      <Button Content="{StaticResource str.Common.CancelBatch}"
+              Command="{Binding CancelXrefBatchCommand}"
+              IsVisible="{Binding IsXrefBatchRunning}"
+              Foreground="#E06C75" Background="Transparent"
+              BorderThickness="1" BorderBrush="#E06C75"
+              Padding="6,2" FontSize="11"
+              VerticalAlignment="Center"
+              Cursor="Hand"/>
     </StackPanel>
 
     <!-- Status + progress in their own dock row (mirrors Interesting
@@ -133,6 +150,17 @@
         <DataGridTextColumn Header="Function" Binding="{Binding FuncName}" SortMemberPath="FuncName" Width="200"/>
         <DataGridTextColumn Header="Flags" Binding="{Binding ShortFlags}" SortMemberPath="ShortFlags" Width="120"/>
         <DataGridTextColumn Header="Params" Binding="{Binding ParamsLabel}" SortMemberPath="ParamsLabel" Width="80"/>
+        <DataGridTemplateColumn Header="{StaticResource str.IF.UsesCol}" Width="200" CanUserSort="False">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:ScoredFunctionRow">
+              <TextBlock Text="{Binding XrefInfo}"
+                         Foreground="#C586C0" FontSize="11"
+                         VerticalAlignment="Center" Margin="4,0"
+                         TextTrimming="CharacterEllipsis"
+                         ToolTip.Tip="{Binding XrefInfo}"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
         <DataGridTemplateColumn Header="" Width="Auto" CanUserSort="False">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:ScoredFunctionRow">

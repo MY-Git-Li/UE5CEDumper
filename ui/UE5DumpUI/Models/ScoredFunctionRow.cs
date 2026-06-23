@@ -1,3 +1,4 @@
+using CommunityToolkit.Mvvm.ComponentModel;
 using UE5DumpUI.Services;
 
 namespace UE5DumpUI.Models;
@@ -8,8 +9,11 @@ namespace UE5DumpUI.Models;
 /// DataGrid. Kept separate from <see cref="AllFunctionEntry"/> so the
 /// raw pipe model stays a pure data carrier; only the UI layer attaches
 /// scoring metadata.
+///
+/// Derives from ObservableObject so the batch-xref inline column
+/// (<see cref="XrefInfo"/>) can be filled asynchronously and refresh the cell.
 /// </summary>
-public sealed class ScoredFunctionRow
+public sealed partial class ScoredFunctionRow : ObservableObject
 {
     public required AllFunctionEntry Entry        { get; init; }
     public required int              FinalScore   { get; init; }
@@ -47,4 +51,11 @@ public sealed class ScoredFunctionRow
     public uint   FunctionFlags=> Entry.FunctionFlags;
     public byte   NumParms     => Entry.NumParms;
     public ushort ParmsSize    => Entry.ParmsSize;
+
+    /// <summary>
+    /// Batch-xref result for the "Props" direction (class-member properties this
+    /// function reads/writes), filled by the tab-level batch button. Format:
+    /// "N · name1, name2[, …]" or "0", "—" (scan failed), "" (not yet run).
+    /// </summary>
+    [ObservableProperty] private string _xrefInfo = "";
 }

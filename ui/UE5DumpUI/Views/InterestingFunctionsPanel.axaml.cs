@@ -51,4 +51,22 @@ public partial class InterestingFunctionsPanel : UserControl
         }
         vm.GenerateCheatTableCommand.Execute(rows);
     }
+
+    /// <summary>
+    /// Forward the grid's multi-select (empty = all rows) to the batch Props
+    /// command, which fills each row's inline "Uses" column. Same selection
+    /// forwarding as <see cref="OnGenerateCtClick"/>.
+    /// </summary>
+    private void OnBatchFindPropsClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not InterestingFunctionsViewModel vm) return;
+        var grid = this.FindControl<DataGrid>("ResultsGrid");
+        var rows = new List<ScoredFunctionRow>();
+        if (grid?.SelectedItems is { } sel)
+        {
+            foreach (var item in sel)
+                if (item is ScoredFunctionRow r) rows.Add(r);
+        }
+        vm.BatchFindFuncPropsCommand.Execute(rows);
+    }
 }

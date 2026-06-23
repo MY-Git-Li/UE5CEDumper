@@ -62,6 +62,24 @@ public partial class PropertySearchPanel : UserControl
         return dialog.ValueLiteral;
     }
 
+    /// <summary>
+    /// Forward the grid's multi-select (empty = all rows) to the batch Find
+    /// Funcs command, which fills each row's inline "Funcs" column. Mirrors
+    /// InterestingPropertiesPanel.OnGenerateCtClick's typed forwarding.
+    /// </summary>
+    private void OnBatchFindFuncsClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is not PropertySearchViewModel vm) return;
+        var grid = this.FindControl<DataGrid>("ResultsGrid");
+        var rows = new List<PropertySearchMatch>();
+        if (grid?.SelectedItems is { } sel)
+        {
+            foreach (var item in sel)
+                if (item is PropertySearchMatch m) rows.Add(m);
+        }
+        vm.BatchFindFuncsCommand.Execute(rows);
+    }
+
     private void SearchQueryInput_KeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter && DataContext is PropertySearchViewModel vm
