@@ -16,7 +16,7 @@ builds ≤696 in
 
 -----
 
-## 2026-06-23 — SPC Query Multiple Values (Single/Group toggle): N-snapshot, object-aware group matching with per-slot predicate chains (builds 1575-1584; C#-only; adversarial-reviewed; in-game VERIFIED on SEED)
+## 2026-06-23 — SPC Query Multiple Values (Single/Group toggle): N-snapshot, object-aware group matching with per-slot predicate chains (builds 1575-1584; C#-only; adversarial-reviewed; in-game VERIFIED on SEED; MERGED main PR #349 `563037e`)
 
 Brings the object-aware **Group Scan** to the **SPC Query** tab — the `Orden` reuse seam group-value-scan-spec §3.1 reserved for SPC (*"run Orden per object after the SPC load"*). Where the just-shipped **Snapshot Group Match Mode B** compares exactly **2** snapshots first-vs-last, **SPC Group** is the full **N-snapshot** generalisation: each of the 2-4 value-slots carries its **own per-snapshot predicate CHAIN** (the SPC directional chain `Any/Unchanged/Changed/Increased/Decreased` + a per-snapshot absolute window), and a match is one OBJECT whose N fields each satisfy their chain at DISTINCT offsets. The motivating case it can express that Mode B can't: *Current HP `·→↓→↑`* while *Max HP `·→=→=`* over `[full, damaged, healed]` — a per-snapshot pattern, not a single step. No DLL change, no DB schema change (pure C#).
 
