@@ -46,7 +46,11 @@ public class SnapshotViewModelTests : IDisposable
             LastGameOnly = gameOnly;
             LastNativeC = nativeC;
             LastAutoSkipNoise = autoSkipNoise;
-            var r = new SnapshotChunkResult { Total = 3, WalkMs = 5, SerializeMs = 2 };
+            var r = new SnapshotChunkResult
+            {
+                Total = 3, WalkMs = 5, SerializeMs = 2,
+                ReadMs = 3, RxLogMs = 1, ParseMs = 7, BuildMs = 4,
+            };
             if (offset == 0)
             {
                 r.Scanned = 2;

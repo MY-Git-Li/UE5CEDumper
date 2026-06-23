@@ -2082,8 +2082,13 @@ public sealed class DumpService : IDumpService
             Scanned     = res["scanned"]?.GetValue<int>() ?? 0,
             WalkMs      = res["walk_ms"]?.GetValue<long>() ?? 0,
             SerializeMs = res["serialize_ms"]?.GetValue<long>() ?? 0,
+            // C#-side split injected by PipeClient.ReadLoopAsync for this response.
+            ReadMs      = res["_t_read_ms"]?.GetValue<long>() ?? 0,
+            RxLogMs     = res["_t_rxlog_ms"]?.GetValue<long>() ?? 0,
+            ParseMs     = res["_t_parse_ms"]?.GetValue<long>() ?? 0,
         };
 
+        var buildSw = System.Diagnostics.Stopwatch.StartNew();
         if (res["objects"] is JsonArray arr)
         {
             foreach (var node in arr)
@@ -2140,6 +2145,8 @@ public sealed class DumpService : IDumpService
                 result.Objects.Add(obj);
             }
         }
+        buildSw.Stop();
+        result.BuildMs = buildSw.ElapsedMilliseconds;
 
         return result;
     }

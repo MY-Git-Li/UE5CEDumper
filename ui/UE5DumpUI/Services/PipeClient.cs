@@ -157,18 +157,29 @@ public sealed class PipeClient : IPipeClient
         {
             while (!_cts.IsCancellationRequested && _reader != null)
             {
+                // Telemetry split (snapshot capture profiling): the response line read, the
+                // "Pipe RX" debug log of it, and the JSON DOM parse each scale with payload
+                // size and were lumped into one "parse+pipe" bucket. Time them separately and
+                // inject the ms into the response object so a snapshot_chunk caller can read
+                // them back (harmless to every other response).
+                var readSw = System.Diagnostics.Stopwatch.StartNew();
                 var line = await _reader.ReadLineAsync(_cts.Token);
+                readSw.Stop();
                 if (line is null)
                 {
                     _log.Warn(Constants.LogCatPipe, "Pipe: ReadLine returned null (disconnected)");
                     break;
                 }
 
+                var rxLogSw = System.Diagnostics.Stopwatch.StartNew();
                 _log.Debug(Constants.LogCatPipe, $"Pipe RX: {line}");
+                rxLogSw.Stop();
 
                 try
                 {
+                    var parseSw = System.Diagnostics.Stopwatch.StartNew();
                     var obj = JsonNode.Parse(line) as JsonObject;
+                    parseSw.Stop();
                     if (obj == null) continue;
 
                     if (obj["event"] != null)
@@ -182,6 +193,9 @@ public sealed class PipeClient : IPipeClient
                         var id = obj["id"]?.GetValue<int>() ?? 0;
                         if (_pending.TryRemove(id, out var tcs))
                         {
+                            obj["_t_read_ms"]  = readSw.ElapsedMilliseconds;
+                            obj["_t_rxlog_ms"] = rxLogSw.ElapsedMilliseconds;
+                            obj["_t_parse_ms"] = parseSw.ElapsedMilliseconds;
                             tcs.TrySetResult(obj);
                         }
                     }

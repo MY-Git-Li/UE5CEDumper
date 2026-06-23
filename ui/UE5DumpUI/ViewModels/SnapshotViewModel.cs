@@ -49,6 +49,10 @@ public partial class SnapshotViewModel : ViewModelBase
     // Phase-0 telemetry totals (ms): DLL walk, DLL JSON build, full fetch round-trip
     // (walk+serialize+pipe+parse), and SQLite write. parse = fetch - walk - serialize.
     private long _capWalkMs, _capSerMs, _capFetchMs, _capWriteMs;
+    // Split of the old "parse+pipe" bucket (C#-side): pipe read, the "Pipe RX" debug log,
+    // the JsonNode DOM parse, and the model-build loop. The remainder (parse+pipe minus
+    // these four) ≈ the DLL's .dump() + the pipe transfer.
+    private long _capReadMs, _capRxLogMs, _capParseMs, _capBuildMs;
 
     [ObservableProperty] private string _label = "";
     [ObservableProperty] private bool   _gameOnly = true;
@@ -440,6 +444,7 @@ public partial class SnapshotViewModel : ViewModelBase
         _lastChunkAt  = _captureStart;
         _capOffset = _capTotal = _capObjects = _capFields = 0;
         _capWalkMs = _capSerMs = _capFetchMs = _capWriteMs = 0;
+        _capReadMs = _capRxLogMs = _capParseMs = _capBuildMs = 0;
         _heartbeatPhase = 0;
 
         long snapshotId = 0;
@@ -489,10 +494,15 @@ public partial class SnapshotViewModel : ViewModelBase
                                 dataType, gameOnly, offset, Constants.SnapshotChunkSize,
                                 includeNative, autoSkipNoise, lct);
                             fetchSw.Stop();
-                            // Phase-0 telemetry: full fetch round-trip + DLL-reported splits.
+                            // Phase-0 telemetry: full fetch round-trip + DLL-reported splits
+                            // + the C#-side parse+pipe breakdown (read / RX-log / parse / build).
                             _capFetchMs += fetchSw.ElapsedMilliseconds;
                             _capWalkMs  += chunk.WalkMs;
                             _capSerMs   += chunk.SerializeMs;
+                            _capReadMs  += chunk.ReadMs;
+                            _capRxLogMs += chunk.RxLogMs;
+                            _capParseMs += chunk.ParseMs;
+                            _capBuildMs += chunk.BuildMs;
                             offset += chunk.Scanned;
                             _capOffset = offset;     // display-only; heartbeat reads on UI thread
                             _lastChunkAt = DateTime.UtcNow;
@@ -542,13 +552,16 @@ public partial class SnapshotViewModel : ViewModelBase
             // skips the checkpoint + VACUUM entirely when the capture stays under quota.
             int dropped = await Task.Run(() => _store.EnforceQuotaAsync(QuotaBytes, ct), ct);
             var evicted = dropped > 0 ? $" — dropped {dropped} oldest (quota)" : "";
-            // Phase-0 telemetry: one summary line so a capture's cost breakdown is in the
-            // log for before/after comparison across the later optimisation phases.
+            // Phase-0 telemetry: one summary line with the full cost breakdown for
+            // before/after comparison. parse+pipe is now split into pipe-read / RX-log /
+            // json-parse / model-build; the leftover (other) ≈ the DLL .dump() + pipe transfer.
             long parseMs = Math.Max(0, _capFetchMs - _capWalkMs - _capSerMs);
+            long otherMs = Math.Max(0, parseMs - _capReadMs - _capRxLogMs - _capParseMs - _capBuildMs);
             _log.Info(Constants.LogCatView,
                 $"Capture done: {objectCount:N0} objects, {fieldCount:N0} fields in " +
                 $"{FmtSpan(DateTime.UtcNow - _captureStart)} — walk {_capWalkMs}ms, serialize {_capSerMs}ms, " +
-                $"parse+pipe {parseMs}ms, write {_capWriteMs}ms");
+                $"parse+pipe {parseMs}ms [read {_capReadMs} / rxlog {_capRxLogMs} / jsonparse {_capParseMs} / " +
+                $"build {_capBuildMs} / other {otherMs}], write {_capWriteMs}ms");
             StatusText = $"Captured {objectCount:N0} objects, {fieldCount:N0} fields{evicted}";
             Label = "";
             await RefreshAsync();
