@@ -106,5 +106,9 @@ public sealed class SnapshotChunkResult
 {
     public int Total   { get; set; }   // GObjects count
     public int Scanned { get; set; }   // indices iterated (advance offset by this)
+    // Phase-0 telemetry (DLL-side, per chunk): the parallel walk+merge and the JSON
+    // DOM-build wall-times. Default 0 keeps older DLLs / test stubs back-compatible.
+    public long WalkMs      { get; set; }
+    public long SerializeMs { get; set; }
     public List<SnapshotCapturedObject> Objects { get; set; } = new();
 }

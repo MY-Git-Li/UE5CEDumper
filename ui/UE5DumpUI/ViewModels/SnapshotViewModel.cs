@@ -45,6 +45,9 @@ public partial class SnapshotViewModel : ViewModelBase
     private DateTime _lastChunkAt;
     private int _capOffset, _capTotal, _capObjects, _capFields;
     private int _heartbeatPhase;
+    // Phase-0 telemetry totals (ms): DLL walk, DLL JSON build, full fetch round-trip
+    // (walk+serialize+pipe+parse), and SQLite write. parse = fetch - walk - serialize.
+    private long _capWalkMs, _capSerMs, _capFetchMs, _capWriteMs;
 
     [ObservableProperty] private string _label = "";
     [ObservableProperty] private bool   _gameOnly = true;
@@ -435,6 +438,7 @@ public partial class SnapshotViewModel : ViewModelBase
         _captureStart = DateTime.UtcNow;
         _lastChunkAt  = _captureStart;
         _capOffset = _capTotal = _capObjects = _capFields = 0;
+        _capWalkMs = _capSerMs = _capFetchMs = _capWriteMs = 0;
         _heartbeatPhase = 0;
 
         long snapshotId = 0;
@@ -462,9 +466,17 @@ public partial class SnapshotViewModel : ViewModelBase
             int offset = 0, objectCount = 0, fieldCount = 0;
             while (!ct.IsCancellationRequested)
             {
+                var fetchSw = System.Diagnostics.Stopwatch.StartNew();
                 var chunk = await _dump.SnapshotChunkAsync(
                     dataType, gameOnly, offset, Constants.SnapshotChunkSize,
                     includeNative, autoSkipNoise, ct);
+                fetchSw.Stop();
+                // Phase-0 telemetry: full fetch round-trip (DLL walk + JSON build + pipe
+                // + C# parse) and the DLL-reported splits, so the status line can show
+                // where capture time goes (parse = fetch - walk - serialize).
+                _capFetchMs += fetchSw.ElapsedMilliseconds;
+                _capWalkMs  += chunk.WalkMs;
+                _capSerMs   += chunk.SerializeMs;
 
                 if (chunk.Objects.Count > 0)
                 {
@@ -472,7 +484,10 @@ public partial class SnapshotViewModel : ViewModelBase
                     // the per-row insert loop must go off the UI thread or the window
                     // stutters throughout a multi-minute capture.
                     var objs = chunk.Objects;
+                    var writeSw = System.Diagnostics.Stopwatch.StartNew();
                     fieldCount += await Task.Run(() => _store.WriteChunkAsync(snapshotId, objs, ct), ct);
+                    writeSw.Stop();
+                    _capWriteMs += writeSw.ElapsedMilliseconds;
                     objectCount += chunk.Objects.Count;
                 }
 
@@ -499,6 +514,13 @@ public partial class SnapshotViewModel : ViewModelBase
             // fits the quota (the just-captured one is always kept).
             int dropped = await Task.Run(() => _store.EnforceQuotaAsync(QuotaBytes, ct), ct);
             var evicted = dropped > 0 ? $" — dropped {dropped} oldest (quota)" : "";
+            // Phase-0 telemetry: one summary line so a capture's cost breakdown is in the
+            // log for before/after comparison across the later optimisation phases.
+            long parseMs = Math.Max(0, _capFetchMs - _capWalkMs - _capSerMs);
+            _log.Info(Constants.LogCatView,
+                $"Capture done: {objectCount:N0} objects, {fieldCount:N0} fields in " +
+                $"{FmtSpan(DateTime.UtcNow - _captureStart)} — walk {_capWalkMs}ms, serialize {_capSerMs}ms, " +
+                $"parse+pipe {parseMs}ms, write {_capWriteMs}ms");
             StatusText = $"Captured {objectCount:N0} objects, {fieldCount:N0} fields{evicted}";
             Label = "";
             await RefreshAsync();
@@ -588,7 +610,18 @@ public partial class SnapshotViewModel : ViewModelBase
         // {dots,-3}: fixed 3-char slot so the count column doesn't jitter as the
         // dots animate.
         StatusText = $"Capturing{dots,-3} {_capOffset:N0}/{_capTotal:N0} ({Progress:P0}) — " +
-                     $"{_capObjects:N0} objects, {_capFields:N0} fields{timing}{batch}";
+                     $"{_capObjects:N0} objects, {_capFields:N0} fields{timing}{CapturePerfSuffix()}{batch}";
+    }
+
+    // Phase-0 telemetry: a compact walk/serialize/parse/write breakdown (seconds),
+    // shown once the totals are meaningful so we optimise capture on real numbers.
+    private string CapturePerfSuffix()
+    {
+        long parse = _capFetchMs - _capWalkMs - _capSerMs;
+        if (parse < 0) parse = 0;
+        if (_capFetchMs + _capWriteMs < 500) return "";   // too early to be useful
+        return $" · walk {_capWalkMs / 1000.0:0.0}s / ser {_capSerMs / 1000.0:0.0}s / " +
+               $"parse {parse / 1000.0:0.0}s / write {_capWriteMs / 1000.0:0.0}s";
     }
 
     [RelayCommand]

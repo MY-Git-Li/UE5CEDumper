@@ -8023,6 +8023,10 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
     struct ThreadResult { std::vector<SnapshotObject> objects; };
     const int32_t chunkLen = end - offset;
 
+    // Phase-0 telemetry: time the parallel walk + merge so the C# side can report
+    // walk-vs-serialize-vs-write per chunk (decides where future optimisation goes).
+    const auto walkT0 = std::chrono::steady_clock::now();
+
     auto scan = ParallelGObjectsScan<ThreadResult>(chunkLen,
         [&](ThreadResult& tr, int32_t beginIdx, int32_t endIdx,
             std::atomic<bool>& deadlineHit) {
@@ -8115,6 +8119,9 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
     result.objects.reserve(totalObjs);
     for (auto& tr : scan.perThread)
         for (auto& so : tr.objects) result.objects.push_back(std::move(so));
+
+    result.walkMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - walkT0).count();
 
     // Tot cancellation (client gone / shutdown) — the partial chunk is discarded by
     // the disconnected/closing C# side, so result.scanned is left at the full range.

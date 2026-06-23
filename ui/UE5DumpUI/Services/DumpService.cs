@@ -2078,8 +2078,10 @@ public sealed class DumpService : IDumpService
 
         var result = new SnapshotChunkResult
         {
-            Total   = res["total"]?.GetValue<int>() ?? 0,
-            Scanned = res["scanned"]?.GetValue<int>() ?? 0,
+            Total       = res["total"]?.GetValue<int>() ?? 0,
+            Scanned     = res["scanned"]?.GetValue<int>() ?? 0,
+            WalkMs      = res["walk_ms"]?.GetValue<long>() ?? 0,
+            SerializeMs = res["serialize_ms"]?.GetValue<long>() ?? 0,
         };
 
         if (res["objects"] is JsonArray arr)

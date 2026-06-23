@@ -1214,6 +1214,10 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 return arr;
             };
 
+            // Phase-0 telemetry: time the JSON DOM build (the bulk of the serialize
+            // cost — the final .dump() is one extra traversal). Reported as serialize_ms
+            // so the C# side can show walk / serialize / parse / write per chunk.
+            const auto serT0 = std::chrono::steady_clock::now();
             json objects = json::array();
             for (const auto& o : chunk.objects) {
                 json item;
@@ -1251,9 +1255,12 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             }
 
             json data;
-            data["total"]   = chunk.total;
-            data["scanned"] = chunk.scanned;
-            data["objects"] = std::move(objects);
+            data["total"]        = chunk.total;
+            data["scanned"]      = chunk.scanned;
+            data["walk_ms"]      = chunk.walkMs;
+            data["serialize_ms"] = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - serT0).count();
+            data["objects"]      = std::move(objects);
             return Renge::MakeResponse(id, data).dump();
         }
 
