@@ -45,7 +45,13 @@ public partial class SpcSnapshotPick : ObservableObject
     partial void OnIsBaselineChanged(bool value)
     {
         OnPropertyChanged(nameof(PredicateEnabled));
-        if (value) SelectedPredicate = "Any";   // the baseline is always "Any"
+        if (!value) return;
+        SelectedPredicate = "Any";   // the baseline is always "Any" (single mode)
+        // Group mode: scrub EVERY slot's directional predicate for this snapshot too, so a
+        // stale non-Any value can't silently re-surface if the row later stops being the
+        // baseline (mirrors the single-mode reset; query-time already forces index 0 = Any).
+        foreach (var cell in GroupCells) cell.Predicate = "Any";
+        OnPropertyChanged(nameof(GroupActivePredicate));
     }
 
     public IReadOnlyList<string> PredicateOptions { get; }
@@ -84,6 +90,95 @@ public partial class SpcSnapshotPick : ObservableObject
             "≤"       => new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.AtMost,  High = Hi() },
             _              => new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.None },
         };
+    }
+
+    // ===================== SPC GROUP (multi-value) matrix =====================
+    // In Group mode the picker grid edits ONE value-slot's column at a time (the
+    // ActiveGroupSlot, chosen via the slot selector). Each snapshot row therefore
+    // holds a cell per possible slot (max 4); the GroupActive* facades read/write the
+    // active slot's cell so the same grid columns serve every slot. The full N×M
+    // matrix is the union of every selected pick's cells over the chosen slots.
+
+    /// <summary>One cell per possible value-slot (max 4) for THIS snapshot.</summary>
+    public SpcGroupCellVm[] GroupCells { get; } = { new(), new(), new(), new() };
+
+    private int _activeGroupSlot;
+
+    /// <summary>Point the GroupActive* facades at <paramref name="slot"/> (0-based) and
+    /// notify, so the picker grid shows that slot's column for this snapshot.</summary>
+    public void SetActiveGroupSlot(int slot)
+    {
+        _activeGroupSlot = slot < 0 ? 0 : slot > 3 ? 3 : slot;
+        OnPropertyChanged(nameof(GroupActivePredicate));
+        OnPropertyChanged(nameof(GroupActiveAbsKind));
+        OnPropertyChanged(nameof(GroupActiveAbsLow));
+        OnPropertyChanged(nameof(GroupActiveAbsHigh));
+        OnPropertyChanged(nameof(GroupShowAbsLow));
+        OnPropertyChanged(nameof(GroupShowAbsHigh));
+    }
+
+    public string GroupActivePredicate
+    {
+        get => GroupCells[_activeGroupSlot].Predicate;
+        set { if (GroupCells[_activeGroupSlot].Predicate != value) { GroupCells[_activeGroupSlot].Predicate = value; OnPropertyChanged(); } }
+    }
+    public string GroupActiveAbsKind
+    {
+        get => GroupCells[_activeGroupSlot].AbsKind;
+        set
+        {
+            if (GroupCells[_activeGroupSlot].AbsKind == value) return;
+            GroupCells[_activeGroupSlot].AbsKind = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(GroupShowAbsLow));
+            OnPropertyChanged(nameof(GroupShowAbsHigh));
+        }
+    }
+    public string GroupActiveAbsLow
+    {
+        get => GroupCells[_activeGroupSlot].AbsLow;
+        set { if (GroupCells[_activeGroupSlot].AbsLow != value) { GroupCells[_activeGroupSlot].AbsLow = value; OnPropertyChanged(); } }
+    }
+    public string GroupActiveAbsHigh
+    {
+        get => GroupCells[_activeGroupSlot].AbsHigh;
+        set { if (GroupCells[_activeGroupSlot].AbsHigh != value) { GroupCells[_activeGroupSlot].AbsHigh = value; OnPropertyChanged(); } }
+    }
+    public bool GroupShowAbsLow  => GroupActiveAbsKind is "Exact" or "Between" or "≥";
+    public bool GroupShowAbsHigh => GroupActiveAbsKind is "Between" or "≤";
+
+    /// <summary>This snapshot's directional predicate for slot <paramref name="slot"/>.</summary>
+    public string GroupPredicateOf(int slot) => GroupCells[slot].Predicate;
+
+    /// <summary>Compile this snapshot's absolute window for slot <paramref name="slot"/>.</summary>
+    public SpcAbsolutePredicate ToGroupAbsolutePredicate(int slot)
+    {
+        var cell = GroupCells[slot];
+        double Lo() => double.TryParse(cell.AbsLow.Trim(),  System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0;
+        double Hi() => double.TryParse(cell.AbsHigh.Trim(), System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0;
+        return cell.AbsKind switch
+        {
+            "Exact"   => new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.Exact,   Low = Lo() },
+            "Between" => new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.Between, Low = Lo(), High = Hi() },
+            "≥"  => new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.AtLeast, Low = Lo() },
+            "≤"  => new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.AtMost,  High = Hi() },
+            _         => new SpcAbsolutePredicate { Kind = SpcAbsoluteKind.None },
+        };
+    }
+
+    /// <summary>Carry the group matrix across a picker rebuild (a Snapshot-tab capture
+    /// refreshes the list — don't wipe a half-built matrix).</summary>
+    public void CopyGroupCellsFrom(SpcSnapshotPick other)
+    {
+        for (int i = 0; i < GroupCells.Length && i < other.GroupCells.Length; i++)
+        {
+            GroupCells[i].Predicate = other.GroupCells[i].Predicate;
+            GroupCells[i].AbsKind   = other.GroupCells[i].AbsKind;
+            GroupCells[i].AbsLow    = other.GroupCells[i].AbsLow;
+            GroupCells[i].AbsHigh   = other.GroupCells[i].AbsHigh;
+        }
     }
 
     public long   Id         => Meta.Id;
@@ -275,8 +370,10 @@ public partial class SpcQueryViewModel : ViewModelBase
             // top and the predicate chain reads top-to-bottom in time order.
             var ordered = list.OrderBy(m => m.Id).ToList();
             // Preserve current selections/predicates across a refresh so a capture
-            // on the Snapshot tab doesn't wipe a half-built query.
+            // on the Snapshot tab doesn't wipe a half-built query — including the SPC
+            // group matrix (every pick's per-slot cells).
             var prev = SnapshotPicks.ToDictionary(p => p.Id, p => (p.IsSelected, p.SelectedPredicate));
+            var prevPick = SnapshotPicks.ToDictionary(p => p.Id);
             foreach (var p in SnapshotPicks) p.PropertyChanged -= OnPickChanged;
 
             // Build the fresh picks detached, then swap in one shot.
@@ -289,6 +386,8 @@ public partial class SpcQueryViewModel : ViewModelBase
                     pick.IsSelected = s.IsSelected;
                     pick.SelectedPredicate = s.SelectedPredicate;
                 }
+                if (prevPick.TryGetValue(m.Id, out var old)) pick.CopyGroupCellsFrom(old);
+                pick.SetActiveGroupSlot(ActiveGroupSlot);   // point the group facades at the current slot
                 pick.PropertyChanged += OnPickChanged;
                 fresh.Add(pick);
             }
@@ -304,6 +403,7 @@ public partial class SpcQueryViewModel : ViewModelBase
             AutoSelectJoinMode();
             OnPropertyChanged(nameof(SelectedCount));
             OnPropertyChanged(nameof(CanRunQuery));
+            OnPropertyChanged(nameof(CanRunGroupQuery));
             UpdateWarning();
         }
         catch (Exception ex)
@@ -321,6 +421,7 @@ public partial class SpcQueryViewModel : ViewModelBase
             AutoSelectJoinMode();
             OnPropertyChanged(nameof(SelectedCount));
             OnPropertyChanged(nameof(CanRunQuery));
+            OnPropertyChanged(nameof(CanRunGroupQuery));
             RaiseResultRowActionGates();   // newest-selected snapshot may have changed
             UpdateWarning();
         }
@@ -380,7 +481,7 @@ public partial class SpcQueryViewModel : ViewModelBase
     /// away from the SPC tab. The in-memory intersection over ~1.8M rows is the
     /// heaviest experimental op; left running while another tab loads, it pegs a
     /// core + allocates GBs (the tab-switch hang the user reported).</summary>
-    public void CancelPendingWork() => _queryCts?.Cancel();
+    public void CancelPendingWork() { _queryCts?.Cancel(); _groupCts?.Cancel(); }
 
     [RelayCommand]
     private async Task RunQueryAsync()
@@ -694,4 +795,19 @@ public partial class NoiseRowVm : ObservableObject
     public string ClassName          { get; set; } = "";
     public int    HitCount           { get; set; }
     public string SamplePropsDisplay { get; set; } = "";
+}
+
+/// <summary>
+/// Plain storage for one (snapshot, value-slot) cell of the SPC group matrix: a
+/// directional predicate + an optional absolute window, as display strings. The
+/// owning <see cref="SpcSnapshotPick"/> exposes the ACTIVE slot's cell via its
+/// GroupActive* facades (which raise change notification), so these need no own
+/// observability.
+/// </summary>
+public sealed class SpcGroupCellVm
+{
+    public string Predicate { get; set; } = "Any";
+    public string AbsKind   { get; set; } = "(any value)";
+    public string AbsLow    { get; set; } = "";
+    public string AbsHigh   { get; set; } = "";
 }

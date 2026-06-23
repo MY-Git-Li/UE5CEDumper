@@ -5,7 +5,21 @@
              x:Class="UE5DumpUI.Views.SpcPanel"
              x:DataType="vm:SpcQueryViewModel">
 
-  <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,170,Auto,*,Auto">
+  <DockPanel Margin="12">
+    <!-- Single / Group mode toggle (mirrors the Snapshot Diff/Group + Value Search
+         Single/Group toggles). Group = the N-snapshot, object-aware multi-value match. -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8" VerticalAlignment="Center">
+      <TextBlock Text="{StaticResource str.Spc.Group.ModeLabel}" Foreground="#CCCCCC" VerticalAlignment="Center"/>
+      <ToggleSwitch IsChecked="{Binding IsGroupMode}"
+                    OffContent="{StaticResource str.Spc.Group.ModeSingle}"
+                    OnContent="{StaticResource str.Spc.Group.ModeGroup}"/>
+    </StackPanel>
+
+    <!-- Both mode contents overlay this Panel; visibility shows exactly one. -->
+    <Panel>
+
+    <!-- ===================== SINGLE mode (one field's value sequence) ===================== -->
+    <Grid IsVisible="{Binding !IsGroupMode}" RowDefinitions="Auto,Auto,Auto,170,Auto,*,Auto">
 
     <!-- Intro -->
     <TextBlock Grid.Row="0" Text="{StaticResource str.Spc.Intro}"
@@ -239,5 +253,185 @@
         </ItemsControl>
       </StackPanel>
     </Expander>
-  </Grid>
+    </Grid>
+
+    <!-- ===================== GROUP mode (Multiple Values) ===================== -->
+    <Grid IsVisible="{Binding IsGroupMode}" RowDefinitions="Auto,Auto,Auto,170,Auto,*">
+
+      <!-- Intro -->
+      <TextBlock Grid.Row="0" Text="{StaticResource str.Spc.Group.Intro}"
+                 Foreground="#999" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+      <!-- Query controls -->
+      <Border Grid.Row="1" Background="#252526" CornerRadius="4" Padding="12,8" Margin="0,0,0,10"
+              BorderBrush="#3C3C3C" BorderThickness="1">
+        <WrapPanel Orientation="Horizontal">
+          <TextBlock Text="{StaticResource str.Spc.Join}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+          <ComboBox ItemsSource="{Binding JoinModeOptions}" SelectedItem="{Binding SelectedJoinMode}"
+                    MinWidth="120" Margin="0,0,12,0" ToolTip.Tip="{StaticResource str.Spc.JoinHint}"
+                    IsEnabled="{Binding !IsGroupMatching}"/>
+          <TextBlock Text="{StaticResource str.Spc.ClassFilter}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+          <TextBox Text="{Binding ClassFilter}" Width="140" Margin="0,0,12,0" IsEnabled="{Binding !IsGroupMatching}"/>
+          <TextBlock Text="{StaticResource str.Spc.PropFilter}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+          <TextBox Text="{Binding PropFilter}" Width="140" Margin="0,0,12,0" IsEnabled="{Binding !IsGroupMatching}"/>
+          <Button Content="{StaticResource str.Spc.Group.Run}" Command="{Binding RunGroupQueryCommand}"
+                  IsEnabled="{Binding CanRunGroupQuery}" Classes="accent" Padding="12,4" Margin="0,0,8,0"/>
+          <Button Content="{StaticResource str.Spc.Group.Clear}" Command="{Binding ClearGroupCommand}" Padding="8,4" Margin="0,0,8,0"/>
+          <Button Content="{StaticResource str.Spc.Refresh}" Command="{Binding RefreshCommand}"
+                  Padding="8,4" IsEnabled="{Binding !IsGroupMatching}"/>
+          <ProgressBar IsIndeterminate="True" Height="4" Width="120" VerticalAlignment="Center" Margin="10,0,8,0"
+                       IsVisible="{Binding IsGroupMatching}"/>
+          <TextBlock Text="{Binding GroupStatusText}" Foreground="#4EC9B0" FontSize="12" VerticalAlignment="Center"/>
+        </WrapPanel>
+      </Border>
+
+      <!-- Value slots: width scope per value + add/remove + which value the grid edits -->
+      <StackPanel Grid.Row="2" Spacing="6" Margin="0,0,0,8">
+        <TextBlock Text="{StaticResource str.Spc.Group.SlotsHeader}" Foreground="#9CDCFE" FontWeight="SemiBold"/>
+        <WrapPanel Orientation="Horizontal">
+          <ItemsControl ItemsSource="{Binding GroupSlots}">
+            <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:SpcGroupSlotVm">
+                <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,12,0" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding Label}" Foreground="#CCCCCC" VerticalAlignment="Center"/>
+                  <ComboBox ItemsSource="{Binding $parent[UserControl].((vm:SpcQueryViewModel)DataContext).GroupScopeOptions}"
+                            SelectedItem="{Binding Scope}" MinWidth="130"/>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Button Content="{StaticResource str.Spc.Group.AddSlot}" Command="{Binding AddGroupSlotCommand}"
+                  IsEnabled="{Binding CanAddGroupSlot}" Padding="8,3" Margin="0,0,4,0"/>
+          <Button Content="{StaticResource str.Spc.Group.RemoveSlot}" Command="{Binding RemoveGroupSlotCommand}"
+                  IsEnabled="{Binding CanRemoveGroupSlot}" Padding="8,3" Margin="0,0,12,0"/>
+          <TextBlock Text="{StaticResource str.Spc.Group.Editing}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+          <ComboBox ItemsSource="{Binding ActiveSlotChoices}" SelectedIndex="{Binding ActiveGroupSlot}"
+                    MinWidth="100" ToolTip.Tip="{StaticResource str.Spc.Group.EditingHint}"
+                    IsEnabled="{Binding !IsGroupMatching}"/>
+        </WrapPanel>
+      </StackPanel>
+
+      <!-- Snapshot picker — tick the snapshots, then set the ACTIVE value's Compare +
+           Value filter down the rows. The slot selector above swaps which value is edited. -->
+      <DataGrid Grid.Row="3" ItemsSource="{Binding SnapshotPicks}" IsReadOnly="False"
+                GridLinesVisibility="Horizontal" Background="#1E1E1E"
+                IsEnabled="{Binding !IsGroupMatching}"
+                CanUserResizeColumns="True" CanUserSortColumns="False">
+        <DataGrid.Columns>
+          <DataGridTemplateColumn Header="{StaticResource str.Spc.Col.Use}" Width="50">
+            <DataGridTemplateColumn.CellTemplate>
+              <DataTemplate x:DataType="vm:SpcSnapshotPick">
+                <CheckBox IsChecked="{Binding IsSelected}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              </DataTemplate>
+            </DataGridTemplateColumn.CellTemplate>
+          </DataGridTemplateColumn>
+          <DataGridTextColumn Header="{StaticResource str.Spc.Col.Label}"    Binding="{Binding Label}"       IsReadOnly="True" Width="*"/>
+          <DataGridTextColumn Header="{StaticResource str.Spc.Col.Captured}" Binding="{Binding CapturedAt}"  IsReadOnly="True" Width="190"/>
+          <DataGridTextColumn Header="{StaticResource str.Spc.Col.Session}"  Binding="{Binding SessionShort}" IsReadOnly="True" Width="120"/>
+          <DataGridTemplateColumn Header="{StaticResource str.Spc.Col.Predicate}" Width="150">
+            <DataGridTemplateColumn.CellTemplate>
+              <DataTemplate x:DataType="vm:SpcSnapshotPick">
+                <ComboBox ItemsSource="{Binding PredicateOptions}"
+                          SelectedItem="{Binding GroupActivePredicate}"
+                          IsEnabled="{Binding PredicateEnabled}"
+                          HorizontalAlignment="Stretch" Margin="2"/>
+              </DataTemplate>
+            </DataGridTemplateColumn.CellTemplate>
+          </DataGridTemplateColumn>
+          <DataGridTemplateColumn Header="{StaticResource str.Spc.Col.ValueFilter}" Width="240">
+            <DataGridTemplateColumn.CellTemplate>
+              <DataTemplate x:DataType="vm:SpcSnapshotPick">
+                <StackPanel Orientation="Horizontal" Spacing="2" Margin="2" VerticalAlignment="Center">
+                  <ComboBox ItemsSource="{Binding AbsKindOptions}" SelectedItem="{Binding GroupActiveAbsKind}"
+                            IsEnabled="{Binding AbsEnabled}" MinWidth="96"/>
+                  <TextBox Text="{Binding GroupActiveAbsLow}" Width="52" IsEnabled="{Binding AbsEnabled}"
+                           IsVisible="{Binding GroupShowAbsLow}" PlaceholderText="lo"/>
+                  <TextBox Text="{Binding GroupActiveAbsHigh}" Width="52" IsEnabled="{Binding AbsEnabled}"
+                           IsVisible="{Binding GroupShowAbsHigh}" PlaceholderText="hi"/>
+                </StackPanel>
+              </DataTemplate>
+            </DataGridTemplateColumn.CellTemplate>
+          </DataGridTemplateColumn>
+        </DataGrid.Columns>
+      </DataGrid>
+
+      <!-- Hints + error -->
+      <StackPanel Grid.Row="4" Spacing="4" Margin="0,8,0,8">
+        <TextBlock Text="{StaticResource str.Spc.BaselineHint}" Foreground="#888" FontSize="11" TextWrapping="Wrap"/>
+        <TextBlock Text="{Binding ErrorMessage}" Foreground="#F44747" FontSize="12" TextWrapping="Wrap"
+                   IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+      </StackPanel>
+
+      <!-- Results master-detail: one row per matched object; expand for per-slot chains
+           + locked offsets + handoffs (reuses GroupCandidate / GroupSlotMatch). -->
+      <DataGrid Grid.Row="5" ItemsSource="{Binding GroupCandidates}" SelectedItem="{Binding SelectedGroupCandidate}"
+                IsReadOnly="True" GridLinesVisibility="Horizontal" Background="#1E1E1E"
+                RowDetailsVisibilityMode="VisibleWhenSelected"
+                CanUserResizeColumns="True" CanUserSortColumns="True">
+        <DataGrid.Columns>
+          <DataGridTextColumn Header="{StaticResource str.Spc.Group.Col.Class}"   Binding="{Binding LocationLabel}" SortMemberPath="ClassName"    Width="220"/>
+          <DataGridTextColumn Header="{StaticResource str.Spc.Group.Col.Object}"  Binding="{Binding InstanceName}"  SortMemberPath="InstanceName" Width="*"/>
+          <DataGridTextColumn Header="{StaticResource str.Spc.Group.Col.Matched}" Binding="{Binding SlotSummary}"   CanUserSort="False"           Width="2*"/>
+          <DataGridTemplateColumn Header="" Width="Auto" CanUserSort="False">
+            <DataGridTemplateColumn.CellTemplate>
+              <DataTemplate x:DataType="m:GroupCandidate">
+                <Button Content="{StaticResource str.Spc.OpenWalker}"
+                        Command="{Binding $parent[UserControl].((vm:SpcQueryViewModel)DataContext).OpenGroupInLiveWalkerCommand}"
+                        CommandParameter="{Binding}"
+                        IsEnabled="{Binding $parent[UserControl].((vm:SpcQueryViewModel)DataContext).CanUseResultRowActions}"
+                        Foreground="#4EC9B0" Background="Transparent" BorderThickness="1" BorderBrush="#4EC9B0"
+                        Padding="6,2" FontSize="11" Cursor="Hand"/>
+              </DataTemplate>
+            </DataGridTemplateColumn.CellTemplate>
+          </DataGridTemplateColumn>
+        </DataGrid.Columns>
+        <DataGrid.RowDetailsTemplate>
+          <DataTemplate x:DataType="m:GroupCandidate">
+            <StackPanel Margin="20,4,8,8" Spacing="4">
+              <TextBlock Text="{Binding OffsetTableLabel}" IsVisible="{Binding HasOffsetTable}"
+                         Foreground="#DCDCAA" FontFamily="Consolas" FontSize="12"/>
+              <ItemsControl ItemsSource="{Binding Slots}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="m:GroupSlotMatch">
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,2">
+                      <TextBlock Text="{Binding LockLabel}" Foreground="#9CDCFE" VerticalAlignment="Center" MinWidth="36"/>
+                      <TextBlock Text="{Binding FieldName}" Foreground="#D4D4D4" VerticalAlignment="Center" Width="200"/>
+                      <TextBlock Text="{Binding ScanType}" Foreground="#9CDCFE" FontFamily="Consolas" VerticalAlignment="Center" Width="90"
+                                 ToolTip.Tip="{StaticResource str.Spc.Group.Detail.Pattern}"/>
+                      <TextBlock Text="{Binding OffsetHex}" Foreground="#888" FontFamily="Consolas" VerticalAlignment="Center" Width="70"/>
+                      <TextBlock Text="{Binding FieldType}" Foreground="#888" VerticalAlignment="Center" Width="110"/>
+                      <TextBlock Text="{Binding LeafValue}" Foreground="#CE9178" FontFamily="Consolas" VerticalAlignment="Center" MinWidth="80"/>
+                      <Button Content="{StaticResource str.Spc.CopyAddr}"
+                              Command="{Binding $parent[UserControl].((vm:SpcQueryViewModel)DataContext).CopyGroupSlotAddressCommand}"
+                              CommandParameter="{Binding}"
+                              IsEnabled="{Binding $parent[UserControl].((vm:SpcQueryViewModel)DataContext).CanUseResultRowActions}"
+                              Foreground="#DCDCAA" Background="Transparent" BorderThickness="1" BorderBrush="#DCDCAA"
+                              Padding="6,2" FontSize="11" Cursor="Hand"/>
+                      <Button Content="{StaticResource str.Spc.LocateGWorld}"
+                              Command="{Binding $parent[UserControl].((vm:SpcQueryViewModel)DataContext).LocateGroupSlotInGWorldCommand}"
+                              CommandParameter="{Binding}"
+                              IsEnabled="{Binding $parent[UserControl].((vm:SpcQueryViewModel)DataContext).CanLocateResultRowInGWorld}"
+                              ToolTip.Tip="{StaticResource str.Tip.Spc.LocateGWorld}"
+                              Foreground="#C586C0" Background="Transparent" BorderThickness="1" BorderBrush="#C586C0"
+                              Padding="6,2" FontSize="11" Cursor="Hand"/>
+                      <Button Content="{StaticResource str.Spc.LocateGameEngine}"
+                              Command="{Binding $parent[UserControl].((vm:SpcQueryViewModel)DataContext).LocateGroupSlotInGameEngineCommand}"
+                              CommandParameter="{Binding}"
+                              IsEnabled="{Binding $parent[UserControl].((vm:SpcQueryViewModel)DataContext).CanUseResultRowActions}"
+                              ToolTip.Tip="{StaticResource str.Tip.Spc.LocateGameEngine}"
+                              Foreground="#C586C0" Background="Transparent" BorderThickness="1" BorderBrush="#C586C0"
+                              Padding="6,2" FontSize="11" Cursor="Hand"/>
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </DataTemplate>
+        </DataGrid.RowDetailsTemplate>
+      </DataGrid>
+    </Grid>
+
+    </Panel>
+  </DockPanel>
 </UserControl>

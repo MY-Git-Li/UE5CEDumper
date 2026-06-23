@@ -65,6 +65,15 @@ public interface ISnapshotStore
     /// docs/experimental-snapshot-spc-pivot.md §"Phase B".</summary>
     Task<SpcResult> SpcQueryAsync(SpcQuery query, CancellationToken ct = default);
 
+    /// <summary>Run an SPC GROUP query: find OBJECTS in the active game's DB holding N
+    /// (2–4) fields, each satisfying its OWN per-snapshot predicate chain across
+    /// <see cref="SpcGroupQuery.SnapshotIds"/> (≥ 2), at DISTINCT offsets. The
+    /// N-snapshot, object-aware generalisation of Snapshot Group Match Mode B (the
+    /// <c>Orden</c>-reuse seam group-value-scan-spec §3.1 reserved for SPC). Reuses the
+    /// SPC intersection load + <see cref="Services.SpcEngine"/> for the per-slot chains
+    /// + <see cref="Services.GroupMatch"/> for the SDR. Pure SQL fetch — no DLL/pipe.</summary>
+    Task<SpcGroupResult> SpcGroupQueryAsync(SpcGroupQuery query, CancellationToken ct = default);
+
     /// <summary>Snapshot Group Match: find objects in the snapshot(s) that hold ALL
     /// of N values (2–4) at DISTINCT numeric offsets, in any order — the object-aware
     /// "Group Scan" over captured data (the <c>Orden</c> reuse seam, run in C#).

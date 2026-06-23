@@ -92,8 +92,11 @@ public static class GroupMatch
     private static bool IsUnsigned(string t) =>
         t is "ByteProperty" or "UInt16Property" or "UInt32Property" or "UInt64Property";
 
-    /// <summary>Is <paramref name="t"/> a numeric field eligible under <paramref name="scope"/>?</summary>
-    private static bool TypeInScope(string t, Scope scope)
+    /// <summary>Is <paramref name="t"/> a numeric field eligible under <paramref name="scope"/>?
+    /// Public so source-agnostic callers (e.g. the SPC group matcher, which evaluates
+    /// per-slot predicate chains via <see cref="SpcEngine"/> instead of
+    /// <see cref="LeafSatisfiesSlot"/>) can reuse the same width-scope gate.</summary>
+    public static bool TypeInScope(string t, Scope scope)
     {
         if (WidthBytes(t) == 0) return false;
         if (scope == Scope.NumericNoByte && IsOneByte(t)) return false;
@@ -225,6 +228,30 @@ public static class GroupMatch
             if (!TryAssign(s, perSlot, leafToSlot, seen)) return false;
         }
         return true;
+    }
+
+    /// <summary>After a successful <see cref="Run"/> / <see cref="HasDistinctAssignment"/>,
+    /// recover the actual SDR: <c>result[s]</c> = the DISTINCT leaf index assigned to slot
+    /// <c>s</c> (or -1 if none). Use this for each slot's representative leaf instead of
+    /// <c>perSlot[s][0]</c> — the first matching leaf can be shared by two slots, which would
+    /// render the same field twice; the SDR guarantees distinct representatives. Returns null
+    /// if no complete assignment exists (caller should only call this when Run returned true).</summary>
+    public static int[]? Assignment(List<int>[] perSlot, int nLeaves)
+    {
+        if (nLeaves < 0) return null;
+        var leafToSlot = new int[nLeaves];
+        for (int i = 0; i < nLeaves; i++) leafToSlot[i] = -1;
+        for (int s = 0; s < perSlot.Length; s++)
+        {
+            if (perSlot[s].Count == 0) return null;
+            var seen = new bool[nLeaves];
+            if (!TryAssign(s, perSlot, leafToSlot, seen)) return null;
+        }
+        var slotToLeaf = new int[perSlot.Length];
+        for (int s = 0; s < slotToLeaf.Length; s++) slotToLeaf[s] = -1;
+        for (int leaf = 0; leaf < nLeaves; leaf++)
+            if (leafToSlot[leaf] >= 0) slotToLeaf[leafToSlot[leaf]] = leaf;
+        return slotToLeaf;
     }
 
     /// <summary>Build each slot's matching-leaf list (capped at <paramref name="perSlotCap"/>)

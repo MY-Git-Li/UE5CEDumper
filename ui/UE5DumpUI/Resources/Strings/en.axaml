@@ -461,6 +461,23 @@
     <sys:String x:Key="str.Spc.Res.Type">Type</sys:String>
     <sys:String x:Key="str.Spc.Res.Sequence">Value sequence</sys:String>
 
+    <!-- SPC GROUP (multiple values) — Single/Group toggle + matrix editor -->
+    <sys:String x:Key="str.Spc.Group.ModeLabel">Mode:</sys:String>
+    <sys:String x:Key="str.Spc.Group.ModeSingle">Single field</sys:String>
+    <sys:String x:Key="str.Spc.Group.ModeGroup">Group (Multiple Values)</sys:String>
+    <sys:String x:Key="str.Spc.Group.Intro">Find OBJECTS holding ALL of 2–4 fields at distinct offsets, where EACH field follows its own direction chain across the snapshots (e.g. Current HP: ·→↓→↑ while Max HP: ·→=→= over [full, damaged, healed]). Tick the snapshots above, pick a value with the selector, then set that value's Compare + Value filter down the snapshot rows. Repeat per value. Run finds objects where every value's chain holds at the same time.</sys:String>
+    <sys:String x:Key="str.Spc.Group.Run">Find group</sys:String>
+    <sys:String x:Key="str.Spc.Group.Clear">Clear</sys:String>
+    <sys:String x:Key="str.Spc.Group.AddSlot">+ value</sys:String>
+    <sys:String x:Key="str.Spc.Group.RemoveSlot">− value</sys:String>
+    <sys:String x:Key="str.Spc.Group.Editing">Editing:</sys:String>
+    <sys:String x:Key="str.Spc.Group.EditingHint">Pick which value's chain the snapshot grid below edits. Each value also has its own width scope.</sys:String>
+    <sys:String x:Key="str.Spc.Group.SlotsHeader">Values (width scope per value):</sys:String>
+    <sys:String x:Key="str.Spc.Group.Col.Class">Class</sys:String>
+    <sys:String x:Key="str.Spc.Group.Col.Object">Object</sys:String>
+    <sys:String x:Key="str.Spc.Group.Col.Matched">Matched values</sys:String>
+    <sys:String x:Key="str.Spc.Group.Detail.Pattern">Pattern</sys:String>
+
     <!-- N1: per-game class denylist (noise picker) — shared by SPC + Diff -->
     <sys:String x:Key="str.Noise.PanelHeader">Noise picker — top classes in this result</sys:String>
     <sys:String x:Key="str.Noise.PanelHint">Tick classes whose hits you consider noise (UI widgets, animation, tick state). Apply adds them to this game's denylist and re-runs the query. The denylist also filters Snapshot Diff and the Class Pivot picker.</sys:String>
