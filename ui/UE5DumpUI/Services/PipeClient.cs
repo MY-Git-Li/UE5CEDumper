@@ -20,6 +20,14 @@ public sealed class PipeClient : IPipeClient
     private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonObject>> _pending = new();
     private readonly ILoggingService _log;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
+
+    // A snapshot_chunk response is multi-MB JSON; logging the FULL body cost ~98 s of a
+    // ~100 s capture in-game (verified by the parse+pipe split — the "Pipe RX" debug log
+    // alone). Cap the logged body so a huge payload is debug-logged as a short prefix +
+    // length, never the whole thing.
+    private const int MaxLogBodyChars = 1024;
+    private static string LogBody(string s) =>
+        s.Length <= MaxLogBodyChars ? s : $"{s[..MaxLogBodyChars]}… ({s.Length:N0} chars)";
     private Task? _readLoopTask;
 
     public bool IsConnected { get; private set; }
@@ -121,7 +129,7 @@ public sealed class PipeClient : IPipeClient
         });
 
         var json = request.ToJsonString();
-        _log.Debug(Constants.LogCatPipe, $"Pipe TX: {json}");
+        _log.Debug(Constants.LogCatPipe, $"Pipe TX: {LogBody(json)}");
 
         try
         {
@@ -172,7 +180,7 @@ public sealed class PipeClient : IPipeClient
                 }
 
                 var rxLogSw = System.Diagnostics.Stopwatch.StartNew();
-                _log.Debug(Constants.LogCatPipe, $"Pipe RX: {line}");
+                _log.Debug(Constants.LogCatPipe, $"Pipe RX: {LogBody(line)}");
                 rxLogSw.Stop();
 
                 try
