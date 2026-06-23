@@ -154,12 +154,18 @@ public partial class SnapshotViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanRunDiff));
         RaiseDiffRowActionGates();
     }
-    partial void OnIsGWorldAvailableChanged(bool value) => OnPropertyChanged(nameof(CanLocateDiffRowInGWorld));
+    partial void OnIsGWorldAvailableChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanLocateDiffRowInGWorld));
+        OnPropertyChanged(nameof(CanLocateGroupRowInGWorld));
+    }
 
     private void RaiseDiffRowActionGates()
     {
         OnPropertyChanged(nameof(CanUseDiffRowActions));
         OnPropertyChanged(nameof(CanLocateDiffRowInGWorld));
+        OnPropertyChanged(nameof(CanUseGroupRowActions));
+        OnPropertyChanged(nameof(CanLocateGroupRowInGWorld));
     }
     partial void OnIsDiffingChanged(bool value)
     {
@@ -354,11 +360,14 @@ public partial class SnapshotViewModel : ViewModelBase
             var list = await Task.Run(() => _store.ListSnapshotsAsync());
             // Preserve the diff picks across a refresh (a capture finishes -> this
             // runs) by id, since Reset detaches every selection bound to Snapshots.
-            long? keepA = DiffA?.Id, keepB = DiffB?.Id;
+            long? keepA = DiffA?.Id, keepB = DiffB?.Id, keepG = GroupSnapshot?.Id;
             UiCollection.Reset(Snapshots, list,
-                () => { SelectedSnapshot = null; DiffA = null; DiffB = null; });
+                () => { SelectedSnapshot = null; DiffA = null; DiffB = null; GroupSnapshot = null; });
             if (keepA.HasValue) DiffA = Snapshots.FirstOrDefault(s => s.Id == keepA.Value);
             if (keepB.HasValue) DiffB = Snapshots.FirstOrDefault(s => s.Id == keepB.Value);
+            // Group mode searches a single snapshot — preserve the pick, else default to newest.
+            if (keepG.HasValue) GroupSnapshot = Snapshots.FirstOrDefault(s => s.Id == keepG.Value);
+            GroupSnapshot ??= Snapshots.FirstOrDefault();
             await UpdateUsageAsync();
             // Convenience: default the diff pickers to the two newest snapshots
             // (A = older, B = newer) so "Run Diff" is one click after capturing.

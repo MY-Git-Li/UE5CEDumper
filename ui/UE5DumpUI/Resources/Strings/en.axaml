@@ -398,6 +398,26 @@
     <sys:String x:Key="str.Snapshot.Diff.Col.Old">Old</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.Col.New">New</sys:String>
 
+    <!-- Snapshot Group Match (Multiple Values over a captured snapshot) -->
+    <sys:String x:Key="str.Snapshot.Group.ModeLabel">Mode:</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.ModeDiff">Diff</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.ModeGroup">Group (Multiple Values)</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Snapshot">Snapshot:</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Find">Find</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Clear">Clear</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.AddRow">+ value</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.RemoveRow">− value</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.ValueHint">value</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Value2Hint">to</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Hint">Find objects holding ALL of 2–4 values at distinct numeric offsets in one captured snapshot. (Cross-snapshot Increased / Decreased / Unchanged comparison — incl. "Current HP↓ + Max HP unchanged" — arrives in a later build.)</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Col.Class">Class</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Col.Object">Object</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.Col.Matched">Matched values</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.OpenWalker">Live</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.CopyAddr">Addr</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.LocateGWorld">🌍</sys:String>
+    <sys:String x:Key="str.Snapshot.Group.LocateGameEngine">⚙</sys:String>
+
     <!-- SPC Query (experimental) -->
     <sys:String x:Key="str.Spc.Intro">Find fields whose value SEQUENCE across snapshots matches a direction chain — no type, no value. Pick two or more snapshots (they may span game sessions), set how each should compare to the previous one (Increased / Decreased / Unchanged / Changed), and run. This is CE's "Unknown Initial Value + Increased/Decreased" generalised across persisted snapshots and restarts.</sys:String>
     <sys:String x:Key="str.Spc.Join">Join:</sys:String>

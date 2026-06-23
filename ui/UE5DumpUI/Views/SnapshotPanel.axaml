@@ -110,8 +110,23 @@
                   ResizeDirection="Rows" Background="#3C3C3C" Margin="0,4,0,4"/>
 
     <!-- Compare (collapsible) + diff results share the lower star row: collapsing
-         the compare Expander hands its space to the diff grid below it. -->
+         the compare Expander hands its space to the diff grid below it. A Diff /
+         Group toggle swaps the lower area between the snapshot diff and the
+         Multiple-Values group match over one snapshot. -->
     <DockPanel Grid.Row="6">
+      <!-- Diff / Group mode toggle -->
+      <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8"
+                  Margin="0,0,0,8" VerticalAlignment="Center">
+        <TextBlock Text="{StaticResource str.Snapshot.Group.ModeLabel}" Foreground="#CCCCCC" VerticalAlignment="Center"/>
+        <ToggleSwitch IsChecked="{Binding IsGroupMode}"
+                      OffContent="{StaticResource str.Snapshot.Group.ModeDiff}"
+                      OnContent="{StaticResource str.Snapshot.Group.ModeGroup}"/>
+      </StackPanel>
+
+      <!-- Both mode contents overlay this Panel; visibility shows exactly one. -->
+      <Panel>
+      <!-- ============ DIFF mode ============ -->
+      <DockPanel IsVisible="{Binding !IsGroupMode}">
       <Expander DockPanel.Dock="Top" Header="{StaticResource str.Snapshot.CompareHeader}"
                 IsExpanded="{Binding CompareSectionOpen}" Margin="0,0,0,8"
                 Background="#252526" BorderBrush="#3C3C3C" BorderThickness="1">
@@ -227,11 +242,123 @@
           </DataGridTemplateColumn>
         </DataGrid.Columns>
       </DataGrid>
+      </DockPanel>
+
+      <!-- ============ GROUP mode (Multiple Values over one snapshot) ============ -->
+      <DockPanel IsVisible="{Binding IsGroupMode}">
+        <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,8">
+          <TextBlock Text="{StaticResource str.Snapshot.Group.Hint}" Foreground="#999" FontSize="11" TextWrapping="Wrap"/>
+          <WrapPanel Orientation="Horizontal">
+            <TextBlock Text="{StaticResource str.Snapshot.Group.Snapshot}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,6,0"/>
+            <ComboBox ItemsSource="{Binding Snapshots}" SelectedItem="{Binding GroupSnapshot}" MinWidth="200" Margin="0,0,12,0"
+                      IsEnabled="{Binding !IsGroupMatching}">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="m:SnapshotMeta"><TextBlock Text="{Binding PickerDisplay}"/></DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+            <Button Content="{StaticResource str.Snapshot.Group.Find}" Command="{Binding RunGroupMatchCommand}"
+                    IsEnabled="{Binding CanRunGroupMatch}" Classes="accent" Padding="12,4" Margin="0,0,8,0"/>
+            <Button Content="{StaticResource str.Snapshot.Group.Clear}" Command="{Binding ClearGroupCommand}" Padding="8,4" Margin="0,0,8,0"/>
+            <ProgressBar IsIndeterminate="True" Width="120" Height="4" VerticalAlignment="Center" Margin="0,0,8,0"
+                         IsVisible="{Binding IsGroupMatching}"/>
+            <TextBlock Text="{Binding GroupStatusText}" Foreground="#4EC9B0" FontSize="12" VerticalAlignment="Center"/>
+          </WrapPanel>
+          <!-- 2-4 value rows: width scope + predicate + value (+ Between upper bound) -->
+          <ItemsControl ItemsSource="{Binding GroupInputs}" IsEnabled="{Binding !IsGroupMatching}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="m:GroupSlotInput">
+                <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,0,4">
+                  <ComboBox ItemsSource="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).GroupDataTypeOptions}"
+                            SelectedItem="{Binding DataType}" MinWidth="130"/>
+                  <ComboBox ItemsSource="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).GroupScanTypeOptions}"
+                            SelectedItem="{Binding ScanType}" MinWidth="100"/>
+                  <TextBox Text="{Binding Value}" Width="120" IsVisible="{Binding RequiresValueInput}"
+                           PlaceholderText="{StaticResource str.Snapshot.Group.ValueHint}"/>
+                  <TextBlock Text="{StaticResource str.Snapshot.Group.Value2Hint}" Foreground="#888"
+                             VerticalAlignment="Center" IsVisible="{Binding RequiresValue2Input}"/>
+                  <TextBox Text="{Binding Value2}" Width="120" IsVisible="{Binding RequiresValue2Input}"/>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Button Content="{StaticResource str.Snapshot.Group.AddRow}" Command="{Binding AddGroupRowCommand}"
+                    IsEnabled="{Binding CanAddGroupRow}" Padding="8,3"/>
+            <Button Content="{StaticResource str.Snapshot.Group.RemoveRow}" Command="{Binding RemoveGroupRowCommand}"
+                    IsEnabled="{Binding CanRemoveGroupRow}" Padding="8,3"/>
+          </StackPanel>
+        </StackPanel>
+
+        <!-- Results master-detail: one row per matched object; expand for per-slot
+             locked offsets + handoffs (reuses GroupCandidate / GroupSlotMatch). -->
+        <DataGrid ItemsSource="{Binding GroupCandidates}" SelectedItem="{Binding SelectedGroupCandidate}"
+                  IsReadOnly="True" GridLinesVisibility="Horizontal" Background="#1E1E1E"
+                  RowDetailsVisibilityMode="VisibleWhenSelected"
+                  CanUserResizeColumns="True" CanUserSortColumns="True">
+          <DataGrid.Columns>
+            <DataGridTextColumn Header="{StaticResource str.Snapshot.Group.Col.Class}"   Binding="{Binding LocationLabel}" SortMemberPath="ClassName"    Width="220"/>
+            <DataGridTextColumn Header="{StaticResource str.Snapshot.Group.Col.Object}"  Binding="{Binding InstanceName}"  SortMemberPath="InstanceName" Width="*"/>
+            <DataGridTextColumn Header="{StaticResource str.Snapshot.Group.Col.Matched}" Binding="{Binding SlotSummary}"   CanUserSort="False"           Width="2*"/>
+            <DataGridTemplateColumn Header="" Width="Auto" CanUserSort="False">
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate x:DataType="m:GroupCandidate">
+                  <Button Content="{StaticResource str.Snapshot.Group.OpenWalker}"
+                          Command="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).OpenGroupInLiveWalkerCommand}"
+                          CommandParameter="{Binding}"
+                          IsEnabled="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).CanUseGroupRowActions}"
+                          Foreground="#4EC9B0" Background="Transparent" BorderThickness="1" BorderBrush="#4EC9B0"
+                          Padding="6,2" FontSize="11" Cursor="Hand"/>
+                </DataTemplate>
+              </DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
+          </DataGrid.Columns>
+          <DataGrid.RowDetailsTemplate>
+            <DataTemplate x:DataType="m:GroupCandidate">
+              <StackPanel Margin="20,4,8,8" Spacing="4">
+                <TextBlock Text="{Binding OffsetTableLabel}" IsVisible="{Binding HasOffsetTable}"
+                           Foreground="#DCDCAA" FontFamily="Consolas" FontSize="12"/>
+                <ItemsControl ItemsSource="{Binding Slots}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="m:GroupSlotMatch">
+                      <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,2">
+                        <TextBlock Text="{Binding LockLabel}" Foreground="#9CDCFE" VerticalAlignment="Center" MinWidth="36"/>
+                        <TextBlock Text="{Binding DisplayLabel}" Foreground="#D4D4D4" VerticalAlignment="Center" Width="360"/>
+                        <TextBlock Text="{Binding LeafValue}" Foreground="#CE9178" FontFamily="Consolas" VerticalAlignment="Center" MinWidth="80"/>
+                        <Button Content="{StaticResource str.Snapshot.Group.CopyAddr}"
+                                Command="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).CopyGroupSlotAddressCommand}"
+                                CommandParameter="{Binding}"
+                                IsEnabled="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).CanUseGroupRowActions}"
+                                Foreground="#DCDCAA" Background="Transparent" BorderThickness="1" BorderBrush="#DCDCAA"
+                                Padding="6,2" FontSize="11" Cursor="Hand"/>
+                        <Button Content="{StaticResource str.Snapshot.Group.LocateGWorld}"
+                                Command="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).LocateGroupSlotInGWorldCommand}"
+                                CommandParameter="{Binding}"
+                                IsEnabled="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).CanLocateGroupRowInGWorld}"
+                                ToolTip.Tip="{StaticResource str.Tip.Snapshot.Diff.LocateGWorld}"
+                                Foreground="#C586C0" Background="Transparent" BorderThickness="1" BorderBrush="#C586C0"
+                                Padding="6,2" FontSize="11" Cursor="Hand"/>
+                        <Button Content="{StaticResource str.Snapshot.Group.LocateGameEngine}"
+                                Command="{Binding $parent[UserControl].((vm:SnapshotViewModel)DataContext).LocateGroupSlotInGameEngineCommand}"
+                                CommandParameter="{Binding}"
+                                ToolTip.Tip="{StaticResource str.Tip.Snapshot.Diff.LocateGameEngine}"
+                                Foreground="#C586C0" Background="Transparent" BorderThickness="1" BorderBrush="#C586C0"
+                                Padding="6,2" FontSize="11" Cursor="Hand"/>
+                      </StackPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </DataTemplate>
+          </DataGrid.RowDetailsTemplate>
+        </DataGrid>
+      </DockPanel>
+      </Panel>
     </DockPanel>
 
     <!-- N1: noise picker for the diff. Same shape as the SPC tab — Apply pushes
-         ticked classes into the Diff-scope denylist and re-runs the diff. -->
+         ticked classes into the Diff-scope denylist and re-runs the diff. Diff-only. -->
     <Expander Grid.Row="7" Header="{StaticResource str.Noise.PanelHeader}"
+              IsVisible="{Binding !IsGroupMode}"
               IsExpanded="{Binding NoisePanelOpen}" Margin="0,8,0,0"
               Background="#252526" BorderBrush="#3C3C3C" BorderThickness="1">
       <StackPanel Orientation="Vertical" Margin="6">
