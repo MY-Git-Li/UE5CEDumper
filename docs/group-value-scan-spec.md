@@ -19,6 +19,11 @@ the actor's)**, **P3 scalar-valued/keyed maps builds 1561-1562 (`TMap<Name,int>`
 inc 2 Pivot-class + P3 scalar-map live-verify still pending. See [dev-log.md](dev-log.md)
 for the milestone history.
 
+**Orden DB-driven reuse SHIPPED (the §3.1 seam):** **Snapshot Group Match** (S1-S5;
+PR #348) and **SPC Group** (multi-value SPC, builds 1575-1582) — both run a pure-C#
+port of the matcher over loaded snapshot rows. SPC Group is the N-snapshot, per-slot
+predicate-chain generalisation of Snapshot Group Mode B. See §3.1 for the seam map.
+
 -----
 
 ## 1. What it does
@@ -98,21 +103,27 @@ dropped (same contract as the single-value container refine).
 
 ## 3. Extension points (where future work connects)
 
-### 3.1 `Orden` reuse — Snapshot / SPC Query / Class Pivot  *(deferred, seam ready)*
+### 3.1 `Orden` reuse — Snapshot ✅ / SPC Query ✅ / Class Pivot *(seam ready)*
 
 `Orden::MatchGroup` is source-agnostic by design. To add group matching to another
 feature, produce a `std::vector<Orden::Leaf>` from that feature's data and call it — no
-scanner dependency:
+scanner dependency. Both DB-driven reuses run a **pure-C# port** of the matcher
+(`Services.GroupMatch`) over the loaded rows rather than a DLL round-trip:
 
-| Feature | Leaf source | Result meaning |
-|---|---|---|
-| **Snapshot** | `SnapshotCapturedObject.Fields` (each has `Offset` / `Type` / `Hex`) → decode hex to `bytes`, resolve `width` from `Type`. No DB schema change. | "N values co-occur inside one captured object." |
-| **SPC Query** | Per-object field sequences already loaded by `RunSpcQueryAsync` → run `Orden` per object after the load. | "N-field intersection query" over the snapshot corpus. |
-| **Class Pivot** | Extend `DiscoveryInput` to a multi-field group input; feed each object's fields. | Pivot on **co-varying value tuples**, not just single (class, prop). |
+| Feature | Leaf source | Result meaning | Status |
+|---|---|---|---|
+| **Snapshot** | `SnapshotCapturedObject.Fields` (each has `Offset` / `Type` / `Hex`) → decode hex to `bytes`, resolve `width` from `Type`. No DB schema change. | "N values co-occur inside one captured object." | ✅ **SHIPPED** (S1-S5; PR #348). Mode A (single-snapshot absolute) + Mode B (2-snapshot temporal, first-vs-last) + Deep. See [snapshot-group-match-spec.md](snapshot-group-match-spec.md). |
+| **SPC Query** | The SPC cross-snapshot intersection (`SnapshotStore.LoadIntersectedCandidatesAsync`, with `computeObjKey`) already loads each field's value SEQUENCE → group the surviving fields by object, run the matcher per object with each slot carrying its OWN per-snapshot predicate chain (`SpcEngine.Matches`). | "N-field intersection query" — objects where N fields each follow their own direction chain across the snapshots, at distinct offsets. | ✅ **SHIPPED + in-game VERIFIED on SEED** (builds 1575-1584). The N-snapshot generalisation of Snapshot Group Mode B; Single/Group toggle in the SPC tab. Deep (struct-array elements) is inherent (the SPC load includes `array_field` rows) — verified on a 3-snapshot deep nested `Tunes` array with two different per-slot chains. |
+| **Class Pivot** | Extend `DiscoveryInput` to a multi-field group input; feed each object's fields. | Pivot on **co-varying value tuples**, not just single (class, prop). | *Seam ready, not built.* |
 
-**Design constraint to preserve:** `Orden.h` must keep depending only on `Radar.h`
-(std-only) — never include a live-memory / GObjects header. That is what keeps the seam
-usable from the DB-driven features.
+**Design constraint to preserve:** `Orden.h` (and the C# `GroupMatch` port) must keep
+depending only on the matcher contract (a leaf fits a slot by width + predicate; a match
+is an SDR) — never a live-memory / GObjects dependency. That is what keeps the seam
+usable from the DB-driven features. **Shared bug-fix note (builds 1575-1582):** the C#
+`BuildGroupCandidate` / `BuildSpcGroupCandidate` now take each slot's representative from
+the SDR's *assigned* leaf (`GroupMatch.Assignment`) rather than the first match, and base
+`Locked` on the count of distinct matching FIELDS (array elements all report offset 0, so
+the old dedup-by-offset falsely "locked" multi-element slots).
 
 ### 3.2 Phase roadmap (open work)  → tracked in [todo.md](todo.md)
 

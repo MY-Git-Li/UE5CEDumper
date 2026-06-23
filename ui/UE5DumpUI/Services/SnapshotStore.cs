@@ -862,12 +862,17 @@ public sealed class SnapshotStore : ISnapshotStore
             ClassName = cls,
             DefiningClassName = cls,
         };
+        // Representative = the slot's SDR-ASSIGNED leaf (not perSlot[s][0]) so two slots can't
+        // render the same field; lock/offsets count DISTINCT matching fields, not deduped
+        // offsets (array elements all report offset 0 — dedup would falsely "lock" them).
+        var assign = GroupMatch.Assignment(perSlot, leaves.Count);
         for (int s = 0; s < slots.Length; s++)
         {
             var hits = perSlot[s];
-            int rep = leaves[hits[0]].Tag;   // representative = first matched leaf
-            var offs = new List<int>();
-            foreach (int li in hits) { int o = leaves[li].Offset; if (!offs.Contains(o)) offs.Add(o); }
+            int repLeaf = assign != null && assign[s] >= 0 ? assign[s] : hits[0];
+            int rep = leaves[repLeaf].Tag;
+            var offs = new List<int>(hits.Count);
+            foreach (int li in hits) offs.Add(leaves[li].Offset);
             cand.Slots.Add(new GroupSlotMatch
             {
                 SlotIndex      = s,
@@ -882,7 +887,7 @@ public sealed class SnapshotStore : ISnapshotStore
                 InstanceAddr   = addr,
                 ClassName      = cls,
                 MatchedOffsets = offs,
-                Locked         = offs.Count == 1,
+                Locked         = hits.Count == 1,
             });
         }
         return cand;
@@ -1094,6 +1099,186 @@ public sealed class SnapshotStore : ISnapshotStore
         return result;
     }
 
+    // ============================================================
+    // SPC GROUP QUERY — the object-aware, N-snapshot generalisation of Snapshot Group
+    // Match Mode B. Reuses the SPC cross-snapshot intersection load
+    // (LoadIntersectedCandidatesAsync) to get each field's value SEQUENCE, then groups
+    // the surviving fields back into per-object blocks and runs the Orden SDR matcher
+    // per object — where each of the N value-slots carries its OWN per-snapshot
+    // predicate CHAIN (evaluated by SpcEngine.Matches, the same engine single-value SPC
+    // uses). A match = one object holds all N slots' chains at DISTINCT fields/offsets.
+    // Deep (struct-array elements) is inherent: the SPC load already includes
+    // array_field rows (build 1203), so each element is its own candidate field grouped
+    // under its owner. See docs/group-value-scan-spec.md §3.1.
+    // ============================================================
+    public async Task<SpcGroupResult> SpcGroupQueryAsync(SpcGroupQuery query, CancellationToken ct = default)
+    {
+        var result = new SpcGroupResult();
+        int n = query.SnapshotIds.Count;
+
+        // ---- validate ----
+        if (query.Slots.Count < 2 || query.Slots.Count > 4)
+        {
+            result.Error = "A group needs 2-4 values.";
+            return result;
+        }
+        if (n < 2)
+        {
+            result.Error = "Select at least two snapshots.";
+            return result;
+        }
+        for (int s = 0; s < query.Slots.Count; s++)
+            if (query.Slots[s].Chain.Count != n)
+            {
+                result.Error = $"Slot {s + 1}: predicate chain length must equal the snapshot count.";
+                return result;
+            }
+
+        ct.ThrowIfCancellationRequested();
+        int max = query.MaxResults > 0 ? query.MaxResults : 50000;
+        var mode = query.JoinMode;
+        string classContains = query.ClassContains?.Trim() ?? "";
+        string propContains  = query.PropContains?.Trim() ?? "";
+        var deny = query.ExcludedClasses is { Count: > 0 } ? query.ExcludedClasses : null;
+
+        await using var conn = await OpenAsync(ct);
+
+        // Reuse the SPC intersection: candidate FIELDS present in ALL snapshots under the
+        // join key, each carrying its oldest→newest value sequence + newest display
+        // fields + (computeObjKey) the object-identity grouping key.
+        var cands = await LoadIntersectedCandidatesAsync(
+            conn, query.SnapshotIds, mode, classContains, propContains, deny, ct, computeObjKey: true);
+
+        // Group surviving fields back into per-object blocks (the object-identity key).
+        var byObj = new Dictionary<string, List<Cand>>(StringComparer.Ordinal);
+        foreach (var c in cands)
+        {
+            if (!byObj.TryGetValue(c.ObjKey, out var list)) { list = new List<Cand>(); byObj[c.ObjKey] = list; }
+            list.Add(c);
+        }
+
+        // Precompute per-slot scope + the directional / absolute arrays of each chain.
+        int ns = query.Slots.Count;
+        var slotScope = new GroupMatch.Scope[ns];
+        var slotDir   = new SpcPredicateKind[ns][];
+        var slotAbs   = new SpcAbsolutePredicate[ns][];
+        for (int s = 0; s < ns; s++)
+        {
+            slotScope[s] = query.Slots[s].Scope == ValueScanDataType.NumericAll
+                ? GroupMatch.Scope.NumericAll : GroupMatch.Scope.NumericNoByte;
+            var chain = query.Slots[s].Chain;
+            var dir = slotDir[s] = new SpcPredicateKind[n];
+            var abs = slotAbs[s] = new SpcAbsolutePredicate[n];
+            for (int i = 0; i < n; i++) { dir[i] = chain[i].Predicate; abs[i] = chain[i].Absolute; }
+        }
+
+        var noise = new NoiseAccumulator();
+        int scanned = 0, totalMatched = 0;
+        var perSlot = new List<int>[ns];
+        foreach (var grp in byObj.Values)
+        {
+            if ((++scanned & 0x3FFF) == 0) ct.ThrowIfCancellationRequested();
+
+            // Build each slot's matching-field list over this object's candidate fields.
+            bool anyEmpty = false;
+            for (int s = 0; s < ns; s++)
+            {
+                var lst = perSlot[s] = new List<int>();
+                for (int i = 0; i < grp.Count; i++)
+                {
+                    var f = grp[i];
+                    if (!GroupMatch.TypeInScope(f.DeclaredType, slotScope[s])) continue;
+                    if (SpcEngine.Matches(f.Hex, f.Num, slotDir[s], slotAbs[s])) lst.Add(i);
+                }
+                if (lst.Count == 0) { anyEmpty = true; break; }   // early reject
+            }
+            if (anyEmpty) continue;
+
+            // Distinct fields per slot (SDR over candidate-field indices — distinct
+            // fields ⇒ distinct offsets / distinct array elements).
+            if (!GroupMatch.HasDistinctAssignment(perSlot, grp.Count)) continue;
+
+            totalMatched++;
+            noise.Bump(grp[0].ClassName, grp[0].PropName);   // counted even past the cap
+            if (result.Candidates.Count < max)
+                result.Candidates.Add(BuildSpcGroupCandidate(grp, query.Slots, perSlot));
+        }
+
+        noise.WriteTo(result.TopContributors);
+        result.Total = totalMatched;
+        result.ScannedObjects = scanned;
+        result.Truncated = totalMatched > result.Candidates.Count;
+        return result;
+    }
+
+    // Build a GroupCandidate (the shared model) from one matched object's candidate
+    // fields + the per-slot assignment. Each slot's representative = its first matching
+    // field; ScanType carries the chain glyph string (e.g. "· ↓ ↑") for the detail row,
+    // Value stays empty so the master SlotSummary falls back to the newest leaf value.
+    private static GroupCandidate BuildSpcGroupCandidate(
+        List<Cand> grp, List<SpcGroupSlot> slots, List<int>[] perSlot)
+    {
+        var first = grp[0];
+        var cand = new GroupCandidate
+        {
+            InstanceAddr      = first.ObjAddr,
+            InstanceIndex     = (int)first.Index,
+            InstanceName      = first.NormPath,
+            ClassName         = first.ClassName,
+            DefiningClassName = first.ClassName,
+        };
+        // Each slot's representative is its SDR-ASSIGNED leaf (not perSlot[s][0]), so two
+        // slots never render the same field. (Run already proved an assignment exists.)
+        var assign = GroupMatch.Assignment(perSlot, grp.Count);
+        for (int s = 0; s < slots.Count; s++)
+        {
+            var hits = perSlot[s];
+            int repIdx = assign != null && assign[s] >= 0 ? assign[s] : hits[0];
+            var rep = grp[repIdx];
+            // One entry per DISTINCT matching field (each Cand is a distinct field/element).
+            // Do NOT dedup by PropOffset: array elements all report offset 0, so dedup would
+            // collapse N distinct elements into one and falsely report the slot "locked".
+            var offs = new List<int>(hits.Count);
+            foreach (int li in hits) offs.Add(grp[li].PropOffset);
+            cand.Slots.Add(new GroupSlotMatch
+            {
+                SlotIndex      = s,
+                Value          = "",                                   // SPC slots carry a chain, not a single target
+                ScanType       = SpcChainGlyphs(slots[s].Chain),       // "· ↓ ↑" — shown in the SPC detail row
+                FieldName      = rep.PropName,
+                FieldOffset    = rep.PropOffset,
+                FieldType      = rep.DeclaredType,
+                LeafValue      = rep.Hex.Count > 0 ? SnapshotNumeric.Render(rep.DeclaredType, rep.Hex[rep.Hex.Count - 1]) : "",
+                Addr           = AddrPlusOffset(first.ObjAddr, rep.PropOffset),
+                InstanceAddr   = first.ObjAddr,
+                ClassName      = first.ClassName,
+                MatchedOffsets = offs,
+                Locked         = hits.Count == 1,                      // exactly one matching field ⇒ unambiguous
+            });
+        }
+        return cand;
+    }
+
+    // Compact glyph string for a slot's directional chain (index 0 = baseline → "·").
+    // Absolute windows are an input detail, not shown here.
+    private static string SpcChainGlyphs(List<SpcGroupCell> chain)
+    {
+        var sb = new StringBuilder(chain.Count * 2);
+        for (int i = 0; i < chain.Count; i++)
+        {
+            if (i > 0) sb.Append(' ');
+            sb.Append(i == 0 ? "·" : chain[i].Predicate switch
+            {
+                SpcPredicateKind.Unchanged => "=",
+                SpcPredicateKind.Changed   => "≠",
+                SpcPredicateKind.Increased => "↑",
+                SpcPredicateKind.Decreased => "↓",
+                _                          => "·",
+            });
+        }
+        return sb.ToString();
+    }
+
     // 0 class,1 norm,2 outer,3 type,4 prop,5 offset,6 addr,7 hex,8 num,9 gobjects_index,
     // 10 array_field,11 elem_index. Struct-array-element rows are now INCLUDED (build 1203);
     // array_field/elem_index join into the key so distinct elements don't collide.
@@ -1138,6 +1323,12 @@ public sealed class SnapshotStore : ISnapshotStore
         public bool Seen;
         public readonly List<string>  Hex = new();
         public readonly List<double?> Num = new();
+        // SPC GROUP only (populated when LoadIntersectedCandidatesAsync is called with
+        // computeObjKey: true): the object-identity portion of the join key, so the
+        // surviving candidate FIELDS can be grouped back into per-object blocks, plus
+        // the anchor snapshot's GObjects index for the candidate's display.
+        public string ObjKey = "";
+        public long   Index;
     }
 
     // Shared cross-snapshot intersection load for SPC + change-driven Discovery
@@ -1153,7 +1344,8 @@ public sealed class SnapshotStore : ISnapshotStore
     // evaluates predicates (SPC) or ranks them (Discovery).
     private async Task<List<Cand>> LoadIntersectedCandidatesAsync(
         SqliteConnection conn, IReadOnlyList<long> snapshotIds, SpcJoinMode mode,
-        string classContains, string propContains, HashSet<string>? deny, CancellationToken ct)
+        string classContains, string propContains, HashSet<string>? deny, CancellationToken ct,
+        bool computeObjKey = false)
     {
         int n = snapshotIds.Count;
         var intern = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -1187,6 +1379,11 @@ public sealed class SnapshotStore : ISnapshotStore
                 var c = new Cand { ClassName = Intern(cls), PropName = Intern(displayProp) };
                 c.Hex.Add(r.IsDBNull(7) ? "" : r.GetString(7));
                 c.Num.Add(r.IsDBNull(8) ? (double?)null : r.GetDouble(8));
+                if (computeObjKey)   // SPC group: remember which OBJECT this field belongs to
+                {
+                    c.ObjKey = Intern(SpcObjectKey(mode, r, cls));
+                    c.Index  = r.IsDBNull(9) ? -1L : r.GetInt64(9);
+                }
                 cands[key] = c;
             }
         }
