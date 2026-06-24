@@ -306,6 +306,15 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     // combinatorial blow-up that otherwise OOMs Copy CE XML on a dense object graph.
     [ObservableProperty] private bool _dedupSharedObjects = true;
 
+    // Skip system/engine asset fields (Widget, SoundBase, Texture, Material, Particle,
+    // Niagara, AnimInstance …) when DRILLING into pointer/struct children in Copy CE XML /
+    // Copy CE Field (default ON). A CE user rarely watches those. Only the recursively-
+    // resolved children are filtered — the top-level fields the user explicitly selected
+    // are always kept (CeXmlExportService gates on emit depth). Name-based, conservative:
+    // gameplay classes (Actor/Pawn/Character/components/Controller/PlayerState/GameInstance)
+    // are never dropped, and a "N system fields hidden" note shows when anything was skipped.
+    [ObservableProperty] private bool _excludeSystemComponents = true;
+
     // AOBMaker CE Plugin detection cooldown (avoids spamming pipe connect on rapid navigation)
     private DateTime _lastAobMakerCheck = DateTime.MinValue;
     private static readonly TimeSpan AobMakerCheckCooldown = TimeSpan.FromSeconds(5);
@@ -2856,7 +2865,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     flattenChain: CollapseChain,
                     descShowOffset: DescShowOffset,
                     descShowType: DescShowType,
-                    dedupShared: DedupSharedObjects);
+                    dedupShared: DedupSharedObjects,
+                    excludeSystemComponents: ExcludeSystemComponents);
             }
             else
             {
@@ -2870,7 +2880,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     flattenChain: CollapseChain,
                     descShowOffset: DescShowOffset,
                     descShowType: DescShowType,
-                    dedupShared: DedupSharedObjects);
+                    dedupShared: DedupSharedObjects,
+                    excludeSystemComponents: ExcludeSystemComponents);
             }
 
             await _platform.CopyToClipboardAsync(xml);
@@ -2884,7 +2895,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             var truncWarn = CeXmlExportService.LastExportTruncated
                 ? " ⚠ Truncated (object graph too large) — lower Drill Depth or use Copy CE Field"
                 : "";
-            StatusText = $"Copied: {objCount} objects, {lineCount} XML lines.{statusExtra}{truncWarn}";
+            var sysWarn = CeXmlExportService.LastSystemFieldsSkipped > 0
+                ? $" {CeXmlExportService.LastSystemFieldsSkipped} system fields hidden"
+                : "";
+            StatusText = $"Copied: {objCount} objects, {lineCount} XML lines.{statusExtra}{truncWarn}{sysWarn}";
             _log.Info($"CE XML copied to clipboard for {CurrentClassName} (AOB={useAob}, " +
                 $"descOffset={DescShowOffset}, descType={DescShowType}, " +
                 $"{resolvedStructs.Count} structs / {resolvedInstances.Count} pointers resolved, depth={CsxDrilldownDepth})");
@@ -3103,7 +3117,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     includeGuessed: includeGuessed,
                     descShowOffset: DescShowOffset,
                     descShowType: DescShowType,
-                    dedupShared: DedupSharedObjects);
+                    dedupShared: DedupSharedObjects,
+                    excludeSystemComponents: ExcludeSystemComponents);
             }
             else
             {
@@ -3118,7 +3133,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     includeGuessed: includeGuessed,
                     descShowOffset: DescShowOffset,
                     descShowType: DescShowType,
-                    dedupShared: DedupSharedObjects);
+                    dedupShared: DedupSharedObjects,
+                    excludeSystemComponents: ExcludeSystemComponents);
             }
 
             await _platform.CopyToClipboardAsync(xml);
@@ -3132,7 +3148,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             var truncWarn = CeXmlExportService.LastExportTruncated
                 ? " ⚠ Truncated (object graph too large) — lower Drill Depth or use Copy CE Field"
                 : "";
-            StatusText = $"Copied: {objCount} objects, {lineCount} XML lines.{statusExtra}{truncWarn}";
+            var sysWarn = CeXmlExportService.LastSystemFieldsSkipped > 0
+                ? $" {CeXmlExportService.LastSystemFieldsSkipped} system fields hidden"
+                : "";
+            StatusText = $"Copied: {objCount} objects, {lineCount} XML lines.{statusExtra}{truncWarn}{sysWarn}";
             _log.Info($"CE Field XML copied: {selectedSnapshot.Count} field(s) (AOB={useAob}, includeGuessed={includeGuessed}, " +
                 $"descOffset={DescShowOffset}, descType={DescShowType}, " +
                 $"{resolvedInstances.Count} pointer targets resolved at depth={CsxDrilldownDepth})");

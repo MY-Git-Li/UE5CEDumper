@@ -4121,6 +4121,119 @@ public class CeXmlExportServiceTests
         Assert.Contains("<Address>+18</Address>", xml);
     }
 
+    // ========================================
+    // System-component noise filter (Feature #2) tests
+    // ========================================
+
+    [Fact]
+    public void GenerateInstanceXml_ExcludeSystemComponents_SkipsDrilledChild_KeepsTopLevelAndHealth()
+    {
+        // Top-level field (depth 1): a pointer to a parent instance — never filtered.
+        var fields = new[]
+        {
+            new LiveFieldValue
+            {
+                Name = "OwnerActor", TypeName = "ObjectProperty", Offset = 0x10, Size = 8,
+                PtrAddress = "0xPARENT", PtrName = "Owner", PtrClassName = "MyGameActor",
+            },
+        };
+        // Resolved children (depth 2): a normal float + a SoundCue pointer (system asset).
+        var resolvedInstances = new Dictionary<string, List<LiveFieldValue>>
+        {
+            ["0xPARENT"] = new()
+            {
+                new LiveFieldValue { Name = "Health", TypeName = "FloatProperty", Offset = 0x8, Size = 4 },
+                new LiveFieldValue
+                {
+                    Name = "FootstepSound", TypeName = "ObjectProperty", Offset = 0x18, Size = 8,
+                    PtrAddress = "0xSND", PtrName = "Footstep", PtrClassName = "SoundCue",
+                },
+            }
+        };
+
+        // Filter ON: the drilled SoundCue child is dropped; Health and the top-level
+        // OwnerActor pointer are kept; the skip count is exactly 1.
+        var on = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields,
+            resolvedInstances: resolvedInstances, excludeSystemComponents: true);
+        Assert.Contains("OwnerActor", on);
+        Assert.Contains("Health", on);
+        Assert.DoesNotContain("FootstepSound", on);
+        Assert.Equal(1, CeXmlExportService.LastSystemFieldsSkipped);
+
+        // Filter OFF: the SoundCue child is present and nothing is counted as skipped.
+        var off = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields,
+            resolvedInstances: resolvedInstances, excludeSystemComponents: false);
+        Assert.Contains("FootstepSound", off);
+        Assert.Equal(0, CeXmlExportService.LastSystemFieldsSkipped);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_ExcludeSystemComponents_KeepsTopLevelSelectedSystemField()
+    {
+        // The user explicitly selected a SoundBase pointer. Even with the filter ON, a
+        // TOP-LEVEL field is never dropped — only recursively-resolved children are filtered.
+        var fields = new[]
+        {
+            new LiveFieldValue
+            {
+                Name = "AmbientSound", TypeName = "ObjectProperty", Offset = 0x20, Size = 8,
+                PtrAddress = "0xSND", PtrName = "Ambient", PtrClassName = "SoundBase",
+            },
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields, excludeSystemComponents: true);
+
+        Assert.Contains("AmbientSound", xml);
+        Assert.Equal(0, CeXmlExportService.LastSystemFieldsSkipped);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_ExcludeSystemComponents_IgnoresStructTypeName()
+    {
+        // A drilled StructProperty child (depth 2) whose StructTypeName collides with a
+        // ban-set name must STILL be kept — the filter tests PtrClassName only, so a plain
+        // struct member (e.g. a GAS FGameplayAttributeData) is never dropped.
+        var fields = new[]
+        {
+            new LiveFieldValue
+            {
+                Name = "OwnerActor", TypeName = "ObjectProperty", Offset = 0x10, Size = 8,
+                PtrAddress = "0xPARENT", PtrName = "Owner", PtrClassName = "MyGameActor",
+            },
+        };
+        var resolvedInstances = new Dictionary<string, List<LiveFieldValue>>
+        {
+            ["0xPARENT"] = new()
+            {
+                new LiveFieldValue
+                {
+                    Name = "HealthAttr", TypeName = "StructProperty", Offset = 0x8, Size = 8,
+                    StructDataAddr = "0xATTR", StructClassAddr = "0xCLS",
+                    StructTypeName = "Texture",   // deliberately a ban-set name (must be ignored)
+                },
+            }
+        };
+        var resolvedStructs = new Dictionary<string, List<LiveFieldValue>>
+        {
+            ["0xATTR"] = new()
+            {
+                new LiveFieldValue { Name = "BaseValue", TypeName = "FloatProperty", Offset = 0x0, Size = 4 },
+            }
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields,
+            resolvedStructs: resolvedStructs, resolvedInstances: resolvedInstances,
+            excludeSystemComponents: true);
+
+        Assert.Contains("HealthAttr", xml);
+        Assert.Contains("BaseValue", xml);
+        Assert.Equal(0, CeXmlExportService.LastSystemFieldsSkipped);
+    }
+
     private static BreadcrumbItem MakeBc(string addr, string label,
         string fieldName = "", bool isPointer = false, int offset = 0,
         bool isContainerView = false)
