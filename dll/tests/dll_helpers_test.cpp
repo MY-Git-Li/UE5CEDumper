@@ -772,6 +772,25 @@ static void Test_ValueScan_FloatTolerance_Exact() {
     WriteLE<float>(cur, 338.25f);
     EXPECT("Float Exact tol 0 matches 338.25 vs 338.25 (exact)",
            Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.0));
+
+    // DOUBLE shares the SAME rounded-Exact path: Radar::IsFloatType covers Float AND
+    // Double, and ApplyOrderedTol loads both as double. UE5 has DoubleProperty
+    // gameplay values (large-world coords, some attributes), so verify parity.
+    WriteLE<double>(tgt, 513.0);
+    WriteLE<double>(cur, 513.3599853516);   // rounds to 513
+    EXPECT("Double Exact tol 0 matches 513.36 vs 513 (rounds to 513)",
+           Radar::ComparePredicate(DT::Double, ST::Exact, cur, tgt, nullptr, 0.0));
+    WriteLE<double>(cur, 513.6);            // rounds to 514, not 513
+    EXPECT("Double Exact tol 0 rejects 513.6 vs 513 (rounds to 514)",
+           !Radar::ComparePredicate(DT::Double, ST::Exact, cur, tgt, nullptr, 0.0));
+    WriteLE<double>(tgt, 514.0);
+    EXPECT("Double Exact tol 0 matches 513.6 vs 514 (rounds to 514)",
+           Radar::ComparePredicate(DT::Double, ST::Exact, cur, tgt, nullptr, 0.0));
+    // Non-whole double target keeps strict tol-0 equality (no rounding).
+    WriteLE<double>(tgt, 512.25);
+    WriteLE<double>(cur, 512.0);
+    EXPECT("Double Exact tol 0 rejects 512.0 vs 512.25 (non-whole target, no rounding)",
+           !Radar::ComparePredicate(DT::Double, ST::Exact, cur, tgt, nullptr, 0.0));
 }
 
 static void Test_ValueScan_FloatTolerance_Ordered() {
@@ -2638,6 +2657,23 @@ static void Test_Orden_RoundedFloatExact() {
         std::vector<Orden::SlotMatches> out;
         EXPECT("group rounded float Exact reject (nothing rounds to 98)",
                !Orden::MatchGroup(leaves, slots, out));
+    }
+    {   // DOUBLE leaves inherit the same rounded Exact (Radar::IsFloatType covers Double).
+        double hp = 7421.6, mp = 49.5;   // round half-away-from-zero -> 7422, 50
+        std::vector<Orden::Leaf> dleaves = {
+            OrdenLeaf(Radar::DataType::Double, 0x20, &hp, 8),
+            OrdenLeaf(Radar::DataType::Double, 0x28, &mp, 8),
+        };
+        Radar::NumericTargetSet t7422, t50;
+        Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "7422", t7422);
+        Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "50",   t50);
+        std::vector<Orden::SlotTarget> slots = {
+            { &t7422, Radar::ScanType::Exact, 0.0 },
+            { &t50,   Radar::ScanType::Exact, 0.0 },
+        };
+        std::vector<Orden::SlotMatches> out;
+        EXPECT("group rounded DOUBLE Exact match (7421.6~7422 + 49.5~50)",
+               Orden::MatchGroup(dleaves, slots, out));
     }
 }
 
