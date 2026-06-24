@@ -16,6 +16,12 @@ builds ≤696 in
 
 -----
 
+## 2026-06-24 — Snapshot Group: pre-fill "Compare with" when exactly two snapshots (build 1651; UI-only)
+
+Small UX default: switching the Snapshot tab to Group mode with **exactly two** snapshots now pre-fills the `Compare with` picker (the OTHER snapshot) so Mode B (cross-snapshot temporal) is ready in one switch — previously it was left empty (Mode A). With 1 (no compare) or 3+ (ambiguous which to compare) it stays empty for the user to pick. One guarded line in `SnapshotViewModel.OnIsGroupModeChanged` (`GroupCompareSnapshot ??= the snapshot whose Id ≠ the primary`, only when `Snapshots.Count == 2`); the primary still defaults to the newest. C# **1878 → 1880** (+2 VM tests: two-snapshot pre-fill → Mode B; three-snapshot stays empty). AOT 47.8 MB. No DLL change.
+
+-----
+
 ## 2026-06-24 — Snapshot captures GAS attributes (plain nested-struct numerics) + rounded float matching (build 1648; on `dev`, NOT in-game verified)
 
 **Headline:** a user couldn't find a player's Health (`513.3599853516` on `AttributeSetCore.Health`, a GAS `FGameplayAttributeData`) in a snapshot Group scan — even Between 512-514 missed it. Root cause: the snapshot capture has three paths — top-level numeric **scalar** picks, **container** (TArray/TSet/TMap) struct elements, and Native-C **holes** — and a plain `StructProperty` member (not numeric, not a container, not a hole) falls through ALL THREE. So GAS `FGameplayAttributeData.BaseValue/CurrentValue` (THE #1 hack target, a struct member of every `UAttributeSet`) was never captured. The code even documented the gap (`Aura.cpp`: *"the object's own direct fields are captured by each caller's normal direct-field pass"* — but the snapshot's direct pass only captures numeric *scalars*, never struct members' inner scalars).
