@@ -7339,6 +7339,59 @@ void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
             out[aPos].elements[ePos].fields.push_back(std::move(f2));
         }, &visited);
 }
+
+// Capture the inner numeric leaves of the object's PLAIN (non-container)
+// StructProperty members — the case neither the scalar picks loop (numeric leaves
+// only) nor CaptureStructArrays (containers only) covers. This is where GAS
+// FGameplayAttributeData.BaseValue/CurrentValue (the #1 hack target) live, plus
+// FVector/FRotator components (Location/Rotation). Reuses EmitStructDirectLeaves (the
+// same struct descent the container path uses for struct ELEMENTS) and emits each as a
+// scalar field named "Health.BaseValue" at the OBJECT-relative offset, so the
+// group/SPC/diff/pivot consumers treat it exactly like a top-level scalar (found even
+// without the "Deep" query toggle, which only folds in container rows). Bounded by
+// EmitStructDirectLeaves' kMaxStructDepth(4) + a per-object leaf cap. The numericScope +
+// family filter is applied per leaf, matching the top-level pass. (build 1648)
+void CaptureDirectStructFields(uintptr_t obj, uintptr_t cls,
+                               Radar::DataType numericScope, Aura::NumericFamily family,
+                               std::vector<Aura::SnapshotField>& out) {
+    if (!obj || !cls) return;
+    const auto& members = Radar::MultiNumericMembers(numericScope);
+    if (members.empty()) return;   // not a meta scope -> capture nothing
+
+    const ClassInfo& ci = Ubel::WalkClassEx(cls);   // cached
+    constexpr int kMaxStructLeafFields = 512;        // per object, defensive
+    int added = 0;
+    for (const auto& f : ci.Fields) {
+        if (added >= kMaxStructLeafFields) break;
+        if (f.TypeName != "StructProperty" || !f.Address) continue;
+        uintptr_t nested = 0;
+        if (!Macht::ReadSafe(f.Address + DynOff::FSTRUCTPROP_STRUCT, nested) || !nested) continue;
+
+        EmitStructDirectLeaves(nested, obj + f.Offset, /*arrayPath*/ "", /*elemIndex*/ 0,
+                               /*elemStructAddr*/ 0, /*elemBaseAddr*/ 0, /*namePrefix*/ f.Name,
+                               /*depth*/ 0, /*structDepth*/ 0,
+            [&](const ContainerLeaf& lf) {
+                if (added >= kMaxStructLeafFields) return;
+                Radar::DataType ldt;
+                if (!Radar::TryDataTypeFromPropertyTypeName(lf.leafType, ldt)) return;
+                bool inScope = false;
+                for (Radar::DataType m : members) if (m == ldt) { inScope = true; break; }
+                if (!inScope) return;
+                if (!Aura::NumericDataTypeInFamily(ldt, family)) return;   // type-family narrowing
+                size_t sz = Radar::SizeOf(ldt);
+                if (sz == 0 || sz > 8) return;
+                uint8_t buf[8] = {};
+                if (!Macht::ReadBytesSafe(lf.leafAddr, buf, sz)) return;
+                Aura::SnapshotField sf;
+                sf.name   = lf.leafName;                              // "Health.BaseValue"
+                sf.offset = static_cast<int32_t>(lf.leafAddr - obj);  // object-relative
+                sf.type   = lf.leafType;
+                sf.hex    = SnapshotBytesToHex(buf, sz);
+                out.push_back(std::move(sf));
+                ++added;
+            });
+    }
+}
 } // namespace
 
 // ============================================================
@@ -8300,6 +8353,12 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
                 sf.hex    = SnapshotBytesToHex(buf, sz);
                 so.fields.push_back(std::move(sf));
             }
+
+            // Inner numeric leaves of PLAIN (non-container) struct members — GAS
+            // FGameplayAttributeData (HP/MP BaseValue/CurrentValue), FVector/FRotator
+            // (Location/Rotation), etc. Neither the scalar picks above (numeric leaves
+            // only) nor CaptureStructArrays (containers only) reach these. (build 1648)
+            CaptureDirectStructFields(obj, cls, numericScope, family, so.fields);
 
             // Container-element leaves at any (bounded) depth — struct-array / map /
             // set elements + nested leaf-containers (build 1204).

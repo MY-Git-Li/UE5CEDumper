@@ -52,6 +52,29 @@ public static class SnapshotNumeric
         }
     }
 
+    /// <summary>True for the float/double property types (precision-lossy display).</summary>
+    public static bool IsFloatType(string declaredType) =>
+        declaredType is "FloatProperty" or "DoubleProperty";
+
+    /// <summary>
+    /// Exact-match a decoded numeric value <paramref name="v"/> against a
+    /// <paramref name="target"/>, with FLOAT-AWARE semantics. Float/double gameplay
+    /// values display as integers but store as e.g. 513.36, so a WHOLE-NUMBER target
+    /// matches any float that ROUNDS to it (CE-style rounded scan) — searching "513"
+    /// finds a 513.36 GAS BaseValue — plus the optional ± <paramref name="tolerance"/>
+    /// band. Integer fields keep strict equality (513 never matches 514), and a
+    /// non-whole target on a float still needs the tolerance band (no rounding). Pure.
+    /// </summary>
+    public static bool ExactMatch(double v, double target, string declaredType, double tolerance = 0)
+    {
+        if (!IsFloatType(declaredType)) return v == target;
+        // Exact equality (tolerance 0) or within the explicit ± band.
+        if (System.Math.Abs(v - target) <= tolerance) return true;
+        // Whole-number target: also match floats that ROUND to it (513 <- 513.36).
+        return target == System.Math.Floor(target)
+            && System.Math.Round(v, System.MidpointRounding.AwayFromZero) == target;
+    }
+
     /// <summary>
     /// Render a captured field's hex to a human-readable value for the diff
     /// grid. Integers are rendered exactly (no double precision loss); floats
