@@ -123,6 +123,30 @@ Open work only. **Read this when deciding what to do next.**
 
 -----
 
+## Bookmarks + Options persistence + CE-export filter — follow-ups (shipped PR #359, builds 1652-1663)
+
+The three persistence features (CE-export system-component filter, global panel-options persistence, per-game bookmark persistence) shipped + in-game verified (dev-log 2026-06-24). Deferred refinements, none blocking:
+
+- **#3 — snapshot capture options: GLOBAL → per-game (peHash)** — Effort: **M** · Risk: med.
+  The snapshot capture block (`GameOnly` / `AutoSkipNoise` / `IncludeNativeFields` / `SelectedScope` / `SelectedFamily` / `SelectedMaxDataset`) is persisted as a single GLOBAL default in `ui-options.json` to avoid a connect-time load race. Making it per-game (a `snapshots.{peHash}.options.json` sibling of the denylist, or a section in the bookmark/per-game store) lets `SelectedMaxDataset` track each game's size (the Avowed-6.7 GB driver). **Load it inside `SnapshotViewModel.SetEngineState` AFTER `_store.SetActiveGame(peHash)` and BEFORE `RefreshAsync`, under its own suppression flag** — NOT in `ApplyEngineState` (the original adversarial-review C2 finding: wrong-game bleed + save-storm if loaded at the wrong point). *Parent: #3 Options persistence, PR #359 (dev-log 2026-06-24).*
+
+- **#3 — opt-in "resume where I left off" (view-state persistence)** — Effort: **S** · Risk: low.
+  `SelectedTabIndex` + panel-collapse toggles (`CaptureSectionOpen` / `CompareSectionOpen` / `NoisePanelOpen` / `IsFunctionsExpanded` / Object Tree `IsCollapsed`) were deliberately EXCLUDED as transient view state. Some users want them restored. Add as an OPT-IN (a "remember tab + panels" preference) so the default stays clean. Lives in the existing `UiOptionsStore` (a `View` sub-object). *Parent: #3 Options persistence, PR #359.*
+
+- **#3 — "Reset options to defaults" button** — Effort: **S** · Risk: low.
+  Delete `ui-options.json` + re-apply model defaults to every VM (reuse `ApplyOptions(new UiOptionsSettings())`). One en.axaml string + a menu item (System tab or a small ⚙ on the toolbar). *Parent: #3 Options persistence, PR #359.*
+
+- **#2 — CE-export filter: also skip system-component CONTAINER elements** — Effort: **S** · Risk: low.
+  The "Skip system components" filter currently only covers pointer/struct fields (`PtrClassName`); array/map/set ELEMENTS whose element class is an engine asset (`KeyPtrClassName` / `ValuePtrClassName`, `LiveFieldValue.cs:60/66`) slip through because the container emitters don't route through the `EmitFields` depth gate. Add the per-element check in `EmitMapProperty` / `EmitSetProperty` / `EmitArrayProperty` (depth>1 only). The tooltip already states elements are not filtered, so this is additive, not a bug. *Parent: #2 CE-export noise filter, PR #359.*
+
+- **#1 — bookmarks across a game RESTART (deeper-than-GWorld-root paths)** — Effort: **M** · Risk: med (wrong-object risk — the reason v1 punts).
+  Today a bookmark whose target is reached by a saved ADDRESS degrades to "stale — re-create" after a game restart (only the GWorld actor-list root re-walks, since it's a stable singleton). Options to do better, if users ask: (a) attempt a SPINE re-walk **only when every hop is a field-offset hop from a stable singleton** (GameInstance/GameState/subsystem) — explicitly refuse actor-list hops (no stable identity); (b) an **"import bookmarks from a previous build"** affordance (pick an older `bookmarks.{oldHash}.json`, re-resolve each path against the new build, keep what resolves) for the game-patch case. Both must keep the v1 safety property: never silently show the wrong object. *Parent: #1 bookmark persistence, PR #359.*
+
+- **#1 — orphaned per-game bookmark files accumulate** — Effort: **S** · Risk: low.
+  Every game patch = new PE hash = a fresh `bookmarks.{hash}.json`; old ones are never swept (same latent issue the snapshot per-game files have, but those have quota eviction). Add a startup sweep (delete `bookmarks.*.json` older than N days, or cap file count) — or a "clear bookmarks for all games" action. Low disk impact; do only if it bothers someone. *Parent: #1 bookmark persistence, PR #359.*
+
+-----
+
 ## Related Objects panel — Phase 2 + follow-ups (Phase 1 shipped builds 1323-1327)
 
 Phase 1 (the "Related" tab: given an actor, list Self/Class/Outer + Controller↔Pawn + owned components/ASC/AttributeSet via a depth-3 owned walk; 🌍 GWorld / Live Walker / finder / copy per row; 🔗 Related handoff from Instance Finder / Value Search / Live Walker) + the Instance Finder **"Newest first"** opt-in shipped builds 1323-1326. **In-game VERIFIED on TQ2:** `bp_ai_default_character_C` → Related lists 58 objects incl. `TQ2AIController`, `GrimAbilitySystemComponent` (ASC), `bp_tq2_character_stats_component_C` (AttributesComponent) → `AttributeSetHealth.CurrentHealth` = live HP (73.57). **Phase 2 (`Edel` current-target auto-detect) SHIPPED build 1400** (dev-log 2026-06-20) — `🎯 Detect target` button resolves GWorld→PC→Pawn, scores the player's outgoing object-ptr fields (structural is-Actor gate + keyword boost), auto-loads the top candidate; the `Edel` roster name is now 🟢. Remaining follow-ups, in order:
