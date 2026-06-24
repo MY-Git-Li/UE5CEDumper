@@ -13,11 +13,15 @@ namespace UE5DumpUI.Models;
 /// scroll anchor. NOT persisted: the live <c>ContainerField</c> / cached world walk
 /// (session objects with volatile addresses) — on reload those are rebuilt or re-walked.
 ///
-/// Addresses ARE stored: they stay valid when the UI is restarted while the SAME game
-/// process keeps running (ASLR is per-process, not per-PE). After a game RESTART they
-/// go stale; the load path validates the walked class against <c>SavedClassName</c>
-/// and degrades to a "stale — re-create" message rather than showing wrong data, and
-/// never auto-clears the bookmark.
+/// Addresses ARE stored as a same-process fast-path hint: they stay valid when the UI is
+/// restarted while the SAME game process keeps running (ASLR is per-process, not per-PE).
+/// After a game RESTART they go stale. On load the spine is RE-RESOLVED from a live anchor
+/// (GWorld / GameEngine) by re-walking the stable field name+offset chain, which
+/// reconstructs fresh addresses so the bookmark still lands on the right object after a
+/// restart (see <c>LiveWalkerViewModel.TryReresolveBookmarkSpineAsync</c>). When
+/// re-resolution can't re-anchor (non-GWorld root / a hop no longer matches), the load
+/// path validates the walked class against <c>SavedClassName</c> and degrades to a
+/// "stale — re-create" message rather than showing wrong data, never auto-clearing it.
 /// </summary>
 public sealed class BookmarkFile
 {

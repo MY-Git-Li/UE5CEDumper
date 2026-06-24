@@ -384,7 +384,326 @@ public class BookmarkTests
         Assert.Contains(vm.Fields, f => f.Name == "PersistentLevel");  // actor-list signature
     }
 
+    // --- Cross-restart spine re-resolution ---
+
+    [Fact]
+    public async Task LoadBookmark_DeepContainerSpine_ReresolvesAfterGameRestart()
+    {
+        // A deep bookmark saved in a PREVIOUS game session: its saved addresses are all
+        // stale (the game restarted, ASLR moved everything). The spine — GWorld → GameState
+        // → PlayerArray[0] → PawnPrivate — is stable, so loading must re-walk it from the
+        // LIVE GWorld and land on the current player object, not the dead saved address.
+        var dump = new StubDumpService();   // WalkWorldAsync default → WorldAddr "0xA8B0"
+
+        dump.RegisterStruct("0xA8B0", new InstanceWalkResult   // live UWorld
+        {
+            Name = "World", ClassName = "World", Address = "0xA8B0",
+            Fields = new()
+            {
+                new() { Name = "GameState", Offset = 432, TypeName = "ObjectProperty", PtrAddress = "0xGS_LIVE" },
+            },
+        });
+        dump.RegisterStruct("0xGS_LIVE", new InstanceWalkResult   // live AGameState
+        {
+            Name = "GameState", ClassName = "GameState", Address = "0xGS_LIVE",
+            Fields = new()
+            {
+                new()
+                {
+                    Name = "PlayerArray", Offset = 736, TypeName = "ArrayProperty",
+                    ArrayCount = 1, ArrayInnerType = "ObjectProperty",
+                    ArrayElements = new() { new() { Index = 0, PtrAddress = "0xPS_LIVE" } },
+                },
+            },
+        });
+        dump.RegisterStruct("0xPS_LIVE", new InstanceWalkResult   // live APlayerState
+        {
+            Name = "PlayerState", ClassName = "PlayerState", Address = "0xPS_LIVE",
+            Fields = new()
+            {
+                new() { Name = "PawnPrivate", Offset = 832, TypeName = "ObjectProperty", PtrAddress = "0xPAWN_LIVE" },
+            },
+        });
+        dump.RegisterStruct("0xPAWN_LIVE", new InstanceWalkResult   // live player pawn
+        {
+            Name = "BP_PlayerCharacter", ClassName = "BP_PlayerCharacter_C", Address = "0xPAWN_LIVE",
+            Fields = new()
+            {
+                new() { Name = "Health", Offset = 100, TypeName = "FloatProperty", TypedValue = "513" },
+            },
+        });
+
+        var vm = new LiveWalkerViewModel(dump, new MockLoggingService(),
+            new MockPlatformService(Path.GetTempPath()));
+
+        var slot = vm.BookmarkSlots[0];
+        slot.SavedClassName = "BP_PlayerCharacter_C";
+        slot.SavedObjectName = "BP_PlayerCharacter";
+        slot.SavedAddress = "0xDEADPAWN";   // stale, from the previous session
+        slot.SavedBreadcrumbs = new List<BreadcrumbItem>
+        {
+            new() { Address = "0xDEADWORLD", Label = "GWorld", FieldName = "GWorld", IsPointerDeref = true },
+            new() { Address = "0xDEADGS", Label = "GameState", FieldName = "GameState", FieldOffset = 432, IsPointerDeref = true, TargetClassName = "GameState" },
+            new() { Address = "0xDEADGS", Label = "PlayerArray", FieldName = "PlayerArray", FieldOffset = 736, IsContainerView = true },
+            new() { Address = "0xDEADPS", Label = "PlayerState", FieldName = "[0]", FieldOffset = 0, IsPointerDeref = true, TargetClassName = "PlayerState" },
+            new() { Address = "0xDEADPAWN", Label = "BP_PlayerCharacter", FieldName = "PawnPrivate", FieldOffset = 832, IsPointerDeref = true, TargetClassName = "BP_PlayerCharacter_C" },
+        };
+        slot.SavedSelectedFields = new() { new BookmarkFieldRef("Health", 100) };
+        slot.IsOccupied = true;
+
+        IReadOnlyList<BookmarkFieldRef>? gotSel = null;
+        vm.RestoreBookmarkView += (sel, _) => gotSel = sel;
+
+        await vm.LoadBookmarkCommand.ExecuteAsync(slot);
+
+        // Landed on the LIVE pawn via the re-walked spine, not the dead saved address.
+        Assert.Equal("BP_PlayerCharacter_C", vm.CurrentClassName);
+        Assert.Contains(vm.Fields, f => f.Name == "Health");
+        Assert.Equal("0xPAWN_LIVE", vm.Breadcrumbs[^1].Address);   // fresh, not "0xDEADPAWN"
+        Assert.Equal("0xGS_LIVE", vm.Breadcrumbs[1].Address);      // every hop re-resolved
+        Assert.NotNull(gotSel);                                    // selection restored (not stale)
+        Assert.Contains(gotSel!, f => f.Name == "Health");
+    }
+
+    [Fact]
+    public async Task LoadBookmark_SpineHopNoLongerMatches_FallsBackAndReportsStale()
+    {
+        // Re-resolution can't match a moved/renamed hop → it bails to the saved addresses;
+        // after a restart those are dead, the walked class mismatches SavedClassName, and the
+        // bookmark is reported stale (kept, selection dropped) rather than showing wrong data.
+        var dump = new StubDumpService();   // WalkWorldAsync → "0xA8B0"
+        dump.RegisterStruct("0xA8B0", new InstanceWalkResult   // live UWorld: no "GameState" field
+        {
+            Name = "World", ClassName = "World", Address = "0xA8B0",
+            Fields = new()
+            {
+                new() { Name = "SomethingElse", Offset = 432, TypeName = "ObjectProperty", PtrAddress = "0xX" },
+            },
+        });
+        // The stale saved leaf resolves to a DIFFERENT class (wrong object).
+        dump.RegisterStruct("0xDEADGS", new InstanceWalkResult
+        {
+            Name = "Garbage", ClassName = "SomeOtherClass", Address = "0xDEADGS",
+            Fields = new(),
+        });
+
+        var vm = new LiveWalkerViewModel(dump, new MockLoggingService(),
+            new MockPlatformService(Path.GetTempPath()));
+        var slot = vm.BookmarkSlots[0];
+        slot.SavedClassName = "GameState";
+        slot.SavedAddress = "0xDEADGS";
+        slot.SavedBreadcrumbs = new List<BreadcrumbItem>
+        {
+            new() { Address = "0xDEADWORLD", Label = "GWorld", FieldName = "GWorld", IsPointerDeref = true },
+            new() { Address = "0xDEADGS", Label = "GameState", FieldName = "GameState", FieldOffset = 432, IsPointerDeref = true, TargetClassName = "GameState" },
+        };
+        slot.SavedSelectedFields = new() { new BookmarkFieldRef("Score", 200) };
+        slot.IsOccupied = true;
+
+        var restoreRaised = false;
+        vm.RestoreBookmarkView += (_, _) => restoreRaised = true;
+
+        await vm.LoadBookmarkCommand.ExecuteAsync(slot);
+
+        Assert.False(restoreRaised);   // selection NOT restored — bookmark is stale
+        Assert.Contains("stale", vm.StatusText, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("0xDEADGS", vm.Breadcrumbs[^1].Address);   // kept the saved (fallback) address
+    }
+
+    [Fact]
+    public async Task LoadBookmark_NonGWorldRoot_FallsBackToSavedAddress()
+    {
+        // An address-rooted ("Custom") bookmark has no stable live anchor; re-resolution
+        // returns null and the load uses the saved address (same-process fast path).
+        var dump = new StubDumpService();
+        dump.RegisterStruct("0xC0DE", new InstanceWalkResult
+        {
+            Name = "Widget", ClassName = "UserWidget", Address = "0xC0DE",
+            Fields = new() { new() { Name = "Opacity", Offset = 80, TypeName = "FloatProperty", TypedValue = "1" } },
+        });
+
+        var vm = new LiveWalkerViewModel(dump, new MockLoggingService(),
+            new MockPlatformService(Path.GetTempPath()));
+        var slot = vm.BookmarkSlots[0];
+        slot.SavedClassName = "UserWidget";
+        slot.SavedAddress = "0xC0DE";
+        slot.SavedBreadcrumbs = new List<BreadcrumbItem>
+        {
+            new() { Address = "0xC0DE", Label = "Widget", FieldName = "0xC0DE", IsPointerDeref = true },
+        };
+        slot.IsOccupied = true;
+
+        await vm.LoadBookmarkCommand.ExecuteAsync(slot);
+
+        Assert.Equal("UserWidget", vm.CurrentClassName);
+        Assert.Equal("0xC0DE", vm.Breadcrumbs[^1].Address);
+    }
+
+    [Fact]
+    public async Task LoadBookmark_GameEngineRoot_ReresolvesViaEngineAnchor()
+    {
+        // A bookmark whose spine was rooted on the live UGameEngine (Start-from-GameEngine
+        // or Locate-in-GameEngine): the root crumb's FieldName is "GameEngine", so after a
+        // restart re-resolution must re-anchor via ResolveGameEngineAsync, not WalkWorldAsync.
+        var dump = new EngineRootStubDumpService(new GameEngineResult
+        {
+            Found = true, Address = "0xENGINELIVE", ClassName = "GameEngine",
+            GameViewportOk = true, GameInstanceOk = true,
+        });
+        dump.RegisterStruct("0xENGINELIVE", new InstanceWalkResult
+        {
+            Name = "GameEngine", ClassName = "GameEngine", Address = "0xENGINELIVE",
+            Fields = new()
+            {
+                new() { Name = "GameInstance", Offset = 0xC00, TypeName = "ObjectProperty", PtrAddress = "0xGILIVE" },
+            },
+        });
+        dump.RegisterStruct("0xGILIVE", new InstanceWalkResult
+        {
+            Name = "GameInstance", ClassName = "MyGameInstance", Address = "0xGILIVE",
+            Fields = new()
+            {
+                new() { Name = "PlayerCount", Offset = 0x40, TypeName = "IntProperty", TypedValue = "1" },
+            },
+        });
+
+        var vm = new LiveWalkerViewModel(dump, new MockLoggingService(),
+            new MockPlatformService(Path.GetTempPath()));
+        var slot = vm.BookmarkSlots[0];
+        slot.SavedClassName = "MyGameInstance";
+        slot.SavedAddress = "0xDEADGI";
+        slot.SavedBreadcrumbs = new List<BreadcrumbItem>
+        {
+            new() { Address = "0xDEADENGINE", Label = "GameEngine", FieldName = "GameEngine", IsPointerDeref = true },
+            new() { Address = "0xDEADGI", Label = "GameInstance", FieldName = "GameInstance", FieldOffset = 0xC00, IsPointerDeref = true, TargetClassName = "MyGameInstance" },
+        };
+        slot.IsOccupied = true;
+
+        await vm.LoadBookmarkCommand.ExecuteAsync(slot);
+
+        Assert.Equal("MyGameInstance", vm.CurrentClassName);
+        Assert.Equal("0xGILIVE", vm.Breadcrumbs[^1].Address);   // re-resolved via the engine anchor
+        Assert.Contains(vm.Fields, f => f.Name == "PlayerCount");
+    }
+
+    // --- Spine re-resolution helpers (unit) ---
+
+    [Fact]
+    public void MatchSpineField_NameAndOffset_PrefersExact()
+    {
+        var walk = new InstanceWalkResult
+        {
+            Fields = new()
+            {
+                new() { Name = "HP", Offset = 0x10 },
+                new() { Name = "HP", Offset = 0x20 },   // duplicate name, different offset
+            },
+        };
+        var crumb = new BreadcrumbItem { FieldName = "HP", FieldOffset = 0x20 };
+        var hit = LiveWalkerViewModel.MatchSpineField(walk, crumb);
+        Assert.NotNull(hit);
+        Assert.Equal(0x20, hit!.Offset);
+    }
+
+    [Fact]
+    public void MatchSpineField_OffsetShifted_UniqueNameFallback()
+    {
+        // Offset moved across a game patch but the name is unique → still resolves.
+        var walk = new InstanceWalkResult
+        {
+            Fields = new() { new() { Name = "Mana", Offset = 0x44 } },
+        };
+        var crumb = new BreadcrumbItem { FieldName = "Mana", FieldOffset = 0x40 };
+        var hit = LiveWalkerViewModel.MatchSpineField(walk, crumb);
+        Assert.NotNull(hit);
+        Assert.Equal(0x44, hit!.Offset);
+    }
+
+    [Fact]
+    public void MatchSpineField_AmbiguousNameNoOffset_Refuses()
+    {
+        var walk = new InstanceWalkResult
+        {
+            Fields = new()
+            {
+                new() { Name = "Slot", Offset = 0x10 },
+                new() { Name = "Slot", Offset = 0x18 },
+            },
+        };
+        var crumb = new BreadcrumbItem { FieldName = "Slot", FieldOffset = 0x99 };  // no exact match
+        Assert.Null(LiveWalkerViewModel.MatchSpineField(walk, crumb));
+    }
+
+    [Fact]
+    public void ResolveContainerElementHop_ObjectArray_ReturnsElementPtr()
+    {
+        var arr = new LiveFieldValue
+        {
+            Name = "SpawnedAttributes", ArrayCount = 3, ArrayInnerType = "ObjectProperty",
+            ArrayElements = new()
+            {
+                new() { Index = 0, PtrAddress = "0xA" },
+                new() { Index = 2, PtrAddress = "0xC" },
+            },
+        };
+        var hop = LiveWalkerViewModel.ResolveContainerElementHop(arr, 2, "[2]");
+        Assert.NotNull(hop);
+        Assert.Equal("0xC", hop!.Value.Addr);
+        Assert.Equal("", hop.Value.ClassAddr);   // object ptr — DLL resolves class
+    }
+
+    [Fact]
+    public void ResolveContainerElementHop_StructArray_ComputesElementAddr()
+    {
+        var arr = new LiveFieldValue
+        {
+            Name = "Tunes", ArrayCount = 4, ArrayInnerType = "StructProperty",
+            ArrayStructClassAddr = "0xSTRUCT", ArrayDataAddr = "0x1000", ArrayElemSize = 0x20,
+        };
+        var hop = LiveWalkerViewModel.ResolveContainerElementHop(arr, 2, "[2]");
+        Assert.NotNull(hop);
+        Assert.Equal("0x1040", hop!.Value.Addr);   // 0x1000 + 2*0x20
+        Assert.Equal("0xSTRUCT", hop.Value.ClassAddr);
+    }
+
+    [Fact]
+    public void ResolveContainerElementHop_NullPointerElement_ReturnsNull()
+    {
+        var arr = new LiveFieldValue
+        {
+            Name = "Refs", ArrayCount = 1, ArrayInnerType = "ObjectProperty",
+            ArrayElements = new() { new() { Index = 0, PtrAddress = "0x0" } },
+        };
+        Assert.Null(LiveWalkerViewModel.ResolveContainerElementHop(arr, 0, "[0]"));
+    }
+
+    [Theory]
+    [InlineData("[0]", true)]
+    [InlineData("[12].Value", true)]
+    [InlineData("PawnPrivate", false)]
+    [InlineData("", false)]
+    public void IsElementCrumb_DetectsBracketNames(string name, bool expected)
+        => Assert.Equal(expected, LiveWalkerViewModel.IsElementCrumb(name));
+
+    [Theory]
+    [InlineData("0x1040", 0x1040UL)]
+    [InlineData("0X20", 0x20UL)]
+    [InlineData("", 0UL)]
+    [InlineData("notahex", 0UL)]
+    public void ParseHexAddr_ParsesOrZero(string addr, ulong expected)
+        => Assert.Equal(expected, LiveWalkerViewModel.ParseHexAddr(addr));
+
     // --- Helpers ---
+
+    /// <summary>StubDumpService whose ResolveGameEngineAsync returns a configured engine
+    /// (the base throws), for testing GameEngine-rooted bookmark re-resolution.</summary>
+    private sealed class EngineRootStubDumpService : StubDumpService
+    {
+        private readonly GameEngineResult _engine;
+        public EngineRootStubDumpService(GameEngineResult engine) => _engine = engine;
+        public override Task<GameEngineResult> ResolveGameEngineAsync(CancellationToken ct = default)
+            => Task.FromResult(_engine);
+    }
 
     private static LiveWalkerViewModel CreateViewModel()
     {

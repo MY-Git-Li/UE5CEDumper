@@ -2005,7 +2005,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            BuildBreadcrumbSpineFromPath(path, objectAddr, stopAtParent);
+            BuildBreadcrumbSpineFromPath(path, objectAddr, stopAtParent, rootKind);
 
             // Value inside a container path (Value Search / SPC "Array[N]...[M]",
             // e.g. "SaveSlotList[1].GP" or the deep
@@ -2147,7 +2147,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// node + one node per hop. <paramref name="stopAtParent"/> drops the final
     /// (target) node so the view lands on the parent pointer.
     /// </summary>
-    private void BuildBreadcrumbSpineFromPath(GWorldPathResult path, string objectAddr, bool stopAtParent)
+    private void BuildBreadcrumbSpineFromPath(GWorldPathResult path, string objectAddr, bool stopAtParent,
+                                              string rootKind = "gworld")
     {
         int stepCount = path.Steps.Count;
         int includedSteps = stopAtParent ? Math.Max(0, stepCount - 1) : stepCount;
@@ -2156,13 +2157,20 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         References.Clear();
         HasReferences = false;
 
+        // The root crumb's FieldName is the re-resolution ANCHOR marker, not a real
+        // field: "GWorld" (live UWorld) vs "GameEngine" (live UGameEngine). It MUST
+        // reflect the BFS root so a bookmark saved from this spine re-resolves against
+        // the right anchor after a game restart (see TryReresolveBookmarkSpineAsync) —
+        // an engine-rooted spine mislabeled "GWorld" would re-walk the wrong object and
+        // fall back to stale addresses. Label keeps the human-facing root name.
+        bool engineRoot = rootKind == "engine";
         Breadcrumbs.Add(new BreadcrumbItem
         {
             Address = !string.IsNullOrEmpty(path.RootAddr) ? path.RootAddr : objectAddr,
-            Label = !string.IsNullOrEmpty(path.RootName) ? path.RootName : "GWorld",
+            Label = !string.IsNullOrEmpty(path.RootName) ? path.RootName : (engineRoot ? "GameEngine" : "GWorld"),
             IsPointerDeref = true,
             FieldOffset = 0,
-            FieldName = "GWorld",
+            FieldName = engineRoot ? "GameEngine" : "GWorld",
         });
 
         for (int i = 0; i < includedSteps; i++)
@@ -2336,7 +2344,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            BuildBreadcrumbSpineFromPath(path, match.OwnerAddress, stopAtParent: false);
+            BuildBreadcrumbSpineFromPath(path, match.OwnerAddress, stopAtParent: false, rootKind);
 
             // Explicit awaited drill — clear the single-shot pending state.
             _pendingScrollFieldOffset = null;
@@ -2710,12 +2718,28 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 _preBookmarkCachedWorld = _cachedWorld;
             }
 
-            // Restore breadcrumbs
+            // Restore breadcrumbs. A persisted bookmark's saved addresses go stale
+            // after a game RESTART — ASLR re-randomizes every pointer, so the saved
+            // leaf address (and each intermediate hop) is dead. The spine's FIELD
+            // identity (name + offset + deref/container kind) is stable, though, so
+            // first try to RE-RESOLVE it from a live anchor (GWorld / GameEngine) down,
+            // reconstructing fresh addresses — that's what makes a bookmark survive a
+            // restart. On any failure (no live root / a hop no longer matches) fall back
+            // to the saved addresses: still valid within the same game process, and
+            // honestly reported as stale otherwise.
+            var resolvedSpine = await TryReresolveBookmarkSpineAsync(slot.SavedBreadcrumbs);
             Breadcrumbs.Clear();
-            foreach (var bc in slot.SavedBreadcrumbs)
-                Breadcrumbs.Add(bc);
-
-            _cachedWorld = slot.SavedCachedWorld;
+            if (resolvedSpine != null)
+            {
+                foreach (var bc in resolvedSpine) Breadcrumbs.Add(bc);
+                // _cachedWorld was refreshed by the re-resolution (GWorld root).
+            }
+            else
+            {
+                foreach (var bc in slot.SavedBreadcrumbs)
+                    Breadcrumbs.Add(bc);
+                _cachedWorld = slot.SavedCachedWorld;
+            }
 
             // Re-display the saved view. Branches are mutually exclusive and all
             // rebuild Fields, so selection + scroll restore happens once at the end.
@@ -2757,10 +2781,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     result = await AutoFillGapsRetryAsync(result, lastBc.Address, classAddr);
                     UpdateDisplay(result);
 
-                    // Staleness guard: a persisted bookmark's address is only valid while
-                    // the same game PROCESS is alive. After a restart it's dead and the walk
-                    // lands on garbage / a different object — detect via a class-name mismatch
-                    // and degrade honestly (keep the bookmark, drop the stale selection).
+                    // Staleness guard (safety net): spine re-resolution above normally
+                    // makes a restart land on the right object, but when it fell back to
+                    // the saved addresses (re-anchor failed) those may be dead after a
+                    // restart and the walk lands on garbage / a different object. Detect
+                    // via a class-name mismatch and degrade honestly (keep the bookmark,
+                    // drop the now-meaningless selection).
                     if (!string.IsNullOrEmpty(slot.SavedClassName)
                         && !string.Equals(CurrentClassName, slot.SavedClassName, StringComparison.Ordinal))
                     {
@@ -2793,6 +2819,269 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             IsLoading = false;
         }
     }
+
+    /// <summary>
+    /// Re-resolve a persisted bookmark's navigation spine against the LIVE process so the
+    /// bookmark survives a game restart. A saved breadcrumb's <c>Address</c> is only valid
+    /// while the game process that produced it is alive — after a restart ASLR
+    /// re-randomizes every pointer, so the saved leaf address and every intermediate hop
+    /// are dead. The spine's FIELD identity (name + offset + deref/container kind) is
+    /// stable, though, so we re-walk it from a live anchor (GWorld / GameEngine) down and
+    /// rebuild each crumb with a fresh address.
+    ///
+    /// Returns a fresh breadcrumb list (new immutable <see cref="BreadcrumbItem"/>s with
+    /// live addresses + re-attached container fields) on full success, or <c>null</c> when
+    /// the spine can't be re-anchored: a non-GWorld/GameEngine root, a hop whose field no
+    /// longer matches by name+offset, a null pointer, or a DataTable view (un-persisted
+    /// walk state). On null the caller keeps the saved addresses — still valid within the
+    /// same game process, honestly reported as stale otherwise.
+    ///
+    /// Side effect: on success <see cref="_cachedWorld"/> is refreshed to the live world
+    /// (null for an engine root) so the GWorld-root display branch reuses it.
+    /// </summary>
+    private async Task<List<BreadcrumbItem>?> TryReresolveBookmarkSpineAsync(
+        IReadOnlyList<BreadcrumbItem> saved)
+    {
+        if (saved.Count == 0) return null;
+        var root = saved[0];
+
+        // Resolve the root anchor fresh. Only GWorld / GameEngine roots have a stable live
+        // anchor; an address-rooted ("Custom") bookmark has nothing to re-walk from.
+        string curAddr;
+        WorldWalkResult? freshWorld = null;
+        try
+        {
+            if (root.FieldName == "GWorld")
+            {
+                freshWorld = await _dump.WalkWorldAsync(500, arrayLimit: ArrayLimit);
+                if (freshWorld == null || string.IsNullOrEmpty(freshWorld.WorldAddr)) return null;
+                curAddr = freshWorld.WorldAddr;
+            }
+            else if (root.FieldName == "GameEngine")
+            {
+                var engine = await _dump.ResolveGameEngineAsync();
+                if (engine is not { Found: true } || string.IsNullOrEmpty(engine.Address)) return null;
+                curAddr = engine.Address;
+            }
+            else
+            {
+                return null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"Bookmark re-resolve: root anchor '{root.FieldName}' failed: {ex.Message}");
+            return null;
+        }
+
+        var rebuilt = new List<BreadcrumbItem>(saved.Count)
+        {
+            CloneCrumbWithAddress(root, curAddr, root.ClassAddr, null),
+        };
+
+        // A null classAddr lets the DLL resolve the object's UClass from its vtable; only
+        // struct hops carry an explicit UScriptStruct* address.
+        string? curClassAddr = null;
+        LiveFieldValue? pendingContainer = null;
+
+        for (int i = 1; i < saved.Count; i++)
+        {
+            var c = saved[i];
+
+            // DataTable row views carry un-persisted walk state (DataTableData) — can't
+            // re-resolve; bail so the caller falls back (matches pre-fix behaviour).
+            if (c.IsDataTableView) return null;
+
+            try
+            {
+                if (c.IsContainerView)
+                {
+                    // Container-view crumb shares the parent object's address; re-find the
+                    // container field by name+offset and re-attach it (fresh elements).
+                    var parent = await WalkForReresolveAsync(curAddr, curClassAddr);
+                    var field = MatchSpineField(parent, c);
+                    if (field == null || !field.IsContainerNavigable) return null;
+                    rebuilt.Add(CloneCrumbWithAddress(c, curAddr, c.ClassAddr, field));
+                    pendingContainer = field;
+                    // curAddr / curClassAddr unchanged — the element crumb does the deref.
+                }
+                else if (IsElementCrumb(c.FieldName))
+                {
+                    // Element crumb "[N]" (optionally ".Key"/".Value"): deref element N of
+                    // the pending container to its target object / inline-struct address.
+                    if (pendingContainer == null) return null;
+                    int? idx = ParseSparseIndex(c.FieldName);
+                    if (idx == null) return null;
+                    var hop = ResolveContainerElementHop(pendingContainer, idx.Value, c.FieldName);
+                    if (hop == null) return null;
+                    curAddr = hop.Value.Addr;
+                    curClassAddr = string.IsNullOrEmpty(hop.Value.ClassAddr) ? null : hop.Value.ClassAddr;
+                    rebuilt.Add(CloneCrumbWithAddress(c, curAddr, curClassAddr ?? "", null));
+                    pendingContainer = null;
+                }
+                else
+                {
+                    // Plain pointer / inline-struct field hop.
+                    var parent = await WalkForReresolveAsync(curAddr, curClassAddr);
+                    var field = MatchSpineField(parent, c);
+                    if (field == null) return null;
+                    if (!string.IsNullOrEmpty(field.PtrAddress) && field.PtrAddress != "0x0")
+                    {
+                        curAddr = field.PtrAddress;
+                        curClassAddr = null;   // object pointer — DLL resolves the class
+                    }
+                    else if (!string.IsNullOrEmpty(field.StructDataAddr) && field.StructDataAddr != "0x0")
+                    {
+                        curAddr = field.StructDataAddr;
+                        curClassAddr = string.IsNullOrEmpty(field.StructClassAddr) ? null : field.StructClassAddr;
+                    }
+                    else
+                    {
+                        return null;   // field no longer navigable
+                    }
+                    rebuilt.Add(CloneCrumbWithAddress(c, curAddr, curClassAddr ?? "", null));
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"Bookmark re-resolve: hop '{c.FieldName}' failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        _cachedWorld = freshWorld;   // refreshed live world (null for an engine root)
+        _log.Info($"Bookmark re-resolved spine from live {root.FieldName}: {rebuilt.Count} crumb(s)");
+        return rebuilt;
+    }
+
+    /// <summary>Walk a UObject / struct for spine re-resolution. Uses the user's current
+    /// FillGaps toggle but does NOT auto-toggle it — the named navigable fields the spine
+    /// matches on come from reflection regardless of gap-fill, and the terminal display
+    /// re-walks the leaf afterwards with the full auto-fill-gaps logic.</summary>
+    private Task<InstanceWalkResult> WalkForReresolveAsync(string addr, string? classAddr)
+        => _dump.WalkInstanceAsync(addr, classAddr, arrayLimit: ArrayLimit,
+                                   previewLimit: PreviewLimit, fillGaps: FillGaps);
+
+    /// <summary>Match a saved spine crumb to a field in a fresh parent walk. Primary key is
+    /// name+offset (the stable spine identity); falls back to a UNIQUE name-only match so a
+    /// small offset shift across a game patch still resolves, while refusing an ambiguous
+    /// duplicate-name match.</summary>
+    internal static LiveFieldValue? MatchSpineField(InstanceWalkResult walk, BreadcrumbItem crumb)
+    {
+        foreach (var f in walk.Fields)
+            if (f.Name == crumb.FieldName && f.Offset == crumb.FieldOffset)
+                return f;
+        LiveFieldValue? byName = null;
+        foreach (var f in walk.Fields)
+        {
+            if (f.Name != crumb.FieldName) continue;
+            if (byName != null) return null;   // ambiguous — refuse
+            byName = f;
+        }
+        return byName;
+    }
+
+    /// <summary>True for a container ELEMENT crumb ("[N]", "[N].Key", "[N].Value").</summary>
+    internal static bool IsElementCrumb(string fieldName)
+        => !string.IsNullOrEmpty(fieldName) && fieldName.Length >= 2 && fieldName[0] == '[';
+
+    /// <summary>
+    /// Resolve a container element crumb to its drill target (object pointer address, or an
+    /// inline-struct data address + UScriptStruct*). Mirrors the element-address maths in
+    /// <see cref="PopulateArrayContainerFields"/> / <see cref="PopulateMapContainerFields"/>
+    /// / <see cref="PopulateSetContainerFields"/>. Returns null when the element (or its
+    /// pointer) is missing, so re-resolution bails to the saved-address fallback.
+    /// </summary>
+    internal static (string Addr, string ClassAddr)? ResolveContainerElementHop(
+        LiveFieldValue container, int index, string crumbName)
+    {
+        // --- Array ---
+        if (container.ArrayCount > 0 && !string.IsNullOrEmpty(container.ArrayInnerType))
+        {
+            if (container.ArrayInnerType == "StructProperty"
+                && !string.IsNullOrEmpty(container.ArrayStructClassAddr))
+            {
+                ulong dataBase = ParseHexAddr(container.ArrayDataAddr);
+                if (dataBase != 0 && container.ArrayElemSize > 0)
+                    return ($"0x{dataBase + (ulong)(index * container.ArrayElemSize):X}",
+                            container.ArrayStructClassAddr);
+                return null;
+            }
+            var elem = container.ArrayElements?.FirstOrDefault(e => e.Index == index);
+            return (elem != null && !string.IsNullOrEmpty(elem.PtrAddress) && elem.PtrAddress != "0x0")
+                ? (elem.PtrAddress, "") : null;
+        }
+
+        // --- Map (value by default; key when the crumb names ".Key") ---
+        if (container.MapCount > 0 && !string.IsNullOrEmpty(container.MapKeyType))
+        {
+            bool wantKey = crumbName.EndsWith(".Key", StringComparison.Ordinal);
+            if (!wantKey && container.MapValueType == "StructProperty"
+                && !string.IsNullOrEmpty(container.MapValueStructAddr))
+            {
+                ulong dataBase = ParseHexAddr(container.MapDataAddr);
+                int valOffset = container.MapValueOffset > 0 ? container.MapValueOffset : container.MapKeySize;
+                int stride = ComputeSetElementStride(valOffset + container.MapValueSize);
+                if (dataBase != 0 && stride > 0)
+                    return ($"0x{dataBase + (ulong)(index * stride) + (ulong)valOffset:X}",
+                            container.MapValueStructAddr);
+                return null;
+            }
+            var elem = container.MapElements?.FirstOrDefault(e => e.Index == index);
+            if (elem == null) return null;
+            var ptr = wantKey ? elem.KeyPtrAddress : elem.ValuePtrAddress;
+            return (!string.IsNullOrEmpty(ptr) && ptr != "0x0") ? (ptr, "") : null;
+        }
+
+        // --- Set ---
+        if (container.SetCount > 0 && !string.IsNullOrEmpty(container.SetElemType))
+        {
+            if (container.SetElemType == "StructProperty"
+                && !string.IsNullOrEmpty(container.SetElemStructAddr))
+            {
+                ulong dataBase = ParseHexAddr(container.SetDataAddr);
+                int stride = ComputeSetElementStride(container.SetElemSize);
+                if (dataBase != 0 && stride > 0)
+                    return ($"0x{dataBase + (ulong)(index * stride):X}", container.SetElemStructAddr);
+                return null;
+            }
+            var elem = container.SetElements?.FirstOrDefault(e => e.Index == index);
+            return (elem != null && !string.IsNullOrEmpty(elem.KeyPtrAddress) && elem.KeyPtrAddress != "0x0")
+                ? (elem.KeyPtrAddress, "") : null;
+        }
+
+        return null;
+    }
+
+    /// <summary>Parse a "0x..." address string to ulong (0 on empty / malformed).</summary>
+    internal static ulong ParseHexAddr(string addr)
+    {
+        if (string.IsNullOrEmpty(addr)) return 0;
+        var s = addr.Replace("0x", "").Replace("0X", "");
+        return ulong.TryParse(s, System.Globalization.NumberStyles.HexNumber, null, out var v) ? v : 0;
+    }
+
+    /// <summary>Build a fresh breadcrumb from a saved spine crumb with a re-resolved
+    /// address / class / container field, copying the (stable) spine identity verbatim.
+    /// <see cref="BreadcrumbItem"/> is init-only, so re-resolution rebuilds rather than
+    /// mutates.</summary>
+    private static BreadcrumbItem CloneCrumbWithAddress(
+        BreadcrumbItem src, string addr, string classAddr, LiveFieldValue? containerField)
+        => new()
+        {
+            Address = addr,
+            Label = src.Label,
+            ClassAddr = classAddr,
+            FieldOffset = src.FieldOffset,
+            FieldName = src.FieldName,
+            TargetClassName = src.TargetClassName,
+            IsPointerDeref = src.IsPointerDeref,
+            ScrollHintFieldName = src.ScrollHintFieldName,
+            IsContainerView = src.IsContainerView,
+            ContainerField = containerField ?? src.ContainerField,
+            IsDataTableView = src.IsDataTableView,
+            DataTableData = src.DataTableData,
+        };
 
     [RelayCommand]
     private void ClearBookmark(BookmarkSlot? slot)

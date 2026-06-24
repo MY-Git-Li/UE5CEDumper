@@ -16,6 +16,22 @@ builds ≤696 in
 
 -----
 
+## 2026-06-24 — Bookmarks survive a GAME RESTART: breadcrumb spine re-resolved from the live GWorld / GameEngine anchor (build 1690; UI/C#-only; on `dev`, NOT in-game verified)
+
+Fixed the reported bug where saved Live-Walker bookmarks all went **stale after a game restart** (UI restart while the game kept running was already fine). Root cause: a bookmark persisted both the navigation SPINE *and* saved memory addresses, and the load path walked the stale leaf address directly (`WalkInstanceAsync(lastBc.Address)`). After a restart, ASLR re-randomizes every pointer → the saved address is dead → the walk lands on garbage → `SavedClassName` mismatch → "stale — re-create". The persisted spine was *already* sufficient (each crumb stores `FieldName` + `FieldOffset` + `IsPointerDeref` + `IsContainerView` + `TargetClassName`); only the addresses were volatile, so **no schema change**.
+
+**Fix** (`LiveWalkerViewModel.cs`): on every bookmark load, `TryReresolveBookmarkSpineAsync` re-walks the saved spine from a live anchor and rebuilds each crumb with a fresh address —
+- **Root** — `GWorld` → `WalkWorldAsync().WorldAddr`; `GameEngine` → `ResolveGameEngineAsync().Address`. Other (address-rooted "Custom") roots → bail.
+- **Pointer/struct hop** — `WalkForReresolveAsync` (no auto-fill-gaps; the named navigable fields come from reflection) → `MatchSpineField` (name+offset, then a UNIQUE name-only fallback for offset shifts) → follow `PtrAddress` / `StructDataAddr` (+`StructClassAddr`).
+- **Container view + `[N]` element** — re-find the container field, then `ResolveContainerElementHop` derefs element N with the SAME address math as the `Populate{Array,Map,Set}ContainerFields` helpers (object ptr → `PtrAddress`; struct → `DataAddr + N*stride`; map `.Key`/`.Value`).
+- `BreadcrumbItem` is init-only → `CloneCrumbWithAddress` rebuilds (never mutates `slot.SavedBreadcrumbs`). On success `_cachedWorld` is refreshed to the live world (null for an engine root). **Any** unmatched hop / null ptr / DataTable view / non-anchor root → return null → the caller falls back to the saved addresses (same-process fast path) and the existing class-name staleness guard reports honest staleness. **Safety property kept: never silently shows the wrong object.**
+
+`BuildBreadcrumbSpineFromPath` now threads `rootKind` so **Locate-in-GameEngine** bookmarks persist the correct `"GameEngine"` root marker (previously hardcoded `"GWorld"`, so an engine-rooted spine would re-anchor on the wrong object and always fall back — adversarial-review finding).
+
+**Adversarial review** (4 lenses → per-finding verify, 11 agents): 6 raised → **1 confirmed/fixed** (the `rootKind` threading above); the rest rejected (re-walk address math, container geometry vs the `Populate*` helpers, `_cachedWorld` refresh, breadcrumb immutability, DataTable bailout all check out). Tests: C# **1958 → 1971** (deep-container restart re-resolution, GameEngine-root re-anchor, hop-no-longer-matches fallback→stale, non-GWorld-root fallback, `MatchSpineField` exact/unique-name/ambiguous, `ResolveContainerElementHop` object/struct/null, `IsElementCrumb`, `ParseHexAddr`). Existing GWorld-root + PLV_game-deep-crumb regression tests still pass (re-resolution feeds the stub's default world / bails to fallback). AOT unaffected (UI-only). No DLL change → no re-inject needed.
+
+-----
+
 ## 2026-06-24 — Explicit Round/Trunc/Ceil rounding mode replaces implicit float rounding + ± tolerance, across Value Search / Snapshot / SPC (builds 1672-1678; DLL + UI; **MERGED main PR #364 `b5419d3`**, **in-game VERIFIED (Avowed)**, needs re-inject)
 
 Turned the *implicit* "a whole-number target matches any float that rounds to it" behavior (build 1648/1669) — and the rarely-useful free-form ± **tolerance** band — into an explicit, per-panel **rounding-mode switch `{Round (default), Trunc, Ceil}`**. A float/double is reduced to the integer the game **DISPLAYS** (HP `513.36`→`513`; progress `99.6`→`100`) before any numeric compare, so the user searches/compares by what they SEE. User-driven design (two clarifying rounds): per-**panel** independent + persisted switch (not per-mode); decimals on an integer field are **coerced** via the mode with a UI hint (`Between 10.9~11.1` → Round `11~11` / Trunc `10~11` / Ceil `11~12`); **vectors** fold in (per-axis, same logic); and **prev-value** predicates use the mode too ("did the *displayed* value change/inc/dec" — filters sub-display float jitter).
