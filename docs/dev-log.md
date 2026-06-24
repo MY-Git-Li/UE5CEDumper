@@ -16,7 +16,7 @@ builds ≤696 in
 
 -----
 
-## 2026-06-24 — Explicit Round/Trunc/Ceil rounding mode replaces implicit float rounding + ± tolerance, across Value Search / Snapshot / SPC (builds 1672-1678; DLL + UI; on `dev`, **in-game VERIFIED (Avowed)**, needs re-inject)
+## 2026-06-24 — Explicit Round/Trunc/Ceil rounding mode replaces implicit float rounding + ± tolerance, across Value Search / Snapshot / SPC (builds 1672-1678; DLL + UI; **MERGED main PR #364 `b5419d3`**, **in-game VERIFIED (Avowed)**, needs re-inject)
 
 Turned the *implicit* "a whole-number target matches any float that rounds to it" behavior (build 1648/1669) — and the rarely-useful free-form ± **tolerance** band — into an explicit, per-panel **rounding-mode switch `{Round (default), Trunc, Ceil}`**. A float/double is reduced to the integer the game **DISPLAYS** (HP `513.36`→`513`; progress `99.6`→`100`) before any numeric compare, so the user searches/compares by what they SEE. User-driven design (two clarifying rounds): per-**panel** independent + persisted switch (not per-mode); decimals on an integer field are **coerced** via the mode with a UI hint (`Between 10.9~11.1` → Round `11~11` / Trunc `10~11` / Ceil `11~12`); **vectors** fold in (per-axis, same logic); and **prev-value** predicates use the mode too ("did the *displayed* value change/inc/dec" — filters sub-display float jitter).
 
