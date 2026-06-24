@@ -23,7 +23,7 @@ namespace UE5DumpUI.Views;
 /// Code-behind only (no XAML / CompiledBinding) to stay AOT-safe; columns use
 /// FuncDataTemplate&lt;T&gt; typed lambdas, not the reflection Binding ctor.
 /// </summary>
-public sealed class FunctionPropsDialog : Window
+public sealed class FunctionPropsDialog : ManagedDialogWindow
 {
     private readonly IDumpService _dump;
     private readonly IPlatformService _platform;

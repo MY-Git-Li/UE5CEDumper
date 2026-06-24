@@ -2103,6 +2103,63 @@ public sealed class SnapshotStore : ISnapshotStore
         _log?.Info(Constants.LogCatView, "SnapshotStore: deleted ALL snapshots for the active game");
     }
 
+    // Whole-disk wipe across EVERY game: delete the snapshot DB files outright
+    // (the .db, its -wal/-shm sidecars, and the per-game .denylist.json) rather than
+    // truncating rows. ClearAllPools first so a just-finished read/capture isn't still
+    // holding a pooled handle that locks the file on Windows. Per-file best-effort: a
+    // file held open by an in-flight capture throws on Delete -> counted as skipped,
+    // never fatal. The blocking work (ClearAllPools + the File.Delete loop, which can
+    // stall on a locked file or a network share) runs on a thread-pool thread so the
+    // calling [RelayCommand] doesn't freeze the UI. (bookmarks.*.json belong to the
+    // Live Walker bookmark feature, not the snapshot DB, so they are left alone.)
+    public Task<SnapshotWipeResult> DeleteAllSnapshotDatabasesAsync(CancellationToken ct = default)
+        => Task.Run(() =>
+        {
+            // Evict ALL idle pooled connections (every connection string), so the per-game
+            // .db files aren't locked by a pooled handle left behind by a list read / capture.
+            SqliteConnection.ClearAllPools();
+
+            int deleted = 0, skipped = 0;
+            // Order matters only for tidiness: drop sidecars/denylists alongside each .db.
+            // The .db count is what we report; sidecar/denylist removal is silent cleanup.
+            foreach (var pattern in new[]
+            {
+                $"{Constants.SnapshotDbPrefix}.*.db",
+                $"{Constants.SnapshotDbPrefix}.*.db-wal",
+                $"{Constants.SnapshotDbPrefix}.*.db-shm",
+                $"{Constants.SnapshotDbPrefix}.*.denylist.json",
+            })
+            {
+                List<string> files;
+                try { files = Directory.EnumerateFiles(_dir, pattern).ToList(); }
+                catch { continue; }   // directory gone / unreadable — nothing to do for this pattern
+
+                foreach (var f in files)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    // Only the bare .db files count toward the deleted/skipped totals — the
+                    // "*.db" glob matches exactly the .db extension (sidecars end in
+                    // .db-wal/.db-shm, so they fall to their own patterns).
+                    bool isDb = f.EndsWith(".db", StringComparison.OrdinalIgnoreCase);
+                    try
+                    {
+                        File.Delete(f);
+                        if (isDb) deleted++;
+                    }
+                    catch (Exception ex)
+                    {
+                        if (isDb) skipped++;
+                        _log?.Warn(Constants.LogCatView,
+                            $"SnapshotStore: could not delete '{Path.GetFileName(f)}' ({ex.Message}) — in use?");
+                    }
+                }
+            }
+
+            _log?.Info(Constants.LogCatView,
+                $"SnapshotStore: removed {deleted} snapshot DB file(s) (all games), {skipped} skipped (in use)");
+            return new SnapshotWipeResult(deleted, skipped);
+        }, ct);
+
     // --- N1: Top-N noise contributor accumulator (used by SPC + Diff) ---
     //
     // Walks each emitted result row, keeps per-class hit counts + per-(class, prop)

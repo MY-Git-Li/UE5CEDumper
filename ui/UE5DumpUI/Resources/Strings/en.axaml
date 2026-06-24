@@ -333,6 +333,21 @@
     <sys:String x:Key="str.System.SelfTest.NoCandidate">No testable BlueprintFunctionLibrary helper found in this game.</sys:String>
     <sys:String x:Key="str.System.SelfTest.Error">Self-Test failed: {0}</sys:String>
 
+    <!-- System tab: Maintenance (open log folder + remove all snapshot databases) -->
+    <sys:String x:Key="str.System.Maintenance.Header">Maintenance</sys:String>
+    <sys:String x:Key="str.System.OpenLogFolder">Open Log Folder</sys:String>
+    <sys:String x:Key="str.System.OpenLogFolderTip">Open the application log folder (%LOCALAPPDATA%\UE5CEDumper\Logs) in the file browser.</sys:String>
+    <sys:String x:Key="str.System.OpenLogFolder.Error">Could not open log folder: {0}</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshots">Remove All Snapshot Data</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshotsTip">Permanently delete the snapshot database FILES for EVERY game (snapshots.*.db and their sidecars) from disk — not a row purge. Files currently in use by an active capture are skipped. Experimental feature; irreversible.</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshots.ConfirmTitle">Remove all snapshot data</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshots.ConfirmMessage">Permanently delete ALL snapshot database files for EVERY game? This deletes the files from disk and cannot be undone.</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshots.ConfirmYes">Delete Files</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshots.None">No snapshot database files found.</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshots.Result">Removed {0} snapshot database file(s).</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshots.ResultPartial">Removed {0} file(s); {1} still in use — stop any active capture and retry.</sys:String>
+    <sys:String x:Key="str.System.RemoveAllSnapshots.Error">Error: {0}</sys:String>
+
     <!-- Credit footer (System tab + Live Walker empty state) -->
     <sys:String x:Key="str.Credit.AuthorPrefix">bbfox @ </sys:String>
     <sys:String x:Key="str.Credit.AuthorUrl">https://opencheattables.com</sys:String>

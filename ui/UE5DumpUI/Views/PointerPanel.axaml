@@ -491,6 +491,35 @@
 
     </StackPanel>
 
+    <!-- Maintenance: always-visible (no live connection needed) so it sits OUTSIDE
+         the HasData card stack. Open Log Folder is always shown; Remove All Snapshot
+         Data is gated on the experimental opt-in (it wipes the snapshot DB files). -->
+    <Border Background="#2D2D30" CornerRadius="4" Padding="16,12"
+            BorderBrush="#555" BorderThickness="1" Margin="0,0,0,4">
+      <StackPanel Spacing="8">
+        <TextBlock Text="{StaticResource str.System.Maintenance.Header}"
+                   Foreground="#9CDCFE" FontSize="13" FontWeight="SemiBold"/>
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button Content="{StaticResource str.System.OpenLogFolder}"
+                  Command="{Binding OpenLogFolderCommand}"
+                  ToolTip.Tip="{StaticResource str.System.OpenLogFolderTip}"
+                  Padding="8,4" FontSize="11" Foreground="#AAA"
+                  Background="Transparent" BorderThickness="1" BorderBrush="#555"
+                  Cursor="Hand"/>
+          <Button Content="{StaticResource str.System.RemoveAllSnapshots}"
+                  Command="{Binding RemoveAllSnapshotsCommand}"
+                  IsVisible="{Binding ExperimentalEnabled}"
+                  ToolTip.Tip="{StaticResource str.System.RemoveAllSnapshotsTip}"
+                  Padding="8,4" FontSize="11" Foreground="#E05252"
+                  Background="Transparent" BorderThickness="1" BorderBrush="#555"
+                  Cursor="Hand"/>
+        </StackPanel>
+        <TextBlock Text="{Binding MaintenanceStatusText}" Foreground="#4EC9B0"
+                   FontSize="11" TextWrapping="Wrap"
+                   IsVisible="{Binding MaintenanceStatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+      </StackPanel>
+    </Border>
+
     <!-- Credit footer + experimental gate. The author/repo credit is a plain
          label + clickable URL link (full opacity). The experimental opt-in is a
          SEPARATE, title-less checkbox beside the author line, kept deliberately

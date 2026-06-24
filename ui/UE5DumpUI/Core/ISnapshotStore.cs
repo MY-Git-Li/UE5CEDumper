@@ -96,6 +96,20 @@ public interface ISnapshotStore
     /// and VACUUM the DB file. Irreversible.</summary>
     Task DeleteAllSnapshotsAsync(CancellationToken ct = default);
 
+    /// <summary>Delete the snapshot database FILES for EVERY game (all
+    /// <c>snapshots.*.db</c> plus their <c>-wal</c>/<c>-shm</c> sidecars and the
+    /// per-game <c>snapshots.*.denylist.json</c>) from disk — a whole-file wipe, not
+    /// a row truncate. Idle pooled connections are released first
+    /// (<c>SqliteConnection.ClearAllPools</c>) so a just-finished read/capture doesn't
+    /// keep a file locked. Best-effort per file: a file still held open (an in-flight
+    /// capture) is skipped, never fatal. Returns how many .db files were deleted vs
+    /// skipped (still in use). Irreversible.
+    ///
+    /// Default no-op (returns 0/0) so lightweight test doubles need not implement it;
+    /// the real <see cref="Services.SnapshotStore"/> overrides it.</summary>
+    Task<SnapshotWipeResult> DeleteAllSnapshotDatabasesAsync(CancellationToken ct = default)
+        => Task.FromResult(new SnapshotWipeResult(0, 0));
+
     /// <summary>Active game's DB file size + all-games total + snapshot count.</summary>
     Task<SnapshotUsage> GetUsageAsync(CancellationToken ct = default);
 

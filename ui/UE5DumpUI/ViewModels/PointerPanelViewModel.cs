@@ -19,6 +19,7 @@ public partial class PointerPanelViewModel : ViewModelBase
     private readonly IAobMakerBridge? _aobMaker;
     private readonly AobUsageService? _aobUsage;
     private readonly IExperimentalGate? _experimentalGate;
+    private readonly ISnapshotStore? _snapshotStore;
 
     [ObservableProperty] private string _gObjectsAddress = "";
     [ObservableProperty] private string _gNamesAddress = "";
@@ -81,6 +82,9 @@ public partial class PointerPanelViewModel : ViewModelBase
     // --- Cache management ---
     [ObservableProperty] private string _peHash = "";
     [ObservableProperty] private string _cacheStatusText = "";
+
+    // --- Maintenance (open log folder / remove all snapshot data) ---
+    [ObservableProperty] private string _maintenanceStatusText = "";
 
     // --- Diagnostics: build version + Self-Test ---
 
@@ -293,10 +297,16 @@ public partial class PointerPanelViewModel : ViewModelBase
     /// <summary>Fired when rescan results have been applied — MainWindowVM re-fetches state.</summary>
     public event Action? RescanApplied;
 
+    /// <summary>Fired after every snapshot DB file was removed (Remove All Snapshot Data)
+    /// — MainWindowVM refreshes the experimental Snapshot / SPC / Pivot tabs so their
+    /// now-stale lists clear.</summary>
+    public event Action? SnapshotDataRemoved;
+
     public PointerPanelViewModel(IPlatformService platform, IDumpService? dump = null,
                                 ILoggingService? log = null, IAobMakerBridge? aobMaker = null,
                                 AobUsageService? aobUsage = null,
-                                IExperimentalGate? experimentalGate = null)
+                                IExperimentalGate? experimentalGate = null,
+                                ISnapshotStore? snapshotStore = null)
     {
         _platform = platform;
         _dump = dump;
@@ -304,6 +314,7 @@ public partial class PointerPanelViewModel : ViewModelBase
         _aobMaker = aobMaker;
         _aobUsage = aobUsage;
         _experimentalGate = experimentalGate;
+        _snapshotStore = snapshotStore;
 
         // Reflect external flips (e.g. another System-tab instance) back to the
         // checkbox, plus the lock state (which disables the checkbox once an
@@ -847,6 +858,59 @@ public partial class PointerPanelViewModel : ViewModelBase
         {
             CacheStatusText = Res.Format("str.Pointers.Cache.Error", ex.Message);
             _log?.Error(Constants.LogCatInit, "ResetAllCache failed", ex);
+        }
+    }
+
+    // --- Maintenance: open log folder + remove all snapshot databases ---
+
+    [RelayCommand]
+    private async Task OpenLogFolderAsync()
+    {
+        try
+        {
+            var logDir = _platform.GetLogDirectoryPath();
+            // The logger normally creates this on startup, but be defensive so the
+            // button still opens something sensible on a brand-new install.
+            System.IO.Directory.CreateDirectory(logDir);
+            await _platform.RevealInExplorerAsync(logDir);
+        }
+        catch (Exception ex)
+        {
+            MaintenanceStatusText = Res.Format("str.System.OpenLogFolder.Error", ex.Message);
+            _log?.Error(Constants.LogCatInit, "OpenLogFolder failed", ex);
+        }
+    }
+
+    [RelayCommand]
+    private async Task RemoveAllSnapshotsAsync()
+    {
+        // Defense in depth: the button is hidden unless experimental is enabled, but
+        // guard the command too (and no-op without a store).
+        if (_snapshotStore == null || !(_experimentalGate?.IsEnabled ?? false)) return;
+
+        bool confirmed = await UE5DumpUI.Views.ConfirmDialog.ShowAsync(
+            Res.Get("str.System.RemoveAllSnapshots.ConfirmTitle"),
+            Res.Get("str.System.RemoveAllSnapshots.ConfirmMessage"),
+            Res.Get("str.System.RemoveAllSnapshots.ConfirmYes"));
+        if (!confirmed) return;
+
+        try
+        {
+            var r = await _snapshotStore.DeleteAllSnapshotDatabasesAsync();
+            MaintenanceStatusText = r.Deleted == 0 && r.Skipped == 0
+                ? Res.Get("str.System.RemoveAllSnapshots.None")
+                : r.Skipped > 0
+                    ? Res.Format("str.System.RemoveAllSnapshots.ResultPartial", r.Deleted, r.Skipped)
+                    : Res.Format("str.System.RemoveAllSnapshots.Result", r.Deleted);
+            _log?.Info(Constants.LogCatView,
+                $"RemoveAllSnapshots: deleted={r.Deleted}, skipped={r.Skipped}");
+            // Let the Snapshot / SPC / Pivot tabs drop their now-stale lists.
+            SnapshotDataRemoved?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            MaintenanceStatusText = Res.Format("str.System.RemoveAllSnapshots.Error", ex.Message);
+            _log?.Error(Constants.LogCatView, "RemoveAllSnapshots failed", ex);
         }
     }
 

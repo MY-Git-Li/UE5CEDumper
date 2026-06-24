@@ -345,6 +345,52 @@ public class SnapshotStoreTests : IDisposable
         Assert.True(Assert.Single(await _store.ListSnapshotsAsync(ct)).EstBytes > 0);
     }
 
+    [Fact]
+    public async Task DeleteAllSnapshotDatabases_RemovesEveryGameFileFromDisk()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        // Two distinct games -> two snapshots.<peHash>.db files on disk.
+        _store.SetActiveGame("WIPEAAAA");
+        await SeedSnapshotAsync("a", 1, ct);
+        _store.SetActiveGame("WIPEBBBB");
+        await SeedSnapshotAsync("b", 2, ct);
+
+        var dbDir = Path.GetDirectoryName(_store.DatabasePath)!;
+        Assert.Equal(2, Directory.GetFiles(dbDir, "snapshots.*.db").Length);
+
+        var r = await _store.DeleteAllSnapshotDatabasesAsync(ct);
+
+        // Both .db files are deleted outright (whole-file wipe, not a row purge), none skipped.
+        Assert.Equal(2, r.Deleted);
+        Assert.Equal(0, r.Skipped);
+        Assert.Empty(Directory.GetFiles(dbDir, "snapshots.*.db"));
+        // Sidecars are cleaned up too — no orphaned -wal/-shm left behind.
+        Assert.Empty(Directory.GetFiles(dbDir, "snapshots.*.db-wal"));
+        Assert.Empty(Directory.GetFiles(dbDir, "snapshots.*.db-shm"));
+    }
+
+    [Fact]
+    public async Task DeleteAllSnapshotDatabases_SkipsFileHeldOpenByActiveCapture()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        // Game B is fully written then idle (its connection returns to the pool).
+        _store.SetActiveGame("WIPEFREE");
+        await SeedSnapshotAsync("b", 1, ct);
+
+        // Game A has a LIVE capture session holding its .db open — the "DB in use" case.
+        _store.SetActiveGame("WIPEBUSY");
+        await using (var session = await _store.BeginCaptureSessionAsync(ct))
+        {
+            var r = await _store.DeleteAllSnapshotDatabasesAsync(ct);
+
+            // The idle game's file is removed; the in-use game's file is skipped, not fatal.
+            Assert.Equal(1, r.Deleted);
+            Assert.Equal(1, r.Skipped);
+        }
+    }
+
     private static SnapshotCapturedArrayElement MakeElem(
         int idx, string keyName, string keyVal, params (string n, string t, string h)[] fields)
     {

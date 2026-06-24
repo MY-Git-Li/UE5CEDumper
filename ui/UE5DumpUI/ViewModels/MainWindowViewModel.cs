@@ -331,7 +331,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         ObjectTree = new ObjectTreeViewModel(dump, log, platform);
         ClassStruct = new ClassStructViewModel(dump, log, platform);
-        Pointers = new PointerPanelViewModel(platform, dump, log, aobMaker, aobUsage, experimentalGate);
+        Pointers = new PointerPanelViewModel(platform, dump, log, aobMaker, aobUsage, experimentalGate, snapshotStore);
         LiveWalker = new LiveWalkerViewModel(dump, log, platform, aobMaker, bookmarks);
         InstanceFinder = new InstanceFinderViewModel(dump, log, platform);
         PropertySearch = new PropertySearchViewModel(dump, log, aobMaker, platform);
@@ -448,6 +448,16 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             LiveWalker.NavigateToPivot            += (cls, prop) => HandlePivotHandoff(cls, prop);
             // Value-locator -> pivot: a value-scan hit already carries class + field.
             ValueSearch.NavigateToPivot           += (cls, prop) => HandlePivotHandoff(cls, prop);
+
+            // "Remove all snapshot data" (System tab) deletes every snapshot DB file —
+            // the experimental tabs' cached lists are now stale, so refresh them to the
+            // empty state.
+            Pointers.SnapshotDataRemoved += () =>
+            {
+                _ = Snapshot?.RefreshCommand.ExecuteAsync(null);
+                _ = Spc?.RefreshCommand.ExecuteAsync(null);
+                _ = Pivot?.RefreshCommand.ExecuteAsync(null);
+            };
         }
         // Gate the handoff menu items to the experimental flag (and pivot existence).
         UpdatePivotHandoffEnabled();
