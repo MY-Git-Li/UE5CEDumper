@@ -63,17 +63,19 @@
          instead of the Avalonia.Desktop meta-package, which also pulls in the
          X11 / macOS-Native / FreeDesktop backends we never run. Dropping them
          removes their "will always throw" Native-AOT ILC warnings. -->
-    <PackageReference Include="Avalonia" Version="12.0.4" />
+    <PackageReference Include="Avalonia" Version="12.0.5" />
     <PackageReference Include="Avalonia.Angle.Windows.Natives" Version="2.1.27548.20260419" />
-    <PackageReference Include="Avalonia.Win32" Version="12.0.4" />
-    <PackageReference Include="Avalonia.Skia" Version="12.0.4" />
+    <PackageReference Include="Avalonia.Win32" Version="12.0.5" />
+    <PackageReference Include="Avalonia.Skia" Version="12.0.5" />
     <!-- Text shaping. UsePlatformDetect() wired this automatically; with the
          explicit Win32+Skia backend it must be added by hand, else AppBuilder
          throws "No text shaping system configured" at startup. -->
-    <PackageReference Include="Avalonia.HarfBuzz" Version="12.0.4" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.4" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.4" />
-    <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.0.0" />
+    <PackageReference Include="Avalonia.HarfBuzz" Version="12.0.5" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.5" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.5" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.0.1" />
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.Linux" Version="14.2.0" />
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.WebAssembly" Version="14.2.0" />
 
     <!-- SQLite (experimental Snapshot store). Raw ADO.NET only — no EF Core
          (its reflection query pipeline breaks trim/AOT). Microsoft.Data.Sqlite
@@ -93,15 +95,15 @@
 
     <!-- MVVM -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
-    <PackageReference Include="HarfBuzzSharp" Version="8.3.1.5" />
+    <PackageReference Include="HarfBuzzSharp" Version="14.2.0" />
     <PackageReference Include="MicroCom.Runtime" Version="0.11.6" />
 
     <!-- Logging -->
     <PackageReference Include="Serilog" Version="4.3.1" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.*" />
-    <PackageReference Include="SkiaSharp" Version="3.119.4" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="3.119.4" />
+    <PackageReference Include="SkiaSharp" Version="4.148.0" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="4.148.0" />
   </ItemGroup>
 
   <ItemGroup>
