@@ -16,6 +16,20 @@ builds ≤696 in
 
 -----
 
+## 2026-06-24 — Value Search + Group/Multi Value Search: CE-style rounded float Exact (Exact 513 finds 513.36) — parity with the snapshot GAS fix (build 1669; DLL; on `dev`, NOT in-game verified, needs re-inject)
+
+Follow-up to the snapshot "can't find a GAS attribute value" fix (build 1648). That fix had two parts: **(A)** descend direct `StructProperty` members to reach inner numerics (GAS `FGameplayAttributeData.BaseValue`), and **(B)** rounded float Exact matching (a whole-number target matches any float that rounds to it — `513` finds `513.36`). Question: is the same fix applied to **Value Search** (single + multi/group)?
+
+**Investigation (3-reader workflow over `Aura::ScanForValue` / `ScanForValueGroup` + `Orden` + `Radar`):**
+- **Part A — already present.** `Aura::ScanForValue` recurses direct `StructProperty` members for numeric (non-vector) scans (the `acceptedStructNames.empty()` gate, `Aura.cpp` ~6110), and the group path `Aura::CollectGroupLeaves` recurses them unconditionally (`Aura.cpp` ~7479). So both single and group already reach GAS `Health.BaseValue`.
+- **Part B — was MISSING in both.** The DLL float Exact compare (`Radar::ApplyOrderedTol`, the `|cur - a| <= tol` band) had no whole-number rounding, so Exact `513` at tol 0 missed a `513.36` BaseValue. (The C# `SnapshotNumeric.ExactMatch` had the rounding; the live DLL scan did not.)
+
+**Fix (DLL, one point):** `Radar::ApplyOrderedTol` Exact case now also returns true when the target is a whole number and `std::round(cur) == a` (half-away-from-zero, matching C# `MidpointRounding.AwayFromZero`). Single (`ScanForValue`) and group/multi (`Orden::LeafSatisfiesSlot` → `Radar::ComparePredicate`) both funnel through this one function, so both inherit it (plus deep-container + native-C scans). Only the absolute **Exact** predicate changed — Bigger/Smaller/Between and the prev-value refine predicates (Changed/Unchanged/Increased/Decreased) are untouched; integers stay strict (they route to `ApplyOrdered`, not `ApplyOrderedTol`); the Vector predicate keeps its own inline compare. A non-whole target keeps strict tol-0 equality.
+
+Tests: dll_helpers_test 765 → **771** (single Float-Exact rounding cases reworked + a new `Test_Orden_RoundedFloatExact` group match/reject). C# 1932/0. AOT 48.5 MB. Adversarial review: clean — `Exact` is a first-scan type that always compares against a user-entered target (never a captured prev-value), so the rounding is always appropriate. **DLL change → needs re-inject.**
+
+-----
+
 ## 2026-06-24 — Persist bookmarks + panel options; CE-export system-component filter; NuGet bump (builds 1652-1663; UI-only; MERGED main PR #359 `f63e009`; all in-game VERIFIED)
 
 Three user-requested UI features (evaluated up front via an 11-agent survey→design→adversarial-review workflow, then a 7-agent option-classification pass for #3), each built / tested / in-game-verified / committed separately, then merged together. **All pure-UI — no DLL change, no re-inject.**

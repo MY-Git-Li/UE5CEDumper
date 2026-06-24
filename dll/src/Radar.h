@@ -759,7 +759,9 @@ private:
 //
 // `tolerance` is the CE-style rounded-scan slack applied to Float/Double
 // only. Per-scan-type semantics (let `a` = target, `b` = target2, `c` = cur):
-//   Exact      |c - a| <= tol           (matches displayed-rounded values)
+//   Exact      |c - a| <= tol  OR  (a is whole) round(c) == a
+//                                      (CE-style rounded scan: 513 finds 513.36 —
+//                                       parity with snapshot SnapshotNumeric.ExactMatch)
 //   Bigger     c > a + tol              (clearly above the tolerance band)
 //   Smaller    c < a - tol
 //   Between    a - tol <= c <= b + tol  (widen the inclusive range)

@@ -751,10 +751,27 @@ static void Test_ValueScan_FloatTolerance_Exact() {
     EXPECT("Float Exact tol 0.5 rejects 338.51",
            !Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.5));
 
-    // tol=0 keeps strict equality semantics (back-compat with old callers)
-    WriteLE<float>(cur, 337.5f);
-    EXPECT("Float Exact tol 0 rejects 337.5 vs 338",
+    // CE-style rounded scan: a WHOLE-NUMBER target matches any float that ROUNDS to
+    // it even at tol=0 (513 Exact finds a 513.36 GAS BaseValue) — parity with the
+    // snapshot SnapshotNumeric.ExactMatch. target=338 (whole):
+    WriteLE<float>(cur, 337.5f);   // rounds up (half-away-from-zero) -> 338
+    EXPECT("Float Exact tol 0 matches 337.5 vs 338 (rounds to 338)",
+           Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.0));
+    WriteLE<float>(cur, 338.49f);  // rounds down -> 338
+    EXPECT("Float Exact tol 0 matches 338.49 vs 338 (rounds to 338)",
+           Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.0));
+    WriteLE<float>(cur, 337.4f);   // rounds to 337, not 338 -> no match
+    EXPECT("Float Exact tol 0 rejects 337.4 vs 338 (rounds to 337)",
            !Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.0));
+
+    // A NON-whole target keeps strict tol=0 equality (no rounding). target=338.25:
+    WriteLE<float>(tgt, 338.25f);
+    WriteLE<float>(cur, 338.0f);
+    EXPECT("Float Exact tol 0 rejects 338.0 vs 338.25 (non-whole target, no rounding)",
+           !Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.0));
+    WriteLE<float>(cur, 338.25f);
+    EXPECT("Float Exact tol 0 matches 338.25 vs 338.25 (exact)",
+           Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.0));
 }
 
 static void Test_ValueScan_FloatTolerance_Ordered() {
@@ -2591,6 +2608,39 @@ static void Test_Orden_BetweenFirstScan() {
     }
 }
 
+static void Test_Orden_RoundedFloatExact() {
+    // Multi-value (group / "multi value search") scan inherits the CE-style rounded
+    // float Exact through LeafSatisfiesSlot -> Radar::ComparePredicate: a whole-number
+    // target matches a float that ROUNDS to it, so a GAS Health.BaseValue=513.36 is
+    // found by Exact "513" (the same gap the snapshot fix closed for Group Match).
+    std::vector<Orden::Leaf> leaves = {
+        OrdenLeafFloat(0x10, 513.36f),   // e.g. AttributeSet "Health.BaseValue"
+        OrdenLeafFloat(0x14, 99.6f),     // e.g. AttributeSet "Mana.BaseValue"
+    };
+    Radar::NumericTargetSet t513, t100, t98;
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "513", t513);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "100", t100);
+    Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "98",  t98);
+    {   // slot0 Exact 513 (513.36->513), slot1 Exact 100 (99.6->100) -> distinct match
+        std::vector<Orden::SlotTarget> slots = {
+            { &t513, Radar::ScanType::Exact, 0.0 },
+            { &t100, Radar::ScanType::Exact, 0.0 },
+        };
+        std::vector<Orden::SlotMatches> out;
+        EXPECT("group rounded float Exact match (513.36~513 + 99.6~100)",
+               Orden::MatchGroup(leaves, slots, out));
+    }
+    {   // slot1 Exact 98 -> neither leaf rounds to 98 -> reject the whole block
+        std::vector<Orden::SlotTarget> slots = {
+            { &t513, Radar::ScanType::Exact, 0.0 },
+            { &t98,  Radar::ScanType::Exact, 0.0 },
+        };
+        std::vector<Orden::SlotMatches> out;
+        EXPECT("group rounded float Exact reject (nothing rounds to 98)",
+               !Orden::MatchGroup(leaves, slots, out));
+    }
+}
+
 static void Test_Orden_PrevValueRejectedOnFirstScan() {
     // Prev-value predicates (Increased / ...) have no baseline on the first scan,
     // so LeafSatisfiesSlot — and thus MatchGroup — must never match them,
@@ -2836,6 +2886,7 @@ int main() {
     Test_Orden_ConvergenceAndAssignment();
     Test_Orden_OrderedFirstScan();
     Test_Orden_BetweenFirstScan();
+    Test_Orden_RoundedFloatExact();
     Test_Orden_PrevValueRejectedOnFirstScan();
 
     // Ubel — Native-C scan P0: hole computation + Guess-type normalization (pure)
