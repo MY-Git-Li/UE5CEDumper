@@ -592,7 +592,18 @@ inline double Absd(double x) { return x < 0.0 ? -x : x; }
 bool ApplyOrderedTol(ScanType st, double cur, double a, double b, double tol) {
     if (tol < 0.0) tol = 0.0;
     switch (st) {
-        case ScanType::Exact:     return Absd(cur - a) <= tol;
+        case ScanType::Exact:
+            // Exact equality, or within the explicit +- tolerance band.
+            if (Absd(cur - a) <= tol) return true;
+            // CE-style rounded scan (parity with the snapshot SnapshotNumeric.ExactMatch):
+            // a WHOLE-NUMBER target ALSO matches any float that ROUNDS to it — searching
+            // 513 Exact finds a 513.36 GAS FGameplayAttributeData.BaseValue. Gameplay
+            // floats display as integers but store fractional, so an unaided Exact on a
+            // whole number must still find them. Only floats reach here (ComparePredicate
+            // routes integral types to the strict ApplyOrdered), so integer Exact stays
+            // literal (513 never matches 514). std::round is half-away-from-zero, matching
+            // C#'s MidpointRounding.AwayFromZero.
+            return a == std::floor(a) && std::round(cur) == a;
         case ScanType::Bigger:    return cur > a + tol;
         case ScanType::Smaller:   return cur < a - tol;
         case ScanType::Between:   return cur >= a - tol && cur <= b + tol;
