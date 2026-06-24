@@ -75,12 +75,14 @@ public class UiOptionsStoreTests : IDisposable
         o.ValueSearch.SelectedDataType = ValueScanDataType.Float;
         o.ValueSearch.SelectedScanType = ValueScanType.Bigger;
         o.ValueSearch.MaxResults = 12345;
-        o.ValueSearch.Tolerance = 1.25;
+        o.ValueSearch.RoundingMode = FloatRoundMode.Trunc;
         o.Snapshot.SelectedFamily = "Integers only";
         o.Snapshot.SelectedScope = "NumericAll";
+        o.Snapshot.RoundingMode = FloatRoundMode.Ceil;
         o.Teleport.ZOffset = 250.5;
         o.Teleport.TraceChannel = 3;
         o.Spc.SelectedJoinMode = "Loose";
+        o.Spc.RoundingMode = FloatRoundMode.Trunc;
         o.Pivot.SelectedSource = "DataTable";
         o.ProxyDeploy.SelectedProxyType = ProxyType.Dxgi;
 
@@ -95,12 +97,14 @@ public class UiOptionsStoreTests : IDisposable
         Assert.Equal(ValueScanDataType.Float, r.ValueSearch.SelectedDataType);
         Assert.Equal(ValueScanType.Bigger, r.ValueSearch.SelectedScanType);
         Assert.Equal(12345, r.ValueSearch.MaxResults);
-        Assert.Equal(1.25, r.ValueSearch.Tolerance);
+        Assert.Equal(FloatRoundMode.Trunc, r.ValueSearch.RoundingMode);
         Assert.Equal("Integers only", r.Snapshot.SelectedFamily);
         Assert.Equal("NumericAll", r.Snapshot.SelectedScope);
+        Assert.Equal(FloatRoundMode.Ceil, r.Snapshot.RoundingMode);
         Assert.Equal(250.5, r.Teleport.ZOffset);
         Assert.Equal(3, r.Teleport.TraceChannel);
         Assert.Equal("Loose", r.Spc.SelectedJoinMode);
+        Assert.Equal(FloatRoundMode.Trunc, r.Spc.RoundingMode);
         Assert.Equal("DataTable", r.Pivot.SelectedSource);
         Assert.Equal(ProxyType.Dxgi, r.ProxyDeploy.SelectedProxyType);
     }

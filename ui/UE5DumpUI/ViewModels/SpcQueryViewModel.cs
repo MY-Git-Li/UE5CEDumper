@@ -222,6 +222,29 @@ public partial class SpcQueryViewModel : ViewModelBase
     [ObservableProperty] private string _warningText = "";
     [ObservableProperty] private SpcResultRow? _selectedResult;
 
+    /// <summary>Per-panel rounding mode (Round/Trunc/Ceil): how a fractional
+    /// float/double absolute target is reduced to the displayed integer before
+    /// compare. Shared by single + group SPC queries. Persisted; default
+    /// <see cref="FloatRoundMode.Round"/>.</summary>
+    [ObservableProperty] private FloatRoundMode _selectedRoundingMode = FloatRoundMode.Round;
+
+    /// <summary>Picker options for <see cref="SelectedRoundingMode"/>.</summary>
+    public IReadOnlyList<FloatRoundMode> RoundingModeOptions { get; } =
+        new[] { FloatRoundMode.Round, FloatRoundMode.Trunc, FloatRoundMode.Ceil };
+
+    /// <summary>One-line explanation of the active rounding mode (UI hint).</summary>
+    public string RoundingModeHint => SelectedRoundingMode switch
+    {
+        FloatRoundMode.Trunc => "Integer fields truncate a decimal target (10.9 → 10; Between 10.9–11.1 → 10–11). Float/double values are used as-is.",
+        FloatRoundMode.Ceil  => "Integer fields round a decimal target up (10.9 → 11; Between 10.9–11.1 → 11–12). Float/double values are used as-is.",
+        _                    => "Integer fields round a decimal target to nearest (10.9 → 11; Between 10.9–11.1 → 11–11). Float/double values are used as-is.",
+    };
+
+    partial void OnSelectedRoundingModeChanged(FloatRoundMode value)
+    {
+        OnPropertyChanged(nameof(RoundingModeHint));
+    }
+
     /// <summary>Directional predicate options (display strings). v1 is
     /// type-agnostic: directions only, no type/value entry.</summary>
     public IReadOnlyList<string> PredicateOptions { get; } =
@@ -513,6 +536,7 @@ public partial class SpcQueryViewModel : ViewModelBase
                 JoinMode      = ParseJoinMode(SelectedJoinMode),
                 ClassContains = ClassFilter.Trim(),
                 PropContains  = PropFilter.Trim(),
+                RoundMode     = SelectedRoundingMode,
                 // N1: hand the current denylist to the store so denylisted classes
                 // never enter the candidate dict (cuts memory + match cost both).
                 ExcludedClasses = _excludedClasses.Count > 0 ? _excludedClasses : null,

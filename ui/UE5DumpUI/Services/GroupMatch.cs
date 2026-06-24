@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UE5DumpUI.Models;
 
 namespace UE5DumpUI.Services;
 
@@ -73,7 +74,9 @@ public static class GroupMatch
         public Predicate Predicate = Predicate.Exact;
         public double? Target;     // absolute predicates
         public double? Target2;    // Between upper bound
-        public double Tolerance;   // float +/- band (0 = exact)
+        /// <summary>Displayed-integer reduction for Float/Double leaves (build 1672,
+        /// replaces the old tolerance band). Integer leaves are reduce-invariant.</summary>
+        public FloatRoundMode RoundMode = FloatRoundMode.Round;
     }
 
     // ---- width / type helpers (mirror SnapshotNumeric's declared-type set) ----
@@ -149,26 +152,27 @@ public static class GroupMatch
             case Predicate.Between:
             {
                 if (slot.Target is not double target) return false;
-                if (!TargetFitsWidth(target, leaf.DeclaredType)) return false;
                 if (leaf.Num.Count == 0) return false;
                 if (leaf.Num[leaf.Num.Count - 1] is not double v) return false; // NaN/null in newest
                 // Comparisons use the decoded double (leaf.Num), like the rest of the
                 // snapshot subsystem (SPC / Diff / Pivot all key on numeric_value). Integer
-                // values above 2^53 lose precision — a known, snapshot-WIDE limitation; the
-                // live DLL's byte-exact path is unaffected, and Changed/Unchanged below use
-                // exact hex. Exact tolerance is a FLOAT band only (matches the DLL, where
-                // integer Exact is exact equality regardless of the tolerance band).
+                // values above 2^53 lose precision — a known, snapshot-WIDE limitation.
+                // RoundMode (build 1672) reduces a Float/Double value to the integer the
+                // game DISPLAYS before comparing a WHOLE target; a fractional target on an
+                // integer field is coerced via the mode. The width-fit gate runs on the
+                // COERCED target so a fractional target/bound is range-checked at its
+                // integer value (the live DLL coerces identically in BuildNumericTargets).
+                bool isFloat = SnapshotNumeric.IsFloatType(leaf.DeclaredType);
+                double fitTarget = isFloat ? target : SnapshotNumeric.CoerceIntTarget(target, slot.RoundMode);
+                if (!TargetFitsWidth(fitTarget, leaf.DeclaredType)) return false;
                 return slot.Predicate switch
                 {
-                    // Float-aware Exact: a whole-number target matches any float that
-                    // ROUNDS to it (513 finds a 513.36 GAS BaseValue), plus the ± band.
-                    // Integer fields stay exact. (build 1648)
-                    Predicate.Exact => SnapshotNumeric.ExactMatch(v, target, leaf.DeclaredType, slot.Tolerance),
-                    Predicate.Bigger => v > target,
-                    Predicate.Smaller => v < target,
+                    Predicate.Exact   => SnapshotNumeric.ExactMatch(v, target, leaf.DeclaredType, slot.RoundMode),
+                    Predicate.Bigger  => SnapshotNumeric.OrderedMatch(v, target, leaf.DeclaredType, slot.RoundMode, bigger: true),
+                    Predicate.Smaller => SnapshotNumeric.OrderedMatch(v, target, leaf.DeclaredType, slot.RoundMode, bigger: false),
                     Predicate.Between => slot.Target2 is double hi
-                        && TargetFitsWidth(hi, leaf.DeclaredType)
-                        && v >= Math.Min(target, hi) && v <= Math.Max(target, hi),
+                        && TargetFitsWidth(isFloat ? hi : SnapshotNumeric.CoerceIntTarget(hi, slot.RoundMode), leaf.DeclaredType)
+                        && SnapshotNumeric.BetweenMatch(v, target, hi, leaf.DeclaredType, slot.RoundMode),
                     _ => false,
                 };
             }
@@ -177,10 +181,19 @@ public static class GroupMatch
             case Predicate.Unchanged:
             {
                 if (leaf.Hex.Count < 2) return false; // no baseline (Mode A)
+                bool unchanged = slot.Predicate == Predicate.Unchanged;
+                // Float leaves compare the DISPLAYED (reduced) values so sub-display
+                // jitter (100.1→100.4) reads as Unchanged — the prev-value mode the user
+                // asked for. Integer / non-finite leaves keep byte-exact hex (no >2^53
+                // double-precision regression; an integer is reduce-invariant anyway).
+                if (SnapshotNumeric.IsFloatType(leaf.DeclaredType)
+                    && leaf.Num.Count >= 2
+                    && leaf.Num[0] is double f0 && leaf.Num[leaf.Num.Count - 1] is double fN)
+                    return SnapshotNumeric.TemporalMatch(f0, fN, leaf.DeclaredType, slot.RoundMode, unchanged ? 0 : 2);
                 string a = leaf.Hex[0] ?? "";
                 string b = leaf.Hex[leaf.Hex.Count - 1] ?? "";
                 bool same = string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
-                return slot.Predicate == Predicate.Unchanged ? same : !same;
+                return unchanged ? same : !same;
             }
 
             case Predicate.Increased:
@@ -189,7 +202,8 @@ public static class GroupMatch
                 if (leaf.Num.Count < 2) return false;
                 if (leaf.Num[0] is not double first) return false;
                 if (leaf.Num[leaf.Num.Count - 1] is not double last) return false;
-                return slot.Predicate == Predicate.Increased ? last > first : last < first;
+                return SnapshotNumeric.TemporalMatch(first, last, leaf.DeclaredType, slot.RoundMode,
+                                                     slot.Predicate == Predicate.Increased ? 1 : -1);
             }
 
             default:

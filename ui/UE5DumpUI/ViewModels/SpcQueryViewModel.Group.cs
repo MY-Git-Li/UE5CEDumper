@@ -142,6 +142,7 @@ public partial class SpcQueryViewModel
                 JoinMode      = ParseJoinMode(SelectedJoinMode),
                 ClassContains = ClassFilter.Trim(),
                 PropContains  = PropFilter.Trim(),
+                RoundMode     = SelectedRoundingMode,
                 ExcludedClasses = _excludedClasses.Count > 0 ? _excludedClasses : null,
             };
             foreach (var p in selected) query.SnapshotIds.Add(p.Id);

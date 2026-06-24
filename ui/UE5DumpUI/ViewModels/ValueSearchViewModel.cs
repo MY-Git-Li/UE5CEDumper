@@ -134,12 +134,29 @@ public partial class ValueSearchViewModel : ViewModelBase
     /// Shared by Single + Group modes; locked at First Scan (refine reuses survivors).</summary>
     [ObservableProperty] private bool _preFilterNoise;
 
-    /// <summary>CE-style rounded-scan slack for Float/Double and vector
-    /// comparisons. Default 0.5 covers the common case: game UI
-    /// displays "338" for a real float of 337.5, so scanning for "338"
-    /// with tolerance 0.5 matches any value in [337.5, 338.5]. Integer
-    /// + string types ignore it.</summary>
-    [ObservableProperty] private double _tolerance = 0.5;
+    /// <summary>Per-panel rounding mode: how a fractional float/double target is
+    /// reduced to the integer the game DISPLAYS before compare (Round/Trunc/Ceil).
+    /// Replaces the old ± tolerance band. Persisted; default <see cref="FloatRoundMode.Round"/>.
+    /// Integer fields are reduce-invariant; a fractional target/bound is coerced via
+    /// the mode. Shown for every type except Bool + the 3 string types.</summary>
+    [ObservableProperty] private FloatRoundMode _selectedRoundingMode = FloatRoundMode.Round;
+
+    /// <summary>Picker options for <see cref="SelectedRoundingMode"/>.</summary>
+    public IReadOnlyList<FloatRoundMode> RoundingModeOptions { get; } =
+        new[] { FloatRoundMode.Round, FloatRoundMode.Trunc, FloatRoundMode.Ceil };
+
+    /// <summary>One-line explanation of the active rounding mode (UI hint).</summary>
+    public string RoundingModeHint => SelectedRoundingMode switch
+    {
+        FloatRoundMode.Trunc => "Integer fields truncate a decimal target (10.9 → 10; Between 10.9–11.1 → 10–11). Float/double values are used as-is.",
+        FloatRoundMode.Ceil  => "Integer fields round a decimal target up (10.9 → 11; Between 10.9–11.1 → 11–12). Float/double values are used as-is.",
+        _                    => "Integer fields round a decimal target to nearest (10.9 → 11; Between 10.9–11.1 → 11–11). Float/double values are used as-is.",
+    };
+
+    partial void OnSelectedRoundingModeChanged(FloatRoundMode value)
+    {
+        OnPropertyChanged(nameof(RoundingModeHint));
+    }
 
     /// <summary>Opt-in case sensitivity for string scans. Default
     /// false matches CE's case-insensitive convention. Has no effect
@@ -484,15 +501,13 @@ public partial class ValueSearchViewModel : ViewModelBase
         OnPropertyChanged(nameof(RequiresValue2Input));
     }
 
-    /// <summary>True when the selected DataType uses tolerance --
-    /// Float/Double for scalar tolerance, Vector/Rotator for axis-
-    /// wise tolerance. Integer + string types hide the UI knob because
-    /// the DLL ignores it for those comparisons.</summary>
-    public bool SupportsTolerance =>
-        SelectedDataType == ValueScanDataType.Float
-        || SelectedDataType == ValueScanDataType.Double
-        || IsMultiNumericDataType(SelectedDataType)
-        || IsVectorDataType(SelectedDataType);
+    /// <summary>True when the rounding-mode picker applies — every numeric +
+    /// vector type. Hidden for Bool and the 3 string types (no fractional target to
+    /// reduce). The rounding mode reduces a fractional float/double target to the
+    /// displayed integer before compare.</summary>
+    public bool SupportsRoundingMode =>
+        SelectedDataType != ValueScanDataType.Bool
+        && !IsStringDataType(SelectedDataType);
 
     /// <summary>True for the multi-numeric meta types (NumericNoByte /
     /// NumericAll) that fan out over a fixed member set instead of a
@@ -522,7 +537,7 @@ public partial class ValueSearchViewModel : ViewModelBase
 
     partial void OnSelectedDataTypeChanged(ValueScanDataType value)
     {
-        OnPropertyChanged(nameof(SupportsTolerance));
+        OnPropertyChanged(nameof(SupportsRoundingMode));
         OnPropertyChanged(nameof(SupportsCaseSensitive));
         OnPropertyChanged(nameof(DataTypeWarning));
         OnPropertyChanged(nameof(VisibleScanTypeOptions));
@@ -686,17 +701,17 @@ public partial class ValueSearchViewModel : ViewModelBase
             // accumulate orphan sessions.
             await EndSessionIfAnyAsync();
 
-            // Tolerance only passes through for Float/Double + vector
-            // types; integer + string scans get exact-match semantics
-            // regardless of the UI value.
-            double effTol = SupportsTolerance ? Tolerance : 0.0;
+            // Rounding mode reduces a fractional float/double target to the displayed
+            // integer before compare; only meaningful for numeric/vector types, but the
+            // DLL ignores it for integer + string scans anyway.
+            var effRound = SupportsRoundingMode ? SelectedRoundingMode : FloatRoundMode.Round;
             // Case sensitivity only passes through for string types;
             // wire serializer enforces the same restriction.
             bool effCase = SupportsCaseSensitive && CaseSensitive;
             var result = await _dump.BeginValueScanAsync(
                 SelectedDataType, SelectedScanType, Value,
                 SelectedScanType == ValueScanType.Between ? Value2 : null,
-                GameOnly, MaxResults, effTol, effCase, ParallelScan, BatchRead, DeepScan,
+                GameOnly, MaxResults, effRound, effCase, ParallelScan, BatchRead, DeepScan,
                 NativeCScan, NewestFirst, PageSize, ScanTimeoutSeconds * 1000,
                 PreFilterNoise, cts.Token);
 
@@ -756,13 +771,13 @@ public partial class ValueSearchViewModel : ViewModelBase
             ErrorMessage = "";
             StatusText  = $"Refining ({SelectedScanType})...";
 
-            double effTol = SupportsTolerance ? Tolerance : 0.0;
+            var effRound = SupportsRoundingMode ? SelectedRoundingMode : FloatRoundMode.Round;
             bool effCase = SupportsCaseSensitive && CaseSensitive;
             var result = await _dump.RefineValueScanAsync(
                 SessionId, SelectedScanType,
                 needsValue ? Value : null,
                 SelectedScanType == ValueScanType.Between ? Value2 : null,
-                effTol, effCase, PageSize, cts.Token);
+                effRound, effCase, PageSize, cts.Token);
 
             // Refine prunes the existing set (no re-scan), so the histogram is exact.
             ClassFilter.RebuildFromCounts(
@@ -1074,7 +1089,7 @@ public partial class ValueSearchViewModel : ViewModelBase
             var result = await _dump.BeginGroupScanAsync(
                 GroupInputs.ToList(), GameOnly, MaxResults, DeepScan, CrossObjectScan,
                 NativeCScan, NewestFirst, PageSize, ScanTimeoutSeconds * 1000,
-                PreFilterNoise, cts.Token);
+                PreFilterNoise, SelectedRoundingMode, cts.Token);
 
             GroupSessionId = result.SessionId;
             GroupClassFilter.RebuildFromCounts(
@@ -1114,7 +1129,7 @@ public partial class ValueSearchViewModel : ViewModelBase
             ErrorMessage = "";
             StatusText = "Refining group scan...";
 
-            var result = await _dump.RefineGroupScanAsync(GroupSessionId, GroupInputs.ToList(), PageSize, cts.Token);
+            var result = await _dump.RefineGroupScanAsync(GroupSessionId, GroupInputs.ToList(), PageSize, SelectedRoundingMode, cts.Token);
 
             GroupClassFilter.RebuildFromCounts(
                 result.ClassHistogram.Select(c => (c.ClassName, c.Count)),

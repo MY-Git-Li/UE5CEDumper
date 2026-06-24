@@ -218,7 +218,10 @@ CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands f
 // scan_type for string:         Exact/Contains/StartsWith/EndsWith
 // value:    string-encoded target (e.g. "100", "3.14", "true", "Engine", "100,200,300" CSV for vectors)
 // value2:   second target for Between (numeric/vector only)
-// tolerance: float-only — applies to Float/Double + vector types (per-axis); omitted for integer/string
+// rounding_mode: "Round"(default)/"Trunc"/"Ceil" — how a float/double value is reduced
+//          to the integer the game DISPLAYS before compare (Round=half-away, Trunc=toward
+//          zero, Ceil=up); also coerces a FRACTIONAL target/bound on an integer field.
+//          Omitted when "Round". Replaced the old float ± "tolerance" (build 1672).
 // case_sensitive: string types only — omitted unless true (CE-style default is insensitive)
 // parallel: omitted unless false. false forces a single-threaded GObjects walk
 //           (slower, but avoids the burst of concurrent cross-thread reads some
@@ -256,7 +259,7 @@ CE-style First Scan / Next Scan workflow over UPROPERTY fields. Three commands f
 ```
 
 **Wire-shape contract** (locked by tests):
-- `tolerance` is attached only when non-zero AND the data type is Float/Double/FVector/FRotator/FTransform. Integer + string sessions never carry it; the DLL ignores it for those anyway.
+- `rounding_mode` is attached only when **not** `"Round"` (the default). When absent the DLL applies Round, so pre-build-1672 clients (no field) keep the historical half-away behavior. Per-slot on group scans; top-level on single. The old float `tolerance` field is gone — value/group scans no longer carry it.
 - `case_sensitive` is attached only when true AND the data type is FString/FName/FText.
 - `parallel` is attached only when **false** (the DLL default is true / full parallel). `false` caps the GObjects walk to one worker thread; the UI exposes it as the default-ON "Parallel scan" toggle for anti-tamper-sensitive games.
 - `batch_read` is attached only when **false** (DLL default true). `false` forces one SEH read per field; default batches each object's fixed-width leaf fields into a single body read (per-thread reused buffer, span-capped, with per-field fallback on fault). Strings + container data are always read directly. UI = default-ON "Batch read" toggle.

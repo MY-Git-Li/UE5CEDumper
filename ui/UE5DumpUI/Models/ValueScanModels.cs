@@ -333,11 +333,15 @@ public class GroupCandidate
     public string LocationLabel =>
         (!string.IsNullOrEmpty(DefiningClassName) && DefiningClassName != ClassName)
             ? $"{ClassName}  ({DefiningClassName})" : ClassName;
-    // Compact master-row summary: "Str=24, Def=10, Dex=14, Int=8". A prev-value
-    // slot carries no target value, so fall back to its current leaf value.
+    // Compact master-row summary: "Health.BaseValue=513.36, Health.CurrentValue=513.36".
+    // Shows each slot's ACTUAL current leaf value (LeafValue) — NOT the query target /
+    // Between bound, which is misleading (an Exact 513 search hides the real 513.36; a
+    // Between 510..514 shows the bound 510). Matches the SPC group display, and the
+    // rendered LeafValue keeps the int/float distinction (513 vs 513.36). Falls back to
+    // the target only if a path left LeafValue empty.
     public string SlotSummary =>
         string.Join(", ", Slots.Select(s =>
-            $"{(string.IsNullOrEmpty(s.FieldName) ? "?" : s.FieldName)}={(string.IsNullOrEmpty(s.Value) ? s.LeafValue : s.Value)}"));
+            $"{(string.IsNullOrEmpty(s.FieldName) ? "?" : s.FieldName)}={(string.IsNullOrEmpty(s.LeafValue) ? s.Value : s.LeafValue)}"));
     public bool AllLocked => Slots.Count > 0 && Slots.All(s => s.Locked);
 
     // ---- Locked-offset table (P2) ----

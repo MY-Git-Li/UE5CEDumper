@@ -276,7 +276,7 @@ public class ValueSearchTests
     }
 
     [Fact]
-    public async Task BeginValueScanAsync_AttachesToleranceForFloat()
+    public async Task BeginValueScanAsync_AttachesRoundingModeWhenNotRound()
     {
         var svc = MakeService(out var pipe);
         JsonObject? captured = null;
@@ -300,62 +300,21 @@ public class ValueSearchTests
 
         await svc.BeginValueScanAsync(
             ValueScanDataType.Float, ValueScanType.Exact, "338",
-            tolerance: 0.5,
+            roundMode: FloatRoundMode.Trunc,
             ct: TestContext.Current.CancellationToken);
 
         Assert.NotNull(captured);
-        Assert.True(captured!.ContainsKey("tolerance"));
-        Assert.Equal(0.5, captured["tolerance"]?.GetValue<double>());
-    }
-
-    [Theory]
-    [InlineData(ValueScanDataType.Int8)]
-    [InlineData(ValueScanDataType.Int32)]
-    [InlineData(ValueScanDataType.Int64)]
-    [InlineData(ValueScanDataType.UInt32)]
-    [InlineData(ValueScanDataType.Bool)]
-    public async Task BeginValueScanAsync_OmitsToleranceForIntegerTypes(ValueScanDataType dt)
-    {
-        // Integer-typed scans must not carry tolerance on the wire even
-        // when the caller supplies a non-zero value -- DLL ignores it
-        // and the wire shape stays byte-identical to the pre-tolerance
-        // protocol for the common (integer) case. Locks the
-        // SupportsTolerance gating logic in DumpService.
-        var svc = MakeService(out var pipe);
-        JsonObject? captured = null;
-        pipe.SetHandler(req =>
-        {
-            captured = (JsonObject)req.DeepClone();
-            return new JsonObject
-            {
-                ["id"]              = req["id"]?.GetValue<int>() ?? 0,
-                ["ok"]              = true,
-                ["session_id"]      = 1UL,
-                ["data_type"]       = dt.ToString(),
-                ["total"]           = 0,
-                ["scanned_classes"] = 0,
-                ["scanned_objects"] = 0,
-                ["duration_ms"]     = 1L,
-                ["deadline_hit"]    = false,
-                ["candidates"]      = new JsonArray(),
-            };
-        });
-
-        await svc.BeginValueScanAsync(
-            dt, ValueScanType.Exact, "10",
-            tolerance: 5.0,   // explicitly non-zero; should still be dropped
-            ct: TestContext.Current.CancellationToken);
-
-        Assert.NotNull(captured);
-        Assert.False(captured!.ContainsKey("tolerance"),
-            $"tolerance must not be on the wire for {dt}");
+        Assert.True(captured!.ContainsKey("rounding_mode"));
+        Assert.Equal("Trunc", captured["rounding_mode"]?.GetValue<string>());
+        // The old tolerance field is gone from the wire entirely.
+        Assert.False(captured.ContainsKey("tolerance"));
     }
 
     [Fact]
-    public async Task BeginValueScanAsync_OmitsToleranceWhenZero()
+    public async Task BeginValueScanAsync_OmitsRoundingModeWhenRound()
     {
-        // Even for Float, tolerance=0 means "exact" -- skip the field so
-        // the existing exact-scan call sites stay byte-identical.
+        // Round is the DLL default → omitted from the wire so existing
+        // exact-scan call sites stay byte-identical.
         var svc = MakeService(out var pipe);
         JsonObject? captured = null;
         pipe.SetHandler(req =>
@@ -378,15 +337,16 @@ public class ValueSearchTests
 
         await svc.BeginValueScanAsync(
             ValueScanDataType.Float, ValueScanType.Exact, "100",
-            tolerance: 0.0,
+            roundMode: FloatRoundMode.Round,
             ct: TestContext.Current.CancellationToken);
 
         Assert.NotNull(captured);
-        Assert.False(captured!.ContainsKey("tolerance"));
+        Assert.False(captured!.ContainsKey("rounding_mode"));
+        Assert.False(captured.ContainsKey("tolerance"));
     }
 
     [Fact]
-    public async Task RefineValueScanAsync_AttachesToleranceWhenNonZero()
+    public async Task RefineValueScanAsync_AttachesRoundingModeWhenNotRound()
     {
         var svc = MakeService(out var pipe);
         JsonObject? captured = null;
@@ -409,63 +369,85 @@ public class ValueSearchTests
         await svc.RefineValueScanAsync(
             1UL, ValueScanType.Decreased,
             value: null, value2: null,
-            tolerance: 0.5,
+            roundMode: FloatRoundMode.Ceil,
             ct: TestContext.Current.CancellationToken);
 
         Assert.NotNull(captured);
-        Assert.Equal(0.5, captured!["tolerance"]?.GetValue<double>());
+        Assert.Equal("Ceil", captured!["rounding_mode"]?.GetValue<string>());
+        Assert.False(captured.ContainsKey("tolerance"));
     }
 
     [Fact]
-    public void ViewModel_SupportsTolerance_GatesByDataType()
+    public void ViewModel_SupportsRoundingMode_GatesByDataType()
     {
+        // The rounding picker shows for every numeric + vector type; hidden
+        // only for Bool and the 3 string types.
         var (vm, _) = MakeVm();
         vm.SelectedDataType = ValueScanDataType.Int32;
-        Assert.False(vm.SupportsTolerance);
+        Assert.True(vm.SupportsRoundingMode);
         vm.SelectedDataType = ValueScanDataType.Float;
-        Assert.True(vm.SupportsTolerance);
+        Assert.True(vm.SupportsRoundingMode);
         vm.SelectedDataType = ValueScanDataType.Double;
-        Assert.True(vm.SupportsTolerance);
-        vm.SelectedDataType = ValueScanDataType.UInt64;
-        Assert.False(vm.SupportsTolerance);
+        Assert.True(vm.SupportsRoundingMode);
+        vm.SelectedDataType = ValueScanDataType.Bool;
+        Assert.False(vm.SupportsRoundingMode);
+        vm.SelectedDataType = ValueScanDataType.FString;
+        Assert.False(vm.SupportsRoundingMode);
     }
 
     [Fact]
-    public async Task ViewModel_TolerancePassesThroughForFloat()
+    public async Task ViewModel_RoundingModePassesThroughForFloat()
     {
         var (vm, fake) = MakeVm();
         fake.NextBeginResult = new ValueScanBeginResult { SessionId = 1UL };
         vm.SelectedDataType = ValueScanDataType.Float;
         vm.SelectedScanType = ValueScanType.Exact;
         vm.Value = "338";
-        vm.Tolerance = 0.5;
+        vm.SelectedRoundingMode = FloatRoundMode.Trunc;
 
         await vm.FirstScanCommand.ExecuteAsync(null);
 
         Assert.Single(fake.Begins);
-        var (_, _, _, _, _, _, tol, _) = fake.Begins[0];
-        Assert.Equal(0.5, tol);
+        var (_, _, _, _, _, _, mode, _) = fake.Begins[0];
+        Assert.Equal(FloatRoundMode.Trunc, mode);
     }
 
     [Fact]
-    public async Task ViewModel_ToleranceIgnoredForIntegerType()
+    public async Task ViewModel_RoundingModePassesThroughForIntegerType()
     {
-        // Even though the user has Tolerance=2 set, an Int32 scan must
-        // send tolerance=0 to the service (which then strips it from the
-        // wire). Mirror of the wire-level OmitsToleranceForIntegerTypes
-        // test, one layer up at the VM.
+        // The picker is shown for integers too (a fractional target gets
+        // coerced via the mode), so the VM threads it through unchanged.
         var (vm, fake) = MakeVm();
         fake.NextBeginResult = new ValueScanBeginResult { SessionId = 1UL };
         vm.SelectedDataType = ValueScanDataType.Int32;
         vm.SelectedScanType = ValueScanType.Exact;
         vm.Value = "100";
-        vm.Tolerance = 2.0;
+        vm.SelectedRoundingMode = FloatRoundMode.Ceil;
 
         await vm.FirstScanCommand.ExecuteAsync(null);
 
         Assert.Single(fake.Begins);
-        var (_, _, _, _, _, _, tol, _) = fake.Begins[0];
-        Assert.Equal(0.0, tol);
+        var (_, _, _, _, _, _, mode, _) = fake.Begins[0];
+        Assert.Equal(FloatRoundMode.Ceil, mode);
+    }
+
+    [Fact]
+    public async Task ViewModel_RoundingModeForcedRoundForStringType()
+    {
+        // A string scan hides the picker (SupportsRoundingMode=false), so the
+        // VM forces Round to the service regardless of the stored mode.
+        var (vm, fake) = MakeVm();
+        fake.NextBeginResult = new ValueScanBeginResult { SessionId = 1UL };
+        vm.SelectedRoundingMode = FloatRoundMode.Ceil;
+        vm.SelectedDataType = ValueScanDataType.FString;
+        vm.SelectedScanType = ValueScanType.Exact;
+        vm.Value = "abc";
+
+        await vm.FirstScanCommand.ExecuteAsync(null);
+
+        Assert.Single(fake.Begins);
+        var (_, _, _, _, _, _, mode, _) = fake.Begins[0];
+        Assert.Equal(FloatRoundMode.Round, mode);
     }
 
     [Fact]
@@ -678,18 +660,19 @@ public class ValueSearchTests
     }
 
     [Fact]
-    public void SupportsTolerance_AlsoForVectorTypes()
+    public void SupportsRoundingMode_AlsoForVectorTypes()
     {
-        // Tolerance is enabled for Float/Double + Vector/Rotator/Transform.
+        // The rounding picker is shown for Float/Double + Vector/Rotator/Transform,
+        // and hidden for the string types.
         var (vm, _) = MakeVm();
         vm.SelectedDataType = ValueScanDataType.FVector;
-        Assert.True(vm.SupportsTolerance);
+        Assert.True(vm.SupportsRoundingMode);
         vm.SelectedDataType = ValueScanDataType.FRotator;
-        Assert.True(vm.SupportsTolerance);
+        Assert.True(vm.SupportsRoundingMode);
         vm.SelectedDataType = ValueScanDataType.FTransform;
-        Assert.True(vm.SupportsTolerance);
+        Assert.True(vm.SupportsRoundingMode);
         vm.SelectedDataType = ValueScanDataType.FString;
-        Assert.False(vm.SupportsTolerance);
+        Assert.False(vm.SupportsRoundingMode);
     }
 
     // ------------------------------------------------------------------
@@ -713,13 +696,13 @@ public class ValueSearchTests
     }
 
     [Fact]
-    public void NumericNoByte_SupportsTolerance_ButNotCaseSensitive()
+    public void NumericNoByte_SupportsRoundingMode_ButNotCaseSensitive()
     {
-        // Tolerance is meaningful (float/double members); case-sensitive
+        // Rounding is meaningful (float/double members); case-sensitive
         // is string-only so it must stay off.
         var (vm, _) = MakeVm();
         vm.SelectedDataType = ValueScanDataType.NumericNoByte;
-        Assert.True(vm.SupportsTolerance);
+        Assert.True(vm.SupportsRoundingMode);
         Assert.False(vm.SupportsCaseSensitive);
     }
 
@@ -751,7 +734,7 @@ public class ValueSearchTests
     }
 
     [Fact]
-    public async Task BeginValueScanAsync_SendsNumericNoByteWireName_AndAttachesTolerance()
+    public async Task BeginValueScanAsync_SendsNumericNoByteWireName_AndAttachesRoundingMode()
     {
         var svc = MakeService(out var pipe);
         JsonObject? captured = null;
@@ -775,14 +758,14 @@ public class ValueSearchTests
 
         await svc.BeginValueScanAsync(
             ValueScanDataType.NumericNoByte, ValueScanType.Exact, "100",
-            tolerance: 0.5,
+            roundMode: FloatRoundMode.Trunc,
             ct: TestContext.Current.CancellationToken);
 
         Assert.NotNull(captured);
         Assert.Equal("NumericNoByte", captured!["data_type"]?.GetValue<string>());
-        // Tolerance rides along (it applies to the float/double members).
-        Assert.True(captured.ContainsKey("tolerance"));
-        Assert.Equal(0.5, captured["tolerance"]?.GetValue<double>());
+        // Rounding mode rides along (it applies to the float/double members).
+        Assert.True(captured.ContainsKey("rounding_mode"));
+        Assert.Equal("Trunc", captured["rounding_mode"]?.GetValue<string>());
     }
 
     [Fact]
@@ -835,11 +818,11 @@ public class ValueSearchTests
     }
 
     [Fact]
-    public void NumericAll_SupportsTolerance_ButNotCaseSensitive()
+    public void NumericAll_SupportsRoundingMode_ButNotCaseSensitive()
     {
         var (vm, _) = MakeVm();
         vm.SelectedDataType = ValueScanDataType.NumericAll;
-        Assert.True(vm.SupportsTolerance);
+        Assert.True(vm.SupportsRoundingMode);
         Assert.False(vm.SupportsCaseSensitive);
     }
 
@@ -884,7 +867,7 @@ public class ValueSearchTests
     }
 
     [Fact]
-    public async Task BeginValueScanAsync_SendsNumericAllWireName_AndAttachesTolerance()
+    public async Task BeginValueScanAsync_SendsNumericAllWireName_AndAttachesRoundingMode()
     {
         var svc = MakeService(out var pipe);
         JsonObject? captured = null;
@@ -908,13 +891,13 @@ public class ValueSearchTests
 
         await svc.BeginValueScanAsync(
             ValueScanDataType.NumericAll, ValueScanType.Exact, "100",
-            tolerance: 0.5,
+            roundMode: FloatRoundMode.Ceil,
             ct: TestContext.Current.CancellationToken);
 
         Assert.NotNull(captured);
         Assert.Equal("NumericAll", captured!["data_type"]?.GetValue<string>());
-        Assert.True(captured.ContainsKey("tolerance"));
-        Assert.Equal(0.5, captured["tolerance"]?.GetValue<double>());
+        Assert.True(captured.ContainsKey("rounding_mode"));
+        Assert.Equal("Ceil", captured["rounding_mode"]?.GetValue<string>());
     }
 
     // ------------------------------------------------------------------
@@ -1037,7 +1020,7 @@ public class ValueSearchTests
     [InlineData(ValueScanDataType.FVector)]
     [InlineData(ValueScanDataType.FRotator)]
     [InlineData(ValueScanDataType.FTransform)]
-    public async Task BeginValueScanAsync_AttachesToleranceForVectorTypes(ValueScanDataType dt)
+    public async Task BeginValueScanAsync_AttachesRoundingModeForVectorTypes(ValueScanDataType dt)
     {
         var svc = MakeService(out var pipe);
         JsonObject? captured = null;
@@ -1061,21 +1044,22 @@ public class ValueSearchTests
 
         await svc.BeginValueScanAsync(
             dt, ValueScanType.Exact, "100,200,300",
-            tolerance: 0.5,
+            roundMode: FloatRoundMode.Trunc,
             ct: TestContext.Current.CancellationToken);
 
         Assert.NotNull(captured);
-        Assert.Equal(0.5, captured!["tolerance"]?.GetValue<double>());
+        Assert.Equal("Trunc", captured!["rounding_mode"]?.GetValue<string>());
+        Assert.False(captured.ContainsKey("tolerance"));
     }
 
     [Theory]
     [InlineData(ValueScanDataType.FString)]
     [InlineData(ValueScanDataType.FName)]
     [InlineData(ValueScanDataType.FText)]
-    public async Task BeginValueScanAsync_OmitsToleranceForStringTypes(ValueScanDataType dt)
+    public async Task BeginValueScanAsync_NeverSendsTolerance(ValueScanDataType dt)
     {
-        // Strings ignore tolerance DLL-side; omitting keeps the wire
-        // shape tight for the common case.
+        // The tolerance wire field is gone entirely. String types never carry it
+        // (the VM forces Round for them anyway), and neither does any other type.
         var svc = MakeService(out var pipe);
         JsonObject? captured = null;
         pipe.SetHandler(req =>
@@ -1098,7 +1082,6 @@ public class ValueSearchTests
 
         await svc.BeginValueScanAsync(
             dt, ValueScanType.Contains, "Player",
-            tolerance: 5.0,   // explicitly non-zero, should still be dropped
             ct: TestContext.Current.CancellationToken);
 
         Assert.NotNull(captured);
@@ -1211,10 +1194,10 @@ public class ValueSearchTests
         public ValueScanBeginResult NextBeginResult { get; set; } = new();
         public ValueScanRefineResult NextRefineResult { get; set; } = new();
         public ValueScanWindowResult NextWindowResult { get; set; } = new();
-        // (dataType, scanType, value, value2, gameOnly, maxResults, tolerance, caseSensitive)
-        public List<(ValueScanDataType, ValueScanType, string, string?, bool, int, double, bool)> Begins { get; } = new();
-        // (sessionId, scanType, value, value2, tolerance, caseSensitive)
-        public List<(ulong, ValueScanType, string?, string?, double, bool)> Refines { get; } = new();
+        // (dataType, scanType, value, value2, gameOnly, maxResults, roundMode, caseSensitive)
+        public List<(ValueScanDataType, ValueScanType, string, string?, bool, int, FloatRoundMode, bool)> Begins { get; } = new();
+        // (sessionId, scanType, value, value2, roundMode, caseSensitive)
+        public List<(ulong, ValueScanType, string?, string?, FloatRoundMode, bool)> Refines { get; } = new();
         // (sessionId, offset, limit, filter, sortKey, sortDesc)
         public List<(ulong, int, int, string?, string?, bool)> Queries { get; } = new();
         public List<ulong> Ends { get; } = new();
@@ -1231,13 +1214,13 @@ public class ValueSearchTests
         public override Task<ValueScanBeginResult> BeginValueScanAsync(
             ValueScanDataType dataType, ValueScanType scanType,
             string value, string? value2 = null, bool gameOnly = true,
-            int maxResults = 50000, double tolerance = 0.0,
+            int maxResults = 50000, FloatRoundMode roundMode = FloatRoundMode.Round,
             bool caseSensitive = false, bool parallel = true, bool batchRead = true,
             bool deep = false, bool nativeC = false, bool newestFirst = false,
             int pageSize = 1000, int deadlineMs = 15000, bool autoSkipNoise = false,
             CancellationToken ct = default)
         {
-            Begins.Add((dataType, scanType, value, value2, gameOnly, maxResults, tolerance, caseSensitive));
+            Begins.Add((dataType, scanType, value, value2, gameOnly, maxResults, roundMode, caseSensitive));
             LastParallel = parallel;
             LastBatchRead = batchRead;
             LastDeep = deep;
@@ -1251,11 +1234,11 @@ public class ValueSearchTests
         public override Task<ValueScanRefineResult> RefineValueScanAsync(
             ulong sessionId, ValueScanType scanType,
             string? value = null, string? value2 = null,
-            double tolerance = 0.0,
+            FloatRoundMode roundMode = FloatRoundMode.Round,
             bool caseSensitive = false, int pageSize = 1000,
             CancellationToken ct = default)
         {
-            Refines.Add((sessionId, scanType, value, value2, tolerance, caseSensitive));
+            Refines.Add((sessionId, scanType, value, value2, roundMode, caseSensitive));
             return Task.FromResult(NextRefineResult);
         }
 
@@ -1290,23 +1273,29 @@ public class ValueSearchTests
         public List<ulong> GroupEnds { get; } = new();
         public int? LastGroupDeadlineMs { get; private set; }
         public bool? LastGroupAutoSkipNoise { get; private set; }
+        public FloatRoundMode? LastGroupBeginRoundMode { get; private set; }
+        public FloatRoundMode? LastGroupRefineRoundMode { get; private set; }
 
         public override Task<GroupScanBeginResult> BeginGroupScanAsync(
             IReadOnlyList<GroupSlotInput> slots, bool gameOnly = true,
             int maxResults = 50000, bool deep = false, bool crossObject = false,
             bool nativeC = false, bool newestFirst = false, int pageSize = 1000,
-            int deadlineMs = 15000, bool autoSkipNoise = false, CancellationToken ct = default)
+            int deadlineMs = 15000, bool autoSkipNoise = false,
+            FloatRoundMode roundMode = FloatRoundMode.Round, CancellationToken ct = default)
         {
             GroupBegins.Add((slots.ToList(), gameOnly, maxResults, deep, crossObject, nativeC, newestFirst));
             LastGroupDeadlineMs = deadlineMs;
             LastGroupAutoSkipNoise = autoSkipNoise;
+            LastGroupBeginRoundMode = roundMode;
             return Task.FromResult(NextGroupBeginResult);
         }
 
         public override Task<GroupScanRefineResult> RefineGroupScanAsync(
-            ulong sessionId, IReadOnlyList<GroupSlotInput> slots, int pageSize = 1000, CancellationToken ct = default)
+            ulong sessionId, IReadOnlyList<GroupSlotInput> slots, int pageSize = 1000,
+            FloatRoundMode roundMode = FloatRoundMode.Round, CancellationToken ct = default)
         {
             GroupRefines.Add((sessionId, slots.ToList()));
+            LastGroupRefineRoundMode = roundMode;
             return Task.FromResult(NextGroupRefineResult);
         }
 
@@ -1620,6 +1609,30 @@ public class ValueSearchTests
         Assert.True(gc.HasOffsetTable);
         Assert.Equal("Str@0x20, Def@0x24", gc.OffsetTable);
         Assert.Equal("🔒 BP_Stats_C — Str@0x20, Def@0x24", gc.OffsetTableLabel);
+    }
+
+    [Fact]
+    public void GroupCandidate_SlotSummary_ShowsActualLeafValueNotQueryTarget()
+    {
+        // The "Matched values" master-row summary must show the ACTUAL current value
+        // (LeafValue), not the query target / Between bound — a float that displays as
+        // an integer (513.36) was misleadingly summarized as the searched "513" / the
+        // lower bound "510". Parity with the SPC group display. (build 1678 fix.)
+        var gc = new GroupCandidate
+        {
+            Slots =
+            {
+                // Exact 513 search → real value 513.36 (Value Search live path).
+                new GroupSlotMatch { FieldName = "Health.BaseValue", Value = "513", LeafValue = "513.36" },
+                // Between 510..514 → real value 513.36 (Snapshot path; bound must not show).
+                new GroupSlotMatch { FieldName = "Health.CurrentValue", ScanType = "Between", Value = "510", Value2 = "514", LeafValue = "513.36" },
+            },
+        };
+        Assert.Equal("Health.BaseValue=513.36, Health.CurrentValue=513.36", gc.SlotSummary);
+
+        // Defensive fallback: when LeafValue is empty, the target is used.
+        var noLeaf = new GroupCandidate { Slots = { new GroupSlotMatch { FieldName = "Str", Value = "24", LeafValue = "" } } };
+        Assert.Equal("Str=24", noLeaf.SlotSummary);
     }
 
     [Fact]

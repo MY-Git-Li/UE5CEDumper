@@ -1812,7 +1812,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         nameof(ValueSearchViewModel.BatchRead), nameof(ValueSearchViewModel.DeepScan),
         nameof(ValueSearchViewModel.CrossObjectScan), nameof(ValueSearchViewModel.NativeCScan),
         nameof(ValueSearchViewModel.NewestFirst), nameof(ValueSearchViewModel.PreFilterNoise),
-        nameof(ValueSearchViewModel.Tolerance), nameof(ValueSearchViewModel.CaseSensitive),
+        nameof(ValueSearchViewModel.SelectedRoundingMode), nameof(ValueSearchViewModel.CaseSensitive),
     };
     private static readonly HashSet<string> SnapshotPersist = new()
     {
@@ -1820,6 +1820,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         nameof(SnapshotViewModel.IncludeNativeFields), nameof(SnapshotViewModel.SelectedScope),
         nameof(SnapshotViewModel.SelectedFamily), nameof(SnapshotViewModel.SelectedMaxDataset),
         nameof(SnapshotViewModel.ShowUsageBar), nameof(SnapshotViewModel.GroupDeep),
+        nameof(SnapshotViewModel.SelectedRoundingMode),
     };
     private static readonly HashSet<string> InstanceFinderPersist = new()
     {
@@ -1837,7 +1838,11 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         nameof(TeleportViewModel.RelativeDistance), nameof(TeleportViewModel.RelativeHorizontal),
         nameof(TeleportViewModel.CoordSetRotation), nameof(TeleportViewModel.AutoRefresh),
     };
-    private static readonly HashSet<string> SpcPersist = new() { nameof(SpcQueryViewModel.SelectedJoinMode) };
+    private static readonly HashSet<string> SpcPersist = new()
+    {
+        nameof(SpcQueryViewModel.SelectedJoinMode),
+        nameof(SpcQueryViewModel.SelectedRoundingMode),
+    };
     private static readonly HashSet<string> PivotPersist = new()
     {
         nameof(ClassPivotViewModel.SelectedSource), nameof(ClassPivotViewModel.SelectedKeyMode),
@@ -1924,8 +1929,13 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             Snapshot.SelectedMaxDataset = sn.SelectedMaxDataset;
             Snapshot.ShowUsageBar = sn.ShowUsageBar;
             Snapshot.GroupDeep = sn.GroupDeep;
+            Snapshot.SelectedRoundingMode = sn.RoundingMode;
         }
-        if (Spc != null) Spc.SelectedJoinMode = o.Spc.SelectedJoinMode;
+        if (Spc != null)
+        {
+            Spc.SelectedJoinMode = o.Spc.SelectedJoinMode;
+            Spc.SelectedRoundingMode = o.Spc.RoundingMode;
+        }
         if (Pivot != null)
         {
             Pivot.SelectedSource = o.Pivot.SelectedSource;
@@ -1954,7 +1964,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ValueSearch.NativeCScan = vs.NativeCScan;     // may flip NewestFirst (side effect)
         ValueSearch.NewestFirst = vs.NewestFirst;     // saved value wins (applied last)
         ValueSearch.PreFilterNoise = vs.PreFilterNoise;
-        ValueSearch.Tolerance = vs.Tolerance;
+        ValueSearch.SelectedRoundingMode = vs.RoundingMode;
         ValueSearch.CaseSensitive = vs.CaseSensitive;
     }
 
@@ -1991,7 +2001,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         o.ValueSearch.NativeCScan = ValueSearch.NativeCScan;
         o.ValueSearch.NewestFirst = ValueSearch.NewestFirst;
         o.ValueSearch.PreFilterNoise = ValueSearch.PreFilterNoise;
-        o.ValueSearch.Tolerance = ValueSearch.Tolerance;
+        o.ValueSearch.RoundingMode = ValueSearch.SelectedRoundingMode;
         o.ValueSearch.CaseSensitive = ValueSearch.CaseSensitive;
 
         o.InstanceFinder.ExactMatch = InstanceFinder.ExactMatch;
@@ -2031,8 +2041,13 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             o.Snapshot.SelectedMaxDataset = Snapshot.SelectedMaxDataset;
             o.Snapshot.ShowUsageBar = Snapshot.ShowUsageBar;
             o.Snapshot.GroupDeep = Snapshot.GroupDeep;
+            o.Snapshot.RoundingMode = Snapshot.SelectedRoundingMode;
         }
-        if (Spc != null) o.Spc.SelectedJoinMode = Spc.SelectedJoinMode;
+        if (Spc != null)
+        {
+            o.Spc.SelectedJoinMode = Spc.SelectedJoinMode;
+            o.Spc.RoundingMode = Spc.SelectedRoundingMode;
+        }
         if (Pivot != null)
         {
             o.Pivot.SelectedSource = Pivot.SelectedSource;

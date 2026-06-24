@@ -150,6 +150,25 @@ enum class ScanType : uint8_t {
     EndsWith,
 };
 
+// How a fractional float/double is reduced to the integer the game DISPLAYS,
+// before any numeric compare (build 1672). Games store HP/MP/progress as floats
+// (513.36, 99.6) but show a rounded integer; the user searches/compares against
+// what they SEE. This replaces the old implicit half-away round + the ± tolerance
+// band: every Float/Double operand (scalar and vector axis) is reduced via this
+// mode, in both targeted (Exact/Bigger/Smaller/Between vs a WHOLE target) and
+// prev-value (Changed/Unchanged/Increased/Decreased — reduce cur AND prev)
+// predicates. A FRACTIONAL target keeps exact-literal compare (precise intent —
+// no reduce). Integer fields are reduce-invariant (an integer reduces to itself),
+// so integer compares stay strict; the mode only affects them when the user types
+// a FRACTIONAL target/bound on an integer width (then the target is coerced to an
+// integer via this mode — see BuildNumericTargets). Default Round = the historical
+// half-away-from-zero behavior.
+enum class RoundMode : uint8_t {
+    Round = 0,  // half-away-from-zero (std::round) — e.g. 11.6 -> 12, 11.4 -> 11
+    Trunc,      // toward zero        (std::trunc) — e.g. 11.6 -> 11, -11.6 -> -11
+    Ceil,       // toward +infinity   (std::ceil)  — e.g. 11.1 -> 12, 99.6 -> 100
+};
+
 // Byte count for a given DataType. 1..8 for numeric primitives;
 // 12 for FVector/FRotator (3 floats); 0 for string types (variable
 // length — the scan engine reads on demand via Ubel::ReadFStringAt /
@@ -168,6 +187,21 @@ const char* NameOf(ScanType st);
 bool TryParseDataType(const std::string& s, DataType& out);
 bool TryParseScanType(const std::string& s, ScanType& out);
 
+// Wire string for a RoundMode ("Round" / "Trunc" / "Ceil"). Inverse of
+// TryParseRoundMode; used to echo a group session's stored per-slot mode back.
+const char* NameOf(RoundMode rm);
+// Parse the wire rounding-mode string; returns true on match. Unknown / empty
+// maps to false (caller defaults to RoundMode::Round — backward compatible with
+// pre-build-1672 clients that send no rounding_mode field).
+bool TryParseRoundMode(const std::string& s, RoundMode& out);
+
+// Reduce a value to the integer-valued double the game DISPLAYS, per the mode:
+// Round = half-away-from-zero, Trunc = toward zero, Ceil = toward +infinity. The
+// single primitive behind the float compare predicate, the fractional-target
+// integer coercion (BuildNumericTargets / ParseValueBytes), and the C# mirror
+// (SnapshotNumeric.Reduce). Pure.
+double ReduceRounded(double x, RoundMode m);
+
 // True when the scan type compares against the stored prevValue.
 // (Changed / Unchanged / Increased / Decreased)
 bool IsPrevValueScanType(ScanType st);
@@ -185,7 +219,7 @@ bool IsStringDataType(DataType dt);
 
 // True when the data type is one of the Phase 2 vector family
 // (FVector / FRotator / FTransform). Reads SizeOf(dt) bytes per
-// candidate and compares X / Y / Z component-wise with shared tolerance.
+// candidate and compares X / Y / Z component-wise with the shared rounding mode.
 bool IsVectorDataType(DataType dt);
 
 // True when the scan type is one of the string-only substring
@@ -279,9 +313,14 @@ struct NumericTargetSet {
 // string is empty / unparseable / fits no member width. Signed,
 // unsigned, and floating interpretations are each attempted and gated:
 //   - negative values produce no unsigned entries
-//   - non-integral values (e.g. "100.5") produce no integer entries
 //   - hex (0x..) values produce integer entries only
-bool BuildNumericTargets(DataType metaDt, const std::string& raw, NumericTargetSet& out);
+// `roundMode` (build 1672): a NON-integral value (e.g. "10.9") no longer skips
+// integer widths — it is reduced to an integer via the mode (Round 10.9->11,
+// Trunc->10, Ceil->11) so integer fields can still match a fractional target/
+// bound. Float/Double members always keep the exact fractional value. A clean
+// integer string is unaffected (the integer parse wins; the mode is a no-op).
+bool BuildNumericTargets(DataType metaDt, const std::string& raw, NumericTargetSet& out,
+                         RoundMode roundMode = RoundMode::Round);
 
 // True when the (DataType, ScanType) pair is a legal combination.
 // Used by the pipe handler to reject Bigger/Smaller on strings and
@@ -601,14 +640,15 @@ private:
 // on the wire. P2: `st` is the per-slot predicate — a first-scan targeted type
 // (Exact / Bigger / Smaller) on begin, plus the prev-value types (Changed /
 // Unchanged / Increased / Decreased) on refine, where the compare is against
-// each matched leaf's stored prevValue and `targets` is unused. `tolerance` is
-// the float +- band (0 = exact / strict; only meaningful for Float/Double leaves).
+// each matched leaf's stored prevValue and `targets` is unused. `roundMode` is
+// the float displayed-integer reduction (build 1672, replaces the old tolerance
+// band); only meaningful for Float/Double leaves + fractional-target coercion.
 struct SlotSpec {
     DataType         dt = DataType::NumericNoByte;  // per-slot meta or concrete width
     ScanType         st = ScanType::Exact;
     std::string      value;                          // original user value (display/echo)
     NumericTargetSet targets;                        // pre-parsed per fitting width
-    double           tolerance = 0.0;                // float compare band (0 = exact)
+    RoundMode        roundMode = RoundMode::Round;   // float displayed-integer reduction
     std::string      value2;                         // Between upper bound (display/echo)
     NumericTargetSet targets2;                       // pre-parsed upper bound (Between only)
 };
@@ -757,21 +797,22 @@ private:
 // For prev-value scan types (Changed / Unchanged / Increased / Decreased)
 // targetBytes is the candidate's prevValue snapshot.
 //
-// `tolerance` is the CE-style rounded-scan slack applied to Float/Double
-// only. Per-scan-type semantics (let `a` = target, `b` = target2, `c` = cur):
-//   Exact      |c - a| <= tol  OR  (a is whole) round(c) == a
-//                                      (CE-style rounded scan: 513 finds 513.36 —
-//                                       parity with snapshot SnapshotNumeric.ExactMatch)
-//   Bigger     c > a + tol              (clearly above the tolerance band)
-//   Smaller    c < a - tol
-//   Between    a - tol <= c <= b + tol  (widen the inclusive range)
-//   Changed    |c - prev| > tol         (changed by more than noise)
-//   Unchanged  |c - prev| <= tol
-//   Increased  c > prev + tol           (strictly above prev beyond noise)
-//   Decreased  c < prev - tol
-// For Int8/16/32/64 + UInt8/16/32/64 + Bool the tolerance is ignored
-// (typed comparison stays exact -- tolerance semantics don't transfer
-// cleanly to integral types where the user typically means literal values).
+// `roundMode` is the displayed-integer reduction applied to Float/Double only
+// (build 1672, replaces the old ± tolerance slack). Let r(x) = reduce(x, mode)
+// (Round/Trunc/Ceil); `a` = target, `b` = target2, `c` = cur:
+//   Exact      a whole: r(c) == a              (513 finds 513.36; Ceil-> 514 finds it)
+//              a fractional: c == a             (precise intent — exact, no reduce)
+//   Bigger     a whole: r(c) > a   else c > a
+//   Smaller    a whole: r(c) < a   else c < a
+//   Between    a,b whole: a <= r(c) <= b   else a <= c <= b  (literal range)
+//   Changed    r(c) != r(prev)               (the DISPLAYED value changed)
+//   Unchanged  r(c) == r(prev)
+//   Increased  r(c) >  r(prev)
+//   Decreased  r(c) <  r(prev)
+// For Int8/16/32/64 + UInt8/16/32/64 + Bool the mode is a no-op (an integer
+// reduces to itself), so integer compares stay strict — the mode only affects
+// them upstream, when a FRACTIONAL target/bound is coerced to an integer in
+// BuildNumericTargets / ParseValueBytes.
 //
 // Exposed for the dll_helpers_test unit suite; the scan + refine
 // engines call this internally.
@@ -779,7 +820,7 @@ bool ComparePredicate(DataType dt, ScanType st,
                       const uint8_t* rawBytes,
                       const uint8_t* targetBytes,
                       const uint8_t* target2Bytes = nullptr,
-                      double         tolerance    = 0.0);
+                      RoundMode      roundMode     = RoundMode::Round);
 
 // String predicate. `cur` is the latest-observed string at the
 // candidate field; `target` is either the user-supplied search string
@@ -801,26 +842,19 @@ bool CompareStringPredicate(ScanType           st,
 
 // Vector predicate. `rawBytes` is 12 bytes (3 floats X,Y,Z) read from
 // the candidate field. `targetBytes` / `target2Bytes` are 12 bytes
-// each (Between takes a second corner). Component-wise compare with
-// shared tolerance applied per-axis.
-//
-// ScanType semantics (let a = target, b = target2, c = current,
-// applied per axis):
-//   Exact      |c - a| <= tol             (all three axes match)
-//   Bigger     c > a + tol                (all three axes strictly above)
-//   Smaller    c < a - tol                (all three axes strictly below)
-//   Between    a - tol <= c <= b + tol    (all three axes inside box)
-//   Changed    any axis |c - prev| > tol
-//   Unchanged  all axes  |c - prev| <= tol
-//   Increased  any axis  c > prev + tol (game movement is rarely
-//              uniformly higher on all axes — match if ANY component
-//              moved in the requested direction)
-//   Decreased  any axis  c < prev - tol
+// each (Between takes a second corner). Each axis runs the SAME displayed-
+// integer-reduction compare as the scalar ComparePredicate (build 1672 —
+// replaces the old per-axis ± tolerance), so a whole target axis matches the
+// reduced axis value and a fractional target axis compares literally (positions
+// typed as decimals keep full precision). The combine across axes is unchanged:
+//   Exact / Bigger / Smaller / Between / Unchanged  ALL three axes satisfy
+//   Changed / Increased / Decreased                 ANY axis satisfies
+// (game movement is rarely uniform across axes — match if ANY component moved.)
 // Substring scan types reject for vectors (return false).
 bool CompareVectorPredicate(ScanType       st,
                             const uint8_t* rawBytes,
                             const uint8_t* targetBytes,
                             const uint8_t* target2Bytes = nullptr,
-                            double         tolerance    = 0.0);
+                            RoundMode      roundMode     = RoundMode::Round);
 
 }  // namespace Radar

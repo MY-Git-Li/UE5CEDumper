@@ -122,6 +122,12 @@ public sealed class SpcQuery
     /// at the anchor-load step and every subsequent snapshot pass, before the cap
     /// is evaluated. Null / empty = no filtering. Ordinal comparison.</summary>
     public HashSet<string>? ExcludedClasses { get; set; }
+
+    /// <summary>How a fractional float/double target is reduced to the displayed
+    /// integer before an absolute Exact/Between/AtLeast/AtMost compare. Threaded to
+    /// <c>SpcEngine.Matches</c>; the rounding logic lives in <c>SpcEngine.AbsMatches</c>,
+    /// not in <see cref="SpcAbsolutePredicate.Matches"/> (Models must not depend on Services).</summary>
+    public FloatRoundMode RoundMode { get; set; } = FloatRoundMode.Round;
 }
 
 /// <summary>One field whose value sequence across the selected snapshots matched
