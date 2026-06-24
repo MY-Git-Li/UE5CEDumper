@@ -30,7 +30,7 @@ namespace UE5DumpUI.Views;
 /// Code-behind only (no XAML / CompiledBinding) to stay AOT-safe like the
 /// rest of the project. Visuals mirror InvokeParamDialog's palette.
 /// </summary>
-public sealed class ObjectInstancePickerDialog : Window
+public sealed class ObjectInstancePickerDialog : ManagedDialogWindow
 {
     private readonly IDumpService _dump;
     private readonly string _expectedClassName;

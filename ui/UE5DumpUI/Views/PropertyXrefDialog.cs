@@ -23,7 +23,7 @@ namespace UE5DumpUI.Views;
 /// ObjectInstancePickerDialog. Columns use FuncDataTemplate&lt;T&gt; (typed
 /// lambdas) rather than the reflection-based <c>new Binding(string)</c> ctor.
 /// </summary>
-public sealed class PropertyXrefDialog : Window
+public sealed class PropertyXrefDialog : ManagedDialogWindow
 {
     private readonly IDumpService _dump;
     private readonly IPlatformService _platform;

@@ -60,6 +60,12 @@ public sealed class SnapshotUsage
     public int    SnapshotCount { get; set; }
 }
 
+/// <summary>Outcome of a whole-disk snapshot wipe
+/// (<see cref="Core.ISnapshotStore.DeleteAllSnapshotDatabasesAsync"/>):
+/// how many .db files were deleted vs skipped because they were still in use
+/// (e.g. an active capture holds the file open).</summary>
+public readonly record struct SnapshotWipeResult(int Deleted, int Skipped);
+
 /// <summary>One UObject captured in a snapshot chunk (transient — flattened
 /// into <c>fields</c> rows by the store, not persisted as-is).</summary>
 public sealed class SnapshotCapturedObject
