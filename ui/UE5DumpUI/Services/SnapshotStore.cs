@@ -232,7 +232,7 @@ public sealed class SnapshotStore : ISnapshotStore
             // partial DB the next open/cleanup discards), so trade durability for speed
             // during capture. Restored to NORMAL when the session disposes.
             await ExecAsync(conn, "PRAGMA synchronous=OFF; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-262144;", ct);
-            return new CaptureSession(conn, _log);
+            return new CaptureSession(conn, _log, DatabasePath);
         }
         catch
         {
@@ -377,6 +377,7 @@ public sealed class SnapshotStore : ISnapshotStore
         private const int CommitEveryChunks = 16;
         private readonly ILoggingService? _log;
         private readonly SqliteConnection _conn;
+        private readonly string _dbPath;   // for CurrentSizeBytes (db + WAL file size)
         private SqliteTransaction? _tx;
         private readonly ChunkInserter _ins;
         private int _sinceCommit;
@@ -389,13 +390,30 @@ public sealed class SnapshotStore : ISnapshotStore
         private readonly Dictionary<(string cls, int isArray), HashSet<long>> _pivot = new();
         private readonly Dictionary<string, string> _intern = new(StringComparer.Ordinal);
 
-        public CaptureSession(SqliteConnection conn, ILoggingService? log)
+        public CaptureSession(SqliteConnection conn, ILoggingService? log, string dbPath)
         {
-            _conn = conn;
-            _log  = log;
-            _tx   = (SqliteTransaction)_conn.BeginTransaction();
-            _ins  = new ChunkInserter(_conn, _tx);
+            _conn   = conn;
+            _log    = log;
+            _dbPath = dbPath;
+            _tx     = (SqliteTransaction)_conn.BeginTransaction();
+            _ins    = new ChunkInserter(_conn, _tx);
         }
+
+        // Live capture footprint = committed on-disk bytes (db + WAL) + an estimate of the
+        // rows written SINCE the last commit. The on-disk files only reflect committed data:
+        // rows of the open transaction sit in the page cache (synchronous=OFF, commit-every-16)
+        // and don't hit the -wal until the next commit, so a bare file-size read lags by up to
+        // one commit batch — letting the cap overshoot. Adding the uncommitted estimate keeps
+        // the cap tight (within ~one chunk). The on-disk part is monotonic non-decreasing:
+        // passive autocheckpoints DO run during capture but recycle WAL frames in place without
+        // shrinking the -wal file — only the post-capture wal_checkpoint(TRUNCATE) truncates it,
+        // and that never overlaps a live capture. No SQL, no checkpoint here. Single-consumer
+        // only (same thread as WriteChunk), so _uncommittedBytes needs no synchronisation.
+        public long CurrentSizeBytes() =>
+            FileSizeOf(_dbPath) + FileSizeOf(_dbPath + "-wal") + _uncommittedBytes;
+
+        // Estimated bytes of rows inserted into the OPEN transaction (reset on each commit).
+        private long _uncommittedBytes;
 
         private string Intern(string s) { if (_intern.TryGetValue(s, out var v)) return v; _intern[s] = s; return s; }
 
@@ -419,6 +437,10 @@ public sealed class SnapshotStore : ISnapshotStore
             }
 
             int rows = _ins.Insert(snapshotId, objects, ct);
+            // Track the open transaction's footprint so CurrentSizeBytes (the max-dataset
+            // cap's gauge) reflects rows not yet flushed to the -wal — the same row model
+            // the pre-flight "Estimate size" uses, so the cap and the estimate agree.
+            _uncommittedBytes += SnapshotSizeEstimate.EstimateChunkBytes(objects);
             // Commit every N chunks so the WAL doesn't grow to the whole capture before
             // the single final commit (bounds disk + lets a later checkpoint reclaim).
             if (++_sinceCommit >= CommitEveryChunks)
@@ -428,6 +450,7 @@ public sealed class SnapshotStore : ISnapshotStore
                 _tx = (SqliteTransaction)_conn.BeginTransaction();
                 _ins.Rebind(_tx);
                 _sinceCommit = 0;
+                _uncommittedBytes = 0;   // committed rows are now in the on-disk size
             }
             return rows;
         }
@@ -675,9 +698,9 @@ public sealed class SnapshotStore : ISnapshotStore
             foreach (var id in dropIds) { p.Value = id; await del.ExecuteNonQueryAsync(ct); }
             await tx.CommitAsync(ct);
         }
-        // Reclaim disk now that rows are gone (DELETE alone doesn't shrink).
-        await ExecAsync(conn, "VACUUM;", ct);
-        await ExecAsync(conn, "PRAGMA wal_checkpoint(TRUNCATE);", ct);
+        // Reclaim disk now that rows are gone (DELETE alone doesn't shrink, and VACUUM
+        // only truncates the file in a rollback journal mode — see ReclaimDiskAsync).
+        await ReclaimDiskAsync(conn, ct);
 
         _log?.Info(Constants.LogCatView,
             $"SnapshotStore: quota eviction dropped {dropIds.Count} oldest snapshot(s)");
@@ -2010,31 +2033,51 @@ public sealed class SnapshotStore : ISnapshotStore
         return result;
     }
 
-    public async Task DeleteSnapshotAsync(long snapshotId, CancellationToken ct = default)
+    public async Task DeleteSnapshotAsync(long snapshotId, bool reclaim = false, CancellationToken ct = default)
     {
         await using var conn = await OpenAsync(ct);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            "DELETE FROM fields WHERE snapshot_id=$id; " +
-            "DELETE FROM class_counts WHERE snapshot_id=$id; " +
-            "DELETE FROM pivot_index_built WHERE snapshot_id=$id; " +
-            "DELETE FROM snapshots WHERE id=$id;";
-        cmd.Parameters.AddWithValue("$id", snapshotId);
-        await cmd.ExecuteNonQueryAsync(ct);
-        _log?.Info(Constants.LogCatView, $"SnapshotStore: deleted snapshot #{snapshotId}");
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText =
+                "DELETE FROM fields WHERE snapshot_id=$id; " +
+                "DELETE FROM class_counts WHERE snapshot_id=$id; " +
+                "DELETE FROM pivot_index_built WHERE snapshot_id=$id; " +
+                "DELETE FROM snapshots WHERE id=$id;";
+            cmd.Parameters.AddWithValue("$id", snapshotId);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        // DELETE frees pages internally but leaves the file size unchanged; a cancelled
+        // partial capture can be multi-GB, so reclaim the disk now when asked.
+        if (reclaim) await ReclaimDiskAsync(conn, ct);
+        _log?.Info(Constants.LogCatView,
+            $"SnapshotStore: deleted snapshot #{snapshotId}{(reclaim ? " (reclaimed disk)" : "")}");
+    }
+
+    // Return freed pages to the OS by truncating the main .db file. VACUUM only shrinks
+    // the file in a ROLLBACK journal mode — in WAL mode the vacuumed (compact) pages land
+    // in the -wal and a passive checkpoint never shrinks the main file, so the on-disk
+    // size would stay put. Fold the WAL back, switch to DELETE mode (which truncates on
+    // VACUUM), VACUUM, then restore WAL. Caller runs this off the UI thread; no open
+    // transaction may be held (VACUUM forbids one).
+    private async Task ReclaimDiskAsync(SqliteConnection conn, CancellationToken ct)
+    {
+        await ExecAsync(conn, "PRAGMA wal_checkpoint(TRUNCATE);", ct);
+        await ExecAsync(conn, "PRAGMA journal_mode=DELETE;", ct);
+        await ExecAsync(conn, "VACUUM;", ct);
+        await ExecAsync(conn, "PRAGMA journal_mode=WAL;", ct);
     }
 
     public async Task DeleteAllSnapshotsAsync(CancellationToken ct = default)
     {
         await using var conn = await OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
-        // Truncate every table for the active game's DB, then VACUUM to reclaim
-        // the (potentially multi-GB) file on disk.
+        // Truncate every table for the active game's DB, then reclaim the
+        // (potentially multi-GB) file on disk.
         cmd.CommandText =
             "DELETE FROM fields; DELETE FROM class_counts; " +
             "DELETE FROM pivot_index_built; DELETE FROM snapshots;";
         await cmd.ExecuteNonQueryAsync(ct);
-        await ExecAsync(conn, "VACUUM;", ct);
+        await ReclaimDiskAsync(conn, ct);   // VACUUM in rollback mode so the file actually shrinks
         _log?.Info(Constants.LogCatView, "SnapshotStore: deleted ALL snapshots for the active game");
     }
 

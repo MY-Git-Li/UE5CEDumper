@@ -106,6 +106,59 @@ public class SnapshotStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task CaptureSession_CurrentSizeBytes_ReflectsUncommittedRows()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        long id = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "sz", Scope = "NumericNoByte" }, ct);
+        await using var s = await _store.BeginCaptureSessionAsync(ct);
+
+        long before = s.CurrentSizeBytes();
+        // A single chunk written into the OPEN transaction (no commit yet, < CommitEveryChunks).
+        s.WriteChunk(id, new[]
+        {
+            MakeObject(1, ("HP", "IntProperty", "0A000000"), ("MP", "FloatProperty", "0000803F")),
+            MakeObject(2, ("HP", "IntProperty", "14000000")),
+        }, ct);
+
+        // The gauge must rise immediately — the cap can't wait for the every-16 commit to
+        // flush the page cache to the -wal, or it would overshoot by up to one commit batch.
+        Assert.True(s.CurrentSizeBytes() > before,
+            $"CurrentSizeBytes should grow with uncommitted rows (before={before}, after={s.CurrentSizeBytes()})");
+    }
+
+    [Fact]
+    public async Task DeleteSnapshot_Reclaim_ShrinksDbFileOnDisk()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _store.SetActiveGame("RECLAIM");
+        long id = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "big", Scope = "NumericNoByte" }, ct);
+
+        // Write enough rows that the DB file grows well past the empty-schema baseline.
+        var objs = new List<SnapshotCapturedObject>();
+        for (int i = 0; i < 3000; i++)
+            objs.Add(MakeObject(i,
+                ("HP", "IntProperty", "0A000000"),
+                ("MP", "FloatProperty", "0000803F"),
+                ("XP", "Int64Property", "0100000000000000")));
+        await _store.WriteChunkAsync(id, objs, ct);
+        await _store.FinalizeSnapshotAsync(id, objs.Count, objs.Count * 3, ct);
+
+        // Fold the WAL into the main .db so its file size reflects the written data.
+        await _store.GetUsageAsync(ct);   // does wal_checkpoint(TRUNCATE)
+        long beforeBytes = new FileInfo(_store.DatabasePath).Length;
+        Assert.True(beforeBytes > 100_000, $"sanity: data should have grown the file (was {beforeBytes})");
+
+        // reclaim:true must VACUUM so the freed space is returned to the OS (the
+        // capture-cancel contract) — DELETE alone would leave beforeBytes unchanged.
+        await _store.DeleteSnapshotAsync(id, reclaim: true, ct);
+
+        Assert.Empty(await _store.ListSnapshotsAsync(ct));
+        long afterBytes = new FileInfo(_store.DatabasePath).Length;
+        Assert.True(afterBytes < beforeBytes,
+            $"reclaim should shrink the file on disk (before={beforeBytes}, after={afterBytes})");
+    }
+
+    [Fact]
     public async Task CreateWriteListDelete_RoundTrips()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -135,7 +188,7 @@ public class SnapshotStoreTests : IDisposable
         Assert.Equal(2, saved.ObjectCount);
         Assert.Equal(3, saved.FieldCount);
 
-        await _store.DeleteSnapshotAsync(id, ct);
+        await _store.DeleteSnapshotAsync(id, ct: ct);
         Assert.Empty(await _store.ListSnapshotsAsync(ct));
     }
 

@@ -1193,13 +1193,18 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             // Default false here keeps any flag-unaware caller's behavior unchanged
             // (full capture) — the UI always sends the checkbox's real value.
             bool autoSkipNoise = request.value("auto_skip_noise", false);
+            // Type-family narrowing (opt-in, default Any): IntegersOnly / FloatsOnly
+            // drop the other family from every numeric leaf, cutting the DB at the
+            // source for type-specific hunts. Orthogonal to data_type (the scope).
+            Aura::NumericFamily family =
+                Aura::ParseNumericFamily(request.value("numeric_family", std::string("Any")));
             std::string dtStr = request.value("data_type", "NumericNoByte");
             Radar::DataType dt;
             if (!Radar::TryParseDataType(dtStr, dt) || !Radar::IsMultiNumericDataType(dt)) {
                 return Renge::MakeError(id, "snapshot data_type must be NumericNoByte or NumericAll").dump();
             }
 
-            auto chunk = Aura::CaptureSnapshotChunk(offset, limit, gameOnly, dt, arrayCap, nativeC, autoSkipNoise);
+            auto chunk = Aura::CaptureSnapshotChunk(offset, limit, gameOnly, dt, arrayCap, nativeC, autoSkipNoise, family);
 
             auto encodeFields = [](const std::vector<Aura::SnapshotField>& src) {
                 json arr = json::array();

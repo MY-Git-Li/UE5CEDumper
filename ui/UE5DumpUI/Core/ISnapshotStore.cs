@@ -22,6 +22,16 @@ public interface ICaptureSession : IAsyncDisposable
     int WriteChunk(long snapshotId, IReadOnlyList<SnapshotCapturedObject> objects,
                    CancellationToken ct = default);
 
+    /// <summary>Approximate footprint of the capture so far (committed db + WAL file
+    /// bytes + an estimate of rows written since the last commit), in bytes — the live
+    /// gauge the streaming loop polls to enforce the opt-in max-dataset cap ("提前止血").
+    /// The on-disk part is monotonic non-decreasing during a capture (passive
+    /// autocheckpoints recycle WAL frames in place without shrinking the -wal file; only
+    /// the post-capture TRUNCATE checkpoint shrinks it, never overlapping a capture), and
+    /// the uncommitted estimate keeps the cap tight (no commit-batch lag). No SQL, no
+    /// checkpoint.</summary>
+    long CurrentSizeBytes();
+
     /// <summary>Finalise the captured snapshot on the session connection: commit the row
     /// tail, stamp object/field totals, and write the per-class pivot counts (class_counts)
     /// INCREMENTALLY from per-class distinct GObjects-index sets accumulated while writing —
@@ -75,8 +85,12 @@ public interface ISnapshotStore
     /// <see cref="SnapshotMeta.EstBytes"/> is set (pro-rated from the DB size).</summary>
     Task<IReadOnlyList<SnapshotMeta>> ListSnapshotsAsync(CancellationToken ct = default);
 
-    /// <summary>Delete a snapshot and all its field rows.</summary>
-    Task DeleteSnapshotAsync(long snapshotId, CancellationToken ct = default);
+    /// <summary>Delete a snapshot and all its field rows. When
+    /// <paramref name="reclaim"/> is true, ALSO fold the WAL back and VACUUM so the
+    /// disk space is returned to the OS immediately (DELETE alone frees the pages
+    /// internally but leaves the file size unchanged). Used on capture-cancel, where
+    /// the discarded partial can be multi-GB and the user expects the space back.</summary>
+    Task DeleteSnapshotAsync(long snapshotId, bool reclaim = false, CancellationToken ct = default);
 
     /// <summary>Delete EVERY snapshot for the active game (truncate all tables)
     /// and VACUUM the DB file. Irreversible.</summary>

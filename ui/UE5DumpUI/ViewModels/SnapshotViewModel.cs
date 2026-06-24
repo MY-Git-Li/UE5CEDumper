@@ -70,6 +70,20 @@ public partial class SnapshotViewModel : ViewModelBase
     /// (HP/MP) values. Slower + larger capture; Pointer/Padding guesses are dropped.</summary>
     [ObservableProperty] private bool   _includeNativeFields;
     [ObservableProperty] private string _selectedScope = "NumericNoByte";
+    /// <summary>Type-family narrowing applied ON TOP of the scope: "All numeric"
+    /// (default), "Integers only" (drop Float/Double), or "Floats only" (drop every
+    /// integer width). A source-level cut for type-specific hunts (floats = HP/MP/
+    /// coords; integers = counts/flags/IDs) that shrinks the DB without touching the
+    /// scope. Lossy by design — re-capture to bring the other family back.</summary>
+    [ObservableProperty] private string _selectedFamily = "All numeric";
+    /// <summary>Opt-in max-dataset cap ("提前止血"): when the capture's live on-disk
+    /// size (db + WAL) crosses this, the paging loop stops gracefully and KEEPS the
+    /// partial snapshot (first-N objects). "Off" = no cap (prior behaviour). This is
+    /// the in-capture ceiling the per-game quota lacks (quota only evicts whole older
+    /// snapshots AFTER a capture finishes).</summary>
+    [ObservableProperty] private string _selectedMaxDataset = "Off";
+    [ObservableProperty] private string _estimateText = "";
+    [ObservableProperty] private bool   _isEstimating;
     [ObservableProperty] private bool   _isCapturing;
     [ObservableProperty] private bool   _isDeleting;
     [ObservableProperty] private bool   _isGWorldAvailable;   // gates the per-row 🌍 button
@@ -182,9 +196,13 @@ public partial class SnapshotViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanEditSettings));
     }
 
-    /// <summary>Capture scope / quota / pickers are locked while a capture or diff
-    /// is running, so the user can't change settings mid-operation.</summary>
-    public bool CanEditSettings => !IsCapturing && !IsDiffing;
+    /// <summary>Capture scope / quota / pickers are locked while a capture, diff,
+    /// or size estimate is running, so the user can't change settings mid-operation.</summary>
+    public bool CanEditSettings => !IsCapturing && !IsDiffing && !IsEstimating;
+
+    /// <summary>A capture OR a size estimate is in flight — both surface the Cancel
+    /// button (CancelCommand cancels whichever is running) and hide Capture/Estimate.</summary>
+    public bool IsBusy => IsCapturing || IsEstimating;
 
     // Filter boxes narrow the loaded result live (client-side).
     partial void OnDiffClassFilterChanged(string value)      => ApplyDiffFilter();
@@ -280,15 +298,41 @@ public partial class SnapshotViewModel : ViewModelBase
     /// NumericAll (includes Int8/UInt8 — floods on small values).</summary>
     public IReadOnlyList<string> ScopeOptions { get; } = new[] { "NumericNoByte", "NumericAll" };
 
+    /// <summary>Type-family picker labels. Maps to the wire family via <see cref="FamilyWire"/>.</summary>
+    public IReadOnlyList<string> FamilyOptions { get; } =
+        new[] { "All numeric", "Integers only", "Floats only" };
+
+    /// <summary>The wire string ("Any" / "IntegersOnly" / "FloatsOnly") for the DLL.</summary>
+    private string FamilyWire => SelectedFamily switch
+    {
+        "Integers only" => "IntegersOnly",
+        "Floats only"   => "FloatsOnly",
+        _               => "Any",
+    };
+
+    /// <summary>Max-dataset cap presets. "Off" disables the in-capture ceiling.</summary>
+    public IReadOnlyList<string> MaxDatasetOptions { get; } =
+        new[] { "Off", "512 MB", "1 GB", "2 GB", "4 GB" };
+
+    /// <summary>The cap in bytes, or 0 when "Off" (no in-capture ceiling).</summary>
+    private long MaxDatasetBytes => SelectedMaxDataset switch
+    {
+        "512 MB" => 512L * 1024 * 1024,
+        "1 GB"   => 1024L * 1024 * 1024,
+        "2 GB"   => 2L * 1024 * 1024 * 1024,
+        "4 GB"   => 4L * 1024 * 1024 * 1024,
+        _        => 0,
+    };
+
     /// <summary>Per-game DB quota presets. "Unlimited" disables eviction.</summary>
     public IReadOnlyList<string> QuotaOptions { get; } =
         new[] { "512 MB", "1 GB", "2 GB", "5 GB", "Unlimited" };
 
     public ObservableCollection<SnapshotMeta> Snapshots { get; } = new();
 
-    /// <summary>True once connected (engine state available) and not mid-capture
-    /// or mid-diff.</summary>
-    public bool CanCapture => _engineState != null && !IsCapturing && !IsDiffing;
+    /// <summary>True once connected (engine state available) and not mid-capture,
+    /// mid-diff, or mid-estimate.</summary>
+    public bool CanCapture => _engineState != null && !IsCapturing && !IsDiffing && !IsEstimating;
 
     private int QuotaMb => _gate?.SnapshotQuotaMb ?? LabelToMb(SelectedQuotaLabel);
     private long QuotaBytes => QuotaMb <= 0 ? 0 : (long)QuotaMb * 1024 * 1024;
@@ -358,6 +402,14 @@ public partial class SnapshotViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanCapture));
         OnPropertyChanged(nameof(CanEditSettings));  // lock Scope/GameOnly/Quota/Label during capture
         OnPropertyChanged(nameof(CanRunDiff));        // and the Run Diff button
+        OnPropertyChanged(nameof(IsBusy));            // swap Capture/Estimate <-> Cancel
+    }
+
+    partial void OnIsEstimatingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanCapture));       // Capture + Estimate buttons gate on this
+        OnPropertyChanged(nameof(CanEditSettings));  // lock pickers while sampling
+        OnPropertyChanged(nameof(IsBusy));            // show Cancel so a long estimate is cancellable
     }
 
     [RelayCommand]
@@ -435,11 +487,19 @@ public partial class SnapshotViewModel : ViewModelBase
         bool gameOnly       = GameOnly;
         bool autoSkipNoise  = AutoSkipNoise;
         bool includeNative  = IncludeNativeFields;
+        string numericFamily = FamilyWire;     // "Any" / "IntegersOnly" / "FloatsOnly"
+        long maxBytes        = MaxDatasetBytes; // 0 = no in-capture cap
+        // Max-dataset cap ("提前止血"): the consumer sets capReached=1 when the live
+        // db+WAL size crosses maxBytes; the producer then stops gracefully and the
+        // PARTIAL snapshot is kept + finalised (NOT deleted like a user-cancel).
+        int  capReached      = 0;
+        long cappedAtBytes   = 0;
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
         IsCapturing = true;
         CaptureSectionOpen = true;   // force the capture region visible while capturing
         Progress = 0;
+        EstimateText = "";           // clear any stale pre-flight estimate from a prior run
         _captureStart = DateTime.UtcNow;
         _lastChunkAt  = _captureStart;
         _capOffset = _capTotal = _capObjects = _capFields = 0;
@@ -487,12 +547,14 @@ public partial class SnapshotViewModel : ViewModelBase
                     try
                     {
                         int offset = 0;
-                        while (!lct.IsCancellationRequested)
+                        // Stop fetching once the consumer flags the max-dataset cap (graceful;
+                        // the buffered chunks already in the channel still drain + persist).
+                        while (!lct.IsCancellationRequested && Volatile.Read(ref capReached) == 0)
                         {
                             var fetchSw = System.Diagnostics.Stopwatch.StartNew();
                             var chunk = await _dump.SnapshotChunkAsync(
                                 dataType, gameOnly, offset, Constants.SnapshotChunkSize,
-                                includeNative, autoSkipNoise, lct);
+                                includeNative, autoSkipNoise, numericFamily, lct);
                             fetchSw.Stop();
                             // Phase-0 telemetry: full fetch round-trip + DLL-reported splits
                             // + the C#-side parse+pipe breakdown (read / RX-log / parse / build).
@@ -532,6 +594,20 @@ public partial class SnapshotViewModel : ViewModelBase
                             fieldCount  += n;
                             _capObjects = objectCount;   // display-only
                             _capFields  = fieldCount;
+
+                            // Max-dataset cap: once the live db+WAL footprint crosses the
+                            // ceiling, signal the producer to stop. We KEEP what's written
+                            // (a partial snapshot of the first-N objects), so this finalises
+                            // normally below — distinct from the user-cancel delete path.
+                            if (maxBytes > 0 && Volatile.Read(ref capReached) == 0)
+                            {
+                                long live = session.CurrentSizeBytes();
+                                if (live >= maxBytes)
+                                {
+                                    cappedAtBytes = live;
+                                    Volatile.Write(ref capReached, 1);
+                                }
+                            }
                         }
                     }
                     catch { linked.Cancel(); throw; }   // unblock the producer on a write failure
@@ -550,8 +626,12 @@ public partial class SnapshotViewModel : ViewModelBase
             // FIFO eviction: drop oldest snapshots of this game until the DB
             // fits the quota (the just-captured one is always kept). EnforceQuotaAsync now
             // skips the checkpoint + VACUUM entirely when the capture stays under quota.
+            bool wasCapped = Volatile.Read(ref capReached) != 0;
             int dropped = await Task.Run(() => _store.EnforceQuotaAsync(QuotaBytes, ct), ct);
             var evicted = dropped > 0 ? $" — dropped {dropped} oldest (quota)" : "";
+            var cappedNote = wasCapped
+                ? $" — stopped at {SnapshotFormat.Bytes(cappedAtBytes)} cap (partial: first {_capOffset:N0} of {total:N0} objects)"
+                : "";
             // Phase-0 telemetry: one summary line with the full cost breakdown for
             // before/after comparison. parse+pipe is now split into pipe-read / RX-log /
             // json-parse / model-build; the leftover (other) ≈ the DLL .dump() + pipe transfer.
@@ -562,19 +642,30 @@ public partial class SnapshotViewModel : ViewModelBase
                 $"{FmtSpan(DateTime.UtcNow - _captureStart)} — walk {_capWalkMs}ms, serialize {_capSerMs}ms, " +
                 $"parse+pipe {parseMs}ms [read {_capReadMs} / rxlog {_capRxLogMs} / jsonparse {_capParseMs} / " +
                 $"build {_capBuildMs} / other {otherMs}], write {_capWriteMs}ms");
-            StatusText = $"Captured {objectCount:N0} objects, {fieldCount:N0} fields{evicted}";
+            StatusText = $"Captured {objectCount:N0} objects, {fieldCount:N0} fields{cappedNote}{evicted}";
             Label = "";
             await RefreshAsync();
         }
         catch (OperationCanceledException)
         {
             StopCaptureHeartbeat();
-            StatusText = "Capture cancelled.";
             if (snapshotId > 0)
             {
-                // DELETE over the partial snapshot — off the UI thread (sync sqlite).
-                try { await Task.Run(() => _store.DeleteSnapshotAsync(snapshotId)); } catch { /* best effort */ }
+                // Drop the partial capture AND reclaim its disk now — a cancelled snapshot
+                // can be multi-GB and DELETE alone leaves the file size unchanged (the space
+                // would otherwise linger until a Delete All). Show a message during the
+                // VACUUM (it can take a few seconds on a large file). NO ct: the capture's
+                // token is already cancelled, but this cleanup must run to completion.
+                StatusText = "Removing incomplete snapshot…";
+                try { await Task.Run(() => _store.DeleteSnapshotAsync(snapshotId, reclaim: true)); }
+                catch (Exception ex) { _log.Warn(Constants.LogCatView, $"Snapshot: partial cleanup failed: {ex.Message}"); }
                 await RefreshAsync();
+                await UpdateUsageAsync();   // reflect the reclaimed space in the usage bar
+                StatusText = "Capture cancelled — incomplete data removed.";
+            }
+            else
+            {
+                StatusText = "Capture cancelled.";
             }
         }
         catch (Exception ex)
@@ -670,7 +761,88 @@ public partial class SnapshotViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void Cancel() => _cts?.Cancel();
+    private void Cancel()
+    {
+        _cts?.Cancel();
+        _estimateCts?.Cancel();
+    }
+
+    private CancellationTokenSource? _estimateCts;
+
+    // How the size pre-flight samples: SampleWindows windows of SampleWindowSize
+    // objects each, spread evenly across the GObjects index space so the estimate
+    // isn't biased by the low-index engine-class cluster (which game_only / noise
+    // skip mostly drops). Walked but NEVER written to the DB (純讀資料做評估).
+    private const int SampleWindows = 5;
+    private const int SampleWindowSize = 4096;
+
+    /// <summary>Pre-flight size estimate: walk a spread-out SAMPLE of objects with the
+    /// CURRENT capture options (never writing the DB), model each row's stored bytes,
+    /// and extrapolate to the full object count — so the user gets a "~X GB" go/no-go
+    /// before committing to a multi-GB capture.</summary>
+    [RelayCommand]
+    private async Task EstimateSizeAsync()
+    {
+        if (!CanCapture) return;
+        ClearError();
+        var dataType = SelectedScope;
+        bool gameOnly      = GameOnly;
+        bool autoSkipNoise = AutoSkipNoise;
+        bool includeNative = IncludeNativeFields;
+        string family      = FamilyWire;
+        long  capBytes     = MaxDatasetBytes;
+
+        _estimateCts = new CancellationTokenSource();
+        var ct = _estimateCts.Token;
+        IsEstimating = true;
+        EstimateText = "Estimating…";
+        try
+        {
+            int total = await _dump.BeginSnapshotAsync(dataType, ct);
+            if (total <= 0) { EstimateText = "No objects to capture."; return; }
+
+            long sampledBytes = 0, sampledObjects = 0;
+            int windows = Math.Min(SampleWindows, Math.Max(1, total / SampleWindowSize + 1));
+            for (int i = 0; i < windows; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                // Spread the windows across [0, total): i/windows of the way in.
+                int offset = (int)((long)total * i / windows);
+                var chunk = await _dump.SnapshotChunkAsync(
+                    dataType, gameOnly, offset, SampleWindowSize,
+                    includeNative, autoSkipNoise, family, ct);
+                sampledBytes   += SnapshotSizeEstimate.EstimateChunkBytes(chunk.Objects);
+                sampledObjects += chunk.Scanned;
+                EstimateText = $"Estimating… sampled {sampledObjects:N0} objects";
+            }
+
+            if (sampledObjects <= 0) { EstimateText = "Sample captured no fields — try a wider scope."; return; }
+
+            long est = SnapshotSizeEstimate.Extrapolate(sampledBytes, sampledObjects, total);
+            string warn = capBytes > 0 && est > capBytes
+                ? $"  ⚠ exceeds the {SnapshotFormat.Bytes(capBytes)} cap — capture would stop early"
+                : "";
+            EstimateText =
+                $"Estimated ~{SnapshotFormat.Bytes(est)} for {total:N0} objects " +
+                $"(sampled {sampledObjects:N0}).{warn}";
+            _log.Info(Constants.LogCatView,
+                $"Snapshot estimate: ~{SnapshotFormat.Bytes(est)} for {total:N0} objects " +
+                $"(sampled {sampledObjects:N0} -> {SnapshotFormat.Bytes(sampledBytes)}; " +
+                $"scope={dataType} family={family} gameOnly={gameOnly} noise={autoSkipNoise} native={includeNative})");
+        }
+        catch (OperationCanceledException) { EstimateText = "Estimate cancelled."; }
+        catch (Exception ex)
+        {
+            _log.Error(Constants.LogCatView, "Snapshot: size estimate failed", ex);
+            EstimateText = "Estimate failed.";
+        }
+        finally
+        {
+            IsEstimating = false;
+            _estimateCts?.Dispose();
+            _estimateCts = null;
+        }
+    }
 
     /// <summary>Reveal the active game's snapshot DB in the OS file browser.</summary>
     [RelayCommand]

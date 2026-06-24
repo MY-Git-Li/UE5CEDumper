@@ -2125,7 +2125,8 @@ public sealed class DumpService : IDumpService
 
     public async Task<SnapshotChunkResult> SnapshotChunkAsync(
         string dataType, bool gameOnly, int offset, int limit,
-        bool nativeC = false, bool autoSkipNoise = true, CancellationToken ct = default)
+        bool nativeC = false, bool autoSkipNoise = true,
+        string numericFamily = "Any", CancellationToken ct = default)
     {
         var req = new JsonObject
         {
@@ -2142,6 +2143,10 @@ public sealed class DumpService : IDumpService
         // Native-C raw-hole capture (P3), opt-in → attach only when on (back-compat).
         if (nativeC)
             req["native_c"] = (JsonNode)true;
+        // Type-family narrowing, opt-in → attach only when narrowed (the DLL
+        // defaults to "Any", so a flag-unaware caller keeps the full capture).
+        if (!string.IsNullOrEmpty(numericFamily) && numericFamily != "Any")
+            req["numeric_family"] = numericFamily;
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
 

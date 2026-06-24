@@ -1,4 +1,5 @@
 using System.IO;
+using UE5DumpUI.Core;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 using UE5DumpUI.ViewModels;
@@ -32,6 +33,7 @@ public class SnapshotViewModelTests : IDisposable
         public bool? LastGameOnly;
         public bool? LastNativeC;
         public bool? LastAutoSkipNoise;
+        public string? LastNumericFamily;
 
         public override Task<int> BeginSnapshotAsync(string dataType, CancellationToken ct = default)
         {
@@ -41,11 +43,13 @@ public class SnapshotViewModelTests : IDisposable
 
         public override Task<SnapshotChunkResult> SnapshotChunkAsync(
             string dataType, bool gameOnly, int offset, int limit,
-            bool nativeC = false, bool autoSkipNoise = true, CancellationToken ct = default)
+            bool nativeC = false, bool autoSkipNoise = true,
+            string numericFamily = "Any", CancellationToken ct = default)
         {
             LastGameOnly = gameOnly;
             LastNativeC = nativeC;
             LastAutoSkipNoise = autoSkipNoise;
+            LastNumericFamily = numericFamily;
             var r = new SnapshotChunkResult
             {
                 Total = 3, WalkMs = 5, SerializeMs = 2,
@@ -95,7 +99,8 @@ public class SnapshotViewModelTests : IDisposable
 
         public override async Task<SnapshotChunkResult> SnapshotChunkAsync(
             string dataType, bool gameOnly, int offset, int limit,
-            bool nativeC = false, bool autoSkipNoise = true, CancellationToken ct = default)
+            bool nativeC = false, bool autoSkipNoise = true,
+            string numericFamily = "Any", CancellationToken ct = default)
         {
             if (offset == 0)
             {
@@ -217,6 +222,143 @@ public class SnapshotViewModelTests : IDisposable
         Assert.False(vm.CanCapture);
         vm.SetEngineState(new EngineState { PeHash = "X" });
         Assert.True(vm.CanCapture);
+    }
+
+    [Fact]
+    public async Task Capture_DefaultFamily_SendsAny()
+    {
+        var dump = new CaptureStub();
+        var vm = new SnapshotViewModel(dump, _store, new MockLoggingService()) { Label = "fam-default" };
+        vm.SetEngineState(new EngineState { PeHash = "PEHASH", UEVersion = 504, ModuleBase = "7FF600000000", ProcessCreationTime = "01D9ABCDEF012345" });
+
+        await vm.CaptureCommand.ExecuteAsync(null);
+
+        Assert.Equal("Any", dump.LastNumericFamily);   // "All numeric" -> wire "Any"
+    }
+
+    [Theory]
+    [InlineData("Floats only", "FloatsOnly")]
+    [InlineData("Integers only", "IntegersOnly")]
+    public async Task Capture_PassesNumericFamily_ToSnapshotChunk(string label, string wire)
+    {
+        var dump = new CaptureStub();
+        var vm = new SnapshotViewModel(dump, _store, new MockLoggingService())
+        {
+            SelectedFamily = label,
+            Label = "fam-run",
+        };
+        vm.SetEngineState(new EngineState { PeHash = "PEHASH", UEVersion = 504, ModuleBase = "7FF600000000", ProcessCreationTime = "01D9ABCDEF012345" });
+
+        await vm.CaptureCommand.ExecuteAsync(null);
+
+        Assert.Equal(wire, dump.LastNumericFamily);
+    }
+
+    [Fact]
+    public async Task Capture_MaxDatasetCap_StopsEarly_AndKeepsPartial()
+    {
+        var dump = new ManyChunkStub();
+        // Decorate the real store so the capture session reports a footprint OVER the
+        // 512 MB cap on the very first poll — the cap should stop the producer early.
+        var store = new CapDecoratorStore(_store, fakeBytes: 600L * 1024 * 1024);
+        var vm = new SnapshotViewModel(dump, store, new MockLoggingService())
+        {
+            SelectedMaxDataset = "512 MB",
+            Label = "capped",
+        };
+        vm.SetEngineState(new EngineState { PeHash = "PEHASH", UEVersion = 504, ModuleBase = "7FF600000000", ProcessCreationTime = "01D9ABCDEF012345" });
+
+        await vm.CaptureCommand.ExecuteAsync(null);
+
+        Assert.False(vm.IsCapturing);
+        // Stopped well before the stub's 10-chunk natural end (the cap fired).
+        Assert.True(dump.FetchCount < 10, $"expected early stop, fetched {dump.FetchCount} chunks");
+        Assert.Contains("cap", vm.StatusText, StringComparison.OrdinalIgnoreCase);
+        // CRITICAL: the partial snapshot is KEPT + finalised (NOT deleted like a cancel).
+        var list = await _store.ListSnapshotsAsync(TestContext.Current.CancellationToken);
+        var saved = Assert.Single(list);
+        Assert.True(saved.ObjectCount > 0, "partial snapshot should hold the captured objects");
+    }
+
+    // Streams 1 object per chunk over a 20-object total (10 chunks of scanned=2) so a
+    // working max-dataset cap stops it EARLY; a broken cap still terminates at chunk 10.
+    private sealed class ManyChunkStub : StubDumpService
+    {
+        public int FetchCount;
+
+        public override Task<int> BeginSnapshotAsync(string dataType, CancellationToken ct = default)
+            => Task.FromResult(20);
+
+        public override Task<SnapshotChunkResult> SnapshotChunkAsync(
+            string dataType, bool gameOnly, int offset, int limit,
+            bool nativeC = false, bool autoSkipNoise = true,
+            string numericFamily = "Any", CancellationToken ct = default)
+        {
+            FetchCount++;
+            var r = new SnapshotChunkResult { Total = 20, Scanned = 2 };
+            if (offset < 20)
+            {
+                var o = new SnapshotCapturedObject
+                {
+                    Index = offset, Addr = $"0x{offset:X}", Name = $"Obj_{offset}",
+                    ClassName = "BP_Thing_C", OuterClassName = "World",
+                    Path = $"/Game/Map.Map:PersistentLevel.Obj_{offset}",
+                };
+                o.Fields.Add(new SnapshotCapturedField { Name = "A", Type = "IntProperty", Hex = "01000000" });
+                r.Objects.Add(o);
+            }
+            else r.Scanned = 0;   // terminal (only reached if the cap never fires)
+            return Task.FromResult(r);
+        }
+    }
+
+    // Wraps a real ISnapshotStore but hands out capture sessions whose CurrentSizeBytes
+    // is forced to a fixed value, so a test can drive the max-dataset cap deterministically
+    // without writing hundreds of MB. All other calls pass through to the inner store.
+    private sealed class CapDecoratorStore : ISnapshotStore
+    {
+        private readonly ISnapshotStore _inner;
+        private readonly long _fakeBytes;
+        public CapDecoratorStore(ISnapshotStore inner, long fakeBytes) { _inner = inner; _fakeBytes = fakeBytes; }
+
+        public async Task<ICaptureSession> BeginCaptureSessionAsync(CancellationToken ct = default)
+            => new CapSession(await _inner.BeginCaptureSessionAsync(ct), _fakeBytes);
+
+        public string DatabasePath => _inner.DatabasePath;
+        public void SetActiveGame(string? p) => _inner.SetActiveGame(p);
+        public Task<long> CreateSnapshotAsync(SnapshotMeta m, CancellationToken ct = default) => _inner.CreateSnapshotAsync(m, ct);
+        public Task<int> WriteChunkAsync(long s, IReadOnlyList<SnapshotCapturedObject> o, CancellationToken ct = default) => _inner.WriteChunkAsync(s, o, ct);
+        public Task FinalizeSnapshotAsync(long s, int oc, int fc, CancellationToken ct = default) => _inner.FinalizeSnapshotAsync(s, oc, fc, ct);
+        public Task<IReadOnlyList<SnapshotMeta>> ListSnapshotsAsync(CancellationToken ct = default) => _inner.ListSnapshotsAsync(ct);
+        public Task DeleteSnapshotAsync(long s, bool reclaim = false, CancellationToken ct = default) => _inner.DeleteSnapshotAsync(s, reclaim, ct);
+        public Task DeleteAllSnapshotsAsync(CancellationToken ct = default) => _inner.DeleteAllSnapshotsAsync(ct);
+        public Task<SnapshotUsage> GetUsageAsync(CancellationToken ct = default) => _inner.GetUsageAsync(ct);
+        public Task<SnapshotDiffResult> DiffSnapshotsAsync(long a, long b, SnapshotDiffFilter f, CancellationToken ct = default) => _inner.DiffSnapshotsAsync(a, b, f, ct);
+        public Task<SnapshotGroupResult> GroupMatchAsync(SnapshotGroupQuery q, CancellationToken ct = default) => _inner.GroupMatchAsync(q, ct);
+        public Task<SpcResult> SpcQueryAsync(SpcQuery q, CancellationToken ct = default) => _inner.SpcQueryAsync(q, ct);
+        public Task<SpcGroupResult> SpcGroupQueryAsync(SpcGroupQuery q, CancellationToken ct = default) => _inner.SpcGroupQueryAsync(q, ct);
+        public Task<DiscoveryResult> DiscoverChangesAsync(DiscoveryQuery q, CancellationToken ct = default) => _inner.DiscoverChangesAsync(q, ct);
+        public Task<IReadOnlyList<PivotClassInfo>> ListPivotClassesAsync(long s, CancellationToken ct = default) => _inner.ListPivotClassesAsync(s, ct);
+        public Task<IReadOnlyList<PivotFieldInfo>> ListPivotFieldsAsync(long s, string c, CancellationToken ct = default) => _inner.ListPivotFieldsAsync(s, c, ct);
+        public Task<PivotResult> PivotAsync(PivotQuery q, CancellationToken ct = default) => _inner.PivotAsync(q, ct);
+        public Task<IReadOnlyList<PivotClassInfo>> ListPivotArrayClassesAsync(long s, CancellationToken ct = default) => _inner.ListPivotArrayClassesAsync(s, ct);
+        public Task<IReadOnlyList<PivotArrayFieldInfo>> ListPivotArrayFieldsAsync(long s, string c, CancellationToken ct = default) => _inner.ListPivotArrayFieldsAsync(s, c, ct);
+        public Task<IReadOnlyList<PivotFieldInfo>> ListPivotArrayPropsAsync(long s, string c, string af, CancellationToken ct = default) => _inner.ListPivotArrayPropsAsync(s, c, af, ct);
+        public Task<PivotResult> PivotArrayAsync(ArrayPivotQuery q, CancellationToken ct = default) => _inner.PivotArrayAsync(q, ct);
+        public Task<int> EnforceQuotaAsync(long b, CancellationToken ct = default) => _inner.EnforceQuotaAsync(b, ct);
+        public HashSet<string> GetClassDenylist(DenylistScope scope) => _inner.GetClassDenylist(scope);
+        public void SetClassDenylist(DenylistScope scope, HashSet<string> classes) => _inner.SetClassDenylist(scope, classes);
+    }
+
+    private sealed class CapSession : ICaptureSession
+    {
+        private readonly ICaptureSession _inner;
+        private readonly long _fakeBytes;
+        public CapSession(ICaptureSession inner, long fakeBytes) { _inner = inner; _fakeBytes = fakeBytes; }
+        public long CurrentSizeBytes() => _fakeBytes;   // force the cap to trip on the first poll
+        public int WriteChunk(long s, IReadOnlyList<SnapshotCapturedObject> o, CancellationToken ct = default) => _inner.WriteChunk(s, o, ct);
+        public Task CompleteSnapshotAsync(long s, int oc, int fc, CancellationToken ct = default) => _inner.CompleteSnapshotAsync(s, oc, fc, ct);
+        public ValueTask DisposeAsync() => _inner.DisposeAsync();
     }
 
     private static SnapshotCapturedObject Obj(int idx, string field, string type, string hex)
