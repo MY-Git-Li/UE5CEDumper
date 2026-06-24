@@ -160,9 +160,10 @@ public static class GroupMatch
                 // integer Exact is exact equality regardless of the tolerance band).
                 return slot.Predicate switch
                 {
-                    Predicate.Exact => IsFloat(leaf.DeclaredType)
-                        ? Math.Abs(v - target) <= slot.Tolerance
-                        : v == target,
+                    // Float-aware Exact: a whole-number target matches any float that
+                    // ROUNDS to it (513 finds a 513.36 GAS BaseValue), plus the ± band.
+                    // Integer fields stay exact. (build 1648)
+                    Predicate.Exact => SnapshotNumeric.ExactMatch(v, target, leaf.DeclaredType, slot.Tolerance),
                     Predicate.Bigger => v > target,
                     Predicate.Smaller => v < target,
                     Predicate.Between => slot.Target2 is double hi

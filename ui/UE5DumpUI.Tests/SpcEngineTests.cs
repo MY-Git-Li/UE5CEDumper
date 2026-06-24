@@ -71,6 +71,22 @@ public class SpcEngineTests
     }
 
     [Fact]
+    public void AbsolutePredicate_Exact_FloatRoundsToWholeTarget()
+    {
+        var dir = new[] { SpcPredicateKind.Any, SpcPredicateKind.Unchanged };
+        var num = new double?[] { 513.3599853516, 513.3599853516 };
+        var abs = new[] { Abs(SpcAbsoluteKind.Exact, 513), Abs(SpcAbsoluteKind.Exact, 513) };
+
+        // Float field: Exact 513 matches the 513.36 value (rounds to 513).
+        Assert.True(SpcEngine.Matches(new[] { "x", "x" }, num, dir, abs, "FloatProperty"));
+        // Without a declared type (default ""), it falls back to strict equality -> no match.
+        Assert.False(SpcEngine.Matches(new[] { "x", "x" }, num, dir, abs));
+        // An integer field with value 513 still matches Exact 513 (and never 514).
+        var numInt = new double?[] { 513, 513 };
+        Assert.True(SpcEngine.Matches(new[] { "x", "x" }, numInt, dir, abs, "IntProperty"));
+    }
+
+    [Fact]
     public void AbsolutePredicate_OnNonNumeric_Fails()
     {
         // A non-None absolute predicate on a field with no numeric value rejects it.

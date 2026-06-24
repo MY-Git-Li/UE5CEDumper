@@ -59,6 +59,24 @@ public class GroupMatchTests
     }
 
     [Fact]
+    public void TwoFloatLeaves_ExactWholeTarget_RoundMatches()
+    {
+        // The reported GAS case: AttributeSetCore.Health BaseValue(0x8) + CurrentValue(0xC)
+        // both store 513.3599853516; searching Exact 513/513 must match via rounding.
+        var leaves = new[]
+        {
+            L(0x8, "FloatProperty", 513.3599853516),
+            L(0xC, "FloatProperty", 513.3599853516),
+        };
+        var slots = new[] { Abs(GroupMatch.Predicate.Exact, 513), Abs(GroupMatch.Predicate.Exact, 513) };
+        Assert.True(GroupMatch.Run(leaves, slots, out _));
+
+        // A float that rounds to 514 is NOT matched by an Exact-513 slot.
+        var miss = new[] { L(0x8, "FloatProperty", 513.7), L(0xC, "FloatProperty", 513.7) };
+        Assert.False(GroupMatch.Run(miss, slots, out _));
+    }
+
+    [Fact]
     public void DuplicateValue_NeedsTwoDistinctLeaves()
     {
         // Two slots both want 24; two distinct leaves hold 24 -> SDR exists.
@@ -142,11 +160,13 @@ public class GroupMatchTests
     [Fact]
     public void Exact_FloatTolerance()
     {
-        var leaf = new[] { L(0x0, "FloatProperty", 1.0001), L(0x4, "IntProperty", 7) };
+        // Non-whole target (1.5) so the rounding path doesn't apply — this isolates the
+        // ± tolerance band. (A whole target would now also round-match; see ExactMatch.)
+        var leaf = new[] { L(0x0, "FloatProperty", 1.5001), L(0x4, "IntProperty", 7) };
         Assert.True(GroupMatch.Run(leaf,
-            new[] { Abs(GroupMatch.Predicate.Exact, 1.0, 0.001), Abs(GroupMatch.Predicate.Exact, 7) }, out _));
+            new[] { Abs(GroupMatch.Predicate.Exact, 1.5, 0.001), Abs(GroupMatch.Predicate.Exact, 7) }, out _));
         Assert.False(GroupMatch.Run(leaf,
-            new[] { Abs(GroupMatch.Predicate.Exact, 1.0, 0.0), Abs(GroupMatch.Predicate.Exact, 7) }, out _));
+            new[] { Abs(GroupMatch.Predicate.Exact, 1.5, 0.0), Abs(GroupMatch.Predicate.Exact, 7) }, out _));
     }
 
     [Fact]

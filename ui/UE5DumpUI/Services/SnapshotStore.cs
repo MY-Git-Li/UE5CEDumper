@@ -1310,7 +1310,7 @@ public sealed class SnapshotStore : ISnapshotStore
         {
             if ((++evalCount & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
             if (c.Hex.Count != n) continue;
-            if (!SpcEngine.Matches(c.Hex, c.Num, query.Predicates, abs)) continue;
+            if (!SpcEngine.Matches(c.Hex, c.Num, query.Predicates, abs, c.DeclaredType)) continue;
             noise.Bump(c.ClassName, c.PropName);  // counted even when row cap is hit
             if (result.Rows.Count >= max) { result.Truncated = true; continue; }
             var row = new SpcResultRow
@@ -1414,7 +1414,7 @@ public sealed class SnapshotStore : ISnapshotStore
                 {
                     var f = grp[i];
                     if (!GroupMatch.TypeInScope(f.DeclaredType, slotScope[s])) continue;
-                    if (SpcEngine.Matches(f.Hex, f.Num, slotDir[s], slotAbs[s])) lst.Add(i);
+                    if (SpcEngine.Matches(f.Hex, f.Num, slotDir[s], slotAbs[s], f.DeclaredType)) lst.Add(i);
                 }
                 if (lst.Count == 0) { anyEmpty = true; break; }   // early reject
             }

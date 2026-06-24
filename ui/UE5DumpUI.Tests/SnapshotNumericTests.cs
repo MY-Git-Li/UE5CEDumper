@@ -24,6 +24,25 @@ public class SnapshotNumericTests
     }
 
     [Theory]
+    // Float fields: a WHOLE-NUMBER target matches any float that ROUNDS to it (the GAS
+    // 513.36 BaseValue found by searching "513"). Integer fields stay exact.
+    [InlineData("FloatProperty",  513.3599853516, 513.0, 0.0, true)]   // rounds to 513 ✓
+    [InlineData("FloatProperty",  513.3599853516, 514.0, 0.0, false)]  // rounds to 513, not 514
+    [InlineData("FloatProperty",  513.6,          514.0, 0.0, true)]   // 513.6 -> 514 ✓
+    [InlineData("FloatProperty",  513.6,          513.0, 0.0, false)]  // 513.6 -> 514, not 513
+    [InlineData("FloatProperty",  513.0,          513.0, 0.0, true)]   // exact-integer float
+    [InlineData("DoubleProperty", 99.9,           100.0, 0.0, true)]   // rounds up to 100
+    [InlineData("FloatProperty",  513.55,         513.5, 0.1, true)]   // non-whole target: ± band
+    [InlineData("FloatProperty",  513.55,         513.5, 0.0, false)]  // non-whole target, no band
+    [InlineData("IntProperty",    513.0,          513.0, 0.0, true)]   // integer exact
+    [InlineData("IntProperty",    513.0,          514.0, 0.0, false)]  // integer never rounds
+    [InlineData("IntProperty",    513.0,          513.0, 5.0, true)]   // tolerance ignored for ints
+    public void ExactMatch_RoundsFloatsToWholeTargets(string type, double value, double target, double tol, bool expected)
+    {
+        Assert.Equal(expected, SnapshotNumeric.ExactMatch(value, target, type, tol));
+    }
+
+    [Theory]
     [InlineData("FloatProperty",  "0000C842", "100")]            // 100.0 -> "100"
     [InlineData("FloatProperty",  "0000803F", "1")]              // 1.0 -> "1"
     [InlineData("DoubleProperty", "0000000000000440", "2.5")]

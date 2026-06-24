@@ -26,14 +26,15 @@ public static class SpcEngine
         IReadOnlyList<string> hex,
         IReadOnlyList<double?> num,
         IReadOnlyList<SpcPredicateKind> dir,
-        IReadOnlyList<SpcAbsolutePredicate>? abs)
+        IReadOnlyList<SpcAbsolutePredicate>? abs,
+        string declaredType = "")
     {
         int n = hex.Count;
 
         // Absolute (value-window) predicates: each snapshot independently.
         if (abs != null)
             for (int i = 0; i < n && i < abs.Count; i++)
-                if (!abs[i].Matches(num[i])) return false;
+                if (!AbsMatches(abs[i], num[i], declaredType)) return false;
 
         // Directional chain: snapshot i vs i-1. Index 0 is the baseline (Any).
         for (int i = 1; i < n; i++)
@@ -58,5 +59,17 @@ public static class SpcEngine
             }
         }
         return true;
+    }
+
+    // Evaluate one absolute predicate with FLOAT-AWARE Exact: a whole-number target
+    // matches any float that rounds to it (513 finds a 513.36 GAS BaseValue). The
+    // other kinds (Between/AtLeast/AtMost/None) delegate to the model's own logic.
+    // Lives here (Services) so the rounding reuses SnapshotNumeric without the Models
+    // layer depending on Services. (build 1648)
+    private static bool AbsMatches(SpcAbsolutePredicate p, double? value, string declaredType)
+    {
+        if (p.Kind == SpcAbsoluteKind.Exact)
+            return value is double v && SnapshotNumeric.ExactMatch(v, p.Low, declaredType);
+        return p.Matches(value);
     }
 }
