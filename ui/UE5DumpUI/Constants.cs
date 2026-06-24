@@ -58,6 +58,10 @@ public static class Constants
     // System-tab credit checkbox). Persisted under %LOCALAPPDATA%\UE5CEDumper.
     public const string ExperimentalSettingsFile = "experimental.json";
 
+    // Global panel/Live-Walker OPTIONS (stable user preferences — export toggles,
+    // scan/search behaviour, formats, limits). Persisted under %LOCALAPPDATA%\UE5CEDumper.
+    public const string UiOptionsFile = "ui-options.json";
+
     // Experimental Snapshot store — per-game SQLite DB under
     // %LOCALAPPDATA%\UE5CEDumper, named snapshots.<pe_hash>.db so each game's
     // snapshots stay isolated (no cross-game mixing / growth / corruption).
