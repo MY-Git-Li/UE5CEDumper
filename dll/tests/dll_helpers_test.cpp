@@ -1405,6 +1405,42 @@ static void Test_SnapshotNoise_GuardrailAndSets() {
     EXPECT("ActorComponent NOT a noise base", noise.count("ActorComponent") == 0);
 }
 
+// Snapshot type-family narrowing (NumericDataTypeInFamily): the orthogonal
+// integer-vs-float filter applied on top of the numeric scope. Any keeps all;
+// IntegersOnly drops Float/Double; FloatsOnly keeps only Float/Double. Locks the
+// per-width verdicts + the wire-string parse so a UI pick maps to the right cut.
+static void Test_NumericFamily_Filter() {
+    using namespace Aura;
+    using Radar::DataType;
+
+    // Any keeps every numeric width (the prior, no-narrowing behaviour).
+    EXPECT("Any keeps Int32",  NumericDataTypeInFamily(DataType::Int32,  NumericFamily::Any));
+    EXPECT("Any keeps Float",  NumericDataTypeInFamily(DataType::Float,  NumericFamily::Any));
+    EXPECT("Any keeps Double", NumericDataTypeInFamily(DataType::Double, NumericFamily::Any));
+    EXPECT("Any keeps UInt8",  NumericDataTypeInFamily(DataType::UInt8,  NumericFamily::Any));
+
+    // IntegersOnly keeps every integer width, drops Float/Double.
+    EXPECT("Int keeps Int8",    NumericDataTypeInFamily(DataType::Int8,   NumericFamily::IntegersOnly));
+    EXPECT("Int keeps Int64",   NumericDataTypeInFamily(DataType::Int64,  NumericFamily::IntegersOnly));
+    EXPECT("Int keeps UInt32",  NumericDataTypeInFamily(DataType::UInt32, NumericFamily::IntegersOnly));
+    EXPECT("Int drops Float",  !NumericDataTypeInFamily(DataType::Float,  NumericFamily::IntegersOnly));
+    EXPECT("Int drops Double", !NumericDataTypeInFamily(DataType::Double, NumericFamily::IntegersOnly));
+
+    // FloatsOnly keeps Float/Double, drops every integer width.
+    EXPECT("Float keeps Float",   NumericDataTypeInFamily(DataType::Float,  NumericFamily::FloatsOnly));
+    EXPECT("Float keeps Double",  NumericDataTypeInFamily(DataType::Double, NumericFamily::FloatsOnly));
+    EXPECT("Float drops Int32",  !NumericDataTypeInFamily(DataType::Int32,  NumericFamily::FloatsOnly));
+    EXPECT("Float drops Int64",  !NumericDataTypeInFamily(DataType::Int64,  NumericFamily::FloatsOnly));
+    EXPECT("Float drops UInt8",  !NumericDataTypeInFamily(DataType::UInt8,  NumericFamily::FloatsOnly));
+
+    // Wire-string parse (unknown -> Any, the safe back-compat default).
+    EXPECT("parse IntegersOnly", ParseNumericFamily("IntegersOnly") == NumericFamily::IntegersOnly);
+    EXPECT("parse FloatsOnly",   ParseNumericFamily("FloatsOnly")   == NumericFamily::FloatsOnly);
+    EXPECT("parse Any",          ParseNumericFamily("Any")          == NumericFamily::Any);
+    EXPECT("parse unknown->Any", ParseNumericFamily("garbage")      == NumericFamily::Any);
+    EXPECT("parse empty->Any",   ParseNumericFamily("")             == NumericFamily::Any);
+}
+
 // Group-scan server-side class filter: exclude skip + histogram bucket on the
 // candidate's OBJECT-level class (first non-empty slot's match), including the
 // defensive case where slot 0 is empty so the class comes from a later slot.
@@ -2745,6 +2781,7 @@ int main() {
     Test_ValueScan_OrderedView();
     Test_IsEnginePackage();
     Test_SnapshotNoise_GuardrailAndSets();
+    Test_NumericFamily_Filter();
     Test_GroupScan_ExcludeAndHistogram();
     Test_ValueScan_OrderedViewScale();
     Test_ValueScan_SparseContainerGeometry();

@@ -309,9 +309,13 @@ public interface IDumpService
     // type ("NumericNoByte" / "NumericAll").
     Task<int> BeginSnapshotAsync(string dataType, CancellationToken ct = default);
 
+    // numericFamily ("Any" / "IntegersOnly" / "FloatsOnly") is an orthogonal
+    // type narrowing applied on top of dataType: keep integer leaves, float
+    // leaves, or both — cuts the snapshot DB at the source for type-specific hunts.
     Task<SnapshotChunkResult> SnapshotChunkAsync(
         string dataType, bool gameOnly, int offset, int limit,
-        bool nativeC = false, bool autoSkipNoise = true, CancellationToken ct = default);
+        bool nativeC = false, bool autoSkipNoise = true,
+        string numericFamily = "Any", CancellationToken ct = default);
 
     // --- All Functions Enumeration (Interesting Functions Finder) ---
     Task<AllFunctionsResult> ListAllFunctionsAsync(

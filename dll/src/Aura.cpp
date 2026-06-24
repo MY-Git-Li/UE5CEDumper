@@ -7247,7 +7247,8 @@ std::string RenderInnerKey(const FieldInfo& kf, uintptr_t elemAddr) {
 // Leaf-container elements (TArray<int> etc.) are captured too (leaf name "").
 void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
                          Radar::DataType numericScope, int32_t arrayCap,
-                         std::vector<Aura::SnapshotArray>& out) {
+                         std::vector<Aura::SnapshotArray>& out,
+                         Aura::NumericFamily family = Aura::NumericFamily::Any) {
     if (!obj || !cls) return;
     if (arrayCap <= 0) arrayCap = 256;
 
@@ -7292,6 +7293,7 @@ void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
             bool inScope = false;
             for (Radar::DataType m : members) if (m == ldt) { inScope = true; break; }
             if (!inScope) return;
+            if (!Aura::NumericDataTypeInFamily(ldt, family)) return;   // type-family narrowing
             size_t sz = Radar::SizeOf(ldt);
             if (sz == 0 || sz > 8) return;
             uint8_t buf[8] = {};
@@ -8113,7 +8115,8 @@ ValueScanStats RefineGroupCandidates(
 // matches the P1/P2 discriminator. Honors the snapshot numericScope (e.g. Byte guesses
 // drop under NumericNoByte). Bounded per object (kMaxRawSnapFields).
 void AppendRawHoleFields(uintptr_t obj, uintptr_t cls, Radar::DataType numericScope,
-                         std::vector<SnapshotField>& out) {
+                         std::vector<SnapshotField>& out,
+                         Aura::NumericFamily family = Aura::NumericFamily::Any) {
     const std::vector<Radar::DataType>& members = Radar::MultiNumericMembers(numericScope);
     if (members.empty()) return;   // numericScope isn't a meta type -> capture nothing
 
@@ -8149,6 +8152,7 @@ void AppendRawHoleFields(uintptr_t obj, uintptr_t cls, Radar::DataType numericSc
             Radar::DataType dt;
             if (!Radar::TryDataTypeFromPropertyTypeName(canon, dt)) continue;
             if (!inScope(dt)) continue;    // honor numericScope (e.g. Byte under NoByte)
+            if (!Aura::NumericDataTypeInFamily(dt, family)) continue;   // type-family narrowing
             SnapshotField sf;
             char nb[32];
             snprintf(nb, sizeof(nb), "<raw@0x%X>", g.offset);
@@ -8190,7 +8194,8 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
                                          Radar::DataType numericScope,
                                          int32_t arrayCap,
                                          bool captureNativeC,
-                                         bool skipNoiseClasses) {
+                                         bool skipNoiseClasses,
+                                         NumericFamily family) {
     SnapshotChunkResult result;
     const int32_t total = GetCount();
     result.total = total;
@@ -8281,6 +8286,7 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
 
             // Top-level numeric scalar fields.
             for (const auto& p : picks) {
+                if (!NumericDataTypeInFamily(p.dt, family)) continue;   // type-family narrowing
                 const auto& fi = ci.Fields[p.fieldIndex];
                 size_t sz = Radar::SizeOf(p.dt);
                 if (sz == 0 || sz > 8) continue;  // defensive; meta members are 1..8B
@@ -8297,13 +8303,13 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
 
             // Container-element leaves at any (bounded) depth — struct-array / map /
             // set elements + nested leaf-containers (build 1204).
-            CaptureStructArrays(obj, cls, numericScope, arrayCap, so.arrays);
+            CaptureStructArrays(obj, cls, numericScope, arrayCap, so.arrays, family);
 
             // Native-C (P3, opt-in): append this object's unmanaged-hole guesses as
             // synthetic "<raw@0xNN>" fields so the snapshot also carries native
             // (non-UPROPERTY) values for SPC diff / Class Pivot.
             if (captureNativeC)
-                AppendRawHoleFields(obj, cls, numericScope, so.fields);
+                AppendRawHoleFields(obj, cls, numericScope, so.fields, family);
 
             // Keep objects with any captured scalar field OR array element.
             if (so.fields.empty() && so.arrays.empty()) continue;

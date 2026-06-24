@@ -1165,6 +1165,38 @@ ValueScanStats RefineGroupCandidates(
     const std::vector<Radar::InstanceRecord>&  instances);
 
 // ------------------------------------------------------------------
+// Numeric type-family filter (build 1600+). An ORTHOGONAL narrowing applied
+// ON TOP of the numericScope meta type (NumericNoByte / NumericAll): the scope
+// decides which widths are eligible, the family decides whether to keep the
+// integer leaves, the float leaves, or both. Cuts a huge game's snapshot DB at
+// the source when the hunt is type-specific (HP/MP/coords -> floats; counts/
+// flags/IDs -> integers). Default Any keeps every eligible numeric (the prior
+// behaviour). Bool is never in a numeric meta scope, so it is unaffected.
+enum class NumericFamily : uint8_t {
+    Any          = 0,   // keep every eligible numeric (integer + float/double)
+    IntegersOnly = 1,   // keep Int8/16/32/64 + UInt8/16/32/64; drop Float/Double
+    FloatsOnly   = 2,   // keep Float/Double; drop every integer width
+};
+
+// Pure (header-inline so the DLL test can link it): does a concrete per-field
+// DataType pass the family filter? Float/Double are the "float" family; every
+// other numeric meta member (Int8..UInt64) is the "integer" family. Any keeps
+// all. Non-numeric dt (string/vector/bool) never reaches here in the snapshot
+// path, so they default to kept under Any and dropped under either narrowing —
+// callers only call this for numeric leaves.
+inline bool NumericDataTypeInFamily(Radar::DataType dt, NumericFamily fam) {
+    if (fam == NumericFamily::Any) return true;
+    const bool isFloat = (dt == Radar::DataType::Float || dt == Radar::DataType::Double);
+    return fam == NumericFamily::FloatsOnly ? isFloat : !isFloat;
+}
+
+// Parse the wire string ("Any" / "IntegersOnly" / "FloatsOnly"); unknown -> Any.
+inline NumericFamily ParseNumericFamily(const std::string& s) {
+    if (s == "IntegersOnly") return NumericFamily::IntegersOnly;
+    if (s == "FloatsOnly")   return NumericFamily::FloatsOnly;
+    return NumericFamily::Any;
+}
+
 // Snapshot capture (experimental — Phase A1a). A type-agnostic, streamed
 // capture of every numeric UPROPERTY of every (scoped) UObject, used by the
 // UI to persist snapshots for diff / SPC / pivot. Stateless cursor
@@ -1231,11 +1263,18 @@ struct SnapshotChunkResult {
 // cutting capture time + DB size at the source. A gameplay guardrail force-keeps
 // Actor/component/Pawn-derived classes (see SnapshotGameplayKeepBases), so a
 // player Pawn's X/Y/Z is never dropped. Single-pass: no histogram pre-scan.
+//
+// family (build 1600+, default Any): orthogonal type-family narrowing applied to
+// EVERY numeric leaf (top-level scalar, struct-array element, Native-C raw hole).
+// IntegersOnly drops Float/Double; FloatsOnly drops every integer width. Cuts the
+// DB at the source for type-specific hunts (floats = HP/MP/coords; integers =
+// counts/flags/IDs) without touching the shared Radar DataType machinery.
 SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
                                          bool gameOnly,
                                          Radar::DataType numericScope,
                                          int32_t arrayCap = 256,
                                          bool captureNativeC = false,
-                                         bool skipNoiseClasses = false);
+                                         bool skipNoiseClasses = false,
+                                         NumericFamily family = NumericFamily::Any);
 
 } // namespace Aura
