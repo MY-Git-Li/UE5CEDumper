@@ -154,7 +154,7 @@
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:ScoredFunctionRow">
               <TextBlock Text="{Binding XrefInfo}"
-                         Foreground="#C586C0" FontSize="11"
+                         Foreground="#C586C0"
                          VerticalAlignment="Center" Margin="4,0"
                          TextTrimming="CharacterEllipsis"
                          ToolTip.Tip="{Binding XrefInfo}"/>

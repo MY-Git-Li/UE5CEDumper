@@ -3337,6 +3337,20 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             return Renge::MakeResponse(id, data).dump();
         }
 
+        // === get_function_code_addr: UFunction->Func (native code entry point) ===
+        // For the xref dialog's "Disassemble in CE" — resolves the .text address
+        // CE should jump its disassembler to (native funcs) / interpreter (BP).
+        if (cmd == Renge::CMD_GET_FUNCTION_CODE_ADDR) {
+            std::string addrStr = request.value("func_addr", "");
+            if (addrStr.empty()) return Renge::MakeError(id, "Missing func_addr").dump();
+            uintptr_t funcAddr = Renge::StrToAddr(addrStr);
+            uintptr_t code = Aura::GetFunctionCodeAddr(funcAddr);
+            json data;
+            data["func_addr"] = addrStr;
+            data["code_addr"] = code ? Renge::AddrToStr(code) : "";
+            return Renge::MakeResponse(id, data).dump();
+        }
+
         // === walk_function_props: reverse edge — properties a UFunction reads/writes ===
         if (cmd == Renge::CMD_WALK_FUNCTION_PROPS) {
             std::string addrStr = request.value("func_addr", "");

@@ -852,6 +852,11 @@ PropertyXrefResult FindPropertyXrefs(uintptr_t propAddr, bool gameOnly,
 PropertyXrefResult FindFunctionsByClassParam(uintptr_t classAddr, bool gameOnly,
                                              int32_t maxResults = 200);
 
+// Resolve a UFunction's native code entry point (UFunction->Func) — the .text
+// address to disassemble (native funcs) or the interpreter (BP funcs). 0 if the
+// Func offset isn't detected yet or the slot isn't a code pointer. See Aura.cpp.
+uintptr_t GetFunctionCodeAddr(uintptr_t funcAddr);
+
 // === Reverse edge: function -> properties it reads/writes ===
 //
 // Given ONE UFunction, parse its Kismet bytecode and list every FProperty it

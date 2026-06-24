@@ -20,6 +20,12 @@
           <TextBlock Text="{StaticResource str.ClassStruct.PropsSize}" Foreground="#888"/>
           <TextBlock Text="{Binding PropertiesSize}" Foreground="#B5CEA8"/>
         </StackPanel>
+        <Button Content="{StaticResource str.ClassStruct.FindClassFunc}"
+                Command="{Binding FindClassFuncCommand}"
+                ToolTip.Tip="{StaticResource str.Tip.ClassStruct.FindClassFunc}"
+                Foreground="#C586C0" Background="Transparent"
+                BorderThickness="1" BorderBrush="#C586C0"
+                Padding="8,2" FontSize="11" VerticalAlignment="Center" Cursor="Hand"/>
       </StackPanel>
     </StackPanel>
 

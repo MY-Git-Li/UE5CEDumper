@@ -22,6 +22,8 @@ public partial class ClassStructViewModel : ViewModelBase
     [ObservableProperty] private ObservableCollection<FieldInfoModel> _fields = new();
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private bool _hasClass;
+    /// <summary>UClass* of the currently loaded class — for the per-class Find Func.</summary>
+    [ObservableProperty] private string _loadedClassAddr = "";
 
     /// <summary>Field row the user right-clicked (drives the xref context menu).</summary>
     [ObservableProperty] private FieldInfoModel? _selectedField;
@@ -104,6 +106,17 @@ public partial class ClassStructViewModel : ViewModelBase
         }
     }
 
+    /// <summary>"Find Class Funcs": which UFunctions take this whole class as a
+    /// parameter or return value (find_functions_by_class — reflection, native
+    /// functions included). Distinct from the per-FIELD "Find Funcs" column.</summary>
+    [RelayCommand]
+    private async Task FindClassFuncAsync()
+    {
+        if (string.IsNullOrEmpty(LoadedClassAddr)) return;
+        await Views.PropertyXrefDialog.ShowForClassAsync(
+            ClassName, LoadedClassAddr, _dump, _platform);
+    }
+
     [RelayCommand]
     private async Task LoadClassAsync(string? classAddr)
     {
@@ -120,6 +133,7 @@ public partial class ClassStructViewModel : ViewModelBase
             ClassPath = ci.FullPath;
             SuperName = ci.SuperName;
             PropertiesSize = ci.PropertiesSize;
+            LoadedClassAddr = classAddr;
             HasClass = true;
 
             _allFields.Clear();

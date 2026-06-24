@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 
 namespace UE5DumpUI.ViewModels;
@@ -15,6 +16,7 @@ public partial class GameClassFilterViewModel : ViewModelBase
 {
     private readonly IDumpService _dump;
     private readonly ILoggingService _log;
+    private readonly IPlatformService _platform;
 
     private List<GameClassEntry> _allResults = new();
 
@@ -26,6 +28,7 @@ public partial class GameClassFilterViewModel : ViewModelBase
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private ObservableCollection<GameClassEntry> _results = new();
     [ObservableProperty] private GameClassEntry? _selectedResult;
+    [ObservableProperty] private bool _isXrefBatchRunning;
 
     /// <summary>Distinct SuperName values from loaded results (for AutoCompleteBox).</summary>
     [ObservableProperty] private List<string> _superSuggestions = new();
@@ -42,10 +45,11 @@ public partial class GameClassFilterViewModel : ViewModelBase
     /// <summary>Event raised when user wants to walk a class in ClassStruct panel.</summary>
     public event Action<string>? NavigateToClassStruct;
 
-    public GameClassFilterViewModel(IDumpService dump, ILoggingService log)
+    public GameClassFilterViewModel(IDumpService dump, ILoggingService log, IPlatformService platform)
     {
         _dump = dump;
         _log = log;
+        _platform = platform;
     }
 
     partial void OnFilterTextChanged(string value) => ApplyFilter();
@@ -190,4 +194,79 @@ public partial class GameClassFilterViewModel : ViewModelBase
         if (entry == null || string.IsNullOrEmpty(entry.ClassAddr)) return;
         NavigateToClassStruct?.Invoke(entry.ClassAddr);
     }
+
+    /// <summary>"Find Func": which UFunctions take this class as a parameter or
+    /// return value (find_functions_by_class — reflection, native functions
+    /// included). Opens the shared xref dialog in class mode.</summary>
+    [RelayCommand]
+    private async Task FindFunctionsForClassAsync(GameClassEntry? entry)
+    {
+        if (entry == null || string.IsNullOrEmpty(entry.ClassAddr)) return;
+        await Views.PropertyXrefDialog.ShowForClassAsync(
+            entry.ClassName, entry.ClassAddr, _dump, _platform);
+    }
+
+    // Batch Find Func over the currently-filtered classes (or selected). Each
+    // find_functions_by_class is a full game-wide reflection sweep → warn past a
+    // low count, cancellable, skip already-scanned (XrefInfo persists across filter).
+    private CancellationTokenSource? _xrefBatchCts;
+    private const int XrefBatchWarnThreshold = 25;
+
+    [RelayCommand]
+    private async Task BatchFindFuncAsync(IList<GameClassEntry>? selected)
+    {
+        var targets = ((selected != null && selected.Count > 0) ? selected : (IList<GameClassEntry>)Results)
+            .Where(e => !string.IsNullOrEmpty(e.ClassAddr)).ToList();
+        if (targets.Count == 0) { StatusText = "No classes with an address to scan."; return; }
+
+        if (targets.Count > XrefBatchWarnThreshold)
+        {
+            var ok = await Views.ConfirmDialog.ShowAsync(
+                "Batch: find functions",
+                $"Scan {targets.Count} classes? Each runs a FULL game-wide reflection "
+              + "sweep, so this can take a while. Tip: narrow the filter or select fewer "
+              + "rows first.",
+                confirmText: "Run");
+            if (!ok) return;
+        }
+
+        _xrefBatchCts?.Cancel();
+        _xrefBatchCts = new CancellationTokenSource();
+        var ct = _xrefBatchCts.Token;
+        IsXrefBatchRunning = true;
+        int done = 0, withFuncs = 0, cached = 0;
+        try
+        {
+            foreach (var entry in targets)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!string.IsNullOrEmpty(entry.XrefInfo)) { cached++; continue; }
+                try
+                {
+                    var res = await _dump.FindFunctionsByClassAsync(entry.ClassAddr, true, 200, ct);
+                    entry.XrefInfo = XrefFormat.FunctionsSummary(res.Xrefs);
+                    if (res.Xrefs.Count > 0) withFuncs++;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    entry.XrefInfo = "—";
+                    _log.Error($"Batch Find Func failed for {entry.ClassName}", ex);
+                }
+                done++;
+                StatusText = $"Find Func: {done}/{targets.Count} scanned ({withFuncs} taken by a function)…";
+            }
+            StatusText = $"Find Func done: {withFuncs}/{targets.Count} taken by a function"
+                       + (cached > 0 ? $" ({cached} cached)." : ".");
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = $"Find Func cancelled at {done}/{targets.Count}.";
+        }
+        finally { IsXrefBatchRunning = false; }
+    }
+
+    /// <summary>Cancel an in-flight batch Find Func run.</summary>
+    [RelayCommand]
+    private void CancelXrefBatch() => _xrefBatchCts?.Cancel();
 }

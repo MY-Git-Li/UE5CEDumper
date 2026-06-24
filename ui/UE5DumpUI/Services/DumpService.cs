@@ -1067,6 +1067,18 @@ public sealed class DumpService : IDumpService
         };
     }
 
+    public async Task<string> GetFunctionCodeAddrAsync(string funcAddr, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "get_function_code_addr",
+            ["func_addr"] = funcAddr,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return res["code_addr"]?.GetValue<string>() ?? "";
+    }
+
     public async Task<FunctionPropRefsResult> WalkFunctionPropsAsync(
         string funcAddr, CancellationToken ct = default)
     {

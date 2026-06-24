@@ -38,7 +38,19 @@ public sealed class PropertyXrefDialog : Window
     private DataGrid _grid = null!;
     private Button _btnRefresh = null!;
     private Button _btnCopy = null!;
+    private Button _btnDisasm = null!;
+    private Button _btnLocate = null!;
     private Button _btnClose = null!;
+
+    /// <summary>App-global AOBMaker bridge for the "Disassemble in CE" push. A
+    /// code-behind dialog can't take per-instance DI, so MainWindow sets this
+    /// once at startup; null/unavailable hides the button.</summary>
+    public static IAobMakerBridge? SharedAobMaker;
+
+    /// <summary>Raised when the user clicks "Locate class" on a row — MainWindow
+    /// subscribes once, resolves a live (non-CDO) instance of the class, and
+    /// navigates to Live Walker (GWorld path). Modal: the dialog closes first.</summary>
+    public static event Action<string>? LocateClassInGWorldRequested;
 
     /// <summary>
     /// Resolve the desktop owner window and show the xref dialog for a field.
@@ -190,6 +202,32 @@ public sealed class PropertyXrefDialog : Window
             HorizontalAlignment = HorizontalAlignment.Right,
             Margin = new Thickness(0, 8, 0, 0),
         };
+        // Disassemble in CE: resolve UFunction->Func via the DLL, then jump CE's
+        // disassembler there + drop a labeled address-list row. Hidden when no
+        // AOBMaker bridge is available.
+        _btnDisasm = new Button
+        {
+            Content = "⚙ Disassemble in CE",
+            Padding = new Thickness(10, 6),
+            Margin = new Thickness(0, 0, 8, 0),
+            IsEnabled = false,
+            IsVisible = SharedAobMaker?.IsAvailable == true,
+        };
+        _btnDisasm.Click += OnDisassembleClicked;
+        btnRow.Children.Add(_btnDisasm);
+
+        // Locate the selected row's owning class in GWorld (resolve a live
+        // instance + switch to Live Walker). Modal: close before navigating.
+        _btnLocate = new Button
+        {
+            Content = "🌍 Locate class",
+            Padding = new Thickness(10, 6),
+            Margin = new Thickness(0, 0, 8, 0),
+            IsEnabled = false,
+        };
+        _btnLocate.Click += OnLocateClicked;
+        btnRow.Children.Add(_btnLocate);
+
         _btnCopy = new Button
         {
             Content = "Copy function path",
@@ -303,7 +341,13 @@ public sealed class PropertyXrefDialog : Window
                     Margin = new Thickness(4, 0),
                 }, supportsRecycling: true),
         });
-        _grid.SelectionChanged += (_, _) => _btnCopy.IsEnabled = _grid.SelectedItem is PropertyXrefMatch;
+        _grid.SelectionChanged += (_, _) =>
+        {
+            bool has = _grid.SelectedItem is PropertyXrefMatch;
+            _btnCopy.IsEnabled = has;
+            _btnDisasm.IsEnabled = has && SharedAobMaker?.IsAvailable == true;
+            _btnLocate.IsEnabled = has;
+        };
         _grid.DoubleTapped += (_, _) => OnCopyClicked(null, null!);
 
         root.Children.Add(_grid);
@@ -361,7 +405,10 @@ public sealed class PropertyXrefDialog : Window
         finally
         {
             _btnRefresh.IsEnabled = true;
-            _btnCopy.IsEnabled = _grid.SelectedItem is PropertyXrefMatch;
+            bool has = _grid.SelectedItem is PropertyXrefMatch;
+            _btnCopy.IsEnabled = has;
+            _btnDisasm.IsEnabled = has && SharedAobMaker?.IsAvailable == true;
+            _btnLocate.IsEnabled = has;
         }
     }
 
@@ -372,5 +419,54 @@ public sealed class PropertyXrefDialog : Window
         await _platform.CopyToClipboardAsync(x.FunctionFullName);
         _statusLabel.Text = $"Copied: {x.FunctionFullName}";
         _statusLabel.Foreground = new SolidColorBrush(Color.Parse("#4EC9B0"));
+    }
+
+    // "Disassemble in CE": resolve the UFunction's native code entry point
+    // (UFunction->Func) via the DLL, then drop a labeled CE address-list row and
+    // jump CE's disassembler there. Native funcs land on the execXxx thunk; BP
+    // funcs land on the interpreter (noted to the user).
+    private async void OnDisassembleClicked(object? sender, RoutedEventArgs e)
+    {
+        if (_grid.SelectedItem is not PropertyXrefMatch x || string.IsNullOrEmpty(x.FunctionAddress)) return;
+        var bridge = SharedAobMaker;
+        if (bridge == null || !bridge.IsAvailable) return;
+        _btnDisasm.IsEnabled = false;
+        try
+        {
+            var codeAddr = await _dump.GetFunctionCodeAddrAsync(x.FunctionAddress);
+            if (string.IsNullOrEmpty(codeAddr) || codeAddr == "0x0")
+            {
+                _statusLabel.Text = $"No native code address for {x.FunctionName} "
+                                  + "(Blueprint-only function, or UFunction::Func offset not yet detected).";
+                _statusLabel.Foreground = new SolidColorBrush(Color.Parse("#E0A050"));
+                return;
+            }
+            var bareHex = codeAddr.Replace("0x", "").Replace("0X", "");
+            // ByteArray (8) + showAsHex so the user can right-click → "find what executes".
+            await bridge.CreateMemoryRecordAsync(x.FunctionName + " (code)", bareHex, 8, false, true);
+            await bridge.NavigateDisassemblerAsync(bareHex);
+            _statusLabel.Text = $"Pushed {x.FunctionName} → CE disassembler @ {codeAddr}";
+            _statusLabel.Foreground = new SolidColorBrush(Color.Parse("#4EC9B0"));
+        }
+        catch (Exception ex)
+        {
+            _statusLabel.Text = $"CE push failed: {ex.Message}";
+            _statusLabel.Foreground = new SolidColorBrush(Color.Parse("#F44747"));
+        }
+        finally
+        {
+            _btnDisasm.IsEnabled = _grid.SelectedItem is PropertyXrefMatch && SharedAobMaker?.IsAvailable == true;
+        }
+    }
+
+    // "Locate class": resolve a live instance of the row's owning class in GWorld
+    // and switch to Live Walker. Modal dialog: close FIRST so the main window
+    // regains focus, then raise the app-global request MainWindow handles.
+    private void OnLocateClicked(object? sender, RoutedEventArgs e)
+    {
+        if (_grid.SelectedItem is not PropertyXrefMatch x || string.IsNullOrEmpty(x.OwnerClassName)) return;
+        var cls = x.OwnerClassName;
+        Close();
+        LocateClassInGWorldRequested?.Invoke(cls);
     }
 }
