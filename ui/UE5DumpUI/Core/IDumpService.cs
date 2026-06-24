@@ -227,7 +227,7 @@ public interface IDumpService
         string? value2 = null,
         bool gameOnly = true,
         int maxResults = 50000,
-        double tolerance = 0.0,
+        Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
         bool caseSensitive = false,
         bool parallel = true,
         bool batchRead = true,
@@ -244,7 +244,7 @@ public interface IDumpService
         ValueScanType scanType,
         string? value = null,
         string? value2 = null,
-        double tolerance = 0.0,
+        Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
         bool caseSensitive = false,
         int pageSize = 1000,
         CancellationToken ct = default);
@@ -281,12 +281,14 @@ public interface IDumpService
         int pageSize = 1000,
         int deadlineMs = 15000,
         bool autoSkipNoise = false,
+        Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
         CancellationToken ct = default);
 
     Task<GroupScanRefineResult> RefineGroupScanAsync(
         ulong sessionId,
         IReadOnlyList<GroupSlotInput> slots,
         int pageSize = 1000,
+        Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
         CancellationToken ct = default);
 
     Task<GroupScanWindowResult> QueryGroupCandidatesAsync(

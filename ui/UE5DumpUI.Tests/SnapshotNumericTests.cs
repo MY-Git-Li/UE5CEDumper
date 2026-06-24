@@ -1,3 +1,4 @@
+using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 using Xunit;
 
@@ -24,22 +25,90 @@ public class SnapshotNumericTests
     }
 
     [Theory]
-    // Float fields: a WHOLE-NUMBER target matches any float that ROUNDS to it (the GAS
-    // 513.36 BaseValue found by searching "513"). Integer fields stay exact.
-    [InlineData("FloatProperty",  513.3599853516, 513.0, 0.0, true)]   // rounds to 513 ✓
-    [InlineData("FloatProperty",  513.3599853516, 514.0, 0.0, false)]  // rounds to 513, not 514
-    [InlineData("FloatProperty",  513.6,          514.0, 0.0, true)]   // 513.6 -> 514 ✓
-    [InlineData("FloatProperty",  513.6,          513.0, 0.0, false)]  // 513.6 -> 514, not 513
-    [InlineData("FloatProperty",  513.0,          513.0, 0.0, true)]   // exact-integer float
-    [InlineData("DoubleProperty", 99.9,           100.0, 0.0, true)]   // rounds up to 100
-    [InlineData("FloatProperty",  513.55,         513.5, 0.1, true)]   // non-whole target: ± band
-    [InlineData("FloatProperty",  513.55,         513.5, 0.0, false)]  // non-whole target, no band
-    [InlineData("IntProperty",    513.0,          513.0, 0.0, true)]   // integer exact
-    [InlineData("IntProperty",    513.0,          514.0, 0.0, false)]  // integer never rounds
-    [InlineData("IntProperty",    513.0,          513.0, 5.0, true)]   // tolerance ignored for ints
-    public void ExactMatch_RoundsFloatsToWholeTargets(string type, double value, double target, double tol, bool expected)
+    // Float fields with the DEFAULT Round mode: a WHOLE-NUMBER target matches any
+    // float that ROUNDS to it (the GAS 513.36 BaseValue found by searching "513").
+    // A FRACTIONAL target keeps an exact-literal compare. Integer fields stay exact.
+    [InlineData("FloatProperty",  513.3599853516, 513.0, true)]   // rounds to 513 ✓
+    [InlineData("FloatProperty",  513.3599853516, 514.0, false)]  // rounds to 513, not 514
+    [InlineData("FloatProperty",  513.6,          514.0, true)]   // 513.6 -> 514 ✓
+    [InlineData("FloatProperty",  513.6,          513.0, false)]  // 513.6 -> 514, not 513
+    [InlineData("FloatProperty",  513.0,          513.0, true)]   // exact-integer float
+    [InlineData("DoubleProperty", 99.9,           100.0, true)]   // rounds up to 100
+    [InlineData("FloatProperty",  513.5,          513.5, true)]   // fractional target: exact literal
+    [InlineData("FloatProperty",  513.55,         513.5, false)]  // fractional target, no match
+    [InlineData("IntProperty",    513.0,          513.0, true)]   // integer exact
+    [InlineData("IntProperty",    513.0,          514.0, false)]  // integer never rounds
+    public void ExactMatch_RoundMode_RoundsFloatsToWholeTargets(string type, double value, double target, bool expected)
     {
-        Assert.Equal(expected, SnapshotNumeric.ExactMatch(value, target, type, tol));
+        Assert.Equal(expected, SnapshotNumeric.ExactMatch(value, target, type, FloatRoundMode.Round));
+    }
+
+    [Theory]
+    // Trunc: a float reduces toward zero before the whole-target compare.
+    [InlineData(513.9, 513.0, true)]    // 513.9 -> 513 ✓
+    [InlineData(513.9, 514.0, false)]   // 513.9 -> 513, not 514
+    [InlineData(513.1, 513.0, true)]    // 513.1 -> 513 ✓
+    public void ExactMatch_TruncMode_TruncatesFloats(double value, double target, bool expected)
+    {
+        Assert.Equal(expected, SnapshotNumeric.ExactMatch(value, target, "FloatProperty", FloatRoundMode.Trunc));
+    }
+
+    [Theory]
+    // Ceil: a float reduces toward +infinity before the whole-target compare.
+    [InlineData(513.1, 514.0, true)]    // 513.1 -> 514 ✓
+    [InlineData(513.1, 513.0, false)]   // 513.1 -> 514, not 513
+    [InlineData(514.0, 514.0, true)]    // exact integer float
+    public void ExactMatch_CeilMode_CeilsFloats(double value, double target, bool expected)
+    {
+        Assert.Equal(expected, SnapshotNumeric.ExactMatch(value, target, "FloatProperty", FloatRoundMode.Ceil));
+    }
+
+    [Theory]
+    // CoerceIntTarget reduces a (possibly fractional) target to an integer per mode.
+    [InlineData(10.9, FloatRoundMode.Round, 11.0)]
+    [InlineData(10.9, FloatRoundMode.Trunc, 10.0)]
+    [InlineData(10.9, FloatRoundMode.Ceil,  11.0)]
+    [InlineData(10.1, FloatRoundMode.Round, 10.0)]
+    [InlineData(10.1, FloatRoundMode.Ceil,  11.0)]
+    public void CoerceIntTarget_ReducesPerMode(double target, FloatRoundMode mode, double expected)
+    {
+        Assert.Equal(expected, SnapshotNumeric.CoerceIntTarget(target, mode));
+    }
+
+    [Theory]
+    // OrderedMatch on a float vs a whole target reduces the value first (bigger=true).
+    [InlineData(513.9, 513.0, FloatRoundMode.Round, true,  true)]   // round 514 > 513
+    [InlineData(513.9, 513.0, FloatRoundMode.Trunc, true,  false)]  // trunc 513 !> 513
+    [InlineData(513.1, 514.0, FloatRoundMode.Round, false, true)]   // round 513 < 514
+    public void OrderedMatch_ReducesFloatPerMode(double value, double target, FloatRoundMode mode, bool bigger, bool expected)
+    {
+        Assert.Equal(expected, SnapshotNumeric.OrderedMatch(value, target, "FloatProperty", mode, bigger));
+    }
+
+    [Theory]
+    // BetweenMatch on an INTEGER field with fractional bounds: the bounds are coerced
+    // to integers per the mode, giving CE-style ranges (10.9..11.1):
+    //   Round -> 11..11, Trunc -> 10..11, Ceil -> 11..12.
+    [InlineData(11.0, FloatRoundMode.Round, true)]    // 11 in 11..11
+    [InlineData(10.0, FloatRoundMode.Round, false)]   // 10 not in 11..11
+    [InlineData(10.0, FloatRoundMode.Trunc, true)]    // 10 in 10..11
+    [InlineData(12.0, FloatRoundMode.Ceil,  true)]    // 12 in 11..12
+    [InlineData(11.0, FloatRoundMode.Ceil,  true)]    // 11 in 11..12
+    public void BetweenMatch_CoercesIntegerBoundsPerMode(double value, FloatRoundMode mode, bool expected)
+    {
+        Assert.Equal(expected, SnapshotNumeric.BetweenMatch(value, 10.9, 11.1, "IntProperty", mode));
+    }
+
+    [Theory]
+    // TemporalMatch (op: 1=Increased, -1=Decreased, 0=Unchanged, other=Changed) on a
+    // float field reduces both sides per the mode before comparing.
+    [InlineData(513.0, 514.0, 1,  FloatRoundMode.Round, true)]    // increased
+    [InlineData(514.0, 513.0, -1, FloatRoundMode.Round, true)]    // decreased
+    [InlineData(513.4, 513.1, 0,  FloatRoundMode.Round, true)]    // both round to 513 -> unchanged
+    [InlineData(513.4, 513.6, 0,  FloatRoundMode.Round, false)]   // 513 vs 514 -> changed, not unchanged
+    public void TemporalMatch_ReducesBothSidesPerMode(double oldV, double newV, int op, FloatRoundMode mode, bool expected)
+    {
+        Assert.Equal(expected, SnapshotNumeric.TemporalMatch(oldV, newV, "FloatProperty", mode, op));
     }
 
     [Theory]

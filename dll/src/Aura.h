@@ -967,7 +967,7 @@ struct ValueScanResult {
 
 // First Scan: walk every UPROPERTY field matching `dt` across all
 // UObject instances, applying the (st, targetBytes, target2Bytes,
-// tolerance) predicate. Skips UClass meta-objects -- only live
+// roundMode) predicate. Skips UClass meta-objects -- only live
 // instances + CDOs are scanned.
 //
 // Numeric path: targetBytes / target2Bytes carry the predicate target.
@@ -982,10 +982,11 @@ struct ValueScanResult {
 // Pipe handler rejects invalid (dt, st) combinations upstream so the
 // scan engine doesn't have to second-guess.
 //
-// `tolerance` only affects Float/Double and vector comparisons
-// (CE-style rounded scan -- displays show "338" for a real float of
-// 337.5, so users want to scan with +-0.5 slack). Integer + string
-// types ignore it.
+// `roundMode` (Round/Trunc/Ceil) only affects Float/Double and vector
+// comparisons — it reduces each float to the integer the game DISPLAYS before
+// comparing (so "338" finds a real 337.6 under Round). Integer + string types
+// are reduce-invariant; the mode only reaches them when a fractional target is
+// coerced to an integer at parse time (BuildNumericTargets / ParseValueBytes).
 //
 // Returns at most maxResults candidates; the scan also bails on a 15s
 // deadline (stats.deadlineHit fires when this happens). Used by the
@@ -1004,7 +1005,7 @@ ValueScanResult ScanForValue(
     const uint8_t*      target2Bytes,
     bool                gameOnly,
     int32_t             maxResults    = 100000,
-    double              tolerance     = 0.0,
+    Radar::RoundMode    roundMode     = Radar::RoundMode::Round,
     const std::string&  targetString  = "",
     bool                caseSensitive = false,
     const Radar::NumericTargetSet* multiTargets  = nullptr,
@@ -1080,7 +1081,7 @@ ValueScanStats RefineCandidates(
     const uint8_t*                               target2Bytes,
     std::vector<Radar::Candidate>&           candidates,
     const std::vector<Radar::FieldDescriptor>& descriptors,
-    double                                       tolerance     = 0.0,
+    Radar::RoundMode                             roundMode     = Radar::RoundMode::Round,
     const std::string&                           targetString  = "",
     bool                                         caseSensitive = false,
     const Radar::NumericTargetSet*           multiTargets  = nullptr,

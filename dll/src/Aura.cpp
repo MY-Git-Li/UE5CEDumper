@@ -5585,7 +5585,7 @@ ValueScanResult ScanForValue(
     const uint8_t*      target2Bytes,
     bool                gameOnly,
     int32_t             maxResults,
-    double              tolerance,
+    Radar::RoundMode    roundMode,
     const std::string&  targetString,
     bool                caseSensitive,
     const Radar::NumericTargetSet* multiTargets,
@@ -6443,7 +6443,7 @@ ValueScanResult ScanForValue(
                 emitCandidate(elemAddr, ensureDescriptor(sf), elemIndex, nullptr, 0, &readStr);
             } else if (isVector) {
                 if (!Macht::ReadBytesSafe(elemAddr, readBuf, 12)) return;
-                if (!Radar::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, tolerance)) return;
+                if (!Radar::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, roundMode)) return;
                 emitCandidate(elemAddr, ensureDescriptor(sf), elemIndex, readBuf, 12, nullptr);
             } else if (isMulti) {
                 // Resolve the element's own width (key/value/elem type) + target.
@@ -6453,14 +6453,14 @@ ValueScanResult ScanForValue(
                 if (!multiResolve(sf.elemTypeName, elemDt, mtgt, mtgt2)) return;
                 size_t sz = Radar::SizeOf(elemDt);
                 if (!Macht::ReadBytesSafe(elemAddr, readBuf, sz)) return;
-                if (!Radar::ComparePredicate(elemDt, st, readBuf, mtgt, mtgt2, tolerance)) return;
+                if (!Radar::ComparePredicate(elemDt, st, readBuf, mtgt, mtgt2, roundMode)) return;
                 emitCandidate(elemAddr, ensureDescriptor(sf), elemIndex, readBuf, sz, nullptr);
             } else {
                 // Container elements never share a bitfield byte (TArray /
                 // TSet<bool> + TMap<bool,...> store bool unpacked), so the
                 // boolFieldMask = 0xFF path applies.
                 if (!Macht::ReadBytesSafe(elemAddr, readBuf, dtSize)) return;
-                if (!Radar::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) return;
+                if (!Radar::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, roundMode)) return;
                 emitCandidate(elemAddr, ensureDescriptor(sf), elemIndex, readBuf, dtSize, nullptr);
             }
         };
@@ -6516,12 +6516,12 @@ ValueScanResult ScanForValue(
                 if (!multiResolve(lf.leafType, mdt, mtgt, mtgt2)) return;
                 size_t sz = Radar::SizeOf(mdt);
                 if (!Macht::ReadBytesSafe(lf.leafAddr, readBuf, sz)) return;
-                if (!Radar::ComparePredicate(mdt, st, readBuf, mtgt, mtgt2, tolerance)) return;
+                if (!Radar::ComparePredicate(mdt, st, readBuf, mtgt, mtgt2, roundMode)) return;
                 emitCandidate(lf.leafAddr, ensureDeepDescriptor(disp, lf.leafType), -1, readBuf, sz, nullptr);
             } else {
                 if (!typeOk) return;
                 if (!Macht::ReadBytesSafe(lf.leafAddr, readBuf, dtSize)) return;
-                if (!Radar::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) return;
+                if (!Radar::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, roundMode)) return;
                 emitCandidate(lf.leafAddr, ensureDeepDescriptor(disp, lf.leafType), -1, readBuf, dtSize, nullptr);
             }
         };
@@ -6696,7 +6696,7 @@ ValueScanResult ScanForValue(
                 // struct start. Caller's targetBytes already encodes
                 // the 12-byte (X,Y,Z) layout.
                 if (!readBody(sf.offset, readBuf, 12)) continue;
-                if (!Radar::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
+                if (!Radar::CompareVectorPredicate(st, readBuf, targetBytes, target2Bytes, roundMode)) continue;
                 emitCandidate(valueAddr, ensureDescriptor(sf), -1, readBuf, 12, nullptr);
                 continue;
             }
@@ -6712,7 +6712,7 @@ ValueScanResult ScanForValue(
                 if (!multiResolve(sf.typeName, memberDt, mtgt, mtgt2)) continue;
                 size_t msz = Radar::SizeOf(memberDt);
                 if (!readBody(sf.offset, readBuf, msz)) continue;
-                if (!Radar::ComparePredicate(memberDt, st, readBuf, mtgt, mtgt2, tolerance)) continue;
+                if (!Radar::ComparePredicate(memberDt, st, readBuf, mtgt, mtgt2, roundMode)) continue;
                 emitCandidate(valueAddr, ensureDescriptor(sf), -1, readBuf, msz, nullptr);
                 continue;
             }
@@ -6729,7 +6729,7 @@ ValueScanResult ScanForValue(
                 readBuf[0] = ((readBuf[0] & sf.boolFieldMask) != 0) ? 1 : 0;
             }
 
-            if (!Radar::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, tolerance)) continue;
+            if (!Radar::ComparePredicate(dt, st, readBuf, targetBytes, target2Bytes, roundMode)) continue;
             emitCandidate(valueAddr, ensureDescriptor(sf), -1, readBuf, dtSize, nullptr);
         }
 
@@ -6825,13 +6825,13 @@ ValueScanResult ScanForValue(
                                     mtgt2 = multiTargets2 ? multiTargets2->Find(e.dt) : nullptr;
                                     if (!mtgt2) continue;
                                 }
-                                if (!Radar::ComparePredicate(e.dt, st, p, e.bytes, mtgt2, tolerance)) continue;
+                                if (!Radar::ComparePredicate(e.dt, st, p, e.bytes, mtgt2, roundMode)) continue;
                                 emitCandidate(obj + off, ensureRawDescriptor(off, e.dt), -1, p, msz, nullptr);
                                 if (++rawEmitted >= kMaxRawPerObj) break;
                             }
                         } else {
                             if (off + static_cast<int32_t>(dtSize) > hole.end) break;  // width can't fit the hole's tail
-                            if (!Radar::ComparePredicate(dt, st, p, targetBytes, target2Bytes, tolerance)) continue;
+                            if (!Radar::ComparePredicate(dt, st, p, targetBytes, target2Bytes, roundMode)) continue;
                             emitCandidate(obj + off, ensureRawDescriptor(off, dt), -1, p, dtSize, nullptr);
                             ++rawEmitted;
                         }
@@ -6962,7 +6962,7 @@ ValueScanResult ScanForValue(
                                         mtgt2 = multiTargets2 ? multiTargets2->Find(me.dt) : nullptr;
                                         if (!mtgt2) continue;
                                     }
-                                    if (!Radar::ComparePredicate(me.dt, st, p, me.bytes, mtgt2, tolerance)) continue;
+                                    if (!Radar::ComparePredicate(me.dt, st, p, me.bytes, mtgt2, roundMode)) continue;
                                     emitCandidate(elemBase + off,
                                                   ensureDeepRawDescriptor(cfe.name, e, off, me.dt),
                                                   -1, p, msz, nullptr);
@@ -6970,7 +6970,7 @@ ValueScanResult ScanForValue(
                                 }
                             } else {
                                 if (off + static_cast<int32_t>(dtSize) > hole.end) break;
-                                if (!Radar::ComparePredicate(dt, st, p, targetBytes, target2Bytes, tolerance)) continue;
+                                if (!Radar::ComparePredicate(dt, st, p, targetBytes, target2Bytes, roundMode)) continue;
                                 emitCandidate(elemBase + off,
                                               ensureDeepRawDescriptor(cfe.name, e, off, dt),
                                               -1, p, dtSize, nullptr);
@@ -7050,7 +7050,7 @@ ValueScanStats RefineCandidates(
     const uint8_t*                                 target2Bytes,
     std::vector<Radar::Candidate>&             candidates,
     const std::vector<Radar::FieldDescriptor>& descriptors,
-    double                                         tolerance,
+    Radar::RoundMode                               roundMode,
     const std::string&                             targetString,
     bool                                           caseSensitive,
     const Radar::NumericTargetSet*             multiTargets,
@@ -7109,7 +7109,7 @@ ValueScanStats RefineCandidates(
                     if (!cmp2) continue;
                 }
             }
-            if (!Radar::ComparePredicate(memberDt, st, readBuf, cmpTarget, cmp2, tolerance)) continue;
+            if (!Radar::ComparePredicate(memberDt, st, readBuf, cmpTarget, cmp2, roundMode)) continue;
             std::memcpy(c.prevValue, readBuf, msz);
             kept.push_back(std::move(c));
             continue;
@@ -7155,7 +7155,7 @@ ValueScanStats RefineCandidates(
             uint8_t readBuf[16] = {};
             if (!Macht::ReadBytesSafe(c.addr, readBuf, 12)) continue;
             const uint8_t* cmpTarget = usePrev ? c.prevValue : targetBytes;
-            if (!Radar::CompareVectorPredicate(st, readBuf, cmpTarget, target2Bytes, tolerance)) continue;
+            if (!Radar::CompareVectorPredicate(st, readBuf, cmpTarget, target2Bytes, roundMode)) continue;
             std::memcpy(c.prevValue, readBuf, 12);
             kept.push_back(std::move(c));
             continue;
@@ -7170,7 +7170,7 @@ ValueScanStats RefineCandidates(
         }
 
         const uint8_t* cmpTarget = usePrev ? c.prevValue : targetBytes;
-        if (!Radar::ComparePredicate(dt, st, readBuf, cmpTarget, target2Bytes, tolerance)) continue;
+        if (!Radar::ComparePredicate(dt, st, readBuf, cmpTarget, target2Bytes, roundMode)) continue;
 
         std::memcpy(c.prevValue, readBuf, dtSize);
         kept.push_back(std::move(c));
@@ -7797,7 +7797,7 @@ void AppendRawHoleLeaves(uintptr_t obj, uintptr_t cls, const std::string& classN
                         tgt2 = sp.targets2.Find(w);
                         if (!tgt2) continue;
                     }
-                    if (Radar::ComparePredicate(w, sp.st, p, tgt, tgt2, sp.tolerance)) {
+                    if (Radar::ComparePredicate(w, sp.st, p, tgt, tgt2, sp.roundMode)) {
                         matchesAny = true; break;
                     }
                 }
@@ -7869,7 +7869,7 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
         Orden::SlotTarget t;
         t.targets   = &sp.targets;
         t.st        = sp.st;
-        t.tolerance = sp.tolerance;
+        t.roundMode = sp.roundMode;
         t.targets2  = &sp.targets2;   // Between upper bound (unused for other types)
         ordenSlots.push_back(t);
     }
@@ -8136,7 +8136,7 @@ ValueScanStats RefineGroupCandidates(
                     cmp2 = slots[s].targets2.Find(width);
                     if (!cmp2) continue;                     // upper bound can't fit this width
                 }
-                if (!Radar::ComparePredicate(width, st, buf, cmp, cmp2, slots[s].tolerance)) continue;
+                if (!Radar::ComparePredicate(width, st, buf, cmp, cmp2, slots[s].roundMode)) continue;
                 std::memcpy(sm.prevValue, buf, sz);
                 keep.push_back(sm);
             }

@@ -545,16 +545,36 @@ static void Test_ValueScan_BuildNumericTargets() {
         EXPECT("-5 has NO UInt32", ts.Find(DT::UInt32) == nullptr);
         EXPECT("-5 has NO UInt64", ts.Find(DT::UInt64) == nullptr);
     }
-    // "100.5" is non-integral — float/double members only.
+    // "100.5" is non-integral. Float/Double keep the exact 100.5; integer widths
+    // are COERCED to the displayed integer via the rounding mode (build 1672) —
+    // default Round: round(100.5)=101 (half-away). So it now fits all 8 widths.
     {
         Radar::NumericTargetSet ts;
         EXPECT("BuildNumericTargets(100.5) ok", Radar::BuildNumericTargets(DT::NumericNoByte, "100.5", ts));
-        EXPECT("100.5 has 2 entries", ts.entries.size() == 2);
-        EXPECT("100.5 has Float",  ts.Find(DT::Float)  != nullptr);
-        EXPECT("100.5 has Double", ts.Find(DT::Double) != nullptr);
-        EXPECT("100.5 has NO Int32", ts.Find(DT::Int32) == nullptr);
+        EXPECT("100.5 (Round) fits all 8 widths", ts.entries.size() == 8);
         const uint8_t* d = ts.Find(DT::Double);
-        if (d) { double v; std::memcpy(&v, d, 8); EXPECT("100.5 Double decodes", v == 100.5); }
+        if (d) { double v; std::memcpy(&v, d, 8); EXPECT("100.5 Double keeps exact 100.5", v == 100.5); }
+        const uint8_t* i32 = ts.Find(DT::Int32);
+        EXPECT("100.5 Int32 entry present (coerced)", i32 != nullptr);
+        if (i32) { int32_t v; std::memcpy(&v, i32, 4); EXPECT("100.5 Round -> Int32 == 101", v == 101); }
+    }
+    // Rounding-mode integer coercion: "10.9" reduces to 11 (Round), 10 (Trunc),
+    // 11 (Ceil) for integer widths; Float always keeps 10.9. (The 10~11 / 11~11
+    // Between-on-integer behavior the user asked about.)
+    {
+        Radar::NumericTargetSet tr, tt, tc;
+        Radar::BuildNumericTargets(DT::NumericNoByte, "10.9", tr, Radar::RoundMode::Round);
+        Radar::BuildNumericTargets(DT::NumericNoByte, "10.9", tt, Radar::RoundMode::Trunc);
+        Radar::BuildNumericTargets(DT::NumericNoByte, "10.9", tc, Radar::RoundMode::Ceil);
+        const uint8_t* r = tr.Find(DT::Int32);
+        const uint8_t* t = tt.Find(DT::Int32);
+        const uint8_t* c = tc.Find(DT::Int32);
+        EXPECT("10.9 coerced entries present", r && t && c);
+        if (r) { int32_t v; std::memcpy(&v, r, 4); EXPECT("10.9 Round -> 11", v == 11); }
+        if (t) { int32_t v; std::memcpy(&v, t, 4); EXPECT("10.9 Trunc -> 10", v == 10); }
+        if (c) { int32_t v; std::memcpy(&v, c, 4); EXPECT("10.9 Ceil  -> 11", v == 11); }
+        const uint8_t* f = tr.Find(DT::Float);
+        if (f) { float v; std::memcpy(&v, f, 4); EXPECT("10.9 Float keeps 10.9", v == 10.9f); }
     }
     // Hex "0x10" → integer widths only (no float reinterpret).
     {
@@ -691,9 +711,11 @@ static void Test_ValueScan_Predicate_Double() {
     uint8_t cur[8], tgt[8];
     WriteLE<double>(cur, 1.0 / 3.0);
     WriteLE<double>(tgt, 1.0 / 3.0);
-    EXPECT("Double Exact (1/3==1/3)",   Radar::ComparePredicate(DT::Double, ST::Exact,   cur, tgt));
+    EXPECT("Double Exact (1/3==1/3, fractional literal)", Radar::ComparePredicate(DT::Double, ST::Exact, cur, tgt));
+    // Increased (default Round) compares DISPLAYED values: cur 2.6 -> 3 > prev 0.
+    WriteLE<double>(cur, 2.6);
     WriteLE<double>(tgt, 0.0);
-    EXPECT("Double Increased prev=0",   Radar::ComparePredicate(DT::Double, ST::Increased, cur, tgt));
+    EXPECT("Double Increased (2.6 displays as 3 > prev 0)", Radar::ComparePredicate(DT::Double, ST::Increased, cur, tgt));
 }
 
 static void Test_ValueScan_Predicate_Bool() {
@@ -721,163 +743,211 @@ static void Test_ValueScan_Predicate_UInt64_RangeBoundary() {
 
 // ----- Radar: SessionManager lifecycle ----------------------------------
 
-// ----- Radar: Float/Double tolerance (CE-style rounded scan) ------------
+// ----- Radar: Float/Double rounding mode (displayed-integer scan) -------
 //
-// The TQ2 / GAS use case that motivated tolerance: game UI shows "338"
-// for an underlying float of 337.5 (default rounding). User scans for
-// 338 with tolerance 0.5 -> should match values in [337.5, 338.5].
-// All eight ScanTypes have a defined tolerance semantic; integer types
-// must IGNORE tolerance regardless of the value supplied (the DLL
-// signal that this is a "wrong type for tolerance" case).
+// Build 1672 replaced the implicit half-away round + the ± tolerance band with
+// an explicit RoundMode (Round/Trunc/Ceil): every Float/Double operand is
+// reduced to the integer the game DISPLAYS before comparing. GAS use case: a
+// stored 513.36 shows as 513 (Round/Trunc) — scanning "513" Exact finds it; a
+// stored 99.6 shows as 100 (Round/Ceil). A FRACTIONAL target keeps exact-literal
+// compare (precise intent). Prev-value predicates compare reduced cur vs reduced
+// prev. Integer types are reduce-invariant (the mode is a no-op there).
 
-static void Test_ValueScan_FloatTolerance_Exact() {
+static void Test_ValueScan_FloatRoundMode_Exact() {
     using DT = Radar::DataType;
     using ST = Radar::ScanType;
+    using RM = Radar::RoundMode;
     uint8_t cur[8], tgt[8];
 
-    // target=338, cur=337.5 (rounds-to-338 in UI), tol=0.5 -> match
-    WriteLE<float>(cur, 337.5f);
+    // --- Round (default, half-away-from-zero). target=338 (whole) ---
     WriteLE<float>(tgt, 338.0f);
-    EXPECT("Float Exact tol 0.5 (337.5 ~= 338)",
-           Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.5));
+    WriteLE<float>(cur, 337.5f);   // round -> 338
+    EXPECT("Float Exact Round matches 337.5 vs 338 (rounds to 338)",
+           Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, RM::Round));
+    WriteLE<float>(cur, 338.49f);  // round -> 338
+    EXPECT("Float Exact Round matches 338.49 vs 338",
+           Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, RM::Round));
+    WriteLE<float>(cur, 337.4f);   // round -> 337
+    EXPECT("Float Exact Round rejects 337.4 vs 338 (rounds to 337)",
+           !Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, RM::Round));
 
-    // target=338, cur=338.5 -> still inside tolerance band [337.5, 338.5]
-    WriteLE<float>(cur, 338.5f);
-    EXPECT("Float Exact tol 0.5 (338.5 ~= 338, inclusive)",
-           Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.5));
+    // --- Trunc (toward zero): only the integer part counts ---
+    WriteLE<float>(cur, 338.9f);   // trunc -> 338
+    EXPECT("Float Exact Trunc matches 338.9 vs 338 (truncates to 338)",
+           Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, RM::Trunc));
+    WriteLE<float>(cur, 339.0f);   // trunc -> 339
+    EXPECT("Float Exact Trunc rejects 339.0 vs 338",
+           !Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, RM::Trunc));
+    WriteLE<float>(cur, 337.5f);   // trunc -> 337 (NOT 338, unlike Round)
+    EXPECT("Float Exact Trunc rejects 337.5 vs 338 (truncates to 337)",
+           !Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, RM::Trunc));
 
-    // target=338, cur=338.51 -> outside band, no match
-    WriteLE<float>(cur, 338.51f);
-    EXPECT("Float Exact tol 0.5 rejects 338.51",
-           !Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.5));
+    // --- Ceil (toward +inf): the displayed 99.6 -> 100 case ---
+    WriteLE<float>(cur, 337.1f);   // ceil -> 338
+    EXPECT("Float Exact Ceil matches 337.1 vs 338 (ceils to 338)",
+           Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, RM::Ceil));
+    WriteLE<float>(cur, 338.0f);   // ceil -> 338
+    EXPECT("Float Exact Ceil matches 338.0 vs 338",
+           Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, RM::Ceil));
+    WriteLE<float>(cur, 338.5f);   // ceil -> 339
+    EXPECT("Float Exact Ceil rejects 338.5 vs 338 (ceils to 339)",
+           !Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, RM::Ceil));
 
-    // CE-style rounded scan: a WHOLE-NUMBER target matches any float that ROUNDS to
-    // it even at tol=0 (513 Exact finds a 513.36 GAS BaseValue) — parity with the
-    // snapshot SnapshotNumeric.ExactMatch. target=338 (whole):
-    WriteLE<float>(cur, 337.5f);   // rounds up (half-away-from-zero) -> 338
-    EXPECT("Float Exact tol 0 matches 337.5 vs 338 (rounds to 338)",
-           Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.0));
-    WriteLE<float>(cur, 338.49f);  // rounds down -> 338
-    EXPECT("Float Exact tol 0 matches 338.49 vs 338 (rounds to 338)",
-           Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.0));
-    WriteLE<float>(cur, 337.4f);   // rounds to 337, not 338 -> no match
-    EXPECT("Float Exact tol 0 rejects 337.4 vs 338 (rounds to 337)",
-           !Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.0));
-
-    // A NON-whole target keeps strict tol=0 equality (no rounding). target=338.25:
+    // --- A NON-whole target keeps exact-literal equality (no reduce) in ANY mode ---
     WriteLE<float>(tgt, 338.25f);
     WriteLE<float>(cur, 338.0f);
-    EXPECT("Float Exact tol 0 rejects 338.0 vs 338.25 (non-whole target, no rounding)",
-           !Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.0));
+    EXPECT("Float Exact rejects 338.0 vs 338.25 (non-whole target, no reduce)",
+           !Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, RM::Round));
     WriteLE<float>(cur, 338.25f);
-    EXPECT("Float Exact tol 0 matches 338.25 vs 338.25 (exact)",
-           Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, 0.0));
+    EXPECT("Float Exact matches 338.25 vs 338.25 (exact literal, any mode)",
+           Radar::ComparePredicate(DT::Float, ST::Exact, cur, tgt, nullptr, RM::Ceil));
 
-    // DOUBLE shares the SAME rounded-Exact path: Radar::IsFloatType covers Float AND
-    // Double, and ApplyOrderedTol loads both as double. UE5 has DoubleProperty
-    // gameplay values (large-world coords, some attributes), so verify parity.
+    // --- DOUBLE shares the same path (IsFloatType covers Float + Double) ---
     WriteLE<double>(tgt, 513.0);
-    WriteLE<double>(cur, 513.3599853516);   // rounds to 513
-    EXPECT("Double Exact tol 0 matches 513.36 vs 513 (rounds to 513)",
-           Radar::ComparePredicate(DT::Double, ST::Exact, cur, tgt, nullptr, 0.0));
-    WriteLE<double>(cur, 513.6);            // rounds to 514, not 513
-    EXPECT("Double Exact tol 0 rejects 513.6 vs 513 (rounds to 514)",
-           !Radar::ComparePredicate(DT::Double, ST::Exact, cur, tgt, nullptr, 0.0));
+    WriteLE<double>(cur, 513.3599853516);   // round/trunc -> 513, ceil -> 514
+    EXPECT("Double Exact Round matches 513.36 vs 513",
+           Radar::ComparePredicate(DT::Double, ST::Exact, cur, tgt, nullptr, RM::Round));
+    EXPECT("Double Exact Trunc matches 513.36 vs 513",
+           Radar::ComparePredicate(DT::Double, ST::Exact, cur, tgt, nullptr, RM::Trunc));
+    EXPECT("Double Exact Ceil rejects 513.36 vs 513 (ceils to 514)",
+           !Radar::ComparePredicate(DT::Double, ST::Exact, cur, tgt, nullptr, RM::Ceil));
     WriteLE<double>(tgt, 514.0);
-    EXPECT("Double Exact tol 0 matches 513.6 vs 514 (rounds to 514)",
-           Radar::ComparePredicate(DT::Double, ST::Exact, cur, tgt, nullptr, 0.0));
-    // Non-whole double target keeps strict tol-0 equality (no rounding).
-    WriteLE<double>(tgt, 512.25);
-    WriteLE<double>(cur, 512.0);
-    EXPECT("Double Exact tol 0 rejects 512.0 vs 512.25 (non-whole target, no rounding)",
-           !Radar::ComparePredicate(DT::Double, ST::Exact, cur, tgt, nullptr, 0.0));
+    EXPECT("Double Exact Ceil matches 513.36 vs 514",
+           Radar::ComparePredicate(DT::Double, ST::Exact, cur, tgt, nullptr, RM::Ceil));
 }
 
-static void Test_ValueScan_FloatTolerance_Ordered() {
+static void Test_ValueScan_FloatRoundMode_Ordered() {
     using DT = Radar::DataType;
     using ST = Radar::ScanType;
+    using RM = Radar::RoundMode;
     uint8_t cur[8], tgt[8];
 
-    // Bigger: cur > target + tol  -> 339 > 338+0.5=338.5 is true, but 338.4 isn't
+    // Bigger: reduce(cur) > whole target.
     WriteLE<float>(tgt, 338.0f);
     WriteLE<float>(cur, 339.0f);
-    EXPECT("Float Bigger tol 0.5 (339 > 338.5)",
-           Radar::ComparePredicate(DT::Float, ST::Bigger, cur, tgt, nullptr, 0.5));
-    WriteLE<float>(cur, 338.4f);
-    EXPECT("Float Bigger tol 0.5 rejects 338.4 (within band)",
-           !Radar::ComparePredicate(DT::Float, ST::Bigger, cur, tgt, nullptr, 0.5));
+    EXPECT("Float Bigger Round (round 339 > 338)",
+           Radar::ComparePredicate(DT::Float, ST::Bigger, cur, tgt, nullptr, RM::Round));
+    WriteLE<float>(cur, 338.4f);   // round -> 338, not > 338
+    EXPECT("Float Bigger Round rejects 338.4 (rounds to 338)",
+           !Radar::ComparePredicate(DT::Float, ST::Bigger, cur, tgt, nullptr, RM::Round));
+    WriteLE<float>(cur, 338.6f);   // round -> 339 > 338
+    EXPECT("Float Bigger Round 338.6 (rounds to 339)",
+           Radar::ComparePredicate(DT::Float, ST::Bigger, cur, tgt, nullptr, RM::Round));
 
-    // Smaller: cur < target - tol
-    WriteLE<float>(cur, 337.4f);
-    EXPECT("Float Smaller tol 0.5 (337.4 < 337.5)",
-           Radar::ComparePredicate(DT::Float, ST::Smaller, cur, tgt, nullptr, 0.5));
+    // Smaller: reduce(cur) < whole target.
+    WriteLE<float>(cur, 337.4f);   // round -> 337 < 338
+    EXPECT("Float Smaller Round (round 337 < 338)",
+           Radar::ComparePredicate(DT::Float, ST::Smaller, cur, tgt, nullptr, RM::Round));
+
+    // Fractional target: literal compare (no reduce) in any mode.
+    WriteLE<float>(tgt, 338.25f);
+    WriteLE<float>(cur, 338.3f);
+    EXPECT("Float Bigger fractional target literal (338.3 > 338.25)",
+           Radar::ComparePredicate(DT::Float, ST::Bigger, cur, tgt, nullptr, RM::Round));
 }
 
-static void Test_ValueScan_FloatTolerance_PrevValue() {
+static void Test_ValueScan_FloatRoundMode_PrevValue() {
     using DT = Radar::DataType;
     using ST = Radar::ScanType;
+    using RM = Radar::RoundMode;
     uint8_t cur[8], prev[8];
 
-    // Unchanged within tolerance band — float drift below tol is "no change"
+    // Unchanged/Changed compare the DISPLAYED (reduced) values, not raw bytes.
     WriteLE<float>(prev, 100.0f);
-    WriteLE<float>(cur,  100.3f);
-    EXPECT("Float Unchanged tol 0.5 (drift 0.3 within noise)",
-           Radar::ComparePredicate(DT::Float, ST::Unchanged, cur, prev, nullptr, 0.5));
-    // Same drift, Changed -> false (drift smaller than tol)
-    EXPECT("Float Changed tol 0.5 rejects 0.3 drift",
-           !Radar::ComparePredicate(DT::Float, ST::Changed, cur, prev, nullptr, 0.5));
+    WriteLE<float>(cur,  100.3f);   // round -> 100 == round(100.0)=100
+    EXPECT("Float Unchanged Round (100.3 displays as 100 == 100)",
+           Radar::ComparePredicate(DT::Float, ST::Unchanged, cur, prev, nullptr, RM::Round));
+    EXPECT("Float Changed Round rejects 100.3 (same display)",
+           !Radar::ComparePredicate(DT::Float, ST::Changed, cur, prev, nullptr, RM::Round));
+    WriteLE<float>(cur, 100.6f);    // round -> 101 != 100
+    EXPECT("Float Changed Round (100.6 displays as 101 != 100)",
+           Radar::ComparePredicate(DT::Float, ST::Changed, cur, prev, nullptr, RM::Round));
 
-    // Drift larger than tol -> Changed true, Unchanged false
-    WriteLE<float>(cur, 100.6f);
-    EXPECT("Float Changed tol 0.5 (drift 0.6 > noise)",
-           Radar::ComparePredicate(DT::Float, ST::Changed, cur, prev, nullptr, 0.5));
-
-    // Increased: cur > prev + tol
+    // Increased: reduce(cur) > reduce(prev).
     WriteLE<float>(prev, 50.0f);
-    WriteLE<float>(cur,  50.6f);
-    EXPECT("Float Increased tol 0.5 (50.6 > 50.5)",
-           Radar::ComparePredicate(DT::Float, ST::Increased, cur, prev, nullptr, 0.5));
-    WriteLE<float>(cur, 50.4f);
-    EXPECT("Float Increased tol 0.5 rejects 50.4 (inside band)",
-           !Radar::ComparePredicate(DT::Float, ST::Increased, cur, prev, nullptr, 0.5));
+    WriteLE<float>(cur,  50.6f);    // round -> 51 > 50
+    EXPECT("Float Increased Round (51 > 50)",
+           Radar::ComparePredicate(DT::Float, ST::Increased, cur, prev, nullptr, RM::Round));
+    WriteLE<float>(cur, 50.4f);     // round -> 50, not > 50
+    EXPECT("Float Increased Round rejects 50.4 (rounds to 50)",
+           !Radar::ComparePredicate(DT::Float, ST::Increased, cur, prev, nullptr, RM::Round));
+
+    // Trunc lens: 100.9 and 100.2 both display as 100 -> Unchanged.
+    WriteLE<float>(prev, 100.9f);
+    WriteLE<float>(cur,  100.2f);
+    EXPECT("Float Unchanged Trunc (100.9 & 100.2 both truncate to 100)",
+           Radar::ComparePredicate(DT::Float, ST::Unchanged, cur, prev, nullptr, RM::Trunc));
 }
 
-static void Test_ValueScan_FloatTolerance_Between() {
+static void Test_ValueScan_FloatRoundMode_Between() {
     using DT = Radar::DataType;
     using ST = Radar::ScanType;
+    using RM = Radar::RoundMode;
     uint8_t cur[8], lo[8], hi[8];
-    // Between widens both bounds: [10-0.5, 20+0.5] = [9.5, 20.5]
+
+    // Whole bounds [10,20]: reduce(cur) within [10,20].
     WriteLE<float>(lo, 10.0f);
     WriteLE<float>(hi, 20.0f);
+    WriteLE<float>(cur, 9.8f);    // round -> 10, in range
+    EXPECT("Float Between Round includes 9.8 (rounds to 10)",
+           Radar::ComparePredicate(DT::Float, ST::Between, cur, lo, hi, RM::Round));
+    WriteLE<float>(cur, 20.3f);   // round -> 20, in range
+    EXPECT("Float Between Round includes 20.3 (rounds to 20)",
+           Radar::ComparePredicate(DT::Float, ST::Between, cur, lo, hi, RM::Round));
+    WriteLE<float>(cur, 20.6f);   // round -> 21, out
+    EXPECT("Float Between Round rejects 20.6 (rounds to 21)",
+           !Radar::ComparePredicate(DT::Float, ST::Between, cur, lo, hi, RM::Round));
+    WriteLE<float>(cur, 9.4f);    // round -> 9, out
+    EXPECT("Float Between Round rejects 9.4 (rounds to 9)",
+           !Radar::ComparePredicate(DT::Float, ST::Between, cur, lo, hi, RM::Round));
+
+    // Fractional bounds [10.5, 20.5]: literal range (no reduce).
+    WriteLE<float>(lo, 10.5f);
+    WriteLE<float>(hi, 20.5f);
+    WriteLE<float>(cur, 10.5f);
+    EXPECT("Float Between fractional includes 10.5 (literal)",
+           Radar::ComparePredicate(DT::Float, ST::Between, cur, lo, hi, RM::Round));
     WriteLE<float>(cur, 9.8f);
-    EXPECT("Float Between tol 0.5 includes 9.8 (lo bound widened)",
-           Radar::ComparePredicate(DT::Float, ST::Between, cur, lo, hi, 0.5));
-    WriteLE<float>(cur, 20.3f);
-    EXPECT("Float Between tol 0.5 includes 20.3 (hi bound widened)",
-           Radar::ComparePredicate(DT::Float, ST::Between, cur, lo, hi, 0.5));
-    WriteLE<float>(cur, 20.6f);
-    EXPECT("Float Between tol 0.5 rejects 20.6",
-           !Radar::ComparePredicate(DT::Float, ST::Between, cur, lo, hi, 0.5));
+    EXPECT("Float Between fractional rejects 9.8 (literal, < 10.5)",
+           !Radar::ComparePredicate(DT::Float, ST::Between, cur, lo, hi, RM::Round));
+
+    // Reversed bounds normalize (parity with C# Min/Max): Between 20..10 matches 15.
+    WriteLE<float>(lo, 20.0f);   // lo > hi on purpose
+    WriteLE<float>(hi, 10.0f);
+    WriteLE<float>(cur, 15.0f);
+    EXPECT("Float Between reversed (20..10) still includes 15",
+           Radar::ComparePredicate(DT::Float, ST::Between, cur, lo, hi, RM::Round));
+    // Same for an integer field (ApplyOrdered path).
+    uint8_t ilo[8], ihi[8], icur[8];
+    WriteLE<int32_t>(ilo, 100);
+    WriteLE<int32_t>(ihi, 50);
+    WriteLE<int32_t>(icur, 75);
+    EXPECT("Int32 Between reversed (100..50) still includes 75",
+           Radar::ComparePredicate(DT::Int32, ST::Between, icur, ilo, ihi, RM::Round));
 }
 
-static void Test_ValueScan_IntegerTypes_IgnoreTolerance() {
+static void Test_ValueScan_RoundMode_IntegerNoOp() {
     using DT = Radar::DataType;
     using ST = Radar::ScanType;
+    using RM = Radar::RoundMode;
     uint8_t cur[8], tgt[8];
-    // Even with absurd tolerance, Int32 Exact must be literal equality.
+    // The rounding mode is a no-op for integer ComparePredicate — an integer
+    // reduces to itself, so Int32 Exact stays strict regardless of the mode.
+    // (Fractional-target coercion happens upstream in BuildNumericTargets /
+    // ParseValueBytes, not here.)
     WriteLE<int32_t>(cur, 99);
     WriteLE<int32_t>(tgt, 100);
-    EXPECT("Int32 Exact tol 5 rejects 99 vs 100 (tolerance ignored)",
-           !Radar::ComparePredicate(DT::Int32, ST::Exact, cur, tgt, nullptr, 5.0));
+    EXPECT("Int32 Exact Ceil rejects 99 vs 100 (mode no-op)",
+           !Radar::ComparePredicate(DT::Int32, ST::Exact, cur, tgt, nullptr, RM::Ceil));
     WriteLE<int32_t>(cur, 100);
-    EXPECT("Int32 Exact tol 5 accepts 100 vs 100",
-           Radar::ComparePredicate(DT::Int32, ST::Exact, cur, tgt, nullptr, 5.0));
+    EXPECT("Int32 Exact Ceil accepts 100 vs 100",
+           Radar::ComparePredicate(DT::Int32, ST::Exact, cur, tgt, nullptr, RM::Ceil));
 
     // Same for UInt64
     WriteLE<uint64_t>(cur, 999);
     WriteLE<uint64_t>(tgt, 1000);
-    EXPECT("UInt64 Exact tol 100 still rejects 999 vs 1000",
-           !Radar::ComparePredicate(DT::UInt64, ST::Exact, cur, tgt, nullptr, 100.0));
+    EXPECT("UInt64 Exact Trunc still rejects 999 vs 1000",
+           !Radar::ComparePredicate(DT::UInt64, ST::Exact, cur, tgt, nullptr, RM::Trunc));
 }
 
 // ----- Radar: CompareStringPredicate (Phase 2A) -------------------------
@@ -967,14 +1037,20 @@ static void WriteVector(uint8_t buf[12], float x, float y, float z) {
 
 static void Test_ValueScan_VectorPredicate_Exact() {
     using ST = Radar::ScanType;
+    using RM = Radar::RoundMode;
     uint8_t cur[12], tgt[12];
     WriteVector(cur, 100.0f, 200.0f, 300.0f);
     WriteVector(tgt, 100.0f, 200.0f, 300.0f);
     EXPECT("Vec Exact all match", Radar::CompareVectorPredicate(ST::Exact, cur, tgt));
-    WriteVector(cur, 100.5f, 200.0f, 300.0f);
-    EXPECT("Vec Exact rejects component mismatch", !Radar::CompareVectorPredicate(ST::Exact, cur, tgt));
-    EXPECT("Vec Exact tol 0.5 accepts within band",
-           Radar::CompareVectorPredicate(ST::Exact, cur, tgt, nullptr, 0.5));
+    // Per-axis displayed-integer reduce: X=100.6 rounds to 101, so a whole target
+    // axis of 100 no longer matches that axis.
+    WriteVector(cur, 100.6f, 200.0f, 300.0f);
+    EXPECT("Vec Exact rejects axis that rounds away (100.6 -> 101 vs 100)",
+           !Radar::CompareVectorPredicate(ST::Exact, cur, tgt, nullptr, RM::Round));
+    // X=100.4 rounds back to 100 -> all axes match the displayed integer.
+    WriteVector(cur, 100.4f, 200.0f, 300.0f);
+    EXPECT("Vec Exact Round accepts axis that rounds back (100.4 -> 100)",
+           Radar::CompareVectorPredicate(ST::Exact, cur, tgt, nullptr, RM::Round));
 }
 
 static void Test_ValueScan_VectorPredicate_Ordering() {
@@ -2570,16 +2646,16 @@ static void Test_Orden_OrderedFirstScan() {
     Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "30", t30);
     {   // slot0: > 20 (24 ok), slot1: < 15 (10 ok) -> distinct match
         std::vector<Orden::SlotTarget> slots = {
-            { &t20, Radar::ScanType::Bigger,  0.0 },
-            { &t15, Radar::ScanType::Smaller, 0.0 },
+            { &t20, Radar::ScanType::Bigger,  Radar::RoundMode::Round },
+            { &t15, Radar::ScanType::Smaller, Radar::RoundMode::Round },
         };
         std::vector<Orden::SlotMatches> out;
         EXPECT("group ordered first-scan match", Orden::MatchGroup(leaves, slots, out));
     }
     {   // slot0: > 30 -> no leaf qualifies -> reject the whole block
         std::vector<Orden::SlotTarget> slots = {
-            { &t30, Radar::ScanType::Bigger,  0.0 },
-            { &t15, Radar::ScanType::Smaller, 0.0 },
+            { &t30, Radar::ScanType::Bigger,  Radar::RoundMode::Round },
+            { &t15, Radar::ScanType::Smaller, Radar::RoundMode::Round },
         };
         std::vector<Orden::SlotMatches> out;
         EXPECT("group ordered first-scan reject (no leaf > 30)",
@@ -2601,16 +2677,16 @@ static void Test_Orden_BetweenFirstScan() {
     Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "8",  hi8);
     {   // slot0 in [20,30] (24 ok), slot1 in [5,12] (10 ok) -> distinct match
         std::vector<Orden::SlotTarget> slots = {
-            { &lo20, Radar::ScanType::Between, 0.0, &hi30 },
-            { &lo5,  Radar::ScanType::Between, 0.0, &hi12 },
+            { &lo20, Radar::ScanType::Between, Radar::RoundMode::Round,&hi30 },
+            { &lo5,  Radar::ScanType::Between, Radar::RoundMode::Round,&hi12 },
         };
         std::vector<Orden::SlotMatches> out;
         EXPECT("group Between first-scan match", Orden::MatchGroup(leaves, slots, out));
     }
     {   // slot1 in [5,8] -> 10 is out of range -> reject the block
         std::vector<Orden::SlotTarget> slots = {
-            { &lo20, Radar::ScanType::Between, 0.0, &hi30 },
-            { &lo5,  Radar::ScanType::Between, 0.0, &hi8 },
+            { &lo20, Radar::ScanType::Between, Radar::RoundMode::Round,&hi30 },
+            { &lo5,  Radar::ScanType::Between, Radar::RoundMode::Round,&hi8 },
         };
         std::vector<Orden::SlotMatches> out;
         EXPECT("group Between first-scan reject (10 not in [5,8])",
@@ -2618,8 +2694,8 @@ static void Test_Orden_BetweenFirstScan() {
     }
     {   // missing upper bound -> Between can't evaluate -> no match
         std::vector<Orden::SlotTarget> slots = {
-            { &lo20, Radar::ScanType::Between, 0.0, nullptr },
-            { &lo5,  Radar::ScanType::Between, 0.0, &hi12 },
+            { &lo20, Radar::ScanType::Between, Radar::RoundMode::Round,nullptr },
+            { &lo5,  Radar::ScanType::Between, Radar::RoundMode::Round,&hi12 },
         };
         std::vector<Orden::SlotMatches> out;
         EXPECT("group Between missing upper bound rejected",
@@ -2642,8 +2718,8 @@ static void Test_Orden_RoundedFloatExact() {
     Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "98",  t98);
     {   // slot0 Exact 513 (513.36->513), slot1 Exact 100 (99.6->100) -> distinct match
         std::vector<Orden::SlotTarget> slots = {
-            { &t513, Radar::ScanType::Exact, 0.0 },
-            { &t100, Radar::ScanType::Exact, 0.0 },
+            { &t513, Radar::ScanType::Exact, Radar::RoundMode::Round },
+            { &t100, Radar::ScanType::Exact, Radar::RoundMode::Round },
         };
         std::vector<Orden::SlotMatches> out;
         EXPECT("group rounded float Exact match (513.36~513 + 99.6~100)",
@@ -2651,8 +2727,8 @@ static void Test_Orden_RoundedFloatExact() {
     }
     {   // slot1 Exact 98 -> neither leaf rounds to 98 -> reject the whole block
         std::vector<Orden::SlotTarget> slots = {
-            { &t513, Radar::ScanType::Exact, 0.0 },
-            { &t98,  Radar::ScanType::Exact, 0.0 },
+            { &t513, Radar::ScanType::Exact, Radar::RoundMode::Round },
+            { &t98,  Radar::ScanType::Exact, Radar::RoundMode::Round },
         };
         std::vector<Orden::SlotMatches> out;
         EXPECT("group rounded float Exact reject (nothing rounds to 98)",
@@ -2668,8 +2744,8 @@ static void Test_Orden_RoundedFloatExact() {
         Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "7422", t7422);
         Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "50",   t50);
         std::vector<Orden::SlotTarget> slots = {
-            { &t7422, Radar::ScanType::Exact, 0.0 },
-            { &t50,   Radar::ScanType::Exact, 0.0 },
+            { &t7422, Radar::ScanType::Exact, Radar::RoundMode::Round },
+            { &t50,   Radar::ScanType::Exact, Radar::RoundMode::Round },
         };
         std::vector<Orden::SlotMatches> out;
         EXPECT("group rounded DOUBLE Exact match (7421.6~7422 + 49.5~50)",
@@ -2688,8 +2764,8 @@ static void Test_Orden_PrevValueRejectedOnFirstScan() {
     Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "24", t24);
     Radar::BuildNumericTargets(Radar::DataType::NumericNoByte, "10", t10);
     std::vector<Orden::SlotTarget> slots = {
-        { &t24, Radar::ScanType::Increased, 0.0 },   // prev-value: never matches here
-        { &t10, Radar::ScanType::Exact,     0.0 },
+        { &t24, Radar::ScanType::Increased, Radar::RoundMode::Round },   // prev-value: never matches here
+        { &t10, Radar::ScanType::Exact,     Radar::RoundMode::Round },
     };
     std::vector<Orden::SlotMatches> out;
     EXPECT("group prev-value slot never matches on first scan",
@@ -2831,11 +2907,11 @@ int main() {
     Test_ValueScan_Predicate_Double();
     Test_ValueScan_Predicate_Bool();
     Test_ValueScan_Predicate_UInt64_RangeBoundary();
-    Test_ValueScan_FloatTolerance_Exact();
-    Test_ValueScan_FloatTolerance_Ordered();
-    Test_ValueScan_FloatTolerance_PrevValue();
-    Test_ValueScan_FloatTolerance_Between();
-    Test_ValueScan_IntegerTypes_IgnoreTolerance();
+    Test_ValueScan_FloatRoundMode_Exact();
+    Test_ValueScan_FloatRoundMode_Ordered();
+    Test_ValueScan_FloatRoundMode_PrevValue();
+    Test_ValueScan_FloatRoundMode_Between();
+    Test_ValueScan_RoundMode_IntegerNoOp();
 
     // Phase 2A — string predicates + family predicates
     Test_ValueScan_TypeFamilyPredicates();

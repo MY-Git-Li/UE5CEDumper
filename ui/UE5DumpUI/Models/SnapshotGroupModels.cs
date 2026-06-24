@@ -20,8 +20,10 @@ public sealed class SnapshotGroupSlotInput
     public string Value  { get; set; } = "";
     /// <summary>Between upper bound. Ignored otherwise.</summary>
     public string Value2 { get; set; } = "";
-    /// <summary>Float +/- band for Exact (0 = exact).</summary>
-    public double Tolerance { get; set; }
+    /// <summary>How a fractional float/double target is reduced to the displayed
+    /// integer before compare (Round/Trunc/Ceil). All slots in a query share the
+    /// panel mode (set from <see cref="SnapshotGroupQuery.RoundMode"/>).</summary>
+    public FloatRoundMode RoundMode { get; set; } = FloatRoundMode.Round;
 }
 
 /// <summary>
@@ -45,6 +47,9 @@ public sealed class SnapshotGroupQuery
     public int MaxResults { get; set; } = 50000;
     /// <summary>Cross-snapshot identity join (Mode B). Ignored for Mode A.</summary>
     public SpcJoinMode JoinMode { get; set; } = SpcJoinMode.InSession;
+    /// <summary>Per-panel rounding mode applied to every slot — how a fractional
+    /// float/double target is reduced to the displayed integer before compare.</summary>
+    public FloatRoundMode RoundMode { get; set; } = FloatRoundMode.Round;
 }
 
 /// <summary>

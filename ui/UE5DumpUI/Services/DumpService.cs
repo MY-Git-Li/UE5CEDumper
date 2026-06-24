@@ -1624,18 +1624,6 @@ public sealed class DumpService : IDumpService
         GuessedType       = obj["guessed_type"]?.GetValue<string>() ?? "",
     };
 
-    private static bool ToleranceAppliesTo(ValueScanDataType dt) =>
-        dt == ValueScanDataType.Float
-        || dt == ValueScanDataType.Double
-        // Multi-numeric meta scans include Float/Double members, so
-        // tolerance is meaningful (DLL applies it per-member to the
-        // float/double fields only; integer members ignore it).
-        || dt == ValueScanDataType.NumericNoByte
-        || dt == ValueScanDataType.NumericAll
-        || dt == ValueScanDataType.FVector
-        || dt == ValueScanDataType.FRotator
-        || dt == ValueScanDataType.FTransform;
-
     private static bool IsStringDataType(ValueScanDataType dt) =>
         dt == ValueScanDataType.FString
         || dt == ValueScanDataType.FName
@@ -1683,7 +1671,7 @@ public sealed class DumpService : IDumpService
         string? value2 = null,
         bool gameOnly = true,
         int maxResults = 50000,
-        double tolerance = 0.0,
+        Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
         bool caseSensitive = false,
         bool parallel = true,
         bool batchRead = true,
@@ -1709,13 +1697,12 @@ public sealed class DumpService : IDumpService
         };
         if (!string.IsNullOrEmpty(value2))
             req["value2"] = value2;
-        // Only attach tolerance for float-aware types (Float/Double +
-        // FVector/FRotator/FTransform). Integer + string scans ignore
-        // it DLL-side; omitting keeps the wire shape tighter for the
-        // common case. Also only attach when non-zero so existing
-        // exact-scan call sites stay byte-identical on the wire.
-        if (tolerance > 0.0 && ToleranceAppliesTo(dataType))
-            req["tolerance"] = tolerance;
+        // Per-panel rounding mode (Round/Trunc/Ceil): how a fractional float/double
+        // target is reduced to the displayed integer before compare. DLL defaults to
+        // Round if absent, so attach only for the non-default modes to keep the
+        // common-case wire shape byte-identical.
+        if (roundMode != Models.FloatRoundMode.Round)
+            req["rounding_mode"] = Models.FloatRoundModeWire.ToWire(roundMode);
         // Case sensitivity is a string-only knob. Default = case-
         // insensitive (matches CE convention) → only attach when the
         // user explicitly opts to case-sensitive AND the type can use it.
@@ -1787,7 +1774,7 @@ public sealed class DumpService : IDumpService
         ValueScanType scanType,
         string? value = null,
         string? value2 = null,
-        double tolerance = 0.0,
+        Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
         bool caseSensitive = false,
         int pageSize = 1000,
         CancellationToken ct = default)
@@ -1801,12 +1788,12 @@ public sealed class DumpService : IDumpService
         };
         if (value != null)  req["value"]  = value;
         if (value2 != null) req["value2"] = value2;
-        // Refine doesn't know the session's DataType client-side -- the
-        // DLL ignores tolerance on integer-typed sessions automatically
-        // and ignores case_sensitive on non-string sessions. Attach
-        // each only when non-default so common refine paths stay
-        // byte-identical on the wire.
-        if (tolerance > 0.0) req["tolerance"] = tolerance;
+        // Refine doesn't know the session's DataType client-side -- the DLL
+        // applies the rounding mode only to float/double members and ignores
+        // case_sensitive on non-string sessions. Attach the rounding mode only
+        // for the non-default modes so common refine paths stay byte-identical.
+        if (roundMode != Models.FloatRoundMode.Round)
+            req["rounding_mode"] = Models.FloatRoundModeWire.ToWire(roundMode);
         if (caseSensitive)   req["case_sensitive"] = true;
 
         var res = await _pipe.SendAsync(req, ct);
@@ -1951,6 +1938,7 @@ public sealed class DumpService : IDumpService
         int pageSize = 1000,
         int deadlineMs = 15000,
         bool autoSkipNoise = false,
+        Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
         CancellationToken ct = default)
     {
         var values = new JsonArray();
@@ -1966,6 +1954,10 @@ public sealed class DumpService : IDumpService
             };
             if (sp.ScanType == ValueScanType.Between)
                 slot["value2"] = sp.Value2;              // Between upper bound
+            // Per-slot rounding mode (all slots share the panel mode). DLL defaults
+            // to Round if absent → attach only for non-default modes.
+            if (roundMode != Models.FloatRoundMode.Round)
+                slot["rounding_mode"] = Models.FloatRoundModeWire.ToWire(roundMode);
             values.Add((JsonNode)slot);
         }
         var req = new JsonObject
@@ -2022,6 +2014,7 @@ public sealed class DumpService : IDumpService
         ulong sessionId,
         IReadOnlyList<GroupSlotInput> slots,
         int pageSize = 1000,
+        Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
         CancellationToken ct = default)
     {
         var arr = new JsonArray();
@@ -2036,6 +2029,9 @@ public sealed class DumpService : IDumpService
             };
             if (sp.ScanType == ValueScanType.Between)
                 slot["value2"] = sp.Value2;
+            // Per-slot rounding mode (all slots share the panel mode).
+            if (roundMode != Models.FloatRoundMode.Round)
+                slot["rounding_mode"] = Models.FloatRoundModeWire.ToWire(roundMode);
             arr.Add((JsonNode)slot);
         }
         var req = new JsonObject

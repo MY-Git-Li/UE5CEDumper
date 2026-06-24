@@ -73,12 +73,12 @@ struct Leaf {
 // Unchanged) compare against a per-leaf baseline that only exists AFTER a
 // refine, so they are honoured by the refine path (Aura::RefineGroupCandidates),
 // never by the first-scan MatchGroup below — LeafSatisfiesSlot rejects them so a
-// prev-value slot can never spuriously match on the first scan. `tolerance` is
-// the float +- band (0 = exact / strict).
+// prev-value slot can never spuriously match on the first scan. `roundMode` is
+// the float displayed-integer reduction (build 1672, replaces the old tolerance).
 struct SlotTarget {
     const Radar::NumericTargetSet* targets   = nullptr;
     Radar::ScanType                st        = Radar::ScanType::Exact;
-    double                         tolerance = 0.0;
+    Radar::RoundMode               roundMode = Radar::RoundMode::Round;
     const Radar::NumericTargetSet* targets2  = nullptr;  // Between upper bound
 };
 
@@ -108,7 +108,7 @@ inline bool LeafSatisfiesSlot(const Leaf& leaf, const SlotTarget& slot) {
         tb2 = slot.targets2 ? slot.targets2->Find(leaf.width) : nullptr;
         if (!tb2) return false;                             // upper bound can't fit this width
     }
-    return Radar::ComparePredicate(leaf.width, slot.st, leaf.bytes, tb, tb2, slot.tolerance);
+    return Radar::ComparePredicate(leaf.width, slot.st, leaf.bytes, tb, tb2, slot.roundMode);
 }
 
 // Internal: Kuhn's augmenting path — try to assign `slot` a distinct leaf,

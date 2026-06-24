@@ -59,8 +59,12 @@
     <sys:String x:Key="str.VS.ScanType">Scan:</sys:String>
     <sys:String x:Key="str.VS.Value">Value:</sys:String>
     <sys:String x:Key="str.VS.Value2">… to</sys:String>
-    <sys:String x:Key="str.VS.Tolerance">± Tol:</sys:String>
-    <sys:String x:Key="str.Tip.VS.Tolerance">Rounded-scan slack for Float/Double + vector types. Game UI shows "338" for a real float of 337.5 — set tolerance 0.5 to scan for "338" and match anything in [337.5, 338.5]. For vectors the tolerance applies per axis. Ignored for integer + string types.</sys:String>
+    <sys:String x:Key="str.VS.Rounding">Rounding:</sys:String>
+    <sys:String x:Key="str.Tip.VS.Rounding">How a fractional float/double target is reduced to the integer the game DISPLAYS before compare. Round (default) = nearest (10.9 → 11); Trunc = toward zero (10.9 → 10); Ceil = up (10.1 → 11). Float/double field values are used as-is; the mode reaches integer fields only when a fractional target/bound is coerced.</sys:String>
+    <!-- Rounding-mode label reused by the Snapshot + SPC panels (same picker; the
+         per-panel hint TextBlock carries the explanation, so no separate tooltip). -->
+    <sys:String x:Key="str.Snapshot.Rounding">Rounding:</sys:String>
+    <sys:String x:Key="str.Spc.Rounding">Rounding:</sys:String>
     <sys:String x:Key="str.VS.GameOnly">Game classes only</sys:String>
     <sys:String x:Key="str.VS.Parallel">Parallel scan</sys:String>
     <sys:String x:Key="str.VS.BatchRead">Batch read</sys:String>

@@ -87,7 +87,8 @@ bool ParseVectorBytes(const std::string& raw, uint8_t out[12]) {
     return true;
 }
 
-bool ParseValueBytes(Radar::DataType dt, const std::string& raw, uint8_t out[8]) {
+bool ParseValueBytes(Radar::DataType dt, const std::string& raw, uint8_t out[8],
+                     Radar::RoundMode roundMode = Radar::RoundMode::Round) {
     std::memset(out, 0, 8);
     if (raw.empty()) return false;
 
@@ -102,6 +103,34 @@ bool ParseValueBytes(Radar::DataType dt, const std::string& raw, uint8_t out[8])
     auto isHexPrefix = [](const std::string& str) {
         return str.size() > 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X');
     };
+
+    // Rounding-mode integer coercion (build 1672): a fractional input (e.g.
+    // "10.9") would throw in the integer stoll/stoull paths below. For an integer
+    // type, reduce it to the displayed integer via the mode (Round 10.9->11,
+    // Trunc->10, Ceil->11) and rewrite `s` to that integer string — the per-type
+    // switch then range-checks it normally. Mirrors BuildNumericTargets so the
+    // concrete-width and meta paths coerce identically. Hex + clean integers are
+    // left untouched; float/double/bool keep their own parse.
+    const bool isIntType =
+        dt == Radar::DataType::Int8   || dt == Radar::DataType::Int16  ||
+        dt == Radar::DataType::Int32  || dt == Radar::DataType::Int64  ||
+        dt == Radar::DataType::UInt8  || dt == Radar::DataType::UInt16 ||
+        dt == Radar::DataType::UInt32 || dt == Radar::DataType::UInt64;
+    if (isIntType && !isHexPrefix(s)) {
+        bool cleanInt = false;
+        try { size_t pos = 0; (void)std::stoll(s, &pos, 0); cleanInt = (pos == s.size()); } catch (...) {}
+        if (!cleanInt) {
+            try {
+                size_t pos = 0;
+                double dv = std::stod(s, &pos);
+                if (pos == s.size()) {
+                    char nb[40];
+                    std::snprintf(nb, sizeof(nb), "%.0f", Radar::ReduceRounded(dv, roundMode));
+                    s = nb;
+                }
+            } catch (...) {}
+        }
+    }
 
     try {
         switch (dt) {
@@ -2100,9 +2129,13 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             std::string val2Str = request.value("value2", "");
             bool gameOnly = request.value("game_only", true);
             int  maxResults = request.value("max_results", 50000);
-            // CE-style rounded scan slack (Float/Double + Vector only --
-            // integer + string types ignore it). 0.0 = exact comparison.
-            double tolerance = request.value("tolerance", 0.0);
+            // Displayed-integer rounding mode (build 1672, replaces the old
+            // tolerance slack): Float/Double values are reduced to the integer
+            // the game shows before comparing; integer types only consult it to
+            // coerce a fractional target/bound. Default Round (legacy half-away);
+            // unknown / absent (pre-1672 client) falls back to Round.
+            Radar::RoundMode roundMode = Radar::RoundMode::Round;
+            Radar::TryParseRoundMode(request.value("rounding_mode", "Round"), roundMode);
             // String scans only: opt-in case sensitivity. Default is
             // CE-style case-insensitive matching.
             bool caseSensitive = request.value("case_sensitive", false);
@@ -2187,23 +2220,23 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                     target2Ptr = target2Bytes;
                 }
             } else if (isMulti) {
-                if (!Radar::BuildNumericTargets(dt, valStr, multiTargets)) {
+                if (!Radar::BuildNumericTargets(dt, valStr, multiTargets, roundMode)) {
                     return Renge::MakeError(id, "Invalid 'value' for data_type " + dtStr +
                         " (does not fit any numeric width)").dump();
                 }
                 multiPtr = &multiTargets;
                 if (st == Radar::ScanType::Between) {
-                    if (!Radar::BuildNumericTargets(dt, val2Str, multiTargets2)) {
+                    if (!Radar::BuildNumericTargets(dt, val2Str, multiTargets2, roundMode)) {
                         return Renge::MakeError(id, "Between requires a valid 'value2' for data_type " + dtStr).dump();
                     }
                     multiPtr2 = &multiTargets2;
                 }
             } else {
-                if (!ParseValueBytes(dt, valStr, targetBytes)) {
+                if (!ParseValueBytes(dt, valStr, targetBytes, roundMode)) {
                     return Renge::MakeError(id, "Invalid 'value' for data_type " + dtStr).dump();
                 }
                 if (st == Radar::ScanType::Between) {
-                    if (!ParseValueBytes(dt, val2Str, target2Bytes)) {
+                    if (!ParseValueBytes(dt, val2Str, target2Bytes, roundMode)) {
                         return Renge::MakeError(id, "Between requires 'value2' for data_type " + dtStr).dump();
                     }
                     target2Ptr = target2Bytes;
@@ -2212,7 +2245,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
 
             auto scanResult = Aura::ScanForValue(
                 dt, st, targetBytes, target2Ptr, gameOnly, maxResults,
-                tolerance, targetString, caseSensitive, multiPtr, multiPtr2,
+                roundMode, targetString, caseSensitive, multiPtr, multiPtr2,
                 parallel, batchRead, deep, nativeC, nativeAlign, newestFirst, deadlineMs,
                 autoSkipNoise);
 
@@ -2275,7 +2308,9 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             std::string stStr = request.value("scan_type", "");
             std::string valStr = request.value("value", "");
             std::string val2Str = request.value("value2", "");
-            double tolerance = request.value("tolerance", 0.0);
+            // Displayed-integer rounding mode (build 1672, replaces tolerance).
+            Radar::RoundMode roundMode = Radar::RoundMode::Round;
+            Radar::TryParseRoundMode(request.value("rounding_mode", "Round"), roundMode);
             bool caseSensitive = request.value("case_sensitive", false);
 
             Radar::ScanType st;
@@ -2336,26 +2371,26 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                                 tgt2Ptr = target2Bytes;
                             }
                         } else if (isMulti) {
-                            if (!Radar::BuildNumericTargets(dt, valStr, multiTargets)) {
+                            if (!Radar::BuildNumericTargets(dt, valStr, multiTargets, roundMode)) {
                                 parseFailed = true;
                                 return;
                             }
                             multiPtr = &multiTargets;
                             if (st == Radar::ScanType::Between) {
-                                if (!Radar::BuildNumericTargets(dt, val2Str, multiTargets2)) {
+                                if (!Radar::BuildNumericTargets(dt, val2Str, multiTargets2, roundMode)) {
                                     parseFailed = true;
                                     return;
                                 }
                                 multiPtr2 = &multiTargets2;
                             }
                         } else {
-                            if (!ParseValueBytes(dt, valStr, targetBytes)) {
+                            if (!ParseValueBytes(dt, valStr, targetBytes, roundMode)) {
                                 parseFailed = true;
                                 return;
                             }
                             tgtPtr = targetBytes;
                             if (st == Radar::ScanType::Between) {
-                                if (!ParseValueBytes(dt, val2Str, target2Bytes)) {
+                                if (!ParseValueBytes(dt, val2Str, target2Bytes, roundMode)) {
                                     parseFailed = true;
                                     return;
                                 }
@@ -2366,7 +2401,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
 
                     stats = Aura::RefineCandidates(dt, st, tgtPtr, tgt2Ptr, cs,
                                                    sess.descriptors,
-                                                   tolerance, targetString, caseSensitive,
+                                                   roundMode, targetString, caseSensitive,
                                                    multiPtr, multiPtr2);
                     totalCount = static_cast<int>(cs.size());
                     const int n = (std::min)(pageSize, totalCount);
@@ -2547,12 +2582,16 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                     return Renge::MakeError(id, "group first-scan scan_type must be Exact / Bigger / Smaller / Between: " + stStr).dump();
                 }
                 Radar::SlotSpec sp;
-                if (!Radar::BuildNumericTargets(dt, valStr, sp.targets)) {
+                // Per-slot displayed-integer rounding mode (build 1672, replaces
+                // tolerance). Parsed BEFORE BuildNumericTargets so a fractional
+                // group value/bound coerces to an integer via the slot's mode.
+                Radar::TryParseRoundMode(vj.value("rounding_mode", "Round"), sp.roundMode);
+                if (!Radar::BuildNumericTargets(dt, valStr, sp.targets, sp.roundMode)) {
                     return Renge::MakeError(id, "Invalid group value '" + valStr + "' (fits no numeric width)").dump();
                 }
                 if (st == Radar::ScanType::Between) {
                     std::string val2Str = vj.value("value2", "");
-                    if (!Radar::BuildNumericTargets(dt, val2Str, sp.targets2)) {
+                    if (!Radar::BuildNumericTargets(dt, val2Str, sp.targets2, sp.roundMode)) {
                         return Renge::MakeError(id, "Invalid group Between upper value '" + val2Str + "' (fits no numeric width)").dump();
                     }
                     sp.value2 = val2Str;
@@ -2560,7 +2599,6 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 sp.dt        = dt;
                 sp.st        = st;
                 sp.value     = valStr;
-                sp.tolerance = vj.value("tolerance", 0.0);
                 slots.push_back(std::move(sp));
             }
             const int slotCount = static_cast<int>(slots.size());
@@ -2646,7 +2684,11 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                             badScanType = stStr; return;
                         }
                         sess.slots[s].st        = st;
-                        sess.slots[s].tolerance = valuesJson[s].value("tolerance", 0.0);
+                        // Per-slot displayed-integer rounding mode (build 1672,
+                        // replaces tolerance). Set before BuildNumericTargets so a
+                        // fractional refine value/bound coerces via the slot's mode.
+                        Radar::TryParseRoundMode(valuesJson[s].value("rounding_mode", "Round"),
+                                                 sess.slots[s].roundMode);
                         if (Radar::IsPrevValueScanType(st)) {
                             sess.slots[s].value    = valStr;  // echoed for display (may be "")
                             sess.slots[s].targets  = Radar::NumericTargetSet{};
@@ -2654,7 +2696,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                             sess.slots[s].targets2 = Radar::NumericTargetSet{};
                         } else {
                             Radar::NumericTargetSet nt;
-                            if (!Radar::BuildNumericTargets(sess.slots[s].dt, valStr, nt)) {
+                            if (!Radar::BuildNumericTargets(sess.slots[s].dt, valStr, nt, sess.slots[s].roundMode)) {
                                 parseFailed = true;
                                 return;
                             }
@@ -2665,7 +2707,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                             if (st == Radar::ScanType::Between) {
                                 std::string val2Str = valuesJson[s].value("value2", "");
                                 Radar::NumericTargetSet nt2;
-                                if (!Radar::BuildNumericTargets(sess.slots[s].dt, val2Str, nt2)) {
+                                if (!Radar::BuildNumericTargets(sess.slots[s].dt, val2Str, nt2, sess.slots[s].roundMode)) {
                                     parseFailed = true;
                                     return;
                                 }

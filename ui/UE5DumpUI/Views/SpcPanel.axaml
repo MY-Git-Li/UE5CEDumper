@@ -40,12 +40,19 @@
         <TextBlock Text="{StaticResource str.Spc.PropFilter}" Foreground="#CCCCCC"
                    VerticalAlignment="Center" Margin="0,0,4,0"/>
         <TextBox Text="{Binding PropFilter}" Width="140" Margin="0,0,12,0" IsEnabled="{Binding !IsQuerying}"/>
+        <!-- Rounding mode: how a fractional float/double absolute target is reduced to
+             the displayed integer before compare (Round/Trunc/Ceil). -->
+        <TextBlock Text="{StaticResource str.Spc.Rounding}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+        <ComboBox ItemsSource="{Binding RoundingModeOptions}" SelectedItem="{Binding SelectedRoundingMode}"
+                  MinWidth="90" Margin="0,0,12,0" IsEnabled="{Binding !IsQuerying}"/>
         <Button Content="{StaticResource str.Spc.Run}" Command="{Binding RunQueryCommand}"
                 IsEnabled="{Binding CanRunQuery}" Classes="accent" Padding="12,4" Margin="0,0,8,0"/>
         <Button Content="{StaticResource str.Spc.Refresh}" Command="{Binding RefreshCommand}"
                 Padding="8,4" IsEnabled="{Binding !IsQuerying}"/>
         <!-- Per-row Open / GWorld / Copy live on each result row (below) — pick a
              row, then use its own buttons. -->
+        <TextBlock Text="{Binding RoundingModeHint}" Foreground="#999" FontSize="11"
+                   FontStyle="Italic" TextWrapping="Wrap" Width="380" Margin="8,4,0,0"/>
       </WrapPanel>
     </Border>
 
@@ -274,6 +281,11 @@
           <TextBox Text="{Binding ClassFilter}" Width="140" Margin="0,0,12,0" IsEnabled="{Binding !IsGroupMatching}"/>
           <TextBlock Text="{StaticResource str.Spc.PropFilter}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
           <TextBox Text="{Binding PropFilter}" Width="140" Margin="0,0,12,0" IsEnabled="{Binding !IsGroupMatching}"/>
+          <!-- Rounding mode: how a fractional float/double absolute target is reduced
+               to the displayed integer before compare. Shared with single SPC. -->
+          <TextBlock Text="{StaticResource str.Spc.Rounding}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+          <ComboBox ItemsSource="{Binding RoundingModeOptions}" SelectedItem="{Binding SelectedRoundingMode}"
+                    MinWidth="90" Margin="0,0,12,0" IsEnabled="{Binding !IsGroupMatching}"/>
           <Button Content="{StaticResource str.Spc.Group.Run}" Command="{Binding RunGroupQueryCommand}"
                   IsEnabled="{Binding CanRunGroupQuery}" Classes="accent" Padding="12,4" Margin="0,0,8,0"/>
           <Button Content="{StaticResource str.Spc.Group.Clear}" Command="{Binding ClearGroupCommand}" Padding="8,4" Margin="0,0,8,0"/>
@@ -282,6 +294,8 @@
           <ProgressBar IsIndeterminate="True" Height="4" Width="120" VerticalAlignment="Center" Margin="10,0,8,0"
                        IsVisible="{Binding IsGroupMatching}"/>
           <TextBlock Text="{Binding GroupStatusText}" Foreground="#4EC9B0" FontSize="12" VerticalAlignment="Center"/>
+          <TextBlock Text="{Binding RoundingModeHint}" Foreground="#999" FontSize="11"
+                     FontStyle="Italic" TextWrapping="Wrap" Width="380" Margin="8,4,0,0"/>
         </WrapPanel>
       </Border>
 

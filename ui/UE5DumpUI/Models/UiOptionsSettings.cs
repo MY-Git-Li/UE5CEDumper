@@ -82,7 +82,7 @@ public sealed class ValueSearchUiOptions
     public bool NativeCScan { get; set; }
     public bool NewestFirst { get; set; }
     public bool PreFilterNoise { get; set; }
-    public double Tolerance { get; set; } = 0.5;
+    public FloatRoundMode RoundingMode { get; set; } = FloatRoundMode.Round;
     public bool CaseSensitive { get; set; }
 }
 
@@ -96,6 +96,7 @@ public sealed class SnapshotUiOptions
     public string SelectedMaxDataset { get; set; } = "Off";
     public bool ShowUsageBar { get; set; } = true;
     public bool GroupDeep { get; set; }
+    public FloatRoundMode RoundingMode { get; set; } = FloatRoundMode.Round;
 }
 
 public sealed class InstanceFinderUiOptions
@@ -127,6 +128,7 @@ public sealed class TeleportUiOptions
 public sealed class SpcUiOptions
 {
     public string SelectedJoinMode { get; set; } = "Strict";
+    public FloatRoundMode RoundingMode { get; set; } = FloatRoundMode.Round;
 }
 
 public sealed class PivotUiOptions

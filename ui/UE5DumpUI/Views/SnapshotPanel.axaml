@@ -324,7 +324,14 @@
             <CheckBox Content="{StaticResource str.Snapshot.Group.Deep}" IsChecked="{Binding GroupDeep}"
                       ToolTip.Tip="{StaticResource str.Tip.Snapshot.Group.Deep}" Foreground="#CCCCCC"
                       IsEnabled="{Binding !IsGroupMatching}" VerticalAlignment="Center" Margin="12,0,0,0"/>
+            <!-- Rounding mode: how a fractional float/double target is reduced to the
+                 displayed integer before compare (Round/Trunc/Ceil). -->
+            <TextBlock Text="{StaticResource str.Snapshot.Rounding}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="12,0,0,0"/>
+            <ComboBox ItemsSource="{Binding RoundingModeOptions}" SelectedItem="{Binding SelectedRoundingMode}"
+                      IsEnabled="{Binding !IsGroupMatching}" MinWidth="90" VerticalAlignment="Center"/>
           </StackPanel>
+          <TextBlock Text="{Binding RoundingModeHint}" Foreground="#999" FontSize="11"
+                     FontStyle="Italic" TextWrapping="Wrap"/>
         </StackPanel>
 
         <!-- Results master-detail: one row per matched object; expand for per-slot

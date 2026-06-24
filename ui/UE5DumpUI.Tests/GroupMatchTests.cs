@@ -1,4 +1,5 @@
 using System.Globalization;
+using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 using Xunit;
 
@@ -35,9 +36,10 @@ public class GroupMatchTests
         Tag = tag,
     };
 
-    private static GroupMatch.Slot Abs(GroupMatch.Predicate p, double target, double tol = 0,
+    private static GroupMatch.Slot Abs(GroupMatch.Predicate p, double target,
+        FloatRoundMode mode = FloatRoundMode.Round,
         GroupMatch.Scope sc = GroupMatch.Scope.NumericNoByte) =>
-        new() { Predicate = p, Target = target, Tolerance = tol, Scope = sc };
+        new() { Predicate = p, Target = target, RoundMode = mode, Scope = sc };
 
     private static GroupMatch.Slot Between(double lo, double hi) =>
         new() { Predicate = GroupMatch.Predicate.Between, Target = lo, Target2 = hi };
@@ -158,15 +160,45 @@ public class GroupMatchTests
     }
 
     [Fact]
-    public void Exact_FloatTolerance()
+    public void Exact_FloatRoundMode_WholeTargetRounds()
     {
-        // Non-whole target (1.5) so the rounding path doesn't apply — this isolates the
-        // ± tolerance band. (A whole target would now also round-match; see ExactMatch.)
-        var leaf = new[] { L(0x0, "FloatProperty", 1.5001), L(0x4, "IntProperty", 7) };
+        // Default Round mode: a whole target matches any float that rounds to it.
+        var leaf = new[] { L(0x0, "FloatProperty", 513.36), L(0x4, "IntProperty", 7) };
         Assert.True(GroupMatch.Run(leaf,
-            new[] { Abs(GroupMatch.Predicate.Exact, 1.5, 0.001), Abs(GroupMatch.Predicate.Exact, 7) }, out _));
-        Assert.False(GroupMatch.Run(leaf,
-            new[] { Abs(GroupMatch.Predicate.Exact, 1.5, 0.0), Abs(GroupMatch.Predicate.Exact, 7) }, out _));
+            new[] { Abs(GroupMatch.Predicate.Exact, 513), Abs(GroupMatch.Predicate.Exact, 7) }, out _));
+        // A fractional float that rounds to 514 is NOT matched by Exact-513.
+        var miss = new[] { L(0x0, "FloatProperty", 513.7), L(0x4, "IntProperty", 7) };
+        Assert.False(GroupMatch.Run(miss,
+            new[] { Abs(GroupMatch.Predicate.Exact, 513), Abs(GroupMatch.Predicate.Exact, 7) }, out _));
+    }
+
+    [Fact]
+    public void Exact_FloatRoundMode_TruncAndCeil()
+    {
+        // 513.9: Trunc reduces to 513 (matches Exact-513), Ceil reduces to 514 (matches Exact-514).
+        var leaf = new[] { L(0x0, "FloatProperty", 513.9), L(0x4, "IntProperty", 7) };
+
+        Assert.True(GroupMatch.Run(leaf, new[]
+        {
+            Abs(GroupMatch.Predicate.Exact, 513, FloatRoundMode.Trunc),
+            Abs(GroupMatch.Predicate.Exact, 7,   FloatRoundMode.Trunc),
+        }, out _));
+        Assert.False(GroupMatch.Run(leaf, new[]
+        {
+            Abs(GroupMatch.Predicate.Exact, 514, FloatRoundMode.Trunc),
+            Abs(GroupMatch.Predicate.Exact, 7,   FloatRoundMode.Trunc),
+        }, out _));
+
+        Assert.True(GroupMatch.Run(leaf, new[]
+        {
+            Abs(GroupMatch.Predicate.Exact, 514, FloatRoundMode.Ceil),
+            Abs(GroupMatch.Predicate.Exact, 7,   FloatRoundMode.Ceil),
+        }, out _));
+        Assert.False(GroupMatch.Run(leaf, new[]
+        {
+            Abs(GroupMatch.Predicate.Exact, 513, FloatRoundMode.Ceil),
+            Abs(GroupMatch.Predicate.Exact, 7,   FloatRoundMode.Ceil),
+        }, out _));
     }
 
     [Fact]

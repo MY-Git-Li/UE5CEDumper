@@ -54,6 +54,29 @@ public partial class SnapshotViewModel
     /// Scan's Deep toggle. Off = the object's direct fields only.</summary>
     [ObservableProperty] private bool _groupDeep;
 
+    /// <summary>Per-panel rounding mode (Round/Trunc/Ceil): how a fractional
+    /// float/double target is reduced to the displayed integer before compare. Shared
+    /// by the single-value match (which also funnels through GroupMatchAsync) and the
+    /// group match. Persisted; default <see cref="FloatRoundMode.Round"/>.</summary>
+    [ObservableProperty] private FloatRoundMode _selectedRoundingMode = FloatRoundMode.Round;
+
+    /// <summary>Picker options for <see cref="SelectedRoundingMode"/>.</summary>
+    public IReadOnlyList<FloatRoundMode> RoundingModeOptions { get; } =
+        new[] { FloatRoundMode.Round, FloatRoundMode.Trunc, FloatRoundMode.Ceil };
+
+    /// <summary>One-line explanation of the active rounding mode (UI hint).</summary>
+    public string RoundingModeHint => SelectedRoundingMode switch
+    {
+        FloatRoundMode.Trunc => "Integer fields truncate a decimal target (10.9 → 10; Between 10.9–11.1 → 10–11). Float/double values are used as-is.",
+        FloatRoundMode.Ceil  => "Integer fields round a decimal target up (10.9 → 11; Between 10.9–11.1 → 11–12). Float/double values are used as-is.",
+        _                    => "Integer fields round a decimal target to nearest (10.9 → 11; Between 10.9–11.1 → 11–11). Float/double values are used as-is.",
+    };
+
+    partial void OnSelectedRoundingModeChanged(FloatRoundMode value)
+    {
+        OnPropertyChanged(nameof(RoundingModeHint));
+    }
+
     [ObservableProperty] private string _groupStatusText = "";
     [ObservableProperty] private GroupCandidate? _selectedGroupCandidate;
 
@@ -179,6 +202,7 @@ public partial class SnapshotViewModel
             var query = new SnapshotGroupQuery
             {
                 Deep = GroupDeep,
+                RoundMode = SelectedRoundingMode,
                 ExcludedClasses = _excludedClasses.Count > 0 ? _excludedClasses : null,
                 Slots = GroupInputs.Select(g => new SnapshotGroupSlotInput
                 {
@@ -186,6 +210,7 @@ public partial class SnapshotViewModel
                     ScanType = g.ScanType,
                     Value = g.Value,
                     Value2 = g.Value2,
+                    RoundMode = SelectedRoundingMode,
                 }).ToList(),
             };
             query.SnapshotIds.Add(GroupSnapshot!.Id);

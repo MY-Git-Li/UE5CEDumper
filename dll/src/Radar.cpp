@@ -116,6 +116,22 @@ bool TryParseScanType(const std::string& s, ScanType& out) {
     return false;
 }
 
+const char* NameOf(RoundMode rm) {
+    switch (rm) {
+        case RoundMode::Round: return "Round";
+        case RoundMode::Trunc: return "Trunc";
+        case RoundMode::Ceil:  return "Ceil";
+    }
+    return "Round";
+}
+
+bool TryParseRoundMode(const std::string& s, RoundMode& out) {
+    if (s == "Round") { out = RoundMode::Round; return true; }
+    if (s == "Trunc") { out = RoundMode::Trunc; return true; }
+    if (s == "Ceil")  { out = RoundMode::Ceil;  return true; }
+    return false;
+}
+
 bool IsPrevValueScanType(ScanType st) {
     switch (st) {
         case ScanType::Changed:
@@ -401,7 +417,22 @@ int SelectArrayInnerKey(const std::vector<std::string>& typeNames,
     return firstInt;                        // -1 if neither -> caller uses elem index
 }
 
-bool BuildNumericTargets(DataType metaDt, const std::string& raw, NumericTargetSet& out) {
+// Reduce a fractional value to the integer-valued double the game DISPLAYS, per
+// the rounding mode. Round = half-away-from-zero (std::round), Trunc = toward
+// zero, Ceil = toward +inf. Shared by the float compare predicate and the
+// integer-coercion in BuildNumericTargets / ParseValueBytes so "Between 10.9~11.1"
+// on an integer width yields 11~11 (Round) / 10~11 (Trunc) / 11~12 (Ceil).
+double ReduceRounded(double x, RoundMode m) {
+    switch (m) {
+        case RoundMode::Trunc: return std::trunc(x);
+        case RoundMode::Ceil:  return std::ceil(x);
+        case RoundMode::Round:
+        default:               return std::round(x);
+    }
+}
+
+bool BuildNumericTargets(DataType metaDt, const std::string& raw, NumericTargetSet& out,
+                         RoundMode roundMode) {
     out.entries.clear();
     const auto& members = MultiNumericMembers(metaDt);
     if (members.empty()) return false;
@@ -447,6 +478,23 @@ bool BuildNumericTargets(DataType metaDt, const std::string& raw, NumericTargetS
             double v = std::stod(s, &pos);
             if (pos == s.size()) { hasFloat = true; dv = v; }
         } catch (...) {}
+    }
+
+    // Rounding-mode integer coercion (build 1672): a fractional input (e.g.
+    // "10.9", "11.0") parses as a float but NOT as a clean integer, so integer-
+    // width members would otherwise be skipped. Reduce it to the displayed
+    // integer via the mode so those members still match (Round 10.9->11,
+    // Trunc->10, Ceil->11). A clean integer string already set hasSigned/
+    // hasUnsigned, so the !has* guards make this a no-op there; Float/Double
+    // members keep the exact fractional `dv` regardless.
+    if (hasFloat) {
+        const double r = ReduceRounded(dv, roundMode);
+        if (!hasSigned && r >= -9223372036854775808.0 && r < 9223372036854775808.0) {
+            sv = static_cast<int64_t>(r); hasSigned = true;
+        }
+        if (!hasUnsigned && !isNeg && r >= 0.0 && r < 18446744073709551616.0) {
+            uv = static_cast<uint64_t>(r); hasUnsigned = true;
+        }
     }
 
     auto push = [&](DataType dt, const void* src, size_t n) {
@@ -574,7 +622,9 @@ bool ApplyOrdered(ScanType st, T cur, T a, T b) {
         case ScanType::Exact:     return cur == a;
         case ScanType::Bigger:    return cur >  a;
         case ScanType::Smaller:   return cur <  a;
-        case ScanType::Between:   return cur >= a && cur <= b;
+        // Normalize reversed bounds (parity with C# SnapshotNumeric.BetweenMatch).
+        case ScanType::Between:   return (a <= b) ? (cur >= a && cur <= b)
+                                                  : (cur >= b && cur <= a);
         case ScanType::Changed:   return cur != a;
         case ScanType::Unchanged: return cur == a;
         case ScanType::Increased: return cur >  a;
@@ -583,36 +633,35 @@ bool ApplyOrdered(ScanType st, T cur, T a, T b) {
     return false;
 }
 
-// Tolerance-aware double predicate. tol applies as a +- band around
-// the reference value(s); per-scan-type semantics are documented on
-// ComparePredicate in Radar.h. Negative tolerance is clamped to 0
-// (a malformed UI input shouldn't widen the band on the wrong side).
-inline double Absd(double x) { return x < 0.0 ? -x : x; }
+// Displayed-integer float predicate (build 1672 — replaces the old ± tolerance
+// ApplyOrderedTol). Semantics documented on ComparePredicate in Radar.h. Let
+// r(x) = ReduceRounded(x, mode). For TARGETED predicates a WHOLE target lets the
+// player search by the displayed integer (reduce the field value); a FRACTIONAL
+// target keeps exact-literal compare (the user is being precise — positions /
+// non-whole GAS values). PREV-VALUE predicates always compare reduced cur vs
+// reduced prev ("did the displayed value change/increase/decrease"). Shared by
+// the scalar ComparePredicate and per-axis by CompareVectorPredicate.
+inline bool IsWhole(double x) { return x == std::floor(x); }
 
-bool ApplyOrderedTol(ScanType st, double cur, double a, double b, double tol) {
-    if (tol < 0.0) tol = 0.0;
+bool CompareFloatScalar(ScanType st, double cur, double a, double b, RoundMode mode) {
+    const double rc = ReduceRounded(cur, mode);
     switch (st) {
-        case ScanType::Exact:
-            // Exact equality, or within the explicit +- tolerance band.
-            if (Absd(cur - a) <= tol) return true;
-            // CE-style rounded scan (parity with the snapshot SnapshotNumeric.ExactMatch):
-            // a WHOLE-NUMBER target ALSO matches any float that ROUNDS to it — searching
-            // 513 Exact finds a 513.36 GAS FGameplayAttributeData.BaseValue. Gameplay
-            // floats display as integers but store fractional, so an unaided Exact on a
-            // whole number must still find them. Only floats reach here (ComparePredicate
-            // routes integral types to the strict ApplyOrdered), so integer Exact stays
-            // literal (513 never matches 514). std::round is half-away-from-zero, matching
-            // C#'s MidpointRounding.AwayFromZero.
-            return a == std::floor(a) && std::round(cur) == a;
-        case ScanType::Bigger:    return cur > a + tol;
-        case ScanType::Smaller:   return cur < a - tol;
-        case ScanType::Between:   return cur >= a - tol && cur <= b + tol;
-        case ScanType::Changed:   return Absd(cur - a) > tol;
-        case ScanType::Unchanged: return Absd(cur - a) <= tol;
-        case ScanType::Increased: return cur > a + tol;
-        case ScanType::Decreased: return cur < a - tol;
+        case ScanType::Exact:     return IsWhole(a) ? (rc == a) : (cur == a);
+        case ScanType::Bigger:    return IsWhole(a) ? (rc >  a) : (cur >  a);
+        case ScanType::Smaller:   return IsWhole(a) ? (rc <  a) : (cur <  a);
+        case ScanType::Between: {
+            // Normalize reversed bounds (lo > hi) so the range matches regardless of
+            // entry order — parity with C# SnapshotNumeric.BetweenMatch (Min/Max).
+            const double lo = a < b ? a : b, hi = a < b ? b : a;
+            return (IsWhole(lo) && IsWhole(hi)) ? (rc >= lo && rc <= hi)
+                                                : (cur >= lo && cur <= hi);
+        }
+        case ScanType::Changed:   return rc != ReduceRounded(a, mode);
+        case ScanType::Unchanged: return rc == ReduceRounded(a, mode);
+        case ScanType::Increased: return rc >  ReduceRounded(a, mode);
+        case ScanType::Decreased: return rc <  ReduceRounded(a, mode);
+        default:                  return false;
     }
-    return false;
 }
 
 }  // namespace
@@ -621,7 +670,7 @@ bool ComparePredicate(DataType dt, ScanType st,
                       const uint8_t* rawBytes,
                       const uint8_t* targetBytes,
                       const uint8_t* target2Bytes,
-                      double         tolerance) {
+                      RoundMode      roundMode) {
     if (!rawBytes || !targetBytes) return false;
     if (st == ScanType::Between && !target2Bytes) return false;
     // Substring predicates have no meaning for numeric types.
@@ -631,9 +680,10 @@ bool ComparePredicate(DataType dt, ScanType st,
         double cur = LoadTyped<double>(dt, rawBytes);
         double a   = LoadTyped<double>(dt, targetBytes);
         double b   = target2Bytes ? LoadTyped<double>(dt, target2Bytes) : 0.0;
-        // Tolerance is only meaningful for Float/Double: integral types
-        // get exact comparison regardless of the supplied tol value.
-        return ApplyOrderedTol(st, cur, a, b, tolerance);
+        // The rounding mode is only meaningful for Float/Double: integral types
+        // get strict comparison (an integer reduces to itself), with any
+        // fractional-target coercion already done at parse time.
+        return CompareFloatScalar(st, cur, a, b, roundMode);
     }
     if (IsSignedIntType(dt)) {
         int64_t cur = LoadTyped<int64_t>(dt, rawBytes);
@@ -739,53 +789,34 @@ bool CompareVectorPredicate(ScanType       st,
                             const uint8_t* rawBytes,
                             const uint8_t* targetBytes,
                             const uint8_t* target2Bytes,
-                            double         tolerance) {
+                            RoundMode      roundMode) {
     if (!rawBytes || !targetBytes) return false;
     if (st == ScanType::Between && !target2Bytes) return false;
     if (IsSubstringScanType(st)) return false;
-    if (tolerance < 0.0) tolerance = 0.0;
 
     float c[3], a[3], b[3] = {0.0f, 0.0f, 0.0f};
     std::memcpy(c, rawBytes,     sizeof(c));
     std::memcpy(a, targetBytes,  sizeof(a));
     if (target2Bytes) std::memcpy(b, target2Bytes, sizeof(b));
 
-    auto absf = [](float x) -> float { return x < 0.0f ? -x : x; };
-    const float tol = static_cast<float>(tolerance);
-
+    // Each axis runs the SAME scalar displayed-integer compare; combine per the
+    // scan type (ALL axes for match/range/unchanged, ANY axis for change/dir).
+    auto axisOk = [&](int i) {
+        return CompareFloatScalar(st, static_cast<double>(c[i]),
+                                  static_cast<double>(a[i]),
+                                  static_cast<double>(b[i]), roundMode);
+    };
     switch (st) {
         case ScanType::Exact:
-            for (int i = 0; i < 3; ++i)
-                if (absf(c[i] - a[i]) > tol) return false;
-            return true;
         case ScanType::Bigger:
-            for (int i = 0; i < 3; ++i)
-                if (!(c[i] > a[i] + tol)) return false;
-            return true;
         case ScanType::Smaller:
-            for (int i = 0; i < 3; ++i)
-                if (!(c[i] < a[i] - tol)) return false;
-            return true;
         case ScanType::Between:
-            for (int i = 0; i < 3; ++i)
-                if (!(c[i] >= a[i] - tol && c[i] <= b[i] + tol)) return false;
-            return true;
-        case ScanType::Changed:
-            for (int i = 0; i < 3; ++i)
-                if (absf(c[i] - a[i]) > tol) return true;
-            return false;
         case ScanType::Unchanged:
-            for (int i = 0; i < 3; ++i)
-                if (absf(c[i] - a[i]) > tol) return false;
-            return true;
+            return axisOk(0) && axisOk(1) && axisOk(2);
+        case ScanType::Changed:
         case ScanType::Increased:
-            for (int i = 0; i < 3; ++i)
-                if (c[i] > a[i] + tol) return true;
-            return false;
         case ScanType::Decreased:
-            for (int i = 0; i < 3; ++i)
-                if (c[i] < a[i] - tol) return true;
-            return false;
+            return axisOk(0) || axisOk(1) || axisOk(2);
         case ScanType::Contains:
         case ScanType::StartsWith:
         case ScanType::EndsWith:

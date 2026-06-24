@@ -61,6 +61,11 @@ public sealed class SpcGroupQuery
     /// <summary>Per-game class denylist (noise picker) — skipped at the intersection
     /// load, before the cap. Null / empty = no filtering. Ordinal comparison.</summary>
     public HashSet<string>? ExcludedClasses { get; set; }
+
+    /// <summary>How a fractional float/double target is reduced to the displayed
+    /// integer before an absolute compare. Threaded to every <c>SpcEngine.Matches</c>
+    /// call; the rounding lives in <c>SpcEngine.AbsMatches</c>.</summary>
+    public FloatRoundMode RoundMode { get; set; } = FloatRoundMode.Round;
 }
 
 /// <summary>

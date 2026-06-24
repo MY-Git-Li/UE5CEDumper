@@ -84,6 +84,27 @@ public class SpcEngineTests
         // An integer field with value 513 still matches Exact 513 (and never 514).
         var numInt = new double?[] { 513, 513 };
         Assert.True(SpcEngine.Matches(new[] { "x", "x" }, numInt, dir, abs, "IntProperty"));
+        // Integer Exact stays strict regardless of mode (no rounding to a neighbour).
+        var absInt514 = new[] { Abs(SpcAbsoluteKind.Exact, 514), Abs(SpcAbsoluteKind.Exact, 514) };
+        Assert.False(SpcEngine.Matches(new[] { "x", "x" }, numInt, dir, absInt514, "IntProperty", FloatRoundMode.Round));
+        Assert.False(SpcEngine.Matches(new[] { "x", "x" }, numInt, dir, absInt514, "IntProperty", FloatRoundMode.Ceil));
+    }
+
+    [Fact]
+    public void AbsolutePredicate_Exact_TruncAndCeil()
+    {
+        var dir = new[] { SpcPredicateKind.Any, SpcPredicateKind.Unchanged };
+        var num = new double?[] { 513.9, 513.9 };
+
+        // Trunc: 513.9 reduces to 513 -> matches Exact-513, not Exact-514.
+        var abs513 = new[] { Abs(SpcAbsoluteKind.Exact, 513), Abs(SpcAbsoluteKind.Exact, 513) };
+        var abs514 = new[] { Abs(SpcAbsoluteKind.Exact, 514), Abs(SpcAbsoluteKind.Exact, 514) };
+        Assert.True(SpcEngine.Matches(new[] { "x", "x" }, num, dir, abs513, "FloatProperty", FloatRoundMode.Trunc));
+        Assert.False(SpcEngine.Matches(new[] { "x", "x" }, num, dir, abs514, "FloatProperty", FloatRoundMode.Trunc));
+
+        // Ceil: 513.9 reduces to 514 -> matches Exact-514, not Exact-513.
+        Assert.True(SpcEngine.Matches(new[] { "x", "x" }, num, dir, abs514, "FloatProperty", FloatRoundMode.Ceil));
+        Assert.False(SpcEngine.Matches(new[] { "x", "x" }, num, dir, abs513, "FloatProperty", FloatRoundMode.Ceil));
     }
 
     [Fact]

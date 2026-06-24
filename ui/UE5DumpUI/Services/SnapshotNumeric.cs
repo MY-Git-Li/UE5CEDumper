@@ -1,4 +1,5 @@
 using System.Globalization;
+using UE5DumpUI.Models;
 
 namespace UE5DumpUI.Services;
 
@@ -56,23 +57,110 @@ public static class SnapshotNumeric
     public static bool IsFloatType(string declaredType) =>
         declaredType is "FloatProperty" or "DoubleProperty";
 
-    /// <summary>
-    /// Exact-match a decoded numeric value <paramref name="v"/> against a
-    /// <paramref name="target"/>, with FLOAT-AWARE semantics. Float/double gameplay
-    /// values display as integers but store as e.g. 513.36, so a WHOLE-NUMBER target
-    /// matches any float that ROUNDS to it (CE-style rounded scan) — searching "513"
-    /// finds a 513.36 GAS BaseValue — plus the optional ± <paramref name="tolerance"/>
-    /// band. Integer fields keep strict equality (513 never matches 514), and a
-    /// non-whole target on a float still needs the tolerance band (no rounding). Pure.
-    /// </summary>
-    public static bool ExactMatch(double v, double target, string declaredType, double tolerance = 0)
+    /// <summary>Reduce a value to the integer the game DISPLAYS, per the mode — the
+    /// C# mirror of the DLL's <c>Radar::ReduceRounded</c>. Round = half-away-from-zero
+    /// (matches the live DLL + CE), Trunc = toward zero, Ceil = toward +inf. Pure.</summary>
+    public static double Reduce(double x, FloatRoundMode mode) => mode switch
     {
-        if (!IsFloatType(declaredType)) return v == target;
-        // Exact equality (tolerance 0) or within the explicit ± band.
-        if (System.Math.Abs(v - target) <= tolerance) return true;
-        // Whole-number target: also match floats that ROUND to it (513 <- 513.36).
-        return target == System.Math.Floor(target)
-            && System.Math.Round(v, System.MidpointRounding.AwayFromZero) == target;
+        FloatRoundMode.Trunc => System.Math.Truncate(x),
+        FloatRoundMode.Ceil  => System.Math.Ceiling(x),
+        _                    => System.Math.Round(x, System.MidpointRounding.AwayFromZero),
+    };
+
+    /// <summary>True when <paramref name="x"/> is a whole number (no fractional part).</summary>
+    private static bool IsWhole(double x) => x == System.Math.Floor(x);
+
+    /// <summary>The integer a fractional <paramref name="target"/> coerces to for an
+    /// INTEGER-typed field, per the mode (e.g. Between 10.9 with Round → 11, Trunc → 10,
+    /// Ceil → 11) — the C# mirror of the DLL's BuildNumericTargets coercion. A whole
+    /// target is returned unchanged.</summary>
+    public static double CoerceIntTarget(double target, FloatRoundMode mode) =>
+        IsWhole(target) ? target : Reduce(target, mode);
+
+    /// <summary>
+    /// Displayed-integer Exact match of a decoded numeric value <paramref name="v"/>
+    /// against a <paramref name="target"/> (build 1672, replaces the tolerance band).
+    /// Float/double fields: a WHOLE target matches any value whose DISPLAYED integer
+    /// (reduce via <paramref name="mode"/>) equals it (513 finds 513.36 under Round /
+    /// Trunc; 514 finds it under Ceil); a FRACTIONAL target keeps exact-literal compare.
+    /// Integer fields stay strict — a fractional target is first coerced to an integer
+    /// via the mode. Pure.
+    /// </summary>
+    public static bool ExactMatch(double v, double target, string declaredType,
+                                  FloatRoundMode mode = FloatRoundMode.Round)
+    {
+        if (!IsFloatType(declaredType)) return v == CoerceIntTarget(target, mode);
+        return IsWhole(target) ? Reduce(v, mode) == target : v == target;
+    }
+
+    /// <summary>Displayed-integer Bigger (<paramref name="bigger"/>=true) / Smaller
+    /// (false) compare of a field value against a target. Float fields reduce the value
+    /// for a whole target (literal for a fractional one); integer fields coerce a
+    /// fractional target via the mode. Pure.</summary>
+    public static bool OrderedMatch(double v, double target, string declaredType,
+                                    FloatRoundMode mode, bool bigger)
+    {
+        if (IsFloatType(declaredType))
+        {
+            double lhs = IsWhole(target) ? Reduce(v, mode) : v;
+            return bigger ? lhs > target : lhs < target;
+        }
+        double t = CoerceIntTarget(target, mode);
+        return bigger ? v > t : v < t;
+    }
+
+    /// <summary>Displayed-integer Between: is <paramref name="v"/> within the inclusive
+    /// [lo, hi] range? Float fields reduce the value when BOTH bounds are whole (literal
+    /// otherwise); integer fields coerce each fractional bound via the mode (the 10~11 /
+    /// 11~11 behavior). Bounds are min/max-normalised. Pure.</summary>
+    public static bool BetweenMatch(double v, double lo, double hi, string declaredType,
+                                    FloatRoundMode mode)
+    {
+        double a = System.Math.Min(lo, hi), b = System.Math.Max(lo, hi);
+        if (IsFloatType(declaredType))
+        {
+            if (IsWhole(a) && IsWhole(b)) { double rv = Reduce(v, mode); return rv >= a && rv <= b; }
+            return v >= a && v <= b;
+        }
+        double la = CoerceIntTarget(a, mode), lb = CoerceIntTarget(b, mode);
+        return v >= la && v <= lb;
+    }
+
+    /// <summary>Displayed-integer "≥ low" (inclusive) — SPC AtLeast. Float fields
+    /// reduce the value for a whole bound (literal otherwise); integer fields coerce a
+    /// fractional bound via the mode. Pure.</summary>
+    public static bool AtLeastMatch(double v, double low, string declaredType, FloatRoundMode mode)
+    {
+        if (IsFloatType(declaredType)) return (IsWhole(low) ? Reduce(v, mode) : v) >= low;
+        return v >= CoerceIntTarget(low, mode);
+    }
+
+    /// <summary>Displayed-integer "≤ high" (inclusive) — SPC AtMost. Mirror of
+    /// <see cref="AtLeastMatch"/>. Pure.</summary>
+    public static bool AtMostMatch(double v, double high, string declaredType, FloatRoundMode mode)
+    {
+        if (IsFloatType(declaredType)) return (IsWhole(high) ? Reduce(v, mode) : v) <= high;
+        return v <= CoerceIntTarget(high, mode);
+    }
+
+    /// <summary>Displayed-integer temporal compare of an OLD vs NEW value for the
+    /// prev-value predicates — the "did the DISPLAYED value change/increase/decrease"
+    /// question the user asked for. Float fields reduce both sides via the mode (so
+    /// sub-display jitter like 100.1→100.4 reads as Unchanged); integer values are
+    /// already integral. <paramref name="op"/>: +1 = Increased, -1 = Decreased,
+    /// 0 = Unchanged, any other = Changed. Pure.</summary>
+    public static bool TemporalMatch(double oldV, double newV, string declaredType,
+                                     FloatRoundMode mode, int op)
+    {
+        double a = oldV, b = newV;
+        if (IsFloatType(declaredType)) { a = Reduce(oldV, mode); b = Reduce(newV, mode); }
+        return op switch
+        {
+            1  => b > a,   // Increased
+            -1 => b < a,   // Decreased
+            0  => b == a,  // Unchanged
+            _  => b != a,  // Changed
+        };
     }
 
     /// <summary>
