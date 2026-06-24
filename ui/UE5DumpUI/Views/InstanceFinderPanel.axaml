@@ -58,11 +58,6 @@
               Foreground="#E06C75" Background="Transparent"
               BorderThickness="1" BorderBrush="#E06C75"
               Padding="6,2" FontSize="11" VerticalAlignment="Center" Cursor="Hand"/>
-      <TextBlock Text="{Binding StatusText}"
-                 Foreground="#888" VerticalAlignment="Center" Margin="8,0"/>
-      <TextBlock Text="{Binding ClassFilterNote}"
-                 IsVisible="{Binding ClassFilterNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                 Foreground="#E0A050" VerticalAlignment="Center" FontSize="12"/>
     </StackPanel>
 
     <!-- Loading (class search) -->
@@ -82,7 +77,8 @@
               ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.Lookup}"
               Padding="12,4"/>
       <TextBlock Text="{Binding LookupStatusText}"
-                 Foreground="#888" VerticalAlignment="Center" Margin="8,0"/>
+                 Foreground="#AAB8D0" FontSize="13" FontFamily="Consolas, Menlo, monospace"
+                 VerticalAlignment="Center" Margin="8,0"/>
     </StackPanel>
 
     <!-- Loading (address lookup). IsIndeterminate is bound so the animation
@@ -181,6 +177,18 @@
                Text="{Binding InstanceFilterText}"
                ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.Keyword}"
                Width="300" Padding="4,2"/>
+    </StackPanel>
+
+    <!-- Status row directly above the grid (mirrors Interesting Props — the
+         place most panels surface their status / batch progress). -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,4">
+      <TextBlock Text="{Binding StatusText}"
+                 Foreground="#AAB8D0" FontSize="13" FontFamily="Consolas, Menlo, monospace"
+                 VerticalAlignment="Center"
+                 ToolTip.Tip="{Binding StatusText}"/>
+      <TextBlock Text="{Binding ClassFilterNote}"
+                 IsVisible="{Binding ClassFilterNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                 Foreground="#E0A050" FontSize="13" VerticalAlignment="Center"/>
     </StackPanel>
 
     <!-- Main content: instances list (top) + field values (bottom) -->

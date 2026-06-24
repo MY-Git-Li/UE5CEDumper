@@ -97,10 +97,13 @@ public sealed class FunctionPropsDialog : Window
         _classFieldsOnly.IsCheckedChanged += (_, _) => ApplyFilter();
         Grid.SetColumn(_classFieldsOnly, 2);
         topRow.Children.Add(_classFieldsOnly);
+        ToolTip.SetTip(_classFieldsOnly, "Show only class-member fields (hide the function's "
+            + "locals / temporaries).");
         _btnRefresh = new Button { Content = "Refresh", Padding = new Thickness(10, 4) };
         _btnRefresh.Click += async (_, _) => await RunScanAsync();
         Grid.SetColumn(_btnRefresh, 4);
         topRow.Children.Add(_btnRefresh);
+        ToolTip.SetTip(_btnRefresh, "Re-analyze the function.");
         DockPanel.SetDock(topRow, Dock.Top);
         root.Children.Add(topRow);
 
@@ -145,9 +148,11 @@ public sealed class FunctionPropsDialog : Window
         };
         _btnCopy.Click += OnCopyClicked;
         btnRow.Children.Add(_btnCopy);
+        ToolTip.SetTip(_btnCopy, "Copy the selected property's name to the clipboard.");
         var btnClose = new Button { Content = "Close", Padding = new Thickness(14, 6) };
         btnClose.Click += (_, _) => Close();
         btnRow.Children.Add(btnClose);
+        ToolTip.SetTip(btnClose, "Close this dialog.");
         DockPanel.SetDock(btnRow, Dock.Bottom);
         root.Children.Add(btnRow);
 

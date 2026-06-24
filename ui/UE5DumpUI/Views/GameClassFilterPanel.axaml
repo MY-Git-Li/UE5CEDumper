@@ -18,7 +18,8 @@
                 Foreground="#CCCCCC" FontSize="12"
                 VerticalAlignment="Center"/>
       <TextBlock Text="{Binding StatusText}"
-                 Foreground="#888" VerticalAlignment="Center" Margin="8,0"/>
+                 Foreground="#AAB8D0" FontSize="13" FontFamily="Consolas, Menlo, monospace"
+                 VerticalAlignment="Center" Margin="8,0"/>
     </StackPanel>
 
     <!-- Row 2: Filters -->

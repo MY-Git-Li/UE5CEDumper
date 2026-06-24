@@ -40,7 +40,8 @@
               ToolTip.Tip="{StaticResource str.Tip.PropertySearch.Search}"
               Classes="accent" Padding="12,4"/>
       <TextBlock Text="{Binding StatusText}"
-                 Foreground="#888" VerticalAlignment="Center" Margin="8,0"/>
+                 Foreground="#AAB8D0" FontSize="13" FontFamily="Consolas, Menlo, monospace"
+                 VerticalAlignment="Center" Margin="8,0"/>
       <TextBlock Text="{Binding ClassFilterNote}"
                  IsVisible="{Binding ClassFilterNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                  Foreground="#E0A050" VerticalAlignment="Center" FontSize="12"/>
