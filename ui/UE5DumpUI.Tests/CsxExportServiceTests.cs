@@ -73,7 +73,12 @@ public class StubDumpService : IDumpService
     public virtual Task WriteMemAsync(string addr, byte[] data, CancellationToken ct = default) => throw new NotImplementedException();
     public Task WatchAsync(string addr, int size, int intervalMs, CancellationToken ct = default) => throw new NotImplementedException();
     public Task UnwatchAsync(string addr, CancellationToken ct = default) => throw new NotImplementedException();
-    public Task<WorldWalkResult> WalkWorldAsync(int actorLimit = 200, int arrayLimit = 64, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<WorldWalkResult> WalkWorldAsync(int actorLimit = 200, int arrayLimit = 64, CancellationToken ct = default)
+        => Task.FromResult(new WorldWalkResult
+        {
+            WorldAddr = "0xA8B0", WorldName = "TestWorld",
+            LevelAddr = "0x4500", LevelName = "PersistentLevel", LevelOffset = 0x30,
+        });
     public virtual Task<FindInstancesResult> FindInstancesAsync(string className, bool exactMatch = false, int limit = 500, bool newestFirst = false, string nameFilter = "", IReadOnlyList<string>? excludeClasses = null, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<CePointerInfo> GetCePointerInfoAsync(string addr, int fieldOffset = 0, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<PackedConstsResult> SetPackedConstsAsync(int alignBits = 0, ulong ptrMaskBits = 0, bool force = false, int serialOff = -1, CancellationToken ct = default) => throw new NotImplementedException();

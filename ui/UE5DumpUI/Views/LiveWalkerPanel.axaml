@@ -71,9 +71,11 @@
                  Foreground="#888" VerticalAlignment="Center" FontSize="11"
                  IsVisible="{Binding HasData}"/>
 
-      <!-- Bookmark controls (inline, after auto-refresh) -->
+      <!-- Bookmark controls (inline, after auto-refresh). Visible when there's a live
+           object OR any saved bookmark, so persisted bookmarks are clickable right
+           after connecting (before the user has navigated). -->
       <Border BorderBrush="#444" BorderThickness="1,0,0,0" Margin="8,0,0,0" Padding="8,0,0,0"
-              IsVisible="{Binding HasData}">
+              IsVisible="{Binding ShowBookmarkBar}">
         <StackPanel Orientation="Horizontal" Spacing="4">
           <!-- Save bookmark toggle (★) — yellow when active, grey when idle -->
           <Panel>
@@ -107,6 +109,14 @@
                         Padding="5,3" MinWidth="30" FontSize="11"
                         Background="Transparent" BorderThickness="1" BorderBrush="#555"
                         Cursor="Hand">
+                  <Button.ContextFlyout>
+                    <MenuFlyout>
+                      <MenuItem Header="{StaticResource str.LiveWalker.BookmarkClearOne}"
+                                IsEnabled="{Binding IsOccupied}"
+                                Command="{Binding $parent[UserControl].((vm:LiveWalkerViewModel)DataContext).ClearBookmarkSlotCommand}"
+                                CommandParameter="{Binding}"/>
+                    </MenuFlyout>
+                  </Button.ContextFlyout>
                   <Panel>
                     <TextBlock Text="{Binding Label}"
                                IsVisible="{Binding IsOccupied}"
@@ -119,6 +129,15 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
+          <!-- Clear all bookmarks (visible only when at least one slot is filled).
+               Right-click a single slot to clear just that one. -->
+          <Button Content="{StaticResource str.LiveWalker.BookmarkClearAll}"
+                  Command="{Binding ClearAllBookmarksAndPersistCommand}"
+                  ToolTip.Tip="{StaticResource str.Tip.LiveWalker.BookmarkClearAll}"
+                  IsVisible="{Binding AnyBookmarkOccupied}"
+                  Padding="5,3" MinWidth="24" FontSize="11"
+                  Background="Transparent" BorderThickness="1" BorderBrush="#555"
+                  Foreground="#888" Cursor="Hand"/>
         </StackPanel>
       </Border>
     </StackPanel>
@@ -184,6 +203,9 @@
             <MenuItem Header="{StaticResource str.LiveWalker.DedupShared}"
                       ToggleType="CheckBox" IsChecked="{Binding DedupSharedObjects, Mode=TwoWay}"
                       ToolTip.Tip="{StaticResource str.Tip.LiveWalker.DedupShared}"/>
+            <MenuItem Header="{StaticResource str.LiveWalker.ExcludeSysComponents}"
+                      ToggleType="CheckBox" IsChecked="{Binding ExcludeSystemComponents, Mode=TwoWay}"
+                      ToolTip.Tip="{StaticResource str.Tip.LiveWalker.ExcludeSysComponents}"/>
             <MenuItem Header="{StaticResource str.LiveWalker.GuessWhat}"
                       ToggleType="CheckBox" IsChecked="{Binding FillGaps, Mode=TwoWay}"
                       ToolTip.Tip="{StaticResource str.Tip.LiveWalker.GuessWhat}"/>

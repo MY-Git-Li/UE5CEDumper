@@ -65,12 +65,13 @@ public class BookmarkTests
     }
 
     [Fact]
-    public void ViewModel_InitializesWith4EmptyBookmarkSlots()
+    public void ViewModel_InitializesWith8EmptyBookmarkSlots()
     {
         var vm = CreateViewModel();
 
-        Assert.Equal(4, vm.BookmarkSlots.Count);
-        for (int i = 0; i < 4; i++)
+        Assert.Equal(UE5DumpUI.Constants.BookmarkSlotCount, vm.BookmarkSlots.Count);
+        Assert.Equal(8, vm.BookmarkSlots.Count);
+        for (int i = 0; i < vm.BookmarkSlots.Count; i++)
         {
             Assert.Equal(i, vm.BookmarkSlots[i].SlotIndex);
             Assert.False(vm.BookmarkSlots[i].IsOccupied);

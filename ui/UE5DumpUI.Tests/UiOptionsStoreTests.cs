@@ -1,0 +1,156 @@
+using System.IO;
+using UE5DumpUI;
+using UE5DumpUI.Models;
+using UE5DumpUI.Services;
+using Xunit;
+
+namespace UE5DumpUI.Tests;
+
+/// <summary>
+/// Locks the UiOptionsStore persistence contract: defaults when no file, round-trips
+/// every sub-object through a fresh instance, falls back to defaults on a corrupt
+/// file, and — the key regression — a default-TRUE option turned OFF must SURVIVE a
+/// reload (the store must NOT use JsonIgnoreCondition.WhenWritingDefault, which would
+/// silently drop the off-value and revert it to on). Reuses
+/// <see cref="MockPlatformService"/> from AobUsageServiceTests.
+/// </summary>
+public class UiOptionsStoreTests : IDisposable
+{
+    private readonly string _tempDir;
+    private readonly MockPlatformService _platform;
+
+    public UiOptionsStoreTests()
+    {
+        _tempDir = Path.Combine(Path.GetTempPath(), $"UE5DumpUiOptTest_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_tempDir);
+        _platform = new MockPlatformService(_tempDir);
+    }
+
+    public void Dispose()
+    {
+        try { if (Directory.Exists(_tempDir)) Directory.Delete(_tempDir, recursive: true); }
+        catch { /* best effort */ }
+    }
+
+    [Fact]
+    public void Load_NoFile_ReturnsDefaults_AndDoesNotCreateFile()
+    {
+        var store = new UiOptionsStore(_platform);
+        var o = store.Load();
+
+        // Representative defaults (must match the ViewModel [ObservableProperty] initializers).
+        Assert.True(o.LiveWalker.DedupSharedObjects);
+        Assert.True(o.LiveWalker.ExcludeSystemComponents);
+        Assert.True(o.ValueSearch.GameOnly);
+        Assert.True(o.ValueSearch.ParallelScan);
+        Assert.Equal(50000, o.ValueSearch.MaxResults);
+        Assert.Equal(ValueScanDataType.Int32, o.ValueSearch.SelectedDataType);
+        Assert.Equal(7, o.Main.ArrayLimitExponent);
+        Assert.Equal(100.0, o.Teleport.ZOffset);
+        Assert.Equal(ProxyType.Version, o.ProxyDeploy.SelectedProxyType);
+
+        Assert.False(File.Exists(store.FilePath)); // load must not create the file
+    }
+
+    [Fact]
+    public void FilePath_IsUnderAppDataWithExpectedName()
+    {
+        var store = new UiOptionsStore(_platform);
+        Assert.Equal(
+            Path.Combine(_tempDir, Constants.LogFolderName, Constants.UiOptionsFile),
+            store.FilePath);
+    }
+
+    [Fact]
+    public void RoundTrip_PreservesEveryKind_AcrossFreshInstance()
+    {
+        var store = new UiOptionsStore(_platform);
+        var o = new UiOptionsSettings();
+
+        // Change a value of every kind across several panels.
+        o.Main.ArrayLimitExponent = 10;
+        o.Main.SelectedAddressFormatIndex = 2;
+        o.LiveWalker.DescShowType = true;
+        o.LiveWalker.GWorldLocateDepth = 9;
+        o.ValueSearch.SelectedDataType = ValueScanDataType.Float;
+        o.ValueSearch.SelectedScanType = ValueScanType.Bigger;
+        o.ValueSearch.MaxResults = 12345;
+        o.ValueSearch.Tolerance = 1.25;
+        o.Snapshot.SelectedFamily = "Integers only";
+        o.Snapshot.SelectedScope = "NumericAll";
+        o.Teleport.ZOffset = 250.5;
+        o.Teleport.TraceChannel = 3;
+        o.Spc.SelectedJoinMode = "Loose";
+        o.Pivot.SelectedSource = "DataTable";
+        o.ProxyDeploy.SelectedProxyType = ProxyType.Dxgi;
+
+        store.Save(o);
+        Assert.True(File.Exists(store.FilePath));
+
+        var r = new UiOptionsStore(_platform).Load();   // simulate restart
+        Assert.Equal(10, r.Main.ArrayLimitExponent);
+        Assert.Equal(2, r.Main.SelectedAddressFormatIndex);
+        Assert.True(r.LiveWalker.DescShowType);
+        Assert.Equal(9, r.LiveWalker.GWorldLocateDepth);
+        Assert.Equal(ValueScanDataType.Float, r.ValueSearch.SelectedDataType);
+        Assert.Equal(ValueScanType.Bigger, r.ValueSearch.SelectedScanType);
+        Assert.Equal(12345, r.ValueSearch.MaxResults);
+        Assert.Equal(1.25, r.ValueSearch.Tolerance);
+        Assert.Equal("Integers only", r.Snapshot.SelectedFamily);
+        Assert.Equal("NumericAll", r.Snapshot.SelectedScope);
+        Assert.Equal(250.5, r.Teleport.ZOffset);
+        Assert.Equal(3, r.Teleport.TraceChannel);
+        Assert.Equal("Loose", r.Spc.SelectedJoinMode);
+        Assert.Equal("DataTable", r.Pivot.SelectedSource);
+        Assert.Equal(ProxyType.Dxgi, r.ProxyDeploy.SelectedProxyType);
+    }
+
+    [Fact]
+    public void DefaultTrueOption_TurnedOff_SurvivesReload()
+    {
+        // REGRESSION (the WhenWritingDefault trap): turning OFF a default-true option
+        // means storing the bool type-default (false). With WhenWritingDefault that
+        // would be omitted and revert to true on reload. The store must persist it.
+        var store = new UiOptionsStore(_platform);
+        var o = new UiOptionsSettings();
+        o.LiveWalker.DedupSharedObjects = false;
+        o.LiveWalker.ExcludeSystemComponents = false;
+        o.ValueSearch.GameOnly = false;
+        o.ValueSearch.ParallelScan = false;
+        o.Snapshot.AutoSkipNoise = false;
+        o.InterestingFuncs.GameOnly = false;
+        store.Save(o);
+
+        var r = new UiOptionsStore(_platform).Load();
+        Assert.False(r.LiveWalker.DedupSharedObjects);
+        Assert.False(r.LiveWalker.ExcludeSystemComponents);
+        Assert.False(r.ValueSearch.GameOnly);
+        Assert.False(r.ValueSearch.ParallelScan);
+        Assert.False(r.Snapshot.AutoSkipNoise);
+        Assert.False(r.InterestingFuncs.GameOnly);
+    }
+
+    [Fact]
+    public void Load_CorruptFile_ReturnsDefaults()
+    {
+        var store = new UiOptionsStore(_platform);
+        Directory.CreateDirectory(Path.GetDirectoryName(store.FilePath)!);
+        File.WriteAllText(store.FilePath, "{ this is not valid json ]]");
+
+        var o = store.Load();
+        Assert.True(o.ValueSearch.GameOnly);             // fell back to defaults
+        Assert.Equal(50000, o.ValueSearch.MaxResults);
+    }
+
+    [Fact]
+    public void Load_DeletesStaleTempFile()
+    {
+        var store = new UiOptionsStore(_platform);
+        Directory.CreateDirectory(Path.GetDirectoryName(store.FilePath)!);
+        var temp = store.FilePath + ".tmp";
+        File.WriteAllText(temp, "orphaned");
+
+        store.Load();
+        Assert.False(File.Exists(temp));   // cleaned up
+    }
+}

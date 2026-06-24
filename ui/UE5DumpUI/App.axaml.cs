@@ -20,6 +20,8 @@ public class App : Application
     private ProxyDeployService? _proxyDeploy;
     private ExperimentalGate? _experimentalGate;
     private SnapshotStore? _snapshotStore;
+    private UiOptionsStore? _uiOptions;
+    private BookmarkStore? _bookmarkStore;
 
     public override void Initialize()
     {
@@ -55,6 +57,8 @@ public class App : Application
             _proxyDeploy = new ProxyDeployService(_logging);
             _experimentalGate = new ExperimentalGate(_platform, _logging);
             _snapshotStore = new SnapshotStore(_platform, _logging);
+            _uiOptions = new UiOptionsStore(_platform, _logging);
+            _bookmarkStore = new BookmarkStore(_platform, _logging);
 
             _logging.Info(Constants.LogCatInit, "UE5DumpUI starting...");
             _logging.Info(Constants.LogCatInit, $"Version:   {typeof(App).Assembly.GetName().Version}");
@@ -67,7 +71,12 @@ public class App : Application
             var globalHotkeys = new WindowsGlobalHotkeyService();
             var mainVm = new MainWindowViewModel(
                 _pipeClient, _dumpService, _logging, _platform, _aobUsage, _aobMakerBridge,
-                _proxyDeploy, _experimentalGate, _snapshotStore, globalHotkeys);
+                _proxyDeploy, _experimentalGate, _snapshotStore, globalHotkeys, _bookmarkStore);
+
+            // Load + apply persisted panel options, then track changes for
+            // debounced save-on-change. Done before the window is shown so the
+            // restored values are in place for the first render.
+            mainVm.InitializeOptionsPersistence(_uiOptions);
 
             // Restore last-session window placement (position / size / maximized,
             // validated against the monitors present this session). Attached
@@ -80,6 +89,8 @@ public class App : Application
             desktop.ShutdownRequested += (_, _) =>
             {
                 _logging?.Info(Constants.LogCatInit, "UE5DumpUI shutting down...");
+                // Flush any pending debounced option change before teardown.
+                mainVm.FlushOptions();
                 _pipeClient?.Dispose();
                 _aobMakerBridge?.Dispose();
                 _platform?.Dispose();

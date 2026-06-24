@@ -308,7 +308,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         IProxyDeployService? proxyDeploy = null,
         IExperimentalGate? experimentalGate = null,
         ISnapshotStore? snapshotStore = null,
-        IGlobalHotkeyService? globalHotkeys = null)
+        IGlobalHotkeyService? globalHotkeys = null,
+        BookmarkStore? bookmarks = null)
     {
         _pipeClient = pipeClient;
         _dump = dump;
@@ -331,7 +332,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ObjectTree = new ObjectTreeViewModel(dump, log, platform);
         ClassStruct = new ClassStructViewModel(dump, log, platform);
         Pointers = new PointerPanelViewModel(platform, dump, log, aobMaker, aobUsage, experimentalGate);
-        LiveWalker = new LiveWalkerViewModel(dump, log, platform, aobMaker);
+        LiveWalker = new LiveWalkerViewModel(dump, log, platform, aobMaker, bookmarks);
         InstanceFinder = new InstanceFinderViewModel(dump, log, platform);
         PropertySearch = new PropertySearchViewModel(dump, log, aobMaker, platform);
         GameClassFilter = new GameClassFilterViewModel(dump, log, platform);
@@ -1693,6 +1694,349 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // Global panel/Live-Walker OPTIONS persistence (stable preferences only).
+    //
+    // Wiring lives here (not in the giant ctor) and is kicked off by App after
+    // construction via InitializeOptionsPersistence. LOAD applies saved values
+    // under _suppressOptionSave so the resulting PropertyChanged storm doesn't
+    // re-save. SAVE is a single debounced write triggered when any *persistable*
+    // property of a tracked VM changes — filtered by the per-VM name sets so the
+    // constant live-data churn (Fields/StatusText/results/selections) never saves.
+    // ──────────────────────────────────────────────────────────────────────
+
+    private UiOptionsStore? _uiOptions;
+    private bool _suppressOptionSave;
+    private Timer? _optionSaveDebounce;
+    private const int OptionSaveDebounceMs = 400;
+
+    /// <summary>
+    /// Called by App right after construction: load the saved options, apply them
+    /// (suppressed), then start tracking changes for debounced save-on-change.
+    /// </summary>
+    public void InitializeOptionsPersistence(UiOptionsStore store)
+    {
+        _uiOptions = store;
+        var o = store.Load();
+
+        _suppressOptionSave = true;
+        try { ApplyOptions(o); }
+        catch (Exception ex) { _log.Error("UiOptions apply failed", ex); }
+        finally { _suppressOptionSave = false; }
+
+        WireOptionSaveTracking();
+    }
+
+    /// <summary>Cancel the debounce and write the current options immediately
+    /// (called on app shutdown so a change made &lt;debounce before exit lands).</summary>
+    public void FlushOptions()
+    {
+        _optionSaveDebounce?.Change(Timeout.Infinite, Timeout.Infinite);
+        SaveOptionsNow();
+    }
+
+    private void ScheduleOptionSave()
+    {
+        if (_uiOptions == null) return;
+        _optionSaveDebounce ??= new Timer(_ => SaveOptionsNow());
+        _optionSaveDebounce.Change(OptionSaveDebounceMs, Timeout.Infinite);
+    }
+
+    // Reads simple value-type VM properties only (bool/int/double/enum/string) —
+    // safe to run on the debounce threadpool thread (no collections, no UI objects).
+    private void SaveOptionsNow()
+    {
+        try { _uiOptions?.Save(BuildOptions()); }
+        catch (Exception ex) { _log.Error("UiOptions save failed", ex); }
+    }
+
+    private void Track(ObservableObject vm, HashSet<string> persistable)
+    {
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (_suppressOptionSave) return;
+            if (e.PropertyName != null && persistable.Contains(e.PropertyName))
+                ScheduleOptionSave();
+        };
+    }
+
+    private void WireOptionSaveTracking()
+    {
+        Track(this, MainPersist);
+        Track(LiveWalker, LiveWalkerPersist);
+        Track(ValueSearch, ValueSearchPersist);
+        Track(InstanceFinder, InstanceFinderPersist);
+        Track(PropertySearch, PropertySearchPersist);
+        Track(Teleport, TeleportPersist);
+        Track(InterestingFunctions, InterestingFuncsPersist);
+        Track(InterestingProperties, InterestingPropsPersist);
+        Track(Console, ConsolePersist);
+        Track(GameClassFilter, GameClassFilterPersist);
+        if (Snapshot != null) Track(Snapshot, SnapshotPersist);
+        if (Spc != null) Track(Spc, SpcPersist);
+        if (Pivot != null) Track(Pivot, PivotPersist);
+        if (ProxyDeploy != null) Track(ProxyDeploy, ProxyDeployPersist);
+    }
+
+    // Persistable property-name sets — used both to filter PropertyChanged and as
+    // the single source of truth for what each VM persists. nameof keeps them
+    // compile-safe against renames.
+    private static readonly HashSet<string> MainPersist = new()
+    {
+        nameof(SelectedAddressFormatIndex), nameof(CollapsePointerNodes),
+        nameof(ArrayLimitExponent), nameof(DropDownLimitExponent),
+        nameof(CsxDrilldownDepth), nameof(PreviewLimit), nameof(DeepScanElemCapExponent),
+    };
+    private static readonly HashSet<string> LiveWalkerPersist = new()
+    {
+        nameof(LiveWalkerViewModel.CollapseChain), nameof(LiveWalkerViewModel.DescShowOffset),
+        nameof(LiveWalkerViewModel.DescShowType), nameof(LiveWalkerViewModel.DedupSharedObjects),
+        nameof(LiveWalkerViewModel.ExcludeSystemComponents), nameof(LiveWalkerViewModel.GWorldLocateDepth),
+        nameof(LiveWalkerViewModel.AutoRefreshIntervalSec),
+    };
+    private static readonly HashSet<string> ValueSearchPersist = new()
+    {
+        nameof(ValueSearchViewModel.SelectedDataType), nameof(ValueSearchViewModel.SelectedScanType),
+        nameof(ValueSearchViewModel.GameOnly), nameof(ValueSearchViewModel.MaxResults),
+        nameof(ValueSearchViewModel.ScanTimeoutSeconds), nameof(ValueSearchViewModel.ParallelScan),
+        nameof(ValueSearchViewModel.BatchRead), nameof(ValueSearchViewModel.DeepScan),
+        nameof(ValueSearchViewModel.CrossObjectScan), nameof(ValueSearchViewModel.NativeCScan),
+        nameof(ValueSearchViewModel.NewestFirst), nameof(ValueSearchViewModel.PreFilterNoise),
+        nameof(ValueSearchViewModel.Tolerance), nameof(ValueSearchViewModel.CaseSensitive),
+    };
+    private static readonly HashSet<string> SnapshotPersist = new()
+    {
+        nameof(SnapshotViewModel.GameOnly), nameof(SnapshotViewModel.AutoSkipNoise),
+        nameof(SnapshotViewModel.IncludeNativeFields), nameof(SnapshotViewModel.SelectedScope),
+        nameof(SnapshotViewModel.SelectedFamily), nameof(SnapshotViewModel.SelectedMaxDataset),
+        nameof(SnapshotViewModel.ShowUsageBar), nameof(SnapshotViewModel.GroupDeep),
+    };
+    private static readonly HashSet<string> InstanceFinderPersist = new()
+    {
+        nameof(InstanceFinderViewModel.ExactMatch), nameof(InstanceFinderViewModel.NewestFirst),
+        nameof(InstanceFinderViewModel.InstanceSearchCap), nameof(InstanceFinderViewModel.DeepScanElemCap),
+    };
+    private static readonly HashSet<string> PropertySearchPersist = new()
+    {
+        nameof(PropertySearchViewModel.GameClassesOnly), nameof(PropertySearchViewModel.DeepSearch),
+    };
+    private static readonly HashSet<string> TeleportPersist = new()
+    {
+        nameof(TeleportViewModel.ZOffset), nameof(TeleportViewModel.TraceChannel),
+        nameof(TeleportViewModel.FallbackToCenter), nameof(TeleportViewModel.CursorHotkeyEnabled),
+        nameof(TeleportViewModel.RelativeDistance), nameof(TeleportViewModel.RelativeHorizontal),
+        nameof(TeleportViewModel.CoordSetRotation), nameof(TeleportViewModel.AutoRefresh),
+    };
+    private static readonly HashSet<string> SpcPersist = new() { nameof(SpcQueryViewModel.SelectedJoinMode) };
+    private static readonly HashSet<string> PivotPersist = new()
+    {
+        nameof(ClassPivotViewModel.SelectedSource), nameof(ClassPivotViewModel.SelectedKeyMode),
+    };
+    private static readonly HashSet<string> InterestingFuncsPersist = new()
+    {
+        nameof(InterestingFunctionsViewModel.GameOnly), nameof(InterestingFunctionsViewModel.ShowAll),
+    };
+    private static readonly HashSet<string> InterestingPropsPersist = new()
+    {
+        nameof(InterestingPropertiesViewModel.GameOnly), nameof(InterestingPropertiesViewModel.UnusualOnly),
+        nameof(InterestingPropertiesViewModel.ShowAll),
+    };
+    private static readonly HashSet<string> ConsolePersist = new() { nameof(ConsoleViewModel.GameOnly) };
+    private static readonly HashSet<string> GameClassFilterPersist = new() { nameof(GameClassFilterViewModel.GameClassesOnly) };
+    private static readonly HashSet<string> ProxyDeployPersist = new()
+    {
+        nameof(ProxyDeployViewModel.SelectedProxyType), nameof(ProxyDeployViewModel.ForceOverwrite),
+    };
+
+    /// <summary>Apply saved options to every VM. Runs under _suppressOptionSave.
+    /// Setters with side effects (address-format fan-out, scan-timeout clamp,
+    /// NativeCScan→NewestFirst) still fire — only the SAVE is suppressed.</summary>
+    private void ApplyOptions(UiOptionsSettings o)
+    {
+        // Main display controls first — their OnChanged fans out to child VMs.
+        SelectedAddressFormatIndex = o.Main.SelectedAddressFormatIndex;
+        CollapsePointerNodes = o.Main.CollapsePointerNodes;
+        ArrayLimitExponent = o.Main.ArrayLimitExponent;
+        DropDownLimitExponent = o.Main.DropDownLimitExponent;
+        CsxDrilldownDepth = o.Main.CsxDrilldownDepth;
+        PreviewLimit = o.Main.PreviewLimit;
+        DeepScanElemCapExponent = o.Main.DeepScanElemCapExponent;
+
+        var lw = o.LiveWalker;
+        LiveWalker.CollapseChain = lw.CollapseChain;
+        LiveWalker.DescShowOffset = lw.DescShowOffset;
+        LiveWalker.DescShowType = lw.DescShowType;
+        LiveWalker.DedupSharedObjects = lw.DedupSharedObjects;
+        LiveWalker.ExcludeSystemComponents = lw.ExcludeSystemComponents;
+        LiveWalker.GWorldLocateDepth = lw.GWorldLocateDepth;
+        LiveWalker.AutoRefreshIntervalSec = lw.AutoRefreshIntervalSec;
+
+        var vs = o.ValueSearch;
+        vs_Apply(vs);
+
+        var inf = o.InstanceFinder;
+        InstanceFinder.ExactMatch = inf.ExactMatch;
+        InstanceFinder.NewestFirst = inf.NewestFirst;
+        InstanceFinder.InstanceSearchCap = inf.InstanceSearchCap;
+        InstanceFinder.DeepScanElemCap = inf.DeepScanElemCap;
+
+        PropertySearch.GameClassesOnly = o.PropertySearch.GameClassesOnly;
+        PropertySearch.DeepSearch = o.PropertySearch.DeepSearch;
+
+        var tp = o.Teleport;
+        Teleport.ZOffset = tp.ZOffset;
+        Teleport.TraceChannel = tp.TraceChannel;
+        Teleport.FallbackToCenter = tp.FallbackToCenter;
+        Teleport.CursorHotkeyEnabled = tp.CursorHotkeyEnabled;
+        Teleport.RelativeDistance = tp.RelativeDistance;
+        Teleport.RelativeHorizontal = tp.RelativeHorizontal;
+        Teleport.CoordSetRotation = tp.CoordSetRotation;
+        Teleport.AutoRefresh = tp.AutoRefresh;
+
+        InterestingFunctions.GameOnly = o.InterestingFuncs.GameOnly;
+        InterestingFunctions.ShowAll = o.InterestingFuncs.ShowAll;
+
+        InterestingProperties.GameOnly = o.InterestingProps.GameOnly;
+        InterestingProperties.UnusualOnly = o.InterestingProps.UnusualOnly;
+        InterestingProperties.ShowAll = o.InterestingProps.ShowAll;
+
+        Console.GameOnly = o.Console.GameOnly;
+        GameClassFilter.GameClassesOnly = o.GameClassFilter.GameClassesOnly;
+
+        if (Snapshot != null)
+        {
+            var sn = o.Snapshot;
+            Snapshot.GameOnly = sn.GameOnly;
+            Snapshot.AutoSkipNoise = sn.AutoSkipNoise;
+            Snapshot.IncludeNativeFields = sn.IncludeNativeFields;
+            Snapshot.SelectedScope = sn.SelectedScope;
+            Snapshot.SelectedFamily = sn.SelectedFamily;
+            Snapshot.SelectedMaxDataset = sn.SelectedMaxDataset;
+            Snapshot.ShowUsageBar = sn.ShowUsageBar;
+            Snapshot.GroupDeep = sn.GroupDeep;
+        }
+        if (Spc != null) Spc.SelectedJoinMode = o.Spc.SelectedJoinMode;
+        if (Pivot != null)
+        {
+            Pivot.SelectedSource = o.Pivot.SelectedSource;
+            Pivot.SelectedKeyMode = o.Pivot.SelectedKeyMode;
+        }
+        if (ProxyDeploy != null)
+        {
+            ProxyDeploy.SelectedProxyType = o.ProxyDeploy.SelectedProxyType;
+            ProxyDeploy.ForceOverwrite = o.ProxyDeploy.ForceOverwrite;
+        }
+    }
+
+    // NativeCScan's setter forces NewestFirst on/off, so apply it BEFORE NewestFirst
+    // — otherwise the side effect would clobber the saved NewestFirst value.
+    private void vs_Apply(ValueSearchUiOptions vs)
+    {
+        ValueSearch.SelectedDataType = vs.SelectedDataType;
+        ValueSearch.SelectedScanType = vs.SelectedScanType;
+        ValueSearch.GameOnly = vs.GameOnly;
+        ValueSearch.MaxResults = vs.MaxResults;
+        ValueSearch.ScanTimeoutSeconds = vs.ScanTimeoutSeconds;
+        ValueSearch.ParallelScan = vs.ParallelScan;
+        ValueSearch.BatchRead = vs.BatchRead;
+        ValueSearch.DeepScan = vs.DeepScan;
+        ValueSearch.CrossObjectScan = vs.CrossObjectScan;
+        ValueSearch.NativeCScan = vs.NativeCScan;     // may flip NewestFirst (side effect)
+        ValueSearch.NewestFirst = vs.NewestFirst;     // saved value wins (applied last)
+        ValueSearch.PreFilterNoise = vs.PreFilterNoise;
+        ValueSearch.Tolerance = vs.Tolerance;
+        ValueSearch.CaseSensitive = vs.CaseSensitive;
+    }
+
+    /// <summary>Snapshot the current option values from every VM into a settings object.</summary>
+    private UiOptionsSettings BuildOptions()
+    {
+        var o = new UiOptionsSettings();
+
+        o.Main.SelectedAddressFormatIndex = SelectedAddressFormatIndex;
+        o.Main.CollapsePointerNodes = CollapsePointerNodes;
+        o.Main.ArrayLimitExponent = ArrayLimitExponent;
+        o.Main.DropDownLimitExponent = DropDownLimitExponent;
+        o.Main.CsxDrilldownDepth = CsxDrilldownDepth;
+        o.Main.PreviewLimit = PreviewLimit;
+        o.Main.DeepScanElemCapExponent = DeepScanElemCapExponent;
+
+        o.LiveWalker.CollapseChain = LiveWalker.CollapseChain;
+        o.LiveWalker.DescShowOffset = LiveWalker.DescShowOffset;
+        o.LiveWalker.DescShowType = LiveWalker.DescShowType;
+        o.LiveWalker.DedupSharedObjects = LiveWalker.DedupSharedObjects;
+        o.LiveWalker.ExcludeSystemComponents = LiveWalker.ExcludeSystemComponents;
+        o.LiveWalker.GWorldLocateDepth = LiveWalker.GWorldLocateDepth;
+        o.LiveWalker.AutoRefreshIntervalSec = LiveWalker.AutoRefreshIntervalSec;
+
+        o.ValueSearch.SelectedDataType = ValueSearch.SelectedDataType;
+        o.ValueSearch.SelectedScanType = ValueSearch.SelectedScanType;
+        o.ValueSearch.GameOnly = ValueSearch.GameOnly;
+        o.ValueSearch.MaxResults = ValueSearch.MaxResults;
+        o.ValueSearch.ScanTimeoutSeconds = ValueSearch.ScanTimeoutSeconds;
+        o.ValueSearch.ParallelScan = ValueSearch.ParallelScan;
+        o.ValueSearch.BatchRead = ValueSearch.BatchRead;
+        o.ValueSearch.DeepScan = ValueSearch.DeepScan;
+        o.ValueSearch.CrossObjectScan = ValueSearch.CrossObjectScan;
+        o.ValueSearch.NativeCScan = ValueSearch.NativeCScan;
+        o.ValueSearch.NewestFirst = ValueSearch.NewestFirst;
+        o.ValueSearch.PreFilterNoise = ValueSearch.PreFilterNoise;
+        o.ValueSearch.Tolerance = ValueSearch.Tolerance;
+        o.ValueSearch.CaseSensitive = ValueSearch.CaseSensitive;
+
+        o.InstanceFinder.ExactMatch = InstanceFinder.ExactMatch;
+        o.InstanceFinder.NewestFirst = InstanceFinder.NewestFirst;
+        o.InstanceFinder.InstanceSearchCap = InstanceFinder.InstanceSearchCap;
+        o.InstanceFinder.DeepScanElemCap = InstanceFinder.DeepScanElemCap;
+
+        o.PropertySearch.GameClassesOnly = PropertySearch.GameClassesOnly;
+        o.PropertySearch.DeepSearch = PropertySearch.DeepSearch;
+
+        o.Teleport.ZOffset = Teleport.ZOffset;
+        o.Teleport.TraceChannel = Teleport.TraceChannel;
+        o.Teleport.FallbackToCenter = Teleport.FallbackToCenter;
+        o.Teleport.CursorHotkeyEnabled = Teleport.CursorHotkeyEnabled;
+        o.Teleport.RelativeDistance = Teleport.RelativeDistance;
+        o.Teleport.RelativeHorizontal = Teleport.RelativeHorizontal;
+        o.Teleport.CoordSetRotation = Teleport.CoordSetRotation;
+        o.Teleport.AutoRefresh = Teleport.AutoRefresh;
+
+        o.InterestingFuncs.GameOnly = InterestingFunctions.GameOnly;
+        o.InterestingFuncs.ShowAll = InterestingFunctions.ShowAll;
+
+        o.InterestingProps.GameOnly = InterestingProperties.GameOnly;
+        o.InterestingProps.UnusualOnly = InterestingProperties.UnusualOnly;
+        o.InterestingProps.ShowAll = InterestingProperties.ShowAll;
+
+        o.Console.GameOnly = Console.GameOnly;
+        o.GameClassFilter.GameClassesOnly = GameClassFilter.GameClassesOnly;
+
+        if (Snapshot != null)
+        {
+            o.Snapshot.GameOnly = Snapshot.GameOnly;
+            o.Snapshot.AutoSkipNoise = Snapshot.AutoSkipNoise;
+            o.Snapshot.IncludeNativeFields = Snapshot.IncludeNativeFields;
+            o.Snapshot.SelectedScope = Snapshot.SelectedScope;
+            o.Snapshot.SelectedFamily = Snapshot.SelectedFamily;
+            o.Snapshot.SelectedMaxDataset = Snapshot.SelectedMaxDataset;
+            o.Snapshot.ShowUsageBar = Snapshot.ShowUsageBar;
+            o.Snapshot.GroupDeep = Snapshot.GroupDeep;
+        }
+        if (Spc != null) o.Spc.SelectedJoinMode = Spc.SelectedJoinMode;
+        if (Pivot != null)
+        {
+            o.Pivot.SelectedSource = Pivot.SelectedSource;
+            o.Pivot.SelectedKeyMode = Pivot.SelectedKeyMode;
+        }
+        if (ProxyDeploy != null)
+        {
+            o.ProxyDeploy.SelectedProxyType = ProxyDeploy.SelectedProxyType;
+            o.ProxyDeploy.ForceOverwrite = ProxyDeploy.ForceOverwrite;
+        }
+
+        return o;
+    }
+
     /// <summary>
     /// Apply a fully-scanned engine state to all child ViewModels.
     /// Shared between ConnectAsync (normal mode) and TriggerScanAsync (proxy mode).
@@ -1703,6 +2047,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         ObjectTree.SetEngineState(state);
         LiveWalker.SetEngineState(state);
+        // Load this game's persisted bookmarks (SetEngineState above captured the PE
+        // hash). Self-clears in-memory first, so it's safe on both connect and a
+        // game-change re-scan. Synchronous (tiny file).
+        LiveWalker.LoadBookmarksForGame(state.PeHash);
         InstanceFinder.SetEngineState(state);
         ValueSearch.SetEngineState(state);
         InterestingFunctions.IsGWorldAvailable = state.HasGWorld;

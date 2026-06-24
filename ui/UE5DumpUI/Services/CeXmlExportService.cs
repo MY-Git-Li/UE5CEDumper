@@ -1,5 +1,6 @@
 using System.Text;
 using UE5DumpUI.Core;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 using UE5DumpUI.ViewModels;
 
@@ -163,6 +164,34 @@ public static class CeXmlExportService
     /// after the synchronous Generate* call (same thread) to warn the user.
     /// </summary>
     public static bool LastExportTruncated => _emitTruncated;
+
+    /// <summary>
+    /// Opt-in (default on at the Live Walker call sites): skip system/engine asset
+    /// fields (Widget, SoundBase, Texture, Material, ParticleSystem, Niagara,
+    /// AnimInstance …) encountered while RECURSIVELY expanding a CE export. Set per
+    /// Generate* entry; the gate itself lives in <see cref="EmitFields"/> and only
+    /// fires for children (emit depth &gt; 1), never the top-level user-selected fields.
+    /// </summary>
+    [ThreadStatic]
+    private static bool _excludeSystemComponents;
+
+    /// <summary>
+    /// Current <see cref="EmitFields"/> nesting depth (1 = the top-level user-selected
+    /// fields, &gt;1 = recursively-resolved struct / pointer children). The noise filter
+    /// keys off this so it never drops a field the user explicitly put on screen.
+    /// </summary>
+    [ThreadStatic]
+    private static int _emitDepth;
+
+    /// <summary>Count of fields the noise filter skipped during the most recent
+    /// Generate* call — surfaced to the user as an "N system fields hidden" note.</summary>
+    [ThreadStatic]
+    private static int _systemFieldsSkipped;
+
+    /// <summary>Number of system/engine fields the noise filter dropped in the most
+    /// recent Generate* call (read same-thread right after, like
+    /// <see cref="LastExportTruncated"/>).</summary>
+    public static int LastSystemFieldsSkipped => _systemFieldsSkipped;
 
     /// <summary>
     /// Per-call resolved-field dictionaries, mirrored into thread-static state so
@@ -760,7 +789,8 @@ public static class CeXmlExportService
         bool includeGuessed = false,
         bool descShowOffset = false,
         bool descShowType = false,
-        bool dedupShared = false)
+        bool dedupShared = false,
+        bool excludeSystemComponents = false)
     {
         // Clean breadcrumbs: remove navigation cycles (e.g., Child->Parent->Child)
         // before generating XML to avoid deeply nested duplicate pointer chains.
@@ -772,12 +802,15 @@ public static class CeXmlExportService
         _descShowOffset = descShowOffset;
         _descShowType = descShowType;
         _dedupShared = dedupShared;
+        _excludeSystemComponents = excludeSystemComponents;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
         _emitPath = new HashSet<string>(StringComparer.Ordinal);
         _emitPointerDepth = 0;
+        _emitDepth = 0;
         _emitEntryCount = 0;
+        _systemFieldsSkipped = 0;
         _emitTruncated = false;
         _emittedInstances = new HashSet<string>(StringComparer.Ordinal);
         _resolvedStructsState = resolvedStructs;
@@ -872,7 +905,8 @@ public static class CeXmlExportService
         bool includeGuessed = false,
         bool descShowOffset = false,
         bool descShowType = false,
-        bool dedupShared = false)
+        bool dedupShared = false,
+        bool excludeSystemComponents = false)
     {
         _nextId = 100;
         _collapsePointerNodes = collapsePointerNodes;
@@ -880,12 +914,15 @@ public static class CeXmlExportService
         _descShowOffset = descShowOffset;
         _descShowType = descShowType;
         _dedupShared = dedupShared;
+        _excludeSystemComponents = excludeSystemComponents;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
         _emitPath = new HashSet<string>(StringComparer.Ordinal);
         _emitPointerDepth = 0;
+        _emitDepth = 0;
         _emitEntryCount = 0;
+        _systemFieldsSkipped = 0;
         _emitTruncated = false;
         _emittedInstances = new HashSet<string>(StringComparer.Ordinal);
         _resolvedStructsState = resolvedStructs;
@@ -989,7 +1026,8 @@ public static class CeXmlExportService
         bool includeGuessed = false,
         bool descShowOffset = false,
         bool descShowType = false,
-        bool dedupShared = false)
+        bool dedupShared = false,
+        bool excludeSystemComponents = false)
     {
         var cleanedBc = CleanBreadcrumbs(breadcrumbs);
 
@@ -999,12 +1037,15 @@ public static class CeXmlExportService
         _descShowOffset = descShowOffset;
         _descShowType = descShowType;
         _dedupShared = dedupShared;
+        _excludeSystemComponents = excludeSystemComponents;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
         _emitPath = new HashSet<string>(StringComparer.Ordinal);
         _emitPointerDepth = 0;
+        _emitDepth = 0;
         _emitEntryCount = 0;
+        _systemFieldsSkipped = 0;
         _emitTruncated = false;
         _emittedInstances = new HashSet<string>(StringComparer.Ordinal);
         _resolvedStructsState = resolvedStructs;
@@ -1640,6 +1681,12 @@ public static class CeXmlExportService
         Dictionary<string, List<LiveFieldValue>>? resolvedStructs,
         Dictionary<string, List<LiveFieldValue>>? resolvedInstances = null)
     {
+        // Track nesting depth so the system-component noise filter (below) fires only
+        // for recursively-resolved children (depth > 1), never the top-level fields the
+        // user explicitly selected (depth == 1). Plain inc/dec (no try/finally) mirrors
+        // _emitPointerDepth: EmitFields doesn't throw under normal use, and the next
+        // Generate* resets _emitDepth, so an exception can't leak a stale depth across calls.
+        _emitDepth++;
         foreach (var field in fields)
         {
             // Global safety budget: a dense object graph can fan the drilldown out
@@ -1655,6 +1702,20 @@ public static class CeXmlExportService
             // calls) drop them, so a struct/pointer export never silently dumps a pile of
             // speculative guessed rows the user didn't ask for.
             if (field.IsGuessed && !_includeGuessed) continue;
+
+            // System/engine asset noise filter (default on at the Live Walker call sites):
+            // skip a pointer field whose pointee class is a known engine asset
+            // (Widget / SoundBase / Texture / Material / Particle / Niagara / AnimInstance …)
+            // — but ONLY while recursing into resolved children (depth > 1). The top-level
+            // fields the user explicitly selected (depth == 1) are never dropped. Tests
+            // PtrClassName only, so a plain struct member (e.g. a GAS FGameplayAttributeData,
+            // whose StructTypeName we deliberately ignore) is never affected by this.
+            if (_excludeSystemComponents && _emitDepth > 1
+                && CeExportNoiseFilter.IsSystemComponent(field.PtrClassName))
+            {
+                _systemFieldsSkipped++;
+                continue;
+            }
 
             // Check if this StructProperty has pre-resolved children. Key is
             // StructDataAddr (absolute address) — unique across instances, so
@@ -1787,6 +1848,7 @@ public static class CeXmlExportService
                     $"+{field.Offset:X}", null);
             }
         }
+        _emitDepth--;
     }
 
     /// <summary>

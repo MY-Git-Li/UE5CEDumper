@@ -185,6 +185,7 @@
     <sys:String x:Key="str.LiveWalker.CollapseChain">Collapse chain</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportOptions">Options</sys:String>
     <sys:String x:Key="str.LiveWalker.DedupShared">Dedup shared objects</sys:String>
+    <sys:String x:Key="str.LiveWalker.ExcludeSysComponents">Skip system components</sys:String>
     <sys:String x:Key="str.LiveWalker.DescShowOffset">Append +Offset</sys:String>
     <sys:String x:Key="str.LiveWalker.DescShowType">Append +Type</sys:String>
     <sys:String x:Key="str.LiveWalker.ExportCsx">Export CSX</sys:String>
@@ -215,8 +216,11 @@
 
     <!-- Live Walker: Bookmarks -->
     <sys:String x:Key="str.LiveWalker.BookmarkSave">&#x2605;</sys:String>
-    <sys:String x:Key="str.Tip.LiveWalker.BookmarkSave">Save a bookmark: click &#x2605;, then click a slot (1-4) on the right to store the current view (object, selected rows, and scroll position) in that slot.</sys:String>
-    <sys:String x:Key="str.Tip.LiveWalker.BookmarkSaveActive">Save mode on: click a slot (1-4) to store the current view there, or click &#x2605; again to cancel.</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.BookmarkSave">Save a bookmark: click &#x2605;, then click a slot (1-8) on the right to store the current view (object, selected rows, and scroll position) in that slot. Bookmarks are remembered per game and reload automatically next time you connect to the same game.</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.BookmarkSaveActive">Save mode on: click a slot (1-8) to store the current view there, or click &#x2605; again to cancel.</sys:String>
+    <sys:String x:Key="str.LiveWalker.BookmarkClearOne">Clear this bookmark</sys:String>
+    <sys:String x:Key="str.LiveWalker.BookmarkClearAll">&#x2715;</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.BookmarkClearAll">Clear ALL bookmarks for this game (also deletes the saved file). To clear just one, right-click that slot.</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.BookmarkClear">Clear this bookmark</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.BookmarkEmpty">Empty bookmark slot</sys:String>
 
@@ -955,6 +959,7 @@
     <sys:String x:Key="str.Tip.LiveWalker.DescShowOffset">Append each node's field offset (hex) to its CE Description — e.g. "AbilitySystemComponent (7E0)". Off = name only.</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.DescShowType">Append each node's class / struct / element type to its CE Description — e.g. "AbilitySystemComponent (LSAbilitySystemComponent)", "[0] (ShieldAttributeSet)". The folded (Collapse chain) spine never adds a type. Off = name only.</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.DedupShared">Expand each drilled object once: a shared object reached from several fields (or a back-reference) is fully expanded the first time and shown as a flat "(shared)" pointer afterwards. Prevents the huge / out-of-memory export when the drilldown reaches a densely-connected object (e.g. the World). Off = expand every reference fully (can be very large at high Drill Depth).</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.ExcludeSysComponents">Default ON. When DRILLING into pointer/struct children, skip fields whose object class is a system/engine asset (Widget, SoundBase, Texture, Material, ParticleSystem, Niagara, AnimInstance) so the CE export stays focused on gameplay data. The fields you explicitly selected are always kept — only resolved children are filtered. Gameplay classes (Actor / Pawn / Character / components / Controller / PlayerState / GameInstance) are never skipped. Container (array/map/set) elements are not filtered. A "N system fields hidden" note shows when anything was dropped. Off = export every drilled field.</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.CollapseChain">Collapse the multi-level GWorld-to-target pointer hops into a single CE multi-level-pointer entry (keeps base, one merged spine node, and the target field with its drill-down). Applies to Copy CE XML and Copy CE Field only.</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.ExportCsx">Export CE Structure Dissect script (.csx). Pick the CE format version from the dropdown.</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.ExportCsxPre77">Legacy format for CE before 7.7: a bit-field bool is exported as a whole Byte with the bit index noted in its description (no bit switch).</sys:String>

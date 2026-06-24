@@ -75,7 +75,13 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     partial void OnHasDataChanged(bool value)
     {
         if (value) LocateFailureMessage = "";
+        OnPropertyChanged(nameof(ShowBookmarkBar));
     }
+
+    /// <summary>Show the bookmark toolbar when there's a live object OR any saved
+    /// bookmark exists — so persisted bookmarks are clickable right after connecting,
+    /// before the user has navigated anywhere.</summary>
+    public bool ShowBookmarkBar => HasData || AnyBookmarkOccupied;
 
     // Multi-selection snapshot. Updated by LiveWalkerPanel's SelectionChanged
     // handler whenever the DataGrid's SelectedItems changes. Drives Copy CE
@@ -306,6 +312,15 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     // combinatorial blow-up that otherwise OOMs Copy CE XML on a dense object graph.
     [ObservableProperty] private bool _dedupSharedObjects = true;
 
+    // Skip system/engine asset fields (Widget, SoundBase, Texture, Material, Particle,
+    // Niagara, AnimInstance …) when DRILLING into pointer/struct children in Copy CE XML /
+    // Copy CE Field (default ON). A CE user rarely watches those. Only the recursively-
+    // resolved children are filtered — the top-level fields the user explicitly selected
+    // are always kept (CeXmlExportService gates on emit depth). Name-based, conservative:
+    // gameplay classes (Actor/Pawn/Character/components/Controller/PlayerState/GameInstance)
+    // are never dropped, and a "N system fields hidden" note shows when anything was skipped.
+    [ObservableProperty] private bool _excludeSystemComponents = true;
+
     // AOBMaker CE Plugin detection cooldown (avoids spamming pipe connect on rapid navigation)
     private DateTime _lastAobMakerCheck = DateTime.MinValue;
     private static readonly TimeSpan AobMakerCheckCooldown = TimeSpan.FromSeconds(5);
@@ -330,6 +345,14 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     private List<BreadcrumbItem>? _preBookmarkBreadcrumbs;
     private string _preBookmarkAddress = "";
     private WorldWalkResult? _preBookmarkCachedWorld;
+
+    // Per-game bookmark persistence (keyed by PE hash). _bookmarks is null when the
+    // store wasn't injected (tests). _activePeHash identifies which game's file to
+    // write. _suppressBookmarkPersist gates the save while hydrating slots from disk
+    // so the load doesn't immediately re-save.
+    private readonly BookmarkStore? _bookmarks;
+    private string _activePeHash = "";
+    private bool _suppressBookmarkPersist;
 
     /// <summary>
     /// Raised when the View should scroll the DataGrid to a specific field name.
@@ -403,15 +426,16 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     }
 
     public LiveWalkerViewModel(IDumpService dump, ILoggingService log, IPlatformService platform,
-                               IAobMakerBridge? aobMaker = null)
+                               IAobMakerBridge? aobMaker = null, BookmarkStore? bookmarks = null)
     {
         _dump = dump;
         _log = log;
         _platform = platform;
         _aobMaker = aobMaker;
+        _bookmarks = bookmarks;
 
-        // Initialize 4 empty bookmark slots
-        for (int i = 0; i < 4; i++)
+        // Initialize the bookmark slots
+        for (int i = 0; i < Constants.BookmarkSlotCount; i++)
             BookmarkSlots.Add(new BookmarkSlot { SlotIndex = i });
 
         // Keep IsRootGWorld in sync with the breadcrumb root so the AOB option
@@ -425,6 +449,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     public void SetEngineState(EngineState state)
     {
         _engineState = state;
+        _activePeHash = state?.PeHash ?? "";
         IsAobSymbolAvailable = !string.IsNullOrEmpty(state?.GWorldAob);
         IsGWorldAvailable = state?.HasGWorld ?? false;
     }
@@ -2636,6 +2661,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         StatusText = $"Bookmark {slot.DisplayNumber} saved";
         var topName = slot.SavedTopRow?.Name ?? "-";
         _log.Info($"Bookmark saved slot={slot.SlotIndex} addr={CurrentAddress} name={CurrentObjectName} sel={slot.SavedSelectedFields.Count} top={topName}");
+
+        PersistBookmarks();
     }
 
     [RelayCommand]
@@ -2692,7 +2719,11 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
             // Re-display the saved view. Branches are mutually exclusive and all
             // rebuild Fields, so selection + scroll restore happens once at the end.
+            // restoredFully = false marks a STALE persisted bookmark (address no longer
+            // resolves to the saved object) so we skip applying its now-meaningless
+            // selection/scroll and tell the user instead of showing wrong data.
             var lastBc = Breadcrumbs.LastOrDefault();
+            bool restoredFully = true;
             if (lastBc != null)
             {
                 if (lastBc.IsContainerView && lastBc.ContainerField != null)
@@ -2708,11 +2739,14 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     // element view, not the parent object grid. Falls through to the walk
                     // below when no live match (graceful degradation).
                 }
-                else if (IsGWorldActorListRoot(lastBc))
+                else if (lastBc.FieldName == "GWorld")
                 {
-                    // Only the genuine GWorld root re-shows the actor list — a deeper
-                    // OwningWorld crumb at the same address is walked as an instance.
-                    PopulateFromWorld(_cachedWorld!);
+                    // GWorld actor-list root. A persisted bookmark carries no cached world,
+                    // so re-walk it fresh — GWorld is a stable singleton, so this restores
+                    // correctly even after a game restart. An in-session bookmark reuses the
+                    // cached walk.
+                    _cachedWorld ??= await _dump.WalkWorldAsync(500, arrayLimit: ArrayLimit);
+                    PopulateFromWorld(_cachedWorld);
                 }
                 else
                 {
@@ -2722,15 +2756,31 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                         arrayLimit: ArrayLimit, previewLimit: PreviewLimit, fillGaps: FillGaps);
                     result = await AutoFillGapsRetryAsync(result, lastBc.Address, classAddr);
                     UpdateDisplay(result);
+
+                    // Staleness guard: a persisted bookmark's address is only valid while
+                    // the same game PROCESS is alive. After a restart it's dead and the walk
+                    // lands on garbage / a different object — detect via a class-name mismatch
+                    // and degrade honestly (keep the bookmark, drop the stale selection).
+                    if (!string.IsNullOrEmpty(slot.SavedClassName)
+                        && !string.Equals(CurrentClassName, slot.SavedClassName, StringComparison.Ordinal))
+                    {
+                        restoredFully = false;
+                    }
                 }
             }
 
-            // Re-select the rows the user had selected + restore the scroll position.
-            RestoreBookmarkView?.Invoke(slot.SavedSelectedFields, slot.SavedTopRow);
-
-            StatusText = $"Bookmark {slot.DisplayNumber} loaded";
+            if (restoredFully)
+            {
+                // Re-select the rows the user had selected + restore the scroll position.
+                RestoreBookmarkView?.Invoke(slot.SavedSelectedFields, slot.SavedTopRow);
+                StatusText = $"Bookmark {slot.DisplayNumber} loaded";
+            }
+            else
+            {
+                StatusText = $"Bookmark {slot.DisplayNumber} stale (game may have restarted) — re-create it";
+            }
             var topName = slot.SavedTopRow?.Name ?? "-";
-            _log.Info($"Bookmark loaded slot={slot.SlotIndex} addr={slot.SavedAddress} sel={slot.SavedSelectedFields.Count} top={topName}");
+            _log.Info($"Bookmark loaded slot={slot.SlotIndex} addr={slot.SavedAddress} sel={slot.SavedSelectedFields.Count} top={topName} full={restoredFully}");
         }
         catch (Exception ex)
         {
@@ -2760,7 +2810,9 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         slot.SavedTopRow = null;
     }
 
-    /// <summary>Clear all bookmark slots (called on disconnect).</summary>
+    /// <summary>Clear all bookmark slots IN MEMORY (called on connect/disconnect).
+    /// Does NOT touch the persisted file — that only happens on the user's explicit
+    /// "clear all" (<see cref="ClearAllBookmarksAndPersist"/>).</summary>
     public void ClearAllBookmarks()
     {
         foreach (var slot in BookmarkSlots)
@@ -2769,6 +2821,139 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         _preBookmarkAddress = "";
         _preBookmarkCachedWorld = null;
         IsBookmarkSaveMode = false;
+    }
+
+    /// <summary>User action — clear ONE slot and persist the change to disk.</summary>
+    [RelayCommand]
+    private void ClearBookmarkSlot(BookmarkSlot? slot)
+    {
+        if (slot == null) return;
+        ClearBookmark(slot);     // in-memory reset
+        PersistBookmarks();
+    }
+
+    /// <summary>User action — clear ALL slots and delete the game's bookmark file.</summary>
+    [RelayCommand]
+    private void ClearAllBookmarksAndPersist()
+    {
+        ClearAllBookmarks();
+        if (_bookmarks != null && !string.IsNullOrEmpty(_activePeHash))
+            _bookmarks.Delete(_activePeHash);
+        OnPropertyChanged(nameof(AnyBookmarkOccupied));
+        OnPropertyChanged(nameof(ShowBookmarkBar));
+        StatusText = "All bookmarks cleared";
+    }
+
+    /// <summary>True when any slot is occupied — gates the "clear all" button visibility.</summary>
+    public bool AnyBookmarkOccupied => BookmarkSlots.Any(s => s.IsOccupied);
+
+    // ── Per-game bookmark persistence ──────────────────────────────────────
+
+    /// <summary>Write the current occupied slots to the active game's file. No-op
+    /// without a store / active game, or while hydrating (suppressed).</summary>
+    private void PersistBookmarks()
+    {
+        OnPropertyChanged(nameof(AnyBookmarkOccupied));
+        OnPropertyChanged(nameof(ShowBookmarkBar));
+        if (_bookmarks == null || _suppressBookmarkPersist || string.IsNullOrEmpty(_activePeHash)) return;
+        try
+        {
+            var file = new BookmarkFile { PeHash = _activePeHash };
+            foreach (var slot in BookmarkSlots)
+                if (slot.IsOccupied)
+                    file.Slots.Add(ToPersisted(slot));
+            _bookmarks.Save(_activePeHash, file);
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"PersistBookmarks failed (pe={_activePeHash})", ex);
+        }
+    }
+
+    /// <summary>Load the given game's bookmarks into the slots, replacing whatever's
+    /// in memory. Called from MainWindowViewModel on connect / game-change. Hydration
+    /// is suppressed so it doesn't re-save, and addresses are kept as same-process
+    /// fast-path hints (the load path validates + degrades on a game restart).</summary>
+    public void LoadBookmarksForGame(string peHash)
+    {
+        _activePeHash = peHash ?? "";
+        if (_bookmarks == null || string.IsNullOrEmpty(_activePeHash)) return;
+
+        _suppressBookmarkPersist = true;
+        try
+        {
+            foreach (var slot in BookmarkSlots) ClearBookmark(slot);   // start clean (idempotent)
+
+            var file = _bookmarks.Load(_activePeHash);
+            foreach (var pb in file.Slots)
+            {
+                if (pb.SlotIndex >= 0 && pb.SlotIndex < BookmarkSlots.Count)
+                    HydrateSlot(BookmarkSlots[pb.SlotIndex], pb);
+            }
+            _log.Info($"Bookmarks loaded for pe={_activePeHash}: {file.Slots.Count} slot(s)");
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"LoadBookmarksForGame failed (pe={_activePeHash})", ex);
+        }
+        finally
+        {
+            _suppressBookmarkPersist = false;
+            OnPropertyChanged(nameof(AnyBookmarkOccupied));
+        OnPropertyChanged(nameof(ShowBookmarkBar));
+        }
+    }
+
+    private static PersistedBookmark ToPersisted(BookmarkSlot slot) => new()
+    {
+        SlotIndex = slot.SlotIndex,
+        Label = slot.Label,
+        SavedObjectName = slot.SavedObjectName,
+        SavedClassName = slot.SavedClassName,
+        SavedAddress = slot.SavedAddress,
+        SavedClassAddr = slot.SavedClassAddr,
+        Breadcrumbs = slot.SavedBreadcrumbs.Select(bc => new PersistedCrumb
+        {
+            Address = bc.Address,
+            Label = bc.Label,
+            ClassAddr = bc.ClassAddr,
+            FieldOffset = bc.FieldOffset,
+            FieldName = bc.FieldName,
+            TargetClassName = bc.TargetClassName,
+            IsPointerDeref = bc.IsPointerDeref,
+            IsContainerView = bc.IsContainerView,
+        }).ToList(),
+        SelectedFields = slot.SavedSelectedFields
+            .Select(f => new PersistedFieldRef { Name = f.Name, Offset = f.Offset }).ToList(),
+        TopRow = slot.SavedTopRow is { } t ? new PersistedFieldRef { Name = t.Name, Offset = t.Offset } : null,
+    };
+
+    // Rebuild a live BookmarkSlot from its persisted form. The breadcrumb's live-only
+    // members (ContainerField / DataTableData) are left null and SavedCachedWorld stays
+    // null — the load path re-walks GWorld or re-synthesizes the container as needed.
+    private static void HydrateSlot(BookmarkSlot slot, PersistedBookmark pb)
+    {
+        slot.Label = pb.Label;
+        slot.SavedObjectName = pb.SavedObjectName;
+        slot.SavedClassName = pb.SavedClassName;
+        slot.SavedAddress = pb.SavedAddress;
+        slot.SavedClassAddr = pb.SavedClassAddr;
+        slot.SavedCachedWorld = null;
+        slot.SavedBreadcrumbs = pb.Breadcrumbs.Select(c => new BreadcrumbItem
+        {
+            Address = c.Address,
+            Label = c.Label,
+            ClassAddr = c.ClassAddr,
+            FieldOffset = c.FieldOffset,
+            FieldName = c.FieldName,
+            TargetClassName = c.TargetClassName,
+            IsPointerDeref = c.IsPointerDeref,
+            IsContainerView = c.IsContainerView,
+        }).ToList();
+        slot.SavedSelectedFields = pb.SelectedFields
+            .Select(f => new BookmarkFieldRef(f.Name, f.Offset)).ToList();
+        slot.SavedTopRow = pb.TopRow is { } t ? new BookmarkFieldRef(t.Name, t.Offset) : null;
+        slot.IsOccupied = true;   // marks filled + refreshes the tooltip
     }
 
     [RelayCommand]
@@ -2856,7 +3041,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     flattenChain: CollapseChain,
                     descShowOffset: DescShowOffset,
                     descShowType: DescShowType,
-                    dedupShared: DedupSharedObjects);
+                    dedupShared: DedupSharedObjects,
+                    excludeSystemComponents: ExcludeSystemComponents);
             }
             else
             {
@@ -2870,7 +3056,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     flattenChain: CollapseChain,
                     descShowOffset: DescShowOffset,
                     descShowType: DescShowType,
-                    dedupShared: DedupSharedObjects);
+                    dedupShared: DedupSharedObjects,
+                    excludeSystemComponents: ExcludeSystemComponents);
             }
 
             await _platform.CopyToClipboardAsync(xml);
@@ -2884,7 +3071,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             var truncWarn = CeXmlExportService.LastExportTruncated
                 ? " ⚠ Truncated (object graph too large) — lower Drill Depth or use Copy CE Field"
                 : "";
-            StatusText = $"Copied: {objCount} objects, {lineCount} XML lines.{statusExtra}{truncWarn}";
+            var sysWarn = CeXmlExportService.LastSystemFieldsSkipped > 0
+                ? $" {CeXmlExportService.LastSystemFieldsSkipped} system fields hidden"
+                : "";
+            StatusText = $"Copied: {objCount} objects, {lineCount} XML lines.{statusExtra}{truncWarn}{sysWarn}";
             _log.Info($"CE XML copied to clipboard for {CurrentClassName} (AOB={useAob}, " +
                 $"descOffset={DescShowOffset}, descType={DescShowType}, " +
                 $"{resolvedStructs.Count} structs / {resolvedInstances.Count} pointers resolved, depth={CsxDrilldownDepth})");
@@ -3103,7 +3293,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     includeGuessed: includeGuessed,
                     descShowOffset: DescShowOffset,
                     descShowType: DescShowType,
-                    dedupShared: DedupSharedObjects);
+                    dedupShared: DedupSharedObjects,
+                    excludeSystemComponents: ExcludeSystemComponents);
             }
             else
             {
@@ -3118,7 +3309,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     includeGuessed: includeGuessed,
                     descShowOffset: DescShowOffset,
                     descShowType: DescShowType,
-                    dedupShared: DedupSharedObjects);
+                    dedupShared: DedupSharedObjects,
+                    excludeSystemComponents: ExcludeSystemComponents);
             }
 
             await _platform.CopyToClipboardAsync(xml);
@@ -3132,7 +3324,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             var truncWarn = CeXmlExportService.LastExportTruncated
                 ? " ⚠ Truncated (object graph too large) — lower Drill Depth or use Copy CE Field"
                 : "";
-            StatusText = $"Copied: {objCount} objects, {lineCount} XML lines.{statusExtra}{truncWarn}";
+            var sysWarn = CeXmlExportService.LastSystemFieldsSkipped > 0
+                ? $" {CeXmlExportService.LastSystemFieldsSkipped} system fields hidden"
+                : "";
+            StatusText = $"Copied: {objCount} objects, {lineCount} XML lines.{statusExtra}{truncWarn}{sysWarn}";
             _log.Info($"CE Field XML copied: {selectedSnapshot.Count} field(s) (AOB={useAob}, includeGuessed={includeGuessed}, " +
                 $"descOffset={DescShowOffset}, descType={DescShowType}, " +
                 $"{resolvedInstances.Count} pointer targets resolved at depth={CsxDrilldownDepth})");
