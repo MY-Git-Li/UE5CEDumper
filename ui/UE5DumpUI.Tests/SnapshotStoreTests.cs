@@ -159,6 +159,38 @@ public class SnapshotStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task DeleteAll_WithAnotherConnectionOpen_DoesNotThrow_ClearsData_DbStaysUsable()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _store.SetActiveGame("LOCKED");
+        long id = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "x", Scope = "NumericNoByte" }, ct);
+        await _store.WriteChunkAsync(id, new[] { MakeObject(1, ("HP", "IntProperty", "0A000000")) }, ct);
+        await _store.FinalizeSnapshotAsync(id, 1, 1, ct);
+
+        // Hold a SECOND connection open on the same DB — the real-app condition (an idle
+        // reader from another panel, or a just-finished capture session) that made the
+        // exclusive journal_mode=DELETE in the disk reclaim throw 'database is locked' and
+        // bubble out of Delete All (leaving the list stale + the DB wedged).
+        await using var other = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = _store.DatabasePath }.ToString());
+        await other.OpenAsync(ct);
+        await using (var probe = other.CreateCommand())
+        {
+            probe.CommandText = "SELECT COUNT(*) FROM snapshots;";
+            await probe.ExecuteScalarAsync(ct);   // actively attach the connection to the DB
+        }
+
+        // Must NOT throw (reclaim is best-effort) and must clear the data.
+        await _store.DeleteAllSnapshotsAsync(ct);
+        Assert.Empty(await _store.ListSnapshotsAsync(ct));
+
+        // The DB must be left usable (WAL restored, no wedged lock) — a follow-up write works.
+        long id2 = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "y", Scope = "NumericNoByte" }, ct);
+        await _store.WriteChunkAsync(id2, new[] { MakeObject(2, ("HP", "IntProperty", "14000000")) }, ct);
+        Assert.Single(await _store.ListSnapshotsAsync(ct));
+    }
+
+    [Fact]
     public async Task CreateWriteListDelete_RoundTrips()
     {
         var ct = TestContext.Current.CancellationToken;

@@ -2057,14 +2057,36 @@ public sealed class SnapshotStore : ISnapshotStore
     // the file in a ROLLBACK journal mode — in WAL mode the vacuumed (compact) pages land
     // in the -wal and a passive checkpoint never shrinks the main file, so the on-disk
     // size would stay put. Fold the WAL back, switch to DELETE mode (which truncates on
-    // VACUUM), VACUUM, then restore WAL. Caller runs this off the UI thread; no open
-    // transaction may be held (VACUUM forbids one).
+    // VACUUM), VACUUM, then restore WAL.
+    //
+    // BEST-EFFORT by contract: the caller has ALREADY deleted the rows, so the data is
+    // gone regardless. Switching WAL->DELETE needs EXCLUSIVE access, which SQLite refuses
+    // ("database is locked") when ANY other connection still holds this DB open — including
+    // IDLE POOLED connections left by a just-finished capture session or a list read. So
+    // (a) evict idle pooled handles first via ClearPool, and (b) swallow a lock so a
+    // reclaim failure never throws out of Delete All / cancel / quota (which would leave the
+    // UI list stale + the DB wedged), and ALWAYS restore WAL in finally so the next
+    // capture/read isn't stuck in rollback mode. Worst case: rows deleted, file not shrunk
+    // this time (recovered by the next reclaim or an app restart, when nothing else is open).
+    // Caller runs this off the UI thread; no open transaction may be held (VACUUM forbids one).
     private async Task ReclaimDiskAsync(SqliteConnection conn, CancellationToken ct)
     {
-        await ExecAsync(conn, "PRAGMA wal_checkpoint(TRUNCATE);", ct);
-        await ExecAsync(conn, "PRAGMA journal_mode=DELETE;", ct);
-        await ExecAsync(conn, "VACUUM;", ct);
-        await ExecAsync(conn, "PRAGMA journal_mode=WAL;", ct);
+        try
+        {
+            SqliteConnection.ClearPool(conn);   // close idle pooled handles -> exclusive
+            await ExecAsync(conn, "PRAGMA wal_checkpoint(TRUNCATE);", ct);
+            await ExecAsync(conn, "PRAGMA journal_mode=DELETE;", ct);
+            await ExecAsync(conn, "VACUUM;", ct);
+        }
+        catch (Exception ex)
+        {
+            _log?.Warn(Constants.LogCatView,
+                $"SnapshotStore: disk reclaim skipped ({ex.Message}) — rows deleted, file not shrunk this time");
+        }
+        finally
+        {
+            try { await ExecAsync(conn, "PRAGMA journal_mode=WAL;", ct); } catch { /* leave as-is */ }
+        }
     }
 
     public async Task DeleteAllSnapshotsAsync(CancellationToken ct = default)
