@@ -16,7 +16,7 @@ builds ≤696 in
 
 -----
 
-## 2026-06-24 — Bookmarks survive a GAME RESTART: breadcrumb spine re-resolved from the live GWorld / GameEngine anchor (build 1690; UI/C#-only; on `dev`, NOT in-game verified)
+## 2026-06-24 — Bookmarks survive a GAME RESTART: breadcrumb spine re-resolved from the live GWorld / GameEngine anchor (build 1690; UI/C#-only; **MERGED main PR #365 `2e54d86`**, **in-game VERIFIED**)
 
 Fixed the reported bug where saved Live-Walker bookmarks all went **stale after a game restart** (UI restart while the game kept running was already fine). Root cause: a bookmark persisted both the navigation SPINE *and* saved memory addresses, and the load path walked the stale leaf address directly (`WalkInstanceAsync(lastBc.Address)`). After a restart, ASLR re-randomizes every pointer → the saved address is dead → the walk lands on garbage → `SavedClassName` mismatch → "stale — re-create". The persisted spine was *already* sufficient (each crumb stores `FieldName` + `FieldOffset` + `IsPointerDeref` + `IsContainerView` + `TargetClassName`); only the addresses were volatile, so **no schema change**.
 
