@@ -90,7 +90,7 @@
                    Width="80" Height="4"
                    VerticalAlignment="Center"/>
       <TextBlock Text="{Binding StatusText}"
-                 Foreground="#AAB8D0" FontSize="12"
+                 Foreground="#AAB8D0" FontSize="13"
                  FontFamily="Consolas, Menlo, monospace"
                  VerticalAlignment="Center"
                  ToolTip.Tip="{Binding StatusText}"/>

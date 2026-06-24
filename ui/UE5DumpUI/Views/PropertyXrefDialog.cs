@@ -163,11 +163,13 @@ public sealed class PropertyXrefDialog : Window
         };
         Grid.SetColumn(_gameOnlyBox, 2);
         topRow.Children.Add(_gameOnlyBox);
+        ToolTip.SetTip(_gameOnlyBox, "Restrict the scan to game (non-engine) classes.");
 
         _btnRefresh = new Button { Content = "Refresh", Padding = new Thickness(10, 4) };
         _btnRefresh.Click += async (_, _) => await RunScanAsync();
         Grid.SetColumn(_btnRefresh, 4);
         topRow.Children.Add(_btnRefresh);
+        ToolTip.SetTip(_btnRefresh, "Re-run the scan.");
 
         DockPanel.SetDock(topRow, Dock.Top);
         root.Children.Add(topRow);
@@ -210,10 +212,19 @@ public sealed class PropertyXrefDialog : Window
             Content = "⚙ Disassemble in CE",
             Padding = new Thickness(10, 6),
             Margin = new Thickness(0, 0, 8, 0),
-            IsEnabled = false,
-            IsVisible = SharedAobMaker?.IsAvailable == true,
+            IsEnabled = false,   // enabled on selection + when AOBMaker is connected
         };
         _btnDisasm.Click += OnDisassembleClicked;
+        // Conditional hint: different text depending on whether the AOBMaker CE
+        // plugin is connected (the button is visible-but-disabled when absent so
+        // the user can see why).
+        ToolTip.SetTip(_btnDisasm, SharedAobMaker?.IsAvailable == true
+            ? "Resolve the selected function's native code address (UFunction->Func) and jump "
+            + "CE's disassembler to it (also drops a labeled byte-array row in CE's address "
+            + "list). Native functions only — Blueprint functions point at the shared "
+            + "interpreter and will report no per-function code."
+            : "AOBMaker CE plugin not connected — connect it in CE to push the function's "
+            + "code address to the disassembler.");
         btnRow.Children.Add(_btnDisasm);
 
         // Locate the selected row's owning class in GWorld (resolve a live
@@ -227,6 +238,8 @@ public sealed class PropertyXrefDialog : Window
         };
         _btnLocate.Click += OnLocateClicked;
         btnRow.Children.Add(_btnLocate);
+        ToolTip.SetTip(_btnLocate, "Find a live (non-CDO) instance of the selected row's owning "
+            + "class and show its path from GWorld in Live Walker.");
 
         _btnCopy = new Button
         {
@@ -237,10 +250,12 @@ public sealed class PropertyXrefDialog : Window
         };
         _btnCopy.Click += OnCopyClicked;
         btnRow.Children.Add(_btnCopy);
+        ToolTip.SetTip(_btnCopy, "Copy the selected function's full path to the clipboard.");
 
         _btnClose = new Button { Content = "Close", Padding = new Thickness(14, 6) };
         _btnClose.Click += (_, _) => Close();
         btnRow.Children.Add(_btnClose);
+        ToolTip.SetTip(_btnClose, "Close this dialog.");
 
         DockPanel.SetDock(btnRow, Dock.Bottom);
         root.Children.Add(btnRow);
