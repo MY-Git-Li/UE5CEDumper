@@ -116,9 +116,15 @@ public partial class SnapshotViewModel
 
     partial void OnIsGroupModeChanged(bool value)
     {
+        if (!value) return;
         // Default the group snapshot to the newest when first switching to Group mode.
-        if (value && GroupSnapshot == null && Snapshots.Count > 0)
+        if (GroupSnapshot == null && Snapshots.Count > 0)
             GroupSnapshot = Snapshots[0];
+        // With exactly two snapshots the "Compare with" target is unambiguous, so pre-fill
+        // it (the OTHER snapshot) → Mode B is ready in one switch. With 1 (no compare) or
+        // 3+ (ambiguous which to compare) leave it empty for the user to pick.
+        if (GroupCompareSnapshot == null && Snapshots.Count == 2)
+            GroupCompareSnapshot = Snapshots.FirstOrDefault(s => s.Id != GroupSnapshot?.Id);
     }
 
     [RelayCommand]

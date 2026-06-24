@@ -403,6 +403,50 @@ public class SnapshotViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task GroupMode_TwoSnapshots_DefaultsCompareToSecond()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _store.SetActiveGame("GG2");
+        long a = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "a" }, ct);
+        await _store.WriteChunkAsync(a, new[] { Obj(1, "HP", "IntProperty", "64000000") }, ct);
+        await _store.FinalizeSnapshotAsync(a, 1, 1, ct);
+        long b = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "b" }, ct);
+        await _store.WriteChunkAsync(b, new[] { Obj(1, "HP", "IntProperty", "5A000000") }, ct);
+        await _store.FinalizeSnapshotAsync(b, 1, 1, ct);
+
+        var vm = new SnapshotViewModel(new CaptureStub(), _store, new MockLoggingService());
+        await vm.RefreshCommand.ExecuteAsync(null);
+        Assert.Null(vm.GroupCompareSnapshot);   // empty until Group mode
+
+        vm.IsGroupMode = true;
+
+        Assert.Equal(b, vm.GroupSnapshot!.Id);          // primary = newest
+        Assert.Equal(a, vm.GroupCompareSnapshot!.Id);   // compare pre-filled with the OTHER one
+        Assert.True(vm.IsGroupCompareMode);             // → Mode B ready in one switch
+    }
+
+    [Fact]
+    public async Task GroupMode_ThreeSnapshots_LeavesCompareEmpty()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _store.SetActiveGame("GG3");
+        foreach (var lbl in new[] { "a", "b", "c" })
+        {
+            long id = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = lbl }, ct);
+            await _store.WriteChunkAsync(id, new[] { Obj(1, "HP", "IntProperty", "64000000") }, ct);
+            await _store.FinalizeSnapshotAsync(id, 1, 1, ct);
+        }
+
+        var vm = new SnapshotViewModel(new CaptureStub(), _store, new MockLoggingService());
+        await vm.RefreshCommand.ExecuteAsync(null);
+
+        vm.IsGroupMode = true;
+
+        Assert.NotNull(vm.GroupSnapshot);        // primary still defaults to newest
+        Assert.Null(vm.GroupCompareSnapshot);    // 3+ → ambiguous, left for the user
+    }
+
+    [Fact]
     public async Task Diff_ClientFilter_NarrowsRowsLive()
     {
         var ct = TestContext.Current.CancellationToken;
