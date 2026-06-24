@@ -216,8 +216,11 @@
 
     <!-- Live Walker: Bookmarks -->
     <sys:String x:Key="str.LiveWalker.BookmarkSave">&#x2605;</sys:String>
-    <sys:String x:Key="str.Tip.LiveWalker.BookmarkSave">Save a bookmark: click &#x2605;, then click a slot (1-4) on the right to store the current view (object, selected rows, and scroll position) in that slot.</sys:String>
-    <sys:String x:Key="str.Tip.LiveWalker.BookmarkSaveActive">Save mode on: click a slot (1-4) to store the current view there, or click &#x2605; again to cancel.</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.BookmarkSave">Save a bookmark: click &#x2605;, then click a slot (1-8) on the right to store the current view (object, selected rows, and scroll position) in that slot. Bookmarks are remembered per game and reload automatically next time you connect to the same game.</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.BookmarkSaveActive">Save mode on: click a slot (1-8) to store the current view there, or click &#x2605; again to cancel.</sys:String>
+    <sys:String x:Key="str.LiveWalker.BookmarkClearOne">Clear this bookmark</sys:String>
+    <sys:String x:Key="str.LiveWalker.BookmarkClearAll">&#x2715;</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.BookmarkClearAll">Clear ALL bookmarks for this game (also deletes the saved file). To clear just one, right-click that slot.</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.BookmarkClear">Clear this bookmark</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.BookmarkEmpty">Empty bookmark slot</sys:String>
 

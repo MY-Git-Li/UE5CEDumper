@@ -21,6 +21,7 @@ public class App : Application
     private ExperimentalGate? _experimentalGate;
     private SnapshotStore? _snapshotStore;
     private UiOptionsStore? _uiOptions;
+    private BookmarkStore? _bookmarkStore;
 
     public override void Initialize()
     {
@@ -57,6 +58,7 @@ public class App : Application
             _experimentalGate = new ExperimentalGate(_platform, _logging);
             _snapshotStore = new SnapshotStore(_platform, _logging);
             _uiOptions = new UiOptionsStore(_platform, _logging);
+            _bookmarkStore = new BookmarkStore(_platform, _logging);
 
             _logging.Info(Constants.LogCatInit, "UE5DumpUI starting...");
             _logging.Info(Constants.LogCatInit, $"Version:   {typeof(App).Assembly.GetName().Version}");
@@ -69,7 +71,7 @@ public class App : Application
             var globalHotkeys = new WindowsGlobalHotkeyService();
             var mainVm = new MainWindowViewModel(
                 _pipeClient, _dumpService, _logging, _platform, _aobUsage, _aobMakerBridge,
-                _proxyDeploy, _experimentalGate, _snapshotStore, globalHotkeys);
+                _proxyDeploy, _experimentalGate, _snapshotStore, globalHotkeys, _bookmarkStore);
 
             // Load + apply persisted panel options, then track changes for
             // debounced save-on-change. Done before the window is shown so the

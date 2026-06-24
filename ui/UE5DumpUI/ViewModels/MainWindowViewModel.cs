@@ -308,7 +308,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         IProxyDeployService? proxyDeploy = null,
         IExperimentalGate? experimentalGate = null,
         ISnapshotStore? snapshotStore = null,
-        IGlobalHotkeyService? globalHotkeys = null)
+        IGlobalHotkeyService? globalHotkeys = null,
+        BookmarkStore? bookmarks = null)
     {
         _pipeClient = pipeClient;
         _dump = dump;
@@ -331,7 +332,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ObjectTree = new ObjectTreeViewModel(dump, log, platform);
         ClassStruct = new ClassStructViewModel(dump, log, platform);
         Pointers = new PointerPanelViewModel(platform, dump, log, aobMaker, aobUsage, experimentalGate);
-        LiveWalker = new LiveWalkerViewModel(dump, log, platform, aobMaker);
+        LiveWalker = new LiveWalkerViewModel(dump, log, platform, aobMaker, bookmarks);
         InstanceFinder = new InstanceFinderViewModel(dump, log, platform);
         PropertySearch = new PropertySearchViewModel(dump, log, aobMaker, platform);
         GameClassFilter = new GameClassFilterViewModel(dump, log, platform);
@@ -2046,6 +2047,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         ObjectTree.SetEngineState(state);
         LiveWalker.SetEngineState(state);
+        // Load this game's persisted bookmarks (SetEngineState above captured the PE
+        // hash). Self-clears in-memory first, so it's safe on both connect and a
+        // game-change re-scan. Synchronous (tiny file).
+        LiveWalker.LoadBookmarksForGame(state.PeHash);
         InstanceFinder.SetEngineState(state);
         ValueSearch.SetEngineState(state);
         InterestingFunctions.IsGWorldAvailable = state.HasGWorld;
