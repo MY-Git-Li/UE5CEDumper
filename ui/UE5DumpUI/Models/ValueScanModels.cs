@@ -223,6 +223,11 @@ public partial class GroupSlotInput : ObservableObject
     [ObservableProperty] private string            _value    = "";
     [ObservableProperty] private string            _value2   = "";
 
+    /// <summary>The owning panel's rounding mode, pushed in by the VM so this row can
+    /// render its own live <see cref="BetweenPreview"/>. Display-only — the actual
+    /// scan always uses the panel-level mode; never persisted on the row.</summary>
+    [ObservableProperty] private FloatRoundMode _roundMode = FloatRoundMode.Round;
+
     /// <summary>False for prev-value predicates (Changed / Increased / Decreased /
     /// Unchanged): they compare against the previous round, so no value is needed
     /// and the grid hides the value box — mirroring single mode.</summary>
@@ -231,11 +236,24 @@ public partial class GroupSlotInput : ObservableObject
     /// <summary>True only for Between — reveals the second (upper bound) value box.</summary>
     public bool RequiresValue2Input => ScanType == ValueScanType.Between;
 
+    /// <summary>Live "what will this actually match" preview for a Between row, shown
+    /// after the upper-bound box (e.g. <c>→ int 12~13 · float 11.5~13.2</c> under Round).
+    /// Group rows always scan a mixed numeric corpus → both interpretations. Empty for
+    /// non-Between predicates or unparseable bounds (the grid hides the label).</summary>
+    public string BetweenPreview => ScanType == ValueScanType.Between
+        ? RoundModePreview.Between(Value, Value2, RoundMode, RoundModePreview.Scope.Both)
+        : "";
+
     partial void OnScanTypeChanged(ValueScanType value)
     {
         OnPropertyChanged(nameof(RequiresValueInput));
         OnPropertyChanged(nameof(RequiresValue2Input));
+        OnPropertyChanged(nameof(BetweenPreview));
     }
+
+    partial void OnValueChanged(string value)     => OnPropertyChanged(nameof(BetweenPreview));
+    partial void OnValue2Changed(string value)    => OnPropertyChanged(nameof(BetweenPreview));
+    partial void OnRoundModeChanged(FloatRoundMode value) => OnPropertyChanged(nameof(BetweenPreview));
 
     private static bool IsPrevValueScanType(ValueScanType st) =>
         st is ValueScanType.Changed or ValueScanType.Unchanged

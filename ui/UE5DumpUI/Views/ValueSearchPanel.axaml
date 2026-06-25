@@ -126,6 +126,15 @@
                       ToolTip.Tip="{StaticResource str.Tip.VS.Rounding}"
                       MinWidth="90" Padding="4,2" FontSize="12"/>
 
+            <!-- Live "what will this actually match" preview for a Between scan: the
+                 coerced integer range and/or literal float range under the active mode
+                 (e.g. → int 12~13 · float 11.5~13.2). Hidden until both bounds parse. -->
+            <TextBlock Text="{Binding BetweenPreview}"
+                       Foreground="#4EC9B0" VerticalAlignment="Center"
+                       FontFamily="Consolas" FontSize="12"
+                       IsVisible="{Binding BetweenPreview, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                       Margin="8,0,0,0"/>
+
             <!-- Case-sensitive checkbox: visible only for string DataTypes
                  (FString / FName / FText). Default unchecked = CE-style
                  case-insensitive matching. -->
@@ -444,6 +453,12 @@
                 <TextBox Text="{Binding Value2}" PlaceholderText="to"
                          IsVisible="{Binding RequiresValue2Input}"
                          Width="120" Padding="4,2" FontSize="12"/>
+                <!-- Live coerced-range preview for this Between row (mixed numeric →
+                     both int and float interpretations), under the panel rounding mode. -->
+                <TextBlock Text="{Binding BetweenPreview}"
+                           Foreground="#4EC9B0" VerticalAlignment="Center"
+                           FontFamily="Consolas" FontSize="12"
+                           IsVisible="{Binding BetweenPreview, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
               </StackPanel>
             </DataTemplate>
           </ItemsControl.ItemTemplate>

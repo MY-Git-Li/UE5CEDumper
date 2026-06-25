@@ -104,6 +104,16 @@
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
+        <!-- Live coerced-range preview of the absolute window under the active mode. -->
+        <DataGridTemplateColumn Header="{StaticResource str.Spc.Col.Preview}" Width="160">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="vm:SpcSnapshotPick">
+              <TextBlock Text="{Binding AbsPreview}" Foreground="#4EC9B0"
+                         FontFamily="Consolas" FontSize="12"
+                         VerticalAlignment="Center" Margin="4,0,0,0"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
       </DataGrid.Columns>
     </DataGrid>
 
@@ -371,6 +381,16 @@
                   <TextBox Text="{Binding GroupActiveAbsHigh}" Width="52" IsEnabled="{Binding AbsEnabled}"
                            IsVisible="{Binding GroupShowAbsHigh}" PlaceholderText="hi"/>
                 </StackPanel>
+              </DataTemplate>
+            </DataGridTemplateColumn.CellTemplate>
+          </DataGridTemplateColumn>
+          <!-- Live coerced-range preview of the ACTIVE slot's window under the active mode. -->
+          <DataGridTemplateColumn Header="{StaticResource str.Spc.Col.Preview}" Width="160">
+            <DataGridTemplateColumn.CellTemplate>
+              <DataTemplate x:DataType="vm:SpcSnapshotPick">
+                <TextBlock Text="{Binding GroupAbsPreview}" Foreground="#4EC9B0"
+                           FontFamily="Consolas" FontSize="12"
+                           VerticalAlignment="Center" Margin="4,0,0,0"/>
               </DataTemplate>
             </DataGridTemplateColumn.CellTemplate>
           </DataGridTemplateColumn>

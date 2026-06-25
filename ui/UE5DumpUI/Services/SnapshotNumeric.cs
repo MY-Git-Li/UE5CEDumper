@@ -59,23 +59,20 @@ public static class SnapshotNumeric
 
     /// <summary>Reduce a value to the integer the game DISPLAYS, per the mode — the
     /// C# mirror of the DLL's <c>Radar::ReduceRounded</c>. Round = half-away-from-zero
-    /// (matches the live DLL + CE), Trunc = toward zero, Ceil = toward +inf. Pure.</summary>
-    public static double Reduce(double x, FloatRoundMode mode) => mode switch
-    {
-        FloatRoundMode.Trunc => System.Math.Truncate(x),
-        FloatRoundMode.Ceil  => System.Math.Ceiling(x),
-        _                    => System.Math.Round(x, System.MidpointRounding.AwayFromZero),
-    };
+    /// (matches the live DLL + CE), Trunc = toward zero, Ceil = toward +inf. Delegates
+    /// to <see cref="RoundModePreview.Reduce"/> (the single C# source of truth shared
+    /// with the live-preview formatter). Pure.</summary>
+    public static double Reduce(double x, FloatRoundMode mode) => RoundModePreview.Reduce(x, mode);
 
     /// <summary>True when <paramref name="x"/> is a whole number (no fractional part).</summary>
-    private static bool IsWhole(double x) => x == System.Math.Floor(x);
+    private static bool IsWhole(double x) => RoundModePreview.IsWhole(x);
 
     /// <summary>The integer a fractional <paramref name="target"/> coerces to for an
     /// INTEGER-typed field, per the mode (e.g. Between 10.9 with Round → 11, Trunc → 10,
     /// Ceil → 11) — the C# mirror of the DLL's BuildNumericTargets coercion. A whole
     /// target is returned unchanged.</summary>
     public static double CoerceIntTarget(double target, FloatRoundMode mode) =>
-        IsWhole(target) ? target : Reduce(target, mode);
+        RoundModePreview.CoerceIntTarget(target, mode);
 
     /// <summary>
     /// Displayed-integer Exact match of a decoded numeric value <paramref name="v"/>

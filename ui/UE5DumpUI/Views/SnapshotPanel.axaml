@@ -312,6 +312,12 @@
                   <TextBlock Text="{StaticResource str.Snapshot.Group.Value2Hint}" Foreground="#888"
                              VerticalAlignment="Center" IsVisible="{Binding RequiresValue2Input}"/>
                   <TextBox Text="{Binding Value2}" Width="120" IsVisible="{Binding RequiresValue2Input}"/>
+                  <!-- Live coerced-range preview for this Between row (mixed numeric →
+                       both int and float interpretations), under the panel rounding mode. -->
+                  <TextBlock Text="{Binding BetweenPreview}"
+                             Foreground="#4EC9B0" VerticalAlignment="Center"
+                             FontFamily="Consolas" FontSize="12"
+                             IsVisible="{Binding BetweenPreview, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
                 </StackPanel>
               </DataTemplate>
             </ItemsControl.ItemTemplate>

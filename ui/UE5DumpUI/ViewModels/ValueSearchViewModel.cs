@@ -156,6 +156,42 @@ public partial class ValueSearchViewModel : ViewModelBase
     partial void OnSelectedRoundingModeChanged(FloatRoundMode value)
     {
         OnPropertyChanged(nameof(RoundingModeHint));
+        OnPropertyChanged(nameof(BetweenPreview));
+        SyncGroupRowRoundMode();   // group rows render their own preview from this mode
+    }
+
+    /// <summary>Live "what will this actually match" preview for a single Between scan,
+    /// shown after the upper-bound box (e.g. <c>→ int 12~13 · float 11.5~13.2</c> under
+    /// Round). Adapts to the selected DataType: integer types show only the coerced
+    /// integer range, Float/Double/vector show only the literal float range, the mixed
+    /// numeric meta types show both. Empty for non-Between / non-numeric / unparseable
+    /// bounds (the label hides itself).</summary>
+    public string BetweenPreview =>
+        SelectedScanType == ValueScanType.Between && SupportsRoundingMode
+            ? RoundModePreview.Between(Value, Value2, SelectedRoundingMode, BetweenPreviewScope)
+            : "";
+
+    /// <summary>Which field interpretation(s) the live preview shows for the current
+    /// DataType — float-only for the float / vector types, both for the mixed numeric
+    /// meta types, integer-only for the fixed-width integer types.</summary>
+    private RoundModePreview.Scope BetweenPreviewScope => SelectedDataType switch
+    {
+        ValueScanDataType.Float or ValueScanDataType.Double
+            or ValueScanDataType.FVector or ValueScanDataType.FRotator
+            or ValueScanDataType.FTransform => RoundModePreview.Scope.FloatOnly,
+        ValueScanDataType.NumericNoByte or ValueScanDataType.NumericAll
+            => RoundModePreview.Scope.Both,
+        _   => RoundModePreview.Scope.IntOnly,
+    };
+
+    partial void OnValueChanged(string value)  => OnPropertyChanged(nameof(BetweenPreview));
+    partial void OnValue2Changed(string value) => OnPropertyChanged(nameof(BetweenPreview));
+
+    /// <summary>Push the panel's rounding mode into every group row so each renders its
+    /// own live Between preview (the actual scan still uses the panel-level mode).</summary>
+    private void SyncGroupRowRoundMode()
+    {
+        foreach (var row in GroupInputs) row.RoundMode = SelectedRoundingMode;
     }
 
     /// <summary>Opt-in case sensitivity for string scans. Default
@@ -499,6 +535,7 @@ public partial class ValueSearchViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(RequiresValueInput));
         OnPropertyChanged(nameof(RequiresValue2Input));
+        OnPropertyChanged(nameof(BetweenPreview));
     }
 
     /// <summary>True when the rounding-mode picker applies — every numeric +
@@ -541,6 +578,7 @@ public partial class ValueSearchViewModel : ViewModelBase
         OnPropertyChanged(nameof(SupportsCaseSensitive));
         OnPropertyChanged(nameof(DataTypeWarning));
         OnPropertyChanged(nameof(VisibleScanTypeOptions));
+        OnPropertyChanged(nameof(BetweenPreview));   // scope (int/float/both) depends on the type
         // If the currently-selected ScanType is no longer valid for
         // the new DataType (e.g. user switched from Int32+Bigger to
         // FString+Bigger), snap it to a sensible default that exists
@@ -1026,7 +1064,7 @@ public partial class ValueSearchViewModel : ViewModelBase
     private void AddGroupRow()
     {
         if (GroupInputs.Count >= 4) return;
-        GroupInputs.Add(new GroupSlotInput());
+        GroupInputs.Add(new GroupSlotInput { RoundMode = SelectedRoundingMode });
         OnPropertyChanged(nameof(CanAddGroupRow));
         OnPropertyChanged(nameof(CanRemoveGroupRow));
     }

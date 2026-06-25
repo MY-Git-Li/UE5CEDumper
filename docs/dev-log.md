@@ -16,6 +16,29 @@ builds ≤696 in
 
 -----
 
+## 2026-06-25 — Live coerced-range preview after a Between / SPC absolute bound (build 1702; UI/C#-only; on `dev`, NOT committed/merged/in-game-verified)
+
+The Round/Trunc/Ceil rounding switch (build 1672, [PR #364](https://github.com/bbfox0703/UE5CEDumper/pull/364)) only showed a **static** hint of what a Between query *might* become (a hard-coded `10.9–11.1 → 11~11` example). Replaced that guesswork with a **live preview** computed from the values the user actually typed + the active mode, shown right after the bound box. Driving example (user request): Between `11.5~13.2` →
+
+| mode  | preview |
+|-------|---------|
+| Round | `→ int 12~13 · float 11.5~13.2` |
+| Trunc | `→ int 11~13 · float 11.5~13.2` |
+| Ceil  | `→ int 12~14 · float 11.5~13.2` |
+
+**Two interpretations** (mirroring `SnapshotNumeric.BetweenMatch`): an INTEGER field coerces each bound via the mode (`CoerceIntTarget`) → the *int range*; a FLOAT field with a fractional bound compares literally → the *float range* (the entered values). When **both bounds are whole** the two coincide and collapse to one range (`→ 11~13`). Type-specific Value Search scans show only their own interpretation (int-only for the integer widths, float-only for Float/Double/vector); the mixed numeric meta types, all group rows, and SPC (type-agnostic corpus) show **both**.
+
+**Surfaces (all 5 — single + multi for every panel the user named):**
+- **Value Search** — single (`BetweenPreview`, adapts scope to the selected DataType) + per-row group preview.
+- **Snapshot** — per-row group preview (the multi-value Group path; single Diff mode is directional, no Between).
+- **SPC** — single value-filter + group matrix, covering all absolute kinds `Exact` / `Between` / `≥` / `≤` (new `Matches` column in both DataGrids).
+
+**Design.** One pure, AOT-safe helper `Models/RoundModePreview.cs` (`Between` / `SpcAbsolute` / `Point` / `Compose` + the canonical `Reduce`/`CoerceIntTarget` math) lives in the **Models** layer so per-row models (`GroupSlotInput`) and the SPC pick VM (`SpcSnapshotPick`) can recompute it **reactively** as the user types, with no Services dependency. It is now the single C# source of truth for the reduce/coerce math — `SnapshotNumeric.Reduce`/`CoerceIntTarget` **delegate** to it (kept behaviour-identical; all prior tests green). The preview is **display-only**: the actual scan always uses the panel-level rounding mode; the per-row/`SpcSnapshotPick` `RoundMode` is pushed in by the VM (on mode-change broadcast + `AddGroupRow` + pick rebuild + game-switch restore) purely to drive the row's own preview. Faithfulness confirmed against the rounding-aware `SpcEngine.AbsMatches` → `SnapshotNumeric` path (NOT the legacy `SpcAbsolutePredicate.Matches`). The original static `RoundingModeHint` line is kept as a general mode explainer; `str.Spc.Col.Preview` ("Matches") added to `en.axaml`.
+
+Tests: new `RoundModePreviewTests` (headline 11.5~13.2 per-mode, scope adaptivity, whole-collapse, reversed/negative bounds, SPC kinds, bad-bound→empty, cross-layer delegation, per-row reactivity) → C# **2004/0**, dll_helpers 791/0; UI AOT publish green (48.6 MB). Adversarial review (4 lenses — math fidelity / reactivity / XAML+AOT+layering / completeness → per-finding verify): **0 confirmed / 0 raised.**
+
+-----
+
 ## 2026-06-25 — Flatten GAS attributes in CE export + fix exit-while-connected CTD (build 1698; UI/C#-only; **MERGED main PR #366** `cdc0a32`+`2722d1a`; GAS flatten **in-game VERIFIED (Avowed)**)
 
 Two independent UI/C#-only changes, one commit each — **no DLL change → no re-inject.**
