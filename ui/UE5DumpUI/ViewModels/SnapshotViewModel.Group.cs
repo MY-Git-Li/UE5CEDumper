@@ -75,6 +75,9 @@ public partial class SnapshotViewModel
     partial void OnSelectedRoundingModeChanged(FloatRoundMode value)
     {
         OnPropertyChanged(nameof(RoundingModeHint));
+        // Group rows render their own live Between preview from this mode (display-only;
+        // the actual match still uses the panel-level mode).
+        foreach (var row in GroupInputs) row.RoundMode = value;
     }
 
     [ObservableProperty] private string _groupStatusText = "";
@@ -154,7 +157,7 @@ public partial class SnapshotViewModel
     private void AddGroupRow()
     {
         if (!CanAddGroupRow) return;
-        GroupInputs.Add(new GroupSlotInput());
+        GroupInputs.Add(new GroupSlotInput { RoundMode = SelectedRoundingMode });
         RaiseGroupRowGates();
     }
 

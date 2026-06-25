@@ -64,15 +64,37 @@ public partial class SpcSnapshotPick : ObservableObject
     [ObservableProperty] private string _absLow  = "";
     [ObservableProperty] private string _absHigh = "";
 
+    /// <summary>The panel's rounding mode, pushed in by the VM so each row renders its
+    /// own live absolute-window preview. Display-only — the query always uses the
+    /// panel-level mode.</summary>
+    [ObservableProperty] private FloatRoundMode _roundMode = FloatRoundMode.Round;
+
     /// <summary>Value boxes are editable only for a selected snapshot.</summary>
     public bool AbsEnabled => IsSelected;
     public bool ShowAbsLow  => AbsKind is "Exact" or "Between" or "≥";
     public bool ShowAbsHigh => AbsKind is "Between" or "≤";
 
+    /// <summary>Live "what will this actually match" preview for the single-query
+    /// absolute window (e.g. <c>→ int 12~13 · float 11.5~13.2</c> under Round). SPC
+    /// scans the whole captured corpus → both interpretations. Empty for "(any value)"
+    /// or unparseable bounds (the cell hides the label).</summary>
+    public string AbsPreview =>
+        RoundModePreview.SpcAbsolute(AbsKind, AbsLow, AbsHigh, RoundMode, RoundModePreview.Scope.Both);
+
     partial void OnAbsKindChanged(string value)
     {
         OnPropertyChanged(nameof(ShowAbsLow));
         OnPropertyChanged(nameof(ShowAbsHigh));
+        OnPropertyChanged(nameof(AbsPreview));
+    }
+
+    partial void OnAbsLowChanged(string value)  => OnPropertyChanged(nameof(AbsPreview));
+    partial void OnAbsHighChanged(string value) => OnPropertyChanged(nameof(AbsPreview));
+
+    partial void OnRoundModeChanged(FloatRoundMode value)
+    {
+        OnPropertyChanged(nameof(AbsPreview));
+        OnPropertyChanged(nameof(GroupAbsPreview));
     }
 
     /// <summary>Compile this row's UI choice into an absolute predicate.</summary>
@@ -115,6 +137,7 @@ public partial class SpcSnapshotPick : ObservableObject
         OnPropertyChanged(nameof(GroupActiveAbsHigh));
         OnPropertyChanged(nameof(GroupShowAbsLow));
         OnPropertyChanged(nameof(GroupShowAbsHigh));
+        OnPropertyChanged(nameof(GroupAbsPreview));
     }
 
     public string GroupActivePredicate
@@ -132,20 +155,28 @@ public partial class SpcSnapshotPick : ObservableObject
             OnPropertyChanged();
             OnPropertyChanged(nameof(GroupShowAbsLow));
             OnPropertyChanged(nameof(GroupShowAbsHigh));
+            OnPropertyChanged(nameof(GroupAbsPreview));
         }
     }
     public string GroupActiveAbsLow
     {
         get => GroupCells[_activeGroupSlot].AbsLow;
-        set { if (GroupCells[_activeGroupSlot].AbsLow != value) { GroupCells[_activeGroupSlot].AbsLow = value; OnPropertyChanged(); } }
+        set { if (GroupCells[_activeGroupSlot].AbsLow != value) { GroupCells[_activeGroupSlot].AbsLow = value; OnPropertyChanged(); OnPropertyChanged(nameof(GroupAbsPreview)); } }
     }
     public string GroupActiveAbsHigh
     {
         get => GroupCells[_activeGroupSlot].AbsHigh;
-        set { if (GroupCells[_activeGroupSlot].AbsHigh != value) { GroupCells[_activeGroupSlot].AbsHigh = value; OnPropertyChanged(); } }
+        set { if (GroupCells[_activeGroupSlot].AbsHigh != value) { GroupCells[_activeGroupSlot].AbsHigh = value; OnPropertyChanged(); OnPropertyChanged(nameof(GroupAbsPreview)); } }
     }
     public bool GroupShowAbsLow  => GroupActiveAbsKind is "Exact" or "Between" or "≥";
     public bool GroupShowAbsHigh => GroupActiveAbsKind is "Between" or "≤";
+
+    /// <summary>Live preview for the ACTIVE slot's absolute window in the group matrix
+    /// (same format as <see cref="AbsPreview"/>). Recomputed when the active cell's
+    /// kind/bounds change, the active slot switches, or the rounding mode changes.</summary>
+    public string GroupAbsPreview =>
+        RoundModePreview.SpcAbsolute(GroupActiveAbsKind, GroupActiveAbsLow, GroupActiveAbsHigh,
+                                     RoundMode, RoundModePreview.Scope.Both);
 
     /// <summary>This snapshot's directional predicate for slot <paramref name="slot"/>.</summary>
     public string GroupPredicateOf(int slot) => GroupCells[slot].Predicate;
@@ -243,6 +274,8 @@ public partial class SpcQueryViewModel : ViewModelBase
     partial void OnSelectedRoundingModeChanged(FloatRoundMode value)
     {
         OnPropertyChanged(nameof(RoundingModeHint));
+        // Each snapshot row renders its own live absolute-window preview from this mode.
+        foreach (var p in SnapshotPicks) p.RoundMode = value;
     }
 
     /// <summary>Directional predicate options (display strings). v1 is
@@ -403,7 +436,7 @@ public partial class SpcQueryViewModel : ViewModelBase
             var fresh = new List<SpcSnapshotPick>(ordered.Count);
             foreach (var m in ordered)
             {
-                var pick = new SpcSnapshotPick(m, PredicateOptions);
+                var pick = new SpcSnapshotPick(m, PredicateOptions) { RoundMode = SelectedRoundingMode };
                 if (prev.TryGetValue(m.Id, out var s))
                 {
                     pick.IsSelected = s.IsSelected;
