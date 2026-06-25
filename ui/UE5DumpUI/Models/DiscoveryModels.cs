@@ -96,6 +96,18 @@ public sealed class DiscoveryCandidate
     public double Selectivity       { get; set; }
     public double PopulationPenalty { get; set; }
 
+    /// <summary>Shape sub-score (only meaningful with ≥3 snapshots): 1.0 = a single
+    /// discrete change (the in-game action you captured around) — or a 2-snapshot
+    /// compare where shape can't be inferred; 0.5 = a steady monotonic trend (e.g. a
+    /// draining resource); 0.0 = jitter on every interval (per-frame render/anim/
+    /// physics noise). Exposed for a future cross-game calibration pass.</summary>
+    public double ShapeScore { get; set; }
+    /// <summary>How many of the N-1 snapshot intervals the representative moved in.</summary>
+    public int ChangeIntervals { get; set; }
+    /// <summary>Human-readable shape ("one-time" / "trend 2/3" / "jitter 3/3"); blank
+    /// when only two snapshots were compared (one interval — shape can't be inferred).</summary>
+    public string ShapeLabel { get; set; } = "";
+
     /// <summary>"3/50" — changed instances over total. Compact column display.</summary>
     public string ChangedDisplay => $"{InstancesChanged:N0}/{InstancesTotal:N0}";
 

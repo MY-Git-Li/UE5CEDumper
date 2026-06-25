@@ -39,6 +39,13 @@ public static class PivotDiscoveryEngine
     public const double ChangeWeight      = 2.0;
     public const double SelectivityWeight = 3.0;
     public const double PopulationWeight  = 1.5;
+    // Shape (only discriminates with ≥3 snapshots; inert at 2): rewards a clean
+    // ONE-TIME change — the discrete in-game action you captured around — and stays
+    // neutral on a steady monotonic trend (a draining resource), while demoting a
+    // field that JITTERS on every interval (per-frame render/anim/physics noise).
+    // Change-interval count alone can't tell a monotonic drain from jitter, so shape
+    // combines the interval count WITH monotonicity. Tunable; exposed on the candidate.
+    public const double ShapeWeight       = 3.0;
 
     // One rolled-up (class, prop, type) group: instance counts + a deterministic
     // representative changed instance (smallest norm path) for display / handoff.
@@ -55,7 +62,8 @@ public static class PivotDiscoveryEngine
     /// <paramref name="maxResults"/>. <paramref name="snapshotCount"/> is recorded
     /// on the result for display.</summary>
     public static DiscoveryResult Rank(
-        IReadOnlyList<DiscoveryInput> inputs, int snapshotCount, int maxResults = 200)
+        IReadOnlyList<DiscoveryInput> inputs, int snapshotCount, int maxResults = 200,
+        IReadOnlyDictionary<string, int>? classTotals = null)
     {
         var result = new DiscoveryResult { SnapshotCount = snapshotCount };
 
@@ -84,7 +92,7 @@ public static class PivotDiscoveryEngine
         foreach (var g in groups.Values)
         {
             if (g.Changed == 0 || g.Rep == null) continue;   // gate: only things that moved
-            rows.Add(BuildCandidate(g));
+            rows.Add(BuildCandidate(g, snapshotCount, classTotals));
         }
         result.ChangedGroups = rows.Count;
 
@@ -110,12 +118,31 @@ public static class PivotDiscoveryEngine
         return false;
     }
 
-    private static DiscoveryCandidate BuildCandidate(Group g)
+    /// <summary>Number of adjacent snapshot intervals whose value differs (0..N-1). A
+    /// single discrete event scores 1; per-frame churn scores N-1. Public for tests.</summary>
+    public static int ChangeIntervals(IReadOnlyList<string> hex)
+    {
+        int c = 0;
+        for (int i = 1; i < hex.Count; i++)
+            if (!string.Equals(hex[i], hex[i - 1], StringComparison.Ordinal)) c++;
+        return c;
+    }
+
+    private static DiscoveryCandidate BuildCandidate(
+        Group g, int snapshotCount, IReadOnlyDictionary<string, int>? classTotals)
     {
         var rep = g.Rep!;
         var score = PropertyScoringTable.Score(
             new PropertySearchMatch { ClassName = g.ClassName, PropName = g.PropName });
         var (direction, monotonic) = Direction(rep.Num);
+
+        // Total: the bounded SQL path feeds only the CHANGED instances, so it supplies
+        // the real per-class instance count separately; the in-memory path (and the
+        // unit tests) count every fed input. Never let total drop below changed (guards
+        // a stale / missing class_counts entry — the display must stay sane).
+        int total = classTotals != null && classTotals.TryGetValue(g.ClassName, out var ct)
+            ? Math.Max(ct, g.Changed)
+            : g.Total;
 
         // A clean (monotonic) move is a stronger signal than jitter.
         double changeScore = monotonic ? 1.0 : 0.5;
@@ -125,12 +152,29 @@ public static class PivotDiscoveryEngine
         double selectivity = 1.0 / (1.0 + Math.Log10(Math.Max(1, g.Changed)));
         // Ubiquitous fields (huge instance counts) are usually render/anim/timer
         // noise. Zero below ~10 instances (singletons & small squads pay nothing).
-        double population  = Math.Max(0.0, Math.Log10(Math.Max(1, g.Total)) - 1.0);
+        double population  = Math.Max(0.0, Math.Log10(Math.Max(1, total)) - 1.0);
+
+        // Shape over the representative's value sequence. With only 2 snapshots (one
+        // interval) shape is meaningless → neutral 1.0 for every candidate (a constant
+        // that can't reorder). With ≥3: a single discrete change (ci==1) is the
+        // cleanest game-action signal; a steady monotonic trend over several intervals
+        // (a draining resource) stays neutral-ish; jitter on every interval is noise.
+        int intervals = Math.Max(1, snapshotCount - 1);
+        int ci = ChangeIntervals(rep.Hex);
+        double shapeScore = snapshotCount <= 2 ? 1.0
+                          : ci <= 1            ? 1.0
+                          : monotonic          ? 0.5
+                          :                      0.0;
+        string shapeLabel = snapshotCount <= 2 ? ""
+                          : ci <= 1            ? "one-time"
+                          : monotonic          ? $"trend {ci}/{intervals}"
+                          :                      $"jitter {ci}/{intervals}";
 
         double composite =
               InterestWeight    * Math.Max(0, score.FinalScore)
             + ChangeWeight      * changeScore
             + SelectivityWeight * selectivity
+            + ShapeWeight       * shapeScore
             - PopulationWeight  * population;
 
         return new DiscoveryCandidate
@@ -138,7 +182,7 @@ public static class PivotDiscoveryEngine
             ClassName        = g.ClassName,
             PropName         = g.PropName,
             DeclaredType     = g.DeclaredType,
-            InstancesTotal   = g.Total,
+            InstancesTotal   = total,
             InstancesChanged = g.Changed,
             Direction        = direction,
             SampleSequence   = string.Join("  →  ",
@@ -152,6 +196,9 @@ public static class PivotDiscoveryEngine
             ChangeScore      = changeScore,
             Selectivity      = selectivity,
             PopulationPenalty = population,
+            ShapeScore       = shapeScore,
+            ChangeIntervals  = ci,
+            ShapeLabel       = shapeLabel,
         };
     }
 

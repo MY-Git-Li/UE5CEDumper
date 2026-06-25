@@ -21,6 +21,17 @@ Open work only. **Read this when deciding what to do next.**
 
 ## ▶ Next up (genuinely actionable now)
 
+- **Class Pivot discovery (build 1742) — in-game verify + deeper capture-memory fix** —
+  Effort: **S** (verify) / **M** (memory) · Risk: low. The bounded N-snapshot discovery +
+  shape ranking + the AutoCompleteBox class picker + Locate-in-GWorld/GameEngine + resizable/
+  filterable results all shipped build 1742 but are **NOT in-game verified** (the AutoCompleteBox
+  `SelectedItem` commit + the Locate handoff + the GridSplitter can't be tested headlessly).
+  Verify on a real game. Separately: the post-capture compacting `GC.Collect` (build 1742) is a
+  **mitigation** for the multi-snapshot working-set bloat — the *deeper* fix is to stop the
+  transient allocation at the source by replacing the capture's JSON-DOM parse with a streaming
+  `Utf8JsonReader` (`SnapshotChunkAsync` / the chunk parse). Only pursue the streaming rewrite if
+  the GC reclaim proves insufficient on huge (Avowed-scale, 266K-object) games. *Parent: dev-log build 1742.*
+
 - **Class Pivot — rounding-mode + "can't-find-data"/GAS-capture follow-ups (deferred from build 1672)** —
   Effort: **S-M** · Risk: low. The per-panel **RoundingMode {Round/Trunc/Ceil}** (build 1672) was rolled out to Value Search, Snapshot, and SPC but **NOT Class Pivot**. Two distinct gaps:
   (1) **Rounding mode** — Pivot does **no numeric value MATCHING** today: it groups by the *rendered* key string (`PivotEngine` uses `SnapshotNumeric.Render`) and `PivotDiscoveryEngine.Direction()` compares raw `double`s with no reduce. So a rounding-mode switch is largely **N/A** — but if Pivot ever grows a value-target filter, it should reuse `SnapshotNumeric.ExactMatch/OrderedMatch/BetweenMatch(...,FloatRoundMode)` like the other panels. Lower priority: optionally apply the reduce to the grouping KEY so float GAS values bucket by displayed integer (e.g. 513.36/513.4 group as "513").

@@ -154,6 +154,90 @@ public class PivotDiscoveryEngineTests
     }
 
     [Fact]
+    public void ChangeIntervals_CountsAdjacentDifferences()
+    {
+        Assert.Equal(0, PivotDiscoveryEngine.ChangeIntervals(new[] { "a", "a", "a" }));
+        Assert.Equal(1, PivotDiscoveryEngine.ChangeIntervals(new[] { "a", "a", "b" }));   // one-time
+        Assert.Equal(2, PivotDiscoveryEngine.ChangeIntervals(new[] { "a", "b", "c" }));   // every interval (N=3)
+        Assert.Equal(1, PivotDiscoveryEngine.ChangeIntervals(new[] { "a", "b", "b" }));
+    }
+
+    [Fact]
+    public void Shape_OneTimeEvent_BeatsJitter_NeutralNameAndPopulation()
+    {
+        // 3 snapshots, neutral names + identical changed-count (1) + population (1), so
+        // SHAPE is the only differentiator. "Aaa" moves ONCE (stable, stable, moved) =
+        // one-time event. "Bbb" jitters every interval, non-monotonically = noise.
+        var inputs = new[]
+        {
+            In("BP_Actor_C", "Aaa", "IntProperty", "p", new[] { "01000000", "01000000", "05000000" }, new double?[] { 1, 1, 5 }),
+            In("BP_Actor_C", "Bbb", "IntProperty", "q", new[] { "01000000", "63000000", "05000000" }, new double?[] { 1, 99, 5 }),
+        };
+        var r = PivotDiscoveryEngine.Rank(inputs, 3);
+        var one = Find(r, "BP_Actor_C", "Aaa")!;
+        var jit = Find(r, "BP_Actor_C", "Bbb")!;
+        Assert.Equal("one-time", one.ShapeLabel);
+        Assert.Equal(1.0, one.ShapeScore);
+        Assert.Equal(0.0, jit.ShapeScore);            // changed every interval + non-monotonic
+        Assert.True(one.Score > jit.Score);
+        Assert.Equal("BP_Actor_C", r.Rows[0].ClassName);
+        Assert.Equal("Aaa", r.Rows[0].PropName);      // one-time event ranks first
+    }
+
+    [Fact]
+    public void Shape_MonotonicTrend_IsNeutral_NotDemotedLikeJitter()
+    {
+        // A steady drain that moves EVERY interval but MONOTONICALLY (a draining
+        // resource) must NOT be demoted like jitter: shape 0.5, above jitter's 0.0.
+        var trend = Find(PivotDiscoveryEngine.Rank(new[]
+        {
+            In("C", "Energy", "IntProperty", "x", new[] { "64000000", "32000000", "0A000000" }, new double?[] { 100, 50, 10 }),
+        }, 3), "C", "Energy")!;
+        Assert.Equal(0.5, trend.ShapeScore);
+        Assert.StartsWith("trend", trend.ShapeLabel);
+    }
+
+    [Fact]
+    public void Shape_NeutralAtTwoSnapshots()
+    {
+        // One interval → shape can't be inferred → neutral 1.0 / blank label for all.
+        var c = Find(PivotDiscoveryEngine.Rank(new[]
+        {
+            In("C", "Gold", "IntProperty", "x", new[] { "64000000", "32000000" }, new double?[] { 100, 50 }),
+        }, 2), "C", "Gold")!;
+        Assert.Equal(1.0, c.ShapeScore);
+        Assert.Equal("", c.ShapeLabel);
+    }
+
+    [Fact]
+    public void ClassTotals_OverrideInstanceTotal_WhenOnlyChangedFed()
+    {
+        // The bounded SQL path feeds only the CHANGED instances + a per-class total.
+        // InstancesTotal must come from the dict, not the fed count.
+        var inputs = new[]
+        {
+            In("BP_Mob_C", "Health", "IntProperty", "m0", new[] { "64", "32" }, new double?[] { 100, 50 }),
+        };
+        var totals = new Dictionary<string, int> { ["BP_Mob_C"] = 500 };
+        var c = Find(PivotDiscoveryEngine.Rank(inputs, 2, 200, totals), "BP_Mob_C", "Health")!;
+        Assert.Equal(500, c.InstancesTotal);   // from class_counts, not the 1 fed input
+        Assert.Equal(1, c.InstancesChanged);
+    }
+
+    [Fact]
+    public void ClassTotals_NeverBelowChanged()
+    {
+        // A stale / missing class_counts entry must never yield total < changed.
+        var inputs = Enumerable.Range(0, 3)
+            .Select(i => In("C", "P", "IntProperty", "n" + i, new[] { "00", "01" }, new double?[] { 0, 1 }))
+            .ToArray();
+        var totals = new Dictionary<string, int> { ["C"] = 1 };   // understated
+        var c = Find(PivotDiscoveryEngine.Rank(inputs, 2, 200, totals), "C", "P")!;
+        Assert.Equal(3, c.InstancesChanged);
+        Assert.Equal(3, c.InstancesTotal);     // max(1, 3)
+    }
+
+    [Fact]
     public void SampleSequence_RendersNumericValues()
     {
         // "64"=100, "32"=50 as little-endian int8-in-hex won't decode as IntProperty

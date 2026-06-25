@@ -440,6 +440,30 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                     _log.Error($"Pivot NavigateToInstance handler error: {addr}", ex);
                 }
             };
+            Pivot.LocateInGWorld += async (addr) =>
+            {
+                try
+                {
+                    SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                    await LiveWalker.LocateInGWorldAsync(addr, 0, null, stopAtParent: false);
+                }
+                catch (Exception ex)
+                {
+                    _log.Error($"Pivot LocateInGWorld handler error: {addr}", ex);
+                }
+            };
+            Pivot.LocateInGameEngine += async (addr) =>
+            {
+                try
+                {
+                    SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                    await LiveWalker.LocateInGameEngineAsync(addr, 0, null, stopAtParent: false);
+                }
+                catch (Exception ex)
+                {
+                    _log.Error($"Pivot LocateInGameEngine handler error: {addr}", ex);
+                }
+            };
 
             // C5: right-click "Pivot this property" from the three source panels ->
             // switch to the Class Pivot tab and pre-select the class/property.

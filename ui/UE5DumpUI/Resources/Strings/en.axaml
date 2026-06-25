@@ -551,9 +551,15 @@
     <sys:String x:Key="str.Pivot.KeyInnerKey">Key = inner-key value (reorder-immune)</sys:String>
     <sys:String x:Key="str.Pivot.ThisProperty">Pivot this property…</sys:String>
     <sys:String x:Key="str.Pivot.ClassFilter">Class:</sys:String>
+    <sys:String x:Key="str.Pivot.ClassFilterHint">type to filter, then pick…</sys:String>
     <sys:String x:Key="str.Pivot.Run">Run Pivot</sys:String>
     <sys:String x:Key="str.Pivot.OpenWalker">Open in Live Walker</sys:String>
     <sys:String x:Key="str.Pivot.CopyAddr">Copy Address</sys:String>
+    <sys:String x:Key="str.Pivot.LocateGWorld">🌍</sys:String>
+    <sys:String x:Key="str.Tip.Pivot.LocateGWorld">Locate in GWorld: find the shortest pointer path from GWorld down to the selected group's representative object and show it in Live Walker</sys:String>
+    <sys:String x:Key="str.Pivot.LocateGameEngine">⚙</sys:String>
+    <sys:String x:Key="str.Tip.Pivot.LocateGameEngine">Locate in GameEngine: shortest pointer path from the live UGameEngine down to the selected group's representative object. Reaches engine-layer objects the GWorld graph can't — for most world actors, use Locate in GWorld.</sys:String>
+    <sys:String x:Key="str.Pivot.ResultFilterHint">filter results…</sys:String>
     <sys:String x:Key="str.Pivot.GroupBy">Group by:</sys:String>
     <sys:String x:Key="str.Pivot.KeyField">Key field:</sys:String>
     <sys:String x:Key="str.Pivot.Col.Key">Key</sys:String>
@@ -571,17 +577,21 @@
 
     <!-- Class Pivot: change-driven discovery (the automatic front-door) -->
     <sys:String x:Key="str.Pivot.Discover.Header">🔍 Suggest targets — find what changed</sys:String>
-    <sys:String x:Key="str.Pivot.Discover.Intro">Don't know which class to pivot? Capture two snapshots around an in-game action (e.g. spend gold, take damage), pick them below, and Discover ranks the (class, property) targets that MOVED — by how much each looks like game state (named fields, specific changes, low noise). Pick one and Use → to pivot it. No class/key guessing.</sys:String>
+    <sys:String x:Key="str.Pivot.Discover.Intro">Don't know which class to pivot? Capture 2-4 snapshots around an in-game action (e.g. spend gold, take damage), tick them below, and Discover ranks the (class, property) targets that MOVED — by how much each looks like game state (named fields, specific changes, low noise). Pick one and Use → to pivot it. No class/key guessing.</sys:String>
+    <sys:String x:Key="str.Pivot.Discover.Pick">Snapshots (tick 2-4, oldest → newest = Before … After):</sys:String>
     <sys:String x:Key="str.Pivot.Discover.From">Before:</sys:String>
     <sys:String x:Key="str.Pivot.Discover.To">After:</sys:String>
     <sys:String x:Key="str.Pivot.Discover.Run">🔍 Discover</sys:String>
     <sys:String x:Key="str.Pivot.Discover.Use">Use → (pivot this)</sys:String>
+    <!-- Usage limits, shown on the tab so expectations are clear up front. -->
+    <sys:String x:Key="str.Pivot.Discover.Limits">How it works &amp; limits:&#10;• Capture 2-4 snapshots around the action you want to isolate (Before … After).&#10;• Use 3-4 to separate a one-time change from constant per-frame noise (rotation, timers, positions); with only 2, both just look "changed".&#10;• Only fields that MOVED appear — a value that never changed between your captures will not show.&#10;• Across a game restart, only objects that re-appear with a stable identity (GameInstance / PlayerState / Pawn / components / GAS) re-join reliably; randomly-spawned actors may not.&#10;• The scan covers the numeric fields captured in the snapshot and runs server-side; on a large capture it can take several seconds (cancellable).</sys:String>
     <sys:String x:Key="str.Pivot.Discover.Col.Class">Class</sys:String>
     <sys:String x:Key="str.Pivot.Discover.Col.Prop">Property</sys:String>
     <sys:String x:Key="str.Pivot.Discover.Col.Changed">Changed</sys:String>
     <sys:String x:Key="str.Pivot.Discover.Col.Dir">Δ</sys:String>
     <sys:String x:Key="str.Pivot.Discover.Col.Cat">Category</sys:String>
-    <sys:String x:Key="str.Pivot.Discover.Col.Seq">Sample (before → after)</sys:String>
+    <sys:String x:Key="str.Pivot.Discover.Col.Shape">Shape</sys:String>
+    <sys:String x:Key="str.Pivot.Discover.Col.Seq">Sample (oldest → newest)</sys:String>
     <sys:String x:Key="str.Pivot.Discover.Col.Score">Score</sys:String>
 
     <!-- Proxy Deploy -->
