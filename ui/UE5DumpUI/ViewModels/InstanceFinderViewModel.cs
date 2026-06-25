@@ -331,6 +331,19 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
             await SearchCommand.ExecuteAsync(null);
     }
 
+    /// <summary>Cross-tab handoff that pre-fills BOTH the class field AND the
+    /// object-name filter, then runs the search (the Object Tree right-click
+    /// "Find Instances (Type + Name)"). Unlike <see cref="SearchForClassAsync"/>
+    /// this keeps the supplied object name rather than clearing it, so the result
+    /// is narrowed to that specific named instance of the class.</summary>
+    public async Task SearchForClassAndNameAsync(string className, string objectName)
+    {
+        SearchClassName = className;
+        SearchObjectName = objectName ?? "";
+        if (SearchCommand.CanExecute(null))
+            await SearchCommand.ExecuteAsync(null);
+    }
+
     [RelayCommand]
     private async Task SearchAsync()
     {

@@ -547,6 +547,35 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             }
         };
 
+        // Wire ObjectTree right-click -> InstanceFinder (find instances of the
+        // selected node's class, optionally ANDed with its object name) + tab
+        // switch + auto-run. Saves the copy-type / paste-into-Instances / Search
+        // round-trip. Mirrors the GameClassFilter / PropertySearch handoffs.
+        ObjectTree.NavigateToInstanceFinder += async (className) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.InstanceFinder;
+                await InstanceFinder.SearchForClassAsync(className);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"ObjectTree NavigateToInstanceFinder handler error: {className}", ex);
+            }
+        };
+        ObjectTree.NavigateToInstanceFinderWithName += async (className, name) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.InstanceFinder;
+                await InstanceFinder.SearchForClassAndNameAsync(className, name);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"ObjectTree NavigateToInstanceFinderWithName handler error: {className}", ex);
+            }
+        };
+
         // Wire InstanceFinder -> LiveWalker navigation + tab switch
         InstanceFinder.NavigateToLiveWalker += async (addr) =>
         {
