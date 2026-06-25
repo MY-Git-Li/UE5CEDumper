@@ -16,7 +16,7 @@ builds ≤696 in
 
 -----
 
-## 2026-06-25 — Object Tree right-click → Instances direct search (build 1722; UI/C#-only, no DLL/schema change; NOT in-game verified)
+## 2026-06-25 — Object Tree right-click → Instances direct search (build 1722; UI/C#-only, no DLL/schema change; NOT in-game verified; **MERGED main PR #374** `ca2a73f`)
 
 Adds two right-click menu items to the **Object Tree** that drive the **Instances**
 tab directly, removing the copy-type → switch-tab → paste → Search round-trip the
