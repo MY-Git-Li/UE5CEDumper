@@ -950,7 +950,7 @@
     <sys:String x:Key="str.Tip.GameClassFilter.TextFilter">Filter classes by name substring</sys:String>
     <sys:String x:Key="str.Tip.GameClassFilter.Clear">Clear all filters</sys:String>
     <sys:String x:Key="str.Tip.GameClassFilter.FindInstances">Find live instances of this class</sys:String>
-    <sys:String x:Key="str.Tip.GameClassFilter.WalkClass">Open class in Live Walker to inspect fields</sys:String>
+    <sys:String x:Key="str.Tip.GameClassFilter.WalkClass">Open class in the Class Struct tab to inspect its full property layout and offsets</sys:String>
     <sys:String x:Key="str.Tip.GameClassFilter.FindFunc">Find UFunctions that take this class as a parameter or return value (reflection scan — includes native functions, unlike the per-field bytecode xref)</sys:String>
 
     <!-- Live Walker: Functions -->
