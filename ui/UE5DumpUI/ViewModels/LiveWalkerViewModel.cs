@@ -306,6 +306,13 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool _descShowOffset;
     [ObservableProperty] private bool _descShowType;
 
+    // Flatten GAS attributes (FGameplayAttributeData) one level in Copy CE XML / Copy CE
+    // Field (default OFF). When on, an attribute struct's BaseValue/CurrentValue children
+    // are promoted to sibling leaves named "HealthPoint ▸ BaseValue" at the combined offset
+    // instead of a nested parent group — fewer nodes, easier to read/edit in CE. Scoped to
+    // GameplayAttributeData structs only (CeXmlExportService gates the rest).
+    [ObservableProperty] private bool _flattenGasAttributes;
+
     // Dedup shared objects in Copy CE XML / Copy CE Field drilldown (default ON).
     // A shared object (e.g. one PlayerState reached from several fields) is expanded
     // ONCE; later references become a flat "(shared)" pointer leaf. Prevents the
@@ -3331,7 +3338,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     descShowOffset: DescShowOffset,
                     descShowType: DescShowType,
                     dedupShared: DedupSharedObjects,
-                    excludeSystemComponents: ExcludeSystemComponents);
+                    excludeSystemComponents: ExcludeSystemComponents,
+                    flattenGasAttributes: FlattenGasAttributes);
             }
             else
             {
@@ -3346,7 +3354,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     descShowOffset: DescShowOffset,
                     descShowType: DescShowType,
                     dedupShared: DedupSharedObjects,
-                    excludeSystemComponents: ExcludeSystemComponents);
+                    excludeSystemComponents: ExcludeSystemComponents,
+                    flattenGasAttributes: FlattenGasAttributes);
             }
 
             await _platform.CopyToClipboardAsync(xml);
@@ -3583,7 +3592,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     descShowOffset: DescShowOffset,
                     descShowType: DescShowType,
                     dedupShared: DedupSharedObjects,
-                    excludeSystemComponents: ExcludeSystemComponents);
+                    excludeSystemComponents: ExcludeSystemComponents,
+                    flattenGasAttributes: FlattenGasAttributes);
             }
             else
             {
@@ -3599,7 +3609,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     descShowOffset: DescShowOffset,
                     descShowType: DescShowType,
                     dedupShared: DedupSharedObjects,
-                    excludeSystemComponents: ExcludeSystemComponents);
+                    excludeSystemComponents: ExcludeSystemComponents,
+                    flattenGasAttributes: FlattenGasAttributes);
             }
 
             await _platform.CopyToClipboardAsync(xml);

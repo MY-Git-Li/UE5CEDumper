@@ -200,6 +200,9 @@
             <MenuItem Header="{StaticResource str.LiveWalker.CollapseChain}"
                       ToggleType="CheckBox" IsChecked="{Binding CollapseChain, Mode=TwoWay}"
                       ToolTip.Tip="{StaticResource str.Tip.LiveWalker.CollapseChain}"/>
+            <MenuItem Header="{StaticResource str.LiveWalker.FlattenGas}"
+                      ToggleType="CheckBox" IsChecked="{Binding FlattenGasAttributes, Mode=TwoWay}"
+                      ToolTip.Tip="{StaticResource str.Tip.LiveWalker.FlattenGas}"/>
             <MenuItem Header="{StaticResource str.LiveWalker.DedupShared}"
                       ToggleType="CheckBox" IsChecked="{Binding DedupSharedObjects, Mode=TwoWay}"
                       ToolTip.Tip="{StaticResource str.Tip.LiveWalker.DedupShared}"/>
