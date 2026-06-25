@@ -46,7 +46,7 @@ A quick look at what you can actually *do* with it (the [full table-maker featur
 | **4.25 – 4.27** | ✅ | ✅ | ✅ | *FF7 Rebirth, Tower of Mask, Hogwarts Legacy, Romancing SaGa 2 RotS, Ghostwire: Tokyo, TimeSplitters Rewind (Early Access V0.3.3), The Artisan of Glimmith, Barn Finders, MOBILE SUIT GUNDAM SEED Battle Destiny Remastered, The Adventures of Elliot: The Millennium Tales* |
 | **5.0 – 5.2** | ✅ | ✅ | ✅ | *Squirrel With A Gun, Caravan Sandwitch, Meltopia, Retro Rewind Demo* |
 | **5.3 – 5.4** | ✅ | ✅ | ✅ | *Satisfactory (v1.1.3.1), Colossal, Avowed (Obsidian — packed 20-byte FUObjectItem; static-struct GObjects AOB), Echoes of Aincrad Demo (Bandai Namco — dxgi.dll proxy)* |
-| **5.5 – 5.7** | ✅ | ✅* | ✅** | *Titan Quest II, EverSpace 2, Lushfoil Photography Sim, Manor Lords, Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT: CARRIER QUALIFICATION Demo, Solarpunk (stock UE5.7 — Object@+0x08), Satisfactory (v1.2 — UE5.6; modular build, all globals via symbol export, 217 K objects)* |
+| **5.5 – 5.7** | ✅ | ✅* | ✅** | *Titan Quest II, EverSpace 2, Lushfoil Photography Sim, Manor Lords, Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT: CARRIER QUALIFICATION Demo, Solarpunk (stock UE5.7 — Object@+0x08), Satisfactory (v1.2.3.1 — UE5.6; modular build, all globals via symbol export, 217 K objects)* |
 
 *\*GNames uses .data pointer-scan fallback for 5.5+*
 *\**DynOff supports **CasePreservingName (FName = 16 bytes)** layout.*
