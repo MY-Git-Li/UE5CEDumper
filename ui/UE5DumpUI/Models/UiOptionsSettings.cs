@@ -62,6 +62,7 @@ public sealed class LiveWalkerUiOptions
     public bool CollapseChain { get; set; }
     public bool DescShowOffset { get; set; }
     public bool DescShowType { get; set; }
+    public bool FlattenGasAttributes { get; set; }
     public bool DedupSharedObjects { get; set; } = true;
     public bool ExcludeSystemComponents { get; set; } = true;
     public int GWorldLocateDepth { get; set; } = 5;

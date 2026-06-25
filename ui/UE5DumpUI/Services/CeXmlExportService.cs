@@ -176,6 +176,19 @@ public static class CeXmlExportService
     private static bool _excludeSystemComponents;
 
     /// <summary>
+    /// Opt-in (Live Walker "Flatten GAS attributes" toggle, default off): collapse a
+    /// GAS <c>FGameplayAttributeData</c> struct (UE reflection name "GameplayAttributeData")
+    /// by ONE level — instead of a parent group at +structOffset with BaseValue/CurrentValue
+    /// children, promote each scalar child to a sibling leaf named "{Struct} ▸ {Child}" at
+    /// the COMBINED offset (+structOff+childOff). Scoped strictly to that struct type and
+    /// only when every child maps to a scalar CE leaf; any other struct keeps its group.
+    /// Honoured in <see cref="EmitFields"/> (the shared StructProperty branch), so it applies
+    /// uniformly to Copy CE XML and Copy CE Field, at any nesting depth.
+    /// </summary>
+    [ThreadStatic]
+    private static bool _flattenGasAttributes;
+
+    /// <summary>
     /// Current <see cref="EmitFields"/> nesting depth (1 = the top-level user-selected
     /// fields, &gt;1 = recursively-resolved struct / pointer children). The noise filter
     /// keys off this so it never drops a field the user explicitly put on screen.
@@ -790,7 +803,8 @@ public static class CeXmlExportService
         bool descShowOffset = false,
         bool descShowType = false,
         bool dedupShared = false,
-        bool excludeSystemComponents = false)
+        bool excludeSystemComponents = false,
+        bool flattenGasAttributes = false)
     {
         // Clean breadcrumbs: remove navigation cycles (e.g., Child->Parent->Child)
         // before generating XML to avoid deeply nested duplicate pointer chains.
@@ -803,6 +817,7 @@ public static class CeXmlExportService
         _descShowType = descShowType;
         _dedupShared = dedupShared;
         _excludeSystemComponents = excludeSystemComponents;
+        _flattenGasAttributes = flattenGasAttributes;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -906,7 +921,8 @@ public static class CeXmlExportService
         bool descShowOffset = false,
         bool descShowType = false,
         bool dedupShared = false,
-        bool excludeSystemComponents = false)
+        bool excludeSystemComponents = false,
+        bool flattenGasAttributes = false)
     {
         _nextId = 100;
         _collapsePointerNodes = collapsePointerNodes;
@@ -915,6 +931,7 @@ public static class CeXmlExportService
         _descShowType = descShowType;
         _dedupShared = dedupShared;
         _excludeSystemComponents = excludeSystemComponents;
+        _flattenGasAttributes = flattenGasAttributes;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -1027,7 +1044,8 @@ public static class CeXmlExportService
         bool descShowOffset = false,
         bool descShowType = false,
         bool dedupShared = false,
-        bool excludeSystemComponents = false)
+        bool excludeSystemComponents = false,
+        bool flattenGasAttributes = false)
     {
         var cleanedBc = CleanBreadcrumbs(breadcrumbs);
 
@@ -1038,6 +1056,7 @@ public static class CeXmlExportService
         _descShowType = descShowType;
         _dedupShared = dedupShared;
         _excludeSystemComponents = excludeSystemComponents;
+        _flattenGasAttributes = flattenGasAttributes;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -1727,7 +1746,15 @@ public static class CeXmlExportService
                 && resolvedStructs.TryGetValue(field.StructDataAddr, out var structChildren)
                 && structChildren.Count > 0)
             {
-                EmitResolvedStruct(sb, indent, field, structChildren);
+                // GAS flatten (opt-in): a GameplayAttributeData struct collapses one level —
+                // its scalar BaseValue/CurrentValue children become sibling leaves (combined
+                // offset) instead of a parent group. Gated on the struct type AND an all-scalar
+                // child set, so any non-GAS / non-scalar struct keeps its normal group.
+                if (_flattenGasAttributes && IsGasAttributeStruct(field)
+                    && structChildren.All(c => MapCeField(c) != null))
+                    EmitFlattenedGasStruct(sb, indent, field, structChildren);
+                else
+                    EmitResolvedStruct(sb, indent, field, structChildren);
                 continue;
             }
 
@@ -2009,6 +2036,56 @@ public static class CeXmlExportService
         EmitFields(sb, childIndent, children, _resolvedStructsState, _resolvedInstancesState);
 
         EmitGroupClose(sb, indent);
+    }
+
+    /// <summary>
+    /// True when <paramref name="field"/> is a GAS <c>FGameplayAttributeData</c> struct
+    /// member — the value container every GAS attribute (HealthPoint, Mana, …) stores as a
+    /// StructProperty of {float BaseValue, float CurrentValue}. UE reflection drops the
+    /// leading 'F' ("GameplayAttributeData"); the F-prefixed spelling is accepted too so a
+    /// future DLL/format change can't silently disable the flatten.
+    /// </summary>
+    private static bool IsGasAttributeStruct(LiveFieldValue field)
+        => field.TypeName == "StructProperty"
+           && field.StructTypeName is "GameplayAttributeData" or "FGameplayAttributeData";
+
+    /// <summary>
+    /// Flatten a GAS attribute struct ONE level: emit each resolved child as a sibling leaf
+    /// instead of a parent group + children. The child's CE Address is the COMBINED offset
+    /// (struct member offset + child offset within the struct) — identical to what CE would
+    /// resolve through the group (inline struct, no dereference), so the watched address is
+    /// unchanged; only the tree is flatter. Description = "{Struct} ▸ {Child}" with per-segment
+    /// +Offset honouring DescShowOffset; the struct's type label is appended ONCE at the end
+    /// (DescShowType) so the merged text stays readable. Caller guarantees every child maps to
+    /// a scalar CE leaf (MapCeField != null).
+    /// </summary>
+    private static void EmitFlattenedGasStruct(StringBuilder sb, string indent,
+        LiveFieldValue structField, List<LiveFieldValue> children)
+    {
+        // Struct type appended once at the very end (per the design: repeating the class name
+        // on every segment reads awkwardly). Honours DescShowType only.
+        var typeSuffix = (_descShowType && !string.IsNullOrEmpty(structField.StructTypeName))
+            ? $" ({structField.StructTypeName})"
+            : "";
+
+        foreach (var child in children)
+        {
+            // Same global emit budget as EmitFields — each promoted child is one CE entry.
+            if (_emitEntryCount >= MaxEmitEntries) { _emitTruncated = true; break; }
+
+            // Per-segment +Offset (allowType:false so the type isn't repeated on each part);
+            // the struct type is appended once via typeSuffix below. "▸" = ▸ (U+25B8).
+            var seg1 = DecorateDesc(structField.Name, structField.Offset, null, allowType: false);
+            var seg2 = DecorateDesc(child.Name, child.Offset, null, allowType: false);
+            var desc = $"{seg1} ▸ {seg2}{typeSuffix}";
+
+            // Inline struct: child address = struct member offset + child-in-struct offset.
+            var combinedOffset = structField.Offset + child.Offset;
+
+            // Caller's all-scalar gate guarantees MapCeField != null; stay defensive anyway.
+            var ceField = MapCeField(child) ?? new CeFieldInfo("8 Bytes", ShowAsHex: true);
+            EmitLeaf(sb, indent, desc, ceField, $"+{combinedOffset:X}", null);
+        }
     }
 
     /// <summary>

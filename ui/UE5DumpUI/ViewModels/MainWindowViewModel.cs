@@ -1800,7 +1800,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private static readonly HashSet<string> LiveWalkerPersist = new()
     {
         nameof(LiveWalkerViewModel.CollapseChain), nameof(LiveWalkerViewModel.DescShowOffset),
-        nameof(LiveWalkerViewModel.DescShowType), nameof(LiveWalkerViewModel.DedupSharedObjects),
+        nameof(LiveWalkerViewModel.DescShowType), nameof(LiveWalkerViewModel.FlattenGasAttributes),
+        nameof(LiveWalkerViewModel.DedupSharedObjects),
         nameof(LiveWalkerViewModel.ExcludeSystemComponents), nameof(LiveWalkerViewModel.GWorldLocateDepth),
         nameof(LiveWalkerViewModel.AutoRefreshIntervalSec),
     };
@@ -1881,6 +1882,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         LiveWalker.CollapseChain = lw.CollapseChain;
         LiveWalker.DescShowOffset = lw.DescShowOffset;
         LiveWalker.DescShowType = lw.DescShowType;
+        LiveWalker.FlattenGasAttributes = lw.FlattenGasAttributes;
         LiveWalker.DedupSharedObjects = lw.DedupSharedObjects;
         LiveWalker.ExcludeSystemComponents = lw.ExcludeSystemComponents;
         LiveWalker.GWorldLocateDepth = lw.GWorldLocateDepth;
@@ -1984,6 +1986,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         o.LiveWalker.CollapseChain = LiveWalker.CollapseChain;
         o.LiveWalker.DescShowOffset = LiveWalker.DescShowOffset;
         o.LiveWalker.DescShowType = LiveWalker.DescShowType;
+        o.LiveWalker.FlattenGasAttributes = LiveWalker.FlattenGasAttributes;
         o.LiveWalker.DedupSharedObjects = LiveWalker.DedupSharedObjects;
         o.LiveWalker.ExcludeSystemComponents = LiveWalker.ExcludeSystemComponents;
         o.LiveWalker.GWorldLocateDepth = LiveWalker.GWorldLocateDepth;

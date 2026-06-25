@@ -420,6 +420,142 @@ public class CeXmlExportServiceTests
         Assert.Contains("<VariableType>Float</VariableType>", xml);
     }
 
+    // ===== GAS attribute flatten (Live Walker "Flatten GAS attributes" option) =====
+    // U+25B8 ▸ is the segment separator written by EmitFlattenedGasStruct.
+
+    /// <summary>Build a UAttributeSet-shaped object: two FGameplayAttributeData members
+    /// (HealthPoint @0x30, MaxHealthPoint @0x40), each {float BaseValue @0x8, float
+    /// CurrentValue @0xC} — the exact GAS shape from the Elliot CharacterAttributeSet.</summary>
+    private static (LiveFieldValue[] fields, Dictionary<string, List<LiveFieldValue>> structs)
+        BuildGasAttributeSet(string structTypeName = "GameplayAttributeData")
+    {
+        var fields = new[]
+        {
+            new LiveFieldValue
+            {
+                Name = "HealthPoint", TypeName = "StructProperty", Offset = 0x30, Size = 0x10,
+                StructDataAddr = "0xH", StructClassAddr = "0xHC", StructTypeName = structTypeName
+            },
+            new LiveFieldValue
+            {
+                Name = "MaxHealthPoint", TypeName = "StructProperty", Offset = 0x40, Size = 0x10,
+                StructDataAddr = "0xM", StructClassAddr = "0xMC", StructTypeName = structTypeName
+            },
+        };
+        List<LiveFieldValue> AttrChildren() => new()
+        {
+            new LiveFieldValue { Name = "BaseValue", TypeName = "FloatProperty", Offset = 0x8, Size = 4 },
+            new LiveFieldValue { Name = "CurrentValue", TypeName = "FloatProperty", Offset = 0xC, Size = 4 },
+        };
+        var structs = new Dictionary<string, List<LiveFieldValue>>
+        {
+            ["0xH"] = AttrChildren(),
+            ["0xM"] = AttrChildren(),
+        };
+        return (fields, structs);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_FlattenGas_PromotesChildrenAtCombinedOffset()
+    {
+        var sep = "▸";
+        var (fields, structs) = BuildGasAttributeSet();   // live spelling, no 'F' prefix
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "CharacterAttributeSet", "UCharacterAttributeSet",
+            fields, structs, flattenGasAttributes: true);
+
+        // Children promoted to "Struct ▸ Child" sibling leaves…
+        Assert.Contains($"HealthPoint {sep} BaseValue", xml);
+        Assert.Contains($"HealthPoint {sep} CurrentValue", xml);
+        Assert.Contains($"MaxHealthPoint {sep} BaseValue", xml);
+        // …at the COMBINED offset (struct member + child-in-struct): 0x30+8=0x38, 0x30+C=0x3C, 0x40+8=0x48.
+        Assert.Contains("<Address>+38</Address>", xml);
+        Assert.Contains("<Address>+3C</Address>", xml);
+        Assert.Contains("<Address>+48</Address>", xml);
+        Assert.Contains("<VariableType>Float</VariableType>", xml);
+        // The intermediate parent group + bare child entries are gone.
+        Assert.DoesNotContain("<Description>\"HealthPoint\"</Description>", xml);
+        Assert.DoesNotContain("<Description>\"BaseValue\"</Description>", xml);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_FlattenGasOff_KeepsNestedAttributeGroup()
+    {
+        var sep = "▸";
+        var (fields, structs) = BuildGasAttributeSet();
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "CharacterAttributeSet", "UCharacterAttributeSet",
+            fields, structs);   // flattenGasAttributes defaults false
+
+        // Default: nested parent group + BaseValue/CurrentValue children, no flatten separator.
+        Assert.Contains("<Description>\"HealthPoint\"</Description>", xml);
+        Assert.Contains("<Description>\"BaseValue\"</Description>", xml);
+        Assert.DoesNotContain(sep, xml);
+        // Child offset stays struct-relative (+8), NOT combined (+38).
+        Assert.Contains("<Address>+8</Address>", xml);
+        Assert.DoesNotContain("<Address>+38</Address>", xml);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_FlattenGas_AcceptsFPrefixedSpelling()
+    {
+        var sep = "▸";
+        var (fields, structs) = BuildGasAttributeSet("FGameplayAttributeData");
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "AttrSet", "UAttrSet", fields, structs, flattenGasAttributes: true);
+
+        Assert.Contains($"HealthPoint {sep} BaseValue", xml);
+        Assert.Contains("<Address>+38</Address>", xml);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_FlattenGas_NonGasStructKeepsGroup()
+    {
+        var sep = "▸";
+        var fields = new[]
+        {
+            new LiveFieldValue
+            {
+                Name = "Transform", TypeName = "StructProperty", Offset = 0x100, Size = 0x30,
+                StructDataAddr = "0xT", StructClassAddr = "0xTC", StructTypeName = "Transform"
+            },
+        };
+        var structs = new Dictionary<string, List<LiveFieldValue>>
+        {
+            ["0xT"] = new()
+            {
+                new LiveFieldValue { Name = "Location.X", TypeName = "FloatProperty", Offset = 0x0, Size = 4 },
+                new LiveFieldValue { Name = "Location.Y", TypeName = "FloatProperty", Offset = 0x4, Size = 4 },
+            }
+        };
+
+        // Flatten ON, but the struct is NOT a GAS attribute → it must stay a nested group.
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields, structs, flattenGasAttributes: true);
+
+        Assert.Contains("<Description>\"Transform\"</Description>", xml);
+        Assert.DoesNotContain(sep, xml);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_FlattenGas_OffsetAndTypeAnnotations()
+    {
+        var sep = "▸";
+        var (fields, structs) = BuildGasAttributeSet();
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "AttrSet", "UAttrSet", fields, structs,
+            descShowOffset: true, descShowType: true, flattenGasAttributes: true);
+
+        // +Offset annotates BOTH segments; +Type appends the struct type ONCE at the very end.
+        Assert.Contains($"HealthPoint (30) {sep} BaseValue (8) (GameplayAttributeData)", xml);
+        // The type must NOT be repeated mid-name (i.e. not on the first segment).
+        Assert.DoesNotContain($"(GameplayAttributeData) {sep}", xml);
+    }
+
     [Fact]
     public void GenerateInstanceXml_StructWithBoolBitfield_EmitsBinaryType()
     {
