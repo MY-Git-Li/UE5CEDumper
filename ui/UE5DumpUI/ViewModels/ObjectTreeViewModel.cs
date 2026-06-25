@@ -125,6 +125,17 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
     /// <summary>Fired when the selected node changes, for cross-VM communication.</summary>
     public event Action<UObjectNode?>? SelectionChanged;
 
+    /// <summary>Raised by the right-click "Find Instances (Type)" menu item:
+    /// pre-fill the Instances tab's class field with the node's ClassName and
+    /// run the search. Payload = class name. Saves the copy-type /
+    /// paste-into-Instances / Search round-trip.</summary>
+    public event Action<string>? NavigateToInstanceFinder;
+
+    /// <summary>Raised by the right-click "Find Instances (Type + Name)" menu
+    /// item: pre-fill the Instances tab's class AND object-name fields, then run
+    /// the search (the two are ANDed server-side). Payload = (className, objectName).</summary>
+    public event Action<string, string>? NavigateToInstanceFinderWithName;
+
     partial void OnSelectedNodeChanged(UObjectNode? value)
     {
         SelectionChanged?.Invoke(value);
@@ -201,6 +212,25 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
             node.Address, _engineState?.ModuleName, _engineState?.ModuleBase,
             (AddressFormat)SelectedAddressFormatIndex);
         await _platform.CopyToClipboardAsync(formatted);
+    }
+
+    /// <summary>Right-click "Find Instances (Type)": hand the node's ClassName to
+    /// the Instances tab and auto-run the search (no clipboard round-trip).</summary>
+    [RelayCommand]
+    private void FindInstancesByType(UObjectNode? node)
+    {
+        if (node == null || string.IsNullOrEmpty(node.ClassName)) return;
+        NavigateToInstanceFinder?.Invoke(node.ClassName);
+    }
+
+    /// <summary>Right-click "Find Instances (Type + Name)": hand both the node's
+    /// ClassName and its object Name to the Instances tab (ANDed) and auto-run
+    /// the search — narrows to the specific named instance(s) of that class.</summary>
+    [RelayCommand]
+    private void FindInstancesByTypeAndName(UObjectNode? node)
+    {
+        if (node == null || string.IsNullOrEmpty(node.ClassName)) return;
+        NavigateToInstanceFinderWithName?.Invoke(node.ClassName, node.Name);
     }
 
     /// <summary>

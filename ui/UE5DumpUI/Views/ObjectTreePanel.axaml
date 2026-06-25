@@ -101,6 +101,13 @@
           <MenuItem Header="{StaticResource str.ObjectTree.CopyAddress}"
                     Command="{Binding CopyAddressCommand}"
                     CommandParameter="{Binding SelectedNode}"/>
+          <Separator/>
+          <MenuItem Header="{StaticResource str.ObjectTree.FindInstancesByType}"
+                    Command="{Binding FindInstancesByTypeCommand}"
+                    CommandParameter="{Binding SelectedNode}"/>
+          <MenuItem Header="{StaticResource str.ObjectTree.FindInstancesByTypeAndName}"
+                    Command="{Binding FindInstancesByTypeAndNameCommand}"
+                    CommandParameter="{Binding SelectedNode}"/>
         </ContextMenu>
       </ListBox.ContextMenu>
       <ListBox.ItemTemplate>

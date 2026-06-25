@@ -16,6 +16,37 @@ builds ≤696 in
 
 -----
 
+## 2026-06-25 — Object Tree right-click → Instances direct search (build 1722; UI/C#-only, no DLL/schema change; NOT in-game verified)
+
+Adds two right-click menu items to the **Object Tree** that drive the **Instances**
+tab directly, removing the copy-type → switch-tab → paste → Search round-trip the
+user previously had to do by hand:
+
+- **Find Instances (Type)** — pre-fills the Instances class field with the node's
+  `ClassName` and auto-runs the search.
+- **Find Instances (Type + Name)** — pre-fills BOTH the class field and the
+  object-name filter (`ClassName` + `Name`, ANDed server-side) and auto-runs.
+
+Pure reuse of the existing cross-tab handoff pattern (same shape as
+`GameClassFilter` / `PropertySearch` → `InstanceFinder`):
+
+- `ObjectTreeViewModel` gains two events (`NavigateToInstanceFinder` /
+  `NavigateToInstanceFinderWithName`) + two `[RelayCommand]`s (null-node /
+  empty-`ClassName` guarded). "Type" maps to `ClassName`, consistent with the
+  existing **Copy Type** menu item.
+- `InstanceFinderViewModel.SearchForClassAndNameAsync(className, objectName)` —
+  twin of `SearchForClassAsync` but keeps the supplied name instead of clearing
+  it (empty name degrades cleanly to a class-only search via the existing
+  `SearchAsync` both-empty guard).
+- `MainWindowViewModel` wires both events → switch to Instances tab + run, in the
+  established `try/catch` + `_log.Error` style.
+- `en.axaml` two new strings; `ObjectTreePanel.axaml` a `<Separator/>` + two
+  `MenuItem`s in the existing `ContextMenu`.
+
+Verified: UI build green, **2009/0** C# tests + C++ self-tests pass, AOT publish
+clean (104.8 MB). Adversarial 3-lens review (correctness / AOT / consistency) →
+0 must-fix.
+
 ## 2026-06-25 — Window maximize/restore position fix across all UI windows (build 1718; UI/C#-only, no DLL/schema change; **in-game VERIFIED**; **MERGED main PR #369** `b1f9a50`)
 
 Fixes two window-placement bugs the user reported across **all** snapshot-managed
