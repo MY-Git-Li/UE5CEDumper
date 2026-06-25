@@ -16,7 +16,7 @@ builds ≤696 in
 
 -----
 
-## 2026-06-25 — Window maximize/restore position fix across all UI windows (build 1718; UI/C#-only, no DLL/schema change; **in-game VERIFIED**)
+## 2026-06-25 — Window maximize/restore position fix across all UI windows (build 1718; UI/C#-only, no DLL/schema change; **in-game VERIFIED**; **MERGED main PR #369** `b1f9a50`)
 
 Fixes two window-placement bugs the user reported across **all** snapshot-managed
 windows (MainWindow + the 3 `ManagedDialogWindow` dialogs — PropertyXref / FunctionProps /
