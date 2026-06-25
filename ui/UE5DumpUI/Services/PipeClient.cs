@@ -47,12 +47,7 @@ public sealed class PipeClient : IPipeClient
         // (DisconnectAsync early-returns on !IsConnected), so reconnecting here would
         // abandon the old NamedPipeClientStream with its OS handle open until GC
         // finalization. Dispose any leftover set before building a new one.
-        _reader?.Dispose();
-        _writer?.Dispose();
-        _pipe?.Dispose();
-        _reader = null;
-        _writer = null;
-        _pipe = null;
+        CloseStreams();
 
         // Dispose previous CTS before creating a new one (prevent WaitHandle leak)
         _cts.Dispose();
@@ -93,12 +88,7 @@ public sealed class PipeClient : IPipeClient
             try { await _readLoopTask; } catch { /* expected */ }
         }
 
-        _reader?.Dispose();
-        _writer?.Dispose();
-        _pipe?.Dispose();
-        _reader = null;
-        _writer = null;
-        _pipe = null;
+        CloseStreams();
 
         IsConnected = false;
         ConnectionStateChanged?.Invoke(false);
@@ -245,6 +235,26 @@ public sealed class PipeClient : IPipeClient
         }
     }
 
+    /// <summary>
+    /// Tear down the reader/writer/pipe without ever throwing. The reader and writer wrap
+    /// the SAME <see cref="_pipe"/>; disposing the reader first closes that shared stream,
+    /// so the writer's Dispose() then flushes to a closed pipe and throws
+    /// ObjectDisposedException. On the synchronous shutdown path (App ShutdownRequested →
+    /// PipeClient.Dispose) that exception was unhandled and FailFast-crashed the process
+    /// (observed CTD on exit while connected). Dispose the WRITER first (flush while the pipe
+    /// is still open), then the reader, then the pipe — and guard each: a broken pipe at
+    /// teardown (game closed / connection dropped) is expected, never fatal.
+    /// </summary>
+    private void CloseStreams()
+    {
+        try { _writer?.Dispose(); } catch (Exception ex) when (ex is IOException or ObjectDisposedException) { }
+        try { _reader?.Dispose(); } catch (Exception ex) when (ex is IOException or ObjectDisposedException) { }
+        try { _pipe?.Dispose(); } catch (Exception ex) when (ex is IOException or ObjectDisposedException) { }
+        _reader = null;
+        _writer = null;
+        _pipe = null;
+    }
+
     public void Dispose()
     {
         _cts.Cancel();
@@ -256,9 +266,7 @@ public sealed class PipeClient : IPipeClient
         }
         _pending.Clear();
 
-        _reader?.Dispose();
-        _writer?.Dispose();
-        _pipe?.Dispose();
+        CloseStreams();
         _cts.Dispose();
         _writeLock.Dispose();
     }
