@@ -16,7 +16,7 @@ builds ≤696 in
 
 -----
 
-## 2026-06-25 — Class Pivot composite multi-field group key (build 1727; UI/C#-only, no DLL/schema/wire change; NOT in-game verified; on `dev`)
+## 2026-06-25 — Class Pivot composite multi-field group key (build 1727; UI/C#-only, no DLL/schema/wire change; NOT in-game verified; **MERGED main PR #375** `73783ca`)
 
 The Class Pivot tab can now group a snapshot class's instances by a **TUPLE of key
 fields**, not just one — e.g. `(Team · Slot)` instead of a single `Team`. This is the
