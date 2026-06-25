@@ -25,6 +25,13 @@ public partial class MainWindow : Window
     private double _normalHeight;
     private WindowState _previousWindowState = WindowState.Normal;
 
+    // Last "non-minimized" state. _previousWindowState is overwritten on every
+    // transition, so after Maximized → Minimized it is already Minimized and
+    // can't tell us the window was minimized FROM a maximized state. Track that
+    // separately here so OnClosingSaveState can persist Maximized=true when the
+    // window is closed while minimized-from-maximized.
+    private WindowState _lastNonMinimizedState = WindowState.Normal;
+
     // Deferred-commit snapshot state. On Windows + Avalonia 12 the
     // property-change order during a maximize transition is
     // (Width/Height first, WindowState second), so reading
@@ -167,6 +174,10 @@ public partial class MainWindow : Window
         var screens = CurrentScreenWorkingAreas();
         if (screens.Count == 0) return; // no screen info — leave as restored
 
+        // RenderScaling reflects the monitor the window is CURRENTLY on; it is
+        // fine for the visibility tolerance check (the restored rect is on that
+        // monitor), but must NOT be used to convert the default size for primary-
+        // screen centering — see ResetToDefaultPlacement / PrimaryScaling().
         double scale = RenderScaling > 0 ? RenderScaling : 1.0;
         int rx = _normalPosition?.X ?? 0;
         int ry = _normalPosition?.Y ?? 0;
@@ -176,11 +187,11 @@ public partial class MainWindow : Window
         if (Services.WindowPlacement.IsVisibleEnough(rx, ry, rw, rh, screens))
             return; // restored placement is reachable — keep it
 
-        ResetToDefaultPlacement(scale);
+        ResetToDefaultPlacement();
     }
 
     /// <summary>Drop to a default-size window centered on the primary monitor.</summary>
-    private void ResetToDefaultPlacement(double scale)
+    private void ResetToDefaultPlacement()
     {
         if (WindowState != WindowState.Normal)
             WindowState = WindowState.Normal;
@@ -188,9 +199,15 @@ public partial class MainWindow : Window
         Width = _defaultWidth;
         Height = _defaultHeight;
 
+        // Convert the default DIP size to physical px using the PRIMARY screen's
+        // own scaling — NOT the window's current RenderScaling. On a mixed-DPI
+        // multi-monitor setup the two differ, and using the current monitor's
+        // scale offsets the window from center (can push the title bar off the
+        // working area).
         var primary = PrimaryWorkingArea();
-        int pw = (int)Math.Round(_defaultWidth * scale);
-        int ph = (int)Math.Round(_defaultHeight * scale);
+        double primaryScale = PrimaryScaling();
+        int pw = (int)Math.Round(_defaultWidth * primaryScale);
+        int ph = (int)Math.Round(_defaultHeight * primaryScale);
         var (cx, cy) = Services.WindowPlacement.CenterIn(primary, pw, ph);
         var pos = new PixelPoint(cx, cy);
         Position = pos;
@@ -209,7 +226,7 @@ public partial class MainWindow : Window
         if (_stateStore is null) return;
 
         bool maximized = WindowState == WindowState.Maximized
-            || (WindowState == WindowState.Minimized && _previousWindowState == WindowState.Maximized);
+            || (WindowState == WindowState.Minimized && _lastNonMinimizedState == WindowState.Maximized);
 
         int x, y;
         double w, h;
@@ -264,6 +281,23 @@ public partial class MainWindow : Window
             return (wa.X, wa.Y, wa.Width, wa.Height);
         }
         return (0, 0, 1920, 1080);
+    }
+
+    /// <summary>
+    /// Primary monitor's scaling (fallback: first screen, then 1.0). Used for the
+    /// DIP→physical-px conversion when centering on the primary screen, so a
+    /// mixed-DPI second monitor's RenderScaling can't skew the centered result.
+    /// </summary>
+    private double PrimaryScaling()
+    {
+        var primary = Screens?.Primary;
+        if (primary == null)
+        {
+            var all = Screens?.All;
+            if (all != null && all.Count > 0) primary = all[0];
+        }
+        double s = primary?.Scaling ?? 1.0;
+        return s > 0 ? s : 1.0;
     }
 
     /// <summary>
@@ -329,6 +363,8 @@ public partial class MainWindow : Window
             var newState = change.GetNewValue<WindowState>();
             HandleWindowStateTransition(_previousWindowState, newState);
             _previousWindowState = newState;
+            if (newState != WindowState.Minimized)
+                _lastNonMinimizedState = newState;
         }
         else if (change.Property == WidthProperty || change.Property == HeightProperty)
         {

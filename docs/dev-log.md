@@ -16,7 +16,7 @@ builds ≤696 in
 
 -----
 
-## 2026-06-25 — Live coerced-range preview after a Between / SPC absolute bound (build 1702; UI/C#-only; on `dev`, NOT committed/merged/in-game-verified)
+## 2026-06-25 — Live coerced-range preview after a Between / SPC absolute bound (build 1702; UI/C#-only; **MERGED main PR #367** `c0606c6`; NOT in-game-verified)
 
 The Round/Trunc/Ceil rounding switch (build 1672, [PR #364](https://github.com/bbfox0703/UE5CEDumper/pull/364)) only showed a **static** hint of what a Between query *might* become (a hard-coded `10.9–11.1 → 11~11` example). Replaced that guesswork with a **live preview** computed from the values the user actually typed + the active mode, shown right after the bound box. Driving example (user request): Between `11.5~13.2` →
 
