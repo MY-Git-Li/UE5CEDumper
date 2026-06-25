@@ -16,6 +16,55 @@ builds ≤696 in
 
 -----
 
+## 2026-06-25 — Window maximize/restore position fix across all UI windows (build 1718; UI/C#-only, no DLL/schema change; **in-game VERIFIED**)
+
+Fixes two window-placement bugs the user reported across **all** snapshot-managed
+windows (MainWindow + the 3 `ManagedDialogWindow` dialogs — PropertyXref / FunctionProps /
+ObjectInstancePicker). Plain non-managed windows (`InvokeParamDialog`,
+`ConfirmDialog`, `FreezeValueDialog`) use native OS restore and were never affected.
+
+- **BUG 1 — "second restore jumps to 0,0":** Normal → Maximize → Restore (correct) →
+  Maximize → Restore **again** landed the top-left at `0,0` (size stayed correct). Root
+  cause is a **producer/consumer latch**: the *synchronous* re-apply (`Position = A` set
+  inside the `Maximized→Normal` `WindowState` change, mid-un-maximize) emitted a
+  maximized-origin (`~0,0`) `PositionChanged` transient — the **producer** (mechanism Y) —
+  which then latched into the **unguarded** `_normalPosition` promotion (`CommitSnapshot`,
+  size had a `>0` guard, position had none) — the **consumer** (mechanism X). The poison
+  was written on cycle-1 restore and replayed on cycle-2 restore (the one-cycle-behind
+  asymmetry).
+- **BUG 2 — born-maximized restore off-screen (cross-restart):** exit while maximized →
+  relaunch opens maximized (`AttachWindowState` sets `WindowState=Maximized` before show)
+  → first Restore landed at the OS's garbage restore rectangle (e.g. `300,400`),
+  partly off-screen. A window born maximized never gave Win32 a valid `rcNormalPosition`,
+  and the synchronous re-apply lost the placement race against the OS.
+
+**Fix (no timer, no P/Invoke, no startup flash):**
+1. **Deferred re-apply** — replaced the synchronous re-apply with a single
+   `Dispatcher.UIThread.Post(…, Background)`. It runs FIFO *after* the Win32 message burst
+   (un-maximize reliably fires `WM_SIZE`/state→Normal before `WM_MOVE`), so it **overrides**
+   the OS placement instead of fighting it mid-transition, and stops producing the `0,0`
+   transient. Fixes BUG 1 *and* BUG 2.
+2. **Position acceptability guard** (defense-in-depth) — the missing twin of the size `>0`
+   guard. `NotePosition`/`Commit` (pure `WindowRestoreState`) and `OnPositionChanged`/
+   `CommitSnapshot` (MainWindow inline) reject a top-left that isn't visible-enough on any
+   current monitor via `WindowPlacement.IsVisibleEnough`. Deliberately does **not** reject
+   an on-screen `(0,0)` corner (that's a legit park; the `0,0` bug is killed by #1).
+3. **`OnRestoreReapplied()`** re-seeds `pending = normal` right after the re-apply so the
+   `Position`/`Size` events it triggers aren't mis-read as a fresh user move.
+4. `_closed` guards in both posted lambdas so a queued re-apply can't touch a torn-down
+   window (no new disposed-object CTD); MainWindow's post is also gated on `!_restorePending`
+   so startup validation stays the sole authority.
+
+**Process:** root cause + design verified by a 3-lens design workflow (Avalonia event
+ordering / regression skeptic / minimal-design) + synthesis; implementation adversarially
+reviewed by a 3-lens review workflow → **0 must-fix defects**. Pure `WindowRestoreState`
+keeps the new behaviour unit-testable (+5 tests: off-screen reject, on-screen `(0,0)`
+accept, size/pos guard independence, `OnRestoreReapplied` anti-poison, null-screens
+accept). Removed dead `_restoreMaximized` field. **C# 2009/0, dll 791/0, Native AOT
+48.6 MB clean.** The deferred-reapply *timing* can't be unit-tested; **in-game verified**
+by the user (double-max/restore on MainWindow + dialogs no longer jumps to 0,0;
+born-maximized restore lands on-screen at the saved rect).
+
 ## 2026-06-25 — Live coerced-range preview after a Between / SPC absolute bound (build 1702; UI/C#-only; **MERGED main PR #367** `c0606c6`; NOT in-game-verified)
 
 The Round/Trunc/Ceil rounding switch (build 1672, [PR #364](https://github.com/bbfox0703/UE5CEDumper/pull/364)) only showed a **static** hint of what a Between query *might* become (a hard-coded `10.9–11.1 → 11~11` example). Replaced that guesswork with a **live preview** computed from the values the user actually typed + the active mode, shown right after the bound box. Driving example (user request): Between `11.5~13.2` →

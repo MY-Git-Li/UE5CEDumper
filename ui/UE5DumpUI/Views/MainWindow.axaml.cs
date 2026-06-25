@@ -48,6 +48,10 @@ public partial class MainWindow : Window
     private PixelPoint _pendingPosition;
     private bool _snapshotCommitScheduled;
 
+    // Set once the window has closed so a deferred (Background-posted) restore re-apply
+    // that fires afterwards can't set Position/Width/Height on a torn-down window.
+    private bool _closed;
+
     // ── Cross-restart placement persistence (AttachWindowState) ──────────────
     // Restores last-session position / size / maximized state, validated
     // against the monitors present THIS session (a window saved on a now-absent
@@ -55,7 +59,6 @@ public partial class MainWindow : Window
     // maximized snapshot above so un-maximizing a restored window lands right.
     private Services.WindowStateStore? _stateStore;
     private bool _restorePending;     // a saved record was applied; validate on Opened
-    private bool _restoreMaximized;   // saved state was maximized
     private double _defaultWidth;     // XAML default, used when resetting off-screen
     private double _defaultHeight;
 
@@ -145,14 +148,14 @@ public partial class MainWindow : Window
         _pendingWidth = w;
         _pendingHeight = h;
 
-        _restoreMaximized = r.Maximized;
         _restorePending = true;
         if (r.Maximized)
         {
             // Show maximized immediately; the snapshot above is the restore-down
-            // target (Avalonia doesn't reliably keep the normal rect across a
-            // maximize, hence the existing HandleWindowStateTransition re-apply,
-            // which now consumes our seeded snapshot).
+            // target. Avalonia doesn't reliably keep the normal rect across a
+            // maximize, and a born-maximized window has no valid OS restore
+            // rectangle — so the first un-maximize is corrected by the deferred
+            // ReapplyNormalSnapshot, which consumes this seeded snapshot.
             WindowState = WindowState.Maximized;
         }
 
@@ -252,6 +255,23 @@ public partial class MainWindow : Window
         _stateStore.Save(new Services.WindowStateRecord(x, y, w, h, maximized));
     }
 
+    /// <summary>
+    /// True when (<paramref name="pos"/>, the current normal size) shows a grabbable chunk
+    /// on some current monitor — the position twin of <see cref="CommitSnapshot"/>'s size
+    /// &gt;0 guard. Stops a transition-artifact / off-screen top-left from latching into the
+    /// snapshot (and being re-applied on the next restore — the "jumps to 0,0" class). No
+    /// screen info yet (pre-show) => accept, so the very first open-time stash isn't dropped.
+    /// </summary>
+    private bool IsSnapshotPositionAcceptable(PixelPoint pos)
+    {
+        var screens = CurrentScreenWorkingAreas();
+        if (screens.Count == 0) return true;
+        return Services.WindowPlacement.IsVisibleEnough(
+            pos.X, pos.Y,
+            (int)Math.Round(_pendingWidth), (int)Math.Round(_pendingHeight),
+            screens);
+    }
+
     /// <summary>Current monitors' working areas as plain physical-pixel rects.</summary>
     private List<(int X, int Y, int W, int H)> CurrentScreenWorkingAreas()
     {
@@ -334,6 +354,9 @@ public partial class MainWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        // Block any still-queued Background restore re-apply from touching the torn-down
+        // window (it reads this flag first).
+        _closed = true;
         // Stop any in-flight heavy experimental query so the process can exit
         // promptly and release the single-instance mutex — otherwise a runaway
         // uncancellable scan kept the old host alive and blocked re-launch.
@@ -348,7 +371,9 @@ public partial class MainWindow : Window
 
     private void OnPositionChanged(object? sender, PixelPointEventArgs e)
     {
-        if (WindowState == WindowState.Normal)
+        // Reject an off-screen / maximized-origin top-left so a transition transient can't
+        // poison the snapshot (the position twin of the size >0 guard in CommitSnapshot).
+        if (WindowState == WindowState.Normal && IsSnapshotPositionAcceptable(Position))
         {
             _pendingPosition = Position;
             ScheduleSnapshotCommit();
@@ -420,7 +445,13 @@ public partial class MainWindow : Window
         {
             _normalHeight = _pendingHeight;
         }
-        _normalPosition = _pendingPosition;
+        // Position promotion is gated like the stash (was unconditional): an off-screen /
+        // maximized-origin top-left must never latch into _normalPosition, or the next
+        // restore re-applies it (the "second restore jumps to 0,0" bug).
+        if (IsSnapshotPositionAcceptable(_pendingPosition))
+        {
+            _normalPosition = _pendingPosition;
+        }
     }
 
     private void HandleWindowStateTransition(WindowState oldState, WindowState newState)
@@ -434,21 +465,55 @@ public partial class MainWindow : Window
         // Returning to Normal: re-apply the snapshot. Without this,
         // restoring from Maximized on a multi-monitor setup can land
         // the window straddling both screens or at the wrong position.
+        //
+        // DEFER the re-apply to a Background dispatcher tick rather than setting
+        // Position/Width/Height synchronously inside the WindowState change. The
+        // synchronous set fought the OS mid-un-maximize: it (a) emitted a maximized-origin
+        // (~0,0) position transient that latched into the snapshot and re-surfaced as the
+        // window jumping to 0,0 on the SECOND restore, and (b) lost the placement race
+        // against a window BORN maximized (cross-restart), whose OS restore rectangle is a
+        // garbage default — leaving the window off-screen. Background priority runs FIFO
+        // after the current Win32 message burst, so the re-apply lands AFTER any OS
+        // placement and OVERRIDES it; re-seeding _pending* stops the events it triggers
+        // from being read as a fresh user move. The position acceptability guard
+        // (IsSnapshotPositionAcceptable) backstops the snapshot should any off-screen
+        // transient still be stashed.
         if (newState == WindowState.Normal && oldState != WindowState.Normal)
         {
-            if (_normalPosition is { } pos)
-            {
-                Position = pos;
-            }
-            if (_normalWidth > 0)
-            {
-                Width = _normalWidth;
-            }
-            if (_normalHeight > 0)
-            {
-                Height = _normalHeight;
-            }
+            Avalonia.Threading.Dispatcher.UIThread.Post(
+                ReapplyNormalSnapshot,
+                Avalonia.Threading.DispatcherPriority.Background);
         }
+    }
+
+    /// <summary>
+    /// Force the live window back onto the saved normal snapshot. Posted at Background
+    /// priority from the Maximized/Minimized → Normal transition. Gated so it never runs
+    /// during startup placement restore (<see cref="_restorePending"/> — that path is the
+    /// sole authority until validated) nor on a closed window.
+    /// </summary>
+    private void ReapplyNormalSnapshot()
+    {
+        if (_closed || _restorePending) return;
+        if (WindowState != WindowState.Normal) return;
+        // Size before position so final DPI scaling resolves against the target monitor.
+        if (_normalWidth > 0)
+        {
+            Width = _normalWidth;
+        }
+        if (_normalHeight > 0)
+        {
+            Height = _normalHeight;
+        }
+        if (_normalPosition is { } pos)
+        {
+            Position = pos;
+        }
+        // Re-seed the stash so the Position/Size events this re-apply triggers aren't
+        // mis-read as a user move (which would thrash, or re-poison, the snapshot).
+        _pendingPosition = _normalPosition ?? _pendingPosition;
+        _pendingWidth = _normalWidth;
+        _pendingHeight = _normalHeight;
     }
 
     /// <summary>
