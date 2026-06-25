@@ -556,13 +556,15 @@
     <sys:String x:Key="str.Pivot.CopyAddr">Copy Address</sys:String>
     <sys:String x:Key="str.Pivot.GroupBy">Group by:</sys:String>
     <sys:String x:Key="str.Pivot.KeyField">Key field:</sys:String>
+    <sys:String x:Key="str.Pivot.Col.Key">Key</sys:String>
+    <sys:String x:Key="str.Pivot.Col.KeyTip">Add this field to the group key (Field mode). The key becomes the tuple of the Key field above + every ticked field, so e.g. (Team · Slot) groups by the combination. A single key = a plain group key.</sys:String>
     <sys:String x:Key="str.Pivot.Col.Project">Value</sys:String>
     <sys:String x:Key="str.Pivot.Col.Field">Field</sys:String>
     <sys:String x:Key="str.Pivot.Col.Type">Type</sys:String>
     <sys:String x:Key="str.Pivot.Col.Distinct">Distinct</sys:String>
     <sys:String x:Key="str.Pivot.Col.Insts">Instances</sys:String>
     <sys:String x:Key="str.Pivot.Col.KeyScore">Key score</sys:String>
-    <sys:String x:Key="str.Pivot.ResultsHint">Tick the value fields above to project them. Identity mode groups spawn-normalised siblings (BP_Enemy_C_0/_1/…) together. Select a group → Open in Live Walker / Copy Address hands its representative instance to CE.</sys:String>
+    <sys:String x:Key="str.Pivot.ResultsHint">Tick the value fields above to project them; tick Key to build a composite key (e.g. Team · Slot) — Field mode only. Identity mode groups spawn-normalised siblings (BP_Enemy_C_0/_1/…) together. Select a group → Open in Live Walker / Copy Address hands its representative instance to CE.</sys:String>
     <sys:String x:Key="str.Pivot.Res.Count">Count</sys:String>
     <sys:String x:Key="str.Pivot.Res.Key">Key</sys:String>
     <sys:String x:Key="str.Pivot.Res.Values">Projected values</sys:String>

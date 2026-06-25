@@ -1817,8 +1817,9 @@ public sealed class SnapshotStore : ISnapshotStore
         // value fields, for this class. Prop names come from our own field list
         // (DB-sourced identifiers) but are still parameterised defensively.
         var props = new List<string>();
-        if (query.KeyMode == PivotKeyMode.Field && !string.IsNullOrEmpty(query.KeyField))
-            props.Add(query.KeyField);
+        if (query.KeyMode == PivotKeyMode.Field)
+            foreach (var kf in query.EffectiveKeyFields)
+                if (!string.IsNullOrEmpty(kf) && !props.Contains(kf)) props.Add(kf);
         foreach (var v in query.ValueFields)
             if (!props.Contains(v)) props.Add(v);
 

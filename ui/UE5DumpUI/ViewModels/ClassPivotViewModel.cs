@@ -26,6 +26,11 @@ public partial class PivotFieldPick : ObservableObject
 
     [ObservableProperty] private bool _isValue;
 
+    /// <summary>Tick to add this field to the composite group key (Field mode). The
+    /// group key becomes the TUPLE of the primary key field + every ticked key field.
+    /// Inert in Identity / DataTable / Array modes (which have their own key).</summary>
+    [ObservableProperty] private bool _isKey;
+
     public string Name          => Info.Name;
     public string DeclaredType  => Info.DeclaredType;
     public int    DistinctCount => Info.DistinctCount;
@@ -716,6 +721,19 @@ public partial class ClassPivotViewModel : ViewModelBase
         }
     }
 
+    /// <summary>The composite Field-mode group key: the primary key field
+    /// (<see cref="SelectedKeyField"/>) first, then every additionally-ticked
+    /// <see cref="PivotFieldPick.IsKey"/> field in grid order, de-duplicated. A single
+    /// entry reproduces the legacy single-key grouping exactly.</summary>
+    private List<string> CollectKeyFields()
+    {
+        var keys = new List<string>();
+        if (!string.IsNullOrEmpty(SelectedKeyField)) keys.Add(SelectedKeyField);
+        foreach (var f in Fields)
+            if (f.IsKey && !keys.Contains(f.Name)) keys.Add(f.Name);
+        return keys;
+    }
+
     [RelayCommand]
     private async Task RunPivotAsync()
     {
@@ -768,13 +786,14 @@ public partial class ClassPivotViewModel : ViewModelBase
                 ClassName   = SelectedClass!.ClassName,
                 KeyMode     = IsFieldKeyMode ? PivotKeyMode.Field : PivotKeyMode.Identity,
                 KeyField    = SelectedKeyField ?? "",
+                KeyFields   = IsFieldKeyMode ? CollectKeyFields() : new List<string>(),
                 ValueFields = Fields.Where(f => f.IsValue).Select(f => f.Name).ToList(),
             };
             var snapRes = await Task.Run(() => _store.PivotAsync(query, ct), ct);
             foreach (var row in snapRes.Rows) Results.Add(row);
 
             var snapTrunc = snapRes.Truncated ? $" (capped at {query.MaxGroups:N0})" : "";
-            var keyDesc = IsFieldKeyMode ? $"key={query.KeyField}" : "identity";
+            var keyDesc = IsFieldKeyMode ? $"key={string.Join(" · ", query.EffectiveKeyFields)}" : "identity";
             StatusText = $"{snapRes.GroupCount:N0} groups{snapTrunc} from {snapRes.InstanceCount:N0} instances · {keyDesc}";
         }
         catch (OperationCanceledException)

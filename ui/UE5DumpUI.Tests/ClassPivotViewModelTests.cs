@@ -170,6 +170,30 @@ public class ClassPivotViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task RunPivot_CompositeKey_TickedKeyField_GroupsByTuple()
+    {
+        await SeedInventoryAsync();
+        var vm = NewVm();
+        await vm.RefreshAsync();
+        await vm.PendingLoad!;
+        vm.SelectedClass = vm.Classes.First(c => c.ClassName == "BP_Item_C");
+        await vm.PendingLoad!;
+
+        // Primary key = ItemID (auto-suggested Field mode). Additionally tick Quantity
+        // as a key → composite (ItemID · Quantity), so each item row is its own group.
+        vm.SelectedKeyMode  = "Field";
+        vm.SelectedKeyField = "ItemID";
+        vm.Fields.First(f => f.Name == "Quantity").IsKey = true;
+
+        await vm.RunPivotCommand.ExecuteAsync(null);
+
+        Assert.Equal(3, vm.Results.Count);
+        Assert.Contains(vm.Results, r => r.KeyValue == "1 · 10");
+        Assert.Contains(vm.Results, r => r.KeyValue == "1 · 20");
+        Assert.Contains(vm.Results, r => r.KeyValue == "2 · 5");
+    }
+
+    [Fact]
     public void OpenInLiveWalker_RaisesNavigate()
     {
         var vm = NewVm();

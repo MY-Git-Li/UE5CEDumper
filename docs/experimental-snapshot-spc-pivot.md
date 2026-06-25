@@ -283,6 +283,17 @@ snapshots. Pure C# over SQLite — **zero DLL change** (except optional C4).
 > Remaining: C2 (find-by-value), and the heavier C3 scorer (Jaccard stability /
 > compound key). The "volatility ranking" half of C3 shipped as **change-driven
 > discovery (build 1160)** — see the status block above.
+>
+> **Composite multi-field key (build 1727):** Field mode can group by a **TUPLE** of
+> key fields (`Team · Slot`), not just one — the user's "multi-value Pivot" request,
+> resolved on the **aggregation axis** (NOT the `Orden` SDR group-scan seam, which
+> stays served by SPC Group / Snapshot Group). `PivotQuery.KeyFields` +
+> `EffectiveKeyFields` (falls back to `[KeyField]` → single-key path byte-identical);
+> `PivotEngine.RenderCompositeKey` joins rendered segments with `" · "` (1 element =
+> verbatim); a new **Key** checkbox column (`PivotFieldPick.IsKey`) ticks the extra
+> key fields alongside the primary key ComboBox. Inert in Identity / DataTable /
+> Snapshot Array. UI/C#-only, no DLL/wire change; +4 tests; AOT green. ⚠ in-game
+> live-verify pending.
 
 ### C — How UE dissolves the key-field problem (the `discrete` pain, your Q#4)
 `discrete`'s root cause: anonymous Unity instances *force* a guessed business

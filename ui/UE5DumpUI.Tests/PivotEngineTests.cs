@@ -54,6 +54,77 @@ public class PivotEngineTests
     }
 
     [Fact]
+    public void FieldMode_CompositeKey_GroupsByTuple()
+    {
+        // Two key fields (Team, Slot) form a tuple key; instances sharing the SAME
+        // (Team, Slot) collapse into one group, the HP spread renders as a collision.
+        var rows = new[]
+        {
+            Row(1, "/G.M:L.U_0", "0x1", "Team", 1), Row(1, "/G.M:L.U_0", "0x1", "Slot", 0), Row(1, "/G.M:L.U_0", "0x1", "HP", 10),
+            Row(2, "/G.M:L.U_1", "0x2", "Team", 1), Row(2, "/G.M:L.U_1", "0x2", "Slot", 0), Row(2, "/G.M:L.U_1", "0x2", "HP", 20),
+            Row(3, "/G.M:L.U_2", "0x3", "Team", 1), Row(3, "/G.M:L.U_2", "0x3", "Slot", 1), Row(3, "/G.M:L.U_2", "0x3", "HP", 30),
+        };
+        var q = new PivotQuery
+        {
+            ClassName = "BP_Unit_C", KeyMode = PivotKeyMode.Field,
+            KeyFields = new() { "Team", "Slot" },
+            ValueFields = new() { "HP" },
+        };
+        var res = PivotEngine.Build(rows, q);
+
+        Assert.Equal(2, res.GroupCount);             // (1·0) and (1·1)
+        var top = res.Rows[0];                       // most-populous tuple first
+        Assert.Equal("1 · 0", top.KeyValue);
+        Assert.Equal(2, top.Count);
+        Assert.Equal("HP=⟨2: 10,20⟩", top.ValuesDisplay);
+        var second = res.Rows[1];
+        Assert.Equal("1 · 1", second.KeyValue);
+        Assert.Equal(1, second.Count);
+    }
+
+    [Fact]
+    public void FieldMode_CompositeKey_MissingSegment_RendersMissing()
+    {
+        // An instance lacking one key field renders "(missing)" for that segment only.
+        var rows = new[]
+        {
+            Row(1, "/G.M:L.A", "0x1", "Team", 2),   // no Slot on this instance
+            Row(1, "/G.M:L.A", "0x1", "HP", 7),
+        };
+        var q = new PivotQuery
+        {
+            ClassName = "C", KeyMode = PivotKeyMode.Field,
+            KeyFields = new() { "Team", "Slot" }, ValueFields = new() { "HP" },
+        };
+        var res = PivotEngine.Build(rows, q);
+        Assert.Equal("2 · (missing)", Assert.Single(res.Rows).KeyValue);
+    }
+
+    [Fact]
+    public void FieldMode_SingleElementKeyFields_MatchesLegacyKeyField()
+    {
+        // A one-element KeyFields list must render byte-identically to the legacy
+        // single KeyField path (no separator, no "(...)").
+        var rows = new[]
+        {
+            Row(1, "/G.M:L.Item_0", "0x1", "ItemID", 1), Row(1, "/G.M:L.Item_0", "0x1", "Quantity", 10),
+            Row(2, "/G.M:L.Item_1", "0x2", "ItemID", 2), Row(2, "/G.M:L.Item_1", "0x2", "Quantity", 20),
+        };
+        var viaList = PivotEngine.Build(rows, new PivotQuery
+        {
+            ClassName = "C", KeyMode = PivotKeyMode.Field,
+            KeyFields = new() { "ItemID" }, ValueFields = new() { "Quantity" },
+        });
+        var viaScalar = PivotEngine.Build(rows, new PivotQuery
+        {
+            ClassName = "C", KeyMode = PivotKeyMode.Field,
+            KeyField = "ItemID", ValueFields = new() { "Quantity" },
+        });
+        Assert.Equal(viaScalar.Rows.Select(r => r.KeyValue), viaList.Rows.Select(r => r.KeyValue));
+        Assert.Equal(viaScalar.Rows.Select(r => r.ValuesDisplay), viaList.Rows.Select(r => r.ValuesDisplay));
+    }
+
+    [Fact]
     public void IdentityMode_CollapsesNormalisedSiblings()
     {
         // Three enemies share a normalised path (spawn counter stripped). Identity
