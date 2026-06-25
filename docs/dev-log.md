@@ -57,7 +57,7 @@ unchanged, AOT publish green (48.6 MB).
 
 -----
 
-## 2026-06-25 — Object Tree right-click → Instances direct search (build 1722; UI/C#-only, no DLL/schema change; NOT in-game verified; **MERGED main PR #374** `ca2a73f`)
+## 2026-06-25 — Object Tree right-click → Instances direct search (build 1722; UI/C#-only, no DLL/schema change; **in-game VERIFIED**; **MERGED main PR #374** `ca2a73f`)
 
 Adds two right-click menu items to the **Object Tree** that drive the **Instances**
 tab directly, removing the copy-type → switch-tab → paste → Search round-trip the
@@ -86,7 +86,8 @@ Pure reuse of the existing cross-tab handoff pattern (same shape as
 
 Verified: UI build green, **2009/0** C# tests + C++ self-tests pass, AOT publish
 clean (104.8 MB). Adversarial 3-lens review (correctness / AOT / consistency) →
-0 must-fix.
+0 must-fix. **In-game VERIFIED** — both right-click items switch to the Instances
+tab and auto-run the expected search.
 
 ## 2026-06-25 — Window maximize/restore position fix across all UI windows (build 1718; UI/C#-only, no DLL/schema change; **in-game VERIFIED**; **MERGED main PR #369** `b1f9a50`)
 
