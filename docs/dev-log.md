@@ -16,6 +16,47 @@ builds ≤696 in
 
 -----
 
+## 2026-06-25 — Class Pivot composite multi-field group key (build 1727; UI/C#-only, no DLL/schema/wire change; NOT in-game verified; on `dev`)
+
+The Class Pivot tab can now group a snapshot class's instances by a **TUPLE of key
+fields**, not just one — e.g. `(Team · Slot)` instead of a single `Team`. This is the
+**aggregation-axis** "multi-value" the user asked for, NOT a group SCAN: it does not
+touch the `Orden` SDR seam (that case stays served by **SPC Group** / **Snapshot
+Group**, which the [evaluation](group-value-scan-spec.md) found already cover "find N
+co-varying values at distinct offsets"). Pivot's unique value is grouping/projection,
+so the multi-value extension lives on the group **key**.
+
+**Additive design (single-key path byte-identical, all prior tests pass unchanged):**
+
+- `PivotQuery` gains `List<string> KeyFields` + an `EffectiveKeyFields` accessor that
+  falls back to `[KeyField]` when the list is empty — every legacy single-key call
+  site is preserved.
+- `PivotEngine.Build` computes a composite key via new `RenderCompositeKey`: each key
+  field's rendered value joined by `" · "`; a **1-element key renders verbatim (no
+  separator)** so it equals the old inline render exactly. A missing segment renders
+  `(missing)` for that segment only.
+- `SnapshotStore.PivotAsync` fetches **all** `EffectiveKeyFields` (parameterised
+  `prop_name IN (...)` with a `!Contains` dedup) so no key segment can wrongly read
+  `(missing)` for a non-fetched field.
+- UI: the field grid gains a **Key** checkbox column (`PivotFieldPick.IsKey`) beside
+  the existing **Value** column; the existing key-field ComboBox stays as the
+  **primary** key. `ClassPivotViewModel.CollectKeyFields()` = `[primary] + ticked
+  extras (grid order, deduped)`, populated only in Field mode. Status line + the
+  `ResultsHint` / tooltip explain the composite key (Field mode only).
+
+Composite key is **inert in Identity / DataTable / Snapshot Array modes** (those
+`return` early in `RunPivotAsync` and never construct the Field-mode `PivotQuery`;
+`PivotArrayAsync` builds `KeyMode=Identity`, so `Build` never consults the key list).
+
+Adversarial review → **no material issues** (3 benign nits: Field+empty-key divergence
+is unreachable behind `CanRunPivot`; Key column visible-but-inert in non-Field modes,
+mirroring the always-visible Value column; separator-aliasing impossible — `Render`
+only emits decimals/hex, never `·`). Tests **2009 → 2013 C#** (+3 `PivotEngine`
+composite/missing/legacy-parity + 1 VM tick→tuple), `dll_helpers_test` 791/0
+unchanged, AOT publish green (48.6 MB).
+
+-----
+
 ## 2026-06-25 — Object Tree right-click → Instances direct search (build 1722; UI/C#-only, no DLL/schema change; NOT in-game verified; **MERGED main PR #374** `ca2a73f`)
 
 Adds two right-click menu items to the **Object Tree** that drive the **Instances**

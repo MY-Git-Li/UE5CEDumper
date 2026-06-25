@@ -172,13 +172,24 @@
                  IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
     </StackPanel>
 
-    <!-- Field picker: tick the value fields to project per group. KeyScore hints
-         which fields make good group keys; the best is pre-selected above. -->
+    <!-- Field picker: tick the value fields to project per group, and the Key
+         fields to add to the composite group key (Field mode). KeyScore hints which
+         fields make good group keys; the best is pre-selected in the Key-field box. -->
     <DataGrid Grid.Row="4" ItemsSource="{Binding Fields}" IsReadOnly="False"
               GridLinesVisibility="Horizontal" Background="#1E1E1E"
               IsEnabled="{Binding !IsBusy}"
               CanUserResizeColumns="True" CanUserSortColumns="True">
       <DataGrid.Columns>
+        <!-- Composite group key: tick to add this field to the Field-mode key tuple
+             (alongside the primary Key field above). Inert in Identity/DataTable/Array. -->
+        <DataGridTemplateColumn Header="{StaticResource str.Pivot.Col.Key}" Width="50" CanUserSort="False">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="vm:PivotFieldPick">
+              <CheckBox IsChecked="{Binding IsKey}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        ToolTip.Tip="{StaticResource str.Pivot.Col.KeyTip}"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
         <DataGridTemplateColumn Header="{StaticResource str.Pivot.Col.Project}" Width="60" CanUserSort="False">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="vm:PivotFieldPick">

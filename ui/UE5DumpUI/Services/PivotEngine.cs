@@ -44,15 +44,16 @@ public static class PivotEngine
         result.InstanceCount = order.Count;
 
         // 2. Group instances by key value (identity = norm_path; field = the
-        //    rendered key field, or "(missing)" when the instance lacks it).
+        //    rendered key field, or "(missing)" when the instance lacks it). A
+        //    multi-field key groups by the TUPLE of the rendered key segments.
+        var keyFields = q.EffectiveKeyFields;
         var groups = new Dictionary<string, List<Instance>>();
         var groupOrder = new List<string>();
         foreach (var idx in order)
         {
             var inst = byIndex[idx];
-            string key = q.KeyMode == PivotKeyMode.Field
-                ? (inst.Fields.TryGetValue(q.KeyField, out var kf)
-                    ? SnapshotNumeric.Render(kf.type, kf.hex) : "(missing)")
+            string key = q.KeyMode == PivotKeyMode.Field && keyFields.Count > 0
+                ? RenderCompositeKey(inst, keyFields)
                 : inst.NormPath;
             if (!groups.TryGetValue(key, out var list))
             {
@@ -92,6 +93,25 @@ public static class PivotEngine
         }
         result.Rows.AddRange(built);
         return result;
+    }
+
+    /// <summary>Render one instance's composite group key: each key field's value
+    /// (or "(missing)" when the instance lacks it), joined by " · ". A single key
+    /// field renders verbatim (no separator), keeping one-element keys byte-identical
+    /// to the legacy single-key path.</summary>
+    private static string RenderCompositeKey(Instance inst, IReadOnlyList<string> keyFields)
+    {
+        if (keyFields.Count == 1)
+            return inst.Fields.TryGetValue(keyFields[0], out var only)
+                ? SnapshotNumeric.Render(only.type, only.hex) : "(missing)";
+        var sb = new StringBuilder();
+        for (int i = 0; i < keyFields.Count; i++)
+        {
+            if (i > 0) sb.Append(" · ");
+            sb.Append(inst.Fields.TryGetValue(keyFields[i], out var kf)
+                ? SnapshotNumeric.Render(kf.type, kf.hex) : "(missing)");
+        }
+        return sb.ToString();
     }
 
     private static string RenderValues(List<Instance> members, List<string> valueFields)

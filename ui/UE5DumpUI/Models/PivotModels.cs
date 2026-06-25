@@ -107,13 +107,29 @@ public sealed class PivotQuery
     public long   SnapshotId { get; set; }
     public string ClassName  { get; set; } = "";
     public PivotKeyMode KeyMode { get; set; } = PivotKeyMode.Identity;
-    /// <summary>Key field name (used only when <see cref="KeyMode"/> is Field).</summary>
+    /// <summary>Primary key field name (used only when <see cref="KeyMode"/> is Field).
+    /// Kept for back-compat / the single-key handoff flows; <see cref="KeyFields"/> is
+    /// the full composite key when grouping by a multi-field tuple.</summary>
     public string KeyField   { get; set; } = "";
+    /// <summary>Composite group key (Field mode): the primary key field plus any
+    /// additional ticked key fields, grouping by the TUPLE of their rendered values.
+    /// When empty, <see cref="KeyField"/> is used as the sole key (back-compat). The
+    /// rendered segments join with " · "; a single field renders verbatim, so a
+    /// one-element list is byte-identical to the legacy single-key path.</summary>
+    public List<string> KeyFields { get; set; } = new();
     /// <summary>Fields whose values are projected per group.</summary>
     public List<string> ValueFields { get; set; } = new();
     /// <summary>Max groups returned (default 5,000). One extra is probed to set
     /// <see cref="PivotResult.Truncated"/>.</summary>
     public int MaxGroups { get; set; } = 5000;
+
+    /// <summary>The effective key-field list for Field-mode grouping: <see cref="KeyFields"/>
+    /// when non-empty, else the single <see cref="KeyField"/>, else empty. Order is
+    /// preserved (the tuple order the user picked).</summary>
+    public IReadOnlyList<string> EffectiveKeyFields =>
+        KeyFields.Count > 0 ? KeyFields
+        : (!string.IsNullOrEmpty(KeyField) ? new List<string> { KeyField }
+                                           : (IReadOnlyList<string>)System.Array.Empty<string>());
 }
 
 /// <summary>One group in a pivot: a distinct key value and the projected values
