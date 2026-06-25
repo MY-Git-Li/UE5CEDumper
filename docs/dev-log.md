@@ -16,6 +16,69 @@ builds ≤696 in
 
 -----
 
+## 2026-06-25 — Class Pivot "Suggest Targets" made usable: bounded N-snapshot discovery + shape ranking + UX (build 1742; UI/C#-only, no DLL/schema/wire change; NOT in-game verified)
+
+The change-driven discovery front-door ("🔍 Suggest Targets") was **unusable** — clicking
+Discover climbed UI RAM to ~11 GB and hung (killed via Task Manager). Root-caused and
+rebuilt end-to-end, then verified bounded against the user's real 2.85 GB / 10.4M-row Elliot DB.
+
+### Discovery OOM fix (headline)
+`DiscoverChangesAsync` → `LoadIntersectedCandidatesAsync` materialised the **entire** older
+snapshot's field set into an in-memory `Dictionary<string, Cand>` — and discovery runs with
+**no class filter by design**, so on a big game that dict held tens of millions of entries
+(~600 B each → 9–18 GB). Replaced (for the Strict path the front-door always uses) with
+`DiscoverChangesSqlAsync`: one bounded SQL statement that pivots each identity's per-snapshot
+values into columns server-side and returns only the **changed** instances. Process-memory
+bound = changed-group count (thousands), not instance count (millions). Verified with the
+actual bundled `Microsoft.Data.Sqlite` on the real DB: **229 MB peak / ~43 s** vs the old
+11 GB hang. `cache_size=-65536`, **not** `temp_store=MEMORY` (the sort must spill to a temp
+FILE). Cancellable via `sqlite3_interrupt` + the per-64k-row check. Loose/InSession fall back
+to the old in-memory join (UI never selects them; preserves the public contract).
+
+### N-snapshot (2–4) + shape ranking
+- The Before/After 2-box picker is now a **2–4 snapshot checkbox picker** (`DiscoverSnapshotPick`).
+- The bounded SQL generalises to N value columns; "changed" = NOT all N equal.
+- **Shape ranking** (`PivotDiscoveryEngine`, weight 3.0): with ≥3 snapshots a field that
+  changed in exactly ONE interval (a discrete in-game action) is boosted; a steady monotonic
+  trend (a draining resource) is neutral; per-frame **jitter** (changed every interval,
+  non-monotonic) is demoted. New **Shape** column. This is the "不變、不變、有變" / energy-bar
+  §1b case — 2 snapshots can't separate a one-time event from constant noise; 3+ can.
+  `class_counts` supplies the per-class Total (no extra scan). **Spawn-sibling consistency:**
+  a `ROW_NUMBER` dedup keeps one physical sibling per (snapshot, identity) so the
+  representative's hex/value/address can't be stitched from different siblings.
+
+### Two pre-existing crashes surfaced during the user's in-game test (fixed)
+- **`ClassPivotViewModel.RefreshAsync` re-entrancy** — `UiCollection.Reset(Snapshots,…)`'s
+  detach re-entered `LoadClassesAsync → Classes.Clear()` during the Snapshots rebuild →
+  Avalonia *"Source collection was modified during selection update"* (7× in the log); the
+  snapshot list silently failed to refresh ("sees old data"). Fixed with a `_refreshing` guard
+  (suppress the selection-driven load during the rebuild; trigger it once after).
+- **Post-capture memory** — a multi-snapshot capture session sat at several GB (Workstation GC
+  keeps the grown heap committed after parsing millions of transient field objects). Added a
+  post-capture compacting `GC.Collect(Aggressive)` + heap/working-set telemetry; in-game the
+  working set drops ~2.8 GB → ~1.4 GB after each capture (the observed 11 GB was the old build's
+  bigger 68K-object captures without reclaim).
+
+### Middle Class picker + result-grid UX
+- The Class filter TextBox + ComboBox (whose `ItemsSource` was `Clear()/Add()`-rebuilt per
+  keystroke, leaving the ComboBox unable to commit a click — dropdown closed, nothing selected)
+  → an **`AutoCompleteBox`** over a stable list + `SelectedItem` (type to filter, pick commits).
+- The Fields ↕ Results panes are now **resizable via a `GridSplitter`**, and the results grid
+  gained a **filter box** (`ResultFilter`, case-insensitive substring over key + values).
+- The result row gained **Locate in GWorld (🌍) / GameEngine (⚙)** buttons wired to
+  `LiveWalker.LocateInGWorld/GameEngineAsync` (the SPC/Snapshot/RelatedObjects pattern).
+
+Tests: dll 791/0; C# **2026/0** (new: `ChangeIntervals`, shape one-time-vs-jitter, classTotals,
+N=3 stable→changed, N=4 shape rank, duplicate-id guard, spawn-sibling self-consistency, result
+filter, Locate gating ×2). Files: `SnapshotStore.cs`, `PivotDiscoveryEngine.cs`,
+`DiscoveryModels.cs`, `ClassPivotViewModel.cs`, `SnapshotViewModel.cs`, `MainWindowViewModel.cs`,
+`ClassPivotPanel.axaml`, `en.axaml`. Design + both adversarial reviews ran as multi-agent
+workflows. **Carryover:** in-game verify on the second device; if the post-capture GC reclaim
+proves insufficient on huge games, a streaming `Utf8JsonReader` capture parse would cut the
+transient allocation at the source.
+
+-----
+
 ## 2026-06-25 — Class Pivot composite multi-field group key (build 1727; UI/C#-only, no DLL/schema/wire change; NOT in-game verified; **MERGED main PR #375** `73783ca`)
 
 The Class Pivot tab can now group a snapshot class's instances by a **TUPLE of key

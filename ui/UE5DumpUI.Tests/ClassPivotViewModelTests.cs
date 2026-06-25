@@ -565,6 +565,57 @@ public class ClassPivotViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task ResultFilter_FiltersAndRestores()
+    {
+        await SeedInventoryAsync();
+        var vm = NewVm();
+        await vm.RefreshAsync();
+        await vm.PendingLoad!;
+        vm.SelectedClass = vm.Classes.First(c => c.ClassName == "BP_Item_C");
+        await vm.PendingLoad!;
+        await vm.RunPivotCommand.ExecuteAsync(null);
+        int all = vm.Results.Count;
+        Assert.True(all > 0);
+
+        vm.ResultFilter = "no-such-token-xyz";   // matches nothing
+        Assert.Empty(vm.Results);
+
+        vm.ResultFilter = "";                     // cleared → full set back
+        Assert.Equal(all, vm.Results.Count);
+    }
+
+    [Fact]
+    public void LocateResultInGWorld_RaisesEvent_OnlyWhenGWorldAvailable()
+    {
+        var vm = NewVm();
+        string? hit = null;
+        vm.LocateInGWorld += a => hit = a;
+        var row = new PivotResultRow { ObjAddr = "0xABC", KeyValue = "K" };
+
+        vm.IsGWorldAvailable = false;
+        vm.LocateResultInGWorldCommand.Execute(row);
+        Assert.Null(hit);                         // gated off when GWorld is down
+        Assert.False(vm.CanLocateResultInGWorld);
+
+        vm.IsGWorldAvailable = true;
+        vm.SelectedResult = row;
+        Assert.True(vm.CanLocateResultInGWorld);
+        vm.LocateResultInGWorldCommand.Execute(row);
+        Assert.Equal("0xABC", hit);
+    }
+
+    [Fact]
+    public void LocateResultInGameEngine_RaisesEvent_NotGatedOnGWorld()
+    {
+        var vm = NewVm();
+        string? hit = null;
+        vm.LocateInGameEngine += a => hit = a;
+        vm.IsGWorldAvailable = false;             // engine root is independent of GWorld
+        vm.LocateResultInGameEngineCommand.Execute(new PivotResultRow { ObjAddr = "0xDEF" });
+        Assert.Equal("0xDEF", hit);
+    }
+
+    [Fact]
     public async Task RapidClassSwitch_StaleLoadDoesNotClobberLatest()
     {
         var store = new GatedStore();

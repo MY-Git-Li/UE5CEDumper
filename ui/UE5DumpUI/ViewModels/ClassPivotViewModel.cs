@@ -38,6 +38,18 @@ public partial class PivotFieldPick : ObservableObject
     public string KeyScoreDisplay => KeyScore.ToString("0.00", CultureInfo.InvariantCulture);
 }
 
+/// <summary>One snapshot offered in the Suggest-Targets picker. Tick 2-4 of them —
+/// ordered oldest → newest = Before … After — to define the change-discovery
+/// sequence. With 3-4 the engine can tell a one-time event from per-frame noise.</summary>
+public partial class DiscoverSnapshotPick : ObservableObject
+{
+    public SnapshotMeta Meta { get; }
+    public long   Id      => Meta.Id;
+    public string Display => Meta.PickerDisplay;
+    public DiscoverSnapshotPick(SnapshotMeta meta) => Meta = meta;
+    [ObservableProperty] private bool _isSelected;
+}
+
 /// <summary>
 /// ViewModel for the experimental Class Pivot tab. Groups one class's captured
 /// instances by intrinsic identity or a chosen key field and projects value
@@ -80,6 +92,11 @@ public partial class ClassPivotViewModel : ViewModelBase
     [ObservableProperty] private bool   _isBusy;
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private PivotResultRow? _selectedResult;
+    /// <summary>GWorld availability (gates the result 🌍 Locate button; ⚙ Engine is not
+    /// GWorld-gated). Set from the engine state on connect.</summary>
+    [ObservableProperty] private bool _isGWorldAvailable;
+    /// <summary>Client-side substring filter over the results grid (key + values).</summary>
+    [ObservableProperty] private string _resultFilter = "";
 
     // --- Change-driven discovery (C3): the automatic front-door. Instead of making
     // the user guess which class/key to pivot when the target is unknown, find the
@@ -88,21 +105,34 @@ public partial class ClassPivotViewModel : ViewModelBase
     // picks from a short list; "Use →" fills the pivot below and runs it. Pure C#
     // over the SQLite corpus (reuses the SPC intersection load). See
     // docs/experimental-snapshot-spc-pivot.md §"Phase C — C3".
-    [ObservableProperty] private SnapshotMeta? _discoverFrom;
-    [ObservableProperty] private SnapshotMeta? _discoverTo;
     [ObservableProperty] private bool   _isDiscovering;
     [ObservableProperty] private string _discoverStatus = "";
     [ObservableProperty] private DiscoveryCandidate? _selectedDiscoverResult;
-    /// <summary>The newer snapshot of the discovery pair — the one the pivot targets
-    /// on "Use →" (its values + addresses are current).</summary>
+    /// <summary>The newest selected snapshot — the one the pivot targets on "Use →"
+    /// (its values + addresses are current).</summary>
     private SnapshotMeta? _discoverNewest;
     private CancellationTokenSource? _discoverCts;
 
     public ObservableCollection<DiscoveryCandidate> DiscoverResults { get; } = new();
 
-    /// <summary>Discovery needs two distinct snapshots (before/after).</summary>
+    /// <summary>The snapshots offered to the discovery picker (newest first). Tick
+    /// 2-4 to define the Before … After sequence.</summary>
+    public ObservableCollection<DiscoverSnapshotPick> DiscoverPicks { get; } = new();
+
+    /// <summary>Discovery needs 2-4 distinct snapshots (Before … After). With 3-4 it
+    /// can separate a one-time event from per-frame noise (the shape ranking).</summary>
     public bool CanDiscover => !IsDiscovering && !IsBusy
-        && DiscoverFrom != null && DiscoverTo != null && DiscoverFrom.Id != DiscoverTo.Id;
+        && SelectedDiscoverCount is >= 2 and <= 4;
+
+    /// <summary>How many snapshots the user has ticked in the discovery picker.</summary>
+    public int SelectedDiscoverCount => DiscoverPicks.Count(p => p.IsSelected);
+
+    /// <summary>Live hint under the picker reflecting the current selection count.</summary>
+    public string DiscoverHint => SelectedDiscoverCount < 2
+        ? "Pick at least 2 snapshots (Before … After)."
+        : SelectedDiscoverCount > 4
+            ? "Pick at most 4 snapshots."
+            : $"{SelectedDiscoverCount} snapshots selected.";
 
     /// <summary>Pivot data source: persisted snapshots (scalar), persisted
     /// snapshot struct-arrays (inner-key pivot — Phase C6), or a live DataTable
@@ -123,6 +153,27 @@ public partial class ClassPivotViewModel : ViewModelBase
 
     /// <summary>Raised to open a pivot group's representative object in Live Walker.</summary>
     public event Action<string>? NavigateToInstance;
+
+    /// <summary>Locate the selected group's representative object within the GWorld
+    /// graph (shortest pointer path GWorld → object, shown in Live Walker).</summary>
+    public event Action<string>? LocateInGWorld;
+    /// <summary>Engine-rooted counterpart (path rooted at the live UGameEngine) —
+    /// reaches engine-layer objects the GWorld graph can't.</summary>
+    public event Action<string>? LocateInGameEngine;
+
+    /// <summary>A result row is selected, so its representative object can be located.</summary>
+    public bool CanLocateResult => SelectedResult != null;
+    /// <summary>…and GWorld is up (gates the 🌍 button; ⚙ Engine is not GWorld-gated).</summary>
+    public bool CanLocateResultInGWorld => SelectedResult != null && IsGWorldAvailable;
+
+    partial void OnSelectedResultChanged(PivotResultRow? value)
+    {
+        OnPropertyChanged(nameof(CanLocateResult));
+        OnPropertyChanged(nameof(CanLocateResultInGWorld));
+    }
+    partial void OnIsGWorldAvailableChanged(bool value) =>
+        OnPropertyChanged(nameof(CanLocateResultInGWorld));
+    partial void OnResultFilterChanged(string value) => ApplyResultFilter();
 
     public bool IsSnapshotSource  => SelectedSource == "Snapshot";
     public bool IsArraySource     => SelectedSource == "Snapshot Array";
@@ -157,6 +208,7 @@ public partial class ClassPivotViewModel : ViewModelBase
     public void SetEngineState(EngineState state)
     {
         _engineState = state;
+        IsGWorldAvailable = state.HasGWorld;
         _store.SetActiveGame(state.PeHash);
         LoadDenylistFromStore();
         // A new connection invalidates any DataTable list/rows from a prior game.
@@ -231,10 +283,17 @@ public partial class ClassPivotViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanRunPivot));
         OnPropertyChanged(nameof(CanDiscover));
     }
-    partial void OnDiscoverFromChanged(SnapshotMeta? value) => OnPropertyChanged(nameof(CanDiscover));
-    partial void OnDiscoverToChanged(SnapshotMeta? value)   => OnPropertyChanged(nameof(CanDiscover));
     partial void OnIsDiscoveringChanged(bool value)         => OnPropertyChanged(nameof(CanDiscover));
-    partial void OnSelectedSnapshotChanged(SnapshotMeta? value) => PendingLoad = LoadClassesAsync();
+    partial void OnSelectedSnapshotChanged(SnapshotMeta? value)
+    {
+        // While RefreshAsync rebuilds the Snapshots collection, the detach
+        // (SelectedSnapshot=null) and the final re-selection must NOT re-enter the
+        // class load — that runs Classes.Clear() inside the Snapshots Clear/Add and
+        // trips Avalonia's "Source collection was modified during selection update".
+        // RefreshAsync triggers the load itself once the rebuild has settled.
+        if (_refreshing) return;
+        PendingLoad = LoadClassesAsync();
+    }
     partial void OnSelectedKeyFieldChanged(string? value) => OnPropertyChanged(nameof(CanRunPivot));
     partial void OnSelectedDataTableChanged(DataTablePick? value) => PendingLoad = LoadDataTableFieldsAsync();
     partial void OnSelectedArrayFieldChanged(PivotArrayFieldInfo? value)
@@ -329,7 +388,8 @@ public partial class ClassPivotViewModel : ViewModelBase
     /// change-driven discovery "Use →" (<see cref="UseDiscoverCandidateAsync"/>).</summary>
     private async Task<bool> SelectClassAndTickPropAsync(string className, string? propName)
     {
-        ClassFilter = "";                     // ensure the class isn't filtered out
+        // Classes now always holds the full (denylist-filtered) set — the picker filters
+        // internally — so the match is found without clearing any list-level filter.
         var match = Classes.FirstOrDefault(c => c.ClassName == className);
         if (match == null)
         {
@@ -352,37 +412,79 @@ public partial class ClassPivotViewModel : ViewModelBase
         return true;
     }
 
+    // Re-entrancy guard for the Snapshots rebuild: coalesces overlapping refreshes and
+    // suppresses the selection-triggered class load while the collection is mutating
+    // (see OnSelectedSnapshotChanged). Without it, a recapture-then-open sequence hits
+    // Avalonia's "Source collection was modified during selection update" — RefreshAsync
+    // then throws, the snapshot list silently fails to update, and the user sees stale
+    // ("old data") snapshots.
+    private bool _refreshing;
+
     [RelayCommand]
     public async Task RefreshAsync()
     {
+        if (_refreshing) return;   // coalesce overlapping refreshes (rapid tab re-entry / clicks)
+        // Off the UI thread: Microsoft.Data.Sqlite "*Async" runs synchronously on the
+        // caller, so awaiting it on the UI thread would block + run the collection
+        // rebuild inline inside a binding event (the crash).
+        var list = await Task.Run(() => _store.ListSnapshotsAsync());
+        _refreshing = true;
         try
         {
-            // Off the UI thread: Microsoft.Data.Sqlite "*Async" runs synchronously
-            // on the caller, so awaiting it on the UI thread would block + run the
-            // collection rebuild inline inside a binding event (the crash).
-            var list = await Task.Run(() => _store.ListSnapshotsAsync());
+            // Rebuild with the selection-triggered class load SUPPRESSED (the detach +
+            // re-select must not run Classes.Clear() during the Snapshots Clear/Add).
             UiCollection.Reset(Snapshots, list, () => SelectedSnapshot = null);
             // Drop cache entries for snapshots that no longer exist (deleted) so a
-            // recaptured Id can't ever read a stale class/field list. (Ids are
-            // monotonic so reuse is unlikely, but this keeps the cache honest +
-            // bounded.)
+            // recaptured Id can't ever read a stale class/field list.
             var liveIds = new HashSet<long>(list.Select(s => s.Id));
             foreach (var k in _classCache.Keys.Where(k => !liveIds.Contains(k.Item1)).ToList())
                 _classCache.Remove(k);
             foreach (var k in _fieldCache.Keys.Where(k => !liveIds.Contains(k.Item1)).ToList())
                 _fieldCache.Remove(k);
-            // Default to the newest snapshot (triggers class load).
+            // Default to the newest snapshot.
             SelectedSnapshot = Snapshots.Count > 0 ? Snapshots[0] : null;
-            // Discovery defaults: compare the last two captures (To = newest,
-            // From = second-newest) — the common "capture before/after an action" flow.
-            DiscoverTo   = Snapshots.Count > 0 ? Snapshots[0] : null;
-            DiscoverFrom = Snapshots.Count > 1 ? Snapshots[1] : DiscoverTo;
+            // Rebuild the discovery picker, defaulting to the two newest ticked — the
+            // common "capture before/after an action" flow.
+            RebuildDiscoverPicks();
         }
         catch (Exception ex)
         {
             _log.Error(Constants.LogCatView, "Pivot: list snapshots failed", ex);
             SetError(ex);
         }
+        finally
+        {
+            _refreshing = false;
+        }
+        // Now that the collection rebuild has settled and suppression is lifted, load
+        // classes for the final selection once — no re-entrancy into the selection model.
+        if (SelectedSnapshot != null) PendingLoad = LoadClassesAsync();
+    }
+
+    // (Re)build the Suggest-Targets picker from the current snapshot list (newest
+    // first), defaulting to the two newest ticked. Subscribes each pick so CanDiscover
+    // / the count / the hint update live as the user ticks 2-4.
+    private void RebuildDiscoverPicks()
+    {
+        foreach (var p in DiscoverPicks) p.PropertyChanged -= OnDiscoverPickChanged;
+        DiscoverPicks.Clear();
+        for (int i = 0; i < Snapshots.Count; i++)
+        {
+            var pick = new DiscoverSnapshotPick(Snapshots[i]) { IsSelected = i < 2 };
+            pick.PropertyChanged += OnDiscoverPickChanged;
+            DiscoverPicks.Add(pick);
+        }
+        OnPropertyChanged(nameof(CanDiscover));
+        OnPropertyChanged(nameof(SelectedDiscoverCount));
+        OnPropertyChanged(nameof(DiscoverHint));
+    }
+
+    private void OnDiscoverPickChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(DiscoverSnapshotPick.IsSelected)) return;
+        OnPropertyChanged(nameof(CanDiscover));
+        OnPropertyChanged(nameof(SelectedDiscoverCount));
+        OnPropertyChanged(nameof(DiscoverHint));
     }
 
     // Per-snapshot class-list cache. A snapshot is write-once / immutable, so its
@@ -458,11 +560,13 @@ public partial class ClassPivotViewModel : ViewModelBase
 
     private void ApplyClassFilter()
     {
-        string f = ClassFilter.Trim();
-        var filtered = _allClasses.Where(c =>
-            f.Length == 0 || c.ClassName.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0);
-        // Detach the selection before rebuilding (Avalonia selection-model safety).
-        UiCollection.Reset(Classes, filtered, () => SelectedClass = null);
+        // The class picker (AutoCompleteBox) filters INTERNALLY over this list, so
+        // Classes just holds the full denylist-filtered set and is rebuilt only when the
+        // class list itself changes (snapshot / source switch) — never per keystroke.
+        // (The old per-keystroke Clear()/Add() rebuild left the ComboBox unable to
+        // commit a pick — dropdown closed, nothing selected.) Detach the selection
+        // before rebuilding (Avalonia selection-model safety).
+        UiCollection.Reset(Classes, _allClasses, () => SelectedClass = null);
     }
 
     // Per-(snapshot, class) field-list cache — same immutability rationale as the
@@ -748,6 +852,7 @@ public partial class ClassPivotViewModel : ViewModelBase
         IsBusy = true;
         StatusText = "Running pivot…";
         SelectedResult = null;   // detach before clearing the bound results grid
+        _allResults.Clear();
         Results.Clear();
         try
         {
@@ -756,7 +861,7 @@ public partial class ClassPivotViewModel : ViewModelBase
                 // Zero-config: RowName is the key, every row its own group.
                 var valueFields = Fields.Where(f => f.IsValue).Select(f => f.Name).ToList();
                 var res = DataTablePivotEngine.Build(_dataTable!, valueFields);
-                foreach (var row in res.Rows) Results.Add(row);
+                SetResults(res.Rows);
                 StatusText = $"{res.GroupCount:N0} rows · key = RowName · {_dataTable!.RowStructName}";
                 return;
             }
@@ -772,7 +877,7 @@ public partial class ClassPivotViewModel : ViewModelBase
                     ValueProps = Fields.Where(f => f.IsValue).Select(f => f.Name).ToList(),
                 };
                 var arrRes = await Task.Run(() => _store.PivotArrayAsync(aq, ct), ct);
-                foreach (var row in arrRes.Rows) Results.Add(row);
+                SetResults(arrRes.Rows);
                 var arrTrunc = arrRes.Truncated ? $" (capped at {aq.MaxGroups:N0})" : "";
                 string keyName = string.IsNullOrEmpty(SelectedArrayField.InnerKeyName)
                     ? "elem index" : SelectedArrayField.InnerKeyName;
@@ -790,7 +895,7 @@ public partial class ClassPivotViewModel : ViewModelBase
                 ValueFields = Fields.Where(f => f.IsValue).Select(f => f.Name).ToList(),
             };
             var snapRes = await Task.Run(() => _store.PivotAsync(query, ct), ct);
-            foreach (var row in snapRes.Rows) Results.Add(row);
+            SetResults(snapRes.Rows);
 
             var snapTrunc = snapRes.Truncated ? $" (capped at {query.MaxGroups:N0})" : "";
             var keyDesc = IsFieldKeyMode ? $"key={string.Join(" · ", query.EffectiveKeyFields)}" : "identity";
@@ -835,12 +940,11 @@ public partial class ClassPivotViewModel : ViewModelBase
         DiscoverResults.Clear();
         try
         {
-            // Order the pair chronologically (lower id = older) so the direction
-            // (↑/↓) and the value sequence read oldest → newest, regardless of which
-            // box the user put each snapshot in. The newer one is the pivot target.
-            long olderId = Math.Min(DiscoverFrom!.Id, DiscoverTo!.Id);
-            long newerId = Math.Max(DiscoverFrom!.Id, DiscoverTo!.Id);
-            _discoverNewest = Snapshots.FirstOrDefault(s => s.Id == newerId);
+            // Order the ticked snapshots chronologically (lower id = older) so the
+            // value sequence + direction (↑/↓) read oldest → newest. The newest is the
+            // pivot target (its values + addresses are current).
+            var selected = DiscoverPicks.Where(p => p.IsSelected).OrderBy(p => p.Id).ToList();
+            _discoverNewest = selected[^1].Meta;
 
             var query = new DiscoveryQuery
             {
@@ -848,15 +952,14 @@ public partial class ClassPivotViewModel : ViewModelBase
                 ExcludedClasses = _excludedClasses.Count > 0 ? _excludedClasses : null,
                 MaxResults      = 200,
             };
-            query.SnapshotIds.Add(olderId);
-            query.SnapshotIds.Add(newerId);
+            foreach (var p in selected) query.SnapshotIds.Add(p.Id);
 
             var res = await Task.Run(() => _store.DiscoverChangesAsync(query, ct), ct);
             foreach (var row in res.Rows) DiscoverResults.Add(row);
 
             var trunc = res.Truncated ? $" (top {res.Rows.Count:N0} of {res.ChangedGroups:N0})" : "";
             DiscoverStatus = res.Rows.Count == 0
-                ? "No fields changed between these two snapshots."
+                ? "No fields changed across the selected snapshots."
                 : $"{res.ChangedGroups:N0} changed target(s){trunc} — pick one, then Use →.";
         }
         catch (OperationCanceledException)
@@ -892,7 +995,7 @@ public partial class ClassPivotViewModel : ViewModelBase
         {
             ClearError();
             SelectedSource = "Snapshot";
-            var target = _discoverNewest ?? DiscoverTo ?? SelectedSnapshot;
+            var target = _discoverNewest ?? SelectedSnapshot;
             if (target != null && !ReferenceEquals(SelectedSnapshot, target))
                 SelectedSnapshot = target;    // triggers the class load
             var pending = PendingLoad;
@@ -933,12 +1036,52 @@ public partial class ClassPivotViewModel : ViewModelBase
         _discoverCts?.Cancel();
     }
 
+    // Full (unfiltered) result set; Results is the filtered view bound to the grid.
+    private readonly List<PivotResultRow> _allResults = new();
+
+    // Store the pivot output + apply the current result filter into the bound grid.
+    private void SetResults(IEnumerable<PivotResultRow> rows)
+    {
+        _allResults.Clear();
+        _allResults.AddRange(rows);
+        ApplyResultFilter();
+    }
+
+    // Filter the results grid by a case-insensitive substring over key + values. Empty
+    // filter shows all. Detaches the selection before the rebuild (selection-model safe).
+    private void ApplyResultFilter()
+    {
+        string f = ResultFilter?.Trim() ?? "";
+        IEnumerable<PivotResultRow> view = _allResults;
+        if (f.Length > 0)
+            view = _allResults.Where(r =>
+                r.KeyValue.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                r.ValuesDisplay.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0);
+        UiCollection.Reset(Results, view, () => SelectedResult = null);
+    }
+
     /// <summary>Open the selected group's representative object in Live Walker.</summary>
     [RelayCommand]
     private void OpenInLiveWalker(PivotResultRow? row)
     {
         if (row == null || string.IsNullOrEmpty(row.ObjAddr)) return;
         NavigateToInstance?.Invoke(row.ObjAddr);
+    }
+
+    /// <summary>Locate the selected group's representative object via the GWorld graph.</summary>
+    [RelayCommand]
+    private void LocateResultInGWorld(PivotResultRow? row)
+    {
+        if (row == null || string.IsNullOrEmpty(row.ObjAddr) || !IsGWorldAvailable) return;
+        LocateInGWorld?.Invoke(row.ObjAddr);
+    }
+
+    /// <summary>Engine-rooted locate — not gated on GWorld (the DLL reports no_engine).</summary>
+    [RelayCommand]
+    private void LocateResultInGameEngine(PivotResultRow? row)
+    {
+        if (row == null || string.IsNullOrEmpty(row.ObjAddr)) return;
+        LocateInGameEngine?.Invoke(row.ObjAddr);
     }
 
     /// <summary>Copy the representative instance's base address to the clipboard.</summary>

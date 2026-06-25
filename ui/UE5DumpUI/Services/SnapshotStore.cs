@@ -1666,25 +1666,218 @@ public sealed class SnapshotStore : ISnapshotStore
 
     public async Task<DiscoveryResult> DiscoverChangesAsync(DiscoveryQuery query, CancellationToken ct = default)
     {
-        int n = query.SnapshotIds.Count;
-        if (n < 2)
-            throw new ArgumentException("Discovery needs at least two snapshots.", nameof(query));
+        // Validate on the DISTINCT count: the SQL path de-dups ids (a degenerate caller
+        // passing [5,5] must fail cleanly here, not emit malformed SQL downstream).
+        if (query.SnapshotIds.Distinct().Count() < 2)
+            throw new ArgumentException("Discovery needs at least two distinct snapshots.", nameof(query));
         ct.ThrowIfCancellationRequested();   // bail before opening a connection
 
+        // BOUNDED path (default): the standard Strict discovery — the only mode the
+        // "Suggest Targets" front-door ever uses — reduces the N-snapshot compare
+        // SERVER-SIDE and marshals only the CHANGED instances. Process memory is then
+        // bounded by the changed-group count (thousands), NOT the snapshot's field
+        // count (millions) — which is what ballooned the old in-memory Dictionary<…,Cand>
+        // to 11 GB and hung the UI on big games. Loose / InSession fall back to the
+        // in-memory intersection: the UI never selects them, but keeping the path
+        // preserves the public contract for any other caller. See
+        // docs/experimental-snapshot-spc-pivot.md §"Phase C — C3".
+        if (query.JoinMode == SpcJoinMode.Strict)
+            return await DiscoverChangesSqlAsync(query, ct);
+        return await DiscoverChangesInMemoryAsync(query, ct);
+    }
+
+    // Bounded server-side change discovery over N (2-4) snapshots. One pass: pivot each
+    // Strict identity's per-snapshot values into columns (h0..hN-1 / v0..vN-1), keep
+    // only identities present in ALL snapshots whose value is NOT constant, and return
+    // just those CHANGED instances. SQLite does the heavy GROUP BY + external-merge sort
+    // (spilling to a temp FILE, not our heap); we marshal a tiny result. The pure engine
+    // then rolls these up per (class, displayProp) and ranks — change-interval "shape"
+    // (one-time event vs per-frame jitter) included once N≥3.
+    private async Task<DiscoveryResult> DiscoverChangesSqlAsync(DiscoveryQuery query, CancellationToken ct)
+    {
+        // Order oldest -> newest (lower id = older) so h0..hN-1 read chronologically
+        // regardless of how the caller arranged the picks; the newest is the pivot/CE
+        // handoff anchor (its address + value are current).
+        var ids = query.SnapshotIds.Distinct().OrderBy(x => x).ToList();
+        int n = ids.Count;
+        long newestId = ids[n - 1];
+
+        // Per-game Pivot-scope denylist — captured once so a concurrent UI mutation
+        // can't change the filter mid-query. Applied server-side (shrinks the sort).
+        var deny = query.ExcludedClasses is { Count: > 0 }
+            ? query.ExcludedClasses.Where(s => !string.IsNullOrEmpty(s)).ToList() : null;
+
+        await using var conn = await OpenAsync(ct);
+        // Generous-but-BOUNDED page cache cuts the sort's spill IO. Do NOT set
+        // temp_store=MEMORY — the external-merge sort MUST spill to a temp FILE (not
+        // our heap), or we recreate the very OOM this method exists to fix.
+        await ExecAsync(conn, "PRAGMA cache_size=-65536;", ct);   // 64 MB ceiling
+
+        // Ensure the newest snapshot's per-class instance counts exist (Total source).
+        await EnsurePivotIndexAsync(conn, newestId, 0, ct);
+
+        // Hard cancel: Microsoft.Data.Sqlite's Read runs synchronously and the FIRST
+        // Read can block for the whole sort, so the per-row ct check below can't fire
+        // during it. Interrupt the in-flight statement on cancellation (best-effort —
+        // if the handle is gone we simply fall back to the per-row check). Registered
+        // AFTER the connection so it is unregistered BEFORE the connection disposes.
+        using var reg = ct.Register(() =>
+        {
+            try { var h = conn.Handle; if (h != null) SQLitePCL.raw.sqlite3_interrupt(h); }
+            catch { /* connection torn down — nothing to interrupt */ }
+        });
+
+        var changed = new List<DiscoveryInput>();
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = BuildDiscoverSql(ids, deny);
+            for (int i = 0; i < n; i++) cmd.Parameters.AddWithValue($"$s{i}", ids[i]);
+            if (deny != null)
+                for (int i = 0; i < deny.Count; i++) cmd.Parameters.AddWithValue($"$d{i}", deny[i]);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            // cols: 0 class_fqn, 1 declared_type, 2 prop_name, 3 array_field,
+            // 4 elem_index, 5 norm_path, 6 addrNewest, then 7..7+n-1 = h, 7+n..7+2n-1 = v
+            int baseH = 7, baseV = 7 + n, rowCount = 0;
+            while (await r.ReadAsync(ct))
+            {
+                if ((++rowCount & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
+                string cls  = r.IsDBNull(0) ? "" : r.GetString(0);
+                string type = r.IsDBNull(1) ? "" : r.GetString(1);
+                string prop = r.IsDBNull(2) ? "" : r.GetString(2);
+                string arr  = r.IsDBNull(3) ? "" : r.GetString(3);
+                int    elem = r.IsDBNull(4) ? -1 : r.GetInt32(4);
+                string norm = r.IsDBNull(5) ? "" : r.GetString(5);
+                string addr = r.IsDBNull(6) ? "" : r.GetString(6);
+
+                var hex = new string[n];
+                var num = new double?[n];
+                for (int i = 0; i < n; i++)
+                {
+                    hex[i] = r.IsDBNull(baseH + i) ? "" : r.GetString(baseH + i);
+                    num[i] = r.IsDBNull(baseV + i) ? (double?)null : r.GetDouble(baseV + i);
+                }
+                changed.Add(new DiscoveryInput
+                {
+                    ClassName = cls, PropName = DiscoverDisplayProp(prop, arr, elem),
+                    DeclaredType = type, NormPath = norm, ObjAddr = addr, Hex = hex, Num = num,
+                });
+            }
+        }
+        catch (SqliteException) when (ct.IsCancellationRequested)
+        {
+            // sqlite3_interrupt surfaces as SQLITE_INTERRUPT — normalise to cancellation.
+            throw new OperationCanceledException(ct);
+        }
+
+        // Class / prop substring filters: the changed set is tiny, so filter in C# for
+        // exact OrdinalIgnoreCase parity with the in-memory path (avoids SQL LIKE
+        // wildcard/collation pitfalls). Applied before Rank so ChangedGroups + the cap
+        // reflect the filtered set, matching the old load-time filtering.
+        string cc = query.ClassContains?.Trim() ?? "";
+        string pc = query.PropContains?.Trim()  ?? "";
+        IEnumerable<DiscoveryInput> filtered = changed;
+        if (cc.Length > 0) filtered = filtered.Where(d => d.ClassName.IndexOf(cc, StringComparison.OrdinalIgnoreCase) >= 0);
+        if (pc.Length > 0) filtered = filtered.Where(d => d.PropName.IndexOf(pc, StringComparison.OrdinalIgnoreCase) >= 0);
+        var inputs = filtered as List<DiscoveryInput> ?? filtered.ToList();
+
+        // Per-class instance totals for the population sub-score — from the precomputed
+        // class_counts (zero extra scan; built just above). The engine reads these
+        // instead of counting fed inputs, since we feed only the CHANGED instances.
+        var totals = await LoadClassTotalsAsync(conn, newestId, ct);
+
+        int max = query.MaxResults > 0 ? query.MaxResults : 200;
+        return PivotDiscoveryEngine.Rank(inputs, n, max, totals);
+    }
+
+    // Build the N-snapshot change-discovery SQL. GROUP BY the Strict identity key
+    // (leading class_fqn so ix_fields drives the scan), pivot each snapshot's hex +
+    // numeric_value into a column, keep identities present in ALL snapshots whose value
+    // is NOT constant. COALESCE matches the C# SpcKey NULL handling exactly.
+    //
+    // Spawn-sibling consistency: NormalizePath strips the trailing _<n> spawn counter,
+    // so several physical instances of one class can share a norm_path and thus the
+    // Strict identity key. The in-memory path keeps ONE self-consistent sibling
+    // (first-wins). Independent per-column MINs would instead let hex/num/addr each come
+    // from a DIFFERENT sibling → a representative whose sample, direction arrow, and
+    // handoff address disagree. So we first de-dup to ONE physical row per (snapshot,
+    // identity) — the smallest gobjects_index, a deterministic stand-in for first-wins —
+    // via ROW_NUMBER, then pivot. Every snapshot column then comes from that one sibling.
+    private static string BuildDiscoverSql(IReadOnlyList<long> ids, IReadOnlyList<string>? deny)
+    {
+        int n = ids.Count;
+        const string KEY = "class_fqn, norm_path, prop_name, COALESCE(prop_offset,0), " +
+                           "COALESCE(array_field,''), COALESCE(elem_index,-1)";
+        var sb = new StringBuilder();
+        sb.Append("WITH dedup AS (SELECT class_fqn, norm_path, prop_name, prop_offset, array_field, elem_index, ");
+        sb.Append("declared_type, snapshot_id, hex, numeric_value, obj_addr, ");
+        sb.Append($"ROW_NUMBER() OVER (PARTITION BY snapshot_id, {KEY} ORDER BY gobjects_index) AS rn ");
+        sb.Append("FROM fields WHERE snapshot_id IN (");
+        for (int i = 0; i < n; i++) { if (i > 0) sb.Append(','); sb.Append($"$s{i}"); }
+        sb.Append(')');
+        if (deny is { Count: > 0 })
+        {
+            sb.Append(" AND class_fqn NOT IN (");
+            for (int i = 0; i < deny.Count; i++) { if (i > 0) sb.Append(','); sb.Append($"$d{i}"); }
+            sb.Append(')');
+        }
+        sb.Append(") SELECT class_fqn, MIN(declared_type) AS dt, prop_name, array_field, elem_index, norm_path, ");
+        sb.Append($"MIN(CASE WHEN snapshot_id=$s{n - 1} THEN obj_addr END) AS addrNewest");
+        for (int i = 0; i < n; i++)
+            sb.Append($", MIN(CASE WHEN snapshot_id=$s{i} THEN hex END) AS h{i}");
+        for (int i = 0; i < n; i++)
+            sb.Append($", MIN(CASE WHEN snapshot_id=$s{i} THEN numeric_value END) AS v{i}");
+        sb.Append(" FROM dedup WHERE rn=1 GROUP BY ").Append(KEY).Append(' ');
+        // present in ALL snapshots (intersection)
+        sb.Append("HAVING ");
+        for (int i = 0; i < n; i++) { if (i > 0) sb.Append(" AND "); sb.Append($"h{i} IS NOT NULL"); }
+        // changed = NOT constant across the sequence
+        sb.Append(" AND NOT (");
+        for (int i = 1; i < n; i++) { if (i > 1) sb.Append(" AND "); sb.Append($"h{i - 1}=h{i}"); }
+        sb.Append(");");
+        return sb.ToString();
+    }
+
+    // Mirror of SpcDisplayProp (SnapshotStore.cs SpcDisplayProp) over already-read
+    // string parts: "Array[N].Inner" for struct-array elements (empty inner -> "Array[N]"),
+    // else the plain prop. Keeps the engine rollup key identical to the SPC path's.
+    private static string DiscoverDisplayProp(string prop, string arrayField, int elem)
+    {
+        if (arrayField.Length == 0) return prop;
+        return prop.Length == 0 ? $"{arrayField}[{elem}]" : $"{arrayField}[{elem}].{prop}";
+    }
+
+    // Per-class instance counts (scalar) for one snapshot, from the precomputed
+    // class_counts table — the Total source for the discovery population sub-score.
+    private static async Task<Dictionary<string, int>> LoadClassTotalsAsync(
+        SqliteConnection conn, long snapshotId, CancellationToken ct)
+    {
+        var totals = new Dictionary<string, int>(StringComparer.Ordinal);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT class_fqn, instance_count FROM class_counts WHERE snapshot_id=$s AND is_array=0;";
+        cmd.Parameters.AddWithValue("$s", snapshotId);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            if (!r.IsDBNull(0)) totals[r.GetString(0)] = r.IsDBNull(1) ? 0 : r.GetInt32(1);
+        return totals;
+    }
+
+    // In-memory fallback for non-Strict discovery (Loose / InSession). The UI never
+    // selects these; kept so the public contract holds for any other caller. NOTE:
+    // this is the OLD path that loads a snapshot's full field set into RAM — it carries
+    // the same big-game memory exposure the Strict SQL path was built to avoid.
+    private async Task<DiscoveryResult> DiscoverChangesInMemoryAsync(DiscoveryQuery query, CancellationToken ct)
+    {
+        int n = query.SnapshotIds.Count;
         string classContains = query.ClassContains?.Trim() ?? "";
         string propContains  = query.PropContains?.Trim() ?? "";
-        // N1: reuse the per-game Pivot-scope denylist. Captured once so a concurrent
-        // UI-side mutation can't change the filter mid-load.
         var deny = query.ExcludedClasses is { Count: > 0 } ? query.ExcludedClasses : null;
 
         await using var conn = await OpenAsync(ct);
         var cands = await LoadIntersectedCandidatesAsync(
             conn, query.SnapshotIds, query.JoinMode, classContains, propContains, deny, ct);
 
-        // Hand the surviving value-sequences to the pure ranking engine: it rolls up
-        // per (class, prop), gates on "actually moved", and ranks by interest ×
-        // change × selectivity × population. Mapping to DiscoveryInput keeps the
-        // engine database-agnostic + unit-testable (same split as SpcEngine).
         var inputs = new List<DiscoveryInput>(cands.Count);
         foreach (var c in cands)
             inputs.Add(new DiscoveryInput

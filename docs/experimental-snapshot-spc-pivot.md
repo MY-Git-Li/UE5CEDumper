@@ -253,6 +253,24 @@ the repo's test culture).
 Group a class's instances by a key field's value, project value fields across
 snapshots. Pure C# over SQLite — **zero DLL change** (except optional C4).
 
+> **Update (build 1742): C3 discovery made USABLE — bounded N-snapshot + shape ranking.**
+> The build-1160 discovery loaded the whole older snapshot into a RAM dictionary
+> (`LoadIntersectedCandidatesAsync`); with no class filter (its whole point) that OOM'd
+> the UI (~11 GB, hang) on big games. Rebuilt for the Strict path as
+> `DiscoverChangesSqlAsync`: a single bounded SQL statement pivots each identity's
+> per-snapshot values into columns server-side (`ROW_NUMBER` dedup keeps one physical
+> sibling per (snapshot, identity)) and returns **only the changed instances** — memory
+> is bounded by the changed-group count, not the instance count (verified 229 MB on a
+> 2.85 GB / 10.4M-row DB; `cache_size=-65536`, **not** `temp_store=MEMORY`; cancellable
+> via `sqlite3_interrupt`). The Before/After pair became a **2–4 snapshot picker**, and
+> `PivotDiscoveryEngine` gained a **shape** sub-score: with ≥3 snapshots a one-time change
+> (changed in a single interval) is boosted, a monotonic trend is neutral, per-frame jitter
+> is demoted — the energy-bar §1b "unchanged, unchanged, changed" case. `class_counts`
+> supplies the Total. Also: result-row **Locate in GWorld/GameEngine**, an **AutoCompleteBox**
+> class picker (the old filter-TextBox + ComboBox dropped clicks after a per-keystroke
+> ItemsSource rebuild), and a **resizable + filterable** results grid. UI/C#-only, no DLL/
+> schema/wire change. ⚠ in-game live-verify pending.
+>
 > **Status (build 1160): C1 + C3-lite + **C3 change-driven discovery** + C4 + C5 + C6 SHIPPED.**
 > **C3 change-driven discovery (build 1160)** is the automatic *front-door* that
 > dissolves the remaining "which class do I even pick?" pain (the reason Pivot was

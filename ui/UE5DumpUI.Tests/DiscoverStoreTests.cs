@@ -201,4 +201,88 @@ public class DiscoverStoreTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(
             () => _store.DiscoverChangesAsync(DQ(SpcJoinMode.Strict, new[] { s1 }), ct));
     }
+
+    [Fact]
+    public async Task DuplicateSnapshotIds_Throws()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        long s1 = await SeedAsync("a", "S", new[] { Obj(1, "PlayerState",
+            "/Game/M.M:PersistentLevel.PlayerState_0", ("HP", "IntProperty", 100)) }, ct);
+        // [s1, s1] passes a raw count==2 check but is 1 distinct snapshot — must throw
+        // ArgumentException, not emit malformed SQL / surface an opaque failure.
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => _store.DiscoverChangesAsync(DQ(SpcJoinMode.Strict, new[] { s1, s1 }), ct));
+    }
+
+    [Fact]
+    public async Task SpawnSiblings_RepresentativeIsSelfConsistent_NotMixedAcrossSiblings()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        // Two physical siblings of one class share a normalized path (the _N spawn
+        // counter is stripped). They move to DIFFERENT values; independent per-column
+        // MINs would mix them (sequence from one sibling, address from another). The
+        // fix de-dups to ONE sibling per snapshot (min gobjects_index = idx 1), so the
+        // representative is internally consistent. This would FAIL pre-fix: independent
+        // MIN picks idx 2's smaller values (100→50, ↓) but idx 1's smaller address.
+        long s1 = await SeedAsync("a", "S", new[]
+        {
+            Obj(1, "BP_Enemy_C", "/G.M:L.BP_Enemy_C_0", ("HP", "IntProperty", 200)),
+            Obj(2, "BP_Enemy_C", "/G.M:L.BP_Enemy_C_1", ("HP", "IntProperty", 100)),
+        }, ct);
+        long s2 = await SeedAsync("b", "S", new[]
+        {
+            Obj(1, "BP_Enemy_C", "/G.M:L.BP_Enemy_C_0", ("HP", "IntProperty", 210)),
+            Obj(2, "BP_Enemy_C", "/G.M:L.BP_Enemy_C_1", ("HP", "IntProperty", 50)),
+        }, ct);
+
+        var res = await _store.DiscoverChangesAsync(DQ(SpcJoinMode.Strict, new[] { s1, s2 }), ct);
+        var hp = Find(res, "HP");
+        Assert.NotNull(hp);
+        Assert.Equal("200  →  210", hp!.SampleSequence);          // idx 1's sequence …
+        Assert.Equal("↑", hp.Direction);                           // … consistent direction …
+        Assert.Equal($"0x{0x7FF600000000 + 1:X}", hp.ObjAddr);     // … and idx 1's address
+    }
+
+    [Fact]
+    public async Task ThreeSnapshots_StableThenChanged_FoundAsOneTime()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        const string path = "/Game/M.M:PersistentLevel.PlayerState_0";
+        // The user's "不變、不變、有變" case: constant across s1→s2, moves at s3.
+        long s1 = await SeedAsync("t1", "S", new[] { Obj(1, "PlayerState", path, ("Mana", "IntProperty", 50)) }, ct);
+        long s2 = await SeedAsync("t2", "S", new[] { Obj(1, "PlayerState", path, ("Mana", "IntProperty", 50)) }, ct);
+        long s3 = await SeedAsync("t3", "S", new[] { Obj(1, "PlayerState", path, ("Mana", "IntProperty", 80)) }, ct);
+
+        var res = await _store.DiscoverChangesAsync(DQ(SpcJoinMode.Strict, new[] { s1, s2, s3 }), ct);
+
+        var mana = Find(res, "Mana");
+        Assert.NotNull(mana);
+        Assert.Equal(3, res.SnapshotCount);
+        Assert.Equal("one-time", mana!.ShapeLabel);              // changed in exactly one interval
+        Assert.Equal("50  →  50  →  80", mana.SampleSequence);
+        Assert.Equal("↑", mana.Direction);
+    }
+
+    [Fact]
+    public async Task FourSnapshots_OneTimeEvent_OutranksPerFrameJitter()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        const string path = "/Game/M.M:PersistentLevel.PlayerState_0";
+        // Neutral names + same changed-count + same population, so SHAPE decides.
+        // "Aaa": stable,stable,stable,moved = one-time event. "Bbb": jitters every step.
+        long s1 = await SeedAsync("a", "S", new[] { Obj(1, "PlayerState", path, ("Aaa", "IntProperty", 1), ("Bbb", "IntProperty", 1)) }, ct);
+        long s2 = await SeedAsync("b", "S", new[] { Obj(1, "PlayerState", path, ("Aaa", "IntProperty", 1), ("Bbb", "IntProperty", 9)) }, ct);
+        long s3 = await SeedAsync("c", "S", new[] { Obj(1, "PlayerState", path, ("Aaa", "IntProperty", 1), ("Bbb", "IntProperty", 2)) }, ct);
+        long s4 = await SeedAsync("d", "S", new[] { Obj(1, "PlayerState", path, ("Aaa", "IntProperty", 7), ("Bbb", "IntProperty", 8)) }, ct);
+
+        var res = await _store.DiscoverChangesAsync(DQ(SpcJoinMode.Strict, new[] { s1, s2, s3, s4 }), ct);
+
+        var aaa = Find(res, "Aaa");
+        var bbb = Find(res, "Bbb");
+        Assert.NotNull(aaa);
+        Assert.NotNull(bbb);
+        Assert.Equal("one-time", aaa!.ShapeLabel);
+        Assert.True(aaa.Score > bbb!.Score);                    // shape promotes the discrete event
+        Assert.Equal("Aaa", res.Rows[0].PropName);
+    }
 }

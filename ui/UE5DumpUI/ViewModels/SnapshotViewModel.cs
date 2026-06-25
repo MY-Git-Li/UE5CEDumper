@@ -642,6 +642,26 @@ public partial class SnapshotViewModel : ViewModelBase
                 $"{FmtSpan(DateTime.UtcNow - _captureStart)} — walk {_capWalkMs}ms, serialize {_capSerMs}ms, " +
                 $"parse+pipe {parseMs}ms [read {_capReadMs} / rxlog {_capRxLogMs} / jsonparse {_capParseMs} / " +
                 $"build {_capBuildMs} / other {otherMs}], write {_capWriteMs}ms");
+
+            // A large capture parses MILLIONS of transient field objects (JSON DOM +
+            // model build); under the default Workstation GC the grown heap stays
+            // committed, so after a multi-snapshot session the working set can sit at
+            // several GB even though almost nothing is live — which is what made the UI
+            // look like it "ate too much" before the user could even use Class Pivot.
+            // Reclaim + COMPACT now (a natural pause, negligible vs the ~45s capture) and
+            // log managed-heap vs working-set so retention is measurable: if heap drops,
+            // the memory was reclaimable garbage; if it stays high, it's a live retainer.
+            var proc = System.Diagnostics.Process.GetCurrentProcess();
+            proc.Refresh();
+            long beforeWs = proc.WorkingSet64 / 1048576, beforeHeap = GC.GetTotalMemory(false) / 1048576;
+            GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            proc.Refresh();
+            _log.Info(Constants.LogCatView,
+                $"Post-capture memory: managed heap {beforeHeap:N0}->{GC.GetTotalMemory(false) / 1048576:N0} MB, " +
+                $"working set {beforeWs:N0}->{proc.WorkingSet64 / 1048576:N0} MB (after compacting GC)");
+
             StatusText = $"Captured {objectCount:N0} objects, {fieldCount:N0} fields{cappedNote}{evicted}";
             Label = "";
             await RefreshAsync();
