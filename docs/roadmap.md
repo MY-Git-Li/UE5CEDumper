@@ -8,6 +8,15 @@ state.
 
 > **Last refreshed**: 2026-05-29 (build 797) for the rows below. **dev = main @
 > build ~937 (PR #238).** Newer work lives in [dev-log.md](dev-log.md):
+> - builds **1764–1799 (2026-06-26)** — **Movement tuning** (Laufen module): force the
+>   player pawn's `UCharacterMovementComponent` floats — **Move Speed** (MaxWalkSpeed),
+>   **Gravity** (GravityScale), **Super Jump** (JumpZVelocity; slider is jump *height*,
+>   10%–3000%) — to a multiplier of their captured base, held by a re-assert worker
+>   (write-on-drift, respawn re-capture) like Solitar's GodMode. Three Teleport-tab cards
+>   + per-knob Locate-in-GWorld + global toggle hotkeys + CE-Lua/.CT via the new
+>   `CMD_MOVEMENT=10` mailbox (`SetKnobPercent`: 100% = off, jump height→velocity √).
+>   **LIVE-VERIFIED on The Adventures of Elliot (UE4.27) and Avowed (UE5.3, packed
+>   FUObjectItem)**. 2071 C# green. Still deferred: UE5.4+ gravity *direction* vector.
 > - builds **1531–1544 (2026-06-22)** — **Locate in GWorld** gained a per-row 🌍 on
 >   **Interesting Properties** (the last clean gap) and a prominent **⚠ failure
 >   banner** in Live Walker — a failed `not_reachable` locate no longer looks like
