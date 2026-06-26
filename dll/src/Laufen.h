@@ -86,6 +86,15 @@ int32_t SetMultiplier(int32_t knobId, double multiplier);
 // MoveResult.
 int32_t ResetKnob(int32_t knobId);
 
+// One-call "set percent" entry point for the CE-Lua / mailbox path (and the
+// UI). `percent` is the USER-FACING slider value: 100 (±0.5) means OFF and calls
+// ResetKnob. For KNOB_JUMP `percent` is jump HEIGHT % and the applied
+// JumpZVelocity multiplier is sqrt(percent/100) (apex height ∝ v²); for the
+// other knobs the multiplier is percent/100. Returns 1 (active), 0 (off via
+// 100%), or a negative MoveResult. This keeps the height↔velocity + "100% = off"
+// logic in ONE place (the DLL), so Lua just passes a percentage.
+int32_t SetKnobPercent(int32_t knobId, double percent);
+
 // Stop and join the re-assert worker. Idempotent. Called by ResetKnob (when
 // nothing else is active) and from UE5_Shutdown() before the DLL unloads.
 void StopWorker();

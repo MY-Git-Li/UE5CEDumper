@@ -398,6 +398,20 @@ int32_t ResetKnob(int32_t knobId) {
     return MR_OK;
 }
 
+int32_t SetKnobPercent(int32_t knobId, double percent) {
+    if (knobId < 0 || knobId >= KNOB_COUNT) return MR_ERR_REFLECT;
+    // 100% (±0.5) means "off" — the single-call API the CE-Lua/mailbox path uses.
+    if (std::fabs(percent - 100.0) < 0.5) {
+        int32_t rc = ResetKnob(knobId);
+        return (rc < 0) ? rc : 0;   // 0 = off
+    }
+    // Jump: percent is HEIGHT %, apply velocity multiplier = sqrt(height) (h ∝ v²).
+    // Other knobs: percent is the multiplier directly.
+    double mult = (knobId == KNOB_JUMP) ? std::sqrt(percent / 100.0)
+                                        : (percent / 100.0);
+    return SetMultiplier(knobId, mult);   // 1 active / negative MoveResult
+}
+
 void StopWorker() {
     std::lock_guard<std::mutex> lk(s_workerMutex);
     if (!s_worker.joinable()) return;

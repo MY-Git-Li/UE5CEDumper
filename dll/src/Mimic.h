@@ -57,6 +57,15 @@ enum Cmd : int32_t {
                               //             [0] u8 want (desired toggle 1/0)
                               //             [1] u8 live (observed 1/0, 0xFF if no pawn)
                               //             [2] u8 resolvable (1/0)
+    CMD_MOVEMENT        = 10, // Movement tuning (Laufen): set a CharacterMovement
+                              //   float knob to a percent (100% = OFF).
+                              //   Input:  instanceAddr = knobId (0 MaxWalkSpeed /
+                              //             1 GravityScale / 2 JumpZVelocity)
+                              //           paramsData[0..7] = double percent (the
+                              //             user slider %; 100 = off. For knob 2 it
+                              //             is jump HEIGHT %, DLL applies sqrt).
+                              //   Output: result = 1 (active) / 0 (off) / negative
+                              //             Laufen::MoveResult.
 };
 
 // CMD_TELEPORT op codes (written into instanceAddr by CE Lua / pipe bridge)

@@ -64,9 +64,20 @@ overwrites — the float analogue of **Solitar** (GodMode), which forces a bool 
 - Renamed the hotkey section "Teleport Hotkeys" → **"Hotkey Settings"** + refreshed its
   hint (now covers God Mode / Super Jump / Move Speed / Gravity toggles, not just teleport).
 
-Tests: +7 TeleportViewModel movement tests (2064 C# green). Roster: `Laufen` 🟢.
-**Deferred (P4):** CE-Lua/.CT generation (Mimic `CMD_MOVEMENT` mailbox) + UE5.4+
-arbitrary gravity **direction** vector. Single-player only (these replicate online).
+### P4 — CE-Lua / .CT via mailbox (same session, build ~1799)
+- DLL `Laufen::SetKnobPercent(knobId, percent)` — single source of truth for the
+  "**100% = OFF**" rule + the jump height→velocity √. `UE5_SetMovementPercent` export.
+- Mimic **`CMD_MOVEMENT=10`** mailbox (instanceAddr = knobId, paramsData[0..7] =
+  double percent) + `HandleMovement`.
+- `MovementScriptGenerator.cs` — stateful toggle AA records (tick = apply baked %,
+  untick = 100%/OFF) poking the mailbox directly. Folded into the Teleport tab's
+  bottom **"Add action records to CE" + "Save .CT"** (3 movement rows baked at the
+  current slider %, alongside the 17 teleport records). Super Jump slider cap raised
+  to **3000%** (height; velocity ×√30 ≈ 5.48, under the DLL ×10 cap).
+
+Tests: +7 movement-VM + +7 MovementScriptGenerator (2071 C# green). Roster: `Laufen` 🟢.
+**Still deferred:** UE5.4+ arbitrary gravity **direction** vector. Single-player only
+(these properties replicate server-side online).
 
 -----
 
