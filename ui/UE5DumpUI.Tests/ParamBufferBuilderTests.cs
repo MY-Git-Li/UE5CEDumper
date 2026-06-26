@@ -188,6 +188,9 @@ public class ParamBufferBuilderTests
     [InlineData("FloatProperty", "float")]
     [InlineData("ObjectProperty", "UObject*")]
     [InlineData("StructProperty", "struct")]
+    [InlineData("StrProperty", "FString")]
+    [InlineData("Utf8StrProperty", "FUtf8String")]
+    [InlineData("AnsiStrProperty", "FAnsiString")]
     [InlineData("SomeCustomProperty", "SomeCustom")]
     public void ShortTypeName_MapsCorrectly(string typeName, string expected)
     {

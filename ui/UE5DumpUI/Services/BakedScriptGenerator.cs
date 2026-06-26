@@ -364,7 +364,11 @@ public static class BakedScriptGenerator
         // raw region (size taken from the param) and tells the user to
         // read the After: hex dump. Still better than silently falling
         // through to int32 and reading 4 random bytes.
-        "StrProperty"                                 => "fstring",
+        // FString + UE5.5+ FUtf8String / FAnsiString: all multi-byte buffer types the
+        // helper can't scalar-decode (treated as a raw region → "see hex dump" hint).
+        // Without these arms the new variants fall to the int32 default and mis-read 4
+        // bytes of the string header.
+        "StrProperty" or "Utf8StrProperty" or "AnsiStrProperty" => "fstring",
         "TextProperty"                                => "ftext",
         "ArrayProperty"                               => "tarray",
         "MapProperty"                                 => "tmap",
