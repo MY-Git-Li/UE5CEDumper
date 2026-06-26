@@ -1,5 +1,5 @@
 // ============================================================
-// Laufen — 走る (高速移動の魔法 — "to run", high-speed-movement mage)
+// Laufen — 拉歐芬 / 走る (高速移動の魔法 — "to run", high-speed-movement mage)
 // MovementTuning: force per-pawn UCharacterMovementComponent float knobs
 // (MaxWalkSpeed / GravityScale / JumpZVelocity) by a multiplier of their
 // captured base, held by a re-assert worker (write-on-drift). Contract: Laufen.h.
