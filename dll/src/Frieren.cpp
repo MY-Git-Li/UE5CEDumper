@@ -19,6 +19,7 @@
 #include "Mimic.h"
 #include "Wirbel.h"
 #include "Solitar.h"
+#include "Laufen.h"
 
 #include <string>
 #include <cstring>
@@ -436,6 +437,7 @@ void UE5_Shutdown() {
     LOG_INFO("UE5_Shutdown: Cleaning up...");
     Mimic::StopThread();
     Solitar::StopWorker();   // join the GodMode re-assert worker before unload
+    Laufen::StopWorker();    // join the movement-tuning re-assert worker before unload
     // Full teardown: RemoveHook + MH_Uninitialize + drain pending invoke queue.
     // Pipe server is stopped after Shutdown() so any in-flight pipe thread
     // blocked on EnqueueInvoke receives its -7 result and unwinds cleanly.

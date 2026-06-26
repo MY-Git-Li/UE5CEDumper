@@ -406,6 +406,30 @@ public interface IDumpService
     /// </summary>
     Task<int> SetGodModeAsync(bool enable, CancellationToken ct = default);
 
+    // === Movement tuning (Laufen: force per-pawn CMC float knobs) ===
+
+    /// <summary>
+    /// Read all movement knobs (walk speed / gravity / jump) on the current
+    /// pawn's CharacterMovement: live value, captured base, multiplier, active
+    /// state, and each field's owner+offset for the "Locate in GWorld" handoff.
+    /// <see cref="MovementParams.HasCmc"/> is false on pawns with no CMC.
+    /// </summary>
+    Task<MovementParams> GetMovementParamsAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Force a movement knob (<paramref name="knob"/> = "walk_speed" | "gravity"
+    /// | "jump") to its captured base × <paramref name="multiplier"/> and hold it
+    /// with a re-assert worker (survives respawns / per-tick overwrites).
+    /// Returns the observed result (State 1 = active, negative = no pawn / no CMC).
+    /// </summary>
+    Task<MovementSetResult> SetMovementMultiplierAsync(string knob, double multiplier, CancellationToken ct = default);
+
+    /// <summary>
+    /// Disable a movement knob — restore its captured base and stop holding it.
+    /// Returns the post-reset snapshot of that knob.
+    /// </summary>
+    Task<MovementSetResult> ResetMovementAsync(string knob, CancellationToken ct = default);
+
     // === Teleport (Wirbel: marker save/recall + cursor teleport) ===
     // docs/teleport-spec.md §7. Model Code/Codes carry the DLL's Wirbel
     // result code (0 = OK, negatives mapped by TeleportCodes).

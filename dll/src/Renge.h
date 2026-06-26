@@ -92,6 +92,13 @@ constexpr const char* CMD_SET_GOD_MODE             = "set_god_mode";
 constexpr const char* CMD_GET_GOD_MODE             = "get_god_mode";
 constexpr const char* CMD_GET_PROTECT_STATE        = "get_protect_state";
 
+// Movement tuning (Laufen) — per-pawn CMC float knobs held against per-tick
+// overwrites: walk_speed (P1) / gravity / jump (P2/P3). "knob" string selects
+// which: "walk_speed" | "gravity" | "jump".
+constexpr const char* CMD_GET_MOVEMENT_PARAMS      = "get_movement_params";
+constexpr const char* CMD_SET_MOVEMENT_MULTIPLIER  = "set_movement_multiplier";
+constexpr const char* CMD_RESET_MOVEMENT           = "reset_movement";
+
 // Snapshot capture (experimental — Phase A). Stateless cursor pagination
 // like get_object_list: begin_snapshot returns the total object count for
 // progress; snapshot_chunk streams [offset, offset+limit) objects with their

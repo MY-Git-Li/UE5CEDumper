@@ -53,6 +53,23 @@ public class TeleportViewModelTests
         public override Task<int> GetGodModeAsync(CancellationToken ct = default)
         { GetGodModeCalls++; return Task.FromResult(NextGodModeState); }
 
+        // ── Movement tuning (Laufen) ──
+        public MovementParams NextMovementParams { get; set; } = new();
+        public MovementSetResult NextMovementSet { get; set; } = new() { State = 1 };
+        public int SetMovementCalls { get; private set; }
+        public int ResetMovementCalls { get; private set; }
+        public string? LastMovementKnob { get; private set; }
+        public double LastMovementMultiplier { get; private set; }
+
+        public override Task<MovementParams> GetMovementParamsAsync(CancellationToken ct = default)
+            => Task.FromResult(NextMovementParams);
+
+        public override Task<MovementSetResult> SetMovementMultiplierAsync(string knob, double multiplier, CancellationToken ct = default)
+        { SetMovementCalls++; LastMovementKnob = knob; LastMovementMultiplier = multiplier; return Task.FromResult(NextMovementSet); }
+
+        public override Task<MovementSetResult> ResetMovementAsync(string knob, CancellationToken ct = default)
+        { ResetMovementCalls++; LastMovementKnob = knob; return Task.FromResult(new MovementSetResult { State = 0 }); }
+
         public override Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default)
         { GetPoseCalls++; return Task.FromResult(NextPose); }
 
@@ -371,8 +388,9 @@ public class TeleportViewModelTests
     {
         var vm = CreateVm(new FakeDumpService(), out _, new FakeHotkeyService());
         // 3 save + 3 recall + recall_last + bugit + bugitgo + debugcam_on/off +
+        // godmode_on/off + superjump_toggle + movespeed_toggle + gravity_toggle +
         // pov_get + relative + coords + cursor_on/off.
-        Assert.Equal(18, vm.HotkeyRows.Count);
+        Assert.Equal(21, vm.HotkeyRows.Count);
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "save0" && r.DisplayName == "Save marker 1");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall2" && r.DisplayName == "Recall marker 3");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall_last" && r.DisplayName == "Recall last");
@@ -382,6 +400,9 @@ public class TeleportViewModelTests
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "debugcam_off" && r.DisplayName == "Debug cam OFF");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "godmode_on" && r.DisplayName == "God Mode ON");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "godmode_off" && r.DisplayName == "God Mode OFF");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "superjump_toggle" && r.DisplayName == "Super Jump toggle");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "movespeed_toggle" && r.DisplayName == "Move Speed toggle");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "gravity_toggle" && r.DisplayName == "Gravity toggle");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "pov_get" && r.DisplayName == "Get POV");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "relative" && r.DisplayName == "TP facing dir");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "coords" && r.DisplayName == "TP to coords");
@@ -458,6 +479,155 @@ public class TeleportViewModelTests
 
         Assert.Equal(0, fake.SetGodModeCalls);
         Assert.Equal("Unknown", vm.GodModeState);
+    }
+
+    // ── Movement tuning (Laufen): Move Speed / Gravity / Super Jump ─────
+
+    [Fact]
+    public async Task ApplyMoveSpeed_sends_walk_speed_multiplier_and_sets_badge()
+    {
+        var fake = new FakeDumpService
+        {
+            NextMovementSet = new MovementSetResult { State = 1 },
+            NextMovementParams = new MovementParams
+            {
+                HasCmc = true,
+                WalkSpeed = new MovementKnob { Resolved = true, Active = true, Current = 1200, Base = 600, Multiplier = 2.0 },
+            },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+        vm.MoveSpeedExponent = 0.30103;   // 10^0.30103 ≈ 2.0×
+
+        await vm.ApplyMoveSpeedCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.SetMovementCalls);
+        Assert.Equal("walk_speed", fake.LastMovementKnob);
+        Assert.Equal(2.0, fake.LastMovementMultiplier, 2);   // 2 decimal places
+        Assert.Equal("ON", vm.MoveSpeedState);
+    }
+
+    [Fact]
+    public async Task ResetMoveSpeed_calls_dll_and_resets_slider()
+    {
+        var fake = new FakeDumpService
+        {
+            NextMovementParams = new MovementParams
+            {
+                HasCmc = true,
+                WalkSpeed = new MovementKnob { Resolved = true, Active = false, Current = 600 },
+            },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+        vm.MoveSpeedExponent = 0.5;
+
+        await vm.ResetMoveSpeedCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.ResetMovementCalls);
+        Assert.Equal("walk_speed", fake.LastMovementKnob);
+        Assert.Equal(0.0, vm.MoveSpeedExponent);   // slider snapped back to 100%
+        Assert.Equal("OFF", vm.MoveSpeedState);
+    }
+
+    [Fact]
+    public async Task ApplyGravity_sends_gravity_knob()
+    {
+        var fake = new FakeDumpService
+        {
+            NextMovementSet = new MovementSetResult { State = 1 },
+            NextMovementParams = new MovementParams
+            {
+                HasCmc = true,
+                Gravity = new MovementKnob { Resolved = true, Active = true, Current = 0.5, Base = 1.0, Multiplier = 0.5 },
+            },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+        vm.GravityExponent = -0.30103;   // ≈ 0.5×
+
+        await vm.ApplyGravityCommand.ExecuteAsync(null);
+
+        Assert.Equal("gravity", fake.LastMovementKnob);
+        Assert.Equal("ON", vm.GravityState);
+    }
+
+    [Fact]
+    public async Task ForceSuperJumpOn_sends_jump_knob_with_sqrt_height_multiplier()
+    {
+        var fake = new FakeDumpService
+        {
+            NextMovementSet = new MovementSetResult { State = 1 },
+            NextMovementParams = new MovementParams
+            {
+                HasCmc = true,
+                Jump = new MovementKnob { Resolved = true, Active = true, Current = 840, Base = 420, Multiplier = 2.0 },
+            },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+        vm.SuperJumpExponent = 0.60206;   // 10^0.60206 ≈ 4.0× HEIGHT → √4 = 2.0× velocity
+
+        await vm.ForceSuperJumpOnCommand.ExecuteAsync(null);
+
+        Assert.Equal("jump", fake.LastMovementKnob);
+        Assert.Equal(2.0, fake.LastMovementMultiplier, 2);   // velocity multiplier = √height
+        Assert.Equal("ON", vm.SuperJumpState);
+    }
+
+    [Fact]
+    public async Task ForceSuperJumpOff_resets_jump_knob()
+    {
+        var fake = new FakeDumpService
+        {
+            NextMovementParams = new MovementParams
+            {
+                HasCmc = true,
+                Jump = new MovementKnob { Resolved = true, Active = false, Current = 420 },
+            },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+
+        await vm.ForceSuperJumpOffCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.ResetMovementCalls);
+        Assert.Equal("jump", fake.LastMovementKnob);
+        Assert.Equal("OFF", vm.SuperJumpState);
+    }
+
+    [Fact]
+    public async Task ResetSuperJump_turns_off_and_snaps_slider_to_100()
+    {
+        var fake = new FakeDumpService
+        {
+            NextMovementParams = new MovementParams
+            {
+                HasCmc = true,
+                Jump = new MovementKnob { Resolved = true, Active = false, Current = 420 },
+            },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+        vm.SuperJumpExponent = 0.8;   // ~630% height
+
+        await vm.ResetSuperJumpCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.ResetMovementCalls);
+        Assert.Equal("jump", fake.LastMovementKnob);
+        Assert.Equal(0.0, vm.SuperJumpExponent);   // slider back to 100%
+        Assert.Equal("OFF", vm.SuperJumpState);
+    }
+
+    [Fact]
+    public async Task ApplyMoveSpeed_does_nothing_when_disconnected()
+    {
+        var fake = new FakeDumpService();
+        var vm = CreateVm(fake, out _);   // not connected
+
+        await vm.ApplyMoveSpeedCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, fake.SetMovementCalls);
     }
 
     [Fact]

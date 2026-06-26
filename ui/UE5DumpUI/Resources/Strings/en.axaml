@@ -773,8 +773,8 @@
     <sys:String x:Key="str.TP.LastHeader">Last Position (auto-saved)</sys:String>
     <sys:String x:Key="str.TP.LastHint">The dumper records where you were just before every Recall / Force / BugItGo / cursor teleport, so you can undo a jump that went wrong. This slot is managed by the system — you can't save into it, only recall it.</sys:String>
     <sys:String x:Key="str.TP.RecallLast">Recall last</sys:String>
-    <sys:String x:Key="str.TP.HkHeader">Teleport Hotkeys</sys:String>
-    <sys:String x:Key="str.TP.HkHint">Global hotkeys for Save / Recall / Recall-last / BugItGo / Debug camera (fire while the game is focused). Click Set, then press the combo — hold Ctrl/Alt/Shift then a key (e.g. Ctrl+F7), or a single key (e.g. F7). Click Cancel or press Esc to abort. Keyboard only for now (mouse extra-buttons / gamepad not yet supported). Saved automatically. A combo marked ⚠ is held by another app — free it and reconnect, or bind a different one.</sys:String>
+    <sys:String x:Key="str.TP.HkHeader">Hotkey Settings</sys:String>
+    <sys:String x:Key="str.TP.HkHint">Global hotkeys for markers (Save / Recall / Recall-last), BugItGo, Debug camera, and the God Mode / Super Jump / Move Speed / Gravity toggles + teleport / cursor actions (fire while the game is focused). Click Set, then press the combo — hold Ctrl/Alt/Shift then a key (e.g. Ctrl+F7), or a single key (e.g. F7). Click Cancel or press Esc to abort. Keyboard only for now (mouse extra-buttons / gamepad not yet supported). Saved automatically. A combo marked ⚠ is held by another app — free it and reconnect, or bind a different one.</sys:String>
     <sys:String x:Key="str.TP.HkSet">Set</sys:String>
     <sys:String x:Key="str.TP.HkClear">Clear</sys:String>
     <sys:String x:Key="str.TP.CeHeader">CE Export</sys:String>
@@ -828,6 +828,48 @@
     <sys:String x:Key="str.Tip.TP.GmOff">Turn God Mode OFF (restore bCanBeDamaged) and stop the re-assert worker.</sys:String>
     <sys:String x:Key="str.Tip.TP.GmRefresh">Re-read the live God Mode state (1=immune / 0=can be damaged / unknown if no pawn).</sys:String>
     <sys:String x:Key="str.Tip.TP.GmCopyScript">Copy a self-contained Cheat Engine AA script (tick = ON, untick = OFF) that drives God Mode via the DLL mailbox. Paste into a CE memory record.</sys:String>
+
+    <!-- Move Speed multiplier (Laufen — force UCharacterMovementComponent.MaxWalkSpeed) -->
+    <sys:String x:Key="str.TP.MsHeader">Move Speed</sys:String>
+    <sys:String x:Key="str.TP.MsState">State:</sys:String>
+    <sys:String x:Key="str.TP.MsHint">Scales the player pawn's UCharacterMovementComponent.MaxWalkSpeed by the slider multiplier (10%–1000%, log scale, 100% = base). The DLL captures the original value on first Apply and re-asserts the target every ~250 ms so it survives respawns and per-tick recomputation. Only normal walk speed is engine-standard — sprint / dash are game-specific (find them in Property Search). Needs a live pawn with a CharacterMovement (not vehicles / custom movement). Single-player only — online games replicate movement server-side.</sys:String>
+    <sys:String x:Key="str.TP.MsApply">Apply</sys:String>
+    <sys:String x:Key="str.TP.MsReset">Reset</sys:String>
+    <sys:String x:Key="str.TP.MsRefresh">↻</sys:String>
+    <sys:String x:Key="str.TP.MsLocate">Locate in GWorld</sys:String>
+    <sys:String x:Key="str.Tip.TP.MsApply">Force MaxWalkSpeed to base × the slider multiplier and hold it (re-asserted on a timer so a sprint/ability system can't revert it).</sys:String>
+    <sys:String x:Key="str.Tip.TP.MsReset">Restore MaxWalkSpeed to its captured base value and stop holding it. Resets the slider to 100%.</sys:String>
+    <sys:String x:Key="str.Tip.TP.MsRefresh">Re-read the live MaxWalkSpeed and override state from the current pawn's CharacterMovement.</sys:String>
+    <sys:String x:Key="str.Tip.TP.MsLocate">Find the MaxWalkSpeed float in GWorld and select it in the Live Walker — to freeze or inspect it directly.</sys:String>
+
+    <!-- Gravity multiplier (Laufen — force UCharacterMovementComponent.GravityScale) -->
+    <sys:String x:Key="str.TP.GrHeader">Gravity</sys:String>
+    <sys:String x:Key="str.TP.GrState">State:</sys:String>
+    <sys:String x:Key="str.TP.GrHint">Scales the player pawn's UCharacterMovementComponent.GravityScale by the slider (10%–1000%, log scale, 100% = base). Below 100% = floaty / moon-jump; above = heavy. Held against per-tick overwrites by the re-assert worker. Per-pawn only — it does not change world gravity for other actors. Extreme values can clip you through floors or break fall damage. Arbitrary gravity direction (UE5.4+) is not yet exposed. Needs a live pawn with a CharacterMovement. Single-player only.</sys:String>
+    <sys:String x:Key="str.TP.GrApply">Apply</sys:String>
+    <sys:String x:Key="str.TP.GrReset">Reset</sys:String>
+    <sys:String x:Key="str.TP.GrRefresh">↻</sys:String>
+    <sys:String x:Key="str.TP.GrLocate">Locate in GWorld</sys:String>
+    <sys:String x:Key="str.Tip.TP.GrApply">Force GravityScale to base × the slider multiplier and hold it (re-asserted on a timer).</sys:String>
+    <sys:String x:Key="str.Tip.TP.GrReset">Restore GravityScale to its captured base value. Resets the slider to 100%.</sys:String>
+    <sys:String x:Key="str.Tip.TP.GrRefresh">Re-read the live GravityScale and override state from the current pawn's CharacterMovement.</sys:String>
+    <sys:String x:Key="str.Tip.TP.GrLocate">Find the GravityScale float in GWorld and select it in the Live Walker.</sys:String>
+
+    <!-- Super Jump toggle (Laufen — force UCharacterMovementComponent.JumpZVelocity) -->
+    <sys:String x:Key="str.TP.SjHeader">Super Jump</sys:String>
+    <sys:String x:Key="str.TP.SjState">State:</sys:String>
+    <sys:String x:Key="str.TP.SjHint">Persistent high-jump toggle: forces UCharacterMovementComponent.JumpZVelocity and re-asserts it. The slider is jump HEIGHT (10%–3000%, 100% = base); apex height grows with the square of launch velocity, so the applied velocity multiplier is √(height) — e.g. 400% height = ×2 velocity. Force ON holds it; Force OFF restores the base, Reset also snaps the slider to 100%. There is no engine "jump height" property, so this works by scaling the launch impulse. Needs a live pawn with a CharacterMovement. Single-player only.</sys:String>
+    <sys:String x:Key="str.TP.SjOn">Force ON</sys:String>
+    <sys:String x:Key="str.TP.SjOff">Force OFF</sys:String>
+    <sys:String x:Key="str.TP.SjReset">Reset</sys:String>
+    <sys:String x:Key="str.TP.SjRefresh">↻</sys:String>
+    <sys:String x:Key="str.TP.SjLocate">Locate in GWorld</sys:String>
+    <sys:String x:Key="str.TP.SjHotkeyHint">Bind a global hotkey to "Super Jump toggle" in the Marker Hotkeys section above to toggle it in-game.</sys:String>
+    <sys:String x:Key="str.Tip.TP.SjOn">Turn Super Jump ON — set JumpZVelocity to base × √(slider height %) and hold it (survives respawns).</sys:String>
+    <sys:String x:Key="str.Tip.TP.SjOff">Turn Super Jump OFF — restore JumpZVelocity to its captured base.</sys:String>
+    <sys:String x:Key="str.Tip.TP.SjReset">Turn Super Jump OFF and snap the height slider back to 100%.</sys:String>
+    <sys:String x:Key="str.Tip.TP.SjRefresh">Re-read the live JumpZVelocity and override state from the current pawn's CharacterMovement.</sys:String>
+    <sys:String x:Key="str.Tip.TP.SjLocate">Find the JumpZVelocity float in GWorld and select it in the Live Walker.</sys:String>
 
     <!-- Teleport: Camera POV (read-only) -->
     <sys:String x:Key="str.TP.PovHeader">Camera POV (read-only)</sys:String>

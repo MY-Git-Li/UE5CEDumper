@@ -50,6 +50,7 @@ narrative identity resonates with what the module *does*.
 | **Solitar.cpp** | 索莉塔 | Greater demon studying humanity | #11 | GodMode: force AActor::bCanBeDamaged (damage immunity) + re-assert worker | Overwhelming, near-unkillable mage — invulnerability; reuses the FBoolProperty bit-write Wirbel uses for the cursor |
 | **Orden.h** | 歐爾登 | Noble house head ("order") | — | GroupMatch: source-agnostic SDR/assignment core for multi-value group scan | Brings *order* to a scattered set of values — assigns each value to its leaf slot (header-only, pure) |
 | **Edel.cpp** | 艾德爾 | Hypnosis-magic mage ("noble") | — | CurrentTarget: auto-detect the actor the player is targeting (GWorld→PlayerController→Pawn, score outgoing object-ptr fields) | Reads what the player's mind is fixed on — the focused enemy, so the user needn't guess a class-name keyword |
+| **Laufen.cpp** | 蘭芬 | High-speed-movement mage ("to run") | — | MovementTuning: force per-pawn CMC float knobs (MaxWalkSpeed/GravityScale/JumpZVelocity) × multiplier + re-assert worker | Runs faster than anyone — scales the pawn's movement; the float analogue of Solitar's bool-bit force |
 
 ---
 
@@ -105,6 +106,7 @@ Lineal::                    // PackedItem — UE5.7+ packed FUObjectItem reconst
 Radar::                     // ValueScan — CE-style by-value scan (was ValueScan)
 Orden::                     // GroupMatch — source-agnostic SDR matcher (multi-value group scan; header-only)
 Edel::                      // CurrentTarget — auto-detect the player's current target actor
+Laufen::                    // MovementTuning — force per-pawn CMC float knobs (speed/gravity/jump) × multiplier + re-assert
 Grimoire::                  // Constants — spell book
 DynOff::                    // Dynamic offsets (in Grimoire.h, unchanged)
 ```
@@ -292,7 +294,7 @@ German meanings are given because most names map cleanly to a module function.
 | Lawine | Lawine | Freezes water ("avalanche") | ⬜ | Snapshot/freeze or bulk cascade |
 | Edel | Edel | Hypnosis magic ("noble") | 🟢 CurrentTarget | Auto-detect the actor the player is currently targeting: GWorld→PlayerController→Pawn, score the player's outgoing object-ptr fields (`Edel.cpp/.h`, build 1400) |
 | Richter | Richter | Staff repair ("judge") | ⬜ | Scoring / judging / recovery-repair |
-| Laufen | Laufen | High-speed movement ("to run") | ⬜ | Fast-path / SIMD acceleration |
+| Laufen | Laufen | High-speed movement ("to run") | 🟢 MovementTuning | Force per-pawn UCharacterMovementComponent float knobs (MaxWalkSpeed/GravityScale/JumpZVelocity) × a multiplier of the captured base + re-assert worker; float analogue of Solitar (`Laufen.cpp/.h`, build 1788) |
 | Ehre | Ehre | Controls rocks ("honor") | ⬜ | Foundation / stability |
 | Blei | Blei | Edel's teammate ("lead" metal) | ⬜ | Weighting / ballast |
 | Dünste | Dunste | Edel's teammate ("vapors") | ⬜ | Volatile / transient state |

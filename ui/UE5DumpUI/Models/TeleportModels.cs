@@ -83,6 +83,77 @@ public sealed class TeleportPose
     public double Speed { get; init; }
 }
 
+/// <summary>
+/// One tunable CharacterMovement float (MaxWalkSpeed / GravityScale /
+/// JumpZVelocity) as reported by <c>get_movement_params</c> (Laufen). The DLL
+/// forces the value to <see cref="Base"/> × <see cref="Multiplier"/> and holds it
+/// against per-tick overwrites with a re-assert worker.
+/// </summary>
+public sealed class MovementKnob
+{
+    /// <summary>The reflected float field was found on the live CMC this instant.</summary>
+    public bool Resolved { get; init; }
+
+    /// <summary>Live value read from memory (cm/s for walk speed; unitless scale
+    /// for gravity; cm/s for jump velocity).</summary>
+    public double Current { get; init; }
+
+    /// <summary>Captured untouched base value (valid only while <see cref="Active"/>).</summary>
+    public double Base { get; init; }
+
+    /// <summary>Desired multiplier of <see cref="Base"/> (1.0 = neutral/off).</summary>
+    public double Multiplier { get; init; } = 1.0;
+
+    /// <summary>Override engaged (the re-assert worker is holding this value).</summary>
+    public bool Active { get; init; }
+
+    /// <summary>Owning sub-object (CharacterMovement) of the float field, for the
+    /// "Locate in GWorld" handoff. "" / "0x0" when unresolved.</summary>
+    public string OwnerAddr { get; init; } = "";
+
+    /// <summary>Field offset within <see cref="OwnerAddr"/>.</summary>
+    public int FieldOffset { get; init; } = -1;
+
+    /// <summary>Reflected property name (e.g. "MaxWalkSpeed").</summary>
+    public string FieldName { get; init; } = "";
+
+    /// <summary>True when the owner+offset can be handed to the GWorld locator.</summary>
+    public bool HasAddr =>
+        Resolved && FieldOffset >= 0 &&
+        !string.IsNullOrEmpty(OwnerAddr) && OwnerAddr != "0x0" && OwnerAddr != "0X0";
+}
+
+/// <summary>
+/// Snapshot of all movement knobs on the current pawn's CharacterMovement,
+/// returned by <c>get_movement_params</c> (Laufen). <see cref="HasCmc"/> is false
+/// on vehicle / custom-framework pawns with no UCharacterMovementComponent.
+/// </summary>
+public sealed class MovementParams
+{
+    /// <summary>Laufen::MoveResult (0 = OK, negative = no pawn / no CMC / reflect).</summary>
+    public int Code { get; init; }
+
+    /// <summary>A UCharacterMovementComponent resolved on the local pawn.</summary>
+    public bool HasCmc { get; init; }
+
+    public MovementKnob WalkSpeed { get; init; } = new();
+    public MovementKnob Gravity { get; init; } = new();   // P2
+    public MovementKnob Jump { get; init; } = new();      // P3
+}
+
+/// <summary>Result of a <c>set_movement_multiplier</c> / <c>reset_movement</c>
+/// call (Laufen). <see cref="State"/> is 1 = override active, 0 = inactive,
+/// negative = error (no pawn / no CMC / property not resolved).</summary>
+public sealed class MovementSetResult
+{
+    public int State { get; init; }
+    public int Code { get; init; }
+    public bool Active { get; init; }
+    public double Current { get; init; }
+    public double Base { get; init; }
+    public double Multiplier { get; init; } = 1.0;
+}
+
 /// <summary>Result of a teleport action (recall / cursor).</summary>
 public sealed class TeleportResult
 {
