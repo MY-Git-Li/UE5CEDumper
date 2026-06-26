@@ -453,7 +453,15 @@ int32_t GetPoseImpl(Pose& out, char* mapName, int32_t mapNameCap, uint8_t* outSo
     out.X = xyz[0]; out.Y = xyz[1]; out.Z = xyz[2];
     out.Pitch = pyr[0]; out.Yaw = pyr[1]; out.Roll = pyr[2];
     CopyMapName(c.world, mapName, mapNameCap);
-    if (move) ReadMovementState(c, *move);
+    if (move) {
+        ReadMovementState(c, *move);   // resets *move, then fills velocity/accel
+        // The location FVector lives on the RootComponent (always resolved when
+        // the pose read succeeded). Surface its owner + offset for the "Locate
+        // position vector in GWorld" handoff. Set AFTER ReadMovementState since
+        // that resets the struct.
+        move->LocOwnerAddr   = c.root;
+        move->LocFieldOffset = c.relLocOff;
+    }
     return TP_OK;
 }
 
@@ -489,6 +497,11 @@ void ReadMovementState(const Chain& c, MovementState& m) {
             m.VelX = vel[0]; m.VelY = vel[1]; m.VelZ = vel[2];
             m.Speed = std::sqrt(vel[0] * vel[0] + vel[1] * vel[1] + vel[2] * vel[2]);
             m.HasMovement = true;
+            // Owner + offset of the Velocity FVector — for the "Locate velocity
+            // vector in GWorld" handoff (land the path on the CharacterMovement's
+            // Velocity field).
+            m.VelOwnerAddr   = cmc;
+            m.VelFieldOffset = vfi.Offset;
         }
     }
 

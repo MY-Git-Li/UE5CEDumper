@@ -436,6 +436,18 @@ void CollectOutgoingObjectPtrs(uintptr_t obj, std::vector<OutgoingPtr>& out,
 //               arbitrary address resolves via FindByAddress / FindInContainers).
 // `maxDepth`  : maximum hop count root → target (default 5; hard-capped at 32).
 // `deadlineMs`: wall-clock budget; the search also bails on Tot::Requested().
+// `deep`      : opt-in — ALSO follow object pointers stored inside ONE
+//               struct-element container level (TArray<FStruct> / TSet<FStruct> /
+//               TMap<*,FStruct> whose element struct holds a UObject*, incl. in an
+//               inline sub-struct). This is the graph analogue of the Value Search
+//               "Deep" nested-container descent: it reaches objects referenced
+//               ONLY from a struct-array element (otherwise not_reachable). Each
+//               such edge is one CE-splittable hop (container Data deref + element
+//               pointer at index*stride + within-element offset). Deeper nesting
+//               (object containers nested INSIDE the element struct — two container
+//               levels) is out of scope (not a single splittable hop). Heavier
+//               per node (reads each struct-array's elements); bounded by a
+//               per-container element cap + the deadline / visited cap.
 //
 // BFS guarantees the path returned is a SHORTEST (fewest-hop) one, and the
 // first such path found in deterministic iteration order. steps is
@@ -448,7 +460,8 @@ void CollectOutgoingObjectPtrs(uintptr_t obj, std::vector<OutgoingPtr>& out,
 // intentionally NOT followed here — they are an unusual gameplay path and a
 // global-TMap walk per node would be prohibitively expensive.
 GraphPathResult FindObjectGraphPath(uintptr_t rootObj, uintptr_t targetObj,
-                                    int32_t maxDepth = 5, int32_t deadlineMs = 20000);
+                                    int32_t maxDepth = 5, int32_t deadlineMs = 20000,
+                                    bool deep = false);
 
 // === Property Keyword Search ===
 

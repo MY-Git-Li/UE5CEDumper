@@ -115,10 +115,10 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      v                                               |
 |  UE5Dumper.dll  [injected]                           |
 |      +-- Frieren  (ExportAPI)     <- C ABI for CE Lua (13 teleport incl. Relative/RecallExplicit/Set+GetMouseCursor, build 1144) |
-|      +-- Fern     (PipeServer)    <- Named Pipe IPC (~59 cmds incl. value scan + group scan + teleport + teleport_relative + set/get_mouse_cursor + get_related_objects + get_current_target) |
+|      +-- Fern     (PipeServer)    <- Named Pipe IPC (~59 cmds incl. value scan + group scan + teleport + teleport_relative + set/get_mouse_cursor + get_related_objects + get_current_target; find_path_from_gworld deep/container_depth + teleport_get_pose loc/vel field addrs, 1780) |
 |      +-- Himmel   (Signatures)    <- 128 AOB + symbol exports |
 |      +-- Genau    (OffsetFinder)  <- GObjects/GNames/GWorld   |
-|      +-- Aura     (ObjectArray)   <- Chunked + Flat arrays + Find Refs/Containers (+ recursive deep descent FindInContainersDeep, 1198) + ScanForValue (lean Candidate V3-A 926; TSet/TMap scan V1a 927) + ScanForValueGroup (multi-value group scan via Orden, 1276) + FindObjectGraphPath (GWorld fwd BFS / Locate in GWorld, 1181; + RecoverViaWorldLevel streaming/WP actor recovery via ULevel::OwningWorld back-ref, status ok_via_level, 1405) + GetRelatedObjects (forward owned graph: Self/Class/Outer/Controller↔Pawn/components/ASC/AttributeSet, 1323) + CollectOutgoingObjectPtrs (public outgoing-edge façade for Edel, 1400) + FindInstancesByClass server-side exclude_classes-before-cap + full-pool class_histogram via split loop gated by buildHistogram, 1444) |
+|      +-- Aura     (ObjectArray)   <- Chunked + Flat arrays + Find Refs/Containers (+ recursive deep descent FindInContainersDeep, 1198) + ScanForValue (lean Candidate V3-A 926; TSet/TMap scan V1a 927) + ScanForValueGroup (multi-value group scan via Orden, 1276) + FindObjectGraphPath (GWorld fwd BFS / Locate in GWorld, 1181; + RecoverViaWorldLevel streaming/WP actor recovery via ULevel::OwningWorld back-ref, status ok_via_level, 1405; + opt-in deep param — follow obj ptrs in one struct-element container level TArray/TSet/TMap<FStruct>, 1780) + GetRelatedObjects (forward owned graph: Self/Class/Outer/Controller↔Pawn/components/ASC/AttributeSet, 1323) + CollectOutgoingObjectPtrs (public outgoing-edge façade for Edel, 1400) + FindInstancesByClass server-side exclude_classes-before-cap + full-pool class_histogram via split loop gated by buildHistogram, 1444) |
 |      +-- Serie    (FNamePool)     <- UE5 Pool / UE4 TNameEntry|
 |      +-- Ubel     (UStructWalker) <- FField + UProperty + Phases B-K + Optional + ReadFStringAt/ReadFNameAt/ReadFTextStringAt (public, build 757) |
 |      +-- Macht    (Memory)        <- AOBScan + SEH read/write |
@@ -128,7 +128,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- Orden    (GroupMatch)    <- source-agnostic SDR/assignment matcher for multi-value group scan (header-only, build 1276) |
 |      +-- Denken   (NativeDisasm)  <- Zydis x64 decoder: native UFunction -> [this+off] property xref (Path 2, build 862) |
 |      +-- Tot      (Cancellation)  <- Tot::Requested() flag; Fern disconnect-monitor + shutdown-abort stop long ops (build 936) |
-|      +-- Wirbel   (Teleport)      <- marker save/recall + cursor + camera POV + directional/explicit-coord TP + force mouse cursor (bShowMouseCursor) (build 1144); CMD_TELEPORT=8 mailbox (ops 0-15) |
+|      +-- Wirbel   (Teleport)      <- marker save/recall + cursor + camera POV + directional/explicit-coord TP + force mouse cursor (bShowMouseCursor) (build 1144); get_pose surfaces loc/vel FVector owner+offset for per-vector Locate-in-GWorld (1780); CMD_TELEPORT=8 mailbox (ops 0-15) |
 |      +-- Solitar  (GodMode)       <- force AActor::bCanBeDamaged (FBoolProperty bit) + re-assert worker; CMD_PROTECT=9 mailbox on/off (build 1251) |
 |      +-- Edel     (CurrentTarget) <- auto-detect the player's current target: GWorld→PC→Pawn, score outgoing object-ptr fields (structural is-Actor gate + keyword boost); get_current_target pipe-only (build 1400) |
 +----------------------+-------------------------------+

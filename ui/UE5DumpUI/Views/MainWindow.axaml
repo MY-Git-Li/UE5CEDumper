@@ -200,6 +200,12 @@
                             Minimum="1" Maximum="32"
                             TickFrequency="1" IsSnapToTickEnabled="True"
                             ToolTip.Tip="{StaticResource str.Tip.LiveWalker.GWorldDepth}"/>
+                    <!-- Deep locate: follow object pointers inside struct-array
+                         elements (Value Search "Deep" analogue). Heavier. -->
+                    <CheckBox Content="{StaticResource str.Toolbar.GWorldDeep}"
+                              IsChecked="{Binding LiveWalker.GWorldLocateDeep}"
+                              ToolTip.Tip="{StaticResource str.Tip.LiveWalker.GWorldDeep}"
+                              Foreground="#CCCCCC" FontSize="12"/>
                   </StackPanel>
 
                   <!-- Deep container scan cap (per-container element probe limit

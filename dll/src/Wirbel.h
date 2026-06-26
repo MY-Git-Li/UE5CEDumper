@@ -75,6 +75,18 @@ struct MovementState {
     double VelX = 0, VelY = 0, VelZ = 0;
     double AccX = 0, AccY = 0, AccZ = 0;
     double Speed = 0;
+    // Owning sub-object + intra-object offset of the location / velocity FVector
+    // fields — for the Teleport "Locate value in GWorld" handoff (land the GWorld
+    // path on the exact vector field, not just the pawn). Location lives on the
+    // RootComponent (USceneComponent::RelativeLocation — parent-relative when the
+    // pawn is attached, but it IS the stored location field); velocity on the
+    // CharacterMovement (UMovementComponent::Velocity). LocOwnerAddr is set
+    // whenever the pose resolves; VelOwnerAddr only when HasMovement. Offsets are
+    // -1 / addresses 0 when unresolved.
+    uintptr_t LocOwnerAddr   = 0;    // RootComponent (USceneComponent)
+    int32_t   LocFieldOffset = -1;   // RelativeLocation offset within RootComponent
+    uintptr_t VelOwnerAddr   = 0;    // CharacterMovement (UMovementComponent)
+    int32_t   VelFieldOffset = -1;   // Velocity offset within CharacterMovement
 };
 
 // Read the current pawn pose (location from RootComponent.RelativeLocation,

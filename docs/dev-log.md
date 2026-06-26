@@ -16,6 +16,66 @@ builds ≤696 in
 
 -----
 
+## 2026-06-26 — Teleport per-vector "Locate in GWorld" (position + velocity) + opt-in Deep Locate-in-GWorld/GameEngine (build ~1780; DLL + UI + wire; tests green, adversarially reviewed, in-game UNVERIFIED)
+
+Two requests, one session:
+
+### Part 1 — Locate the position / velocity VECTOR in GWorld (not just the pawn)
+The Teleport pose card already had a pawn "🌍 Locate in GWorld". Added two
+sibling buttons — next to the Location row and the Velocity row — that land the
+GWorld path on the *exact FVector field* rather than the owning pawn:
+- **Position** → `RootComponent.RelativeLocation` (owner = RootComponent).
+- **Velocity** → `CharacterMovement.Velocity` (owner = CharacterMovement; hidden/
+  no-op on pawns with no CMC).
+
+These addresses were already resolved internally by `Wirbel::GetPoseAndMovement`
+/ `ReadMovementState`; the change just surfaces owner addr + field offset:
+`MovementState` gains `LocOwnerAddr/LocFieldOffset` + `VelOwnerAddr/VelFieldOffset`
+([Wirbel.h](../dll/src/Wirbel.h)/[Wirbel.cpp](../dll/src/Wirbel.cpp)), emitted in
+`teleport_get_pose` as `loc_owner_addr/loc_field_offset/loc_field_name` (+ `vel_*`
+when `has_movement`). UI: `TeleportPose` gains the fields, `TeleportViewModel`
+adds a `LocateValueInGWorld(owner, fieldOffset, fieldName)` event +
+`LocatePositionInGWorldCommand`/`LocateVelocityInGWorldCommand`, and
+`MainWindowViewModel` wires it to the existing value-landing
+`LiveWalker.LocateInGWorldAsync(owner, fieldOffset, fieldName)` (the same handoff
+Value Search uses). GWorld-only (the owning components are normal world
+sub-objects; GameEngine parity wasn't requested).
+
+### Part 2 — "Deep" Locate-in-GWorld / GameEngine (the Value Search Deep analogue)
+**Finding (confirmed):** neither Locate supported nested/multi-container, in two
+ways. **Gap A** — `find_path_from_gworld`'s target→owner resolution used the
+shallow `FindInContainers(addr,1)`; a bare value address in a separately-allocated
+nested heap container returned `invalid_target`. **Gap B** — the forward BFS
+(`EnumerateOutgoingObjectPtrs` → `GetClassRefMeta`) follows object containers and
+inline-struct-nested pointers (depth 3) but NOT object pointers inside
+struct-array ELEMENTS (`TArray<FStruct>` holding a `UObject*`), so such objects
+were `not_reachable`. Both apply identically to the `root_kind="engine"` variant.
+
+Both closed, opt-in (default off):
+- **Gap A**: `find_path_from_gworld` now takes `container_depth`; when the shallow
+  scans miss and `container_depth>1`, it attributes the value to its owner via
+  `FindInContainersDeep` (mirrors `find_by_address`).
+- **Gap B**: `find_path_from_gworld` takes `deep`; `EnumerateOutgoingObjectPtrs`
+  gains a `deep` pass that walks `GetClassContainers` struct-element containers
+  (array/set element + map value/key) and reads each element struct's object/weak
+  pointers via `GetClassRefMeta(elemStruct)`, emitting each as ONE CE-splittable
+  hop (`elem_stride` + `elem_value_offset` locate the pointer; `inner_type =
+  StructProperty`). `PathStepToBreadcrumbs` extends its container split to
+  `ArrayProperty + StructProperty`. **Bound:** one struct-element level — object
+  containers nested *inside* the element struct (two levels) aren't a single
+  splittable hop and are out of scope. Bounded by a per-container element cap +
+  the existing deadline / visited cap.
+
+UI: a **"Deep (nested containers)"** checkbox by the Locate-depth slider
+(`LiveWalker.GWorldLocateDeep`, persisted), passed through `FindPathFromGWorldAsync`
+(`deep` + `containerDepth=4` when on) at every locate call site.
+
+Tests: +6 (Teleport locate-vector commands + `HasLocAddr`/`HasVelAddr`; deep
+struct-array breadcrumb split). All green (2035 C# / 791 dll / 53 utf8). Published
+exe launch-verified (no crash). In-game behaviour UNVERIFIED.
+
+-----
+
 ## 2026-06-26 — Class Pivot post-capture freeze fixed: runaway connection-open loop + a robust class picker (build 1764; UI/C#+AXAML-only, no DLL/schema/wire change; in-game VERIFIED)
 
 Selecting a class in Class Pivot froze the whole UI ("Not Responding", low CPU, heavy DB I/O)

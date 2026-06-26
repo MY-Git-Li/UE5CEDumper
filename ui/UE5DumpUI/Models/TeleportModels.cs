@@ -35,6 +35,35 @@ public sealed class TeleportPose
     public bool HasPawnAddr =>
         !string.IsNullOrEmpty(PawnAddr) && PawnAddr != "0x0" && PawnAddr != "0X0";
 
+    /// <summary>Owning sub-object (RootComponent) of the position FVector, for the
+    /// "Locate position vector in GWorld" handoff. "" / "0x0" when unresolved.</summary>
+    public string LocOwnerAddr { get; init; } = "";
+
+    /// <summary>RelativeLocation offset within <see cref="LocOwnerAddr"/>.</summary>
+    public int LocFieldOffset { get; init; }
+
+    /// <summary>Field name to land on ("RelativeLocation").</summary>
+    public string LocFieldName { get; init; } = "";
+
+    /// <summary>True when the position vector's owner+offset are usable.</summary>
+    public bool HasLocAddr =>
+        !string.IsNullOrEmpty(LocOwnerAddr) && LocOwnerAddr != "0x0" && LocOwnerAddr != "0X0";
+
+    /// <summary>Owning sub-object (CharacterMovement) of the velocity FVector, for
+    /// the "Locate velocity vector in GWorld" handoff. Only set when
+    /// <see cref="HasMovement"/>. "" / "0x0" when unresolved.</summary>
+    public string VelOwnerAddr { get; init; } = "";
+
+    /// <summary>Velocity offset within <see cref="VelOwnerAddr"/>.</summary>
+    public int VelFieldOffset { get; init; }
+
+    /// <summary>Field name to land on ("Velocity").</summary>
+    public string VelFieldName { get; init; } = "";
+
+    /// <summary>True when the velocity vector's owner+offset are usable.</summary>
+    public bool HasVelAddr =>
+        !string.IsNullOrEmpty(VelOwnerAddr) && VelOwnerAddr != "0x0" && VelOwnerAddr != "0X0";
+
     /// <summary>True when the pawn has a UCharacterMovementComponent whose
     /// reflected Velocity field resolved, so <see cref="VelX"/>/<see cref="Speed"/>
     /// (and usually <see cref="AccX"/>) are live. False on vehicle / custom-framework

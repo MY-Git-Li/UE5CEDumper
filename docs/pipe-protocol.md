@@ -961,7 +961,20 @@ Request:
   "object_addr": "0x7FF6BB100000",// OPTIONAL — the owning UObject if the caller already
                                   //   knows it (Value Search / Instance Finder); skips the
                                   //   FindByAddress resolution scan
-  "max_depth": 5                  // max pointer hops from GWorld (default 5; hard-capped 32)
+  "max_depth": 5,                 // max pointer hops from GWorld (default 5; hard-capped 32)
+  "root_kind": "gworld",          // OPTIONAL — "gworld" (default) or "engine" (root at UGameEngine)
+  "deep": false,                  // OPTIONAL — opt-in deep BFS (default off): ALSO follow object
+                                  //   pointers inside ONE struct-element container level
+                                  //   (TArray<FStruct>/TSet<FStruct>/TMap<*,FStruct> whose element
+                                  //   struct holds a UObject*) — reaches objects referenced ONLY
+                                  //   from a struct-array element. The graph analogue of Value
+                                  //   Search "Deep". Heavier (reads each struct-array's elements
+                                  //   per visited node); each edge is one CE-splittable hop
+                                  //   (elem_stride + elem_value_offset point at the pointer).
+  "container_depth": 1            // OPTIONAL — >1 attributes a BARE value address inside a deeply-
+                                  //   nested heap container to its owning UObject via the deep
+                                  //   container scan (FindInContainersDeep), instead of returning
+                                  //   invalid_target. Ignored when object_addr is supplied.
 }
 ```
 
@@ -1019,6 +1032,20 @@ edges. A truly unreferenced actor not in any world level still returns
 MulticastSparseDelegateProperty edges are intentionally NOT followed (their
 bindings live in a CoreUObject-global TMap — a per-node global walk would be
 prohibitively expensive).
+
+**Deep traversal (`deep: true`).** The forward BFS additionally follows object
+pointers stored inside ONE struct-element container level — a `UObject*` held by
+a `TArray<FStruct>` / `TSet<FStruct>` / `TMap<*,FStruct>` element struct (incl.
+nested in an inline sub-struct, which the metadata flattens to a fixed
+element-relative offset). The emitted step carries `field_type` =
+`ArrayProperty`/`SetProperty`/`MapProperty`, `inner_type` = `StructProperty`,
+`element_index`, `elem_stride` (the element/pair stride) and `elem_value_offset`
+(the pointer's offset within the element), so the UI splits it into a container
+deref + an element-pointer deref at `element_index*elem_stride +
+elem_value_offset` — a faithful CE pointer chain. Object containers nested INSIDE
+the element struct (two container levels) are deliberately NOT followed: they
+cannot be expressed as a single splittable hop. Bounded by a per-container
+element cap plus the deadline / visited cap. Default off (heavier).
 
 ### get_offsets
 
@@ -1251,10 +1278,18 @@ fallback (game may snap back). Codes (§8): 0 OK, -1 not-init, -2 no controller,
 { "cmd": "teleport_get_pose" }
 → { "x":…,"y":…,"z":…,"pitch":…,"yaw":…,"roll":…,"map":"Map","source":"raw|invoke","code":0,
 //   pawn_addr = the resolved pawn (hex str, "0x0" if none) for the "Locate in GWorld" handoff.
+//   loc_owner_addr / loc_field_offset / loc_field_name = owner (RootComponent) + offset of the
+//     position FVector (RelativeLocation) — the "Locate position vector in GWorld" handoff lands
+//     the path on this exact field. Present whenever the pose resolved.
 //   has_movement = pawn has a CharacterMovement; when true, the live vel_/acc_/speed fields are
 //   present (velocity cm/s, acceleration cm/s²). Absent on vehicle / custom-framework pawns.
-    "pawn_addr":"0x…", "has_movement":true,
-    "vel_x":…,"vel_y":…,"vel_z":…, "acc_x":…,"acc_y":…,"acc_z":…, "speed":… }
+//   vel_owner_addr / vel_field_offset / vel_field_name = owner (CharacterMovement) + offset of the
+//     velocity FVector — the "Locate velocity vector in GWorld" handoff. Present only when has_movement.
+    "pawn_addr":"0x…",
+    "loc_owner_addr":"0x…","loc_field_offset":0x140,"loc_field_name":"RelativeLocation",
+    "has_movement":true,
+    "vel_x":…,"vel_y":…,"vel_z":…, "acc_x":…,"acc_y":…,"acc_z":…, "speed":…,
+    "vel_owner_addr":"0x…","vel_field_offset":0x16C,"vel_field_name":"Velocity" }
 
 { "cmd": "teleport_save_marker", "slot": 0 }
 → { "slot":0,"x":…,…,"map":"…","code":0 }

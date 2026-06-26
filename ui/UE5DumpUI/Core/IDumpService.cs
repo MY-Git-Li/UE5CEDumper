@@ -108,9 +108,16 @@ public interface IDumpService
     // "engine" (the live UGameEngine; reaches engine-layer objects the GWorld
     // graph never touches, but NOT a superset — world actors are typically
     // not_reachable from the engine).
+    // deep: opt-in deep traversal — the forward BFS also follows object pointers
+    // inside one struct-element container level (TArray<FStruct> etc.), reaching
+    // objects referenced only from a struct-array element (Value Search "Deep"
+    // analogue). containerDepth (>1) lets the DLL attribute a bare value address
+    // in a deeply-nested heap container to its owning object via the deep
+    // container scan (otherwise "invalid_target"). Both heavier; default off.
     Task<GWorldPathResult> FindPathFromGWorldAsync(
         string target, string? objectAddr = null, int maxDepth = 5,
-        CancellationToken ct = default, string rootKind = "gworld");
+        CancellationToken ct = default, string rootKind = "gworld",
+        bool deep = false, int containerDepth = 1);
 
     // --- Related-object graph (forward, owned) — "Related Objects" panel ---
     // Given a UObject (typically an actor), list itself, its class/outer, its

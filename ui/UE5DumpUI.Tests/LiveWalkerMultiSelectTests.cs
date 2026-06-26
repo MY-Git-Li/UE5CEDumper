@@ -449,10 +449,12 @@ public class LiveWalkerMultiSelectTests
     }
 
     [Fact]
-    public void PathStepToBreadcrumbs_StructArrayElement_DoesNotSplit()
+    public void PathStepToBreadcrumbs_StructArrayElement_WithoutStride_DoesNotSplit()
     {
-        // Struct-array element stride isn't a plain 8-byte pointer → keep the
-        // single crumb (current behavior) rather than emit a wrong index*8 deref.
+        // A struct-array element with NO carried stride (legacy / non-deep path)
+        // can't be split into a correct element deref — keep the single crumb
+        // rather than emit a wrong index*8 deref. (The deep BFS DOES carry a
+        // stride; see the next test.)
         var step = new GWorldPathStep
         {
             From = "0xA", To = "0xB", FieldOffset = 0x10, FieldName = "Items",
@@ -460,6 +462,39 @@ public class LiveWalkerMultiSelectTests
         };
         var crumbs = LiveWalkerViewModel.PathStepToBreadcrumbs(step);
         Assert.Single(crumbs);
+    }
+
+    [Fact]
+    public void PathStepToBreadcrumbs_DeepStructArrayElement_SplitsWithStrideAndPtrOffset()
+    {
+        // Aura's deep BFS edge: an object pointer stored inside a TArray<FStruct>
+        // element (e.g. Inventory[2].ItemActor). It carries the element struct
+        // stride + the pointer's within-element offset, so it must split into a
+        // container crumb (deref TArray::Data at the array field) + an element
+        // crumb at index*stride + ptrOffset.
+        // The DLL emits FieldName = the container field name only (Aura deep BFS
+        // uses cfe.name + ".Key"/".Value" suffix — never the inner pointer field),
+        // so the container crumb names the real field and back-nav re-hydration matches.
+        var step = new GWorldPathStep
+        {
+            From = "0x100", To = "0x200",
+            FieldOffset = 0x80, FieldName = "Inventory",
+            FieldType = "ArrayProperty", InnerType = "StructProperty", ElementIndex = 2,
+            ElemStride = 0x30, ElemValueOffset = 0x18,
+            ToName = "BP_Item_C", ToClass = "BP_Item_C",
+        };
+
+        var crumbs = LiveWalkerViewModel.PathStepToBreadcrumbs(step);
+
+        Assert.Equal(2, crumbs.Count);
+        Assert.Equal(0x80, crumbs[0].FieldOffset);
+        Assert.True(crumbs[0].IsContainerView);
+        Assert.Equal("Inventory", crumbs[0].FieldName);          // container field named correctly
+        Assert.Equal(2 * 0x30 + 0x18, crumbs[1].FieldOffset);   // 0x78
+        Assert.True(crumbs[1].IsPointerDeref);
+        Assert.False(crumbs[1].IsContainerView);
+        Assert.Equal("[2]", crumbs[1].FieldName);
+        Assert.Equal("0x200", crumbs[1].Address);
     }
 
     [Fact]

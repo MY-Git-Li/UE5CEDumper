@@ -181,6 +181,8 @@
     <sys:String x:Key="str.LiveWalker.GWorldDepth">GWorld depth:</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.GWorldDepth">Maximum pointer hops to search downward from GWorld when using "Locate in GWorld" (default 5). Larger = finds deeper targets but slower.</sys:String>
     <sys:String x:Key="str.Toolbar.GWorldDepth">Locate in GWorld depth</sys:String>
+    <sys:String x:Key="str.Toolbar.GWorldDeep">Deep (nested containers)</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.GWorldDeep">Deep "Locate in GWorld" (default off — the analogue of Value Search's Deep). When on, the path search ALSO follows object pointers stored inside one struct-array / struct-set / struct-map element level (e.g. an actor referenced only from Inventory[3].ItemActor), so otherwise-unreachable objects can be located; and a bare value address inside a deeply-nested container is attributed to its owner instead of failing. Heavier — it reads each struct-array's elements per visited node.</sys:String>
     <sys:String x:Key="str.Toolbar.DeepScanElemCap">Deep container scan cap</sys:String>
     <sys:String x:Key="str.Tip.Toolbar.DeepScanElemCap">Per-container element probe cap for the Instances "Lookup" deep scan — the recursive descent that finds a value buried in nested containers (e.g. SaveSlotList[1]…Tunes[N]). Only runs when the fast shallow lookup finds nothing. Higher = reaches values at higher element indices but slower; default 256.</sys:String>
     <sys:String x:Key="str.LiveWalker.Go">Go</sys:String>
@@ -748,6 +750,8 @@
     <sys:String x:Key="str.TP.Pawn">Pawn:</sys:String>
     <sys:String x:Key="str.TP.Locate">🌍 Locate in GWorld</sys:String>
     <sys:String x:Key="str.TP.LocateGameEngine">⚙</sys:String>
+    <sys:String x:Key="str.TP.LocatePos">🌍 Locate vector</sys:String>
+    <sys:String x:Key="str.TP.LocateVel">🌍 Locate vector</sys:String>
     <sys:String x:Key="str.TP.Velocity">Velocity (X / Y / Z):</sys:String>
     <sys:String x:Key="str.TP.Speed">Speed:</sys:String>
     <sys:String x:Key="str.TP.Accel">Acceleration (X / Y / Z):</sys:String>
@@ -782,6 +786,8 @@
     <sys:String x:Key="str.Tip.TP.Auto">Re-read the pose every 0.5s, and the camera POV too (POV is skipped silently on games where it isn't available). Off by default; stops automatically on disconnect.</sys:String>
     <sys:String x:Key="str.Tip.TP.Locate">Find this pawn (the object whose Current Pose is shown) in the Live Walker and select it — switches to Live Walker, walks the GWorld → … → pawn path, and lands on it. Reads a fresh pose first to get the live pawn address. World-Partition / streaming pawns resolve via the level back-reference (Live Walker shows 'via level'); a just-spawned, unreferenced pawn may be unreachable.</sys:String>
     <sys:String x:Key="str.Tip.TP.LocateGameEngine">Locate in GameEngine: find this pawn via the live UGameEngine graph instead of GWorld. NOTE: a pawn is a world actor and usually lives BELOW GWorld, so this is typically unreachable — use the 🌍 Locate in GWorld button for pawns. Provided only for parity.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LocatePos">Locate the position vector in GWorld: walk the GWorld → … → RootComponent path and land directly on the RelativeLocation FVector field (X/Y/Z), so you can build a pointer chain straight to the coordinates. Reads a fresh pose first. (On attached pawns the stored RelativeLocation is parent-relative.)</sys:String>
+    <sys:String x:Key="str.Tip.TP.LocateVel">Locate the velocity vector in GWorld: walk the GWorld → … → CharacterMovement path and land directly on the Velocity FVector field, for a pointer chain straight to the movement vector. Reads a fresh pose first. Unavailable on pawns with no CharacterMovement (vehicles / custom movement frameworks).</sys:String>
     <sys:String x:Key="str.Tip.TP.Velocity">Live velocity (cm/s) and acceleration (cm/s²) read straight from the pawn's CharacterMovement (no invoke). Enable Auto to watch them change while moving. Shown as — with a note on pawns that have no CharacterMovement (vehicles / custom movement frameworks).</sys:String>
     <sys:String x:Key="str.Tip.TP.Save">Save the current pose into this marker slot. Markers live in the DLL — they survive a UI restart as long as the game process lives.</sys:String>
     <sys:String x:Key="str.Tip.TP.Recall">Teleport back to this marker (invokes K2_SetActorLocation with bTeleport=true, then restores rotation and zeroes velocity). Refused if you've changed maps — use Force.</sys:String>

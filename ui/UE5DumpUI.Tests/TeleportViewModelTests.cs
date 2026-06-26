@@ -945,6 +945,103 @@ public class TeleportViewModelTests
     }
 
     [Fact]
+    public async Task LocatePosition_fires_value_event_with_root_component_and_offset()
+    {
+        var fake = new FakeDumpService
+        {
+            NextPose = new()
+            {
+                Code = 0, PawnAddr = "0xDEAD",
+                LocOwnerAddr = "0xR007", LocFieldOffset = 0x140, LocFieldName = "RelativeLocation",
+            },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        (string owner, int off, string name)? got = null;
+        vm.LocateValueInGWorld += (o, f, n) => got = (o, f, n);
+
+        await vm.LocatePositionInGWorldCommand.ExecuteAsync(null);
+
+        Assert.NotNull(got);
+        Assert.Equal("0xR007", got!.Value.owner);
+        Assert.Equal(0x140, got.Value.off);
+        Assert.Equal("RelativeLocation", got.Value.name);
+        Assert.Equal(1, fake.GetPoseCalls);   // reads a fresh pose first
+    }
+
+    [Fact]
+    public async Task LocateVelocity_fires_value_event_with_movement_component_and_offset()
+    {
+        var fake = new FakeDumpService
+        {
+            NextPose = new()
+            {
+                Code = 0, PawnAddr = "0xDEAD", HasMovement = true,
+                VelOwnerAddr = "0xCMC0", VelFieldOffset = 0x16C, VelFieldName = "Velocity",
+            },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        (string owner, int off, string name)? got = null;
+        vm.LocateValueInGWorld += (o, f, n) => got = (o, f, n);
+
+        await vm.LocateVelocityInGWorldCommand.ExecuteAsync(null);
+
+        Assert.NotNull(got);
+        Assert.Equal("0xCMC0", got!.Value.owner);
+        Assert.Equal(0x16C, got.Value.off);
+        Assert.Equal("Velocity", got.Value.name);
+    }
+
+    [Fact]
+    public async Task LocateVelocity_no_movement_does_not_fire()
+    {
+        var fake = new FakeDumpService
+        {
+            // Pawn resolved but no CharacterMovement → no velocity vector to locate.
+            NextPose = new() { Code = 0, PawnAddr = "0xDEAD", HasMovement = false },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        bool fired = false;
+        vm.LocateValueInGWorld += (_, _, _) => fired = true;
+
+        await vm.LocateVelocityInGWorldCommand.ExecuteAsync(null);
+
+        Assert.False(fired);
+        Assert.Contains("velocity", vm.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LocatePosition_no_loc_addr_does_not_fire()
+    {
+        var fake = new FakeDumpService
+        {
+            // Old DLL / unresolved owner → loc owner address missing.
+            NextPose = new() { Code = 0, PawnAddr = "0xDEAD", LocOwnerAddr = "" },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        bool fired = false;
+        vm.LocateValueInGWorld += (_, _, _) => fired = true;
+
+        await vm.LocatePositionInGWorldCommand.ExecuteAsync(null);
+
+        Assert.False(fired);
+        Assert.Contains("position", vm.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TeleportPose_HasLocAddr_HasVelAddr_reject_null_and_zero()
+    {
+        Assert.False(new TeleportPose { LocOwnerAddr = "" }.HasLocAddr);
+        Assert.False(new TeleportPose { LocOwnerAddr = "0x0" }.HasLocAddr);
+        Assert.True(new TeleportPose { LocOwnerAddr = "0x7FF00010" }.HasLocAddr);
+        Assert.False(new TeleportPose { VelOwnerAddr = "0X0" }.HasVelAddr);
+        Assert.True(new TeleportPose { VelOwnerAddr = "0x7FF00020" }.HasVelAddr);
+    }
+
+    [Fact]
     public async Task LocateCurrentPose_error_code_shows_hint_without_firing()
     {
         var fake = new FakeDumpService { NextPose = new() { Code = TeleportCodes.NoPawn } };
