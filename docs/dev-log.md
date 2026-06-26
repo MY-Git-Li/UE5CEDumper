@@ -16,6 +16,60 @@ builds ≤696 in
 
 -----
 
+## 2026-06-26 — Movement tuning: Move Speed / Gravity / Super Jump (Laufen module; build ~1795; DLL + pipe + UI; tests green, **in-game VERIFIED on Elliot-Win64-Shipping**)
+
+New **Laufen** (走る / "to run") DLL module + three Teleport-tab cards that force
+per-pawn `UCharacterMovementComponent` float knobs and hold them against per-tick
+overwrites — the float analogue of **Solitar** (GodMode), which forces a bool bit.
+
+### Engine (`Laufen.cpp/.h`)
+- Self-contained (Path B): copies Solitar's local-pawn chain (GWorld →
+  OwningGameInstance → LocalPlayers[0] → PlayerController → Pawn), then one extra
+  hop to the reflected `CharacterMovement` ObjectProperty → the CMC.
+- Generic **float-knob engine** over 3 knobs resolved by FName (DynOff rule):
+  `KNOB_WALK_SPEED`=MaxWalkSpeed, `KNOB_GRAVITY`=GravityScale, `KNOB_JUMP`=JumpZVelocity.
+- **Multiplier of a captured base** with the compounding/restore trap solved: base
+  is captured once on activation and **re-captured only on pawn change** (respawn),
+  never on a mere multiplier change — so re-applying never folds our own write into
+  the base, and Reset restores the true original.
+- **Re-assert worker** = Solitar's pattern verbatim (write-on-drift, ~250 ms,
+  two-mutex split so `join()` never runs under the op mutex). `UE5_Shutdown` joins it.
+- Width from reflected `FieldInfo.Size` (4B float / 8B double), never assumed.
+- Graceful `MR_ERR_NO_CMC` on vehicle / custom-movement pawns (no CMC).
+
+### Pipe (`Fern.cpp` + `Renge.h`)
+- 3 generic commands (the `knob` string selects walk_speed/gravity/jump):
+  `get_movement_params` (all knobs + each field's owner+offset for Locate-in-GWorld),
+  `set_movement_multiplier {knob,multiplier}`, `reset_movement {knob}`. Pipe-only
+  (UI path); CE-Lua/mailbox exposure deferred to P4.
+
+### UI (Teleport tab — three cards, clone of the GodMode card)
+- **P1 Move Speed**: 10%–1000% log slider on MaxWalkSpeed + Apply/Reset/↻/Locate.
+- **P2 Gravity**: same on GravityScale (<100% floaty, >100% heavy).
+- **P3 Super Jump**: persistent **toggle** (Force ON/OFF, like GodMode) + global
+  **hotkey** ("Super Jump toggle"). Slider is jump **height** %; since apex height
+  ∝ v², the applied JumpZVelocity multiplier is **√(height %)** (e.g. 400% height
+  = ×2 velocity). Each card's Locate-in-GWorld reuses the existing value-landing
+  `LocateValueInGWorld` handoff to mark the float in Live Walker.
+- Log slider = `10^exponent`, exponent ∈ [-1,1], 100% at centre (VM `Math.Pow`,
+  AOT-safe, no converter). Tri-state badge ON/OFF/Unavailable.
+
+### Post-test UI polish (same session, build ~1795)
+- Move Speed + Gravity got their own global **toggle hotkeys** (`movespeed_toggle`,
+  `gravity_toggle` — apply current slider when off, reset when on; needed VM active-state
+  tracking `_moveSpeedActive`/`_gravityActive`).
+- Super Jump card gained a **Reset** button (off + snap slider to 100%, parity with
+  Move Speed / Gravity).
+- Hotkey-row label column widened 120→150 (the "Super Jump toggle" label was clipped).
+- Renamed the hotkey section "Teleport Hotkeys" → **"Hotkey Settings"** + refreshed its
+  hint (now covers God Mode / Super Jump / Move Speed / Gravity toggles, not just teleport).
+
+Tests: +7 TeleportViewModel movement tests (2064 C# green). Roster: `Laufen` 🟢.
+**Deferred (P4):** CE-Lua/.CT generation (Mimic `CMD_MOVEMENT` mailbox) + UE5.4+
+arbitrary gravity **direction** vector. Single-player only (these replicate online).
+
+-----
+
 ## 2026-06-26 — Teleport per-vector "Locate in GWorld" (position + velocity) + opt-in Deep Locate-in-GWorld/GameEngine (build ~1780; DLL + UI + wire; tests green, adversarially reviewed, in-game UNVERIFIED)
 
 Two requests, one session:

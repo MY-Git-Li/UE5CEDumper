@@ -198,4 +198,9 @@ constexpr int    TELEPORT_MAPNAME_CAP     = 128;     // marker map-name buffer s
 // --- GodMode (Solitar) — docs/godmode-spec.md ---
 constexpr int    PROTECT_REASSERT_MS      = 300;     // re-assert worker tick (write-on-drift)
 
+// --- Movement tuning (Laufen) — Super Jump / Gravity / Move Speed ---
+constexpr int    MOVE_REASSERT_MS         = 250;     // re-assert worker tick (write-on-drift)
+constexpr double MOVE_MULT_MIN            = 0.1;     // 10%  — UI slider floor
+constexpr double MOVE_MULT_MAX            = 10.0;    // 1000% — UI slider ceiling
+
 } // namespace Grimoire

@@ -18,6 +18,7 @@
 #include "Radar.h"
 #include "Tot.h"
 #include "Wirbel.h"
+#include "Laufen.h"
 #include "Edel.h"
 #include "BuildInfo.h"
 
@@ -4006,6 +4007,86 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             data["godmode"]    = live;        // observed live state (1/0, -1 = no pawn)
             data["resolvable"] = resolvable != 0;
             data["code"]       = code;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // ── get_movement_params / set_movement_multiplier / reset_movement (Laufen) ──
+        // Per-pawn CharacterMovement float knobs (MaxWalkSpeed/GravityScale/
+        // JumpZVelocity) forced by a multiplier of their captured base and held by
+        // a re-assert worker. Each knob surfaces (owner_addr,field_offset) for the
+        // same "Locate in GWorld" handoff teleport_get_pose uses for loc/vel.
+        if (cmd == Renge::CMD_GET_MOVEMENT_PARAMS) {
+            Laufen::Snapshot snap{};
+            int32_t code = Laufen::GetSnapshot(snap);
+            auto knobJson = [](const Laufen::KnobInfo& k) {
+                json j;
+                j["resolved"]   = k.resolved;
+                j["current"]    = k.current;
+                j["base"]       = k.base;
+                j["multiplier"] = k.multiplier;
+                j["active"]     = k.active;
+                if (k.resolved && k.ownerAddr && k.fieldOffset >= 0) {
+                    j["owner_addr"]   = Renge::AddrToStr(k.ownerAddr);
+                    j["field_offset"] = k.fieldOffset;
+                    j["field_name"]   = k.fieldName;
+                }
+                return j;
+            };
+            json data;
+            data["code"]    = code;            // 0 ok; negative Laufen::MoveResult
+            data["has_cmc"] = snap.hasCmc;
+            if (snap.cmcAddr) data["cmc_addr"] = Renge::AddrToStr(snap.cmcAddr);
+            json knobs;
+            knobs["walk_speed"] = knobJson(snap.knobs[Laufen::KNOB_WALK_SPEED]);
+            knobs["gravity"]    = knobJson(snap.knobs[Laufen::KNOB_GRAVITY]);
+            knobs["jump"]       = knobJson(snap.knobs[Laufen::KNOB_JUMP]);
+            data["knobs"] = knobs;
+            return Renge::MakeResponse(id, data).dump();
+        }
+        if (cmd == Renge::CMD_SET_MOVEMENT_MULTIPLIER) {
+            std::string knob = request.value("knob", std::string());
+            double mult = request.value("multiplier", 1.0);
+            int32_t kid = (knob == "walk_speed") ? Laufen::KNOB_WALK_SPEED
+                        : (knob == "gravity")    ? Laufen::KNOB_GRAVITY
+                        : (knob == "jump")       ? Laufen::KNOB_JUMP : -1;
+            if (kid < 0) return Renge::MakeError(id, "Unknown movement knob: " + knob).dump();
+            Sein::Info("PIPE:cmd", "set_movement_multiplier: knob=%s mult=%.3f",
+                       knob.c_str(), mult);
+            int32_t state = Laufen::SetMultiplier(kid, mult);
+            Laufen::KnobInfo info{};
+            Laufen::GetKnob(kid, info);
+            json data;
+            data["state"]      = state;                  // 1 active / negative MoveResult
+            data["code"]       = (state < 0) ? state : 0;
+            data["current"]    = info.current;
+            data["base"]       = info.base;
+            data["multiplier"] = info.multiplier;
+            data["active"]     = info.active;
+            data["resolved"]   = info.resolved;
+            if (info.resolved && info.ownerAddr && info.fieldOffset >= 0) {
+                data["owner_addr"]   = Renge::AddrToStr(info.ownerAddr);
+                data["field_offset"] = info.fieldOffset;
+                data["field_name"]   = info.fieldName;
+            }
+            return Renge::MakeResponse(id, data).dump();
+        }
+        if (cmd == Renge::CMD_RESET_MOVEMENT) {
+            std::string knob = request.value("knob", std::string());
+            int32_t kid = (knob == "walk_speed") ? Laufen::KNOB_WALK_SPEED
+                        : (knob == "gravity")    ? Laufen::KNOB_GRAVITY
+                        : (knob == "jump")       ? Laufen::KNOB_JUMP : -1;
+            if (kid < 0) return Renge::MakeError(id, "Unknown movement knob: " + knob).dump();
+            Sein::Info("PIPE:cmd", "reset_movement: knob=%s", knob.c_str());
+            int32_t code = Laufen::ResetKnob(kid);
+            Laufen::KnobInfo info{};
+            Laufen::GetKnob(kid, info);
+            json data;
+            data["code"]       = code;
+            data["current"]    = info.current;
+            data["base"]       = info.base;
+            data["multiplier"] = info.multiplier;
+            data["active"]     = info.active;
+            data["resolved"]   = info.resolved;
             return Renge::MakeResponse(id, data).dump();
         }
 

@@ -65,6 +65,9 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "debugcam_off", DisplayName = "Debug cam OFF" });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "godmode_on",   DisplayName = "God Mode ON" });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "godmode_off",  DisplayName = "God Mode OFF" });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "superjump_toggle", DisplayName = "Super Jump toggle" });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "movespeed_toggle", DisplayName = "Move Speed toggle" });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "gravity_toggle",   DisplayName = "Gravity toggle" });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "pov_get",      DisplayName = "Get POV" });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "relative",     DisplayName = "TP facing dir" });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "coords",       DisplayName = "TP to coords" });
@@ -210,6 +213,76 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _godModeState = "Unknown";
     [ObservableProperty] private string _godModeBadgeColor = "#888888";
 
+    // ── Move Speed multiplier (Laufen via set_movement_multiplier) ─────
+    /// <summary>Tri-state badge: "ON" (held) / "OFF" / "Unavailable". The pawn →
+    /// CharacterMovement resolution, MaxWalkSpeed write, base-value cache and
+    /// re-assert worker all live DLL-side; this VM is a thin client over
+    /// get_movement_params / set_movement_multiplier / reset_movement.</summary>
+    [ObservableProperty] private string _moveSpeedState = "Unknown";
+    [ObservableProperty] private string _moveSpeedBadgeColor = "#888888";
+
+    /// <summary>Log-scale slider position: the multiplier is 10^exponent, so
+    /// exponent ∈ [-1, 1] maps to 10%…1000% with 100% (1.0×) at the centre. A
+    /// log scale gives equal slider travel to halving and doubling.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(MoveSpeedPercentText))]
+    private double _moveSpeedExponent;
+
+    /// <summary>Live "Current: 600 (base 600)" readout for the current pawn.</summary>
+    [ObservableProperty] private string _moveSpeedCurrentText = "—";
+
+    /// <summary>Multiplier the slider currently represents (10^exponent).</summary>
+    public double MoveSpeedMultiplier => Math.Pow(10.0, MoveSpeedExponent);
+
+    /// <summary>Slider position as a percentage string (e.g. "250%").</summary>
+    public string MoveSpeedPercentText => $"{Math.Round(MoveSpeedMultiplier * 100.0)}%";
+
+    // ── Gravity multiplier (Laufen via "gravity" knob = GravityScale) ──
+    /// <summary>Tri-state badge: "ON" (held) / "OFF" / "Unavailable".</summary>
+    [ObservableProperty] private string _gravityState = "Unknown";
+    [ObservableProperty] private string _gravityBadgeColor = "#888888";
+
+    /// <summary>Log-scale slider: multiplier = 10^exponent, exponent ∈ [-1,1] ⇒
+    /// 10%…1000% of GravityScale with 100% (1.0×) at centre. &lt;100% = floaty /
+    /// moon-jump, &gt;100% = heavy.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(GravityPercentText))]
+    private double _gravityExponent;
+
+    [ObservableProperty] private string _gravityCurrentText = "—";
+
+    public double GravityMultiplier => Math.Pow(10.0, GravityExponent);
+    public string GravityPercentText => $"{Math.Round(GravityMultiplier * 100.0)}%";
+
+    // ── Super Jump (Laufen via "jump" knob = JumpZVelocity) ────────────
+    /// <summary>Tri-state badge: "ON" (high-jump held) / "OFF" / "Unavailable".
+    /// Persistent toggle (Force ON keeps re-asserting), mirroring God Mode.</summary>
+    [ObservableProperty] private string _superJumpState = "Unknown";
+    [ObservableProperty] private string _superJumpBadgeColor = "#888888";
+
+    /// <summary>Log-scale slider for jump HEIGHT (10%…1000%, 100% = base). Apex
+    /// height h ∝ JumpZVelocity², so the applied velocity multiplier is
+    /// √(heightMultiplier) — see <see cref="SuperJumpVelocityMultiplier"/>.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SuperJumpPercentText))]
+    private double _superJumpExponent;
+
+    [ObservableProperty] private string _superJumpCurrentText = "—";
+
+    /// <summary>Tracks whether the high-jump override is currently held (so the
+    /// global hotkey can toggle it).</summary>
+    private bool _superJumpActive;
+
+    /// <summary>Desired jump-HEIGHT multiplier the slider represents.</summary>
+    public double SuperJumpHeightMultiplier => Math.Pow(10.0, SuperJumpExponent);
+
+    /// <summary>The JumpZVelocity multiplier to actually apply: √(heightMult),
+    /// since apex height scales with the square of launch velocity.</summary>
+    public double SuperJumpVelocityMultiplier => Math.Sqrt(SuperJumpHeightMultiplier);
+
+    /// <summary>Slider position as a jump-height percentage (e.g. "400%").</summary>
+    public string SuperJumpPercentText => $"{Math.Round(SuperJumpHeightMultiplier * 100.0)}%";
+
     // ── Directional teleport (move along the pawn's facing) ────────────
     /// <summary>Distance in unreal units to step along the facing direction
     /// (negative = backward).</summary>
@@ -279,6 +352,13 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             AutoRefresh = false;
             ApplyDebugCameraState(-1);   // badge back to Unknown
             ApplyGodModeState(-1);       // godmode badge back to Unknown
+            ApplyMoveSpeedState(-1);     // move-speed badge back to Unknown
+            MoveSpeedCurrentText = "—";
+            ApplyGravityState(-1);       // gravity badge back to Unknown
+            GravityCurrentText = "—";
+            ApplySuperJumpState(-1);     // super-jump badge back to Unknown
+            SuperJumpCurrentText = "—";
+            _superJumpActive = false;
             ApplyMouseCursorState(-1);   // cursor badge back to Unknown
             ClearPovDisplay();
         }
@@ -959,6 +1039,440 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // ── Move Speed multiplier (force MaxWalkSpeed, Laufen) ─────────────
+
+    /// <summary>Tracks whether the move-speed override is held (so the global
+    /// hotkey can toggle it).</summary>
+    private bool _moveSpeedActive;
+
+    /// <summary>Map the override state (1 = held, 0 = off, &lt;0 = no pawn / no
+    /// CMC) onto the badge.</summary>
+    private void ApplyMoveSpeedState(int state)
+    {
+        _moveSpeedActive = state == 1;
+        (MoveSpeedState, MoveSpeedBadgeColor) = state switch
+        {
+            1 => ("ON",          "#4EC9B0"),   // green — override held
+            0 => ("OFF",         "#999999"),   // grey — base restored
+            _ => ("Unavailable", "#C9A04E"),   // amber — no pawn / no CharacterMovement
+        };
+    }
+
+    /// <summary>Format the live "Current: X (base Y)" readout from a knob.</summary>
+    private void ApplyMoveSpeedReadout(MovementParams mp)
+    {
+        var k = mp.WalkSpeed;
+        if (!mp.HasCmc || !k.Resolved)
+        {
+            MoveSpeedCurrentText = "Current: unavailable (no CharacterMovement on this pawn)";
+            ApplyMoveSpeedState(-1);
+            return;
+        }
+        MoveSpeedCurrentText = k.Active
+            ? string.Format(CultureInfo.InvariantCulture,
+                "Current: {0:0.#} cm/s  (base {1:0.#} × {2:0.##})", k.Current, k.Base, k.Multiplier)
+            : string.Format(CultureInfo.InvariantCulture, "Current: {0:0.#} cm/s", k.Current);
+        ApplyMoveSpeedState(k.Active ? 1 : 0);
+    }
+
+    /// <summary>↻ — re-read the live walk-speed value + override state.</summary>
+    [RelayCommand]
+    private async Task RefreshMoveSpeedAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var mp = await _dump.GetMovementParamsAsync();
+            ApplyMoveSpeedReadout(mp);
+            StatusText = mp.HasCmc
+                ? "Read movement params."
+                : "No CharacterMovement on the current pawn (enter gameplay, or this pawn is a vehicle / custom-movement type).";
+        }
+        catch (Exception ex)
+        {
+            ApplyMoveSpeedState(-1);
+            SetError(ex);
+            _log.Error("Teleport RefreshMoveSpeed failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Apply the slider multiplier to MaxWalkSpeed and hold it via the
+    /// DLL re-assert worker (base is captured DLL-side on first apply, so the
+    /// multiplier never compounds and Reset restores the true original).</summary>
+    [RelayCommand]
+    private async Task ApplyMoveSpeedAsync()
+    {
+        if (!IsConnected) return;
+        double mult = MoveSpeedMultiplier;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var r = await _dump.SetMovementMultiplierAsync("walk_speed", mult);
+            // Refresh the live readout so the user sees the new held value.
+            var mp = await _dump.GetMovementParamsAsync();
+            ApplyMoveSpeedReadout(mp);
+            StatusText = r.State switch
+            {
+                1   => string.Format(CultureInfo.InvariantCulture,
+                         "✓ Walk speed held at {0:0}% ({1:0.#} cm/s). Drag + Apply to change; Reset to restore.",
+                         mult * 100.0, mp.WalkSpeed.Current),
+                < 0 => "No pawn / no CharacterMovement — enter gameplay first; the override applies once a pawn exists.",
+                _   => "Walk speed override is off.",
+            };
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            StatusText = $"Apply walk speed failed: {ex.Message}";
+            _log.Error("Teleport ApplyMoveSpeed failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Restore MaxWalkSpeed to its captured base and stop holding it.</summary>
+    [RelayCommand]
+    private async Task ResetMoveSpeedAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            await _dump.ResetMovementAsync("walk_speed");
+            MoveSpeedExponent = 0.0;   // slider back to 100%
+            var mp = await _dump.GetMovementParamsAsync();
+            ApplyMoveSpeedReadout(mp);
+            StatusText = "Walk speed restored to base.";
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport ResetMoveSpeed failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Locate the MaxWalkSpeed field in GWorld — lands on the exact float
+    /// on the CharacterMovement so the user can freeze / inspect it in the Live
+    /// Walker (same handoff the per-vector pose locators use).</summary>
+    [RelayCommand]
+    private async Task LocateMoveSpeedInGWorldAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var mp = await _dump.GetMovementParamsAsync();
+            ApplyMoveSpeedReadout(mp);
+            var k = mp.WalkSpeed;
+            if (!k.HasAddr)
+            {
+                StatusText = "No MaxWalkSpeed field to locate (this pawn has no CharacterMovement).";
+                return;
+            }
+            StatusText = $"Locating {k.FieldName} {k.OwnerAddr}+0x{k.FieldOffset:X} in GWorld…";
+            LocateValueInGWorld?.Invoke(k.OwnerAddr, k.FieldOffset, k.FieldName);
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport LocateMoveSpeed failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    // ── Gravity multiplier (force GravityScale, Laufen) ────────────────
+
+    /// <summary>Tracks whether the gravity override is held (hotkey toggle).</summary>
+    private bool _gravityActive;
+
+    private void ApplyGravityState(int state)
+    {
+        _gravityActive = state == 1;
+        (GravityState, GravityBadgeColor) = state switch
+        {
+            1 => ("ON",          "#4EC9B0"),
+            0 => ("OFF",         "#999999"),
+            _ => ("Unavailable", "#C9A04E"),
+        };
+    }
+
+    private void ApplyGravityReadout(MovementParams mp)
+    {
+        var k = mp.Gravity;
+        if (!mp.HasCmc || !k.Resolved)
+        {
+            GravityCurrentText = "Current: unavailable (no CharacterMovement on this pawn)";
+            ApplyGravityState(-1);
+            return;
+        }
+        GravityCurrentText = k.Active
+            ? string.Format(CultureInfo.InvariantCulture,
+                "Current: {0:0.###}×  (base {1:0.###} × {2:0.##})", k.Current, k.Base, k.Multiplier)
+            : string.Format(CultureInfo.InvariantCulture, "Current: {0:0.###}× GravityScale", k.Current);
+        ApplyGravityState(k.Active ? 1 : 0);
+    }
+
+    /// <summary>↻ — re-read the live GravityScale + override state.</summary>
+    [RelayCommand]
+    private async Task RefreshGravityAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var mp = await _dump.GetMovementParamsAsync();
+            ApplyGravityReadout(mp);
+            StatusText = mp.HasCmc ? "Read movement params."
+                : "No CharacterMovement on the current pawn.";
+        }
+        catch (Exception ex)
+        {
+            ApplyGravityState(-1);
+            SetError(ex);
+            _log.Error("Teleport RefreshGravity failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Apply the slider multiplier to GravityScale and hold it.</summary>
+    [RelayCommand]
+    private async Task ApplyGravityAsync()
+    {
+        if (!IsConnected) return;
+        double mult = GravityMultiplier;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var r = await _dump.SetMovementMultiplierAsync("gravity", mult);
+            var mp = await _dump.GetMovementParamsAsync();
+            ApplyGravityReadout(mp);
+            StatusText = r.State switch
+            {
+                1   => string.Format(CultureInfo.InvariantCulture,
+                         "✓ Gravity held at {0:0}% ({1:0.###}× GravityScale).", mult * 100.0, mp.Gravity.Current),
+                < 0 => "No pawn / no CharacterMovement — enter gameplay first.",
+                _   => "Gravity override is off.",
+            };
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            StatusText = $"Apply gravity failed: {ex.Message}";
+            _log.Error("Teleport ApplyGravity failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Restore GravityScale to its captured base.</summary>
+    [RelayCommand]
+    private async Task ResetGravityAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            await _dump.ResetMovementAsync("gravity");
+            GravityExponent = 0.0;
+            var mp = await _dump.GetMovementParamsAsync();
+            ApplyGravityReadout(mp);
+            StatusText = "Gravity restored to base.";
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport ResetGravity failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Locate the GravityScale field in GWorld.</summary>
+    [RelayCommand]
+    private async Task LocateGravityInGWorldAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var mp = await _dump.GetMovementParamsAsync();
+            ApplyGravityReadout(mp);
+            var k = mp.Gravity;
+            if (!k.HasAddr)
+            {
+                StatusText = "No GravityScale field to locate (this pawn has no CharacterMovement).";
+                return;
+            }
+            StatusText = $"Locating {k.FieldName} {k.OwnerAddr}+0x{k.FieldOffset:X} in GWorld…";
+            LocateValueInGWorld?.Invoke(k.OwnerAddr, k.FieldOffset, k.FieldName);
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport LocateGravity failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    // ── Super Jump (force JumpZVelocity, Laufen) ───────────────────────
+
+    private void ApplySuperJumpState(int state)
+    {
+        _superJumpActive = state == 1;
+        (SuperJumpState, SuperJumpBadgeColor) = state switch
+        {
+            1 => ("ON",          "#4EC9B0"),
+            0 => ("OFF",         "#999999"),
+            _ => ("Unavailable", "#C9A04E"),
+        };
+    }
+
+    private void ApplySuperJumpReadout(MovementParams mp)
+    {
+        var k = mp.Jump;
+        if (!mp.HasCmc || !k.Resolved)
+        {
+            SuperJumpCurrentText = "Current: unavailable (no CharacterMovement on this pawn)";
+            ApplySuperJumpState(-1);
+            return;
+        }
+        SuperJumpCurrentText = k.Active
+            ? string.Format(CultureInfo.InvariantCulture,
+                "Current: {0:0.#} cm/s  (base {1:0.#} × {2:0.##} → ~{3:0}% height)",
+                k.Current, k.Base, k.Multiplier, k.Multiplier * k.Multiplier * 100.0)
+            : string.Format(CultureInfo.InvariantCulture, "Current: {0:0.#} cm/s JumpZVelocity", k.Current);
+        ApplySuperJumpState(k.Active ? 1 : 0);
+    }
+
+    [RelayCommand]
+    private Task ForceSuperJumpOnAsync()  => SetSuperJumpAsync(wantOn: true);
+
+    [RelayCommand]
+    private Task ForceSuperJumpOffAsync() => SetSuperJumpAsync(wantOn: false);
+
+    /// <summary>Reset Super Jump: turn the override off AND snap the height slider
+    /// back to 100% (parity with the Move Speed / Gravity Reset buttons).</summary>
+    [RelayCommand]
+    private async Task ResetSuperJumpAsync()
+    {
+        SuperJumpExponent = 0.0;
+        await ResetSuperJumpInternalAsync();
+    }
+
+    /// <summary>↻ — re-read the live JumpZVelocity + override state.</summary>
+    [RelayCommand]
+    private async Task RefreshSuperJumpAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var mp = await _dump.GetMovementParamsAsync();
+            ApplySuperJumpReadout(mp);
+            StatusText = mp.HasCmc ? "Read movement params."
+                : "No CharacterMovement on the current pawn.";
+        }
+        catch (Exception ex)
+        {
+            ApplySuperJumpState(-1);
+            SetError(ex);
+            _log.Error("Teleport RefreshSuperJump failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Toggle the high-jump override (for the global hotkey): ON applies
+    /// the slider's jump-height multiplier and holds it; OFF restores the base.</summary>
+    private Task SetSuperJumpAsync(bool wantOn)
+        => wantOn ? ApplySuperJumpInternalAsync() : ResetSuperJumpInternalAsync();
+
+    private async Task ApplySuperJumpInternalAsync()
+    {
+        if (!IsConnected) return;
+        // Apply the VELOCITY multiplier = √(height multiplier); apex height ∝ v².
+        double velMult = SuperJumpVelocityMultiplier;
+        double heightPct = SuperJumpHeightMultiplier * 100.0;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var r = await _dump.SetMovementMultiplierAsync("jump", velMult);
+            var mp = await _dump.GetMovementParamsAsync();
+            ApplySuperJumpReadout(mp);
+            StatusText = r.State switch
+            {
+                1   => string.Format(CultureInfo.InvariantCulture,
+                         "✓ Super Jump ON — ~{0:0}% jump height (JumpZVelocity ×{1:0.##}).", heightPct, velMult),
+                < 0 => "No pawn / no CharacterMovement — enter gameplay first.",
+                _   => "Super Jump is off.",
+            };
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            StatusText = $"Super Jump ON failed: {ex.Message}";
+            _log.Error("Teleport ApplySuperJump failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    private async Task ResetSuperJumpInternalAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            await _dump.ResetMovementAsync("jump");
+            var mp = await _dump.GetMovementParamsAsync();
+            ApplySuperJumpReadout(mp);
+            StatusText = "Super Jump OFF — jump velocity restored to base.";
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport ResetSuperJump failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Locate the JumpZVelocity field in GWorld.</summary>
+    [RelayCommand]
+    private async Task LocateSuperJumpInGWorldAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var mp = await _dump.GetMovementParamsAsync();
+            ApplySuperJumpReadout(mp);
+            var k = mp.Jump;
+            if (!k.HasAddr)
+            {
+                StatusText = "No JumpZVelocity field to locate (this pawn has no CharacterMovement).";
+                return;
+            }
+            StatusText = $"Locating {k.FieldName} {k.OwnerAddr}+0x{k.FieldOffset:X} in GWorld…";
+            LocateValueInGWorld?.Invoke(k.OwnerAddr, k.FieldOffset, k.FieldName);
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport LocateSuperJump failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
     // ── Directional + explicit-coordinate teleport ─────────────────────
 
     /// <summary>Teleport along the pawn's facing by RelativeDistance uu (negative
@@ -1201,6 +1715,18 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 case "debugcam_off": _ = ForceDebugCameraOffCommand.ExecuteAsync(null); return;
                 case "godmode_on":   _ = ForceGodModeOnCommand.ExecuteAsync(null); return;
                 case "godmode_off":  _ = ForceGodModeOffCommand.ExecuteAsync(null); return;
+                case "superjump_toggle":
+                    _ = (_superJumpActive ? ForceSuperJumpOffCommand : ForceSuperJumpOnCommand)
+                        .ExecuteAsync(null);
+                    return;
+                case "movespeed_toggle":
+                    _ = (_moveSpeedActive ? ResetMoveSpeedCommand : ApplyMoveSpeedCommand)
+                        .ExecuteAsync(null);
+                    return;
+                case "gravity_toggle":
+                    _ = (_gravityActive ? ResetGravityCommand : ApplyGravityCommand)
+                        .ExecuteAsync(null);
+                    return;
                 case "pov_get":      _ = GetPovCommand.ExecuteAsync(null); return;
                 case "relative":     _ = TeleportRelativeCommand.ExecuteAsync(null); return;
                 case "coords":       _ = TeleportToCoordsCommand.ExecuteAsync(null); return;

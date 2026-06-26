@@ -2540,6 +2540,78 @@ public sealed class DumpService : IDumpService
         return res["state"]?.GetValue<int>() ?? -1;
     }
 
+    // === Movement tuning (Laufen) ===
+
+    private static MovementKnob ParseKnob(JsonNode? n)
+    {
+        if (n is null) return new MovementKnob();
+        return new MovementKnob
+        {
+            Resolved    = n["resolved"]?.GetValue<bool>() ?? false,
+            Current     = n["current"]?.GetValue<double>() ?? 0.0,
+            Base        = n["base"]?.GetValue<double>() ?? 0.0,
+            Multiplier  = n["multiplier"]?.GetValue<double>() ?? 1.0,
+            Active      = n["active"]?.GetValue<bool>() ?? false,
+            OwnerAddr   = n["owner_addr"]?.GetValue<string>() ?? "",
+            FieldOffset = n["field_offset"]?.GetValue<int>() ?? -1,
+            FieldName   = n["field_name"]?.GetValue<string>() ?? "",
+        };
+    }
+
+    public async Task<MovementParams> GetMovementParamsAsync(CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "get_movement_params" };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        var knobs = res["knobs"];
+        return new MovementParams
+        {
+            Code      = res["code"]?.GetValue<int>() ?? 0,
+            HasCmc    = res["has_cmc"]?.GetValue<bool>() ?? false,
+            WalkSpeed = ParseKnob(knobs?["walk_speed"]),
+            Gravity   = ParseKnob(knobs?["gravity"]),
+            Jump      = ParseKnob(knobs?["jump"]),
+        };
+    }
+
+    public async Task<MovementSetResult> SetMovementMultiplierAsync(string knob, double multiplier, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "set_movement_multiplier",
+            ["knob"] = knob,
+            ["multiplier"] = multiplier,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return new MovementSetResult
+        {
+            State      = res["state"]?.GetValue<int>() ?? -1,
+            Code       = res["code"]?.GetValue<int>() ?? 0,
+            Active     = res["active"]?.GetValue<bool>() ?? false,
+            Current    = res["current"]?.GetValue<double>() ?? 0.0,
+            Base       = res["base"]?.GetValue<double>() ?? 0.0,
+            Multiplier = res["multiplier"]?.GetValue<double>() ?? 1.0,
+        };
+    }
+
+    public async Task<MovementSetResult> ResetMovementAsync(string knob, CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "reset_movement", ["knob"] = knob };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        bool active = res["active"]?.GetValue<bool>() ?? false;
+        return new MovementSetResult
+        {
+            State      = active ? 1 : 0,
+            Code       = res["code"]?.GetValue<int>() ?? 0,
+            Active     = active,
+            Current    = res["current"]?.GetValue<double>() ?? 0.0,
+            Base       = res["base"]?.GetValue<double>() ?? 0.0,
+            Multiplier = res["multiplier"]?.GetValue<double>() ?? 1.0,
+        };
+    }
+
     // === Teleport (Wirbel) — docs/teleport-spec.md §7 ===
 
     public async Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default)

@@ -115,7 +115,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      v                                               |
 |  UE5Dumper.dll  [injected]                           |
 |      +-- Frieren  (ExportAPI)     <- C ABI for CE Lua (13 teleport incl. Relative/RecallExplicit/Set+GetMouseCursor, build 1144) |
-|      +-- Fern     (PipeServer)    <- Named Pipe IPC (~59 cmds incl. value scan + group scan + teleport + teleport_relative + set/get_mouse_cursor + get_related_objects + get_current_target; find_path_from_gworld deep/container_depth + teleport_get_pose loc/vel field addrs, 1780) |
+|      +-- Fern     (PipeServer)    <- Named Pipe IPC (~62 cmds incl. value scan + group scan + teleport + teleport_relative + set/get_mouse_cursor + get_related_objects + get_current_target + get/set_movement_multiplier/reset_movement (Laufen); find_path_from_gworld deep/container_depth + teleport_get_pose loc/vel field addrs, 1792) |
 |      +-- Himmel   (Signatures)    <- 128 AOB + symbol exports |
 |      +-- Genau    (OffsetFinder)  <- GObjects/GNames/GWorld   |
 |      +-- Aura     (ObjectArray)   <- Chunked + Flat arrays + Find Refs/Containers (+ recursive deep descent FindInContainersDeep, 1198) + ScanForValue (lean Candidate V3-A 926; TSet/TMap scan V1a 927) + ScanForValueGroup (multi-value group scan via Orden, 1276) + FindObjectGraphPath (GWorld fwd BFS / Locate in GWorld, 1181; + RecoverViaWorldLevel streaming/WP actor recovery via ULevel::OwningWorld back-ref, status ok_via_level, 1405; + opt-in deep param — follow obj ptrs in one struct-element container level TArray/TSet/TMap<FStruct>, 1780) + GetRelatedObjects (forward owned graph: Self/Class/Outer/Controller↔Pawn/components/ASC/AttributeSet, 1323) + CollectOutgoingObjectPtrs (public outgoing-edge façade for Edel, 1400) + FindInstancesByClass server-side exclude_classes-before-cap + full-pool class_histogram via split loop gated by buildHistogram, 1444) |
@@ -130,6 +130,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- Tot      (Cancellation)  <- Tot::Requested() flag; Fern disconnect-monitor + shutdown-abort stop long ops (build 936) |
 |      +-- Wirbel   (Teleport)      <- marker save/recall + cursor + camera POV + directional/explicit-coord TP + force mouse cursor (bShowMouseCursor) (build 1144); get_pose surfaces loc/vel FVector owner+offset for per-vector Locate-in-GWorld (1780); CMD_TELEPORT=8 mailbox (ops 0-15) |
 |      +-- Solitar  (GodMode)       <- force AActor::bCanBeDamaged (FBoolProperty bit) + re-assert worker; CMD_PROTECT=9 mailbox on/off (build 1251) |
+|      +-- Laufen   (MovementTuning)<- force per-pawn CMC float knobs MaxWalkSpeed/GravityScale/JumpZVelocity × multiplier of captured base + re-assert worker (write-on-drift, respawn re-capture); pipe-only get/set_movement_multiplier/reset_movement (build 1792) |
 |      +-- Edel     (CurrentTarget) <- auto-detect the player's current target: GWorld→PC→Pawn, score outgoing object-ptr fields (structural is-Actor gate + keyword boost); get_current_target pipe-only (build 1400) |
 +----------------------+-------------------------------+
                        | Named Pipe: \\.\pipe\UE5DumpBfx
@@ -146,7 +147,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- InterestingFunctionsPanel <- Scored UFunctions; 📦 batch CT (build 760) |
 |      +-- InterestingPropertiesPanel<- Scored properties (B'); 📦 batch CT (build 760) |
 |      +-- ConsolePanel              <- UFUNCTION(exec) discovery + UCheatManager hint (build 778) |
-|      +-- TeleportPanel             <- marker save/recall + cursor + BugItGo + POV + facing-dir TP + coord TP + force cursor (input-mode, build 1147) + GodMode toggle (Solitar, build 1251) + CE Lua/.CT (17-row) |
+|      +-- TeleportPanel             <- marker save/recall + cursor + BugItGo + POV + facing-dir TP + coord TP + force cursor (input-mode, build 1147) + GodMode toggle (Solitar, build 1251) + Move Speed / Gravity / Super Jump cards (Laufen: 10%-1000% log slider × MaxWalkSpeed/GravityScale/JumpZVelocity + Super Jump toggle & global hotkey, build 1792) + CE Lua/.CT (17-row) |
 |      +-- ValueSearchPanel          <- CE-style by-value scan (build 738 + Phase 2 757) + Single/Group mode toggle (multi-value group scan, master-detail, build 1276) |
 |      +-- RelatedObjectsPanel        <- Related Objects: an actor's class/outer + Controller↔Pawn + owned components/ASC/AttributeSet; 🌍 GWorld / Live Walker / finder handoffs; fed from InstanceFinder/ValueSearch/LiveWalker (build 1323) + 🎯 Detect target auto-detect (Edel, ranked candidate picker, build 1400) |
 |      +-- ProxyDeployPanel          <- Proxy DLL management |

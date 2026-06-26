@@ -1323,6 +1323,24 @@ fallback (game may snap back). Codes (§8): 0 OK, -1 not-init, -2 no controller,
 { "cmd": "set_mouse_cursor", "show": true } → { "code":0, "state":true }
 { "cmd": "get_mouse_cursor" }              → { "code":0, "state":true }
 // (Explicit-coordinate teleport reuses teleport_recall_marker with x/y/z above.)
+
+// Movement tuning (Laufen) — per-pawn UCharacterMovementComponent float knobs
+// forced to base × multiplier and held by a re-assert worker. `knob` ∈
+// { "walk_speed" (MaxWalkSpeed), "gravity" (GravityScale), "jump" (JumpZVelocity) }.
+// Each knob surfaces (owner_addr,field_offset,field_name) for the Locate-in-GWorld
+// handoff (object_addr=owner, target=owner+offset → find_path_from_gworld).
+{ "cmd": "get_movement_params" }
+→ { "code":0, "has_cmc":true, "cmc_addr":"0x…",
+    "knobs": { "walk_speed": { "resolved":true,"current":600.0,"base":600.0,
+                               "multiplier":1.0,"active":false,
+                               "owner_addr":"0x…","field_offset":316,"field_name":"MaxWalkSpeed" },
+               "gravity": { … }, "jump": { … } } }
+// State: 1 = override active, 0 = inactive, negative = no pawn / no CMC / reflect.
+{ "cmd": "set_movement_multiplier", "knob":"walk_speed", "multiplier":2.0 }
+→ { "state":1,"code":0,"current":1200.0,"base":600.0,"multiplier":2.0,"active":true,
+    "resolved":true,"owner_addr":"0x…","field_offset":316,"field_name":"MaxWalkSpeed" }
+{ "cmd": "reset_movement", "knob":"walk_speed" }
+→ { "code":0,"current":600.0,"base":600.0,"multiplier":1.0,"active":false,"resolved":true }
 ```
 
 The CE Lua path uses the Mimic mailbox `CMD_TELEPORT=8` instead (see
