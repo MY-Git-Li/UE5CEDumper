@@ -16,7 +16,7 @@ builds ≤696 in
 
 -----
 
-## 2026-06-26 — Movement tuning: Move Speed / Gravity / Super Jump (Laufen module; build ~1795; DLL + pipe + UI; tests green, **in-game VERIFIED on Elliot-Win64-Shipping**)
+## 2026-06-26 — Movement tuning: Move Speed / Gravity / Super Jump (Laufen module; build ~1799; DLL + pipe + UI + CE-Lua mailbox; tests green, **in-game VERIFIED on Elliot-Win64-Shipping (UE4.27) + Avowed-Win64-Shipping (UE5.3, packed FUObjectItem)**)
 
 New **Laufen** (走る / "to run") DLL module + three Teleport-tab cards that force
 per-pawn `UCharacterMovementComponent` float knobs and hold them against per-tick
