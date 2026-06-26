@@ -50,7 +50,7 @@ narrative identity resonates with what the module *does*.
 | **Solitar.cpp** | 索莉塔 | Greater demon studying humanity | #11 | GodMode: force AActor::bCanBeDamaged (damage immunity) + re-assert worker | Overwhelming, near-unkillable mage — invulnerability; reuses the FBoolProperty bit-write Wirbel uses for the cursor |
 | **Orden.h** | 歐爾登 | Noble house head ("order") | — | GroupMatch: source-agnostic SDR/assignment core for multi-value group scan | Brings *order* to a scattered set of values — assigns each value to its leaf slot (header-only, pure) |
 | **Edel.cpp** | 艾德爾 | Hypnosis-magic mage ("noble") | — | CurrentTarget: auto-detect the actor the player is targeting (GWorld→PlayerController→Pawn, score outgoing object-ptr fields) | Reads what the player's mind is fixed on — the focused enemy, so the user needn't guess a class-name keyword |
-| **Laufen.cpp** | 蘭芬 | High-speed-movement mage ("to run") | — | MovementTuning: force per-pawn CMC float knobs (MaxWalkSpeed/GravityScale/JumpZVelocity) × multiplier + re-assert worker | Runs faster than anyone — scales the pawn's movement; the float analogue of Solitar's bool-bit force |
+| **Laufen.cpp** | 拉歐芬 | High-speed-movement mage ("to run") | — | MovementTuning: force per-pawn CMC float knobs (MaxWalkSpeed/GravityScale/JumpZVelocity) × multiplier + re-assert worker | Runs faster than anyone — scales the pawn's movement; the float analogue of Solitar's bool-bit force |
 
 ---
 
