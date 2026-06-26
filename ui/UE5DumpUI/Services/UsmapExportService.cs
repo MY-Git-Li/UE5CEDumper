@@ -55,7 +55,7 @@ public static class UsmapExportService
         SetProperty = 25,
         EnumProperty = 26,
         FieldPathProperty = 27,
-        OptionalProperty = 28,   // reserved slot; full support needs inner-type recursion (deferred)
+        OptionalProperty = 28,   // UE5.2+ TOptional<T> — wraps an inner ValueProperty
         Utf8StrProperty = 29,    // UE5.5+ FUtf8String (1-byte UTF-8)
         AnsiStrProperty = 30,    // UE5.5+ FAnsiString (1-byte ANSI)
         Unknown = 0xFF,
@@ -276,6 +276,14 @@ public static class UsmapExportService
                     "", "", nameTable);
                 break;
 
+            case EPropertyType.OptionalProperty:
+                // TOptional<T>: write the wrapped value type recursively (mirrors UE4SS
+                // FOptionalProperty / CUE4Parse). The DLL fills InnerType/InnerStructType/
+                // InnerObjClass for OptionalProperty exactly as it does for ArrayProperty.
+                WriteInnerPropertyTypeFromField(w, f.InnerType, f.InnerStructType,
+                    f.InnerObjClass, f.EnumName, nameTable);
+                break;
+
             case EPropertyType.ByteProperty:
                 // If ByteProperty has an enum, write it as EnumProperty instead
                 if (!string.IsNullOrEmpty(f.EnumName))
@@ -364,10 +372,8 @@ public static class UsmapExportService
             // UE5.5+ string variants — pure scalar, no extra type bytes (like StrProperty).
             "Utf8StrProperty" => EPropertyType.Utf8StrProperty,
             "AnsiStrProperty" => EPropertyType.AnsiStrProperty,
-            // NOTE: "OptionalProperty" is intentionally NOT mapped here. It wraps an inner
-            // type and would require inner-type-byte serialization (and an InnerOptionalType
-            // on FieldInfoModel); emitting just the type byte would produce an invalid .usmap.
-            // It stays Unknown(0xFF) — the current behaviour — until that support lands.
+            // UE5.2+ TOptional<T> — WritePropertyType recurses into the wrapped value type.
+            "OptionalProperty" => EPropertyType.OptionalProperty,
             _ => EPropertyType.Unknown,
         };
     }

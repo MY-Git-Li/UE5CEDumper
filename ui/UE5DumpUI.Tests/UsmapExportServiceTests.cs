@@ -287,12 +287,50 @@ public class UsmapExportServiceTests
     }
 
     [Fact]
-    public void MapPropertyType_OptionalProperty_StaysUnknown()
+    public void MapPropertyType_OptionalProperty_ReturnsOptional()
     {
-        // OptionalProperty wraps an inner type and needs inner-type-byte serialization,
-        // which is not yet implemented — it must NOT silently emit a bare type byte.
-        Assert.Equal(UsmapExportService.EPropertyType.Unknown,
+        Assert.Equal(UsmapExportService.EPropertyType.OptionalProperty,
             UsmapExportService.MapPropertyType("OptionalProperty"));
+    }
+
+    [Fact]
+    public void WritePropertyType_OptionalStruct_WritesTypeThenInnerStruct()
+    {
+        // TOptional<FVector> → [OptionalProperty=28][StructProperty=9][name idx of "FVector"].
+        var nameTable = new UsmapExportService.NameTable();
+        var field = new FieldInfoModel
+        {
+            TypeName = "OptionalProperty",
+            InnerType = "StructProperty",
+            InnerStructType = "FVector",
+        };
+
+        using var ms = new MemoryStream();
+        var w = new BinaryWriter(ms);
+        UsmapExportService.WritePropertyType(w, field, nameTable);
+        w.Flush();
+        var bytes = ms.ToArray();
+
+        Assert.Equal(28, bytes[0]);                       // OptionalProperty
+        Assert.Equal(9, bytes[1]);                        // inner StructProperty
+        Assert.True(bytes.Length > 2);                    // followed by the struct name index
+        Assert.Equal(0, nameTable.GetOrAdd("FVector"));   // "FVector" was registered (idx 0)
+    }
+
+    [Fact]
+    public void WritePropertyType_OptionalObject_WritesTypeThenInnerObjectNoExtra()
+    {
+        // TOptional<UObject*> → [OptionalProperty=28][ObjectProperty=4], no trailing data.
+        var nameTable = new UsmapExportService.NameTable();
+        var field = new FieldInfoModel { TypeName = "OptionalProperty", InnerType = "ObjectProperty" };
+
+        using var ms = new MemoryStream();
+        var w = new BinaryWriter(ms);
+        UsmapExportService.WritePropertyType(w, field, nameTable);
+        w.Flush();
+        var bytes = ms.ToArray();
+
+        Assert.Equal(new byte[] { 28, 4 }, bytes);  // ObjectProperty writes no extra bytes
     }
 
     [Fact]
