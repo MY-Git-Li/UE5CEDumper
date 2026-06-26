@@ -223,6 +223,19 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int _gWorldLocateDepth = 5;
     [ObservableProperty] private bool _isGWorldAvailable;
 
+    /// <summary>Opt-in deep "Locate in GWorld" (default OFF). When on, the forward
+    /// BFS also follows object pointers stored inside one struct-element container
+    /// level (TArray&lt;FStruct&gt; etc.) — reaching objects referenced ONLY from a
+    /// struct-array element — and a bare value address in a deeply-nested heap
+    /// container is attributed to its owner via the deep container scan. Heavier
+    /// (reads each struct-array's elements per visited node); the analogue of the
+    /// Value Search "Deep" option. The container-scan depth used when on.</summary>
+    [ObservableProperty] private bool _gWorldLocateDeep;
+
+    // Container-scan depth handed to find_path when GWorldLocateDeep is on (matches
+    // the Value Search deep default; >1 enables the deep target-owner attribution).
+    private const int kGWorldDeepContainerDepth = 4;
+
     /// <summary>Foreground brush for the depth display — default at 0-3, then
     /// warms from yellow (4) through orange to deep red (8) as the export
     /// cost grows. Max is 8.</summary>
@@ -1993,7 +2006,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             _preBookmarkBreadcrumbs = null;
             IsBookmarkSaveMode = false;
 
-            var path = await _dump.FindPathFromGWorldAsync(objectAddr, objectAddr, GWorldLocateDepth, ct, rootKind);
+            var path = await _dump.FindPathFromGWorldAsync(objectAddr, objectAddr, GWorldLocateDepth, ct, rootKind,
+                GWorldLocateDeep, GWorldLocateDeep ? kGWorldDeepContainerDepth : 1);
 
             if (!path.Found)
             {
@@ -2244,10 +2258,15 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         }
         else if (s.ElementIndex >= 0 && s.ElemStride > 0
                  && (s.FieldType == "MapProperty" || s.FieldType == "SetProperty"
-                     || (s.FieldType == "ArrayProperty" && s.InnerType == "InterfaceProperty")))
+                     || (s.FieldType == "ArrayProperty"
+                         && (s.InnerType == "InterfaceProperty" || s.InnerType == "StructProperty"))))
         {
             splitStride = s.ElemStride;
-            splitValueOffset = s.ElemValueOffset;   // map value within-pair offset; 0 for set / map key / interface
+            // Within-element offset of the followed pointer: map value within-pair
+            // offset; for a deep StructProperty element it's the object pointer's
+            // offset within the struct element (Aura deep BFS); 0 for set / map
+            // key / interface.
+            splitValueOffset = s.ElemValueOffset;
         }
 
         if (splitStride > 0)
@@ -2338,7 +2357,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             IsBookmarkSaveMode = false;
 
             var path = await _dump.FindPathFromGWorldAsync(match.OwnerAddress, match.OwnerAddress,
-                                                           GWorldLocateDepth, ct, rootKind);
+                                                           GWorldLocateDepth, ct, rootKind,
+                                                           GWorldLocateDeep, GWorldLocateDeep ? kGWorldDeepContainerDepth : 1);
             if (!path.Found)
             {
                 if (path.Status == "cancelled")

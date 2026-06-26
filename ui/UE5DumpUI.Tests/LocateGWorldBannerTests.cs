@@ -21,7 +21,7 @@ public class LocateGWorldBannerTests
         public GWorldPathResult Next = new();
         public override Task<GWorldPathResult> FindPathFromGWorldAsync(
             string target, string? objectAddr = null, int maxDepth = 5, CancellationToken ct = default,
-            string rootKind = "gworld")
+            string rootKind = "gworld", bool deep = false, int containerDepth = 1)
             => Task.FromResult(Next);
     }
 

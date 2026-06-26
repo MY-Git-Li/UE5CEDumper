@@ -88,6 +88,13 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     /// below GWorld, so this is typically unreachable — provided for parity.</summary>
     public event Action<string>? LocateInGameEngine;
 
+    /// <summary>Raised when the user clicks one of the per-vector "Locate in GWorld"
+    /// buttons (position / velocity) — carries (ownerAddr, fieldOffset, fieldName) of
+    /// the FVector field. MainWindowViewModel switches to the Live Walker and runs
+    /// LocateInGWorldAsync so the path lands on the exact vector field (the same
+    /// value-landing handoff Value Search uses), not just the owning component.</summary>
+    public event Action<string, int, string>? LocateValueInGWorld;
+
     /// <summary>Whether global teleport hotkeys can be offered (a hotkey service
     /// was supplied — false in headless tests).</summary>
     public bool CanBindCursorHotkey => _globalHotkeys != null;
@@ -437,6 +444,69 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     /// provided for parity (see the tooltip).</summary>
     [RelayCommand]
     private Task LocateCurrentPoseInGameEngineAsync() => LocateCurrentPoseAsync(useEngine: true);
+
+    /// <summary>Locate the pawn's position FVector (RootComponent.RelativeLocation)
+    /// in GWorld — lands the Live Walker on the exact location field rather than the
+    /// pawn. Reads a fresh pose for the live owner address. GWorld-only: the owning
+    /// RootComponent is a normal world sub-object the GWorld graph reaches.</summary>
+    [RelayCommand]
+    private Task LocatePositionInGWorldAsync() => LocateVectorAsync(velocity: false);
+
+    /// <summary>Locate the pawn's velocity FVector (CharacterMovement.Velocity) in
+    /// GWorld — lands on the exact velocity field. Unavailable on pawns with no
+    /// CharacterMovement (vehicle / custom-movement framework).</summary>
+    [RelayCommand]
+    private Task LocateVelocityInGWorldAsync() => LocateVectorAsync(velocity: true);
+
+    // Shared body for the two per-vector locate buttons: read a fresh pose, pick
+    // the position or velocity owner+offset, and hand it to the value-landing
+    // GWorld locator (same path Value Search uses — lands on the field, not just
+    // the owning component).
+    private async Task LocateVectorAsync(bool velocity)
+    {
+        if (!IsConnected) return;
+        string what = velocity ? "velocity" : "position";
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var p = await _dump.TeleportGetPoseAsync();
+            if (p.Code != TeleportCodes.Ok)
+            {
+                StatusText = TeleportCodes.Describe(p.Code);
+                return;
+            }
+            ApplyPoseAndMovement(p);
+
+            string owner; int offset; string field;
+            if (velocity)
+            {
+                if (!p.HasMovement || !p.HasVelAddr)
+                {
+                    StatusText = "No velocity vector to locate (this pawn has no CharacterMovement).";
+                    return;
+                }
+                owner = p.VelOwnerAddr; offset = p.VelFieldOffset; field = p.VelFieldName;
+            }
+            else
+            {
+                if (!p.HasLocAddr)
+                {
+                    StatusText = "No position vector to locate (location field unresolved).";
+                    return;
+                }
+                owner = p.LocOwnerAddr; offset = p.LocFieldOffset; field = p.LocFieldName;
+            }
+            StatusText = $"Locating {what} vector {owner}+0x{offset:X} in GWorld…";
+            LocateValueInGWorld?.Invoke(owner, offset, field);
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error($"Teleport LocateVector ({what}) failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
 
     private async Task LocateCurrentPoseAsync(bool useEngine)
     {

@@ -88,7 +88,7 @@ public class StubDumpService : IDumpService
     public virtual Task<RelatedObjectsResult> GetRelatedObjectsAsync(string addr, int maxResults = 128, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<CurrentTargetResult> DetectCurrentTargetAsync(int maxCandidates = 8, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<GameEngineResult> ResolveGameEngineAsync(CancellationToken ct = default) => throw new NotImplementedException();
-    public virtual Task<GWorldPathResult> FindPathFromGWorldAsync(string target, string? objectAddr = null, int maxDepth = 5, CancellationToken ct = default, string rootKind = "gworld") => throw new NotImplementedException();
+    public virtual Task<GWorldPathResult> FindPathFromGWorldAsync(string target, string? objectAddr = null, int maxDepth = 5, CancellationToken ct = default, string rootKind = "gworld", bool deep = false, int containerDepth = 1) => throw new NotImplementedException();
     public Task<FindPropertyXrefsResult> FindPropertyXrefsAsync(string propAddr, bool gameOnly = true, int maxResults = 200, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<FindPropertyXrefsResult> FindFunctionsByClassAsync(string classAddr, bool gameOnly = true, int maxResults = 200, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<string> GetFunctionCodeAddrAsync(string funcAddr, CancellationToken ct = default) => throw new NotImplementedException();

@@ -896,7 +896,8 @@ public sealed class DumpService : IDumpService
 
     public async Task<GWorldPathResult> FindPathFromGWorldAsync(
         string target, string? objectAddr = null, int maxDepth = 5,
-        CancellationToken ct = default, string rootKind = "gworld")
+        CancellationToken ct = default, string rootKind = "gworld",
+        bool deep = false, int containerDepth = 1)
     {
         var req = new JsonObject
         {
@@ -910,6 +911,12 @@ public sealed class DumpService : IDumpService
         // so the DLL's default path (and the pipe log) stay unchanged.
         if (rootKind != "gworld")
             req["root_kind"] = rootKind;
+        // Opt-in deep flags — attach only when set so the common (fast) path and
+        // the pipe log stay unchanged.
+        if (deep)
+            req["deep"] = true;
+        if (containerDepth > 1)
+            req["container_depth"] = containerDepth;
 
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
@@ -2716,6 +2723,12 @@ public sealed class DumpService : IDumpService
         AccY  = res["acc_y"]?.GetValue<double>() ?? 0,
         AccZ  = res["acc_z"]?.GetValue<double>() ?? 0,
         Speed = res["speed"]?.GetValue<double>() ?? 0,
+        LocOwnerAddr   = res["loc_owner_addr"]?.GetValue<string>() ?? "",
+        LocFieldOffset = res["loc_field_offset"]?.GetValue<int>() ?? 0,
+        LocFieldName   = res["loc_field_name"]?.GetValue<string>() ?? "",
+        VelOwnerAddr   = res["vel_owner_addr"]?.GetValue<string>() ?? "",
+        VelFieldOffset = res["vel_field_offset"]?.GetValue<int>() ?? 0,
+        VelFieldName   = res["vel_field_name"]?.GetValue<string>() ?? "",
     };
 
     private static TeleportResult ParseTeleportResult(JsonObject res) => new()

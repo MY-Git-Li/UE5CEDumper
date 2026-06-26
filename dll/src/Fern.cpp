@@ -3240,6 +3240,25 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                     if (!cms.empty()) {
                         targetObj   = cms[0].ownerObj;
                         intraOffset = 0;  // value is in a heap buffer, not inside the object
+                    } else {
+                        // Deep fallback (mirrors find_by_address): a value in a
+                        // SEPARATELY-allocated nested container (a TArray inside a
+                        // struct element of a TMap value inside a struct element of
+                        // a TArray, …) isn't found by the shallow scan. Only when the
+                        // caller opted in via container_depth > 1, so the common
+                        // (fast) path is never slowed. Attributes the value to its
+                        // owning UObject so the path search has a reachable target.
+                        int containerDepth   = request.value("container_depth", 1);
+                        int containerElemCap = request.value("container_elem_cap", 256);
+                        if (containerDepth > 1) {
+                            Aura::ContainerScanStats dstats;
+                            auto dms = Aura::FindInContainersDeep(targetAddr, 1, containerDepth,
+                                                                  containerElemCap, &dstats);
+                            if (!dms.empty()) {
+                                targetObj   = dms[0].ownerObj;
+                                intraOffset = 0;
+                            }
+                        }
                     }
                 }
             }
@@ -3250,7 +3269,11 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 return Renge::MakeResponse(id, data).dump();
             }
 
-            auto path = Aura::FindObjectGraphPath(rootObj, targetObj, maxDepth);
+            // deep (opt-in): also follow object pointers inside one struct-element
+            // container level (TArray<FStruct> etc.) — reaches objects referenced
+            // only from a struct-array element. Heavier; default off.
+            bool deep = request.value("deep", false);
+            auto path = Aura::FindObjectGraphPath(rootObj, targetObj, maxDepth, 0, deep);
 
             // Surface the result in the pipe log next to the request (the full
             // trace also lands in the OARR/offsets log). not_reachable with a large
@@ -3277,6 +3300,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             }
             data["target_intra_offset"] = intraOffset;
             data["max_depth"]           = maxDepth;
+            data["deep"]                = deep;
             data["depth"]               = path.depthReached;
             data["visited"]             = path.visited;
             data["duration_ms"]         = path.durationMs;
@@ -4006,6 +4030,15 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                 // (hex string, matching find_path's object_addr / get_current_target's
                 // player_pawn). "0x0" when unresolved.
                 data["pawn_addr"] = Renge::AddrToStr(mv.PawnAddr);
+                // "Locate position vector in GWorld": owner (RootComponent) + the
+                // RelativeLocation FVector offset. The UI hands these to
+                // find_path_from_gworld so the path lands on the exact location
+                // field, not just the pawn. Emitted only when resolved.
+                if (mv.LocOwnerAddr && mv.LocFieldOffset >= 0) {
+                    data["loc_owner_addr"]   = Renge::AddrToStr(mv.LocOwnerAddr);
+                    data["loc_field_offset"] = mv.LocFieldOffset;
+                    data["loc_field_name"]   = "RelativeLocation";
+                }
                 // Feature A: live velocity/acceleration off the CharacterMovement.
                 // has_movement=false on vehicle / custom-framework pawns (no CMC):
                 // the vel/acc fields are then absent and the UI shows "unavailable".
@@ -4014,6 +4047,13 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                     data["vel_x"] = mv.VelX; data["vel_y"] = mv.VelY; data["vel_z"] = mv.VelZ;
                     data["acc_x"] = mv.AccX; data["acc_y"] = mv.AccY; data["acc_z"] = mv.AccZ;
                     data["speed"] = mv.Speed;
+                    // "Locate velocity vector in GWorld": owner (CharacterMovement)
+                    // + the Velocity FVector offset (same handoff as location).
+                    if (mv.VelOwnerAddr && mv.VelFieldOffset >= 0) {
+                        data["vel_owner_addr"]   = Renge::AddrToStr(mv.VelOwnerAddr);
+                        data["vel_field_offset"] = mv.VelFieldOffset;
+                        data["vel_field_name"]   = "Velocity";
+                    }
                 }
             }
             return Renge::MakeResponse(id, data).dump();

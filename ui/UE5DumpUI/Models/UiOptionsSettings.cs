@@ -66,6 +66,7 @@ public sealed class LiveWalkerUiOptions
     public bool DedupSharedObjects { get; set; } = true;
     public bool ExcludeSystemComponents { get; set; } = true;
     public int GWorldLocateDepth { get; set; } = 5;
+    public bool GWorldLocateDeep { get; set; }
     public int AutoRefreshIntervalSec { get; set; } = 10;   // Constants.DefaultAutoRefreshIntervalSec
 }
 

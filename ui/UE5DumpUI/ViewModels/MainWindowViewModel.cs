@@ -751,6 +751,21 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 _log.Error($"Teleport LocateInGameEngine handler error: {addr}", ex);
             }
         };
+        // Per-vector locate (position / velocity): land ON the FVector field inside
+        // its owning component (RootComponent / CharacterMovement) — same value-
+        // landing handoff Value Search uses (owner addr + field offset + name).
+        Teleport.LocateValueInGWorld += async (owner, fieldOffset, fieldName) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                await LiveWalker.LocateInGWorldAsync(owner, fieldOffset, fieldName, stopAtParent: false);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"Teleport LocateValueInGWorld handler error: {owner}+0x{fieldOffset:X}", ex);
+            }
+        };
 
         // Wire Instance Finder / Value Search / Live Walker -> Related Objects:
         // hand the chosen object's address to the Related tab and load its graph.
@@ -1856,6 +1871,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         nameof(LiveWalkerViewModel.DescShowType), nameof(LiveWalkerViewModel.FlattenGasAttributes),
         nameof(LiveWalkerViewModel.DedupSharedObjects),
         nameof(LiveWalkerViewModel.ExcludeSystemComponents), nameof(LiveWalkerViewModel.GWorldLocateDepth),
+        nameof(LiveWalkerViewModel.GWorldLocateDeep),
         nameof(LiveWalkerViewModel.AutoRefreshIntervalSec),
     };
     private static readonly HashSet<string> ValueSearchPersist = new()
@@ -1939,6 +1955,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         LiveWalker.DedupSharedObjects = lw.DedupSharedObjects;
         LiveWalker.ExcludeSystemComponents = lw.ExcludeSystemComponents;
         LiveWalker.GWorldLocateDepth = lw.GWorldLocateDepth;
+        LiveWalker.GWorldLocateDeep = lw.GWorldLocateDeep;
         LiveWalker.AutoRefreshIntervalSec = lw.AutoRefreshIntervalSec;
 
         var vs = o.ValueSearch;
@@ -2043,6 +2060,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         o.LiveWalker.DedupSharedObjects = LiveWalker.DedupSharedObjects;
         o.LiveWalker.ExcludeSystemComponents = LiveWalker.ExcludeSystemComponents;
         o.LiveWalker.GWorldLocateDepth = LiveWalker.GWorldLocateDepth;
+        o.LiveWalker.GWorldLocateDeep = LiveWalker.GWorldLocateDeep;
         o.LiveWalker.AutoRefreshIntervalSec = LiveWalker.AutoRefreshIntervalSec;
 
         o.ValueSearch.SelectedDataType = ValueSearch.SelectedDataType;

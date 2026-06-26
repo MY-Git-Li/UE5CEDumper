@@ -3357,17 +3357,21 @@ std::vector<ReferenceMatch> FindReferencesToUObject(uintptr_t target,
 // element hop can be split into container+element CE derefs; 0 for direct edges.
 // Mirrors FindReferencesToUObject's per-object read patterns.
 template <typename EmitFn>
-static void EnumerateOutgoingObjectPtrs(uintptr_t obj, EmitFn&& emit) {
+static void EnumerateOutgoingObjectPtrs(uintptr_t obj, EmitFn&& emit, bool deep = false) {
     uintptr_t cls = 0;
     if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) return;
     const auto& meta = GetClassRefMeta(cls);
-    if (meta.empty()) return;
+    // NOTE: don't early-return on meta.empty() when deep — a class with no direct
+    // pointer fields can still own a TArray<FStruct> whose elements hold pointers
+    // (the deep pass below walks GetClassContainers, a separate cache).
+    if (meta.empty() && !deep) return;
 
     static const std::string kEmpty;
-    static const std::string kArrayProp = "ArrayProperty";
-    static const std::string kMapProp   = "MapProperty";
-    static const std::string kSetProp   = "SetProperty";
-    static const std::string kIfaceProp = "InterfaceProperty";
+    static const std::string kArrayProp  = "ArrayProperty";
+    static const std::string kMapProp    = "MapProperty";
+    static const std::string kSetProp    = "SetProperty";
+    static const std::string kIfaceProp  = "InterfaceProperty";
+    static const std::string kStructProp = "StructProperty";
 
     // --- Direct ObjectProperty / ClassProperty / InterfaceProperty ---
     for (const auto& pfe : meta.directPointers) {
@@ -3446,6 +3450,82 @@ static void EnumerateOutgoingObjectPtrs(uintptr_t obj, EmitFn&& emit) {
             if (emit(ptr, ose.offset, ose.name, kSetProp, ose.elemTypeName, e, ose.elemStride, 0)) return;
         }
     }
+
+    if (!deep) return;
+
+    // --- Deep (opt-in): object pointers inside ONE struct-element container
+    //     level — TArray<FStruct> / TSet<FStruct> / TMap<*,FStruct> whose element
+    //     (or map value/key) struct holds a UObject* (direct or weak/soft/lazy,
+    //     incl. nested in an inline sub-struct — GetClassRefMeta flattens that to
+    //     a fixed element-relative offset). The graph analogue of Value Search
+    //     "Deep". Each pointer is one CE-splittable hop: deref the container Data
+    //     (at field+0), then deref the element pointer at
+    //     index*stride + within-element-offset (carried as elemStride /
+    //     elemValueOffset, exactly like a Map value). Object containers nested
+    //     INSIDE the element struct (two container levels) are deliberately NOT
+    //     followed — they aren't a single splittable hop. Bounded by a per-
+    //     container element cap; the BFS deadline / visited cap bound the rest. ---
+    constexpr int32_t kDeepElemCap = 256;
+    for (const auto& cfe : GetClassContainers(cls)) {
+        if (cfe.stride <= 0) continue;
+
+        // The struct sides we can descend into for pointers, with the byte offset
+        // of that side within the element/pair (0 for array/set element & map key;
+        // valueOffset for the map value). `suffix` keeps the Map ".Key"/".Value"
+        // naming convention the top-level emits use (and that PathStepToBreadcrumbs'
+        // StripContainerKeyValueSuffix / kvHint split relies on) — the inner
+        // pointer field name is NOT appended, so the container crumb names the real
+        // field and back-nav re-hydration matches a live parent walk.
+        struct Side { uintptr_t structAddr; int32_t within; const char* suffix; };
+        Side sides[2]; int nSides = 0;
+        if (cfe.kind == ContainerKind::Map) {
+            if (cfe.valueStruct) sides[nSides++] = { cfe.valueStruct, cfe.valueOffset, ".Value" };
+            if (cfe.keyStruct)   sides[nSides++] = { cfe.keyStruct,   0,               ".Key"   };
+        } else if (cfe.elemStruct) {
+            sides[nSides++] = { cfe.elemStruct, 0, "" };
+        }
+        if (nSides == 0) continue;
+
+        uintptr_t bufData = 0; int32_t maxIdx = 0;
+        const bool isSparse = (cfe.kind != ContainerKind::Array);
+        Macht::TSparseArrayView sa{};
+        if (cfe.kind == ContainerKind::Array) {
+            Macht::TArrayView arr;
+            if (!Macht::ReadTArray(obj + cfe.offset, arr) || arr.Count <= 0 || !arr.Data) continue;
+            bufData = arr.Data; maxIdx = arr.Count;
+        } else {
+            if (!Macht::ReadTSparseArray(obj + cfe.offset, sa) || sa.MaxIndex <= 0 || !sa.Data) continue;
+            bufData = sa.Data; maxIdx = sa.MaxIndex;
+        }
+        const int32_t probe = maxIdx < kDeepElemCap ? maxIdx : kDeepElemCap;
+        const std::string& fieldType = (cfe.kind == ContainerKind::Array) ? kArrayProp
+                                     : (cfe.kind == ContainerKind::Set)   ? kSetProp : kMapProp;
+
+        for (int32_t e = 0; e < probe; ++e) {
+            if (isSparse && !Macht::IsSparseIndexAllocated(sa, e)) continue;
+            uintptr_t slotBase = bufData + static_cast<int64_t>(e) * cfe.stride;
+            for (int s = 0; s < nSides; ++s) {
+                uintptr_t structBase = slotBase + sides[s].within;
+                const auto& emeta = GetClassRefMeta(sides[s].structAddr);
+                // Direct Object/Class/Interface pointers in the element struct.
+                for (const auto& pfe : emeta.directPointers) {
+                    uintptr_t ptr = 0;
+                    if (!Macht::ReadSafe(structBase + pfe.offset, ptr) || !ptr) continue;
+                    if (emit(ptr, cfe.offset, cfe.name + sides[s].suffix,
+                             fieldType, kStructProp, e, cfe.stride, sides[s].within + pfe.offset))
+                        return;
+                }
+                // Weak/soft/lazy single pointers in the element struct.
+                for (const auto& wpe : emeta.weakLikePointers) {
+                    uintptr_t r = ResolveWeakAt(structBase + wpe.offset);
+                    if (!r) continue;
+                    if (emit(r, cfe.offset, cfe.name + sides[s].suffix,
+                             fieldType, kStructProp, e, cfe.stride, sides[s].within + wpe.offset))
+                        return;
+                }
+            }
+        }
+    }
 }
 
 // Public façade over the file-static EnumerateOutgoingObjectPtrs template — see
@@ -3490,7 +3570,7 @@ void CollectOutgoingObjectPtrs(uintptr_t obj, std::vector<OutgoingPtr>& out,
 // independent of the caller's BFS depth.
 template <typename AbortFn>
 static GraphPathResult RecoverViaWorldLevel(uintptr_t rootWorld, uintptr_t target,
-                                            AbortFn&& abortFn) {
+                                            AbortFn&& abortFn, bool deep = false) {
     GraphPathResult res;  // found=false by default
 
     // The root must be a UWorld for the OwningWorld back-reference to mean anything.
@@ -3560,7 +3640,7 @@ static GraphPathResult RecoverViaWorldLevel(uintptr_t rootWorld, uintptr_t targe
     //     the chain to the actor (landing on the owner is useful).
     if (actor != target) {
         auto neighborFn = [&](uintptr_t node, auto&& emit) {
-            EnumerateOutgoingObjectPtrs(node, std::forward<decltype(emit)>(emit));
+            EnumerateOutgoingObjectPtrs(node, std::forward<decltype(emit)>(emit), deep);
         };
         GraphPathResult tail = BfsShortestObjectPath(actor, target, /*maxDepth*/ 6,
                                                      /*maxVisited*/ 500000, neighborFn, abortFn);
@@ -3576,7 +3656,7 @@ static GraphPathResult RecoverViaWorldLevel(uintptr_t rootWorld, uintptr_t targe
 }
 
 GraphPathResult FindObjectGraphPath(uintptr_t rootObj, uintptr_t targetObj,
-                                    int32_t maxDepth, int32_t deadlineMs) {
+                                    int32_t maxDepth, int32_t deadlineMs, bool deep) {
     GraphPathResult res;
     if (!rootObj || !targetObj || !s_arrayAddr) { res.status = "invalid"; return res; }
     if (maxDepth <= 0)  maxDepth = 5;
@@ -3586,9 +3666,9 @@ GraphPathResult FindObjectGraphPath(uintptr_t rootObj, uintptr_t targetObj,
     constexpr int32_t kMaxVisited = 3000000;  // runaway guard (~48MB of map entries)
     auto t0 = std::chrono::steady_clock::now();
 
-    LOG_INFO("FindObjectGraphPath: root=0x%llX target=0x%llX maxDepth=%d",
+    LOG_INFO("FindObjectGraphPath: root=0x%llX target=0x%llX maxDepth=%d deep=%d",
              static_cast<unsigned long long>(rootObj),
-             static_cast<unsigned long long>(targetObj), maxDepth);
+             static_cast<unsigned long long>(targetObj), maxDepth, deep ? 1 : 0);
 
     auto abortFn = [&]() -> bool {
         if (Tot::Requested()) return true;
@@ -3597,7 +3677,7 @@ GraphPathResult FindObjectGraphPath(uintptr_t rootObj, uintptr_t targetObj,
         return dt > deadlineMs;
     };
     auto neighborFn = [&](uintptr_t node, auto&& emit) {
-        EnumerateOutgoingObjectPtrs(node, std::forward<decltype(emit)>(emit));
+        EnumerateOutgoingObjectPtrs(node, std::forward<decltype(emit)>(emit), deep);
     };
 
     res = BfsShortestObjectPath(rootObj, targetObj, maxDepth, kMaxVisited,
@@ -3617,7 +3697,7 @@ GraphPathResult FindObjectGraphPath(uintptr_t rootObj, uintptr_t targetObj,
     // never override a deadline/cancel/cap (those mean "search incomplete", not
     // "definitively unreferenced"), and never re-run the heavy work on success.
     if (!res.found && res.status == "not_reachable") {
-        GraphPathResult rec = RecoverViaWorldLevel(rootObj, targetObj, abortFn);
+        GraphPathResult rec = RecoverViaWorldLevel(rootObj, targetObj, abortFn, deep);
         if (rec.found) {
             int32_t prevVisited = res.visited;   // keep the BFS diagnostic count
             res = std::move(rec);
