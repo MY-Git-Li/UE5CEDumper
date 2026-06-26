@@ -3228,6 +3228,60 @@ public class CeXmlExportServiceTests
     }
 
     [Fact]
+    public void GenerateInstanceXml_StrProperty_EmitsUnicodeStringNoCodePage()
+    {
+        var fields = new[]
+        {
+            new LiveFieldValue { Name = "WideName", TypeName = "StrProperty", Offset = 0x10, Size = 16 },
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields);
+
+        // FString (wchar_t*) → Unicode=1, CodePage=0
+        Assert.Contains("<VariableType>String</VariableType>", xml);
+        Assert.Contains("<Unicode>1</Unicode>", xml);
+        Assert.Contains("<CodePage>0</CodePage>", xml);
+        Assert.Contains("WideName", xml);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_Utf8StrProperty_EmitsByteStringWithCodePage()
+    {
+        var fields = new[]
+        {
+            new LiveFieldValue { Name = "Utf8Name", TypeName = "Utf8StrProperty", Offset = 0x10, Size = 16 },
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields);
+
+        // FUtf8String (1-byte UTF-8) → Unicode=0, CodePage=1 (CE decodes multibyte UTF-8)
+        Assert.Contains("<VariableType>String</VariableType>", xml);
+        Assert.Contains("<Unicode>0</Unicode>", xml);
+        Assert.Contains("<CodePage>1</CodePage>", xml);
+        Assert.Contains("Utf8Name", xml);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_AnsiStrProperty_EmitsByteStringNoCodePage()
+    {
+        var fields = new[]
+        {
+            new LiveFieldValue { Name = "AnsiName", TypeName = "AnsiStrProperty", Offset = 0x10, Size = 16 },
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields);
+
+        // FAnsiString (1-byte ANSI) → Unicode=0, CodePage=0
+        Assert.Contains("<VariableType>String</VariableType>", xml);
+        Assert.Contains("<Unicode>0</Unicode>", xml);
+        Assert.Contains("<CodePage>0</CodePage>", xml);
+        Assert.Contains("AnsiName", xml);
+    }
+
+    [Fact]
     public void GenerateInstanceXml_DataTableRows_RowWithEnumField_EmitsDropDown()
     {
         var fields = new[]

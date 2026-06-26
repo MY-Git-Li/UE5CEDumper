@@ -273,6 +273,39 @@ public class UsmapExportServiceTests
     }
 
     [Fact]
+    public void MapPropertyType_Utf8StrProperty_ReturnsUtf8Str()
+    {
+        Assert.Equal(UsmapExportService.EPropertyType.Utf8StrProperty,
+            UsmapExportService.MapPropertyType("Utf8StrProperty"));
+    }
+
+    [Fact]
+    public void MapPropertyType_AnsiStrProperty_ReturnsAnsiStr()
+    {
+        Assert.Equal(UsmapExportService.EPropertyType.AnsiStrProperty,
+            UsmapExportService.MapPropertyType("AnsiStrProperty"));
+    }
+
+    [Fact]
+    public void MapPropertyType_OptionalProperty_StaysUnknown()
+    {
+        // OptionalProperty wraps an inner type and needs inner-type-byte serialization,
+        // which is not yet implemented — it must NOT silently emit a bare type byte.
+        Assert.Equal(UsmapExportService.EPropertyType.Unknown,
+            UsmapExportService.MapPropertyType("OptionalProperty"));
+    }
+
+    [Fact]
+    public void EPropertyType_NewMembers_HaveCanonicalByteValues()
+    {
+        // Binary contract with CUE4Parse / UE4SS. Values MUST match the canonical
+        // ordering in RE-UE4SS USMapGenerator/Generator.cpp and Dumper-7 Enums.h.
+        Assert.Equal(28, (byte)UsmapExportService.EPropertyType.OptionalProperty);
+        Assert.Equal(29, (byte)UsmapExportService.EPropertyType.Utf8StrProperty);
+        Assert.Equal(30, (byte)UsmapExportService.EPropertyType.AnsiStrProperty);
+    }
+
+    [Fact]
     public void NameTable_GetOrAdd_DeduplicatesCorrectly()
     {
         var table = new UsmapExportService.NameTable();

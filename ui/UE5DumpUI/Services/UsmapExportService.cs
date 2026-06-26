@@ -20,6 +20,10 @@ public static class UsmapExportService
 
     /// <summary>
     /// Property type enum matching EMappingsTypeFlags from Dumper-7/UE4SS.
+    /// Byte values are a binary contract with downstream consumers (CUE4Parse / UE4SS) —
+    /// they MUST match the canonical ordering in RE-UE4SS USMapGenerator/Generator.cpp and
+    /// Dumper-7 Engine/Public/Unreal/Enums.h. In particular OptionalProperty=28 sits BEFORE
+    /// the UE5.5+ string variants, so its slot is reserved to keep 29/30 correct.
     /// </summary>
     internal enum EPropertyType : byte
     {
@@ -51,6 +55,9 @@ public static class UsmapExportService
         SetProperty = 25,
         EnumProperty = 26,
         FieldPathProperty = 27,
+        OptionalProperty = 28,   // reserved slot; full support needs inner-type recursion (deferred)
+        Utf8StrProperty = 29,    // UE5.5+ FUtf8String (1-byte UTF-8)
+        AnsiStrProperty = 30,    // UE5.5+ FAnsiString (1-byte ANSI)
         Unknown = 0xFF,
     }
 
@@ -354,6 +361,13 @@ public static class UsmapExportService
             "SetProperty" => EPropertyType.SetProperty,
             "EnumProperty" => EPropertyType.EnumProperty,
             "FieldPathProperty" => EPropertyType.FieldPathProperty,
+            // UE5.5+ string variants — pure scalar, no extra type bytes (like StrProperty).
+            "Utf8StrProperty" => EPropertyType.Utf8StrProperty,
+            "AnsiStrProperty" => EPropertyType.AnsiStrProperty,
+            // NOTE: "OptionalProperty" is intentionally NOT mapped here. It wraps an inner
+            // type and would require inner-type-byte serialization (and an InnerOptionalType
+            // on FieldInfoModel); emitting just the type byte would produce an invalid .usmap.
+            // It stays Unknown(0xFF) — the current behaviour — until that support lands.
             _ => EPropertyType.Unknown,
         };
     }

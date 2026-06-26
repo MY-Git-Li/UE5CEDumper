@@ -158,6 +158,53 @@ public class CsxExportServiceTests
     }
 
     [Fact]
+    public async Task GenerateCsx_StrProperty_EmitsPointerWithUnicodeStringChild()
+    {
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "DisplayName", TypeName = "StrProperty", Offset = 0x10, Size = 16 }
+        };
+
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields);
+
+        // FString (wchar_t*) → Pointer + wide "Unicode String" child element
+        Assert.Contains("Vartype=\"Pointer\"", csx);
+        Assert.Contains("Vartype=\"Unicode String\"", csx);
+    }
+
+    [Fact]
+    public async Task GenerateCsx_Utf8StrProperty_EmitsPointerWithByteStringChild()
+    {
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "Utf8Name", TypeName = "Utf8StrProperty", Offset = 0x10, Size = 16 }
+        };
+
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields);
+
+        // FUtf8String (1-byte) → Pointer + non-wide "String" child (CSX has no CodePage option)
+        Assert.Contains("Vartype=\"Pointer\"", csx);
+        Assert.Contains("Vartype=\"String\"", csx);
+        Assert.DoesNotContain("Vartype=\"Unicode String\"", csx);
+    }
+
+    [Fact]
+    public async Task GenerateCsx_AnsiStrProperty_EmitsPointerWithByteStringChild()
+    {
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "AnsiName", TypeName = "AnsiStrProperty", Offset = 0x10, Size = 16 }
+        };
+
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields);
+
+        // FAnsiString (1-byte) → Pointer + non-wide "String" child
+        Assert.Contains("Vartype=\"Pointer\"", csx);
+        Assert.Contains("Vartype=\"String\"", csx);
+        Assert.DoesNotContain("Vartype=\"Unicode String\"", csx);
+    }
+
+    [Fact]
     public async Task GenerateCsx_FloatProperty_EmitsFloat()
     {
         var fields = new List<LiveFieldValue>
