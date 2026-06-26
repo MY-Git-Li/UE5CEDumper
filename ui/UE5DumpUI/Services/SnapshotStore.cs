@@ -78,7 +78,13 @@ public sealed class SnapshotStore : ISnapshotStore
         try
         {
             await conn.OpenAsync(ct);
-            await ExecAsync(conn, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;", ct);
+            // busy_timeout: WAL allows concurrent readers, but a reader that opens while a
+            // writer/checkpoint holds the read-mark lock would otherwise busy-spin the -shm
+            // lock byte (LockFile/UnlockFile thousands/sec, low CPU) until Microsoft.Data.Sqlite's
+            // 30s default command timeout — the post-capture "Loading fields…" Not-Responding
+            // freeze. A bounded native sleep-and-retry turns that contention into at worst a
+            // short wait that then succeeds (or a catchable SQLITE_BUSY), instead of a hang.
+            await ExecAsync(conn, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;", ct);
             await EnsureSchemaAsync(conn, ct);
             return conn;
         }
@@ -634,23 +640,22 @@ public sealed class SnapshotStore : ISnapshotStore
 
     public async Task<int> EnforceQuotaAsync(long quotaBytes, CancellationToken ct = default)
     {
-        if (quotaBytes <= 0) return 0;  // unlimited
-
-        // Estimate the on-disk footprint WITHOUT a checkpoint — db + WAL + shm — so a
-        // capture that stays under quota pays NO wal_checkpoint(TRUNCATE) (the checkpoint +
-        // VACUUM run only on the eviction path below). The estimate slightly overcounts
-        // (the WAL may hold frames already in the db), which is safe for a quota gate; the
-        // accurate post-checkpoint size is re-checked before any eviction.
-        long estBytes = FileSizeOf(DatabasePath)
-                      + FileSizeOf(DatabasePath + "-wal")
-                      + FileSizeOf(DatabasePath + "-shm");
-        if (estBytes <= quotaBytes) return 0;   // under quota → no connection, no checkpoint, no VACUUM
-
+        // ALWAYS fold the capture-grown WAL back into the .db first, off the UI thread (the
+        // caller wraps this in Task.Run). The previous "estimate db+wal+shm and skip the
+        // checkpoint when under quota" optimisation left a large un-checkpointed WAL behind
+        // after every under-quota capture; the next reader (e.g. the Class Pivot field load)
+        // then opened against that bloated WAL, contended for the WAL read-mark lock, and
+        // stalled — the "Loading fields…" Not-Responding freeze (low CPU, -shm lock churn).
+        // Folding here is cheap (passive autocheckpoints already moved most frames into the
+        // db during capture; this mainly truncates the -wal file) and means subsequent
+        // readers always meet a small WAL and never contend.
         await using var conn = await OpenAsync(ct);
         await ExecAsync(conn, "PRAGMA wal_checkpoint(TRUNCATE);", ct);
 
+        if (quotaBytes <= 0) return 0;  // unlimited (WAL already folded above)
+
         long fileBytes = FileSizeOf(DatabasePath);   // accurate size after folding the WAL
-        if (fileBytes <= quotaBytes) return 0;       // WAL frames were redundant — actually under
+        if (fileBytes <= quotaBytes) return 0;       // under quota → no eviction
 
         // Read snapshots newest-first with their field counts.
         var rows = new List<(long id, int fields)>();

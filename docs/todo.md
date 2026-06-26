@@ -21,12 +21,12 @@ Open work only. **Read this when deciding what to do next.**
 
 ## ▶ Next up (genuinely actionable now)
 
-- **Class Pivot discovery (build 1742) — in-game verify + deeper capture-memory fix** —
-  Effort: **S** (verify) / **M** (memory) · Risk: low. The bounded N-snapshot discovery +
-  shape ranking + the AutoCompleteBox class picker + Locate-in-GWorld/GameEngine + resizable/
-  filterable results all shipped build 1742 but are **NOT in-game verified** (the AutoCompleteBox
-  `SelectedItem` commit + the Locate handoff + the GridSplitter can't be tested headlessly).
-  Verify on a real game. Separately: the post-capture compacting `GC.Collect` (build 1742) is a
+- **Class Pivot discovery (build 1742) — deeper capture-memory fix** —
+  Effort: **M** (memory) · Risk: low. The bounded N-snapshot discovery + shape ranking +
+  Locate-in-GWorld/GameEngine + resizable/filterable results shipped build 1742; the class
+  picker freeze was fixed + in-game verified build 1764 (filter TextBox + ListBox — see
+  dev-log). The **change-driven discovery ("Suggest Targets") path itself is still NOT in-game
+  verified** end-to-end. Separately: the post-capture compacting `GC.Collect` (build 1742) is a
   **mitigation** for the multi-snapshot working-set bloat — the *deeper* fix is to stop the
   transient allocation at the source by replacing the capture's JSON-DOM parse with a streaming
   `Utf8JsonReader` (`SnapshotChunkAsync` / the chunk parse). Only pursue the streaming rewrite if

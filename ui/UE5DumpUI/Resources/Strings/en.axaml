@@ -542,6 +542,7 @@
 
     <!-- Class Pivot (experimental) -->
     <sys:String x:Key="str.Pivot.Intro">Group one class's instances by a key field's value (e.g. inventory by ItemID) or by object identity, and project the value fields per group. The best key field is auto-suggested (type + name + cardinality). Differing values inside a group render as a collision ⟨N: v1,v2,+M⟩. Snapshot capture is all-numeric, so keys are int/enum IDs. Tip: for transient inventory objects (whose object path is identical, e.g. //Engine/Transient/Item) use a Field key like ItemID — Identity mode would merge them into one group. Switch Source to Snapshot Array to pivot a captured struct array (e.g. Cargo) by its inner-key value (e.g. ItemID) — reorder- and session-immune. Or DataTable for a zero-config pivot of a live DataTable (RowName is the key — no discovery needed).</sys:String>
+    <sys:String x:Key="str.Pivot.SourceHeader">⚙ Pivot target — Source · Snapshot · Class</sys:String>
     <sys:String x:Key="str.Pivot.Source">Source:</sys:String>
     <sys:String x:Key="str.Pivot.Snapshot">Snapshot:</sys:String>
     <sys:String x:Key="str.Pivot.DataTable">DataTable:</sys:String>

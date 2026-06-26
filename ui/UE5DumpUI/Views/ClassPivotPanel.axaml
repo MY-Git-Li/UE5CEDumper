@@ -79,11 +79,13 @@
       </StackPanel>
     </Expander>
 
-    <!-- Snapshot / class selection. Grayed during a pivot run so the source /
-         snapshot / class can't change mid-operation. -->
-    <Border Grid.Row="2" Background="#252526" CornerRadius="4" Padding="12,8" Margin="0,0,0,8"
-            BorderBrush="#3C3C3C" BorderThickness="1">
-      <WrapPanel Orientation="Horizontal" IsEnabled="{Binding !IsBusy}">
+    <!-- Snapshot / class selection. Collapsible (the picker + class list take vertical
+         space; collapse to give the results grid more room). Grayed during a pivot run so
+         the source / snapshot / class can't change mid-operation. -->
+    <Expander Grid.Row="2" Margin="0,0,0,8" IsExpanded="True"
+              Header="{StaticResource str.Pivot.SourceHeader}">
+      <StackPanel Orientation="Vertical" IsEnabled="{Binding !IsBusy}">
+      <WrapPanel Orientation="Horizontal">
         <TextBlock Text="{StaticResource str.Pivot.Source}" Foreground="#CCCCCC"
                    VerticalAlignment="Center" Margin="0,0,4,0"/>
         <ComboBox ItemsSource="{Binding SourceOptions}" SelectedItem="{Binding SelectedSource}"
@@ -102,30 +104,15 @@
         </ComboBox>
         <TextBlock Text="{StaticResource str.Pivot.ClassFilter}" Foreground="#CCCCCC"
                    VerticalAlignment="Center" Margin="0,0,4,0" IsVisible="{Binding UsesSnapshot}"/>
-        <!-- Type-to-filter + pick. AutoCompleteBox filters INTERNALLY over a STABLE
-             ItemsSource (Classes), so unlike the old filter-TextBox + ComboBox — whose
-             ItemsSource was Clear()/Add()-rebuilt on every keystroke, leaving the
-             ComboBox unable to commit a click (dropdown closed, nothing selected) — the
-             selection always sticks. Right-click → hide the selected class (Pivot-scope
-             denylist); the ContextMenu inherits the VM DataContext. -->
-        <AutoCompleteBox ItemsSource="{Binding Classes}" SelectedItem="{Binding SelectedClass}"
-                         FilterMode="Contains" ValueMemberBinding="{Binding Display}"
-                         MinimumPrefixLength="0" MinWidth="320" Margin="0,0,12,0"
-                         IsVisible="{Binding UsesSnapshot}"
-                         PlaceholderText="{StaticResource str.Pivot.ClassFilterHint}">
-          <AutoCompleteBox.ContextMenu>
-            <ContextMenu>
-              <MenuItem Header="{StaticResource str.Pivot.HideClass}"
-                        Command="{Binding HideClassCommand}"
-                        CommandParameter="{Binding SelectedClass}"/>
-            </ContextMenu>
-          </AutoCompleteBox.ContextMenu>
-          <AutoCompleteBox.ItemTemplate>
-            <DataTemplate x:DataType="m:PivotClassInfo">
-              <TextBlock Text="{Binding Display}"/>
-            </DataTemplate>
-          </AutoCompleteBox.ItemTemplate>
-        </AutoCompleteBox>
+        <!-- Class picker = filter TextBox (here) + ListBox (below the WrapPanel). NOT a
+             ComboBox (its dropdown Popup drops the click after a per-keystroke ItemsSource
+             rebuild) and NOT an AutoCompleteBox (its Text<->SelectedItem reconciliation
+             oscillated SelectedClass and froze the UI). A ListBox has no Popup, so a
+             live-filtered list commits clicks reliably. Typing here sets SelectedClass=null
+             → no field load → the DB is never touched while filtering. -->
+        <TextBox Text="{Binding ClassFilter}" Width="200" Margin="0,0,12,0"
+                 IsVisible="{Binding UsesSnapshot}"
+                 PlaceholderText="{StaticResource str.Pivot.ClassFilterHint}"/>
 
         <!-- Snapshot Array source (Phase C6: inner-key pivot of a struct array) -->
         <TextBlock Text="{StaticResource str.Pivot.ArrayField}" Foreground="#CCCCCC"
@@ -171,7 +158,29 @@
                 Foreground="#C586C0" Background="Transparent" BorderThickness="1" BorderBrush="#C586C0"
                 Padding="8,4" Margin="4,0,0,0"/>
       </WrapPanel>
-    </Border>
+
+      <!-- Class list (Snapshot sources). A ListBox — not a ComboBox dropdown — so the
+           per-keystroke filter rebuild can't drop the click. Filter above to narrow it,
+           then click a class to pivot it. Right-click → hide the class (Pivot-scope denylist). -->
+      <ListBox ItemsSource="{Binding Classes}" SelectedItem="{Binding SelectedClass}"
+               Height="132" Margin="0,8,0,0" Background="#1E1E1E"
+               IsVisible="{Binding UsesSnapshot}"
+               ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+        <ListBox.ContextMenu>
+          <ContextMenu>
+            <MenuItem Header="{StaticResource str.Pivot.HideClass}"
+                      Command="{Binding HideClassCommand}"
+                      CommandParameter="{Binding SelectedClass}"/>
+          </ContextMenu>
+        </ListBox.ContextMenu>
+        <ListBox.ItemTemplate>
+          <DataTemplate x:DataType="m:PivotClassInfo">
+            <TextBlock Text="{Binding Display}" Padding="2,1"/>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+      </StackPanel>
+    </Expander>
 
     <!-- Key mode -->
     <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="6" Margin="0,0,0,8" VerticalAlignment="Center">

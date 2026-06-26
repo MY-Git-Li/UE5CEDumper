@@ -117,6 +117,93 @@ public class ClassPivotViewModelTests : IDisposable
         Assert.Contains(vm.Classes, c => c.ClassName == "BP_Item_C");
     }
 
+    // The class picker is a filter TextBox + ListBox (the AutoCompleteBox oscillated/froze; the
+    // ComboBox dropped clicks). Typing the filter narrows the list by substring and must NOT hit
+    // the DB. A filter that KEEPS the picked class preserves the selection (so a spurious
+    // re-filter post-click can't wipe it); a filter that EXCLUDES it clears the selection.
+    [Fact]
+    public async Task ClassFilter_NarrowsClasses_NoDbHit_PreservesOrClearsSelection()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        long id = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "two" }, ct);
+        await _store.WriteChunkAsync(id, new[]
+        {
+            Obj(1, "BP_Item_C",  "/G.M:L.Item_0",  ("ItemID", 1)),
+            Obj(2, "BP_Other_C", "/G.M:L.Other_0", ("Slot", 3)),
+        }, ct);
+        await _store.FinalizeSnapshotAsync(id, 2, 2, ct);
+
+        var counting = new CountingStore(_store);
+        var vm = new ClassPivotViewModel(counting, new MockLoggingService());
+        await vm.RefreshAsync();
+        await vm.PendingLoad!;   // classes loaded (BP_Item_C, BP_Other_C)
+        Assert.Equal(2, vm.Classes.Count);
+
+        // Pick a class → one field load.
+        vm.SelectedClass = vm.Classes.First(c => c.ClassName == "BP_Item_C");
+        await vm.PendingLoad!;
+        int calls = counting.FieldCalls;
+        Assert.Equal(1, calls);
+
+        // Filter that KEEPS the picked class → narrows the list, selection PRESERVED, no new DB hit.
+        vm.ClassFilter = "item";
+        Assert.Single(vm.Classes);
+        Assert.Equal("BP_Item_C", vm.Classes[0].ClassName);
+        Assert.Equal("BP_Item_C", vm.SelectedClass?.ClassName);   // survived the filter → kept (the anti-flicker fix)
+        Assert.Equal(calls, counting.FieldCalls);                 // re-select was a cache hit — zero DB
+
+        // Filter that EXCLUDES the picked class → selection cleared, still no DB hit.
+        vm.ClassFilter = "other";
+        Assert.Single(vm.Classes);
+        Assert.Equal("BP_Other_C", vm.Classes[0].ClassName);
+        Assert.Null(vm.SelectedClass);
+        Assert.Equal(calls, counting.FieldCalls);
+
+        // Clearing the filter restores the full list.
+        vm.ClassFilter = "";
+        Assert.Equal(2, vm.Classes.Count);
+    }
+
+    // Regression for the ~135 OpenAsync/sec DB storm: a SUPERSEDED-but-COMPLETED field load
+    // must still populate the (immutable-keyed) cache, so re-selecting that class is a cache
+    // hit instead of re-hitting the store. Pre-fix the supersession guard ran BEFORE the cache
+    // write, so the cache stayed empty and every re-fire re-opened the DB. Uses the GatedStore
+    // (its ListPivotFields ignores ct, so a held load completes via SetResult even after it is
+    // superseded — exactly the path the fix caches). The cache-hit apply is synchronous, so a
+    // miss leaves Fields stale at the assert — deterministic, no delays.
+    [Fact]
+    public async Task FieldList_SupersededLoad_StillCaches_ReselectServesFromCache()
+    {
+        var store = new GatedStore();
+        var vm = new ClassPivotViewModel(store, new MockLoggingService());
+        await vm.RefreshAsync();
+        await vm.PendingLoad!;   // classes A, B
+
+        var clsA = vm.Classes.First(c => c.ClassName == "A");
+        var clsB = vm.Classes.First(c => c.ClassName == "B");
+
+        // Select A (gated, in flight), then B — A becomes the superseded load.
+        vm.SelectedClass = clsA;
+        var loadA = vm.PendingLoad!;
+        await WaitForGate(store, "A");
+        vm.SelectedClass = clsB;
+        var loadB = vm.PendingLoad!;
+        await WaitForGate(store, "B");
+
+        // Complete B (applied), then the SUPERSEDED A. With the cache-before-guard fix A's
+        // completed result is cached even though its UI apply is skipped.
+        store.Gates["B"].SetResult(new[] { Field("BetaField") });
+        await loadB;
+        store.Gates["A"].SetResult(new[] { Field("AlphaField") });
+        await loadA;
+        Assert.Equal("BetaField", Assert.Single(vm.Fields).Name);   // A's stale apply was skipped
+
+        // Re-select A: a synchronous CACHE HIT applies A's fields immediately. Pre-fix this was
+        // a cache MISS → async (re)load → Fields would still read "BetaField" at this point.
+        vm.SelectedClass = clsA;
+        Assert.Equal("AlphaField", Assert.Single(vm.Fields).Name);
+    }
+
     [Fact]
     public async Task Refresh_LoadsSnapshotsAndClasses()
     {
