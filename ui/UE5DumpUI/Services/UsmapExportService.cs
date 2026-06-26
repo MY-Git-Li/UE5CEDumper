@@ -20,6 +20,10 @@ public static class UsmapExportService
 
     /// <summary>
     /// Property type enum matching EMappingsTypeFlags from Dumper-7/UE4SS.
+    /// Byte values are a binary contract with downstream consumers (CUE4Parse / UE4SS) —
+    /// they MUST match the canonical ordering in RE-UE4SS USMapGenerator/Generator.cpp and
+    /// Dumper-7 Engine/Public/Unreal/Enums.h. In particular OptionalProperty=28 sits BEFORE
+    /// the UE5.5+ string variants, so its slot is reserved to keep 29/30 correct.
     /// </summary>
     internal enum EPropertyType : byte
     {
@@ -51,6 +55,9 @@ public static class UsmapExportService
         SetProperty = 25,
         EnumProperty = 26,
         FieldPathProperty = 27,
+        OptionalProperty = 28,   // UE5.2+ TOptional<T> — wraps an inner ValueProperty
+        Utf8StrProperty = 29,    // UE5.5+ FUtf8String (1-byte UTF-8)
+        AnsiStrProperty = 30,    // UE5.5+ FAnsiString (1-byte ANSI)
         Unknown = 0xFF,
     }
 
@@ -269,6 +276,14 @@ public static class UsmapExportService
                     "", "", nameTable);
                 break;
 
+            case EPropertyType.OptionalProperty:
+                // TOptional<T>: write the wrapped value type recursively (mirrors UE4SS
+                // FOptionalProperty / CUE4Parse). The DLL fills InnerType/InnerStructType/
+                // InnerObjClass for OptionalProperty exactly as it does for ArrayProperty.
+                WriteInnerPropertyTypeFromField(w, f.InnerType, f.InnerStructType,
+                    f.InnerObjClass, f.EnumName, nameTable);
+                break;
+
             case EPropertyType.ByteProperty:
                 // If ByteProperty has an enum, write it as EnumProperty instead
                 if (!string.IsNullOrEmpty(f.EnumName))
@@ -354,6 +369,11 @@ public static class UsmapExportService
             "SetProperty" => EPropertyType.SetProperty,
             "EnumProperty" => EPropertyType.EnumProperty,
             "FieldPathProperty" => EPropertyType.FieldPathProperty,
+            // UE5.5+ string variants — pure scalar, no extra type bytes (like StrProperty).
+            "Utf8StrProperty" => EPropertyType.Utf8StrProperty,
+            "AnsiStrProperty" => EPropertyType.AnsiStrProperty,
+            // UE5.2+ TOptional<T> — WritePropertyType recurses into the wrapped value type.
+            "OptionalProperty" => EPropertyType.OptionalProperty,
             _ => EPropertyType.Unknown,
         };
     }

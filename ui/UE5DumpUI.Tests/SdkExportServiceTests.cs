@@ -37,6 +37,33 @@ public class SdkExportServiceTests
     }
 
     [Fact]
+    public void MapCppType_Utf8StrProperty_ReturnsFUtf8String()
+    {
+        // UE5.5+ FUtf8String — a distinct UE type, not an FString alias.
+        var field = new FieldInfoModel { TypeName = "Utf8StrProperty", Size = 16 };
+        Assert.Equal("FUtf8String", SdkExportService.MapCppType(field));
+    }
+
+    [Fact]
+    public void MapCppType_AnsiStrProperty_ReturnsFAnsiString()
+    {
+        // UE5.5+ FAnsiString.
+        var field = new FieldInfoModel { TypeName = "AnsiStrProperty", Size = 16 };
+        Assert.Equal("FAnsiString", SdkExportService.MapCppType(field));
+    }
+
+    [Fact]
+    public void MapCppType_Utf8StrArray_ReturnsTArrayOfFUtf8String()
+    {
+        // Inner-type mapping (MapScalarInnerType) must also resolve the new variants.
+        var field = new FieldInfoModel
+        {
+            TypeName = "ArrayProperty", InnerType = "Utf8StrProperty", Size = 16,
+        };
+        Assert.Equal("TArray<FUtf8String>", SdkExportService.MapCppType(field));
+    }
+
+    [Fact]
     public void MapCppType_ObjectProperty_WithClass_ReturnsPtr()
     {
         var field = new FieldInfoModel { TypeName = "ObjectProperty", ObjClassName = "APlayerController", Size = 8 };

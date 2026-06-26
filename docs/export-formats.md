@@ -255,10 +255,19 @@ flatten with `{StructType} / {FieldName}` naming.
 
 ### StrProperty Special Case
 
-Emits as `Vartype="Pointer"` with a child structure containing:
+Emits as `Vartype="Pointer"` with a child structure containing a single string element:
 ```xml
 <Element Offset="0" Vartype="Unicode String" Bytesize="18" Description="Value"/>
 ```
+
+The child element's Vartype depends on the FString-family variant (all share the same
+TArray header, only the char width differs):
+
+| UE Property | Child Vartype | Note |
+|-------------|---------------|------|
+| `StrProperty` (FString, wchar_t*) | `Unicode String` | wide / UTF-16 |
+| `Utf8StrProperty` (FUtf8String, UTF-8) | `String` | CE Structure Dissect has only `String` / `Unicode String` (no CodePage option), so UTF-8 multibyte cannot be decoded here — a CSX format limitation. Use CE XML (CodePage=1) for correct UTF-8 display. |
+| `AnsiStrProperty` (FAnsiString, ANSI) | `String` | 1-byte ANSI |
 
 ### Format Version: Pre-CE-7.7 vs CE-7.7+ (bit-field bools)
 
@@ -354,7 +363,9 @@ struct ClassName : public SuperName
 | BoolProperty (byte) | Byte | | | Fallback |
 | NameProperty | 4 Bytes | | | FName index |
 | EnumProperty | Byte / 2 / 4 / 8 Bytes | | | width = property byte size; + DropDownList |
-| StrProperty | String | | | Unicode=1, Offsets=[0] |
+| StrProperty | String | | | Unicode=1, CodePage=0, Offsets=[0] |
+| Utf8StrProperty | String | | | Unicode=0, **CodePage=1**, Offsets=[0] (UE5.5+ FUtf8String) |
+| AnsiStrProperty | String | | | Unicode=0, CodePage=0, Offsets=[0] (UE5.5+ FAnsiString) |
 | ObjectProperty | 8 Bytes | | ✓ | Pointer |
 | ClassProperty | 8 Bytes | | ✓ | Pointer |
 | WeakObjectProperty | 8 Bytes | | ✓ | |
@@ -372,7 +383,9 @@ struct ClassName : public SuperName
 | ByteProperty | Byte | 1 | unsigned integer |
 | BoolProperty | Byte | 1 | unsigned integer |
 | ObjectProperty | Pointer | 8 | unsigned integer |
-| StrProperty | Pointer | 8 | unsigned integer |
+| StrProperty | Pointer | 8 | unsigned integer | (child `Unicode String`) |
+| Utf8StrProperty | Pointer | 8 | unsigned integer | (child `String`, byte — CSX has no CodePage) |
+| AnsiStrProperty | Pointer | 8 | unsigned integer | (child `String`, byte) |
 | ArrayProperty | Pointer | 8 | unsigned integer |
 | MapProperty | Pointer | 8 | unsigned integer |
 | TextProperty | 8 Bytes | 8 | hexadecimal |
@@ -389,6 +402,8 @@ struct ClassName : public SuperName
 | BoolProperty | `bool` |
 | NameProperty | `FName` |
 | StrProperty | `FString` |
+| Utf8StrProperty | `FUtf8String` (UE5.5+) |
+| AnsiStrProperty | `FAnsiString` (UE5.5+) |
 | TextProperty | `FText` |
 | ObjectProperty | `class {ClassName}*` |
 | ClassProperty | `TSubclassOf<class {ClassName}>` |

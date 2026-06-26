@@ -1850,11 +1850,14 @@ public static class CeXmlExportService
             string ScalarDesc() => field.IsGuessed
                 ? field.Name : DecorateDesc(field.Name, field.Offset, LeafTypeLabel(field));
 
-            // StrProperty: emit as Unicode string with pointer dereference to wchar_t* Data
-            if (field.TypeName == "StrProperty")
+            // FString-family (StrProperty / Utf8StrProperty / AnsiStrProperty): emit as a
+            // CE String leaf with pointer deref to the Data buffer. Wide (UTF-16) vs byte,
+            // and UTF-8 byte (CodePage), are selected by the Unicode/CodePage flags.
+            if (IsStringProperty(field.TypeName))
             {
                 EmitStringLeaf(sb, indent, ScalarDesc(), $"+{field.Offset:X}",
-                    offsets: [0], unicode: true);
+                    offsets: [0], unicode: field.TypeName == "StrProperty",
+                    codepage: field.TypeName == "Utf8StrProperty");
                 continue;
             }
 
@@ -2819,12 +2822,14 @@ public static class CeXmlExportService
             // Level 3: Fields — inline offset within dereferenced row data
             foreach (var rowField in row.Fields)
             {
-                // StrProperty within row: Unicode string with pointer deref
-                if (rowField.TypeName == "StrProperty")
+                // FString-family within row: CE String leaf with pointer deref
+                if (IsStringProperty(rowField.TypeName))
                 {
                     EmitStringLeaf(sb, fieldIndent,
                         DecorateDesc(rowField.Name, rowField.Offset, LeafTypeLabel(rowField)),
-                        $"+{rowField.Offset:X}", offsets: [0], unicode: true);
+                        $"+{rowField.Offset:X}", offsets: [0],
+                        unicode: rowField.TypeName == "StrProperty",
+                        codepage: rowField.TypeName == "Utf8StrProperty");
                     continue;
                 }
 
@@ -2968,12 +2973,23 @@ public static class CeXmlExportService
     }
 
     /// <summary>
+    /// True for the three FString-family property types (FString / FUtf8String /
+    /// FAnsiString), all sharing the TArray string header and emitting as a CE String leaf.
+    /// </summary>
+    private static bool IsStringProperty(string? typeName) =>
+        typeName is "StrProperty" or "Utf8StrProperty" or "AnsiStrProperty";
+
+    /// <summary>
     /// Emit a CE String leaf with proper Length/Unicode/CodePage/ZeroTerminate.
-    /// Used for StrProperty which stores FString = { wchar_t* Data, int32 Count, int32 Max }.
-    /// The Offsets=[0] dereferences the Data pointer to reach the actual character buffer.
+    /// CE's String type encodes three modes via the Unicode + CodePage flags:
+    ///   StrProperty     = FString (wchar_t*, UTF-16)  -> Unicode=1, CodePage=0
+    ///   AnsiStrProperty = FAnsiString (char*, ANSI)   -> Unicode=0, CodePage=0
+    ///   Utf8StrProperty = FUtf8String (char*, UTF-8)  -> Unicode=0, CodePage=1
+    /// All three share the FString TArray header { Data ptr, int32 Count, int32 Max },
+    /// so Offsets=[0] dereferences the Data pointer to reach the character buffer.
     /// </summary>
     private static void EmitStringLeaf(StringBuilder sb, string indent, string description,
-        string address, int[]? offsets, bool unicode, int length = 256)
+        string address, int[]? offsets, bool unicode, bool codepage = false, int length = 256)
     {
         _emitEntryCount++;
         sb.AppendLine($"{indent}<CheatEntry>");
@@ -2983,7 +2999,7 @@ public static class CeXmlExportService
         sb.AppendLine($"{indent}  <VariableType>String</VariableType>");
         sb.AppendLine($"{indent}  <Length>{length}</Length>");
         sb.AppendLine($"{indent}  <Unicode>{(unicode ? 1 : 0)}</Unicode>");
-        sb.AppendLine($"{indent}  <CodePage>0</CodePage>");
+        sb.AppendLine($"{indent}  <CodePage>{(codepage ? 1 : 0)}</CodePage>");
         sb.AppendLine($"{indent}  <ZeroTerminate>1</ZeroTerminate>");
         sb.AppendLine($"{indent}  <Address>{address}</Address>");
         EmitOffsets(sb, indent, offsets);

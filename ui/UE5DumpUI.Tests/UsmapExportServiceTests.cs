@@ -273,6 +273,77 @@ public class UsmapExportServiceTests
     }
 
     [Fact]
+    public void MapPropertyType_Utf8StrProperty_ReturnsUtf8Str()
+    {
+        Assert.Equal(UsmapExportService.EPropertyType.Utf8StrProperty,
+            UsmapExportService.MapPropertyType("Utf8StrProperty"));
+    }
+
+    [Fact]
+    public void MapPropertyType_AnsiStrProperty_ReturnsAnsiStr()
+    {
+        Assert.Equal(UsmapExportService.EPropertyType.AnsiStrProperty,
+            UsmapExportService.MapPropertyType("AnsiStrProperty"));
+    }
+
+    [Fact]
+    public void MapPropertyType_OptionalProperty_ReturnsOptional()
+    {
+        Assert.Equal(UsmapExportService.EPropertyType.OptionalProperty,
+            UsmapExportService.MapPropertyType("OptionalProperty"));
+    }
+
+    [Fact]
+    public void WritePropertyType_OptionalStruct_WritesTypeThenInnerStruct()
+    {
+        // TOptional<FVector> → [OptionalProperty=28][StructProperty=9][name idx of "FVector"].
+        var nameTable = new UsmapExportService.NameTable();
+        var field = new FieldInfoModel
+        {
+            TypeName = "OptionalProperty",
+            InnerType = "StructProperty",
+            InnerStructType = "FVector",
+        };
+
+        using var ms = new MemoryStream();
+        var w = new BinaryWriter(ms);
+        UsmapExportService.WritePropertyType(w, field, nameTable);
+        w.Flush();
+        var bytes = ms.ToArray();
+
+        Assert.Equal(28, bytes[0]);                       // OptionalProperty
+        Assert.Equal(9, bytes[1]);                        // inner StructProperty
+        Assert.True(bytes.Length > 2);                    // followed by the struct name index
+        Assert.Equal(0, nameTable.GetOrAdd("FVector"));   // "FVector" was registered (idx 0)
+    }
+
+    [Fact]
+    public void WritePropertyType_OptionalObject_WritesTypeThenInnerObjectNoExtra()
+    {
+        // TOptional<UObject*> → [OptionalProperty=28][ObjectProperty=4], no trailing data.
+        var nameTable = new UsmapExportService.NameTable();
+        var field = new FieldInfoModel { TypeName = "OptionalProperty", InnerType = "ObjectProperty" };
+
+        using var ms = new MemoryStream();
+        var w = new BinaryWriter(ms);
+        UsmapExportService.WritePropertyType(w, field, nameTable);
+        w.Flush();
+        var bytes = ms.ToArray();
+
+        Assert.Equal(new byte[] { 28, 4 }, bytes);  // ObjectProperty writes no extra bytes
+    }
+
+    [Fact]
+    public void EPropertyType_NewMembers_HaveCanonicalByteValues()
+    {
+        // Binary contract with CUE4Parse / UE4SS. Values MUST match the canonical
+        // ordering in RE-UE4SS USMapGenerator/Generator.cpp and Dumper-7 Enums.h.
+        Assert.Equal(28, (byte)UsmapExportService.EPropertyType.OptionalProperty);
+        Assert.Equal(29, (byte)UsmapExportService.EPropertyType.Utf8StrProperty);
+        Assert.Equal(30, (byte)UsmapExportService.EPropertyType.AnsiStrProperty);
+    }
+
+    [Fact]
     public void NameTable_GetOrAdd_DeduplicatesCorrectly()
     {
         var table = new UsmapExportService.NameTable();

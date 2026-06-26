@@ -664,6 +664,8 @@ public class InvokeScriptTests
     [InlineData("InterfaceProperty",    "pointer")]
     [InlineData("StructProperty",       "fstruct")]
     [InlineData("StrProperty",          "fstring")]
+    [InlineData("Utf8StrProperty",      "fstring")]
+    [InlineData("AnsiStrProperty",      "fstring")]
     [InlineData("TextProperty",         "ftext")]
     [InlineData("ArrayProperty",        "tarray")]
     [InlineData("MapProperty",          "tmap")]
@@ -678,6 +680,8 @@ public class InvokeScriptTests
 
     [Theory]
     [InlineData("StrProperty",          true)]
+    [InlineData("Utf8StrProperty",      true)]
+    [InlineData("AnsiStrProperty",      true)]
     [InlineData("TextProperty",         true)]
     [InlineData("ArrayProperty",        true)]
     [InlineData("StructProperty",       true)]

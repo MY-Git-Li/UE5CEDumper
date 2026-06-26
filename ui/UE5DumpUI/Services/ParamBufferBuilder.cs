@@ -93,6 +93,8 @@ public static class ParamBufferBuilder
             "ObjectProperty" => "UObject*",
             "ClassProperty" => "UClass*",
             "StrProperty" => "FString",
+            "Utf8StrProperty" => "FUtf8String",
+            "AnsiStrProperty" => "FAnsiString",
             "TextProperty" => "FText",
             "EnumProperty" => "enum",
             "StructProperty" => "struct",

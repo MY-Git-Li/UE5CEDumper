@@ -221,6 +221,10 @@ public static class SdkExportService
             "BoolProperty" => "bool",
             "NameProperty" => "FName",
             "StrProperty" => "FString",
+            // UE5.5+ split FString into 1-byte string variants (TArray<char>):
+            // FUtf8String (UTF-8) and FAnsiString (ANSI). Distinct UE types, not FString aliases.
+            "Utf8StrProperty" => "FUtf8String",
+            "AnsiStrProperty" => "FAnsiString",
             "TextProperty" => "FText",
 
             "ObjectProperty" => FormatPtrType("class", objClassName, "UObject"),
@@ -303,6 +307,8 @@ public static class SdkExportService
             "ByteProperty" => "uint8_t",
             "NameProperty" => "FName",
             "StrProperty" => "FString",
+            "Utf8StrProperty" => "FUtf8String",
+            "AnsiStrProperty" => "FAnsiString",
             "TextProperty" => "FText",
             "EnumProperty" => "uint8_t",
             _ => "uint8_t",
@@ -595,6 +601,8 @@ public static class SdkExportService
             "ByteProperty" => "uint8_t",
             "NameProperty" => "FName",
             "StrProperty" => "FString",
+            "Utf8StrProperty" => "FUtf8String",
+            "AnsiStrProperty" => "FAnsiString",
             "TextProperty" => "FText",
             "ObjectProperty" => "UObject*",
             "ClassProperty" => "UClass*",

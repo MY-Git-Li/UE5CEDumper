@@ -202,7 +202,9 @@ public static class CsxExportService
         switch (field.TypeName)
         {
             case "StrProperty":
-                childStructure = BuildStrChildStructure(field.HexValue);
+            case "Utf8StrProperty":   // UE5.5+ FUtf8String (1-byte UTF-8)
+            case "AnsiStrProperty":   // UE5.5+ FAnsiString (1-byte ANSI)
+                childStructure = BuildStrChildStructure(field.TypeName, field.HexValue);
                 break;
 
             case "ObjectProperty":
@@ -327,6 +329,8 @@ public static class CsxExportService
 
             // Pointer types — Vartype=Pointer so CE can dereference
             "StrProperty"           => new CsxTypeInfo("Pointer", 8, "unsigned integer"),
+            "Utf8StrProperty"       => new CsxTypeInfo("Pointer", 8, "unsigned integer"),
+            "AnsiStrProperty"       => new CsxTypeInfo("Pointer", 8, "unsigned integer"),
             "ObjectProperty"        => new CsxTypeInfo("Pointer", 8, "unsigned integer"),
             "ClassProperty"         => new CsxTypeInfo("Pointer", 8, "unsigned integer"),
             "SoftObjectProperty"    => new CsxTypeInfo("Pointer", 8, "unsigned integer"),
@@ -354,16 +358,21 @@ public static class CsxExportService
     }
 
     /// <summary>
-    /// Build a child Structure for StrProperty (pointer → Unicode String).
+    /// Build a child Structure for an FString-family pointer (Data ptr → string buffer).
+    /// FString uses the wide "Unicode String"; FUtf8String/FAnsiString are 1-byte "String".
+    /// CE's Structure Dissect has only these two string Vartypes (no CodePage option), so a
+    /// UTF-8 FUtf8String falls back to "String" — CE renders it byte-wise and cannot decode
+    /// multibyte UTF-8 (a CSX format limitation; CE XML's CodePage flag has no CSX equivalent).
     /// </summary>
-    private static string BuildStrChildStructure(string? addr)
+    private static string BuildStrChildStructure(string typeName, string? addr)
     {
+        var vartype = typeName == "StrProperty" ? "Unicode String" : "String";
         var name = FormatStructName(addr);
         var sb = new StringBuilder();
         sb.Append("        <Structure Name=\"").Append(EscapeXml(name))
           .AppendLine("\" AutoFill=\"0\" AutoCreate=\"1\" DefaultHex=\"0\" AutoDestroy=\"0\" DoNotSaveLocal=\"0\" RLECompression=\"1\" AutoCreateStructsize=\"4096\">");
         sb.AppendLine("          <Elements>");
-        sb.AppendLine("            <Element Offset=\"0\" Vartype=\"Unicode String\" Bytesize=\"18\" OffsetHex=\"00000000\" DisplayMethod=\"unsigned integer\"/>");
+        sb.AppendLine($"            <Element Offset=\"0\" Vartype=\"{vartype}\" Bytesize=\"18\" OffsetHex=\"00000000\" DisplayMethod=\"unsigned integer\"/>");
         sb.AppendLine("          </Elements>");
         sb.AppendLine("        </Structure>");
         return sb.ToString();
