@@ -83,6 +83,7 @@ static void HandleListInstances();
 static void HandleSetDebugCamera();
 static void HandleTeleport();
 static void HandleProtect();
+static void HandleMovement();
 static void SetError(int32_t code, const char* msg);
 static void SetDone(int32_t resultCode);
 static bool EnsureInitialized();
@@ -176,6 +177,9 @@ static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
                 break;
             case CMD_PROTECT:
                 HandleProtect();
+                break;
+            case CMD_MOVEMENT:
+                HandleMovement();
                 break;
             default:
                 SetError(-1, "Unknown command");
@@ -872,6 +876,27 @@ static void HandleProtect() {
         g_invokeMailbox.errorMsg[sizeof(g_invokeMailbox.errorMsg) - 1] = '\0';
     }
     LOG_INFO("Mailbox: PROTECT op=%llu -> rc=%d", (unsigned long long)op, rc);
+    SetDone(rc);
+}
+
+// CMD_MOVEMENT (Laufen): set one CharacterMovement float knob to a percent.
+// instanceAddr = knobId (0/1/2); paramsData[0..7] = double percent (100 = off,
+// knob 2 = jump height %). The percent is read BEFORE SetDone (paramsData is not
+// overwritten with outputs here). Returns 1 (active) / 0 (off) / negative.
+static void HandleMovement() {
+    const uint64_t knobId = g_invokeMailbox.instanceAddr;
+    double percent = 0.0;
+    memcpy(&percent, g_invokeMailbox.paramsData, sizeof(double));
+    int32_t rc = UE5_SetMovementPercent(static_cast<int32_t>(knobId), percent);
+    if (rc < 0) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "Movement: knob=%llu pct=%.1f failed code=%d",
+                 (unsigned long long)knobId, percent, rc);
+        strncpy(g_invokeMailbox.errorMsg, msg, sizeof(g_invokeMailbox.errorMsg) - 1);
+        g_invokeMailbox.errorMsg[sizeof(g_invokeMailbox.errorMsg) - 1] = '\0';
+    }
+    LOG_INFO("Mailbox: MOVEMENT knob=%llu pct=%.1f -> rc=%d",
+             (unsigned long long)knobId, percent, rc);
     SetDone(rc);
 }
 

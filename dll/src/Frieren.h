@@ -160,6 +160,15 @@ __declspec(dllexport) int32_t   UE5_GetGodMode();
 __declspec(dllexport) int32_t   UE5_GetProtectState(int32_t* outWant,
                                     int32_t* outLive, int32_t* outResolvable);
 
+// === Movement tuning (Laufen) ===
+// Single-call "set percent" for the local pawn's CharacterMovement float knobs.
+// knobId: 0 = MaxWalkSpeed, 1 = GravityScale, 2 = JumpZVelocity. `percent` is the
+// user-facing slider value — 100 (±0.5) means OFF (restore base). For knobId 2
+// (jump) `percent` is jump HEIGHT % (applied JumpZVelocity multiplier = sqrt).
+// Returns 1 (active) / 0 (off) / negative Laufen::MoveResult. CE Lua uses the
+// Mimic mailbox (CMD_MOVEMENT=10) — executeCodeEx cannot read return values.
+__declspec(dllexport) int32_t   UE5_SetMovementPercent(int32_t knobId, double percent);
+
 // === Mailbox (CE Lua shared memory interface) ===
 // Returns the address of the g_invokeMailbox buffer.
 // CE Lua can also use getAddress("g_invokeMailbox") directly.

@@ -1343,6 +1343,12 @@ fallback (game may snap back). Codes (§8): 0 OK, -1 not-init, -2 no controller,
 → { "code":0,"current":600.0,"base":600.0,"multiplier":1.0,"active":false,"resolved":true }
 ```
 
+The CE Lua path uses the Mimic mailbox `CMD_MOVEMENT=10` (instanceAddr = knobId
+0/1/2, paramsData[0..7] = double percent; **100% = OFF**, knob 2 = jump HEIGHT %),
+driven by the `UE5_SetMovementPercent(knobId, percent)` export — `executeCodeEx`
+can't read export return values. The Teleport tab's "Add action records to CE" /
+"Save .CT" emit stateful movement toggles that poke this mailbox.
+
 The CE Lua path uses the Mimic mailbox `CMD_TELEPORT=8` instead (see
 [teleport-spec.md](teleport-spec.md) §8) — `executeCodeEx` can't read export
 return values.

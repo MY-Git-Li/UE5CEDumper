@@ -1870,9 +1870,27 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 if (await _aobMaker!.CreateAAScriptAsync(s.Desc, script, autoActivate: false))
                     ok++;
             }
-            StatusText = $"Added {ok}/{specs.Length} Teleport action records to CE " +
-                         "(tick a record to fire it once; bind CE hotkeys as you like).";
-            _log.Info($"Teleport actions -> CE via AOBMaker ({ok}/{specs.Length})");
+            // Movement-tuning toggles (Laufen) baked at the current slider % —
+            // stateful records (tick = apply %, untick = OFF). 100% = OFF.
+            var moveSpecs = new (string Desc, MovementScriptGenerator.Knob Knob, double Percent)[]
+            {
+                ($"Movement: Move Speed ({MoveSpeedMultiplier * 100:0}%)",
+                    MovementScriptGenerator.Knob.WalkSpeed, MoveSpeedMultiplier * 100),
+                ($"Movement: Gravity ({GravityMultiplier * 100:0}%)",
+                    MovementScriptGenerator.Knob.Gravity, GravityMultiplier * 100),
+                ($"Movement: Super Jump ({SuperJumpHeightMultiplier * 100:0}% height)",
+                    MovementScriptGenerator.Knob.Jump, SuperJumpHeightMultiplier * 100),
+            };
+            foreach (var s in moveSpecs)
+            {
+                string script = MovementScriptGenerator.Generate(s.Knob, s.Percent);
+                if (await _aobMaker!.CreateAAScriptAsync(s.Desc, script, autoActivate: false))
+                    ok++;
+            }
+            int total = specs.Length + moveSpecs.Length;
+            StatusText = $"Added {ok}/{total} Teleport + Movement records to CE " +
+                         "(teleport = momentary; movement = on/off toggle; bind CE hotkeys as you like).";
+            _log.Info($"Teleport + Movement actions -> CE via AOBMaker ({ok}/{total})");
         }
         catch (Exception ex)
         {
@@ -1891,6 +1909,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 RelativeDistance, RelativeHorizontal,
                 CoordX, CoordY, CoordZ, CoordSetRotation,
                 CoordPitch, CoordYaw, CoordRoll);
+            // Movement-tuning toggles (Laufen) baked at the current slider %.
+            rows.AddRange(MovementScriptGenerator.BuildBatchRows(
+                MoveSpeedMultiplier * 100, GravityMultiplier * 100,
+                SuperJumpHeightMultiplier * 100));
             string ct = CheatTableBuilder.Build("Teleport — UE5CEDumper", rows);
             var path = await _platform.ShowSaveFileDialogAsync(
                 defaultFileName: CheatTableBuilder.DefaultFileName("Teleport", DateTime.Now),

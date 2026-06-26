@@ -130,7 +130,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 |      +-- Tot      (Cancellation)  <- Tot::Requested() flag; Fern disconnect-monitor + shutdown-abort stop long ops (build 936) |
 |      +-- Wirbel   (Teleport)      <- marker save/recall + cursor + camera POV + directional/explicit-coord TP + force mouse cursor (bShowMouseCursor) (build 1144); get_pose surfaces loc/vel FVector owner+offset for per-vector Locate-in-GWorld (1780); CMD_TELEPORT=8 mailbox (ops 0-15) |
 |      +-- Solitar  (GodMode)       <- force AActor::bCanBeDamaged (FBoolProperty bit) + re-assert worker; CMD_PROTECT=9 mailbox on/off (build 1251) |
-|      +-- Laufen   (MovementTuning)<- force per-pawn CMC float knobs MaxWalkSpeed/GravityScale/JumpZVelocity × multiplier of captured base + re-assert worker (write-on-drift, respawn re-capture); pipe-only get/set_movement_multiplier/reset_movement (build 1792) |
+|      +-- Laufen   (MovementTuning)<- force per-pawn CMC float knobs MaxWalkSpeed/GravityScale/JumpZVelocity × multiplier of captured base + re-assert worker (write-on-drift, respawn re-capture); pipe get/set_movement_multiplier/reset_movement + SetKnobPercent (100%=off, jump √height) via UE5_SetMovementPercent export + Mimic CMD_MOVEMENT=10 mailbox for CE Lua/.CT (build 1799) |
 |      +-- Edel     (CurrentTarget) <- auto-detect the player's current target: GWorld→PC→Pawn, score outgoing object-ptr fields (structural is-Actor gate + keyword boost); get_current_target pipe-only (build 1400) |
 +----------------------+-------------------------------+
                        | Named Pipe: \\.\pipe\UE5DumpBfx

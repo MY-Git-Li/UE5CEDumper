@@ -966,6 +966,12 @@ int32_t UE5_GetProtectState(int32_t* outWant, int32_t* outLive, int32_t* outReso
     return rc;
 }
 
+// === Movement tuning (Laufen) ===
+
+int32_t UE5_SetMovementPercent(int32_t knobId, double percent) {
+    return Laufen::SetKnobPercent(knobId, percent);
+}
+
 // ============================================================================
 // ProcessEvent vtable detection (build 648+)
 //
