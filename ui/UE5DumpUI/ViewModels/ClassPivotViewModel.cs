@@ -388,9 +388,11 @@ public partial class ClassPivotViewModel : ViewModelBase
     /// change-driven discovery "Use →" (<see cref="UseDiscoverCandidateAsync"/>).</summary>
     private async Task<bool> SelectClassAndTickPropAsync(string className, string? propName)
     {
-        // Classes now always holds the full (denylist-filtered) set — the picker filters
-        // internally — so the match is found without clearing any list-level filter.
-        var match = Classes.FirstOrDefault(c => c.ClassName == className);
+        // Clear any active class filter so the target class is visible in the picker, then
+        // match against the FULL list (_allClasses) — Classes itself is now the filtered
+        // view, which might not contain the handoff target.
+        if (!string.IsNullOrEmpty(ClassFilter)) ClassFilter = "";   // OnClassFilterChanged → rebuilds Classes to the full set
+        var match = _allClasses.FirstOrDefault(c => c.ClassName == className);
         if (match == null)
         {
             StatusText = $"'{className}' is not in the selected snapshot — capture it, then retry.";
@@ -514,7 +516,7 @@ public partial class ClassPivotViewModel : ViewModelBase
         if (_classCache.TryGetValue(key, out var cachedList))
         {
             ApplyClassList(cachedList);
-            StatusText = $"{_allClasses.Count:N0} classes — pick one to pivot.";
+            StatusText = $"{_allClasses.Count:N0} classes — filter + pick one to pivot.  {CacheNote()}";
             return;
         }
 
@@ -531,10 +533,14 @@ public partial class ClassPivotViewModel : ViewModelBase
             var list = await Task.Run(() => arrayMode
                 ? _store.ListPivotArrayClassesAsync(snapId, ct)
                 : _store.ListPivotClassesAsync(snapId, ct), ct);
-            if (id != _classLoadId) return;   // a newer snapshot/source superseded us
-            _classCache[key] = list;          // cache for the rest of the session
+            // Cache BEFORE the supersession guard: the (snapId, arrayMode) key is immutable
+            // (write-once snapshot), so a superseded-but-complete result is still correct to
+            // cache. This collapses a rapid re-fire to cache hits instead of re-opening the DB
+            // every time (defence against any picker re-selection storm hammering the DB).
+            _classCache[key] = list;
+            if (id != _classLoadId) return;   // superseded -> skip the UI apply only
             ApplyClassList(list);
-            StatusText = $"{_allClasses.Count:N0} classes — pick one to pivot.";
+            StatusText = $"{_allClasses.Count:N0} classes — filter + pick one to pivot.  {CacheNote()}";
         }
         catch (OperationCanceledException)
         {
@@ -558,15 +564,42 @@ public partial class ClassPivotViewModel : ViewModelBase
         ApplyClassFilter();
     }
 
+    /// <summary>Lightweight memory/cache readout for the status line (the user asked to see
+    /// "how much memory is used"). The cached class + per-class field lists live on the managed
+    /// heap; this shows the cached-field-set count and the current heap size. Cheap to compute.</summary>
+    private string CacheNote()
+        => $"({_fieldCache.Count} field-set(s) cached · ~{GC.GetTotalMemory(false) / (1024.0 * 1024.0):N0} MB heap)";
+
     private void ApplyClassFilter()
     {
-        // The class picker (AutoCompleteBox) filters INTERNALLY over this list, so
-        // Classes just holds the full denylist-filtered set and is rebuilt only when the
-        // class list itself changes (snapshot / source switch) — never per keystroke.
-        // (The old per-keystroke Clear()/Add() rebuild left the ComboBox unable to
-        // commit a pick — dropdown closed, nothing selected.) Detach the selection
-        // before rebuilding (Avalonia selection-model safety).
-        UiCollection.Reset(Classes, _allClasses, () => SelectedClass = null);
+        // Filter the class dropdown by a case-insensitive substring of the ClassFilter
+        // TextBox (so "attributeset" surfaces "CharacterAttributeSet"). The picker is a
+        // plain ComboBox bound to this filtered Classes collection — NOT an AutoCompleteBox
+        // (whose internal Text<->SelectedItem reconciliation oscillated SelectedClass and
+        // froze the UI). Rebuild via UiCollection.Reset, which DETACHES SelectedClass before
+        // mutating the collection — that detach is what makes a per-keystroke rebuild safe
+        // (the old Clear()/Add() without the detach is what dropped clicks). Typing here sets
+        // SelectedClass=null → no field load, no DB — so filtering never touches the DB.
+        var f = ClassFilter?.Trim() ?? "";
+        var view = (f.Length == 0
+            ? (IEnumerable<PivotClassInfo>)_allClasses
+            : _allClasses.Where(c =>
+                c.ClassName.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0
+                || c.Display.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0)).ToList();
+
+        // Skip the rebuild when the filtered set is identical to what's already shown. A spurious
+        // re-filter (same text — e.g. fired again right after a click) must NOT Clear()/Add() the
+        // collection: the UiCollection.Reset detach below would null SelectedClass and wipe the
+        // just-picked class. That detach firing post-click is the "click flickers then clears, no
+        // selection" bug seen with BOTH the ComboBox and the ListBox.
+        if (Classes.Count == view.Count && Classes.SequenceEqual(view)) return;
+
+        // Genuine filter change: rebuild (the detach is required for Avalonia selection-model
+        // safety), then RE-SELECT the previously-picked class if it survived the filter — so even
+        // a real filter change can't silently drop a live selection that still matches.
+        var keep = SelectedClass;
+        UiCollection.Reset(Classes, view, () => SelectedClass = null);
+        if (keep != null && Classes.Contains(keep)) SelectedClass = keep;
     }
 
     // Per-(snapshot, class) field-list cache — same immutability rationale as the
@@ -604,10 +637,15 @@ public partial class ClassPivotViewModel : ViewModelBase
         try
         {
             var fields = await Task.Run(() => _store.ListPivotFieldsAsync(snapId, cls, ct), ct);
-            // A newer class selection superseded us — leave its results intact.
-            // (Clear is deferred to here so a stale load can't wipe the latest.)
-            if (id != _fieldLoadId) return;
+            // Cache BEFORE the supersession guard: the (snapId, cls) key is immutable
+            // (write-once snapshot), so a superseded-but-complete result is still correct to
+            // cache. This collapses a rapid re-fire to cache hits (no repeated OpenAsync) —
+            // the defence that makes the ~135/sec DB-open storm impossible regardless of any
+            // future picker re-selection storm.
             _fieldCache[key] = fields;
+            // A newer class selection superseded us — skip the UI apply only (so a stale load
+            // can't wipe the latest); the cache above is still populated.
+            if (id != _fieldLoadId) return;
             ApplyFieldList(fields, cls);
         }
         catch (OperationCanceledException)
@@ -664,7 +702,7 @@ public partial class ClassPivotViewModel : ViewModelBase
                 ticked++;
             }
         }
-        StatusText = $"{Fields.Count} fields · suggested key: {SelectedKeyField ?? "(none)"}";
+        StatusText = $"{Fields.Count} fields · suggested key: {SelectedKeyField ?? "(none)"}  {CacheNote()}";
     }
 
     /// <summary>List live DataTable instances (and subclasses) for the C4 picker.</summary>

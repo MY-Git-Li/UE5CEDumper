@@ -331,6 +331,37 @@ public class SnapshotStoreTests : IDisposable
         Assert.Single(await _store.ListSnapshotsAsync(ct));
     }
 
+    // Regression for the post-capture "Loading fields…" Not-Responding freeze: even when the
+    // capture stays UNDER quota (no eviction), EnforceQuota must fold the capture-grown WAL
+    // back into the .db. A bloated, un-checkpointed WAL left behind made the next reader (the
+    // Class Pivot field load) contend for the WAL read-mark lock and spin the -shm lock byte.
+    // Pre-fix the unlimited/under-quota path returned WITHOUT checkpointing, leaving -wal > 0.
+    [Fact]
+    public async Task EnforceQuota_FoldsWalEvenWhenUnderQuota()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        long id = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "wal" }, ct);
+
+        // Write enough committed rows to leave un-checkpointed frames in the -wal file
+        // (a plain COMMIT does not truncate the WAL — only a TRUNCATE checkpoint does).
+        var objs = new List<SnapshotCapturedObject>();
+        for (int i = 0; i < 500; i++)
+            objs.Add(MakeObject(i, ("X", "IntProperty", "01000000"), ("Y", "IntProperty", "02000000")));
+        await _store.WriteChunkAsync(id, objs, ct);
+        await _store.FinalizeSnapshotAsync(id, objs.Count, objs.Count * 2, ct);
+
+        string wal = _store.DatabasePath + "-wal";
+        long walBefore = File.Exists(wal) ? new FileInfo(wal).Length : 0;
+        Assert.True(walBefore > 0, "precondition: the capture should leave a non-empty WAL");
+
+        // Unlimited (under-quota) call: keeps the snapshot, but MUST still fold the WAL.
+        Assert.Equal(0, await _store.EnforceQuotaAsync(0, ct));
+        Assert.Single(await _store.ListSnapshotsAsync(ct));
+
+        long walAfter = File.Exists(wal) ? new FileInfo(wal).Length : 0;
+        Assert.True(walAfter == 0, $"WAL not folded by EnforceQuota: {walAfter} bytes remain (was {walBefore})");
+    }
+
     [Fact]
     public async Task GetUsage_ReportsSizeAndCount()
     {

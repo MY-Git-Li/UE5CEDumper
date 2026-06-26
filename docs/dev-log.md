@@ -16,6 +16,55 @@ builds ≤696 in
 
 -----
 
+## 2026-06-26 — Class Pivot post-capture freeze fixed: runaway connection-open loop + a robust class picker (build 1764; UI/C#+AXAML-only, no DLL/schema/wire change; in-game VERIFIED)
+
+Selecting a class in Class Pivot froze the whole UI ("Not Responding", low CPU, heavy DB I/O)
+— `CharacterAttributeSet` has 7 instances and the field query is indexed, so the cost made no
+sense. Took several rounds (two wrong diagnoses) before the user's Process Monitor captures
+nailed it.
+
+### Root cause (ProcMon-proven, not what it looked like)
+The `.db-shm` lock churn at offset 123 was all `Exclusive:False` + `Result=SUCCESS` (granted
+every time) with ~135–375 `.db` `CreateFile`/`Close` per second, opens spaced <5 ms apart =
+a **runaway loop re-opening a fresh `SqliteConnection`**, not lock contention and not WAL
+bloat (the first two hypotheses — both wrong). The driver: the merge-1742 class picker was an
+**`AutoCompleteBox` with a two-way `SelectedItem` binding**; its internal Text↔SelectedItem
+reconciliation oscillated `SelectedClass` (item↔null) and re-fired `OnSelectedClassChanged →
+LoadFieldsAsync` ~135×/sec. Every other `AutoCompleteBox` in the app binds `Text`, never
+`SelectedItem` — this was the only one. (The query pages came warm from the pooled connection,
+so there were zero data `ReadFile`s — which is what made the ProcMon trace look like pure lock
+spinning.)
+
+### The picker, done right (after two dead ends)
+- `AutoCompleteBox` `Text`-bound (round 2) — STILL oscillated (object items + `ValueMemberBinding`).
+- filter `TextBox` + `ComboBox` (round 3) — no freeze, but the dropdown **Popup dropped the
+  click** after a per-keystroke `ItemsSource` rebuild (the exact bug the original merge cited).
+- **filter `TextBox` + `ListBox` (shipped)** — a ListBox has no Popup, so a live-filtered list
+  commits clicks reliably. Plus a VM-side immunity: `ApplyClassFilter` **skips the rebuild when
+  the filtered set is unchanged** (`SequenceEqual`) and **re-selects a pick that survives the
+  filter** — so a spurious post-click re-filter can't null `SelectedClass` and wipe the
+  selection (the "datagrid flickers then clears" round-4 symptom). Typing the filter sets
+  `SelectedClass=null` → no field load → **the DB is never touched while filtering**.
+
+### Bundled hygiene (correct, but not the root-cause fix)
+- `OpenAsync`: `PRAGMA busy_timeout=5000` (bounds any future lock wait instead of busy-spinning).
+- `EnforceQuotaAsync`: now **always** folds the WAL with `wal_checkpoint(TRUNCATE)` (it used to
+  skip it under quota, leaving a bloated `-wal`), off the UI thread.
+- `LoadFieldsAsync`/`LoadClassesAsync`: write the per-`(snapshot,class)` cache **before** the
+  supersession guard (immutable key → a superseded-but-complete result is still correct), so a
+  re-fire collapses to cache hits.
+- Per-class field lists load on a deliberate pick and cache permanently; a status readout shows
+  `N classes · M field-set(s) cached · ~X MB heap`.
+
+### UX
+- The "Pivot target — Source · Snapshot · Class" panel is now a collapsible `Expander`.
+
+UI/C#+AXAML-only. Tests **2029 C#** (added the supersession-cache + filter-preserve/clear
+regressions). In-game verified: filter `attribute` → pick `CharacterAttributeSet` → 7 groups
+projected, no freeze.
+
+-----
+
 ## 2026-06-25 — Class Pivot "Suggest Targets" made usable: bounded N-snapshot discovery + shape ranking + UX (build 1742; UI/C#-only, no DLL/schema/wire change; NOT in-game verified)
 
 The change-driven discovery front-door ("🔍 Suggest Targets") was **unusable** — clicking

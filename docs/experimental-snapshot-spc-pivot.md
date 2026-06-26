@@ -266,10 +266,18 @@ snapshots. Pure C# over SQLite — **zero DLL change** (except optional C4).
 > `PivotDiscoveryEngine` gained a **shape** sub-score: with ≥3 snapshots a one-time change
 > (changed in a single interval) is boosted, a monotonic trend is neutral, per-frame jitter
 > is demoted — the energy-bar §1b "unchanged, unchanged, changed" case. `class_counts`
-> supplies the Total. Also: result-row **Locate in GWorld/GameEngine**, an **AutoCompleteBox**
-> class picker (the old filter-TextBox + ComboBox dropped clicks after a per-keystroke
-> ItemsSource rebuild), and a **resizable + filterable** results grid. UI/C#-only, no DLL/
-> schema/wire change. ⚠ in-game live-verify pending.
+> supplies the Total. Also: result-row **Locate in GWorld/GameEngine** and a **resizable +
+> filterable** results grid. UI/C#-only, no DLL/schema/wire change.
+>
+> **Class picker (build 1764, in-game VERIFIED):** the build-1742 `AutoCompleteBox` froze the UI
+> — its two-way `SelectedItem` binding oscillated `SelectedClass` (item↔null) and re-fired the
+> field load ~135×/sec = a runaway connection-open loop (ProcMon: `.db-shm` offset-123 churn, all
+> `Result=SUCCESS` granted). Replaced with a **filter `TextBox` + `ListBox`** (a ComboBox dropdown
+> drops clicks on a per-keystroke rebuild; a ListBox has no Popup so clicks commit). `ApplyClassFilter`
+> skips the rebuild when the filtered set is unchanged and re-selects a surviving pick, so a spurious
+> post-click re-filter can't wipe the selection. Typing the filter never touches the DB; a deliberate
+> pick loads that class's fields once (cached). + `busy_timeout=5000`, an always-on post-capture
+> `wal_checkpoint(TRUNCATE)`, cache-before-supersession, and a collapsible Source `Expander`.
 >
 > **Status (build 1160): C1 + C3-lite + **C3 change-driven discovery** + C4 + C5 + C6 SHIPPED.**
 > **C3 change-driven discovery (build 1160)** is the automatic *front-door* that
