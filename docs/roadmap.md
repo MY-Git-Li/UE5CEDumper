@@ -7,7 +7,13 @@ trail. Build number tags reflect when each row reached its current
 state.
 
 > **Last refreshed**: 2026-05-29 (build 797) for the rows below. **dev = main @
-> build ~937 (PR #238).** Newer work lives in [dev-log.md](dev-log.md):
+> build 1832 (PR #393, 2026-06-27).** Newer work lives in [dev-log.md](dev-log.md):
+> - builds **1827–1832 (2026-06-27)** — **Snapshot captures gameplay classes' top-level
+>   scalar arrays** (e.g. a Pawn's `SupportActionGauge[]` `TArray<float>`) — previously
+>   skipped at capture so Diff/SPC/Pivot couldn't see them (Value Search always could);
+>   gated by `IsSnapshotGameplayClass` (in-game VERIFIED on Elliot). Plus an **app-wide
+>   DataGrid horizontal-overflow fix** (17 grids: star→fixed `Width`+`MinWidth` +
+>   `HorizontalScrollBarVisibility="Auto"`) and a **"Diff is always deep"** note by Run Diff.
 > - builds **1764–1799 (2026-06-26)** — **Movement tuning** (Laufen module): force the
 >   player pawn's `UCharacterMovementComponent` floats — **Move Speed** (MaxWalkSpeed),
 >   **Gravity** (GravityScale), **Super Jump** (JumpZVelocity; slider is jump *height*,
