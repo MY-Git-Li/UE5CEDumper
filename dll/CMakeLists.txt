@@ -65,6 +65,25 @@ configure_file(
     @ONLY
 )
 
+# ------------------------------------------------------------
+# Keep the PE VERSIONINFO in sync with build_number.txt on incremental builds.
+#
+# version.rc embeds FileVersion / ProductVersion / GitCommit via
+# #include "BuildInfo.h" (regenerated above on every configure — build number,
+# git hash, timestamp). But Ninja does NOT scan .rc files for their #include
+# dependencies the way it does .cpp (the RC compile rule emits no depfile), so a
+# changed BuildInfo.h never retriggers the resource compile. With the build dir
+# kept across runs (incremental Ninja), the DLL kept relinking the STALE
+# version.res — its embedded version froze at the first kept-build (the .cpp TUs
+# that include BuildInfo.h recompiled fine, so logs were current, but the PE
+# version info lagged). OBJECT_DEPENDS adds the missing edge: the resource object
+# explicitly depends on the generated header, so each build recompiles version.rc
+# and the embedded version/git info stays in lockstep with the UI. Directory-
+# scoped → applies to the main DLL and every proxy target listing src/version.rc.
+# ------------------------------------------------------------
+set_source_files_properties(src/version.rc PROPERTIES
+    OBJECT_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/generated/BuildInfo.h")
+
 # ============================================================
 # MinHook — inline hooking library (MIT, vendor submodule)
 # Built as a separate static C library to avoid C/C++ linkage
