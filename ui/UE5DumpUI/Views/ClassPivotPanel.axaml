@@ -64,15 +64,16 @@
              Use → pivots it (selects the class, ticks the property, runs). -->
         <DataGrid ItemsSource="{Binding DiscoverResults}" SelectedItem="{Binding SelectedDiscoverResult}"
                   Height="170" IsReadOnly="True" GridLinesVisibility="Horizontal" Background="#1E1E1E"
-                  CanUserResizeColumns="True" CanUserSortColumns="True">
+                  CanUserResizeColumns="True" CanUserSortColumns="True"
+                  HorizontalScrollBarVisibility="Auto">
           <DataGrid.Columns>
-            <DataGridTextColumn Header="{StaticResource str.Pivot.Discover.Col.Class}"   Binding="{Binding ClassName}"      SortMemberPath="ClassName"        Width="*"/>
-            <DataGridTextColumn Header="{StaticResource str.Pivot.Discover.Col.Prop}"    Binding="{Binding PropName}"       SortMemberPath="PropName"         Width="1.2*"/>
+            <DataGridTextColumn Header="{StaticResource str.Pivot.Discover.Col.Class}"   Binding="{Binding ClassName}"      SortMemberPath="ClassName"        Width="280" MinWidth="180"/>
+            <DataGridTextColumn Header="{StaticResource str.Pivot.Discover.Col.Prop}"    Binding="{Binding PropName}"       SortMemberPath="PropName"         Width="260" MinWidth="160"/>
             <DataGridTextColumn Header="{StaticResource str.Pivot.Discover.Col.Changed}" Binding="{Binding ChangedDisplay}" SortMemberPath="InstancesChanged" Width="80"/>
             <DataGridTextColumn Header="{StaticResource str.Pivot.Discover.Col.Dir}"     Binding="{Binding Direction}"      SortMemberPath="Direction"        Width="44"/>
             <DataGridTextColumn Header="{StaticResource str.Pivot.Discover.Col.Cat}"     Binding="{Binding CategoryName}"   SortMemberPath="InterestScore"    Width="90"/>
             <DataGridTextColumn Header="{StaticResource str.Pivot.Discover.Col.Shape}"   Binding="{Binding ShapeLabel}"     SortMemberPath="ShapeScore"       Width="90"/>
-            <DataGridTextColumn Header="{StaticResource str.Pivot.Discover.Col.Seq}"     Binding="{Binding SampleSequence}" SortMemberPath="SampleSequence"   Width="1.5*"/>
+            <DataGridTextColumn Header="{StaticResource str.Pivot.Discover.Col.Seq}"     Binding="{Binding SampleSequence}" SortMemberPath="SampleSequence"   Width="300" MinWidth="180"/>
             <DataGridTextColumn Header="{StaticResource str.Pivot.Discover.Col.Score}"   Binding="{Binding ScoreDisplay}"   SortMemberPath="Score"            Width="70"/>
           </DataGrid.Columns>
         </DataGrid>
@@ -216,7 +217,8 @@
     <DataGrid Grid.Row="0" ItemsSource="{Binding Fields}" IsReadOnly="False"
               GridLinesVisibility="Horizontal" Background="#1E1E1E"
               IsEnabled="{Binding !IsBusy}"
-              CanUserResizeColumns="True" CanUserSortColumns="True">
+              CanUserResizeColumns="True" CanUserSortColumns="True"
+              HorizontalScrollBarVisibility="Auto">
       <DataGrid.Columns>
         <!-- Composite group key: tick to add this field to the Field-mode key tuple
              (alongside the primary Key field above). Inert in Identity/DataTable/Array. -->
@@ -235,7 +237,7 @@
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
-        <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Field}"    Binding="{Binding Name}"            SortMemberPath="Name"          IsReadOnly="True" Width="*"/>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Field}"    Binding="{Binding Name}"            SortMemberPath="Name"          IsReadOnly="True" Width="260" MinWidth="160"/>
         <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Type}"     Binding="{Binding DeclaredType}"    SortMemberPath="DeclaredType"  IsReadOnly="True" Width="130"/>
         <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Distinct}" Binding="{Binding DistinctCount}"   SortMemberPath="DistinctCount" IsReadOnly="True" Width="80"/>
         <DataGridTextColumn Header="{StaticResource str.Pivot.Col.Insts}"    Binding="{Binding InstanceCount}"   SortMemberPath="InstanceCount" IsReadOnly="True" Width="90"/>
@@ -259,11 +261,12 @@
       <!-- Results: one row per group -->
       <DataGrid Grid.Row="1" ItemsSource="{Binding Results}" SelectedItem="{Binding SelectedResult}"
                 IsReadOnly="True" GridLinesVisibility="Horizontal" Background="#1E1E1E"
-                CanUserResizeColumns="True" CanUserSortColumns="True">
+                CanUserResizeColumns="True" CanUserSortColumns="True"
+                HorizontalScrollBarVisibility="Auto">
       <DataGrid.Columns>
         <DataGridTextColumn Header="{StaticResource str.Pivot.Res.Count}"  Binding="{Binding Count}"         SortMemberPath="Count"         Width="70"/>
-        <DataGridTextColumn Header="{StaticResource str.Pivot.Res.Key}"    Binding="{Binding KeyValue}"      SortMemberPath="KeyValue"      Width="*"/>
-        <DataGridTextColumn Header="{StaticResource str.Pivot.Res.Values}" Binding="{Binding ValuesDisplay}" SortMemberPath="ValuesDisplay" Width="2*"/>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Res.Key}"    Binding="{Binding KeyValue}"      SortMemberPath="KeyValue"      Width="320" MinWidth="200"/>
+        <DataGridTextColumn Header="{StaticResource str.Pivot.Res.Values}" Binding="{Binding ValuesDisplay}" SortMemberPath="ValuesDisplay" Width="440" MinWidth="240"/>
         </DataGrid.Columns>
       </DataGrid>
     </Grid>

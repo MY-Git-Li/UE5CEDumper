@@ -396,14 +396,15 @@
                   Background="#1E1E1E"
                   Foreground="#D4D4D4"
                   FontFamily="Consolas" FontSize="11"
-                  MaxHeight="160">
+                  MaxHeight="160"
+                  HorizontalScrollBarVisibility="Auto">
           <DataGrid.Columns>
             <DataGridTextColumn Header="Reference Path"
                                 Binding="{Binding DisplayPath}" SortMemberPath="DisplayPath"
-                                Width="2*"/>
+                                Width="420" MinWidth="220"/>
             <DataGridTextColumn Header="Owner Class"
                                 Binding="{Binding OwnerClassName}" SortMemberPath="OwnerClassName"
-                                Width="*"/>
+                                Width="220" MinWidth="140"/>
             <DataGridTextColumn Header="Field Type"
                                 Binding="{Binding FieldType}" SortMemberPath="FieldType"
                                 Width="120"/>

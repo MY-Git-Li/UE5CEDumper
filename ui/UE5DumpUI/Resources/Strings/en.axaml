@@ -412,6 +412,8 @@
     <sys:String x:Key="str.Snapshot.Diff.Old">Old:</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.New">New:</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.Run">Run Diff</sys:String>
+    <sys:String x:Key="str.Snapshot.Diff.DeepNote">Diff is always deep</sys:String>
+    <sys:String x:Key="str.Tip.Snapshot.Diff.DeepNote">Snapshot Diff always includes nested array / struct-array element changes (e.g. SupportActionGauge[3], shown as Array[N]) — no Deep toggle is needed here. The Deep toggle exists only in Group mode, where it opts array elements in as group-match slots.</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.ClassFilter">Class:</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.PropFilter">Field:</sys:String>
     <sys:String x:Key="str.Snapshot.Diff.Dir">Change:</sys:String>

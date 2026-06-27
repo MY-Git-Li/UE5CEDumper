@@ -7328,7 +7328,8 @@ std::string RenderInnerKey(const FieldInfo& kf, uintptr_t elemAddr) {
 void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
                          Radar::DataType numericScope, int32_t arrayCap,
                          std::vector<Aura::SnapshotArray>& out,
-                         Aura::NumericFamily family = Aura::NumericFamily::Any) {
+                         Aura::NumericFamily family = Aura::NumericFamily::Any,
+                         bool captureTopLevelScalarArrays = false) {
     if (!obj || !cls) return;
     if (arrayCap <= 0) arrayCap = 256;
 
@@ -7362,11 +7363,16 @@ void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
     WalkContainerLeaves(obj, cls, /*pathPrefix*/ "", /*depth*/ 0, lim,
         [&](const ContainerLeaf& lf) {
             // Skip TOP-LEVEL leaf-containers (a TArray<int> directly on the object,
-            // depth==1): the main capture loop never tracked those, and capturing
-            // every object's scalar arrays would balloon the DB. Struct-array
-            // element fields (e.g. SaveSlotList[1].GP, depth 1) ARE captured, and
-            // nested leaf-containers (Tunes[N], depth >= 2) too. (build 1204)
-            if (lf.leafName.empty() && lf.depth < 2) return;
+            // depth==1) by default: the main capture loop never tracked those, and
+            // capturing every object's scalar arrays would balloon the DB.
+            // EXCEPTION (build 1827): for GAMEPLAY classes (captureTopLevelScalarArrays
+            // — Actor/Pawn/component/PlayerState/... — the value carriers) keep these.
+            // A Pawn's numeric stat-bank TArray<float> (e.g. SupportActionGauge[]) is
+            // exactly a hack target users hunt, and was previously invisible to Snapshot
+            // Diff / SPC / Pivot (Value Search already finds it via the live Array scan).
+            // Struct-array element fields (e.g. SaveSlotList[1].GP, depth 1) ARE always
+            // captured, and nested leaf-containers (Tunes[N], depth >= 2) too. (build 1204)
+            if (lf.leafName.empty() && lf.depth < 2 && !captureTopLevelScalarArrays) return;
             // Snapshot tracks only numeric leaves within the configured scope.
             Radar::DataType ldt;
             if (!Radar::TryDataTypeFromPropertyTypeName(lf.leafType, ldt)) return;
@@ -8322,6 +8328,23 @@ static bool IsSnapshotNoiseClass(uintptr_t cls, const std::string& classPath) {
     return noise;
 }
 
+// True if `cls` is a GAMEPLAY class (Actor/component/Pawn/Character/Controller/
+// PlayerState/GameInstance-derived; see SnapshotGameplayKeepBases) — the usual
+// carriers of the values users hunt. Used to opt these classes into TOP-LEVEL
+// scalar-array capture (e.g. a Pawn's numeric stat-bank TArray<float>), which is
+// otherwise skipped for every object to keep the DB small (see the guard in
+// CaptureStructArrays). Thread-local memoized on the class pointer, mirroring
+// IsSnapshotNoiseClass's super-chain-walk amortization. Thread-safe: pure
+// read-only memory reads + a per-worker cache. (build 1827)
+static bool IsSnapshotGameplayClass(uintptr_t cls) {
+    thread_local std::unordered_map<uintptr_t, char> verdictCache;
+    auto it = verdictCache.find(cls);
+    if (it != verdictCache.end()) return it->second != 0;
+    bool keep = ClassDerivesFromAny(cls, SnapshotGameplayKeepBases());
+    verdictCache.emplace(cls, keep ? char{1} : char{0});
+    return keep;
+}
+
 SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
                                          bool gameOnly,
                                          Radar::DataType numericScope,
@@ -8441,8 +8464,13 @@ SnapshotChunkResult CaptureSnapshotChunk(int32_t offset, int32_t limit,
             CaptureDirectStructFields(obj, cls, numericScope, family, so.fields);
 
             // Container-element leaves at any (bounded) depth — struct-array / map /
-            // set elements + nested leaf-containers (build 1204).
-            CaptureStructArrays(obj, cls, numericScope, arrayCap, so.arrays, family);
+            // set elements + nested leaf-containers (build 1204). Gameplay classes
+            // (Actor/Pawn/component/... — the value carriers) additionally capture
+            // their TOP-LEVEL numeric scalar arrays (e.g. a Pawn's stat-bank
+            // TArray<float>); non-gameplay classes skip those to keep the DB small.
+            // (build 1827)
+            CaptureStructArrays(obj, cls, numericScope, arrayCap, so.arrays, family,
+                                /*captureTopLevelScalarArrays*/ IsSnapshotGameplayClass(cls));
 
             // Native-C (P3, opt-in): append this object's unmanaged-hole guesses as
             // synthetic "<raw@0xNN>" fields so the snapshot also carries native
