@@ -629,11 +629,12 @@
                   Background="#1E1E1E"
                   Foreground="#D4D4D4"
                   FontSize="12"
-                  FontFamily="Consolas, Menlo, monospace">
+                  FontFamily="Consolas, Menlo, monospace"
+                  HorizontalScrollBarVisibility="Auto">
           <DataGrid.Columns>
             <DataGridTextColumn Header="Class" Binding="{Binding LocationLabel}" Width="280"/>
             <DataGridTextColumn Header="Instance" Binding="{Binding InstanceName}" Width="180"/>
-            <DataGridTextColumn Header="Matched values" Binding="{Binding SlotSummary}" Width="*"/>
+            <DataGridTextColumn Header="Matched values" Binding="{Binding SlotSummary}" Width="440" MinWidth="240"/>
             <DataGridTemplateColumn Header="" Width="Auto">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate x:DataType="m:GroupCandidate">

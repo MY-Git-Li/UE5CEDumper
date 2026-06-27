@@ -74,7 +74,8 @@
               BorderThickness="0"
               Background="#1E1E1E"
               Foreground="#D4D4D4"
-              FontFamily="Consolas" FontSize="12">
+              FontFamily="Consolas" FontSize="12"
+              HorizontalScrollBarVisibility="Auto">
       <DataGrid.Columns>
         <DataGridTextColumn Header="{StaticResource str.Related.ColRelation}"
                             Binding="{Binding Relation}"
@@ -83,10 +84,10 @@
         <DataGridTextColumn Header="{StaticResource str.Related.ColObject}"
                             Binding="{Binding Display}"
                             SortMemberPath="Display"
-                            Width="2*" CanUserSort="True"/>
+                            Width="420" MinWidth="220" CanUserSort="True"/>
         <DataGridTextColumn Header="{StaticResource str.Related.ColField}"
                             Binding="{Binding FieldDisplay}"
-                            Width="*" CanUserSort="False"/>
+                            Width="240" MinWidth="140" CanUserSort="False"/>
         <DataGridTextColumn Header="{StaticResource str.Related.ColAddress}"
                             Binding="{Binding Address}"
                             SortMemberPath="Address"

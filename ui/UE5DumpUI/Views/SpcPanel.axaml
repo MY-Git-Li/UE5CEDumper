@@ -65,7 +65,8 @@
     <DataGrid Grid.Row="3" ItemsSource="{Binding SnapshotPicks}" IsReadOnly="False"
               GridLinesVisibility="Horizontal" Background="#1E1E1E"
               IsEnabled="{Binding !IsQuerying}"
-              CanUserResizeColumns="True" CanUserSortColumns="False">
+              CanUserResizeColumns="True" CanUserSortColumns="False"
+              HorizontalScrollBarVisibility="Auto">
       <DataGrid.Columns>
         <DataGridTemplateColumn Header="{StaticResource str.Spc.Col.Use}" Width="50">
           <DataGridTemplateColumn.CellTemplate>
@@ -75,7 +76,7 @@
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>
         <DataGridTextColumn Header="{StaticResource str.Spc.Col.Label}"
-                            Binding="{Binding Label}" IsReadOnly="True" Width="*"/>
+                            Binding="{Binding Label}" IsReadOnly="True" Width="260" MinWidth="160"/>
         <DataGridTextColumn Header="{StaticResource str.Spc.Col.Captured}"
                             Binding="{Binding CapturedAt}" IsReadOnly="True" Width="190"/>
         <DataGridTextColumn Header="{StaticResource str.Spc.Col.Session}"
@@ -160,10 +161,11 @@
     <!-- Results -->
     <DataGrid Grid.Row="5" ItemsSource="{Binding Results}" SelectedItem="{Binding SelectedResult}"
               IsReadOnly="True" GridLinesVisibility="Horizontal" Background="#1E1E1E"
-              CanUserResizeColumns="True" CanUserSortColumns="True">
+              CanUserResizeColumns="True" CanUserSortColumns="True"
+              HorizontalScrollBarVisibility="Auto">
       <DataGrid.Columns>
         <DataGridTextColumn Header="{StaticResource str.Spc.Res.Class}"    Binding="{Binding ClassName}"       SortMemberPath="ClassName"       Width="200"/>
-        <DataGridTextColumn Header="{StaticResource str.Spc.Res.Object}"   Binding="{Binding NormPath}"        SortMemberPath="NormPath"        Width="*"/>
+        <DataGridTextColumn Header="{StaticResource str.Spc.Res.Object}"   Binding="{Binding NormPath}"        SortMemberPath="NormPath"        Width="420" MinWidth="220"/>
         <DataGridTextColumn Header="{StaticResource str.Spc.Res.Field}"    Binding="{Binding PropName}"        SortMemberPath="PropName"        Width="150"/>
         <DataGridTextColumn Header="{StaticResource str.Spc.Res.Type}"     Binding="{Binding DeclaredType}"    SortMemberPath="DeclaredType"    Width="120"/>
         <DataGridTextColumn Header="{StaticResource str.Spc.Res.Sequence}" Binding="{Binding SequenceDisplay}" SortMemberPath="SequenceDisplay" Width="240"/>
@@ -220,7 +222,8 @@
         <!-- Top-N picker grid (height-capped) -->
         <DataGrid ItemsSource="{Binding NoiseRows}" IsReadOnly="False"
                   Height="200" GridLinesVisibility="Horizontal" Background="#1E1E1E"
-                  CanUserResizeColumns="True" CanUserSortColumns="True">
+                  CanUserResizeColumns="True" CanUserSortColumns="True"
+                  HorizontalScrollBarVisibility="Auto">
           <DataGrid.Columns>
             <DataGridTemplateColumn Header="{StaticResource str.Noise.Col.Pick}" Width="50" CanUserSort="False">
               <DataGridTemplateColumn.CellTemplate>
@@ -230,7 +233,7 @@
               </DataGridTemplateColumn.CellTemplate>
             </DataGridTemplateColumn>
             <DataGridTextColumn Header="{StaticResource str.Noise.Col.Class}"
-                                Binding="{Binding ClassName}" SortMemberPath="ClassName" IsReadOnly="True" Width="*"/>
+                                Binding="{Binding ClassName}" SortMemberPath="ClassName" IsReadOnly="True" Width="300" MinWidth="180"/>
             <DataGridTextColumn Header="{StaticResource str.Noise.Col.Hits}"
                                 Binding="{Binding HitCount}" SortMemberPath="HitCount" IsReadOnly="True" Width="80"/>
             <DataGridTextColumn Header="{StaticResource str.Noise.Col.SampleProps}"
@@ -348,7 +351,8 @@
       <DataGrid Grid.Row="3" ItemsSource="{Binding SnapshotPicks}" IsReadOnly="False"
                 GridLinesVisibility="Horizontal" Background="#1E1E1E"
                 IsEnabled="{Binding !IsGroupMatching}"
-                CanUserResizeColumns="True" CanUserSortColumns="False">
+                CanUserResizeColumns="True" CanUserSortColumns="False"
+                HorizontalScrollBarVisibility="Auto">
         <DataGrid.Columns>
           <DataGridTemplateColumn Header="{StaticResource str.Spc.Col.Use}" Width="50">
             <DataGridTemplateColumn.CellTemplate>
@@ -357,7 +361,7 @@
               </DataTemplate>
             </DataGridTemplateColumn.CellTemplate>
           </DataGridTemplateColumn>
-          <DataGridTextColumn Header="{StaticResource str.Spc.Col.Label}"    Binding="{Binding Label}"       IsReadOnly="True" Width="*"/>
+          <DataGridTextColumn Header="{StaticResource str.Spc.Col.Label}"    Binding="{Binding Label}"       IsReadOnly="True" Width="260" MinWidth="160"/>
           <DataGridTextColumn Header="{StaticResource str.Spc.Col.Captured}" Binding="{Binding CapturedAt}"  IsReadOnly="True" Width="190"/>
           <DataGridTextColumn Header="{StaticResource str.Spc.Col.Session}"  Binding="{Binding SessionShort}" IsReadOnly="True" Width="120"/>
           <DataGridTemplateColumn Header="{StaticResource str.Spc.Col.Predicate}" Width="150">
@@ -409,11 +413,12 @@
       <DataGrid Grid.Row="5" ItemsSource="{Binding GroupCandidates}" SelectedItem="{Binding SelectedGroupCandidate}"
                 IsReadOnly="True" GridLinesVisibility="Horizontal" Background="#1E1E1E"
                 RowDetailsVisibilityMode="VisibleWhenSelected"
-                CanUserResizeColumns="True" CanUserSortColumns="True">
+                CanUserResizeColumns="True" CanUserSortColumns="True"
+                HorizontalScrollBarVisibility="Auto">
         <DataGrid.Columns>
           <DataGridTextColumn Header="{StaticResource str.Spc.Group.Col.Class}"   Binding="{Binding LocationLabel}" SortMemberPath="ClassName"    Width="220"/>
-          <DataGridTextColumn Header="{StaticResource str.Spc.Group.Col.Object}"  Binding="{Binding InstanceName}"  SortMemberPath="InstanceName" Width="*"/>
-          <DataGridTextColumn Header="{StaticResource str.Spc.Group.Col.Matched}" Binding="{Binding SlotSummary}"   CanUserSort="False"           Width="2*"/>
+          <DataGridTextColumn Header="{StaticResource str.Spc.Group.Col.Object}"  Binding="{Binding InstanceName}"  SortMemberPath="InstanceName" Width="320" MinWidth="200"/>
+          <DataGridTextColumn Header="{StaticResource str.Spc.Group.Col.Matched}" Binding="{Binding SlotSummary}"   CanUserSort="False"           Width="440" MinWidth="240"/>
           <DataGridTemplateColumn Header="" Width="Auto" CanUserSort="False">
             <DataGridTemplateColumn.CellTemplate>
               <DataTemplate x:DataType="m:GroupCandidate">

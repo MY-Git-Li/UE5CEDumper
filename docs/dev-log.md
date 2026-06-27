@@ -18,6 +18,81 @@ builds ≤696 in
 
 -----
 
+## 2026-06-27 — DataGrid horizontal-overflow sweep (all panels) + "Diff is always deep" annotation (build ~1832; UI/XAML-only; no test delta)
+
+**Context.** Two follow-ups after the top-level scalar-array capture fix below. (1) The user
+found that dragging a column splitter in the Snapshot result grids could not widen a column
+past the window edge — the grid clamped to the UI width with no horizontal scrollbar — and
+noted "this was fixed long ago" (the LiveWalker FieldGrid, commit `e1b4d46`) but never went
+app-wide. (2) The single-value Snapshot Diff has no "Deep" toggle while Group mode does,
+which read as an inconsistency.
+
+**Root cause (DataGrid, adversarially verified).** Any `Width="*"` (star) column makes an
+Avalonia DataGrid fit total width to the viewport — the star column absorbs every splitter
+drag, so the grid can never overflow and no scrollbar appears. `HorizontalScrollBarVisibility`
+**already defaults to `Auto`** (InstanceFinder InstancesGrid scrolls with no explicit attr),
+so the missing attribute is NOT the cause — the star column is. The fix is the proven
+`e1b4d46` pattern: all columns fixed `Width` + `MinWidth`, no star, plus an explicit
+`HorizontalScrollBarVisibility="Auto"` for self-documentation.
+
+**Change.** App-wide sweep — **17 DataGrids across 8 panels** converted (Snapshot ×4, SPC ×5
+incl. both snapshot pickers, ClassPivot ×3, RelatedObjects, InstanceFinder ContainerMatches,
+LiveWalker References, ValueSearch GroupResultsGrid, ProxyDeploy). Deliberately left alone:
+`MainWindow` `<ColumnDefinition Width="*"/>` (tab-host layout, correct) and the two
+intentionally non-scroll surfaces (Console ScrollViewer + ClassPivot class-list ListBox, both
+`HorizontalScrollBarVisibility="Disabled"`). Every `SortMemberPath` preserved (compiled
+bindings need it or nothing sorts). **Tradeoff (same as `e1b4d46`):** fixed columns no longer
+auto-stretch to fill a wide window → right-edge dead space; in exchange the grid overflows +
+scrolls horizontally on demand.
+
+**Diff "always deep" annotation.** Confirmed (workflow + verify) that the Snapshot **Diff is
+already always-deep** — `DiffSnapshotsAsync` applies no `array_field` filter, so nested
+array / struct-array element changes (e.g. `SupportActionGauge[3]`, shown as `Array[N]`)
+always appear. "Deep" is a QUERY-time toggle that exists **only in Group mode** (gates array
+elements in as group-match slots); a shared "global Deep" would be misleading (Diff =
+always-deep, Group = opt-in-shallow → opposite defaults). Per the user's choice: no Diff Deep
+checkbox; instead an italic **"Diff is always deep"** note (+ tooltip) sits next to **Run
+Diff** so users don't hunt for a missing switch.
+
+**Verify.** UI build clean (compiled-binding XAML validates at build); published
+`dist\UE5DumpUI.exe` launch-verified (alive, responding, no `crash.log`). XAML-only — no DLL
+re-inject, no test delta.
+
+-----
+
+## 2026-06-27 — Snapshot now captures gameplay classes' TOP-LEVEL scalar arrays (e.g. a Pawn's SupportActionGauge[] TArray<float>) — Diff/SPC/Pivot could not see them before (build 1827; DLL; in-game VERIFIED on Elliot)
+
+**Symptom (Elliot, user-reported).** A Live Walker value — element `[3]` of
+`BPPlayerCharacter_C.SupportActionGauge` (`TArray<float>`, 7 floats) — dropped ~89→83, but the
+Snapshot **Diff** showed nothing. Value Search finds the same value fine.
+
+**Root cause.** `Aura::CaptureStructArrays`'s walker deliberately skipped **top-level
+leaf-containers** — a scalar `TArray<int>/<float>` directly on an object (`leafName==""`,
+`depth==1`) — via `if (lf.leafName.empty() && lf.depth < 2) return;` (build 1204), because
+capturing every object's scalar arrays would balloon the DB. So `SupportActionGauge[]` was
+never stored → Diff/SPC/Pivot had nothing to compare. (Nested leaf-containers `Tunes[N]`,
+depth≥2, and struct-array element fields were always captured.) This is a CAPTURE-time gap, not
+a query-time one — the Diff is already always-deep and the Group "Deep" toggle can't surface
+rows that were never written. **Live Value Search is unaffected** — its Phase 2C Array scan
+(`f.TypeName=="ArrayProperty"` + matching innerType → `ScanContainer::Array`) walks the TArray
+buffer directly.
+
+**Fix (per user choice "only gameplay classes, by default").** New thread-local-memoized
+`IsSnapshotGameplayClass(cls)` (reuses `ClassDerivesFromAny(cls, SnapshotGameplayKeepBases())`
+= Actor/ActorComponent/Pawn/Character/Controller/PlayerState/GameInstance) gates a new
+`captureTopLevelScalarArrays` param on `CaptureStructArrays`. Gameplay classes (the value
+carriers) now capture their top-level numeric scalar arrays; engine/system classes still skip
+them, so the DB stays bounded. **No schema change** — rows reuse the existing
+`array_field`/`elem_index` columns with `inner_prop_name=""` (the same leaf-container path
+`Tunes[N]` already proved end-to-end: Fern encode → SnapshotStore INSERT → Diff display
+`Array[N]`).
+
+**Verify.** DLL build clean; 797 dll + 2091 C# tests green; **in-game VERIFIED on Elliot** —
+re-injected DLL + fresh snapshots, Diff now shows `SupportActionGauge[3]` 89→83. (Pre-1827
+snapshots lack these rows — must re-capture.)
+
+-----
+
 ## 2026-06-27 — Snapshot consistency guard: detect a GObjects-count drift mid-capture → mark UNUSABLE + auto-delete before next capture (build ~1825; UI/C#-only; tests +8)
 
 **Context.** A user asked whether the slow/huge `48–61 MB`-chunk snapshot they saw was *GC

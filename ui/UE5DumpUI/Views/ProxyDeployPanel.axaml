@@ -140,7 +140,8 @@
               BorderThickness="0"
               Background="#1E1E1E"
               Foreground="#D4D4D4"
-              FontSize="12">
+              FontSize="12"
+              HorizontalScrollBarVisibility="Auto">
       <DataGrid.Columns>
         <!-- Select checkbox -->
         <DataGridTemplateColumn Header="" Width="40" CanUserResize="False" CanUserSort="False">
@@ -154,11 +155,11 @@
 
         <!-- Game Name -->
         <DataGridTextColumn Header="{StaticResource str.ProxyDeploy.ColName}"
-                            Binding="{Binding Name}" SortMemberPath="Name" Width="*" IsReadOnly="True"/>
+                            Binding="{Binding Name}" SortMemberPath="Name" Width="260" MinWidth="160" IsReadOnly="True"/>
 
         <!-- BinariesDir (path) -->
         <DataGridTextColumn Header="{StaticResource str.ProxyDeploy.ColPath}"
-                            Binding="{Binding BinariesDir}" SortMemberPath="BinariesDir" Width="2*" IsReadOnly="True"/>
+                            Binding="{Binding BinariesDir}" SortMemberPath="BinariesDir" Width="420" MinWidth="220" IsReadOnly="True"/>
 
         <!-- Status -->
         <DataGridTextColumn Header="{StaticResource str.ProxyDeploy.ColStatus}"
