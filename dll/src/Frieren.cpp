@@ -6,7 +6,7 @@
 #include "Frieren.h"
 #define LOG_CAT "INIT"
 #include "Sein.h"
-#include "BuildInfo.h"
+#include "BuildStamp.h"
 #include "Grimoire.h"
 #include "Macht.h"
 #include "Genau.h"
@@ -449,7 +449,7 @@ bool UE5_Init() {
 
     // Condensed summary for quick scan-log triage
     LOG_SUMMARY("build=%s config=%s UE=%u",
-                BUILD_GIT_SHORT, BUILD_CONFIG, ptrs.UEVersion);
+                BuildStamp::GitShort(), BuildStamp::Config(), ptrs.UEVersion);
     LOG_SUMMARY("GObjects=0x%llX GNames=0x%llX GWorld=0x%llX Objects=%d",
                 static_cast<unsigned long long>(ptrs.GObjects),
                 static_cast<unsigned long long>(ptrs.GNames),

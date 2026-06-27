@@ -17,9 +17,10 @@ UE5CEDumper/
 │
 ├── dll/                            ← C++ DLL (injected into game process)
 │   ├── CMakeLists.txt              ← DLL build config (versioning, git hash, deps)
-│   └── src/                        ← 18 .cpp + 20 .h (Frieren-themed; see naming-convention.md; +Denken = native x64 disasm, Path 2; +Cancel.h = cooperative cancellation; +Wirbel = teleport, build 1027)
+│   └── src/                        ← 23 .cpp + 28 .h (Frieren-themed; see naming-convention.md; +Denken = native x64 disasm, Path 2; +Cancel.h = cooperative cancellation; +Wirbel = teleport, build 1027; +BuildStamp = build-metadata accessor decoupling BuildInfo.h, build 1817)
 │       ├── Heiter.cpp              ← dllmain — DLL_PROCESS_ATTACH, AutoStartThreadProc
 │       ├── Methode.cpp             ← CEPlugin — CE plugin Type 5 main menu
+│       ├── BuildStamp.cpp / .h     ← build/version metadata accessors (only TU that includes generated BuildInfo.h), build 1817
 │       ├── Grimoire.h              ← Constants — magic strings, pipe name, UObject offsets, DynOff namespace
 │       ├── Himmel.h                ← Signatures — 128 AOB patterns + 5 symbol exports (14 sources)
 │       ├── BuildInfo.h.in          ← Template → BuildInfo.h (version, git hash)

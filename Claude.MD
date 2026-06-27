@@ -168,7 +168,7 @@ Target: Support UE4 (4.18+) and UE5 (5.0 ~ 5.8+), find global pointers (GObjects
 | [docs/tips.md](docs/tips.md) | **User-facing how-to recipes** — goal → which panel/button. First recipe: forcing camera rotation in fixed-view (2.5D/45°) games. |
 | [docs/todo.md](docs/todo.md) | **What's next** — prioritized open work with effort/risk tags. Active plan + carryover gaps + speculative ideas. |
 | [docs/dev-log.md](docs/dev-log.md) | **What shipped** — append-only milestone history per build number. Read when investigating "when/why was X added". |
-| [docs/architecture.md](docs/architecture.md) | Directory structure (17 .cpp + 19 .h DLL files; ~135 UI .cs/.axaml files; 33 test files), git submodules, build environment |
+| [docs/architecture.md](docs/architecture.md) | Directory structure (23 .cpp + 28 .h DLL files; ~135 UI .cs/.axaml files; 33 test files), git submodules, build environment. **C++ build is incremental** (Ninja, single build dir, shared `UE5DumperCommon` object lib compiles the proxy-agnostic sources once); `build clean` forces a full rebuild (CI always passes `-Clean`). |
 | [docs/dll-spec.md](docs/dll-spec.md) | C++ DLL interface: 30 C ABI exports, offset tables, CE Lua bridge (Frieren-themed file/namespace names) |
 | [docs/pipe-protocol.md](docs/pipe-protocol.md) | Named Pipe JSON IPC protocol (~46 commands incl. Value Search + Group Scan begin/refine/query/end, Request/Response/Event) |
 | [docs/group-value-scan-spec.md](docs/group-value-scan-spec.md) | **Multiple Values Group Scan** — architecture (`Orden` source-agnostic SDR matcher, block model, deep containers) + the **extension points** for Snapshot/SPC/Pivot reuse + P2/P3/P4 roadmap. Read for "how a future feature plugs into group matching". |

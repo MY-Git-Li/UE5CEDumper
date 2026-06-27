@@ -20,7 +20,7 @@
 #include "Wirbel.h"
 #include "Laufen.h"
 #include "Edel.h"
-#include "BuildInfo.h"
+#include "BuildStamp.h"
 
 #include <json.hpp>
 #include <algorithm>
@@ -716,7 +716,7 @@ static void FillPointerSnapshot(json& data) {
     // build_number: compile-time DLL build (e.g. 648). Also emitted on the
     // init response; surfacing it on every snapshot lets the UI's
     // get_pointers refreshes preserve the value across panel state rebuilds.
-    data["build_number"]         = (int)VER_BUILD;
+    data["build_number"]         = BuildStamp::BuildNumber();
     data["publisher_thumbprint"] = g_cachedPublisherThumbprint ? g_cachedPublisherThumbprint : "";
     data["object_count"]         = Aura::GetCount();
     // FUObjectItem layout (so the UI can flag the *** UNVERIFIED *** UE5.7+ packed mode).
@@ -1023,15 +1023,15 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             data["is_low_confidence"] = g_cachedIsLowConfidence;
             data["publisher_thumbprint"] = g_cachedPublisherThumbprint
                 ? g_cachedPublisherThumbprint : "";
-            data["build_git"]    = BUILD_GIT_SHORT;
-            data["build_hash"]   = BUILD_GIT_HASH;
-            data["build_time"]   = BUILD_TIMESTAMP;
-            data["build_info"]   = BUILD_VERSION_STRING;
+            data["build_git"]    = BuildStamp::GitShort();
+            data["build_hash"]   = BuildStamp::GitHash();
+            data["build_time"]   = BuildStamp::Timestamp();
+            data["build_info"]   = BuildStamp::VersionString();
             // build_number: VER_BUILD as integer (e.g. 648). UI compares against
             // its own bundled build to detect "DLL not redeployed after rebuild"
             // — common gotcha in proxy mode, where the user updates the UI but
             // forgets to copy the new DLL into the game's Binaries\Win64\ folder.
-            data["build_number"] = (int)VER_BUILD;
+            data["build_number"] = BuildStamp::BuildNumber();
             return Renge::MakeResponse(id, data).dump();
         }
 
@@ -3594,7 +3594,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
 
         if (cmd == Renge::CMD_GET_OFFSETS) {
             json data;
-            data["build_info"]         = BUILD_VERSION_STRING;
+            data["build_info"]         = BuildStamp::VersionString();
             data["validated"]          = DynOff::bOffsetsValidated.load(std::memory_order_acquire);
             data["case_preserving"]    = DynOff::bCasePreservingName;
             data["use_fproperty"]      = DynOff::bUseFProperty;
