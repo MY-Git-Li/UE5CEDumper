@@ -421,7 +421,7 @@ public class CeXmlExportServiceTests
     }
 
     // ===== GAS attribute flatten (Live Walker "Flatten GAS attributes" option) =====
-    // U+25B8 ▸ is the segment separator written by EmitFlattenedGasStruct.
+    // U+25B8 ▸ is the segment separator written by EmitFlattenedStruct.
 
     /// <summary>Build a UAttributeSet-shaped object: two FGameplayAttributeData members
     /// (HealthPoint @0x30, MaxHealthPoint @0x40), each {float BaseValue @0x8, float
@@ -554,6 +554,149 @@ public class CeXmlExportServiceTests
         Assert.Contains($"HealthPoint (30) {sep} BaseValue (8) (GameplayAttributeData)", xml);
         // The type must NOT be repeated mid-name (i.e. not on the first segment).
         Assert.DoesNotContain($"(GameplayAttributeData) {sep}", xml);
+    }
+
+    // ===== Primitive-leaf struct flatten (Live Walker "Flatten primitive-leaf structs") =====
+    // Superset of the GAS flatten: ANY terminal struct whose whole subtree is primitive inline
+    // scalars (int/float/bool/enum) flattens; a pointer / string / container descendant blocks it.
+
+    /// <summary>Build a one-StructProperty object: a non-GAS struct <paramref name="structType"/>
+    /// at +0x50 whose children are supplied by <paramref name="children"/> (offsets struct-relative).</summary>
+    private static (LiveFieldValue[] fields, Dictionary<string, List<LiveFieldValue>> structs)
+        BuildLeafStruct(string structType, List<LiveFieldValue> children)
+    {
+        var fields = new[]
+        {
+            new LiveFieldValue
+            {
+                Name = "Range", TypeName = "StructProperty", Offset = 0x50, Size = 0x10,
+                StructDataAddr = "0xS", StructClassAddr = "0xSC", StructTypeName = structType
+            },
+        };
+        var structs = new Dictionary<string, List<LiveFieldValue>> { ["0xS"] = children };
+        return (fields, structs);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_FlattenLeafStructs_PromotesAllPrimitiveStruct()
+    {
+        var sep = "▸";
+        var (fields, structs) = BuildLeafStruct("StatRange", new()
+        {
+            new LiveFieldValue { Name = "Min", TypeName = "FloatProperty", Offset = 0x0, Size = 4 },
+            new LiveFieldValue { Name = "Max", TypeName = "IntProperty",   Offset = 0x4, Size = 4 },
+        });
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields, structs, flattenLeafStructs: true);
+
+        // Children promoted to "Range ▸ Child" leaves at the COMBINED offset (0x50+0, 0x50+4).
+        Assert.Contains($"Range {sep} Min", xml);
+        Assert.Contains($"Range {sep} Max", xml);
+        Assert.Contains("<Address>+50</Address>", xml);
+        Assert.Contains("<Address>+54</Address>", xml);
+        Assert.Contains("<VariableType>Float</VariableType>", xml);
+        Assert.Contains("<VariableType>4 Bytes</VariableType>", xml);
+        // The intermediate parent group is gone.
+        Assert.DoesNotContain("<Description>\"Range\"</Description>", xml);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_FlattenLeafStructs_FlattensVectorStruct()
+    {
+        var sep = "▸";
+        var (fields, structs) = BuildLeafStruct("Vector", new()
+        {
+            new LiveFieldValue { Name = "X", TypeName = "FloatProperty", Offset = 0x0, Size = 4 },
+            new LiveFieldValue { Name = "Y", TypeName = "FloatProperty", Offset = 0x4, Size = 4 },
+            new LiveFieldValue { Name = "Z", TypeName = "FloatProperty", Offset = 0x8, Size = 4 },
+        });
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields, structs, flattenLeafStructs: true);
+
+        Assert.Contains($"Range {sep} X", xml);
+        Assert.Contains($"Range {sep} Z", xml);
+        Assert.Contains("<Address>+58</Address>", xml);   // 0x50 + 0x8
+        Assert.DoesNotContain("<Description>\"Range\"</Description>", xml);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_FlattenLeafStructs_AlsoFlattensGasStruct()
+    {
+        // The leaf-struct option is a SUPERSET — a GAS attribute is a {float,float} primitive
+        // leaf, so it flattens even with the dedicated GAS toggle OFF.
+        var sep = "▸";
+        var (fields, structs) = BuildGasAttributeSet();
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "AttrSet", "UAttrSet", fields, structs,
+            flattenGasAttributes: false, flattenLeafStructs: true);
+
+        Assert.Contains($"HealthPoint {sep} BaseValue", xml);
+        Assert.Contains("<Address>+38</Address>", xml);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_FlattenLeafStructs_KeepsStructWithPointer()
+    {
+        var sep = "▸";
+        var (fields, structs) = BuildLeafStruct("Holder", new()
+        {
+            new LiveFieldValue { Name = "Count", TypeName = "IntProperty", Offset = 0x0, Size = 4 },
+            // A pointer descendant must keep the struct grouped ("pointers stay unflattened").
+            new LiveFieldValue
+            {
+                Name = "Owner", TypeName = "ObjectProperty", Offset = 0x8, Size = 8,
+                PtrAddress = "0x0", PtrClassName = "AActor"
+            },
+        });
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields, structs, flattenLeafStructs: true);
+
+        // Group kept (Description = the field name "Range"); no flatten separator.
+        Assert.Contains("<Description>\"Range\"</Description>", xml);
+        Assert.DoesNotContain(sep, xml);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_FlattenLeafStructs_KeepsStructWithString()
+    {
+        var sep = "▸";
+        var (fields, structs) = BuildLeafStruct("Named", new()
+        {
+            new LiveFieldValue { Name = "Level", TypeName = "IntProperty", Offset = 0x0, Size = 4 },
+            // A string (pointer-backed FString) descendant blocks the flatten.
+            new LiveFieldValue { Name = "Label", TypeName = "StrProperty", Offset = 0x8, Size = 16 },
+        });
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields, structs, flattenLeafStructs: true);
+
+        // Group kept (Description = the field name "Range"); no flatten separator.
+        Assert.Contains("<Description>\"Range\"</Description>", xml);
+        Assert.DoesNotContain(sep, xml);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_FlattenLeafStructsOff_KeepsGroup()
+    {
+        var sep = "▸";
+        var (fields, structs) = BuildLeafStruct("StatRange", new()
+        {
+            new LiveFieldValue { Name = "Min", TypeName = "FloatProperty", Offset = 0x0, Size = 4 },
+            new LiveFieldValue { Name = "Max", TypeName = "FloatProperty", Offset = 0x4, Size = 4 },
+        });
+
+        // Default off (neither flatten toggle) → the all-primitive struct stays a nested group.
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields, structs);
+
+        Assert.Contains("<Description>\"Range\"</Description>", xml);
+        Assert.DoesNotContain(sep, xml);
+        Assert.Contains("<Address>+50</Address>", xml);   // struct group at its own offset
+        Assert.DoesNotContain("<Address>+54</Address>", xml);
     }
 
     [Fact]

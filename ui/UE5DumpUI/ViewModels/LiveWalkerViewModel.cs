@@ -326,6 +326,14 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     // GameplayAttributeData structs only (CeXmlExportService gates the rest).
     [ObservableProperty] private bool _flattenGasAttributes;
 
+    // Flatten primitive-leaf structs one level in Copy CE XML / Copy CE Field (default OFF).
+    // A SUPERSET of Flatten GAS attributes: when on, ANY terminal StructProperty whose entire
+    // flattened subtree is primitive inline scalars (int / float / bool / enum) — e.g. FVector,
+    // FRotator, a plain {min,max} struct — has its children promoted to sibling leaves at the
+    // combined offset instead of a nested group. Structs containing a pointer, string, FName,
+    // container, or unresolved nested struct keep their group (CeXmlExportService gates the rest).
+    [ObservableProperty] private bool _flattenLeafStructs;
+
     // Dedup shared objects in Copy CE XML / Copy CE Field drilldown (default ON).
     // A shared object (e.g. one PlayerState reached from several fields) is expanded
     // ONCE; later references become a flat "(shared)" pointer leaf. Prevents the
@@ -3368,7 +3376,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     descShowType: DescShowType,
                     dedupShared: DedupSharedObjects,
                     excludeSystemComponents: ExcludeSystemComponents,
-                    flattenGasAttributes: FlattenGasAttributes);
+                    flattenGasAttributes: FlattenGasAttributes,
+                    flattenLeafStructs: FlattenLeafStructs);
             }
             else
             {
@@ -3384,7 +3393,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     descShowType: DescShowType,
                     dedupShared: DedupSharedObjects,
                     excludeSystemComponents: ExcludeSystemComponents,
-                    flattenGasAttributes: FlattenGasAttributes);
+                    flattenGasAttributes: FlattenGasAttributes,
+                    flattenLeafStructs: FlattenLeafStructs);
             }
 
             await _platform.CopyToClipboardAsync(xml);
@@ -3622,7 +3632,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     descShowType: DescShowType,
                     dedupShared: DedupSharedObjects,
                     excludeSystemComponents: ExcludeSystemComponents,
-                    flattenGasAttributes: FlattenGasAttributes);
+                    flattenGasAttributes: FlattenGasAttributes,
+                    flattenLeafStructs: FlattenLeafStructs);
             }
             else
             {
@@ -3639,7 +3650,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     descShowType: DescShowType,
                     dedupShared: DedupSharedObjects,
                     excludeSystemComponents: ExcludeSystemComponents,
-                    flattenGasAttributes: FlattenGasAttributes);
+                    flattenGasAttributes: FlattenGasAttributes,
+                    flattenLeafStructs: FlattenLeafStructs);
             }
 
             await _platform.CopyToClipboardAsync(xml);
