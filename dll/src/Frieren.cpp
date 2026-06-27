@@ -346,6 +346,20 @@ bool UE5_Init() {
                 }
             }
         }
+        // Structural marker: the UE5.7 reordered FUObjectItem — the standard 24-byte
+        // item with the Object* moved to +0x08 (e.g. Solarpunk, the stock-UE5.7 repro).
+        // Detected during the GObjects scan, so reliable even in a menu. The ==24 stride
+        // guard excludes Avowed's CUSTOM 20-byte packed layout (UE5.3 — not a version
+        // signal). The "unverified" packed reconstruction (IsPacked, never seen in a
+        // real game) would also be 24B at +0x00; this offset test stays specific to the
+        // reorder.
+        if (DynOff::bUseFProperty && g_cachedUEVersion < 507
+            && Aura::GetItemObjOffset() == 0x08 && Aura::GetItemSize() == 24) {
+            LOG_WARN("UE5_Init: structural marker (FUObjectItem Object@+0x08, 24B = UE5.7+) "
+                     "but version=%u — raising floor to 507.", g_cachedUEVersion);
+            ptrs.UEVersion    = 507;
+            g_cachedUEVersion = 507;
+        }
     } else {
         LOG_WARN("UE5_Init: Partial init — GObjects=%s GNames=%s — skipping offset validation",
                  ptrs.GObjects ? "OK" : "MISSING", ptrs.GNames ? "OK" : "MISSING");
@@ -481,14 +495,23 @@ void UE5_Shutdown() {
 }
 
 uint32_t UE5_GetVersion() {
-    // Lazy UE5.5+ refine: once any class walk has seen a reflected Utf8StrProperty /
-    // AnsiStrProperty (UE5.5 types), raise the floor to 505. Monotonic + UE5-only
-    // (only refines an already-UE5 label, never a UE4 one). Cheap atomic read; the
+    // Lazy UE5.5 / 5.6 refines off markers discovered during walks / enum access (the
+    // structural item + property markers ran at init; these two only surface later):
+    //   • a reflected Utf8StrProperty / AnsiStrProperty (Ubel flag) ⇒ UE5.5+
+    //   • the FNameData struct-of-arrays UEnum::Names container (DynOff flag, set by
+    //     the lazy DetectUEnumNames) ⇒ UE5.6+ (this is the layout whose enum bug the
+    //     UE5.6+ Neu reader fixed; e.g. Titan Quest II).
+    // Monotonic + UE5-only (never lowers, never touches a UE4 label). Cheap reads; the
     // UI polls this for the badge, so the version self-corrects as the user browses.
-    if (g_cachedUEVersion >= 500 && g_cachedUEVersion < 505 && Ubel::SawUtf8OrAnsiStr()) {
-        LOG_INFO("UE5_GetVersion: Utf8Str/AnsiStr property marker seen — raising %u -> 505 (UE5.5+).",
-                 g_cachedUEVersion);
-        g_cachedUEVersion = 505;
+    if (g_cachedUEVersion >= 500 && g_cachedUEVersion < 506) {
+        uint32_t floor = g_cachedUEVersion;
+        if (Ubel::SawUtf8OrAnsiStr() && floor < 505)          floor = 505;
+        if (DynOff::bEnumNamesNewContainer && floor < 506)    floor = 506;
+        if (floor != g_cachedUEVersion) {
+            LOG_INFO("UE5_GetVersion: marker refine %u -> %u (UE5.5/5.6 type/enum marker).",
+                     g_cachedUEVersion, floor);
+            g_cachedUEVersion = floor;
+        }
     }
     return g_cachedUEVersion;
 }
