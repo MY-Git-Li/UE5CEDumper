@@ -169,6 +169,13 @@ __declspec(dllexport) int32_t   UE5_GetProtectState(int32_t* outWant,
 // Mimic mailbox (CMD_MOVEMENT=10) — executeCodeEx cannot read return values.
 __declspec(dllexport) int32_t   UE5_SetMovementPercent(int32_t knobId, double percent);
 
+// Set the pawn's UCharacterMovementComponent::GravityDirection (UE5.4+) to the
+// (x,y,z) vector (normalized DLL-side). Sentinel (0,0,0) = OFF (restore the
+// captured default). Returns 1 (active) / 0 (off) / negative Laufen::MoveResult
+// (MR_ERR_REFLECT when the field isn't reflected — pre-5.4). CE Lua uses the
+// Mimic mailbox (CMD_MOVEMENT=10, knobId=3, paramsData = 3 doubles x/y/z).
+__declspec(dllexport) int32_t   UE5_SetGravityDirection(double x, double y, double z);
+
 // === Mailbox (CE Lua shared memory interface) ===
 // Returns the address of the g_invokeMailbox buffer.
 // CE Lua can also use getAddress("g_invokeMailbox") directly.

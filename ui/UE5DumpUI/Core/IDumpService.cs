@@ -430,6 +430,17 @@ public interface IDumpService
     /// </summary>
     Task<MovementSetResult> ResetMovementAsync(string knob, CancellationToken ct = default);
 
+    /// <summary>
+    /// Set the pawn's gravity DIRECTION (UE5.4+ GravityDirection) to (x,y,z)
+    /// (normalized DLL-side, held by the re-assert worker). (0,0,0) = OFF (restore
+    /// the captured default). State 1 = active, 0 = off, negative = not reflected
+    /// (pre-5.4) / no pawn.
+    /// </summary>
+    Task<MovementVectorResult> SetGravityDirectionAsync(double x, double y, double z, CancellationToken ct = default);
+
+    /// <summary>Restore gravity direction to its captured default.</summary>
+    Task<MovementVectorResult> ResetGravityDirectionAsync(CancellationToken ct = default);
+
     // === Teleport (Wirbel: marker save/recall + cursor teleport) ===
     // docs/teleport-spec.md §7. Model Code/Codes carry the DLL's Wirbel
     // result code (0 = OK, negatives mapped by TeleportCodes).

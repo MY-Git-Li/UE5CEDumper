@@ -239,9 +239,9 @@
     <sys:String x:Key="str.InstanceFinder.Search">Search</sys:String>
     <sys:String x:Key="str.InstanceFinder.Address">Address</sys:String>
     <sys:String x:Key="str.InstanceFinder.OpenInWalker">Open in Live Walker</sys:String>
-    <sys:String x:Key="str.InstanceFinder.LocateGWorld">🌍 Locate in GWorld</sys:String>
+    <sys:String x:Key="str.InstanceFinder.LocateGWorld">🌍 Locate</sys:String>
     <sys:String x:Key="str.InstanceFinder.LocateGWorldShort">🌍</sys:String>
-    <sys:String x:Key="str.InstanceFinder.LocateGameEngine">⚙ Locate in GameEngine</sys:String>
+    <sys:String x:Key="str.InstanceFinder.LocateGameEngine">⚙ Locate</sys:String>
     <sys:String x:Key="str.InstanceFinder.LocateGameEngineShort">⚙</sys:String>
     <sys:String x:Key="str.InstanceFinder.AddressHint">Address (hex or module.exe+offset)</sys:String>
     <sys:String x:Key="str.InstanceFinder.Lookup">Lookup</sys:String>
@@ -748,10 +748,16 @@
     <sys:String x:Key="str.TP.Rot">Rotation (Pitch / Yaw / Roll):</sys:String>
     <sys:String x:Key="str.TP.Map">Map:</sys:String>
     <sys:String x:Key="str.TP.Pawn">Pawn:</sys:String>
-    <sys:String x:Key="str.TP.Locate">🌍 Locate in GWorld</sys:String>
-    <sys:String x:Key="str.TP.LocateGameEngine">⚙</sys:String>
-    <sys:String x:Key="str.TP.LocatePos">🌍 Locate vector</sys:String>
-    <sys:String x:Key="str.TP.LocateVel">🌍 Locate vector</sys:String>
+    <sys:String x:Key="str.TP.Locate">🌍 Locate</sys:String>
+    <sys:String x:Key="str.TP.LocateGameEngine">⚙ Locate</sys:String>
+    <sys:String x:Key="str.TP.LocatePos">🌍 Locate</sys:String>
+    <sys:String x:Key="str.TP.LocateVel">🌍 Locate</sys:String>
+    <sys:String x:Key="str.TP.LocateAccel">🌍 Locate</sys:String>
+    <sys:String x:Key="str.TP.LocateSpeed">🌍 Locate</sys:String>
+    <sys:String x:Key="str.TP.LocateCamLoc">🌍 Locate</sys:String>
+    <sys:String x:Key="str.TP.LocateCamFov">🌍 Locate</sys:String>
+    <sys:String x:Key="str.TP.LocateRot">🌍 Locate</sys:String>
+    <sys:String x:Key="str.TP.LocateCamRot">🌍 Locate</sys:String>
     <sys:String x:Key="str.TP.Velocity">Velocity (X / Y / Z):</sys:String>
     <sys:String x:Key="str.TP.Speed">Speed:</sys:String>
     <sys:String x:Key="str.TP.Accel">Acceleration (X / Y / Z):</sys:String>
@@ -788,6 +794,12 @@
     <sys:String x:Key="str.Tip.TP.LocateGameEngine">Locate in GameEngine: find this pawn via the live UGameEngine graph instead of GWorld. NOTE: a pawn is a world actor and usually lives BELOW GWorld, so this is typically unreachable — use the 🌍 Locate in GWorld button for pawns. Provided only for parity.</sys:String>
     <sys:String x:Key="str.Tip.TP.LocatePos">Locate the position vector in GWorld: walk the GWorld → … → RootComponent path and land directly on the RelativeLocation FVector field (X/Y/Z), so you can build a pointer chain straight to the coordinates. Reads a fresh pose first. (On attached pawns the stored RelativeLocation is parent-relative.)</sys:String>
     <sys:String x:Key="str.Tip.TP.LocateVel">Locate the velocity vector in GWorld: walk the GWorld → … → CharacterMovement path and land directly on the Velocity FVector field, for a pointer chain straight to the movement vector. Reads a fresh pose first. Unavailable on pawns with no CharacterMovement (vehicles / custom movement frameworks).</sys:String>
+    <sys:String x:Key="str.Tip.TP.LocateAccel">Locate the acceleration vector in GWorld: land directly on CharacterMovement.Acceleration (the input acceleration the movement uses). Reads a fresh pose first. Unavailable on pawns with no CharacterMovement.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LocateSpeed">Speed has no own field — it is the magnitude of Velocity. This lands on the Velocity FVector it is computed from (freeze/inspect the components there). Reads a fresh pose first.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LocateCamLoc">Locate the camera's cached POV Location in GWorld: land on APlayerCameraManager.CameraCachePrivate.POV.Location. Reads a fresh POV first. Unavailable when the cached-POV layout isn't reflected.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LocateCamFov">Locate the camera's cached POV FOV float in GWorld: land on APlayerCameraManager.CameraCachePrivate.POV.FOV. Reads a fresh POV first. Unavailable when the cached-POV layout isn't reflected.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LocateRot">Locate the rotation in GWorld: land directly on Controller.ControlRotation (the FRotator Pitch/Yaw/Roll that drives the view/aim). Reads a fresh pose first.</sys:String>
+    <sys:String x:Key="str.Tip.TP.LocateCamRot">Locate the camera's cached POV Rotation in GWorld: land on APlayerCameraManager.CameraCachePrivate.POV.Rotation. Reads a fresh POV first. Unavailable when the cached-POV layout isn't reflected.</sys:String>
     <sys:String x:Key="str.Tip.TP.Velocity">Live velocity (cm/s) and acceleration (cm/s²) read straight from the pawn's CharacterMovement (no invoke). Enable Auto to watch them change while moving. Shown as — with a note on pawns that have no CharacterMovement (vehicles / custom movement frameworks).</sys:String>
     <sys:String x:Key="str.Tip.TP.Save">Save the current pose into this marker slot. Markers live in the DLL — they survive a UI restart as long as the game process lives.</sys:String>
     <sys:String x:Key="str.Tip.TP.Recall">Teleport back to this marker (invokes K2_SetActorLocation with bTeleport=true, then restores rotation and zeroes velocity). Refused if you've changed maps — use Force.</sys:String>
@@ -836,7 +848,7 @@
     <sys:String x:Key="str.TP.MsApply">Apply</sys:String>
     <sys:String x:Key="str.TP.MsReset">Reset</sys:String>
     <sys:String x:Key="str.TP.MsRefresh">↻</sys:String>
-    <sys:String x:Key="str.TP.MsLocate">Locate in GWorld</sys:String>
+    <sys:String x:Key="str.TP.MsLocate">🌍 Locate</sys:String>
     <sys:String x:Key="str.Tip.TP.MsApply">Force MaxWalkSpeed to base × the slider multiplier and hold it (re-asserted on a timer so a sprint/ability system can't revert it).</sys:String>
     <sys:String x:Key="str.Tip.TP.MsReset">Restore MaxWalkSpeed to its captured base value and stop holding it. Resets the slider to 100%.</sys:String>
     <sys:String x:Key="str.Tip.TP.MsRefresh">Re-read the live MaxWalkSpeed and override state from the current pawn's CharacterMovement.</sys:String>
@@ -849,7 +861,7 @@
     <sys:String x:Key="str.TP.GrApply">Apply</sys:String>
     <sys:String x:Key="str.TP.GrReset">Reset</sys:String>
     <sys:String x:Key="str.TP.GrRefresh">↻</sys:String>
-    <sys:String x:Key="str.TP.GrLocate">Locate in GWorld</sys:String>
+    <sys:String x:Key="str.TP.GrLocate">🌍 Locate</sys:String>
     <sys:String x:Key="str.Tip.TP.GrApply">Force GravityScale to base × the slider multiplier and hold it (re-asserted on a timer).</sys:String>
     <sys:String x:Key="str.Tip.TP.GrReset">Restore GravityScale to its captured base value. Resets the slider to 100%.</sys:String>
     <sys:String x:Key="str.Tip.TP.GrRefresh">Re-read the live GravityScale and override state from the current pawn's CharacterMovement.</sys:String>
@@ -863,13 +875,27 @@
     <sys:String x:Key="str.TP.SjOff">Force OFF</sys:String>
     <sys:String x:Key="str.TP.SjReset">Reset</sys:String>
     <sys:String x:Key="str.TP.SjRefresh">↻</sys:String>
-    <sys:String x:Key="str.TP.SjLocate">Locate in GWorld</sys:String>
+    <sys:String x:Key="str.TP.SjLocate">🌍 Locate</sys:String>
     <sys:String x:Key="str.TP.SjHotkeyHint">Bind a global hotkey to "Super Jump toggle" in the Marker Hotkeys section above to toggle it in-game.</sys:String>
     <sys:String x:Key="str.Tip.TP.SjOn">Turn Super Jump ON — set JumpZVelocity to base × √(slider height %) and hold it (survives respawns).</sys:String>
     <sys:String x:Key="str.Tip.TP.SjOff">Turn Super Jump OFF — restore JumpZVelocity to its captured base.</sys:String>
     <sys:String x:Key="str.Tip.TP.SjReset">Turn Super Jump OFF and snap the height slider back to 100%.</sys:String>
     <sys:String x:Key="str.Tip.TP.SjRefresh">Re-read the live JumpZVelocity and override state from the current pawn's CharacterMovement.</sys:String>
     <sys:String x:Key="str.Tip.TP.SjLocate">Find the JumpZVelocity float in GWorld and select it in the Live Walker.</sys:String>
+
+    <!-- Gravity Direction (Laufen — UE5.4+ UCharacterMovementComponent.GravityDirection) -->
+    <sys:String x:Key="str.TP.GdHeader">Gravity Direction (UE5.4+)</sys:String>
+    <sys:String x:Key="str.TP.GdState">State:</sys:String>
+    <sys:String x:Key="str.TP.GdHint">Tilt gravity to any direction by setting the per-axis components (each −100%…+100%, i.e. −1.0…+1.0). This is DIRECTION only — the DLL normalizes to a unit vector, so a single-axis setting like (0,0,−62%) collapses to (0,0,−1): it only re-aims gravity, it does NOT change strength (use the Gravity card for strength). To tilt you must mix axes, e.g. X=+100%, Z=−100% → diagonal. Default (0,0,−100%) = straight down; X=+100%, Z=0 makes gravity pull along +X (walk on a wall). Apply holds the direction; Reset restores the game's captured default and snaps the sliders back to down. Needs UE5.4+ with a reflected GravityDirection (pre-5.4 games show Unavailable). Single-player only.</sys:String>
+    <sys:String x:Key="str.TP.GdApply">Apply</sys:String>
+    <sys:String x:Key="str.TP.GdReset">Reset</sys:String>
+    <sys:String x:Key="str.TP.GdRefresh">↻</sys:String>
+    <sys:String x:Key="str.TP.GdLocate">🌍 Locate</sys:String>
+    <sys:String x:Key="str.TP.GdHotkeyHint">Bind a global hotkey to "Gravity Dir toggle" in the Hotkey Settings section to toggle it in-game.</sys:String>
+    <sys:String x:Key="str.Tip.TP.GdApply">Force GravityDirection to the (X,Y,Z) sliders (normalized) and hold it (re-asserted on a timer). All-zero = off.</sys:String>
+    <sys:String x:Key="str.Tip.TP.GdReset">Restore GravityDirection to the captured game default and snap the sliders to straight down (0,0,−100%).</sys:String>
+    <sys:String x:Key="str.Tip.TP.GdRefresh">Re-read the live GravityDirection and override state from the current pawn's CharacterMovement (UE5.4+).</sys:String>
+    <sys:String x:Key="str.Tip.TP.GdLocate">Find the GravityDirection FVector in GWorld and select it in the Live Walker.</sys:String>
 
     <!-- Teleport: Camera POV (read-only) -->
     <sys:String x:Key="str.TP.PovHeader">Camera POV (read-only)</sys:String>

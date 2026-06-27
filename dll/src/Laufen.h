@@ -61,11 +61,24 @@ struct KnobInfo {
     std::string fieldName;          // reflected property name
 };
 
+// Live snapshot of the gravity-DIRECTION vector (UE5.4+ only — the reflected
+// UCharacterMovementComponent::GravityDirection FVector). resolved=false on
+// pre-5.4 / games where the field isn't reflected.
+struct GravDirInfo {
+    bool        resolved   = false;
+    double      x = 0, y = 0, z = -1;   // live unit vector (default (0,0,-1) = down)
+    bool        active     = false;     // override engaged (worker holding it)
+    uintptr_t   ownerAddr  = 0;         // CMC — Locate-in-GWorld owner
+    int32_t     fieldOffset = -1;       // GravityDirection offset within the CMC
+    std::string fieldName;
+};
+
 struct Snapshot {
     int32_t   code    = 0;      // MoveResult: MR_OK or a negative error
     bool      hasCmc  = false;  // a CharacterMovement resolved on the pawn
     uintptr_t cmcAddr = 0;
     KnobInfo  knobs[KNOB_COUNT];
+    GravDirInfo gravDir;        // UE5.4+ arbitrary gravity direction
 };
 
 // Read every knob on the current pawn's CMC (current/base/multiplier/active +
@@ -94,6 +107,22 @@ int32_t ResetKnob(int32_t knobId);
 // 100%), or a negative MoveResult. This keeps the height↔velocity + "100% = off"
 // logic in ONE place (the DLL), so Lua just passes a percentage.
 int32_t SetKnobPercent(int32_t knobId, double percent);
+
+// === Gravity DIRECTION (UE5.4+ arbitrary gravity) ===
+
+// Set the pawn's UCharacterMovementComponent::GravityDirection to the (x,y,z)
+// vector (normalized DLL-side; the engine expects a unit vector). Captures the
+// game's default on first activation, holds the value with the re-assert worker.
+// Sentinel: (0,0,0) means OFF — restore the captured default (a zero vector is
+// not a valid direction). Returns 1 (active), 0 (off via (0,0,0)), or a negative
+// MoveResult (MR_ERR_REFLECT when GravityDirection isn't reflected — pre-5.4).
+int32_t SetGravityDirection(double x, double y, double z);
+
+// Restore GravityDirection to its captured default and stop holding it.
+int32_t ResetGravityDirection();
+
+// Read the live gravity direction (+ owner/offset for Locate-in-GWorld).
+int32_t GetGravityDirection(GravDirInfo& out);
 
 // Stop and join the re-assert worker. Idempotent. Called by ResetKnob (when
 // nothing else is active) and from UE5_Shutdown() before the DLL unloads.

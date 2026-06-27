@@ -58,12 +58,16 @@ enum Cmd : int32_t {
                               //             [1] u8 live (observed 1/0, 0xFF if no pawn)
                               //             [2] u8 resolvable (1/0)
     CMD_MOVEMENT        = 10, // Movement tuning (Laufen): set a CharacterMovement
-                              //   float knob to a percent (100% = OFF).
+                              //   float knob to a percent (100% = OFF), or the
+                              //   gravity DIRECTION vector (knobId 3).
                               //   Input:  instanceAddr = knobId (0 MaxWalkSpeed /
-                              //             1 GravityScale / 2 JumpZVelocity)
-                              //           paramsData[0..7] = double percent (the
-                              //             user slider %; 100 = off. For knob 2 it
-                              //             is jump HEIGHT %, DLL applies sqrt).
+                              //             1 GravityScale / 2 JumpZVelocity /
+                              //             3 GravityDirection, UE5.4+)
+                              //           knob 0-2: paramsData[0..7] = double percent
+                              //             (user slider %; 100 = off. knob 2 = jump
+                              //             HEIGHT %, DLL applies sqrt).
+                              //           knob 3:   paramsData[0..23] = 3 doubles
+                              //             x/y/z (DLL normalizes; (0,0,0) = off).
                               //   Output: result = 1 (active) / 0 (off) / negative
                               //             Laufen::MoveResult.
 };

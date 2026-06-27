@@ -2035,7 +2035,9 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             // inner field across multiple "[N]" levels, so drill the full path
             // explicitly after reaching the owner — parity with the Instance
             // Finder structured-chain deep-drill.
-            if (!stopAtParent && TryParseContainerPath(scrollFieldName, out var pathSegs))
+            // requireIndex:false so a pure nested-struct path (camera POV fields:
+            // "CameraCachePrivate.POV.Location") also drills, not just container "[N]".
+            if (!stopAtParent && TryParseContainerPath(scrollFieldName, out var pathSegs, requireIndex: false))
             {
                 _pendingScrollFieldOffset = null;
                 _pendingScrollFieldName = null;
@@ -2570,7 +2572,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     }
 
     internal static bool TryParseContainerPath(string? fieldName,
-                                               out List<(string name, int index)> segments)
+                                               out List<(string name, int index)> segments,
+                                               bool requireIndex = true)
     {
         segments = new List<(string name, int index)>();
         if (string.IsNullOrEmpty(fieldName)) return false;
@@ -2597,7 +2600,13 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 segments.Add((raw, -1));
             }
         }
-        return hasIndex;
+        // A container path (has a "[N]") always qualifies. With requireIndex=false a
+        // pure nested-struct path (≥2 dotted segments, e.g.
+        // "CameraCachePrivate.POV.Location") also qualifies — DrillDisplayPathAsync
+        // walks struct segments via its index<0 branch the same way. The default
+        // (requireIndex=true) preserves the container-only contract (a bare or
+        // dotted no-index field is rejected → caller uses the byte-offset scroll).
+        return hasIndex || (!requireIndex && segments.Count >= 2);
     }
 
     /// <summary>

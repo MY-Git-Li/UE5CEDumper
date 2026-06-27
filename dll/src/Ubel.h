@@ -168,6 +168,12 @@ std::string GetName(uintptr_t uobjectAddr);
 // stale names after UObject address reuse). Call at snapshot/re-scan start.
 void ClearNameCache();
 
+// Lazy UE5.5+ version marker: true once any class walk has encountered a reflected
+// Utf8StrProperty or AnsiStrProperty (those FProperty types were added in UE5.5).
+// Set cheaply during WalkClass (a string compare on data it already reads); the
+// version badge refines off it (Frieren::UE5_GetVersion) without a dedicated scan.
+bool SawUtf8OrAnsiStr();
+
 // Get the full path name (e.g., /Game/BP_Player.BP_Player_C)
 std::string GetFullName(uintptr_t uobjectAddr);
 

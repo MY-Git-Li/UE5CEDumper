@@ -61,9 +61,33 @@ public class MovementScriptGeneratorTests
     }
 
     [Fact]
-    public void BuildBatchRows_returns_three_movement_rows()
+    public void BuildBatchRows_returns_four_movement_rows()
     {
-        var rows = MovementScriptGenerator.BuildBatchRows(200, 50, 400);
-        Assert.Equal(3, rows.Count);
+        var rows = MovementScriptGenerator.BuildBatchRows(200, 50, 400, 0, 0, -1);
+        Assert.Equal(4, rows.Count);   // Move Speed + Gravity + Super Jump + Gravity Direction
+    }
+
+    [Fact]
+    public void GravityDirection_uses_knobId_3_and_three_doubles()
+    {
+        var s = MovementScriptGenerator.GenerateGravityDirection(0.0, 0.7, -0.7);
+        Assert.Contains("writeQword(mb + 0x10, 3)", s);     // knobId 3 = GravityDirection
+        Assert.Contains("writeInteger(mb + 0x00, 10)", s);  // CMD_MOVEMENT
+        Assert.Contains("writeDouble(mb + 0x328,", s);      // X
+        Assert.Contains("writeDouble(mb + 0x330,", s);      // Y
+        Assert.Contains("writeDouble(mb + 0x338,", s);      // Z
+    }
+
+    [Fact]
+    public void GravityDirection_disable_sends_zero_vector_off()
+    {
+        var s = MovementScriptGenerator.GenerateGravityDirection(0.5, 0.5, -0.5);
+        int disableIdx = s.IndexOf("[DISABLE]", System.StringComparison.Ordinal);
+        Assert.True(disableIdx > 0);
+        string disable = s.Substring(disableIdx);
+        // OFF = (0,0,0)
+        Assert.Contains("writeDouble(mb + 0x328, 0", disable);
+        Assert.Contains("writeDouble(mb + 0x330, 0", disable);
+        Assert.Contains("writeDouble(mb + 0x338, 0", disable);
     }
 }

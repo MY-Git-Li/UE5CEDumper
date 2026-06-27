@@ -16,6 +16,7 @@
 #include "Neu.h"     // UEnum::Names layout (legacy TArray vs UE5.6+ FNameData)
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <cstring>
@@ -32,6 +33,11 @@
 extern uint32_t g_cachedUEVersion;
 
 namespace Ubel {
+
+// Lazy UE5.5+ version marker — set true the first time a class walk encounters a
+// reflected Utf8StrProperty / AnsiStrProperty (added in UE5.5). Atomic so the
+// parallel GObjects walks can set it without a lock. Read via SawUtf8OrAnsiStr().
+static std::atomic<bool> s_sawUtf8OrAnsiStr{false};
 
 // File-scope enum cache: keyed by UEnum* → vector of (value, name) pairs.
 // Shared between ResolveEnumValue (lookup) and GetEnumEntries (full list export).
@@ -352,6 +358,10 @@ void ClearNameCache() {
     std::unordered_map<uintptr_t, std::string>().swap(s_nameCache);
 }
 
+bool SawUtf8OrAnsiStr() {
+    return s_sawUtf8OrAnsiStr.load(std::memory_order_relaxed);
+}
+
 int32_t GetIndex(uintptr_t uobjectAddr) {
     if (!uobjectAddr) return -1;
     int32_t index = -1;
@@ -465,6 +475,13 @@ static void WalkFFieldChain(uintptr_t firstField, std::vector<FieldInfo>& fields
 
         // Read type name from FFieldClass
         fi.TypeName = GetFieldTypeName(current);
+
+        // Lazy UE5.5+ version marker (see Ubel::SawUtf8OrAnsiStr): a reflected
+        // Utf8StrProperty / AnsiStrProperty proves the engine is >= UE5.5. Cheap
+        // — a string compare on a name we already read.
+        if (!s_sawUtf8OrAnsiStr.load(std::memory_order_relaxed)
+            && (fi.TypeName == "Utf8StrProperty" || fi.TypeName == "AnsiStrProperty"))
+            s_sawUtf8OrAnsiStr.store(true, std::memory_order_relaxed);
 
         // Read offset and size (FProperty fields, may not be valid for non-property FFields)
         Macht::ReadSafe<int32_t>(current + DynOff::FPROPERTY_OFFSET, fi.Offset);

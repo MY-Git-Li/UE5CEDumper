@@ -885,18 +885,28 @@ static void HandleProtect() {
 // overwritten with outputs here). Returns 1 (active) / 0 (off) / negative.
 static void HandleMovement() {
     const uint64_t knobId = g_invokeMailbox.instanceAddr;
-    double percent = 0.0;
-    memcpy(&percent, g_invokeMailbox.paramsData, sizeof(double));
-    int32_t rc = UE5_SetMovementPercent(static_cast<int32_t>(knobId), percent);
+    int32_t rc;
+    if (knobId == 3) {
+        // Gravity direction (UE5.4+): 3 doubles x/y/z in paramsData. (0,0,0) = off.
+        double v[3] = {};
+        memcpy(v, g_invokeMailbox.paramsData, sizeof(v));
+        rc = UE5_SetGravityDirection(v[0], v[1], v[2]);
+        LOG_INFO("Mailbox: MOVEMENT gravdir -> (%.3f, %.3f, %.3f) rc=%d",
+                 v[0], v[1], v[2], rc);
+    } else {
+        double percent = 0.0;
+        memcpy(&percent, g_invokeMailbox.paramsData, sizeof(double));
+        rc = UE5_SetMovementPercent(static_cast<int32_t>(knobId), percent);
+        LOG_INFO("Mailbox: MOVEMENT knob=%llu pct=%.1f -> rc=%d",
+                 (unsigned long long)knobId, percent, rc);
+    }
     if (rc < 0) {
         char msg[128];
-        snprintf(msg, sizeof(msg), "Movement: knob=%llu pct=%.1f failed code=%d",
-                 (unsigned long long)knobId, percent, rc);
+        snprintf(msg, sizeof(msg), "Movement: knob=%llu failed code=%d",
+                 (unsigned long long)knobId, rc);
         strncpy(g_invokeMailbox.errorMsg, msg, sizeof(g_invokeMailbox.errorMsg) - 1);
         g_invokeMailbox.errorMsg[sizeof(g_invokeMailbox.errorMsg) - 1] = '\0';
     }
-    LOG_INFO("Mailbox: MOVEMENT knob=%llu pct=%.1f -> rc=%d",
-             (unsigned long long)knobId, percent, rc);
     SetDone(rc);
 }
 

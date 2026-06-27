@@ -70,6 +70,19 @@ public class TeleportViewModelTests
         public override Task<MovementSetResult> ResetMovementAsync(string knob, CancellationToken ct = default)
         { ResetMovementCalls++; LastMovementKnob = knob; return Task.FromResult(new MovementSetResult { State = 0 }); }
 
+        public MovementVectorResult NextGravDir { get; set; } = new() { State = 1 };
+        public int SetGravDirCalls { get; private set; }
+        public int ResetGravDirCalls { get; private set; }
+        public double LastGravDirX { get; private set; }
+        public double LastGravDirY { get; private set; }
+        public double LastGravDirZ { get; private set; }
+
+        public override Task<MovementVectorResult> SetGravityDirectionAsync(double x, double y, double z, CancellationToken ct = default)
+        { SetGravDirCalls++; LastGravDirX = x; LastGravDirY = y; LastGravDirZ = z; return Task.FromResult(NextGravDir); }
+
+        public override Task<MovementVectorResult> ResetGravityDirectionAsync(CancellationToken ct = default)
+        { ResetGravDirCalls++; return Task.FromResult(new MovementVectorResult { State = 0 }); }
+
         public override Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default)
         { GetPoseCalls++; return Task.FromResult(NextPose); }
 
@@ -389,8 +402,8 @@ public class TeleportViewModelTests
         var vm = CreateVm(new FakeDumpService(), out _, new FakeHotkeyService());
         // 3 save + 3 recall + recall_last + bugit + bugitgo + debugcam_on/off +
         // godmode_on/off + superjump_toggle + movespeed_toggle + gravity_toggle +
-        // pov_get + relative + coords + cursor_on/off.
-        Assert.Equal(21, vm.HotkeyRows.Count);
+        // gravdir_toggle + pov_get + relative + coords + cursor_on/off.
+        Assert.Equal(22, vm.HotkeyRows.Count);
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "save0" && r.DisplayName == "Save marker 1");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall2" && r.DisplayName == "Recall marker 3");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall_last" && r.DisplayName == "Recall last");
@@ -403,6 +416,7 @@ public class TeleportViewModelTests
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "superjump_toggle" && r.DisplayName == "Super Jump toggle");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "movespeed_toggle" && r.DisplayName == "Move Speed toggle");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "gravity_toggle" && r.DisplayName == "Gravity toggle");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "gravdir_toggle" && r.DisplayName == "Gravity Dir toggle");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "pov_get" && r.DisplayName == "Get POV");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "relative" && r.DisplayName == "TP facing dir");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "coords" && r.DisplayName == "TP to coords");
@@ -628,6 +642,72 @@ public class TeleportViewModelTests
         await vm.ApplyMoveSpeedCommand.ExecuteAsync(null);
 
         Assert.Equal(0, fake.SetMovementCalls);
+    }
+
+    [Fact]
+    public async Task ApplyGravDir_sends_xyz_and_sets_badge()
+    {
+        var fake = new FakeDumpService
+        {
+            NextGravDir = new MovementVectorResult { State = 1, Resolved = true },
+            NextMovementParams = new MovementParams
+            {
+                HasCmc = true,
+                GravityDirection = new MovementVectorKnob { Resolved = true, Active = true, X = 0, Y = 0.7, Z = -0.7 },
+            },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+        vm.GravDirX = 0; vm.GravDirY = 0.7; vm.GravDirZ = -0.7;
+
+        await vm.ApplyGravDirCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.SetGravDirCalls);
+        Assert.Equal(0.7, fake.LastGravDirY, 2);
+        Assert.Equal(-0.7, fake.LastGravDirZ, 2);
+        Assert.Equal("ON", vm.GravDirState);
+    }
+
+    [Fact]
+    public async Task ResetGravDir_resets_sliders_to_down()
+    {
+        var fake = new FakeDumpService
+        {
+            NextMovementParams = new MovementParams
+            {
+                HasCmc = true,
+                GravityDirection = new MovementVectorKnob { Resolved = true, Active = false, Z = -1 },
+            },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+        vm.GravDirX = 0.5; vm.GravDirZ = 0;
+
+        await vm.ResetGravDirCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.ResetGravDirCalls);
+        Assert.Equal(0.0, vm.GravDirX);
+        Assert.Equal(-1.0, vm.GravDirZ);   // sliders back to "down"
+        Assert.Equal("OFF", vm.GravDirState);
+    }
+
+    [Fact]
+    public async Task GravDir_unavailable_when_not_reflected()
+    {
+        var fake = new FakeDumpService
+        {
+            NextMovementParams = new MovementParams
+            {
+                HasCmc = true,
+                GravityDirection = new MovementVectorKnob { Resolved = false },
+            },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+
+        await vm.RefreshGravDirCommand.ExecuteAsync(null);
+
+        Assert.Equal("Unavailable", vm.GravDirState);   // pre-5.4 / not reflected
     }
 
     [Fact]

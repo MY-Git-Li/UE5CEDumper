@@ -55,24 +55,43 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         // all it takes — capture, persistence and registration are generic over
         // ActionId; OnMarkerHotkeyPressed routes the id to the right command.
         for (int i = 0; i < 3; i++)
-            HotkeyRows.Add(new TeleportHotkeyRow { ActionId = $"save{i}", DisplayName = $"Save marker {i + 1}" });
+            HotkeyRows.Add(new TeleportHotkeyRow { ActionId = $"save{i}", DisplayName = $"Save marker {i + 1}",
+                Hint = $"Save the current position into marker slot {i + 1}." });
         for (int i = 0; i < 3; i++)
-            HotkeyRows.Add(new TeleportHotkeyRow { ActionId = $"recall{i}", DisplayName = $"Recall marker {i + 1}" });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "recall_last",  DisplayName = "Recall last" });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "bugit",        DisplayName = "Copy BugItGo" });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "bugitgo",      DisplayName = "Run BugItGo" });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "debugcam_on",  DisplayName = "Debug cam ON" });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "debugcam_off", DisplayName = "Debug cam OFF" });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "godmode_on",   DisplayName = "God Mode ON" });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "godmode_off",  DisplayName = "God Mode OFF" });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "superjump_toggle", DisplayName = "Super Jump toggle" });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "movespeed_toggle", DisplayName = "Move Speed toggle" });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "gravity_toggle",   DisplayName = "Gravity toggle" });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "pov_get",      DisplayName = "Get POV" });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "relative",     DisplayName = "TP facing dir" });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "coords",       DisplayName = "TP to coords" });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "cursor_on",    DisplayName = "Cursor ON" });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "cursor_off",   DisplayName = "Cursor OFF" });
+            HotkeyRows.Add(new TeleportHotkeyRow { ActionId = $"recall{i}", DisplayName = $"Recall marker {i + 1}",
+                Hint = $"Teleport back to marker slot {i + 1}." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "recall_last",  DisplayName = "Recall last",
+            Hint = "Undo the last teleport — return to the position from just before it." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "bugit",        DisplayName = "Copy BugItGo",
+            Hint = "Copy the current position as a 'BugItGo X Y Z' string to the clipboard." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "bugitgo",      DisplayName = "Run BugItGo",
+            Hint = "Teleport to the position stored by the last BugIt." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "debugcam_on",  DisplayName = "Debug cam ON",
+            Hint = "Turn the free-fly Debug Camera ON." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "debugcam_off", DisplayName = "Debug cam OFF",
+            Hint = "Turn the Debug Camera OFF (return to the player view)." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "godmode_on",   DisplayName = "God Mode ON",
+            Hint = "Turn God Mode ON (force damage immunity on the player pawn)." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "godmode_off",  DisplayName = "God Mode OFF",
+            Hint = "Turn God Mode OFF." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "superjump_toggle", DisplayName = "Super Jump toggle",
+            Hint = "Toggle Super Jump on/off (hold a high JumpZVelocity from the slider)." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "movespeed_toggle", DisplayName = "Move Speed toggle",
+            Hint = "Toggle the Move Speed override on/off (apply the slider %, or restore)." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "gravity_toggle",   DisplayName = "Gravity toggle",
+            Hint = "Toggle the Gravity (GravityScale) override on/off." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "gravdir_toggle",   DisplayName = "Gravity Dir toggle",
+            Hint = "Toggle the Gravity Direction override on/off (UE5.4+)." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "pov_get",      DisplayName = "Get POV",
+            Hint = "Read the current camera POV (location / rotation / FOV)." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "relative",     DisplayName = "TP facing dir",
+            Hint = "Teleport along the pawn's facing direction by the set distance." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "coords",       DisplayName = "TP to coords",
+            Hint = "Teleport to the entered X / Y / Z coordinates." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "cursor_on",    DisplayName = "Cursor ON",
+            Hint = "Force the mouse cursor ON (bShowMouseCursor = true)." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "cursor_off",   DisplayName = "Cursor OFF",
+            Hint = "Force the mouse cursor OFF." });
 
         if (_globalHotkeys != null)
         {
@@ -283,6 +302,35 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     /// <summary>Slider position as a jump-height percentage (e.g. "400%").</summary>
     public string SuperJumpPercentText => $"{Math.Round(SuperJumpHeightMultiplier * 100.0)}%";
 
+    // ── Gravity Direction (Laufen, UE5.4+ GravityDirection vector) ─────
+    /// <summary>Tri-state badge: "ON" / "OFF" / "Unavailable" (pre-5.4 / no
+    /// reflected GravityDirection).</summary>
+    [ObservableProperty] private string _gravDirState = "Unknown";
+    [ObservableProperty] private string _gravDirBadgeColor = "#888888";
+
+    /// <summary>Direction components, each a LINEAR slider in [-1, +1] (= -100%…
+    /// +100%). The DLL normalizes; default (0,0,-1) = straight down.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(GravDirXPercentText))]
+    private double _gravDirX;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(GravDirYPercentText))]
+    private double _gravDirY;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(GravDirZPercentText))]
+    private double _gravDirZ = -1;
+
+    [ObservableProperty] private string _gravDirCurrentText = "—";
+
+    /// <summary>Tracks whether the gravity-direction override is held (hotkey toggle).</summary>
+    private bool _gravDirActive;
+
+    public string GravDirXPercentText => $"{Math.Round(GravDirX * 100.0)}%";
+    public string GravDirYPercentText => $"{Math.Round(GravDirY * 100.0)}%";
+    public string GravDirZPercentText => $"{Math.Round(GravDirZ * 100.0)}%";
+
     // ── Directional teleport (move along the pawn's facing) ────────────
     /// <summary>Distance in unreal units to step along the facing direction
     /// (negative = backward).</summary>
@@ -359,6 +407,9 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             ApplySuperJumpState(-1);     // super-jump badge back to Unknown
             SuperJumpCurrentText = "—";
             _superJumpActive = false;
+            ApplyGravDirState(-1);       // gravity-direction badge back to Unknown
+            GravDirCurrentText = "—";
+            _gravDirActive = false;
             ApplyMouseCursorState(-1);   // cursor badge back to Unknown
             ClearPovDisplay();
         }
@@ -530,22 +581,38 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     /// pawn. Reads a fresh pose for the live owner address. GWorld-only: the owning
     /// RootComponent is a normal world sub-object the GWorld graph reaches.</summary>
     [RelayCommand]
-    private Task LocatePositionInGWorldAsync() => LocateVectorAsync(velocity: false);
+    private Task LocatePositionInGWorldAsync() => LocatePoseFieldAsync(PoseLocateKind.Position);
 
     /// <summary>Locate the pawn's velocity FVector (CharacterMovement.Velocity) in
     /// GWorld — lands on the exact velocity field. Unavailable on pawns with no
     /// CharacterMovement (vehicle / custom-movement framework).</summary>
     [RelayCommand]
-    private Task LocateVelocityInGWorldAsync() => LocateVectorAsync(velocity: true);
+    private Task LocateVelocityInGWorldAsync() => LocatePoseFieldAsync(PoseLocateKind.Velocity);
 
-    // Shared body for the two per-vector locate buttons: read a fresh pose, pick
-    // the position or velocity owner+offset, and hand it to the value-landing
-    // GWorld locator (same path Value Search uses — lands on the field, not just
-    // the owning component).
-    private async Task LocateVectorAsync(bool velocity)
+    /// <summary>Locate the pawn's acceleration FVector (CharacterMovement.Acceleration)
+    /// in GWorld.</summary>
+    [RelayCommand]
+    private Task LocateAccelerationInGWorldAsync() => LocatePoseFieldAsync(PoseLocateKind.Acceleration);
+
+    /// <summary>Locate "Speed" in GWorld — Speed has no own field (it is |Velocity|),
+    /// so this lands on the Velocity vector it is computed from.</summary>
+    [RelayCommand]
+    private Task LocateSpeedInGWorldAsync() => LocatePoseFieldAsync(PoseLocateKind.Speed);
+
+    /// <summary>Locate the pawn's rotation (Controller.ControlRotation FRotator) in
+    /// GWorld.</summary>
+    [RelayCommand]
+    private Task LocateRotationInGWorldAsync() => LocatePoseFieldAsync(PoseLocateKind.Rotation);
+
+    private enum PoseLocateKind { Position, Velocity, Acceleration, Speed, Rotation }
+
+    // Shared body for the per-field locate buttons: read a fresh pose, pick the
+    // owner+offset of the requested field, and hand it to the value-landing GWorld
+    // locator (same path Value Search uses — lands on the field, not just the
+    // owning component). Speed has no own field → lands on Velocity.
+    private async Task LocatePoseFieldAsync(PoseLocateKind kind)
     {
         if (!IsConnected) return;
-        string what = velocity ? "velocity" : "position";
         try
         {
             IsBusy = true;
@@ -558,32 +625,128 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             }
             ApplyPoseAndMovement(p);
 
-            string owner; int offset; string field;
-            if (velocity)
+            string what, owner, field;
+            int offset;
+            switch (kind)
             {
-                if (!p.HasMovement || !p.HasVelAddr)
-                {
-                    StatusText = "No velocity vector to locate (this pawn has no CharacterMovement).";
-                    return;
-                }
-                owner = p.VelOwnerAddr; offset = p.VelFieldOffset; field = p.VelFieldName;
+                case PoseLocateKind.Velocity:
+                case PoseLocateKind.Speed:
+                    what = kind == PoseLocateKind.Speed ? "speed (Velocity vector)" : "velocity";
+                    if (!p.HasMovement || !p.HasVelAddr)
+                    {
+                        StatusText = "No velocity vector to locate (this pawn has no CharacterMovement).";
+                        return;
+                    }
+                    owner = p.VelOwnerAddr; offset = p.VelFieldOffset; field = p.VelFieldName;
+                    break;
+                case PoseLocateKind.Acceleration:
+                    what = "acceleration";
+                    if (!p.HasMovement || !p.HasAccAddr)
+                    {
+                        StatusText = "No acceleration vector to locate (this pawn has no CharacterMovement).";
+                        return;
+                    }
+                    owner = p.AccOwnerAddr; offset = p.AccFieldOffset; field = p.AccFieldName;
+                    break;
+                case PoseLocateKind.Rotation:
+                    what = "rotation";
+                    if (!p.HasRotAddr)
+                    {
+                        StatusText = "No rotation field to locate (ControlRotation unresolved).";
+                        return;
+                    }
+                    owner = p.RotOwnerAddr; offset = p.RotFieldOffset; field = p.RotFieldName;
+                    break;
+                default: // Position
+                    what = "position";
+                    if (!p.HasLocAddr)
+                    {
+                        StatusText = "No position vector to locate (location field unresolved).";
+                        return;
+                    }
+                    owner = p.LocOwnerAddr; offset = p.LocFieldOffset; field = p.LocFieldName;
+                    break;
             }
-            else
-            {
-                if (!p.HasLocAddr)
-                {
-                    StatusText = "No position vector to locate (location field unresolved).";
-                    return;
-                }
-                owner = p.LocOwnerAddr; offset = p.LocFieldOffset; field = p.LocFieldName;
-            }
-            StatusText = $"Locating {what} vector {owner}+0x{offset:X} in GWorld…";
+            StatusText = $"Locating {what} {owner}+0x{offset:X} in GWorld…";
             LocateValueInGWorld?.Invoke(owner, offset, field);
         }
         catch (Exception ex)
         {
             SetError(ex);
-            _log.Error($"Teleport LocateVector ({what}) failed", ex);
+            _log.Error($"Teleport LocatePoseField ({kind}) failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Locate the camera's POV Location FVector (CameraCachePrivate.POV.
+    /// Location on the PlayerCameraManager) in GWorld.</summary>
+    [RelayCommand]
+    private Task LocateCameraLocationInGWorldAsync() => LocateCameraFieldAsync(CameraLocateKind.Location);
+
+    /// <summary>Locate the camera's POV Rotation FRotator in GWorld.</summary>
+    [RelayCommand]
+    private Task LocateCameraRotationInGWorldAsync() => LocateCameraFieldAsync(CameraLocateKind.Rotation);
+
+    /// <summary>Locate the camera's FOV float (CameraCachePrivate.POV.FOV) in GWorld.</summary>
+    [RelayCommand]
+    private Task LocateCameraFovInGWorldAsync() => LocateCameraFieldAsync(CameraLocateKind.Fov);
+
+    private enum CameraLocateKind { Location, Rotation, Fov }
+
+    private async Task LocateCameraFieldAsync(CameraLocateKind kind)
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var pov = await _dump.TeleportGetPovAsync();
+            if (pov.Code != TeleportCodes.Ok)
+            {
+                StatusText = $"Get POV: {TeleportCodes.Describe(pov.Code)}";
+                return;
+            }
+            ApplyPov(pov);
+
+            string what, owner = pov.CamOwnerAddr, field;
+            int offset;
+            switch (kind)
+            {
+                case CameraLocateKind.Rotation:
+                    what = "camera rotation";
+                    if (!pov.HasCamRotAddr)
+                    {
+                        StatusText = "No camera rotation field to locate (cached-POV layout not reflected).";
+                        return;
+                    }
+                    offset = pov.CamRotFieldOffset; field = pov.CamRotFieldName;
+                    break;
+                case CameraLocateKind.Fov:
+                    what = "camera FOV";
+                    if (!pov.HasCamFovAddr)
+                    {
+                        StatusText = "No camera FOV field to locate (cached-POV layout not reflected).";
+                        return;
+                    }
+                    offset = pov.CamFovFieldOffset; field = pov.CamFovFieldName;
+                    break;
+                default: // Location
+                    what = "camera location";
+                    if (!pov.HasCamLocAddr)
+                    {
+                        StatusText = "No camera location field to locate (cached-POV layout not reflected).";
+                        return;
+                    }
+                    offset = pov.CamLocFieldOffset; field = pov.CamLocFieldName;
+                    break;
+            }
+            StatusText = $"Locating {what} {owner}+0x{offset:X} in GWorld…";
+            LocateValueInGWorld?.Invoke(owner, offset, field);
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error($"Teleport LocateCameraField ({kind}) failed", ex);
         }
         finally { IsBusy = false; }
     }
@@ -1473,6 +1636,141 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         finally { IsBusy = false; }
     }
 
+    // ── Gravity Direction (force GravityDirection vector, Laufen — UE5.4+) ──
+
+    private void ApplyGravDirState(int state)
+    {
+        _gravDirActive = state == 1;
+        (GravDirState, GravDirBadgeColor) = state switch
+        {
+            1 => ("ON",          "#4EC9B0"),
+            0 => ("OFF",         "#999999"),
+            _ => ("Unavailable", "#C9A04E"),   // pre-5.4 / no reflected GravityDirection
+        };
+    }
+
+    private void ApplyGravDirReadout(MovementParams mp)
+    {
+        var g = mp.GravityDirection;
+        if (!mp.HasCmc || !g.Resolved)
+        {
+            GravDirCurrentText = "Current: unavailable (needs UE5.4+ with a reflected GravityDirection).";
+            ApplyGravDirState(-1);
+            return;
+        }
+        GravDirCurrentText = string.Format(CultureInfo.InvariantCulture,
+            "Current: ({0:0.00}, {1:0.00}, {2:0.00})", g.X, g.Y, g.Z);
+        ApplyGravDirState(g.Active ? 1 : 0);
+    }
+
+    /// <summary>↻ — re-read the live gravity direction + override state.</summary>
+    [RelayCommand]
+    private async Task RefreshGravDirAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var mp = await _dump.GetMovementParamsAsync();
+            ApplyGravDirReadout(mp);
+            StatusText = (mp.HasCmc && mp.GravityDirection.Resolved)
+                ? "Read gravity direction."
+                : "Gravity direction unavailable (needs UE5.4+ with a reflected GravityDirection).";
+        }
+        catch (Exception ex)
+        {
+            ApplyGravDirState(-1);
+            SetError(ex);
+            _log.Error("Teleport RefreshGravDir failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Apply the slider direction (X/Y/Z in [-1,1]) and hold it. The DLL
+    /// normalizes; (0,0,0) is treated as OFF.</summary>
+    [RelayCommand]
+    private async Task ApplyGravDirAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var r = await _dump.SetGravityDirectionAsync(GravDirX, GravDirY, GravDirZ);
+            var mp = await _dump.GetMovementParamsAsync();
+            ApplyGravDirReadout(mp);
+            var g = mp.GravityDirection;
+            StatusText = r.State switch
+            {
+                1 => string.Format(CultureInfo.InvariantCulture,
+                       "✓ Gravity direction held at ({0:0.00}, {1:0.00}, {2:0.00}).", g.X, g.Y, g.Z),
+                0 => "Gravity direction off (a zero vector = off).",
+                _ when !r.Resolved => "Gravity direction unavailable — needs UE5.4+ (no reflected GravityDirection).",
+                _ => "Gravity direction: no pawn / no CharacterMovement (enter gameplay first).",
+            };
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            StatusText = $"Apply gravity direction failed: {ex.Message}";
+            _log.Error("Teleport ApplyGravDir failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Restore gravity direction to the captured default + reset sliders
+    /// to (0,0,-1) = straight down.</summary>
+    [RelayCommand]
+    private async Task ResetGravDirAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            await _dump.ResetGravityDirectionAsync();
+            GravDirX = 0; GravDirY = 0; GravDirZ = -1;   // sliders back to "down"
+            var mp = await _dump.GetMovementParamsAsync();
+            ApplyGravDirReadout(mp);
+            StatusText = "Gravity direction restored to the game default.";
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport ResetGravDir failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Locate the GravityDirection FVector in GWorld.</summary>
+    [RelayCommand]
+    private async Task LocateGravDirInGWorldAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var mp = await _dump.GetMovementParamsAsync();
+            ApplyGravDirReadout(mp);
+            var g = mp.GravityDirection;
+            if (!g.HasAddr)
+            {
+                StatusText = "No GravityDirection field to locate (needs UE5.4+).";
+                return;
+            }
+            StatusText = $"Locating {g.FieldName} {g.OwnerAddr}+0x{g.FieldOffset:X} in GWorld…";
+            LocateValueInGWorld?.Invoke(g.OwnerAddr, g.FieldOffset, g.FieldName);
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport LocateGravDir failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
     // ── Directional + explicit-coordinate teleport ─────────────────────
 
     /// <summary>Teleport along the pawn's facing by RelativeDistance uu (negative
@@ -1727,6 +2025,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                     _ = (_gravityActive ? ResetGravityCommand : ApplyGravityCommand)
                         .ExecuteAsync(null);
                     return;
+                case "gravdir_toggle":
+                    _ = (_gravDirActive ? ResetGravDirCommand : ApplyGravDirCommand)
+                        .ExecuteAsync(null);
+                    return;
                 case "pov_get":      _ = GetPovCommand.ExecuteAsync(null); return;
                 case "relative":     _ = TeleportRelativeCommand.ExecuteAsync(null); return;
                 case "coords":       _ = TeleportToCoordsCommand.ExecuteAsync(null); return;
@@ -1887,7 +2189,13 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 if (await _aobMaker!.CreateAAScriptAsync(s.Desc, script, autoActivate: false))
                     ok++;
             }
-            int total = specs.Length + moveSpecs.Length;
+            // Gravity Direction vector (UE5.4+) baked at the current sliders.
+            string gdDesc = string.Format(CultureInfo.InvariantCulture,
+                "Movement: Gravity Direction ({0:0.0#}, {1:0.0#}, {2:0.0#})", GravDirX, GravDirY, GravDirZ);
+            string gdScript = MovementScriptGenerator.GenerateGravityDirection(GravDirX, GravDirY, GravDirZ);
+            if (await _aobMaker!.CreateAAScriptAsync(gdDesc, gdScript, autoActivate: false))
+                ok++;
+            int total = specs.Length + moveSpecs.Length + 1;
             StatusText = $"Added {ok}/{total} Teleport + Movement records to CE " +
                          "(teleport = momentary; movement = on/off toggle; bind CE hotkeys as you like).";
             _log.Info($"Teleport + Movement actions -> CE via AOBMaker ({ok}/{total})");
@@ -1909,10 +2217,11 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 RelativeDistance, RelativeHorizontal,
                 CoordX, CoordY, CoordZ, CoordSetRotation,
                 CoordPitch, CoordYaw, CoordRoll);
-            // Movement-tuning toggles (Laufen) baked at the current slider %.
+            // Movement-tuning toggles (Laufen) baked at the current slider values.
             rows.AddRange(MovementScriptGenerator.BuildBatchRows(
                 MoveSpeedMultiplier * 100, GravityMultiplier * 100,
-                SuperJumpHeightMultiplier * 100));
+                SuperJumpHeightMultiplier * 100,
+                GravDirX, GravDirY, GravDirZ));
             string ct = CheatTableBuilder.Build("Teleport — UE5CEDumper", rows);
             var path = await _platform.ShowSaveFileDialogAsync(
                 defaultFileName: CheatTableBuilder.DefaultFileName("Teleport", DateTime.Now),
@@ -2101,6 +2410,9 @@ public partial class TeleportHotkeyRow : ObservableObject
     /// <summary>Stable id: "save0".."save2" / "recall0".."recall2".</summary>
     public string ActionId { get; init; } = "";
     public string DisplayName { get; init; } = "";
+
+    /// <summary>One-line description shown as the row's tooltip (what the hotkey does).</summary>
+    public string Hint { get; init; } = "";
 
     /// <summary>Current bound combo label (e.g. "Ctrl+F7"), or "" when unset.</summary>
     [ObservableProperty]
