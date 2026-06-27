@@ -4877,7 +4877,22 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     private async Task<InstanceWalkResult> AutoFillGapsRetryAsync(
         InstanceWalkResult result, string addr, string? classAddr = null)
     {
-        if (result.Fields.Count == 0 && result.PropertiesSize > 0 && !FillGaps)
+        // Never auto-retry a stale/recycled object: the DLL already judged its
+        // class pointer garbage. Firing fill_gaps on it asks the walker to guess
+        // types across a bogus multi-hundred-MB PropertiesSize, which wedges the
+        // single-threaded pipe (the "switch back to Live Walker froze the pipe"
+        // bug). The DLL caps this too, but bail here so we don't even send it.
+        if (result.IsStale)
+        {
+            _log.Warn($"Skipping fill_gaps auto-retry for {addr}: object is stale (recycled class pointer)");
+            return result;
+        }
+
+        // PropertiesSize sanity bound mirrors the DLL's kMaxSanePropertiesSize
+        // (1 MB). A larger value is garbage, not a genuine 0-field class.
+        const int MaxSanePropertiesSize = 1 * 1024 * 1024;
+        if (result.Fields.Count == 0 && result.PropertiesSize > 0
+            && result.PropertiesSize <= MaxSanePropertiesSize && !FillGaps)
         {
             _log.Info($"Auto fill_gaps: 0 fields but propsSize={result.PropertiesSize}, auto-checking Guess? + retrying with fill_gaps for {addr}");
             SetFillGapsSilently(true);
@@ -5138,6 +5153,17 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
         // Track whether this is a definition view (schema-only, no live values)
         _isDefinitionView = result.IsDefinition;
+
+        // Stale object: the DLL judged the class pointer recycled/garbage (the
+        // instance was freed and its memory slot reused — common after returning
+        // to Live Walker from a long Snapshot / Class-Pivot pass on the same
+        // address). The field grid is empty; surface why instead of showing a
+        // silently-blank grid, and never auto-retry fill_gaps on it.
+        if (result.IsStale)
+        {
+            StatusText = "⚠ This object appears to have been freed/recycled — re-open it from \U0001F30D GWorld or the finder.";
+            _log.Warn($"UpdateDisplay: stale/recycled object at {result.Address} (implausible PropertiesSize) — fields unavailable");
+        }
 
         // Compute absolute field addresses
         ulong baseAddr = 0;

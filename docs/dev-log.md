@@ -18,6 +18,46 @@ builds ≤696 in
 
 -----
 
+## 2026-06-27 — Pipe-block fix: stale/recycled Live Walker object with a garbage PropertiesSize no longer wedges the single-threaded pipe (build ~1824; DLL + UI; tests +6 dll)
+
+**Symptom (Elliot, user-reported).** Did Snapshot → Class Pivot → multi-value diff (~10 min),
+switched **back to Live Walker**, and the UI pipe appeared **blocked** — no further command
+returned until the app was force-closed.
+
+**Root cause (log-proven, three logs cross-checked).** The instance the Live Walker had
+selected (`0x376182070`) was freed/GC'd during the long Pivot pass and its memory slot reused.
+On return, the panel re-walked the **stale address**:
+1. Shallow `walk_instance` (id=375) read a recycled UClass pointer whose name was empty and
+   whose `PropertiesSize` decoded as garbage **867763776 (~827 MB)** — yet returned `ok:true`,
+   0 fields, `props_size` huge.
+2. UI `AutoFillGapsRetryAsync` saw *0 fields + propsSize>0* and **auto-fired `fill_gaps=true`**
+   (id=376) — with no upper bound.
+3. DLL `Ubel::WalkInstance` computed **one gap `[0, 0x33B90640)`** = the whole 827 MB and called
+   `GuessGapTypes` over it. For a gap >64 KB it abandons the bulk read and does a **per-position
+   SEH read, advancing 1 byte per fault** over mostly-unmapped memory → ~**8×10⁸ SEH faults** =
+   effective hang. The loop had **no `Tot::Requested()` check**, so even the disconnect monitor
+   couldn't free it. The single-threaded pipe queued every later command (the user's `walk_world`
+   id=377 never ran) → UI frozen.
+
+**Fix (4 layers).**
+- **DLL gate** (`Ubel::WalkInstance`): new pure `Ubel::IsSanePropertiesSize` (≤ `kMaxSanePropertiesSize`
+  = 1 MB). Implausible `PropertiesSize` → flag `isStale`, zero `propsSize`, **return before the
+  gap walk**.
+- **DLL gap-fill cap** (`Ubel.cpp` fill-gaps block): explicit `PropertiesSize <= kMaxSanePropertiesSize`
+  guard (belt-and-suspenders with the gate).
+- **DLL `GuessGapTypes`**: hard `gapLen > kMaxSanePropertiesSize` refusal (protects *every* caller,
+  incl. the Native-C scan) **+ a throttled `Tot::Requested()` poll** so a wide gap stays abortable
+  on disconnect/shutdown.
+- **UI** (`AutoFillGapsRetryAsync`): skip the auto-retry when `IsStale` or `PropertiesSize` exceeds
+  1 MB; `UpdateDisplay` surfaces a "object freed/recycled — re-open from 🌍 GWorld/finder" status
+  instead of a silently-blank grid. New `stale` field plumbed Fern → `InstanceWalkResult`.
+
+**Tests.** `Test_IsSanePropertiesSize` (6 EXPECTs incl. the 827 MB value) → dll_helpers 797/0;
+C# 2083/0; published UI launch-verified (alive 7 s, no crash.log). In-game re-verify on Elliot
+pending (repeat the Snapshot/Pivot → Live Walker round-trip).
+
+-----
+
 ## 2026-06-27 — Build fix: DLL/proxy PE VERSIONINFO now tracks build_number again on incremental builds (build ~1822; CMake only)
 
 **Symptom.** After the incremental-Ninja build dir became persistent (build 1817), the

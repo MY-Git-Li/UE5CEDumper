@@ -341,6 +341,25 @@ struct LiveFieldValue {
     bool guessed = false;
 };
 
+// A real UStruct::PropertiesSize is bounded — even the largest generated
+// Blueprint / UClass layouts are at most tens of KB. A value beyond this means
+// the class pointer is recycled/garbage: the instance was freed and its memory
+// slot reused (e.g. a level transition / GC that ran while the user was away in
+// another panel, then returned to Live Walker on the stale address). Used to
+//   (a) reject such stale objects in WalkInstance, and
+//   (b) cap the Guess-What gap-fill so a bogus multi-hundred-MB PropertiesSize
+//       can't become one giant gap that wedges the single-threaded pipe worker
+//       (827 MB observed → ~8e8 per-byte SEH-faulting reads = effective hang).
+inline constexpr int32_t kMaxSanePropertiesSize = 1 * 1024 * 1024;  // 1 MB
+
+// True when `propertiesSize` is a plausible UStruct::PropertiesSize: non-negative
+// and within kMaxSanePropertiesSize. A 0 is allowed (unusual but not garbage); a
+// negative or wildly-large value means the class pointer is recycled/garbage.
+// Pure — unit-tested in dll_helpers_test so the bound is locked at build time.
+inline bool IsSanePropertiesSize(int32_t propertiesSize) {
+    return propertiesSize >= 0 && propertiesSize <= kMaxSanePropertiesSize;
+}
+
 // Result of walking a live instance
 struct InstanceWalkResult {
     uintptr_t   addr      = 0;
@@ -351,6 +370,7 @@ struct InstanceWalkResult {
     std::string outerName;         // Name of the outer object
     std::string outerClassName;    // Class name of the outer object
     bool        isDefinition = false;  // True when viewing a class/struct definition (not a live instance)
+    bool        isStale = false;   // True when classAddr looks recycled/garbage (implausible PropertiesSize)
     int32_t     propsSize = 0;     // UStruct::PropertiesSize — total struct/class size in bytes
     std::vector<LiveFieldValue> fields;
 };

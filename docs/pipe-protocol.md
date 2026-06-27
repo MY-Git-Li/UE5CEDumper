@@ -565,6 +565,10 @@ Field objects include all `walk_class` fields **plus** live typed values and arr
   "outer":       "7FF6BB000000",
   "outer_name":  "ThirdPersonMap",
   "outer_class": "World",
+  // "stale": true,   // present only when the class pointer looks recycled/garbage
+                      // (PropertiesSize beyond kMaxSanePropertiesSize = 1 MB). Returned
+                      // with no fields + props_size omitted; the client must NOT retry
+                      // fill_gaps (a bogus multi-hundred-MB size would wedge the pipe).
   "fields": [
     // --- Scalar field ---
     {

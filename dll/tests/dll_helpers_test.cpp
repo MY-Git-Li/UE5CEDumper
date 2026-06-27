@@ -2853,6 +2853,20 @@ static void Test_Holes_ComputeClassHoles_ArrayDim() {
            Ubel::ComputeClassHoles(ciBad, 0x28, 0x80).size() == 3);
 }
 
+static void Test_IsSanePropertiesSize() {
+    // The bound that stops a recycled-object walk from wedging the pipe: a real
+    // UStruct::PropertiesSize is non-negative and at most kMaxSanePropertiesSize.
+    // Real-world trigger (Elliot, 2026-06-27 log): returning to Live Walker on a
+    // freed instance read class PropertiesSize=867763776 (~827 MB) → one giant
+    // gap → GuessGapTypes spun ~8e8 SEH reads and blocked the single-threaded pipe.
+    EXPECT("UWorld real size (2536) is sane", Ubel::IsSanePropertiesSize(2536));
+    EXPECT("zero is sane (unusual, not garbage)", Ubel::IsSanePropertiesSize(0));
+    EXPECT("exactly the cap is sane", Ubel::IsSanePropertiesSize(Ubel::kMaxSanePropertiesSize));
+    EXPECT("cap+1 is NOT sane", !Ubel::IsSanePropertiesSize(Ubel::kMaxSanePropertiesSize + 1));
+    EXPECT("negative is NOT sane", !Ubel::IsSanePropertiesSize(-1));
+    EXPECT("the 827 MB garbage value is NOT sane", !Ubel::IsSanePropertiesSize(867763776));
+}
+
 static void Test_Holes_NormalizeGuessedType() {
     using DT = Radar::DataType;
     // Every label GuessGapTypes can emit must normalize to a canonical property
@@ -3007,6 +3021,7 @@ int main() {
     Test_Holes_FullyCovered();
     Test_Holes_ClampsOutOfWindow();
     Test_Holes_ComputeClassHoles_ArrayDim();
+    Test_IsSanePropertiesSize();
     Test_Holes_NormalizeGuessedType();
 
     std::printf("------------------------------------------\n");

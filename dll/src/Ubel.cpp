@@ -14,6 +14,7 @@
 #include "Utf8Helpers.h"
 #include "Scharf.h"
 #include "Neu.h"     // UEnum::Names layout (legacy TArray vs UE5.6+ FNameData)
+#include "Tot.h"     // cooperative cancellation for the unbounded gap-fill loop
 
 #include <algorithm>
 #include <atomic>
@@ -2918,6 +2919,17 @@ void GuessGapTypes(uintptr_t baseAddr, int32_t gapStart, int32_t gapEnd,
     // only the source of the bytes changes. Output is byte-for-byte unchanged.
     const int32_t gapLen = gapEnd - gapStart;
     if (gapLen <= 0) return;
+    // Hard safety bound, independent of any caller: a single object's gap can
+    // never legitimately exceed its PropertiesSize (<= kMaxSanePropertiesSize).
+    // A larger gapLen means the caller fed a garbage size — refuse it rather
+    // than walk it one byte at a time (each faulting read is a costly SEH). This
+    // guards EVERY caller (WalkInstance gap-fill + Aura Native-C scan).
+    if (gapLen > kMaxSanePropertiesSize) {
+        Sein::Warn("WALK:guess",
+            "GuessGapTypes: gap [0x%X,0x%X) len=%d exceeds sane bound, refusing",
+            (unsigned)gapStart, (unsigned)gapEnd, gapLen);
+        return;
+    }
     static thread_local std::vector<uint8_t> s_gapBuf;
     const uint8_t* gb = nullptr;
     if (gapLen <= 0x10000) {
@@ -2937,7 +2949,14 @@ void GuessGapTypes(uintptr_t baseAddr, int32_t gapStart, int32_t gapEnd,
 
     int32_t pos = gapStart;
 
+    // Cancellation throttle: the slow path advances 1 byte per faulting SEH
+    // read, so a wide gap over unmapped memory must stay abortable. Poll the
+    // cooperative cancel flag (set by Fern's disconnect monitor / shutdown)
+    // every ~1KB of progress and bail with partial guesses.
+    uint32_t iterCount = 0;
     while (pos < gapEnd) {
+        if ((++iterCount & 0x3FF) == 0 && Tot::Requested())
+            return;
         int32_t remaining = gapEnd - pos;
 
         // Read up to 8 bytes for analysis (from the bulk buffer, or direct on fallback)
@@ -3274,6 +3293,25 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
     auto walkClassMs = std::chrono::duration_cast<std::chrono::milliseconds>(walkClassEnd - walkClassStart).count();
 
     result.propsSize = ci.PropertiesSize;
+
+    // Stale/garbage gate: a real UStruct::PropertiesSize is bounded (see
+    // kMaxSanePropertiesSize). An implausible value means classAddr points at
+    // recycled memory — the instance was freed and its slot reused while the
+    // user was elsewhere (e.g. a long Snapshot/Class-Pivot pass), then Live
+    // Walker re-walked the stale address on return. Bail BEFORE the gap-fill:
+    // otherwise a bogus 827 MB PropertiesSize becomes one giant gap and
+    // GuessGapTypes spins ~8e8 per-byte SEH reads, wedging the single-threaded
+    // pipe worker (and the UI with it). propsSize is zeroed so the UI's
+    // "0 fields + propsSize>0" fill_gaps auto-retry never fires.
+    if (!IsSanePropertiesSize(ci.PropertiesSize)) {
+        Sein::Warn("WALK:safe",
+            "WalkInstance: instance 0x%llx class 0x%llx has implausible PropertiesSize=%d "
+            "(stale/recycled object?), skipping field/gap walk",
+            (unsigned long long)instanceAddr, (unsigned long long)classAddr, ci.PropertiesSize);
+        result.isStale   = true;
+        result.propsSize = 0;
+        return result;
+    }
 
     // Pre-pass: calibrate subclass extension offsets using StructProperty probe.
     // Must run BEFORE the main loop so ArrayProperty fields use corrected offsets.
@@ -5227,7 +5265,11 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
 
     // --- Guess What: fill gaps between known fields ---
     // Note: works with 0-field classes too — the entire [headerEnd, propsSize] becomes one gap.
-    if (fillGaps && !result.isDefinition && ci.PropertiesSize > 0) {
+    // The PropertiesSize upper bound is redundant with the stale gate above (which
+    // already returns for implausible sizes) but kept explicit so the gap-fill can
+    // never run over a multi-hundred-MB range even if that gate is ever loosened.
+    if (fillGaps && !result.isDefinition &&
+        ci.PropertiesSize > 0 && ci.PropertiesSize <= kMaxSanePropertiesSize) {
         // Determine scan boundaries
         int32_t headerEnd = isRawStruct ? 0 : (DynOff::UOBJECT_OUTER + 8);
         int32_t scanEnd = ci.PropertiesSize;
