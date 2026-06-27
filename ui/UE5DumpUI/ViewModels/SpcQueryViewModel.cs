@@ -422,9 +422,11 @@ public partial class SpcQueryViewModel : ViewModelBase
             // the rebuild as a fresh dispatcher work item, avoiding the "cannot
             // change ObservableCollection during a CollectionChanged event" crash.
             var list = await Task.Run(() => _store.ListSnapshotsAsync());
+            // Exclude UNUSABLE snapshots (captures that spanned a GObjects drift): SPC
+            // joins across snapshots, so an inconsistent one silently poisons results.
             // Display oldest-first: the baseline (oldest selected) then sits at the
             // top and the predicate chain reads top-to-bottom in time order.
-            var ordered = list.OrderBy(m => m.Id).ToList();
+            var ordered = list.Where(m => m.IsUsable).OrderBy(m => m.Id).ToList();
             // Preserve current selections/predicates across a refresh so a capture
             // on the Snapshot tab doesn't wipe a half-built query — including the SPC
             // group matrix (every pick's per-slot cells).

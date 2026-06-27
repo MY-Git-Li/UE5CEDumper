@@ -430,15 +430,20 @@ public partial class SnapshotViewModel : ViewModelBase
             // compare snapshot and reverts Mode B to Mode A. Don't default the compare:
             // null = Mode A is the intended default.
             if (keepG.HasValue) GroupSnapshot = Snapshots.FirstOrDefault(s => s.Id == keepG.Value);
-            GroupSnapshot ??= Snapshots.FirstOrDefault();
+            GroupSnapshot ??= Snapshots.FirstOrDefault(s => s.IsUsable);
             if (keepGC.HasValue) GroupCompareSnapshot = Snapshots.FirstOrDefault(s => s.Id == keepGC.Value);
             await UpdateUsageAsync();
-            // Convenience: default the diff pickers to the two newest snapshots
-            // (A = older, B = newer) so "Run Diff" is one click after capturing.
-            if (Snapshots.Count >= 2 && DiffA == null && DiffB == null)
+            // Convenience: default the diff pickers to the two newest USABLE snapshots
+            // (A = older, B = newer) so "Run Diff" is one click after capturing. Unusable
+            // (drift-flagged) snapshots are never auto-selected.
+            if (DiffA == null && DiffB == null)
             {
-                DiffB = Snapshots[0];   // newest
-                DiffA = Snapshots[1];   // second-newest
+                var usable = Snapshots.Where(s => s.IsUsable).ToList();
+                if (usable.Count >= 2)
+                {
+                    DiffB = usable[0];   // newest usable
+                    DiffA = usable[1];   // second-newest usable
+                }
             }
         }
         catch (Exception ex)
@@ -510,6 +515,19 @@ public partial class SnapshotViewModel : ViewModelBase
         long snapshotId = 0;
         try
         {
+            // Auto-reclaim any previously-flagged UNUSABLE snapshots (captures that
+            // spanned a GObjects drift) before starting a fresh one — deferred cleanup
+            // so the user saw them flagged in the list until now. Best-effort: a
+            // cleanup hiccup must never block a new capture.
+            try
+            {
+                int purged = await Task.Run(() => _store.DeleteUnusableSnapshotsAsync(ct), ct);
+                if (purged > 0)
+                    _log.Info(Constants.LogCatView, $"Snapshot: auto-removed {purged} unusable snapshot(s) before capture");
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) { _log.Warn(Constants.LogCatView, $"Snapshot: unusable cleanup skipped: {ex.Message}"); }
+
             int total = await _dump.BeginSnapshotAsync(dataType, ct);
             _capTotal = total;
             StartCaptureHeartbeat();
@@ -535,6 +553,14 @@ public partial class SnapshotViewModel : ViewModelBase
             // bulk pragmas, commit-every-N). A linked CTS lets a consumer (write) failure
             // stop the producer without deadlocking on the bounded channel, and vice-versa.
             int objectCount = 0, fieldCount = 0;
+            // Consistency guard: watch the GObjects count each chunk reports. A level
+            // transition / mass spawn-free mid-capture swings it by thousands, so the
+            // snapshot becomes a temporally-inconsistent mix of two worlds. On drift we
+            // stop early and finalize the partial as UNUSABLE (excluded from SPC/Pivot,
+            // auto-removed before the next capture). Written only by the producer task;
+            // read after WhenAll (the await is the memory barrier).
+            int minTotal = total, maxTotal = total;
+            bool driftDetected = false;
             await using (var session = await _store.BeginCaptureSessionAsync(ct))
             using (var linked = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
@@ -568,7 +594,20 @@ public partial class SnapshotViewModel : ViewModelBase
                             offset += chunk.Scanned;
                             _capOffset = offset;     // display-only; heartbeat reads on UI thread
                             _lastChunkAt = DateTime.UtcNow;
+                            // Track GObjects-count drift across chunks (begin is folded in
+                            // by the seeded min/max), then persist this still-valid chunk.
+                            if (chunk.Total > 0)
+                            {
+                                if (chunk.Total < minTotal) minTotal = chunk.Total;
+                                if (chunk.Total > maxTotal) maxTotal = chunk.Total;
+                            }
                             await channel.Writer.WriteAsync(chunk, lct);
+                            if (!driftDetected &&
+                                SnapshotConsistency.IsDriftSuspect(total, minTotal, maxTotal))
+                            {
+                                driftDetected = true;
+                                break;   // world churned mid-capture — stop; finalize partial as unusable
+                            }
                             if (chunk.Scanned == 0 || offset >= chunk.Total) break;
                         }
                     }
@@ -620,7 +659,7 @@ public partial class SnapshotViewModel : ViewModelBase
                 // Incremental pivot counts on the session connection — replaces the ~10s
                 // COUNT(DISTINCT) GROUP BY ×2 the lazy build runs (the documented finalize
                 // freeze). Dispose then restores pragmas + closes.
-                await session.CompleteSnapshotAsync(snapshotId, objectCount, fieldCount, ct);
+                await session.CompleteSnapshotAsync(snapshotId, objectCount, fieldCount, !driftDetected, ct);
             }
 
             // FIFO eviction: drop oldest snapshots of this game until the DB
@@ -662,7 +701,10 @@ public partial class SnapshotViewModel : ViewModelBase
                 $"Post-capture memory: managed heap {beforeHeap:N0}->{GC.GetTotalMemory(false) / 1048576:N0} MB, " +
                 $"working set {beforeWs:N0}->{proc.WorkingSet64 / 1048576:N0} MB (after compacting GC)");
 
-            StatusText = $"Captured {objectCount:N0} objects, {fieldCount:N0} fields{cappedNote}{evicted}";
+            var driftNote = driftDetected
+                ? $" — ⚠ GObjects changed mid-capture ({total:N0}→{maxTotal:N0}); marked UNUSABLE (excluded from SPC/Pivot, auto-removed before next capture)"
+                : "";
+            StatusText = $"Captured {objectCount:N0} objects, {fieldCount:N0} fields{driftNote}{cappedNote}{evicted}";
             Label = "";
             await RefreshAsync();
         }

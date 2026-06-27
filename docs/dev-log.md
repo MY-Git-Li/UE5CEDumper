@@ -18,6 +18,38 @@ builds ≤696 in
 
 -----
 
+## 2026-06-27 — Snapshot consistency guard: detect a GObjects-count drift mid-capture → mark UNUSABLE + auto-delete before next capture (build ~1825; UI/C#-only; tests +8)
+
+**Context.** A user asked whether the slow/huge `48–61 MB`-chunk snapshot they saw was *GC
+corruption*. Investigation (DLL `Aura::CaptureSnapshotChunk` + UI capture loop + SQLite
+lifecycle) found **No**: the big chunks are legitimately data-heavy objects, and the run's
+every chunk reported a stable `total:390017` (no churn). The "~10 min" was a misread — the
+3 captures took ~82 s each; the 9-min gap was Class-Pivot work. BUT the probe surfaced a real
+latent bug: the paging loop stops on the *per-chunk* `total` with **no drift detection**, so a
+capture spanning a level transition / mass spawn-free is stored as "valid" while being a
+temporally-inconsistent mix — and snapshots are consumed OFFLINE by SPC Query / Class Pivot.
+
+**Feature (the user-requested safeguard, with the corrected trigger).**
+- **Detect** (`Services/SnapshotConsistency.cs`, pure): track the min/max GObjects count each
+  chunk reports; `IsDriftSuspect` flags a span beyond `max(2000, 2% of begin)` — generous so
+  ordinary gameplay churn never false-flags a good capture (a false positive would auto-delete
+  good offline data).
+- **Early-abort + mark unusable**: on drift the capture loop stops early and finalizes the
+  partial with `is_usable=0`.
+- **Schema** (`SnapshotStore`): `is_usable` added **additively** (PRAGMA-guarded `ALTER`, no
+  `SchemaVersion` bump) so existing snapshot DBs are preserved, not wiped.
+- **Auto-clean**: `DeleteUnusableSnapshotsAsync` runs at the START of each capture (deferred so
+  the user sees the ⚠ flag in the list until then).
+- **Offline consumers honour it**: SPC + Class Pivot pickers exclude `is_usable=0`; Diff
+  auto-select skips them; the saved-snapshots grid + pickers show a ⚠ prefix
+  (`SnapshotMeta.LabelDisplay`/`PickerDisplay`/`UsabilityBadge`).
+
+**Tests.** `SnapshotConsistencyTests` (7) + a store round-trip/`DeleteUnusable` test → C#
+2091/0; dll 797/0; published UI launch-verified (additive migration safe on startup). No DLL
+change (count already in the chunk RX) → no re-inject for this feature.
+
+-----
+
 ## 2026-06-27 — Pipe-block fix: stale/recycled Live Walker object with a garbage PropertiesSize no longer wedges the single-threaded pipe (build ~1824; DLL + UI; tests +6 dll)
 
 **Symptom (Elliot, user-reported).** Did Snapshot → Class Pivot → multi-value diff (~10 min),

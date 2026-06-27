@@ -86,7 +86,7 @@ public class SnapshotStoreTests : IDisposable
             var c1 = Chunk1(); var c2 = Chunk2();
             fieldA += s.WriteChunk(idA, c1, ct); objA += c1.Length;
             fieldA += s.WriteChunk(idA, c2, ct); objA += c2.Length;
-            await s.CompleteSnapshotAsync(idA, objA, fieldA, ct);
+            await s.CompleteSnapshotAsync(idA, objA, fieldA, ct: ct);
         }
 
         // (B) Identical data via the one-shot path + the GROUP-BY finalize (the oracle).
@@ -124,6 +124,44 @@ public class SnapshotStoreTests : IDisposable
         // flush the page cache to the -wal, or it would overshoot by up to one commit batch.
         Assert.True(s.CurrentSizeBytes() > before,
             $"CurrentSizeBytes should grow with uncommitted rows (before={before}, after={s.CurrentSizeBytes()})");
+    }
+
+    [Fact]
+    public async Task IsUsableFlag_RoundTrips_AndDeleteUnusableRemovesOnlyFlagged()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _store.SetActiveGame("USABLE");
+
+        // A clean (usable) snapshot via the streaming finalize.
+        long good = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "good", Scope = "NumericNoByte" }, ct);
+        await using (var s = await _store.BeginCaptureSessionAsync(ct))
+        {
+            int n = s.WriteChunk(good, new[] { MakeObject(1, ("HP", "IntProperty", "0A000000")) }, ct);
+            await s.CompleteSnapshotAsync(good, 1, n, isUsable: true, ct: ct);
+        }
+
+        // A drift-flagged (unusable) snapshot.
+        long bad = await _store.CreateSnapshotAsync(new SnapshotMeta { Label = "bad", Scope = "NumericNoByte" }, ct);
+        await using (var s = await _store.BeginCaptureSessionAsync(ct))
+        {
+            int n = s.WriteChunk(bad, new[] { MakeObject(2, ("HP", "IntProperty", "14000000")) }, ct);
+            await s.CompleteSnapshotAsync(bad, 1, n, isUsable: false, ct: ct);
+        }
+
+        // The flag round-trips through the additive is_usable column.
+        var list = await _store.ListSnapshotsAsync(ct);
+        Assert.True(list.Single(m => m.Id == good).IsUsable);
+        Assert.False(list.Single(m => m.Id == bad).IsUsable);
+
+        // Auto-clean removes ONLY the flagged one; the good snapshot survives.
+        int removed = await _store.DeleteUnusableSnapshotsAsync(ct);
+        Assert.Equal(1, removed);
+        var after = await _store.ListSnapshotsAsync(ct);
+        Assert.Single(after);
+        Assert.Equal(good, after[0].Id);
+
+        // A second call is a no-op (nothing left flagged).
+        Assert.Equal(0, await _store.DeleteUnusableSnapshotsAsync(ct));
     }
 
     [Fact]

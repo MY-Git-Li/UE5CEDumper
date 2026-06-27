@@ -38,9 +38,11 @@ public interface ICaptureSession : IAsyncDisposable
     /// replacing the ~10 s <c>COUNT(DISTINCT) GROUP BY ×2</c> the lazy build runs. Call once,
     /// after the last <see cref="WriteChunk"/> and before disposing. The lazy GROUP-BY build
     /// (<c>EnsurePivotIndexAsync</c>) remains the fallback for snapshots NOT captured via a
-    /// session.</summary>
+    /// session. <paramref name="isUsable"/> false marks the capture temporally
+    /// inconsistent (GObjects drifted mid-capture) so SPC/Pivot skip it and it's
+    /// auto-deleted before the next capture.</summary>
     Task CompleteSnapshotAsync(long snapshotId, int objectCount, int fieldCount,
-                               CancellationToken ct = default);
+                               bool isUsable = true, CancellationToken ct = default);
 }
 
 public interface ISnapshotStore
@@ -95,6 +97,15 @@ public interface ISnapshotStore
     /// <summary>Delete EVERY snapshot for the active game (truncate all tables)
     /// and VACUUM the DB file. Irreversible.</summary>
     Task DeleteAllSnapshotsAsync(CancellationToken ct = default);
+
+    /// <summary>Delete every snapshot flagged unusable (<c>is_usable=0</c>) for the
+    /// active game — captures that spanned a GObjects drift and are temporally
+    /// inconsistent. Called at the START of a new capture so a flagged-but-kept
+    /// snapshot is reclaimed once, deferred (the user sees it flagged in the list
+    /// until then). Returns how many were removed. Default no-op (returns 0) so
+    /// lightweight test doubles need not implement it.</summary>
+    Task<int> DeleteUnusableSnapshotsAsync(CancellationToken ct = default)
+        => Task.FromResult(0);
 
     /// <summary>Delete the snapshot database FILES for EVERY game (all
     /// <c>snapshots.*.db</c> plus their <c>-wal</c>/<c>-shm</c> sidecars and the

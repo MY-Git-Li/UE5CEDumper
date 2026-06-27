@@ -357,7 +357,7 @@ public class SnapshotViewModelTests : IDisposable
         public CapSession(ICaptureSession inner, long fakeBytes) { _inner = inner; _fakeBytes = fakeBytes; }
         public long CurrentSizeBytes() => _fakeBytes;   // force the cap to trip on the first poll
         public int WriteChunk(long s, IReadOnlyList<SnapshotCapturedObject> o, CancellationToken ct = default) => _inner.WriteChunk(s, o, ct);
-        public Task CompleteSnapshotAsync(long s, int oc, int fc, CancellationToken ct = default) => _inner.CompleteSnapshotAsync(s, oc, fc, ct);
+        public Task CompleteSnapshotAsync(long s, int oc, int fc, bool isUsable = true, CancellationToken ct = default) => _inner.CompleteSnapshotAsync(s, oc, fc, isUsable, ct);
         public ValueTask DisposeAsync() => _inner.DisposeAsync();
     }
 
