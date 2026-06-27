@@ -16,6 +16,25 @@ builds ≤696 in
 
 -----
 
+## 2026-06-27 — UE-version markers extended to 5.6 / 5.7 (build ~1810; DLL only; 2077 green)
+
+Extends the version-reconciliation chain with the two remaining structural markers
+already in the codebase (both reliable, distinct from Avowed's custom packing):
+- **UE5.7 reordered FUObjectItem** (`Object*`@+0x08, 24-byte item — the stock-UE5.7
+  Solarpunk repro): `Aura::GetItemObjOffset()==0x08 && GetItemSize()==24` → version floor
+  **507** in the init reconciliation. The `==24` guard excludes Avowed's CUSTOM 20-byte
+  packed layout (UE5.3, NOT a version signal); the "unverified" packed-reconstruction path
+  is never seen in a real game.
+- **UE5.6+ `FNameData` UEnum::Names container** (the struct-of-arrays whose enum bug the
+  `Neu` reader fixed; e.g. Titan Quest II): `DynOff::bEnumNamesNewContainer` → **506**,
+  added to the lazy `UE5_GetVersion` refine (the flag is set lazily by `DetectUEnumNames`,
+  so it surfaces as the user browses, alongside the UE5.5 Utf8Str marker).
+
+Full marker chain now: tagged FFieldVariant (5.3) → GravityDirection (5.4) → Utf8Str/Ansi
+(5.5, lazy) → FNameData enum (5.6, lazy) → Object@+0x08 24B item (5.7, init). All raise-only.
+
+-----
+
 ## 2026-06-27 — Movement Locate-in-GWorld coverage + Gravity Direction (UE5.4+) + camera nested-struct drill + UE-version upward reconciliation (build ~1808; DLL + UI; 2077 C# green; in-game VERIFIED on Elliot)
 
 Follow-on to the Laufen movement work — Locate-in-GWorld for every pose/POV field,
