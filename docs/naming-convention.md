@@ -361,6 +361,7 @@ German spelling.
 | Value scan | `Radar.cpp/.h` (was `ValueScan.*`) | CE-style by-value scan | ✅ renamed `ValueScan → Radar` |
 | Graph path | `GraphPath.h` | BFS shortest-path core (under `Aura::`) | ✅ kept — helper inside `Aura::`, by design |
 | UTF-8 helpers | `Utf8Helpers.h` | string conversion leaf util | ✅ kept — generic utility, by design |
+| Build stamp | `BuildStamp.h/.cpp` | build/version metadata accessors (decouples generated `BuildInfo.h` from heavy TUs) | ✅ kept — generic leaf utility, by design |
 
 ---
 

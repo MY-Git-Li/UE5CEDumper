@@ -125,9 +125,72 @@ foreach(_zt Zydis Zycore)
     endif()
 endforeach()
 
-add_library(UE5Dumper SHARED
-    src/Heiter.cpp
-    src/Methode.cpp
+# ============================================================
+# Common build settings shared by every DLL-side C++ target
+# (the shared object library, the main DLL, all three proxy DLLs).
+# Defined ONCE so the four DLLs can never drift apart in flags or
+# defines — that is precisely what makes their object code identical
+# and therefore safe to compile once and share (see UE5DumperCommon).
+# ============================================================
+if(MSVC)
+    # Drop the default /EHsc globally; we use /EHa for SEH (__try/__except).
+    # Hoisted above all targets so every one of them inherits the cleaned flags.
+    string(REPLACE "/EHsc" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+endif()
+
+set(UE5_COMMON_DEFS
+    UNICODE
+    _UNICODE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+    _CRT_SECURE_NO_WARNINGS
+)
+
+set(UE5_COMMON_INCLUDE_DIRS
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_BINARY_DIR}/generated   # BuildInfo.h
+    ${CMAKE_SOURCE_DIR}/vendor/nlohmann
+)
+
+# Apply the identical MSVC compile flags every DLL-side C++ target uses. Keeping
+# this in one function guarantees the shared object library and the four DLLs are
+# compiled with byte-for-byte identical flags (a prerequisite for sharing objects).
+function(ue5_apply_common_msvc_flags _tgt)
+    if(MSVC)
+        set_property(TARGET ${_tgt} PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+        )
+        target_compile_options(${_tgt} PRIVATE
+            /utf-8
+            /W4
+            /permissive-
+            /EHa            # SEH exceptions for __try/__except
+            /arch:AVX2      # enable AVX2 instruction-set optimization
+            /favor:blend    # tune for modern hybrid-core CPUs
+        )
+    endif()
+endfunction()
+
+# ============================================================
+# Shared object library — proxy-agnostic sources compiled ONCE
+#
+# These translation units never reference UE5_PROXY_BUILD or any of the per-proxy
+# sub-defines, so the compiler emits identical object code for the main DLL and
+# all three proxy DLLs. A CMake OBJECT library compiles them a SINGLE time; every
+# DLL then links the same objects. This is the correct, incremental-safe form of
+# "compile once, reuse the .obj in the other DLLs" — CMake owns the sharing and
+# dependency tracking, so a source edit recompiles that one TU once and relinks
+# the four DLLs (no manual .obj copying, which would silently desync on a flag
+# change). OBJECT (not STATIC) is deliberate: every object is force-linked into
+# each DLL, so dllexported C-ABI symbols (Frieren) are never dropped.
+#
+# INVARIANT: a file may live here ONLY if it never tests a UE5_PROXY_* macro.
+# If you add such a test to one of these files, move it into the per-target
+# source lists below (Heiter / Lugner*) instead, or the proxy DLLs will silently
+# get the main-DLL behaviour.
+# ============================================================
+set(UE5_COMMON_SOURCES
+    src/BuildStamp.cpp
     src/Macht.cpp
     src/Sein.cpp
     src/Genau.cpp
@@ -145,42 +208,33 @@ add_library(UE5Dumper SHARED
     src/Solitar.cpp
     src/Laufen.cpp
     src/Edel.cpp
+)
+
+add_library(UE5DumperCommon OBJECT ${UE5_COMMON_SOURCES})
+target_include_directories(UE5DumperCommon PUBLIC ${UE5_COMMON_INCLUDE_DIRS})
+target_compile_definitions(UE5DumperCommon PUBLIC ${UE5_COMMON_DEFS})
+ue5_apply_common_msvc_flags(UE5DumperCommon)
+# Zydis (Denken.cpp) + MinHook (Stark.cpp) are needed at COMPILE time for their
+# headers. PRIVATE = the headers reach this lib's TUs without propagating the
+# linked statics to consumers; each DLL links the actual Zydis/minhook statics
+# itself (below) so the common objects' references resolve at the final link.
+target_link_libraries(UE5DumperCommon PRIVATE minhook Zydis)
+
+# ============================================================
+# Main DLL: UE5Dumper.dll (Cheat-Engine-injected build)
+#   Own sources: Heiter (no UE5_PROXY_BUILD) + Methode (CE exports, main-only)
+#   Shared code: the UE5DumperCommon objects
+# ============================================================
+add_library(UE5Dumper SHARED
+    src/Heiter.cpp
+    src/Methode.cpp
     src/version.rc
+    $<TARGET_OBJECTS:UE5DumperCommon>
 )
 
-target_include_directories(UE5Dumper PRIVATE
-    src
-    ${CMAKE_CURRENT_BINARY_DIR}/generated   # BuildInfo.h
-    ${CMAKE_SOURCE_DIR}/vendor/nlohmann
-)
-
-target_compile_definitions(UE5Dumper PRIVATE
-    UNICODE
-    _UNICODE
-    WIN32_LEAN_AND_MEAN
-    NOMINMAX
-    _CRT_SECURE_NO_WARNINGS
-)
-
-# MSVC-specific flags
-if(MSVC)
-    # Static CRT linkage
-    set_property(TARGET UE5Dumper PROPERTY
-        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-    )
-
-    # Remove default /EHsc to avoid conflict with /EHa
-    string(REPLACE "/EHsc" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-
-    target_compile_options(UE5Dumper PRIVATE
-        /utf-8
-        /W4
-        /permissive-
-        /EHa        # Enable SEH exceptions for __try/__except
-		/arch:AVX2          # 啟用 AVX2 指令集最佳化
-        /favor:blend        # 針對現代 CPU 混合架構最佳化		
-    )
-endif()
+target_include_directories(UE5Dumper PRIVATE ${UE5_COMMON_INCLUDE_DIRS})
+target_compile_definitions(UE5Dumper PRIVATE ${UE5_COMMON_DEFS})
+ue5_apply_common_msvc_flags(UE5Dumper)
 
 target_link_libraries(UE5Dumper PRIVATE
     ws2_32
@@ -199,90 +253,58 @@ set_target_properties(UE5Dumper PROPERTIES
 )
 
 # ============================================================
-# Proxy DLL target — builds as version.dll for direct game-folder injection
-# Same source files as UE5Dumper, but:
-#   - Excludes CEPlugin.cpp (no CE SDK dependency)
-#   - Includes ProxyVersion.cpp (version.dll export forwarding)
-#   - Defines UE5_PROXY_BUILD (changes auto-start behavior)
-#   - Output: version.dll
+# Proxy DLL targets — version.dll / dinput8.dll / dxgi.dll
 #
-# Why version.dll? Almost every Windows process loads it (via
-# GetFileVersionInfo calls). dinput8.dll only works for games
-# that use DirectInput8 — most modern UE5 games do not.
+# Each proxy shares the UE5DumperCommon objects and adds only its proxy-specific
+# TUs: Heiter (compiled WITH UE5_PROXY_BUILD) + the Lugner forwarder shims (each
+# gated by its own UE5_PROXY_*_BUILD sub-define, so they must be compiled per
+# target). Excludes Methode.cpp (no CE SDK dependency). Output renamed to the
+# hijack target.
+#
+# Why version.dll? Almost every Windows process loads it (GetFileVersionInfo).
+# dinput8.dll only works for games that use DirectInput8 (most modern UE5 games
+# do not). dxgi.dll is statically imported by every D3D11/D3D12 UE game and is
+# the reliable hijack for EXEs that import neither of the other two.
+#
+# Only one proxy DLL should be active per game folder; if the user deploys more
+# than one, the runtime mutex in Heiter.cpp ensures only the first to load runs
+# full init.
 # ============================================================
-option(BUILD_PROXY_DLL "Build the proxy DLL (version.dll) target" OFF)
 
-# Shared source list for both proxy DLL targets.
-# Includes BOTH Lugner.cpp (version.dll forwarders) and Lugner_Dinput8.cpp
-# (dinput8.dll forwarders); each is gated by its own #ifdef so only the
-# active target's forwarders compile.
-set(PROXY_SOURCES
+# Proxy-specific sources (everything proxy-flavoured that is NOT in the shared
+# object library). Both Lugner.cpp (version forwarders) and Lugner_Dinput8.cpp
+# (dinput8 forwarders) are listed for every proxy; each is gated by its own
+# #ifdef so only the active target's forwarders produce code.
+set(PROXY_SPECIFIC_SOURCES
     src/Heiter.cpp
     src/Lugner.cpp
     src/Lugner_Dinput8.cpp
-    src/Macht.cpp
-    src/Sein.cpp
-    src/Genau.cpp
-    src/Aura.cpp
-    src/Serie.cpp
-    src/Ubel.cpp
-    src/Radar.cpp
-    src/Frieren.cpp
-    src/Fern.cpp
-    src/Stark.cpp
-    src/Mimic.cpp
-    src/Flamme.cpp
-    src/Denken.cpp
-    src/Wirbel.cpp
-    src/Solitar.cpp
-    src/Laufen.cpp
-    src/Edel.cpp
     src/version.rc
-)
-
-set(PROXY_COMMON_DEFS
-    UNICODE
-    _UNICODE
-    WIN32_LEAN_AND_MEAN
-    NOMINMAX
-    _CRT_SECURE_NO_WARNINGS
-    UE5_PROXY_BUILD
-)
-
-set(PROXY_INCLUDE_DIRS
-    src
-    ${CMAKE_CURRENT_BINARY_DIR}/generated
-    ${CMAKE_SOURCE_DIR}/vendor/nlohmann
 )
 
 set(PROXY_LINK_LIBS
     ws2_32 Shlwapi Psapi Version Winmm delayimp minhook Zydis
 )
 
+option(BUILD_PROXY_DLL "Build the proxy DLL (version.dll) target" OFF)
 if(BUILD_PROXY_DLL)
-    add_library(UE5Dumper_Proxy SHARED ${PROXY_SOURCES})
-
-    target_include_directories(UE5Dumper_Proxy PRIVATE ${PROXY_INCLUDE_DIRS})
-
-    target_compile_definitions(UE5Dumper_Proxy PRIVATE
-        ${PROXY_COMMON_DEFS}
-        UE5_PROXY_VERSION_BUILD
+    add_library(UE5Dumper_Proxy SHARED
+        ${PROXY_SPECIFIC_SOURCES}
+        $<TARGET_OBJECTS:UE5DumperCommon>
     )
 
-    if(MSVC)
-        set_property(TARGET UE5Dumper_Proxy PROPERTY
-            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-        )
-        target_compile_options(UE5Dumper_Proxy PRIVATE
-            /utf-8 /W4 /permissive- /EHa /arch:AVX2 /favor:blend
-        )
-    endif()
-
+    target_include_directories(UE5Dumper_Proxy PRIVATE ${UE5_COMMON_INCLUDE_DIRS})
+    target_compile_definitions(UE5Dumper_Proxy PRIVATE
+        ${UE5_COMMON_DEFS}
+        UE5_PROXY_BUILD
+        UE5_PROXY_VERSION_BUILD
+    )
+    ue5_apply_common_msvc_flags(UE5Dumper_Proxy)
     target_link_libraries(UE5Dumper_Proxy PRIVATE ${PROXY_LINK_LIBS})
 
-    # Delay-load version.dll to avoid circular dependency: the proxy DLL
-    # IS version.dll, so we can't have it in the import table at load time.
-    # MSVC delay-load resolves it at first call → goes through our proxy exports.
+    # Delay-load version.dll to break the circular dependency: the proxy DLL IS
+    # version.dll, so it can't be in the import table at load time. MSVC delay-load
+    # resolves it at first call → goes through our proxy exports.
     target_link_options(UE5Dumper_Proxy PRIVATE
         /DELAYLOAD:version.dll
         /DEF:${CMAKE_CURRENT_SOURCE_DIR}/src/ProxyVersion.def
@@ -294,37 +316,20 @@ if(BUILD_PROXY_DLL)
     )
 endif()
 
-# ============================================================
-# Proxy DLL target (alternative): dinput8.dll
-# Same architecture as version.dll proxy, but hijacks dinput8.dll
-# instead. Useful when version.dll hijacking conflicts with the
-# game's installer / anti-tamper shim.
-#
-# Only one proxy DLL should be active per game folder; if the user
-# accidentally deploys both, the runtime mutex in Heiter.cpp ensures
-# only the first to load runs full init.
-# ============================================================
 option(BUILD_PROXY_DINPUT8 "Build the dinput8.dll proxy DLL target" OFF)
-
 if(BUILD_PROXY_DINPUT8)
-    add_library(UE5Dumper_ProxyDinput8 SHARED ${PROXY_SOURCES})
-
-    target_include_directories(UE5Dumper_ProxyDinput8 PRIVATE ${PROXY_INCLUDE_DIRS})
-
-    target_compile_definitions(UE5Dumper_ProxyDinput8 PRIVATE
-        ${PROXY_COMMON_DEFS}
-        UE5_PROXY_DINPUT8_BUILD
+    add_library(UE5Dumper_ProxyDinput8 SHARED
+        ${PROXY_SPECIFIC_SOURCES}
+        $<TARGET_OBJECTS:UE5DumperCommon>
     )
 
-    if(MSVC)
-        set_property(TARGET UE5Dumper_ProxyDinput8 PROPERTY
-            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-        )
-        target_compile_options(UE5Dumper_ProxyDinput8 PRIVATE
-            /utf-8 /W4 /permissive- /EHa /arch:AVX2 /favor:blend
-        )
-    endif()
-
+    target_include_directories(UE5Dumper_ProxyDinput8 PRIVATE ${UE5_COMMON_INCLUDE_DIRS})
+    target_compile_definitions(UE5Dumper_ProxyDinput8 PRIVATE
+        ${UE5_COMMON_DEFS}
+        UE5_PROXY_BUILD
+        UE5_PROXY_DINPUT8_BUILD
+    )
+    ue5_apply_common_msvc_flags(UE5Dumper_ProxyDinput8)
     target_link_libraries(UE5Dumper_ProxyDinput8 PRIVATE ${PROXY_LINK_LIBS})
 
     # Delay-load dinput8.dll for the same reason as the version.dll proxy:
@@ -340,49 +345,32 @@ if(BUILD_PROXY_DINPUT8)
     )
 endif()
 
-# ============================================================
-# Proxy DLL target (alternative): dxgi.dll
-# Hijacks dxgi.dll, which is statically imported by every D3D11/
-# D3D12 Unreal Engine game on Windows (CreateDXGIFactory1/2). This
-# is the reliable hijack target for games whose EXE imports neither
-# version.dll nor dinput8.dll (observed: a SQUARE ENIX UE4.27 demo).
-#
-# Unlike the version/dinput8 proxies, dxgi exports several
-# undocumented internals (DXGID3D10*, Compat*, PIX*) with unknown
-# signatures, so forwarding uses signature-agnostic asm jmp-thunks
-# (Lugner_Dxgi.asm + Lugner_Dxgi.cpp) instead of plain C wrappers.
-# This requires the MASM assembler (enabled below, dxgi target only).
-#
-# As with the other proxies, only one should be active per game
-# folder; the runtime mutex in Heiter.cpp enforces first-loaded-wins.
-# ============================================================
 option(BUILD_PROXY_DXGI "Build the dxgi.dll proxy DLL target" OFF)
-
 if(BUILD_PROXY_DXGI)
-    # MASM is only needed for this target's jmp-thunks; enable it lazily so
-    # the version/dinput8 proxy configures don't pay for it.
+    # MASM is only needed for this target's jmp-thunks; enable it lazily so the
+    # version/dinput8 proxy configures don't pay for it.
     enable_language(ASM_MASM)
 
     # Assemble the jmp-thunks in an ISOLATED object library that links nothing.
     # The main proxy target links Zydis, which exports a PUBLIC /wd4201 compile
-    # option; target compile options apply to ALL languages, so that CL-only
-    # flag would reach ml64 and trigger "MASM warning A4018: invalid
-    # command-line option". Keeping the .asm in a dependency-free object lib
-    # (then folding its objects in via $<TARGET_OBJECTS>) keeps ml64's command
-    # line clean. f0..f19 resolve against mProcs (in Lugner_Dxgi.cpp) at the
-    # final shared-lib link, exactly as before.
+    # option; target compile options apply to ALL languages, so that CL-only flag
+    # would reach ml64 and trigger "MASM warning A4018: invalid command-line
+    # option". Keeping the .asm in a dependency-free object lib (then folding its
+    # objects in via $<TARGET_OBJECTS>) keeps ml64's command line clean. f0..f19
+    # resolve against mProcs (in Lugner_Dxgi.cpp) at the final shared-lib link.
     add_library(UE5Dumper_ProxyDxgi_Thunks OBJECT src/Lugner_Dxgi.asm)
 
     add_library(UE5Dumper_ProxyDxgi SHARED
-        ${PROXY_SOURCES}
+        ${PROXY_SPECIFIC_SOURCES}
         src/Lugner_Dxgi.cpp
+        $<TARGET_OBJECTS:UE5DumperCommon>
         $<TARGET_OBJECTS:UE5Dumper_ProxyDxgi_Thunks>
     )
 
-    target_include_directories(UE5Dumper_ProxyDxgi PRIVATE ${PROXY_INCLUDE_DIRS})
-
+    target_include_directories(UE5Dumper_ProxyDxgi PRIVATE ${UE5_COMMON_INCLUDE_DIRS})
     target_compile_definitions(UE5Dumper_ProxyDxgi PRIVATE
-        ${PROXY_COMMON_DEFS}
+        ${UE5_COMMON_DEFS}
+        UE5_PROXY_BUILD
         UE5_PROXY_DXGI_BUILD
     )
 
@@ -390,7 +378,8 @@ if(BUILD_PROXY_DXGI)
         set_property(TARGET UE5Dumper_ProxyDxgi PROPERTY
             MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
         )
-        # /utf-8 /W4 etc. apply to C/C++ only; MASM (.asm) ignores them.
+        # /utf-8 /W4 etc. apply to C/C++ only; MASM (.asm) ignores them. The
+        # COMPILE_LANGUAGE guard keeps these CL-only flags off ml64's command line.
         target_compile_options(UE5Dumper_ProxyDxgi PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:/utf-8>
             $<$<COMPILE_LANGUAGE:CXX>:/W4>
@@ -403,9 +392,9 @@ if(BUILD_PROXY_DXGI)
 
     target_link_libraries(UE5Dumper_ProxyDxgi PRIVATE ${PROXY_LINK_LIBS})
 
-    # No /DELAYLOAD here: unlike the version/dinput8 proxies, this DLL does
-    # NOT import dxgi.dll (PROXY_LINK_LIBS has no dxgi), so there is no
-    # circular import to break — we load the real dxgi manually by full path.
+    # No /DELAYLOAD here: unlike the version/dinput8 proxies, this DLL does NOT
+    # import dxgi.dll (PROXY_LINK_LIBS has no dxgi), so there is no circular
+    # import to break — we load the real dxgi manually by full path.
     target_link_options(UE5Dumper_ProxyDxgi PRIVATE
         /DEF:${CMAKE_CURRENT_SOURCE_DIR}/src/ProxyDxgi.def
     )
@@ -417,21 +406,22 @@ if(BUILD_PROXY_DXGI)
 endif()
 
 # ============================================================
-# Unit test target — Utf8Helpers self-test
+# Unit test targets — Utf8Helpers + pure-helper self-tests
 #
-# Stand-alone executable, no GoogleTest dependency. Builds only when the
-# main UE5Dumper target builds (skipped for proxy-only configures since
-# proxy builds use a different binary directory). build.ps1 -Target Test
-# runs the executable before C# tests; non-zero exit fails the test
-# phase.
+# Stand-alone executables, no GoogleTest dependency. Built in the SAME (unified)
+# binary directory as the DLLs. Gated by an explicit option (default ON) instead
+# of the old "proxy targets are off" heuristic, because the unified configure now
+# enables the proxy targets too. build.ps1 -Target Test runs the executables
+# before the C# tests; a non-zero exit fails the test phase.
 #
-# Why a separate target instead of folding into UE5Dumper? The DLL
-# requires Win32 / MinHook / nlohmann linkage that the test logic
-# doesn't need. Keeping the test minimal (just <cstdio> + the
-# header-only Utf8Helpers.h) means a regression in DLL build doesn't
-# block the test from running.
+# Why separate targets instead of folding into UE5Dumper? The DLL requires Win32 /
+# MinHook / nlohmann linkage that the test logic doesn't need. Keeping the tests
+# minimal means a regression in the DLL build doesn't block the tests from running.
+# They compile their own copies of Radar.cpp / Denken.cpp (a couple of extra TUs)
+# rather than linking the object library, to keep the leaf test self-contained.
 # ============================================================
-if(NOT BUILD_PROXY_DLL AND NOT BUILD_PROXY_DINPUT8)
+option(BUILD_DLL_TESTS "Build the C++ self-test executables" ON)
+if(BUILD_DLL_TESTS)
     add_executable(utf8_helpers_test
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/utf8_helpers_test.cpp
     )

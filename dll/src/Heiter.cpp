@@ -7,7 +7,7 @@
 #include <atomic>
 #define LOG_CAT "INIT"
 #include "Sein.h"
-#include "BuildInfo.h"
+#include "BuildStamp.h"
 
 // Global DLL module handle — used by CEPlugin.cpp to resolve the DLL's
 // own file path when injecting into the game process.
@@ -169,7 +169,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID /*reserved*/) {
             char procNameA[MAX_PATH] = {};
             GetModuleFileNameA(nullptr, procNameA, MAX_PATH);
             LOG_INFO("UE5Dumper DLL loaded | build: %s | process: %s [PID=%lu]",
-                     BUILD_VERSION_STRING, procNameA, GetCurrentProcessId());
+                     BuildStamp::VersionString(), procNameA, GetCurrentProcessId());
 
             // Initialize per-process mirror log subfolder
             Sein::InitProcessMirror(fileName);

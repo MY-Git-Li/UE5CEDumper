@@ -288,6 +288,16 @@ if ($Clean) {
 New-Item -ItemType Directory -Path $DIST_DIR  -Force | Out-Null
 New-Item -ItemType Directory -Path $BUILD_DIR -Force | Out-Null
 
+# Remove legacy per-proxy build directories from the old (pre-unified) layout.
+# The proxy DLLs now build inside $BUILD_DIR alongside the main DLL, so these are
+# dead weight — drop them once if a previous checkout left them behind.
+foreach ($legacy in @("build_proxy", "build_proxy_dinput8", "build_proxy_dxgi")) {
+    $legacyPath = Join-Path $ROOT_DIR $legacy
+    if (Test-Path $legacyPath) {
+        Remove-Item $legacyPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # ============================================================
 # Increment build number (once per build invocation)
 # CMake and MSBuild both READ this file; only build.ps1 increments.
@@ -312,21 +322,38 @@ else {
 $exitCode = 0
 
 # ============================================================
-# Build C++ DLL
+# Build C++ DLLs (main + proxies) — single unified build dir
+#
+# All four DLLs share ONE CMake configure + ONE Ninja build so that:
+#   - Zydis / minhook compile ONCE (not once per DLL)
+#   - the proxy-agnostic sources compile ONCE (UE5DumperCommon object library)
+#   - Ninja does true incremental rebuilds between runs (a source edit recompiles
+#     only that TU, then relinks the affected DLLs)
+#
+# A full wipe of $BUILD_DIR happens ONLY with -Clean (done in the Clean phase
+# above; CI always passes -Clean). Without -Clean we KEEP the build dir and let
+# Ninja rebuild just what changed. We STILL re-run `cmake` configure on every
+# build so BuildInfo.h (build number / git hash / timestamp) is regenerated —
+# that keeps the embedded version fresh without forcing a full recompile (only
+# the few TUs that include BuildInfo.h rebuild).
 # ============================================================
 
-if ($Target -in "All", "DLL") {
-    Write-Banner "C++ DLL  |  $CppConfig"
+# Map the requested -Target to the concrete Ninja targets to build. The configure
+# always enables every proxy target, so any subset can be built without a
+# reconfigure; we only compile the targets requested here.
+$cppTargets = @()
+if ($Target -in "All", "DLL")          { $cppTargets += "UE5Dumper" }
+if ($Target -in "All", "ProxyDLL")     { $cppTargets += "UE5Dumper_Proxy" }
+if ($Target -in "All", "ProxyDinput8") { $cppTargets += "UE5Dumper_ProxyDinput8" }
+if ($Target -in "All", "ProxyDxgi")    { $cppTargets += "UE5Dumper_ProxyDxgi" }
 
-    # Always do a clean build — remove CMake cache to force full recompile
-    if (Test-Path $BUILD_DIR) {
-        Write-Step "Removing CMake cache for clean build..."
-        Remove-Item $BUILD_DIR -Recurse -Force
-        Write-Ok "Build directory cleaned"
-    }
+if ($cppTargets.Count -gt 0) {
+    Write-Banner "C++ DLLs  |  $CppConfig"
 
-    Write-Step "Configuring CMake (Ninja + MSVC)..."
-    $configOk = Invoke-CmdInVsEnv "cmake -S `"$ROOT_DIR`" -B `"$BUILD_DIR`" -G Ninja -DCMAKE_BUILD_TYPE=$CppConfig"
+    # NOTE: no clean here. -Clean already removed $BUILD_DIR in the Clean phase;
+    # otherwise we keep it for an incremental Ninja build (the whole point).
+    Write-Step "Configuring CMake (Ninja + MSVC, all DLL targets)..."
+    $configOk = Invoke-CmdInVsEnv "cmake -S `"$ROOT_DIR`" -B `"$BUILD_DIR`" -G Ninja -DCMAKE_BUILD_TYPE=$CppConfig -DBUILD_PROXY_DLL=ON -DBUILD_PROXY_DINPUT8=ON -DBUILD_PROXY_DXGI=ON"
 
     if (-not $configOk) {
         Write-Fail "CMake configure failed"
@@ -335,234 +362,74 @@ if ($Target -in "All", "DLL") {
     else {
         Write-Ok "CMake configured"
 
-        Write-Step "Building UE5Dumper.dll ($CppConfig)..."
-        $buildOk = Invoke-CmdInVsEnv "cmake --build `"$BUILD_DIR`" --config $CppConfig"
+        $targetArgs = "--target " + ($cppTargets -join " ")
+        Write-Step "Building $($cppTargets -join ', ') ($CppConfig)..."
+        $buildOk = Invoke-CmdInVsEnv "cmake --build `"$BUILD_DIR`" --config $CppConfig $targetArgs"
 
         if (-not $buildOk) {
             Write-Fail "DLL build failed"
             $exitCode = 1
         }
         else {
-            # Find and copy the DLL to dist/
-            $dllFile = Get-ChildItem -Path $BUILD_DIR -Filter "UE5Dumper.dll" -Recurse |
-                       Select-Object -First 1
+            # ---- Copy the main DLL to dist\ ----
+            if ($Target -in "All", "DLL") {
+                $dllFile = Get-ChildItem -Path $BUILD_DIR -Filter "UE5Dumper.dll" -Recurse |
+                           Select-Object -First 1
+                if ($dllFile) {
+                    Copy-Item $dllFile.FullName -Destination $DIST_DIR -Force
 
-            if ($dllFile) {
-                Copy-Item $dllFile.FullName -Destination $DIST_DIR -Force
-
-                # Copy PDB for Debug only — Release/Publish dists ship without
-                # symbols (a final sweep also strips any stale *.pdb).
-                if ($Mode -eq "Debug") {
-                    $pdbFile = Get-ChildItem -Path $BUILD_DIR -Filter "UE5Dumper.pdb" -Recurse |
-                               Select-Object -First 1
-                    if ($pdbFile) {
-                        Copy-Item $pdbFile.FullName -Destination $DIST_DIR -Force
+                    # Copy PDB for Debug only — Release/Publish dists ship without
+                    # symbols (a final sweep also strips any stale *.pdb).
+                    if ($Mode -eq "Debug") {
+                        $pdbFile = Get-ChildItem -Path $BUILD_DIR -Filter "UE5Dumper.pdb" -Recurse |
+                                   Select-Object -First 1
+                        if ($pdbFile) { Copy-Item $pdbFile.FullName -Destination $DIST_DIR -Force }
                     }
+
+                    $dllSize = Get-FileSize (Join-Path $DIST_DIR "UE5Dumper.dll")
+                    Write-Ok "UE5Dumper.dll ($dllSize)"
+
+                    # Verify exports with dumpbin (best-effort)
+                    Write-Step "Verifying DLL exports..."
+                    Invoke-CmdInVsEnv "dumpbin /exports `"$($dllFile.FullName)`" | findstr /C:`"UE5_`"" | Out-Null
                 }
-
-                $dllSize = Get-FileSize (Join-Path $DIST_DIR "UE5Dumper.dll")
-                Write-Ok "UE5Dumper.dll ($dllSize)"
-
-                # Verify exports with dumpbin (best-effort)
-                Write-Step "Verifying DLL exports..."
-                Invoke-CmdInVsEnv "dumpbin /exports `"$($dllFile.FullName)`" | findstr /C:`"UE5_`"" | Out-Null
+                else {
+                    Write-Fail "UE5Dumper.dll not found in build output"
+                    $exitCode = 1
+                }
             }
-            else {
-                Write-Fail "UE5Dumper.dll not found in build output"
-                $exitCode = 1
-            }
-        }
-    }
-}
 
-# ============================================================
-# Build Proxy DLL (version.dll)
-# ============================================================
+            # ---- Copy proxy DLLs to dist\proxy\ ----
+            # Each proxy goes in a subdirectory to prevent UE5DumpUI.exe from
+            # accidentally loading it (Windows DLL search order).
+            $proxyOutputs = @(
+                @{ When = "ProxyDLL";     File = "version.dll"; Pdb = "version.pdb" },
+                @{ When = "ProxyDinput8"; File = "dinput8.dll"; Pdb = "dinput8.pdb" },
+                @{ When = "ProxyDxgi";    File = "dxgi.dll";    Pdb = "dxgi.pdb"    }
+            )
+            $proxyOutDir = Join-Path $DIST_DIR "proxy"
+            foreach ($p in $proxyOutputs) {
+                if ($Target -ne "All" -and $Target -ne $p.When) { continue }
 
-if ($Target -in "All", "ProxyDLL") {
-    Write-Banner "Proxy DLL (version.dll)  |  $CppConfig"
+                $proxyDll = Get-ChildItem -Path $BUILD_DIR -Filter $p.File -Recurse |
+                            Select-Object -First 1
+                if ($proxyDll) {
+                    if (-not (Test-Path $proxyOutDir)) { New-Item -Path $proxyOutDir -ItemType Directory | Out-Null }
+                    Copy-Item $proxyDll.FullName -Destination $proxyOutDir -Force
 
-    $proxyBuildDir = Join-Path $ROOT_DIR "build_proxy"
-
-    # Always do a clean build
-    if (Test-Path $proxyBuildDir) {
-        Write-Step "Removing proxy CMake cache for clean build..."
-        Remove-Item $proxyBuildDir -Recurse -Force
-        Write-Ok "Proxy build directory cleaned"
-    }
-
-    Write-Step "Configuring CMake for Proxy DLL (Ninja + MSVC)..."
-    $configOk = Invoke-CmdInVsEnv "cmake -S `"$ROOT_DIR`" -B `"$proxyBuildDir`" -G Ninja -DCMAKE_BUILD_TYPE=$CppConfig -DBUILD_PROXY_DLL=ON"
-
-    if (-not $configOk) {
-        Write-Fail "CMake configure failed (Proxy DLL)"
-        $exitCode = 1
-    }
-    else {
-        Write-Ok "CMake configured (Proxy DLL)"
-
-        Write-Step "Building version.dll ($CppConfig)..."
-        $buildOk = Invoke-CmdInVsEnv "cmake --build `"$proxyBuildDir`" --config $CppConfig --target UE5Dumper_Proxy"
-
-        if (-not $buildOk) {
-            Write-Fail "Proxy DLL build failed"
-            $exitCode = 1
-        }
-        else {
-            $proxyDll = Get-ChildItem -Path $proxyBuildDir -Filter "version.dll" -Recurse |
-                        Select-Object -First 1
-
-            if ($proxyDll) {
-                # Place proxy DLL in a subdirectory to prevent UE5DumpUI.exe
-                # from accidentally loading it (Windows DLL search order).
-                $proxyOutDir = Join-Path $DIST_DIR "proxy"
-                if (-not (Test-Path $proxyOutDir)) { New-Item -Path $proxyOutDir -ItemType Directory | Out-Null }
-
-                Copy-Item $proxyDll.FullName -Destination $proxyOutDir -Force
-
-                if ($Mode -eq "Debug") {
-                    $pdbFile = Get-ChildItem -Path $proxyBuildDir -Filter "version.pdb" -Recurse |
-                               Select-Object -First 1
-                    if ($pdbFile) {
-                        Copy-Item $pdbFile.FullName -Destination $proxyOutDir -Force
+                    if ($Mode -eq "Debug") {
+                        $pdbFile = Get-ChildItem -Path $BUILD_DIR -Filter $p.Pdb -Recurse |
+                                   Select-Object -First 1
+                        if ($pdbFile) { Copy-Item $pdbFile.FullName -Destination $proxyOutDir -Force }
                     }
+
+                    $dllSize = Get-FileSize (Join-Path $proxyOutDir $p.File)
+                    Write-Ok "$($p.File) ($dllSize) -> dist\proxy\"
                 }
-
-                $dllSize = Get-FileSize (Join-Path $proxyOutDir "version.dll")
-                Write-Ok "version.dll ($dllSize) -> dist\proxy\"
-            }
-            else {
-                Write-Fail "version.dll not found in build output"
-                $exitCode = 1
-            }
-        }
-    }
-}
-
-# ============================================================
-# Build Proxy DLL (dinput8.dll) — alternative to version.dll
-# ============================================================
-
-if ($Target -in "All", "ProxyDinput8") {
-    Write-Banner "Proxy DLL (dinput8.dll)  |  $CppConfig"
-
-    $proxyDi8BuildDir = Join-Path $ROOT_DIR "build_proxy_dinput8"
-
-    # Always do a clean build
-    if (Test-Path $proxyDi8BuildDir) {
-        Write-Step "Removing dinput8 proxy CMake cache for clean build..."
-        Remove-Item $proxyDi8BuildDir -Recurse -Force
-        Write-Ok "dinput8 proxy build directory cleaned"
-    }
-
-    Write-Step "Configuring CMake for dinput8 Proxy DLL (Ninja + MSVC)..."
-    $configOk = Invoke-CmdInVsEnv "cmake -S `"$ROOT_DIR`" -B `"$proxyDi8BuildDir`" -G Ninja -DCMAKE_BUILD_TYPE=$CppConfig -DBUILD_PROXY_DINPUT8=ON"
-
-    if (-not $configOk) {
-        Write-Fail "CMake configure failed (dinput8 Proxy DLL)"
-        $exitCode = 1
-    }
-    else {
-        Write-Ok "CMake configured (dinput8 Proxy DLL)"
-
-        Write-Step "Building dinput8.dll ($CppConfig)..."
-        $buildOk = Invoke-CmdInVsEnv "cmake --build `"$proxyDi8BuildDir`" --config $CppConfig --target UE5Dumper_ProxyDinput8"
-
-        if (-not $buildOk) {
-            Write-Fail "dinput8 Proxy DLL build failed"
-            $exitCode = 1
-        }
-        else {
-            $proxyDll = Get-ChildItem -Path $proxyDi8BuildDir -Filter "dinput8.dll" -Recurse |
-                        Select-Object -First 1
-
-            if ($proxyDll) {
-                # Place proxy DLL in a subdirectory to prevent UE5DumpUI.exe
-                # from accidentally loading it (Windows DLL search order).
-                $proxyOutDir = Join-Path $DIST_DIR "proxy"
-                if (-not (Test-Path $proxyOutDir)) { New-Item -Path $proxyOutDir -ItemType Directory | Out-Null }
-
-                Copy-Item $proxyDll.FullName -Destination $proxyOutDir -Force
-
-                if ($Mode -eq "Debug") {
-                    $pdbFile = Get-ChildItem -Path $proxyDi8BuildDir -Filter "dinput8.pdb" -Recurse |
-                               Select-Object -First 1
-                    if ($pdbFile) {
-                        Copy-Item $pdbFile.FullName -Destination $proxyOutDir -Force
-                    }
+                else {
+                    Write-Fail "$($p.File) not found in build output"
+                    $exitCode = 1
                 }
-
-                $dllSize = Get-FileSize (Join-Path $proxyOutDir "dinput8.dll")
-                Write-Ok "dinput8.dll ($dllSize) -> dist\proxy\"
-            }
-            else {
-                Write-Fail "dinput8.dll not found in build output"
-                $exitCode = 1
-            }
-        }
-    }
-}
-
-# ============================================================
-# Build Proxy DLL (dxgi.dll) — for D3D11/D3D12 games whose EXE
-# imports neither version.dll nor dinput8.dll (uses MASM thunks)
-# ============================================================
-
-if ($Target -in "All", "ProxyDxgi") {
-    Write-Banner "Proxy DLL (dxgi.dll)  |  $CppConfig"
-
-    $proxyDxgiBuildDir = Join-Path $ROOT_DIR "build_proxy_dxgi"
-
-    # Always do a clean build
-    if (Test-Path $proxyDxgiBuildDir) {
-        Write-Step "Removing dxgi proxy CMake cache for clean build..."
-        Remove-Item $proxyDxgiBuildDir -Recurse -Force
-        Write-Ok "dxgi proxy build directory cleaned"
-    }
-
-    Write-Step "Configuring CMake for dxgi Proxy DLL (Ninja + MSVC + MASM)..."
-    $configOk = Invoke-CmdInVsEnv "cmake -S `"$ROOT_DIR`" -B `"$proxyDxgiBuildDir`" -G Ninja -DCMAKE_BUILD_TYPE=$CppConfig -DBUILD_PROXY_DXGI=ON"
-
-    if (-not $configOk) {
-        Write-Fail "CMake configure failed (dxgi Proxy DLL)"
-        $exitCode = 1
-    }
-    else {
-        Write-Ok "CMake configured (dxgi Proxy DLL)"
-
-        Write-Step "Building dxgi.dll ($CppConfig)..."
-        $buildOk = Invoke-CmdInVsEnv "cmake --build `"$proxyDxgiBuildDir`" --config $CppConfig --target UE5Dumper_ProxyDxgi"
-
-        if (-not $buildOk) {
-            Write-Fail "dxgi Proxy DLL build failed"
-            $exitCode = 1
-        }
-        else {
-            $proxyDll = Get-ChildItem -Path $proxyDxgiBuildDir -Filter "dxgi.dll" -Recurse |
-                        Select-Object -First 1
-
-            if ($proxyDll) {
-                # Place proxy DLL in a subdirectory to prevent UE5DumpUI.exe
-                # from accidentally loading it (Windows DLL search order).
-                $proxyOutDir = Join-Path $DIST_DIR "proxy"
-                if (-not (Test-Path $proxyOutDir)) { New-Item -Path $proxyOutDir -ItemType Directory | Out-Null }
-
-                Copy-Item $proxyDll.FullName -Destination $proxyOutDir -Force
-
-                if ($Mode -eq "Debug") {
-                    $pdbFile = Get-ChildItem -Path $proxyDxgiBuildDir -Filter "dxgi.pdb" -Recurse |
-                               Select-Object -First 1
-                    if ($pdbFile) {
-                        Copy-Item $pdbFile.FullName -Destination $proxyOutDir -Force
-                    }
-                }
-
-                $dllSize = Get-FileSize (Join-Path $proxyOutDir "dxgi.dll")
-                Write-Ok "dxgi.dll ($dllSize) -> dist\proxy\"
-            }
-            else {
-                Write-Fail "dxgi.dll not found in build output"
-                $exitCode = 1
             }
         }
     }
@@ -703,6 +570,19 @@ if ($Target -in "All", "UI", "Test") {
 
 if ($Target -in "All", "Test") {
     Write-Banner "Unit Tests"
+
+    # Ensure the C++ build dir is configured so the test targets exist. For
+    # `build test` run on its own (no DLL build this invocation) the dir may be
+    # empty/unconfigured — configure it now (cheap; only the requested test
+    # targets are compiled below, not the DLLs).
+    if (-not (Test-Path (Join-Path $BUILD_DIR "CMakeCache.txt"))) {
+        Write-Step "Configuring CMake for tests (Ninja + MSVC)..."
+        $testCfgOk = Invoke-CmdInVsEnv "cmake -S `"$ROOT_DIR`" -B `"$BUILD_DIR`" -G Ninja -DCMAKE_BUILD_TYPE=$CppConfig -DBUILD_PROXY_DLL=ON -DBUILD_PROXY_DINPUT8=ON -DBUILD_PROXY_DXGI=ON"
+        if (-not $testCfgOk) {
+            Write-Fail "CMake configure (tests) failed"
+            $exitCode = 1
+        }
+    }
 
     # ----- C++ Utf8Helpers self-test -----
     # Build + run before the C# tests so a regression in the surrogate /

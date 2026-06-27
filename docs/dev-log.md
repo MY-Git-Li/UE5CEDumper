@@ -16,6 +16,55 @@ builds ≤696 in
 
 -----
 
+## 2026-06-27 — Build-system perf: shared OBJECT library + unified build dir + incremental Ninja (build 1817; build tooling only; 2077 C# green)
+
+The four DLLs (UE5Dumper.dll + the version/dinput8/dxgi proxies) previously each
+got their own clean CMake configure in a separate build dir, so every `build`
+wiped the tree and recompiled Zydis + all ~20 sources up to 4× — Aura.cpp et al.
+were rebuilt from scratch on every run. Restructured for incremental builds while
+keeping correctness and CI behaviour identical.
+
+### What changed
+- **Shared `UE5DumperCommon` OBJECT library** (`dll/CMakeLists.txt`): the 17
+  proxy-agnostic sources (Aura/Fern/Frieren/Macht/… — none test a `UE5_PROXY_*`
+  macro) compile ONCE; all four DLLs link the same objects. This is the
+  CMake-correct form of "share the .obj across DLLs". Only Heiter (gated on
+  `UE5_PROXY_BUILD`) + the per-proxy Lugner shims compile per target. OBJECT (not
+  STATIC) is deliberate — every object is force-linked, so the dllexported C-ABI
+  symbols (Frieren) are never dropped.
+- **Single unified build dir** (`build.ps1`): one `cmake` configure (all proxy
+  options ON) + one Ninja build produces all four DLLs → Zydis/minhook compile
+  ONCE (was 4×); a full `Publish -Clean -Target All` C++ build went from ~188
+  compile steps across 4 configures to **69 in one**. Legacy `build_proxy*` dirs
+  are removed automatically.
+- **Incremental by default**: the unconditional `Remove-Item $BUILD_DIR` is gone;
+  only `-Clean` wipes. `build.ps1` still re-runs configure every build so
+  `BuildInfo.h` (build number / git / timestamp) stays fresh — that was the real
+  cause of the old "Ninja used stale data" perception (it was version metadata,
+  not code; Ninja tracks header/source changes correctly).
+- **`BuildStamp.h/.cpp`** (new leaf util): the volatile build macros now live in
+  one tiny TU behind accessors (`BuildStamp::VersionString()` etc.); Fern /
+  Frieren / Sein / Heiter call those instead of including `BuildInfo.h`. A
+  build-number bump now recompiles only `BuildStamp.cpp` + `version.rc`, not the
+  heavy Frieren/Fern. `version.rc` still uses the macros directly (RC needs them).
+
+### Verified (all real builds on this machine)
+- Clean main DLL 1:55; **no-change rebuild 8s** (was a full rebuild);
+  touch Aura.cpp → 20s (Aura recompiles → source changes are always reflected).
+- dxgi proxy MASM thunks isolated + assembled; all `UE5_*` exports intact.
+- **CI path `Publish -Clean -Target All` green in 4:30** — all four DLLs in one
+  69-step Ninja build + AOT UI + utf8/dll self-tests + 2077 C# tests pass.
+
+### CI / correctness
+CI is unchanged: `release.yml` already passes `-Clean` on a fresh runner, so it
+still does a full from-scratch build (if a fast incremental ever went wrong, CI
+would still catch it). The object-library + unified-dir changes are
+correctness-preserving (CMake owns the sharing + dependency tracking), so CI also
+builds faster for free. `BuildStamp` kept English (generic leaf utility — same
+exception as `Utf8Helpers.h` / `GraphPath.h`).
+
+-----
+
 ## 2026-06-27 — UE-version markers extended to 5.6 / 5.7 (build ~1810; DLL only; 2077 green)
 
 Extends the version-reconciliation chain with the two remaining structural markers

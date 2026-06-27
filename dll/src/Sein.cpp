@@ -5,7 +5,7 @@
 
 #include "Sein.h"
 #include "Grimoire.h"
-#include "BuildInfo.h"
+#include "BuildStamp.h"
 
 #include <Windows.h>
 #include <ShlObj.h>
@@ -169,7 +169,7 @@ static void RotateIfNeeded(LogFileState& fs_state) {
     if (fs_state.file) {
         auto ts = GetTimestamp();
         int n = fprintf(fs_state.file, "[%s] [INFO] [INIT] Log rotated | build: %s\n",
-                        ts.c_str(), BUILD_VERSION_STRING);
+                        ts.c_str(), BuildStamp::VersionString());
         if (n > 0) fs_state.written += static_cast<size_t>(n);
         fflush(fs_state.file);
     }
@@ -190,7 +190,7 @@ static bool OpenFileInDir(LogFileState& fs_state, const fs::path& dir,
 
     auto ts = GetTimestamp();
     int n = fprintf(fs_state.file, "[%s] [INFO] [INIT] Logger started | build: %s\n",
-                    ts.c_str(), BUILD_VERSION_STRING);
+                    ts.c_str(), BuildStamp::VersionString());
     if (n > 0) fs_state.written += static_cast<size_t>(n);
     fflush(fs_state.file);
     return true;

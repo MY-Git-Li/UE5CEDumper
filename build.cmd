@@ -4,8 +4,10 @@ setlocal EnableDelayedExpansion
 :: ============================================================
 :: build.cmd -- UE5CEDumper build wrapper
 ::
-:: NOTE: All builds are ALWAYS clean (no cache).
-::   CMake build/ dir and dotnet bin/obj are removed before each build.
+:: NOTE: The C++ DLLs build INCREMENTALLY (Ninja) by default -- only changed
+::   sources recompile, and all four DLLs share one build dir (the proxy-
+::   agnostic sources compile once). Add `clean` to force a full from-scratch
+::   rebuild (this is also what CI uses). The C# UI is still rebuilt clean.
 ::
 :: Usage:
 ::   build              Build Release (all targets)
