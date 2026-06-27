@@ -55,6 +55,16 @@ struct KnobState {
 };
 KnobState s_knobs[KNOB_COUNT];
 
+// Gravity-DIRECTION override (UE5.4+ FVector GravityDirection). Parallel to the
+// scalar knobs: same base-capture / re-assert discipline. Guarded by s_mutex.
+struct GravDirState {
+    bool      active       = false;
+    double    x = 0, y = 0, z = -1;   // desired (normalized) unit vector
+    double    baseX = 0, baseY = 0, baseZ = -1;   // captured default
+    uintptr_t capturedPawn = 0;
+};
+GravDirState s_gravDir;
+
 // Serializes whole operations: reachable from the Fern pipe thread AND the
 // re-assert worker (and, in P4, the Mimic mailbox thread).
 std::mutex s_mutex;
@@ -103,6 +113,46 @@ bool WriteFloatAt(uintptr_t addr, int32_t size, double v) {
     }
     float f = static_cast<float>(v);
     return Macht::WriteBytes(addr, &f, 4);
+}
+
+// Read/write a 3-component FVector honoring the reflected struct width (12B =
+// 3×float / 24B = 3×double under LWC). structSize is the StructProperty's
+// ElementSize (sizeof FVector); component width = structSize/3.
+bool ReadVec3At(uintptr_t addr, int32_t structSize, double out[3]) {
+    int cw = (structSize >= 24) ? 8 : 4;
+    for (int i = 0; i < 3; ++i) {
+        if (cw == 8) {
+            double d = 0;
+            if (!Macht::ReadSafe(addr + static_cast<uintptr_t>(i * 8), d)) return false;
+            out[i] = d;
+        } else {
+            float f = 0;
+            if (!Macht::ReadSafe(addr + static_cast<uintptr_t>(i * 4), f)) return false;
+            out[i] = static_cast<double>(f);
+        }
+    }
+    return true;
+}
+
+bool WriteVec3At(uintptr_t addr, int32_t structSize, const double v[3]) {
+    int cw = (structSize >= 24) ? 8 : 4;
+    for (int i = 0; i < 3; ++i) {
+        if (cw == 8) {
+            double d = v[i];
+            if (!Macht::WriteBytes(addr + static_cast<uintptr_t>(i * 8), &d, 8)) return false;
+        } else {
+            float f = static_cast<float>(v[i]);
+            if (!Macht::WriteBytes(addr + static_cast<uintptr_t>(i * 4), &f, 4)) return false;
+        }
+    }
+    return true;
+}
+
+// Normalize a direction to a unit vector; degenerate (near-zero) → straight down.
+void Normalize3(double v[3]) {
+    double len = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    if (len < 1e-6) { v[0] = 0; v[1] = 0; v[2] = -1; }
+    else            { v[0] /= len; v[1] /= len; v[2] /= len; }
 }
 
 // ---- resolution chain (identical to Solitar — local pawn → CMC) ----
@@ -210,10 +260,22 @@ bool ResolveField(const Ctx& c, int knobId, FieldLoc& f) {
     return true;
 }
 
+// Resolve the GravityDirection FVector field on the live CMC (UE5.4+).
+bool ResolveGravDirField(const Ctx& c, uintptr_t& addr, int32_t& size) {
+    FieldInfo fi{};
+    if (!Ubel::FindField(c.cmcClass, "GravityDirection", "GravityDirection",
+                         nullptr, "StructProperty", fi)
+        || fi.Offset < 0)
+        return false;
+    addr = c.cmc + static_cast<uintptr_t>(fi.Offset);
+    size = fi.Size;
+    return true;
+}
+
 bool AnyActiveLocked() {
     for (int i = 0; i < KNOB_COUNT; ++i)
         if (s_knobs[i].active) return true;
-    return false;
+    return s_gravDir.active;
 }
 
 // Apply one knob's desired value to the live CMC (caller holds s_mutex).
@@ -236,6 +298,39 @@ void ApplyKnobLocked(const Ctx& c, int knobId, bool* drifted) {
     if (std::fabs(current - target) > eps) {
         if (WriteFloatAt(f.addr, f.size, target) && drifted) *drifted = true;
     }
+}
+
+// Apply the gravity-direction override to the live CMC (caller holds s_mutex).
+// Write-on-drift; re-capture the base default on pawn change (respawn).
+void ApplyGravDirLocked(const Ctx& c, bool* drifted) {
+    if (!s_gravDir.active) return;
+    uintptr_t addr = 0; int32_t size = 0;
+    if (!ResolveGravDirField(c, addr, size)) return;
+    double cur[3] = {};
+    if (!ReadVec3At(addr, size, cur)) return;
+    if (c.pawn != s_gravDir.capturedPawn) {
+        s_gravDir.baseX = cur[0]; s_gravDir.baseY = cur[1]; s_gravDir.baseZ = cur[2];
+        s_gravDir.capturedPawn = c.pawn;
+    }
+    double target[3] = { s_gravDir.x, s_gravDir.y, s_gravDir.z };
+    double dx = cur[0] - target[0], dy = cur[1] - target[1], dz = cur[2] - target[2];
+    if (dx * dx + dy * dy + dz * dz > 1e-6) {
+        if (WriteVec3At(addr, size, target) && drifted) *drifted = true;
+    }
+}
+
+// Fill a GravDirInfo for the UI from the live CMC + stored desired state.
+void FillGravDirLocked(const Ctx& c, GravDirInfo& info) {
+    info.active = s_gravDir.active;
+    uintptr_t addr = 0; int32_t size = 0;
+    if (!ResolveGravDirField(c, addr, size)) return;   // pre-5.4 / not reflected
+    double cur[3] = {};
+    if (!ReadVec3At(addr, size, cur)) return;
+    info.resolved    = true;
+    info.x = cur[0]; info.y = cur[1]; info.z = cur[2];
+    info.ownerAddr   = c.cmc;
+    info.fieldOffset = static_cast<int32_t>(addr - c.cmc);
+    info.fieldName   = "GravityDirection";
 }
 
 // Fill a KnobInfo for the UI from the live CMC + stored desired state.
@@ -276,6 +371,7 @@ void WorkerLoop() {
         bool drifted = false;
         for (int i = 0; i < KNOB_COUNT; ++i)
             ApplyKnobLocked(c, i, &drifted);
+        ApplyGravDirLocked(c, &drifted);
         if (drifted) {
             ++driftCount;
             if (driftCount <= 5 || driftCount % 100 == 0)
@@ -316,6 +412,7 @@ int32_t GetSnapshot(Snapshot& out) {
     out.cmcAddr = c.cmc;
     for (int i = 0; i < KNOB_COUNT; ++i)
         FillKnobLocked(c, i, out.knobs[i]);
+    FillGravDirLocked(c, out.gravDir);
     return MR_OK;
 }
 
@@ -410,6 +507,75 @@ int32_t SetKnobPercent(int32_t knobId, double percent) {
     double mult = (knobId == KNOB_JUMP) ? std::sqrt(percent / 100.0)
                                         : (percent / 100.0);
     return SetMultiplier(knobId, mult);   // 1 active / negative MoveResult
+}
+
+int32_t SetGravityDirection(double x, double y, double z) {
+    // (0,0,0) sentinel = OFF (a zero vector is not a valid direction).
+    if (std::fabs(x) < 1e-9 && std::fabs(y) < 1e-9 && std::fabs(z) < 1e-9)
+        return ResetGravityDirection();
+    int32_t rc = MR_OK;
+    {
+        std::lock_guard<std::mutex> lk(s_mutex);
+        Ctx c;
+        rc = ResolveCtx(c);
+        if (rc != MR_OK) return rc;
+        uintptr_t addr = 0; int32_t size = 0;
+        if (!ResolveGravDirField(c, addr, size)) return MR_ERR_REFLECT;  // pre-5.4
+        double cur[3] = {};
+        if (!ReadVec3At(addr, size, cur)) return MR_ERR_REFLECT;
+        // Capture the untouched default only on (re)activation or pawn change.
+        if (!s_gravDir.active || c.pawn != s_gravDir.capturedPawn) {
+            s_gravDir.baseX = cur[0]; s_gravDir.baseY = cur[1]; s_gravDir.baseZ = cur[2];
+            s_gravDir.capturedPawn = c.pawn;
+        }
+        double v[3] = { x, y, z };
+        Normalize3(v);
+        s_gravDir.x = v[0]; s_gravDir.y = v[1]; s_gravDir.z = v[2];
+        s_gravDir.active = true;
+        if (!WriteVec3At(addr, size, v)) rc = MR_ERR_WRITE;
+        LOG_INFO("Movement: gravity dir -> (%.3f, %.3f, %.3f) (rc=%d)", v[0], v[1], v[2], rc);
+    }
+    StartWorker();
+    return (rc < 0) ? rc : 1;
+}
+
+int32_t ResetGravityDirection() {
+    {
+        std::lock_guard<std::mutex> lk(s_mutex);
+        if (s_gravDir.active) {
+            Ctx c;
+            if (ResolveCtx(c) == MR_OK) {
+                uintptr_t addr = 0; int32_t size = 0;
+                if (ResolveGravDirField(c, addr, size)) {
+                    double base[3] = { s_gravDir.baseX, s_gravDir.baseY, s_gravDir.baseZ };
+                    WriteVec3At(addr, size, base);   // best-effort restore
+                }
+            }
+        }
+        s_gravDir.active = false;
+        s_gravDir.capturedPawn = 0;
+    }
+    bool anyActive;
+    {
+        std::lock_guard<std::mutex> lk(s_mutex);
+        anyActive = AnyActiveLocked();
+    }
+    if (!anyActive) StopWorker();
+    LOG_INFO("Movement: gravity dir reset (any active left=%d)", anyActive ? 1 : 0);
+    return MR_OK;
+}
+
+int32_t GetGravityDirection(GravDirInfo& out) {
+    out = GravDirInfo{};
+    std::lock_guard<std::mutex> lk(s_mutex);
+    Ctx c;
+    int32_t rc = ResolveCtx(c);
+    if (rc != MR_OK) {
+        out.active = s_gravDir.active;
+        return rc;
+    }
+    FillGravDirLocked(c, out);
+    return MR_OK;
 }
 
 void StopWorker() {

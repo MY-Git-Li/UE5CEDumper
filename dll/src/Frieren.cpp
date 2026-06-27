@@ -312,6 +312,40 @@ bool UE5_Init() {
             g_cachedUEVersion = ptrs.UEVersion;
             g_cachedIsLowConfidence = true; // post-correction, user shouldn't blindly trust label
         }
+
+        // Post-DynOff version correction (UPWARD): structural / property markers can
+        // reveal that a stripped binary is a NEWER engine than the version-string scan
+        // found. Heavily-stripped games (e.g. The Adventures of Elliot) lose every
+        // version string and fall back to 4.27, yet are really UE5 — the structural
+        // probes already proved it (tagged FFieldVariant = UE5.3+; FProperty mode).
+        // Raise the floor so version-gated behaviour (the >=500 branches in Aura/Ubel)
+        // and the UI badge are honest. Runtime-only: the cached RAW detection is left
+        // as-is and re-corrected here on every init, so no cache delete is ever needed.
+        if (DynOff::bUseFProperty && DynOff::bTaggedFFieldVariant && g_cachedUEVersion < 503) {
+            LOG_WARN("UE5_Init: structural marker (tagged FFieldVariant = UE5.3+) but "
+                     "version=%u — raising floor to 503 (UE5).", g_cachedUEVersion);
+            ptrs.UEVersion    = 503;
+            g_cachedUEVersion = 503;
+        }
+        // Property marker: UCharacterMovementComponent::GravityDirection (a reflected
+        // FVector StructProperty) was added in UE5.4. Only probe for UE5 games (the
+        // structural floor above already implies >=503), and only when below 504, so
+        // genuine UE4 games never pay the GObjects walk. Best-effort + bounded.
+        if (DynOff::bUseFProperty && g_cachedUEVersion >= 500 && g_cachedUEVersion < 504) {
+            auto cmcSet = Aura::FindInstancesByClass("CharacterMovementComponent", false, 3);
+            for (const auto& r : cmcSet.results) {
+                if (!r.addr) continue;
+                uintptr_t cls = Ubel::GetClass(r.addr);
+                if (cls && Ubel::FindFieldOffset(cls, "GravityDirection", "GravityDirection",
+                                                 nullptr, "StructProperty") >= 0) {
+                    LOG_WARN("UE5_Init: property marker (CMC::GravityDirection) = UE5.4+ — "
+                             "raising version %u -> 504.", g_cachedUEVersion);
+                    ptrs.UEVersion    = 504;
+                    g_cachedUEVersion = 504;
+                    break;
+                }
+            }
+        }
     } else {
         LOG_WARN("UE5_Init: Partial init — GObjects=%s GNames=%s — skipping offset validation",
                  ptrs.GObjects ? "OK" : "MISSING", ptrs.GNames ? "OK" : "MISSING");
@@ -447,6 +481,15 @@ void UE5_Shutdown() {
 }
 
 uint32_t UE5_GetVersion() {
+    // Lazy UE5.5+ refine: once any class walk has seen a reflected Utf8StrProperty /
+    // AnsiStrProperty (UE5.5 types), raise the floor to 505. Monotonic + UE5-only
+    // (only refines an already-UE5 label, never a UE4 one). Cheap atomic read; the
+    // UI polls this for the badge, so the version self-corrects as the user browses.
+    if (g_cachedUEVersion >= 500 && g_cachedUEVersion < 505 && Ubel::SawUtf8OrAnsiStr()) {
+        LOG_INFO("UE5_GetVersion: Utf8Str/AnsiStr property marker seen — raising %u -> 505 (UE5.5+).",
+                 g_cachedUEVersion);
+        g_cachedUEVersion = 505;
+    }
     return g_cachedUEVersion;
 }
 
@@ -970,6 +1013,10 @@ int32_t UE5_GetProtectState(int32_t* outWant, int32_t* outLive, int32_t* outReso
 
 int32_t UE5_SetMovementPercent(int32_t knobId, double percent) {
     return Laufen::SetKnobPercent(knobId, percent);
+}
+
+int32_t UE5_SetGravityDirection(double x, double y, double z) {
+    return Laufen::SetGravityDirection(x, y, z);   // (0,0,0) = reset
 }
 
 // ============================================================================

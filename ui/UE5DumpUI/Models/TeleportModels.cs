@@ -64,6 +64,35 @@ public sealed class TeleportPose
     public bool HasVelAddr =>
         !string.IsNullOrEmpty(VelOwnerAddr) && VelOwnerAddr != "0x0" && VelOwnerAddr != "0X0";
 
+    /// <summary>Owning sub-object (CharacterMovement) of the acceleration FVector,
+    /// for the "Locate acceleration vector in GWorld" handoff. Only set when
+    /// <see cref="HasMovement"/>.</summary>
+    public string AccOwnerAddr { get; init; } = "";
+
+    /// <summary>Acceleration offset within <see cref="AccOwnerAddr"/>.</summary>
+    public int AccFieldOffset { get; init; }
+
+    /// <summary>Field name to land on ("Acceleration").</summary>
+    public string AccFieldName { get; init; } = "";
+
+    /// <summary>True when the acceleration vector's owner+offset are usable.</summary>
+    public bool HasAccAddr =>
+        !string.IsNullOrEmpty(AccOwnerAddr) && AccOwnerAddr != "0x0" && AccOwnerAddr != "0X0";
+
+    /// <summary>Owning object (Controller) of the ControlRotation FRotator, for the
+    /// "Locate rotation in GWorld" handoff.</summary>
+    public string RotOwnerAddr { get; init; } = "";
+
+    /// <summary>ControlRotation offset within <see cref="RotOwnerAddr"/>.</summary>
+    public int RotFieldOffset { get; init; }
+
+    /// <summary>Field name to land on ("ControlRotation").</summary>
+    public string RotFieldName { get; init; } = "";
+
+    /// <summary>True when the rotation field's owner+offset are usable.</summary>
+    public bool HasRotAddr =>
+        !string.IsNullOrEmpty(RotOwnerAddr) && RotOwnerAddr != "0x0" && RotOwnerAddr != "0X0";
+
     /// <summary>True when the pawn has a UCharacterMovementComponent whose
     /// reflected Velocity field resolved, so <see cref="VelX"/>/<see cref="Speed"/>
     /// (and usually <see cref="AccX"/>) are live. False on vehicle / custom-framework
@@ -124,6 +153,40 @@ public sealed class MovementKnob
 }
 
 /// <summary>
+/// Gravity DIRECTION vector (UE5.4+ UCharacterMovementComponent.GravityDirection).
+/// A unit vector — <see cref="Resolved"/> is false on pre-5.4 games where the
+/// field isn't reflected.
+/// </summary>
+public sealed class MovementVectorKnob
+{
+    public bool Resolved { get; init; }
+    public double X { get; init; }
+    public double Y { get; init; }
+    public double Z { get; init; } = -1;   // default (0,0,-1) = straight down
+    public bool Active { get; init; }
+    public string OwnerAddr { get; init; } = "";
+    public int FieldOffset { get; init; } = -1;
+    public string FieldName { get; init; } = "";
+
+    public bool HasAddr =>
+        Resolved && FieldOffset >= 0 &&
+        !string.IsNullOrEmpty(OwnerAddr) && OwnerAddr != "0x0" && OwnerAddr != "0X0";
+}
+
+/// <summary>Result of a <c>set_gravity_direction</c> / <c>reset_gravity_direction</c>
+/// call. <see cref="State"/> 1 = active, 0 = off, negative = error / not reflected.</summary>
+public sealed class MovementVectorResult
+{
+    public int State { get; init; }
+    public int Code { get; init; }
+    public bool Resolved { get; init; }
+    public bool Active { get; init; }
+    public double X { get; init; }
+    public double Y { get; init; }
+    public double Z { get; init; } = -1;
+}
+
+/// <summary>
 /// Snapshot of all movement knobs on the current pawn's CharacterMovement,
 /// returned by <c>get_movement_params</c> (Laufen). <see cref="HasCmc"/> is false
 /// on vehicle / custom-framework pawns with no UCharacterMovementComponent.
@@ -139,6 +202,7 @@ public sealed class MovementParams
     public MovementKnob WalkSpeed { get; init; } = new();
     public MovementKnob Gravity { get; init; } = new();   // P2
     public MovementKnob Jump { get; init; } = new();      // P3
+    public MovementVectorKnob GravityDirection { get; init; } = new();  // UE5.4+
 }
 
 /// <summary>Result of a <c>set_movement_multiplier</c> / <c>reset_movement</c>
@@ -233,6 +297,34 @@ public sealed class TeleportPov
                          + (CamY - PawnY) * (CamY - PawnY)
                          + (CamZ - PawnZ) * (CamZ - PawnZ))
         : 0;
+
+    /// <summary>The APlayerCameraManager object — owner for the cached-POV
+    /// "Locate in GWorld" handoffs (Location / FOV). "" / "0x0" when unresolved.</summary>
+    public string CamOwnerAddr { get; init; } = "";
+
+    /// <summary>Offset of CameraCachePrivate.POV.Location within the camera manager.</summary>
+    public int CamLocFieldOffset { get; init; } = -1;
+    public string CamLocFieldName { get; init; } = "";
+
+    /// <summary>Offset of CameraCachePrivate.POV.Rotation within the camera manager.</summary>
+    public int CamRotFieldOffset { get; init; } = -1;
+    public string CamRotFieldName { get; init; } = "";
+
+    /// <summary>Offset of CameraCachePrivate.POV.FOV within the camera manager.</summary>
+    public int CamFovFieldOffset { get; init; } = -1;
+    public string CamFovFieldName { get; init; } = "";
+
+    private bool CamOwnerUsable =>
+        !string.IsNullOrEmpty(CamOwnerAddr) && CamOwnerAddr != "0x0" && CamOwnerAddr != "0X0";
+
+    /// <summary>True when the camera Location field can be handed to the GWorld locator.</summary>
+    public bool HasCamLocAddr => CamOwnerUsable && CamLocFieldOffset >= 0;
+
+    /// <summary>True when the camera Rotation field can be handed to the GWorld locator.</summary>
+    public bool HasCamRotAddr => CamOwnerUsable && CamRotFieldOffset >= 0;
+
+    /// <summary>True when the camera FOV field can be handed to the GWorld locator.</summary>
+    public bool HasCamFovAddr => CamOwnerUsable && CamFovFieldOffset >= 0;
 }
 
 /// <summary>

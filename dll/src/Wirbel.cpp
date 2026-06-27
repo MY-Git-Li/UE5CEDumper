@@ -461,6 +461,12 @@ int32_t GetPoseImpl(Pose& out, char* mapName, int32_t mapNameCap, uint8_t* outSo
         // that resets the struct.
         move->LocOwnerAddr   = c.root;
         move->LocFieldOffset = c.relLocOff;
+        // The rotation FRotator (ControlRotation) lives on the Controller — for
+        // the "Locate rotation in GWorld" handoff.
+        if (c.ctrlRotOff >= 0) {
+            move->RotOwnerAddr   = c.pc;
+            move->RotFieldOffset = c.ctrlRotOff;
+        }
     }
     return TP_OK;
 }
@@ -511,6 +517,10 @@ void ReadMovementState(const Chain& c, MovementState& m) {
         double acc[3] = {};
         if (ReadVec3Mem(cmc + static_cast<uintptr_t>(afi.Offset), afi.Size, acc)) {
             m.AccX = acc[0]; m.AccY = acc[1]; m.AccZ = acc[2];
+            // Owner + offset of the Acceleration FVector — for the "Locate
+            // acceleration vector in GWorld" handoff (lands on CMC.Acceleration).
+            m.AccOwnerAddr   = cmc;
+            m.AccFieldOffset = afi.Offset;
         }
     }
 
@@ -751,6 +761,44 @@ bool ReadPovRaw(uintptr_t cam, double loc[3], double rot[3], double& fov) {
     return true;
 }
 
+// Resolve the intra-camera-manager offsets of the cached POV Location FVector and
+// FOV float (CameraCachePrivate.POV.Location / .FOV) — for the "Locate in GWorld"
+// handoff. Same reflection chain as ReadPovRaw, but returns offsets instead of
+// reading. Works regardless of which read path produced the live POV values.
+// outLocOff / outFovOff are -1 when unresolved.
+void ResolvePovOffsets(uintptr_t cam, int32_t& outLocOff, int32_t& outRotOff,
+                       int32_t& outFovOff) {
+    outLocOff = -1;
+    outRotOff = -1;
+    outFovOff = -1;
+    if (!cam) return;
+    uintptr_t camClass = Ubel::GetClass(cam);
+    FieldInfo fiCache{};
+    if (!Ubel::FindField(camClass, "CameraCachePrivate", "CameraCache",
+                         nullptr, "StructProperty", fiCache))
+        return;
+    uintptr_t cacheStruct = StructInner(fiCache);
+    if (!cacheStruct) return;
+    FieldInfo fiPov{};
+    if (!Ubel::FindField(cacheStruct, "POV", "POV", nullptr, "StructProperty", fiPov))
+        return;
+    uintptr_t minView = StructInner(fiPov);
+    if (!minView) return;
+    int32_t povBaseOff = fiCache.Offset + fiPov.Offset;
+    FieldInfo fiLoc{};
+    if (Ubel::FindField(minView, "Location", nullptr, nullptr, nullptr, fiLoc)
+        && fiLoc.Offset >= 0)
+        outLocOff = povBaseOff + fiLoc.Offset;
+    FieldInfo fiRot{};
+    if (Ubel::FindField(minView, "Rotation", nullptr, nullptr, nullptr, fiRot)
+        && fiRot.Offset >= 0)
+        outRotOff = povBaseOff + fiRot.Offset;
+    FieldInfo fiFov{};
+    if (Ubel::FindField(minView, "FOV", nullptr, nullptr, nullptr, fiFov)
+        && fiFov.Offset >= 0)
+        outFovOff = povBaseOff + fiFov.Offset;
+}
+
 int32_t GetPovImpl(Pov& out) {
     out = Pov{};
     uintptr_t world = DerefWorld();
@@ -813,6 +861,15 @@ int32_t GetPovImpl(Pov& out) {
     out.Cam.Pitch = rot[0]; out.Cam.Yaw = rot[1]; out.Cam.Roll = rot[2];
     out.Fov = fov;
     out.Source = source;
+
+    // Surface the cached-POV field addresses for "Locate in GWorld" (best-effort;
+    // independent of whether the live values came from getters or the raw read).
+    int32_t locOff = -1, rotOff = -1, fovOff = -1;
+    ResolvePovOffsets(cam, locOff, rotOff, fovOff);
+    out.CamOwnerAddr      = cam;
+    out.CamLocFieldOffset = locOff;
+    out.CamRotFieldOffset = rotOff;
+    out.CamFovFieldOffset = fovOff;
 
     // Best-effort pawn world position for the delta display (resolve the pawn
     // via the REAL controller, hopping past the debug camera if it's active).

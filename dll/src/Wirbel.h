@@ -58,6 +58,15 @@ struct Pov {
     bool HasPawn = false;
     Pose Pawn{};        // pawn world location (X/Y/Z) — for the camera-vs-pawn delta
     uint8_t Source = 0; // 0 = invoke getters (GetCameraLocation/Rotation/FOV)
+    // Owner + intra-object offset of the cached POV Location FVector and FOV float
+    // (APlayerCameraManager.CameraCachePrivate.POV.Location / .FOV) for the "Locate
+    // in GWorld" handoff. Resolved by reflection whenever the camera manager
+    // resolves (independent of which read path produced the live values). Offsets
+    // are -1 / addr 0 when the cached-POV chain isn't reflected (rare).
+    uintptr_t CamOwnerAddr      = 0;   // APlayerCameraManager object
+    int32_t   CamLocFieldOffset = -1;  // POV.Location offset within the camera manager
+    int32_t   CamRotFieldOffset = -1;  // POV.Rotation offset within the camera manager
+    int32_t   CamFovFieldOffset = -1;  // POV.FOV offset within the camera manager
 };
 
 // Live movement state read alongside the pose in a single resolution pass.
@@ -87,6 +96,10 @@ struct MovementState {
     int32_t   LocFieldOffset = -1;   // RelativeLocation offset within RootComponent
     uintptr_t VelOwnerAddr   = 0;    // CharacterMovement (UMovementComponent)
     int32_t   VelFieldOffset = -1;   // Velocity offset within CharacterMovement
+    uintptr_t AccOwnerAddr   = 0;    // CharacterMovement (UCharacterMovementComponent)
+    int32_t   AccFieldOffset = -1;   // Acceleration offset within CharacterMovement
+    uintptr_t RotOwnerAddr   = 0;    // Controller (AController) — owns ControlRotation
+    int32_t   RotFieldOffset = -1;   // ControlRotation FRotator offset within the controller
 };
 
 // Read the current pawn pose (location from RootComponent.RelativeLocation,

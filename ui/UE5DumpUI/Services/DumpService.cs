@@ -2571,8 +2571,56 @@ public sealed class DumpService : IDumpService
             WalkSpeed = ParseKnob(knobs?["walk_speed"]),
             Gravity   = ParseKnob(knobs?["gravity"]),
             Jump      = ParseKnob(knobs?["jump"]),
+            GravityDirection = ParseVectorKnob(res["gravity_direction"]),
         };
     }
+
+    private static MovementVectorKnob ParseVectorKnob(JsonNode? n)
+    {
+        if (n is null) return new MovementVectorKnob();
+        return new MovementVectorKnob
+        {
+            Resolved    = n["resolved"]?.GetValue<bool>() ?? false,
+            X           = n["x"]?.GetValue<double>() ?? 0,
+            Y           = n["y"]?.GetValue<double>() ?? 0,
+            Z           = n["z"]?.GetValue<double>() ?? -1,
+            Active      = n["active"]?.GetValue<bool>() ?? false,
+            OwnerAddr   = n["owner_addr"]?.GetValue<string>() ?? "",
+            FieldOffset = n["field_offset"]?.GetValue<int>() ?? -1,
+            FieldName   = n["field_name"]?.GetValue<string>() ?? "",
+        };
+    }
+
+    public async Task<MovementVectorResult> SetGravityDirectionAsync(double x, double y, double z, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "set_gravity_direction",
+            ["x"] = x, ["y"] = y, ["z"] = z,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return ParseVectorResult(res);
+    }
+
+    public async Task<MovementVectorResult> ResetGravityDirectionAsync(CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "reset_gravity_direction" };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return ParseVectorResult(res);
+    }
+
+    private static MovementVectorResult ParseVectorResult(JsonObject res) => new()
+    {
+        State    = res["state"]?.GetValue<int>() ?? (res["active"]?.GetValue<bool>() ?? false ? 1 : 0),
+        Code     = res["code"]?.GetValue<int>() ?? 0,
+        Resolved = res["resolved"]?.GetValue<bool>() ?? false,
+        Active   = res["active"]?.GetValue<bool>() ?? false,
+        X = res["x"]?.GetValue<double>() ?? 0,
+        Y = res["y"]?.GetValue<double>() ?? 0,
+        Z = res["z"]?.GetValue<double>() ?? -1,
+    };
 
     public async Task<MovementSetResult> SetMovementMultiplierAsync(string knob, double multiplier, CancellationToken ct = default)
     {
@@ -2738,6 +2786,13 @@ public sealed class DumpService : IDumpService
             PawnX = res["pawnX"]?.GetValue<double>() ?? 0,
             PawnY = res["pawnY"]?.GetValue<double>() ?? 0,
             PawnZ = res["pawnZ"]?.GetValue<double>() ?? 0,
+            CamOwnerAddr      = res["cam_owner_addr"]?.GetValue<string>() ?? "",
+            CamLocFieldOffset = res["cam_loc_field_offset"]?.GetValue<int>() ?? -1,
+            CamLocFieldName   = res["cam_loc_field_name"]?.GetValue<string>() ?? "",
+            CamRotFieldOffset = res["cam_rot_field_offset"]?.GetValue<int>() ?? -1,
+            CamRotFieldName   = res["cam_rot_field_name"]?.GetValue<string>() ?? "",
+            CamFovFieldOffset = res["cam_fov_field_offset"]?.GetValue<int>() ?? -1,
+            CamFovFieldName   = res["cam_fov_field_name"]?.GetValue<string>() ?? "",
         };
     }
 
@@ -2801,6 +2856,12 @@ public sealed class DumpService : IDumpService
         VelOwnerAddr   = res["vel_owner_addr"]?.GetValue<string>() ?? "",
         VelFieldOffset = res["vel_field_offset"]?.GetValue<int>() ?? 0,
         VelFieldName   = res["vel_field_name"]?.GetValue<string>() ?? "",
+        AccOwnerAddr   = res["acc_owner_addr"]?.GetValue<string>() ?? "",
+        AccFieldOffset = res["acc_field_offset"]?.GetValue<int>() ?? 0,
+        AccFieldName   = res["acc_field_name"]?.GetValue<string>() ?? "",
+        RotOwnerAddr   = res["rot_owner_addr"]?.GetValue<string>() ?? "",
+        RotFieldOffset = res["rot_field_offset"]?.GetValue<int>() ?? 0,
+        RotFieldName   = res["rot_field_name"]?.GetValue<string>() ?? "",
     };
 
     private static TeleportResult ParseTeleportResult(JsonObject res) => new()

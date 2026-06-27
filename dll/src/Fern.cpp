@@ -4041,6 +4041,50 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             knobs["gravity"]    = knobJson(snap.knobs[Laufen::KNOB_GRAVITY]);
             knobs["jump"]       = knobJson(snap.knobs[Laufen::KNOB_JUMP]);
             data["knobs"] = knobs;
+            // Gravity DIRECTION (UE5.4+); resolved=false on pre-5.4 games.
+            json gd;
+            gd["resolved"] = snap.gravDir.resolved;
+            gd["x"] = snap.gravDir.x; gd["y"] = snap.gravDir.y; gd["z"] = snap.gravDir.z;
+            gd["active"]   = snap.gravDir.active;
+            if (snap.gravDir.resolved && snap.gravDir.ownerAddr && snap.gravDir.fieldOffset >= 0) {
+                gd["owner_addr"]   = Renge::AddrToStr(snap.gravDir.ownerAddr);
+                gd["field_offset"] = snap.gravDir.fieldOffset;
+                gd["field_name"]   = snap.gravDir.fieldName;
+            }
+            data["gravity_direction"] = gd;
+            return Renge::MakeResponse(id, data).dump();
+        }
+        if (cmd == Renge::CMD_SET_GRAVITY_DIRECTION) {
+            double x = request.value("x", 0.0);
+            double y = request.value("y", 0.0);
+            double z = request.value("z", 0.0);
+            Sein::Info("PIPE:cmd", "set_gravity_direction: (%.3f, %.3f, %.3f)", x, y, z);
+            int32_t state = Laufen::SetGravityDirection(x, y, z);   // (0,0,0) = off
+            Laufen::GravDirInfo info{};
+            Laufen::GetGravityDirection(info);
+            json data;
+            data["state"]    = state;                    // 1 active / 0 off / negative
+            data["code"]     = (state < 0) ? state : 0;
+            data["resolved"] = info.resolved;
+            data["x"] = info.x; data["y"] = info.y; data["z"] = info.z;
+            data["active"]   = info.active;
+            if (info.resolved && info.ownerAddr && info.fieldOffset >= 0) {
+                data["owner_addr"]   = Renge::AddrToStr(info.ownerAddr);
+                data["field_offset"] = info.fieldOffset;
+                data["field_name"]   = info.fieldName;
+            }
+            return Renge::MakeResponse(id, data).dump();
+        }
+        if (cmd == Renge::CMD_RESET_GRAVITY_DIRECTION) {
+            Sein::Info("PIPE:cmd", "reset_gravity_direction");
+            int32_t code = Laufen::ResetGravityDirection();
+            Laufen::GravDirInfo info{};
+            Laufen::GetGravityDirection(info);
+            json data;
+            data["code"]     = code;
+            data["resolved"] = info.resolved;
+            data["x"] = info.x; data["y"] = info.y; data["z"] = info.z;
+            data["active"]   = info.active;
             return Renge::MakeResponse(id, data).dump();
         }
         if (cmd == Renge::CMD_SET_MOVEMENT_MULTIPLIER) {
@@ -4120,6 +4164,12 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                     data["loc_field_offset"] = mv.LocFieldOffset;
                     data["loc_field_name"]   = "RelativeLocation";
                 }
+                // "Locate rotation in GWorld": Controller.ControlRotation (FRotator).
+                if (mv.RotOwnerAddr && mv.RotFieldOffset >= 0) {
+                    data["rot_owner_addr"]   = Renge::AddrToStr(mv.RotOwnerAddr);
+                    data["rot_field_offset"] = mv.RotFieldOffset;
+                    data["rot_field_name"]   = "ControlRotation";
+                }
                 // Feature A: live velocity/acceleration off the CharacterMovement.
                 // has_movement=false on vehicle / custom-framework pawns (no CMC):
                 // the vel/acc fields are then absent and the UI shows "unavailable".
@@ -4134,6 +4184,12 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                         data["vel_owner_addr"]   = Renge::AddrToStr(mv.VelOwnerAddr);
                         data["vel_field_offset"] = mv.VelFieldOffset;
                         data["vel_field_name"]   = "Velocity";
+                    }
+                    // "Locate acceleration vector in GWorld": CMC.Acceleration.
+                    if (mv.AccOwnerAddr && mv.AccFieldOffset >= 0) {
+                        data["acc_owner_addr"]   = Renge::AddrToStr(mv.AccOwnerAddr);
+                        data["acc_field_offset"] = mv.AccFieldOffset;
+                        data["acc_field_name"]   = "Acceleration";
                     }
                 }
             }
@@ -4290,6 +4346,26 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
                     data["pawnX"] = pov.Pawn.X; data["pawnY"] = pov.Pawn.Y; data["pawnZ"] = pov.Pawn.Z;
                 }
                 data["source"] = (pov.Source == 1) ? "raw" : "invoke";
+                // "Locate in GWorld" for the cached POV fields (camera manager +
+                // CameraCachePrivate.POV.Location / .FOV offsets).
+                if (pov.CamOwnerAddr) {
+                    data["cam_owner_addr"] = Renge::AddrToStr(pov.CamOwnerAddr);
+                    // Full drillable struct path from the camera manager so the Live
+                    // Walker can drill CameraCachePrivate → POV → leaf (the field is
+                    // nested two struct levels deep, not a direct field).
+                    if (pov.CamLocFieldOffset >= 0) {
+                        data["cam_loc_field_offset"] = pov.CamLocFieldOffset;
+                        data["cam_loc_field_name"]   = "CameraCachePrivate.POV.Location";
+                    }
+                    if (pov.CamRotFieldOffset >= 0) {
+                        data["cam_rot_field_offset"] = pov.CamRotFieldOffset;
+                        data["cam_rot_field_name"]   = "CameraCachePrivate.POV.Rotation";
+                    }
+                    if (pov.CamFovFieldOffset >= 0) {
+                        data["cam_fov_field_offset"] = pov.CamFovFieldOffset;
+                        data["cam_fov_field_name"]   = "CameraCachePrivate.POV.FOV";
+                    }
+                }
             }
             return Renge::MakeResponse(id, data).dump();
         }

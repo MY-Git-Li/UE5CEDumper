@@ -213,6 +213,22 @@ public class DeepContainerChainTests
         Assert.False(LiveWalkerViewModel.TryParseContainerPath(name, out _));
     }
 
+    [Fact]
+    public void TryParseContainerPath_NestedStructPath_DrillsWhenIndexNotRequired()
+    {
+        // Camera POV fields are nested two struct levels deep with no "[N]".
+        // Default (container-only) rejects them; requireIndex:false accepts + parses.
+        Assert.False(LiveWalkerViewModel.TryParseContainerPath("CameraCachePrivate.POV.Location", out _));
+        Assert.True(LiveWalkerViewModel.TryParseContainerPath(
+            "CameraCachePrivate.POV.Location", out var segs, requireIndex: false));
+        Assert.Equal(3, segs.Count);
+        Assert.Equal(("CameraCachePrivate", -1), segs[0]);
+        Assert.Equal(("POV", -1), segs[1]);
+        Assert.Equal(("Location", -1), segs[^1]);
+        // A single bare field is still NOT a path even with requireIndex:false.
+        Assert.False(LiveWalkerViewModel.TryParseContainerPath("Velocity", out _, requireIndex: false));
+    }
+
     // --- LiveWalkerViewModel.FindFieldByOffsetOrContaining (Locate-in-GWorld
     //     scroll-to-field; nested-struct leaves like GAS FGameplayAttributeData) ---
 

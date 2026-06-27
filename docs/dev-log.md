@@ -16,6 +16,51 @@ builds ≤696 in
 
 -----
 
+## 2026-06-27 — Movement Locate-in-GWorld coverage + Gravity Direction (UE5.4+) + camera nested-struct drill + UE-version upward reconciliation (build ~1808; DLL + UI; 2077 C# green; in-game VERIFIED on Elliot)
+
+Follow-on to the Laufen movement work — Locate-in-GWorld for every pose/POV field,
+the gravity-DIRECTION vector, two UX fixes, and honest UE-version detection.
+
+### Locate-in-GWorld — full pose/POV field coverage
+- Current Pose: added **Acceleration** (CMC.Acceleration), **Speed** (no own field →
+  lands on Velocity), and **Rotation** (Controller.ControlRotation) locators.
+- Camera POV: added **Location**, **Rotation**, **FOV** locators
+  (APlayerCameraManager.CameraCachePrivate.POV.*, nested offsets resolved by reflection).
+- All Locate button labels unified to the compact **"🌍 Locate"** / "⚙ Locate" style
+  (Teleport tab + Instance Finder full-text); DataGrid icon-only buttons unchanged.
+
+### Gravity Direction (Laufen, UE5.4+)
+- New `Laufen::SetGravityDirection`/`ResetGravityDirection`/`GetGravityDirection` (FVector
+  `GravityDirection`, normalized DLL-side, base-capture + re-assert worker). `UE5_SetGravityDirection`
+  export; Mimic `CMD_MOVEMENT` **knobId=3** (3 doubles, (0,0,0)=off). Pipe set/reset +
+  gravity_direction in get_movement_params.
+- UI card: 3 **linear** X/Y/Z sliders (−100%…+100%, normalized), Apply/Reset/Refresh/Locate,
+  state badge, global "Gravity Dir toggle" hotkey, CE-Lua/.CT export row. Graceful
+  "Unavailable" on pre-5.4. Hint clarifies normalization (single-axis collapses to ±1 =
+  direction only, not strength).
+- Hotkey Settings: per-row tooltips for all 22 actions; Move Speed/Gravity toggle hotkeys.
+
+### Camera Locate — nested-struct drill fix
+The POV fields are nested two struct levels deep, so the locate landed on the
+PlayerCameraManager parent. Fix: DLL sends the full drillable path
+`CameraCachePrivate.POV.Location`; Live Walker `TryParseContainerPath` gained
+`requireIndex:false` so a pure nested-struct path also drives `DrillDisplayPathAsync`
+(its index<0 branch already drills struct fields). Now lands on the leaf.
+
+### UE-version upward reconciliation (Genau/Frieren + Ubel)
+Heavily-stripped games (Elliot) lose every version string → fall back to 4.27 despite
+being UE5. Added a runtime post-process in `UE5_Init` (self-correcting every launch, no
+cache delete needed): **tagged FFieldVariant** (structural, UE5.3+) → floor 503;
+**CMC::GravityDirection** (property marker) → 504. Plus a **lazy** UE5.5 marker — `Ubel`
+sets a flag when any walk sees a reflected `Utf8StrProperty`/`AnsiStrProperty`, and
+`UE5_GetVersion` raises 504→505 off it. Elliot now reports UE5.4. (Packed FUObjectItem is
+NOT a version marker — Avowed packs it at UE5.3.)
+
+Tests: +5 (TeleportViewModel gravity-dir ×3, MovementScriptGenerator gravity-dir ×2,
+DeepContainerChain struct-path ×1) → 2077 C# green.
+
+-----
+
 ## 2026-06-26 — Movement tuning: Move Speed / Gravity / Super Jump (Laufen module; build ~1799; DLL + pipe + UI + CE-Lua mailbox; tests green, **in-game VERIFIED on Elliot-Win64-Shipping (UE4.27) + Avowed-Win64-Shipping (UE5.3, packed FUObjectItem)**)
 
 New **Laufen** (走る / "to run") DLL module + three Teleport-tab cards that force
