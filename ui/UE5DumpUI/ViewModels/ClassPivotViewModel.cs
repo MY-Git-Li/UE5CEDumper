@@ -429,7 +429,10 @@ public partial class ClassPivotViewModel : ViewModelBase
         // Off the UI thread: Microsoft.Data.Sqlite "*Async" runs synchronously on the
         // caller, so awaiting it on the UI thread would block + run the collection
         // rebuild inline inside a binding event (the crash).
-        var list = await Task.Run(() => _store.ListSnapshotsAsync());
+        // Exclude UNUSABLE snapshots (captures that spanned a GObjects drift): a
+        // pivot over temporally-inconsistent rows mixes two worlds' instances.
+        var list = (await Task.Run(() => _store.ListSnapshotsAsync()))
+            .Where(m => m.IsUsable).ToList();
         _refreshing = true;
         try
         {

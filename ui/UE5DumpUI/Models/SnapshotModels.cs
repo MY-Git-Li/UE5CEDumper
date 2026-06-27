@@ -24,6 +24,22 @@ public sealed class SnapshotMeta
     /// <summary>Capture scope tag, e.g. "NumericNoByte".</summary>
     public string Scope         { get; set; } = "NumericNoByte";
 
+    /// <summary>False when the capture spanned a GObjects-count drift (likely a
+    /// level transition / mass spawn-free) and is therefore temporally
+    /// inconsistent. Such snapshots are excluded from SPC Query / Class Pivot
+    /// pickers and auto-deleted before the next capture. Defaults true so every
+    /// existing row (and any capture proven clean) is usable. See
+    /// <see cref="Services.SnapshotConsistency"/>.</summary>
+    public bool IsUsable { get; set; } = true;
+
+    /// <summary>"⚠" for an unusable (inconsistent) snapshot, else empty — a compact
+    /// status glyph for the saved-snapshots grid.</summary>
+    public string UsabilityBadge => IsUsable ? "" : "⚠";
+
+    /// <summary>Label with a leading ⚠ when the snapshot is unusable, so the
+    /// saved-snapshots grid flags it without needing a separate column.</summary>
+    public string LabelDisplay => IsUsable ? Label : $"⚠ {Label}";
+
     /// <summary>Estimated on-disk size of this snapshot in bytes (field_count
     /// pro-rated against the DB file size). Computed by the store on list, not
     /// persisted — snapshots share one per-game DB file, so exact per-snapshot
@@ -41,10 +57,11 @@ public sealed class SnapshotMeta
     {
         get
         {
+            var prefix = IsUsable ? "" : "⚠ ";
             if (System.DateTimeOffset.TryParse(CapturedAt, System.Globalization.CultureInfo.InvariantCulture,
                     System.Globalization.DateTimeStyles.RoundtripKind, out var dto))
-                return $"{Label}  ·  {dto.LocalDateTime:yyyy-MM-dd HH:mm:ss}";
-            return Label;
+                return $"{prefix}{Label}  ·  {dto.LocalDateTime:yyyy-MM-dd HH:mm:ss}";
+            return $"{prefix}{Label}";
         }
     }
 }

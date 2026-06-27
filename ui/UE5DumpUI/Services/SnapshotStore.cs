@@ -105,6 +105,30 @@ public sealed class SnapshotStore : ISnapshotStore
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    /// <summary>Add a column to a table only if it doesn't already exist (SQLite has
+    /// no ADD COLUMN IF NOT EXISTS). Used for ADDITIVE schema changes that must NOT
+    /// bump <see cref="SchemaVersion"/> (which drops every snapshot) — so an existing
+    /// DB gains the column while keeping its data. <paramref name="columnDef"/> is the
+    /// SQL after the name, e.g. "INTEGER NOT NULL DEFAULT 1".</summary>
+    private static async Task AddColumnIfMissingAsync(
+        SqliteConnection conn, string table, string column, string columnDef, CancellationToken ct)
+    {
+        bool exists = false;
+        await using (var info = conn.CreateCommand())
+        {
+            info.CommandText = $"PRAGMA table_info({table});";
+            await using var r = await info.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                // table_info columns: cid, name, type, notnull, dflt_value, pk
+                if (string.Equals(r.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                { exists = true; break; }
+            }
+        }
+        if (!exists)
+            await ExecAsync(conn, $"ALTER TABLE {table} ADD COLUMN {column} {columnDef};", ct);
+    }
+
     /// <summary>Current on-disk schema version. The <c>fields</c> table is
     /// denormalised (identity columns per row). v4 DROPPED the three heavy composite
     /// covering indexes (ix_strict/loose/insession — ~450 MB on a ~1.8M-row capture):
@@ -191,6 +215,14 @@ public sealed class SnapshotStore : ISnapshotStore
                 PRIMARY KEY(snapshot_id, is_array)
             );
             """, ct);
+
+        // is_usable (additive — no SchemaVersion bump, so existing snapshots are
+        // PRESERVED, not dropped). 0 marks a capture that spanned a GObjects-count
+        // drift (likely a level transition) and is temporally inconsistent; such
+        // snapshots are hidden from SPC/Pivot and auto-deleted before the next
+        // capture. DEFAULT 1 => every existing + future row is usable unless proven
+        // otherwise. See Services.SnapshotConsistency.
+        await AddColumnIfMissingAsync(conn, "snapshots", "is_usable", "INTEGER NOT NULL DEFAULT 1", ct);
 
         if (ver < SchemaVersion)
             await ExecAsync(conn, $"PRAGMA user_version={SchemaVersion};", ct);
@@ -468,7 +500,8 @@ public sealed class SnapshotStore : ISnapshotStore
             return set;
         }
 
-        public async Task CompleteSnapshotAsync(long snapshotId, int objectCount, int fieldCount, CancellationToken ct = default)
+        public async Task CompleteSnapshotAsync(long snapshotId, int objectCount, int fieldCount,
+                                                bool isUsable = true, CancellationToken ct = default)
         {
             // Flush the captured rows, then write totals + incremental pivot counts in a
             // fresh transaction (so a reader can't observe a half-written class_counts).
@@ -481,9 +514,10 @@ public sealed class SnapshotStore : ISnapshotStore
             await using (var u = _conn.CreateCommand())
             {
                 u.Transaction = tx;
-                u.CommandText = "UPDATE snapshots SET object_count=$oc, field_count=$fc WHERE id=$id;";
+                u.CommandText = "UPDATE snapshots SET object_count=$oc, field_count=$fc, is_usable=$us WHERE id=$id;";
                 u.Parameters.AddWithValue("$oc", objectCount);
                 u.Parameters.AddWithValue("$fc", fieldCount);
+                u.Parameters.AddWithValue("$us", isUsable ? 1 : 0);
                 u.Parameters.AddWithValue("$id", snapshotId);
                 await u.ExecuteNonQueryAsync(ct);
             }
@@ -588,7 +622,7 @@ public sealed class SnapshotStore : ISnapshotStore
         await using var conn = await OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT id, label, captured_at, pe_hash, game_session_id, ue_version, object_count, field_count, scope
+            SELECT id, label, captured_at, pe_hash, game_session_id, ue_version, object_count, field_count, scope, is_usable
             FROM snapshots ORDER BY id DESC;
             """;
         var list = new List<SnapshotMeta>();
@@ -606,6 +640,8 @@ public sealed class SnapshotStore : ISnapshotStore
                 ObjectCount   = reader.IsDBNull(6) ? 0  : reader.GetInt32(6),
                 FieldCount    = reader.IsDBNull(7) ? 0  : reader.GetInt32(7),
                 Scope         = reader.IsDBNull(8) ? "" : reader.GetString(8),
+                // Defensive: treat NULL/missing as usable (older rows default to 1).
+                IsUsable      = reader.IsDBNull(9) || reader.GetInt32(9) != 0,
             });
         }
 
@@ -2231,6 +2267,35 @@ public sealed class SnapshotStore : ISnapshotStore
         var result = PivotEngine.Build(rows, pq);
         if (capped) result.Truncated = true;
         return result;
+    }
+
+    public async Task<int> DeleteUnusableSnapshotsAsync(CancellationToken ct = default)
+    {
+        await using var conn = await OpenAsync(ct);
+        int removed;
+        await using (var count = conn.CreateCommand())
+        {
+            count.CommandText = "SELECT COUNT(*) FROM snapshots WHERE is_usable=0;";
+            removed = (int)(long)(await count.ExecuteScalarAsync(ct) ?? 0L);
+        }
+        if (removed == 0) return 0;
+
+        // Delete the flagged snapshots' rows across all four tables in one statement
+        // (the per-row tables key on snapshot_id; the metadata row holds the flag).
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText =
+                "DELETE FROM fields            WHERE snapshot_id IN (SELECT id FROM snapshots WHERE is_usable=0); " +
+                "DELETE FROM class_counts      WHERE snapshot_id IN (SELECT id FROM snapshots WHERE is_usable=0); " +
+                "DELETE FROM pivot_index_built WHERE snapshot_id IN (SELECT id FROM snapshots WHERE is_usable=0); " +
+                "DELETE FROM snapshots         WHERE is_usable=0;";
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        // Reclaim the disk: an unusable capture can still be large, and this runs at
+        // the START of a new capture, so freeing it now keeps the file from bloating.
+        await ReclaimDiskAsync(conn, ct);
+        _log?.Info(Constants.LogCatView, $"SnapshotStore: deleted {removed} unusable snapshot(s) (reclaimed disk)");
+        return removed;
     }
 
     public async Task DeleteSnapshotAsync(long snapshotId, bool reclaim = false, CancellationToken ct = default)
