@@ -21,20 +21,21 @@ Open work only. **Read this when deciding what to do next.**
 
 ## ▶ Next up (genuinely actionable now)
 
-- **Multi-pipe Phase 1 REDO — off-thread heavy dispatch via OVERLAPPED pipe I/O (the only correct way)** —
-  Effort: **L** · Risk: high (live threading; no Fern unit tests). The build-1836 attempt
-  (single FIFO heavy worker) was **REVERTED** — it deadlocked because the server pipe is
-  **synchronous** (`CreateNamedPipeW` without `FILE_FLAG_OVERLAPPED`, Fern.cpp:496), so the
-  Windows I/O manager serializes I/O on the handle: the worker's `WriteFile` (response) can't
-  complete while the read thread is parked in `ReadFile`. See [multipipe-eval.md](multipipe-eval.md)
-  §8.1. To make off-thread dispatch work, **first convert the server pipe + `ReadLine`/`WriteLine`/
-  `AcceptLoop` to overlapped (async) I/O** (or use separate read/write handles) so a read can be
-  pending while a write proceeds. Only then re-add the light-inline / heavy-worker split. **Must
-  be verified IN-GAME** (connect handshake, Snapshot/Value-Search-while-Live-Walker, disconnect
-  mid-scan, CE invoke under load) — unit tests won't catch the I/O serialization. Also note
-  (§8.3): even fixed, Snapshot is bottlenecked by the **UI-side single-threaded multi-MB chunk
-  parse (~2.4 s/chunk)** — consider streaming `Utf8JsonReader` or smaller chunks there too.
-  *Parent: reverted Phase 1 build 1836 (dev-log 2026-06-28).*
+- **Multi-pipe Phase 1 REDO — discrete-style TWO-CONNECTION lane split (plan written; not built)** —
+  Effort: **M-L** · Risk: med (live threading; no Fern unit tests). **Full plan: [multipipe-eval.md](multipipe-eval.md) §9.**
+  The build-1836 single-handle worker-pool was REVERTED (deadlocked on the synchronous pipe, §8.1).
+  The sister repo `D:\Github\discrete` runs a proven alternative: the UI opens **two** client
+  connections (interactive + bulk) to a `maxInstances≥2` server that serves **each connection on
+  its own thread + own handle**. Each connection stays serial read→write on one handle (one thread)
+  → **no same-handle deadlock, and NO overlapped-I/O rewrite needed** (each handle is touched by
+  exactly one thread). Safe because the interactive lane never builds the Aura class caches and the
+  bulk lane runs scans one-at-a-time (§9.1). DLL work = per-connection refactor of Fern (thread-per-
+  connection accept, per-connection write-mutex / in-flight / watch-event routing, monitor + session
+  cleanup keyed per-connection — §9.3); UI work = a 2nd `PipeClient` + a `BulkCommands` router like
+  discrete's `BackendAdapter` (§9.4). Lane table = §6. **MUST pass the §9.6 in-game checklist before
+  shipping.** Open decisions in §9.7 (maxInstances count; session-drop policy; cancellation scope).
+  Snapshot SPEED is a SEPARATE issue (§9.5): UI-side single-threaded multi-MB chunk parse (~2.4s/chunk)
+  → streaming `Utf8JsonReader`/smaller chunks. *Parent: reverted Phase 1 build 1836 (dev-log 2026-06-28).*
 
 - **CE responsiveness under heavy scans — pick a NON-priority approach if it ever bites** —
   Effort: **S-M** · Risk: med. Phase 0 (drop scan threads to `BELOW_NORMAL`) was **REVERTED** —
