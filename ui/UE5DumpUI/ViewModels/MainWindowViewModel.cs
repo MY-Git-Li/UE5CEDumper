@@ -331,7 +331,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         ObjectTree = new ObjectTreeViewModel(dump, log, platform);
         ClassStruct = new ClassStructViewModel(dump, log, platform);
-        Pointers = new PointerPanelViewModel(platform, dump, log, aobMaker, aobUsage, experimentalGate, snapshotStore);
+        Pointers = new PointerPanelViewModel(platform, dump, log, aobMaker, aobUsage, experimentalGate, snapshotStore, pipeClient);
         LiveWalker = new LiveWalkerViewModel(dump, log, platform, aobMaker, bookmarks);
         InstanceFinder = new InstanceFinderViewModel(dump, log, platform);
         PropertySearch = new PropertySearchViewModel(dump, log, aobMaker, platform);

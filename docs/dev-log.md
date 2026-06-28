@@ -18,6 +18,28 @@ builds ≤696 in
 
 -----
 
+## 2026-06-28 — System-tab "Pipe Activity" log (live UI↔DLL traffic tail) (build ~1837; UI-only; 2091 C# green, AOT publish clean + launch-verified)
+
+**Context.** Companion to Phase 1: a small in-UI tail of pipe traffic on the System tab so
+the user can *see* light commands interleave with a heavy scan (proof the lane split works)
+without opening the `%LOCALAPPDATA%` pipe log. The user noted the file log already exists, so
+this is a convenience mirror — its value is immediacy.
+
+**Change.** `IPipeClient` gains an `Activity` event raised for every line: TX (on send, with
+command + id), RX (on response, paired back to the TX for command name + round-trip ms via a
+new `_txMeta` id→(cmd,tick) map), and push events. `PipeClient` raises it only when a
+subscriber is attached (near-zero cost otherwise) and clears `_txMeta` on cancel/disconnect.
+The System-tab VM (`PointerPanelViewModel`) subscribes and renders a newest-first ring buffer
+(`ObservableCollection<PipeLogEntry>`, cap 100) with **Pause** + **Clear**. Pipe-thread
+callbacks enqueue into a `ConcurrentQueue` and **coalesce a single `Dispatcher.UIThread.Post`
+per burst at `DispatcherPriority.Background`**, so a snapshot streaming hundreds of chunks
+can't flood the UI thread. New `PipeLogEntry` model; a "Pipe Activity" card in `PointerPanel.axaml`
+(monospace list + empty placeholder); en.axaml strings. Test mocks (`MockPipeClient`,
+`NoopPipeClient`) implement the new event.
+
+**Verification.** Full suite green (2091 C# / 797 dll / 53 utf8); Native-AOT publish clean (no
+new ILC/trim warnings) and the published exe launches + stays alive with no `crash.log`.
+
 ## 2026-06-28 — Multi-pipe Phase 1: non-blocking DLL dispatch (heavy worker lane) (build ~1836; DLL-only Fern; 2091 C# / 797 dll / 53 utf8 green)
 
 **Context.** Phase 0 (below) protected CE responsiveness but left the actual UI symptom —

@@ -1,5 +1,8 @@
+using System.Collections.Concurrent;
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Reflection;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
@@ -20,6 +23,7 @@ public partial class PointerPanelViewModel : ViewModelBase
     private readonly AobUsageService? _aobUsage;
     private readonly IExperimentalGate? _experimentalGate;
     private readonly ISnapshotStore? _snapshotStore;
+    private readonly IPipeClient? _pipe;
 
     [ObservableProperty] private string _gObjectsAddress = "";
     [ObservableProperty] private string _gNamesAddress = "";
@@ -85,6 +89,20 @@ public partial class PointerPanelViewModel : ViewModelBase
 
     // --- Maintenance (open log folder / remove all snapshot data) ---
     [ObservableProperty] private string _maintenanceStatusText = "";
+
+    // --- Pipe Activity log (System tab): live tail of UI<->DLL pipe traffic ---
+    // Newest-first ring buffer, fed by IPipeClient.Activity (raised on pipe
+    // threads). Entries are coalesced onto the UI thread so a burst (snapshot
+    // streaming, tree scroll) can't flood the dispatcher.
+    private const int PipeLogCap = 100;
+    /// <summary>The displayed lines (newest first), capped at <see cref="PipeLogCap"/>.</summary>
+    public ObservableCollection<PipeLogEntry> PipeLog { get; } = new();
+    /// <summary>When true, new pipe lines are dropped (the list freezes for reading).</summary>
+    [ObservableProperty] private bool _pipeLogPaused;
+    /// <summary>True while the log is empty — drives the placeholder text.</summary>
+    public bool PipeLogIsEmpty => PipeLog.Count == 0;
+    private readonly ConcurrentQueue<PipeLogEntry> _pipeLogPending = new();
+    private int _pipeLogFlushScheduled;
 
     // --- Diagnostics: build version + Self-Test ---
 
@@ -306,7 +324,8 @@ public partial class PointerPanelViewModel : ViewModelBase
                                 ILoggingService? log = null, IAobMakerBridge? aobMaker = null,
                                 AobUsageService? aobUsage = null,
                                 IExperimentalGate? experimentalGate = null,
-                                ISnapshotStore? snapshotStore = null)
+                                ISnapshotStore? snapshotStore = null,
+                                IPipeClient? pipeClient = null)
     {
         _platform = platform;
         _dump = dump;
@@ -315,6 +334,11 @@ public partial class PointerPanelViewModel : ViewModelBase
         _aobUsage = aobUsage;
         _experimentalGate = experimentalGate;
         _snapshotStore = snapshotStore;
+        _pipe = pipeClient;
+
+        // Subscribe to the live pipe activity tail (System-tab Pipe Activity card).
+        if (pipeClient != null)
+            pipeClient.Activity += OnPipeActivity;
 
         // Reflect external flips (e.g. another System-tab instance) back to the
         // checkbox, plus the lock state (which disables the checkbox once an
@@ -912,6 +936,46 @@ public partial class PointerPanelViewModel : ViewModelBase
             MaintenanceStatusText = Res.Format("str.System.RemoveAllSnapshots.Error", ex.Message);
             _log?.Error(Constants.LogCatView, "RemoveAllSnapshots failed", ex);
         }
+    }
+
+    // --- Pipe Activity log ---
+
+    /// <summary>
+    /// Pipe-thread callback: queue the line and coalesce a single UI-thread flush
+    /// per burst (DispatcherPriority.Background yields to real UI work, so even a
+    /// snapshot streaming hundreds of chunks can't starve the UI).
+    /// </summary>
+    private void OnPipeActivity(PipeLogEntry entry)
+    {
+        if (PipeLogPaused) return;
+        _pipeLogPending.Enqueue(entry);
+        // Bound the pending buffer so a busy UI thread can't let it grow without
+        // limit; drop the oldest beyond a generous margin over the display cap.
+        while (_pipeLogPending.Count > PipeLogCap * 4 && _pipeLogPending.TryDequeue(out _)) { }
+        if (Interlocked.Exchange(ref _pipeLogFlushScheduled, 1) == 0)
+            Dispatcher.UIThread.Post(FlushPipeLog, DispatcherPriority.Background);
+    }
+
+    /// <summary>UI-thread: drain the pending queue into the bound collection
+    /// (newest first) and trim to the cap.</summary>
+    private void FlushPipeLog()
+    {
+        Interlocked.Exchange(ref _pipeLogFlushScheduled, 0);
+        bool wasEmpty = PipeLog.Count == 0;
+        while (_pipeLogPending.TryDequeue(out var entry))
+            PipeLog.Insert(0, entry);
+        while (PipeLog.Count > PipeLogCap)
+            PipeLog.RemoveAt(PipeLog.Count - 1);
+        if (wasEmpty != (PipeLog.Count == 0))
+            OnPropertyChanged(nameof(PipeLogIsEmpty));
+    }
+
+    [RelayCommand]
+    private void ClearPipeLog()
+    {
+        while (_pipeLogPending.TryDequeue(out _)) { }
+        PipeLog.Clear();
+        OnPropertyChanged(nameof(PipeLogIsEmpty));
     }
 
     // --- Clipboard copy commands ---
