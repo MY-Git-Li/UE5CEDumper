@@ -114,3 +114,61 @@ Cross-check: the field accesses in step 3 should line up against this base (e.g.
   `find_gobjects.java` finds nothing and you must use the patternsleuth candidates + `find_callers`.
 - patternsleuth's `--disassemble-merged` only prints when a resolver returns exactly one value;
   on an ambiguous resolve it errors but still lists the candidate VAs in the message.
+
+## Encrypted games — what `vendor/Dumper-7` and `vendor/RE-UE4SS` can (and can't) do
+
+We periodically re-evaluate whether to adopt the two reference dumpers under `vendor/` to
+handle **encrypted** games. **Decision: no — and there is nothing to gain on the
+encryption axis.** Both repos (and this project) only provide a *plug-in hook*; neither
+decrypts any title out of the box. Re-confirmed 2026-06-28 against
+`vendor/Dumper-7@c891b17` and `vendor/RE-UE4SS@2352d15b` (these are local reference clones,
+**not** git submodules — see `.gitmodules`).
+
+### First, disambiguate "encrypted"
+
+- **In-memory pointer / struct encryption** — the `FUObjectArray::Objects` pointer is
+  XOR/add/rotate-obfuscated, or UE's `TEncryptedObjectProperty` stores some object pointers
+  encrypted in memory. This is the only kind a *runtime* dumper cares about.
+- **PAK / asset AES encryption** — the on-disk `.pak` AES-256 key. This is an *offline
+  unpacking* concern (UnrealPak / FModel / aes-finder), entirely orthogonal to dumping live
+  memory. Neither repo's runtime path addresses it (RE-UE4SS's pak loader is for mod-loading,
+  not dumping). If a user says "encrypted game" meaning this, point them at offline tools.
+
+### Capability matrix (in-memory encryption)
+
+| | `Dumper-7` | `RE-UE4SS` | **This project** |
+|---|---|---|---|
+| GObjects pointer-decrypt hook | ✅ `InitObjectArrayDecryption(lambda)`, default identity | ❌ none | ✅ `Aura::SetDecryptFunc` → `UE5_SetObjectDecryption` export, default nullptr |
+| Ships any per-game key/routine | ❌ zero (README `^ 0x8375` is a sample) | ❌ zero | ❌ zero (hook only) |
+| `TEncryptedObjectProperty` | ⚠️ opt-in `bEnableEncryptedObjectPropertySupport` (default off) | ❌ | ❌ |
+| Non-standard / forked engine | manual XOR/offset | per-game `assets/CustomGameConfigs/*.ini` (33 titles) overriding AOB / FName-method / version / vtable | per-game config (roadmap) |
+
+### Findings
+
+- **Dumper-7** decryption = `ObjectArray::DecryptPtr`, defaulting to an identity lambda
+  (`Dumper/Engine/Public/Unreal/ObjectArray.h`). The README's `uint64(ObjPtr) ^ 0x8375` key
+  is **per-game and must be reverse-engineered by you** — it is not built in. Its `XORString`
+  setting is unrelated (it obfuscates Dumper-7's *own generated SDK strings*). The one piece
+  worth borrowing *if* we ever hit it: `TEncryptedObjectProperty` support
+  (`Dumper/Settings.h`), a real newer-UE feature for in-memory-encrypted object properties.
+- **RE-UE4SS** has **no AES / decrypt code at all** (the only `encrypt` hit is a YouTube
+  iframe). It copes with hard games via `CustomGameConfigs/*/UE4SS-settings.ini` — signature /
+  offset / engine-version / vtable *overrides*, not decryption. It assumes `GUObjectArray` /
+  `FName` are directly readable, so it does not target pointer-encrypted / strong-anti-cheat
+  titles. Its 33 shipped profiles (FF7 Rebirth/Remake, Atomic Heart, Borderlands 3, Jedi
+  Survivor, Lies of P, …) are forked-engine tuning, not encrypted-pointer cases.
+- **This project already has parity** with Dumper-7's pointer-decrypt hook: `Aura::SetDecryptFunc`
+  / `Aura::DecryptObjectPtr` (`dll/src/Aura.cpp`), wired through the CE-Lua export
+  `UE5_SetObjectDecryption` (`dll/src/Frieren.cpp`). Adopting Dumper-7 for decryption would add
+  zero coverage.
+
+### Recommendation
+
+- **Do not vendor either repo for decryption.** We already match Dumper-7's hook; the missing
+  ingredient for any encrypted game is the **per-game routine**, which you reverse yourself and
+  pass to `UE5_SetObjectDecryption` before `UE5_Init` (see `Frieren.h` — `UE5_AutoStart` does
+  not support decryption; use the manual Lua flow).
+- **Only selectively borrow** Dumper-7's `TEncryptedObjectProperty` handling, and only when a
+  concrete UE5 title that uses it shows up.
+- RE-UE4SS's value here is its `CustomGameConfigs` *per-game-profile philosophy*, which overlaps
+  our existing per-game config — that's a separate (non-encryption) topic.
