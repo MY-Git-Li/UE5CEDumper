@@ -18,6 +18,47 @@ builds ≤696 in
 
 -----
 
+## 2026-06-28 — Multi-pipe Phase 1: non-blocking DLL dispatch (heavy worker lane) (build ~1836; DLL-only Fern; 2091 C# / 797 dll / 53 utf8 green)
+
+**Context.** Phase 0 (below) protected CE responsiveness but left the actual UI symptom —
+Live Walker slow during a Snapshot — untouched, because the DLL command loop was still
+strictly serial (a `snapshot_chunk` blocked the read thread so a queued `walk_instance`
+waited in the pipe buffer). Phase 1 fixes that. Design + rationale: [multipipe-eval.md](multipipe-eval.md) §5–§6.
+
+**Change (Fern only — no protocol/UI change).** `HandleClient` no longer runs every command
+inline. It now routes by lane:
+- **Light** (`IsLightCommand` allowlist — get_object/list, walk_class/instance,
+  read_array_elements, query_candidates, teleport_*, god/movement/cursor, watch, …): run
+  **inline** on the read thread, exactly as before.
+- **Heavy** (everything else — value/group scan, snapshot_chunk, find_instances/refs/path,
+  find_by_address, search_properties, list_*, invoke_function, version/packed/apply-rescan
+  mutators, …): posted to a **single FIFO worker thread** (`HeavyWorkerLoop`). The read loop
+  returns immediately to service light commands. The worker runs `DispatchCommand` (which
+  bakes the request id into the response) and writes the id-tagged response via the
+  `m_writeMutex`-guarded `WriteLine`, so it interleaves safely with the read thread's light
+  responses and async `PushEvent`s. The UI already demultiplexes by id, so out-of-order
+  completion needs no client change.
+
+**Concurrency-1 by design.** The heavy worker is a single FIFO thread, so two cache-building
+scans never run at once → the Aura `s_classContainerCache`/`s_classRefCache` (and GObjects
+drift) are never raced across commands. Light commands only read write-once globals + Ubel's
+mutex-guarded caches + their own session, so a light command running concurrently with one
+heavy job is safe. The allowlist is the *only* light set; anything unlisted defaults to heavy
+(safe default — a new/unclassified command can't accidentally race a scan).
+
+**Cancellation simplified.** `Tot::ResetPerCommand` moved from per-command to **per-client**
+(at `HandleClient` start) — `g_perCommand` is only ever set on disconnect (Fern monitor), so
+per-client reset is equivalent, and it removes the risk of a light command clearing a running
+scan's cancel mid-flight. On disconnect the read loop drains the worker: `RequestPerCommand`
+(running scan bails at its next Tot poll) + clear the queue + **wait for the worker idle**
+before returning, so AcceptLoop's pipe-close + session `DropAll` can't race a live job.
+`Fern::Start/Stop` spawn/join the worker (Stop's existing `RequestShutdown` makes an in-flight
+job bail fast).
+
+**Status.** Built + full suite green. Fern is integration-level (not unit-tested), so the
+threading needs **in-game verification**: confirm Live Walker / teleport stay responsive while
+a Snapshot / Value Search runs, and that disconnect mid-scan frees the pipe cleanly.
+
 ## 2026-06-28 — Multi-pipe IPC evaluation + Phase 0 scan CPU/priority guard (build ~1834; DLL-only; 2091 C# / 797 dll / 53 utf8 green)
 
 **Context.** User asked whether the UI↔DLL and CE-Lua↔DLL IPC should use **multiple

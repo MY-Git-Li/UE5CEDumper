@@ -21,20 +21,16 @@ Open work only. **Read this when deciding what to do next.**
 
 ## ▶ Next up (genuinely actionable now)
 
-- **Multi-pipe Phase 1 — non-blocking DLL dispatch (fixes Live-Walker-during-Snapshot lag)** —
-  Effort: **M-L** · Risk: med. Root cause + full design in
-  [multipipe-eval.md](multipipe-eval.md). The UI lag is **DLL-side head-of-line blocking**:
-  one serial `HandleClient` loop (`ReadLine → DispatchCommand[blocks] → WriteLine`) means a
-  `snapshot_chunk` (~0.5–2 s) starves a queued `walk_instance`. Fix: split dispatch — **light/
-  control commands run inline** on the read thread; **heavyweight commands go to ONE worker
-  thread** (concurrency = 1, so no two cache-builders run at once) and return their `id`-tagged
-  response via the existing `m_writeMutex` write path, freeing the read loop immediately. UI
-  needs ~no protocol change (already `id`-muxed + event/response split). **Hard prerequisite:**
-  replace the **global** `Tot::ResetPerCommand` (Fern.cpp:616) with **per-request cancellation**
-  (token / generation) — else a light inline command clears a running heavy scan's cancel state;
-  and generalize the MonitorLoop in-flight detection (`m_commandInFlight`) to "any worker
-  active". Lane table in the eval §6. **Do NOT add pipe instances** (Option 2 — same benefit,
-  forces unsafe concurrent `DispatchCommand`). *Parent: multipipe-eval Phase 0 build 1834 (dev-log 2026-06-28).*
+- **Multi-pipe Phase 1 — IN-GAME VERIFY the non-blocking dispatch (shipped build 1836)** —
+  Effort: **S** (verify) · Risk: med (live threading). The light/heavy lane split shipped
+  (Fern `HandleClient` + `HeavyWorkerLoop`, single FIFO worker, per-client cancel, disconnect
+  drain — see dev-log 2026-06-28 + [multipipe-eval.md](multipipe-eval.md)). Built + tests green,
+  but Fern is integration-level (not unit-tested). **Verify in-game:** (1) Live Walker drill +
+  teleport/godmode stay snappy WHILE a Snapshot / Value Search streams (the original symptom);
+  (2) start a Value Search mid-Snapshot — both complete, no wedge (they serialize on the worker);
+  (3) close the UI mid-scan — pipe frees cleanly + game still exits (disconnect drain + Tot);
+  (4) CE `.CT` invoke still works during heavy UI work. If any lane feels wrong, re-check the
+  `IsLightCommand` allowlist. *Parent: multipipe-eval Phase 0 build 1834 (dev-log 2026-06-28).*
 
 - **Multi-pipe Phase 2 — true-parallel heavy ops (OPTIONAL; only if users want 2 heavy at once)** —
   Effort: **L** · Risk: high. Speculative — **do not pursue without a concrete need.** Raising

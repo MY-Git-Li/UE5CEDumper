@@ -28,6 +28,7 @@
 #include <cstring>
 #include <sstream>
 #include <vector>
+#include <unordered_set>
 
 using json = nlohmann::json;
 
@@ -389,6 +390,41 @@ namespace ScanProgress {
     std::string GetStatusText();
 }
 
+// Light = fast, pure-memory or cached-session commands safe to run inline on the
+// read thread while ONE heavy job runs on the worker. They read only the
+// write-once GObjects/GNames/GWorld globals, Ubel's mutex-guarded caches, or
+// their own value-scan session, and write only to game memory or independent
+// subsystem state (Wirbel/Solitar/Laufen, watches). None of them build the Aura
+// class-container/ref caches or mutate DLL globals a concurrent scan reads (the
+// scan engines, version/packed/apply-rescan mutators, and anything that walks
+// the full pool are all left to the heavy worker). Anything not listed is heavy.
+bool Fern::IsLightCommand(const std::string& cmd) {
+    using namespace Renge;
+    static const std::unordered_set<std::string> kLight = {
+        CMD_INIT, CMD_GET_POINTERS, CMD_GET_OBJECT_COUNT, CMD_GET_OBJECT_LIST,
+        CMD_GET_OBJECT, CMD_FIND_OBJECT, CMD_WALK_CLASS, CMD_WALK_CLASS_BATCH,
+        CMD_WALK_FUNCTIONS, CMD_WALK_INSTANCE, CMD_READ_ARRAY_ELEMS,
+        CMD_READ_MEM, CMD_WRITE_MEM, CMD_GET_OFFSETS, CMD_GET_CE_PTR_INFO,
+        CMD_GET_FUNCTION_CODE_ADDR, CMD_QUERY_CANDIDATES, CMD_END_VALUE_SCAN,
+        CMD_QUERY_GROUP_CANDIDATES, CMD_END_GROUP_SCAN, CMD_BEGIN_SNAPSHOT,
+        CMD_RESCAN_STATUS, CMD_SCAN_STATUS, CMD_RESOLVE_GAME_ENGINE,
+        CMD_SET_INVOKE_TIMEOUT, CMD_WATCH, CMD_UNWATCH,
+        // Teleport / godmode / movement (Wirbel/Solitar/Laufen): pure-memory
+        // writes or read-only pose; must stay snappy and must NOT queue behind a
+        // scan. The few that route through the game thread (to_cursor/recall) are
+        // short (~10-100ms), an acceptable inline block on the read thread.
+        CMD_TELEPORT_GET_POSE, CMD_TELEPORT_SAVE_MARKER, CMD_TELEPORT_RECALL_MARKER,
+        CMD_TELEPORT_TO_CURSOR, CMD_TELEPORT_GET_MARKERS, CMD_TELEPORT_CLEAR_MARKER,
+        CMD_TELEPORT_RECALL_LAST, CMD_TELEPORT_GET_POV, CMD_TELEPORT_RELATIVE,
+        CMD_SET_MOUSE_CURSOR, CMD_GET_MOUSE_CURSOR,
+        CMD_SET_GOD_MODE, CMD_GET_GOD_MODE, CMD_GET_PROTECT_STATE,
+        CMD_GET_MOVEMENT_PARAMS, CMD_SET_MOVEMENT_MULTIPLIER, CMD_RESET_MOVEMENT,
+        CMD_SET_GRAVITY_DIRECTION, CMD_RESET_GRAVITY_DIRECTION,
+        CMD_GET_DEBUG_CAMERA_STATE, CMD_SET_DEBUG_CAMERA,
+    };
+    return kLight.count(cmd) != 0;
+}
+
 bool Fern::Start() {
     if (m_running.load()) {
         LOG_WARN("PipeServer: Already running");
@@ -402,9 +438,18 @@ bool Fern::Start() {
     Tot::ResetShutdown();
     Tot::ResetPerCommand();
 
+    // Reset the heavy-worker latch left by a prior Stop() before (re)spawning.
+    {
+        std::lock_guard<std::mutex> lock(m_heavyMutex);
+        m_heavyStop = false;
+        m_heavyBusy = false;
+        m_heavyQueue.clear();
+    }
+
     m_running = true;
     m_acceptThread = std::thread(&Fern::AcceptLoop, this);
     m_monitorThread = std::thread(&Fern::MonitorLoop, this);
+    m_heavyThread = std::thread(&Fern::HeavyWorkerLoop, this);
 
     LOG_INFO("PipeServer: Started on %ls", Grimoire::PIPE_NAME);
     return true;
@@ -418,6 +463,19 @@ void Fern::Stop() {
     // a long scan finishes). Sticky — never auto-cleared.
     Tot::RequestShutdown();
     StopAllWatches();
+
+    // Stop the heavy-command worker. RequestShutdown above makes an in-flight job
+    // bail on its next Tot poll; signal + drain the queue + join so the worker is
+    // gone before we close the pipe and drop value-scan sessions below.
+    {
+        std::lock_guard<std::mutex> lock(m_heavyMutex);
+        m_heavyStop = true;
+        m_heavyQueue.clear();
+    }
+    m_heavyCv.notify_all();
+    if (m_heavyThread.joinable()) {
+        m_heavyThread.join();
+    }
 
     // Join background rescan thread if running
     m_rescan.running.store(false);
@@ -607,13 +665,17 @@ void Fern::HandleClient(HANDLE pipe) {
         lastCmd.clear();
     };
 
+    // Clear any per-command cancel left by a prior (disconnected) client — done
+    // ONCE per client now (not per command). The heavy worker, not the read
+    // loop, owns the in-flight cancel, so a concurrent light command must never
+    // clear a running scan's cancel state mid-flight. g_perCommand is only ever
+    // set on disconnect, so a per-client reset is exactly equivalent to the old
+    // per-command reset. Shutdown cancellation stays sticky.
+    Tot::ResetPerCommand();
+
     while (m_running.load()) {
         std::string line = ReadLine(pipe);
         if (line.empty()) { flushRepeat(); break; } // Disconnected
-
-        // Fresh command: clear any per-command cancel left from a prior
-        // (disconnected) client. Shutdown cancellation stays sticky.
-        Tot::ResetPerCommand();
 
         // Extract command name for dedup (fast: find "cmd":" in JSON)
         std::string cmd;
@@ -633,23 +695,76 @@ void Fern::HandleClient(HANDLE pipe) {
             repeatCount = 1;
         }
 
-        // Publish the in-flight pipe so the monitor thread can detect a
-        // mid-command disconnect (the handler below blocks this thread).
-        m_inflightPipe.store(pipe, std::memory_order_relaxed);
-        m_commandInFlight.store(true, std::memory_order_relaxed);
-        std::string response = DispatchCommand(line);
-        m_commandInFlight.store(false, std::memory_order_relaxed);
+        if (IsLightCommand(cmd)) {
+            // Light lane: run inline on the read thread (fast, pure-memory /
+            // cached). Publish the in-flight pipe so the monitor can detect a
+            // mid-command disconnect on the rare slow-ish light command.
+            m_inflightPipe.store(pipe, std::memory_order_relaxed);
+            m_commandInFlight.store(true, std::memory_order_relaxed);
+            std::string response = DispatchCommand(line);
+            m_commandInFlight.store(false, std::memory_order_relaxed);
 
-        if (!response.empty()) {
-            if (!WriteLine(pipe, response)) {
-                flushRepeat();
-                Sein::Error("PIPE:cmd", "PipeServer: Failed to write response");
-                break;
+            if (!response.empty()) {
+                if (!WriteLine(pipe, response)) {
+                    flushRepeat();
+                    Sein::Error("PIPE:cmd", "PipeServer: Failed to write response");
+                    break;
+                }
             }
+        } else {
+            // Heavy lane: hand off to the single FIFO worker and keep reading,
+            // so light commands aren't blocked behind this multi-second command.
+            // The worker writes the id-tagged response itself (via WriteLine).
+            {
+                std::lock_guard<std::mutex> lock(m_heavyMutex);
+                m_heavyQueue.push_back(HeavyJob{ line, pipe });
+            }
+            m_heavyCv.notify_one();
         }
     }
     m_commandInFlight.store(false, std::memory_order_relaxed);
     m_inflightPipe.store(INVALID_HANDLE_VALUE, std::memory_order_relaxed);
+
+    // Client gone: cancel any in-flight heavy job, drop queued jobs, and WAIT for
+    // the worker to go idle BEFORE returning. AcceptLoop closes this pipe handle
+    // and drops value-scan sessions right after, so nothing may still be writing
+    // to the pipe or reading a session. RequestPerCommand makes a running scan
+    // bail at its next Tot poll (it is cleared again for the next client above).
+    Tot::RequestPerCommand();
+    {
+        std::unique_lock<std::mutex> lock(m_heavyMutex);
+        m_heavyQueue.clear();
+        m_heavyCv.wait(lock, [this] { return !m_heavyBusy; });
+    }
+}
+
+// Single FIFO worker for heavy commands (Phase 1). Concurrency-1 by design — see
+// Fern.h. Pulls jobs posted by HandleClient, runs DispatchCommand (which may take
+// seconds and polls Tot for cancellation), and writes the id-tagged response via
+// the m_writeMutex-guarded WriteLine so it interleaves safely with the read
+// thread's light responses and async PushEvents.
+void Fern::HeavyWorkerLoop() {
+    for (;;) {
+        HeavyJob job;
+        {
+            std::unique_lock<std::mutex> lock(m_heavyMutex);
+            m_heavyCv.wait(lock, [this] { return m_heavyStop || !m_heavyQueue.empty(); });
+            if (m_heavyStop && m_heavyQueue.empty()) return;
+            if (m_heavyQueue.empty()) continue;   // spurious wake / drained
+            job = std::move(m_heavyQueue.front());
+            m_heavyQueue.pop_front();
+            m_heavyBusy = true;
+        }
+
+        std::string response = DispatchCommand(job.line);
+        if (!response.empty()) WriteLine(job.pipe, response);
+
+        {
+            std::lock_guard<std::mutex> lock(m_heavyMutex);
+            m_heavyBusy = false;
+        }
+        m_heavyCv.notify_all();   // wake a HandleClient drain waiting for !m_heavyBusy
+    }
 }
 
 void Fern::PushEvent(const std::string& jsonLine) {
