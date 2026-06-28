@@ -21,10 +21,13 @@ Open work only. **Read this when deciding what to do next.**
 
 ## ▶ Next up (genuinely actionable now)
 
-- **Multi-pipe Phase 1 REDO — discrete-style TWO-CONNECTION lane split (IMPLEMENTED on branch `feat/multipipe-lane-split`; IN-GAME VERIFY then merge)** —
-  Effort: **S** (verify) · Risk: med (live threading; no Fern unit tests). Built + tests + AOT green;
-  **run the §9.6 in-game checklist before merging** (the reverted attempt's deadlock only showed
-  in-game). What landed = [multipipe-eval.md](multipipe-eval.md) §9.8. **Full plan: [multipipe-eval.md](multipipe-eval.md) §9.**
+- **Multi-pipe Phase 1 — residual verification (low priority; lane split SHIPPED PR #396)** —
+  Effort: **S** · Risk: low. The two-connection lane split shipped + in-game verified for §9.6 items
+  1–5 (dev-log 2026-06-28). Two checklist items weren't explicitly exercised: (6) **watch-event
+  delivery** to the interactive lane (System-tab / address watch still pushes correctly), and the
+  **single-lane-independent-drop edge** (§9.7 — one lane errors while the other lives; the UI router
+  should tear down both for a clean reconnect, and a stray interactive disconnect shouldn't cancel a
+  running bulk scan). Verify opportunistically. *Parent: multipipe-eval §9 (PR #396).*
   The build-1836 single-handle worker-pool was REVERTED (deadlocked on the synchronous pipe, §8.1).
   The sister repo `D:\Github\discrete` runs a proven alternative: the UI opens **two** client
   connections (interactive + bulk) to a `maxInstances≥2` server that serves **each connection on

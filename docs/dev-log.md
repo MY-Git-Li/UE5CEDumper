@@ -18,9 +18,12 @@ builds ≤696 in
 
 -----
 
-## 2026-06-28 — Phase 1 REDO: discrete-style two-connection lane split (branch `feat/multipipe-lane-split`, build ~1845; NOT in-game verified)
+## 2026-06-28 — Phase 1 REDO: discrete-style two-connection lane split (build ~1845; MERGED PR #396, in-game VERIFIED 1–5)
 
-**On a branch, not merged.** Implements [multipipe-eval.md](multipipe-eval.md) §9 (Path A),
+**SHIPPED.** In-game verified on Elliot (§9.6 items 1–5: connect / interactive-responsive-during-
+scan / value-search-mid-snapshot / disconnect-mid-scan / CE invoke under load) and merged to main
+(PR #396). Low-priority follow-up: watch-event delivery + single-lane-drop edge. Implements
+[multipipe-eval.md](multipipe-eval.md) §9 (Path A),
 modeled on the sister repo `D:\Github\discrete`. Fixes the reverted Phase 1's deadlock by giving
 **each connection its own handle + its own thread** instead of one worker writing the read
 thread's handle — so the synchronous pipe never has two threads on one handle, and **no
