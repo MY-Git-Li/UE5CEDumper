@@ -235,9 +235,10 @@ per burst. Ironically it was the tool that made the deadlock obvious (the missin
 
 ## 9. Phase 1 REDO — discrete-style two-connection lane split (Path A)
 
-> **STATUS: IMPLEMENTED on branch `feat/multipipe-lane-split` (build ~1845); builds + unit
-> tests + AOT clean + launches, but NOT YET in-game verified.** Do not merge until the §9.6
-> checklist passes in a real game. Decisions taken (per "use your defaults"): `maxInstances=3`;
+> **STATUS: SHIPPED — MERGED to `main` via PR #396 (build ~1845), in-game verified on Elliot
+> (§9.6 items 1–5 pass: connect, interactive-responsive-during-scan, value-search-mid-snapshot,
+> disconnect-mid-scan, CE invoke under load).** Remaining low-priority verification: watch-event
+> delivery + the single-lane-independent-drop edge (§9.7). Decisions taken: `maxInstances=3`;
 > value-scan sessions dropped only when the **last** connection disconnects; the monitor trips
 > the **global** `Tot` cancel for **any** broken in-flight connection (the DLL is lane-agnostic
 > — a fast light command finishes before the 200 ms peek catches it, so in practice only a bulk
