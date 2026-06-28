@@ -31,6 +31,9 @@ public sealed class PipeClient : IPipeClient
         s.Length <= MaxLogBodyChars ? s : $"{s[..MaxLogBodyChars]}… ({s.Length:N0} chars)";
     private Task? _readLoopTask;
 
+    // Lane label for the Pipe Activity log ("I" interactive / "B" bulk / "" single).
+    private readonly string _laneTag;
+
     public bool IsConnected { get; private set; }
     public event Action<bool>? ConnectionStateChanged;
     public event Action<JsonObject>? EventReceived;
@@ -43,9 +46,10 @@ public sealed class PipeClient : IPipeClient
 
     private static string NowStr() => DateTime.Now.ToString("HH:mm:ss.fff");
 
-    public PipeClient(ILoggingService log)
+    public PipeClient(ILoggingService log, string laneTag = "")
     {
         _log = log;
+        _laneTag = laneTag;
     }
 
     public async Task ConnectAsync(CancellationToken ct = default)
@@ -125,7 +129,7 @@ public sealed class PipeClient : IPipeClient
         {
             string cmd = request["cmd"]?.GetValue<string>() ?? "?";
             _txMeta[id] = (cmd, Environment.TickCount64);
-            Activity.Invoke(new PipeLogEntry { Time = NowStr(), Dir = "→", Cmd = cmd, Id = id });
+            Activity.Invoke(new PipeLogEntry { Time = NowStr(), Lane = _laneTag, Dir = "→", Cmd = cmd, Id = id });
         }
 
         var tcs = new TaskCompletionSource<JsonObject>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -206,7 +210,7 @@ public sealed class PipeClient : IPipeClient
                     {
                         // Push event from DLL
                         Activity?.Invoke(new PipeLogEntry {
-                            Time = NowStr(), Dir = "⚡",
+                            Time = NowStr(), Lane = _laneTag, Dir = "⚡",
                             Cmd = obj["event"]?.GetValue<string>() ?? "event" });
                         EventReceived?.Invoke(obj);
                     }
@@ -230,7 +234,7 @@ public sealed class PipeClient : IPipeClient
                                     detail = ok ? $"{ms} ms" : $"err {ms} ms";
                                 }
                                 Activity.Invoke(new PipeLogEntry {
-                                    Time = NowStr(), Dir = "←", Cmd = cmd, Id = id, Detail = detail });
+                                    Time = NowStr(), Lane = _laneTag, Dir = "←", Cmd = cmd, Id = id, Detail = detail });
                             }
                             obj["_t_read_ms"]  = readSw.ElapsedMilliseconds;
                             obj["_t_rxlog_ms"] = rxLogSw.ElapsedMilliseconds;

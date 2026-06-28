@@ -226,3 +226,167 @@ target those, and Phase 1 should only be revisited with overlapped I/O.
 Unrelated to the deadlock; UI-only. `IPipeClient.Activity` event → `PointerPanelViewModel`
 newest-first ring buffer (cap **200**, Pause/Clear), coalesced one `Dispatcher.UIThread.Post`
 per burst. Ironically it was the tool that made the deadlock obvious (the missing `←` reply).
+
+> Note: §8.3 originally said "Phase 1 should only be revisited with overlapped I/O." That is
+> superseded by **§9** — the sister repo `discrete` shows a **two-connection** design that gets
+> the lane benefit **without** overlapped I/O, by giving each connection its own handle.
+
+-----
+
+## 9. Phase 1 REDO — discrete-style two-connection lane split (Path A)
+
+> **STATUS: IMPLEMENTED on branch `feat/multipipe-lane-split` (build ~1845); builds + unit
+> tests + AOT clean + launches, but NOT YET in-game verified.** Do not merge until the §9.6
+> checklist passes in a real game. Decisions taken (per "use your defaults"): `maxInstances=3`;
+> value-scan sessions dropped only when the **last** connection disconnects; the monitor trips
+> the **global** `Tot` cancel for **any** broken in-flight connection (the DLL is lane-agnostic
+> — a fast light command finishes before the 200 ms peek catches it, so in practice only a bulk
+> scan is ever caught; the UI router reconnects **both** lanes on either drop so the cancel flag
+> is reset cleanly); Pipe Activity entries are **lane-tagged** (I/B). See §9.8 for what landed.
+
+Modeled on the sister repo **`D:\Github\discrete`**, which runs this in production. It supersedes
+the reverted single-handle worker-pool.
+
+### 9.1 Core idea
+
+The UI opens **TWO** named-pipe client connections to the same server name; the DLL accepts
+multiple instances and serves **each connection on its own thread with its own handle**:
+
+- **Interactive lane** — light, fast, read-only browse commands (Live Walker, properties,
+  teleport, godmode/movement, pagination over cached sessions).
+- **Bulk lane** — heavy, long-running commands (snapshot, value/group scan, find_*,
+  search_*, list_*, invoke).
+
+Each connection stays **serial** within itself (read → dispatch → write on one thread, one
+handle). The two connections run **independently** on two handles/threads.
+
+**Why this avoids the reverted deadlock (§8.1):** the deadlock was a worker thread doing
+`WriteFile` while the read thread was parked in `ReadFile` on the **same** synchronous handle.
+Here, each handle is touched by exactly **one** thread doing read→write sequentially — there is
+never a second thread writing the same handle. So **synchronous I/O is fine; no overlapped/
+`FILE_FLAG_OVERLAPPED` rewrite is needed.** (discrete also uses overlapped I/O, but only because
+its CE-Lua bridge opens *additional* bursty pipe clients; our CE uses the Mimic mailbox, not the
+pipe, so two UI connections is all we need.)
+
+**Why it's concurrency-safe:** the interactive lane only reads write-once GObjects globals +
+Ubel's mutex-guarded caches + global (mutex-guarded) value-scan sessions — it **never** builds
+the Aura `s_classContainerCache` / `s_classRefCache` (those live only in scan engines, all on
+the bulk lane). The bulk lane runs scans **one at a time** (serial within its connection). So
+two cache-builders never run concurrently — the same safety boundary §4 established, now with
+NO deadlock. (discrete confirms: handlers are "read-mostly; concurrent invocation worst-case is
+a duplicate cache fill, not corruption.")
+
+### 9.2 Reference (discrete — proven template)
+
+- Server: `dll/src/shared/PipeServer.cpp` — `kMaxPipeInstances = 4`, accept-then-detach a
+  thread per client, each with its own handle (`FILE_FLAG_OVERLAPPED` there; we keep sync).
+- Client: `ui/UnityDumpUI.Core/Services/BackendAdapter.cs` — two `PipeClient`s (`_pipe`
+  interactive + `_bulk`), `BulkCommands` set + `PipeFor(cmd)` routing, `ConnectAsync` opens both.
+- Per-connection cache guards: `dll/src/shared/ExportAPI.cpp` (mutex-guarded `s_cache`).
+
+### 9.3 DLL changes (`Fern`)
+
+1. **maxInstances**: `CreateNamedPipeW(..., /*maxInstances=*/3, ...)` (2 UI lanes + 1 reconnect
+   transient). Keep `PIPE_TYPE_BYTE | PIPE_WAIT`, **no** `FILE_FLAG_OVERLAPPED`.
+2. **Thread-per-connection accept loop**: `AcceptLoop` currently creates one instance, calls
+   `HandleClient` **inline**, then loops. Change to: create an instance → `ConnectNamedPipe` →
+   **spawn a thread** running `HandleClient(conn)` → loop immediately to create the next
+   instance. Track the spawned threads for join on `Stop()`.
+3. **Per-connection state** (replaces the single `m_pipe` / `m_writeMutex` /
+   `m_commandInFlight` / `m_inflightPipe`): introduce a `Connection` struct holding `HANDLE
+   pipe`, its **own** `std::mutex writeMutex`, `std::atomic<bool> inFlight`, and
+   `std::atomic<bool> inFlightHeavy`. Keep a registry `std::vector<std::shared_ptr<Connection>>`
+   under `m_connMutex` (for teardown + the monitor). `WriteLine` takes the connection's own
+   `writeMutex` (writes to different handles need no shared lock).
+4. **Watch events → owning connection** (the only `PushEvent` path, Fern.cpp:4515): tag each
+   `WatchEntry` with its originating `Connection*`. The watch thread writes the event to **that**
+   connection (via its `writeMutex`), not a global `m_pipe`. When a connection disconnects, stop
+   **only its** watches (key `m_watches` per connection, or filter by owner).
+5. **MonitorLoop → per-connection**: iterate the registry; for any connection whose `inFlight`
+   handle is broken, trip cancellation. **Cancellation caveat:** `Tot` is global and only the
+   bulk lane runs cancellable scans, so trip `Tot::RequestPerCommand()` **only when the broken
+   connection had `inFlightHeavy`** — otherwise an interactive-lane disconnect would wrongly
+   abort a running bulk scan. (Longer term: per-connection cancel tokens.)
+6. **Session cleanup**: `Radar::SessionManager/GroupSessionManager::DropAll()` currently runs on
+   the single client's disconnect. Change to drop **only when the last connection disconnects**
+   (registry empty) — sessions are bulk-lane-only and the UI is single-instance, so both lanes
+   drop together on close. (Per-owner drop is a future refinement if needed.)
+7. **`Stop()`**: signal stop, close all registry handles, join all connection threads (plus the
+   existing accept/monitor/scan threads), then `DropAll`.
+
+### 9.4 UI changes (`PipeClient` / `DumpService`)
+
+1. Keep `PipeClient` as-is (one connection, id-mux, `_writeLock` around the byte-write). It's
+   already correct for a single serial lane.
+2. Add a second `PipeClient` and a thin router (mirror discrete's `BackendAdapter`): a
+   `BulkCommands` set + `SendAsync` picks the bulk client for those, the interactive client for
+   the rest. `ConnectAsync`/`DisconnectAsync` manage both. The **command lane table is §6** (the
+   light allowlist → interactive; everything else → bulk).
+3. `Pipe Activity` log: tag each entry with its lane (interactive/bulk) so the System-tab tail
+   shows the split visibly (one extra column). The `Activity` event already exists per client.
+4. AOT: no reflection added — a second `PipeClient` instance + a `HashSet<string>` route are
+   trim-safe.
+
+### 9.5 NOT in scope (separate follow-ups)
+
+The §8.3 snapshot bottlenecks are **orthogonal** to the lane split and remain after it:
+(a) the bulk-lane multi-MB chunk write still ties up the bulk handle (fine — it's the bulk
+lane's job), and (b) the **UI-side single-threaded multi-MB chunk parse (~2.4 s/chunk)**. The
+lane split fixes "interactive stays responsive during a scan"; it does **not** speed up the
+snapshot itself. If snapshot speed matters, separately switch `SnapshotChunkAsync` to a
+streaming `Utf8JsonReader` and/or smaller chunks (already noted in todo).
+
+### 9.6 In-game verification checklist (MANDATORY — Fern has no unit tests)
+
+1. Connect handshake completes with no hang (the §8.1 failure), incl. a fresh `trigger_scan`.
+2. Live Walker drill + teleport + godmode stay responsive **while a Snapshot / Value Search
+   streams on the bulk lane**.
+3. Start a Value Search **mid-Snapshot** — both complete; bulk lane serializes them, interactive
+   stays live.
+4. Close the UI mid-scan — both connections free cleanly, sessions/watches dropped, game exits.
+5. Disconnect only one lane (edge) — the other keeps working; a bulk scan isn't wrongly cancelled
+   by an interactive disconnect (the §9.3.5 caveat).
+6. CE `.CT` mailbox invoke still works under heavy UI load (it's off-pipe; should be unaffected).
+7. Watches (System-tab / address watch) still deliver events to the right (interactive) lane.
+
+### 9.8 What landed on `feat/multipipe-lane-split` (build ~1845)
+
+**DLL (`Fern.cpp`/`.h`):**
+- `kMaxPipeInstances = 3`; `AcceptLoop` creates instances and **spawns a detached
+  `HandleConnection` thread per accepted connection** (own handle), looping immediately for the
+  next instance. A `std::vector<shared_ptr<Connection>>` registry (`m_connMutex` + `m_connCv`)
+  tracks live connections; `m_listenPipe` is the parked accept instance.
+- `Connection { HANDLE pipe; std::mutex writeMutex; atomic<bool> inFlight; atomic<bool> closed; }`.
+  `WriteLine(Connection&, line)` takes the connection's **own** `writeMutex` and no-ops if closed;
+  `CloseConnOnce` (owning thread only) closes once under that mutex. `inFlight` is set only around
+  `DispatchCommand` so the monitor's peek never races the connection's I/O or close.
+- `MonitorLoop` iterates the registry, peeks each in-flight connection, trips `Tot::RequestPerCommand`
+  on a broken pipe. `AcceptLoop` resets `Tot::ResetPerCommand` only on the **first** connection of a
+  session (registry empty→1) — never per-command — so a light command on one lane can't clear a
+  running scan's cancel on the other.
+- Watches are **per-connection**: `WatchEntry.owner` points at the registering `Connection`; the
+  watch thread writes its event to that connection via `WriteLine` (old global `PushEvent` removed).
+  `StopWatchesForConnection(owner)` stops+joins a connection's watches in its cleanup before the
+  `Connection` is freed. Sessions (`Radar::*::DropAll`) dropped only on the last disconnect.
+- `Stop()` closes `m_listenPipe` (unblock `ConnectNamedPipe`) and `CancelIoEx`'s each connection
+  (unblock `ReadFile`/`WriteFile`; each thread then closes its **own** handle), stops watches, waits
+  (bounded 5 s) for the registry to drain, then joins accept/monitor.
+- `DispatchCommand` gained a `Connection` arg (used only by the `watch` handler).
+
+**UI:**
+- `LaneRoutingPipeClient : IPipeClient` wraps two `PipeClient`s (`"I"` interactive + `"B"` bulk),
+  routes `SendAsync` by a `BulkCommands` set (mirrors discrete's `BackendAdapter`), forwards
+  events + activity, and on either lane dropping unexpectedly tears down **both** for a clean
+  reconnect. `App.axaml.cs` builds it as the single `IPipeClient`; everything downstream is
+  unchanged. `PipeClient` gained a `laneTag` ctor arg; `PipeLogEntry` gained a `Lane` column.
+
+### 9.7 Effort / risk / open decisions
+
+- **Effort:** M–L (DLL per-connection refactor is the bulk; UI router is small). **Risk:** med
+  — live threading, no Fern unit tests → §9.6 in-game pass is the gate.
+- **Open decisions to confirm before building:**
+  - maxInstances = 3 vs 2 vs 4 (reconnect transients / future bridge).
+  - Session cleanup: "drop on last disconnect" (simple, proposed) vs per-owner tagging.
+  - Cancellation: "trip global Tot only for heavy-in-flight connection" (proposed) vs full
+    per-connection cancel tokens (cleaner, more work).
+  - Whether to also tag Pipe Activity entries by lane now (small, recommended).

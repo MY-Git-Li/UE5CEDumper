@@ -3,6 +3,15 @@
 // ============================================================
 // Fern — 費倫 (芙莉蓮的弟子 — Frieren's Apprentice)
 // PipeServer: Named Pipe JSON IPC server (~30 commands)
+//
+// Multi-connection model (Path A — docs/multipipe-eval.md §9): the server
+// accepts up to kMaxPipeInstances clients and serves EACH on its own thread
+// with its own handle, fully serial within itself (read→dispatch→write). Two
+// threads therefore never touch the same handle, so the synchronous pipe never
+// hits the WriteFile-while-ReadFile-parked deadlock that sank the single-handle
+// worker-pool attempt. The UI opens TWO connections (interactive + bulk lanes)
+// and routes commands; the DLL itself is lane-agnostic — it only supports
+// concurrent connections. CE Lua stays on the Mimic mailbox (off-pipe).
 // ============================================================
 
 #include <Windows.h>
@@ -11,6 +20,9 @@
 #include <atomic>
 #include <unordered_map>
 #include <mutex>
+#include <condition_variable>
+#include <memory>
+#include <vector>
 
 class Fern {
 public:
@@ -19,35 +31,52 @@ public:
     void Stop();
     bool IsClientConnected() const { return m_clientConnected.load(); }
 
-    // Push an event to the connected client
-    void PushEvent(const std::string& jsonLine);
-
 private:
+    // Max concurrent client connections. 2 UI lanes (interactive + bulk) + 1
+    // slack for reconnect transients. CE uses the Mimic mailbox, not the pipe.
+    static constexpr DWORD kMaxPipeInstances = 3;
+
+    // Per-connection state. Each accepted client gets one of these, served by
+    // its own HandleConnection thread on its own handle. writeMutex serializes
+    // the (single) thread's response writes against this connection's own watch
+    // event writes — writes to DIFFERENT connections need no shared lock.
+    struct Connection {
+        HANDLE             pipe{INVALID_HANDLE_VALUE};
+        std::mutex         writeMutex;
+        std::atomic<bool>  inFlight{false};   // true only while inside DispatchCommand
+        std::atomic<bool>  closed{false};     // CloseHandle done exactly once
+    };
+
     std::thread        m_acceptThread;
     std::atomic<bool>  m_running{false};
-    std::atomic<bool>  m_clientConnected{false};
-    HANDLE             m_pipe{INVALID_HANDLE_VALUE};
-    std::mutex         m_pipeMutex;     // Protects m_pipe access across threads
-    std::mutex         m_writeMutex;
+    std::atomic<bool>  m_clientConnected{false};   // mirror of (!m_conns.empty())
 
-    // Disconnect monitor (cooperative cancellation, build 936). While a
-    // command is in-flight the handler blocks the pipe thread, so it can't
-    // notice the client vanishing. The monitor thread peeks the in-flight
-    // pipe every ~200ms and requests per-command cancellation on a broken
-    // pipe, so an orphaned scan bails and the pipe frees for a reconnect.
-    // It only peeks WHILE m_commandInFlight (the handler is then CPU-bound
-    // in DispatchCommand, not in ReadFile/WriteFile), so there is no
-    // concurrent read/write on the handle.
+    // Registry of live connections + the instance currently parked in
+    // ConnectNamedPipe (so Stop() can close it to unblock the accept).
+    std::vector<std::shared_ptr<Connection>> m_conns;
+    HANDLE                  m_listenPipe{INVALID_HANDLE_VALUE};
+    std::mutex              m_connMutex;     // guards m_conns + m_listenPipe + m_clientConnected
+    std::condition_variable m_connCv;        // notified when a connection thread exits
+
+    // Disconnect monitor (cooperative cancellation). A bulk-lane scan blocks its
+    // connection thread inside DispatchCommand, so that thread can't notice the
+    // client vanishing. The monitor peeks each in-flight connection every ~200ms
+    // and trips per-command cancellation on a broken pipe so the orphaned scan
+    // bails. It peeks ONLY while a connection's inFlight flag is set (the thread
+    // is then CPU-bound in DispatchCommand, not in ReadFile/WriteFile), so there
+    // is no concurrent read/write on the handle.
     std::thread          m_monitorThread;
-    std::atomic<bool>    m_commandInFlight{false};
-    std::atomic<HANDLE>  m_inflightPipe{INVALID_HANDLE_VALUE};
     void MonitorLoop();
 
-    // Watch entries
+    // Watch entries — per-connection. A watch's event is written to the
+    // connection that registered it (owner); on that connection's disconnect,
+    // only its watches are stopped (and joined before the Connection is freed,
+    // so `owner` stays valid for the watch thread's lifetime).
     struct WatchEntry {
         uintptr_t           addr;
         uint32_t            size;
         uint32_t            interval_ms;
+        Connection*         owner{nullptr};
         std::thread         watchThread;
         std::atomic<bool>   active{true};
     };
@@ -82,11 +111,13 @@ private:
     void RunRescan(bool scanGObjects, bool scanGWorld);
 
     void AcceptLoop();
-    void HandleClient(HANDLE pipe);
-    std::string DispatchCommand(const std::string& jsonLine);
-    void StartWatch(uintptr_t addr, uint32_t size, uint32_t interval_ms);
+    void HandleConnection(std::shared_ptr<Connection> conn);
+    std::string DispatchCommand(const std::shared_ptr<Connection>& conn, const std::string& jsonLine);
+    void StartWatch(const std::shared_ptr<Connection>& conn, uintptr_t addr, uint32_t size, uint32_t interval_ms);
     void StopWatch(uintptr_t addr);
+    void StopWatchesForConnection(Connection* owner);
     void StopAllWatches();
-    bool WriteLine(HANDLE pipe, const std::string& line);
+    void CloseConnOnce(Connection& conn);
+    bool WriteLine(Connection& conn, const std::string& line);
     std::string ReadLine(HANDLE pipe);
 };

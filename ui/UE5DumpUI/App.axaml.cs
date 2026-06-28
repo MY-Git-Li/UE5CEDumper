@@ -13,7 +13,7 @@ public class App : Application
     // Service instances (simple composition root — no DI container for AOT compatibility)
     private WindowsPlatformService? _platform;
     private LoggingService? _logging;
-    private PipeClient? _pipeClient;
+    private IPipeClient? _pipeClient;
     private DumpService? _dumpService;
     private AobUsageService? _aobUsage;
     private AobMakerBridgeService? _aobMakerBridge;
@@ -50,7 +50,9 @@ public class App : Application
             // Initialize services
             var logDir = _platform.GetLogDirectoryPath();
             _logging = new LoggingService(logDir);
-            _pipeClient = new PipeClient(_logging);
+            // Two-connection lane router (interactive + bulk) — see
+            // LaneRoutingPipeClient / docs/multipipe-eval.md §9.
+            _pipeClient = new LaneRoutingPipeClient(_logging);
             _dumpService = new DumpService(_pipeClient, _logging);
             _aobUsage = new AobUsageService(_platform, _logging);
             _aobMakerBridge = new AobMakerBridgeService(_logging);

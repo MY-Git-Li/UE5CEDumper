@@ -402,11 +402,18 @@ bool Fern::Start() {
     Tot::ResetShutdown();
     Tot::ResetPerCommand();
 
+    {
+        std::lock_guard<std::mutex> lock(m_connMutex);
+        m_conns.clear();
+        m_listenPipe = INVALID_HANDLE_VALUE;
+        m_clientConnected = false;
+    }
+
     m_running = true;
     m_acceptThread = std::thread(&Fern::AcceptLoop, this);
     m_monitorThread = std::thread(&Fern::MonitorLoop, this);
 
-    LOG_INFO("PipeServer: Started on %ls", Grimoire::PIPE_NAME);
+    LOG_INFO("PipeServer: Started on %ls (maxInstances=%lu)", Grimoire::PIPE_NAME, kMaxPipeInstances);
     return true;
 }
 
@@ -419,36 +426,51 @@ void Fern::Stop() {
     Tot::RequestShutdown();
     StopAllWatches();
 
-    // Join background rescan thread if running
+    // Unblock everyone (Path A multi-connection teardown). Close the parked
+    // listen instance to break AcceptLoop's ConnectNamedPipe (proven unblock),
+    // and CancelIoEx every live connection so a thread blocked in ReadFile/
+    // WriteFile returns ERROR_OPERATION_ABORTED and runs its OWN cleanup (each
+    // connection handle is closed by its owning thread — no cross-thread close
+    // race). A thread inside DispatchCommand exits via the m_running loop check
+    // after it returns; Tot::RequestShutdown above makes a long scan bail first.
+    {
+        std::lock_guard<std::mutex> lock(m_connMutex);
+        if (m_listenPipe != INVALID_HANDLE_VALUE) {
+            CloseHandle(m_listenPipe);
+            m_listenPipe = INVALID_HANDLE_VALUE;
+        }
+        for (auto& c : m_conns) {
+            if (c->pipe != INVALID_HANDLE_VALUE && !c->closed.load(std::memory_order_relaxed))
+                CancelIoEx(c->pipe, nullptr);
+        }
+    }
+
+    // Stop watches AFTER cancelling connection I/O so a watch-thread WriteFile
+    // can't deadlock its own join on a stuck pipe.
+    StopAllWatches();
+
+    // Join background scan threads (they exit naturally; RunScan/RunRescan are
+    // bounded AOB scans).
     m_rescan.running.store(false);
     if (m_rescan.scanThread.joinable()) {
         m_rescan.scanThread.join();
     }
-
-    // Audit fix #3: join the initial-scan thread too. Previously this was
-    // missed, so destructing the static s_pipeServer with a still-joinable
-    // m_scan.scanThread would call ~thread → std::terminate. RunScan() runs
-    // UE5_Init (a bounded AOB scan, typically 2-8s) and exits naturally;
-    // we have no signal to abort it mid-flight, so just wait for it.
     m_scan.running.store(false);
     if (m_scan.scanThread.joinable()) {
         m_scan.scanThread.join();
     }
 
-    // Close the pipe to unblock ConnectNamedPipe / ReadFile
+    // Wait for every connection thread to self-unregister (they are detached;
+    // they erase themselves from m_conns + notify on exit). Bounded so a wedged
+    // handler can't hang shutdown forever.
     {
-        std::lock_guard<std::mutex> lock(m_pipeMutex);
-        if (m_pipe != INVALID_HANDLE_VALUE) {
-            DisconnectNamedPipe(m_pipe);
-            CloseHandle(m_pipe);
-            m_pipe = INVALID_HANDLE_VALUE;
-        }
+        std::unique_lock<std::mutex> lock(m_connMutex);
+        m_connCv.wait_for(lock, std::chrono::seconds(5), [this] { return m_conns.empty(); });
     }
 
     if (m_acceptThread.joinable()) {
         m_acceptThread.join();
     }
-
     if (m_monitorThread.joinable()) {
         m_monitorThread.join();
     }
@@ -469,21 +491,44 @@ void Fern::MonitorLoop() {
     while (m_running.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         if (!m_running.load()) break;
-        if (!m_commandInFlight.load(std::memory_order_relaxed)) continue;
 
-        HANDLE p = m_inflightPipe.load(std::memory_order_relaxed);
-        if (p == INVALID_HANDLE_VALUE) continue;
+        // Snapshot the in-flight connections (keep them alive via shared_ptr for
+        // the peek). Only peek while inFlight — the thread is then CPU-bound in
+        // DispatchCommand, NOT in ReadFile/WriteFile and NOT closing its handle,
+        // so the peek can't race the connection's own I/O or close.
+        std::vector<std::shared_ptr<Connection>> inflight;
+        {
+            std::lock_guard<std::mutex> lock(m_connMutex);
+            for (auto& c : m_conns) {
+                if (c->inFlight.load(std::memory_order_relaxed)
+                    && !c->closed.load(std::memory_order_relaxed)
+                    && c->pipe != INVALID_HANDLE_VALUE)
+                    inflight.push_back(c);
+            }
+        }
 
-        // Non-destructive: PeekNamedPipe reads only buffer state. A closed
-        // client end surfaces as FALSE + ERROR_BROKEN_PIPE.
-        DWORD avail = 0;
-        if (!PeekNamedPipe(p, nullptr, 0, nullptr, &avail, nullptr)) {
-            DWORD e = GetLastError();
-            if (e == ERROR_BROKEN_PIPE || e == ERROR_PIPE_NOT_CONNECTED
-                || e == ERROR_INVALID_HANDLE) {
-                if (!Tot::g_perCommand.load(std::memory_order_relaxed)) {
-                    LOG_WARN("PipeServer: client gone mid-command (err=%lu) — aborting in-flight op", e);
-                    Tot::RequestPerCommand();
+        for (auto& c : inflight) {
+            if (c->closed.load(std::memory_order_relaxed)) continue;
+            HANDLE p = c->pipe;
+            if (p == INVALID_HANDLE_VALUE) continue;
+
+            // Non-destructive: PeekNamedPipe reads only buffer state. A closed
+            // client end surfaces as FALSE + ERROR_BROKEN_PIPE.
+            DWORD avail = 0;
+            if (!PeekNamedPipe(p, nullptr, 0, nullptr, &avail, nullptr)) {
+                DWORD e = GetLastError();
+                if (e == ERROR_BROKEN_PIPE || e == ERROR_PIPE_NOT_CONNECTED
+                    || e == ERROR_INVALID_HANDLE) {
+                    // Global per-command cancel: only the bulk lane runs
+                    // cancellable scans, and a fast light command finishes before
+                    // a 200ms peek catches it in-flight, so in practice this only
+                    // ever fires for a broken bulk scan. The UI must reconnect
+                    // BOTH lanes together so g_perCommand is reset (AcceptLoop
+                    // firstConn) before the next session's scans.
+                    if (!Tot::g_perCommand.load(std::memory_order_relaxed)) {
+                        LOG_WARN("PipeServer: client gone mid-command (err=%lu) — aborting in-flight op", e);
+                        Tot::RequestPerCommand();
+                    }
                 }
             }
         }
@@ -492,12 +537,16 @@ void Fern::MonitorLoop() {
 
 void Fern::AcceptLoop() {
     while (m_running.load()) {
-        // Create a new pipe instance
+        // Create a new pipe instance (multi-instance: up to kMaxPipeInstances
+        // concurrent clients, so the UI's interactive + bulk lanes can connect
+        // at once). Synchronous handle (no FILE_FLAG_OVERLAPPED) — safe here
+        // because each connection is served by exactly ONE thread doing serial
+        // read→dispatch→write on its own handle (no same-handle deadlock).
         HANDLE pipe = CreateNamedPipeW(
             Grimoire::PIPE_NAME,
             PIPE_ACCESS_DUPLEX,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-            1,                          // Max instances
+            kMaxPipeInstances,
             Grimoire::PIPE_BUF_SIZE,
             Grimoire::PIPE_BUF_SIZE,
             0,                          // Default timeout
@@ -511,53 +560,50 @@ void Fern::AcceptLoop() {
         }
 
         {
-            std::lock_guard<std::mutex> lock(m_pipeMutex);
-            m_pipe = pipe;
+            std::lock_guard<std::mutex> lock(m_connMutex);
+            m_listenPipe = pipe;
         }
         LOG_INFO("PipeServer: Waiting for client connection...");
 
-        // Wait for a client to connect
+        // Wait for a client to connect on this instance.
         BOOL connected = ConnectNamedPipe(pipe, nullptr);
         if (!connected && GetLastError() != ERROR_PIPE_CONNECTED) {
-            if (!m_running.load()) break; // Normal shutdown
+            // Stop() closed m_listenPipe to unblock us, or a real error.
+            std::lock_guard<std::mutex> lock(m_connMutex);
+            if (m_listenPipe == pipe) { CloseHandle(pipe); m_listenPipe = INVALID_HANDLE_VALUE; }
+            if (!m_running.load()) break;
             LOG_ERROR("PipeServer: ConnectNamedPipe failed (err=%lu)", GetLastError());
-            std::lock_guard<std::mutex> lock(m_pipeMutex);
-            if (m_pipe == pipe) { CloseHandle(pipe); m_pipe = INVALID_HANDLE_VALUE; }
             continue;
         }
 
         if (!m_running.load()) {
-            std::lock_guard<std::mutex> lock(m_pipeMutex);
-            if (m_pipe == pipe) { CloseHandle(pipe); m_pipe = INVALID_HANDLE_VALUE; }
+            std::lock_guard<std::mutex> lock(m_connMutex);
+            if (m_listenPipe == pipe) { CloseHandle(pipe); m_listenPipe = INVALID_HANDLE_VALUE; }
             break;
         }
 
-        LOG_INFO("PipeServer: Client connected");
-        m_clientConnected = true;
-
-        HandleClient(pipe);
-
-        // Client disconnected
-        m_clientConnected = false;
-        StopAllWatches();
-        // Drop any value-scan sessions owned by the departed client. Otherwise a
-        // First Scan's candidate set (up to 1M candidates + descriptor/instance
-        // pools) lingers in the game process until the next begin_value_scan
-        // triggers lazy idle-expiry — exactly the "UI closed mid-scan" leak.
-        Radar::SessionManager::Instance().DropAll();
-        Radar::GroupSessionManager::Instance().DropAll();
+        // Hand this connected instance to a Connection served on its own thread.
+        auto conn = std::make_shared<Connection>();
+        conn->pipe = pipe;
+        bool firstConn;
+        size_t connCount;
         {
-            std::lock_guard<std::mutex> lock(m_pipeMutex);
-            // Only close if Stop() hasn't already closed it
-            if (m_pipe == pipe) {
-                DisconnectNamedPipe(pipe);
-                CloseHandle(pipe);
-                m_pipe = INVALID_HANDLE_VALUE;
-            }
+            std::lock_guard<std::mutex> lock(m_connMutex);
+            m_listenPipe = INVALID_HANDLE_VALUE;   // consumed by this connection
+            firstConn = m_conns.empty();
+            m_conns.push_back(conn);
+            connCount = m_conns.size();
+            m_clientConnected = true;
         }
+        // New session (registry was empty): clear any per-command cancel left by
+        // the prior fully-disconnected session. NOT done per-command, so a light
+        // command on one lane can't clear a running scan's cancel on the other.
+        if (firstConn) Tot::ResetPerCommand();
 
-        LOG_INFO("PipeServer: Client disconnected");
+        LOG_INFO("PipeServer: Client connected (conns=%zu)", connCount);
+        std::thread([this, conn]() { HandleConnection(conn); }).detach();
     }
+    LOG_INFO("PipeServer: AcceptLoop exiting");
 }
 
 std::string Fern::ReadLine(HANDLE pipe) {
@@ -587,14 +633,37 @@ std::string Fern::ReadLine(HANDLE pipe) {
     return "";
 }
 
-bool Fern::WriteLine(HANDLE pipe, const std::string& line) {
-    std::lock_guard<std::mutex> lock(m_writeMutex);
+bool Fern::WriteLine(Connection& conn, const std::string& line) {
+    // Per-connection write mutex: serializes this connection's response write
+    // against its own watch-event writes. Writes to OTHER connections use their
+    // own mutex, so the two UI lanes never contend. CloseConnOnce takes the same
+    // mutex, so a write can never run on a just-closed handle.
+    std::lock_guard<std::mutex> lock(conn.writeMutex);
+    if (conn.closed.load(std::memory_order_relaxed) || conn.pipe == INVALID_HANDLE_VALUE)
+        return false;
     std::string data = line + "\n";
     DWORD written;
-    return WriteFile(pipe, data.c_str(), static_cast<DWORD>(data.size()), &written, nullptr) != 0;
+    return WriteFile(conn.pipe, data.c_str(), static_cast<DWORD>(data.size()), &written, nullptr) != 0;
 }
 
-void Fern::HandleClient(HANDLE pipe) {
+// Close a connection's handle exactly once. Called by the connection's OWN
+// thread in HandleConnection cleanup (after its watches are stopped), so the
+// writeMutex here is uncontended; it still guards against a stray in-flight
+// write. Stop() never closes connection handles — it CancelIoEx's them and lets
+// each owning thread close its own.
+void Fern::CloseConnOnce(Connection& conn) {
+    if (conn.closed.exchange(true)) return;
+    std::lock_guard<std::mutex> lock(conn.writeMutex);
+    if (conn.pipe != INVALID_HANDLE_VALUE) {
+        DisconnectNamedPipe(conn.pipe);
+        CloseHandle(conn.pipe);
+        conn.pipe = INVALID_HANDLE_VALUE;
+    }
+}
+
+void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
+    HANDLE pipe = conn->pipe;
+
     // Batch-suppress repetitive command logging (e.g. 244 x get_object_list)
     std::string lastCmd;
     int repeatCount = 0;
@@ -609,11 +678,7 @@ void Fern::HandleClient(HANDLE pipe) {
 
     while (m_running.load()) {
         std::string line = ReadLine(pipe);
-        if (line.empty()) { flushRepeat(); break; } // Disconnected
-
-        // Fresh command: clear any per-command cancel left from a prior
-        // (disconnected) client. Shutdown cancellation stays sticky.
-        Tot::ResetPerCommand();
+        if (line.empty()) { flushRepeat(); break; } // Disconnected / I/O cancelled
 
         // Extract command name for dedup (fast: find "cmd":" in JSON)
         std::string cmd;
@@ -633,35 +698,53 @@ void Fern::HandleClient(HANDLE pipe) {
             repeatCount = 1;
         }
 
-        // Publish the in-flight pipe so the monitor thread can detect a
-        // mid-command disconnect (the handler below blocks this thread).
-        m_inflightPipe.store(pipe, std::memory_order_relaxed);
-        m_commandInFlight.store(true, std::memory_order_relaxed);
-        std::string response = DispatchCommand(line);
-        m_commandInFlight.store(false, std::memory_order_relaxed);
+        // Mark in-flight so the monitor can peek THIS connection for a
+        // mid-command disconnect (a long bulk scan blocks this thread). inFlight
+        // is set only around DispatchCommand (CPU-bound; not touching the pipe),
+        // never around ReadLine/WriteLine, so the monitor's peek never races I/O.
+        conn->inFlight.store(true, std::memory_order_relaxed);
+        std::string response = DispatchCommand(conn, line);
+        conn->inFlight.store(false, std::memory_order_relaxed);
 
         if (!response.empty()) {
-            if (!WriteLine(pipe, response)) {
+            if (!WriteLine(*conn, response)) {
                 flushRepeat();
                 Sein::Error("PIPE:cmd", "PipeServer: Failed to write response");
                 break;
             }
         }
     }
-    m_commandInFlight.store(false, std::memory_order_relaxed);
-    m_inflightPipe.store(INVALID_HANDLE_VALUE, std::memory_order_relaxed);
+    conn->inFlight.store(false, std::memory_order_relaxed);
+
+    // Connection cleanup. Stop THIS connection's watches first (joins their
+    // threads while the handle is still valid + owner pointer alive), then
+    // unregister and close our own handle. Drop value-scan sessions only when
+    // this was the LAST connection (sessions are bulk-lane-only; the UI's two
+    // lanes disconnect together on close).
+    StopWatchesForConnection(conn.get());
+
+    bool last;
+    {
+        std::lock_guard<std::mutex> lock(m_connMutex);
+        auto it = std::find(m_conns.begin(), m_conns.end(), conn);
+        if (it != m_conns.end()) m_conns.erase(it);
+        last = m_conns.empty();
+        m_clientConnected = !m_conns.empty();
+    }
+
+    CloseConnOnce(*conn);
+
+    if (last) {
+        Radar::SessionManager::Instance().DropAll();
+        Radar::GroupSessionManager::Instance().DropAll();
+    }
+
+    m_connCv.notify_all();
+    LOG_INFO("PipeServer: Client disconnected");
 }
 
-void Fern::PushEvent(const std::string& jsonLine) {
-    if (!m_clientConnected.load()) return;
-    HANDLE pipe;
-    {
-        std::lock_guard<std::mutex> lock(m_pipeMutex);
-        pipe = m_pipe;
-    }
-    if (pipe == INVALID_HANDLE_VALUE) return;
-    WriteLine(pipe, jsonLine);
-}
+// (PushEvent removed in the Path A multi-connection refactor — watch events now
+// write directly to their owning connection's handle; see StartWatch below.)
 
 // ============================================================
 // FillPointerSnapshot — Populate a JSON object with the engine pointer state
@@ -989,7 +1072,7 @@ static json SerializeField(const Ubel::LiveFieldValue& fv) {
     return fj;
 }
 
-std::string Fern::DispatchCommand(const std::string& jsonLine) {
+std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const std::string& jsonLine) {
     json request;
     try {
         request = json::parse(jsonLine);
@@ -3637,7 +3720,7 @@ std::string Fern::DispatchCommand(const std::string& jsonLine) {
             if (interval < 50) interval = 50; // Minimum 50ms to prevent CPU spin
 
             uintptr_t addr = Renge::StrToAddr(addrStr);
-            StartWatch(addr, size, interval);
+            StartWatch(conn, addr, size, interval);
             return Renge::MakeResponse(id).dump();
         }
 
@@ -4490,7 +4573,7 @@ void Fern::RunRescan(bool scanGObjects, bool scanGWorld) {
                  static_cast<unsigned long long>(m_rescan.foundGWorld));
 }
 
-void Fern::StartWatch(uintptr_t addr, uint32_t size, uint32_t interval_ms) {
+void Fern::StartWatch(const std::shared_ptr<Connection>& conn, uintptr_t addr, uint32_t size, uint32_t interval_ms) {
     StopWatch(addr); // Stop existing watch on same address
 
     std::lock_guard<std::mutex> lock(m_watchMutex);
@@ -4499,6 +4582,8 @@ void Fern::StartWatch(uintptr_t addr, uint32_t size, uint32_t interval_ms) {
     entry->addr = addr;
     entry->size = size;
     entry->interval_ms = interval_ms;
+    entry->owner = conn.get();   // event target; valid until this conn's watches
+                                 // are stopped+joined in HandleConnection cleanup
     entry->active = true;
 
     WatchEntry* ptr = entry.get();
@@ -4512,7 +4597,11 @@ void Fern::StartWatch(uintptr_t addr, uint32_t size, uint32_t interval_ms) {
                 data["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::system_clock::now().time_since_epoch()).count();
 
-                PushEvent(Renge::MakeEvent(Renge::EVT_WATCH, data).dump());
+                // Write the event to the connection that registered this watch
+                // (the interactive lane). WriteLine no-ops if that connection
+                // closed; the watch is stopped on its connection's disconnect.
+                if (ptr->owner)
+                    WriteLine(*ptr->owner, Renge::MakeEvent(Renge::EVT_WATCH, data).dump());
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(ptr->interval_ms));
         }
@@ -4523,11 +4612,33 @@ void Fern::StartWatch(uintptr_t addr, uint32_t size, uint32_t interval_ms) {
              static_cast<unsigned long long>(addr), size, interval_ms);
 }
 
+// Stop + join every watch registered by a given connection. Called in that
+// connection's HandleConnection cleanup BEFORE the Connection is closed/freed,
+// so the watch threads (which hold a raw owner pointer) never outlive it.
+void Fern::StopWatchesForConnection(Connection* owner) {
+    std::vector<std::unique_ptr<WatchEntry>> toJoin;
+    {
+        std::lock_guard<std::mutex> lock(m_watchMutex);
+        for (auto it = m_watches.begin(); it != m_watches.end(); ) {
+            if (it->second->owner == owner) {
+                it->second->active = false;
+                toJoin.push_back(std::move(it->second));
+                it = m_watches.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+    for (auto& entry : toJoin) {
+        if (entry && entry->watchThread.joinable()) entry->watchThread.join();
+    }
+}
+
 void Fern::StopWatch(uintptr_t addr) {
     // Audit fix #4: extract the entry under m_watchMutex but join the thread
-    // OUTSIDE the lock. The watch thread calls PushEvent → m_pipeMutex /
-    // m_writeMutex; if we held m_watchMutex while joining and another
-    // thread tried to take both locks in the opposite order, we'd deadlock.
+    // OUTSIDE the lock. The watch thread writes events via WriteLine (the
+    // connection's writeMutex); if we held m_watchMutex while joining and
+    // another thread took both locks in the opposite order, we'd deadlock.
     // Safer to release m_watchMutex before the blocking join.
     std::unique_ptr<WatchEntry> entry;
     {
