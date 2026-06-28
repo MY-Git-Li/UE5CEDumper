@@ -233,10 +233,19 @@ per burst. Ironically it was the tool that made the deadlock obvious (the missin
 
 -----
 
-## 9. Phase 1 REDO plan — discrete-style two-connection lane split (Path A; NOT YET BUILT)
+## 9. Phase 1 REDO — discrete-style two-connection lane split (Path A)
 
-This is a **plan for review**, not shipped. It supersedes the reverted single-handle worker-pool.
-Modeled on the sister repo **`D:\Github\discrete`**, which runs this in production.
+> **STATUS: IMPLEMENTED on branch `feat/multipipe-lane-split` (build ~1845); builds + unit
+> tests + AOT clean + launches, but NOT YET in-game verified.** Do not merge until the §9.6
+> checklist passes in a real game. Decisions taken (per "use your defaults"): `maxInstances=3`;
+> value-scan sessions dropped only when the **last** connection disconnects; the monitor trips
+> the **global** `Tot` cancel for **any** broken in-flight connection (the DLL is lane-agnostic
+> — a fast light command finishes before the 200 ms peek catches it, so in practice only a bulk
+> scan is ever caught; the UI router reconnects **both** lanes on either drop so the cancel flag
+> is reset cleanly); Pipe Activity entries are **lane-tagged** (I/B). See §9.8 for what landed.
+
+Modeled on the sister repo **`D:\Github\discrete`**, which runs this in production. It supersedes
+the reverted single-handle worker-pool.
 
 ### 9.1 Core idea
 
@@ -339,6 +348,37 @@ streaming `Utf8JsonReader` and/or smaller chunks (already noted in todo).
    by an interactive disconnect (the §9.3.5 caveat).
 6. CE `.CT` mailbox invoke still works under heavy UI load (it's off-pipe; should be unaffected).
 7. Watches (System-tab / address watch) still deliver events to the right (interactive) lane.
+
+### 9.8 What landed on `feat/multipipe-lane-split` (build ~1845)
+
+**DLL (`Fern.cpp`/`.h`):**
+- `kMaxPipeInstances = 3`; `AcceptLoop` creates instances and **spawns a detached
+  `HandleConnection` thread per accepted connection** (own handle), looping immediately for the
+  next instance. A `std::vector<shared_ptr<Connection>>` registry (`m_connMutex` + `m_connCv`)
+  tracks live connections; `m_listenPipe` is the parked accept instance.
+- `Connection { HANDLE pipe; std::mutex writeMutex; atomic<bool> inFlight; atomic<bool> closed; }`.
+  `WriteLine(Connection&, line)` takes the connection's **own** `writeMutex` and no-ops if closed;
+  `CloseConnOnce` (owning thread only) closes once under that mutex. `inFlight` is set only around
+  `DispatchCommand` so the monitor's peek never races the connection's I/O or close.
+- `MonitorLoop` iterates the registry, peeks each in-flight connection, trips `Tot::RequestPerCommand`
+  on a broken pipe. `AcceptLoop` resets `Tot::ResetPerCommand` only on the **first** connection of a
+  session (registry empty→1) — never per-command — so a light command on one lane can't clear a
+  running scan's cancel on the other.
+- Watches are **per-connection**: `WatchEntry.owner` points at the registering `Connection`; the
+  watch thread writes its event to that connection via `WriteLine` (old global `PushEvent` removed).
+  `StopWatchesForConnection(owner)` stops+joins a connection's watches in its cleanup before the
+  `Connection` is freed. Sessions (`Radar::*::DropAll`) dropped only on the last disconnect.
+- `Stop()` closes `m_listenPipe` (unblock `ConnectNamedPipe`) and `CancelIoEx`'s each connection
+  (unblock `ReadFile`/`WriteFile`; each thread then closes its **own** handle), stops watches, waits
+  (bounded 5 s) for the registry to drain, then joins accept/monitor.
+- `DispatchCommand` gained a `Connection` arg (used only by the `watch` handler).
+
+**UI:**
+- `LaneRoutingPipeClient : IPipeClient` wraps two `PipeClient`s (`"I"` interactive + `"B"` bulk),
+  routes `SendAsync` by a `BulkCommands` set (mirrors discrete's `BackendAdapter`), forwards
+  events + activity, and on either lane dropping unexpectedly tears down **both** for a clean
+  reconnect. `App.axaml.cs` builds it as the single `IPipeClient`; everything downstream is
+  unchanged. `PipeClient` gained a `laneTag` ctor arg; `PipeLogEntry` gained a `Lane` column.
 
 ### 9.7 Effort / risk / open decisions
 

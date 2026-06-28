@@ -18,6 +18,34 @@ builds ≤696 in
 
 -----
 
+## 2026-06-28 — Phase 1 REDO: discrete-style two-connection lane split (branch `feat/multipipe-lane-split`, build ~1845; NOT in-game verified)
+
+**On a branch, not merged.** Implements [multipipe-eval.md](multipipe-eval.md) §9 (Path A),
+modeled on the sister repo `D:\Github\discrete`. Fixes the reverted Phase 1's deadlock by giving
+**each connection its own handle + its own thread** instead of one worker writing the read
+thread's handle — so the synchronous pipe never has two threads on one handle, and **no
+overlapped-I/O rewrite is needed**.
+
+**Model.** The UI opens TWO connections (interactive + bulk) to a `maxInstances=3` server; the
+DLL serves each on its own detached thread, serial read→dispatch→write on its own handle. The
+DLL is **lane-agnostic** (no command classification) — the UI's `LaneRoutingPipeClient` routes
+by a `BulkCommands` set (heavy/scan/snapshot → bulk; everything else → interactive). Safe because
+the interactive lane never builds the Aura `s_classContainerCache`/`s_classRefCache` and the bulk
+lane runs scans one-at-a-time (its own serial connection).
+
+**DLL (`Fern`) — per-connection refactor:** registry of `Connection{pipe, writeMutex, inFlight,
+closed}`; thread-per-connection `AcceptLoop`; per-connection `WriteLine`; watches keyed to their
+owning connection (old global `PushEvent` removed); monitor iterates connections + trips global
+`Tot` on a broken in-flight pipe; per-command cancel reset moved to first-connection-of-session;
+`Stop` uses `CancelIoEx` + bounded drain (each thread closes its own handle). **UI:**
+`LaneRoutingPipeClient` decorator + `PipeClient` lane tag + `PipeLogEntry.Lane` column.
+
+**Verification so far:** builds (DLL + UI), full suite green (2091 C# / 797 dll / 53 utf8),
+Native-AOT publish clean, exe launches + stays alive. **STILL REQUIRED before merge: the §9.6
+in-game checklist** (Fern has no unit tests; the last attempt's deadlock only showed in-game).
+**Lessons baked in:** separate handle per connection (one thread per handle) is what makes the
+synchronous pipe safe; close from the owning thread (`CancelIoEx` to unblock) not cross-thread.
+
 ## 2026-06-28 — REVERT Phase 0 + Phase 1 (in-game regressions); keep Pipe Activity log (build ~1841; restores DLL baseline)
 
 **In-game test on Elliot regressed badly** — reverted both phases to the pre-change DLL

@@ -345,7 +345,7 @@
 
     <!-- System tab: Pipe Activity (live tail of UI<->DLL pipe traffic) -->
     <sys:String x:Key="str.System.PipeLog.Header">Pipe Activity</sys:String>
-    <sys:String x:Key="str.System.PipeLog.Hint">Live tail of UI&#x2194;DLL pipe traffic, newest first (&#x2192; sent, &#x2190; reply with round-trip ms, &#x26A1; event). A convenience mirror of the pipe log file — useful for watching light commands stay responsive while a heavy scan runs.</sys:String>
+    <sys:String x:Key="str.System.PipeLog.Hint">Live tail of UI&#x2194;DLL pipe traffic, newest first. Columns: time · lane (I = interactive, B = bulk) · direction (&#x2192; sent, &#x2190; reply with round-trip ms, &#x26A1; event) · command · id. A convenience mirror of the pipe log file — watch interactive commands stay responsive while a heavy scan streams on the bulk lane.</sys:String>
     <sys:String x:Key="str.System.PipeLog.Pause">Pause</sys:String>
     <sys:String x:Key="str.System.PipeLog.Clear">Clear</sys:String>
     <sys:String x:Key="str.System.PipeLog.Empty">No pipe traffic yet — connect to a game and interact with a panel.</sys:String>

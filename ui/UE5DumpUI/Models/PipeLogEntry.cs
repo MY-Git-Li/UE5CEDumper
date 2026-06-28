@@ -12,6 +12,9 @@ public sealed class PipeLogEntry
     /// <summary>Local wall-clock "HH:mm:ss.fff" when the line was recorded.</summary>
     public string Time { get; init; } = "";
 
+    /// <summary>Lane tag — "I" interactive / "B" bulk (empty if single-connection).</summary>
+    public string Lane { get; init; } = "";
+
     /// <summary>Direction glyph: "→" sent (TX), "←" reply (RX), "⚡" push event.</summary>
     public string Dir { get; init; } = "";
 
@@ -26,5 +29,5 @@ public sealed class PipeLogEntry
 
     /// <summary>Pre-formatted single monospace line for the activity list.</summary>
     public string Display =>
-        $"{Time}  {Dir,-2} {Cmd,-26} {(Id > 0 ? "#" + Id.ToString() : ""),-6} {Detail}";
+        $"{Time} {Lane,-1} {Dir,-2} {Cmd,-26} {(Id > 0 ? "#" + Id.ToString() : ""),-6} {Detail}";
 }
