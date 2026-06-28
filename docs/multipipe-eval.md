@@ -1,10 +1,15 @@
 # Multi-pipe IPC Evaluation (UI / DLL / CE contention)
 
-> **Status:** Evaluation + Phase 0 SHIPPED. Phase 1/2 are open work (see [todo.md](todo.md)).
-> **TL;DR:** Do **NOT** add more named pipes. The reported lag is **head-of-line
-> blocking on the DLL's single serial command loop**, not a "need more pipes" problem.
-> CE `.CT` mailbox is **already** off the pipe and isolated; its only real risk is
-> game-thread/CPU starvation, fixed by throttling scan CPU (Phase 0), not by pipes.
+> **Status (2026-06-28): Phase 0 + Phase 1 were SHIPPED then REVERTED** after in-game testing
+> regressed badly (build 1840). Baseline restored. The analysis below (§1–§6) is still correct;
+> only the *implementation* was wrong. **See §8 Postmortem.** A correct Phase 1 needs
+> **overlapped (async) pipe I/O** — not attempted yet.
+> **TL;DR:** Do **NOT** add more named pipes. The reported lag is **head-of-line blocking on
+> the DLL's single serial command loop**. But both attempted fixes regressed: (a) the Phase 0
+> scan thread-priority drop **starved scans ~20× when the game is busy**; (b) Phase 1's
+> off-thread heavy worker **deadlocks on the synchronous pipe handle** — a `WriteFile` cannot
+> proceed while the read thread is parked in `ReadFile` on the same non-overlapped handle. CE
+> `.CT` mailbox is already off the pipe and isolated.
 
 This document evaluates the user request: *"should the UI↔DLL and CE-Lua↔DLL IPC use
 multiple pipes? classify UI functions; guarantee the CE `.CT` invoke mailbox stays
@@ -158,23 +163,66 @@ and (b) does **not** call `Ubel::WalkClassEx` / build the class-metadata caches.
 
 -----
 
-## 7. Phase 0 — what shipped
+## 7. What was shipped (then reverted)
 
-**Code ([`Aura.cpp`](../dll/src/Aura.cpp)):**
+- **Phase 0** (`Aura.cpp`): scan worker threads + the chunk-0 calling thread were dropped to
+  `THREAD_PRIORITY_BELOW_NORMAL` during a parallel scan (RAII `ScopedScanPriority`), on top of
+  the pre-existing `hardware_concurrency() − 2` cap.
+- **Phase 1** (`Fern.cpp`/`.h`): `HandleClient` routed light commands inline and heavy commands
+  to a single FIFO worker thread (`HeavyWorkerLoop`), with per-client cancel + disconnect drain.
 
-- The worker count was **already** capped at `hardware_concurrency() − 2` (clamped `[1,16]`,
-  single-threaded under 8192 objects) in
-  [`ScanThreadCount`](../dll/src/Aura.cpp:105) — i.e. the "leave the game thread cores"
-  headroom already existed.
-- **New:** scan worker threads now run at `THREAD_PRIORITY_BELOW_NORMAL` so the OS
-  scheduler favors the game thread (and the pipe/mailbox threads) under CPU contention —
-  the spawned workers in `ParallelIndexRanges`, and (via a scoped guard) the calling thread
-  running chunk 0 in `ParallelGObjectsScan`, for the duration of a parallel scan only.
-  Priority is restored on scope exit (RAII), including on the throwing-chunk path. The
-  short-lived cancel-watcher thread stays at normal priority so cancellation remains snappy.
-- **Effect:** a full-pool Value Search / Group Scan / Snapshot capture no longer competes
-  with the game thread for CPU, so CE `.CT` ProcessEvent invokes keep draining (and are far
-  less likely to hit the invoke timeout) while the UI does heavy work.
+Both were reverted to the pre-change baseline (the Pipe Activity log, §8, was kept).
 
-**Not changed in Phase 0:** the DLL command loop is still serial, so the *UI* Live-Walker
--during-Snapshot lag is unchanged — that is Phase 1's job.
+-----
+
+## 8. Postmortem — why Phase 0 + Phase 1 were reverted (build 1840, Elliot)
+
+In-game testing surfaced three regressions; root-caused from the DLL pipe log + screenshots.
+
+### 8.1 Phase 1 deadlocks on the synchronous pipe handle (the connect hang)
+
+The server pipe is created **without `FILE_FLAG_OVERLAPPED`** (synchronous handle,
+[Fern.cpp:496](../dll/src/Fern.cpp)). On a synchronous handle the Windows I/O manager
+**serializes operations**: a pending `ReadFile` holds the file-object lock, so a concurrent
+`WriteFile` on the same handle **blocks until the read completes**. Phase 1's whole premise —
+the heavy worker writing a response while the read thread is parked in `ReadFile` waiting for
+the next command — is therefore impossible: the worker's `WriteFile` hangs until *some new
+command* arrives to release the read.
+
+Proof from the log: on the first connect, `trigger_scan #5` was received (11:52:29.515), its
+handler ran (`RunScan finished` 30.036), but **the response never reached the UI** — nothing
+else was sent, so the read thread stayed parked, the worker's write stayed blocked, and the UI
+hung until a manual disconnect. The second connect "worked" only because continuous user
+traffic (object-tree loads, a `walk_world` click) kept releasing the read and flushing the
+previous write. Classic intermittently-masked deadlock.
+
+(The old serial loop never hit this: the read thread did its own writing, so read and write
+were never outstanding at the same time. Watch-thread `PushEvent` writes technically could, but
+were rare enough to slip by.)
+
+**A correct Phase 1 requires overlapped/async pipe I/O** (or separate read/write handles), so
+the read can be pending while the worker writes independently. That is a real rework of
+`ReadLine`/`WriteLine`/`AcceptLoop` and must be tested in-game before shipping.
+
+### 8.2 Phase 0 priority drop starves scans ~20× (snapshot 1–2 min → ~1 hour)
+
+With a game (Elliot) running and saturating cores, `THREAD_PRIORITY_BELOW_NORMAL` scan threads
+are preempted by the game's normal-priority threads and barely run. The snapshot crawled to **2%
+in 57 s (ETA ~40 min)**. The `cores − 2` *count* headroom was already the right (and sufficient)
+throttle; lowering *priority* on top of it was the mistake — it converts "leave some CPU for the
+game" into "run only when the game is fully idle", which a live game never is.
+
+### 8.3 Net
+
+Even with the deadlock worked around, Phase 1 wouldn't have helped the snapshot case much: the
+shared `m_writeMutex` re-serializes a multi-MB chunk write, and the **UI-side `ReadLoopAsync`
+parses each multi-MB chunk single-threaded (~2.4 s each)**, blocking delivery of any interleaved
+light response. The dominant snapshot bottlenecks are (a) scan-thread starvation [fixed by the
+revert] and (b) UI-side chunk parse — *not* DLL dispatch serialization. Any future work should
+target those, and Phase 1 should only be revisited with overlapped I/O.
+
+### 8.4 Kept: Pipe Activity log (System tab)
+
+Unrelated to the deadlock; UI-only. `IPipeClient.Activity` event → `PointerPanelViewModel`
+newest-first ring buffer (cap **200**, Pause/Clear), coalesced one `Dispatcher.UIThread.Post`
+per burst. Ironically it was the tool that made the deadlock obvious (the missing `←` reply).

@@ -11,8 +11,6 @@
 #include <atomic>
 #include <unordered_map>
 #include <mutex>
-#include <deque>
-#include <condition_variable>
 
 class Fern {
 public:
@@ -44,32 +42,6 @@ private:
     std::atomic<bool>    m_commandInFlight{false};
     std::atomic<HANDLE>  m_inflightPipe{INVALID_HANDLE_VALUE};
     void MonitorLoop();
-
-    // ── Heavy-command worker (Phase 1 — docs/multipipe-eval.md §5/§6) ─────────
-    // Long commands (full-pool scans, snapshot streaming, value/group scan,
-    // ref/path/container finds, invoke) run on this SINGLE worker thread instead
-    // of the read loop, so light commands (Live Walker, properties, teleport)
-    // are serviced immediately and never queue behind a multi-second command.
-    // The worker is concurrency-1 (FIFO): two cache-building scans never run at
-    // once, so the Aura class-metadata caches (and GObjects drift) are never
-    // raced across commands. The UI already demultiplexes responses by request
-    // id, so out-of-order completion is fine. DispatchCommand bakes the id into
-    // the response and WriteLine is m_writeMutex-guarded, so worker responses
-    // interleave safely with the read thread's light responses + async events.
-    struct HeavyJob { std::string line; HANDLE pipe; };
-    std::thread             m_heavyThread;
-    std::deque<HeavyJob>    m_heavyQueue;
-    std::mutex              m_heavyMutex;   // guards m_heavyQueue + m_heavyBusy + m_heavyStop
-    std::condition_variable m_heavyCv;      // signals: new job / job done / stop
-    bool                    m_heavyBusy = false;
-    bool                    m_heavyStop = false;
-    void HeavyWorkerLoop();
-
-    // True for fast, pure-memory / cached-session commands that are safe to run
-    // inline on the read thread (concurrently with one heavy job). Everything
-    // NOT listed is treated as heavy and deferred to the worker — the safe
-    // default, so an unclassified/new command can never race a scan.
-    static bool IsLightCommand(const std::string& cmd);
 
     // Watch entries
     struct WatchEntry {

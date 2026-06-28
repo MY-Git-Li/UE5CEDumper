@@ -18,6 +18,36 @@ builds ≤696 in
 
 -----
 
+## 2026-06-28 — REVERT Phase 0 + Phase 1 (in-game regressions); keep Pipe Activity log (build ~1841; restores DLL baseline)
+
+**In-game test on Elliot regressed badly** — reverted both phases to the pre-change DLL
+baseline (`git checkout 1b7d149 -- Aura.cpp Fern.cpp Fern.h`). Root causes (DLL pipe log +
+screenshots; full writeup [multipipe-eval.md](multipipe-eval.md) §8):
+
+1. **Phase 1 deadlocks on the synchronous pipe handle.** The server pipe is created **without
+   `FILE_FLAG_OVERLAPPED`** (Fern.cpp:496) → the Windows I/O manager serializes I/O on the
+   handle, so the heavy worker's `WriteFile` (response) **cannot complete while the read thread
+   is parked in `ReadFile`** waiting for the next command. First connect: `trigger_scan #5`
+   handler ran (`RunScan finished`) but its response never reached the UI (nothing else was
+   sent to release the read) → UI hung until manual disconnect. Second connect "worked" only
+   because continuous user traffic kept flushing the blocked write. **A correct off-thread
+   dispatch needs overlapped/async pipe I/O — a real rework, deferred.**
+2. **Phase 0 priority drop starves scans ~20×.** With the game saturating cores,
+   `THREAD_PRIORITY_BELOW_NORMAL` scan threads barely run → Snapshot crawled to **2% in 57 s
+   (~40 min ETA)** vs the normal 1–2 min. The pre-existing `cores − 2` *count* headroom was the
+   correct throttle; dropping *priority* on top turned it into "run only when the game is idle".
+3. (Also noted) even without the deadlock, Phase 1 wouldn't have fixed Snapshot much: the
+   shared `m_writeMutex` re-serializes the multi-MB chunk write, and the **UI-side
+   `ReadLoopAsync` parses each multi-MB chunk single-threaded (~2.4 s)**, blocking interleaved
+   light responses. Real bottlenecks = scan starvation [now reverted] + UI chunk parse, not DLL
+   dispatch.
+
+**Kept:** the System-tab Pipe Activity log (UI-only, unrelated to the deadlock — it's what made
+the missing `←` reply obvious). Cap raised 100→**200** per request; newest-first (newest always
+visible at top). **Lesson:** never run a `WriteFile` from a second thread while the read thread
+is blocked in `ReadFile` on a non-overlapped handle — the OS serializes them. Verify pipe
+concurrency changes IN-GAME, not just by unit tests (Fern has none).
+
 ## 2026-06-28 — System-tab "Pipe Activity" log (live UI↔DLL traffic tail) (build ~1837; UI-only; 2091 C# green, AOT publish clean + launch-verified)
 
 **Context.** Companion to Phase 1: a small in-UI tail of pipe traffic on the System tab so

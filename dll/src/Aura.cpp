@@ -27,7 +27,6 @@ extern uint32_t g_cachedUEVersion;
 #include <climits>
 #include <cstring>
 #include <mutex>
-#include <optional>
 #include <set>
 #include <thread>
 #include <unordered_map>
@@ -112,31 +111,6 @@ int ScanThreadCount(int32_t workItems) {
     return n;
 }
 
-// RAII: temporarily drop the CURRENT thread's scheduling priority to
-// THREAD_PRIORITY_BELOW_NORMAL, restoring the prior value on scope exit.
-// Phase 0 CE-responsiveness guard (see docs/multipipe-eval.md §7): a full-pool
-// parallel scan must not starve the game tick — a CE .CT ProcessEvent invoke
-// routes through the game thread (mailbox -> Stark queue) and would otherwise
-// hit its timeout while the game is CPU-starved. ScanThreadCount already leaves
-// (cores - 2) headroom by thread COUNT; this makes the scan threads "nice" so
-// the OS scheduler additionally favors the game/pipe/mailbox threads under load.
-// Restore runs even on the throwing-chunk path.
-class ScopedScanPriority {
-public:
-    ScopedScanPriority()
-        : m_handle(GetCurrentThread()),
-          m_prev(GetThreadPriority(GetCurrentThread())) {
-        if (m_prev == THREAD_PRIORITY_ERROR_RETURN) m_prev = THREAD_PRIORITY_NORMAL;
-        SetThreadPriority(m_handle, THREAD_PRIORITY_BELOW_NORMAL);
-    }
-    ~ScopedScanPriority() { SetThreadPriority(m_handle, m_prev); }
-    ScopedScanPriority(const ScopedScanPriority&) = delete;
-    ScopedScanPriority& operator=(const ScopedScanPriority&) = delete;
-private:
-    HANDLE m_handle;
-    int    m_prev;
-};
-
 // Partition [0, count) into `nthreads` contiguous ascending ranges and run
 // body(tid, beginIdx, endIdx) on each. Chunk 0 runs inline on the calling
 // thread; the rest run on spawned std::threads which are joined before
@@ -172,12 +146,7 @@ void ParallelIndexRanges(int32_t count, int nthreads, BodyFn&& body) {
         if (b >= count) break;
         const int32_t bi = static_cast<int32_t>(b);
         const int32_t ei = static_cast<int32_t>(std::min<int64_t>(b + chunk, count));
-        pool.emplace_back([&runChunk, t, bi, ei]() {
-            // Phase 0 CE-responsiveness guard: run scan workers below normal so
-            // the game thread wins scheduling and CE .CT invokes keep draining.
-            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
-            runChunk(t, bi, ei);
-        });
+        pool.emplace_back([&runChunk, t, bi, ei]() { runChunk(t, bi, ei); });
     }
     runChunk(0, 0, static_cast<int32_t>(std::min<int64_t>(chunk, count)));  // chunk 0 inline
     for (auto& th : pool) th.join();
@@ -237,13 +206,6 @@ ParallelScanResult<PerThreadT> ParallelGObjectsScan(int32_t count, BodyFn&& body
             }
         });
     }
-
-    // Phase 0: the calling thread runs chunk 0 inline, so drop its priority too
-    // for the duration of a parallel scan (restored by RAII on return). Skipped
-    // for serial scans (nthreads == 1: tiny arrays, or the anti-tamper "parallel
-    // off" toggle) which leave cores free anyway.
-    std::optional<ScopedScanPriority> scanPrio;
-    if (nthreads > 1) scanPrio.emplace();
 
     ParallelIndexRanges(count, nthreads, [&](int tid, int32_t beginIdx, int32_t endIdx) {
         body(perThread[tid], beginIdx, endIdx, deadlineHit);

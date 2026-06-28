@@ -91,10 +91,11 @@ public partial class PointerPanelViewModel : ViewModelBase
     [ObservableProperty] private string _maintenanceStatusText = "";
 
     // --- Pipe Activity log (System tab): live tail of UI<->DLL pipe traffic ---
-    // Newest-first ring buffer, fed by IPipeClient.Activity (raised on pipe
-    // threads). Entries are coalesced onto the UI thread so a burst (snapshot
-    // streaming, tree scroll) can't flood the dispatcher.
-    private const int PipeLogCap = 100;
+    // Newest-first ring buffer (newest at top, so the latest line is always
+    // visible at the default scroll position), fed by IPipeClient.Activity
+    // (raised on pipe threads). Entries are coalesced onto the UI thread so a
+    // burst (snapshot streaming, tree scroll) can't flood the dispatcher.
+    private const int PipeLogCap = 200;
     /// <summary>The displayed lines (newest first), capped at <see cref="PipeLogCap"/>.</summary>
     public ObservableCollection<PipeLogEntry> PipeLog { get; } = new();
     /// <summary>When true, new pipe lines are dropped (the list freezes for reading).</summary>
