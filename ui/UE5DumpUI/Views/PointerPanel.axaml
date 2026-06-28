@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:UE5DumpUI.ViewModels"
              xmlns:views="using:UE5DumpUI.Views"
+             xmlns:models="using:UE5DumpUI.Models"
              x:Class="UE5DumpUI.Views.PointerPanel"
              x:DataType="vm:PointerPanelViewModel">
 
@@ -517,6 +518,53 @@
         <TextBlock Text="{Binding MaintenanceStatusText}" Foreground="#4EC9B0"
                    FontSize="11" TextWrapping="Wrap"
                    IsVisible="{Binding MaintenanceStatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+      </StackPanel>
+    </Border>
+
+    <!-- Pipe Activity: live tail of UI<->DLL pipe traffic (newest first). A
+         convenience mirror of the pipe log file so the user can watch light
+         commands stay responsive while a heavy scan runs (Phase 1 lane split)
+         without opening %LOCALAPPDATA% logs. Always visible (no live connection
+         needed); fed from PipeClient.Activity via a coalesced UI-thread flush. -->
+    <Border Background="#2D2D30" CornerRadius="4" Padding="16,12"
+            BorderBrush="#555" BorderThickness="1" Margin="0,0,0,4">
+      <StackPanel Spacing="8">
+        <Grid ColumnDefinitions="*,Auto,Auto">
+          <TextBlock Grid.Column="0" Text="{StaticResource str.System.PipeLog.Header}"
+                     Foreground="#9CDCFE" FontSize="13" FontWeight="SemiBold"
+                     VerticalAlignment="Center"/>
+          <CheckBox Grid.Column="1" Content="{StaticResource str.System.PipeLog.Pause}"
+                    IsChecked="{Binding PipeLogPaused}"
+                    Foreground="#AAA" FontSize="11" Margin="0,0,10,0"
+                    VerticalAlignment="Center"/>
+          <Button Grid.Column="2" Content="{StaticResource str.System.PipeLog.Clear}"
+                  Command="{Binding ClearPipeLogCommand}"
+                  Padding="8,4" FontSize="11" Foreground="#AAA"
+                  Background="Transparent" BorderThickness="1" BorderBrush="#555"
+                  Cursor="Hand"/>
+        </Grid>
+        <TextBlock Text="{StaticResource str.System.PipeLog.Hint}"
+                   Foreground="#666" FontSize="11" TextWrapping="Wrap"/>
+        <Border Background="#1E1E1E" CornerRadius="3"
+                BorderBrush="#3F3F46" BorderThickness="1" Height="170">
+          <Panel>
+            <TextBlock Text="{StaticResource str.System.PipeLog.Empty}"
+                       Foreground="#555" FontSize="11" Margin="8,6"
+                       TextWrapping="Wrap" VerticalAlignment="Top"
+                       IsVisible="{Binding PipeLogIsEmpty}"/>
+            <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Auto">
+              <ItemsControl ItemsSource="{Binding PipeLog}" Padding="8,6">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="models:PipeLogEntry">
+                    <TextBlock Text="{Binding Display}" FontFamily="Consolas"
+                               FontSize="11" Foreground="#C8C8C8"/>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </Panel>
+        </Border>
       </StackPanel>
     </Border>
 

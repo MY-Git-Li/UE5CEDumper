@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using UE5DumpUI.Models;
 
 namespace UE5DumpUI.Core;
 
@@ -15,6 +16,13 @@ public interface IPipeClient : IDisposable
 
     /// <summary>Fired when a push event is received from the DLL.</summary>
     event Action<JsonObject>? EventReceived;
+
+    /// <summary>
+    /// Fired for every pipe line — TX request, RX response, push event — so the
+    /// UI can show a live activity tail (System tab). Raised on background pipe
+    /// threads; handlers must marshal to the UI thread before touching UI state.
+    /// </summary>
+    event Action<PipeLogEntry>? Activity;
 
     /// <summary>Connect to the named pipe server.</summary>
     Task ConnectAsync(CancellationToken ct = default);

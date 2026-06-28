@@ -18,6 +18,139 @@ builds ≤696 in
 
 -----
 
+## 2026-06-28 — REVERT Phase 0 + Phase 1 (in-game regressions); keep Pipe Activity log (build ~1841; restores DLL baseline)
+
+**In-game test on Elliot regressed badly** — reverted both phases to the pre-change DLL
+baseline (`git checkout 1b7d149 -- Aura.cpp Fern.cpp Fern.h`). Root causes (DLL pipe log +
+screenshots; full writeup [multipipe-eval.md](multipipe-eval.md) §8):
+
+1. **Phase 1 deadlocks on the synchronous pipe handle.** The server pipe is created **without
+   `FILE_FLAG_OVERLAPPED`** (Fern.cpp:496) → the Windows I/O manager serializes I/O on the
+   handle, so the heavy worker's `WriteFile` (response) **cannot complete while the read thread
+   is parked in `ReadFile`** waiting for the next command. First connect: `trigger_scan #5`
+   handler ran (`RunScan finished`) but its response never reached the UI (nothing else was
+   sent to release the read) → UI hung until manual disconnect. Second connect "worked" only
+   because continuous user traffic kept flushing the blocked write. **A correct off-thread
+   dispatch needs overlapped/async pipe I/O — a real rework, deferred.**
+2. **Phase 0 priority drop starves scans ~20×.** With the game saturating cores,
+   `THREAD_PRIORITY_BELOW_NORMAL` scan threads barely run → Snapshot crawled to **2% in 57 s
+   (~40 min ETA)** vs the normal 1–2 min. The pre-existing `cores − 2` *count* headroom was the
+   correct throttle; dropping *priority* on top turned it into "run only when the game is idle".
+3. (Also noted) even without the deadlock, Phase 1 wouldn't have fixed Snapshot much: the
+   shared `m_writeMutex` re-serializes the multi-MB chunk write, and the **UI-side
+   `ReadLoopAsync` parses each multi-MB chunk single-threaded (~2.4 s)**, blocking interleaved
+   light responses. Real bottlenecks = scan starvation [now reverted] + UI chunk parse, not DLL
+   dispatch.
+
+**Kept:** the System-tab Pipe Activity log (UI-only, unrelated to the deadlock — it's what made
+the missing `←` reply obvious). Cap raised 100→**200** per request; newest-first (newest always
+visible at top). **Lesson:** never run a `WriteFile` from a second thread while the read thread
+is blocked in `ReadFile` on a non-overlapped handle — the OS serializes them. Verify pipe
+concurrency changes IN-GAME, not just by unit tests (Fern has none).
+
+## 2026-06-28 — System-tab "Pipe Activity" log (live UI↔DLL traffic tail) (build ~1837; UI-only; 2091 C# green, AOT publish clean + launch-verified)
+
+**Context.** Companion to Phase 1: a small in-UI tail of pipe traffic on the System tab so
+the user can *see* light commands interleave with a heavy scan (proof the lane split works)
+without opening the `%LOCALAPPDATA%` pipe log. The user noted the file log already exists, so
+this is a convenience mirror — its value is immediacy.
+
+**Change.** `IPipeClient` gains an `Activity` event raised for every line: TX (on send, with
+command + id), RX (on response, paired back to the TX for command name + round-trip ms via a
+new `_txMeta` id→(cmd,tick) map), and push events. `PipeClient` raises it only when a
+subscriber is attached (near-zero cost otherwise) and clears `_txMeta` on cancel/disconnect.
+The System-tab VM (`PointerPanelViewModel`) subscribes and renders a newest-first ring buffer
+(`ObservableCollection<PipeLogEntry>`, cap 100) with **Pause** + **Clear**. Pipe-thread
+callbacks enqueue into a `ConcurrentQueue` and **coalesce a single `Dispatcher.UIThread.Post`
+per burst at `DispatcherPriority.Background`**, so a snapshot streaming hundreds of chunks
+can't flood the UI thread. New `PipeLogEntry` model; a "Pipe Activity" card in `PointerPanel.axaml`
+(monospace list + empty placeholder); en.axaml strings. Test mocks (`MockPipeClient`,
+`NoopPipeClient`) implement the new event.
+
+**Verification.** Full suite green (2091 C# / 797 dll / 53 utf8); Native-AOT publish clean (no
+new ILC/trim warnings) and the published exe launches + stays alive with no `crash.log`.
+
+## 2026-06-28 — Multi-pipe Phase 1: non-blocking DLL dispatch (heavy worker lane) (build ~1836; DLL-only Fern; 2091 C# / 797 dll / 53 utf8 green)
+
+**Context.** Phase 0 (below) protected CE responsiveness but left the actual UI symptom —
+Live Walker slow during a Snapshot — untouched, because the DLL command loop was still
+strictly serial (a `snapshot_chunk` blocked the read thread so a queued `walk_instance`
+waited in the pipe buffer). Phase 1 fixes that. Design + rationale: [multipipe-eval.md](multipipe-eval.md) §5–§6.
+
+**Change (Fern only — no protocol/UI change).** `HandleClient` no longer runs every command
+inline. It now routes by lane:
+- **Light** (`IsLightCommand` allowlist — get_object/list, walk_class/instance,
+  read_array_elements, query_candidates, teleport_*, god/movement/cursor, watch, …): run
+  **inline** on the read thread, exactly as before.
+- **Heavy** (everything else — value/group scan, snapshot_chunk, find_instances/refs/path,
+  find_by_address, search_properties, list_*, invoke_function, version/packed/apply-rescan
+  mutators, …): posted to a **single FIFO worker thread** (`HeavyWorkerLoop`). The read loop
+  returns immediately to service light commands. The worker runs `DispatchCommand` (which
+  bakes the request id into the response) and writes the id-tagged response via the
+  `m_writeMutex`-guarded `WriteLine`, so it interleaves safely with the read thread's light
+  responses and async `PushEvent`s. The UI already demultiplexes by id, so out-of-order
+  completion needs no client change.
+
+**Concurrency-1 by design.** The heavy worker is a single FIFO thread, so two cache-building
+scans never run at once → the Aura `s_classContainerCache`/`s_classRefCache` (and GObjects
+drift) are never raced across commands. Light commands only read write-once globals + Ubel's
+mutex-guarded caches + their own session, so a light command running concurrently with one
+heavy job is safe. The allowlist is the *only* light set; anything unlisted defaults to heavy
+(safe default — a new/unclassified command can't accidentally race a scan).
+
+**Cancellation simplified.** `Tot::ResetPerCommand` moved from per-command to **per-client**
+(at `HandleClient` start) — `g_perCommand` is only ever set on disconnect (Fern monitor), so
+per-client reset is equivalent, and it removes the risk of a light command clearing a running
+scan's cancel mid-flight. On disconnect the read loop drains the worker: `RequestPerCommand`
+(running scan bails at its next Tot poll) + clear the queue + **wait for the worker idle**
+before returning, so AcceptLoop's pipe-close + session `DropAll` can't race a live job.
+`Fern::Start/Stop` spawn/join the worker (Stop's existing `RequestShutdown` makes an in-flight
+job bail fast).
+
+**Status.** Built + full suite green. Fern is integration-level (not unit-tested), so the
+threading needs **in-game verification**: confirm Live Walker / teleport stay responsive while
+a Snapshot / Value Search runs, and that disconnect mid-scan frees the pipe cleanly.
+
+## 2026-06-28 — Multi-pipe IPC evaluation + Phase 0 scan CPU/priority guard (build ~1834; DLL-only; 2091 C# / 797 dll / 53 utf8 green)
+
+**Context.** User asked whether the UI↔DLL and CE-Lua↔DLL IPC should use **multiple
+pipes** — Live Walker feels slow during a Snapshot (suspected pipe queuing), and the CE
+`.CT` invoke mailbox should stay responsive while the UI does heavy work. Investigated via
+a multi-agent workflow (5 parallel readers over Fern/PipeClient/Mimic+Stark/command
+taxonomy/shared-state safety + synthesis + adversarial verify).
+
+**Findings (full writeup: [multipipe-eval.md](multipipe-eval.md)).**
+- There are **already two independent channels**: the UI **named pipe** (Fern) and the CE
+  **shared-memory mailbox** (Mimic, `g_invokeMailbox`, polled on its own thread → Stark
+  game-thread queue). CE never touches the pipe.
+- Root cause of the UI lag is **DLL-side head-of-line blocking**: one pipe instance
+  (`CreateNamedPipeW maxInstances=1`) + a strictly serial `HandleClient` loop
+  (`ReadLine → DispatchCommand[blocks] → WriteLine`). A `snapshot_chunk` (~0.5–2 s) blocks
+  the read loop so a queued `walk_instance` waits in the pipe buffer. **Not** the UI
+  `_writeLock` (released before the response await — the client already `id`-multiplexes),
+  **not** CE.
+- **Multi-pipe is the wrong fix.** N pipe instances force two `DispatchCommand` to run
+  concurrently, which is **unsafe today** — `s_classContainerCache`/`s_classRefCache` use a
+  check-without-lock → build-outside-lock (`Ubel::WalkClassEx`) → insert-under-lock pattern
+  that races, and GObjects has no epoch stamp. Recommended instead: **single pipe +
+  non-blocking dispatch** (light inline + one heavy worker, concurrency = 1), deferred to
+  Phase 1 (needs per-request cancellation — `Tot::ResetPerCommand` is currently global).
+- CE responsiveness: pure-memory CE ops (GodMode/Movement/read-only teleport) are already
+  immune; only **game-thread-routed** CE invokes are at risk, and only from **CPU
+  starvation** during parallel scans — a pipe-count-independent problem.
+
+**Phase 0 shipped (DLL, `Aura.cpp`).** `ScanThreadCount` already capped workers at
+`hardware_concurrency() − 2`; added a **thread-priority guard** so a full-pool scan goes
+"nice": spawned workers in `ParallelIndexRanges` set `THREAD_PRIORITY_BELOW_NORMAL`, and a
+new RAII `ScopedScanPriority` drops the calling thread (which runs chunk 0 inline) for the
+duration of a *parallel* scan, restoring on scope exit (incl. the throwing-chunk path).
+Serial scans (tiny arrays / anti-tamper "parallel off") are untouched — they leave cores
+free anyway. The cancel-watcher stays normal priority so cancellation stays snappy. Net:
+Value Search / Group Scan / Snapshot capture no longer competes with the game thread, so CE
+`.CT` ProcessEvent invokes keep draining (far less likely to hit the invoke timeout) while
+the UI is busy. **The serial UI dispatch is unchanged — Live-Walker-during-Snapshot lag is
+Phase 1's job.** *(Built + full test suite green; not yet in-game profiled.)*
+
 ## 2026-06-27 — DataGrid horizontal-overflow sweep (all panels) + "Diff is always deep" annotation (build ~1832; UI/XAML-only; no test delta)
 
 **Context.** Two follow-ups after the top-level scalar-array capture fix below. (1) The user

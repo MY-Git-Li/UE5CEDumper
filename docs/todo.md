@@ -21,6 +21,30 @@ Open work only. **Read this when deciding what to do next.**
 
 ## ▶ Next up (genuinely actionable now)
 
+- **Multi-pipe Phase 1 REDO — off-thread heavy dispatch via OVERLAPPED pipe I/O (the only correct way)** —
+  Effort: **L** · Risk: high (live threading; no Fern unit tests). The build-1836 attempt
+  (single FIFO heavy worker) was **REVERTED** — it deadlocked because the server pipe is
+  **synchronous** (`CreateNamedPipeW` without `FILE_FLAG_OVERLAPPED`, Fern.cpp:496), so the
+  Windows I/O manager serializes I/O on the handle: the worker's `WriteFile` (response) can't
+  complete while the read thread is parked in `ReadFile`. See [multipipe-eval.md](multipipe-eval.md)
+  §8.1. To make off-thread dispatch work, **first convert the server pipe + `ReadLine`/`WriteLine`/
+  `AcceptLoop` to overlapped (async) I/O** (or use separate read/write handles) so a read can be
+  pending while a write proceeds. Only then re-add the light-inline / heavy-worker split. **Must
+  be verified IN-GAME** (connect handshake, Snapshot/Value-Search-while-Live-Walker, disconnect
+  mid-scan, CE invoke under load) — unit tests won't catch the I/O serialization. Also note
+  (§8.3): even fixed, Snapshot is bottlenecked by the **UI-side single-threaded multi-MB chunk
+  parse (~2.4 s/chunk)** — consider streaming `Utf8JsonReader` or smaller chunks there too.
+  *Parent: reverted Phase 1 build 1836 (dev-log 2026-06-28).*
+
+- **CE responsiveness under heavy scans — pick a NON-priority approach if it ever bites** —
+  Effort: **S-M** · Risk: med. Phase 0 (drop scan threads to `BELOW_NORMAL`) was **REVERTED** —
+  with the game saturating cores it starved scans ~20× (Snapshot 1–2 min → ~1 h). The
+  pre-existing `cores − 2` count cap (`ScanThreadCount`, Aura.cpp:105) is the right throttle and
+  is restored. CE `.CT` invoke is already off-pipe (Mimic mailbox); if a real starvation case
+  appears, prefer: yield points inside the scan loop, a smaller worker cap while a CE invoke is
+  pending, or `Stark`-queue priority for mailbox invokes — **not** a blanket thread-priority drop.
+  *Parent: reverted Phase 0 build 1834 (dev-log 2026-06-28).*
+
 - **Class Pivot discovery (build 1742) — deeper capture-memory fix** —
   Effort: **M** (memory) · Risk: low. The bounded N-snapshot discovery + shape ranking +
   Locate-in-GWorld/GameEngine + resizable/filterable results shipped build 1742; the class

@@ -343,6 +343,13 @@
     <sys:String x:Key="str.System.SelfTest.NoCandidate">No testable BlueprintFunctionLibrary helper found in this game.</sys:String>
     <sys:String x:Key="str.System.SelfTest.Error">Self-Test failed: {0}</sys:String>
 
+    <!-- System tab: Pipe Activity (live tail of UI<->DLL pipe traffic) -->
+    <sys:String x:Key="str.System.PipeLog.Header">Pipe Activity</sys:String>
+    <sys:String x:Key="str.System.PipeLog.Hint">Live tail of UI&#x2194;DLL pipe traffic, newest first (&#x2192; sent, &#x2190; reply with round-trip ms, &#x26A1; event). A convenience mirror of the pipe log file — useful for watching light commands stay responsive while a heavy scan runs.</sys:String>
+    <sys:String x:Key="str.System.PipeLog.Pause">Pause</sys:String>
+    <sys:String x:Key="str.System.PipeLog.Clear">Clear</sys:String>
+    <sys:String x:Key="str.System.PipeLog.Empty">No pipe traffic yet — connect to a game and interact with a panel.</sys:String>
+
     <!-- System tab: Maintenance (open log folder + remove all snapshot databases) -->
     <sys:String x:Key="str.System.Maintenance.Header">Maintenance</sys:String>
     <sys:String x:Key="str.System.OpenLogFolder">Open Log Folder</sys:String>

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using UE5DumpUI.Core;
+using UE5DumpUI.Models;
 
 namespace UE5DumpUI.Services;
 
@@ -33,6 +34,14 @@ public sealed class PipeClient : IPipeClient
     public bool IsConnected { get; private set; }
     public event Action<bool>? ConnectionStateChanged;
     public event Action<JsonObject>? EventReceived;
+    public event Action<PipeLogEntry>? Activity;
+
+    // id -> (command name, TX tick) so the RX line can show which command it
+    // answers and the round-trip ms. Only populated when Activity has a
+    // subscriber. Entries are removed on RX / cancel / disconnect.
+    private readonly ConcurrentDictionary<int, (string cmd, long tx)> _txMeta = new();
+
+    private static string NowStr() => DateTime.Now.ToString("HH:mm:ss.fff");
 
     public PipeClient(ILoggingService log)
     {
@@ -82,6 +91,7 @@ public sealed class PipeClient : IPipeClient
             kvp.Value.TrySetCanceled();
         }
         _pending.Clear();
+        _txMeta.Clear();
 
         if (_readLoopTask != null)
         {
@@ -109,11 +119,21 @@ public sealed class PipeClient : IPipeClient
         int id = Interlocked.Increment(ref _nextId);
         request["id"] = id;
 
+        // Activity tail (System tab): record the TX line + remember the command
+        // name / start time so the matching RX can show command + round-trip ms.
+        if (Activity != null)
+        {
+            string cmd = request["cmd"]?.GetValue<string>() ?? "?";
+            _txMeta[id] = (cmd, Environment.TickCount64);
+            Activity.Invoke(new PipeLogEntry { Time = NowStr(), Dir = "→", Cmd = cmd, Id = id });
+        }
+
         var tcs = new TaskCompletionSource<JsonObject>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[id] = tcs;
 
         // Register cancellation
         await using var reg = ct.Register(() => {
+            _txMeta.TryRemove(id, out _);
             if (_pending.TryRemove(id, out var removed))
                 removed.TrySetCanceled();
         });
@@ -137,11 +157,13 @@ public sealed class PipeClient : IPipeClient
         catch (IOException) when (!IsConnected || _cts.IsCancellationRequested)
         {
             // Pipe closed during write (disconnect in progress) — cancel this request
+            _txMeta.TryRemove(id, out _);
             _pending.TryRemove(id, out _);
             throw new OperationCanceledException("Pipe disconnected during send");
         }
         catch (ObjectDisposedException) when (!IsConnected || _cts.IsCancellationRequested)
         {
+            _txMeta.TryRemove(id, out _);
             _pending.TryRemove(id, out _);
             throw new OperationCanceledException("Pipe disconnected during send");
         }
@@ -183,6 +205,9 @@ public sealed class PipeClient : IPipeClient
                     if (obj["event"] != null)
                     {
                         // Push event from DLL
+                        Activity?.Invoke(new PipeLogEntry {
+                            Time = NowStr(), Dir = "⚡",
+                            Cmd = obj["event"]?.GetValue<string>() ?? "event" });
                         EventReceived?.Invoke(obj);
                     }
                     else
@@ -191,6 +216,22 @@ public sealed class PipeClient : IPipeClient
                         var id = obj["id"]?.GetValue<int>() ?? 0;
                         if (_pending.TryRemove(id, out var tcs))
                         {
+                            // Activity tail: pair the RX with its TX (command +
+                            // round-trip ms) recorded in _txMeta on send.
+                            if (Activity != null)
+                            {
+                                string cmd = "?";
+                                string detail = "";
+                                if (_txMeta.TryRemove(id, out var meta))
+                                {
+                                    cmd = meta.cmd;
+                                    long ms = Environment.TickCount64 - meta.tx;
+                                    bool ok = obj["ok"]?.GetValue<bool>() ?? true;
+                                    detail = ok ? $"{ms} ms" : $"err {ms} ms";
+                                }
+                                Activity.Invoke(new PipeLogEntry {
+                                    Time = NowStr(), Dir = "←", Cmd = cmd, Id = id, Detail = detail });
+                            }
                             obj["_t_read_ms"]  = readSw.ElapsedMilliseconds;
                             obj["_t_rxlog_ms"] = rxLogSw.ElapsedMilliseconds;
                             obj["_t_parse_ms"] = parseSw.ElapsedMilliseconds;
@@ -224,6 +265,7 @@ public sealed class PipeClient : IPipeClient
                 foreach (var kvp in _pending)
                     kvp.Value.TrySetException(new IOException("Pipe disconnected"));
                 _pending.Clear();
+                _txMeta.Clear();
             }
 
             // If we exit the read loop unexpectedly, mark disconnected
@@ -265,6 +307,7 @@ public sealed class PipeClient : IPipeClient
             kvp.Value.TrySetCanceled();
         }
         _pending.Clear();
+        _txMeta.Clear();
 
         CloseStreams();
         _cts.Dispose();

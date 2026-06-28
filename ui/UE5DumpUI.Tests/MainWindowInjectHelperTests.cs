@@ -158,6 +158,7 @@ public class MainWindowInjectHelperTests
         public bool IsConnected => false;
         public event Action<bool>? ConnectionStateChanged { add { } remove { } }
         public event Action<JsonObject>? EventReceived { add { } remove { } }
+        public event Action<UE5DumpUI.Models.PipeLogEntry>? Activity { add { } remove { } }
         public Task ConnectAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task DisconnectAsync() => Task.CompletedTask;
         public Task<JsonObject> SendAsync(JsonObject request, CancellationToken ct = default)

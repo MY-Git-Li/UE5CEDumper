@@ -14,6 +14,7 @@ public sealed class MockPipeClient : IPipeClient
     public bool IsConnected { get; set; } = true;
     public event Action<bool>? ConnectionStateChanged;
     public event Action<JsonObject>? EventReceived;
+    public event Action<PipeLogEntry>? Activity { add { } remove { } }
 
     private Func<JsonObject, JsonObject>? _handler;
 
