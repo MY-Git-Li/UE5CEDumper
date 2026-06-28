@@ -18,6 +18,46 @@ builds ≤696 in
 
 -----
 
+## 2026-06-28 — Multi-pipe IPC evaluation + Phase 0 scan CPU/priority guard (build ~1834; DLL-only; 2091 C# / 797 dll / 53 utf8 green)
+
+**Context.** User asked whether the UI↔DLL and CE-Lua↔DLL IPC should use **multiple
+pipes** — Live Walker feels slow during a Snapshot (suspected pipe queuing), and the CE
+`.CT` invoke mailbox should stay responsive while the UI does heavy work. Investigated via
+a multi-agent workflow (5 parallel readers over Fern/PipeClient/Mimic+Stark/command
+taxonomy/shared-state safety + synthesis + adversarial verify).
+
+**Findings (full writeup: [multipipe-eval.md](multipipe-eval.md)).**
+- There are **already two independent channels**: the UI **named pipe** (Fern) and the CE
+  **shared-memory mailbox** (Mimic, `g_invokeMailbox`, polled on its own thread → Stark
+  game-thread queue). CE never touches the pipe.
+- Root cause of the UI lag is **DLL-side head-of-line blocking**: one pipe instance
+  (`CreateNamedPipeW maxInstances=1`) + a strictly serial `HandleClient` loop
+  (`ReadLine → DispatchCommand[blocks] → WriteLine`). A `snapshot_chunk` (~0.5–2 s) blocks
+  the read loop so a queued `walk_instance` waits in the pipe buffer. **Not** the UI
+  `_writeLock` (released before the response await — the client already `id`-multiplexes),
+  **not** CE.
+- **Multi-pipe is the wrong fix.** N pipe instances force two `DispatchCommand` to run
+  concurrently, which is **unsafe today** — `s_classContainerCache`/`s_classRefCache` use a
+  check-without-lock → build-outside-lock (`Ubel::WalkClassEx`) → insert-under-lock pattern
+  that races, and GObjects has no epoch stamp. Recommended instead: **single pipe +
+  non-blocking dispatch** (light inline + one heavy worker, concurrency = 1), deferred to
+  Phase 1 (needs per-request cancellation — `Tot::ResetPerCommand` is currently global).
+- CE responsiveness: pure-memory CE ops (GodMode/Movement/read-only teleport) are already
+  immune; only **game-thread-routed** CE invokes are at risk, and only from **CPU
+  starvation** during parallel scans — a pipe-count-independent problem.
+
+**Phase 0 shipped (DLL, `Aura.cpp`).** `ScanThreadCount` already capped workers at
+`hardware_concurrency() − 2`; added a **thread-priority guard** so a full-pool scan goes
+"nice": spawned workers in `ParallelIndexRanges` set `THREAD_PRIORITY_BELOW_NORMAL`, and a
+new RAII `ScopedScanPriority` drops the calling thread (which runs chunk 0 inline) for the
+duration of a *parallel* scan, restoring on scope exit (incl. the throwing-chunk path).
+Serial scans (tiny arrays / anti-tamper "parallel off") are untouched — they leave cores
+free anyway. The cancel-watcher stays normal priority so cancellation stays snappy. Net:
+Value Search / Group Scan / Snapshot capture no longer competes with the game thread, so CE
+`.CT` ProcessEvent invokes keep draining (far less likely to hit the invoke timeout) while
+the UI is busy. **The serial UI dispatch is unchanged — Live-Walker-during-Snapshot lag is
+Phase 1's job.** *(Built + full test suite green; not yet in-game profiled.)*
+
 ## 2026-06-27 — DataGrid horizontal-overflow sweep (all panels) + "Diff is always deep" annotation (build ~1832; UI/XAML-only; no test delta)
 
 **Context.** Two follow-ups after the top-level scalar-array capture fix below. (1) The user

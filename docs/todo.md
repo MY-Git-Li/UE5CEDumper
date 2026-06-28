@@ -21,6 +21,31 @@ Open work only. **Read this when deciding what to do next.**
 
 ## ▶ Next up (genuinely actionable now)
 
+- **Multi-pipe Phase 1 — non-blocking DLL dispatch (fixes Live-Walker-during-Snapshot lag)** —
+  Effort: **M-L** · Risk: med. Root cause + full design in
+  [multipipe-eval.md](multipipe-eval.md). The UI lag is **DLL-side head-of-line blocking**:
+  one serial `HandleClient` loop (`ReadLine → DispatchCommand[blocks] → WriteLine`) means a
+  `snapshot_chunk` (~0.5–2 s) starves a queued `walk_instance`. Fix: split dispatch — **light/
+  control commands run inline** on the read thread; **heavyweight commands go to ONE worker
+  thread** (concurrency = 1, so no two cache-builders run at once) and return their `id`-tagged
+  response via the existing `m_writeMutex` write path, freeing the read loop immediately. UI
+  needs ~no protocol change (already `id`-muxed + event/response split). **Hard prerequisite:**
+  replace the **global** `Tot::ResetPerCommand` (Fern.cpp:616) with **per-request cancellation**
+  (token / generation) — else a light inline command clears a running heavy scan's cancel state;
+  and generalize the MonitorLoop in-flight detection (`m_commandInFlight`) to "any worker
+  active". Lane table in the eval §6. **Do NOT add pipe instances** (Option 2 — same benefit,
+  forces unsafe concurrent `DispatchCommand`). *Parent: multipipe-eval Phase 0 build 1834 (dev-log 2026-06-28).*
+
+- **Multi-pipe Phase 2 — true-parallel heavy ops (OPTIONAL; only if users want 2 heavy at once)** —
+  Effort: **L** · Risk: high. Speculative — **do not pursue without a concrete need.** Raising
+  the heavy-worker cap above 1 (or ever going multi-pipe-instance) requires first making the
+  DLL safe for concurrent `DispatchCommand`: `s_classContainerCache` (Aura.cpp:1784) +
+  `s_classRefCache` (Aura.cpp:2644) currently use a check-without-lock → build-outside-lock
+  (`Ubel::WalkClassEx`) → insert-under-lock antipattern that races when two threads miss
+  together; and GObjects has **no epoch/version stamp** so concurrent walks can straddle a
+  live drift inconsistently. Make those caches build-under-lock (or per-thread build + atomic
+  publish) and add a GObjects epoch, **then** raise the cap. *Parent: multipipe-eval (dev-log 2026-06-28).*
+
 - **Class Pivot discovery (build 1742) — deeper capture-memory fix** —
   Effort: **M** (memory) · Risk: low. The bounded N-snapshot discovery + shape ranking +
   Locate-in-GWorld/GameEngine + resizable/filterable results shipped build 1742; the class
