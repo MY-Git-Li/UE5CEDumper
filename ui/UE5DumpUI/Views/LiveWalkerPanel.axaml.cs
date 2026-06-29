@@ -1,8 +1,11 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Shapes;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -40,6 +43,7 @@ public partial class LiveWalkerPanel : UserControl
         InitializeComponent();
         this.FindControl<DataGrid>("FieldGrid")?.WireSortComparers(FieldsSortComparers);
         DataContextChanged += OnDataContextChanged;
+        AttachedToVisualTree += OnAttached;
         DetachedFromVisualTree += OnDetached;
     }
 
@@ -82,6 +86,120 @@ public partial class LiveWalkerPanel : UserControl
             _subscribedVm.RestoreBookmarkView -= OnRestoreBookmarkView;
             _subscribedVm = null;
         }
+
+        if (_shineTimer != null)
+        {
+            _shineTimer.Stop();
+            _shineTimer.Tick -= ShineTimer_Tick;
+        }
+    }
+
+    // --- Empty-state logo "specular shine" easter-egg (build 1846) ----------
+    // A rare, one-shot diagonal glint sweeps across the idle logo, like light
+    // reflecting from one corner to the opposite. Kept deliberately low-odds: a
+    // slow timer rolls a small probability, and only while the logo is showing.
+    private static readonly Random ShineRng = new();
+    private const double ShineTimerIntervalSeconds = 5.0;   // how often we roll
+    private const double ShineTriggerProbability = 0.045;   // per-roll odds (rare)
+    private const double ShineSweepMilliseconds = 820.0;    // single sweep length
+    private DispatcherTimer? _shineTimer;
+    private bool _shinePlaying;
+
+    private void OnAttached(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        _shineTimer ??= new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(ShineTimerIntervalSeconds),
+        };
+        _shineTimer.Tick -= ShineTimer_Tick; // guard against double-subscribe
+        _shineTimer.Tick += ShineTimer_Tick;
+        _shineTimer.Start();
+    }
+
+    private void ShineTimer_Tick(object? sender, EventArgs e)
+    {
+        if (_shinePlaying) return;
+        // Only glint while the idle logo is actually on screen.
+        if (DataContext is not LiveWalkerViewModel vm || !vm.ShowEmptyStateLogo) return;
+        if (ShineRng.NextDouble() < ShineTriggerProbability)
+            _ = PlayShineAsync();
+    }
+
+    /// <summary>
+    /// Run one diagonal specular sweep across the logo, picking at random one of
+    /// the four "corner to opposite corner" diagonals. A fresh TransformGroup is
+    /// built each time so no animated state leaks between plays.
+    /// </summary>
+    private async Task PlayShineAsync()
+    {
+        if (_shinePlaying) return;
+
+        var shine = this.FindControl<Border>("LogoShine");
+        var bar = this.FindControl<Rectangle>("LogoShineBar");
+        if (shine is null || bar is null) return;
+
+        double w = shine.Bounds.Width, h = shine.Bounds.Height;
+        if (w < 8 || h < 8) return; // not laid out yet — skip this roll
+
+        _shinePlaying = true;
+        try
+        {
+            // Two coin flips => one of four corner->opposite-corner diagonals.
+            bool slashUp = ShineRng.Next(2) == 0; // band orientation: "/" vs "\"
+            bool reverse = ShineRng.Next(2) == 0; // sweep direction along it
+            double angle = slashUp ? -45.0 : 45.0;
+            double range = w + h;                  // start/end fully off the image
+            double fromX = reverse ? range : -range;
+            double toX = reverse ? -range : range;
+
+            var translate = new TranslateTransform { X = fromX };
+            var group = new TransformGroup();
+            group.Children.Add(new ScaleTransform(1.0, 2.4)); // lengthen band to span the diagonal
+            group.Children.Add(new RotateTransform(angle));
+            group.Children.Add(translate);
+            bar.RenderTransformOrigin = RelativePoint.Center;
+            bar.RenderTransform = group;
+
+            shine.Opacity = 1;
+
+            // Drive the sweep manually instead of Avalonia's Animation: the
+            // built-in TransformAnimator only animates a Visual's RenderTransform
+            // (it casts the target to Visual and throws InvalidCast when handed a
+            // bare Transform). A per-frame timer that writes translate.X directly
+            // re-renders cleanly, is AOT-safe, and gives full control of easing.
+            await SweepXAsync(translate, fromX, toX, ShineSweepMilliseconds);
+        }
+        catch
+        {
+            // Easter-egg only — never let a glint failure surface to the user.
+        }
+        finally
+        {
+            shine.Opacity = 0;
+            _shinePlaying = false;
+        }
+    }
+
+    /// <summary>Ease translate.X from <paramref name="fromX"/> to <paramref name="toX"/>
+    /// over <paramref name="durationMs"/> using a ~60fps dispatcher timer (sine in-out).</summary>
+    private static Task SweepXAsync(TranslateTransform translate, double fromX, double toX, double durationMs)
+    {
+        var tcs = new TaskCompletionSource();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        timer.Tick += (_, _) =>
+        {
+            double t = durationMs <= 0 ? 1.0 : Math.Min(1.0, sw.Elapsed.TotalMilliseconds / durationMs);
+            double eased = -(Math.Cos(Math.PI * t) - 1.0) / 2.0; // sine ease-in-out
+            translate.X = fromX + (toX - fromX) * eased;
+            if (t >= 1.0)
+            {
+                timer.Stop();
+                tcs.TrySetResult();
+            }
+        };
+        timer.Start();
+        return tcs.Task;
     }
 
     private void OnScrollToFieldRequested(string fieldName)
