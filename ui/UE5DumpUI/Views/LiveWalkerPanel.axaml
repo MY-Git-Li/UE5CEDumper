@@ -7,6 +7,22 @@
              x:Class="UE5DumpUI.Views.LiveWalkerPanel"
              x:DataType="vm:LiveWalkerViewModel">
 
+  <UserControl.Resources>
+    <!-- Specular-shine confinement mask (relative, so it tracks the image on
+         resize). The empty-state logo's own edge-fade is now baked into the
+         PNG's alpha (a separable rectangular feather — see Assets/UE5CEDumper.png),
+         so the Image needs no mask. This radial alpha brush only confines the
+         rare "shine" sweep to the logo's circular area: inner region opaque
+         (#FFFFFFFF), outer ring transparent (#00FFFFFF). -->
+    <RadialGradientBrush x:Key="LogoShineMask"
+                         Center="50%,50%" GradientOrigin="50%,50%"
+                         RadiusX="50%" RadiusY="58%">
+      <GradientStop Offset="0.0"  Color="#FFFFFFFF"/>
+      <GradientStop Offset="0.78" Color="#FFFFFFFF"/>
+      <GradientStop Offset="1.0"  Color="#00FFFFFF"/>
+    </RadialGradientBrush>
+  </UserControl.Resources>
+
   <DockPanel Margin="8">
     <!-- Top toolbar row 1: Navigation -->
     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,4">
@@ -686,16 +702,51 @@
     </DataGrid>
 
     <!-- Empty-state logo: shown when DataGrid has no data AND there is no
-         locate-failure banner to display (the banner takes over the area). -->
-    <Image Source="/Assets/UE5CEDumper.jpg"
-           IsVisible="{Binding ShowEmptyStateLogo}"
-           IsHitTestVisible="False"
-           Opacity="0.6"
-           Stretch="Uniform"
-           HorizontalAlignment="Center"
-           VerticalAlignment="Center"
-           MaxWidth="{Binding $parent[Panel].Bounds.Width, Converter={x:Static conv:MultiplyConverter.Instance}, ConverterParameter=0.75}"
-           MaxHeight="{Binding $parent[Panel].Bounds.Height, Converter={x:Static conv:MultiplyConverter.Instance}, ConverterParameter=0.75}"/>
+         locate-failure banner to display (the banner takes over the area).
+         Wrapped in a Grid so (a) the soft-fade vignette OpacityMask and the
+         rare specular "shine" overlay both track the image's rendered rect
+         (the Image sizes the Grid; the shine Border fills it), and (b) both
+         reuse one relative RadialGradientBrush so they scale together on
+         resize. The MaxWidth/MaxHeight bindings moved from the Image to this
+         wrapper because $parent[Panel] would otherwise resolve to the wrapper
+         Grid (Grid is a Panel) instead of the outer empty-state panel. -->
+    <Grid IsVisible="{Binding ShowEmptyStateLogo}"
+          IsHitTestVisible="False"
+          HorizontalAlignment="Center"
+          VerticalAlignment="Center"
+          MaxWidth="{Binding $parent[Panel].Bounds.Width, Converter={x:Static conv:MultiplyConverter.Instance}, ConverterParameter=0.75}"
+          MaxHeight="{Binding $parent[Panel].Bounds.Height, Converter={x:Static conv:MultiplyConverter.Instance}, ConverterParameter=0.75}">
+      <!-- Edge-fade is baked into the PNG's alpha (separable rectangular
+           feather), so all four edges dissolve into the panel background and
+           the fade scales with the image automatically. -->
+      <Image Source="/Assets/UE5CEDumper.png"
+             Opacity="0.6"
+             Stretch="Uniform"/>
+      <!-- Specular sweep overlay: hidden (Opacity=0) until a rare timer roll
+           drives a one-shot diagonal glint (see LiveWalkerPanel.axaml.cs,
+           PlayShineAsync). Clipped to the image rect and feathered by the same
+           vignette so the glint stays within the logo's visible shape. -->
+      <Border x:Name="LogoShine"
+              Opacity="0"
+              ClipToBounds="True"
+              OpacityMask="{StaticResource LogoShineMask}">
+        <Rectangle x:Name="LogoShineBar"
+                   HorizontalAlignment="Stretch"
+                   VerticalAlignment="Stretch"
+                   RenderTransformOrigin="50%,50%">
+          <Rectangle.Fill>
+            <!-- A soft white band across the middle; rotated + swept by code. -->
+            <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
+              <GradientStop Offset="0.00" Color="#00FFFFFF"/>
+              <GradientStop Offset="0.42" Color="#00FFFFFF"/>
+              <GradientStop Offset="0.50" Color="#A6FFFFFF"/>
+              <GradientStop Offset="0.58" Color="#00FFFFFF"/>
+              <GradientStop Offset="1.00" Color="#00FFFFFF"/>
+            </LinearGradientBrush>
+          </Rectangle.Fill>
+        </Rectangle>
+      </Border>
+    </Grid>
 
     <!-- Locate-in-GWorld failure banner: replaces the idle logo so a failed
          locate doesn't look identical to "nothing loaded yet". Shows the full
