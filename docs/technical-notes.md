@@ -17,6 +17,18 @@
 | UE5.3+ | Some games enable Object Pointer Encryption |
 | UE5.4+ | `FField` chain structure stable, no major changes |
 | UE5.5+/5.7 | **CasePreservingName**: FName grows from 0x8 to 0x10 bytes (adds DisplayIndex field), shifting FField::Flags +0x8 and all FProperty offsets by +0x8. Must use `DynOff` dynamic detection |
+| UE5.8 / UE6.0 | **Cache-locality reorder** of `FUObjectArray` / `FChunkedFixedUObjectArray` (shipped in **5.8**, unchanged in 6.0): `ObjObjects` is `FUObjectArray`'s first member; chunked fields `Objects@0x00, NumElements@0x08, MaxElements@0x0C, NumChunks@0x10, MaxChunks@0x14, PreAllocatedObjects@0x18`. Matched by the **"UE5.8" preset** `{0x00,0x0C,0x08,0x14,0x10}` (`Aura.cpp:258` / `Genau.cpp:192`; ArrayLayout = `{objectsOffset, maxElementsOffset, numElementsOffset, maxChunksOffset, numChunksOffset}`). **UE6.0 is layout-identical to 5.8** for every dumper-read structure in normal shipping builds — see the parity note below |
+
+> **UE6.0 vs 5.8 — shipping-build layout parity** (verified `origin/5.8..origin/ue6-main`, 2026-06-30). For normal shipping game builds UE 6.0 reads identically to UE 5.8 across every structure the dumper touches; the core path is already UE6-ready and nothing needs implementing now:
+>
+> - **FChunkedFixedUObjectArray / FUObjectArray**: SAME (the 5.8 reorder in the row above; 6.0 unchanged).
+> - **FUObjectItem**: SAME — `Object*`@+0x08 after the `int64 FlagsAndRefCount` (the reordered-item layout `DetectItemSize` already handles, `Unpacked57` mode). Only 6.0 delta is removal of `FRemoteObjectId RemoteId`, gated on `UE_WITH_REMOTE_OBJECT_HANDLE`.
+> - **UObjectBase**: Class/Name/Outer/Index/Flags offsets SAME — the hardcoded `OFF_UOBJECT_*` stay valid. 6.0 inserts `FRemoteObjectId RemoteIdPrivate` between `InternalIndex` and `ClassPrivate` **only** `#if UE_WITH_REMOTE_OBJECT_HANDLE`.
+> - **UStruct / UClass**: data members SAME (only virtual signatures gained `AUTORTFM_*` + a `PostLoad(Object)` param).
+> - **FProperty / FField**: layout SAME (the 157-line `UnrealType.h` diff is all AutoRTFM annotations, zero data members).
+> - **FName / FNamePool**: SAME (AutoRTFM annotation + a `DebugDumpBlock` tail-terminator fix only).
+>
+> ⚠️ **Watch-item (far future):** `UE_WITH_REMOTE_OBJECT_HANDLE` is an experimental multi-server/UEFN remote-object feature, OFF in normal shipping. If a UE6 game ships it **ON**, `ClassPrivate`/`NamePrivate`/`OuterPrivate` shift by `sizeof(FRemoteObjectId)` (breaking the hardcoded UObject offsets) **and** it forces FUObjectItem packing off. Version-string-map + AOB prep tracked in [todo.md](todo.md).
 
 -----
 

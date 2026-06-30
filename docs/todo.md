@@ -562,6 +562,24 @@ Pick up when the active plan finishes or when blocked.
   casually — wrong publisher bias overrides correct detection). Only add a publisher with
   ≥3 misdetected titles AND a clear pattern. Wait for real misdetection reports.
 
+- **UE 6.0 readiness — version-string map entry + remote-object watch (do only with a real UE6 binary)** —
+  Effort: **S** · Risk: low. UE 6.0 is **layout-identical to UE 5.8** across every structure the dumper
+  reads (verified `origin/5.8..origin/ue6-main`, 2026-06-30 — see [technical-notes.md](technical-notes.md));
+  the core walk + AOBs are already UE6-ready, nothing to implement now. Two small, deferred items:
+  (1) **Version-string map** — `Genau.cpp:2159` tops out at `{"5.8.",508}`; no `6.0.`→600 entry, so UE6
+  games fall to the bias fallback (dynamic detection still works, so this is detection-clarity only).
+  Adding `{"6.0.",600}` needs a `kVersionDetectLogicRev` bump (forces a one-time re-detect of all cached
+  games) **and** care vs game-version strings like "6.0" (mirror the "15.6.0" guard at `Genau.cpp:2221`).
+  (2) **UE6 AOBs** — add UE6-specific AOBs only against a real binary; our AOBs wildcard displacements and
+  resolve the pointer, so the 5.8/6.0 reordered fields are handled post-resolve by the existing "UE5.8"
+  preset. `StaticAllocateObject` gained a `UObject*` param (body changed) but the GObjects AOBs target the
+  `mov reg,[rip+GUObjectArray]` sites, not that prologue. **Watch-item (far future, not shipping-default):**
+  `UE_WITH_REMOTE_OBJECT_HANDLE` (experimental multi-server / UEFN remote objects, OFF in normal shipping)
+  inserts `FRemoteObjectId` into `UObjectBase` (between `InternalIndex` and `ClassPrivate`) and `FUObjectItem`;
+  if a UE6 game ships it ON, the hardcoded `OFF_UOBJECT_*` offsets shift by `sizeof(FRemoteObjectId)` and
+  FUObjectItem packing is forced off — a real handler branch would then be needed.
+  *Parent: UE6-vs-5.8 parity audit (2026-06-30); per-structure detail in technical-notes.md.*
+
 -----
 
 ## Pending live-game verification (verify only — no code)
