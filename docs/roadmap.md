@@ -617,3 +617,20 @@ shipping any major Walker / Detection change:
   `CMD_SCAN_STATUS` payloads. The shared helper enforces this for
   pointer fields; the equivalent guarantee for object-list / walker
   payloads does not yet exist.
+- **UE 6.0 layout parity (core path already UE6-ready)** — diffed every
+  dumper-critical header `origin/5.8..origin/ue6-main` (2026-06-30). For
+  **normal shipping** UE6 builds, **6.0 is layout-identical to 5.8** across
+  every structure the dumper reads (FUObjectArray/chunked array, FUObjectItem
+  `Object@+0x08`, UObjectBase Class/Name/Outer/Index/Flags, UStruct/UClass,
+  FProperty/FField, FName/FNamePool) — the 5.8 cache-locality field reorder
+  already ships in our `{0x00,0x0C,0x08,0x14,0x10}` "UE5.8" preset
+  (`Aura.cpp`/`Genau.cpp`); 6.0 adds only AutoRTFM annotations + virtual-sig
+  changes (no data members). **Nothing to implement now.** Two deferred
+  watch-items (effort/risk in [todo.md](todo.md), per-structure layout in
+  [technical-notes.md](technical-notes.md)): (1) if a UE6 game ships the
+  experimental `UE_WITH_REMOTE_OBJECT_HANDLE` ON (off in normal shipping),
+  hardcoded `OFF_UOBJECT_*` offsets shift by `sizeof(FRemoteObjectId)` and
+  FUObjectItem packing is forced off; (2) the version-string map tops out at
+  `{"5.8.",508}` — UE6 games fall to a bias fallback (dynamic detection still
+  works), so a `{"6.0.",600}` entry is optional prep gated on a
+  `kVersionDetectLogicRev` bump. No pre-emptive UE6 AOBs needed.
