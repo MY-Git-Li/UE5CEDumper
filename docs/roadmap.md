@@ -108,6 +108,24 @@ state.
 | FieldPathProperty | ❌ | ❌ |
 | TMap / TSet with weak-like inner sides | — | ❌ (v4 candidate) |
 
+## CE export — record flatten / colors / leaf-pointer collapse (build ~1856; PRs #401/#402)
+
+Live Walker → **Options** toggles that flatten the **Copy CE XML / Copy CE Field** output (CSX
+stays nested by design). All **address-equivalent** (a flattened row watches the same memory),
+**off by default**, persisted in `LiveWalkerUiOptions`. `IsTerminalLeafField` = primitives ∪
+`{NameProperty, StrProperty/Utf8Str/AnsiStr}`; `FText` is excluded. See [tips.md](tips.md) for the
+user recipe.
+
+| Option | Effect | Encoding |
+|---|---|---|
+| Flatten primitive-leaf structs | all-numeric struct (FVector, FRotator, FDateTime `Ticks`…) → `Struct ▸ Field` sibling leaves | inline `+(structOff+childOff)`, 0-deref |
+| Flatten leaf records (names/strings) | superset: also accepts FName + FString leaves; reaches into **TMap/TArray element structs** (drops the `[i]` folder); no field-count cap | FString child `+combined` `Offsets=[0]`; FName 4-byte; scalar inline |
+| Collapse single-leaf pointers | drilled pointer whose target is **one** terminal leaf → one `Ptr ▸ Field` record (vs folder + lone child); multi-field pointee keeps its group | scalar/FName `+ptrOff Offsets=[childOff]`; FString `Offsets=[0, childOff]` |
+| Record Colors… | tint flattened **container** rows by element-index parity (CE `<Color>` text colour) | RGB→COLORREF `BBGGRR`; `FlattenColorDialog` + in-app `ColorPickerDialog` (Custom… hue strip + RGB) |
+
+In-game VERIFIED on SEED (`StoryMissionRecord` 222-entry `TMap` flatten + colors); the
+pointer-collapse path is unit-tested only (no in-game pointer-to-string case yet).
+
 ## Per-game configuration
 
 Persisted in HintCache JSON per PE hash, surfaces in the Pointer panel:

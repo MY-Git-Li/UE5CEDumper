@@ -18,6 +18,50 @@ builds ≤696 in
 
 -----
 
+## 2026-06-30 — CE export: flatten leaf records + record colors + collapse single-leaf pointers (build ~1856; MERGED PRs #401/#402, docs #403; in-game VERIFIED on SEED for flatten + colors)
+
+**SHIPPED.** Three opt-in Live Walker → **Options** export features — **Copy CE XML / Copy CE
+Field only** (CSX deliberately left nested), **no DLL change, no re-inject**. All **address-
+equivalent**: a flattened / collapsed row resolves to the exact same memory as the nested form,
+with the offsets folded into the row instead of spread across parent folders. Off by default,
+persisted in `LiveWalkerUiOptions`. Origin: the SEED save-data session's three "case" asks plus a
+colour follow-up. User recipe added to [tips.md](tips.md) (PR #403).
+
+**Flatten leaf records (names/strings) — PR #401.** Superset of "Flatten primitive-leaf structs":
+the flatten gate (new `IsTerminalLeafField` = primitives ∪ `NameProperty` ∪ FString family) now
+accepts `FName` + `FString` leaves, so a record struct `{Score, Rank, MsID(FName), PilotName
+(FString)}` collapses fully. `EmitFlattenedStruct` emits an FString child as a CE **String** leaf
+(`Offsets=[0]`, one FString.Data deref) and a name child as a 4-byte int. `EmitMapProperty`
+collapses the per-element `[i]` group when the value is a flattenable record → flat `[i] key ▸
+Field` siblings at the combined offset (struct arrays / sets already flattened via `EmitFields`;
+only `TMap` wrapped a group). **No field-count cap** — the all-terminal-leaf requirement is the
+gate. Subsumes case #2 (`FDateTime` = a single `Ticks`). **In-game VERIFIED on SEED**
+`StoryMissionRecord` (`TMap<FName, LifeStoryMissionRecord>`, 222 entries): flat rows, `PilotName`
+as a readable CE String.
+
+**Record Colors — PR #401.** Tints flattened container-element rows by element-index parity
+(CE `<Color>`, a COLORREF written `BBGGRR` — RGB byte-swapped at emit) so records stay separable
+once the `[i]` folder is gone. Even = `struct[0],[2],…`; Odd = `struct[1],[3],…`. `FlattenColorDialog`
+(code-behind `ManagedDialogWindow`): neutral preset palette + hex + Reset + live preview; per-section
+**Custom…** opens an in-app `ColorPickerDialog` (rainbow hue strip + R/G/B sliders + preview —
+deliberately **not** the native Win32 picker, which would need a Core platform-abstraction P/Invoke
+and clashes with the dark theme; reflection was never the blocker). Default on, Even = azure, Odd =
+unset. Colours land only on flattened rows. **In-game VERIFIED on SEED.**
+
+**Collapse single-leaf pointers — PR #402.** The deferred case #1 ("pointer to a string"): a drilled
+pointer whose resolved target holds **exactly one** terminal leaf collapses to one `Pointer ▸ Field`
+record via `EmitOneDerefLeaf` (scalar / `FName` → `Address=+ptrOff, Offsets=[childOff]`, 1 deref;
+`FString` → `Offsets=[0, childOff]`, 2 derefs) instead of a folder + lone child. Gated in
+`EmitDrilledPointer` after the dedup / cycle / depth guards (does not mark dedup or push the cycle
+path — a leaf has no subtree); a multi-field pointee keeps its group. Default OFF. **Unit-tested
+only** — no in-game pointer-to-string case has surfaced (SEED's `PilotName` is an inline struct
+string, already record-flattened); low risk.
+
+**Verification:** 2105 C# tests (+14 across the three features), 797 dll self-tests, Native-AOT
+publish clean. All client / C#-only; the export math reuses the CE pointer model proven by the
+record flatten. **Lesson:** CE `<Color>` is a Win32 COLORREF (`BBGGRR`), the reverse of RGB —
+`0080FF` (azure) writes as `FF8000`.
+
 ## 2026-06-28 — Phase 1 REDO: discrete-style two-connection lane split (build ~1845; MERGED PR #396, in-game VERIFIED 1–5)
 
 **SHIPPED.** In-game verified on Elliot (§9.6 items 1–5: connect / interactive-responsive-during-
