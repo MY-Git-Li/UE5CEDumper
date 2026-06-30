@@ -243,6 +243,20 @@ public static class CeXmlExportService
     private static string? _curRowColor;
 
     /// <summary>
+    /// Opt-in (Live Walker "Collapse single-leaf pointers" toggle, default off): when a drilled
+    /// pointer (Object/Class/Weak/Soft/Lazy/Interface) resolves to a target with EXACTLY ONE
+    /// terminal-leaf field (a scalar / FName / FString), collapse the group + lone child into ONE
+    /// CE record at the pointer field with a deref chain instead of a folder. The original
+    /// "指標指到 string" case: a pointer whose only payload is a single string is two CE nodes for
+    /// one value. Encodings (<see cref="EmitOneDerefLeaf"/>): scalar/name child → Address=+ptrOff,
+    /// Offsets=[childOff] (1 deref); FString child → Address=+ptrOff, Offsets=[0, childOff]
+    /// (2 derefs: the pointer, then the FString.Data buffer). A multi-field pointee keeps its group
+    /// (its object identity is worth a boundary). Honoured in <see cref="EmitDrilledPointer"/>.
+    /// </summary>
+    [ThreadStatic]
+    private static bool _collapseLeafPointers;
+
+    /// <summary>
     /// Current <see cref="EmitFields"/> nesting depth (1 = the top-level user-selected
     /// fields, &gt;1 = recursively-resolved struct / pointer children). The noise filter
     /// keys off this so it never drops a field the user explicitly put on screen.
@@ -863,7 +877,8 @@ public static class CeXmlExportService
         bool flattenLeafRecords = false,
         bool altColorEnabled = false,
         string? altRowColorEvenRgb = null,
-        string? altRowColorOddRgb = null)
+        string? altRowColorOddRgb = null,
+        bool collapseLeafPointers = false)
     {
         // Clean breadcrumbs: remove navigation cycles (e.g., Child->Parent->Child)
         // before generating XML to avoid deeply nested duplicate pointer chains.
@@ -883,6 +898,7 @@ public static class CeXmlExportService
         _altColorEven = RgbToCeColor(altRowColorEvenRgb);
         _altColorOdd = RgbToCeColor(altRowColorOddRgb);
         _curRowColor = null;
+        _collapseLeafPointers = collapseLeafPointers;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -992,7 +1008,8 @@ public static class CeXmlExportService
         bool flattenLeafRecords = false,
         bool altColorEnabled = false,
         string? altRowColorEvenRgb = null,
-        string? altRowColorOddRgb = null)
+        string? altRowColorOddRgb = null,
+        bool collapseLeafPointers = false)
     {
         _nextId = 100;
         _collapsePointerNodes = collapsePointerNodes;
@@ -1008,6 +1025,7 @@ public static class CeXmlExportService
         _altColorEven = RgbToCeColor(altRowColorEvenRgb);
         _altColorOdd = RgbToCeColor(altRowColorOddRgb);
         _curRowColor = null;
+        _collapseLeafPointers = collapseLeafPointers;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -1126,7 +1144,8 @@ public static class CeXmlExportService
         bool flattenLeafRecords = false,
         bool altColorEnabled = false,
         string? altRowColorEvenRgb = null,
-        string? altRowColorOddRgb = null)
+        string? altRowColorOddRgb = null,
+        bool collapseLeafPointers = false)
     {
         var cleanedBc = CleanBreadcrumbs(breadcrumbs);
 
@@ -1144,6 +1163,7 @@ public static class CeXmlExportService
         _altColorEven = RgbToCeColor(altRowColorEvenRgb);
         _altColorOdd = RgbToCeColor(altRowColorOddRgb);
         _curRowColor = null;
+        _collapseLeafPointers = collapseLeafPointers;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -2090,6 +2110,17 @@ public static class CeXmlExportService
             return;
         }
 
+        // Feature B (Collapse single-leaf pointers): the resolved target is a SINGLE terminal leaf
+        // (scalar / FName / FString) — the pointer node + its lone child are two CE rows for one
+        // value. Collapse to ONE record at the pointer field with a deref chain (no group). We do
+        // NOT mark the pointer emitted (dedup) or push the cycle path: a leaf has no subtree, so
+        // later references may collapse independently and there is nothing to recurse into.
+        if (_collapseLeafPointers && children.Count == 1 && IsTerminalLeafField(children[0]))
+        {
+            EmitOneDerefLeaf(sb, indent, field, children[0]);
+            return;
+        }
+
         // Committing to the full expansion — mark this object emitted so any later
         // reference to it dedups to a "(shared)" flat leaf.
         if (dedupTrack)
@@ -2254,6 +2285,42 @@ public static class CeXmlExportService
             // The primitive-only gates guarantee MapCeField != null; stay defensive anyway.
             var ceField = MapCeField(child) ?? new CeFieldInfo("8 Bytes", ShowAsHex: true);
             EmitLeaf(sb, indent, desc, ceField, $"+{combinedOffset:X}", null);
+        }
+    }
+
+    /// <summary>
+    /// Collapse a drilled pointer whose target is a SINGLE terminal leaf into ONE CE record at the
+    /// pointer field (Feature B — the "指標指到 string" case). The pointer is dereferenced through the
+    /// leaf's Offsets, so the watched address is the SAME value CE would reach through the old
+    /// group + child; only the tree is flatter. Description = "{ptr} ▸ {child}" (per-segment +Offset;
+    /// the pointer class type appended once via +Type). CE pointer model (CeXmlExportService.cs
+    /// header math): Address is dereferenced first, then offsets apply with O[0] outermost.
+    ///   • FString-family child → CE String leaf, Address=+ptrOff, Offsets=[0, childOff] — TWO
+    ///     derefs: follow the pointer, then the inline FString.Data buffer at +childOff.
+    ///   • scalar / FName child → Address=+ptrOff, Offsets=[childOff] — ONE deref: follow the
+    ///     pointer; the value sits inline at +childOff within the target.
+    /// </summary>
+    private static void EmitOneDerefLeaf(StringBuilder sb, string indent,
+        LiveFieldValue ptrField, LiveFieldValue child)
+    {
+        var seg1 = DecorateDesc(ptrField.Name, ptrField.Offset, null, allowType: false);
+        var seg2 = DecorateDesc(child.Name, child.Offset, null, allowType: false);
+        var typeSuffix = (_descShowType && !string.IsNullOrEmpty(ptrField.PtrClassName))
+            ? $" ({ptrField.PtrClassName})"
+            : "";
+        var desc = $"{seg1} ▸ {seg2}{typeSuffix}";
+        var address = $"+{ptrField.Offset:X}";
+
+        if (IsStringProperty(child.TypeName))
+        {
+            EmitStringLeaf(sb, indent, desc, address,
+                offsets: [0, child.Offset], unicode: child.TypeName == "StrProperty",
+                codepage: child.TypeName == "Utf8StrProperty");
+        }
+        else
+        {
+            var ceField = MapCeField(child) ?? new CeFieldInfo("8 Bytes", ShowAsHex: true);
+            EmitLeaf(sb, indent, desc, ceField, address, offsets: [child.Offset]);
         }
     }
 
