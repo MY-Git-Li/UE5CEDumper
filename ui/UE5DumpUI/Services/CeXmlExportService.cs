@@ -206,6 +206,24 @@ public static class CeXmlExportService
     private static bool _flattenLeafStructs;
 
     /// <summary>
+    /// Opt-in (Live Walker "Flatten leaf records" toggle, default off): a STRICT SUPERSET of
+    /// <see cref="_flattenLeafStructs"/>. Collapse ANY terminal StructProperty by ONE level when
+    /// its entire flattened subtree is made of <see cref="IsTerminalLeafField">terminal leaves</see>
+    /// — i.e. the primitive scalars/enum that primitive-leaf accepts PLUS <c>NameProperty</c> and the
+    /// FString family (<c>StrProperty</c>/<c>Utf8StrProperty</c>/<c>AnsiStrProperty</c>). Designed for
+    /// save-data "record" structs (e.g. {int Score, int Time, ERankID Rank, FName MsID, FString
+    /// PilotName}) so each field becomes a sibling leaf instead of a per-struct group. NO field-count
+    /// cap (the all-leaf gate is the safety). A name child renders as today's 4-byte int leaf; an
+    /// FString child renders as a CE String leaf with <c>Offsets=[0]</c> (one deref of the FString.Data
+    /// pointer) — see <see cref="EmitFlattenedStruct"/>. Pointers/objects, FText, containers, and
+    /// unresolved nested structs still keep the struct grouped. Auto-applies to TMap/TArray element
+    /// structs (they route through <see cref="EmitFields"/>). Copy CE XML / Copy CE Field only
+    /// (CSX deliberately unaffected).
+    /// </summary>
+    [ThreadStatic]
+    private static bool _flattenLeafRecords;
+
+    /// <summary>
     /// Current <see cref="EmitFields"/> nesting depth (1 = the top-level user-selected
     /// fields, &gt;1 = recursively-resolved struct / pointer children). The noise filter
     /// keys off this so it never drops a field the user explicitly put on screen.
@@ -822,7 +840,8 @@ public static class CeXmlExportService
         bool dedupShared = false,
         bool excludeSystemComponents = false,
         bool flattenGasAttributes = false,
-        bool flattenLeafStructs = false)
+        bool flattenLeafStructs = false,
+        bool flattenLeafRecords = false)
     {
         // Clean breadcrumbs: remove navigation cycles (e.g., Child->Parent->Child)
         // before generating XML to avoid deeply nested duplicate pointer chains.
@@ -837,6 +856,7 @@ public static class CeXmlExportService
         _excludeSystemComponents = excludeSystemComponents;
         _flattenGasAttributes = flattenGasAttributes;
         _flattenLeafStructs = flattenLeafStructs;
+        _flattenLeafRecords = flattenLeafRecords;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -942,7 +962,8 @@ public static class CeXmlExportService
         bool dedupShared = false,
         bool excludeSystemComponents = false,
         bool flattenGasAttributes = false,
-        bool flattenLeafStructs = false)
+        bool flattenLeafStructs = false,
+        bool flattenLeafRecords = false)
     {
         _nextId = 100;
         _collapsePointerNodes = collapsePointerNodes;
@@ -953,6 +974,7 @@ public static class CeXmlExportService
         _excludeSystemComponents = excludeSystemComponents;
         _flattenGasAttributes = flattenGasAttributes;
         _flattenLeafStructs = flattenLeafStructs;
+        _flattenLeafRecords = flattenLeafRecords;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -1067,7 +1089,8 @@ public static class CeXmlExportService
         bool dedupShared = false,
         bool excludeSystemComponents = false,
         bool flattenGasAttributes = false,
-        bool flattenLeafStructs = false)
+        bool flattenLeafStructs = false,
+        bool flattenLeafRecords = false)
     {
         var cleanedBc = CleanBreadcrumbs(breadcrumbs);
 
@@ -1080,6 +1103,7 @@ public static class CeXmlExportService
         _excludeSystemComponents = excludeSystemComponents;
         _flattenGasAttributes = flattenGasAttributes;
         _flattenLeafStructs = flattenLeafStructs;
+        _flattenLeafRecords = flattenLeafRecords;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -1783,7 +1807,13 @@ public static class CeXmlExportService
                                   && structChildren.All(c => MapCeField(c) != null);
                 bool leafFlatten = _flattenLeafStructs
                                    && structChildren.All(IsPrimitiveLeafField);
-                if (gasFlatten || leafFlatten)
+                //  • Record: ANY terminal struct whose flattened subtree is ALL terminal leaves
+                //    (the primitive scalars PLUS NameProperty + FString family). A superset of
+                //    leafFlatten; EmitFlattenedStruct renders a string child as a CE String leaf
+                //    (Offsets=[0]) and a name child as a 4-byte int. Save-data "record" structs.
+                bool recordFlatten = _flattenLeafRecords
+                                     && structChildren.All(IsTerminalLeafField);
+                if (gasFlatten || leafFlatten || recordFlatten)
                     EmitFlattenedStruct(sb, indent, field, structChildren);
                 else
                     EmitResolvedStruct(sb, indent, field, structChildren);
@@ -2112,14 +2142,39 @@ public static class CeXmlExportService
         or "Byte" or "Byte?";
 
     /// <summary>
+    /// True when <paramref name="field"/> is a TERMINAL LEAF — a value that never expands into
+    /// further CE rows. The gate for the "Flatten leaf records" option (<see cref="_flattenLeafRecords"/>),
+    /// a STRICT SUPERSET of <see cref="IsPrimitiveLeafField"/>: every primitive scalar PLUS
+    /// <c>NameProperty</c> (an FName index pair, rendered as a 4-byte int) and the FString family
+    /// (<c>StrProperty</c>/<c>Utf8StrProperty</c>/<c>AnsiStrProperty</c>, rendered as a CE String leaf
+    /// with one Data-pointer deref). These are leaves: they hold a single watchable value and have
+    /// no sub-fields to drill. STILL EXCLUDED (each keeps the struct grouped): pointers/objects,
+    /// <c>TextProperty</c> (FText's internal chain has no clean CE encoding), containers, and
+    /// StructProperty. <see cref="EmitFlattenedStruct"/> renders the string children specially.
+    /// </summary>
+    private static bool IsTerminalLeafField(LiveFieldValue field) =>
+        IsPrimitiveLeafField(field)
+        || field.TypeName == "NameProperty"
+        || IsStringProperty(field.TypeName);
+
+    /// <summary>
     /// Flatten a struct ONE level: emit each resolved child as a sibling leaf instead of a
-    /// parent group + children. Shared by the GAS flatten and the generic primitive-leaf
-    /// flatten. The child's CE Address is the COMBINED offset (struct member offset + child
-    /// offset within the struct) — identical to what CE would resolve through the group (inline
-    /// struct, no dereference), so the watched address is unchanged; only the tree is flatter.
-    /// Description = "{Struct} ▸ {Child}" with per-segment +Offset honouring DescShowOffset; the
-    /// struct's type label is appended ONCE at the end (DescShowType) so the merged text stays
-    /// readable. Caller guarantees every child maps to a scalar CE leaf (MapCeField != null).
+    /// parent group + children. Shared by the GAS flatten, the primitive-leaf flatten, and the
+    /// "Flatten leaf records" superset. The child's CE Address is the COMBINED offset (struct
+    /// member offset + child offset within the struct) — identical to what CE would resolve
+    /// through the group (inline struct, no dereference), so the watched address is unchanged;
+    /// only the tree is flatter. Description = "{Struct} ▸ {Child}" with per-segment +Offset
+    /// honouring DescShowOffset; the struct's type label is appended ONCE at the end (DescShowType)
+    /// so the merged text stays readable.
+    ///
+    /// Child rendering by type (the record-flatten gate may add string/name children that the
+    /// primitive-only gates never produce):
+    ///   • FString family (StrProperty/Utf8StrProperty/AnsiStrProperty) → a CE String leaf at
+    ///     +combinedOffset with Offsets=[0] — one deref of the inline FString.Data pointer (the
+    ///     header sits at the combined offset; the chars are one pointer hop away). MapCeField
+    ///     returns null for these (they are normally handled by EmitStringLeaf), so they MUST take
+    ///     this branch or they'd mis-render as an 8-byte hex blob.
+    ///   • Everything else (scalar/enum/FName) → EmitLeaf with MapCeField, no Offsets (0-deref).
     /// </summary>
     private static void EmitFlattenedStruct(StringBuilder sb, string indent,
         LiveFieldValue structField, List<LiveFieldValue> children)
@@ -2144,7 +2199,19 @@ public static class CeXmlExportService
             // Inline struct: child address = struct member offset + child-in-struct offset.
             var combinedOffset = structField.Offset + child.Offset;
 
-            // Caller's all-scalar gate guarantees MapCeField != null; stay defensive anyway.
+            // FString-family child: render as a CE String leaf with a single Data-pointer deref
+            // (Offsets=[0]), the same encoding EmitFields uses for a top-level string — the FString
+            // header is inline at the combined offset, its chars one hop away.
+            if (IsStringProperty(child.TypeName))
+            {
+                EmitStringLeaf(sb, indent, desc, $"+{combinedOffset:X}",
+                    offsets: [0], unicode: child.TypeName == "StrProperty",
+                    codepage: child.TypeName == "Utf8StrProperty");
+                continue;
+            }
+
+            // Scalar / enum / FName: a direct value at the combined offset, no dereference.
+            // The primitive-only gates guarantee MapCeField != null; stay defensive anyway.
             var ceField = MapCeField(child) ?? new CeFieldInfo("8 Bytes", ShowAsHex: true);
             EmitLeaf(sb, indent, desc, ceField, $"+{combinedOffset:X}", null);
         }
@@ -2689,6 +2756,40 @@ public static class CeXmlExportService
         foreach (var elem in field.MapElements)
         {
             int elemByteOffset = elem.Index * stride;
+
+            // Record / primitive-leaf flatten: when the map VALUE is a struct whose entire subtree
+            // is leaf fields, collapse the per-element [i] group too — emit the Key and the value's
+            // fields as flat "[i] key ▸ Field" siblings at the COMBINED offset (element base + value
+            // offset + field offset), instead of an [i] folder + a Value sub-group. Mirrors how a
+            // struct ARRAY already flattens its elements (EmitStructArrayProperty). The map group
+            // already derefs Data (Offsets=[0]), so the combined offset is the live field address.
+            // Gate matches the StructProperty branch in EmitFields (leaf / record), minus GAS.
+            string valStructAddr = valStruct ? AbsAddr(dataBase, elemByteOffset + valOffset) : "";
+            if (valStruct && _resolvedStructsState != null
+                && _resolvedStructsState.TryGetValue(valStructAddr, out var valFlatChildren)
+                && valFlatChildren.Count > 0
+                && ((_flattenLeafStructs && valFlatChildren.All(IsPrimitiveLeafField))
+                    || (_flattenLeafRecords && valFlatChildren.All(IsTerminalLeafField))))
+            {
+                var rawElemLabel = !string.IsNullOrEmpty(elem.Key)
+                    ? $"[{elem.Index}] {elem.Key}" : $"[{elem.Index}]";
+                // Key as a flat sibling leaf at the element base ("[i] key ▸ Key").
+                if (ceKey != null)
+                    EmitLeaf(sb, elemIndent,
+                        $"{DecorateDesc(rawElemLabel, elemByteOffset, null, allowType: false)} ▸ Key",
+                        ceKey, $"+{elemByteOffset:X}", null);
+                // Value record fields as flat "[i] key ▸ Field" siblings at the combined offset.
+                EmitFlattenedStruct(sb, elemIndent, new LiveFieldValue
+                {
+                    Name = rawElemLabel,
+                    TypeName = "StructProperty",
+                    Offset = elemByteOffset + valOffset,
+                    StructDataAddr = valStructAddr,
+                    StructTypeName = field.MapValueStructType,
+                }, valFlatChildren);
+                continue;
+            }
+
             // An object key's instance name is dropped (+Type re-adds its class); a
             // scalar/string key is the slot's identity, so it's kept as the name.
             var elemDesc = !string.IsNullOrEmpty(elem.KeyPtrName)

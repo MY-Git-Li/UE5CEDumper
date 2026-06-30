@@ -699,6 +699,124 @@ public class CeXmlExportServiceTests
         Assert.DoesNotContain("<Address>+54</Address>", xml);
     }
 
+    // ===== Leaf-record flatten (Live Walker "Flatten leaf records (names/strings)") =====
+    // Superset of the primitive-leaf flatten: ALSO accepts NameProperty + the FString family as
+    // leaf children, so a save-data "record" struct flattens fully. A name child renders as a
+    // 4-byte int; an FString child renders as a CE String leaf with Offsets=[0] (one Data deref).
+
+    /// <summary>A record struct {int Score, enum Rank, FName MsID, FString PilotName} mirroring the
+    /// SEED LifeStoryMissionRecord shape (offsets struct-relative; struct sits at +0x50).</summary>
+    private static (LiveFieldValue[] fields, Dictionary<string, List<LiveFieldValue>> structs)
+        BuildRecordStruct() => BuildLeafStruct("LifeStoryMissionRecord", new()
+        {
+            new LiveFieldValue { Name = "Score",     TypeName = "IntProperty",  Offset = 0x0, Size = 4 },
+            new LiveFieldValue { Name = "Rank",      TypeName = "EnumProperty", Offset = 0x4, Size = 1 },
+            new LiveFieldValue { Name = "MsID",      TypeName = "NameProperty", Offset = 0x8, Size = 8 },
+            new LiveFieldValue { Name = "PilotName", TypeName = "StrProperty",  Offset = 0x10, Size = 16 },
+        });
+
+    [Fact]
+    public void GenerateInstanceXml_FlattenLeafRecords_FlattensRecordWithNameAndString()
+    {
+        var sep = "▸";
+        var (fields, structs) = BuildRecordStruct();
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields, structs, flattenLeafRecords: true);
+
+        // Every field promoted to a "Range ▸ Field" sibling leaf — no parent group.
+        Assert.Contains($"Range {sep} Score", xml);
+        Assert.Contains($"Range {sep} Rank", xml);
+        Assert.Contains($"Range {sep} MsID", xml);
+        Assert.Contains($"Range {sep} PilotName", xml);
+        Assert.DoesNotContain("<Description>\"Range\"</Description>", xml);
+
+        // Scalar at the COMBINED offset (0x50 + childOffset), 0-deref.
+        Assert.Contains("<Address>+50</Address>", xml);   // Score  (0x50 + 0x0)
+        Assert.Contains("<Address>+58</Address>", xml);   // MsID   (0x50 + 0x8)
+        // FName renders as a 4-byte int leaf (no Offsets / deref).
+        Assert.Contains("<VariableType>4 Bytes</VariableType>", xml);
+
+        // FString child renders as a CE String leaf at the combined offset (0x50 + 0x10 = 0x60)
+        // WITH Offsets=[0] (one deref of the inline FString.Data pointer) — the headline 1-deref case.
+        Assert.Contains("<Address>+60</Address>", xml);
+        Assert.Contains("<VariableType>String</VariableType>", xml);
+        Assert.Matches(
+            @"<Address>\+60</Address>\s*<Offsets>\s*<Offset>0</Offset>\s*</Offsets>", xml);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_FlattenLeafRecordsOff_KeepsRecordGroup()
+    {
+        var sep = "▸";
+        var (fields, structs) = BuildRecordStruct();
+
+        // Neither flatten toggle → the record stays a nested group.
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields, structs);
+
+        Assert.Contains("<Description>\"Range\"</Description>", xml);
+        Assert.DoesNotContain(sep, xml);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_FlattenLeafStructs_DoesNotFlattenRecordWithNameString()
+    {
+        // REGRESSION: the OLD primitive-leaf toggle must NOT flatten a record carrying FName /
+        // FString fields — only the new leaf-records toggle widens the gate. Guards that the
+        // IsPrimitiveLeafField predicate stayed narrow.
+        var sep = "▸";
+        var (fields, structs) = BuildRecordStruct();
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields, structs, flattenLeafStructs: true);
+
+        Assert.Contains("<Description>\"Range\"</Description>", xml);
+        Assert.DoesNotContain(sep, xml);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_FlattenLeafRecords_StillKeepsStructWithPointer()
+    {
+        // Pointers are NOT terminal leaves — a pointer descendant keeps the struct grouped even
+        // under the wider record gate.
+        var sep = "▸";
+        var (fields, structs) = BuildLeafStruct("Holder", new()
+        {
+            new LiveFieldValue { Name = "MsID", TypeName = "NameProperty", Offset = 0x0, Size = 8 },
+            new LiveFieldValue
+            {
+                Name = "Owner", TypeName = "ObjectProperty", Offset = 0x8, Size = 8,
+                PtrAddress = "0x0", PtrClassName = "AActor"
+            },
+        });
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields, structs, flattenLeafRecords: true);
+
+        Assert.Contains("<Description>\"Range\"</Description>", xml);
+        Assert.DoesNotContain(sep, xml);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_FlattenLeafRecords_KeepsStructWithFText()
+    {
+        // FText is deliberately EXCLUDED from the flattenable leaf set (its internal chain has no
+        // clean CE encoding), so a TextProperty descendant keeps the struct grouped.
+        var sep = "▸";
+        var (fields, structs) = BuildLeafStruct("Captioned", new()
+        {
+            new LiveFieldValue { Name = "Score", TypeName = "IntProperty",  Offset = 0x0, Size = 4 },
+            new LiveFieldValue { Name = "Title", TypeName = "TextProperty", Offset = 0x8, Size = 24 },
+        });
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields, structs, flattenLeafRecords: true);
+
+        Assert.Contains("<Description>\"Range\"</Description>", xml);
+        Assert.DoesNotContain(sep, xml);
+    }
+
     [Fact]
     public void GenerateInstanceXml_StructWithBoolBitfield_EmitsBinaryType()
     {
@@ -2454,6 +2572,59 @@ public class CeXmlExportServiceTests
         // The value struct's own fields are emitted (the whole point).
         Assert.Contains("\"Rank\"", xml);
         Assert.Contains("\"Cleared\"", xml);
+    }
+
+    [Fact]
+    public void MapValueRecord_FlattenLeafRecords_CollapsesPerElementGroup()
+    {
+        // The SEED StoryMissionRecord shape: TMap<FName, record-struct>. With Flatten leaf records
+        // on, the per-element [i] group collapses too — the Key and the value record's fields become
+        // flat "[i] key ▸ Field" siblings at the COMBINED offset (element base + value offset + field
+        // offset), instead of an [i] folder wrapping a Value sub-group.
+        var map = new LiveFieldValue
+        {
+            Name = "StoryMissionRecord", TypeName = "MapProperty", Offset = 0x100, Size = 0x50,
+            MapCount = 1, MapKeyType = "NameProperty", MapValueType = "StructProperty",
+            MapKeySize = 8, MapValueSize = 0x30, MapValueOffset = 8, MapDataAddr = "0x4000",
+            MapValueStructAddr = "0xABC", MapValueStructType = "LifeStoryMissionRecord",
+            MapElements = new List<ContainerElementValue> { new() { Index = 0, Key = "mc1om_001" } },
+        };
+        // Element 0 value struct addr = MapDataAddr + 0*stride + valOffset = 0x4000 + 8 = 0x4008.
+        var resolvedStructs = new Dictionary<string, List<LiveFieldValue>>
+        {
+            ["0x4008"] = new()
+            {
+                new() { Name = "Score",     TypeName = "IntProperty",  Offset = 0x0,  Size = 4 },
+                new() { Name = "MsID",      TypeName = "NameProperty", Offset = 0x8,  Size = 8 },
+                new() { Name = "PilotName", TypeName = "StrProperty",  Offset = 0x10, Size = 16 },
+            }
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "Obj", "Cls",
+            new List<LiveFieldValue> { map }, resolvedStructs, flattenLeafRecords: true);
+
+        var sep = "▸";
+        // Flat "[0] mc1om_001 ▸ Field" siblings — including the Key.
+        Assert.Contains($"[0] mc1om_001 {sep} Key", xml);
+        Assert.Contains($"[0] mc1om_001 {sep} Score", xml);
+        Assert.Contains($"[0] mc1om_001 {sep} MsID", xml);
+        Assert.Contains($"[0] mc1om_001 {sep} PilotName", xml);
+        // The per-element group HEADER is gone (no bare "[0] mc1om_001" Description, no "Value" group).
+        Assert.DoesNotContain("<Description>\"[0] mc1om_001\"</Description>", xml);
+        Assert.DoesNotContain($"Value {sep}", xml);
+
+        // Combined offsets relative to the map's dereferenced Data pointer:
+        //   Key   = elemBase(0) + 0          = +0
+        //   Score = elemBase(0) + valOff(8)  = +8
+        //   MsID  = +8 + 0x8                 = +10
+        Assert.Contains("<Address>+8</Address>", xml);
+        Assert.Contains("<Address>+10</Address>", xml);
+        // PilotName: combined +18 (0 + 8 + 0x10) rendered as a CE String with Offsets=[0] — the
+        // FString.Data deref still resolves correctly THROUGH the collapsed map element.
+        Assert.Contains("<VariableType>String</VariableType>", xml);
+        Assert.Matches(
+            @"<Address>\+18</Address>\s*<Offsets>\s*<Offset>0</Offset>\s*</Offsets>", xml);
     }
 
     [Fact]

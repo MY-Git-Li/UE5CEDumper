@@ -64,6 +64,7 @@ public sealed class LiveWalkerUiOptions
     public bool DescShowType { get; set; }
     public bool FlattenGasAttributes { get; set; }
     public bool FlattenLeafStructs { get; set; }
+    public bool FlattenLeafRecords { get; set; }
     public bool DedupSharedObjects { get; set; } = true;
     public bool ExcludeSystemComponents { get; set; } = true;
     public int GWorldLocateDepth { get; set; } = 5;

@@ -1869,7 +1869,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         nameof(LiveWalkerViewModel.CollapseChain), nameof(LiveWalkerViewModel.DescShowOffset),
         nameof(LiveWalkerViewModel.DescShowType), nameof(LiveWalkerViewModel.FlattenGasAttributes),
-        nameof(LiveWalkerViewModel.FlattenLeafStructs),
+        nameof(LiveWalkerViewModel.FlattenLeafStructs), nameof(LiveWalkerViewModel.FlattenLeafRecords),
         nameof(LiveWalkerViewModel.DedupSharedObjects),
         nameof(LiveWalkerViewModel.ExcludeSystemComponents), nameof(LiveWalkerViewModel.GWorldLocateDepth),
         nameof(LiveWalkerViewModel.GWorldLocateDeep),
@@ -1954,6 +1954,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         LiveWalker.DescShowType = lw.DescShowType;
         LiveWalker.FlattenGasAttributes = lw.FlattenGasAttributes;
         LiveWalker.FlattenLeafStructs = lw.FlattenLeafStructs;
+        LiveWalker.FlattenLeafRecords = lw.FlattenLeafRecords;
         LiveWalker.DedupSharedObjects = lw.DedupSharedObjects;
         LiveWalker.ExcludeSystemComponents = lw.ExcludeSystemComponents;
         LiveWalker.GWorldLocateDepth = lw.GWorldLocateDepth;
@@ -2060,6 +2061,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         o.LiveWalker.DescShowType = LiveWalker.DescShowType;
         o.LiveWalker.FlattenGasAttributes = LiveWalker.FlattenGasAttributes;
         o.LiveWalker.FlattenLeafStructs = LiveWalker.FlattenLeafStructs;
+        o.LiveWalker.FlattenLeafRecords = LiveWalker.FlattenLeafRecords;
         o.LiveWalker.DedupSharedObjects = LiveWalker.DedupSharedObjects;
         o.LiveWalker.ExcludeSystemComponents = LiveWalker.ExcludeSystemComponents;
         o.LiveWalker.GWorldLocateDepth = LiveWalker.GWorldLocateDepth;
