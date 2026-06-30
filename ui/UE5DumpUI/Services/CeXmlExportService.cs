@@ -224,6 +224,25 @@ public static class CeXmlExportService
     private static bool _flattenLeafRecords;
 
     /// <summary>
+    /// Opt-in (Live Walker "Flatten Record Colors" dialog): tint flattened container-element rows
+    /// by element-index parity so the records stay visually separable in CE once the per-element
+    /// group boundary is gone. <see cref="_altColorEven"/> / <see cref="_altColorOdd"/> are CE
+    /// COLORREF (BBGGRR) strings or null (= no colour for that parity). Applied only to flattened
+    /// TMap / TArray element rows (<see cref="AltRowColor"/>); ordinary leaves are never coloured.
+    /// </summary>
+    [ThreadStatic]
+    private static bool _altColorEnabled;
+    [ThreadStatic]
+    private static string? _altColorEven;
+    [ThreadStatic]
+    private static string? _altColorOdd;
+
+    /// <summary>The CE colour to stamp on the leaf currently being emitted, or null. Set/cleared
+    /// around each flattened container element; read by <see cref="EmitRowColor"/>.</summary>
+    [ThreadStatic]
+    private static string? _curRowColor;
+
+    /// <summary>
     /// Current <see cref="EmitFields"/> nesting depth (1 = the top-level user-selected
     /// fields, &gt;1 = recursively-resolved struct / pointer children). The noise filter
     /// keys off this so it never drops a field the user explicitly put on screen.
@@ -841,7 +860,10 @@ public static class CeXmlExportService
         bool excludeSystemComponents = false,
         bool flattenGasAttributes = false,
         bool flattenLeafStructs = false,
-        bool flattenLeafRecords = false)
+        bool flattenLeafRecords = false,
+        bool altColorEnabled = false,
+        string? altRowColorEvenRgb = null,
+        string? altRowColorOddRgb = null)
     {
         // Clean breadcrumbs: remove navigation cycles (e.g., Child->Parent->Child)
         // before generating XML to avoid deeply nested duplicate pointer chains.
@@ -857,6 +879,10 @@ public static class CeXmlExportService
         _flattenGasAttributes = flattenGasAttributes;
         _flattenLeafStructs = flattenLeafStructs;
         _flattenLeafRecords = flattenLeafRecords;
+        _altColorEnabled = altColorEnabled;
+        _altColorEven = RgbToCeColor(altRowColorEvenRgb);
+        _altColorOdd = RgbToCeColor(altRowColorOddRgb);
+        _curRowColor = null;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -963,7 +989,10 @@ public static class CeXmlExportService
         bool excludeSystemComponents = false,
         bool flattenGasAttributes = false,
         bool flattenLeafStructs = false,
-        bool flattenLeafRecords = false)
+        bool flattenLeafRecords = false,
+        bool altColorEnabled = false,
+        string? altRowColorEvenRgb = null,
+        string? altRowColorOddRgb = null)
     {
         _nextId = 100;
         _collapsePointerNodes = collapsePointerNodes;
@@ -975,6 +1004,10 @@ public static class CeXmlExportService
         _flattenGasAttributes = flattenGasAttributes;
         _flattenLeafStructs = flattenLeafStructs;
         _flattenLeafRecords = flattenLeafRecords;
+        _altColorEnabled = altColorEnabled;
+        _altColorEven = RgbToCeColor(altRowColorEvenRgb);
+        _altColorOdd = RgbToCeColor(altRowColorOddRgb);
+        _curRowColor = null;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -1090,7 +1123,10 @@ public static class CeXmlExportService
         bool excludeSystemComponents = false,
         bool flattenGasAttributes = false,
         bool flattenLeafStructs = false,
-        bool flattenLeafRecords = false)
+        bool flattenLeafRecords = false,
+        bool altColorEnabled = false,
+        string? altRowColorEvenRgb = null,
+        string? altRowColorOddRgb = null)
     {
         var cleanedBc = CleanBreadcrumbs(breadcrumbs);
 
@@ -1104,6 +1140,10 @@ public static class CeXmlExportService
         _flattenGasAttributes = flattenGasAttributes;
         _flattenLeafStructs = flattenLeafStructs;
         _flattenLeafRecords = flattenLeafRecords;
+        _altColorEnabled = altColorEnabled;
+        _altColorEven = RgbToCeColor(altRowColorEvenRgb);
+        _altColorOdd = RgbToCeColor(altRowColorOddRgb);
+        _curRowColor = null;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -2632,7 +2672,11 @@ public static class CeXmlExportService
                     StructDataAddr = elemStructAddr, StructClassAddr = field.ArrayStructClassAddr,
                     StructTypeName = field.ArrayStructType,
                 };
+                // Alternating row colour by element parity, but ONLY when the element actually
+                // flattens (a grouped element keeps its [i] boundary, so it needs no tint).
+                _curRowColor = WouldFlattenLeafStruct(rs) ? AltRowColor(elem.Index) : null;
                 EmitFields(sb, elemIndent, new[] { sv }, _resolvedStructsState, _resolvedInstancesState);
+                _curRowColor = null;
                 continue;
             }
 
@@ -2767,12 +2811,13 @@ public static class CeXmlExportService
             string valStructAddr = valStruct ? AbsAddr(dataBase, elemByteOffset + valOffset) : "";
             if (valStruct && _resolvedStructsState != null
                 && _resolvedStructsState.TryGetValue(valStructAddr, out var valFlatChildren)
-                && valFlatChildren.Count > 0
-                && ((_flattenLeafStructs && valFlatChildren.All(IsPrimitiveLeafField))
-                    || (_flattenLeafRecords && valFlatChildren.All(IsTerminalLeafField))))
+                && WouldFlattenLeafStruct(valFlatChildren))
             {
                 var rawElemLabel = !string.IsNullOrEmpty(elem.Key)
                     ? $"[{elem.Index}] {elem.Key}" : $"[{elem.Index}]";
+                // Alternating row colour by element parity (no-op when the feature is off); tints
+                // BOTH the Key leaf and the flattened value fields so the whole record reads as one.
+                _curRowColor = AltRowColor(elem.Index);
                 // Key as a flat sibling leaf at the element base ("[i] key ▸ Key").
                 if (ceKey != null)
                     EmitLeaf(sb, elemIndent,
@@ -2787,6 +2832,7 @@ public static class CeXmlExportService
                     StructDataAddr = valStructAddr,
                     StructTypeName = field.MapValueStructType,
                 }, valFlatChildren);
+                _curRowColor = null;
                 continue;
             }
 
@@ -3120,6 +3166,7 @@ public static class CeXmlExportService
         if (ceField.ShowAsHex)
             sb.AppendLine($"{indent}  <ShowAsHex>1</ShowAsHex>");
         sb.AppendLine($"{indent}  <ShowAsSigned>{(ceField.IsSigned ? 1 : 0)}</ShowAsSigned>");
+        EmitRowColor(sb, indent);
         sb.AppendLine($"{indent}  <VariableType>{ceField.VariableType}</VariableType>");
         if (ceField.BitStart >= 0)
         {
@@ -3156,6 +3203,7 @@ public static class CeXmlExportService
         sb.AppendLine($"{indent}  <ID>{_nextId++}</ID>");
         sb.AppendLine($"{indent}  <Description>\"{description}\"</Description>");
         sb.AppendLine($"{indent}  <ShowAsSigned>0</ShowAsSigned>");
+        EmitRowColor(sb, indent);
         sb.AppendLine($"{indent}  <VariableType>String</VariableType>");
         sb.AppendLine($"{indent}  <Length>{length}</Length>");
         sb.AppendLine($"{indent}  <Unicode>{(unicode ? 1 : 0)}</Unicode>");
@@ -3165,6 +3213,55 @@ public static class CeXmlExportService
         EmitOffsets(sb, indent, offsets);
         sb.AppendLine($"{indent}</CheatEntry>");
     }
+
+    /// <summary>
+    /// Emit a CE &lt;Color&gt; element for the entry currently being written, when an alternating
+    /// row color is active (<see cref="_curRowColor"/>). CE colours the record's TEXT; the value
+    /// is a COLORREF hex string (BBGGRR). Set only around flattened container-element emission
+    /// (<see cref="EmitMapProperty"/> / <see cref="EmitStructArrayProperty"/>), so ordinary
+    /// (non-flattened) leaves never carry a colour.
+    /// </summary>
+    private static void EmitRowColor(StringBuilder sb, string indent)
+    {
+        if (!string.IsNullOrEmpty(_curRowColor))
+            sb.AppendLine($"{indent}  <Color>{_curRowColor}</Color>");
+    }
+
+    /// <summary>
+    /// The alternating row colour for a container element at <paramref name="index"/> — even
+    /// indices (struct[0],[2],…) get <see cref="_altColorEven"/>, odd indices get
+    /// <see cref="_altColorOdd"/>. Null (no &lt;Color&gt;, CE uses its theme) when the feature is
+    /// off or that parity is unset. The stored values are already CE COLORREF (BBGGRR) strings.
+    /// </summary>
+    private static string? AltRowColor(int index) =>
+        !_altColorEnabled ? null : ((index & 1) == 0 ? _altColorEven : _altColorOdd);
+
+    /// <summary>
+    /// Convert a UI RGB hex string ("RRGGBB", optional '#') to a CE COLORREF hex ("BBGGRR"), or
+    /// null when empty/malformed (→ no &lt;Color&gt; emitted). CE stores a Win32 COLORREF
+    /// (0x00BBGGRR), so the byte order is reversed from RGB: "0080FF" (azure) → "FF8000".
+    /// </summary>
+    private static string? RgbToCeColor(string? rgb)
+    {
+        if (string.IsNullOrWhiteSpace(rgb)) return null;
+        var s = rgb.Trim().TrimStart('#');
+        if (s.Length != 6) return null;
+        foreach (var c in s)
+            if (!Uri.IsHexDigit(c)) return null;
+        // RRGGBB -> BBGGRR
+        return (s.Substring(4, 2) + s.Substring(2, 2) + s.Substring(0, 2)).ToUpperInvariant();
+    }
+
+    /// <summary>
+    /// True when a struct whose resolved <paramref name="children"/> are supplied WOULD be
+    /// flattened by the current leaf / record gates (mirrors the StructProperty branch in
+    /// <see cref="EmitFields"/>, minus GAS). Used by the container emitters to decide whether to
+    /// collapse a per-element wrapper and whether to apply an alternating row colour.
+    /// </summary>
+    private static bool WouldFlattenLeafStruct(List<LiveFieldValue> children) =>
+        children.Count > 0
+        && ((_flattenLeafStructs && children.All(IsPrimitiveLeafField))
+            || (_flattenLeafRecords && children.All(IsTerminalLeafField)));
 
     /// <summary>Emit Offsets block if offsets are provided.</summary>
     private static void EmitOffsets(StringBuilder sb, string indent, int[]? offsets)

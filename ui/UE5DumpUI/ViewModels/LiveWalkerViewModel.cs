@@ -341,6 +341,30 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     // all-terminal-leaf requirement is the safety gate (CeXmlExportService.IsTerminalLeafField).
     [ObservableProperty] private bool _flattenLeafRecords;
 
+    // Alternating row colours for flattened container records (Copy CE XML / Copy CE Field): when
+    // a TMap/TArray of records is flattened, each element's rows are tinted by index parity so the
+    // records stay separable in CE. Even = struct[0],[2],…; Odd = struct[1],[3],…. Colours are RGB
+    // hex "RRGGBB" (null/empty = no colour for that parity → CE theme); converted to CE COLORREF at
+    // export. Default: enabled, Even = azure (0080FF, = CE FF8000), Odd = unset. Edited via the
+    // "Record Colors…" dialog (FlattenColorDialog); persisted in LiveWalkerUiOptions.
+    [ObservableProperty] private bool _flattenColorEnabled = true;
+    [ObservableProperty] private string? _flattenColorEven = "0080FF";
+    [ObservableProperty] private string? _flattenColorOdd;
+
+    /// <summary>Open the Record Colors editor; the callback writes the picked colours back to the
+    /// persisted VM properties. Lives here (not the Options MenuFlyout) because a colour picker
+    /// needs more room than a menu item gives.</summary>
+    [RelayCommand]
+    private void OpenFlattenColors()
+        => Views.FlattenColorDialog.ShowFor(
+            FlattenColorEnabled, FlattenColorEven, FlattenColorOdd,
+            (enabled, even, odd) =>
+            {
+                FlattenColorEnabled = enabled;
+                FlattenColorEven = even;
+                FlattenColorOdd = odd;
+            });
+
     // Dedup shared objects in Copy CE XML / Copy CE Field drilldown (default ON).
     // A shared object (e.g. one PlayerState reached from several fields) is expanded
     // ONCE; later references become a flat "(shared)" pointer leaf. Prevents the
@@ -3385,7 +3409,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     excludeSystemComponents: ExcludeSystemComponents,
                     flattenGasAttributes: FlattenGasAttributes,
                     flattenLeafStructs: FlattenLeafStructs,
-                    flattenLeafRecords: FlattenLeafRecords);
+                    flattenLeafRecords: FlattenLeafRecords,
+                    altColorEnabled: FlattenColorEnabled,
+                    altRowColorEvenRgb: FlattenColorEven,
+                    altRowColorOddRgb: FlattenColorOdd);
             }
             else
             {
@@ -3403,7 +3430,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     excludeSystemComponents: ExcludeSystemComponents,
                     flattenGasAttributes: FlattenGasAttributes,
                     flattenLeafStructs: FlattenLeafStructs,
-                    flattenLeafRecords: FlattenLeafRecords);
+                    flattenLeafRecords: FlattenLeafRecords,
+                    altColorEnabled: FlattenColorEnabled,
+                    altRowColorEvenRgb: FlattenColorEven,
+                    altRowColorOddRgb: FlattenColorOdd);
             }
 
             await _platform.CopyToClipboardAsync(xml);
@@ -3643,7 +3673,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     excludeSystemComponents: ExcludeSystemComponents,
                     flattenGasAttributes: FlattenGasAttributes,
                     flattenLeafStructs: FlattenLeafStructs,
-                    flattenLeafRecords: FlattenLeafRecords);
+                    flattenLeafRecords: FlattenLeafRecords,
+                    altColorEnabled: FlattenColorEnabled,
+                    altRowColorEvenRgb: FlattenColorEven,
+                    altRowColorOddRgb: FlattenColorOdd);
             }
             else
             {
@@ -3662,7 +3695,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     excludeSystemComponents: ExcludeSystemComponents,
                     flattenGasAttributes: FlattenGasAttributes,
                     flattenLeafStructs: FlattenLeafStructs,
-                    flattenLeafRecords: FlattenLeafRecords);
+                    flattenLeafRecords: FlattenLeafRecords,
+                    altColorEnabled: FlattenColorEnabled,
+                    altRowColorEvenRgb: FlattenColorEven,
+                    altRowColorOddRgb: FlattenColorOdd);
             }
 
             await _platform.CopyToClipboardAsync(xml);

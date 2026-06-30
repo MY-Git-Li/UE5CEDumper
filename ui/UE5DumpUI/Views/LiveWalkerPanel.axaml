@@ -225,6 +225,9 @@
             <MenuItem Header="{StaticResource str.LiveWalker.FlattenLeafRecords}"
                       ToggleType="CheckBox" IsChecked="{Binding FlattenLeafRecords, Mode=TwoWay}"
                       ToolTip.Tip="{StaticResource str.Tip.LiveWalker.FlattenLeafRecords}"/>
+            <MenuItem Header="{StaticResource str.LiveWalker.RecordColors}"
+                      Command="{Binding OpenFlattenColorsCommand}"
+                      ToolTip.Tip="{StaticResource str.Tip.LiveWalker.RecordColors}"/>
             <MenuItem Header="{StaticResource str.LiveWalker.DedupShared}"
                       ToggleType="CheckBox" IsChecked="{Binding DedupSharedObjects, Mode=TwoWay}"
                       ToolTip.Tip="{StaticResource str.Tip.LiveWalker.DedupShared}"/>

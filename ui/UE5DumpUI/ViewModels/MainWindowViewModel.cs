@@ -1870,6 +1870,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         nameof(LiveWalkerViewModel.CollapseChain), nameof(LiveWalkerViewModel.DescShowOffset),
         nameof(LiveWalkerViewModel.DescShowType), nameof(LiveWalkerViewModel.FlattenGasAttributes),
         nameof(LiveWalkerViewModel.FlattenLeafStructs), nameof(LiveWalkerViewModel.FlattenLeafRecords),
+        nameof(LiveWalkerViewModel.FlattenColorEnabled), nameof(LiveWalkerViewModel.FlattenColorEven),
+        nameof(LiveWalkerViewModel.FlattenColorOdd),
         nameof(LiveWalkerViewModel.DedupSharedObjects),
         nameof(LiveWalkerViewModel.ExcludeSystemComponents), nameof(LiveWalkerViewModel.GWorldLocateDepth),
         nameof(LiveWalkerViewModel.GWorldLocateDeep),
@@ -1955,6 +1957,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         LiveWalker.FlattenGasAttributes = lw.FlattenGasAttributes;
         LiveWalker.FlattenLeafStructs = lw.FlattenLeafStructs;
         LiveWalker.FlattenLeafRecords = lw.FlattenLeafRecords;
+        LiveWalker.FlattenColorEnabled = lw.FlattenColorEnabled;
+        LiveWalker.FlattenColorEven = lw.FlattenColorEven;
+        LiveWalker.FlattenColorOdd = lw.FlattenColorOdd;
         LiveWalker.DedupSharedObjects = lw.DedupSharedObjects;
         LiveWalker.ExcludeSystemComponents = lw.ExcludeSystemComponents;
         LiveWalker.GWorldLocateDepth = lw.GWorldLocateDepth;
@@ -2062,6 +2067,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         o.LiveWalker.FlattenGasAttributes = LiveWalker.FlattenGasAttributes;
         o.LiveWalker.FlattenLeafStructs = LiveWalker.FlattenLeafStructs;
         o.LiveWalker.FlattenLeafRecords = LiveWalker.FlattenLeafRecords;
+        o.LiveWalker.FlattenColorEnabled = LiveWalker.FlattenColorEnabled;
+        o.LiveWalker.FlattenColorEven = LiveWalker.FlattenColorEven;
+        o.LiveWalker.FlattenColorOdd = LiveWalker.FlattenColorOdd;
         o.LiveWalker.DedupSharedObjects = LiveWalker.DedupSharedObjects;
         o.LiveWalker.ExcludeSystemComponents = LiveWalker.ExcludeSystemComponents;
         o.LiveWalker.GWorldLocateDepth = LiveWalker.GWorldLocateDepth;

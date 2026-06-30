@@ -2627,6 +2627,101 @@ public class CeXmlExportServiceTests
             @"<Address>\+18</Address>\s*<Offsets>\s*<Offset>0</Offset>\s*</Offsets>", xml);
     }
 
+    /// <summary>A 2-element record map for the alternating-colour tests (stride =
+    /// ((valOff 8 + size 0x30 + 3) &amp; ~3) + 8 = 0x40; value structs at 0x4008 / 0x4048).</summary>
+    private static (LiveFieldValue map, Dictionary<string, List<LiveFieldValue>> structs)
+        BuildTwoElementRecordMap()
+    {
+        var map = new LiveFieldValue
+        {
+            Name = "StoryMissionRecord", TypeName = "MapProperty", Offset = 0x100, Size = 0x50,
+            MapCount = 2, MapKeyType = "NameProperty", MapValueType = "StructProperty",
+            MapKeySize = 8, MapValueSize = 0x30, MapValueOffset = 8, MapDataAddr = "0x4000",
+            MapValueStructAddr = "0xABC", MapValueStructType = "LifeStoryMissionRecord",
+            MapElements = new List<ContainerElementValue>
+            {
+                new() { Index = 0, Key = "mc1om_001" },
+                new() { Index = 1, Key = "mc1om_002" },
+            },
+        };
+        static List<LiveFieldValue> Rec() => new()
+        {
+            new() { Name = "Score",     TypeName = "IntProperty", Offset = 0x0,  Size = 4 },
+            new() { Name = "PilotName", TypeName = "StrProperty", Offset = 0x10, Size = 16 },
+        };
+        var structs = new Dictionary<string, List<LiveFieldValue>> { ["0x4008"] = Rec(), ["0x4048"] = Rec() };
+        return (map, structs);
+    }
+
+    [Fact]
+    public void MapValueRecord_AltColor_TintsRowsByParity()
+    {
+        var (map, structs) = BuildTwoElementRecordMap();
+
+        // Even = RGB 0080FF (azure, the requested default) → CE COLORREF FF8000;
+        // Odd  = RGB FF0000 (red)                         → CE COLORREF 0000FF.
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "Obj", "Cls", new List<LiveFieldValue> { map }, structs,
+            flattenLeafRecords: true,
+            altColorEnabled: true, altRowColorEvenRgb: "0080FF", altRowColorOddRgb: "FF0000");
+
+        // RGB → CE COLORREF byte-swap (RRGGBB → BBGGRR).
+        Assert.Contains("<Color>FF8000</Color>", xml);
+        Assert.Contains("<Color>0000FF</Color>", xml);
+        // Parity is correct: the even element's row carries the even colour, the odd element's the
+        // odd colour — checked WITHIN the same CheatEntry (no </CheatEntry> between Description and Color).
+        Assert.Matches(
+            @"\[0\] mc1om_001 ▸ Score""</Description>(?:(?!</CheatEntry>)[\s\S])*?<Color>FF8000</Color>", xml);
+        Assert.Matches(
+            @"\[1\] mc1om_002 ▸ Score""</Description>(?:(?!</CheatEntry>)[\s\S])*?<Color>0000FF</Color>", xml);
+    }
+
+    [Fact]
+    public void MapValueRecord_AltColor_OddUnset_OnlyEvenTinted()
+    {
+        var (map, structs) = BuildTwoElementRecordMap();
+
+        // The default shape: Even = azure, Odd = unset (no colour → CE theme).
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "Obj", "Cls", new List<LiveFieldValue> { map }, structs,
+            flattenLeafRecords: true,
+            altColorEnabled: true, altRowColorEvenRgb: "0080FF", altRowColorOddRgb: null);
+
+        Assert.Contains("<Color>FF8000</Color>", xml);          // even tinted
+        // The odd element's rows carry no <Color> at all.
+        Assert.DoesNotMatch(
+            @"\[1\] mc1om_002 ▸ Score""</Description>(?:(?!</CheatEntry>)[\s\S])*?<Color>", xml);
+    }
+
+    [Fact]
+    public void MapValueRecord_AltColorDisabled_NoColorEmitted()
+    {
+        var (map, structs) = BuildTwoElementRecordMap();
+
+        // Colours configured but the feature is OFF → not a single <Color>.
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "Obj", "Cls", new List<LiveFieldValue> { map }, structs,
+            flattenLeafRecords: true,
+            altColorEnabled: false, altRowColorEvenRgb: "0080FF", altRowColorOddRgb: "FF0000");
+
+        Assert.DoesNotContain("<Color>", xml);
+    }
+
+    [Fact]
+    public void AltColor_NotAppliedToUnflattenedLeaves()
+    {
+        // Colour is scoped to flattened container elements: with the flatten toggle OFF the map
+        // keeps per-element groups and NO row is tinted, even though the colour feature is on.
+        var (map, structs) = BuildTwoElementRecordMap();
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "Obj", "Cls", new List<LiveFieldValue> { map }, structs,
+            flattenLeafRecords: false,
+            altColorEnabled: true, altRowColorEvenRgb: "0080FF", altRowColorOddRgb: "FF0000");
+
+        Assert.DoesNotContain("<Color>", xml);
+    }
+
     [Fact]
     public void MapValueStruct_NotResolved_FallsBackGracefully()
     {
