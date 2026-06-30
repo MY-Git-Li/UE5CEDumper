@@ -64,6 +64,11 @@ public sealed class LiveWalkerUiOptions
     public bool DescShowType { get; set; }
     public bool FlattenGasAttributes { get; set; }
     public bool FlattenLeafStructs { get; set; }
+    public bool FlattenLeafRecords { get; set; }
+    // Alternating record-row colours (RGB hex "RRGGBB"; null = unset). Default: on, Even = azure.
+    public bool FlattenColorEnabled { get; set; } = true;
+    public string? FlattenColorEven { get; set; } = "0080FF";
+    public string? FlattenColorOdd { get; set; }
     public bool DedupSharedObjects { get; set; } = true;
     public bool ExcludeSystemComponents { get; set; } = true;
     public int GWorldLocateDepth { get; set; } = 5;
