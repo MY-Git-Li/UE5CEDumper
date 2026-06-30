@@ -161,3 +161,81 @@ self-contained (no helper Lua). **Save .CT…** exports the same actions as 7
 momentary records instead.
 
 > Single-player only — online games will rubber-band or may flag teleports.
+
+-----
+
+## Flattening save-data records into a clean Cheat Engine table
+
+A struct-heavy object — a save slot, a stats block, a `TMap` of mission records —
+exports to CE as a tree of nested folders: one group per struct, one per array /
+map element, each wrapping the actual values. CE *can* watch that, but you click
+through a lot of folders to reach a number. The Live Walker **Options** dropdown
+has a family of toggles that flatten that tree at export time. They all apply to
+**Copy CE XML** and **Copy CE Field** only (the CSX Structure-Dissect export is
+deliberately left nested), and **none of them change the watched address** — a
+flattened row resolves to the exact same memory the nested one did, just with the
+offsets folded into the row instead of spread across parent folders.
+
+### The toggles (Live Walker → Options)
+
+- **Flatten primitive-leaf structs** — collapses any struct whose whole contents
+  are plain numbers (`int` / `float` / `bool` / `enum`), e.g. an `FVector`
+  (X/Y/Z), an `FRotator`, an `FDateTime` (its single `Ticks`), or a `{Min,Max}`
+  pair. Children become sibling leaves named `Struct ▸ Field` at the combined
+  offset. A struct that contains a pointer / string / container keeps its group.
+
+- **Flatten leaf records (names/strings)** — a superset of the above that *also*
+  accepts `FName` and `FString` fields as leaves, so a save-data "record" struct
+  like `{Score, Rank, MsID (FName), PilotName (FString)}` flattens **completely**.
+  An `FName` renders as its 4-byte index; an `FString` renders as a CE **String**
+  (it carries the one pointer-dereference CE needs to read the text). There is no
+  field-count limit — the "every field is a leaf" requirement is the safety gate.
+  **This also reaches into containers:** a `TMap` / `TArray` *of* such records
+  drops its per-element `[i]` folders too, so 200 mission records become 200 flat
+  rows (`[0] mc1om_001 ▸ Score`, …) instead of 200 folders. (Struct arrays / sets
+  already flattened; only `TMap` kept a wrapper before.)
+
+- **Collapse single-leaf pointers** — for the "pointer to a string" case: when a
+  pointer's target object holds exactly **one** watchable value (a scalar, an
+  `FName`, or an `FString`), it collapses the folder-plus-lone-child into one
+  `Pointer ▸ Field` record at the pointer offset, following the pointer in the
+  row's offset chain. A pointer whose target has two or more fields keeps its
+  group (its object identity is worth a boundary).
+
+All three are **off by default** and persist across sessions. The `▸` segment
+names honour the **Append +Offset** option; the struct / class type (if you turn
+on **Append +Type**) is shown once at the end of the row.
+
+### Telling the records apart: Record Colors
+
+Once a map of records is flattened, the per-element folders that used to separate
+them are gone — 200 rows in a row. **Options → Record Colors…** opens an editor
+that tints each element's rows by index parity (CE colours the row text), so
+even-indexed records (`struct[0]`, `[2]`, …) read in one colour and odd-indexed
+(`[1]`, `[3]`, …) in another — adjacent records stay visually distinct.
+
+- Each of **Even** / **Odd** takes a colour from a neutral preset palette, a hex
+  value, **Custom…** (an in-app picker: rainbow hue strip + R/G/B sliders + live
+  preview), or **Reset** (no colour → CE uses its theme). Default: enabled, Even =
+  azure, Odd = unset.
+- Colours only land on **flattened container rows** — ordinary fields are never
+  tinted, and nothing is coloured unless one of the flatten toggles is also on.
+
+### Worked example
+
+A save slot exposes `StoryMissionRecord` = `TMap<FName, LifeStoryMissionRecord>`
+with 222 entries, each `{Score, Time, ClearCount, Rank, MsID, PilotID, PilotName}`.
+Drill to it in Live Walker, tick **Flatten leaf records**, open **Record Colors…**
+(leave the azure default), then **Copy CE XML** and paste into CE. You get a flat
+list — `[0] mc1om_001 ▸ Score`, `… ▸ PilotName` (a readable String), `[1]
+mc1om_002 ▸ Score`, … — with even and odd missions in alternating colours, no
+folders to expand, every `Score` directly editable.
+
+### Caveats
+
+- **CE XML / Field only.** CSX export stays nested by design — if you export both
+  from the same view they'll look different.
+- `FText` is **not** flattened (its internal chain has no clean CE encoding); a
+  struct / pointer holding one keeps its group.
+- Flattening removes the object / element **boundary**, not the data. If you
+  prefer the folders for orientation, just leave the toggles off.
