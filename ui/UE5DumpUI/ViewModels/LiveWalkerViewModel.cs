@@ -341,6 +341,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     // all-terminal-leaf requirement is the safety gate (CeXmlExportService.IsTerminalLeafField).
     [ObservableProperty] private bool _flattenLeafRecords;
 
+    // Collapse a drilled pointer whose target is a SINGLE terminal leaf (scalar / FName / FString)
+    // into one CE record at the pointer field (Copy CE XML / Copy CE Field). The "pointer to a
+    // string" case: avoids the extra group layer when the pointee holds a single watchable value.
+    // scalar/name → +ptrOff, Offsets=[childOff]; FString → +ptrOff, Offsets=[0, childOff]. Default OFF.
+    [ObservableProperty] private bool _collapseLeafPointers;
+
     // Alternating row colours for flattened container records (Copy CE XML / Copy CE Field): when
     // a TMap/TArray of records is flattened, each element's rows are tinted by index parity so the
     // records stay separable in CE. Even = struct[0],[2],…; Odd = struct[1],[3],…. Colours are RGB
@@ -3412,7 +3418,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     flattenLeafRecords: FlattenLeafRecords,
                     altColorEnabled: FlattenColorEnabled,
                     altRowColorEvenRgb: FlattenColorEven,
-                    altRowColorOddRgb: FlattenColorOdd);
+                    altRowColorOddRgb: FlattenColorOdd,
+                    collapseLeafPointers: CollapseLeafPointers);
             }
             else
             {
@@ -3433,7 +3440,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     flattenLeafRecords: FlattenLeafRecords,
                     altColorEnabled: FlattenColorEnabled,
                     altRowColorEvenRgb: FlattenColorEven,
-                    altRowColorOddRgb: FlattenColorOdd);
+                    altRowColorOddRgb: FlattenColorOdd,
+                    collapseLeafPointers: CollapseLeafPointers);
             }
 
             await _platform.CopyToClipboardAsync(xml);
@@ -3676,7 +3684,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     flattenLeafRecords: FlattenLeafRecords,
                     altColorEnabled: FlattenColorEnabled,
                     altRowColorEvenRgb: FlattenColorEven,
-                    altRowColorOddRgb: FlattenColorOdd);
+                    altRowColorOddRgb: FlattenColorOdd,
+                    collapseLeafPointers: CollapseLeafPointers);
             }
             else
             {
@@ -3698,7 +3707,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     flattenLeafRecords: FlattenLeafRecords,
                     altColorEnabled: FlattenColorEnabled,
                     altRowColorEvenRgb: FlattenColorEven,
-                    altRowColorOddRgb: FlattenColorOdd);
+                    altRowColorOddRgb: FlattenColorOdd,
+                    collapseLeafPointers: CollapseLeafPointers);
             }
 
             await _platform.CopyToClipboardAsync(xml);

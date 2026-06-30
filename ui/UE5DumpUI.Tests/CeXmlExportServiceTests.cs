@@ -2722,6 +2722,109 @@ public class CeXmlExportServiceTests
         Assert.DoesNotContain("<Color>", xml);
     }
 
+    // ===== Collapse single-leaf pointers (Feature B — the "指標指到 string" case) =====
+    // A drilled pointer whose resolved target is a SINGLE terminal leaf collapses to one CE record
+    // at the pointer field with a deref chain, instead of a GroupHeader + lone child.
+
+    /// <summary>One ObjectProperty "Owner" at +0x2C8 → a target object (0xPTR) whose only field is
+    /// <paramref name="childType"/> <paramref name="childName"/> at <paramref name="childOffset"/>.</summary>
+    private static (LiveFieldValue[] fields, Dictionary<string, List<LiveFieldValue>> instances)
+        BuildSingleChildPointer(string childName, string childType, int childOffset, int childSize)
+    {
+        const string ptr = "0x7FF453509278";
+        var fields = new[]
+        {
+            new LiveFieldValue
+            {
+                Name = "Owner", TypeName = "ObjectProperty", Offset = 0x2C8, Size = 8,
+                PtrAddress = ptr, PtrName = "Owner", PtrClassName = "UHolder",
+            },
+        };
+        var instances = new Dictionary<string, List<LiveFieldValue>>
+        {
+            [ptr] = new() { new LiveFieldValue { Name = childName, TypeName = childType, Offset = childOffset, Size = childSize } },
+        };
+        return (fields, instances);
+    }
+
+    [Fact]
+    public void CollapseLeafPointer_SingleString_EmitsTwoDerefStringLeaf()
+    {
+        var (fields, instances) = BuildSingleChildPointer("Value", "StrProperty", 0x10, 16);
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields,
+            resolvedInstances: instances, collapseLeafPointers: true);
+
+        // Collapsed to ONE CE String leaf "Owner ▸ Value": follow the pointer (Address=+2C8), then the
+        // FString.Data buffer at +10 — Offsets=[0, 10] (two derefs). The +2C8 String-with-chain leaf
+        // can't coexist with a non-collapsed group at +2C8, so the regex alone proves the collapse.
+        Assert.Matches(
+            @"Owner ▸ Value""</Description>(?:(?!</CheatEntry>)[\s\S])*?<VariableType>String</VariableType>"
+            + @"(?:(?!</CheatEntry>)[\s\S])*?<Address>\+2C8</Address>\s*<Offsets>\s*<Offset>0</Offset>"
+            + @"\s*<Offset>10</Offset>\s*</Offsets>", xml);
+    }
+
+    [Fact]
+    public void CollapseLeafPointer_SingleScalar_EmitsOneDerefLeaf()
+    {
+        var (fields, instances) = BuildSingleChildPointer("Count", "IntProperty", 0x8, 4);
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields,
+            resolvedInstances: instances, collapseLeafPointers: true);
+
+        // Collapsed to ONE 4-byte leaf "Owner ▸ Count": Address=+2C8, Offsets=[8] (one deref). The
+        // +2C8 leaf-with-offset can't coexist with a non-collapsed group at +2C8, proving collapse.
+        Assert.Matches(
+            @"Owner ▸ Count""</Description>(?:(?!</CheatEntry>)[\s\S])*?<Address>\+2C8</Address>"
+            + @"\s*<Offsets>\s*<Offset>8</Offset>\s*</Offsets>", xml);
+    }
+
+    [Fact]
+    public void CollapseLeafPointer_MultiField_KeepsGroup()
+    {
+        // Two fields behind the pointer → an object identity worth a boundary; keep the group.
+        const string ptr = "0x7FF453509278";
+        var fields = new[]
+        {
+            new LiveFieldValue
+            {
+                Name = "Owner", TypeName = "ObjectProperty", Offset = 0x2C8, Size = 8,
+                PtrAddress = ptr, PtrName = "Owner", PtrClassName = "UHolder",
+            },
+        };
+        var instances = new Dictionary<string, List<LiveFieldValue>>
+        {
+            [ptr] = new()
+            {
+                new LiveFieldValue { Name = "Value", TypeName = "StrProperty", Offset = 0x10, Size = 16 },
+                new LiveFieldValue { Name = "Count", TypeName = "IntProperty", Offset = 0x20, Size = 4 },
+            },
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields,
+            resolvedInstances: instances, collapseLeafPointers: true);
+
+        Assert.Contains("<GroupHeader>1</GroupHeader>", xml);   // group kept
+        Assert.DoesNotContain("Owner ▸ Value", xml);            // not collapsed
+    }
+
+    [Fact]
+    public void CollapseLeafPointerOff_KeepsGroup()
+    {
+        var (fields, instances) = BuildSingleChildPointer("Value", "StrProperty", 0x10, 16);
+
+        // Toggle off (default) → the single-string pointer keeps its GroupHeader + String child.
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields,
+            resolvedInstances: instances, collapseLeafPointers: false);
+
+        Assert.Contains("<GroupHeader>1</GroupHeader>", xml);
+        Assert.DoesNotContain("Owner ▸ Value", xml);
+    }
+
     [Fact]
     public void MapValueStruct_NotResolved_FallsBackGracefully()
     {

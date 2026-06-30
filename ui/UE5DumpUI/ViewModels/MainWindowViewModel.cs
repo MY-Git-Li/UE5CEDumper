@@ -1870,6 +1870,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         nameof(LiveWalkerViewModel.CollapseChain), nameof(LiveWalkerViewModel.DescShowOffset),
         nameof(LiveWalkerViewModel.DescShowType), nameof(LiveWalkerViewModel.FlattenGasAttributes),
         nameof(LiveWalkerViewModel.FlattenLeafStructs), nameof(LiveWalkerViewModel.FlattenLeafRecords),
+        nameof(LiveWalkerViewModel.CollapseLeafPointers),
         nameof(LiveWalkerViewModel.FlattenColorEnabled), nameof(LiveWalkerViewModel.FlattenColorEven),
         nameof(LiveWalkerViewModel.FlattenColorOdd),
         nameof(LiveWalkerViewModel.DedupSharedObjects),
@@ -1957,6 +1958,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         LiveWalker.FlattenGasAttributes = lw.FlattenGasAttributes;
         LiveWalker.FlattenLeafStructs = lw.FlattenLeafStructs;
         LiveWalker.FlattenLeafRecords = lw.FlattenLeafRecords;
+        LiveWalker.CollapseLeafPointers = lw.CollapseLeafPointers;
         LiveWalker.FlattenColorEnabled = lw.FlattenColorEnabled;
         LiveWalker.FlattenColorEven = lw.FlattenColorEven;
         LiveWalker.FlattenColorOdd = lw.FlattenColorOdd;
@@ -2067,6 +2069,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         o.LiveWalker.FlattenGasAttributes = LiveWalker.FlattenGasAttributes;
         o.LiveWalker.FlattenLeafStructs = LiveWalker.FlattenLeafStructs;
         o.LiveWalker.FlattenLeafRecords = LiveWalker.FlattenLeafRecords;
+        o.LiveWalker.CollapseLeafPointers = LiveWalker.CollapseLeafPointers;
         o.LiveWalker.FlattenColorEnabled = LiveWalker.FlattenColorEnabled;
         o.LiveWalker.FlattenColorEven = LiveWalker.FlattenColorEven;
         o.LiveWalker.FlattenColorOdd = LiveWalker.FlattenColorOdd;
