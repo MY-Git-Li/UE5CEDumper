@@ -160,6 +160,15 @@ static void __fastcall HookedProcessEvent(void* thisObj, void* ufunc, void* para
 // ---- Public API ----
 
 bool InstallHook(uintptr_t processEventAddr) {
+    // Serialize the whole check-then-MH_CreateHook/MH_EnableHook sequence. This is
+    // a public API and the Frieren-side call_once only covers the game-thread
+    // dispatch path — a concurrent (or future) caller must never race two
+    // MH_CreateHook calls on the same target, which can corrupt MinHook's internal
+    // tables (audit #3). A second caller blocks here, then hits the s_hookActive /
+    // s_hookedAddr fast-paths below and no-ops.
+    static std::mutex s_installMutex;
+    std::lock_guard<std::mutex> lock(s_installMutex);
+
     if (s_hookActive.load()) {
         LOG_WARN("GameThreadDispatch: hook already active");
         return true;
@@ -322,8 +331,13 @@ int32_t EnqueueInvoke(uintptr_t instance, uintptr_t ufunc, uintptr_t params, siz
         LOG_ERROR("GameThreadDispatch: invoke timeout (%dms) inst=0x%llX func=0x%llX",
                   timeoutMs,
                   (unsigned long long)instance, (unsigned long long)ufunc);
-        // The request stays queued, but it owns its param buffer, so the eventual
-        // game-thread execution is safe. We just abandon the (now stale) result.
+        // The request stays queued. When the caller supplied a size (>0) the
+        // request owns a COPY of the param bytes, so the eventual game-thread
+        // execution reads stable data even after the caller's buffer is reused/
+        // freed — and no copy-back runs on this timeout path, so the caller's
+        // buffer is never clobbered after we return. Size-0 callers (a persistent
+        // buffer whose CONTENT must also stay valid until drained) get no such
+        // protection. We just abandon the (now stale) result.
         return -5;
     }
 

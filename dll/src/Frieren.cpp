@@ -24,6 +24,7 @@
 #include <string>
 #include <cstring>
 #include <mutex>
+#include <atomic>
 #include <algorithm>
 #include <thread>
 #include <chrono>
@@ -1294,6 +1295,41 @@ static void TryInstallGameThreadHook() {
     }).detach();
 }
 
+// First-time ProcessEvent bring-up (vtable-offset detection + game-thread hook
+// install) MUST run exactly once even when the Mimic mailbox polling thread and
+// one or more Fern pipe-lane threads issue their FIRST invoke at the same moment.
+// Previously each entry point did an unsynchronized `if (s_processEventOffset ==
+// -2) { detect; TryInstall; }`, so two threads could both detect and both reach
+// Stark::InstallHook — a double MH_CreateHook on the same address can corrupt
+// MinHook's state (and races the s_originalPE write the game thread reads),
+// risking a crash (audit #3). std::call_once serializes the pair; late arrivals
+// block until it finishes, then observe the fully-written offset via call_once's
+// happens-before. Diagnostic: the arrival counter surfaces whether the race
+// window was actually contended in this game (proof the guard earns its keep).
+static std::once_flag s_peInitOnce;
+static std::atomic<int> s_peInitArrivals{0};
+static void EnsureProcessEventReady() {
+    int arrivals = s_peInitArrivals.fetch_add(1, std::memory_order_relaxed) + 1;
+    std::call_once(s_peInitOnce, [arrivals]() {
+        LOG_INFO("ProcessEvent: first-time init on thread %lu (offset detection + "
+                 "game-thread hook install), serialized via call_once — %d "
+                 "caller(s) arrived before init began",
+                 (unsigned long)GetCurrentThreadId(), arrivals);
+        s_processEventOffset = DetectProcessEventVTableOffset();
+        TryInstallGameThreadHook();
+        LOG_INFO("ProcessEvent: first-time init complete — offset=%d, hook_active=%d",
+                 s_processEventOffset, Stark::IsHookActive() ? 1 : 0);
+    });
+    // A total > 1 means concurrent first-invokes contended the once — harmless
+    // now, but historically the double-install crash window. Logged once per
+    // contended arrival so it is greppable if a game ever hits it.
+    if (arrivals > 1) {
+        LOG_WARN("ProcessEvent: concurrent first-invoke #%d serialized behind the "
+                 "one-time init (audit #3 race window observed but guarded)",
+                 arrivals);
+    }
+}
+
 // Internal size-aware entry. paramsSize > 0 makes the queued GameThreadDispatch
 // request OWN a copy of the param bytes, so a timed-out-but-still-queued invoke
 // can't dereference a freed caller buffer (use-after-free). Out-params are copied
@@ -1303,11 +1339,8 @@ extern "C" int32_t UE5_CallProcessEventEx(uintptr_t instance, uintptr_t ufunc,
                                           uintptr_t params, uint32_t paramsSize) {
     if (!instance || !ufunc) return -1;
 
-    // Lazy detection
-    if (s_processEventOffset == -2) {
-        s_processEventOffset = DetectProcessEventVTableOffset();
-        TryInstallGameThreadHook();
-    }
+    // Lazy, race-safe one-time detection + hook install (audit #3).
+    EnsureProcessEventReady();
     if (s_processEventOffset < 0) return -3;
 
     // Prefer game-thread dispatch via hook
@@ -1362,11 +1395,8 @@ int32_t UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t para
 int32_t UE5_CallProcessEventDirect(uintptr_t instance, uintptr_t ufunc, uintptr_t params) {
     if (!instance || !ufunc) return -1;
 
-    // Lazy detection (same as the dispatching path)
-    if (s_processEventOffset == -2) {
-        s_processEventOffset = DetectProcessEventVTableOffset();
-        TryInstallGameThreadHook();
-    }
+    // Lazy, race-safe one-time detection + hook install (audit #3).
+    EnsureProcessEventReady();
     if (s_processEventOffset < 0) return -3;
 
     uintptr_t vtable = 0;

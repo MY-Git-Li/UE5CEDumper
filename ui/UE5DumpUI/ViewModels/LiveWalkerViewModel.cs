@@ -5299,22 +5299,23 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         _currentClassAddr = result.ClassAddr;
         _pendingFunctionsLoad = LoadFunctionsAsync(result.ClassAddr);
 
-        // DataTable detection: if this is a DataTable, fetch rows and inject synthetic RowMap field
+        // DataTable detection: if this is a DataTable, fetch rows and inject synthetic RowMap field.
+        // Capture the breadcrumb depth so the fire-and-forget load can detect a
+        // navigation that happened during its round-trip (audit #7).
         _cachedDataTableRows = null;
         if (result.ClassName == "DataTable" && !string.IsNullOrEmpty(result.Address))
-            _ = TryLoadDataTableRowsAsync(result.Address);
+            _ = TryLoadDataTableRowsAsync(result.Address, Breadcrumbs.Count);
     }
 
     /// <summary>
     /// Detect DataTable and inject a synthetic RowMap field for container navigation.
     /// Called fire-and-forget from UpdateDisplay to avoid blocking the UI.
     /// </summary>
-    private async Task TryLoadDataTableRowsAsync(string dataTableAddr)
+    private async Task TryLoadDataTableRowsAsync(string dataTableAddr, int bcAtStart)
     {
         try
         {
             var dtResult = await _dump.WalkDataTableRowsAsync(dataTableAddr);
-            _cachedDataTableRows = dtResult;
 
             // Inject a synthetic "RowMap" field at the end of the field list
             var syntheticField = new LiveFieldValue
@@ -5332,8 +5333,25 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 DataTableRowData = dtResult.Rows,
             };
 
-            // Add on UI thread
-            await Dispatcher.UIThread.InvokeAsync(() => Fields.Add(syntheticField));
+            // Apply on the UI thread, GUARDED (audit #7): UpdateDisplay fires this
+            // and forgets it. If the user navigated to another object during the
+            // WalkDataTableRows round-trip, landing the synthetic RowMap (and
+            // caching its rows) would attach the previous DataTable's data to the
+            // CURRENT object's field grid — a stale-data glitch. Drop the result
+            // when the displayed object changed under us. Both the check and the
+            // mutation run on the UI thread so CurrentAddress / Breadcrumbs read
+            // consistently and _cachedDataTableRows is written race-free.
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (CurrentAddress != dataTableAddr || Breadcrumbs.Count != bcAtStart)
+                {
+                    _log.Info($"DataTable RowMap load superseded for {dataTableAddr} " +
+                              $"(now {CurrentAddress}, bc {Breadcrumbs.Count}/{bcAtStart}) — dropped");
+                    return;
+                }
+                _cachedDataTableRows = dtResult;
+                Fields.Add(syntheticField);
+            });
         }
         catch (Exception ex)
         {

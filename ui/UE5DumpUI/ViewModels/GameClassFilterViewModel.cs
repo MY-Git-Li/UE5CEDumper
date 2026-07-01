@@ -114,6 +114,7 @@ public partial class GameClassFilterViewModel : ViewModelBase
 
     private void ApplyFilter()
     {
+        SelectedResult = null;   // detach before rebuilding the selection-bound grid
         Results.Clear();
         var nameFilter = FilterText.Trim();
         var superF = SuperFilter.Trim();
