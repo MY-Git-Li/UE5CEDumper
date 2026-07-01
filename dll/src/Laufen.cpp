@@ -383,11 +383,24 @@ void WorkerLoop() {
     LOG_INFO("Movement: re-assert worker stopped");
 }
 
-void StartWorker() {
-    std::lock_guard<std::mutex> lk(s_workerMutex);
+// Worker start/stop split into "Locked" cores (caller ALREADY holds s_workerMutex)
+// plus a public StopWorker() wrapper. The knob mutators hold s_workerMutex ACROSS
+// the whole "mutate desired state + decide start/stop" sequence (audit #8), so a
+// concurrent mutator on a different knob can't slip a StartWorker between one op's
+// state-clear and its stop decision (which would join a freshly-started worker and
+// leave a knob active with no re-assert). Lock order is always s_workerMutex
+// (outer) → s_mutex (inner); the join in StopWorkerLocked runs with s_mutex
+// RELEASED because WorkerLoop takes s_mutex every tick (joining under it deadlocks).
+void StartWorkerLocked() {
     if (s_worker.joinable()) return;   // already running
     s_workerStop.store(false);
     s_worker = std::thread(WorkerLoop);
+}
+
+void StopWorkerLocked() {
+    if (!s_worker.joinable()) return;
+    s_workerStop.store(true);
+    s_worker.join();
 }
 
 } // namespace
@@ -436,6 +449,9 @@ int32_t SetMultiplier(int32_t knobId, double multiplier) {
     if (knobId < 0 || knobId >= KNOB_COUNT) return MR_ERR_REFLECT;
     multiplier = (std::max)(Grimoire::MOVE_MULT_MIN,
                             (std::min)(Grimoire::MOVE_MULT_MAX, multiplier));
+    // Hold s_workerMutex across the whole mutate+StartWorker decision (audit #8):
+    // lock order s_workerMutex (outer) → s_mutex (inner).
+    std::lock_guard<std::mutex> wlk(s_workerMutex);
     int32_t rc = MR_OK;
     {
         std::lock_guard<std::mutex> lk(s_mutex);
@@ -462,12 +478,17 @@ int32_t SetMultiplier(int32_t knobId, double multiplier) {
         LOG_INFO("Movement: knob %d ('%s') base=%.3f x%.3f -> %.3f (rc=%d)",
                  knobId, f.name.c_str(), k.base, multiplier, target, rc);
     }
-    StartWorker();
+    StartWorkerLocked();   // s_workerMutex held, s_mutex released
     return (rc < 0) ? rc : 1;   // 1 = override active
 }
 
 int32_t ResetKnob(int32_t knobId) {
     if (knobId < 0 || knobId >= KNOB_COUNT) return MR_ERR_REFLECT;
+    // Hold s_workerMutex across the clear + stop decision so a concurrent
+    // SetMultiplier on another knob can't StartWorker between them and then get
+    // joined away, leaving a knob active with no re-assert worker (audit #8).
+    std::lock_guard<std::mutex> wlk(s_workerMutex);
+    bool anyActive;
     {
         std::lock_guard<std::mutex> lk(s_mutex);
         KnobState& k = s_knobs[knobId];
@@ -482,15 +503,13 @@ int32_t ResetKnob(int32_t knobId) {
         k.active = false;
         k.multiplier = 1.0;
         k.capturedPawn = 0;
-    }
-    // Stop the worker OUTSIDE s_mutex when nothing remains active (join() locks
-    // s_mutex per tick — joining under s_mutex would deadlock).
-    bool anyActive;
-    {
-        std::lock_guard<std::mutex> lk(s_mutex);
+        // Decide under the SAME s_mutex hold as the clear — a stale re-read in a
+        // second scope was the race window.
         anyActive = AnyActiveLocked();
     }
-    if (!anyActive) StopWorker();
+    // Join with s_mutex RELEASED (WorkerLoop takes s_mutex per tick) but
+    // s_workerMutex still held (serializes against a racing StartWorkerLocked).
+    if (!anyActive) StopWorkerLocked();
     LOG_INFO("Movement: reset knob %d (any active left=%d)", knobId, anyActive ? 1 : 0);
     return MR_OK;
 }
@@ -510,9 +529,13 @@ int32_t SetKnobPercent(int32_t knobId, double percent) {
 }
 
 int32_t SetGravityDirection(double x, double y, double z) {
-    // (0,0,0) sentinel = OFF (a zero vector is not a valid direction).
+    // (0,0,0) sentinel = OFF (a zero vector is not a valid direction). Handled
+    // BEFORE taking s_workerMutex — ResetGravityDirection() acquires it itself.
     if (std::fabs(x) < 1e-9 && std::fabs(y) < 1e-9 && std::fabs(z) < 1e-9)
         return ResetGravityDirection();
+    // Hold s_workerMutex across the mutate+StartWorker decision (audit #8):
+    // lock order s_workerMutex (outer) → s_mutex (inner).
+    std::lock_guard<std::mutex> wlk(s_workerMutex);
     int32_t rc = MR_OK;
     {
         std::lock_guard<std::mutex> lk(s_mutex);
@@ -535,11 +558,15 @@ int32_t SetGravityDirection(double x, double y, double z) {
         if (!WriteVec3At(addr, size, v)) rc = MR_ERR_WRITE;
         LOG_INFO("Movement: gravity dir -> (%.3f, %.3f, %.3f) (rc=%d)", v[0], v[1], v[2], rc);
     }
-    StartWorker();
+    StartWorkerLocked();   // s_workerMutex held, s_mutex released
     return (rc < 0) ? rc : 1;
 }
 
 int32_t ResetGravityDirection() {
+    // Hold s_workerMutex across the clear + stop decision (audit #8): lock order
+    // s_workerMutex (outer) → s_mutex (inner); join with s_mutex released.
+    std::lock_guard<std::mutex> wlk(s_workerMutex);
+    bool anyActive;
     {
         std::lock_guard<std::mutex> lk(s_mutex);
         if (s_gravDir.active) {
@@ -554,13 +581,9 @@ int32_t ResetGravityDirection() {
         }
         s_gravDir.active = false;
         s_gravDir.capturedPawn = 0;
+        anyActive = AnyActiveLocked();   // decide under the same s_mutex hold
     }
-    bool anyActive;
-    {
-        std::lock_guard<std::mutex> lk(s_mutex);
-        anyActive = AnyActiveLocked();
-    }
-    if (!anyActive) StopWorker();
+    if (!anyActive) StopWorkerLocked();
     LOG_INFO("Movement: gravity dir reset (any active left=%d)", anyActive ? 1 : 0);
     return MR_OK;
 }
@@ -579,10 +602,10 @@ int32_t GetGravityDirection(GravDirInfo& out) {
 }
 
 void StopWorker() {
+    // Public wrapper (exported; called on DLL unload). Takes s_workerMutex, then
+    // joins with s_mutex not held — same discipline the mutators use.
     std::lock_guard<std::mutex> lk(s_workerMutex);
-    if (!s_worker.joinable()) return;
-    s_workerStop.store(true);
-    s_worker.join();
+    StopWorkerLocked();
 }
 
 } // namespace Laufen

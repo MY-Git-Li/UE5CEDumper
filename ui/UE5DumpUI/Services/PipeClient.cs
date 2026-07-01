@@ -172,6 +172,20 @@ public sealed class PipeClient : IPipeClient
             throw new OperationCanceledException("Pipe disconnected during send");
         }
 
+        // Late-death reap (audit #4): the IsConnected guard at entry is a TOCTOU —
+        // ReadLoopAsync's finally can drain+clear _pending and flip IsConnected to
+        // false in the window between that guard and the `_pending[id] = tcs` insert
+        // above. If the write then happens to succeed on the just-dying pipe (OS
+        // buffered), neither the IOException filters nor the loop's one-shot drain
+        // will ever complete this tcs, so a ct=None caller would await it forever.
+        // Re-check now that the entry is registered and fail the orphan ourselves.
+        if (!IsConnected || _cts.IsCancellationRequested)
+        {
+            _txMeta.TryRemove(id, out _);
+            if (_pending.TryRemove(id, out var orphan))
+                orphan.TrySetException(new IOException("Pipe disconnected during send"));
+        }
+
         return await tcs.Task;
     }
 
