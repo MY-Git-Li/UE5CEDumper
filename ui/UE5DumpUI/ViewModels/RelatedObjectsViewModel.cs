@@ -81,6 +81,7 @@ public partial class RelatedObjectsViewModel : ViewModelBase
         {
             IsBusy = true;
             StatusText = "Scanning related objects…";
+            SelectedRelated = null;   // detach before rebuilding the selection-bound grid
             Related.Clear();
             QueryClassName = "";
             var result = await _dump.GetRelatedObjectsAsync(addr);
@@ -170,6 +171,7 @@ public partial class RelatedObjectsViewModel : ViewModelBase
         {
             IsBusy = true;
             StatusText = "Detecting current target…";
+            SelectedCandidate = null;   // detach before rebuilding the selection-bound list
             TargetCandidates.Clear();
             HasCandidates = false;
             var r = await _dump.DetectCurrentTargetAsync();

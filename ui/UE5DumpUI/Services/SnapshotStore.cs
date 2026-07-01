@@ -84,7 +84,17 @@ public sealed class SnapshotStore : ISnapshotStore
             // 30s default command timeout — the post-capture "Loading fields…" Not-Responding
             // freeze. A bounded native sleep-and-retry turns that contention into at worst a
             // short wait that then succeeds (or a catchable SQLITE_BUSY), instead of a hang.
-            await ExecAsync(conn, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;", ct);
+            //
+            // temp_store + cache_size are re-normalized here on EVERY open because they are
+            // connection-scoped PRAGMAs that BeginCaptureSessionAsync sets on a POOLED handle
+            // (temp_store=MEMORY, cache_size=-262144). Microsoft.Data.Sqlite pools the native
+            // sqlite3 handle (no Pooling=false in ConnectionString) and does NOT reset PRAGMAs
+            // on return, and CaptureSession.DisposeAsync restores only synchronous — so without
+            // this, a later reader draws a poisoned handle and the Discovery/Pivot external-merge
+            // sort spills to OUR HEAP instead of a temp FILE, re-creating the OOM the bounded-SQL
+            // path exists to prevent. temp_store=DEFAULT restores the compile-time default (FILE);
+            // cache_size=-2000 restores the ~2MB default ceiling.
+            await ExecAsync(conn, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; PRAGMA temp_store=DEFAULT; PRAGMA cache_size=-2000;", ct);
             await EnsureSchemaAsync(conn, ct);
             return conn;
         }
@@ -1751,8 +1761,10 @@ public sealed class SnapshotStore : ISnapshotStore
         await using var conn = await OpenAsync(ct);
         // Generous-but-BOUNDED page cache cuts the sort's spill IO. Do NOT set
         // temp_store=MEMORY — the external-merge sort MUST spill to a temp FILE (not
-        // our heap), or we recreate the very OOM this method exists to fix.
-        await ExecAsync(conn, "PRAGMA cache_size=-65536;", ct);   // 64 MB ceiling
+        // our heap), or we recreate the very OOM this method exists to fix. temp_store=FILE
+        // is forced explicitly (belt-and-suspenders): OpenAsync already un-poisons the pooled
+        // handle, but this guarantees the OOM-critical path regardless of pool/open changes.
+        await ExecAsync(conn, "PRAGMA cache_size=-65536; PRAGMA temp_store=FILE;", ct);   // 64 MB ceiling
 
         // Ensure the newest snapshot's per-class instance counts exist (Total source).
         await EnsurePivotIndexAsync(conn, newestId, 0, ct);
