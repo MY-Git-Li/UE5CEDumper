@@ -32,6 +32,7 @@
 // Forward declarations for ExportAPI symbols (must be outside namespace)
 extern "C" bool     UE5_Init();
 extern "C" int32_t  UE5_CallProcessEvent(uintptr_t, uintptr_t, uintptr_t);
+extern "C" int32_t  UE5_CallProcessEventEx(uintptr_t, uintptr_t, uintptr_t, uint32_t);
 extern "C" int32_t  UE5_CallProcessEventDirect(uintptr_t, uintptr_t, uintptr_t);
 extern uintptr_t    g_cachedGObjects;
 extern uintptr_t    g_cachedGNames;
@@ -416,15 +417,31 @@ static void HandleInvoke() {
             instanceAddr, ufuncAddr,
             reinterpret_cast<uintptr_t>(g_invokeMailbox.paramsData));
     } else {
-        // Call ProcessEvent using the existing public API.
-        // UE5_CallProcessEvent handles:
-        //   - Lazy ProcessEvent vtable detection
-        //   - Lazy MinHook installation (GameThreadDispatch)
-        //   - EnqueueInvoke (blocks until game thread executes)
-        //   - Fallback direct call if hook not active
-        result = UE5_CallProcessEvent(
+        // Call ProcessEvent via the SIZE-AWARE entry so the queued
+        // GameThreadDispatch request OWNS a copy of the param bytes.
+        //
+        // Audit #2: paramsData is a PERSISTENT global that CE overwrites with its
+        // next command the instant we SetDone below. On an idle game (menu /
+        // loading) the invoke times out (-5) while STILL queued; the old 3-arg
+        // path passed size 0, leaving the request aliasing this shared buffer, so
+        // the game thread would later run the ORIGINAL ufunc against the NEXT
+        // command's params — silent state corruption (CallProcessEventSEH only
+        // masks a wild deref, not a plausible-but-wrong call). Passing the buffer
+        // size makes EnqueueInvoke copy into req->ownedParams; a late drain then
+        // reads the original params, and the timeout path performs no copy-back so
+        // the mailbox is never clobbered after we return.
+        // UE5_CallProcessEventEx handles: lazy PE vtable detection, lazy MinHook
+        // install, EnqueueInvoke (blocks until game-thread exec / timeout), and
+        // the direct-call fallback when the hook isn't active.
+        result = UE5_CallProcessEventEx(
             instanceAddr, ufuncAddr,
-            reinterpret_cast<uintptr_t>(g_invokeMailbox.paramsData));
+            reinterpret_cast<uintptr_t>(g_invokeMailbox.paramsData),
+            static_cast<uint32_t>(sizeof(g_invokeMailbox.paramsData)));
+        if (result == -5) {
+            LOG_WARN("Mailbox: INVOKE timed out (game thread idle?). The queued "
+                     "request keeps its OWN param copy, so a later drain runs "
+                     "safely against the original params (stale result abandoned).");
+        }
     }
 
     if (result != 0) {
