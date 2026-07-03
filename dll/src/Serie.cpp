@@ -152,7 +152,7 @@ static bool ValidateChunkForNone(uintptr_t poolAddr, int chunksOffset) {
     if (!Macht::ReadSafe(poolAddr + chunksOffset, chunk0) || !chunk0) return false;
 
     // Pointer sanity
-    if (chunk0 < 0x10000 || chunk0 > 0x00007FFFFFFFFFFF) return false;
+    if (!Grimoire::IsUserspacePointer(chunk0)) return false;
 
     // Entry 0 is at chunk0 + 0 (nameIndex=0 -> chunkIndex=0, offset=0)
     // Try with current header offset first, then try both 0 and 4
@@ -187,7 +187,7 @@ static void DetectChunksOffset() {
     for (int off : offsets) {
         uintptr_t chunk0 = 0;
         if (Macht::ReadSafe(s_poolAddr + off, chunk0) && chunk0 != 0 &&
-            chunk0 > 0x10000 && chunk0 < 0x00007FFFFFFFFFFF) {
+            chunk0 > Grimoire::PTR_USERSPACE_MIN && chunk0 < Grimoire::PTR_USERSPACE_MAX) {
             uint16_t testHeader = 0;
             if (Macht::ReadSafe(chunk0, testHeader)) {
                 s_chunksOffset = off;

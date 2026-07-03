@@ -6,6 +6,7 @@
 #include "Macht.h"
 #define LOG_CAT "MEM"
 #include "Sein.h"
+#include "Grimoire.h"
 
 #include <Psapi.h>
 #include <vector>
@@ -33,7 +34,7 @@ bool ReadBytesSafe(uintptr_t addr, void* buf, size_t size) {
 bool IsAddrReadable(uintptr_t addr, size_t size) {
     if (!addr || size == 0) return false;
     // Reject obviously bogus user-mode addresses early
-    if (addr < 0x10000 || addr > 0x00007FFFFFFFFFFF) return false;
+    if (!Grimoire::IsUserspacePointer(addr)) return false;
 
     MEMORY_BASIC_INFORMATION mbi{};
     uintptr_t cur = addr;

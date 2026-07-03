@@ -24,6 +24,20 @@ constexpr const wchar_t* PIPE_NAME        = L"\\\\.\\pipe\\UE5DumpBfx";
 constexpr const char*    PIPE_NAME_NARROW  = "\\\\.\\pipe\\UE5DumpBfx";
 constexpr unsigned long  PIPE_BUF_SIZE    = 65536;
 
+// --- Userspace pointer plausibility ---
+// A candidate x64 pointer is "plausible userspace" iff it sits in the canonical
+// low-half range [0x10000, 0x00007FFFFFFFFFFF]: above the first 64KB (never a valid
+// heap/module address) and below the x64 user/kernel split. Used pervasively across
+// the DLL as a pre-deref garbage/kernel-address guard.
+// NOTE: 0x10000 also appears STANDALONE elsewhere with unrelated meanings (min module
+// size in AOB scan, PropertiesSize / element-size sanity caps) — those are NOT pointer
+// checks; only the paired [MIN, MAX] range test is.
+constexpr uintptr_t PTR_USERSPACE_MIN = 0x10000;
+constexpr uintptr_t PTR_USERSPACE_MAX = 0x00007FFFFFFFFFFF;
+inline bool IsUserspacePointer(uintptr_t p) {
+    return p >= PTR_USERSPACE_MIN && p <= PTR_USERSPACE_MAX;
+}
+
 // --- UObject offsets ---
 // UObjectBase layout: VTable(8) + Flags(4) + Index(4) + Class*(8) + FName(?) + Outer*(8)
 // Most offsets are stable, but Outer shifts when CasePreservingName is active (FName = 0x10):

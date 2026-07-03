@@ -284,9 +284,8 @@ static constexpr int NUM_FLAT_PRESETS = sizeof(s_flatPresets) / sizeof(s_flatPre
 
 // Helper: check if a pointer value looks like a valid heap pointer (not code/null/low)
 static bool LooksLikeHeapPtr(uintptr_t ptr) {
-    if (!ptr || ptr < 0x10000) return false;
-    // Must be in user-mode address range (below kernel boundary)
-    if (ptr > 0x00007FFFFFFFFFFF) return false;
+    // Must be a plausible user-mode heap/data pointer (not null/low/kernel)
+    if (!Grimoire::IsUserspacePointer(ptr)) return false;
     // Reject pointers in the game module's code range (likely .text section)
     uintptr_t modBase = Macht::GetModuleBase(nullptr);
     uintptr_t modSize = Macht::GetModuleSize(nullptr);
@@ -506,13 +505,13 @@ static bool DetectLayout(uintptr_t addr) {
 
 // Helper: check if a pointer looks like a valid UObject (has valid ClassPrivate chain)
 static bool LooksLikeUObject(uintptr_t obj) {
-    if (!obj || obj < 0x10000 || obj > 0x00007FFFFFFFFFFF) return false;
+    if (!obj || !Grimoire::IsUserspacePointer(obj)) return false;
     uintptr_t cls = 0;
     if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls)) return false;
-    if (cls < 0x10000 || cls > 0x00007FFFFFFFFFFF) return false;
+    if (!Grimoire::IsUserspacePointer(cls)) return false;
     uintptr_t clsCls = 0;
     if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_CLASS, clsCls)) return false;
-    if (clsCls < 0x10000 || clsCls > 0x00007FFFFFFFFFFF) return false;
+    if (!Grimoire::IsUserspacePointer(clsCls)) return false;
     return true;
 }
 

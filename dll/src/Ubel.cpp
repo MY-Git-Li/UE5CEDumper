@@ -446,7 +446,7 @@ static std::string GetFieldTypeName(uintptr_t ffieldAddr) {
 static std::string GetUPropertyTypeName(uintptr_t upropAddr) {
     uintptr_t cls = 0;
     if (!Macht::ReadSafe(upropAddr + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) return "";
-    if (cls < 0x10000 || cls > 0x00007FFFFFFFFFFF) return "";
+    if (!Grimoire::IsUserspacePointer(cls)) return "";
 
     uint32_t nameIdx = 0;
     if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, nameIdx)) return "";
@@ -1396,7 +1396,7 @@ bool GetMapPairLayout(uintptr_t fieldAddr, MapPairLayout& out) {
         if (tryOff < 0) continue;
         uintptr_t keyProp = 0;
         if (!Macht::ReadSafe(fieldAddr + tryOff, keyProp) || !keyProp) continue;
-        if (keyProp < 0x10000 || keyProp > 0x00007FFFFFFFFFFF) continue;
+        if (!Grimoire::IsUserspacePointer(keyProp)) continue;
 
         std::string keyTn = GetFieldTypeName(keyProp);
         if (keyTn.empty() || keyTn.find("Property") == std::string::npos) continue;
@@ -2827,7 +2827,7 @@ static std::string FormatGuessedName(int32_t offset, const char* hint) {
 
 // Pointer validation: address in userspace range AND target is readable
 static bool IsLikelyPointer(uint64_t val) {
-    if (val < 0x10000 || val > 0x00007FFFFFFFFFFF) return false;
+    if (!Grimoire::IsUserspacePointer(val)) return false;
     uint8_t probe = 0;
     return Macht::ReadSafe(static_cast<uintptr_t>(val), probe);
 }
@@ -3229,7 +3229,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
     if (classAddr) {
         uintptr_t testClass = 0;
         Macht::ReadSafe(instanceAddr + Grimoire::OFF_UOBJECT_CLASS, testClass);
-        if (!testClass || testClass < 0x10000 || testClass > 0x00007FFFFFFFFFFF) {
+        if (!testClass || !Grimoire::IsUserspacePointer(testClass)) {
             isRawStruct = true;
         } else {
             std::string testName = GetName(testClass);
@@ -3579,7 +3579,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                     uintptr_t inner = 0;
                     if (!Macht::ReadSafe(fi.Address + tryOff, inner) || !inner) continue;
                     // Skip obvious garbage addresses to avoid SEH faults
-                    if (inner < 0x10000 || inner > 0x00007FFFFFFFFFFF) continue;
+                    if (!Grimoire::IsUserspacePointer(inner)) continue;
 
                     // Validate: Inner must be an FField with a readable FFieldClass name
                     std::string innerTypeName = GetFieldTypeName(inner);
@@ -3781,7 +3781,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                     if (tryOff < 0) continue;
                     uintptr_t inner = 0;
                     if (!Macht::ReadSafe(fi.Address + tryOff, inner) || !inner) continue;
-                    if (inner < 0x10000 || inner > 0x00007FFFFFFFFFFF) continue;
+                    if (!Grimoire::IsUserspacePointer(inner)) continue;
 
                     std::string innerTypeName = GetUPropertyTypeName(inner);
                     if (!innerTypeName.empty() && innerTypeName.find("Property") != std::string::npos) {
@@ -3937,7 +3937,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                     if (tryOff < 0) continue;
                     uintptr_t keyProp = 0;
                     if (!Macht::ReadSafe(fi.Address + tryOff, keyProp) || !keyProp) continue;
-                    if (keyProp < 0x10000 || keyProp > 0x00007FFFFFFFFFFF) continue;
+                    if (!Grimoire::IsUserspacePointer(keyProp)) continue;
 
                     std::string keyTypeName = GetFieldTypeName(keyProp);
                     if (keyTypeName.empty() || keyTypeName == "Unknown"
@@ -4071,15 +4071,15 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                     if (tryOff < 0) continue;
                     uintptr_t keyProp = 0;
                     if (!Macht::ReadSafe(fi.Address + tryOff, keyProp) || !keyProp) continue;
-                    if (keyProp < 0x10000 || keyProp > 0x00007FFFFFFFFFFF) continue;
+                    if (!Grimoire::IsUserspacePointer(keyProp)) continue;
 
                     std::string keyTypeName = GetUPropertyTypeName(keyProp);
                     if (keyTypeName.empty() || keyTypeName.find("Property") == std::string::npos) continue;
 
                     uintptr_t valueProp = 0;
                     Macht::ReadSafe(fi.Address + tryOff + 8, valueProp);
-                    std::string valueTypeName = (valueProp && valueProp > 0x10000
-                        && valueProp < 0x00007FFFFFFFFFFF) ? GetUPropertyTypeName(valueProp) : "";
+                    std::string valueTypeName = (valueProp && valueProp > Grimoire::PTR_USERSPACE_MIN
+                        && valueProp < Grimoire::PTR_USERSPACE_MAX) ? GetUPropertyTypeName(valueProp) : "";
 
                     if (!valueTypeName.empty() && valueTypeName.find("Property") != std::string::npos) {
                         fv.mapKeyType = keyTypeName;
@@ -4207,7 +4207,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                     if (tryOff < 0) continue;
                     uintptr_t elemProp = 0;
                     if (!Macht::ReadSafe(fi.Address + tryOff, elemProp) || !elemProp) continue;
-                    if (elemProp < 0x10000 || elemProp > 0x00007FFFFFFFFFFF) continue;
+                    if (!Grimoire::IsUserspacePointer(elemProp)) continue;
 
                     std::string elemTypeName = GetFieldTypeName(elemProp);
                     if (elemTypeName.empty() || elemTypeName == "Unknown"
@@ -4283,7 +4283,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                     if (tryOff < 0) continue;
                     uintptr_t elemProp = 0;
                     if (!Macht::ReadSafe(fi.Address + tryOff, elemProp) || !elemProp) continue;
-                    if (elemProp < 0x10000 || elemProp > 0x00007FFFFFFFFFFF) continue;
+                    if (!Grimoire::IsUserspacePointer(elemProp)) continue;
 
                     std::string elemTypeName = GetUPropertyTypeName(elemProp);
                     if (elemTypeName.empty() || elemTypeName.find("Property") == std::string::npos) continue;
@@ -4363,7 +4363,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                 uintptr_t candidate = 0;
                 if (!Macht::ReadSafe(fi.Address + tryOffset, candidate) || !candidate) continue;
                 // Skip obvious garbage addresses to avoid SEH faults
-                if (candidate < 0x10000 || candidate > 0x00007FFFFFFFFFFF) continue;
+                if (!Grimoire::IsUserspacePointer(candidate)) continue;
                 // Validate: must be a UScriptStruct (inherits UObject), so GetName should return ASCII
                 std::string sname = GetName(candidate);
                 if (!sname.empty() && sname[0] >= 0x20 && sname[0] < 0x7F) {
@@ -4848,8 +4848,7 @@ InstanceWalkResult WalkInstance(uintptr_t instanceAddr, uintptr_t classAddr, int
                     uintptr_t candidate = 0;
                     if (!Macht::ReadSafe(innerProp + tryOff, candidate)
                         || !candidate) continue;
-                    if (candidate < 0x10000
-                        || candidate > 0x00007FFFFFFFFFFF) continue;
+                    if (!Grimoire::IsUserspacePointer(candidate)) continue;
                     std::string sname = GetName(candidate);
                     if (sname.empty() || sname[0] < 0x20 || sname[0] >= 0x7F)
                         continue;
@@ -5588,7 +5587,7 @@ static int32_t ProbeRowMapOffset(uintptr_t dataTableAddr, const ClassInfo& ci) {
             continue;
 
         // Validate Data pointer range
-        if (sa.Data < 0x10000 || sa.Data > 0x7FFFFFFFFFFF)
+        if (!Grimoire::IsUserspacePointer(sa.Data))
             continue;
 
         // Extra validation: read first allocated element
@@ -5611,7 +5610,7 @@ static int32_t ProbeRowMapOffset(uintptr_t dataTableAddr, const ClassInfo& ci) {
             uintptr_t rowPtr = 0;
             if (!Macht::ReadSafe(elemAddr + fnameSize, rowPtr))
                 break;
-            if (rowPtr < 0x10000 || rowPtr > 0x7FFFFFFFFFFF)
+            if (!Grimoire::IsUserspacePointer(rowPtr))
                 break;
 
             validated = true;
