@@ -854,6 +854,11 @@
     <sys:String x:Key="str.Tip.TP.GmRefresh">Re-read the live God Mode state (1=immune / 0=can be damaged / unknown if no pawn).</sys:String>
     <sys:String x:Key="str.Tip.TP.GmCopyScript">Copy a self-contained Cheat Engine AA script (tick = ON, untick = OFF) that drives God Mode via the DLL mailbox. Paste into a CE memory record.</sys:String>
 
+    <!-- Standalone trainer export (no-DLL CE Lua .CT via AOBMaker) -->
+    <sys:String x:Key="str.TP.TrainerHeader">Standalone Trainer (no DLL)</sys:String>
+    <sys:String x:Key="str.TP.TrainerExport">Export to CE (this game/version)</sys:String>
+    <sys:String x:Key="str.Tip.TP.TrainerExport">Bake this game's GWorld chain + offsets into a self-contained CE Lua trainer (Move Speed / Gravity / Super Jump / GodMode / coordinate TP) and push it straight into Cheat Engine via the AOBMaker plugin. Runs WITHOUT the DLL afterwards. Valid only for this exact game build — regenerate after a patch. Requires the AOBMaker plugin.</sys:String>
+
     <!-- Move Speed multiplier (Laufen — force UCharacterMovementComponent.MaxWalkSpeed) -->
     <sys:String x:Key="str.TP.MsHeader">Move Speed</sys:String>
     <sys:String x:Key="str.TP.MsState">State:</sys:String>

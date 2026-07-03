@@ -102,6 +102,40 @@ struct MovementState {
     int32_t   RotFieldOffset = -1;   // ControlRotation FRotator offset within the controller
 };
 
+// One hop of the *GWorld -> Pawn pointer chain, decomposed into a bake-able
+// (offset, deref) pair so a standalone CE-Lua trainer can re-walk it every tick
+// (`addr = readQword(addr + Offset)` when Deref, else `addr = addr + Offset`).
+struct TrainerChainHop {
+    char    Field[48] = {};   // property name (for the emitted Lua comment)
+    int32_t Offset = 0;
+    bool    Deref = true;
+};
+
+// Everything a no-DLL standalone trainer needs baked as static numbers, resolved
+// live from reflection during normal gameplay. The pawn chain is the FIXED
+// engine-base-class spine (OwningGameInstance -> LocalPlayers[0] -> PlayerController
+// -> Pawn); the per-field offsets hang off the pawn / its RootComponent / its
+// CharacterMovement. Offsets are -1 when the field didn't resolve.
+struct TrainerOffsets {
+    int32_t         ChainCount = 0;
+    TrainerChainHop Chain[16];      // *GWorld -> ... -> Pawn (pointer)
+    int32_t PawnToRoot   = -1;      // APawn.RootComponent (deref)
+    int32_t RootToRelLoc = -1;      // USceneComponent.RelativeLocation (inline FVector)
+    int32_t FVectorWidth = 0;       // total FVector size: 12 (float) or 24 (double/LWC)
+    int32_t PawnToCmc    = -1;      // APawn.CharacterMovement (deref)
+    int32_t WalkSpeedOff = -1;      // UCharacterMovementComponent.MaxWalkSpeed (float)
+    int32_t GravityOff   = -1;      // UCharacterMovementComponent.GravityScale (float)
+    int32_t JumpOff      = -1;      // UCharacterMovementComponent.JumpZVelocity (float)
+    int32_t CtrlRotOff   = -1;      // AController.ControlRotation (inline FRotator)
+    int32_t CtrlRotSize  = 0;       // 12 (float) or 24 (double/LWC)
+};
+
+// Resolve the standalone-trainer offset bundle (§ standalone-ce-lua-trainer).
+// Reuses the teleport resolution chain; must be called during normal gameplay
+// (a live pawn). Returns TP_OK, or a negative TeleportResult when the chain /
+// pawn / RootComponent don't resolve.
+int32_t GetTrainerOffsets(TrainerOffsets& out);
+
 // Read the current pawn pose (location from RootComponent.RelativeLocation,
 // rotation from Controller.ControlRotation). When the pawn's root is
 // attached (vehicle/platform), falls back to invoking K2_GetActorLocation

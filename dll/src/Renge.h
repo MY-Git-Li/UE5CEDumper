@@ -102,6 +102,12 @@ constexpr const char* CMD_RESET_MOVEMENT           = "reset_movement";
 constexpr const char* CMD_SET_GRAVITY_DIRECTION    = "set_gravity_direction";
 constexpr const char* CMD_RESET_GRAVITY_DIRECTION  = "reset_gravity_direction";
 
+// Standalone CE-Lua trainer bake (no-DLL trainer export). One-shot: returns the
+// decomposed *GWorld->Pawn offset chain + RootComponent/RelativeLocation,
+// CharacterMovement + knob offsets, and the protection bits — everything a
+// GWorld-anchored standalone .CT needs to re-walk and write without the DLL.
+constexpr const char* CMD_GET_TRAINER_OFFSETS      = "get_trainer_offsets";
+
 // Snapshot capture (experimental — Phase A). Stateless cursor pagination
 // like get_object_list: begin_snapshot returns the total object count for
 // progress; snapshot_chunk streams [offset, offset+limit) objects with their

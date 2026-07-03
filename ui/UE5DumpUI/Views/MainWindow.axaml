@@ -379,7 +379,7 @@
         <TabItem Header="{StaticResource str.Tab.Console}">
           <views:ConsolePanel DataContext="{Binding Console}"/>
         </TabItem>
-        <TabItem Header="{StaticResource str.Tab.Teleport}">
+        <TabItem Header="{StaticResource str.Tab.Teleport}" Tag="Teleport">
           <views:TeleportPanel DataContext="{Binding Teleport}"/>
         </TabItem>
         <TabItem Header="{StaticResource str.Tab.GameClassFilter}">

@@ -1279,6 +1279,7 @@ public static class CeXmlExportService
         sb.AppendLine("{$lua}");
         sb.AppendLine("if syntaxcheck then return end");
         AppendDebugPreamble(sb);
+        sb.AppendLine($"-- {CeLuaHygiene.Attribution}");
         sb.AppendLine();
 
         // Idempotent Lua helpers, shared verbatim with GenerateGWorldWalkedSymbolXml.
@@ -1450,6 +1451,7 @@ public static class CeXmlExportService
         sb.AppendLine("{$lua}");
         sb.AppendLine("if syntaxcheck then return end");
         AppendDebugPreamble(sb);
+        sb.AppendLine($"-- {CeLuaHygiene.Attribution}");
         sb.AppendLine();
         if (useAob) AppendAobScanModuleUEHelper(sb);
         AppendCloseLuaEngineHelper(sb);

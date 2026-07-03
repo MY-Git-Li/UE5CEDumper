@@ -150,6 +150,17 @@ public class CeLuaHygieneTests
     }
 
     [Fact]
+    public void Every_generator_carries_the_project_url()
+    {
+        const string url = "https://github.com/bbfox0703/UE5CEDumper";
+        Assert.Equal(url, CeLuaHygiene.AttributionUrl);
+        Assert.Contains(url, ProtectionScriptGenerator.Generate());
+        Assert.Contains(url, DebugCameraScriptGenerator.Generate());
+        Assert.Contains(url, MovementScriptGenerator.Generate(MovementScriptGenerator.Knob.WalkSpeed, 150.0));
+        Assert.Contains(url, TeleportScriptGenerator.Generate(TeleportScriptGenerator.Action.Save, 0));
+    }
+
+    [Fact]
     public void Baked_carries_preamble_and_debug_gated_close()
     {
         var s = BakedScriptGenerator.Generate(

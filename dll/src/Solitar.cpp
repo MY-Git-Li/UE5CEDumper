@@ -350,6 +350,33 @@ void StartWorker() {
 
 namespace Solitar {
 
+// Read-only companion to BuildTargets: resolve every matched protection bool on
+// the current pawn as pawn-relative offsets, WITHOUT mutating s_targets or the
+// toggle — so exporting a standalone trainer never disturbs a live GodMode.
+int32_t ResolveProtectBits(std::vector<ProtectBit>& out) {
+    out.clear();
+    PawnRef p;
+    int32_t rc = ResolvePawnRef(p);
+    if (rc != PR_OK) return rc;
+    ClassInfo ci = Ubel::WalkClassEx(p.pawnClass);
+    for (const auto& f : ci.Fields) {
+        if (f.TypeName != "BoolProperty" || !f.Address) continue;
+        std::string lower = ToLower(f.Name);
+        bool protect = false;
+        if (!MatchProtectionBool(lower, protect)) continue;
+        uint8_t byteOff = 0, mask = 0;
+        if (!ReadBoolLayout(f.Address, byteOff, mask)) continue;
+        ProtectBit b;
+        b.name = f.Name;
+        b.byteOffset = f.Offset + static_cast<int32_t>(byteOff);
+        b.mask = mask;
+        b.protect = protect ? 1 : 0;
+        out.push_back(std::move(b));
+        if (out.size() >= 16) break;   // mirror BuildTargets sanity cap
+    }
+    return PR_OK;
+}
+
 int32_t SetGodMode(bool on) {
     int32_t rc;
     {
