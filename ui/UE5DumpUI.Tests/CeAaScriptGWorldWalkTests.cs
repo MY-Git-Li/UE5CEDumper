@@ -70,6 +70,24 @@ public class CeAaScriptGWorldWalkTests
         Assert.DoesNotContain("tonumber('", xml);   // base comes from the scan, not a literal
     }
 
+    [Fact]
+    public void Walk_carries_debug_preamble_and_debug_gated_close()
+    {
+        var xml = CeXmlExportService.GenerateGWorldWalkedSymbolXml(
+            "BP_Test", SampleSpine(), useAob: true,
+            aob: "48 8B 1D ?? ?? ?? ??", aobPos: 3, aobLen: 7, gworldSlotAddr: "");
+
+        // Quiet by default; UE5_DEBUG flips it on.
+        Assert.Contains("local DEBUG = UE5_DEBUG or 0", xml);
+        // Status lines are gated; the mid-walk WARNING still surfaces.
+        Assert.Contains("dbg(string.format('[GWorldWalk] BP_Test = %X', addr))", xml);
+        Assert.Contains("print('[GWorldWalk] WARNING: null pointer mid-walk", xml);
+        // Close ONLY on a live leaf + DEBUG off (a null walk keeps the window open).
+        Assert.Contains("if DEBUG == 0 and addr and addr ~= 0 then closeLuaEngine() end", xml);
+        // DISABLE closes too, gated on DEBUG.
+        Assert.Contains("if DEBUG == 0 then closeLuaEngine() end", xml);
+    }
+
     // ── Generator: hardcoded-GWorld branch ─────────────────────────────
 
     [Fact]

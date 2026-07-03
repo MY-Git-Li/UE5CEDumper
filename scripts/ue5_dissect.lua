@@ -29,7 +29,10 @@ local UOBJECT_VTABLE_SIZE = 8 -- 64-bit pointer
 -- ----------------------------------------------------------------
 -- Logging helpers
 -- ----------------------------------------------------------------
-local function log(fmt, ...)  print(string.format("[UE5Dissect] " .. fmt, ...)) end
+-- Debug gate: log() stays quiet unless UE5_DEBUG ~= 0 (set it in CE's Lua
+-- console) so the Lua Engine window does not pop over Cheat Engine. warn()
+-- always prints -- it flags a real problem the user needs to see.
+local function log(fmt, ...)  if (UE5_DEBUG or 0) ~= 0 then print(string.format("[UE5Dissect] " .. fmt, ...)) end end
 local function warn(fmt, ...) print(string.format("[UE5Dissect WARN] " .. fmt, ...)) end
 
 -- ----------------------------------------------------------------

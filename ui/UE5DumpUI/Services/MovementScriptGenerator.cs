@@ -50,6 +50,7 @@ public static class MovementScriptGenerator
         Line(sb, header);
         Line(sb, "{$lua}");
         Line(sb, "if syntaxcheck then return end");
+        CeLuaHygiene.AppendDebugPreamble(sb);
         if (enable)
         {
             Line(sb, "-- ================================================================");
@@ -92,16 +93,26 @@ public static class MovementScriptGenerator
         }
         else
         {
-            Line(sb, "  if elapsed >= 10000 then break end");
+            // Timeout on an untick is an error, not a clean finish -- return so the
+            // success-close below is unreachable (leave the window as-is), matching
+            // the [ENABLE] path. (break would fall through into the auto-close.)
+            Line(sb, "  if elapsed >= 10000 then return end");
         }
         Line(sb, "end");
         if (enable)
         {
             Line(sb, "local state = readInteger(mb + 0x08)   -- 1=active, 0=off, <0=error");
-            Line(sb, $"print('[Movement] {label} {Pct(percent)} -> state=' .. tostring(state))");
+            Line(sb, $"dbg('[Movement] {label} {Pct(percent)} -> state=' .. tostring(state))");
             Line(sb, "if state < 0 then");
             Line(sb, $"  showMessage('[Movement] {label} -- no pawn / no CharacterMovement (enter gameplay first)')");
+            Line(sb, "elseif DEBUG == 0 then");
+            Line(sb, $"  {CeLuaHygiene.CloseCall}   -- clean success: close the Lua Engine window");
             Line(sb, "end");
+        }
+        else
+        {
+            // [DISABLE] restored the base -- close the window on a clean untick.
+            CeLuaHygiene.AppendCloseOnSuccess(sb);
         }
         Line(sb, "{$asm}");
     }
@@ -126,6 +137,7 @@ public static class MovementScriptGenerator
         Line(sb, header);
         Line(sb, "{$lua}");
         Line(sb, "if syntaxcheck then return end");
+        CeLuaHygiene.AppendDebugPreamble(sb);
         if (enable)
         {
             Line(sb, "-- ================================================================");
@@ -169,16 +181,26 @@ public static class MovementScriptGenerator
         }
         else
         {
-            Line(sb, "  if elapsed >= 10000 then break end");
+            // Timeout on an untick is an error, not a clean finish -- return so the
+            // success-close below is unreachable (leave the window as-is), matching
+            // the [ENABLE] path. (break would fall through into the auto-close.)
+            Line(sb, "  if elapsed >= 10000 then return end");
         }
         Line(sb, "end");
         if (enable)
         {
             Line(sb, "local state = readInteger(mb + 0x08)   -- 1=active, 0=off, <0=error/unavailable");
-            Line(sb, "print('[Movement] Gravity Direction -> state=' .. tostring(state))");
+            Line(sb, "dbg('[Movement] Gravity Direction -> state=' .. tostring(state))");
             Line(sb, "if state < 0 then");
             Line(sb, "  showMessage('[Movement] Gravity Direction -- unavailable (needs UE5.4+) or no pawn.')");
+            Line(sb, "elseif DEBUG == 0 then");
+            Line(sb, $"  {CeLuaHygiene.CloseCall}   -- clean success: close the Lua Engine window");
             Line(sb, "end");
+        }
+        else
+        {
+            // [DISABLE] restored the default gravity -- close on a clean untick.
+            CeLuaHygiene.AppendCloseOnSuccess(sb);
         }
         Line(sb, "{$asm}");
     }
