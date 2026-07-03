@@ -1278,6 +1278,7 @@ public static class CeXmlExportService
         sb.AppendLine("[ENABLE]");
         sb.AppendLine("{$lua}");
         sb.AppendLine("if syntaxcheck then return end");
+        AppendDebugPreamble(sb);
         sb.AppendLine();
 
         // Idempotent Lua helpers, shared verbatim with GenerateGWorldWalkedSymbolXml.
@@ -1295,6 +1296,7 @@ public static class CeXmlExportService
         sb.AppendLine();
 
         // Scan and register loop
+        sb.AppendLine("local scan_ok = true");
         sb.AppendLine("for _, entry in ipairs(AOBs) do");
         sb.AppendLine("  local aob_addr_str = AOBScanModuleUE(module_name, entry.aob)");
         sb.AppendLine("  if aob_addr_str then");
@@ -1306,13 +1308,16 @@ public static class CeXmlExportService
         sb.AppendLine("      unregisterSymbol(entry.symbol)");
         sb.AppendLine("      registerSymbol(entry.symbol, final_addr)");
         sb.AppendLine("    end)");
-        sb.AppendLine("    print(string.format('[SymbolScanner] %s registered at: %X', entry.name, final_addr))");
+        sb.AppendLine("    dbg(string.format('[SymbolScanner] %s registered at: %X', entry.name, final_addr))");
         sb.AppendLine("  else");
+        sb.AppendLine("    scan_ok = false");
         sb.AppendLine("    print(string.format('[SymbolScanner] WARNING: AOB scan failed for %s', entry.name))");
         sb.AppendLine("  end");
         sb.AppendLine("end");
         sb.AppendLine();
-        sb.AppendLine("closeLuaEngine()");
+        // Close only on a clean scan; a failed scan keeps the window open so the
+        // WARNING stays readable.
+        sb.AppendLine("if DEBUG == 0 and scan_ok then closeLuaEngine() end");
         sb.AppendLine("{$asm}");
         sb.AppendLine();
 
@@ -1320,8 +1325,9 @@ public static class CeXmlExportService
         sb.AppendLine("[DISABLE]");
         sb.AppendLine("{$lua}");
         sb.AppendLine("if syntaxcheck then return end");
+        AppendDebugPreamble(sb);
         sb.AppendLine($"unregisterSymbol('{symbolName}')");
-        sb.AppendLine("closeLuaEngine()");
+        sb.AppendLine("if DEBUG == 0 then closeLuaEngine() end");
         sb.AppendLine("{$asm}");
     }
 
@@ -1366,6 +1372,18 @@ public static class CeXmlExportService
         sb.AppendLine("end");
         sb.AppendLine("registerLuaFunctionHighlight('AOBScanModuleUE')");
         sb.AppendLine();
+    }
+
+    /// <summary>Emit the shared DEBUG preamble into the embedded AA-script Lua so
+    /// it honours <c>UE5_DEBUG</c> like every other generator: <c>dbg()</c> is
+    /// quiet unless the flag is set, and the trailing <c>closeLuaEngine()</c> is
+    /// gated on <c>DEBUG == 0</c>. Text is identical to
+    /// <see cref="CeLuaHygiene.AppendDebugPreamble"/>; emitted via AppendLine here
+    /// to keep this file's line-ending style consistent within the XML payload.</summary>
+    private static void AppendDebugPreamble(StringBuilder sb)
+    {
+        sb.AppendLine("local DEBUG = UE5_DEBUG or 0   -- 1 = show diagnostics + keep this window open");
+        sb.AppendLine("local function dbg(...) if DEBUG ~= 0 then print(...) end end");
     }
 
     /// <summary>closeLuaEngine Lua helper (idempotent). Shared verbatim by
@@ -1431,6 +1449,7 @@ public static class CeXmlExportService
         sb.AppendLine("[ENABLE]");
         sb.AppendLine("{$lua}");
         sb.AppendLine("if syntaxcheck then return end");
+        AppendDebugPreamble(sb);
         sb.AppendLine();
         if (useAob) AppendAobScanModuleUEHelper(sb);
         AppendCloseLuaEngineHelper(sb);
@@ -1449,7 +1468,7 @@ public static class CeXmlExportService
             sb.AppendLine("    unregisterSymbol(entry.symbol)");
             sb.AppendLine("    registerSymbol(entry.symbol, gworld_base)");
             sb.AppendLine("  end)");
-            sb.AppendLine("  print(string.format('[GWorldWalk] %s = %X', entry.symbol, gworld_base))");
+            sb.AppendLine("  dbg(string.format('[GWorldWalk] %s = %X', entry.symbol, gworld_base))");
             sb.AppendLine("else");
             sb.AppendLine("  print('[GWorldWalk] WARNING: GWorld AOB scan failed')");
             sb.AppendLine("end");
@@ -1488,11 +1507,13 @@ public static class CeXmlExportService
         sb.AppendLine($"    unregisterSymbol('{leafSymbol}')");
         sb.AppendLine($"    registerSymbol('{leafSymbol}', addr)");
         sb.AppendLine("  end)");
-        sb.AppendLine($"  print(string.format('[GWorldWalk] {leafSymbol} = %X', addr))");
+        sb.AppendLine($"  dbg(string.format('[GWorldWalk] {leafSymbol} = %X', addr))");
         sb.AppendLine("else");
         sb.AppendLine($"  print('[GWorldWalk] WARNING: null pointer mid-walk; {leafSymbol} not registered')");
         sb.AppendLine("end");
-        sb.AppendLine("closeLuaEngine()");
+        // Close only when the walk produced a live leaf; a null mid-walk keeps the
+        // window open so the WARNING stays readable.
+        sb.AppendLine("if DEBUG == 0 and addr and addr ~= 0 then closeLuaEngine() end");
         sb.AppendLine("{$asm}");
         sb.AppendLine();
 
@@ -1500,9 +1521,10 @@ public static class CeXmlExportService
         sb.AppendLine("[DISABLE]");
         sb.AppendLine("{$lua}");
         sb.AppendLine("if syntaxcheck then return end");
+        AppendDebugPreamble(sb);
         sb.AppendLine($"unregisterSymbol('{leafSymbol}')");
         sb.AppendLine($"unregisterSymbol('{gworldSymbol}')");
-        sb.AppendLine("closeLuaEngine()");
+        sb.AppendLine("if DEBUG == 0 then closeLuaEngine() end");
         sb.AppendLine("{$asm}");
 
         sb.AppendLine("      </AssemblerScript>");

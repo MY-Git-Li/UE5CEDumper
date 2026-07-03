@@ -18,6 +18,11 @@ if syntaxcheck then return end
 -- ============================================================
 -- UE5CEDumper — Table Script
 -- Auto-runs when this CT is opened in Cheat Engine.
+--
+-- Quiet by default: set UE5_DEBUG=1 (a global, e.g. typed once in CE's Lua
+-- console) to echo progress to the Lua Engine console. Errors always show and
+-- keep the window open; file logging under %LOCALAPPDATA%\UE5CEDumper\Logs is
+-- unaffected by this flag.
 -- ============================================================
 
 -- Auto-detect DLL path by searching candidate directories.
@@ -77,15 +82,17 @@ if not DLL_PATH then
     return
 end
 
--- Diagnostic: show search results
-print(string.format("[UE5Dump] OpenDialog1 = '%s'", _openPath))
-print(string.format("[UE5Dump] SaveDialog1 = '%s'", _savePath))
-if _dllFoundIn then
-    print(string.format("[UE5Dump] DLL found in: '%s'", _dllFoundIn))
-else
-    print(string.format("[UE5Dump] WARNING: DLL not found in any candidate!"))
-    for i, dir in ipairs(_candidates) do
-        print(string.format("[UE5Dump]   candidate %d: '%s'", i, dir))
+-- Diagnostic: show search results (gated on UE5_DEBUG so it stays quiet by default)
+if (UE5_DEBUG or 0) ~= 0 then
+    print(string.format("[UE5Dump] OpenDialog1 = '%s'", _openPath))
+    print(string.format("[UE5Dump] SaveDialog1 = '%s'", _savePath))
+    if _dllFoundIn then
+        print(string.format("[UE5Dump] DLL found in: '%s'", _dllFoundIn))
+    else
+        print(string.format("[UE5Dump] WARNING: DLL not found in any candidate!"))
+        for i, dir in ipairs(_candidates) do
+            print(string.format("[UE5Dump]   candidate %d: '%s'", i, dir))
+        end
     end
 end
 
@@ -120,7 +127,8 @@ ue5_logInit()
 
 function ue5_log(fmt, ...)
     local msg = string.format("[%s] [UE5Dump] " .. fmt, os.date("%H:%M:%S"), ...)
-    print(msg)
+    -- Console echo gated on UE5_DEBUG (quiet by default); file logging always runs.
+    if (UE5_DEBUG or 0) ~= 0 then print(msg) end
     if _logHandle then
         _logHandle:write(msg .. "\n")
         _logHandle:flush()

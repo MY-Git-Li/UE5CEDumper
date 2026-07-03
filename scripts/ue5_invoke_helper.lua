@@ -390,5 +390,9 @@ end
 -- ============================================================
 -- Sentinel (visible in CE Lua engine after first load)
 -- ============================================================
-print(string.format('[*] ue5_invoke_helper.lua v%s loaded',
-                    UE5_INVOKE_HELPER_VERSION))
+-- Gated on UE5_DEBUG so loading the helper does not pop the Lua Engine window
+-- over Cheat Engine. Set UE5_DEBUG=1 in CE's Lua console to see the load banner.
+if (UE5_DEBUG or 0) ~= 0 then
+  print(string.format('[*] ue5_invoke_helper.lua v%s loaded',
+                      UE5_INVOKE_HELPER_VERSION))
+end
