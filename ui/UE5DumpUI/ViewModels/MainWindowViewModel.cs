@@ -542,8 +542,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 Snapshot?.SetEngineState(state);
                 Spc?.SetEngineState(state);
                 Pivot?.SetEngineState(state);
+                Teleport.SetEngineState(state);
 
                 _ = LiveWalker.CheckAobMakerAsync();
+                _ = Teleport.CheckAobMakerAsync();
 
                 StatusText = $"Connected — UE{state.UEVersion} ({state.ObjectCount} objects)";
 
@@ -2171,12 +2173,14 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         InterestingFunctions.IsGWorldAvailable = state.HasGWorld;
         InterestingProperties.IsGWorldAvailable = state.HasGWorld;
         Teleport.SetConnected(true);   // refresh markers once the DLL is scanned
+        Teleport.SetEngineState(state);
         Snapshot?.SetEngineState(state);
         Spc?.SetEngineState(state);
         Pivot?.SetEngineState(state);
 
-        // Fire-and-forget: check AOBMaker availability for Live Walker
+        // Fire-and-forget: check AOBMaker availability for Live Walker + Teleport
         _ = LiveWalker.CheckAobMakerAsync();
+        _ = Teleport.CheckAobMakerAsync();
 
         // Fire-and-forget: persist AOB usage data (failure must not block UI)
         if (_aobUsage != null)

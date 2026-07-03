@@ -2576,6 +2576,50 @@ public sealed class DumpService : IDumpService
         };
     }
 
+    public async Task<TrainerOffsets> GetTrainerOffsetsAsync(CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "get_trainer_offsets" };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        var o = new TrainerOffsets
+        {
+            Code         = res["code"]?.GetValue<int>() ?? 0,
+            PawnToRoot   = res["pawn_to_root"]?.GetValue<int>() ?? -1,
+            RootToRelLoc = res["root_to_relloc"]?.GetValue<int>() ?? -1,
+            FVectorWidth = res["fvector_width"]?.GetValue<int>() ?? 0,
+            PawnToCmc    = res["pawn_to_cmc"]?.GetValue<int>() ?? -1,
+            WalkSpeedOff = res["walk_speed_off"]?.GetValue<int>() ?? -1,
+            GravityOff   = res["gravity_off"]?.GetValue<int>() ?? -1,
+            JumpOff      = res["jump_off"]?.GetValue<int>() ?? -1,
+            CtrlRotOff   = res["ctrl_rot_off"]?.GetValue<int>() ?? -1,
+            CtrlRotSize  = res["ctrl_rot_size"]?.GetValue<int>() ?? 0,
+        };
+        if (res["chain"] is JsonArray chain)
+            foreach (var h in chain)
+            {
+                if (h is null) continue;
+                o.Chain.Add(new TrainerChainHop
+                {
+                    Field  = h["field"]?.GetValue<string>() ?? "",
+                    Offset = h["offset"]?.GetValue<int>() ?? 0,
+                    Deref  = h["deref"]?.GetValue<bool>() ?? true,
+                });
+            }
+        if (res["god_bits"] is JsonArray god)
+            foreach (var g in god)
+            {
+                if (g is null) continue;
+                o.GodBits.Add(new TrainerProtectBit
+                {
+                    Name       = g["name"]?.GetValue<string>() ?? "",
+                    ByteOffset = g["byte_offset"]?.GetValue<int>() ?? -1,
+                    Mask       = g["mask"]?.GetValue<int>() ?? 0,
+                    Protect    = g["protect"]?.GetValue<int>() ?? 0,
+                });
+            }
+        return o;
+    }
+
     private static MovementVectorKnob ParseVectorKnob(JsonNode? n)
     {
         if (n is null) return new MovementVectorKnob();

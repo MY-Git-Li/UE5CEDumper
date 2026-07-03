@@ -1338,6 +1338,97 @@ int32_t GetPov(Pov& out) {
     return GetPovImpl(out);
 }
 
+// Standalone-trainer offset bundle (no-DLL trainer export). Reuses the teleport
+// resolution chain, then decomposes *GWorld->Pawn into bake-able (offset, deref)
+// hops and gathers the pawn/root/CMC field offsets a standalone CE-Lua trainer
+// needs. Read-only reflection — no writes, no invokes.
+int32_t GetTrainerOffsets(TrainerOffsets& out) {
+    std::lock_guard<std::mutex> lock(s_opMutex);
+    out = TrainerOffsets{};
+
+    Chain c;
+    int32_t rc = ResolveChain(c);
+    if (rc != TP_OK) return rc;
+
+    auto push = [&](const char* name, int32_t off, bool deref) {
+        if (off < 0 || out.ChainCount >= 16) return;
+        TrainerChainHop& h = out.Chain[out.ChainCount++];
+        size_t n = 0;
+        while (name[n] && n + 1 < sizeof(h.Field)) { h.Field[n] = name[n]; ++n; }
+        h.Field[n] = '\0';
+        h.Offset = off;
+        h.Deref = deref;
+    };
+
+    // *GWorld -> OwningGameInstance
+    uintptr_t worldClass = Ubel::GetClass(c.world);
+    int32_t giOff = Ubel::FindFieldOffset(worldClass, "OwningGameInstance",
+                                          "GameInstance", nullptr, "ObjectProperty");
+    if (giOff < 0) return TP_ERR_REFLECTION;
+    push("OwningGameInstance", giOff, true);
+    uintptr_t gi = ReadPtrAt(c.world, giOff);
+    if (!gi) return TP_ERR_REFLECTION;
+
+    // GameInstance -> LocalPlayers (TArray Data ptr) -> [0]
+    uintptr_t giClass = Ubel::GetClass(gi);
+    int32_t lpOff = Ubel::FindFieldOffset(giClass, "LocalPlayers", "LocalPlayers",
+                                          nullptr, "ArrayProperty");
+    if (lpOff < 0) return TP_ERR_REFLECTION;
+    push("LocalPlayers", lpOff, true);   // -> TArray Data pointer
+    push("LocalPlayers[0]", 0, true);    // -> element[0] (ULocalPlayer*)
+    Macht::TArrayView arr;
+    if (!Macht::ReadTArray(gi + static_cast<uintptr_t>(lpOff), arr) || arr.Count <= 0)
+        return TP_ERR_REFLECTION;
+    uintptr_t lp = Macht::ReadTArrayElement(arr, 0);
+    if (!lp) return TP_ERR_REFLECTION;
+
+    // LocalPlayer -> PlayerController
+    uintptr_t lpClass = Ubel::GetClass(lp);
+    int32_t pcOff = Ubel::FindFieldOffset(lpClass, "PlayerController",
+                                          "PlayerController", nullptr, "ObjectProperty");
+    if (pcOff < 0) return TP_ERR_REFLECTION;
+    push("PlayerController", pcOff, true);
+
+    // PlayerController -> Pawn (resolve the offset on the RAW chain PC's class, not
+    // a debug-camera-hopped controller — the baked chain is the normal one).
+    uintptr_t rawPc = ReadPtrAt(lp, pcOff);
+    uintptr_t pcChainClass = Ubel::GetClass(rawPc ? rawPc : c.pc);
+    const char* pawnField = "Pawn";
+    int32_t pawnOff = Ubel::FindFieldOffset(pcChainClass, "Pawn");
+    if (pawnOff < 0) {
+        pawnField = "AcknowledgedPawn";
+        pawnOff = Ubel::FindFieldOffset(pcChainClass, "AcknowledgedPawn");
+    }
+    if (pawnOff < 0) return TP_ERR_REFLECTION;
+    push(pawnField, pawnOff, true);
+
+    // Offsets hanging off the pawn (reuse what ResolveChain already resolved).
+    uintptr_t pawnClass = Ubel::GetClass(c.pawn);
+    out.PawnToRoot   = Ubel::FindFieldOffset(pawnClass, "RootComponent",
+                                             "RootComponent", nullptr, "ObjectProperty");
+    out.RootToRelLoc = c.relLocOff;
+    out.FVectorWidth = c.relLocSize;
+    out.CtrlRotOff   = c.ctrlRotOff;
+    out.CtrlRotSize  = c.ctrlRotSize;
+
+    // CharacterMovement + float knobs (MaxWalkSpeed / GravityScale / JumpZVelocity).
+    out.PawnToCmc = Ubel::FindFieldOffset(pawnClass, "CharacterMovement",
+                                          "CharacterMovement", nullptr, "ObjectProperty");
+    if (out.PawnToCmc >= 0) {
+        uintptr_t cmc = ReadPtrAt(c.pawn, out.PawnToCmc);
+        if (cmc) {
+            uintptr_t cmcClass = Ubel::GetClass(cmc);
+            out.WalkSpeedOff = Ubel::FindFieldOffset(cmcClass, "MaxWalkSpeed", "WalkSpeed",
+                                                     nullptr, "FloatProperty");
+            out.GravityOff   = Ubel::FindFieldOffset(cmcClass, "GravityScale", "GravityScale",
+                                                     nullptr, "FloatProperty");
+            out.JumpOff      = Ubel::FindFieldOffset(cmcClass, "JumpZVelocity", "JumpZVelocity",
+                                                     nullptr, "FloatProperty");
+        }
+    }
+    return TP_OK;
+}
+
 int32_t SaveMarker(int32_t slot) {
     std::lock_guard<std::mutex> lock(s_opMutex);
     if (slot < 0 || slot >= Grimoire::TELEPORT_SLOTS) return TP_ERR_EMPTY_MARKER;

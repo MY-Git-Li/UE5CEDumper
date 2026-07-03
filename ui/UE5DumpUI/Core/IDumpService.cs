@@ -417,6 +417,14 @@ public interface IDumpService
     Task<MovementParams> GetMovementParamsAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Fetch the decomposed *GWorld->Pawn offset chain + per-field offsets baked
+    /// into a no-DLL standalone CE-Lua trainer (see project-standalone-ce-lua-trainer).
+    /// Call during normal gameplay (a live pawn). <see cref="TrainerOffsets.Code"/>
+    /// is non-zero when the chain/pawn can't be resolved.
+    /// </summary>
+    Task<TrainerOffsets> GetTrainerOffsetsAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// Force a movement knob (<paramref name="knob"/> = "walk_speed" | "gravity"
     /// | "jump") to its captured base × <paramref name="multiplier"/> and hold it
     /// with a re-assert worker (survives respawns / per-tick overwrites).

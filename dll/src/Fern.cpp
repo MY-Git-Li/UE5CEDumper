@@ -19,6 +19,7 @@
 #include "Tot.h"
 #include "Wirbel.h"
 #include "Laufen.h"
+#include "Solitar.h"   // Solitar::ResolveProtectBits for get_trainer_offsets
 #include "Edel.h"
 #include "BuildStamp.h"
 
@@ -4277,6 +4278,52 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                         data["acc_field_name"]   = "Acceleration";
                     }
                 }
+            }
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // get_trainer_offsets: one-shot bake bundle for a no-DLL standalone
+        // CE-Lua trainer — the decomposed *GWorld->Pawn chain + RootComponent /
+        // RelativeLocation / CharacterMovement knob offsets (Wirbel) + the
+        // protection bits (Solitar). Read-only; codes map to teleport hints.
+        if (cmd == Renge::CMD_GET_TRAINER_OFFSETS) {
+            Wirbel::TrainerOffsets t{};
+            int32_t code = Wirbel::GetTrainerOffsets(t);
+            json data;
+            data["code"] = code;
+            if (code == 0) {
+                json chain = json::array();
+                for (int i = 0; i < t.ChainCount; ++i) {
+                    json h;
+                    h["field"]  = t.Chain[i].Field;
+                    h["offset"] = t.Chain[i].Offset;
+                    h["deref"]  = t.Chain[i].Deref;
+                    chain.push_back(h);
+                }
+                data["chain"]          = chain;
+                data["pawn_to_root"]   = t.PawnToRoot;
+                data["root_to_relloc"] = t.RootToRelLoc;
+                data["fvector_width"]  = t.FVectorWidth;
+                data["pawn_to_cmc"]    = t.PawnToCmc;
+                data["walk_speed_off"] = t.WalkSpeedOff;
+                data["gravity_off"]    = t.GravityOff;
+                data["jump_off"]       = t.JumpOff;
+                data["ctrl_rot_off"]   = t.CtrlRotOff;
+                data["ctrl_rot_size"]  = t.CtrlRotSize;
+                // Protection bits (bCanBeDamaged + any matched invincibility bool).
+                std::vector<Solitar::ProtectBit> bits;
+                json god = json::array();
+                if (Solitar::ResolveProtectBits(bits) == 0) {
+                    for (const auto& b : bits) {
+                        json e;
+                        e["name"]        = b.name;
+                        e["byte_offset"] = b.byteOffset;
+                        e["mask"]        = static_cast<int>(b.mask);
+                        e["protect"]     = static_cast<int>(b.protect);
+                        god.push_back(e);
+                    }
+                }
+                data["god_bits"] = god;
             }
             return Renge::MakeResponse(id, data).dump();
         }

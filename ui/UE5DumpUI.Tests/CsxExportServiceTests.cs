@@ -62,6 +62,7 @@ public class StubDumpService : IDumpService
     // Unused stubs — throw NotImplementedException to catch unexpected calls
     public Task<EngineState> InitAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public Task<EngineState> GetPointersAsync(CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<TrainerOffsets> GetTrainerOffsetsAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public Task<EngineState> SetUeVersionOverrideAsync(int version, bool persist = true, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<EngineState> SetInvokeTimeoutAsync(int timeoutMs, bool persist = true, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<int> GetObjectCountAsync(CancellationToken ct = default) => throw new NotImplementedException();

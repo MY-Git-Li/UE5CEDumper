@@ -11,8 +11,20 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace Solitar {
+
+// One protection bool resolved on the live pawn, expressed as offsets from the
+// PAWN base so a standalone CE-Lua trainer can freeze the bit without the DLL.
+// ByteOffset = FBoolProperty.Offset + within-byte ByteOffset; Mask is a single
+// bit; Protect is the bit value that means "protected" (what GodMode ON writes).
+struct ProtectBit {
+    std::string name;       // property name (e.g. "bCanBeDamaged")
+    int32_t     byteOffset; // absolute byte offset from the pawn base
+    uint8_t     mask;       // single-bit mask
+    int8_t      protect;    // bit value meaning "protected" (0 for bCanBeDamaged)
+};
 
 // Result codes shared across exports, pipe, and mailbox (docs/godmode-spec.md §6.3).
 // Non-negative SetGodMode/GetGodMode returns are the OBSERVED live state (1/0).
@@ -91,6 +103,14 @@ int32_t GetState(State& out);
 // on an object. `on` is the DESIRED VALUE OF THE PROPERTY. One-shot (no
 // re-assert). Returns the observed property bit (1/0) or a negative ProtectResult.
 int32_t SetActorBool(uintptr_t obj, uintptr_t classAddr, const char* propName, bool on);
+
+// Resolve ALL matched protection bits on the CURRENT live pawn (bCanBeDamaged +
+// any invincibility bool the universal keyword table matches), expressed as
+// offsets from the pawn base — for baking into a standalone CE-Lua trainer. Read
+// only: does NOT touch the toggle state or the re-assert worker's cache. Returns
+// PR_OK (out may be empty when the pawn has no matched bool) or a negative
+// ProtectResult when the pawn can't be resolved.
+int32_t ResolveProtectBits(std::vector<ProtectBit>& out);
 
 // Stop and join the re-assert worker. Idempotent. Called by SetGodMode(false)
 // and from UE5_Shutdown() before the DLL unloads.

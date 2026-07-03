@@ -38,6 +38,9 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     // a burst. Skip a tick whenever the previous one hasn't finished.
     private bool _autoTickBusy;
     private bool _disposed;
+    // Latest engine state (for GWorld AOB / module) — needed to bake a standalone
+    // trainer .CT. Pushed by MainWindowViewModel on connect / rescan.
+    private Models.EngineState? _engineState;
 
     public TeleportViewModel(IDumpService dump, ILoggingService log, IPlatformService platform,
         IAobMakerBridge? aobMaker = null, IGlobalHotkeyService? globalHotkeys = null)
@@ -140,6 +143,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanOperate))]
     [NotifyPropertyChangedFor(nameof(CanRecallLast))]
+    [NotifyPropertyChangedFor(nameof(CanExportTrainer))]
     private bool _isConnected;
 
     [ObservableProperty]
@@ -151,6 +155,91 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     public bool CanOperate => IsConnected && !IsBusy;
 
     [ObservableProperty] private string _statusText = "Not connected";
+
+    // ── Standalone trainer export (no-DLL CE Lua .CT via AOBMaker) ──────
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanExportTrainer))]
+    [NotifyPropertyChangedFor(nameof(AobMakerNote))]
+    private bool _isAobMakerAvailable;
+
+    /// <summary>Export is offered only when connected AND the AOBMaker plugin is
+    /// reachable (it's the delivery channel — no clipboard fallback by design).</summary>
+    public bool CanExportTrainer => IsConnected && IsAobMakerAvailable;
+
+    public string AobMakerNote => IsAobMakerAvailable
+        ? "AOBMaker connected — the standalone trainer will be pushed straight into CE."
+        : "AOBMaker plugin not detected. Start Cheat Engine with the AOBMaker plugin, then press ⟳.";
+
+    /// <summary>Push the latest engine state (GWorld AOB / module) for trainer bake.</summary>
+    public void SetEngineState(Models.EngineState state) => _engineState = state;
+
+    /// <summary>Probe AOBMaker availability (the delivery channel for trainer export).</summary>
+    public async Task CheckAobMakerAsync()
+    {
+        if (_aobMaker == null) return;
+        try { IsAobMakerAvailable = await _aobMaker.CheckAvailabilityAsync(); }
+        catch { IsAobMakerAvailable = false; }
+    }
+
+    /// <summary>
+    /// Fetch baked offsets from the DLL, emit a no-DLL standalone CE-Lua trainer
+    /// (Move Speed / Gravity / Super Jump / GodMode / coordinate TP), and push each
+    /// entry into CE via AOBMaker (Setup auto-activates). Gated on AOBMaker — no
+    /// clipboard/disk fallback by design (see project-standalone-ce-lua-trainer).
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportTrainerAsync()
+    {
+        if (_aobMaker == null || !_aobMaker.IsAvailable)
+        {
+            StatusText = "AOBMaker plugin not detected — cannot push the trainer into CE.";
+            return;
+        }
+        if (_engineState == null || string.IsNullOrWhiteSpace(_engineState.GWorldAob))
+        {
+            StatusText = "GWorld AOB unavailable — connect and scan first.";
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            StatusText = "Fetching baked offsets…";
+            var offs = await _dump.GetTrainerOffsetsAsync();
+            offs.Module = _engineState.ModuleName;
+            offs.GWorldAob = _engineState.GWorldAob;
+            offs.GWorldAobPos = _engineState.GWorldAobPos;
+            offs.GWorldAobLen = _engineState.GWorldAobLen;
+
+            if (!offs.IsUsable)
+            {
+                StatusText = offs.Code != 0
+                    ? $"Trainer offsets unavailable (code {offs.Code}). Enter gameplay so a pawn is live, then retry."
+                    : "Trainer offsets incomplete (pawn / RootComponent not resolved).";
+                return;
+            }
+
+            var entries = StandaloneTrainerScriptGenerator.Generate(offs);
+            int ok = 0;
+            foreach (var e in entries)
+            {
+                var sent = await _aobMaker.CreateAAScriptAsync(e.Description, e.Script, e.AutoActivate);
+                if (sent) { ok++; }
+                else { break; }   // pipe dropped mid-push (CE closed?)
+            }
+            IsAobMakerAvailable = _aobMaker.IsAvailable;
+            StatusText = ok == entries.Count
+                ? $"Standalone trainer pushed to CE ({ok} entries). Setup ran; toggle the rest. No DLL needed henceforth."
+                : $"⚠ Pushed {ok}/{entries.Count} entries — AOBMaker pipe dropped (CE closed?).";
+            _log.Info($"Standalone trainer export: {ok}/{entries.Count} entries pushed to CE");
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Trainer export failed: {ex.Message}";
+            _log.Error("Standalone trainer export failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
 
     // ── Current pose ───────────────────────────────────────────────────
     [ObservableProperty] private string _poseX = "—";
