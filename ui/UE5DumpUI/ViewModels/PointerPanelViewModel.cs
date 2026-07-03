@@ -40,7 +40,7 @@ public partial class PointerPanelViewModel : ViewModelBase
     /// Per-game GameThreadDispatch invoke timeout (ms). 5000 is the Stark default;
     /// any value other than 5000 indicates a user override active for this game.
     /// </summary>
-    [ObservableProperty] private int _invokeTimeoutMs = 5000;
+    [ObservableProperty] private int _invokeTimeoutMs = Constants.StarkDefaultInvokeTimeoutMs;
     [ObservableProperty] private bool _isApplyingInvokeTimeout;
     [ObservableProperty] private int _totalObjects;
     [ObservableProperty] private bool _hasData;
@@ -423,7 +423,7 @@ public partial class PointerPanelViewModel : ViewModelBase
         // _suppressInvokeTimeoutEvent prevents the partial-changed handler from firing the apply
         // round-trip when this is just a refresh.
         _suppressInvokeTimeoutEvent = true;
-        InvokeTimeoutMs = state.InvokeTimeoutMs > 0 ? state.InvokeTimeoutMs : 5000;
+        InvokeTimeoutMs = state.InvokeTimeoutMs > 0 ? state.InvokeTimeoutMs : Constants.StarkDefaultInvokeTimeoutMs;
         _suppressInvokeTimeoutEvent = false;
         HasData = true;
         // Reset scan state on fresh update
@@ -522,7 +522,7 @@ public partial class PointerPanelViewModel : ViewModelBase
     private bool _suppressInvokeTimeoutEvent;
 
     /// <summary>True when the active timeout differs from Stark's 5000ms default.</summary>
-    public bool ShowInvokeTimeoutOverrideBadge => HasData && InvokeTimeoutMs != 5000;
+    public bool ShowInvokeTimeoutOverrideBadge => HasData && InvokeTimeoutMs != Constants.StarkDefaultInvokeTimeoutMs;
 
     /// <summary>
     /// Auto-fired by [ObservableProperty] when SelectedUeVersionOverride changes.
@@ -558,7 +558,7 @@ public partial class PointerPanelViewModel : ViewModelBase
             ClearError();
             IsApplyingInvokeTimeout = true;
             // 5000 = the Stark default → treat as "clear override" so the JSON stays clean.
-            int payload = timeoutMs == 5000 ? 0 : timeoutMs;
+            int payload = timeoutMs == Constants.StarkDefaultInvokeTimeoutMs ? 0 : timeoutMs;
             var newState = await _dump.SetInvokeTimeoutAsync(payload, persist: true);
             Update(newState);
         }

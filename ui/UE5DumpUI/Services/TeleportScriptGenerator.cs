@@ -107,21 +107,21 @@ public static class TeleportScriptGenerator
         Line(sb, "end");
         Line(sb);
         Line(sb, "local hadError = false");
-        Line(sb, "if readInteger(mb + 0x00) == 0 then");
+        Line(sb, $"if readInteger(mb + {CeMailboxLayout.OffCmd}) == 0 then");
         if (op == 4)
         {
-            Line(sb, $"  writeDouble(mb + 0x328, {Lua(zOffset)})   -- zOffset");
+            Line(sb, $"  writeDouble(mb + {CeMailboxLayout.OffParamsData}, {Lua(zOffset)})   -- zOffset");
             Line(sb, $"  writeBytes(mb + 0x330, {channel & 0xFF})            -- trace channel");
             Line(sb, $"  writeBytes(mb + 0x331, {(fallbackCenter ? 1 : 0)})            -- fall back to screen center");
         }
         else if (op == 12)
         {
-            Line(sb, $"  writeDouble(mb + 0x328, {Lua(distance)})  -- distance (uu; -ve = backward)");
+            Line(sb, $"  writeDouble(mb + {CeMailboxLayout.OffParamsData}, {Lua(distance)})  -- distance (uu; -ve = backward)");
             Line(sb, $"  writeBytes(mb + 0x330, {(horizontal ? 0 : 1)})            -- mode (0 = horizontal, 1 = 3D)");
         }
         else if (op == 13)
         {
-            Line(sb, $"  writeDouble(mb + 0x328, {Lua(coordX)})  -- X");
+            Line(sb, $"  writeDouble(mb + {CeMailboxLayout.OffParamsData}, {Lua(coordX)})  -- X");
             Line(sb, $"  writeDouble(mb + 0x330, {Lua(coordY)})  -- Y");
             Line(sb, $"  writeDouble(mb + 0x338, {Lua(coordZ)})  -- Z");
             Line(sb, $"  writeDouble(mb + 0x340, {Lua(pitch)})  -- Pitch");
@@ -129,16 +129,16 @@ public static class TeleportScriptGenerator
             Line(sb, $"  writeDouble(mb + 0x350, {Lua(roll)})  -- Roll");
             Line(sb, $"  writeBytes(mb + 0x358, {(hasRot ? 1 : 0)})            -- hasRot (restore rotation)");
         }
-        Line(sb, $"  writeQword(mb + 0x18, {slotField})           -- slot / show flag");
-        Line(sb, $"  writeQword(mb + 0x10, {op})             -- op");
-        Line(sb, "  writeInteger(mb + 0x04, 0)             -- clear status");
-        Line(sb, $"  writeInteger(mb + 0x00, {CmdTeleport})  -- CMD_TELEPORT (write LAST)");
+        Line(sb, $"  writeQword(mb + {CeMailboxLayout.OffUfuncAddr}, {slotField})           -- slot / show flag");
+        Line(sb, $"  writeQword(mb + {CeMailboxLayout.OffInstanceAddr}, {op})             -- op");
+        Line(sb, $"  writeInteger(mb + {CeMailboxLayout.OffStatus}, 0)             -- clear status");
+        Line(sb, $"  writeInteger(mb + {CeMailboxLayout.OffCmd}, {CmdTeleport})  -- CMD_TELEPORT (write LAST)");
         Line(sb, "  local elapsed = 0");
-        Line(sb, "  while readInteger(mb + 0x04) ~= 1 do");
+        Line(sb, $"  while readInteger(mb + {CeMailboxLayout.OffStatus}) ~= 1 do");
         Line(sb, "    sleep(1); elapsed = elapsed + 1");
-        Line(sb, "    if elapsed >= 10000 then break end");
+        Line(sb, $"    if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then break end");
         Line(sb, "  end");
-        Line(sb, "  local code = readInteger(mb + 0x08)");
+        Line(sb, $"  local code = readInteger(mb + {CeMailboxLayout.OffResult})");
         Line(sb, $"  dbg('[Teleport] {label} -> code=' .. code)");
         if (op == 11)
         {
@@ -209,15 +209,15 @@ public static class TeleportScriptGenerator
         Line(sb, "end");
         Line(sb);
         Line(sb, "for slot = 0, 2 do");
-        Line(sb, "  if readInteger(mb + 0x00) == 0 then");
-        Line(sb, "    writeQword(mb + 0x18, slot)            -- slot");
-        Line(sb, "    writeQword(mb + 0x10, 6)               -- op = CLEAR_MARKER");
-        Line(sb, "    writeInteger(mb + 0x04, 0)             -- clear status");
-        Line(sb, $"    writeInteger(mb + 0x00, {CmdTeleport})  -- CMD_TELEPORT (write LAST)");
+        Line(sb, $"  if readInteger(mb + {CeMailboxLayout.OffCmd}) == 0 then");
+        Line(sb, $"    writeQword(mb + {CeMailboxLayout.OffUfuncAddr}, slot)            -- slot");
+        Line(sb, $"    writeQword(mb + {CeMailboxLayout.OffInstanceAddr}, 6)               -- op = CLEAR_MARKER");
+        Line(sb, $"    writeInteger(mb + {CeMailboxLayout.OffStatus}, 0)             -- clear status");
+        Line(sb, $"    writeInteger(mb + {CeMailboxLayout.OffCmd}, {CmdTeleport})  -- CMD_TELEPORT (write LAST)");
         Line(sb, "    local elapsed = 0");
-        Line(sb, "    while readInteger(mb + 0x04) ~= 1 do");
+        Line(sb, $"    while readInteger(mb + {CeMailboxLayout.OffStatus}) ~= 1 do");
         Line(sb, "      sleep(1); elapsed = elapsed + 1");
-        Line(sb, "      if elapsed >= 10000 then break end");
+        Line(sb, $"      if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then break end");
         Line(sb, "    end");
         Line(sb, "  end");
         Line(sb, "end");

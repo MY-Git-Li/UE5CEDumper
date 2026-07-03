@@ -117,8 +117,7 @@ static uintptr_t TrySymbolExport(const char* mangledName) {
 // Helper: check if a pointer looks like a valid heap/data pointer (not code/null/low).
 // Used by ValidateGObjects to reject false positives.
 static bool LooksLikeDataPtr(uintptr_t ptr) {
-    if (!ptr || ptr < 0x10000) return false;
-    if (ptr > 0x00007FFFFFFFFFFF) return false;
+    if (!Grimoire::IsUserspacePointer(ptr)) return false;
     // Reject pointers inside the game module's loaded range (code/rdata/data all contiguous)
     uintptr_t modBase = Macht::GetModuleBase(nullptr);
     uintptr_t modSize = Macht::GetModuleSize(nullptr);
@@ -146,7 +145,7 @@ static bool ValidateCyclicClassChain(uintptr_t chunk0) {
         for (int i = 0; i < kScanRange; i++) {
             uintptr_t objPtr = 0;
             if (!Macht::ReadSafe(chunk0 + i * stride, objPtr) || !objPtr) continue;
-            if (objPtr < 0x10000 || objPtr > 0x00007FFFFFFFFFFF) continue;
+            if (!Grimoire::IsUserspacePointer(objPtr)) continue;
             tried++;
 
             // Follow Class chain: obj->Class->Class->... looking for self-referential UClass
@@ -155,7 +154,7 @@ static bool ValidateCyclicClassChain(uintptr_t chunk0) {
             for (int hop = 0; hop < kMaxHops; hop++) {
                 uintptr_t cls = 0;
                 if (!Macht::ReadSafe(current + Grimoire::OFF_UOBJECT_CLASS, cls)) break;
-                if (cls < 0x10000 || cls > 0x00007FFFFFFFFFFF) break;
+                if (!Grimoire::IsUserspacePointer(cls)) break;
 
                 // UClass terminates: its ClassPrivate points to itself
                 uintptr_t clsCls = 0;
@@ -809,7 +808,7 @@ static uintptr_t TryResolveMatch(uintptr_t matchAddr, const AobSignature& sig, V
             if (!Macht::ReadSafe(addr, world)) return 0;
             if (!sig.gworldAllowNull && world == 0) return 0;
             // Basic pointer sanity for non-null values
-            if (world != 0 && (world < 0x10000 || world > 0x00007FFFFFFFFFFF))
+            if (world != 0 && (!Grimoire::IsUserspacePointer(world)))
                 return 0;
         }
         if (validate(addr)) return addr;
@@ -1419,13 +1418,13 @@ static bool ValidateGNamesUE4(uintptr_t addr, int& outStringOffset) {
     // Read first chunk pointer: TNameEntryArray[0]
     uintptr_t chunk0Ptr = 0;
     if (!Macht::ReadSafe(addr, chunk0Ptr) || !chunk0Ptr) return false;
-    if (chunk0Ptr < 0x10000 || chunk0Ptr > 0x00007FFFFFFFFFFF) return false;
+    if (!Grimoire::IsUserspacePointer(chunk0Ptr)) return false;
 
     // chunk0Ptr points to an array of FNameEntry* pointers
     // Read chunk0[0] = first FNameEntry*
     uintptr_t entry0 = 0;
     if (!Macht::ReadSafe(chunk0Ptr, entry0) || !entry0) return false;
-    if (entry0 < 0x10000 || entry0 > 0x00007FFFFFFFFFFF) return false;
+    if (!Grimoire::IsUserspacePointer(entry0)) return false;
 
     // Try reading "None" at common UE4 FNameEntry string offsets
     int offsets[] = { 0x10, 0x06, 0x0C, 0x08 };
@@ -1540,7 +1539,7 @@ static uintptr_t FindGNamesByPointerScan() {
             if (!Macht::ReadSafe(secBase + off, ptr)) continue;
 
             // Plausible user-space 64-bit address (exclude null, low, kernel)
-            if (ptr < 0x10000 || ptr > 0x00007FFFFFFFFFFF) continue;
+            if (!Grimoire::IsUserspacePointer(ptr)) continue;
 
             // Skip if ptr lives inside the game module itself (not a heap chunk)
             if (ptr >= base && ptr < base + modSize) continue;
@@ -2319,7 +2318,7 @@ static void DetectCasePreservingName() {
         // Read Class at +0x10 to confirm this is a valid UObject
         uintptr_t cls = 0;
         if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
-        if (cls < 0x10000 || cls > 0x00007FFFFFFFFFFF) continue;
+        if (!Grimoire::IsUserspacePointer(cls)) continue;
 
         // Read candidate Outer at standard offset 0x20
         uintptr_t outerAt20 = 0;
@@ -2333,10 +2332,10 @@ static void DetectCasePreservingName() {
         // Also: Outer must be a UObject, so its Class at +0x10 should be a valid pointer too.
         auto isValidOuter = [](uintptr_t val) -> bool {
             if (val == 0) return true; // null = root package
-            if (val < 0x10000 || val > 0x00007FFFFFFFFFFF) return false;
+            if (!Grimoire::IsUserspacePointer(val)) return false;
             uintptr_t outerCls = 0;
             if (!Macht::ReadSafe(val + Grimoire::OFF_UOBJECT_CLASS, outerCls)) return false;
-            return outerCls > 0x10000 && outerCls < 0x00007FFFFFFFFFFF;
+            return outerCls > Grimoire::PTR_USERSPACE_MIN && outerCls < Grimoire::PTR_USERSPACE_MAX;
         };
 
         bool at20valid = isValidOuter(outerAt20);
@@ -2535,12 +2534,12 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
                     uintptr_t cp = 0;
                     if (!Macht::ReadSafe(obj + cpOff, cp) || !cp) continue;
                     cp = DynOff::StripFFieldTag(cp);
-                    if (cp < 0x10000 || cp > 0x00007FFFFFFFFFFF) continue;
+                    if (!Grimoire::IsUserspacePointer(cp)) continue;
 
                     // Check FFieldClass* at first FField
                     uintptr_t fc = 0;
                     if (!Macht::ReadSafe(cp + DynOff::FFIELD_CLASS, fc) || !fc) continue;
-                    if (fc < 0x10000 || fc > 0x00007FFFFFFFFFFF) continue;
+                    if (!Grimoire::IsUserspacePointer(fc)) continue;
 
                     // Resolve FFieldClass name — must contain "Property"
                     uint32_t fcNameIdx = 0;
@@ -2552,7 +2551,7 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
                     uintptr_t next = 0;
                     if (!Macht::ReadSafe(cp + DynOff::FFIELD_NEXT, next)) continue;
                     next = DynOff::StripFFieldTag(next);
-                    if (next && next > 0x10000 && next < 0x00007FFFFFFFFFFF) {
+                    if (next && next > Grimoire::PTR_USERSPACE_MIN && next < Grimoire::PTR_USERSPACE_MAX) {
                         // Second entry also has valid FFieldClass with "Property"?
                         uintptr_t fc2 = 0;
                         if (Macht::ReadSafe(next + DynOff::FFIELD_CLASS, fc2) && fc2 > 0x10000) {
@@ -2607,7 +2606,7 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
             auto GetNaturalAlignment = [](uintptr_t ffieldAddr) -> int {
                 uintptr_t fc = 0;
                 if (!Macht::ReadSafe(ffieldAddr + DynOff::FFIELD_CLASS, fc) || !fc) return 0;
-                if (fc < 0x10000 || fc > 0x00007FFFFFFFFFFF) return 0;
+                if (!Grimoire::IsUserspacePointer(fc)) return 0;
                 uint32_t nameIdx = 0;
                 if (!Macht::ReadSafe(fc + DynOff::FFIELDCLASS_NAME, nameIdx)) return 0;
                 std::string tn = Serie::GetString(nameIdx);
@@ -2655,11 +2654,11 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
                 uintptr_t cp = 0;
                 if (!Macht::ReadSafe(obj + DynOff::USTRUCT_CHILDPROPS, cp) || !cp) continue;
                 cp = DynOff::StripFFieldTag(cp);
-                if (cp < 0x10000 || cp > 0x00007FFFFFFFFFFF) continue;
+                if (!Grimoire::IsUserspacePointer(cp)) continue;
 
                 uintptr_t fc = 0;
                 if (!Macht::ReadSafe(cp + DynOff::FFIELD_CLASS, fc) || !fc) continue;
-                if (fc < 0x10000 || fc > 0x00007FFFFFFFFFFF) continue;
+                if (!Grimoire::IsUserspacePointer(fc)) continue;
 
                 auto& c = candidates[nCandidates];
                 c.classAddr = obj;
@@ -2809,13 +2808,13 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
         if (!Macht::ReadSafe(testStruct + off, ptr) || !ptr) continue;
 
         // Basic pointer validity: must be in user space
-        if (ptr < 0x10000 || ptr > 0x00007FFFFFFFFFFF) continue;
+        if (!Grimoire::IsUserspacePointer(ptr)) continue;
 
         if (DynOff::bUseFProperty) {
             // FProperty mode: check if this pointer has an FFieldClass* at +0x08
             uintptr_t fieldClass = 0;
             if (!Macht::ReadSafe(ptr + 0x08, fieldClass) || !fieldClass) continue;
-            if (fieldClass < 0x10000 || fieldClass > 0x00007FFFFFFFFFFF) continue;
+            if (!Grimoire::IsUserspacePointer(fieldClass)) continue;
 
             // The FFieldClass should have an FName that resolves to a *Property type name
             uint32_t fcNameIdx = 0;
@@ -2832,7 +2831,7 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
             // UProperty mode: items are UObjects. Check if Class at +0x10 resolves to a *Property class.
             uintptr_t cls = 0;
             if (!Macht::ReadSafe(ptr + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
-            if (cls < 0x10000 || cls > 0x00007FFFFFFFFFFF) continue;
+            if (!Grimoire::IsUserspacePointer(cls)) continue;
 
             uint32_t clsNameIdx = 0;
             if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx)) continue;
@@ -2858,12 +2857,12 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
         for (int off = 0x28; off <= 0x80; off += 8) {
             uintptr_t ptr = 0;
             if (!Macht::ReadSafe(testStruct + off, ptr) || !ptr) continue;
-            if (ptr < 0x10000 || ptr > 0x00007FFFFFFFFFFF) continue;
+            if (!Grimoire::IsUserspacePointer(ptr)) continue;
 
             // UProperty mode: items are UObjects. Check if Class at +0x10 resolves to a *Property class.
             uintptr_t cls = 0;
             if (!Macht::ReadSafe(ptr + Grimoire::OFF_UOBJECT_CLASS, cls) || !cls) continue;
-            if (cls < 0x10000 || cls > 0x00007FFFFFFFFFFF) continue;
+            if (!Grimoire::IsUserspacePointer(cls)) continue;
 
             uint32_t clsNameIdx = 0;
             if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx)) continue;
@@ -2943,7 +2942,7 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
             if (DynOff::IsFFieldVariantUObject(nextPtr)) continue;
             nextPtr = DynOff::StripFFieldTag(nextPtr);
 
-            if (nextPtr < 0x10000 || nextPtr > 0x00007FFFFFFFFFFF) continue;
+            if (!Grimoire::IsUserspacePointer(nextPtr)) continue;
 
             // Verify it looks like an FField: check FFieldClass at +0x08
             uintptr_t nextFieldClass = 0;
@@ -3006,12 +3005,12 @@ bool ValidateAndFixOffsets(uint32_t ueVersion) {
         for (int off = 0x20; off <= 0x48; off += 8) {
             uintptr_t nextPtr = 0;
             if (!Macht::ReadSafe(childProps + off, nextPtr) || !nextPtr) continue;
-            if (nextPtr < 0x10000 || nextPtr > 0x00007FFFFFFFFFFF) continue;
+            if (!Grimoire::IsUserspacePointer(nextPtr)) continue;
 
             // Verify: target must be a UObject whose Class name contains "Property"
             uintptr_t nextCls = 0;
             if (!Macht::ReadSafe(nextPtr + Grimoire::OFF_UOBJECT_CLASS, nextCls) || !nextCls) continue;
-            if (nextCls < 0x10000 || nextCls > 0x00007FFFFFFFFFFF) continue;
+            if (!Grimoire::IsUserspacePointer(nextCls)) continue;
 
             uint32_t nextClsNameIdx = 0;
             if (!Macht::ReadSafe(nextCls + Grimoire::OFF_UOBJECT_NAME, nextClsNameIdx)) continue;

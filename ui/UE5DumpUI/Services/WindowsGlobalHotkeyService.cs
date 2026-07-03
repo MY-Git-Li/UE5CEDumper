@@ -61,6 +61,8 @@ public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
     private sealed class Registration : IGlobalHotkeyRegistration
     {
         private const int HotkeyId = 0xB1F0;   // arbitrary, unique within our thread
+        // Budget (ms) for both the ctor's ready-wait and Dispose's thread-join.
+        private const int HotkeyThreadWaitMs = 2000;
         private readonly Thread _thread;
         // IMPORTANT: this event is NOT disposed in the ctor. ManualResetEventSlim
         // forbids Dispose() concurrent with Set() (docs), and the worker calls
@@ -120,7 +122,7 @@ public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
                 Name = "UE5CEDumper-CursorHotkey",
             };
             _thread.Start();
-            _ready.Wait(2000);
+            _ready.Wait(HotkeyThreadWaitMs);
         }
 
         public void Dispose()
@@ -132,7 +134,7 @@ public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
             // before we dispose the event it touched.
             if (_threadId != 0)
                 PostThreadMessage(_threadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
-            _thread.Join(2000);
+            _thread.Join(HotkeyThreadWaitMs);
             _ready.Dispose();
         }
     }

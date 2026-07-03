@@ -211,7 +211,6 @@ public partial class GameClassFilterViewModel : ViewModelBase
     // find_functions_by_class is a full game-wide reflection sweep → warn past a
     // low count, cancellable, skip already-scanned (XrefInfo persists across filter).
     private CancellationTokenSource? _xrefBatchCts;
-    private const int XrefBatchWarnThreshold = 25;
 
     [RelayCommand]
     private async Task BatchFindFuncAsync(IList<GameClassEntry>? selected)
@@ -220,7 +219,7 @@ public partial class GameClassFilterViewModel : ViewModelBase
             .Where(e => !string.IsNullOrEmpty(e.ClassAddr)).ToList();
         if (targets.Count == 0) { StatusText = "No classes with an address to scan."; return; }
 
-        if (targets.Count > XrefBatchWarnThreshold)
+        if (targets.Count > Constants.XrefBatchWarnThreshold)
         {
             var ok = await Views.ConfirmDialog.ShowAsync(
                 "Batch: find functions",

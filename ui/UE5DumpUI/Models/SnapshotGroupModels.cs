@@ -44,7 +44,7 @@ public sealed class SnapshotGroupQuery
     public bool Deep { get; set; }
     /// <summary>Per-game class denylist (noise picker) — excluded before matching.</summary>
     public HashSet<string>? ExcludedClasses { get; set; }
-    public int MaxResults { get; set; } = 50000;
+    public int MaxResults { get; set; } = Constants.DefaultMaxQueryRows;
     /// <summary>Cross-snapshot identity join (Mode B). Ignored for Mode A.</summary>
     public SpcJoinMode JoinMode { get; set; } = SpcJoinMode.InSession;
     /// <summary>Per-panel rounding mode applied to every slot — how a fractional

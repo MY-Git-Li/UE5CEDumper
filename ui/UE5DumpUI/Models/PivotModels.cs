@@ -84,7 +84,7 @@ public sealed class ArrayPivotQuery
     public string ArrayField { get; set; } = "";
     /// <summary>Inner prop names whose values are projected per inner-key group.</summary>
     public List<string> ValueProps { get; set; } = new();
-    public int MaxGroups { get; set; } = 5000;
+    public int MaxGroups { get; set; } = Constants.DefaultMaxPivotGroups;
 }
 
 /// <summary>One captured (instance, field) row the store hands to the pure
@@ -121,7 +121,7 @@ public sealed class PivotQuery
     public List<string> ValueFields { get; set; } = new();
     /// <summary>Max groups returned (default 5,000). One extra is probed to set
     /// <see cref="PivotResult.Truncated"/>.</summary>
-    public int MaxGroups { get; set; } = 5000;
+    public int MaxGroups { get; set; } = Constants.DefaultMaxPivotGroups;
 
     /// <summary>The effective key-field list for Field-mode grouping: <see cref="KeyFields"/>
     /// when non-empty, else the single <see cref="KeyField"/>, else empty. Order is

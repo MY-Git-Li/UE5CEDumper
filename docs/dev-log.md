@@ -18,6 +18,42 @@ builds ≤696 in
 
 -----
 
+## 2026-07-03 — Magic-number centralization: Tier 1 + Tier 2 pointer helper (build ~1888; pushed dev, dev→main PR)
+
+**SHIPPED.** A "pull out the magic numbers, centralize them" sweep across the DLL (C++) and UI (C#),
+driven by a multi-agent discovery workflow (17 parallel scanners → per-project synthesis; 63 DLL +
+48 UI raw findings, deduped/ranked). Behavior-preserving refactor; full build + all 2120 tests green.
+
+**Tier 1 — duplicated / tunable literals (commit `48315a5`).** DLL: reference the existing
+`Grimoire::OFF_UOBJECT_CLASS` (Aura `LooksLikeUObject`) and `Grimoire::PIPE_NAME` (Heiter) instead of
+re-hardcoding; new `Stark::kMin/MaxInvokeTimeoutMs` (100/600000) shared by the Stark clamp and Fern's
+`set_invoke_timeout` validation; file-local `constexpr` for the Ubel per-request array cap (4096 ×8),
+Serie FName chunk/len bounds (256/8192/1024), Aura value-scan defaults (100000/15000) + deep-walk
+element cap (50000 ×3), Edel scan budgets (1024/16), Radar session idle-expiry (300s), Lugner_Dxgi
+export count (20). UI: 12 new `Constants.cs` entries (GObjects walk page size, scan/query caps +
+deadlines + page sizes, Stark invoke timeout, pivot/xref/instance caps, array/dropdown limits) +
+reference the existing `DefaultPreviewLimit`/`ObjectTreePageSize`; new `Services/CeMailboxLayout.cs`
+shared by all 5 CE Lua generators (canonical mailbox offsets/opcodes/timeout). **Test fix:** the
+shared mailbox class normalized `InvokeScriptGenerator`'s zero-padded hex tokens (`0x010`) to the
+compact `0x10` used by the other 4 generators (identical numeric address in Lua; 6 InvokeScriptTests
+assertions updated) — chosen because it keeps the other four generators' emitted output byte-identical.
+
+**Tier 2 — `IsUserspacePointer` helper (commit `22c2211`).** New `Grimoire::PTR_USERSPACE_MIN/MAX` +
+inline `IsUserspacePointer()`. The pervasive x64 "is this a plausible userspace pointer?" guard was
+hardcoded ~48× across Genau/Ubel/Aura/Serie/Macht/Wirbel. Converted only the **paired** range checks:
+a Python backreference regex (`VAR < 0x10000 || VAR > 0x0*7FFFFFFFFFFF`, same variable both sides,
+boundary-guarded) rewrote 43 reject-form sites to `!IsUserspacePointer(x)` (+ folded the two
+split-`if` `LooksLikeHeapPtr`/`LooksLikeDataPtr`); 4 accept-form sites became named constants keeping
+the strict `>`/`<`. **Critically left untouched** the standalone `0x10000` collisions (min module
+size `Macht.cpp:535`, struct/element-size sanity caps, lone low-bound guards) — the pairing
+requirement is exactly what makes `0x10000`'s ≥4 meanings safe to disambiguate. Neu::LooksLikePtr (an
+equivalent peer helper) also left as-is.
+
+**Deferred (see [todo.md](todo.md)).** Tier 2 remainder — object-count/size ceilings (`0x800000` 8M
+object count; `0x100000` 1M, but split between container-element-COUNT and PropertiesSize-BYTES;
+`[0x1000..0x400000]` window) and `MAX_CLASS_HIERARCHY_DEPTH=64` — carry genuine per-site multi-meaning
+nuance and were left rather than risk conflating unrelated tunables. Tier 3 single-use knobs likewise.
+
 ## 2026-06-30 — CE export: flatten leaf records + record colors + collapse single-leaf pointers (build ~1856; MERGED PRs #401/#402, docs #403; in-game VERIFIED on SEED for flatten + colors)
 
 **SHIPPED.** Three opt-in Live Walker → **Options** export features — **Copy CE XML / Copy CE

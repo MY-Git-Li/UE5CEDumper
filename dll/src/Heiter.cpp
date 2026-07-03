@@ -8,6 +8,7 @@
 #define LOG_CAT "INIT"
 #include "Sein.h"
 #include "BuildStamp.h"
+#include "Grimoire.h"
 
 // Global DLL module handle — used by CEPlugin.cpp to resolve the DLL's
 // own file path when injecting into the game process.
@@ -112,7 +113,7 @@ static DWORD WINAPI AutoStartThreadProc(LPVOID)
     // Check if another UE5Dumper instance is already running (e.g., proxy DLL)
     // by trying to open the named pipe. If it exists, skip auto-start.
     HANDLE testPipe = CreateFileW(
-        L"\\\\.\\pipe\\UE5DumpBfx",
+        Grimoire::PIPE_NAME,
         GENERIC_READ, 0, nullptr,
         OPEN_EXISTING, 0, nullptr);
     if (testPipe != INVALID_HANDLE_VALUE) {

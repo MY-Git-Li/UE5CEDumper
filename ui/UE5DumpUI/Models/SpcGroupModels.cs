@@ -56,7 +56,7 @@ public sealed class SpcGroupQuery
     public string PropContains { get; set; } = "";
 
     /// <summary>Max matching candidate OBJECTS returned (default 50,000).</summary>
-    public int MaxResults { get; set; } = 50000;
+    public int MaxResults { get; set; } = Constants.DefaultMaxQueryRows;
 
     /// <summary>Per-game class denylist (noise picker) — skipped at the intersection
     /// load, before the cap. Null / empty = no filtering. Ordinal comparison.</summary>

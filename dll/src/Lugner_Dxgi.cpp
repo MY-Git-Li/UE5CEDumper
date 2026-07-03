@@ -48,13 +48,14 @@
 // Lugner_Dxgi.asm and the "name = f<N>" map in ProxyDxgi.def.
 // The .asm references this exact symbol via `extern mProcs:QWORD`,
 // so it must have C linkage (no name mangling) and the matching name.
-extern "C" uintptr_t mProcs[20] = { 0 };
+static constexpr int kDxgiExportCount = 20;  // f0..f19 — MUST match ProxyDxgi.def + the .asm thunk order
+extern "C" uintptr_t mProcs[kDxgiExportCount] = { 0 };
 
 // Export names in f0..f19 order. MUST stay in sync with ProxyDxgi.def
 // and the asm thunk order. Resolution is by NAME (version-robust: a name
 // absent on some Windows build simply yields a null slot, which only
 // matters if that rarely-used internal is ever called).
-static const char* const kDxgiExports[20] = {
+static const char* const kDxgiExports[kDxgiExportCount] = {
     "ApplyCompatResolutionQuirking",    // f0  @1
     "CompatString",                     // f1  @2
     "CompatValue",                      // f2  @3
@@ -113,11 +114,11 @@ extern "C" void DxgiProxy_EnsureResolved()
         HMODULE real = LoadLibraryW(realPath);
         if (real) {
             int resolved = 0;
-            for (int i = 0; i < 20; ++i) {
+            for (int i = 0; i < kDxgiExportCount; ++i) {
                 mProcs[i] = reinterpret_cast<uintptr_t>(GetProcAddress(real, kDxgiExports[i]));
                 if (mProcs[i]) ++resolved;
             }
-            LOG_INFO("dxgi proxy: lazily forwarded %d/20 exports to real System32 dxgi.dll", resolved);
+            LOG_INFO("dxgi proxy: lazily forwarded %d/%d exports to real System32 dxgi.dll", resolved, kDxgiExportCount);
         } else {
             LOG_ERROR("dxgi proxy: FAILED to load real System32 dxgi.dll (err=%lu) — forwarded calls will crash",
                       GetLastError());

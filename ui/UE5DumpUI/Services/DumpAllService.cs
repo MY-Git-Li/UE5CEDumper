@@ -118,7 +118,7 @@ public static class DumpAllService
         {
             instanceCounts = new Dictionary<string, int>(StringComparer.Ordinal);
             int offset = 0;
-            const int pageSize = 5000;
+            const int pageSize = Constants.GObjectsWalkPageSize;
             do
             {
                 ct.ThrowIfCancellationRequested();
@@ -156,7 +156,7 @@ public static class DumpAllService
         int scannedObjects = 0;
         {
             int offset = 0;
-            const int pageSize = 5000;
+            const int pageSize = Constants.GObjectsWalkPageSize;
             var chunkBuffer = new List<UObjectNode>(WalkClassBatchChunkSize);
 
             do

@@ -25,7 +25,7 @@ public static class SymbolExportService
 
         var symbols = new List<SymbolEntry>();
         int offset = 0;
-        const int pageSize = 5000;
+        const int pageSize = Constants.GObjectsWalkPageSize;
         int total = 0;
 
         do

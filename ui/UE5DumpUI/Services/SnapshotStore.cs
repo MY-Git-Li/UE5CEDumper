@@ -28,6 +28,12 @@ public sealed class SnapshotStore : ISnapshotStore
     private static readonly object s_initLock = new();
     private static bool s_initialised;
 
+    // Defensive input cap for the two pivot fetch paths: a pathologically large
+    // class shouldn't pull an unbounded row set into memory. Far above any realistic
+    // class fan-out; if it ever fires we log it and flag the result truncated (no
+    // silent caps — see the repo's lessons-learned).
+    private const int PivotFetchRowCap = 2_000_000;
+
     /// <summary>Per-game DB path: snapshots.&lt;pe_hash&gt;.db (or
     /// snapshots.default.db before a game is set).</summary>
     public string DatabasePath =>
@@ -781,7 +787,7 @@ public sealed class SnapshotStore : ISnapshotStore
     {
         ct.ThrowIfCancellationRequested();   // bail before opening a connection
         var result = new SnapshotDiffResult();
-        int max = filter.MaxRows > 0 ? filter.MaxRows : 50000;
+        int max = filter.MaxRows > 0 ? filter.MaxRows : Constants.DefaultMaxQueryRows;
 
         string classContains = filter.ClassContains ?? "";
         string propContains  = filter.PropContains ?? "";
@@ -997,7 +1003,7 @@ public sealed class SnapshotStore : ISnapshotStore
             };
         }
 
-        int max = query.MaxResults > 0 ? query.MaxResults : 50000;
+        int max = query.MaxResults > 0 ? query.MaxResults : Constants.DefaultMaxQueryRows;
         var deny = query.ExcludedClasses is { Count: > 0 } ? query.ExcludedClasses : null;
 
         await using var conn = await OpenAsync(ct);
@@ -1334,7 +1340,7 @@ public sealed class SnapshotStore : ISnapshotStore
         if (query.Predicates.Count != n)
             throw new ArgumentException("Predicate count must equal snapshot count.", nameof(query));
         ct.ThrowIfCancellationRequested();   // bail before opening a connection
-        int max = query.MaxRows > 0 ? query.MaxRows : 50000;
+        int max = query.MaxRows > 0 ? query.MaxRows : Constants.DefaultMaxQueryRows;
 
         string classContains = query.ClassContains?.Trim() ?? "";
         string propContains  = query.PropContains?.Trim() ?? "";
@@ -1413,7 +1419,7 @@ public sealed class SnapshotStore : ISnapshotStore
             }
 
         ct.ThrowIfCancellationRequested();
-        int max = query.MaxResults > 0 ? query.MaxResults : 50000;
+        int max = query.MaxResults > 0 ? query.MaxResults : Constants.DefaultMaxQueryRows;
         var mode = query.JoinMode;
         string classContains = query.ClassContains?.Trim() ?? "";
         string propContains  = query.PropContains?.Trim() ?? "";
@@ -2094,11 +2100,6 @@ public sealed class SnapshotStore : ISnapshotStore
         sql.Append(" ORDER BY gobjects_index;");
         cmd.CommandText = sql.ToString();
 
-        // Defensive input cap: a pathologically large class shouldn't pull an
-        // unbounded row set into memory. Far above any realistic class fan-out;
-        // if it ever fires we log it and flag the result truncated (no silent
-        // caps — see the repo's lessons-learned).
-        const int fetchRowCap = 2_000_000;
         bool capped = false;
         await using (var r = await cmd.ExecuteReaderAsync(ct))
         {
@@ -2106,7 +2107,7 @@ public sealed class SnapshotStore : ISnapshotStore
             while (await r.ReadAsync(ct))
             {
                 if ((++rowCount & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
-                if (rows.Count >= fetchRowCap) { capped = true; break; }
+                if (rows.Count >= PivotFetchRowCap) { capped = true; break; }
                 rows.Add(new PivotInputRow
                 {
                     ObjectIndex  = r.IsDBNull(0) ? -1 : r.GetInt64(0),
@@ -2121,7 +2122,7 @@ public sealed class SnapshotStore : ISnapshotStore
         }
         if (capped)
             _log?.Warn(Constants.LogCatView,
-                $"Pivot: row fetch hit the {fetchRowCap:N0} cap for class {query.ClassName} — results truncated");
+                $"Pivot: row fetch hit the {PivotFetchRowCap:N0} cap for class {query.ClassName} — results truncated");
 
         var result = PivotEngine.Build(rows, query);
         if (capped) result.Truncated = true;
@@ -2242,7 +2243,6 @@ public sealed class SnapshotStore : ISnapshotStore
         // inner-key value becomes the Identity group key (reorder-/session-immune).
         var idMap = new Dictionary<(long, int), long>();
         long nextId = 0;
-        const int fetchRowCap = 2_000_000;
         bool capped = false;
         await using (var r = await cmd.ExecuteReaderAsync(ct))
         {
@@ -2250,7 +2250,7 @@ public sealed class SnapshotStore : ISnapshotStore
             while (await r.ReadAsync(ct))
             {
                 if ((++rowCount & 0xFFFF) == 0) ct.ThrowIfCancellationRequested();
-                if (rows.Count >= fetchRowCap) { capped = true; break; }
+                if (rows.Count >= PivotFetchRowCap) { capped = true; break; }
                 long objIdx = r.IsDBNull(0) ? -1 : r.GetInt64(0);
                 int  elem   = r.IsDBNull(1) ? -1 : r.GetInt32(1);
                 var key = (objIdx, elem);
@@ -2268,7 +2268,7 @@ public sealed class SnapshotStore : ISnapshotStore
         }
         if (capped)
             _log?.Warn(Constants.LogCatView,
-                $"Array pivot: row fetch hit the {fetchRowCap:N0} cap for {query.ClassName}.{query.ArrayField} — results truncated");
+                $"Array pivot: row fetch hit the {PivotFetchRowCap:N0} cap for {query.ClassName}.{query.ArrayField} — results truncated");
 
         var pq = new PivotQuery
         {

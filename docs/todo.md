@@ -42,6 +42,17 @@ Open work only. **Read this when deciding what to do next.**
   Snapshot SPEED is a SEPARATE issue (§9.5): UI-side single-threaded multi-MB chunk parse (~2.4s/chunk)
   → streaming `Utf8JsonReader`/smaller chunks. *Parent: reverted Phase 1 build 1836 (dev-log 2026-06-28).*
 
+- **Magic-number centralization — Tier 2 remainder + Tier 3 (deferred; low priority)** —
+  Effort: **M** · Risk: med. Tier 1 (dup/tunable literals) + the Tier 2 `IsUserspacePointer` paired-
+  bounds helper SHIPPED (dev-log 2026-07-03). LEFT because each carries genuine per-site multi-meaning
+  nuance: object-count/size ceilings — `0x800000` (8M UObject count), `0x100000` (1M, but needs
+  SPLITTING into container-element-COUNT vs PropertiesSize-BYTES — one const would conflate them),
+  `[0x1000..0x400000]` NumElements window; and `MAX_CLASS_HIERARCHY_DEPTH=64` (`64` is high-collision —
+  buffers / bit-counts — needs per-site verification). Tier 3 = single-use knobs (Heiter startup
+  delays, Fern watch/monitor poll, Mimic caps, Solitar caps, Wirbel eps/channel, movement/debug-cam
+  protocol-id enums). Same careful methodology: pair/meaning-gated, never blind-sweep a literal.
+  *Parent: magic-number centralization (dev-log 2026-07-03).*
+
 - **CE responsiveness under heavy scans — pick a NON-priority approach if it ever bites** —
   Effort: **S-M** · Risk: med. Phase 0 (drop scan threads to `BELOW_NORMAL`) was **REVERTED** —
   with the game saturating cores it starved scans ~20× (Snapshot 1–2 min → ~1 h). The

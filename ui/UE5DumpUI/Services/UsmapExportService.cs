@@ -76,7 +76,7 @@ public static class UsmapExportService
         // 2. Collect all Class/ScriptStruct objects
         var structTargets = new List<(string addr, string name)>();
         int offset = 0;
-        const int pageSize = 5000;
+        const int pageSize = Constants.GObjectsWalkPageSize;
         int total = 0;
 
         do

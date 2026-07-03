@@ -177,7 +177,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool _collapseChain;
 
     /// <summary>Max array element count for inline reading (2^N, default 128).</summary>
-    private int _arrayLimit = 128;
+    private int _arrayLimit = Constants.DefaultArrayLimit;
     public int ArrayLimit
     {
         get => _arrayLimit;
@@ -192,7 +192,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>Max struct sub-fields to show in preview (0 = none, default 2, max 6).</summary>
-    private int _previewLimit = 2;
+    private int _previewLimit = Constants.DefaultPreviewLimit;
     public int PreviewLimit
     {
         get => _previewLimit;
@@ -207,7 +207,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>Max CE DropDownList entries (2^N, default 512). Used during CE XML export.</summary>
-    public int DropDownLimit { get; set; } = 512;
+    public int DropDownLimit { get; set; } = Constants.DefaultDropDownLimit;
 
     /// <summary>CSX drilldown depth (0 = flat/dummy, 1-4 normal, 5-6 deep / warning band).
     /// Each extra level can multiply CE XML / CSX output exponentially because every
@@ -579,7 +579,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             _preBookmarkBreadcrumbs = null;
             IsBookmarkSaveMode = false;
 
-            var world = await _dump.WalkWorldAsync(500, arrayLimit: ArrayLimit);
+            var world = await _dump.WalkWorldAsync(Constants.WorldWalkMaxDepth, arrayLimit: ArrayLimit);
             _cachedWorld = world;
 
             Breadcrumbs.Clear();
@@ -2850,7 +2850,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     // so re-walk it fresh — GWorld is a stable singleton, so this restores
                     // correctly even after a game restart. An in-session bookmark reuses the
                     // cached walk.
-                    _cachedWorld ??= await _dump.WalkWorldAsync(500, arrayLimit: ArrayLimit);
+                    _cachedWorld ??= await _dump.WalkWorldAsync(Constants.WorldWalkMaxDepth, arrayLimit: ArrayLimit);
                     PopulateFromWorld(_cachedWorld);
                 }
                 else
@@ -2934,7 +2934,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         {
             if (root.FieldName == "GWorld")
             {
-                freshWorld = await _dump.WalkWorldAsync(500, arrayLimit: ArrayLimit);
+                freshWorld = await _dump.WalkWorldAsync(Constants.WorldWalkMaxDepth, arrayLimit: ArrayLimit);
                 if (freshWorld == null || string.IsNullOrEmpty(freshWorld.WorldAddr)) return null;
                 curAddr = freshWorld.WorldAddr;
             }
@@ -4117,7 +4117,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             if (_cachedWorld != null && CurrentAddress == _cachedWorld.WorldAddr
                 && Breadcrumbs.Count == 1)
             {
-                var world = await _dump.WalkWorldAsync(500, arrayLimit: ArrayLimit, ct: ct);
+                var world = await _dump.WalkWorldAsync(Constants.WorldWalkMaxDepth, arrayLimit: ArrayLimit, ct: ct);
                 if (CurrentAddress != addressAtStart || Breadcrumbs.Count != breadcrumbCountAtStart) return;
                 _cachedWorld = world;
                 PopulateFromWorld(world);

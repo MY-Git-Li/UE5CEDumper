@@ -709,7 +709,7 @@ uintptr_t StructInner(const FieldInfo& fi) {
         uintptr_t cand = 0;
         if (!Macht::ReadSafe(fi.Address + static_cast<uintptr_t>(off), cand) || !cand)
             continue;
-        if (cand < 0x10000 || cand > 0x00007FFFFFFFFFFF) continue;
+        if (!Grimoire::IsUserspacePointer(cand)) continue;
         std::string sn = Ubel::GetName(cand);
         if (!sn.empty() && static_cast<unsigned char>(sn[0]) >= 0x20
             && static_cast<unsigned char>(sn[0]) < 0x7F)

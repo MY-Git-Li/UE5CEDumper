@@ -116,7 +116,7 @@ public sealed class SpcQuery
 
     /// <summary>Max matching candidates returned (default 50,000). One extra is
     /// probed to set <see cref="SpcResult.Truncated"/>.</summary>
-    public int MaxRows { get; set; } = 50000;
+    public int MaxRows { get; set; } = Constants.DefaultMaxQueryRows;
 
     /// <summary>Per-game class denylist (N1). Class FQNs in this set are skipped
     /// at the anchor-load step and every subsequent snapshot pass, before the cap

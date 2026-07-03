@@ -1678,7 +1678,7 @@ public sealed class DumpService : IDumpService
         string value,
         string? value2 = null,
         bool gameOnly = true,
-        int maxResults = 50000,
+        int maxResults = Constants.ScanSessionMaxResults,
         Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
         bool caseSensitive = false,
         bool parallel = true,
@@ -1686,8 +1686,8 @@ public sealed class DumpService : IDumpService
         bool deep = false,
         bool nativeC = false,
         bool newestFirst = false,
-        int pageSize = 1000,
-        int deadlineMs = 15000,
+        int pageSize = Constants.ScanSessionPageSize,
+        int deadlineMs = Constants.ScanSessionDeadlineMs,
         bool autoSkipNoise = false,
         CancellationToken ct = default)
     {
@@ -1743,7 +1743,7 @@ public sealed class DumpService : IDumpService
         // Scan deadline (Value Search "Timeout" slider). DLL default is 15000ms →
         // attach only when the user picked a different budget, keeping the common
         // case byte-identical on the wire. (JsonNode) cast dodges the AOT Add<T> trap.
-        if (deadlineMs != 15000)
+        if (deadlineMs != Constants.ScanSessionDeadlineMs)
             req["deadline_ms"] = (JsonNode)deadlineMs;
         // "Auto detect Engine/System noise" pre-filter is opt-in (default off) →
         // attach only when on, keeping the common-case wire shape byte-identical.
@@ -1784,7 +1784,7 @@ public sealed class DumpService : IDumpService
         string? value2 = null,
         Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
         bool caseSensitive = false,
-        int pageSize = 1000,
+        int pageSize = Constants.ScanSessionPageSize,
         CancellationToken ct = default)
     {
         var req = new JsonObject
@@ -1938,13 +1938,13 @@ public sealed class DumpService : IDumpService
     public async Task<GroupScanBeginResult> BeginGroupScanAsync(
         IReadOnlyList<GroupSlotInput> slots,
         bool gameOnly = true,
-        int maxResults = 50000,
+        int maxResults = Constants.ScanSessionMaxResults,
         bool deep = false,
         bool crossObject = false,
         bool nativeC = false,
         bool newestFirst = false,
-        int pageSize = 1000,
-        int deadlineMs = 15000,
+        int pageSize = Constants.ScanSessionPageSize,
+        int deadlineMs = Constants.ScanSessionDeadlineMs,
         bool autoSkipNoise = false,
         Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
         CancellationToken ct = default)
@@ -1988,7 +1988,7 @@ public sealed class DumpService : IDumpService
             req["newest_first"] = (JsonNode)true;
         // Scan deadline (Value Search "Timeout" slider). DLL default 15000ms →
         // attach only when changed, keeping the common case wire-identical.
-        if (deadlineMs != 15000)
+        if (deadlineMs != Constants.ScanSessionDeadlineMs)
             req["deadline_ms"] = (JsonNode)deadlineMs;
         // "Auto detect Engine/System noise" pre-filter (opt-in, default off).
         if (autoSkipNoise)
@@ -2021,7 +2021,7 @@ public sealed class DumpService : IDumpService
     public async Task<GroupScanRefineResult> RefineGroupScanAsync(
         ulong sessionId,
         IReadOnlyList<GroupSlotInput> slots,
-        int pageSize = 1000,
+        int pageSize = Constants.ScanSessionPageSize,
         Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
         CancellationToken ct = default)
     {

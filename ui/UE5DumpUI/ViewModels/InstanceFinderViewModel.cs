@@ -59,7 +59,7 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
     public bool CollapsePointerNodes { get; set; }
 
     /// <summary>Max array element count for inline reading (2^N, default 128).</summary>
-    private int _arrayLimit = 128;
+    private int _arrayLimit = Constants.DefaultArrayLimit;
     public int ArrayLimit
     {
         get => _arrayLimit;
@@ -74,7 +74,7 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>Max struct sub-fields to show in preview (0 = none, default 2, max 6).</summary>
-    private int _previewLimit = 2;
+    private int _previewLimit = Constants.DefaultPreviewLimit;
     public int PreviewLimit
     {
         get => _previewLimit;
@@ -89,7 +89,7 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>Max CE DropDownList entries (2^N, default 512). Used during CE XML export.</summary>
-    public int DropDownLimit { get; set; } = 512;
+    public int DropDownLimit { get; set; } = Constants.DefaultDropDownLimit;
 
     // --- Class name search ---
     [ObservableProperty] private string _searchClassName = "";
@@ -114,7 +114,7 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
     /// to 5000 so a wanted instance is far less likely to fall off the end, and
     /// server-side class-noise exclusion frees cap slots on top. Clamped 100..50000
     /// (UI NumericUpDown + a DLL-side clamp).</summary>
-    [ObservableProperty] private int _instanceSearchCap = 5000;
+    [ObservableProperty] private int _instanceSearchCap = Constants.DefaultInstanceSearchCap;
 
     /// <summary>Temporary client-side keyword filter over the CURRENTLY-RETURNED
     /// rows (whitespace-separated terms ANDed across Name / Class / Address, like
@@ -763,7 +763,6 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
     // distinct class is a full game-wide sweep done once. Skip already-scanned
     // (XrefInfo persists across the keyword filter).
     private CancellationTokenSource? _xrefBatchCts;
-    private const int XrefBatchWarnThreshold = 25;
 
     [RelayCommand]
     private async Task BatchFindFuncsAsync(IList<InstanceResult>? selected)
@@ -775,7 +774,7 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
         int distinctClasses = targets
             .Where(i => !string.IsNullOrEmpty(i.ClassAddress) && string.IsNullOrEmpty(i.XrefInfo))
             .Select(i => i.ClassAddress).Distinct().Count();
-        if (distinctClasses > XrefBatchWarnThreshold)
+        if (distinctClasses > Constants.XrefBatchWarnThreshold)
         {
             var ok = await Views.ConfirmDialog.ShowAsync(
                 "Batch: find functions",

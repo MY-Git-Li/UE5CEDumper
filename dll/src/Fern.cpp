@@ -1196,7 +1196,7 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             bool persist   = request.value("persist", true);
 
             // Defensive bounds — match Stark's clamp band, but allow 0 to clear.
-            if (timeoutMs != 0 && (timeoutMs < 100 || timeoutMs > 600000)) {
+            if (timeoutMs != 0 && (timeoutMs < Stark::kMinInvokeTimeoutMs || timeoutMs > Stark::kMaxInvokeTimeoutMs)) {
                 return Renge::MakeError(id,
                     "timeout_ms out of supported range (100..600000 or 0 to clear)").dump();
             }
