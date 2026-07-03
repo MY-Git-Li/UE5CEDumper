@@ -51,6 +51,10 @@ int32_t EnqueueInvoke(uintptr_t instance, uintptr_t ufunc, uintptr_t params, siz
 
 /// Default invoke timeout (compile-time baseline, used when no override is set).
 constexpr int32_t kDefaultInvokeTimeoutMs = 5000;
+/// Clamp band for a user-supplied invoke timeout (100ms .. 10min). Enforced by
+/// SetInvokeTimeoutMs and mirrored by Fern's set_invoke_timeout pipe validation.
+constexpr int32_t kMinInvokeTimeoutMs = 100;
+constexpr int32_t kMaxInvokeTimeoutMs = 600000;
 
 /// Override the EnqueueInvoke timeout in milliseconds. Set to 0 to revert to
 /// kDefaultInvokeTimeoutMs. Clamped to [100, 600000] (100ms .. 10min). Thread-safe.

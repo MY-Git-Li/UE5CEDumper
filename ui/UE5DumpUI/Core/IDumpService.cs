@@ -233,7 +233,7 @@ public interface IDumpService
         string value,
         string? value2 = null,
         bool gameOnly = true,
-        int maxResults = 50000,
+        int maxResults = Constants.ScanSessionMaxResults,
         Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
         bool caseSensitive = false,
         bool parallel = true,
@@ -241,8 +241,8 @@ public interface IDumpService
         bool deep = false,
         bool nativeC = false,
         bool newestFirst = false,
-        int pageSize = 1000,
-        int deadlineMs = 15000,
+        int pageSize = Constants.ScanSessionPageSize,
+        int deadlineMs = Constants.ScanSessionDeadlineMs,
         bool autoSkipNoise = false,
         CancellationToken ct = default);
 
@@ -253,7 +253,7 @@ public interface IDumpService
         string? value2 = null,
         Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
         bool caseSensitive = false,
-        int pageSize = 1000,
+        int pageSize = Constants.ScanSessionPageSize,
         CancellationToken ct = default);
 
     // V3-C: server-side window over the session's full candidate set. Filters
@@ -280,13 +280,13 @@ public interface IDumpService
     Task<GroupScanBeginResult> BeginGroupScanAsync(
         IReadOnlyList<GroupSlotInput> slots,
         bool gameOnly = true,
-        int maxResults = 50000,
+        int maxResults = Constants.ScanSessionMaxResults,
         bool deep = false,
         bool crossObject = false,
         bool nativeC = false,
         bool newestFirst = false,
-        int pageSize = 1000,
-        int deadlineMs = 15000,
+        int pageSize = Constants.ScanSessionPageSize,
+        int deadlineMs = Constants.ScanSessionDeadlineMs,
         bool autoSkipNoise = false,
         Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
         CancellationToken ct = default);
@@ -294,7 +294,7 @@ public interface IDumpService
     Task<GroupScanRefineResult> RefineGroupScanAsync(
         ulong sessionId,
         IReadOnlyList<GroupSlotInput> slots,
-        int pageSize = 1000,
+        int pageSize = Constants.ScanSessionPageSize,
         Models.FloatRoundMode roundMode = Models.FloatRoundMode.Round,
         CancellationToken ct = default);
 

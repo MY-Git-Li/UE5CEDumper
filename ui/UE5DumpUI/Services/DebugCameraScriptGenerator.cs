@@ -59,19 +59,19 @@ public static class DebugCameraScriptGenerator
         Line(sb);
 
         // Mailbox round-trip: write request, trigger CMD_SET_DEBUG_CAMERA=7, poll.
-        Line(sb, $"writeQword(mb + 0x10, {req})   -- request: {req} = {label}");
-        Line(sb, "writeInteger(mb + 0x04, 0)    -- clear status");
-        Line(sb, "writeInteger(mb + 0x00, 7)    -- CMD_SET_DEBUG_CAMERA (write LAST)");
+        Line(sb, $"writeQword(mb + {CeMailboxLayout.OffInstanceAddr}, {req})   -- request: {req} = {label}");
+        Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffStatus}, 0)    -- clear status");
+        Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffCmd}, {CeMailboxLayout.CmdSetDebugCamera})    -- CMD_SET_DEBUG_CAMERA (write LAST)");
         Line(sb, "local elapsed = 0");
-        Line(sb, "while readInteger(mb + 0x04) ~= 1 do");
+        Line(sb, $"while readInteger(mb + {CeMailboxLayout.OffStatus}) ~= 1 do");
         Line(sb, "  sleep(1)");
         Line(sb, "  elapsed = elapsed + 1");
-        Line(sb, "  if elapsed >= 10000 then");
+        Line(sb, $"  if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then");
         Line(sb, "    showMessage('[DebugCamera] mailbox timeout (DLL not responding?)')");
         Line(sb, "    return");
         Line(sb, "  end");
         Line(sb, "end");
-        Line(sb, "local state = readInteger(mb + 0x08)   -- 1=ON, 0=OFF, -1=error");
+        Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult})   -- 1=ON, 0=OFF, -1=error");
         Line(sb, $"dbg('[DebugCamera] {label} -> state=' .. tostring(state))");
         Line(sb, "if state == -1 then");
         Line(sb, $"  showMessage('[DebugCamera] {label} -- no live CheatManager? " +

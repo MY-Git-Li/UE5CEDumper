@@ -64,7 +64,7 @@ public static class SdkExportService
         // 1. Collect all Class/ScriptStruct objects
         var targets = new List<(string addr, string name, string className)>();
         int offset = 0;
-        const int pageSize = 5000;
+        const int pageSize = Constants.GObjectsWalkPageSize;
         int total = 0;
 
         do

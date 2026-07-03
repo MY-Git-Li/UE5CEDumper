@@ -24,6 +24,9 @@ static std::atomic<bool> s_initialized{false};
 static bool s_isUE4Mode = false;
 static int  s_ue4StringOffset = 0x10;  // Offset within FNameEntry to null-terminated string
 static constexpr int UE4_CHUNK_SIZE = 0x4000; // 16384 entries per chunk
+static constexpr int32_t UE4_NAME_MAX_CHUNKS = 256;   // UE4 TNameEntryArray max chunk count (256 * 16384 = 4M names)
+static constexpr int32_t UE5_NAME_MAX_CHUNKS = 8192;  // UE5 FNamePool max chunk count (8192 * 128KB = 1GB)
+static constexpr int     FNAME_MAX_LEN       = 1024;  // Max plausible decoded FName length (sanity ceiling)
 
 // Header format detection
 // UE has changed the FNameEntry header format between versions:
@@ -86,7 +89,7 @@ static uintptr_t GetEntryInternal(int32_t nameIndex) {
     if (s_isUE4Mode) {
         int32_t chunkIndex = nameIndex / UE4_CHUNK_SIZE;
         int32_t elemIndex  = nameIndex % UE4_CHUNK_SIZE;
-        if (chunkIndex < 0 || chunkIndex > 256) return 0;
+        if (chunkIndex < 0 || chunkIndex > UE4_NAME_MAX_CHUNKS) return 0;
         uintptr_t chunkPtr = 0;
         if (!Macht::ReadSafe(s_poolAddr + chunkIndex * sizeof(uintptr_t), chunkPtr) || !chunkPtr) return 0;
         uintptr_t entryPtr = 0;
@@ -96,7 +99,7 @@ static uintptr_t GetEntryInternal(int32_t nameIndex) {
 
     int32_t chunkIndex  = nameIndex >> s_blockOffsetBits;
     int32_t chunkOffset = (nameIndex & s_blockOffsetMask) * s_stride;
-    if (chunkIndex < 0 || chunkIndex > 8192) return 0;
+    if (chunkIndex < 0 || chunkIndex > UE5_NAME_MAX_CHUNKS) return 0;
     uintptr_t chunkPtr = 0;
     uintptr_t chunksBase = s_poolAddr + s_chunksOffset;
     if (!Macht::ReadSafe(chunksBase + chunkIndex * sizeof(uintptr_t), chunkPtr) || !chunkPtr) return 0;
@@ -359,7 +362,7 @@ uintptr_t GetEntry(int32_t nameIndex) {
         int32_t elemIndex  = nameIndex % UE4_CHUNK_SIZE;
 
         // Bounds guard: UE4 typically has < 256 chunks (256 * 16384 = 4M names max)
-        if (chunkIndex < 0 || chunkIndex > 256) return 0;
+        if (chunkIndex < 0 || chunkIndex > UE4_NAME_MAX_CHUNKS) return 0;
 
         // Read chunk pointer from array
         uintptr_t chunkPtr = 0;
@@ -379,7 +382,7 @@ uintptr_t GetEntry(int32_t nameIndex) {
     int32_t chunkOffset = (nameIndex & s_blockOffsetMask) * s_stride;
 
     // Bounds guard: FNamePool typically has < 8192 chunks (each 128KB = 1GB total max)
-    if (chunkIndex < 0 || chunkIndex > 8192) return 0;
+    if (chunkIndex < 0 || chunkIndex > UE5_NAME_MAX_CHUNKS) return 0;
 
     // Read chunk pointer
     uintptr_t chunkPtr = 0;
@@ -423,7 +426,7 @@ std::string GetString(int32_t nameIndex, int32_t number) {
     int len = (header >> s_lenShift) & s_lenMask;
     bool isWide = (header & (1 << s_wideFlag)) != 0;
 
-    if (len <= 0 || len > 1024) return "";
+    if (len <= 0 || len > FNAME_MAX_LEN) return "";
 
     // String starts at entry + s_headerOffset + 2
     int strStart = s_headerOffset + 2;
@@ -558,7 +561,7 @@ void LogDiagnostics() {
             }
             continue;
         }
-        if (len > 1024) {
+        if (len > FNAME_MAX_LEN) {
             ++stats.lenOverflow;
             if (firstFailures < 5) {
                 LOG_INFO("  FAIL idx=0x%08X chunk=%d off=%d entry=0x%llX header=0x%04X len=%d (overflow)",

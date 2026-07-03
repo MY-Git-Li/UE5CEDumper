@@ -310,16 +310,16 @@ public class InvokeScriptTests
         var script = InvokeScriptGenerator.Generate("ShopKeeper_C", "openShop", func);
 
         // CMD_FIND_INSTANCE = 2
-        Assert.Contains("writeInteger(mb + 0x000, 2)", script);
+        Assert.Contains("writeInteger(mb + 0x00, 2)", script);
         // CMD_FIND_FUNCTION = 3
-        Assert.Contains("writeInteger(mb + 0x000, 3)", script);
+        Assert.Contains("writeInteger(mb + 0x00, 3)", script);
         // CMD_INVOKE = 1
-        Assert.Contains("writeInteger(mb + 0x000, 1)", script);
+        Assert.Contains("writeInteger(mb + 0x00, 1)", script);
         // Reads instance + function addresses from mailbox
-        Assert.Contains("readQword(mb + 0x010)", script);  // instanceAddr
-        Assert.Contains("readQword(mb + 0x018)", script);  // ufuncPtr
+        Assert.Contains("readQword(mb + 0x10)", script);  // instanceAddr
+        Assert.Contains("readQword(mb + 0x18)", script);  // ufuncPtr
         // Reads result code
-        Assert.Contains("readInteger(mb + 0x008)", script); // result
+        Assert.Contains("readInteger(mb + 0x08)", script); // result
     }
 
     [Fact]

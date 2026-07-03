@@ -35,6 +35,11 @@ extern uint32_t g_cachedUEVersion;
 
 namespace Ubel {
 
+// Hard cap on container/array elements read per request across every
+// Read*ArrayElements phase — clamps (end - offset) so one malformed Num can't
+// make the reader walk unbounded memory. Shared by all array-reader functions.
+static constexpr int32_t kArrayElementsPerRequestCap = 4096;
+
 // Lazy UE5.5+ version marker — set true the first time a class walk encounters a
 // reflected Utf8StrProperty / AnsiStrProperty (added in UE5.5). Atomic so the
 // parallel GObjects walks can set it without a lock. Read via SawUtf8OrAnsiStr().
@@ -1627,7 +1632,7 @@ ReadArrayResult ReadArrayElements(
     }
     int32_t end = offset + limit;
     if (end > arr.Count) end = arr.Count;
-    if (end - offset > 4096) end = offset + 4096;  // hard cap per request
+    if (end - offset > kArrayElementsPerRequestCap) end = offset + kArrayElementsPerRequestCap;  // hard cap per request
 
     // For enum arrays: read UEnum* once from Inner FProperty
     uintptr_t enumPtr = 0;
@@ -1758,7 +1763,7 @@ ReadArrayResult ReadPointerArrayElements(
     }
     int32_t end = offset + limit;
     if (end > arr.Count) end = arr.Count;
-    if (end - offset > 4096) end = offset + 4096;  // hard cap per request
+    if (end - offset > kArrayElementsPerRequestCap) end = offset + kArrayElementsPerRequestCap;  // hard cap per request
 
     result.elements.reserve(end - offset);
 
@@ -1872,7 +1877,7 @@ ReadArrayResult ReadWeakObjectArrayElements(
     }
     int32_t end = offset + limit;
     if (end > arr.Count) end = arr.Count;
-    if (end - offset > 4096) end = offset + 4096;
+    if (end - offset > kArrayElementsPerRequestCap) end = offset + kArrayElementsPerRequestCap;
 
     result.elements.reserve(end - offset);
 
@@ -2255,7 +2260,7 @@ ReadArrayResult ReadSoftObjectArrayElements(
     }
     int32_t end = offset + limit;
     if (end > arr.Count) end = arr.Count;
-    if (end - offset > 4096) end = offset + 4096;
+    if (end - offset > kArrayElementsPerRequestCap) end = offset + kArrayElementsPerRequestCap;
 
     result.elements.reserve(end - offset);
 
@@ -2369,7 +2374,7 @@ ReadArrayResult ReadLazyObjectArrayElements(
     }
     int32_t end = offset + limit;
     if (end > arr.Count) end = arr.Count;
-    if (end - offset > 4096) end = offset + 4096;
+    if (end - offset > kArrayElementsPerRequestCap) end = offset + kArrayElementsPerRequestCap;
 
     result.elements.reserve(end - offset);
 
@@ -2475,7 +2480,7 @@ ReadArrayResult ReadInterfaceArrayElements(
     }
     int32_t end = offset + limit;
     if (end > arr.Count) end = arr.Count;
-    if (end - offset > 4096) end = offset + 4096;
+    if (end - offset > kArrayElementsPerRequestCap) end = offset + kArrayElementsPerRequestCap;
 
     result.elements.reserve(end - offset);
 
@@ -2577,7 +2582,7 @@ ReadArrayResult ReadDelegateArrayElements(
     }
     int32_t end = offset + limit;
     if (end > arr.Count) end = arr.Count;
-    if (end - offset > 4096) end = offset + 4096;
+    if (end - offset > kArrayElementsPerRequestCap) end = offset + kArrayElementsPerRequestCap;
 
     result.elements.reserve(end - offset);
 
@@ -2679,7 +2684,7 @@ ReadArrayResult ReadMulticastDelegateArrayElements(
     }
     int32_t end = offset + limit;
     if (end > arr.Count) end = arr.Count;
-    if (end - offset > 4096) end = offset + 4096;
+    if (end - offset > kArrayElementsPerRequestCap) end = offset + kArrayElementsPerRequestCap;
 
     result.elements.reserve(end - offset);
 

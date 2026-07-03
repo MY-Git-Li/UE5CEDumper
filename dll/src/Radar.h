@@ -501,6 +501,11 @@ std::vector<std::pair<std::string, int>> BuildClassHistogram(
     const std::vector<Candidate>&       candidates,
     const std::vector<FieldDescriptor>& descriptors);
 
+// Idle-expiry for a scan session — dropped after this long without a Begin/Refine
+// so a misbehaving client can't leak candidate memory. Shared by both the single
+// (SessionManager) and group (GroupSessionManager) session managers.
+inline constexpr std::chrono::seconds kScanSessionIdleExpiry{300};
+
 class SessionManager {
 public:
     static SessionManager& Instance();
@@ -604,7 +609,7 @@ private:
     // Long enough that a user can step away mid-refine without losing
     // candidates; short enough that abandoned sessions clear on the
     // next Begin().
-    static constexpr std::chrono::seconds kExpirySeconds{300};
+    static constexpr std::chrono::seconds kExpirySeconds = kScanSessionIdleExpiry;
 
     std::mutex                                                  mu_;
     std::unordered_map<uint64_t, std::unique_ptr<Session>>      sessions_;
@@ -783,7 +788,7 @@ private:
     GroupSessionManager(const GroupSessionManager&) = delete;
     GroupSessionManager& operator=(const GroupSessionManager&) = delete;
 
-    static constexpr std::chrono::seconds kExpirySeconds{300};
+    static constexpr std::chrono::seconds kExpirySeconds = kScanSessionIdleExpiry;
 
     std::mutex                                                      mu_;
     std::unordered_map<uint64_t, std::unique_ptr<GroupSession>>     sessions_;

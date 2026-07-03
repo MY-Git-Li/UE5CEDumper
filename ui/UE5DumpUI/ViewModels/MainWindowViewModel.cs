@@ -109,7 +109,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int _arrayLimitExponent = 7; // 2^7 = 128
     [ObservableProperty] private int _dropDownLimitExponent = 9; // 2^9 = 512
     [ObservableProperty] private int _csxDrilldownDepth; // 0 = flat (dummy), 1+ = real child structures
-    [ObservableProperty] private int _previewLimit = 2; // Struct preview sub-field count (0-6)
+    [ObservableProperty] private int _previewLimit = Constants.DefaultPreviewLimit; // Struct preview sub-field count (0-6)
     [ObservableProperty] private int _deepScanElemCapExponent = 8; // 2^8 = 256 (find_by_address deep scan per-container cap)
 
     // Always-visible top-toolbar AOBMaker status (mirrors the per-tab indicators).

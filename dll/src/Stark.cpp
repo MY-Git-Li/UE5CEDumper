@@ -359,8 +359,8 @@ void SetInvokeTimeoutMs(int32_t timeoutMs) {
         s_invokeTimeoutMs.store(kDefaultInvokeTimeoutMs);
         return;
     }
-    if (timeoutMs < 100)    timeoutMs = 100;
-    if (timeoutMs > 600000) timeoutMs = 600000;
+    if (timeoutMs < kMinInvokeTimeoutMs) timeoutMs = kMinInvokeTimeoutMs;
+    if (timeoutMs > kMaxInvokeTimeoutMs) timeoutMs = kMaxInvokeTimeoutMs;
     s_invokeTimeoutMs.store(timeoutMs);
 }
 

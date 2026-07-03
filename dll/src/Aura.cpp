@@ -36,6 +36,11 @@ extern uint32_t g_cachedUEVersion;
 
 namespace Aura {
 
+// Deterministic per-object cap on total container elements visited during a deep
+// leaf walk (blow-up guard). Shared by the value-scan, group-scan and snapshot
+// deep descents so they stay in lockstep (see native-c / snapshot specs).
+static constexpr int64_t kDeepWalkMaxTotalElems = 50000;
+
 // FUObjectArray layout offsets (auto-detected)
 struct ArrayLayout {
     int32_t objectsOffset;    // FUObjectItem** Objects
@@ -503,10 +508,10 @@ static bool DetectLayout(uintptr_t addr) {
 static bool LooksLikeUObject(uintptr_t obj) {
     if (!obj || obj < 0x10000 || obj > 0x00007FFFFFFFFFFF) return false;
     uintptr_t cls = 0;
-    if (!Macht::ReadSafe(obj + 0x10, cls)) return false;
+    if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls)) return false;
     if (cls < 0x10000 || cls > 0x00007FFFFFFFFFFF) return false;
     uintptr_t clsCls = 0;
-    if (!Macht::ReadSafe(cls + 0x10, clsCls)) return false;
+    if (!Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_CLASS, clsCls)) return false;
     if (clsCls < 0x10000 || clsCls > 0x00007FFFFFFFFFFF) return false;
     return true;
 }
@@ -6827,7 +6832,7 @@ ValueScanResult ScanForValue(
             // a single deeply-nested wide object can't monopolise the global
             // scan budget. The 15s wall-clock deadline below remains the global
             // backstop across all objects.
-            dlim.maxTotalElems = 50000;
+            dlim.maxTotalElems = kDeepWalkMaxTotalElems;
             int64_t deepVisited = 0;
             dlim.aborted  = [&] {
                 if (deadlineHit.load(std::memory_order_relaxed)) return true;
@@ -7352,7 +7357,7 @@ void CaptureStructArrays(uintptr_t obj, uintptr_t cls,
     // slow reads). 50k is far above any real object yet caps the blow-up to tens
     // of ms; the chunk loop's own cancel poll handles client-gone between objects.
     int64_t visited = 0;
-    lim.maxTotalElems = 50000;
+    lim.maxTotalElems = kDeepWalkMaxTotalElems;
     const auto t0 = std::chrono::steady_clock::now();
     constexpr auto kPerObjBackstop = std::chrono::milliseconds(750);
     lim.aborted  = [t0] {
@@ -8046,7 +8051,7 @@ GroupScanResult ScanForValueGroup(const std::vector<Radar::SlotSpec>& slots,
     WalkLeafLimits dlim;
     dlim.maxDepth      = 4;
     dlim.maxElems      = 256;
-    dlim.maxTotalElems = 50000;
+    dlim.maxTotalElems = kDeepWalkMaxTotalElems;
     dlim.aborted = [&] {
         return Tot::Requested() || (std::chrono::steady_clock::now() - t0 > kDeadline);
     };

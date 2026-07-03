@@ -25,7 +25,7 @@ public static class MovementScriptGenerator
     //   0x04 status (poll == 1), 0x08 result (1 active / 0 off / negative error)
     //   0x10 instanceAddr = knobId (0 MaxWalkSpeed / 1 GravityScale / 2 JumpZVelocity)
     //   0x328 paramsData[0..7] = double percent (100 = off; knob 2 = jump HEIGHT %)
-    private const int CmdMovement = 10;
+    private const int CmdMovement = CeMailboxLayout.CmdMovement;
 
     /// <summary>The three tunable knobs — value is the mailbox knobId.</summary>
     public enum Knob { WalkSpeed = 0, Gravity = 1, Jump = 2 }
@@ -77,16 +77,16 @@ public static class MovementScriptGenerator
         Line(sb, "  return");
         Line(sb, "end");
         Line(sb);
-        Line(sb, $"writeQword(mb + 0x10, {(int)knob})        -- knobId: {label}");
-        Line(sb, $"writeDouble(mb + 0x328, {Lua(sent)})   -- percent (100 = off)");
-        Line(sb, "writeInteger(mb + 0x04, 0)        -- clear status");
-        Line(sb, $"writeInteger(mb + 0x00, {CmdMovement})       -- CMD_MOVEMENT (write LAST)");
+        Line(sb, $"writeQword(mb + {CeMailboxLayout.OffInstanceAddr}, {(int)knob})        -- knobId: {label}");
+        Line(sb, $"writeDouble(mb + {CeMailboxLayout.OffParamsData}, {Lua(sent)})   -- percent (100 = off)");
+        Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffStatus}, 0)        -- clear status");
+        Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffCmd}, {CmdMovement})       -- CMD_MOVEMENT (write LAST)");
         Line(sb, "local elapsed = 0");
-        Line(sb, "while readInteger(mb + 0x04) ~= 1 do");
+        Line(sb, $"while readInteger(mb + {CeMailboxLayout.OffStatus}) ~= 1 do");
         Line(sb, "  sleep(1); elapsed = elapsed + 1");
         if (enable)
         {
-            Line(sb, "  if elapsed >= 10000 then");
+            Line(sb, $"  if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then");
             Line(sb, "    showMessage('[Movement] mailbox timeout (DLL not responding?)')");
             Line(sb, "    return");
             Line(sb, "  end");
@@ -96,12 +96,12 @@ public static class MovementScriptGenerator
             // Timeout on an untick is an error, not a clean finish -- return so the
             // success-close below is unreachable (leave the window as-is), matching
             // the [ENABLE] path. (break would fall through into the auto-close.)
-            Line(sb, "  if elapsed >= 10000 then return end");
+            Line(sb, $"  if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then return end");
         }
         Line(sb, "end");
         if (enable)
         {
-            Line(sb, "local state = readInteger(mb + 0x08)   -- 1=active, 0=off, <0=error");
+            Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult})   -- 1=active, 0=off, <0=error");
             Line(sb, $"dbg('[Movement] {label} {Pct(percent)} -> state=' .. tostring(state))");
             Line(sb, "if state < 0 then");
             Line(sb, $"  showMessage('[Movement] {label} -- no pawn / no CharacterMovement (enter gameplay first)')");
@@ -163,18 +163,18 @@ public static class MovementScriptGenerator
         Line(sb, "  return");
         Line(sb, "end");
         Line(sb);
-        Line(sb, "writeQword(mb + 0x10, 3)        -- knobId 3 = GravityDirection");
-        Line(sb, $"writeDouble(mb + 0x328, {Lua(sx)})   -- X");
+        Line(sb, $"writeQword(mb + {CeMailboxLayout.OffInstanceAddr}, 3)        -- knobId 3 = GravityDirection");
+        Line(sb, $"writeDouble(mb + {CeMailboxLayout.OffParamsData}, {Lua(sx)})   -- X");
         Line(sb, $"writeDouble(mb + 0x330, {Lua(sy)})   -- Y");
         Line(sb, $"writeDouble(mb + 0x338, {Lua(sz)})   -- Z");
-        Line(sb, "writeInteger(mb + 0x04, 0)        -- clear status");
-        Line(sb, $"writeInteger(mb + 0x00, {CmdMovement})       -- CMD_MOVEMENT (write LAST)");
+        Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffStatus}, 0)        -- clear status");
+        Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffCmd}, {CmdMovement})       -- CMD_MOVEMENT (write LAST)");
         Line(sb, "local elapsed = 0");
-        Line(sb, "while readInteger(mb + 0x04) ~= 1 do");
+        Line(sb, $"while readInteger(mb + {CeMailboxLayout.OffStatus}) ~= 1 do");
         Line(sb, "  sleep(1); elapsed = elapsed + 1");
         if (enable)
         {
-            Line(sb, "  if elapsed >= 10000 then");
+            Line(sb, $"  if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then");
             Line(sb, "    showMessage('[Movement] mailbox timeout (DLL not responding?)')");
             Line(sb, "    return");
             Line(sb, "  end");
@@ -184,12 +184,12 @@ public static class MovementScriptGenerator
             // Timeout on an untick is an error, not a clean finish -- return so the
             // success-close below is unreachable (leave the window as-is), matching
             // the [ENABLE] path. (break would fall through into the auto-close.)
-            Line(sb, "  if elapsed >= 10000 then return end");
+            Line(sb, $"  if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then return end");
         }
         Line(sb, "end");
         if (enable)
         {
-            Line(sb, "local state = readInteger(mb + 0x08)   -- 1=active, 0=off, <0=error/unavailable");
+            Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult})   -- 1=active, 0=off, <0=error/unavailable");
             Line(sb, "dbg('[Movement] Gravity Direction -> state=' .. tostring(state))");
             Line(sb, "if state < 0 then");
             Line(sb, "  showMessage('[Movement] Gravity Direction -- unavailable (needs UE5.4+) or no pawn.')");

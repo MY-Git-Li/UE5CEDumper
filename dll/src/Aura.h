@@ -1011,13 +1011,18 @@ struct ValueScanResult {
 // the matching entry in `multiTargets` (and `multiTargets2` for
 // Between). A field whose width can't represent the value (no matching
 // entry) is skipped. `multiTargets` must be non-null for this path.
+// Shared defaults for the single- and group-value scans (keep ScanForValue and
+// ScanForValueGroup in lockstep): 100000-candidate ceiling and a 15s wall-clock budget.
+constexpr int32_t kValueScanDefaultMaxResults = 100000;
+constexpr int32_t kValueScanDefaultDeadlineMs = 15000;
+
 ValueScanResult ScanForValue(
     Radar::DataType dt,
     Radar::ScanType st,
     const uint8_t*      targetBytes,
     const uint8_t*      target2Bytes,
     bool                gameOnly,
-    int32_t             maxResults    = 100000,
+    int32_t             maxResults    = kValueScanDefaultMaxResults,
     Radar::RoundMode    roundMode     = Radar::RoundMode::Round,
     const std::string&  targetString  = "",
     bool                caseSensitive = false,
@@ -1062,7 +1067,7 @@ ValueScanResult ScanForValue(
     // and returns whatever matched so far. Exposed via the pipe `deadline_ms` field
     // + the Value Search "Timeout" slider (10-60s) so huge games that don't finish
     // in 15s can be given a longer budget. <= 0 falls back to the 15s default.
-    int32_t             deadlineMs    = 15000,
+    int32_t             deadlineMs    = kValueScanDefaultDeadlineMs,
     // Pre-filter "Auto detect Engine/System noise" (opt-in, default OFF here; UI
     // checkbox also defaults unchecked). When true, pure engine/system classes are
     // skipped at the SOURCE (before the per-object field walk) so their instances
@@ -1141,7 +1146,7 @@ struct GroupScanResult {
 GroupScanResult ScanForValueGroup(
     const std::vector<Radar::SlotSpec>& slots,
     bool                                gameOnly,
-    int32_t                             maxResults  = 100000,
+    int32_t                             maxResults  = kValueScanDefaultMaxResults,
     bool                                deep        = false,
     bool                                crossObject = false,
     // Native-C (P2, opt-in, default off): also fold each object's unmanaged-hole
@@ -1159,7 +1164,7 @@ GroupScanResult ScanForValueGroup(
     // exceeds this budget it bails early (stats.deadlineHit fires) and returns the
     // matches found so far. Exposed via the pipe `deadline_ms` field + the Value
     // Search "Timeout" slider (10-60s). <= 0 falls back to the 15s default.
-    int32_t                             deadlineMs  = 15000,
+    int32_t                             deadlineMs  = kValueScanDefaultDeadlineMs,
     // Pre-filter "Auto detect Engine/System noise" (opt-in, default OFF; UI checkbox
     // defaults unchecked). When true, pure engine/system classes are skipped at the
     // SOURCE (before each object's leaf enumeration) so they never enter the group

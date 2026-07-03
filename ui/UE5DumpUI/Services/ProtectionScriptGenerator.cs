@@ -20,7 +20,7 @@ public static class ProtectionScriptGenerator
     //   0x04 status (poll == 1), 0x08 result (observed state / negative error)
     //   0x10 instanceAddr = op  (PROTECT_OP_SET_GODMODE = 0)
     //   0x18 ufuncAddr    = value (1 = ON / 0 = OFF)
-    private const int CmdProtect = 9;
+    private const int CmdProtect = CeMailboxLayout.CmdProtect;
     private const int OpSetGodMode = 0;
 
     /// <summary>Build the [ENABLE]/[DISABLE] memory-record script.</summary>
@@ -62,20 +62,20 @@ public static class ProtectionScriptGenerator
         Line(sb);
 
         // Mailbox round-trip: write op + value, trigger CMD_PROTECT=9, poll status.
-        Line(sb, $"writeQword(mb + 0x10, {OpSetGodMode})    -- op: PROTECT_OP_SET_GODMODE");
-        Line(sb, $"writeQword(mb + 0x18, {value})    -- value: {value} = {label}");
-        Line(sb, "writeInteger(mb + 0x04, 0)    -- clear status");
-        Line(sb, $"writeInteger(mb + 0x00, {CmdProtect})    -- CMD_PROTECT (write LAST)");
+        Line(sb, $"writeQword(mb + {CeMailboxLayout.OffInstanceAddr}, {OpSetGodMode})    -- op: PROTECT_OP_SET_GODMODE");
+        Line(sb, $"writeQword(mb + {CeMailboxLayout.OffUfuncAddr}, {value})    -- value: {value} = {label}");
+        Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffStatus}, 0)    -- clear status");
+        Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffCmd}, {CmdProtect})    -- CMD_PROTECT (write LAST)");
         Line(sb, "local elapsed = 0");
-        Line(sb, "while readInteger(mb + 0x04) ~= 1 do");
+        Line(sb, $"while readInteger(mb + {CeMailboxLayout.OffStatus}) ~= 1 do");
         Line(sb, "  sleep(1)");
         Line(sb, "  elapsed = elapsed + 1");
-        Line(sb, "  if elapsed >= 10000 then");
+        Line(sb, $"  if elapsed >= {CeMailboxLayout.MailboxPollTimeoutMs} then");
         Line(sb, "    showMessage('[GodMode] mailbox timeout (DLL not responding?)')");
         Line(sb, "    return");
         Line(sb, "  end");
         Line(sb, "end");
-        Line(sb, "local state = readInteger(mb + 0x08)   -- 1=immune, 0=can be damaged, <0=error");
+        Line(sb, $"local state = readInteger(mb + {CeMailboxLayout.OffResult})   -- 1=immune, 0=can be damaged, <0=error");
         Line(sb, $"dbg('[GodMode] {label} -> state=' .. tostring(state))");
         Line(sb, "if state < 0 then");
         Line(sb, $"  showMessage('[GodMode] {label} -- no pawn? (enter gameplay first)')");

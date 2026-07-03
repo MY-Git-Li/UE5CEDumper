@@ -14,7 +14,7 @@ public sealed class SnapshotDiffFilter
     public SnapshotDiffDirection Direction { get; set; } = SnapshotDiffDirection.None;
     /// <summary>Max changed rows returned (default 50,000). One extra is probed
     /// to set <see cref="SnapshotDiffResult.Truncated"/>.</summary>
-    public int MaxRows { get; set; } = 50000;
+    public int MaxRows { get; set; } = Constants.DefaultMaxQueryRows;
     /// <summary>Also count Added / Removed fields (object set churn). Off skips
     /// the two NOT EXISTS passes.</summary>
     public bool IncludeAddedRemoved { get; set; } = true;

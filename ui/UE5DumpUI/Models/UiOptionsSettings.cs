@@ -82,7 +82,7 @@ public sealed class ValueSearchUiOptions
     public ValueScanDataType SelectedDataType { get; set; } = ValueScanDataType.Int32;
     public ValueScanType SelectedScanType { get; set; } = ValueScanType.Exact;
     public bool GameOnly { get; set; } = true;
-    public int MaxResults { get; set; } = 50000;
+    public int MaxResults { get; set; } = Constants.DefaultMaxQueryRows;
     public int ScanTimeoutSeconds { get; set; } = 25;
     public bool ParallelScan { get; set; } = true;
     public bool BatchRead { get; set; } = true;
@@ -112,7 +112,7 @@ public sealed class InstanceFinderUiOptions
 {
     public bool ExactMatch { get; set; }
     public bool NewestFirst { get; set; }
-    public int InstanceSearchCap { get; set; } = 5000;
+    public int InstanceSearchCap { get; set; } = Constants.DefaultInstanceSearchCap;
     public int DeepScanElemCap { get; set; } = 256;
 }
 

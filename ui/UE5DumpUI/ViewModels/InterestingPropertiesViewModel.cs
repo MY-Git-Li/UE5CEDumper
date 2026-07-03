@@ -159,7 +159,6 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
     // Find Funcs is the EXPENSIVE direction — each call is a full game-wide
     // bytecode sweep — so warn past a low row count and update progress per row.
     private CancellationTokenSource? _xrefBatchCts;
-    private const int XrefBatchWarnThreshold = 25;
 
     /// <summary>
     /// Batch "Find Funcs": run find_property_xrefs for the selected rows (or all
@@ -174,7 +173,7 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
             .Where(r => !string.IsNullOrEmpty(r.Match.FieldAddr)).ToList();
         if (targets.Count == 0) { StatusText = "No rows with a field address to scan."; return; }
 
-        if (targets.Count > XrefBatchWarnThreshold)
+        if (targets.Count > Constants.XrefBatchWarnThreshold)
         {
             var ok = await Views.ConfirmDialog.ShowAsync(
                 "Batch: find functions",

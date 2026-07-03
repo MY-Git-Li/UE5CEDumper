@@ -341,7 +341,7 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
             SelectedClassFilterIndex = 0;
 
             // Server-side case-insensitive partial search across ALL objects
-            var result = await _dump.SearchObjectsAsync(SearchText, 2000);
+            var result = await _dump.SearchObjectsAsync(SearchText, Constants.ObjectTreePageSize);
             _allNodes.Clear();
             ObjectCount = result.Total;
 

@@ -14,19 +14,21 @@ namespace UE5DumpUI.Services;
 /// </summary>
 public static class InvokeScriptGenerator
 {
-    // Mailbox offsets (must match Mailbox.h MailboxData struct)
-    private const string OffCmd          = "0x000";
-    private const string OffStatus       = "0x004";
-    private const string OffResult       = "0x008";
-    private const string OffInstanceAddr = "0x010";
-    private const string OffUfuncAddr    = "0x018";
+    // Mailbox offsets (must match Mimic.h MailboxData struct). The tokens shared
+    // with the other mailbox generators live in CeMailboxLayout (single source of
+    // truth); the invoke-only fields stay local.
+    private const string OffCmd          = CeMailboxLayout.OffCmd;
+    private const string OffStatus       = CeMailboxLayout.OffStatus;
+    private const string OffResult       = CeMailboxLayout.OffResult;
+    private const string OffInstanceAddr = CeMailboxLayout.OffInstanceAddr;
+    private const string OffUfuncAddr    = CeMailboxLayout.OffUfuncAddr;
     private const string OffParmsSize    = "0x020";
     private const string OffNumParms     = "0x022";
     private const string OffFuncFlags    = "0x024";
     private const string OffClassName    = "0x028";
     private const string OffFuncName     = "0x128";
     private const string OffErrorMsg     = "0x228";
-    private const string OffParamsData   = "0x328";
+    private const string OffParamsData   = CeMailboxLayout.OffParamsData;
 
     /// <summary>
     /// Generate a complete CE AA script that invokes a UFunction via mailbox.
@@ -114,7 +116,7 @@ public static class InvokeScriptGenerator
         Line(sb, $"    while readInteger(mb + {OffStatus}) ~= 1 do");
         Line(sb, "        sleep(1)");
         Line(sb, "        elapsed = elapsed + 1");
-        Line(sb, "        if elapsed >= (timeoutMs or 10000) then");
+        Line(sb, $"        if elapsed >= (timeoutMs or {CeMailboxLayout.MailboxPollTimeoutMs}) then");
         Line(sb, $"            local err = readString(mb + {OffErrorMsg}, 256) or 'timeout'");
         Line(sb, "            error('[Invoke] Mailbox timeout: ' .. err)");
         Line(sb, "        end");

@@ -43,6 +43,11 @@ public static class Constants
     public const int ObjectTreePageSize = 2000;     // Batch size for loading all objects
     public const int ObjectTreeMaxDisplay = 5000;   // Max items shown in FilteredNodes ListBox
 
+    // Objects-per-page when walking the FULL GObjects pool via GetObjectListAsync
+    // (SDK / USMAP / symbol / dump-all exports). Distinct from ObjectTreePageSize
+    // (2000) — the exporters page in larger 5000-object batches.
+    public const int GObjectsWalkPageSize = 5000;
+
     // Live Walker preview
     public const int DefaultPreviewLimit = 2;       // Struct sub-fields in preview (0-6)
 
@@ -82,6 +87,55 @@ public static class Constants
     // Safe: byte-mode pipe (no message cap) + StreamReader.ReadLineAsync accumulates
     // any size. See docs/todo.md snapshot-perf item (in-game re-test pending).
     public const int SnapshotChunkSize = 8192;
+
+    // Snapshot Diff / SPC / Group / Value snapshot-query row cap. Shared by the
+    // model defaults (SpcQuery.MaxRows, SnapshotDiffFilter.MaxRows, group MaxResults,
+    // ValueSearchUiOptions.MaxResults) AND the SnapshotStore `x > 0 ? x : N` fallbacks
+    // so a single number governs the cap everywhere.
+    public const int DefaultMaxQueryRows = 50000;
+
+    // Live DLL value/group scan candidate cap (the DLL session's max returned rows).
+    // Intentionally a SEPARATE constant from DefaultMaxQueryRows even though the value
+    // matches — different subsystem (in-game scan session vs. snapshot-DB query).
+    public const int ScanSessionMaxResults = 50000;
+
+    // Value/group scan begin deadline in ms (Value Search "Timeout" slider default).
+    // Also the sentinel the wire-shape code compares against to omit the field when
+    // the user hasn't overridden it. Mirrors the DLL's 15000 ms scan default.
+    public const int ScanSessionDeadlineMs = 15000;
+
+    // Server-side paging window for scan begin / refine / query. Distinct from
+    // DefaultPageSize (200) — the scan session pages in 1000-row windows.
+    public const int ScanSessionPageSize = 1000;
+
+    // GameThreadDispatch (Stark) default invoke timeout in ms. Mirrors the DLL's
+    // Stark::kDefaultInvokeTimeoutMs; also the sentinel the UI uses to treat a value
+    // as "clear override" so the per-game JSON stays clean.
+    public const int StarkDefaultInvokeTimeoutMs = 5000;
+
+    // Class / array pivot group cap (PivotQuery.MaxGroups, ArrayPivotQuery.MaxGroups).
+    public const int DefaultMaxPivotGroups = 5000;
+
+    // Batch-xref confirm warning threshold: warn before running a batch "Find Funcs"
+    // over more than this many classes/rows (each is a full game-wide sweep).
+    // NOTE: InterestingFunctionsViewModel intentionally uses its own local 100.
+    public const int XrefBatchWarnThreshold = 25;
+
+    // WalkWorldAsync actor limit passed by the Live Walker world-root walks.
+    public const int WorldWalkMaxDepth = 500;
+
+    // Default inline array element read limit (2^7). InstanceFinder / LiveWalker
+    // seed their per-panel ArrayLimit with this; MainWindow derives its own from an
+    // exponent slider.
+    public const int DefaultArrayLimit = 128;
+
+    // Default CE DropDownList enum-entry cap (2^9). InstanceFinder / LiveWalker seed
+    // their per-panel DropDownLimit with this.
+    public const int DefaultDropDownLimit = 512;
+
+    // Default instance-search result cap (InstanceFinderUiOptions.InstanceSearchCap
+    // and the InstanceFinder panel's own default).
+    public const int DefaultInstanceSearchCap = 5000;
 
     // UI
     public const int DefaultWindowWidth = 1400;

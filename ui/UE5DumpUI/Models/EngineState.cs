@@ -126,7 +126,7 @@ public sealed class EngineState
     /// Driven from the DLL — already-loaded per-game override is reflected here. UI shows it next
     /// to the UE Version Override; user can adjust via SetInvokeTimeoutAsync.
     /// </summary>
-    public int InvokeTimeoutMs { get; init; } = 5000;
+    public int InvokeTimeoutMs { get; init; } = Constants.StarkDefaultInvokeTimeoutMs;
 
     /// <summary>
     /// VER_BUILD of the currently-running DLL (e.g. 648). Returned by the init pipe response.

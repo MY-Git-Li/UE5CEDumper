@@ -35,6 +35,10 @@
 // Wirbel::DerefWorld). Defined elsewhere in the DLL; declared extern here.
 extern uintptr_t g_cachedGWorld;
 
+// Target-detection scan budgets (Edel):
+static constexpr int kTargetScanEdgeCap   = 1024;  // max outgoing object-ptr edges collected per root/component
+static constexpr int kComponentScanBudget = 16;    // per-root owned-ActorComponent scan budget (fairness cap)
+
 namespace {
 
 // ---- low-level reads (mirror Wirbel) ----
@@ -293,7 +297,7 @@ CurrentTargetResult DetectCurrentTarget(int32_t maxCandidates) {
         uintptr_t rootCls = Ubel::GetClass(root);
         std::string rootClass = rootCls ? Ubel::GetName(rootCls) : std::string();
         std::vector<Aura::OutgoingPtr> edges;
-        Aura::CollectOutgoingObjectPtrs(root, edges, 1024);
+        Aura::CollectOutgoingObjectPtrs(root, edges, kTargetScanEdgeCap);
         for (const auto& e : edges) consider(e, root, rootClass, nearCombat);
     };
 
@@ -311,10 +315,10 @@ CurrentTargetResult DetectCurrentTarget(int32_t maxCandidates) {
     auto scanOwnedComponents = [&](uintptr_t root) {
         if (!root || Tot::Requested()) return;
         std::vector<Aura::OutgoingPtr> edges;
-        Aura::CollectOutgoingObjectPtrs(root, edges, 1024);
+        Aura::CollectOutgoingObjectPtrs(root, edges, kTargetScanEdgeCap);
         int compCount = 0;   // per-root budget
         for (const auto& e : edges) {
-            if (compCount >= 16) break;
+            if (compCount >= kComponentScanBudget) break;
             uintptr_t comp = e.target;
             if (!comp || scannedComps.count(comp)) continue;
             if (std::string(ClassifyBySuperChain(comp)) != "ActorComponent") continue;
@@ -324,7 +328,7 @@ CurrentTargetResult DetectCurrentTarget(int32_t maxCandidates) {
             uintptr_t compCls = Ubel::GetClass(comp);
             std::string compClass = compCls ? Ubel::GetName(compCls) : std::string();
             std::vector<Aura::OutgoingPtr> cedges;
-            Aura::CollectOutgoingObjectPtrs(comp, cedges, 1024);
+            Aura::CollectOutgoingObjectPtrs(comp, cedges, kTargetScanEdgeCap);
             for (const auto& ce : cedges) consider(ce, comp, compClass, /*nearCombat*/ true);
         }
     };
