@@ -319,6 +319,18 @@
       </WrapPanel>
     </Border>
 
+    <!-- Full-width "game thread paused" banner. Visible on every tab whenever the
+         DLL reports the game thread has stopped ticking ProcessEvent (pause /
+         alt-tab / breakpoint): live-camera & invoke features time out and, with
+         Teleport auto-refresh on, POV polling would otherwise starve scans. -->
+    <Border DockPanel.Dock="Top" IsVisible="{Binding GameThreadStalled}"
+            Background="#3A2E0A" BorderBrush="#E6A817" BorderThickness="0,0,0,1"
+            Padding="10,5">
+      <TextBlock Text="{StaticResource str.Banner.GameThreadPaused}"
+                 Foreground="#E6A817" FontSize="12" FontWeight="SemiBold"
+                 TextWrapping="Wrap"/>
+    </Border>
+
     <!-- Main Content: Left Tree + Right Tabs -->
     <Grid x:Name="ContentGrid">
       <Grid.ColumnDefinitions>

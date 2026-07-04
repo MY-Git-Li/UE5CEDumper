@@ -18,6 +18,45 @@ builds ≤696 in
 
 -----
 
+## 2026-07-04 — Game-thread stall detection: POV fast-fail + app-wide "paused" banner (build ~1902; pushed dev, dev→main PR)
+
+**SHIPPED.** Fix for a ~3.5-min object-list load diagnosed from a Brimstone (UE5.6) log: the **game
+thread was paused** (user paused / alt-tabbed), so every `Stark` game-thread invoke timed out at
+5000ms for 5.5 min straight. Teleport's 500ms auto-refresh polls `teleport_get_pov`, whose
+`Wirbel::GetPovImpl` does **two** game-thread invokes (`GetCameraLocation` + `GetCameraRotation`) =
+~10s block per poll; the DLL's serial pipe dispatch (head-of-line, see `multipipe-eval.md`) then
+starved the pure-memory `get_object_list` paging behind those blocks. `teleport_get_pose` is a raw
+read (no invoke) — only POV blocks. DLL + UI (AOT publish) build clean, 2120 tests green. **Needs
+re-inject; verify in-game.**
+
+**B — fast-fail (the cure).** `Wirbel::GetPovImpl` now guards the two getters on
+`Stark::IsGameThreadResponsive()`; when the thread isn't ticking it skips the invokes and falls
+straight through to `ReadPovRaw` (the same trusted cached-POV path already used on cook-stripped
+TQ2 / Octopath; response `source="raw"`). While paused the world is frozen, so the cached POV equals
+the live value — correct, and no 10s stall. Resumes invoking automatically once the thread ticks.
+POV is read-only + Teleport-tab-only — zero impact on dumped/scanned data.
+
+**Stark liveness.** `HookedProcessEvent` now stamps `s_lastHookFireMs` on every fire; `InstallHook`
+stamps `s_hookInstalledMs`. `kStallThresholdMs = 500` (PE fires hundreds of times/frame, so only a
+genuine stop crosses it). `IsGameThreadResponsive`: hook-not-active → responsive (the first invoke
+lazily installs the hook — never block that); fired-before → `now-lastFire ≤ thr`; **active but NEVER
+fired → `now-installTime ≤ thr`**. That last branch is essential: in the logged case the hook was
+installed but the game was already paused, so it never fired and `s_lastHookFireMs` stayed 0 forever
+— last-fire alone would report "responsive" indefinitely. Consequence: the first POV poll after
+connecting-while-paused still costs ~10s (installs the hook + baselines); every poll after skips.
+
+**A — app-wide banner.** `Renge::MakeResponse` rides `game_thread_stalled` (= `!IsGameThreadResponsive()`)
+on EVERY success envelope — one atomic + steady-clock read, so any command the UI sends updates the
+hint (no dedicated heartbeat command/timer). UI: `PipeClient.ReadLoopAsync` raises the new
+`IPipeClient.GameThreadStalledChanged` on transition only; `LaneRoutingPipeClient` forwards both lanes;
+`MainWindowViewModel.GameThreadStalled` (reset false on disconnect) drives a full-width amber banner
+in `MainWindow.axaml` (`str.Banner.GameThreadPaused`) visible from every tab. Two `IPipeClient` test
+doubles gained the event.
+
+**Scope.** Only `GetPovImpl` uses the stall guard; other invokes (recall / function-invoke / Laufen /
+Solitar) are untouched — the re-assert workers block their own threads, not the pipe, so they don't
+starve scans. Single-player.
+
 ## 2026-07-03 — Standalone CE-Lua trainer export (no DLL) (build ~1898; pushed dev, dev→main PR)
 
 **SHIPPED.** A "generate a self-contained Cheat Engine trainer for ONE game+version that runs without

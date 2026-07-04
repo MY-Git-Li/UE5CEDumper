@@ -64,6 +64,10 @@ public sealed class LaneRoutingPipeClient : IPipeClient
         _bulk.EventReceived        += e => EventReceived?.Invoke(e);
         _interactive.Activity      += a => Activity?.Invoke(a);
         _bulk.Activity             += a => Activity?.Invoke(a);
+        // Either lane observes the same global game-thread state; each raises only
+        // on its own transitions, so forward both and let the consumer dedupe.
+        _interactive.GameThreadStalledChanged += s => GameThreadStalledChanged?.Invoke(s);
+        _bulk.GameThreadStalledChanged        += s => GameThreadStalledChanged?.Invoke(s);
 
         _interactive.ConnectionStateChanged += _ => OnChildStateChanged();
         _bulk.ConnectionStateChanged        += _ => OnChildStateChanged();
@@ -73,6 +77,7 @@ public sealed class LaneRoutingPipeClient : IPipeClient
     public event Action<bool>? ConnectionStateChanged;
     public event Action<JsonObject>? EventReceived;
     public event Action<PipeLogEntry>? Activity;
+    public event Action<bool>? GameThreadStalledChanged;
 
     public async Task ConnectAsync(CancellationToken ct = default)
     {

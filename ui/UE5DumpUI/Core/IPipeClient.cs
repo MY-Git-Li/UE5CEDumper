@@ -18,6 +18,16 @@ public interface IPipeClient : IDisposable
     event Action<JsonObject>? EventReceived;
 
     /// <summary>
+    /// Fired when the DLL reports a change in game-thread liveness. Payload is
+    /// true when the game thread appears paused/suspended (not ticking
+    /// ProcessEvent), so live-camera / function-invoke features will time out;
+    /// false when it resumes. The DLL rides this on every response envelope; the
+    /// client raises it only on a transition. Raised on a background pipe thread —
+    /// handlers must marshal to the UI thread before touching UI state.
+    /// </summary>
+    event Action<bool>? GameThreadStalledChanged;
+
+    /// <summary>
     /// Fired for every pipe line — TX request, RX response, push event — so the
     /// UI can show a live activity tail (System tab). Raised on background pipe
     /// threads; handlers must marshal to the UI thread before touching UI state.

@@ -13,6 +13,9 @@
     <sys:String x:Key="str.Toolbar.PreviewLimit">Preview:</sys:String>
     <sys:String x:Key="str.Toolbar.CsxDepth">Drill Depth:</sys:String>
 
+    <!-- Banners -->
+    <sys:String x:Key="str.Banner.GameThreadPaused">⏸ Game thread paused — the game isn't ticking (pause menu / alt-tab / breakpoint). Live camera &amp; function-invoke features will time out; memory scans still work. Un-pause / click back into the game for full speed.</sys:String>
+
     <!-- Tabs -->
     <sys:String x:Key="str.Tab.ClassStruct">Class Struct</sys:String>
     <sys:String x:Key="str.Tab.Pointers">System</sys:String>
