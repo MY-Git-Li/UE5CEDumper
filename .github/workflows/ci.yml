@@ -1,0 +1,64 @@
+# CI gate — full Native-AOT publish + test suite on every PR (and pushes to main).
+#
+# WHY THIS EXISTS
+#   IL2026 / IL3050 (trim + AOT) errors — and any other AOT-only break — are
+#   ONLY surfaced by the trimmed *Publish* build. A plain Release build, or
+#   `build.ps1 -Target UI` / `-Target Test`, does NOT run the trim analyzer, so
+#   these slip through local dev and only fail at release time. That is exactly
+#   how the str_params JsonArray.Add<T> break reached `main` (fixed in #413).
+#
+#   This job runs the SAME command the release workflow uses
+#   (`build.ps1 -Mode Publish`), so a green check here == a green release build:
+#   C++ DLL + Native-AOT Avalonia UI + the full C# / C++ test suite.
+#
+# TO MAKE IT BLOCK MERGES
+#   A workflow file can't require itself. In GitHub → Settings → Branches → add a
+#   branch protection rule for `main` → "Require status checks to pass" → select
+#   "CI (AOT gate) / AOT publish + tests". (Or via gh — see the note in the PR.)
+name: CI (AOT gate)
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [main]
+
+# Cancel superseded runs for the same PR / ref so pushing several commits to an
+# open PR in quick succession doesn't pile up ~10-min AOT builds.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  aot-gate:
+    name: AOT publish + tests
+    # Same pinned image as release.yml: windows-latest / -2025 redirect to
+    # -vs2026, which ships VS2026 + cmake + ninja (build.ps1 finds VS via
+    # vswhere, so it stays toolchain-version-agnostic).
+    runs-on: windows-2025-vs2026
+    steps:
+      - name: Checkout (no submodules — docs/private is a private repo)
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+          fetch-depth: 1          # gate needs no history (unlike the release changelog)
+
+      - name: Init public build submodules
+        shell: pwsh
+        # Only the two PUBLIC vendor submodules are needed to build; the private
+        # docs/private submodule is docs-only and intentionally not cloned.
+        run: git submodule update --init vendor/minhook vendor/zydis
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build + test + AOT publish (the gate)
+        shell: pwsh
+        # -Mode Publish -Target All == C++ DLL + Native-AOT UI + full test suite.
+        # -NoBumpBuildNumber: the runner's build_number.txt bump is throwaway.
+        run: ./build.ps1 -Mode Publish -Clean -NoBumpBuildNumber
