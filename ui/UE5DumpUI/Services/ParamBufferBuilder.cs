@@ -44,6 +44,11 @@ public static class ParamBufferBuilder
         {
             "FloatProperty" or "DoubleProperty" => "0.0",
             "BoolProperty" => "0",
+            // String types start empty (a text value, not a number). Used by the
+            // baked-script path via the dialog; the CE Lua builds the FString.
+            // 字串型別預設為空（文字而非數字）。透過對話框走 baked-script 路徑時使用，
+            // 由 CE Lua 建立 FString。
+            "StrProperty" or "Utf8StrProperty" or "AnsiStrProperty" => "",
             "NameProperty" or "ObjectProperty" or "ClassProperty"
                 or "SoftObjectProperty" or "SoftClassProperty"
                 or "WeakObjectProperty" or "LazyObjectProperty"

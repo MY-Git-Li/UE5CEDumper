@@ -241,6 +241,17 @@ public static class InvokeScriptGenerator
         Line(sb);
         Line(sb, "local edits = {}");
 
+        // String INPUT params need an FString built by value. This path is
+        // self-contained (no helper file), so inline a small builder once when
+        // any string param is present. Comments here are ASCII-only because the
+        // emitted script is transmitted through CE / the AOBMaker JSON pipe.
+        // 字串輸入參數需要以傳值方式建立 FString。此路徑不依賴 helper 檔，因此當有
+        // 任何字串參數時就地內嵌一個小型建構函式（生成腳本內註解僅用 ASCII）。
+        if (inputParams.Any(p => IsStringType(p.TypeName)))
+        {
+            AppendInlineFStringBuilder(sb);
+        }
+
         // Generate labels + edit fields
         for (int i = 0; i < inputParams.Count; i++)
         {
@@ -369,9 +380,58 @@ public static class InvokeScriptGenerator
         Line(sb, $"{pad}t.Enabled = true");
     }
 
+    /// <summary>True for UE string property types (built as an FString by value).</summary>
+    private static bool IsStringType(string typeName) =>
+        typeName is "StrProperty" or "Utf8StrProperty" or "AnsiStrProperty";
+
+    /// <summary>True for the wide (UTF-16) FString; false for narrow FUtf8/FAnsiString.</summary>
+    private static bool IsWideString(string typeName) => typeName == "StrProperty";
+
+    /// <summary>
+    /// Emit a self-contained CE Lua <c>writeFStr(addr, s, wide)</c> that builds
+    /// a by-value UE string (FString / FUtf8String / FAnsiString) at
+    /// <c>addr</c>: allocates a char buffer in the target process, writes the
+    /// characters + null terminator, and stamps the <c>{Data, Num, Max}</c>
+    /// header. The buffer is intentionally leaked — see the emitted note.
+    /// (ASCII-only body; the generated script is CE / pipe transmitted.)
+    /// 內嵌一個自足的 writeFStr：以傳值方式建立 UE 字串並刻意不釋放 buffer。
+    /// </summary>
+    private static void AppendInlineFStringBuilder(StringBuilder sb)
+    {
+        Line(sb, "-- Build a by-value UE string INPUT param at addr {Data, Num, Max}.");
+        Line(sb, "-- wide=true -> UTF-16LE (FString); false -> raw bytes (FUtf8/FAnsiString).");
+        Line(sb, "-- NOTE: the buffer is intentionally NOT freed -- freeing is unsafe if the");
+        Line(sb, "-- callee retained it, and it is CE-allocated (not UE FMemory).");
+        Line(sb, "local function writeFStr(addr, s, wide)");
+        Line(sb, "    s = tostring(s or '')");
+        Line(sb, "    local n = #s");
+        Line(sb, "    local bytes = {}");
+        Line(sb, "    local buf");
+        Line(sb, "    if wide then");
+        Line(sb, "        for i = 1, n do bytes[#bytes+1] = string.byte(s, i); bytes[#bytes+1] = 0 end");
+        Line(sb, "        bytes[#bytes+1] = 0; bytes[#bytes+1] = 0");
+        Line(sb, "        buf = allocateMemory((n + 1) * 2)");
+        Line(sb, "    else");
+        Line(sb, "        for i = 1, n do bytes[#bytes+1] = string.byte(s, i) end");
+        Line(sb, "        bytes[#bytes+1] = 0");
+        Line(sb, "        buf = allocateMemory(n + 1)");
+        Line(sb, "    end");
+        Line(sb, "    writeBytes(buf, bytes)");
+        Line(sb, "    writeQword(addr, buf)");
+        Line(sb, "    writeInteger(addr + 8, n + 1)");
+        Line(sb, "    writeInteger(addr + 12, n + 1)");
+        Line(sb, "end");
+        Line(sb);
+    }
+
     /// <summary>Generate a CE Lua write statement for a param in the mailbox params_data buffer.</summary>
     private static string GetMailboxWriteStatement(string typeName, int size, int offset, string valueExpr)
     {
+        // String params build an FString by value via the inlined writeFStr.
+        // 字串參數透過內嵌的 writeFStr 以傳值方式建立 FString。
+        if (IsStringType(typeName))
+            return $"writeFStr(PD + {offset}, {valueExpr}, {(IsWideString(typeName) ? "true" : "false")})";
+
         string writeFunc = typeName switch
         {
             "BoolProperty" or "ByteProperty" or "Int8Property"
@@ -440,6 +500,9 @@ public static class InvokeScriptGenerator
         {
             "FloatProperty" or "DoubleProperty" => "0.0",
             "BoolProperty" => "0",
+            // String types start empty so the form shows a text field, not "0".
+            // 字串型別預設為空，讓表單顯示文字欄位而非 "0"。
+            "StrProperty" or "Utf8StrProperty" or "AnsiStrProperty" => "",
             "NameProperty" or "ObjectProperty" or "ClassProperty"
                 or "SoftObjectProperty" or "SoftClassProperty"
                 or "WeakObjectProperty" or "LazyObjectProperty"
@@ -448,9 +511,14 @@ public static class InvokeScriptGenerator
         };
     }
 
-    /// <summary>Lua expression to parse edit field text into a numeric value.</summary>
+    /// <summary>Lua expression to parse edit field text into a value.</summary>
     private static string GetParseExpression(string typeName, int editIndex)
     {
+        // String types: pass the raw edit text straight to writeFStr (no numeric parse).
+        // 字串型別：將輸入框原始文字直接交給 writeFStr（不做數值解析）。
+        if (IsStringType(typeName))
+            return $"edits[{editIndex}].Text or ''";
+
         // Pointer/FName types: hex-aware parsing
         if (typeName is "NameProperty" or "ObjectProperty" or "ClassProperty"
             or "SoftObjectProperty" or "SoftClassProperty"

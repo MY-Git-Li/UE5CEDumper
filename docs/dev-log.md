@@ -18,6 +18,39 @@ builds ≤696 in
 
 -----
 
+## 2026-07-04 — FString INPUT param support in invoke generators + helper (build ~1908; pushed dev)
+
+**SHIPPED (UI + helper `.lua`, no re-inject).** String **input** params (`StrProperty` /
+`Utf8StrProperty` / `AnsiStrProperty`) are now built for you by the two CE-Lua invoke generators.
+Before, `ParamBufferBuilder` / `InvokeScriptGenerator` wrote a bare int32 into the FString slot and
+`ue5_invoke_helper.lua` raised `Unknown param type 'fstring'` — string params were effectively
+unusable from the generated scripts.
+
+**Model.** A UE string param is passed **by value**: the params buffer holds the whole 16-byte
+`{ CharT* Data; int32 ArrayNum; int32 ArrayMax }` struct inline (NOT a pointer to it). So the scripts
+now `allocateMemory` a char buffer in the target process, write the chars + null terminator, and stamp
+the three struct fields. Wide (`StrProperty` → UTF-16LE) vs narrow (`FUtf8String`/`FAnsiString` → raw
+bytes) is preserved. ASCII / basic-Latin only for the wide case (no UTF-8 transcode).
+
+**Lifetime.** The Data buffer is intentionally **leaked** by default — freeing is unsafe if the callee
+retained the pointer, and it's CE-allocated (not UE `FMemory`), so the game must never free it. The
+helper tracks allocations in `_ue5_invoke_str_bufs` and exposes an opt-in `freeInvokeStringBuffers()`
+for when you know the call merely read the string. A few small leaks per one-shot cheat is the safe
+default.
+
+**Impl.** Helper `ue5_invoke_helper.lua` (v1.1→1.2): new `writeFStringInline` + `writeBakedParams`
+`fstring`/`fstringn` branches + public `freeInvokeStringBuffers`. `BakedScriptGenerator`: new
+`MapInputType` (keeps wide/narrow — the return path still uses `MapToHelperType`, so its complex-type
+classification is untouched) + `RenderLiteral` emits a quoted Lua string for string types.
+`InvokeScriptGenerator` (self-contained, no helper): inlines a small `writeFStr(addr, s, wide)` builder
+when any string param is present + text field defaults to empty. `ParamBufferBuilder.GetDefaultValue`
+strings → empty (nicer dialog field). Generated scripts stay **ASCII** (bilingual EN/中文 comments live
+only in the C# source + the static `.lua`, per the user's request — never in emitted text).
+
+**Still out of scope.** The **PIPE** (in-app) FIRE path can't build FStrings (it has no target-process
+allocation in the hex-buffer model — that needs a DLL-side change); string params there still pass
+empty. UI + helper build clean, 2157 UI tests green (+13).
+
 ## 2026-07-04 — Invoke scripts print the return value under UE5_DEBUG (build ~1905; pushed dev)
 
 **SHIPPED (UI-only, no re-inject).** Both CE-Lua UFunction invoke generators now decode + `print()`

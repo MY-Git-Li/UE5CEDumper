@@ -565,6 +565,136 @@ public class InvokeScriptTests
         Assert.DoesNotContain("if ok and DEBUG ~= 0 then", script);
     }
 
+    // --- FString INPUT param support (generator + helper) ---
+
+    [Theory]
+    [InlineData("StrProperty",     "fstring")]
+    [InlineData("Utf8StrProperty", "fstringn")]
+    [InlineData("AnsiStrProperty", "fstringn")]
+    [InlineData("IntProperty",     "int32")]   // non-string falls through to MapToHelperType
+    [InlineData("ObjectProperty",  "pointer")]
+    public void BakedGenerate_MapInputType_KeepsStringWideNarrowDistinction(
+        string ueType, string expected)
+    {
+        Assert.Equal(expected, BakedScriptGenerator.MapInputType(ueType));
+    }
+
+    [Fact]
+    public void BakedGenerate_StringInput_RendersFstringTypeAndQuotedLiteral()
+    {
+        var script = BakedScriptGenerator.Generate(
+            "PlayerState", "SetPlayerName", 16,
+            new[] { new BakedParamValue("Name", "StrProperty", 16, 0, "Hero") });
+
+        Assert.Contains("type='fstring', offset=0, value='Hero'", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_Utf8StringInput_RendersFstringnType()
+    {
+        var script = BakedScriptGenerator.Generate(
+            "C", "F", 16,
+            new[] { new BakedParamValue("Tag", "Utf8StrProperty", 16, 0, "abc") });
+
+        Assert.Contains("type='fstringn', offset=0, value='abc'", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_StringInput_EscapesApostropheAndKeepsEmpty()
+    {
+        Assert.Equal("'it\\'s'", BakedScriptGenerator.RenderLiteral("StrProperty", "it's"));
+        // Empty string is a valid empty FString, NOT the numeric-0 fallback.
+        Assert.Equal("''", BakedScriptGenerator.RenderLiteral("StrProperty", ""));
+    }
+
+    [Fact]
+    public void Generate_StringInputParam_EmitsInlineFStringBuilderAndCall()
+    {
+        var func = new FunctionInfoModel
+        {
+            Name = "SetName",
+            ParmsSize = 16,
+            Params = new List<FunctionParamModel>
+            {
+                new() { Name = "NewName", TypeName = "StrProperty", Size = 16, Offset = 0 },
+            },
+        };
+
+        var script = InvokeScriptGenerator.Generate("Pawn_C", "SetName", func);
+
+        Assert.Contains("createForm", script);              // interactive form
+        Assert.Contains("local function writeFStr(", script); // inline builder
+        Assert.Contains("allocateMemory", script);
+        Assert.Contains("writeFStr(PD + 0, edits[1].Text or '', true)", script);  // wide FString
+    }
+
+    [Fact]
+    public void Generate_NarrowStringInputParam_UsesNarrowFlag()
+    {
+        var func = new FunctionInfoModel
+        {
+            Name = "SetTag",
+            ParmsSize = 16,
+            Params = new List<FunctionParamModel>
+            {
+                new() { Name = "Tag", TypeName = "Utf8StrProperty", Size = 16, Offset = 0 },
+            },
+        };
+
+        var script = InvokeScriptGenerator.Generate("C", "SetTag", func);
+
+        Assert.Contains("writeFStr(PD + 0, edits[1].Text or '', false)", script);
+    }
+
+    [Fact]
+    public void Generate_NoStringParam_OmitsInlineFStringBuilder()
+    {
+        var func = new FunctionInfoModel
+        {
+            Name = "AddMoney",
+            ParmsSize = 4,
+            Params = new List<FunctionParamModel>
+            {
+                new() { Name = "Amount", TypeName = "IntProperty", Size = 4, Offset = 0 },
+            },
+        };
+
+        var script = InvokeScriptGenerator.Generate("C", "AddMoney", func);
+
+        Assert.DoesNotContain("writeFStr", script);
+    }
+
+    [Fact]
+    public void Generate_StringInputParam_StaysAscii()
+    {
+        // Bilingual comments live in the C# SOURCE + the .lua helper, never in
+        // the generated script -- this stays ASCII for CE / pipe transmission.
+        var func = new FunctionInfoModel
+        {
+            Name = "SetName",
+            ParmsSize = 16,
+            Params = new List<FunctionParamModel>
+            {
+                new() { Name = "NewName", TypeName = "StrProperty", Size = 16, Offset = 0 },
+            },
+        };
+
+        var script = InvokeScriptGenerator.Generate("Pawn_C", "SetName", func);
+
+        Assert.All(script, c => Assert.True(c < 128, $"Non-ASCII char: U+{(int)c:X4}"));
+    }
+
+    [Fact]
+    public void HelperLuaResource_HasFStringInputSupport()
+    {
+        var content = HelperLuaResource.Read();
+        Assert.Contains("function writeFStringInline", content);   // via `local function ...`
+        Assert.Contains("function freeInvokeStringBuffers(", content);
+        Assert.Contains("t == 'fstring'", content);
+        Assert.Contains("t == 'fstringn'", content);
+        Assert.Contains("UE5_INVOKE_HELPER_VERSION = '1.2'", content);
+    }
+
     // --- InputParams property ---
 
     [Fact]
