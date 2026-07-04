@@ -18,6 +18,39 @@ builds ≤696 in
 
 -----
 
+## 2026-07-04 — Invoke scripts print the return value under UE5_DEBUG (build ~1905; pushed dev)
+
+**SHIPPED (UI-only, no re-inject).** Both CE-Lua UFunction invoke generators now decode + `print()`
+the return value when `DEBUG ~= 0`. Before this, only the in-app **PIPE** dialog decoded returns (via
+`StructReturnDecoder`); the generated **INV** (`InvokeScriptGenerator`) never read the return at all,
+and **AA(Baked)** (`BakedScriptGenerator`) printed it only in the opt-in "Verify return value" mode —
+so a user who turned DEBUG on still saw nothing (the exact complaint that prompted this).
+
+**Where the return lives.** After a successful invoke the value sits in the mailbox params buffer at
+`g_invokeMailbox.paramsData + returnOffset` (`mb + 0x328 + off`) — UE lays the return param inside the
+same params blob as the inputs. Static-native funcs run ProcessEvent in-place ([Mimic.cpp:416](../dll/src/Mimic.cpp));
+game-thread funcs copy `ownedParams` back into the caller buffer on success ([Stark.cpp:376](../dll/src/Stark.cpp)) —
+the timeout path does NOT copy back, hence the `result==0`/`ok` gate.
+
+**Impl.** New shared emitter `CeInvokeReturn.AppendDecodeAndPrint` (single source of truth so the two
+generators can't drift): scalars via the matching CE read; `StrProperty` derefs the `{Data,Num}` header
+and wide-reads the string (`readString(_sp, 512, true)`); `Utf8Str/AnsiStr` narrow-read; every other
+buffer type (`FText`/`TArray`/`TMap`/`TSet`/`FStruct`/delegate) falls back to a bounded raw-hex dump.
+Wired into `InvokeScriptGenerator` (both the direct-invoke and the param-form FIRE paths, base local
+`_PDret = mb + 0x328`, gated `if result == 0 and DEBUG ~= 0`) and `BakedScriptGenerator`'s non-verify
+branch (resolves the mailbox via `getAddressSafe` + module-prefixed fallback, gated `if ok and DEBUG ~= 0`;
+verify mode keeps its own richer Before/After print, so the two never double-fire). Uses `_PDret`
+(not `PD`) so it can't collide with the write-path's `PD` local, and the `dbg()` preamble's own
+`DEBUG ~= 0` substring means "no return block" tests must assert on `_PDret` / the full gate line.
+
+**Hygiene.** Fully honours the quiet-by-default rule: nothing prints when `DEBUG == 0` (the
+success-close still fires); when `DEBUG ~= 0` the value prints and the window stays open. Tooltips for
+INV / PIPE / AA(Baked) rewritten to explain the three paths + where the return value goes.
+
+**Known gap (unchanged).** String **input** params are still not built for you — the generators write a
+number into the FString slot rather than allocating a `{Data,Num,Max}` buffer + wide char data (and
+freeing it after). Documented as a follow-up. UI builds clean, 2144 tests green.
+
 ## 2026-07-04 — Game-thread stall detection: POV fast-fail + app-wide "paused" banner (build ~1902; pushed dev, dev→main PR)
 
 **SHIPPED.** Fix for a ~3.5-min object-list load diagnosed from a Brimstone (UE5.6) log: the **game

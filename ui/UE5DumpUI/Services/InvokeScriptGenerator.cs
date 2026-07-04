@@ -79,11 +79,11 @@ public static class InvokeScriptGenerator
 
         if (hasParams)
         {
-            AppendParamForm(sb, className, funcName, inputParams, func.ParmsSize);
+            AppendParamForm(sb, className, funcName, func, inputParams, func.ParmsSize);
         }
         else
         {
-            AppendDirectInvoke(sb, func.ParmsSize);
+            AppendDirectInvoke(sb, className, funcName, func, func.ParmsSize);
         }
 
         Line(sb, "{$asm}");
@@ -185,7 +185,8 @@ public static class InvokeScriptGenerator
         Line(sb);
     }
 
-    private static void AppendDirectInvoke(StringBuilder sb, int parmsSize)
+    private static void AppendDirectInvoke(StringBuilder sb, string className, string funcName,
+        FunctionInfoModel func, int parmsSize)
     {
         Line(sb, "-- No parameters -- invoke directly via CMD_INVOKE (1)");
 
@@ -207,6 +208,8 @@ public static class InvokeScriptGenerator
         Line(sb, $"local result = readInteger(mb + {OffResult})");
         Line(sb, "if result == 0 then dbg('  INVOKED OK!')");
         Line(sb, "else print('  INVOKE FAILED: error code ' .. tostring(result) .. ' ' .. readErr()); showMessage('INVOKE FAILED:\\nerror code ' .. tostring(result)) end");
+        // DEBUG-only: decode + print the return value from the params buffer.
+        AppendReturnDebugPrint(sb, className, funcName, func, "");
         // Clean success (no args, DEBUG off) -> close the Lua Engine window.
         Line(sb, $"if result == 0 and DEBUG == 0 then {CeLuaHygiene.CloseCall} end");
         AppendCleanupTimer(sb, 0);
@@ -214,7 +217,7 @@ public static class InvokeScriptGenerator
     }
 
     private static void AppendParamForm(StringBuilder sb, string className, string funcName,
-        List<FunctionParamModel> inputParams, int parmsSize)
+        FunctionInfoModel func, List<FunctionParamModel> inputParams, int parmsSize)
     {
         Line(sb, "-- ================================================================");
         Line(sb, "-- Build parameter input form");
@@ -320,12 +323,41 @@ public static class InvokeScriptGenerator
         Line(sb, $"    local result = readInteger(mb + {OffResult})");
         Line(sb, "    if result == 0 then dbg('  INVOKED OK!')");
         Line(sb, "    else print('  INVOKE FAILED: error code ' .. tostring(result) .. ' ' .. readErr()); showMessage('INVOKE FAILED:\\nerror code ' .. tostring(result)) end");
+        // DEBUG-only: decode + print the return value (the created form closes
+        // below, but the Lua Engine console keeps the printed value visible).
+        AppendReturnDebugPrint(sb, className, funcName, func, "    ");
 
         Line(sb, "    frm.close()");
         Line(sb, "end");
         Line(sb);
         Line(sb, "frm.show()");
         Line(sb);
+    }
+
+    /// <summary>
+    /// Emit a DEBUG-gated block that decodes + prints the function's return
+    /// value from the mailbox params buffer. No-op for void functions (no
+    /// param carries CPF_ReturnParm). The success flag is the mailbox
+    /// <c>result</c> local (0 == success); the block never fires when
+    /// <c>DEBUG == 0</c>, so it stays quiet by default and only surfaces the
+    /// value when the user set <c>UE5_DEBUG=1</c> (which also keeps the window
+    /// open). Uses a private <c>_PDret</c> base so it can't collide with the
+    /// input-param write path's <c>PD</c> local.
+    /// </summary>
+    private static void AppendReturnDebugPrint(StringBuilder sb, string className,
+        string funcName, FunctionInfoModel func, string indent)
+    {
+        var ret = func.Params.FirstOrDefault(p => p.IsReturn);
+        if (ret == null) return;
+        // Guard the offset against the params buffer bounds (a bogus return
+        // offset would otherwise read outside the mailbox's params_data).
+        if (ret.Offset < 0 || (func.ParmsSize > 0 && ret.Offset >= func.ParmsSize)) return;
+
+        Line(sb, $"{indent}if result == 0 and DEBUG ~= 0 then");
+        Line(sb, $"{indent}    local _PDret = mb + {OffParamsData}");
+        CeInvokeReturn.AppendDecodeAndPrint(sb, className, funcName, ret.Name,
+            ret.TypeName, ret.Size, ret.Offset, "_PDret", indent + "    ");
+        Line(sb, $"{indent}end");
     }
 
     private static void AppendCleanupTimer(StringBuilder sb, int indent)

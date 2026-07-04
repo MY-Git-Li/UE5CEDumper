@@ -387,6 +387,184 @@ public class InvokeScriptTests
         Assert.Contains("PD + i, 0", script);
     }
 
+    // --- DEBUG-mode return-value printing (InvokeScriptGenerator) ---
+
+    [Fact]
+    public void Generate_StringReturn_NoParams_EmitsDebugGatedFStringDecode()
+    {
+        // GetPlayerName-style: no inputs, FString return. Under DEBUG the
+        // script must dereference the {Data,Num} header and read the string.
+        var func = new FunctionInfoModel
+        {
+            Name = "GetPlayerName",
+            ReturnType = "StrProperty",
+            ParmsSize = 16,
+            Params = new List<FunctionParamModel>
+            {
+                new() { Name = "ReturnValue", TypeName = "StrProperty", Size = 16, Offset = 0, IsReturn = true },
+            },
+        };
+
+        var script = InvokeScriptGenerator.Generate("PlayerState", "GetPlayerName", func);
+
+        // Gated on success AND DEBUG (quiet by default per hygiene rule)
+        Assert.Contains("if result == 0 and DEBUG ~= 0 then", script);
+        // Uses its own params base local, distinct from the write path's PD
+        Assert.Contains("local _PDret = mb + 0x328", script);
+        // FString decode: pointer + count + wide readString
+        Assert.Contains("readString(_sp, 512, true)", script);
+        Assert.Contains("(FString@0)", script);
+        Assert.Contains("PlayerState::GetPlayerName -> ReturnValue", script);
+    }
+
+    [Fact]
+    public void Generate_IntReturn_NoParams_EmitsDebugGatedScalarDecode()
+    {
+        var func = new FunctionInfoModel
+        {
+            Name = "GetScore",
+            ReturnType = "IntProperty",
+            ParmsSize = 4,
+            Params = new List<FunctionParamModel>
+            {
+                new() { Name = "ReturnValue", TypeName = "IntProperty", Size = 4, Offset = 0, IsReturn = true },
+            },
+        };
+
+        var script = InvokeScriptGenerator.Generate("Pawn_C", "GetScore", func);
+
+        Assert.Contains("if result == 0 and DEBUG ~= 0 then", script);
+        Assert.Contains("readInteger(_PDret + 0)", script);
+        Assert.Contains("(int32@0)", script);
+    }
+
+    [Fact]
+    public void Generate_VoidReturn_NoDebugReturnBlock()
+    {
+        var func = new FunctionInfoModel
+        {
+            Name = "openShop",
+            Params = new(),  // no params, no return
+        };
+
+        var script = InvokeScriptGenerator.Generate("ShopKeeper_C", "openShop", func);
+
+        // No return param -> no return-decode scaffolding at all.
+        // (Note: the shared dbg() preamble legitimately contains "DEBUG ~= 0",
+        // so we assert on the return-block's unique markers instead.)
+        Assert.DoesNotContain("_PDret", script);
+        Assert.DoesNotContain("if result == 0 and DEBUG ~= 0 then", script);
+    }
+
+    [Fact]
+    public void Generate_WithParamsAndReturn_EmitsReturnPrintInsideFireHandler()
+    {
+        // Input param + return: the form path must still decode the return
+        // under DEBUG (inside btnFire, after the invoke result check).
+        var func = new FunctionInfoModel
+        {
+            Name = "TryBuy",
+            ParmsSize = 12,
+            Params = new List<FunctionParamModel>
+            {
+                new() { Name = "ItemId", TypeName = "IntProperty", Size = 4, Offset = 0 },
+                new() { Name = "ReturnValue", TypeName = "BoolProperty", Size = 1, Offset = 8, IsReturn = true },
+            },
+        };
+
+        var script = InvokeScriptGenerator.Generate("Shop_C", "TryBuy", func);
+
+        Assert.Contains("createForm", script);            // param form present
+        Assert.Contains("if result == 0 and DEBUG ~= 0 then", script);
+        Assert.Contains("readByte(_PDret + 8)", script);  // bool return read
+        Assert.Contains("(bool@8)", script);
+    }
+
+    [Fact]
+    public void Generate_ReturnDebugPrint_StaysAsciiAndSingleQuoted()
+    {
+        var func = new FunctionInfoModel
+        {
+            Name = "GetName",
+            ReturnType = "StrProperty",
+            ParmsSize = 16,
+            Params = new List<FunctionParamModel>
+            {
+                new() { Name = "ReturnValue", TypeName = "StrProperty", Size = 16, Offset = 0, IsReturn = true },
+            },
+        };
+
+        var script = InvokeScriptGenerator.Generate("A_C", "GetName", func);
+
+        Assert.All(script, c => Assert.True(c < 128, $"Non-ASCII char: U+{(int)c:X4}"));
+        Assert.DoesNotContain("\"", script);  // Lua strings single-quoted only
+    }
+
+    // --- DEBUG-mode return-value printing (BakedScriptGenerator) ---
+
+    [Fact]
+    public void BakedGenerate_NonVerify_WithReturn_EmitsDebugGatedReturnPrint()
+    {
+        var script = BakedScriptGenerator.Generate(
+            "Pawn_C", "GetScore", 4,
+            Array.Empty<BakedParamValue>(),
+            returnParam: new BakedParamValue("ReturnValue", "IntProperty", 4, 0, ""),
+            verifyReturn: false);
+
+        // Quiet-by-default gate + mailbox resolution + scalar decode
+        Assert.Contains("if ok and DEBUG ~= 0 then", script);
+        Assert.Contains("getAddressSafe('g_invokeMailbox')", script);
+        Assert.Contains("local _PDret = _mbret + (UE5_INVOKE_PARAMS_OFFSET or 0x328)", script);
+        Assert.Contains("readInteger(_PDret + 0)", script);
+        // Non-verify path must NOT use verify-mode readUFunctionReturn, and the
+        // success-close must still be present (DEBUG==0-gated).
+        Assert.DoesNotContain("readUFunctionReturn", script);
+        Assert.Contains("synchronize(function() getLuaEngine().Close() end)", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_NonVerify_FStringReturn_EmitsDebugGatedStringDecode()
+    {
+        var script = BakedScriptGenerator.Generate(
+            "PlayerState", "GetPlayerName", 16,
+            Array.Empty<BakedParamValue>(),
+            returnParam: new BakedParamValue("ReturnValue", "StrProperty", 16, 0, ""),
+            verifyReturn: false);
+
+        Assert.Contains("if ok and DEBUG ~= 0 then", script);
+        Assert.Contains("readString(_sp, 512, true)", script);
+        Assert.Contains("(FString@0)", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_NonVerify_NoReturn_NoDebugReturnBlock()
+    {
+        var script = BakedScriptGenerator.Generate(
+            "C", "DoStuff", 4,
+            new[] { new BakedParamValue("Flag", "BoolProperty", 1, 0, "true") },
+            returnParam: null,
+            verifyReturn: false);
+
+        Assert.DoesNotContain("_PDret", script);
+        Assert.DoesNotContain("if ok and DEBUG ~= 0 then", script);
+    }
+
+    [Fact]
+    public void BakedGenerate_VerifyMode_DoesNotAlsoEmitDebugReturnBlock()
+    {
+        // Verify mode owns the return print (Before/After + readUFunctionReturn);
+        // the concise DEBUG block lives only in the non-verify branch, so the two
+        // never double-print.
+        var script = BakedScriptGenerator.Generate(
+            "KismetMathLibrary", "exp", 16,
+            new[] { new BakedParamValue("A", "DoubleProperty", 8, 0, "8") },
+            returnParam: new BakedParamValue("ReturnValue", "DoubleProperty", 8, 8, ""),
+            verifyReturn: true);
+
+        Assert.DoesNotContain("_PDret", script);
+        Assert.DoesNotContain("if ok and DEBUG ~= 0 then", script);
+    }
+
     // --- InputParams property ---
 
     [Fact]

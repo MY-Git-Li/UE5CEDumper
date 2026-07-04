@@ -284,6 +284,28 @@ public static class BakedScriptGenerator
                       $"'{EscapeLua(funcName)}', tostring(err)))");
             Line(sb, "  showMessage('Invoke failed:\\n' .. tostring(err))");
             Line(sb, "end");
+
+            // DEBUG-only return-value print (verify mode already prints its own,
+            // richer diagnostic, so this only fires in the non-verify path).
+            // Quiet by default; when UE5_DEBUG=1 the value is printed and the
+            // window is kept open (the success-close is DEBUG==0-gated). The
+            // helper's mailbox is resolved here (getAddressSafe + module-prefixed
+            // fallback, mirroring findMailbox) so the raw slot can be read.
+            if (returnParam != null &&
+                returnParam.Offset >= 0 &&
+                (parmsSize <= 0 || returnParam.Offset < parmsSize))
+            {
+                Line(sb, "if ok and DEBUG ~= 0 then");
+                Line(sb, "  local _mbret = getAddressSafe('g_invokeMailbox')");
+                Line(sb, "  if not _mbret or _mbret == 0 then _mbret = getAddressSafe('UE5Dumper.g_invokeMailbox') end");
+                Line(sb, "  if _mbret and _mbret ~= 0 then");
+                Line(sb, "    local _PDret = _mbret + (UE5_INVOKE_PARAMS_OFFSET or 0x328)");
+                CeInvokeReturn.AppendDecodeAndPrint(sb, className, funcName,
+                    returnParam.ParamName, returnParam.UeTypeName,
+                    returnParam.Size, returnParam.Offset, "_PDret", "    ");
+                Line(sb, "  end");
+                Line(sb, "end");
+            }
         }
         Line(sb);
     }
