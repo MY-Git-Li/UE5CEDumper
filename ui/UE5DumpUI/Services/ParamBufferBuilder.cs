@@ -77,6 +77,18 @@ public static class ParamBufferBuilder
                  or "LazyObjectProperty";
 
     /// <summary>
+    /// True for UE string property types (FString / FUtf8String / FAnsiString).
+    /// These can't be written as scalars into the params hex — the DLL builds
+    /// the by-value FString (see <see cref="Models.InvokeStringParam"/>).
+    /// UE 字串型別；無法以純量寫入 params hex，改由 DLL 建立傳值 FString。
+    /// </summary>
+    public static bool IsStringType(string typeName) =>
+        typeName is "StrProperty" or "Utf8StrProperty" or "AnsiStrProperty";
+
+    /// <summary>True for the wide (UTF-16) FString; false for narrow FUtf8/FAnsiString.</summary>
+    public static bool IsWideString(string typeName) => typeName == "StrProperty";
+
+    /// <summary>
     /// Get a short display name for a parameter type.
     /// </summary>
     public static string ShortTypeName(string typeName)

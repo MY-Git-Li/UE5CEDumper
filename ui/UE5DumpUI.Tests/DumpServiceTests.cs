@@ -76,6 +76,78 @@ public class DumpServiceTests
     private DumpService CreateService() => new(_pipe, _log);
 
     [Fact]
+    public async Task InvokeFunctionAsync_StringParams_SerializedAsStrParamsArray()
+    {
+        JsonObject? lastReq = null;
+        _pipe.SetHandler(req =>
+        {
+            if (req["cmd"]?.GetValue<string>() == "invoke_function")
+                lastReq = req;
+            return new JsonObject { ["ok"] = true, ["result"] = 0, ["parms_size"] = 16 };
+        });
+
+        var svc = CreateService();
+        await svc.InvokeFunctionAsync(
+            "SetPlayerName",
+            instanceAddr: "0x1000",
+            parmsSize: 16,
+            paramsHex: "00000000000000000000000000000000",
+            stringParams: new[]
+            {
+                new InvokeStringParam(0, Wide: true, "Hero"),
+                new InvokeStringParam(16, Wide: false, "utf8"),
+            },
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(lastReq);
+        var arr = lastReq!["str_params"] as JsonArray;
+        Assert.NotNull(arr);
+        Assert.Equal(2, arr!.Count);
+
+        var wide = arr[0]!.AsObject();
+        Assert.Equal(0, wide["off"]!.GetValue<int>());
+        Assert.True(wide["wide"]!.GetValue<bool>());
+        Assert.Equal("Hero", wide["text"]!.GetValue<string>());
+
+        var narrow = arr[1]!.AsObject();
+        Assert.Equal(16, narrow["off"]!.GetValue<int>());
+        Assert.False(narrow["wide"]!.GetValue<bool>());
+        Assert.Equal("utf8", narrow["text"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task InvokeFunctionAsync_NoStringParams_OmitsStrParams()
+    {
+        JsonObject? lastReq = null;
+        _pipe.SetHandler(req =>
+        {
+            if (req["cmd"]?.GetValue<string>() == "invoke_function")
+                lastReq = req;
+            return new JsonObject { ["ok"] = true, ["result"] = 0 };
+        });
+
+        var svc = CreateService();
+        await svc.InvokeFunctionAsync("DoThing", instanceAddr: "0x1000",
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(lastReq);
+        Assert.False(lastReq!.ContainsKey("str_params"));
+    }
+
+    [Fact]
+    public void ParamBufferBuilder_ClassifiesStringTypes()
+    {
+        Assert.True(ParamBufferBuilder.IsStringType("StrProperty"));
+        Assert.True(ParamBufferBuilder.IsStringType("Utf8StrProperty"));
+        Assert.True(ParamBufferBuilder.IsStringType("AnsiStrProperty"));
+        Assert.False(ParamBufferBuilder.IsStringType("IntProperty"));
+
+        Assert.True(ParamBufferBuilder.IsWideString("StrProperty"));
+        Assert.False(ParamBufferBuilder.IsWideString("Utf8StrProperty"));
+        Assert.False(ParamBufferBuilder.IsWideString("AnsiStrProperty"));
+    }
+
+    [Fact]
     public async Task InitAsync_ParsesResponse()
     {
         int callCount = 0;

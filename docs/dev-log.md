@@ -18,6 +18,36 @@ builds ≤696 in
 
 -----
 
+## 2026-07-04 — PIPE FIRE string INPUT params (DLL builds the FString) (build ~1911; pushed dev; needs re-inject)
+
+**SHIPPED (DLL + UI + protocol; NEEDS RE-INJECT).** The in-app **PIPE** FIRE path can now pass string
+input params — the last invoke path that couldn't (INV / AA(Baked) got FStrings in build ~1908). The
+hex-buffer model can't carry an FString because its `Data` pointer must be a valid **game-process**
+address the UI can't allocate. Fix: the UI sends a `str_params` descriptor list and the **DLL builds
+each FString in-process**.
+
+**Why the DLL can.** UE5Dumper.dll is injected, so a buffer it `malloc`s lives in the game's address
+space (the same reason `paramBuf.data()` already works as the ProcessEvent params pointer). For each
+`{ off, wide, text }`: allocate a char buffer (wide → UTF-8→UTF-16LE via `MultiByteToWideChar`, full
+Unicode — better than the CE-side ASCII-only path; narrow → raw UTF-8/ANSI bytes), patch the by-value
+`{ Data, Num, Max }` at `off`, run ProcessEvent.
+
+**Lifetime.** UE's convention makes the CALLER own the params and a UFUNCTION takes its FString by
+value/const-ref, so freeing after ProcessEvent is correct — EXCEPT on a game-thread dispatch **timeout
+(-5)**, where the request stays queued with a copy whose `Data` aliases our buffers; a late drain would
+deref them, so we deliberately **leak on -5** (matches the CE-side policy). Every other path frees now.
+
+**OUT strings.** The UI only sends `str_params` for **input** (`!IsOut`) string params. An OUT
+`FString&` must stay a zeroed/empty struct — otherwise the callee's reassignment would `FMemory::Free`
+our non-FMemory buffer and crash. A zeroed slot is a valid empty FString the callee fills safely.
+
+**Impl.** `Fern.cpp` (`invoke_function`): parse `str_params`, build/patch/free (leak-on-`-5`), bounds-
+checked. `IDumpService` / `DumpService` gained an `IReadOnlyList<InvokeStringParam>? stringParams` arg
+(new `InvokeStringParam` record) serialised to `str_params`. `InvokeParamDialog.OnFireClicked` collects
+input string fields instead of writing them as scalars. `ParamBufferBuilder.IsStringType/IsWideString`
+made public. `docs/pipe-protocol.md` updated. DLL + UI build clean, 2160 UI tests green (+3). **Re-inject
+required** (DLL change). Fern has no unit tests → verify the actual call in-game.
+
 ## 2026-07-04 — FString INPUT param support in invoke generators + helper (build ~1908; pushed dev)
 
 **SHIPPED (UI + helper `.lua`, no re-inject).** String **input** params (`StrProperty` /

@@ -587,8 +587,12 @@ public sealed class InvokeParamDialog : Window
 
         try
         {
-            // Build param hex from input fields (struct-aware)
+            // Build param hex from input fields (struct-aware). String params are
+            // NOT written here — an FString's Data pointer must live in the game
+            // process, so the DLL builds them from these descriptors and patches
+            // the (zeroed) 16-byte slots. 字串參數改由 DLL 端建立傳值 FString。
             string? paramsHex = null;
+            var stringParams = new List<InvokeStringParam>();
             if (_inputParams.Count > 0 && _parmsSize > 0)
             {
                 var buf = new byte[_parmsSize];
@@ -605,6 +609,23 @@ public sealed class InvokeParamDialog : Window
                         ParamBufferBuilder.WriteStructParam(buf, param.Offset,
                             (IReadOnlyList<DynamicStructField>)subFields, subValues);
                     }
+                    else if (ParamBufferBuilder.IsStringType(param.TypeName))
+                    {
+                        // String param. Only build INPUT strings: an OUT FString
+                        // (the callee fills it) must stay a zeroed/empty FString,
+                        // else the callee's reassignment would free our non-FMemory
+                        // Data buffer and crash. Leaving the 16-byte slot zeroed is
+                        // the correct empty FString for an out param.
+                        // 只建立「輸入」字串；OUT FString 需保持為空結構，否則被呼叫端
+                        // 重新指派時會 free 我方非 FMemory 的 buffer 而崩潰。
+                        if (!param.IsOut)
+                        {
+                            stringParams.Add(new InvokeStringParam(
+                                param.Offset,
+                                ParamBufferBuilder.IsWideString(param.TypeName),
+                                _edits[i]?.Text ?? ""));
+                        }
+                    }
                     else
                     {
                         // Scalar param
@@ -620,7 +641,8 @@ public sealed class InvokeParamDialog : Window
                 _funcName,
                 instanceAddr: _instanceAddr,
                 parmsSize: _parmsSize,
-                paramsHex: paramsHex);
+                paramsHex: paramsHex,
+                stringParams: stringParams.Count > 0 ? stringParams : null);
 
             // Display results
             ShowResult(result);
