@@ -11,6 +11,8 @@
 #include <sstream>
 #include <iomanip>
 
+#include "Stark.h"   // game-thread liveness for the shared response envelope
+
 namespace Renge {
 
 // Command strings
@@ -180,6 +182,15 @@ inline nlohmann::json MakeResponse(int id, const nlohmann::json& data = {}) {
     nlohmann::json res;
     res["id"] = id;
     res["ok"] = true;
+    // Cross-cutting game-thread liveness hint riding the shared success
+    // envelope: a paused / suspended game stops ticking ProcessEvent, so every
+    // live-camera / function-invoke feature times out. Carrying it on EVERY
+    // response lets the UI raise a non-blocking "game paused" banner from any
+    // command it happens to send (no dedicated heartbeat command or timer), and
+    // clear it on the next response once the thread ticks again. Cost: one
+    // atomic read + a steady-clock diff. Placed before merge_patch so a handler
+    // that (unusually) sets its own "game_thread_stalled" still wins.
+    res["game_thread_stalled"] = !Stark::IsGameThreadResponsive();
     if (!data.is_null() && !data.empty()) {
         res.merge_patch(data);
     }

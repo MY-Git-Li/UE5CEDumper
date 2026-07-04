@@ -23,6 +23,7 @@
 #include "Macht.h"
 #include "Aura.h"
 #include "Ubel.h"
+#include "Stark.h"   // IsGameThreadResponsive — skip doomed POV invokes when paused
 
 #include <algorithm>
 #include <cctype>
@@ -822,8 +823,22 @@ int32_t GetPovImpl(Pov& out) {
 
     double loc[3] = {}, rot[3] = {}, fov = 0;
     uint8_t source = 0;   // 0 = invoke getters, 1 = raw cached-POV read
-    bool gotLoc = InvokeRetVec(cam, "GetCameraLocation", loc);
-    bool gotRot = InvokeRetVec(cam, "GetCameraRotation", rot);
+    // Skip the game-thread getters entirely when the game thread is not ticking
+    // (paused / suspended). Each InvokeRetVec would otherwise enqueue a
+    // ProcessEvent call and block for the full invoke timeout (default 5s) that a
+    // paused thread can never service — two per poll = a ~10s stall that
+    // serializes behind every other pipe command (this is exactly what starved
+    // the object-list load when a user paused mid-scan). When stalled, fall
+    // straight through to the raw cached-POV read below, which needs no game
+    // thread; it resumes invoking automatically once the thread ticks again.
+    bool gotLoc = false, gotRot = false;
+    if (Stark::IsGameThreadResponsive()) {
+        gotLoc = InvokeRetVec(cam, "GetCameraLocation", loc);
+        gotRot = InvokeRetVec(cam, "GetCameraRotation", rot);
+    } else {
+        LOG_INFO("Teleport: POV getters skipped — game thread not ticking "
+                 "(paused/suspended), using raw cached POV");
+    }
 
     if (gotLoc || gotRot) {
         InvokeRetFloat(cam, "GetFOVAngle", fov);   // best-effort bonus

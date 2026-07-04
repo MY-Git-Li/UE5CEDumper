@@ -73,6 +73,16 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _windowTitle = "UE5 Dump UI";
     [ObservableProperty] private bool _isConnected;
 
+    /// <summary>Always-visible top-bar banner: true while the game thread is
+    /// paused/suspended (not ticking ProcessEvent). Live-camera / function-invoke
+    /// features time out in this state, and if Teleport auto-refresh is polling,
+    /// its POV reads would starve memory scans behind them — so the user gets a
+    /// heads-up on why things feel slow (and that scans still work). Fed by the
+    /// DLL's per-response liveness flag via IPipeClient.GameThreadStalledChanged;
+    /// reset to false on disconnect so the banner never sticks. Bound directly to
+    /// the banner's IsVisible.</summary>
+    [ObservableProperty] private bool _gameThreadStalled;
+
     /// <summary>Global stale-DLL badge shown in the always-visible top bar:
     /// only while connected AND the DLL build differs from / pre-dates the UI's.
     /// Mirrors the per-tab Diagnostics badge (PointerPanelViewModel) but is
@@ -1650,9 +1660,20 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 IsConnected = connected;
                 StatusText = connected ? "Connected" : "Disconnected";
                 Teleport.SetConnected(connected);
-                if (!connected) WindowTitle = "UE5 Dump UI";
+                if (!connected)
+                {
+                    WindowTitle = "UE5 Dump UI";
+                    GameThreadStalled = false;   // clear the paused banner on disconnect
+                }
             });
         };
+
+        // The DLL flags a paused/suspended game thread on every response; surface
+        // it as an always-visible banner so a user who paused the game and switched
+        // to the UI understands why live-camera features time out (and that memory
+        // scans still work). Marshalled to the UI thread — raised off a pipe thread.
+        _pipeClient.GameThreadStalledChanged += (stalled) =>
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => GameThreadStalled = stalled);
     }
 
     /// <summary>

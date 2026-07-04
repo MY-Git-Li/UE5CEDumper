@@ -70,4 +70,25 @@ int32_t GetInvokeTimeoutMs();
 /// during normal gameplay, a wrong hook fires 0 times. Thread-safe.
 uint64_t GetHookFireCount();
 
+/// Gap (ms) beyond which — once the PE hook has fired at least once — the game
+/// thread is considered "stalled": not ticking ProcessEvent (paused / suspended
+/// / alt-tab-throttled). A live game fires PE hundreds of times per frame, so
+/// even a few-FPS game stays far under this; only a genuine stop crosses it.
+constexpr int32_t kStallThresholdMs = 500;
+
+/// Milliseconds since HookedProcessEvent last fired, or UINT64_MAX when it has
+/// never fired (hook not installed yet, or installed but the game thread has
+/// not reached it — liveness unknown). Thread-safe.
+uint64_t MsSinceLastHookFire();
+
+/// @return true if the game thread appears to be ticking (draining our PE
+/// hook): either no fire has been observed yet (unknown → give a fresh hook a
+/// chance) or the last fire was within thresholdMs. False ONLY once the hook
+/// has fired and then gone quiet past the threshold — i.e. the game is
+/// paused/suspended. Callers use this to skip game-thread invokes that would
+/// otherwise block for the full invoke timeout on a thread that will not run,
+/// and to surface a "game paused" hint. thresholdMs<=0 uses kStallThresholdMs.
+/// Thread-safe.
+bool IsGameThreadResponsive(int32_t thresholdMs = kStallThresholdMs);
+
 } // namespace Stark

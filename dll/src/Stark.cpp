@@ -83,6 +83,29 @@ static std::atomic<int32_t> s_invokeTimeoutMs{kDefaultInvokeTimeoutMs};
 // vtable slot. relaxed memory order — readers just want a non-zero check.
 static std::atomic<uint64_t> s_hookFireCount{0};
 
+// steady_clock timestamp (ms) of the last HookedProcessEvent fire. 0 = never
+// fired. A live game ticks ProcessEvent hundreds of times per frame, so this
+// advances continuously during gameplay and FREEZES the instant the game
+// thread stops (pause menu that halts the world, breakpoint, alt-tab throttle).
+// MsSinceLastHookFire / IsGameThreadResponsive read it to fail-fast invokes and
+// surface a "game paused" hint instead of blocking on a thread that won't run.
+static std::atomic<uint64_t> s_lastHookFireMs{0};
+
+// steady_clock timestamp (ms) when the hook last went active. Lets
+// IsGameThreadResponsive distinguish "just installed, give it a beat to tick"
+// from "installed a while ago and STILL never fired" — the latter means the game
+// thread was already paused when we hooked (connected while paused), where
+// s_lastHookFireMs alone stays 0 forever and can't reveal the stall.
+static std::atomic<uint64_t> s_hookInstalledMs{0};
+
+// Monotonic milliseconds since process start. steady_clock (not system_clock)
+// so a wall-clock adjustment can't make an interval read negative/huge.
+static uint64_t NowMs() {
+    return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
 // ---- SEH-isolated helper ----
 
 /// Call ProcessEvent with SEH protection. Isolated into a separate function
@@ -113,6 +136,10 @@ static void __fastcall HookedProcessEvent(void* thisObj, void* ufunc, void* para
     // vtable slot." relaxed: a single non-zero observation by the validator
     // is enough; we never read this back inside the hot path.
     s_hookFireCount.fetch_add(1, std::memory_order_relaxed);
+    // Stamp the fire time so IsGameThreadResponsive / MsSinceLastHookFire can
+    // tell "ticking now" from "went quiet". One clock read on the hot path —
+    // cheap next to ProcessEvent's own work, and the atomic store is relaxed.
+    s_lastHookFireMs.store(NowMs(), std::memory_order_relaxed);
 
     // Drain pending invocations from pipe thread. Fast path: skip the mutex
     // entirely unless the pipe thread has actually enqueued something. A stale
@@ -184,6 +211,7 @@ bool InstallHook(uintptr_t processEventAddr) {
     // an in-flight unhook race), so a second InstallHook on the same
     // address just flips the flag back on. No MinHook calls needed.
     if (s_hookedAddr == processEventAddr && s_originalPE != nullptr) {
+        s_hookInstalledMs.store(NowMs(), std::memory_order_relaxed);
         s_hookActive.store(true);
         LOG_INFO("GameThreadDispatch: re-enabled existing hook at 0x%llX",
                  (unsigned long long)processEventAddr);
@@ -223,6 +251,7 @@ bool InstallHook(uintptr_t processEventAddr) {
     }
 
     s_hookedAddr = processEventAddr;
+    s_hookInstalledMs.store(NowMs(), std::memory_order_relaxed);
     s_hookActive.store(true);
     LOG_INFO("GameThreadDispatch: ProcessEvent hook installed at 0x%llX",
              (unsigned long long)processEventAddr);
@@ -370,6 +399,35 @@ int32_t GetInvokeTimeoutMs() {
 
 uint64_t GetHookFireCount() {
     return s_hookFireCount.load(std::memory_order_relaxed);
+}
+
+uint64_t MsSinceLastHookFire() {
+    uint64_t last = s_lastHookFireMs.load(std::memory_order_relaxed);
+    if (last == 0) return UINT64_MAX;   // never fired — liveness unknown
+    uint64_t now = NowMs();
+    return (now > last) ? (now - last) : 0;
+}
+
+bool IsGameThreadResponsive(int32_t thresholdMs) {
+    uint64_t thr = (uint64_t)(thresholdMs > 0 ? thresholdMs : kStallThresholdMs);
+    // No hook yet: the caller's invoke is what lazily installs it, so let it try —
+    // reporting "stalled" here would stop the POV path from ever installing the
+    // hook on games where invoke-based getters do work.
+    if (!s_hookActive.load(std::memory_order_relaxed)) return true;
+    uint64_t now  = NowMs();
+    uint64_t last = s_lastHookFireMs.load(std::memory_order_relaxed);
+    if (last != 0) {
+        // Hook has fired before: responsive iff it fired within the threshold.
+        // A running game keeps this tiny; a pause freezes it and we cross `thr`.
+        return (now > last ? now - last : 0) <= thr;
+    }
+    // Hook is active but has NEVER fired. Give it a grace window after install to
+    // produce its first tick; if it stays silent past that, the game thread was
+    // already paused when we hooked (the just-connected-while-paused case, where
+    // s_lastHookFireMs alone would stay 0 forever and never reveal the stall).
+    uint64_t inst = s_hookInstalledMs.load(std::memory_order_relaxed);
+    if (inst == 0) return true;   // active without an install stamp — shouldn't happen
+    return (now > inst ? now - inst : 0) <= thr;
 }
 
 } // namespace Stark
