@@ -2494,7 +2494,13 @@ public sealed class DumpService : IDumpService
             var arr = new JsonArray();
             foreach (var sp in stringParams)
             {
-                arr.Add(new JsonObject
+                // Cast to JsonNode? so the non-generic JsonArray.Add(JsonNode?)
+                // overload is picked. The generic Add<T>(T) is trim/AOT-unsafe
+                // (IL2026/IL3050) and overload resolution would otherwise select
+                // it (identity conversion to JsonObject beats the reference
+                // conversion to JsonNode). Only surfaces under the trimmed AOT
+                // publish, not a plain Release build.
+                arr.Add((JsonNode?)new JsonObject
                 {
                     ["off"]  = sp.Offset,
                     ["wide"] = sp.Wide,
