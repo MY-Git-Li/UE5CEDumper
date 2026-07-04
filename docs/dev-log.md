@@ -18,6 +18,20 @@ builds ≤696 in
 
 -----
 
+## 2026-07-04 — CE generators skip OUT-string params (crash fix) (build ~1913; pushed dev)
+
+**SHIPPED (UI-only, no re-inject).** Parity fix bringing the two CE-Lua generators in line with the
+PIPE path (build ~1911): an OUT `FString&` param (the callee fills it) must stay a zeroed/empty FString,
+because building one would make the callee's reassignment `FMemory::Free` our CE-allocated (non-FMemory)
+`Data` buffer and crash. INPUT strings are unaffected — the common case.
+
+**Impl.** `InvokeScriptGenerator` (INV): the FIRE loop skips `IsStringType && IsOut` params (emits a
+`-- out FString left empty` comment; the zero-fill already left a valid empty FString), and the inline
+`writeFStr` builder is now only emitted when an INPUT (non-out) string param exists.
+`InvokeParamDialog.CollectBakedValues` (AA(Baked)): skips out-string params so the helper never builds
+one. Out-string params are rare, so this was a latent edge case, not a common crash. 2162 UI tests
+green (+2).
+
 ## 2026-07-04 — PIPE FIRE string INPUT params (DLL builds the FString) (build ~1911; pushed dev; needs re-inject)
 
 **SHIPPED (DLL + UI + protocol; NEEDS RE-INJECT).** The in-app **PIPE** FIRE path can now pass string

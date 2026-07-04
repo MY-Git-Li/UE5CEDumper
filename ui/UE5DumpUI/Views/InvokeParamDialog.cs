@@ -955,6 +955,13 @@ public sealed class InvokeParamDialog : Window
             }
             else
             {
+                // OUT string params must stay a zeroed/empty FString (the callee
+                // fills them). Baking one would make the helper build an FString
+                // the callee then FMemory::Free's -> crash. Skip so the slot
+                // stays zeroed. OUT 字串參數需保持為空 FString，跳過以免崩潰。
+                if (ParamBufferBuilder.IsStringType(p.TypeName) && p.IsOut)
+                    continue;
+
                 var text = (_edits[i]?.Text ?? "0").Trim();
                 list.Add(new BakedParamValue(
                     ParamName:   p.Name,

@@ -243,11 +243,13 @@ public static class InvokeScriptGenerator
 
         // String INPUT params need an FString built by value. This path is
         // self-contained (no helper file), so inline a small builder once when
-        // any string param is present. Comments here are ASCII-only because the
-        // emitted script is transmitted through CE / the AOBMaker JSON pipe.
-        // 字串輸入參數需要以傳值方式建立 FString。此路徑不依賴 helper 檔，因此當有
-        // 任何字串參數時就地內嵌一個小型建構函式（生成腳本內註解僅用 ASCII）。
-        if (inputParams.Any(p => IsStringType(p.TypeName)))
+        // any INPUT (non-out) string param is present. Out-string params are
+        // left as empty FStrings (built by the callee), so they don't need it.
+        // Comments here are ASCII-only because the emitted script is transmitted
+        // through CE / the AOBMaker JSON pipe.
+        // 只有存在「輸入」（非 out）字串參數時才內嵌建構函式；out 字串保持為空
+        // FString（由被呼叫端填入），不需要它。生成腳本內註解僅用 ASCII。
+        if (inputParams.Any(p => IsStringType(p.TypeName) && !p.IsOut))
         {
             AppendInlineFStringBuilder(sb);
         }
@@ -320,6 +322,17 @@ public static class InvokeScriptGenerator
         {
             var p = inputParams[i];
             int idx = i + 1;
+            // OUT string params must stay a zeroed/empty FString (the callee
+            // fills them). Building one would make the callee FMemory::Free our
+            // CE-allocated Data buffer -> crash. The zero-fill above already
+            // left the 16-byte slot as a valid empty FString.
+            // OUT 字串參數需保持為空 FString（由被呼叫端填入）；若建立，被呼叫端會
+            // 對我方 CE 配置的 Data buffer 做 FMemory::Free 而崩潰。
+            if (IsStringType(p.TypeName) && p.IsOut)
+            {
+                Line(sb, $"    -- {p.Name}: out FString left empty (callee fills it)");
+                continue;
+            }
             var parseExpr = GetParseExpression(p.TypeName, idx);
             var writeStmt = GetMailboxWriteStatement(p.TypeName, p.Size, p.Offset, parseExpr);
             Line(sb, $"    {writeStmt}");

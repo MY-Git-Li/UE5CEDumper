@@ -665,6 +665,52 @@ public class InvokeScriptTests
     }
 
     [Fact]
+    public void Generate_OutStringParam_NotBuiltLeftEmpty()
+    {
+        // An OUT FString& (the callee fills it) must stay a zeroed/empty FString.
+        // Building one would make the callee FMemory::Free our CE buffer -> crash.
+        var func = new FunctionInfoModel
+        {
+            Name = "GetText",
+            ParmsSize = 16,
+            Params = new List<FunctionParamModel>
+            {
+                new() { Name = "OutText", TypeName = "StrProperty", Size = 16, Offset = 0, IsOut = true },
+            },
+        };
+
+        var script = InvokeScriptGenerator.Generate("C", "GetText", func);
+
+        // No builder + no build call for the out-string param.
+        Assert.DoesNotContain("writeFStr", script);
+        // A comment documents the intentional skip.
+        Assert.Contains("out FString left empty", script);
+    }
+
+    [Fact]
+    public void Generate_MixedInputAndOutString_OnlyInputBuilt()
+    {
+        var func = new FunctionInfoModel
+        {
+            Name = "Rename",
+            ParmsSize = 32,
+            Params = new List<FunctionParamModel>
+            {
+                new() { Name = "NewName", TypeName = "StrProperty", Size = 16, Offset = 0 },
+                new() { Name = "OldName", TypeName = "StrProperty", Size = 16, Offset = 16, IsOut = true },
+            },
+        };
+
+        var script = InvokeScriptGenerator.Generate("C", "Rename", func);
+
+        // Builder present; input string built; out string skipped.
+        Assert.Contains("local function writeFStr(", script);
+        Assert.Contains("writeFStr(PD + 0, edits[1].Text or '', true)", script);
+        Assert.DoesNotContain("writeFStr(PD + 16,", script);
+        Assert.Contains("out FString left empty", script);
+    }
+
+    [Fact]
     public void Generate_StringInputParam_StaysAscii()
     {
         // Bilingual comments live in the C# SOURCE + the .lua helper, never in
