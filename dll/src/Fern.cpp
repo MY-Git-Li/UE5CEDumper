@@ -26,6 +26,7 @@
 #include <json.hpp>
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>   // malloc/free for by-value FString INPUT-param buffers
 #include <cstring>
 #include <sstream>
 #include <vector>
@@ -3999,6 +4000,63 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                 }
             }
 
+            // ── String INPUT params: build by-value FStrings in-process ──
+            // An FString param is passed BY VALUE as { CharT* Data; int32 Num;
+            // int32 Max } inline in the params buffer, and its Data pointer must
+            // be a valid GAME-process address. It is: this DLL is injected, so a
+            // heap buffer allocated here lives in the game's address space (the
+            // same reason paramBuf.data() works as the params pointer). The UI
+            // sends these descriptors and leaves the 16-byte slots zeroed.
+            // 字串輸入參數以傳值的 { Data*, Num, Max } 內嵌於 params buffer，其 Data
+            // 指標必須是遊戲行程內的有效位址。此 DLL 為注入式，故我們在此配置的 heap
+            // buffer 就位於遊戲位址空間（與 paramBuf.data() 可作為 params 同理）。
+            std::vector<void*> strAllocs;
+            if (request.contains("str_params") && request["str_params"].is_array()) {
+                for (const auto& sp : request["str_params"]) {
+                    int off  = sp.value("off", -1);
+                    bool wide = sp.value("wide", true);
+                    std::string text = sp.value("text", "");
+                    // Bounds: the whole 16-byte FString struct must fit.
+                    if (off < 0 || static_cast<size_t>(off) + 16 > paramBuf.size()) {
+                        Sein::Warn("PIPE:cmd",
+                                   "invoke_function: str_param off=%d out of range (parms=%zu)",
+                                   off, paramBuf.size());
+                        continue;
+                    }
+                    int32_t num = 0;          // element count incl null terminator
+                    void* dataBuf = nullptr;
+                    if (wide) {
+                        // UTF-8 (JSON) -> UTF-16LE via the OS codec (full Unicode).
+                        int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(),
+                                                       static_cast<int>(text.size()), nullptr, 0);
+                        if (wlen < 0) wlen = 0;
+                        num = wlen + 1;
+                        wchar_t* wbuf = static_cast<wchar_t*>(malloc(static_cast<size_t>(num) * sizeof(wchar_t)));
+                        if (!wbuf) continue;
+                        if (wlen > 0) {
+                            MultiByteToWideChar(CP_UTF8, 0, text.c_str(),
+                                                static_cast<int>(text.size()), wbuf, wlen);
+                        }
+                        wbuf[wlen] = L'\0';
+                        dataBuf = wbuf;
+                    } else {
+                        // Narrow: raw bytes (FUtf8String = UTF-8, FAnsiString ~ ANSI).
+                        num = static_cast<int32_t>(text.size()) + 1;
+                        char* cbuf = static_cast<char*>(malloc(static_cast<size_t>(num)));
+                        if (!cbuf) continue;
+                        if (!text.empty()) memcpy(cbuf, text.data(), text.size());
+                        cbuf[text.size()] = '\0';
+                        dataBuf = cbuf;
+                    }
+                    strAllocs.push_back(dataBuf);
+                    // Patch FString { Data(+0,8), Num(+8,4), Max(+12,4) } at off.
+                    uintptr_t dataPtr = reinterpret_cast<uintptr_t>(dataBuf);
+                    memcpy(paramBuf.data() + off,      &dataPtr, sizeof(uintptr_t));
+                    memcpy(paramBuf.data() + off + 8,  &num,     sizeof(int32_t));
+                    memcpy(paramBuf.data() + off + 12, &num,     sizeof(int32_t));
+                }
+            }
+
             uintptr_t paramPtr = bufSize > 0
                 ? reinterpret_cast<uintptr_t>(paramBuf.data())
                 : 0;
@@ -4018,6 +4076,21 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             int32_t callResult = directCall
                 ? UE5_CallProcessEventDirect(instanceAddr, ufuncAddr, paramPtr)
                 : UE5_CallProcessEventEx(instanceAddr, ufuncAddr, paramPtr, (uint32_t)bufSize);
+
+            // Free the by-value FString buffers. UE's calling convention makes
+            // the CALLER own the params, and a UFUNCTION receives its FString by
+            // value (copy) or const-ref (read) — so after ProcessEvent returns
+            // the callee no longer needs our Data buffer and freeing is correct.
+            // EXCEPTION: a game-thread dispatch TIMEOUT (-5) leaves the request
+            // QUEUED with a COPY of paramBuf whose Data pointers alias these
+            // buffers; a later drain would deref them, so we deliberately LEAK
+            // on -5 to stay crash-safe (matches the CE-side policy).
+            // 逾時(-5)時佇列仍持有指向這些 buffer 的複本，稍後排空會解參考，故刻意
+            // 洩漏以避免崩潰；其餘路徑呼叫已結束，立即釋放。
+            if (callResult != -5) {
+                for (void* p : strAllocs) free(p);
+                strAllocs.clear();
+            }
 
             // Build response
             json data;

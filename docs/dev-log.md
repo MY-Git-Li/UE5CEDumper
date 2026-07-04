@@ -18,6 +18,116 @@ builds ≤696 in
 
 -----
 
+## 2026-07-04 — CE generators skip OUT-string params (crash fix) (build ~1913; pushed dev)
+
+**SHIPPED (UI-only, no re-inject).** Parity fix bringing the two CE-Lua generators in line with the
+PIPE path (build ~1911): an OUT `FString&` param (the callee fills it) must stay a zeroed/empty FString,
+because building one would make the callee's reassignment `FMemory::Free` our CE-allocated (non-FMemory)
+`Data` buffer and crash. INPUT strings are unaffected — the common case.
+
+**Impl.** `InvokeScriptGenerator` (INV): the FIRE loop skips `IsStringType && IsOut` params (emits a
+`-- out FString left empty` comment; the zero-fill already left a valid empty FString), and the inline
+`writeFStr` builder is now only emitted when an INPUT (non-out) string param exists.
+`InvokeParamDialog.CollectBakedValues` (AA(Baked)): skips out-string params so the helper never builds
+one. Out-string params are rare, so this was a latent edge case, not a common crash. 2162 UI tests
+green (+2).
+
+## 2026-07-04 — PIPE FIRE string INPUT params (DLL builds the FString) (build ~1911; pushed dev; needs re-inject)
+
+**SHIPPED (DLL + UI + protocol; NEEDS RE-INJECT).** The in-app **PIPE** FIRE path can now pass string
+input params — the last invoke path that couldn't (INV / AA(Baked) got FStrings in build ~1908). The
+hex-buffer model can't carry an FString because its `Data` pointer must be a valid **game-process**
+address the UI can't allocate. Fix: the UI sends a `str_params` descriptor list and the **DLL builds
+each FString in-process**.
+
+**Why the DLL can.** UE5Dumper.dll is injected, so a buffer it `malloc`s lives in the game's address
+space (the same reason `paramBuf.data()` already works as the ProcessEvent params pointer). For each
+`{ off, wide, text }`: allocate a char buffer (wide → UTF-8→UTF-16LE via `MultiByteToWideChar`, full
+Unicode — better than the CE-side ASCII-only path; narrow → raw UTF-8/ANSI bytes), patch the by-value
+`{ Data, Num, Max }` at `off`, run ProcessEvent.
+
+**Lifetime.** UE's convention makes the CALLER own the params and a UFUNCTION takes its FString by
+value/const-ref, so freeing after ProcessEvent is correct — EXCEPT on a game-thread dispatch **timeout
+(-5)**, where the request stays queued with a copy whose `Data` aliases our buffers; a late drain would
+deref them, so we deliberately **leak on -5** (matches the CE-side policy). Every other path frees now.
+
+**OUT strings.** The UI only sends `str_params` for **input** (`!IsOut`) string params. An OUT
+`FString&` must stay a zeroed/empty struct — otherwise the callee's reassignment would `FMemory::Free`
+our non-FMemory buffer and crash. A zeroed slot is a valid empty FString the callee fills safely.
+
+**Impl.** `Fern.cpp` (`invoke_function`): parse `str_params`, build/patch/free (leak-on-`-5`), bounds-
+checked. `IDumpService` / `DumpService` gained an `IReadOnlyList<InvokeStringParam>? stringParams` arg
+(new `InvokeStringParam` record) serialised to `str_params`. `InvokeParamDialog.OnFireClicked` collects
+input string fields instead of writing them as scalars. `ParamBufferBuilder.IsStringType/IsWideString`
+made public. `docs/pipe-protocol.md` updated. DLL + UI build clean, 2160 UI tests green (+3). **Re-inject
+required** (DLL change). Fern has no unit tests → verify the actual call in-game.
+
+## 2026-07-04 — FString INPUT param support in invoke generators + helper (build ~1908; pushed dev)
+
+**SHIPPED (UI + helper `.lua`, no re-inject).** String **input** params (`StrProperty` /
+`Utf8StrProperty` / `AnsiStrProperty`) are now built for you by the two CE-Lua invoke generators.
+Before, `ParamBufferBuilder` / `InvokeScriptGenerator` wrote a bare int32 into the FString slot and
+`ue5_invoke_helper.lua` raised `Unknown param type 'fstring'` — string params were effectively
+unusable from the generated scripts.
+
+**Model.** A UE string param is passed **by value**: the params buffer holds the whole 16-byte
+`{ CharT* Data; int32 ArrayNum; int32 ArrayMax }` struct inline (NOT a pointer to it). So the scripts
+now `allocateMemory` a char buffer in the target process, write the chars + null terminator, and stamp
+the three struct fields. Wide (`StrProperty` → UTF-16LE) vs narrow (`FUtf8String`/`FAnsiString` → raw
+bytes) is preserved. ASCII / basic-Latin only for the wide case (no UTF-8 transcode).
+
+**Lifetime.** The Data buffer is intentionally **leaked** by default — freeing is unsafe if the callee
+retained the pointer, and it's CE-allocated (not UE `FMemory`), so the game must never free it. The
+helper tracks allocations in `_ue5_invoke_str_bufs` and exposes an opt-in `freeInvokeStringBuffers()`
+for when you know the call merely read the string. A few small leaks per one-shot cheat is the safe
+default.
+
+**Impl.** Helper `ue5_invoke_helper.lua` (v1.1→1.2): new `writeFStringInline` + `writeBakedParams`
+`fstring`/`fstringn` branches + public `freeInvokeStringBuffers`. `BakedScriptGenerator`: new
+`MapInputType` (keeps wide/narrow — the return path still uses `MapToHelperType`, so its complex-type
+classification is untouched) + `RenderLiteral` emits a quoted Lua string for string types.
+`InvokeScriptGenerator` (self-contained, no helper): inlines a small `writeFStr(addr, s, wide)` builder
+when any string param is present + text field defaults to empty. `ParamBufferBuilder.GetDefaultValue`
+strings → empty (nicer dialog field). Generated scripts stay **ASCII** (bilingual EN/中文 comments live
+only in the C# source + the static `.lua`, per the user's request — never in emitted text).
+
+**Still out of scope.** The **PIPE** (in-app) FIRE path can't build FStrings (it has no target-process
+allocation in the hex-buffer model — that needs a DLL-side change); string params there still pass
+empty. UI + helper build clean, 2157 UI tests green (+13).
+
+## 2026-07-04 — Invoke scripts print the return value under UE5_DEBUG (build ~1905; pushed dev)
+
+**SHIPPED (UI-only, no re-inject).** Both CE-Lua UFunction invoke generators now decode + `print()`
+the return value when `DEBUG ~= 0`. Before this, only the in-app **PIPE** dialog decoded returns (via
+`StructReturnDecoder`); the generated **INV** (`InvokeScriptGenerator`) never read the return at all,
+and **AA(Baked)** (`BakedScriptGenerator`) printed it only in the opt-in "Verify return value" mode —
+so a user who turned DEBUG on still saw nothing (the exact complaint that prompted this).
+
+**Where the return lives.** After a successful invoke the value sits in the mailbox params buffer at
+`g_invokeMailbox.paramsData + returnOffset` (`mb + 0x328 + off`) — UE lays the return param inside the
+same params blob as the inputs. Static-native funcs run ProcessEvent in-place ([Mimic.cpp:416](../dll/src/Mimic.cpp));
+game-thread funcs copy `ownedParams` back into the caller buffer on success ([Stark.cpp:376](../dll/src/Stark.cpp)) —
+the timeout path does NOT copy back, hence the `result==0`/`ok` gate.
+
+**Impl.** New shared emitter `CeInvokeReturn.AppendDecodeAndPrint` (single source of truth so the two
+generators can't drift): scalars via the matching CE read; `StrProperty` derefs the `{Data,Num}` header
+and wide-reads the string (`readString(_sp, 512, true)`); `Utf8Str/AnsiStr` narrow-read; every other
+buffer type (`FText`/`TArray`/`TMap`/`TSet`/`FStruct`/delegate) falls back to a bounded raw-hex dump.
+Wired into `InvokeScriptGenerator` (both the direct-invoke and the param-form FIRE paths, base local
+`_PDret = mb + 0x328`, gated `if result == 0 and DEBUG ~= 0`) and `BakedScriptGenerator`'s non-verify
+branch (resolves the mailbox via `getAddressSafe` + module-prefixed fallback, gated `if ok and DEBUG ~= 0`;
+verify mode keeps its own richer Before/After print, so the two never double-fire). Uses `_PDret`
+(not `PD`) so it can't collide with the write-path's `PD` local, and the `dbg()` preamble's own
+`DEBUG ~= 0` substring means "no return block" tests must assert on `_PDret` / the full gate line.
+
+**Hygiene.** Fully honours the quiet-by-default rule: nothing prints when `DEBUG == 0` (the
+success-close still fires); when `DEBUG ~= 0` the value prints and the window stays open. Tooltips for
+INV / PIPE / AA(Baked) rewritten to explain the three paths + where the return value goes.
+
+**Known gap (unchanged).** String **input** params are still not built for you — the generators write a
+number into the FString slot rather than allocating a `{Data,Num,Max}` buffer + wide char data (and
+freeing it after). Documented as a follow-up. UI builds clean, 2144 tests green.
+
 ## 2026-07-04 — Game-thread stall detection: POV fast-fail + app-wide "paused" banner (build ~1902; pushed dev, dev→main PR)
 
 **SHIPPED.** Fix for a ~3.5-min object-list load diagnosed from a Brimstone (UE5.6) log: the **game

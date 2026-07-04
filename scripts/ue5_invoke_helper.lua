@@ -19,8 +19,17 @@
   Public API (re-declaration-safe, syntax-highlighted):
     ok, err = invokeUFunction(className, funcName, parmsSize, params)
     value   = readUFunctionReturn(offset, valueType)
+    freed   = freeInvokeStringBuffers() -- free FString INPUT-param buffers (UNSAFE unless read-only)
     state   = setDebugCamera(enable)   -- robust force on/off (1=on,0=off,-1=err)
     state   = getDebugCameraState()    -- 1=on, 0=off, -1=unknown
+
+  String INPUT params: a param descriptor with type 'fstring' (wide, UE FString)
+  or 'fstringn' (narrow, FUtf8String/FAnsiString) takes value = a Lua string; the
+  helper allocates a char buffer in the target process and builds the by-value
+  { Data, Num, Max } struct in place. See writeFStringInline for the lifetime note.
+  字串輸入參數：type 為 'fstring'（寬字元 FString）或 'fstringn'（窄字元
+  FUtf8String/FAnsiString）時，value 傳入 Lua 字串；helper 會在目標行程配置字元
+  buffer 並就地建立傳值的 { Data, Num, Max } 結構。生命週期說明見 writeFStringInline。
 
   Debug Camera memory-record example (one checkbox = camera on/off).
   Both blocks call the SAME DLL export, only the arg differs; the DLL
@@ -41,7 +50,7 @@
     {$asm}
 
   Constants exposed:
-    UE5_INVOKE_HELPER_VERSION  = '1.0'
+    UE5_INVOKE_HELPER_VERSION  = '1.2'
     UE5_INVOKE_PARAMS_OFFSET   = 0x328  (params_data offset within mailbox)
 ]]
 
@@ -50,7 +59,7 @@
 -- ============================================================
 
 if not UE5_INVOKE_HELPER_VERSION then
-  UE5_INVOKE_HELPER_VERSION = '1.1'
+  UE5_INVOKE_HELPER_VERSION = '1.2'
 end
 
 -- ============================================================
@@ -131,6 +140,66 @@ local function writeMbStr(mb, off, str)
   writeBytes(mb + off, b)
 end
 
+-- ============================================================
+-- FString / FUtf8String / FAnsiString INPUT params (by value)
+-- FString / FUtf8String / FAnsiString 輸入參數（傳值）
+-- ============================================================
+-- A UE string param is passed BY VALUE: the params buffer holds the whole
+-- 16-byte struct { CharT* Data; int32 ArrayNum; int32 ArrayMax } INLINE, not a
+-- pointer to it. So we allocate a Data buffer in the TARGET process, write the
+-- characters + null terminator, and stamp the three struct fields.
+-- UE 字串參數是「傳值」：params buffer 內直接放整個 16-byte 結構
+-- { CharT* Data; int32 ArrayNum; int32 ArrayMax }，而不是指向它的指標。因此我們
+-- 在「目標行程」配置一塊 Data buffer，寫入字元 + 結尾 '\0'，再填入三個欄位。
+--
+-- LIFETIME: allocations are tracked in _ue5_invoke_str_bufs and are NOT freed
+-- automatically. Freeing is unsafe if the callee kept the pointer, and the
+-- buffer is CE-allocated (not UE's FMemory) so the game must NEVER free it.
+-- Call freeInvokeStringBuffers() manually only when every such call merely READ
+-- the string. Leaking a few small buffers is the safe default for one-shot cheats.
+-- 生命週期：配置的記憶體記錄在 _ue5_invoke_str_bufs，且「不會」自動釋放。若被呼叫
+-- 的函式保留了指標，釋放會造成 use-after-free；且此 buffer 由 CE 配置（非 UE 的
+-- FMemory），遊戲端絕不能去 free 它。只有在確定那些呼叫都只是「讀取」字串時，才手動
+-- 呼叫 freeInvokeStringBuffers()。對一次性 cheat 而言，漏掉幾個小 buffer 是安全預設。
+if _ue5_invoke_str_bufs == nil then
+  _ue5_invoke_str_bufs = {}
+end
+
+-- Build a by-value UE string at (pd + off). wide=true -> UTF-16LE (FString);
+-- wide=false -> raw bytes (FUtf8String is UTF-8, FAnsiString is ANSI).
+-- 於 (pd + off) 建立傳值的 UE 字串。wide=true -> UTF-16LE（FString）；
+-- wide=false -> 原始位元組（FUtf8String 為 UTF-8，FAnsiString 為 ANSI）。
+local function writeFStringInline(pd, off, s, wide)
+  s = tostring(s or '')
+  local n = #s
+  local bytes = {}
+  local buf
+  if wide then
+    -- UTF-16LE: low byte + 0 high byte. ASCII / basic Latin only; multi-byte
+    -- UTF-8 input is not transcoded here.
+    -- UTF-16LE：低位元組 + 0 高位元組。僅支援 ASCII / 基本拉丁字元；此處不會轉碼
+    -- 多位元組的 UTF-8 輸入。
+    for i = 1, n do
+      bytes[#bytes + 1] = string.byte(s, i)
+      bytes[#bytes + 1] = 0
+    end
+    bytes[#bytes + 1] = 0
+    bytes[#bytes + 1] = 0                 -- L'\0'
+    buf = allocateMemory((n + 1) * 2)
+  else
+    for i = 1, n do
+      bytes[#bytes + 1] = string.byte(s, i)
+    end
+    bytes[#bytes + 1] = 0                 -- '\0'
+    buf = allocateMemory(n + 1)
+  end
+  writeBytes(buf, bytes)
+  writeQword(pd + off, buf)               -- Data
+  writeInteger(pd + off + 8,  n + 1)      -- ArrayNum (incl null / 含結尾)
+  writeInteger(pd + off + 12, n + 1)      -- ArrayMax
+  _ue5_invoke_str_bufs[#_ue5_invoke_str_bufs + 1] = buf
+end
+
 local function writeBakedParams(mb, parmsSize, params)
   local PD = mb + OFF_PARAMS
 
@@ -164,10 +233,19 @@ local function writeBakedParams(mb, parmsSize, params)
            or t == 'name' or t == 'soft' or t == 'weak'
            or t == 'lazy' or t == 'interface' then
       writeQword(PD + off, v)
+    elseif t == 'fstring' then
+      -- Wide UE FString INPUT param (value = Lua string).
+      -- 寬字元 UE FString 輸入參數（value = Lua 字串）。
+      writeFStringInline(PD, off, v, true)
+    elseif t == 'fstringn' then
+      -- Narrow FUtf8String / FAnsiString INPUT param (value = Lua string).
+      -- 窄字元 FUtf8String / FAnsiString 輸入參數（value = Lua 字串）。
+      writeFStringInline(PD, off, v, false)
     else
       error(string.format(
         "[ue5_invoke] Unknown param type '%s' for '%s' -- " ..
-        "supported: bool/byte/int16/int32/int64/float/double/pointer",
+        "supported: bool/byte/int16/int32/int64/float/double/pointer/" ..
+        "fstring/fstringn",
         tostring(t), tostring(p.name or '?')))
     end
   end
@@ -333,6 +411,35 @@ if not readUFunctionReturn then
   end
 
   registerLuaFunctionHighlight('readUFunctionReturn')
+end
+
+-- ============================================================
+-- Public API: freeInvokeStringBuffers
+-- ============================================================
+if not freeInvokeStringBuffers then
+
+  --- Free every target-process buffer allocated for FString/FUtf8String/
+  --- FAnsiString INPUT params by prior invokeUFunction calls.
+  ---
+  --- UNSAFE if any invoked function retained the string pointer (use-after-
+  --- free) -- only call when every such call merely READ the string. The
+  --- default is to leak (safe); this is the opt-in cleanup.
+  --- 釋放先前 invokeUFunction 為字串輸入參數在目標行程配置的所有 buffer。
+  --- 若任一被呼叫的函式保留了字串指標，此操作不安全（use-after-free）-- 僅在確定
+  --- 那些呼叫都只是「讀取」字串時才呼叫。預設是「不釋放」（安全），此為選擇性清理。
+  --- @return number freed  Count of buffers released.
+  function freeInvokeStringBuffers()
+    local freed = 0
+    if _ue5_invoke_str_bufs then
+      for _, a in ipairs(_ue5_invoke_str_bufs) do
+        if a and a ~= 0 then deAlloc(a); freed = freed + 1 end
+      end
+    end
+    _ue5_invoke_str_bufs = {}
+    return freed
+  end
+
+  registerLuaFunctionHighlight('freeInvokeStringBuffers')
 end
 
 -- ============================================================

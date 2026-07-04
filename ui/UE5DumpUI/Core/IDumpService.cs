@@ -365,6 +365,9 @@ public interface IDumpService
     ///     (bypass GameThreadDispatch). Caller asserts the function is FUNC_Native|FUNC_Static
     ///     (e.g. KismetMathLibrary helpers) — required by the System tab Self-Test which must
     ///     succeed on idle main-menu / loading screens where the game thread isn't pumping.</param>
+    /// <param name="stringParams">String INPUT params the DLL must build as by-value FStrings
+    ///     (their 16-byte slots stay zeroed in <paramref name="paramsHex"/>). See
+    ///     <see cref="InvokeStringParam"/>. Null / empty when the function takes no string args.</param>
     Task<InvokeFunctionResult> InvokeFunctionAsync(
         string funcName,
         string? instanceAddr = null,
@@ -372,6 +375,7 @@ public interface IDumpService
         int parmsSize = 0,
         string? paramsHex = null,
         bool directCall = false,
+        IReadOnlyList<InvokeStringParam>? stringParams = null,
         CancellationToken ct = default);
 
     /// <summary>

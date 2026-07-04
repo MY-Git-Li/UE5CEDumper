@@ -149,7 +149,11 @@ public static class BakedScriptGenerator
         Line(sb, "local PARAMS = {");
         foreach (var v in values)
         {
-            var helperType = MapToHelperType(v.UeTypeName);
+            // Input path uses MapInputType so string params keep their wide/
+            // narrow distinction ('fstring' vs 'fstringn') the helper needs.
+            // 輸入路徑使用 MapInputType，讓字串參數保留寬/窄之分（'fstring' vs
+            // 'fstringn'），這是 helper 建立字元 buffer 所需。
+            var helperType = MapInputType(v.UeTypeName);
             var literal = RenderLiteral(v.UeTypeName, v.LiteralText);
             // Each row: { name='...', type='...', offset=N, value=LITERAL },  -- shortType
             Line(sb,
@@ -284,6 +288,28 @@ public static class BakedScriptGenerator
                       $"'{EscapeLua(funcName)}', tostring(err)))");
             Line(sb, "  showMessage('Invoke failed:\\n' .. tostring(err))");
             Line(sb, "end");
+
+            // DEBUG-only return-value print (verify mode already prints its own,
+            // richer diagnostic, so this only fires in the non-verify path).
+            // Quiet by default; when UE5_DEBUG=1 the value is printed and the
+            // window is kept open (the success-close is DEBUG==0-gated). The
+            // helper's mailbox is resolved here (getAddressSafe + module-prefixed
+            // fallback, mirroring findMailbox) so the raw slot can be read.
+            if (returnParam != null &&
+                returnParam.Offset >= 0 &&
+                (parmsSize <= 0 || returnParam.Offset < parmsSize))
+            {
+                Line(sb, "if ok and DEBUG ~= 0 then");
+                Line(sb, "  local _mbret = getAddressSafe('g_invokeMailbox')");
+                Line(sb, "  if not _mbret or _mbret == 0 then _mbret = getAddressSafe('UE5Dumper.g_invokeMailbox') end");
+                Line(sb, "  if _mbret and _mbret ~= 0 then");
+                Line(sb, "    local _PDret = _mbret + (UE5_INVOKE_PARAMS_OFFSET or 0x328)");
+                CeInvokeReturn.AppendDecodeAndPrint(sb, className, funcName,
+                    returnParam.ParamName, returnParam.UeTypeName,
+                    returnParam.Size, returnParam.Offset, "_PDret", "    ");
+                Line(sb, "  end");
+                Line(sb, "end");
+            }
         }
         Line(sb);
     }
@@ -384,6 +410,26 @@ public static class BakedScriptGenerator
     };
 
     /// <summary>
+    /// Map a UE FProperty type to the helper token used when <b>writing an
+    /// input</b> param. Identical to <see cref="MapToHelperType"/> except
+    /// string types keep their wide/narrow distinction — <c>StrProperty</c>
+    /// stays <c>'fstring'</c> (UTF-16) while <c>Utf8StrProperty</c>/
+    /// <c>AnsiStrProperty</c> become <c>'fstringn'</c> (raw bytes) — because
+    /// the helper needs it to build the right char buffer. The return-value
+    /// path keeps calling <see cref="MapToHelperType"/> (which collapses all
+    /// three to <c>'fstring'</c>) so its complex-type classification is
+    /// unaffected.
+    /// 對照「寫入輸入參數」時使用的 helper 型別；與 <see cref="MapToHelperType"/>
+    /// 相同，但字串型別保留寬/窄之分（helper 需要它來建立正確的字元 buffer）。
+    /// </summary>
+    public static string MapInputType(string ueTypeName) => ueTypeName switch
+    {
+        "StrProperty"                          => "fstring",
+        "Utf8StrProperty" or "AnsiStrProperty" => "fstringn",
+        _                                      => MapToHelperType(ueTypeName),
+    };
+
+    /// <summary>
     /// True for types the helper's <c>readUFunctionReturn</c> can't decode
     /// as a single scalar -- caller emits a "see hex dump" hint instead
     /// of an actual read+print line. Keeps the diagnostic honest rather
@@ -404,6 +450,14 @@ public static class BakedScriptGenerator
     /// </summary>
     public static string RenderLiteral(string ueTypeName, string text)
     {
+        // String types render as a quoted Lua string literal (helper reads
+        // p.value as the text and builds the FString). An empty value is a
+        // valid empty string, not the numeric 0 fallback.
+        // 字串型別輸出為「帶引號的 Lua 字串常值」（helper 讀 p.value 當文字並建立
+        // FString）。空值代表合法的空字串，而非數字 0 的回退。
+        if (ueTypeName is "StrProperty" or "Utf8StrProperty" or "AnsiStrProperty")
+            return "'" + EscapeLua(text ?? "") + "'";
+
         var t = (text ?? "").Trim();
         if (t.Length == 0) return "0";
 

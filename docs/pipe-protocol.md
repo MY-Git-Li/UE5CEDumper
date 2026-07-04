@@ -1214,7 +1214,18 @@ state-changing operations but works for simple getters).
   "instance_addr": "0x7FF6AA000",  // optional (one of instance_addr / class_name required)
   "class_name": "BP_Player_C",     // optional
   "parms_size": 16,                // optional (default 0)
-  "params_hex": "3F800000"         // optional (hex param bytes)
+  "params_hex": "3F800000",        // optional (hex param bytes; scalars only)
+  // optional: string INPUT params. An FString is passed by value as
+  // { Data*, Num, Max } (16 bytes) inline in the params buffer, and its Data
+  // pointer must be a valid GAME-process address — which the UI can't allocate.
+  // The DLL (injected) mallocs a char buffer, patches the struct at `off`, runs
+  // ProcessEvent, then frees it (LEAKS on a -5 game-thread timeout to stay
+  // crash-safe). Leave the corresponding 16-byte slots zeroed in params_hex.
+  // Only send INPUT strings; an OUT FString must stay a zeroed/empty struct.
+  "str_params": [
+    { "off": 0, "wide": true,  "text": "Hero" },   // wide=true  -> UTF-16 FString
+    { "off": 16, "wide": false, "text": "tag" }     // wide=false -> FUtf8String/FAnsiString bytes
+  ]
 }
 
 // Response (success)
