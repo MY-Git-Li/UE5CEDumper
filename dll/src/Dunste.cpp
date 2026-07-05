@@ -180,7 +180,14 @@ bool FindFuncByName(uintptr_t classAddr, const char* name, FunctionInfo& out) {
 bool InvokeSetCollision(uintptr_t pawn, bool enable) {
     if (!pawn) return false;
     FunctionInfo fi;
-    if (!FindFuncByName(Ubel::GetClass(pawn), "SetActorEnableCollision", fi)) return false;
+    if (!FindFuncByName(Ubel::GetClass(pawn), "SetActorEnableCollision", fi)) {
+        // The setter is cooked out (heavily-stripped Shipping builds, e.g. TQ2) →
+        // noclip can't disable collision here. Flight still works; it just can't
+        // pass through walls. Surface it so a "noclip 無效" report is explained.
+        LOG_WARN("Fly: SetActorEnableCollision NOT FOUND on pawn class — Noclip can't "
+                 "disable collision on this game (flight still works, walls still block)");
+        return false;
+    }
     std::vector<uint8_t> buf((std::max<size_t>)(static_cast<size_t>(fi.parmsSize), size_t{1}), 0);
     for (const auto& p : fi.params)
         if (IEq(p.name, "bNewActorEnableCollision") && p.offset >= 0 && p.offset < (int)buf.size())
@@ -188,6 +195,7 @@ bool InvokeSetCollision(uintptr_t pawn, bool enable) {
     UE5_CallProcessEventEx(pawn, fi.address,
                            reinterpret_cast<uintptr_t>(buf.data()),
                            static_cast<uint32_t>(buf.size()));
+    LOG_INFO("Fly: SetActorEnableCollision(%d) invoked", enable ? 1 : 0);
     return true;
 }
 
