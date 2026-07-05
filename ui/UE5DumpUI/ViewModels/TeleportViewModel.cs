@@ -85,6 +85,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             Hint = "Toggle the Gravity (GravityScale) override on/off." });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "gravdir_toggle",   DisplayName = "Gravity Dir toggle",
             Hint = "Toggle the Gravity Direction override on/off (UE5.4+)." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "fly_toggle",       DisplayName = "Fly toggle",
+            Hint = "Toggle Fly (no-gravity 3D flight) on/off. While flying, use the selected keyboard preset to move." });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "pov_get",      DisplayName = "Get POV",
             Hint = "Read the current camera POV (location / rotation / FOV)." });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "relative",     DisplayName = "TP facing dir",
@@ -391,6 +393,39 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     /// <summary>Slider position as a jump-height percentage (e.g. "400%").</summary>
     public string SuperJumpPercentText => $"{Math.Round(SuperJumpHeightMultiplier * 100.0)}%";
 
+    // ── Fly (Dunste — no-gravity keyboard-driven 3D flight) ────────────
+    /// <summary>Tri-state badge: "ON" (flying) / "OFF" / "Unavailable" (no CMC).</summary>
+    [ObservableProperty] private string _flyState = "Unknown";
+    [ObservableProperty] private string _flyBadgeColor = "#888888";
+
+    /// <summary>Flight speed in uu/s (50…20000). Pushed to the DLL live while fly
+    /// is active; otherwise applied on the next enable.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FlySpeedText))]
+    private double _flySpeed = 1200.0;
+
+    /// <summary>Active keyboard preset (index = DLL preset id): 0 = WASD+QE+ZC,
+    /// 1 = numpad, 2 = arrows.</summary>
+    [ObservableProperty] private int _flyPresetIndex;
+
+    [ObservableProperty] private string _flyCurrentText = "—";
+
+    /// <summary>Tracks whether fly is currently engaged (so the global hotkey +
+    /// the toggle button can flip it).</summary>
+    private bool _flyActive;
+
+    /// <summary>Slider readout, e.g. "1200 uu/s".</summary>
+    public string FlySpeedText => $"{Math.Round(FlySpeed)} uu/s";
+
+    /// <summary>Preset labels for the dropdown (index = DLL preset id — the order
+    /// MUST match Dunste::Preset).</summary>
+    public System.Collections.Generic.IReadOnlyList<string> FlyPresets { get; } = new[]
+    {
+        "WASD  ·  Q/E turn  ·  Z/C up-down",
+        "Numpad 8/4/2/6  ·  7/9 turn  ·  1/3 up-down",
+        "Arrows  ·  Ins/Del turn  ·  PgUp/PgDn up-down",
+    };
+
     // ── Gravity Direction (Laufen, UE5.4+ GravityDirection vector) ─────
     /// <summary>Tri-state badge: "ON" / "OFF" / "Unavailable" (pre-5.4 / no
     /// reflected GravityDirection).</summary>
@@ -496,6 +531,9 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             ApplySuperJumpState(-1);     // super-jump badge back to Unknown
             SuperJumpCurrentText = "—";
             _superJumpActive = false;
+            ApplyFlyState(-1);           // fly badge back to Unknown
+            FlyCurrentText = "—";
+            _flyActive = false;
             ApplyGravDirState(-1);       // gravity-direction badge back to Unknown
             GravDirCurrentText = "—";
             _gravDirActive = false;
@@ -1574,6 +1612,134 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         finally { IsBusy = false; }
     }
 
+    // ── Fly (Dunste — no-gravity keyboard-driven 3D flight) ────────────
+
+    private void ApplyFlyState(int state)
+    {
+        _flyActive = state == 1;
+        (FlyState, FlyBadgeColor) = state switch
+        {
+            1 => ("ON",          "#4EC9B0"),
+            0 => ("OFF",         "#999999"),
+            _ => ("Unavailable", "#C9A04E"),
+        };
+    }
+
+    private void ApplyFlyReadout(FlyStatus st)
+    {
+        if (!st.HasCmc)
+        {
+            FlyCurrentText = "Current: unavailable (no CharacterMovement on this pawn)";
+            ApplyFlyState(-1);
+            return;
+        }
+        FlyCurrentText = st.Active
+            ? string.Format(CultureInfo.InvariantCulture,
+                "Flying at {0:0} uu/s (MovementMode = {1}).", st.Speed, st.CurrentMode)
+            : string.Format(CultureInfo.InvariantCulture,
+                "Ready (MovementMode = {0}). Toggle Fly ON to take off.", st.CurrentMode);
+        ApplyFlyState(st.Active ? 1 : 0);
+    }
+
+    /// <summary>Enable Fly: force MOVE_Flying and start the DLL worker (keyboard
+    /// input is read DLL-side). Pushes the current speed + preset too.</summary>
+    [RelayCommand]
+    private async Task ApplyFlyAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var st = await _dump.FlySetAsync(enable: true, speed: FlySpeed, preset: FlyPresetIndex);
+            ApplyFlyReadout(st);
+            StatusText = st.HasCmc
+                ? $"✈ Fly ON — {FlyPresets[Math.Clamp(FlyPresetIndex, 0, FlyPresets.Count - 1)]}."
+                : "Fly could not engage (no CharacterMovement on this pawn).";
+        }
+        catch (Exception ex)
+        {
+            ApplyFlyState(-1);
+            SetError(ex);
+            _log.Error("Teleport ApplyFly failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Disable Fly: restore the captured MovementMode + stop the worker.</summary>
+    [RelayCommand]
+    private async Task ResetFlyAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var st = await _dump.FlySetAsync(enable: false, speed: null, preset: null);
+            ApplyFlyReadout(st);
+            StatusText = "Fly OFF.";
+        }
+        catch (Exception ex)
+        {
+            ApplyFlyState(-1);
+            SetError(ex);
+            _log.Error("Teleport ResetFly failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>↻ — re-read the live fly state from the current pawn.</summary>
+    [RelayCommand]
+    private async Task RefreshFlyAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var st = await _dump.FlyGetStateAsync();
+            ApplyFlyReadout(st);
+            StatusText = st.HasCmc ? "Read fly state."
+                : "No CharacterMovement on the current pawn.";
+        }
+        catch (Exception ex)
+        {
+            ApplyFlyState(-1);
+            SetError(ex);
+            _log.Error("Teleport RefreshFly failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Live speed change: push to the DLL only while fly is active
+    /// (otherwise it takes effect on the next enable).</summary>
+    partial void OnFlySpeedChanged(double value)
+    {
+        if (_flyActive && IsConnected)
+            _ = PushFlyConfigAsync(speed: value, preset: null);
+    }
+
+    /// <summary>Live preset change: push to the DLL (takes effect next tick).</summary>
+    partial void OnFlyPresetIndexChanged(int value)
+    {
+        if (IsConnected)
+            _ = PushFlyConfigAsync(speed: null, preset: value);
+    }
+
+    /// <summary>Push a config-only change (no enable field) and refresh the badge.</summary>
+    private async Task PushFlyConfigAsync(double? speed, int? preset)
+    {
+        try
+        {
+            var st = await _dump.FlySetAsync(enable: null, speed: speed, preset: preset);
+            ApplyFlyReadout(st);
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Teleport PushFlyConfig failed", ex);
+        }
+    }
+
     // ── Super Jump (force JumpZVelocity, Laufen) ───────────────────────
 
     private void ApplySuperJumpState(int state)
@@ -2116,6 +2282,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                     return;
                 case "gravdir_toggle":
                     _ = (_gravDirActive ? ResetGravDirCommand : ApplyGravDirCommand)
+                        .ExecuteAsync(null);
+                    return;
+                case "fly_toggle":
+                    _ = (_flyActive ? ResetFlyCommand : ApplyFlyCommand)
                         .ExecuteAsync(null);
                     return;
                 case "pov_get":      _ = GetPovCommand.ExecuteAsync(null); return;

@@ -904,6 +904,20 @@
     <sys:String x:Key="str.Tip.TP.SjRefresh">Re-read the live JumpZVelocity and override state from the current pawn's CharacterMovement.</sys:String>
     <sys:String x:Key="str.Tip.TP.SjLocate">Find the JumpZVelocity float in GWorld and select it in the Live Walker.</sys:String>
 
+    <!-- Fly (Dunste — no-gravity keyboard-driven 3D flight) -->
+    <sys:String x:Key="str.TP.FlyHeader">Fly (no-gravity 3D flight)</sys:String>
+    <sys:String x:Key="str.TP.FlyState">State:</sys:String>
+    <sys:String x:Key="str.TP.FlyHint">No-gravity free flight: forces the pawn's CharacterMovement into MOVE_Flying (collision is kept — you won't fall through walls) and steers it with the keyboard. Input is read inside the game, so keep the GAME window focused. Movement follows where you aim (pitch-inclusive), turn keys rotate you, and the up/down keys move straight up/down. Pick a keyboard preset and a speed below, then Fly ON / OFF (or bind the "Fly toggle" global hotkey). The mouse is never captured — your normal look controls still work. Needs a live pawn with a CharacterMovement. Single-player only.</sys:String>
+    <sys:String x:Key="str.TP.FlyPreset">Keys:</sys:String>
+    <sys:String x:Key="str.TP.FlyOn">Fly ON</sys:String>
+    <sys:String x:Key="str.TP.FlyOff">Fly OFF</sys:String>
+    <sys:String x:Key="str.TP.FlyRefresh">↻</sys:String>
+    <sys:String x:Key="str.TP.FlyHotkeyHint">Bind a global hotkey to "Fly toggle" in the Hotkey Settings section above to toggle Fly in-game without alt-tabbing.</sys:String>
+    <sys:String x:Key="str.Tip.TP.FlyPreset">Which keys drive flight: WASD (+Q/E turn, Z/C up-down), the numeric keypad, or the arrow keys (+Ins/Del turn, PgUp/PgDn up-down).</sys:String>
+    <sys:String x:Key="str.Tip.TP.FlyOn">Turn Fly ON — force MOVE_Flying and start reading the keyboard (held against the game re-asserting its own movement mode).</sys:String>
+    <sys:String x:Key="str.Tip.TP.FlyOff">Turn Fly OFF — restore the pawn's captured MovementMode and stop.</sys:String>
+    <sys:String x:Key="str.Tip.TP.FlyRefresh">Re-read the live fly state and MovementMode from the current pawn's CharacterMovement.</sys:String>
+
     <!-- Gravity Direction (Laufen — UE5.4+ UCharacterMovementComponent.GravityDirection) -->
     <sys:String x:Key="str.TP.GdHeader">Gravity Direction (UE5.4+)</sys:String>
     <sys:String x:Key="str.TP.GdState">State:</sys:String>

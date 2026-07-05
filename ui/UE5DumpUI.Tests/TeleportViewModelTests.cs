@@ -83,6 +83,20 @@ public class TeleportViewModelTests
         public override Task<MovementVectorResult> ResetGravityDirectionAsync(CancellationToken ct = default)
         { ResetGravDirCalls++; return Task.FromResult(new MovementVectorResult { State = 0 }); }
 
+        // ── Fly (Dunste) ──
+        public FlyStatus NextFlyStatus { get; set; } = new() { HasCmc = true };
+        public int FlySetCalls { get; private set; }
+        public int FlyGetStateCalls { get; private set; }
+        public bool? LastFlyEnable { get; private set; }
+        public double? LastFlySpeed { get; private set; }
+        public int? LastFlyPreset { get; private set; }
+
+        public override Task<FlyStatus> FlySetAsync(bool? enable, double? speed, int? preset, CancellationToken ct = default)
+        { FlySetCalls++; LastFlyEnable = enable; LastFlySpeed = speed; LastFlyPreset = preset; return Task.FromResult(NextFlyStatus); }
+
+        public override Task<FlyStatus> FlyGetStateAsync(CancellationToken ct = default)
+        { FlyGetStateCalls++; return Task.FromResult(NextFlyStatus); }
+
         public override Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default)
         { GetPoseCalls++; return Task.FromResult(NextPose); }
 
@@ -397,13 +411,45 @@ public class TeleportViewModelTests
     }
 
     [Fact]
+    public async Task Fly_toggle_enables_then_disables()
+    {
+        var fake = new FakeDumpService();
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        fake.NextFlyStatus = new FlyStatus { HasCmc = true, Active = true, CurrentMode = 5, State = 1 };
+        await vm.ApplyFlyCommand.ExecuteAsync(null);
+        Assert.True(fake.LastFlyEnable);
+        Assert.Equal("ON", vm.FlyState);
+
+        fake.NextFlyStatus = new FlyStatus { HasCmc = true, Active = false, CurrentMode = 1, State = 0 };
+        await vm.ResetFlyCommand.ExecuteAsync(null);
+        Assert.False(fake.LastFlyEnable);
+        Assert.Equal("OFF", vm.FlyState);
+    }
+
+    [Fact]
+    public void Fly_preset_change_pushes_config_without_enable()
+    {
+        var fake = new FakeDumpService();
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        fake.NextFlyStatus = new FlyStatus { HasCmc = true, Active = false, CurrentMode = 1 };
+
+        vm.FlyPresetIndex = 2;   // OnFlyPresetIndexChanged → PushFlyConfigAsync (config-only)
+
+        Assert.Equal(2, fake.LastFlyPreset);
+        Assert.Null(fake.LastFlyEnable);   // no enable field on a config-only push
+    }
+
+    [Fact]
     public void Hotkey_rows_cover_all_teleport_actions()
     {
         var vm = CreateVm(new FakeDumpService(), out _, new FakeHotkeyService());
         // 3 save + 3 recall + recall_last + bugit + bugitgo + debugcam_on/off +
         // godmode_on/off + superjump_toggle + movespeed_toggle + gravity_toggle +
-        // gravdir_toggle + pov_get + relative + coords + cursor_on/off.
-        Assert.Equal(22, vm.HotkeyRows.Count);
+        // gravdir_toggle + fly_toggle + pov_get + relative + coords + cursor_on/off.
+        Assert.Equal(23, vm.HotkeyRows.Count);
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "save0" && r.DisplayName == "Save marker 1");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall2" && r.DisplayName == "Recall marker 3");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall_last" && r.DisplayName == "Recall last");
@@ -417,6 +463,7 @@ public class TeleportViewModelTests
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "movespeed_toggle" && r.DisplayName == "Move Speed toggle");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "gravity_toggle" && r.DisplayName == "Gravity toggle");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "gravdir_toggle" && r.DisplayName == "Gravity Dir toggle");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "fly_toggle" && r.DisplayName == "Fly toggle");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "pov_get" && r.DisplayName == "Get POV");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "relative" && r.DisplayName == "TP facing dir");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "coords" && r.DisplayName == "TP to coords");

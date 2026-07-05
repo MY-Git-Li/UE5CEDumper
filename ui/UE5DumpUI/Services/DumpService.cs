@@ -2731,6 +2731,38 @@ public sealed class DumpService : IDumpService
         };
     }
 
+    // === Fly (Dunste) — no-gravity keyboard-driven 3D flight ===
+
+    public async Task<FlyStatus> FlySetAsync(bool? enable, double? speed, int? preset, CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "fly_set" };
+        if (enable.HasValue) req["enable"] = enable.Value;
+        if (speed.HasValue)  req["speed"]  = speed.Value;
+        if (preset.HasValue) req["preset"] = preset.Value;
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return ParseFlyStatus(res);
+    }
+
+    public async Task<FlyStatus> FlyGetStateAsync(CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "fly_get_state" };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return ParseFlyStatus(res);
+    }
+
+    private static FlyStatus ParseFlyStatus(JsonNode? res) => new FlyStatus
+    {
+        Code        = res?["code"]?.GetValue<int>() ?? 0,
+        Active      = res?["active"]?.GetValue<bool>() ?? false,
+        HasCmc      = res?["has_cmc"]?.GetValue<bool>() ?? false,
+        Preset      = res?["preset"]?.GetValue<int>() ?? 0,
+        Speed       = res?["speed"]?.GetValue<double>() ?? 0.0,
+        CurrentMode = res?["current_mode"]?.GetValue<int>() ?? -1,
+        State       = res?["state"]?.GetValue<int>() ?? -1,
+    };
+
     // === Teleport (Wirbel) — docs/teleport-spec.md §7 ===
 
     public async Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default)
