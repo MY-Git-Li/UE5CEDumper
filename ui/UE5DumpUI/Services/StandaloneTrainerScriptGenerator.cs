@@ -47,6 +47,11 @@ public static class StandaloneTrainerScriptGenerator
             entries.Add(new("UE5 Trainer: Super Jump (4x height)", BuildJump(o.JumpOff, "4.0"), false));
         if (o.GodBits.Count > 0)
             entries.Add(new("UE5 Trainer: God Mode", BuildGodMode(), false));
+        // Pure-Lua velocity fly (no DLL, no ProcessEvent) — needs the CMC MovementMode
+        // + Velocity offsets and a Controller back-ref for the view-relative basis.
+        if (o.PawnToCmc >= 0 && o.MoveModeOff >= 0 && o.VelocityOff >= 0
+            && o.CtrlRotOff >= 0 && o.PawnToController >= 0)
+            entries.Add(new("UE5 Trainer: Fly (velocity, view-relative)", BuildFly(), false));
 
         // Coordinate teleport (Save/Recall) — IsUsable already guarantees these.
         entries.Add(new(SaveDescription, BuildTpSave(), false));
@@ -76,6 +81,10 @@ public static class StandaloneTrainerScriptGenerator
         Line(sb, "  },");
         Line(sb, $"  rootOff = {Hex(o.PawnToRoot)}, relLocOff = {Hex(o.RootToRelLoc)}, vecWidth = {o.VecElementWidth},");
         Line(sb, $"  cmcOff = {Hex(o.PawnToCmc)}, maxWalkOff = {Hex(o.WalkSpeedOff)}, gravOff = {Hex(o.GravityOff)}, jumpOff = {Hex(o.JumpOff)},");
+        // Fly config: MovementMode / Velocity on the CMC, ControlRotation via the
+        // Controller back-ref (yaw = ControlRotation's 2nd component = +vecWidth).
+        Line(sb, $"  moveModeOff = {Hex(o.MoveModeOff)}, velOff = {Hex(o.VelocityOff)}, ctrlRotOff = {Hex(o.CtrlRotOff)}, controllerOff = {Hex(o.PawnToController)},");
+        Line(sb, "  flySpeed = 1200, flyTickMs = 16,   -- fly: edit flySpeed (uu/s)");
         Line(sb, "  godBits = {");
         foreach (var b in o.GodBits)
             Line(sb, $"    {{ off = {Hex(b.ByteOffset)}, mask = {Hex(b.Mask)}, protect = {b.Protect} }},   -- {b.Name}");
@@ -125,6 +134,8 @@ public static class StandaloneTrainerScriptGenerator
         Line(sb, "  if UE5T_stopKnob then UE5T_stopKnob('speed'); UE5T_stopKnob('grav'); UE5T_stopKnob('jump') end");
         Line(sb, "  local t = UE5T.god_timer");
         Line(sb, "  if t then t.destroy(); UE5T.god_timer = nil end");
+        Line(sb, "  local ft = UE5T.fly_timer");
+        Line(sb, "  if ft then ft.destroy(); UE5T.fly_timer = nil end");
         Line(sb, "  synchronize(function() unregisterSymbol(UE5T.sym) end)");
         Line(sb, "end");
         Line(sb, "UE5T_ready = false");
@@ -262,6 +273,73 @@ public static class StandaloneTrainerScriptGenerator
         Line(sb, "  local p = UE5T_pawn()");
         Line(sb, "  if p then for _, g in ipairs(UE5T.godBits) do UE5T_setbit(p + g.off, g.mask, 1 - g.protect) end end");
         Line(sb, "end");
+        Line(sb, $"if DEBUG == 0 then {Close} end");
+        EndDisable(sb);
+        return sb.ToString();
+    }
+
+    // ---- Fly: pure-Lua velocity-drive, view-relative (no DLL, no ProcessEvent) ----
+    // Holds MOVE_Flying(5) on the CMC and drives its Velocity from WASD + Z/C each
+    // ~60 Hz tick, projected onto the camera (ControlRotation) yaw. Turn with the
+    // mouse. No Noclip here — that needs SetActorEnableCollision (a ProcessEvent
+    // invoke the standalone path avoids). Best-effort: a game that overwrites
+    // Velocity every frame (e.g. FF7 Rebirth) won't move — use the DLL Fly instead.
+    private static string BuildFly()
+    {
+        var sb = new StringBuilder(2048);
+        BeginEnable(sb);
+        Line(sb, "if not UE5T_ready then showMessage('[UE5 Trainer] Enable Setup first.'); return end");
+        Line(sb, "if not isKeyPressed then showMessage('[UE5 Trainer] Fly needs CE isKeyPressed -- update Cheat Engine.'); return end");
+        Line(sb, "local old = UE5T.fly_timer");
+        Line(sb, "if old then old.destroy(); UE5T.fly_timer = nil end");
+        Line(sb, "UE5T.fly_pawn = nil   -- re-capture the natural MovementMode on (re)enable");
+        Line(sb, "local t = createTimer(nil, false)");
+        Line(sb, "t.Interval = UE5T.flyTickMs");
+        Line(sb, "t.OnTimer = function()");
+        Line(sb, "  local p = UE5T_pawn(); if not p then return end");
+        Line(sb, "  local c = UE5T_deref(p, UE5T.cmcOff); if not c then return end");
+        Line(sb, "  -- capture the pawn's natural MovementMode once, then force MOVE_Flying(5)");
+        Line(sb, "  if UE5T.fly_pawn ~= p then UE5T.fly_baseMode = readByte(c + UE5T.moveModeOff) or 1; UE5T.fly_pawn = p end");
+        Line(sb, "  writeByte(c + UE5T.moveModeOff, 5)");
+        Line(sb, "  -- view-relative basis: yaw = ControlRotation (2nd component) on the Controller");
+        Line(sb, "  local yaw = 0");
+        Line(sb, "  local ctrl = UE5T_deref(p, UE5T.controllerOff)");
+        Line(sb, "  if ctrl then yaw = UE5T_rdv(ctrl + UE5T.ctrlRotOff + UE5T.vecWidth) or 0 end");
+        Line(sb, "  local r = math.rad(yaw)");
+        Line(sb, "  local fx, fy = math.cos(r), math.sin(r)     -- forward (yaw)");
+        Line(sb, "  local rx, ry = -math.sin(r), math.cos(r)    -- right");
+        Line(sb, "  local vx, vy, vz = 0, 0, 0");
+        Line(sb, "  if isKeyPressed(0x57) then vx = vx + fx; vy = vy + fy end   -- W forward");
+        Line(sb, "  if isKeyPressed(0x53) then vx = vx - fx; vy = vy - fy end   -- S back");
+        Line(sb, "  if isKeyPressed(0x44) then vx = vx + rx; vy = vy + ry end   -- D right");
+        Line(sb, "  if isKeyPressed(0x41) then vx = vx - rx; vy = vy - ry end   -- A left");
+        Line(sb, "  if isKeyPressed(0x5A) then vz = vz + 1 end                  -- Z up");
+        Line(sb, "  if isKeyPressed(0x43) then vz = vz - 1 end                  -- C down");
+        Line(sb, "  local len = math.sqrt(vx*vx + vy*vy + vz*vz)");
+        Line(sb, "  if len > 0.0001 then local s = UE5T.flySpeed / len; vx = vx*s; vy = vy*s; vz = vz*s end");
+        Line(sb, "  UE5T_wrv(c + UE5T.velOff, vx)");
+        Line(sb, "  UE5T_wrv(c + UE5T.velOff + UE5T.vecWidth, vy)");
+        Line(sb, "  UE5T_wrv(c + UE5T.velOff + 2 * UE5T.vecWidth, vz)");
+        Line(sb, "end");
+        Line(sb, "t.Enabled = true");
+        Line(sb, "UE5T.fly_timer = t");
+        Line(sb, "dbg('[UE5 Trainer] Fly ON (WASD + Z/C, turn with mouse)')");
+        Line(sb, $"if DEBUG == 0 then {Close} end");
+        EndEnable(sb);
+        BeginDisable(sb);
+        Line(sb, "local t = UE5T and UE5T.fly_timer");
+        Line(sb, "if t then t.destroy(); UE5T.fly_timer = nil end");
+        Line(sb, "if UE5T_ready and UE5T.fly_pawn then");
+        Line(sb, "  local p = UE5T_pawn()");
+        Line(sb, "  local c = p and UE5T_deref(p, UE5T.cmcOff)");
+        Line(sb, "  if c then");
+        Line(sb, "    writeByte(c + UE5T.moveModeOff, UE5T.fly_baseMode or 1)   -- restore MovementMode");
+        Line(sb, "    UE5T_wrv(c + UE5T.velOff, 0)");
+        Line(sb, "    UE5T_wrv(c + UE5T.velOff + UE5T.vecWidth, 0)");
+        Line(sb, "    UE5T_wrv(c + UE5T.velOff + 2 * UE5T.vecWidth, 0)");
+        Line(sb, "  end");
+        Line(sb, "end");
+        Line(sb, "UE5T.fly_pawn = nil");
         Line(sb, $"if DEBUG == 0 then {Close} end");
         EndDisable(sb);
         return sb.ToString();

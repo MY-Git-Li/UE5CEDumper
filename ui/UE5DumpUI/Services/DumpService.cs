@@ -2619,6 +2619,10 @@ public sealed class DumpService : IDumpService
             JumpOff      = res["jump_off"]?.GetValue<int>() ?? -1,
             CtrlRotOff   = res["ctrl_rot_off"]?.GetValue<int>() ?? -1,
             CtrlRotSize  = res["ctrl_rot_size"]?.GetValue<int>() ?? 0,
+            PawnToController = res["pawn_to_controller"]?.GetValue<int>() ?? -1,
+            MoveModeOff  = res["move_mode_off"]?.GetValue<int>() ?? -1,
+            VelocityOff  = res["velocity_off"]?.GetValue<int>() ?? -1,
+            VelocitySize = res["velocity_size"]?.GetValue<int>() ?? 0,
         };
         if (res["chain"] is JsonArray chain)
             foreach (var h in chain)

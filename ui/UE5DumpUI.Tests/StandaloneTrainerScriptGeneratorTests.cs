@@ -20,6 +20,8 @@ public class StandaloneTrainerScriptGeneratorTests
         },
         PawnToRoot = 0x1A0, RootToRelLoc = 0x120, FVectorWidth = 24,
         PawnToCmc = 0x520, WalkSpeedOff = 0x1B0, GravityOff = 0x100, JumpOff = 0x1A4,
+        CtrlRotOff = 0x2C8, CtrlRotSize = 24, PawnToController = 0x210,
+        MoveModeOff = 0x1F4, VelocityOff = 0x160, VelocitySize = 24,
         GodBits = { new TrainerProtectBit { Name = "bCanBeDamaged", ByteOffset = 0x9C, Mask = 0x1, Protect = 0 } },
         Module = "Game.exe", GWorldAob = "48 8B 1D ?? ?? ?? ??", GWorldAobPos = 3, GWorldAobLen = 7,
     };
@@ -88,6 +90,31 @@ public class StandaloneTrainerScriptGeneratorTests
         Assert.DoesNotContain(descs, d => d.Contains("Move Speed"));
         // Gravity still present (its offset resolved) — omission is per-feature.
         Assert.Contains(descs, d => d.Contains("Gravity"));
+    }
+
+    [Fact]
+    public void Fly_present_when_offsets_resolve_and_bakes_config()
+    {
+        var entries = StandaloneTrainerScriptGenerator.Generate(Usable());
+        Assert.Contains(entries, e => e.Description.Contains("Fly"));
+        var setup = entries[0].Script;
+        Assert.Contains("moveModeOff = 0x1F4", setup);
+        Assert.Contains("velOff = 0x160", setup);
+        Assert.Contains("controllerOff = 0x210", setup);
+        Assert.Contains("flySpeed = 1200", setup);
+        var fly = entries.First(e => e.Description.Contains("Fly")).Script;
+        Assert.Contains("writeByte(c + UE5T.moveModeOff, 5)", fly);   // force MOVE_Flying
+        Assert.Contains("isKeyPressed(0x57)", fly);                   // W = forward
+    }
+
+    [Fact]
+    public void Fly_omitted_when_move_mode_offset_missing()
+    {
+        var o = Usable();
+        o.MoveModeOff = -1;
+        var descs = StandaloneTrainerScriptGenerator.Generate(o).Select(e => e.Description).ToList();
+        Assert.DoesNotContain(descs, d => d.Contains("Fly"));
+        Assert.Contains(descs, d => d.Contains("Move Speed"));   // per-feature omission
     }
 
     [Fact]

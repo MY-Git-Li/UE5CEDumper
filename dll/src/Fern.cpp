@@ -4431,6 +4431,10 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                 data["jump_off"]       = t.JumpOff;
                 data["ctrl_rot_off"]   = t.CtrlRotOff;
                 data["ctrl_rot_size"]  = t.CtrlRotSize;
+                data["pawn_to_controller"] = t.PawnToController;   // fly: reach ControlRotation
+                data["move_mode_off"]  = t.MoveModeOff;            // fly: CMC.MovementMode
+                data["velocity_off"]   = t.VelocityOff;            // fly: CMC.Velocity
+                data["velocity_size"]  = t.VelocitySize;
                 // Protection bits (bCanBeDamaged + any matched invincibility bool).
                 std::vector<Solitar::ProtectBit> bits;
                 json god = json::array();

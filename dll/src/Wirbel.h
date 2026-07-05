@@ -128,6 +128,10 @@ struct TrainerOffsets {
     int32_t JumpOff      = -1;      // UCharacterMovementComponent.JumpZVelocity (float)
     int32_t CtrlRotOff   = -1;      // AController.ControlRotation (inline FRotator)
     int32_t CtrlRotSize  = 0;       // 12 (float) or 24 (double/LWC)
+    int32_t PawnToController = -1;  // APawn.Controller (deref) — reach ControlRotation for the fly basis
+    int32_t MoveModeOff  = -1;      // UCharacterMovementComponent.MovementMode (1 byte enum) — fly
+    int32_t VelocityOff  = -1;      // UCharacterMovementComponent.Velocity (inline FVector) — fly
+    int32_t VelocitySize = 0;       // 12 (float) or 24 (double/LWC)
 };
 
 // Resolve the standalone-trainer offset bundle (§ standalone-ce-lua-trainer).
