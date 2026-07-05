@@ -24,6 +24,29 @@ public partial class ProxyDeployViewModel : ViewModelBase
     [ObservableProperty] private bool _forceOverwrite;
     [ObservableProperty] private string? _lastOperationResult;
 
+    // Status text colours — the top Status line + the last-result label turn a
+    // prominent red when an operation reports failures (e.g. a deploy write blocked
+    // by a file lock because the game is still running), green on full success, and
+    // neutral gray otherwise. Bound to the TextBlock Foregrounds in the XAML.
+    private const string StatusNeutral = "#888888";
+    private const string StatusSuccess = "#4EC9B0";
+    private const string StatusError   = "#F14C4C";
+    [ObservableProperty] private string _statusColor = StatusNeutral;
+    [ObservableProperty] private string _lastOperationColor = StatusNeutral;
+
+    /// <summary>Set an operation's result on both the running Status line and the
+    /// persistent last-result label, coloured red when any item failed (e.g. a
+    /// file-locked write) or green on full success.</summary>
+    private void SetOperationResult(string text, int fail)
+    {
+        LastOperationResult = text;
+        StatusText = text;
+        string color = fail > 0 ? StatusError : StatusSuccess;
+        StatusColor = color;
+        LastOperationColor = color;
+        _log.Info("ProxyDeploy", text);
+    }
+
     /// <summary>
     /// Which proxy DLL the user wants to deploy. Bound to the RadioButtons
     /// at the top of the panel. Changing this triggers a status refresh so
@@ -145,6 +168,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
         {
             ClearError();
             IsScanning = true;
+            StatusColor = StatusNeutral;
             StatusText = "Detecting Steam libraries...";
             LastOperationResult = null;
 
@@ -178,6 +202,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
         catch (Exception ex)
         {
             StatusText = "Scan failed";
+            StatusColor = StatusError;
             SetError(ex);
             _log.Error("ProxyDeploy", $"Scan failed: {ex.Message}");
         }
@@ -195,6 +220,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
         try
         {
             ClearError();
+            StatusColor = StatusNeutral;
             StatusText = "Refreshing status...";
             LastOperationResult = null;
 
@@ -209,6 +235,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
         catch (Exception ex)
         {
             StatusText = "Refresh failed";
+            StatusColor = StatusError;
             SetError(ex);
         }
     }
@@ -216,6 +243,8 @@ public partial class ProxyDeployViewModel : ViewModelBase
     [RelayCommand]
     private async Task DeploySelectedAsync(CancellationToken ct)
     {
+        StatusColor = StatusNeutral;
+        LastOperationColor = StatusNeutral;
         if (IsScanning) { LastOperationResult = "Wait for scan to finish"; return; }
 
         if (!File.Exists(SourceDllPath))
@@ -247,14 +276,14 @@ public partial class ProxyDeployViewModel : ViewModelBase
         // Refresh status from disk to ensure DataGrid reflects actual state
         await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, ct);
 
-        LastOperationResult = $"Deployed: {ok} success, {fail} failed";
-        StatusText = LastOperationResult;
-        _log.Info("ProxyDeploy", LastOperationResult);
+        SetOperationResult($"Deployed: {ok} success, {fail} failed", fail);
     }
 
     [RelayCommand]
     private async Task UndeploySelectedAsync(CancellationToken ct)
     {
+        StatusColor = StatusNeutral;
+        LastOperationColor = StatusNeutral;
         if (IsScanning) { LastOperationResult = "Wait for scan to finish"; return; }
 
         var selected = Games.Where(g => g.IsSelected).ToList();
@@ -280,14 +309,14 @@ public partial class ProxyDeployViewModel : ViewModelBase
         // Refresh status from disk to ensure DataGrid reflects actual state
         await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, ct);
 
-        LastOperationResult = $"Removed: {ok} success, {fail} failed";
-        StatusText = LastOperationResult;
-        _log.Info("ProxyDeploy", LastOperationResult);
+        SetOperationResult($"Removed: {ok} success, {fail} failed", fail);
     }
 
     [RelayCommand]
     private async Task UpdateAllAsync(CancellationToken ct)
     {
+        StatusColor = StatusNeutral;
+        LastOperationColor = StatusNeutral;
         if (IsScanning)
         {
             LastOperationResult = "Wait for scan to finish";
@@ -348,16 +377,19 @@ public partial class ProxyDeployViewModel : ViewModelBase
 
         if (updated == 0 && fail == 0)
         {
-            LastOperationResult = upToDate > 0
+            string msg = upToDate > 0
                 ? $"All {upToDate} deployed proxy DLL(s) already up-to-date"
                 : "No deployed proxy DLLs to update";
+            LastOperationResult = msg;
+            StatusText = msg;
+            StatusColor = StatusNeutral;
+            LastOperationColor = StatusNeutral;
+            _log.Info("ProxyDeploy", msg);
         }
         else
         {
-            LastOperationResult = $"Updated: {updated}, up-to-date: {upToDate}, failed: {fail}";
+            SetOperationResult($"Updated: {updated}, up-to-date: {upToDate}, failed: {fail}", fail);
         }
-        StatusText = LastOperationResult;
-        _log.Info("ProxyDeploy", LastOperationResult);
     }
 
     // ────────────────────────────────────────────────────────────────
