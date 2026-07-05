@@ -104,6 +104,12 @@ constexpr const char* CMD_RESET_MOVEMENT           = "reset_movement";
 constexpr const char* CMD_SET_GRAVITY_DIRECTION    = "set_gravity_direction";
 constexpr const char* CMD_RESET_GRAVITY_DIRECTION  = "reset_gravity_direction";
 
+// Fly (Dunste) — no-gravity keyboard-driven 3D flight. fly_set applies whichever
+// of {enable, speed, preset} are present and returns the live status; fly_get_state
+// polls it. Input is read DLL-side (GetAsyncKeyState); the UI only toggles/config.
+constexpr const char* CMD_FLY_SET                  = "fly_set";
+constexpr const char* CMD_FLY_GET_STATE            = "fly_get_state";
+
 // Standalone CE-Lua trainer bake (no-DLL trainer export). One-shot: returns the
 // decomposed *GWorld->Pawn offset chain + RootComponent/RelativeLocation,
 // CharacterMovement + knob offsets, and the protection bits — everything a

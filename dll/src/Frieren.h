@@ -176,6 +176,20 @@ __declspec(dllexport) int32_t   UE5_SetMovementPercent(int32_t knobId, double pe
 // Mimic mailbox (CMD_MOVEMENT=10, knobId=3, paramsData = 3 doubles x/y/z).
 __declspec(dllexport) int32_t   UE5_SetGravityDirection(double x, double y, double z);
 
+// === Fly (Dunste) — no-gravity keyboard-driven 3D flight ===
+// Toggle engine-flying (MOVE_Flying, collision preserved) on the local pawn,
+// held by a re-assert worker that also samples the keyboard and drives the CMC
+// Velocity each ~60 Hz tick. enable!=0 = on, 0 = off. Returns 1 (active) /
+// 0 (off) / negative Dunste::FlyResult. Input is read DLL-side (no per-frame
+// IPC); the UI/mailbox only toggle + set speed/preset. CE Lua uses the Mimic
+// mailbox (CMD_FLY=11).
+__declspec(dllexport) int32_t   UE5_SetFly(int32_t enable);
+// Flight speed in uu/s (clamped to [FLY_SPEED_MIN, FLY_SPEED_MAX]). Returns FR_OK.
+__declspec(dllexport) int32_t   UE5_SetFlySpeed(double uuPerSec);
+// Keyboard preset: 0 = WASD+QE+ZC, 1 = numpad, 2 = arrows+Ins/Del+PgUp/PgDn.
+// Returns FR_OK, or negative Dunste::FlyResult for an out-of-range value.
+__declspec(dllexport) int32_t   UE5_SetFlyPreset(int32_t preset);
+
 // === Mailbox (CE Lua shared memory interface) ===
 // Returns the address of the g_invokeMailbox buffer.
 // CE Lua can also use getAddress("g_invokeMailbox") directly.

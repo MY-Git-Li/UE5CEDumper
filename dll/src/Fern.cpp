@@ -19,6 +19,7 @@
 #include "Tot.h"
 #include "Wirbel.h"
 #include "Laufen.h"
+#include "Dunste.h"    // Dunste::SetEnabled/SetSpeed/SetPreset/GetStatus for fly_*
 #include "Solitar.h"   // Solitar::ResolveProtectBits for get_trainer_offsets
 #include "Edel.h"
 #include "BuildStamp.h"
@@ -4291,6 +4292,49 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             data["active"]     = info.active;
             data["resolved"]   = info.resolved;
             return Renge::MakeResponse(id, data).dump();
+        }
+
+        // ── fly_set / fly_get_state (Dunste) — no-gravity 3D flight ──
+        // fly_set applies whichever of {enable, speed, preset} are present, then
+        // returns the live status. Input (WASD/numpad/arrows) is sampled DLL-side
+        // by the fly worker (GetAsyncKeyState) — the pipe only toggles + configs,
+        // so there is no per-frame IPC.
+        auto flyStatusJson = [](const Dunste::FlyStatus& st) {
+            json data;
+            data["code"]          = st.code;          // 0 ok; negative Dunste::FlyResult
+            data["active"]        = st.active;
+            data["has_cmc"]       = st.hasCmc;
+            data["preset"]        = st.preset;        // 0 WASD / 1 numpad / 2 arrows
+            data["speed"]         = st.speed;         // uu/s
+            data["mode_resolved"] = st.modeResolved;
+            data["current_mode"]  = st.currentMode;   // live MovementMode enum (5 = flying)
+            if (st.hasCmc && st.cmcAddr)
+                data["cmc_addr"]  = Renge::AddrToStr(st.cmcAddr);
+            return data;
+        };
+        if (cmd == Renge::CMD_FLY_SET) {
+            if (request.contains("speed"))
+                Dunste::SetSpeed(request.value("speed", 0.0));
+            if (request.contains("preset"))
+                Dunste::SetPreset(request.value("preset", 0));
+            int32_t state = -1;
+            const bool haveEnable = request.contains("enable");
+            if (haveEnable)
+                state = Dunste::SetEnabled(request.value("enable", false));
+            Sein::Info("PIPE:cmd", "fly_set: enable=%s speed=%s preset=%s",
+                       haveEnable ? (request.value("enable", false) ? "1" : "0") : "-",
+                       request.contains("speed") ? "y" : "-",
+                       request.contains("preset") ? "y" : "-");
+            Dunste::FlyStatus st{};
+            Dunste::GetStatus(st);
+            json data = flyStatusJson(st);
+            data["state"] = haveEnable ? state : (st.active ? 1 : 0);
+            return Renge::MakeResponse(id, data).dump();
+        }
+        if (cmd == Renge::CMD_FLY_GET_STATE) {
+            Dunste::FlyStatus st{};
+            Dunste::GetStatus(st);
+            return Renge::MakeResponse(id, flyStatusJson(st)).dump();
         }
 
         // ── teleport_*: marker save/recall + cursor teleport (Wirbel) ──

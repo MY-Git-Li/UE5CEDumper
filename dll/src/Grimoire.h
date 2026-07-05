@@ -217,4 +217,12 @@ constexpr int    MOVE_REASSERT_MS         = 250;     // re-assert worker tick (w
 constexpr double MOVE_MULT_MIN            = 0.1;     // 10%  — UI slider floor
 constexpr double MOVE_MULT_MAX            = 10.0;    // 1000% — UI slider ceiling
 
+// --- Fly (Dunste) — no-gravity 3D flight ---
+constexpr int     FLY_TICK_MS            = 16;       // fly worker tick (~60 Hz)
+constexpr double  FLY_SPEED_MIN          = 50.0;     // uu/s — UI slider floor
+constexpr double  FLY_SPEED_MAX          = 20000.0;  // uu/s — UI slider ceiling
+constexpr double  FLY_SPEED_DEFAULT      = 1200.0;   // uu/s (~2× default walk speed)
+constexpr double  FLY_TURN_DEG_PER_S     = 120.0;    // yaw rate for the turn keys (deg/s)
+constexpr uint8_t MOVE_FLYING            = 5;        // EMovementMode::MOVE_Flying (UE4/UE5 stable)
+
 } // namespace Grimoire

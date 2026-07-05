@@ -19,6 +19,7 @@
 #include "Aura.h"
 #include "Ubel.h"
 #include "Wirbel.h"
+#include "Dunste.h"
 #include "Grimoire.h"
 
 #include <Windows.h>
@@ -85,6 +86,7 @@ static void HandleSetDebugCamera();
 static void HandleTeleport();
 static void HandleProtect();
 static void HandleMovement();
+static void HandleFly();
 static void SetError(int32_t code, const char* msg);
 static void SetDone(int32_t resultCode);
 static bool EnsureInitialized();
@@ -181,6 +183,9 @@ static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
                 break;
             case CMD_MOVEMENT:
                 HandleMovement();
+                break;
+            case CMD_FLY:
+                HandleFly();
                 break;
             default:
                 SetError(-1, "Unknown command");
@@ -921,6 +926,52 @@ static void HandleMovement() {
         char msg[128];
         snprintf(msg, sizeof(msg), "Movement: knob=%llu failed code=%d",
                  (unsigned long long)knobId, rc);
+        strncpy(g_invokeMailbox.errorMsg, msg, sizeof(g_invokeMailbox.errorMsg) - 1);
+        g_invokeMailbox.errorMsg[sizeof(g_invokeMailbox.errorMsg) - 1] = '\0';
+    }
+    SetDone(rc);
+}
+
+// CMD_FLY (Dunste): toggle no-gravity flight + set speed/preset, shared with the
+// UI pipe (fly_set). instanceAddr = op (FlyOp); ufuncAddr / paramsData carry the
+// operand (read BEFORE SetDone). GET_STATE writes the live status into paramsData.
+static void HandleFly() {
+    const uint64_t op = g_invokeMailbox.instanceAddr;
+    int32_t rc;
+    switch (op) {
+    case FLY_OP_SET_ENABLED:
+        rc = UE5_SetFly(static_cast<int32_t>(g_invokeMailbox.ufuncAddr) != 0 ? 1 : 0);
+        LOG_INFO("Mailbox: FLY enable=%llu -> rc=%d",
+                 (unsigned long long)g_invokeMailbox.ufuncAddr, rc);
+        break;
+    case FLY_OP_SET_SPEED: {
+        double speed = 0.0;
+        memcpy(&speed, g_invokeMailbox.paramsData, sizeof(double));
+        rc = UE5_SetFlySpeed(speed);
+        LOG_INFO("Mailbox: FLY speed=%.0f -> rc=%d", speed, rc);
+        break;
+    }
+    case FLY_OP_SET_PRESET:
+        rc = UE5_SetFlyPreset(static_cast<int32_t>(g_invokeMailbox.ufuncAddr));
+        LOG_INFO("Mailbox: FLY preset=%llu -> rc=%d",
+                 (unsigned long long)g_invokeMailbox.ufuncAddr, rc);
+        break;
+    case FLY_OP_GET_STATE: {
+        Dunste::FlyStatus st{};
+        rc = Dunste::GetStatus(st);
+        g_invokeMailbox.paramsData[0] = st.active ? 1 : 0;
+        g_invokeMailbox.paramsData[1] = static_cast<uint8_t>(st.preset);
+        memcpy(g_invokeMailbox.paramsData + 8, &st.speed, sizeof(double));
+        break;
+    }
+    default:
+        rc = Dunste::FR_ERR_REFLECT;
+        break;
+    }
+    if (rc < 0) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "Fly: op=%llu failed code=%d",
+                 (unsigned long long)op, rc);
         strncpy(g_invokeMailbox.errorMsg, msg, sizeof(g_invokeMailbox.errorMsg) - 1);
         g_invokeMailbox.errorMsg[sizeof(g_invokeMailbox.errorMsg) - 1] = '\0';
     }
