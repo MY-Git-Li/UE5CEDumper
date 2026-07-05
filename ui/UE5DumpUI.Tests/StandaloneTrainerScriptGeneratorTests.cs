@@ -93,20 +93,24 @@ public class StandaloneTrainerScriptGeneratorTests
     }
 
     [Fact]
-    public void Fly_present_when_offsets_resolve_and_bakes_config()
+    public void Fly_present_per_preset_and_bakes_config()
     {
         var entries = StandaloneTrainerScriptGenerator.Generate(Usable());
-        Assert.Contains(entries, e => e.Description.Contains("Fly"));
+        var fly = entries.Where(e => e.Description.Contains("Fly")).ToList();
+        Assert.Equal(3, fly.Count);   // WASD / Numpad / Arrows
         var setup = entries[0].Script;
         Assert.Contains("moveModeOff = 0x1F4", setup);
         Assert.Contains("velOff = 0x160", setup);
         Assert.Contains("controllerOff = 0x210", setup);
         Assert.Contains("flySpeed = 1200", setup);
-        var fly = entries.First(e => e.Description.Contains("Fly")).Script;
-        Assert.Contains("writeByte(c + UE5T.moveModeOff, 5)", fly);   // force MOVE_Flying
-        Assert.Contains("isKeyPressed(0x57)", fly);                   // W = forward
+        var wasd = fly.First(e => e.Description.Contains("WASD")).Script;
+        Assert.Contains("writeByte(c + UE5T.moveModeOff, 5)", wasd);   // force MOVE_Flying
+        Assert.Contains("isKeyPressed(0x57)", wasd);                   // W = forward
         // Keys only drive movement while the game is foreground (else hover).
-        Assert.Contains("getForegroundProcess() == getOpenedProcessID()", fly);
+        Assert.Contains("getForegroundProcess() == getOpenedProcessID()", wasd);
+        // Each preset bakes its own key set.
+        Assert.Contains("isKeyPressed(0x68)", fly.First(e => e.Description.Contains("Numpad")).Script);   // Num8
+        Assert.Contains("isKeyPressed(0x26)", fly.First(e => e.Description.Contains("Arrows")).Script);    // Up arrow
     }
 
     [Fact]

@@ -77,11 +77,27 @@ public class FlyScriptGeneratorTests
     }
 
     [Fact]
-    public void BuildBatchRows_returns_two_fly_rows()
+    public void Enable_with_preset_sets_preset_before_enabling()
+    {
+        // Without a preset, no SET_PRESET (op 2) call.
+        Assert.DoesNotContain("writeQword(mb + 0x10, 2)",
+            FlyScriptGenerator.Generate(FlyScriptGenerator.FlyToggle.Enabled));
+        // With a preset, the ENABLE first fires FLY_OP_SET_PRESET (op 2).
+        var s = FlyScriptGenerator.Generate(FlyScriptGenerator.FlyToggle.Enabled, 1);   // Numpad
+        Assert.Contains("writeQword(mb + 0x10, 2)", s);   // FLY_OP_SET_PRESET
+        Assert.Contains("writeQword(mb + 0x10, 0)", s);   // then FLY_OP_SET_ENABLED
+    }
+
+    [Fact]
+    public void BuildBatchRows_returns_one_row_per_preset_plus_noclip()
     {
         var rows = FlyScriptGenerator.BuildBatchRows();
-        Assert.Equal(2, rows.Count);
+        Assert.Equal(FlyScriptGenerator.PresetNames.Length + 1, rows.Count);   // 3 presets + noclip
         Assert.All(rows, r => Assert.Equal("Fly", r.Category));
         Assert.All(rows, r => Assert.IsType<CtScriptRow>(r));
+        Assert.Contains(rows, r => r.Description.Contains("WASD"));
+        Assert.Contains(rows, r => r.Description.Contains("Numpad"));
+        Assert.Contains(rows, r => r.Description.Contains("Arrows"));
+        Assert.Contains(rows, r => r.Description.Contains("Noclip"));
     }
 }

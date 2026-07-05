@@ -2465,18 +2465,20 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             string gdScript = MovementScriptGenerator.GenerateGravityDirection(GravDirX, GravDirY, GravDirZ);
             if (await _aobMaker!.CreateAAScriptAsync(gdDesc, gdScript, autoActivate: false))
                 ok++;
-            // Fly (Dunste) — DLL-driven no-gravity flight; stateful on/off toggles.
-            var flySpecs = new (string Desc, FlyScriptGenerator.FlyToggle Toggle)[]
-            {
-                ("Fly: no-gravity 3D flight",   FlyScriptGenerator.FlyToggle.Enabled),
-                ("Fly: Noclip (through walls)", FlyScriptGenerator.FlyToggle.Noclip),
-            };
+            // Fly (Dunste) — one row per key preset (WASD often collides with the game's
+            // own movement) + a Noclip toggle. DLL-driven; stateful on/off.
+            var flySpecs = new List<(string Desc, string Script)>();
+            for (int p = 0; p < FlyScriptGenerator.PresetNames.Length; p++)
+                flySpecs.Add(($"Fly: no-gravity 3D flight ({FlyScriptGenerator.PresetNames[p]})",
+                              FlyScriptGenerator.Generate(FlyScriptGenerator.FlyToggle.Enabled, p)));
+            flySpecs.Add(("Fly: Noclip (through walls)",
+                          FlyScriptGenerator.Generate(FlyScriptGenerator.FlyToggle.Noclip)));
             foreach (var s in flySpecs)
             {
-                if (await _aobMaker!.CreateAAScriptAsync(s.Desc, FlyScriptGenerator.Generate(s.Toggle), autoActivate: false))
+                if (await _aobMaker!.CreateAAScriptAsync(s.Desc, s.Script, autoActivate: false))
                     ok++;
             }
-            int total = specs.Length + moveSpecs.Length + 1 + flySpecs.Length;
+            int total = specs.Length + moveSpecs.Length + 1 + flySpecs.Count;
             StatusText = $"Added {ok}/{total} Teleport + Movement + Fly records to CE " +
                          "(teleport = momentary; movement/fly = on/off toggle; bind CE hotkeys as you like).";
             _log.Info($"Teleport + Movement + Fly actions -> CE via AOBMaker ({ok}/{total})");
