@@ -1425,8 +1425,12 @@ int32_t GetTrainerOffsets(TrainerOffsets& out) {
     out.FVectorWidth = c.relLocSize;
     out.CtrlRotOff   = c.ctrlRotOff;
     out.CtrlRotSize  = c.ctrlRotSize;
+    // Pawn -> Controller back-ref (the pure-Lua fly reads ControlRotation off it).
+    out.PawnToController = Ubel::FindFieldOffset(pawnClass, "Controller",
+                                                 "Controller", nullptr, "ObjectProperty");
 
-    // CharacterMovement + float knobs (MaxWalkSpeed / GravityScale / JumpZVelocity).
+    // CharacterMovement + float knobs (MaxWalkSpeed / GravityScale / JumpZVelocity)
+    // + the fly fields (MovementMode / Velocity), mirroring Dunste::ResolveCtx.
     out.PawnToCmc = Ubel::FindFieldOffset(pawnClass, "CharacterMovement",
                                           "CharacterMovement", nullptr, "ObjectProperty");
     if (out.PawnToCmc >= 0) {
@@ -1439,6 +1443,15 @@ int32_t GetTrainerOffsets(TrainerOffsets& out) {
                                                      nullptr, "FloatProperty");
             out.JumpOff      = Ubel::FindFieldOffset(cmcClass, "JumpZVelocity", "JumpZVelocity",
                                                      nullptr, "FloatProperty");
+            // MovementMode: exclude the sibling CustomMovementMode byte (matches Dunste).
+            out.MoveModeOff  = Ubel::FindFieldOffset(cmcClass, "MovementMode", "MovementMode",
+                                                     "Custom", nullptr);
+            FieldInfo vf{};
+            if (Ubel::FindField(cmcClass, "Velocity", "Velocity", nullptr, "StructProperty", vf)
+                && vf.Offset >= 0) {
+                out.VelocityOff  = vf.Offset;
+                out.VelocitySize = vf.Size;
+            }
         }
     }
     return TP_OK;

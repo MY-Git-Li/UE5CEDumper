@@ -107,6 +107,7 @@ Radar::                     // ValueScan — CE-style by-value scan (was ValueSc
 Orden::                     // GroupMatch — source-agnostic SDR matcher (multi-value group scan; header-only)
 Edel::                      // CurrentTarget — auto-detect the player's current target actor
 Laufen::                    // MovementTuning — force per-pawn CMC float knobs (speed/gravity/jump) × multiplier + re-assert
+Dunste::                    // Fly — no-gravity keyboard-driven 3D flight (CMC MOVE_Flying + Velocity drive, re-assert worker)
 Grimoire::                  // Constants — spell book
 DynOff::                    // Dynamic offsets (in Grimoire.h, unchanged)
 ```
@@ -304,7 +305,7 @@ German spelling.
 | Laufen | ラオフェン | Laufen | High-speed movement ("to run") | 🟢 MovementTuning | Force per-pawn UCharacterMovementComponent float knobs (MaxWalkSpeed/GravityScale/JumpZVelocity) × a multiplier of the captured base + re-assert worker; float analogue of Solitar (`Laufen.cpp/.h`, build 1788) |
 | Ehre | エーレ | Ehre | Controls rocks ("honor") | ⬜ | Foundation / stability |
 | Blei | ブライ | Blei | Edel's teammate ("lead" metal) | ⬜ | Weighting / ballast |
-| Dünste | ドゥンスト | Dunste | Edel's teammate ("vapors") | ⬜ | Volatile / transient state |
+| Dünste | ドゥンスト | Dunste | Edel's teammate ("vapors") | 🟢 Fly | No-gravity keyboard-driven 3D flight of the local pawn: force CMC MOVE_Flying (raw enum-byte, collision preserved) held by a re-assert worker that samples the keyboard (GetAsyncKeyState) and drives CMC Velocity each ~60 Hz tick — vapors drift weightlessly through the air (`Dunste.cpp/.h`) |
 | Ton | トーン | Ton | Lone-wolf exam mage ("clay") | ⬜ | Shaping / serialization / formatting |
 
 ### Northern Empire — Special Forces & Shadow Warriors

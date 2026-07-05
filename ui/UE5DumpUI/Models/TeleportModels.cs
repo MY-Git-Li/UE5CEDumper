@@ -218,6 +218,31 @@ public sealed class MovementSetResult
     public double Multiplier { get; init; } = 1.0;
 }
 
+/// <summary>Live state of the Fly feature (Dunste — no-gravity 3D flight),
+/// returned by <c>fly_set</c> / <c>fly_get_state</c>. <see cref="HasCmc"/> is
+/// false on vehicle / custom-framework pawns with no UCharacterMovementComponent
+/// (fly can't engage on those).</summary>
+public sealed class FlyStatus
+{
+    /// <summary>Dunste::FlyResult (0 = OK, negative = no pawn / no CMC / reflect).</summary>
+    public int Code { get; init; }
+    /// <summary>Fly currently engaged (the worker is holding MOVE_Flying).</summary>
+    public bool Active { get; init; }
+    /// <summary>Noclip (position-drive, fly through walls) vs velocity (collision).</summary>
+    public bool Noclip { get; init; }
+    /// <summary>A UCharacterMovementComponent resolved on the local pawn.</summary>
+    public bool HasCmc { get; init; }
+    /// <summary>Active keyboard preset: 0 = WASD, 1 = numpad, 2 = arrows.</summary>
+    public int Preset { get; init; }
+    /// <summary>Flight speed in uu/s.</summary>
+    public double Speed { get; init; }
+    /// <summary>Live EMovementMode enum byte (5 = MOVE_Flying), or -1 unknown.</summary>
+    public int CurrentMode { get; init; } = -1;
+    /// <summary>Result of the last enable/disable (1 active / 0 off / negative),
+    /// or -1 when the call carried no enable field.</summary>
+    public int State { get; init; } = -1;
+}
+
 /// <summary>Result of a teleport action (recall / cursor).</summary>
 public sealed class TeleportResult
 {

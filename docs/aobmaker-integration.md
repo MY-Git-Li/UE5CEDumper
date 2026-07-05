@@ -108,7 +108,8 @@ Create an Auto Assembler script entry in CE's address list.
   "type": "CreateAAScript",
   "description": "Invoke: BP_SantiagoGameInstance_C::GetSkillManager",
   "script": "[ENABLE]\n...\n[DISABLE]\n...",
-  "autoActivate": false
+  "autoActivate": false,
+  "group": "UE5CEDumper (DLL)"
 }
 
 // Response
@@ -120,9 +121,11 @@ Create an Auto Assembler script entry in CE's address list.
 | `description` | string | Display name in CE address list |
 | `script` | string | Full AA script content (`[ENABLE]`/`[DISABLE]` sections) |
 | `autoActivate` | bool | Whether to activate immediately after creation |
+| `group` | string | *(optional)* Target **group-node** description. Non-empty → the record is nested **under** a single-level `IsGroupHeader` folder of that description (created if absent). A name-collision with an existing **AA-script** (Type-11) node yields a *fresh* group rather than nesting under it. Empty/omitted → address-list **root** (back-compatible). **Requires an AOBMaker CE plugin whose `CreateAAScript` handler reads `group`** — older builds ignore the field and land the record at root. |
 
 **Used by:**
 - LiveWalker: `GenerateInvokeScriptAsync` sends UFunction invoke scripts directly to CE (falls back to clipboard if AOBMaker unavailable)
+- Teleport tab: **Add records to CE** nests the DLL-mailbox Teleport / Movement / Fly scripts under `group` = `"UE5CEDumper (DLL)"`, and **Export standalone trainer** nests the no-DLL trainer entries under `"UE5CEDumper (no-DLL trainer)"` — so the many pushed scripts collapse into two folders (pure-Lua vs DLL-call), not littering the address-list root.
 
 ### 4. `InjectTableFile`
 

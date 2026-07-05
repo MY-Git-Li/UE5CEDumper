@@ -26,6 +26,10 @@ public sealed class TrainerOffsets
     public int JumpOff { get; set; } = -1;        // CMC.JumpZVelocity (float)
     public int CtrlRotOff { get; set; } = -1;     // AController.ControlRotation (inline FRotator)
     public int CtrlRotSize { get; set; }
+    public int PawnToController { get; set; } = -1; // APawn.Controller (deref) — fly ControlRotation read
+    public int MoveModeOff { get; set; } = -1;    // CMC.MovementMode (1 byte enum) — fly
+    public int VelocityOff { get; set; } = -1;    // CMC.Velocity (inline FVector) — fly
+    public int VelocitySize { get; set; }         // 12 (float) / 24 (double LWC)
 
     /// <summary>Matched protection bits (bCanBeDamaged + any invincibility bool).</summary>
     public List<TrainerProtectBit> GodBits { get; set; } = new();

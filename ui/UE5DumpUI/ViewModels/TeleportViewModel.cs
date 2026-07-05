@@ -42,6 +42,14 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     // trainer .CT. Pushed by MainWindowViewModel on connect / rescan.
     private Models.EngineState? _engineState;
 
+    // CE address-list group nodes the AOBMaker push nests records under, so the many
+    // pushed scripts collapse into two folders instead of littering the root. The
+    // DLL-mailbox scripts (Teleport / Movement / Fly) and the no-DLL standalone
+    // trainer are kept in SEPARATE groups. (Needs an AOBMaker plugin that handles the
+    // `group` field; older builds ignore it and land the records at root.)
+    private const string CeGroupDll = "UE5CEDumper (DLL)";
+    private const string CeGroupTrainer = "UE5CEDumper (no-DLL trainer)";
+
     public TeleportViewModel(IDumpService dump, ILoggingService log, IPlatformService platform,
         IAobMakerBridge? aobMaker = null, IGlobalHotkeyService? globalHotkeys = null)
     {
@@ -85,6 +93,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             Hint = "Toggle the Gravity (GravityScale) override on/off." });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "gravdir_toggle",   DisplayName = "Gravity Dir toggle",
             Hint = "Toggle the Gravity Direction override on/off (UE5.4+)." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "fly_toggle",       DisplayName = "Fly toggle",
+            Hint = "Toggle Fly (no-gravity 3D flight) on/off. While flying, use the selected keyboard preset to move." });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "pov_get",      DisplayName = "Get POV",
             Hint = "Read the current camera POV (location / rotation / FOV)." });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "relative",     DisplayName = "TP facing dir",
@@ -223,7 +233,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             int ok = 0;
             foreach (var e in entries)
             {
-                var sent = await _aobMaker.CreateAAScriptAsync(e.Description, e.Script, e.AutoActivate);
+                var sent = await _aobMaker.CreateAAScriptAsync(e.Description, e.Script, e.AutoActivate, group: CeGroupTrainer);
                 if (sent) { ok++; }
                 else { break; }   // pipe dropped mid-push (CE closed?)
             }
@@ -391,6 +401,43 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     /// <summary>Slider position as a jump-height percentage (e.g. "400%").</summary>
     public string SuperJumpPercentText => $"{Math.Round(SuperJumpHeightMultiplier * 100.0)}%";
 
+    // ── Fly (Dunste — no-gravity keyboard-driven 3D flight) ────────────
+    /// <summary>Tri-state badge: "ON" (flying) / "OFF" / "Unavailable" (no CMC).</summary>
+    [ObservableProperty] private string _flyState = "Unknown";
+    [ObservableProperty] private string _flyBadgeColor = "#888888";
+
+    /// <summary>Flight speed in uu/s (50…20000). Pushed to the DLL live while fly
+    /// is active; otherwise applied on the next enable.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FlySpeedText))]
+    private double _flySpeed = 1200.0;
+
+    /// <summary>Active keyboard preset (index = DLL preset id): 0 = WASD,
+    /// 1 = numpad, 2 = arrows. Turn is view-relative (the mouse).</summary>
+    [ObservableProperty] private int _flyPresetIndex;
+
+    /// <summary>Noclip: position-drive (fly through walls, works even where the
+    /// game overrides velocity) vs the default velocity-drive (collision kept).</summary>
+    [ObservableProperty] private bool _flyNoclip;
+
+    [ObservableProperty] private string _flyCurrentText = "—";
+
+    /// <summary>Tracks whether fly is currently engaged (so the global hotkey +
+    /// the toggle button can flip it).</summary>
+    private bool _flyActive;
+
+    /// <summary>Slider readout, e.g. "1200 uu/s".</summary>
+    public string FlySpeedText => $"{Math.Round(FlySpeed)} uu/s";
+
+    /// <summary>Preset labels for the dropdown (index = DLL preset id — the order
+    /// MUST match Dunste::Preset). Turn is the mouse (view-relative).</summary>
+    public System.Collections.Generic.IReadOnlyList<string> FlyPresets { get; } = new[]
+    {
+        "WASD move  ·  Z/C up-down",
+        "Numpad 8/4/2/6 move  ·  1/3 up-down",
+        "Arrows move  ·  PgUp/PgDn up-down",
+    };
+
     // ── Gravity Direction (Laufen, UE5.4+ GravityDirection vector) ─────
     /// <summary>Tri-state badge: "ON" / "OFF" / "Unavailable" (pre-5.4 / no
     /// reflected GravityDirection).</summary>
@@ -496,6 +543,9 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             ApplySuperJumpState(-1);     // super-jump badge back to Unknown
             SuperJumpCurrentText = "—";
             _superJumpActive = false;
+            ApplyFlyState(-1);           // fly badge back to Unknown
+            FlyCurrentText = "—";
+            _flyActive = false;
             ApplyGravDirState(-1);       // gravity-direction badge back to Unknown
             GravDirCurrentText = "—";
             _gravDirActive = false;
@@ -1574,6 +1624,141 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         finally { IsBusy = false; }
     }
 
+    // ── Fly (Dunste — no-gravity keyboard-driven 3D flight) ────────────
+
+    private void ApplyFlyState(int state)
+    {
+        _flyActive = state == 1;
+        (FlyState, FlyBadgeColor) = state switch
+        {
+            1 => ("ON",          "#4EC9B0"),
+            0 => ("OFF",         "#999999"),
+            _ => ("Unavailable", "#C9A04E"),
+        };
+    }
+
+    private void ApplyFlyReadout(FlyStatus st)
+    {
+        if (!st.HasCmc)
+        {
+            FlyCurrentText = "Current: unavailable (no CharacterMovement on this pawn)";
+            ApplyFlyState(-1);
+            return;
+        }
+        FlyCurrentText = st.Active
+            ? string.Format(CultureInfo.InvariantCulture,
+                "Flying at {0:0} uu/s (MovementMode = {1}).", st.Speed, st.CurrentMode)
+            : string.Format(CultureInfo.InvariantCulture,
+                "Ready (MovementMode = {0}). Toggle Fly ON to take off.", st.CurrentMode);
+        ApplyFlyState(st.Active ? 1 : 0);
+    }
+
+    /// <summary>Enable Fly: force MOVE_Flying and start the DLL worker (keyboard
+    /// input is read DLL-side). Pushes the current speed + preset too.</summary>
+    [RelayCommand]
+    private async Task ApplyFlyAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var st = await _dump.FlySetAsync(enable: true, speed: FlySpeed, preset: FlyPresetIndex, noclip: FlyNoclip);
+            ApplyFlyReadout(st);
+            StatusText = st.HasCmc
+                ? $"✈ Fly ON ({(FlyNoclip ? "noclip" : "collision")}) — {FlyPresets[Math.Clamp(FlyPresetIndex, 0, FlyPresets.Count - 1)]}."
+                : "Fly could not engage (no CharacterMovement on this pawn).";
+        }
+        catch (Exception ex)
+        {
+            ApplyFlyState(-1);
+            SetError(ex);
+            _log.Error("Teleport ApplyFly failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Disable Fly: restore the captured MovementMode + stop the worker.</summary>
+    [RelayCommand]
+    private async Task ResetFlyAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var st = await _dump.FlySetAsync(enable: false, speed: null, preset: null, noclip: null);
+            ApplyFlyReadout(st);
+            StatusText = "Fly OFF.";
+        }
+        catch (Exception ex)
+        {
+            ApplyFlyState(-1);
+            SetError(ex);
+            _log.Error("Teleport ResetFly failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>↻ — re-read the live fly state from the current pawn.</summary>
+    [RelayCommand]
+    private async Task RefreshFlyAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var st = await _dump.FlyGetStateAsync();
+            ApplyFlyReadout(st);
+            StatusText = st.HasCmc ? "Read fly state."
+                : "No CharacterMovement on the current pawn.";
+        }
+        catch (Exception ex)
+        {
+            ApplyFlyState(-1);
+            SetError(ex);
+            _log.Error("Teleport RefreshFly failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Live speed change: push to the DLL only while fly is active
+    /// (otherwise it takes effect on the next enable).</summary>
+    partial void OnFlySpeedChanged(double value)
+    {
+        if (_flyActive && IsConnected)
+            _ = PushFlyConfigAsync(speed: value, preset: null, noclip: null);
+    }
+
+    /// <summary>Live preset change: push to the DLL (takes effect next tick).</summary>
+    partial void OnFlyPresetIndexChanged(int value)
+    {
+        if (IsConnected)
+            _ = PushFlyConfigAsync(speed: null, preset: value, noclip: null);
+    }
+
+    /// <summary>Live noclip toggle: push to the DLL (takes effect next tick).</summary>
+    partial void OnFlyNoclipChanged(bool value)
+    {
+        if (IsConnected)
+            _ = PushFlyConfigAsync(speed: null, preset: null, noclip: value);
+    }
+
+    /// <summary>Push a config-only change (no enable field) and refresh the badge.</summary>
+    private async Task PushFlyConfigAsync(double? speed, int? preset, bool? noclip)
+    {
+        try
+        {
+            var st = await _dump.FlySetAsync(enable: null, speed: speed, preset: preset, noclip: noclip);
+            ApplyFlyReadout(st);
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Teleport PushFlyConfig failed", ex);
+        }
+    }
+
     // ── Super Jump (force JumpZVelocity, Laufen) ───────────────────────
 
     private void ApplySuperJumpState(int state)
@@ -2118,6 +2303,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                     _ = (_gravDirActive ? ResetGravDirCommand : ApplyGravDirCommand)
                         .ExecuteAsync(null);
                     return;
+                case "fly_toggle":
+                    _ = (_flyActive ? ResetFlyCommand : ApplyFlyCommand)
+                        .ExecuteAsync(null);
+                    return;
                 case "pov_get":      _ = GetPovCommand.ExecuteAsync(null); return;
                 case "relative":     _ = TeleportRelativeCommand.ExecuteAsync(null); return;
                 case "coords":       _ = TeleportToCoordsCommand.ExecuteAsync(null); return;
@@ -2258,7 +2447,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                     RelativeDistance, RelativeHorizontal,
                     CoordX, CoordY, CoordZ, CoordSetRotation,
                     CoordPitch, CoordYaw, CoordRoll);
-                if (await _aobMaker!.CreateAAScriptAsync(s.Desc, script, autoActivate: false))
+                if (await _aobMaker!.CreateAAScriptAsync(s.Desc, script, autoActivate: false, group: CeGroupDll))
                     ok++;
             }
             // Movement-tuning toggles (Laufen) baked at the current slider % —
@@ -2275,19 +2464,32 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             foreach (var s in moveSpecs)
             {
                 string script = MovementScriptGenerator.Generate(s.Knob, s.Percent);
-                if (await _aobMaker!.CreateAAScriptAsync(s.Desc, script, autoActivate: false))
+                if (await _aobMaker!.CreateAAScriptAsync(s.Desc, script, autoActivate: false, group: CeGroupDll))
                     ok++;
             }
             // Gravity Direction vector (UE5.4+) baked at the current sliders.
             string gdDesc = string.Format(CultureInfo.InvariantCulture,
                 "Movement: Gravity Direction ({0:0.0#}, {1:0.0#}, {2:0.0#})", GravDirX, GravDirY, GravDirZ);
             string gdScript = MovementScriptGenerator.GenerateGravityDirection(GravDirX, GravDirY, GravDirZ);
-            if (await _aobMaker!.CreateAAScriptAsync(gdDesc, gdScript, autoActivate: false))
+            if (await _aobMaker!.CreateAAScriptAsync(gdDesc, gdScript, autoActivate: false, group: CeGroupDll))
                 ok++;
-            int total = specs.Length + moveSpecs.Length + 1;
-            StatusText = $"Added {ok}/{total} Teleport + Movement records to CE " +
-                         "(teleport = momentary; movement = on/off toggle; bind CE hotkeys as you like).";
-            _log.Info($"Teleport + Movement actions -> CE via AOBMaker ({ok}/{total})");
+            // Fly (Dunste) — one row per key preset (WASD often collides with the game's
+            // own movement) + a Noclip toggle. DLL-driven; stateful on/off.
+            var flySpecs = new List<(string Desc, string Script)>();
+            for (int p = 0; p < FlyScriptGenerator.PresetNames.Length; p++)
+                flySpecs.Add(($"Fly: no-gravity 3D flight ({FlyScriptGenerator.PresetNames[p]})",
+                              FlyScriptGenerator.Generate(FlyScriptGenerator.FlyToggle.Enabled, p)));
+            flySpecs.Add(("Fly: Noclip (through walls)",
+                          FlyScriptGenerator.Generate(FlyScriptGenerator.FlyToggle.Noclip)));
+            foreach (var s in flySpecs)
+            {
+                if (await _aobMaker!.CreateAAScriptAsync(s.Desc, s.Script, autoActivate: false, group: CeGroupDll))
+                    ok++;
+            }
+            int total = specs.Length + moveSpecs.Length + 1 + flySpecs.Count;
+            StatusText = $"Added {ok}/{total} Teleport + Movement + Fly records to CE " +
+                         "(teleport = momentary; movement/fly = on/off toggle; bind CE hotkeys as you like).";
+            _log.Info($"Teleport + Movement + Fly actions -> CE via AOBMaker ({ok}/{total})");
         }
         catch (Exception ex)
         {
@@ -2311,6 +2513,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 MoveSpeedMultiplier * 100, GravityMultiplier * 100,
                 SuperJumpHeightMultiplier * 100,
                 GravDirX, GravDirY, GravDirZ));
+            // Fly (Dunste) — DLL-driven no-gravity flight on/off + noclip on/off.
+            rows.AddRange(FlyScriptGenerator.BuildBatchRows());
             string ct = CheatTableBuilder.Build("Teleport — UE5CEDumper", rows);
             var path = await _platform.ShowSaveFileDialogAsync(
                 defaultFileName: CheatTableBuilder.DefaultFileName("Teleport", DateTime.Now),

@@ -20,6 +20,7 @@
 #include "Wirbel.h"
 #include "Solitar.h"
 #include "Laufen.h"
+#include "Dunste.h"
 
 #include <string>
 #include <cstring>
@@ -487,6 +488,7 @@ void UE5_Shutdown() {
     Mimic::StopThread();
     Solitar::StopWorker();   // join the GodMode re-assert worker before unload
     Laufen::StopWorker();    // join the movement-tuning re-assert worker before unload
+    Dunste::StopWorker();    // join the fly worker before unload
     // Full teardown: RemoveHook + MH_Uninitialize + drain pending invoke queue.
     // Pipe server is stopped after Shutdown() so any in-flight pipe thread
     // blocked on EnqueueInvoke receives its -7 result and unwinds cleanly.
@@ -1041,6 +1043,24 @@ int32_t UE5_SetMovementPercent(int32_t knobId, double percent) {
 
 int32_t UE5_SetGravityDirection(double x, double y, double z) {
     return Laufen::SetGravityDirection(x, y, z);   // (0,0,0) = reset
+}
+
+// === Fly (Dunste) — no-gravity keyboard-driven 3D flight ===
+
+int32_t UE5_SetFly(int32_t enable) {
+    return Dunste::SetEnabled(enable != 0);
+}
+
+int32_t UE5_SetFlySpeed(double uuPerSec) {
+    return Dunste::SetSpeed(uuPerSec);
+}
+
+int32_t UE5_SetFlyPreset(int32_t preset) {
+    return Dunste::SetPreset(preset);
+}
+
+int32_t UE5_SetFlyNoclip(int32_t enable) {
+    return Dunste::SetNoclip(enable != 0);
 }
 
 // ============================================================================

@@ -2619,6 +2619,10 @@ public sealed class DumpService : IDumpService
             JumpOff      = res["jump_off"]?.GetValue<int>() ?? -1,
             CtrlRotOff   = res["ctrl_rot_off"]?.GetValue<int>() ?? -1,
             CtrlRotSize  = res["ctrl_rot_size"]?.GetValue<int>() ?? 0,
+            PawnToController = res["pawn_to_controller"]?.GetValue<int>() ?? -1,
+            MoveModeOff  = res["move_mode_off"]?.GetValue<int>() ?? -1,
+            VelocityOff  = res["velocity_off"]?.GetValue<int>() ?? -1,
+            VelocitySize = res["velocity_size"]?.GetValue<int>() ?? 0,
         };
         if (res["chain"] is JsonArray chain)
             foreach (var h in chain)
@@ -2730,6 +2734,40 @@ public sealed class DumpService : IDumpService
             Multiplier = res["multiplier"]?.GetValue<double>() ?? 1.0,
         };
     }
+
+    // === Fly (Dunste) — no-gravity keyboard-driven 3D flight ===
+
+    public async Task<FlyStatus> FlySetAsync(bool? enable, double? speed, int? preset, bool? noclip, CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "fly_set" };
+        if (enable.HasValue) req["enable"] = enable.Value;
+        if (speed.HasValue)  req["speed"]  = speed.Value;
+        if (preset.HasValue) req["preset"] = preset.Value;
+        if (noclip.HasValue) req["noclip"] = noclip.Value;
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return ParseFlyStatus(res);
+    }
+
+    public async Task<FlyStatus> FlyGetStateAsync(CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "fly_get_state" };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return ParseFlyStatus(res);
+    }
+
+    private static FlyStatus ParseFlyStatus(JsonNode? res) => new FlyStatus
+    {
+        Code        = res?["code"]?.GetValue<int>() ?? 0,
+        Active      = res?["active"]?.GetValue<bool>() ?? false,
+        Noclip      = res?["noclip"]?.GetValue<bool>() ?? false,
+        HasCmc      = res?["has_cmc"]?.GetValue<bool>() ?? false,
+        Preset      = res?["preset"]?.GetValue<int>() ?? 0,
+        Speed       = res?["speed"]?.GetValue<double>() ?? 0.0,
+        CurrentMode = res?["current_mode"]?.GetValue<int>() ?? -1,
+        State       = res?["state"]?.GetValue<int>() ?? -1,
+    };
 
     // === Teleport (Wirbel) — docs/teleport-spec.md §7 ===
 

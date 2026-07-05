@@ -453,6 +453,18 @@ public interface IDumpService
     /// <summary>Restore gravity direction to its captured default.</summary>
     Task<MovementVectorResult> ResetGravityDirectionAsync(CancellationToken ct = default);
 
+    // === Fly (Dunste: no-gravity keyboard-driven 3D flight) ===
+
+    /// <summary>Apply whichever of {enable, speed, preset, noclip} are non-null and
+    /// return the live fly state. Input (WASD/numpad/arrows) is sampled DLL-side;
+    /// this only toggles + configures. enable=true forces MOVE_Flying + starts the
+    /// worker; enable=false restores the captured MovementMode + stops it. noclip
+    /// switches position-drive (fly through walls) vs velocity (collision).</summary>
+    Task<FlyStatus> FlySetAsync(bool? enable, double? speed, int? preset, bool? noclip, CancellationToken ct = default);
+
+    /// <summary>Poll the live fly state (active / preset / speed / MovementMode).</summary>
+    Task<FlyStatus> FlyGetStateAsync(CancellationToken ct = default);
+
     // === Teleport (Wirbel: marker save/recall + cursor teleport) ===
     // docs/teleport-spec.md §7. Model Code/Codes carry the DLL's Wirbel
     // result code (0 = OK, negatives mapped by TeleportCodes).

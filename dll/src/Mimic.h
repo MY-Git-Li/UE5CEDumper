@@ -70,6 +70,15 @@ enum Cmd : int32_t {
                               //             x/y/z (DLL normalizes; (0,0,0) = off).
                               //   Output: result = 1 (active) / 0 (off) / negative
                               //             Laufen::MoveResult.
+    CMD_FLY             = 11, // Fly (Dunste): no-gravity keyboard-driven 3D flight.
+                              //   Input:  instanceAddr = op (FlyOp below).
+                              //     SET_ENABLED: ufuncAddr = 1 (on) / 0 (off).
+                              //     SET_SPEED:   paramsData[0..7] = double uu/s.
+                              //     SET_PRESET:  ufuncAddr = preset (0/1/2).
+                              //     GET_STATE:   (no input).
+                              //   Output: result = 1 (active) / 0 (off) / negative
+                              //     Dunste::FlyResult. GET_STATE writes paramsData:
+                              //       [0] u8 active, [1] u8 preset, [8..15] double speed.
 };
 
 // CMD_TELEPORT op codes (written into instanceAddr by CE Lua / pipe bridge)
@@ -111,6 +120,16 @@ enum TeleportOp : uint64_t {
     TP_OP_GET_CURSOR   = 15, // read the current bShowMouseCursor state. slot
                              //   ignored. Output: result = code, paramsData[0] =
                              //   state (1/0).
+};
+
+// CMD_FLY op codes (written into instanceAddr by CE Lua / pipe bridge).
+enum FlyOp : uint64_t {
+    FLY_OP_SET_ENABLED = 0, // ufuncAddr = 1 (on) / 0 (off). result = active/off/neg.
+    FLY_OP_SET_SPEED   = 1, // paramsData[0..7] = double uu/s. result = FlyResult.
+    FLY_OP_SET_PRESET  = 2, // ufuncAddr = preset (0/1/2). result = FlyResult.
+    FLY_OP_GET_STATE   = 3, // result = FlyResult; paramsData[0] = active, [1] =
+                            //   preset, [2] = noclip, [8..15] = speed double.
+    FLY_OP_SET_NOCLIP  = 4, // ufuncAddr = 1 (noclip/through-walls) / 0 (collision).
 };
 
 // CMD_PROTECT op codes (written into instanceAddr by CE Lua / pipe bridge).

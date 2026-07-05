@@ -71,6 +71,7 @@ static const CatMapping s_catMap[] = {
     { "OARR",           4, LF_Offsets },
     { "FNAM",           4, LF_Offsets },
     { "WALK",           4, LF_Walk    },
+    { "FLY",            3, LF_Walk    },   // Dunste fly worker (movement-related)
     { "PIPE",           4, LF_Pipe    },
     { "CEP",            3, LF_Init    },
     { "MEM",            3, LF_Scan    },

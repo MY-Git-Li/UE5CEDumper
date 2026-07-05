@@ -696,6 +696,67 @@
         </StackPanel>
       </Border>
 
+      <!-- ── Fly (Dunste — no-gravity keyboard-driven 3D flight) ── -->
+      <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
+              CornerRadius="4" Padding="10">
+        <StackPanel Spacing="8">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="{StaticResource str.TP.FlyHeader}"
+                       Foreground="#DDDDDD" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <TextBlock Text="{StaticResource str.TP.FlyState}" Foreground="#999999"
+                       FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            <Border Background="#333337" CornerRadius="3" Padding="6,1">
+              <TextBlock Text="{Binding FlyState}"
+                         Foreground="{Binding FlyBadgeColor}"
+                         FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            </Border>
+          </StackPanel>
+          <TextBlock Text="{StaticResource str.TP.FlyHint}"
+                     Foreground="#888888" FontSize="11" TextWrapping="Wrap"/>
+          <TextBlock Text="{Binding FlyCurrentText}"
+                     Foreground="#BBBBBB" FontSize="12"/>
+          <!-- Keyboard preset selector -->
+          <Grid ColumnDefinitions="Auto,*">
+            <TextBlock Grid.Column="0" Text="{StaticResource str.TP.FlyPreset}"
+                       Foreground="#BBBBBB" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <ComboBox Grid.Column="1" ItemsSource="{Binding FlyPresets}"
+                      SelectedIndex="{Binding FlyPresetIndex}"
+                      IsEnabled="{Binding CanOperate}" HorizontalAlignment="Stretch"
+                      ToolTip.Tip="{StaticResource str.Tip.TP.FlyPreset}"/>
+          </Grid>
+          <!-- Flight speed (uu/s) -->
+          <Grid ColumnDefinitions="*,Auto">
+            <Slider Grid.Column="0" Minimum="50" Maximum="20000"
+                    Value="{Binding FlySpeed}"
+                    IsEnabled="{Binding CanOperate}" VerticalAlignment="Center"/>
+            <TextBlock Grid.Column="1" Text="{Binding FlySpeedText}"
+                       Foreground="#DDDDDD" FontWeight="SemiBold" MinWidth="72"
+                       TextAlignment="Right" VerticalAlignment="Center" Margin="8,0,0,0"/>
+          </Grid>
+          <CheckBox Content="{StaticResource str.TP.FlyNoclip}"
+                    IsChecked="{Binding FlyNoclip}"
+                    IsEnabled="{Binding CanOperate}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.FlyNoclip}"
+                    Foreground="#CCCCCC"/>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Content="{StaticResource str.TP.FlyOn}"
+                    Command="{Binding ApplyFlyCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.FlyOn}"
+                    IsEnabled="{Binding CanOperate}" Padding="12,4"/>
+            <Button Content="{StaticResource str.TP.FlyOff}"
+                    Command="{Binding ResetFlyCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.FlyOff}"
+                    IsEnabled="{Binding CanOperate}" Padding="12,4"/>
+            <Button Content="{StaticResource str.TP.FlyRefresh}"
+                    Command="{Binding RefreshFlyCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.FlyRefresh}"
+                    IsEnabled="{Binding CanOperate}" Padding="10,4"/>
+          </StackPanel>
+          <TextBlock Text="{StaticResource str.TP.FlyHotkeyHint}"
+                     Foreground="#777777" FontSize="11" TextWrapping="Wrap"/>
+        </StackPanel>
+      </Border>
+
       <!-- ── Gravity Direction (Laufen — UE5.4+ GravityDirection vector) ── -->
       <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
               CornerRadius="4" Padding="10">
