@@ -12,11 +12,16 @@
 // pattern as Laufen/Solitar) so the engine suppresses gravity yet still sweeps
 // world geometry. A fast (~60 Hz) worker then samples the keyboard directly
 // (GetAsyncKeyState — the DLL lives inside the game process, so no per-frame
-// IPC) and writes the CMC's Velocity FVector each tick from the pressed keys,
-// projected onto the pawn's facing (pitch-inclusive forward + yaw-only right +
-// world up). Turn keys nudge the Controller's ControlRotation yaw. All writes
-// are pure reflected Macht (SEH) memory writes — NO UFunction invoke, NO game
-// thread (Path B, like Laufen). All offsets resolved by FName (DynOff) →
+// IPC).
+//
+// Control is CHARACTER-RELATIVE: Dunste owns the flight HEADING (yaw), seeded
+// from the pawn's live facing on engage. Q/E rotate the heading; WASD move
+// relative to it (forward/strafe on the ground plane), Z/C move world-vertical.
+// Each tick it writes the CMC Velocity FVector for motion and raw-writes the
+// pawn RootComponent's RelativeRotation yaw = heading so the CHARACTER turns
+// (the camera is left to the user's mouse/gamepad). All writes are pure
+// reflected Macht (SEH) memory writes — NO UFunction invoke, NO game thread
+// (Path B, like Laufen). All offsets resolved by FName (DynOff) →
 // UE4/UE5-agnostic. No cached instance pointers: the pawn/CMC is re-resolved
 // every worker tick (stale-pointer crash class).
 //

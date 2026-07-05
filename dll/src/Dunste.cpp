@@ -5,9 +5,15 @@
 //
 // Engine-flying (collision preserved): force the CMC into MOVE_Flying via a raw
 // enum-byte write held by a re-assert worker (write-on-drift, like Laufen), then
-// drive the CMC Velocity FVector each ~60 Hz tick from the keyboard, projected
-// onto the pawn's facing. Pure reflected Macht (SEH) writes — NO invoke, NO game
-// thread. Self-contained (Path B): only public Ubel/Aura/Macht + DynOff.
+// drive the CMC Velocity FVector each ~60 Hz tick from the keyboard.
+//
+// CHARACTER-RELATIVE control (build 1919+): Dunste owns the flight HEADING (yaw),
+// seeded from the pawn's live facing on engage. Q/E rotate the heading; WASD move
+// relative to it (forward/strafe horizontal), Z/C move world-vertical. Each tick
+// we raw-write the pawn RootComponent's RelativeRotation yaw = heading, so the
+// CHARACTER turns (not the camera — the mouse still owns the view). All pure
+// reflected Macht (SEH) writes — NO invoke, NO game thread. Self-contained
+// (Path B): only public Ubel/Aura/Macht + DynOff.
 // ============================================================
 
 #define LOG_CAT "FLY"
@@ -43,6 +49,14 @@ struct FlyState {
     uint8_t   baseMode     = 1;      // captured MovementMode to restore (default MOVE_Walking)
     bool      baseCaptured = false;
     uintptr_t capturedPawn = 0;      // pawn the base mode was captured from (respawn re-capture)
+    // Character-relative flight: Dunste owns the flight HEADING (yaw, degrees).
+    // WASD move relative to it; Q/E rotate it; each tick we force the pawn's
+    // actual facing to it (so the CHARACTER turns, not the camera). Initialized
+    // from the pawn's live facing on first tick after (re)capture.
+    double    flyYaw       = 0.0;
+    bool      yawInit      = false;
+    uint64_t  tick         = 0;      // worker tick counter (sampled diagnostics)
+    int       driftCount   = 0;      // times we re-asserted MOVE_Flying (game fought us)
 };
 FlyState s_state;
 
@@ -177,13 +191,16 @@ uintptr_t ResolvePawn(uintptr_t pc) {
     return ReadPtrAt(pc, Ubel::FindFieldOffset(cls, "AcknowledgedPawn"));
 }
 
-// Resolved local pawn + Controller + CharacterMovement + the three field
-// locations the fly tick writes. Re-resolved every tick (no cached pointers).
+// Resolved local pawn + CharacterMovement + RootComponent + the field locations
+// the fly tick writes. Re-resolved every tick (no cached pointers).
 struct Ctx {
     uintptr_t world = 0, pc = 0, pawn = 0, cmc = 0, cmcClass = 0;
     int32_t   modeOff = -1;                 // CMC.MovementMode (1 byte)
-    uintptr_t velAddr = 0;  int32_t velSize = 12;   // CMC.Velocity FVector
-    uintptr_t rotAddr = 0;  int32_t rotSize = 12;   // Controller.ControlRotation FRotator
+    uintptr_t velAddr  = 0; int32_t velSize = 12;   // CMC.Velocity FVector
+    uintptr_t root     = 0;                          // pawn.RootComponent (USceneComponent)
+    uintptr_t relRotAddr = 0; int32_t relRotSize = 12; // RootComponent.RelativeRotation FRotator
+    uintptr_t ctrlRotAddr = 0; int32_t ctrlRotSize = 12; // Controller.ControlRotation (yaw-init fallback)
+    bool      attached  = false;            // root has an AttachParent (rel != world rot)
 };
 
 int32_t ResolveCtx(Ctx& c, bool allowScan) {
@@ -215,16 +232,45 @@ int32_t ResolveCtx(Ctx& c, bool allowScan) {
         c.velAddr = c.cmc + static_cast<uintptr_t>(fi.Offset);
         c.velSize = fi.Size;
     }
-    // ControlRotation FRotator on the Controller (type filter nullptr — mirrors
-    // Wirbel, which resolves it without a type constraint).
-    FieldInfo rf{};
-    if (Ubel::FindField(Ubel::GetClass(c.pc), "ControlRotation", nullptr, nullptr, nullptr, rf)
-        && rf.Offset >= 0) {
-        c.rotAddr = c.pc + static_cast<uintptr_t>(rf.Offset);
-        c.rotSize = rf.Size;
+    // RootComponent + its RelativeRotation FRotator — the pawn's ACTUAL facing
+    // (character turn writes here; == world rotation only when not attached).
+    int32_t rootOff = Ubel::FindFieldOffset(pawnClass, "RootComponent",
+                                            "RootComponent", nullptr, "ObjectProperty");
+    c.root = ReadPtrAt(c.pawn, rootOff);
+    if (c.root) {
+        uintptr_t rootClass = Ubel::GetClass(c.root);
+        FieldInfo rr{};
+        if (Ubel::FindField(rootClass, "RelativeRotation", "RelativeRotation",
+                            nullptr, "StructProperty", rr) && rr.Offset >= 0) {
+            c.relRotAddr = c.root + static_cast<uintptr_t>(rr.Offset);
+            c.relRotSize = rr.Size;
+        }
+        int32_t apOff = Ubel::FindFieldOffset(rootClass, "AttachParent", "AttachParent",
+                                              nullptr, "ObjectProperty");
+        c.attached = (apOff >= 0) && ReadPtrAt(c.root, apOff) != 0;
+    }
+    // ControlRotation FRotator on the Controller — only used to seed flyYaw when
+    // the RootComponent rotation isn't readable.
+    FieldInfo cr{};
+    if (Ubel::FindField(Ubel::GetClass(c.pc), "ControlRotation", nullptr, nullptr, nullptr, cr)
+        && cr.Offset >= 0) {
+        c.ctrlRotAddr = c.pc + static_cast<uintptr_t>(cr.Offset);
+        c.ctrlRotSize = cr.Size;
     }
     if (c.modeOff < 0 || !c.velAddr) return FR_ERR_REFLECT;
     return FR_OK;
+}
+
+// Seed the flight heading from the pawn's live facing: prefer the RootComponent
+// RelativeRotation yaw (the actual character facing, when not attached), else the
+// Controller ControlRotation yaw. Returns the yaw in degrees (0 if neither reads).
+double ReadInitialYaw(const Ctx& c) {
+    double r[3] = {};
+    if (!c.attached && c.relRotAddr && ReadVec3At(c.relRotAddr, c.relRotSize, r))
+        return r[1];   // FRotator = (Pitch, Yaw, Roll)
+    if (c.ctrlRotAddr && ReadVec3At(c.ctrlRotAddr, c.ctrlRotSize, r))
+        return r[1];
+    return 0.0;
 }
 
 // True when the GAME window (any top-level window owned by this process) is
@@ -242,58 +288,71 @@ bool KeyDown(uint8_t vk) {
     return (GetAsyncKeyState(vk) & 0x8000) != 0;
 }
 
-// Pitch-inclusive forward + yaw-only right basis from an FRotator (Pitch, Yaw,
-// Roll in degrees). UE convention: forward = (cosP·cosY, cosP·sinY, sinP);
-// right = (-sinY, cosY, 0).
-void FacingBasis(const double pyr[3], double fwd[3], double right[3]) {
+// Horizontal forward + right basis from a heading yaw (degrees). Character-
+// relative: movement is on the ground plane of the facing, vertical is world Z.
+// UE convention: forward = (cosY, sinY, 0); right = (-sinY, cosY, 0).
+void HeadingBasis(double yawDeg, double fwd[3], double right[3]) {
     constexpr double kDeg2Rad = 3.14159265358979323846 / 180.0;
-    double pitch = pyr[0] * kDeg2Rad, yaw = pyr[1] * kDeg2Rad;
-    double cp = std::cos(pitch), sp = std::sin(pitch);
-    double cy = std::cos(yaw),   sy = std::sin(yaw);
-    fwd[0] = cp * cy;  fwd[1] = cp * sy;  fwd[2] = sp;
-    right[0] = -sy;    right[1] = cy;     right[2] = 0.0;
+    double yaw = yawDeg * kDeg2Rad;
+    double cy = std::cos(yaw), sy = std::sin(yaw);
+    fwd[0]   = cy;  fwd[1]   = sy;  fwd[2]   = 0.0;
+    right[0] = -sy; right[1] = cy;  right[2] = 0.0;
 }
 
 // ---- one fly tick (caller holds s_mutex; c already resolved MR_OK) ----
 void FlyTickLocked(const Ctx& c, double dtSec) {
-    // Re-capture base MovementMode on pawn change (respawn): the fresh pawn's
-    // mode is the genuine one to restore later.
+    ++s_state.tick;
+    // Read the game's LIVE mode + velocity at the top of the tick — i.e. the state
+    // the game left after processing our PREVIOUS write. If velNow stays ~0 while
+    // we keep writing a big velocity, the game is overwriting us (TQ2/FF7R class).
     uint8_t liveMode = 0;
     bool haveMode = (c.modeOff >= 0) &&
                     Macht::ReadSafe(c.cmc + static_cast<uintptr_t>(c.modeOff), liveMode);
-    if (haveMode && c.pawn != s_state.capturedPawn) {
-        s_state.baseMode = (liveMode == Grimoire::MOVE_FLYING) ? 1 /*Walking*/ : liveMode;
-        s_state.baseCaptured = true;
+    double velNow[3] = {0, 0, 0};
+    if (c.velAddr) ReadVec3At(c.velAddr, c.velSize, velNow);
+    if (c.pawn != s_state.capturedPawn) {
+        if (haveMode)
+            s_state.baseMode = (liveMode == Grimoire::MOVE_FLYING) ? 1 /*Walking*/ : liveMode;
+        s_state.baseCaptured = haveMode;
         s_state.capturedPawn = c.pawn;
+        s_state.yawInit = false;             // re-seed heading from the new pawn
     }
-    // Hold MOVE_Flying against the game re-asserting its own mode.
+    if (!s_state.yawInit) {
+        s_state.flyYaw = ReadInitialYaw(c);
+        s_state.yawInit = true;
+    }
+    // Hold MOVE_Flying against the game re-asserting its own mode (write-on-drift).
+    bool drifted = false;
     if (haveMode && liveMode != Grimoire::MOVE_FLYING) {
         uint8_t fly = Grimoire::MOVE_FLYING;
-        Macht::WriteBytes(c.cmc + static_cast<uintptr_t>(c.modeOff), &fly, 1);
+        drifted = Macht::WriteBytes(c.cmc + static_cast<uintptr_t>(c.modeOff), &fly, 1);
+        if (drifted) ++s_state.driftCount;
     }
 
-    // Read facing from ControlRotation (fall back to world axes if unresolved).
-    double pyr[3] = {0, 0, 0};
-    bool haveRot = c.rotAddr && ReadVec3At(c.rotAddr, c.rotSize, pyr);
-    double fwd[3], right[3];
-    FacingBasis(pyr, fwd, right);
-
     // Sample keys only while the game is foreground; otherwise hover (zero vel).
+    uint32_t keymask = 0;
     double move[3] = {0, 0, 0};
-    double turn = 0.0;
     if (GameIsForeground()) {
         const uint8_t* k = kPresetKeys[s_state.preset];
+        auto held = [&](int a) {
+            bool d = KeyDown(k[a]);
+            if (d) keymask |= (1u << a);
+            return d;
+        };
+        double fwd[3], right[3];
+        // Q/E rotate the HEADING first, so this frame's movement + facing use it.
+        if (held(A_YAW_L)) s_state.flyYaw -= Grimoire::FLY_TURN_DEG_PER_S * dtSec;
+        if (held(A_YAW_R)) s_state.flyYaw += Grimoire::FLY_TURN_DEG_PER_S * dtSec;
+        HeadingBasis(s_state.flyYaw, fwd, right);
         auto add = [&](const double v[3], double s) {
             move[0] += v[0] * s; move[1] += v[1] * s; move[2] += v[2] * s;
         };
-        if (KeyDown(k[A_FWD]))   add(fwd, 1.0);
-        if (KeyDown(k[A_BACK]))  add(fwd, -1.0);
-        if (KeyDown(k[A_RIGHT])) add(right, 1.0);
-        if (KeyDown(k[A_LEFT]))  add(right, -1.0);
-        if (KeyDown(k[A_UP]))    move[2] += 1.0;   // world up
-        if (KeyDown(k[A_DOWN]))  move[2] -= 1.0;
-        if (KeyDown(k[A_YAW_L])) turn -= Grimoire::FLY_TURN_DEG_PER_S * dtSec;
-        if (KeyDown(k[A_YAW_R])) turn += Grimoire::FLY_TURN_DEG_PER_S * dtSec;
+        if (held(A_FWD))   add(fwd, 1.0);
+        if (held(A_BACK))  add(fwd, -1.0);
+        if (held(A_RIGHT)) add(right, 1.0);
+        if (held(A_LEFT))  add(right, -1.0);
+        if (held(A_UP))    move[2] += 1.0;   // world up
+        if (held(A_DOWN))  move[2] -= 1.0;
     }
 
     // Normalize the combined direction so diagonals aren't faster, then scale to
@@ -306,11 +365,27 @@ void FlyTickLocked(const Ctx& c, double dtSec) {
     }
     WriteVec3At(c.velAddr, c.velSize, vel);
 
-    // Apply yaw turn to ControlRotation (Q/E). Written back so the camera + our
-    // facing basis follow next tick.
-    if (haveRot && std::fabs(turn) > 1e-9) {
-        pyr[1] += turn;
-        WriteVec3At(c.rotAddr, c.rotSize, pyr);
+    // Force the CHARACTER's actual facing to the heading (Q/E turn). Raw-write the
+    // RootComponent RelativeRotation yaw — the same live-memory write that drives
+    // Velocity — so the character turns (camera is left to the user's mouse).
+    // Only valid when not attached (RelativeRotation == world rotation).
+    if (!c.attached && c.relRotAddr) {
+        double rr[3] = {0, 0, 0};
+        ReadVec3At(c.relRotAddr, c.relRotSize, rr);   // keep pitch/roll
+        rr[1] = s_state.flyYaw;
+        WriteVec3At(c.relRotAddr, c.relRotSize, rr);
+    }
+
+    // Sampled diagnostics: first tick after enable, then ~every 2s. Surfaces
+    // whether the mode is being held and whether our velocity/heading stick, so a
+    // failing game (TQ2/FF7R) tells us where it's fought. (init.log → walk.log.)
+    if (s_state.tick == 1 || s_state.tick % 120 == 0) {
+        LOG_INFO("Fly tick %llu: mode=%d(want 5) keys=0x%03X yaw=%.0f drift=%d "
+                 "velGameLeft=(%.0f,%.0f,%.0f) velWeSet=(%.0f,%.0f,%.0f) attached=%d root=%d",
+                 (unsigned long long)s_state.tick, haveMode ? liveMode : -1, keymask,
+                 s_state.flyYaw, s_state.driftCount,
+                 velNow[0], velNow[1], velNow[2], vel[0], vel[1], vel[2],
+                 c.attached ? 1 : 0, c.relRotAddr ? 1 : 0);
     }
 }
 
@@ -368,6 +443,9 @@ int32_t SetEnabled(bool enable) {
             }
             s_state.capturedPawn = c.pawn;
             s_state.active = true;
+            s_state.yawInit = false;    // worker re-seeds the heading from live facing
+            s_state.tick = 0;
+            s_state.driftCount = 0;
             uint8_t fly = Grimoire::MOVE_FLYING;
             if (c.modeOff >= 0)
                 Macht::WriteBytes(c.cmc + static_cast<uintptr_t>(c.modeOff), &fly, 1);

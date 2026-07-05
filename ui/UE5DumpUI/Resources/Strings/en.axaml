@@ -907,7 +907,7 @@
     <!-- Fly (Dunste — no-gravity keyboard-driven 3D flight) -->
     <sys:String x:Key="str.TP.FlyHeader">Fly (no-gravity 3D flight)</sys:String>
     <sys:String x:Key="str.TP.FlyState">State:</sys:String>
-    <sys:String x:Key="str.TP.FlyHint">No-gravity free flight: forces the pawn's CharacterMovement into MOVE_Flying (collision is kept — you won't fall through walls) and steers it with the keyboard. Input is read inside the game, so keep the GAME window focused. Movement follows where you aim (pitch-inclusive), turn keys rotate you, and the up/down keys move straight up/down. Pick a keyboard preset and a speed below, then Fly ON / OFF (or bind the "Fly toggle" global hotkey). The mouse is never captured — your normal look controls still work. Needs a live pawn with a CharacterMovement. Single-player only.</sys:String>
+    <sys:String x:Key="str.TP.FlyHint">No-gravity free flight: forces the pawn's CharacterMovement into MOVE_Flying (collision is kept — you won't fall through walls) and steers it with the keyboard. Input is read inside the game, so keep the GAME window focused. Control is CHARACTER-relative: the turn keys rotate the character's facing, forward/back/strafe move relative to that facing, and the up/down keys move straight up/down (world). The camera is left to your mouse/gamepad. Pick a keyboard preset and a speed below, then Fly ON / OFF (or bind the "Fly toggle" global hotkey). Needs a live pawn with a CharacterMovement. Single-player only; some games with authoritative movement systems may override it.</sys:String>
     <sys:String x:Key="str.TP.FlyPreset">Keys:</sys:String>
     <sys:String x:Key="str.TP.FlyOn">Fly ON</sys:String>
     <sys:String x:Key="str.TP.FlyOff">Fly OFF</sys:String>
