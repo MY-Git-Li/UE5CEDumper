@@ -11,9 +11,13 @@
 // seeded from the pawn's live facing on engage. Q/E rotate the heading; WASD move
 // relative to it (forward/strafe horizontal), Z/C move world-vertical. Each tick
 // we raw-write the pawn RootComponent's RelativeRotation yaw = heading, so the
-// CHARACTER turns (not the camera — the mouse still owns the view). All pure
-// reflected Macht (SEH) writes — NO invoke, NO game thread. Self-contained
-// (Path B): only public Ubel/Aura/Macht + DynOff.
+// View-relative: movement follows the camera (ControlRotation) yaw, read-only;
+// turning is the mouse. Two motion modes: Velocity (collision, pure raw Macht
+// writes — Path B) and Noclip (position-drive). Noclip teleports via the engine's
+// K2_SetActorLocation on the game thread (Stark) so UpdateComponentToWorld runs
+// and the render/physics transform follows — a raw RelativeLocation write does
+// NOT refresh it and desyncs the pawn (falls out of the world). Offsets resolved
+// by FName (DynOff), UE4/UE5-agnostic; pawn re-resolved every tick.
 // ============================================================
 
 #define LOG_CAT "FLY"
@@ -23,19 +27,28 @@
 #include "Macht.h"
 #include "Aura.h"
 #include "Ubel.h"
+#include "Stark.h"      // IsGameThreadResponsive — gate the Noclip teleport invoke
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #include <windows.h>   // GetAsyncKeyState / GetForegroundWindow (foreground gate)
                        // (WIN32_LEAN_AND_MEAN / NOMINMAX come from the CMake defs)
 
 // &GWorld — deref once for UWorld* (defined in Frieren.cpp; same as Laufen).
 extern uintptr_t g_cachedGWorld;
+// Game-thread ProcessEvent invoke (Stark). Only the Noclip path uses it — it must
+// run on the game thread so UpdateComponentToWorld refreshes the render/physics
+// transform (a raw RelativeLocation write does not → the pawn desyncs).
+extern "C" int32_t UE5_CallProcessEventEx(uintptr_t instance, uintptr_t ufunc,
+                                          uintptr_t params, uint32_t size);
 
 namespace {
 
@@ -123,6 +136,69 @@ bool WriteVec3At(uintptr_t addr, int32_t structSize, const double v[3]) {
         }
     }
     return true;
+}
+
+// ---- minimal game-thread UFunction invoke (Noclip teleport only) ----
+
+// Case-insensitive name compare (UFunction / param names).
+bool IEq(const std::string& a, const char* b) {
+    size_t n = std::strlen(b);
+    if (a.size() != n) return false;
+    for (size_t i = 0; i < n; ++i)
+        if (std::tolower(static_cast<unsigned char>(a[i])) !=
+            std::tolower(static_cast<unsigned char>(b[i]))) return false;
+    return true;
+}
+
+// Find a UFunction by name, walking class → Super (engine setters live on base
+// classes above the concrete pawn). Uses only public Ubel::WalkFunctions.
+bool FindFuncByName(uintptr_t classAddr, const char* name, FunctionInfo& out) {
+    uintptr_t cls = classAddr;
+    for (int guard = 0; cls && guard < 64; ++guard) {
+        for (const auto& f : Ubel::WalkFunctions(cls))
+            if (IEq(f.name, name)) { out = f; return true; }
+        uintptr_t super = 0;
+        if (!Macht::ReadSafe(cls + static_cast<uintptr_t>(DynOff::USTRUCT_SUPER), super)
+            || super == cls)
+            break;
+        cls = super;
+    }
+    return false;
+}
+
+void WriteVec3ToBuf(std::vector<uint8_t>& buf, int32_t off, int32_t size, const double v[3]) {
+    if (off < 0) return;
+    int need = (size >= 24) ? 24 : 12;
+    if (off + need > static_cast<int32_t>(buf.size())) return;
+    if (size >= 24)
+        for (int i = 0; i < 3; ++i) { double d = v[i]; std::memcpy(buf.data() + off + i*8, &d, 8); }
+    else
+        for (int i = 0; i < 3; ++i) { float f = static_cast<float>(v[i]); std::memcpy(buf.data() + off + i*4, &f, 4); }
+}
+
+// Pack + invoke a K2 "set world location" setter with bSweep=false, bTeleport=true
+// (= noclip: ignores collision AND runs UpdateComponentToWorld so the transform
+// follows). Tries AActor::K2_SetActorLocation on the pawn, then the RootComponent's
+// K2_SetWorldLocation. Runs on the game thread via Stark. Returns true if invoked.
+bool InvokeTeleport(uintptr_t pawn, uintptr_t root, const double xyz[3]) {
+    struct Target { uintptr_t obj; const char* fn; };
+    Target tries[2] = { { pawn, "K2_SetActorLocation" }, { root, "K2_SetWorldLocation" } };
+    for (const auto& t : tries) {
+        if (!t.obj) continue;
+        FunctionInfo fi;
+        if (!FindFuncByName(Ubel::GetClass(t.obj), t.fn, fi) || fi.parmsSize == 0) continue;
+        std::vector<uint8_t> buf(fi.parmsSize, 0);
+        for (const auto& p : fi.params) {
+            if (IEq(p.name, "NewLocation")) WriteVec3ToBuf(buf, p.offset, p.size, xyz);
+            else if (IEq(p.name, "bSweep")    && p.offset >= 0 && p.offset < (int)buf.size()) buf[p.offset] = 0;
+            else if (IEq(p.name, "bTeleport") && p.offset >= 0 && p.offset < (int)buf.size()) buf[p.offset] = 1;
+        }
+        UE5_CallProcessEventEx(t.obj, fi.address,
+                               reinterpret_cast<uintptr_t>(buf.data()),
+                               static_cast<uint32_t>(buf.size()));
+        return true;
+    }
+    return false;
 }
 
 // ---- resolution chain (local pawn → CMC → PC; same shape as Laufen) ----
@@ -284,7 +360,10 @@ void CameraBasis(double yawDeg, double fwd[3], double right[3]) {
 }
 
 // ---- one fly tick (caller holds s_mutex; c already resolved MR_OK) ----
-void FlyTickLocked(const Ctx& c, double dtSec) {
+// In Noclip mode, sets outTeleport + outTarget (a world position); the worker
+// performs the actual teleport OUTSIDE the lock via a game-thread invoke.
+void FlyTickLocked(const Ctx& c, double dtSec, bool& outTeleport, double outTarget[3]) {
+    outTeleport = false;
     ++s_state.tick;
     // Read the game's LIVE mode + velocity at the top of the tick — i.e. the state
     // the game left after processing our PREVIOUS write. If velNow stays ~0 while
@@ -345,17 +424,22 @@ void FlyTickLocked(const Ctx& c, double dtSec) {
 
     double dbg[3] = {0, 0, 0};   // diagnostics: velWeSet (velocity) or posDelta (noclip)
     if (s_state.noclip) {
-        // Noclip: position-drive. Raw-write RootComponent.RelativeLocation each
-        // tick (fly through walls, bypasses any velocity system the game enforces)
-        // and zero velocity so the CMC doesn't add drift. Not valid while attached.
+        // Noclip: teleport-drive. Compute the target world position (RelativeLocation
+        // == world when not attached) and hand it to the worker, which teleports via
+        // the engine on the game thread (K2_SetActorLocation, bSweep=0/bTeleport=1) so
+        // UpdateComponentToWorld runs and the pawn actually moves. A raw
+        // RelativeLocation write here desyncs the transform → the pawn falls out of
+        // the world. Zero velocity so the CMC adds no drift between teleports.
         dbg[0] = dir[0]*s_state.speed*dtSec;
         dbg[1] = dir[1]*s_state.speed*dtSec;
         dbg[2] = dir[2]*s_state.speed*dtSec;
         if (!c.attached && c.relLocAddr && len > 1e-6) {
             double pos[3] = {0, 0, 0};
             if (ReadVec3At(c.relLocAddr, c.relLocSize, pos)) {
-                pos[0] += dbg[0]; pos[1] += dbg[1]; pos[2] += dbg[2];
-                WriteVec3At(c.relLocAddr, c.relLocSize, pos);
+                outTarget[0] = pos[0] + dbg[0];
+                outTarget[1] = pos[1] + dbg[1];
+                outTarget[2] = pos[2] + dbg[2];
+                outTeleport = true;
             }
         }
         double zero[3] = {0, 0, 0};
@@ -386,11 +470,20 @@ void WorkerLoop() {
     while (!s_workerStop.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(Grimoire::FLY_TICK_MS));
         if (s_workerStop.load()) break;
-        std::lock_guard<std::mutex> lk(s_mutex);
-        if (!s_state.active) continue;             // disabled between ticks
         Ctx c;
-        if (ResolveCtx(c, false) != FR_OK) continue;  // pawn/CMC gone (menu) — retry
-        FlyTickLocked(c, dtSec);
+        bool doTeleport = false;
+        double tpTarget[3] = {0, 0, 0};
+        {
+            std::lock_guard<std::mutex> lk(s_mutex);
+            if (!s_state.active) continue;             // disabled between ticks
+            if (ResolveCtx(c, false) != FR_OK) continue;  // pawn/CMC gone (menu) — retry
+            FlyTickLocked(c, dtSec, doTeleport, tpTarget);
+        }
+        // Noclip teleport runs OUTSIDE s_mutex (it blocks on the game thread) and
+        // only when the game thread is live — else the invoke would stall the worker
+        // for the full timeout on a paused game.
+        if (doTeleport && Stark::IsGameThreadResponsive())
+            InvokeTeleport(c.pawn, c.root, tpTarget);
     }
     LOG_INFO("Fly: worker stopped");
 }
