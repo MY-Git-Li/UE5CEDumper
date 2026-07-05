@@ -2465,10 +2465,21 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             string gdScript = MovementScriptGenerator.GenerateGravityDirection(GravDirX, GravDirY, GravDirZ);
             if (await _aobMaker!.CreateAAScriptAsync(gdDesc, gdScript, autoActivate: false))
                 ok++;
-            int total = specs.Length + moveSpecs.Length + 1;
-            StatusText = $"Added {ok}/{total} Teleport + Movement records to CE " +
-                         "(teleport = momentary; movement = on/off toggle; bind CE hotkeys as you like).";
-            _log.Info($"Teleport + Movement actions -> CE via AOBMaker ({ok}/{total})");
+            // Fly (Dunste) — DLL-driven no-gravity flight; stateful on/off toggles.
+            var flySpecs = new (string Desc, FlyScriptGenerator.FlyToggle Toggle)[]
+            {
+                ("Fly: no-gravity 3D flight",   FlyScriptGenerator.FlyToggle.Enabled),
+                ("Fly: Noclip (through walls)", FlyScriptGenerator.FlyToggle.Noclip),
+            };
+            foreach (var s in flySpecs)
+            {
+                if (await _aobMaker!.CreateAAScriptAsync(s.Desc, FlyScriptGenerator.Generate(s.Toggle), autoActivate: false))
+                    ok++;
+            }
+            int total = specs.Length + moveSpecs.Length + 1 + flySpecs.Length;
+            StatusText = $"Added {ok}/{total} Teleport + Movement + Fly records to CE " +
+                         "(teleport = momentary; movement/fly = on/off toggle; bind CE hotkeys as you like).";
+            _log.Info($"Teleport + Movement + Fly actions -> CE via AOBMaker ({ok}/{total})");
         }
         catch (Exception ex)
         {
@@ -2492,6 +2503,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 MoveSpeedMultiplier * 100, GravityMultiplier * 100,
                 SuperJumpHeightMultiplier * 100,
                 GravDirX, GravDirY, GravDirZ));
+            // Fly (Dunste) — DLL-driven no-gravity flight on/off + noclip on/off.
+            rows.AddRange(FlyScriptGenerator.BuildBatchRows());
             string ct = CheatTableBuilder.Build("Teleport — UE5CEDumper", rows);
             var path = await _platform.ShowSaveFileDialogAsync(
                 defaultFileName: CheatTableBuilder.DefaultFileName("Teleport", DateTime.Now),
