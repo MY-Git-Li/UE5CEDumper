@@ -105,6 +105,8 @@ public class StandaloneTrainerScriptGeneratorTests
         var fly = entries.First(e => e.Description.Contains("Fly")).Script;
         Assert.Contains("writeByte(c + UE5T.moveModeOff, 5)", fly);   // force MOVE_Flying
         Assert.Contains("isKeyPressed(0x57)", fly);                   // W = forward
+        // Keys only drive movement while the game is foreground (else hover).
+        Assert.Contains("getForegroundProcess() == getOpenedProcessID()", fly);
     }
 
     [Fact]
