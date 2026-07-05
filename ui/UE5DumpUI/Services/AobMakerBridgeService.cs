@@ -200,7 +200,7 @@ public sealed class AobMakerBridgeService : IAobMakerBridge, IDisposable
     }
 
     public async Task<bool> CreateAAScriptAsync(string description, string script,
-        bool autoActivate = true, CancellationToken ct = default)
+        bool autoActivate = true, string? group = null, CancellationToken ct = default)
     {
         await _opLock.WaitAsync(ct);
         try
@@ -218,7 +218,8 @@ public sealed class AobMakerBridgeService : IAobMakerBridge, IDisposable
                     Type = TypeCreateAAScript,
                     Description = description,
                     Script = script,
-                    AutoActivate = autoActivate
+                    AutoActivate = autoActivate,
+                    Group = string.IsNullOrEmpty(group) ? null : group,
                 };
 
                 await WriteMessageAsync(_pipe!, request, ct);

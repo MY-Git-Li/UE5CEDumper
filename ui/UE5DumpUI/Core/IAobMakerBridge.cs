@@ -35,8 +35,13 @@ public interface IAobMakerBridge
     /// <param name="description">Description shown in CE address list</param>
     /// <param name="script">Full AA script content ([ENABLE]/[DISABLE] sections)</param>
     /// <param name="autoActivate">Whether to activate the script immediately after creation</param>
+    /// <param name="group">Optional group-node description. Non-empty → the record is
+    /// nested under a single-level <c>IsGroupHeader</c> folder of that description
+    /// (created if absent). Null/empty → address-list root (back-compatible).
+    /// <b>Requires an AOBMaker CE plugin that handles the <c>group</c> field</b> —
+    /// older builds ignore it (records land at root).</param>
     Task<bool> CreateAAScriptAsync(string description, string script, bool autoActivate = true,
-        CancellationToken ct = default);
+        string? group = null, CancellationToken ct = default);
 
     /// <summary>
     /// Create an AOB-scan-based symbol registration AA script in CE's address list.

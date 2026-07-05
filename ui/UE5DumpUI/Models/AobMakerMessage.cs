@@ -39,6 +39,15 @@ public class AobMakerMessage
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool AutoActivate { get; set; }
 
+    // Optional target group-node description. Non-empty → the AA-script record is
+    // nested under a single-level IsGroupHeader folder of that description (created
+    // if absent; a Type-11 script name-collision yields a fresh group). Omitted →
+    // address-list root (back-compatible). Handled by the AOBMaker CE plugin's
+    // CreateAAScript handler (docs/aobmaker-integration.md).
+    [JsonPropertyName("group")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Group { get; set; }
+
     // --- CreateSymbolScript fields ---
     // CE Plugin's BuildSymbolScanScript() generates an AA script from these AOB parameters.
 

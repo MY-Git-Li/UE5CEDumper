@@ -320,7 +320,7 @@ public class InterestingFunctionsViewModelTests
         public Task<bool> NavigateDisassemblerAsync(string hexAddress, CancellationToken ct = default)
             => Task.FromResult(false);
         public Task<bool> CreateAAScriptAsync(string description, string script,
-            bool autoActivate = true, CancellationToken ct = default)
+            bool autoActivate = true, string? group = null, CancellationToken ct = default)
             => Task.FromResult(false);
         public Task<bool> CreateSymbolScriptAsync(string name, string aob, int pos, int aoblen,
             string symbol, string module, bool autoActivate = true, CancellationToken ct = default)

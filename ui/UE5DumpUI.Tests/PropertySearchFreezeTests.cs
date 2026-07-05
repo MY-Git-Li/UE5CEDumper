@@ -173,7 +173,7 @@ public class PropertySearchFreezeTests
         }
 
         public Task<bool> CreateAAScriptAsync(string description, string script,
-            bool autoActivate = true, CancellationToken ct = default)
+            bool autoActivate = true, string? group = null, CancellationToken ct = default)
         {
             CreateAaCalls++;
             LastDescription = description;

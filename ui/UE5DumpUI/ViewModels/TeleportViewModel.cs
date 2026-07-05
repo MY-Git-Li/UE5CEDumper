@@ -42,6 +42,14 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     // trainer .CT. Pushed by MainWindowViewModel on connect / rescan.
     private Models.EngineState? _engineState;
 
+    // CE address-list group nodes the AOBMaker push nests records under, so the many
+    // pushed scripts collapse into two folders instead of littering the root. The
+    // DLL-mailbox scripts (Teleport / Movement / Fly) and the no-DLL standalone
+    // trainer are kept in SEPARATE groups. (Needs an AOBMaker plugin that handles the
+    // `group` field; older builds ignore it and land the records at root.)
+    private const string CeGroupDll = "UE5CEDumper (DLL)";
+    private const string CeGroupTrainer = "UE5CEDumper (no-DLL trainer)";
+
     public TeleportViewModel(IDumpService dump, ILoggingService log, IPlatformService platform,
         IAobMakerBridge? aobMaker = null, IGlobalHotkeyService? globalHotkeys = null)
     {
@@ -225,7 +233,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             int ok = 0;
             foreach (var e in entries)
             {
-                var sent = await _aobMaker.CreateAAScriptAsync(e.Description, e.Script, e.AutoActivate);
+                var sent = await _aobMaker.CreateAAScriptAsync(e.Description, e.Script, e.AutoActivate, group: CeGroupTrainer);
                 if (sent) { ok++; }
                 else { break; }   // pipe dropped mid-push (CE closed?)
             }
@@ -2439,7 +2447,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                     RelativeDistance, RelativeHorizontal,
                     CoordX, CoordY, CoordZ, CoordSetRotation,
                     CoordPitch, CoordYaw, CoordRoll);
-                if (await _aobMaker!.CreateAAScriptAsync(s.Desc, script, autoActivate: false))
+                if (await _aobMaker!.CreateAAScriptAsync(s.Desc, script, autoActivate: false, group: CeGroupDll))
                     ok++;
             }
             // Movement-tuning toggles (Laufen) baked at the current slider % —
@@ -2456,14 +2464,14 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             foreach (var s in moveSpecs)
             {
                 string script = MovementScriptGenerator.Generate(s.Knob, s.Percent);
-                if (await _aobMaker!.CreateAAScriptAsync(s.Desc, script, autoActivate: false))
+                if (await _aobMaker!.CreateAAScriptAsync(s.Desc, script, autoActivate: false, group: CeGroupDll))
                     ok++;
             }
             // Gravity Direction vector (UE5.4+) baked at the current sliders.
             string gdDesc = string.Format(CultureInfo.InvariantCulture,
                 "Movement: Gravity Direction ({0:0.0#}, {1:0.0#}, {2:0.0#})", GravDirX, GravDirY, GravDirZ);
             string gdScript = MovementScriptGenerator.GenerateGravityDirection(GravDirX, GravDirY, GravDirZ);
-            if (await _aobMaker!.CreateAAScriptAsync(gdDesc, gdScript, autoActivate: false))
+            if (await _aobMaker!.CreateAAScriptAsync(gdDesc, gdScript, autoActivate: false, group: CeGroupDll))
                 ok++;
             // Fly (Dunste) — one row per key preset (WASD often collides with the game's
             // own movement) + a Noclip toggle. DLL-driven; stateful on/off.
@@ -2475,7 +2483,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                           FlyScriptGenerator.Generate(FlyScriptGenerator.FlyToggle.Noclip)));
             foreach (var s in flySpecs)
             {
-                if (await _aobMaker!.CreateAAScriptAsync(s.Desc, s.Script, autoActivate: false))
+                if (await _aobMaker!.CreateAAScriptAsync(s.Desc, s.Script, autoActivate: false, group: CeGroupDll))
                     ok++;
             }
             int total = specs.Length + moveSpecs.Length + 1 + flySpecs.Count;
