@@ -404,9 +404,13 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     [NotifyPropertyChangedFor(nameof(FlySpeedText))]
     private double _flySpeed = 1200.0;
 
-    /// <summary>Active keyboard preset (index = DLL preset id): 0 = WASD+QE+ZC,
-    /// 1 = numpad, 2 = arrows.</summary>
+    /// <summary>Active keyboard preset (index = DLL preset id): 0 = WASD,
+    /// 1 = numpad, 2 = arrows. Turn is view-relative (the mouse).</summary>
     [ObservableProperty] private int _flyPresetIndex;
+
+    /// <summary>Noclip: position-drive (fly through walls, works even where the
+    /// game overrides velocity) vs the default velocity-drive (collision kept).</summary>
+    [ObservableProperty] private bool _flyNoclip;
 
     [ObservableProperty] private string _flyCurrentText = "—";
 
@@ -418,12 +422,12 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     public string FlySpeedText => $"{Math.Round(FlySpeed)} uu/s";
 
     /// <summary>Preset labels for the dropdown (index = DLL preset id — the order
-    /// MUST match Dunste::Preset).</summary>
+    /// MUST match Dunste::Preset). Turn is the mouse (view-relative).</summary>
     public System.Collections.Generic.IReadOnlyList<string> FlyPresets { get; } = new[]
     {
-        "WASD  ·  Q/E turn  ·  Z/C up-down",
-        "Numpad 8/4/2/6  ·  7/9 turn  ·  1/3 up-down",
-        "Arrows  ·  Ins/Del turn  ·  PgUp/PgDn up-down",
+        "WASD move  ·  Z/C up-down",
+        "Numpad 8/4/2/6 move  ·  1/3 up-down",
+        "Arrows move  ·  PgUp/PgDn up-down",
     };
 
     // ── Gravity Direction (Laufen, UE5.4+ GravityDirection vector) ─────
@@ -1651,10 +1655,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         {
             IsBusy = true;
             ClearError();
-            var st = await _dump.FlySetAsync(enable: true, speed: FlySpeed, preset: FlyPresetIndex);
+            var st = await _dump.FlySetAsync(enable: true, speed: FlySpeed, preset: FlyPresetIndex, noclip: FlyNoclip);
             ApplyFlyReadout(st);
             StatusText = st.HasCmc
-                ? $"✈ Fly ON — {FlyPresets[Math.Clamp(FlyPresetIndex, 0, FlyPresets.Count - 1)]}."
+                ? $"✈ Fly ON ({(FlyNoclip ? "noclip" : "collision")}) — {FlyPresets[Math.Clamp(FlyPresetIndex, 0, FlyPresets.Count - 1)]}."
                 : "Fly could not engage (no CharacterMovement on this pawn).";
         }
         catch (Exception ex)
@@ -1675,7 +1679,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         {
             IsBusy = true;
             ClearError();
-            var st = await _dump.FlySetAsync(enable: false, speed: null, preset: null);
+            var st = await _dump.FlySetAsync(enable: false, speed: null, preset: null, noclip: null);
             ApplyFlyReadout(st);
             StatusText = "Fly OFF.";
         }
@@ -1716,22 +1720,29 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     partial void OnFlySpeedChanged(double value)
     {
         if (_flyActive && IsConnected)
-            _ = PushFlyConfigAsync(speed: value, preset: null);
+            _ = PushFlyConfigAsync(speed: value, preset: null, noclip: null);
     }
 
     /// <summary>Live preset change: push to the DLL (takes effect next tick).</summary>
     partial void OnFlyPresetIndexChanged(int value)
     {
         if (IsConnected)
-            _ = PushFlyConfigAsync(speed: null, preset: value);
+            _ = PushFlyConfigAsync(speed: null, preset: value, noclip: null);
+    }
+
+    /// <summary>Live noclip toggle: push to the DLL (takes effect next tick).</summary>
+    partial void OnFlyNoclipChanged(bool value)
+    {
+        if (IsConnected)
+            _ = PushFlyConfigAsync(speed: null, preset: null, noclip: value);
     }
 
     /// <summary>Push a config-only change (no enable field) and refresh the badge.</summary>
-    private async Task PushFlyConfigAsync(double? speed, int? preset)
+    private async Task PushFlyConfigAsync(double? speed, int? preset, bool? noclip)
     {
         try
         {
-            var st = await _dump.FlySetAsync(enable: null, speed: speed, preset: preset);
+            var st = await _dump.FlySetAsync(enable: null, speed: speed, preset: preset, noclip: noclip);
             ApplyFlyReadout(st);
         }
         catch (Exception ex)

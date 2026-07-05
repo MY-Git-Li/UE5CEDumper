@@ -1059,6 +1059,10 @@ int32_t UE5_SetFlyPreset(int32_t preset) {
     return Dunste::SetPreset(preset);
 }
 
+int32_t UE5_SetFlyNoclip(int32_t enable) {
+    return Dunste::SetNoclip(enable != 0);
+}
+
 // ============================================================================
 // ProcessEvent vtable detection (build 648+)
 //

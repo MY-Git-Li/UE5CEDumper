@@ -4303,6 +4303,7 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             json data;
             data["code"]          = st.code;          // 0 ok; negative Dunste::FlyResult
             data["active"]        = st.active;
+            data["noclip"]        = st.noclip;        // position-drive (through walls)
             data["has_cmc"]       = st.hasCmc;
             data["preset"]        = st.preset;        // 0 WASD / 1 numpad / 2 arrows
             data["speed"]         = st.speed;         // uu/s
@@ -4317,14 +4318,17 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                 Dunste::SetSpeed(request.value("speed", 0.0));
             if (request.contains("preset"))
                 Dunste::SetPreset(request.value("preset", 0));
+            if (request.contains("noclip"))
+                Dunste::SetNoclip(request.value("noclip", false));
             int32_t state = -1;
             const bool haveEnable = request.contains("enable");
             if (haveEnable)
                 state = Dunste::SetEnabled(request.value("enable", false));
-            Sein::Info("PIPE:cmd", "fly_set: enable=%s speed=%s preset=%s",
+            Sein::Info("PIPE:cmd", "fly_set: enable=%s speed=%s preset=%s noclip=%s",
                        haveEnable ? (request.value("enable", false) ? "1" : "0") : "-",
                        request.contains("speed") ? "y" : "-",
-                       request.contains("preset") ? "y" : "-");
+                       request.contains("preset") ? "y" : "-",
+                       request.contains("noclip") ? (request.value("noclip", false) ? "1" : "0") : "-");
             Dunste::FlyStatus st{};
             Dunste::GetStatus(st);
             json data = flyStatusJson(st);

@@ -228,6 +228,8 @@ public sealed class FlyStatus
     public int Code { get; init; }
     /// <summary>Fly currently engaged (the worker is holding MOVE_Flying).</summary>
     public bool Active { get; init; }
+    /// <summary>Noclip (position-drive, fly through walls) vs velocity (collision).</summary>
+    public bool Noclip { get; init; }
     /// <summary>A UCharacterMovementComponent resolved on the local pawn.</summary>
     public bool HasCmc { get; init; }
     /// <summary>Active keyboard preset: 0 = WASD, 1 = numpad, 2 = arrows.</summary>

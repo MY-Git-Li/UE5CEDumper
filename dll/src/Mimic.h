@@ -128,7 +128,8 @@ enum FlyOp : uint64_t {
     FLY_OP_SET_SPEED   = 1, // paramsData[0..7] = double uu/s. result = FlyResult.
     FLY_OP_SET_PRESET  = 2, // ufuncAddr = preset (0/1/2). result = FlyResult.
     FLY_OP_GET_STATE   = 3, // result = FlyResult; paramsData[0] = active, [1] =
-                            //   preset, [8..15] = speed double.
+                            //   preset, [2] = noclip, [8..15] = speed double.
+    FLY_OP_SET_NOCLIP  = 4, // ufuncAddr = 1 (noclip/through-walls) / 0 (collision).
 };
 
 // CMD_PROTECT op codes (written into instanceAddr by CE Lua / pipe bridge).

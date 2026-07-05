@@ -90,9 +90,10 @@ public class TeleportViewModelTests
         public bool? LastFlyEnable { get; private set; }
         public double? LastFlySpeed { get; private set; }
         public int? LastFlyPreset { get; private set; }
+        public bool? LastFlyNoclip { get; private set; }
 
-        public override Task<FlyStatus> FlySetAsync(bool? enable, double? speed, int? preset, CancellationToken ct = default)
-        { FlySetCalls++; LastFlyEnable = enable; LastFlySpeed = speed; LastFlyPreset = preset; return Task.FromResult(NextFlyStatus); }
+        public override Task<FlyStatus> FlySetAsync(bool? enable, double? speed, int? preset, bool? noclip, CancellationToken ct = default)
+        { FlySetCalls++; LastFlyEnable = enable; LastFlySpeed = speed; LastFlyPreset = preset; LastFlyNoclip = noclip; return Task.FromResult(NextFlyStatus); }
 
         public override Task<FlyStatus> FlyGetStateAsync(CancellationToken ct = default)
         { FlyGetStateCalls++; return Task.FromResult(NextFlyStatus); }
@@ -440,6 +441,20 @@ public class TeleportViewModelTests
 
         Assert.Equal(2, fake.LastFlyPreset);
         Assert.Null(fake.LastFlyEnable);   // no enable field on a config-only push
+    }
+
+    [Fact]
+    public void Fly_noclip_toggle_pushes_config_without_enable()
+    {
+        var fake = new FakeDumpService();
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        fake.NextFlyStatus = new FlyStatus { HasCmc = true, Active = false, Noclip = true };
+
+        vm.FlyNoclip = true;   // OnFlyNoclipChanged → PushFlyConfigAsync (config-only)
+
+        Assert.Equal(true, fake.LastFlyNoclip);
+        Assert.Null(fake.LastFlyEnable);
     }
 
     [Fact]

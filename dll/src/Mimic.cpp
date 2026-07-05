@@ -956,11 +956,17 @@ static void HandleFly() {
         LOG_INFO("Mailbox: FLY preset=%llu -> rc=%d",
                  (unsigned long long)g_invokeMailbox.ufuncAddr, rc);
         break;
+    case FLY_OP_SET_NOCLIP:
+        rc = UE5_SetFlyNoclip(static_cast<int32_t>(g_invokeMailbox.ufuncAddr) != 0 ? 1 : 0);
+        LOG_INFO("Mailbox: FLY noclip=%llu -> rc=%d",
+                 (unsigned long long)g_invokeMailbox.ufuncAddr, rc);
+        break;
     case FLY_OP_GET_STATE: {
         Dunste::FlyStatus st{};
         rc = Dunste::GetStatus(st);
         g_invokeMailbox.paramsData[0] = st.active ? 1 : 0;
         g_invokeMailbox.paramsData[1] = static_cast<uint8_t>(st.preset);
+        g_invokeMailbox.paramsData[2] = st.noclip ? 1 : 0;
         memcpy(g_invokeMailbox.paramsData + 8, &st.speed, sizeof(double));
         break;
     }

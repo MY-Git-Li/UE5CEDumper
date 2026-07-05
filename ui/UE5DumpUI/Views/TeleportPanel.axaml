@@ -733,6 +733,11 @@
                        Foreground="#DDDDDD" FontWeight="SemiBold" MinWidth="72"
                        TextAlignment="Right" VerticalAlignment="Center" Margin="8,0,0,0"/>
           </Grid>
+          <CheckBox Content="{StaticResource str.TP.FlyNoclip}"
+                    IsChecked="{Binding FlyNoclip}"
+                    IsEnabled="{Binding CanOperate}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.FlyNoclip}"
+                    Foreground="#CCCCCC"/>
           <StackPanel Orientation="Horizontal" Spacing="8">
             <Button Content="{StaticResource str.TP.FlyOn}"
                     Command="{Binding ApplyFlyCommand}"

@@ -186,9 +186,12 @@ __declspec(dllexport) int32_t   UE5_SetGravityDirection(double x, double y, doub
 __declspec(dllexport) int32_t   UE5_SetFly(int32_t enable);
 // Flight speed in uu/s (clamped to [FLY_SPEED_MIN, FLY_SPEED_MAX]). Returns FR_OK.
 __declspec(dllexport) int32_t   UE5_SetFlySpeed(double uuPerSec);
-// Keyboard preset: 0 = WASD+QE+ZC, 1 = numpad, 2 = arrows+Ins/Del+PgUp/PgDn.
-// Returns FR_OK, or negative Dunste::FlyResult for an out-of-range value.
+// Keyboard preset: 0 = WASD, 1 = numpad, 2 = arrows (movement + up/down; turn is
+// the mouse). Returns FR_OK, or negative Dunste::FlyResult for out-of-range.
 __declspec(dllexport) int32_t   UE5_SetFlyPreset(int32_t preset);
+// Noclip: enable!=0 = position-drive (fly through walls, works even where the
+// game overwrites Velocity); 0 = velocity-drive (collision preserved). FR_OK.
+__declspec(dllexport) int32_t   UE5_SetFlyNoclip(int32_t enable);
 
 // === Mailbox (CE Lua shared memory interface) ===
 // Returns the address of the g_invokeMailbox buffer.
