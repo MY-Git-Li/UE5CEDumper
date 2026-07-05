@@ -16,11 +16,11 @@
 // yaw — W flies where you look (ground plane), A/D strafe, Z/C move world-vertical.
 // Turning is the mouse (we only READ the camera yaw; never write rotation). Two
 // motion modes:
-//   • Collision (default): write the CMC Velocity FVector — the engine sweeps
+//   • Collision (default): drive the CMC Velocity FVector — the engine sweeps
 //     world geometry (you can't pass through walls).
-//   • Noclip: raw-write the RootComponent RelativeLocation each tick — flies
-//     through walls, and bypasses any game that overwrites Velocity (FF7Rebirth
-//     class). No gravity in either mode.
+//   • Noclip: SAME velocity-drive, plus AActor::SetActorEnableCollision(false) so
+//     the flying sweep passes through walls. No gravity in either mode. (FF7Rebirth
+//     zeroes Velocity every frame → neither mode moves it.)
 // All writes are pure reflected Macht (SEH) memory writes — NO UFunction invoke,
 // NO game thread (Path B, like Laufen). All offsets resolved by FName (DynOff) →
 // UE4/UE5-agnostic. No cached instance pointers: the pawn/CMC is re-resolved
@@ -61,7 +61,7 @@ enum Preset : int32_t {
 struct FlyStatus {
     int32_t   code           = 0;      // FlyResult: FR_OK or a negative error
     bool      active         = false;  // fly override engaged (worker holding it)
-    bool      noclip         = false;  // position-drive (fly through walls) vs velocity
+    bool      noclip         = false;  // fly through walls (collision disabled) vs kept
     bool      hasCmc         = false;  // a CharacterMovement resolved on the pawn
     int32_t   preset         = PRESET_WASD;
     double    speed          = 0.0;    // uu/s
@@ -84,9 +84,9 @@ int32_t SetSpeed(double uuPerSec);
 // FR_OK, or FR_ERR_REFLECT for an out-of-range value.
 int32_t SetPreset(int32_t preset);
 
-// Toggle Noclip: true = position-drive (raw RelativeLocation write, flies through
-// walls, works even where the game overwrites Velocity); false = velocity-drive
-// (collision preserved). Takes effect on the next worker tick. Returns FR_OK.
+// Toggle Noclip: true = disable the actor's collision so flight passes through
+// walls (velocity-drive is unchanged); false = keep collision. Takes effect on the
+// next worker tick (a one-shot SetActorEnableCollision invoke). Returns FR_OK.
 int32_t SetNoclip(bool enable);
 
 // Read the live fly state (+ CMC owner for Locate-in-GWorld). Always fills

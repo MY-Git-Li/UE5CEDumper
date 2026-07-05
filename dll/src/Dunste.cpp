@@ -3,21 +3,25 @@
 // Fly: no-gravity free 3D flight of the local pawn, keyboard-driven. Contract:
 // Dunste.h.
 //
-// Engine-flying (collision preserved): force the CMC into MOVE_Flying via a raw
-// enum-byte write held by a re-assert worker (write-on-drift, like Laufen), then
-// drive the CMC Velocity FVector each ~60 Hz tick from the keyboard.
+// Force the CMC into MOVE_Flying via a raw enum-byte write held by a re-assert
+// worker (write-on-drift, like Laufen), then drive the CMC Velocity FVector each
+// ~60 Hz tick from the keyboard — the engine moves the WHOLE character with a
+// proper transform refresh, so this is clean across games.
 //
-// CHARACTER-RELATIVE control (build 1919+): Dunste owns the flight HEADING (yaw),
-// seeded from the pawn's live facing on engage. Q/E rotate the heading; WASD move
-// relative to it (forward/strafe horizontal), Z/C move world-vertical. Each tick
-// we raw-write the pawn RootComponent's RelativeRotation yaw = heading, so the
-// View-relative: movement follows the camera (ControlRotation) yaw, read-only;
-// turning is the mouse. Two motion modes: Velocity (collision, pure raw Macht
-// writes — Path B) and Noclip (position-drive). Noclip teleports via the engine's
-// K2_SetActorLocation on the game thread (Stark) so UpdateComponentToWorld runs
-// and the render/physics transform follows — a raw RelativeLocation write does
-// NOT refresh it and desyncs the pawn (falls out of the world). Offsets resolved
-// by FName (DynOff), UE4/UE5-agnostic; pawn re-resolved every tick.
+// VIEW-relative control: movement follows the camera (ControlRotation) yaw
+// (read-only — the mouse owns the view). W flies where you look (ground plane),
+// A/D strafe, Z/C move world-vertical.
+//
+// Two modes, IDENTICAL motion (velocity-drive); they differ only in collision:
+//   • Collision (default): the CMC's flying sweep keeps world geometry — no
+//     passing through walls. Pure raw Macht writes, no game thread (Path B).
+//   • Noclip: additionally invoke AActor::SetActorEnableCollision(false) once (game
+//     thread, Stark) so the sweep passes through walls; restored on off/disable.
+//     (An earlier per-tick teleport noclip jittered / desynced the mesh / broke
+//     input across games — velocity + collision-off is clean.) FF7Rebirth zeroes
+//     Velocity every frame → neither mode moves it (authoritative movement system).
+//
+// Offsets resolved by FName (DynOff), UE4/UE5-agnostic; pawn re-resolved every tick.
 // ============================================================
 
 #define LOG_CAT "FLY"
@@ -57,13 +61,15 @@ using namespace Dunste;  // FlyResult / Preset codes
 // ---- desired state (guarded by s_mutex) ----
 struct FlyState {
     bool      active       = false;
-    bool      noclip       = false;  // position-drive (fly through walls, works
-                                     //   everywhere) vs velocity-drive (collision kept)
+    bool      noclip       = false;  // fly through walls: velocity-drive + the actor's
+                                     //   collision disabled (vs collision kept)
     double    speed        = Grimoire::FLY_SPEED_DEFAULT;
     int32_t   preset       = PRESET_WASD;
     uint8_t   baseMode     = 1;      // captured MovementMode to restore (default MOVE_Walking)
     bool      baseCaptured = false;
     uintptr_t capturedPawn = 0;      // pawn the base mode was captured from (respawn re-capture)
+    bool      collisionOff = false;  // WE disabled the actor's collision (noclip)
+    uintptr_t collisionPawn = 0;     // pawn the collision was disabled on (respawn re-apply)
     uint64_t  tick         = 0;      // worker tick counter (sampled diagnostics)
     int       driftCount   = 0;      // times we re-asserted MOVE_Flying (game fought us)
 };
@@ -166,39 +172,23 @@ bool FindFuncByName(uintptr_t classAddr, const char* name, FunctionInfo& out) {
     return false;
 }
 
-void WriteVec3ToBuf(std::vector<uint8_t>& buf, int32_t off, int32_t size, const double v[3]) {
-    if (off < 0) return;
-    int need = (size >= 24) ? 24 : 12;
-    if (off + need > static_cast<int32_t>(buf.size())) return;
-    if (size >= 24)
-        for (int i = 0; i < 3; ++i) { double d = v[i]; std::memcpy(buf.data() + off + i*8, &d, 8); }
-    else
-        for (int i = 0; i < 3; ++i) { float f = static_cast<float>(v[i]); std::memcpy(buf.data() + off + i*4, &f, 4); }
-}
-
-// Pack + invoke a K2 "set world location" setter with bSweep=false, bTeleport=true
-// (= noclip: ignores collision AND runs UpdateComponentToWorld so the transform
-// follows). Tries AActor::K2_SetActorLocation on the pawn, then the RootComponent's
-// K2_SetWorldLocation. Runs on the game thread via Stark. Returns true if invoked.
-bool InvokeTeleport(uintptr_t pawn, uintptr_t root, const double xyz[3]) {
-    struct Target { uintptr_t obj; const char* fn; };
-    Target tries[2] = { { pawn, "K2_SetActorLocation" }, { root, "K2_SetWorldLocation" } };
-    for (const auto& t : tries) {
-        if (!t.obj) continue;
-        FunctionInfo fi;
-        if (!FindFuncByName(Ubel::GetClass(t.obj), t.fn, fi) || fi.parmsSize == 0) continue;
-        std::vector<uint8_t> buf(fi.parmsSize, 0);
-        for (const auto& p : fi.params) {
-            if (IEq(p.name, "NewLocation")) WriteVec3ToBuf(buf, p.offset, p.size, xyz);
-            else if (IEq(p.name, "bSweep")    && p.offset >= 0 && p.offset < (int)buf.size()) buf[p.offset] = 0;
-            else if (IEq(p.name, "bTeleport") && p.offset >= 0 && p.offset < (int)buf.size()) buf[p.offset] = 1;
-        }
-        UE5_CallProcessEventEx(t.obj, fi.address,
-                               reinterpret_cast<uintptr_t>(buf.data()),
-                               static_cast<uint32_t>(buf.size()));
-        return true;
-    }
-    return false;
+// Invoke AActor::SetActorEnableCollision(enable) on the game thread (Stark). Noclip
+// = disable the actor's collision so the CMC's flying sweep passes through walls,
+// while the (unchanged) velocity-drive moves the WHOLE character with a proper
+// transform refresh — unlike a per-tick teleport, which only moved the root and
+// jittered / desynced the mesh across games. Returns true if the setter was found.
+bool InvokeSetCollision(uintptr_t pawn, bool enable) {
+    if (!pawn) return false;
+    FunctionInfo fi;
+    if (!FindFuncByName(Ubel::GetClass(pawn), "SetActorEnableCollision", fi)) return false;
+    std::vector<uint8_t> buf((std::max<size_t>)(static_cast<size_t>(fi.parmsSize), size_t{1}), 0);
+    for (const auto& p : fi.params)
+        if (IEq(p.name, "bNewActorEnableCollision") && p.offset >= 0 && p.offset < (int)buf.size())
+            buf[p.offset] = enable ? 1 : 0;
+    UE5_CallProcessEventEx(pawn, fi.address,
+                           reinterpret_cast<uintptr_t>(buf.data()),
+                           static_cast<uint32_t>(buf.size()));
+    return true;
 }
 
 // ---- resolution chain (local pawn → CMC → PC; same shape as Laufen) ----
@@ -360,15 +350,17 @@ void CameraBasis(double yawDeg, double fwd[3], double right[3]) {
 }
 
 // ---- one fly tick (caller holds s_mutex; c already resolved MR_OK) ----
-// In Noclip mode, sets outTeleport + outTarget (a world position); the worker
-// performs the actual teleport OUTSIDE the lock via a game-thread invoke.
-void FlyTickLocked(const Ctx& c, double dtSec, bool& outTeleport, double outTarget[3]) {
-    outTeleport = false;
+// When the actor's collision must change (noclip on/off, or a new pawn after
+// respawn), sets outCollPawn + outCollEnable; the worker invokes
+// SetActorEnableCollision OUTSIDE the lock (game thread).
+void FlyTickLocked(const Ctx& c, double dtSec, uintptr_t& outCollPawn, int& outCollEnable) {
+    (void)dtSec;
+    outCollPawn = 0;
     ++s_state.tick;
     // Read the game's LIVE mode + velocity at the top of the tick — i.e. the state
     // the game left after processing our PREVIOUS write. If velNow stays ~0 while
-    // we keep writing a big velocity, the game is overwriting us (FF7R class →
-    // Noclip mode is the fix).
+    // we keep writing a big velocity, the game is overwriting us (FF7R class — its
+    // movement is authoritative, so neither mode moves it).
     uint8_t liveMode = 0;
     bool haveMode = (c.modeOff >= 0) &&
                     Macht::ReadSafe(c.cmc + static_cast<uintptr_t>(c.modeOff), liveMode);
@@ -422,44 +414,33 @@ void FlyTickLocked(const Ctx& c, double dtSec, bool& outTeleport, double outTarg
     double dir[3] = {0, 0, 0};
     if (len > 1e-6) { dir[0] = move[0]/len; dir[1] = move[1]/len; dir[2] = move[2]/len; }
 
-    double dbg[3] = {0, 0, 0};   // diagnostics: velWeSet (velocity) or posDelta (noclip)
-    if (s_state.noclip) {
-        // Noclip: teleport-drive. Compute the target world position (RelativeLocation
-        // == world when not attached) and hand it to the worker, which teleports via
-        // the engine on the game thread (K2_SetActorLocation, bSweep=0/bTeleport=1) so
-        // UpdateComponentToWorld runs and the pawn actually moves. A raw
-        // RelativeLocation write here desyncs the transform → the pawn falls out of
-        // the world. Zero velocity so the CMC adds no drift between teleports.
-        dbg[0] = dir[0]*s_state.speed*dtSec;
-        dbg[1] = dir[1]*s_state.speed*dtSec;
-        dbg[2] = dir[2]*s_state.speed*dtSec;
-        if (!c.attached && c.relLocAddr && len > 1e-6) {
-            double pos[3] = {0, 0, 0};
-            if (ReadVec3At(c.relLocAddr, c.relLocSize, pos)) {
-                outTarget[0] = pos[0] + dbg[0];
-                outTarget[1] = pos[1] + dbg[1];
-                outTarget[2] = pos[2] + dbg[2];
-                outTeleport = true;
-            }
-        }
-        double zero[3] = {0, 0, 0};
-        WriteVec3At(c.velAddr, c.velSize, zero);
-    } else {
-        // Collision-preserving: drive the CMC Velocity (engine sweeps geometry).
-        // No keys → zero velocity (hover in place, no gravity).
-        dbg[0] = dir[0]*s_state.speed; dbg[1] = dir[1]*s_state.speed; dbg[2] = dir[2]*s_state.speed;
-        WriteVec3At(c.velAddr, c.velSize, dbg);
+    // Motion is IDENTICAL in both modes: drive the CMC Velocity (the engine moves
+    // the WHOLE character with a proper transform refresh — the reason velocity mode
+    // is clean everywhere). No keys → zero velocity (hover, no gravity). Noclip only
+    // additionally turns OFF the actor's collision (below) so the flying sweep passes
+    // through walls.
+    double vel[3] = { dir[0]*s_state.speed, dir[1]*s_state.speed, dir[2]*s_state.speed };
+    WriteVec3At(c.velAddr, c.velSize, vel);
+
+    // Collision should be OFF iff noclip is on. Emit an invoke request when the
+    // desired state differs, or when the pawn changed while it should stay off
+    // (respawn → the fresh pawn has collision on again).
+    bool wantOff = s_state.noclip;
+    if (wantOff != s_state.collisionOff ||
+        (wantOff && c.pawn != s_state.collisionPawn)) {
+        outCollPawn   = c.pawn;
+        outCollEnable = wantOff ? 0 : 1;      // 0 = disable collision, 1 = restore
+        s_state.collisionOff  = wantOff;      // optimistic (worker does the invoke)
+        s_state.collisionPawn = wantOff ? c.pawn : 0;
     }
 
     // Sampled diagnostics: first tick after enable, then ~every 2s.
     if (s_state.tick == 1 || s_state.tick % 120 == 0) {
-        LOG_INFO("Fly tick %llu: noclip=%d mode=%d(want 5) keys=0x%03X camYaw=%.0f drift=%d "
-                 "velGameLeft=(%.0f,%.0f,%.0f) %s=(%.1f,%.1f,%.1f) attached=%d root=%d",
+        LOG_INFO("Fly tick %llu: noclip=%d collOff=%d mode=%d(want 5) keys=0x%03X camYaw=%.0f "
+                 "drift=%d velGameLeft=(%.0f,%.0f,%.0f) velWeSet=(%.0f,%.0f,%.0f)",
                  (unsigned long long)s_state.tick, s_state.noclip ? 1 : 0,
-                 haveMode ? liveMode : -1, keymask, camYaw, s_state.driftCount,
-                 velNow[0], velNow[1], velNow[2],
-                 s_state.noclip ? "posDelta" : "velWeSet", dbg[0], dbg[1], dbg[2],
-                 c.attached ? 1 : 0, c.relLocAddr ? 1 : 0);
+                 s_state.collisionOff ? 1 : 0, haveMode ? liveMode : -1, keymask, camYaw,
+                 s_state.driftCount, velNow[0], velNow[1], velNow[2], vel[0], vel[1], vel[2]);
     }
 }
 
@@ -471,19 +452,20 @@ void WorkerLoop() {
         std::this_thread::sleep_for(std::chrono::milliseconds(Grimoire::FLY_TICK_MS));
         if (s_workerStop.load()) break;
         Ctx c;
-        bool doTeleport = false;
-        double tpTarget[3] = {0, 0, 0};
+        uintptr_t collPawn = 0;
+        int collEnable = 0;
         {
             std::lock_guard<std::mutex> lk(s_mutex);
             if (!s_state.active) continue;             // disabled between ticks
             if (ResolveCtx(c, false) != FR_OK) continue;  // pawn/CMC gone (menu) — retry
-            FlyTickLocked(c, dtSec, doTeleport, tpTarget);
+            FlyTickLocked(c, dtSec, collPawn, collEnable);
         }
-        // Noclip teleport runs OUTSIDE s_mutex (it blocks on the game thread) and
-        // only when the game thread is live — else the invoke would stall the worker
-        // for the full timeout on a paused game.
-        if (doTeleport && Stark::IsGameThreadResponsive())
-            InvokeTeleport(c.pawn, c.root, tpTarget);
+        // The SetActorEnableCollision invoke (noclip on/off, or respawn re-apply)
+        // runs OUTSIDE s_mutex (it blocks on the game thread) and only when the game
+        // thread is live — else it would stall the worker for the full timeout on a
+        // paused game.
+        if (collPawn && Stark::IsGameThreadResponsive())
+            InvokeSetCollision(collPawn, collEnable != 0);
     }
     LOG_INFO("Fly: worker stopped");
 }
@@ -539,6 +521,9 @@ int32_t SetEnabled(bool enable) {
     }
 
     // Disable: restore the captured MovementMode + zero velocity, stop worker.
+    // If we disabled the actor's collision (noclip), restore it — do the invoke
+    // OUTSIDE s_mutex (game thread).
+    uintptr_t restoreCollPawn = 0;
     {
         std::lock_guard<std::mutex> lk(s_mutex);
         if (s_state.active) {
@@ -550,13 +535,18 @@ int32_t SetEnabled(bool enable) {
                 }
                 double zero[3] = {0, 0, 0};
                 if (c.velAddr) WriteVec3At(c.velAddr, c.velSize, zero);
+                if (s_state.collisionOff) restoreCollPawn = c.pawn;
             }
         }
         s_state.active = false;
         s_state.baseCaptured = false;
         s_state.capturedPawn = 0;
+        s_state.collisionOff = false;
+        s_state.collisionPawn = 0;
         LOG_INFO("Fly: DISABLED");
     }
+    if (restoreCollPawn && Stark::IsGameThreadResponsive())
+        InvokeSetCollision(restoreCollPawn, true);   // re-enable collision
     StopWorkerLocked();   // join with s_mutex released
     return 0;
 }
