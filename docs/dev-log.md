@@ -18,6 +18,42 @@ builds ≤696 in
 
 -----
 
+## 2026-07-06 — Generic (non-Steam) drive scan in Proxy Deploy (build ~1944; dev)
+
+**SHIPPED (UI-only, no re-inject).** The Proxy Deploy tab could only find Steam-installed games. Added a
+**Source toggle** (Steam / Scan Drives) at the top of the same panel — Scan Drives searches user-chosen
+drives for UE games installed *anywhere* (Epic / GOG / manual), then feeds them into the identical
+Deploy / Undeploy / Update / Refresh machinery (all source-agnostic — they only need `BinariesDir`).
+
+**Requirements → mechanism.** (1) drive checkbox-list; (2) **partitions of one physical disk scan
+sequentially, different disks in parallel** — `IOCTL_STORAGE_GET_DEVICE_NUMBER` groups drives, groups run
+`Task.WhenAll` while drives within a group run a sequential `foreach await` (bounded by
+`SemaphoreSlim(Clamp(ProcessorCount,1,4))`); (3) inaccessible folders skipped and walk continues
+(`EnumerationOptions.IgnoreInaccessible` + materialize-in-try around every enumeration); (4) UE detection
+by folder structure (`LooksLikeUeGameRoot`: sibling `Engine\Binaries\Win64` / `Content\Paks\*.pak|utoc|ucas`
+/ `*-Win64-Shipping.exe`) with **prune-on-match** (never descend a matched root's multi-GB Content tree)
++ depth-6 cap + reparse-point cycle guard + hard-skip set; (5) Steam libraries excluded (resolved roots
+via `GetSteamLibraryFoldersAsync` + `steamapps` hard-skip fallback); (6) results drop into the existing
+`Games` grid.
+
+**Impl / AOT.** Drive→physical-disk mapping is **classic `[DllImport]`** `CreateFileW(\\.\C:, access=0)`
++ `DeviceIoControl` + blittable 12-byte `STORAGE_DEVICE_NUMBER` — no WMI/`System.Management` (AOT-banned),
+no `LibraryImport`. `dwDesiredAccess=0` = query-only = **no admin** needed. Lives behind
+`IPlatformService.GetLogicalDrives()` (Core stays platform-free); `ProxyDeployService` gains an
+`IPlatformService` ctor param (wired in `App.axaml.cs`). Unknown disk (spanned/network/virtual /
+`DeviceNumber==0xFFFFFFFF`) → its own scan group. New models `DriveDescriptor` / `DriveScanProgress`;
+new service methods `GetScannableDrivesAsync` / `FindUeGamesOnDrivesAsync`; VM `ScanDrivesMode` +
+`LoadDrives`/`ScanDrives` commands; per-game-dir detection (`ScanGameFolder`) reused verbatim.
+`IsKnownStubExe` also filters `UnrealEditor/UE4Editor/UnrealFrontend.exe`. 2194 UI tests green (+14 pure-
+helper + Steam-exclusion end-to-end).
+
+**Follow-ups (same build).** Added a **Cancel** button (`[RelayCommand(IncludeCancelCommand=true)]` →
+`ScanDrivesCancelCommand`, shown only while `IsScanning`) and **mode persistence** (`ScanDrivesMode` in
+`ProxyDeployUiOptions` + the `ProxyDeployPersist`/Apply/Capture blocks; restoring drive-mode lazily
+re-enumerates drives). **Real-machine verified** (headless P/Invoke replica, non-elevated): 7 drives →
+6 physical disks, `STORAGE_DEVICE_NUMBER`=12 bytes; two volumes sharing physical disk 0 correctly grouped
+into one sequential lane while the other five run parallel — requirement 2 confirmed on real hardware.
+
 ## 2026-07-04 — CE generators skip OUT-string params (crash fix) (build ~1913; pushed dev)
 
 **SHIPPED (UI-only, no re-inject).** Parity fix bringing the two CE-Lua generators in line with the

@@ -469,7 +469,7 @@ public class ProxyDeployTests
             MakeEmptyFile(Path.Combine(factoryBin, "FactoryGameSteam-Win64-Shipping.modules"));
             MakeEmptyFile(Path.Combine(factoryBin, "FactoryGameSteam-FactoryGame-Win64-Shipping.dll"));
 
-            var svc = new ProxyDeployService(new NoopLog());
+            var svc = new ProxyDeployService(new NoopLog(), new NoopPlatform());
             var found = await svc.FindUeGamesAsync(new[] { lib }, TestContext.Current.CancellationToken);
 
             var sat = Assert.Single(found, g => g.Name == "Satisfactory");
@@ -499,7 +499,7 @@ public class ProxyDeployTests
             MakeEmptyFile(Path.Combine(engineBin, "CrashReportClient.exe"));
             MakeEmptyFile(Path.Combine(gameBin, "MonoGame-Win64-Shipping.exe"));
 
-            var svc = new ProxyDeployService(new NoopLog());
+            var svc = new ProxyDeployService(new NoopLog(), new NoopPlatform());
             var found = await svc.FindUeGamesAsync(new[] { lib }, TestContext.Current.CancellationToken);
 
             var mono = Assert.Single(found, g => g.Name == "MonoGame");
@@ -525,7 +525,7 @@ public class ProxyDeployTests
             string engineBin = Path.Combine(game, "Engine", "Binaries", "Win64");
             MakeEmptyFile(Path.Combine(engineBin, "CrashReportClient.exe"));
 
-            var svc = new ProxyDeployService(new NoopLog());
+            var svc = new ProxyDeployService(new NoopLog(), new NoopPlatform());
             var found = await svc.FindUeGamesAsync(new[] { lib }, TestContext.Current.CancellationToken);
 
             Assert.DoesNotContain(found, g => g.Name == "OrphanEngine");
@@ -556,7 +556,7 @@ public class ProxyDeployTests
             MakeEmptyFile(Path.Combine(engineBin, "CrashReportClient.exe"));
             MakeEmptyFile(Path.Combine(sbBin,     "SB-Win64-Shipping.exe"));     // real exe
 
-            var svc = new ProxyDeployService(new NoopLog());
+            var svc = new ProxyDeployService(new NoopLog(), new NoopPlatform());
             var found = await svc.FindUeGamesAsync(new[] { lib }, TestContext.Current.CancellationToken);
 
             var sb = Assert.Single(found, g => g.Name == "StellarBlade");
@@ -589,7 +589,7 @@ public class ProxyDeployTests
             MakeEmptyFile(Path.Combine(factoryBin, "FactoryGameSteam-Win64-Shipping.modules"));
             MakeEmptyFile(Path.Combine(factoryBin, "FactoryGameSteam-FactoryGame-Win64-Shipping.dll"));
 
-            var svc = new ProxyDeployService(new NoopLog());
+            var svc = new ProxyDeployService(new NoopLog(), new NoopPlatform());
             var found = await svc.FindUeGamesAsync(new[] { lib }, TestContext.Current.CancellationToken);
 
             var sat = Assert.Single(found, g => g.Name == "Satisfactory");
@@ -599,5 +599,181 @@ public class ProxyDeployTests
         {
             Directory.Delete(lib, recursive: true);
         }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Generic (non-Steam) drive scan — pure helpers
+    // ────────────────────────────────────────────────────────────────
+
+    private sealed class NoopPlatform : IPlatformService
+    {
+        public bool TryAcquireSingleInstance() => true;
+        public void ReleaseSingleInstance() { }
+        public string GetAppDataPath() => "";
+        public string GetLogDirectoryPath() => "";
+        public Task CopyToClipboardAsync(string text) => Task.CompletedTask;
+        public Task RevealInExplorerAsync(string path) => Task.CompletedTask;
+        public string GetMachineName() => "test";
+        public void CloseImeForWindow(IntPtr windowHandle) { }
+        public Task<string?> ShowSaveFileDialogAsync(string defaultFileName,
+            string filterName, string filterExtension) => Task.FromResult<string?>(null);
+    }
+
+    private static string MakeTempDir()
+    {
+        string dir = Path.Combine(Path.GetTempPath(),
+            "UE5DumpGenTests_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    private static DriveDescriptor Drive(char letter, int? disk) =>
+        new() { Root = $"{letter}:\\", Letter = letter, PhysicalDiskNumber = disk };
+
+    // ---- IsHardSkipDir ----
+
+    [Theory]
+    [InlineData("Windows", true)]
+    [InlineData("$Recycle.Bin", true)]
+    [InlineData("steamapps", true)]
+    [InlineData("STEAMAPPS", true)]      // case-insensitive
+    [InlineData("node_modules", true)]
+    [InlineData("MyCoolGame", false)]
+    public void IsHardSkipDir_MatchesSystemAndSteamNames(string name, bool expected)
+    {
+        Assert.Equal(expected, ProxyDeployService.IsHardSkipDir(name));
+    }
+
+    // ---- IsExcludedBySteam ----
+
+    [Fact]
+    public void IsExcludedBySteam_UnderRoot_IsExcluded()
+    {
+        var roots = new[] { ProxyDeployService.NormalizeDir(@"D:\SteamLibrary") };
+        Assert.True(ProxyDeployService.IsExcludedBySteam(@"D:\SteamLibrary\steamapps\common\Foo", roots));
+    }
+
+    [Fact]
+    public void IsExcludedBySteam_TheRootItself_IsExcluded()
+    {
+        var roots = new[] { ProxyDeployService.NormalizeDir(@"D:\SteamLibrary") };
+        Assert.True(ProxyDeployService.IsExcludedBySteam(@"D:\SteamLibrary", roots));
+    }
+
+    [Fact]
+    public void IsExcludedBySteam_SiblingWithSharedPrefix_IsNotExcluded()
+    {
+        // 'D:\SteamLibrary' must NOT swallow 'D:\SteamLibraryBackup'.
+        var roots = new[] { ProxyDeployService.NormalizeDir(@"D:\SteamLibrary") };
+        Assert.False(ProxyDeployService.IsExcludedBySteam(@"D:\SteamLibraryBackup\Game", roots));
+    }
+
+    [Fact]
+    public void IsExcludedBySteam_NoRoots_IsNotExcluded()
+    {
+        Assert.False(ProxyDeployService.IsExcludedBySteam(@"D:\Games\Foo", Array.Empty<string>()));
+    }
+
+    // ---- LooksLikeUeGameRoot ----
+
+    [Fact]
+    public void LooksLikeUeGameRoot_SiblingEngineTree_IsTrue()
+    {
+        string root = MakeTempDir();
+        try
+        {
+            // <root>\Engine\Binaries\Win64 + <root>\Proj\Binaries\Win64 (tier 1)
+            MakeEmptyFile(Path.Combine(root, "Engine", "Binaries", "Win64", "CrashReportClient.exe"));
+            MakeEmptyFile(Path.Combine(root, "Proj", "Binaries", "Win64", "Proj-Win64-Shipping.exe"));
+            Assert.True(ProxyDeployService.LooksLikeUeGameRoot(root));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void LooksLikeUeGameRoot_ContentPaks_IsTrue()
+    {
+        string root = MakeTempDir();
+        try
+        {
+            // <root>\Proj\Content\Paks\x.pak (tier 2)
+            MakeEmptyFile(Path.Combine(root, "Proj", "Content", "Paks", "pakchunk0.pak"));
+            Assert.True(ProxyDeployService.LooksLikeUeGameRoot(root));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void LooksLikeUeGameRoot_PlainFolder_IsFalse()
+    {
+        string root = MakeTempDir();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "Docs"));
+            Directory.CreateDirectory(Path.Combine(root, "Images"));
+            Assert.False(ProxyDeployService.LooksLikeUeGameRoot(root));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    // ---- GroupDrivesByPhysicalDisk ----
+
+    [Fact]
+    public void GroupDrives_SamePhysicalDisk_OneGroup()
+    {
+        var groups = ProxyDeployService.GroupDrivesByPhysicalDisk(
+            new[] { Drive('C', 0), Drive('D', 0) });
+        var g = Assert.Single(groups);
+        Assert.Equal(2, g.Count);
+    }
+
+    [Fact]
+    public void GroupDrives_DifferentDisks_TwoGroups()
+    {
+        var groups = ProxyDeployService.GroupDrivesByPhysicalDisk(
+            new[] { Drive('C', 0), Drive('E', 1) });
+        Assert.Equal(2, groups.Count);
+        Assert.All(groups, g => Assert.Single(g));
+    }
+
+    [Fact]
+    public void GroupDrives_UnknownDisk_GetsOwnGroup()
+    {
+        // Two unknown-disk drives must NOT be serialized together — each its own group.
+        var groups = ProxyDeployService.GroupDrivesByPhysicalDisk(
+            new[] { Drive('C', 0), Drive('D', 0), Drive('X', null), Drive('Y', null) });
+        // one group of {C,D} + two singleton unknown groups = 3 groups
+        Assert.Equal(3, groups.Count);
+        Assert.Contains(groups, g => g.Count == 2);
+        Assert.Equal(2, groups.Count(g => g.Count == 1));
+    }
+
+    // ---- FindUeGamesOnDrivesAsync — Steam exclusion end-to-end ----
+
+    [Fact]
+    public async Task FindUeGamesOnDrives_SkipsSteamAppsSubtree()
+    {
+        string root = MakeTempDir();
+        try
+        {
+            // A non-Steam game under <root>\Games\CoolGame (monolithic).
+            string cool = Path.Combine(root, "Games", "CoolGame");
+            MakeEmptyFile(Path.Combine(cool, "Engine", "Binaries", "Win64", "CrashReportClient.exe"));
+            MakeEmptyFile(Path.Combine(cool, "CoolGame", "Binaries", "Win64", "CoolGame-Win64-Shipping.exe"));
+
+            // A game inside a steamapps tree — must be SKIPPED by the generic walk.
+            string steam = Path.Combine(root, "steamapps", "common", "SteamGame");
+            MakeEmptyFile(Path.Combine(steam, "Engine", "Binaries", "Win64", "CrashReportClient.exe"));
+            MakeEmptyFile(Path.Combine(steam, "SteamGame", "Binaries", "Win64", "SteamGame-Win64-Shipping.exe"));
+
+            var svc = new ProxyDeployService(new NoopLog(), new NoopPlatform());
+            var drive = new DriveDescriptor { Root = root, Letter = 'X', PhysicalDiskNumber = 0 };
+            var found = await svc.FindUeGamesOnDrivesAsync(
+                new[] { drive }, progress: null, ct: TestContext.Current.CancellationToken);
+
+            Assert.Contains(found, g => g.Name == "CoolGame");
+            Assert.DoesNotContain(found, g => g.Name == "SteamGame");
+        }
+        finally { Directory.Delete(root, recursive: true); }
     }
 }

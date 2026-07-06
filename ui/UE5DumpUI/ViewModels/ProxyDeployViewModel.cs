@@ -24,6 +24,12 @@ public partial class ProxyDeployViewModel : ViewModelBase
     [ObservableProperty] private bool _forceOverwrite;
     [ObservableProperty] private string? _lastOperationResult;
 
+    /// <summary>
+    /// Scan source: false = Steam library (default), true = generic drive scan.
+    /// Bound to the Source radio pair at the top of the panel.
+    /// </summary>
+    [ObservableProperty] private bool _scanDrivesMode;
+
     // Status text colours — the top Status line + the last-result label turn a
     // prominent red when an operation reports failures (e.g. a deploy write blocked
     // by a file lock because the game is still running), green on full success, and
@@ -87,6 +93,25 @@ public partial class ProxyDeployViewModel : ViewModelBase
     /// the underlying items are the same instances.
     /// </summary>
     public ObservableCollection<DetectedGame> Games { get; } = new();
+
+    /// <summary>
+    /// Drives available for the generic (non-Steam) scan. Populated lazily on
+    /// first switch to Scan Drives mode (or via Refresh Drives). Each carries an
+    /// IsSelected checkbox and its physical-disk number for grouping.
+    /// </summary>
+    public ObservableCollection<DriveDescriptor> Drives { get; } = new();
+
+    // Two-way mirror properties for the Steam / Scan-Drives radio pair.
+    public bool IsSteamSource
+    {
+        get => !ScanDrivesMode;
+        set { if (value) ScanDrivesMode = false; }
+    }
+    public bool IsDriveSource
+    {
+        get => ScanDrivesMode;
+        set { if (value) ScanDrivesMode = true; }
+    }
 
     /// <summary>Whether any games are selected for batch operations.</summary>
     public bool HasSelection => Games.Any(g => g.IsSelected);
@@ -205,6 +230,90 @@ public partial class ProxyDeployViewModel : ViewModelBase
             StatusColor = StatusError;
             SetError(ex);
             _log.Error("ProxyDeploy", $"Scan failed: {ex.Message}");
+        }
+        finally
+        {
+            IsScanning = false;
+        }
+    }
+
+    /// <summary>Triggered by the source-generated ScanDrivesMode setter. Keeps
+    /// the radio mirror props in sync and lazily loads drives the first time the
+    /// user switches to Scan Drives mode.</summary>
+    partial void OnScanDrivesModeChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsSteamSource));
+        OnPropertyChanged(nameof(IsDriveSource));
+        if (value && Drives.Count == 0 && !IsScanning)
+            LoadDrivesCommand.Execute(null);
+    }
+
+    [RelayCommand]
+    private async Task LoadDrivesAsync(CancellationToken ct)
+    {
+        try
+        {
+            var drives = await _deploy.GetScannableDrivesAsync(ct);
+            Drives.Clear();
+            foreach (var d in drives) Drives.Add(d);
+            StatusText = $"{Drives.Count} drive(s) available — select and scan";
+            StatusColor = StatusNeutral;
+        }
+        catch (OperationCanceledException) { /* ignore */ }
+        catch (Exception ex)
+        {
+            _log.Warn("ProxyDeploy", $"LoadDrives failed: {ex.Message}");
+        }
+    }
+
+    [RelayCommand(IncludeCancelCommand = true)]
+    private async Task ScanDrivesAsync(CancellationToken ct)
+    {
+        if (IsScanning) { LastOperationResult = "Wait for scan to finish"; return; }
+
+        var selected = Drives.Where(d => d.IsSelected).ToList();
+        if (selected.Count == 0)
+        {
+            LastOperationResult = "No drives selected";
+            return;
+        }
+
+        try
+        {
+            ClearError();
+            IsScanning = true;
+            StatusColor = StatusNeutral;
+            StatusText = "Scanning drives for UE games...";
+            LastOperationResult = null;
+
+            // Constructed on the UI thread → callback marshals back to the UI thread.
+            var progress = new Progress<DriveScanProgress>(p =>
+                StatusText = $"{p.CurrentDrive} {p.Phase} — {p.GamesFound} found");
+
+            var found = await _deploy.FindUeGamesOnDrivesAsync(selected, progress, ct);
+
+            Games.Clear();
+            foreach (var g in found) Games.Add(g);
+
+            if (Games.Count > 0 && File.Exists(SourceDllPath))
+            {
+                StatusText = "Checking deploy status...";
+                await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, ct);
+            }
+
+            StatusText = $"Found {Games.Count} UE game(s)";
+            OnPropertyChanged(nameof(HasSelection));
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = "Scan cancelled";
+        }
+        catch (Exception ex)
+        {
+            StatusText = "Scan failed";
+            StatusColor = StatusError;
+            SetError(ex);
+            _log.Error("ProxyDeploy", $"Drive scan failed: {ex.Message}");
         }
         finally
         {

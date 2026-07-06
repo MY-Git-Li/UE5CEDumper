@@ -6,6 +6,60 @@
              x:DataType="vm:ProxyDeployViewModel">
 
   <DockPanel Margin="8">
+    <!-- Top: scan source selector (Steam library vs generic drive scan) -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8">
+      <TextBlock Text="{StaticResource str.ProxyDeploy.Source}"
+                 Foreground="#CCCCCC" VerticalAlignment="Center" FontWeight="Bold"/>
+      <RadioButton GroupName="ScanSource"
+                   Content="{StaticResource str.ProxyDeploy.Source.Steam}"
+                   IsChecked="{Binding IsSteamSource, Mode=TwoWay}"
+                   ToolTip.Tip="{StaticResource str.Tip.ProxyDeploy.Source}"
+                   Foreground="#D4D4D4" VerticalAlignment="Center"/>
+      <RadioButton GroupName="ScanSource"
+                   Content="{StaticResource str.ProxyDeploy.Source.Drives}"
+                   IsChecked="{Binding IsDriveSource, Mode=TwoWay}"
+                   ToolTip.Tip="{StaticResource str.Tip.ProxyDeploy.Source}"
+                   Foreground="#D4D4D4" VerticalAlignment="Center"/>
+    </StackPanel>
+
+    <!-- Drive selection — only shown in Scan Drives mode -->
+    <Border DockPanel.Dock="Top" Background="#252526" CornerRadius="4" Padding="8"
+            Margin="0,0,0,8" IsVisible="{Binding ScanDrivesMode}">
+      <StackPanel Spacing="6">
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <TextBlock Text="{StaticResource str.ProxyDeploy.DriveHint}"
+                     Foreground="#CCCCCC" VerticalAlignment="Center" FontWeight="Bold"/>
+          <Button Content="{StaticResource str.ProxyDeploy.ScanDrives}"
+                  Command="{Binding ScanDrivesCommand}"
+                  ToolTip.Tip="{StaticResource str.Tip.ProxyDeploy.ScanDrives}"
+                  Classes="accent" Padding="12,4"/>
+          <Button Content="{StaticResource str.ProxyDeploy.RefreshDrives}"
+                  Command="{Binding LoadDrivesCommand}"
+                  ToolTip.Tip="{StaticResource str.Tip.ProxyDeploy.RefreshDrives}"
+                  Padding="12,4"/>
+          <Button Content="{StaticResource str.ProxyDeploy.CancelScan}"
+                  Command="{Binding ScanDrivesCancelCommand}"
+                  ToolTip.Tip="{StaticResource str.Tip.ProxyDeploy.CancelScan}"
+                  IsVisible="{Binding IsScanning}"
+                  Padding="12,4"/>
+        </StackPanel>
+        <ItemsControl ItemsSource="{Binding Drives}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <WrapPanel Orientation="Horizontal"/>
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="m:DriveDescriptor">
+              <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                        Content="{Binding Display}"
+                        Foreground="#D4D4D4" Margin="0,0,16,0"/>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </Border>
+
     <!-- Top: Proxy DLL type selector -->
     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8">
       <TextBlock Text="{StaticResource str.ProxyDeploy.ProxyType}"
@@ -31,6 +85,7 @@
     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
       <Button Content="{StaticResource str.ProxyDeploy.Scan}"
               Command="{Binding ScanCommand}"
+              IsVisible="{Binding IsSteamSource}"
               ToolTip.Tip="{StaticResource str.Tip.ProxyDeploy.Scan}"
               Classes="accent" Padding="12,4"/>
       <Button Content="{StaticResource str.ProxyDeploy.Refresh}"
