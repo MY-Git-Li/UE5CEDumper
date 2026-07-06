@@ -720,6 +720,13 @@ if ($Target -in "All", "DLL") {
         Copy-Item $dissectSrc -Destination $DIST_DIR -Force
         Write-Ok "ue5_dissect.lua copied to dist\"
     }
+    # inject-ue.ps1 — standalone command-line injector. Goes next to UE5Dumper.dll
+    # so its default DLL resolution ("<script dir>\UE5Dumper.dll") just works.
+    $injectSrc = Join-Path $ROOT_DIR "scripts\inject-ue.ps1"
+    if (Test-Path $injectSrc) {
+        Copy-Item $injectSrc -Destination $DIST_DIR -Force
+        Write-Ok "inject-ue.ps1 copied to dist\"
+    }
     # README.html — deployment guide for end users (covers CE inject + Proxy DLL)
     $readmeSrc = Join-Path $ROOT_DIR "scripts\DEPLOY_README.html"
     if (Test-Path $readmeSrc) {
