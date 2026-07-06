@@ -33,7 +33,7 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 - **Debug Camera（除錯相機）** — 在內建此功能的遊戲中強制開 / 關自由飛行除錯相機（即使在通常會卡住的 Shipping build 也能可靠開關）。
 - **Console（主控台）** — 發現並一鍵呼叫許多遊戲保留的 `fly` / `god` / `ghost` / 遊戲特定 cheat 指令。
 - **一鍵 Cheat Engine 匯出** — 指標鏈 XML、Structure Dissect (CSX)、SDK headers、AA 腳本，以及多列 `.CT` 批次。
-- **注入免 Cheat Engine** — 把 `version.dll` **proxy DLL** 放到遊戲旁，啟動後連接即可。
+- **注入免 Cheat Engine** — 把 `version.dll` **proxy DLL** 放到遊戲旁，或從 UI（**Inject into running game…**）或 **`inject-ue.ps1`** 命令列工具對正在執行的遊戲注入（遊戲以系統管理員執行時會自動提權）。
 
 > ¹ Marker 存檔 / 召回廣泛可用（包含泰坦任務 2，已修正某些「回報成功卻不移動 actor」的引擎 setter 的 transform 重新整理問題）。少數被大量精簡的 Shipping build（例如泰坦任務 2）無法做*游標*傳送，因為它們移除了標準的游標 / viewport / line-trace API 並改用自訂虛擬游標 — 詳見 [docs/teleport-spec.md](docs/teleport-spec.md)。
 
@@ -104,7 +104,24 @@ UE5CEDumper 是一款UE資料的互動式的檢查工具。不同於其它 Dumpe
 
 > **注意**: 請勿同時使用兩種方式。若 Proxy DLL 已放在遊戲目錄中，請勿再透過 CE 注入 `UE5Dumper.dll`。DLL 會偵測重複實例並跳過自動啟動以避免衝突。
 
-> **該用哪個 Proxy DLL？** 先試 `version.dll`（`build.ps1 -Target ProxyDLL`）。若遊戲能啟動但 UI 無法連接，通常代表該 EXE 沒有匯入 `version.dll` — 改試 **`dxgi.dll`**（`-Target ProxyDxgi`，每款 D3D11/D3D12 UE 遊戲都會匯入），或 `dinput8.dll`（`-Target ProxyDinput8`）。`build.ps1`（預設 `-Target All`）會把三種都建置到 `dist\proxy\`，而 **Proxy Deploy** 分頁可讓你為每款遊戲挑選類型並自動部署。
+> **該用哪個 Proxy DLL？** 先試 `version.dll`（`build.ps1 -Target ProxyDLL`）。若遊戲能啟動但 UI 無法連接，通常代表該 EXE 沒有匯入 `version.dll` — 改試 **`dxgi.dll`**（`-Target ProxyDxgi`，每款 D3D11/D3D12 UE 遊戲都會匯入），或 `dinput8.dll`（`-Target ProxyDinput8`）。`build.ps1`（預設 `-Target All`）會把三種都建置到 `dist\proxy\`，而 **Proxy Deploy** 分頁可讓你為每款遊戲挑選類型並自動部署（Steam 遊戲，或指定磁碟掃描任何位置 — Epic / GOG / 手動安裝）。
+
+### 方式 C：對執行中的遊戲注入（免 CE、免重開）
+
+把 `UE5Dumper.dll` 注入到**正在執行**的遊戲 — 最快的方式（免 Cheat Engine、免預先部署 proxy、免重開遊戲）。兩種入口、同一種技術（`CreateRemoteThread` + `LoadLibraryW`）：
+
+- **從 UI**: Proxy Deploy 分頁 → **Inject into running game…** → 在 process picker 選遊戲 → **Inject**。UI 會自動連線。若遊戲以系統管理員執行，會跳 UAC 讓你提權注入 — 不用手動重開。
+- **從命令列** — `inject-ue.ps1`（隨發佈放在 `dist\`，與 `UE5Dumper.dll` 同層）：
+
+  ```powershell
+  .\inject-ue.ps1                 # 自動：注入唯一在跑的 UE 遊戲
+  .\inject-ue.ps1 -List           # 列出偵測到的 UE 遊戲
+  .\inject-ue.ps1 -ProcessId 1234 # 注入指定 PID
+  ```
+
+  接著啟動 **UE5DumpUI.exe** 並 **Connect**。遇到 Access Denied（遊戲以系統管理員執行）時，腳本會自動以系統管理員身分重新啟動（跳一次 UAC）。
+
+> **僅限 x64 遊戲**，且僅限單機／離線使用 — 與所有注入方式相同，`CreateRemoteThread` 可能被防毒標記，並會被 kernel 反作弊（EAC / BattlEye）擋下／封鎖。
 
 | **Game Process (Injected)** |
 | :---: |
