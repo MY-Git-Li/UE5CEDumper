@@ -13,7 +13,10 @@
     Build mode: Debug, Release, or Publish (default: Release)
 
 .PARAMETER Target
-    Build target: All, DLL, UI, Test (default: All)
+    Build target: All, DLL, UI, Test (default: All).
+    DLL builds the main UE5Dumper.dll AND all three proxy DLLs (version/dinput8/
+    dxgi) — the proxies are what actually get injected. ProxyDLL / ProxyDinput8 /
+    ProxyDxgi build a single proxy in isolation.
 
 .PARAMETER Clean
     Remove all build artifacts before building
@@ -26,7 +29,7 @@
     .\build.ps1 -Mode Debug             # Debug build
     .\build.ps1 -Mode Publish           # Optimized single-file publish
     .\build.ps1 -Mode Publish -Clean    # Clean + publish
-    .\build.ps1 -Target DLL             # Build only the C++ DLL
+    .\build.ps1 -Target DLL             # Build the C++ DLL + all 3 proxy DLLs
     .\build.ps1 -Target UI -Mode Debug  # Debug build UI only
     .\build.ps1 -Target Test            # Build + run tests (also republishes UI to dist/)
 #>
@@ -341,11 +344,15 @@ $exitCode = 0
 # Map the requested -Target to the concrete Ninja targets to build. The configure
 # always enables every proxy target, so any subset can be built without a
 # reconfigure; we only compile the targets requested here.
+# -Target DLL builds the main DLL AND all three proxy DLLs (version/dinput8/dxgi)
+# — the proxies are the actually-injected artifacts, so "the DLL" means all of
+# them. The per-proxy targets (ProxyDLL/ProxyDinput8/ProxyDxgi) remain for
+# building a single proxy in isolation.
 $cppTargets = @()
-if ($Target -in "All", "DLL")          { $cppTargets += "UE5Dumper" }
-if ($Target -in "All", "ProxyDLL")     { $cppTargets += "UE5Dumper_Proxy" }
-if ($Target -in "All", "ProxyDinput8") { $cppTargets += "UE5Dumper_ProxyDinput8" }
-if ($Target -in "All", "ProxyDxgi")    { $cppTargets += "UE5Dumper_ProxyDxgi" }
+if ($Target -in "All", "DLL")               { $cppTargets += "UE5Dumper" }
+if ($Target -in "All", "DLL", "ProxyDLL")     { $cppTargets += "UE5Dumper_Proxy" }
+if ($Target -in "All", "DLL", "ProxyDinput8") { $cppTargets += "UE5Dumper_ProxyDinput8" }
+if ($Target -in "All", "DLL", "ProxyDxgi")    { $cppTargets += "UE5Dumper_ProxyDxgi" }
 
 if ($cppTargets.Count -gt 0) {
     Write-Banner "C++ DLLs  |  $CppConfig"
@@ -409,7 +416,8 @@ if ($cppTargets.Count -gt 0) {
             )
             $proxyOutDir = Join-Path $DIST_DIR "proxy"
             foreach ($p in $proxyOutputs) {
-                if ($Target -ne "All" -and $Target -ne $p.When) { continue }
+                # -Target DLL copies ALL proxies; a per-proxy target copies only its own.
+                if ($Target -notin "All", "DLL", $p.When) { continue }
 
                 $proxyDll = Get-ChildItem -Path $BUILD_DIR -Filter $p.File -Recurse |
                             Select-Object -First 1
