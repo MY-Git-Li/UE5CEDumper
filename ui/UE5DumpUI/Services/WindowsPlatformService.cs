@@ -1,9 +1,11 @@
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
 using UE5DumpUI.Core;
+using UE5DumpUI.Models;
 
 namespace UE5DumpUI.Services;
 
@@ -196,6 +198,145 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
         }
         return Task.CompletedTask;
     }
+
+    // --- Drive enumeration + physical-disk mapping -----------------------
+    // Used by the generic (non-Steam) UE-game scan to schedule per-physical-disk
+    // sequential / cross-disk parallel walks. Enumeration is pure managed BCL;
+    // the letter -> physical disk number lookup uses classic [DllImport]
+    // DeviceIoControl (NOT WMI/System.Management, which is banned by the AOT rule).
+
+    public IReadOnlyList<DriveDescriptor> GetLogicalDrives()
+    {
+        var list = new List<DriveDescriptor>();
+        DriveInfo[] drives;
+        try
+        {
+            drives = DriveInfo.GetDrives();
+        }
+        catch
+        {
+            return list;
+        }
+
+        foreach (var d in drives)
+        {
+            try
+            {
+                // Only volumes worth scanning for installed games; IsReady guards
+                // against empty optical / card readers that throw on metadata access.
+                if (d.DriveType is not (DriveType.Fixed or DriveType.Removable))
+                    continue;
+                if (!d.IsReady)
+                    continue;
+
+                char letter = d.Name.Length > 0 ? char.ToUpperInvariant(d.Name[0]) : '?';
+                string? label = null;
+                long total = 0, free = 0;
+                try { label = d.VolumeLabel; } catch { /* label optional */ }
+                try { total = d.TotalSize; } catch { /* size optional */ }
+                try { free = d.AvailableFreeSpace; } catch { /* size optional */ }
+
+                list.Add(new DriveDescriptor
+                {
+                    Root = d.Name,
+                    Letter = letter,
+                    Label = label,
+                    Type = d.DriveType,
+                    PhysicalDiskNumber = GetPhysicalDiskNumber(letter),
+                    TotalBytes = total,
+                    FreeBytes = free,
+                });
+            }
+            catch
+            {
+                // One unreadable drive must not abort enumeration.
+            }
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// Map a drive letter to the physical disk number backing it via
+    /// DeviceIoControl(IOCTL_STORAGE_GET_DEVICE_NUMBER). Returns null when it
+    /// can't be determined — spanned/striped/network/virtual volumes, or the MPIO
+    /// sentinel — so the caller treats the drive as its own scan group.
+    /// dwDesiredAccess = 0 (query-only) means this needs NO administrator rights;
+    /// opening \\.\C: with GENERIC_READ WOULD require elevation and must be avoided.
+    /// </summary>
+    private static int? GetPhysicalDiskNumber(char driveLetter)
+    {
+        // Volume device path form: \\.\C:  — NO trailing backslash (a trailing
+        // backslash opens the filesystem root, not the volume device handle).
+        string path = $@"\\.\{char.ToUpperInvariant(driveLetter)}:";
+
+        IntPtr h = CreateFileW(
+            path,
+            0,                                          // query-only: no admin needed
+            FILE_SHARE_READ | FILE_SHARE_WRITE,          // C: is always open for write
+            IntPtr.Zero,
+            OPEN_EXISTING,
+            0,
+            IntPtr.Zero);
+        if (h == INVALID_HANDLE_VALUE)
+            return null;
+
+        try
+        {
+            bool ok = DeviceIoControl(
+                h, IOCTL_STORAGE_GET_DEVICE_NUMBER,
+                IntPtr.Zero, 0,
+                out STORAGE_DEVICE_NUMBER sdn, (uint)Marshal.SizeOf<STORAGE_DEVICE_NUMBER>(),
+                out _, IntPtr.Zero);
+            if (!ok)
+                return null;                            // spanned/striped/virtual → own group
+            if (sdn.DeviceNumber == 0xFFFFFFFF)
+                return null;                            // MPIO sentinel → own group
+            return unchecked((int)sdn.DeviceNumber);
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            CloseHandle(h);
+        }
+    }
+
+    // IOCTL_STORAGE_GET_DEVICE_NUMBER = CTL_CODE(IOCTL_STORAGE_BASE=0x2D, 0x420,
+    // METHOD_BUFFERED, FILE_ANY_ACCESS) = 0x2D1080. Available since Windows XP.
+    private const uint IOCTL_STORAGE_GET_DEVICE_NUMBER = 0x2D1080;
+    private const uint FILE_SHARE_READ  = 0x1;
+    private const uint FILE_SHARE_WRITE = 0x2;
+    private const uint OPEN_EXISTING    = 3;
+    private static readonly IntPtr INVALID_HANDLE_VALUE = new(-1);
+
+    // 12-byte blittable struct (three 4-byte integers) => classic [DllImport]
+    // with an out-struct works without LibraryImport / AllowUnsafeBlocks.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct STORAGE_DEVICE_NUMBER
+    {
+        public uint DeviceType;      // DEVICE_TYPE (ULONG) — field order matters
+        public uint DeviceNumber;    // physical disk index we group by
+        public uint PartitionNumber;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "CreateFileW", SetLastError = true, ExactSpelling = true)]
+    private static extern IntPtr CreateFileW(string lpFileName, uint dwDesiredAccess,
+        uint dwShareMode, IntPtr lpSecurityAttributes, uint dwCreationDisposition,
+        uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+
+    [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeviceIoControl(IntPtr hDevice, uint dwIoControlCode,
+        IntPtr lpInBuffer, uint nInBufferSize,
+        out STORAGE_DEVICE_NUMBER lpOutBuffer, uint nOutBufferSize,
+        out uint lpBytesReturned, IntPtr lpOverlapped);
+
+    [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr hObject);
 
     public void Dispose()
     {

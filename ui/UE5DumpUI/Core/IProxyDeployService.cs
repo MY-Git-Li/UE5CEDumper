@@ -23,6 +23,25 @@ public interface IProxyDeployService
         IReadOnlyList<string> libraryPaths, CancellationToken ct = default);
 
     /// <summary>
+    /// Enumerate the ready fixed/removable drives (with physical-disk numbers)
+    /// available for the generic (non-Steam) scan. Delegates to the platform
+    /// layer so the caller stays platform-agnostic.
+    /// </summary>
+    Task<IReadOnlyList<DriveDescriptor>> GetScannableDrivesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Generic (non-Steam) scan: walk the selected drives for UE games by folder
+    /// structure. Drives on the same physical disk are walked sequentially while
+    /// different disks run in parallel; Steam library folders and system/junk
+    /// trees are excluded; inaccessible folders are skipped and the walk
+    /// continues. Reuses the same per-game-dir detection as the Steam path.
+    /// </summary>
+    Task<IReadOnlyList<DetectedGame>> FindUeGamesOnDrivesAsync(
+        IReadOnlyList<DriveDescriptor> selectedDrives,
+        IProgress<DriveScanProgress>? progress = null,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Check deployment status for each game (for the given proxy type) and
     /// update Status / InstalledVersion / ErrorMessage. Independently of the
     /// selected type, flags a redundancy warning via ErrorMessage only when

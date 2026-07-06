@@ -121,6 +121,8 @@ public class StubDumpService : IDumpService
     public virtual Task<int> SetDebugCameraAsync(bool enable, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<int> GetGodModeAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<int> SetGodModeAsync(bool enable, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<int> GetForegroundLockAsync(CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<int> SetForegroundLockAsync(bool enable, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<MovementParams> GetMovementParamsAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<MovementSetResult> SetMovementMultiplierAsync(string knob, double multiplier, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<MovementSetResult> ResetMovementAsync(string knob, CancellationToken ct = default) => throw new NotImplementedException();

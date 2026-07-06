@@ -94,6 +94,11 @@ constexpr const char* CMD_SET_GOD_MODE             = "set_god_mode";
 constexpr const char* CMD_GET_GOD_MODE             = "get_god_mode";
 constexpr const char* CMD_GET_PROTECT_STATE        = "get_protect_state";
 
+// Foreground lock (Grausam) — hook GetForegroundWindow so the game always thinks
+// it is the foreground app, defeating t.IdleWhenNotForeground / focus-loss pause.
+constexpr const char* CMD_SET_FOREGROUND_LOCK      = "set_foreground_lock";
+constexpr const char* CMD_GET_FOREGROUND_LOCK      = "get_foreground_lock";
+
 // Movement tuning (Laufen) — per-pawn CMC float knobs held against per-tick
 // overwrites: walk_speed (P1) / gravity / jump (P2/P3). "knob" string selects
 // which: "walk_speed" | "gravity" | "jump".

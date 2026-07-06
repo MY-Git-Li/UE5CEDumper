@@ -1958,6 +1958,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private static readonly HashSet<string> ProxyDeployPersist = new()
     {
         nameof(ProxyDeployViewModel.SelectedProxyType), nameof(ProxyDeployViewModel.ForceOverwrite),
+        nameof(ProxyDeployViewModel.ScanDrivesMode),
     };
 
     /// <summary>Apply saved options to every VM. Runs under _suppressOptionSave.
@@ -2050,6 +2051,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             ProxyDeploy.SelectedProxyType = o.ProxyDeploy.SelectedProxyType;
             ProxyDeploy.ForceOverwrite = o.ProxyDeploy.ForceOverwrite;
+            ProxyDeploy.ScanDrivesMode = o.ProxyDeploy.ScanDrivesMode;
         }
     }
 
@@ -2170,6 +2172,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             o.ProxyDeploy.SelectedProxyType = ProxyDeploy.SelectedProxyType;
             o.ProxyDeploy.ForceOverwrite = ProxyDeploy.ForceOverwrite;
+            o.ProxyDeploy.ScanDrivesMode = ProxyDeploy.ScanDrivesMode;
         }
 
         return o;

@@ -56,7 +56,7 @@ public class App : Application
             _dumpService = new DumpService(_pipeClient, _logging);
             _aobUsage = new AobUsageService(_platform, _logging);
             _aobMakerBridge = new AobMakerBridgeService(_logging);
-            _proxyDeploy = new ProxyDeployService(_logging);
+            _proxyDeploy = new ProxyDeployService(_logging, _platform);
             _experimentalGate = new ExperimentalGate(_platform, _logging);
             _snapshotStore = new SnapshotStore(_platform, _logging);
             _uiOptions = new UiOptionsStore(_platform, _logging);

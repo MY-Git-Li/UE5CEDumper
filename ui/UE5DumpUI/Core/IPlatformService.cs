@@ -1,3 +1,5 @@
+using UE5DumpUI.Models;
+
 namespace UE5DumpUI.Core;
 
 /// <summary>
@@ -53,4 +55,14 @@ public interface IPlatformService
     /// service overrides it with <c>RegisterApplicationRestart</c>.
     /// </summary>
     void RegisterForRestart() { }
+
+    /// <summary>
+    /// Enumerate ready fixed/removable drives with metadata AND the physical disk
+    /// number backing each (via IOCTL_STORAGE_GET_DEVICE_NUMBER). Used by the
+    /// generic (non-Steam) UE-game scan to group drives so that partitions on one
+    /// physical disk are scanned sequentially while different disks scan in
+    /// parallel. Default returns empty so non-Windows implementations and test
+    /// doubles need not provide it. Never throws; one unreadable drive is skipped.
+    /// </summary>
+    IReadOnlyList<DriveDescriptor> GetLogicalDrives() => Array.Empty<DriveDescriptor>();
 }

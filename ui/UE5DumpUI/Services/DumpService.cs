@@ -2567,6 +2567,28 @@ public sealed class DumpService : IDumpService
         return res["state"]?.GetValue<int>() ?? -1;
     }
 
+    // === Foreground lock (Grausam) — keep the game thread alive when unfocused ===
+
+    public async Task<int> GetForegroundLockAsync(CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "get_foreground_lock" };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return res["state"]?.GetValue<int>() ?? 0;
+    }
+
+    public async Task<int> SetForegroundLockAsync(bool enable, CancellationToken ct = default)
+    {
+        var req = new JsonObject
+        {
+            ["cmd"] = "set_foreground_lock",
+            ["enable"] = enable,
+        };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return res["state"]?.GetValue<int>() ?? -1;
+    }
+
     // === Movement tuning (Laufen) ===
 
     private static MovementKnob ParseKnob(JsonNode? n)

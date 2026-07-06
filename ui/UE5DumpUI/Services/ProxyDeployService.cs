@@ -13,10 +13,12 @@ namespace UE5DumpUI.Services;
 public sealed class ProxyDeployService : IProxyDeployService
 {
     private readonly ILoggingService _log;
+    private readonly IPlatformService _platform;
 
-    public ProxyDeployService(ILoggingService log)
+    public ProxyDeployService(ILoggingService log, IPlatformService platform)
     {
         _log = log;
+        _platform = platform;
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -270,7 +272,14 @@ public sealed class ProxyDeployService : IProxyDeployService
     /// </summary>
     internal static bool IsKnownStubExe(string exeName)
     {
-        return string.Equals(exeName, "CrashReportClient.exe", StringComparison.OrdinalIgnoreCase);
+        // CrashReportClient ships next to the real game exe on modular builds.
+        // UnrealEditor / UE4Editor / UnrealFrontend only matter for the generic
+        // drive walk (a Steam library never contains an editor install) — filter
+        // them so an engine/editor tree is never surfaced as a "game".
+        return string.Equals(exeName, "CrashReportClient.exe", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(exeName, "UnrealEditor.exe", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(exeName, "UE4Editor.exe", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(exeName, "UnrealFrontend.exe", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -335,6 +344,308 @@ public sealed class ProxyDeployService : IProxyDeployService
         {
             return null;
         }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Generic (non-Steam) Drive Scan
+    // ────────────────────────────────────────────────────────────────
+
+    /// <summary>Directory names hard-skipped during the generic drive walk —
+    /// system/junk trees plus "steamapps" (Steam is scanned by the dedicated
+    /// path; the resolved Steam roots are also excluded explicitly). Matched by
+    /// directory name, case-insensitive.</summary>
+    private static readonly HashSet<string> HardSkipDirs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "$Recycle.Bin", "System Volume Information", "Windows", "WinSxS",
+        "$SysReset", "Recovery", "node_modules", ".git", "WindowsApps", "steamapps",
+    };
+
+    // UE game roots are shallow (<Drive>\...\<Game>\<Project>\Binaries\Win64); 6
+    // levels covers manual launcher nesting while hard-stopping runaway descent
+    // into asset trees. Prune-on-match usually fires long before this.
+    private const int MaxWalkDepth = 6;
+
+    public Task<IReadOnlyList<DriveDescriptor>> GetScannableDrivesAsync(CancellationToken ct = default)
+    {
+        return Task.Run(() => _platform.GetLogicalDrives(), ct);
+    }
+
+    public Task<IReadOnlyList<DetectedGame>> FindUeGamesOnDrivesAsync(
+        IReadOnlyList<DriveDescriptor> selectedDrives,
+        IProgress<DriveScanProgress>? progress = null,
+        CancellationToken ct = default)
+    {
+        return Task.Run(async () =>
+        {
+            // Requirement 5: resolve Steam library roots ONCE for exclusion.
+            var steamRoots = new List<string>();
+            try
+            {
+                var libs = await GetSteamLibraryFoldersAsync(ct);
+                foreach (string lib in libs)
+                {
+                    string n = NormalizeDir(lib);
+                    if (n.Length > 0)
+                        steamRoots.Add(n);
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                _log.Warn("ProxyDeploy", $"Steam-root resolve for exclusion failed: {ex.Message}");
+            }
+
+            // Requirement 2: partitions of one physical disk scan SEQUENTIALLY,
+            // different disks scan in PARALLEL. Bound overall parallelism so a
+            // many-disk box doesn't thrash a shared bus.
+            var groups = GroupDrivesByPhysicalDisk(selectedDrives);
+            using var gate = new SemaphoreSlim(Math.Clamp(Environment.ProcessorCount, 1, 4));
+
+            var tasks = new List<Task<List<DetectedGame>>>(groups.Count);
+            foreach (var group in groups)
+            {
+                tasks.Add(Task.Run(async () =>
+                {
+                    // Each group owns its list + dedupe set — no shared mutable
+                    // state across parallel groups.
+                    var local = new List<DetectedGame>();
+                    var localSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    await gate.WaitAsync(ct);
+                    try
+                    {
+                        foreach (var drive in group)
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            string label = $"{drive.Letter}:";
+                            progress?.Report(new DriveScanProgress(local.Count, label, "scanning"));
+                            WalkDrive(drive.Root, 0, local, localSeen, steamRoots, progress, label, ct);
+                        }
+                    }
+                    finally
+                    {
+                        gate.Release();
+                    }
+                    return local;
+                }, ct));
+            }
+
+            var results = await Task.WhenAll(tasks);
+
+            // Merge + global dedupe by BinariesDir (collapse a game reached via
+            // two drives / a junction).
+            var merged = new List<DetectedGame>();
+            var globalSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var list in results)
+                foreach (var g in list)
+                    if (globalSeen.Add(g.BinariesDir))
+                        merged.Add(g);
+
+            _log.Info("ProxyDeploy",
+                $"Generic scan found {merged.Count} UE game(s) across {selectedDrives.Count} drive(s)");
+            return (IReadOnlyList<DetectedGame>)merged;
+        }, ct);
+    }
+
+    /// <summary>
+    /// Bounded, prune-on-match recursive walk. When a directory looks like a UE
+    /// game root it is handed to the EXISTING ScanGameFolder (all layout logic
+    /// stays there) and NOT descended into (its Content\Paks is the multi-GB
+    /// payload). Inaccessible folders are skipped and the walk continues
+    /// (requirement 3). Writes only to the caller's local list/set — safe to run
+    /// on a worker thread.
+    /// </summary>
+    private void WalkDrive(
+        string dir, int depth,
+        List<DetectedGame> games, HashSet<string> seenBinDirs,
+        IReadOnlyList<string> steamRoots,
+        IProgress<DriveScanProgress>? progress, string driveLabel,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (depth > MaxWalkDepth)
+            return;
+
+        // Skip reparse points (junctions/symlinks) to avoid cycles + drive re-entry.
+        try
+        {
+            if ((new DirectoryInfo(dir).Attributes & FileAttributes.ReparsePoint) != 0)
+                return;
+        }
+        catch
+        {
+            return;
+        }
+
+        if (IsExcludedBySteam(dir, steamRoots))
+            return;
+
+        // Prune-on-match: reuse the Steam-path per-game-dir detector, then stop.
+        if (LooksLikeUeGameRoot(dir))
+        {
+            int before = games.Count;
+            ScanGameFolder(dir, games, seenBinDirs);
+            if (games.Count > before)
+                progress?.Report(new DriveScanProgress(games.Count, driveLabel, Path.GetFileName(dir)));
+            return;
+        }
+
+        // Materialize the child list INSIDE the try: EnumerateDirectories is lazy,
+        // so an UnauthorizedAccessException for opening `dir` (e.g. System Volume
+        // Information) surfaces during iteration, not at the call. IgnoreInaccessible
+        // additionally skips individual locked siblings without aborting the batch
+        // (requirement 3).
+        List<string> children;
+        try
+        {
+            var opts = new EnumerationOptions { IgnoreInaccessible = true, RecurseSubdirectories = false };
+            children = new List<string>(Directory.EnumerateDirectories(dir, "*", opts));
+        }
+        catch
+        {
+            return; // access denied / gone — skip subtree (requirement 3)
+        }
+
+        foreach (string child in children)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (HardSkipDirs.Contains(Path.GetFileName(child)))
+                continue;
+            WalkDrive(child, depth + 1, games, seenBinDirs, steamRoots, progress, driveLabel, ct);
+        }
+    }
+
+    // ---- Pure helpers (unit-testable, no shared state / IO side effects) ----
+
+    /// <summary>Canonicalize a directory path for prefix comparison: full path,
+    /// no trailing separator. Returns empty on failure (caller treats as
+    /// non-match / skip).</summary>
+    internal static string NormalizeDir(string path)
+    {
+        try { path = Path.GetFullPath(path); }
+        catch { return string.Empty; }
+        return path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
+
+    /// <summary>Requirement 5: is <paramref name="path"/> at-or-under a resolved
+    /// Steam library root? (The "steamapps" name is additionally hard-skipped
+    /// during the walk as a fallback when root resolution fails.)</summary>
+    internal static bool IsExcludedBySteam(string path, IReadOnlyList<string> steamRoots)
+    {
+        string norm = NormalizeDir(path);
+        if (norm.Length == 0)
+            return false;
+
+        foreach (string root in steamRoots)
+        {
+            if (root.Length == 0)
+                continue;
+            if (string.Equals(norm, root, StringComparison.OrdinalIgnoreCase))
+                return true;
+            // Trailing separator guard so 'D:\SteamLib' does not match 'D:\SteamLibBackup'.
+            string prefix = root + Path.DirectorySeparatorChar;
+            if (norm.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>Whether a directory name is hard-skipped by the generic walk.</summary>
+    internal static bool IsHardSkipDir(string dirName) => HardSkipDirs.Contains(dirName);
+
+    /// <summary>Requirement 4: cheap, stat-only structural test for a UE shipping
+    /// game root. Tiers, most→least reliable: (1) a sibling Engine\Binaries\Win64
+    /// next to a project dir with Binaries\Win64; (2) a project Content\Paks with
+    /// *.pak/*.utoc/*.ucas; (3) a project Binaries\Win64 with a *-Win64-Shipping
+    /// exe; (4) a flattened top-level shipping exe. Never enumerates the (huge)
+    /// Content tree.</summary>
+    internal static bool LooksLikeUeGameRoot(string dir)
+    {
+        try
+        {
+            // Tier 1 — canonical cooked tree.
+            if (Directory.Exists(Path.Combine(dir, "Engine", "Binaries", "Win64")))
+            {
+                foreach (string sub in Directory.EnumerateDirectories(dir))
+                {
+                    if (string.Equals(Path.GetFileName(sub), "Engine", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    if (Directory.Exists(Path.Combine(sub, "Binaries", "Win64")))
+                        return true;
+                }
+            }
+            // Tier 2 — <Project>\Content\Paks\*.pak|*.utoc|*.ucas
+            foreach (string sub in Directory.EnumerateDirectories(dir))
+            {
+                if (string.Equals(Path.GetFileName(sub), "Engine", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                string paks = Path.Combine(sub, "Content", "Paks");
+                if (Directory.Exists(paks) && HasAnyFile(paks, "*.pak", "*.utoc", "*.ucas"))
+                    return true;
+            }
+            // Tier 3 — <Project>\Binaries\Win64\*-Win64-Shipping.exe
+            foreach (string sub in Directory.EnumerateDirectories(dir))
+            {
+                string bin = Path.Combine(sub, "Binaries", "Win64");
+                if (Directory.Exists(bin) && HasAnyFile(bin, "*-Win64-Shipping.exe"))
+                    return true;
+            }
+            // Tier 4 — flattened top-level shipping exe (some repacks).
+            if (HasAnyFile(dir, "*-Win64-Shipping.exe"))
+                return true;
+        }
+        catch
+        {
+            // Inaccessible — skip (requirement 3).
+        }
+        return false;
+    }
+
+    private static bool HasAnyFile(string dir, params string[] patterns)
+    {
+        foreach (string pat in patterns)
+        {
+            try
+            {
+                foreach (string _ in Directory.EnumerateFiles(dir, pat))
+                    return true;
+            }
+            catch
+            {
+                // Inaccessible pattern enumeration — try the next.
+            }
+        }
+        return false;
+    }
+
+    /// <summary>Requirement 2: partition drives into scan groups by physical disk.
+    /// Drives sharing a physical disk number are grouped (scanned sequentially);
+    /// a drive whose disk is unknown (null) gets its OWN singleton group (scanned
+    /// in parallel, never serialized against an unrelated drive). Pure.</summary>
+    internal static IReadOnlyList<IReadOnlyList<DriveDescriptor>> GroupDrivesByPhysicalDisk(
+        IReadOnlyList<DriveDescriptor> drives)
+    {
+        var byDisk = new Dictionary<int, List<DriveDescriptor>>();
+        var groups = new List<IReadOnlyList<DriveDescriptor>>();
+
+        foreach (var d in drives)
+        {
+            if (d.PhysicalDiskNumber is int disk)
+            {
+                if (!byDisk.TryGetValue(disk, out var bucket))
+                {
+                    bucket = new List<DriveDescriptor>();
+                    byDisk[disk] = bucket;
+                    groups.Add(bucket); // preserve first-seen order, one entry per disk
+                }
+                bucket.Add(d);
+            }
+            else
+            {
+                groups.Add(new List<DriveDescriptor> { d }); // unknown → own group
+            }
+        }
+
+        return groups;
     }
 
     // ────────────────────────────────────────────────────────────────

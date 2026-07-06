@@ -173,6 +173,9 @@ public sealed class ProxyDeployUiOptions
 {
     public ProxyType SelectedProxyType { get; set; } = ProxyType.Version;
     public bool ForceOverwrite { get; set; }
+
+    /// <summary>Scan source: false = Steam library (default), true = generic drive scan.</summary>
+    public bool ScanDrivesMode { get; set; }
 }
 
 /// <summary>

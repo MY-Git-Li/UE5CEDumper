@@ -51,6 +51,7 @@ narrative identity resonates with what the module *does*.
 | **Orden.h** | 歐爾登 | オルデン | Noble house head ("order") | — | GroupMatch: source-agnostic SDR/assignment core for multi-value group scan | Brings *order* to a scattered set of values — assigns each value to its leaf slot (header-only, pure) |
 | **Edel.cpp** | 艾德爾 | エーデル | Hypnosis-magic mage ("noble") | — | CurrentTarget: auto-detect the actor the player is targeting (GWorld→PlayerController→Pawn, score outgoing object-ptr fields) | Reads what the player's mind is fixed on — the focused enemy, so the user needn't guess a class-name keyword |
 | **Laufen.cpp** | 拉歐芬 | ラオフェン | High-speed-movement mage ("to run") | — | MovementTuning: force per-pawn CMC float knobs (MaxWalkSpeed/GravityScale/JumpZVelocity) × multiplier + re-assert worker | Runs faster than anyone — scales the pawn's movement; the float analogue of Solitar's bool-bit force |
+| **Grausam.cpp** | 格勞薩姆 | グラオザーム | Seven Sages, master of illusion magic | #— | ForegroundLock: MinHook user32!GetForegroundWindow → always report the game's own window as foreground | Master of illusion — casts the illusion that the game is always the foreground app, so `t.IdleWhenNotForeground` / focus-loss pause never fires |
 
 ---
 
@@ -108,6 +109,7 @@ Orden::                     // GroupMatch — source-agnostic SDR matcher (multi
 Edel::                      // CurrentTarget — auto-detect the player's current target actor
 Laufen::                    // MovementTuning — force per-pawn CMC float knobs (speed/gravity/jump) × multiplier + re-assert
 Dunste::                    // Fly — no-gravity keyboard-driven 3D flight (CMC MOVE_Flying + Velocity drive, re-assert worker)
+Grausam::                   // ForegroundLock — hook GetForegroundWindow so the game always thinks it is foreground (defeat idle/pause when unfocused)
 Grimoire::                  // Constants — spell book
 DynOff::                    // Dynamic offsets (in Grimoire.h, unchanged)
 ```
@@ -257,7 +259,7 @@ German spelling.
 | Aura | アウラ | Aura | Scales of Obedience (mind control) | 🟢 ObjectArray | — |
 | Macht | マハト | Macht | Gold transmutation curse | 🟢 Memory | — |
 | Schlacht | シュラハト | Schlacht | "The Omniscient", precognition | ⬜ | Prediction / lookahead / speculative scan |
-| Grausam | グラオザーム | Grausam | Master of illusion magic ("cruel") | ⬜ | Decoy / obfuscation / anti-debug counter |
+| Grausam | グラオザーム | Grausam | Master of illusion magic ("cruel") | 🟢 ForegroundLock | Hook user32!GetForegroundWindow so the game always believes it is foreground — casts the *illusion* of focus to defeat `t.IdleWhenNotForeground` idle / focus-loss pause, keeping the game thread alive for invokes/POV while the tool or CE holds the real foreground (`Grausam.cpp/.h`, build ~1950) |
 | Böse | ベーゼ | Bose | Immortal Sage, barrier magic ("evil") | ⬜ | Protection / guard / anti-tamper shield |
 
 ### Demons — Greater & Other
