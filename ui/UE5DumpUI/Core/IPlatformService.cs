@@ -65,4 +65,31 @@ public interface IPlatformService
     /// doubles need not provide it. Never throws; one unreadable drive is skipped.
     /// </summary>
     IReadOnlyList<DriveDescriptor> GetLogicalDrives() => Array.Empty<DriveDescriptor>();
+
+    /// <summary>
+    /// Enumerate running processes as DLL-injection candidates, flagging which look
+    /// like UE4/UE5 games (<see cref="GameProcessInfo.IsUe"/>). Default empty for
+    /// non-Windows implementations and test doubles. Never throws; inaccessible
+    /// processes are skipped.
+    /// </summary>
+    IReadOnlyList<GameProcessInfo> GetRunningProcesses() => Array.Empty<GameProcessInfo>();
+
+    /// <summary>
+    /// Inject a DLL into a running process via CreateRemoteThread + LoadLibraryW.
+    /// x64 targets only (rejects Wow64). Default reports unsupported for non-Windows
+    /// implementations and test doubles.
+    /// </summary>
+    InjectResult InjectDll(int pid, string dllPath) =>
+        InjectResult.Failure("DLL injection is only supported on Windows.");
+
+    /// <summary>True when the current process runs with Administrator rights.</summary>
+    bool IsElevated() => false;
+
+    /// <summary>
+    /// Retry injection elevated (relaunch this app headless via UAC to do just the
+    /// inject). Used when <see cref="InjectDll"/> returns
+    /// <see cref="InjectResult.AccessDenied"/> because the game runs elevated.
+    /// </summary>
+    InjectResult InjectDllElevated(int pid, string dllPath) =>
+        InjectResult.Failure("Elevated injection is only supported on Windows.");
 }

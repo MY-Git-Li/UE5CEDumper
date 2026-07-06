@@ -8,6 +8,14 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        // Headless elevated inject helper: when the main (non-elevated) UI hits an
+        // Access-Denied inject (the game runs as Administrator), it relaunches THIS
+        // exe with `--inject-elevated <pid> <dll> <resultFile>` via UAC. We do just
+        // the injection, write the result to resultFile, and exit — no GUI, no
+        // single-instance mutex. Must run BEFORE BuildAvaloniaApp().
+        if (args.Length >= 4 && args[0] == "--inject-elevated")
+            return RunElevatedInject(args[1], args[2], args[3]);
+
         // AOT publish gives gutted stack traces (no PDB lookup at runtime,
         // inlining opaque). A startup crash in the compositor thread would
         // otherwise leave the user with "the exe just closed" and no signal.
@@ -32,6 +40,29 @@ internal static class Program
                     $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] UE5DumpUI startup crash\n{ex}\n");
             }
             catch { /* best effort — nothing more we can do if even this fails */ }
+            return 1;
+        }
+    }
+
+    /// <summary>Headless elevated inject: inject the DLL and write "OK &lt;hex&gt;" or the
+    /// error to <paramref name="resultFile"/>. Returns 0 on success. No GUI.</summary>
+    private static int RunElevatedInject(string pidArg, string dllPath, string resultFile)
+    {
+        try
+        {
+            if (!int.TryParse(pidArg, out int pid))
+            {
+                File.WriteAllText(resultFile, "Invalid PID.");
+                return 2;
+            }
+            var result = new Services.WindowsPlatformService().InjectDll(pid, dllPath);
+            File.WriteAllText(resultFile,
+                result.Ok ? $"OK {result.HModule:X}" : (result.ErrorMessage ?? "inject failed"));
+            return result.Ok ? 0 : 1;
+        }
+        catch (Exception ex)
+        {
+            try { File.WriteAllText(resultFile, "Elevated inject error: " + ex.Message); } catch { }
             return 1;
         }
     }

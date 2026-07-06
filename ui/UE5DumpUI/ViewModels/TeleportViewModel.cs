@@ -1417,6 +1417,26 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         finally { IsBusy = false; }
     }
 
+    /// <summary>Copy a self-contained CE AA script (tick = ON, untick = OFF) that
+    /// drives Keep Foreground through the DLL mailbox (CMD_FOREGROUND). Paste into a
+    /// CE memory record. Works offline — it's static text.</summary>
+    [RelayCommand]
+    private async Task CopyForegroundLockScriptAsync()
+    {
+        try
+        {
+            await _platform.CopyToClipboardAsync(
+                UE5DumpUI.Services.ForegroundScriptGenerator.Generate());
+            StatusText = "Copied Keep Foreground CE script (paste into a CE memory record; " +
+                         "tick = ON, untick = OFF).";
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport CopyForegroundLockScript failed", ex);
+        }
+    }
+
     // ── Move Speed multiplier (force MaxWalkSpeed, Laufen) ─────────────
 
     /// <summary>Tracks whether the move-speed override is held (so the global

@@ -30,6 +30,7 @@ internal static class CeMailboxLayout
     public const int CmdProtect        = 9;   // CMD_PROTECT   (GodMode / Solitar)
     public const int CmdMovement       = 10;  // CMD_MOVEMENT  (Laufen knobs)
     public const int CmdFly            = 11;  // CMD_FLY       (Dunste — no-gravity 3D flight)
+    public const int CmdForeground     = 12;  // CMD_FOREGROUND (Grausam — keep-foreground lock)
 
     // Shared mailbox poll timeout (ms) — the upper bound of the `while status ~= 1`
     // busy-wait loop in every emitted mailbox round-trip.

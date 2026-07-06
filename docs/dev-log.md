@@ -18,6 +18,32 @@ builds ≤696 in
 
 -----
 
+## 2026-07-06 — In-UI DLL injection + inject-ue.ps1 CLI (build ~1958-1962; dev)
+
+**SHIPPED (UI + CLI; no DLL change).** A third way to load `UE5Dumper.dll` besides the CE `.CT` LoadLibrary
+and the version/dxgi/dinput8 **proxy**: inject it into an **already-running** UE game. No Cheat Engine, no
+pre-deployed proxy, no game restart.
+
+**UI** — Proxy Deploy tab gains an **"Inject into running game…"** button → a modal **process picker**
+(`ProcessPickerWindow`, code-behind/AOT-safe like ConfirmDialog; UE games listed first, "Show all" toggle) →
+`CreateRemoteThread` + `LoadLibraryW` → **auto-connect** the pipe. Ported from the sibling `discrete`
+project's `WindowsDllInjector` but with **classic `[DllImport]`** (this project bans `LibraryImport`/
+`AllowUnsafeBlocks`); all inject P/Invokes are blittable. Behind `IPlatformService` (`GetRunningProcesses` +
+`InjectDll`), x64-only (rejects Wow64). UE-process detection reuses the drive-scan signals on the process exe
+path (`UeProcessDetector`: `*-Shipping.exe`, or under `\Binaries\Win64\` with `Engine`/`Content\Paks`
+up-tree). New `GameProcessInfo`/`InjectResult` models; `IProxyDeployService.ListGameProcessesAsync/
+InjectDllAsync` façades; `ProxyDeployViewModel.InjectIntoRunningGame` + `PickProcessAsync`/
+`RequestConnectAsync` delegates (`MainWindowViewModel` wires the latter → `ConnectCommand`). DLL path =
+`<exeDir>\UE5Dumper.dll`.
+
+**CLI** — `scripts/inject-ue.ps1`: one combined command-line injector (list + inject + auto). `inject-ue.ps1`
+auto-injects the single running UE game (0 → abort; 2+ → list + abort); `-List` / `-ProcessId N` / `-Dll`.
+Same technique via `Add-Type` classic `[DllImport]`. Verified `-List`/auto-abort/DLL-resolution on the dev box.
+
+AOT UI + 2211 tests green (+10 `UeProcessDetector`). **Single-player / offline only** — `CreateRemoteThread`
+injection is commonly flagged by AV and blocked/banned by kernel anti-cheat (same caveat as the CE inject +
+proxy already carry). Live in-game inject verify pending (technique proven via the CLI on the dev box).
+
 ## 2026-07-06 — Keep-Foreground lock (Grausam) — stop background game-thread pause (build ~1950-1955; dev; LIVE-VERIFIED P3R)
 
 **SHIPPED (DLL + UI; NEEDS RE-INJECT).** Some games idle/pause their **game thread whenever they are not the
@@ -50,6 +76,15 @@ injected file) — use `-Target All`.
 **Wiring:** pipe `set_foreground_lock` / `get_foreground_lock` (Renge) → `Grausam::SetForegroundLock/IsEnabled`
 (Fern); `IDumpService.Set/GetForegroundLockAsync` (DumpService); Teleport tab **Keep Foreground** card
 (ON/OFF/Unknown badge + Force ON/OFF/↻), off by default. DLL + AOT UI + 2194 tests green.
+
+**CE mailbox path (build 1956).** Added `Mimic CMD_FOREGROUND=12` (op `FG_OP_SET`/`FG_OP_GET`, `ForegroundOp`)
+so pure-CE users can toggle it without the pipe/UI. Thread-agnostic — Grausam is a pure Win32 hook/subclass,
+so `HandleForeground` runs entirely on the mailbox **polling thread** (not the game thread), and therefore
+works even while the game thread is idle. New `ForegroundScriptGenerator` (mirrors `ProtectionScriptGenerator`,
+quiet-by-default per the CE-Lua hygiene rule) + a **Copy CE Script** button on the Keep Foreground card
+(`CopyForegroundLockScript`); `CeMailboxLayout.CmdForeground=12`. The bundled `UE5CEDumper.CT` is unchanged
+(GodMode/Fly/etc. aren't baked into it either — the CE path for all of them is the Copy-CE-Script generator).
+2201 UI tests green (+7 generator tests).
 
 ## 2026-07-06 — Generic (non-Steam) drive scan in Proxy Deploy (build ~1944; dev)
 

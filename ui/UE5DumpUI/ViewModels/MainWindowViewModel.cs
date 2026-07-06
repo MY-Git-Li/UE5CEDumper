@@ -497,7 +497,11 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         UpdatePivotHandoffEnabled();
 
         if (proxyDeploy != null)
+        {
             ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log);
+            // Auto-connect the pipe after a successful in-UI DLL injection.
+            ProxyDeploy.RequestConnectAsync = () => ConnectCommand.ExecuteAsync(null);
+        }
 
         // Mirror the per-tab stale-DLL warning into the always-visible top-bar
         // badge so a version mismatch is noticed from any tab.

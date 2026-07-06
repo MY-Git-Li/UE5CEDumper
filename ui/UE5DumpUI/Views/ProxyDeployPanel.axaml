@@ -92,6 +92,10 @@
               Command="{Binding RefreshCommand}"
               ToolTip.Tip="{StaticResource str.Tip.ProxyDeploy.Refresh}"
               Padding="12,4"/>
+      <Button Content="{StaticResource str.ProxyDeploy.Inject}"
+              Command="{Binding InjectIntoRunningGameCommand}"
+              ToolTip.Tip="{StaticResource str.Tip.ProxyDeploy.Inject}"
+              Padding="12,4"/>
 
       <!-- Selection buttons — separated visually from scan/refresh -->
       <Border Width="1" Background="#444" Margin="4,2"/>

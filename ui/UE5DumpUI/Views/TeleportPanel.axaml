@@ -574,6 +574,10 @@
                     Command="{Binding RefreshForegroundLockCommand}"
                     ToolTip.Tip="{StaticResource str.Tip.TP.FgRefresh}"
                     IsEnabled="{Binding CanOperate}" Padding="10,4"/>
+            <Button Content="{StaticResource str.TP.FgCopyScript}"
+                    Command="{Binding CopyForegroundLockScriptCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.FgCopyScript}"
+                    Padding="10,4"/>
           </StackPanel>
         </StackPanel>
       </Border>

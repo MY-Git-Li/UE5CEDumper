@@ -53,7 +53,8 @@ It injects a DLL into the game process, then communicates with a standalone UI v
     <tr><td><code>UE5DumpUI.exe</code></td><td>Standalone UI application (connect, browse, export)</td></tr>
     <tr><td><code>UE5Dumper.dll</code></td><td>Injected DLL — used with Cheat Engine (Option A)</td></tr>
     <tr><td><code>proxy\version.dll</code><br><code>proxy\dxgi.dll</code><br><code>proxy\dinput8.dll</code></td><td>Proxy DLLs — auto-load without CE (Option B). Use <strong>one</strong>: <code>version.dll</code> (default), <code>dxgi.dll</code> (D3D11/12 games whose EXE imports neither version nor dinput8), or <code>dinput8.dll</code>.</td></tr>
-    <tr><td><code>UE5CEDumper.CT</code></td><td>CE Cheat Table — loads and injects the DLL</td></tr>
+    <tr><td><code>UE5CEDumper.CT</code></td><td>CE Cheat Table — loads and injects the DLL (Option A)</td></tr>
+    <tr><td><code>inject-ue.ps1</code></td><td>Command-line injector — inject <code>UE5Dumper.dll</code> into a running UE game (Option C). No Cheat Engine needed.</td></tr>
     <tr><td><code>ue5_dissect.lua</code></td><td>CE Structure Dissect builder (optional, for advanced CE users)</td></tr>
   </tbody>
 </table>
@@ -62,8 +63,8 @@ It injects a DLL into the game process, then communicates with a standalone UI v
 
 <h2>Injection Methods</h2>
 
-<p>There are <strong>two ways</strong> to get UE5Dumper running inside the game process.
-Choose one — do <strong>not</strong> use both at the same time.</p>
+<p>There are <strong>a few ways</strong> to get UE5Dumper running inside the game process.
+Use <strong>one at a time</strong>. If you're not sure, <strong>Option C</strong> (inject into a running game) is the quickest — no Cheat Engine, no pre-deployed proxy, no game restart.</p>
 
 <h3>Option A: Cheat Engine Injection</h3>
 
@@ -87,7 +88,7 @@ CE Structure Dissect entries from UE class reflection. See the <em>CE Scripts</e
 
 <p>Best for: users who don't need CE, or when CE causes compatibility issues with the game.</p>
 
-<p><strong>Required files</strong>: one proxy DLL — <code>version.dll</code>, <code>dxgi.dll</code>, or <code>dinput8.dll</code> (all in <code>proxy\</code>) — plus <code>UE5DumpUI.exe</code>. The <strong>Proxy Deploy</strong> tab in the UI can pick the type and deploy it for you per game.</p>
+<p><strong>Required files</strong>: one proxy DLL — <code>version.dll</code>, <code>dxgi.dll</code>, or <code>dinput8.dll</code> (all in <code>proxy\</code>) — plus <code>UE5DumpUI.exe</code>. The <strong>Proxy Deploy</strong> tab in the UI can pick the type and deploy it for you per game — it detects Steam games, or scans chosen drives for UE games installed anywhere (Epic / GOG / manual).</p>
 
 <ol>
   <li>Copy <strong>one</strong> proxy DLL (start with <code>version.dll</code>) into the <strong>game's root folder</strong> (next to the game <code>.exe</code>).</li>
@@ -106,17 +107,40 @@ gameplay ensures the scan finds valid data.</blockquote>
 
 <blockquote><strong>Removing</strong>: To stop using the proxy DLL, simply delete the proxy DLL (<code>version.dll</code> / <code>dxgi.dll</code> / <code>dinput8.dll</code>) from the game folder.</blockquote>
 
+<h3>Option C: Inject into a Running Game (UI button or CLI)</h3>
+
+<p>Best for: the quickest path — inject into an <strong>already-running</strong> game with no Cheat Engine, no pre-deployed proxy, and no game restart.</p>
+
+<p><strong>Required files</strong>: <code>UE5Dumper.dll</code> + <code>UE5DumpUI.exe</code> (UI), or <code>inject-ue.ps1</code> (command line). Keep them together (the CLI looks for <code>UE5Dumper.dll</code> next to itself).</p>
+
+<p><strong>From the UI:</strong></p>
+<ol>
+  <li>Start the game and reach gameplay so UE objects are populated.</li>
+  <li>Launch <code>UE5DumpUI.exe</code> and open the <strong>Proxy Deploy</strong> tab.</li>
+  <li>Click <strong>Inject into running game…</strong>, pick the game in the process picker, and press <strong>Inject</strong>.</li>
+  <li>The UI injects the DLL and <strong>auto-connects</strong>. If the game runs as Administrator you'll get a UAC prompt to inject elevated — no manual restart.</li>
+</ol>
+
+<p><strong>From the command line</strong> (run in the folder that holds <code>UE5Dumper.dll</code>):</p>
+<pre><code>.\inject-ue.ps1                 # auto: inject the single running UE game
+.\inject-ue.ps1 -List           # list detected UE games
+.\inject-ue.ps1 -ProcessId 1234 # inject a specific PID</code></pre>
+<p>Then launch <code>UE5DumpUI.exe</code> and click <strong>Connect</strong>. If the game runs as Administrator, the script auto-relaunches elevated (one UAC prompt).</p>
+
+<blockquote><strong>x64 games only</strong>, and <strong>single-player / offline use only</strong> — like all injection, <code>CreateRemoteThread</code> may be flagged by anti-virus and is blocked/banned by kernel anti-cheat (EAC / BattlEye).</blockquote>
+
 <h3>Comparison</h3>
 
 <table>
-  <thead><tr><th></th><th>Option A (CE Inject)</th><th>Option B (Proxy DLL)</th></tr></thead>
+  <thead><tr><th></th><th>Option A (CE Inject)</th><th>Option B (Proxy DLL)</th><th>Option C (Inject running)</th></tr></thead>
   <tbody>
-    <tr><td>Requires Cheat Engine</td><td>Yes</td><td>No</td></tr>
-    <tr><td>Auto-loads on game start</td><td>No (manual inject)</td><td>Yes</td></tr>
-    <tr><td>CE Structure Dissect</td><td>Yes (<code>ue5_dissect.lua</code>)</td><td>No</td></tr>
-    <tr><td>CE memory editing</td><td>Yes</td><td>No (UI read-only browse)</td></tr>
-    <tr><td>Scan timing</td><td>Immediate on inject</td><td>Deferred (click Start Scan)</td></tr>
-    <tr><td>Anti-cheat risk</td><td>CE may be detected</td><td>Lower profile (common DLL name)</td></tr>
+    <tr><td>Requires Cheat Engine</td><td>Yes</td><td>No</td><td>No</td></tr>
+    <tr><td>Needs game restart</td><td>No</td><td>Yes (launch with proxy)</td><td>No (inject on demand)</td></tr>
+    <tr><td>Auto-loads on game start</td><td>No (manual inject)</td><td>Yes</td><td>No</td></tr>
+    <tr><td>CE Structure Dissect</td><td>Yes (<code>ue5_dissect.lua</code>)</td><td>No</td><td>No</td></tr>
+    <tr><td>CE memory editing</td><td>Yes</td><td>No (UI read-only browse)</td><td>No (UI read-only browse)</td></tr>
+    <tr><td>Scan timing</td><td>Immediate on inject</td><td>Deferred (click Start Scan)</td><td>Immediate on inject</td></tr>
+    <tr><td>Anti-cheat risk</td><td>CE may be detected</td><td>Lower profile (common DLL name)</td><td><code>CreateRemoteThread</code> may be flagged</td></tr>
   </tbody>
 </table>
 
@@ -167,6 +191,8 @@ dissect.enableAutoCallback()</code></pre>
     <tr><td>UI connects but shows 0 objects</td><td>Scan not run or game data not loaded</td><td>Load a save first, then inject (A) or click Start Scan (B)</td></tr>
     <tr><td>Start Scan button not visible</td><td>Already scanned, or CE inject mode</td><td>Normal — button only appears in proxy DLL mode before first scan</td></tr>
     <tr><td>Game crashes on launch with a proxy DLL</td><td>Rare DLL conflict / anti-tamper</td><td>Try a different proxy target (<code>dxgi.dll</code> / <code>dinput8.dll</code> / <code>version.dll</code>); if all fail, use CE injection (Option A) and file a bug report</td></tr>
+    <tr><td>Inject fails: "OpenProcess failed (Win32 5)"</td><td>The game runs as Administrator (higher integrity)</td><td>The UI / <code>inject-ue.ps1</code> auto-relaunch elevated — just accept the UAC prompt. Or start them as Administrator up front.</td></tr>
+    <tr><td>Game freezes / UI actions (POV, teleport, invokes) time out when the game is not focused</td><td>The game idles its game thread when it loses foreground (<code>t.IdleWhenNotForeground</code>)</td><td>In the <strong>Teleport</strong> tab, turn on <strong>Keep Foreground</strong> (Force ON) so the game keeps running while it's in the background.</td></tr>
     <tr><td>"UE version: Unknown"</td><td>AOB patterns didn't match</td><td>File a bug report with game name + UE version</td></tr>
   </tbody>
 </table>

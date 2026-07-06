@@ -619,6 +619,7 @@
     <sys:String x:Key="str.ProxyDeploy.Type.Dinput8">dinput8.dll</sys:String>
     <sys:String x:Key="str.ProxyDeploy.Type.Dxgi">dxgi.dll</sys:String>
     <sys:String x:Key="str.ProxyDeploy.Scan">Scan Steam</sys:String>
+    <sys:String x:Key="str.ProxyDeploy.Inject">Inject into running game…</sys:String>
     <sys:String x:Key="str.ProxyDeploy.Refresh">Refresh</sys:String>
     <sys:String x:Key="str.ProxyDeploy.Deploy">Deploy</sys:String>
     <sys:String x:Key="str.ProxyDeploy.Undeploy">Undeploy</sys:String>
@@ -872,6 +873,8 @@
     <sys:String x:Key="str.Tip.TP.FgOn">Turn the foreground lock ON — the DLL hooks GetForegroundWindow so the game always thinks it is focused. Keeps the game thread ticking (invokes / POV) while this tool or Cheat Engine holds the foreground.</sys:String>
     <sys:String x:Key="str.Tip.TP.FgOff">Turn the foreground lock OFF — restore normal focus behaviour (the game may idle/pause when unfocused).</sys:String>
     <sys:String x:Key="str.Tip.TP.FgRefresh">Re-read the live foreground-lock state (ON / OFF).</sys:String>
+    <sys:String x:Key="str.TP.FgCopyScript">Copy CE Script</sys:String>
+    <sys:String x:Key="str.Tip.TP.FgCopyScript">Copy a self-contained Cheat Engine AA script (tick = ON, untick = OFF) that drives Keep Foreground via the DLL mailbox. Paste into a CE memory record — no pipe / UI connection needed.</sys:String>
 
     <!-- Standalone trainer export (no-DLL CE Lua .CT via AOBMaker) -->
     <sys:String x:Key="str.TP.TrainerHeader">Standalone Trainer (no DLL)</sys:String>
@@ -1149,6 +1152,7 @@
 
     <!-- Tooltips: Proxy Deploy -->
     <sys:String x:Key="str.Tip.ProxyDeploy.Scan">Detect Steam-installed UE games</sys:String>
+    <sys:String x:Key="str.Tip.ProxyDeploy.Inject">Inject UE5Dumper.dll into an already-running UE game (CreateRemoteThread + LoadLibraryW) — no Cheat Engine or pre-deployed proxy needed. Pick the process, then auto-connect. If the game runs as Administrator you'll get a UAC prompt to inject elevated (no manual restart). x64 games only; single-player / offline use only (anti-cheat may block).</sys:String>
     <sys:String x:Key="str.Tip.ProxyDeploy.Refresh">Refresh deploy status for detected games</sys:String>
     <sys:String x:Key="str.Tip.ProxyDeploy.Deploy">Deploy proxy DLL to selected games</sys:String>
     <sys:String x:Key="str.Tip.ProxyDeploy.Undeploy">Remove proxy DLL from selected games</sys:String>

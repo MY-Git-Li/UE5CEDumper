@@ -338,6 +338,236 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CloseHandle(IntPtr hObject);
 
+    // --- Process enumeration + DLL injection ------------------------------
+    // Classic CreateRemoteThread + LoadLibraryW injection so the UI can load
+    // UE5Dumper.dll into a running game without Cheat Engine or a pre-deployed
+    // proxy. Classic [DllImport] on blittable signatures — AOT-safe, no
+    // LibraryImport. x64 targets only (the DLL is 64-bit).
+
+    public IReadOnlyList<GameProcessInfo> GetRunningProcesses()
+    {
+        var list = new List<GameProcessInfo>();
+        Process[] procs;
+        try { procs = Process.GetProcesses(); }
+        catch { return list; }
+
+        foreach (var p in procs)
+        {
+            try
+            {
+                string? path = null;
+                try { path = p.MainModule?.FileName; }
+                catch { path = null; }   // protected / cross-bitness / exited → skip
+                if (string.IsNullOrEmpty(path))
+                    continue;
+                list.Add(new GameProcessInfo(
+                    p.Id, Path.GetFileName(path), path,
+                    UeProcessDetector.IsUeExecutable(path)));
+            }
+            catch
+            {
+                // One bad process must not abort enumeration.
+            }
+            finally
+            {
+                p.Dispose();
+            }
+        }
+        return list;
+    }
+
+    public InjectResult InjectDll(int pid, string dllPath)
+    {
+        if (!File.Exists(dllPath))
+            return InjectResult.Failure($"DLL not found: {dllPath}");
+
+        IntPtr hProc = OpenProcess(PROCESS_ALL_ACCESS, false, pid);
+        if (hProc == IntPtr.Zero)
+        {
+            int err = Marshal.GetLastWin32Error();
+            bool denied = err == 5;   // ERROR_ACCESS_DENIED — game likely elevated
+            return new InjectResult(false, 0,
+                $"OpenProcess failed (Win32 {err})."
+                    + (denied ? " The game may be running as Administrator." : ""),
+                AccessDenied: denied);
+        }
+        try
+        {
+            if (IsWow64Process(hProc, out bool wow64) && wow64)
+                return InjectResult.Failure(
+                    $"PID {pid} is a 32-bit process; UE5Dumper.dll is x64-only.");
+
+            byte[] pathBytes = System.Text.Encoding.Unicode.GetBytes(dllPath + "\0");
+            var size = (UIntPtr)pathBytes.Length;
+            IntPtr remote = VirtualAllocEx(hProc, IntPtr.Zero, size, MEM_COMMIT_RESERVE, PAGE_READWRITE);
+            if (remote == IntPtr.Zero)
+                return InjectResult.Failure($"VirtualAllocEx failed (Win32 {Marshal.GetLastWin32Error()}).");
+            try
+            {
+                if (!WriteProcessMemory(hProc, remote, pathBytes, size, out _))
+                    return InjectResult.Failure($"WriteProcessMemory failed (Win32 {Marshal.GetLastWin32Error()}).");
+
+                IntPtr k32 = GetModuleHandleW("kernel32.dll");
+                IntPtr loadLib = k32 == IntPtr.Zero ? IntPtr.Zero : GetProcAddress(k32, "LoadLibraryW");
+                if (loadLib == IntPtr.Zero)
+                    return InjectResult.Failure("Could not resolve LoadLibraryW.");
+
+                IntPtr hThread = CreateRemoteThread(hProc, IntPtr.Zero, UIntPtr.Zero, loadLib, remote, 0, IntPtr.Zero);
+                if (hThread == IntPtr.Zero)
+                    return InjectResult.Failure($"CreateRemoteThread failed (Win32 {Marshal.GetLastWin32Error()}).");
+                try
+                {
+                    uint wait = WaitForSingleObject(hThread, InjectTimeoutMs);
+                    if (wait != WAIT_OBJECT_0)
+                        return InjectResult.Failure($"Remote thread did not finish in {InjectTimeoutMs / 1000}s (wait 0x{wait:X8}).");
+                    if (!GetExitCodeThread(hThread, out uint exitCode))
+                        return InjectResult.Failure($"GetExitCodeThread failed (Win32 {Marshal.GetLastWin32Error()}).");
+                    if (exitCode == 0)
+                        return InjectResult.Failure(
+                            "LoadLibraryW returned NULL — the DLL failed to load. " +
+                            "Check %LOCALAPPDATA%\\UE5CEDumper\\Logs.");
+                    return InjectResult.Success(exitCode);
+                }
+                finally { CloseHandle(hThread); }
+            }
+            finally { VirtualFreeEx(hProc, remote, UIntPtr.Zero, MEM_RELEASE); }
+        }
+        finally { CloseHandle(hProc); }
+    }
+
+    public bool IsElevated()
+    {
+        try
+        {
+            using var id = System.Security.Principal.WindowsIdentity.GetCurrent();
+            var principal = new System.Security.Principal.WindowsPrincipal(id);
+            return principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Retry injection with elevation: relaunch THIS exe headless with
+    /// <c>--inject-elevated &lt;pid&gt; &lt;dll&gt; &lt;resultFile&gt;</c> via ShellExecute "runas"
+    /// (one UAC prompt). The short-lived elevated child does the inject and writes
+    /// its result to <paramref name="resultFile"/>; the main UI keeps running.
+    /// </summary>
+    public InjectResult InjectDllElevated(int pid, string dllPath)
+    {
+        if (!File.Exists(dllPath))
+            return InjectResult.Failure($"DLL not found: {dllPath}");
+
+        string exe = Environment.ProcessPath ?? "";
+        if (string.IsNullOrEmpty(exe))
+            return InjectResult.Failure("Cannot resolve the app path for elevation.");
+
+        string resultFile = Path.Combine(Path.GetTempPath(), $"ue5inject_{Guid.NewGuid():N}.txt");
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = exe,
+                UseShellExecute = true,   // required for the "runas" verb
+                Verb = "runas",
+            };
+            psi.ArgumentList.Add("--inject-elevated");
+            psi.ArgumentList.Add(pid.ToString());
+            psi.ArgumentList.Add(dllPath);
+            psi.ArgumentList.Add(resultFile);
+
+            Process? proc;
+            try
+            {
+                proc = Process.Start(psi);
+            }
+            catch (System.ComponentModel.Win32Exception w) when (w.NativeErrorCode == 1223)
+            {
+                return InjectResult.Failure("Elevation cancelled (UAC declined).");
+            }
+            if (proc == null)
+                return InjectResult.Failure("Could not start the elevated helper.");
+
+            if (!proc.WaitForExit(30000))
+            {
+                try { proc.Kill(); } catch { /* best effort */ }
+                return InjectResult.Failure("Elevated inject timed out.");
+            }
+
+            string content = "";
+            try { if (File.Exists(resultFile)) content = File.ReadAllText(resultFile).Trim(); }
+            catch { /* fall back to exit code below */ }
+
+            if (content.StartsWith("OK ", StringComparison.Ordinal))
+            {
+                uint.TryParse(content.AsSpan(3), System.Globalization.NumberStyles.HexNumber,
+                    System.Globalization.CultureInfo.InvariantCulture, out uint hmod);
+                return InjectResult.Success(hmod);
+            }
+            return InjectResult.Failure(content.Length > 0
+                ? content
+                : $"Elevated inject failed (exit {proc.ExitCode}).");
+        }
+        catch (Exception ex)
+        {
+            return InjectResult.Failure($"Elevated inject error: {ex.Message}");
+        }
+        finally
+        {
+            try { if (File.Exists(resultFile)) File.Delete(resultFile); } catch { }
+        }
+    }
+
+    private const uint PROCESS_ALL_ACCESS = 0x1F0FFF;
+    private const uint MEM_COMMIT_RESERVE = 0x3000;   // MEM_COMMIT | MEM_RESERVE
+    private const uint MEM_RELEASE        = 0x8000;
+    private const uint PAGE_READWRITE     = 0x04;
+    private const uint WAIT_OBJECT_0      = 0x0;
+    private const uint InjectTimeoutMs    = 10000;
+
+    [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+    private static extern IntPtr OpenProcess(uint dwDesiredAccess,
+        [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle, int dwProcessId);
+
+    [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+    private static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress,
+        UIntPtr dwSize, uint flAllocationType, uint flProtect);
+
+    [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool VirtualFreeEx(IntPtr hProcess, IntPtr lpAddress,
+        UIntPtr dwSize, uint dwFreeType);
+
+    [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool WriteProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress,
+        byte[] lpBuffer, UIntPtr nSize, out UIntPtr lpNumberOfBytesWritten);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetModuleHandleW", SetLastError = true, ExactSpelling = true)]
+    private static extern IntPtr GetModuleHandleW(string lpModuleName);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Ansi, EntryPoint = "GetProcAddress", SetLastError = true, ExactSpelling = true)]
+    private static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
+
+    [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+    private static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr lpThreadAttributes,
+        UIntPtr dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter,
+        uint dwCreationFlags, IntPtr lpThreadId);
+
+    [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+    private static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+
+    [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetExitCodeThread(IntPtr hThread, out uint lpExitCode);
+
+    [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWow64Process(IntPtr hProcess,
+        [MarshalAs(UnmanagedType.Bool)] out bool wow64Process);
+
     public void Dispose()
     {
         ReleaseSingleInstance();

@@ -33,7 +33,7 @@ A quick look at what you can actually *do* with it (the [full table-maker featur
 - **Debug Camera** — force the free-fly debug camera on/off in games that ship it (reliable on/off even on Shipping builds that normally get stuck).
 - **Console** — discover and one-click invoke the `fly` / `god` / `ghost` / game-specific cheat commands that many games leave in.
 - **One-click Cheat Engine export** — pointer-chain XML, Structure Dissect (CSX), SDK headers, AA scripts, and multi-row `.CT` batches.
-- **No Cheat Engine needed to inject** — drop the `version.dll` **proxy DLL** next to the game, launch, and connect.
+- **No Cheat Engine needed to inject** — drop the `version.dll` **proxy DLL** next to the game, or inject into an already-running game from the UI (**Inject into running game…**) or the **`inject-ue.ps1`** command-line tool (auto-elevates for games running as admin).
 
 > ¹ Marker save/recall works broadly (including Titan Quest II, after a transform-refresh fix for engine setters that report success but don't move the actor). A few heavily-stripped Shipping builds (e.g. Titan Quest II) can't do *cursor* teleport because they remove the standard cursor / viewport / line-trace APIs and use a custom virtual cursor — see [docs/teleport-spec.md](docs/teleport-spec.md) for the details.
 
@@ -104,7 +104,24 @@ A quick look at what you can actually *do* with it (the [full table-maker featur
 
 > **Note**: Do not use both methods simultaneously. If the proxy DLL is in the game folder, do not also inject `UE5Dumper.dll` via CE. The DLL detects duplicate instances and skips auto-start to prevent conflicts.
 
-> **Which proxy DLL?** Start with `version.dll` (`build.ps1 -Target ProxyDLL`). If the game launches but the UI can't connect, the EXE probably doesn't import `version.dll` — try **`dxgi.dll`** (`-Target ProxyDxgi`), which every D3D11/D3D12 UE game imports, or `dinput8.dll` (`-Target ProxyDinput8`). `build.ps1` (default `-Target All`) builds all three into `dist\proxy\`, and the **Proxy Deploy** tab lets you pick the type per game and deploy it for you.
+> **Which proxy DLL?** Start with `version.dll` (`build.ps1 -Target ProxyDLL`). If the game launches but the UI can't connect, the EXE probably doesn't import `version.dll` — try **`dxgi.dll`** (`-Target ProxyDxgi`), which every D3D11/D3D12 UE game imports, or `dinput8.dll` (`-Target ProxyDinput8`). `build.ps1` (default `-Target All`) builds all three into `dist\proxy\`, and the **Proxy Deploy** tab lets you pick the type per game and deploy it for you (Steam games, or any drive you point it at — Epic / GOG / manual).
+
+### Option C: Inject into a running game (no CE, no restart)
+
+Inject `UE5Dumper.dll` into an **already-running** game — the quickest path (no Cheat Engine, no pre-deployed proxy, no game restart). Two front-ends, one technique (`CreateRemoteThread` + `LoadLibraryW`):
+
+- **From the UI**: Proxy Deploy tab → **Inject into running game…** → pick the game in the process picker → **Inject**. The UI auto-connects. If the game runs as Administrator you get a UAC prompt to inject elevated — no manual restart.
+- **From the command line** — `inject-ue.ps1` (ships in `dist\` next to `UE5Dumper.dll`):
+
+  ```powershell
+  .\inject-ue.ps1                 # auto: inject the single running UE game
+  .\inject-ue.ps1 -List           # list detected UE games
+  .\inject-ue.ps1 -ProcessId 1234 # inject a specific PID
+  ```
+
+  Then launch **UE5DumpUI.exe** and **Connect**. On Access-Denied (an elevated game) the script auto-relaunches itself elevated (one UAC prompt).
+
+> **x64 games only**, single-player / offline use only — like all injection, `CreateRemoteThread` may be flagged by anti-virus and is blocked/banned by kernel anti-cheat (EAC / BattlEye).
 
 | **Game Process (Injected)** |
 | :---: |

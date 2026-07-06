@@ -321,6 +321,107 @@ public partial class ProxyDeployViewModel : ViewModelBase
         }
     }
 
+    // ── Inject into a running game (Proxy Deploy button → process picker) ──
+
+    /// <summary>Set by the panel code-behind: opens the process picker window and
+    /// returns the chosen process (or null on cancel). A delegate so the VM never
+    /// references a View.</summary>
+    public Func<Task<GameProcessInfo?>>? PickProcessAsync { get; set; }
+
+    /// <summary>Set by MainWindowViewModel: connect the pipe after a successful
+    /// inject (best-effort auto-connect).</summary>
+    public Func<Task>? RequestConnectAsync { get; set; }
+
+    /// <summary>Load injection-candidate processes for the picker. showAll=false
+    /// returns only UE games.</summary>
+    public async Task<IReadOnlyList<GameProcessInfo>> ListGameProcessesAsync(bool showAll)
+    {
+        var all = await _deploy.ListGameProcessesAsync();
+        return showAll ? all : all.Where(p => p.IsUe).ToList();
+    }
+
+    [RelayCommand]
+    private async Task InjectIntoRunningGameAsync()
+    {
+        StatusColor = StatusNeutral;
+        LastOperationColor = StatusNeutral;
+        ClearError();
+
+        // The injectable DLL sits next to the UI exe (dist\UE5Dumper.dll).
+        var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+        var dllPath = Path.Combine(exeDir, "UE5Dumper.dll");
+        if (!File.Exists(dllPath))
+        {
+            SetError($"UE5Dumper.dll not found next to the app: {dllPath}");
+            return;
+        }
+
+        if (PickProcessAsync is null) return;
+        GameProcessInfo? target;
+        try
+        {
+            target = await PickProcessAsync();
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            return;
+        }
+        if (target is null) return;   // cancelled
+
+        StatusText = $"Injecting UE5Dumper.dll into {target.Name} (PID {target.Pid})...";
+        InjectResult result;
+        try
+        {
+            result = await _deploy.InjectDllAsync(target.Pid, dllPath);
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            StatusText = "Inject failed";
+            StatusColor = StatusError;
+            return;
+        }
+
+        // Game runs elevated → OpenProcess Access Denied. Auto-retry WITH elevation
+        // (a headless UAC-prompt relaunch does just the inject; the UI stays running)
+        // unless we're already admin (then elevation can't help).
+        if (!result.Ok && result.AccessDenied && !_deploy.IsElevated())
+        {
+            StatusText = $"Access denied — requesting Administrator for {target.Name}...";
+            try
+            {
+                result = await _deploy.InjectDllElevatedAsync(target.Pid, dllPath);
+            }
+            catch (Exception ex)
+            {
+                SetError(ex);
+                StatusText = "Inject failed";
+                StatusColor = StatusError;
+                return;
+            }
+        }
+
+        if (!result.Ok)
+        {
+            SetError(result.ErrorMessage ?? "Injection failed");
+            StatusText = "Inject failed";
+            StatusColor = StatusError;
+            _log.Warn("ProxyDeploy", $"Inject into PID {target.Pid} failed: {result.ErrorMessage}");
+            return;
+        }
+
+        _log.Info("ProxyDeploy", $"Injected UE5Dumper.dll into PID {target.Pid} (HMODULE=0x{result.HModule:X})");
+        SetOperationResult($"Injected into {target.Name} (PID {target.Pid}) — connecting...", 0);
+
+        // Auto-connect the pipe (best-effort — the DLL auto-starts its pipe server).
+        if (RequestConnectAsync is not null)
+        {
+            try { await RequestConnectAsync(); }
+            catch (Exception ex) { _log.Warn("ProxyDeploy", $"Auto-connect after inject failed: {ex.Message}"); }
+        }
+    }
+
     [RelayCommand]
     private async Task RefreshAsync(CancellationToken ct)
     {
