@@ -81,4 +81,15 @@ public interface IPlatformService
     /// </summary>
     InjectResult InjectDll(int pid, string dllPath) =>
         InjectResult.Failure("DLL injection is only supported on Windows.");
+
+    /// <summary>True when the current process runs with Administrator rights.</summary>
+    bool IsElevated() => false;
+
+    /// <summary>
+    /// Retry injection elevated (relaunch this app headless via UAC to do just the
+    /// inject). Used when <see cref="InjectDll"/> returns
+    /// <see cref="InjectResult.AccessDenied"/> because the game runs elevated.
+    /// </summary>
+    InjectResult InjectDllElevated(int pid, string dllPath) =>
+        InjectResult.Failure("Elevated injection is only supported on Windows.");
 }

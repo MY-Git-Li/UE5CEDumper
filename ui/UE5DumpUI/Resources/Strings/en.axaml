@@ -1152,7 +1152,7 @@
 
     <!-- Tooltips: Proxy Deploy -->
     <sys:String x:Key="str.Tip.ProxyDeploy.Scan">Detect Steam-installed UE games</sys:String>
-    <sys:String x:Key="str.Tip.ProxyDeploy.Inject">Inject UE5Dumper.dll into an already-running UE game (CreateRemoteThread + LoadLibraryW) — no Cheat Engine or pre-deployed proxy needed. Pick the process, then auto-connect. x64 games only; single-player / offline use only (anti-cheat may block).</sys:String>
+    <sys:String x:Key="str.Tip.ProxyDeploy.Inject">Inject UE5Dumper.dll into an already-running UE game (CreateRemoteThread + LoadLibraryW) — no Cheat Engine or pre-deployed proxy needed. Pick the process, then auto-connect. If the game runs as Administrator you'll get a UAC prompt to inject elevated (no manual restart). x64 games only; single-player / offline use only (anti-cheat may block).</sys:String>
     <sys:String x:Key="str.Tip.ProxyDeploy.Refresh">Refresh deploy status for detected games</sys:String>
     <sys:String x:Key="str.Tip.ProxyDeploy.Deploy">Deploy proxy DLL to selected games</sys:String>
     <sys:String x:Key="str.Tip.ProxyDeploy.Undeploy">Remove proxy DLL from selected games</sys:String>

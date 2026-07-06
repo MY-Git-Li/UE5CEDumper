@@ -380,6 +380,13 @@ public sealed class ProxyDeployService : IProxyDeployService
         return Task.Run(() => _platform.InjectDll(pid, dllPath), ct);
     }
 
+    public bool IsElevated() => _platform.IsElevated();
+
+    public Task<InjectResult> InjectDllElevatedAsync(int pid, string dllPath, CancellationToken ct = default)
+    {
+        return Task.Run(() => _platform.InjectDllElevated(pid, dllPath), ct);
+    }
+
     public Task<IReadOnlyList<DetectedGame>> FindUeGamesOnDrivesAsync(
         IReadOnlyList<DriveDescriptor> selectedDrives,
         IProgress<DriveScanProgress>? progress = null,

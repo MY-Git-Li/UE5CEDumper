@@ -42,8 +42,10 @@ inject and the `version.dll` proxy. One combined CLI (list + inject + auto):
   script skips it unless `-Force`.
 - After a successful inject the DLL starts its pipe server automatically — launch
   `UE5DumpUI.exe` and **Connect**.
-- **Notes:** some games running elevated need this run as Administrator; and
-  real-time AV / anti-cheat may flag `CreateRemoteThread` injection — intended for
+- **Auto-elevation:** if the game runs as Administrator, injection hits Access
+  Denied and the script **auto-relaunches itself elevated** (one UAC prompt) — no
+  manual `Run as administrator`.
+- **Notes:** real-time AV / anti-cheat may flag `CreateRemoteThread` injection —
   single-player / offline use only.
 
 ---

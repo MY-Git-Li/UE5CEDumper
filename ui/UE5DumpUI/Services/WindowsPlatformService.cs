@@ -383,9 +383,14 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
 
         IntPtr hProc = OpenProcess(PROCESS_ALL_ACCESS, false, pid);
         if (hProc == IntPtr.Zero)
-            return InjectResult.Failure(
-                $"OpenProcess failed (Win32 {Marshal.GetLastWin32Error()}). " +
-                "If the game runs elevated, run this app as Administrator.");
+        {
+            int err = Marshal.GetLastWin32Error();
+            bool denied = err == 5;   // ERROR_ACCESS_DENIED — game likely elevated
+            return new InjectResult(false, 0,
+                $"OpenProcess failed (Win32 {err})."
+                    + (denied ? " The game may be running as Administrator." : ""),
+                AccessDenied: denied);
+        }
         try
         {
             if (IsWow64Process(hProc, out bool wow64) && wow64)
@@ -428,6 +433,91 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
             finally { VirtualFreeEx(hProc, remote, UIntPtr.Zero, MEM_RELEASE); }
         }
         finally { CloseHandle(hProc); }
+    }
+
+    public bool IsElevated()
+    {
+        try
+        {
+            using var id = System.Security.Principal.WindowsIdentity.GetCurrent();
+            var principal = new System.Security.Principal.WindowsPrincipal(id);
+            return principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Retry injection with elevation: relaunch THIS exe headless with
+    /// <c>--inject-elevated &lt;pid&gt; &lt;dll&gt; &lt;resultFile&gt;</c> via ShellExecute "runas"
+    /// (one UAC prompt). The short-lived elevated child does the inject and writes
+    /// its result to <paramref name="resultFile"/>; the main UI keeps running.
+    /// </summary>
+    public InjectResult InjectDllElevated(int pid, string dllPath)
+    {
+        if (!File.Exists(dllPath))
+            return InjectResult.Failure($"DLL not found: {dllPath}");
+
+        string exe = Environment.ProcessPath ?? "";
+        if (string.IsNullOrEmpty(exe))
+            return InjectResult.Failure("Cannot resolve the app path for elevation.");
+
+        string resultFile = Path.Combine(Path.GetTempPath(), $"ue5inject_{Guid.NewGuid():N}.txt");
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = exe,
+                UseShellExecute = true,   // required for the "runas" verb
+                Verb = "runas",
+            };
+            psi.ArgumentList.Add("--inject-elevated");
+            psi.ArgumentList.Add(pid.ToString());
+            psi.ArgumentList.Add(dllPath);
+            psi.ArgumentList.Add(resultFile);
+
+            Process? proc;
+            try
+            {
+                proc = Process.Start(psi);
+            }
+            catch (System.ComponentModel.Win32Exception w) when (w.NativeErrorCode == 1223)
+            {
+                return InjectResult.Failure("Elevation cancelled (UAC declined).");
+            }
+            if (proc == null)
+                return InjectResult.Failure("Could not start the elevated helper.");
+
+            if (!proc.WaitForExit(30000))
+            {
+                try { proc.Kill(); } catch { /* best effort */ }
+                return InjectResult.Failure("Elevated inject timed out.");
+            }
+
+            string content = "";
+            try { if (File.Exists(resultFile)) content = File.ReadAllText(resultFile).Trim(); }
+            catch { /* fall back to exit code below */ }
+
+            if (content.StartsWith("OK ", StringComparison.Ordinal))
+            {
+                uint.TryParse(content.AsSpan(3), System.Globalization.NumberStyles.HexNumber,
+                    System.Globalization.CultureInfo.InvariantCulture, out uint hmod);
+                return InjectResult.Success(hmod);
+            }
+            return InjectResult.Failure(content.Length > 0
+                ? content
+                : $"Elevated inject failed (exit {proc.ExitCode}).");
+        }
+        catch (Exception ex)
+        {
+            return InjectResult.Failure($"Elevated inject error: {ex.Message}");
+        }
+        finally
+        {
+            try { if (File.Exists(resultFile)) File.Delete(resultFile); } catch { }
+        }
     }
 
     private const uint PROCESS_ALL_ACCESS = 0x1F0FFF;

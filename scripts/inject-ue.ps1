@@ -47,7 +47,8 @@ param(
     [switch]$List,
     [switch]$All,
     [string]$Dll,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$Elevated   # internal: set on the self-relaunched elevated run (prevents a re-loop)
 )
 
 $ErrorActionPreference = 'Stop'
@@ -265,6 +266,32 @@ if (-not $Force -and (Test-AlreadyInjected $target.Proc $dllLeaf)) {
 
 [uint32]$hmod = 0
 $err = [UeInject.Injector]::Inject($target.PID, $dllPath, [ref]$hmod)
+
+# Auto-elevate on Access Denied (game runs as Administrator) — relaunch this script
+# elevated (one UAC prompt). Guarded so it never re-loops and never fires when we
+# already are admin.
+if (-not [string]::IsNullOrEmpty($err) -and $err -match 'Win32 5\)' -and -not $Elevated) {
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $isAdmin) {
+        Write-Host "[info] Access denied — the game may be running as Administrator. Relaunching elevated (accept the UAC prompt)..." -ForegroundColor Yellow
+        $psExe = (Get-Process -Id $PID).Path
+        $argList = @('-NoProfile','-ExecutionPolicy','Bypass','-File', $PSCommandPath,
+                     '-ProcessId', "$($target.PID)", '-Dll', "$dllPath", '-Elevated')
+        try {
+            $p = Start-Process -FilePath $psExe -Verb RunAs -ArgumentList $argList -PassThru -Wait -ErrorAction Stop
+            if ($p.ExitCode -eq 0) {
+                Write-Host ("[ok] Injected {0} into PID {1} (elevated). Launch UE5DumpUI.exe and Connect." -f $dllLeaf, $target.PID) -ForegroundColor Green
+            } else {
+                Write-Host ("[fail] Elevated inject failed (exit {0})." -f $p.ExitCode) -ForegroundColor Red
+            }
+            exit $p.ExitCode
+        } catch {
+            Write-Host ("[fail] Elevation cancelled or failed: {0}" -f $_.Exception.Message) -ForegroundColor Red
+            exit 1
+        }
+    }
+}
+
 if ([string]::IsNullOrEmpty($err)) {
     Write-Host ("[ok] Injected {0} into PID {1} (HMODULE=0x{2:X})." -f $dllLeaf, $target.PID, $hmod) -ForegroundColor Green
     Write-Host "The DLL starts its pipe server automatically. Launch UE5DumpUI.exe and Connect."

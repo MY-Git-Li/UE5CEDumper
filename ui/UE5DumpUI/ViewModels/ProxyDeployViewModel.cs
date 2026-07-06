@@ -383,6 +383,25 @@ public partial class ProxyDeployViewModel : ViewModelBase
             return;
         }
 
+        // Game runs elevated → OpenProcess Access Denied. Auto-retry WITH elevation
+        // (a headless UAC-prompt relaunch does just the inject; the UI stays running)
+        // unless we're already admin (then elevation can't help).
+        if (!result.Ok && result.AccessDenied && !_deploy.IsElevated())
+        {
+            StatusText = $"Access denied — requesting Administrator for {target.Name}...";
+            try
+            {
+                result = await _deploy.InjectDllElevatedAsync(target.Pid, dllPath);
+            }
+            catch (Exception ex)
+            {
+                SetError(ex);
+                StatusText = "Inject failed";
+                StatusColor = StatusError;
+                return;
+            }
+        }
+
         if (!result.Ok)
         {
             SetError(result.ErrorMessage ?? "Injection failed");
