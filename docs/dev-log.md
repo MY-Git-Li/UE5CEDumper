@@ -18,7 +18,7 @@ builds ≤696 in
 
 -----
 
-## 2026-07-06 — Keep-Foreground lock (Grausam) — stop background game-thread pause (build ~1950; dev; NEEDS RE-INJECT)
+## 2026-07-06 — Keep-Foreground lock (Grausam) — stop background game-thread pause (build ~1950-1955; dev; LIVE-VERIFIED P3R)
 
 **SHIPPED (DLL + UI; NEEDS RE-INJECT).** Some games idle/pause their **game thread whenever they are not the
 foreground window** (Persona 3 Reload — verified via its dump log: ProcessEvent hook-fire validator saw 0
@@ -37,10 +37,19 @@ focus-pause, at the *root* signal (version- and game-agnostic; also stops audio 
 IConsoleManager needed. Soft-disable leaves the hook installed and passes through (no unhook race). Coexists
 with Stark's MinHook (`MH_Initialize` guards `ALREADY_INITIALIZED`).
 
+**v2 (build 1955) — the fix that actually worked.** The GetForegroundWindow hook alone did NOT stop P3R
+(log: lock ENABLED but game still paused). P3R's pause is **`WM_ACTIVATEAPP`-message-driven** (UE's
+`FWindowsApplication` → `OnApplicationActivationChanged(false)`), not GetForegroundWindow polling. So Grausam
+now ALSO subclasses every top-level game window's WndProc (`SetWindowLongPtrW` + `SetProp`, gated on enabled)
+and rewrites the deactivation messages to "active": `WM_ACTIVATEAPP→TRUE`, `WM_NCACTIVATE→TRUE`,
+`WM_ACTIVATE→WA_ACTIVE`, swallow `WM_KILLFOCUS`. Two focus channels now covered (polling + messages).
+**LIVE-VERIFIED on P3R** (build 1955): log shows it subclassed the real 3840×2160 game window and
+invoke/POV ops work while backgrounded. Build gotcha: `-Target DLL` does NOT build the proxy DLLs (the
+injected file) — use `-Target All`.
+
 **Wiring:** pipe `set_foreground_lock` / `get_foreground_lock` (Renge) → `Grausam::SetForegroundLock/IsEnabled`
 (Fern); `IDumpService.Set/GetForegroundLockAsync` (DumpService); Teleport tab **Keep Foreground** card
-(ON/OFF/Unknown badge + Force ON/OFF/↻), off by default. DLL + AOT UI + 2194 tests green. Verify in-game on
-P3R after re-inject: enable → background the game → POV/invokes should keep working.
+(ON/OFF/Unknown badge + Force ON/OFF/↻), off by default. DLL + AOT UI + 2194 tests green.
 
 ## 2026-07-06 — Generic (non-Steam) drive scan in Proxy Deploy (build ~1944; dev)
 
