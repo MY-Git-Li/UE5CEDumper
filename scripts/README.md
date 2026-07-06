@@ -13,8 +13,38 @@ Cheat Engine artefacts that ship with UE5CEDumper.
 | `UE5CEDumper.CT` | Main CE Cheat Table — DLL injection, init, pipe server | Copied to `dist/` by build |
 | `ue5_dissect.lua` | CE Structure Dissect builder — generates CE struct definitions from UE reflection | Copied to `dist/` by build |
 | `ue5_invoke_helper.lua` | Runtime helper required by AA Scripts produced via UE5DumpUI's "Copy AA Script (Baked)" / Interesting Funcs AA(B) flow | **Embedded in `UE5DumpUI.exe`** as a manifest resource — see [HelperLuaResource.cs](../ui/UE5DumpUI/Services/HelperLuaResource.cs) — and shipped into the user's open .CT either via Tools → Inject Helper (one click via AOBMaker) or Tools → Export CE Helper Lua File... + manual `Table -> Add File...` |
+| `inject-ue.ps1` | Command-line injector — list running UE4/UE5 games and inject `UE5Dumper.dll` (CreateRemoteThread + LoadLibraryW). No Cheat Engine needed. | Ship next to `UE5Dumper.dll` (e.g. copy into `dist/`) |
 | `test_pipe.ps1` | Dev-only pipe protocol test script | Not deployed |
 | `DEPLOY_README.md` | End-user deployment doc — copied into `dist/` as `README.md` | Copied to `dist/README.md` |
+
+---
+
+## inject-ue.ps1
+
+A standalone command-line injector — an alternative to the Cheat Engine `.CT`
+inject and the `version.dll` proxy. One combined CLI (list + inject + auto):
+
+```powershell
+.\inject-ue.ps1                 # AUTO: exactly one UE game running -> inject it;
+                                #        0 -> abort; 2+ -> list them + abort
+.\inject-ue.ps1 -List           # list detected UE processes and exit
+.\inject-ue.ps1 -List -All      # list every accessible x64 process
+.\inject-ue.ps1 -ProcessId 1234 # inject into a specific PID
+.\inject-ue.ps1 -Dll C:\path\UE5Dumper.dll   # override the DLL to inject
+```
+
+- **UE detection** is by the executable path (same heuristics as the UI drive
+  scan): a `*-Shipping.exe` name, or an exe under `\Binaries\Win64\` with an
+  `Engine` folder / `Content\Paks` up the tree.
+- **x64 only** — `UE5Dumper.dll` is 64-bit; 32-bit targets are reported and skipped.
+- **DLL path** defaults to `UE5Dumper.dll` next to the script, else `..\dist\`.
+- Re-injecting is a safe no-op (`LoadLibraryW` returns the existing handle); the
+  script skips it unless `-Force`.
+- After a successful inject the DLL starts its pipe server automatically — launch
+  `UE5DumpUI.exe` and **Connect**.
+- **Notes:** some games running elevated need this run as Administrator; and
+  real-time AV / anti-cheat may flag `CreateRemoteThread` injection — intended for
+  single-player / offline use only.
 
 ---
 
