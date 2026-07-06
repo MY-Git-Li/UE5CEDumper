@@ -872,6 +872,8 @@
     <sys:String x:Key="str.Tip.TP.FgOn">Turn the foreground lock ON — the DLL hooks GetForegroundWindow so the game always thinks it is focused. Keeps the game thread ticking (invokes / POV) while this tool or Cheat Engine holds the foreground.</sys:String>
     <sys:String x:Key="str.Tip.TP.FgOff">Turn the foreground lock OFF — restore normal focus behaviour (the game may idle/pause when unfocused).</sys:String>
     <sys:String x:Key="str.Tip.TP.FgRefresh">Re-read the live foreground-lock state (ON / OFF).</sys:String>
+    <sys:String x:Key="str.TP.FgCopyScript">Copy CE Script</sys:String>
+    <sys:String x:Key="str.Tip.TP.FgCopyScript">Copy a self-contained Cheat Engine AA script (tick = ON, untick = OFF) that drives Keep Foreground via the DLL mailbox. Paste into a CE memory record — no pipe / UI connection needed.</sys:String>
 
     <!-- Standalone trainer export (no-DLL CE Lua .CT via AOBMaker) -->
     <sys:String x:Key="str.TP.TrainerHeader">Standalone Trainer (no DLL)</sys:String>

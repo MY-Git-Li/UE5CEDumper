@@ -51,6 +51,15 @@ injected file) — use `-Target All`.
 (Fern); `IDumpService.Set/GetForegroundLockAsync` (DumpService); Teleport tab **Keep Foreground** card
 (ON/OFF/Unknown badge + Force ON/OFF/↻), off by default. DLL + AOT UI + 2194 tests green.
 
+**CE mailbox path (build 1956).** Added `Mimic CMD_FOREGROUND=12` (op `FG_OP_SET`/`FG_OP_GET`, `ForegroundOp`)
+so pure-CE users can toggle it without the pipe/UI. Thread-agnostic — Grausam is a pure Win32 hook/subclass,
+so `HandleForeground` runs entirely on the mailbox **polling thread** (not the game thread), and therefore
+works even while the game thread is idle. New `ForegroundScriptGenerator` (mirrors `ProtectionScriptGenerator`,
+quiet-by-default per the CE-Lua hygiene rule) + a **Copy CE Script** button on the Keep Foreground card
+(`CopyForegroundLockScript`); `CeMailboxLayout.CmdForeground=12`. The bundled `UE5CEDumper.CT` is unchanged
+(GodMode/Fly/etc. aren't baked into it either — the CE path for all of them is the Copy-CE-Script generator).
+2201 UI tests green (+7 generator tests).
+
 ## 2026-07-06 — Generic (non-Steam) drive scan in Proxy Deploy (build ~1944; dev)
 
 **SHIPPED (UI-only, no re-inject).** The Proxy Deploy tab could only find Steam-installed games. Added a

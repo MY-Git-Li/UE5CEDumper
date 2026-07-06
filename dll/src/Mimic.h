@@ -79,6 +79,16 @@ enum Cmd : int32_t {
                               //   Output: result = 1 (active) / 0 (off) / negative
                               //     Dunste::FlyResult. GET_STATE writes paramsData:
                               //       [0] u8 active, [1] u8 preset, [8..15] double speed.
+    CMD_FOREGROUND      = 12, // Keep-Foreground lock (Grausam): make the game
+                              //   always believe it is the foreground app so it
+                              //   never idles/pauses its game thread when unfocused.
+                              //   Thread-agnostic (pure Win32 hook + WndProc
+                              //   subclass) — processed on the mailbox polling
+                              //   thread, so it works even while the game thread
+                              //   is asleep.
+                              //   Input:  instanceAddr = op (ForegroundOp below)
+                              //           ufuncAddr    = value (1 on / 0 off) for SET
+                              //   Output: result = 1 (on) / 0 (off) / <0 error
 };
 
 // CMD_TELEPORT op codes (written into instanceAddr by CE Lua / pipe bridge)
@@ -130,6 +140,12 @@ enum FlyOp : uint64_t {
     FLY_OP_GET_STATE   = 3, // result = FlyResult; paramsData[0] = active, [1] =
                             //   preset, [2] = noclip, [8..15] = speed double.
     FLY_OP_SET_NOCLIP  = 4, // ufuncAddr = 1 (noclip/through-walls) / 0 (collision).
+};
+
+// CMD_FOREGROUND op codes (written into instanceAddr by CE Lua / pipe bridge).
+enum ForegroundOp : uint64_t {
+    FG_OP_SET = 0, // ufuncAddr = 1 (on) / 0 (off). result = 1/0/negative.
+    FG_OP_GET = 1, // no input. result = current state (1/0).
 };
 
 // CMD_PROTECT op codes (written into instanceAddr by CE Lua / pipe bridge).

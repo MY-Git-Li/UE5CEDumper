@@ -20,6 +20,7 @@
 #include "Ubel.h"
 #include "Wirbel.h"
 #include "Dunste.h"
+#include "Grausam.h"
 #include "Grimoire.h"
 
 #include <Windows.h>
@@ -87,6 +88,7 @@ static void HandleTeleport();
 static void HandleProtect();
 static void HandleMovement();
 static void HandleFly();
+static void HandleForeground();
 static void SetError(int32_t code, const char* msg);
 static void SetDone(int32_t resultCode);
 static bool EnsureInitialized();
@@ -186,6 +188,9 @@ static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
                 break;
             case CMD_FLY:
                 HandleFly();
+                break;
+            case CMD_FOREGROUND:
+                HandleForeground();
                 break;
             default:
                 SetError(-1, "Unknown command");
@@ -898,6 +903,29 @@ static void HandleProtect() {
         g_invokeMailbox.errorMsg[sizeof(g_invokeMailbox.errorMsg) - 1] = '\0';
     }
     LOG_INFO("Mailbox: PROTECT op=%llu -> rc=%d", (unsigned long long)op, rc);
+    SetDone(rc);
+}
+
+// CMD_FOREGROUND: Keep-Foreground lock (Grausam), shared with the UI pipe
+// (set_foreground_lock). instanceAddr = op (ForegroundOp), ufuncAddr = value
+// (0/1) for the SET op. Thread-agnostic — Grausam is a pure Win32 hook/subclass,
+// so this runs entirely on the mailbox polling thread (no game-thread dispatch),
+// and therefore works even while the game thread is idle/paused.
+static void HandleForeground() {
+    const uint64_t op = g_invokeMailbox.instanceAddr;
+    int32_t rc;
+    switch (op) {
+    case FG_OP_SET:
+        rc = Grausam::SetForegroundLock(g_invokeMailbox.ufuncAddr != 0);
+        break;
+    case FG_OP_GET:
+        rc = Grausam::IsForegroundLockEnabled();
+        break;
+    default:
+        SetError(-1, "Foreground: unknown op");
+        return;
+    }
+    LOG_INFO("Mailbox: FOREGROUND op=%llu -> rc=%d", (unsigned long long)op, rc);
     SetDone(rc);
 }
 
