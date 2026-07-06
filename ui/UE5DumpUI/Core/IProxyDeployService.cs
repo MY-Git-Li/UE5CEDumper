@@ -42,6 +42,18 @@ public interface IProxyDeployService
         CancellationToken ct = default);
 
     /// <summary>
+    /// Enumerate running processes as DLL-injection candidates (UE games flagged).
+    /// Delegates to the platform layer.
+    /// </summary>
+    Task<IReadOnlyList<GameProcessInfo>> ListGameProcessesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Inject a DLL into a running process (CreateRemoteThread + LoadLibraryW).
+    /// Used by the "Inject into running game" flow. Delegates to the platform layer.
+    /// </summary>
+    Task<InjectResult> InjectDllAsync(int pid, string dllPath, CancellationToken ct = default);
+
+    /// <summary>
     /// Check deployment status for each game (for the given proxy type) and
     /// update Status / InstalledVersion / ErrorMessage. Independently of the
     /// selected type, flags a redundancy warning via ErrorMessage only when
