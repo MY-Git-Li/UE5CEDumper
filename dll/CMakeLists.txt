@@ -228,6 +228,7 @@ set(UE5_COMMON_SOURCES
     src/Laufen.cpp
     src/Dunste.cpp
     src/Edel.cpp
+    src/Grausam.cpp
 )
 
 add_library(UE5DumperCommon OBJECT ${UE5_COMMON_SOURCES})

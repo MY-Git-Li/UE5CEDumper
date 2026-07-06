@@ -544,6 +544,40 @@
         </StackPanel>
       </Border>
 
+      <!-- ── Keep Foreground (Grausam — hook GetForegroundWindow) ── -->
+      <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
+              CornerRadius="4" Padding="10">
+        <StackPanel Spacing="8">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="{StaticResource str.TP.FgHeader}"
+                       Foreground="#DDDDDD" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <TextBlock Text="{StaticResource str.TP.FgState}" Foreground="#999999"
+                       FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            <Border Background="#333337" CornerRadius="3" Padding="6,1">
+              <TextBlock Text="{Binding ForegroundLockState}"
+                         Foreground="{Binding ForegroundLockBadgeColor}"
+                         FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            </Border>
+          </StackPanel>
+          <TextBlock Text="{StaticResource str.TP.FgHint}"
+                     Foreground="#888888" FontSize="11" TextWrapping="Wrap"/>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Content="{StaticResource str.TP.FgOn}"
+                    Command="{Binding ForceForegroundLockOnCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.FgOn}"
+                    IsEnabled="{Binding CanOperate}" Padding="12,4"/>
+            <Button Content="{StaticResource str.TP.FgOff}"
+                    Command="{Binding ForceForegroundLockOffCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.FgOff}"
+                    IsEnabled="{Binding CanOperate}" Padding="12,4"/>
+            <Button Content="{StaticResource str.TP.FgRefresh}"
+                    Command="{Binding RefreshForegroundLockCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.FgRefresh}"
+                    IsEnabled="{Binding CanOperate}" Padding="10,4"/>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
       <!-- ── Move Speed multiplier (Laufen — force MaxWalkSpeed) ── -->
       <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
               CornerRadius="4" Padding="10">

@@ -410,6 +410,22 @@ public interface IDumpService
     /// </summary>
     Task<int> SetGodModeAsync(bool enable, CancellationToken ct = default);
 
+    // === Foreground lock (Grausam: keep the game thread alive when unfocused) ===
+
+    /// <summary>
+    /// Read the foreground-lock state. Returns 1 = on, 0 = off.
+    /// </summary>
+    Task<int> GetForegroundLockAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Enable/disable the foreground lock. ON ⇒ the DLL hooks GetForegroundWindow so
+    /// the game always believes it is the foreground app, defeating UE's
+    /// t.IdleWhenNotForeground idle / focus-loss pause (keeps ProcessEvent invokes and
+    /// POV reads working while our UI or CE holds the foreground). Returns 1 = on,
+    /// 0 = off, negative = hook-install error.
+    /// </summary>
+    Task<int> SetForegroundLockAsync(bool enable, CancellationToken ct = default);
+
     // === Movement tuning (Laufen: force per-pawn CMC float knobs) ===
 
     /// <summary>

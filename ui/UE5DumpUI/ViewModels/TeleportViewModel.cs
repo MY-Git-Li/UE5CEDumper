@@ -331,6 +331,14 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _godModeState = "Unknown";
     [ObservableProperty] private string _godModeBadgeColor = "#888888";
 
+    // ── Foreground lock (Grausam via set_foreground_lock) ──────────────
+    /// <summary>Badge: "ON" / "OFF" / "Unknown". When ON, the DLL hooks
+    /// GetForegroundWindow so the game never idles/pauses on focus loss — needed
+    /// for invoke/POV ops on games like Persona 3 Reload that halt the game thread
+    /// when backgrounded (t.IdleWhenNotForeground).</summary>
+    [ObservableProperty] private string _foregroundLockState = "Unknown";
+    [ObservableProperty] private string _foregroundLockBadgeColor = "#888888";
+
     // ── Move Speed multiplier (Laufen via set_movement_multiplier) ─────
     /// <summary>Tri-state badge: "ON" (held) / "OFF" / "Unavailable". The pawn →
     /// CharacterMovement resolution, MaxWalkSpeed write, base-value cache and
@@ -536,6 +544,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             AutoRefresh = false;
             ApplyDebugCameraState(-1);   // badge back to Unknown
             ApplyGodModeState(-1);       // godmode badge back to Unknown
+            ApplyForegroundLockState(-1);// foreground-lock badge back to Unknown
             ApplyMoveSpeedState(-1);     // move-speed badge back to Unknown
             MoveSpeedCurrentText = "—";
             ApplyGravityState(-1);       // gravity badge back to Unknown
@@ -1339,6 +1348,73 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             SetError(ex);
             _log.Error("Teleport CopyGodModeScript failed", ex);
         }
+    }
+
+    // ── Foreground lock (keep game thread alive when unfocused, Grausam) ──
+
+    /// <summary>Map the DLL state (1=on, 0=off, &lt;0=error/unknown) onto the badge.</summary>
+    private void ApplyForegroundLockState(int state)
+        => (ForegroundLockState, ForegroundLockBadgeColor) = state switch
+        {
+            1 => ("ON",      "#4EC9B0"),   // green — game always sees itself as foreground
+            0 => ("OFF",     "#999999"),   // grey — normal (idles/pauses when unfocused)
+            _ => ("Unknown", "#888888"),
+        };
+
+    [RelayCommand]
+    private Task ForceForegroundLockOnAsync()  => ForceForegroundLockAsync(wantOn: true);
+
+    [RelayCommand]
+    private Task ForceForegroundLockOffAsync() => ForceForegroundLockAsync(wantOn: false);
+
+    /// <summary>↻ — re-read and display the live foreground-lock state.</summary>
+    [RelayCommand]
+    private async Task RefreshForegroundLockAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var state = await _dump.GetForegroundLockAsync();
+            ApplyForegroundLockState(state);
+            StatusText = state == 1 ? "Foreground lock is ON" : "Foreground lock is OFF";
+        }
+        catch (Exception ex)
+        {
+            ApplyForegroundLockState(-1);
+            SetError(ex);
+            _log.Error("Teleport RefreshForegroundLock failed", ex);
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Enable/disable the foreground lock — the DLL hooks
+    /// GetForegroundWindow so the game never idles/pauses on focus loss. Idempotent.</summary>
+    private async Task ForceForegroundLockAsync(bool wantOn)
+    {
+        if (!IsConnected) return;
+        string want = wantOn ? "ON" : "OFF";
+        try
+        {
+            IsBusy = true;
+            ClearError();
+            var state = await _dump.SetForegroundLockAsync(wantOn);
+            ApplyForegroundLockState(state);
+            StatusText = state switch
+            {
+                1 => "Foreground lock ON — game stays awake when unfocused",
+                0 => "Foreground lock OFF",
+                _ => $"Foreground lock {want} failed (hook error {state})",
+            };
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            StatusText = $"Foreground lock {want} failed: {ex.Message}";
+            _log.Error($"Teleport ForceForegroundLock({want}) failed", ex);
+        }
+        finally { IsBusy = false; }
     }
 
     // ── Move Speed multiplier (force MaxWalkSpeed, Laufen) ─────────────

@@ -18,6 +18,30 @@ builds ≤696 in
 
 -----
 
+## 2026-07-06 — Keep-Foreground lock (Grausam) — stop background game-thread pause (build ~1950; dev; NEEDS RE-INJECT)
+
+**SHIPPED (DLL + UI; NEEDS RE-INJECT).** Some games idle/pause their **game thread whenever they are not the
+foreground window** (Persona 3 Reload — verified via its dump log: ProcessEvent hook-fire validator saw 0
+fires, POV fell back to raw cached read). Root cause (confirmed in vendored UE source): `FApp::HasFocus()`
+→ `FWindowsPlatformApplicationMisc::IsThisApplicationForeground()` = *"does `GetForegroundWindow()` belong to
+my PID?"*. Both UE's `t.IdleWhenNotForeground` idle **and** any game-side focus-loss pause gate on this, so
+clicking our UI (or CE) makes the game think it lost focus → thread sleeps → invokes/POV time out. Editing the
+game's `Engine.ini` `[ConsoleVariables] t.IdleWhenNotForeground=0` did NOT help (set in code/pak, and/or the
+game has its own focus-pause).
+
+**Fix — new module `Grausam` (illusion magic):** MinHook `user32!GetForegroundWindow` (resolved via
+`GetProcAddress`, so the real function body is patched for all callers) to always return the game's own
+top-level window (largest visible un-owned window of our PID, via `EnumWindows`) when the real foreground
+belongs to another process. `IsThisApplicationForeground()` then always reports foreground → no idle, no
+focus-pause, at the *root* signal (version- and game-agnostic; also stops audio ducking). No AOB / no
+IConsoleManager needed. Soft-disable leaves the hook installed and passes through (no unhook race). Coexists
+with Stark's MinHook (`MH_Initialize` guards `ALREADY_INITIALIZED`).
+
+**Wiring:** pipe `set_foreground_lock` / `get_foreground_lock` (Renge) → `Grausam::SetForegroundLock/IsEnabled`
+(Fern); `IDumpService.Set/GetForegroundLockAsync` (DumpService); Teleport tab **Keep Foreground** card
+(ON/OFF/Unknown badge + Force ON/OFF/↻), off by default. DLL + AOT UI + 2194 tests green. Verify in-game on
+P3R after re-inject: enable → background the game → POV/invokes should keep working.
+
 ## 2026-07-06 — Generic (non-Steam) drive scan in Proxy Deploy (build ~1944; dev)
 
 **SHIPPED (UI-only, no re-inject).** The Proxy Deploy tab could only find Steam-installed games. Added a

@@ -21,6 +21,7 @@
 #include "Laufen.h"
 #include "Dunste.h"    // Dunste::SetEnabled/SetSpeed/SetPreset/GetStatus for fly_*
 #include "Solitar.h"   // Solitar::ResolveProtectBits for get_trainer_offsets
+#include "Grausam.h"   // Grausam::SetForegroundLock — keep game thread alive when backgrounded
 #include "Edel.h"
 #include "BuildStamp.h"
 
@@ -4167,6 +4168,25 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             data["godmode"]    = live;        // observed live state (1/0, -1 = no pawn)
             data["resolvable"] = resolvable != 0;
             data["code"]       = code;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // ── set_foreground_lock / get_foreground_lock (Grausam) ──
+        // ON ⇒ hook GetForegroundWindow so the game always believes it is the
+        // foreground app; defeats t.IdleWhenNotForeground idle + focus-loss pause
+        // so game-thread ops keep working while our UI/CE holds the foreground.
+        if (cmd == Renge::CMD_SET_FOREGROUND_LOCK) {
+            bool enable = request.value("enable", false);
+            Sein::Info("PIPE:cmd", "set_foreground_lock: enable=%d", enable ? 1 : 0);
+            int32_t state = Grausam::SetForegroundLock(enable);
+            json data;
+            data["state"] = state;                    // 1=on, 0=off, <0=error
+            data["code"]  = (state < 0) ? state : 0;
+            return Renge::MakeResponse(id, data).dump();
+        }
+        if (cmd == Renge::CMD_GET_FOREGROUND_LOCK) {
+            json data;
+            data["state"] = Grausam::IsForegroundLockEnabled();  // 1=on, 0=off
             return Renge::MakeResponse(id, data).dump();
         }
 
