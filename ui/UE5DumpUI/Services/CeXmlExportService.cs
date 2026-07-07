@@ -1,4 +1,5 @@
 using System.Text;
+using System.Threading;
 using UE5DumpUI.Core;
 using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
@@ -431,11 +432,12 @@ public static class CeXmlExportService
         Dictionary<string, List<LiveFieldValue>> resolvedInstances,
         int depth,
         int arrayLimit = 64,
-        Action? onWalk = null)
+        Action? onWalk = null,
+        CancellationToken ct = default)
     {
         var visited = new HashSet<string>(StringComparer.Ordinal);
         await ResolveDrilldownRecAsync(dump, fields, resolvedStructs, resolvedInstances,
-            depth, arrayLimit, visited, onWalk);
+            depth, arrayLimit, visited, onWalk, ct);
     }
 
     private static async Task ResolveDrilldownRecAsync(
@@ -446,12 +448,16 @@ public static class CeXmlExportService
         int depth,
         int arrayLimit,
         HashSet<string> visited,
-        Action? onWalk)
+        Action? onWalk,
+        CancellationToken ct)
     {
+        // Abort promptly between pipe round-trips when the user cancels the export.
+        ct.ThrowIfCancellationRequested();
+
         // (1) Structs at this level — flatten nested (depth-free, MaxStructDepth-bound),
         //     then descend into each resolved struct's own fields (still depth-free) so
         //     containers/pointers INSIDE the struct are reached.
-        await ResolveStructFieldsIntoAsync(dump, fields, resolvedStructs, arrayLimit);
+        await ResolveStructFieldsIntoAsync(dump, fields, resolvedStructs, arrayLimit, ct);
         onWalk?.Invoke();
         foreach (var f in fields)
         {
@@ -460,7 +466,7 @@ public static class CeXmlExportService
             if (!resolvedStructs.TryGetValue(f.StructDataAddr, out var sub)) continue;
             if (!visited.Add("S:" + f.StructDataAddr)) continue;
             await ResolveDrilldownRecAsync(dump, sub, resolvedStructs, resolvedInstances,
-                depth, arrayLimit, visited, onWalk);
+                depth, arrayLimit, visited, onWalk, ct);
         }
 
         if (depth <= 0) return;
@@ -473,7 +479,7 @@ public static class CeXmlExportService
             if (resolvedInstances.ContainsKey(f.PtrAddress)) continue;
             if (!visited.Add("P:" + f.PtrAddress)) continue;
             await WalkAndRecurseAsync(dump, f.PtrAddress, f.PtrClassAddr, resolvedStructs,
-                resolvedInstances, depth - 1, arrayLimit, visited, onWalk);
+                resolvedInstances, depth - 1, arrayLimit, visited, onWalk, ct);
         }
 
         // (3) Container element VALUES (struct + object) — cost 1 level.
@@ -489,14 +495,14 @@ public static class CeXmlExportService
                 .ToList();
             if (structVals.Count > 0)
             {
-                await ResolveStructFieldsIntoAsync(dump, structVals, resolvedStructs, arrayLimit);
+                await ResolveStructFieldsIntoAsync(dump, structVals, resolvedStructs, arrayLimit, ct);
                 onWalk?.Invoke();
                 foreach (var sv in structVals)
                 {
                     if (!resolvedStructs.TryGetValue(sv.StructDataAddr, out var sub)) continue;
                     if (!visited.Add("S:" + sv.StructDataAddr)) continue;
                     await ResolveDrilldownRecAsync(dump, sub, resolvedStructs, resolvedInstances,
-                        depth - 1, arrayLimit, visited, onWalk);
+                        depth - 1, arrayLimit, visited, onWalk, ct);
                 }
             }
 
@@ -507,7 +513,7 @@ public static class CeXmlExportService
                 if (resolvedInstances.ContainsKey(ov.PtrAddress)) continue;
                 if (!visited.Add("P:" + ov.PtrAddress)) continue;
                 await WalkAndRecurseAsync(dump, ov.PtrAddress, ov.PtrClassAddr, resolvedStructs,
-                    resolvedInstances, depth - 1, arrayLimit, visited, onWalk);
+                    resolvedInstances, depth - 1, arrayLimit, visited, onWalk, ct);
             }
         }
     }
@@ -516,20 +522,23 @@ public static class CeXmlExportService
         IDumpService dump, string ptrAddr, string ptrClassAddr,
         Dictionary<string, List<LiveFieldValue>> resolvedStructs,
         Dictionary<string, List<LiveFieldValue>> resolvedInstances,
-        int depth, int arrayLimit, HashSet<string> visited, Action? onWalk)
+        int depth, int arrayLimit, HashSet<string> visited, Action? onWalk, CancellationToken ct)
     {
         try
         {
-            var r = await dump.WalkInstanceAsync(ptrAddr, ptrClassAddr, arrayLimit);
+            var r = await dump.WalkInstanceAsync(ptrAddr, ptrClassAddr, arrayLimit, ct: ct);
             if (r.Fields.Count > 0)
             {
                 resolvedInstances[ptrAddr] = r.Fields;
                 onWalk?.Invoke();
                 await ResolveDrilldownRecAsync(dump, r.Fields, resolvedStructs,
-                    resolvedInstances, depth, arrayLimit, visited, onWalk);
+                    resolvedInstances, depth, arrayLimit, visited, onWalk, ct);
             }
         }
-        catch
+        // Let a cancel abort the whole export; only real pipe/target failures fall through
+        // to a leaf. TaskCanceledException derives from OperationCanceledException, so this
+        // single guard covers both.
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Pipe error / reclaimed target — leave unresolved; emit falls back to a leaf.
         }
@@ -707,10 +716,14 @@ public static class CeXmlExportService
         IDumpService dump,
         IReadOnlyList<LiveFieldValue> fields,
         Dictionary<string, List<LiveFieldValue>> resolved,
-        int arrayLimit)
+        int arrayLimit,
+        CancellationToken ct = default)
     {
         foreach (var field in fields)
         {
+            // Abort promptly between per-field struct walks when the export is cancelled.
+            ct.ThrowIfCancellationRequested();
+
             // Both StructProperty and OptionalProperty<Struct> have the same
             // {StructClassAddr, StructDataAddr, StructTypeName} triple stamped
             // by the walker when the value is set, so the resolver treats
@@ -728,9 +741,12 @@ public static class CeXmlExportService
             try
             {
                 await ResolveStructRecursiveAsync(dump, field.StructDataAddr, field.StructClassAddr,
-                    "", 0, subResolved, 0, arrayLimit);
+                    "", 0, subResolved, 0, arrayLimit, ct);
             }
-            catch
+            // A cancel unwinds the whole export; only genuine failures leave the struct
+            // empty (emit falls back to a placeholder). OperationCanceledException covers
+            // its TaskCanceledException subclass too.
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // If resolution fails (pipe error, etc.), leave empty — will fall back to placeholder
             }
@@ -743,11 +759,12 @@ public static class CeXmlExportService
     private static async Task ResolveStructRecursiveAsync(
         IDumpService dump, string dataAddr, string classAddr,
         string namePrefix, int baseOffset, List<LiveFieldValue> output, int depth,
-        int arrayLimit = 64)
+        int arrayLimit = 64, CancellationToken ct = default)
     {
         if (depth >= MaxStructDepth) return;
 
-        var walkResult = await dump.WalkInstanceAsync(dataAddr, classAddr, arrayLimit: arrayLimit);
+        ct.ThrowIfCancellationRequested();
+        var walkResult = await dump.WalkInstanceAsync(dataAddr, classAddr, arrayLimit: arrayLimit, ct: ct);
 
         foreach (var f in walkResult.Fields)
         {
@@ -761,7 +778,7 @@ public static class CeXmlExportService
             {
                 // Nested struct — recurse and flatten into the same list
                 await ResolveStructRecursiveAsync(dump, f.StructDataAddr, f.StructClassAddr,
-                    displayName, absOffset, output, depth + 1, arrayLimit);
+                    displayName, absOffset, output, depth + 1, arrayLimit, ct);
             }
             else if (f.IsPointerNavigation)
             {

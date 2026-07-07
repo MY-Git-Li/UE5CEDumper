@@ -175,13 +175,23 @@
       <Button Content="{StaticResource str.LiveWalker.ExportCE}"
               Command="{Binding ExportCeXmlCommand}"
               IsVisible="{Binding HasData}"
+              IsEnabled="{Binding !IsExporting}"
               ToolTip.Tip="{StaticResource str.Tip.LiveWalker.ExportCE}"
               Padding="8,4"/>
       <Button Content="{Binding ExportCeFieldButtonLabel}"
               Command="{Binding ExportCeFieldXmlCommand}"
               IsVisible="{Binding HasSelectedFields}"
+              IsEnabled="{Binding !IsExporting}"
               ToolTip.Tip="{StaticResource str.Tip.LiveWalker.ExportCEField}"
               Padding="8,4"/>
+      <!-- Abort the drilldown pipe-walk of an in-flight Copy CE XML / Copy CE Field
+           export. Only visible while IsExporting; mirrors the Value Search Cancel style. -->
+      <Button Content="{StaticResource str.LiveWalker.CancelExport}"
+              Command="{Binding CancelExportCommand}"
+              IsVisible="{Binding IsExporting}"
+              ToolTip.Tip="{StaticResource str.Tip.LiveWalker.CancelExport}"
+              Foreground="#F44747" BorderBrush="#F44747" BorderThickness="1"
+              Background="Transparent" Padding="8,4"/>
       <Button Content="{StaticResource str.LiveWalker.PushCeField}"
               Command="{Binding PushCeFieldToCeCommand}"
               IsVisible="{Binding HasSelectedFields}"

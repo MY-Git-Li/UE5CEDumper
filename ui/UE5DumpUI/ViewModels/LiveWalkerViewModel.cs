@@ -31,10 +31,21 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     // Engine state for CE address formatting
     private EngineState? _engineState;
 
+    // Cancels an in-flight Copy CE XML / Copy CE Field export (the ResolveDrilldown
+    // pipe-walk phase, which can be long for deep/wide object graphs). Recreated per
+    // export; the Cancel button binds to CancelExportCommand.
+    private CancellationTokenSource? _exportCts;
+
     // Navigation breadcrumb stack
     [ObservableProperty] private ObservableCollection<BreadcrumbItem> _breadcrumbs = new();
     [ObservableProperty] private ObservableCollection<LiveFieldValue> _fields = new();
     [ObservableProperty] private bool _isLoading;
+
+    /// <summary>True while a Copy CE XML / Copy CE Field export is resolving its object
+    /// graph — drives the Cancel button's visibility. Distinct from <see cref="IsLoading"/>,
+    /// which many navigation flows also raise, so the Cancel button appears only for the
+    /// abortable export walk (not for every load).</summary>
+    [ObservableProperty] private bool _isExporting;
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private string _currentObjectName = "";
     [ObservableProperty] private string _currentClassName = "";
@@ -3330,11 +3341,14 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     private async Task ExportCeXmlAsync()
     {
         if (string.IsNullOrEmpty(CurrentAddress) || Breadcrumbs.Count == 0) return;
+        if (IsExporting) return;   // an export is already running — its Cancel button is showing
 
+        var cts = _exportCts = new CancellationTokenSource();
         try
         {
             ClearStatus();
             IsLoading = true;
+            IsExporting = true;
 
             // Container view: strip container breadcrumb, use original ContainerField.
             // Container breadcrumbs share the parent's Address, which causes CleanBreadcrumbs
@@ -3384,7 +3398,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     // throttled so a deep/wide map doesn't spam the bound StatusText.
                     int n = resolvedStructs.Count + resolvedInstances.Count;
                     if (n - lastShown >= 16) { lastShown = n; StatusText = $"Resolving… {n} objects"; }
-                });
+                },
+                ct: cts.Token);
 
             var rootBc = breadcrumbsForXml[0];
 
@@ -3463,6 +3478,15 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 $"descOffset={DescShowOffset}, descType={DescShowType}, " +
                 $"{resolvedStructs.Count} structs / {resolvedInstances.Count} pointers resolved, depth={CsxDrilldownDepth})");
         }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            // User hit Cancel — not an error; leave the clipboard untouched. The token
+            // guard matters: a bare OCE that is NOT from our token (e.g. PipeClient's
+            // "Pipe disconnected during send") must fall through to the generic handler
+            // so a real mid-export disconnect isn't mislabeled as a user cancellation.
+            StatusText = "Export cancelled.";
+            _log.Info("CE XML export cancelled by user");
+        }
         catch (Exception ex)
         {
             StatusText = "";
@@ -3472,8 +3496,17 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         finally
         {
             IsLoading = false;
+            IsExporting = false;
+            if (ReferenceEquals(_exportCts, cts)) _exportCts = null;
+            cts.Dispose();
         }
     }
+
+    /// <summary>Abort the in-flight Copy CE XML / Copy CE Field export (cancels the
+    /// ResolveDrilldown pipe-walk). Shared by both export commands — only one runs at a
+    /// time (guarded by <see cref="IsExporting"/>). No-op if nothing is exporting.</summary>
+    [RelayCommand]
+    private void CancelExport() => _exportCts?.Cancel();
 
     // Two thin commands feed the Export CSX dropdown (LiveWalkerPanel.axaml): the legacy
     // Pre-CE-7.7 byte form and the CE 7.7+ Binary (bit-switch) form. Both delegate to one core.
@@ -3551,6 +3584,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             : (SelectedField != null ? new List<LiveFieldValue> { SelectedField } : new List<LiveFieldValue>());
 
         if (selectedSnapshot.Count == 0 || string.IsNullOrEmpty(CurrentAddress) || Breadcrumbs.Count == 0) return;
+        if (IsExporting) return;   // an export is already running — its Cancel button is showing
 
         // Guessed ("Guess?") fields export only when the user explicitly focuses
         // guessed field(s) — i.e. the whole selection is guessed. A mixed or reflected
@@ -3559,10 +3593,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         // scalar leaves, so an all-guessed selection has no children to recurse into.
         bool includeGuessed = selectedSnapshot.All(f => f.IsGuessed);
 
+        var cts = _exportCts = new CancellationTokenSource();
         try
         {
             ClearStatus();
             IsLoading = true;
+            IsExporting = true;
 
             // Collapse consecutive duplicate crumbs FIRST (before the container
             // split below), so a redundant trailing container crumb — e.g. a
@@ -3651,7 +3687,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     // throttled so a deep/wide map doesn't spam the bound StatusText.
                     int n = resolvedStructs.Count + resolvedInstances.Count;
                     if (n - lastShown >= 16) { lastShown = n; StatusText = $"Resolving… {n} objects"; }
-                });
+                },
+                ct: cts.Token);
 
             var rootBc = breadcrumbsForXml[0];
 
@@ -3730,6 +3767,15 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 $"descOffset={DescShowOffset}, descType={DescShowType}, " +
                 $"{resolvedInstances.Count} pointer targets resolved at depth={CsxDrilldownDepth})");
         }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            // User hit Cancel — not an error; leave the clipboard untouched. The token
+            // guard matters: a bare OCE that is NOT from our token (e.g. PipeClient's
+            // "Pipe disconnected during send") must fall through to the generic handler
+            // so a real mid-export disconnect isn't mislabeled as a user cancellation.
+            StatusText = "Export cancelled.";
+            _log.Info("CE Field XML export cancelled by user");
+        }
         catch (Exception ex)
         {
             StatusText = "";
@@ -3739,6 +3785,9 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         finally
         {
             IsLoading = false;
+            IsExporting = false;
+            if (ReferenceEquals(_exportCts, cts)) _exportCts = null;
+            cts.Dispose();
         }
     }
 
@@ -4700,6 +4749,11 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
         _searchHistoryDebounce?.Dispose();
         _searchHistoryDebounce = null;
+
+        // Abort any in-flight export walk so a pending drilldown unwinds on teardown.
+        _exportCts?.Cancel();
+        _exportCts?.Dispose();
+        _exportCts = null;
 
         GC.SuppressFinalize(this);
     }

@@ -2873,7 +2873,8 @@ public class CeXmlExportServiceTests
         var resolvedStructs = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
         var resolvedInstances = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
         await CeXmlExportService.ResolveDrilldownAsync(
-            stub, new List<LiveFieldValue> { map }, resolvedStructs, resolvedInstances, depth: 2);
+            stub, new List<LiveFieldValue> { map }, resolvedStructs, resolvedInstances, depth: 2,
+            ct: TestContext.Current.CancellationToken);
 
         // Value struct at 0x4000 + 0*stride + valOffset(8) = 0x4008 was walked.
         Assert.True(resolvedStructs.ContainsKey("0x4008"));
@@ -2899,7 +2900,8 @@ public class CeXmlExportServiceTests
         };
         var rs = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
         var ri = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
-        await CeXmlExportService.ResolveDrilldownAsync(stub, new List<LiveFieldValue> { map }, rs, ri, depth: 0);
+        await CeXmlExportService.ResolveDrilldownAsync(stub, new List<LiveFieldValue> { map }, rs, ri, depth: 0,
+            ct: TestContext.Current.CancellationToken);
         Assert.False(rs.ContainsKey("0x4008"));
     }
 
@@ -2941,15 +2943,118 @@ public class CeXmlExportServiceTests
 
         var rs1 = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
         var ri1 = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
-        await CeXmlExportService.ResolveDrilldownAsync(stub, new List<LiveFieldValue> { map }, rs1, ri1, depth: 1);
+        await CeXmlExportService.ResolveDrilldownAsync(stub, new List<LiveFieldValue> { map }, rs1, ri1, depth: 1,
+            ct: TestContext.Current.CancellationToken);
         Assert.True(rs1.ContainsKey("0x4008"));    // outer value struct walked (one level)
         Assert.False(rs1.ContainsKey("0x9008"));   // inner map value struct NOT walked at D=1
 
         var rs2 = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
         var ri2 = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
-        await CeXmlExportService.ResolveDrilldownAsync(stub, new List<LiveFieldValue> { map }, rs2, ri2, depth: 2);
+        await CeXmlExportService.ResolveDrilldownAsync(stub, new List<LiveFieldValue> { map }, rs2, ri2, depth: 2,
+            ct: TestContext.Current.CancellationToken);
         Assert.True(rs2.ContainsKey("0x4008"));
         Assert.True(rs2.ContainsKey("0x9008"));    // inner expands at D=2
+    }
+
+    // ========================================
+    // ResolveDrilldown cancellation (Copy CE XML / Copy CE Field abort)
+    // ========================================
+
+    /// <summary>A StubDumpService whose WalkInstanceAsync always throws — lets a test
+    /// prove that the export resolver distinguishes a cancellation (must propagate and
+    /// abort the export) from an ordinary pipe/target failure (must be swallowed so the
+    /// field falls back to a leaf).</summary>
+    private sealed class ThrowingWalkStub : StubDumpService
+    {
+        private readonly Func<Exception> _make;
+        public ThrowingWalkStub(Func<Exception> make) => _make = make;
+        public override Task<InstanceWalkResult> WalkInstanceAsync(string addr, string? classAddr = null,
+            int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, CancellationToken ct = default)
+            => throw _make();
+    }
+
+    [Fact]
+    public async Task ResolveDrilldown_CancelledToken_ThrowsOperationCanceled()
+    {
+        // A token cancelled before the walk begins aborts at the entry guard.
+        var stub = new StubDumpService();
+        stub.RegisterStruct("0xDATA", new InstanceWalkResult
+        {
+            Fields = new List<LiveFieldValue> { new() { Name = "Leaf", TypeName = "IntProperty", Offset = 0, Size = 4 } }
+        });
+        var field = new LiveFieldValue
+        {
+            Name = "S", TypeName = "StructProperty", Offset = 0,
+            StructClassAddr = "0xCLS", StructDataAddr = "0xDATA",
+        };
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var rs = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+        var ri = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            CeXmlExportService.ResolveDrilldownAsync(
+                stub, new List<LiveFieldValue> { field }, rs, ri, depth: 1, ct: cts.Token));
+    }
+
+    [Fact]
+    public async Task ResolveDrilldown_StructWalkCancelled_Propagates()
+    {
+        // A cancel surfacing mid-walk (as OperationCanceledException from a struct
+        // WalkInstance) must NOT be eaten by ResolveStructFieldsIntoAsync's pipe-error
+        // catch — it must abort the whole export.
+        var stub = new ThrowingWalkStub(() => new OperationCanceledException());
+        var field = new LiveFieldValue
+        {
+            Name = "S", TypeName = "StructProperty", Offset = 0,
+            StructClassAddr = "0xCLS", StructDataAddr = "0xDATA",
+        };
+        var rs = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+        var ri = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            CeXmlExportService.ResolveDrilldownAsync(
+                stub, new List<LiveFieldValue> { field }, rs, ri, depth: 1,
+                ct: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task ResolveDrilldown_PointerWalkCancelled_Propagates()
+    {
+        // Same guarantee on the pointer branch — WalkAndRecurseAsync's swallow-catch
+        // must let a cancellation through, not fall back to a leaf.
+        var stub = new ThrowingWalkStub(() => new OperationCanceledException());
+        var field = new LiveFieldValue
+        {
+            Name = "Ptr", TypeName = "ObjectProperty", Offset = 0, PtrAddress = "0xAAA",
+        };
+        var rs = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+        var ri = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            CeXmlExportService.ResolveDrilldownAsync(
+                stub, new List<LiveFieldValue> { field }, rs, ri, depth: 1,
+                ct: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task ResolveDrilldown_OrdinaryWalkError_StillSwallowed()
+    {
+        // Positive control: a normal pipe/target failure (not a cancel) is still
+        // tolerated — the struct is left unresolved (leaf fallback) and the export
+        // completes without throwing. Guards against an over-broad catch.
+        var stub = new ThrowingWalkStub(() => new InvalidOperationException("pipe boom"));
+        var field = new LiveFieldValue
+        {
+            Name = "S", TypeName = "StructProperty", Offset = 0,
+            StructClassAddr = "0xCLS", StructDataAddr = "0xDATA",
+        };
+        var rs = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+        var ri = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
+
+        await CeXmlExportService.ResolveDrilldownAsync(
+            stub, new List<LiveFieldValue> { field }, rs, ri, depth: 1,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.False(rs.ContainsKey("0xDATA"));   // unresolved → emit falls back to a leaf
     }
 
     [Fact]
