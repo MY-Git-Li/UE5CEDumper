@@ -20,6 +20,7 @@
 #include "Wirbel.h"
 #include "Laufen.h"
 #include "Dunste.h"    // Dunste::SetEnabled/SetSpeed/SetPreset/GetStatus for fly_*
+#include "Schlacht.h"  // Schlacht::SetEnabled/GetStatus for seethrough_*
 #include "Solitar.h"   // Solitar::ResolveProtectBits for get_trainer_offsets
 #include "Grausam.h"   // Grausam::SetForegroundLock — keep game thread alive when backgrounded
 #include "Edel.h"
@@ -4359,6 +4360,40 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             Dunste::FlyStatus st{};
             Dunste::GetStatus(st);
             return Renge::MakeResponse(id, flyStatusJson(st)).dump();
+        }
+
+        // ── seethrough_set / seethrough_get_state (Schlacht) — see-through occluders ──
+        // seethrough_set applies {enable} then returns the live status; get_state
+        // polls it. Trace/hide run DLL-side on the worker; the pipe only toggles.
+        auto seeThroughStatusJson = [](const Schlacht::SeeThroughStatus& st) {
+            json data;
+            data["code"]         = st.code;          // 0 ok; negative Schlacht::SeeThroughResult
+            data["active"]       = st.active;
+            data["has_target"]   = st.hasTarget;     // camera + pawn resolved last tick
+            data["hidden_count"] = st.hiddenCount;   // occluders currently hidden
+            data["pierce_count"] = st.pierceCount;   // nearest occluders to hide along the ray
+            return data;
+        };
+        if (cmd == Renge::CMD_SEE_THROUGH_SET) {
+            if (request.contains("count"))
+                Schlacht::SetPierceCount(request.value("count", 1));
+            int32_t state = -1;
+            const bool haveEnable = request.contains("enable");
+            if (haveEnable)
+                state = Schlacht::SetEnabled(request.value("enable", false));
+            Sein::Info("PIPE:cmd", "seethrough_set: enable=%s count=%s",
+                       haveEnable ? (request.value("enable", false) ? "1" : "0") : "-",
+                       request.contains("count") ? "y" : "-");
+            Schlacht::SeeThroughStatus st{};
+            Schlacht::GetStatus(st);
+            json data = seeThroughStatusJson(st);
+            data["state"] = haveEnable ? state : (st.active ? 1 : 0);
+            return Renge::MakeResponse(id, data).dump();
+        }
+        if (cmd == Renge::CMD_SEE_THROUGH_GET_STATE) {
+            Schlacht::SeeThroughStatus st{};
+            Schlacht::GetStatus(st);
+            return Renge::MakeResponse(id, seeThroughStatusJson(st)).dump();
         }
 
         // ── teleport_*: marker save/recall + cursor teleport (Wirbel) ──

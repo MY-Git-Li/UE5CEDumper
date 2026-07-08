@@ -32,6 +32,7 @@ internal static class CeMailboxLayout
     public const int CmdFly            = 11;  // CMD_FLY       (Dunste — no-gravity 3D flight)
     public const int CmdForeground     = 12;  // CMD_FOREGROUND (Grausam — keep-foreground lock)
     public const int CmdQueryPtr       = 13;  // CMD_QUERY_PTR (resolve GWorld / GameEngine address)
+    public const int CmdSeeThrough     = 14;  // CMD_SEETHROUGH (Schlacht — see-through occluders toggle)
 
     // Shared mailbox poll timeout (ms) — the upper bound of the `while status ~= 1`
     // busy-wait loop in every emitted mailbox round-trip.

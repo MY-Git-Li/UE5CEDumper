@@ -23,12 +23,23 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     private readonly IPlatformService _platform;
     private readonly IAobMakerBridge? _aobMaker;
     private readonly IGlobalHotkeyService? _globalHotkeys;
+    // Shared experimental-features opt-in (System-tab checkbox). Gates the three
+    // trainer-flavoured cards added after v1817 — Keep Foreground, Fly, Standalone
+    // trainer export — plus their split-out hotkey card. Null in headless tests.
+    private readonly IExperimentalGate? _experimentalGate;
     private readonly TeleportHotkeyStore? _hotkeyStore;
     private IGlobalHotkeyRegistration? _cursorHotkey;
     // Live marker-hotkey registrations + the persisted combos, both keyed by
     // action id ("save0".."recall2").
     private readonly Dictionary<string, IGlobalHotkeyRegistration> _markerHotkeys = new();
     private readonly Dictionary<string, TeleportHotkeyBinding> _bindings = new(StringComparer.Ordinal);
+
+    // Hotkeys belonging to the experimental-gated cards (Keep Foreground / Fly).
+    // These live in ExperimentalHotkeyRows (own card) and stay UNregistered until
+    // the experimental gate is enabled. "foreground_off" is the emergency cursor-lock
+    // release — user chose to tear the features down on disable rather than strand it.
+    private static readonly HashSet<string> s_experimentalHotkeyIds =
+        new(StringComparer.Ordinal) { "foreground_on", "foreground_off", "fly_toggle", "seethrough_toggle" };
     private Avalonia.Threading.DispatcherTimer? _autoTimer;
     private int _autoTick;
     // Re-entrancy guard: the 500ms DispatcherTimer keeps firing even while a tick
@@ -51,13 +62,15 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     private const string CeGroupTrainer = "UE5CEDumper (no-DLL trainer)";
 
     public TeleportViewModel(IDumpService dump, ILoggingService log, IPlatformService platform,
-        IAobMakerBridge? aobMaker = null, IGlobalHotkeyService? globalHotkeys = null)
+        IAobMakerBridge? aobMaker = null, IGlobalHotkeyService? globalHotkeys = null,
+        IExperimentalGate? experimentalGate = null)
     {
         _dump = dump;
         _log = log;
         _platform = platform;
         _aobMaker = aobMaker;
         _globalHotkeys = globalHotkeys;
+        _experimentalGate = experimentalGate;
         for (int i = 0; i < 3; i++)
             Markers.Add(new TeleportMarkerRow { Slot = i });
 
@@ -93,8 +106,11 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             Hint = "Toggle the Gravity (GravityScale) override on/off." });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "gravdir_toggle",   DisplayName = "Gravity Dir toggle",
             Hint = "Toggle the Gravity Direction override on/off (UE5.4+)." });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "fly_toggle",       DisplayName = "Fly toggle",
+        // Experimental-gated hotkeys live in their own collection + card (below).
+        ExperimentalHotkeyRows.Add(new TeleportHotkeyRow { ActionId = "fly_toggle", DisplayName = "Fly toggle",
             Hint = "Toggle Fly (no-gravity 3D flight) on/off. While flying, use the selected keyboard preset to move." });
+        ExperimentalHotkeyRows.Add(new TeleportHotkeyRow { ActionId = "seethrough_toggle", DisplayName = "See-through toggle",
+            Hint = "Toggle See-through occluders on/off (hide the nearest non-Pawn object blocking the camera→player line)." });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "pov_get",      DisplayName = "Get POV",
             Hint = "Read the current camera POV (location / rotation / FOV)." });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "relative",     DisplayName = "TP facing dir",
@@ -105,9 +121,9 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             Hint = "Force the mouse cursor ON (bShowMouseCursor = true)." });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "cursor_off",   DisplayName = "Cursor OFF",
             Hint = "Force the mouse cursor OFF." });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "foreground_on",  DisplayName = "Keep Foreground ON",
+        ExperimentalHotkeyRows.Add(new TeleportHotkeyRow { ActionId = "foreground_on", DisplayName = "Keep Foreground ON",
             Hint = "Turn Keep Foreground ON (game never idles/pauses when backgrounded)." });
-        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "foreground_off", DisplayName = "Keep Foreground OFF",
+        ExperimentalHotkeyRows.Add(new TeleportHotkeyRow { ActionId = "foreground_off", DisplayName = "Keep Foreground OFF",
             Hint = "Emergency OFF for Keep Foreground — binds a global key so you can release the "
                  + "cursor lock even when the mouse is trapped in the game window." });
 
@@ -116,6 +132,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             _hotkeyStore = new TeleportHotkeyStore(platform);
             LoadAndRegisterHotkeys();
         }
+        // Subscribe regardless of the hotkey service — the gate also drives card
+        // visibility (ExperimentalEnabled / ShowExperimentalHotkeys).
+        if (_experimentalGate != null)
+            _experimentalGate.Changed += OnExperimentalGateChanged;
     }
 
     /// <summary>Raised when the user clicks "Locate in GWorld" on the Current Pose
@@ -141,6 +161,23 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
 
     /// <summary>Per-action marker hotkey rows shown in the panel.</summary>
     public ObservableCollection<TeleportHotkeyRow> HotkeyRows { get; } = new();
+
+    /// <summary>Hotkeys for the experimental-gated cards (Keep Foreground / Fly),
+    /// shown in their own card and only registered while <see cref="ExperimentalEnabled"/>.</summary>
+    public ObservableCollection<TeleportHotkeyRow> ExperimentalHotkeyRows { get; } = new();
+
+    /// <summary>All hotkey rows (both cards) — capture / registration / conflict-warning
+    /// logic is generic over the union; only the UI splits them into two lists.</summary>
+    private IEnumerable<TeleportHotkeyRow> AllHotkeyRows => HotkeyRows.Concat(ExperimentalHotkeyRows);
+
+    /// <summary>True when the experimental-features opt-in is on. Gates the Keep
+    /// Foreground / Fly / Standalone-trainer cards (bound in XAML). Backed by the
+    /// shared <see cref="IExperimentalGate"/>; updates live via its Changed event.</summary>
+    public bool ExperimentalEnabled => _experimentalGate?.IsEnabled ?? false;
+
+    /// <summary>The split-out experimental hotkey card shows only when a hotkey
+    /// service exists AND the experimental gate is on.</summary>
+    public bool ShowExperimentalHotkeys => CanBindCursorHotkey && ExperimentalEnabled;
 
     /// <summary>The row currently capturing a key combo (null when idle). The
     /// panel code-behind feeds KeyDown here while non-null.</summary>
@@ -451,6 +488,20 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         "Arrows move  ·  PgUp/PgDn up-down",
     };
 
+    // ── See-through occluders (Schlacht) ───────────────────────────────
+    /// <summary>Tri-state badge: "ON" / "OFF" / "Unavailable".</summary>
+    [ObservableProperty] private string _seeThroughState = "Unknown";
+    [ObservableProperty] private string _seeThroughBadgeColor = "#888888";
+    [ObservableProperty] private string _seeThroughCurrentText = "—";
+
+    /// <summary>Pierce depth: how many nearest occluders to hide along the view ray
+    /// (1 = just the nearest object, e.g. a painting; 2 = it + the wall behind, …).
+    /// Pawns/Characters on the ray are skipped and don't count.</summary>
+    [ObservableProperty] private int _seeThroughPierce = 1;
+
+    /// <summary>Tracks whether see-through is engaged (for the toggle hotkey/button).</summary>
+    private bool _seeThroughActive;
+
     // ── Gravity Direction (Laufen, UE5.4+ GravityDirection vector) ─────
     /// <summary>Tri-state badge: "ON" / "OFF" / "Unavailable" (pre-5.4 / no
     /// reflected GravityDirection).</summary>
@@ -560,6 +611,9 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             ApplyFlyState(-1);           // fly badge back to Unknown
             FlyCurrentText = "—";
             _flyActive = false;
+            ApplySeeThroughState(-1);    // see-through badge back to Unknown
+            SeeThroughCurrentText = "—";
+            _seeThroughActive = false;
             ApplyGravDirState(-1);       // gravity-direction badge back to Unknown
             GravDirCurrentText = "—";
             _gravDirActive = false;
@@ -1944,6 +1998,116 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // ── See-through occluders (Schlacht) ───────────────────────────────
+
+    private void ApplySeeThroughState(int state)
+    {
+        _seeThroughActive = state == 1;
+        (SeeThroughState, SeeThroughBadgeColor) = state switch
+        {
+            1 => ("ON",          "#4EC9B0"),
+            0 => ("OFF",         "#999999"),
+            _ => ("Unavailable", "#C9A04E"),
+        };
+    }
+
+    private void ApplySeeThroughReadout(SeeThroughStatus st)
+    {
+        ApplySeeThroughState(st.Active ? 1 : 0);
+        if (!st.Active)
+        {
+            SeeThroughCurrentText = "—";
+            return;
+        }
+        SeeThroughCurrentText = st.HasTarget
+            ? (st.HiddenCount > 0
+                ? "Active — hiding the occluder in front of your character."
+                : "Active — nothing blocking the view right now.")
+            : "Active — waiting for a pawn/camera (menu / loading?).";
+    }
+
+    [RelayCommand]
+    private async Task ApplySeeThroughAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true; ClearError();
+            var st = await _dump.SeeThroughSetAsync(enable: true, count: SeeThroughPierce);
+            ApplySeeThroughReadout(st);
+            StatusText = $"See-through ON — hiding the nearest {SeeThroughPierce} occluder(s) in the view.";
+        }
+        catch (Exception ex) { ApplySeeThroughState(-1); SetError(ex); _log.Error("Teleport ApplySeeThrough failed", ex); }
+        finally { IsBusy = false; }
+    }
+
+    [RelayCommand]
+    private async Task ResetSeeThroughAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true; ClearError();
+            var st = await _dump.SeeThroughSetAsync(enable: false, count: null);
+            ApplySeeThroughReadout(st);
+            StatusText = "See-through OFF.";
+        }
+        catch (Exception ex) { ApplySeeThroughState(-1); SetError(ex); _log.Error("Teleport ResetSeeThrough failed", ex); }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Live pierce-depth change: push to the DLL only while active (else it
+    /// takes effect on the next See-through ON).</summary>
+    partial void OnSeeThroughPierceChanged(int value)
+    {
+        if (_seeThroughActive && IsConnected)
+            _ = PushSeeThroughPierceAsync(value);
+    }
+
+    private async Task PushSeeThroughPierceAsync(int count)
+    {
+        try { var st = await _dump.SeeThroughSetAsync(enable: null, count: count); ApplySeeThroughReadout(st); }
+        catch (Exception ex) { _log.Error("Teleport PushSeeThroughPierce failed", ex); }
+    }
+
+    [RelayCommand]
+    private async Task RefreshSeeThroughAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true; ClearError();
+            var st = await _dump.SeeThroughGetStateAsync();
+            ApplySeeThroughReadout(st);
+        }
+        catch (Exception ex) { ApplySeeThroughState(-1); SetError(ex); _log.Error("Teleport RefreshSeeThrough failed", ex); }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Push a self-contained CE AA toggle script (tick = ON, untick = OFF)
+    /// that drives See-through through the DLL mailbox (CMD_SEETHROUGH) straight into
+    /// CE via AOBMaker. AOBMaker ONLY — no clipboard fallback (by request); the button
+    /// is disabled (grayed out) when the AOBMaker plugin isn't detected, so this
+    /// command is only reachable when a push can actually happen.</summary>
+    [RelayCommand]
+    private async Task AddSeeThroughToCeAsync()
+    {
+        if (_aobMaker == null || !IsAobMakerAvailable) return;   // defence in depth; button is grayed out
+        try
+        {
+            ClearError();
+            const string desc = "See-through occluders (toggle)";
+            bool ok = await _aobMaker.CreateAAScriptAsync(
+                desc, UE5DumpUI.Services.SeeThroughScriptGenerator.Generate(),
+                autoActivate: false, group: CeGroupDll);
+            StatusText = ok
+                ? $"Added '{desc}' to Cheat Engine via AOBMaker — enable it in-game (tick = ON, untick = OFF)."
+                : $"AOBMaker refused '{desc}'.";
+            _log.Info($"Teleport See-through toggle-script -> CE via AOBMaker (ok={ok})");
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Teleport push See-through script failed", ex); }
+    }
+
     // ── Super Jump (force JumpZVelocity, Laufen) ───────────────────────
 
     private void ApplySuperJumpState(int state)
@@ -2392,13 +2556,23 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         if (_hotkeyStore == null || _globalHotkeys == null) return;
         var saved = _hotkeyStore.Load();
         var failed = new List<string>();
-        foreach (var row in HotkeyRows)
+        foreach (var row in AllHotkeyRows)
         {
             if (!saved.TryGetValue(row.ActionId, out var b)) continue;
             // Always show the saved combo so the user knows what was bound, even
             // when registration fails — otherwise a hotkey silently goes dead and
             // the row looks unbound.
             row.Label = b.Label;
+
+            // Experimental-feature hotkeys stay UNregistered until the experimental
+            // gate is enabled (their card is hidden anyway). Retain the binding so
+            // enabling later re-registers it (see RegisterExperimentalHotkeys).
+            if (s_experimentalHotkeyIds.Contains(row.ActionId) && !ExperimentalEnabled)
+            {
+                _bindings[row.ActionId] = b;
+                continue;
+            }
+
             if (RegisterMarkerHotkey(row.ActionId, b))
             {
                 _bindings[row.ActionId] = b;
@@ -2425,10 +2599,73 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
               $"{string.Join(", ", failed)}. Free the combo and reconnect, or re-bind below.";
     }
 
+    /// <summary>Experimental gate flipped (System-tab checkbox). Refresh the gated
+    /// card visibility and (dis)engage the experimental-feature hotkeys. On disable
+    /// we FIRST force the features off (user choice) so a live cursor-lock/flight is
+    /// never stranded with its card + emergency hotkey removed.</summary>
+    private void OnExperimentalGateChanged(object? sender, EventArgs e)
+    {
+        // gate.Changed always fires on the UI thread (System-tab checkbox / tab-open
+        // Lock), so act synchronously — same pattern as MainWindowViewModel.
+        OnPropertyChanged(nameof(ExperimentalEnabled));
+        OnPropertyChanged(nameof(ShowExperimentalHotkeys));
+
+        if (ExperimentalEnabled)
+        {
+            RegisterExperimentalHotkeys();
+        }
+        else
+        {
+            // Clean teardown before hiding: force the experimental features OFF
+            // (best-effort; needs a live connection to reach the DLL) so the game
+            // can't stay cursor-locked / flying with no visible way to undo.
+            if (IsConnected)
+            {
+                _ = ForceForegroundLockOffCommand.ExecuteAsync(null);
+                if (_flyActive) _ = ResetFlyCommand.ExecuteAsync(null);
+                if (_seeThroughActive) _ = ResetSeeThroughCommand.ExecuteAsync(null);
+            }
+            UnregisterExperimentalHotkeys();
+        }
+    }
+
+    /// <summary>Register the saved combos for the experimental-feature hotkeys.
+    /// Called when the gate turns on. No-op for rows without a saved binding.</summary>
+    private void RegisterExperimentalHotkeys()
+    {
+        if (_globalHotkeys == null) return;
+        var failed = new List<string>();
+        foreach (var row in ExperimentalHotkeyRows)
+        {
+            if (_markerHotkeys.ContainsKey(row.ActionId)) continue;      // already live
+            if (!_bindings.TryGetValue(row.ActionId, out var b)) continue; // unbound
+            row.Label = b.Label;
+            if (RegisterMarkerHotkey(row.ActionId, b)) row.Conflicted = false;
+            else { row.Conflicted = true; failed.Add($"{row.DisplayName} ({b.Label})"); }
+        }
+        RecomputeHotkeyWarning();
+    }
+
+    /// <summary>Release the experimental-feature hotkey registrations (gate off).
+    /// Keeps <see cref="_bindings"/> intact so re-enabling restores the combos.</summary>
+    private void UnregisterExperimentalHotkeys()
+    {
+        foreach (var row in ExperimentalHotkeyRows)
+        {
+            if (_markerHotkeys.TryGetValue(row.ActionId, out var reg))
+            {
+                reg.Dispose();
+                _markerHotkeys.Remove(row.ActionId);
+            }
+            row.Conflicted = false;
+        }
+        RecomputeHotkeyWarning();
+    }
+
     /// <summary>Recompute the banner from the current per-row Conflicted flags
     /// (called after a successful re-bind or a clear).</summary>
     private void RecomputeHotkeyWarning()
-        => UpdateHotkeyWarning(HotkeyRows
+        => UpdateHotkeyWarning(AllHotkeyRows
             .Where(r => r.Conflicted && r.HasBinding)
             .Select(r => $"{r.DisplayName} ({r.Label})")
             .ToList());
@@ -2452,7 +2689,11 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
-            var row = HotkeyRows.FirstOrDefault(r => r.ActionId == actionId);
+            // Belt-and-suspenders: an experimental-feature hotkey must never fire
+            // while the gate is off (it's normally unregistered — guard a straggler).
+            if (s_experimentalHotkeyIds.Contains(actionId) && !ExperimentalEnabled) return;
+
+            var row = AllHotkeyRows.FirstOrDefault(r => r.ActionId == actionId);
             string what = row?.DisplayName ?? actionId;
             if (!CanOperate)
             {
@@ -2490,6 +2731,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                     return;
                 case "fly_toggle":
                     _ = (_flyActive ? ResetFlyCommand : ApplyFlyCommand)
+                        .ExecuteAsync(null);
+                    return;
+                case "seethrough_toggle":
+                    _ = (_seeThroughActive ? ResetSeeThroughCommand : ApplySeeThroughCommand)
                         .ExecuteAsync(null);
                     return;
                 case "pov_get":      _ = GetPovCommand.ExecuteAsync(null); return;
@@ -2865,6 +3110,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             _autoTimer.Tick -= AutoTick;
             _autoTimer = null;
         }
+        if (_experimentalGate != null)
+            _experimentalGate.Changed -= OnExperimentalGateChanged;
         _cursorHotkey?.Dispose();
         _cursorHotkey = null;
         foreach (var reg in _markerHotkeys.Values) reg.Dispose();

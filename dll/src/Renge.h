@@ -115,6 +115,13 @@ constexpr const char* CMD_RESET_GRAVITY_DIRECTION  = "reset_gravity_direction";
 constexpr const char* CMD_FLY_SET                  = "fly_set";
 constexpr const char* CMD_FLY_GET_STATE            = "fly_get_state";
 
+// See-through occluders (Schlacht) — hide the nearest non-Pawn actor blocking the
+// camera→pawn line so the view isn't obstructed. seethrough_set applies {enable}
+// and returns the live status; seethrough_get_state polls it. Trace/hide run
+// DLL-side on the worker; the UI only toggles.
+constexpr const char* CMD_SEE_THROUGH_SET          = "seethrough_set";
+constexpr const char* CMD_SEE_THROUGH_GET_STATE    = "seethrough_get_state";
+
 // Standalone CE-Lua trainer bake (no-DLL trainer export). One-shot: returns the
 // decomposed *GWorld->Pawn offset chain + RootComponent/RelativeLocation,
 // CharacterMovement + knob offsets, and the protection bits — everything a

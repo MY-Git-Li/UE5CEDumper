@@ -2791,6 +2791,36 @@ public sealed class DumpService : IDumpService
         State       = res?["state"]?.GetValue<int>() ?? -1,
     };
 
+    // === See-through occluders (Schlacht) ===
+
+    public async Task<SeeThroughStatus> SeeThroughSetAsync(bool? enable, int? count, CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "seethrough_set" };
+        if (enable.HasValue) req["enable"] = enable.Value;
+        if (count.HasValue)  req["count"]  = count.Value;
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return ParseSeeThroughStatus(res);
+    }
+
+    public async Task<SeeThroughStatus> SeeThroughGetStateAsync(CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "seethrough_get_state" };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        return ParseSeeThroughStatus(res);
+    }
+
+    private static SeeThroughStatus ParseSeeThroughStatus(JsonNode? res) => new SeeThroughStatus
+    {
+        Code        = res?["code"]?.GetValue<int>() ?? 0,
+        Active      = res?["active"]?.GetValue<bool>() ?? false,
+        HasTarget   = res?["has_target"]?.GetValue<bool>() ?? false,
+        HiddenCount = res?["hidden_count"]?.GetValue<int>() ?? 0,
+        PierceCount = res?["pierce_count"]?.GetValue<int>() ?? 1,
+        State       = res?["state"]?.GetValue<int>() ?? -1,
+    };
+
     // === Teleport (Wirbel) — docs/teleport-spec.md §7 ===
 
     public async Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default)

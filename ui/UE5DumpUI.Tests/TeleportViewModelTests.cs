@@ -98,6 +98,19 @@ public class TeleportViewModelTests
         public override Task<FlyStatus> FlyGetStateAsync(CancellationToken ct = default)
         { FlyGetStateCalls++; return Task.FromResult(NextFlyStatus); }
 
+        // ── See-through (Schlacht) ──
+        public SeeThroughStatus NextSeeThroughStatus { get; set; } = new() { Active = false };
+        public int SeeThroughSetCalls { get; private set; }
+        public int SeeThroughGetStateCalls { get; private set; }
+        public bool? LastSeeThroughEnable { get; private set; }
+        public int? LastSeeThroughCount { get; private set; }
+
+        public override Task<SeeThroughStatus> SeeThroughSetAsync(bool? enable, int? count, CancellationToken ct = default)
+        { SeeThroughSetCalls++; LastSeeThroughEnable = enable; LastSeeThroughCount = count; return Task.FromResult(NextSeeThroughStatus); }
+
+        public override Task<SeeThroughStatus> SeeThroughGetStateAsync(CancellationToken ct = default)
+        { SeeThroughGetStateCalls++; return Task.FromResult(NextSeeThroughStatus); }
+
         public override Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default)
         { GetPoseCalls++; return Task.FromResult(NextPose); }
 
@@ -202,11 +215,29 @@ public class TeleportViewModelTests
         public IGlobalHotkeyRegistration? RegisterSpecific(uint modifiers, uint vk, string label, Action onPressed) => null;
     }
 
+    /// <summary>Minimal in-test IExperimentalGate — flips <see cref="IsEnabled"/> and
+    /// raises Changed, mirroring the shared opt-in the Teleport cards bind to.</summary>
+    private sealed class FakeExperimentalGate : IExperimentalGate
+    {
+        private bool _enabled;
+        public FakeExperimentalGate(bool enabled = false) => _enabled = enabled;
+        public bool IsEnabled
+        {
+            get => _enabled;
+            set { if (_enabled == value) return; _enabled = value; Changed?.Invoke(this, EventArgs.Empty); }
+        }
+        public int SnapshotQuotaMb { get; set; } = 1024;
+        public bool IsLocked => false;
+        public void Lock() { }
+        public event EventHandler? Changed;
+    }
+
     private static TeleportViewModel CreateVm(FakeDumpService fake, out FakePlatform platform,
-        IGlobalHotkeyService? hotkeys = null)
+        IGlobalHotkeyService? hotkeys = null, IExperimentalGate? experimentalGate = null)
     {
         platform = new FakePlatform();
-        return new TeleportViewModel(fake, new NoopLogger(), platform, aobMaker: null, globalHotkeys: hotkeys);
+        return new TeleportViewModel(fake, new NoopLogger(), platform, aobMaker: null,
+            globalHotkeys: hotkeys, experimentalGate: experimentalGate);
     }
 
     [Fact]
@@ -461,11 +492,10 @@ public class TeleportViewModelTests
     public void Hotkey_rows_cover_all_teleport_actions()
     {
         var vm = CreateVm(new FakeDumpService(), out _, new FakeHotkeyService());
-        // 3 save + 3 recall + recall_last + bugit + bugitgo + debugcam_on/off +
-        // godmode_on/off + superjump_toggle + movespeed_toggle + gravity_toggle +
-        // gravdir_toggle + fly_toggle + pov_get + relative + coords + cursor_on/off +
-        // foreground_on/off.
-        Assert.Equal(25, vm.HotkeyRows.Count);
+        // Main card (22): 3 save + 3 recall + recall_last + bugit + bugitgo +
+        // debugcam_on/off + godmode_on/off + superjump_toggle + movespeed_toggle +
+        // gravity_toggle + gravdir_toggle + pov_get + relative + coords + cursor_on/off.
+        Assert.Equal(22, vm.HotkeyRows.Count);
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "save0" && r.DisplayName == "Save marker 1");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall2" && r.DisplayName == "Recall marker 3");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall_last" && r.DisplayName == "Recall last");
@@ -479,15 +509,20 @@ public class TeleportViewModelTests
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "movespeed_toggle" && r.DisplayName == "Move Speed toggle");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "gravity_toggle" && r.DisplayName == "Gravity toggle");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "gravdir_toggle" && r.DisplayName == "Gravity Dir toggle");
-        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "fly_toggle" && r.DisplayName == "Fly toggle");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "pov_get" && r.DisplayName == "Get POV");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "relative" && r.DisplayName == "TP facing dir");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "coords" && r.DisplayName == "TP to coords");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "cursor_on" && r.DisplayName == "Cursor ON");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "cursor_off" && r.DisplayName == "Cursor OFF");
-        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "foreground_on" && r.DisplayName == "Keep Foreground ON");
-        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "foreground_off" && r.DisplayName == "Keep Foreground OFF");
         Assert.All(vm.HotkeyRows, r => Assert.False(r.HasBinding));
+
+        // Experimental card (4): Fly + Keep Foreground ON/OFF + See-through, split out.
+        Assert.Equal(4, vm.ExperimentalHotkeyRows.Count);
+        Assert.Contains(vm.ExperimentalHotkeyRows, r => r.ActionId == "fly_toggle" && r.DisplayName == "Fly toggle");
+        Assert.Contains(vm.ExperimentalHotkeyRows, r => r.ActionId == "foreground_on" && r.DisplayName == "Keep Foreground ON");
+        Assert.Contains(vm.ExperimentalHotkeyRows, r => r.ActionId == "foreground_off" && r.DisplayName == "Keep Foreground OFF");
+        Assert.Contains(vm.ExperimentalHotkeyRows, r => r.ActionId == "seethrough_toggle" && r.DisplayName == "See-through toggle");
+        Assert.All(vm.ExperimentalHotkeyRows, r => Assert.False(r.HasBinding));
     }
 
     // ── God Mode / Keep Foreground "Add to CE" delivery ────────────────
@@ -1016,6 +1051,182 @@ public class TeleportViewModelTests
         Assert.False(row.Conflicted);
         Assert.False(row.HasBinding);
         Assert.False(vm.HasHotkeyWarning);
+    }
+
+    // ── Experimental gating (Keep Foreground / Fly / Standalone trainer) ──
+
+    [Fact]
+    public void Experimental_feature_hotkeys_live_in_their_own_collection()
+    {
+        var vm = CreateVm(new FakeDumpService(), out _, hotkeys: new FakeHotkeyService());
+
+        // The three trainer-flavoured hotkeys moved out of the main card…
+        foreach (var id in new[] { "foreground_on", "foreground_off", "fly_toggle" })
+        {
+            Assert.Contains(vm.ExperimentalHotkeyRows, r => r.ActionId == id);
+            Assert.DoesNotContain(vm.HotkeyRows, r => r.ActionId == id);
+        }
+        // …while the ordinary ones stay in the main card.
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "save0");
+        Assert.DoesNotContain(vm.ExperimentalHotkeyRows, r => r.ActionId == "save0");
+    }
+
+    [Fact]
+    public void Experimental_disabled_hides_cards_and_hotkey_card()
+    {
+        var vm = CreateVm(new FakeDumpService(), out _, hotkeys: new FakeHotkeyService(),
+            experimentalGate: new FakeExperimentalGate(enabled: false));
+
+        Assert.False(vm.ExperimentalEnabled);       // feature cards hidden
+        Assert.False(vm.ShowExperimentalHotkeys);   // hotkey card hidden
+    }
+
+    [Fact]
+    public void Experimental_enabled_shows_cards_and_hotkey_card_when_hotkeys_available()
+    {
+        var vm = CreateVm(new FakeDumpService(), out _, hotkeys: new FakeHotkeyService(),
+            experimentalGate: new FakeExperimentalGate(enabled: true));
+
+        Assert.True(vm.ExperimentalEnabled);
+        Assert.True(vm.ShowExperimentalHotkeys);
+    }
+
+    [Fact]
+    public void Experimental_hotkey_card_stays_hidden_without_a_hotkey_service()
+    {
+        // Enabled gate but no hotkey service (headless) → cards show, hotkey card doesn't.
+        var vm = CreateVm(new FakeDumpService(), out _, hotkeys: null,
+            experimentalGate: new FakeExperimentalGate(enabled: true));
+
+        Assert.True(vm.ExperimentalEnabled);
+        Assert.False(vm.ShowExperimentalHotkeys);   // needs CanBindCursorHotkey too
+    }
+
+    [Fact]
+    public void Toggling_gate_raises_property_changed_for_visibility()
+    {
+        var gate = new FakeExperimentalGate(enabled: false);
+        var vm = CreateVm(new FakeDumpService(), out _, hotkeys: new FakeHotkeyService(),
+            experimentalGate: gate);
+        var raised = new List<string>();
+        vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName ?? "");
+
+        gate.IsEnabled = true;
+
+        Assert.Contains(nameof(vm.ExperimentalEnabled), raised);
+        Assert.Contains(nameof(vm.ShowExperimentalHotkeys), raised);
+        Assert.True(vm.ShowExperimentalHotkeys);
+    }
+
+    [Fact]
+    public void Experimental_hotkey_not_registered_while_gate_off_but_combo_still_shown()
+    {
+        var platform = new FakePlatform();
+        new TeleportHotkeyStore(platform).Save(new Dictionary<string, TeleportHotkeyBinding>
+        {
+            ["fly_toggle"] = new TeleportHotkeyBinding(HotkeyModifiers.Control, 0x77 /*F8*/),
+        });
+        var hotkeys = new FakeHotkeyService();
+
+        var vm = new TeleportViewModel(new FakeDumpService(), new NoopLogger(), platform,
+            aobMaker: null, globalHotkeys: hotkeys, experimentalGate: new FakeExperimentalGate(enabled: false));
+
+        // Gate off → the combo is NOT grabbed globally…
+        Assert.DoesNotContain(hotkeys.Registered, r => r.Vk == 0x77);
+        // …but the saved combo still shows in the (hidden) row so it isn't lost.
+        var row = vm.ExperimentalHotkeyRows.First(r => r.ActionId == "fly_toggle");
+        Assert.True(row.HasBinding);
+    }
+
+    [Fact]
+    public void Experimental_hotkey_registered_when_gate_on_at_startup()
+    {
+        var platform = new FakePlatform();
+        new TeleportHotkeyStore(platform).Save(new Dictionary<string, TeleportHotkeyBinding>
+        {
+            ["fly_toggle"] = new TeleportHotkeyBinding(HotkeyModifiers.Control, 0x77 /*F8*/),
+        });
+        var hotkeys = new FakeHotkeyService();
+
+        _ = new TeleportViewModel(new FakeDumpService(), new NoopLogger(), platform,
+            aobMaker: null, globalHotkeys: hotkeys, experimentalGate: new FakeExperimentalGate(enabled: true));
+
+        Assert.Contains(hotkeys.Registered, r => r.Vk == 0x77);
+    }
+
+    [Fact]
+    public void Enabling_gate_registers_experimental_hotkey_that_was_gated_off()
+    {
+        var platform = new FakePlatform();
+        new TeleportHotkeyStore(platform).Save(new Dictionary<string, TeleportHotkeyBinding>
+        {
+            ["fly_toggle"] = new TeleportHotkeyBinding(HotkeyModifiers.Control, 0x77 /*F8*/),
+        });
+        var hotkeys = new FakeHotkeyService();
+        var gate = new FakeExperimentalGate(enabled: false);
+        var vm = new TeleportViewModel(new FakeDumpService(), new NoopLogger(), platform,
+            aobMaker: null, globalHotkeys: hotkeys, experimentalGate: gate);
+        Assert.DoesNotContain(hotkeys.Registered, r => r.Vk == 0x77);
+
+        gate.IsEnabled = true;   // user ticks the opt-in
+
+        Assert.Contains(hotkeys.Registered, r => r.Vk == 0x77);
+    }
+
+    // ── See-through occluders (Schlacht) ──
+
+    [Fact]
+    public async Task ApplySeeThrough_enables_and_reflects_active_state()
+    {
+        var fake = new FakeDumpService { NextSeeThroughStatus = new() { Active = true, HasTarget = true, HiddenCount = 2, PierceCount = 3 } };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        vm.SeeThroughPierce = 3;
+
+        await vm.ApplySeeThroughCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.SeeThroughSetCalls);
+        Assert.True(fake.LastSeeThroughEnable);
+        Assert.Equal(3, fake.LastSeeThroughCount);   // pierce depth threaded through
+        Assert.Equal("ON", vm.SeeThroughState);
+    }
+
+    [Fact]
+    public async Task Changing_pierce_depth_while_active_pushes_it_live()
+    {
+        var fake = new FakeDumpService { NextSeeThroughStatus = new() { Active = true, HasTarget = true } };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        await vm.ApplySeeThroughCommand.ExecuteAsync(null);   // now active
+        int callsBefore = fake.SeeThroughSetCalls;
+
+        vm.SeeThroughPierce = 4;                              // live change
+
+        Assert.True(fake.SeeThroughSetCalls > callsBefore);   // pushed
+        Assert.Equal(4, fake.LastSeeThroughCount);
+        Assert.Null(fake.LastSeeThroughEnable);               // config-only (no enable field)
+    }
+
+    [Fact]
+    public async Task ResetSeeThrough_disables_and_reflects_off_state()
+    {
+        var fake = new FakeDumpService { NextSeeThroughStatus = new() { Active = false } };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.ResetSeeThroughCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.SeeThroughSetCalls);
+        Assert.False(fake.LastSeeThroughEnable);
+        Assert.Equal("OFF", vm.SeeThroughState);
+    }
+
+    [Fact]
+    public void SeeThrough_hotkey_is_experimental_and_in_its_own_collection()
+    {
+        var vm = CreateVm(new FakeDumpService(), out _, hotkeys: new FakeHotkeyService());
+        Assert.Contains(vm.ExperimentalHotkeyRows, r => r.ActionId == "seethrough_toggle");
+        Assert.DoesNotContain(vm.HotkeyRows, r => r.ActionId == "seethrough_toggle");
     }
 
     [Fact]
