@@ -867,11 +867,11 @@
     <sys:String x:Key="str.TP.GmOn">Force ON</sys:String>
     <sys:String x:Key="str.TP.GmOff">Force OFF</sys:String>
     <sys:String x:Key="str.TP.GmRefresh">↻</sys:String>
-    <sys:String x:Key="str.TP.GmCopyScript">Copy CE Script</sys:String>
+    <sys:String x:Key="str.TP.GmCopyScript">Add to CE</sys:String>
     <sys:String x:Key="str.Tip.TP.GmOn">Turn God Mode ON (clear bCanBeDamaged). Idempotent; the DLL re-asserts the bit every ~300 ms so it survives respawns.</sys:String>
     <sys:String x:Key="str.Tip.TP.GmOff">Turn God Mode OFF (restore bCanBeDamaged) and stop the re-assert worker.</sys:String>
     <sys:String x:Key="str.Tip.TP.GmRefresh">Re-read the live God Mode state (1=immune / 0=can be damaged / unknown if no pawn).</sys:String>
-    <sys:String x:Key="str.Tip.TP.GmCopyScript">Copy a self-contained Cheat Engine AA script (tick = ON, untick = OFF) that drives God Mode via the DLL mailbox. Paste into a CE memory record.</sys:String>
+    <sys:String x:Key="str.Tip.TP.GmCopyScript">Add a self-contained Cheat Engine AA record (tick = ON, untick = OFF) that drives God Mode via the DLL mailbox. Pushed straight into CE via AOBMaker, or copied as paste-able CE memory-record XML if AOBMaker isn't connected (right-click the address list → Paste). Works offline — no pipe / UI connection needed.</sys:String>
     <sys:String x:Key="str.TP.FgHeader">Keep Foreground</sys:String>
     <sys:String x:Key="str.TP.FgState">State:</sys:String>
     <sys:String x:Key="str.TP.FgHint">Force the game to always behave as the foreground app so it doesn't idle/pause its game thread when unfocused (t.IdleWhenNotForeground). Needed for POV / UFunction invokes on games that halt when backgrounded — e.g. Persona 3 Reload. Off by default.</sys:String>
@@ -881,8 +881,8 @@
     <sys:String x:Key="str.Tip.TP.FgOn">Turn the foreground lock ON — the DLL hooks GetForegroundWindow so the game always thinks it is focused. Keeps the game thread ticking (invokes / POV) while this tool or Cheat Engine holds the foreground.</sys:String>
     <sys:String x:Key="str.Tip.TP.FgOff">Turn the foreground lock OFF — restore normal focus behaviour (the game may idle/pause when unfocused).</sys:String>
     <sys:String x:Key="str.Tip.TP.FgRefresh">Re-read the live foreground-lock state (ON / OFF).</sys:String>
-    <sys:String x:Key="str.TP.FgCopyScript">Copy CE Script</sys:String>
-    <sys:String x:Key="str.Tip.TP.FgCopyScript">Copy a self-contained Cheat Engine AA script (tick = ON, untick = OFF) that drives Keep Foreground via the DLL mailbox. Paste into a CE memory record — no pipe / UI connection needed.</sys:String>
+    <sys:String x:Key="str.TP.FgCopyScript">Add to CE</sys:String>
+    <sys:String x:Key="str.Tip.TP.FgCopyScript">Add a self-contained Cheat Engine AA record (tick = ON, untick = OFF) that drives Keep Foreground via the DLL mailbox. Pushed straight into CE via AOBMaker, or copied as paste-able CE memory-record XML if AOBMaker isn't connected (right-click the address list → Paste). Works offline — no pipe / UI connection needed.</sys:String>
 
     <!-- Standalone trainer export (no-DLL CE Lua .CT via AOBMaker) -->
     <sys:String x:Key="str.TP.TrainerHeader">Standalone Trainer (no DLL)</sys:String>

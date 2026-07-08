@@ -105,6 +105,11 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             Hint = "Force the mouse cursor ON (bShowMouseCursor = true)." });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "cursor_off",   DisplayName = "Cursor OFF",
             Hint = "Force the mouse cursor OFF." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "foreground_on",  DisplayName = "Keep Foreground ON",
+            Hint = "Turn Keep Foreground ON (game never idles/pauses when backgrounded)." });
+        HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "foreground_off", DisplayName = "Keep Foreground OFF",
+            Hint = "Emergency OFF for Keep Foreground — binds a global key so you can release the "
+                 + "cursor lock even when the mouse is trapped in the game window." });
 
         if (_globalHotkeys != null)
         {
@@ -1330,25 +1335,15 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         finally { IsBusy = false; }
     }
 
-    /// <summary>Copy a self-contained CE AA script (tick = ON, untick = OFF) that
-    /// drives God Mode through the DLL mailbox (CMD_PROTECT). Paste into a CE
-    /// memory record. Works offline — it's static text.</summary>
+    /// <summary>Deliver a self-contained CE AA toggle script (tick = ON, untick =
+    /// OFF) that drives God Mode through the DLL mailbox (CMD_PROTECT) — pushed
+    /// straight into CE via AOBMaker when connected, else copied to the clipboard as
+    /// paste-able CE memory-record XML (a bare AA body can't be pasted into a
+    /// record). Same delivery as the Global-Pointer records.</summary>
     [RelayCommand]
-    private async Task CopyGodModeScriptAsync()
-    {
-        try
-        {
-            await _platform.CopyToClipboardAsync(
-                UE5DumpUI.Services.ProtectionScriptGenerator.Generate());
-            StatusText = "Copied GodMode CE script (paste into a CE memory record; " +
-                         "tick = ON, untick = OFF).";
-        }
-        catch (Exception ex)
-        {
-            SetError(ex);
-            _log.Error("Teleport CopyGodModeScript failed", ex);
-        }
-    }
+    private Task CopyGodModeScriptAsync()
+        => PushOrCopyToggleScriptAsync(
+            "God Mode (toggle)", UE5DumpUI.Services.ProtectionScriptGenerator.Generate());
 
     // ── Foreground lock (keep game thread alive when unfocused, Grausam) ──
 
@@ -1417,25 +1412,15 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         finally { IsBusy = false; }
     }
 
-    /// <summary>Copy a self-contained CE AA script (tick = ON, untick = OFF) that
-    /// drives Keep Foreground through the DLL mailbox (CMD_FOREGROUND). Paste into a
-    /// CE memory record. Works offline — it's static text.</summary>
+    /// <summary>Deliver a self-contained CE AA toggle script (tick = ON, untick =
+    /// OFF) that drives Keep Foreground through the DLL mailbox (CMD_FOREGROUND) —
+    /// pushed straight into CE via AOBMaker when connected, else copied to the
+    /// clipboard as paste-able CE memory-record XML. Same delivery as the
+    /// Global-Pointer records.</summary>
     [RelayCommand]
-    private async Task CopyForegroundLockScriptAsync()
-    {
-        try
-        {
-            await _platform.CopyToClipboardAsync(
-                UE5DumpUI.Services.ForegroundScriptGenerator.Generate());
-            StatusText = "Copied Keep Foreground CE script (paste into a CE memory record; " +
-                         "tick = ON, untick = OFF).";
-        }
-        catch (Exception ex)
-        {
-            SetError(ex);
-            _log.Error("Teleport CopyForegroundLockScript failed", ex);
-        }
-    }
+    private Task CopyForegroundLockScriptAsync()
+        => PushOrCopyToggleScriptAsync(
+            "Keep Foreground (toggle)", UE5DumpUI.Services.ForegroundScriptGenerator.Generate());
 
     // ── Global pointers (CE) — DLL-invoke GWorld / GameEngine ──────────
 
@@ -1499,6 +1484,45 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         {
             SetError(ex);
             _log.Error("Teleport query-ptr failed", ex);
+        }
+    }
+
+    /// <summary>Deliver a self-contained STATEFUL CE AA toggle script (God Mode /
+    /// Keep Foreground: [ENABLE] = ON, [DISABLE] = OFF) the same way as the
+    /// Global-Pointer records: push it straight into CE via AOBMaker
+    /// (<c>CreateAAScript</c>) when the plugin is connected so it lands as a real
+    /// memory record; otherwise fall back to the clipboard as paste-able CE
+    /// memory-record XML — a bare AA body can't be pasted into a record, so it's
+    /// wrapped as a <c>&lt;CheatEntry&gt;</c> via
+    /// <see cref="Services.CheatTableBuilder.WrapAaScriptXml"/>.</summary>
+    private async Task PushOrCopyToggleScriptAsync(string desc, string script)
+    {
+        try
+        {
+            ClearError();
+            bool available = _aobMaker != null && await _aobMaker.CheckAvailabilityAsync();
+            if (available && await _aobMaker!.CreateAAScriptAsync(
+                    desc, script, autoActivate: false, group: CeGroupDll))
+            {
+                StatusText = $"Added '{desc}' to Cheat Engine via AOBMaker — enable it in-game " +
+                             "(tick = ON, untick = OFF).";
+                _log.Info($"Teleport toggle-script -> CE via AOBMaker: {desc}");
+                return;
+            }
+
+            // No AOBMaker (or it refused) — fall back to the clipboard as paste-able CE XML.
+            await _platform.CopyToClipboardAsync(
+                UE5DumpUI.Services.CheatTableBuilder.WrapAaScriptXml(desc, script));
+            StatusText = (available
+                ? $"AOBMaker refused '{desc}' — copied it as CE memory-record XML instead. "
+                : $"AOBMaker not connected — copied '{desc}' as CE memory-record XML to the clipboard. ")
+                + "Paste into Cheat Engine's address list (right-click → Paste); tick = ON, untick = OFF.";
+            _log.Info($"Teleport toggle-script -> clipboard XML (AOBMaker {(available ? "refused" : "absent")}): {desc}");
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error($"Teleport push/copy toggle-script '{desc}' failed", ex);
         }
     }
 
@@ -2473,6 +2497,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                 case "coords":       _ = TeleportToCoordsCommand.ExecuteAsync(null); return;
                 case "cursor_on":    _ = ForceCursorOnCommand.ExecuteAsync(null); return;
                 case "cursor_off":   _ = ForceCursorOffCommand.ExecuteAsync(null); return;
+                case "foreground_on":  _ = ForceForegroundLockOnCommand.ExecuteAsync(null); return;
+                case "foreground_off": _ = ForceForegroundLockOffCommand.ExecuteAsync(null); return;
             }
             int slot = actionId[^1] - '0';
             if (actionId.StartsWith("save", StringComparison.Ordinal))

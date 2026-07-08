@@ -131,7 +131,21 @@ public sealed class ProcessPickerWindow : Window
                     Foreground = new SolidColorBrush(Color.Parse("#888888")),
                     FontSize = 10, TextTrimming = TextTrimming.CharacterEllipsis,
                 };
-                return new StackPanel { Margin = new Thickness(2, 3), Children = { title, path } };
+                var panel = new StackPanel { Margin = new Thickness(2, 3), Children = { title, path } };
+                // Amber "already loaded" line: our dumper DLL is active in this
+                // process (proxy / prior inject / CE .CT). Injecting again would
+                // double-load and fight over the pipe, so the VM just connects.
+                if (item.DumperLoaded)
+                {
+                    panel.Children.Add(new TextBlock
+                    {
+                        Text = $"⬤ {item.DumperStatusLine} — already active; Inject will just Connect",
+                        Foreground = new SolidColorBrush(Color.Parse("#D7BA7D")),
+                        FontSize = 10, FontWeight = FontWeight.SemiBold,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                    });
+                }
+                return panel;
             }, supportsRecycling: false),
         };
         _list.DoubleTapped += (_, _) => Accept();

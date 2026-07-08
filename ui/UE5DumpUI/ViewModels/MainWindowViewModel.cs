@@ -1372,7 +1372,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                     if (_aobMaker != null && wasAvailable)
                         sentToCe = await _aobMaker.CreateAAScriptAsync(description, script, autoActivate: false);
                     if (!sentToCe)
-                        await _platform.CopyToClipboardAsync(script);
+                        // Wrap as paste-able CE memory-record XML (a bare AA body can't
+                        // be pasted into a record).
+                        await _platform.CopyToClipboardAsync(
+                            Services.CheatTableBuilder.WrapAaScriptXml(description, script));
                     // Sync VM-level state so InterestingFunctions tab's Notes
                     // column reflects post-send reality.
                     if (_aobMaker != null)
@@ -1380,8 +1383,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                     StatusText = sentToCe
                         ? $"AA Script created in CE: {funcName}"
                         : wasAvailable
-                            ? $"⚠ AOBMaker pipe broke (CE closed?) — script copied to clipboard"
-                            : $"AOBMaker not connected — script copied to clipboard ({funcName})";
+                            ? $"⚠ AOBMaker pipe broke (CE closed?) — script copied as CE XML (paste into CE's address list)"
+                            : $"AOBMaker not connected — script copied as CE XML, paste into CE's address list ({funcName})";
                     _log.Info($"InterestingFunctions baked AA Script (no args) " +
                               $"{(sentToCe ? "sent to CE" : "to clipboard")}: " +
                               $"{className}::{funcName} (wasAvailable={wasAvailable})");
@@ -1588,12 +1591,15 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                     if (_aobMaker != null && wasAvailable)
                         sentToCe = await _aobMaker.CreateAAScriptAsync(description, script, autoActivate: false);
                     if (!sentToCe)
-                        await _platform.CopyToClipboardAsync(script);
+                        // Wrap as paste-able CE memory-record XML (a bare AA body can't
+                        // be pasted into a record).
+                        await _platform.CopyToClipboardAsync(
+                            Services.CheatTableBuilder.WrapAaScriptXml(description, script));
                     StatusText = sentToCe
                         ? $"AA Script created in CE: {funcName}"
                         : wasAvailable
-                            ? $"⚠ AOBMaker pipe broke (CE closed?) — script copied to clipboard"
-                            : $"AOBMaker not connected — script copied to clipboard ({funcName})";
+                            ? $"⚠ AOBMaker pipe broke (CE closed?) — script copied as CE XML (paste into CE's address list)"
+                            : $"AOBMaker not connected — script copied as CE XML, paste into CE's address list ({funcName})";
                     _log.Info($"Console baked AA Script (no args) " +
                               $"{(sentToCe ? "sent to CE" : "to clipboard")}: " +
                               $"{className}::{funcName} (wasAvailable={wasAvailable})");
@@ -1639,13 +1645,16 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 if (_aobMaker != null && wasAvailable)
                     sentToCe = await _aobMaker.CreateAAScriptAsync(description, script, autoActivate: false);
                 if (!sentToCe)
-                    await _platform.CopyToClipboardAsync(script);
+                    // Wrap as paste-able CE memory-record XML (a bare AA body can't be
+                    // pasted into a record). The script is self-contained (talks to the
+                    // mailbox directly) — no ue5_invoke_helper.lua needed.
+                    await _platform.CopyToClipboardAsync(
+                        Services.CheatTableBuilder.WrapAaScriptXml(description, script));
                 StatusText = sentToCe
                     ? "Debug Camera AA Script created in CE (tick = ON, untick = OFF)."
                     : wasAvailable
-                        ? "⚠ AOBMaker pipe broke (CE closed?) — Debug Camera script copied to clipboard."
-                        : "AOBMaker not connected — Debug Camera script copied to clipboard " +
-                          "(embed ue5_invoke_helper.lua in your .CT).";
+                        ? "⚠ AOBMaker pipe broke (CE closed?) — Debug Camera script copied as CE XML (paste into CE's address list)."
+                        : "AOBMaker not connected — Debug Camera script copied as CE XML — paste into CE's address list (tick = ON, untick = OFF).";
                 _log.Info($"Console Debug Camera CE script " +
                           $"{(sentToCe ? "sent to CE" : "to clipboard")} (wasAvailable={wasAvailable})");
             }

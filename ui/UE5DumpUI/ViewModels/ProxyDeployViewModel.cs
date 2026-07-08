@@ -369,6 +369,24 @@ public partial class ProxyDeployViewModel : ViewModelBase
         }
         if (target is null) return;   // cancelled
 
+        // Already loaded (proxy / prior inject / CE .CT): re-injecting would
+        // double-load UE5Dumper.dll and fight over the pipe. Skip straight to
+        // connecting to the DLL that's already running.
+        if (target.DumperLoaded)
+        {
+            _log.Info("ProxyDeploy",
+                $"PID {target.Pid} already has the dumper loaded ({target.DumperLoadMode} "
+                + $"{target.DumperVersion}) — connecting instead of re-injecting");
+            SetOperationResult(
+                $"{target.Name} already has {target.DumperStatusLine} — connecting...", 0);
+            if (RequestConnectAsync is not null)
+            {
+                try { await RequestConnectAsync(); }
+                catch (Exception ex) { _log.Warn("ProxyDeploy", $"Connect to already-loaded PID {target.Pid} failed: {ex.Message}"); }
+            }
+            return;
+        }
+
         StatusText = $"Injecting UE5Dumper.dll into {target.Name} (PID {target.Pid})...";
         InjectResult result;
         try

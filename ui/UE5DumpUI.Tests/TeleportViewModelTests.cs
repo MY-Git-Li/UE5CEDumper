@@ -463,8 +463,9 @@ public class TeleportViewModelTests
         var vm = CreateVm(new FakeDumpService(), out _, new FakeHotkeyService());
         // 3 save + 3 recall + recall_last + bugit + bugitgo + debugcam_on/off +
         // godmode_on/off + superjump_toggle + movespeed_toggle + gravity_toggle +
-        // gravdir_toggle + fly_toggle + pov_get + relative + coords + cursor_on/off.
-        Assert.Equal(23, vm.HotkeyRows.Count);
+        // gravdir_toggle + fly_toggle + pov_get + relative + coords + cursor_on/off +
+        // foreground_on/off.
+        Assert.Equal(25, vm.HotkeyRows.Count);
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "save0" && r.DisplayName == "Save marker 1");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall2" && r.DisplayName == "Recall marker 3");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "recall_last" && r.DisplayName == "Recall last");
@@ -484,7 +485,42 @@ public class TeleportViewModelTests
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "coords" && r.DisplayName == "TP to coords");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "cursor_on" && r.DisplayName == "Cursor ON");
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "cursor_off" && r.DisplayName == "Cursor OFF");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "foreground_on" && r.DisplayName == "Keep Foreground ON");
+        Assert.Contains(vm.HotkeyRows, r => r.ActionId == "foreground_off" && r.DisplayName == "Keep Foreground OFF");
         Assert.All(vm.HotkeyRows, r => Assert.False(r.HasBinding));
+    }
+
+    // ── God Mode / Keep Foreground "Add to CE" delivery ────────────────
+    // Regression: these must NOT copy raw AA to the clipboard (a bare AA body
+    // can't be pasted into a CE record). With no AOBMaker they fall back to
+    // paste-able CE memory-record XML (WrapAaScriptXml).
+
+    [Fact]
+    public async Task CopyGodModeScript_without_aobmaker_copies_pasteable_ce_xml()
+    {
+        var vm = CreateVm(new FakeDumpService(), out var platform);   // aobMaker null → clipboard fallback
+
+        await vm.CopyGodModeScriptCommand.ExecuteAsync(null);
+
+        Assert.NotNull(platform.LastClipboard);
+        Assert.Contains("<CheatTable>", platform.LastClipboard);
+        Assert.Contains("<VariableType>Auto Assembler Script</VariableType>", platform.LastClipboard);
+        Assert.False(platform.LastClipboard!.TrimStart().StartsWith("[ENABLE]", StringComparison.Ordinal),
+            "clipboard must be wrapped CE XML, not a bare AA body");
+    }
+
+    [Fact]
+    public async Task CopyForegroundLockScript_without_aobmaker_copies_pasteable_ce_xml()
+    {
+        var vm = CreateVm(new FakeDumpService(), out var platform);
+
+        await vm.CopyForegroundLockScriptCommand.ExecuteAsync(null);
+
+        Assert.NotNull(platform.LastClipboard);
+        Assert.Contains("<CheatTable>", platform.LastClipboard);
+        Assert.Contains("<VariableType>Auto Assembler Script</VariableType>", platform.LastClipboard);
+        Assert.False(platform.LastClipboard!.TrimStart().StartsWith("[ENABLE]", StringComparison.Ordinal),
+            "clipboard must be wrapped CE XML, not a bare AA body");
     }
 
     // ── Debug Camera force on/off ──────────────────────────────────────

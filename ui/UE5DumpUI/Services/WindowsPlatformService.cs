@@ -360,9 +360,18 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
                 catch { path = null; }   // protected / cross-bitness / exited → skip
                 if (string.IsNullOrEmpty(path))
                     continue;
+
+                bool isUe = UeProcessDetector.IsUeExecutable(path);
+                // Probe loaded modules only for UE games (the inject targets): a
+                // module snapshot per process isn't free, and non-UE rows (only
+                // shown under "Show all") are never expected to host our DLL.
+                (bool Loaded, string? Mode, string? Version) dump = (false, null, null);
+                if (isUe)
+                    dump = DetectDumper(p);
+
                 list.Add(new GameProcessInfo(
-                    p.Id, Path.GetFileName(path), path,
-                    UeProcessDetector.IsUeExecutable(path)));
+                    p.Id, Path.GetFileName(path), path, isUe,
+                    dump.Loaded, dump.Mode, dump.Version));
             }
             catch
             {
@@ -374,6 +383,45 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
             }
         }
         return list;
+    }
+
+    /// <summary>
+    /// Is OUR dumper DLL already loaded in <paramref name="p"/>, and how? Walks the
+    /// target's loaded modules, version-probes only the handful whose file name
+    /// could be ours (the three proxy names + UE5Dumper.dll — reading a version
+    /// resource touches the file, so the hundreds of unrelated DLLs are skipped),
+    /// then delegates the identity/mode decision to the pure
+    /// <see cref="DumperModuleDetector"/>. Returns "unknown" (false/null/null) on
+    /// any failure — an elevated/protected game, a 32-bit target, or a process that
+    /// exited mid-enumeration must never abort the whole process list.
+    /// </summary>
+    private static (bool Loaded, string? Mode, string? Version) DetectDumper(Process p)
+    {
+        try
+        {
+            var mods = new List<DumperModuleDetector.ModuleInfo>();
+            foreach (ProcessModule m in p.Modules)
+            {
+                string name = m.ModuleName ?? "";
+                string lower = name.ToLowerInvariant();
+                if (lower is not ("version.dll" or "dinput8.dll" or "dxgi.dll" or "ue5dumper.dll"))
+                    continue;
+                string? product = null, version = null;
+                try
+                {
+                    var fv = m.FileVersionInfo;
+                    product = fv.ProductName;
+                    version = fv.FileVersion;
+                }
+                catch { /* unreadable version resource → stays null (won't match ours) */ }
+                mods.Add(new DumperModuleDetector.ModuleInfo(name, product, version));
+            }
+            return DumperModuleDetector.Classify(mods);
+        }
+        catch
+        {
+            return (false, null, null);
+        }
     }
 
     public InjectResult InjectDll(int pid, string dllPath)
