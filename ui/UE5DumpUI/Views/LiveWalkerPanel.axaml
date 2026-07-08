@@ -255,6 +255,7 @@
       </DropDownButton>
       <DropDownButton Content="{StaticResource str.LiveWalker.ExportCsx}"
                       IsVisible="{Binding HasData}"
+                      IsEnabled="{Binding !IsExporting}"
                       ToolTip.Tip="{StaticResource str.Tip.LiveWalker.ExportCsx}"
                       Padding="8,4">
         <DropDownButton.Flyout>

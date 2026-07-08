@@ -1,4 +1,5 @@
 using System.Text;
+using System.Threading;
 using UE5DumpUI.Core;
 using UE5DumpUI.Models;
 
@@ -55,7 +56,8 @@ public static class CsxExportService
         IReadOnlyList<LiveFieldValue> fields,
         int arrayLimit = 64,
         int drilldownDepth = 0,
-        CsxFormat format = CsxFormat.PreCe77)
+        CsxFormat format = CsxFormat.PreCe77,
+        CancellationToken ct = default)
     {
         // Unified drilldown resolve (docs/ce-export-drilldown-spec.md Phase B): structs
         // (flatten, depth-free) + pointers + CONTAINER ELEMENT VALUES that are structs
@@ -66,7 +68,7 @@ public static class CsxExportService
         var resolvedStructs = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
         var resolvedInstances = new Dictionary<string, List<LiveFieldValue>>(StringComparer.Ordinal);
         await CeXmlExportService.ResolveDrilldownAsync(
-            dump, fields, resolvedStructs, resolvedInstances, drilldownDepth, arrayLimit);
+            dump, fields, resolvedStructs, resolvedInstances, drilldownDepth, arrayLimit, ct: ct);
 
         // CSX additionally drills OBJECT pointers held in object-arrays / DataTable rows /
         // multicast delegates — container shapes the unified resolver doesn't descend (CE XML
@@ -75,14 +77,14 @@ public static class CsxExportService
         if (drilldownDepth > 0)
         {
             var visited = new HashSet<string>(StringComparer.Ordinal);
-            await ResolvePointerInstancesAsync(dump, fields, resolvedInstances, drilldownDepth, arrayLimit, visited);
+            await ResolvePointerInstancesAsync(dump, fields, resolvedInstances, drilldownDepth, arrayLimit, visited, ct);
             // Also resolve pointer instances within flattened struct fields
             foreach (var innerFields in resolvedStructs.Values)
-                await ResolvePointerInstancesAsync(dump, innerFields, resolvedInstances, drilldownDepth, arrayLimit, visited);
+                await ResolvePointerInstancesAsync(dump, innerFields, resolvedInstances, drilldownDepth, arrayLimit, visited, ct);
             // Resolve pointer targets within container elements (Map/Array/Set/DataTable)
-            await ResolveContainerPointerInstancesAsync(dump, fields, resolvedInstances, drilldownDepth, arrayLimit, visited);
+            await ResolveContainerPointerInstancesAsync(dump, fields, resolvedInstances, drilldownDepth, arrayLimit, visited, ct);
             foreach (var innerFields in resolvedStructs.Values)
-                await ResolveContainerPointerInstancesAsync(dump, innerFields, resolvedInstances, drilldownDepth, arrayLimit, visited);
+                await ResolveContainerPointerInstancesAsync(dump, innerFields, resolvedInstances, drilldownDepth, arrayLimit, visited, ct);
         }
 
         var sb = new StringBuilder();
@@ -447,12 +449,16 @@ public static class CsxExportService
         Dictionary<string, List<LiveFieldValue>> resolved,
         int remainingDepth,
         int arrayLimit,
-        HashSet<string> visited)
+        HashSet<string> visited,
+        CancellationToken ct = default)
     {
         if (remainingDepth <= 0) return;
 
         foreach (var field in fields)
         {
+            // Abort promptly between pipe round-trips when the CSX export is cancelled.
+            ct.ThrowIfCancellationRequested();
+
             if (!IsObjectPropertyType(field.TypeName)) continue;
             if (string.IsNullOrEmpty(field.PtrAddress) || field.PtrAddress == "0x0") continue;
             if (resolved.ContainsKey(field.PtrAddress)) continue;
@@ -460,16 +466,19 @@ public static class CsxExportService
 
             try
             {
-                var result = await dump.WalkInstanceAsync(field.PtrAddress, field.PtrClassAddr, arrayLimit);
+                var result = await dump.WalkInstanceAsync(field.PtrAddress, field.PtrClassAddr, arrayLimit, ct: ct);
                 if (result.Fields.Count > 0)
                 {
                     resolved[field.PtrAddress] = result.Fields;
                     // Recurse deeper for nested pointers
                     await ResolvePointerInstancesAsync(
-                        dump, result.Fields, resolved, remainingDepth - 1, arrayLimit, visited);
+                        dump, result.Fields, resolved, remainingDepth - 1, arrayLimit, visited, ct);
                 }
             }
-            catch
+            // Let a cancel unwind the export; only genuine pipe/target failures leave the
+            // pointer without a child structure. OperationCanceledException covers its
+            // TaskCanceledException subclass too.
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // Skip on pipe error — pointer will have no child structure
             }
@@ -497,18 +506,21 @@ public static class CsxExportService
         Dictionary<string, List<LiveFieldValue>> resolved,
         int remainingDepth,
         int arrayLimit,
-        HashSet<string> visited)
+        HashSet<string> visited,
+        CancellationToken ct = default)
     {
         if (remainingDepth <= 0) return;
 
         foreach (var field in fields)
         {
+            ct.ThrowIfCancellationRequested();
+
             var containerFields = ConvertContainerElementsToFields(field);
             if (containerFields == null || containerFields.Count == 0) continue;
 
             // Container expansion uses one depth level; resolve inner pointers at depth-1
             await ResolvePointerInstancesAsync(
-                dump, containerFields, resolved, remainingDepth - 1, arrayLimit, visited);
+                dump, containerFields, resolved, remainingDepth - 1, arrayLimit, visited, ct);
         }
     }
 
