@@ -1121,7 +1121,7 @@
     <sys:String x:Key="str.Tip.LiveWalker.FieldInst">List live instances of this field's object class in the Instance Finder tab — pre-fills the class name and runs the search.</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.ExportCE">Copy full CE XML pointer chain to clipboard</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.ExportCEField">Copy CE XML for the selected field(s) only (Ctrl/Shift-click to multi-select)</sys:String>
-    <sys:String x:Key="str.Tip.LiveWalker.CancelExport">Abort the in-progress Copy CE XML / Copy CE Field export (stops resolving the object graph — the clipboard is left untouched)</sys:String>
+    <sys:String x:Key="str.Tip.LiveWalker.CancelExport">Abort the in-progress export (Copy CE XML / Copy CE Field / Export CSX) — stops resolving the object graph; the clipboard/file is left untouched</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.AobToggle">Use AOB-scanned GWorld symbol instead of hardcoded address (survives game restarts)</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.ExportOptions">Copy CE XML / Copy CE Field options: memory-record Description format (+Offset / +Type) and the AOB / Collapse chain / Guess? toggles.</sys:String>
     <sys:String x:Key="str.Tip.LiveWalker.DescShowOffset">Append each node's field offset (hex) to its CE Description — e.g. "AbilitySystemComponent (7E0)". Off = name only.</sys:String>

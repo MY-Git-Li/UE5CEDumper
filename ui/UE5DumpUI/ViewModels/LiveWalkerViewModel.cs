@@ -3519,7 +3519,11 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     private async Task ExportCsxCoreAsync(CsxFormat format)
     {
         if (string.IsNullOrEmpty(CurrentAddress) || !HasData) return;
+        if (IsExporting) return;   // an export is already running — its Cancel button is showing
 
+        // The CTS is created only AFTER the save dialog, so cancel covers the abortable
+        // resolve/write work — not the interactive dialog (which has its own cancel).
+        CancellationTokenSource? cts = null;
         try
         {
             ClearStatus();
@@ -3537,14 +3541,19 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             // Show save-file dialog; user picks folder + file name
             var filePath = await _platform.ShowSaveFileDialogAsync(
                 safeFileName, "CE Structure Dissect (*.CSX)", ".CSX");
-            if (string.IsNullOrEmpty(filePath)) return; // user cancelled
+            if (string.IsNullOrEmpty(filePath)) return; // user cancelled the save dialog
 
+            cts = _exportCts = new CancellationTokenSource();
             IsLoading = true;
+            IsExporting = true;
             StatusText = CsxDrilldownDepth > 0 ? "Resolving struct + pointer fields..." : "Resolving struct fields...";
             var csx = await CsxExportService.GenerateCsxAsync(
-                _dump, structName, Fields, arrayLimit: ArrayLimit, drilldownDepth: CsxDrilldownDepth, format: format);
+                _dump, structName, Fields, arrayLimit: ArrayLimit, drilldownDepth: CsxDrilldownDepth,
+                format: format, ct: cts.Token);
 
-            // Write to file (overwrite if exists — user already confirmed via dialog)
+            // Write to file (overwrite if exists — user already confirmed via dialog). No
+            // token here on purpose: cancel aborts the slow resolve above; once we have the
+            // full CSX we let the quick write finish so a completed export is never truncated.
             await File.WriteAllTextAsync(filePath, csx);
 
             // Surface a truncation note so a partial export (a container clipped by
@@ -3554,6 +3563,13 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             var formatLabel = format == CsxFormat.Ce77Plus ? "CE 7.7+ Binary" : "Pre-CE 7.7";
             _log.Info($"CSX ({formatLabel}) exported to {filePath} for {CurrentClassName}"
                 + (limitWarn != null ? $" ({limitWarn})" : ""));
+        }
+        catch (OperationCanceledException) when (cts is { IsCancellationRequested: true })
+        {
+            // User hit Cancel during the resolve — not an error. No file was written (the
+            // OCE unwinds before WriteAllTextAsync), so nothing partial is left behind.
+            StatusText = "Export cancelled.";
+            _log.Info("CSX export cancelled by user");
         }
         catch (UnauthorizedAccessException)
         {
@@ -3570,6 +3586,13 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         finally
         {
             IsLoading = false;
+            // Only touch the export flag/CTS if we actually started one (past the dialog).
+            if (cts != null)
+            {
+                IsExporting = false;
+                if (ReferenceEquals(_exportCts, cts)) _exportCts = null;
+                cts.Dispose();
+            }
         }
     }
 

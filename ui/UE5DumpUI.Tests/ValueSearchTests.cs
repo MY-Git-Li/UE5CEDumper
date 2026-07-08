@@ -2516,6 +2516,17 @@ public class ValueSearchTests
         Assert.Equal(1, fake.Queries[^1].Item2);       // offset = previously-loaded count
     }
 
+    // Poll until a condition holds (or a generous timeout elapses) instead of sleeping a
+    // fixed interval — deterministic under CI load. A fixed Task.Delay past the debounce
+    // flaked when a loaded runner scheduled the debounce continuation late (blocked a merge).
+    // The caller still asserts afterward, so a real failure (condition never true) surfaces
+    // as a normal assertion failure rather than a hang.
+    private static async Task WaitUntilAsync(Func<bool> condition, int timeoutMs = 5000, int pollMs = 10)
+    {
+        for (int waited = 0; waited < timeoutMs && !condition(); waited += pollMs)
+            await Task.Delay(pollMs, TestContext.Current.CancellationToken);
+    }
+
     [Fact]
     public async Task FilterChange_DebouncedServerQuery()
     {
@@ -2528,7 +2539,8 @@ public class ValueSearchTests
         };
 
         vm.FilterText = "hp";
-        await Task.Delay(400, TestContext.Current.CancellationToken);  // past the 250ms debounce
+        // Wait for the debounced (250ms) server query to fire — poll, don't fixed-delay.
+        await WaitUntilAsync(() => fake.Queries.Count > 0);
 
         Assert.NotEmpty(fake.Queries);
         Assert.Equal("hp", fake.Queries[^1].Item4);  // filter

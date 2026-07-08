@@ -157,7 +157,7 @@ public class CsxExportServiceTests
             new() { Name = "Health", TypeName = "IntProperty", Offset = 0x120, Size = 4, HexValue = "64000000" }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, ct: TestContext.Current.CancellationToken);
 
         Assert.Contains("Vartype=\"4 Bytes\"", csx);
         Assert.Contains("Bytesize=\"4\"", csx);
@@ -175,7 +175,7 @@ public class CsxExportServiceTests
             new() { Name = "DisplayName", TypeName = "StrProperty", Offset = 0x10, Size = 16 }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, ct: TestContext.Current.CancellationToken);
 
         // FString (wchar_t*) → Pointer + wide "Unicode String" child element
         Assert.Contains("Vartype=\"Pointer\"", csx);
@@ -190,7 +190,7 @@ public class CsxExportServiceTests
             new() { Name = "Utf8Name", TypeName = "Utf8StrProperty", Offset = 0x10, Size = 16 }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, ct: TestContext.Current.CancellationToken);
 
         // FUtf8String (1-byte) → Pointer + non-wide "String" child (CSX has no CodePage option)
         Assert.Contains("Vartype=\"Pointer\"", csx);
@@ -206,7 +206,7 @@ public class CsxExportServiceTests
             new() { Name = "AnsiName", TypeName = "AnsiStrProperty", Offset = 0x10, Size = 16 }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, ct: TestContext.Current.CancellationToken);
 
         // FAnsiString (1-byte) → Pointer + non-wide "String" child
         Assert.Contains("Vartype=\"Pointer\"", csx);
@@ -222,7 +222,7 @@ public class CsxExportServiceTests
             new() { Name = "Speed", TypeName = "FloatProperty", Offset = 0x50, Size = 4 }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, ct: TestContext.Current.CancellationToken);
 
         Assert.Contains("Vartype=\"Float\"", csx);
         Assert.Contains("Bytesize=\"4\"", csx);
@@ -237,7 +237,7 @@ public class CsxExportServiceTests
                      BoolBitIndex = -1, BoolFieldMask = 0 }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, ct: TestContext.Current.CancellationToken);
 
         Assert.Contains("Vartype=\"Byte\"", csx);
         Assert.Contains("Bytesize=\"1\"", csx);
@@ -257,7 +257,7 @@ public class CsxExportServiceTests
                      BoolBitIndex = 0, BoolFieldMask = 0x01 },
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, ct: TestContext.Current.CancellationToken);
 
         Assert.Contains("Description=\"bIsVisible (bit 5, mask 0x20)\"", csx);
         Assert.Contains("Description=\"bIsLightingScenario (bit 0, mask 0x01)\"", csx);
@@ -278,7 +278,7 @@ public class CsxExportServiceTests
         };
 
         var csx = await CsxExportService.GenerateCsxAsync(
-            _dump, "TestStruct", fields, format: CsxFormat.Ce77Plus);
+            _dump, "TestStruct", fields, format: CsxFormat.Ce77Plus, ct: TestContext.Current.CancellationToken);
 
         // Byte-identical to the CE 7.7+ sample element (attribute order + values)
         Assert.Contains(
@@ -300,7 +300,7 @@ public class CsxExportServiceTests
         };
 
         var csx = await CsxExportService.GenerateCsxAsync(
-            _dump, "TestStruct", fields, format: CsxFormat.Ce77Plus);
+            _dump, "TestStruct", fields, format: CsxFormat.Ce77Plus, ct: TestContext.Current.CancellationToken);
 
         // byteOffset = 0x10 + 3 = 0x13 = 19 for BOTH decimal Offset and hex OffsetHex
         Assert.Contains("Offset=\"19\"", csx);
@@ -331,7 +331,7 @@ public class CsxExportServiceTests
         };
 
         var csx = await CsxExportService.GenerateCsxAsync(
-            _dump, "TestStruct", fields, format: CsxFormat.Ce77Plus);
+            _dump, "TestStruct", fields, format: CsxFormat.Ce77Plus, ct: TestContext.Current.CancellationToken);
 
         // Absolute byte = 0x100 + 0x4 + 3 = 0x107 = 263
         Assert.Contains("Offset=\"263\"", csx);
@@ -352,7 +352,7 @@ public class CsxExportServiceTests
         };
 
         var csx = await CsxExportService.GenerateCsxAsync(
-            _dump, "TestStruct", fields, format: CsxFormat.Ce77Plus);
+            _dump, "TestStruct", fields, format: CsxFormat.Ce77Plus, ct: TestContext.Current.CancellationToken);
 
         Assert.Contains("Vartype=\"Byte\"", csx);
         Assert.DoesNotContain("Vartype=\"Binary\"", csx);
@@ -367,7 +367,7 @@ public class CsxExportServiceTests
                      HexValue = "0000018AF21C3E20" }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, ct: TestContext.Current.CancellationToken);
 
         Assert.Contains("Vartype=\"Pointer\"", csx);
         Assert.Contains("Bytesize=\"8\"", csx);
@@ -386,7 +386,7 @@ public class CsxExportServiceTests
                      PtrAddress = "0x18AAD37FB00" }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, ct: TestContext.Current.CancellationToken);
 
         Assert.Contains("Vartype=\"Pointer\"", csx);
         Assert.Contains("Description=\"Target\"", csx);
@@ -415,7 +415,7 @@ public class CsxExportServiceTests
                      StructTypeName = "FVector", StructDataAddr = "0x1000", StructClassAddr = "0x2000" }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, ct: TestContext.Current.CancellationToken);
 
         // Fields should be flattened with "FVector / X" naming
         Assert.Contains("Description=\"FVector / X\"", csx);
@@ -435,7 +435,7 @@ public class CsxExportServiceTests
             new() { Name = "HP", TypeName = "IntProperty", Offset = 0, Size = 4 }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "PlayerData_123", fields);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "PlayerData_123", fields, ct: TestContext.Current.CancellationToken);
 
         Assert.Contains("Name=\"PlayerData_123\"", csx);
         Assert.Contains("<Structures>", csx);
@@ -452,7 +452,7 @@ public class CsxExportServiceTests
                      MapDataAddr = "0x18A8FD1E170" }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, ct: TestContext.Current.CancellationToken);
 
         Assert.Contains("Vartype=\"Pointer\"", csx);
         Assert.Contains("Description=\"Attributes\"", csx);
@@ -468,7 +468,7 @@ public class CsxExportServiceTests
             new() { Name = "CustomField", TypeName = "SomeUnknownProperty", Offset = 0x40, Size = 16 }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, ct: TestContext.Current.CancellationToken);
 
         Assert.Contains("Vartype=\"Array of byte\"", csx);
         Assert.Contains("Bytesize=\"16\"", csx);
@@ -488,7 +488,7 @@ public class CsxExportServiceTests
                      PtrClassAddr = "0xCLASS_ACTOR" }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 0);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 0, ct: TestContext.Current.CancellationToken);
 
         Assert.DoesNotContain("Description=\"dummy\"", csx);
         Assert.DoesNotContain("Description=\"Health\"", csx);
@@ -518,7 +518,7 @@ public class CsxExportServiceTests
                      PtrClassAddr = "0xCLASS_ACTOR" }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         // Should have real child structure named "Actor"
         Assert.Contains("Name=\"Actor\"", csx);
@@ -540,7 +540,7 @@ public class CsxExportServiceTests
                      PtrAddress = "0x0", PtrClassName = "", PtrClassAddr = "" }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         Assert.DoesNotContain("Description=\"dummy\"", csx);
         Assert.Contains("Description=\"Target\"", csx);
@@ -569,7 +569,7 @@ public class CsxExportServiceTests
                      PtrClassAddr = "0xCLASS_PAWN" }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         // Top-level child should be real (Pawn fields)
         Assert.Contains("Name=\"Pawn\"", csx);
@@ -612,7 +612,7 @@ public class CsxExportServiceTests
                      StructTypeName = "FMyData", StructDataAddr = "0x5000", StructClassAddr = "0x6000" }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         // Struct fields should be flattened inline
         Assert.Contains("Description=\"FMyData / X\"", csx);
@@ -656,7 +656,7 @@ public class CsxExportServiceTests
                      PtrClassAddr = "0xCLASS_ACTOR" }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 2);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 2, ct: TestContext.Current.CancellationToken);
 
         // Depth 1: Actor expanded with real fields
         Assert.Contains("Name=\"Actor\"", csx);
@@ -701,7 +701,7 @@ public class CsxExportServiceTests
         };
 
         // Should complete without stack overflow or infinite loop
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 3);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 3, ct: TestContext.Current.CancellationToken);
 
         // NodeA expanded at depth 1
         Assert.Contains("Name=\"NodeA\"", csx);
@@ -738,7 +738,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "PlayerData", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "PlayerData", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         // Map should have a child structure named "GlobalAttributes"
         Assert.Contains("Name=\"GlobalAttributes\"", csx);
@@ -782,7 +782,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "PlayerData", fields, drilldownDepth: 2);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "PlayerData", fields, drilldownDepth: 2, ct: TestContext.Current.CancellationToken);
 
         // Layer 1: Map elements
         Assert.Contains("Name=\"Attrs\"", csx);
@@ -810,7 +810,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         // Array should have a child structure
         Assert.Contains("Name=\"Actors\"", csx);
@@ -838,7 +838,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 0);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 0, ct: TestContext.Current.CancellationToken);
 
         // Should NOT have child structure
         Assert.DoesNotContain("Name=\"MyMap\"", csx);
@@ -878,7 +878,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         // Child structure should be named after the field
         Assert.Contains("Name=\"MissionSaveState\"", csx);
@@ -917,7 +917,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         // Child structure for the array
         Assert.Contains("Name=\"Weights\"", csx);
@@ -950,7 +950,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         // Child structure
         Assert.Contains("Name=\"Tags\"", csx);
@@ -1004,7 +1004,7 @@ public class CsxExportServiceTests
                      StructTypeName = "FStationCargo", StructDataAddr = "0x8000", StructClassAddr = "0xC000" }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 2);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 2, ct: TestContext.Current.CancellationToken);
 
         // Struct fields flattened inline at layer 0
         Assert.Contains("Description=\"FStationCargo / StationId\"", csx);
@@ -1036,7 +1036,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         // Child structure
         Assert.Contains("Name=\"History\"", csx);
@@ -1087,7 +1087,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 2);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 2, ct: TestContext.Current.CancellationToken);
 
         // Layer 1: Struct array expansion — sub-fields flattened
         Assert.Contains("Name=\"Ships\"", csx);
@@ -1127,7 +1127,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "DataTable_Recipes", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "DataTable_Recipes", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         // Child structure for the RowMap container
         Assert.Contains("Name=\"RowMap\"", csx);
@@ -1170,7 +1170,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "DataTable_Recipes", fields, drilldownDepth: 2);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "DataTable_Recipes", fields, drilldownDepth: 2, ct: TestContext.Current.CancellationToken);
 
         // Resolved child structure for the row pointer target
         Assert.Contains("Name=\"RecipeRow\"", csx);
@@ -1196,7 +1196,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "DataTable_Items", fields, drilldownDepth: 0);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "DataTable_Items", fields, drilldownDepth: 0, ct: TestContext.Current.CancellationToken);
 
         // Should emit as Pointer type
         Assert.Contains("Vartype=\"Pointer\"", csx);
@@ -1225,7 +1225,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         // Child structure for the soft array
         Assert.Contains("Name=\"AssetRefs\"", csx);
@@ -1253,7 +1253,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         Assert.Contains("Name=\"LazyRefs\"", csx);
         // Sequential offsets: index * 0x20 (32)
@@ -1283,7 +1283,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         Assert.Contains("Name=\"Handlers\"", csx);
         // Resolved target names appear in element descriptions (pointer-style)
@@ -1313,7 +1313,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         // Stride 24: [0] at 0, [1] at 24
         Assert.Contains("Offset=\"0\"", csx);
@@ -1339,7 +1339,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         Assert.Contains("Name=\"Events\"", csx);
         // Sequential offsets: index * 16
@@ -1366,7 +1366,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         Assert.Contains("Name=\"DamageHandlers\"", csx);
         // Resolved names appear in element descriptions
@@ -1412,7 +1412,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "SaveData", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "SaveData", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         // Map child structure exists
         Assert.Contains("Name=\"MissionInfoList\"", csx);
@@ -1460,7 +1460,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
 
         Assert.Contains("Name=\"TagSet\"", csx);
         Assert.Contains("Description=\"[0] Alpha / Id\"", csx);
@@ -1496,7 +1496,7 @@ public class CsxExportServiceTests
             }
         };
 
-        var csx = await CsxExportService.GenerateCsxAsync(_dump, "SaveData", fields, drilldownDepth: 0);
+        var csx = await CsxExportService.GenerateCsxAsync(_dump, "SaveData", fields, drilldownDepth: 0, ct: TestContext.Current.CancellationToken);
 
         // No child structure, no flattened value fields — just the pointer leaf.
         Assert.DoesNotContain("Name=\"MissionInfoList\"", csx);
@@ -1548,15 +1548,85 @@ public class CsxExportServiceTests
 
         // D=1: outer value struct flattens (Inner field appears), but the inner map does NOT
         // expand — no "Inner" child structure, no Leaf.
-        var csx1 = await CsxExportService.GenerateCsxAsync(_dump, "Save", fields, drilldownDepth: 1);
+        var csx1 = await CsxExportService.GenerateCsxAsync(_dump, "Save", fields, drilldownDepth: 1, ct: TestContext.Current.CancellationToken);
         Assert.Contains("Name=\"Outer\"", csx1);
         Assert.Contains("Description=\"[0] ok / Inner\"", csx1);  // value struct flattened one level
         Assert.DoesNotContain("Name=\"Inner\"", csx1);            // inner map NOT expanded at D=1
         Assert.DoesNotContain("Leaf", csx1);
 
         // D=2: the inner map expands too — "Inner" child structure with the Leaf field.
-        var csx2 = await CsxExportService.GenerateCsxAsync(_dump, "Save", fields, drilldownDepth: 2);
+        var csx2 = await CsxExportService.GenerateCsxAsync(_dump, "Save", fields, drilldownDepth: 2, ct: TestContext.Current.CancellationToken);
         Assert.Contains("Name=\"Inner\"", csx2);
         Assert.Contains("Leaf", csx2);
+    }
+
+    // ========================================
+    // GenerateCsxAsync cancellation (Export CSX abort)
+    // ========================================
+
+    /// <summary>A StubDumpService whose WalkInstanceAsync always throws — proves the CSX
+    /// resolver propagates a cancellation (abort) but still swallows ordinary pipe/target
+    /// failures (leaf fallback).</summary>
+    private sealed class ThrowingWalkStub : StubDumpService
+    {
+        private readonly Func<Exception> _make;
+        public ThrowingWalkStub(Func<Exception> make) => _make = make;
+        public override Task<InstanceWalkResult> WalkInstanceAsync(string addr, string? classAddr = null,
+            int arrayLimit = 64, int previewLimit = 2, bool fillGaps = false, CancellationToken ct = default)
+            => throw _make();
+    }
+
+    [Fact]
+    public async Task GenerateCsx_CancelledToken_ThrowsOperationCanceled()
+    {
+        // A struct field forces a WalkInstance during ResolveDrilldown; a token cancelled
+        // up front aborts at the resolver's entry guard.
+        _dump.RegisterStruct("0xDATA", new InstanceWalkResult
+        {
+            Fields = new List<LiveFieldValue> { new() { Name = "Leaf", TypeName = "IntProperty", Offset = 0, Size = 4 } }
+        });
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "S", TypeName = "StructProperty", Offset = 0,
+                    StructClassAddr = "0xCLS", StructDataAddr = "0xDATA" },
+        };
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            CsxExportService.GenerateCsxAsync(_dump, "TestStruct", fields, drilldownDepth: 1, ct: cts.Token));
+    }
+
+    [Fact]
+    public async Task GenerateCsx_PointerWalkCancelled_Propagates()
+    {
+        // A cancel surfacing mid-walk (OCE from a pointer WalkInstance) must NOT be eaten
+        // by the CSX ResolvePointerInstancesAsync pipe-error catch — it aborts the export.
+        var dump = new ThrowingWalkStub(() => new OperationCanceledException());
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "Ptr", TypeName = "ObjectProperty", Offset = 0, PtrAddress = "0xAAA" },
+        };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            CsxExportService.GenerateCsxAsync(dump, "TestStruct", fields, drilldownDepth: 1,
+                ct: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task GenerateCsx_OrdinaryWalkError_StillSwallowed()
+    {
+        // Positive control: a normal pipe/target failure (not a cancel) is tolerated — the
+        // pointer just gets no child structure and the export completes without throwing.
+        var dump = new ThrowingWalkStub(() => new InvalidOperationException("pipe boom"));
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "Ptr", TypeName = "ObjectProperty", Offset = 0, PtrAddress = "0xAAA" },
+        };
+
+        var csx = await CsxExportService.GenerateCsxAsync(dump, "TestStruct", fields, drilldownDepth: 1,
+            ct: TestContext.Current.CancellationToken);
+
+        Assert.Contains("<Structures>", csx);   // produced output despite the walk failure
     }
 }
