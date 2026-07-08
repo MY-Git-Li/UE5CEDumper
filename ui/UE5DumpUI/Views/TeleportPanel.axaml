@@ -15,23 +15,6 @@
       <TextBlock Text="{StaticResource str.TP.BestEffort}"
                  Foreground="#888888" FontSize="11" TextWrapping="Wrap"/>
 
-      <!-- ── Standalone trainer export (no-DLL CE Lua .CT via AOBMaker) ── -->
-      <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
-              CornerRadius="4" Padding="10">
-        <StackPanel Spacing="6">
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <TextBlock Text="{StaticResource str.TP.TrainerHeader}"
-                       Foreground="#DDDDDD" FontWeight="SemiBold" VerticalAlignment="Center"/>
-            <Button Content="{StaticResource str.TP.TrainerExport}"
-                    Command="{Binding ExportTrainerCommand}"
-                    ToolTip.Tip="{StaticResource str.Tip.TP.TrainerExport}"
-                    IsEnabled="{Binding CanExportTrainer}" Padding="10,3"/>
-          </StackPanel>
-          <TextBlock Text="{Binding AobMakerNote}"
-                     Foreground="#888888" FontSize="11" TextWrapping="Wrap"/>
-        </StackPanel>
-      </Border>
-
       <!-- ── Current pose ── -->
       <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
               CornerRadius="4" Padding="10">
@@ -931,6 +914,35 @@
         </StackPanel>
       </Border>
 
+      <!-- ── Global pointers (CE) — DLL-invoke GWorld / GameEngine ── -->
+      <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
+              CornerRadius="4" Padding="10">
+        <!-- Near the bottom of the scrollable tab → force tooltips above the
+             buttons to avoid the upward-flip flicker (same fix as CE export). -->
+        <Border.Styles>
+          <Style Selector="Button">
+            <Setter Property="ToolTip.Placement" Value="Top"/>
+            <Setter Property="ToolTip.VerticalOffset" Value="-4"/>
+          </Style>
+        </Border.Styles>
+        <StackPanel Spacing="8">
+          <TextBlock Text="{StaticResource str.TP.PtrHeader}"
+                     Foreground="#DDDDDD" FontWeight="SemiBold"/>
+          <TextBlock Text="{StaticResource str.TP.PtrHint}"
+                     Foreground="#888888" FontSize="11" TextWrapping="Wrap"/>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Content="{StaticResource str.TP.PtrGWorld}"
+                    Command="{Binding GetGWorldAddressCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.PtrGWorld}"
+                    Padding="12,4"/>
+            <Button Content="{StaticResource str.TP.PtrGameEngine}"
+                    Command="{Binding GetGameEngineAddressCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.PtrGameEngine}"
+                    Padding="12,4"/>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
       <!-- ── CE export (records into CE via AOBMaker; .CT is the backup) ── -->
       <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
               CornerRadius="4" Padding="10">
@@ -959,6 +971,32 @@
                     ToolTip.Tip="{StaticResource str.Tip.TP.SaveCt}"
                     Padding="12,4" Margin="0,0,8,4"/>
           </WrapPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- ── Standalone trainer export (no-DLL CE Lua .CT via AOBMaker) ──
+           Moved to the bottom of the tab (was at the top): it's a separate
+           no-DLL export path, so it sits with the other export cards. -->
+      <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
+              CornerRadius="4" Padding="10">
+        <!-- Bottom-most card → force tooltips above the button (flip-flicker fix). -->
+        <Border.Styles>
+          <Style Selector="Button">
+            <Setter Property="ToolTip.Placement" Value="Top"/>
+            <Setter Property="ToolTip.VerticalOffset" Value="-4"/>
+          </Style>
+        </Border.Styles>
+        <StackPanel Spacing="6">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="{StaticResource str.TP.TrainerHeader}"
+                       Foreground="#DDDDDD" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <Button Content="{StaticResource str.TP.TrainerExport}"
+                    Command="{Binding ExportTrainerCommand}"
+                    ToolTip.Tip="{StaticResource str.Tip.TP.TrainerExport}"
+                    IsEnabled="{Binding CanExportTrainer}" Padding="10,3"/>
+          </StackPanel>
+          <TextBlock Text="{Binding AobMakerNote}"
+                     Foreground="#888888" FontSize="11" TextWrapping="Wrap"/>
         </StackPanel>
       </Border>
 

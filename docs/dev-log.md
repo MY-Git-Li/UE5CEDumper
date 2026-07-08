@@ -18,6 +18,45 @@ builds ≤696 in
 
 -----
 
+## 2026-07-08 — Teleport tab: Global Pointers (GWorld / GameEngine) CE Lua + card reorder (build 1978; dev)
+
+**SHIPPED (DLL + UI; live verify pending).** Two new one-click **"DLL-invoke" CE Lua** exports on the Teleport
+tab that ask the injected `UE5Dumper.dll` for a live global-pointer address and show it in a message box:
+**Get GWorld** and **Get GameEngine instance address**.
+
+**DLL** — new mailbox command `CMD_QUERY_PTR=13` (`Mimic.h`/`Mimic.cpp`, `HandleQueryPtr`) with two ops
+(`QueryPtrOp`): `QUERY_OP_GWORLD=0` writes `paramsData[0..7]`=`&GWorld` (the cached `g_cachedGWorld` slot) +
+`[8..15]`=`UWorld*` (slot deref via `Macht::ReadSafe`); `QUERY_OP_GAME_ENGINE=1` calls `Genau::FindGameEngine`
+and writes `[0..7]`=`UEngine*` instance, `[8..15]`=`UClass*`, `[16..143]`=class name. `result`=0 found / −1 not
+resolved. Read-only + thread-agnostic → runs on the mailbox polling thread even when the game thread is idle. No
+new C ABI export / `.def` change — reuses the already-exported `g_invokeMailbox`. **Why the mailbox and not a
+plain `UE5_GetGWorld` export + `executeCodeEx`:** CE Lua's `executeCodeEx` can't reliably read an export's
+return value on protected games (returns nil) — the repo's standing lesson (godmode-spec §10 / lessons-learned).
+
+**UI** — new `PointerQueryScriptGenerator`: a **stateful toggle** record that publishes a resolved global pointer
+as a **registered CE symbol** the user references directly (`[UE_GWorld]+offset` / `[UE_GameEngine]+offset`).
+Both resolve via one mailbox round-trip (address at paramsData[0..7] = mb+0x328), then differ by backing:
+**GWorld** registers the symbol DIRECTLY to the returned **&GWorld slot** — `[UE_GWorld]` derefs the slot to the
+CURRENT UWorld, so it **auto-follows level transitions** (no buffer, disable just unregisters). **GameEngine**
+has no static slot (found by walking GObjects), so the `UEngine*` is copied into an `allocateMemory(8)` buffer,
+the symbol registered to it (SNAPSHOT), and `[DISABLE]` frees the buffer. Hygiene-compliant: errors
+`showMessage`+untick, success is `dbg()`-gated + close-on-clean.
+New Teleport **"Global Pointers → Cheat Engine symbols"** card with **Get GWorld** / **Get GameEngine** buttons
+(`GetGWorldAddressCommand` / `GetGameEngineAddressCommand`). **Delivery: push via AOBMaker (`CreateAAScript`) so
+it lands as a real CE memory record; fallback (AOBMaker not connected / refused) copies the paste-able CE
+memory-record XML** (`CheatTableBuilder.WrapAaScriptXml` → `<CheatTable><CheatEntries><CheatEntry>…
+<VariableType>Auto Assembler Script</VariableType><AssemblerScript>…`) to the clipboard for right-click → Paste.
+(A bare `[ENABLE]`/`[DISABLE]` AA body can't be pasted into a memory record — the v1 raw clipboard copy didn't
+work.) `CeMailboxLayout.CmdQueryPtr=13`.
+
+**Layout** — the **"Standalone Trainer (no DLL)"** card moved from the TOP of the tab to the BOTTOM (grouped
+with the other export cards, below CE Export); the new Global Pointers card sits just above CE Export.
+
+2232 tests green (+11 `PointerQueryScriptGeneratorTests`, incl. symbol register/unregister + the paste-able-XML
+wrapper). Live in-game verify pending.
+
+-----
+
 ## 2026-07-06 — In-UI DLL injection + inject-ue.ps1 CLI (build ~1958-1962; dev)
 
 **SHIPPED (UI + CLI; no DLL change).** A third way to load `UE5Dumper.dll` besides the CE `.CT` LoadLibrary

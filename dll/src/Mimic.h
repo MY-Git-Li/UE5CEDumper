@@ -89,6 +89,24 @@ enum Cmd : int32_t {
                               //   Input:  instanceAddr = op (ForegroundOp below)
                               //           ufuncAddr    = value (1 on / 0 off) for SET
                               //   Output: result = 1 (on) / 0 (off) / <0 error
+    CMD_QUERY_PTR       = 13, // Resolve a global pointer for CE Lua display —
+                              //   GWorld / GameEngine (executeCodeEx can't read
+                              //   export returns, so CE goes through the mailbox).
+                              //   Read-only + thread-agnostic (reads a cached
+                              //   global / iterates GObjects), so it runs on the
+                              //   mailbox polling thread even while the game thread
+                              //   is idle.
+                              //   Input:  instanceAddr = op (QueryPtrOp below)
+                              //   Output: result = 0 (found) / -1 (not resolved),
+                              //           paramsData (op GWORLD):
+                              //             [0..7]  uint64 &GWorld slot (the address
+                              //                     of the global UWorld* pointer)
+                              //             [8..15] uint64 UWorld* (slot deref, 0 if
+                              //                     no world currently loaded)
+                              //           paramsData (op GAME_ENGINE):
+                              //             [0..7]  uint64 UEngine* instance
+                              //             [8..15] uint64 UClass* (its class)
+                              //             [16..143] class name (null-terminated)
 };
 
 // CMD_TELEPORT op codes (written into instanceAddr by CE Lua / pipe bridge)
@@ -146,6 +164,14 @@ enum FlyOp : uint64_t {
 enum ForegroundOp : uint64_t {
     FG_OP_SET = 0, // ufuncAddr = 1 (on) / 0 (off). result = 1/0/negative.
     FG_OP_GET = 1, // no input. result = current state (1/0).
+};
+
+// CMD_QUERY_PTR op codes (written into instanceAddr by CE Lua / pipe bridge).
+enum QueryPtrOp : uint64_t {
+    QUERY_OP_GWORLD      = 0, // Output paramsData: [0..7] &GWorld slot,
+                              //   [8..15] UWorld* (slot deref).
+    QUERY_OP_GAME_ENGINE = 1, // Output paramsData: [0..7] UEngine* instance,
+                              //   [8..15] UClass*, [16..143] class name.
 };
 
 // CMD_PROTECT op codes (written into instanceAddr by CE Lua / pipe bridge).
