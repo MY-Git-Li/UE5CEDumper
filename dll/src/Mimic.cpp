@@ -21,6 +21,8 @@
 #include "Wirbel.h"
 #include "Dunste.h"
 #include "Grausam.h"
+#include "Genau.h"
+#include "Macht.h"
 #include "Grimoire.h"
 
 #include <Windows.h>
@@ -38,6 +40,7 @@ extern "C" int32_t  UE5_CallProcessEventEx(uintptr_t, uintptr_t, uintptr_t, uint
 extern "C" int32_t  UE5_CallProcessEventDirect(uintptr_t, uintptr_t, uintptr_t);
 extern uintptr_t    g_cachedGObjects;
 extern uintptr_t    g_cachedGNames;
+extern uintptr_t    g_cachedGWorld;   // &GWorld (address of the global UWorld* pointer)
 
 // UE FunctionFlags subset we care about for the static-native fast path.
 // Pulled from Engine/Source/Runtime/CoreUObject/Public/UObject/Script.h.
@@ -89,6 +92,7 @@ static void HandleProtect();
 static void HandleMovement();
 static void HandleFly();
 static void HandleForeground();
+static void HandleQueryPtr();
 static void SetError(int32_t code, const char* msg);
 static void SetDone(int32_t resultCode);
 static bool EnsureInitialized();
@@ -191,6 +195,9 @@ static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
                 break;
             case CMD_FOREGROUND:
                 HandleForeground();
+                break;
+            case CMD_QUERY_PTR:
+                HandleQueryPtr();
                 break;
             default:
                 SetError(-1, "Unknown command");
@@ -927,6 +934,62 @@ static void HandleForeground() {
     }
     LOG_INFO("Mailbox: FOREGROUND op=%llu -> rc=%d", (unsigned long long)op, rc);
     SetDone(rc);
+}
+
+// CMD_QUERY_PTR: resolve a global pointer for CE Lua display. instanceAddr = op
+// (QueryPtrOp). Output addresses go in paramsData qwords (result is int32, too
+// narrow for a 64-bit address). Read-only — reads the cached &GWorld global or
+// iterates GObjects for the live UEngine — so it is safe on the polling thread
+// even while the game thread is idle (no ProcessEvent dispatch). This exists
+// because CE Lua's executeCodeEx can't reliably read an export's return value
+// (see docs/godmode-spec.md §10 + docs/lessons-learned.md).
+static void HandleQueryPtr() {
+    const uint64_t op = g_invokeMailbox.instanceAddr;
+    memset(g_invokeMailbox.paramsData, 0, sizeof(g_invokeMailbox.paramsData));
+
+    switch (op) {
+    case QUERY_OP_GWORLD: {
+        // g_cachedGWorld is &GWorld (the address of the global UWorld* pointer);
+        // deref once for the live UWorld*. A recovery slot is a live heap field
+        // that still derefs to the current world (docs: RecoverGWorldViaEngine).
+        uintptr_t slot  = g_cachedGWorld;
+        uintptr_t world = 0;
+        if (slot) Macht::ReadSafe(slot, world);
+        uint64_t out[2] = { static_cast<uint64_t>(slot), static_cast<uint64_t>(world) };
+        memcpy(g_invokeMailbox.paramsData, out, sizeof(out));
+        LOG_INFO("Mailbox: QUERY_PTR GWorld -> &GWorld=0x%llX UWorld*=0x%llX",
+                 (unsigned long long)slot, (unsigned long long)world);
+        if (!slot) {
+            SetError(-1, "GWorld not resolved (no static slot / recovery failed)");
+            return;
+        }
+        SetDone(0);
+        return;
+    }
+    case QUERY_OP_GAME_ENGINE: {
+        Genau::GameEngineInfo info = Genau::FindGameEngine();
+        uint64_t out[2] = { static_cast<uint64_t>(info.engineAddr),
+                            static_cast<uint64_t>(info.classAddr) };
+        memcpy(g_invokeMailbox.paramsData, out, sizeof(out));
+        if (!info.className.empty()) {
+            // paramsData[16..143] — 128-byte class-name field (leave a null).
+            size_t n = (std::min)(info.className.size(), static_cast<size_t>(127));
+            memcpy(g_invokeMailbox.paramsData + 16, info.className.c_str(), n);
+            g_invokeMailbox.paramsData[16 + n] = '\0';
+        }
+        LOG_INFO("Mailbox: QUERY_PTR GameEngine -> 0x%llX class='%s'",
+                 (unsigned long long)info.engineAddr, info.className.c_str());
+        if (!info.engineAddr) {
+            SetError(-1, "GameEngine not found (no live UEngine in GObjects)");
+            return;
+        }
+        SetDone(0);
+        return;
+    }
+    default:
+        SetError(-1, "QueryPtr: unknown op");
+        return;
+    }
 }
 
 // CMD_MOVEMENT (Laufen): set one CharacterMovement float knob to a percent.

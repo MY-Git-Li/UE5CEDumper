@@ -1437,6 +1437,71 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // ── Global pointers (CE) — DLL-invoke GWorld / GameEngine ──────────
+
+    /// <summary>Add a stateful CE record that asks the injected DLL for the live
+    /// GWorld instance (UWorld*) and registers it as the CE symbol <c>UE_GWorld</c>
+    /// (enable = register, disable = unregister + free). Uses the mailbox
+    /// (CMD_QUERY_PTR) because CE Lua's executeCodeEx can't read export returns.</summary>
+    [RelayCommand]
+    private Task GetGWorldAddressAsync()
+        => PushOrCopyQueryScriptAsync(
+            UE5DumpUI.Services.PointerQueryScriptGenerator.Target.GWorld);
+
+    /// <summary>Add a stateful CE record that asks the injected DLL for the live
+    /// GameEngine instance (UEngine*) and registers it as the CE symbol
+    /// <c>UE_GameEngine</c> (enable = register, disable = unregister + free).
+    /// Uses the mailbox (CMD_QUERY_PTR).</summary>
+    [RelayCommand]
+    private Task GetGameEngineAddressAsync()
+        => PushOrCopyQueryScriptAsync(
+            UE5DumpUI.Services.PointerQueryScriptGenerator.Target.GameEngine);
+
+    /// <summary>Deliver a global-pointer symbol record to Cheat Engine. Primary path:
+    /// push it straight into CE via AOBMaker (<c>CreateAAScript</c>) so it lands as a
+    /// real memory record. Fallback (AOBMaker not connected, or the push is refused):
+    /// copy the paste-able CE memory-record XML to the clipboard — a bare AA body
+    /// can't be pasted into a record, so it's wrapped as a <c>&lt;CheatEntry&gt;</c>
+    /// via <see cref="Services.CheatTableBuilder.WrapAaScriptXml"/>. The record is a
+    /// STATEFUL toggle: enabling registers the symbol, disabling frees it.</summary>
+    private async Task PushOrCopyQueryScriptAsync(
+        UE5DumpUI.Services.PointerQueryScriptGenerator.Target target)
+    {
+        try
+        {
+            ClearError();
+            string sym = UE5DumpUI.Services.PointerQueryScriptGenerator.SymbolName(target);
+            string desc = target == UE5DumpUI.Services.PointerQueryScriptGenerator.Target.GWorld
+                ? $"Get GWorld → symbol {sym}"
+                : $"Get GameEngine → symbol {sym}";
+            string script = UE5DumpUI.Services.PointerQueryScriptGenerator.Generate(target);
+
+            bool available = _aobMaker != null && await _aobMaker.CheckAvailabilityAsync();
+            if (available && await _aobMaker!.CreateAAScriptAsync(
+                    desc, script, autoActivate: false, group: CeGroupDll))
+            {
+                StatusText = $"Added '{desc}' to Cheat Engine via AOBMaker — enable it in-game to " +
+                             $"register the '{sym}' symbol, disable to free it.";
+                _log.Info($"Teleport query-ptr -> CE via AOBMaker: {desc}");
+                return;
+            }
+
+            // No AOBMaker (or it refused) — fall back to the clipboard as paste-able CE XML.
+            await _platform.CopyToClipboardAsync(
+                UE5DumpUI.Services.CheatTableBuilder.WrapAaScriptXml(desc, script));
+            StatusText = (available
+                ? $"AOBMaker refused '{desc}' — copied it as CE memory-record XML instead. "
+                : $"AOBMaker not connected — copied '{desc}' as CE memory-record XML to the clipboard. ")
+                + $"Paste into Cheat Engine's address list (right-click → Paste), then enable it to register '{sym}'.";
+            _log.Info($"Teleport query-ptr -> clipboard XML (AOBMaker {(available ? "refused" : "absent")}): {desc}");
+        }
+        catch (Exception ex)
+        {
+            SetError(ex);
+            _log.Error("Teleport query-ptr failed", ex);
+        }
+    }
+
     // ── Move Speed multiplier (force MaxWalkSpeed, Laufen) ─────────────
 
     /// <summary>Tracks whether the move-speed override is held (so the global

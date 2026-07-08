@@ -153,6 +153,33 @@ public static class CheatTableBuilder
         return $"{proc}-batch-{now:yyyyMMdd-HHmmss}.CT";
     }
 
+    /// <summary>Wrap a single Auto Assembler script as a paste-able Cheat Engine
+    /// memory-record XML — the <c>&lt;CheatTable&gt;&lt;CheatEntries&gt;&lt;CheatEntry&gt;…</c>
+    /// clipboard form CE accepts when you right-click the address list → Paste.
+    /// Used as the OFFLINE FALLBACK when AOBMaker isn't connected: a bare
+    /// <c>[ENABLE]</c>/<c>[DISABLE]</c> AA body can't be pasted into a memory
+    /// record on its own — it must be a CheatEntry with
+    /// <c>VariableType = Auto Assembler Script</c>. Same per-entry shape as
+    /// <see cref="EmitRowEntry"/> so the two delivery paths stay identical.</summary>
+    public static string WrapAaScriptXml(string description, string script)
+    {
+        var sb = new StringBuilder((script?.Length ?? 0) + 512);
+        sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+        sb.AppendLine("<CheatTable>");
+        sb.AppendLine("  <CheatEntries>");
+        sb.AppendLine("    <CheatEntry>");
+        sb.AppendLine($"      <ID>{BaseId}</ID>");
+        sb.AppendLine($"      <Description>\"{EscapeXml(description)}\"</Description>");
+        sb.AppendLine("      <VariableType>Auto Assembler Script</VariableType>");
+        sb.Append("      <AssemblerScript>");
+        sb.Append(EscapeXml(script ?? string.Empty));
+        sb.AppendLine("</AssemblerScript>");
+        sb.AppendLine("    </CheatEntry>");
+        sb.AppendLine("  </CheatEntries>");
+        sb.AppendLine("</CheatTable>");
+        return sb.ToString();
+    }
+
     // ------------------------------------------------------------------
     // Internal helpers
     // ------------------------------------------------------------------
