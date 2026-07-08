@@ -949,6 +949,20 @@
     <sys:String x:Key="str.Tip.TP.FlyOff">Turn Fly OFF — restore the pawn's captured MovementMode and stop.</sys:String>
     <sys:String x:Key="str.Tip.TP.FlyRefresh">Re-read the live fly state and MovementMode from the current pawn's CharacterMovement.</sys:String>
 
+    <!-- See-through occluders (Schlacht) -->
+    <sys:String x:Key="str.TP.SeeThroughHeader">See-through (occluders)</sys:String>
+    <sys:String x:Key="str.TP.SeeThroughState">State:</sys:String>
+    <sys:String x:Key="str.TP.SeeThroughHint">Hide the object blocking your view: each tick traces a line from the camera along the view direction and, if the NEAREST thing in the way is world geometry (a wall/pillar), makes it invisible. Enemies, NPCs and your own character are never hidden (only non-Pawn/Character actors). Stage 1 hides one nearest occluder at a time; it is un-hidden as you look around and everything is restored when you turn it off. Needs a live pawn + camera. Single-player only; best-effort. NOTE: works on games where an object's collision and visible mesh are the same actor (most games) — on games that split them into separate collision-proxy actors (e.g. FF7 Rebirth's CollisionAssetActor) the ray hits the invisible collision proxy, so hiding it has no visible effect.</sys:String>
+    <sys:String x:Key="str.TP.SeeThroughOn">See-through ON</sys:String>
+    <sys:String x:Key="str.TP.SeeThroughOff">See-through OFF</sys:String>
+    <sys:String x:Key="str.TP.SeeThroughRefresh">↻</sys:String>
+    <sys:String x:Key="str.TP.SeeThroughAddCe">Add to CE</sys:String>
+    <sys:String x:Key="str.TP.SeeThroughHotkeyHint">Bind a global hotkey to "See-through toggle" in the Experimental Hotkeys section above to toggle it in-game without alt-tabbing.</sys:String>
+    <sys:String x:Key="str.Tip.TP.SeeThroughOn">Turn See-through ON — start the worker that traces the view direction and hides the nearest non-Pawn occluder.</sys:String>
+    <sys:String x:Key="str.Tip.TP.SeeThroughOff">Turn See-through OFF — un-hide any hidden object and stop the worker.</sys:String>
+    <sys:String x:Key="str.Tip.TP.SeeThroughRefresh">Re-read the live see-through state (active / whether it has a target / how many objects are hidden).</sys:String>
+    <sys:String x:Key="str.Tip.TP.SeeThroughAddCe">Push a self-contained CE toggle script (tick = ON / untick = OFF) straight into Cheat Engine via AOBMaker. It drives the DLL's See-through through the mailbox, so no pipe connection is needed once added. Disabled when the AOBMaker CE plugin isn't detected.</sys:String>
+
     <!-- Gravity Direction (Laufen — UE5.4+ UCharacterMovementComponent.GravityDirection) -->
     <sys:String x:Key="str.TP.GdHeader">Gravity Direction (UE5.4+)</sys:String>
     <sys:String x:Key="str.TP.GdState">State:</sys:String>

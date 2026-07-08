@@ -481,6 +481,17 @@ public interface IDumpService
     /// <summary>Poll the live fly state (active / preset / speed / MovementMode).</summary>
     Task<FlyStatus> FlyGetStateAsync(CancellationToken ct = default);
 
+    // === See-through occluders (Schlacht) ===
+
+    /// <summary>Toggle the see-through worker (enable non-null) and return the live
+    /// status. When on, each tick traces camera→pawn and hides the nearest non-Pawn
+    /// occluder (SetActorHiddenInGame); Pawns/Characters (enemies/NPCs/player) are
+    /// never hidden. enable=false un-hides everything and stops the worker.</summary>
+    Task<SeeThroughStatus> SeeThroughSetAsync(bool? enable, CancellationToken ct = default);
+
+    /// <summary>Poll the live see-through status (active / has-target / hidden count).</summary>
+    Task<SeeThroughStatus> SeeThroughGetStateAsync(CancellationToken ct = default);
+
     // === Teleport (Wirbel: marker save/recall + cursor teleport) ===
     // docs/teleport-spec.md §7. Model Code/Codes carry the DLL's Wirbel
     // result code (0 = OK, negatives mapped by TeleportCodes).

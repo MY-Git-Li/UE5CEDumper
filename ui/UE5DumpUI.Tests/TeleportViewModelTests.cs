@@ -98,6 +98,18 @@ public class TeleportViewModelTests
         public override Task<FlyStatus> FlyGetStateAsync(CancellationToken ct = default)
         { FlyGetStateCalls++; return Task.FromResult(NextFlyStatus); }
 
+        // ── See-through (Schlacht) ──
+        public SeeThroughStatus NextSeeThroughStatus { get; set; } = new() { Active = false };
+        public int SeeThroughSetCalls { get; private set; }
+        public int SeeThroughGetStateCalls { get; private set; }
+        public bool? LastSeeThroughEnable { get; private set; }
+
+        public override Task<SeeThroughStatus> SeeThroughSetAsync(bool? enable, CancellationToken ct = default)
+        { SeeThroughSetCalls++; LastSeeThroughEnable = enable; return Task.FromResult(NextSeeThroughStatus); }
+
+        public override Task<SeeThroughStatus> SeeThroughGetStateAsync(CancellationToken ct = default)
+        { SeeThroughGetStateCalls++; return Task.FromResult(NextSeeThroughStatus); }
+
         public override Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default)
         { GetPoseCalls++; return Task.FromResult(NextPose); }
 
@@ -503,11 +515,12 @@ public class TeleportViewModelTests
         Assert.Contains(vm.HotkeyRows, r => r.ActionId == "cursor_off" && r.DisplayName == "Cursor OFF");
         Assert.All(vm.HotkeyRows, r => Assert.False(r.HasBinding));
 
-        // Experimental card (3): Fly + Keep Foreground ON/OFF, split into their own list.
-        Assert.Equal(3, vm.ExperimentalHotkeyRows.Count);
+        // Experimental card (4): Fly + Keep Foreground ON/OFF + See-through, split out.
+        Assert.Equal(4, vm.ExperimentalHotkeyRows.Count);
         Assert.Contains(vm.ExperimentalHotkeyRows, r => r.ActionId == "fly_toggle" && r.DisplayName == "Fly toggle");
         Assert.Contains(vm.ExperimentalHotkeyRows, r => r.ActionId == "foreground_on" && r.DisplayName == "Keep Foreground ON");
         Assert.Contains(vm.ExperimentalHotkeyRows, r => r.ActionId == "foreground_off" && r.DisplayName == "Keep Foreground OFF");
+        Assert.Contains(vm.ExperimentalHotkeyRows, r => r.ActionId == "seethrough_toggle" && r.DisplayName == "See-through toggle");
         Assert.All(vm.ExperimentalHotkeyRows, r => Assert.False(r.HasBinding));
     }
 
@@ -1157,6 +1170,44 @@ public class TeleportViewModelTests
         gate.IsEnabled = true;   // user ticks the opt-in
 
         Assert.Contains(hotkeys.Registered, r => r.Vk == 0x77);
+    }
+
+    // ── See-through occluders (Schlacht) ──
+
+    [Fact]
+    public async Task ApplySeeThrough_enables_and_reflects_active_state()
+    {
+        var fake = new FakeDumpService { NextSeeThroughStatus = new() { Active = true, HasTarget = true, HiddenCount = 1 } };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.ApplySeeThroughCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.SeeThroughSetCalls);
+        Assert.True(fake.LastSeeThroughEnable);
+        Assert.Equal("ON", vm.SeeThroughState);
+    }
+
+    [Fact]
+    public async Task ResetSeeThrough_disables_and_reflects_off_state()
+    {
+        var fake = new FakeDumpService { NextSeeThroughStatus = new() { Active = false } };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+
+        await vm.ResetSeeThroughCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fake.SeeThroughSetCalls);
+        Assert.False(fake.LastSeeThroughEnable);
+        Assert.Equal("OFF", vm.SeeThroughState);
+    }
+
+    [Fact]
+    public void SeeThrough_hotkey_is_experimental_and_in_its_own_collection()
+    {
+        var vm = CreateVm(new FakeDumpService(), out _, hotkeys: new FakeHotkeyService());
+        Assert.Contains(vm.ExperimentalHotkeyRows, r => r.ActionId == "seethrough_toggle");
+        Assert.DoesNotContain(vm.HotkeyRows, r => r.ActionId == "seethrough_toggle");
     }
 
     [Fact]

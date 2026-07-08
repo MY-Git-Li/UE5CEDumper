@@ -243,6 +243,25 @@ public sealed class FlyStatus
     public int State { get; init; } = -1;
 }
 
+/// <summary>Live state of the See-through occluders feature (Schlacht), returned
+/// by <c>seethrough_set</c> / <c>seethrough_get_state</c>. Stage 1 hides the single
+/// nearest non-Pawn occluder on the camera→pawn line.</summary>
+public sealed class SeeThroughStatus
+{
+    /// <summary>Schlacht::SeeThroughResult (0 = OK, negative = not-init / no-pawn /
+    /// reflection / no-camera on the last tick).</summary>
+    public int Code { get; init; }
+    /// <summary>The see-through worker is engaged.</summary>
+    public bool Active { get; init; }
+    /// <summary>Camera + pawn resolved on the last tick (the trace can run).</summary>
+    public bool HasTarget { get; init; }
+    /// <summary>Occluders currently hidden (0 or 1 in Stage 1).</summary>
+    public int HiddenCount { get; init; }
+    /// <summary>Result of the last enable/disable (1 active / 0 off / negative),
+    /// or -1 when the call carried no enable field.</summary>
+    public int State { get; init; } = -1;
+}
+
 /// <summary>Result of a teleport action (recall / cursor).</summary>
 public sealed class TeleportResult
 {

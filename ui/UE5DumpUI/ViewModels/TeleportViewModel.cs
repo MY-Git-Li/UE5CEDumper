@@ -39,7 +39,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     // the experimental gate is enabled. "foreground_off" is the emergency cursor-lock
     // release — user chose to tear the features down on disable rather than strand it.
     private static readonly HashSet<string> s_experimentalHotkeyIds =
-        new(StringComparer.Ordinal) { "foreground_on", "foreground_off", "fly_toggle" };
+        new(StringComparer.Ordinal) { "foreground_on", "foreground_off", "fly_toggle", "seethrough_toggle" };
     private Avalonia.Threading.DispatcherTimer? _autoTimer;
     private int _autoTick;
     // Re-entrancy guard: the 500ms DispatcherTimer keeps firing even while a tick
@@ -109,6 +109,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         // Experimental-gated hotkeys live in their own collection + card (below).
         ExperimentalHotkeyRows.Add(new TeleportHotkeyRow { ActionId = "fly_toggle", DisplayName = "Fly toggle",
             Hint = "Toggle Fly (no-gravity 3D flight) on/off. While flying, use the selected keyboard preset to move." });
+        ExperimentalHotkeyRows.Add(new TeleportHotkeyRow { ActionId = "seethrough_toggle", DisplayName = "See-through toggle",
+            Hint = "Toggle See-through occluders on/off (hide the nearest non-Pawn object blocking the camera→player line)." });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "pov_get",      DisplayName = "Get POV",
             Hint = "Read the current camera POV (location / rotation / FOV)." });
         HotkeyRows.Add(new TeleportHotkeyRow { ActionId = "relative",     DisplayName = "TP facing dir",
@@ -486,6 +488,15 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         "Arrows move  ·  PgUp/PgDn up-down",
     };
 
+    // ── See-through occluders (Schlacht) ───────────────────────────────
+    /// <summary>Tri-state badge: "ON" / "OFF" / "Unavailable".</summary>
+    [ObservableProperty] private string _seeThroughState = "Unknown";
+    [ObservableProperty] private string _seeThroughBadgeColor = "#888888";
+    [ObservableProperty] private string _seeThroughCurrentText = "—";
+
+    /// <summary>Tracks whether see-through is engaged (for the toggle hotkey/button).</summary>
+    private bool _seeThroughActive;
+
     // ── Gravity Direction (Laufen, UE5.4+ GravityDirection vector) ─────
     /// <summary>Tri-state badge: "ON" / "OFF" / "Unavailable" (pre-5.4 / no
     /// reflected GravityDirection).</summary>
@@ -595,6 +606,9 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             ApplyFlyState(-1);           // fly badge back to Unknown
             FlyCurrentText = "—";
             _flyActive = false;
+            ApplySeeThroughState(-1);    // see-through badge back to Unknown
+            SeeThroughCurrentText = "—";
+            _seeThroughActive = false;
             ApplyGravDirState(-1);       // gravity-direction badge back to Unknown
             GravDirCurrentText = "—";
             _gravDirActive = false;
@@ -1979,6 +1993,102 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // ── See-through occluders (Schlacht) ───────────────────────────────
+
+    private void ApplySeeThroughState(int state)
+    {
+        _seeThroughActive = state == 1;
+        (SeeThroughState, SeeThroughBadgeColor) = state switch
+        {
+            1 => ("ON",          "#4EC9B0"),
+            0 => ("OFF",         "#999999"),
+            _ => ("Unavailable", "#C9A04E"),
+        };
+    }
+
+    private void ApplySeeThroughReadout(SeeThroughStatus st)
+    {
+        ApplySeeThroughState(st.Active ? 1 : 0);
+        if (!st.Active)
+        {
+            SeeThroughCurrentText = "—";
+            return;
+        }
+        SeeThroughCurrentText = st.HasTarget
+            ? (st.HiddenCount > 0
+                ? "Active — hiding the occluder in front of your character."
+                : "Active — nothing blocking the view right now.")
+            : "Active — waiting for a pawn/camera (menu / loading?).";
+    }
+
+    [RelayCommand]
+    private async Task ApplySeeThroughAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true; ClearError();
+            var st = await _dump.SeeThroughSetAsync(enable: true);
+            ApplySeeThroughReadout(st);
+            StatusText = "See-through ON — occluders in front of your character are hidden.";
+        }
+        catch (Exception ex) { ApplySeeThroughState(-1); SetError(ex); _log.Error("Teleport ApplySeeThrough failed", ex); }
+        finally { IsBusy = false; }
+    }
+
+    [RelayCommand]
+    private async Task ResetSeeThroughAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true; ClearError();
+            var st = await _dump.SeeThroughSetAsync(enable: false);
+            ApplySeeThroughReadout(st);
+            StatusText = "See-through OFF.";
+        }
+        catch (Exception ex) { ApplySeeThroughState(-1); SetError(ex); _log.Error("Teleport ResetSeeThrough failed", ex); }
+        finally { IsBusy = false; }
+    }
+
+    [RelayCommand]
+    private async Task RefreshSeeThroughAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            IsBusy = true; ClearError();
+            var st = await _dump.SeeThroughGetStateAsync();
+            ApplySeeThroughReadout(st);
+        }
+        catch (Exception ex) { ApplySeeThroughState(-1); SetError(ex); _log.Error("Teleport RefreshSeeThrough failed", ex); }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Push a self-contained CE AA toggle script (tick = ON, untick = OFF)
+    /// that drives See-through through the DLL mailbox (CMD_SEETHROUGH) straight into
+    /// CE via AOBMaker. AOBMaker ONLY — no clipboard fallback (by request); the button
+    /// is disabled (grayed out) when the AOBMaker plugin isn't detected, so this
+    /// command is only reachable when a push can actually happen.</summary>
+    [RelayCommand]
+    private async Task AddSeeThroughToCeAsync()
+    {
+        if (_aobMaker == null || !IsAobMakerAvailable) return;   // defence in depth; button is grayed out
+        try
+        {
+            ClearError();
+            const string desc = "See-through occluders (toggle)";
+            bool ok = await _aobMaker.CreateAAScriptAsync(
+                desc, UE5DumpUI.Services.SeeThroughScriptGenerator.Generate(),
+                autoActivate: false, group: CeGroupDll);
+            StatusText = ok
+                ? $"Added '{desc}' to Cheat Engine via AOBMaker — enable it in-game (tick = ON, untick = OFF)."
+                : $"AOBMaker refused '{desc}'.";
+            _log.Info($"Teleport See-through toggle-script -> CE via AOBMaker (ok={ok})");
+        }
+        catch (Exception ex) { SetError(ex); _log.Error("Teleport push See-through script failed", ex); }
+    }
+
     // ── Super Jump (force JumpZVelocity, Laufen) ───────────────────────
 
     private void ApplySuperJumpState(int state)
@@ -2494,6 +2604,7 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             {
                 _ = ForceForegroundLockOffCommand.ExecuteAsync(null);
                 if (_flyActive) _ = ResetFlyCommand.ExecuteAsync(null);
+                if (_seeThroughActive) _ = ResetSeeThroughCommand.ExecuteAsync(null);
             }
             UnregisterExperimentalHotkeys();
         }
@@ -2601,6 +2712,10 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
                     return;
                 case "fly_toggle":
                     _ = (_flyActive ? ResetFlyCommand : ApplyFlyCommand)
+                        .ExecuteAsync(null);
+                    return;
+                case "seethrough_toggle":
+                    _ = (_seeThroughActive ? ResetSeeThroughCommand : ApplySeeThroughCommand)
                         .ExecuteAsync(null);
                     return;
                 case "pov_get":      _ = GetPovCommand.ExecuteAsync(null); return;

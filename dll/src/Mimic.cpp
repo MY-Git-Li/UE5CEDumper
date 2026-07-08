@@ -21,6 +21,7 @@
 #include "Wirbel.h"
 #include "Dunste.h"
 #include "Grausam.h"
+#include "Schlacht.h"
 #include "Genau.h"
 #include "Macht.h"
 #include "Grimoire.h"
@@ -93,6 +94,7 @@ static void HandleMovement();
 static void HandleFly();
 static void HandleForeground();
 static void HandleQueryPtr();
+static void HandleSeeThrough();
 static void SetError(int32_t code, const char* msg);
 static void SetDone(int32_t resultCode);
 static bool EnsureInitialized();
@@ -198,6 +200,9 @@ static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
                 break;
             case CMD_QUERY_PTR:
                 HandleQueryPtr();
+                break;
+            case CMD_SEETHROUGH:
+                HandleSeeThrough();
                 break;
             default:
                 SetError(-1, "Unknown command");
@@ -933,6 +938,16 @@ static void HandleForeground() {
         return;
     }
     LOG_INFO("Mailbox: FOREGROUND op=%llu -> rc=%d", (unsigned long long)op, rc);
+    SetDone(rc);
+}
+
+// CMD_SEETHROUGH: toggle See-through occluders (Schlacht). ufuncAddr = value
+// (0/1). Schlacht owns its own worker thread that does the game-thread invokes,
+// so this handler just flips the flag on the mailbox polling thread.
+static void HandleSeeThrough() {
+    int32_t rc = Schlacht::SetEnabled(g_invokeMailbox.ufuncAddr != 0);
+    LOG_INFO("Mailbox: SEETHROUGH value=%llu -> rc=%d",
+             (unsigned long long)g_invokeMailbox.ufuncAddr, rc);
     SetDone(rc);
 }
 

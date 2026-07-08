@@ -225,4 +225,10 @@ constexpr double  FLY_SPEED_DEFAULT      = 1200.0;   // uu/s (~2× default walk 
 constexpr double  FLY_TURN_DEG_PER_S     = 120.0;    // yaw rate for the turn keys (deg/s)
 constexpr uint8_t MOVE_FLYING            = 5;        // EMovementMode::MOVE_Flying (UE4/UE5 stable)
 
+// --- See-through occluders (Schlacht) ---
+constexpr int     SCHLACHT_TICK_MS       = 100;      // occluder worker tick (~10 Hz — hiding actors doesn't need 60 Hz)
+constexpr uint8_t SCHLACHT_TRACE_CHANNEL = 0;        // ETraceTypeQuery index (0 = TraceTypeQuery1 == Visibility on stock projects)
+constexpr double  SCHLACHT_TRACE_DIST    = 100000.0; // uu — camera-forward ray length (LineTraceSingle returns the NEAREST hit)
+constexpr int     SCHLACHT_LOG_EVERY     = 10;       // heartbeat: log a full diagnostic every N ticks (~1/sec)
+
 } // namespace Grimoire

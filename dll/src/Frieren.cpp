@@ -21,6 +21,7 @@
 #include "Solitar.h"
 #include "Laufen.h"
 #include "Dunste.h"
+#include "Schlacht.h"
 
 #include <string>
 #include <cstring>
@@ -489,6 +490,7 @@ void UE5_Shutdown() {
     Solitar::StopWorker();   // join the GodMode re-assert worker before unload
     Laufen::StopWorker();    // join the movement-tuning re-assert worker before unload
     Dunste::StopWorker();    // join the fly worker before unload
+    Schlacht::StopWorker();  // join the see-through worker before unload
     // Full teardown: RemoveHook + MH_Uninitialize + drain pending invoke queue.
     // Pipe server is stopped after Shutdown() so any in-flight pipe thread
     // blocked on EnqueueInvoke receives its -7 result and unwinds cleanly.

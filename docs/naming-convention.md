@@ -258,7 +258,7 @@ German spelling.
 |---|---|---|---|---|---|
 | Aura | アウラ | Aura | Scales of Obedience (mind control) | 🟢 ObjectArray | — |
 | Macht | マハト | Macht | Gold transmutation curse | 🟢 Memory | — |
-| Schlacht | シュラハト | Schlacht | "The Omniscient", precognition | ⬜ | Prediction / lookahead / speculative scan |
+| Schlacht | シュラハト | Schlacht | "The Omniscient", precognition | 🟢 SeeThrough | See-through occluders — trace camera→pawn each worker tick and hide the nearest non-Pawn/Character actor blocking the view (SetActorHiddenInGame), restored as the view moves; the Omniscient's sight passes through the world (`Schlacht.cpp/.h`, Stage 1 nearest occluder, build 1987) |
 | Grausam | グラオザーム | Grausam | Master of illusion magic ("cruel") | 🟢 ForegroundLock | Hook user32!GetForegroundWindow so the game always believes it is foreground — casts the *illusion* of focus to defeat `t.IdleWhenNotForeground` idle / focus-loss pause, keeping the game thread alive for invokes/POV while the tool or CE holds the real foreground (`Grausam.cpp/.h`, build ~1950) |
 | Böse | ベーゼ | Bose | Immortal Sage, barrier magic ("evil") | ⬜ | Protection / guard / anti-tamper shield |
 
