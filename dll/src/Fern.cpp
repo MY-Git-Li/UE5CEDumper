@@ -4370,16 +4370,20 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             data["code"]         = st.code;          // 0 ok; negative Schlacht::SeeThroughResult
             data["active"]       = st.active;
             data["has_target"]   = st.hasTarget;     // camera + pawn resolved last tick
-            data["hidden_count"] = st.hiddenCount;   // occluders currently hidden (0/1 in Stage 1)
+            data["hidden_count"] = st.hiddenCount;   // occluders currently hidden
+            data["pierce_count"] = st.pierceCount;   // nearest occluders to hide along the ray
             return data;
         };
         if (cmd == Renge::CMD_SEE_THROUGH_SET) {
+            if (request.contains("count"))
+                Schlacht::SetPierceCount(request.value("count", 1));
             int32_t state = -1;
             const bool haveEnable = request.contains("enable");
             if (haveEnable)
                 state = Schlacht::SetEnabled(request.value("enable", false));
-            Sein::Info("PIPE:cmd", "seethrough_set: enable=%s",
-                       haveEnable ? (request.value("enable", false) ? "1" : "0") : "-");
+            Sein::Info("PIPE:cmd", "seethrough_set: enable=%s count=%s",
+                       haveEnable ? (request.value("enable", false) ? "1" : "0") : "-",
+                       request.contains("count") ? "y" : "-");
             Schlacht::SeeThroughStatus st{};
             Schlacht::GetStatus(st);
             json data = seeThroughStatusJson(st);

@@ -483,11 +483,12 @@ public interface IDumpService
 
     // === See-through occluders (Schlacht) ===
 
-    /// <summary>Toggle the see-through worker (enable non-null) and return the live
-    /// status. When on, each tick traces camera→pawn and hides the nearest non-Pawn
-    /// occluder (SetActorHiddenInGame); Pawns/Characters (enemies/NPCs/player) are
-    /// never hidden. enable=false un-hides everything and stops the worker.</summary>
-    Task<SeeThroughStatus> SeeThroughSetAsync(bool? enable, CancellationToken ct = default);
+    /// <summary>Apply whichever of {enable, count} are non-null and return the live
+    /// status. When on, each tick traces the camera→view ray and hides the nearest
+    /// <paramref name="count"/> non-Pawn occluders (SetActorHiddenInGame);
+    /// Pawns/Characters (enemies/NPCs/player) are never hidden. enable=false un-hides
+    /// everything and stops the worker; count sets the pierce depth (>=1).</summary>
+    Task<SeeThroughStatus> SeeThroughSetAsync(bool? enable, int? count, CancellationToken ct = default);
 
     /// <summary>Poll the live see-through status (active / has-target / hidden count).</summary>
     Task<SeeThroughStatus> SeeThroughGetStateAsync(CancellationToken ct = default);

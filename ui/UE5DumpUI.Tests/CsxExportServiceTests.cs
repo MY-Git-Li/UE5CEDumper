@@ -130,7 +130,7 @@ public class StubDumpService : IDumpService
     public virtual Task<MovementVectorResult> ResetGravityDirectionAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<FlyStatus> FlySetAsync(bool? enable, double? speed, int? preset, bool? noclip, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<FlyStatus> FlyGetStateAsync(CancellationToken ct = default) => throw new NotImplementedException();
-    public virtual Task<SeeThroughStatus> SeeThroughSetAsync(bool? enable, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<SeeThroughStatus> SeeThroughSetAsync(bool? enable, int? count, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<SeeThroughStatus> SeeThroughGetStateAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<DataTableWalkResult> WalkDataTableRowsAsync(string addr, int offset = 0, int limit = 64, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task<TeleportPose> TeleportGetPoseAsync(CancellationToken ct = default) => throw new NotImplementedException();

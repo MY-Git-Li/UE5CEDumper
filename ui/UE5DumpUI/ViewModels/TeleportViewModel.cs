@@ -494,6 +494,11 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _seeThroughBadgeColor = "#888888";
     [ObservableProperty] private string _seeThroughCurrentText = "—";
 
+    /// <summary>Pierce depth: how many nearest occluders to hide along the view ray
+    /// (1 = just the nearest object, e.g. a painting; 2 = it + the wall behind, …).
+    /// Pawns/Characters on the ray are skipped and don't count.</summary>
+    [ObservableProperty] private int _seeThroughPierce = 1;
+
     /// <summary>Tracks whether see-through is engaged (for the toggle hotkey/button).</summary>
     private bool _seeThroughActive;
 
@@ -2028,9 +2033,9 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         try
         {
             IsBusy = true; ClearError();
-            var st = await _dump.SeeThroughSetAsync(enable: true);
+            var st = await _dump.SeeThroughSetAsync(enable: true, count: SeeThroughPierce);
             ApplySeeThroughReadout(st);
-            StatusText = "See-through ON — occluders in front of your character are hidden.";
+            StatusText = $"See-through ON — hiding the nearest {SeeThroughPierce} occluder(s) in the view.";
         }
         catch (Exception ex) { ApplySeeThroughState(-1); SetError(ex); _log.Error("Teleport ApplySeeThrough failed", ex); }
         finally { IsBusy = false; }
@@ -2043,12 +2048,26 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         try
         {
             IsBusy = true; ClearError();
-            var st = await _dump.SeeThroughSetAsync(enable: false);
+            var st = await _dump.SeeThroughSetAsync(enable: false, count: null);
             ApplySeeThroughReadout(st);
             StatusText = "See-through OFF.";
         }
         catch (Exception ex) { ApplySeeThroughState(-1); SetError(ex); _log.Error("Teleport ResetSeeThrough failed", ex); }
         finally { IsBusy = false; }
+    }
+
+    /// <summary>Live pierce-depth change: push to the DLL only while active (else it
+    /// takes effect on the next See-through ON).</summary>
+    partial void OnSeeThroughPierceChanged(int value)
+    {
+        if (_seeThroughActive && IsConnected)
+            _ = PushSeeThroughPierceAsync(value);
+    }
+
+    private async Task PushSeeThroughPierceAsync(int count)
+    {
+        try { var st = await _dump.SeeThroughSetAsync(enable: null, count: count); ApplySeeThroughReadout(st); }
+        catch (Exception ex) { _log.Error("Teleport PushSeeThroughPierce failed", ex); }
     }
 
     [RelayCommand]

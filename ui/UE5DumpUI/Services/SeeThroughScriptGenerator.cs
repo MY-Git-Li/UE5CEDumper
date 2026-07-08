@@ -60,6 +60,18 @@ public static class SeeThroughScriptGenerator
         Line(sb, "end");
         Line(sb);
 
+        // Pierce depth: how many nearest objects to see through. EDIT `pierceCount`
+        // below (1 = just the nearest object; 2 = it + the wall behind; …). Only the
+        // [ENABLE] block sends it; [DISABLE] sends 0 (ignored).
+        if (enable)
+        {
+            Line(sb, "local pierceCount = 1   -- EDIT ME: how many nearest objects to see through (1 = nearest only)");
+            Line(sb, $"writeQword(mb + {CeMailboxLayout.OffInstanceAddr}, pierceCount)    -- pierce depth (>=1)");
+        }
+        else
+        {
+            Line(sb, $"writeQword(mb + {CeMailboxLayout.OffInstanceAddr}, 0)    -- pierce depth ignored on OFF");
+        }
         // Mailbox round-trip: write value, trigger CMD_SEETHROUGH=14, poll status.
         Line(sb, $"writeQword(mb + {CeMailboxLayout.OffUfuncAddr}, {value})    -- value: {value} = {label}");
         Line(sb, $"writeInteger(mb + {CeMailboxLayout.OffStatus}, 0)    -- clear status");

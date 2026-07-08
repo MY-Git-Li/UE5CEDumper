@@ -957,6 +957,8 @@
     <sys:String x:Key="str.TP.SeeThroughOff">See-through OFF</sys:String>
     <sys:String x:Key="str.TP.SeeThroughRefresh">↻</sys:String>
     <sys:String x:Key="str.TP.SeeThroughAddCe">Add to CE</sys:String>
+    <sys:String x:Key="str.TP.SeeThroughPierce">Pierce depth:</sys:String>
+    <sys:String x:Key="str.Tip.TP.SeeThroughPierce">How many nearest objects to make invisible along the view ray. 1 = just the nearest object (e.g. a painting on a wall); 2 = it plus the wall behind it; and so on. Enemies / NPCs / your character on the ray are skipped (kept visible) and do not count. Changing this while See-through is ON applies immediately.</sys:String>
     <sys:String x:Key="str.TP.SeeThroughHotkeyHint">Bind a global hotkey to "See-through toggle" in the Experimental Hotkeys section above to toggle it in-game without alt-tabbing.</sys:String>
     <sys:String x:Key="str.Tip.TP.SeeThroughOn">Turn See-through ON — start the worker that traces the view direction and hides the nearest non-Pawn occluder.</sys:String>
     <sys:String x:Key="str.Tip.TP.SeeThroughOff">Turn See-through OFF — un-hide any hidden object and stop the worker.</sys:String>

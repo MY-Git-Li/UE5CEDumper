@@ -941,12 +941,16 @@ static void HandleForeground() {
     SetDone(rc);
 }
 
-// CMD_SEETHROUGH: toggle See-through occluders (Schlacht). ufuncAddr = value
-// (0/1). Schlacht owns its own worker thread that does the game-thread invokes,
-// so this handler just flips the flag on the mailbox polling thread.
+// CMD_SEETHROUGH: toggle See-through occluders (Schlacht). instanceAddr = pierce
+// count (>=1, how many nearest occluders to hide), ufuncAddr = value (0/1 on/off).
+// Schlacht owns its own worker thread that does the game-thread invokes, so this
+// handler just flips the flag on the mailbox polling thread.
 static void HandleSeeThrough() {
+    if (g_invokeMailbox.instanceAddr >= 1)
+        Schlacht::SetPierceCount(static_cast<int32_t>(g_invokeMailbox.instanceAddr));
     int32_t rc = Schlacht::SetEnabled(g_invokeMailbox.ufuncAddr != 0);
-    LOG_INFO("Mailbox: SEETHROUGH value=%llu -> rc=%d",
+    LOG_INFO("Mailbox: SEETHROUGH count=%llu value=%llu -> rc=%d",
+             (unsigned long long)g_invokeMailbox.instanceAddr,
              (unsigned long long)g_invokeMailbox.ufuncAddr, rc);
     SetDone(rc);
 }

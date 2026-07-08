@@ -255,8 +255,10 @@ public sealed class SeeThroughStatus
     public bool Active { get; init; }
     /// <summary>Camera + pawn resolved on the last tick (the trace can run).</summary>
     public bool HasTarget { get; init; }
-    /// <summary>Occluders currently hidden (0 or 1 in Stage 1).</summary>
+    /// <summary>Occluders currently hidden.</summary>
     public int HiddenCount { get; init; }
+    /// <summary>How many nearest occluders are hidden along the ray (pierce depth).</summary>
+    public int PierceCount { get; init; } = 1;
     /// <summary>Result of the last enable/disable (1 active / 0 off / negative),
     /// or -1 when the call carried no enable field.</summary>
     public int State { get; init; } = -1;

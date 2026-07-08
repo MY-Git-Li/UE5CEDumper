@@ -245,6 +245,20 @@ uintptr_t ExtractHitActor(const std::vector<uint8_t>& buf, const FunctionParam& 
     return 0;
 }
 
+// Pull the impact POINT out of a returned FHitResult (ImpactPoint, else Location)
+// so the pierce loop can advance the ray start just past this hit.
+bool ExtractHitImpactPoint(const std::vector<uint8_t>& buf, const FunctionParam& outHit, double out[3]) {
+    const FunctionParam::StructSubField* best = nullptr;
+    for (const auto& sf : outHit.structFields) if (IEq(sf.name, "ImpactPoint")) { best = &sf; break; }
+    if (!best) for (const auto& sf : outHit.structFields) if (IEq(sf.name, "Location")) { best = &sf; break; }
+    if (!best || best->offset < 0 || outHit.offset < 0) return false;
+    int32_t need = (best->size >= 24) ? 24 : 12;
+    int32_t at = outHit.offset + best->offset;
+    if (at + need > static_cast<int32_t>(buf.size())) return false;
+    ReadVec3Buf(buf.data() + at, best->size, out);
+    return true;
+}
+
 // Invoke AActor::SetActorHiddenInGame(hidden) on the game thread. Returns false
 // when the setter is cooked out or the actor no longer looks like a live Actor.
 bool InvokeSetHidden(uintptr_t actor, bool hidden) {
@@ -263,62 +277,75 @@ bool InvokeSetHidden(uintptr_t actor, bool hidden) {
     return true;
 }
 
-// Trace along the view direction (start → end); return the NEAREST blocking actor
-// that should be hidden (0 = none / clear / the hit is the pawn itself / a
-// Pawn/Character we keep). `logThis` gates verbose per-tick diagnostics.
-uintptr_t TraceNearestOccluder(uintptr_t pawn, const double start[3], const double end[3], bool logThis) {
+// Trace along the view direction and collect the first `pierceN` NON-Pawn
+// occluders. Reuses LineTraceSingle iteratively: after each hit we advance the ray
+// start just past the impact point (fwd·STEP) and trace again, so we pierce through
+// one surface at a time — no LineTraceMulti / TArray<FHitResult> (which would leak
+// the engine-allocated OutHits every tick). Pawns/Characters (and the pawn itself)
+// are skipped: kept visible, passed through, and do NOT consume the pierce depth.
+void CollectOccluders(uintptr_t pawn, const double start0[3], const double fwd[3],
+                      const double end[3], int32_t pierceN, bool logThis,
+                      std::unordered_set<uintptr_t>& out) {
+    out.clear();
     uintptr_t ksl = UE5_FindInstanceOfClass("KismetSystemLibrary");
-    if (!ksl) { if (logThis) LOG_WARN("SeeThrough: KismetSystemLibrary instance/CDO not found"); return 0; }
+    if (!ksl) { if (logThis) LOG_WARN("SeeThrough: KismetSystemLibrary instance/CDO not found"); return; }
     FunctionInfo lt;
     if (!FindFuncByName(Ubel::GetClass(ksl), "LineTraceSingle", lt) || lt.parmsSize <= 0) {
         if (logThis) LOG_WARN("SeeThrough: LineTraceSingle not found (cooked out?) — no occluder detection");
-        return 0;
+        return;
     }
-    std::vector<uint8_t> buf(lt.parmsSize, 0);
-    WritePtrParam(buf, lt, "WorldContextObject", pawn);
-    WriteVecParam(buf, lt, "Start", start);
-    WriteVecParam(buf, lt, "End",   end);
-    WriteByteParam(buf, lt, "TraceChannel", static_cast<uint8_t>(Grimoire::SCHLACHT_TRACE_CHANNEL));
-    WriteBoolParam(buf, lt, "bTraceComplex", false);
-    WriteBoolParam(buf, lt, "bIgnoreSelf",   true);
-    // ActorsToIgnore (TArray), DrawDebugType, colours, DrawTime stay zeroed.
     const FunctionParam* hr = FindParam(lt, "OutHit");
-    if (!hr) { if (logThis) LOG_WARN("SeeThrough: LineTraceSingle has no OutHit param (layout?)"); return 0; }
+    if (!hr) { if (logThis) LOG_WARN("SeeThrough: LineTraceSingle has no OutHit param (layout?)"); return; }
     const FunctionParam* rv = FindReturnParam(lt);
-    int32_t r = Invoke(ksl, lt, buf);
-    bool hit = (r == 0) &&
-               (!rv || rv->offset < 0 || rv->offset >= static_cast<int32_t>(buf.size()) || buf[rv->offset] != 0);
-    if (!hit) { if (logThis) LOG_INFO("SeeThrough: trace ran (r=%d) — no blocking hit on channel %d",
-                                      r, (int)Grimoire::SCHLACHT_TRACE_CHANNEL); return 0; }
-    uintptr_t actor = ExtractHitActor(buf, *hr);
-    if (!actor) {
-        // Couldn't resolve the hit actor — dump the FHitResult sub-field layout so we
-        // can fix ExtractHitActor for this engine (UE5 HitObjectHandle etc.).
-        if (logThis) {
-            LOG_WARN("SeeThrough: HIT but couldn't extract actor from FHitResult — sub-fields:");
-            for (const auto& sf : hr->structFields)
-                LOG_INFO("  FHitResult.%s : %s  @+%d sz=%d", sf.name.c_str(), sf.typeName.c_str(), sf.offset, sf.size);
+
+    double curStart[3] = { start0[0], start0[1], start0[2] };
+    const int32_t maxIters = pierceN + Grimoire::SCHLACHT_MAX_EXTRA_ITERS;
+    for (int32_t iter = 0; iter < maxIters && static_cast<int32_t>(out.size()) < pierceN; ++iter) {
+        std::vector<uint8_t> buf(lt.parmsSize, 0);
+        WritePtrParam(buf, lt, "WorldContextObject", pawn);
+        WriteVecParam(buf, lt, "Start", curStart);
+        WriteVecParam(buf, lt, "End",   end);
+        WriteByteParam(buf, lt, "TraceChannel", static_cast<uint8_t>(Grimoire::SCHLACHT_TRACE_CHANNEL));
+        WriteBoolParam(buf, lt, "bTraceComplex", false);
+        WriteBoolParam(buf, lt, "bIgnoreSelf",   true);
+        int32_t r = Invoke(ksl, lt, buf);
+        bool hit = (r == 0) &&
+                   (!rv || rv->offset < 0 || rv->offset >= static_cast<int32_t>(buf.size()) || buf[rv->offset] != 0);
+        if (!hit) { if (logThis && iter == 0) LOG_INFO("SeeThrough: trace ran (r=%d) — no blocking hit on channel %d",
+                                                       r, (int)Grimoire::SCHLACHT_TRACE_CHANNEL); break; }
+
+        uintptr_t actor = ExtractHitActor(buf, *hr);
+        double impact[3] = {};
+        bool haveImpact = ExtractHitImpactPoint(buf, *hr, impact);
+        if (!actor) {
+            // Couldn't resolve the hit actor — dump the FHitResult layout (once) so we
+            // can fix ExtractHitActor for this engine (UE5 HitObjectHandle etc.).
+            if (logThis && iter == 0) {
+                LOG_WARN("SeeThrough: HIT but couldn't extract actor from FHitResult — sub-fields:");
+                for (const auto& sf : hr->structFields)
+                    LOG_INFO("  FHitResult.%s : %s  @+%d sz=%d", sf.name.c_str(), sf.typeName.c_str(), sf.offset, sf.size);
+            }
+        } else {
+            bool isPawn = Aura::ClassDerivesFromAny(Ubel::GetClass(actor), {"Pawn", "Character"});
+            if (logThis) LOG_INFO("SeeThrough: [%d] hit 0x%llX '%s' class=%s pawnOrChar=%d",
+                                  iter, (unsigned long long)actor, Ubel::GetName(actor).c_str(),
+                                  Ubel::GetName(Ubel::GetClass(actor)).c_str(), isPawn ? 1 : 0);
+            if (actor != pawn && !isPawn) out.insert(actor);   // occluder → hide; Pawns/self skipped + pierced
         }
-        return 0;
+        if (!haveImpact) break;   // can't advance the ray → stop here
+        for (int i = 0; i < 3; ++i) curStart[i] = impact[i] + fwd[i] * Grimoire::SCHLACHT_TRACE_STEP;
     }
-    std::string nm = Ubel::GetName(actor);
-    std::string cl = Ubel::GetName(Ubel::GetClass(actor));
-    bool isPawn = Aura::ClassDerivesFromAny(Ubel::GetClass(actor), {"Pawn", "Character"});
-    if (logThis) LOG_INFO("SeeThrough: hit actor=0x%llX '%s' class=%s pawnOrChar=%d self=%d",
-                          (unsigned long long)actor, nm.c_str(), cl.c_str(), isPawn ? 1 : 0, actor == pawn ? 1 : 0);
-    if (actor == pawn) return 0;
-    if (isPawn) return 0;   // keep Pawns / Characters (enemies / NPCs / the player) visible
-    return actor;
 }
 
 // ---- state + worker ----
 
 struct State {
     bool      active      = false;
-    uintptr_t hiddenActor = 0;   // the single occluder currently hidden (0 = none)
+    std::unordered_set<uintptr_t> hiddenActors;   // occluders currently hidden
     int32_t   code        = 0;
     bool      hasTarget   = false;
     int32_t   hiddenCount = 0;
+    int32_t   pierceCount = Grimoire::SCHLACHT_PIERCE_DEFAULT;  // nearest occluders to hide
     int32_t   state       = -1;  // last enable/disable result (1/0/neg); -1 = poll-only
     uint64_t  tick        = 0;
 };
@@ -333,7 +360,8 @@ void SetCode(int32_t code, bool hasTarget) {
     std::lock_guard<std::mutex> lk(s_mutex);
     s_state.code = code;
     s_state.hasTarget = hasTarget;
-    if (!hasTarget) s_state.hiddenCount = (s_state.hiddenActor != 0) ? 1 : 0;
+    // Transient resolution failures leave the currently-hidden set as-is.
+    s_state.hiddenCount = static_cast<int32_t>(s_state.hiddenActors.size());
 }
 
 // One resolution+trace+apply cycle. All game-thread invokes run here (the worker
@@ -359,21 +387,26 @@ void Tick() {
     if (logThis) LOG_INFO("SeeThrough: pawn=0x%llX cam=(%.0f,%.0f,%.0f) fwd=(%.2f,%.2f,%.2f)",
                           (unsigned long long)pawn, camLoc[0], camLoc[1], camLoc[2], fwd[0], fwd[1], fwd[2]);
 
-    uintptr_t occ = TraceNearestOccluder(pawn, camLoc, end, logThis);
+    int32_t pierceN;
+    { std::lock_guard<std::mutex> lk(s_mutex); pierceN = s_state.pierceCount; }
 
-    uintptr_t old = 0;
-    { std::lock_guard<std::mutex> lk(s_mutex); old = s_state.hiddenActor; }
-    if (occ != old) {
-        LOG_INFO("SeeThrough: occluder change old=0x%llX -> new=0x%llX", (unsigned long long)old, (unsigned long long)occ);
-        if (old) { bool ok = InvokeSetHidden(old, false); LOG_INFO("SeeThrough: unhide 0x%llX ok=%d", (unsigned long long)old, ok ? 1 : 0); }
-        if (occ) { bool ok = InvokeSetHidden(occ, true);  LOG_INFO("SeeThrough: HIDE   0x%llX ok=%d", (unsigned long long)occ, ok ? 1 : 0); }
-        std::lock_guard<std::mutex> lk(s_mutex);
-        s_state.hiddenActor = occ;
-    }
+    std::unordered_set<uintptr_t> desired;
+    CollectOccluders(pawn, camLoc, fwd, end, pierceN, logThis, desired);
+
+    // Diff against the currently-hidden set: un-hide those no longer occluding,
+    // hide the newly-occluding ones. (No churn/log when the set is unchanged.)
+    std::unordered_set<uintptr_t> old;
+    { std::lock_guard<std::mutex> lk(s_mutex); old = s_state.hiddenActors; }
+    for (uintptr_t a : old)
+        if (!desired.count(a)) { bool ok = InvokeSetHidden(a, false); LOG_INFO("SeeThrough: unhide 0x%llX ok=%d", (unsigned long long)a, ok ? 1 : 0); }
+    for (uintptr_t a : desired)
+        if (!old.count(a))     { bool ok = InvokeSetHidden(a, true);  LOG_INFO("SeeThrough: HIDE   0x%llX ok=%d", (unsigned long long)a, ok ? 1 : 0); }
+
     std::lock_guard<std::mutex> lk(s_mutex);
+    s_state.hiddenActors = std::move(desired);
     s_state.code = STR_OK;
     s_state.hasTarget = true;
-    s_state.hiddenCount = occ ? 1 : 0;
+    s_state.hiddenCount = static_cast<int32_t>(s_state.hiddenActors.size());
 }
 
 void WorkerLoop() {
@@ -408,35 +441,44 @@ int32_t SetEnabled(bool enable) {
     // lock order: s_workerMutex (outer) → s_mutex (inner).
     std::lock_guard<std::mutex> wlk(s_workerMutex);
     if (enable) {
+        int32_t n;
         {
             std::lock_guard<std::mutex> lk(s_mutex);
+            n = s_state.pierceCount;
             if (s_state.active) return 1;   // already on
             s_state.active = true;
-            s_state.hiddenActor = 0;
+            s_state.hiddenActors.clear();
             s_state.hiddenCount = 0;
             s_state.code = STR_OK;
             s_state.state = 1;
         }
         StartWorkerLocked();   // s_workerMutex held, s_mutex released
-        LOG_INFO("SeeThrough: enabled");
+        LOG_INFO("SeeThrough: enabled (pierce=%d)", n);
         return 1;
     }
-    // Disable: un-hide whatever we hid (game thread, off-lock), then stop.
-    uintptr_t restore = 0;
+    // Disable: un-hide everything we hid (game thread, off-lock), then stop.
+    std::unordered_set<uintptr_t> restore;
     {
         std::lock_guard<std::mutex> lk(s_mutex);
-        restore = s_state.hiddenActor;
+        restore = std::move(s_state.hiddenActors);
+        s_state.hiddenActors.clear();
         s_state.active = false;
-        s_state.hiddenActor = 0;
         s_state.hiddenCount = 0;
         s_state.state = 0;
         s_state.hasTarget = false;
     }
-    if (restore && Stark::IsGameThreadResponsive())
-        InvokeSetHidden(restore, false);
+    if (Stark::IsGameThreadResponsive())
+        for (uintptr_t a : restore) InvokeSetHidden(a, false);
     StopWorkerLocked();        // join with s_mutex released
     LOG_INFO("SeeThrough: disabled");
     return 0;
+}
+
+void SetPierceCount(int32_t count) {
+    if (count < 1) count = 1;
+    if (count > Grimoire::SCHLACHT_PIERCE_MAX) count = Grimoire::SCHLACHT_PIERCE_MAX;
+    std::lock_guard<std::mutex> lk(s_mutex);
+    s_state.pierceCount = count;
 }
 
 int32_t GetStatus(SeeThroughStatus& out) {
@@ -445,6 +487,7 @@ int32_t GetStatus(SeeThroughStatus& out) {
     out.active      = s_state.active;
     out.hasTarget   = s_state.hasTarget;
     out.hiddenCount = s_state.hiddenCount;
+    out.pierceCount = s_state.pierceCount;
     out.state       = s_state.state;
     return s_state.code;
 }

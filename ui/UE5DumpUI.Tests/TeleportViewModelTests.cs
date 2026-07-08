@@ -103,9 +103,10 @@ public class TeleportViewModelTests
         public int SeeThroughSetCalls { get; private set; }
         public int SeeThroughGetStateCalls { get; private set; }
         public bool? LastSeeThroughEnable { get; private set; }
+        public int? LastSeeThroughCount { get; private set; }
 
-        public override Task<SeeThroughStatus> SeeThroughSetAsync(bool? enable, CancellationToken ct = default)
-        { SeeThroughSetCalls++; LastSeeThroughEnable = enable; return Task.FromResult(NextSeeThroughStatus); }
+        public override Task<SeeThroughStatus> SeeThroughSetAsync(bool? enable, int? count, CancellationToken ct = default)
+        { SeeThroughSetCalls++; LastSeeThroughEnable = enable; LastSeeThroughCount = count; return Task.FromResult(NextSeeThroughStatus); }
 
         public override Task<SeeThroughStatus> SeeThroughGetStateAsync(CancellationToken ct = default)
         { SeeThroughGetStateCalls++; return Task.FromResult(NextSeeThroughStatus); }
@@ -1177,15 +1178,33 @@ public class TeleportViewModelTests
     [Fact]
     public async Task ApplySeeThrough_enables_and_reflects_active_state()
     {
-        var fake = new FakeDumpService { NextSeeThroughStatus = new() { Active = true, HasTarget = true, HiddenCount = 1 } };
+        var fake = new FakeDumpService { NextSeeThroughStatus = new() { Active = true, HasTarget = true, HiddenCount = 2, PierceCount = 3 } };
         var vm = CreateVm(fake, out _);
         vm.IsConnected = true;
+        vm.SeeThroughPierce = 3;
 
         await vm.ApplySeeThroughCommand.ExecuteAsync(null);
 
         Assert.Equal(1, fake.SeeThroughSetCalls);
         Assert.True(fake.LastSeeThroughEnable);
+        Assert.Equal(3, fake.LastSeeThroughCount);   // pierce depth threaded through
         Assert.Equal("ON", vm.SeeThroughState);
+    }
+
+    [Fact]
+    public async Task Changing_pierce_depth_while_active_pushes_it_live()
+    {
+        var fake = new FakeDumpService { NextSeeThroughStatus = new() { Active = true, HasTarget = true } };
+        var vm = CreateVm(fake, out _);
+        vm.IsConnected = true;
+        await vm.ApplySeeThroughCommand.ExecuteAsync(null);   // now active
+        int callsBefore = fake.SeeThroughSetCalls;
+
+        vm.SeeThroughPierce = 4;                              // live change
+
+        Assert.True(fake.SeeThroughSetCalls > callsBefore);   // pushed
+        Assert.Equal(4, fake.LastSeeThroughCount);
+        Assert.Null(fake.LastSeeThroughEnable);               // config-only (no enable field)
     }
 
     [Fact]

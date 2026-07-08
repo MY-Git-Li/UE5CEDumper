@@ -848,6 +848,13 @@
           <TextBlock Text="{Binding SeeThroughCurrentText}"
                      Foreground="#BBBBBB" FontSize="12"/>
           <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="{StaticResource str.TP.SeeThroughPierce}" Foreground="#999999"
+                       VerticalAlignment="Center"/>
+            <NumericUpDown Value="{Binding SeeThroughPierce}" Minimum="1" Maximum="10"
+                           Increment="1" Width="130" Padding="4,2"
+                           ToolTip.Tip="{StaticResource str.Tip.TP.SeeThroughPierce}"/>
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="8">
             <Button Content="{StaticResource str.TP.SeeThroughOn}"
                     Command="{Binding ApplySeeThroughCommand}"
                     ToolTip.Tip="{StaticResource str.Tip.TP.SeeThroughOn}"

@@ -32,13 +32,20 @@ struct SeeThroughStatus {
     int32_t code        = 0;      // last SeeThroughResult (0 = OK on the last tick)
     bool    active      = false;  // the see-through worker is engaged
     bool    hasTarget   = false;  // camera + pawn resolved on the last tick
-    int32_t hiddenCount = 0;      // occluders currently hidden (0 or 1 in Stage 1)
+    int32_t hiddenCount = 0;      // occluders currently hidden
+    int32_t pierceCount = 1;      // how many nearest occluders to hide along the ray
     int32_t state       = -1;     // last enable/disable result (1/0/neg); -1 = poll-only
 };
 
 // Enable / disable the see-through worker. Idempotent. enable=false un-hides any
 // actor we hid and stops the worker. Returns 1 (on), 0 (off), or negative on error.
 int32_t SetEnabled(bool enable);
+
+// How many nearest occluders to hide along the view ray (clamped to
+// [1, SCHLACHT_PIERCE_MAX]). Takes effect on the next tick; safe to call while
+// active. Pawns/Characters on the ray are skipped (kept visible) and do NOT
+// count toward the pierce depth.
+void SetPierceCount(int32_t count);
 
 // Poll the live status (safe to call from the pipe thread).
 int32_t GetStatus(SeeThroughStatus& out);

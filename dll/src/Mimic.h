@@ -108,11 +108,12 @@ enum Cmd : int32_t {
                               //             [8..15] uint64 UClass* (its class)
                               //             [16..143] class name (null-terminated)
     CMD_SEETHROUGH      = 14, // See-through occluders (Schlacht): toggle the worker
-                              //   that hides the nearest non-Pawn actor blocking the
+                              //   that hides the nearest N non-Pawn actors blocking the
                               //   camera→view ray. Self-contained (its own worker does
                               //   the game-thread invokes), so the mailbox handler just
                               //   flips it on the polling thread.
-                              //   Input:  ufuncAddr = value (1 on / 0 off)
+                              //   Input:  instanceAddr = pierce count (>=1)
+                              //           ufuncAddr    = value (1 on / 0 off)
                               //   Output: result = 1 (on) / 0 (off) / <0 error
 };
 

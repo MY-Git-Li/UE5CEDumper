@@ -230,5 +230,9 @@ constexpr int     SCHLACHT_TICK_MS       = 100;      // occluder worker tick (~1
 constexpr uint8_t SCHLACHT_TRACE_CHANNEL = 0;        // ETraceTypeQuery index (0 = TraceTypeQuery1 == Visibility on stock projects)
 constexpr double  SCHLACHT_TRACE_DIST    = 100000.0; // uu — camera-forward ray length (LineTraceSingle returns the NEAREST hit)
 constexpr int     SCHLACHT_LOG_EVERY     = 10;       // heartbeat: log a full diagnostic every N ticks (~1/sec)
+constexpr double  SCHLACHT_TRACE_STEP    = 2.0;      // uu — advance the ray start just past each hit surface (pierce loop)
+constexpr int     SCHLACHT_PIERCE_DEFAULT = 1;       // hide this many nearest occluders by default
+constexpr int     SCHLACHT_PIERCE_MAX     = 10;      // UI/clamp ceiling for the pierce depth
+constexpr int     SCHLACHT_MAX_EXTRA_ITERS = 16;     // extra trace iterations beyond pierceN (skipped Pawns / dupes)
 
 } // namespace Grimoire
