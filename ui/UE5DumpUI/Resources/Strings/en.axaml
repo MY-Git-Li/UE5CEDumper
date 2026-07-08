@@ -806,6 +806,8 @@
     <sys:String x:Key="str.TP.RecallLast">Recall last</sys:String>
     <sys:String x:Key="str.TP.HkHeader">Hotkey Settings</sys:String>
     <sys:String x:Key="str.TP.HkHint">Global hotkeys for markers (Save / Recall / Recall-last), BugItGo, Debug camera, and the God Mode / Super Jump / Move Speed / Gravity toggles + teleport / cursor actions (fire while the game is focused). Click Set, then press the combo — hold Ctrl/Alt/Shift then a key (e.g. Ctrl+F7), or a single key (e.g. F7). Click Cancel or press Esc to abort. Keyboard only for now (mouse extra-buttons / gamepad not yet supported). Saved automatically. A combo marked ⚠ is held by another app — free it and reconnect, or bind a different one.</sys:String>
+    <sys:String x:Key="str.TP.ExpHkHeader">Experimental Hotkeys</sys:String>
+    <sys:String x:Key="str.TP.ExpHkHint">Global hotkeys for the experimental features (Keep Foreground ON/OFF, Fly toggle). These are only active while Experimental features is enabled — turning it off unbinds them (and the emergency Keep-Foreground-OFF key). Bind them the same way: click Set, then press the combo.</sys:String>
     <sys:String x:Key="str.TP.HkSet">Set</sys:String>
     <sys:String x:Key="str.TP.HkClear">Clear</sys:String>
     <sys:String x:Key="str.TP.CeHeader">CE Export</sys:String>

@@ -345,6 +345,50 @@
         </StackPanel>
       </Border>
 
+      <!-- ── Experimental-feature hotkeys (Keep Foreground / Fly) ──
+           Split out of the Marker hotkeys card so they hide + unbind together with
+           the experimental cards when the experimental gate is off (ShowExperimentalHotkeys
+           = hotkey service present AND experimental opt-in on). -->
+      <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
+              CornerRadius="4" Padding="10"
+              IsVisible="{Binding ShowExperimentalHotkeys}">
+        <StackPanel Spacing="6">
+          <TextBlock Text="{StaticResource str.TP.ExpHkHeader}"
+                     Foreground="#DDDDDD" FontWeight="SemiBold"/>
+          <TextBlock Text="{StaticResource str.TP.ExpHkHint}"
+                     Foreground="#888888" FontSize="11" TextWrapping="Wrap"/>
+          <ItemsControl ItemsSource="{Binding ExperimentalHotkeyRows}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:TeleportHotkeyRow">
+                <Grid ColumnDefinitions="150,120,Auto,Auto" Margin="0,2"
+                      ToolTip.Tip="{Binding Hint}">
+                  <TextBlock Grid.Column="0" Text="{Binding DisplayName}"
+                             Foreground="#CCCCCC" VerticalAlignment="Center"/>
+                  <Border Grid.Column="1" Background="#333337" CornerRadius="3"
+                          Padding="6,2" Margin="2,0" MinWidth="90"
+                          HorizontalAlignment="Left">
+                    <TextBlock Text="{Binding DisplayLabel}"
+                               Foreground="#4EC9B0" FontSize="11" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  </Border>
+                  <Button Grid.Column="2" Content="{Binding CaptureButtonText}"
+                          Command="{Binding $parent[UserControl].((vm:TeleportViewModel)DataContext).BeginCaptureCommand}"
+                          CommandParameter="{Binding}"
+                          ToolTip.Tip="{StaticResource str.Tip.TP.HkSet}"
+                          Padding="10,3" Margin="2,0" MinWidth="58"/>
+                  <Button Grid.Column="3" Content="{StaticResource str.TP.HkClear}"
+                          Command="{Binding $parent[UserControl].((vm:TeleportViewModel)DataContext).ClearHotkeyCommand}"
+                          CommandParameter="{Binding}"
+                          IsEnabled="{Binding HasBinding}"
+                          ToolTip.Tip="{StaticResource str.Tip.TP.HkClear}"
+                          Padding="10,3" Margin="2,0"/>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
       <!-- ── Cursor teleport ── -->
       <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
               CornerRadius="4" Padding="10">
@@ -527,9 +571,11 @@
         </StackPanel>
       </Border>
 
-      <!-- ── Keep Foreground (Grausam — hook GetForegroundWindow) ── -->
+      <!-- ── Keep Foreground (Grausam — hook GetForegroundWindow) ──
+           Experimental-gated: hidden unless the experimental-features opt-in is on. -->
       <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
-              CornerRadius="4" Padding="10">
+              CornerRadius="4" Padding="10"
+              IsVisible="{Binding ExperimentalEnabled}">
         <StackPanel Spacing="8">
           <StackPanel Orientation="Horizontal" Spacing="8">
             <TextBlock Text="{StaticResource str.TP.FgHeader}"
@@ -717,9 +763,11 @@
         </StackPanel>
       </Border>
 
-      <!-- ── Fly (Dunste — no-gravity keyboard-driven 3D flight) ── -->
+      <!-- ── Fly (Dunste — no-gravity keyboard-driven 3D flight) ──
+           Experimental-gated: hidden unless the experimental-features opt-in is on. -->
       <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
-              CornerRadius="4" Padding="10">
+              CornerRadius="4" Padding="10"
+              IsVisible="{Binding ExperimentalEnabled}">
         <StackPanel Spacing="8">
           <StackPanel Orientation="Horizontal" Spacing="8">
             <TextBlock Text="{StaticResource str.TP.FlyHeader}"
@@ -976,9 +1024,11 @@
 
       <!-- ── Standalone trainer export (no-DLL CE Lua .CT via AOBMaker) ──
            Moved to the bottom of the tab (was at the top): it's a separate
-           no-DLL export path, so it sits with the other export cards. -->
+           no-DLL export path, so it sits with the other export cards.
+           Experimental-gated: hidden unless the experimental-features opt-in is on. -->
       <Border Background="#252526" BorderBrush="#3E3E42" BorderThickness="1"
-              CornerRadius="4" Padding="10">
+              CornerRadius="4" Padding="10"
+              IsVisible="{Binding ExperimentalEnabled}">
         <!-- Bottom-most card → force tooltips above the button (flip-flicker fix). -->
         <Border.Styles>
           <Style Selector="Button">

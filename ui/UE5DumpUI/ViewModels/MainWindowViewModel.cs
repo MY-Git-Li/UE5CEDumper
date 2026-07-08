@@ -351,7 +351,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ValueSearch = new ValueSearchViewModel(dump, log);
         RelatedObjects = new RelatedObjectsViewModel(dump, log, platform);
         Console = new ConsoleViewModel(dump, log);
-        Teleport = new TeleportViewModel(dump, log, platform, aobMaker, globalHotkeys);
+        Teleport = new TeleportViewModel(dump, log, platform, aobMaker, globalHotkeys, experimentalGate);
         if (snapshotStore != null)
         {
             Snapshot = new SnapshotViewModel(dump, snapshotStore, log, experimentalGate, platform);
