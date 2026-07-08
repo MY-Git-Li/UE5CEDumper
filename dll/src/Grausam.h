@@ -6,6 +6,13 @@
 // → GetForegroundWindow() PID compare; casting the illusion that our own window
 // is foreground keeps the game thread ticking (ProcessEvent invokes / POV reads)
 // while our UI or Cheat Engine holds the real foreground.
+//
+// Side effect neutralized: because the game never learns it lost focus, its
+// still-ticking thread keeps calling ClipCursor()/SetCursorPos() to confine the
+// OS cursor to its viewport, trapping the mouse across the whole desktop. We also
+// hook those two: while the lock is on but the game is backgrounded, the clip is
+// released / recentring swallowed; when the game is genuinely foreground they
+// pass through so in-game mouse-look is unaffected.
 
 namespace Grausam {
 

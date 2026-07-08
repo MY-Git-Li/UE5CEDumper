@@ -1,11 +1,15 @@
 // Grausam — グラオザーム (幻影魔法大師 — Seven Sages, Master of Illusion)
-// ForegroundLock: two illusions so the game never learns it lost focus —
+// ForegroundLock: illusions so the game never learns it lost focus —
 //   1. MinHook user32!GetForegroundWindow → report the game's own window as
 //      foreground (defeats t.IdleWhenNotForeground idle + FApp::HasFocus polling).
 //   2. Subclass every top-level game window's WndProc and rewrite the
 //      deactivation messages (WM_ACTIVATEAPP / WM_ACTIVATE / WM_NCACTIVATE →
 //      "active", swallow WM_KILLFOCUS) → defeats WM_ACTIVATEAPP-driven pauses
 //      (UE's OnApplicationActivationChanged + any game-side focus-loss pause).
+//   3. MinHook user32!ClipCursor + SetCursorPos → while the lock is on but the
+//      game is BACKGROUNDED, release the cursor confinement / swallow recentring
+//      so the mouse isn't trapped in the game window (the whole-desktop lock
+//      symptom); pass through untouched when the game is genuinely foreground.
 // See Grausam.h.
 
 #include "Grausam.h"
@@ -22,9 +26,13 @@ namespace Grausam {
 namespace {
 
 using GetForegroundWindow_t = HWND(WINAPI*)();
+using ClipCursor_t          = BOOL(WINAPI*)(const RECT*);
+using SetCursorPos_t        = BOOL(WINAPI*)(int, int);
 
 std::mutex             g_mutex;
 GetForegroundWindow_t  g_origGetForegroundWindow = nullptr;
+ClipCursor_t           g_origClipCursor          = nullptr;  // trampoline — NEVER call ::ClipCursor from the hook (recursion)
+SetCursorPos_t         g_origSetCursorPos        = nullptr;
 std::atomic<bool>      g_enabled{false};
 std::atomic<HWND>      g_gameWindow{nullptr};
 bool                   g_hookInstalled = false;
@@ -74,6 +82,46 @@ HWND WINAPI HookedGetForegroundWindow() {
         g_gameWindow.store(gw, std::memory_order_relaxed);
     }
     return (gw && ::IsWindow(gw)) ? gw : real;
+}
+
+// ── (3) Cursor-confinement neutralization ────────────────────────────
+// Keeping the game "foreground" also keeps its game thread ticking, so it
+// re-applies ClipCursor()/SetCursorPos() every frame to confine the OS cursor
+// to its viewport — even after the user switched to another app. Windows
+// auto-releases ClipCursor on real deactivation, but the still-running game
+// re-clips within a frame, trapping the mouse across the whole desktop. While
+// the lock is on AND the game is NOT genuinely foreground we release the clip /
+// swallow recentring; when the game truly is foreground (the user is actually
+// playing) both pass through so in-game mouse-look is untouched.
+
+// Read focus truth through the un-hooked GetForegroundWindow trampoline so it is
+// not fooled by our own illusion (HookedGetForegroundWindow).
+bool GameGenuinelyForeground() {
+    HWND real = g_origGetForegroundWindow ? g_origGetForegroundWindow() : ::GetForegroundWindow();
+    if (!real) return false;
+    DWORD pid = 0;
+    ::GetWindowThreadProcessId(real, &pid);
+    return pid == ::GetCurrentProcessId();
+}
+
+BOOL WINAPI HookedClipCursor(const RECT* rc) {
+    if (!g_origClipCursor) return FALSE;  // defensive — never null once hooked
+    // Only intercept CONFINEMENT (rc != null). A release (rc == null) is exactly
+    // what we want, so it passes through. Confinement while backgrounded →
+    // release instead so the cursor is free for the app the user switched to.
+    if (rc && g_enabled.load(std::memory_order_relaxed) && !GameGenuinelyForeground())
+        return g_origClipCursor(nullptr);
+    return g_origClipCursor(rc);
+}
+
+BOOL WINAPI HookedSetCursorPos(int x, int y) {
+    if (!g_origSetCursorPos) return FALSE;
+    // Swallow per-frame recentring while backgrounded so the cursor does not snap
+    // back into the game window; report success so the game's own logic is
+    // unaffected.
+    if (g_enabled.load(std::memory_order_relaxed) && !GameGenuinelyForeground())
+        return TRUE;
+    return g_origSetCursorPos(x, y);
 }
 
 // ── (2) WndProc subclass — neutralize deactivation messages ──────────
@@ -139,25 +187,49 @@ int SetForegroundLock(bool enable) {
                 g_mhInitialized = true;
             }
 
-            FARPROC target = ::GetProcAddress(::GetModuleHandleW(L"user32.dll"), "GetForegroundWindow");
-            if (!target) {
+            HMODULE user32 = ::GetModuleHandleW(L"user32.dll");
+            FARPROC pGfw  = user32 ? ::GetProcAddress(user32, "GetForegroundWindow") : nullptr;
+            FARPROC pClip = user32 ? ::GetProcAddress(user32, "ClipCursor")          : nullptr;
+            FARPROC pSetP = user32 ? ::GetProcAddress(user32, "SetCursorPos")        : nullptr;
+            if (!pGfw) {
                 Sein::Error("Grausam", "GetProcAddress(user32!GetForegroundWindow) failed");
                 return -2;
             }
 
-            MH_STATUS st = MH_CreateHook(reinterpret_cast<LPVOID>(target),
+            // (1) GetForegroundWindow — the primary illusion (idle/pause defeat).
+            MH_STATUS st = MH_CreateHook(reinterpret_cast<LPVOID>(pGfw),
                                          reinterpret_cast<LPVOID>(&HookedGetForegroundWindow),
                                          reinterpret_cast<LPVOID*>(&g_origGetForegroundWindow));
             if (st != MH_OK) {
-                Sein::Error("Grausam", "MH_CreateHook failed: %s", MH_StatusToString(st));
+                Sein::Error("Grausam", "MH_CreateHook(GetForegroundWindow) failed: %s", MH_StatusToString(st));
                 return -3;
             }
-            st = MH_EnableHook(reinterpret_cast<LPVOID>(target));
+            st = MH_EnableHook(reinterpret_cast<LPVOID>(pGfw));
             if (st != MH_OK) {
-                Sein::Error("Grausam", "MH_EnableHook failed: %s", MH_StatusToString(st));
-                MH_RemoveHook(reinterpret_cast<LPVOID>(target));
+                Sein::Error("Grausam", "MH_EnableHook(GetForegroundWindow) failed: %s", MH_StatusToString(st));
+                MH_RemoveHook(reinterpret_cast<LPVOID>(pGfw));
                 return -4;
             }
+
+            // (3) ClipCursor + SetCursorPos — cursor-lock neutralization. Best
+            // effort: a game that never confines the cursor never triggers them,
+            // and a failure to hook them must NOT abort the (primary) lock. Enable
+            // per-target, NOT MH_ALL_HOOKS — other modules (Stark/Solitar/Laufen)
+            // share this MinHook instance and must not be re-enabled here.
+            if (pClip
+                && MH_CreateHook(reinterpret_cast<LPVOID>(pClip),
+                                 reinterpret_cast<LPVOID>(&HookedClipCursor),
+                                 reinterpret_cast<LPVOID*>(&g_origClipCursor)) == MH_OK)
+                MH_EnableHook(reinterpret_cast<LPVOID>(pClip));
+            else
+                Sein::Error("Grausam", "ClipCursor hook unavailable — cursor may stay locked when backgrounded");
+
+            if (pSetP
+                && MH_CreateHook(reinterpret_cast<LPVOID>(pSetP),
+                                 reinterpret_cast<LPVOID>(&HookedSetCursorPos),
+                                 reinterpret_cast<LPVOID*>(&g_origSetCursorPos)) == MH_OK)
+                MH_EnableHook(reinterpret_cast<LPVOID>(pSetP));
+
             g_hookInstalled = true;
         }
 
@@ -171,9 +243,15 @@ int SetForegroundLock(bool enable) {
         return 1;
     }
 
-    // Soft-disable: leave the hook + subclass installed (they gate on g_enabled and
+    // Soft-disable: leave the hooks + subclass installed (they gate on g_enabled and
     // pass through when off) to avoid an unhook/unsubclass race with an in-flight call.
     g_enabled.store(false, std::memory_order_relaxed);
+    // Actively release any confinement we were masking so the cursor is freed the
+    // instant the lock goes off (the game's own release-on-focus-loss was
+    // suppressed while we were on). Skip if the game is genuinely foreground — the
+    // user is playing and a live in-game clip must be left alone.
+    if (g_origClipCursor && !GameGenuinelyForeground())
+        g_origClipCursor(nullptr);
     Sein::Info("Grausam", "Foreground lock DISABLED");
     return 0;
 }

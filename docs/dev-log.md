@@ -18,6 +18,57 @@ builds ≤696 in
 
 -----
 
+## 2026-07-08 — Inject picker "already loaded" detection + Keep-Foreground cursor-lock fix + emergency hotkey + GodMode/KeepFg "Add to CE" delivery (build 1986; dev)
+
+**SHIPPED (DLL + UI; Keep-Foreground cursor-lock fix LIVE-VERIFIED P3R).** Four related fixes/features.
+
+**(4) Raw-AA-to-clipboard sweep — everything now delivers paste-able CE XML.** The God Mode + Keep Foreground
+"Copy CE Script" buttons emitted **raw AA code** to the clipboard — same bug the Global-Pointer buttons had: a
+bare AA body can't be pasted into a CE memory record. Now they use the identical delivery as Get
+GWorld/GameEngine: push straight into CE via AOBMaker (`CreateAAScript`, group `UE5CEDumper (DLL)`) when
+connected, else copy paste-able CE memory-record XML (`CheatTableBuilder.WrapAaScriptXml`). Shared helper
+`PushOrCopyToggleScriptAsync(desc, script)`; commands one-liners; labels `Copy CE Script`→`Add to CE`; tooltips
+updated. Regression tests lock the no-AOBMaker path to wrapped `<CheatTable>` XML (not a bare `[ENABLE]` body).
+**Same milder bug fixed in the Invoke / exec / Debug-Camera paths** (`LiveWalkerViewModel` GenerateInvokeScript
+×2, `MainWindowViewModel` InterestingFunctions + Console baked-invoke + Debug-Camera): those already
+push-first, but their clipboard FALLBACK copied raw AA — now wrapped via `WrapAaScriptXml` too (status text
+updated; the stale "embed ue5_invoke_helper.lua" note dropped). The CE-XML pointer-chain exports
+(LiveWalker `CopyToClipboardAsync(xml)`) were left untouched — already full `<CheatTable>` XML. Tests 2242→2244.
+
+**(1) Q1 — Inject picker shows already-loaded dumper + version.** The "Inject into running game" picker now
+detects whether OUR dumper DLL is ALREADY active in each UE process (via a proxy, a prior inject, or a CE `.CT`)
+and shows the running DLL version, so the user isn't tricked into a redundant double-load that fights over the
+pipe. New pure classifier `DumperModuleDetector.Classify` (Services, unit-tested) takes the target's loaded
+modules (file name + PE ProductName + FileVersion) and reports `(loaded, mode, version)` — `mode` =
+`proxy: <name>` (version/dinput8/dxgi carrying ProductName `UE5CEDumper`) / `injected` (`UE5Dumper.dll`) /
+`loaded: <name>`; identity is `ProductName == UE5CEDumper` (same check as `IsOurProxyDll`), so the real system
+version.dll/dxgi.dll never counts. `WindowsPlatformService.DetectDumper(Process)` walks `Process.Modules`,
+version-probes only the ≤4 name-matching modules (reading a version resource touches the file), and only for
+`IsUe` rows; access-denied/32-bit/exited → "unknown". `GameProcessInfo` gained `DumperLoaded/DumperLoadMode/
+DumperVersion` + a `DumperStatusLine`; `ProcessPickerWindow` renders an amber "⬤ … already active; Inject will
+just Connect" line; `ProxyDeployViewModel.InjectIntoRunningGame` skips injection and connects when
+`DumperLoaded`.
+
+**(2) Q2 — Keep Foreground no longer traps the mouse.** Root cause: `Grausam` makes the game believe it never
+lost focus AND keeps its game thread ticking, so the game re-applies `ClipCursor()`/`SetCursorPos()` every frame
+to confine the OS cursor to its viewport — Windows auto-releases the clip on real deactivation but the
+still-running game re-clips within a frame, locking the mouse across the whole desktop (LIVE-REPRODUCED P3R,
+3840×2160). Fix: `Grausam` now also MinHooks `user32!ClipCursor` + `SetCursorPos`. While the lock is on but the
+game is NOT genuinely foreground (checked via the un-hooked `g_origGetForegroundWindow` trampoline so the check
+isn't fooled by our own illusion), `ClipCursor(rect)` is turned into `ClipCursor(nullptr)` and `SetCursorPos` is
+swallowed; when the game truly is foreground both pass through so in-game mouse-look is untouched. Disable also
+force-releases any masked clip. Cursor hooks are best-effort (per-target enable, NOT `MH_ALL_HOOKS`, so
+Stark/Solitar/Laufen hooks aren't touched); the primary GetForegroundWindow hook still gates the whole feature.
+
+**(3) Q2 — Emergency "Keep Foreground OFF" global hotkey (safety net).** Because a trapped cursor can't reach the
+UI's OFF button, added `foreground_on` / `foreground_off` rows to the Teleport hotkey table (generic over
+`ActionId` — capture/persist/register for free; routed in `OnMarkerHotkeyPressed` to the existing
+`ForceForegroundLockOn/OffCommand`). Bind `Keep Foreground OFF` to a global key to release the lock from any app.
+
+Tests: +`DumperModuleDetectorTests` (8 cases); hotkey-count lock 23→25. 2242 tests green.
+
+-----
+
 ## 2026-07-08 — Teleport tab: Global Pointers (GWorld / GameEngine) CE Lua + card reorder (build 1978; dev)
 
 **SHIPPED (DLL + UI; live verify pending).** Two new one-click **"DLL-invoke" CE Lua** exports on the Teleport

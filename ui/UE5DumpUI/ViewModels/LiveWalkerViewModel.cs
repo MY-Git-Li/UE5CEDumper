@@ -5080,16 +5080,17 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 }
             }
 
-            // Fallback: copy script to clipboard. If we thought CE was
-            // present (button shouldn't have been clickable in that case),
-            // surface a pipe-broken warning so the user knows the AA Script
-            // didn't land in CE.
-            await _platform.CopyToClipboardAsync(script);
+            // Fallback: copy as paste-able CE memory-record XML (a bare AA body
+            // can't be pasted into a CE record — wrap it, same as the Global-Pointer
+            // records). If we thought CE was present (button shouldn't have been
+            // clickable then), surface a pipe-broken warning too.
+            await _platform.CopyToClipboardAsync(
+                Services.CheatTableBuilder.WrapAaScriptXml(description, script));
             if (_aobMaker != null) IsAobMakerAvailable = _aobMaker.IsAvailable;
             StatusText = wasAvailable
-                ? $"⚠ AOBMaker pipe broke (CE closed?) — invoke script copied to clipboard"
-                : $"Invoke script copied to clipboard: {func.Name}";
-            _log.Info($"Invoke script copied to clipboard: {description} (wasAvailable={wasAvailable})");
+                ? $"⚠ AOBMaker pipe broke (CE closed?) — invoke script copied as CE XML (paste into CE's address list)"
+                : $"Invoke script copied as CE XML — paste into CE's address list ({func.Name})";
+            _log.Info($"Invoke script copied as CE XML: {description} (wasAvailable={wasAvailable})");
         }
         catch (Exception ex)
         {
@@ -5182,7 +5183,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 if (_aobMaker != null && wasAvailable)
                     sentToCe = await _aobMaker.CreateAAScriptAsync(description, script, autoActivate: false);
                 if (!sentToCe)
-                    await _platform.CopyToClipboardAsync(script);
+                    await _platform.CopyToClipboardAsync(
+                        Services.CheatTableBuilder.WrapAaScriptXml(description, script));
                 // Sync the VM-level flag from whatever the bridge ended up at,
                 // so the Notes column reflects post-send reality on the next
                 // repaint.
@@ -5191,8 +5193,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                 StatusText = sentToCe
                     ? $"AA Script created in CE: {func.Name}"
                     : wasAvailable
-                        ? $"⚠ AOBMaker pipe broke (CE closed?) — script copied to clipboard"
-                        : $"AOBMaker not connected — script copied to clipboard ({func.Name})";
+                        ? $"⚠ AOBMaker pipe broke (CE closed?) — script copied as CE XML (paste into CE's address list)"
+                        : $"AOBMaker not connected — script copied as CE XML, paste into CE's address list ({func.Name})";
                 _log.Info($"Baked AA Script (no args) {(sentToCe ? "sent to CE" : "to clipboard")}: " +
                           $"{CurrentClassName}::{func.Name} (wasAvailable={wasAvailable})");
                 return;
