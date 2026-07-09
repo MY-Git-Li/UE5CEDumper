@@ -650,6 +650,50 @@ Shipped + unit-tests-pass but unproven on real games:
 
 -----
 
+## See-through (Schlacht) — "pass light/shadow through too?" — EVALUATED (mostly WON'T-DO)
+
+**Question:** can See-through also let the occluder's **light/shadow** effects pass through, not just
+its mesh? **Verdict: split by lighting type — dynamic is already handled; baked is infeasible from an
+injected DLL.** (36-agent adversarial verify against UE engine source, 2026-07-09.)
+
+- **Dynamic / real-time light (movable lights, Lumen GI+reflections, DF shadows/DFAO, HW ray tracing)
+  — ALREADY passes through, no code change.** `AActor::SetActorHiddenInGame(true)` sets `bHidden` →
+  `UPrimitiveComponent::ShouldRender()` false → `ShouldComponentAddToScene()` false (default flags) →
+  the primitive is dropped from the render scene entirely, so it is absent from the **shadow-depth
+  pass** too — the dynamic shadow vanishes with the mesh (community's `bCastHiddenShadow=true` recipe
+  exists only because default hiding drops the shadow). UE5 does the same for the mesh distance-field /
+  Lumen scene: `PrimitiveNeedsDistanceFieldSceneData()` has `IsDrawnInGame()` as a required OR-term,
+  and `FScene::UpdatePrimitivesIsDrawn_RenderThread()` calls `DistanceFieldSceneData.RemovePrimitive()`
+  + `LumenRemovePrimitive()` on the hide branch by default; the HW-RT gather also skips `!bDrawInGame`
+  primitives. So on a Lumen/movable-light game, hiding the wall already removes its shadow, GI
+  occlusion, and RT contribution.
+
+- **Exception (fixable): a game that sets `bCastHiddenShadow=true` (or `bAffectIndirectLightingWhileHidden`)
+  on world meshes** keeps the shadow/GI after hide (that flag's whole purpose is cast-while-hidden).
+  **Only actionable enhancement:** alongside `SetActorHiddenInGame`, also invoke
+  `UPrimitiveComponent::SetCastShadow(false)` / `SetCastHiddenShadow(false)` (and
+  `SetAffectDistanceFieldLighting(false)` for Lumen/DF) on each of the hit actor's primitive components,
+  restoring on un-hide. All are `BlueprintCallable` UFUNCTIONs reachable via the existing
+  `UE5_CallProcessEventEx` ProcessEvent path; component enumeration already exists (`GetRelatedObjects`).
+  Effort: **S** · Risk: low. **Do only if a real game shows a lingering shadow after See-through hides
+  the mesh** (LIVE-VERIFY first, per the module's ethos). Won't help baked lighting.
+
+- **Baked / static light (Static or Stationary mobility — the common case for UE4 & perf-sensitive UE5
+  world geometry: locked-60fps, mobile, VR) — INFEASIBLE, WON'T-DO.** The wall's shadow is baked by
+  Lightmass into the **receiving** surface's (floor / neighbouring wall) lightmap texture (and per-object
+  distance-field shadow maps for Stationary), stored per-mesh in the `MapBuildDataRegistry` — it lives
+  on the receiver, not the caster. `SetActorHiddenInGame` only toggles the caster's own primitive
+  visibility; it cannot touch another mesh's lightmap, so a **"ghost shadow"** stays exactly where the
+  wall was. Removing a baked shadow needs an editor-time **Build Lighting** (Lightmass is editor-only,
+  stripped from shipping/cooked builds); no runtime API recomputes lightmaps. The only external "fix"
+  is forcing the whole level to unlit/dynamic (`r.AllowStaticLighting 0` + restart — global, breaks all
+  level lighting), which isn't worth it. This is why many games show a residual shadow after See-through
+  hides the mesh — nothing we can do about it from a DLL.
+
+*Parent: Schlacht Stage 1 (dev-log 2026-07-08 build ~1989; project-seethrough-occluders-schlacht).*
+
+-----
+
 ## Speculative — pick if the active plan finishes ahead of schedule
 
 Not yet committed to:
