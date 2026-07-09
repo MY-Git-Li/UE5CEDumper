@@ -234,6 +234,52 @@ public class DumpAllServiceTests
     }
 
     [Fact]
+    public void Generate_EmitsPropFlagsArrayDimAndInnerStructType_WhenNonDefault()
+    {
+        var dump = new FakeDumpForDump();
+        dump.Objects.Add(Obj("0x1", "BP_Player_C", "BlueprintGeneratedClass", "/Game/BP_Player_C"));
+        dump.ClassWalks["0x1"] = new ClassInfoModel
+        {
+            Name = "BP_Player_C",
+            Fields = new List<FieldInfoModel>
+            {
+                // Non-zero CPF_* flags on a scalar → prop_flags emits, array_dim omitted.
+                new() { Name = "Health", TypeName = "FloatProperty", Offset = 0x10, Size = 4,
+                        PropertyFlags = 0x0040000000000001UL },
+                // Static C-array (Foo[4]) → array_dim emits.
+                new() { Name = "AmmoCounts", TypeName = "IntProperty", Offset = 0x20, Size = 4, ArrayDim = 4 },
+                // TArray<FStruct> → inner_struct_type emits.
+                new() { Name = "Effects", TypeName = "ArrayProperty", Offset = 0x30, Size = 16,
+                        InnerType = "StructProperty", InnerStructType = "GameplayEffectSpec" },
+                // All defaults (flags 0, dim 1) → neither key emitted.
+                new() { Name = "Plain", TypeName = "IntProperty", Offset = 0x40, Size = 4 },
+            }
+        };
+
+        var classLine = Dump(dump).First(l => l.Contains("\"kind\":\"class\""));
+
+        // prop_flags: uppercase hex "0x…", no padding (byte-identical to the
+        // DLL's Renge::AddrToStr wire form so the two never drift).
+        Assert.Contains("\"prop_flags\":\"0x40000000000001\"", classLine);
+        Assert.Contains("\"array_dim\":4", classLine);
+        Assert.Contains("\"inner_struct_type\":\"GameplayEffectSpec\"", classLine);
+        // Defaults are omitted — exactly one field carries each optional key.
+        Assert.Equal(1, CountOccurrences(classLine, "\"prop_flags\""));
+        Assert.Equal(1, CountOccurrences(classLine, "\"array_dim\""));
+    }
+
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        int count = 0, i = 0;
+        while ((i = haystack.IndexOf(needle, i, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            i += needle.Length;
+        }
+        return count;
+    }
+
+    [Fact]
     public void Generate_RegularClass_FlagsIsBpgcFalse()
     {
         var dump = new FakeDumpForDump();

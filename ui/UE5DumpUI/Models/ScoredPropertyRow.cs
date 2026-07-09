@@ -22,6 +22,13 @@ public sealed partial class ScoredPropertyRow : ObservableObject
     public required int                 ClassBonus       { get; init; }
     public required bool                IsUnusualLocation{ get; init; }
 
+    // Structural signals (P2a). StructuralBonus = GAS boost + type prior;
+    // PairBonus = Current/Max stat-family bonus (both already folded into
+    // FinalScore, surfaced here for the score breakdown tooltip).
+    public int                          StructuralBonus  { get; init; }
+    public bool                         IsGasAttribute   { get; init; }
+    public int                          PairBonus        { get; init; }
+
     // ------------------------------------------------------------------
     // Display helpers (DataGrid bindings)
     // ------------------------------------------------------------------
@@ -38,6 +45,14 @@ public sealed partial class ScoredPropertyRow : ObservableObject
     public string ScoreTooltip
         => $"FinalScore={FinalScore} = keywords({KeywordHits} hits) " +
            $"+ classBonus={ClassBonus}" +
+           (StructuralBonus != 0 ? $" + structural={StructuralBonus}" : "") +
+           (PairBonus != 0 ? $" + pair={PairBonus}" : "") +
+           (IsGasAttribute
+               ? "  (GAS — FGameplayAttributeData, a near-certain gameplay stat)"
+               : "") +
+           (PairBonus != 0
+               ? "  (part of a Current/Max stat family in this class)"
+               : "") +
            (IsUnusualLocation
                ? "  (⚠ class is in the Unusual Location list — properties " +
                  "here are often overlooked because they sit outside the " +

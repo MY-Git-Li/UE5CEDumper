@@ -1467,6 +1467,15 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                     {"offset", f.Offset},
                     {"size",   f.Size}
                 };
+                // Reflection flags (CPF_*) + static-array dim — feed the
+                // auto-detect scorer (SaveGame/BlueprintVisible/Net/Transient
+                // gating; full footprint = Size * ArrayDim). PropertyFlags is
+                // a uint64 with high bits set, so emit it as an "0x" hex
+                // string (via AddrToStr's uint→hex) so no JSON-number consumer
+                // loses precision. Omitted at defaults (flags 0 / dim 1) to
+                // keep the wire lean.
+                if (f.PropertyFlags != 0) fj["prop_flags"] = Renge::AddrToStr(f.PropertyFlags);
+                if (f.ArrayDim != 1)      fj["array_dim"]  = f.ArrayDim;
                 // Extended type metadata (only emit non-empty values)
                 if (!f.structType.empty())      fj["struct_type"]       = f.structType;
                 if (!f.objClassName.empty())     fj["obj_class"]         = f.objClassName;
@@ -2087,6 +2096,10 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                 item["prop_size"]   = m.propSize;
                 item["struct_type"] = m.structType;
                 item["inner_type"]  = m.innerType;
+                // CPF_* reflection flags (auto-detect scorer gating) — hex
+                // string so the uint64 high bits survive; omitted when 0.
+                if (m.propertyFlags != 0)
+                    item["prop_flags"] = Renge::AddrToStr(m.propertyFlags);
                 // Inheritance-aware fields (build 610+) -- after dedup,
                 // class_name == defining_class_name (we keep both for
                 // forward compat in case the dedup story changes).
@@ -2175,6 +2188,8 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                     item["prop_size"]   = m.propSize;
                     item["struct_type"] = m.structType;
                     item["inner_type"]  = m.innerType;
+                    if (m.propertyFlags != 0)
+                        item["prop_flags"] = Renge::AddrToStr(m.propertyFlags);
                     item["defining_class_name"] = m.definingClassName;
                     item["defining_class_addr"] = Renge::AddrToStr(m.definingClassAddr);
                     item["defining_class_path"] = m.definingClassPath;

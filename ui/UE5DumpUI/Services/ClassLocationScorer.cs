@@ -50,6 +50,13 @@ public static class ClassLocationScorer
         //                              build 678 Property-side Weapon rule)
         ("Enemy",             2),
         ("Weapon",            2),
+        // === 7-game cross-game analysis (2026-07-09, ES2/SEED/TQ2/Avowed/
+        // DQ7R/HogwartsLegacy/SB): Health* (4/7) and Damage* (5/7) classes
+        // host cheat-relevant functions. Clean tokens (no core UE class
+        // contains them); keyword-gated so the +2 only lands when the
+        // function name is itself relevant. ===
+        ("Health",            2),
+        ("Damage",            2),
         // Game-level systems
         ("GameMode",          2),
         ("GameInstance",      2),
@@ -149,6 +156,16 @@ public static class ClassLocationScorer
         // (an "Enemy*" class is just as likely to hold damage / health
         // properties as it is to expose damage functions). ===
         new("Enemy",            2, false),
+
+        // === 7-game cross-game analysis (2026-07-09): Health* (4/7) and
+        // Damage* (5/7) classes host cheat-relevant properties (HealthComponent,
+        // DamageDealer, etc.). Clean tokens — no core UE class contains them;
+        // keyword-gated so the +2 only matters when the property name is
+        // already a Stats/Combat hit. Rejected same-pass: Item (redundant with
+        // the Resources keyword + UI-widget over-match), Jump/Objective/Mission
+        // (marginal), Modifier (UInputModifier_* engine over-match). ===
+        new("Health",           2, false),
+        new("Damage",           2, false),
 
         // === UNUSUAL locations (highest-value hits — devs broke convention) ===
         // LocalPlayer / GameViewportClient / HUD often store gameplay state

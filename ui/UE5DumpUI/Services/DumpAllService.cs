@@ -384,10 +384,19 @@ public static class DumpAllService
             AppendJsonString(sb, ",\"type\":", f.TypeName);
             sb.Append(",\"offset\":").Append(f.Offset);
             sb.Append(",\"size\":").Append(f.Size);
+            // Reflection flags + static-array dim (auto-detect features).
+            // prop_flags as an "0x" hex string — CPF_* is uint64 with high
+            // bits set. Both omitted at defaults (flags 0 / dim 1).
+            if (f.PropertyFlags != 0)
+                sb.Append(",\"prop_flags\":\"0x").Append(f.PropertyFlags.ToString("X")).Append('"');
+            if (f.ArrayDim != 1)
+                sb.Append(",\"array_dim\":").Append(f.ArrayDim);
             if (!string.IsNullOrEmpty(f.StructType))
                 AppendJsonString(sb, ",\"struct_type\":", f.StructType);
             if (!string.IsNullOrEmpty(f.InnerType))
                 AppendJsonString(sb, ",\"inner_type\":", f.InnerType);
+            if (!string.IsNullOrEmpty(f.InnerStructType))
+                AppendJsonString(sb, ",\"inner_struct_type\":", f.InnerStructType);
             if (!string.IsNullOrEmpty(f.ObjClassName))
                 AppendJsonString(sb, ",\"obj_class\":", f.ObjClassName);
             if (!string.IsNullOrEmpty(f.EnumName))

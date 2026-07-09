@@ -2046,11 +2046,42 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// prominent in-grid banner (a user-initiated cancel keeps the current view and
     /// uses the mild top status line instead).
     /// </summary>
+    /// <summary>Depth below which deep objects (e.g. GAS attributes, ~7 hops from
+    /// GWorld — verified TQ2) are likely missed, so a locate at a smaller depth
+    /// warrants a heads-up before it runs.</summary>
+    private const int RecommendedGWorldLocateDepth = 7;
+
+    /// <summary>Session-scoped: the low-depth locate warning is shown at most once
+    /// (firing on every locate would be noise — the default depth resolves most
+    /// objects). Reset only by restarting the app.</summary>
+    private bool _lowDepthLocateWarned;
+
     public async Task LocateInGWorldAsync(string? objectAddr, int scrollFieldOffset,
                                           string? scrollFieldName, bool stopAtParent,
                                           CancellationToken ct = default, string rootKind = "gworld")
     {
         if (string.IsNullOrEmpty(objectAddr)) return;
+
+        // Proactive heads-up (once per session) when the depth is below where deep
+        // objects typically sit — the BFS is depth-bounded, so a too-small depth
+        // silently misses reachable-but-deep targets (GAS attributes are ~7 hops;
+        // verified TQ2: found at depth 8, missed at depth 5). Ask before wasting a
+        // search; the user can Cancel to raise the depth / enable Deep first.
+        if (GWorldLocateDepth < RecommendedGWorldLocateDepth && !_lowDepthLocateWarned)
+        {
+            _lowDepthLocateWarned = true;   // set first so a re-entrant locate can't re-ask
+            bool proceed = await UE5DumpUI.Views.ConfirmDialog.ShowAsync(
+                "Locate depth may be too small",
+                $"'Locate in GWorld depth' is set to {GWorldLocateDepth}. The search is "
+                + $"depth-bounded, so deeper objects — e.g. GAS attributes sit ~{RecommendedGWorldLocateDepth} "
+                + "hops from GWorld — may not be found at this depth. Raise 'Locate in GWorld depth' "
+                + "in Options ⚙ (and/or enable Deep) for a better chance, or proceed anyway at depth "
+                + $"{GWorldLocateDepth}?",
+                confirmText: "Proceed anyway",
+                cancelText: "Cancel");
+            if (!proceed) return;
+        }
+
         // User-facing label for the chosen BFS root ("GWorld" vs "GameEngine").
         string rootLabel = rootKind == "engine" ? "GameEngine" : "GWorld";
         LocateFailureTitle = $"Locate in {rootLabel} failed";
@@ -2187,13 +2218,18 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// but NOT most world actors (the level-list recovery is World-root only).</summary>
     private string GWorldPathFailureStatus(GWorldPathResult path, string rootLabel = "GWorld") => path.Status switch
     {
-        // not_reachable means the BFS exhausted everything reachable from the root
-        // (within the depth) WITHOUT finding the target — the object isn't
-        // referenced by any forward pointer chain from the root. Raising the depth
-        // does NOT help (the reachable set is already exhausted).
+        // not_reachable means the DEPTH-BOUNDED BFS didn't find the target within
+        // `GWorldLocateDepth` hops — it only explores nodes up to that depth, NOT the
+        // whole reachable graph (verified in-game: depth 5 → not_reachable/visited
+        // 57,658, depth 8 → found at 7 hops/visited 130,860). So the target is often
+        // simply DEEPER than the current depth: raising 'Locate in GWorld depth' (and/or
+        // enabling Deep, which follows container struct-element pointers the normal walk
+        // skips) can make it reachable. The DLL doesn't distinguish a depth-capped miss
+        // from a truly-exhausted frontier, so we suggest the depth/Deep knobs first
+        // rather than claiming the object doesn't exist.
         "not_reachable"  => rootLabel == "GameEngine"
-            ? $"Not reachable from GameEngine — nothing in the engine's forward graph references this object (searched {path.Visited:N0}). An engine root reaches engine / GameInstance / LocalPlayer / engine-subsystem objects, but NOT most world actors: those live below GWorld, and the streaming/World-Partition recovery (via a level's actor list) only works from a World root. For a world actor, use 🌍 Locate in GWorld instead."
-            : $"Not reachable — nothing in the GWorld graph references this object, and it isn't in any of the world's levels' actor lists either (searched {path.Visited:N0} objects). Raising depth won't help. If it's a streaming/World-Partition actor, try once it's loaded/aggro'd; or 🔗 Related from an Instance Finder hit, or use Find Refs to find a holder.",
+            ? $"Not reachable from GameEngine within depth {GWorldLocateDepth} — no forward chain from the engine to this object was found (searched {path.Visited:N0}). Try raising 'Locate in GWorld depth' in Options ⚙ and/or enabling 'Deep (nested containers)'. Note: an engine root reaches engine / GameInstance / LocalPlayer / subsystems best; most WORLD actors are easier via 🌍 Locate in GWorld (its level-list recovery is World-root only)."
+            : $"Not reachable within depth {GWorldLocateDepth} — no forward pointer chain from GWorld to this object was found yet (searched {path.Visited:N0} objects), and it isn't in a level's actor list. It may be DEEPER than {GWorldLocateDepth} hops: raise 'Locate in GWorld depth' in Options ⚙, and/or enable 'Deep (nested containers)'. Still nothing? A streaming/World-Partition actor appears once loaded/aggro'd — or use 🔗 Related from an Instance Finder hit, or Find Refs to find a holder.",
         "deadline"       => $"{rootLabel} path search timed out at depth {GWorldLocateDepth} (visited {path.Visited:N0}). Try a smaller depth.",
         "visited_cap"    => $"{rootLabel} path search space too large at depth {GWorldLocateDepth} (visited {path.Visited:N0}). Try a smaller depth.",
         "cancelled"      => $"{rootLabel} path search cancelled.",

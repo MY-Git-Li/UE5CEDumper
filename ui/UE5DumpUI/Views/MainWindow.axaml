@@ -404,10 +404,14 @@
           <views:RelatedObjectsPanel DataContext="{Binding RelatedObjects}"/>
         </TabItem>
 
-        <!-- Fixed tail order (see MainTabIndex): the 3 experimental tabs (hidden
+        <!-- Fixed tail order (see MainTabIndex): the experimental tabs (hidden
              unless opted in via the System-tab credit checkbox), then Proxy
              Deploy (always 2nd-to-last), then System (always last). New tabs go
-             ABOVE this block so these five stay anchored at the end. -->
+             ABOVE this block so these stay anchored at the end. -->
+        <TabItem Header="{StaticResource str.Tab.DetectStats}" Tag="DetectStats"
+                 IsVisible="{Binding ExperimentalEnabled}">
+          <views:DetectStatsPanel DataContext="{Binding DetectStats}"/>
+        </TabItem>
         <TabItem Header="{StaticResource str.Tab.Snapshot}" Tag="Snapshot"
                  IsVisible="{Binding ExperimentalEnabled}">
           <views:SnapshotPanel DataContext="{Binding Snapshot}"/>

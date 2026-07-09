@@ -280,16 +280,14 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
             // pre-dedup set can hit ~6000 entries.
             _allRows = await Task.Run(() =>
             {
-                // Dedup key: defining class + prop name + offset. Keep first
-                // occurrence; the seed-query order is alphabetical-ish and
-                // not semantically meaningful, so a stable first-win policy
-                // is fine.
-                var dedup = new Dictionary<(string, string, int), ScoredPropertyRow>();
-                int totalRaw = 0;
+                // Pass 1 — dedup by (defining class, prop name, offset). Keep
+                // the first occurrence + its base ScoreResult; the seed-query
+                // order isn't semantically meaningful so first-win is fine.
+                var dedup = new Dictionary<(string, string, int),
+                                           (PropertySearchMatch m, PropertyScoringTable.ScoreResult s)>();
                 foreach (var r in results)
                 {
                     if (r?.Results == null) continue;
-                    totalRaw += r.Results.Count;
                     foreach (var m in r.Results)
                     {
                         var key = (
@@ -297,21 +295,36 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
                             m.PropName,
                             m.PropOffset);
                         if (dedup.ContainsKey(key)) continue;
-
-                        var s = PropertyScoringTable.Score(m);
-                        dedup[key] = new ScoredPropertyRow
-                        {
-                            Match              = m,
-                            FinalScore         = s.FinalScore,
-                            Category           = s.Category,
-                            KeywordHits        = s.KeywordHits,
-                            ClassBonus         = s.ClassBonus,
-                            IsUnusualLocation  = s.IsUnusualLocation,
-                        };
+                        dedup[key] = (m, PropertyScoringTable.Score(m));
                     }
                 }
 
-                var rows = new List<ScoredPropertyRow>(dedup.Values);
+                // Pass 2 — Current/Max stat-pair bonuses over the deduped set.
+                // This needs cross-field context within a class (a lone Score
+                // call can't see siblings), so it runs here, not in Score.
+                var pairBonuses = PropertyScoringTable.ComputeStatPairBonuses(
+                    dedup.Values.Select(v => v.m));
+
+                // Pass 3 — materialise rows with the combined score.
+                var rows = new List<ScoredPropertyRow>(dedup.Count);
+                foreach (var kv in dedup)
+                {
+                    var (m, s) = kv.Value;
+                    int pair = pairBonuses.TryGetValue(kv.Key, out var pb) ? pb : 0;
+                    rows.Add(new ScoredPropertyRow
+                    {
+                        Match              = m,
+                        FinalScore         = s.FinalScore + pair,
+                        Category           = s.Category,
+                        KeywordHits        = s.KeywordHits,
+                        ClassBonus         = s.ClassBonus,
+                        IsUnusualLocation  = s.IsUnusualLocation,
+                        StructuralBonus    = s.StructuralBonus,
+                        IsGasAttribute     = s.IsGasAttribute,
+                        PairBonus          = pair,
+                    });
+                }
+
                 rows.Sort((a, b) =>
                 {
                     // Unusual hits float to the top within equal-score

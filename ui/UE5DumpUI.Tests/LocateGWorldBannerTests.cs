@@ -25,8 +25,14 @@ public class LocateGWorldBannerTests
             => Task.FromResult(Next);
     }
 
+    // Depth 7 (>= RecommendedGWorldLocateDepth) so these banner tests don't trip
+    // the low-depth confirm gate (which, headless, returns false = cancel and would
+    // skip the search these tests exercise). The gate itself is covered separately.
     private static LiveWalkerViewModel MakeVm(PathStub stub)
-        => new(stub, new MockLoggingService(), new MockPlatformService(Path.GetTempPath()));
+        => new(stub, new MockLoggingService(), new MockPlatformService(Path.GetTempPath()))
+        {
+            GWorldLocateDepth = 7,
+        };
 
     [Fact]
     public async Task LocateInGWorld_NotReachable_RaisesBanner_AndHidesLogo()
@@ -91,8 +97,9 @@ public class LocateGWorldBannerTests
     public async Task LocateInGameEngine_NotReachable_BannerMentionsGameEngine()
     {
         // The engine-rooted variant must surface a GameEngine-specific reason (an
-        // engine root reaches engine-layer objects but not most world actors), so
-        // the user isn't told to "raise depth" or expect level-list recovery.
+        // engine root reaches engine-layer objects best; most world actors are easier
+        // via 🌍 Locate in GWorld). It still suggests raising depth / Deep, since a
+        // not_reachable is depth-bounded, not a proof of non-existence.
         var stub = new PathStub
         {
             Next = new GWorldPathResult { Found = false, Status = "not_reachable", Visited = 42 },
@@ -120,6 +127,33 @@ public class LocateGWorldBannerTests
 
         Assert.True(vm.HasLocateFailure);
         Assert.Contains("UGameEngine", vm.LocateFailureMessage);
+    }
+
+    [Fact]
+    public async Task LocateInGWorld_LowDepth_ConfirmGate_SkipsSearchOnCancel_ThenQuietForSession()
+    {
+        // depth < RecommendedGWorldLocateDepth (7) trips the confirm gate. Headless,
+        // ConfirmDialog returns false (no owner window) = "cancel", so the first
+        // low-depth locate skips the search entirely — no failure banner.
+        var stub = new PathStub
+        {
+            Next = new GWorldPathResult { Found = false, Status = "not_reachable", Visited = 1 },
+        };
+        var vm = new LiveWalkerViewModel(stub, new MockLoggingService(),
+            new MockPlatformService(Path.GetTempPath()))
+        {
+            GWorldLocateDepth = 5,   // below the threshold
+        };
+
+        await vm.LocateInGWorldAsync("0x1000", 0, null, stopAtParent: false,
+            ct: TestContext.Current.CancellationToken);
+        Assert.False(vm.HasLocateFailure);   // gate cancelled → search never ran
+
+        // Warned once → the gate stays quiet for the session, so a second low-depth
+        // locate proceeds and the stubbed not_reachable now raises the banner.
+        await vm.LocateInGWorldAsync("0x1000", 0, null, stopAtParent: false,
+            ct: TestContext.Current.CancellationToken);
+        Assert.True(vm.HasLocateFailure);
     }
 
     [Fact]

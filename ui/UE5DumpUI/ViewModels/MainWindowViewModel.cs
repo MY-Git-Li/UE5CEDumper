@@ -32,15 +32,16 @@ internal enum MainTabIndex
     GameClassFilter = 8,
     ClassStruct = 9,
     RelatedObjects = 10,
-    // Fixed tail order: the 3 experimental tabs (hidden unless opted in), then
+    // Fixed tail order: the experimental tabs (hidden unless opted in), then
     // Proxy Deploy (always 2nd-to-last), then System/Pointers (always last) —
-    // regardless of any future tab additions. When experimental is off the 3
+    // regardless of any future tab additions. When experimental is off these
     // tabs collapse, so the visible last two are Proxy Deploy + System.
-    Snapshot = 11,
-    SpcQuery = 12,
-    ClassPivot = 13,
-    ProxyDeploy = 14,
-    Pointers = 15,   // the "System" tab (str.Tab.Pointers = "System")
+    DetectStats = 11,   // "Detect Player Stats" (P4, experimental)
+    Snapshot = 12,
+    SpcQuery = 13,
+    ClassPivot = 14,
+    ProxyDeploy = 15,
+    Pointers = 16,   // the "System" tab (str.Tab.Pointers = "System")
 }
 
 /// <summary>
@@ -231,6 +232,11 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public InterestingPropertiesViewModel InterestingProperties { get; }
     public ValueSearchViewModel ValueSearch { get; }
     public RelatedObjectsViewModel RelatedObjects { get; }
+    /// <summary>Experimental "Detect Player Stats" tab (P4) — shortlists likely
+    /// HP/MP/Gold fields + confirms them live. Gated behind
+    /// <see cref="ExperimentalEnabled"/>. Non-null (no store dependency; the
+    /// snapshot signal is opt-in and degrades gracefully when the store is null).</summary>
+    public DetectStatsViewModel DetectStats { get; }
     public ConsoleViewModel Console { get; }
     public TeleportViewModel Teleport { get; }
     public ProxyDeployViewModel? ProxyDeploy { get; }
@@ -350,6 +356,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         InterestingProperties = new InterestingPropertiesViewModel(dump, log, platform);
         ValueSearch = new ValueSearchViewModel(dump, log);
         RelatedObjects = new RelatedObjectsViewModel(dump, log, platform);
+        // Detect Player Stats (P4). snapshotStore is optional — the behavioral
+        // signal is opt-in and no-ops (with a note) when it's null.
+        DetectStats = new DetectStatsViewModel(dump, log, snapshotStore);
         Console = new ConsoleViewModel(dump, log);
         Teleport = new TeleportViewModel(dump, log, platform, aobMaker, globalHotkeys, experimentalGate);
         if (snapshotStore != null)
@@ -553,6 +562,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 ValueSearch.SetEngineState(state);
                 InterestingFunctions.IsGWorldAvailable = state.HasGWorld;
                 InterestingProperties.IsGWorldAvailable = state.HasGWorld;
+                DetectStats.IsGWorldAvailable = state.HasGWorld;
                 Snapshot?.SetEngineState(state);
                 Spc?.SetEngineState(state);
                 Pivot?.SetEngineState(state);
@@ -1205,6 +1215,57 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _log.Error($"InterestingProperties clipboard copy failed: {ex.Message}", ex);
+            }
+        };
+
+        // --- Detect Player Stats (P4) — same class->live-instance->GWorld /
+        //     Instance Finder / clipboard handoffs as Interesting Properties. ---
+        DetectStats.LocateInGWorld += async (className) =>
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(className)) return;
+                var instances = await _dump.FindInstancesAsync(className, exactMatch: true, limit: 5);
+                string? liveAddr = null;
+                foreach (var inst in instances.Instances)
+                {
+                    if (string.IsNullOrEmpty(inst.Address)) continue;
+                    if (inst.Name.StartsWith("Default__", StringComparison.Ordinal)) continue;
+                    liveAddr = inst.Address;
+                    break;
+                }
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                if (string.IsNullOrEmpty(liveAddr))
+                {
+                    LiveWalker.StatusText = $"No live (non-CDO) instance of {className} to locate in GWorld.";
+                    return;
+                }
+                await LiveWalker.LocateInGWorldAsync(liveAddr, 0, null, stopAtParent: true);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"DetectStats LocateInGWorld handler error: {className}", ex);
+            }
+        };
+        DetectStats.NavigateToInstanceFinder += async (className) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.InstanceFinder;
+                await InstanceFinder.SearchForClassAsync(className);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"DetectStats NavigateToInstanceFinder handler error: {className}", ex);
+            }
+        };
+        DetectStats.RequestCopyText += async (text) =>
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            try { await _platform.CopyToClipboardAsync(text); }
+            catch (Exception ex)
+            {
+                _log.Error($"DetectStats clipboard copy failed: {ex.Message}", ex);
             }
         };
 
@@ -2209,6 +2270,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ValueSearch.SetEngineState(state);
         InterestingFunctions.IsGWorldAvailable = state.HasGWorld;
         InterestingProperties.IsGWorldAvailable = state.HasGWorld;
+        DetectStats.IsGWorldAvailable = state.HasGWorld;
         Teleport.SetConnected(true);   // refresh markers once the DLL is scanned
         Teleport.SetEngineState(state);
         Snapshot?.SetEngineState(state);
