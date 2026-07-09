@@ -201,6 +201,12 @@ public class WalkClassBatchEquivalenceTests
                         _                                  => "",
                     },
                     BoolFieldMask    = typeName == "BoolProperty" ? (1 << (j % 8)) : 0,
+                    // Exercise the prop_flags (hex) + array_dim JSONL emit —
+                    // varied non-zero flags + occasional static-array dim so
+                    // both new conditional-emit branches are covered by the
+                    // batch↔fallback byte-equivalence assertion.
+                    PropertyFlags    = 0x0040000000000001UL | ((ulong)j << 8),
+                    ArrayDim         = (j % 4 == 3) ? 4 : 1,
                 });
 
                 offset += 16;

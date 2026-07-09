@@ -142,13 +142,52 @@ public static class PropertyScoringTable
         "IsImmortal", "CanBeDamaged", "Invincible", "Invulnerable",
     };
 
+    // ------------------------------------------------------------------
+    // Structural-signal tuning (P2a). Applied on top of keyword +
+    // class-location scoring using ONLY data search_properties already
+    // carries (PropType + StructType) — no new wire fields. PropertyFlags
+    // gating (SaveGame/BlueprintVisible/Transient) is a separate follow-up
+    // (P2b) that needs prop_flags added to the search_properties response.
+    // ------------------------------------------------------------------
+
+    /// <summary>UScriptStruct name of a GAS gameplay attribute. An
+    /// FGameplayAttributeData in an AttributeSet is a near-certain gameplay
+    /// stat (HP/Mana/Stamina/Attack/…).</summary>
+    public const string GasAttributeStructType = "GameplayAttributeData";
+    /// <summary>Boost for a GAS attribute — enough to clear the threshold on
+    /// its own, so a GAS stat whose name didn't hit a keyword still surfaces.</summary>
+    public const int GasAttributeBonus = 4;
+    /// <summary>A value-category keyword (Stats/Resources/Combat/Movement) on a
+    /// container / pointer / delegate type is usually a holder or label, not
+    /// the live number. Gentle nudge, never enough to bury a multi-signal hit.</summary>
+    public const int NonValueTypePenalty = -1;
+    /// <summary>A Current/Max stat family within one class (Health + MaxHealth)
+    /// is a strong "real gameplay stat" signal — boost every family member.</summary>
+    public const int StatPairBonus = 2;
+
+    // PropertyFlags gating (P2b). Persistent / designer-facing fields are more
+    // likely a real cheat target; editor-only fields never are. Conservative
+    // on purpose — NO Transient/Net penalty, since current HP is very often
+    // transient + replicated (GAS-derived). Needs the DLL's prop_flags field
+    // (search_properties/_batch, build 2017+); 0 on older DLLs → no effect.
+    public const int SaveGameBonus = 2;          // CPF_SaveGame — persisted player data (Gold/Level/…)
+    public const int BlueprintVisibleBonus = 1;  // CPF_BlueprintVisible — designer/BP exposed
+    public const int EditorOnlyPenalty = -4;     // CPF_EditorOnly — never a live runtime value
+
+    // UE EPropertyFlags bits we key on (stable across UE4/UE5, from ObjectMacros.h).
+    private const ulong CPF_BlueprintVisible = 0x0000000000000004UL;
+    private const ulong CPF_SaveGame         = 0x0000000001000000UL;
+    private const ulong CPF_EditorOnly       = 0x0000000800000000UL;
+
     /// <summary>Result of scoring one property.</summary>
     public readonly record struct ScoreResult(
         int FinalScore,
         PropertyCategory Category,
         int KeywordHits,
         int ClassBonus,
-        bool IsUnusualLocation);
+        bool IsUnusualLocation,
+        int StructuralBonus = 0,
+        bool IsGasAttribute = false);
 
     /// <summary>
     /// Score one property entry. Mirrors <see cref="KeywordScoringTable.Score"/>
@@ -197,16 +236,48 @@ public static class PropertyScoringTable
         // are the whole point of B'.
         var (classBonus, isUnusual) = ClassLocationScorer.PropertyBonus(match.ClassName);
 
+        // --- Structural signals (P2a): type-aware + GAS refinement. Uses
+        // only PropType + StructType, both already on PropertySearchMatch. ---
+        bool isGas = string.Equals(match.StructType, GasAttributeStructType,
+                                   StringComparison.Ordinal);
+        int structuralBonus = 0;
+        if (isGas)
+        {
+            structuralBonus += GasAttributeBonus;
+            // Default an un-categorised GAS attribute (name didn't hit a
+            // keyword bucket) to Stats so it still surfaces + gets a chip.
+            if (category == PropertyCategory.Other)
+                category = PropertyCategory.Stats;
+        }
+        else if (IsValueCategory(category) && IsNonValueType(match.PropType))
+        {
+            structuralBonus += NonValueTypePenalty;
+        }
+
+        // PropertyFlags gating (P2b): persistent / designer-facing fields are
+        // more likely a live cheat target; editor-only fields never are.
+        // Additive on top of GAS/type signals; a no-op (flags 0) on older DLLs
+        // that don't emit prop_flags, so this can't regress existing scores.
+        ulong flags = match.PropertyFlags;
+        if ((flags & CPF_EditorOnly) != 0)
+            structuralBonus += EditorOnlyPenalty;
+        if ((flags & CPF_SaveGame) != 0)
+            structuralBonus += SaveGameBonus;
+        else if ((flags & CPF_BlueprintVisible) != 0)
+            structuralBonus += BlueprintVisibleBonus;
+
         int keywordSum = statsScore + combatScore + resourcesScore +
                          movementScore + utilityScore;
-        int finalScore = keywordSum + classBonus;
+        int finalScore = keywordSum + classBonus + structuralBonus;
 
         return new ScoreResult(
             FinalScore:        finalScore,
             Category:          category,
             KeywordHits:       totalKeywordHits,
             ClassBonus:        classBonus,
-            IsUnusualLocation: isUnusual);
+            IsUnusualLocation: isUnusual,
+            StructuralBonus:   structuralBonus,
+            IsGasAttribute:    isGas);
     }
 
     /// <summary>Subset-match: keyword counts as a hit when ALL its
@@ -227,6 +298,112 @@ public static class PropertyScoringTable
             if (allPresent) hits++;
         }
         return hits;
+    }
+
+    // ------------------------------------------------------------------
+    // Structural helpers (P2a) — type prior + Current/Max stat pairing
+    // ------------------------------------------------------------------
+
+    /// <summary>Categories whose real cheat target is a numeric scalar (or a
+    /// GAS attribute), so a non-value type is evidence AGAINST the match.</summary>
+    private static bool IsValueCategory(PropertyCategory c) =>
+        c is PropertyCategory.Stats or PropertyCategory.Resources
+          or PropertyCategory.Combat or PropertyCategory.Movement;
+
+    /// <summary>UE property types that can't themselves be the scalar cheat
+    /// value — containers, pointers, interfaces, delegates. Numeric scalars,
+    /// bool, enum, name/string and (non-GAS) structs stay neutral.</summary>
+    private static bool IsNonValueType(string propType) => propType switch
+    {
+        "ArrayProperty" or "MapProperty" or "SetProperty"
+            or "ObjectProperty" or "ClassProperty" or "WeakObjectProperty"
+            or "SoftObjectProperty" or "SoftClassProperty" or "LazyObjectProperty"
+            or "InterfaceProperty"
+            or "DelegateProperty" or "MulticastInlineDelegateProperty"
+            or "MulticastSparseDelegateProperty" => true,
+        _ => false,
+    };
+
+    /// <summary>Qualifier tokens stripped from a stat name to find its stem.
+    /// A name carrying one at either end is a "variant" (MaxHealth,
+    /// CurrentMana, BaseDamage) rather than the plain base (Health).</summary>
+    private static readonly HashSet<string> StatQualifierTokens =
+        new(StringComparer.Ordinal)
+        {
+            // Both abbreviated and full-word forms — real games mix them
+            // (Max/MaxHealth vs Maximum/MaximumHealth, seen in TQ2's
+            // GrimAttributeSet* full-word naming).
+            "max", "maximum", "min", "minimum", "current", "cur", "base",
+            "total", "start", "starting", "initial", "default",
+        };
+
+    /// <summary>Strip leading/trailing qualifier tokens (Max/Current/Base/…)
+    /// to reveal the shared stat stem. Returns ("", false) when the name is
+    /// only qualifiers (e.g. "Max") or empty; <c>isVariant</c> is true when a
+    /// qualifier was stripped.</summary>
+    internal static (string stem, bool isVariant) NormaliseStatStem(string propName)
+    {
+        var toks = KeywordTokenizer.Tokenize(propName);
+        if (toks.Length == 0) return ("", false);
+        int lo = 0, hi = toks.Length;
+        bool variant = false;
+        while (lo < hi && StatQualifierTokens.Contains(toks[lo]))     { variant = true; lo++; }
+        while (hi > lo && StatQualifierTokens.Contains(toks[hi - 1])) { variant = true; hi--; }
+        if (lo >= hi) return ("", false);
+        return (string.Join('.', toks[lo..hi]), variant);
+    }
+
+    /// <summary>
+    /// Post-scoring pass: within each defining class, find Current/Max stat
+    /// families (≥2 fields sharing a stem where at least one is a
+    /// Max/Current/… variant — e.g. Health + MaxHealth, or CurrentHP + MaxHP)
+    /// and return a <see cref="StatPairBonus"/> per member. Keyed by
+    /// (definingClass, propName, offset) to match the finder's dedup key.
+    /// A paired stem is a strong "this is a live gameplay stat" signal that a
+    /// per-field score can't see (it needs sibling context).
+    /// </summary>
+    public static Dictionary<(string cls, string name, int offset), int>
+        ComputeStatPairBonuses(IEnumerable<PropertySearchMatch> matches)
+    {
+        static string DefClass(PropertySearchMatch m) =>
+            string.IsNullOrEmpty(m.DefiningClassName) ? m.ClassName : m.DefiningClassName;
+
+        var byClass = new Dictionary<string, List<PropertySearchMatch>>(StringComparer.Ordinal);
+        foreach (var m in matches)
+        {
+            var cls = DefClass(m);
+            if (string.IsNullOrEmpty(cls) || string.IsNullOrEmpty(m.PropName)) continue;
+            if (!byClass.TryGetValue(cls, out var list)) byClass[cls] = list = new();
+            list.Add(m);
+        }
+
+        var bonuses = new Dictionary<(string, string, int), int>();
+        foreach (var list in byClass.Values)
+        {
+            // stem -> (any member is a variant, members)
+            var families =
+                new Dictionary<string, (bool hasVariant, List<PropertySearchMatch> members)>(
+                    StringComparer.OrdinalIgnoreCase);
+            foreach (var m in list)
+            {
+                var (stem, isVariant) = NormaliseStatStem(m.PropName);
+                if (string.IsNullOrEmpty(stem)) continue;
+                if (!families.TryGetValue(stem, out var fam))
+                    fam = (false, new List<PropertySearchMatch>());
+                fam.members.Add(m);
+                fam.hasVariant |= isVariant;
+                families[stem] = fam;
+            }
+            foreach (var fam in families.Values)
+            {
+                // Need ≥2 fields sharing a stem AND at least one Max/Current/…
+                // variant, so two unqualified siblings don't spuriously pair.
+                if (fam.members.Count < 2 || !fam.hasVariant) continue;
+                foreach (var m in fam.members)
+                    bonuses[(DefClass(m), m.PropName, m.PropOffset)] = StatPairBonus;
+            }
+        }
+        return bonuses;
     }
 
     /// <summary>Display label for a property category.</summary>

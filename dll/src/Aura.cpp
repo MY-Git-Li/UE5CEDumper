@@ -4116,6 +4116,7 @@ PropertySearchResult SearchProperties(
             // class's preview is still valid since the field is
             // identical).
             match.fieldAddr      = field.Address;
+            match.propertyFlags  = field.PropertyFlags;
             match.boolFieldMask  = field.boolFieldMask;
             match.keyType        = field.keyType;
             match.valueType      = field.valueType;
@@ -4471,6 +4472,7 @@ std::vector<PropertySearchResult> SearchPropertiesBatch(
                 match.definingClassPath = definingPath;
                 match.inheritedByCount  = 0;
                 match.fieldAddr      = field.Address;
+                match.propertyFlags  = field.PropertyFlags;
                 match.boolFieldMask  = field.boolFieldMask;
                 match.keyType        = field.keyType;
                 match.valueType      = field.valueType;

@@ -34,6 +34,11 @@ public partial class PropertySearchMatch : ObservableObject
     public string InnerType { get; set; } = "";
     public string Preview { get; set; } = "";
 
+    /// <summary>CPF_* reflection flags (SaveGame / BlueprintVisible /
+    /// EditorOnly / …). 0 when absent (older DLL or all-default field).
+    /// Feeds the auto-detect scorer's PropertyFlags gating.</summary>
+    public ulong PropertyFlags { get; set; }
+
     // === Inheritance-aware fields (build 610+) ===
     public string DefiningClassName { get; set; } = "";
     public string DefiningClassAddr { get; set; } = "";

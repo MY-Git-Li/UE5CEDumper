@@ -328,11 +328,26 @@ public sealed class DumpService : IDumpService
                     ElemStructType = fo["elem_struct_type"]?.GetValue<string>() ?? "",
                     EnumName = fo["enum_name"]?.GetValue<string>() ?? "",
                     BoolFieldMask = fo["bool_mask"]?.GetValue<int>() ?? 0,
+                    PropertyFlags = ParseFlagsHex(fo["prop_flags"]?.GetValue<string>()),
+                    ArrayDim = fo["array_dim"]?.GetValue<int>() ?? 1,
                 });
             }
         }
 
         return model;
+    }
+
+    /// <summary>Parse a "0x…"-prefixed (or bare) hex string into a
+    /// <see cref="ulong"/>; empty/null/malformed → 0. Used for the
+    /// uint64 <c>prop_flags</c> field, which is wired as a hex string so
+    /// the high CPF_* bits survive without JSON-number precision loss.</summary>
+    private static ulong ParseFlagsHex(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return 0;
+        var span = s.AsSpan();
+        if (span.StartsWith("0x") || span.StartsWith("0X")) span = span[2..];
+        return ulong.TryParse(span, System.Globalization.NumberStyles.HexNumber,
+            System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0;
     }
 
     public async Task<List<ClassInfoModel>> WalkClassesBatchAsync(string[] addrs, CancellationToken ct = default)
@@ -1510,6 +1525,7 @@ public sealed class DumpService : IDumpService
                     PropSize   = obj["prop_size"]?.GetValue<int>() ?? 0,
                     StructType = obj["struct_type"]?.GetValue<string>() ?? "",
                     InnerType  = obj["inner_type"]?.GetValue<string>() ?? "",
+                    PropertyFlags = ParseFlagsHex(obj["prop_flags"]?.GetValue<string>()),
                     Preview    = obj["preview"]?.GetValue<string>() ?? "",
                     // Inheritance-aware fields (build 610+) -- back-compat
                     // with older DLLs that didn't emit these: defaults to
@@ -1594,6 +1610,7 @@ public sealed class DumpService : IDumpService
                             PropSize   = obj["prop_size"]?.GetValue<int>() ?? 0,
                             StructType = obj["struct_type"]?.GetValue<string>() ?? "",
                             InnerType  = obj["inner_type"]?.GetValue<string>() ?? "",
+                            PropertyFlags = ParseFlagsHex(obj["prop_flags"]?.GetValue<string>()),
                             // Preview intentionally omitted — batch path
                             // skips DLL-side Phase-2 instance scan; field
                             // stays empty by default.

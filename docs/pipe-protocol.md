@@ -537,7 +537,8 @@ across snapshots regardless of reordering, plus its numeric inner fields:
         "name":   "Health",
         "type":   "FloatProperty",
         "offset": 720,
-        "size":   4
+        "size":   4,
+        "prop_flags": "0x0040000000000001"
       },
       {
         "addr":   "7FF601234020",
@@ -550,6 +551,19 @@ across snapshots regardless of reordering, plus its numeric inner fields:
   }
 }
 ```
+
+Extended per-field keys are emitted **only when non-default**: `struct_type`,
+`obj_class`, `inner_type`, `inner_struct_type`, `inner_obj_class`,
+`key_type`/`key_struct_type`, `value_type`/`value_struct_type`,
+`elem_type`/`elem_struct_type`, `enum_name`, `bool_mask`, plus **`prop_flags`**
+(uint64 `CPF_*` reflection flags — `SaveGame`/`BlueprintVisible`/`Net`/
+`Transient`/`EditConst`/… — as an `"0x…"` hex string, omitted when 0) and
+**`array_dim`** (static C-array dimension `Type Foo[N]`, omitted when 1). The
+full field footprint is `size * array_dim`. `walk_class_batch` emits each class
+object through the same serialiser, so these keys appear identically there and
+in the `Dump All Metadata` JSONL. `search_properties` / `search_properties_batch`
+match rows also carry **`prop_flags`** (same `"0x…"` hex form, omitted when 0) so
+the Interesting Properties scorer can gate on `SaveGame`/`BlueprintVisible`/`EditorOnly`.
 
 ### walk_instance
 

@@ -26,4 +26,8 @@ public sealed class FieldInfoModel
     public string ElemStructType { get; init; } = "";    // SetProperty element struct name
     public string EnumName { get; init; } = "";          // EnumProperty/ByteProperty -> UEnum name
     public int BoolFieldMask { get; init; }              // BoolProperty -> FieldMask byte
+
+    // Reflection / layout metadata (feed the auto-detect scorer)
+    public ulong PropertyFlags { get; init; }            // CPF_* flags (SaveGame/BlueprintVisible/Net/Transient/EditConst/...); 0 when absent
+    public int ArrayDim { get; init; } = 1;              // Static C-array dim (Type Foo[N]); 1 = scalar. Full footprint = Size * ArrayDim.
 }

@@ -96,6 +96,10 @@ public class PropertyScoringTableTests
     // === Build 686 — Phase 2 function-side analyzer surfaced Enemy. ===
     [InlineData("BP_Enemy_C",            false, 2)]  // Enemy class
     [InlineData("EnemyBase",             false, 2)]  // Enemy-prefix
+    // === 7-game cross-game analysis (2026-07-09): Health / Damage +2. ===
+    [InlineData("BP_HealthComponent_C",  false, 2)]  // Health class
+    [InlineData("UDamageDealer",         false, 2)]  // Damage class
+    [InlineData("GrimAttributeSetHealth",false, 5)]  // AttributeSet(+3) + Health(+2) stack
     public void PropertyBonus_ClassLocation(
         string className, bool expectedUnusual, int expectedBonus)
     {
@@ -228,8 +232,192 @@ public class PropertyScoringTableTests
     [InlineData("BP_Enemy_C",       2)]  // Enemy +2
     [InlineData("WeaponBase",       2)]  // Weapon +2 (mirror of property side)
     [InlineData("EnemyWeapon_C",    4)]  // both stack: Enemy(+2) + Weapon(+2)
+    // === 7-game cross-game analysis (2026-07-09): Health / Damage +2. ===
+    [InlineData("HealthComponent",  2)]  // Health +2
+    [InlineData("BP_DamageZone_C",  2)]  // Damage +2
     public void FunctionBonus_PreservesExistingContract(string className, int expected)
     {
         Assert.Equal(expected, ClassLocationScorer.FunctionBonus(className));
+    }
+
+    // ==================================================================
+    // Structural signals (P2a): GAS attribute + type prior + stat pairing.
+    // These use only PropType + StructType (already on PropertySearchMatch),
+    // so they run with no new wire data.
+    // ==================================================================
+
+    private static PropertySearchMatch MakeEx(string propName, string className,
+        string propType, string structType = "", int offset = 0x100, ulong propertyFlags = 0)
+        => new()
+        {
+            PropName          = propName,
+            ClassName         = className,
+            DefiningClassName = className,
+            PropType          = propType,
+            StructType        = structType,
+            PropOffset        = offset,
+            PropSize          = 4,
+            PropertyFlags     = propertyFlags,
+        };
+
+    // UE EPropertyFlags bits used by the P2b gating tests.
+    private const ulong CPF_BlueprintVisible = 0x0000000000000004UL;
+    private const ulong CPF_SaveGame         = 0x0000000001000000UL;
+    private const ulong CPF_EditorOnly       = 0x0000000800000000UL;
+
+    [Fact]
+    public void Score_SaveGameFlag_BoostsPersistentField()
+    {
+        var save  = PropertyScoringTable.Score(
+            MakeEx("Gold", "BP_Player_C", "IntProperty", propertyFlags: CPF_SaveGame));
+        var plain = PropertyScoringTable.Score(
+            MakeEx("Gold", "BP_Player_C", "IntProperty"));
+
+        Assert.Equal(PropertyScoringTable.SaveGameBonus, save.StructuralBonus);
+        Assert.True(save.FinalScore > plain.FinalScore);
+    }
+
+    [Fact]
+    public void Score_EditorOnlyFlag_IsPenalised()
+    {
+        var r = PropertyScoringTable.Score(
+            MakeEx("Health", "BP_Player_C", "FloatProperty", propertyFlags: CPF_EditorOnly));
+        Assert.Equal(PropertyScoringTable.EditorOnlyPenalty, r.StructuralBonus);
+    }
+
+    [Fact]
+    public void Score_BlueprintVisibleFlag_MildBoost_WhenNotSaveGame()
+    {
+        var r = PropertyScoringTable.Score(
+            MakeEx("Mana", "BP_Player_C", "FloatProperty", propertyFlags: CPF_BlueprintVisible));
+        Assert.Equal(PropertyScoringTable.BlueprintVisibleBonus, r.StructuralBonus);
+    }
+
+    [Fact]
+    public void Score_SaveGameTakesPrecedenceOverBlueprintVisible()
+    {
+        // Both set → SaveGame wins (else-if) rather than double-counting.
+        var r = PropertyScoringTable.Score(
+            MakeEx("Level", "PlayerState", "IntProperty",
+                   propertyFlags: CPF_SaveGame | CPF_BlueprintVisible));
+        Assert.Equal(PropertyScoringTable.SaveGameBonus, r.StructuralBonus);
+    }
+
+    [Fact]
+    public void Score_GasAttribute_BoostsAndDefaultsToStats()
+    {
+        // An FGameplayAttributeData whose name is NOT a keyword still surfaces
+        // as a Stats attribute purely from its struct type.
+        var r = PropertyScoringTable.Score(
+            MakeEx("Toughness", "MyAttributeSet", "StructProperty", "GameplayAttributeData"));
+
+        Assert.True(r.IsGasAttribute);
+        Assert.Equal(PropertyCategory.Stats, r.Category);
+        Assert.Equal(PropertyScoringTable.GasAttributeBonus, r.StructuralBonus);
+        Assert.True(r.FinalScore >= PropertyScoringTable.InterestingThreshold);
+    }
+
+    [Fact]
+    public void Score_GasHealth_OutscoresPlainFloatHealth()
+    {
+        var gas = PropertyScoringTable.Score(
+            MakeEx("Health", "MyAttributeSet", "StructProperty", "GameplayAttributeData"));
+        var plain = PropertyScoringTable.Score(
+            MakeEx("Health", "MyAttributeSet", "FloatProperty"));
+
+        Assert.True(gas.FinalScore > plain.FinalScore);
+        Assert.Equal(PropertyCategory.Stats, gas.Category);
+    }
+
+    [Fact]
+    public void Score_ValueKeywordOnPointerType_GetsGentlePenalty()
+    {
+        // "Health" on an ObjectProperty (a HealthComponent pointer) is a
+        // holder, not the live number → -1 structural nudge.
+        var obj   = PropertyScoringTable.Score(Make("Health", "BP_Player_C", propType: "ObjectProperty"));
+        var value = PropertyScoringTable.Score(Make("Health", "BP_Player_C", propType: "FloatProperty"));
+
+        Assert.Equal(PropertyScoringTable.NonValueTypePenalty, obj.StructuralBonus);
+        Assert.Equal(0, value.StructuralBonus);
+        Assert.True(value.FinalScore > obj.FinalScore);
+    }
+
+    [Fact]
+    public void Score_NumericValueType_StaysNeutral_RegressionGuard()
+    {
+        // The exact-score contract tests above rely on FloatProperty staying
+        // neutral (structuralBonus 0) so P2a doesn't shift historical scores.
+        var r = PropertyScoringTable.Score(Make("Health", "AnimMan_Player_C")); // FloatProperty
+        Assert.Equal(0, r.StructuralBonus);
+        Assert.Equal(7, r.FinalScore); // Stats(5) + Player(2) — unchanged by P2a
+    }
+
+    [Theory]
+    [InlineData("Health",        false, "health")]
+    [InlineData("MaxHealth",     true,  "health")]
+    [InlineData("MaximumHealth", true,  "health")]  // TQ2 full-word naming
+    [InlineData("MinimumMana",   true,  "mana")]
+    [InlineData("CurrentMana",   true,  "mana")]
+    [InlineData("HealthMax",     true,  "health")]
+    [InlineData("BaseDamage",    true,  "damage")]
+    [InlineData("Max",           false, "")]      // all-qualifier → no stem
+    [InlineData("Gold",          false, "gold")]
+    public void NormaliseStatStem_StripsQualifiers(string name, bool expectVariant, string expectStem)
+    {
+        var (stem, isVariant) = PropertyScoringTable.NormaliseStatStem(name);
+        Assert.Equal(expectStem, stem);
+        Assert.Equal(expectVariant, isVariant);
+    }
+
+    [Fact]
+    public void ComputeStatPairBonuses_PairsBaseAndMax_NotLoneFields()
+    {
+        var matches = new[]
+        {
+            Make("Health",    "BP_Player_C", offset: 0x10),
+            Make("MaxHealth", "BP_Player_C", offset: 0x14),
+            Make("Gold",      "BP_Player_C", offset: 0x20), // lone — no variant sibling
+        };
+        var bonuses = PropertyScoringTable.ComputeStatPairBonuses(matches);
+
+        Assert.Equal(PropertyScoringTable.StatPairBonus, bonuses[("BP_Player_C", "Health", 0x10)]);
+        Assert.Equal(PropertyScoringTable.StatPairBonus, bonuses[("BP_Player_C", "MaxHealth", 0x14)]);
+        Assert.False(bonuses.ContainsKey(("BP_Player_C", "Gold", 0x20)));
+    }
+
+    [Fact]
+    public void ComputeStatPairBonuses_TwoVariantsSameStem_BothBoosted()
+    {
+        var matches = new[]
+        {
+            Make("CurrentHP", "PawnState", offset: 0x10),
+            Make("MaxHP",     "PawnState", offset: 0x14),
+        };
+        var bonuses = PropertyScoringTable.ComputeStatPairBonuses(matches);
+        Assert.Equal(2, bonuses.Count);
+    }
+
+    [Fact]
+    public void ComputeStatPairBonuses_DifferentClasses_DoNotPair()
+    {
+        var matches = new[]
+        {
+            Make("Health",    "ClassA", offset: 0x10),
+            Make("MaxHealth", "ClassB", offset: 0x14),
+        };
+        Assert.Empty(PropertyScoringTable.ComputeStatPairBonuses(matches));
+    }
+
+    [Fact]
+    public void ComputeStatPairBonuses_FullWordMaximumCurrent_Pairs()
+    {
+        // Real TQ2 case: GrimAttributeSetHealth has MaximumHealth + CurrentHealth
+        // (full-word qualifiers). Both must pair.
+        var matches = new[]
+        {
+            Make("MaximumHealth", "GrimAttributeSetHealth", offset: 0x10),
+            Make("CurrentHealth", "GrimAttributeSetHealth", offset: 0x14),
+        };
+        Assert.Equal(2, PropertyScoringTable.ComputeStatPairBonuses(matches).Count);
     }
 }

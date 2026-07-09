@@ -514,6 +514,7 @@ struct PropertyMatch {
     // Preview support — populated in Phase 2 of SearchProperties
     std::string preview;           // Inline value preview from a representative instance
     uintptr_t   fieldAddr   = 0;   // FField/FProperty address (for enum resolve)
+    uint64_t    propertyFlags = 0; // CPF_* reflection flags (SaveGame/BlueprintVisible/EditorOnly/...) — auto-detect scorer gating
     uint8_t     boolFieldMask  = 0; // BoolProperty: FieldMask byte
     uint8_t     boolByteOffset = 0; // BoolProperty: ByteOffset within property
     uintptr_t   enumAddr    = 0;   // EnumProperty: UEnum* for name resolution
