@@ -2046,11 +2046,42 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// prominent in-grid banner (a user-initiated cancel keeps the current view and
     /// uses the mild top status line instead).
     /// </summary>
+    /// <summary>Depth below which deep objects (e.g. GAS attributes, ~7 hops from
+    /// GWorld — verified TQ2) are likely missed, so a locate at a smaller depth
+    /// warrants a heads-up before it runs.</summary>
+    private const int RecommendedGWorldLocateDepth = 7;
+
+    /// <summary>Session-scoped: the low-depth locate warning is shown at most once
+    /// (firing on every locate would be noise — the default depth resolves most
+    /// objects). Reset only by restarting the app.</summary>
+    private bool _lowDepthLocateWarned;
+
     public async Task LocateInGWorldAsync(string? objectAddr, int scrollFieldOffset,
                                           string? scrollFieldName, bool stopAtParent,
                                           CancellationToken ct = default, string rootKind = "gworld")
     {
         if (string.IsNullOrEmpty(objectAddr)) return;
+
+        // Proactive heads-up (once per session) when the depth is below where deep
+        // objects typically sit — the BFS is depth-bounded, so a too-small depth
+        // silently misses reachable-but-deep targets (GAS attributes are ~7 hops;
+        // verified TQ2: found at depth 8, missed at depth 5). Ask before wasting a
+        // search; the user can Cancel to raise the depth / enable Deep first.
+        if (GWorldLocateDepth < RecommendedGWorldLocateDepth && !_lowDepthLocateWarned)
+        {
+            _lowDepthLocateWarned = true;   // set first so a re-entrant locate can't re-ask
+            bool proceed = await UE5DumpUI.Views.ConfirmDialog.ShowAsync(
+                "Locate depth may be too small",
+                $"'Locate in GWorld depth' is set to {GWorldLocateDepth}. The search is "
+                + $"depth-bounded, so deeper objects — e.g. GAS attributes sit ~{RecommendedGWorldLocateDepth} "
+                + "hops from GWorld — may not be found at this depth. Raise 'Locate in GWorld depth' "
+                + "in Options ⚙ (and/or enable Deep) for a better chance, or proceed anyway at depth "
+                + $"{GWorldLocateDepth}?",
+                confirmText: "Proceed anyway",
+                cancelText: "Cancel");
+            if (!proceed) return;
+        }
+
         // User-facing label for the chosen BFS root ("GWorld" vs "GameEngine").
         string rootLabel = rootKind == "engine" ? "GameEngine" : "GWorld";
         LocateFailureTitle = $"Locate in {rootLabel} failed";
