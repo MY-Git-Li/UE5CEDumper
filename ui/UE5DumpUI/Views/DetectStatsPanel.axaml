@@ -13,16 +13,22 @@
                  Foreground="#E8C860" FontWeight="Bold" TextWrapping="Wrap"/>
     </Border>
 
-    <!-- Toolbar: Detect + snapshot opt-in -->
+    <!-- Toolbar: Detect + snapshot opt-in + keyword filter -->
     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8">
       <Button Content="{StaticResource str.Detect.Run}"
               Command="{Binding DetectCommand}"
               IsEnabled="{Binding !IsBusy}"
+              ToolTip.Tip="{StaticResource str.Tip.Detect.Run}"
               Classes="accent" Padding="12,4"/>
       <CheckBox Content="{StaticResource str.Detect.UseSnapshot}"
                 IsChecked="{Binding UseSnapshotSignal}"
                 IsEnabled="{Binding !IsBusy}"
+                ToolTip.Tip="{StaticResource str.Tip.Detect.UseSnapshot}"
                 VerticalAlignment="Center"/>
+      <TextBox Text="{Binding FilterText}"
+               PlaceholderText="{StaticResource str.Detect.FilterHint}"
+               ToolTip.Tip="{StaticResource str.Tip.Detect.Filter}"
+               Width="260" Padding="4,2" VerticalAlignment="Center"/>
     </StackPanel>
 
     <!-- Status + indeterminate progress -->
@@ -78,7 +84,10 @@
                             Width="80" CanUserSort="True"/>
         <DataGridTextColumn Header="{StaticResource str.Detect.ColSignals}"
                             Binding="{Binding SignalSummary}"
-                            Width="260" MinWidth="140" CanUserSort="False"/>
+                            Width="240" MinWidth="140" CanUserSort="False"/>
+        <DataGridTextColumn Header="{StaticResource str.Detect.ColChange}"
+                            Binding="{Binding SnapshotChange}"
+                            Width="160" MinWidth="90" CanUserSort="False"/>
         <DataGridTemplateColumn Header="" Width="Auto" CanUserResize="False" CanUserSort="False">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:DetectedStat">
@@ -88,18 +97,21 @@
                         Command="{Binding $parent[DataGrid].((vm:DetectStatsViewModel)DataContext).LocateRowInGWorldCommand}"
                         CommandParameter="{Binding}"
                         IsEnabled="{Binding $parent[DataGrid].((vm:DetectStatsViewModel)DataContext).IsGWorldAvailable}"
+                        ToolTip.Tip="{StaticResource str.Tip.Detect.GWorld}"
                         Foreground="#C586C0" Background="Transparent"
                         BorderThickness="1" BorderBrush="#C586C0"
                         Padding="6,2" FontSize="11" Cursor="Hand"/>
                 <Button Content="{StaticResource str.PropertySearch.FindInstances}"
                         Command="{Binding $parent[DataGrid].((vm:DetectStatsViewModel)DataContext).OpenInInstanceFinderCommand}"
                         CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.Detect.Finder}"
                         Foreground="#569CD6" Background="Transparent"
                         BorderThickness="1" BorderBrush="#569CD6"
                         Padding="6,2" FontSize="11" Cursor="Hand"/>
                 <Button Content="{StaticResource str.Detect.CopyName}"
                         Command="{Binding $parent[DataGrid].((vm:DetectStatsViewModel)DataContext).CopyPropertyNameCommand}"
                         CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.Detect.Copy}"
                         Foreground="#DCDCAA" Background="Transparent"
                         BorderThickness="1" BorderBrush="#DCDCAA"
                         Padding="6,2" FontSize="11" Cursor="Hand"/>

@@ -54,8 +54,14 @@ public partial class DetectStatsViewModel : ViewModelBase
         "UInt32Property", "UInt64Property", "UInt16Property", "ByteProperty",
     };
 
+    /// <summary>Full detected set; <see cref="Results"/> is this filtered by
+    /// <see cref="FilterText"/>.</summary>
+    private List<DetectedStat> _allResults = new();
+
     [ObservableProperty] private ObservableCollection<DetectedStat> _results = new();
     [ObservableProperty] private DetectedStat? _selectedResult;
+    /// <summary>Client-side filter on property / class / category name (substring).</summary>
+    [ObservableProperty] private string _filterText = "";
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private string _statusText =
         "Click Detect to shortlist likely HP / MP / Gold fields and confirm them live.";
@@ -124,10 +130,11 @@ public partial class DetectStatsViewModel : ViewModelBase
                 return;
             }
 
-            // 2. Optional behavioral signal from the two most-recent snapshots.
-            var (decreasedNames, snapNote) = UseSnapshotSignal
+            // 2. Optional behavioral signal from the two most-recent snapshots
+            //    (runs off the UI thread — see TryLoadDecreasedFieldsAsync).
+            var (snapChanges, snapNote) = UseSnapshotSignal
                 ? await TryLoadDecreasedFieldsAsync()
-                : (new HashSet<string>(StringComparer.OrdinalIgnoreCase), "");
+                : (new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase), "");
 
             // 3. Group by defining class; resolve ONE live instance + ONE walk per
             //    class (bounded), then confirm every candidate field of that class.
@@ -176,7 +183,7 @@ public partial class DetectStatsViewModel : ViewModelBase
                     bool gas = x.s.IsGasAttribute;
                     bool valueOk = plausible || (gas && liveExists);
                     string liveVal = plausible ? (lf?.TypedValue ?? "") : (gas && liveExists ? "(GAS)" : "");
-                    bool decreased = decreasedNames.Contains(x.m.PropName);
+                    bool decreased = snapChanges.TryGetValue(x.m.PropName, out var snapChg);
                     bool hasMax = x.pair > 0;
 
                     int conf = x.score
@@ -198,17 +205,17 @@ public partial class DetectStatsViewModel : ViewModelBase
                         IsGasAttribute = gas,
                         SnapshotDecreased = decreased,
                         LiveValue = liveVal,
+                        SnapshotChange = decreased ? (snapChg ?? "") : "",
                     });
                 }
             }
 
-            foreach (var r in results
-                        .OrderByDescending(r => r.IsConfirmed)
-                        .ThenByDescending(r => r.Confidence)
-                        .ThenBy(r => r.ClassName, StringComparer.Ordinal))
-            {
-                Results.Add(r);
-            }
+            _allResults = results
+                .OrderByDescending(r => r.IsConfirmed)
+                .ThenByDescending(r => r.Confidence)
+                .ThenBy(r => r.ClassName, StringComparer.Ordinal)
+                .ToList();
+            ApplyFilter();
 
             int confirmedCount = results.Count(r => r.IsConfirmed);
             StatusText =
@@ -233,32 +240,43 @@ public partial class DetectStatsViewModel : ViewModelBase
     /// Coarse (matched by property name only, per the panel's low-accuracy
     /// disclaimer) and fully defensive — any failure returns an empty set + note.
     /// </summary>
-    private async Task<(HashSet<string> names, string note)> TryLoadDecreasedFieldsAsync()
+    private async Task<(Dictionary<string, string> changes, string note)> TryLoadDecreasedFieldsAsync()
     {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (_snapshotStore == null) return (set, "unavailable");
+        var changes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (_snapshotStore == null) return (changes, "unavailable");
         try
         {
-            var snaps = await _snapshotStore.ListSnapshotsAsync();
-            var usable = snaps.Where(s => s.IsUsable).Take(2).ToList(); // newest first
-            if (usable.Count < 2) return (set, "need ≥2 usable snapshots");
-
-            var newer = usable[0];
-            var older = usable[1];
-            var filter = new SnapshotDiffFilter
+            // SnapshotStore's SQLite runs SYNCHRONOUSLY on the caller (its own docs
+            // say "wrap in Task.Run, never the UI thread"). A whole-corpus diff can be
+            // multi-hundred-ms, which froze the window ("not responding"), so push it
+            // to a thread-pool thread and only touch the result back here.
+            var diff = await Task.Run(async () =>
             {
-                Direction = SnapshotDiffDirection.Down,
-                IncludeAddedRemoved = false,
-                MaxRows = 20_000,
-            };
-            var diff = await _snapshotStore.DiffSnapshotsAsync(older.Id, newer.Id, filter);
-            foreach (var row in diff.Changed) set.Add(row.PropName);
-            return (set, $"{set.Count} fields decreased");
+                var snaps = await _snapshotStore.ListSnapshotsAsync();
+                var usable = snaps.Where(s => s.IsUsable).Take(2).ToList(); // newest first
+                if (usable.Count < 2) return null;
+                var filter = new SnapshotDiffFilter
+                {
+                    Direction = SnapshotDiffDirection.Down,
+                    IncludeAddedRemoved = false,
+                    MaxRows = 20_000,
+                };
+                return await _snapshotStore.DiffSnapshotsAsync(usable[1].Id, usable[0].Id, filter);
+            });
+
+            if (diff == null) return (changes, "need ≥2 usable snapshots");
+            foreach (var row in diff.Changed)
+            {
+                // First (any) decreased row per field name backs the Δ display.
+                if (!changes.ContainsKey(row.PropName))
+                    changes[row.PropName] = $"{row.OldValue} → {row.NewValue}";
+            }
+            return (changes, $"{diff.Changed.Count} fields decreased");
         }
         catch (Exception ex)
         {
             _log.Error("DetectStats snapshot signal failed", ex);
-            return (set, "error");
+            return (changes, "error");
         }
     }
 
@@ -280,6 +298,28 @@ public partial class DetectStatsViewModel : ViewModelBase
                 return false;
         }
         return double.IsFinite(val) && Math.Abs(val) < 1e9;
+    }
+
+    partial void OnFilterTextChanged(string value) => ApplyFilter();
+
+    /// <summary>Rebuild <see cref="Results"/> from <see cref="_allResults"/>,
+    /// keeping the pre-sorted order, applying the property / class / category
+    /// substring filter.</summary>
+    private void ApplyFilter()
+    {
+        Results.Clear();
+        var f = (FilterText ?? "").Trim();
+        foreach (var r in _allResults)
+        {
+            if (f.Length > 0
+                && !r.PropName.Contains(f, StringComparison.OrdinalIgnoreCase)
+                && !r.ClassName.Contains(f, StringComparison.OrdinalIgnoreCase)
+                && !r.CategoryLabel.Contains(f, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            Results.Add(r);
+        }
     }
 
     // ------------------------------------------------------------------

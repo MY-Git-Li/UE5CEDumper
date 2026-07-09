@@ -31,6 +31,11 @@ public sealed class DetectedStat
     /// <summary>Live typed value read from a representative instance ("" if none).</summary>
     public string LiveValue { get; init; } = "";
 
+    /// <summary>When the snapshot signal fired, the rendered old→new change that
+    /// backs it (e.g. "320.23 → 300.33"); "" otherwise. Coarse: matched by field
+    /// name against the two most-recent snapshots' diff.</summary>
+    public string SnapshotChange { get; init; } = "";
+
     // Forwarded for the DataGrid + cross-tab handoffs
     public string ClassName => Match.ClassName;
     public string DefiningClassName => Match.DefiningClassName;

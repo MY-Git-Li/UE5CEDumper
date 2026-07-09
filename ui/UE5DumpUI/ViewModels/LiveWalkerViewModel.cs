@@ -2187,13 +2187,18 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// but NOT most world actors (the level-list recovery is World-root only).</summary>
     private string GWorldPathFailureStatus(GWorldPathResult path, string rootLabel = "GWorld") => path.Status switch
     {
-        // not_reachable means the BFS exhausted everything reachable from the root
-        // (within the depth) WITHOUT finding the target — the object isn't
-        // referenced by any forward pointer chain from the root. Raising the depth
-        // does NOT help (the reachable set is already exhausted).
+        // not_reachable means the DEPTH-BOUNDED BFS didn't find the target within
+        // `GWorldLocateDepth` hops — it only explores nodes up to that depth, NOT the
+        // whole reachable graph (verified in-game: depth 5 → not_reachable/visited
+        // 57,658, depth 8 → found at 7 hops/visited 130,860). So the target is often
+        // simply DEEPER than the current depth: raising 'Locate in GWorld depth' (and/or
+        // enabling Deep, which follows container struct-element pointers the normal walk
+        // skips) can make it reachable. The DLL doesn't distinguish a depth-capped miss
+        // from a truly-exhausted frontier, so we suggest the depth/Deep knobs first
+        // rather than claiming the object doesn't exist.
         "not_reachable"  => rootLabel == "GameEngine"
-            ? $"Not reachable from GameEngine — nothing in the engine's forward graph references this object (searched {path.Visited:N0}). An engine root reaches engine / GameInstance / LocalPlayer / engine-subsystem objects, but NOT most world actors: those live below GWorld, and the streaming/World-Partition recovery (via a level's actor list) only works from a World root. For a world actor, use 🌍 Locate in GWorld instead."
-            : $"Not reachable — nothing in the GWorld graph references this object, and it isn't in any of the world's levels' actor lists either (searched {path.Visited:N0} objects). Raising depth won't help. If it's a streaming/World-Partition actor, try once it's loaded/aggro'd; or 🔗 Related from an Instance Finder hit, or use Find Refs to find a holder.",
+            ? $"Not reachable from GameEngine within depth {GWorldLocateDepth} — no forward chain from the engine to this object was found (searched {path.Visited:N0}). Try raising 'Locate in GWorld depth' in Options ⚙ and/or enabling 'Deep (nested containers)'. Note: an engine root reaches engine / GameInstance / LocalPlayer / subsystems best; most WORLD actors are easier via 🌍 Locate in GWorld (its level-list recovery is World-root only)."
+            : $"Not reachable within depth {GWorldLocateDepth} — no forward pointer chain from GWorld to this object was found yet (searched {path.Visited:N0} objects), and it isn't in a level's actor list. It may be DEEPER than {GWorldLocateDepth} hops: raise 'Locate in GWorld depth' in Options ⚙, and/or enable 'Deep (nested containers)'. Still nothing? A streaming/World-Partition actor appears once loaded/aggro'd — or use 🔗 Related from an Instance Finder hit, or Find Refs to find a holder.",
         "deadline"       => $"{rootLabel} path search timed out at depth {GWorldLocateDepth} (visited {path.Visited:N0}). Try a smaller depth.",
         "visited_cap"    => $"{rootLabel} path search space too large at depth {GWorldLocateDepth} (visited {path.Visited:N0}). Try a smaller depth.",
         "cancelled"      => $"{rootLabel} path search cancelled.",

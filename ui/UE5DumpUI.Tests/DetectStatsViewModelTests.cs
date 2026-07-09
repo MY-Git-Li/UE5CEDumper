@@ -190,6 +190,29 @@ public class DetectStatsViewModelTests
     }
 
     [Fact]
+    public async Task Detect_FilterText_NarrowsResults()
+    {
+        var dump = new FakeDump();
+        dump.Matches.Add(M("Health", "PlayerCharacter", "FloatProperty", 0x100));
+        dump.Matches.Add(M("Gold", "InventoryComponent", "IntProperty", 0x40));
+        dump.InstanceAddrByClass["PlayerCharacter"] = "0xAAAA";
+        dump.InstanceAddrByClass["InventoryComponent"] = "0xBBBB";
+        dump.WalkByAddr["0xAAAA"] = new() { F("Health", 0x100, "100") };
+        dump.WalkByAddr["0xBBBB"] = new() { F("Gold", 0x40, "500", "IntProperty") };
+
+        var vm = Vm(dump);
+        await vm.DetectCommand.ExecuteAsync(null);
+        Assert.Equal(2, vm.Results.Count);
+
+        vm.FilterText = "gold";               // substring over property/class/category
+        Assert.Single(vm.Results);
+        Assert.Equal("Gold", vm.Results[0].PropName);
+
+        vm.FilterText = "";                   // cleared → full set restored
+        Assert.Equal(2, vm.Results.Count);
+    }
+
+    [Fact]
     public async Task Detect_SnapshotSignalWithoutStore_DegradesGracefully()
     {
         var dump = new FakeDump();

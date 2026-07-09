@@ -91,8 +91,9 @@ public class LocateGWorldBannerTests
     public async Task LocateInGameEngine_NotReachable_BannerMentionsGameEngine()
     {
         // The engine-rooted variant must surface a GameEngine-specific reason (an
-        // engine root reaches engine-layer objects but not most world actors), so
-        // the user isn't told to "raise depth" or expect level-list recovery.
+        // engine root reaches engine-layer objects best; most world actors are easier
+        // via 🌍 Locate in GWorld). It still suggests raising depth / Deep, since a
+        // not_reachable is depth-bounded, not a proof of non-existence.
         var stub = new PathStub
         {
             Next = new GWorldPathResult { Found = false, Status = "not_reachable", Visited = 42 },
