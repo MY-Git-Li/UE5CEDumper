@@ -31,9 +31,24 @@
     <sys:String x:Key="str.Tab.GameClassFilter">Classes</sys:String>
     <sys:String x:Key="str.Tab.RelatedObjects">Related</sys:String>
     <!-- Experimental tabs (hidden unless opted in via System-tab credit checkbox) -->
+    <sys:String x:Key="str.Tab.DetectStats">Detect Stats</sys:String>
     <sys:String x:Key="str.Tab.Snapshot">Snapshot</sys:String>
     <sys:String x:Key="str.Tab.SpcQuery">SPC Query</sys:String>
     <sys:String x:Key="str.Tab.ClassPivot">Class Pivot</sys:String>
+
+    <!-- Detect Player Stats panel (experimental, P4) -->
+    <sys:String x:Key="str.Detect.Disclaimer">⚠ Reference only — low accuracy. These are auto-detected guesses, not guarantees. Always verify the live value and address (Live Walker / Value Search) before using them.</sys:String>
+    <sys:String x:Key="str.Detect.Run">🔎 Detect Player Stats</sys:String>
+    <sys:String x:Key="str.Detect.UseSnapshot">Use snapshot signal (capture → take damage / spend → capture again)</sys:String>
+    <sys:String x:Key="str.Detect.ColConfirm">Result</sys:String>
+    <sys:String x:Key="str.Detect.ColCategory">Category</sys:String>
+    <sys:String x:Key="str.Detect.ColClass">Class</sys:String>
+    <sys:String x:Key="str.Detect.ColProperty">Property</sys:String>
+    <sys:String x:Key="str.Detect.ColType">Type</sys:String>
+    <sys:String x:Key="str.Detect.ColOffset">Offset</sys:String>
+    <sys:String x:Key="str.Detect.ColSignals">Live / signals</sys:String>
+    <sys:String x:Key="str.Detect.ColConfidence">Conf</sys:String>
+    <sys:String x:Key="str.Detect.CopyName">copy</sys:String>
 
     <!-- Related Objects panel -->
     <sys:String x:Key="str.Related.AddressHint">UObject / actor address (hex) — or hand off from another tab</sys:String>

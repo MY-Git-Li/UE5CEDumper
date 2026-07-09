@@ -1,0 +1,113 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UE5DumpUI.ViewModels"
+             xmlns:m="using:UE5DumpUI.Models"
+             x:Class="UE5DumpUI.Views.DetectStatsPanel"
+             x:DataType="vm:DetectStatsViewModel">
+
+  <DockPanel Margin="8">
+    <!-- Prominent disclaimer — this is a low-accuracy heuristic shortlist. -->
+    <Border DockPanel.Dock="Top" Background="#3A2E12" BorderBrush="#C8A020"
+            BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="0,0,0,8">
+      <TextBlock Text="{StaticResource str.Detect.Disclaimer}"
+                 Foreground="#E8C860" FontWeight="Bold" TextWrapping="Wrap"/>
+    </Border>
+
+    <!-- Toolbar: Detect + snapshot opt-in -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8">
+      <Button Content="{StaticResource str.Detect.Run}"
+              Command="{Binding DetectCommand}"
+              IsEnabled="{Binding !IsBusy}"
+              Classes="accent" Padding="12,4"/>
+      <CheckBox Content="{StaticResource str.Detect.UseSnapshot}"
+                IsChecked="{Binding UseSnapshotSignal}"
+                IsEnabled="{Binding !IsBusy}"
+                VerticalAlignment="Center"/>
+    </StackPanel>
+
+    <!-- Status + indeterminate progress -->
+    <TextBlock DockPanel.Dock="Top" Text="{Binding StatusText}"
+               Foreground="#888" Margin="0,0,0,4" TextWrapping="Wrap"/>
+    <ProgressBar DockPanel.Dock="Top"
+                 IsIndeterminate="{Binding IsBusy}"
+                 IsVisible="{Binding IsBusy}"
+                 Height="2" Margin="0,0,0,4"/>
+
+    <!-- Ranked candidates: confirmed first. Each row hands off to
+         🌍 Locate in GWorld / inst (Instance Finder) / copy name. -->
+    <DataGrid x:Name="DetectGrid"
+              ItemsSource="{Binding Results}"
+              SelectedItem="{Binding SelectedResult}"
+              IsReadOnly="True"
+              CanUserResizeColumns="True"
+              GridLinesVisibility="Horizontal"
+              HeadersVisibility="Column"
+              BorderThickness="0"
+              Background="#1E1E1E"
+              Foreground="#D4D4D4"
+              FontFamily="Consolas" FontSize="12"
+              HorizontalScrollBarVisibility="Auto">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="{StaticResource str.Detect.ColConfirm}"
+                            Binding="{Binding ConfirmBadge}"
+                            SortMemberPath="IsConfirmed"
+                            Width="110" CanUserSort="True"/>
+        <DataGridTextColumn Header="{StaticResource str.Detect.ColConfidence}"
+                            Binding="{Binding Confidence}"
+                            SortMemberPath="Confidence"
+                            Width="60" CanUserSort="True"/>
+        <DataGridTextColumn Header="{StaticResource str.Detect.ColCategory}"
+                            Binding="{Binding CategoryLabel}"
+                            SortMemberPath="CategoryLabel"
+                            Width="90" CanUserSort="True"/>
+        <DataGridTextColumn Header="{StaticResource str.Detect.ColProperty}"
+                            Binding="{Binding PropName}"
+                            SortMemberPath="PropName"
+                            Width="220" MinWidth="140" CanUserSort="True"/>
+        <DataGridTextColumn Header="{StaticResource str.Detect.ColClass}"
+                            Binding="{Binding ClassName}"
+                            SortMemberPath="ClassName"
+                            Width="240" MinWidth="140" CanUserSort="True"/>
+        <DataGridTextColumn Header="{StaticResource str.Detect.ColType}"
+                            Binding="{Binding PropType}"
+                            SortMemberPath="PropType"
+                            Width="120" CanUserSort="True"/>
+        <DataGridTextColumn Header="{StaticResource str.Detect.ColOffset}"
+                            Binding="{Binding OffsetHex}"
+                            SortMemberPath="PropOffset"
+                            Width="80" CanUserSort="True"/>
+        <DataGridTextColumn Header="{StaticResource str.Detect.ColSignals}"
+                            Binding="{Binding SignalSummary}"
+                            Width="260" MinWidth="140" CanUserSort="False"/>
+        <DataGridTemplateColumn Header="" Width="Auto" CanUserResize="False" CanUserSort="False">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:DetectedStat">
+              <StackPanel Orientation="Horizontal" Spacing="4"
+                          HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Button Content="{StaticResource str.InstanceFinder.LocateGWorldShort}"
+                        Command="{Binding $parent[DataGrid].((vm:DetectStatsViewModel)DataContext).LocateRowInGWorldCommand}"
+                        CommandParameter="{Binding}"
+                        IsEnabled="{Binding $parent[DataGrid].((vm:DetectStatsViewModel)DataContext).IsGWorldAvailable}"
+                        Foreground="#C586C0" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#C586C0"
+                        Padding="6,2" FontSize="11" Cursor="Hand"/>
+                <Button Content="{StaticResource str.PropertySearch.FindInstances}"
+                        Command="{Binding $parent[DataGrid].((vm:DetectStatsViewModel)DataContext).OpenInInstanceFinderCommand}"
+                        CommandParameter="{Binding}"
+                        Foreground="#569CD6" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#569CD6"
+                        Padding="6,2" FontSize="11" Cursor="Hand"/>
+                <Button Content="{StaticResource str.Detect.CopyName}"
+                        Command="{Binding $parent[DataGrid].((vm:DetectStatsViewModel)DataContext).CopyPropertyNameCommand}"
+                        CommandParameter="{Binding}"
+                        Foreground="#DCDCAA" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#DCDCAA"
+                        Padding="6,2" FontSize="11" Cursor="Hand"/>
+              </StackPanel>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</UserControl>
