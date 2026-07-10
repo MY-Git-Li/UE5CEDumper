@@ -122,6 +122,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int _csxDrilldownDepth; // 0 = flat (dummy), 1+ = real child structures
     [ObservableProperty] private int _previewLimit = Constants.DefaultPreviewLimit; // Struct preview sub-field count (0-6)
     [ObservableProperty] private int _deepScanElemCapExponent = 8; // 2^8 = 256 (find_by_address deep scan per-container cap)
+    [ObservableProperty] private int _ceStringLengthExponent = 8; // 2^8 = 256 (CE String leaf <Length>; floored at 2^4 = 16)
 
     // Always-visible top-toolbar AOBMaker status (mirrors the per-tab indicators).
     [ObservableProperty] private bool _isAobMakerAvailable;
@@ -134,6 +135,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>Computed CE DropDownList max entries: 2^DropDownLimitExponent (64..8192).</summary>
     public int DropDownLimit => 1 << DropDownLimitExponent;
+
+    /// <summary>Computed CE String leaf display length: 2^CeStringLengthExponent (16..4096).</summary>
+    public int CeStringLength => 1 << CeStringLengthExponent;
 
     /// <summary>Show warning when array limit &gt;= 256 (high memory usage).</summary>
     public bool ShowArrayLimitWarning => ArrayLimitExponent >= 8;
@@ -276,6 +280,13 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(DropDownLimit));
         LiveWalker.DropDownLimit = DropDownLimit;
         InstanceFinder.DropDownLimit = DropDownLimit;
+    }
+
+    partial void OnCeStringLengthExponentChanged(int value)
+    {
+        OnPropertyChanged(nameof(CeStringLength));
+        LiveWalker.CeStringLength = CeStringLength;
+        InstanceFinder.CeStringLength = CeStringLength;
     }
 
     partial void OnCsxDrilldownDepthChanged(int value)
@@ -1961,6 +1972,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         nameof(SelectedAddressFormatIndex), nameof(CollapsePointerNodes),
         nameof(ArrayLimitExponent), nameof(DropDownLimitExponent),
         nameof(CsxDrilldownDepth), nameof(PreviewLimit), nameof(DeepScanElemCapExponent),
+        nameof(CeStringLengthExponent),
     };
     private static readonly HashSet<string> LiveWalkerPersist = new()
     {
@@ -2048,6 +2060,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         CsxDrilldownDepth = o.Main.CsxDrilldownDepth;
         PreviewLimit = o.Main.PreviewLimit;
         DeepScanElemCapExponent = o.Main.DeepScanElemCapExponent;
+        CeStringLengthExponent = o.Main.CeStringLengthExponent;
 
         var lw = o.LiveWalker;
         LiveWalker.CollapseChain = lw.CollapseChain;
@@ -2161,6 +2174,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         o.Main.CsxDrilldownDepth = CsxDrilldownDepth;
         o.Main.PreviewLimit = PreviewLimit;
         o.Main.DeepScanElemCapExponent = DeepScanElemCapExponent;
+        o.Main.CeStringLengthExponent = CeStringLengthExponent;
 
         o.LiveWalker.CollapseChain = LiveWalker.CollapseChain;
         o.LiveWalker.DescShowOffset = LiveWalker.DescShowOffset;

@@ -746,6 +746,41 @@ public class CeXmlExportServiceTests
     }
 
     [Fact]
+    public void GenerateInstanceXml_StringLeaf_DefaultsToLength256()
+    {
+        // No ceStringLength passed → the CE String leaf keeps the historic 256-char window.
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "PlayerName", TypeName = "StrProperty", Offset = 0x30, Size = 16 },
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields);
+
+        Assert.Contains("<VariableType>String</VariableType>", xml);
+        Assert.Contains("<Length>256</Length>", xml);
+    }
+
+    [Theory]
+    [InlineData(16)]
+    [InlineData(64)]
+    [InlineData(1024)]
+    public void GenerateInstanceXml_StringLeaf_HonorsCeStringLength(int length)
+    {
+        // The "String Length" export option flows through to the CE String leaf's <Length>.
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "PlayerName", TypeName = "StrProperty", Offset = 0x30, Size = 16 },
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields, ceStringLength: length);
+
+        Assert.Contains($"<Length>{length}</Length>", xml);
+        Assert.DoesNotContain("<Length>256</Length>", xml.Replace($"<Length>{length}</Length>", ""));
+    }
+
+    [Fact]
     public void GenerateInstanceXml_FlattenLeafRecordsOff_KeepsRecordGroup()
     {
         var sep = "▸";

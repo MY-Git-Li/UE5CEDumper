@@ -47,6 +47,18 @@ public static class CeXmlExportService
     private static int _maxDropDownEntries;
 
     /// <summary>
+    /// CE String leaf display length — the &lt;Length&gt; window CE reads for a String
+    /// field. Set per Generate* entry from the user's "String Length" export option
+    /// (default 256, floored at 16 by the toolbar slider). Read by
+    /// <see cref="EmitStringLeaf"/>; 0 (unset) falls back to 256. Because the value is a
+    /// fixed read window (with ZeroTerminate=1 CE still stops at the null), a generous
+    /// length never truncates a shorter live string — it only guards strings that later
+    /// grow. Copy CE XML / Copy CE Field only (CSX uses its own Bytesize).
+    /// </summary>
+    [ThreadStatic]
+    private static int _ceStringLength;
+
+    /// <summary>
     /// Tracks emitted DropDownList owners by UEnum address → parent group's Description.
     /// Reset per Generate* call. Enables DropDownListLink sharing for same-enum arrays.
     /// </summary>
@@ -895,7 +907,8 @@ public static class CeXmlExportService
         bool altColorEnabled = false,
         string? altRowColorEvenRgb = null,
         string? altRowColorOddRgb = null,
-        bool collapseLeafPointers = false)
+        bool collapseLeafPointers = false,
+        int ceStringLength = 256)
     {
         // Clean breadcrumbs: remove navigation cycles (e.g., Child->Parent->Child)
         // before generating XML to avoid deeply nested duplicate pointer chains.
@@ -916,6 +929,7 @@ public static class CeXmlExportService
         _altColorOdd = RgbToCeColor(altRowColorOddRgb);
         _curRowColor = null;
         _collapseLeafPointers = collapseLeafPointers;
+        _ceStringLength = ceStringLength;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -1026,7 +1040,8 @@ public static class CeXmlExportService
         bool altColorEnabled = false,
         string? altRowColorEvenRgb = null,
         string? altRowColorOddRgb = null,
-        bool collapseLeafPointers = false)
+        bool collapseLeafPointers = false,
+        int ceStringLength = 256)
     {
         _nextId = 100;
         _collapsePointerNodes = collapsePointerNodes;
@@ -1043,6 +1058,7 @@ public static class CeXmlExportService
         _altColorOdd = RgbToCeColor(altRowColorOddRgb);
         _curRowColor = null;
         _collapseLeafPointers = collapseLeafPointers;
+        _ceStringLength = ceStringLength;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -1162,7 +1178,8 @@ public static class CeXmlExportService
         bool altColorEnabled = false,
         string? altRowColorEvenRgb = null,
         string? altRowColorOddRgb = null,
-        bool collapseLeafPointers = false)
+        bool collapseLeafPointers = false,
+        int ceStringLength = 256)
     {
         var cleanedBc = CleanBreadcrumbs(breadcrumbs);
 
@@ -1181,6 +1198,7 @@ public static class CeXmlExportService
         _altColorOdd = RgbToCeColor(altRowColorOddRgb);
         _curRowColor = null;
         _collapseLeafPointers = collapseLeafPointers;
+        _ceStringLength = ceStringLength;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -3304,9 +3322,14 @@ public static class CeXmlExportService
     /// so Offsets=[0] dereferences the Data pointer to reach the character buffer.
     /// </summary>
     private static void EmitStringLeaf(StringBuilder sb, string indent, string description,
-        string address, int[]? offsets, bool unicode, bool codepage = false, int length = 256)
+        string address, int[]? offsets, bool unicode, bool codepage = false)
     {
         _emitEntryCount++;
+        // CE String display window: the per-export "String Length" option (default 256,
+        // floored at 16 by the toolbar slider); 0 (unset) falls back to 256. With
+        // ZeroTerminate=1 a generous length never truncates a shorter live string — it
+        // only reserves room for strings that later grow (differ per save/progress).
+        int length = _ceStringLength > 0 ? _ceStringLength : 256;
         sb.AppendLine($"{indent}<CheatEntry>");
         sb.AppendLine($"{indent}  <ID>{_nextId++}</ID>");
         sb.AppendLine($"{indent}  <Description>\"{description}\"</Description>");

@@ -220,6 +220,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// <summary>Max CE DropDownList entries (2^N, default 512). Used during CE XML export.</summary>
     public int DropDownLimit { get; set; } = Constants.DefaultDropDownLimit;
 
+    /// <summary>CE String leaf display length (2^N chars; 16..4096, default 256).
+    /// Seeded from the toolbar master; passed to CE XML / CE Field export.</summary>
+    public int CeStringLength { get; set; } = Constants.DefaultCeStringLength;
+
     /// <summary>CSX drilldown depth (0 = flat/dummy, 1-4 normal, 5-6 deep / warning band).
     /// Each extra level can multiply CE XML / CSX output exponentially because every
     /// ObjectProperty hit fans out to its own field tree. 4 was the historic ceiling
@@ -3458,6 +3462,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     resolvedStructs,
                     collapsePointerNodes: CollapsePointerNodes,
                     maxDropDownEntries: DropDownLimit,
+                    ceStringLength: CeStringLength,
                     resolvedInstances: resolvedInstances,
                     flattenChain: CollapseChain,
                     descShowOffset: DescShowOffset,
@@ -3480,6 +3485,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     rootAddress, rootBc.Label, breadcrumbsForXml, fieldsForXml, resolvedStructs,
                     collapsePointerNodes: CollapsePointerNodes,
                     maxDropDownEntries: DropDownLimit,
+                    ceStringLength: CeStringLength,
                     resolvedInstances: resolvedInstances,
                     flattenChain: CollapseChain,
                     descShowOffset: DescShowOffset,
@@ -3768,6 +3774,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     resolvedStructs,
                     collapsePointerNodes: CollapsePointerNodes,
                     maxDropDownEntries: DropDownLimit,
+                    ceStringLength: CeStringLength,
                     resolvedInstances: resolvedInstances,
                     flattenChain: CollapseChain,
                     includeGuessed: includeGuessed,
@@ -3791,6 +3798,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     rootAddress, rootBc.Label, breadcrumbsForXml, fieldsForXml, resolvedStructs,
                     collapsePointerNodes: CollapsePointerNodes,
                     maxDropDownEntries: DropDownLimit,
+                    ceStringLength: CeStringLength,
                     resolvedInstances: resolvedInstances,
                     flattenChain: CollapseChain,
                     includeGuessed: includeGuessed,

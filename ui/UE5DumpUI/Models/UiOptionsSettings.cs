@@ -55,6 +55,7 @@ public sealed class MainUiOptions
     public int CsxDrilldownDepth { get; set; }
     public int PreviewLimit { get; set; } = 2;
     public int DeepScanElemCapExponent { get; set; } = 8;
+    public int CeStringLengthExponent { get; set; } = 8;   // 2^8 = 256 (CE String leaf <Length>)
 }
 
 public sealed class LiveWalkerUiOptions

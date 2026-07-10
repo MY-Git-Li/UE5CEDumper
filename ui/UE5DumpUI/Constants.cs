@@ -133,6 +133,11 @@ public static class Constants
     // their per-panel DropDownLimit with this.
     public const int DefaultDropDownLimit = 512;
 
+    // Default CE String leaf <Length> display window (2^8 = 256 chars). InstanceFinder /
+    // LiveWalker seed their per-panel CeStringLength with this; the toolbar "String Length"
+    // exponent slider floors at 2^4 = 16. Applies to Copy CE XML / Copy CE Field only.
+    public const int DefaultCeStringLength = 256;
+
     // Default instance-search result cap (InstanceFinderUiOptions.InstanceSearchCap
     // and the InstanceFinder panel's own default).
     public const int DefaultInstanceSearchCap = 5000;

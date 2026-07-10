@@ -150,6 +150,22 @@
                             ToolTip.Tip="{StaticResource str.Tip.DropDownLimit}"/>
                   </StackPanel>
 
+                  <!-- CE String Length -->
+                  <StackPanel Spacing="2">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="{StaticResource str.Toolbar.StringLength}"
+                                 Foreground="#CCCCCC" FontSize="12"
+                                 VerticalAlignment="Center"/>
+                      <TextBlock Text="{Binding CeStringLength}"
+                                 Foreground="#D4D4D4" FontSize="12" FontWeight="Bold"
+                                 VerticalAlignment="Center" MinWidth="40"/>
+                    </StackPanel>
+                    <Slider Value="{Binding CeStringLengthExponent}"
+                            Minimum="4" Maximum="12"
+                            TickFrequency="1" IsSnapToTickEnabled="True"
+                            ToolTip.Tip="{StaticResource str.Tip.StringLength}"/>
+                  </StackPanel>
+
                   <!-- Preview limit -->
                   <StackPanel Spacing="2">
                     <StackPanel Orientation="Horizontal" Spacing="6">
