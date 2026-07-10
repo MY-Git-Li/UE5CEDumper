@@ -1135,55 +1135,49 @@ public class CeXmlExportServiceTests
     }
 
     [Fact]
-    public void GenerateInstanceXml_Fabricate_SameOffsetArrays_NoCrossArrayDedupCollapse()
+    public void GenerateInstanceXml_Fabricate_NextLayerOnly_NestedArraysNotFabricated()
     {
-        // Regression: fabricated slot keys must be GLOBALLY unique, not just per-array.
-        // Two same-class items each hold a "Mods" object-array at the SAME offset (0x50).
-        // A key folding in only (arrayOffset, index) collided across the two arrays in the
-        // export-global dedup set (_emittedInstances, _dedupShared ON), so item[1]'s
-        // fabricated slots wrongly collapsed to "(shared)" flat leaves. Keying on the slot's
-        // absolute address (unique per array instance) keeps them distinct.
-        const string item0 = "0x1A000", item1 = "0x1B000";
-        const string mod0 = "0x1AAA0", mod1 = "0x1BBB0";
-
-        LiveFieldValue ModsArray(string dataAddr, string modPtr) => new()
+        // "Next layer only": fabricate the SELECTED top-level array, but NOT arrays reached by
+        // drilling THROUGH an object pointer. Otherwise a deep element template (an item's own
+        // Mods/Attributes arrays) is fabricated to the target count at every nesting level,
+        // exploding the output (256 items × 256 mods × …). Regression for the in-game 500k-line
+        // Cargo blow-up.
+        const string item0 = "0x1A000", mod0 = "0x1AAA0";
+        var mods = new LiveFieldValue
         {
             Name = "Mods", TypeName = "ArrayProperty", ArrayInnerType = "ObjectProperty",
-            ArrayCount = 1, ArrayElemSize = 8, Offset = 0x50, ArrayDataAddr = dataAddr,
+            ArrayCount = 1, ArrayElemSize = 8, Offset = 0x50, ArrayDataAddr = "0x1A050",
             ArrayElements = new List<ArrayElementValue>
             {
-                new() { Index = 0, PtrAddress = modPtr, PtrClassName = "Mod" },
+                new() { Index = 0, PtrAddress = mod0, PtrClassName = "Mod" },
             },
         };
-
         var items = new LiveFieldValue
         {
             Name = "Items", TypeName = "ArrayProperty", ArrayInnerType = "ObjectProperty",
-            ArrayCount = 2, ArrayElemSize = 8, Offset = 0x10, ArrayDataAddr = "0x19000",
+            ArrayCount = 1, ArrayElemSize = 8, Offset = 0x10, ArrayDataAddr = "0x19000",
             ArrayElements = new List<ArrayElementValue>
             {
                 new() { Index = 0, PtrAddress = item0, PtrClassName = "Item" },
-                new() { Index = 1, PtrAddress = item1, PtrClassName = "Item" },
             },
         };
         var resolved = new Dictionary<string, List<LiveFieldValue>>
         {
-            [item0] = new() { ModsArray("0x1A050", mod0) },
-            [item1] = new() { ModsArray("0x1B050", mod1) },
+            [item0] = new() { mods },
             [mod0] = new() { new LiveFieldValue { Name = "Power", TypeName = "IntProperty", Offset = 0x8, Size = 4 } },
-            [mod1] = new() { new LiveFieldValue { Name = "Power", TypeName = "IntProperty", Offset = 0x8, Size = 4 } },
         };
 
-        // Count = 2 = Items' Num, so the TOP array does not fabricate (isolates the nested
-        // collision); each Mods array (Num=1) fabricates one extra slot.
         var xml = CeXmlExportService.GenerateInstanceXml(
             "\"Game.exe\"+1000", "Inv", "Inv", new[] { items },
-            resolvedInstances: resolved, dedupShared: true, fabricateArrayCount: 2);
+            resolvedInstances: resolved, dedupShared: true, fabricateArrayCount: 8);
 
-        // Both items' fabricated Mod slot must drill the template "Power" field, not collapse.
+        // TOP array Items IS fabricated (walked=1 → 8 rows): element [7] exists.
+        Assert.Contains("\"[7]\"", xml);
+        // NESTED Mods array is NOT fabricated: it stays at its walked count (1). If it had
+        // been fabricated, each of the 8 items would carry ~8 Mod slots → an explosion of
+        // "Power" rows. With the gate, only the one real Mod expands (others dedup/absent).
         int powerRows = System.Text.RegularExpressions.Regex.Matches(xml, "\"Power\"").Count;
-        Assert.True(powerRows >= 4, $"cross-array dedup collapse regressed: only {powerRows} drilled Power rows");
-        Assert.DoesNotContain("(shared)", xml);
+        Assert.True(powerRows <= 2, $"nested array was fabricated (explosion): {powerRows} Power rows");
     }
 
     [Fact]

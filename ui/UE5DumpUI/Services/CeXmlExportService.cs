@@ -77,6 +77,21 @@ public static class CeXmlExportService
     private const int MaxFabricateElements = 4096;
 
     /// <summary>
+    /// Fabrication (padding a TArray past its live element count) applies ONLY to a TOP-LEVEL
+    /// selected array — a direct field of the walked object — NOT to an array reached by
+    /// drilling THROUGH an object pointer. Without this "next layer only" gate, a deep element
+    /// template (e.g. an inventory item's own Attributes / Catalysts arrays) would ALSO be
+    /// fabricated to the target count at every nesting level, exploding the output
+    /// combinatorially (observed in-game: Fabricate=256 on a 234-item Cargo produced 500k+
+    /// XML lines — 256 items × 256 fabricated Attributes × … — which Cheat Engine couldn't
+    /// load). <see cref="_emitPointerDepth"/> is 0 until <see cref="EmitDrilledPointer"/>
+    /// crosses the first object boundary, so it cleanly distinguishes the selected array from
+    /// arrays inside drilled sub-objects. (Inline structs on the selected object do NOT cross a
+    /// pointer, so an array inside such a struct still counts as top-level.)
+    /// </summary>
+    private static bool FabricateActive => _fabricateArrayCount > 0 && _emitPointerDepth == 0;
+
+    /// <summary>
     /// Tracks emitted DropDownList owners by UEnum address → parent group's Description.
     /// Reset per Generate* call. Enables DropDownListLink sharing for same-enum arrays.
     /// </summary>
@@ -2604,7 +2619,7 @@ public static class CeXmlExportService
         // this generic path — no resolved element to drill) get extra element leaves past
         // the live Num so the CE table has rows for values a later save will hold.
         int walkedLeaf = field.ArrayElements.Count;
-        int targetLeaf = (_fabricateArrayCount > 0 && field.ArrayElemSize > 0)
+        int targetLeaf = (FabricateActive && field.ArrayElemSize > 0)
             ? Math.Min(Math.Max(_fabricateArrayCount, walkedLeaf), MaxFabricateElements)
             : walkedLeaf;
 
@@ -2680,7 +2695,7 @@ public static class CeXmlExportService
         int target = walked;
         List<LiveFieldValue>? template = null;
         string? templateClass = null;
-        if (_fabricateArrayCount > 0 && field.ArrayElemSize > 0)
+        if (FabricateActive && field.ArrayElemSize > 0)
         {
             target = Math.Min(Math.Max(_fabricateArrayCount, walked), MaxFabricateElements);
             foreach (var e in elems)
@@ -2960,7 +2975,7 @@ public static class CeXmlExportService
         // arrays are dense (every walked slot resolves), so this is pure extend — no null slots
         // to fill. Rich re-walked template only; the shallow Phase-F preview isn't fabricated.
         int walkedStruct = field.ArrayElements!.Count;
-        if (_fabricateArrayCount > 0 && field.ArrayElemSize > 0 && canResolveElem)
+        if (FabricateActive && field.ArrayElemSize > 0 && canResolveElem)
         {
             int targetStruct = Math.Min(Math.Max(_fabricateArrayCount, walkedStruct), MaxFabricateElements);
             string templateAddr = "";
