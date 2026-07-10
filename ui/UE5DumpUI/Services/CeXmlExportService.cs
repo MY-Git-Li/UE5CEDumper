@@ -2692,6 +2692,14 @@ public static class CeXmlExportService
             }
         }
 
+        // TArray.Data base — used to key each fabricated slot by its ABSOLUTE element-slot
+        // address. The dedup / cycle guards (_emittedInstances) are export-GLOBAL, so a key
+        // that folds in only (field.Offset, index) collides across two different same-class
+        // arrays sharing a property offset (e.g. Item[0].Mods and Item[1].Mods both at +0x50),
+        // wrongly collapsing the second array's fabricated slots to "(shared)". The slot
+        // address is unique per array instance, so it can't collide.
+        ulong arrDataBase = ParseHexAddr(field.ArrayDataAddr);
+
         // TArray indices are contiguous, but map by Index defensively.
         var byIndex = new Dictionary<int, ArrayElementValue>();
         foreach (var e in elems) byIndex[e.Index] = e;
@@ -2739,7 +2747,9 @@ public static class CeXmlExportService
                     Name = baseName,
                     TypeName = string.IsNullOrEmpty(field.ArrayInnerType) ? "ObjectProperty" : field.ArrayInnerType,
                     Offset = elemByteOffset,
-                    PtrAddress = $"fab:{field.Offset:X}:{i:X}",
+                    PtrAddress = arrDataBase != 0
+                        ? $"fab:{arrDataBase + (ulong)elemByteOffset:X}"   // globally-unique slot addr
+                        : $"fab:{field.Offset:X}:{i:X}",                   // fallback (no Data addr)
                     PtrClassName = templateClass ?? elem?.PtrClassName ?? "",
                 };
                 EmitDrilledPointer(sb, elemIndent, synth, template,
