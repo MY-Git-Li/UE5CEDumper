@@ -746,6 +746,41 @@ public class CeXmlExportServiceTests
     }
 
     [Fact]
+    public void GenerateInstanceXml_StringLeaf_DefaultsToLength256()
+    {
+        // No ceStringLength passed → the CE String leaf keeps the historic 256-char window.
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "PlayerName", TypeName = "StrProperty", Offset = 0x30, Size = 16 },
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields);
+
+        Assert.Contains("<VariableType>String</VariableType>", xml);
+        Assert.Contains("<Length>256</Length>", xml);
+    }
+
+    [Theory]
+    [InlineData(16)]
+    [InlineData(64)]
+    [InlineData(1024)]
+    public void GenerateInstanceXml_StringLeaf_HonorsCeStringLength(int length)
+    {
+        // The "String Length" export option flows through to the CE String leaf's <Length>.
+        var fields = new List<LiveFieldValue>
+        {
+            new() { Name = "PlayerName", TypeName = "StrProperty", Offset = 0x30, Size = 16 },
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "MyObj", "UMyClass", fields, ceStringLength: length);
+
+        Assert.Contains($"<Length>{length}</Length>", xml);
+        Assert.DoesNotContain("<Length>256</Length>", xml.Replace($"<Length>{length}</Length>", ""));
+    }
+
+    [Fact]
     public void GenerateInstanceXml_FlattenLeafRecordsOff_KeepsRecordGroup()
     {
         var sep = "▸";
@@ -1055,6 +1090,141 @@ public class CeXmlExportServiceTests
         Assert.Contains("\"TickInterval\"", xml);
         Assert.Contains("<Address>+A0</Address>", xml);
         Assert.Contains("<VariableType>Float</VariableType>", xml);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_ObjectArray_Fabricate_ExtendsAndFillsWithTemplate()
+    {
+        // Copy CE Field fabricate: a TArray<Object*> with 2 walked slots (one live Item,
+        // one null) and fabricateArrayCount=5 → 5 element rows. The live element's field
+        // layout is the template; the null slot and the extended slots [2..4] replicate it,
+        // so the CE table already has item rows a later save will populate.
+        const string elem0Ptr = "0x1E727ADC10";
+        var field = new LiveFieldValue
+        {
+            Name = "Cargo", TypeName = "ArrayProperty", ArrayInnerType = "ObjectProperty",
+            ArrayCount = 2, ArrayElemSize = 8, Offset = 0xD8, ArrayDataAddr = "0x2000",
+            ArrayElements = new List<ArrayElementValue>
+            {
+                new() { Index = 0, PtrAddress = elem0Ptr, PtrName = "Item_1", PtrClassName = "Item" },
+                new() { Index = 1, PtrAddress = "0x0" }, // null slot within Num
+            },
+        };
+        var resolvedInstances = new Dictionary<string, List<LiveFieldValue>>
+        {
+            [elem0Ptr] = new()
+            {
+                new LiveFieldValue { Name = "ItemLevel", TypeName = "IntProperty", Offset = 0x58, Size = 4 },
+                new LiveFieldValue { Name = "Amount", TypeName = "IntProperty", Offset = 0x9C, Size = 4 },
+            },
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "Inventory", "Inventory",
+            new[] { field }, resolvedInstances: resolvedInstances, fabricateArrayCount: 5);
+
+        // Extended past Num=2: element [4] exists at +20 (4 * 8).
+        Assert.Contains("\"[4]\"", xml);
+        Assert.Contains("<Address>+20</Address>", xml);
+        // Null slot [1] is no longer a flat 8-byte leaf — it got the template group.
+        Assert.Contains("\"[1]\"", xml);
+        // Every slot (real [0] + fabricated [1..4]) carries the template's fields → 5 each.
+        int itemLevel = System.Text.RegularExpressions.Regex.Matches(xml, "\"ItemLevel\"").Count;
+        Assert.True(itemLevel >= 4, $"expected the template ItemLevel on multiple slots, got {itemLevel}");
+        Assert.Contains("<Address>+58</Address>", xml); // template field offset preserved
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_Fabricate_NextLayerOnly_NestedArraysNotFabricated()
+    {
+        // "Next layer only": fabricate the SELECTED top-level array, but NOT arrays reached by
+        // drilling THROUGH an object pointer. Otherwise a deep element template (an item's own
+        // Mods/Attributes arrays) is fabricated to the target count at every nesting level,
+        // exploding the output (256 items × 256 mods × …). Regression for the in-game 500k-line
+        // Cargo blow-up.
+        const string item0 = "0x1A000", mod0 = "0x1AAA0";
+        var mods = new LiveFieldValue
+        {
+            Name = "Mods", TypeName = "ArrayProperty", ArrayInnerType = "ObjectProperty",
+            ArrayCount = 1, ArrayElemSize = 8, Offset = 0x50, ArrayDataAddr = "0x1A050",
+            ArrayElements = new List<ArrayElementValue>
+            {
+                new() { Index = 0, PtrAddress = mod0, PtrClassName = "Mod" },
+            },
+        };
+        var items = new LiveFieldValue
+        {
+            Name = "Items", TypeName = "ArrayProperty", ArrayInnerType = "ObjectProperty",
+            ArrayCount = 1, ArrayElemSize = 8, Offset = 0x10, ArrayDataAddr = "0x19000",
+            ArrayElements = new List<ArrayElementValue>
+            {
+                new() { Index = 0, PtrAddress = item0, PtrClassName = "Item" },
+            },
+        };
+        var resolved = new Dictionary<string, List<LiveFieldValue>>
+        {
+            [item0] = new() { mods },
+            [mod0] = new() { new LiveFieldValue { Name = "Power", TypeName = "IntProperty", Offset = 0x8, Size = 4 } },
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "Inv", "Inv", new[] { items },
+            resolvedInstances: resolved, dedupShared: true, fabricateArrayCount: 8);
+
+        // TOP array Items IS fabricated (walked=1 → 8 rows): element [7] exists.
+        Assert.Contains("\"[7]\"", xml);
+        // NESTED Mods array is NOT fabricated: it stays at its walked count (1). If it had
+        // been fabricated, each of the 8 items would carry ~8 Mod slots → an explosion of
+        // "Power" rows. With the gate, only the one real Mod expands (others dedup/absent).
+        int powerRows = System.Text.RegularExpressions.Regex.Matches(xml, "\"Power\"").Count;
+        Assert.True(powerRows <= 2, $"nested array was fabricated (explosion): {powerRows} Power rows");
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_ScalarArray_Fabricate_ExtendsLeaves()
+    {
+        var field = new LiveFieldValue
+        {
+            Name = "Counts", TypeName = "ArrayProperty", ArrayInnerType = "IntProperty",
+            ArrayCount = 2, ArrayElemSize = 4, Offset = 0x20,
+            ArrayElements = new List<ArrayElementValue>
+            {
+                new() { Index = 0, Value = "10" },
+                new() { Index = 1, Value = "20" },
+            },
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "Obj", "Obj", new[] { field }, fabricateArrayCount: 4);
+
+        // Extended to 4: [2] @ +8, [3] @ +C.
+        Assert.Contains("\"[2]\"", xml);
+        Assert.Contains("\"[3]\"", xml);
+        Assert.Contains("<Address>+8</Address>", xml);
+        Assert.Contains("<Address>+C</Address>", xml);
+    }
+
+    [Fact]
+    public void GenerateInstanceXml_Array_NoFabricateByDefault()
+    {
+        // fabricateArrayCount defaults to 0 (off) — Copy CE XML and any un-opted export
+        // never pad the array.
+        var field = new LiveFieldValue
+        {
+            Name = "Counts", TypeName = "ArrayProperty", ArrayInnerType = "IntProperty",
+            ArrayCount = 2, ArrayElemSize = 4, Offset = 0x20,
+            ArrayElements = new List<ArrayElementValue>
+            {
+                new() { Index = 0, Value = "10" },
+                new() { Index = 1, Value = "20" },
+            },
+        };
+
+        var xml = CeXmlExportService.GenerateInstanceXml(
+            "\"Game.exe\"+1000", "Obj", "Obj", new[] { field });
+
+        Assert.Contains("\"[1]\"", xml);
+        Assert.DoesNotContain("\"[2]\"", xml);
     }
 
     [Fact]

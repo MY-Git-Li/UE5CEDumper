@@ -220,6 +220,15 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// <summary>Max CE DropDownList entries (2^N, default 512). Used during CE XML export.</summary>
     public int DropDownLimit { get; set; } = Constants.DefaultDropDownLimit;
 
+    /// <summary>CE String leaf display length (2^N chars; 16..4096, default 256).
+    /// Seeded from the toolbar master; passed to CE XML / CE Field export.</summary>
+    public int CeStringLength { get; set; } = Constants.DefaultCeStringLength;
+
+    /// <summary>Copy CE Field array fabricate count (0 = off). When &gt; 0, Copy CE Field on a
+    /// selected TArray pads it to this many element rows using a resolved element's layout.
+    /// Seeded from the toolbar master; passed ONLY to the Copy CE Field export (not Copy CE XML).</summary>
+    public int FabricateArrayCount { get; set; }
+
     /// <summary>CSX drilldown depth (0 = flat/dummy, 1-4 normal, 5-6 deep / warning band).
     /// Each extra level can multiply CE XML / CSX output exponentially because every
     /// ObjectProperty hit fans out to its own field tree. 4 was the historic ceiling
@@ -231,7 +240,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     // === Locate in GWorld (forward BFS path search) ===
     // User-set search depth (how many pointer hops down from GWorld to look),
     // and live GWorld availability (drives gray-out of the feature).
-    [ObservableProperty] private int _gWorldLocateDepth = 5;
+    [ObservableProperty] private int _gWorldLocateDepth = 7;
     [ObservableProperty] private bool _isGWorldAvailable;
 
     /// <summary>Opt-in deep "Locate in GWorld" (default OFF). When on, the forward
@@ -3458,6 +3467,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     resolvedStructs,
                     collapsePointerNodes: CollapsePointerNodes,
                     maxDropDownEntries: DropDownLimit,
+                    ceStringLength: CeStringLength,
                     resolvedInstances: resolvedInstances,
                     flattenChain: CollapseChain,
                     descShowOffset: DescShowOffset,
@@ -3480,6 +3490,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     rootAddress, rootBc.Label, breadcrumbsForXml, fieldsForXml, resolvedStructs,
                     collapsePointerNodes: CollapsePointerNodes,
                     maxDropDownEntries: DropDownLimit,
+                    ceStringLength: CeStringLength,
                     resolvedInstances: resolvedInstances,
                     flattenChain: CollapseChain,
                     descShowOffset: DescShowOffset,
@@ -3768,9 +3779,11 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     resolvedStructs,
                     collapsePointerNodes: CollapsePointerNodes,
                     maxDropDownEntries: DropDownLimit,
+                    ceStringLength: CeStringLength,
                     resolvedInstances: resolvedInstances,
                     flattenChain: CollapseChain,
                     includeGuessed: includeGuessed,
+                    fabricateArrayCount: FabricateArrayCount,
                     descShowOffset: DescShowOffset,
                     descShowType: DescShowType,
                     dedupShared: DedupSharedObjects,
@@ -3791,9 +3804,11 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     rootAddress, rootBc.Label, breadcrumbsForXml, fieldsForXml, resolvedStructs,
                     collapsePointerNodes: CollapsePointerNodes,
                     maxDropDownEntries: DropDownLimit,
+                    ceStringLength: CeStringLength,
                     resolvedInstances: resolvedInstances,
                     flattenChain: CollapseChain,
                     includeGuessed: includeGuessed,
+                    fabricateArrayCount: FabricateArrayCount,
                     descShowOffset: DescShowOffset,
                     descShowType: DescShowType,
                     dedupShared: DedupSharedObjects,

@@ -55,6 +55,8 @@ public sealed class MainUiOptions
     public int CsxDrilldownDepth { get; set; }
     public int PreviewLimit { get; set; } = 2;
     public int DeepScanElemCapExponent { get; set; } = 8;
+    public int CeStringLengthExponent { get; set; } = 8;   // 2^8 = 256 (CE String leaf <Length>)
+    public int FabricateArrayCountExponent { get; set; }   // 0 = off; 2^N = Copy CE Field array fabricate count
 }
 
 public sealed class LiveWalkerUiOptions
@@ -72,7 +74,7 @@ public sealed class LiveWalkerUiOptions
     public string? FlattenColorOdd { get; set; }
     public bool DedupSharedObjects { get; set; } = true;
     public bool ExcludeSystemComponents { get; set; } = true;
-    public int GWorldLocateDepth { get; set; } = 5;
+    public int GWorldLocateDepth { get; set; } = 7;
     public bool GWorldLocateDeep { get; set; }
     public int AutoRefreshIntervalSec { get; set; } = 10;   // Constants.DefaultAutoRefreshIntervalSec
 }

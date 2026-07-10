@@ -150,6 +150,38 @@
                             ToolTip.Tip="{StaticResource str.Tip.DropDownLimit}"/>
                   </StackPanel>
 
+                  <!-- CE String Length -->
+                  <StackPanel Spacing="2">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="{StaticResource str.Toolbar.StringLength}"
+                                 Foreground="#CCCCCC" FontSize="12"
+                                 VerticalAlignment="Center"/>
+                      <TextBlock Text="{Binding CeStringLength}"
+                                 Foreground="#D4D4D4" FontSize="12" FontWeight="Bold"
+                                 VerticalAlignment="Center" MinWidth="40"/>
+                    </StackPanel>
+                    <Slider Value="{Binding CeStringLengthExponent}"
+                            Minimum="4" Maximum="12"
+                            TickFrequency="1" IsSnapToTickEnabled="True"
+                            ToolTip.Tip="{StaticResource str.Tip.StringLength}"/>
+                  </StackPanel>
+
+                  <!-- Copy CE Field: fabricate empty array slots (0 = off) -->
+                  <StackPanel Spacing="2">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="{StaticResource str.Toolbar.Fabricate}"
+                                 Foreground="#CCCCCC" FontSize="12"
+                                 VerticalAlignment="Center"/>
+                      <TextBlock Text="{Binding FabricateArrayCountLabel}"
+                                 Foreground="{Binding FabricateArrayCountBrush}" FontSize="12" FontWeight="Bold"
+                                 VerticalAlignment="Center" MinWidth="40"/>
+                    </StackPanel>
+                    <Slider Value="{Binding FabricateArrayCountExponent}"
+                            Minimum="0" Maximum="12"
+                            TickFrequency="1" IsSnapToTickEnabled="True"
+                            ToolTip.Tip="{StaticResource str.Tip.Fabricate}"/>
+                  </StackPanel>
+
                   <!-- Preview limit -->
                   <StackPanel Spacing="2">
                     <StackPanel Orientation="Horizontal" Spacing="6">

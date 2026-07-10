@@ -91,6 +91,10 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
     /// <summary>Max CE DropDownList entries (2^N, default 512). Used during CE XML export.</summary>
     public int DropDownLimit { get; set; } = Constants.DefaultDropDownLimit;
 
+    /// <summary>CE String leaf display length (2^N chars; 16..4096, default 256).
+    /// Seeded from the toolbar master; passed to CE XML export.</summary>
+    public int CeStringLength { get; set; } = Constants.DefaultCeStringLength;
+
     // --- Class name search ---
     [ObservableProperty] private string _searchClassName = "";
     /// <summary>Optional object-name filter (case-insensitive substring), ANDed
@@ -669,7 +673,8 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
                 rootAddress, SelectedInstance.Name, SelectedInstance.ClassName,
                 new List<LiveFieldValue>(Fields), resolvedStructs,
                 collapsePointerNodes: CollapsePointerNodes,
-                maxDropDownEntries: DropDownLimit);
+                maxDropDownEntries: DropDownLimit,
+                ceStringLength: CeStringLength);
 
             await _platform.CopyToClipboardAsync(xml);
             StatusText = "";

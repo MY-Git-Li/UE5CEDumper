@@ -122,6 +122,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int _csxDrilldownDepth; // 0 = flat (dummy), 1+ = real child structures
     [ObservableProperty] private int _previewLimit = Constants.DefaultPreviewLimit; // Struct preview sub-field count (0-6)
     [ObservableProperty] private int _deepScanElemCapExponent = 8; // 2^8 = 256 (find_by_address deep scan per-container cap)
+    [ObservableProperty] private int _ceStringLengthExponent = 8; // 2^8 = 256 (CE String leaf <Length>; floored at 2^4 = 16)
+    [ObservableProperty] private int _fabricateArrayCountExponent; // 0 = off; 2^N = Copy CE Field array fabricate count
 
     // Always-visible top-toolbar AOBMaker status (mirrors the per-tab indicators).
     [ObservableProperty] private bool _isAobMakerAvailable;
@@ -134,6 +136,27 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>Computed CE DropDownList max entries: 2^DropDownLimitExponent (64..8192).</summary>
     public int DropDownLimit => 1 << DropDownLimitExponent;
+
+    /// <summary>Computed CE String leaf display length: 2^CeStringLengthExponent (16..4096).</summary>
+    public int CeStringLength => 1 << CeStringLengthExponent;
+
+    /// <summary>Computed Copy CE Field array fabricate count: 0 (off) or 2^FabricateArrayCountExponent
+    /// (2..512). When &gt; 0, Copy CE Field on a TArray pads it to this many element rows.</summary>
+    public int FabricateArrayCount => FabricateArrayCountExponent <= 0 ? 0 : (1 << FabricateArrayCountExponent);
+
+    /// <summary>Toolbar readout for the fabricate slider — "Off" at 0, the count otherwise,
+    /// plus a warning past 256 (large exports slow Cheat Engine and can hit the entry cap).</summary>
+    public string FabricateArrayCountLabel => FabricateArrayCount switch
+    {
+        0 => "Off",
+        > 256 => $"{FabricateArrayCount} ⚠ large — CE may lag / truncate",
+        _ => FabricateArrayCount.ToString(),
+    };
+
+    /// <summary>Amber readout past 256 (use-at-your-own-risk band), default grey otherwise.</summary>
+    public Avalonia.Media.IBrush FabricateArrayCountBrush => FabricateArrayCount > 256
+        ? Avalonia.Media.SolidColorBrush.Parse("#F4A747")
+        : Avalonia.Media.SolidColorBrush.Parse("#D4D4D4");
 
     /// <summary>Show warning when array limit &gt;= 256 (high memory usage).</summary>
     public bool ShowArrayLimitWarning => ArrayLimitExponent >= 8;
@@ -276,6 +299,22 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(DropDownLimit));
         LiveWalker.DropDownLimit = DropDownLimit;
         InstanceFinder.DropDownLimit = DropDownLimit;
+    }
+
+    partial void OnCeStringLengthExponentChanged(int value)
+    {
+        OnPropertyChanged(nameof(CeStringLength));
+        LiveWalker.CeStringLength = CeStringLength;
+        InstanceFinder.CeStringLength = CeStringLength;
+    }
+
+    partial void OnFabricateArrayCountExponentChanged(int value)
+    {
+        OnPropertyChanged(nameof(FabricateArrayCount));
+        OnPropertyChanged(nameof(FabricateArrayCountLabel));
+        OnPropertyChanged(nameof(FabricateArrayCountBrush));
+        // Copy CE Field is Live Walker only, so this fans out to just that VM.
+        LiveWalker.FabricateArrayCount = FabricateArrayCount;
     }
 
     partial void OnCsxDrilldownDepthChanged(int value)
@@ -1961,6 +2000,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         nameof(SelectedAddressFormatIndex), nameof(CollapsePointerNodes),
         nameof(ArrayLimitExponent), nameof(DropDownLimitExponent),
         nameof(CsxDrilldownDepth), nameof(PreviewLimit), nameof(DeepScanElemCapExponent),
+        nameof(CeStringLengthExponent), nameof(FabricateArrayCountExponent),
     };
     private static readonly HashSet<string> LiveWalkerPersist = new()
     {
@@ -2048,6 +2088,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         CsxDrilldownDepth = o.Main.CsxDrilldownDepth;
         PreviewLimit = o.Main.PreviewLimit;
         DeepScanElemCapExponent = o.Main.DeepScanElemCapExponent;
+        CeStringLengthExponent = o.Main.CeStringLengthExponent;
+        FabricateArrayCountExponent = o.Main.FabricateArrayCountExponent;
 
         var lw = o.LiveWalker;
         LiveWalker.CollapseChain = lw.CollapseChain;
@@ -2161,6 +2203,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         o.Main.CsxDrilldownDepth = CsxDrilldownDepth;
         o.Main.PreviewLimit = PreviewLimit;
         o.Main.DeepScanElemCapExponent = DeepScanElemCapExponent;
+        o.Main.CeStringLengthExponent = CeStringLengthExponent;
+        o.Main.FabricateArrayCountExponent = FabricateArrayCountExponent;
 
         o.LiveWalker.CollapseChain = LiveWalker.CollapseChain;
         o.LiveWalker.DescShowOffset = LiveWalker.DescShowOffset;
