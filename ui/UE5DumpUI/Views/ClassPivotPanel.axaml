@@ -105,15 +105,20 @@
         </ComboBox>
         <TextBlock Text="{StaticResource str.Pivot.ClassFilter}" Foreground="#CCCCCC"
                    VerticalAlignment="Center" Margin="0,0,4,0" IsVisible="{Binding UsesSnapshot}"/>
-        <!-- Class picker = filter TextBox (here) + ListBox (below the WrapPanel). NOT a
+        <!-- Class picker = filter AutoCompleteBox (here) + ListBox (below the WrapPanel). NOT a
              ComboBox (its dropdown Popup drops the click after a per-keystroke ItemsSource
-             rebuild) and NOT an AutoCompleteBox (its Text<->SelectedItem reconciliation
-             oscillated SelectedClass and froze the UI). A ListBox has no Popup, so a
-             live-filtered list commits clicks reliably. Typing here sets SelectedClass=null
-             → no field load → the DB is never touched while filtering. -->
-        <TextBox Text="{Binding ClassFilter}" Width="200" Margin="0,0,12,0"
-                 IsVisible="{Binding UsesSnapshot}"
-                 PlaceholderText="{StaticResource str.Pivot.ClassFilterHint}"/>
+             rebuild). SAFE as an AutoCompleteBox ONLY because we bind Text ONLY (never
+             SelectedItem/SelectedValue) — its ItemsSource is the keyword MEMORY (past filters),
+             so the Text<->SelectedItem reconciliation that oscillated SelectedClass and froze
+             the UI never happens; SelectedClass stays owned by the ListBox. A ListBox has no
+             Popup, so a live-filtered list commits clicks reliably. Typing here sets
+             SelectedClass=null → no field load → the DB is never touched while filtering. -->
+        <AutoCompleteBox Text="{Binding ClassFilter, Mode=TwoWay}"
+                         ItemsSource="{Binding ClassFilterHistory}"
+                         FilterMode="Contains"
+                         Width="200" Margin="0,0,12,0"
+                         IsVisible="{Binding UsesSnapshot}"
+                         PlaceholderText="{StaticResource str.Pivot.ClassFilterHint}"/>
 
         <!-- Snapshot Array source (Phase C6: inner-key pivot of a struct array) -->
         <TextBlock Text="{StaticResource str.Pivot.ArrayField}" Foreground="#CCCCCC"
@@ -254,8 +259,11 @@
       <WrapPanel Grid.Row="0" Orientation="Horizontal" Margin="0,6,0,6">
         <TextBlock Text="{StaticResource str.Pivot.ResultsHint}" Foreground="#888"
                    FontSize="11" TextWrapping="Wrap" Width="680" Margin="0,0,12,0"/>
-        <TextBox Text="{Binding ResultFilter}" Width="220" Height="26" VerticalAlignment="Center"
-                 PlaceholderText="{StaticResource str.Pivot.ResultFilterHint}"/>
+        <AutoCompleteBox Text="{Binding ResultFilter, Mode=TwoWay}"
+                         ItemsSource="{Binding ResultFilterHistory}"
+                         FilterMode="Contains"
+                         Width="220" Height="26" VerticalAlignment="Center"
+                         PlaceholderText="{StaticResource str.Pivot.ResultFilterHint}"/>
       </WrapPanel>
 
       <!-- Results: one row per group -->

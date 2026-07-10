@@ -36,6 +36,12 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
     // Debounce timer for FilterText changes (200 ms)
     private System.Threading.Timer? _filterDebounce;
 
+    /// <summary>Per-session remembered filter keywords (LRU) surfaced as the bottom
+    /// text-filter box's AutoCompleteBox suggestions — see <see cref="KeywordSearchMemory"/>.
+    /// (The top SearchText box uses the curated <see cref="SearchSuggestions"/> instead.)</summary>
+    private readonly KeywordSearchMemory _filterMemory;
+    public ObservableCollection<string> FilterHistory => _filterMemory.History;
+
     [ObservableProperty] private ObservableCollection<UObjectNode> _filteredNodes = new();
     [ObservableProperty] private UObjectNode? _selectedNode;
     [ObservableProperty] private string _searchText = "";
@@ -150,6 +156,9 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
         _filterDebounce = new System.Threading.Timer(
             _ => Avalonia.Threading.Dispatcher.UIThread.Post(ApplyFilter),
             null, 200, Timeout.Infinite);
+        // Remember the settled keyword once its own 700ms quiet period elapses; the
+        // probe reads FilteredNodes.Count (populated by the 200ms ApplyFilter above).
+        _filterMemory.Schedule(value);
     }
 
     /// <summary>
@@ -165,6 +174,8 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
 
         _filterDebounce?.Dispose();
         _filterDebounce = null;
+
+        _filterMemory.Dispose();
 
         try { _loadCts?.Cancel(); } catch { /* already disposed */ }
         _loadCts?.Dispose();
@@ -183,6 +194,7 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
         _dump = dump;
         _log = log;
         _platform = platform;
+        _filterMemory = new KeywordSearchMemory(() => (FilterText, FilteredNodes.Count > 0));
     }
 
     public void SetEngineState(EngineState state)

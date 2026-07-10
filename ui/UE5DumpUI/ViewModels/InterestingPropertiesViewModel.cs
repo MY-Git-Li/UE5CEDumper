@@ -121,6 +121,11 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
     /// genuine miss. Recomputed by <see cref="ApplyFilter"/>.</summary>
     [ObservableProperty] private string _classFilterNote = "";
 
+    /// <summary>Per-session remembered filter keywords (LRU) surfaced as the
+    /// filter box's AutoCompleteBox suggestions — see <see cref="KeywordSearchMemory"/>.</summary>
+    private readonly KeywordSearchMemory _filterMemory;
+    public ObservableCollection<string> FilterHistory => _filterMemory.History;
+
     public InterestingPropertiesViewModel(IDumpService dump, ILoggingService log,
                                           IPlatformService? platform = null)
     {
@@ -133,6 +138,7 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
                 (await _dump.DetectNoiseClassesAsync(names))
                     .Select(n => (n.ClassName, n.IsNoise, n.Reason)).ToList(),
         };
+        _filterMemory = new KeywordSearchMemory(() => (FilterText, Results.Count > 0));
     }
 
     /// <summary>
@@ -225,7 +231,11 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
     [RelayCommand]
     private void CancelXrefBatch() => _xrefBatchCts?.Cancel();
 
-    partial void OnFilterTextChanged(string value)                  => ApplyFilter();
+    partial void OnFilterTextChanged(string value)
+    {
+        ApplyFilter();
+        _filterMemory.Schedule(value);
+    }
     partial void OnCategoryFilterChanged(PropertyCategory? value)   => ApplyFilter();
     partial void OnUnusualOnlyChanged(bool value)                   => ApplyFilter();
     partial void OnShowAllChanged(bool value)                       => ApplyFilter();
@@ -384,8 +394,10 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
         Results.Clear();
         if (_allRows.Count == 0) return;
 
-        var nameFilter = (FilterText ?? "").Trim();
-        var hasName    = nameFilter.Length > 0;
+        // Space-separated terms are ANDed (each must hit PropName or ClassName),
+        // so "health max" narrows to entries matching both — the shared Object Tree
+        // filter semantics.
+        var terms      = ObjectTreeFilter.SplitTerms(FilterText);
         var cat        = CategoryFilter;
         var threshold  = ShowAll ? int.MinValue : PropertyScoringTable.InterestingThreshold;
         var unusualGate = UnusualOnly;
@@ -396,13 +408,10 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
             if (row.FinalScore < threshold) continue;
             if (cat.HasValue && row.Category != cat.Value) continue;
             if (unusualGate && !row.IsUnusualLocation) continue;
-            if (hasName)
+            if (terms.Length > 0 &&
+                !ObjectTreeFilter.MatchesAllTerms(terms, row.PropName, row.ClassName))
             {
-                if (!row.PropName.Contains(nameFilter, StringComparison.OrdinalIgnoreCase)
-                    && !row.ClassName.Contains(nameFilter, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
+                continue;
             }
             // Class-noise exclusion last, so the count reflects rows that would
             // otherwise be visible.

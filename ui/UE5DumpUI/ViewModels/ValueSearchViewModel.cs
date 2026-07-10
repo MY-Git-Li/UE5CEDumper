@@ -362,6 +362,15 @@ public partial class ValueSearchViewModel : ViewModelBase
     /// so a change reloads window 0 from the DLL (debounced).</summary>
     [ObservableProperty] private string _filterText = "";
 
+    /// <summary>Per-session remembered filter keywords (LRU) surfaced as the
+    /// single-mode filter box's AutoCompleteBox suggestions — see
+    /// <see cref="KeywordSearchMemory"/>. The filter is server-side (the DLL windows
+    /// candidates) and asynchronous, so a debounced <c>Schedule</c> probe would race
+    /// the pipe round-trip and read a stale count. Instead we <c>Commit</c> the keyword
+    /// from <see cref="LoadWindowAsync"/> once the result count for it has landed.</summary>
+    private readonly KeywordSearchMemory _filterMemory;
+    public ObservableCollection<string> FilterHistory => _filterMemory.History;
+
     partial void OnFilterTextChanged(string value) => _ = DebouncedReloadAsync();
 
     private bool IsDefaultView =>
@@ -414,6 +423,10 @@ public partial class ValueSearchViewModel : ViewModelBase
                 foreach (var c in w.Candidates) Candidates.Add(c);
             OnPropertyChanged(nameof(HasMore));
             UpdateWindowStatus();
+            // Filter keyword-memory: remember the settled keyword only now that the
+            // server-reported count for it has landed (a page-0 reload = a filter/sort
+            // change). Commit — not a timer probe — so it never reads a stale count.
+            if (reset) _filterMemory.Commit();
         }
         catch (OperationCanceledException) { /* superseded by a newer query */ }
         catch (Exception ex)
@@ -672,6 +685,8 @@ public partial class ValueSearchViewModel : ViewModelBase
     {
         _dump = dump;
         _log  = log;
+        _filterMemory = new KeywordSearchMemory(() => (FilterText, FilteredTotal > 0));
+        _groupFilterMemory = new KeywordSearchMemory(() => (GroupFilterText, GroupFilteredTotal > 0));
         _selectedSortOption = SortOptions[0];  // scan order
         _selectedGroupSortOption = GroupSortOptions[0];  // scan order (group mode)
         ClassFilter = new ClassFacetFilter(() => { if (HasSession) _ = LoadWindowAsync(reset: true); })
@@ -1039,6 +1054,15 @@ public partial class ValueSearchViewModel : ViewModelBase
         => OnPropertyChanged(nameof(GroupHasMore));
 
     [ObservableProperty] private string _groupFilterText = "";
+
+    /// <summary>Per-session remembered filter keywords (LRU) for the group-mode
+    /// filter box's AutoCompleteBox suggestions — see <see cref="KeywordSearchMemory"/>.
+    /// Server-side + async filter, so the keyword is <c>Commit</c>ted from
+    /// <see cref="LoadGroupWindowAsync"/> once the group result count lands (a debounced
+    /// probe would race the pipe round-trip).</summary>
+    private readonly KeywordSearchMemory _groupFilterMemory;
+    public ObservableCollection<string> GroupFilterHistory => _groupFilterMemory.History;
+
     partial void OnGroupFilterTextChanged(string value) => _ = DebouncedGroupReloadAsync();
 
     /// <summary>Server-side sort picker for the group results (object-level rows).</summary>
@@ -1245,6 +1269,9 @@ public partial class ValueSearchViewModel : ViewModelBase
                 foreach (var c in w.Candidates) GroupCandidates.Add(c);
             OnPropertyChanged(nameof(GroupHasMore));
             UpdateGroupWindowStatus();
+            // Filter keyword-memory: commit the settled keyword once its server count
+            // has landed (page-0 reload), never on a timer that could race the reload.
+            if (reset) _groupFilterMemory.Commit();
         }
         catch (OperationCanceledException) { /* superseded */ }
         catch (Exception ex)

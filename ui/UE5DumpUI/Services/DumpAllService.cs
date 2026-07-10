@@ -49,34 +49,28 @@ public static class DumpAllService
     internal const int WalkClassBatchChunkSize = 200;
 
     /// <summary>
-    /// Engine-package path prefixes (mirrors the DLL's IsEnginePackage
-    /// list). Used only when <see cref="DumpOptions.GameOnly"/> is true
-    /// to skip /Script/Engine.*, /Script/CoreUObject.*, etc.
+    /// Engine-package path prefixes — kept in sync with the DLL's
+    /// <c>Aura::IsEnginePackage</c> (dll/src/Aura.h) so the client-side GameOnly skip
+    /// matches what the DLL treats as an engine package. Prefixes have NO trailing
+    /// separator: <see cref="IsEnginePath"/> checks the terminator (<c>/</c>, <c>.</c>,
+    /// or end-of-string) explicitly, and first collapses <c>Ubel::GetFullName</c>'s
+    /// double-leading-slash form.
     /// </summary>
     private static readonly string[] EnginePathPrefixes =
     {
-        "/Script/Engine.",
-        "/Script/CoreUObject.",
-        "/Script/CoreOnline.",
-        "/Script/UMG.",
-        "/Script/Slate.",
-        "/Script/SlateCore.",
-        "/Script/InputCore.",
-        "/Script/PhysicsCore.",
-        "/Script/NavigationSystem.",
-        "/Script/AIModule.",
-        "/Script/Niagara.",
-        "/Script/MovieScene.",
-        "/Script/LevelSequence.",
-        "/Script/Landscape.",
-        "/Script/Foliage.",
-        "/Script/AnimGraphRuntime.",
-        "/Script/AudioMixer.",
-        "/Script/GameplayTags.",
-        "/Script/GameplayTasks.",
-        "/Script/GameplayAbilities.",
-        // Common UE built-in modules; not exhaustive — analysis scripts
-        // can further filter via the class_path field in the dump.
+        "/Script/Engine", "/Script/CoreUObject", "/Script/CoreOnline",
+        "/Script/UMG", "/Script/Slate", "/Script/SlateCore", "/Script/InputCore",
+        "/Script/EnhancedInput", "/Script/PhysicsCore", "/Script/NavigationSystem",
+        "/Script/AIModule", "/Script/Niagara", "/Script/Paper2D",
+        "/Script/CinematicCamera", "/Script/GameplayCameras", "/Script/MovieScene",
+        "/Script/LevelSequence", "/Script/Landscape", "/Script/Foliage",
+        "/Script/AnimGraphRuntime", "/Script/AudioMixer", "/Script/ChaosCloth",
+        "/Script/ChaosSolverEngine", "/Script/ClothingSystemRuntimeNv",
+        "/Script/GeometryCollectionEngine", "/Script/FieldSystemEngine",
+        "/Script/ProceduralMeshComponent", "/Script/GameplayTags",
+        "/Script/GameplayTasks", "/Script/GameplayAbilities", "/Script/PacketHandler",
+        "/Script/PropertyAccess", "/Script/DeveloperSettings", "/Script/AssetRegistry",
+        "/Script/MediaAssets", "/Script/HeadMountedDisplay",
     };
 
     /// <summary>
@@ -162,7 +156,9 @@ public static class DumpAllService
             do
             {
                 ct.ThrowIfCancellationRequested();
-                var page = await dump.GetObjectListAsync(offset, pageSize, ct);
+                // Request per-object full paths only when GameOnly needs them for the
+                // pre-walk engine-package skip below — otherwise stay on the lean path.
+                var page = await dump.GetObjectListAsync(offset, pageSize, ct, includePath: options.GameOnly);
                 total = page.Total;
 
                 foreach (var obj in page.Objects)
@@ -172,11 +168,20 @@ public static class DumpAllService
                     {
                         continue;
                     }
-                    // The GameOnly engine-package skip CANNOT happen here: obj.FullPath
-                    // is always "" from get_object_list (the DLL only sends addr/name/
-                    // class/outer — no path on the wire). It is applied AFTER walking,
-                    // on the walked classInfo.FullPath, in FlushClassChunkAsync (which
-                    // returns the skipped count).
+                    // Pre-walk GameOnly skip: with include_path=true the object list now
+                    // carries obj.FullPath (normally == the walked classInfo.FullPath), so
+                    // engine classes are dropped BEFORE the walk_class round-trip. The
+                    // post-walk skip in FlushClassChunkAsync stays as the authoritative
+                    // backstop: it still fires when obj.FullPath is unavailable (a caller
+                    // that didn't request include_path) or diverges from the walked path
+                    // (the object's outer chain changed between the two pipe calls). An
+                    // empty obj.FullPath simply doesn't match here (IsEnginePath("")==false),
+                    // so it falls through to be walked and re-checked on classInfo.FullPath.
+                    if (options.GameOnly && IsEnginePath(obj.FullPath))
+                    {
+                        classesSkipped++;
+                        continue;
+                    }
 
                     chunkBuffer.Add(obj);
                     if (chunkBuffer.Count >= WalkClassBatchChunkSize)
@@ -483,15 +488,28 @@ public static class DumpAllService
         sb.Append('"');
     }
 
-    /// <summary>Check whether <paramref name="fullPath"/> belongs to one
-    /// of the known engine packages. Case-sensitive (UE paths are
-    /// case-sensitive by convention).</summary>
+    /// <summary>Check whether <paramref name="fullPath"/> belongs to one of the known
+    /// engine packages. Case-sensitive (UE paths are case-sensitive by convention).
+    /// Faithful C# port of the DLL's <c>Aura::IsEnginePackage</c> (dll/src/Aura.h):
+    /// <c>Ubel::GetFullName</c> emits engine paths as <c>//Script/Engine/Class</c> — a
+    /// DOUBLE leading slash with <c>/</c> separators (dot is used only for sub-objects
+    /// at depth &gt; 2, never for a top-level class). A naive <c>StartsWith("/Script/Engine.")</c>
+    /// never matched that real wire form, silently making GameOnly a no-op. So collapse
+    /// the leading-slash run to a single <c>/</c>, then require the prefix to be followed
+    /// by end-of-string, <c>/</c>, or <c>.</c>.</summary>
     internal static bool IsEnginePath(string fullPath)
     {
         if (string.IsNullOrEmpty(fullPath)) return false;
+
+        int firstNonSlash = 0;
+        while (firstNonSlash < fullPath.Length && fullPath[firstNonSlash] == '/') firstNonSlash++;
+        if (firstNonSlash >= fullPath.Length) return false;   // empty / all slashes
+        string path = "/" + fullPath.Substring(firstNonSlash);
+
         foreach (var prefix in EnginePathPrefixes)
         {
-            if (fullPath.StartsWith(prefix, StringComparison.Ordinal))
+            if (path.StartsWith(prefix, StringComparison.Ordinal) &&
+                (path.Length == prefix.Length || path[prefix.Length] == '/' || path[prefix.Length] == '.'))
                 return true;
         }
         return false;

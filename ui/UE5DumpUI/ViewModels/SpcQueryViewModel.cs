@@ -4,6 +4,7 @@ using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 
@@ -318,10 +319,21 @@ public partial class SpcQueryViewModel : ViewModelBase
     [ObservableProperty] private string _seqLastMin = "";
     [ObservableProperty] private string _seqLastMax = "";
 
+    /// <summary>Per-session remembered global-filter keywords (LRU), surfaced as the
+    /// global result filter box's AutoCompleteBox suggestions — see
+    /// <see cref="KeywordSearchMemory"/>. Only the class/field/object pickers stay
+    /// data-derived; the free-text global box gets keyword memory.</summary>
+    private readonly KeywordSearchMemory _resultGlobalMemory;
+    public ObservableCollection<string> ResultGlobalHistory => _resultGlobalMemory.History;
+
     partial void OnResultClassFilterChanged(string value)  => ApplyResultFilter();
     partial void OnResultFieldFilterChanged(string value)  => ApplyResultFilter();
     partial void OnResultObjectFilterChanged(string value) => ApplyResultFilter();
-    partial void OnResultGlobalFilterChanged(string value) => ApplyResultFilter();
+    partial void OnResultGlobalFilterChanged(string value)
+    {
+        ApplyResultFilter();
+        _resultGlobalMemory.Schedule(value);
+    }
 
     /// <summary>Distinct Class/Field/Object candidates from the last result set,
     /// feeding the AutoCompleteBox pickers (partial match).</summary>
@@ -387,6 +399,7 @@ public partial class SpcQueryViewModel : ViewModelBase
         _store = store;
         _log = log;
         _platform = platform;
+        _resultGlobalMemory = new KeywordSearchMemory(() => (ResultGlobalFilter, Results.Count > 0));
         // Don't list yet — the per-game DB isn't known until a game connects.
     }
 
@@ -628,10 +641,13 @@ public partial class SpcQueryViewModel : ViewModelBase
     private void ApplyResultFilter()
     {
         if (_allResults.Count == 0 && Results.Count == 0) { StatusText = _resultSummary; return; }
-        string cls = ResultClassFilter.Trim();
-        string fld = ResultFieldFilter.Trim();
-        string obj = ResultObjectFilter.Trim();
-        string glob = ResultGlobalFilter.Trim();
+        // Space-separated terms are ANDed per box (each term must hit the box's field;
+        // the global box ORs across all displayed columns) — the shared Object Tree
+        // filter semantics.
+        var clsTerms  = ObjectTreeFilter.SplitTerms(ResultClassFilter);
+        var fldTerms  = ObjectTreeFilter.SplitTerms(ResultFieldFilter);
+        var objTerms  = ObjectTreeFilter.SplitTerms(ResultObjectFilter);
+        var globTerms = ObjectTreeFilter.SplitTerms(ResultGlobalFilter);
         double? fMin = ParseBound(SeqFirstMin), fMax = ParseBound(SeqFirstMax);
         double? lMin = ParseBound(SeqLastMin),  lMax = ParseBound(SeqLastMax);
 
@@ -639,10 +655,11 @@ public partial class SpcQueryViewModel : ViewModelBase
         Results.Clear();
         foreach (var r in _allResults)
         {
-            if (cls.Length  > 0 && r.ClassName.IndexOf(cls, StringComparison.OrdinalIgnoreCase) < 0) continue;
-            if (fld.Length  > 0 && r.PropName.IndexOf(fld, StringComparison.OrdinalIgnoreCase) < 0) continue;
-            if (obj.Length  > 0 && r.NormPath.IndexOf(obj, StringComparison.OrdinalIgnoreCase) < 0) continue;
-            if (glob.Length > 0 && !MatchesGlobal(r, glob)) continue;
+            if (clsTerms.Length  > 0 && !ObjectTreeFilter.MatchesAllTerms(clsTerms, r.ClassName)) continue;
+            if (fldTerms.Length  > 0 && !ObjectTreeFilter.MatchesAllTerms(fldTerms, r.PropName)) continue;
+            if (objTerms.Length  > 0 && !ObjectTreeFilter.MatchesAllTerms(objTerms, r.NormPath)) continue;
+            if (globTerms.Length > 0 && !ObjectTreeFilter.MatchesAllTerms(
+                    globTerms, r.ClassName, r.PropName, r.NormPath, r.DeclaredType, r.SequenceDisplay)) continue;
             if (!WithinRange(SeqFirst(r), fMin, fMax)) continue;
             if (!WithinRange(SeqLast(r),  lMin, lMax)) continue;
             Results.Add(r);
@@ -653,13 +670,6 @@ public partial class SpcQueryViewModel : ViewModelBase
 
     private static string SeqFirst(SpcResultRow r) => r.Values.Count > 0 ? r.Values[0] : "";
     private static string SeqLast(SpcResultRow r)  => r.Values.Count > 0 ? r.Values[^1] : "";
-
-    private static bool MatchesGlobal(SpcResultRow r, string q) =>
-        r.ClassName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-        r.PropName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-        r.NormPath.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-        r.DeclaredType.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-        r.SequenceDisplay.Contains(q, StringComparison.OrdinalIgnoreCase);
 
     private static double? ParseBound(string s) =>
         double.TryParse(s.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : null;

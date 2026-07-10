@@ -131,6 +131,11 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     /// genuine miss. Recomputed by <see cref="ApplyFilter"/>.</summary>
     [ObservableProperty] private string _classFilterNote = "";
 
+    /// <summary>Per-session remembered filter keywords (LRU) surfaced as the
+    /// filter box's AutoCompleteBox suggestions — see <see cref="KeywordSearchMemory"/>.</summary>
+    private readonly KeywordSearchMemory _filterMemory;
+    public ObservableCollection<string> FilterHistory => _filterMemory.History;
+
     public InterestingFunctionsViewModel(IDumpService dump, ILoggingService log,
                                           IAobMakerBridge? aobMaker = null,
                                           IPlatformService? platform = null)
@@ -139,6 +144,7 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
         _log = log;
         _aobMaker = aobMaker;
         _platform = platform;
+        _filterMemory = new KeywordSearchMemory(() => (FilterText, Results.Count > 0));
         ClassFilter = new ClassFacetFilter(ApplyFilter)
         {
             AutoDetectProvider = async names =>
@@ -264,7 +270,11 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
 
     // Filter inputs all funnel into a single ApplyFilter pass. Each
     // partial method fires once per ObservableProperty change.
-    partial void OnFilterTextChanged(string value)         => ApplyFilter();
+    partial void OnFilterTextChanged(string value)
+    {
+        ApplyFilter();
+        _filterMemory.Schedule(value);
+    }
     partial void OnCategoryFilterChanged(FunctionCategory? value) => ApplyFilter();
     partial void OnShowAllChanged(bool value)              => ApplyFilter();
     partial void OnIsAobMakerAvailableChanged(bool value)
@@ -386,8 +396,11 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
         Results.Clear();
         if (_allRows.Count == 0) return;
 
-        var nameFilter = (FilterText ?? "").Trim();
-        var hasName    = nameFilter.Length > 0;
+        // Space-separated terms are ANDed (each must hit FuncName or ClassName),
+        // so "add money" narrows to entries matching both — the shared Object Tree
+        // filter semantics. Cheat-table workflow: user usually remembers either
+        // "AddMoney" or "PlayerInventory", and either term keeps both entry points.
+        var terms      = ObjectTreeFilter.SplitTerms(FilterText);
         var cat        = CategoryFilter;
         var threshold  = ShowAll ? int.MinValue : KeywordScoringTable.InterestingThreshold;
 
@@ -396,17 +409,10 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
         {
             if (row.FinalScore < threshold) continue;
             if (cat.HasValue && row.Category != cat.Value) continue;
-            if (hasName)
+            if (terms.Length > 0 &&
+                !ObjectTreeFilter.MatchesAllTerms(terms, row.FuncName, row.ClassName))
             {
-                // Match against function name OR class name (cheat-table
-                // workflow: user usually remembers either "AddMoney" or
-                // "PlayerInventory" — substring against both keeps both
-                // entry points working).
-                if (!row.FuncName.Contains(nameFilter, StringComparison.OrdinalIgnoreCase)
-                    && !row.ClassName.Contains(nameFilter, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
+                continue;
             }
             // Class-noise exclusion last, so the count reflects rows that would
             // otherwise be visible.

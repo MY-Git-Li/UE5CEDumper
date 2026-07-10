@@ -131,7 +131,8 @@
         <AutoCompleteBox Text="{Binding ResultObjectFilter, Mode=TwoWay}" ItemsSource="{Binding ResultObjectOptions}"
                          FilterMode="Contains" Width="170" Margin="0,0,8,0"/>
         <TextBlock Text="{StaticResource str.Spc.ResGlobal}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
-        <TextBox Text="{Binding ResultGlobalFilter}" Width="160" PlaceholderText="{StaticResource str.Spc.ResGlobalHint}"/>
+        <AutoCompleteBox Text="{Binding ResultGlobalFilter, Mode=TwoWay}" ItemsSource="{Binding ResultGlobalHistory}"
+                         FilterMode="Contains" Width="160" PlaceholderText="{StaticResource str.Spc.ResGlobalHint}"/>
       </WrapPanel>
       <WrapPanel Orientation="Horizontal">
         <TextBlock Text="{StaticResource str.Spc.SeqFirst}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>

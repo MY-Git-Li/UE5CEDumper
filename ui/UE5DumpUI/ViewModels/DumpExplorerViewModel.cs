@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 
@@ -59,8 +60,28 @@ public partial class DumpExplorerViewModel : ViewModelBase
     [ObservableProperty] private string _matchedHeader = "In current game";
     [ObservableProperty] private string _unmatchedHeader = "Not in current game";
 
+    /// <summary>Row selected in the Matched / Unmatched grid (bound TwoWay to each
+    /// grid's SelectedItem). A per-row action (Jump / Instances / Copy path) sets the
+    /// acted-on row here via <see cref="SelectEntry"/> even when the user clicked the
+    /// button without first selecting the row, so the selection survives the tab switch
+    /// the action triggers and is restored (and scrolled back into view) on return.
+    /// Only one is non-null at a time — selecting in one grid clears the other.</summary>
+    [ObservableProperty] private DumpEntry? _matchedSelected;
+    [ObservableProperty] private DumpEntry? _unmatchedSelected;
+
     // Long-running load / re-check cancellation (guarded OCE — see catch blocks).
     private CancellationTokenSource? _opCts;
+
+    /// <summary>Combined match count (matched + unmatched, pre-cap) from the most
+    /// recent <see cref="ApplyFilter"/>. The keyword-memory probe reads this to
+    /// decide whether a settled search term produced any hits and is worth
+    /// remembering — searching classes/props/funcs, not just the capped grid.</summary>
+    private int _lastMatchTotal;
+
+    /// <summary>Per-session remembered search keywords (LRU) surfaced as the search
+    /// box's AutoCompleteBox suggestions — see <see cref="KeywordSearchMemory"/>.</summary>
+    private readonly KeywordSearchMemory _searchMemory;
+    public ObservableCollection<string> SearchHistory => _searchMemory.History;
 
     /// <summary>Jump the selected row's owning class into the Live Walker.
     /// Payload = the CURRENT live address (only raised for matched rows).</summary>
@@ -77,6 +98,7 @@ public partial class DumpExplorerViewModel : ViewModelBase
         _dump = dump;
         _log = log;
         _platform = platform;
+        _searchMemory = new KeywordSearchMemory(() => (SearchText, _lastMatchTotal > 0));
     }
 
     /// <summary>Fanned in from MainWindowViewModel on connect/disconnect. On
@@ -98,6 +120,7 @@ public partial class DumpExplorerViewModel : ViewModelBase
     partial void OnSearchTextChanged(string value)
     {
         if (HasFile) ApplyFilter();
+        _searchMemory.Schedule(value);
     }
 
     partial void OnSelectedCategoryIndexChanged(int value)
@@ -247,6 +270,7 @@ public partial class DumpExplorerViewModel : ViewModelBase
     [RelayCommand]
     private void OpenInLiveWalker(DumpEntry? row)
     {
+        SelectEntry(row);
         if (row is null) return;
         if (!row.IsMatched || string.IsNullOrEmpty(row.LiveAddr))
         {
@@ -259,6 +283,7 @@ public partial class DumpExplorerViewModel : ViewModelBase
     [RelayCommand]
     private void FindInstances(DumpEntry? row)
     {
+        SelectEntry(row);
         if (row is null || string.IsNullOrEmpty(row.OwningClassName)) return;
         NavigateToInstanceFinder?.Invoke(row.OwningClassName);
     }
@@ -266,9 +291,30 @@ public partial class DumpExplorerViewModel : ViewModelBase
     [RelayCommand]
     private async Task CopyPathAsync(DumpEntry? row)
     {
+        SelectEntry(row);
         if (row is null || string.IsNullOrEmpty(row.Path)) return;
         await _platform.CopyToClipboardAsync(row.Path);
         StatusText = $"Copied path: {row.Path}";
+    }
+
+    /// <summary>Make <paramref name="row"/> the current selection in whichever grid
+    /// holds it, clearing the other grid's selection so exactly one row stays selected.
+    /// Called by every per-row action so clicking its button auto-selects the row even
+    /// when it wasn't selected first — the selection then persists across the tab switch
+    /// the action triggers. No-op if the row isn't in either (capped-out) collection.</summary>
+    private void SelectEntry(DumpEntry? row)
+    {
+        if (row is null) return;
+        if (Matched.Contains(row))
+        {
+            MatchedSelected = row;
+            UnmatchedSelected = null;
+        }
+        else if (Unmatched.Contains(row))
+        {
+            UnmatchedSelected = row;
+            MatchedSelected = null;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -381,6 +427,10 @@ public partial class DumpExplorerViewModel : ViewModelBase
 
         Matched = new ObservableCollection<DumpEntry>(matched);
         Unmatched = new ObservableCollection<DumpEntry>(unmatched);
+
+        // Settled-signal for keyword-memory: total hits across both groups (pre-cap),
+        // so a remembered keyword reflects real matches even when the grid is capped.
+        _lastMatchTotal = matchedTotal + unmatchedTotal;
 
         MatchedHeader = LiveChecked
             ? $"✅ In current game — {GroupCountLabel(matched.Count, matchedTotal)}"

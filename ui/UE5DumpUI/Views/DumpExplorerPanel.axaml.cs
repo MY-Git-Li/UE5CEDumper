@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using Avalonia.Controls;
+using Avalonia.Threading;
 using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 
@@ -28,5 +29,30 @@ public partial class DumpExplorerPanel : UserControl
         InitializeComponent();
         this.FindControl<DataGrid>("MatchedGrid")?.WireSortComparers(DumpSortComparers);
         this.FindControl<DataGrid>("UnmatchedGrid")?.WireSortComparers(DumpSortComparers);
+    }
+
+    /// <summary>
+    /// On (re)load — including when the user switches back to this tab — scroll the
+    /// last-acted-on row back into view. A Jump / Instances / Copy path action sets the
+    /// grid selection (<c>DumpExplorerViewModel.SelectEntry</c>) so it survives the tab
+    /// switch the action triggers; this brings that selected row back into view on
+    /// return. Deferred so the DataGrid has materialized its row containers first
+    /// (ScrollIntoView no-ops otherwise — same reason as PropertySearchPanel).
+    /// </summary>
+    private void OnPanelLoaded(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            ScrollGridToSelection("MatchedGrid");
+            ScrollGridToSelection("UnmatchedGrid");
+        }, DispatcherPriority.Background);
+    }
+
+    private void ScrollGridToSelection(string gridName)
+    {
+        var grid = this.FindControl<DataGrid>(gridName);
+        if (grid?.SelectedItem is not { } sel) return;
+        try { grid.ScrollIntoView(sel, null); }
+        catch { /* defensive: recycled grid / missing row */ }
     }
 }

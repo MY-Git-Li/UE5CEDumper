@@ -18,6 +18,58 @@ builds ≤696 in
 
 -----
 
+## 2026-07-10 — Keyword-search UX unification (space=AND + per-keyword memory) + `get_object_list` `full_path` restores GameOnly pre-walk skip + IsEnginePath format fix (build 2088; dev)
+
+**SHIPPED.** Three changes; the last two are one feature + a serious pre-existing bug it exposed.
+
+**(1) Every keyword/filter box now uses `space = AND` (learned from Object Tree).** The Object Tree text filter
+already split on whitespace and required EVERY term to hit a field (`ObjectTreeFilter.SplitTerms` /
+`MatchesAllTerms`). That helper grew a `params string?[]` multi-field overload (term-level AND, field-level OR,
+null-safe), and **every** client-side keyword filter was migrated off single-substring `.Contains`/`IndexOf` onto it:
+Console, Detect Stats, Interesting Properties, Interesting Functions, Game Class Filter, Class Struct, Class Pivot
+(class-picker + results), Snapshot Diff (global + class/field/object), SPC result (global + class/field/object),
+Live Walker (field-highlight search + Functions filter). So `add money` now matches a row containing both terms in
+any order, in any field. Already-AND boxes (Instance Finder temp filter, Dump Explorer, Object Tree) were left as-is.
+Server-side filters (Value Search, SPC query-time Class/Prop) can't AND client-side and were skipped. Every panel's
+combined facets (Category / ShowAll / GameOnly / class-noise exclusion / numeric ranges / direction / threshold /
+selection-detach / SequenceEqual no-op guard) were preserved; the Live Walker field search stays a **highlighter**
+(sets `IsSearchMatch`, never removes rows); the Class Pivot picker stays a `Text`-only AutoCompleteBox (never
+`SelectedItem`) so the historical `SelectedClass` oscillation can't return.
+
+**(2) Every keyword box now REMEMBERS what you typed (learned from Live Walker).** New reusable
+`Helpers/KeywordSearchMemory` packages the Live Walker pattern — an LRU `ObservableCollection<string>` of settled
+keywords that yielded matches (700 ms debounce, `SearchKeywordHistory.Remember`, longest-valid-wins), bound to an
+`AutoCompleteBox.ItemsSource`. 14 plain filter TextBoxes became AutoCompleteBoxes with per-box memory (`FilterHistory`
+etc.). The Snapshot/SPC **class/field/object** pickers keep their existing DATA-derived distinct-value suggestions
+(not regressed); only their free-text **global** box got typed-keyword memory. Value Search (server-side, async
+filter) uses `KeywordSearchMemory.Commit()` from the reload-completion path instead of a timer probe, so the remember
+never races the pipe round-trip and reads a stale count. Disposed in the three `IDisposable` VMs; self-limiting
+elsewhere.
+
+**(3) `get_object_list` emits `full_path` (gated) → GameOnly pre-walk skip restored — AND the pre-existing
+IsEnginePath format bug fixed.** The DLL `get_object_list` (Fern.cpp) now emits `full_path` per object **only when the
+request carries `include_path=true`** (kept off the hot Object Tree paginate — a path string per object is ~19 MB over
+486K objects; not interned). `DumpService.GetObjectListAsync(..., bool includePath=false)` parses it into
+`UObjectNode.FullPath`; `DumpAllService` sets the flag only for GameOnly and drops engine-package classes BEFORE the
+`walk_class` round-trip (the post-walk skip stays as the authoritative backstop for the include_path-off / TOCTOU
+case). **The bug an adversarial review then caught:** the C# `DumpAllService.IsEnginePath` matched `"/Script/Engine."`
+(single slash, trailing dot) but `Ubel::GetFullName` actually emits `"//Script/Engine/Actor"` (DOUBLE leading slash,
+`/` separators — dot is only used for sub-objects at depth > 2). So `IsEnginePath` **never matched a real wire path**,
+making GameOnly a complete no-op — including build 2044's post-walk "fix", which corrected the skip LOCATION but not
+the path FORMAT. The tests passed because they fed the `/Script/Engine.Actor` fiction the DLL never produces.
+`IsEnginePath` was rewritten as a faithful port of the DLL's `Aura::IsEnginePackage` (collapse the leading-slash run,
+require a `/`/`.`/end terminator, prefix list synced to the DLL's 37 packages), and the test fixtures switched to the
+real `//Script/Engine/Actor` form so they now guard the production format. This is the CLAUDE.md debugging rule in
+action: verify a fix against the actual data format, not an assumed one.
+
+**Verification.** Clean DLL+UI+Tests build green; **2320 tests pass** (helper `params`-overload coverage + real-format
+`IsEnginePath` theory + a new pre-walk-skip test that keys on `obj.FullPath`). The whole thing was built by one
+inventory workflow (16 agents auditing each panel), one implementation workflow (13 agents, one per panel, editing
+disjoint VM+AXAML), and one adversarial review workflow (3 lenses) that surfaced both fixed bugs. New files:
+`Helpers/KeywordSearchMemory.cs`; `ObjectTreeFilter` gained the `params` overload.
+
+-----
+
 ## 2026-07-10 — Dump Explorer tab (offline "Dump All" .jsonl browser) + Options depth/Deep editable while disconnected (build 2044; dev)
 
 **SHIPPED (UI only; no DLL / pipe-protocol change).** Two changes.

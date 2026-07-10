@@ -21,8 +21,10 @@
                 ToolTip.Tip="{StaticResource str.Tip.IF.GameOnly}"
                 Foreground="#CCCCCC" FontSize="12"
                 VerticalAlignment="Center"/>
-      <TextBox PlaceholderText="{StaticResource str.IF.FilterHint}"
-               Text="{Binding FilterText}"
+      <AutoCompleteBox PlaceholderText="{StaticResource str.IF.FilterHint}"
+               Text="{Binding FilterText, Mode=TwoWay}"
+               ItemsSource="{Binding FilterHistory}"
+               FilterMode="Contains"
                ToolTip.Tip="{StaticResource str.Tip.IF.Filter}"
                Width="260" Padding="4,2"/>
       <ComboBox ItemsSource="{Binding CategoryOptions}"

@@ -3,7 +3,8 @@
              xmlns:vm="using:UE5DumpUI.ViewModels"
              xmlns:m="using:UE5DumpUI.Models"
              x:Class="UE5DumpUI.Views.DumpExplorerPanel"
-             x:DataType="vm:DumpExplorerViewModel">
+             x:DataType="vm:DumpExplorerViewModel"
+             Loaded="OnPanelLoaded">
 
   <DockPanel Margin="8">
     <!-- Row 1: file controls + meta header -->
@@ -31,10 +32,12 @@
 
     <!-- Row 2: unified keyword search + category -->
     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
-      <TextBox x:Name="SearchInput"
-               Width="380" Padding="4,2"
-               Text="{Binding SearchText}"
-               PlaceholderText="{StaticResource str.Dump.SearchHint}"/>
+      <AutoCompleteBox x:Name="SearchInput"
+                       Width="380" Padding="4,2"
+                       Text="{Binding SearchText, Mode=TwoWay}"
+                       ItemsSource="{Binding SearchHistory}"
+                       FilterMode="Contains"
+                       PlaceholderText="{StaticResource str.Dump.SearchHint}"/>
       <ComboBox SelectedIndex="{Binding SelectedCategoryIndex}"
                 Width="140" VerticalAlignment="Center"
                 ToolTip.Tip="{StaticResource str.Tip.Dump.Category}">
@@ -65,6 +68,7 @@
                    Foreground="#4EC9B0" FontWeight="Bold" Margin="0,0,0,2"/>
         <DataGrid x:Name="MatchedGrid"
                   ItemsSource="{Binding Matched}"
+                  SelectedItem="{Binding MatchedSelected, Mode=TwoWay}"
                   IsReadOnly="True"
                   CanUserResizeColumns="True"
                   GridLinesVisibility="Horizontal"
@@ -134,6 +138,7 @@
                    Foreground="#F4A747" FontWeight="Bold" Margin="0,4,0,2"/>
         <DataGrid x:Name="UnmatchedGrid"
                   ItemsSource="{Binding Unmatched}"
+                  SelectedItem="{Binding UnmatchedSelected, Mode=TwoWay}"
                   IsReadOnly="True"
                   CanUserResizeColumns="True"
                   GridLinesVisibility="Horizontal"

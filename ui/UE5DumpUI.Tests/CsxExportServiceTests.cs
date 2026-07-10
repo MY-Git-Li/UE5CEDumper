@@ -66,7 +66,7 @@ public class StubDumpService : IDumpService
     public Task<EngineState> SetUeVersionOverrideAsync(int version, bool persist = true, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<EngineState> SetInvokeTimeoutAsync(int timeoutMs, bool persist = true, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<int> GetObjectCountAsync(CancellationToken ct = default) => throw new NotImplementedException();
-    public virtual Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default, bool includePath = false) => throw new NotImplementedException();
     public Task<ObjectDetail> GetObjectAsync(string addr, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<ObjectDetail> FindObjectAsync(string path, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<ObjectListResult> SearchObjectsAsync(string query, int limit = 200, CancellationToken ct = default) => throw new NotImplementedException();

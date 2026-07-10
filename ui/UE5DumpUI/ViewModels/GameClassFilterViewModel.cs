@@ -45,14 +45,24 @@ public partial class GameClassFilterViewModel : ViewModelBase
     /// <summary>Event raised when user wants to walk a class in ClassStruct panel.</summary>
     public event Action<string>? NavigateToClassStruct;
 
+    /// <summary>Per-session remembered filter keywords (LRU) surfaced as the
+    /// free-text filter box's AutoCompleteBox suggestions — see <see cref="KeywordSearchMemory"/>.</summary>
+    private readonly KeywordSearchMemory _filterMemory;
+    public ObservableCollection<string> FilterHistory => _filterMemory.History;
+
     public GameClassFilterViewModel(IDumpService dump, ILoggingService log, IPlatformService platform)
     {
         _dump = dump;
         _log = log;
         _platform = platform;
+        _filterMemory = new KeywordSearchMemory(() => (FilterText, Results.Count > 0));
     }
 
-    partial void OnFilterTextChanged(string value) => ApplyFilter();
+    partial void OnFilterTextChanged(string value)
+    {
+        ApplyFilter();
+        _filterMemory.Schedule(value);
+    }
     partial void OnSuperFilterChanged(string value) => ApplyFilter();
     partial void OnPackageFilterChanged(string value) => ApplyFilter();
 
@@ -116,7 +126,10 @@ public partial class GameClassFilterViewModel : ViewModelBase
     {
         SelectedResult = null;   // detach before rebuilding the selection-bound grid
         Results.Clear();
-        var nameFilter = FilterText.Trim();
+        // Space-separated terms are ANDed (each must hit ClassName, SuperName or
+        // ClassPath) — the shared Object Tree filter semantics, so "BP_ char"
+        // keeps rows matching BOTH terms in any order.
+        var terms = ObjectTreeFilter.SplitTerms(FilterText);
         var superF = SuperFilter.Trim();
         var pkgF = PackageFilter.Trim();
 
@@ -125,11 +138,9 @@ public partial class GameClassFilterViewModel : ViewModelBase
 
         foreach (var entry in _allResults)
         {
-            // Name filter: substring match on ClassName, SuperName, or ClassPath
-            if (!string.IsNullOrEmpty(nameFilter)
-                && !entry.ClassName.Contains(nameFilter, StringComparison.OrdinalIgnoreCase)
-                && !entry.SuperName.Contains(nameFilter, StringComparison.OrdinalIgnoreCase)
-                && !entry.ClassPath.Contains(nameFilter, StringComparison.OrdinalIgnoreCase))
+            // Name filter: AND-terms substring match on ClassName, SuperName, or ClassPath
+            if (terms.Length > 0
+                && !ObjectTreeFilter.MatchesAllTerms(terms, entry.ClassName, entry.SuperName, entry.ClassPath))
             {
                 continue;
             }

@@ -34,9 +34,11 @@
                 Margin="0,0,0,8" IsVisible="{Binding HasClass}">
       <TextBlock Text="{StaticResource str.ClassStruct.FilterLabel}"
                  Foreground="#888" FontSize="12" VerticalAlignment="Center"/>
-      <TextBox PlaceholderText="{StaticResource str.ClassStruct.FilterHint}"
-               Text="{Binding FieldFilter}"
-               Width="320" Padding="4,2" FontSize="12"/>
+      <AutoCompleteBox PlaceholderText="{StaticResource str.ClassStruct.FilterHint}"
+                       Text="{Binding FieldFilter, Mode=TwoWay}"
+                       ItemsSource="{Binding FieldFilterHistory}"
+                       FilterMode="Contains"
+                       Width="320" Padding="4,2" FontSize="12"/>
     </StackPanel>
 
     <!-- No class selected message -->

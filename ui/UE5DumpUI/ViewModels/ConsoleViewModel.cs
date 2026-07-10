@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 
 namespace UE5DumpUI.ViewModels;
@@ -141,13 +142,23 @@ public partial class ConsoleViewModel : ViewModelBase
     /// AOBMaker / clipboard. No args: the script is self-contained.</summary>
     public event Action? RequestDebugCameraCeScript;
 
+    /// <summary>Per-session remembered filter keywords (LRU) surfaced as the
+    /// filter box's AutoCompleteBox suggestions — see <see cref="KeywordSearchMemory"/>.</summary>
+    private readonly KeywordSearchMemory _filterMemory;
+    public ObservableCollection<string> FilterHistory => _filterMemory.History;
+
     public ConsoleViewModel(IDumpService dump, ILoggingService log)
     {
         _dump = dump;
         _log = log;
+        _filterMemory = new KeywordSearchMemory(() => (FilterText, Results.Count > 0));
     }
 
-    partial void OnFilterTextChanged(string value) => ApplyFilter();
+    partial void OnFilterTextChanged(string value)
+    {
+        ApplyFilter();
+        _filterMemory.Schedule(value);
+    }
 
     /// <summary>
     /// When the user selects a row, refresh the
@@ -286,18 +297,17 @@ public partial class ConsoleViewModel : ViewModelBase
         Results.Clear();
         if (_allExec.Count == 0) return;
 
-        var nameFilter = (FilterText ?? "").Trim();
-        var hasName    = nameFilter.Length > 0;
+        // Space-separated terms are ANDed (each must hit FuncName or ClassName),
+        // so "add money" narrows to entries matching both — the shared Object Tree
+        // filter semantics.
+        var terms = ObjectTreeFilter.SplitTerms(FilterText);
 
         foreach (var entry in _allExec)
         {
-            if (hasName)
+            if (terms.Length > 0 &&
+                !ObjectTreeFilter.MatchesAllTerms(terms, entry.FuncName, entry.ClassName))
             {
-                if (!entry.FuncName.Contains(nameFilter, StringComparison.OrdinalIgnoreCase)
-                    && !entry.ClassName.Contains(nameFilter, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
+                continue;
             }
             Results.Add(entry);
         }

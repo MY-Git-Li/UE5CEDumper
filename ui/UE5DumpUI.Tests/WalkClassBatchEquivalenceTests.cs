@@ -43,7 +43,7 @@ public class WalkClassBatchEquivalenceTests
         public Dictionary<string, ClassInfoModel> ClassWalks { get; } = new();
         public Dictionary<string, List<FunctionInfoModel>> FunctionWalks { get; } = new();
 
-        public override Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default)
+        public override Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default, bool includePath = false)
         {
             var slice = Objects.Skip(offset).Take(limit).ToList();
             return Task.FromResult(new ObjectListResult
@@ -86,7 +86,7 @@ public class WalkClassBatchEquivalenceTests
 
         public int BatchAttempts { get; private set; }
 
-        public override Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default)
+        public override Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default, bool includePath = false)
         {
             var slice = Objects.Skip(offset).Take(limit).ToList();
             return Task.FromResult(new ObjectListResult
@@ -412,7 +412,7 @@ public class WalkClassBatchEquivalenceTests
         public Dictionary<string, ClassInfoModel> ClassWalks { get; } = new();
         public Dictionary<string, List<FunctionInfoModel>> FunctionWalks { get; } = new();
 
-        public override Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default)
+        public override Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default, bool includePath = false)
         {
             var slice = Objects.Skip(offset).Take(limit).ToList();
             return Task.FromResult(new ObjectListResult
