@@ -21,10 +21,12 @@
                 ToolTip.Tip="{StaticResource str.Tip.IP.GameOnly}"
                 Foreground="#CCCCCC" FontSize="12"
                 VerticalAlignment="Center"/>
-      <TextBox PlaceholderText="{StaticResource str.IP.FilterHint}"
-               Text="{Binding FilterText}"
-               ToolTip.Tip="{StaticResource str.Tip.IP.Filter}"
-               Width="240" Padding="4,2"/>
+      <AutoCompleteBox PlaceholderText="{StaticResource str.IP.FilterHint}"
+                       Text="{Binding FilterText, Mode=TwoWay}"
+                       ItemsSource="{Binding FilterHistory}"
+                       FilterMode="Contains"
+                       ToolTip.Tip="{StaticResource str.Tip.IP.Filter}"
+                       Width="240" Padding="4,2"/>
       <ComboBox ItemsSource="{Binding CategoryOptions}"
                 SelectedItem="{Binding CategoryFilter}"
                 ToolTip.Tip="{StaticResource str.Tip.IP.Category}"

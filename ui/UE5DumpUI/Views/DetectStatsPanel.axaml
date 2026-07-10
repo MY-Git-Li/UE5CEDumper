@@ -25,10 +25,12 @@
                 IsEnabled="{Binding !IsBusy}"
                 ToolTip.Tip="{StaticResource str.Tip.Detect.UseSnapshot}"
                 VerticalAlignment="Center"/>
-      <TextBox Text="{Binding FilterText}"
-               PlaceholderText="{StaticResource str.Detect.FilterHint}"
-               ToolTip.Tip="{StaticResource str.Tip.Detect.Filter}"
-               Width="260" Padding="4,2" VerticalAlignment="Center"/>
+      <AutoCompleteBox Text="{Binding FilterText, Mode=TwoWay}"
+                       ItemsSource="{Binding FilterHistory}"
+                       FilterMode="Contains"
+                       PlaceholderText="{StaticResource str.Detect.FilterHint}"
+                       ToolTip.Tip="{StaticResource str.Tip.Detect.Filter}"
+                       Width="260" Padding="4,2" VerticalAlignment="Center"/>
     </StackPanel>
 
     <!-- Status + indeterminate progress -->

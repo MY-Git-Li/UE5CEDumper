@@ -174,10 +174,12 @@
          class-noise ⚑ filter: this only narrows what's already on screen and does
          NOT reach past the result cap. -->
     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
-      <TextBox PlaceholderText="{StaticResource str.InstanceFinder.KeywordHint}"
-               Text="{Binding InstanceFilterText}"
-               ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.Keyword}"
-               Width="300" Padding="4,2"/>
+      <AutoCompleteBox PlaceholderText="{StaticResource str.InstanceFinder.KeywordHint}"
+                       Text="{Binding InstanceFilterText, Mode=TwoWay}"
+                       ItemsSource="{Binding InstanceFilterHistory}"
+                       FilterMode="Contains"
+                       ToolTip.Tip="{StaticResource str.Tip.InstanceFinder.Keyword}"
+                       Width="300" Padding="4,2"/>
     </StackPanel>
 
     <!-- Status row directly above the grid (mirrors Interesting Props — the

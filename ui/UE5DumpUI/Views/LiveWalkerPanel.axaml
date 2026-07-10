@@ -807,7 +807,9 @@
         <!-- Filter row: substring match on function name -->
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6"
                     Margin="2,2,2,4">
-          <TextBox Text="{Binding FunctionFilter, Mode=TwoWay}"
+          <AutoCompleteBox Text="{Binding FunctionFilter, Mode=TwoWay}"
+                   ItemsSource="{Binding FunctionFilterHistory}"
+                   FilterMode="Contains"
                    PlaceholderText="Filter by name..."
                    Width="220" Padding="4,2" FontSize="12"
                    ToolTip.Tip="Substring match on function name (case-insensitive)"/>

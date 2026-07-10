@@ -27,7 +27,7 @@ public class DumpAllServiceTests
         public Dictionary<string, ClassInfoModel> ClassWalks { get; } = new();
         public Dictionary<string, List<FunctionInfoModel>> FunctionWalks { get; } = new();
 
-        public override Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default)
+        public override Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default, bool includePath = false)
         {
             var slice = Objects.Skip(offset).Take(limit).ToList();
             return Task.FromResult(new ObjectListResult
@@ -185,8 +185,11 @@ public class DumpAllServiceTests
         // code skipped on the always-empty obj.FullPath and silently kept everything.)
         dump.Objects.Add(Obj("0x1", "UActor", "Class"));
         dump.Objects.Add(Obj("0x2", "MyPlayer", "BlueprintGeneratedClass"));
-        dump.ClassWalks["0x1"] = new ClassInfoModel { Name = "UActor", FullPath = "/Script/Engine.Actor" };
-        dump.ClassWalks["0x2"] = new ClassInfoModel { Name = "MyPlayer", FullPath = "/Game/Foo/MyPlayer_C" };
+        // REAL Ubel::GetFullName wire format: "//Script/Engine/Actor" (double leading
+        // slash, '/' separators) — NOT the "/Script/Engine.Actor" fiction the DLL never
+        // emits. Using the fiction here would let a broken IsEnginePath pass green.
+        dump.ClassWalks["0x1"] = new ClassInfoModel { Name = "UActor", FullPath = "//Script/Engine/Actor" };
+        dump.ClassWalks["0x2"] = new ClassInfoModel { Name = "MyPlayer", FullPath = "//Game/Foo/MyPlayer/MyPlayer_C" };
 
         var lines = Dump(dump, new DumpOptions(GameOnly: true, IncludeFunctions: false, IncludeInstanceCounts: false));
         var classLines = lines.Where(l => l.Contains("\"kind\":\"class\"")).ToList();
@@ -196,6 +199,27 @@ public class DumpAllServiceTests
         // Summary counts the skip
         var summary = lines[^1];
         Assert.Contains("\"classes_skipped_engine\":1", summary);
+    }
+
+    [Fact]
+    public void Generate_GameOnly_PreWalkSkip_KeysOnObjectFullPath_WithoutWalking()
+    {
+        // With include_path=true the object list carries obj.FullPath, so GameOnly
+        // skips engine classes BEFORE walking them. To prove the skip keys on
+        // obj.FullPath (pre-walk) and not the walked classInfo.FullPath, give the
+        // engine object an obj.FullPath of "/Script/Engine.Actor" but a WALKED path
+        // of "/Game/…". If it were walked + post-filtered, the game path would let
+        // it through and it would be emitted — so an empty class output proves the
+        // pre-walk skip fired and the walk was never reached.
+        var dump = new FakeDumpForDump();
+        dump.Objects.Add(Obj("0x1", "UActor", "Class", "//Script/Engine/Actor"));
+        dump.ClassWalks["0x1"] = new ClassInfoModel { Name = "UActor", FullPath = "//Game/Decoy/UActor/UActor_C" };
+
+        var lines = Dump(dump, new DumpOptions(GameOnly: true, IncludeFunctions: false, IncludeInstanceCounts: false));
+        var classLines = lines.Where(l => l.Contains("\"kind\":\"class\"")).ToList();
+
+        Assert.Empty(classLines);
+        Assert.Contains("\"classes_skipped_engine\":1", lines[^1]);
     }
 
     // ==================================================================
@@ -417,11 +441,20 @@ public class DumpAllServiceTests
     }
 
     [Theory]
+    // REAL Ubel::GetFullName wire format: DOUBLE leading slash, '/' separators.
+    [InlineData("//Script/Engine/Actor", true)]
+    [InlineData("//Script/CoreUObject/Object", true)]
+    [InlineData("//Script/Niagara/NiagaraComponent", true)]
+    [InlineData("//Script/EnhancedInput/InputAction", true)]   // newly-synced prefix
+    [InlineData("//Script/Engine", true)]                      // exact package, no trailing segment
+    // Tolerant of the alternate single-slash / dot-terminated form too.
     [InlineData("/Script/Engine.Actor", true)]
-    [InlineData("/Script/CoreUObject.Object", true)]
-    [InlineData("/Script/Niagara.NiagaraComponent", true)]
-    [InlineData("/Game/MyGame/BP_Player_C", false)]
+    // A game class must NOT be treated as engine.
+    [InlineData("//Game/MyGame/BP_Player/BP_Player_C", false)]
+    // A prefix that is only a substring (not a package boundary) must NOT match.
+    [InlineData("//Script/EngineOverride/Foo", false)]
     [InlineData("", false)]
+    [InlineData("///", false)]
     public void IsEnginePath_DetectsKnownEnginePrefixes(string path, bool expected)
     {
         Assert.Equal(expected, DumpAllService.IsEnginePath(path));

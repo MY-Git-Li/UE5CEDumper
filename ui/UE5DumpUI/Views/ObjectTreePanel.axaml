@@ -77,8 +77,10 @@
                   SelectedIndex="{Binding SelectedClassFilterIndex}"
                   ToolTip.Tip="{StaticResource str.Tip.ObjectTree.ClassFilter}"
                   MinWidth="140" Padding="4,2" FontSize="12"/>
-        <TextBox PlaceholderText="{StaticResource str.ObjectTree.FilterHint}"
-                 Text="{Binding FilterText}"
+        <AutoCompleteBox PlaceholderText="{StaticResource str.ObjectTree.FilterHint}"
+                 Text="{Binding FilterText, Mode=TwoWay}"
+                 ItemsSource="{Binding FilterHistory}"
+                 FilterMode="Contains"
                  ToolTip.Tip="{StaticResource str.Tip.ObjectTree.TextFilter}"
                  Padding="4,2" FontSize="12"
                  MinWidth="160"/>

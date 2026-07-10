@@ -1250,6 +1250,12 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             int offset = request.value("offset", 0);
             int limit  = request.value("limit", 200);
             int total  = Aura::GetCount();
+            // Opt-in per-object full path (Ubel::GetFullName). Gated behind
+            // include_path so the hot Object Tree paginate stays lean — a path
+            // string per object costs ~19 MB over 486K objects, and only
+            // DumpAllService's GameOnly pass needs it (to skip engine-package
+            // classes BEFORE walking them, restoring the pre-walk skip).
+            bool includePath = request.value("include_path", false);
 
             json objects = json::array();
             int end = (std::min)(offset + limit, total);
@@ -1270,6 +1276,10 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
 
                 uintptr_t outer = Ubel::GetOuter(obj);
                 item["outer"] = outer ? Renge::AddrToStr(outer) : "";
+
+                if (includePath) {
+                    item["full_path"] = Ubel::GetFullName(obj);
+                }
 
                 objects.push_back(item);
             }

@@ -206,11 +206,18 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
     /// an empty grid caused by a stale exclusion from a genuine miss.</summary>
     [ObservableProperty] private string _classFilterNote = "";
 
+    /// <summary>Per-session remembered keywords (LRU) surfaced as the temporary
+    /// keyword box's AutoCompleteBox suggestions — see <see cref="KeywordSearchMemory"/>.
+    /// A keyword is remembered only once typing settles AND it yielded rows.</summary>
+    private readonly KeywordSearchMemory _filterMemory;
+    public ObservableCollection<string> InstanceFilterHistory => _filterMemory.History;
+
     public InstanceFinderViewModel(IDumpService dump, ILoggingService log, IPlatformService platform)
     {
         _dump = dump;
         _log = log;
         _platform = platform;
+        _filterMemory = new KeywordSearchMemory(() => (InstanceFilterText, Instances.Count > 0));
         ClassFilter = new ClassFacetFilter(OnClassFilterChanged)
         {
             AutoDetectProvider = async names =>
@@ -292,6 +299,9 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
         _filterDebounce = new System.Threading.Timer(
             _ => Avalonia.Threading.Dispatcher.UIThread.Post(ApplyInstanceFilter),
             null, 200, Timeout.Infinite);
+        // Remember the keyword once typing settles (probe reads Instances.Count after
+        // the 200 ms re-project has landed). Longer debounce than the filter itself.
+        _filterMemory.Schedule(value);
     }
 
     /// <summary>Dispose the keyword debounce timer and cancel any in-flight class
@@ -304,6 +314,8 @@ public partial class InstanceFinderViewModel : ViewModelBase, IDisposable
 
         _filterDebounce?.Dispose();
         _filterDebounce = null;
+
+        _filterMemory.Dispose();
 
         try { _reRunCts?.Cancel(); } catch { /* already disposed */ }
         _reRunCts?.Dispose();

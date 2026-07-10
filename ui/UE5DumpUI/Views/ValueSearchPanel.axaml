@@ -283,7 +283,8 @@
               ToolTip.Tip="{StaticResource str.Tip.VS.Sort}">
           <TextBlock Grid.Column="0" Text="{StaticResource str.VS.Filter}"
                      Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,8,0"/>
-          <TextBox Grid.Column="1" Text="{Binding FilterText}"
+          <AutoCompleteBox Grid.Column="1" Text="{Binding FilterText, Mode=TwoWay}"
+                   ItemsSource="{Binding FilterHistory}" FilterMode="Contains"
                    PlaceholderText="{StaticResource str.VS.FilterWatermark}"
                    Padding="4,2" FontSize="12"/>
           <TextBlock Grid.Column="2" Text="{StaticResource str.VS.Sort}"
@@ -578,7 +579,8 @@
               ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
           <TextBlock Grid.Column="0" Text="{StaticResource str.VS.Filter}"
                      Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,8,0"/>
-          <TextBox Grid.Column="1" Text="{Binding GroupFilterText}"
+          <AutoCompleteBox Grid.Column="1" Text="{Binding GroupFilterText, Mode=TwoWay}"
+                   ItemsSource="{Binding GroupFilterHistory}" FilterMode="Contains"
                    PlaceholderText="{StaticResource str.VS.Group.FilterWatermark}"
                    Padding="4,2" FontSize="12"/>
           <TextBlock Grid.Column="2" Text="{StaticResource str.VS.Sort}"

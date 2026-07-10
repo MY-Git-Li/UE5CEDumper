@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 
 namespace UE5DumpUI.ViewModels;
@@ -35,6 +36,11 @@ public partial class ClassStructViewModel : ViewModelBase
     /// filtered view rebuilt by <see cref="ApplyFieldFilter"/>.</summary>
     private readonly List<FieldInfoModel> _allFields = new();
 
+    /// <summary>Per-session remembered filter keywords (LRU) surfaced as the
+    /// field-filter box's AutoCompleteBox suggestions — see <see cref="KeywordSearchMemory"/>.</summary>
+    private readonly KeywordSearchMemory _filterMemory;
+    public ObservableCollection<string> FieldFilterHistory => _filterMemory.History;
+
     /// <summary>
     /// True when a class is loaded but has zero instance fields. The
     /// canonical example is <c>BlueprintFunctionLibrary</c> subclasses
@@ -48,20 +54,24 @@ public partial class ClassStructViewModel : ViewModelBase
 
     partial void OnHasClassChanged(bool value)   => OnPropertyChanged(nameof(HasNoFields));
     partial void OnIsLoadingChanged(bool value)  => OnPropertyChanged(nameof(HasNoFields));
-    partial void OnFieldFilterChanged(string value) => ApplyFieldFilter();
+    partial void OnFieldFilterChanged(string value)
+    {
+        ApplyFieldFilter();
+        _filterMemory.Schedule(value);
+    }
 
     /// <summary>Rebuild <see cref="Fields"/> from <see cref="_allFields"/>,
-    /// applying <see cref="FieldFilter"/> as a case-insensitive substring over
-    /// field name + type. Field lists are small (hundreds), so no debounce.</summary>
+    /// applying <see cref="FieldFilter"/> as whitespace-separated AND terms
+    /// (each term must hit field name OR type). Field lists are small
+    /// (hundreds), so no debounce.</summary>
     private void ApplyFieldFilter()
     {
-        var filter = (FieldFilter ?? "").Trim();
+        var terms = ObjectTreeFilter.SplitTerms(FieldFilter);
         Fields.Clear();
         foreach (var f in _allFields)
         {
-            if (filter.Length == 0
-                || f.Name.Contains(filter, System.StringComparison.OrdinalIgnoreCase)
-                || f.TypeName.Contains(filter, System.StringComparison.OrdinalIgnoreCase))
+            if (terms.Length == 0
+                || ObjectTreeFilter.MatchesAllTerms(terms, f.Name, f.TypeName))
             {
                 Fields.Add(f);
             }
@@ -80,6 +90,7 @@ public partial class ClassStructViewModel : ViewModelBase
         _dump = dump;
         _log = log;
         _platform = platform;
+        _filterMemory = new KeywordSearchMemory(() => (FieldFilter, Fields.Count > 0));
     }
 
     /// <summary>

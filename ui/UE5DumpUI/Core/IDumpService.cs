@@ -27,7 +27,16 @@ public interface IDumpService
     Task<EngineState> SetInvokeTimeoutAsync(int timeoutMs, bool persist = true, CancellationToken ct = default);
 
     Task<int> GetObjectCountAsync(CancellationToken ct = default);
-    Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default);
+    /// <summary>
+    /// Paginate the GObjects pool. <paramref name="includePath"/> requests the
+    /// DLL emit each object's full path (Ubel::GetFullName) as <c>full_path</c>,
+    /// surfaced on <see cref="UObjectNode.FullPath"/>. Off by default so the hot
+    /// Object Tree paginate stays lean (a path string per object is ~19 MB over
+    /// 486K objects); only DumpAllService's GameOnly pass sets it, to skip
+    /// engine-package classes before walking them. Placed after <c>ct</c> to keep
+    /// the existing 3-arg call sites unchanged.
+    /// </summary>
+    Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default, bool includePath = false);
     Task<ObjectDetail> GetObjectAsync(string addr, CancellationToken ct = default);
     Task<ObjectDetail> FindObjectAsync(string path, CancellationToken ct = default);
     Task<ObjectListResult> SearchObjectsAsync(string query, int limit = 200, CancellationToken ct = default);

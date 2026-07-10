@@ -203,8 +203,9 @@
           <!-- Inputs grayed during a diff; progress + status stay live. -->
           <WrapPanel Orientation="Horizontal" IsEnabled="{Binding !IsDiffing}">
             <TextBlock Text="{StaticResource str.Snapshot.Diff.Global}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
-            <TextBox Text="{Binding DiffGlobalFilter}" Width="180" Margin="0,0,12,0"
-                     PlaceholderText="{StaticResource str.Snapshot.Diff.GlobalHint}"/>
+            <AutoCompleteBox Text="{Binding DiffGlobalFilter, Mode=TwoWay}" Width="180" Margin="0,0,12,0"
+                     PlaceholderText="{StaticResource str.Snapshot.Diff.GlobalHint}"
+                     ItemsSource="{Binding DiffGlobalHistory}" FilterMode="Contains"/>
             <TextBlock Text="{StaticResource str.Snapshot.Diff.OldRange}" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
             <TextBox Text="{Binding DiffOldMin}" Width="70" Margin="0,0,2,0" PlaceholderText="min"/>
             <TextBlock Text="–" Foreground="#888" VerticalAlignment="Center" Margin="0,0,2,0"/>

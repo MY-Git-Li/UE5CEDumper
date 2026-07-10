@@ -4,6 +4,7 @@ using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 
@@ -173,7 +174,11 @@ public partial class ClassPivotViewModel : ViewModelBase
     }
     partial void OnIsGWorldAvailableChanged(bool value) =>
         OnPropertyChanged(nameof(CanLocateResultInGWorld));
-    partial void OnResultFilterChanged(string value) => ApplyResultFilter();
+    partial void OnResultFilterChanged(string value)
+    {
+        ApplyResultFilter();
+        _resultFilterMemory.Schedule(value);
+    }
 
     public bool IsSnapshotSource  => SelectedSource == "Snapshot";
     public bool IsArraySource     => SelectedSource == "Snapshot Array";
@@ -196,6 +201,16 @@ public partial class ClassPivotViewModel : ViewModelBase
     /// fire-and-forget chain deterministically; the live UI ignores it.</summary>
     public Task? PendingLoad { get; private set; }
 
+    /// <summary>Per-session remembered class-filter keywords (LRU) surfaced as the
+    /// class-filter box's AutoCompleteBox suggestions — see <see cref="KeywordSearchMemory"/>.</summary>
+    private readonly KeywordSearchMemory _classFilterMemory;
+    public ObservableCollection<string> ClassFilterHistory => _classFilterMemory.History;
+
+    /// <summary>Per-session remembered result-filter keywords (LRU) surfaced as the
+    /// results-grid filter box's AutoCompleteBox suggestions.</summary>
+    private readonly KeywordSearchMemory _resultFilterMemory;
+    public ObservableCollection<string> ResultFilterHistory => _resultFilterMemory.History;
+
     public ClassPivotViewModel(ISnapshotStore store, ILoggingService log,
                                IPlatformService? platform = null, IDumpService? dump = null)
     {
@@ -203,6 +218,8 @@ public partial class ClassPivotViewModel : ViewModelBase
         _log = log;
         _platform = platform;
         _dump = dump;
+        _classFilterMemory  = new KeywordSearchMemory(() => (ClassFilter, Classes.Count > 0));
+        _resultFilterMemory = new KeywordSearchMemory(() => (ResultFilter, Results.Count > 0));
     }
 
     public void SetEngineState(EngineState state)
@@ -346,7 +363,11 @@ public partial class ClassPivotViewModel : ViewModelBase
         PendingLoad = IsArraySource ? LoadArrayFieldsAsync() : LoadFieldsAsync();
     }
 
-    partial void OnClassFilterChanged(string value) => ApplyClassFilter();
+    partial void OnClassFilterChanged(string value)
+    {
+        ApplyClassFilter();
+        _classFilterMemory.Schedule(value);
+    }
 
     /// <summary>C5 right-click handoff target: switch to scalar Snapshot source,
     /// select <paramref name="className"/> in the newest snapshot, and surface
@@ -575,20 +596,21 @@ public partial class ClassPivotViewModel : ViewModelBase
 
     private void ApplyClassFilter()
     {
-        // Filter the class dropdown by a case-insensitive substring of the ClassFilter
-        // TextBox (so "attributeset" surfaces "CharacterAttributeSet"). The picker is a
-        // plain ComboBox bound to this filtered Classes collection — NOT an AutoCompleteBox
-        // (whose internal Text<->SelectedItem reconciliation oscillated SelectedClass and
-        // froze the UI). Rebuild via UiCollection.Reset, which DETACHES SelectedClass before
+        // Filter the class dropdown by space-separated AND terms over the ClassFilter box
+        // (each term must hit ClassName or Display, so "attribute set" surfaces
+        // "CharacterAttributeSet") — the shared Object Tree filter semantics. The picker
+        // binds this filtered Classes collection to a plain ListBox — its Text box is an
+        // AutoCompleteBox whose Text ONLY (never SelectedItem) is bound, so the internal
+        // Text<->SelectedItem reconciliation that oscillated SelectedClass and froze the UI
+        // never happens. Rebuild via UiCollection.Reset, which DETACHES SelectedClass before
         // mutating the collection — that detach is what makes a per-keystroke rebuild safe
         // (the old Clear()/Add() without the detach is what dropped clicks). Typing here sets
         // SelectedClass=null → no field load, no DB — so filtering never touches the DB.
-        var f = ClassFilter?.Trim() ?? "";
-        var view = (f.Length == 0
+        var terms = ObjectTreeFilter.SplitTerms(ClassFilter);
+        var view = (terms.Length == 0
             ? (IEnumerable<PivotClassInfo>)_allClasses
             : _allClasses.Where(c =>
-                c.ClassName.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0
-                || c.Display.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0)).ToList();
+                ObjectTreeFilter.MatchesAllTerms(terms, c.ClassName, c.Display))).ToList();
 
         // Skip the rebuild when the filtered set is identical to what's already shown. A spurious
         // re-filter (same text — e.g. fired again right after a click) must NOT Clear()/Add() the
@@ -1088,16 +1110,16 @@ public partial class ClassPivotViewModel : ViewModelBase
         ApplyResultFilter();
     }
 
-    // Filter the results grid by a case-insensitive substring over key + values. Empty
-    // filter shows all. Detaches the selection before the rebuild (selection-model safe).
+    // Filter the results grid by space-separated AND terms over key + values (each term
+    // must hit KeyValue or ValuesDisplay). Empty filter shows all. Detaches the selection
+    // before the rebuild (selection-model safe).
     private void ApplyResultFilter()
     {
-        string f = ResultFilter?.Trim() ?? "";
+        var terms = ObjectTreeFilter.SplitTerms(ResultFilter);
         IEnumerable<PivotResultRow> view = _allResults;
-        if (f.Length > 0)
+        if (terms.Length > 0)
             view = _allResults.Where(r =>
-                r.KeyValue.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                r.ValuesDisplay.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0);
+                ObjectTreeFilter.MatchesAllTerms(terms, r.KeyValue, r.ValuesDisplay));
         UiCollection.Reset(Results, view, () => SelectedResult = null);
     }
 

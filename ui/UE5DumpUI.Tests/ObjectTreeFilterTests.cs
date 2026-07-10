@@ -80,4 +80,50 @@ public class ObjectTreeFilterTests
         Assert.True(ObjectTreeFilter.MatchesAllTerms(
             terms, "WB_HUD_Stone", "UserWidget", "0xABC0"));
     }
+
+    // ── MatchesAllTerms — params (multi-field) overload ─────────────────────
+    // The shared "space = AND" matcher every panel reuses: term-level AND,
+    // field-level OR, over an arbitrary field count (1/2/4/5…).
+
+    [Fact]
+    public void MatchesAllTerms_Params_SingleField_AndWithinField()
+    {
+        var terms = ObjectTreeFilter.SplitTerms("attr set");
+        // Both terms must appear in the single field (Snapshot/SPC single-field boxes).
+        Assert.True(ObjectTreeFilter.MatchesAllTerms(terms, "CharacterAttributeSet"));
+        Assert.False(ObjectTreeFilter.MatchesAllTerms(terms, "CharacterAttribute"));
+    }
+
+    [Fact]
+    public void MatchesAllTerms_Params_TwoFields_OrAcrossFields()
+    {
+        var terms = ObjectTreeFilter.SplitTerms("add money");
+        // "add" hits FuncName, "money" hits ClassName → match (Console/Funcs panels).
+        Assert.True(ObjectTreeFilter.MatchesAllTerms(terms, "AddCurrency", "PlayerMoneyComponent"));
+        Assert.False(ObjectTreeFilter.MatchesAllTerms(terms, "AddCurrency", "PlayerInventory"));
+    }
+
+    [Fact]
+    public void MatchesAllTerms_Params_FiveFields_GlobalFilter()
+    {
+        var terms = ObjectTreeFilter.SplitTerms("health float");
+        // Global filters match across 5 columns (Snapshot DiffGlobal / SPC ResultGlobal).
+        Assert.True(ObjectTreeFilter.MatchesAllTerms(
+            terms, "BP_Player_C", "MaxHealth", "/Game/Player", "FloatProperty", "100 -> 120"));
+    }
+
+    [Fact]
+    public void MatchesAllTerms_Params_SkipsNullAndEmptyFields()
+    {
+        var terms = ObjectTreeFilter.SplitTerms("pawn");
+        // Null / empty fields are skipped, not matched — only the real field counts.
+        // 4 fields so overload resolution binds the params overload (not the 3-string one).
+        Assert.True(ObjectTreeFilter.MatchesAllTerms(terms, null, "", "APawn", null));
+        Assert.False(ObjectTreeFilter.MatchesAllTerms(terms, null, "", "AActor", null));
+    }
+
+    [Fact]
+    public void MatchesAllTerms_Params_EmptyTerms_MatchesEverything()
+        => Assert.True(ObjectTreeFilter.MatchesAllTerms(
+            System.Array.Empty<string>(), "a", "b"));
 }

@@ -42,9 +42,12 @@
                        MinimumPrefixLength="0"
                        ToolTip.Tip="{StaticResource str.Tip.GameClassFilter.PackageFilter}"
                        Width="180" Padding="4,2" FontSize="12"/>
-      <TextBox PlaceholderText="{StaticResource str.GameClassFilter.FilterHint}"
-               Text="{Binding FilterText}"
-               Width="200" Padding="4,2"/>
+      <AutoCompleteBox PlaceholderText="{StaticResource str.GameClassFilter.FilterHint}"
+                       Text="{Binding FilterText, Mode=TwoWay}"
+                       FilterMode="Contains"
+                       ItemsSource="{Binding FilterHistory}"
+                       MinimumPrefixLength="0"
+                       Width="200" Padding="4,2"/>
       <Button Content="{StaticResource str.GameClassFilter.Clear}"
               Command="{Binding ClearFiltersCommand}"
               ToolTip.Tip="{StaticResource str.Tip.GameClassFilter.Clear}"

@@ -6,6 +6,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 
@@ -121,7 +122,18 @@ public partial class SnapshotViewModel : ViewModelBase
     [ObservableProperty] private string _diffNewMin = "";
     [ObservableProperty] private string _diffNewMax = "";
 
-    partial void OnDiffGlobalFilterChanged(string value) => ApplyDiffFilter();
+    partial void OnDiffGlobalFilterChanged(string value)
+    {
+        ApplyDiffFilter();
+        _globalMemory.Schedule(value);
+    }
+
+    /// <summary>Per-session remembered global-filter keywords (LRU) surfaced as the
+    /// global filter box's AutoCompleteBox suggestions — see <see cref="KeywordSearchMemory"/>.
+    /// Only the global box gets memory; the Class/Field/Object boxes already surface
+    /// data-derived distinct suggestions (Diff*Options).</summary>
+    private readonly KeywordSearchMemory _globalMemory;
+    public ObservableCollection<string> DiffGlobalHistory => _globalMemory.History;
 
     // Distinct candidate values from the last diff, feeding the Class/Field/Object
     // AutoCompleteBox pickers (partial match).
@@ -213,10 +225,14 @@ public partial class SnapshotViewModel : ViewModelBase
     private void ApplyDiffFilter()
     {
         if (_allDiff.Count == 0 && DiffRows.Count == 0) return;
-        string cls = DiffClassFilter.Trim();
-        string prop = DiffPropFilter.Trim();
-        string obj = DiffObjectFilter.Trim();
-        string glob = DiffGlobalFilter.Trim();
+        // Whitespace-separated terms are ANDed (shared Object Tree filter semantics).
+        // The Class/Field/Object boxes each AND within their single field; the global
+        // box ANDs each term across every displayed column. Cache the split once per
+        // rebuild (not per row).
+        var clsTerms  = ObjectTreeFilter.SplitTerms(DiffClassFilter);
+        var propTerms = ObjectTreeFilter.SplitTerms(DiffPropFilter);
+        var objTerms  = ObjectTreeFilter.SplitTerms(DiffObjectFilter);
+        var globTerms = ObjectTreeFilter.SplitTerms(DiffGlobalFilter);
         SnapshotDiffDirection? dir = SelectedDiffDirection switch
         {
             "Increased" => SnapshotDiffDirection.Up,
@@ -230,11 +246,13 @@ public partial class SnapshotViewModel : ViewModelBase
         DiffRows.Clear();
         foreach (var r in _allDiff)
         {
-            if (cls.Length  > 0 && r.ClassName.IndexOf(cls, StringComparison.OrdinalIgnoreCase) < 0) continue;
-            if (prop.Length > 0 && r.PropName.IndexOf(prop, StringComparison.OrdinalIgnoreCase) < 0) continue;
-            if (obj.Length  > 0 && r.NormPath.IndexOf(obj, StringComparison.OrdinalIgnoreCase) < 0) continue;
+            if (clsTerms.Length  > 0 && !ObjectTreeFilter.MatchesAllTerms(clsTerms, r.ClassName)) continue;
+            if (propTerms.Length > 0 && !ObjectTreeFilter.MatchesAllTerms(propTerms, r.PropName)) continue;
+            if (objTerms.Length  > 0 && !ObjectTreeFilter.MatchesAllTerms(objTerms, r.NormPath)) continue;
             if (dir.HasValue && r.Direction != dir.Value) continue;
-            if (glob.Length > 0 && !MatchesGlobal(r, glob)) continue;
+            if (globTerms.Length > 0 &&
+                !ObjectTreeFilter.MatchesAllTerms(globTerms, r.ClassName, r.PropName, r.NormPath, r.OldValue, r.NewValue))
+                continue;
             if (!WithinRange(r.OldValue, oldMin, oldMax)) continue;
             if (!WithinRange(r.NewValue, newMin, newMax)) continue;
             DiffRows.Add(r);
@@ -242,14 +260,6 @@ public partial class SnapshotViewModel : ViewModelBase
         DiffStatusText = _diffSummary +
             (DiffRows.Count != _allDiff.Count ? $"  ·  showing {DiffRows.Count:N0}" : "");
     }
-
-    // Global filter: case-insensitive substring across every displayed column.
-    private static bool MatchesGlobal(SnapshotDiffRow r, string q) =>
-        r.ClassName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-        r.PropName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-        r.NormPath.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-        r.OldValue.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-        r.NewValue.Contains(q, StringComparison.OrdinalIgnoreCase);
 
     private static double? ParseBound(string s) =>
         double.TryParse(s.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : null;
@@ -345,6 +355,7 @@ public partial class SnapshotViewModel : ViewModelBase
         _log = log;
         _gate = gate;
         _platform = platform;
+        _globalMemory = new KeywordSearchMemory(() => (DiffGlobalFilter, DiffRows.Count > 0));
         if (_gate != null) _selectedQuotaLabel = MbToLabel(_gate.SnapshotQuotaMb);
         // Don't list yet — the per-game DB isn't known until a game connects.
     }

@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 
@@ -71,6 +72,11 @@ public partial class DetectStatsViewModel : ViewModelBase
     /// <summary>Gates the per-row 🌍 handoff (set by MainWindow from HasGWorld).</summary>
     [ObservableProperty] private bool _isGWorldAvailable;
 
+    /// <summary>Per-session remembered filter keywords (LRU) surfaced as the
+    /// filter box's AutoCompleteBox suggestions — see <see cref="KeywordSearchMemory"/>.</summary>
+    private readonly KeywordSearchMemory _filterMemory;
+    public ObservableCollection<string> FilterHistory => _filterMemory.History;
+
     // Cross-tab handoffs (same event pattern the other finder panels use).
     public event Action<string>? LocateInGWorld;          // payload = class name
     public event Action<string>? NavigateToInstanceFinder; // payload = class name
@@ -82,6 +88,7 @@ public partial class DetectStatsViewModel : ViewModelBase
         _dump = dump;
         _log = log;
         _snapshotStore = snapshotStore;
+        _filterMemory = new KeywordSearchMemory(() => (FilterText, Results.Count > 0));
     }
 
     [RelayCommand]
@@ -300,21 +307,23 @@ public partial class DetectStatsViewModel : ViewModelBase
         return double.IsFinite(val) && Math.Abs(val) < 1e9;
     }
 
-    partial void OnFilterTextChanged(string value) => ApplyFilter();
+    partial void OnFilterTextChanged(string value)
+    {
+        ApplyFilter();
+        _filterMemory.Schedule(value);
+    }
 
     /// <summary>Rebuild <see cref="Results"/> from <see cref="_allResults"/>,
-    /// keeping the pre-sorted order, applying the property / class / category
-    /// substring filter.</summary>
+    /// keeping the pre-sorted order, applying the whitespace-separated AND-terms
+    /// filter over the property / class / category names.</summary>
     private void ApplyFilter()
     {
         Results.Clear();
-        var f = (FilterText ?? "").Trim();
+        var terms = ObjectTreeFilter.SplitTerms(FilterText);
         foreach (var r in _allResults)
         {
-            if (f.Length > 0
-                && !r.PropName.Contains(f, StringComparison.OrdinalIgnoreCase)
-                && !r.ClassName.Contains(f, StringComparison.OrdinalIgnoreCase)
-                && !r.CategoryLabel.Contains(f, StringComparison.OrdinalIgnoreCase))
+            if (terms.Length > 0
+                && !ObjectTreeFilter.MatchesAllTerms(terms, r.PropName, r.ClassName, r.CategoryLabel))
             {
                 continue;
             }

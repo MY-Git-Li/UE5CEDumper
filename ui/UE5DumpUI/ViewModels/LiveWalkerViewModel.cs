@@ -151,6 +151,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private FunctionInfoModel? _selectedFunction;
     [ObservableProperty] private string _functionFilter = "";
 
+    /// <summary>Per-session remembered Functions-filter keywords (LRU) surfaced as
+    /// the filter box's AutoCompleteBox suggestions — see <see cref="KeywordSearchMemory"/>.
+    /// Separate from the field-search <see cref="SearchHistory"/> memory.</summary>
+    private readonly KeywordSearchMemory _functionFilterMemory;
+    public ObservableCollection<string> FunctionFilterHistory => _functionFilterMemory.History;
+
     /// <summary>
     /// Two-way binding for the Functions Expander. Defaults to collapsed
     /// because most navigation in LiveWalker is field-focused; cross-tab
@@ -160,7 +166,11 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// </summary>
     [ObservableProperty] private bool _isFunctionsExpanded;
 
-    partial void OnFunctionFilterChanged(string value) => ApplyFunctionFilter();
+    partial void OnFunctionFilterChanged(string value)
+    {
+        ApplyFunctionFilter();
+        _functionFilterMemory.Schedule(value);
+    }
 
     [RelayCommand]
     private void ClearFunctionFilter() => FunctionFilter = "";
@@ -518,6 +528,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         _platform = platform;
         _aobMaker = aobMaker;
         _bookmarks = bookmarks;
+
+        // Functions-filter keyword memory: remember a settled keyword only when it
+        // yielded at least one visible function row.
+        _functionFilterMemory = new KeywordSearchMemory(() => (FunctionFilter, Functions.Count > 0));
 
         // Initialize the bookmark slots
         for (int i = 0; i < Constants.BookmarkSlotCount; i++)
@@ -4824,6 +4838,8 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         _searchHistoryDebounce?.Dispose();
         _searchHistoryDebounce = null;
 
+        _functionFilterMemory.Dispose();
+
         // Abort any in-flight export walk so a pending drilldown unwinds on teardown.
         _exportCts?.Cancel();
         _exportCts?.Dispose();
@@ -4947,6 +4963,12 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
     private void ApplySearch(string query)
     {
+        // Space-separated terms are ANDed: each term must hit at least one of the
+        // scanned fields (term-level AND, field-level OR) — the shared Object Tree
+        // filter semantics. This stays a HIGHLIGHTER: matching rows are re-coloured
+        // (IsSearchMatch), no rows are removed.
+        var terms = ObjectTreeFilter.SplitTerms(query);
+
         // Require at least 2 characters — single char matches too broadly
         if (string.IsNullOrWhiteSpace(query) || query.Trim().Length < 2)
         {
@@ -4960,12 +4982,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
             int count = 0;
             foreach (var f in Fields)
             {
-                bool match =
-                    f.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                    f.TypeName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                    f.DisplayValue.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                    f.PtrClassName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                    (!string.IsNullOrEmpty(f.StructTypeName) && f.StructTypeName.Contains(query, StringComparison.OrdinalIgnoreCase));
+                bool match = terms.Length == 0
+                    ? false
+                    : ObjectTreeFilter.MatchesAllTerms(
+                        terms, f.Name, f.TypeName, f.DisplayValue, f.PtrClassName, f.StructTypeName);
 
                 f.IsSearchMatch = match;
                 if (match) count++;
@@ -5527,8 +5547,10 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
         Functions.Clear();
         if (_allFunctions.Count == 0) return;
 
-        var filter = (FunctionFilter ?? "").Trim();
-        if (filter.Length == 0)
+        // Space-separated terms are ANDed (each must hit the function name) — the
+        // shared Object Tree filter semantics. Empty filter shows everything.
+        var terms = ObjectTreeFilter.SplitTerms(FunctionFilter);
+        if (terms.Length == 0)
         {
             foreach (var f in _allFunctions) Functions.Add(f);
             return;
@@ -5536,7 +5558,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
 
         foreach (var f in _allFunctions)
         {
-            if (f.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))
+            if (ObjectTreeFilter.MatchesAllTerms(terms, f.Name))
                 Functions.Add(f);
         }
     }

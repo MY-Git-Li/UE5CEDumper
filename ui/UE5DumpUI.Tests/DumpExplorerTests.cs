@@ -138,7 +138,7 @@ public class DumpExplorerTests
     {
         public List<UObjectNode> Objects { get; } = new();
 
-        public override Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default)
+        public override Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default, bool includePath = false)
         {
             if (offset > 0)
                 return Task.FromResult(new ObjectListResult { Total = Objects.Count, Scanned = 0, Objects = new() });

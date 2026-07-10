@@ -31,10 +31,12 @@
 
     <!-- Row 2: unified keyword search + category -->
     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
-      <TextBox x:Name="SearchInput"
-               Width="380" Padding="4,2"
-               Text="{Binding SearchText}"
-               PlaceholderText="{StaticResource str.Dump.SearchHint}"/>
+      <AutoCompleteBox x:Name="SearchInput"
+                       Width="380" Padding="4,2"
+                       Text="{Binding SearchText, Mode=TwoWay}"
+                       ItemsSource="{Binding SearchHistory}"
+                       FilterMode="Contains"
+                       PlaceholderText="{StaticResource str.Dump.SearchHint}"/>
       <ComboBox SelectedIndex="{Binding SelectedCategoryIndex}"
                 Width="140" VerticalAlignment="Center"
                 ToolTip.Tip="{StaticResource str.Tip.Dump.Category}">

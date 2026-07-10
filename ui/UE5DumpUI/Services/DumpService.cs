@@ -168,7 +168,7 @@ public sealed class DumpService : IDumpService
         return res["count"]?.GetValue<int>() ?? 0;
     }
 
-    public async Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default)
+    public async Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default, bool includePath = false)
     {
         var req = new JsonObject
         {
@@ -176,6 +176,10 @@ public sealed class DumpService : IDumpService
             ["offset"] = offset,
             ["limit"] = limit
         };
+        // Only ask for per-object full paths when the caller needs them
+        // (DumpAllService GameOnly). Omitting the flag keeps the DLL on its
+        // lean addr/name/class/outer path for the hot Object Tree paginate.
+        if (includePath) req["include_path"] = true;
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
 
@@ -193,12 +197,15 @@ public sealed class DumpService : IDumpService
                 // Intern ClassName to deduplicate — most objects share a small set
                 // of class names (Class, Package, Function, etc.). Saves ~19 MB
                 // when loading 486K+ objects with ~500 unique class names.
+                // FullPath is deliberately NOT interned (paths are near-unique) and
+                // stays "" unless include_path was requested.
                 result.Objects.Add(new UObjectNode
                 {
                     Address = obj["addr"]?.GetValue<string>() ?? "",
                     Name = obj["name"]?.GetValue<string>() ?? "",
                     ClassName = string.Intern(obj["class"]?.GetValue<string>() ?? ""),
                     OuterAddr = obj["outer"]?.GetValue<string>() ?? "",
+                    FullPath = obj["full_path"]?.GetValue<string>() ?? "",
                 });
             }
         }

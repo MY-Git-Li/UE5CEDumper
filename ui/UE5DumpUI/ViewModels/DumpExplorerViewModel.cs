@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UE5DumpUI.Core;
+using UE5DumpUI.Helpers;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
 
@@ -62,6 +63,17 @@ public partial class DumpExplorerViewModel : ViewModelBase
     // Long-running load / re-check cancellation (guarded OCE — see catch blocks).
     private CancellationTokenSource? _opCts;
 
+    /// <summary>Combined match count (matched + unmatched, pre-cap) from the most
+    /// recent <see cref="ApplyFilter"/>. The keyword-memory probe reads this to
+    /// decide whether a settled search term produced any hits and is worth
+    /// remembering — searching classes/props/funcs, not just the capped grid.</summary>
+    private int _lastMatchTotal;
+
+    /// <summary>Per-session remembered search keywords (LRU) surfaced as the search
+    /// box's AutoCompleteBox suggestions — see <see cref="KeywordSearchMemory"/>.</summary>
+    private readonly KeywordSearchMemory _searchMemory;
+    public ObservableCollection<string> SearchHistory => _searchMemory.History;
+
     /// <summary>Jump the selected row's owning class into the Live Walker.
     /// Payload = the CURRENT live address (only raised for matched rows).</summary>
     public event Action<string>? NavigateToLiveWalker;
@@ -77,6 +89,7 @@ public partial class DumpExplorerViewModel : ViewModelBase
         _dump = dump;
         _log = log;
         _platform = platform;
+        _searchMemory = new KeywordSearchMemory(() => (SearchText, _lastMatchTotal > 0));
     }
 
     /// <summary>Fanned in from MainWindowViewModel on connect/disconnect. On
@@ -98,6 +111,7 @@ public partial class DumpExplorerViewModel : ViewModelBase
     partial void OnSearchTextChanged(string value)
     {
         if (HasFile) ApplyFilter();
+        _searchMemory.Schedule(value);
     }
 
     partial void OnSelectedCategoryIndexChanged(int value)
@@ -381,6 +395,10 @@ public partial class DumpExplorerViewModel : ViewModelBase
 
         Matched = new ObservableCollection<DumpEntry>(matched);
         Unmatched = new ObservableCollection<DumpEntry>(unmatched);
+
+        // Settled-signal for keyword-memory: total hits across both groups (pre-cap),
+        // so a remembered keyword reflects real matches even when the grid is capped.
+        _lastMatchTotal = matchedTotal + unmatchedTotal;
 
         MatchedHeader = LiveChecked
             ? $"✅ In current game — {GroupCountLabel(matched.Count, matchedTotal)}"
