@@ -60,6 +60,15 @@ public partial class DumpExplorerViewModel : ViewModelBase
     [ObservableProperty] private string _matchedHeader = "In current game";
     [ObservableProperty] private string _unmatchedHeader = "Not in current game";
 
+    /// <summary>Row selected in the Matched / Unmatched grid (bound TwoWay to each
+    /// grid's SelectedItem). A per-row action (Jump / Instances / Copy path) sets the
+    /// acted-on row here via <see cref="SelectEntry"/> even when the user clicked the
+    /// button without first selecting the row, so the selection survives the tab switch
+    /// the action triggers and is restored (and scrolled back into view) on return.
+    /// Only one is non-null at a time — selecting in one grid clears the other.</summary>
+    [ObservableProperty] private DumpEntry? _matchedSelected;
+    [ObservableProperty] private DumpEntry? _unmatchedSelected;
+
     // Long-running load / re-check cancellation (guarded OCE — see catch blocks).
     private CancellationTokenSource? _opCts;
 
@@ -261,6 +270,7 @@ public partial class DumpExplorerViewModel : ViewModelBase
     [RelayCommand]
     private void OpenInLiveWalker(DumpEntry? row)
     {
+        SelectEntry(row);
         if (row is null) return;
         if (!row.IsMatched || string.IsNullOrEmpty(row.LiveAddr))
         {
@@ -273,6 +283,7 @@ public partial class DumpExplorerViewModel : ViewModelBase
     [RelayCommand]
     private void FindInstances(DumpEntry? row)
     {
+        SelectEntry(row);
         if (row is null || string.IsNullOrEmpty(row.OwningClassName)) return;
         NavigateToInstanceFinder?.Invoke(row.OwningClassName);
     }
@@ -280,9 +291,30 @@ public partial class DumpExplorerViewModel : ViewModelBase
     [RelayCommand]
     private async Task CopyPathAsync(DumpEntry? row)
     {
+        SelectEntry(row);
         if (row is null || string.IsNullOrEmpty(row.Path)) return;
         await _platform.CopyToClipboardAsync(row.Path);
         StatusText = $"Copied path: {row.Path}";
+    }
+
+    /// <summary>Make <paramref name="row"/> the current selection in whichever grid
+    /// holds it, clearing the other grid's selection so exactly one row stays selected.
+    /// Called by every per-row action so clicking its button auto-selects the row even
+    /// when it wasn't selected first — the selection then persists across the tab switch
+    /// the action triggers. No-op if the row isn't in either (capped-out) collection.</summary>
+    private void SelectEntry(DumpEntry? row)
+    {
+        if (row is null) return;
+        if (Matched.Contains(row))
+        {
+            MatchedSelected = row;
+            UnmatchedSelected = null;
+        }
+        else if (Unmatched.Contains(row))
+        {
+            UnmatchedSelected = row;
+            MatchedSelected = null;
+        }
     }
 
     // ------------------------------------------------------------------

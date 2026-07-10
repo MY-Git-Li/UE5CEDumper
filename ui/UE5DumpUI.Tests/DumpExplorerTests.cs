@@ -317,4 +317,40 @@ public class DumpExplorerTests
         }
         finally { File.Delete(path); }
     }
+
+    [Fact]
+    public async Task Vm_PerRowAction_AutoSelectsRow_WithSingleSelectionAcrossGrids()
+    {
+        var path = await WriteTempAsync(SampleJsonl);
+        try
+        {
+            var vm = CreateVm(LiveGameWithPlayer(), new MockPlatformService(Path.GetTempPath()));
+            vm.SetConnected(true);
+            await vm.LoadFromPathAsync(path);
+
+            // Nothing selected until an action runs.
+            Assert.Null(vm.MatchedSelected);
+            Assert.Null(vm.UnmatchedSelected);
+
+            // Jump on a matched row that was NEVER selected first auto-selects it, so the
+            // selection survives the tab switch the action triggers.
+            var matchedRow = vm.Matched.First(e => e.Kind == DumpEntryKind.Class);
+            vm.OpenInLiveWalkerCommand.Execute(matchedRow);
+            Assert.Same(matchedRow, vm.MatchedSelected);
+            Assert.Null(vm.UnmatchedSelected);
+
+            // Copy path on an unmatched row moves the single selection to the other grid.
+            var unmatchedRow = vm.Unmatched.First();
+            vm.CopyPathCommand.Execute(unmatchedRow);
+            Assert.Same(unmatchedRow, vm.UnmatchedSelected);
+            Assert.Null(vm.MatchedSelected);
+
+            // Find instances on a matched property row selects it back in the Matched grid.
+            var matchedProp = vm.Matched.First(e => e.Kind == DumpEntryKind.Property);
+            vm.FindInstancesCommand.Execute(matchedProp);
+            Assert.Same(matchedProp, vm.MatchedSelected);
+            Assert.Null(vm.UnmatchedSelected);
+        }
+        finally { File.Delete(path); }
+    }
 }
