@@ -179,8 +179,12 @@ public class DumpAllServiceTests
     public void Generate_GameOnly_SkipsEnginePackagesButKeepsBPGC()
     {
         var dump = new FakeDumpForDump();
-        dump.Objects.Add(Obj("0x1", "UActor", "Class", "/Script/Engine.Actor"));
-        dump.Objects.Add(Obj("0x2", "MyPlayer", "BlueprintGeneratedClass", "/Game/Foo/MyPlayer_C"));
+        // REALISTIC: get_object_list never sends a path, so obj.FullPath is "".
+        // The engine-package skip must therefore key on the WALKED classInfo.FullPath.
+        // (Passing a path to Obj here would mask the bug this test guards — the old
+        // code skipped on the always-empty obj.FullPath and silently kept everything.)
+        dump.Objects.Add(Obj("0x1", "UActor", "Class"));
+        dump.Objects.Add(Obj("0x2", "MyPlayer", "BlueprintGeneratedClass"));
         dump.ClassWalks["0x1"] = new ClassInfoModel { Name = "UActor", FullPath = "/Script/Engine.Actor" };
         dump.ClassWalks["0x2"] = new ClassInfoModel { Name = "MyPlayer", FullPath = "/Game/Foo/MyPlayer_C" };
 

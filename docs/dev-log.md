@@ -18,6 +18,52 @@ builds ≤696 in
 
 -----
 
+## 2026-07-10 — Dump Explorer tab (offline "Dump All" .jsonl browser) + Options depth/Deep editable while disconnected (build 2044; dev)
+
+**SHIPPED (UI only; no DLL / pipe-protocol change).** Two changes.
+
+**(1) Options “Locate in GWorld depth” + “Deep” now editable while disconnected.** Both controls shared one
+`StackPanel IsEnabled="{Binding LiveWalker.IsGWorldAvailable}"` gate (MainWindow.axaml:222) that greyed them out
+until a live GWorld resolved. They back **persisted preferences** (`GWorldLocateDepth`=7 / `GWorldLocateDeep` in
+`LiveWalkerUiOptions`), so the gate is removed — the user can dial them in ahead of a locate, like every other
+Options item. Locate-time read via `FindPathFromGWorldAsync` is unchanged.
+
+**(2) New “Dump Explorer” tab** — an **offline** browser over an exported *Dump All* (`.jsonl`, produced by
+`DumpAllService`). One keyword box searches **classes + properties + functions at once** (space = AND, category
+filter All/Class/Prop/Func), so you no longer pick a category and switch tabs first. Results split into two
+groups: **✅ In current game** (owning class resolves live — matched by **class short name**, which is stable
+across game restarts even when the dump’s recorded address is stale) with a **🡒 Jump** to the live class in the
+Live Walker, and **⚠ Not in current game** (read-only metadata reference). Live match = one GObjects pass →
+`className→currentAddr` index (class-like metas only). Name (not full path) because `get_object_list` only
+carries the short FName and `find_object` is an O(n) scan; the trade-off is same-named classes across packages
+collide (last-wins). Disconnect invalidates the match (stale addresses cleared). Purely client-side; parsing
+needs no game, matching needs a connected+scanned one. A **⤓ Last export** button one-click-loads the most recent
+in-session *Export ▸ Dump All* (no dialog; NOT auto-loaded — repeated exports / a busy tab mustn't clobber the
+view). Rows also offer **🔍 Instances** (→ Instance Finder for the owning class) as the class→instance bridge to
+the downstream *Related ▸ Locate-in-GWorld/GameEngine* flow; Locate is deliberately NOT put on rows here because
+it's instance-oriented and a class object almost never sits in the GWorld/engine forward graph. New files: `Models/DumpBrowseModels.cs` (DTOs + source-gen JSON context + flat
+`DumpEntry`), `Services/DumpJsonlReader.cs`, `ViewModels/DumpExplorerViewModel.cs`, `Views/DumpExplorerPanel.axaml`.
+Added `IPlatformService.ShowOpenFileDialogAsync` (default no-op + Windows `OpenFilePickerAsync`). Tab inserted
+after **Related** (`MainTabIndex.DumpExplorer=11`, tail renumbered 12–17). 6 new unit tests
+(`DumpExplorerTests`). An adversarial multi-agent review of the feature caught + fixed 4 issues before ship: a
+**blocker** (path-matching was dead against the real DLL — `get_object_list` sends no path and
+`UObjectNode.FullPath` is always `""`; switched to class-short-name matching), two **major** cancellation races
+(OCE guard read the shared `_opCts` field instead of the op-local token → superseded op reset shared `IsBusy`;
+now op-local guard + `EndOp` + Load gated on `!IsBusy`), and a **major** stale-match-on-disconnect
+(`SetConnected(false)` now clears `IsMatched`/`LiveAddr`).
+
+**(3) Fixed `DumpAllService` GameOnly silent no-op (pre-existing bug, found during (2)'s review).** The engine-
+package skip keyed on `obj.FullPath` from `GetObjectListAsync`, which is **always `""`** (the DLL `get_object_list`
+sends no path) → `IsEnginePath("")` false → engine classes were never skipped and every "game only" Dump All
+actually included all engine classes. Moved the skip **post-walk** onto the reliable `classInfo.FullPath` (from
+`walk_class`/`walk_class_batch`, which do carry the path), before `WalkFunctions` so an engine class costs no extra
+round-trip; `FlushClassChunkAsync` now returns a `skipped` count. The existing GameOnly test was masking the bug
+(it set `obj.FullPath`, which production never has) — rewritten to be realistic so it genuinely regresses.
+
+Full suite 2306 green.
+
+-----
+
 ## 2026-07-08 — Inject picker "already loaded" detection + Keep-Foreground cursor-lock fix + emergency hotkey + GodMode/KeepFg "Add to CE" delivery (build 1986; dev)
 
 **SHIPPED (DLL + UI; Keep-Foreground cursor-lock fix LIVE-VERIFIED P3R).** Four related fixes/features.

@@ -1,0 +1,183 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UE5DumpUI.ViewModels"
+             xmlns:m="using:UE5DumpUI.Models"
+             x:Class="UE5DumpUI.Views.DumpExplorerPanel"
+             x:DataType="vm:DumpExplorerViewModel">
+
+  <DockPanel Margin="8">
+    <!-- Row 1: file controls + meta header -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
+      <Button Content="{StaticResource str.Dump.Load}"
+              Command="{Binding LoadFileCommand}"
+              ToolTip.Tip="{StaticResource str.Tip.Dump.Load}"
+              Classes="accent" Padding="12,4"/>
+      <Button Content="{StaticResource str.Dump.LoadLast}"
+              Command="{Binding LoadLastExportCommand}"
+              ToolTip.Tip="{StaticResource str.Tip.Dump.LoadLast}"
+              Padding="12,4"/>
+      <Button Content="{StaticResource str.Dump.Recheck}"
+              Command="{Binding RecheckLiveCommand}"
+              ToolTip.Tip="{StaticResource str.Tip.Dump.Recheck}"
+              Padding="12,4"/>
+      <Button Content="{StaticResource str.Dump.Cancel}"
+              Command="{Binding CancelCommand}"
+              IsVisible="{Binding IsBusy}"
+              Padding="8,4"/>
+      <TextBlock Text="{Binding HeaderText}"
+                 Foreground="#4EC9B0" VerticalAlignment="Center"
+                 TextTrimming="CharacterEllipsis"/>
+    </StackPanel>
+
+    <!-- Row 2: unified keyword search + category -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
+      <TextBox x:Name="SearchInput"
+               Width="380" Padding="4,2"
+               Text="{Binding SearchText}"
+               PlaceholderText="{StaticResource str.Dump.SearchHint}"/>
+      <ComboBox SelectedIndex="{Binding SelectedCategoryIndex}"
+                Width="140" VerticalAlignment="Center"
+                ToolTip.Tip="{StaticResource str.Tip.Dump.Category}">
+        <ComboBoxItem Content="{StaticResource str.Dump.Cat.All}"/>
+        <ComboBoxItem Content="{StaticResource str.Dump.Cat.Class}"/>
+        <ComboBoxItem Content="{StaticResource str.Dump.Cat.Property}"/>
+        <ComboBoxItem Content="{StaticResource str.Dump.Cat.Function}"/>
+      </ComboBox>
+    </StackPanel>
+
+    <!-- Persistent explainer: what these rows ARE (class metadata, not instances)
+         and why there's no Locate here (a class isn't in the GWorld/engine graph). -->
+    <TextBlock DockPanel.Dock="Top" Text="{StaticResource str.Dump.MetaNote}"
+               Foreground="#777" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"/>
+
+    <!-- Status + indeterminate progress -->
+    <TextBlock DockPanel.Dock="Top" Text="{Binding StatusText}"
+               Foreground="#888" Margin="0,0,0,4" TextWrapping="Wrap"/>
+    <ProgressBar DockPanel.Dock="Top"
+                 IsIndeterminate="{Binding IsBusy}"
+                 IsVisible="{Binding IsBusy}"
+                 Height="2" Margin="0,0,0,4"/>
+
+    <!-- Body: two groups — In current game (jumpable) / Not in current game -->
+    <Grid RowDefinitions="*,Auto,*">
+      <DockPanel Grid.Row="0">
+        <TextBlock DockPanel.Dock="Top" Text="{Binding MatchedHeader}"
+                   Foreground="#4EC9B0" FontWeight="Bold" Margin="0,0,0,2"/>
+        <DataGrid x:Name="MatchedGrid"
+                  ItemsSource="{Binding Matched}"
+                  IsReadOnly="True"
+                  CanUserResizeColumns="True"
+                  GridLinesVisibility="Horizontal"
+                  HeadersVisibility="Column"
+                  BorderThickness="0"
+                  Background="#1E1E1E" Foreground="#D4D4D4"
+                  FontFamily="Consolas" FontSize="12"
+                  HorizontalScrollBarVisibility="Auto">
+          <DataGrid.Columns>
+            <DataGridTextColumn Header="{StaticResource str.Dump.ColKind}"
+                                Binding="{Binding KindLabel}" SortMemberPath="KindLabel"
+                                Width="60" CanUserSort="True"/>
+            <DataGridTextColumn Header="{StaticResource str.Dump.ColName}"
+                                Binding="{Binding Name}" SortMemberPath="Name"
+                                Width="260" MinWidth="140" CanUserSort="True"/>
+            <DataGridTextColumn Header="{StaticResource str.Dump.ColOwner}"
+                                Binding="{Binding OwnerClass}" SortMemberPath="OwnerClass"
+                                Width="200" MinWidth="120" CanUserSort="True"/>
+            <DataGridTextColumn Header="{StaticResource str.Dump.ColType}"
+                                Binding="{Binding TypeInfo}" SortMemberPath="TypeInfo"
+                                Width="240" MinWidth="120" CanUserSort="True"/>
+            <DataGridTextColumn Header="{StaticResource str.Dump.ColOffset}"
+                                Binding="{Binding OffsetDisplay}" SortMemberPath="Offset"
+                                Width="70" CanUserSort="True"/>
+            <DataGridTextColumn Header="{StaticResource str.Dump.ColPath}"
+                                Binding="{Binding Path}" SortMemberPath="Path"
+                                Width="340" MinWidth="160" CanUserSort="True"/>
+            <DataGridTemplateColumn Header="" Width="Auto" CanUserResize="False" CanUserSort="False">
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate x:DataType="m:DumpEntry">
+                  <StackPanel Orientation="Horizontal" Spacing="4"
+                              HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Button Content="{StaticResource str.Dump.Jump}"
+                            Command="{Binding $parent[DataGrid].((vm:DumpExplorerViewModel)DataContext).OpenInLiveWalkerCommand}"
+                            CommandParameter="{Binding}"
+                            ToolTip.Tip="{StaticResource str.Tip.Dump.Jump}"
+                            Foreground="#4EC9B0" Background="Transparent"
+                            BorderThickness="1" BorderBrush="#4EC9B0"
+                            Padding="6,2" FontSize="11" Cursor="Hand"/>
+                    <Button Content="{StaticResource str.Dump.FindInstances}"
+                            Command="{Binding $parent[DataGrid].((vm:DumpExplorerViewModel)DataContext).FindInstancesCommand}"
+                            CommandParameter="{Binding}"
+                            ToolTip.Tip="{StaticResource str.Tip.Dump.FindInstances}"
+                            Foreground="#569CD6" Background="Transparent"
+                            BorderThickness="1" BorderBrush="#569CD6"
+                            Padding="6,2" FontSize="11" Cursor="Hand"/>
+                    <Button Content="{StaticResource str.Dump.CopyPath}"
+                            Command="{Binding $parent[DataGrid].((vm:DumpExplorerViewModel)DataContext).CopyPathCommand}"
+                            CommandParameter="{Binding}"
+                            ToolTip.Tip="{StaticResource str.Tip.Dump.CopyPath}"
+                            Foreground="#DCDCAA" Background="Transparent"
+                            BorderThickness="1" BorderBrush="#DCDCAA"
+                            Padding="6,2" FontSize="11" Cursor="Hand"/>
+                  </StackPanel>
+                </DataTemplate>
+              </DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
+          </DataGrid.Columns>
+        </DataGrid>
+      </DockPanel>
+
+      <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch"
+                    Background="#333" ResizeDirection="Rows"/>
+
+      <DockPanel Grid.Row="2">
+        <TextBlock DockPanel.Dock="Top" Text="{Binding UnmatchedHeader}"
+                   Foreground="#F4A747" FontWeight="Bold" Margin="0,4,0,2"/>
+        <DataGrid x:Name="UnmatchedGrid"
+                  ItemsSource="{Binding Unmatched}"
+                  IsReadOnly="True"
+                  CanUserResizeColumns="True"
+                  GridLinesVisibility="Horizontal"
+                  HeadersVisibility="Column"
+                  BorderThickness="0"
+                  Background="#1E1E1E" Foreground="#9A9A9A"
+                  FontFamily="Consolas" FontSize="12"
+                  HorizontalScrollBarVisibility="Auto">
+          <DataGrid.Columns>
+            <DataGridTextColumn Header="{StaticResource str.Dump.ColKind}"
+                                Binding="{Binding KindLabel}" SortMemberPath="KindLabel"
+                                Width="60" CanUserSort="True"/>
+            <DataGridTextColumn Header="{StaticResource str.Dump.ColName}"
+                                Binding="{Binding Name}" SortMemberPath="Name"
+                                Width="260" MinWidth="140" CanUserSort="True"/>
+            <DataGridTextColumn Header="{StaticResource str.Dump.ColOwner}"
+                                Binding="{Binding OwnerClass}" SortMemberPath="OwnerClass"
+                                Width="200" MinWidth="120" CanUserSort="True"/>
+            <DataGridTextColumn Header="{StaticResource str.Dump.ColType}"
+                                Binding="{Binding TypeInfo}" SortMemberPath="TypeInfo"
+                                Width="240" MinWidth="120" CanUserSort="True"/>
+            <DataGridTextColumn Header="{StaticResource str.Dump.ColOffset}"
+                                Binding="{Binding OffsetDisplay}" SortMemberPath="Offset"
+                                Width="70" CanUserSort="True"/>
+            <DataGridTextColumn Header="{StaticResource str.Dump.ColPath}"
+                                Binding="{Binding Path}" SortMemberPath="Path"
+                                Width="340" MinWidth="160" CanUserSort="True"/>
+            <DataGridTemplateColumn Header="" Width="Auto" CanUserResize="False" CanUserSort="False">
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate x:DataType="m:DumpEntry">
+                  <Button Content="{StaticResource str.Dump.CopyPath}"
+                          Command="{Binding $parent[DataGrid].((vm:DumpExplorerViewModel)DataContext).CopyPathCommand}"
+                          CommandParameter="{Binding}"
+                          ToolTip.Tip="{StaticResource str.Tip.Dump.CopyPath}"
+                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                          Foreground="#DCDCAA" Background="Transparent"
+                          BorderThickness="1" BorderBrush="#DCDCAA"
+                          Padding="6,2" FontSize="11" Cursor="Hand"/>
+                </DataTemplate>
+              </DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
+          </DataGrid.Columns>
+        </DataGrid>
+      </DockPanel>
+    </Grid>
+  </DockPanel>
+</UserControl>

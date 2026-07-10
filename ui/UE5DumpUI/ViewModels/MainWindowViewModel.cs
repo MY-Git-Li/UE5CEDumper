@@ -32,16 +32,17 @@ internal enum MainTabIndex
     GameClassFilter = 8,
     ClassStruct = 9,
     RelatedObjects = 10,
+    DumpExplorer = 11,   // offline "Dump All" .jsonl browser
     // Fixed tail order: the experimental tabs (hidden unless opted in), then
     // Proxy Deploy (always 2nd-to-last), then System/Pointers (always last) —
     // regardless of any future tab additions. When experimental is off these
     // tabs collapse, so the visible last two are Proxy Deploy + System.
-    DetectStats = 11,   // "Detect Player Stats" (P4, experimental)
-    Snapshot = 12,
-    SpcQuery = 13,
-    ClassPivot = 14,
-    ProxyDeploy = 15,
-    Pointers = 16,   // the "System" tab (str.Tab.Pointers = "System")
+    DetectStats = 12,   // "Detect Player Stats" (P4, experimental)
+    Snapshot = 13,
+    SpcQuery = 14,
+    ClassPivot = 15,
+    ProxyDeploy = 16,
+    Pointers = 17,   // the "System" tab (str.Tab.Pointers = "System")
 }
 
 /// <summary>
@@ -255,6 +256,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public InterestingPropertiesViewModel InterestingProperties { get; }
     public ValueSearchViewModel ValueSearch { get; }
     public RelatedObjectsViewModel RelatedObjects { get; }
+    /// <summary>Offline "Dump All" (.jsonl) browser — one keyword search over
+    /// classes + properties + functions, split by what's live in the current
+    /// game (matched by object path), with jump-to-Live-Walker for matches.</summary>
+    public DumpExplorerViewModel DumpExplorer { get; }
     /// <summary>Experimental "Detect Player Stats" tab (P4) — shortlists likely
     /// HP/MP/Gold fields + confirms them live. Gated behind
     /// <see cref="ExperimentalEnabled"/>. Non-null (no store dependency; the
@@ -395,6 +400,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         InterestingProperties = new InterestingPropertiesViewModel(dump, log, platform);
         ValueSearch = new ValueSearchViewModel(dump, log);
         RelatedObjects = new RelatedObjectsViewModel(dump, log, platform);
+        DumpExplorer = new DumpExplorerViewModel(dump, log, platform);
         // Detect Player Stats (P4). snapshotStore is optional — the behavioral
         // signal is opt-in and no-ops (with a note) when it's null.
         DetectStats = new DetectStatsViewModel(dump, log, snapshotStore);
@@ -775,6 +781,36 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _log.Error($"RelatedObjects LocateInGameEngine handler error: {addr}", ex);
+            }
+        };
+
+        // Dump Explorer: a matched row hands off its owning class's CURRENT live
+        // address to the Live Walker (same pattern as the other panels).
+        DumpExplorer.NavigateToLiveWalker += async (addr) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                await LiveWalker.NavigateToAddressCommand.ExecuteAsync(addr);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"DumpExplorer NavigateToLiveWalker handler error: {addr}", ex);
+            }
+        };
+        // Dump Explorer: the class -> instances bridge (find live instances of a
+        // row's owning class in the Instance Finder). From there the existing
+        // Related -> Locate-in-GWorld/GameEngine flow handles instances.
+        DumpExplorer.NavigateToInstanceFinder += async (className) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.InstanceFinder;
+                await InstanceFinder.SearchForClassAsync(className);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"DumpExplorer NavigateToInstanceFinder handler error: {className}", ex);
             }
         };
         RelatedObjects.NavigateToInstanceFinder += async (className) =>
@@ -1773,6 +1809,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 IsConnected = connected;
                 StatusText = connected ? "Connected" : "Disconnected";
                 Teleport.SetConnected(connected);
+                DumpExplorer.SetConnected(connected);
                 if (!connected)
                 {
                     WindowTitle = "UE5 Dump UI";
@@ -2800,6 +2837,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             var fileInfo = new FileInfo(filePath);
             StatusText = $"Dumped {fileInfo.Length / 1024 / 1024:F1} MB to {Path.GetFileName(filePath)}";
             _log.Info($"DumpAll exported to {filePath} ({fileInfo.Length} bytes)");
+
+            // Offer a one-click load in the Dump Explorer tab (no auto-load — the
+            // user may re-export or be mid-operation there).
+            DumpExplorer.SetLastExportPath(filePath);
         }
         catch (Exception ex)
         {

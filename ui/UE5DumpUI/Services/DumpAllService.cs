@@ -172,20 +172,21 @@ public static class DumpAllService
                     {
                         continue;
                     }
-                    if (options.GameOnly && IsEnginePath(obj.FullPath))
-                    {
-                        classesSkipped++;
-                        continue;
-                    }
+                    // The GameOnly engine-package skip CANNOT happen here: obj.FullPath
+                    // is always "" from get_object_list (the DLL only sends addr/name/
+                    // class/outer — no path on the wire). It is applied AFTER walking,
+                    // on the walked classInfo.FullPath, in FlushClassChunkAsync (which
+                    // returns the skipped count).
 
                     chunkBuffer.Add(obj);
                     if (chunkBuffer.Count >= WalkClassBatchChunkSize)
                     {
-                        var (emitted, errs) = await FlushClassChunkAsync(
+                        var (emitted, errs, skipped) = await FlushClassChunkAsync(
                             dump, writer, chunkBuffer, instanceCounts, options,
                             classesEmitted, progress, ct);
                         classesEmitted += emitted;
                         errors         += errs;
+                        classesSkipped += skipped;
                         chunkBuffer.Clear();
                     }
                 }
@@ -197,11 +198,12 @@ public static class DumpAllService
             // Final partial chunk.
             if (chunkBuffer.Count > 0)
             {
-                var (emitted, errs) = await FlushClassChunkAsync(
+                var (emitted, errs, skipped) = await FlushClassChunkAsync(
                     dump, writer, chunkBuffer, instanceCounts, options,
                     classesEmitted, progress, ct);
                 classesEmitted += emitted;
                 errors         += errs;
+                classesSkipped += skipped;
                 chunkBuffer.Clear();
             }
         }
@@ -225,11 +227,15 @@ public static class DumpAllService
     /// half of the per-class round-trip cost is a separate batching
     /// candidate (build 693 only batches walk_class).
     ///
-    /// Returns (emittedDelta, errorsDelta) so the caller can maintain
-    /// the cumulative <c>classesEmitted</c> / <c>errors</c> counters
-    /// the summary line reports.
+    /// Returns (emittedDelta, errorsDelta, skippedDelta) so the caller can
+    /// maintain the cumulative <c>classesEmitted</c> / <c>errors</c> /
+    /// <c>classesSkipped</c> counters the summary line reports. The GameOnly
+    /// engine-package skip is applied HERE (post-walk) because the walked
+    /// <c>classInfo.FullPath</c> is the only reliable package path — the
+    /// object-list <c>obj.FullPath</c> is always empty (get_object_list carries
+    /// no path).
     /// </summary>
-    private static async Task<(int emitted, int errors)> FlushClassChunkAsync(
+    private static async Task<(int emitted, int errors, int skipped)> FlushClassChunkAsync(
         IDumpService dump,
         TextWriter writer,
         List<UObjectNode> chunk,
@@ -239,7 +245,7 @@ public static class DumpAllService
         IProgress<DumpProgress>? progress,
         CancellationToken ct)
     {
-        if (chunk.Count == 0) return (0, 0);
+        if (chunk.Count == 0) return (0, 0, 0);
 
         // Try the batched path first.
         var addrs = new string[chunk.Count];
@@ -265,6 +271,7 @@ public static class DumpAllService
 
         int emittedThisChunk = 0;
         int errorsThisChunk = 0;
+        int skippedThisChunk = 0;
 
         for (int i = 0; i < chunk.Count; i++)
         {
@@ -275,6 +282,15 @@ public static class DumpAllService
                 var classInfo = batchResult != null
                     ? batchResult[i]
                     : await dump.WalkClassAsync(obj.Address, ct);
+
+                // GameOnly engine-package skip — applied on the walked path (the
+                // reliable one) rather than obj.FullPath (always empty). Skips
+                // BEFORE WalkFunctions so an engine class costs no extra round-trip.
+                if (options.GameOnly && IsEnginePath(classInfo.FullPath))
+                {
+                    skippedThisChunk++;
+                    continue;
+                }
 
                 List<FunctionInfoModel>? functions = null;
                 if (options.IncludeFunctions)
@@ -315,7 +331,7 @@ public static class DumpAllService
             }
         }
 
-        return (emittedThisChunk, errorsThisChunk);
+        return (emittedThisChunk, errorsThisChunk, skippedThisChunk);
     }
 
     // ------------------------------------------------------------------

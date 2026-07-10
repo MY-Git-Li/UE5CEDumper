@@ -217,9 +217,11 @@
 
                   <Separator Background="#3C3C3C" Height="1"/>
 
-                  <!-- Locate in GWorld depth (BFS hops from GWorld; dims when GWorld
-                       is unavailable). Bound through the Live Walker sub-VM that owns it. -->
-                  <StackPanel Spacing="2" IsEnabled="{Binding LiveWalker.IsGWorldAvailable}">
+                  <!-- Locate in GWorld depth (BFS hops from GWorld) + Deep. These are
+                       persisted user preferences, so they stay editable even while
+                       disconnected / when GWorld is unavailable — the user can dial them
+                       in ahead of a locate. Bound through the Live Walker sub-VM that owns them. -->
+                  <StackPanel Spacing="2">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                       <TextBlock Text="{StaticResource str.Toolbar.GWorldDepth}"
                                  Foreground="#CCCCCC" FontSize="12"
@@ -434,6 +436,9 @@
         </TabItem>
         <TabItem Header="{StaticResource str.Tab.RelatedObjects}">
           <views:RelatedObjectsPanel DataContext="{Binding RelatedObjects}"/>
+        </TabItem>
+        <TabItem Header="{StaticResource str.Tab.DumpExplorer}">
+          <views:DumpExplorerPanel DataContext="{Binding DumpExplorer}"/>
         </TabItem>
 
         <!-- Fixed tail order (see MainTabIndex): the experimental tabs (hidden

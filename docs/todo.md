@@ -21,6 +21,18 @@ Open work only. **Read this when deciding what to do next.**
 
 ## ▶ Next up (genuinely actionable now)
 
+- **`get_object_list` emit `full_path` to restore GameOnly pre-walk skip (perf; correctness already fixed)** —
+  Effort: **M** · Risk: med. The `DumpAllService` GameOnly correctness bug is fixed (build 2044) by moving the
+  engine-package skip **post-walk** onto `classInfo.FullPath` — but that means GameOnly now *walks* every engine
+  class before discarding it (the old pre-walk skip on `obj.FullPath` was a no-op, so it was never actually
+  skipping — but the intent was to avoid the walk entirely). To restore the pre-walk optimization, the DLL
+  `get_object_list` (Fern.cpp ~1257-1281) would need to emit `full_path` per object and `DumpService.GetObjectListAsync`
+  (DumpService.cs:196-202) parse it. **Weigh the memory cost**: the ClassName-interning comment (DumpService.cs:193)
+  deliberately avoided per-object path strings (~19 MB over 486K objects) — so gate it behind a request flag
+  (e.g. `include_path=true`) that only `DumpAllService` sets, keeping the hot Object Tree paginate lean. Fixing
+  this ALSO un-breaks any other consumer that reads `UObjectNode.FullPath` from the object list (currently always
+  ""). *Parent: DumpAllService GameOnly fix, dev-log 2026-07-10 build 2044.*
+
 - **Multi-pipe Phase 1 — residual verification (low priority; lane split SHIPPED PR #396)** —
   Effort: **S** · Risk: low. The two-connection lane split shipped + in-game verified for §9.6 items
   1–5 (dev-log 2026-06-28). Two checklist items weren't explicitly exercised: (6) **watch-event
