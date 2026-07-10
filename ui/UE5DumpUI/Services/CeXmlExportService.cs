@@ -59,6 +59,24 @@ public static class CeXmlExportService
     private static int _ceStringLength;
 
     /// <summary>
+    /// Copy CE Field "Fabricate empty array slots" target count (0 = off, the default and
+    /// the Copy CE XML value). When &gt; 0, a selected <c>TArray</c> is emitted with
+    /// <c>max(count, walkedCount)</c> element rows (capped at <see cref="MaxFabricateElements"/>):
+    /// slots the live save hasn't populated (null object pointers, or indices beyond the
+    /// current Num) are FABRICATED so the CE table already has room for items a later save
+    /// will hold. Object arrays replicate a resolved element's field layout (homogeneous-class
+    /// assumption); scalar / all-null arrays extend the flat element leaf. TArray-only — Map/Set
+    /// are sparse (free-list slots aren't future elements) and are never fabricated. Set per
+    /// Generate* entry; only the Copy CE Field call sites pass a non-zero value.
+    /// </summary>
+    [ThreadStatic]
+    private static int _fabricateArrayCount;
+
+    /// <summary>Hard ceiling on fabricated element rows per array — a backstop beyond the
+    /// UI slider's max, so a huge requested count can't alone blow the entry budget.</summary>
+    private const int MaxFabricateElements = 4096;
+
+    /// <summary>
     /// Tracks emitted DropDownList owners by UEnum address → parent group's Description.
     /// Reset per Generate* call. Enables DropDownListLink sharing for same-enum arrays.
     /// </summary>
@@ -908,7 +926,8 @@ public static class CeXmlExportService
         string? altRowColorEvenRgb = null,
         string? altRowColorOddRgb = null,
         bool collapseLeafPointers = false,
-        int ceStringLength = 256)
+        int ceStringLength = 256,
+        int fabricateArrayCount = 0)
     {
         // Clean breadcrumbs: remove navigation cycles (e.g., Child->Parent->Child)
         // before generating XML to avoid deeply nested duplicate pointer chains.
@@ -930,6 +949,7 @@ public static class CeXmlExportService
         _curRowColor = null;
         _collapseLeafPointers = collapseLeafPointers;
         _ceStringLength = ceStringLength;
+        _fabricateArrayCount = fabricateArrayCount;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -1041,7 +1061,8 @@ public static class CeXmlExportService
         string? altRowColorEvenRgb = null,
         string? altRowColorOddRgb = null,
         bool collapseLeafPointers = false,
-        int ceStringLength = 256)
+        int ceStringLength = 256,
+        int fabricateArrayCount = 0)
     {
         _nextId = 100;
         _collapsePointerNodes = collapsePointerNodes;
@@ -1059,6 +1080,7 @@ public static class CeXmlExportService
         _curRowColor = null;
         _collapseLeafPointers = collapseLeafPointers;
         _ceStringLength = ceStringLength;
+        _fabricateArrayCount = fabricateArrayCount;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -1179,7 +1201,8 @@ public static class CeXmlExportService
         string? altRowColorEvenRgb = null,
         string? altRowColorOddRgb = null,
         bool collapseLeafPointers = false,
-        int ceStringLength = 256)
+        int ceStringLength = 256,
+        int fabricateArrayCount = 0)
     {
         var cleanedBc = CleanBreadcrumbs(breadcrumbs);
 
@@ -1199,6 +1222,7 @@ public static class CeXmlExportService
         _curRowColor = null;
         _collapseLeafPointers = collapseLeafPointers;
         _ceStringLength = ceStringLength;
+        _fabricateArrayCount = fabricateArrayCount;
         _maxDropDownEntries = maxDropDownEntries;
         _dropDownOwners = new Dictionary<string, string>();
         _dropDownDescriptions = new HashSet<string>(StringComparer.Ordinal);
@@ -2575,6 +2599,15 @@ public static class CeXmlExportService
         }
         var childIndent = indent + "  ";
 
+        // Fabricate (Copy CE Field, _fabricateArrayCount > 0): the target row count for
+        // this leaf-element array. Scalar arrays and all-null object arrays (which reach
+        // this generic path — no resolved element to drill) get extra element leaves past
+        // the live Num so the CE table has rows for values a later save will hold.
+        int walkedLeaf = field.ArrayElements.Count;
+        int targetLeaf = (_fabricateArrayCount > 0 && field.ArrayElemSize > 0)
+            ? Math.Min(Math.Max(_fabricateArrayCount, walkedLeaf), MaxFabricateElements)
+            : walkedLeaf;
+
         foreach (var elem in field.ArrayElements)
         {
             // Element: simple offset from the already-dereferenced Data pointer.
@@ -2601,6 +2634,21 @@ public static class CeXmlExportService
             }
         }
 
+        // Fabricated tail: element leaves for indices [Num .. target) at +i*ElemSize. The
+        // group already deref'd TArray.Data, so these auto-follow a realloc; they read
+        // past-the-end memory (harmless, CE shows unknowns) until the game grows the array.
+        for (int i = walkedLeaf; i < targetLeaf; i++)
+        {
+            if (_emitEntryCount >= MaxEmitEntries) { _emitTruncated = true; break; }
+            int elemByteOffset = i * field.ArrayElemSize;
+            var elemDesc = DecorateDesc($"[{i}]", elemByteOffset, null);
+            if (dropDownLinkTarget != null)
+                EmitLeaf(sb, childIndent, elemDesc, ceElem, $"+{elemByteOffset:X}", null,
+                    dropDownListLink: dropDownLinkTarget);
+            else
+                EmitLeaf(sb, childIndent, elemDesc, ceElem, $"+{elemByteOffset:X}", null);
+        }
+
         EmitGroupClose(sb, indent);
     }
 
@@ -2620,22 +2668,52 @@ public static class CeXmlExportService
         EmitGroupOpen(sb, indent, desc, $"+{field.Offset:X}", new[] { 0 });
         var elemIndent = indent + "  ";
 
-        foreach (var elem in field.ArrayElements!)
-        {
-            int elemByteOffset = elem.Index * field.ArrayElemSize;
-            // Bare index name. The instance name (PtrName) is dropped; EmitDrilledPointer
-            // (resolved path) and DecorateDesc (leaf fallback) re-add the element's class
-            // only when the +Type opt-in is on. The synth Name must be just "[N]" so the
-            // decoration isn't doubled.
-            var baseName = $"[{elem.Index}]";
+        var elems = field.ArrayElements!;
+        int walked = elems.Count;
 
-            if (!string.IsNullOrEmpty(elem.PtrAddress) && elem.PtrAddress != "0x0"
+        // Fabricate (Copy CE Field only, _fabricateArrayCount > 0): replicate a resolved
+        // element's field layout onto slots the live save hasn't populated — null pointers
+        // within Num AND, when the requested count exceeds Num, indices beyond it — so the
+        // CE table already has room for items a later save/ship will hold. Homogeneous-class
+        // assumption (TArray<ConcreteType*>). Element [i] lives at +i*ElemSize from the
+        // already-dereferenced TArray.Data, so extended rows auto-follow a realloc.
+        int target = walked;
+        List<LiveFieldValue>? template = null;
+        string? templateClass = null;
+        if (_fabricateArrayCount > 0 && field.ArrayElemSize > 0)
+        {
+            target = Math.Min(Math.Max(_fabricateArrayCount, walked), MaxFabricateElements);
+            foreach (var e in elems)
+            {
+                if (!string.IsNullOrEmpty(e.PtrAddress) && e.PtrAddress != "0x0"
+                    && _resolvedInstancesState != null
+                    && _resolvedInstancesState.TryGetValue(e.PtrAddress, out var t) && t.Count > 0)
+                { template = t; templateClass = e.PtrClassName; break; }
+            }
+        }
+
+        // TArray indices are contiguous, but map by Index defensively.
+        var byIndex = new Dictionary<int, ArrayElementValue>();
+        foreach (var e in elems) byIndex[e.Index] = e;
+
+        for (int i = 0; i < target; i++)
+        {
+            // The per-element foreach is not otherwise budget-checked; a large fabricate
+            // count must stop cleanly (and honestly flag truncation) rather than overshoot.
+            if (_emitEntryCount >= MaxEmitEntries) { _emitTruncated = true; break; }
+
+            int elemByteOffset = i * field.ArrayElemSize;
+            // Bare index name; EmitDrilledPointer / DecorateDesc re-add the class only under
+            // the +Type opt-in, so the synth Name must be just "[N]" to avoid doubling.
+            var baseName = $"[{i}]";
+            byIndex.TryGetValue(i, out var elem);
+
+            // Live resolved element → drill its own target's fields.
+            if (elem != null && !string.IsNullOrEmpty(elem.PtrAddress) && elem.PtrAddress != "0x0"
                 && _resolvedInstancesState != null
                 && _resolvedInstancesState.TryGetValue(elem.PtrAddress, out var children)
                 && children.Count > 0)
             {
-                // Synthetic pointer field so EmitDrilledPointer derefs the element
-                // slot (+elemByteOffset, Offsets=[0]) and lays out the target's fields.
                 var synth = new LiveFieldValue
                 {
                     Name = baseName,
@@ -2650,9 +2728,29 @@ public static class CeXmlExportService
                 continue;
             }
 
-            // Unresolved / null → flat 8-byte pointer leaf. Default "[N]"; +Type re-adds class.
+            // Fabricated slot with a template → drill the template's field layout. A unique
+            // synthetic PtrAddress per slot keeps the shared-dedup / cycle guards from
+            // collapsing the fabricated siblings into "(shared)"; EmitDrilledPointer uses the
+            // key only for those guards and never emits it (the group is +off / Offsets=[0]).
+            if (template != null)
+            {
+                var synth = new LiveFieldValue
+                {
+                    Name = baseName,
+                    TypeName = string.IsNullOrEmpty(field.ArrayInnerType) ? "ObjectProperty" : field.ArrayInnerType,
+                    Offset = elemByteOffset,
+                    PtrAddress = $"fab:{field.Offset:X}:{i:X}",
+                    PtrClassName = templateClass ?? elem?.PtrClassName ?? "",
+                };
+                EmitDrilledPointer(sb, elemIndent, synth, template,
+                    _resolvedStructsState, _resolvedInstancesState!);
+                continue;
+            }
+
+            // No template (fabrication off, or every walked element null) → flat 8-byte
+            // pointer leaf. Default "[N]"; +Type re-adds class.
             EmitLeaf(sb, elemIndent,
-                DecorateDesc(baseName, elemByteOffset, elem.PtrClassName),
+                DecorateDesc(baseName, elemByteOffset, elem?.PtrClassName),
                 new CeFieldInfo("8 Bytes", ShowAsHex: true),
                 $"+{elemByteOffset:X}", null);
         }
@@ -2844,6 +2942,40 @@ public static class CeXmlExportService
             else
             {
                 EmitGroupPlaceholder(sb, elemIndent, elemDesc, $"+{elemByteOffset:X}", null);
+            }
+        }
+
+        // Fabricate (Copy CE Field, _fabricateArrayCount > 0): extend a struct array past Num
+        // by replicating a resolved element's field layout at each new +i*ElemSize. Struct
+        // arrays are dense (every walked slot resolves), so this is pure extend — no null slots
+        // to fill. Rich re-walked template only; the shallow Phase-F preview isn't fabricated.
+        int walkedStruct = field.ArrayElements!.Count;
+        if (_fabricateArrayCount > 0 && field.ArrayElemSize > 0 && canResolveElem)
+        {
+            int targetStruct = Math.Min(Math.Max(_fabricateArrayCount, walkedStruct), MaxFabricateElements);
+            string templateAddr = "";
+            foreach (var e in field.ArrayElements!)
+            {
+                var a = AbsAddr(arrDataBase, (long)e.Index * field.ArrayElemSize);
+                if (_resolvedStructsState!.TryGetValue(a, out var rs2) && rs2.Count > 0) { templateAddr = a; break; }
+            }
+            if (!string.IsNullOrEmpty(templateAddr))
+            {
+                for (int i = walkedStruct; i < targetStruct; i++)
+                {
+                    if (_emitEntryCount >= MaxEmitEntries) { _emitTruncated = true; break; }
+                    int elemByteOffset = i * field.ArrayElemSize;
+                    // StructDataAddr = the template's addr (keys the resolved layout, never
+                    // emitted); Offset = i*ElemSize places the group at the fabricated slot.
+                    var sv = new LiveFieldValue
+                    {
+                        Name = $"[{i}]", TypeName = "StructProperty", Offset = elemByteOffset,
+                        StructDataAddr = templateAddr, StructClassAddr = field.ArrayStructClassAddr,
+                        StructTypeName = field.ArrayStructType,
+                    };
+                    _curRowColor = null;
+                    EmitFields(sb, elemIndent, new[] { sv }, _resolvedStructsState, _resolvedInstancesState);
+                }
             }
         }
 

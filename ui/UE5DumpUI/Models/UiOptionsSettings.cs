@@ -56,6 +56,7 @@ public sealed class MainUiOptions
     public int PreviewLimit { get; set; } = 2;
     public int DeepScanElemCapExponent { get; set; } = 8;
     public int CeStringLengthExponent { get; set; } = 8;   // 2^8 = 256 (CE String leaf <Length>)
+    public int FabricateArrayCountExponent { get; set; }   // 0 = off; 2^N = Copy CE Field array fabricate count
 }
 
 public sealed class LiveWalkerUiOptions

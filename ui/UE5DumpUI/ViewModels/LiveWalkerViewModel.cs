@@ -224,6 +224,11 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     /// Seeded from the toolbar master; passed to CE XML / CE Field export.</summary>
     public int CeStringLength { get; set; } = Constants.DefaultCeStringLength;
 
+    /// <summary>Copy CE Field array fabricate count (0 = off). When &gt; 0, Copy CE Field on a
+    /// selected TArray pads it to this many element rows using a resolved element's layout.
+    /// Seeded from the toolbar master; passed ONLY to the Copy CE Field export (not Copy CE XML).</summary>
+    public int FabricateArrayCount { get; set; }
+
     /// <summary>CSX drilldown depth (0 = flat/dummy, 1-4 normal, 5-6 deep / warning band).
     /// Each extra level can multiply CE XML / CSX output exponentially because every
     /// ObjectProperty hit fans out to its own field tree. 4 was the historic ceiling
@@ -3778,6 +3783,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     resolvedInstances: resolvedInstances,
                     flattenChain: CollapseChain,
                     includeGuessed: includeGuessed,
+                    fabricateArrayCount: FabricateArrayCount,
                     descShowOffset: DescShowOffset,
                     descShowType: DescShowType,
                     dedupShared: DedupSharedObjects,
@@ -3802,6 +3808,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
                     resolvedInstances: resolvedInstances,
                     flattenChain: CollapseChain,
                     includeGuessed: includeGuessed,
+                    fabricateArrayCount: FabricateArrayCount,
                     descShowOffset: DescShowOffset,
                     descShowType: DescShowType,
                     dedupShared: DedupSharedObjects,
