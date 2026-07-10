@@ -173,11 +173,11 @@
                                  Foreground="#CCCCCC" FontSize="12"
                                  VerticalAlignment="Center"/>
                       <TextBlock Text="{Binding FabricateArrayCountLabel}"
-                                 Foreground="#D4D4D4" FontSize="12" FontWeight="Bold"
+                                 Foreground="{Binding FabricateArrayCountBrush}" FontSize="12" FontWeight="Bold"
                                  VerticalAlignment="Center" MinWidth="40"/>
                     </StackPanel>
                     <Slider Value="{Binding FabricateArrayCountExponent}"
-                            Minimum="0" Maximum="9"
+                            Minimum="0" Maximum="12"
                             TickFrequency="1" IsSnapToTickEnabled="True"
                             ToolTip.Tip="{StaticResource str.Tip.Fabricate}"/>
                   </StackPanel>

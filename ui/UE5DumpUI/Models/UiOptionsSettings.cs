@@ -74,7 +74,7 @@ public sealed class LiveWalkerUiOptions
     public string? FlattenColorOdd { get; set; }
     public bool DedupSharedObjects { get; set; } = true;
     public bool ExcludeSystemComponents { get; set; } = true;
-    public int GWorldLocateDepth { get; set; } = 5;
+    public int GWorldLocateDepth { get; set; } = 7;
     public bool GWorldLocateDeep { get; set; }
     public int AutoRefreshIntervalSec { get; set; } = 10;   // Constants.DefaultAutoRefreshIntervalSec
 }

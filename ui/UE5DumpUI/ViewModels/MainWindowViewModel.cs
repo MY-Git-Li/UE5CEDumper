@@ -144,8 +144,19 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     /// (2..512). When &gt; 0, Copy CE Field on a TArray pads it to this many element rows.</summary>
     public int FabricateArrayCount => FabricateArrayCountExponent <= 0 ? 0 : (1 << FabricateArrayCountExponent);
 
-    /// <summary>Toolbar readout for the fabricate slider — "Off" at 0, else the count.</summary>
-    public string FabricateArrayCountLabel => FabricateArrayCount == 0 ? "Off" : FabricateArrayCount.ToString();
+    /// <summary>Toolbar readout for the fabricate slider — "Off" at 0, the count otherwise,
+    /// plus a warning past 256 (large exports slow Cheat Engine and can hit the entry cap).</summary>
+    public string FabricateArrayCountLabel => FabricateArrayCount switch
+    {
+        0 => "Off",
+        > 256 => $"{FabricateArrayCount} ⚠ large — CE may lag / truncate",
+        _ => FabricateArrayCount.ToString(),
+    };
+
+    /// <summary>Amber readout past 256 (use-at-your-own-risk band), default grey otherwise.</summary>
+    public Avalonia.Media.IBrush FabricateArrayCountBrush => FabricateArrayCount > 256
+        ? Avalonia.Media.SolidColorBrush.Parse("#F4A747")
+        : Avalonia.Media.SolidColorBrush.Parse("#D4D4D4");
 
     /// <summary>Show warning when array limit &gt;= 256 (high memory usage).</summary>
     public bool ShowArrayLimitWarning => ArrayLimitExponent >= 8;
@@ -301,6 +312,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         OnPropertyChanged(nameof(FabricateArrayCount));
         OnPropertyChanged(nameof(FabricateArrayCountLabel));
+        OnPropertyChanged(nameof(FabricateArrayCountBrush));
         // Copy CE Field is Live Walker only, so this fans out to just that VM.
         LiveWalker.FabricateArrayCount = FabricateArrayCount;
     }

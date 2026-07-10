@@ -240,7 +240,7 @@ public partial class LiveWalkerViewModel : ViewModelBase, IDisposable
     // === Locate in GWorld (forward BFS path search) ===
     // User-set search depth (how many pointer hops down from GWorld to look),
     // and live GWorld availability (drives gray-out of the feature).
-    [ObservableProperty] private int _gWorldLocateDepth = 5;
+    [ObservableProperty] private int _gWorldLocateDepth = 7;
     [ObservableProperty] private bool _isGWorldAvailable;
 
     /// <summary>Opt-in deep "Locate in GWorld" (default OFF). When on, the forward
