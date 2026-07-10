@@ -54,4 +54,11 @@
   <ItemGroup>
     <ProjectReference Include="..\UE5DumpUI\UE5DumpUI.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- Sanitized real-world "Dump All" slice used by DumpExplorerTests
+         (Reader_ParsesRealWorldDumpFixture). Update (not Include) — the SDK
+         already globs it into None; this only flags it for copy-to-output. -->
+    <None Update="TestData\sample-dump.jsonl" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

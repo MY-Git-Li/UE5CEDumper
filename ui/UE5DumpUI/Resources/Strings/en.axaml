@@ -32,6 +32,7 @@
     <sys:String x:Key="str.Tab.Teleport">Teleport</sys:String>
     <sys:String x:Key="str.Tab.GameClassFilter">Classes</sys:String>
     <sys:String x:Key="str.Tab.RelatedObjects">Related</sys:String>
+    <sys:String x:Key="str.Tab.DumpExplorer">Dump Explorer</sys:String>
     <!-- Experimental tabs (hidden unless opted in via System-tab credit checkbox) -->
     <sys:String x:Key="str.Tab.DetectStats">Detect Stats</sys:String>
     <sys:String x:Key="str.Tab.Snapshot">Snapshot</sys:String>
@@ -60,6 +61,32 @@
     <sys:String x:Key="str.Tip.Detect.GWorld">Locate a live instance of this class in the GWorld object graph (opens Live Walker, where you can Copy CE Field).</sys:String>
     <sys:String x:Key="str.Tip.Detect.Finder">Find all live instances of this class in the Instance Finder.</sys:String>
     <sys:String x:Key="str.Tip.Detect.Copy">Copy the property name to the clipboard.</sys:String>
+
+    <!-- Dump Explorer panel — offline browser over a "Dump All" .jsonl file -->
+    <sys:String x:Key="str.Dump.Load">📂 Load .jsonl</sys:String>
+    <sys:String x:Key="str.Dump.LoadLast">⤓ Last export</sys:String>
+    <sys:String x:Key="str.Dump.Recheck">🔄 Re-check live</sys:String>
+    <sys:String x:Key="str.Dump.Cancel">Cancel</sys:String>
+    <sys:String x:Key="str.Dump.SearchHint">Keyword — searches class / property / function names at once (space = AND)</sys:String>
+    <sys:String x:Key="str.Dump.Cat.All">All</sys:String>
+    <sys:String x:Key="str.Dump.Cat.Class">Classes</sys:String>
+    <sys:String x:Key="str.Dump.Cat.Property">Properties</sys:String>
+    <sys:String x:Key="str.Dump.Cat.Function">Functions</sys:String>
+    <sys:String x:Key="str.Dump.ColKind">Kind</sys:String>
+    <sys:String x:Key="str.Dump.ColName">Name</sys:String>
+    <sys:String x:Key="str.Dump.ColOwner">Owner class</sys:String>
+    <sys:String x:Key="str.Dump.ColType">Type / signature</sys:String>
+    <sys:String x:Key="str.Dump.ColOffset">Offset</sys:String>
+    <sys:String x:Key="str.Dump.ColPath">Class path</sys:String>
+    <sys:String x:Key="str.Dump.Jump">🡒 Jump</sys:String>
+    <sys:String x:Key="str.Dump.CopyPath">copy path</sys:String>
+    <!-- Dump Explorer tooltips -->
+    <sys:String x:Key="str.Tip.Dump.Load">Open a “Dump All” .jsonl file (Export ▸ Dump All) and browse every class, property and function in one searchable list — no game connection required.</sys:String>
+    <sys:String x:Key="str.Tip.Dump.LoadLast">Load the most recent Export ▸ Dump All from this session (no file dialog). Disabled until you export one.</sys:String>
+    <sys:String x:Key="str.Tip.Dump.Recheck">Scan the connected game's live classes and re-split results into “in current game” (matched by class name, restart-safe) vs. not. Requires a connected, scanned game.</sys:String>
+    <sys:String x:Key="str.Tip.Dump.Category">Limit results to a single kind (classes / properties / functions), or show all.</sys:String>
+    <sys:String x:Key="str.Tip.Dump.Jump">Open the owning class's live object in the Live Walker.</sys:String>
+    <sys:String x:Key="str.Tip.Dump.CopyPath">Copy the class object path to the clipboard.</sys:String>
 
     <!-- Related Objects panel -->
     <sys:String x:Key="str.Related.AddressHint">UObject / actor address (hex) — or hand off from another tab</sys:String>

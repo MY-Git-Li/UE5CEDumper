@@ -87,6 +87,32 @@ public sealed class WindowsPlatformService : IPlatformService, IDisposable
         return null;
     }
 
+    public async Task<string?> ShowOpenFileDialogAsync(string filterName, string filterExtension)
+    {
+        if (Avalonia.Application.Current?.ApplicationLifetime is
+            IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            var topLevel = desktop.MainWindow;
+            if (topLevel?.StorageProvider is { } sp)
+            {
+                var files = await sp.OpenFilePickerAsync(new FilePickerOpenOptions
+                {
+                    Title = "Open File",
+                    AllowMultiple = false,
+                    FileTypeFilter = new[]
+                    {
+                        new FilePickerFileType(filterName)
+                        {
+                            Patterns = new[] { $"*{filterExtension}" }
+                        }
+                    }
+                });
+                return files.Count > 0 ? files[0].Path.LocalPath : null;
+            }
+        }
+        return null;
+    }
+
     public string GetMachineName()
     {
         return Environment.MachineName;
