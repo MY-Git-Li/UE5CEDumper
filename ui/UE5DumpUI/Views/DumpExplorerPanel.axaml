@@ -45,6 +45,11 @@
       </ComboBox>
     </StackPanel>
 
+    <!-- Persistent explainer: what these rows ARE (class metadata, not instances)
+         and why there's no Locate here (a class isn't in the GWorld/engine graph). -->
+    <TextBlock DockPanel.Dock="Top" Text="{StaticResource str.Dump.MetaNote}"
+               Foreground="#777" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"/>
+
     <!-- Status + indeterminate progress -->
     <TextBlock DockPanel.Dock="Top" Text="{Binding StatusText}"
                Foreground="#888" Margin="0,0,0,4" TextWrapping="Wrap"/>

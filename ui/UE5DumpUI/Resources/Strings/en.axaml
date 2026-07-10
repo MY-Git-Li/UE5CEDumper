@@ -68,6 +68,7 @@
     <sys:String x:Key="str.Dump.Recheck">🔄 Re-check live</sys:String>
     <sys:String x:Key="str.Dump.Cancel">Cancel</sys:String>
     <sys:String x:Key="str.Dump.SearchHint">Keyword — searches class / property / function names at once (space = AND)</sys:String>
+    <sys:String x:Key="str.Dump.MetaNote">ⓘ Rows are class definitions (metadata), not live instances — a class isn't part of the GWorld/GameEngine object graph, so there's no Locate here. 🡒 Jump opens the class; 🔍 Instances finds a live instance you can then Locate via Related.</sys:String>
     <sys:String x:Key="str.Dump.Cat.All">All</sys:String>
     <sys:String x:Key="str.Dump.Cat.Class">Classes</sys:String>
     <sys:String x:Key="str.Dump.Cat.Property">Properties</sys:String>
