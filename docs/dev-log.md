@@ -37,7 +37,11 @@ Live Walker, and **⚠ Not in current game** (read-only metadata reference). Liv
 `className→currentAddr` index (class-like metas only). Name (not full path) because `get_object_list` only
 carries the short FName and `find_object` is an O(n) scan; the trade-off is same-named classes across packages
 collide (last-wins). Disconnect invalidates the match (stale addresses cleared). Purely client-side; parsing
-needs no game, matching needs a connected+scanned one. New files: `Models/DumpBrowseModels.cs` (DTOs + source-gen JSON context + flat
+needs no game, matching needs a connected+scanned one. A **⤓ Last export** button one-click-loads the most recent
+in-session *Export ▸ Dump All* (no dialog; NOT auto-loaded — repeated exports / a busy tab mustn't clobber the
+view). Rows also offer **🔍 Instances** (→ Instance Finder for the owning class) as the class→instance bridge to
+the downstream *Related ▸ Locate-in-GWorld/GameEngine* flow; Locate is deliberately NOT put on rows here because
+it's instance-oriented and a class object almost never sits in the GWorld/engine forward graph. New files: `Models/DumpBrowseModels.cs` (DTOs + source-gen JSON context + flat
 `DumpEntry`), `Services/DumpJsonlReader.cs`, `ViewModels/DumpExplorerViewModel.cs`, `Views/DumpExplorerPanel.axaml`.
 Added `IPlatformService.ShowOpenFileDialogAsync` (default no-op + Windows `OpenFilePickerAsync`). Tab inserted
 after **Related** (`MainTabIndex.DumpExplorer=11`, tail renumbered 12–17). 6 new unit tests

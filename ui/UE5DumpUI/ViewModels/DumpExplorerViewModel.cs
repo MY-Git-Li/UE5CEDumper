@@ -66,6 +66,12 @@ public partial class DumpExplorerViewModel : ViewModelBase
     /// Payload = the CURRENT live address (only raised for matched rows).</summary>
     public event Action<string>? NavigateToLiveWalker;
 
+    /// <summary>Find live instances of a row's owning class (class → Instances tab).
+    /// The correct bridge from a matched class to a locatable instance — Locate in
+    /// GWorld/GameEngine is instance-oriented, so it stays downstream (Related),
+    /// not on a class row here. Payload = class name.</summary>
+    public event Action<string>? NavigateToInstanceFinder;
+
     public DumpExplorerViewModel(IDumpService dump, ILoggingService log, IPlatformService platform)
     {
         _dump = dump;
@@ -248,6 +254,13 @@ public partial class DumpExplorerViewModel : ViewModelBase
             return;
         }
         NavigateToLiveWalker?.Invoke(row.LiveAddr);
+    }
+
+    [RelayCommand]
+    private void FindInstances(DumpEntry? row)
+    {
+        if (row is null || string.IsNullOrEmpty(row.OwningClassName)) return;
+        NavigateToInstanceFinder?.Invoke(row.OwningClassName);
     }
 
     [RelayCommand]

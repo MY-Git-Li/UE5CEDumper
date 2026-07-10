@@ -282,6 +282,26 @@ public class DumpExplorerTests
     }
 
     [Fact]
+    public async Task Vm_FindInstances_RaisesWithOwningClass()
+    {
+        var path = await WriteTempAsync(SampleJsonl);
+        try
+        {
+            var vm = CreateVm(LiveGameWithPlayer(), new MockPlatformService(Path.GetTempPath()));
+            vm.SetConnected(true);
+            string? cls = null;
+            vm.NavigateToInstanceFinder += c => cls = c;
+            await vm.LoadFromPathAsync(path);
+
+            // A PROPERTY row bridges to instances of its OWNING class, not the prop name.
+            var propRow = vm.Matched.First(e => e.Kind == DumpEntryKind.Property);
+            vm.FindInstancesCommand.Execute(propRow);
+            Assert.Equal("BP_Player_C", cls);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public async Task Vm_OpenUnmatched_DoesNotJump()
     {
         var path = await WriteTempAsync(SampleJsonl);

@@ -79,6 +79,7 @@
     <sys:String x:Key="str.Dump.ColOffset">Offset</sys:String>
     <sys:String x:Key="str.Dump.ColPath">Class path</sys:String>
     <sys:String x:Key="str.Dump.Jump">🡒 Jump</sys:String>
+    <sys:String x:Key="str.Dump.FindInstances">🔍 Instances</sys:String>
     <sys:String x:Key="str.Dump.CopyPath">copy path</sys:String>
     <!-- Dump Explorer tooltips -->
     <sys:String x:Key="str.Tip.Dump.Load">Open a “Dump All” .jsonl file (Export ▸ Dump All) and browse every class, property and function in one searchable list — no game connection required.</sys:String>
@@ -86,6 +87,7 @@
     <sys:String x:Key="str.Tip.Dump.Recheck">Scan the connected game's live classes and re-split results into “in current game” (matched by class name, restart-safe) vs. not. Requires a connected, scanned game.</sys:String>
     <sys:String x:Key="str.Tip.Dump.Category">Limit results to a single kind (classes / properties / functions), or show all.</sys:String>
     <sys:String x:Key="str.Tip.Dump.Jump">Open the owning class's live object in the Live Walker.</sys:String>
+    <sys:String x:Key="str.Tip.Dump.FindInstances">Find live instances of the owning class in the Instance Finder — the bridge to Related ▸ Locate in GWorld/GameEngine (which work on instances, not class definitions).</sys:String>
     <sys:String x:Key="str.Tip.Dump.CopyPath">Copy the class object path to the clipboard.</sys:String>
 
     <!-- Related Objects panel -->

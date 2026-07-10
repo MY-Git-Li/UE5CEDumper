@@ -798,6 +798,21 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 _log.Error($"DumpExplorer NavigateToLiveWalker handler error: {addr}", ex);
             }
         };
+        // Dump Explorer: the class -> instances bridge (find live instances of a
+        // row's owning class in the Instance Finder). From there the existing
+        // Related -> Locate-in-GWorld/GameEngine flow handles instances.
+        DumpExplorer.NavigateToInstanceFinder += async (className) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.InstanceFinder;
+                await InstanceFinder.SearchForClassAsync(className);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"DumpExplorer NavigateToInstanceFinder handler error: {className}", ex);
+            }
+        };
         RelatedObjects.NavigateToInstanceFinder += async (className) =>
         {
             try
