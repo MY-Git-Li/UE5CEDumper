@@ -119,6 +119,21 @@
           <MenuItem Header="{StaticResource str.ObjectTree.FindInstancesByTypeAndName}"
                     Command="{Binding FindInstancesByTypeAndNameCommand}"
                     CommandParameter="{Binding SelectedNode}"/>
+          <Separator/>
+          <!-- Per-instance drill-downs: open THIS object (not just its class) in the
+               instance-oriented panels. The handoffs re-resolve the live address. -->
+          <MenuItem Header="{StaticResource str.ObjectTree.OpenInLiveWalker}"
+                    Command="{Binding OpenInLiveWalkerCommand}"
+                    CommandParameter="{Binding SelectedNode}"/>
+          <MenuItem Header="{StaticResource str.ObjectTree.ShowRelated}"
+                    Command="{Binding ShowRelatedObjectsCommand}"
+                    CommandParameter="{Binding SelectedNode}"/>
+          <MenuItem Header="{StaticResource str.ObjectTree.LocateInGWorld}"
+                    Command="{Binding LocateSelectedInGWorldCommand}"
+                    CommandParameter="{Binding SelectedNode}"/>
+          <MenuItem Header="{StaticResource str.ObjectTree.LocateInGameEngine}"
+                    Command="{Binding LocateSelectedInGameEngineCommand}"
+                    CommandParameter="{Binding SelectedNode}"/>
         </ContextMenu>
       </ListBox.ContextMenu>
       <ListBox.ItemTemplate>

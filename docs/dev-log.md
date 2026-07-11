@@ -18,6 +18,31 @@ builds ≤696 in
 
 -----
 
+## 2026-07-11 — Object Tree per-instance drill-downs: Open in Live Walker / Show Related / Locate in GWorld+GameEngine (build 2098; dev)
+
+**SHIPPED (UI-only). Phase 3 (final) of "global instance explorer".** A global instance keyword search is only useful
+if you can act on a specific hit. The Object Tree row context menu previously offered only class-oriented actions (Copy
+Type/Name/Address, Find Instances by Type / Type+Name) — nothing to drill THIS exact object. Added four per-instance
+handoffs mirroring the InstanceFinder row actions:
+
+- **Open in Live Walker** (`NavigateToLiveWalker` → `LiveWalker.NavigateToAddressCommand`) — walk this object's live fields.
+- **Show Related Objects** (`NavigateToRelatedObjects` → `RelatedObjects.LoadForAddressAsync`) — its class/outer/
+  Controller↔Pawn/components/ASC/AttributeSet graph.
+- **Locate in GWorld** / **Locate in GameEngine** (`LocateInGWorld`/`LocateInGameEngine` →
+  `LiveWalker.LocateInGWorldAsync`/`LocateInGameEngineAsync`, `stopAtParent: false` so it lands ON the picked object) —
+  shortest pointer chain from the world / engine root. Meaningful for instances; a class row is usually not reachable
+  (Live Walker reports that) — kept ungated for simplicity since the "Instances only" toggle already narrows to instances.
+
+Wired in `MainWindowViewModel` with the exact try/catch + tab-switch shape as the InstanceFinder handoffs (reusing the
+shared `OpenRelatedAsync`). Each command no-ops on a null node / empty address so a bad row never navigates to a dead
+target. UI-only — no DLL/pipe change; the handoffs re-resolve the live address downstream.
+
+**Tests:** `ObjectTreeViewModelNavigationTests` (6 — each command raises its event with the row address; null-node and
+empty-address no-op). C# suite 2369 green; UI AOT publish + compiled bindings pass. Completes the three-phase global
+instance explorer (Phase 1 instances-only toggle, Phase 2 server-side Search, Phase 3 drill-downs).
+
+-----
+
 ## 2026-07-11 — Object Tree top Search upgraded: server-side space=AND over name+class + instances_only + honest truncation (build 2096; dev)
 
 **SHIPPED (DLL + pipe + UI). Phase 2 of "global instance explorer".** The Object Tree top Search box was a silent
