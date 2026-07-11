@@ -395,6 +395,99 @@ Full suite 2306 green.
 
 -----
 
+## 2026-07-10 — CE export: configurable String Len + Fabricate empty/extended TArray slots on Copy CE Field (builds 2028-2038; dev)
+
+**SHIPPED (UI-only; 2299 tests green).** Two exporter features (entry added retroactively 2026-07-11; details in
+memory `project-ce-export-strlen-fill-empty`).
+
+- **String Len (build 2028)** — `EmitStringLeaf` hardcoded `<Length>256` for every CE String leaf (4 call sites).
+  Now a toolbar **exponent slider** (2^4..2^12 = 16..4096, default 256) mirroring the `DropDownLimit` recipe:
+  `MainUiOptions.CeStringLengthExponent` → fan-out to LiveWalker/InstanceFinder → `ceStringLength` param on all 3
+  `Generate*` entry points → `[ThreadStatic]` → `EmitStringLeaf`. CSX untouched (separate `Bytesize=18`).
+- **Fabricate (builds 2032-2038)** — on **Copy CE Field** (Live Walker only), a "Fabricate" exponent slider
+  (0=Off default, else 2^N=2..4096; amber "⚠ large" warning past 256) pads a selected **TArray** to
+  `max(N, Num)` element rows so the CE table already has slots for items the current save hasn't populated.
+  Object arrays replicate the first resolved element's child layout via `EmitDrilledPointer` (synthetic per-slot
+  key = the slot's ABSOLUTE address — **globally unique**, fix `ca47a2c`: an offset-based key collided across
+  two same-class arrays at the same property offset and wrongly collapsed to "(shared)"); scalar arrays append
+  leaves; struct arrays replicate a resolved element's struct layout. **Next-layer-only gate** (fix `77764e0`,
+  in-game bug): the first ship-test fabricated every NESTED array of every element recursively (234-item Cargo →
+  ~500k-line file truncated at `MaxEmitEntries`) — now `FabricateActive => _fabricateArrayCount>0 &&
+  _emitPointerDepth==0` fabricates ONLY a top-level array of the walked object. Fabricate vs Array Limit:
+  `rows = max(Fabricate, walked)` — real data is never hidden; slots past `Num` read past-end (harmless, CE
+  shows `??` and re-derefs per poll). **Map/Set not fabricated** (sparse gaps never on the wire). Deferred:
+  bare `TArray<FString>` string-container emit path (Phase 3).
+
+-----
+
+## 2026-07-09 — Auto-Detect Player Stats: prop-flags wire + structural scorer + experimental "Detect Stats" panel (builds 2014-2026; dev; IN-GAME VERIFIED TQ2/ES2/SEED)
+
+**SHIPPED (DLL + UI; entry added retroactively 2026-07-11 — full history in memory `project-autodetect-stats`).**
+Auto-suggest likely HP/MP/Gold/Mana/XP/Level fields from dumped metadata, fusing name + structural signals.
+P0 (labeled corpus) + P3 (learned weights) were **de-scoped** by user call — rules only, no ML.
+
+- **P1 (b2014)** — `prop_flags` (uint64 CPF_* hex) + `array_dim` + `inner_struct_type` on wire→UI→JSONL
+  (`Fern.cpp` EncodeClassInfoToJson, `FieldInfoModel`, `DumpAllService`). Omitted at defaults.
+- **P2a (b2016)** — structural rules in `PropertyScoringTable`: GAS `StructType=="GameplayAttributeData"` → +4
+  (un-categorised→Stats); value-category keyword on container/pointer/delegate → −1; **Current/Max pairing**
+  (`ComputeStatPairBonuses`, `NormaliseStatStem` strips max/current/base/… qualifiers; b2019 added
+  `maximum`/`minimum` full-word tokens for TQ2's `MaximumHealth`) → +2 per family member.
+- **P2b (b2017)** — propflags gating: `CPF_SaveGame`(0x01000000)→+2, `CPF_BlueprintVisible`(0x04)→+1,
+  `CPF_EditorOnly`→−4. Deliberately NO Transient/Net penalty (current HP is often transient+replicated).
+- **P4 (b2022-2026)** — experimental-gated **"Detect Stats"** tab: one button runs the scorer → top-K grouped by
+  class → per-class one `find_instances` + one `walk_instance` → confirm on live-instance-exists +
+  value-plausible/GAS + Max-sibling → confidence rank. Opt-in **snapshot signal** boosts names that decreased
+  across 2 usable snapshots (+ Δ column "320.23 → 300.33"). Prominent "reference only, low accuracy" disclaimer.
+  Row handoffs 🌍/inst/copy reuse the InterestingProperties pattern.
+- **In-game verified**: TQ2 (80 GAS `GameplayAttributeData` fields / 12 AttributeSet classes — GAS rule fires;
+  live run 80 candidates / 41 confirmed incl. Health pair + MaxWalkSpeed), ES2 + SEED (0 GAS — rule correctly
+  silent, keyword+type+pair+flags path). Side fixes: SnapshotStore sync-SQLite freeze → `Task.Run`;
+  Locate-in-GWorld `not_reachable` banner wrongly said "raising depth won't help" (BFS is depth-bounded —
+  log-proven depth 5 fails / depth 8 finds 7 hops) → message + a once-per-session pre-search confirm when
+  `GWorldLocateDepth < 7` (b2026).
+
+-----
+
+## 2026-07-08 — See-through occluders (Schlacht) + configurable pierce depth (builds 2006-2011; dev; VERIFIED Tower of Mask + DQ7R)
+
+**SHIPPED (DLL + UI; experimental-gated; entry added retroactively 2026-07-11 — details in memory
+`project-seethrough-occluders-schlacht`).** New Frieren module **`Schlacht`** (「全知者」): a ~10 Hz worker
+traces **camera→VIEW-forward** (`UKismetSystemLibrary::LineTraceSingle` on the game thread via Stark), hides the
+nearest **N** non-Pawn blocking actors via `SetActorHiddenInGame(true)` so world geometry stops covering the
+view; hidden actors are restored as the view moves and un-hidden on disable/disconnect/shutdown.
+
+- **Camera→VIEW-forward, not camera→pawn** (the live-verify pivot): in first-person the camera sits AT the
+  pawn's eyes → degenerate zero-length ray. Forward = `(cosP·cosY, cosP·sinY, sinP)` × 100000uu works first-
+  AND third-person (Tower of Mask ✓ first-person, DQ7R ✓).
+- **MOBs stay visible**: `Aura::ClassDerivesFromAny(hit, {"Pawn","Character"})` — enemies/NPCs/player are kept
+  + pierced-through and don't consume N.
+- **Pierce depth N (build 2009)**: hide the nearest N occluders (UI NumericUpDown 1-10, live-push while active)
+  — iterative single-trace advancing past each impact (+2uu step), NO `LineTraceMulti` (which would leak the
+  engine-allocated `TArray<FHitResult>` every tick). Example: N=1 hides a painting, N=2 hides painting+wall.
+- **The fragile core**: `ExtractHitActor` pulls the actor from FHitResult — UE4 `Actor` TWeakObjectPtr →
+  leading int32 ObjectIndex → `Aura::GetByIndex`; UE5 `HitObjectHandle` best-effort. Per-game fragile;
+  one-shot failure warning (diagnostics quieted to lifecycle-only in build 2011).
+- **CE toggle**: Mimic `CMD_SEETHROUGH=14` mailbox + `SeeThroughScriptGenerator` (editable `pierceCount`);
+  "Add to CE" is **AOBMaker-only** (grayed out without the plugin — no clipboard fallback, by request).
+- **Known limitation**: NO-OP on collision/render-split games — FF7R's trace hits invisible
+  `CollisionAssetActor` proxies, so hiding them changes nothing (harmless). Light/shadow passthrough was
+  evaluated separately (2026-07-09, todo.md): dynamic lighting already follows the hide; baked/static shadows
+  are Lightmass-textured into the receiver and **can't** be removed at runtime (WON'T-DO).
+
+-----
+
+## 2026-07-08 — Teleport experimental gating: Keep-Foreground / Fly / Standalone-trainer cards opt-in (build 1995; dev)
+
+**SHIPPED (UI-only; entry added retroactively 2026-07-11).** The Teleport tab's riskier cards — **Keep
+Foreground**, **Fly / Noclip**, **Standalone CE Lua trainer** — plus the "Experimental Hotkeys" card are now
+hidden unless the experimental opt-in is enabled (`ExperimentalEnabled` / `ShowExperimentalHotkeys`,
+Avalonia `IsVisible` = collapse). Disabling the opt-in force-releases any active experimental state first
+(foreground lock off, fly off) so a hidden card can never keep a hook alive. Later experimental features
+(See-through 2006, Detect Stats tab 2022) ship behind the same gate. Policy per the wiki: experimental features
+are documented + marked experimental, but the enable path is never shown.
+
+-----
+
 ## 2026-07-08 — Inject picker "already loaded" detection + Keep-Foreground cursor-lock fix + emergency hotkey + GodMode/KeepFg "Add to CE" delivery (build 1986; dev)
 
 **SHIPPED (DLL + UI; Keep-Foreground cursor-lock fix LIVE-VERIFIED P3R).** Four related fixes/features.
@@ -482,6 +575,19 @@ with the other export cards, below CE Export); the new Global Pointers card sits
 
 2232 tests green (+11 `PointerQueryScriptGeneratorTests`, incl. symbol register/unregister + the paste-able-XML
 wrapper). Live in-game verify pending.
+
+-----
+
+## 2026-07-07 — Copy CE XML / Copy CE Field / Export CSX made cancellable (builds 1974-1977; dev; PRs #418/#419)
+
+**SHIPPED (UI-only; entry added retroactively 2026-07-11).** The three heavy CE exporters — **Copy CE XML**,
+**Copy CE Field** (both `fd2e796`, build 1974) and **Export CSX** (`13121da`, build 1977) — now abort cleanly
+mid-flight: a `CancellationToken` is threaded through `ResolveDrilldownAsync` and the emit loops, so a deep
+drill-down / huge-array export can be abandoned without wedging the pipe or leaving the DLL walking. GOTCHA
+locked in memory `feedback-pipeclient-bare-oce-cancel-guard`: the user-cancel catch MUST be
+`catch (OperationCanceledException) when (cts.IsCancellationRequested)` — `PipeClient` throws a **bare OCE on
+disconnect** (token=None), and an unguarded catch would swallow a disconnect as if the user cancelled. Also
+fixed a flaky debounce test in the same push.
 
 -----
 

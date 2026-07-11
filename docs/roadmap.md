@@ -7,7 +7,59 @@ trail. Build number tags reflect when each row reached its current
 state.
 
 > **Last refreshed**: 2026-05-29 (build 797) for the rows below. **dev = main @
-> build 1832 (PR #393, 2026-06-27).** Newer work lives in [dev-log.md](dev-log.md):
+> build 2142 (PR #431, 2026-07-11).** Newer work lives in [dev-log.md](dev-log.md):
+> - builds **2134–2142 (2026-07-11)** — **Proxy Deploy "Last-Known-Good" suggestion**: a
+>   per-game **Suggested proxy** column. Priority: **confirmed-working** (Phase 2 — the DLL
+>   self-reports `load_mode` from `GetModuleFileNameW(g_hDllModule)` at init, recorded after a
+>   20 s stability gate) > last deployed pick > injection known-good > version default. Keyed
+>   by game .exe name (NOT peHash — survives reinstall/patch); import-table parsing is
+>   *viability* context only (never auto-escalates to dxgi). All in `ui-options.json`.
+> - builds **2109–2130 (2026-07-11)** — **Live Funcs tab: Live ProcessEvent Call Profiler**
+>   (new `Linie` module) — behaviour-based UFunction discovery: Start → do ONE in-game action
+>   → Stop → ranked fired-function list. Baseline diff (NEW/increased rows first), Hide UI
+>   widgets / Hide events+delegates filters, first-fired **Order** column (causal entry-point
+>   signal). Hot path free when off (one relaxed atomic gate on Stark's PE hook). Plus the
+>   opt-in **Gameplay Actions** keyword pack + **BP/Exec only** filter in Interesting
+>   Functions (build 2103).
+> - builds **2088–2098 (2026-07-10/11)** — **keyword-search unification** (every filter box:
+>   space=AND via `ObjectTreeFilter.MatchesAllTerms` + per-box `KeywordSearchMemory` LRU
+>   autocomplete; now a CLAUDE.md MUST rule) + the **IsEnginePath format fix** (C# matched
+>   `/Script/Engine.` but the DLL emits `//Script/Engine/Actor` → GameOnly dump was a no-op)
+>   + **Object Tree global instance explorer** (Instances-only toggle hiding the full
+>   reflection layer via `ReflectionMetaClassifier`; server-side space=AND top Search over
+>   name+class with honest truncation; per-instance row drill-downs to Live Walker / Related
+>   / Locate).
+> - builds **2028–2044 (2026-07-10)** — **Dump Explorer tab** (offline "Dump All" `.jsonl`
+>   browser: ONE keyword search over classes+props+funcs, ✅ in-current-game via restart-safe
+>   class-name match + Jump-to-Live-Walker + 🔍 Instances bridge, ⤓ Last-export quick-load;
+>   client-only) + **CE export String Len slider** (16–4096 per string leaf) + **Fabricate**
+>   (pad a selected top-level TArray with template rows up to 4096 on Copy CE Field;
+>   next-layer-only gate; globally-unique slot keys).
+> - builds **2006–2026 (2026-07-08/09)** — **See-through occluders** (new `Schlacht` module:
+>   ~10 Hz camera→VIEW-forward LineTraceSingle, hide the nearest N non-Pawn occluders via
+>   SetActorHiddenInGame, Pawns/Characters stay visible; VERIFIED Tower of Mask + DQ7R; NO-OP
+>   on collision/render-split games like FF7R; CE `CMD_SEETHROUGH=14`) + **Auto-Detect Player
+>   Stats** (`prop_flags`/`array_dim` on wire; structural scorer: GAS GameplayAttributeData
+>   +4, SaveGame/BlueprintVisible flags, Current/Max pairing; experimental **Detect Stats**
+>   panel with live-instance confirm + snapshot Δ; VERIFIED TQ2/ES2/SEED) + experimental
+>   gating for Keep-Foreground/Fly/Trainer cards (build 1995).
+> - builds **1944–1992 (2026-07-06/08)** — **Keep-Foreground lock** (new `Grausam` module:
+>   MinHook GetForegroundWindow + WndProc subclass rewriting WM_ACTIVATEAPP/WM_ACTIVATE/
+>   WM_NCACTIVATE→active + ClipCursor/SetCursorPos release; defeats `t.IdleWhenNotForeground`
+>   background pause; LIVE-VERIFIED P3R; CE `CMD_FOREGROUND=12`) + **in-UI DLL injection**
+>   (CreateRemoteThread+LoadLibraryW into a running game, auto-elevate on Access-Denied, +
+>   `inject-ue.ps1` CLI; picker flags already-loaded dumpers) + **generic non-Steam drive
+>   scan** in Proxy Deploy + **Teleport Global Pointers → CE symbols** (`UE_GWorld` registered
+>   on the static slot, `UE_GameEngine` snapshot buffer; `CMD_QUERY_PTR=13`) + CE export
+>   XML/Field/CSX **cancellable** (builds 1974-1977).
+> - builds **1888–1913 (2026-07-03/04)** — **standalone no-DLL CE Lua trainer** export +
+>   **game-thread stall detection** (POV fast-fail + app-wide amber "paused" banner) +
+>   **invoke FString INPUT params** (DLL builds the FString; generators + PIPE FIRE; OUT-string
+>   params skipped) + return-value print under `UE5_DEBUG` + magic-number centralization.
+> - builds **1836–1856 (2026-06-28/30)** — **multi-pipe IPC evaluation** (Phase 0 scan
+>   thread-priority guard SHIPPED; Phase 1 REDO = discrete-style two-connection lane split,
+>   PR #396, in-game VERIFIED) + System-tab **Pipe Activity** log + **CE export flatten**
+>   (leaf records / record colors / collapse single-leaf pointers, PRs #401/#402).
 > - builds **1827–1832 (2026-06-27)** — **Snapshot captures gameplay classes' top-level
 >   scalar arrays** (e.g. a Pawn's `SupportActionGauge[]` `TArray<float>`) — previously
 >   skipped at capture so Diff/SPC/Pivot couldn't see them (Value Search always could);
@@ -582,7 +634,8 @@ Delete-cache button; a UE version override still wins over everything.
 
 GWorld success ratio: **100% of all tested games** — see the
 [test-games.md](test-games.md) GWorld Status Summary for the authoritative tally
-(**29 / 29** as of 2026-06-17, incl. Solarpunk stock-UE5.7 via the `+0x08` fix);
+(**31 / 31** as of 2026-07-06, incl. Stellar Blade UE4.26-fork and Persona 3
+Reload via GWLD_GH_1 direct);
 the list above itemises only a subset and is otherwise last-verified 2026-06-11.
 Satisfactory (modular DLL build): scan side OK — `Macht::AOBScanAllModules`
 falls through to `FactoryGameSteam-CoreUObject-Win64-Shipping.dll`
