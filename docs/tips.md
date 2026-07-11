@@ -37,6 +37,59 @@ navigation (`GameInstance → …`).
 
 -----
 
+## Finding character-control / shop functions (jump / dash / interact / open-shop)
+
+The **Interesting Functions** finder is tuned for *cheat-value* targets — stat/resource
+nouns (HP/MP/Gold) and movement/combat cheat verbs. Basic **operation** verbs like
+`Dash` / `Dodge` / `Roll` / `Interact` / `Open` / `Buy` / `Sell` / `Shop` / `Vendor` /
+`Trade` are **not** in the default keyword tables, so they score 0 and hide below the
+threshold. Two ways to surface them:
+
+### The opt-in "Gameplay Actions" pack (recommended)
+
+1. Open **Interesting Functions → Load**.
+2. Tick the green **Gameplay Actions** checkbox (next to *Show All*). This folds an extra
+   keyword pack (`Dash`/`Dodge`/`Interact`/`Use`/`Open`/`Buy`/`Sell`/`Shop`/`Vendor`/
+   `Merchant`/`Trade`/`Purchase`/…) into the score and **re-scores in place** — no reload.
+   The matching rows get a green **Gameplay** category chip.
+3. Narrow with the filter box (space = AND over func + class name): type `shop`, `buy`,
+   `dash`, `interact`. Filter to the **Gameplay** category in the dropdown to see only these.
+4. Tick **BP/Exec only** to hide native getter/setter/plumbing noise — gameplay/control/shop
+   entry points are almost always `BlueprintCallable` or `Exec` (both survive cooking). Combine
+   with *Show All* to browse callable action functions even when they score below threshold.
+
+It's opt-in (default off) because it's noisier than the cheat-value default — turn it back
+off to return to the tuned view.
+
+### Then: find the right instance and call it
+
+A control/shop function is a **stateful instance method** — it needs a live, non-CDO `this`:
+
+- Click **Live** on the row to open it in Live Walker (falls back to Class Struct if there's
+  no live instance). Or use the row's **inst** button → Instance Finder.
+- For the player: **Related Objects → 🎯 Detect target**, or Live Walker's *Start from GWorld*
+  → PlayerController → Pawn.
+- **Pipe Invoke** the function (Live Walker row) → fill params → **FIRE**. No-arg verbs
+  (`Jump`, `StopJumping`, `Dash`) fire directly.
+
+### Open-shop caveats (honest limits)
+
+"Open shop UI" is **game-specific** and often needs a param (a vendor object pointer, or a
+vendor/shop ID). Practical path:
+
+1. Find the vendor/shop object: **Instance Finder** → `Shop`/`Store`/`Vendor`/`Merchant`, or
+   spot the interaction actor in Live Walker's GWorld list while standing at the merchant.
+2. See its functions **with params**: open its class in Class Struct / Live Walker
+   (`walk_functions` shows each param's name/type/`obj_class`). Or use **Find Func** to list
+   functions that *take that class as a parameter* — often lands `OpenShopFor(AVendor*)`.
+3. In the invoke dialog, enter a vendor **ID** (`IntProperty`, decimal or `0x…`) or use
+   **[Pick…]** to select the vendor **object pointer** (pre-filtered to the param's class).
+
+Some games open the shop purely via a **UMG widget event** with no callable UFunction entry
+point — those can't be reproduced by invoking a single function.
+
+-----
+
 ## Forcing camera rotation in a fixed-view (2.5D / 45°) game
 
 UE4 and UE5 share the camera pipeline, so the same handful of entry points work

@@ -48,10 +48,26 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     /// against this and rebuilds <see cref="Results"/>.</summary>
     private List<ScoredFunctionRow> _allRows = new();
 
+    /// <summary>Raw entries from the last Load — kept so the
+    /// <see cref="GameplayActions"/> opt-in can re-score without a pipe
+    /// round-trip (the entry set is unchanged; only the scoring differs).</summary>
+    private IReadOnlyList<AllFunctionEntry> _entries = Array.Empty<AllFunctionEntry>();
+
     [ObservableProperty] private bool   _gameOnly = true;
     [ObservableProperty] private string _filterText = "";
     [ObservableProperty] private FunctionCategory? _categoryFilter; // null = All
     [ObservableProperty] private bool   _showAll;     // false = hide rows below threshold
+    /// <summary>Opt-in (default OFF): fold the Gameplay-Action keyword pack
+    /// (Dash/Interact/Open/Buy/Sell/Shop/Vendor/…) into scoring so
+    /// character-control + shop verbs the cheat-oriented buckets omit can
+    /// clear the threshold. Toggling re-scores the loaded set in place.</summary>
+    [ObservableProperty] private bool   _gameplayActions;
+    /// <summary>Opt-in filter (default OFF): show only functions that are
+    /// BlueprintCallable or Exec. Gameplay/control/shop entry points are
+    /// almost always one of these two (both flags survive cooking), so this
+    /// hides native getters/setters/plumbing noise. Pure display filter —
+    /// no re-score, no threshold change.</summary>
+    [ObservableProperty] private bool   _callableOnly;
     [ObservableProperty] private bool   _isLoading;
     [ObservableProperty] private string _statusText = "Click Load to scan all UFunctions";
     [ObservableProperty] private ObservableCollection<ScoredFunctionRow> _results = new();
@@ -73,6 +89,7 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
         FunctionCategory.Movement,
         FunctionCategory.Combat,
         FunctionCategory.Utility,
+        FunctionCategory.GameplayAction,
         FunctionCategory.Other,
     };
 
@@ -277,6 +294,11 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     }
     partial void OnCategoryFilterChanged(FunctionCategory? value) => ApplyFilter();
     partial void OnShowAllChanged(bool value)              => ApplyFilter();
+    partial void OnCallableOnlyChanged(bool value)        => ApplyFilter();
+    // Gameplay-Action opt-in changes per-row scores + categories, so a full
+    // re-score (not just a re-filter) is needed. Fire-and-forget: the scoring
+    // runs on a worker thread to keep the toggle responsive on large games.
+    partial void OnGameplayActionsChanged(bool value)     => _ = RescoreAsync();
     partial void OnIsAobMakerAvailableChanged(bool value)
         => OnPropertyChanged(nameof(AobMakerNote));
 
@@ -322,36 +344,14 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
 
             var result = await _dump.ListAllFunctionsAsync(gameOnly: GameOnly);
 
+            // Cache the raw entries so the Gameplay-Action opt-in can
+            // re-score without re-fetching (see RescoreAsync).
+            _entries = result.Functions;
+            bool includeActions = GameplayActions;
+
             // Score on the worker thread to keep the UI responsive when
             // the result set is in the tens-of-thousands range.
-            _allRows = await Task.Run(() =>
-            {
-                var rows = new List<ScoredFunctionRow>(result.Functions.Count);
-                foreach (var entry in result.Functions)
-                {
-                    var s = KeywordScoringTable.Score(entry);
-                    rows.Add(new ScoredFunctionRow
-                    {
-                        Entry       = entry,
-                        FinalScore  = s.FinalScore,
-                        Category    = s.Category,
-                        KeywordHits = s.KeywordHits,
-                        ClassBonus  = s.ClassBonus,
-                        FlagBonus   = s.FlagBonus,
-                    });
-                }
-                // Sort once after scoring; ApplyFilter preserves order
-                // without re-sorting since it walks the pre-sorted list.
-                rows.Sort((a, b) =>
-                {
-                    int cmp = b.FinalScore.CompareTo(a.FinalScore);
-                    if (cmp != 0) return cmp;
-                    cmp = string.Compare(a.ClassName, b.ClassName, StringComparison.Ordinal);
-                    if (cmp != 0) return cmp;
-                    return string.Compare(a.FuncName, b.FuncName, StringComparison.Ordinal);
-                });
-                return rows;
-            });
+            _allRows = await Task.Run(() => ScoreEntries(_entries, includeActions));
 
             // Build the class histogram over the FULL scored set, then filter.
             ClassFilter.Rebuild(_allRows.Select(r => r.ClassName));
@@ -385,6 +385,61 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Score every entry with the given Gameplay-Action opt-in and return
+    /// the rows sorted (score desc, then class, then func). Static + pure
+    /// so both <see cref="LoadAsync"/> and the re-score-on-toggle path
+    /// (<see cref="RescoreAsync"/>) share identical scoring + ordering.
+    /// Intended to run on a worker thread (tens of thousands of rows).
+    /// </summary>
+    private static List<ScoredFunctionRow> ScoreEntries(
+        IReadOnlyList<AllFunctionEntry> entries, bool includeGameplayActions)
+    {
+        var rows = new List<ScoredFunctionRow>(entries.Count);
+        foreach (var entry in entries)
+        {
+            var s = KeywordScoringTable.Score(entry, includeGameplayActions);
+            rows.Add(new ScoredFunctionRow
+            {
+                Entry       = entry,
+                FinalScore  = s.FinalScore,
+                Category    = s.Category,
+                KeywordHits = s.KeywordHits,
+                ClassBonus  = s.ClassBonus,
+                FlagBonus   = s.FlagBonus,
+            });
+        }
+        // Sort once after scoring; ApplyFilter preserves order without
+        // re-sorting since it walks the pre-sorted list.
+        rows.Sort((a, b) =>
+        {
+            int cmp = b.FinalScore.CompareTo(a.FinalScore);
+            if (cmp != 0) return cmp;
+            cmp = string.Compare(a.ClassName, b.ClassName, StringComparison.Ordinal);
+            if (cmp != 0) return cmp;
+            return string.Compare(a.FuncName, b.FuncName, StringComparison.Ordinal);
+        });
+        return rows;
+    }
+
+    /// <summary>
+    /// Re-score the already-loaded entries with the current
+    /// <see cref="GameplayActions"/> opt-in and rebuild the grid. Toggling
+    /// the pack changes per-row scores + categories, so a full re-score is
+    /// needed — but the entry set is unchanged, so the class-noise histogram
+    /// is left intact (no re-fetch, no Rebuild). No-op before the first Load
+    /// or while one is in flight (Load reads the current toggle itself).
+    /// Internal so the VM tests can await a deterministic re-score.
+    /// </summary>
+    internal async Task RescoreAsync()
+    {
+        if (IsLoading || _entries.Count == 0) return;
+        var entries = _entries;
+        bool includeActions = GameplayActions;
+        _allRows = await Task.Run(() => ScoreEntries(entries, includeActions));
+        ApplyFilter();
+    }
+
+    /// <summary>
     /// Rebuild <see cref="Results"/> from <see cref="_allRows"/> applying
     /// name + category + threshold filters. Order is preserved from the
     /// pre-sorted full list (Score desc, then Class, then Func) so the
@@ -405,10 +460,14 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
         var threshold  = ShowAll ? int.MinValue : KeywordScoringTable.InterestingThreshold;
 
         int hiddenByClass = 0;
+        var callableOnly = CallableOnly;
         foreach (var row in _allRows)
         {
             if (row.FinalScore < threshold) continue;
             if (cat.HasValue && row.Category != cat.Value) continue;
+            // BlueprintCallable/Exec filter — gameplay/control/shop entry points
+            // are almost always one of these; hides native getter/plumbing noise.
+            if (callableOnly && !(row.IsBlueprintCallable || row.IsExec)) continue;
             if (terms.Length > 0 &&
                 !ObjectTreeFilter.MatchesAllTerms(terms, row.FuncName, row.ClassName))
             {
@@ -428,6 +487,9 @@ public partial class InterestingFunctionsViewModel : ViewModelBase
         FilterText      = "";
         CategoryFilter  = null;
         ShowAll         = false;
+        CallableOnly    = false;
+        // GameplayActions is a scoring MODE (re-scores the set), not a view
+        // filter — left untouched so "Clear" doesn't silently re-score.
     }
 
     /// <summary>Per-row action: fire navigate event so MainWindow can

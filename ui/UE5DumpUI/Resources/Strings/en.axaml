@@ -753,6 +753,8 @@
     <sys:String x:Key="str.IF.GameOnly">Game Only</sys:String>
     <sys:String x:Key="str.IF.FilterHint">Filter by name (function or class)...</sys:String>
     <sys:String x:Key="str.IF.ShowAll">Show All (incl. low-score)</sys:String>
+    <sys:String x:Key="str.IF.GameplayActions">Gameplay Actions</sys:String>
+    <sys:String x:Key="str.IF.CallableOnly">BP/Exec only</sys:String>
     <sys:String x:Key="str.IF.ClearFilters">Clear</sys:String>
     <sys:String x:Key="str.IF.OpenInst">inst</sys:String>
     <sys:String x:Key="str.IF.Props">Props</sys:String>
@@ -768,6 +770,8 @@
     <sys:String x:Key="str.Tip.IF.OpenInst">Open this row's class in the Instance Finder tab — pre-fills the class name and runs the search to list its live instances.</sys:String>
     <sys:String x:Key="str.Tip.IF.Category">Filter by category. Categories are picked from the strongest-scoring keyword bucket per function (Stats &gt; Inventory &gt; Movement &gt; Combat &gt; Utility tied with same score).</sys:String>
     <sys:String x:Key="str.Tip.IF.ShowAll">When off, hide rows with score below the InterestingThreshold (currently 5). When on, show every UFunction regardless of score.</sys:String>
+    <sys:String x:Key="str.Tip.IF.GameplayActions">Opt-in (default off). Fold an extra keyword pack into scoring for character-control + world-interaction + shop verbs the default buckets skip — Dash / Dodge / Roll / Slide / Climb / Interact / Use / Open / Buy / Sell / Shop / Vendor / Merchant / Trade / Purchase. Lets a plain OpenShop() / Dash() / Interact() clear the threshold and show up (tip: combine with a name filter like "shop" or "buy"). Re-scores the loaded set in place — no reload needed. Noisier by design; turn off to return to the cheat-value default.</sys:String>
+    <sys:String x:Key="str.Tip.IF.CallableOnly">Filter (default off): show only functions flagged BlueprintCallable or Exec. Gameplay/control/shop entry points are almost always one of these two, and both flags survive cooking — so this hides native getters/setters/engine plumbing noise. Pairs well with "Gameplay Actions" + "Show All" to browse callable action functions. Pure display filter — doesn't change scores.</sys:String>
     <sys:String x:Key="str.Tip.IF.Props">List the properties this function reads/writes (static Blueprint-bytecode scan). Native functions have no bytecode and show nothing.</sys:String>
     <sys:String x:Key="str.Tip.IF.OpenLive">Try to open this function in Live Walker. If the class has no live (non-CDO) instance, falls back to the Class Struct tab. Auto-expands the Functions section and selects the target row.</sys:String>
     <sys:String x:Key="str.Tip.IF.LocateGWorld">Locate in GWorld: find a live instance of this function's class, then show the shortest pointer path from GWorld down to it in Live Walker (stops at the parent that points to it)</sys:String>

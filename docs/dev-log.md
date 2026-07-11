@@ -18,6 +18,47 @@ builds ≤696 in
 
 -----
 
+## 2026-07-11 — Interesting Functions: opt-in "Gameplay Actions" keyword pack (build 2103; dev)
+
+**SHIPPED (UI-only, opt-in default OFF).** The Interesting Functions scorer was tuned for cheat-value
+targets (Stats/Inventory nouns + Movement/Combat cheat verbs). Character-control + interaction + shop verbs
+the user actually wants to *call* — `Dash`/`Dodge`/`Roll`/`Slide`/`Interact`/`Use`/`Open`/`Buy`/`Sell`/
+`Shop`/`Vendor`/`Merchant`/`Trade`/`Purchase` — were **absent from every keyword bucket**, so a plain
+`OpenShop()` / `Dash()` / `Interact()` scored 0 and stayed below the threshold-5 cutoff (invisible unless
+"Show All").
+
+Added a new opt-in `FunctionCategory.GameplayAction` keyword pack (weight 5, same as Stats/Movement):
+
+- **`KeywordScoringTable.Score(entry, includeGameplayActions = false)`** — new default-`false` param. When
+  off, scoring is **byte-identical** to before (regression-guarded by a test), so the pack is purely additive.
+  Only **NEW** tokens live in the pack — verbs already in Movement (`Jump/Move/Walk/Sprint`) or Combat
+  (`Attack/Fire`) are deliberately NOT duplicated (the final score sums every bucket; a dup would double-count).
+- **Whole-token match** (`KeywordTokenizer`, per the CLAUDE.md rule) → single tokens: `OpenShop` →
+  `["open","shop"]` hits both `Open` and `Shop` (score 10). Noisier common words (`Use`/`Open`/`Store`) are
+  included anyway — opt-in trades precision for recall.
+- **Tie priority lowest**: a verb that also hits a built-in bucket keeps that label (e.g. `SellItem`: Sell↔Item
+  tie → stays Inventory) but still gains the extra points so it surfaces.
+- **UI**: a "Gameplay Actions" checkbox next to "Show All" (green `#5FBF7F`). Toggling **re-scores the loaded
+  set in place** (`RescoreAsync` on a worker thread — no pipe re-fetch, class-noise histogram untouched) via
+  the shared `ScoreEntries` helper. New `GameplayAction` chip in the category dropdown + green "Gameplay" label.
+- **"BP/Exec only" filter** (`CallableOnly`, default off, blue `#7FB6E8`) — a pure *display* filter (in
+  `ApplyFilter`, no re-score) that keeps only rows flagged `BlueprintCallable` or `Exec`. Gameplay/control/shop
+  entry points are almost always one of these two (both survive cooking), so it hides native getter/setter/
+  plumbing noise. Pairs with Gameplay Actions + Show All to browse callable action functions.
+  `ScoredFunctionRow` forwards `IsBlueprintCallable`/`IsExec`. Added to `ClearFilters` (it's a view filter);
+  `GameplayActions` deliberately is NOT (it's a scoring mode with a re-score cost).
+
+Recipe added to [tips.md](tips.md) ("Finding character-control / shop functions"). **No DLL/pipe change** — all
+client-side C# (the DLL already returns raw `function_flags`; scoring has always been UI-side).
+
+**Tests:** `KeywordScoringTableTests` (+6: off-path zero-contribution, default==off regression, on-path
+categorisation incl. the Sell↔Item tie, bare-OpenShop clears threshold, Jump no-double-count, DisplayName/Color
+for the new enum) + `InterestingFunctionsViewModelTests` (+4: pack toggle re-scores & surfaces OpenShop, defaults
+off, BP/Exec-only hides native rows / keeps Exec rows, ClearFilters resets it). Full suite 2388 pass / 0 fail;
+AOT publish clean.
+
+-----
+
 ## 2026-07-11 — Object Tree per-instance drill-downs: Open in Live Walker / Show Related / Locate in GWorld+GameEngine (build 2098; dev)
 
 **SHIPPED (UI-only). Phase 3 (final) of "global instance explorer".** A global instance keyword search is only useful

@@ -244,6 +244,7 @@ public class KeywordScoringTableTests
     [InlineData(FunctionCategory.Movement,  "Movement")]
     [InlineData(FunctionCategory.Combat,    "Combat")]
     [InlineData(FunctionCategory.Utility,   "Utility")]
+    [InlineData(FunctionCategory.GameplayAction, "Gameplay")]
     [InlineData(FunctionCategory.Other,     "Other")]
     public void DisplayName_AllCategories_HasLabel(FunctionCategory cat, string expected)
     {
@@ -256,6 +257,7 @@ public class KeywordScoringTableTests
     [InlineData(FunctionCategory.Movement)]
     [InlineData(FunctionCategory.Combat)]
     [InlineData(FunctionCategory.Utility)]
+    [InlineData(FunctionCategory.GameplayAction)]
     [InlineData(FunctionCategory.Other)]
     public void CategoryColor_AllCategories_HasHexColor(FunctionCategory cat)
     {
@@ -339,5 +341,89 @@ public class KeywordScoringTableTests
         Assert.Equal(FunctionCategory.Movement, result.Category);
         // And also "ToggleGodMode" still wins over Utility's "Toggle"
         // because ExplicitMovementCheats per-hit (8) > Utility per-hit (3).
+    }
+
+    // ==================================================================
+    // Gameplay-Action opt-in keyword pack (default OFF)
+    //
+    // The pack is only scored when the caller passes
+    // includeGameplayActions:true. With the default overload every one of
+    // these verbs contributes ZERO -- that's the whole reason they were
+    // previously undiscoverable.
+    // ==================================================================
+
+    [Theory]
+    [InlineData("Dash",       "PlayerCharacter")]  // traversal verb, no built-in bucket
+    [InlineData("DodgeRoll",  "PlayerCharacter")]
+    [InlineData("OpenShop",   "ShopSubsystem")]    // shop verbs, no built-in bucket
+    [InlineData("Interact",   "InteractionComponent")]
+    public void Score_GameplayActionsOff_VerbsContributeNoKeywordHits(
+        string funcName, string className)
+    {
+        // Default overload -> pack disabled. None of these tokens live in
+        // any built-in bucket, so keyword hits must be 0 and the category
+        // is never GameplayAction (class bonus alone can't set a category).
+        var result = KeywordScoringTable.Score(MakeEntry(funcName, className));
+        Assert.Equal(0, result.KeywordHits);
+        Assert.NotEqual(FunctionCategory.GameplayAction, result.Category);
+    }
+
+    [Fact]
+    public void Score_DefaultOverload_IsIdenticalToGameplayActionsOff()
+    {
+        // Regression guard: the default overload must score byte-identically
+        // to explicitly passing false, so enabling the pack is the ONLY thing
+        // that changes any score. Uses a verb the pack would otherwise catch.
+        var entry = MakeEntry("OpenShop", "ShopSubsystem", flags: BlueprintCallable);
+        var def = KeywordScoringTable.Score(entry);
+        var off = KeywordScoringTable.Score(entry, includeGameplayActions: false);
+        Assert.Equal(off.FinalScore,  def.FinalScore);
+        Assert.Equal(off.Category,    def.Category);
+        Assert.Equal(off.KeywordHits, def.KeywordHits);
+    }
+
+    [Theory]
+    [InlineData("Dash",       "PlayerCharacter", FunctionCategory.GameplayAction)]
+    [InlineData("DodgeRoll",  "PlayerCharacter", FunctionCategory.GameplayAction)]
+    [InlineData("OpenShop",   "ShopSubsystem",   FunctionCategory.GameplayAction)]
+    [InlineData("Interact",   "InteractComp",    FunctionCategory.GameplayAction)]
+    [InlineData("BeginTrade", "MerchantActor",   FunctionCategory.GameplayAction)]
+    // Verb that ALSO hits a built-in bucket keeps that bucket's label
+    // (Sell↔Item tie at 5 -> Inventory wins, GameplayAction is lowest tie
+    // priority) but still gains the extra points so it surfaces. Neutral
+    // class name so only the func tokens (sell, item) score.
+    [InlineData("SellItem",   "MyActor",         FunctionCategory.Inventory)]
+    public void Score_GameplayActionsOn_AssignsExpectedCategory(
+        string funcName, string className, FunctionCategory expected)
+    {
+        var result = KeywordScoringTable.Score(
+            MakeEntry(funcName, className), includeGameplayActions: true);
+        Assert.Equal(expected, result.Category);
+    }
+
+    [Fact]
+    public void Score_GameplayActionsOn_BareOpenShopClearsThreshold()
+    {
+        // A plain OpenShop on a UI subsystem with NO class bonus: Open + Shop
+        // = 2 tokens x 5 = 10, well above the threshold, so it surfaces in the
+        // default (non-"Show All") view once the pack is enabled.
+        var result = KeywordScoringTable.Score(
+            MakeEntry("OpenShop", "ShopUISubsystem"), includeGameplayActions: true);
+        Assert.Equal(FunctionCategory.GameplayAction, result.Category);
+        Assert.True(result.FinalScore >= KeywordScoringTable.InterestingThreshold,
+            $"OpenShop should clear threshold, got {result.FinalScore}");
+    }
+
+    [Fact]
+    public void Score_GameplayActionsOn_DoesNotDuplicateMovementVerbs()
+    {
+        // Jump lives in the Movement bucket, NOT the pack, so enabling the
+        // pack must not change its score (no double-count) -- the pack only
+        // adds NEW tokens.
+        var entry = MakeEntry("Jump", "PlayerCharacter");
+        var off = KeywordScoringTable.Score(entry);
+        var on  = KeywordScoringTable.Score(entry, includeGameplayActions: true);
+        Assert.Equal(off.FinalScore, on.FinalScore);
+        Assert.Equal(FunctionCategory.Movement, on.Category);
     }
 }
