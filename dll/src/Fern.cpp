@@ -3036,6 +3036,8 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             // vtable-offset detection failed on this game → counts will stay 0.
             bool hookActive = UE5_EnsureGameThreadHook();
             Linie::StartRecording();
+            Sein::Info("PIPE:profile", "pe_profile_start: recording begun (hook_active=%d)",
+                       hookActive ? 1 : 0);
             json data;
             data["recording"]   = true;
             data["hook_active"] = hookActive;
@@ -3044,6 +3046,7 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
 
         if (cmd == Renge::CMD_PE_PROFILE_STOP) {
             Linie::StopRecording();   // idempotent; counts retained for pe_profile_get
+            Sein::Info("PIPE:profile", "pe_profile_stop: recording frozen");
             json data;
             data["recording"] = false;
             return Renge::MakeResponse(id, data).dump();
@@ -3079,6 +3082,10 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                 functions.push_back(item);
                 ++emitted;
             }
+
+            Sein::Info("PIPE:profile",
+                       "pe_profile_get: %d distinct funcs, %llu total calls, %d emitted (limit %d)",
+                       static_cast<int>(snap.size()), (unsigned long long)totalCalls, emitted, limit);
 
             json data;
             data["recording"]      = Linie::IsActive();
