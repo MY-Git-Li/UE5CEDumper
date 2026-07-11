@@ -43,9 +43,9 @@
 
 ## GWorld Status Summary
 
-**Working (30/30):** TQ2, EverSpace 2, Hogwarts Legacy, IDOLM@STER, Romancing SaGa 2, Tower of Mask, Ghostwire: Tokyo, Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT Demo, OctoPath Traveler, FF7R, FF7Re, DQ I&II, DQ III, DQ XI S, Lushfoil Photography Sim, Manor Lords, The Artisan of Glimmith, Barn Finders, Colossal, Extinction, MS Gundam SEED Battle Destiny Remastered, The Adventures of Elliot: The Millennium Tales, Avowed (instance_scan_recovery), Echoes of Aincrad Demo, Star Wars Jedi: Fallen Order (CE manual inject), Satisfactory (modular CoreUObject DLL — v1.1.3.1/UE5.3 + v1.2.3.1/UE5.6), Solarpunk (instance-scan recovery), Persona 3 Reload (GWLD_GH_1 direct)
+**Working (31/31):** TQ2, EverSpace 2, Hogwarts Legacy, IDOLM@STER, Romancing SaGa 2, Tower of Mask, Ghostwire: Tokyo, Cat Island Petrichor Demo, Way of the Hunter 2 Demo, COMBAT PILOT Demo, OctoPath Traveler, FF7R, FF7Re, DQ I&II, DQ III, DQ XI S, Lushfoil Photography Sim, Manor Lords, The Artisan of Glimmith, Barn Finders, Colossal, Extinction, MS Gundam SEED Battle Destiny Remastered, The Adventures of Elliot: The Millennium Tales, Avowed (instance_scan_recovery), Echoes of Aincrad Demo, Star Wars Jedi: Fallen Order (CE manual inject), Satisfactory (modular CoreUObject DLL — v1.1.3.1/UE5.3 + v1.2.3.1/UE5.6), Solarpunk (instance-scan recovery), Stellar Blade, Persona 3 Reload (GWLD_GH_1 direct)
 
-**Failing (GWorld not found or untested):** none — all 30 tested games resolve GWorld. Star Wars Jedi + Satisfactory were re-verified working at build 704 (2026-05-12); the earlier "failing" note was stale (pre-`AOBScanAllModules` / pre-CE-inject). Satisfactory was re-verified again on its **1.2.3.1 / UE5.6** build (build 1.0.0.1718, 2026-06-25) — symbol-export globals + GWorld walk all clean with zero code changes.
+**Failing (GWorld not found or untested):** none — all 31 tested games resolve GWorld. Star Wars Jedi + Satisfactory were re-verified working at build 704 (2026-05-12); the earlier "failing" note was stale (pre-`AOBScanAllModules` / pre-CE-inject). Satisfactory was re-verified again on its **1.2.3.1 / UE5.6** build (build 1.0.0.1718, 2026-06-25) — symbol-export globals + GWorld walk all clean with zero code changes.
 
 ## Naming Convention
 
