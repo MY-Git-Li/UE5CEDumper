@@ -134,8 +134,12 @@ Total commands: 31 (command name constants live in `dll/src/Renge.h`)
 ### Search & Enumeration
 
 ```jsonc
-// Multi-pattern object search (substring match on name/class/path)
-{ "id": 19, "cmd": "search_objects", "query": "Player", "limit": 200 }
+// Global keyword object search. "query" is space=AND — each whitespace-separated
+// term must match the object name OR the class name (case-insensitive). Optional
+// "instances_only": true (default false) hides the reflection/type layer (UClass,
+// UFunction, UScriptStruct, UEnum, UPackage, UE4 FooProperty) so only live instances
+// return. Response adds "truncated": true when the "limit" cap was hit.
+{ "id": 19, "cmd": "search_objects", "query": "BP_ Enemy", "limit": 5000, "instances_only": true }
 
 // Search properties by name across all classes.
 // Optional "deep": true (default false) also descends into nested struct members

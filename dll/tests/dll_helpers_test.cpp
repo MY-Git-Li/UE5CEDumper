@@ -1473,6 +1473,73 @@ static void Test_IsEnginePackage() {
     EXPECT("all slashes -> not engine", !IsEnginePackage("///"));
 }
 
+// IsReflectionMetaClass: the Object Tree "Instances only" server-side gate. MUST match
+// the C# Helpers/ReflectionMetaClassifier — excludes the FULL reflection/type layer, not
+// just class-like metas (else UFunction/UScriptStruct/UPackage/UEnum leak through).
+static void Test_IsReflectionMetaClass() {
+    using Aura::IsReflectionMetaClass;
+
+    // Class family
+    EXPECT("meta: Class",                     IsReflectionMetaClass("Class"));
+    EXPECT("meta: BlueprintGeneratedClass",   IsReflectionMetaClass("BlueprintGeneratedClass"));
+    EXPECT("meta: WidgetBlueprintGeneratedClass", IsReflectionMetaClass("WidgetBlueprintGeneratedClass"));
+    EXPECT("meta: DynamicClass",              IsReflectionMetaClass("DynamicClass"));
+    // Function family — the headline gap a class-only filter would miss
+    EXPECT("meta: Function",                  IsReflectionMetaClass("Function"));
+    EXPECT("meta: DelegateFunction",          IsReflectionMetaClass("DelegateFunction"));
+    EXPECT("meta: SparseDelegateFunction",    IsReflectionMetaClass("SparseDelegateFunction"));
+    // Struct / enum descriptors + package
+    EXPECT("meta: ScriptStruct",              IsReflectionMetaClass("ScriptStruct"));
+    EXPECT("meta: UserDefinedStruct",         IsReflectionMetaClass("UserDefinedStruct"));
+    EXPECT("meta: Enum",                      IsReflectionMetaClass("Enum"));
+    EXPECT("meta: UserDefinedEnum",           IsReflectionMetaClass("UserDefinedEnum"));
+    EXPECT("meta: Package",                   IsReflectionMetaClass("Package"));
+    // UE4 UProperty descriptors — caught by the "…Property" suffix
+    EXPECT("meta: IntProperty",               IsReflectionMetaClass("IntProperty"));
+    EXPECT("meta: ObjectProperty",            IsReflectionMetaClass("ObjectProperty"));
+    EXPECT("meta: StructProperty",            IsReflectionMetaClass("StructProperty"));
+    EXPECT("meta: MulticastInlineDelegateProperty", IsReflectionMetaClass("MulticastInlineDelegateProperty"));
+
+    // Live instances are kept
+    EXPECT("instance: BP_Enemy_C",            !IsReflectionMetaClass("BP_Enemy_C"));
+    EXPECT("instance: Character",             !IsReflectionMetaClass("Character"));
+    EXPECT("instance: PlayerController",      !IsReflectionMetaClass("PlayerController"));
+    EXPECT("instance: StaticMeshComponent",   !IsReflectionMetaClass("StaticMeshComponent"));
+    EXPECT("instance: MyDataManager (not …Property)", !IsReflectionMetaClass("MyDataManager"));
+
+    // Contract: empty kept; exact-cased (UE never emits lowercase "class")
+    EXPECT("empty -> instance",               !IsReflectionMetaClass(""));
+    EXPECT("case-sensitive: 'class' kept",    !IsReflectionMetaClass("class"));
+}
+
+// Keyword tokenize + space=AND matcher: the server-side twin of the C#
+// ObjectTreeFilter (term-level AND, field-level OR over obj+class name).
+static void Test_KeywordMatch() {
+    using Aura::SplitLowerKeywords;
+    using Aura::MatchesAllKeywords;
+
+    // Tokenize: whitespace-split + lowercase; blanks collapse.
+    auto t0 = SplitLowerKeywords("  BP_   Char ");
+    EXPECT("split count", t0.size() == 2);
+    EXPECT("split lower[0]", t0.size() == 2 && t0[0] == "bp_");
+    EXPECT("split lower[1]", t0.size() == 2 && t0[1] == "char");
+    EXPECT("split blank -> empty", SplitLowerKeywords("   ").empty());
+
+    // Empty terms match everything.
+    EXPECT("empty terms match", MatchesAllKeywords(SplitLowerKeywords(""), "Anything", "AnyClass"));
+
+    // AND across fields: "bp_" hits class, "char" hits name.
+    auto t1 = SplitLowerKeywords("bp_ char");
+    EXPECT("AND across name+class", MatchesAllKeywords(t1, "MyCharacter", "BP_MyCharacter_C"));
+    // A term matching neither field fails the AND.
+    auto t2 = SplitLowerKeywords("bp_ player");
+    EXPECT("missing term -> no match", !MatchesAllKeywords(t2, "MyCharacter", "BP_MyCharacter_C"));
+    // Case-insensitive; single term may hit the class only.
+    auto t3 = SplitLowerKeywords("PAWN");
+    EXPECT("term hits class only (ci)", MatchesAllKeywords(t3, "Default__Thing", "APawn"));
+    EXPECT("term hits neither", !MatchesAllKeywords(t3, "Default__Thing", "AActor"));
+}
+
 // Snapshot "Auto detect Engine/System noise" source-level skip: the PURE
 // precedence (DecideSnapshotNoise) + the keep/noise base sets. The live
 // super-chain / package predicates that FEED the booleans read game memory and
@@ -2956,6 +3023,8 @@ int main() {
     Test_ValueScan_OptionalFlagOffset();
     Test_ValueScan_OrderedView();
     Test_IsEnginePackage();
+    Test_IsReflectionMetaClass();
+    Test_KeywordMatch();
     Test_SnapshotNoise_GuardrailAndSets();
     Test_NumericFamily_Filter();
     Test_GroupScan_ExcludeAndHistogram();

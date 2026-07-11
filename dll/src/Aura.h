@@ -5,6 +5,7 @@
 // ObjectArray: FUObjectArray slot enumeration and validation
 // ============================================================
 
+#include <cctype>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -132,7 +133,12 @@ struct SearchResultSet {
     int32_t classDistinct = 0;   // distinct matched classes (>= classHistogram.size() when capped)
 };
 
-SearchResultSet SearchByName(const std::string& query, int maxResults = 200);
+// Search every UObject by keyword. `query` is whitespace-tokenized into AND terms;
+// each term must match the object name OR the class name (space=AND, field-level OR —
+// mirrors the client ObjectTreeFilter). When `instancesOnly`, reflection/type-layer
+// rows (IsReflectionMetaClass) are skipped so only live instances are returned. Sets
+// SearchResultSet::truncated when the result cap was hit.
+SearchResultSet SearchByName(const std::string& query, int maxResults = 200, bool instancesOnly = false);
 
 // Find all instances whose class name matches (case-insensitive partial match)
 // AND, optionally, whose OBJECT name contains nameFilter (case-insensitive
@@ -707,6 +713,75 @@ inline bool IsEnginePackage(const std::string& rawPath) {
         }
     }
     return false;
+}
+
+// IsReflectionMetaClass — true when a UObject's CLASS name denotes the reflection /
+// type layer (UClass family, UFunction family, UScriptStruct/UEnum descriptors,
+// UPackage) rather than a live gameplay instance. On UE4 (a priority target, where
+// UProperty is still a UObject) property descriptors also sit in GObjects; their class
+// name always ends in "Property" (IntProperty, ObjectProperty, StructProperty, …) so
+// the suffix rule catches them. UE5 makes FProperty non-UObject, so the suffix never
+// fires there. Powers the Object Tree "Instances only" server-side gate.
+//
+// MUST stay in sync with the C# mirror Helpers/ReflectionMetaClassifier. Exact-cased
+// match (UE emits meta names exactly cased); pure / string-only so the lightweight DLL
+// test can exercise it without linking the whole DLL.
+inline bool IsReflectionMetaClass(const std::string& className) {
+    if (className.empty()) return false;
+    static const char* const kReflectionMetas[] = {
+        // Class family (mirrors IsClassLikeMeta / DumpAllService.ClassLikeMetas)
+        "Class", "BlueprintGeneratedClass", "AnimBlueprintGeneratedClass",
+        "WidgetBlueprintGeneratedClass", "DynamicClass",
+        // Function family (UFunction + delegate flavours)
+        "Function", "DelegateFunction", "SparseDelegateFunction",
+        // Struct / enum descriptors
+        "ScriptStruct", "UserDefinedStruct", "Enum", "UserDefinedEnum",
+        // Package
+        "Package",
+    };
+    for (const char* m : kReflectionMetas)
+        if (className == m) return true;
+    // UE4 UProperty descriptors always end in "Property".
+    static const std::string kProp = "Property";
+    if (className.size() >= kProp.size() &&
+        className.compare(className.size() - kProp.size(), kProp.size(), kProp) == 0)
+        return true;
+    return false;
+}
+
+// SplitLowerKeywords — split a raw filter string into non-empty, lowercased terms on
+// ASCII whitespace. Mirrors the C# ObjectTreeFilter.SplitTerms so the server-side top
+// Search tokenizes identically to the client-side filter. Pure — DLL-test exercisable.
+inline std::vector<std::string> SplitLowerKeywords(const std::string& raw) {
+    std::vector<std::string> terms;
+    std::string cur;
+    for (char ch : raw) {
+        unsigned char uc = static_cast<unsigned char>(ch);
+        if (uc == ' ' || uc == '\t' || uc == '\n' || uc == '\r' || uc == '\f' || uc == '\v') {
+            if (!cur.empty()) { terms.push_back(cur); cur.clear(); }
+        } else {
+            cur.push_back(static_cast<char>(std::tolower(uc)));
+        }
+    }
+    if (!cur.empty()) terms.push_back(cur);
+    return terms;
+}
+
+// MatchesAllKeywords — term-level AND, field-level OR: every term in `lowerTerms`
+// (already lowercased by SplitLowerKeywords) must be a substring of at least one of the
+// two fields. Fields are lowercased on the fly. An empty term list matches everything.
+// Mirrors C# ObjectTreeFilter.MatchesAllTerms. Pure — DLL-test exercisable.
+inline bool MatchesAllKeywords(const std::vector<std::string>& lowerTerms,
+                               const std::string& a, const std::string& b) {
+    if (lowerTerms.empty()) return true;
+    std::string la = a, lb = b;
+    for (auto& c : la) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (auto& c : lb) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (const auto& t : lowerTerms) {
+        if (la.find(t) == std::string::npos && lb.find(t) == std::string::npos)
+            return false;
+    }
+    return true;
 }
 
 // === Snapshot source-level noise classification (header-inline, pure) ===

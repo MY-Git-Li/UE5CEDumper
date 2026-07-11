@@ -39,7 +39,10 @@ public interface IDumpService
     Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default, bool includePath = false);
     Task<ObjectDetail> GetObjectAsync(string addr, CancellationToken ct = default);
     Task<ObjectDetail> FindObjectAsync(string path, CancellationToken ct = default);
-    Task<ObjectListResult> SearchObjectsAsync(string query, int limit = 200, CancellationToken ct = default);
+    /// <summary>Server-side keyword search over all objects. <paramref name="query"/> is
+    /// space=AND (each term matches object name OR class name); <paramref name="instancesOnly"/>
+    /// hides the reflection/type layer. Result <c>Truncated</c> flags a hit cap.</summary>
+    Task<ObjectListResult> SearchObjectsAsync(string query, int limit = 200, bool instancesOnly = false, CancellationToken ct = default);
     Task<ClassInfoModel> WalkClassAsync(string addr, CancellationToken ct = default);
 
     /// <summary>

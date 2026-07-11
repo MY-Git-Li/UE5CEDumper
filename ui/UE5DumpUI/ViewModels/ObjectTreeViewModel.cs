@@ -47,6 +47,12 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _searchText = "";
     [ObservableProperty] private string _filterText = "";
     [ObservableProperty] private int _selectedClassFilterIndex;
+    /// <summary>When on, the filter hides reflection/type-layer rows (UClass, UFunction,
+    /// UScriptStruct, UEnum, UPackage, and UE4's <c>FooProperty</c> family) so a global
+    /// keyword search shows only live gameplay instances. Applied inside
+    /// <see cref="ApplyFilter"/> over the ENTIRE loaded pool (<see cref="_allNodes"/>),
+    /// not just the displayed page — see <see cref="Helpers.ReflectionMetaClassifier"/>.</summary>
+    [ObservableProperty] private bool _instancesOnly;
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private int _objectCount;
     [ObservableProperty] private string _displayCount = "";
@@ -142,6 +148,23 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
     /// the search (the two are ANDed server-side). Payload = (className, objectName).</summary>
     public event Action<string, string>? NavigateToInstanceFinderWithName;
 
+    /// <summary>Raised by the right-click "Open in Live Walker" menu item: drill into the
+    /// selected object's live instance (walk its fields). Payload = object address. Mirrors
+    /// the InstanceFinder / ValueSearch → Live Walker handoff.</summary>
+    public event Action<string>? NavigateToLiveWalker;
+
+    /// <summary>Raised by "Locate in GWorld": shortest pointer chain from GWorld to the
+    /// selected object (forward BFS). Payload = object address.</summary>
+    public event Action<string>? LocateInGWorld;
+
+    /// <summary>Engine-rooted companion of <see cref="LocateInGWorld"/> (GEngine-rooted
+    /// path search). Payload = object address.</summary>
+    public event Action<string>? LocateInGameEngine;
+
+    /// <summary>Raised by "Show Related Objects": load the selected object's owned graph
+    /// (class / outer / components / ASC / AttributeSet). Payload = object address.</summary>
+    public event Action<string>? NavigateToRelatedObjects;
+
     partial void OnSelectedNodeChanged(UObjectNode? value)
     {
         SelectionChanged?.Invoke(value);
@@ -185,6 +208,11 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
     }
 
     partial void OnSelectedClassFilterIndexChanged(int value)
+    {
+        ApplyFilter();
+    }
+
+    partial void OnInstancesOnlyChanged(bool value)
     {
         ApplyFilter();
     }
@@ -243,6 +271,44 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
     {
         if (node == null || string.IsNullOrEmpty(node.ClassName)) return;
         NavigateToInstanceFinderWithName?.Invoke(node.ClassName, node.Name);
+    }
+
+    /// <summary>Right-click "Open in Live Walker": drill into THIS exact object (walk its
+    /// live fields) — the per-hit handoff a global instance search needs, which the class-
+    /// oriented "Find Instances" does not give. Any UObject works; a class row walks the
+    /// UClass itself.</summary>
+    [RelayCommand]
+    private void OpenInLiveWalker(UObjectNode? node)
+    {
+        if (node == null || string.IsNullOrEmpty(node.Address)) return;
+        NavigateToLiveWalker?.Invoke(node.Address);
+    }
+
+    /// <summary>Right-click "Locate in GWorld": shortest GWorld→object pointer chain
+    /// (forward BFS). Meaningful for live instances; a class row is usually not reachable
+    /// from the world graph (Live Walker reports that).</summary>
+    [RelayCommand]
+    private void LocateSelectedInGWorld(UObjectNode? node)
+    {
+        if (node == null || string.IsNullOrEmpty(node.Address)) return;
+        LocateInGWorld?.Invoke(node.Address);
+    }
+
+    /// <summary>Right-click "Locate in GameEngine": engine-rooted companion of Locate in GWorld.</summary>
+    [RelayCommand]
+    private void LocateSelectedInGameEngine(UObjectNode? node)
+    {
+        if (node == null || string.IsNullOrEmpty(node.Address)) return;
+        LocateInGameEngine?.Invoke(node.Address);
+    }
+
+    /// <summary>Right-click "Show Related Objects": load THIS object's owned graph
+    /// (class / outer / Controller↔Pawn / components / ASC / AttributeSet).</summary>
+    [RelayCommand]
+    private void ShowRelatedObjects(UObjectNode? node)
+    {
+        if (node == null || string.IsNullOrEmpty(node.Address)) return;
+        NavigateToRelatedObjects?.Invoke(node.Address);
     }
 
     /// <summary>
@@ -352,8 +418,10 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
             FilterText = "";
             SelectedClassFilterIndex = 0;
 
-            // Server-side case-insensitive partial search across ALL objects
-            var result = await _dump.SearchObjectsAsync(SearchText, Constants.ObjectTreePageSize);
+            // Server-side keyword search across ALL objects. space=AND (each term hits
+            // object name OR class name) + the Instances-only gate are applied server-side,
+            // matching the bottom filter, so the top Search is a true global instance search.
+            var result = await _dump.SearchObjectsAsync(SearchText, Constants.ObjectTreeSearchCap, InstancesOnly);
             _allNodes.Clear();
             ObjectCount = result.Total;
 
@@ -369,8 +437,13 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
                 SelectedNode = FilteredNodes[0];
             }
 
-            StatusText = $"Found {result.Total:N0} results";
-            _log.Info($"Search '{SearchText}': found {result.Total:N0} results");
+            // On a hit cap, tell the user matches were dropped and how to see them all —
+            // the top Search caps server-side, but Reload + the bottom filter scans the
+            // whole loaded pool uncapped.
+            StatusText = result.Truncated
+                ? $"Found {result.Total:N0}+ results (capped — narrow the search, or Reload + filter for all)"
+                : $"Found {result.Total:N0} results";
+            _log.Info($"Search '{SearchText}' (instancesOnly={InstancesOnly}): {result.Total:N0} results{(result.Truncated ? " (capped)" : "")}");
         }
         catch (Exception ex)
         {
@@ -408,6 +481,13 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
 
         foreach (var node in _allNodes)
         {
+            // Instances-only filter: drop reflection/type-layer rows (UClass, UFunction,
+            // UScriptStruct, UEnum, UPackage, UE4 FooProperty) so only live gameplay
+            // instances remain. Runs here — over the FULL _allNodes cache — so it filters
+            // the whole loaded pool, not the display-capped page.
+            if (InstancesOnly && !ReflectionMetaClassifier.IsLiveInstanceRow(node.ClassName))
+                continue;
+
             // Class type filter (exact match on ClassName)
             if (classFilter != null &&
                 !node.ClassName.Equals(classFilter, StringComparison.OrdinalIgnoreCase))
@@ -425,7 +505,7 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
                 FilteredNodes.Add(node);
         }
 
-        bool hasAnyFilter = terms.Length > 0 || classFilter != null;
+        bool hasAnyFilter = terms.Length > 0 || classFilter != null || InstancesOnly;
         var totalSuffix = ObjectCount > 0 && ObjectCount != _allNodes.Count
             ? $" / {ObjectCount:N0} total ({100.0 * _allNodes.Count / ObjectCount:F1}%)"
             : "";

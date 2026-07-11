@@ -187,7 +187,7 @@
 
     <!-- Object Tree -->
     <sys:String x:Key="str.ObjectTree.Title">Object Tree</sys:String>
-    <sys:String x:Key="str.ObjectTree.Search">Search objects...</sys:String>
+    <sys:String x:Key="str.ObjectTree.Search">Search objects (space = AND)...</sys:String>
     <sys:String x:Key="str.ObjectTree.Load">Load</sys:String>
     <sys:String x:Key="str.ObjectTree.Reload">Reload</sys:String>
     <sys:String x:Key="str.ObjectTree.Loading">Loading...</sys:String>
@@ -197,8 +197,13 @@
     <sys:String x:Key="str.ObjectTree.CopyAddress">Copy Address</sys:String>
     <sys:String x:Key="str.ObjectTree.FindInstancesByType">Find Instances (Type)</sys:String>
     <sys:String x:Key="str.ObjectTree.FindInstancesByTypeAndName">Find Instances (Type + Name)</sys:String>
+    <sys:String x:Key="str.ObjectTree.OpenInLiveWalker">Open in Live Walker</sys:String>
+    <sys:String x:Key="str.ObjectTree.ShowRelated">Show Related Objects</sys:String>
+    <sys:String x:Key="str.ObjectTree.LocateInGWorld">Locate in GWorld</sys:String>
+    <sys:String x:Key="str.ObjectTree.LocateInGameEngine">Locate in GameEngine</sys:String>
     <sys:String x:Key="str.ObjectTree.FilterHint">Filter (space = AND, e.g. BP_ char)</sys:String>
     <sys:String x:Key="str.ObjectTree.ClassFilter">Class Type:</sys:String>
+    <sys:String x:Key="str.ObjectTree.InstancesOnly">Instances only (hide reflection metadata)</sys:String>
     <sys:String x:Key="str.ObjectTree.Cancel">Cancel</sys:String>
 
     <!-- Instance Finder -->
@@ -1132,11 +1137,12 @@
     <sys:String x:Key="str.Tip.ObjectTree.Reload">Reload all objects from game process</sys:String>
     <sys:String x:Key="str.Tip.ObjectTree.Cancel">Cancel current loading operation</sys:String>
     <sys:String x:Key="str.Tip.ObjectTree.Search">Search objects by name or class</sys:String>
-    <sys:String x:Key="str.Tip.ObjectTree.SearchField">Type a name/class substring and press Enter or the magnifier to search every object in the game. Leave it empty and press the magnifier (or Reload) to list all objects again. Recent searches are suggested as you type.</sys:String>
+    <sys:String x:Key="str.Tip.ObjectTree.SearchField">Type a keyword and press Enter or the magnifier to search every object in the game server-side. Multiple space-separated terms are ANDed, each matching the object name OR class name. Respects the "Instances only" toggle. Results are capped (you'll be told if more exist — narrow, or Reload + use the bottom filter for the whole pool uncapped). Leave it empty and press the magnifier (or Reload) to list all objects again. Recent searches are suggested as you type.</sys:String>
     <sys:String x:Key="str.Tip.ObjectTree.ClassFilter">Filter by class type</sys:String>
     <sys:String x:Key="str.Tip.ObjectTree.Collapse">Collapse the Object Tree to give the right-hand panels the full window width</sys:String>
     <sys:String x:Key="str.Tip.ObjectTree.Expand">Show the Object Tree</sys:String>
     <sys:String x:Key="str.Tip.ObjectTree.TextFilter">Filter the loaded objects by text. Separate multiple terms with spaces — every term must match (AND), each against Name, Class, or Address. Example: "BP_ char" keeps objects matching both BP_ and char. Leave the Search box empty + press the magnifier (or Reload) to list all again.</sys:String>
+    <sys:String x:Key="str.Tip.ObjectTree.InstancesOnly">Hide the reflection/type layer (UClass, UFunction, UScriptStruct, UEnum, UPackage, and UE4 property descriptors) so only live gameplay instances remain. Applies to BOTH the top Search (server-side) and the bottom text filter, over the ENTIRE loaded pool — not just the visible page. Reload + the bottom filter scans the whole pool uncapped; the top Search is faster but caps its results.</sys:String>
 
     <!-- Tooltips: Instance Finder -->
     <sys:String x:Key="str.Tip.InstanceFinder.ClassName">Class name to search for (substring by default, e.g. "Character"). Tick Exact match for a whole-name match. Combine with the Object name box (AND), or leave this empty to search by object name alone.</sys:String>

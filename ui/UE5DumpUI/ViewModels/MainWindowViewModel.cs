@@ -716,6 +716,47 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             }
         };
 
+        // Wire Object Tree row drill-downs -> Live Walker / Locate. The selected row IS
+        // the target object (land ON it, stopAtParent: false) — same shape as the
+        // InstanceFinder handoffs above. Gives a global-search hit the per-instance drill
+        // the class-oriented "Find Instances" can't.
+        ObjectTree.NavigateToLiveWalker += async (addr) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                await LiveWalker.NavigateToAddressCommand.ExecuteAsync(addr);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"ObjectTree NavigateToLiveWalker handler error: {addr}", ex);
+            }
+        };
+        ObjectTree.LocateInGWorld += async (addr) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                await LiveWalker.LocateInGWorldAsync(addr, 0, null, stopAtParent: false);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"ObjectTree LocateInGWorld handler error: {addr}", ex);
+            }
+        };
+        ObjectTree.LocateInGameEngine += async (addr) =>
+        {
+            try
+            {
+                SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                await LiveWalker.LocateInGameEngineAsync(addr, 0, null, stopAtParent: false);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"ObjectTree LocateInGameEngine handler error: {addr}", ex);
+            }
+        };
+
         // Wire InstanceFinder container match -> "Locate in GWorld" (the address is
         // a value inside a container element → reach the owning object + drill the
         // full container chain, including deeply-nested values).
@@ -885,6 +926,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         InstanceFinder.NavigateToRelatedObjects += async (addr) => await OpenRelatedAsync(addr);
         ValueSearch.NavigateToRelatedObjects += async (addr) => await OpenRelatedAsync(addr);
         LiveWalker.NavigateToRelatedObjects += async (addr) => await OpenRelatedAsync(addr);
+        ObjectTree.NavigateToRelatedObjects += async (addr) => await OpenRelatedAsync(addr);
 
         // Wire LiveWalker -> InstanceFinder (per-field "inst" button: open the
         // field's pointed-to object class + switch tab + auto-run, mirroring the

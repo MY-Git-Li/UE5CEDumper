@@ -85,6 +85,15 @@
                  Padding="4,2" FontSize="12"
                  MinWidth="160"/>
       </StackPanel>
+
+      <!-- Instances-only toggle: hide the reflection/type layer (UClass, UFunction,
+           UScriptStruct, UEnum, UPackage) so a global keyword search over the whole
+           loaded pool surfaces only live gameplay instances. Filters _allNodes, not
+           the display-capped page. -->
+      <CheckBox Content="{StaticResource str.ObjectTree.InstancesOnly}"
+                IsChecked="{Binding InstancesOnly}"
+                ToolTip.Tip="{StaticResource str.Tip.ObjectTree.InstancesOnly}"
+                FontSize="12" Foreground="#CCC" Padding="4,0,0,0"/>
     </StackPanel>
 
     <!-- Object list (flat list with virtualization) -->
@@ -109,6 +118,21 @@
                     CommandParameter="{Binding SelectedNode}"/>
           <MenuItem Header="{StaticResource str.ObjectTree.FindInstancesByTypeAndName}"
                     Command="{Binding FindInstancesByTypeAndNameCommand}"
+                    CommandParameter="{Binding SelectedNode}"/>
+          <Separator/>
+          <!-- Per-instance drill-downs: open THIS object (not just its class) in the
+               instance-oriented panels. The handoffs re-resolve the live address. -->
+          <MenuItem Header="{StaticResource str.ObjectTree.OpenInLiveWalker}"
+                    Command="{Binding OpenInLiveWalkerCommand}"
+                    CommandParameter="{Binding SelectedNode}"/>
+          <MenuItem Header="{StaticResource str.ObjectTree.ShowRelated}"
+                    Command="{Binding ShowRelatedObjectsCommand}"
+                    CommandParameter="{Binding SelectedNode}"/>
+          <MenuItem Header="{StaticResource str.ObjectTree.LocateInGWorld}"
+                    Command="{Binding LocateSelectedInGWorldCommand}"
+                    CommandParameter="{Binding SelectedNode}"/>
+          <MenuItem Header="{StaticResource str.ObjectTree.LocateInGameEngine}"
+                    Command="{Binding LocateSelectedInGameEngineCommand}"
                     CommandParameter="{Binding SelectedNode}"/>
         </ContextMenu>
       </ListBox.ContextMenu>

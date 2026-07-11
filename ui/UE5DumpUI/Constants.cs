@@ -42,6 +42,10 @@ public static class Constants
     // Object Tree
     public const int ObjectTreePageSize = 2000;     // Batch size for loading all objects
     public const int ObjectTreeMaxDisplay = 5000;   // Max items shown in FilteredNodes ListBox
+    // Server-side cap for the top Search box (search_objects). Matches ObjectTreeMaxDisplay
+    // so every returned row can display; the server reports Truncated when more matches
+    // exist (the UI then points at Reload + bottom filter for the whole pool).
+    public const int ObjectTreeSearchCap = 5000;
 
     // Objects-per-page when walking the FULL GObjects pool via GetObjectListAsync
     // (SDK / USMAP / symbol / dump-all exports). Distinct from ObjectTreePageSize

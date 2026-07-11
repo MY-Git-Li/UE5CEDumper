@@ -18,6 +18,106 @@ builds ≤696 in
 
 -----
 
+## 2026-07-11 — Object Tree per-instance drill-downs: Open in Live Walker / Show Related / Locate in GWorld+GameEngine (build 2098; dev)
+
+**SHIPPED (UI-only). Phase 3 (final) of "global instance explorer".** A global instance keyword search is only useful
+if you can act on a specific hit. The Object Tree row context menu previously offered only class-oriented actions (Copy
+Type/Name/Address, Find Instances by Type / Type+Name) — nothing to drill THIS exact object. Added four per-instance
+handoffs mirroring the InstanceFinder row actions:
+
+- **Open in Live Walker** (`NavigateToLiveWalker` → `LiveWalker.NavigateToAddressCommand`) — walk this object's live fields.
+- **Show Related Objects** (`NavigateToRelatedObjects` → `RelatedObjects.LoadForAddressAsync`) — its class/outer/
+  Controller↔Pawn/components/ASC/AttributeSet graph.
+- **Locate in GWorld** / **Locate in GameEngine** (`LocateInGWorld`/`LocateInGameEngine` →
+  `LiveWalker.LocateInGWorldAsync`/`LocateInGameEngineAsync`, `stopAtParent: false` so it lands ON the picked object) —
+  shortest pointer chain from the world / engine root. Meaningful for instances; a class row is usually not reachable
+  (Live Walker reports that) — kept ungated for simplicity since the "Instances only" toggle already narrows to instances.
+
+Wired in `MainWindowViewModel` with the exact try/catch + tab-switch shape as the InstanceFinder handoffs (reusing the
+shared `OpenRelatedAsync`). Each command no-ops on a null node / empty address so a bad row never navigates to a dead
+target. UI-only — no DLL/pipe change; the handoffs re-resolve the live address downstream.
+
+**Tests:** `ObjectTreeViewModelNavigationTests` (6 — each command raises its event with the row address; null-node and
+empty-address no-op). C# suite 2369 green; UI AOT publish + compiled bindings pass. Completes the three-phase global
+instance explorer (Phase 1 instances-only toggle, Phase 2 server-side Search, Phase 3 drill-downs).
+
+-----
+
+## 2026-07-11 — Object Tree top Search upgraded: server-side space=AND over name+class + instances_only + honest truncation (build 2096; dev)
+
+**SHIPPED (DLL + pipe + UI). Phase 2 of "global instance explorer".** The Object Tree top Search box was a silent
+trap: `search_objects` → `Aura::SearchByName` matched the **object name only** (single substring), early-exited at the
+client's 2000 cap, and Fern reported `total = results.size()` — so the user got ≤2000 rows with **no signal that more
+existed**. This makes the top Search a true global instance keyword search, consistent with the bottom filter.
+
+**DLL.** `Aura::SearchByName(query, maxResults, instancesOnly)`:
+- **space = AND over object name OR class name.** `query` is whitespace-tokenized (new header-inline
+  `Aura::SplitLowerKeywords`); every term must hit the object name OR the class name (`Aura::MatchesAllKeywords`,
+  term-level AND / field-level OR) — the server-side twin of the client `ObjectTreeFilter`. So "Pawn" now matches by
+  class, and "BP_ Enemy" ANDs.
+- **`instances_only` gate** via new header-inline `Aura::IsReflectionMetaClass` — mirrors the C#
+  `ReflectionMetaClassifier` (full reflection/type layer, class family + Function/ScriptStruct/Enum/Package + UE4
+  `…Property` suffix), so the top Search honours the "Instances only" toggle server-side.
+- **Honest truncation:** `SearchResultSet::truncated` is set when the cap is hit (same test as `FindInstancesByClass`'s
+  cheap path); Fern emits `data["truncated"]`.
+- All three helpers are header-inline in `Aura.h` (like `IsEnginePackage`) and unit-tested in `dll_helpers_test`.
+
+**UI.** `SearchObjectsAsync(query, limit, instancesOnly, ct)` + `ObjectListResult.Truncated`; the VM's `SearchAsync`
+forwards `InstancesOnly` and the new `Constants.ObjectTreeSearchCap = 5000` (= `ObjectTreeMaxDisplay`, so every
+returned row can display — replaces the old 2000 page size), and on a hit cap the status reads
+"Found N+ results (capped — narrow the search, or Reload + filter for all)" instead of silently truncating. Tooltips
+updated.
+
+**Whole-pool honesty.** The top Search still caps (returning the entire 486K-object pool over the pipe is not viable),
+but it is now **explicit, class-aware, space=AND, instances-only-aware, and reports truncation** — and the tooltip
+points at the uncapped path (Reload loads the whole pool into `_allNodes`; the bottom filter scans it with no cap on
+match-counting).
+
+**Tests:** `dll_helpers_test` +32 (`Test_IsReflectionMetaClass` full-layer parity + `Test_KeywordMatch` tokenize/AND;
+829 pass) + 3 VM tests (`SearchAsync_SendsInstancesOnlyAndSearchCap_ToServer`, truncated→"capped" status, plain-count
+status). C# suite 2363 green; full DLL+UI build clean. **DLL scan itself not live-verified** (needs a UE process +
+re-inject); header-logic + wiring covered by tests.
+
+-----
+
+## 2026-07-11 — Object Tree "Instances only" toggle: global live-instance keyword search by hiding the reflection layer (build 2092; dev)
+
+**SHIPPED (UI-only, no DLL/pipe change).** Turns the existing Object Tree into a **global live-instance keyword
+explorer** — the instance analog the user wanted to mirror the offline metadata Dump Explorer. A multi-agent
+feasibility eval established the surprising finding that a whole-pool, class-agnostic, `space = AND` keyword browse
+over live instances *already existed*: the Object Tree paginates the entire GObjects pool into `_allNodes` and its
+bottom filter runs `ObjectTreeFilter.MatchesAllTerms` over the **whole cache**, not the page. The single genuinely
+missing capability was **"show live instances only, not reflection metadata"** — a client-side predicate, not a new
+subsystem. So Phase 1 is one toggle.
+
+**What shipped.** New `Helpers/ReflectionMetaClassifier` (`IsReflectionMeta` / `IsLiveInstanceRow`) + an "Instances
+only (hide reflection metadata)" checkbox on the Object Tree filter row (`InstancesOnly` observable → `ApplyFilter`).
+When on, `ApplyFilter` drops rows whose `ClassName` is in the **full reflection/type layer** before the text/class
+filter runs.
+
+**The load-bearing correctness detail** (an adversarial review of the design caught this): the noise is NOT just
+class-like metas. Excluding only `Class`/`BlueprintGeneratedClass`/… (what `DumpAllService.IsClassLikeMetaName` /
+`Aura::IsClassLikeMeta` cover) would leave every `UFunction`, `UScriptStruct`, `UPackage` and `UEnum` in the result —
+failing at the toggle's headline job. So the classifier excludes the whole set: class family + `Function`/
+`DelegateFunction`/`SparseDelegateFunction` + `ScriptStruct`/`UserDefinedStruct` + `Enum`/`UserDefinedEnum` +
+`Package`, plus a `EndsWith("Property")` suffix rule for UE4's `FooProperty` UObject descriptors (a priority target;
+UE5 makes FProperty non-UObject so the suffix never fires there). CDOs/archetypes report their game class as
+`ClassName`, so they survive by design; null/empty `ClassName` is treated as an instance (never silently hidden).
+
+**Whole-pool guarantee (the explicit user concern).** The filter runs inside the `foreach (var node in _allNodes)`
+loop — the `ObjectTreeMaxDisplay = 5000` cap limits only *displayed* rows, while `matchCount` counts every match. Test
+`ObjectTreeViewModelFilterTests.InstancesOnly_FiltersWholePool_BeyondDisplayCap` loads 8000 nodes (2000 metas THEN
+6000 instances) and asserts the reported match count is the full **6000** — it would fail if the scan were ever
+limited to a page or the display cap, locking the guarantee in as a regression guard.
+
+**Tests:** `ReflectionMetaClassifierTests` (36 cases — full type layer excluded, UE4 property family excluded via
+suffix, instances kept, CDO/null contract) + `ObjectTreeViewModelFilterTests` (whole-pool span, meta-hiding,
+`space = AND` composition with the text filter). Suite 2360 green. **Not live-verified in a game** (needs a UE
+process); logic covered by tests + the Avalonia compiled-binding build. Phase 2 (server-side pool-load-free global
+keyword command) and Phase 3 (per-hit drill to Live Walker / Locate) remain optional follow-ups.
+
+-----
+
 ## 2026-07-10 — Keyword-search UX unification (space=AND + per-keyword memory) + `get_object_list` `full_path` restores GameOnly pre-walk skip + IsEnginePath format fix (build 2088; dev)
 
 **SHIPPED.** Three changes; the last two are one feature + a serious pre-existing bug it exposed.
