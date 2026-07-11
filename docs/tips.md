@@ -75,10 +75,14 @@ only a handful of times — sinks to the bottom. **Use the baseline diff to isol
 2. **Start** → ALT-TAB to the game → walk up to the merchant and **open the shop** → ALT-TAB
    back → **Stop**.
 3. The list now shows a **diff**: functions that did NOT fire while idle are tagged **NEW**
-   (green) and ranked to the top; "New/changed only" hides the unchanged Tick noise. The
-   shop-open function is almost always a **NEW** row near the top. Filter by `shop`/`open`/`buy`
-   to nail it.
-4. Click **Live** on the row to open it in Live Walker and invoke it.
+   (green) and ranked to the top; "New/changed only" hides the unchanged Tick noise.
+4. Tick **Hide UI widgets**. Opening the shop *creates* its widget, so all the widget's own
+   methods fire at once and flood the NEW list with obviously-shop-named rows (tagged **UI**) —
+   but the widget is the *result*, not the entry point. Hiding them leaves the persistent
+   **opener** (on a PlayerController / a UI-manager subsystem / the vendor's interaction
+   component) — the function you can actually call in the open world. Filter by `shop`/`open`/`buy`
+   to narrow further.
+5. Click **Live** on the row to open it in Live Walker and invoke it.
 
 (Without a baseline it still works — just Start → action → Stop and sort/scan by count — but
 the diff is what makes a busy game tractable. Leaving the tab auto-stops recording.)
