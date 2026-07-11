@@ -69,7 +69,7 @@ public class StubDumpService : IDumpService
     public virtual Task<ObjectListResult> GetObjectListAsync(int offset, int limit, CancellationToken ct = default, bool includePath = false) => throw new NotImplementedException();
     public Task<ObjectDetail> GetObjectAsync(string addr, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<ObjectDetail> FindObjectAsync(string path, CancellationToken ct = default) => throw new NotImplementedException();
-    public Task<ObjectListResult> SearchObjectsAsync(string query, int limit = 200, CancellationToken ct = default) => throw new NotImplementedException();
+    public virtual Task<ObjectListResult> SearchObjectsAsync(string query, int limit = 200, bool instancesOnly = false, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<byte[]> ReadMemAsync(string addr, int size, CancellationToken ct = default) => throw new NotImplementedException();
     public virtual Task WriteMemAsync(string addr, byte[] data, CancellationToken ct = default) => throw new NotImplementedException();
     public Task WatchAsync(string addr, int size, int intervalMs, CancellationToken ct = default) => throw new NotImplementedException();

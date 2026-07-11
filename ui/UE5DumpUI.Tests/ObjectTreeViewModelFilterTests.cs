@@ -135,4 +135,80 @@ public class ObjectTreeViewModelFilterTests
 
     private static bool ReflectionMetaClassName(string className) =>
         UE5DumpUI.Helpers.ReflectionMetaClassifier.IsReflectionMeta(className);
+
+    // ── Top Search box → server-side global keyword search (Phase 2) ────────────────
+
+    /// <summary>Records the args the VM passes to the server search and returns a
+    /// caller-controlled result (so truncation / instances-only wiring can be asserted).</summary>
+    private sealed class SearchRecordingDump : StubDumpService
+    {
+        public string? LastQuery;
+        public int LastLimit;
+        public bool LastInstancesOnly;
+        public ObjectListResult Result = new();
+
+        public override Task<ObjectListResult> SearchObjectsAsync(
+            string query, int limit = 200, bool instancesOnly = false, CancellationToken ct = default)
+        {
+            LastQuery = query;
+            LastLimit = limit;
+            LastInstancesOnly = instancesOnly;
+            return Task.FromResult(Result);
+        }
+    }
+
+    private static ObjectTreeViewModel NewVm(StubDumpService dump) =>
+        new(dump, new MockLoggingService(), new MockPlatformService(Path.GetTempPath()));
+
+    [Fact]
+    public async Task SearchAsync_SendsInstancesOnlyAndSearchCap_ToServer()
+    {
+        var dump = new SearchRecordingDump
+        {
+            Result = new ObjectListResult { Total = 3, Objects = new() { Node("BP_Enemy_C", "Enemy_0") } },
+        };
+        var vm = NewVm(dump);
+        vm.InstancesOnly = true;
+        vm.SearchText = "Enemy Boss";
+
+        await vm.SearchCommand.ExecuteAsync(null);
+
+        // The top Search now forwards the Instances-only toggle and the higher search cap
+        // (not the old 2000 page size), so the server does the same space=AND + gate.
+        Assert.Equal("Enemy Boss", dump.LastQuery);
+        Assert.True(dump.LastInstancesOnly);
+        Assert.Equal(Constants.ObjectTreeSearchCap, dump.LastLimit);
+    }
+
+    [Fact]
+    public async Task SearchAsync_Truncated_StatusFlagsCapped()
+    {
+        var dump = new SearchRecordingDump
+        {
+            Result = new ObjectListResult { Total = Constants.ObjectTreeSearchCap, Truncated = true },
+        };
+        var vm = NewVm(dump);
+        vm.SearchText = "a";
+
+        await vm.SearchCommand.ExecuteAsync(null);
+
+        // A hit cap is surfaced (not silently truncated) so the user knows to narrow or Reload.
+        Assert.Contains("capped", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task SearchAsync_NotTruncated_StatusIsPlainCount()
+    {
+        var dump = new SearchRecordingDump
+        {
+            Result = new ObjectListResult { Total = 12, Truncated = false },
+        };
+        var vm = NewVm(dump);
+        vm.SearchText = "hero";
+
+        await vm.SearchCommand.ExecuteAsync(null);
+
+        Assert.DoesNotContain("capped", vm.StatusText);
+        Assert.Contains("12", vm.StatusText);
+    }
 }

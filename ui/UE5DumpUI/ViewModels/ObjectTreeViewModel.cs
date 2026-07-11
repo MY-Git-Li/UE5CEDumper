@@ -363,8 +363,10 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
             FilterText = "";
             SelectedClassFilterIndex = 0;
 
-            // Server-side case-insensitive partial search across ALL objects
-            var result = await _dump.SearchObjectsAsync(SearchText, Constants.ObjectTreePageSize);
+            // Server-side keyword search across ALL objects. space=AND (each term hits
+            // object name OR class name) + the Instances-only gate are applied server-side,
+            // matching the bottom filter, so the top Search is a true global instance search.
+            var result = await _dump.SearchObjectsAsync(SearchText, Constants.ObjectTreeSearchCap, InstancesOnly);
             _allNodes.Clear();
             ObjectCount = result.Total;
 
@@ -380,8 +382,13 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
                 SelectedNode = FilteredNodes[0];
             }
 
-            StatusText = $"Found {result.Total:N0} results";
-            _log.Info($"Search '{SearchText}': found {result.Total:N0} results");
+            // On a hit cap, tell the user matches were dropped and how to see them all —
+            // the top Search caps server-side, but Reload + the bottom filter scans the
+            // whole loaded pool uncapped.
+            StatusText = result.Truncated
+                ? $"Found {result.Total:N0}+ results (capped — narrow the search, or Reload + filter for all)"
+                : $"Found {result.Total:N0} results";
+            _log.Info($"Search '{SearchText}' (instancesOnly={InstancesOnly}): {result.Total:N0} results{(result.Truncated ? " (capped)" : "")}");
         }
         catch (Exception ex)
         {

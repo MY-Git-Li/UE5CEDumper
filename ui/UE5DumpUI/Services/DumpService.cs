@@ -244,13 +244,14 @@ public sealed class DumpService : IDumpService
         };
     }
 
-    public async Task<ObjectListResult> SearchObjectsAsync(string query, int limit = 200, CancellationToken ct = default)
+    public async Task<ObjectListResult> SearchObjectsAsync(string query, int limit = 200, bool instancesOnly = false, CancellationToken ct = default)
     {
         var req = new JsonObject
         {
             ["cmd"] = "search_objects",
             ["query"] = query,
-            ["limit"] = limit
+            ["limit"] = limit,
+            ["instances_only"] = instancesOnly
         };
         var res = await _pipe.SendAsync(req, ct);
         CheckResponse(res);
@@ -258,6 +259,7 @@ public sealed class DumpService : IDumpService
         var result = new ObjectListResult
         {
             Total = res["total"]?.GetValue<int>() ?? 0,
+            Truncated = res["truncated"]?.GetValue<bool>() ?? false,
         };
 
         if (res["objects"] is JsonArray arr)

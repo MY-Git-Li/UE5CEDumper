@@ -1434,9 +1434,12 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
         if (cmd == Renge::CMD_SEARCH_OBJECTS) {
             std::string query = request.value("query", "");
             int limit = request.value("limit", 200);
+            // Opt-in: hide the reflection/type layer so a global keyword search returns
+            // only live gameplay instances (mirrors the Object Tree "Instances only" toggle).
+            bool instancesOnly = request.value("instances_only", false);
             if (query.empty()) return Renge::MakeError(id, "Missing query").dump();
 
-            auto rset = Aura::SearchByName(query, limit);
+            auto rset = Aura::SearchByName(query, limit, instancesOnly);
 
             json objects = json::array();
             for (const auto& sr : rset.results) {
@@ -1449,9 +1452,11 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             }
 
             json data;
-            data["total"]   = static_cast<int>(rset.results.size());
-            data["scanned"] = rset.scanned;
-            data["objects"] = objects;
+            data["total"]     = static_cast<int>(rset.results.size());
+            data["scanned"]   = rset.scanned;
+            // True when the cap was hit — the UI flags "more exist; narrow, or Reload + filter".
+            data["truncated"] = rset.truncated;
+            data["objects"]   = objects;
             return Renge::MakeResponse(id, data).dump();
         }
 

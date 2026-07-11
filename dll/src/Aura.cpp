@@ -1234,12 +1234,14 @@ uintptr_t FindByFullName(const std::string& fullName) {
     return 0;
 }
 
-SearchResultSet SearchByName(const std::string& query, int maxResults) {
+SearchResultSet SearchByName(const std::string& query, int maxResults, bool instancesOnly) {
     SearchResultSet rset;
 
-    // Convert query to lowercase for case-insensitive comparison
-    std::string lowerQuery = query;
-    for (auto& c : lowerQuery) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    // Whitespace-separated terms are ANDed; each term matches the object name OR the
+    // class name (field-level OR) — mirrors the client ObjectTreeFilter so the top
+    // Search box behaves like the bottom filter (class-aware + space=AND). The pipe
+    // handler already rejects an empty query string; empty terms would match-all.
+    const std::vector<std::string> terms = SplitLowerKeywords(query);
 
     int32_t count = GetCount();
     rset.scanned = count;
@@ -1252,7 +1254,7 @@ SearchResultSet SearchByName(const std::string& query, int maxResults) {
         if (!obj) continue;
         rset.nonNull++;
 
-        // Read FName from UObject
+        // Read object FName.
         uint32_t nameIndex = 0;
         if (!Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_NAME, nameIndex)) continue;
 
@@ -1260,25 +1262,28 @@ SearchResultSet SearchByName(const std::string& query, int maxResults) {
         if (objName.empty()) continue;
         rset.named++;
 
-        // Case-insensitive partial match
-        std::string lowerName = objName;
-        for (auto& c : lowerName) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        // Resolve class — its name is needed for the class-name match, the
+        // instances-only gate, and the returned row.
+        uintptr_t cls = 0;
+        std::string clsName;
+        if (Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) && cls) {
+            uint32_t clsNameIdx = 0;
+            if (Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx))
+                clsName = Serie::GetString(clsNameIdx);
+        }
 
-        if (lowerName.find(lowerQuery) == std::string::npos) continue;
+        // Instances-only gate: drop the reflection/type layer (UClass / UFunction /
+        // UScriptStruct / UEnum / UPackage, UE4 FooProperty) so only live instances remain.
+        if (instancesOnly && IsReflectionMetaClass(clsName)) continue;
+
+        // space=AND: every term must hit the object name OR the class name.
+        if (!MatchesAllKeywords(terms, objName, clsName)) continue;
 
         SearchResult sr;
         sr.addr = obj;
         sr.name = objName;
-
-        // Get class name
-        uintptr_t cls = 0;
-        if (Macht::ReadSafe(obj + Grimoire::OFF_UOBJECT_CLASS, cls) && cls) {
-            uint32_t clsNameIdx = 0;
-            if (Macht::ReadSafe(cls + Grimoire::OFF_UOBJECT_NAME, clsNameIdx)) {
-                sr.className = Serie::GetString(clsNameIdx);
-            }
-            sr.classAddr = cls;
-        }
+        sr.className = clsName;
+        sr.classAddr = cls;
 
         // Get outer
         Macht::ReadSafe(obj + DynOff::UOBJECT_OUTER, sr.outer);
@@ -1286,6 +1291,10 @@ SearchResultSet SearchByName(const std::string& query, int maxResults) {
         rset.results.push_back(std::move(sr));
     }
 
+    // Early-exit at the cap means "at least maxResults matched" — report truncation the
+    // same way FindInstancesByClass does on its cheap path so the UI can flag "more
+    // exist; narrow the search, or Reload + filter for the whole pool".
+    rset.truncated = (static_cast<int>(rset.results.size()) >= maxResults);
     return rset;
 }
 

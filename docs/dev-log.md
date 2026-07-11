@@ -18,6 +18,43 @@ builds ≤696 in
 
 -----
 
+## 2026-07-11 — Object Tree top Search upgraded: server-side space=AND over name+class + instances_only + honest truncation (build 2096; dev)
+
+**SHIPPED (DLL + pipe + UI). Phase 2 of "global instance explorer".** The Object Tree top Search box was a silent
+trap: `search_objects` → `Aura::SearchByName` matched the **object name only** (single substring), early-exited at the
+client's 2000 cap, and Fern reported `total = results.size()` — so the user got ≤2000 rows with **no signal that more
+existed**. This makes the top Search a true global instance keyword search, consistent with the bottom filter.
+
+**DLL.** `Aura::SearchByName(query, maxResults, instancesOnly)`:
+- **space = AND over object name OR class name.** `query` is whitespace-tokenized (new header-inline
+  `Aura::SplitLowerKeywords`); every term must hit the object name OR the class name (`Aura::MatchesAllKeywords`,
+  term-level AND / field-level OR) — the server-side twin of the client `ObjectTreeFilter`. So "Pawn" now matches by
+  class, and "BP_ Enemy" ANDs.
+- **`instances_only` gate** via new header-inline `Aura::IsReflectionMetaClass` — mirrors the C#
+  `ReflectionMetaClassifier` (full reflection/type layer, class family + Function/ScriptStruct/Enum/Package + UE4
+  `…Property` suffix), so the top Search honours the "Instances only" toggle server-side.
+- **Honest truncation:** `SearchResultSet::truncated` is set when the cap is hit (same test as `FindInstancesByClass`'s
+  cheap path); Fern emits `data["truncated"]`.
+- All three helpers are header-inline in `Aura.h` (like `IsEnginePackage`) and unit-tested in `dll_helpers_test`.
+
+**UI.** `SearchObjectsAsync(query, limit, instancesOnly, ct)` + `ObjectListResult.Truncated`; the VM's `SearchAsync`
+forwards `InstancesOnly` and the new `Constants.ObjectTreeSearchCap = 5000` (= `ObjectTreeMaxDisplay`, so every
+returned row can display — replaces the old 2000 page size), and on a hit cap the status reads
+"Found N+ results (capped — narrow the search, or Reload + filter for all)" instead of silently truncating. Tooltips
+updated.
+
+**Whole-pool honesty.** The top Search still caps (returning the entire 486K-object pool over the pipe is not viable),
+but it is now **explicit, class-aware, space=AND, instances-only-aware, and reports truncation** — and the tooltip
+points at the uncapped path (Reload loads the whole pool into `_allNodes`; the bottom filter scans it with no cap on
+match-counting).
+
+**Tests:** `dll_helpers_test` +32 (`Test_IsReflectionMetaClass` full-layer parity + `Test_KeywordMatch` tokenize/AND;
+829 pass) + 3 VM tests (`SearchAsync_SendsInstancesOnlyAndSearchCap_ToServer`, truncated→"capped" status, plain-count
+status). C# suite 2363 green; full DLL+UI build clean. **DLL scan itself not live-verified** (needs a UE process +
+re-inject); header-logic + wiring covered by tests.
+
+-----
+
 ## 2026-07-11 — Object Tree "Instances only" toggle: global live-instance keyword search by hiding the reflection layer (build 2092; dev)
 
 **SHIPPED (UI-only, no DLL/pipe change).** Turns the existing Object Tree into a **global live-instance keyword
