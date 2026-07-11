@@ -18,6 +18,44 @@ builds ≤696 in
 
 -----
 
+## 2026-07-11 — Object Tree "Instances only" toggle: global live-instance keyword search by hiding the reflection layer (build 2092; dev)
+
+**SHIPPED (UI-only, no DLL/pipe change).** Turns the existing Object Tree into a **global live-instance keyword
+explorer** — the instance analog the user wanted to mirror the offline metadata Dump Explorer. A multi-agent
+feasibility eval established the surprising finding that a whole-pool, class-agnostic, `space = AND` keyword browse
+over live instances *already existed*: the Object Tree paginates the entire GObjects pool into `_allNodes` and its
+bottom filter runs `ObjectTreeFilter.MatchesAllTerms` over the **whole cache**, not the page. The single genuinely
+missing capability was **"show live instances only, not reflection metadata"** — a client-side predicate, not a new
+subsystem. So Phase 1 is one toggle.
+
+**What shipped.** New `Helpers/ReflectionMetaClassifier` (`IsReflectionMeta` / `IsLiveInstanceRow`) + an "Instances
+only (hide reflection metadata)" checkbox on the Object Tree filter row (`InstancesOnly` observable → `ApplyFilter`).
+When on, `ApplyFilter` drops rows whose `ClassName` is in the **full reflection/type layer** before the text/class
+filter runs.
+
+**The load-bearing correctness detail** (an adversarial review of the design caught this): the noise is NOT just
+class-like metas. Excluding only `Class`/`BlueprintGeneratedClass`/… (what `DumpAllService.IsClassLikeMetaName` /
+`Aura::IsClassLikeMeta` cover) would leave every `UFunction`, `UScriptStruct`, `UPackage` and `UEnum` in the result —
+failing at the toggle's headline job. So the classifier excludes the whole set: class family + `Function`/
+`DelegateFunction`/`SparseDelegateFunction` + `ScriptStruct`/`UserDefinedStruct` + `Enum`/`UserDefinedEnum` +
+`Package`, plus a `EndsWith("Property")` suffix rule for UE4's `FooProperty` UObject descriptors (a priority target;
+UE5 makes FProperty non-UObject so the suffix never fires there). CDOs/archetypes report their game class as
+`ClassName`, so they survive by design; null/empty `ClassName` is treated as an instance (never silently hidden).
+
+**Whole-pool guarantee (the explicit user concern).** The filter runs inside the `foreach (var node in _allNodes)`
+loop — the `ObjectTreeMaxDisplay = 5000` cap limits only *displayed* rows, while `matchCount` counts every match. Test
+`ObjectTreeViewModelFilterTests.InstancesOnly_FiltersWholePool_BeyondDisplayCap` loads 8000 nodes (2000 metas THEN
+6000 instances) and asserts the reported match count is the full **6000** — it would fail if the scan were ever
+limited to a page or the display cap, locking the guarantee in as a regression guard.
+
+**Tests:** `ReflectionMetaClassifierTests` (36 cases — full type layer excluded, UE4 property family excluded via
+suffix, instances kept, CDO/null contract) + `ObjectTreeViewModelFilterTests` (whole-pool span, meta-hiding,
+`space = AND` composition with the text filter). Suite 2360 green. **Not live-verified in a game** (needs a UE
+process); logic covered by tests + the Avalonia compiled-binding build. Phase 2 (server-side pool-load-free global
+keyword command) and Phase 3 (per-hit drill to Live Walker / Locate) remain optional follow-ups.
+
+-----
+
 ## 2026-07-10 — Keyword-search UX unification (space=AND + per-keyword memory) + `get_object_list` `full_path` restores GameOnly pre-walk skip + IsEnginePath format fix (build 2088; dev)
 
 **SHIPPED.** Three changes; the last two are one feature + a serious pre-existing bug it exposed.

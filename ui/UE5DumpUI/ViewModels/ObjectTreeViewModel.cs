@@ -47,6 +47,12 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _searchText = "";
     [ObservableProperty] private string _filterText = "";
     [ObservableProperty] private int _selectedClassFilterIndex;
+    /// <summary>When on, the filter hides reflection/type-layer rows (UClass, UFunction,
+    /// UScriptStruct, UEnum, UPackage, and UE4's <c>FooProperty</c> family) so a global
+    /// keyword search shows only live gameplay instances. Applied inside
+    /// <see cref="ApplyFilter"/> over the ENTIRE loaded pool (<see cref="_allNodes"/>),
+    /// not just the displayed page — see <see cref="Helpers.ReflectionMetaClassifier"/>.</summary>
+    [ObservableProperty] private bool _instancesOnly;
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private int _objectCount;
     [ObservableProperty] private string _displayCount = "";
@@ -185,6 +191,11 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
     }
 
     partial void OnSelectedClassFilterIndexChanged(int value)
+    {
+        ApplyFilter();
+    }
+
+    partial void OnInstancesOnlyChanged(bool value)
     {
         ApplyFilter();
     }
@@ -408,6 +419,13 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
 
         foreach (var node in _allNodes)
         {
+            // Instances-only filter: drop reflection/type-layer rows (UClass, UFunction,
+            // UScriptStruct, UEnum, UPackage, UE4 FooProperty) so only live gameplay
+            // instances remain. Runs here — over the FULL _allNodes cache — so it filters
+            // the whole loaded pool, not the display-capped page.
+            if (InstancesOnly && !ReflectionMetaClassifier.IsLiveInstanceRow(node.ClassName))
+                continue;
+
             // Class type filter (exact match on ClassName)
             if (classFilter != null &&
                 !node.ClassName.Equals(classFilter, StringComparison.OrdinalIgnoreCase))
@@ -425,7 +443,7 @@ public partial class ObjectTreeViewModel : ViewModelBase, IDisposable
                 FilteredNodes.Add(node);
         }
 
-        bool hasAnyFilter = terms.Length > 0 || classFilter != null;
+        bool hasAnyFilter = terms.Length > 0 || classFilter != null || InstancesOnly;
         var totalSuffix = ObjectCount > 0 && ObjectCount != _allNodes.Count
             ? $" / {ObjectCount:N0} total ({100.0 * _allNodes.Count / ObjectCount:F1}%)"
             : "";

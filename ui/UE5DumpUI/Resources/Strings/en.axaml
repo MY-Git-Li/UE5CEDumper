@@ -199,6 +199,7 @@
     <sys:String x:Key="str.ObjectTree.FindInstancesByTypeAndName">Find Instances (Type + Name)</sys:String>
     <sys:String x:Key="str.ObjectTree.FilterHint">Filter (space = AND, e.g. BP_ char)</sys:String>
     <sys:String x:Key="str.ObjectTree.ClassFilter">Class Type:</sys:String>
+    <sys:String x:Key="str.ObjectTree.InstancesOnly">Instances only (hide reflection metadata)</sys:String>
     <sys:String x:Key="str.ObjectTree.Cancel">Cancel</sys:String>
 
     <!-- Instance Finder -->
@@ -1137,6 +1138,7 @@
     <sys:String x:Key="str.Tip.ObjectTree.Collapse">Collapse the Object Tree to give the right-hand panels the full window width</sys:String>
     <sys:String x:Key="str.Tip.ObjectTree.Expand">Show the Object Tree</sys:String>
     <sys:String x:Key="str.Tip.ObjectTree.TextFilter">Filter the loaded objects by text. Separate multiple terms with spaces — every term must match (AND), each against Name, Class, or Address. Example: "BP_ char" keeps objects matching both BP_ and char. Leave the Search box empty + press the magnifier (or Reload) to list all again.</sys:String>
+    <sys:String x:Key="str.Tip.ObjectTree.InstancesOnly">Hide the reflection/type layer (UClass, UFunction, UScriptStruct, UEnum, UPackage, and UE4 property descriptors) so only live gameplay instances remain. Applies to the ENTIRE loaded pool, not just the visible page — combine with the text filter for a global instance keyword search. Use Reload (not the magnifier Search) first so the whole pool is loaded.</sys:String>
 
     <!-- Tooltips: Instance Finder -->
     <sys:String x:Key="str.Tip.InstanceFinder.ClassName">Class name to search for (substring by default, e.g. "Character"). Tick Exact match for a whole-name match. Combine with the Object name box (AND), or leave this empty to search by object name alone.</sys:String>

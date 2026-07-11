@@ -85,6 +85,15 @@
                  Padding="4,2" FontSize="12"
                  MinWidth="160"/>
       </StackPanel>
+
+      <!-- Instances-only toggle: hide the reflection/type layer (UClass, UFunction,
+           UScriptStruct, UEnum, UPackage) so a global keyword search over the whole
+           loaded pool surfaces only live gameplay instances. Filters _allNodes, not
+           the display-capped page. -->
+      <CheckBox Content="{StaticResource str.ObjectTree.InstancesOnly}"
+                IsChecked="{Binding InstancesOnly}"
+                ToolTip.Tip="{StaticResource str.Tip.ObjectTree.InstancesOnly}"
+                FontSize="12" Foreground="#CCC" Padding="4,0,0,0"/>
     </StackPanel>
 
     <!-- Object list (flat list with virtualization) -->
