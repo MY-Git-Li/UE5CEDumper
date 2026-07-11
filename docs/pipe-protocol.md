@@ -431,6 +431,48 @@ across snapshots regardless of reordering, plus its numeric inner fields:
 ]
 ```
 
+### Live ProcessEvent Profiler (Linie — build 2103)
+
+Behaviour-based UFunction discovery: record which UFunctions the game dispatches through `ProcessEvent` during a Start/Stop window, then rank by fire count. Pipe-only (no Mimic/CE-Lua mailbox). Counting is gated by an atomic in the Stark hook, so the not-recording path is free; the recording table + mutex live in the `Linie` module. State is dropped on client disconnect.
+
+```jsonc
+// Start — force the game-thread PE hook to install (so the game's own PE calls
+// are counted without first issuing an invoke), then begin recording. Clears any
+// prior table. Response: recording:true, hook_active (false ⇒ PE-vtable detection
+// failed on this game → counts will stay 0; still ok:true, a domain state not an error).
+{ "id": 70, "cmd": "pe_profile_start" }
+
+// Stop — freeze the table (idempotent). Counts are retained for pe_profile_get.
+{ "id": 71, "cmd": "pe_profile_stop" }
+
+// Get — snapshot + rank by fire count desc, cap to `limit` (default 200), resolve
+// each UFunction* to its name/class at query time (stale/recycled pointers dropped
+// via a "Function" meta-class guard). Safe to call while recording (live peek).
+{ "id": 72, "cmd": "pe_profile_get", "limit": 200 }
+```
+
+Response for `pe_profile_get`:
+
+```jsonc
+{ "id": 72, "ok": true,
+  "recording":      false,   // still recording?
+  "distinct_funcs": 214,     // distinct UFunctions seen (pre-cap)
+  "total_calls":    98213,   // sum of all fire counts
+  "functions": [
+    { "class_name": "AShopVendor", "func_name": "OpenShop",
+      "func_addr": "0x1B2C3D40", "num_parms": 1, "parms_size": 8, "count": 3,
+      "first_seq": 40,   // call-stream position of the FIRST fire (1-based). Causal
+                         // signal: an entry point fires before the reactions it triggers,
+                         // so sorting NEW rows by first_seq asc floats the true opener up.
+      "function_flags": 67108864,  // UFunction::FunctionFlags — UI tags Event/Delegate
+                                   // (a reaction) vs Call (an imperative entry point).
+      "is_widget": false }   // owning class derives from UUserWidget/UWidget — the
+                             // transient UI created BY the action, not its opener; the
+                             // UI can hide these so the persistent opener surfaces.
+    // ... ranked by count desc, capped at `limit`
+  ] }
+```
+
 -----
 
 ## Responses (DLL → UI)

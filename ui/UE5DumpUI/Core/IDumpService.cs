@@ -342,6 +342,15 @@ public interface IDumpService
     Task<AllFunctionsResult> ListAllFunctionsAsync(
         bool gameOnly = true, int limit = 100000, CancellationToken ct = default);
 
+    // --- Live ProcessEvent Profiler (Live Funcs) ---
+    // Start recording per-UFunction fire counts (forces the game-thread PE hook
+    // to install). Returns hook-active + a reason string when it isn't.
+    Task<PeProfileStartResult> PeProfileStartAsync(CancellationToken ct = default);
+    // Stop recording (idempotent). Counts are retained for a subsequent get.
+    Task PeProfileStopAsync(CancellationToken ct = default);
+    // Fetch the ranked fire-count table (top <paramref name="limit"/> by count).
+    Task<PeProfileResult> PeProfileGetAsync(int limit = 200, CancellationToken ct = default);
+
     // --- Extra Scan (user-triggered aggressive fallback) ---
     Task<RescanStartResult> StartRescanAsync(CancellationToken ct = default);
     Task<RescanStatusResult> GetRescanStatusAsync(CancellationToken ct = default);

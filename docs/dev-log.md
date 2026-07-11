@@ -18,6 +18,110 @@ builds ≤696 in
 
 -----
 
+## 2026-07-11 — Live Funcs profiler refinements: baseline diff, hide-widgets, hide-events, call-order (builds 2110-2130; dev)
+
+Iterative in-game hardening of the Live PE profiler ([Linie](../dll/src/Linie.cpp)) driven by a
+DQ7R (UE4.27 Shipping) open-shop hunt. Each round cut noise so the action's true entry point surfaces
+— all **general / game-agnostic** (no per-game heuristics):
+
+- **Baseline diff** (client-side): Set Baseline on an idle recording, then the action recording shows a
+  Δ column + ranks NEW / increased rows first (keyed by `ClassName::FuncName`, stable across GC).
+  "New/changed only" hides unchanged Tick noise.
+- **Hide UI widgets**: `pe_profile_get` walks each function's owning-class super-chain
+  (`Aura::ClassDerivesFromAny{UserWidget,Widget}`) → `is_widget`. Opening a shop CREATES its widget, so
+  all the widget's own methods fire at once and flood the diff — hiding them leaves the persistent opener.
+- **Hide events/delegates + Type badge**: `pe_profile_get` returns `function_flags`; the UI tags each row
+  Event / Deleg / Call / native (`FUNC_Event`/`FUNC_Delegate`/`FUNC_BlueprintCallable`) and can hide the
+  On*/callback reactions, leaving imperative callables.
+- **Call order (first-fired)**: Linie now records each function's first-fire position in the call stream
+  (`first_seq`); the UI adds an "Order" column + "Earliest first" sort. An action's entry point runs
+  BEFORE the reactions it triggers, so this is the causal, name-independent signal that floats the true
+  opener to the top of the NEW set.
+
+**Finding of record:** on DQ7R the shop opens via a **native C++ call** the ProcessEvent hook can't see —
+only its BP event callbacks (On*) are visible. That's the fundamental limit of PE-based discovery, not a
+tool gap; the profiler correctly surfaces it (hide-events empties the callable list). For most UE games
+(reflected/Blueprint gameplay) the profiler + these filters find the action's function directly. Tests
+across the four rounds: +25 (`LiveFuncsViewModelTests`). Suite 2419 pass / 0 fail; all 3 proxies + AOT clean.
+
+-----
+
+## 2026-07-11 — Live ProcessEvent Call Profiler (Linie) — behaviour-based UFunction discovery (build 2109; dev)
+
+**SHIPPED (DLL + UI). New "Live Funcs" tab.** The root-cause answer to "which function does this game
+call to open the shop / dash?" — the thing name heuristics (Interesting Functions) fundamentally can't
+find. Workflow: **Start → ALT-TAB to the game → perform ONE action (open shop, dash, attack) → Stop →
+see which UFunctions fired, ranked by call count.** The action-specific function is near the top with a
+low count (a handful of calls); per-frame Tick/Update noise has huge counts.
+
+**New Frieren module `Linie`** (莉涅 — "reads opponent mana"; roster use = *Analysis / profiling*).
+`Stark`'s ProcessEvent hook keeps the single hook and calls into `Linie` with one inlined branch:
+- **Hot path stays free when off.** `Linie::IsRecording()` is one relaxed `atomic<bool>` load + a
+  predicted-not-taken branch ([Stark.cpp:143](dll/src/Stark.cpp)); the mutex + `unordered_map<UFunction*,
+  count>` are touched ONLY inside a Start/Stop window. Mirrors the existing `s_queueDepth` "skip work
+  unless armed" gate. Multi-threaded-PE safe (map guarded by a dedicated mutex, never Stark's queue mutex).
+- **Hook-install prerequisite.** The PE hook installs lazily on the first invoke; `pe_profile_start`
+  calls the new `UE5_EnsureGameThreadHook()` (reuses the audit-#3 `call_once`) so recording works without
+  first issuing an invoke. `hook_active:false` ⇒ vtable detection failed → counts stay 0 (UI warns).
+- **Query-time resolution.** Raw `UFunction*` are stored during recording; `pe_profile_get` snapshots →
+  sorts by count desc → caps → resolves only the capped set via the new `Ubel::ResolveFunctionInfo`
+  (factored out of `WalkFunctions`' version-aware flags/params probe), with a `"Function"` meta-class
+  guard so a pointer whose slot was recycled by a GC/level-load is dropped, not deref'd. Cooperative
+  `Tot::Requested()` abort. `Linie::Reset()` on client disconnect.
+
+3 pipe commands (`pe_profile_start/stop/get`, [Renge.h](dll/src/Renge.h)). UI: `LiveFuncsViewModel` +
+`LiveFuncsPanel` (Start/Stop/Refresh/Clear + ranked DataGrid + space=AND keyword filter with LRU memory
+per the CLAUDE.md rule + "Live"/"Name" row handoffs to Live Walker/clipboard). New "Live Funcs" tab
+inserted after Dump Explorer (MainTabIndex shifted); leaving the tab auto-stops any live recording.
+
+**Tests:** `LiveFuncsViewModelTests` (14 — Start hook/no-hook, Stop fetch+rank+empty, filter space=AND,
+Clear, handoffs, auto-stop-on-leave, model). Full suite 2402 pass / 0 fail; all 3 proxy DLLs + AOT
+publish clean. **DLL-side PE counting needs in-game verification** (Fern/DLL has no unit tests) — the
+shop/dash acceptance test on a live UE title.
+
+-----
+
+## 2026-07-11 — Interesting Functions: opt-in "Gameplay Actions" keyword pack (build 2103; dev)
+
+**SHIPPED (UI-only, opt-in default OFF).** The Interesting Functions scorer was tuned for cheat-value
+targets (Stats/Inventory nouns + Movement/Combat cheat verbs). Character-control + interaction + shop verbs
+the user actually wants to *call* — `Dash`/`Dodge`/`Roll`/`Slide`/`Interact`/`Use`/`Open`/`Buy`/`Sell`/
+`Shop`/`Vendor`/`Merchant`/`Trade`/`Purchase` — were **absent from every keyword bucket**, so a plain
+`OpenShop()` / `Dash()` / `Interact()` scored 0 and stayed below the threshold-5 cutoff (invisible unless
+"Show All").
+
+Added a new opt-in `FunctionCategory.GameplayAction` keyword pack (weight 5, same as Stats/Movement):
+
+- **`KeywordScoringTable.Score(entry, includeGameplayActions = false)`** — new default-`false` param. When
+  off, scoring is **byte-identical** to before (regression-guarded by a test), so the pack is purely additive.
+  Only **NEW** tokens live in the pack — verbs already in Movement (`Jump/Move/Walk/Sprint`) or Combat
+  (`Attack/Fire`) are deliberately NOT duplicated (the final score sums every bucket; a dup would double-count).
+- **Whole-token match** (`KeywordTokenizer`, per the CLAUDE.md rule) → single tokens: `OpenShop` →
+  `["open","shop"]` hits both `Open` and `Shop` (score 10). Noisier common words (`Use`/`Open`/`Store`) are
+  included anyway — opt-in trades precision for recall.
+- **Tie priority lowest**: a verb that also hits a built-in bucket keeps that label (e.g. `SellItem`: Sell↔Item
+  tie → stays Inventory) but still gains the extra points so it surfaces.
+- **UI**: a "Gameplay Actions" checkbox next to "Show All" (green `#5FBF7F`). Toggling **re-scores the loaded
+  set in place** (`RescoreAsync` on a worker thread — no pipe re-fetch, class-noise histogram untouched) via
+  the shared `ScoreEntries` helper. New `GameplayAction` chip in the category dropdown + green "Gameplay" label.
+- **"BP/Exec only" filter** (`CallableOnly`, default off, blue `#7FB6E8`) — a pure *display* filter (in
+  `ApplyFilter`, no re-score) that keeps only rows flagged `BlueprintCallable` or `Exec`. Gameplay/control/shop
+  entry points are almost always one of these two (both survive cooking), so it hides native getter/setter/
+  plumbing noise. Pairs with Gameplay Actions + Show All to browse callable action functions.
+  `ScoredFunctionRow` forwards `IsBlueprintCallable`/`IsExec`. Added to `ClearFilters` (it's a view filter);
+  `GameplayActions` deliberately is NOT (it's a scoring mode with a re-score cost).
+
+Recipe added to [tips.md](tips.md) ("Finding character-control / shop functions"). **No DLL/pipe change** — all
+client-side C# (the DLL already returns raw `function_flags`; scoring has always been UI-side).
+
+**Tests:** `KeywordScoringTableTests` (+6: off-path zero-contribution, default==off regression, on-path
+categorisation incl. the Sell↔Item tie, bare-OpenShop clears threshold, Jump no-double-count, DisplayName/Color
+for the new enum) + `InterestingFunctionsViewModelTests` (+4: pack toggle re-scores & surfaces OpenShop, defaults
+off, BP/Exec-only hides native rows / keeps Exec rows, ClearFilters resets it). Full suite 2388 pass / 0 fail;
+AOT publish clean.
+
+-----
+
 ## 2026-07-11 — Object Tree per-instance drill-downs: Open in Live Walker / Show Related / Locate in GWorld+GameEngine (build 2098; dev)
 
 **SHIPPED (UI-only). Phase 3 (final) of "global instance explorer".** A global instance keyword search is only useful

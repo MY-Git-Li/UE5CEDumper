@@ -33,6 +33,7 @@
     <sys:String x:Key="str.Tab.GameClassFilter">Classes</sys:String>
     <sys:String x:Key="str.Tab.RelatedObjects">Related</sys:String>
     <sys:String x:Key="str.Tab.DumpExplorer">Dump Explorer</sys:String>
+    <sys:String x:Key="str.Tab.LiveFuncs">Live Funcs</sys:String>
     <!-- Experimental tabs (hidden unless opted in via System-tab credit checkbox) -->
     <sys:String x:Key="str.Tab.DetectStats">Detect Stats</sys:String>
     <sys:String x:Key="str.Tab.Snapshot">Snapshot</sys:String>
@@ -753,6 +754,8 @@
     <sys:String x:Key="str.IF.GameOnly">Game Only</sys:String>
     <sys:String x:Key="str.IF.FilterHint">Filter by name (function or class)...</sys:String>
     <sys:String x:Key="str.IF.ShowAll">Show All (incl. low-score)</sys:String>
+    <sys:String x:Key="str.IF.GameplayActions">Gameplay Actions</sys:String>
+    <sys:String x:Key="str.IF.CallableOnly">BP/Exec only</sys:String>
     <sys:String x:Key="str.IF.ClearFilters">Clear</sys:String>
     <sys:String x:Key="str.IF.OpenInst">inst</sys:String>
     <sys:String x:Key="str.IF.Props">Props</sys:String>
@@ -768,6 +771,8 @@
     <sys:String x:Key="str.Tip.IF.OpenInst">Open this row's class in the Instance Finder tab — pre-fills the class name and runs the search to list its live instances.</sys:String>
     <sys:String x:Key="str.Tip.IF.Category">Filter by category. Categories are picked from the strongest-scoring keyword bucket per function (Stats &gt; Inventory &gt; Movement &gt; Combat &gt; Utility tied with same score).</sys:String>
     <sys:String x:Key="str.Tip.IF.ShowAll">When off, hide rows with score below the InterestingThreshold (currently 5). When on, show every UFunction regardless of score.</sys:String>
+    <sys:String x:Key="str.Tip.IF.GameplayActions">Opt-in (default off). Fold an extra keyword pack into scoring for character-control + world-interaction + shop verbs the default buckets skip — Dash / Dodge / Roll / Slide / Climb / Interact / Use / Open / Buy / Sell / Shop / Vendor / Merchant / Trade / Purchase. Lets a plain OpenShop() / Dash() / Interact() clear the threshold and show up (tip: combine with a name filter like "shop" or "buy"). Re-scores the loaded set in place — no reload needed. Noisier by design; turn off to return to the cheat-value default.</sys:String>
+    <sys:String x:Key="str.Tip.IF.CallableOnly">Filter (default off): show only functions flagged BlueprintCallable or Exec. Gameplay/control/shop entry points are almost always one of these two, and both flags survive cooking — so this hides native getters/setters/engine plumbing noise. Pairs well with "Gameplay Actions" + "Show All" to browse callable action functions. Pure display filter — doesn't change scores.</sys:String>
     <sys:String x:Key="str.Tip.IF.Props">List the properties this function reads/writes (static Blueprint-bytecode scan). Native functions have no bytecode and show nothing.</sys:String>
     <sys:String x:Key="str.Tip.IF.OpenLive">Try to open this function in Live Walker. If the class has no live (non-CDO) instance, falls back to the Class Struct tab. Auto-expands the Functions section and selects the target row.</sys:String>
     <sys:String x:Key="str.Tip.IF.LocateGWorld">Locate in GWorld: find a live instance of this function's class, then show the shortest pointer path from GWorld down to it in Live Walker (stops at the parent that points to it)</sys:String>
@@ -785,6 +790,34 @@
     <sys:String x:Key="str.Tip.Common.BatchFindFunc">Fill the "Funcs" column for the selected rows (or all currently-filtered rows if none selected): which UFunctions take each class as a parameter or return value (reflection scan — includes native functions). Each call is a full game-wide sweep, so narrow the filter or select rows first. Already-scanned rows are skipped (cached).</sys:String>
     <sys:String x:Key="str.Common.FuncsCol">Funcs</sys:String>
     <sys:String x:Key="str.Tip.Common.BatchFuncs">Fill the "Funcs" column for the selected rows (or all rows if none selected): which UFunctions reference each property (Blueprint bytecode xref). Each call is a full game scan, so this is slower than the function-side batch — select rows first (Ctrl/Shift+click) to scope it. Most rows show 0 (native-only access / unreferenced).</sys:String>
+
+    <!-- Live Funcs (Live ProcessEvent Call Profiler) -->
+    <sys:String x:Key="str.LF.Start">● Start</sys:String>
+    <sys:String x:Key="str.LF.Stop">■ Stop</sys:String>
+    <sys:String x:Key="str.LF.Refresh">Refresh</sys:String>
+    <sys:String x:Key="str.LF.Clear">Clear</sys:String>
+    <sys:String x:Key="str.LF.FilterHint">Filter by name (function or class)...</sys:String>
+    <sys:String x:Key="str.LF.OpenLive">Live</sys:String>
+    <sys:String x:Key="str.LF.CopyName">Name</sys:String>
+    <sys:String x:Key="str.LF.SetBaseline">⚑ Set Baseline</sys:String>
+    <sys:String x:Key="str.LF.Diff">Diff vs baseline</sys:String>
+    <sys:String x:Key="str.LF.NewOnly">New/changed only</sys:String>
+    <sys:String x:Key="str.LF.ClearBaseline">Clear baseline</sys:String>
+    <sys:String x:Key="str.LF.HideWidgets">Hide UI widgets</sys:String>
+    <sys:String x:Key="str.LF.HideEvents">Hide events/delegates</sys:String>
+    <sys:String x:Key="str.LF.EarliestFirst">Earliest first</sys:String>
+    <sys:String x:Key="str.Tip.LF.Start">Start recording which UFunctions the game dispatches through ProcessEvent. Forces the game-thread PE hook to install. After clicking, ALT-TAB to the game and perform ONE action (open the shop, dash, attack), then click Stop — behaviour-based discovery finds the exact function even when its name is unguessable.</sys:String>
+    <sys:String x:Key="str.Tip.LF.Stop">Stop recording and show the UFunctions that fired, ranked by call count. The action-specific function is usually near the top with a low count (a handful of calls), while per-frame Tick/Update functions have huge counts.</sys:String>
+    <sys:String x:Key="str.Tip.LF.Refresh">Re-fetch the current fire-count table without stopping — a live peek while recording, or a re-pull after Stop.</sys:String>
+    <sys:String x:Key="str.Tip.LF.Filter">Substring match against function name OR class name (space = AND, case-insensitive). e.g. "shop" or "open".</sys:String>
+    <sys:String x:Key="str.Tip.LF.OpenLive">Open this function in Live Walker on a live instance of its class (falls back to Class Struct if the class has no live instance). From there you can invoke it.</sys:String>
+    <sys:String x:Key="str.Tip.LF.CopyName">Copy this function's name to the clipboard.</sys:String>
+    <sys:String x:Key="str.Tip.LF.SetBaseline">Capture the CURRENT results as a baseline (an idle reference). Do this: Start → stand still a few seconds → Stop → Set Baseline. Then record the ACTION (open shop) and the list flips to a diff — functions that DIDN'T fire while idle ("NEW") rank to the top, so the action's function stops drowning under per-frame Tick/Update noise.</sys:String>
+    <sys:String x:Key="str.Tip.LF.Diff">Show the "Δ vs base" column and rank new/increased functions first (needs a baseline). Turn off to rank by raw call count again.</sys:String>
+    <sys:String x:Key="str.Tip.LF.NewOnly">Show ONLY functions that are new or fired more than the baseline — the action-specific set. The shop/dash function is almost always in here.</sys:String>
+    <sys:String x:Key="str.Tip.LF.HideWidgets">Hide functions whose owning class is a UI widget (UUserWidget-derived, tagged "UI"). When a shop/menu opens, the widget is CREATED, so all its own methods fire at once and flood the diff — but the widget is the RESULT, not the entry point. Hiding them leaves the persistent opener (on a PlayerController / UI-manager subsystem / interaction component) — the function you can actually call in the open world.</sys:String>
+    <sys:String x:Key="str.Tip.LF.HideEvents">Hide event handlers and delegate signatures (tagged "Event"/"Deleg" in the Type column — On*/callbacks). These are reactions the engine fires AT the game when something happens, not functions you can call to MAKE it happen. Hiding them leaves imperative callables ("Call"). Note: if this empties the list, the action's real entry point wasn't captured (it opened via a native C++ call the ProcessEvent hook can't see, or the panel hadn't appeared yet — record through until it's fully on screen).</sys:String>
+    <sys:String x:Key="str.Tip.LF.EarliestFirst">Sort by call order — the function that fired FIRST during the recording goes to the top (see the "Order" column). An action's entry point runs BEFORE the reactions it triggers (widget creation, On* notifications), so combined with "New/changed only" this floats the true opener to the top instead of ranking by raw call count. Causal, name-independent.</sys:String>
 
     <!-- Console (UFUNCTION(exec) discovery + invoke) -->
     <sys:String x:Key="str.Con.Load">Load</sys:String>

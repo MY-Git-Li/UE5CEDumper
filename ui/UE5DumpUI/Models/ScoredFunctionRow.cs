@@ -51,6 +51,8 @@ public sealed partial class ScoredFunctionRow : ObservableObject
     public uint   FunctionFlags=> Entry.FunctionFlags;
     public byte   NumParms     => Entry.NumParms;
     public ushort ParmsSize    => Entry.ParmsSize;
+    public bool   IsBlueprintCallable => Entry.IsBlueprintCallable;
+    public bool   IsExec       => Entry.IsExec;
 
     /// <summary>
     /// Batch-xref result for the "Props" direction (class-member properties this

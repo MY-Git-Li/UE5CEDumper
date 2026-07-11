@@ -9,8 +9,9 @@ namespace UE5DumpUI.Services;
 ///
 /// One function gets exactly one category -- the one with the highest
 /// total keyword hit score (ties broken by table order: Stats &gt;
-/// Inventory &gt; Movement &gt; Combat &gt; Utility &gt; Other). Keeps the
-/// UI chip filter unambiguous; multi-tag UI can come later if needed.
+/// Inventory &gt; Movement &gt; Combat &gt; Utility &gt; GameplayAction &gt;
+/// Other). Keeps the UI chip filter unambiguous; multi-tag UI can come
+/// later if needed.
 /// </summary>
 public enum FunctionCategory
 {
@@ -20,6 +21,7 @@ public enum FunctionCategory
     Movement,   // Teleport/Walk/Speed/NoClip/Fly
     Combat,     // Attack/Fire/Cast/Ability
     Utility,    // Save/Load/Spawn/Timer/Cheat/Console
+    GameplayAction, // OPT-IN (default off): Dash/Dodge/Interact/Open/Buy/Sell/Shop/Vendor/Trade
 }
 
 /// <summary>
@@ -144,6 +146,46 @@ public static class KeywordScoringTable
         "Cheat", "Debug", "Console", "Toggle",
     };
 
+    /// <summary>Per-hit score for each Gameplay-Action keyword. Same
+    /// weight as Stats/Inventory/Movement (5) so a single clean action
+    /// verb clears the InterestingThreshold on its own.</summary>
+    public const int GameplayActionKeywordScore = 5;
+
+    /// <summary>
+    /// OPT-IN "gameplay action" verbs — scored ONLY when the caller
+    /// passes <c>includeGameplayActions: true</c> (wired to the
+    /// Interesting Functions panel's "Gameplay Actions" checkbox, which
+    /// defaults OFF). These are the character-control / world-interaction
+    /// / shop verbs the cheat-oriented buckets above deliberately omit:
+    /// Dash/Dodge/Interact/Open/Buy/Sell/Shop/Vendor/Trade all score 0
+    /// without this pack, so a plain <c>OpenShop()</c> or <c>Dash()</c>
+    /// never clears the threshold and stays hidden.
+    ///
+    /// Only NEW tokens live here — verbs already in Movement
+    /// (Jump/Move/Walk/Sprint) or Combat (Attack/Fire) are intentionally
+    /// NOT duplicated, because <see cref="Score"/> sums EVERY bucket into
+    /// the final score and a duplicate would double-count.
+    ///
+    /// Whole-token matching (<see cref="CountTokenHits"/>) means every
+    /// entry is a single token: <c>OpenShop</c> tokenises to
+    /// ["open","shop"] and hits both "Open" and "Shop" here (score 10).
+    /// Noisier common words (Use/Open/Store) are included anyway — the
+    /// pack being opt-in means enabling it deliberately trades precision
+    /// for recall. Tie note: verbs that also hit a built-in bucket keep
+    /// that bucket's label (e.g. <c>SellItem</c> ties Sell↔Item at 5 →
+    /// stays Inventory since GameplayAction is lowest tie priority) but
+    /// still gain the extra points, so they surface.
+    /// </summary>
+    public static readonly string[] GameplayActionKeywords =
+    {
+        // Traversal / movement actions absent from the Movement bucket.
+        "Dash", "Dodge", "Roll", "Slide", "Climb", "Vault", "Glide", "Grapple", "Crouch",
+        // World interaction.
+        "Interact", "Use", "Grab", "Activate", "Talk", "Open",
+        // Shop / economy / trade (the "open shop UI + sell in the open world" goal).
+        "Buy", "Sell", "Shop", "Vendor", "Merchant", "Trade", "Purchase", "Store",
+    };
+
     // ------------------------------------------------------------------
     // Class-name boosts moved to ClassLocationScorer.FunctionBonus so
     // both Function side and Property side (B' / Interesting Properties)
@@ -177,7 +219,12 @@ public static class KeywordScoringTable
     /// category, breakdown) so the UI can show a tooltip explaining
     /// why a row is interesting.
     /// </summary>
-    public static ScoreResult Score(AllFunctionEntry entry)
+    /// <param name="includeGameplayActions">Opt-in: when true, also score
+    /// the <see cref="GameplayActionKeywords"/> pack (Dash/Interact/Open/
+    /// Buy/Sell/Shop/…). Defaults false so the built-in categorisation is
+    /// byte-identical to before this pack existed — the panel's "Gameplay
+    /// Actions" checkbox flips it on.</param>
+    public static ScoreResult Score(AllFunctionEntry entry, bool includeGameplayActions = false)
     {
         // Tokenise the function + class names once. The tokeniser already
         // emits lowercased tokens so keyword comparison is case-blind by
@@ -196,6 +243,10 @@ public static class KeywordScoringTable
         int cheatHits     = CountTokenHits(tokens, ExplicitMovementCheats);
         int combatHits    = CountTokenHits(tokens, CombatKeywords);
         int utilityHits   = CountTokenHits(tokens, UtilityKeywords);
+        // Opt-in pack: only tallied when the caller enables it, so the
+        // default path scores exactly as it did before this pack existed.
+        int gameplayHits  = includeGameplayActions
+                          ? CountTokenHits(tokens, GameplayActionKeywords) : 0;
 
         int statsScore     = statsHits     * StatsKeywordScore;
         int inventoryScore = inventoryHits * InventoryKeywordScore;
@@ -204,19 +255,25 @@ public static class KeywordScoringTable
                            + cheatHits     * ExplicitCheatScore;
         int combatScore    = combatHits    * CombatKeywordScore;
         int utilityScore   = utilityHits   * UtilityKeywordScore;
+        int gameplayScore  = gameplayHits  * GameplayActionKeywordScore;
 
         // Pick highest-scoring category; ties broken by enum order
-        // (Stats > Inventory > Movement > Combat > Utility).
+        // (Stats > Inventory > Movement > Combat > Utility > GameplayAction).
         var category = FunctionCategory.Other;
         int catScore = 0;
         int totalKeywordHits =
-            statsHits + inventoryHits + movementHits + cheatHits + combatHits + utilityHits;
+            statsHits + inventoryHits + movementHits + cheatHits + combatHits
+            + utilityHits + gameplayHits;
 
         if (statsScore > catScore)     { catScore = statsScore;     category = FunctionCategory.Stats; }
         if (inventoryScore > catScore) { catScore = inventoryScore; category = FunctionCategory.Inventory; }
         if (movementScore > catScore)  { catScore = movementScore;  category = FunctionCategory.Movement; }
         if (combatScore > catScore)    { catScore = combatScore;    category = FunctionCategory.Combat; }
         if (utilityScore > catScore)   { catScore = utilityScore;   category = FunctionCategory.Utility; }
+        // GameplayAction last -> lowest tie priority: a verb that also
+        // hits a built-in bucket (e.g. SellItem: Sell↔Item) keeps that
+        // bucket's label but still gains the extra points.
+        if (gameplayScore > catScore)  { catScore = gameplayScore;  category = FunctionCategory.GameplayAction; }
 
         // Class bonus delegated to shared ClassLocationScorer so the
         // identical stacking semantics ("AnimCharacter" = Anim + Character)
@@ -237,7 +294,7 @@ public static class KeywordScoringTable
         // matches BOTH Stats AND Inventory gets credit for both even
         // though only one category label shows.
         int keywordSum = statsScore + inventoryScore + movementScore +
-                         combatScore + utilityScore;
+                         combatScore + utilityScore + gameplayScore;
         int finalScore = keywordSum + classBonus + flagBonus;
 
         return new ScoreResult(
@@ -293,6 +350,7 @@ public static class KeywordScoringTable
         FunctionCategory.Movement  => "Movement",
         FunctionCategory.Combat    => "Combat",
         FunctionCategory.Utility   => "Utility",
+        FunctionCategory.GameplayAction => "Gameplay",
         _                          => "Other",
     };
 
@@ -306,6 +364,7 @@ public static class KeywordScoringTable
         FunctionCategory.Movement  => "#7FB6E8", // sky -- teleport/move
         FunctionCategory.Combat    => "#E0A050", // orange -- attack/skill
         FunctionCategory.Utility   => "#B280D9", // purple -- save/spawn
+        FunctionCategory.GameplayAction => "#5FBF7F", // green -- action/interact/shop
         _                          => "#808080", // grey -- other
     };
 }

@@ -24,6 +24,7 @@
 #include "Solitar.h"   // Solitar::ResolveProtectBits for get_trainer_offsets
 #include "Grausam.h"   // Grausam::SetForegroundLock — keep game thread alive when backgrounded
 #include "Edel.h"
+#include "Linie.h"     // Live PE profiler — pe_profile_start/stop/get
 #include "BuildStamp.h"
 
 #include <json.hpp>
@@ -32,6 +33,7 @@
 #include <cstdlib>   // malloc/free for by-value FString INPUT-param buffers
 #include <cstring>
 #include <sstream>
+#include <unordered_set>   // widget-base set for pe_profile_get is_widget classification
 #include <vector>
 
 using json = nlohmann::json;
@@ -51,6 +53,8 @@ extern "C" int32_t   UE5_GetProtectState(int32_t* outWant, int32_t* outLive, int
 // Size-aware variant: the queued request owns a copy of the param buffer, so a
 // timed-out invoke can't use-after-free this handler's stack-local paramBuf.
 extern "C" int32_t   UE5_CallProcessEventEx(uintptr_t instance, uintptr_t ufunc, uintptr_t params, uint32_t paramsSize);
+extern "C" bool      UE5_EnsureGameThreadHook();
+extern "C" int       UE5_GetProcessEventOffset();
 
 // ============================================================
 // Radar wire helpers — parse "100" / "-42" / "3.14" / "true" /
@@ -483,6 +487,7 @@ void Fern::Stop() {
     // No handler thread is running now — free every remaining value-scan session.
     Radar::SessionManager::Instance().DropAll();
     Radar::GroupSessionManager::Instance().DropAll();
+    Linie::Reset();   // drop any live PE-profile recording + free the table
 
     m_clientConnected = false;
     LOG_INFO("PipeServer: Stopped");
@@ -742,6 +747,7 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
     if (last) {
         Radar::SessionManager::Instance().DropAll();
         Radar::GroupSessionManager::Instance().DropAll();
+        Linie::Reset();   // last client gone — drop any live PE-profile recording
     }
 
     m_connCv.notify_all();
@@ -3019,6 +3025,96 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             data["scanned_classes"]  = enumResult.scannedClasses;
             data["total_functions"]  = enumResult.totalFunctions;
             data["functions"]        = functions;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // === Live ProcessEvent profiler (Linie) — behaviour-based UFunction
+        // discovery. Start records every UFunction* the game dispatches through
+        // ProcessEvent; the user performs an in-game action; Stop freezes the
+        // table; Get resolves + ranks by fire count. Pipe-only. ===
+        if (cmd == Renge::CMD_PE_PROFILE_START) {
+            // Force the game-thread PE hook up NOW so we count the game's own
+            // calls without first issuing an invoke. hook_active=false means the
+            // vtable-offset detection failed on this game → counts will stay 0.
+            bool hookActive = UE5_EnsureGameThreadHook();
+            Linie::StartRecording();
+            Sein::Info("PIPE:profile", "pe_profile_start: recording begun (hook_active=%d)",
+                       hookActive ? 1 : 0);
+            json data;
+            data["recording"]   = true;
+            data["hook_active"] = hookActive;
+            if (!hookActive) {
+                // Distinguish the two failure modes so the UI can advise correctly.
+                int peOffset = UE5_GetProcessEventOffset();
+                data["hook_detail"] = (peOffset >= 0)
+                    ? std::string("PE hook couldn't install (memory near ProcessEvent is busy). "
+                                  "Change to another map/scene and Start again — or restart the game + re-inject.")
+                    : std::string("ProcessEvent not detected — do any invoke first "
+                                  "(Teleport -> Get POV), then Start again.");
+            }
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        if (cmd == Renge::CMD_PE_PROFILE_STOP) {
+            Linie::StopRecording();   // idempotent; counts retained for pe_profile_get
+            Sein::Info("PIPE:profile", "pe_profile_stop: recording frozen");
+            json data;
+            data["recording"] = false;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        if (cmd == Renge::CMD_PE_PROFILE_GET) {
+            int limit = request.value("limit", 200);
+
+            std::vector<Linie::FuncStat> snap;
+            Linie::Snapshot(snap);
+
+            uint64_t totalCalls = 0;
+            for (const auto& s : snap) totalCalls += s.count;
+
+            // Sort by fire count desc; resolve only the capped set (name resolution
+            // is the cost, so we pay it after the sort + cap, not per stored entry).
+            // first_seq (call-stream order) rides along so the UI can re-sort by it.
+            std::sort(snap.begin(), snap.end(),
+                      [](const Linie::FuncStat& a, const Linie::FuncStat& b) { return a.count > b.count; });
+
+            // Transient-UI discriminator. A widget class's own methods all fire for
+            // the FIRST time when the widget is created (e.g. opening a shop), so they
+            // flood a baseline-diff as "new" — but the widget is the RESULT of the
+            // action, not its entry point. is_widget lets the UI hide them to surface
+            // the persistent opener (on a controller / subsystem / component).
+            static const std::unordered_set<std::string> kWidgetBases{ "UserWidget", "Widget" };
+
+            json functions = json::array();
+            int emitted = 0;
+            for (size_t i = 0; i < snap.size() && emitted < limit; ++i) {
+                if ((i & 0xFFF) == 0 && Tot::Requested()) break;  // cooperative abort
+                FunctionInfo fi{};
+                if (!Ubel::ResolveFunctionInfo(snap[i].func, fi)) continue;  // drop stale/recycled
+                uintptr_t classAddr = Ubel::GetOuter(snap[i].func);  // UFunction's Outer == its UClass
+                json item;
+                item["class_name"] = Ubel::GetName(classAddr);
+                item["func_name"]  = fi.name;
+                item["func_addr"]  = Renge::AddrToStr(snap[i].func);
+                item["num_parms"]  = fi.numParms;
+                item["parms_size"] = fi.parmsSize;
+                item["count"]      = snap[i].count;
+                item["first_seq"]  = snap[i].firstSeq;        // call-stream position of first fire
+                item["function_flags"] = fi.functionFlags;   // let the UI tag Event/Delegate/Callable
+                item["is_widget"]  = Aura::ClassDerivesFromAny(classAddr, kWidgetBases);
+                functions.push_back(item);
+                ++emitted;
+            }
+
+            Sein::Info("PIPE:profile",
+                       "pe_profile_get: %d distinct funcs, %llu total calls, %d emitted (limit %d)",
+                       static_cast<int>(snap.size()), (unsigned long long)totalCalls, emitted, limit);
+
+            json data;
+            data["recording"]      = Linie::IsActive();
+            data["distinct_funcs"] = static_cast<int>(snap.size());
+            data["total_calls"]    = totalCalls;
+            data["functions"]      = functions;
             return Renge::MakeResponse(id, data).dump();
         }
 

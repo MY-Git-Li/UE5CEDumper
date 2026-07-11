@@ -1408,6 +1408,40 @@ int32_t UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t para
     return UE5_CallProcessEventEx(instance, ufunc, params, 0);
 }
 
+// Force the game-thread ProcessEvent hook to install NOW (reuses the audit-#3
+// call_once, so it is race-safe and idempotent). Normally the hook installs
+// lazily on the first invoke; the Live PE profiler (Linie) needs it up before
+// any invoke so it can record the game's own PE calls. Returns whether the hook
+// is active afterward (false ⇒ vtable-offset detection failed on this game;
+// the profiler will record nothing and the UI warns).
+extern "C" bool UE5_EnsureGameThreadHook() {
+    EnsureProcessEventReady();          // one-time offset detection + first install attempt
+    if (Stark::IsHookActive()) return true;
+
+    // The first install can fail transiently — e.g. MH_ERROR_MEMORY_ALLOC, when MinHook
+    // can't place a trampoline near ProcessEvent this session (reachable ±2GB region
+    // occupied by another injected tool / a stale prior injection). The call_once above
+    // won't re-run and TryInstallGameThreadHook has its own one-shot guard, so retry the
+    // INSTALL directly here (detection already cached the offset). Stark::InstallHook is
+    // idempotent + mutex-guarded, so repeated Start clicks safely re-attempt; a later
+    // attempt can succeed once memory frees up.
+    if (s_processEventOffset < 0) return false;   // detection genuinely failed — nothing to retry
+    uintptr_t peAddr = ResolveProcessEventAddr();
+    if (!peAddr) return false;
+    bool ok = Stark::InstallHook(peAddr);
+    if (ok) LOG_INFO("GameThreadDispatch: hook install succeeded on retry at 0x%llX",
+                     (unsigned long long)peAddr);
+    return ok;
+}
+
+// ProcessEvent vtable offset once detected (>=0), or a negative sentinel (-2 not
+// yet attempted / -1 detection failed). Lets the UI distinguish "couldn't find
+// ProcessEvent" (retry after an invoke) from "found it but the hook wouldn't
+// install" (MinHook alloc / another tool — restart + re-inject).
+extern "C" int UE5_GetProcessEventOffset() {
+    return s_processEventOffset;
+}
+
 // Direct call entry point — never goes through GameThreadDispatch.
 // Mirrors the fallback path of UE5_CallProcessEvent without the hook
 // check; intended for callers (e.g. Mimic::HandleInvoke) that have

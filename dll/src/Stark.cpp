@@ -13,6 +13,7 @@
 #define LOG_CAT "PIPE"
 #include "Sein.h"
 #include "Stark.h"
+#include "Linie.h"   // Live PE profiler — opt-in per-UFunction fire counting
 
 #include <MinHook.h>
 #include <Windows.h>
@@ -140,6 +141,16 @@ static void __fastcall HookedProcessEvent(void* thisObj, void* ufunc, void* para
     // tell "ticking now" from "went quiet". One clock read on the hot path —
     // cheap next to ProcessEvent's own work, and the atomic store is relaxed.
     s_lastHookFireMs.store(NowMs(), std::memory_order_relaxed);
+
+    // Live PE profiler (Linie): opt-in per-UFunction fire counting. The
+    // not-recording path pays exactly one relaxed atomic load + a
+    // predicted-not-taken branch; the mutex + map touch happen ONLY inside a
+    // Start/Stop window. Mirrors the s_queueDepth "skip work unless armed" gate
+    // below. `ufunc` is the UFunction* for this dispatch — stored raw and
+    // resolved to a name at pe_profile_get time, off the hot path.
+    if (Linie::IsRecording()) {
+        Linie::RecordCall(reinterpret_cast<uintptr_t>(ufunc));
+    }
 
     // Drain pending invocations from pipe thread. Fast path: skip the mutex
     // entirely unless the pipe thread has actually enqueued something. A stale

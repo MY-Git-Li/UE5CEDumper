@@ -631,6 +631,11 @@ public partial class MainWindow : Window
         if (tag != "Snapshot")   vm.Snapshot?.CancelPendingWork();
         if (tag != "ClassPivot") vm.Pivot?.CancelPendingWork();
 
+        // Leaving Live Funcs auto-stops any live PE recording (so a forgotten
+        // session doesn't keep the game thread taking the profile mutex per PE
+        // call) and flushes its filter-keyword memory.
+        if (tag != "LiveFuncs")  vm.LiveFuncs?.OnLeavingTab();
+
         // Opening any experimental tab while enabled permanently commits the
         // opt-in: the System-tab checkbox can no longer be unticked from here
         // on. The gate persists the lock; LockExperimental is idempotent and a

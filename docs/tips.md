@@ -37,6 +37,101 @@ navigation (`GameInstance → …`).
 
 -----
 
+## Finding character-control / shop functions (jump / dash / interact / open-shop)
+
+The **Interesting Functions** finder is tuned for *cheat-value* targets — stat/resource
+nouns (HP/MP/Gold) and movement/combat cheat verbs. Basic **operation** verbs like
+`Dash` / `Dodge` / `Roll` / `Interact` / `Open` / `Buy` / `Sell` / `Shop` / `Vendor` /
+`Trade` are **not** in the default keyword tables, so they score 0 and hide below the
+threshold. Two ways to surface them:
+
+### The opt-in "Gameplay Actions" pack (recommended)
+
+1. Open **Interesting Functions → Load**.
+2. Tick the green **Gameplay Actions** checkbox (next to *Show All*). This folds an extra
+   keyword pack (`Dash`/`Dodge`/`Interact`/`Use`/`Open`/`Buy`/`Sell`/`Shop`/`Vendor`/
+   `Merchant`/`Trade`/`Purchase`/…) into the score and **re-scores in place** — no reload.
+   The matching rows get a green **Gameplay** category chip.
+3. Narrow with the filter box (space = AND over func + class name): type `shop`, `buy`,
+   `dash`, `interact`. Filter to the **Gameplay** category in the dropdown to see only these.
+4. Tick **BP/Exec only** to hide native getter/setter/plumbing noise — gameplay/control/shop
+   entry points are almost always `BlueprintCallable` or `Exec` (both survive cooking). Combine
+   with *Show All* to browse callable action functions even when they score below threshold.
+
+It's opt-in (default off) because it's noisier than the cheat-value default — turn it back
+off to return to the tuned view.
+
+### Best for "open shop UI" and other unguessable functions: the Live Funcs profiler
+
+When the name gives you nothing (a game-specific `OpenShop` / `BeginTrade` / a mangled
+Blueprint name), stop guessing names and watch what the game **actually calls**:
+
+A single recording captures a lot (one real case: 70 functions / ~75k calls in 7s), and
+per-frame `Tick`/`Update` noise dominates the top while the shop-open function — which fires
+only a handful of times — sinks to the bottom. **Use the baseline diff to isolate the action:**
+
+1. Open the **Live Funcs** tab → **Start** → stand still a few seconds → **Stop**. This is
+   your idle baseline. Click **⚑ Set Baseline** (turns on Diff mode).
+2. **Start** → ALT-TAB to the game → walk up to the merchant and **open the shop** → ALT-TAB
+   back → **Stop**.
+3. The list now shows a **diff**: functions that did NOT fire while idle are tagged **NEW**
+   (green) and ranked to the top; "New/changed only" hides the unchanged Tick noise.
+4. Tick **Hide UI widgets** (the created UI, tagged **UI**, not the entry point) and **Hide
+   events/delegates** (the `On*`/callback *reactions*, tagged **Event**/**Deleg** — not functions
+   you call). What's left are imperative **Call** functions on persistent objects.
+5. Tick **Earliest first**. An action's entry point fires *before* the reactions it triggers, so
+   the causal opener sorts to the top of the NEW set (see the **Order** column) — name-independent.
+6. Click **Live** on the top candidate to open it in Live Walker and invoke it.
+
+> **If Start says the PE hook couldn't install** (counts stay 0 even though the game is running):
+> MinHook couldn't place its trampoline near ProcessEvent in this process. **Change to another
+> map/scene and Start again** — a level reload reshuffles memory and almost always frees the space
+> (verified on Elliot). If it persists, restart the game and re-inject. This is unrelated to whether
+> the game is *supported* — the same game hooks fine in a fresh/differently-loaded process.
+>
+> **If "Hide events/delegates" empties the list**, the action opened via a **native C++ call** the
+> ProcessEvent hook can't see (or the panel hadn't fully appeared — record through until it's on
+> screen). That's the limit of behaviour-based discovery. Fallback: while the UI is open, use
+> Instance Finder on the vendor/inventory class and invoke its own `BlueprintCallable` functions
+> (`AddGold`/`SellItem`/…) directly — you often don't need to "open" anything to change the state.
+
+(Without a baseline it still works — just Start → action → Stop and sort/scan by count — but
+the diff is what makes a busy game tractable. Leaving the tab auto-stops recording.)
+
+> **Remember the earlier caveat:** a shop *widget* class like `DOLLShopStoreLayout` is the
+> transient thing the action *creates* (GC'd when the shop closes — only its `Default__` CDO
+> remains), not the opener. The NEW row you want is the function on a **persistent** object
+> (PlayerController / a UI-manager subsystem / the vendor's interaction component) that opened it.
+
+### Then: find the right instance and call it
+
+A control/shop function is a **stateful instance method** — it needs a live, non-CDO `this`:
+
+- Click **Live** on the row to open it in Live Walker (falls back to Class Struct if there's
+  no live instance). Or use the row's **inst** button → Instance Finder.
+- For the player: **Related Objects → 🎯 Detect target**, or Live Walker's *Start from GWorld*
+  → PlayerController → Pawn.
+- **Pipe Invoke** the function (Live Walker row) → fill params → **FIRE**. No-arg verbs
+  (`Jump`, `StopJumping`, `Dash`) fire directly.
+
+### Open-shop caveats (honest limits)
+
+"Open shop UI" is **game-specific** and often needs a param (a vendor object pointer, or a
+vendor/shop ID). Practical path:
+
+1. Find the vendor/shop object: **Instance Finder** → `Shop`/`Store`/`Vendor`/`Merchant`, or
+   spot the interaction actor in Live Walker's GWorld list while standing at the merchant.
+2. See its functions **with params**: open its class in Class Struct / Live Walker
+   (`walk_functions` shows each param's name/type/`obj_class`). Or use **Find Func** to list
+   functions that *take that class as a parameter* — often lands `OpenShopFor(AVendor*)`.
+3. In the invoke dialog, enter a vendor **ID** (`IntProperty`, decimal or `0x…`) or use
+   **[Pick…]** to select the vendor **object pointer** (pre-filtered to the param's class).
+
+Some games open the shop purely via a **UMG widget event** with no callable UFunction entry
+point — those can't be reproduced by invoking a single function.
+
+-----
+
 ## Forcing camera rotation in a fixed-view (2.5D / 45°) game
 
 UE4 and UE5 share the camera pipeline, so the same handful of entry points work

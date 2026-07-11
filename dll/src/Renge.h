@@ -135,6 +135,14 @@ constexpr const char* CMD_GET_TRAINER_OFFSETS      = "get_trainer_offsets";
 constexpr const char* CMD_BEGIN_SNAPSHOT           = "begin_snapshot";
 constexpr const char* CMD_SNAPSHOT_CHUNK           = "snapshot_chunk";
 
+// Live ProcessEvent profiler (Linie via the Stark hook) — record per-UFunction*
+// fire counts during a Start/Stop window, resolve names at query time. Behaviour-
+// based UFunction discovery (Start → do an in-game action → Stop → see what fired).
+// Pipe-only (no Mimic/CE-Lua mailbox).
+constexpr const char* CMD_PE_PROFILE_START         = "pe_profile_start";
+constexpr const char* CMD_PE_PROFILE_STOP          = "pe_profile_stop";
+constexpr const char* CMD_PE_PROFILE_GET           = "pe_profile_get";
+
 // Event types
 constexpr const char* EVT_WATCH            = "watch";
 

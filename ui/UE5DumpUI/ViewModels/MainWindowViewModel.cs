@@ -33,16 +33,17 @@ internal enum MainTabIndex
     ClassStruct = 9,
     RelatedObjects = 10,
     DumpExplorer = 11,   // offline "Dump All" .jsonl browser
+    LiveFuncs = 12,      // Live ProcessEvent Call Profiler (behaviour-based discovery)
     // Fixed tail order: the experimental tabs (hidden unless opted in), then
     // Proxy Deploy (always 2nd-to-last), then System/Pointers (always last) —
     // regardless of any future tab additions. When experimental is off these
     // tabs collapse, so the visible last two are Proxy Deploy + System.
-    DetectStats = 12,   // "Detect Player Stats" (P4, experimental)
-    Snapshot = 13,
-    SpcQuery = 14,
-    ClassPivot = 15,
-    ProxyDeploy = 16,
-    Pointers = 17,   // the "System" tab (str.Tab.Pointers = "System")
+    DetectStats = 13,   // "Detect Player Stats" (P4, experimental)
+    Snapshot = 14,
+    SpcQuery = 15,
+    ClassPivot = 16,
+    ProxyDeploy = 17,
+    Pointers = 18,   // the "System" tab (str.Tab.Pointers = "System")
 }
 
 /// <summary>
@@ -253,6 +254,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public PropertySearchViewModel PropertySearch { get; }
     public GameClassFilterViewModel GameClassFilter { get; }
     public InterestingFunctionsViewModel InterestingFunctions { get; }
+    /// <summary>Live ProcessEvent Call Profiler — behaviour-based UFunction
+    /// discovery (Start → do an in-game action → Stop → see what fired). Finds
+    /// game-specific functions (OpenShop / Dash) that name heuristics can't.</summary>
+    public LiveFuncsViewModel LiveFuncs { get; }
     public InterestingPropertiesViewModel InterestingProperties { get; }
     public ValueSearchViewModel ValueSearch { get; }
     public RelatedObjectsViewModel RelatedObjects { get; }
@@ -397,6 +402,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         PropertySearch = new PropertySearchViewModel(dump, log, aobMaker, platform);
         GameClassFilter = new GameClassFilterViewModel(dump, log, platform);
         InterestingFunctions = new InterestingFunctionsViewModel(dump, log, aobMaker, platform);
+        LiveFuncs = new LiveFuncsViewModel(dump, log, platform);
         InterestingProperties = new InterestingPropertiesViewModel(dump, log, platform);
         ValueSearch = new ValueSearchViewModel(dump, log);
         RelatedObjects = new RelatedObjectsViewModel(dump, log, platform);
@@ -1112,6 +1118,70 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 _log.Error($"InterestingFunctions NavigateToFunction handler error: {className}::{funcName}", ex);
+            }
+        };
+
+        // Wire Live Funcs (PE profiler) -> Live Walker, same instance-based handoff
+        // as the Interesting Functions finder: find a live non-CDO instance of the
+        // class, open it in Live Walker, and auto-select the discovered function.
+        LiveFuncs.NavigateToFunction += async (className, funcName) =>
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(className)) return;
+
+                var instances = await _dump.FindInstancesAsync(className, exactMatch: true, limit: 5);
+                string? liveAddr = null;
+                foreach (var inst in instances.Instances)
+                {
+                    if (string.IsNullOrEmpty(inst.Address)) continue;
+                    if (inst.Name.StartsWith("Default__", StringComparison.Ordinal)) continue;
+                    liveAddr = inst.Address;
+                    break;
+                }
+
+                if (!string.IsNullOrEmpty(liveAddr))
+                {
+                    SelectedTabIndex = (int)MainTabIndex.LiveWalker;
+                    await LiveWalker.NavigateToAddressCommand.ExecuteAsync(liveAddr);
+                    var picked = await LiveWalker.TrySelectFunctionByNameAsync(funcName);
+                    StatusText = picked
+                        ? $"Navigated to {className}::{funcName} (live instance {liveAddr})"
+                        : $"Navigated to {className} @ {liveAddr}; function '{funcName}' not in this class";
+                    _log.Info($"LiveFuncs -> LiveWalker: {className}::{funcName} @ {liveAddr}" +
+                              (picked ? "" : " (function not selected)"));
+                }
+                else
+                {
+                    SelectedTabIndex = (int)MainTabIndex.ClassStruct;
+                    var classes = await _dump.ListClassesAsync(gameOnly: false);
+                    var match = classes.Classes.FirstOrDefault(
+                        c => c.ClassName.Equals(className, StringComparison.Ordinal));
+                    if (match != null && !string.IsNullOrEmpty(match.ClassAddr))
+                    {
+                        await ClassStruct.LoadClassCommand.ExecuteAsync(match.ClassAddr);
+                        StatusText = $"No live instance of {className}; showing class metadata";
+                    }
+                    else
+                    {
+                        StatusText = $"Class {className} not resolvable (Find Instances + ListClasses both empty)";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"LiveFuncs NavigateToFunction handler error: {className}::{funcName}", ex);
+            }
+        };
+
+        // Wire Live Funcs -> clipboard (copy function name). VM stays IPlatformService-free.
+        LiveFuncs.RequestCopyText += async (text) =>
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            try { await _platform.CopyToClipboardAsync(text); }
+            catch (Exception ex)
+            {
+                _log.Error($"LiveFuncs clipboard copy failed: {ex.Message}", ex);
             }
         };
 

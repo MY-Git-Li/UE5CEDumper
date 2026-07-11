@@ -1003,6 +1003,67 @@ int32_t FindFieldOffset(uintptr_t classAddr, const char* exact,
         ? fi.Offset : -1;
 }
 
+// Read UFunction::FunctionFlags (+ the NumParms/ParmsSize/ReturnValueOffset that
+// sit at fixed offsets past it) into `fi`. Version-aware offset probe shared by
+// WalkFunctions and ResolveFunctionInfo. `funcAddr` must already be a validated
+// UFunction*; all reads are SEH-safe via Macht::ReadSafe.
+static void ReadFuncFlagsAndParams(uintptr_t funcAddr, FunctionInfo& fi) {
+    // Version-aware probing of UFunction::FunctionFlags. RE-UE4SS templates:
+    //   0x88 = UE 4.18-4.20      0x98 = UE 4.21-4.24
+    //   0xB0 = UE 4.25-4.27 / UE5.0-5.4      0xC0 = UE 5.5+
+    uint32_t funcFlags = 0;
+    int funcFlagsOff = -1;
+    int primary;
+    if (g_cachedUEVersion >= 550)      primary = 0xC0;
+    else if (g_cachedUEVersion >= 425) primary = 0xB0;
+    else if (g_cachedUEVersion >= 421) primary = 0x98;
+    else                               primary = 0x88;
+
+    if (Macht::ReadSafe<uint32_t>(funcAddr + primary, funcFlags) && funcFlags != 0) {
+        funcFlagsOff = primary;
+    } else {
+        // Fallback: try all known offsets (skip primary, already tried).
+        for (int tryOff : { 0xB0, 0xC0, 0x88, 0x98, 0xA8, 0xB8 }) {
+            if (tryOff == primary) continue;
+            if (Macht::ReadSafe<uint32_t>(funcAddr + tryOff, funcFlags) && funcFlags != 0) {
+                funcFlagsOff = tryOff;
+                break;
+            }
+        }
+    }
+    fi.functionFlags = funcFlags;
+
+    // NumParms/ParmsSize/ReturnValueOffset are at fixed offsets relative to
+    // FunctionFlags (stable across all UE versions):
+    //   +0x04 = NumParms (uint8)  +0x06 = ParmsSize (uint16)  +0x08 = ReturnValueOffset (uint16)
+    if (funcFlagsOff >= 0) {
+        Macht::ReadSafe<uint8_t> (funcAddr + funcFlagsOff + 0x04, fi.numParms);
+        Macht::ReadSafe<uint16_t>(funcAddr + funcFlagsOff + 0x06, fi.parmsSize);
+        Macht::ReadSafe<uint16_t>(funcAddr + funcFlagsOff + 0x08, fi.returnValueOffset);
+    }
+}
+
+// Resolve a single UFunction* to its (name, fullName, flags, numParms, parmsSize).
+// Validates the meta-class name == "Function" first — this guards against stale/
+// recycled pointers (e.g. a UFunction* recorded by the Live PE profiler whose slot
+// was reused after a GC / level-load): a recycled object won't deref to a class
+// named "Function". All reads are SEH-safe via Macht::ReadSafe, so a dead pointer
+// fails safe. Returns false when funcAddr is not (or no longer) a UFunction.
+bool ResolveFunctionInfo(uintptr_t funcAddr, FunctionInfo& out) {
+    if (!funcAddr) return false;
+    uintptr_t metaClass = 0;
+    if (!Macht::ReadSafe(funcAddr + Grimoire::OFF_UOBJECT_CLASS, metaClass) || !metaClass)
+        return false;
+    if (ReadFName(metaClass + Grimoire::OFF_UOBJECT_NAME) != "Function")
+        return false;
+    out = FunctionInfo{};
+    out.address  = funcAddr;
+    out.name     = GetName(funcAddr);
+    out.fullName = GetFullName(funcAddr);
+    ReadFuncFlagsAndParams(funcAddr, out);
+    return true;
+}
+
 // --- WalkFunctions: enumerate UFunctions of a UClass ---
 
 std::vector<FunctionInfo> WalkFunctions(uintptr_t uclassAddr) {
@@ -1039,48 +1100,9 @@ std::vector<FunctionInfo> WalkFunctions(uintptr_t uclassAddr) {
                 fi.fullName = GetFullName(child);
                 fi.address = child;
 
-                // Read FunctionFlags (UFunction::FunctionFlags)
-                // Version-aware probing: try the most likely offset first.
-                // RE-UE4SS templates confirm offsets:
-                //   0x88 = UE 4.18-4.20
-                //   0x98 = UE 4.21-4.24
-                //   0xB0 = UE 4.25-4.27 / UE5.0-5.4
-                //   0xC0 = UE 5.5+
-                uint32_t funcFlags = 0;
-                int funcFlagsOff = -1;
-
-                // Determine primary offset based on detected UE version
-                int primary;
-                if (g_cachedUEVersion >= 550)      primary = 0xC0;
-                else if (g_cachedUEVersion >= 425) primary = 0xB0;
-                else if (g_cachedUEVersion >= 421) primary = 0x98;
-                else                               primary = 0x88;
-
-                // Try primary offset first
-                if (Macht::ReadSafe<uint32_t>(child + primary, funcFlags) && funcFlags != 0) {
-                    funcFlagsOff = primary;
-                } else {
-                    // Fallback: try all known offsets (skip primary, already tried)
-                    for (int tryOff : { 0xB0, 0xC0, 0x88, 0x98, 0xA8, 0xB8 }) {
-                        if (tryOff == primary) continue;
-                        if (Macht::ReadSafe<uint32_t>(child + tryOff, funcFlags) && funcFlags != 0) {
-                            funcFlagsOff = tryOff;
-                            break;
-                        }
-                    }
-                }
-                fi.functionFlags = funcFlags;
-
-                // NumParms, ParmsSize, ReturnValueOffset are at fixed offsets
-                // relative to FunctionFlags (stable across all UE versions):
-                //   +0x04 = NumParms (uint8)
-                //   +0x06 = ParmsSize (uint16)
-                //   +0x08 = ReturnValueOffset (uint16)
-                if (funcFlagsOff >= 0) {
-                    Macht::ReadSafe<uint8_t> (child + funcFlagsOff + 0x04, fi.numParms);
-                    Macht::ReadSafe<uint16_t>(child + funcFlagsOff + 0x06, fi.parmsSize);
-                    Macht::ReadSafe<uint16_t>(child + funcFlagsOff + 0x08, fi.returnValueOffset);
-                }
+                // FunctionFlags + NumParms/ParmsSize/ReturnValueOffset — version-aware
+                // probe shared with ResolveFunctionInfo (the Live PE profiler path).
+                ReadFuncFlagsAndParams(child, fi);
 
                 // Walk the UFunction's own property chain (its parameters)
                 // UFunction inherits UStruct, so ChildProperties is at USTRUCT_CHILDPROPS

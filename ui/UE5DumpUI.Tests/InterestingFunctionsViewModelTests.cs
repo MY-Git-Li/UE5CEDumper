@@ -1,3 +1,4 @@
+using System.Linq;
 using UE5DumpUI.Core;
 using UE5DumpUI.Models;
 using UE5DumpUI.Services;
@@ -202,6 +203,48 @@ public class InterestingFunctionsViewModelTests
             "ShowAll should reveal additional rows below the threshold");
     }
 
+    // ==================================================================
+    // Gameplay-Action opt-in (default off) re-scores in place
+    // ==================================================================
+
+    [Fact]
+    public async Task GameplayActions_Toggle_RescoresAndSurfacesActionVerbs()
+    {
+        // OpenShop scores 0 keyword points by default (Open/Shop are in the
+        // opt-in pack only), so with just its BlueprintCallable flag (+2) it
+        // sits below the threshold 5 and is hidden from the default view.
+        var entries = new List<AllFunctionEntry>
+        {
+            new() { ClassName="ShopSubsystem", FuncName="OpenShop",
+                    FunctionFlags=0x0400_0000, NumParms=1, ParmsSize=8 },
+        };
+        var (vm, _) = MakeVm(entries);
+        await vm.LoadCommand.ExecuteAsync(null);
+
+        Assert.DoesNotContain(vm.Results, r => r.FuncName == "OpenShop");
+
+        // Enable the opt-in pack -> full re-score -> OpenShop now clears the
+        // threshold as a GameplayAction row (Open + Shop = 10). Await the
+        // re-score directly for a deterministic result (the property setter
+        // also kicks one off fire-and-forget).
+        vm.GameplayActions = true;
+        await vm.RescoreAsync();
+
+        Assert.Contains(vm.Results, r => r.FuncName == "OpenShop");
+        var row = vm.Results.First(r => r.FuncName == "OpenShop");
+        Assert.Equal(FunctionCategory.GameplayAction, row.Category);
+    }
+
+    [Fact]
+    public async Task GameplayActions_DefaultsOff()
+    {
+        var (vm, _) = MakeVm();
+        Assert.False(vm.GameplayActions);
+        await vm.LoadCommand.ExecuteAsync(null);
+        // Default load must not assign any row the GameplayAction category.
+        Assert.DoesNotContain(vm.Results, r => r.Category == FunctionCategory.GameplayAction);
+    }
+
     [Fact]
     public async Task ClearFilters_ResetsAllInputs()
     {
@@ -211,12 +254,59 @@ public class InterestingFunctionsViewModelTests
         vm.FilterText = "Foo";
         vm.CategoryFilter = FunctionCategory.Stats;
         vm.ShowAll = true;
+        vm.CallableOnly = true;
 
         vm.ClearFiltersCommand.Execute(null);
 
         Assert.Equal("", vm.FilterText);
         Assert.Null(vm.CategoryFilter);
         Assert.False(vm.ShowAll);
+        Assert.False(vm.CallableOnly);
+    }
+
+    // ==================================================================
+    // BlueprintCallable/Exec filter (default off)
+    // ==================================================================
+
+    [Fact]
+    public async Task CallableOnly_HidesNonCallableNonExecRows()
+    {
+        // Two above-threshold Movement rows: one BlueprintCallable, one with
+        // no flags at all. The keyword score alone (Teleport=5 + class bonus)
+        // clears the threshold, so both show by default.
+        var entries = new List<AllFunctionEntry>
+        {
+            new() { ClassName="MyPawn", FuncName="TeleportCallable",
+                    FunctionFlags=0x0400_0000, NumParms=1, ParmsSize=4 }, // BlueprintCallable
+            new() { ClassName="MyPawn", FuncName="TeleportNative",
+                    FunctionFlags=0x0000_0400, NumParms=1, ParmsSize=4 }, // Native only (not BC/Exec)
+        };
+        var (vm, _) = MakeVm(entries);
+        await vm.LoadCommand.ExecuteAsync(null);
+        Assert.Contains(vm.Results, r => r.FuncName == "TeleportCallable");
+        Assert.Contains(vm.Results, r => r.FuncName == "TeleportNative");
+
+        // Enable BP/Exec-only -> the native-only row drops, the callable stays.
+        vm.CallableOnly = true;
+        Assert.Contains(vm.Results, r => r.FuncName == "TeleportCallable");
+        Assert.DoesNotContain(vm.Results, r => r.FuncName == "TeleportNative");
+    }
+
+    [Fact]
+    public async Task CallableOnly_KeepsExecRows()
+    {
+        // An Exec function with no keyword hits: needs Show All to clear the
+        // threshold, but must survive the BP/Exec-only filter (Exec counts).
+        var entries = new List<AllFunctionEntry>
+        {
+            new() { ClassName="MyCheatManager", FuncName="DoThing",
+                    FunctionFlags=0x0000_0200, NumParms=0, ParmsSize=0 }, // Exec only
+        };
+        var (vm, _) = MakeVm(entries);
+        await vm.LoadCommand.ExecuteAsync(null);
+        vm.ShowAll = true;        // DoThing scores 0 -> only visible with Show All
+        vm.CallableOnly = true;   // Exec flag satisfies the filter
+        Assert.Contains(vm.Results, r => r.FuncName == "DoThing");
     }
 
     // ==================================================================
