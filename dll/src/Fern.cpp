@@ -3056,16 +3056,17 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
         if (cmd == Renge::CMD_PE_PROFILE_GET) {
             int limit = request.value("limit", 200);
 
-            std::vector<std::pair<uintptr_t, uint64_t>> snap;
+            std::vector<Linie::FuncStat> snap;
             Linie::Snapshot(snap);
 
             uint64_t totalCalls = 0;
-            for (const auto& p : snap) totalCalls += p.second;
+            for (const auto& s : snap) totalCalls += s.count;
 
             // Sort by fire count desc; resolve only the capped set (name resolution
             // is the cost, so we pay it after the sort + cap, not per stored entry).
+            // first_seq (call-stream order) rides along so the UI can re-sort by it.
             std::sort(snap.begin(), snap.end(),
-                      [](const auto& a, const auto& b) { return a.second > b.second; });
+                      [](const Linie::FuncStat& a, const Linie::FuncStat& b) { return a.count > b.count; });
 
             // Transient-UI discriminator. A widget class's own methods all fire for
             // the FIRST time when the widget is created (e.g. opening a shop), so they
@@ -3079,15 +3080,16 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             for (size_t i = 0; i < snap.size() && emitted < limit; ++i) {
                 if ((i & 0xFFF) == 0 && Tot::Requested()) break;  // cooperative abort
                 FunctionInfo fi{};
-                if (!Ubel::ResolveFunctionInfo(snap[i].first, fi)) continue;  // drop stale/recycled
-                uintptr_t classAddr = Ubel::GetOuter(snap[i].first);  // UFunction's Outer == its UClass
+                if (!Ubel::ResolveFunctionInfo(snap[i].func, fi)) continue;  // drop stale/recycled
+                uintptr_t classAddr = Ubel::GetOuter(snap[i].func);  // UFunction's Outer == its UClass
                 json item;
                 item["class_name"] = Ubel::GetName(classAddr);
                 item["func_name"]  = fi.name;
-                item["func_addr"]  = Renge::AddrToStr(snap[i].first);
+                item["func_addr"]  = Renge::AddrToStr(snap[i].func);
                 item["num_parms"]  = fi.numParms;
                 item["parms_size"] = fi.parmsSize;
-                item["count"]      = snap[i].second;
+                item["count"]      = snap[i].count;
+                item["first_seq"]  = snap[i].firstSeq;        // call-stream position of first fire
                 item["function_flags"] = fi.functionFlags;   // let the UI tag Event/Delegate/Callable
                 item["is_widget"]  = Aura::ClassDerivesFromAny(classAddr, kWidgetBases);
                 functions.push_back(item);

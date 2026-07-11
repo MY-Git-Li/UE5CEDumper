@@ -19,6 +19,11 @@ public sealed class PeProfileEntry
     public byte   NumParms  { get; init; }
     public ushort ParmsSize { get; init; }
     public long   Count     { get; init; }
+    /// <summary>Call-stream position of this function's FIRST fire during the recording
+    /// (1-based; 0 if unknown). The causal signal: an action's entry point fires before
+    /// the reactions it triggers, so sorting NEW rows by FirstSeq ascending puts the true
+    /// opener above its downstream widget-creation / On* effects.</summary>
+    public long   FirstSeq  { get; init; }
     public uint   FunctionFlags { get; init; }
 
     // UE FunctionFlags (ObjectMacros.h) relevant to "is this a thing I can CALL vs

@@ -59,6 +59,10 @@ public partial class LiveFuncsViewModel : ViewModelBase
     /// FUNC_Delegate). Those are reactions the engine fires AT the game, not imperative
     /// functions you'd invoke; hiding them leaves the callable entry points.</summary>
     [ObservableProperty] private bool   _hideEvents;
+    /// <summary>Sort by call-stream order (earliest first fire at the top) instead of by
+    /// count/diff. The causal ordering: an action's entry point fires before the reactions
+    /// it triggers, so combined with New/changed-only this floats the true opener to the top.</summary>
+    [ObservableProperty] private bool   _earliestFirst;
     [ObservableProperty] private string _baselineStatus = "No baseline — record idle, then Set Baseline.";
 
     /// <summary>Per-session remembered filter keywords (LRU) surfaced as the filter
@@ -90,6 +94,7 @@ public partial class LiveFuncsViewModel : ViewModelBase
         _filterMemory.Schedule(value);
     }
     partial void OnDiffModeChanged(bool value) => ApplyDiffAndFilter();
+    partial void OnEarliestFirstChanged(bool value) => ApplyDiffAndFilter();
     partial void OnNewChangedOnlyChanged(bool value) => ApplyFilter();
     partial void OnHideWidgetsChanged(bool value) => ApplyFilter();
     partial void OnHideEventsChanged(bool value) => ApplyFilter();
@@ -240,12 +245,24 @@ public partial class LiveFuncsViewModel : ViewModelBase
             else { e.IsNew = false; e.Delta = 0; }
         }
 
-        _allEntries = diff
-            ? _allEntries.OrderByDescending(e => e.IsNew)
-                         .ThenByDescending(e => e.Delta)
-                         .ThenBy(e => e.Count)
-                         .ToList()
-            : _allEntries.OrderByDescending(e => e.Count).ToList();
+        if (EarliestFirst)
+        {
+            // Causal order: earliest first-fire on top (FirstSeq 0 = unknown → sink last).
+            _allEntries = _allEntries
+                .OrderBy(e => e.FirstSeq <= 0 ? long.MaxValue : e.FirstSeq)
+                .ToList();
+        }
+        else if (diff)
+        {
+            _allEntries = _allEntries.OrderByDescending(e => e.IsNew)
+                                     .ThenByDescending(e => e.Delta)
+                                     .ThenBy(e => e.Count)
+                                     .ToList();
+        }
+        else
+        {
+            _allEntries = _allEntries.OrderByDescending(e => e.Count).ToList();
+        }
 
         ApplyFilter();
     }

@@ -70,6 +70,10 @@
                 IsChecked="{Binding HideEvents}"
                 ToolTip.Tip="{StaticResource str.Tip.LF.HideEvents}"
                 Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center"/>
+      <CheckBox Content="{StaticResource str.LF.EarliestFirst}"
+                IsChecked="{Binding EarliestFirst}"
+                ToolTip.Tip="{StaticResource str.Tip.LF.EarliestFirst}"
+                Foreground="#DCDCAA" FontSize="12" VerticalAlignment="Center"/>
       <Button Content="{StaticResource str.LF.ClearBaseline}"
               Command="{Binding ClearBaselineCommand}"
               IsVisible="{Binding DiffMode}"
@@ -112,6 +116,17 @@
               FontSize="12"
               FontFamily="Consolas, Menlo, monospace">
       <DataGrid.Columns>
+        <!-- Order: call-stream position of the first fire (lower = earlier = more likely
+             the causal entry point). Sort ascending to put openers on top. -->
+        <DataGridTemplateColumn Header="Order" Width="64" SortMemberPath="FirstSeq" CanUserSort="True">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:PeProfileEntry">
+              <TextBlock Text="{Binding FirstSeq}"
+                         Foreground="#7FB6E8"
+                         VerticalAlignment="Center" Margin="6,0"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
         <DataGridTemplateColumn Header="Calls" Width="80" SortMemberPath="Count" CanUserSort="True">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate x:DataType="m:PeProfileEntry">

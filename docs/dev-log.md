@@ -18,6 +18,34 @@ builds ≤696 in
 
 -----
 
+## 2026-07-11 — Live Funcs profiler refinements: baseline diff, hide-widgets, hide-events, call-order (builds 2110-2130; dev)
+
+Iterative in-game hardening of the Live PE profiler ([Linie](../dll/src/Linie.cpp)) driven by a
+DQ7R (UE4.27 Shipping) open-shop hunt. Each round cut noise so the action's true entry point surfaces
+— all **general / game-agnostic** (no per-game heuristics):
+
+- **Baseline diff** (client-side): Set Baseline on an idle recording, then the action recording shows a
+  Δ column + ranks NEW / increased rows first (keyed by `ClassName::FuncName`, stable across GC).
+  "New/changed only" hides unchanged Tick noise.
+- **Hide UI widgets**: `pe_profile_get` walks each function's owning-class super-chain
+  (`Aura::ClassDerivesFromAny{UserWidget,Widget}`) → `is_widget`. Opening a shop CREATES its widget, so
+  all the widget's own methods fire at once and flood the diff — hiding them leaves the persistent opener.
+- **Hide events/delegates + Type badge**: `pe_profile_get` returns `function_flags`; the UI tags each row
+  Event / Deleg / Call / native (`FUNC_Event`/`FUNC_Delegate`/`FUNC_BlueprintCallable`) and can hide the
+  On*/callback reactions, leaving imperative callables.
+- **Call order (first-fired)**: Linie now records each function's first-fire position in the call stream
+  (`first_seq`); the UI adds an "Order" column + "Earliest first" sort. An action's entry point runs
+  BEFORE the reactions it triggers, so this is the causal, name-independent signal that floats the true
+  opener to the top of the NEW set.
+
+**Finding of record:** on DQ7R the shop opens via a **native C++ call** the ProcessEvent hook can't see —
+only its BP event callbacks (On*) are visible. That's the fundamental limit of PE-based discovery, not a
+tool gap; the profiler correctly surfaces it (hide-events empties the callable list). For most UE games
+(reflected/Blueprint gameplay) the profiler + these filters find the action's function directly. Tests
+across the four rounds: +25 (`LiveFuncsViewModelTests`). Suite 2419 pass / 0 fail; all 3 proxies + AOT clean.
+
+-----
+
 ## 2026-07-11 — Live ProcessEvent Call Profiler (Linie) — behaviour-based UFunction discovery (build 2109; dev)
 
 **SHIPPED (DLL + UI). New "Live Funcs" tab.** The root-cause answer to "which function does this game

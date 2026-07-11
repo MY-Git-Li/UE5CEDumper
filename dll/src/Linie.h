@@ -17,6 +17,17 @@
 
 namespace Linie {
 
+// One profiled function: how many times it fired + WHEN it first fired (its
+// position in the recording's call stream, 1-based). firstSeq is the causal
+// signal — an action's entry point (e.g. OpenShop) fires BEFORE the reactions
+// it triggers (widget creation, On* notifications), so a smaller firstSeq among
+// the diff's NEW rows ranks the true entry point above its downstream effects.
+struct FuncStat {
+    uintptr_t func     = 0;
+    uint64_t  count    = 0;
+    uint64_t  firstSeq = 0;
+};
+
 // Hot-path gate. Defined in Linie.cpp; declared extern so the check inlines at
 // Stark's call site (one relaxed atomic load + predicted-not-taken branch when off).
 extern std::atomic<bool> g_recording;
@@ -40,7 +51,8 @@ bool IsActive();
 // so a stale recording never leaks across connections and the map is freed.
 void Reset();
 
-// Copy out {UFunction* addr -> count} pairs. Safe to call while recording.
-void Snapshot(std::vector<std::pair<uintptr_t, uint64_t>>& out);
+// Copy out one FuncStat per distinct function (addr / count / firstSeq). Safe to
+// call while recording.
+void Snapshot(std::vector<FuncStat>& out);
 
 } // namespace Linie

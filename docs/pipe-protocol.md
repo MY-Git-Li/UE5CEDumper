@@ -461,6 +461,9 @@ Response for `pe_profile_get`:
   "functions": [
     { "class_name": "AShopVendor", "func_name": "OpenShop",
       "func_addr": "0x1B2C3D40", "num_parms": 1, "parms_size": 8, "count": 3,
+      "first_seq": 40,   // call-stream position of the FIRST fire (1-based). Causal
+                         // signal: an entry point fires before the reactions it triggers,
+                         // so sorting NEW rows by first_seq asc floats the true opener up.
       "function_flags": 67108864,  // UFunction::FunctionFlags — UI tags Event/Delegate
                                    // (a reaction) vs Call (an imperative entry point).
       "is_widget": false }   // owning class derives from UUserWidget/UWidget — the

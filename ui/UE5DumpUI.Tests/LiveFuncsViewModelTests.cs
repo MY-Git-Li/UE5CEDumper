@@ -308,6 +308,29 @@ public class LiveFuncsViewModelTests
     }
 
     [Fact]
+    public async Task EarliestFirst_SortsByFirstFireCausalOrder()
+    {
+        // The opener (OpenShop) fired at call #40 — BEFORE the reactions it triggered
+        // (widget Construct #205, a per-frame Tick #2 with a huge count). Ranked by count
+        // Tick tops; by call order OpenShop tops. Unknown FirstSeq (0) sinks last.
+        var (vm, dump) = MakeVm();
+        dump.NextGet = ResultOf(
+            new PeProfileEntry { ClassName = "APawn",    FuncName = "Tick",      Count = 900, FirstSeq = 2 },
+            new PeProfileEntry { ClassName = "AShopMgr", FuncName = "OpenShop",  Count = 1,   FirstSeq = 40 },
+            new PeProfileEntry { ClassName = "AWidget",  FuncName = "Construct", Count = 3,   FirstSeq = 205 },
+            new PeProfileEntry { ClassName = "AMisc",    FuncName = "NoSeq",     Count = 5,   FirstSeq = 0 });
+        await vm.StartCommand.ExecuteAsync(null);
+        await vm.StopCommand.ExecuteAsync(null);
+
+        vm.EarliestFirst = true;
+        // Ascending by FirstSeq (0 → last): Tick(2), OpenShop(40), Construct(205), NoSeq(0→last).
+        Assert.Equal("Tick", vm.Results[0].FuncName);
+        Assert.Equal("OpenShop", vm.Results[1].FuncName);
+        Assert.Equal("Construct", vm.Results[2].FuncName);
+        Assert.Equal("NoSeq", vm.Results[3].FuncName);  // FirstSeq 0 sinks to the bottom
+    }
+
+    [Fact]
     public async Task HideEvents_RemovesEventAndDelegateRows()
     {
         var (vm, dump) = MakeVm();
