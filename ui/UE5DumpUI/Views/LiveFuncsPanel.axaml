@@ -82,19 +82,20 @@
                  Foreground="#8FA0B8" FontSize="12" VerticalAlignment="Center"/>
     </StackPanel>
 
-    <!-- Status + progress -->
-    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8"
-                Margin="0,0,0,4" VerticalAlignment="Center">
-      <ProgressBar IsIndeterminate="True"
+    <!-- Status + progress. DockPanel (not a horizontal StackPanel) so the status
+         TextBlock gets a bounded width and WRAPS long messages instead of being
+         clipped at the window edge. -->
+    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4" LastChildFill="True">
+      <ProgressBar DockPanel.Dock="Left" IsIndeterminate="True"
                    IsVisible="{Binding IsBusy}"
-                   Width="80" Height="4" VerticalAlignment="Center"/>
+                   Width="80" Height="4" VerticalAlignment="Center" Margin="0,0,8,0"/>
       <TextBlock Text="{Binding StatusText}"
                  Foreground="#AAB8D0" FontSize="13"
                  FontFamily="Consolas, Menlo, monospace"
                  TextWrapping="Wrap"
                  VerticalAlignment="Center"
                  ToolTip.Tip="{Binding StatusText}"/>
-    </StackPanel>
+    </DockPanel>
 
     <!-- Error display -->
     <TextBlock DockPanel.Dock="Top"

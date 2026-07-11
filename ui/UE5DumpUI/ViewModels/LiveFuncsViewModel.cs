@@ -141,10 +141,9 @@ public partial class LiveFuncsViewModel : ViewModelBase
             IsRecording = true;
             StatusText = start.HookActive
                 ? "Recording… ALT-TAB to the game, perform the action (open shop / dash), then click Stop."
-                : "No PE hook active — counts will stay 0. "
-                  + (string.IsNullOrEmpty(start.Detail)
-                        ? "Try issuing any invoke first (e.g. Teleport → Get POV), then Start again."
-                        : start.Detail);
+                : string.IsNullOrEmpty(start.Detail)
+                    ? "No PE hook — counts stay 0. Change to another map/scene and Start again."
+                    : start.Detail;   // self-contained reason from the DLL
             _log.Info($"LivePEProfiler: start (hook_active={start.HookActive})");
         }
         catch (Exception ex)

@@ -3047,11 +3047,10 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                 // Distinguish the two failure modes so the UI can advise correctly.
                 int peOffset = UE5_GetProcessEventOffset();
                 data["hook_detail"] = (peOffset >= 0)
-                    ? std::string("ProcessEvent was found but the game-thread hook could not install "
-                                  "(MinHook trampoline alloc failed, or another injected tool holds it). "
-                                  "Restart the game and re-inject, or close other CE hooks, then Start again.")
-                    : std::string("ProcessEvent not detected yet. Issue any invoke first "
-                                  "(e.g. Teleport -> Get POV), then Start again.");
+                    ? std::string("PE hook couldn't install (memory near ProcessEvent is busy). "
+                                  "Change to another map/scene and Start again — or restart the game + re-inject.")
+                    : std::string("ProcessEvent not detected — do any invoke first "
+                                  "(Teleport -> Get POV), then Start again.");
             }
             return Renge::MakeResponse(id, data).dump();
         }

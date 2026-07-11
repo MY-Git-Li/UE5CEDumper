@@ -83,6 +83,12 @@ only a handful of times — sinks to the bottom. **Use the baseline diff to isol
    the causal opener sorts to the top of the NEW set (see the **Order** column) — name-independent.
 6. Click **Live** on the top candidate to open it in Live Walker and invoke it.
 
+> **If Start says the PE hook couldn't install** (counts stay 0 even though the game is running):
+> MinHook couldn't place its trampoline near ProcessEvent in this process. **Change to another
+> map/scene and Start again** — a level reload reshuffles memory and almost always frees the space
+> (verified on Elliot). If it persists, restart the game and re-inject. This is unrelated to whether
+> the game is *supported* — the same game hooks fine in a fresh/differently-loaded process.
+>
 > **If "Hide events/delegates" empties the list**, the action opened via a **native C++ call** the
 > ProcessEvent hook can't see (or the panel hadn't fully appeared — record through until it's on
 > screen). That's the limit of behaviour-based discovery. Fallback: while the UI is open, use

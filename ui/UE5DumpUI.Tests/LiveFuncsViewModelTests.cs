@@ -94,13 +94,13 @@ public class LiveFuncsViewModelTests
     {
         var (vm, dump) = MakeVm();
         dump.StartHookActive = false;
-        dump.StartDetail = "ProcessEvent was found but the game-thread hook could not install.";
+        dump.StartDetail = "PE hook couldn't install — change to another map/scene and Start again.";
 
         await vm.StartCommand.ExecuteAsync(null);
 
         Assert.True(vm.IsRecording);
-        Assert.Contains("PE hook", vm.StatusText);
-        Assert.Contains("could not install", vm.StatusText);  // the DLL's specific reason is shown
+        // The DLL's self-contained reason is shown verbatim (change-map guidance included).
+        Assert.Equal(dump.StartDetail, vm.StatusText);
     }
 
     [Fact]
