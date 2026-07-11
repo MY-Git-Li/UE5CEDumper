@@ -31,7 +31,7 @@ jobs:
     # is toolchain-version-agnostic.
     runs-on: windows-2025-vs2026
     steps:
-      - name: Checkout (no submodules — docs/private is a private repo)
+      - name: Checkout (submodules inited manually below)
         uses: actions/checkout@v6
         with:
           submodules: false
@@ -39,9 +39,7 @@ jobs:
 
       - name: Init public build submodules
         shell: pwsh
-        # Only the two PUBLIC vendor submodules are needed to build. The private
-        # docs/private submodule (CE-Handwire-Private) is docs-only and is
-        # intentionally NOT cloned (the default token can't read it).
+        # Only the two PUBLIC vendor submodules are needed to build.
         run: git submodule update --init vendor/minhook vendor/zydis
 
       - name: Setup .NET 10
