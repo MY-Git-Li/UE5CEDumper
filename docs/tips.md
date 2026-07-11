@@ -76,13 +76,18 @@ only a handful of times — sinks to the bottom. **Use the baseline diff to isol
    back → **Stop**.
 3. The list now shows a **diff**: functions that did NOT fire while idle are tagged **NEW**
    (green) and ranked to the top; "New/changed only" hides the unchanged Tick noise.
-4. Tick **Hide UI widgets**. Opening the shop *creates* its widget, so all the widget's own
-   methods fire at once and flood the NEW list with obviously-shop-named rows (tagged **UI**) —
-   but the widget is the *result*, not the entry point. Hiding them leaves the persistent
-   **opener** (on a PlayerController / a UI-manager subsystem / the vendor's interaction
-   component) — the function you can actually call in the open world. Filter by `shop`/`open`/`buy`
-   to narrow further.
-5. Click **Live** on the row to open it in Live Walker and invoke it.
+4. Tick **Hide UI widgets** (the created UI, tagged **UI**, not the entry point) and **Hide
+   events/delegates** (the `On*`/callback *reactions*, tagged **Event**/**Deleg** — not functions
+   you call). What's left are imperative **Call** functions on persistent objects.
+5. Tick **Earliest first**. An action's entry point fires *before* the reactions it triggers, so
+   the causal opener sorts to the top of the NEW set (see the **Order** column) — name-independent.
+6. Click **Live** on the top candidate to open it in Live Walker and invoke it.
+
+> **If "Hide events/delegates" empties the list**, the action opened via a **native C++ call** the
+> ProcessEvent hook can't see (or the panel hadn't fully appeared — record through until it's on
+> screen). That's the limit of behaviour-based discovery. Fallback: while the UI is open, use
+> Instance Finder on the vendor/inventory class and invoke its own `BlueprintCallable` functions
+> (`AddGold`/`SellItem`/…) directly — you often don't need to "open" anything to change the state.
 
 (Without a baseline it still works — just Start → action → Stop and sort/scan by count — but
 the diff is what makes a busy game tractable. Leaving the tab auto-stops recording.)
