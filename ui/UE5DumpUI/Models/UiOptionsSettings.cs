@@ -190,6 +190,12 @@ public sealed class ProxyDeployUiOptions
     /// <summary>.exe file names of games the user has successfully loaded via UI
     /// injection. Feeds the "injection · no proxy deployed" known-good suggestion.</summary>
     public List<string> InjectedGameExes { get; set; } = new();
+
+    /// <summary>Proxy CONFIRMED to have actually loaded a game (the DLL self-reported
+    /// a proxy load_mode and the session stayed connected past the stability dwell),
+    /// keyed by .exe file name. The strongest known-good signal — takes priority over
+    /// a merely-deployed pick. Survives reinstall/patch (exe name is stable).</summary>
+    public Dictionary<string, ProxyType> ConfirmedProxyByExe { get; set; } = new();
 }
 
 /// <summary>

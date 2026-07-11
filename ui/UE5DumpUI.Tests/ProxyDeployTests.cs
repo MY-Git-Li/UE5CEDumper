@@ -495,27 +495,36 @@ public class ProxyDeployTests
             string exeA = Path.Combine(dir, "GameA.exe");
             string exeB = Path.Combine(dir, "GameB.exe");
             string exeC = Path.Combine(dir, "GameC.exe");
+            string exeD = Path.Combine(dir, "GameD.exe");
             File.WriteAllBytes(exeA, new byte[] { 1, 2, 3 });
             File.WriteAllBytes(exeB, new byte[] { 1, 2, 3 });
             File.WriteAllBytes(exeC, new byte[] { 1, 2, 3 });
+            File.WriteAllBytes(exeD, new byte[] { 1, 2, 3 });
 
             var gameA = new DetectedGame { Name = "GameA", ExePath = exeA, BinariesDir = dir };
             var gameB = new DetectedGame { Name = "GameB", ExePath = exeB, BinariesDir = dir };
             var gameC = new DetectedGame { Name = "GameC", ExePath = exeC, BinariesDir = dir };
-            var games = new List<DetectedGame> { gameA, gameB, gameC };
+            var gameD = new DetectedGame { Name = "GameD", ExePath = exeD, BinariesDir = dir };
+            var games = new List<DetectedGame> { gameA, gameB, gameC, gameD };
             var remembered = new Dictionary<string, ProxyType>(StringComparer.OrdinalIgnoreCase)
             {
                 ["GameA"] = ProxyType.Dxgi,
+                ["GameD"] = ProxyType.Dinput8,   // will be beaten by GameD's confirmed pick
             };
             // GameC was injected (by .exe name); GameA also injected but a proxy pick wins.
             var injected = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
                 "GameC.exe", "GameA.exe",
             };
+            // GameD confirmed-working via version.dll → beats its deployed dinput8 pick.
+            var confirmed = new Dictionary<string, ProxyType>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["GameD.exe"] = ProxyType.Version,
+            };
 
             var svc = new ProxyDeployService(new NoopLog(), new NoopPlatform());
 
-            await svc.ApplyProxySuggestionsAsync(games, remembered, injected, enabled: true,
+            await svc.ApplyProxySuggestionsAsync(games, confirmed, remembered, injected, enabled: true,
                 TestContext.Current.CancellationToken);
 
             Assert.Equal(ProxyType.Dxgi, gameA.SuggestedProxyType);       // remembered proxy beats injection
@@ -524,14 +533,17 @@ public class ProxyDeployTests
             Assert.Equal("version · default", gameB.SuggestedProxy);
             Assert.Null(gameC.SuggestedProxyType);                        // injection-only → no proxy type
             Assert.Equal("injection · no proxy deployed", gameC.SuggestedProxy);
+            Assert.Equal(ProxyType.Version, gameD.SuggestedProxyType);    // confirmed beats deployed
+            Assert.Equal("version.dll · confirmed working", gameD.SuggestedProxy);
 
-            await svc.ApplyProxySuggestionsAsync(games, remembered, injected, enabled: false,
+            await svc.ApplyProxySuggestionsAsync(games, confirmed, remembered, injected, enabled: false,
                 TestContext.Current.CancellationToken);
 
             Assert.Null(gameA.SuggestedProxyType);                        // disabled → cleared
             Assert.Null(gameA.SuggestedProxy);
             Assert.Null(gameB.SuggestedProxy);
             Assert.Null(gameC.SuggestedProxy);
+            Assert.Null(gameD.SuggestedProxy);
         }
         finally
         {

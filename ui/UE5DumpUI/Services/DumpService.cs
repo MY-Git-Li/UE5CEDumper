@@ -120,6 +120,8 @@ public sealed class DumpService : IDumpService
             ObjectCount = ptrs["object_count"]?.GetValue<int>() ?? 0,
             ModuleName = ptrs["module_name"]?.GetValue<string>() ?? "",
             ModuleBase = ptrs["module_base"]?.GetValue<string>() ?? "",
+            // How the DLL was loaded (self-reported); "" on older DLLs.
+            LoadMode = ptrs["load_mode"]?.GetValue<string>() ?? "",
             // FUObjectItem layout (older DLLs omit these → classic/false fallback)
             ItemLayoutMode = ptrs["item_layout_mode"]?.GetValue<string>() ?? "classic",
             ItemPacked = ptrs["item_packed"]?.GetValue<bool>() ?? false,

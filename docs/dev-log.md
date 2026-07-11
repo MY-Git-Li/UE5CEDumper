@@ -18,6 +18,32 @@ builds ≤696 in
 
 -----
 
+## 2026-07-11 — LKG Phase 2: DLL-attributed confirmed-working proxy (build 2142; dev, needs re-inject)
+
+**SHIPPED (DLL + UI; re-inject required).** Upgrades the Proxy Deploy suggestion from "you deployed /
+injected this before" to **"a proxy actually LOADED this game and it stayed running"** — the strongest
+known-good signal.
+
+- **DLL self-reports the load path** ([Fern.cpp](../dll/src/Fern.cpp) init response): `load_mode` =
+  `proxy:version.dll` | `proxy:dinput8.dll` | `proxy:dxgi.dll` | `injected` | `loaded:<name>` | `unknown`,
+  computed from **`GetModuleFileNameW(g_hDllModule)`** — THIS module's own file name. This is the ONLY
+  correct proxy attribution: with two proxies deployed, `Heiter.cpp`'s mutex makes the loser a passive
+  forwarder that returns before init and never reports, so the served `load_mode` is always the WINNER;
+  module-list enumeration (the naive approach) mis-attributes because all proxies share the PE ProductName.
+- **UI stability gate** ([MainWindowViewModel](../ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs)
+  `ScheduleProxyConfirmation`): on connect, if `EngineState.LoadMode` is a proxy, wait a 20 s dwell and —
+  **only if still connected** — record it via `RecordConfirmedProxy`. The dwell guards a proxy that loads +
+  connects then crashes the game seconds into play (connect alone isn't proof the game keeps running).
+- **Key = game .exe name** (`EngineState.ModuleName`), NOT peHash — survives reinstall/patch; unified with
+  Phase 1's injection/enrichment exe-name resolution. Stored in `ProxyDeployUiOptions.ConfirmedProxyByExe`.
+- **Suggestion priority**: confirmed-working ("dxgi.dll · confirmed working") > deployed ("· last used") >
+  injection ("injection · no proxy deployed") > version default. Progressive: deploy shows "last used" →
+  launch + survive the dwell → upgrades to "confirmed working".
+- Race-safe: enrichment reads snapshots; all map mutations marshal to the UI thread. Backward-compatible
+  (older DLLs emit no `load_mode` → gate is inert). 2436 tests pass; DLL + 3 proxies + trimmed UI green.
+
+-----
+
 ## 2026-07-11 — Proxy Deploy per-game suggestion (LKG Phase 1): import-table + remembered pick + injection known-good (builds 2134-2140; dev)
 
 **SHIPPED (UI-only, no DLL/pipe change).** First slice of the "Last-Known-Good proxy" idea: the Proxy

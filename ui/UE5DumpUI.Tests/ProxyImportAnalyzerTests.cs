@@ -19,7 +19,7 @@ public class ProxyImportAnalyzerTests
     [Fact]
     public void Recommend_NoHistoryNoImports_DefaultsToVersion()
     {
-        var s = ProxyImportAnalyzer.Recommend(null, null, injected: false);
+        var s = ProxyImportAnalyzer.Recommend(null, null, null, injected: false);
         Assert.Equal(ProxyType.Version, s.Type);
         Assert.Equal("version · default", s.Display);
     }
@@ -29,15 +29,25 @@ public class ProxyImportAnalyzerTests
     {
         // Even when the exe imports dxgi/dinput8, a remembered manual pick is used.
         var imports = new ProxyImportAnalyzer.ProxyImportInfo(false, true, true);
-        var s = ProxyImportAnalyzer.Recommend(imports, ProxyType.Dxgi, injected: false);
+        var s = ProxyImportAnalyzer.Recommend(imports, null, ProxyType.Dxgi, injected: false);
         Assert.Equal(ProxyType.Dxgi, s.Type);
         Assert.Equal("dxgi.dll · last used", s.Display);
     }
 
     [Fact]
+    public void Recommend_ConfirmedProxy_WinsOverEverything()
+    {
+        // A proxy the DLL confirmed actually loaded beats deployed/injected/imports.
+        var imports = new ProxyImportAnalyzer.ProxyImportInfo(false, true, true);
+        var s = ProxyImportAnalyzer.Recommend(imports, ProxyType.Dxgi, ProxyType.Version, injected: true);
+        Assert.Equal(ProxyType.Dxgi, s.Type);
+        Assert.Equal("dxgi.dll · confirmed working", s.Display);
+    }
+
+    [Fact]
     public void Recommend_Injected_NoProxy_SurfacesInjectionKnownGood()
     {
-        var s = ProxyImportAnalyzer.Recommend(null, null, injected: true);
+        var s = ProxyImportAnalyzer.Recommend(null, null, null, injected: true);
         Assert.Null(s.Type); // injection has no proxy type
         Assert.Equal("injection · no proxy deployed", s.Display);
     }
@@ -46,7 +56,7 @@ public class ProxyImportAnalyzerTests
     public void Recommend_RememberedProxy_WinsOverInjection()
     {
         // A deployed proxy is a stronger known-good than "also injected once".
-        var s = ProxyImportAnalyzer.Recommend(null, ProxyType.Version, injected: true);
+        var s = ProxyImportAnalyzer.Recommend(null, null, ProxyType.Version, injected: true);
         Assert.Equal(ProxyType.Version, s.Type);
         Assert.Equal("version.dll · last used", s.Display);
     }
@@ -55,7 +65,7 @@ public class ProxyImportAnalyzerTests
     public void Recommend_ImportsDxgi_AnnotatesAlternative_ButKeepsVersionDefault()
     {
         var imports = new ProxyImportAnalyzer.ProxyImportInfo(false, false, true);
-        var s = ProxyImportAnalyzer.Recommend(imports, null, injected: false);
+        var s = ProxyImportAnalyzer.Recommend(imports, null, null, injected: false);
         Assert.Equal(ProxyType.Version, s.Type);   // never auto-escalates to dxgi
         Assert.Equal("version · default · alt: dxgi", s.Display);
     }
@@ -64,7 +74,7 @@ public class ProxyImportAnalyzerTests
     public void Recommend_ImportsBoth_ListsBothAlternatives()
     {
         var imports = new ProxyImportAnalyzer.ProxyImportInfo(false, true, true);
-        var s = ProxyImportAnalyzer.Recommend(imports, null, injected: false);
+        var s = ProxyImportAnalyzer.Recommend(imports, null, null, injected: false);
         Assert.Equal("version · default · alt: dxgi, dinput8", s.Display);
     }
 
@@ -72,9 +82,21 @@ public class ProxyImportAnalyzerTests
     public void Recommend_ImportsNeither_FlagsHardCase()
     {
         var imports = new ProxyImportAnalyzer.ProxyImportInfo(false, false, false);
-        var s = ProxyImportAnalyzer.Recommend(imports, null, injected: false);
+        var s = ProxyImportAnalyzer.Recommend(imports, null, null, injected: false);
         Assert.Equal(ProxyType.Version, s.Type);
         Assert.Equal("version · default · no dxgi/dinput8", s.Display);
+    }
+
+    [Fact]
+    public void FromDllName_MapsProxyNames_NullForNonProxy()
+    {
+        // The load_mode → ProxyType bridge used by the Phase 2 confirmation gate.
+        Assert.Equal(ProxyType.Version, ProxyTypeExtensions.FromDllName("version.dll"));
+        Assert.Equal(ProxyType.Dinput8, ProxyTypeExtensions.FromDllName("DINPUT8.DLL")); // case-insensitive
+        Assert.Equal(ProxyType.Dxgi, ProxyTypeExtensions.FromDllName("dxgi.dll"));
+        Assert.Null(ProxyTypeExtensions.FromDllName("UE5Dumper.dll"));                    // inject → not a proxy
+        Assert.Null(ProxyTypeExtensions.FromDllName(""));
+        Assert.Null(ProxyTypeExtensions.FromDllName(null));
     }
 
     // ── PE import parsing (synthetic image) ──

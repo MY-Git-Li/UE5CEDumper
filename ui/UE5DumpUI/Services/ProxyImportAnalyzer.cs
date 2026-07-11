@@ -173,10 +173,15 @@ internal static class ProxyImportAnalyzer
     /// "importable" context and are NEVER used to override the version default.
     /// </summary>
     public static ProxySuggestion Recommend(
-        ProxyImportInfo? imports, ProxyType? rememberedPick, bool injected)
+        ProxyImportInfo? imports, ProxyType? confirmedPick, ProxyType? rememberedPick, bool injected)
     {
-        // 1. A proxy the user actually deployed for this game wins — the honest
-        //    "last known good" we can offer without a DLL change.
+        // 0. A proxy the DLL CONFIRMED actually loaded this game (and the session
+        //    stayed alive past the stability dwell) is the strongest known-good.
+        if (confirmedPick is ProxyType confirmed)
+            return new ProxySuggestion(confirmed, $"{confirmed.GetDisplayName()} · confirmed working");
+
+        // 1. A proxy the user actually deployed for this game — weaker than a
+        //    confirmed load, but still an honest "last known good".
         if (rememberedPick is ProxyType pick)
             return new ProxySuggestion(pick, $"{pick.GetDisplayName()} · last used");
 

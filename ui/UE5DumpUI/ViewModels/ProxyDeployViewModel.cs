@@ -53,8 +53,18 @@ public partial class ProxyDeployViewModel : ViewModelBase
     public HashSet<string> InjectedGameExes { get; } =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Proxy CONFIRMED to have actually loaded a game — the DLL self-reported a
+    /// proxy <c>load_mode</c> at connect AND the session stayed connected past the
+    /// stability dwell (so it didn't load-then-crash). Keyed by .exe file name.
+    /// The strongest known-good signal; wins over a merely-deployed pick. Recorded
+    /// via <see cref="RecordConfirmedProxy"/> from MainWindowViewModel's gate.
+    /// </summary>
+    public Dictionary<string, ProxyType> ConfirmedProxyByExe { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Set by MainWindowViewModel: schedule a debounced options save after
-    /// the remembered-pick map / injected set is mutated (neither is an
+    /// the remembered-pick map / injected set / confirmed map is mutated (none is an
     /// ObservableProperty, so the change-tracking save doesn't fire).</summary>
     public Action? RequestOptionSave { get; set; }
 
@@ -235,8 +245,15 @@ public partial class ProxyDeployViewModel : ViewModelBase
     {
         try
         {
+            // Snapshot the known-good maps/set (taken on the calling — UI — thread)
+            // so the background enrichment reads immutable copies; this avoids a race
+            // with RecordConfirmedProxy / RememberInjection / deploy mutating them.
+            var confirmed = new Dictionary<string, ProxyType>(ConfirmedProxyByExe, StringComparer.OrdinalIgnoreCase);
+            var remembered = new Dictionary<string, ProxyType>(LastManualProxyByGame, StringComparer.OrdinalIgnoreCase);
+            var injected = new HashSet<string>(InjectedGameExes, StringComparer.OrdinalIgnoreCase);
+
             await _deploy.ApplyProxySuggestionsAsync(
-                Games, LastManualProxyByGame, InjectedGameExes, LkgSuggestEnabled, ct);
+                Games, confirmed, remembered, injected, LkgSuggestEnabled, ct);
         }
         catch (OperationCanceledException) { /* scan cancelled */ }
         catch (Exception ex)
@@ -256,6 +273,28 @@ public partial class ProxyDeployViewModel : ViewModelBase
 
         if (InjectedGameExes.Add(key))
         {
+            RequestOptionSave?.Invoke();
+            if (Games.Count > 0)
+                _ = ApplyProxySuggestionsAsync();
+        }
+    }
+
+    /// <summary>
+    /// Record a proxy CONFIRMED to have loaded a game — called from the connection
+    /// stability gate (DLL self-reported a proxy load_mode + session stayed alive).
+    /// Keyed by the .exe file name (from EngineState.ModuleName). Persists + re-runs
+    /// the suggestion so the game upgrades to "confirmed working". Must be called on
+    /// the UI thread (mutation + snapshot serialize there). No-op on a non-proxy DLL
+    /// name or if the same confirmation is already recorded.
+    /// </summary>
+    public void RecordConfirmedProxy(string? exeName, string? proxyDllName)
+    {
+        if (string.IsNullOrEmpty(exeName)) return;
+        if (ProxyTypeExtensions.FromDllName(proxyDllName) is not ProxyType type) return;
+
+        if (!ConfirmedProxyByExe.TryGetValue(exeName, out var prev) || prev != type)
+        {
+            ConfirmedProxyByExe[exeName] = type;
             RequestOptionSave?.Invoke();
             if (Games.Count > 0)
                 _ = ApplyProxySuggestionsAsync();

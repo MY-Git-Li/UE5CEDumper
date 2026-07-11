@@ -868,6 +868,7 @@ public sealed class ProxyDeployService : IProxyDeployService
 
     public Task ApplyProxySuggestionsAsync(
         IReadOnlyList<DetectedGame> games,
+        IReadOnlyDictionary<string, ProxyType> confirmedByExe,
         IReadOnlyDictionary<string, ProxyType> rememberedByGame,
         IReadOnlySet<string> injectedExes,
         bool enabled,
@@ -886,13 +887,15 @@ public sealed class ProxyDeployService : IProxyDeployService
                     continue;
                 }
 
+                string exeName = Path.GetFileName(game.ExePath);
+                ProxyType? confirmed =
+                    confirmedByExe.TryGetValue(exeName, out var c) ? c : null;
                 ProxyType? remembered =
                     rememberedByGame.TryGetValue(game.Name, out var p) ? p : null;
-                bool injected =
-                    injectedExes.Contains(Path.GetFileName(game.ExePath));
+                bool injected = injectedExes.Contains(exeName);
 
                 var imports = ReadProxyImports(game.ExePath);
-                var suggestion = ProxyImportAnalyzer.Recommend(imports, remembered, injected);
+                var suggestion = ProxyImportAnalyzer.Recommend(imports, confirmed, remembered, injected);
 
                 game.SuggestedProxyType = suggestion.Type;
                 game.SuggestedProxy = suggestion.Display;
