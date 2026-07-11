@@ -460,7 +460,10 @@ Response for `pe_profile_get`:
   "total_calls":    98213,   // sum of all fire counts
   "functions": [
     { "class_name": "AShopVendor", "func_name": "OpenShop",
-      "func_addr": "0x1B2C3D40", "num_parms": 1, "parms_size": 8, "count": 3 }
+      "func_addr": "0x1B2C3D40", "num_parms": 1, "parms_size": 8, "count": 3,
+      "is_widget": false }   // owning class derives from UUserWidget/UWidget — the
+                             // transient UI created BY the action, not its opener; the
+                             // UI can hide these so the persistent opener surfaces.
     // ... ranked by count desc, capped at `limit`
   ] }
 ```

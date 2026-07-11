@@ -62,6 +62,10 @@
                 IsVisible="{Binding DiffMode}"
                 ToolTip.Tip="{StaticResource str.Tip.LF.NewOnly}"
                 Foreground="#5FBF7F" FontSize="12" VerticalAlignment="Center"/>
+      <CheckBox Content="{StaticResource str.LF.HideWidgets}"
+                IsChecked="{Binding HideWidgets}"
+                ToolTip.Tip="{StaticResource str.Tip.LF.HideWidgets}"
+                Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center"/>
       <Button Content="{StaticResource str.LF.ClearBaseline}"
               Command="{Binding ClearBaselineCommand}"
               IsVisible="{Binding DiffMode}"
@@ -121,6 +125,16 @@
               <TextBlock Text="{Binding DeltaLabel}"
                          Foreground="#5FBF7F" FontWeight="Bold"
                          VerticalAlignment="Center" Margin="6,0"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+        <!-- Kind: "UI" marks a transient widget method (the created UI, not the opener). -->
+        <DataGridTemplateColumn Header="Kind" Width="44" SortMemberPath="Kind" CanUserSort="True">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:PeProfileEntry">
+              <TextBlock Text="{Binding Kind}"
+                         Foreground="#808080" FontSize="11"
+                         VerticalAlignment="Center" Margin="4,0"/>
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
         </DataGridTemplateColumn>

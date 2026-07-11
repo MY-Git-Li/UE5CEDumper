@@ -20,8 +20,16 @@ public sealed class PeProfileEntry
     public ushort ParmsSize { get; init; }
     public long   Count     { get; init; }
 
+    /// <summary>Owning class derives from UUserWidget/UWidget — the transient UI
+    /// created BY the action (e.g. a shop widget), not its opener. The UI can hide
+    /// these so the persistent opener (controller / subsystem / component) surfaces.</summary>
+    public bool   IsWidget  { get; init; }
+
     /// <summary>"NumParms (ParmsSize B)" e.g. "2 (5B)"; empty for no-arg funcs.</summary>
     public string ParamsLabel => NumParms == 0 ? "" : $"{NumParms} ({ParmsSize}B)";
+
+    /// <summary>Small kind badge for the grid — "UI" marks a transient widget method.</summary>
+    public string Kind => IsWidget ? "UI" : "";
 
     // --- Baseline-diff display state (set by LiveFuncsViewModel when Diff mode is
     // on; 0 / false otherwise). The diff is client-side — the DLL knows nothing of

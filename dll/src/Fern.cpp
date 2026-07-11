@@ -33,6 +33,7 @@
 #include <cstdlib>   // malloc/free for by-value FString INPUT-param buffers
 #include <cstring>
 #include <sstream>
+#include <unordered_set>   // widget-base set for pe_profile_get is_widget classification
 #include <vector>
 
 using json = nlohmann::json;
@@ -3066,19 +3067,28 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             std::sort(snap.begin(), snap.end(),
                       [](const auto& a, const auto& b) { return a.second > b.second; });
 
+            // Transient-UI discriminator. A widget class's own methods all fire for
+            // the FIRST time when the widget is created (e.g. opening a shop), so they
+            // flood a baseline-diff as "new" — but the widget is the RESULT of the
+            // action, not its entry point. is_widget lets the UI hide them to surface
+            // the persistent opener (on a controller / subsystem / component).
+            static const std::unordered_set<std::string> kWidgetBases{ "UserWidget", "Widget" };
+
             json functions = json::array();
             int emitted = 0;
             for (size_t i = 0; i < snap.size() && emitted < limit; ++i) {
                 if ((i & 0xFFF) == 0 && Tot::Requested()) break;  // cooperative abort
                 FunctionInfo fi{};
                 if (!Ubel::ResolveFunctionInfo(snap[i].first, fi)) continue;  // drop stale/recycled
+                uintptr_t classAddr = Ubel::GetOuter(snap[i].first);  // UFunction's Outer == its UClass
                 json item;
-                item["class_name"] = Ubel::GetName(Ubel::GetOuter(snap[i].first));  // UFunction's Outer == its UClass
+                item["class_name"] = Ubel::GetName(classAddr);
                 item["func_name"]  = fi.name;
                 item["func_addr"]  = Renge::AddrToStr(snap[i].first);
                 item["num_parms"]  = fi.numParms;
                 item["parms_size"] = fi.parmsSize;
                 item["count"]      = snap[i].second;
+                item["is_widget"]  = Aura::ClassDerivesFromAny(classAddr, kWidgetBases);
                 functions.push_back(item);
                 ++emitted;
             }

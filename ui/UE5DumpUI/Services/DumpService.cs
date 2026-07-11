@@ -2435,6 +2435,7 @@ public sealed class DumpService : IDumpService
                     NumParms  = (byte)(obj["num_parms"]?.GetValue<int>() ?? 0),
                     ParmsSize = (ushort)(obj["parms_size"]?.GetValue<int>() ?? 0),
                     Count     = obj["count"]?.GetValue<long>() ?? 0L,
+                    IsWidget  = obj["is_widget"]?.GetValue<bool>() ?? false,
                 });
             }
         }

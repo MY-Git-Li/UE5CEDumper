@@ -265,6 +265,35 @@ public class LiveFuncsViewModelTests
         Assert.Equal(expected, e.DeltaLabel);
     }
 
+    [Fact]
+    public async Task HideWidgets_RemovesTransientWidgetMethods()
+    {
+        // A shop-open recording: the widget's Construct fires (is_widget) alongside
+        // the persistent controller's opener. Hiding widgets leaves the opener.
+        var (vm, dump) = MakeVm();
+        dump.NextGet = ResultOf(
+            new PeProfileEntry { ClassName = "DOLLShopStoreLayout", FuncName = "Construct",
+                                 Count = 1, IsWidget = true },
+            new PeProfileEntry { ClassName = "AShopController", FuncName = "OpenShop",
+                                 Count = 2, IsWidget = false });
+        await vm.StartCommand.ExecuteAsync(null);
+        await vm.StopCommand.ExecuteAsync(null);
+        Assert.Equal(2, vm.Results.Count);
+
+        vm.HideWidgets = true;
+        Assert.DoesNotContain(vm.Results, r => r.ClassName == "DOLLShopStoreLayout");
+        Assert.Contains(vm.Results, r => r.FuncName == "OpenShop");
+    }
+
+    [Theory]
+    [InlineData(true, "UI")]
+    [InlineData(false, "")]
+    public void PeProfileEntry_Kind_ReflectsIsWidget(bool isWidget, string expected)
+    {
+        var e = new PeProfileEntry { IsWidget = isWidget };
+        Assert.Equal(expected, e.Kind);
+    }
+
     // ==================================================================
     // Cross-tab handoffs + auto-stop
     // ==================================================================
