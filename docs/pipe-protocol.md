@@ -461,6 +461,8 @@ Response for `pe_profile_get`:
   "functions": [
     { "class_name": "AShopVendor", "func_name": "OpenShop",
       "func_addr": "0x1B2C3D40", "num_parms": 1, "parms_size": 8, "count": 3,
+      "function_flags": 67108864,  // UFunction::FunctionFlags — UI tags Event/Delegate
+                                   // (a reaction) vs Call (an imperative entry point).
       "is_widget": false }   // owning class derives from UUserWidget/UWidget — the
                              // transient UI created BY the action, not its opener; the
                              // UI can hide these so the persistent opener surfaces.

@@ -3088,6 +3088,7 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
                 item["num_parms"]  = fi.numParms;
                 item["parms_size"] = fi.parmsSize;
                 item["count"]      = snap[i].second;
+                item["function_flags"] = fi.functionFlags;   // let the UI tag Event/Delegate/Callable
                 item["is_widget"]  = Aura::ClassDerivesFromAny(classAddr, kWidgetBases);
                 functions.push_back(item);
                 ++emitted;

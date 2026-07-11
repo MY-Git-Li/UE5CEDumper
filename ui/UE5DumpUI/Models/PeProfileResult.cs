@@ -19,6 +19,30 @@ public sealed class PeProfileEntry
     public byte   NumParms  { get; init; }
     public ushort ParmsSize { get; init; }
     public long   Count     { get; init; }
+    public uint   FunctionFlags { get; init; }
+
+    // UE FunctionFlags (ObjectMacros.h) relevant to "is this a thing I can CALL vs
+    // an event the engine fires AT me". Event/delegate signatures are reactions,
+    // not entry points — the flood you see when profiling an interaction.
+    private const uint FUNC_Event             = 0x0000_0800;
+    private const uint FUNC_MulticastDelegate = 0x0001_0000;
+    private const uint FUNC_Delegate          = 0x0010_0000;
+    private const uint FUNC_BlueprintCallable = 0x0400_0000;
+    private const uint FUNC_BlueprintEvent    = 0x0800_0000;
+    private const uint FUNC_Native            = 0x0000_0400;
+
+    /// <summary>Event handler / delegate signature — a reaction the engine dispatches
+    /// (On*/callbacks), NOT an imperative function you'd invoke to drive the flow.</summary>
+    public bool IsEventLike =>
+        (FunctionFlags & (FUNC_Event | FUNC_MulticastDelegate | FUNC_Delegate)) != 0;
+
+    /// <summary>Short kind badge: "Deleg" / "Event" / "Call" / "native" / "".</summary>
+    public string TypeLabel =>
+        (FunctionFlags & (FUNC_MulticastDelegate | FUNC_Delegate)) != 0 ? "Deleg"
+        : (FunctionFlags & (FUNC_Event | FUNC_BlueprintEvent)) != 0     ? "Event"
+        : (FunctionFlags & FUNC_BlueprintCallable) != 0                 ? "Call"
+        : (FunctionFlags & FUNC_Native) != 0                           ? "native"
+        : "";
 
     /// <summary>Owning class derives from UUserWidget/UWidget — the transient UI
     /// created BY the action (e.g. a shop widget), not its opener. The UI can hide

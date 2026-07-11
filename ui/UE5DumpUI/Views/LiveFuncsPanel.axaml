@@ -66,6 +66,10 @@
                 IsChecked="{Binding HideWidgets}"
                 ToolTip.Tip="{StaticResource str.Tip.LF.HideWidgets}"
                 Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center"/>
+      <CheckBox Content="{StaticResource str.LF.HideEvents}"
+                IsChecked="{Binding HideEvents}"
+                ToolTip.Tip="{StaticResource str.Tip.LF.HideEvents}"
+                Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center"/>
       <Button Content="{StaticResource str.LF.ClearBaseline}"
               Command="{Binding ClearBaselineCommand}"
               IsVisible="{Binding DiffMode}"
@@ -134,6 +138,17 @@
             <DataTemplate x:DataType="m:PeProfileEntry">
               <TextBlock Text="{Binding Kind}"
                          Foreground="#808080" FontSize="11"
+                         VerticalAlignment="Center" Margin="4,0"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+        <!-- Type: Event/Deleg (a reaction the engine fires) vs Call (an imperative
+             function you can invoke) vs native. -->
+        <DataGridTemplateColumn Header="Type" Width="56" SortMemberPath="TypeLabel" CanUserSort="True">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:PeProfileEntry">
+              <TextBlock Text="{Binding TypeLabel}"
+                         Foreground="#8FA0B8" FontSize="11"
                          VerticalAlignment="Center" Margin="4,0"/>
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>

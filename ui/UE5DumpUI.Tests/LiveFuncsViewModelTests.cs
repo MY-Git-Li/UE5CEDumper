@@ -294,6 +294,37 @@ public class LiveFuncsViewModelTests
         Assert.Equal(expected, e.Kind);
     }
 
+    // FUNC_Event=0x800, FUNC_MulticastDelegate=0x10000, FUNC_BlueprintCallable=0x04000000, FUNC_Native=0x400.
+    [Theory]
+    [InlineData(0x0000_0800u, true,  "Event")]   // BP event (On*)
+    [InlineData(0x0001_0000u, true,  "Deleg")]   // multicast delegate (OnHit etc.)
+    [InlineData(0x0400_0000u, false, "Call")]    // imperative BlueprintCallable — the kind we want
+    [InlineData(0x0000_0400u, false, "native")]
+    public void PeProfileEntry_TypeAndEventLike_FromFlags(uint flags, bool eventLike, string label)
+    {
+        var e = new PeProfileEntry { FunctionFlags = flags };
+        Assert.Equal(eventLike, e.IsEventLike);
+        Assert.Equal(label, e.TypeLabel);
+    }
+
+    [Fact]
+    public async Task HideEvents_RemovesEventAndDelegateRows()
+    {
+        var (vm, dump) = MakeVm();
+        dump.NextGet = ResultOf(
+            new PeProfileEntry { ClassName = "AVolume",  FuncName = "OnStartSkit", Count = 7,
+                                 FunctionFlags = 0x0000_0800 },   // Event
+            new PeProfileEntry { ClassName = "AShopMgr", FuncName = "OpenShop",    Count = 1,
+                                 FunctionFlags = 0x0400_0000 });  // BlueprintCallable
+        await vm.StartCommand.ExecuteAsync(null);
+        await vm.StopCommand.ExecuteAsync(null);
+        Assert.Equal(2, vm.Results.Count);
+
+        vm.HideEvents = true;
+        Assert.DoesNotContain(vm.Results, r => r.FuncName == "OnStartSkit");
+        Assert.Contains(vm.Results, r => r.FuncName == "OpenShop");
+    }
+
     // ==================================================================
     // Cross-tab handoffs + auto-stop
     // ==================================================================

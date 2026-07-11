@@ -55,6 +55,10 @@ public partial class LiveFuncsViewModel : ViewModelBase
     /// A widget's own methods all fire on creation, flooding a shop/menu diff — the
     /// opener you want lives on a persistent controller/subsystem, not the widget.</summary>
     [ObservableProperty] private bool   _hideWidgets;
+    /// <summary>Hide event handlers / delegate signatures (On*/callbacks — FUNC_Event /
+    /// FUNC_Delegate). Those are reactions the engine fires AT the game, not imperative
+    /// functions you'd invoke; hiding them leaves the callable entry points.</summary>
+    [ObservableProperty] private bool   _hideEvents;
     [ObservableProperty] private string _baselineStatus = "No baseline — record idle, then Set Baseline.";
 
     /// <summary>Per-session remembered filter keywords (LRU) surfaced as the filter
@@ -88,6 +92,7 @@ public partial class LiveFuncsViewModel : ViewModelBase
     partial void OnDiffModeChanged(bool value) => ApplyDiffAndFilter();
     partial void OnNewChangedOnlyChanged(bool value) => ApplyFilter();
     partial void OnHideWidgetsChanged(bool value) => ApplyFilter();
+    partial void OnHideEventsChanged(bool value) => ApplyFilter();
 
     private static string Key(PeProfileEntry e) => $"{e.ClassName}::{e.FuncName}";
 
@@ -273,6 +278,8 @@ public partial class LiveFuncsViewModel : ViewModelBase
             if (diffNewOnly && !(e.IsNew || e.Delta > 0)) continue;
             // Hide transient UI-widget methods so the persistent opener surfaces.
             if (HideWidgets && e.IsWidget) continue;
+            // Hide event/delegate reactions so imperative callables surface.
+            if (HideEvents && e.IsEventLike) continue;
             if (terms.Length > 0 &&
                 !ObjectTreeFilter.MatchesAllTerms(terms, e.FuncName, e.ClassName))
             {
