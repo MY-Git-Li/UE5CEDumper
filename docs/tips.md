@@ -66,16 +66,27 @@ off to return to the tuned view.
 When the name gives you nothing (a game-specific `OpenShop` / `BeginTrade` / a mangled
 Blueprint name), stop guessing names and watch what the game **actually calls**:
 
-1. Open the **Live Funcs** tab → **Start**. (This forces the game-thread ProcessEvent hook
-   up and begins counting every UFunction the game dispatches.)
-2. ALT-TAB to the game and perform **one** action — walk up to the merchant and open the shop.
-3. ALT-TAB back → **Stop**. The list shows the UFunctions that fired, ranked by call count.
-   The shop-open function is usually near the top with a **low** count (a handful of calls);
-   per-frame `Tick`/`Update` noise sits at huge counts. Filter by `shop`/`open`/`buy` to narrow.
+A single recording captures a lot (one real case: 70 functions / ~75k calls in 7s), and
+per-frame `Tick`/`Update` noise dominates the top while the shop-open function — which fires
+only a handful of times — sinks to the bottom. **Use the baseline diff to isolate the action:**
+
+1. Open the **Live Funcs** tab → **Start** → stand still a few seconds → **Stop**. This is
+   your idle baseline. Click **⚑ Set Baseline** (turns on Diff mode).
+2. **Start** → ALT-TAB to the game → walk up to the merchant and **open the shop** → ALT-TAB
+   back → **Stop**.
+3. The list now shows a **diff**: functions that did NOT fire while idle are tagged **NEW**
+   (green) and ranked to the top; "New/changed only" hides the unchanged Tick noise. The
+   shop-open function is almost always a **NEW** row near the top. Filter by `shop`/`open`/`buy`
+   to nail it.
 4. Click **Live** on the row to open it in Live Walker and invoke it.
 
-This is behaviour-based discovery — it finds the exact function regardless of its name. (Leaving
-the tab auto-stops recording so it never runs indefinitely.)
+(Without a baseline it still works — just Start → action → Stop and sort/scan by count — but
+the diff is what makes a busy game tractable. Leaving the tab auto-stops recording.)
+
+> **Remember the earlier caveat:** a shop *widget* class like `DOLLShopStoreLayout` is the
+> transient thing the action *creates* (GC'd when the shop closes — only its `Default__` CDO
+> remains), not the opener. The NEW row you want is the function on a **persistent** object
+> (PlayerController / a UI-manager subsystem / the vendor's interaction component) that opened it.
 
 ### Then: find the right instance and call it
 
