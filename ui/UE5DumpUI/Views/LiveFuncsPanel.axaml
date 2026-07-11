@@ -1,0 +1,118 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UE5DumpUI.ViewModels"
+             xmlns:m="using:UE5DumpUI.Models"
+             x:Class="UE5DumpUI.Views.LiveFuncsPanel"
+             x:DataType="vm:LiveFuncsViewModel">
+
+  <DockPanel Margin="8">
+
+    <!-- Top: Start / Stop / Refresh / Clear + filter -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,4">
+      <Button Content="{StaticResource str.LF.Start}"
+              Command="{Binding StartCommand}"
+              ToolTip.Tip="{StaticResource str.Tip.LF.Start}"
+              IsEnabled="{Binding !IsRecording}"
+              Foreground="#00BB5E" Background="Transparent"
+              BorderThickness="1" BorderBrush="#00BB5E"
+              Padding="12,4" Cursor="Hand"/>
+      <Button Content="{StaticResource str.LF.Stop}"
+              Command="{Binding StopCommand}"
+              ToolTip.Tip="{StaticResource str.Tip.LF.Stop}"
+              IsEnabled="{Binding IsRecording}"
+              Foreground="#E06C75" Background="Transparent"
+              BorderThickness="1" BorderBrush="#E06C75"
+              Padding="12,4" Cursor="Hand"/>
+      <Button Content="{StaticResource str.LF.Refresh}"
+              Command="{Binding RefreshCommand}"
+              ToolTip.Tip="{StaticResource str.Tip.LF.Refresh}"
+              Padding="6,2" FontSize="11" VerticalAlignment="Center"
+              Cursor="Hand"/>
+      <Button Content="{StaticResource str.LF.Clear}"
+              Command="{Binding ClearCommand}"
+              Padding="6,2" FontSize="11" VerticalAlignment="Center"
+              Cursor="Hand"/>
+      <AutoCompleteBox PlaceholderText="{StaticResource str.LF.FilterHint}"
+               Text="{Binding FilterText, Mode=TwoWay}"
+               ItemsSource="{Binding FilterHistory}"
+               FilterMode="Contains"
+               ToolTip.Tip="{StaticResource str.Tip.LF.Filter}"
+               Width="260" Padding="4,2"/>
+      <!-- Recording pulse indicator -->
+      <Ellipse Width="10" Height="10" Fill="#E06C75"
+               IsVisible="{Binding IsRecording}"
+               VerticalAlignment="Center"/>
+    </StackPanel>
+
+    <!-- Status + progress -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8"
+                Margin="0,0,0,4" VerticalAlignment="Center">
+      <ProgressBar IsIndeterminate="True"
+                   IsVisible="{Binding IsBusy}"
+                   Width="80" Height="4" VerticalAlignment="Center"/>
+      <TextBlock Text="{Binding StatusText}"
+                 Foreground="#AAB8D0" FontSize="13"
+                 FontFamily="Consolas, Menlo, monospace"
+                 TextWrapping="Wrap"
+                 VerticalAlignment="Center"
+                 ToolTip.Tip="{Binding StatusText}"/>
+    </StackPanel>
+
+    <!-- Error display -->
+    <TextBlock DockPanel.Dock="Top"
+               Text="{Binding ErrorMessage}"
+               Foreground="#F44747" Margin="0,0,0,4"
+               IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+
+    <!-- Results DataGrid -->
+    <DataGrid x:Name="ResultsGrid"
+              ItemsSource="{Binding Results}"
+              SelectedItem="{Binding SelectedResult}"
+              SelectionMode="Single"
+              IsReadOnly="True"
+              CanUserResizeColumns="True"
+              GridLinesVisibility="Horizontal"
+              BorderThickness="0"
+              Background="#1E1E1E"
+              Foreground="#D4D4D4"
+              FontSize="12"
+              FontFamily="Consolas, Menlo, monospace">
+      <DataGrid.Columns>
+        <DataGridTemplateColumn Header="Calls" Width="80" SortMemberPath="Count" CanUserSort="True">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:PeProfileEntry">
+              <TextBlock Text="{Binding Count}"
+                         Foreground="#DCDCAA" FontWeight="Bold"
+                         VerticalAlignment="Center" Margin="6,0"/>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+        <DataGridTextColumn Header="Class" Binding="{Binding ClassName}" SortMemberPath="ClassName" Width="240"/>
+        <DataGridTextColumn Header="Function" Binding="{Binding FuncName}" SortMemberPath="FuncName" Width="240"/>
+        <DataGridTextColumn Header="Params" Binding="{Binding ParamsLabel}" SortMemberPath="ParamsLabel" Width="90"/>
+        <DataGridTemplateColumn Header="" Width="Auto" CanUserSort="False">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="m:PeProfileEntry">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <Button Content="{StaticResource str.LF.OpenLive}"
+                        Command="{Binding $parent[UserControl].((vm:LiveFuncsViewModel)DataContext).OpenInLiveWalkerCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.LF.OpenLive}"
+                        Foreground="#4EC9B0" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#4EC9B0"
+                        Padding="6,2" FontSize="11" Cursor="Hand"/>
+                <Button Content="{StaticResource str.LF.CopyName}"
+                        Command="{Binding $parent[UserControl].((vm:LiveFuncsViewModel)DataContext).CopyFuncNameCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="{StaticResource str.Tip.LF.CopyName}"
+                        Foreground="#DCDCAA" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#DCDCAA"
+                        Padding="6,2" FontSize="11" Cursor="Hand"/>
+              </StackPanel>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</UserControl>

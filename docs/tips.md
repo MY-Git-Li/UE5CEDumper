@@ -61,6 +61,22 @@ threshold. Two ways to surface them:
 It's opt-in (default off) because it's noisier than the cheat-value default — turn it back
 off to return to the tuned view.
 
+### Best for "open shop UI" and other unguessable functions: the Live Funcs profiler
+
+When the name gives you nothing (a game-specific `OpenShop` / `BeginTrade` / a mangled
+Blueprint name), stop guessing names and watch what the game **actually calls**:
+
+1. Open the **Live Funcs** tab → **Start**. (This forces the game-thread ProcessEvent hook
+   up and begins counting every UFunction the game dispatches.)
+2. ALT-TAB to the game and perform **one** action — walk up to the merchant and open the shop.
+3. ALT-TAB back → **Stop**. The list shows the UFunctions that fired, ranked by call count.
+   The shop-open function is usually near the top with a **low** count (a handful of calls);
+   per-frame `Tick`/`Update` noise sits at huge counts. Filter by `shop`/`open`/`buy` to narrow.
+4. Click **Live** on the row to open it in Live Walker and invoke it.
+
+This is behaviour-based discovery — it finds the exact function regardless of its name. (Leaving
+the tab auto-stops recording so it never runs indefinitely.)
+
 ### Then: find the right instance and call it
 
 A control/shop function is a **stateful instance method** — it needs a live, non-CDO `this`:

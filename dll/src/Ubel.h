@@ -155,6 +155,13 @@ bool GetMapPairLayout(uintptr_t fieldAddr, MapPairLayout& out);
 // Iterates the function chain, resolving parameters and return type.
 std::vector<FunctionInfo> WalkFunctions(uintptr_t uclassAddr);
 
+// Resolve a SINGLE UFunction* to its (name, fullName, functionFlags, numParms,
+// parmsSize) — no param-chain walk. Validates the meta-class name == "Function"
+// first so a stale/recycled pointer (e.g. one recorded by the Live PE profiler
+// before a GC/level-load reused its slot) fails safe. Returns false when funcAddr
+// is not (or no longer) a UFunction.
+bool ResolveFunctionInfo(uintptr_t funcAddr, FunctionInfo& out);
+
 // Get the UClass* of a UObject
 uintptr_t GetClass(uintptr_t uobjectAddr);
 

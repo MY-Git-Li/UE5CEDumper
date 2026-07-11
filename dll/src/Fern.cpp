@@ -24,6 +24,7 @@
 #include "Solitar.h"   // Solitar::ResolveProtectBits for get_trainer_offsets
 #include "Grausam.h"   // Grausam::SetForegroundLock — keep game thread alive when backgrounded
 #include "Edel.h"
+#include "Linie.h"     // Live PE profiler — pe_profile_start/stop/get
 #include "BuildStamp.h"
 
 #include <json.hpp>
@@ -51,6 +52,7 @@ extern "C" int32_t   UE5_GetProtectState(int32_t* outWant, int32_t* outLive, int
 // Size-aware variant: the queued request owns a copy of the param buffer, so a
 // timed-out invoke can't use-after-free this handler's stack-local paramBuf.
 extern "C" int32_t   UE5_CallProcessEventEx(uintptr_t instance, uintptr_t ufunc, uintptr_t params, uint32_t paramsSize);
+extern "C" bool      UE5_EnsureGameThreadHook();
 
 // ============================================================
 // Radar wire helpers — parse "100" / "-42" / "3.14" / "true" /
@@ -483,6 +485,7 @@ void Fern::Stop() {
     // No handler thread is running now — free every remaining value-scan session.
     Radar::SessionManager::Instance().DropAll();
     Radar::GroupSessionManager::Instance().DropAll();
+    Linie::Reset();   // drop any live PE-profile recording + free the table
 
     m_clientConnected = false;
     LOG_INFO("PipeServer: Stopped");
@@ -742,6 +745,7 @@ void Fern::HandleConnection(std::shared_ptr<Connection> conn) {
     if (last) {
         Radar::SessionManager::Instance().DropAll();
         Radar::GroupSessionManager::Instance().DropAll();
+        Linie::Reset();   // last client gone — drop any live PE-profile recording
     }
 
     m_connCv.notify_all();
@@ -3019,6 +3023,68 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             data["scanned_classes"]  = enumResult.scannedClasses;
             data["total_functions"]  = enumResult.totalFunctions;
             data["functions"]        = functions;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        // === Live ProcessEvent profiler (Linie) — behaviour-based UFunction
+        // discovery. Start records every UFunction* the game dispatches through
+        // ProcessEvent; the user performs an in-game action; Stop freezes the
+        // table; Get resolves + ranks by fire count. Pipe-only. ===
+        if (cmd == Renge::CMD_PE_PROFILE_START) {
+            // Force the game-thread PE hook up NOW so we count the game's own
+            // calls without first issuing an invoke. hook_active=false means the
+            // vtable-offset detection failed on this game → counts will stay 0.
+            bool hookActive = UE5_EnsureGameThreadHook();
+            Linie::StartRecording();
+            json data;
+            data["recording"]   = true;
+            data["hook_active"] = hookActive;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        if (cmd == Renge::CMD_PE_PROFILE_STOP) {
+            Linie::StopRecording();   // idempotent; counts retained for pe_profile_get
+            json data;
+            data["recording"] = false;
+            return Renge::MakeResponse(id, data).dump();
+        }
+
+        if (cmd == Renge::CMD_PE_PROFILE_GET) {
+            int limit = request.value("limit", 200);
+
+            std::vector<std::pair<uintptr_t, uint64_t>> snap;
+            Linie::Snapshot(snap);
+
+            uint64_t totalCalls = 0;
+            for (const auto& p : snap) totalCalls += p.second;
+
+            // Sort by fire count desc; resolve only the capped set (name resolution
+            // is the cost, so we pay it after the sort + cap, not per stored entry).
+            std::sort(snap.begin(), snap.end(),
+                      [](const auto& a, const auto& b) { return a.second > b.second; });
+
+            json functions = json::array();
+            int emitted = 0;
+            for (size_t i = 0; i < snap.size() && emitted < limit; ++i) {
+                if ((i & 0xFFF) == 0 && Tot::Requested()) break;  // cooperative abort
+                FunctionInfo fi{};
+                if (!Ubel::ResolveFunctionInfo(snap[i].first, fi)) continue;  // drop stale/recycled
+                json item;
+                item["class_name"] = Ubel::GetName(Ubel::GetOuter(snap[i].first));  // UFunction's Outer == its UClass
+                item["func_name"]  = fi.name;
+                item["func_addr"]  = Renge::AddrToStr(snap[i].first);
+                item["num_parms"]  = fi.numParms;
+                item["parms_size"] = fi.parmsSize;
+                item["count"]      = snap[i].second;
+                functions.push_back(item);
+                ++emitted;
+            }
+
+            json data;
+            data["recording"]      = Linie::IsActive();
+            data["distinct_funcs"] = static_cast<int>(snap.size());
+            data["total_calls"]    = totalCalls;
+            data["functions"]      = functions;
             return Renge::MakeResponse(id, data).dump();
         }
 

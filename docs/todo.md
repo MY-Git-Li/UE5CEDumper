@@ -445,13 +445,15 @@ direction, both shipped (dev-log builds 838-872).
 
 ## Call-UE-function / invoke
 
-- **#2 Live ProcessEvent Call Profiler** — Effort: **M-L** · Risk: **med** (PE is hot
-  path). Rank UFunctions by **observed behaviour** instead of name heuristics. `Stark`
-  already ticks `s_hookFireCount` — extend with a per-UFunction atomic counter + a
-  "Recording" toggle + 3 pipe cmds (`start/stop/get_pe_profile`) + a "Live Funcs" tab.
-  Workflow: Start → perform action ("open inventory") → Stop → see what fired. Keep
-  PE hot-path overhead < 100ns/call (lockless atomic; benchmark before shipping).
-  Biggest blast radius of the picks.
+- **#2 Live ProcessEvent Call Profiler** — ✅ **SHIPPED build 2109** (new `Linie` module +
+  "Live Funcs" tab). Ranks UFunctions by **observed behaviour** (Start → perform action →
+  Stop → see what fired), the root-cause answer for game-specific functions (OpenShop/Dash)
+  name heuristics can't find. Hot-path gate is one relaxed `atomic<bool>` load when off (the
+  map + mutex are only touched while recording — the recording-window mutex was accepted over
+  a lockless counter per the plan; escalate to a sharded table only if an in-game benchmark
+  shows contention). `pe_profile_start` forces the PE hook via `UE5_EnsureGameThreadHook`.
+  **Remaining:** in-game acceptance test (shop/dash on a live UE title) + confirm nil overhead
+  with recording off. See [dev-log.md](dev-log.md) build 2109.
 
 - **#7 View Snap Hotkey (Property → snap-to-step)** — Effort: **S-M** · Risk: **low**.
   Bind a CE hotkey that snaps a Float/Double property to the next N° step (rotation

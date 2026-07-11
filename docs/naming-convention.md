@@ -192,7 +192,7 @@ Total votes: **12,700,122** | Voting period: 2026-03-08 ~ 2026-03-29
 | 11 | Solitär (索莉塔) | — | — |
 | 12 | Lügner (琉古納) | — | **ProxyVersion** |
 | 13 | Sense (乘斯) | — | — |
-| 14 | Linie (莉涅) | — | — |
+| 14 | Linie (莉涅) | — | **LivePEProfiler** |
 | 15 | Übel (尤蓓爾) | — | **UStructWalker** |
 | 16 | Methode (梅特戴) | — | **CEPlugin** |
 | 17 | Scharf (夏爾夫) | — | — |
@@ -271,7 +271,7 @@ German spelling.
 | Tot | トート | Tot | "Saint of the End", end-curse | 🟢 Cancellation | Cooperative cancel flag for long-running ops (`Tot.h`, was `Cancel`) |
 | Rivale | リヴァーレ | Rivale | "Bloody God of War", forges weapons | ⬜ | Builder / generator (CT / AA script) |
 | Qual | クヴァール | Qual | Creator of Zoltraak (universal magic) | ⬜ | Foundational engine / AOB pattern compiler |
-| Linie | リーニエ | Linie | Reads opponent mana ("line") | ⬜ | Analysis / profiling / lineage trace |
+| Linie | リーニエ | Linie | Reads opponent mana ("line") | 🟢 LivePEProfiler | Live ProcessEvent call profiler — opt-in per-UFunction* fire-count table recorded from Stark's PE hook during a Start/Stop window (`Linie.cpp`, build 2103) |
 | Draht | ドラート | Draht | Lügner's assistant ("wire") | ⬜ | Wiring / binding / IPC plumbing |
 | Revolte | レヴォルテ | Revolte | Four-handed general, four swords | ⬜ | Parallelism / multi-threaded dispatch |
 | Hemmung | ヘムング | Hemmung | Mist→energy ("inhibition") | ⬜ | Throttle / rate-limit / backpressure |

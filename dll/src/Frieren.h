@@ -93,6 +93,12 @@ __declspec(dllexport) int32_t   UE5_CallProcessEvent(uintptr_t instance, uintptr
 // vtable offset unresolved, -4=SEH exception.
 __declspec(dllexport) int32_t   UE5_CallProcessEventDirect(uintptr_t instance, uintptr_t ufunc, uintptr_t params);
 
+// Force the game-thread ProcessEvent hook to install immediately (race-safe /
+// idempotent). Returns true if the hook is active afterward. The Live PE
+// profiler (Linie) calls this at pe_profile_start so it can count the game's
+// own PE calls without first issuing an invoke.
+__declspec(dllexport) bool      UE5_EnsureGameThreadHook();
+
 // === Debug Camera (robust force on/off; shared by UI pipe + CE Lua) ===
 // Read the live Debug Camera state. 1 = ON (a DebugCameraController is
 // possessing the player), 0 = OFF, -1 = unknown / no live CheatManager.

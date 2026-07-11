@@ -2396,6 +2396,58 @@ public sealed class DumpService : IDumpService
         };
     }
 
+    // --- Live ProcessEvent Profiler (Live Funcs) ---
+
+    /// <summary>Start recording per-UFunction fire counts. Forces the game-thread
+    /// PE hook to install; returns its <c>hook_active</c> (false ⇒ counts stay 0).</summary>
+    public async Task<bool> PeProfileStartAsync(CancellationToken ct = default)
+    {
+        var res = await _pipe.SendAsync(new JsonObject { ["cmd"] = "pe_profile_start" }, ct);
+        CheckResponse(res);
+        return res["hook_active"]?.GetValue<bool>() ?? false;
+    }
+
+    /// <summary>Stop recording (idempotent). Counts are retained for a later get.</summary>
+    public async Task PeProfileStopAsync(CancellationToken ct = default)
+    {
+        var res = await _pipe.SendAsync(new JsonObject { ["cmd"] = "pe_profile_stop" }, ct);
+        CheckResponse(res);
+    }
+
+    /// <summary>Fetch the ranked fire-count table (top <paramref name="limit"/> by count).</summary>
+    public async Task<PeProfileResult> PeProfileGetAsync(int limit = 200, CancellationToken ct = default)
+    {
+        var res = await _pipe.SendAsync(
+            new JsonObject { ["cmd"] = "pe_profile_get", ["limit"] = limit }, ct);
+        CheckResponse(res);
+
+        var entries = new List<PeProfileEntry>();
+        if (res["functions"] is JsonArray arr)
+        {
+            foreach (var item in arr)
+            {
+                if (item is not JsonObject obj) continue;
+                entries.Add(new PeProfileEntry
+                {
+                    ClassName = obj["class_name"]?.GetValue<string>() ?? "",
+                    FuncName  = obj["func_name"]?.GetValue<string>() ?? "",
+                    FuncAddr  = obj["func_addr"]?.GetValue<string>() ?? "",
+                    NumParms  = (byte)(obj["num_parms"]?.GetValue<int>() ?? 0),
+                    ParmsSize = (ushort)(obj["parms_size"]?.GetValue<int>() ?? 0),
+                    Count     = obj["count"]?.GetValue<long>() ?? 0L,
+                });
+            }
+        }
+
+        return new PeProfileResult
+        {
+            Recording     = res["recording"]?.GetValue<bool>() ?? false,
+            DistinctFuncs = res["distinct_funcs"]?.GetValue<int>() ?? 0,
+            TotalCalls    = res["total_calls"]?.GetValue<long>() ?? 0L,
+            Entries       = entries,
+        };
+    }
+
     // --- Extra Scan (user-triggered aggressive fallback) ---
 
     public async Task<RescanStartResult> StartRescanAsync(CancellationToken ct = default)

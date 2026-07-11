@@ -18,6 +18,41 @@ builds ≤696 in
 
 -----
 
+## 2026-07-11 — Live ProcessEvent Call Profiler (Linie) — behaviour-based UFunction discovery (build 2109; dev)
+
+**SHIPPED (DLL + UI). New "Live Funcs" tab.** The root-cause answer to "which function does this game
+call to open the shop / dash?" — the thing name heuristics (Interesting Functions) fundamentally can't
+find. Workflow: **Start → ALT-TAB to the game → perform ONE action (open shop, dash, attack) → Stop →
+see which UFunctions fired, ranked by call count.** The action-specific function is near the top with a
+low count (a handful of calls); per-frame Tick/Update noise has huge counts.
+
+**New Frieren module `Linie`** (莉涅 — "reads opponent mana"; roster use = *Analysis / profiling*).
+`Stark`'s ProcessEvent hook keeps the single hook and calls into `Linie` with one inlined branch:
+- **Hot path stays free when off.** `Linie::IsRecording()` is one relaxed `atomic<bool>` load + a
+  predicted-not-taken branch ([Stark.cpp:143](dll/src/Stark.cpp)); the mutex + `unordered_map<UFunction*,
+  count>` are touched ONLY inside a Start/Stop window. Mirrors the existing `s_queueDepth` "skip work
+  unless armed" gate. Multi-threaded-PE safe (map guarded by a dedicated mutex, never Stark's queue mutex).
+- **Hook-install prerequisite.** The PE hook installs lazily on the first invoke; `pe_profile_start`
+  calls the new `UE5_EnsureGameThreadHook()` (reuses the audit-#3 `call_once`) so recording works without
+  first issuing an invoke. `hook_active:false` ⇒ vtable detection failed → counts stay 0 (UI warns).
+- **Query-time resolution.** Raw `UFunction*` are stored during recording; `pe_profile_get` snapshots →
+  sorts by count desc → caps → resolves only the capped set via the new `Ubel::ResolveFunctionInfo`
+  (factored out of `WalkFunctions`' version-aware flags/params probe), with a `"Function"` meta-class
+  guard so a pointer whose slot was recycled by a GC/level-load is dropped, not deref'd. Cooperative
+  `Tot::Requested()` abort. `Linie::Reset()` on client disconnect.
+
+3 pipe commands (`pe_profile_start/stop/get`, [Renge.h](dll/src/Renge.h)). UI: `LiveFuncsViewModel` +
+`LiveFuncsPanel` (Start/Stop/Refresh/Clear + ranked DataGrid + space=AND keyword filter with LRU memory
+per the CLAUDE.md rule + "Live"/"Name" row handoffs to Live Walker/clipboard). New "Live Funcs" tab
+inserted after Dump Explorer (MainTabIndex shifted); leaving the tab auto-stops any live recording.
+
+**Tests:** `LiveFuncsViewModelTests` (14 — Start hook/no-hook, Stop fetch+rank+empty, filter space=AND,
+Clear, handoffs, auto-stop-on-leave, model). Full suite 2402 pass / 0 fail; all 3 proxy DLLs + AOT
+publish clean. **DLL-side PE counting needs in-game verification** (Fern/DLL has no unit tests) — the
+shop/dash acceptance test on a live UE title.
+
+-----
+
 ## 2026-07-11 — Interesting Functions: opt-in "Gameplay Actions" keyword pack (build 2103; dev)
 
 **SHIPPED (UI-only, opt-in default OFF).** The Interesting Functions scorer was tuned for cheat-value

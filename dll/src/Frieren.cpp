@@ -1408,6 +1408,17 @@ int32_t UE5_CallProcessEvent(uintptr_t instance, uintptr_t ufunc, uintptr_t para
     return UE5_CallProcessEventEx(instance, ufunc, params, 0);
 }
 
+// Force the game-thread ProcessEvent hook to install NOW (reuses the audit-#3
+// call_once, so it is race-safe and idempotent). Normally the hook installs
+// lazily on the first invoke; the Live PE profiler (Linie) needs it up before
+// any invoke so it can record the game's own PE calls. Returns whether the hook
+// is active afterward (false ⇒ vtable-offset detection failed on this game;
+// the profiler will record nothing and the UI warns).
+extern "C" bool UE5_EnsureGameThreadHook() {
+    EnsureProcessEventReady();
+    return Stark::IsHookActive();
+}
+
 // Direct call entry point — never goes through GameThreadDispatch.
 // Mirrors the fallback path of UE5_CallProcessEvent without the hook
 // check; intended for callers (e.g. Mimic::HandleInvoke) that have
