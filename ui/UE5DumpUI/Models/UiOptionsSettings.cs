@@ -178,6 +178,18 @@ public sealed class ProxyDeployUiOptions
 
     /// <summary>Scan source: false = Steam library (default), true = generic drive scan.</summary>
     public bool ScanDrivesMode { get; set; }
+
+    /// <summary>Opt-in (default ON): show the per-game suggested-proxy column.</summary>
+    public bool LkgSuggestEnabled { get; set; } = true;
+
+    /// <summary>Proxy the user last deployed per game, keyed by game folder name
+    /// (stable across reinstall/patch). Feeds the suggestion as a mini "last known
+    /// good". Written whenever a deploy records a new pick.</summary>
+    public Dictionary<string, ProxyType> LastManualProxyByGame { get; set; } = new();
+
+    /// <summary>.exe file names of games the user has successfully loaded via UI
+    /// injection. Feeds the "injection · no proxy deployed" known-good suggestion.</summary>
+    public List<string> InjectedGameExes { get; set; } = new();
 }
 
 /// <summary>
@@ -187,6 +199,9 @@ public sealed class ProxyDeployUiOptions
 /// (every field is written — see the UiOptionsSettings remarks).
 /// </summary>
 [JsonSerializable(typeof(UiOptionsSettings))]
+// Explicitly registered (mirrors AobUsageJsonContext's Dictionary registration) so
+// the enum-valued map round-trips under source-gen without reflection fallback.
+[JsonSerializable(typeof(Dictionary<string, ProxyType>))]
 [JsonSourceGenerationOptions(
     WriteIndented = true,
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]

@@ -484,6 +484,62 @@ public class ProxyDeployTests
     }
 
     [Fact]
+    public async Task ApplyProxySuggestions_RememberedPickWins_ElseVersionDefault_AndClearsWhenDisabled()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "ue5lkg_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            // Non-PE files → import parse returns null; that isolates the glue:
+            // remembered-pick precedence + version fallback + enabled toggle.
+            string exeA = Path.Combine(dir, "GameA.exe");
+            string exeB = Path.Combine(dir, "GameB.exe");
+            string exeC = Path.Combine(dir, "GameC.exe");
+            File.WriteAllBytes(exeA, new byte[] { 1, 2, 3 });
+            File.WriteAllBytes(exeB, new byte[] { 1, 2, 3 });
+            File.WriteAllBytes(exeC, new byte[] { 1, 2, 3 });
+
+            var gameA = new DetectedGame { Name = "GameA", ExePath = exeA, BinariesDir = dir };
+            var gameB = new DetectedGame { Name = "GameB", ExePath = exeB, BinariesDir = dir };
+            var gameC = new DetectedGame { Name = "GameC", ExePath = exeC, BinariesDir = dir };
+            var games = new List<DetectedGame> { gameA, gameB, gameC };
+            var remembered = new Dictionary<string, ProxyType>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["GameA"] = ProxyType.Dxgi,
+            };
+            // GameC was injected (by .exe name); GameA also injected but a proxy pick wins.
+            var injected = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "GameC.exe", "GameA.exe",
+            };
+
+            var svc = new ProxyDeployService(new NoopLog(), new NoopPlatform());
+
+            await svc.ApplyProxySuggestionsAsync(games, remembered, injected, enabled: true,
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(ProxyType.Dxgi, gameA.SuggestedProxyType);       // remembered proxy beats injection
+            Assert.Equal("dxgi.dll · last used", gameA.SuggestedProxy);
+            Assert.Equal(ProxyType.Version, gameB.SuggestedProxyType);    // no history → safe default
+            Assert.Equal("version · default", gameB.SuggestedProxy);
+            Assert.Null(gameC.SuggestedProxyType);                        // injection-only → no proxy type
+            Assert.Equal("injection · no proxy deployed", gameC.SuggestedProxy);
+
+            await svc.ApplyProxySuggestionsAsync(games, remembered, injected, enabled: false,
+                TestContext.Current.CancellationToken);
+
+            Assert.Null(gameA.SuggestedProxyType);                        // disabled → cleared
+            Assert.Null(gameA.SuggestedProxy);
+            Assert.Null(gameB.SuggestedProxy);
+            Assert.Null(gameC.SuggestedProxy);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task FindUeGames_MonolithicLayout_StillPicksGameExeNotEngineSide()
     {
         string lib = MakeTempLibrary();

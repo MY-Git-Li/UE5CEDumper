@@ -79,6 +79,11 @@
                    IsChecked="{Binding IsDxgiSelected, Mode=TwoWay}"
                    ToolTip.Tip="{StaticResource str.Tip.ProxyDeploy.Type.Dxgi}"
                    Foreground="#D4D4D4" VerticalAlignment="Center"/>
+      <Border Width="1" Background="#444" Margin="4,2"/>
+      <CheckBox Content="{StaticResource str.ProxyDeploy.SuggestToggle}"
+                IsChecked="{Binding LkgSuggestEnabled}"
+                ToolTip.Tip="{StaticResource str.Tip.ProxyDeploy.SuggestToggle}"
+                Foreground="#CCCCCC" VerticalAlignment="Center"/>
     </StackPanel>
 
     <!-- Toolbar: Scan / Refresh / Selection helpers -->
@@ -224,6 +229,12 @@
         <!-- Status -->
         <DataGridTextColumn Header="{StaticResource str.ProxyDeploy.ColStatus}"
                             Binding="{Binding Status}" SortMemberPath="Status" Width="200" IsReadOnly="True"/>
+
+        <!-- Suggested proxy (import-table + remembered pick; advisory, plain text
+             column with Binding==SortMemberPath so it sorts under compiled bindings). -->
+        <DataGridTextColumn Header="{StaticResource str.ProxyDeploy.ColSuggested}"
+                            Binding="{Binding SuggestedProxy}" SortMemberPath="SuggestedProxy"
+                            Width="220" MinWidth="120" IsReadOnly="True"/>
 
         <!-- Installed Version -->
         <DataGridTextColumn Header="{StaticResource str.ProxyDeploy.ColVersion}"

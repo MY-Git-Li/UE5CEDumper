@@ -88,6 +88,25 @@ public interface IProxyDeployService
         CancellationToken ct = default);
 
     /// <summary>
+    /// Compute a per-game proxy suggestion for each detected game and write it to
+    /// <c>SuggestedProxyType</c> / <c>SuggestedProxy</c>. Preference order:
+    /// (1) a proxy the user last deployed for this game (<paramref name="rememberedByGame"/>,
+    /// keyed by <c>DetectedGame.Name</c>); (2) <c>injection · no proxy deployed</c>
+    /// when the user has successfully injected into this game (<paramref name="injectedExes"/>,
+    /// matched by the .exe file name) and never deployed a proxy — injection is a
+    /// known-good load method in its own right; (3) the safe <c>version.dll</c>
+    /// default, with the .exe import table only annotating which proxies are
+    /// importable. When <paramref name="enabled"/> is false the suggestion fields
+    /// are cleared. Advisory only — never changes the selected proxy type, never deploys.
+    /// </summary>
+    Task ApplyProxySuggestionsAsync(
+        IReadOnlyList<DetectedGame> games,
+        IReadOnlyDictionary<string, ProxyType> rememberedByGame,
+        IReadOnlySet<string> injectedExes,
+        bool enabled,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Check if a DLL at the given path is ours (ProductName == "UE5CEDumper").
     /// </summary>
     bool IsOurProxyDll(string dllPath);

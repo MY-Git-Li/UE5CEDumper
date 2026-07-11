@@ -561,6 +561,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log);
             // Auto-connect the pipe after a successful in-UI DLL injection.
             ProxyDeploy.RequestConnectAsync = () => ConnectCommand.ExecuteAsync(null);
+            // Persist the remembered-proxy map (a Dictionary mutation isn't caught
+            // by the [ObservableProperty] change-tracking save).
+            ProxyDeploy.RequestOptionSave = ScheduleOptionSave;
         }
 
         // Mirror the per-tab stale-DLL warning into the always-visible top-bar
@@ -2221,7 +2224,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private static readonly HashSet<string> ProxyDeployPersist = new()
     {
         nameof(ProxyDeployViewModel.SelectedProxyType), nameof(ProxyDeployViewModel.ForceOverwrite),
-        nameof(ProxyDeployViewModel.ScanDrivesMode),
+        nameof(ProxyDeployViewModel.ScanDrivesMode), nameof(ProxyDeployViewModel.LkgSuggestEnabled),
     };
 
     /// <summary>Apply saved options to every VM. Runs under _suppressOptionSave.
@@ -2317,6 +2320,13 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             ProxyDeploy.SelectedProxyType = o.ProxyDeploy.SelectedProxyType;
             ProxyDeploy.ForceOverwrite = o.ProxyDeploy.ForceOverwrite;
             ProxyDeploy.ScanDrivesMode = o.ProxyDeploy.ScanDrivesMode;
+            ProxyDeploy.LkgSuggestEnabled = o.ProxyDeploy.LkgSuggestEnabled;
+            ProxyDeploy.LastManualProxyByGame.Clear();
+            foreach (var (name, type) in o.ProxyDeploy.LastManualProxyByGame)
+                ProxyDeploy.LastManualProxyByGame[name] = type;
+            ProxyDeploy.InjectedGameExes.Clear();
+            foreach (var exe in o.ProxyDeploy.InjectedGameExes)
+                ProxyDeploy.InjectedGameExes.Add(exe);
         }
     }
 
@@ -2440,6 +2450,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             o.ProxyDeploy.SelectedProxyType = ProxyDeploy.SelectedProxyType;
             o.ProxyDeploy.ForceOverwrite = ProxyDeploy.ForceOverwrite;
             o.ProxyDeploy.ScanDrivesMode = ProxyDeploy.ScanDrivesMode;
+            o.ProxyDeploy.LkgSuggestEnabled = ProxyDeploy.LkgSuggestEnabled;
+            o.ProxyDeploy.LastManualProxyByGame =
+                new Dictionary<string, ProxyType>(ProxyDeploy.LastManualProxyByGame, StringComparer.OrdinalIgnoreCase);
+            o.ProxyDeploy.InjectedGameExes = new List<string>(ProxyDeploy.InjectedGameExes);
         }
 
         return o;
