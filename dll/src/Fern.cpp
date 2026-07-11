@@ -54,6 +54,7 @@ extern "C" int32_t   UE5_GetProtectState(int32_t* outWant, int32_t* outLive, int
 // timed-out invoke can't use-after-free this handler's stack-local paramBuf.
 extern "C" int32_t   UE5_CallProcessEventEx(uintptr_t instance, uintptr_t ufunc, uintptr_t params, uint32_t paramsSize);
 extern "C" bool      UE5_EnsureGameThreadHook();
+extern "C" int       UE5_GetProcessEventOffset();
 
 // ============================================================
 // Radar wire helpers — parse "100" / "-42" / "3.14" / "true" /
@@ -3042,6 +3043,16 @@ std::string Fern::DispatchCommand(const std::shared_ptr<Connection>& conn, const
             json data;
             data["recording"]   = true;
             data["hook_active"] = hookActive;
+            if (!hookActive) {
+                // Distinguish the two failure modes so the UI can advise correctly.
+                int peOffset = UE5_GetProcessEventOffset();
+                data["hook_detail"] = (peOffset >= 0)
+                    ? std::string("ProcessEvent was found but the game-thread hook could not install "
+                                  "(MinHook trampoline alloc failed, or another injected tool holds it). "
+                                  "Restart the game and re-inject, or close other CE hooks, then Start again.")
+                    : std::string("ProcessEvent not detected yet. Issue any invoke first "
+                                  "(e.g. Teleport -> Get POV), then Start again.");
+            }
             return Renge::MakeResponse(id, data).dump();
         }
 

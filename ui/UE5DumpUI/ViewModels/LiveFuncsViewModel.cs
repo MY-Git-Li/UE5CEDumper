@@ -137,13 +137,15 @@ public partial class LiveFuncsViewModel : ViewModelBase
         {
             ClearError();
             IsBusy = true;
-            bool hookActive = await _dump.PeProfileStartAsync();
+            var start = await _dump.PeProfileStartAsync();
             IsRecording = true;
-            StatusText = hookActive
+            StatusText = start.HookActive
                 ? "Recording… ALT-TAB to the game, perform the action (open shop / dash), then click Stop."
-                : "Recording, but no PE hook installed on this game — counts will stay 0. "
-                  + "Try issuing any invoke first (e.g. Teleport → Get POV), then Start again.";
-            _log.Info($"LivePEProfiler: start (hook_active={hookActive})");
+                : "No PE hook active — counts will stay 0. "
+                  + (string.IsNullOrEmpty(start.Detail)
+                        ? "Try issuing any invoke first (e.g. Teleport → Get POV), then Start again."
+                        : start.Detail);
+            _log.Info($"LivePEProfiler: start (hook_active={start.HookActive})");
         }
         catch (Exception ex)
         {

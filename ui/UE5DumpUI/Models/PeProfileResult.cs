@@ -77,6 +77,18 @@ public sealed class PeProfileEntry
 }
 
 /// <summary>
+/// Result of <c>pe_profile_start</c>. <see cref="HookActive"/> false means the
+/// game-thread ProcessEvent hook isn't installed, so counts will stay 0;
+/// <see cref="Detail"/> is the DLL's specific reason (ProcessEvent not detected
+/// vs found-but-hook-couldn't-install) so the UI can advise the right remedy.
+/// </summary>
+public sealed class PeProfileStartResult
+{
+    public bool   HookActive { get; init; }
+    public string Detail     { get; init; } = "";
+}
+
+/// <summary>
 /// Result of <c>pe_profile_get</c>: the ranked fire-count table plus the
 /// aggregate counters (distinct functions + total PE calls) shown in the status
 /// line so the user can gauge how much fired during the window.

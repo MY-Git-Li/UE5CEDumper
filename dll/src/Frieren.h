@@ -99,6 +99,11 @@ __declspec(dllexport) int32_t   UE5_CallProcessEventDirect(uintptr_t instance, u
 // own PE calls without first issuing an invoke.
 __declspec(dllexport) bool      UE5_EnsureGameThreadHook();
 
+// ProcessEvent vtable offset once detected (>=0), else negative (-2 not attempted,
+// -1 detection failed). Lets the profiler tell "ProcessEvent not found" apart from
+// "found but the hook couldn't install" when reporting why recording is inactive.
+__declspec(dllexport) int       UE5_GetProcessEventOffset();
+
 // === Debug Camera (robust force on/off; shared by UI pipe + CE Lua) ===
 // Read the live Debug Camera state. 1 = ON (a DebugCameraController is
 // possessing the player), 0 = OFF, -1 = unknown / no live CheatManager.

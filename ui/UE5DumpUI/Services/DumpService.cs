@@ -2400,11 +2400,15 @@ public sealed class DumpService : IDumpService
 
     /// <summary>Start recording per-UFunction fire counts. Forces the game-thread
     /// PE hook to install; returns its <c>hook_active</c> (false ⇒ counts stay 0).</summary>
-    public async Task<bool> PeProfileStartAsync(CancellationToken ct = default)
+    public async Task<PeProfileStartResult> PeProfileStartAsync(CancellationToken ct = default)
     {
         var res = await _pipe.SendAsync(new JsonObject { ["cmd"] = "pe_profile_start" }, ct);
         CheckResponse(res);
-        return res["hook_active"]?.GetValue<bool>() ?? false;
+        return new PeProfileStartResult
+        {
+            HookActive = res["hook_active"]?.GetValue<bool>() ?? false,
+            Detail     = res["hook_detail"]?.GetValue<string>() ?? "",
+        };
     }
 
     /// <summary>Stop recording (idempotent). Counts are retained for a later get.</summary>

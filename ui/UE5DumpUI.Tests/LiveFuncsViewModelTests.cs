@@ -17,15 +17,16 @@ public class LiveFuncsViewModelTests
     private sealed class FakeDumpService : StubDumpService
     {
         public bool StartHookActive { get; set; } = true;
+        public string StartDetail { get; set; } = "";
         public int StartCalls { get; private set; }
         public int StopCalls { get; private set; }
         public int GetCalls { get; private set; }
         public PeProfileResult NextGet { get; set; } = new();
 
-        public override Task<bool> PeProfileStartAsync(CancellationToken ct = default)
+        public override Task<PeProfileStartResult> PeProfileStartAsync(CancellationToken ct = default)
         {
             StartCalls++;
-            return Task.FromResult(StartHookActive);
+            return Task.FromResult(new PeProfileStartResult { HookActive = StartHookActive, Detail = StartDetail });
         }
         public override Task PeProfileStopAsync(CancellationToken ct = default)
         {
@@ -89,15 +90,17 @@ public class LiveFuncsViewModelTests
     }
 
     [Fact]
-    public async Task Start_NoHook_WarnsCountsStayZero()
+    public async Task Start_NoHook_SurfacesDllReason()
     {
         var (vm, dump) = MakeVm();
         dump.StartHookActive = false;
+        dump.StartDetail = "ProcessEvent was found but the game-thread hook could not install.";
 
         await vm.StartCommand.ExecuteAsync(null);
 
         Assert.True(vm.IsRecording);
-        Assert.Contains("no PE hook", vm.StatusText);
+        Assert.Contains("PE hook", vm.StatusText);
+        Assert.Contains("could not install", vm.StatusText);  // the DLL's specific reason is shown
     }
 
     [Fact]
