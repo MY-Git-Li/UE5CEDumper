@@ -561,6 +561,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             ProxyDeploy = new ProxyDeployViewModel(proxyDeploy, log);
             // Auto-connect the pipe after a successful in-UI DLL injection.
             ProxyDeploy.RequestConnectAsync = () => ConnectCommand.ExecuteAsync(null);
+            // Persist the remembered-proxy map (a Dictionary mutation isn't caught
+            // by the [ObservableProperty] change-tracking save).
+            ProxyDeploy.RequestOptionSave = ScheduleOptionSave;
         }
 
         // Mirror the per-tab stale-DLL warning into the always-visible top-bar
@@ -2221,7 +2224,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private static readonly HashSet<string> ProxyDeployPersist = new()
     {
         nameof(ProxyDeployViewModel.SelectedProxyType), nameof(ProxyDeployViewModel.ForceOverwrite),
-        nameof(ProxyDeployViewModel.ScanDrivesMode),
+        nameof(ProxyDeployViewModel.ScanDrivesMode), nameof(ProxyDeployViewModel.LkgSuggestEnabled),
     };
 
     /// <summary>Apply saved options to every VM. Runs under _suppressOptionSave.
@@ -2317,6 +2320,16 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             ProxyDeploy.SelectedProxyType = o.ProxyDeploy.SelectedProxyType;
             ProxyDeploy.ForceOverwrite = o.ProxyDeploy.ForceOverwrite;
             ProxyDeploy.ScanDrivesMode = o.ProxyDeploy.ScanDrivesMode;
+            ProxyDeploy.LkgSuggestEnabled = o.ProxyDeploy.LkgSuggestEnabled;
+            ProxyDeploy.LastManualProxyByGame.Clear();
+            foreach (var (name, type) in o.ProxyDeploy.LastManualProxyByGame)
+                ProxyDeploy.LastManualProxyByGame[name] = type;
+            ProxyDeploy.InjectedGameExes.Clear();
+            foreach (var exe in o.ProxyDeploy.InjectedGameExes)
+                ProxyDeploy.InjectedGameExes.Add(exe);
+            ProxyDeploy.ConfirmedProxyByExe.Clear();
+            foreach (var (exe, type) in o.ProxyDeploy.ConfirmedProxyByExe)
+                ProxyDeploy.ConfirmedProxyByExe[exe] = type;
         }
     }
 
@@ -2440,6 +2453,12 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             o.ProxyDeploy.SelectedProxyType = ProxyDeploy.SelectedProxyType;
             o.ProxyDeploy.ForceOverwrite = ProxyDeploy.ForceOverwrite;
             o.ProxyDeploy.ScanDrivesMode = ProxyDeploy.ScanDrivesMode;
+            o.ProxyDeploy.LkgSuggestEnabled = ProxyDeploy.LkgSuggestEnabled;
+            o.ProxyDeploy.LastManualProxyByGame =
+                new Dictionary<string, ProxyType>(ProxyDeploy.LastManualProxyByGame, StringComparer.OrdinalIgnoreCase);
+            o.ProxyDeploy.InjectedGameExes = new List<string>(ProxyDeploy.InjectedGameExes);
+            o.ProxyDeploy.ConfirmedProxyByExe =
+                new Dictionary<string, ProxyType>(ProxyDeploy.ConfirmedProxyByExe, StringComparer.OrdinalIgnoreCase);
         }
 
         return o;
@@ -2478,6 +2497,11 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (_aobUsage != null)
             _ = _aobUsage.RecordScanAsync(state);
 
+        // Phase 2 LKG: if the DLL reports a PROXY loaded this game, remember it as
+        // confirmed-working — but only after the session proves stable (guards a
+        // proxy that loads + connects then crashes the game seconds into play).
+        ScheduleProxyConfirmation(state);
+
         StatusText = $"Connected — UE{state.UEVersion} ({state.ObjectCount} objects)";
 
         if (!string.IsNullOrEmpty(state.ModuleName))
@@ -2490,6 +2514,44 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         // Auto-load objects
         _ = ObjectTree.LoadCommand.ExecuteAsync(null);
+    }
+
+    // Stability dwell before a proxy load is recorded as confirmed-working: long
+    // enough that a proxy which loads + connects then crashes the game is NOT
+    // recorded, short enough to fire in a normal session.
+    private const int ProxyConfirmDwellMs = 20_000;
+    private Timer? _proxyConfirmTimer;
+
+    /// <summary>
+    /// Phase 2 LKG stability gate. When the DLL self-reports that a PROXY loaded
+    /// this game (<see cref="EngineState.LoadMode"/> = "proxy:&lt;dll&gt;"), wait a
+    /// short dwell and — if the session is still connected — record it as the game's
+    /// confirmed-working proxy (keyed by the game .exe name so it survives reinstall).
+    /// The dwell guards a proxy that loads + connects then crashes the game: the
+    /// connect alone is not proof the game keeps running. Non-proxy load modes
+    /// (injected / CE .CT / older DLLs with no load_mode) are ignored here.
+    /// </summary>
+    private void ScheduleProxyConfirmation(EngineState state)
+    {
+        if (ProxyDeploy is null) return;
+
+        const string prefix = "proxy:";
+        string mode = state.LoadMode ?? "";
+        if (!mode.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return;
+
+        string proxyDll = mode[prefix.Length..];   // "version.dll" / "dinput8.dll" / "dxgi.dll"
+        string exeName = state.ModuleName;          // bare game .exe file name
+        if (string.IsNullOrEmpty(proxyDll) || string.IsNullOrEmpty(exeName)) return;
+
+        _proxyConfirmTimer?.Dispose();
+        _proxyConfirmTimer = new Timer(_ =>
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                // Still connected after the dwell → the proxy didn't crash the game.
+                if (IsConnected)
+                    ProxyDeploy?.RecordConfirmedProxy(exeName, proxyDll);
+            }),
+            null, ProxyConfirmDwellMs, Timeout.Infinite);
     }
 
     /// <summary>

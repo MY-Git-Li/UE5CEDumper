@@ -18,6 +18,81 @@ builds ≤696 in
 
 -----
 
+## 2026-07-11 — LKG Phase 2: DLL-attributed confirmed-working proxy (build 2142; dev, needs re-inject)
+
+**SHIPPED (DLL + UI; re-inject required).** Upgrades the Proxy Deploy suggestion from "you deployed /
+injected this before" to **"a proxy actually LOADED this game and it stayed running"** — the strongest
+known-good signal.
+
+- **DLL self-reports the load path** ([Fern.cpp](../dll/src/Fern.cpp) init response): `load_mode` =
+  `proxy:version.dll` | `proxy:dinput8.dll` | `proxy:dxgi.dll` | `injected` | `loaded:<name>` | `unknown`,
+  computed from **`GetModuleFileNameW(g_hDllModule)`** — THIS module's own file name. This is the ONLY
+  correct proxy attribution: with two proxies deployed, `Heiter.cpp`'s mutex makes the loser a passive
+  forwarder that returns before init and never reports, so the served `load_mode` is always the WINNER;
+  module-list enumeration (the naive approach) mis-attributes because all proxies share the PE ProductName.
+- **UI stability gate** ([MainWindowViewModel](../ui/UE5DumpUI/ViewModels/MainWindowViewModel.cs)
+  `ScheduleProxyConfirmation`): on connect, if `EngineState.LoadMode` is a proxy, wait a 20 s dwell and —
+  **only if still connected** — record it via `RecordConfirmedProxy`. The dwell guards a proxy that loads +
+  connects then crashes the game seconds into play (connect alone isn't proof the game keeps running).
+- **Key = game .exe name** (`EngineState.ModuleName`), NOT peHash — survives reinstall/patch; unified with
+  Phase 1's injection/enrichment exe-name resolution. Stored in `ProxyDeployUiOptions.ConfirmedProxyByExe`.
+- **Suggestion priority**: confirmed-working ("dxgi.dll · confirmed working") > deployed ("· last used") >
+  injection ("injection · no proxy deployed") > version default. Progressive: deploy shows "last used" →
+  launch + survive the dwell → upgrades to "confirmed working".
+- Race-safe: enrichment reads snapshots; all map mutations marshal to the UI thread. Backward-compatible
+  (older DLLs emit no `load_mode` → gate is inert). 2436 tests pass; DLL + 3 proxies + trimmed UI green.
+
+-----
+
+## 2026-07-11 — Proxy Deploy per-game suggestion (LKG Phase 1): import-table + remembered pick + injection known-good (builds 2134-2140; dev)
+
+**SHIPPED (UI-only, no DLL/pipe change).** First slice of the "Last-Known-Good proxy" idea: the Proxy
+Deploy grid gains a per-game **Suggested proxy** column so the user doesn't have to re-guess which of
+version/dinput8/dxgi to deploy after an uninstall→reinstall wipes the folder. Advisory only — it never
+changes the global proxy radio and never auto-deploys.
+
+**Why this shape (evaluation first).** A multi-agent evaluation of the full peHash-keyed "record a
+confirmed proxy load" design surfaced three verified blockers: (1) the confirmed-success moment (pipe
+connect, `ApplyEngineState`) has the game peHash but **no proxy-type** — attribution lives only in the
+process-module list, and with two proxies deployed the mutex passive-forwarder (`Heiter.cpp` +
+identical `version.rc` `ProductName`/`OriginalFilename`) makes module-enumeration record the *wrong*
+proxy; (2) **peHash = TimeDateStamp+SizeOfImage changes on every game patch**, so a reinstall (which
+pulls the latest build) orphans the entry — the wrong key for a "survives reinstall" feature; (3)
+recording success at connect can log a load-then-crash proxy as "good". Phase 1 therefore avoids the
+DLL change and history entirely.
+
+**What Phase 1 does instead:**
+- **[ProxyImportAnalyzer](../ui/UE5DumpUI/Services/ProxyImportAnalyzer.cs)** — pure, offline PE
+  import-table parser (DOS→NT→section→RVA→file-offset; standard + delay-load dirs). Reports which of
+  {version,dinput8,dxgi}.dll the .exe imports. **Honesty guard:** import parsing reports *viability*
+  (which proxies can even load), NOT the recommendation — `version.dll` loads *dynamically* so its
+  absence from the static import table means nothing, and we deliberately never auto-escalate to dxgi
+  (that pattern matches nearly every D3D game and would push dxgi into the Octopath-秒退 trap).
+- **Suggestion** = the proxy the user **last deployed for that game** (remembered by folder name, so it
+  survives reinstall/patch — the honest mini-LKG) ?? **injection known-good** ?? `version` (safe default).
+  Import viability is folded into the column text as advisory context ("version · default · alt: dxgi").
+- **Injection as a first-class known-good** (build 2140): injection is a UI-initiated action, so — unlike a
+  plain-Connect proxy load — it is reliably knowable in Phase 1. `RememberInjection` records the game .exe
+  name whenever the user successfully injects (fresh inject, or an already-loaded process the module list
+  attributes to injection). A game that was injected but never had a proxy deployed shows **"injection ·
+  no proxy deployed"** — its known-good load method (and often the ONLY option for EA/launcher games that
+  strip the exe's DLL search dir). Keyed by .exe name (inject flow) vs proxy pick by folder name (deploy
+  flow); both resolve against the same `DetectedGame`, so no key unification needed. Persisted in
+  `ProxyDeployUiOptions.InjectedGameExes`.
+- **Opt-in** `LkgSuggestEnabled` (default ON) in `ProxyDeployUiOptions`; remembered picks persist in
+  `LastManualProxyByGame` (game-name → ProxyType) in `ui-options.json` (UI-owned, never the DLL-shared
+  peHash json). Enrichment runs once per scan after `RefreshDeployStatusAsync`; the column is a plain
+  `DataGridTextColumn` (Binding==SortMemberPath, the only compiled-binding-sortable pattern in this grid).
+
+**Not done (Phase 2, deferred):** the real DLL-attributed success-history LKG — needs the DLL to
+self-report `GetModuleFileNameW(g_hDllModule)` (the winning proxy's own filename) at init, a stable
+install-identity key (appid/name, not peHash), and a stability gate before recording. Known Phase 1
+caveat: import-table can't predict EA-launcher games that strip the exe's DLL search dir (no proxy
+loads at all). 15 new tests (synthetic PE incl. non-identity RVA mapping + real-PE smoke + injection
+known-good + service glue); full suite 2434 pass / 0 fail; trimmed self-contained UI publish green.
+
+-----
+
 ## 2026-07-11 — Live Funcs profiler refinements: baseline diff, hide-widgets, hide-events, call-order (builds 2110-2130; dev)
 
 Iterative in-game hardening of the Live PE profiler ([Linie](../dll/src/Linie.cpp)) driven by a

@@ -25,6 +25,50 @@ public partial class ProxyDeployViewModel : ViewModelBase
     [ObservableProperty] private string? _lastOperationResult;
 
     /// <summary>
+    /// Opt-in (default ON): show a per-game suggested proxy in the grid, derived
+    /// from the .exe import table + the proxy the user last deployed for that game.
+    /// Advisory only — never changes the selected proxy radio, never auto-deploys.
+    /// </summary>
+    [ObservableProperty] private bool _lkgSuggestEnabled = true;
+
+    /// <summary>
+    /// The proxy the user last DEPLOYED per game (keyed by DetectedGame.Name, the
+    /// stable folder name — survives reinstall/patch, unlike peHash). Feeds the
+    /// suggestion as a mini "last known good". Round-tripped via ProxyDeployUiOptions
+    /// (MainWindowViewModel ApplyOptions/BuildOptions); persisted on change through
+    /// <see cref="RequestOptionSave"/> because a Dictionary mutation is not tracked
+    /// by the [ObservableProperty] save mechanism.
+    /// </summary>
+    public Dictionary<string, ProxyType> LastManualProxyByGame { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Games the user has successfully loaded via UI DLL injection, keyed by the
+    /// .exe file name (available in the inject flow; stable across reinstall/patch).
+    /// Injection is a UI-initiated action, so — unlike a plain-Connect proxy load —
+    /// it is reliably known here. When a game is in this set but NOT in
+    /// <see cref="LastManualProxyByGame"/>, the suggestion surfaces "injection ·
+    /// no proxy deployed": injection is this game's known-good load method.
+    /// </summary>
+    public HashSet<string> InjectedGameExes { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Proxy CONFIRMED to have actually loaded a game — the DLL self-reported a
+    /// proxy <c>load_mode</c> at connect AND the session stayed connected past the
+    /// stability dwell (so it didn't load-then-crash). Keyed by .exe file name.
+    /// The strongest known-good signal; wins over a merely-deployed pick. Recorded
+    /// via <see cref="RecordConfirmedProxy"/> from MainWindowViewModel's gate.
+    /// </summary>
+    public Dictionary<string, ProxyType> ConfirmedProxyByExe { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Set by MainWindowViewModel: schedule a debounced options save after
+    /// the remembered-pick map / injected set / confirmed map is mutated (none is an
+    /// ObservableProperty, so the change-tracking save doesn't fire).</summary>
+    public Action? RequestOptionSave { get; set; }
+
+    /// <summary>
     /// Scan source: false = Steam library (default), true = generic drive scan.
     /// Bound to the Source radio pair at the top of the panel.
     /// </summary>
@@ -186,6 +230,77 @@ public partial class ProxyDeployViewModel : ViewModelBase
         }
     }
 
+    /// <summary>Toggling the suggestion opt-in re-evaluates the grid (populate or
+    /// clear the Suggested column). Fire-and-forget — the UI doesn't block.</summary>
+    partial void OnLkgSuggestEnabledChanged(bool value)
+    {
+        if (Games.Count > 0)
+            _ = ApplyProxySuggestionsAsync();
+    }
+
+    /// <summary>Compute the per-game proxy suggestion (import table + remembered
+    /// pick) for every scanned game. Gated on <see cref="LkgSuggestEnabled"/> —
+    /// when off, the service clears the suggestion fields. Advisory only.</summary>
+    private async Task ApplyProxySuggestionsAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            // Snapshot the known-good maps/set (taken on the calling — UI — thread)
+            // so the background enrichment reads immutable copies; this avoids a race
+            // with RecordConfirmedProxy / RememberInjection / deploy mutating them.
+            var confirmed = new Dictionary<string, ProxyType>(ConfirmedProxyByExe, StringComparer.OrdinalIgnoreCase);
+            var remembered = new Dictionary<string, ProxyType>(LastManualProxyByGame, StringComparer.OrdinalIgnoreCase);
+            var injected = new HashSet<string>(InjectedGameExes, StringComparer.OrdinalIgnoreCase);
+
+            await _deploy.ApplyProxySuggestionsAsync(
+                Games, confirmed, remembered, injected, LkgSuggestEnabled, ct);
+        }
+        catch (OperationCanceledException) { /* scan cancelled */ }
+        catch (Exception ex)
+        {
+            _log.Warn("ProxyDeploy", $"Proxy suggestion pass failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>Record that the user successfully loaded a game via UI injection
+    /// (keyed by the .exe file name). Persists + re-evaluates the suggestion column
+    /// so an injection-only game shows its known-good method. No-op if already known.</summary>
+    private void RememberInjection(string? exePath)
+    {
+        if (string.IsNullOrEmpty(exePath)) return;
+        string key = Path.GetFileName(exePath);
+        if (string.IsNullOrEmpty(key)) return;
+
+        if (InjectedGameExes.Add(key))
+        {
+            RequestOptionSave?.Invoke();
+            if (Games.Count > 0)
+                _ = ApplyProxySuggestionsAsync();
+        }
+    }
+
+    /// <summary>
+    /// Record a proxy CONFIRMED to have loaded a game — called from the connection
+    /// stability gate (DLL self-reported a proxy load_mode + session stayed alive).
+    /// Keyed by the .exe file name (from EngineState.ModuleName). Persists + re-runs
+    /// the suggestion so the game upgrades to "confirmed working". Must be called on
+    /// the UI thread (mutation + snapshot serialize there). No-op on a non-proxy DLL
+    /// name or if the same confirmation is already recorded.
+    /// </summary>
+    public void RecordConfirmedProxy(string? exeName, string? proxyDllName)
+    {
+        if (string.IsNullOrEmpty(exeName)) return;
+        if (ProxyTypeExtensions.FromDllName(proxyDllName) is not ProxyType type) return;
+
+        if (!ConfirmedProxyByExe.TryGetValue(exeName, out var prev) || prev != type)
+        {
+            ConfirmedProxyByExe[exeName] = type;
+            RequestOptionSave?.Invoke();
+            if (Games.Count > 0)
+                _ = ApplyProxySuggestionsAsync();
+        }
+    }
+
     [RelayCommand]
     private async Task ScanAsync(CancellationToken ct)
     {
@@ -216,6 +331,9 @@ public partial class ProxyDeployViewModel : ViewModelBase
                 StatusText = "Checking deploy status...";
                 await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, ct);
             }
+
+            // Per-game proxy suggestion (import table + remembered pick), once per scan.
+            await ApplyProxySuggestionsAsync(ct);
 
             StatusText = $"Found {Games.Count} UE game(s)";
             OnPropertyChanged(nameof(HasSelection));
@@ -301,6 +419,9 @@ public partial class ProxyDeployViewModel : ViewModelBase
                 await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, ct);
             }
 
+            // Per-game proxy suggestion (import table + remembered pick), once per scan.
+            await ApplyProxySuggestionsAsync(ct);
+
             StatusText = $"Found {Games.Count} UE game(s)";
             OnPropertyChanged(nameof(HasSelection));
         }
@@ -379,6 +500,10 @@ public partial class ProxyDeployViewModel : ViewModelBase
                 + $"{target.DumperVersion}) — connecting instead of re-injecting");
             SetOperationResult(
                 $"{target.Name} already has {target.DumperStatusLine} — connecting...", 0);
+            // If the module list shows this game was loaded via injection (not a
+            // proxy), that's a known-good injection — remember it for the suggestion.
+            if (target.DumperLoadMode?.Contains("inject", StringComparison.OrdinalIgnoreCase) == true)
+                RememberInjection(target.Path);
             if (RequestConnectAsync is not null)
             {
                 try { await RequestConnectAsync(); }
@@ -431,6 +556,9 @@ public partial class ProxyDeployViewModel : ViewModelBase
 
         _log.Info("ProxyDeploy", $"Injected UE5Dumper.dll into PID {target.Pid} (HMODULE=0x{result.HModule:X})");
         SetOperationResult($"Injected into {target.Name} (PID {target.Pid}) — connecting...", 0);
+        // Injection is a known-good load method for this game — remember it so the
+        // Suggested column flags an injection-only game (never had a proxy deployed).
+        RememberInjection(target.Path);
 
         // Auto-connect the pipe (best-effort — the DLL auto-starts its pipe server).
         if (RequestConnectAsync is not null)
@@ -458,6 +586,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
                 : null;
 
             await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, ct);
+            await ApplyProxySuggestionsAsync(ct);
             StatusText = $"{Games.Count} game(s) — status refreshed";
         }
         catch (Exception ex)
@@ -490,6 +619,7 @@ public partial class ProxyDeployViewModel : ViewModelBase
 
         ClearError();
         int ok = 0, fail = 0;
+        bool pickChanged = false;
 
         foreach (var game in selected)
         {
@@ -497,12 +627,28 @@ public partial class ProxyDeployViewModel : ViewModelBase
             StatusText = $"Deploying to {game.Name}...";
 
             bool success = await _deploy.DeployAsync(SourceDllPath, game, SelectedProxyType, ForceOverwrite, ct);
-            if (success) ok++;
+            if (success)
+            {
+                ok++;
+                // Remember what the user deployed for this game (mini "last known
+                // good"), keyed by the stable folder name so it survives reinstall.
+                if (!string.IsNullOrEmpty(game.Name))
+                {
+                    if (!LastManualProxyByGame.TryGetValue(game.Name, out var prev) || prev != SelectedProxyType)
+                    {
+                        LastManualProxyByGame[game.Name] = SelectedProxyType;
+                        pickChanged = true;
+                    }
+                }
+            }
             else fail++;
         }
 
         // Refresh status from disk to ensure DataGrid reflects actual state
         await _deploy.RefreshDeployStatusAsync(Games, SourceDllPath, SelectedProxyType, ct);
+        // Reflect the just-recorded pick in the Suggested column immediately.
+        await ApplyProxySuggestionsAsync(ct);
+        if (pickChanged) RequestOptionSave?.Invoke();
 
         SetOperationResult($"Deployed: {ok} success, {fail} failed", fail);
     }

@@ -38,6 +38,14 @@
 
 using json = nlohmann::json;
 
+// This DLL's own module handle (defined in Heiter.cpp DllMain). Used to self-report
+// the load path in the init response: for a proxy build g_hDllModule IS the proxy
+// DLL that the OS actually loaded (the mutex WINNER — a passive-forwarder second
+// proxy returns before init and never reports), for a manual inject / CE .CT it is
+// UE5Dumper.dll. This is the only correct proxy attribution: module-list enumeration
+// mis-attributes when two proxies coexist because they share the PE ProductName.
+extern HMODULE g_hDllModule;
+
 // Forward declare ExportAPI functions (extern "C" must be at global scope)
 extern "C" bool      UE5_Init();
 extern "C" uintptr_t UE5_FindInstanceOfClass(const char* className);
@@ -865,6 +873,33 @@ static void FillPointerSnapshot(json& data) {
         moduleName += (wc < 128) ? static_cast<char>(wc) : '?';
     }
     data["module_name"] = moduleName;
+
+    // load_mode: how the dumper got into this process, from THIS module's own file
+    // name (g_hDllModule). "proxy:version.dll" | "proxy:dinput8.dll" | "proxy:dxgi.dll"
+    // (the OS-loaded proxy — the mutex winner, correct even when 2 proxies coexist) /
+    // "injected" (UE5Dumper.dll via CreateRemoteThread or CE .CT) / "loaded:<name>" /
+    // "unknown". The UI folds a proxy load into per-game "confirmed-working" LKG.
+    {
+        std::string selfName;
+        wchar_t selfPathW[MAX_PATH] = {};
+        if (g_hDllModule && GetModuleFileNameW(g_hDllModule, selfPathW, MAX_PATH)) {
+            std::wstring selfPath(selfPathW);
+            auto ss = selfPath.find_last_of(L"\\/");
+            std::wstring selfFile = (ss != std::wstring::npos) ? selfPath.substr(ss + 1) : selfPath;
+            for (wchar_t wc : selfFile)
+                selfName += (wc < 128) ? static_cast<char>(towlower(wc)) : '?';
+        }
+        std::string loadMode;
+        if (selfName == "version.dll" || selfName == "dinput8.dll" || selfName == "dxgi.dll")
+            loadMode = "proxy:" + selfName;
+        else if (selfName == "ue5dumper.dll")
+            loadMode = "injected";
+        else if (!selfName.empty())
+            loadMode = "loaded:" + selfName;
+        else
+            loadMode = "unknown";
+        data["load_mode"] = loadMode;
+    }
 
     // Per-launch session token: the game process's creation time (FILETIME,
     // 100ns intervals since 1601, hi:lo packed → hex). Unique per launch even

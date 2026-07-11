@@ -64,4 +64,15 @@ public sealed partial class DetectedGame : ObservableObject
 
     /// <summary>Whether this game is selected for batch operations.</summary>
     [ObservableProperty] private bool _isSelected;
+
+    /// <summary>
+    /// Suggested proxy type for this game (import-table + remembered-pick based),
+    /// or null when suggestions are disabled / not yet computed. Advisory only —
+    /// it never changes the global proxy radio and never auto-deploys.
+    /// </summary>
+    [ObservableProperty] private ProxyType? _suggestedProxyType;
+
+    /// <summary>Concise column text for the suggestion (e.g. "version · default",
+    /// "dxgi · last used", "version · default · alt: dxgi"). Null clears the cell.</summary>
+    [ObservableProperty] private string? _suggestedProxy;
 }

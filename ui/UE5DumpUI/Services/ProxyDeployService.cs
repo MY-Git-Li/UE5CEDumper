@@ -863,6 +863,67 @@ public sealed class ProxyDeployService : IProxyDeployService
     }
 
     // ────────────────────────────────────────────────────────────────
+    // Proxy Suggestion (import-table + remembered pick)
+    // ────────────────────────────────────────────────────────────────
+
+    public Task ApplyProxySuggestionsAsync(
+        IReadOnlyList<DetectedGame> games,
+        IReadOnlyDictionary<string, ProxyType> confirmedByExe,
+        IReadOnlyDictionary<string, ProxyType> rememberedByGame,
+        IReadOnlySet<string> injectedExes,
+        bool enabled,
+        CancellationToken ct = default)
+    {
+        return Task.Run(() =>
+        {
+            foreach (var game in games)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                if (!enabled)
+                {
+                    game.SuggestedProxyType = null;
+                    game.SuggestedProxy = null;
+                    continue;
+                }
+
+                string exeName = Path.GetFileName(game.ExePath);
+                ProxyType? confirmed =
+                    confirmedByExe.TryGetValue(exeName, out var c) ? c : null;
+                ProxyType? remembered =
+                    rememberedByGame.TryGetValue(game.Name, out var p) ? p : null;
+                bool injected = injectedExes.Contains(exeName);
+
+                var imports = ReadProxyImports(game.ExePath);
+                var suggestion = ProxyImportAnalyzer.Recommend(imports, confirmed, remembered, injected);
+
+                game.SuggestedProxyType = suggestion.Type;
+                game.SuggestedProxy = suggestion.Display;
+            }
+        }, ct);
+    }
+
+    /// <summary>Open a game .exe and parse only its PE headers/import directory
+    /// (no full-file read) to learn which proxy DLLs it imports. Returns null when
+    /// the file is missing/locked/malformed — the caller then shows no viability
+    /// hint. The parsing itself lives in the pure, testable ProxyImportAnalyzer.</summary>
+    private ProxyImportAnalyzer.ProxyImportInfo? ReadProxyImports(string exePath)
+    {
+        try
+        {
+            using var fs = new FileStream(
+                exePath, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            return ProxyImportAnalyzer.Analyze(fs);
+        }
+        catch (Exception ex)
+        {
+            _log.Debug("ProxyDeploy", $"Import parse skipped for {exePath}: {ex.Message}");
+            return null;
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────
     // DLL Identification
     // ────────────────────────────────────────────────────────────────
 

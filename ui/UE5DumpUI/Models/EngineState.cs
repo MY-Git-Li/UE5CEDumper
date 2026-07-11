@@ -61,6 +61,15 @@ public sealed class EngineState
     public string GWorldMethod { get; init; } = "aob";
     public string SparseDelegatesMethod { get; init; } = "not_found";
 
+    /// <summary>
+    /// How the dumper was loaded into the game, self-reported by the DLL from its
+    /// OWN module file name: "proxy:version.dll" | "proxy:dinput8.dll" |
+    /// "proxy:dxgi.dll" | "injected" | "loaded:&lt;name&gt;" | "unknown". Empty on
+    /// DLLs older than the load-mode change. The Proxy Deploy panel folds a proxy
+    /// value into per-game "confirmed-working" LKG (after a stability dwell).
+    /// </summary>
+    public string LoadMode { get; init; } = "";
+
     // --- AOB Usage Tracking ---
     /// <summary>PE hash: TimeDateStamp + SizeOfImage (16 hex chars). Unique per game build.</summary>
     public string PeHash { get; init; } = "";

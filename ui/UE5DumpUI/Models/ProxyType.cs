@@ -56,4 +56,18 @@ public static class ProxyTypeExtensions
         ProxyType.Dxgi    => "dxgi.dll",
         _                 => "version.dll",
     };
+
+    /// <summary>
+    /// Map a proxy DLL file name (e.g. from the DLL's self-reported load_mode
+    /// "proxy:dxgi.dll") back to the enum. Case-insensitive; returns null for a
+    /// non-proxy name (UE5Dumper.dll / anything else). AOT-safe: pure comparison.
+    /// </summary>
+    public static ProxyType? FromDllName(string? dllName)
+    {
+        if (string.IsNullOrEmpty(dllName)) return null;
+        if (string.Equals(dllName, Constants.ProxyDllName, StringComparison.OrdinalIgnoreCase)) return ProxyType.Version;
+        if (string.Equals(dllName, Constants.ProxyDllNameDinput8, StringComparison.OrdinalIgnoreCase)) return ProxyType.Dinput8;
+        if (string.Equals(dllName, Constants.ProxyDllNameDxgi, StringComparison.OrdinalIgnoreCase)) return ProxyType.Dxgi;
+        return null;
+    }
 }
