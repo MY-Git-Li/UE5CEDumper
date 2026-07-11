@@ -115,8 +115,10 @@ public class LiveFuncsViewModelTests
         Assert.Equal(1, dump.StopCalls);
         Assert.Equal(1, dump.GetCalls);
         Assert.Equal(2, vm.Results.Count);
-        // DLL already ranks by count desc; the VM preserves that order.
-        Assert.Equal("OpenShop", vm.Results[0].FuncName);
+        // Ranked by call count desc (non-diff mode): Tick (900) tops OpenShop (3).
+        // (The action-specific low-count OpenShop is what Diff mode surfaces instead.)
+        Assert.Equal("Tick", vm.Results[0].FuncName);
+        Assert.Contains(vm.Results, r => r.FuncName == "OpenShop");
         Assert.Contains("2 distinct", vm.StatusText);
     }
 
@@ -177,6 +179,90 @@ public class LiveFuncsViewModelTests
 
         Assert.Empty(vm.Results);
         Assert.Equal("", vm.FilterText);
+    }
+
+    // ==================================================================
+    // Baseline diff (isolate the action's function from Tick noise)
+    // ==================================================================
+
+    [Fact]
+    public async Task Diff_SetBaselineThenAction_SurfacesNewFunctionOnTop()
+    {
+        var (vm, dump) = MakeVm();
+        // Idle baseline: per-frame noise, no shop function.
+        dump.NextGet = ResultOf(
+            new PeProfileEntry { ClassName = "APawn", FuncName = "Tick",   Count = 900 },
+            new PeProfileEntry { ClassName = "AHUD",  FuncName = "Update", Count = 300 });
+        await vm.StartCommand.ExecuteAsync(null);
+        await vm.StopCommand.ExecuteAsync(null);
+
+        vm.SetBaselineCommand.Execute(null);
+        Assert.True(vm.DiffMode);
+
+        // Action: Tick keeps firing (higher), Update unchanged, PLUS a NEW OpenShop.
+        dump.NextGet = ResultOf(
+            new PeProfileEntry { ClassName = "APawn",       FuncName = "Tick",     Count = 1000 },
+            new PeProfileEntry { ClassName = "AHUD",        FuncName = "Update",   Count = 300 },
+            new PeProfileEntry { ClassName = "AShopVendor", FuncName = "OpenShop", Count = 2 });
+        await vm.StartCommand.ExecuteAsync(null);
+        await vm.StopCommand.ExecuteAsync(null);
+
+        // NewChangedOnly defaults on → the unchanged Update (Δ0) is hidden.
+        Assert.DoesNotContain(vm.Results, r => r.FuncName == "Update");
+        // NEW function ranks first, ahead of the +100 Tick.
+        Assert.Equal("OpenShop", vm.Results[0].FuncName);
+        Assert.True(vm.Results[0].IsNew);
+        Assert.Equal("NEW", vm.Results[0].DeltaLabel);
+        var tick = vm.Results.First(r => r.FuncName == "Tick");
+        Assert.Equal(100, tick.Delta);
+        Assert.Equal("+100", tick.DeltaLabel);
+        Assert.Contains("NEW", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task Diff_NewChangedOnlyOff_ShowsUnchangedRowsToo()
+    {
+        var (vm, dump) = MakeVm();
+        dump.NextGet = ResultOf(new PeProfileEntry { ClassName = "AHUD", FuncName = "Update", Count = 300 });
+        await vm.StartCommand.ExecuteAsync(null);
+        await vm.StopCommand.ExecuteAsync(null);
+        vm.SetBaselineCommand.Execute(null);
+
+        dump.NextGet = ResultOf(new PeProfileEntry { ClassName = "AHUD", FuncName = "Update", Count = 300 });
+        await vm.StartCommand.ExecuteAsync(null);
+        await vm.StopCommand.ExecuteAsync(null);
+
+        Assert.DoesNotContain(vm.Results, r => r.FuncName == "Update"); // Δ0 hidden by default
+        vm.NewChangedOnly = false;
+        Assert.Contains(vm.Results, r => r.FuncName == "Update");       // now visible
+    }
+
+    [Fact]
+    public void SetBaseline_WithNoData_DoesNotEnableDiff()
+    {
+        var (vm, _) = MakeVm();
+        vm.SetBaselineCommand.Execute(null);
+        Assert.False(vm.DiffMode);
+    }
+
+    [Fact]
+    public void ClearBaseline_ResetsDiffMode()
+    {
+        var (vm, _) = MakeVm();
+        vm.DiffMode = true;
+        vm.ClearBaselineCommand.Execute(null);
+        Assert.False(vm.DiffMode);
+    }
+
+    [Theory]
+    [InlineData(false, 0L, "")]
+    [InlineData(false, 5L, "+5")]
+    [InlineData(false, -3L, "-3")]
+    [InlineData(true, 7L, "NEW")]
+    public void PeProfileEntry_DeltaLabel_Formats(bool isNew, long delta, string expected)
+    {
+        var e = new PeProfileEntry { IsNew = isNew, Delta = delta };
+        Assert.Equal(expected, e.DeltaLabel);
     }
 
     // ==================================================================

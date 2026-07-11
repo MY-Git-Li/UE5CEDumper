@@ -22,6 +22,21 @@ public sealed class PeProfileEntry
 
     /// <summary>"NumParms (ParmsSize B)" e.g. "2 (5B)"; empty for no-arg funcs.</summary>
     public string ParamsLabel => NumParms == 0 ? "" : $"{NumParms} ({ParmsSize}B)";
+
+    // --- Baseline-diff display state (set by LiveFuncsViewModel when Diff mode is
+    // on; 0 / false otherwise). The diff is client-side — the DLL knows nothing of
+    // it. Mutable by design: rows are transient per fetch and never persisted. ---
+
+    /// <summary>Count minus this Class::Func's baseline count (== Count when new).</summary>
+    public long Delta { get; set; }
+    /// <summary>True when this Class::Func was absent from the baseline entirely —
+    /// the strongest "fired because of the action" signal.</summary>
+    public bool IsNew { get; set; }
+
+    /// <summary>Δ-column label: "NEW" (absent from baseline) / "+N" (fired more) /
+    /// "" (unchanged, or not in diff mode) / "-N" (fired less).</summary>
+    public string DeltaLabel =>
+        IsNew ? "NEW" : Delta > 0 ? $"+{Delta}" : Delta < 0 ? Delta.ToString() : "";
 }
 
 /// <summary>

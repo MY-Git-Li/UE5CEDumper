@@ -799,12 +799,19 @@
     <sys:String x:Key="str.LF.FilterHint">Filter by name (function or class)...</sys:String>
     <sys:String x:Key="str.LF.OpenLive">Live</sys:String>
     <sys:String x:Key="str.LF.CopyName">Name</sys:String>
+    <sys:String x:Key="str.LF.SetBaseline">⚑ Set Baseline</sys:String>
+    <sys:String x:Key="str.LF.Diff">Diff vs baseline</sys:String>
+    <sys:String x:Key="str.LF.NewOnly">New/changed only</sys:String>
+    <sys:String x:Key="str.LF.ClearBaseline">Clear baseline</sys:String>
     <sys:String x:Key="str.Tip.LF.Start">Start recording which UFunctions the game dispatches through ProcessEvent. Forces the game-thread PE hook to install. After clicking, ALT-TAB to the game and perform ONE action (open the shop, dash, attack), then click Stop — behaviour-based discovery finds the exact function even when its name is unguessable.</sys:String>
     <sys:String x:Key="str.Tip.LF.Stop">Stop recording and show the UFunctions that fired, ranked by call count. The action-specific function is usually near the top with a low count (a handful of calls), while per-frame Tick/Update functions have huge counts.</sys:String>
     <sys:String x:Key="str.Tip.LF.Refresh">Re-fetch the current fire-count table without stopping — a live peek while recording, or a re-pull after Stop.</sys:String>
     <sys:String x:Key="str.Tip.LF.Filter">Substring match against function name OR class name (space = AND, case-insensitive). e.g. "shop" or "open".</sys:String>
     <sys:String x:Key="str.Tip.LF.OpenLive">Open this function in Live Walker on a live instance of its class (falls back to Class Struct if the class has no live instance). From there you can invoke it.</sys:String>
     <sys:String x:Key="str.Tip.LF.CopyName">Copy this function's name to the clipboard.</sys:String>
+    <sys:String x:Key="str.Tip.LF.SetBaseline">Capture the CURRENT results as a baseline (an idle reference). Do this: Start → stand still a few seconds → Stop → Set Baseline. Then record the ACTION (open shop) and the list flips to a diff — functions that DIDN'T fire while idle ("NEW") rank to the top, so the action's function stops drowning under per-frame Tick/Update noise.</sys:String>
+    <sys:String x:Key="str.Tip.LF.Diff">Show the "Δ vs base" column and rank new/increased functions first (needs a baseline). Turn off to rank by raw call count again.</sys:String>
+    <sys:String x:Key="str.Tip.LF.NewOnly">Show ONLY functions that are new or fired more than the baseline — the action-specific set. The shop/dash function is almost always in here.</sys:String>
 
     <!-- Console (UFUNCTION(exec) discovery + invoke) -->
     <sys:String x:Key="str.Con.Load">Load</sys:String>

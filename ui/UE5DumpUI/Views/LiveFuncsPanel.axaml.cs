@@ -16,6 +16,7 @@ public partial class LiveFuncsPanel : UserControl
         new Dictionary<string, IComparer>
         {
             ["Count"] = DataGridSortComparers.Number<PeProfileEntry>(r => r.Count),
+            ["Delta"] = DataGridSortComparers.Number<PeProfileEntry>(r => r.Delta),
         };
 
     public LiveFuncsPanel()

@@ -33,12 +33,25 @@ public partial class LiveFuncsViewModel : ViewModelBase
     /// <summary>Full unfiltered result set — the filter rebuilds <see cref="Results"/> from this.</summary>
     private List<PeProfileEntry> _allEntries = new();
 
+    /// <summary>Baseline fire counts keyed by "ClassName::FuncName" (stable across GC,
+    /// unlike a transient instance address). Empty = no baseline captured. When Diff
+    /// mode is on, each fetch is compared against this to surface action-specific
+    /// functions (new / increased) instead of per-frame Tick noise.</summary>
+    private Dictionary<string, long> _baseline = new();
+
     [ObservableProperty] private bool   _isRecording;
     [ObservableProperty] private string _filterText = "";
     [ObservableProperty] private string _statusText = "Click Start, do an in-game action (open shop / dash), then Stop.";
     [ObservableProperty] private bool   _isBusy;
     [ObservableProperty] private ObservableCollection<PeProfileEntry> _results = new();
     [ObservableProperty] private PeProfileEntry? _selectedResult;
+    /// <summary>When on (and a baseline exists), show Δ vs baseline and rank
+    /// new/increased functions to the top instead of ranking by raw call count.</summary>
+    [ObservableProperty] private bool   _diffMode;
+    /// <summary>In diff mode: show ONLY functions that are new or fired more than the
+    /// baseline — the action-specific set. Off shows the full diff.</summary>
+    [ObservableProperty] private bool   _newChangedOnly = true;
+    [ObservableProperty] private string _baselineStatus = "No baseline — record idle, then Set Baseline.";
 
     /// <summary>Per-session remembered filter keywords (LRU) surfaced as the filter
     /// box's AutoCompleteBox suggestions — see <see cref="KeywordSearchMemory"/>.
@@ -67,6 +80,35 @@ public partial class LiveFuncsViewModel : ViewModelBase
     {
         ApplyFilter();
         _filterMemory.Schedule(value);
+    }
+    partial void OnDiffModeChanged(bool value) => ApplyDiffAndFilter();
+    partial void OnNewChangedOnlyChanged(bool value) => ApplyFilter();
+
+    private static string Key(PeProfileEntry e) => $"{e.ClassName}::{e.FuncName}";
+
+    /// <summary>Capture the current results as the baseline (idle reference) and turn
+    /// on Diff mode. The next recording is then shown as new/increased vs this.</summary>
+    [RelayCommand]
+    private void SetBaseline()
+    {
+        if (_allEntries.Count == 0)
+        {
+            StatusText = "Record an idle window first (Start → wait → Stop), then Set Baseline.";
+            return;
+        }
+        _baseline = _allEntries.GroupBy(Key).ToDictionary(g => g.Key, g => g.First().Count);
+        DiffMode = true;   // triggers ApplyDiffAndFilter via OnDiffModeChanged
+        BaselineStatus = $"Baseline: {_baseline.Count} funcs. Now record the ACTION — new/increased rows float to the top.";
+        StatusText = "Baseline set. Start → perform the action (open shop) → Stop.";
+    }
+
+    /// <summary>Drop the baseline and leave diff mode (back to raw count ranking).</summary>
+    [RelayCommand]
+    private void ClearBaseline()
+    {
+        _baseline = new();
+        DiffMode = false;  // triggers ApplyDiffAndFilter
+        BaselineStatus = "No baseline — record idle, then Set Baseline.";
     }
 
     /// <summary>Start recording. Forces the game-thread PE hook up first; if it
@@ -143,12 +185,59 @@ public partial class LiveFuncsViewModel : ViewModelBase
     {
         var result = await _dump.PeProfileGetAsync(FetchLimit);
         _allEntries = result.Entries;
+        ApplyDiffAndFilter();
+
+        bool diff = DiffMode && _baseline.Count > 0;
+        if (result.DistinctFuncs == 0)
+        {
+            StatusText = "No UFunctions recorded. Was the game running (unpaused) during the window? "
+              + "If it stayed 0, the PE hook may not be installed on this game.";
+        }
+        else if (diff)
+        {
+            int newCount = _allEntries.Count(e => e.IsNew);
+            int increased = _allEntries.Count(e => !e.IsNew && e.Delta > 0);
+            StatusText = $"vs baseline: {newCount} NEW + {increased} increased (of {result.DistinctFuncs:N0}). "
+              + "The action's function is almost certainly among the NEW rows at the top.";
+        }
+        else
+        {
+            StatusText = $"{result.DistinctFuncs:N0} distinct functions, {result.TotalCalls:N0} total calls"
+              + (result.Recording ? " (still recording)" : "")
+              + ". Tip: Set Baseline on an idle window, then re-record to isolate the action.";
+        }
+    }
+
+    /// <summary>Compute per-row Δ vs the baseline (when Diff mode is on) + order the
+    /// full set, then rebuild the filtered view. In diff mode, NEW functions rank
+    /// first, then biggest increase, then rarest — so the action-specific function
+    /// (which didn't fire while idle) surfaces at the top instead of drowning under
+    /// per-frame Tick noise. Off, rows keep the DLL's count-desc ranking.</summary>
+    private void ApplyDiffAndFilter()
+    {
+        bool diff = DiffMode && _baseline.Count > 0;
+        foreach (var e in _allEntries)
+        {
+            if (diff)
+            {
+                if (_baseline.TryGetValue(Key(e), out var baseCount))
+                {
+                    e.IsNew = false;
+                    e.Delta = e.Count - baseCount;
+                }
+                else { e.IsNew = true; e.Delta = e.Count; }
+            }
+            else { e.IsNew = false; e.Delta = 0; }
+        }
+
+        _allEntries = diff
+            ? _allEntries.OrderByDescending(e => e.IsNew)
+                         .ThenByDescending(e => e.Delta)
+                         .ThenBy(e => e.Count)
+                         .ToList()
+            : _allEntries.OrderByDescending(e => e.Count).ToList();
+
         ApplyFilter();
-        StatusText = result.DistinctFuncs == 0
-            ? "No UFunctions recorded. Was the game running (unpaused) during the window? "
-              + "If it stayed 0, the PE hook may not be installed on this game."
-            : $"{result.DistinctFuncs:N0} distinct functions, {result.TotalCalls:N0} total calls"
-              + (result.Recording ? " (still recording)" : "") + ".";
     }
 
     /// <summary>Clear the fetched results + filter (does not touch a live recording).</summary>
@@ -172,8 +261,11 @@ public partial class LiveFuncsViewModel : ViewModelBase
         if (_allEntries.Count == 0) return;
 
         var terms = ObjectTreeFilter.SplitTerms(FilterText);
+        bool diffNewOnly = DiffMode && _baseline.Count > 0 && NewChangedOnly;
         foreach (var e in _allEntries)
         {
+            // In diff mode, "New/changed only" hides the unchanged baseline noise.
+            if (diffNewOnly && !(e.IsNew || e.Delta > 0)) continue;
             if (terms.Length > 0 &&
                 !ObjectTreeFilter.MatchesAllTerms(terms, e.FuncName, e.ClassName))
             {
