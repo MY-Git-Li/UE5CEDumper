@@ -12,7 +12,7 @@ echo [INFO] 正在統計 %TARGET_DIR% 的程式碼行數...
 REM 統計指令：使用正斜線 / 以避免反斜線 \ 的轉義問題
 "%CLOC_EXE%" "%TARGET_DIR%" ^
     --fullpath ^
-    --not-match-d="(\.claude|\.git|\.vs|build|bin|obj|ui/UE5DumpUI/bin|ui/UE5DumpUI/obj|ui/UE5DumpUI.Tests/bin|ui/UE5DumpUI.Tests/obj|vendor|docs/private)" ^
+    --not-match-d="(\.claude|\.git|\.vs|build|bin|obj|ui/UE5DumpUI/bin|ui/UE5DumpUI/obj|ui/UE5DumpUI.Tests/bin|ui/UE5DumpUI.Tests/obj|vendor)" ^
     --exclude-lang="JSON,XML"
 
 ::pause
