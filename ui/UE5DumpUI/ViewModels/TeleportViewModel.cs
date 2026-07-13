@@ -432,9 +432,9 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
 
     partial void OnTimeTargetIsPawnChanged(bool value)
     {
-        // Refresh the readout for the newly-selected lever (fire-and-forget; guarded
-        // by IsConnected inside).
-        _ = RefreshTimeStateAsync();
+        // Reflect the newly-selected lever's live state — and sync the slider to
+        // its held value if engaged (fire-and-forget; guarded by IsConnected inside).
+        _ = RefreshHeldTimeStateAsync();
     }
 
     // ── Gravity multiplier (Laufen via "gravity" knob = GravityScale) ──
@@ -625,6 +625,9 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
         {
             StatusText = "Connected";
             _ = RefreshMarkersAsync();
+            // Reflect any dilation the DLL is already holding (prior session / CE
+            // record) — it survives a UI reconnect as long as the game lives.
+            _ = RefreshHeldTimeStateAsync();
         }
         else
         {
@@ -635,6 +638,8 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             ApplyForegroundLockState(-1);// foreground-lock badge back to Unknown
             ApplyMoveSpeedState(-1);     // move-speed badge back to Unknown
             MoveSpeedCurrentText = "—";
+            ApplyTimeDilationState(-1);  // time-dilation badge back to Unknown
+            TimeDilationCurrentText = "—";
             ApplyGravityState(-1);       // gravity badge back to Unknown
             GravityCurrentText = "—";
             ApplySuperJumpState(-1);     // super-jump badge back to Unknown
@@ -1813,6 +1818,30 @@ public partial class TeleportViewModel : ViewModelBase, IDisposable
             _log.Error("Teleport RefreshTimeState failed", ex);
         }
         finally { IsBusy = false; }
+    }
+
+    /// <summary>Quiet read-back of the held dilation (used on connect and on
+    /// target-switch): the DLL's re-assert worker keeps holding the dilation as
+    /// long as the game process lives, so on a UI reconnect the card should reflect
+    /// whatever is engaged (a value set by a prior session or a CE .CT record) — the
+    /// same "state lives in the DLL" model as teleport markers. Syncs the slider to
+    /// the engaged value so the card shows the true override; leaves the slider at
+    /// the persisted preference when nothing is held. Does not touch StatusText.</summary>
+    private async Task RefreshHeldTimeStateAsync()
+    {
+        if (!IsConnected) return;
+        try
+        {
+            var ts = await _dump.GetTimeStateAsync();
+            ApplyTimeDilationReadout(ts);
+            var k = TimeTargetIsPawn ? ts.Pawn : ts.Global;
+            if (k.Active) TimeDilation = k.Value;   // reflect the engaged value on the slider
+        }
+        catch (Exception ex)
+        {
+            ApplyTimeDilationState(-1);
+            _log.Error("Teleport RefreshHeldTimeState failed", ex);
+        }
     }
 
     /// <summary>Hold the selected lever at the slider's absolute value via the DLL

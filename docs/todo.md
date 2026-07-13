@@ -558,10 +558,15 @@ native-RE parts are exactly the reflection-invisible ones — cut them from v1.*
   RESET on untick); `CeLuaHygiene`-compliant; wired into the Teleport panel's "Add to CE" (2 records: World +
   Player) + "Save .CT" batch; 6 generator tests. So the dilation lock now works from a standalone CE table
   without the UI.
-  **REMAINING for L1:** (1) **persistence** (re-apply the held dilation on reconnect / remember the last
-  value+target per game); (2) **in-game verify** (Hemmung has NO unit test — reflection needs a live game):
-  drag slider / ½× / Apply → world runs at half speed + holds against slow-mo; Reset restores. Also NOT built
-  (deferred):
+  **Persistence — DONE (build 2151).** (1) live read-back: `SetConnected` reflects the DLL's held dilation on
+  connect + on target-switch (syncs the slider to the engaged value; `RefreshHeldTimeStateAsync`), disconnect
+  resets the badge — the "state lives in the DLL, survives a UI reconnect" markers model. (2) disk preference:
+  `TeleportUiOptions.TimeDilation`/`TimeTargetIsPawn` in `ui-options.json` pre-fill the last value+target
+  across UI restarts (NOT auto-applied; live read-back wins). +2 VM tests + options round-trip.
+  **L1 is feature-complete** (discovery + DLL + UI card + CE export + persistence). **REMAINING:** only
+  **in-game verify** (Hemmung has NO unit test — reflection needs a live game): drag slider / ½× / Apply →
+  world runs at half speed + holds against slow-mo; Reset restores; reconnect shows the still-held value. Also
+  NOT built (deferred):
   `SetGlobalTimeDilation`/`GetTimeSeconds` invoke wrappers, and a dedicated opt-in function-side
   `FunctionCategory.Timing` bucket (timer methods currently land in Utility at weight 3 — below threshold
   without a class bonus / Show-All).

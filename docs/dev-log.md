@@ -62,8 +62,17 @@ X× (held; natural Y×)" readout. Wired via new `IDumpService`/`DumpService`
 double value); `CeMailboxLayout.CmdTime`+`TimeOpSet/Reset` added; `CeLuaHygiene`-compliant (DEBUG-gated `dbg`,
 errors surface, auto-close on clean success). Wired into the Teleport panel's "Add to CE" (AOBMaker push, 2
 records) + "Save .CT" batch (`BuildBatchRows` → World + Player rows); 6 new generator tests (2465 C# green).
-**REMAINING:** persistence; a dedicated opt-in function-side `FunctionCategory.Timing` bucket; and L2 (GAS
-cooldowns) / L3 (live FTimerManager), deferred by design. **NEEDS in-game verify** (Hemmung has no
+**Persistence — SHIPPED (build 2151).** Two layers: (1) **live read-back** — `TeleportViewModel.SetConnected`
+now reflects whatever dilation the DLL is already holding on connect (and on target-switch), syncing the
+slider to the engaged value — the same "state lives in the DLL, survives a UI reconnect while the game lives"
+model as teleport markers (`RefreshHeldTimeStateAsync`); disconnect resets the badge. (2) **disk preference** —
+`TeleportUiOptions.TimeDilation`/`TimeTargetIsPawn` (in the global `ui-options.json`, mapped in
+`MainWindowViewModel` Apply/Capture) pre-fill the card's last-used value+target across UI restarts (NOT
+auto-applied; the live read-back wins when a dilation is held). +2 VM tests + options round-trip/defaults
+coverage (2467 C# green). **L1 is now feature-complete** (discovery + DLL + UI card + CE export + persistence);
+only **in-game verification** remains (Hemmung has no unit test — reflection needs a live game). **REMAINING
+(deferred by design):** a dedicated opt-in function-side `FunctionCategory.Timing` bucket; L2 (GAS cooldowns) /
+L3 (live FTimerManager). **NEEDS in-game verify** (Hemmung has no
 unit test — reflection needs a live game): attach, drag the slider / hit ½×, Apply → world runs at half speed
 and holds against slow-mo; Reset restores.
 

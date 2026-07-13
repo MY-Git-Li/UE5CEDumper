@@ -2281,6 +2281,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         Teleport.RelativeHorizontal = tp.RelativeHorizontal;
         Teleport.CoordSetRotation = tp.CoordSetRotation;
         Teleport.AutoRefresh = tp.AutoRefresh;
+        Teleport.TimeDilation = tp.TimeDilation;
+        Teleport.TimeTargetIsPawn = tp.TimeTargetIsPawn;
 
         InterestingFunctions.GameOnly = o.InterestingFuncs.GameOnly;
         InterestingFunctions.ShowAll = o.InterestingFuncs.ShowAll;
@@ -2415,6 +2417,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         o.Teleport.RelativeHorizontal = Teleport.RelativeHorizontal;
         o.Teleport.CoordSetRotation = Teleport.CoordSetRotation;
         o.Teleport.AutoRefresh = Teleport.AutoRefresh;
+        o.Teleport.TimeDilation = Teleport.TimeDilation;
+        o.Teleport.TimeTargetIsPawn = Teleport.TimeTargetIsPawn;
 
         o.InterestingFuncs.GameOnly = InterestingFunctions.GameOnly;
         o.InterestingFuncs.ShowAll = InterestingFunctions.ShowAll;

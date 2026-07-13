@@ -446,6 +446,39 @@ public class TeleportViewModelTests
     }
 
     [Fact]
+    public void SetConnected_reflects_held_dilation_and_syncs_slider()
+    {
+        // The DLL keeps holding the dilation as long as the game lives, so on a UI
+        // reconnect the card must reflect the engaged override (badge ON + slider).
+        var fake = new FakeDumpService
+        {
+            NextTimeState = new()
+            {
+                Global = new() { Resolved = true, Active = true, Current = 0.3, Base = 1.0, Value = 0.3 },
+            },
+        };
+        var vm = CreateVm(fake, out _);
+        vm.SetConnected(true);
+
+        Assert.Equal("ON", vm.TimeDilationState);
+        Assert.Equal(0.3, vm.TimeDilation);   // slider synced to the held value
+    }
+
+    [Fact]
+    public void SetConnected_no_held_dilation_keeps_persisted_slider()
+    {
+        // Nothing engaged (menu / no world): the persisted slider preference is left
+        // untouched and the badge reads Unavailable.
+        var fake = new FakeDumpService { NextTimeState = new() };   // both levers Resolved=false
+        var vm = CreateVm(fake, out _);
+        vm.TimeDilation = 0.7;   // simulate a restored preference
+        vm.SetConnected(true);
+
+        Assert.Equal(0.7, vm.TimeDilation);          // unchanged
+        Assert.Equal("Unavailable", vm.TimeDilationState);
+    }
+
+    [Fact]
     public async Task Recall_maps_minus7_to_force_hint_and_does_not_force()
     {
         var fake = new FakeDumpService
