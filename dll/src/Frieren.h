@@ -187,6 +187,20 @@ __declspec(dllexport) int32_t   UE5_SetMovementPercent(int32_t knobId, double pe
 // Mimic mailbox (CMD_MOVEMENT=10, knobId=3, paramsData = 3 doubles x/y/z).
 __declspec(dllexport) int32_t   UE5_SetGravityDirection(double x, double y, double z);
 
+// === Time dilation (Hemmung: global slow-mo / freeze / speed-up) ===
+// Hold a reflected dilation float at an ABSOLUTE value against per-tick game
+// overwrites. `target` = 0 (global AWorldSettings::TimeDilation, whole-world) /
+// 1 (local pawn AActor::CustomTimeDilation, per-actor). `value` = dilation
+// (1.0 = normal, 0.5 = half, 0 = frozen, 2.0 = double), clamped DLL-side to
+// [TIME_DILATION_MIN, TIME_DILATION_MAX]. Returns 1 (active) or a negative
+// Hemmung::TimeResult. CE Lua uses the Mimic mailbox (CMD_TIME=15) — executeCodeEx
+// cannot read return values. Reset via UE5_ResetTimeDilation.
+__declspec(dllexport) int32_t   UE5_SetTimeDilation(int32_t target, double value);
+
+// Restore `target` to its captured natural value and stop holding it. Returns
+// Hemmung::TimeResult (0 = ok / negative error).
+__declspec(dllexport) int32_t   UE5_ResetTimeDilation(int32_t target);
+
 // === Fly (Dunste) — no-gravity keyboard-driven 3D flight ===
 // Toggle engine-flying (MOVE_Flying, collision preserved) on the local pawn,
 // held by a re-assert worker that also samples the keyboard and drives the CMC

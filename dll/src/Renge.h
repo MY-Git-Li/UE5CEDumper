@@ -109,6 +109,14 @@ constexpr const char* CMD_RESET_MOVEMENT           = "reset_movement";
 constexpr const char* CMD_SET_GRAVITY_DIRECTION    = "set_gravity_direction";
 constexpr const char* CMD_RESET_GRAVITY_DIRECTION  = "reset_gravity_direction";
 
+// Time dilation (Hemmung) — hold a reflected dilation float at an absolute value
+// (global slow-mo/freeze/speed-up) held by a re-assert worker. "target" string
+// selects which: "global" (AWorldSettings::TimeDilation) | "pawn"
+// (AActor::CustomTimeDilation). get_time_state polls both.
+constexpr const char* CMD_SET_TIME_DILATION        = "set_time_dilation";
+constexpr const char* CMD_RESET_TIME_DILATION      = "reset_time_dilation";
+constexpr const char* CMD_GET_TIME_STATE           = "get_time_state";
+
 // Fly (Dunste) — no-gravity keyboard-driven 3D flight. fly_set applies whichever
 // of {enable, speed, preset} are present and returns the live status; fly_get_state
 // polls it. Input is read DLL-side (GetAsyncKeyState); the UI only toggles/config.

@@ -6,7 +6,7 @@ namespace UE5DumpUI.Services;
 /// Categories surfaced by the Interesting Properties Finder (B').
 /// One property gets exactly one category — the one with the highest
 /// keyword hit score, broken by enum order (Stats &gt; Combat &gt;
-/// Resources &gt; Movement &gt; Utility &gt; Other).
+/// Resources &gt; Movement &gt; Utility &gt; Timing &gt; Other).
 ///
 /// Smaller bucket count than Function-side because property NAMES are
 /// usually noun-only (no verb to disambiguate Stats from Combat). When
@@ -20,6 +20,7 @@ public enum PropertyCategory
     Resources,  // Gold / Coin / Gem / Ammo / Material (collectibles)
     Movement,   // Speed / Jump / Friction (numeric movement tuning)
     Utility,    // Checkpoint / Save / Quest / Cheat (state flags)
+    Timing,     // Cooldown / Duration / RemainingTime / TimeDilation (time knobs)
 }
 
 /// <summary>
@@ -142,6 +143,40 @@ public static class PropertyScoringTable
         "IsImmortal", "CanBeDamaged", "Invincible", "Invulnerable",
     };
 
+    // Timing (L1) — time/timer properties: BP-authored cooldown/countdown/
+    // duration floats, respawn/reload/cast timers, and the engine's
+    // reflected time-dilation knobs (AWorldSettings::TimeDilation, per-actor
+    // CustomTimeDilation). All whole-token: "Time" only fires when 'time' is
+    // its own token (CastTime → [cast,time]), never inside "Lifetime" →
+    // [lifetime]. Same per-hit weight as Combat/Resources/Movement so a
+    // single clean timer token clears InterestingThreshold(4). The category
+    // check is appended LAST (lowest tie priority) so an ambiguous name that
+    // also hits an earlier bucket keeps that bucket (e.g. BuffDuration stays
+    // Combat because "Duration" lives in CombatKeywords and is scored first).
+    public const int TimingKeywordScore = 4;
+    public static readonly string[] TimingKeywords =
+    {
+        // Cooldowns / countdowns — both casings ("Cooldown" → [cooldown],
+        // "CoolDown" → [cool,down]) since games use both.
+        "Cooldown", "CoolDown", "Countdown",
+        // Delays / intervals / explicit timer fields.
+        "Delay", "Interval", "Timer", "Timers",
+        // Elapsed / remaining readouts (RemainingTime/TimeRemaining hit via
+        // "Remaining" + "Time"; -Time compounds like RespawnTime/ReloadTime/
+        // CastTime/ChargeTime/ExpireTime all carry the "Time" token below).
+        "Elapsed", "Remaining",
+        // Actor lifetime family ("LifeSpan" → [life,span] catches
+        // InitialLifeSpan/LifeSpan; "Lifetime" is a single token).
+        "LifeSpan", "Lifespan", "Lifetime", "InitialLifeSpan",
+        // Recharge / tick cadence.
+        "Recharge", "TickRate", "Cadence",
+        // Global slow-mo / freeze-time knobs (the L1 Hemmung levers).
+        "TimeDilation", "GlobalTimeDilation",
+        // Bare "Time" — whole-token, so safe (CastTime/RespawnTime/
+        // TimeSeconds → Timing; Lifetime/Runtime → not).
+        "Time",
+    };
+
     // ------------------------------------------------------------------
     // Structural-signal tuning (P2a). Applied on top of keyword +
     // class-location scoring using ONLY data search_properties already
@@ -164,6 +199,20 @@ public static class PropertyScoringTable
     /// <summary>A Current/Max stat family within one class (Health + MaxHealth)
     /// is a strong "real gameplay stat" signal — boost every family member.</summary>
     public const int StatPairBonus = 2;
+
+    /// <summary>UScriptStruct names (no F-prefix, matching StructType's
+    /// convention — same as <see cref="GasAttributeStructType"/>) that ARE a
+    /// unit of time. A property of one of these types is a near-certain timing
+    /// field regardless of its name (e.g. an FTimespan "Cooldown").</summary>
+    public static readonly HashSet<string> TimeStructTypes =
+        new(StringComparer.Ordinal)
+        {
+            "Timespan", "DateTime", "QualifiedFrameTime", "FrameTime", "Timecode",
+        };
+    /// <summary>Boost for a time-typed struct — enough to clear the threshold
+    /// on its own, so an FTimespan/FDateTime field whose name didn't hit a
+    /// keyword still surfaces (mirrors <see cref="GasAttributeBonus"/>).</summary>
+    public const int TimeStructBonus = 4;
 
     // PropertyFlags gating (P2b). Persistent / designer-facing fields are more
     // likely a real cheat target; editor-only fields never are. Conservative
@@ -210,23 +259,28 @@ public static class PropertyScoringTable
         int resourcesHits = CountTokenHits(tokens, ResourcesKeywords);
         int movementHits  = CountTokenHits(tokens, MovementKeywords);
         int utilityHits   = CountTokenHits(tokens, UtilityKeywords);
+        int timingHits    = CountTokenHits(tokens, TimingKeywords);
 
         int statsScore     = statsHits     * StatsKeywordScore;
         int combatScore    = combatHits    * CombatKeywordScore;
         int resourcesScore = resourcesHits * ResourcesKeywordScore;
         int movementScore  = movementHits  * MovementKeywordScore;
         int utilityScore   = utilityHits   * UtilityKeywordScore;
+        int timingScore    = timingHits    * TimingKeywordScore;
 
         var category = PropertyCategory.Other;
         int catScore = 0;
         int totalKeywordHits =
-            statsHits + combatHits + resourcesHits + movementHits + utilityHits;
+            statsHits + combatHits + resourcesHits + movementHits + utilityHits + timingHits;
 
         if (statsScore     > catScore) { catScore = statsScore;     category = PropertyCategory.Stats; }
         if (combatScore    > catScore) { catScore = combatScore;    category = PropertyCategory.Combat; }
         if (resourcesScore > catScore) { catScore = resourcesScore; category = PropertyCategory.Resources; }
         if (movementScore  > catScore) { catScore = movementScore;  category = PropertyCategory.Movement; }
         if (utilityScore   > catScore) { catScore = utilityScore;   category = PropertyCategory.Utility; }
+        // Timing check LAST → lowest tie priority: a name that also hits an
+        // earlier bucket keeps that bucket (BuffDuration stays Combat).
+        if (timingScore    > catScore) { catScore = timingScore;    category = PropertyCategory.Timing; }
 
         // Class-location bonus + Unusual flag. The Unusual classes
         // (LocalPlayer / HUD / GameViewportClient / ...) carry a +4 that
@@ -240,6 +294,8 @@ public static class PropertyScoringTable
         // only PropType + StructType, both already on PropertySearchMatch. ---
         bool isGas = string.Equals(match.StructType, GasAttributeStructType,
                                    StringComparison.Ordinal);
+        bool isTimeStruct = !string.IsNullOrEmpty(match.StructType)
+                            && TimeStructTypes.Contains(match.StructType);
         int structuralBonus = 0;
         if (isGas)
         {
@@ -248,6 +304,14 @@ public static class PropertyScoringTable
             // keyword bucket) to Stats so it still surfaces + gets a chip.
             if (category == PropertyCategory.Other)
                 category = PropertyCategory.Stats;
+        }
+        else if (isTimeStruct)
+        {
+            structuralBonus += TimeStructBonus;
+            // An FTimespan/FDateTime/FFrameTime whose name missed a keyword is
+            // still a timing field purely from its struct type.
+            if (category == PropertyCategory.Other)
+                category = PropertyCategory.Timing;
         }
         else if (IsValueCategory(category) && IsNonValueType(match.PropType))
         {
@@ -267,7 +331,7 @@ public static class PropertyScoringTable
             structuralBonus += BlueprintVisibleBonus;
 
         int keywordSum = statsScore + combatScore + resourcesScore +
-                         movementScore + utilityScore;
+                         movementScore + utilityScore + timingScore;
         int finalScore = keywordSum + classBonus + structuralBonus;
 
         return new ScoreResult(
@@ -414,6 +478,7 @@ public static class PropertyScoringTable
         PropertyCategory.Resources => "Resources",
         PropertyCategory.Movement  => "Movement",
         PropertyCategory.Utility   => "Utility",
+        PropertyCategory.Timing    => "Timing",
         _                          => "Other",
     };
 
@@ -425,6 +490,7 @@ public static class PropertyScoringTable
         PropertyCategory.Resources => "#DCDCAA",  // gold — money/gem
         PropertyCategory.Movement  => "#7FB6E8",  // sky — speed/jump
         PropertyCategory.Utility   => "#B280D9",  // purple — quest/save
+        PropertyCategory.Timing    => "#4EC9B0",  // teal — cooldown/timer
         _                          => "#808080",  // grey — other
     };
 
@@ -451,5 +517,9 @@ public static class PropertyScoringTable
         "Speed", "Jump", "Walk", "Sprint", "Friction", "Gravity",
         // Utility (state flags / quest)
         "Quest", "Cheat", "Immortal", "Damaged", "Invincible",
+        // Timing (L1) — the DLL substring-matches these against property
+        // names so round-1 actually fetches timer fields for the scorer.
+        "Cooldown", "Duration", "Timer", "Delay", "Interval", "Elapsed",
+        "Remaining", "Lifespan", "Recharge", "TimeDilation", "Time",
     };
 }

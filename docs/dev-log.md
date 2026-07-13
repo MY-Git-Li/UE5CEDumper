@@ -18,6 +18,100 @@ builds ≤696 in
 
 -----
 
+## 2026-07-13 — Timer control Phase E: Linie cadence flag — periodic timer-callback discovery (build 2156; dev, DLL needs re-inject)
+
+**SHIPPED (DLL + UI; full build + 2479 C# tests + C++ self-tests green).** The behavioural complement to the
+static `Timing` discovery (memory `project-timer-feature-eval`, layer E): make the Live Funcs profiler flag
+*which UFunction* fires at a regular **timer cadence** — the callback that actually drives a cooldown / respawn
+/ damage-over-tick, which name-scoring can't find.
+
+- **DLL ([Linie](../dll/src/Linie.cpp)):** `Stat` gains a Welford running mean/variance of the wall-clock
+  **inter-arrival gaps** between a function's fires; `RecordCall(ufunc, nowMs)` is fed the timestamp
+  [Stark.cpp:143](../dll/src/Stark.cpp) *already* stamps for the responsiveness check — **zero extra clock
+  reads on the PE hot path**. `Snapshot` emits `meanPeriodMs` + `cv` (stddev/mean = regularity) + `gapSamples`;
+  `pe_profile_get` ships them per row.
+- **UI:** `PeProfileEntry` gains `MeanPeriodMs`/`Cv`/`GapSamples` + an `IsPeriodic` classifier (≥3 gaps, CV≤0.25,
+  period outside the per-frame Tick band ~5-40 ms and within a plausible ~50 ms-30 s gameplay-timer window) →
+  a **"Timer"** Kind badge + a **Period** column; a **"Periodic only"** filter in `LiveFuncsViewModel`. The
+  workflow is the *inverse* of the shipped action-diff: record while **IDLE** ~15-20 s, then Periodic-only
+  leaves the steady callbacks.
+- **Honest limit (stated in the tooltip):** native C++/lambda timers (`SetTimer(this, &UClass::Method)`) call
+  the delegate directly and **bypass ProcessEvent** — only UFUNCTION-bound (BP timer event /
+  `SetTimerByFunctionName`) timers are visible. +12 tests (classification + VM filter). A cadence diagnostic
+  (build 2158) appends the periodic candidates to `pe_profile_get`'s log line so an idle-window recording is
+  verifiable from the log, not just the UI. **LIVE-VERIFIED on The Adventures of Elliot (UE4.27):** an
+  idle-window recording flagged **3 periodic funcs out of ~90** (the rest per-frame Tick, correctly excluded)
+  — `BP_SupportFairy_C::TryAttackEnable` + its `ExecuteUbergraph` at the same **~325 ms** cadence (cv 0.02) =
+  a real ~3 Hz BP timer, plus `EQC_PlayerContext_C::ProvideSingleActor ~108 ms` (cv 0.08); stable across two
+  windows (~10 s → 8-27 gaps, ~20 s → 27-83 gaps). No false positives, no tuning needed. *Extends
+  Linie/LivePEProfiler (build 2109); completes the timer eval's layer E.*
+
+-----
+
+## 2026-07-13 — Time/Timer control L1: Hemmung module + Timing discovery category (build 2148; dev, DLL needs re-inject)
+
+**SHIPPED (DLL + UI; builds + all 2453 C# tests + C++ self-tests green).** First slice of the layered
+Time/Timer feature (eval: memory `project-timer-feature-eval`, todo.md "Time / Timer control"). Two halves:
+
+- **Timing discovery category (UI, no DLL/pipe change).** New `PropertyCategory.Timing` in
+  [PropertyScoringTable.cs](../ui/UE5DumpUI/Services/PropertyScoringTable.cs) — always-on `TimingKeywords`
+  (Cooldown/CoolDown/Countdown/Delay/Interval/Timer/Elapsed/Remaining/LifeSpan/Lifetime/Recharge/TickRate/
+  TimeDilation/Time…), a `TimeStructTypes` set (Timespan/DateTime/QualifiedFrameTime/FrameTime/Timecode)
+  mirroring the GAS-struct branch (default-to-Timing when the name misses a keyword), timer terms added to
+  `SeedQueries[]` (so round-1 `search_properties` actually fetches them), and a teal chip in the Interesting
+  Properties tab. The Timing check is appended **last** so an ambiguous name that also hits an earlier bucket
+  keeps it (locked `BuffDuration → Combat` test still passes). [ClassLocationScorer.cs](../ui/UE5DumpUI/Services/ClassLocationScorer.cs)
+  gained GameplayEffect/GameplayAbility/WorldSettings +2. Function side: [KeywordScoringTable.cs](../ui/UE5DumpUI/Services/KeywordScoringTable.cs)
+  `UtilityKeywords` widened with Cooldown/Dilation/Delay/Interval/Elapsed/Recharge (catches cooldown/dilation
+  getters that scored 0 before). One sentinel test renamed (`ComponentTickInterval` → `MeshSectionIndex`,
+  now that `Interval` is a keyword) + new Timing/time-struct/class-rule tests.
+- **Hemmung module (DLL) — global slow-mo / freeze-time / speed-up.** New Frieren module
+  [Hemmung.cpp/.h](../dll/src/Hemmung.cpp) (ヘムング "inhibition"): the **absolute-value sibling of Laufen** —
+  holds reflected dilation floats at a pinned value via a write-on-drift re-assert worker (same s_mutex/
+  s_workerMutex discipline, LWC-width-aware read/write, owner-change re-capture). Two levers: `DIL_GLOBAL`
+  (`AWorldSettings::TimeDilation`, whole-world; resolved via GWorld→PersistentLevel→WorldSettings reflected
+  chain + `Aura::FindInstancesByClass("WorldSettings")` fallback) and `DIL_PAWN` (local pawn
+  `AActor::CustomTimeDilation`, reusing Laufen/Solitar's pawn chain). Exports `UE5_SetTimeDilation(target,
+  value)` / `UE5_ResetTimeDilation(target)`; **Mimic `CMD_TIME=15`** mailbox (`TimeOp` SET/RESET) for CE
+  Lua/.CT; pipe `set_time_dilation` / `reset_time_dilation` / `get_time_state` (each surfaces
+  owner_addr/field_offset for the Locate-in-GWorld handoff). `Hemmung::StopWorker()` joined on shutdown;
+  roster flipped 🟢. Value clamped DLL-side to [0.0, 100.0]. Direct write bypasses SetGlobalTimeDilation's
+  clamp; a paused world can't be stepped and an active Sequencer track flickers ≤1 tick (documented).
+
+**Part C UI Time card — SHIPPED (build 2149).** A **"Time Dilation" card** in the Teleport panel
+([TeleportPanel.axaml](../ui/UE5DumpUI/Views/TeleportPanel.axaml)) beside Move Speed/Gravity: a "Player only"
+toggle (whole-world `TimeDilation` vs per-pawn `CustomTimeDilation`), a linear 0–3× slider + % readout,
+preset buttons (Freeze / ¼× / ½× / 1× / 2×), Apply/Reset/↻, and an ON/OFF/Unavailable badge + live "Current:
+X× (held; natural Y×)" readout. Wired via new `IDumpService`/`DumpService`
+`GetTimeStateAsync`/`SetTimeDilationAsync`/`ResetTimeDilationAsync` (models `TimeDilationKnob`/
+`TimeDilationSetResult`/`TimeState`) and `TeleportViewModel` commands; en.axaml strings; 6 new VM tests
+(2459 C# green). **CE Lua/.CT generation — SHIPPED (build 2150).**
+[TimeDilationScriptGenerator.cs](../ui/UE5DumpUI/Services/TimeDilationScriptGenerator.cs) mirrors
+`MovementScriptGenerator`: stateful `[ENABLE]`/`[DISABLE]` records poking the `CMD_TIME=15` mailbox — op `SET`
+(baked value) on tick, op `RESET` on untick (instanceAddr=op, ufuncAddr=target 0 global/1 pawn, paramsData
+double value); `CeMailboxLayout.CmdTime`+`TimeOpSet/Reset` added; `CeLuaHygiene`-compliant (DEBUG-gated `dbg`,
+errors surface, auto-close on clean success). Wired into the Teleport panel's "Add to CE" (AOBMaker push, 2
+records) + "Save .CT" batch (`BuildBatchRows` → World + Player rows); 6 new generator tests (2465 C# green).
+**Persistence — SHIPPED (build 2151).** Two layers: (1) **live read-back** — `TeleportViewModel.SetConnected`
+now reflects whatever dilation the DLL is already holding on connect (and on target-switch), syncing the
+slider to the engaged value — the same "state lives in the DLL, survives a UI reconnect while the game lives"
+model as teleport markers (`RefreshHeldTimeStateAsync`); disconnect resets the badge. (2) **disk preference** —
+`TeleportUiOptions.TimeDilation`/`TimeTargetIsPawn` (in the global `ui-options.json`, mapped in
+`MainWindowViewModel` Apply/Capture) pre-fill the card's last-used value+target across UI restarts (NOT
+auto-applied; the live read-back wins when a dilation is held). +2 VM tests + options round-trip/defaults
+coverage (2467 C# green). **L1 COMPLETE + LIVE-VERIFIED on The Adventures of Elliot (UE4.27, build 2151).**
+Log (`Elliot-Win64-Shipping`): `set_time_dilation target=pawn value=0.5` → `Time: target 1
+('CustomTimeDilation') base=1.0000 -> hold 0.5000 (rc=0)` → re-assert worker started; held at 0.5/1.0/2.0/1.4688×
+and reset cleanly (`Time: reset target 1 (any active left=0)`, worker stopped); `get_time_state` polled on
+connect (the read-back). `rc=0` throughout — the per-pawn `CustomTimeDilation` lever resolved + held. (Global
+`WorldSettings::TimeDilation` lever wired + unit-covered, not exercised in this session's log.) **REMAINING
+(deferred by design):** a dedicated opt-in function-side `FunctionCategory.Timing` bucket; L2 (GAS cooldowns) /
+L3 (live FTimerManager). **NEEDS in-game verify** (Hemmung has no
+unit test — reflection needs a live game): attach, drag the slider / hit ½×, Apply → world runs at half speed
+and holds against slow-mo; Reset restores.
+
+-----
+
 ## 2026-07-11 — LKG Phase 2: DLL-attributed confirmed-working proxy (build 2142; dev, needs re-inject)
 
 **SHIPPED (DLL + UI; re-inject required).** Upgrades the Proxy Deploy suggestion from "you deployed /

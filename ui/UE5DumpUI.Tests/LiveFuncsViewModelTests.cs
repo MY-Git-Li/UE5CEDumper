@@ -288,6 +288,29 @@ public class LiveFuncsViewModelTests
         Assert.Contains(vm.Results, r => r.FuncName == "OpenShop");
     }
 
+    [Fact]
+    public async Task PeriodicOnly_KeepsOnlyTimerCadenceRows()
+    {
+        // An idle-window recording: a steady 0.5 s timer callback alongside per-frame
+        // Tick (frame band) and an input-driven one-off. Periodic-only leaves the timer.
+        var (vm, dump) = MakeVm();
+        dump.NextGet = ResultOf(
+            new PeProfileEntry { ClassName = "ABuffMgr", FuncName = "OnDotTick",
+                                 Count = 20, MeanPeriodMs = 500, Cv = 0.04, GapSamples = 19 },
+            new PeProfileEntry { ClassName = "APawn", FuncName = "Tick",
+                                 Count = 900, MeanPeriodMs = 16, Cv = 0.05, GapSamples = 899 },
+            new PeProfileEntry { ClassName = "APlayer", FuncName = "OnFirePressed",
+                                 Count = 4, MeanPeriodMs = 1200, Cv = 0.9, GapSamples = 3 });
+        await vm.StartCommand.ExecuteAsync(null);
+        await vm.StopCommand.ExecuteAsync(null);
+        Assert.Equal(3, vm.Results.Count);
+
+        vm.PeriodicOnly = true;
+        Assert.Single(vm.Results);
+        Assert.Equal("OnDotTick", vm.Results[0].FuncName);
+        Assert.Equal("Timer", vm.Results[0].Kind);   // periodic rows badge as "Timer"
+    }
+
     [Theory]
     [InlineData(true, "UI")]
     [InlineData(false, "")]
@@ -295,6 +318,45 @@ public class LiveFuncsViewModelTests
     {
         var e = new PeProfileEntry { IsWidget = isWidget };
         Assert.Equal(expected, e.Kind);
+    }
+
+    // Cadence classification (Phase E): (meanMs, cv, gapSamples) → isPeriodic.
+    [Theory]
+    [InlineData(500.0, 0.05, 19, true)]    // steady 0.5 s timer — regular, out of frame band
+    [InlineData(16.0,  0.05, 900, false)]  // per-frame Tick — regular but in the frame band
+    [InlineData(500.0, 0.05, 2,  false)]   // too few samples (need ≥3 gaps)
+    [InlineData(500.0, 0.80, 19, false)]   // high CV — bursty / input-driven, not regular
+    [InlineData(60000.0, 0.05, 10, false)] // too slow to be a gameplay timer here
+    [InlineData(0.0,   0.0,  0,  false)]   // never fired twice — no cadence
+    public void PeProfileEntry_IsPeriodic_Classifies(double meanMs, double cv, long gaps, bool expected)
+    {
+        var e = new PeProfileEntry { MeanPeriodMs = meanMs, Cv = cv, GapSamples = gaps };
+        Assert.Equal(expected, e.IsPeriodic);
+    }
+
+    [Fact]
+    public void PeProfileEntry_Kind_IsTimer_WhenPeriodic()
+    {
+        var e = new PeProfileEntry { MeanPeriodMs = 250, Cv = 0.03, GapSamples = 40 };
+        Assert.True(e.IsPeriodic);
+        Assert.Equal("Timer", e.Kind);   // Timer takes precedence over the UI badge
+    }
+
+    [Theory]
+    [InlineData(0, "")]
+    [InlineData(1, "250 ms")]      // sub-second → ms
+    [InlineData(40, "250 ms")]
+    public void PeProfileEntry_PeriodLabel_FormatsMs(long gaps, string expected)
+    {
+        var e = new PeProfileEntry { MeanPeriodMs = 250, GapSamples = gaps };
+        Assert.Equal(expected, e.PeriodLabel);
+    }
+
+    [Fact]
+    public void PeProfileEntry_PeriodLabel_FormatsSecondsAboveOneThousandMs()
+    {
+        var e = new PeProfileEntry { MeanPeriodMs = 1500, GapSamples = 5 };
+        Assert.Equal("1.5 s", e.PeriodLabel);
     }
 
     // FUNC_Event=0x800, FUNC_MulticastDelegate=0x10000, FUNC_BlueprintCallable=0x04000000, FUNC_Native=0x400.

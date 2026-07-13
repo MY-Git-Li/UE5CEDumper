@@ -80,6 +80,27 @@ public class KeywordScoringTableTests
         Assert.Equal(FunctionCategory.Other, result.Category);
     }
 
+    // === L1 (2026-07-13) — cooldown/dilation methods that the pre-existing
+    // "Timer"/"Time" Utility tokens missed. Widened UtilityKeywords with
+    // Cooldown/Dilation/Delay/Interval/Elapsed/Recharge; all land in Utility
+    // (weight 3, so a bare hit needs a class bonus or "Show all" to clear the
+    // threshold — a dedicated weight-5 Timing bucket is the follow-up). ===
+    [Theory]
+    [InlineData("SetCooldown",          "FooActor",         FunctionCategory.Utility)]  // Cooldown
+                                                                                        // (neutral class — "Ability" in a
+                                                                                        // class name would inject Combat)
+    [InlineData("SetGlobalTimeDilation","GameplayStatics",  FunctionCategory.Utility)]  // Dilation + Time
+    [InlineData("DelayAction",          "FooActor",         FunctionCategory.Utility)]  // Delay
+    [InlineData("GetTickInterval",      "FooActor",         FunctionCategory.Utility)]  // Interval
+    [InlineData("GetElapsedSeconds",    "FooActor",         FunctionCategory.Utility)]  // Elapsed
+    [InlineData("ResetRecharge",        "FooActor",         FunctionCategory.Utility)]  // Recharge
+    public void Score_TimerMethods_CategoriseUtility(
+        string funcName, string className, FunctionCategory expected)
+    {
+        var result = KeywordScoringTable.Score(MakeEntry(funcName, className));
+        Assert.Equal(expected, result.Category);
+    }
+
     [Fact]
     public void Score_KeywordInClassNameOnly_StillCategorises()
     {

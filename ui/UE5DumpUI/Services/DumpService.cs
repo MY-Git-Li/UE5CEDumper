@@ -2444,6 +2444,9 @@ public sealed class DumpService : IDumpService
                     FirstSeq  = obj["first_seq"]?.GetValue<long>() ?? 0L,
                     FunctionFlags = (uint)(obj["function_flags"]?.GetValue<long>() ?? 0L),
                     IsWidget  = obj["is_widget"]?.GetValue<bool>() ?? false,
+                    MeanPeriodMs = obj["mean_period_ms"]?.GetValue<double>() ?? 0.0,
+                    Cv           = obj["cv"]?.GetValue<double>() ?? 0.0,
+                    GapSamples   = obj["gap_samples"]?.GetValue<long>() ?? 0L,
                 });
             }
         }
@@ -2841,6 +2844,72 @@ public sealed class DumpService : IDumpService
             Current    = res["current"]?.GetValue<double>() ?? 0.0,
             Base       = res["base"]?.GetValue<double>() ?? 0.0,
             Multiplier = res["multiplier"]?.GetValue<double>() ?? 1.0,
+        };
+    }
+
+    // === Time dilation (Hemmung) — global slow-mo / freeze / speed-up ===
+
+    private static TimeDilationKnob ParseTimeKnob(JsonNode? n)
+    {
+        if (n is null) return new TimeDilationKnob();
+        return new TimeDilationKnob
+        {
+            Resolved    = n["resolved"]?.GetValue<bool>() ?? false,
+            Current     = n["current"]?.GetValue<double>() ?? 0.0,
+            Base        = n["base"]?.GetValue<double>() ?? 1.0,
+            Value       = n["value"]?.GetValue<double>() ?? 1.0,
+            Active      = n["active"]?.GetValue<bool>() ?? false,
+            OwnerAddr   = n["owner_addr"]?.GetValue<string>() ?? "",
+            FieldOffset = n["field_offset"]?.GetValue<int>() ?? -1,
+            FieldName   = n["field_name"]?.GetValue<string>() ?? "",
+        };
+    }
+
+    public async Task<TimeState> GetTimeStateAsync(CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "get_time_state" };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        var dil = res["dilation"];
+        return new TimeState
+        {
+            Code   = res["code"]?.GetValue<int>() ?? 0,
+            Global = ParseTimeKnob(dil?["global"]),
+            Pawn   = ParseTimeKnob(dil?["pawn"]),
+        };
+    }
+
+    public async Task<TimeDilationSetResult> SetTimeDilationAsync(string target, double value, CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "set_time_dilation", ["target"] = target, ["value"] = value };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        var k = ParseTimeKnob(res["dilation"]);
+        return new TimeDilationSetResult
+        {
+            State   = res["state"]?.GetValue<int>() ?? -1,
+            Code    = res["code"]?.GetValue<int>() ?? 0,
+            Active  = k.Active,
+            Current = k.Current,
+            Base    = k.Base,
+            Value   = k.Value,
+        };
+    }
+
+    public async Task<TimeDilationSetResult> ResetTimeDilationAsync(string target, CancellationToken ct = default)
+    {
+        var req = new JsonObject { ["cmd"] = "reset_time_dilation", ["target"] = target };
+        var res = await _pipe.SendAsync(req, ct);
+        CheckResponse(res);
+        var k = ParseTimeKnob(res["dilation"]);
+        return new TimeDilationSetResult
+        {
+            State   = k.Active ? 1 : 0,
+            Code    = res["code"]?.GetValue<int>() ?? 0,
+            Active  = k.Active,
+            Current = k.Current,
+            Base    = k.Base,
+            Value   = k.Value,
         };
     }
 

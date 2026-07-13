@@ -20,6 +20,7 @@
 #include "Wirbel.h"
 #include "Solitar.h"
 #include "Laufen.h"
+#include "Hemmung.h"
 #include "Dunste.h"
 #include "Schlacht.h"
 
@@ -489,6 +490,7 @@ void UE5_Shutdown() {
     Mimic::StopThread();
     Solitar::StopWorker();   // join the GodMode re-assert worker before unload
     Laufen::StopWorker();    // join the movement-tuning re-assert worker before unload
+    Hemmung::StopWorker();   // join the time-dilation re-assert worker before unload
     Dunste::StopWorker();    // join the fly worker before unload
     Schlacht::StopWorker();  // join the see-through worker before unload
     // Full teardown: RemoveHook + MH_Uninitialize + drain pending invoke queue.
@@ -1045,6 +1047,16 @@ int32_t UE5_SetMovementPercent(int32_t knobId, double percent) {
 
 int32_t UE5_SetGravityDirection(double x, double y, double z) {
     return Laufen::SetGravityDirection(x, y, z);   // (0,0,0) = reset
+}
+
+// === Time dilation (Hemmung) ===
+
+int32_t UE5_SetTimeDilation(int32_t target, double value) {
+    return Hemmung::SetDilation(target, value);
+}
+
+int32_t UE5_ResetTimeDilation(int32_t target) {
+    return Hemmung::ResetDilation(target);
 }
 
 // === Fly (Dunste) — no-gravity keyboard-driven 3D flight ===

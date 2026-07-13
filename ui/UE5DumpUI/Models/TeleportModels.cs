@@ -218,6 +218,63 @@ public sealed class MovementSetResult
     public double Multiplier { get; init; } = 1.0;
 }
 
+/// <summary>
+/// One time-dilation lever (Hemmung) as reported by <c>get_time_state</c> /
+/// <c>set_time_dilation</c>: global <c>AWorldSettings::TimeDilation</c> or per-pawn
+/// <c>AActor::CustomTimeDilation</c>. The DLL holds the value at
+/// <see cref="Value"/> against per-tick game/Sequencer overwrites and restores
+/// <see cref="Base"/> on reset.
+/// </summary>
+public sealed class TimeDilationKnob
+{
+    /// <summary>The reflected float was found on the live owner this instant.</summary>
+    public bool Resolved { get; init; }
+    /// <summary>Live dilation read from memory (1.0 = normal, 0.5 = half, 0 = frozen).</summary>
+    public double Current { get; init; }
+    /// <summary>Captured natural value, restored on reset (valid while <see cref="Active"/>).</summary>
+    public double Base { get; init; } = 1.0;
+    /// <summary>Desired held value (1.0 = normal).</summary>
+    public double Value { get; init; } = 1.0;
+    /// <summary>Override engaged (the re-assert worker is holding this value).</summary>
+    public bool Active { get; init; }
+    /// <summary>Owning object (WorldSettings / pawn) of the float, for the
+    /// "Locate in GWorld" handoff. "" / "0x0" when unresolved.</summary>
+    public string OwnerAddr { get; init; } = "";
+    /// <summary>Field offset within <see cref="OwnerAddr"/>.</summary>
+    public int FieldOffset { get; init; } = -1;
+    /// <summary>Reflected property name ("TimeDilation" / "CustomTimeDilation").</summary>
+    public string FieldName { get; init; } = "";
+    /// <summary>True when the owner+offset can be handed to the GWorld locator.</summary>
+    public bool HasAddr =>
+        Resolved && FieldOffset >= 0 &&
+        !string.IsNullOrEmpty(OwnerAddr) && OwnerAddr != "0x0" && OwnerAddr != "0X0";
+}
+
+/// <summary>Result of a <c>set_time_dilation</c> / <c>reset_time_dilation</c> call
+/// (Hemmung). <see cref="State"/> is 1 = override active, 0 = inactive, negative =
+/// error (no WorldSettings / no pawn / not reflected).</summary>
+public sealed class TimeDilationSetResult
+{
+    public int State { get; init; }
+    public int Code { get; init; }
+    public bool Active { get; init; }
+    public double Current { get; init; }
+    public double Base { get; init; } = 1.0;
+    public double Value { get; init; } = 1.0;
+}
+
+/// <summary>Snapshot of both time-dilation levers (Hemmung), returned by
+/// <c>get_time_state</c>. <see cref="Global"/> = world speed
+/// (AWorldSettings::TimeDilation), <see cref="Pawn"/> = per-player speed
+/// (AActor::CustomTimeDilation).</summary>
+public sealed class TimeState
+{
+    /// <summary>Hemmung::TimeResult for the global target (0 = OK, negative = error).</summary>
+    public int Code { get; init; }
+    public TimeDilationKnob Global { get; init; } = new();
+    public TimeDilationKnob Pawn { get; init; } = new();
+}
+
 /// <summary>Live state of the Fly feature (Dunste — no-gravity 3D flight),
 /// returned by <c>fly_set</c> / <c>fly_get_state</c>. <see cref="HasCmc"/> is
 /// false on vehicle / custom-framework pawns with no UCharacterMovementComponent

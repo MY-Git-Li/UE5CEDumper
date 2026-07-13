@@ -57,8 +57,46 @@ public sealed class PeProfileEntry
     /// <summary>"NumParms (ParmsSize B)" e.g. "2 (5B)"; empty for no-arg funcs.</summary>
     public string ParamsLabel => NumParms == 0 ? "" : $"{NumParms} ({ParmsSize}B)";
 
-    /// <summary>Small kind badge for the grid — "UI" marks a transient widget method.</summary>
-    public string Kind => IsWidget ? "UI" : "";
+    // --- Cadence (Phase E): inter-arrival stats from the DLL, so the UI can flag a
+    // regularly-firing TIMER callback vs Tick vs an input-driven one-off. ---
+
+    /// <summary>Mean inter-arrival gap between fires (ms); 0 with fewer than 2 fires.</summary>
+    public double MeanPeriodMs { get; init; }
+    /// <summary>Coefficient of variation of the gaps (stddev/mean) — regularity: a
+    /// steady timer is near 0, a bursty/input-driven function is high. 0 with &lt;2 gaps.</summary>
+    public double Cv { get; init; }
+    /// <summary>Number of inter-arrival gaps measured (== Count-1). Need enough to
+    /// trust the cadence (a couple of fires prove nothing).</summary>
+    public long GapSamples { get; init; }
+
+    // Classification bands. A timer callback fires at a steady period (low CV) that
+    // is NOT the per-frame Tick band and is within a plausible gameplay-timer window.
+    private const double PeriodicCvMax     = 0.25;    // ≤ ⇒ regular
+    private const double FrameBandMaxMs    = 40.0;    // ≤ ⇒ likely Tick (per-frame), not a timer
+    private const double TimerBandMaxMs    = 30_000.0;// ≥ ⇒ too slow to be a gameplay timer here
+    private const long   MinGapSamples     = 3;       // need ≥3 gaps (≥4 fires) to trust the CV
+
+    /// <summary>Heuristic: this function fires at a regular cadence consistent with a
+    /// TIMER callback (SetTimerByFunctionName / a BP timer event) rather than Tick or
+    /// input. Requires enough samples, a low CV, and a period outside the per-frame
+    /// band but within a plausible gameplay-timer window. An aid, not proof — native
+    /// C++/lambda timers bypass ProcessEvent entirely and never appear here.</summary>
+    public bool IsPeriodic =>
+        GapSamples >= MinGapSamples &&
+        Cv <= PeriodicCvMax &&
+        MeanPeriodMs > FrameBandMaxMs &&
+        MeanPeriodMs <= TimerBandMaxMs;
+
+    /// <summary>Human period readout for the grid: "0.5 s" / "250 ms" / "" (too few
+    /// fires). Independent of <see cref="IsPeriodic"/> so any measured cadence shows.</summary>
+    public string PeriodLabel =>
+        GapSamples < 1 ? "" :
+        MeanPeriodMs >= 1000.0 ? $"{MeanPeriodMs / 1000.0:0.##} s"
+                               : $"{MeanPeriodMs:0} ms";
+
+    /// <summary>Small kind badge for the grid — "Timer" marks a periodic callback,
+    /// else "UI" marks a transient widget method.</summary>
+    public string Kind => IsPeriodic ? "Timer" : IsWidget ? "UI" : "";
 
     // --- Baseline-diff display state (set by LiveFuncsViewModel when Diff mode is
     // on; 0 / false otherwise). The diff is client-side — the DLL knows nothing of

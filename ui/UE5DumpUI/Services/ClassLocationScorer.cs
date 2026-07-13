@@ -167,6 +167,16 @@ public static class ClassLocationScorer
         new("Health",           2, false),
         new("Damage",           2, false),
 
+        // === Timing (L1) — canonical homes of cooldown/duration/dilation
+        // fields. GameplayEffect holds effect Duration/Period; GameplayAbility
+        // holds cooldown/cost tags; WorldSettings holds TimeDilation. (Ability
+        // System/AttributeSet already bonused above; Weapon/Projectile carry
+        // reload/charge timers and are bonused too.) Clean tokens — no core UE
+        // class outside these families contains them. ===
+        new("GameplayEffect",   2, false),
+        new("GameplayAbility",  2, false),
+        new("WorldSettings",    2, false),
+
         // === UNUSUAL locations (highest-value hits — devs broke convention) ===
         // LocalPlayer / GameViewportClient / HUD often store gameplay state
         // they "shouldn't" because Unreal's recommended pattern would put it

@@ -66,6 +66,7 @@ public partial class InterestingPropertiesViewModel : ViewModelBase
         PropertyCategory.Resources,
         PropertyCategory.Movement,
         PropertyCategory.Utility,
+        PropertyCategory.Timing,
         PropertyCategory.Other,
     };
 

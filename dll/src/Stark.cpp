@@ -140,7 +140,8 @@ static void __fastcall HookedProcessEvent(void* thisObj, void* ufunc, void* para
     // Stamp the fire time so IsGameThreadResponsive / MsSinceLastHookFire can
     // tell "ticking now" from "went quiet". One clock read on the hot path —
     // cheap next to ProcessEvent's own work, and the atomic store is relaxed.
-    s_lastHookFireMs.store(NowMs(), std::memory_order_relaxed);
+    uint64_t nowMs = NowMs();
+    s_lastHookFireMs.store(nowMs, std::memory_order_relaxed);
 
     // Live PE profiler (Linie): opt-in per-UFunction fire counting. The
     // not-recording path pays exactly one relaxed atomic load + a
@@ -149,7 +150,7 @@ static void __fastcall HookedProcessEvent(void* thisObj, void* ufunc, void* para
     // below. `ufunc` is the UFunction* for this dispatch — stored raw and
     // resolved to a name at pe_profile_get time, off the hot path.
     if (Linie::IsRecording()) {
-        Linie::RecordCall(reinterpret_cast<uintptr_t>(ufunc));
+        Linie::RecordCall(reinterpret_cast<uintptr_t>(ufunc), nowMs);
     }
 
     // Drain pending invocations from pipe thread. Fast path: skip the mutex

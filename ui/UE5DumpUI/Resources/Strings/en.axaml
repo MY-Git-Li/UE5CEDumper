@@ -807,6 +807,7 @@
     <sys:String x:Key="str.LF.ClearBaseline">Clear baseline</sys:String>
     <sys:String x:Key="str.LF.HideWidgets">Hide UI widgets</sys:String>
     <sys:String x:Key="str.LF.HideEvents">Hide events/delegates</sys:String>
+    <sys:String x:Key="str.LF.PeriodicOnly">Periodic only</sys:String>
     <sys:String x:Key="str.LF.EarliestFirst">Earliest first</sys:String>
     <sys:String x:Key="str.Tip.LF.Start">Start recording which UFunctions the game dispatches through ProcessEvent. Forces the game-thread PE hook to install. After clicking, ALT-TAB to the game and perform ONE action (open the shop, dash, attack), then click Stop — behaviour-based discovery finds the exact function even when its name is unguessable.</sys:String>
     <sys:String x:Key="str.Tip.LF.Stop">Stop recording and show the UFunctions that fired, ranked by call count. The action-specific function is usually near the top with a low count (a handful of calls), while per-frame Tick/Update functions have huge counts.</sys:String>
@@ -819,6 +820,7 @@
     <sys:String x:Key="str.Tip.LF.NewOnly">Show ONLY functions that are new or fired more than the baseline — the action-specific set. The shop/dash function is almost always in here.</sys:String>
     <sys:String x:Key="str.Tip.LF.HideWidgets">Hide functions whose owning class is a UI widget (UUserWidget-derived, tagged "UI"). When a shop/menu opens, the widget is CREATED, so all its own methods fire at once and flood the diff — but the widget is the RESULT, not the entry point. Hiding them leaves the persistent opener (on a PlayerController / UI-manager subsystem / interaction component) — the function you can actually call in the open world.</sys:String>
     <sys:String x:Key="str.Tip.LF.HideEvents">Hide event handlers and delegate signatures (tagged "Event"/"Deleg" in the Type column — On*/callbacks). These are reactions the engine fires AT the game when something happens, not functions you can call to MAKE it happen. Hiding them leaves imperative callables ("Call"). Note: if this empties the list, the action's real entry point wasn't captured (it opened via a native C++ call the ProcessEvent hook can't see, or the panel hadn't appeared yet — record through until it's fully on screen).</sys:String>
+    <sys:String x:Key="str.Tip.LF.PeriodicOnly">Show ONLY functions firing at a regular timer-like cadence (tagged "Timer" in the Kind column) — a steady period, low variation, not the per-frame Tick band. The behaviour-based way to find the callback that drives a cooldown / respawn / damage-over-tick: record while standing IDLE for ~15-20 s (the inverse of the action-diff flow), then enable this to leave just the periodic callbacks. The "Period" column shows the measured interval. Caveat: native C++/lambda timers (SetTimer(this, &amp;UClass::Method)) bypass ProcessEvent entirely and never appear here — only UFUNCTION-bound (BP timer event / SetTimerByFunctionName) timers are visible.</sys:String>
     <sys:String x:Key="str.Tip.LF.EarliestFirst">Sort by call order — the function that fired FIRST during the recording goes to the top (see the "Order" column). An action's entry point runs BEFORE the reactions it triggers (widget creation, On* notifications), so combined with "New/changed only" this floats the true opener to the top instead of ranking by raw call count. Causal, name-independent.</sys:String>
 
     <!-- Console (UFUNCTION(exec) discovery + invoke) -->
@@ -999,6 +1001,24 @@
     <sys:String x:Key="str.Tip.TP.MsReset">Restore MaxWalkSpeed to its captured base value and stop holding it. Resets the slider to 100%.</sys:String>
     <sys:String x:Key="str.Tip.TP.MsRefresh">Re-read the live MaxWalkSpeed and override state from the current pawn's CharacterMovement.</sys:String>
     <sys:String x:Key="str.Tip.TP.MsLocate">Find the MaxWalkSpeed float in GWorld and select it in the Live Walker — to freeze or inspect it directly.</sys:String>
+
+    <!-- Time dilation (Hemmung) — global slow-mo / freeze / speed-up -->
+    <sys:String x:Key="str.TP.TdHeader">Time Dilation</sys:String>
+    <sys:String x:Key="str.TP.TdState">State:</sys:String>
+    <sys:String x:Key="str.TP.TdHint">Slows, freezes, or speeds up game time by forcing a reflected dilation float. "Whole world" writes AWorldSettings.TimeDilation (everything — enemies, projectiles, physics); "Player only" writes the pawn's AActor.CustomTimeDilation. The DLL captures the natural value on first Apply and re-asserts the target every ~250 ms, so a slow-mo ability or Sequencer time-track can't revert it. 1× = normal, 0.5× = half speed, 0 = frozen (a literal 0 can destabilise physics on some games — use a small value like 0.05×). A paused world can't be stepped this way. Single-player only.</sys:String>
+    <sys:String x:Key="str.TP.TdPawnToggle">Player only (CustomTimeDilation)</sys:String>
+    <sys:String x:Key="str.TP.TdApply">Apply</sys:String>
+    <sys:String x:Key="str.TP.TdReset">Reset</sys:String>
+    <sys:String x:Key="str.TP.TdRefresh">↻</sys:String>
+    <sys:String x:Key="str.TP.TdFreeze">Freeze</sys:String>
+    <sys:String x:Key="str.TP.TdQuarter">¼×</sys:String>
+    <sys:String x:Key="str.TP.TdHalf">½×</sys:String>
+    <sys:String x:Key="str.TP.TdNormal">1×</sys:String>
+    <sys:String x:Key="str.TP.TdDouble">2×</sys:String>
+    <sys:String x:Key="str.Tip.TP.TdApply">Hold the selected lever (whole world or player) at the slider's absolute dilation and re-assert it on a timer so the game can't revert it.</sys:String>
+    <sys:String x:Key="str.Tip.TP.TdReset">Restore the selected lever to its captured natural value and stop holding it. Resets the slider to 1×.</sys:String>
+    <sys:String x:Key="str.Tip.TP.TdRefresh">Re-read the live dilation value and override state for the selected lever.</sys:String>
+    <sys:String x:Key="str.Tip.TP.TdPawnToggle">Off = whole world (AWorldSettings.TimeDilation); On = the player pawn only (AActor.CustomTimeDilation).</sys:String>
 
     <!-- Gravity multiplier (Laufen — force UCharacterMovementComponent.GravityScale) -->
     <sys:String x:Key="str.TP.GrHeader">Gravity</sys:String>

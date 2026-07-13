@@ -8,6 +8,19 @@ state.
 
 > **Last refreshed**: 2026-05-29 (build 797) for the rows below. **dev = main @
 > build 2142 (PR #431, 2026-07-11).** Newer work lives in [dev-log.md](dev-log.md):
+> - builds **2147–2151 (2026-07-13)** — **Time/Timer control L1** (eval: layered detect/lock/
+>   reset/adjust/persist, memory `project-timer-feature-eval`). **Global slow-mo / freeze / speed-up:**
+>   new `Hemmung` DLL module (the absolute-value sibling of Laufen) holds reflected dilation floats —
+>   global `AWorldSettings::TimeDilation` (whole-world; GWorld→PersistentLevel→WorldSettings chain +
+>   `FindInstancesByClass` fallback) + per-pawn `AActor::CustomTimeDilation` — via a write-on-drift
+>   re-assert worker; exports `UE5_Set/ResetTimeDilation`, Mimic `CMD_TIME=15`, pipe
+>   `set/reset_time_dilation`+`get_time_state`. **UI:** a Time Dilation card in the Teleport panel
+>   (Player-only toggle, 0–3× slider + presets Freeze/¼×/½×/1×/2×) + `TimeDilationScriptGenerator`
+>   CE Lua/.CT export (`CMD_TIME` SET/RESET) + persistence (live read-back on connect = markers model
+>   + disk `TeleportUiOptions`). **Discovery:** new `PropertyCategory.Timing` (Interesting Properties)
+>   + `TimeStructTypes` + function-side cooldown/dilation keywords. **LIVE-VERIFIED on The Adventures
+>   of Elliot (UE4.27):** per-pawn `CustomTimeDilation` held 0.5/2.0× + reset clean (rc=0). L2 (GAS
+>   cooldowns) / L3 (live FTimerManager) deferred — reflection-invisible, native RE.
 > - builds **2134–2142 (2026-07-11)** — **Proxy Deploy "Last-Known-Good" suggestion**: a
 >   per-game **Suggested proxy** column. Priority: **confirmed-working** (Phase 2 — the DLL
 >   self-reports `load_mode` from `GetModuleFileNameW(g_hDllModule)` at init, recorded after a

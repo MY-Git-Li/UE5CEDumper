@@ -11,6 +11,7 @@
 
 #include "Linie.h"
 
+#include <cmath>
 #include <mutex>
 #include <unordered_map>
 
@@ -18,18 +19,38 @@ namespace Linie {
 
 std::atomic<bool> g_recording{false};
 
-struct Stat { uint64_t count = 0; uint64_t firstSeq = 0; };
+// Per-function accumulators. count + firstSeq drive the ranked/causal view;
+// lastMs + gaps + mean + m2 drive the CADENCE view (Welford running mean/variance
+// of the inter-arrival gaps, so a regularly-firing timer callback shows a low cv).
+struct Stat {
+    uint64_t count    = 0;
+    uint64_t firstSeq = 0;
+    uint64_t lastMs   = 0;   // wall-clock of the previous fire (inter-arrival base)
+    uint64_t gaps     = 0;   // number of gaps measured (== count-1)
+    double   mean     = 0.0; // Welford running mean of the gaps (ms)
+    double   m2       = 0.0; // Welford running M2 (sum of squared deltas)
+};
 static std::mutex g_mu;
 static std::unordered_map<uintptr_t, Stat> g_stats;
 // Monotonic call-stream position (1-based), reset per recording. A function's
 // firstSeq is g_seq at the moment it was first seen — the causal ordering.
 static uint64_t g_seq = 0;
 
-void RecordCall(uintptr_t ufunc) {
+void RecordCall(uintptr_t ufunc, uint64_t nowMs) {
     std::lock_guard<std::mutex> lk(g_mu);
     uint64_t seq = ++g_seq;
-    auto& s = g_stats[ufunc];       // default-constructs {0,0} on first sight
-    if (s.count == 0) s.firstSeq = seq;
+    auto& s = g_stats[ufunc];       // default-constructs on first sight
+    if (s.count == 0) {
+        s.firstSeq = seq;
+    } else {
+        // Inter-arrival gap since this function's previous fire — Welford update.
+        double gap = static_cast<double>(nowMs - s.lastMs);
+        s.gaps += 1;
+        double delta = gap - s.mean;
+        s.mean += delta / static_cast<double>(s.gaps);
+        s.m2   += delta * (gap - s.mean);
+    }
+    s.lastMs = nowMs;
     ++s.count;
 }
 
@@ -62,8 +83,16 @@ void Snapshot(std::vector<FuncStat>& out) {
     std::lock_guard<std::mutex> lk(g_mu);
     out.clear();
     out.reserve(g_stats.size());
-    for (const auto& kv : g_stats)
-        out.push_back(FuncStat{ kv.first, kv.second.count, kv.second.firstSeq });
+    for (const auto& kv : g_stats) {
+        const Stat& s = kv.second;
+        double meanMs = (s.gaps > 0) ? s.mean : 0.0;
+        double cv = 0.0;
+        if (s.gaps > 0 && meanMs > 1e-6) {
+            double variance = s.m2 / static_cast<double>(s.gaps);  // population variance
+            cv = std::sqrt(variance) / meanMs;
+        }
+        out.push_back(FuncStat{ kv.first, s.count, s.firstSeq, meanMs, cv, s.gaps });
+    }
 }
 
 } // namespace Linie

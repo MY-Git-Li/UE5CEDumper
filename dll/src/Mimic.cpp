@@ -91,6 +91,7 @@ static void HandleSetDebugCamera();
 static void HandleTeleport();
 static void HandleProtect();
 static void HandleMovement();
+static void HandleTime();
 static void HandleFly();
 static void HandleForeground();
 static void HandleQueryPtr();
@@ -203,6 +204,9 @@ static DWORD WINAPI PollingThreadProc(LPVOID /*param*/) {
                 break;
             case CMD_SEETHROUGH:
                 HandleSeeThrough();
+                break;
+            case CMD_TIME:
+                HandleTime();
                 break;
             default:
                 SetError(-1, "Unknown command");
@@ -1036,6 +1040,41 @@ static void HandleMovement() {
         char msg[128];
         snprintf(msg, sizeof(msg), "Movement: knob=%llu failed code=%d",
                  (unsigned long long)knobId, rc);
+        strncpy(g_invokeMailbox.errorMsg, msg, sizeof(g_invokeMailbox.errorMsg) - 1);
+        g_invokeMailbox.errorMsg[sizeof(g_invokeMailbox.errorMsg) - 1] = '\0';
+    }
+    SetDone(rc);
+}
+
+// CMD_TIME (Hemmung): hold a reflected dilation float at an absolute value, or
+// reset it. instanceAddr = op (TimeOp); ufuncAddr = target (0 global / 1 pawn);
+// paramsData[0..7] = double value for SET (read BEFORE SetDone). Returns
+// 1 (active) / 0 (off) / negative Hemmung::TimeResult.
+static void HandleTime() {
+    const uint64_t op = g_invokeMailbox.instanceAddr;
+    const int32_t  target = static_cast<int32_t>(g_invokeMailbox.ufuncAddr);
+    int32_t rc;
+    switch (op) {
+    case TIME_OP_SET: {
+        double value = 0.0;
+        memcpy(&value, g_invokeMailbox.paramsData, sizeof(double));
+        rc = UE5_SetTimeDilation(target, value);
+        LOG_INFO("Mailbox: TIME set target=%d value=%.4f -> rc=%d", target, value, rc);
+        break;
+    }
+    case TIME_OP_RESET:
+        rc = UE5_ResetTimeDilation(target);
+        LOG_INFO("Mailbox: TIME reset target=%d -> rc=%d", target, rc);
+        break;
+    default:
+        rc = -1;
+        LOG_WARN("Mailbox: TIME unknown op=%llu", (unsigned long long)op);
+        break;
+    }
+    if (rc < 0) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "Time: op=%llu target=%d failed code=%d",
+                 (unsigned long long)op, target, rc);
         strncpy(g_invokeMailbox.errorMsg, msg, sizeof(g_invokeMailbox.errorMsg) - 1);
         g_invokeMailbox.errorMsg[sizeof(g_invokeMailbox.errorMsg) - 1] = '\0';
     }

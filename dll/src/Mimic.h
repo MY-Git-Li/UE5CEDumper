@@ -115,6 +115,16 @@ enum Cmd : int32_t {
                               //   Input:  instanceAddr = pierce count (>=1)
                               //           ufuncAddr    = value (1 on / 0 off)
                               //   Output: result = 1 (on) / 0 (off) / <0 error
+    CMD_TIME            = 15, // Time dilation (Hemmung): hold a reflected dilation
+                              //   float at an absolute value (global slow-mo /
+                              //   freeze / speed-up). Pure reflected memory write on
+                              //   the polling thread — no game thread needed.
+                              //   Input:  instanceAddr = op (TimeOp below)
+                              //           ufuncAddr    = target (0 global / 1 pawn)
+                              //           paramsData (op SET, read BEFORE outputs):
+                              //             [0..7] double value (1.0 normal, 0 frozen)
+                              //   Output: result = 1 (active) / 0 (off) / negative
+                              //           Hemmung::TimeResult
 };
 
 // CMD_TELEPORT op codes (written into instanceAddr by CE Lua / pipe bridge)
@@ -180,6 +190,13 @@ enum QueryPtrOp : uint64_t {
                               //   [8..15] UWorld* (slot deref).
     QUERY_OP_GAME_ENGINE = 1, // Output paramsData: [0..7] UEngine* instance,
                               //   [8..15] UClass*, [16..143] class name.
+};
+
+// CMD_TIME op codes (written into instanceAddr by CE Lua / pipe bridge).
+enum TimeOp : uint64_t {
+    TIME_OP_SET   = 0, // ufuncAddr = target (0 global / 1 pawn),
+                       //   paramsData[0..7] = double value. result = 1/0/negative.
+    TIME_OP_RESET = 1, // ufuncAddr = target. result = Hemmung::TimeResult.
 };
 
 // CMD_PROTECT op codes (written into instanceAddr by CE Lua / pipe bridge).

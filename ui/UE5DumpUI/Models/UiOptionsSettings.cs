@@ -134,6 +134,12 @@ public sealed class TeleportUiOptions
     public bool RelativeHorizontal { get; set; } = true;
     public bool CoordSetRotation { get; set; }
     public bool AutoRefresh { get; set; }
+    // Time dilation (Hemmung) — last-used slider value + target, so the Time card
+    // pre-fills the user's preference across UI restarts. NOT auto-applied on load
+    // (the live DLL state, read back on connect, wins when a dilation is held).
+    // Defaults MUST match TeleportViewModel's _timeDilation / _timeTargetIsPawn.
+    public double TimeDilation { get; set; } = 1.0;
+    public bool TimeTargetIsPawn { get; set; }
 }
 
 public sealed class SpcUiOptions

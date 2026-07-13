@@ -59,6 +59,12 @@ public partial class LiveFuncsViewModel : ViewModelBase
     /// FUNC_Delegate). Those are reactions the engine fires AT the game, not imperative
     /// functions you'd invoke; hiding them leaves the callable entry points.</summary>
     [ObservableProperty] private bool   _hideEvents;
+    /// <summary>Show ONLY functions firing at a regular timer-like cadence (Phase E):
+    /// enough fires, a low coefficient-of-variation, and a period outside the per-frame
+    /// (Tick) band. The behaviour-based way to find the callback that drives a cooldown /
+    /// spawn / DoT — record while IDLE (the inverse of the action-diff flow). Native
+    /// C++/lambda timers bypass ProcessEvent and never appear, so this is an aid.</summary>
+    [ObservableProperty] private bool   _periodicOnly;
     /// <summary>Sort by call-stream order (earliest first fire at the top) instead of by
     /// count/diff. The causal ordering: an action's entry point fires before the reactions
     /// it triggers, so combined with New/changed-only this floats the true opener to the top.</summary>
@@ -98,6 +104,7 @@ public partial class LiveFuncsViewModel : ViewModelBase
     partial void OnNewChangedOnlyChanged(bool value) => ApplyFilter();
     partial void OnHideWidgetsChanged(bool value) => ApplyFilter();
     partial void OnHideEventsChanged(bool value) => ApplyFilter();
+    partial void OnPeriodicOnlyChanged(bool value) => ApplyFilter();
 
     private static string Key(PeProfileEntry e) => $"{e.ClassName}::{e.FuncName}";
 
@@ -298,6 +305,8 @@ public partial class LiveFuncsViewModel : ViewModelBase
             if (HideWidgets && e.IsWidget) continue;
             // Hide event/delegate reactions so imperative callables surface.
             if (HideEvents && e.IsEventLike) continue;
+            // Periodic-only: keep just the regular timer-like cadence functions.
+            if (PeriodicOnly && !e.IsPeriodic) continue;
             if (terms.Length > 0 &&
                 !ObjectTreeFilter.MatchesAllTerms(terms, e.FuncName, e.ClassName))
             {
